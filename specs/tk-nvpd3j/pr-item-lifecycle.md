@@ -272,17 +272,23 @@ GitHub's reaction set has no check or question glyph, so "resolved" and
 "awaiting-a-human" are a mechanism choice (a reaction, a short reply, or thread
 resolution) — tk-fspfp2's to make, and tunable.
 
-**Per-thread answer vs. the holistic all-clear.** The per-thread reply stays with
-the fix unit: a commit answers how it answered the thread, a demo answers a demo ask,
-a "we did X" answers a requested change — stage 2's output, posted when the fix unit
-closes. Stage 3 adds the *collective* signal: when the last finding on the anchor
-resolves and every lane derives green, the write-back posts one holistic comment —
-the actions taken, everything resolved, the PR ready — the single statement that
-stage 3 completed for the whole PR. This builds on the write-back's existing
-all-findings-closed arm, which already dismisses a human CHANGES_REQUESTED review and
-re-requests the author once every finding of that review closes (`pr-facts.sh`), and
-it is tk-fspfp2's to drive. It can start as one comment and grow richer over time;
-the design fixes that the signal exists and when, not its final wording.
+**Per-thread answer and the review's living answer.** The per-thread reply stays
+with the fix unit: a commit answers how it answered the thread, a demo answers a
+demo ask, a "we did X" answers a requested change — stage 2's output, posted when
+the fix unit closes. The collective signal is per review. Each human review gets
+one living answer, a Conversation comment the write-back posts as it picks the
+review up and edits in place on every change after that: a ruling, a fix's
+result, a fix landing, a visit ruled, the dismissal. It leads with any visit
+waiting on the operator, then a count line, then the review's points sorted into
+Needs you, Worth a look, In progress and Done. Each point is a label linked to
+the comment, one sentence in the words of whoever answered it (the validator for
+a ruling, the fix unit for a result), and the commit, follow-up or visit that
+carries it, and the fix unit's notes sit folded below them. A review body that
+only frames its inline comments is ruled `restates` and is no point of its own.
+Once every finding of the review closes, the write-back dismisses a human
+CHANGES_REQUESTED review and re-requests its author with a one-line note linking
+the living answer, which then says so. `assets/scripts/review-answer.sh` states
+what the comment shows, and `pr-facts.sh` is its one writer.
 
 **The ledger extension is the real work in tk-fspfp2.** The write-back drives
 reply/resolve off `pr_comment_batch`, a `<disposition>|<floor>|<mark>` record per

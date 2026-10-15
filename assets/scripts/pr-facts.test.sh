@@ -64,12 +64,21 @@
 # resolved. One the identity cannot resolve, answered for a batch or a ruled
 # machine finding, stays owed: each pass tries the resolve again and files the
 # situation as one finding for the repository.
+# The living answer: one Conversation comment per human review, posted at pickup
+# once the pickup reactions land and edited in place, never posted again, when
+# its rendering changes; a summary body ruled restates is no point and no
+# count; a decision made for the operator and a wider fix are worth a look; a
+# decline its fix unit flagged cites the fix's commits once that fix unit lands;
+# an open visit leads it; a hand-written comment is labelled by its first
+# sentence; a label links only to a comment the PR holds; a review body's
+# decline is delivered in it, not in a post of its own; no check-mark ack is
+# posted for a review body; and the review's dismissal is one line linking it.
 #
 # The sections run in the parts declared below, each wrapped in an `if part`
 # block. tools/run-tests.sh runs each part as its own run under its own
 # timeout. Run directly, the file runs each part in order, each in a process of
 # its own (test-harness.sh), so no part reads the fixtures an earlier part left.
-# run-tests-parts: reconcile rework posture routing feedback writeback answers reactions checks selfheal pacing
+# run-tests-parts: reconcile rework posture routing feedback writeback answers reactions checks selfheal living pacing
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -3301,12 +3310,15 @@ eq "$(meta PV1 pr_comment_watermark)" "9701" "…its inline comment advances the
 eq "$(meta_pinned PV1 pr_posture)" "commented@sha-156" "…and the posture holds the merge as commented"
 PV1C=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "PV1") | .id ] | .[0] // ""' "$STUB_STORE")
 has "$(desc "$PV1C")" "Bound the re-read per pass." "the child carries the inline comment verbatim"
-# The fixer works in its own rig's checkout, so the helper is named by the
+# The fixer works in its own rig's checkout, so each helper is named by the
 # absolute path pr-facts resolved, never a pack-relative one that names nothing
 # there.
-has "$(desc "$PV1C")" "reply through $SD/pr-post.sh" "…and tells the fixer to reply through pr-post.sh, by its resolved path"
-has "$(meta "$PV1C" rejection_reason)" "posted through $SD/pr-post.sh" "…as its rejection_reason does"
+has "$(desc "$PV1C")" "post it through $SD/pr-post.sh" "…and tells the fixer to reply through pr-post.sh, by its resolved path"
+has "$(desc "$PV1C")" "$SD/finding.sh answer --finding <finding>" "…and to record each answer through finding.sh, by its resolved path"
+has "$(desc "$PV1C")" "gc bd list --metadata-field finding.fix_unit=<this bead> --all" "…naming the listing that finds the findings it answers"
+has "$(meta "$PV1C" rejection_reason)" "with $SD/finding.sh answer" "…as its rejection_reason does"
 hasnt "$(desc "$PV1C")" "through assets/scripts/pr-post.sh" "…never by a pack-relative path"
+hasnt "$(desc "$PV1C")" "assets/scripts/finding.sh" "…for either helper"
 eq "$(jq '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "PV1")
            | select((.metadata["finding.source"] // "") == "human:gc-city-bot") ] | length' "$STUB_STORE")" "2" "…and each item is a finding sourced to the account it came from"
 eq "$(jq '[ .[] | select(((.metadata.escalation_key // "") | tostring) | startswith("pr-unengaged-threads")) ] | length' "$STUB_STORE")" "0" "…so the unengaged-thread backstop has nothing to file"
@@ -3466,6 +3478,8 @@ commits() { # num commits-json
 # Sections in more than one part stamp it, and each part runs alone, so it is
 # defined here, outside every part.
 UTCUT=',"pr_provenance_since":"2026-10-07T00:00:00Z"'
+# The living answer to review <rid> on PR <num>, as the fixture now holds it.
+lanswer() { jq -r --arg k "<!-- gc-review-answer:r$2 -->" '[ .issue_comments[]? | select((.body // "") | contains($k)) | .body ] | join("\n=====\n")' "$GH_DIR/threads_$1.json"; }
 # advance one bead between passes, the way a later pass of the city would
 bmut() { # <id> <jq-expression over that bead>
   local t="$TMP/bmut.json"
@@ -4545,17 +4559,20 @@ mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
 out=$(run)
 hasnt "$(gh_since "$mark")" "REACT" "a third pass writes no reaction"
 
-echo "# a declined review body is answered on the Conversation tab, linking to the review"
+echo "# a declined review body is answered in its review's living answer, linking to the review"
+# A review body sits in no thread, so the living answer to its review carries
+# the decline, and is the one comment the review gets on the Conversation tab.
 store "[$(anchor WT7 316 "$(wb_tmeta rework:KT7 55 0 'rework:KT7|0|55' '')"), $(child KT7 open), $(hfind FT7 WT7 55 55 declined closed 'Not an objection: the cap is a reaction budget.')]"
 printf '%s' "$(prview 316 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_316.json"
 threads 316 "$(top_fixture 316 | jq -c '.issue_comments = []')"
 out=$(STUB_DROP_KEYS="FT7:finding.reply_posted" run)
-has "$(pcomments 316)" "Declined: Not an objection: the cap is a reaction budget. In reply to https://github.com/zook/gc-toolkit/pull/316#pullrequestreview-55." \
-  "the decline is posted leading with its ruling, with a link to the review it answers"
+has "$(lanswer 316 55)" "(https://github.com/zook/gc-toolkit/pull/316#pullrequestreview-55)** Declined: Not an objection: the cap is a reaction budget." \
+  "the decline leads with its ruling, in an entry linking the review it answers"
+eq "$(jq -r '[ .issue_comments[]? ] | length' "$GH_DIR/threads_316.json")" "1" "…which is the only comment the review gets"
 eq "$(meta FT7 finding.reply_posted)" "<absent>" "the answered stamp was dropped, as a pass that died after posting leaves it"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
 out=$(run)
-hasnt "$(gh_since "$mark")" "PRCOMMENT" "the next pass finds the posted answer by its text and finding line, and posts no second one"
+hasnt "$(gh_since "$mark")" "PRCOMMENT" "the next pass finds the living answer by its review key, and posts no second one"
 eq "$(meta FT7 finding.reply_posted)" "1" "…and records the finding answered"
 out=$(run)
 eq "$(thumbed 316 RV-316),$(reacted 316 RV-316)" "true,false" "…and the review body trades EYES for THUMBS_UP"
@@ -5435,10 +5452,11 @@ rm -f "$GH_DIR/rules_main.json"
 # the review level. A human CHANGES_REQUESTED is GitHub's own block and stands
 # until cleared, so once every finding one review raised has closed — fixed and
 # landed, or declined and answered — pr-facts dismisses THAT review (clearing the
-# block) and re-requests its author, per-review via finding.review_id, saying
-# what each finding came to. The
-# confidence is the validator's, carried by the closed findings; a dismissal is
-# not an approval. wview.reviews is served from the .reviews of threads_<n>.json.
+# block) and re-requests its author, per-review via finding.review_id, with a
+# one-line note linking the review's living answer, which says what each finding
+# came to. The confidence is the validator's, carried by the closed findings; a
+# dismissal is not an approval. wview.reviews is served from the .reviews of
+# threads_<n>.json.
 rfind() { # id anchor review_id disposition [status]
   printf '{"id":"%s","status":"%s","assignee":"","notes":"","title":"finding[human]: %s","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"human","finding.disposition":"%s","finding.source":"human:johnzook","finding.review_id":"%s"}}' \
     "$1" "${5:-closed}" "$1" "$2" "$4" "$3"
@@ -5456,10 +5474,13 @@ out=$(run)
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/140/reviews/555/dismissals" "the human review is dismissed once all its findings clear"
 has "$(cat "$STUB_GH_LOG")" "REREQUEST repos/zook/gc-toolkit/pulls/140/requested_reviewers" "…and a fresh review is requested"
 has "$(cat "$STUB_GH_LOG")" "reviewers[]=johnzook" "…from the review's own author"
-has "$(cat "$STUB_GH_LOG")" "Every comment from this review has an answer on PR #140" "the dismiss message says every comment is answered, never that each was addressed"
-has "$(cat "$STUB_GH_LOG")" "HF1: fixed" "…names the comment that was fixed"
-has "$(cat "$STUB_GH_LOG")" "HF2: declined; the reason is in its thread" "…and the one declined, pointing at its reason"
+has "$(cat "$STUB_GH_LOG")" "message=Your review: 2 points, all answered (https://github.com/zook/gc-toolkit/pull/140#issuecomment-" "the dismiss message is the count line, linking the review's living answer"
+has "$(cat "$STUB_GH_LOG")" "Dismissal is not approval; the merge still gates on an explicit approving review." "…and says dismissal is not approval"
+hasnt "$(cat "$STUB_GH_LOG")" "in its thread" "…and points at no reply or thread"
 hasnt "$(cat "$STUB_GH_LOG")" "addressed" "…and calls none of them addressed"
+has "$(lanswer 140 555)" "- **HF1.** Fixed." "the living answer names the comment that was fixed"
+has "$(lanswer 140 555)" "- **HF2.** Noted; no change asked." "…and the one declined with no objection to answer"
+has "$(lanswer 140 555)" "Review dismissed; your review is requested again." "…and says, in the same pass, that the review was dismissed"
 has "$out" "dismissed human review 555 and re-requested johnzook" "the pass reports the per-review dismissal"
 
 echo "# …but not while one of that review's findings is still open"
@@ -5489,7 +5510,7 @@ threads 391 "$(hreview 391 591 CHANGES_REQUESTED)"
 : > "$STUB_GH_LOG"
 out=$(run)
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/391/reviews/591/dismissals" "a review whose needs-you finding has closed on a ruling is dismissed"
-has "$(cat "$STUB_GH_LOG")" "HFY: settled by the ruling on visit tk-vHRY" "…and the dismiss message names the visit whose ruling settled it"
+has "$(lanswer 391 591)" "- **HFY.** Settled by your ruling on visit tk-vHRY." "…and its living answer names the visit whose ruling settled it"
 
 echo "# …but a needs-you finding closed with no ruling recorded leaves its review standing"
 # A visit closed moot, benign, dismissed or cut short carries no ruling, so no
@@ -5565,7 +5586,7 @@ threads 145 "$(hreview 145 560 CHANGES_REQUESTED)"
 out=$(run)
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/145/reviews/560/dismissals" "a delivered decline reply lets the review dismiss"
 has "$(cat "$STUB_GH_LOG")" "REREQUEST repos/zook/gc-toolkit/pulls/145/requested_reviewers" "…and its author is re-requested"
-has "$(cat "$STUB_GH_LOG")" "HF8: declined; the reason is in its thread" "…the dismiss message names the decline"
+has "$(lanswer 145 560)" "- **HF8.** declined on the merits" "…and its living answer carries the decline in the validator's words"
 
 # ---- a deferred finding's owed reply gates its review's dismissal the same way --
 # A deferred finding closes when the validator rules it, but it owes its raiser
@@ -5593,7 +5614,7 @@ threads 148 "$(hreview 148 563 CHANGES_REQUESTED)"
 : > "$STUB_GH_LOG"
 out=$(run)
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/148/reviews/563/dismissals" "a delivered deferral reply lets the review dismiss"
-has "$(cat "$STUB_GH_LOG")" "deferred to a follow-up, named in its thread" "…the dismiss message names the deferral"
+has "$(lanswer 148 563)" "Deferred — tracked as follow-up tk-fup9." "…and its living answer names the deferral and its follow-up"
 
 # ---- a needs-you finding's owed reply gates its review's dismissal the same way --
 # A needs-you finding owes its raiser the visit's id. close-answered closes it on
@@ -5626,19 +5647,22 @@ out=$(run)
 has "$(treply 394 T-394)" "opened visit tk-vny" "the visit's answer is posted into the raiser's thread"
 eq "$(meta HFN2 finding.reply_posted)" "1" "…and the finding is marked answered"
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/394/reviews/594/dismissals" "…so the same pass dismisses the review"
-has "$(cat "$STUB_GH_LOG")" "HFN2: settled by the ruling on visit tk-vny" "…naming the visit whose ruling settled it"
+has "$(lanswer 394 594)" "Settled by your ruling on visit tk-vny." "…and its living answer names the visit whose ruling settled it"
 
-echo "# a review body's needs-you finding holds the dismissal while its Conversation answer fails to post"
+echo "# a review body's needs-you finding holds the dismissal while its living answer fails to post"
+# A review body sits in no thread, so the review's living answer is what carries
+# its answer, and the finding is marked answered only once that answer is up.
 store "[$(anchor HRN3 395 "$(wb_rmeta rework:HRCN3 595)"), $(child HRCN3 closed), $(rfindneedsyou HFN3 HRN3 595 595)]"
 printf '%s' "$(prview 395 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_395.json"
 threads 395 "$(hreview 395 595 CHANGES_REQUESTED)"
 : > "$STUB_GH_LOG"
 out=$(STUB_PR_COMMENT_RC=1 run)
-has "$out" "could not post the owed reply for HFN3" "a review body's answer goes to the Conversation tab, where the post fails"
+has "$out" "could not post the answer to review 595" "a review body's answer goes in its review's living answer, whose post fails"
 eq "$(meta HFN3 finding.reply_posted)" "<absent>" "…so the finding is not marked answered"
 hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…and the review it answers is not dismissed"
 out=$(run)
-has "$(jq -r '[ .issue_comments[]? | .body ] | join(" ")' "$GH_DIR/threads_395.json")" "opened visit tk-vny" "the next pass posts the answer on the Conversation tab"
+has "$(lanswer 395 595)" "Settled by your ruling on visit tk-vny." "the next pass posts the living answer carrying it"
+eq "$(jq -r '[ .issue_comments[]? ] | length' "$GH_DIR/threads_395.json")" "1" "…as the only comment the review gets on the Conversation tab"
 eq "$(meta HFN3 finding.reply_posted)" "1" "…marks the finding answered"
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/395/reviews/595/dismissals" "…and dismisses the review"
 
@@ -5838,6 +5862,351 @@ twins=$(jq '[ .[] | select(((.metadata.task_kind // "") == "rework") and ((.meta
 eq "$twins" 1 "the mint invalidates the per-pass cache, so the second pass's dedup sees the child and files no twin"
 
 fi # part selfheal
+
+# ==== part living: the one living answer to each human review ====
+if part living; then
+
+# A review answered by findings gets one Conversation comment, kept current
+# (review-answer.sh). These fixtures state a review whose body and inline
+# comments are each a finding pr-facts filed: the finding carries the comment's
+# body as filed, its comment id and its review id. The anchor's batch went to
+# the fix unit named by the disposition, which answers both id spaces.
+lmeta() { # disposition comment-mark review-id
+  printf ',"pr_comment_disposition":"%s","pr_comment_watermark":"%s","pr_review_watermark":"%s","pr_review_batch":"%s|0|%s"' \
+    "$1" "$2" "$3" "$1" "$3"
+}
+lfind() { # id anchor comment_id review_id disposition status message [extra-metadata-object]
+  local x="${8:-}"; [ -n "$x" ] || x='{}'
+  jq -cn --arg id "$1" --arg a "$2" --arg c "$3" --arg r "$4" --arg d "$5" --arg st "$6" --arg msg "$7" --argjson x "$x" '
+    { id: $id, status: $st, assignee: "", notes: "", title: ("finding[human]: " + ($msg | gsub("\n"; " ") | .[0:80])),
+      description: ("Locus: " + (if $c == $r then "PR review" else "x.sh:1" end) + "\n\n" + $msg + "\n\nRaised by human:johnzook reviewing anchor " + $a + "."),
+      metadata: ({ task_kind: "finding", anchor_bead: $a, "finding.lane": "human", "finding.disposition": $d,
+                   "finding.source": "human:johnzook", "finding.comment_id": $c, "finding.review_id": $r } + $x) }'
+}
+lreview() { # num review-id state body inline-comment-id... — the review, its body and one thread per inline comment
+  local n="$1" r="$2" st="$3" b="$4"; shift 4
+  jq -cn --arg n "$n" --argjson r "$r" --arg st "$st" --arg b "$b" '
+    { reviews: [ { id: ("RV-" + $n), databaseId: $r, state: $st, body: $b, author: { login: "johnzook" },
+                   url: ("https://github.com/zook/gc-toolkit/pull/" + $n + "#pullrequestreview-" + ($r | tostring)),
+                   reactionGroups: [] } ],
+      threads: [ $ARGS.positional[] | tonumber as $c
+                 | { id: ("T-" + $n + "-" + ($c | tostring)), isResolved: false, viewerCanResolve: true,
+                     comments: { nodes: [ { id: ("NC-" + $n + "-" + ($c | tostring)), databaseId: $c,
+                                            author: { login: "johnzook" }, body: "see the review",
+                                            pullRequestReview: { databaseId: $r }, reactionGroups: [] } ] } } ],
+      issue_comments: [] }' --args "$@"
+}
+fixunit() { # id status [fix-notes]
+  child "$1" "$2" | jq -c --arg n "${3:-}" 'if $n != "" then .metadata.fix_notes = $n else . end'
+}
+# GitHub records a dismissal the next read sees; the shared stub only logs it.
+rdismissed() { # num review-id
+  jq -c --argjson r "$2" '.reviews = [ .reviews[] | if .databaseId == $r then .state = "DISMISSED" else . end ]' \
+    "$GH_DIR/threads_$1.json" > "$TMP/rd.json" && mv "$TMP/rd.json" "$GH_DIR/threads_$1.json"
+}
+# How many comments on the Conversation tab carry review <rid>'s key.
+lcount() { jq -r --arg k "<!-- gc-review-answer:r$2 -->" '[ .issue_comments[]? | select((.body // "") | contains($k)) ] | length' "$GH_DIR/threads_$1.json"; }
+# Write a living answer to $PR_FACTS_SHOWCASE/<name>.md when the variable names a
+# directory: the rendered comments the PR description shows come from here.
+showcase() { # name num review-id
+  [ -n "${PR_FACTS_SHOWCASE:-}" ] || return 0
+  mkdir -p "$PR_FACTS_SHOWCASE" && lanswer "$2" "$3" > "$PR_FACTS_SHOWCASE/$1.md"
+}
+
+echo "# a review shaped like PR #1244: a summary body and three inline comments, two of them worth a look"
+L1_SUMMARY="Requesting changes for three issues; details are in the inline comments.
+
+1. **When GitHub refuses a dismissal, nobody is told.**
+2. **The guard rewrites the human-only none/off opt-out.**
+3. **Old by: guard records are left half-done.**"
+store "[$(anchor LA1 600 "$(lmeta rework:KL1 6103 6001)"),
+  $(fixunit KL1 closed 'Each point is its own commit, so each reply names one.
+
+The opt-out case takes the option that changes no other reader.'),
+  $(lfind LB0 LA1 6001 6001 restates closed "$L1_SUMMARY" '{"finding.fix_unit":"KL1"}'),
+  $(lfind LB1 LA1 6101 6001 must-fix closed '🔴 **When GitHub refuses a dismissal, the merge is held but nobody is told.**
+
+Before this change, the re-ask visit was filed first.' '{"finding.fix_unit":"KL1","finding.fix_answer":"Fixed with your option (a): a lifted approval now reads as review required."}'),
+  $(lfind LB2 LA1 6102 6001 must-fix closed '🔴 **The guard rewrites the human-only `none`/`off` opt-out.** This needs an explicit decision.' '{"finding.fix_unit":"KL1","finding.fix_flag":"1","finding.fix_answer":"You asked for a decision, and the fix chose your second option: the guard leaves opt-outs alone and only lifts the approval."}'),
+  $(lfind LB3 LA1 6103 6001 must-fix closed '🔴 **Old `by: guard` records written before this change can strand an approval.**' '{"finding.fix_unit":"KL1","finding.fix_flag":"1","finding.fix_answer":"Fixed more widely than you suggested: a re-run carries out the whole earlier ruling, not just the dismissal."}')]"
+printf '%s' "$(prview 600 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_600.json"
+threads 600 "$(lreview 600 6001 CHANGES_REQUESTED "$L1_SUMMARY" 6101 6102 6103)"
+commits 600 '[{"oid":"09290b4eaaaa","message":"fix: a lifted approval reads review required (KL1)\n\nReview comment 6101."},
+  {"oid":"e512eb3bbbbb","message":"fix: leave the human-only opt-out alone (KL1)\n\nReview comment 6102."},
+  {"oid":"598c6b34cccc","message":"fix: a re-run carries out the earlier ruling (KL1)\n\nReview comment 6103."}]'
+: > "$STUB_GH_LOG"
+out=$(run)
+L1=$(lanswer 600 6001)
+eq "$(lcount 600 6001)" "1" "the review gets one living answer"
+has "$L1" "### Your review: 3 points, all answered
+" "it counts three points: the summary paragraph is no point of its own"
+hasnt "$L1" "answered at" "…and names no commit, so a push leaves it as it stands"
+hasnt "$L1" "Requesting changes for three issues" "…and has no entry"
+has "$L1" "Review dismissed; your review is requested again. 2 worth a look, 1 done." "it leads with the dismissal and the section counts"
+has "$L1" "**Worth a look**
+- **[The guard rewrites the human-only \`none\`/\`off\` opt-out.](https://github.com/zook/gc-toolkit/pull/600#discussion_r6102)** You asked for a decision, and the fix chose your second option: the guard leaves opt-outs alone and only lifts the approval. (e512eb3b)" \
+  "the decision the fix made for the operator is worth a look, labelled by its bold lead, linked to its thread, citing its commit"
+has "$L1" "- **[Old \`by: guard\` records written before this change can strand an approval.](https://github.com/zook/gc-toolkit/pull/600#discussion_r6103)** Fixed more widely than you suggested: a re-run carries out the whole earlier ruling, not just the dismissal. (598c6b34)" \
+  "…and so is the fix that went wider than suggested"
+has "$L1" "**Done**
+- **[When GitHub refuses a dismissal, the merge is held but nobody is told.](https://github.com/zook/gc-toolkit/pull/600#discussion_r6101)** Fixed with your option (a): a lifted approval now reads as review required. (09290b4e)" \
+  "the fix made as suggested is done"
+hasnt "$L1" "🔴" "no label keeps its severity mark"
+has "$L1" "<summary>Notes from the fix</summary>
+
+Each point is its own commit, so each reply names one." "the fix unit's notes are folded in below the points"
+eq "$(jq -r '[ .issue_comments[]? ] | length' "$GH_DIR/threads_600.json")" "1" "no other comment answers the review on the Conversation tab: no summary post, no check-mark ack"
+eq "$(grep -c '^PRCOMMENT 600' "$STUB_GH_LOG")" "1" "…one post in all"
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/600/reviews/6001/dismissals" "the answered review is dismissed"
+eq "$(grep -c 'message=Your review: 3 points, all answered (https://github.com/zook/gc-toolkit/pull/600#issuecomment-[0-9]*)\. Dismissal is not approval; the merge still gates on an explicit approving review\.$' "$STUB_GH_LOG")" "1" \
+  "…with a one-line note: the count line, the living answer's link, and that dismissal is not approval"
+eq "$(thumbed 600 RV-600),$(reacted 600 RV-600)" "true,false" "the review body trades its pickup EYES for THUMBS_UP once the living answer marks it resolved"
+has "$L1" "<!-- gc-writeback-mark:resolved r6001 -->" "…the mark line the living answer carries for it"
+eq "$(treply 600 T-600-6102 | grep -c 'Fixed in e512eb3b')" "1" "the per-thread replies stay, each naming its own commit"
+showcase pr-1244-shape 600 6001
+echo "# …and a second pass, after GitHub records the dismissal, writes nothing"
+rdismissed 600 6001
+: > "$STUB_GH_LOG"
+out=$(run)
+hasnt "$(cat "$STUB_GH_LOG")" "PRCOMMENT" "no second living answer"
+hasnt "$(cat "$STUB_GH_LOG")" "ICEDIT" "…and no edit, since the rendering has not changed"
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…and no second dismissal"
+eq "$(lanswer 600 6001)" "$L1" "the living answer is unchanged"
+echo "# …and neither does a push, since the count line names no commit"
+printf '%s' "$(prview 600 OPEN CLEAN MERGEABLE | jq -c '.headRefOid = "sha-600-pushed"')" > "$GH_DIR/pr_view_600.json"
+: > "$STUB_GH_LOG"
+out=$(run)
+hasnt "$(cat "$STUB_GH_LOG")" "ICEDIT" "a push leaves the settled living answer as it stands, with no edit"
+eq "$(lanswer 600 6001)" "$L1" "…so it reads as before"
+
+echo "# a review shaped like PR #1212: four inline comments, all fixed as asked"
+L2_SUMMARY="Requesting a few fixes before merge. Details are in the inline comments."
+store "[$(anchor LA2 601 "$(lmeta rework:KL2 6204 6002)"), $(fixunit KL2 closed),
+  $(lfind LC0 LA2 6002 6002 restates closed "$L2_SUMMARY" '{"finding.fix_unit":"KL2"}'),
+  $(lfind LC1 LA2 6201 6002 must-fix closed '**Please fix on this PR: a partial landing writes a mismatched work record.** Each key is written on its own.' '{"finding.fix_unit":"KL2","finding.fix_answer":"Fixed as you suggested: a landing that names one key leaves both unwritten."}'),
+  $(lfind LC2 LA2 6202 6002 must-fix closed '**Please fix on this PR: with `GC_RIG_ROOT` unset, the fetch is skipped silently.**' '{"finding.fix_unit":"KL2","finding.fix_answer":"Fixed as you suggested: the WARN prints and the rig root is exported."}'),
+  $(lfind LC3 LA2 6203 6002 must-fix closed '**Please fix on this PR: SIGKILL on timeout can leave `.lock` files in the shared rig checkout.**' '{"finding.fix_unit":"KL2","finding.fix_answer":"Fixed with your suggestion: SIGTERM to the process group, with WaitDelay as the backstop."}'),
+  $(lfind LC4 LA2 6204 6002 must-fix closed '**Small doc fix:** this reads as the bead checkout.' '{"finding.fix_unit":"KL2","finding.fix_answer":"Fixed as you suggested: the line names the rig checkout."}')]"
+printf '%s' "$(prview 601 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_601.json"
+threads 601 "$(lreview 601 6002 CHANGES_REQUESTED "$L2_SUMMARY" 6201 6202 6203 6204)"
+commits 601 '[{"oid":"aa11aa11aaaa","message":"fix: the four review points (KL2)"}]'
+: > "$STUB_GH_LOG"
+out=$(run)
+L2=$(lanswer 601 6002)
+has "$L2" "### Your review: 4 points, all answered
+" "four points, all answered"
+has "$L2" "4 done." "…all done"
+hasnt "$L2" "Worth a look" "…with nothing worth a look"
+has "$L2" "- **[A partial landing writes a mismatched work record.](https://github.com/zook/gc-toolkit/pull/601#discussion_r6201)** Fixed as you suggested" "a bold lead loses its 'Please fix on this PR:'"
+has "$L2" "- **[Small doc fix.](https://github.com/zook/gc-toolkit/pull/601#discussion_r6204)**" "…and a bare bold lead is the label as written"
+hasnt "$L2" "Notes from the fix" "a fix unit with no notes adds no notes block"
+eq "$(jq -r '[ .issue_comments[]? ] | length' "$GH_DIR/threads_601.json")" "1" "no separate summary post or check-mark ack: the living answer is the one Conversation comment"
+hasnt "$(jq -r '[ .issue_comments[]? | .body ] | join(" ")' "$GH_DIR/threads_601.json")" "✅" "…and nothing on the Conversation tab carries the check-mark ack"
+eq "$(grep -c 'message=Your review: 4 points, all answered (https://github.com/zook/gc-toolkit/pull/601#issuecomment-[0-9]*)\. Dismissal is not approval; the merge still gates on an explicit approving review\.$' "$STUB_GH_LOG")" "1" \
+  "the dismissal note is one line linking the living answer"
+showcase pr-1212-shape 601 6002
+
+echo "# the living answer is posted at pickup, before any ruling, and edited in place after"
+store "[$(anchor LA3 602 "$(lmeta rework:KL3 6302 6003)"), $(fixunit KL3 open),
+  $(lfind LD0 LA3 6003 6003 unvalidated open 'A couple of things, inline.' '{"finding.fix_unit":"KL3"}'),
+  $(lfind LD1 LA3 6301 6003 unvalidated open 'Great case for a demo video' '{"finding.fix_unit":"KL3"}'),
+  $(lfind LD2 LA3 6302 6003 unvalidated open 'Should enforcement turn on now? I am not sure we want it yet.' '{"finding.fix_unit":"KL3"}')]"
+printf '%s' "$(prview 602 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_602.json"
+threads 602 "$(lreview 602 6003 COMMENTED 'A couple of things, inline.' 6301 6302)"
+echo "# …but not while a pickup reaction is still owed"
+: > "$STUB_GH_LOG"
+out=$(STUB_REACT_RC=1 run)
+eq "$(lcount 602 6003)" "0" "no living answer before the review's comments carry their pickup reaction"
+: > "$STUB_GH_LOG"
+out=$(run)
+L3=$(lanswer 602 6003)
+eq "$(reacted 602 NC-602-6301)" "true" "the pickup reaction lands"
+eq "$(lcount 602 6003)" "1" "…and the living answer is posted in the same pass"
+has "$L3" "### Your review: 3 points, picked up; the ruling is in progress" "it says how many points were picked up and that the ruling is in progress"
+has "$L3" "- **[Great case for a demo video.](https://github.com/zook/gc-toolkit/pull/602#discussion_r6301)**" "a hand-written comment with no headline is labelled by its first sentence"
+has "$out" "1 review answers posted" "the pass reports the post"
+echo "# …a needs-you ruling puts the visit at the very top on the next pass, in place"
+bmut LD0 '.status = "closed" | .metadata += {"finding.disposition":"restates"}'
+bmut LD1 '.status = "closed" | .metadata += {"finding.disposition":"declined","finding.label":"A demo video for this change"}'
+bmut LD2 '.metadata += {"finding.disposition":"needs-you","finding.visit":"tk-v602","finding.answer":"Should enforcement turn on now, or wait for the next release?","finding.reply":"This comment needs your decision — opened visit tk-v602."}'
+: > "$STUB_GH_LOG"
+out=$(run)
+L3=$(lanswer 602 6003)
+eq "$(lcount 602 6003)" "1" "still one living answer"
+hasnt "$(cat "$STUB_GH_LOG")" "PRCOMMENT 602" "…edited, never posted again"
+eq "$(grep -c '^ICEDIT' "$STUB_GH_LOG")" "1" "…in one edit"
+has "$L3" "> [!IMPORTANT]
+> **Needs you: visit tk-v602.** Should enforcement turn on now, or wait for the next release?" "the open visit and its question lead the comment"
+has "$L3" "### Your review: 2 points, 1 answered so far" "the count drops the summary the ruling found restating the inline comments"
+has "$L3" "- **[Should enforcement turn on now?](https://github.com/zook/gc-toolkit/pull/602#discussion_r6302)** Should enforcement turn on now, or wait for the next release? (tk-v602)" "the point needing the operator names its visit"
+has "$L3" "- **[A demo video for this change.](https://github.com/zook/gc-toolkit/pull/602#discussion_r6301)** Noted; no change asked." "a comment that asked for nothing is done, labelled by the validator"
+showcase open-visit 602 6003
+echo "# …and a pass whose rendering is unchanged writes nothing"
+: > "$STUB_GH_LOG"
+out=$(run)
+hasnt "$(cat "$STUB_GH_LOG")" "ICEDIT" "no edit"
+hasnt "$(cat "$STUB_GH_LOG")" "PRCOMMENT" "no post"
+
+echo "# …an edit the API refuses is retried on the next pass"
+bmut LD2 '.status = "closed" | .metadata += {"finding.ruling_visit":"tk-v602"}'
+: > "$STUB_GH_LOG"
+out=$(STUB_ICEDIT_RC=1 run)
+has "$out" "could not edit the answer to review 6003" "the refused edit is reported"
+has "$(lanswer 602 6003)" "Needs you: visit tk-v602" "…and the comment still holds what it said"
+: > "$STUB_GH_LOG"
+out=$(run)
+hasnt "$(lanswer 602 6003)" "Needs you: visit" "the next pass edits it: the visit no longer waits on the operator"
+has "$(lanswer 602 6003)" "Settled by your ruling on visit tk-v602." "…and says how the ruling settled the point"
+eq "$(lcount 602 6003)" "1" "…still in the one living answer"
+
+echo "# a review body's decline is carried by its living answer, never a second post"
+store "[$(anchor LA4 603 "$(lmeta rework:KL4 0 6004)"), $(fixunit KL4 closed),
+  $(lfind LE0 LA4 6004 6004 declined closed 'Rename the flag to --strict before this lands.' '{"finding.fix_unit":"KL4","finding.reply":"the flag name matches the other three scripts that take it, so a rename belongs with all four."}')]"
+printf '%s' "$(prview 603 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_603.json"
+threads 603 "$(lreview 603 6004 COMMENTED 'Rename the flag to --strict before this lands.')"
+: > "$STUB_GH_LOG"
+out=$(run)
+L4=$(lanswer 603 6004)
+has "$L4" "- **[Rename the flag to --strict before this lands.](https://github.com/zook/gc-toolkit/pull/603#pullrequestreview-6004)** Declined: the flag name matches the other three scripts that take it, so a rename belongs with all four." \
+  "the decline is in the living answer, linked to the review"
+eq "$(jq -r '[ .issue_comments[]? ] | length' "$GH_DIR/threads_603.json")" "1" "…which is the only comment the review gets"
+eq "$(meta LE0 finding.reply_posted)" "1" "…and the decline is marked delivered"
+hasnt "$L4" "in its thread" "nothing points at a thread a review body does not have"
+
+echo "# a label links only to a comment the read of the PR holds"
+store "[$(anchor LA5 604 "$(lmeta rework:KL5 6501 6005)"), $(fixunit KL5 closed),
+  $(lfind LF1 LA5 6501 6005 must-fix closed '**The cap reads the wrong budget.**' '{"finding.fix_unit":"KL5"}')]"
+printf '%s' "$(prview 604 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_604.json"
+threads 604 "$(lreview 604 6005 CHANGES_REQUESTED '')"
+: > "$STUB_GH_LOG"
+out=$(run)
+L5=$(lanswer 604 6005)
+has "$L5" "- **The cap reads the wrong budget.** Fixed." "a comment gone from the PR keeps its label, unlinked"
+hasnt "$L5" "discussion_r6501" "…and no link names it"
+
+echo "# a review that predates the living answer, answered and dismissed, gets none"
+store "[$(anchor LA6 605 "$(lmeta rework:KL6 6601 6006)"), $(fixunit KL6 closed),
+  $(lfind LG1 LA6 6601 6006 must-fix closed '**Old point.**' '{"finding.fix_unit":"KL6"}')]"
+printf '%s' "$(prview 605 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_605.json"
+threads 605 "$(lreview 605 6006 DISMISSED '' 6601)"
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(lcount 605 6006)" "0" "no living answer for a review with nothing left to answer"
+
+echo "# a review body its batch answers after every finding closed still gets its answer, in a living answer"
+# The findings closed at ruling (a summary ruled restates, a comment that asked
+# for nothing), so nothing holds the review open. Once the batch's fix unit
+# lands, the body is answered, and the living answer is what carries that mark.
+store "[$(anchor LA7 606 "$(lmeta rework:KL7 6701 6007)"), $(fixunit KL7 open),
+  $(lfind LH0 LA7 6007 6007 restates closed 'Summary: one point, inline.' '{"finding.fix_unit":"KL7"}'),
+  $(lfind LH1 LA7 6701 6007 declined closed 'Nice cleanup.' '{"finding.fix_unit":"KL7"}')]"
+printf '%s' "$(prview 606 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_606.json"
+threads 606 "$(lreview 606 6007 COMMENTED 'Summary: one point, inline.' 6701)"
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(lcount 606 6007)" "0" "nothing is owed while the batch is in flight, so no living answer yet"
+bmut KL7 '.status = "closed"'
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(lcount 606 6007)" "1" "once the batch lands, the living answer is posted"
+has "$(lanswer 606 6007)" "<!-- gc-writeback-mark:resolved r6007 -->" "…carrying the mark that records the body answered"
+eq "$(thumbed 606 RV-606),$(reacted 606 RV-606)" "true,false" "…so the body trades its pickup EYES for THUMBS_UP"
+eq "$(jq -r '[ .issue_comments[]? ] | length' "$GH_DIR/threads_606.json")" "1" "…and no check-mark ack is posted beside it"
+
+echo "# a covered review body trades its reaction once a pass, through its living answer, after the pickup reactions"
+# The first pass posts the living answer with the body's resolved mark, and its
+# EYES removal is refused, so the trade is still owed with the mark on the PR.
+store "[$(anchor LA10 609 "$(lmeta rework:KL10 7001 6010)"), $(fixunit KL10 closed),
+  $(lfind LK0 LA10 6010 6010 restates closed 'Summary: one point, inline.' '{"finding.fix_unit":"KL10"}'),
+  $(lfind LK1 LA10 7001 6010 declined closed 'Nice cleanup.' '{"finding.fix_unit":"KL10"}')]"
+printf '%s' "$(prview 609 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_609.json"
+threads 609 "$(lreview 609 6010 COMMENTED 'Summary: one point, inline.' 7001)"
+: > "$STUB_GH_LOG"
+out=$(STUB_UNREACT_RC=1 run)
+has "$(lanswer 609 6010)" "<!-- gc-writeback-mark:resolved r6010 -->" "the living answer carries the body's resolved mark"
+eq "$(thumbed 609 RV-609),$(reacted 609 RV-609)" "true,true" "…and the refused removal leaves the body's trade owed"
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(grep -c '^UNREACT RV-609 EYES$' "$STUB_GH_LOG")" "1" "the next pass makes the trade once, through the living answer alone"
+eq "$(thumbed 609 RV-609),$(reacted 609 RV-609)" "true,false" "…leaving the body with THUMBS_UP and no EYES"
+# The trade is owed again, and an inline comment has lost its pickup reaction.
+# A pass whose pickup reaction is refused answers nothing, the trade included,
+# though the living answer's rendering is unchanged.
+jq -c '.reviews |= map(if .id == "RV-609" then .reactionGroups += [{content: "EYES", viewerHasReacted: true}] else . end)
+       | .threads |= map(.comments.nodes |= map(if .id == "NC-609-7001" then .reactionGroups = [] else . end))' \
+  "$GH_DIR/threads_609.json" > "$TMP/t609.json" && mv "$TMP/t609.json" "$GH_DIR/threads_609.json"
+: > "$STUB_GH_LOG"
+out=$(STUB_REACT_RC=1 run)
+eq "$(grep -c '^UNREACT RV-609 ' "$STUB_GH_LOG")" "0" "a pass whose pickup reaction is refused makes no trade, not even through an unchanged living answer"
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(grep -c '^UNREACT RV-609 EYES$' "$STUB_GH_LOG")" "1" "…and the pass after it makes the trade"
+
+echo "# a decline its fix unit flagged cites the fix's commits once that fix unit lands, in an edit"
+# The decline closed its finding at the ruling, before the fix unit that changed
+# the code anyway had pushed, so the landing alone has to change the rendering
+# for the writer to edit the comment and cite the commit.
+store "[$(anchor LA8 607 "$(lmeta rework:KL8 6802 6008)"), $(fixunit KL8 open),
+  $(lfind LI1 LA8 6801 6008 declined closed '**Rename the cap to budget.**' '{"finding.fix_unit":"KL8","finding.reply":"the name matches the config key it reads.","finding.fix_flag":"1","finding.fix_answer":"Renamed anyway, though the ruling declined it: the config key was renamed in the same change."}'),
+  $(lfind LI2 LA8 6802 6008 needs-you open 'Should the cap apply to retries too?' '{"finding.fix_unit":"KL8","finding.visit":"tk-v607","finding.answer":"Should the cap apply to retries too?","finding.reply":"This comment needs your decision — opened visit tk-v607."}')]"
+printf '%s' "$(prview 607 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_607.json"
+threads 607 "$(lreview 607 6008 COMMENTED '' 6801 6802)"
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(lanswer 607 6008)" "**Worth a look**
+- **[Rename the cap to budget.](https://github.com/zook/gc-toolkit/pull/607#discussion_r6801)** Renamed anyway, though the ruling declined it: the config key was renamed in the same change.
+
+<!-- gc-writeback -->" "the decline its fix unit flagged is worth a look in the fix unit's words, citing no commit while that fix unit is in flight"
+bmut KL8 '.status = "closed"'
+commits 607 '[{"oid":"7a7a7a7aaaaa","message":"fix: rename the cap to budget (KL8)\n\nReview comment 6801."}]'
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(grep -c '^ICEDIT' "$STUB_GH_LOG")" "1" "the fix unit landing edits the living answer in place"
+has "$(lanswer 607 6008)" "the config key was renamed in the same change. (7a7a7a7a)" "…to cite the commit that made the change"
+eq "$(lcount 607 6008)" "1" "…still in the one living answer"
+
+echo "# a dismissal whose edit of the living answer is refused still reads as re-requested on the next pass"
+store "[$(anchor LA11 610 "$(lmeta rework:KL11 7101 6011)"), $(fixunit KL11 closed),
+  $(lfind LL1 LA11 7101 6011 must-fix closed '**Quote the expansion.**' '{"finding.fix_unit":"KL11","finding.fix_answer":"Fixed as you suggested."}')]"
+printf '%s' "$(prview 610 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_610.json"
+threads 610 "$(lreview 610 6011 CHANGES_REQUESTED '' 7101)"
+commits 610 '[{"oid":"1b1b1b1bbbbb","message":"fix: quote the expansion (KL11)"}]'
+: > "$STUB_GH_LOG"
+out=$(STUB_ICEDIT_RC=1 run)
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/610/reviews/6011/dismissals" "the answered review is dismissed, its author re-requested"
+hasnt "$(lanswer 610 6011)" "Review dismissed" "…but the edit saying so is refused"
+rdismissed 610 6011
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(lanswer 610 6011)" "Review dismissed; your review is requested again." "the next pass says so, reading the pending review request"
+has "$(lanswer 610 6011)" "<!-- gc-review-answer:r6011:dismissed -->" "…and the comment keeps the dismissed mark from then on"
+
+echo "# a review whose answers outgrow one comment still gets its living answer and its dismissal"
+# Forty points each answered at length, and long notes from the fix, would render
+# past the 65,536 characters GitHub takes in one comment, and the stub refuses
+# such a body the way GitHub does. The rendering shortens itself to fit.
+L9_LONG=$(printf 'said %.0s' $(seq 280))
+L9_ROWS=""
+for i in $(seq 1 40); do
+  L9_ROWS="$L9_ROWS,$(lfind "LJ$i" LA9 "$((6900 + i))" 6009 must-fix closed "**Point $i needs a fix.**" \
+    "$(jq -cn --arg a "Fixed as you suggested: $L9_LONG" '{"finding.fix_unit":"KL9","finding.fix_answer":$a}')")"
+done
+store "[$(anchor LA9 608 "$(lmeta rework:KL9 6940 6009)"), $(fixunit KL9 closed "$(printf 'n %.0s' $(seq 9000))")$L9_ROWS]"
+printf '%s' "$(prview 608 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_608.json"
+# shellcheck disable=SC2046  # one inline comment id per word
+threads 608 "$(lreview 608 6009 CHANGES_REQUESTED '' $(seq 6901 6940))"
+commits 608 '[{"oid":"9b9b9b9bbbbb","message":"fix: the forty points (KL9)"}]'
+: > "$STUB_GH_LOG"
+out=$(run)
+L9=$(lanswer 608 6009)
+eq "$(lcount 608 6009)" "1" "the review gets its living answer"
+[ "${#L9}" -le 65536 ] && ok "…within what GitHub takes (${#L9} characters)" || bad "…within what GitHub takes (got ${#L9} characters)"
+has "$L9" "### Your review: 40 points, all answered" "…counting every point"
+has "$L9" "The notes from the fix are on KL9, left out here to fit the size GitHub allows a comment." "…its notes named rather than carried"
+has "$L9" "(the full text is on LJ1)" "…and each shortened answer naming the finding that holds it whole"
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/608/reviews/6009/dismissals" "…so the answered review is dismissed"
+
+fi # part living
 
 # ==== part pacing: the paced walks, their visit order, and the posture basis ====
 if part pacing; then

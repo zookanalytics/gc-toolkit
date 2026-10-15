@@ -387,11 +387,6 @@ verdict recorded, was retired unjudged by `review-sweep.sh`, or was closed
 `superseded` by the ancestry refusal above, and either verdict against it is
 refused on the same terms: nothing written, no round spent.
 
-A legacy `exception@<oid>` marker — the pre-migration cap park — is not lane
-vocabulary an approve verdict may read or overwrite: `signoff.sh` refuses to
-stamp `green` over one, naming `migrate-lane-states.sh` as the remedy, rather
-than silently releasing a park a human is relying on.
-
 **Merge condition** (validated by `merge.sh`, every field re-read immediately
 before merging): `check_set` is non-empty (empty is never the `none` opt-out —
 an unnormalized anchor holds); every check named in `check_set` reads `green`; a
@@ -536,9 +531,9 @@ is extensible: one value is set at a time, and setting one removes any other
 
 | Label | Who acts next | When |
 |---|---|---|
-| `status: working` | the city | an open rework child stands on the anchor, or an approved PR is merging |
-| `status: needs-review` | a human reviews the head | settled at the head, no open rework: opened check-green, reworked and handed back, or a non-blocking review left comments |
-| `status: needs-attention` | a human weighs in | a hold stands — the signoff cap (`merge_hold=signoff_cap`), an operator freeze, or a topic held for discussion — or an approved PR is wedged with no rework in flight |
+| `status: working` | the city | an open rework child stands on the anchor, a draft the city opened still waits on the checks that flip it ready, or an approved PR is merging |
+| `status: needs-review` | a human reviews the head | settled at the head, no open rework: opened check-green or flipped from draft to ready, reworked and handed back, or a non-blocking review left comments |
+| `status: needs-attention` | a human weighs in | a hold stands — an operator freeze, or a topic held for discussion — or an approved PR is wedged with no rework in flight |
 
 Precedence when inputs overlap: `needs-attention` > `working` > `needs-review`.
 
@@ -547,8 +542,9 @@ Precedence when inputs overlap: `needs-attention` > `working` > `needs-review`.
 block or to resolve what a hold stands for.
 
 The label reads the city's own state — the refinery-computed posture and merge
-state on the anchor, its holds, and its rework children — not GitHub's review
-posture directly and not a lane marker. The `working`->`needs-review` flip rests on
+state on the anchor, its holds, its draft-stage markers, and its rework
+children — not GitHub's review posture or draft flag directly and not a lane
+marker. The `working`->`needs-review` flip rests on
 the rework child, which is scoped to the reviewed commit and closes when the fix
 lands, so a sticky `CHANGES_REQUESTED` never traps the label in `working` after a
 rework hands back, and a `check.<g>=green` that outlives a rewritten reviewed
@@ -560,9 +556,14 @@ rides `pr.machine`. The draft flag is a phase signal, not a merge signal — a P
 opens as a draft when its `check_set` names an `open-as-draft` check, and
 `pr-open.sh` flips it to ready once every `pre-open` and `open-as-draft` check
 reads green ([Checks](#checks)); merge readiness waits on every phase and the
-universal approval besides.
+universal approval besides. A draft the city opened carries `opened_as_draft`
+and reads `working` until `pr-open.sh` records `draft_readied`, because until
+then the city still owes the checks that flip it and the flip itself. A draft
+anyone else made, or one re-drafted after the city readied it, reads like any
+other PR.
 `assets/scripts/pr-status-label.sh` is the single writer. `pr-open.sh` sets the
-label when it opens a PR and when it flips a draft to ready, and `signoff.sh`
+label when it opens a PR and when it records a draft ready, whether it flipped
+the draft or found it already ready, and `signoff.sh`
 flips it on each of the city's own verdicts. A human's review moves it in the
 merge cadence's posture and feedback arms, in the pass that records the review.
 The posture arm re-derives the label for an anchor whose posture value it
@@ -630,23 +631,21 @@ anchor is moving without re-implementing two scripts' predicates. Declared in
 `lifecycle/lifecycle.toml` `[machine_axis]`, written by `gate-ensure.sh`
 through `lifecycle.sh`, and by `merge.sh` through the lifecycle writer that
 `gctk merge` runs in-process, at the points where each already reaches the
-verdict, from `pre_open_gate` onward — most wedged anchors have no PR number
-yet, so a key written only for open pull requests would miss the majority of
-them.
+verdict, from `pre_open_gate` onward — an anchor can stall before its PR number
+exists, so a key written only for open pull requests would miss the pre-open
+ones.
 
 | Value | Meaning |
 |---|---|
 | `progressing` | some automated actor will act: a pool-routed blocker is open, or a declared lane is short of green |
 | `settled` | every declared check reads `green`; the cadence is done, and the PR waits on approval, on the merge pass, or on nothing |
 | `blocked` | a hold no review verdict clears: an unresolved required review thread, a base gone `BEHIND`, or a branch that conflicts with the base with no merge-in rework in flight. The cause rides `pr.machine_reason`, and the board owes it to the operator as needs-attention rather than folding it into the awaiting-review tail |
-| `wedged-exception` | `merge_hold` stands with `signoff_cap` beside it: the convergence cap parked the anchor and routed it to a person, and no automated actor will lift it |
 
-`wedged-exception` names the anchor's wedge in the value itself: no automated
-actor will move it, and the value says what releases it, so a reader acts
-without re-deriving the shape. A standing non-city `CHANGES_REQUESTED` is not a
-wedge — the city answers it by filing rework every round without bound, so the
-anchor reads `progressing`, and the standing review is carried on the posture
-axis.
+A standing non-city `CHANGES_REQUESTED` is not `blocked`: a review verdict is
+what it waits on. While a fix unit answering it is in flight the anchor reads
+`progressing`. Once nothing is in flight the merge pass records `settled`, the
+PR waits on that reviewer's re-review, and the standing review rides the
+posture axis.
 
 **Dated keys.** `pr.machine` and `pr_posture` carry a third component,
 `<value>@<oid>@<since>`, under one write rule that `lifecycle.sh --set-dated`
@@ -804,11 +803,7 @@ review's result set.
   gate-ensure holds dispatch rather than pouring a second review while an open
   rework child is already in flight for the lane — a `blocks`-dep bead on the
   anchor carrying a non-empty `source_review_bead` or `source_ruling_bead` (the
-  review or the ruling the rework answers) — and reads a
-  legacy `exception@<oid>` marker as a park — wedged, no dispatch — until
-  `migrate-lane-states.sh` rewrites it to `merge_hold=true`; its stray-
-  marker sweep leaves that shape alone rather than clearing it, for the same
-  reason.
+  review or the ruling the rework answers).
 
 ### Bringing a branch current
 

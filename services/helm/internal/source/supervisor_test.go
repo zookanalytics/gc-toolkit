@@ -496,8 +496,7 @@ func TestMetadataAnchorPredicateMatchesTheStoreFilter(t *testing.T) {
 
 	// The merge kind, also presence-keyed. Keyed on merge_result rather than on
 	// pr_number because an anchor at pre_open_gate has a machine axis and no
-	// number yet, and most wedged anchors are in that state — a number-keyed
-	// selector would omit the majority of the condition the row exists to show.
+	// number yet — a number-keyed selector would omit every pre-open row.
 	var merge metadataAnchor
 	for _, ma := range metadataAnchors {
 		if ma.kind == "merge" {
@@ -519,8 +518,9 @@ func TestMetadataAnchorPredicateMatchesTheStoreFilter(t *testing.T) {
 	}
 
 	// The human kind comes FIRST so BuildBoard's id-dedup — which keeps the
-	// first at equal rank — leaves a wedged anchor, which carries both markers,
-	// on its human row instead of flipping kind between passes.
+	// first at equal rank — leaves a merge anchor routed to a person, which
+	// carries both markers, on its human row instead of flipping kind between
+	// passes.
 	humanAt, mergeAt := -1, -1
 	for i, ma := range metadataAnchors {
 		switch ma.kind {
@@ -554,12 +554,12 @@ func TestSupervisorBackendReadsThePRAxes(t *testing.T) {
 	md := map[string]string{
 		"merge_result": "pre_open_gate",
 		"branch":       "polecat/tk-w",
-		"pr.machine":   "wedged-exception@" + strings.Repeat("a", 40) + "@2026-08-28T04:05:06Z",
+		"pr.machine":   "progressing@" + strings.Repeat("a", 40) + "@2026-08-28T04:05:06Z",
 	}
 	if !merge.matches(md) {
-		t.Fatal("the scan must admit a wedged pre-open anchor")
+		t.Fatal("the scan must admit a pre-open anchor")
 	}
-	a := (&SupervisorSource{}).metadataAnchorFor(&gatherState{}, apiBead{ID: "tk-w", Title: "wedged"},
+	a := (&SupervisorSource{}).metadataAnchorFor(&gatherState{}, apiBead{ID: "tk-w", Title: "pre-open"},
 		md, merge.kind, nil)
 	if a.Metadata["pr.machine"] == "" {
 		t.Error("the recorded position has to ride on the anchor, or the axis is unreadable here")

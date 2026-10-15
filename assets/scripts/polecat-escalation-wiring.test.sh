@@ -6,10 +6,11 @@
 # .test.sh) does not reach the polecat: a patrol tops the agent tier with no
 # peer to mail, a worker has one.
 #
-# A hold+drain is not a blocker to mail, though: it de-routes the whole molecule,
-# so it must leave a tracked record first. This also pins that the decline-and-hold
-# path files an escalate.sh visit before molecule-hold.sh runs, never bare mail
-# behind a hold, the silent strand that leaves a de-routed molecule no query returns.
+# A decline is not a blocker to mail, though: it cancels the run, so it must
+# leave a tracked record first. This also pins that the decline path files an
+# escalate.sh visit and records the wait before run-cancel.sh runs, never bare
+# mail behind a cancel, which would leave work nothing re-offers and no query
+# returns.
 #
 # The sender half is useless without the receiver half, so this pins both: the
 # doctrine that tells the polecat to mail HELP or NOTICE, and the witness patrol
@@ -48,14 +49,20 @@ grep -q -- '--subject' "$DOCTRINE" && grep -q -- '--key' "$DOCTRINE" \
   && ok "escalate.sh call carries --subject and --key (the dedup identity)" \
   || bad "escalate.sh call must carry --subject and --key"
 
-# A decline that ends in a hold+drain files the visit FIRST and gates the hold on
-# it: an escalate.sh call precedes molecule-hold.sh, so a de-routed molecule always
-# leaves a tracked record a query returns and a hold never lands behind bare mail
-# (the silent strand this pins out, since mail reaches an agent peer, not the record).
-if awk '/escalate\.sh.*--key/{e=NR} /molecule-hold\.sh.*--step/{if(e&&NR-e<=6)f=1} END{exit !f}' "$DOCTRINE"; then
-  ok "hold+drain is gated on a filed escalate.sh visit (escalate precedes molecule-hold)"
+# A decline files the visit FIRST, records the wait on the work bead next, and
+# gates the cancel on both: escalate.sh, then await-ruling.sh, then run-cancel.sh,
+# within one block. A cancelled run therefore always leaves a tracked record a
+# query returns, and never lands behind bare mail (mail reaches an agent peer,
+# not the record).
+if awk '/escalate\.sh.*--key/{e=NR} /await-ruling\.sh.*--key/{if(e&&NR>e)a=NR} /run-cancel\.sh.*--step/{if(e&&a&&NR>a&&NR-e<=8)f=1} END{exit !f}' "$DOCTRINE"; then
+  ok "the cancel is gated on a filed escalate.sh visit and a recorded wait (escalate, await-ruling, run-cancel)"
 else
-  bad "hold+drain must run escalate.sh first and gate the hold on its exit 0; a hold behind bare mail strands silently"
+  bad "a decline must run escalate.sh, then await-ruling.sh, then run-cancel.sh; a cancel behind bare mail leaves work nothing re-offers"
+fi
+if grep -q 'molecule-hold' "$DOCTRINE"; then
+  bad "the doctrine still teaches molecule-hold.sh; a molecule's lifecycle is gascity's, so a decline cancels the run"
+else
+  ok "the doctrine teaches no molecule hold"
 fi
 
 grep -q 'HELP' "$WITNESS" && grep -q 'escalate\.sh' "$WITNESS" \

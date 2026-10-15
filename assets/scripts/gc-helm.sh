@@ -1,13 +1,14 @@
 #!/bin/sh
 # gc-helm.sh — the helm verbs: the WRITE verbs, and the read-only resolve and
 # unplaced.
-# Job: write the operator-facing state the helm board renders. The board
-# itself is `helm-svc board` (services/helm); this script renders nothing.
+# Job: write the operator-facing state the helm board renders, and the
+# operator's steering moves. The board itself is `helm-svc board`
+# (services/helm); this script renders nothing.
 # Verbs (full grammar and per-verb notes in usage(), `gc-helm --help`): the
-# write verbs open, engage, react, takeaway, demand, dismiss, accept, and the
-# read-only resolve and unplaced. open, engage and react take a <subject> (a
-# bead id, a PR number or URL, or a superseded id) and resolve it to the live
-# bead that owns the work by metadata and the graph, never a title; an
+# write verbs open, engage, react, takeaway, demand, park, dismiss, accept, and
+# the read-only resolve and unplaced. open, engage and react take a <subject>
+# (a bead id, a PR number or URL, or a superseded id) and resolve it to the
+# live bead that owns the work by metadata and the graph, never a title; an
 # unresolvable or ambiguous reference is refused and nothing is filed.
 # Callers: tmux-pick-helm.sh + gc-visit-open.sh (open), helm-svc POST
 # /helm/open via GC_HELM_OPEN_TOOL (open — its stderr/stdout sentences are
@@ -50,6 +51,8 @@ Usage:
   gc-helm react <bead-id> [--reason "..."]  file a first reaction — a reaction bead that tracks the subject, claimed and disposed by the proactive pool
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent> | --assign <named-agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
   gc-helm demand <gated-bead> "<text>" [--by ...] [--topic <key>] [--assignee <who>] [--body "..."] [--also-blocks <bead-id>]...  file what a person owes as a bead and block the work on it
+  gc-helm park <bead-id> "<text>" [--body "..."]  hold everything under the bead that has not started: file a gate titled with why it is parked and what releases it (≤140 chars, ENFORCED), described by --body, and make the bead wait on it
+  gc-helm park <bead-id> --waiting-on <bead-id>  the same hold behind an existing bead, filing no gate
   gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
   gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject (passed as gc.var.issue), resolve the human gate that put it to the operator, and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
@@ -107,10 +110,10 @@ force-to-visit invariant is preserved — engage files that one visit itself.
 dismiss ends the sitting. react files a proactive first-reaction bead via
 tools/gc-proactive.sh (its --reason is log-only operator intent). takeaway
 stamps gc.takeaway (+_at/+_by) in one
-update; --release also reopens/unassigns/clears the route and quiesces the
-released molecule's step beads and workflow root. On an anchor that is already
+update; --release also reopens/unassigns/clears the route and ends the run
+beneath the anchor through gascity's run cancel. On an anchor that is already
 CLOSED the reopen would resurrect a landed disposition, so it is skipped and
-only the quiesce runs; --route <rig>/<agent> releases it TO a pool instead of
+only the run's end runs; --route <rig>/<agent> releases it TO a pool instead of
 back to the human, in the same write, and is refused on a closed anchor and on
 a bead blocked by anything but its own demand, since the work is then on the
 blocker and a pool has nothing to perform here; --assign <named-agent> releases
@@ -132,6 +135,19 @@ demand files what a person owes as its own bead, a SIBLING of the work, and
 blocks that work on it with a `blocks` edge; it prints `demand <id> blocks
 <gated>`, so a caller reads the id back with
 `awk '/^demand /{print $2; exit}'`.
+
+park holds everything under a bead that has not started and leaves work in
+flight running (docs/steering.md). It gives the bead one `blocks` edge, onto
+the gate the text form files or onto the bead --waiting-on names, and reads the
+edge back. It prints `park <blocker> holds <bead>`, then what the park holds
+and what it leaves running. Re-running the text form with the same text files
+no second gate, and a --body on the re-run becomes that gate's description. It
+refuses a bead in flight (one claimed, in_progress or hooked, one carrying
+branch, merge_result or rejection_reason, or one with a workflow past
+load-context), because the bead's own edge would hold its merge, and it
+refuses a demand gate as the bead to wait on. Closing the gate releases the
+park; removing one bead's edge (gc bd dep remove <bead> <gate>) releases that
+bead alone.
 
 dismiss is the operator's explicit "end this sitting". It closes the subject's
 open visit, which is what holds a converse sitting's pane up; converse-reap
@@ -188,6 +204,27 @@ assignee_now() {
         | jq -r 'if type == "array" then (.[0].assignee // "") else "" end' 2>/dev/null || printf ''
 }
 
+# row_now <bead> — the bead's own row as the store answers it now, one line of
+# JSON, or empty when it does not resolve. Same pinned store as meta_now.
+row_now() {
+    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+    gc bd show "$1" ${db:+--db "$db"} --json 2>/dev/null | scrub \
+        | jq -c --arg b "$1" \
+            'if type == "array" then ([ .[] | select(type == "object" and (.id // "") == $b) ] | first // empty) else empty end' \
+            2>/dev/null || true
+}
+
+# blocks_edge_reads_back <bead> <blocker> — 0 iff the bead's own row, read now,
+# carries a `blocks` edge onto <blocker>. A row that will not read is a missing
+# edge. demand and park report an edge as landed only through this read, never
+# through the exit status of the `dep add` or create that wrote it.
+blocks_edge_reads_back() {
+    row_now "$1" | jq -e --arg d "$2" '
+        [ (.dependencies // [])[]? | select(type == "object")
+          | select(((.dependency_type // .type // "") | tostring) == "blocks")
+          | select(((.id // .depends_on_id // "") | tostring) == $d) ] | length > 0' >/dev/null 2>&1
+}
+
 # stamp_hides_placement — given a `bd show --json` answer on stdin whose row
 # carries gc.execution_routed_to, print 1 when that stamp is all that keeps the
 # bead out of the placement queue (placement.sh's awaiting_placement holds for
@@ -219,7 +256,10 @@ normalize_headline() {
     case "$tlen" in ''|*[!0-9]*) tlen=${#HEADLINE} ;; esac
     if [ "$tlen" -gt "$TAKEAWAY_MAX" ]; then
         echo "$PROG: $2: text is $tlen chars; the cap is $TAKEAWAY_MAX" >&2
-        echo "$PROG: $2: it renders as the board's NEEDS cell — one line, read at a glance. Cut it to the single sentence the operator needs and put the rest in the bead's notes." >&2
+        case "$2" in
+            park) echo "$PROG: park: it is the park gate's title, one line read wherever the gate is listed. Cut it to why the bead is parked and what releases it, and put the rest in --body." >&2 ;;
+            *)    echo "$PROG: $2: it renders as the board's NEEDS cell — one line, read at a glance. Cut it to the single sentence the operator needs and put the rest in the bead's notes." >&2 ;;
+        esac
         exit 2
     fi
     # <<< takeaway-length-gate
@@ -291,6 +331,9 @@ ENGAGE_AGENTS_DIR="${GC_HELM_AGENTS_DIR:-$SCRIPT_DIR/../../agents}"
 # that it closed). Best-effort and self-silencing when the subject has no PR;
 # overridable so a hermetic test can point it at a fixture.
 VISIT_COMMENT_TOOL="${GC_VISIT_COMMENT_TOOL:-$SCRIPT_DIR/pr-visit-comment.sh}"
+# Ends the run beneath a released anchor through gascity's run cancel;
+# overridable so a hermetic test can point it at a fixture.
+RUN_CANCEL_TOOL="${GC_RUN_CANCEL_TOOL:-$SCRIPT_DIR/run-cancel.sh}"
 # The longest engage waits, in seconds, for the reconciler to start the sitting
 # it spawned before attaching to it. 120 is the default `gc session new` puts on
 # the same wait. Overridable, so a slow controller can be given longer and a
@@ -454,69 +497,6 @@ rig_db_for_session() {
         | jq -r --arg n "$_srig" '.rigs[]? | objects | select(.name == $n) | .path' 2>/dev/null | head -n1)
     [ -n "$_spath" ] && [ -d "$_spath/.beads" ] && printf '%s' "$_spath/.beads"
 }
-
-# ── Reap helper: force-close a husk molecule ─────────────────────────
-# A released molecule that no live session is completing — its work cancelled by
-# a stand-down, or already folded — never closes its own step chain, so
-# workflow-finalize stays blocked_by the chain and the root never reaps, while
-# its held steps keep drawing re-dispatches. A stood-down molecule should die,
-# not park, so force-close the whole subtree: every step and the root. bd
-# refuses to close a bead an open blocker gates, so the chain unwinds from its
-# unblocked end — close what closes, repeat until a pass closes nothing.
-# `update --status=closed` needs no --force: the ownership check belongs to the
-# `close` verb, not to reaching the closed state, and the forward order is what
-# satisfies the blocker rule. A bead the store will not close is de-pinned
-# instead, so it stops re-attracting spawns while the patrol retries.
-#
-# $1 = newline-separated molecule rows (JSON, {id,kind,step,...}); $2 = rig
-# .beads path or ""; $3 = the released anchor id, for the log line.
-# >>> reap-release-molecule
-reap_release_molecule() {
-    _reap_rows="$1"; _reap_db="$2"; _reap_anchor="$3"
-    _reap_todo=$(printf '%s\n' "$_reap_rows" | jq -r '.id // empty' 2>/dev/null | grep . || true)
-    [ -n "$_reap_todo" ] || return 0
-    _reap_n=$(printf '%s\n' "$_reap_todo" | grep -c . 2>/dev/null || echo 0)
-    case "$_reap_n" in ''|*[!0-9]*) _reap_n=0 ;; esac
-    _reap_pass=0
-
-    while [ -n "$_reap_todo" ] && [ "$_reap_pass" -le "$_reap_n" ]; do
-        _reap_pass=$((_reap_pass + 1))
-        _reap_next=""
-        _reap_moved=0
-        while IFS= read -r _sid; do
-            [ -n "$_sid" ] || continue
-            _lbl=$(printf '%s\n' "$_reap_rows" | jq -r --arg i "$_sid" \
-                'select(.id == $i) | "\(.kind) \(.id) (\(.step // ""))"' 2>/dev/null | head -1)
-            # shellcheck disable=SC2086  # ${_reap_db:+--db "$_reap_db"} expands to 0 or 2 fields
-            if gc bd update "$_sid" ${_reap_db:+--db "$_reap_db"} --status=closed --set-metadata "gc.outcome=stand-down" >/dev/null 2>&1; then
-                _reap_moved=1
-                echo "$PROG: takeaway: reaped ${_lbl:-$_sid} of $_reap_anchor"
-            else
-                _reap_next="${_reap_next}${_sid}
-"
-            fi
-        done <<REAP
-$_reap_todo
-REAP
-        _reap_todo=$(printf '%s' "$_reap_next" | grep . || true)
-        [ "$_reap_moved" -eq 1 ] || break
-    done
-
-    # Anything the store refused to close — a pin-write refusal, or a blocker
-    # outside this molecule that never clears — is de-pinned so it stops
-    # re-attracting spawns, and named so the patrol knows to retry.
-    while IFS= read -r _sid; do
-        [ -n "$_sid" ] || continue
-        _lbl=$(printf '%s\n' "$_reap_rows" | jq -r --arg i "$_sid" \
-            'select(.id == $i) | "\(.kind) \(.id) (\(.step // ""))"' 2>/dev/null | head -1)
-        # shellcheck disable=SC2086  # ${_reap_db:+--db "$_reap_db"} expands to 0 or 2 fields
-        gc bd update "$_sid" ${_reap_db:+--db "$_reap_db"} --unset-metadata gc.routed_to --unset-metadata gc.session_affinity >/dev/null 2>&1 || true
-        echo "$PROG: takeaway: could not reap ${_lbl:-$_sid} of $_reap_anchor — de-pinned; retries via witness patrol" >&2
-    done <<REAP
-$_reap_todo
-REAP
-}
-# <<< reap-release-molecule
 
 # ── Subject resolver: an operator reference to the live bead it owns ──
 # The operator supplies a subject by reading it off whatever is in front of
@@ -693,64 +673,44 @@ _resolve_superseded_reference() {
     RESOLVED_SUBJECT="$_ss_cur"
 }
 
-# ── Release helper: quiesce a released molecule ──────────────────────
-# A molecule whose anchor is out of play — parked by a stand-down, or closed by
-# a fold that landed after the pour — keeps re-attracting the pins
-# (gc.routed_to / assignee / session_affinity) that re-spawn a polecat onto the
-# husk. That is why the walk is reachable on a closed anchor too. Both doors
-# carry them: the graph.v2 STEP beads, and the gc.kind=workflow ROOT, which is
-# only a tracker but is pool-routed in its own right. The anchor's input convoy
-# TRACKS it, so a reverse `tracks` lookup on the anchor names the convoy(s)
-# whose molecule resolves HERE; a root belongs to this molecule when its
-# gc.input_convoy_id is one of them and that convoy's single tracked member is
-# the anchor. Keying on the anchor keeps the resolution bounded — the work does
-# not grow with the number of molecules open in the store.
+# ── Release helper: end the run beneath a released anchor ─────────────
+# A molecule whose anchor is out of play — parked by a stand-down, released to a
+# pool or an agent, or closed by a fold that landed after the pour — must not
+# keep running, and a molecule's lifecycle is gascity's. So the release ends
+# each such run through gascity's run cancel (run-cancel.sh --root), which
+# closes the root and every step that is not closed. This script writes no step
+# and no root. That is why the walk is reachable on a closed anchor too.
 #
-# What each resolved molecule gets turns on whether the RELEASING session holds
-# one of its steps. If it does, the molecule is the session's OWN and live — a
-# sitting disposing the anchor it runs on, say — and it closes its own chain the
-# normal way: the held step is left alone, the
-# husk pins around it are cleared, and workflow-finalize keeps its escape route.
-# If no step is the releasing session's, nothing will ever close the chain, so
-# the molecule is a husk and reap_release_molecule force-closes the whole
-# subtree.
+# The anchor's input convoy TRACKS it, so a reverse `tracks` lookup on the
+# anchor names the convoy(s) whose molecule resolves HERE; a root belongs to
+# this molecule when its gc.input_convoy_id is one of them and that convoy's
+# single tracked member is the anchor. Keying on the anchor keeps the
+# resolution bounded — the work does not grow with the number of molecules open
+# in the store.
 #
-# Guards: fail closed on an unresolved or foreign anchor; select steps by
-# contract (gc.step_ref) and never by formula name; an absent root is the
+# A molecule the RELEASING session holds a step of is its own run, such as a
+# sitting disposing the anchor it runs on, and it closes its own chain the
+# normal way, so it is left alone.
+#
+# Guards: fail closed on an unresolved or foreign anchor; an absent root is the
 # witness patrol's, not ours.
 #
-# The de-pin path clears the pins in TWO updates, route first. beads refuses
-# `--assignee ""` on an in_progress bead another session holds, and refuses the
-# whole update along with it, so folding all three keys into one write loses the
-# route pins on exactly the bead being re-offered. Clearing gc.routed_to alone
-# already lifts a bead out of every pool claim predicate; the assignee is the
-# one key that may legitimately have to wait for its holder. The order is
-# load-bearing — reversed, the gap between the writes would leave the bead
-# routed and unassigned, which is the pool-offer shape a fresh polecat races
-# into. For the same reason the second write is skipped outright when the first
-# one fails.
-#
-# Best-effort subshell. $1 = released anchor id, $2 = rig .beads path or "".
-# >>> quiesce-release-molecule-steps
-quiesce_release_molecule_steps() (
+# Subshell. $1 = released anchor id, $2 = rig .beads path or "". Returns
+# non-zero when a run it set out to end did not end, each named on stderr.
+# >>> cancel-release-molecules
+cancel_release_molecules() (
     set +e
-    _anchor="$1"; _db="$2"
+    _anchor="$1"; _db="$2"; _missed=0
 
     _me=$(session_identities)
 
-    # `blocked` belongs in the set because molecule-hold.sh writes a held step
-    # to status=blocked (route and affinity cleared, assignee kept). That step
-    # still blocks the chain, so an enumeration that could not see it would close
-    # every other step, then fail to close the root behind the surviving blocker,
-    # and leave workflow-finalize unable to retire the molecule — the husk this
-    # release exists to kill. The reap force-closes it forward like any other.
     # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
-    _steps=$(gc bd list --status=open,in_progress,blocked ${_db:+--db "$_db"} --json --limit=0 2>/dev/null || true)
-    [ -n "$_steps" ] && [ "$_steps" != "[]" ] || exit 0
+    _live=$(gc bd list --status=open,in_progress,blocked ${_db:+--db "$_db"} --json --limit=0 2>/dev/null || true)
+    [ -n "$_live" ] && [ "$_live" != "[]" ] || exit 0
 
-    # A root names no gc.root_bead_id and no gc.step_ref; it IS the root, and
-    # its gc.step_id is the formula name, which is what the report says.
-    _rows=$(printf '%s' "$_steps" | jq -c '
+    # One row per molecule member: a root carries gc.kind=workflow and names
+    # its convoy, a step names its root.
+    _rows=$(printf '%s' "$_live" | jq -c '
         .[]
         | . as $b
         | (($b.metadata["gc.kind"] // "") == "workflow") as $isroot
@@ -759,33 +719,17 @@ quiesce_release_molecule_steps() (
                      and (($b.metadata["gc.root_bead_id"] // "") != "")))
         | { id:       $b.id,
             kind:     (if $isroot then "root" else "step" end),
-            step:     (if $isroot then ($b.metadata["gc.step_id"]  // "")
-                                  else ($b.metadata["gc.step_ref"] // "") end),
             root:     (if $isroot then $b.id
                                   else ($b.metadata["gc.root_bead_id"] // "") end),
             convoy:   (if $isroot then ($b.metadata["gc.input_convoy_id"] // "") else "" end),
-            routed:   ($b.metadata["gc.routed_to"] // ""),
-            assignee: ($b.assignee // ""),
-            affinity: ($b.metadata["gc.session_affinity"] // "") }' 2>/dev/null || true)
+            assignee: ($b.assignee // "") }' 2>/dev/null || true)
     [ -n "$_rows" ] || exit 0
 
-    # Resolve the released molecule DIRECTLY from the parked anchor. The input
-    # convoy TRACKS the anchor, so a reverse `tracks` lookup names the convoy(s)
-    # whose molecule resolves here — one read keyed on the anchor. Enumerating
-    # every open root and resolving each one's convoy back to the anchor instead
-    # is O(open molecules) `gc bd show` + `gc convoy status` round trips per
-    # release, work that scales with the store rather than with the one molecule
-    # being released. An unreadable or empty lookup leaves the husk to the
-    # witness patrol — the same skip an absent root already takes.
     # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
     _convoys=$(gc bd dep list "$_anchor" --direction=up -t tracks ${_db:+--db "$_db"} --json 2>/dev/null \
         | jq -r 'if type == "array" then (.[] | .id // empty) else empty end' 2>/dev/null | grep . || true)
     [ -n "$_convoys" ] || exit 0
 
-    # Match roots whose input convoy is in that set, in memory against the scan
-    # above — no per-root store read. A root reachable only through its steps
-    # (its own bead already closed) carries no convoy row here and is the witness
-    # patrol's, the same boundary the enumeration drew.
     _match_roots=$(printf '%s\n' "$_rows" | jq -r -s --arg c "$_convoys" '
         ($c | split("\n") | map(select(length > 0))) as $cs
         | [ .[]
@@ -796,7 +740,7 @@ quiesce_release_molecule_steps() (
         | unique | .[]' 2>/dev/null || true)
     [ -n "$_match_roots" ] || exit 0
 
-    printf '%s\n' "$_match_roots" | while IFS= read -r _root; do
+    while IFS= read -r _root; do
         [ -n "$_root" ] || continue
         _convoy=$(printf '%s\n' "$_rows" | jq -r --arg r "$_root" \
             'select(.kind == "root" and .root == $r) | .convoy' 2>/dev/null | head -n1)
@@ -804,105 +748,52 @@ quiesce_release_molecule_steps() (
 
         # FAIL CLOSED: the reverse lookup proved the convoy tracks the anchor;
         # confirm it is a clean 1:1 input convoy whose single tracked member IS
-        # the parked bead before acting — the guard the enumeration enforced.
+        # the released bead before acting.
         _ranchor=$(gc convoy status "$_convoy" --json 2>/dev/null \
             | jq -r 'if ((.children // []) | length) == 1 then (.children[0].id // empty) else empty end' 2>/dev/null || true)
         [ -n "$_ranchor" ] && [ "$_ranchor" = "$_anchor" ] || continue
 
-        _mol_rows=$(printf '%s\n' "$_rows" | jq -c --arg r "$_root" 'select(.root == $r)' 2>/dev/null || true)
-        [ -n "$_mol_rows" ] || continue
-
-        # A molecule the RELEASING session is itself completing keeps its chain
-        # and just sheds its husk pins; one no live session holds a step of is a
-        # husk whose work is cancelled or folded, and it is reaped so
-        # workflow-finalize can unblock and the root reaps.
         _own=""
         if [ -n "$_me" ]; then
-            _own=$(printf '%s\n' "$_mol_rows" | jq -r -s --arg me "$_me" '
+            _own=$(printf '%s\n' "$_rows" | jq -r -s --arg r "$_root" --arg me "$_me" '
                 ($me | split("\n") | map(select(length > 0))) as $ids
-                | [ .[] | (.assignee // "") | select(. != "") | . as $a | select($ids | any(. == $a)) ]
+                | [ .[] | select(.root == $r) | (.assignee // "") | select(. != "") | . as $a | select($ids | any(. == $a)) ]
                 | if length > 0 then "own" else "" end' 2>/dev/null || true)
         fi
-        if [ -z "$_own" ]; then
-            reap_release_molecule "$_mol_rows" "$_db" "$_anchor"
+        if [ -n "$_own" ]; then
+            echo "$PROG: takeaway: kept run $_root of $_anchor — this session holds a step of it and closes its own chain"
             continue
         fi
 
-        printf '%s\n' "$_mol_rows" | while IFS= read -r _row; do
-            [ -n "$_row" ] || continue
-            _sid=$(printf '%s'      "$_row" | jq -r '.id // empty' 2>/dev/null || true)
-            _kind=$(printf '%s'     "$_row" | jq -r '.kind // empty' 2>/dev/null || true)
-            _step=$(printf '%s'     "$_row" | jq -r '.step // empty' 2>/dev/null || true)
-            _routed=$(printf '%s'   "$_row" | jq -r '.routed // empty' 2>/dev/null || true)
-            _who=$(printf '%s'      "$_row" | jq -r '.assignee // empty' 2>/dev/null || true)
-            _affinity=$(printf '%s' "$_row" | jq -r '.affinity // empty' 2>/dev/null || true)
-            [ -n "$_sid" ] || continue
-
-            # Never de-route the finalize step (the molecule's only escape path).
-            case "$_step" in *.workflow-finalize) continue ;; esac
-            case "$_routed" in *control-dispatcher*) continue ;; esac
-
-            # Never de-pin the bead this release is being performed FROM. The
-            # quiesce exists to stop an ABANDONED molecule re-attracting spawns;
-            # a bead the releasing session holds is the live one, not a husk,
-            # and the session still owes its own step chain's close, so this
-            # quiesce leaves it alone. With no identity in the environment
-            # step-close.sh refuses to close anything at all, so there is no
-            # case where the skip is needed and unavailable.
-            if [ -n "$_who" ] && [ -n "$_me" ] && printf '%s\n' "$_me" | grep -qxF -- "$_who"; then
-                echo "$PROG: takeaway: kept live $_kind $_sid ($_step) — this session holds it and still has to close it"
-                continue
-            fi
-
-            # Idempotent: already quiet -> nothing left to clear.
-            [ -n "$_routed" ] || [ -n "$_who" ] || [ -n "$_affinity" ] || continue
-
-            _pins_ok=1
-            set --
-            [ -n "$_routed" ]   && set -- "$@" --unset-metadata gc.routed_to
-            [ -n "$_affinity" ] && set -- "$@" --unset-metadata gc.session_affinity
-            if [ $# -gt 0 ]; then
-                # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 fields
-                gc bd update "$_sid" ${_db:+--db "$_db"} "$@" >/dev/null 2>&1 || _pins_ok=0
-            fi
-
-            # The assignee clear is attempted only once the route is known to be
-            # gone (landed, or never there). Unassigning a bead that is still
-            # routed is what leaves the pool-offer shape behind, so a failed
-            # pin write takes the second update down with it rather than
-            # producing the state this whole order exists to avoid.
-            _who_ok=1
-            if [ -n "$_who" ] && [ "$_pins_ok" -eq 1 ]; then
-                # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 fields
-                gc bd update "$_sid" ${_db:+--db "$_db"} --assignee "" >/dev/null 2>&1 || _who_ok=0
-            fi
-
-            if [ "$_pins_ok" -eq 0 ]; then
-                echo "$PROG: takeaway: could not quiesce $_kind $_sid (retries via witness patrol)" >&2
-            elif [ "$_who_ok" -eq 0 ]; then
-                echo "$PROG: takeaway: de-pinned husk $_kind $_sid ($_step) of $_anchor — assignee left to the session still holding it"
-            else
-                echo "$PROG: takeaway: quiesced husk $_kind $_sid ($_step) of $_anchor"
-            fi
-        done
-    done
-    exit 0
+        # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
+        if _out=$("$RUN_CANCEL_TOOL" --root "$_root" ${_db:+--db "$_db"} --reason "takeaway --release on $_anchor took its work out of play" 2>&1); then
+            echo "$PROG: takeaway: ended run $_root of $_anchor through gascity"
+        else
+            _missed=1
+            echo "$PROG: takeaway: run $_root of $_anchor did not end: $(printf '%s' "$_out" | tr '\n' ' ')" >&2
+            echo "$PROG:   end it by hand: $RUN_CANCEL_TOOL --root $_root${_db:+ --db $_db} --reason \"<why>\"" >&2
+        fi
+    done <<ROOTS
+$_match_roots
+ROOTS
+    exit "$_missed"
 )
-# <<< quiesce-release-molecule-steps
+# <<< cancel-release-molecules
 
 # ── Verb: takeaway ───────────────────────────────────────────────────
 # Stamp gc.takeaway/_at/_by in ONE update, then bust the cache. --release adds
-# two acts to that stamp: PARK the anchor, and QUIESCE the molecule beneath it.
+# two acts to that stamp: PARK the anchor, and END the run beneath it.
 #
 # The park (reopen, unassign, stamp the route) rides the same write as the
 # headline, so a reaction that concludes "this is work" hands the bead on in
 # the write that records the conclusion: either the whole disposition lands or
 # none of it does. It applies to an anchor still standing.
 # A closed anchor was disposed already, so it keeps that disposition and gets
-# the quiesce alone.
+# the run's end alone.
 #
-# The quiesce de-pins every routed bead of the molecule, its graph.v2 workflow
-# root as well as its steps: the root is a pool-routed door into the same work.
+# The run's end is gascity's run cancel on the molecule's root, which closes the
+# root and every step that is not closed; a run the releasing session holds a
+# step of is its own, and is left to close its chain.
 #
 # --route names a pool to release TO. The target is rig-qualified or refused,
 # because gc.routed_to is read by exact string and a bare agent name routes to
@@ -946,7 +837,7 @@ quiesce_release_molecule_steps() (
 # holds it. Neither flag on a bead with no blocker is the silent prose-only park
 # refused below, the unedged hold the I1 backlog exists to drain. A --release
 # --route DISPATCHES to a pool instead (moving, not held), as --assign does to a
-# named agent, a closed anchor takes only the quiesce, and a bare headline (no
+# named agent, a closed anchor takes only the run's end, and a bare headline (no
 # --release) parks nothing — all exempt.
 cmd_takeaway() {
     bead=""; text=""; by="host"; release=""; route=""; assign=""; npos=0
@@ -1013,15 +904,15 @@ cmd_takeaway() {
     db=""; [ -n "$path" ] && [ -d "$path/.beads" ] && db="$path/.beads"
 
     # --release is two acts welded into one flag: PARK the anchor (reopen,
-    # unassign, stamp the route) and QUIESCE the molecule beneath it. The park
+    # unassign, stamp the route) and END the run beneath it. The park
     # is correct for an anchor still standing and destructive for one already
     # disposed — a bead closed by a fold carries gc.superseded_by and a
     # close_reason naming its carrier, and `--status=open` there makes work
     # whose disposition landed visible as open in every reader of open beads.
-    # The quiesce is the half a disposed anchor still needs: a fold that lands
-    # AFTER the pour leaves the molecule routed either way, and welding the two
-    # is what made that chain unreachable. So a closed anchor keeps its
-    # disposition and still gets the walk.
+    # The run's end is the half a disposed anchor still needs: a fold that lands
+    # AFTER the pour leaves the run going either way, and gascity's autoclose
+    # skips a run with open steps. So a closed anchor keeps its disposition and
+    # still gets the walk.
     #
     # The status is read before anything is written, and an unreadable one
     # refuses the verb: a bead whose disposition cannot be proven is the one
@@ -1048,7 +939,7 @@ cmd_takeaway() {
                     'if type == "array"
                      then [ .[] | select(type == "object" and (.id // "") == $b) ] | first | ((.metadata // {})["gc.superseded_by"] // "")
                      else empty end' 2>/dev/null || true)
-            echo "$PROG: takeaway: $bead is closed${superseded:+, superseded by $superseded} — its disposition stands, so the release write is skipped (no reopen, no unassign, no route stamp). The molecule is still quiesced." >&2
+            echo "$PROG: takeaway: $bead is closed${superseded:+, superseded by $superseded} — its disposition stands, so the release write is skipped (no reopen, no unassign, no route stamp). The run beneath it is still ended." >&2
         fi
     fi
     # <<< takeaway-release-closed-anchor
@@ -1110,7 +1001,7 @@ cmd_takeaway() {
     # all. A cross-store edge is left out of the array entirely, invisible here
     # as it is to every other reader of this graph. A closed anchor is not this
     # refusal's case: its route is refused below on the disposition itself,
-    # after the headline and the quiesce a folded anchor still needs have
+    # after the headline and the run's end a folded anchor still needs have
     # landed. An --assign takes the same guard, since a named agent offered a
     # bead whose work sits on a blocker has nothing to perform either, unless
     # the call names its waits with --waiting-on: the agent's hook offers the
@@ -1229,7 +1120,7 @@ cmd_takeaway() {
         || { echo "$PROG: takeaway: could not update '$bead' (does it exist in rig '${path:-?}'?)" >&2; exit 4; }
     # The headline is what this verb exists to write, so it is read back first,
     # in every mode: it rides the bare stamp, the park and a closed anchor's
-    # quiesce alike. One `--set-metadata` pair in a multi-pair update can fail to
+    # run end alike. One `--set-metadata` pair in a multi-pair update can fail to
     # land while its siblings land, and a headline that does not land leaves the
     # one the bead carried before this call, empty or an earlier sitting's. So
     # the read-back compares with the text this call wrote, not with empty. The
@@ -1239,7 +1130,7 @@ cmd_takeaway() {
     # as a wait already discharged. The disposition is still read back on its
     # own below. A repair that also misses is a verb failure, because callers
     # read a zero exit as the headline being set. The miss is reported here with
-    # its repair. Its exit comes last, after the edges, the quiesce and every
+    # its repair. Its exit comes last, after the edges, the run's end and every
     # other check have run and printed their own repairs. The messages carrying
     # the headline go through printf, because sh's echo interprets backslash
     # escapes, and a headline is free text.
@@ -1356,7 +1247,7 @@ cmd_takeaway() {
         fi
     fi
     # The executor identity the unassign takes with it is read back like the route
-    # and the proof above, and fails the verb the same way: both keys have readers.
+    # above, and fails the verb the same way: both keys have readers.
     # A gc.session_name left on the now-open bead is the residue
     # doctor/executor-identity-residue reports the moment the bead next carries a
     # route its stamp does not match — the finding this release exists to close. It
@@ -1414,8 +1305,9 @@ cmd_takeaway() {
         echo "$PROG: takeaway: --waiting-on $_w is a landed rider on $bead's own branch ($subj_branch) — its work is already there, so $bead's merge is what lands it and no wait edge is written (an edge would gate $bead's merge on work that merges with it, with no release). The board re-asks this wait through $bead's own landing." >&2
     done
     bust_cache
+    cancel_missed=""
     if [ -n "$release" ]; then
-        quiesce_release_molecule_steps "$bead" "$db"
+        cancel_release_molecules "$bead" "$db" || cancel_missed=1
     fi
     if [ -n "$route_missed" ]; then
         echo "$PROG: takeaway: $bead is released but NOT routed to '$route' — it is open, unassigned and visible to no pool. The headline, the release and the edges are written; stamp the route by hand: gc bd update $bead${db:+ --db $db} --set-metadata gc.routed_to=$route" >&2
@@ -1426,8 +1318,13 @@ cmd_takeaway() {
         exit 4
     fi
     # Reported at its read-back above; the exit waits until here so the edges
-    # and the quiesce still run, the way the route miss does.
+    # and the run's end still run, the way the route miss does.
     if [ -n "$settled_missed" ]; then
+        exit 4
+    fi
+    # Named, with its repair, by the helper. Nothing retries a cancel that did not
+    # land, so a zero exit here would read as a run ended when it still runs.
+    if [ -n "$cancel_missed" ]; then
         exit 4
     fi
     # A surviving session pin is exit-4 like the route above, on any bead: both
@@ -1462,11 +1359,11 @@ cmd_takeaway() {
     # the resurrection in its purest form — the pool claims it and cuts a
     # branch for superseded work.
     if [ -n "$route" ] && [ -z "$release_park" ]; then
-        echo "$PROG: takeaway: $bead is closed, so it was NOT routed to '$route' — a pool that claimed it would work a bead whose disposition landed. The headline and the quiesce are written. If the disposition is wrong, reopen the bead deliberately and re-run: gc bd update $bead${db:+ --db $db} --status=open" >&2
+        echo "$PROG: takeaway: $bead is closed, so it was NOT routed to '$route' — a pool that claimed it would work a bead whose disposition landed. The headline and the run's end are written. If the disposition is wrong, reopen the bead deliberately and re-run: gc bd update $bead${db:+ --db $db} --status=open" >&2
         exit 4
     fi
     if [ -n "$assign" ] && [ -z "$release_park" ]; then
-        echo "$PROG: takeaway: $bead is closed, so it was NOT assigned to '$assign' — the agent would be handed a bead whose disposition landed. The headline and the quiesce are written. If the disposition is wrong, reopen the bead deliberately and re-run: gc bd update $bead${db:+ --db $db} --status=open" >&2
+        echo "$PROG: takeaway: $bead is closed, so it was NOT assigned to '$assign' — the agent would be handed a bead whose disposition landed. The headline and the run's end are written. If the disposition is wrong, reopen the bead deliberately and re-run: gc bd update $bead${db:+ --db $db} --status=open" >&2
         exit 4
     fi
     # Reported at its read-back above, with its repair. The exit stands in for
@@ -1477,7 +1374,7 @@ cmd_takeaway() {
     rel_note=""
     if [ -n "$release" ]; then
         if [ -n "$release_park" ]; then rel_note=" [released${route:+ to $route}${assign:+ to $assign}]"
-        else rel_note=" [quiesced; anchor left closed]"; fi
+        else rel_note=" [run ended; anchor left closed]"; fi
     fi
     echo "takeaway set on $bead (by $by)$rel_note: $text"
 }
@@ -1735,14 +1632,7 @@ cmd_demand() {
     for _w in $gated $also; do
         [ -n "$_w" ] || continue
         if [ "$_w" = "$demand" ]; then continue; fi
-        w_after=$(gc bd show "$_w" --json 2>/dev/null | scrub || true)
-        have_edge=$(printf '%s' "$w_after" | jq -r --arg d "$demand" \
-            '[ .[0].dependencies[]?
-               | select(((.dependency_type // .type // "") | tostring) == "blocks")
-               | ((.id // .depends_on_id // "") | tostring) ]
-             | map(select(. == $d)) | length' 2>/dev/null || true)
-        case "$have_edge" in ''|*[!0-9]*) have_edge=0 ;; esac
-        if [ "$have_edge" -lt 1 ]; then unwired="$unwired $_w"; fi
+        blocks_edge_reads_back "$_w" "$demand" || unwired="$unwired $_w"
     done
     if [ -n "$unwired" ]; then
         for _w in $unwired; do
@@ -1753,6 +1643,315 @@ cmd_demand() {
 
     bust_cache
     echo "demand $demand blocks $gated (by $by${who:+, for $who}): $text"
+}
+
+# ── Verb: park ───────────────────────────────────────────────────────
+# A park holds everything under a bead that has not started, by giving the bead
+# one `blocks` edge (docs/steering.md). The text form files a gate of its own
+# for the edge to land on, and --waiting-on lands it on an existing bead and
+# files nothing. Either way the edge is read back off the bead before the verb
+# reports success: an edge that did not land leaves the bead and everything
+# under it reading ready while the operator believes them held.
+#
+# The gate is a plain gate: issue_type=gate, titled with the text, with no
+# await type, no gc.demand_for and none of the [holds] markers that
+# doctor/check-wait-is-an-edge reads, so no sweep closes or visits it. It is
+# born with its edge in one transaction (`bd create --deps blocks:<bead>`), so
+# no gate exists that holds nothing, and it is filed in the bead's own store,
+# because bd resolves an edge only within one store. Who parked the bead, and
+# when, are the gate's creator and creation time.
+#
+# Refused before anything is written, besides the forms and the headline cap:
+# - a bead in flight: someone has claimed it (in_progress or hooked, bd's claim
+#   statuses), it carries branch, merge_result or rejection_reason, or a
+#   workflow poured for it has passed load-context. Its own edge would be a
+#   live direct blocker: merge.sh holds an anchor's merge on any open blocker
+#   of its own, and bd refuses to close a bead that has one. Parking its parent
+#   holds the parent's unstarted work and leaves this bead's PR landing.
+# - a demand gate (gc.demand_for) as the bead to wait on. A demand gate is a
+#   wait on the operator's decision, and the operator ruled that such a wait
+#   does not hold armed work, so a park behind one would read as that decision
+#   rather than as a park. The text form's gate carries no gc.demand_for, and
+#   its text can name the decision the park waits for.
+# - a bead to wait on that is closed, lives in another store, or sits under
+#   the bead: each edge would hold nothing, or bd refuses it.
+
+# PARK_SURVEY_JQ reads one listing of the bead's store, every bead not closed,
+# and sorts the bead (--arg b) and everything under it by what a park does to
+# each. A bead is under another through parent-child edges, any of its parents
+# counting. A bead is in flight when its status is a claim (in_progress or
+# hooked), when it carries merge_result, rejection_reason or branch, or when a
+# workflow poured for it has passed load-context. The status alone does not
+# cover a workflow, because a pour promotes its own root to in_progress and
+# never claims the bead it was poured for. A workflow is found from its bead:
+# its input convoy tracks the bead, and its root names that convoy in
+# gc.input_convoy_id. The workflow has passed load-context once no step of the
+# root whose gc.step_ref ends in .load-context is still open, so a formula with
+# no such step counts as started.
+#   flight  in flight, with why; the park leaves it running.
+#   poured  under the bead, not in flight and not armed (gc.dispatch_when_ready),
+#           with a workflow still at load-context.
+#   held    the bead, and everything else under it. An armed member is held:
+#           deferred dispatch slings an armed bead only when no blocker holds
+#           it or any of its ancestors (hold-lib.sh).
+# Rows come in either bd shape: a listing's edges are {depends_on_id, type},
+# and a `bd show` row's are {id, dependency_type}.
+# shellcheck disable=SC2016  # jq program, single-quoted on purpose
+PARK_SURVEY_JQ='
+  def meta: if (.metadata | type) == "object" then .metadata else {} end;
+  def edges: [ (.dependencies // [])[]? | select(type == "object")
+               | {t: ((.type // .dependency_type // "") | tostring),
+                  on: ((.depends_on_id // .id // "") | tostring)} ];
+  def has_($x): any(.[]; . == $x);
+  [ .[] | select(type == "object")
+    | {id: ((.id // "") | tostring), it: ((.issue_type // "") | tostring),
+       st: ((.status // "") | tostring), a: ((.assignee // "") | tostring), m: meta, e: edges} ] as $all
+  | def under($front; $acc):
+      if ($front | length) == 0 then $acc
+      else ([ $all[] | select(any(.e[]; .t == "parent-child" and (.on as $o | $front | has_($o)))) | .id ]
+            | unique | map(select(. as $x | ($acc | has_($x) | not) and $x != $b))) as $next
+           | under($next; $acc + $next) end;
+    under([$b]; []) as $sub
+  | [ $all[] | select(.it == "convoy") | {c: .id, tracked: [ .e[] | select(.t == "tracks") | .on ]} ] as $convoys
+  | [ $all[] | select(((.m["gc.kind"] // "") | tostring) == "workflow")
+      | {r: .id, c: ((.m["gc.input_convoy_id"] // "") | tostring)} ] as $roots
+  | [ $all[] | select(((.m["gc.step_ref"] // "") | tostring) | endswith(".load-context"))
+      | ((.m["gc.root_bead_id"] // "") | tostring) ] as $at_lc
+  | ($all | map({key: .id, value: .}) | from_entries) as $by
+  | def why($r):
+      $r.m as $m
+      | if (($m.merge_result // "") | tostring) != "" then "merge_result=" + ($m.merge_result | tostring)
+        elif (($m.rejection_reason // "") | tostring) != "" then "rejection_reason set"
+        elif (($m.branch // "") | tostring) != "" then "branch " + ($m.branch | tostring)
+        elif $r.st == "in_progress" or $r.st == "hooked" then $r.st + (if $r.a != "" then " under " + $r.a else "" end)
+        else "" end;
+    def workflows($id):
+      [ $convoys[] | select(.tracked | has_($id)) | .c ] as $cs
+      | [ $roots[] | select(.c as $c | $cs | has_($c)) | .r ];
+    [ ([$b] + $sub)[] as $id
+      | ($by[$id] // {st: "", a: "", m: {}}) as $r
+      | $r.m as $m
+      | workflows($id) as $ws
+      | {id: $id,
+         why: (why($r) as $w
+               | if $w != "" then $w
+                 else ([ $ws[] | select(. as $x | $at_lc | has_($x) | not) ] | first // "") as $past
+                      | if $past != "" then "workflow " + $past + " past load-context" else "" end end),
+         armed: ((($m["gc.dispatch_when_ready"] // "") | tostring) != ""),
+         poured: ([ $ws[] | select(. as $x | $at_lc | has_($x)) ] | first // "")} ] as $rows
+  | { self: ((first($rows[] | select(.id == $b))) // {id: $b, why: ""}),
+      flight: [ $rows[] | select(.why != "") | {id, why} ],
+      poured: [ $rows[] | select(.id != $b and .why == "" and (.armed | not) and .poured != "") | {id, root: .poured} ],
+      held: [ $rows[] | select(.why == "" and (.id == $b or .armed or .poured == "")) | .id ] }'
+
+# park_open_gate_titled <bead-row-json> <text> — the open gate the bead already
+# waits on under exactly this title, or empty. A re-run finds the gate it filed.
+# Only a gate in the shape the text form files counts: no await type and no
+# metadata. A gate of another kind can carry the same title. A demand gate
+# (await_type=human, gc.demand_for) is released by the operator's decision, a
+# gate with any await type by its condition firing, and a gate with metadata
+# belongs to the writer that stamped it. Adopting one would report a park while
+# the bead waits on something that is not a park.
+park_open_gate_titled() {
+    printf '%s' "$1" | jq -r --arg t "$2" '
+        [ (.dependencies // [])[]? | select(type == "object")
+          | select(((.dependency_type // .type // "") | tostring) == "blocks")
+          | select((.status // "") != "closed" and (.issue_type // "") == "gate")
+          | select((.title // "") == $t)
+          | select(((.await_type // "") | tostring) == "" and (.metadata // {}) == {})
+          | ((.id // .depends_on_id // "") | tostring) ]
+        | map(select(. != "")) | .[0] // ""' 2>/dev/null || printf ''
+}
+
+# park_gate_described <gate> <body> — 0 iff the gate's own row, read now, has
+# exactly <body> as its description. A row that will not read has none.
+park_gate_described() {
+    row_now "$1" | jq -e --arg d "$2" '(.description // "") == $d' >/dev/null 2>&1
+}
+
+cmd_park() {
+    bead=""; text=""; body=""; body_set=""; wait_on=""; npos=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --body=*)       body="${1#--body=}"; body_set=1; shift ;;
+            --body)         shift; [ $# -gt 0 ] || { echo "$PROG: park: --body requires a value" >&2; exit 2; }; body="$1"; body_set=1; shift ;;
+            --waiting-on|--waiting-on=*)
+                case "$1" in
+                    --waiting-on=*) _pk_w="${1#--waiting-on=}"; shift ;;
+                    *) shift; [ $# -gt 0 ] || { echo "$PROG: park: --waiting-on requires a bead id" >&2; exit 2; }; _pk_w="$1"; shift ;;
+                esac
+                [ -n "$_pk_w" ] || { echo "$PROG: park: --waiting-on requires a bead id" >&2; exit 2; }
+                [ -z "$wait_on" ] || { echo "$PROG: park: --waiting-on names one bead to wait on, and this call names $wait_on and $_pk_w. Park once per bead. Nothing was written." >&2; exit 2; }
+                wait_on="$_pk_w" ;;
+            -h|--help)      usage; exit 0 ;;
+            -*) echo "$PROG: park: unknown flag '$1'" >&2; exit 2 ;;
+            *)
+                npos=$((npos + 1))
+                case "$npos" in
+                    1) bead="$1" ;;
+                    2) text="$1" ;;
+                    *) echo "$PROG: park takes one <bead-id> and one \"<text>\"" >&2; exit 2 ;;
+                esac
+                shift ;;
+        esac
+    done
+    [ -n "$bead" ] || { echo "$PROG: park needs <bead-id>" >&2; usage; exit 2; }
+    if [ "$npos" -ge 2 ] && [ -n "$wait_on" ]; then
+        echo "$PROG: park: \"<text>\" and --waiting-on are the two forms of a park, and a park takes one. The text form files a gate of its own, titled with why $bead is parked and what releases it; --waiting-on parks $bead behind $wait_on and files no gate. Pass one. Nothing was written." >&2
+        exit 2
+    fi
+    if [ "$npos" -lt 2 ] && [ -z "$wait_on" ]; then
+        echo "$PROG: park needs \"<text>\", one line of at most $TAKEAWAY_MAX characters saying why $bead is parked and what releases it, or --waiting-on <bead-id> to park it behind an existing bead. Nothing was written." >&2
+        exit 2
+    fi
+    if [ -n "$wait_on" ] && [ -n "$body_set" ]; then
+        echo "$PROG: park: --body describes the gate the text form files, and --waiting-on files none, so the body would be dropped. Use the text form to describe a park of its own. Nothing was written." >&2
+        exit 2
+    fi
+    if [ -z "$wait_on" ]; then
+        normalize_headline "$text" park
+        text="$HEADLINE"
+    fi
+
+    path=$(rig_path_for_bead "$bead")
+    db=""; [ -n "$path" ] && [ -d "$path/.beads" ] && db="$path/.beads"
+    prefix="${bead%%-*}"
+
+    bead_row=$(row_now "$bead")
+    [ -n "$bead_row" ] \
+        || { echo "$PROG: park: '$bead' does not resolve${path:+ in rig $path}. Nothing was written." >&2; exit 4; }
+    bead_status=$(printf '%s' "$bead_row" | jq -r '.status // ""' 2>/dev/null || true)
+    if [ "$bead_status" = closed ]; then
+        echo "$PROG: park: $bead is closed, so nothing under it waits to start and a park would hold nothing. Nothing was written." >&2
+        exit 2
+    fi
+
+    # Whether the bead is in flight, and what the park holds under it, come from
+    # one listing of its store. A listing that does not read leaves the bead's
+    # workflows unproven, and an edge on a bead in flight holds its merge, so the
+    # verb stops rather than guess. --brief drops the free text the survey never
+    # reads, which is most of a listing's bytes. The bead's own row joins the
+    # listing when the listing leaves it out.
+    _pk_rc=0
+    # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+    _pk_raw=$(gc bd list ${db:+--db "$db"} --status=open,in_progress,blocked,deferred,hooked,pinned --brief --json --limit=0 2>/dev/null) || _pk_rc=$?
+    survey=""
+    if [ "$_pk_rc" -eq 0 ]; then
+        _pk_row=$(printf '%s' "$bead_row" | jq -c '{id, status, assignee, issue_type, metadata,
+            dependencies: [ (.dependencies // [])[]? | select(type == "object") | {id, dependency_type} ]}' 2>/dev/null || printf '{}')
+        survey=$(printf '%s' "$_pk_raw" | scrub | jq -c --arg b "$bead" --argjson row "$_pk_row" \
+            "(if type == \"object\" and ((.issues // null) | type) == \"array\" then .issues else . end)
+             | if type == \"array\" then (. + (if any(.[]; (.id // \"\") == \$b) then [] else [\$row] end)) | $PARK_SURVEY_JQ
+               else error(\"not a listing\") end" \
+            2>/dev/null || true)
+    fi
+    if [ -z "$survey" ]; then
+        echo "$PROG: park: could not list the store that holds $bead${path:+ (rig $path)} to prove that $bead is not in flight, and a park edge on a bead in flight holds its merge. Re-run once the store answers. Nothing was written." >&2
+        exit 4
+    fi
+    self_why=$(printf '%s' "$survey" | jq -r '.self.why // ""' 2>/dev/null || true)
+    if [ -n "$self_why" ]; then
+        parent=$(printf '%s' "$bead_row" | jq -r '
+            (.parent // "") as $p
+            | if ($p | tostring) != "" then $p
+              else ([ (.dependencies // [])[]? | select(type == "object")
+                      | select(((.dependency_type // .type // "") | tostring) == "parent-child")
+                      | ((.id // .depends_on_id // "") | tostring) ] | map(select(. != "")) | .[0] // "") end' 2>/dev/null || true)
+        echo "$PROG: park: $bead is in flight ($self_why). Its own edge would be a live direct blocker: merge.sh holds an anchor's merge on any open blocker of its own, and bd refuses to close a bead that has one.${parent:+ Park $parent instead, which holds what under it has not started and leaves $bead running.} Nothing was written." >&2
+        exit 2
+    fi
+
+    if [ -n "$wait_on" ]; then
+        if [ "$wait_on" = "$bead" ]; then
+            echo "$PROG: park: --waiting-on $wait_on is $bead itself. Nothing was written." >&2
+            exit 2
+        fi
+        if [ "${wait_on%%-*}" != "$prefix" ]; then
+            echo "$PROG: park: $wait_on lives in another store than $bead, and bd resolves an edge only within one store, so an edge onto $wait_on would hold nothing. Park with the text form and name $wait_on in it: $PROG park $bead \"<why it is parked and what releases it>\". Nothing was written." >&2
+            exit 2
+        fi
+        wait_row=$(row_now "$wait_on")
+        [ -n "$wait_row" ] \
+            || { echo "$PROG: park: --waiting-on '$wait_on' does not resolve${path:+ in rig $path}. Nothing was written." >&2; exit 4; }
+        if [ "$(printf '%s' "$wait_row" | jq -r '.status // ""' 2>/dev/null || true)" = closed ]; then
+            echo "$PROG: park: $wait_on is closed, so an edge onto it holds nothing. Nothing was written." >&2
+            exit 2
+        fi
+        demand_for=$(printf '%s' "$wait_row" | jq -r '((.metadata // {})["gc.demand_for"] // "") | tostring' 2>/dev/null || true)
+        if [ -n "$demand_for" ]; then
+            echo "$PROG: park: $wait_on is a demand gate (gc.demand_for=$demand_for). It waits on the operator's decision, and the operator ruled that such a wait does not hold armed work, so a park behind it would read as that decision rather than as a park. Use the text form instead, and name the decision the park waits for: $PROG park $bead \"<why it is parked and what releases it>\". Nothing was written." >&2
+            exit 2
+        fi
+        if printf '%s' "$survey" | jq -e --arg w "$wait_on" '(.held + [.poured[].id] + [.flight[].id]) | any(.[]; . == $w)' >/dev/null 2>&1; then
+            echo "$PROG: park: $wait_on is under $bead, and bd refuses an edge that makes a bead wait on its own part. Nothing was written." >&2
+            exit 2
+        fi
+        # `dep add <bead> <wait>` reads "<bead> is blocked by <wait>", so the
+        # edge lands on the bead, the side that waits. Its exit status settles
+        # nothing; the read-back below does.
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        gc bd dep add "$bead" "$wait_on" -t blocks ${db:+--db "$db"} >/dev/null 2>&1 || true
+        blocker="$wait_on"
+        blocker_title=$(printf '%s' "$wait_row" | jq -r '.title // ""' 2>/dev/null || true)
+    else
+        blocker=$(park_open_gate_titled "$bead_row" "$text")
+        if [ -n "$blocker" ]; then
+            # A re-run that names a body is how the operator corrects the
+            # park's detail, so the gate it reuses takes that body, read back
+            # as the edge is. A re-run without one leaves the description.
+            _pk_note=""
+            if [ -n "$body_set" ] && ! park_gate_described "$blocker" "$body"; then
+                # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+                gc bd update "$blocker" --description="$body" ${db:+--db "$db"} >/dev/null 2>&1 || true
+                if ! park_gate_described "$blocker" "$body"; then
+                    echo "$PROG: park: $bead already waits on the open gate $blocker under this text, so the park holds, but the gate's description is not the --body this run names: the update did not read back. Apply it by hand: gc bd update $blocker --description \"<the --body text>\"${db:+ --db $db}" >&2
+                    exit 4
+                fi
+                _pk_note=", and its description is now the --body this run names"
+            fi
+            echo "$PROG: park: $bead already waits on the open gate $blocker under this text; no second gate filed$_pk_note" >&2
+        else
+            [ -n "$body_set" ] || body="Parks $bead: everything under it that has not started waits on this gate, and work already in flight finishes. Closing this gate releases it. To release one bead this gate holds, remove that bead's edge: gc bd dep remove <bead> <this gate>."
+            # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+            blocker=$(gc bd create --type=gate --title="$text" --description="$body" --deps "blocks:$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub \
+                | jq -r 'if type == "array" then (.[0].id // empty) elif type == "object" then (.id // empty) else empty end' 2>/dev/null || true)
+            # A create that landed and lost its answer left its gate on the bead,
+            # under this title: the edge was born with it.
+            if [ -z "$blocker" ] || [ "$blocker" = null ]; then
+                blocker=$(park_open_gate_titled "$(row_now "$bead")" "$text")
+            fi
+            case "$blocker" in
+                ""|null)
+                    echo "$PROG: park: gc bd create filed no gate for $bead, and none waits on it under this text, so nothing holds $bead. Re-run once the store answers." >&2
+                    exit 4 ;;
+                "$prefix"-*) : ;;
+                *)
+                    echo "$PROG: park: gc bd create filed $blocker, whose prefix is not '$prefix': it landed in another rig's store and can never hold $bead. Close it by hand (gc bd close $blocker) and re-run from the rig that owns $bead." >&2
+                    exit 4 ;;
+            esac
+        fi
+        blocker_title="$text"
+    fi
+
+    if ! blocks_edge_reads_back "$bead" "$blocker"; then
+        # One repair: re-adding an edge that is there already is a no-op.
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        gc bd dep add "$bead" "$blocker" -t blocks ${db:+--db "$db"} >/dev/null 2>&1 || true
+        if ! blocks_edge_reads_back "$bead" "$blocker"; then
+            echo "$PROG: park: $bead is NOT blocked by $blocker: the edge did not land, so nothing holds $bead or anything under it. Wire it by hand: gc bd dep add $bead $blocker -t blocks${db:+ --db $db}" >&2
+            [ -n "$wait_on" ] || echo "$PROG: park: or close the gate, which holds nothing without its edge: gc bd close $blocker${db:+ --db $db}" >&2
+            exit 4
+        fi
+    fi
+
+    bust_cache
+    echo "park $blocker holds $bead: $blocker_title"
+    held=$(printf '%s' "$survey" | jq -r '.held | join(" ")' 2>/dev/null || true)
+    flight=$(printf '%s' "$survey" | jq -r '[ .flight[] | .id + " (" + .why + ")" ] | join(", ")' 2>/dev/null || true)
+    poured=$(printf '%s' "$survey" | jq -r '[ .poured[] | .id + " (workflow " + .root + ")" ] | join(", ")' 2>/dev/null || true)
+    echo "held, not started: ${held:-$bead}"
+    [ -z "$flight" ] || echo "in flight, keeps running: $flight"
+    [ -z "$poured" ] || echo "poured before the park, not held by it: $poured. Load-context reads no ancestor's blockers, so each workflow runs."
 }
 
 # ── Verb: resolve ────────────────────────────────────────────────────
@@ -4153,9 +4352,10 @@ case "${1:-}" in
     unplaced)      shift; cmd_unplaced "$@" ;;
     takeaway)      shift; cmd_takeaway "$@" ;;
     demand)        shift; cmd_demand "$@" ;;
+    park)          shift; cmd_park "$@" ;;
     dismiss)       shift; cmd_dismiss "$@" ;;
     accept)        shift; cmd_accept "$@" ;;
     board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm)" >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
-    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, accept, takeaway, demand, dismiss, resolve, unplaced, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, accept, takeaway, demand, park, dismiss, resolve, unplaced, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
 esac

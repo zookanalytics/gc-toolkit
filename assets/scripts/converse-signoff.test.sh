@@ -1441,7 +1441,7 @@ fi
 # read off EVERY bead the call was asked to gate. An --also-blocks target left
 # unwired reads ready against a demand named to gate it: the same state, one
 # bead over.
-if demand_body | grep -qF -- 'w_after=$(gc bd show "$_w"'; then
+if demand_body | grep -qF -- 'blocks_edge_reads_back "$_w" "$demand"'; then
     ok "…having read the edge back off each bead it was asked to gate"
 else
     bad "…having read the edge back off each bead it was asked to gate" \
