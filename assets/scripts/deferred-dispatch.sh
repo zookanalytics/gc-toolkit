@@ -25,7 +25,8 @@
 # so a sitting can queue everything and drain, with nothing left to remember.
 # The bead resolves by id, so the arm lands from any seat, rig-scoped or not.
 # Callers: agents sequencing dependent work; first-reaction-dispose.sh
-# --then-route; the deferred-dispatch order. doctor/check-blocked-work-armed
+# --then-route; await-ruling.sh and held-work-gate.sh, each arming a declined
+# run's re-sling; the deferred-dispatch order. doctor/check-blocked-work-armed
 # flags a blocked work bead that was never armed and carries no route.
 #
 # Per-bead best-effort (one bad bead never skips the rest; the next cooldown
