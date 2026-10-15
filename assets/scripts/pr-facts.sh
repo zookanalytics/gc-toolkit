@@ -3352,12 +3352,15 @@ GATES
             # A strand: MY OWN prior red-check child, open/unclaimed/unrouted at
             # this head, whose route stamp exited 0 without landing. It matches the
             # live dedup below and would veto its own rescue, so exclude it from
-            # its own dedup and re-route it instead of twinning.
+            # its own dedup and re-route it instead of twinning. A poured child
+            # (gc.execution_routed_to set) is its molecule's to run, even while
+            # the molecule is held, so it is no strand.
             rc_stranded=$(printf '%s' "$rc_kids" | jq -r --arg id "$id" --arg h "$head_oid" '
               [ .[] | select(.id != $id)
                 | select(((.status // "open") | ascii_downcase) == "open")
                 | select(((.assignee // "") | tostring) == "")
                 | select(((.metadata["gc.routed_to"] // "") | tostring) == "")
+                | select(((.metadata["gc.execution_routed_to"] // "") | tostring) == "")
                 | select(((.metadata.merge_result // "") | tostring) == "")
                 | select(($h != "") and (((.metadata.rejection_reason // "") | tostring) | contains("head " + $h)))
                 | .id ] | .[0] // empty' 2>/dev/null)

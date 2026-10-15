@@ -5087,6 +5087,27 @@ eq "$(meta new-2 gc.outcome)" "abandoned" "…and marked abandoned"
 eq "$(jq '[.[] | select((.metadata.task_kind // "") == "rework") | select(.status == "open") | select((.metadata.rejection_reason // "") == "")] | length' "$STUB_STORE")" "0" "no OPEN red-check rework child survives able to veto but missing rejection_reason"
 rm -f "$GH_DIR/rules_main.json"
 
+echo "# …a red-check child stranded at this head is re-routed, but a poured one is its molecule's, even held"
+# A strand is a child whose route stamp did not land: open, unassigned and
+# unrouted, its rejection_reason naming this head. A child a mol-polecat-work
+# pour runs carries gc.execution_routed_to instead of a route, and keeps its
+# rejection_reason while its molecule is held, as a bring-current that stops to
+# ask a person leaves it. Routing it to the pool as well would run it twice.
+printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"}]}}]' > "$GH_DIR/rules_main.json"
+printf '%s' "$(prview 86 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE"}]')" > "$GH_DIR/pr_view_86.json"
+RSC='{"id":"RSC","status":"open","assignee":"","notes":"","title":"Fix failing required check(s) on PR#86: required check red at head sha-86","metadata":{"task_kind":"rework","anchor_bead":"RS1","branch":"polecat/x86","target":"main","rejection_reason":"Required check(s) failing on PR#86 at head sha-86: test."}}'
+store "[$(anchor RS1 86),$RSC]"
+out=$(run)
+has "$out" "re-routing stranded red-check rework RSC" "an unrouted child at this head is a strand, re-routed"
+eq "$(meta RSC 'gc.routed_to')" "$FIX" "…to the fix pool"
+store "[$(anchor RS1 86),$(printf '%s' "$RSC" | jq -c '.metadata["gc.execution_routed_to"] = "rig/gc-toolkit.polecat"')]"
+out=$(run)
+has "$out" "child RSC already covers this head, no new child" "a poured child at this head covers it"
+hasnt "$out" "re-routing stranded red-check rework RSC" "…and is not taken for a strand"
+eq "$(meta RSC 'gc.routed_to')" "<absent>" "…so it is not routed to the pool beside its molecule"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no twin is minted"
+rm -f "$GH_DIR/rules_main.json"
+
 fi # part checks
 
 # ==== part selfheal: the self-heal reap, parks and the attempt cap, review
