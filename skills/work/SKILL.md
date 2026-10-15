@@ -32,11 +32,16 @@ it wait, or leave it for placement.
   applies, give the bead no parent.
 - **File it in the store of the pool that will work it.** A pool reads only its
   own rig's store, so a city-scoped session names the rig with `--rig <rig>`.
-- **Hold it for placement unless intake admits it.** A bead may be routed or
-  armed to a pool only when it is an epic member, PR-finishing work carrying
-  `anchor_bead`, a confirmed emergency, or routed by the operator in a sitting,
-  by hand or by Accept. Any other bead carries `placement=pending` in its create
-  and no route or arm, and the placement sitting places it (`docs/steering.md`).
+- **Send it now when intake admits it, and hold only the rest.** Epics are how
+  the operator steers which work runs, and membership is one of four ways in
+  (`docs/steering.md`). A bead goes to a pool now when it is a member of an
+  epic, when it is PR-finishing work carrying `anchor_bead`, when it is an
+  emergency, or when the operator routed it in a sitting, by hand or by Accept.
+  An emergency is a red main or a broken gate, confirmed by a check that failed
+  on the default branch's head. Critical work the operator wants run now goes
+  through the operator's own routing. Any other bead carries
+  `placement=pending` in its create and no route or arm, and the operator's
+  placement sitting places it.
 
 Writer:
 
@@ -45,7 +50,7 @@ gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks l
 ```
 
 Add `--parent <epic>` when an epic applies, and
-`--metadata '{"placement":"pending"}'` when intake does not admit it. The
+`--metadata '{"placement":"pending"}'` when intake holds the bead. The
 description is the contract the worker reads.
 
 ## Send a bead to a pool on a formula
