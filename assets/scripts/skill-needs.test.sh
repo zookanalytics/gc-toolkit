@@ -20,12 +20,13 @@
 # a real need used, and one that passes still has to read well.
 #
 # The same file pins the skills' shape: each names its neighbors, keeps
-# converse's vocabulary out of its description, sets the directory its examples
-# call writers through in a converse sitting and anywhere else, and the converse
-# steps name its options rather than re-explain them.
+# converse's vocabulary out of its description, and calls every writer as the
+# pack's own copy through the pack command `gc gc-toolkit scripts-dir`. It pins
+# that command, and that the converse steps name its options rather than
+# re-explain them.
 #
-# Hermetic: reads the repo, and runs each skill's setup block in a temporary
-# directory outside any git repo.
+# Hermetic: reads the repo, and runs the pack command and the writer call shape
+# in a temporary directory outside any git repo, with a stub gc.
 
 set -u
 
@@ -103,76 +104,92 @@ for s in $BLOCKS; do
         || bad "$s: description names a neighbor to use instead" "no 'use <work|waits|records|prs>' in: $desc"
 done
 
-echo "── each building-block skill's examples reach their writers, in a converse sitting and anywhere else ──"
-# Each tool call starts a fresh shell, so an agent runs a skill's setup block in
-# the same call as the writer it calls through S. A converse sitting has CONV,
-# any other session finds the directory, and a session with neither has to stop
-# before "$S/<writer>" runs /<writer>. Each case runs the block and then a line
-# standing in for the writer, in a fresh shell outside any git repo with only
-# the variables the case names.
+echo "── each building-block skill calls the pack's own writers, never a checkout's ──"
+# A skill's writers are the pack's own scripts. The pack command
+# commands/scripts-dir prints their directory from GC_PACK_DIR, which gc sets
+# to the pack it loaded, so an example calls "$(gc gc-toolkit scripts-dir)/<writer>"
+# inside the one command that runs it. Nothing looks in the rig checkout or the
+# caller's git toplevel, which can be a branch's worktree, and nothing relies on
+# a variable an earlier tool call set, since each call starts a fresh shell.
 ROOT="$(cd "$REPO" && pwd)"
-mkdir -p "$TMP/away" "$TMP/city"
-# setup_block <file> — the first fenced bash block that assigns S.
-setup_block() {
-    awk '
-        /^```bash$/ { inb = 1; buf = ""; sets = 0; next }
-        inb && /^```$/ { inb = 0; if (sets) { printf "%s", buf; exit } next }
-        inb { buf = buf $0 "\n"; if ($0 ~ /(^|[^A-Za-z0-9_])S=/) sets = 1 }
-    ' "$1"
-}
-# outside_setup <file> — the file without its setup block.
-outside_setup() {
-    awk '
-        /^```bash$/ { inb = 1; buf = $0 "\n"; sets = 0; next }
-        inb && /^```$/ { inb = 0; if (!sets) printf "%s%s\n", buf, $0; next }
-        inb { buf = buf $0 "\n"; if ($0 ~ /(^|[^A-Za-z0-9_])S=/) sets = 1; next }
-        { print }
-    ' "$1"
-}
-# call <shell> <script> [NAME=value ...] — the script's output in a fresh shell;
-# fails when the script stops.
-call() {
-    c_shell=$1 c_script=$2
-    shift 2
-    (cd "$TMP/away" && env -u CONV -u GC_RIG_ROOT -u BASH_ENV -u ENV \
-        GIT_DIR="$TMP/no-repo" GC_CITY_PATH="$TMP/city" "$@" $c_shell "$c_script" 2>/dev/null)
-}
-shells="bash"
-command -v zsh >/dev/null 2>&1 && shells="bash zsh"
+RESOLVE='"$(gc gc-toolkit scripts-dir)/'
 for s in $BLOCKS; do
     f="$SKILLS/$s/SKILL.md"
     [ -r "$f" ] || continue
-    setup_block "$f" >"$TMP/setup-$s"
-    if [ ! -s "$TMP/setup-$s" ]; then
-        bad "$s: has a setup block that sets S" "no fenced bash block in $f assigns S"
-        continue
-    fi
-    { cat "$TMP/setup-$s"; echo 'printf "%s" "$S"'; } >"$TMP/call-$s"
-    for sh_ in $shells; do
-        run=$sh_
-        [ "$sh_" = zsh ] && run="zsh -f"
-        got=$(call "$run" "$TMP/call-$s" CONV="$ROOT/assets/scripts")
-        [ "$got" = "$ROOT/assets/scripts" ] && ok "$s ($sh_): in a converse sitting, S is CONV" \
-            || bad "$s ($sh_): in a converse sitting, S is CONV" "S='$got' with only CONV set"
-        got=$(call "$run" "$TMP/call-$s" GC_RIG_ROOT="$ROOT")
-        [ "$got" = "$ROOT/assets/scripts" ] && ok "$s ($sh_): anywhere else, S is found under GC_RIG_ROOT" \
-            || bad "$s ($sh_): anywhere else, S is found under GC_RIG_ROOT" "S='$got' with only GC_RIG_ROOT set"
-        if got=$(call "$run" "$TMP/call-$s"); then
-            bad "$s ($sh_): with no directory found, the call stops before its writer" "the writer line ran with S='$got'"
-        else
-            ok "$s ($sh_): with no directory found, the call stops before its writer"
-        fi
+    found=""
+    for probe in 'GC_RIG_ROOT' 'rev-parse --show-toplevel' 'CONV' '"$S/' 'GC_CITY_PATH/rigs'; do
+        grep -qF -- "$probe" "$f" && found="$found [$probe]"
     done
-    refs=$(outside_setup "$f" | grep -oE '"\$[A-Za-z_][A-Za-z_0-9]*/[A-Za-z0-9._-]+"' | tr -d '"' | sort -u)
-    stray=$(printf '%s\n' "$refs" | grep -v -e '^\$S/' -e '^$' | tr '\n' ' ')
-    [ -n "$refs" ] && [ -z "$stray" ] && ok "$s: every writer an example calls goes through \$S" \
-        || bad "$s: every writer an example calls goes through \$S" "${stray:-no \"\$S/<writer>\" call found}"
+    [ -z "$found" ] && ok "$s: looks for no writer in a checkout or a variable an earlier call set" \
+        || bad "$s: looks for no writer in a checkout or a variable an earlier call set" "found:$found"
+    refs=$(grep -oF -- "$RESOLVE" "$f" | wc -l | tr -d ' ')
+    writers=$(grep -oE '"\$\(gc gc-toolkit scripts-dir\)/[A-Za-z0-9._-]+"' "$f" | sed 's#.*/##; s#"$##' | sort -u)
+    [ "${refs:-0}" -gt 0 ] && ok "$s: calls its writers through gc gc-toolkit scripts-dir (calls: $refs)" \
+        || bad "$s: calls its writers through gc gc-toolkit scripts-dir" "no $RESOLVE<writer>\" call found"
+    stray=$(grep -oE '"\$(\{[^}]*\}|[A-Za-z_][A-Za-z_0-9]*)/[A-Za-z0-9._-]+' "$f" | sort -u | tr '\n' ' ')
+    [ -z "$stray" ] && ok "$s: every writer an example calls goes through the pack command" \
+        || bad "$s: every writer an example calls goes through the pack command" "stray: $stray"
     missing=""
-    for r in $refs; do
-        [ -x "$ROOT/assets/scripts/${r##*/}" ] || missing="$missing ${r##*/}"
+    for w in $writers; do
+        [ -x "$ROOT/assets/scripts/$w" ] || missing="$missing $w"
     done
-    [ -z "$missing" ] && ok "$s: every writer an example calls is in assets/scripts" \
-        || bad "$s: every writer an example calls is in assets/scripts" "missing:$missing"
+    [ -n "$writers" ] && [ -z "$missing" ] && ok "$s: every writer an example calls is an executable in assets/scripts" \
+        || bad "$s: every writer an example calls is an executable in assets/scripts" "missing:${missing:- none named}"
+done
+
+echo "── gc gc-toolkit scripts-dir prints the scripts of the pack gc loaded ──"
+CMD="$ROOT/commands/scripts-dir/run.sh"
+[ -x "$CMD" ] && ok "commands/scripts-dir/run.sh is an executable pack command" \
+    || bad "commands/scripts-dir/run.sh is an executable pack command" "missing or not executable: $CMD"
+mkdir -p "$TMP/away" "$TMP/no-scripts"
+got=$(cd "$TMP/away" && env -u GC_PACK_DIR GC_PACK_DIR="$ROOT" "$CMD" 2>/dev/null)
+[ "$got" = "$ROOT/assets/scripts" ] && ok "it prints GC_PACK_DIR's assets/scripts" \
+    || bad "it prints GC_PACK_DIR's assets/scripts" "printed '$got'"
+if got=$(cd "$TMP/away" && env -u GC_PACK_DIR "$CMD" 2>/dev/null); then
+    bad "with GC_PACK_DIR unset it fails" "exited 0 and printed '$got'"
+else
+    [ -z "$got" ] && ok "with GC_PACK_DIR unset it fails and prints nothing" \
+        || bad "with GC_PACK_DIR unset it fails and prints nothing" "printed '$got'"
+fi
+if got=$(cd "$TMP/away" && env GC_PACK_DIR="$TMP/no-scripts" "$CMD" 2>/dev/null); then
+    bad "with no assets/scripts under GC_PACK_DIR it fails" "exited 0 and printed '$got'"
+else
+    ok "with no assets/scripts under GC_PACK_DIR it fails"
+fi
+# gc runs a pack command with GC_PACK_DIR set to the pack's root and the
+# caller's arguments, so a stub gc that does the same for this one command
+# stands in for it. The call shape then holds in a fresh bash and zsh, and when
+# the command cannot answer, the writer path names no file and the call fails.
+mkdir -p "$TMP/stub-ok" "$TMP/stub-fail"
+cat >"$TMP/stub-ok/gc" <<STUB
+#!/usr/bin/env bash
+[ "\$1 \$2" = "gc-toolkit scripts-dir" ] || { echo "gc: unknown command \\"\$1\\"" >&2; exit 1; }
+GC_PACK_DIR="$ROOT" exec "$CMD"
+STUB
+printf '#!/usr/bin/env bash\necho "gc: unknown command \\"$1\\"" >&2\nexit 1\n' >"$TMP/stub-fail/gc"
+chmod +x "$TMP/stub-ok/gc" "$TMP/stub-fail/gc"
+printf '%s\n' 'printf "%s" "$(gc gc-toolkit scripts-dir)/gc-helm.sh"' >"$TMP/call-path"
+printf '%s\n' '"$(gc gc-toolkit scripts-dir)/gc-helm.sh" --help >/dev/null 2>&1' >"$TMP/call-writer"
+shells="bash"
+command -v zsh >/dev/null 2>&1 && shells="bash zsh"
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    got=$(cd "$TMP/away" && env -u GC_PACK_DIR -u BASH_ENV -u ENV PATH="$TMP/stub-ok:$PATH" $run "$TMP/call-path" 2>/dev/null)
+    [ "$got" = "$ROOT/assets/scripts/gc-helm.sh" ] && ok "($sh_) the call resolves to the pack's own writer" \
+        || bad "($sh_) the call resolves to the pack's own writer" "resolved '$got'"
+    if (cd "$TMP/away" && env -u GC_PACK_DIR -u BASH_ENV -u ENV PATH="$TMP/stub-ok:$PATH" $run "$TMP/call-writer") 2>/dev/null; then
+        ok "($sh_) the resolved writer runs"
+    else
+        bad "($sh_) the resolved writer runs" "gc-helm.sh --help through the call failed"
+    fi
+    if [ -e /gc-helm.sh ]; then
+        bad "($sh_) a call whose pack command cannot answer fails" "/gc-helm.sh exists on this host, so the case cannot tell"
+    elif (cd "$TMP/away" && env -u GC_PACK_DIR -u BASH_ENV -u ENV PATH="$TMP/stub-fail:$PATH" $run "$TMP/call-writer") 2>/dev/null; then
+        bad "($sh_) a call whose pack command cannot answer fails" "it exited 0"
+    else
+        ok "($sh_) a call whose pack command cannot answer fails"
+    fi
 done
 
 echo "── the converse steps name an option and leave its how to the skill ──"

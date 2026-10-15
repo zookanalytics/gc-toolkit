@@ -562,3 +562,12 @@ script lives in the owning pack's tree under it. Do **not** reach for
 `$GC_PACK_DIR` or `$GC_CONFIG_DIR` — they are populated only for order/command
 execution and are **not exported to agent or worker sessions**, so a formula
 that references them resolves an empty path.
+
+An agent's own shell, where a skill's examples run, has no template pass
+either, and no variable set in one tool call survives into the next. It asks
+gc for the pack instead: `commands/scripts-dir/run.sh` is the pack command
+`gc gc-toolkit scripts-dir`, and gc runs a pack command with `$GC_PACK_DIR` set
+to the root of the pack it loaded. So `"$(gc gc-toolkit scripts-dir)/foo.sh"`
+runs the pack's own copy wherever the city imports the pack from, and never a
+checkout the agent is standing in. The ask-for-work skills (`work`, `waits`,
+`records`, `prs`) call every writer this way.

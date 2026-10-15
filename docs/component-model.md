@@ -350,8 +350,9 @@ each judgment, and the migration are `specs/tk-s4fg87/`.
 Design rule 1 of `specs/2026-08-rewrite/plan.md` holds that every component
 belongs to one of six workflows (work, review, merge, visit, feedback, patrol)
 or is a declared shared primitive. Below is that assignment for the tree as it
-stands: every order, formula, service, and `assets/scripts` entry a running
-city executes, with nothing unplaced and no row carrying any other value.
+stands: every order, formula, service, pack command, and `assets/scripts`
+entry a running city executes, with nothing unplaced and no row carrying any
+other value.
 
 **What the index does not place.** Three exclusions, each mechanical:
 
@@ -493,6 +494,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/worktree-setup.sh` | shared primitive | Agent `pre_start` worktree creation, for the polecat, polecat-codex, refinery, and proactive templates. |
 | `assets/scripts/gh-origin-guard.sh` | shared primitive | The `PreToolUse` hook every agent's provider runs ahead of a shell command: refuses a typed `gh` write aimed outside a repository the session owns, and an unmarked post on one it does own ([gh-origin-guard.md](gh-origin-guard.md)). |
 | `assets/scripts/gh-origin-guard-codex.sh` | shared primitive | Agent `pre_start` for the codex-provider templates, polecat-codex, converse-codex and dog: registers the gh origin guard in the Codex home's hooks file, the one every Codex session reads. |
+| `commands/scripts-dir` | shared primitive | `gc gc-toolkit scripts-dir` prints the directory holding the pack's scripts, read from the pack gc loaded, so an agent calls a pack script as the pack's own copy rather than a checkout's. The ask-for-work skills (work, waits, records, prs) call every writer through it, for converse sittings (visit), polecats (work) and the patrol roles alike. |
 | `assets/scripts/standing-kinds.sh` | shared primitive | The one definition of the standing kinds: the `task_kind` values of a record that is open, unrouted and unassigned by design and never closes. The liveness sweep, its precheck and its re-check (patrol) source it, and so does the proactive scan (visit), each to tell a standing record from work or input. The doctor checks `check-blocked-work-armed` and `check-hq-marooned-work` read it the same way. |
 | `assets/scripts/dispatch-path.sh` | shared primitive | The one definition of a dispatch path: a `gc.routed_to` route or a `gc.dispatch_when_ready` arm. The proactive scan and sling (visit) source it to leave alone a bead whose dispatch is already decided. Patrol's doctor sweep runs `check-blocked-work-armed` and `check-step-terminal`, which source it to find work that no pass will dispatch. `placement.sh` asks it too, so every reader of the placement queue sources it. |
 | `assets/scripts/placement.sh` | shared primitive | The one definition of a bead that waits for placement: it carries `placement=pending` and has no parent, route, arm, assignee or live pour. Visit lists those beads as the placement sitting's queue (`gc-helm.sh unplaced`), and its proactive scan files no first reaction for them. Patrol's liveness sweep and its precheck name them as a wait through the classifier, the claim-time re-check of a sweep visit names the same wait, and the doctor sweep's `check-blocked-work-armed` owes them no arm ([steering.md](steering.md)). |

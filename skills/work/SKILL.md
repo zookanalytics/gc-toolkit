@@ -11,18 +11,10 @@ needs none. Each option says what the message means, who acts on it, and the
 one writer that sends it. The writer's `--help` carries its flags. Doing the
 work is a molecule's job, so nothing here changes a repo.
 
-The writers are in the pack's `assets/scripts/`, and the examples call them
-through `$S`. Each tool call starts a fresh shell, so run this block in the
-same call as the writer. It takes `$CONV` where a converse sitting has set it,
-and otherwise finds the directory:
-
-```bash
-S=""
-for d in "${CONV:-}" "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  [ -x "$d/gc-helm.sh" ] && { S="$d"; break; }
-done
-: "${S:?no assets/scripts with gc-helm.sh found}"
-```
+The writers are the gc-toolkit pack's own scripts.
+`gc gc-toolkit scripts-dir` prints their directory in the pack as gc loaded it,
+so each example calls the pack's copy inside the command itself, and runs as
+written in a fresh shell.
 
 ## File new work
 
@@ -30,7 +22,7 @@ A new bead says that work needs doing. Filing it starts nothing: send it, make
 it wait, or leave it for placement.
 
 - **File it beside the bead it came from, never under it.** Give it that bead's
-  own parent, or no parent when it has none. `"$S/converse-parent.sh" <bead>`
+  own parent, or no parent when it has none. `"$(gc gc-toolkit scripts-dir)/converse-parent.sh" <bead>`
   prints the parent, or an empty line. bd refuses a `blocks` edge from a parent
   to its own descendant, so a child could never gate the bead it came from.
   Work already filed under the bead it came from stays where it is.
@@ -128,15 +120,16 @@ and when all-in-one (`--var design_gated=false`) fits.
 
 The message is that work already sent should stop, or go somewhere else.
 
-- **Stop it.** `"$S/gc-helm.sh" takeaway <bead> "<why it stops>" --release --no-wait`
+- **Stop it.**
+  `"$(gc gc-toolkit scripts-dir)/gc-helm.sh" takeaway <bead> "<why it stops>" --release --no-wait`
   stops the run beneath the bead and leaves the bead open, unassigned and
-  routed to no pool, with that sentence as its headline. When it now waits on
-  something, pass `--waiting-on <bead>` in place of `--no-wait`.
+  routed to no pool, with that sentence as its headline. When the bead now
+  waits on something, pass `--waiting-on <bead>` in place of `--no-wait`.
 - **Send it elsewhere.** The same release with `--route <rig>/<pool>` hands it
   to a pool, or with `--assign <named-agent>` to a named agent, in one write.
 - **Withdraw a recommendation** the bead should not take, while the bead stays
   open for discussion:
-  `SUBJECT=<bead> VISIT=<visit> "$S/converse-invalidate-recommendation.sh" "<why it no longer holds>"`.
+  `SUBJECT=<bead> VISIT=<visit> "$(gc gc-toolkit scripts-dir)/converse-invalidate-recommendation.sh" "<why it no longer holds>"`.
   It strips `gc.recommended_formula`, so the board stops offering Accept once
   no sitting holds the visit. When the bead itself should go, close it instead.
 
@@ -154,7 +147,7 @@ Record the no-op, then close through the disposition writer:
 
 ```bash
 gc bd update <bead> --set-metadata gc.work_outcome=no-op
-"$S/bead-rehome.sh" --origin <bead> --successor <successor> --kind not-needed --note "<why, one sentence>"
+"$(gc gc-toolkit scripts-dir)/bead-rehome.sh" --origin <bead> --successor <successor> --kind not-needed --note "<why, one sentence>"
 ```
 
 Under `not-needed` the successor is the evidence that ruled the work out, such
@@ -170,7 +163,7 @@ already closed by hand, the same writer adds the missing pointer.
   `gc bd close` on a bead whose `merge_result` is not a closed state leaves its
   PR unlanded. Check the shape yourself: the doctor exempts a disposed bead, so
   nothing downstream checks it again.
-- Disarm an armed bead first, with `"$S/deferred-dispatch.sh" disarm <bead>`,
+- Disarm an armed bead first, with `"$(gc gc-toolkit scripts-dir)/deferred-dispatch.sh" disarm <bead>`,
   so a wait released before the close lands cannot send it.
 
 `docs/state-machine.md` ("Disposition") is the doctrine.

@@ -13,19 +13,10 @@ keeps it out of `bd ready` until that bead closes. Never write `triage.hold`,
 and never leave a stamped, still bead as the record of a wait.
 
 Each option says what the message means, who acts on it, and the one writer
-that sends it. The writer's `--help` carries its flags. The writers are in the
-pack's `assets/scripts/`, and the examples call them through `$S`. Each tool
-call starts a fresh shell, so run this block in the same call as the writer. It
-takes `$CONV` where a converse sitting has set it, and otherwise finds the
-directory:
-
-```bash
-S=""
-for d in "${CONV:-}" "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  [ -x "$d/gc-helm.sh" ] && { S="$d"; break; }
-done
-: "${S:?no assets/scripts with gc-helm.sh found}"
-```
+that sends it. The writer's `--help` carries its flags. The writers are the
+gc-toolkit pack's own scripts. `gc gc-toolkit scripts-dir` prints their
+directory in the pack as gc loaded it, so each example calls the pack's copy
+inside the command itself, and runs as written in a fresh shell.
 
 ## Make a bead wait on other work
 
@@ -49,7 +40,7 @@ link across two stores prints success and lands nothing.
 The message is that a person owes something before this bead goes. A decision
 is filed unassigned. A task only a person can perform is assigned to them.
 
-Writer: `"$S/gc-helm.sh" demand <bead> "<what is owed, at most 140 characters>"`,
+Writer: `"$(gc gc-toolkit scripts-dir)/gc-helm.sh" demand <bead> "<what is owed, at most 140 characters>"`,
 with `--assignee <who>` for a task and `--body "<detail>"` for the rest. It
 files the demand as a human gate beside the bead, blocks the bead on it, and
 fails unless that edge reads back.
@@ -69,14 +60,14 @@ The message is that a bead needs a conversation with the operator. A visit
 parks on the helm board until the operator engages it, which starts a converse
 sitting on that bead.
 
-Writer: `"$S/gc-helm.sh" open <bead> --reason "<what this visit needs>" --body "<the brief the sitting reads>"`.
+Writer: `"$(gc gc-toolkit scripts-dir)/gc-helm.sh" open <bead> --reason "<what this visit needs>" --body "<the brief the sitting reads>"`.
 `open` files one visit per bead. While a visit on the bead is open, it files
 nothing and your brief goes nowhere, so append what you need to the bead's
 notes (the records skill), where the sitting reads it.
 
 For a blocker only a person can answer, escalate instead. It keeps one open
 visit per bead and situation key, however often you hit it:
-`"$S/escalate.sh" --subject <bead> --key <situation-key> --message "<what you hit, what you tried, what unblocks it>"`.
+`"$(gc gc-toolkit scripts-dir)/escalate.sh" --subject <bead> --key <situation-key> --message "<what you hit, what you tried, what unblocks it>"`.
 When the situation clears by itself, the same call with `--retract` closes
 that visit, unless someone has already engaged it.
 
@@ -91,7 +82,7 @@ The message is that once nothing holds this bead, it goes to this pool. The
 deferred-dispatch order's reconcile pass slings it as soon as nothing holds it,
 and retires the arm if the bead closes first.
 
-Writer: `"$S/deferred-dispatch.sh" arm <bead> --target <rig>/<pool> --reason "waits for <blocker>"`.
+Writer: `"$(gc gc-toolkit scripts-dir)/deferred-dispatch.sh" arm <bead> --target <rig>/<pool> --reason "waits for <blocker>"`.
 Add `--sling-arg --on --sling-arg <formula>` to send it on a formula other than
 the default. The bead must be open and carry no route.
 
@@ -108,7 +99,7 @@ limits arming too (the work skill).
   `gc bd gate resolve <gate> --reason "<the answer>"`. In a sitting, the
   sign-off's `--ruled yes` resolves the demands its hold filed and releases a
   `held` bead (the converse-settle step).
-- **An arm no longer wanted:** `"$S/deferred-dispatch.sh" disarm <bead> --reason "<why>"`.
+- **An arm no longer wanted:** `"$(gc gc-toolkit scripts-dir)/deferred-dispatch.sh" disarm <bead> --reason "<why>"`.
 - **A park** (`gc-helm.sh park`) is released by closing its gate, or for one
   bead by `gc bd dep remove <bead> <gate>` (`docs/steering.md`).
 

@@ -11,18 +11,10 @@ starts from what is written there, not from your context, which ends with your
 session. Each option says what the record means, who reads it, and the one
 writer that sends it.
 
-The writers are in the pack's `assets/scripts/`, and the examples call them
-through `$S`. Each tool call starts a fresh shell, so run this block in the
-same call as the writer. It takes `$CONV` where a converse sitting has set it,
-and otherwise finds the directory:
-
-```bash
-S=""
-for d in "${CONV:-}" "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  [ -x "$d/gc-helm.sh" ] && { S="$d"; break; }
-done
-: "${S:?no assets/scripts with gc-helm.sh found}"
-```
+The writers are the gc-toolkit pack's own scripts.
+`gc gc-toolkit scripts-dir` prints their directory in the pack as gc loaded it,
+so each example calls the pack's copy inside the command itself, and runs as
+written in a fresh shell.
 
 ## Record an outcome on a bead
 
@@ -51,7 +43,7 @@ The message is one sentence saying what the bead needs now. The helm board
 shows it as the bead's NEEDS cell, and `doctor/check-wait-is-an-edge` checks
 the wait it declares against the bead's `blocks` edges.
 
-Writer: `"$S/gc-helm.sh" takeaway <bead> "<what it needs now, at most 140 characters>" --no-wait`
+Writer: `"$(gc gc-toolkit scripts-dir)/gc-helm.sh" takeaway <bead> "<what it needs now, at most 140 characters>" --no-wait`
 when the bead waits on nothing, or `--waiting-on <bead>` (repeatable) for each
 bead it waits on. Each named wait is also written as a `blocks` edge,
 best-effort: an edge that will not take only warns, so read it back when the

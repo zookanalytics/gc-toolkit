@@ -12,18 +12,10 @@ and lands the PR once it is approved and nothing holds it. Each option says what
 the message means, who acts on it, and the one writer that sends it. The
 writer's `--help` carries its flags.
 
-The writers are in the pack's `assets/scripts/`, and the examples call them
-through `$S`. Each tool call starts a fresh shell, so run this block in the
-same call as the writer. It takes `$CONV` where a converse sitting has set it,
-and otherwise finds the directory:
-
-```bash
-S=""
-for d in "${CONV:-}" "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
-  [ -x "$d/pr-post.sh" ] && { S="$d"; break; }
-done
-: "${S:?no assets/scripts with pr-post.sh found}"
-```
+The writers are the gc-toolkit pack's own scripts.
+`gc gc-toolkit scripts-dir` prints their directory in the pack as gc loaded it,
+so each example calls the pack's copy inside the command itself, and runs as
+written in a fresh shell.
 
 ## Answer its review comments
 
@@ -34,9 +26,9 @@ the city's own post rather than new feedback.
 Writer: `pr-post.sh`, the only way the pack posts on a pull request.
 
 - A reply in a review thread:
-  `"$S/pr-post.sh" reply --host github.com --thread <the thread's PRRT_ id> --body-file <file>`.
+  `"$(gc gc-toolkit scripts-dir)/pr-post.sh" reply --host github.com --thread <the thread's PRRT_ id> --body-file <file>`.
 - A conversation comment:
-  `"$S/pr-post.sh" comment --repo github.com/<owner>/<name> --pr <number> --body-file <file>`.
+  `"$(gc gc-toolkit scripts-dir)/pr-post.sh" comment --repo github.com/<owner>/<name> --pr <number> --body-file <file>`.
 
 It appends the city's mark. The reconcile reads a post without that mark as new
 feedback and routes it into rework, so never post with `gh` directly.
@@ -81,7 +73,7 @@ it.
 
 Writer: in a sitting, `converse-hold.sh --hold-merge` (the converse-hold step).
 Anywhere else, file the open question as a demand on the anchor:
-`"$S/gc-helm.sh" demand <anchor> "<what must be settled first, at most 140 characters>"`.
+`"$(gc gc-toolkit scripts-dir)/gc-helm.sh" demand <anchor> "<what must be settled first, at most 140 characters>"`.
 The gate-visit sweep then files a visit, so the operator is asked.
 
 Every open bead the anchor waits on, and every open bead filed under it, holds
@@ -96,7 +88,7 @@ or is wrong. The writer records the disposition on the anchor and closes the
 PR, and the reconcile closes the anchor on its next pass through the
 disposition writer, `bead-rehome.sh`.
 
-Writer: `"$S/pr-dispose.sh" --anchor <anchor> --successor <bead> --kind not-needed --note "<why, one sentence>"`.
+Writer: `"$(gc gc-toolkit scripts-dir)/pr-dispose.sh" --anchor <anchor> --successor <bead> --kind not-needed --note "<why, one sentence>"`.
 The anchor must be open at `merge_result=pull_request`. Under `not-needed` the
 successor is the evidence that ruled the work out, such as the visit where it
 was decided. Under `duplicate`, `folded`, `re-homed` and `fixed-upstream` it is
@@ -106,6 +98,6 @@ a visit asking what to do with it.
 
 In a sitting, retire a PR only on the operator's ruling, after the sign-off,
 and close the visit right after it
-(`"$S/pr-dispose.sh" ... && "$S/visit-close.sh" ...`). The sitting's open
+(`"$(gc gc-toolkit scripts-dir)/pr-dispose.sh" ... && "$(gc gc-toolkit scripts-dir)/visit-close.sh" ...`). The sitting's open
 visit holds the anchor's close (`docs/finalize-gate.md`), so the reconcile
 closes the anchor once the visit is closed.
