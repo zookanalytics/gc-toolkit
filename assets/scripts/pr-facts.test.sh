@@ -1538,6 +1538,24 @@ has "$out" "unrouted sibling strand-rw is redundant" "…and the unreachable str
 eq "$(meta strand-rw 'gc.routed_to')" "<absent>" "…the strand is NOT routed into a race with it"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no twin is minted"
 
+echo "# …a merge-in child armed to re-sling at this head covers the branch, and is no strand"
+# A child whose run stopped to ask a person keeps its rejection_reason, which
+# names this head, and waits armed to re-sling with its route keys cleared
+# (await-ruling.sh). Its arm re-dispatches it once the person rules, so a route
+# to the pool as well would run it twice.
+armed='{"id":"armed-rw","status":"open","assignee":"","notes":"",'
+armed="$armed"'"title":"Merge main into polecat/x187: base rewritten, PR conflicts",'
+armed="$armed"'"metadata":{"task_kind":"rework","anchor_bead":"RT4","branch":"polecat/x187","rejection_reason":"stale base at head sha-187: x",'
+armed="$armed"'"gc.routed_to":"","gc.execution_routed_to":"","resling_target":"'"$FIX"'","gc.dispatch_when_ready":"'"$FIX"'"}}'
+store "[$armed, $(anchor RT4 187)]"
+printf '%s' "$(prview 187 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_187.json"
+approve 187
+out=$(run)
+has "$out" "rework armed-rw already covers branch 'polecat/x187' at this head, no new child" "an armed child at this head covers the branch"
+hasnt "$out" "re-routing stranded rework armed-rw" "…and is not taken for a strand"
+eq "$(meta armed-rw 'gc.routed_to')" "" "…so it is not routed to the pool while it waits for its arm"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no twin is minted"
+
 echo "# CONFLICTING: a branch a landed change superseded gets the operator's decision, not a child"
 # The stub git serves STUB_FETCHED_HEAD for every rev-parse, so both fetched tips
 # read as the PR's head: the head GitHub reported is the head classified.
@@ -5104,12 +5122,14 @@ eq "$(meta new-2 gc.outcome)" "abandoned" "…and marked abandoned"
 eq "$(jq '[.[] | select((.metadata.task_kind // "") == "rework") | select(.status == "open") | select((.metadata.rejection_reason // "") == "")] | length' "$STUB_STORE")" "0" "no OPEN red-check rework child survives able to veto but missing rejection_reason"
 rm -f "$GH_DIR/rules_main.json"
 
-echo "# …a red-check child stranded at this head is re-routed, but a poured one is its molecule's, even held"
+echo "# …a red-check child stranded at this head is re-routed, but a poured one is its molecule's and an armed one its arm's"
 # A strand is a child whose route stamp did not land: open, unassigned and
-# unrouted, its rejection_reason naming this head. A child a mol-polecat-work
-# pour runs carries gc.execution_routed_to instead of a route, and keeps its
-# rejection_reason while its molecule is held, as a bring-current that stops to
-# ask a person leaves it. Routing it to the pool as well would run it twice.
+# unrouted, its rejection_reason naming this head. A child keeps its
+# rejection_reason until the merge its resume runs concludes. While a
+# mol-polecat-work pour runs it, it carries gc.execution_routed_to instead of a
+# route. Once that run stops to ask a person, await-ruling.sh clears both route
+# keys and arms a re-sling (gc.dispatch_when_ready). Routing either to the pool
+# as well would run it twice.
 printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"}]}}]' > "$GH_DIR/rules_main.json"
 printf '%s' "$(prview 86 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE"}]')" > "$GH_DIR/pr_view_86.json"
 RSC='{"id":"RSC","status":"open","assignee":"","notes":"","title":"Fix failing required check(s) on PR#86: required check red at head sha-86","metadata":{"task_kind":"rework","anchor_bead":"RS1","branch":"polecat/x86","target":"main","rejection_reason":"Required check(s) failing on PR#86 at head sha-86: test."}}'
@@ -5122,6 +5142,15 @@ out=$(run)
 has "$out" "child RSC already covers this head, no new child" "a poured child at this head covers it"
 hasnt "$out" "re-routing stranded red-check rework RSC" "…and is not taken for a strand"
 eq "$(meta RSC 'gc.routed_to')" "<absent>" "…so it is not routed to the pool beside its molecule"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no twin is minted"
+store "[$(anchor RS1 86),$(printf '%s' "$RSC" | jq -c '.metadata += {"gc.routed_to": "", "gc.execution_routed_to": "",
+  "resling_target": "rig/gc-toolkit.polecat", "gc.dispatch_when_ready": "rig/gc-toolkit.polecat",
+  "gc.dispatch_when_ready_args": "[\"--on\",\"mol-polecat-work\"]",
+  "gc.dispatch_when_ready_reason": "waits on the ruling in visit V86 (bring-current-question.RSC)"}')]"
+out=$(run)
+has "$out" "child RSC already covers this head, no new child" "a child armed to re-sling at this head, its route keys cleared, covers it"
+hasnt "$out" "re-routing stranded red-check rework RSC" "…and is not taken for a strand"
+eq "$(meta RSC 'gc.routed_to')" "" "…so it is not routed to the pool while it waits for its arm"
 eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no twin is minted"
 rm -f "$GH_DIR/rules_main.json"
 
