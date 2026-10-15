@@ -628,7 +628,7 @@ one. There are four exit classes:
 
 | Class | Meaning | What the exit writes |
 |---|---|---|
-| **Outcome** | The bead left the refinery's queue for good: merged, gated (pre_open_gate or pull_request), handed back to its anchor, rejected to the polecat pool, or parked by its lifecycle state. | Unchanged, except that the claim's pins are cleared. |
+| **Outcome** | The bead left the refinery's queue for good: merged, gated (pre_open_gate or pull_request), handed back to its anchor, rejected to the polecat pool, or parked by its lifecycle state. | The transition as today, which already clears the claim's pins (section 2), plus an unset of `refinery_attempts` where the bead stays open (below). |
 | **Transient** | Nothing is shown to be wrong with the bead or the rig. A read or write did not land, a branch moved under a race, or the harness refused a command. | Release. The status goes to open, the assignee is cleared, the pins are unset, and the route, which the claim made the refinery's (section 2), is kept. A note names the exit. The queue offers the bead again. |
 | **Person** | The bead asks for a decision only a person can make. | A demand. `gc-helm.sh demand <bead> "<question>" --topic refinery-<exit>` files a native human gate the bead is blocked by (`gc-helm.sh:1525-1555`), and the board shows the question. |
 | **Rig** | Something outside the bead stops it, and would stop the next bead the same way: a pack defect, a rig setup fault, or a process on the host. | A finding. `patrol-finding.sh --scope refinery-findings --key refinery-<exit>` files one bead per fault, deduped on the key. The bead blocks on it. The finding's first reaction routes the fix to a pool, or puts it to the operator. |
@@ -656,20 +656,46 @@ it. So the bead keeps a count, and the count is of claims, not of time.
     `refinery-repeat-unresolved`, and the finding names the exits its notes
     record. The bead is not worked again.
   - Otherwise the script adds one to the count, and the session works the bead.
-- An outcome or a park clears the count. So a bead re-offered after its wait
-  closes starts fresh.
+- An outcome or a park clears the count, in the write that ends the claim.
+  - A park, the wait of the Person or Rig class, is written by
+    `refinery-exit.sh`, which unsets `refinery_attempts` in the write that ends
+    the claim.
+  - An Outcome that leaves the bead open is written by the transition that ends
+    the claim, which unsets the count in the same lifecycle write. Those are
+    merge-push's `refused_false_completion`, `blocked`, `pre_open_gate` and
+    `pull_request` transitions, and `rejection-repool.sh`'s unanchoring
+    transition. The two Outcomes that close the bead, a merge and a rework handed
+    back to its anchor, leave the count, because a closed bead is not offered
+    again.
+
+  So a bead re-offered after its wait closes starts fresh, and so does a bead
+  that is rejected to the polecat pool and handed off again after its rebuild.
 
 A bead therefore gets at most two claims that end without an outcome. That is the
 same "start it once more, then escalate" rule the gate step applies to a gate cut
 short (`mol-refinery-patrol.toml:515-521`). `refinery_attempts` is registered with
-the merge-identity keys in `lifecycle/lifecycle.toml`.
+the merge-identity keys in `lifecycle/lifecycle.toml`, and its entry names
+`refinery-claim.sh` as its writer and the park and Outcome writes above as the
+writes that clear it.
+
+Clearing the count on a park is a choice. Closing a refinery wait is a person's
+ruling, and the ruling grants the bead two fresh claims. A bead whose
+`refinery-repeat-unresolved` finding a person closes to have it run again is
+worked again, not sent straight back to the same finding. The cost is that a
+fault nobody fixes can cycle. A Rig finding closed without a fix re-offers its
+beads, the next claim meets the same fault, and `patrol-finding.sh` files a new
+finding that names its closed predecessor in `finding.recurrence_of` and whose
+body says the earlier fix did not hold (`patrol-finding.sh:398-446`). A repeat
+finding cycles the same way, after two more claims. Each round costs one or two
+claims and a person's decision, and nothing escalates the pattern beyond that
+link. The design accepts that, because every round is a person's ruling.
 
 ### One writer for the waits
 
 All three non-outcome classes go through one helper, `refinery-exit.sh`. It does
 six things:
 
-1. It reads and keeps the attempt count.
+1. It keeps the attempt count on a release, and clears it on a park.
 2. It writes the release, the demand or the finding.
 3. It adds the `blocks` edge and reads it back.
 4. It ends the claim.
@@ -1077,9 +1103,11 @@ where one speaks the old shape to the other.
 1. **The exit writer.** Write `assets/scripts/refinery-exit.sh` and its test. It
    covers release, demand and finding, the attempt count, the edge read-back, the
    self-block refusal, pin clearing, and the unfinished repool's finding, which
-   takes no edge. Register `refinery_attempts` in `lifecycle/lifecycle.toml`. The
-   test covers each class against a bead held in progress under the alias, a
-   crash count reaching two, and an edge that fails to land.
+   takes no edge. Register `refinery_attempts` in `lifecycle/lifecycle.toml`,
+   naming its writer and the writes that clear it. The test covers each class
+   against a bead held in progress under the alias, a crash count reaching two,
+   a release that keeps the count and a park that clears it, and an edge that
+   fails to land.
 2. **The refinery pool.** This changes `agents/refinery/agent.toml` (min 0, max 1,
    the claim nudge that runs `assets/scripts/refinery-claim.sh`, and the
    `work_query` and `scale_check` that call `assets/scripts/refinery-offers.sh`),
@@ -1124,9 +1152,11 @@ where one speaks the old shape to the other.
    steps are deleted, the claim's `$WORK` is used, and every exit goes through
    unit 1. The terminal transitions and `rejection-repool.sh`'s unanchoring
    transition already clear the pins through the lifecycle writer (section 2),
-   so they keep their one write. The formula's block tests,
+   so they keep their one write. The Outcome transitions that leave the bead
+   open, and the unanchoring transition, add the `refinery_attempts` unset to
+   that write (section 3). The formula's block tests,
    `rejection-repool.test.sh` and `refinery-escalation-wiring.test.sh` follow the
-   edits. It depends on unit 1.
+   edits, and `rejection-repool.test.sh` pins the unset. It depends on unit 1.
 3. **The handoff writers.** These are the submit handoff (the route through
    `pool-route.sh`, with no wake or nudge), `convoy-graduate.sh`, the keeper's
    `mol-upstream-gc-rebase.toml` handoff, and its `refinery-rebase-handling` race
