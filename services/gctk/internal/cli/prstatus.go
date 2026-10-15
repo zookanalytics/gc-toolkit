@@ -48,9 +48,9 @@ func PRStatus(args []string, stdout, stderr io.Writer) int {
 }
 
 // prStatusDerive gathers the anchor's refinery-computed facts and prints the
-// state prstatus.Derive returns. It reads only what derive_value read: the
-// holds and the dated posture/merge-state off the anchor, and the size of the
-// anchor's in-flight set.
+// state prstatus.Derive returns. It reads the holds, the dated
+// posture/merge-state and the draft-stage markers off the anchor, and the size
+// of the anchor's in-flight set.
 func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	anchor := ""
 	var missing string
@@ -108,6 +108,8 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 		RebaseHold:    bead.Meta("rebase_hold"),
 		PRPosture:     bead.Meta("pr_posture"),
 		PRMergeState:  bead.Meta("pr_merge_state"),
+		OpenedAsDraft: bead.Meta("opened_as_draft"),
+		DraftReadied:  bead.Meta("draft_readied"),
 		InFlightCount: len(rows),
 	})
 	fmt.Fprintf(stdout, "%s\n", state)
