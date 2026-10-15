@@ -725,7 +725,7 @@ finding that shares its key with a live finding about another bead, unless
 
 | Key | Flags | One finding per |
 |---|---|---|
-| `refinery-rig-root-unresolved`, `refinery-pack-script-missing`, `refinery-gate-unstoppable`, `refinery-repool-refused` | No `--about` | Fault on the rig. A second bead that meets the fault records an occurrence on the live finding and blocks on the same finding. No refinery filing of these keys names a bead, so the sibling refusal never meets one. Closing the finding offers every bead that waits on it again, which is what fixing a rig fault should do. |
+| `refinery-rig-root-unresolved`, `refinery-pack-script-missing`, `refinery-gate-unstoppable`, `refinery-repool-refused`, `refinery-no-checks` | No `--about` | Fault on the rig. A second bead that meets the fault records an occurrence on the live finding and blocks on the same finding. No refinery filing of these keys names a bead, so the sibling refusal never meets one. Closing the finding offers every bead that waits on it again, which is what fixing a rig fault should do. |
 | `refinery-repeat-unresolved`, `refinery-repool-unfinished` | `--about <bead> --distinct` | Bead. Each names one bead's own state: its exits so far, or the command that finishes its repool. `--distinct` passes the sibling refusal, which would otherwise refuse every bead after the first, and the first reaction has that bead as its subject. Closing a repeat finding offers only its own bead again. An unfinished repool's finding takes no edge (the exit table below). |
 
 The alarm's two keys, `refinery-offers-untaken` and `refinery-offer-unread`, are
@@ -745,9 +745,12 @@ the bead.
 
 ### Every exit and its wait
 
-The table lists every exit in `mol-refinery-patrol.toml` at `132909cb5` that today
-reads "leaving the work with the refinery", "ending the turn", "the next patrol
-retries" or "STOP", plus the keeper's refinery exits. "Rig" names the finding key
+The table lists every exit in `mol-refinery-patrol.toml` at `132909cb5` that stops
+a working step before an outcome, plus the keeper's refinery exits. Most of them
+read "leaving the work with the refinery", "ending the turn", "the next patrol
+retries" or "STOP". Two instead ask the session to fix something and run the
+block again (`:433` and `:484`). Each keeps that retry in the session, and its
+row is the exit for when the retry cannot succeed. "Rig" names the finding key
 after `refinery-`.
 
 **Prepare (`rebase` step)**
@@ -780,7 +783,9 @@ keeps it, and the unanchoring write clears it.
 | 378 | The previous gate will not stop | Rig | `gate-unstoppable` |
 | 391 | The rig's check commands cannot be read | Transient | Release |
 | 407 | A check cannot be written | Transient | Release |
+| 433 | The rig sets no check commands, and its `CLAUDE.md` documents no quality gate the session could add where the block marks | Rig | `no-checks`. Every bead on the rig would stop here the same way, so the finding routes the rig's check commands to whoever sets them. |
 | 457 | The gate did not start (tk-rohu7om's refusal) | Transient | Release |
+| 484 | The gate wait finds no `detached-job.sh`, even run again from the pack checkout as the block asks | Rig | `pack-script-missing` |
 | 509-514 | The gate is still running after the limit, and its group survived TERM and KILL | Rig | `gate-unstoppable` |
 | 515-521 | The gate was cut short twice | Person | Demand: land it, reject it, or re-run it |
 
