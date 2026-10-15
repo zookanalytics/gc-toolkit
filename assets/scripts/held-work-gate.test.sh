@@ -84,6 +84,9 @@ case "${1:-}" in
       esac
       shift || true
     done
+    # A by-id read naming $STUB_LIST_FAIL_ID fails on its own, as one read of a
+    # walk can while the others answer.
+    case ",$id," in *",${STUB_LIST_FAIL_ID:-<none>},"*) echo "bd: simulated read failure" >&2; exit 1 ;; esac
     jq -c --arg k "$key" --arg id "$id" --argjson ready "$ready" --argjson all "$all" --argjson gates "$gates" "$READY_JQ"'
       . as $s
       | ($id | if . == "" then [] else split(",") end) as $ids
@@ -335,7 +338,15 @@ lc tk-w
 eq "$RC|$SEQ" "1|UPDATE;ARM;UPDATE;CANCEL;DRAIN;" "(UNREAD) a blocker of its own the store does not return holds the bead"
 has "$OUT" "sl-other (unreadable)" "(UNREAD) the gate names the blocker it could not read"
 
+store "[{\"id\":\"tk-w\",\"status\":\"open\",\"metadata\":$POURED,\"_deps\":[{\"id\":\"tk-epic\",\"dependency_type\":\"parent-child\"}]}, $EPIC, $PARK]"
+STUB_LIST_FAIL_ID=tk-epic lc tk-w
+eq "$RC|$SEQ" "1|UPDATE;ARM;UPDATE;CANCEL;DRAIN;" "(UNREAD) a row that reads under an ancestor that does not is held, and armed to the pool its row names"
+has "$OUT" "its blockers or ancestors did not read" "(UNREAD) the gate says the walk did not read"
+
 echo "# a closed bead"
+store "[{\"id\":\"tk-w\",\"status\":\"closed\",\"metadata\":$POURED,\"_deps\":[{\"id\":\"tk-epic\",\"dependency_type\":\"parent-child\"}]}, $EPIC, $PARK]"
+STUB_LIST_FAIL_ID=tk-epic lc tk-w
+eq "$RC|$SEQ" "1|UPDATE;CANCEL;DRAIN;" "(CLOSED) a closed bead is cancelled with no re-sling even when its walk does not read"
 store "[{\"id\":\"tk-w\",\"status\":\"closed\",\"metadata\":$POURED}]"
 lc tk-w
 eq "$RC|$SEQ" "1|UPDATE;CANCEL;DRAIN;" "(CLOSED) a closed bead's run is cancelled with no re-sling and no visit"

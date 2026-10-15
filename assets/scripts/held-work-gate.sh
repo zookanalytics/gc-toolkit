@@ -137,22 +137,15 @@ hwg_read() {
 }
 
 SEED="$TMP/seed.json"; GRAPH="$TMP/graph.json"
-UNREAD=""
+UNREAD=""; STATUS=""; FLIGHT=""; HOLD=""; POOL=""
 if ! hwg_read "$BEAD" > "$TMP/row.json"; then
   UNREAD="the store did not answer a read of $BEAD"
 elif ! jq -c --arg b "$BEAD" '[ .[]? | objects | select(((.id // "") | tostring) == $b) ]' "$TMP/row.json" > "$SEED" 2>/dev/null \
     || ! jq -e 'length == 1' "$SEED" >/dev/null 2>&1; then
   UNREAD="$BEAD did not read back as one bead"
-elif ! hold_graph hwg_read "$SEED" "$GRAPH"; then
-  UNREAD="its blockers or ancestors did not read"
-fi
-
-STATUS=""; FLIGHT=""; HOLD=""; POOL=""
-if [ -z "$UNREAD" ]; then
+else
   STATUS="$(jq -r '(.[0].status // "") | tostring' "$SEED" 2>/dev/null)"
   FLIGHT="$(jq -r "$HOLD_JQ"'.[0] | hold_flight_why' "$SEED" 2>/dev/null)"
-  HOLD="$(jq -r --slurpfile g "$GRAPH" "$HOLD_JQ"'.[0] | hold_summary($g[0])' "$SEED" 2>/dev/null)" \
-    || UNREAD="what holds $BEAD did not evaluate"
   # The pool the last pour ran on, else a route, else an arm or a re-sling an
   # earlier decline recorded, the order await-ruling.sh reads them in.
   POOL="$(jq -r '(.[0].metadata // {}) | if type == "object"
@@ -160,6 +153,11 @@ if [ -z "$UNREAD" ]; then
            | map(select(. != null) | tostring | select(. != "")) | .[0] // ""
       else "" end' "$SEED" 2>/dev/null)"
   case "$POOL" in */*) ;; *) POOL="" ;; esac
+  if ! hold_graph hwg_read "$SEED" "$GRAPH"; then
+    UNREAD="its blockers or ancestors did not read"
+  elif ! HOLD="$(jq -r --slurpfile g "$GRAPH" "$HOLD_JQ"'.[0] | hold_summary($g[0])' "$SEED" 2>/dev/null)"; then
+    UNREAD="what holds $BEAD did not evaluate"
+  fi
 fi
 [ -z "$UNREAD" ] || HOLD="an unreadable hold ($UNREAD)"
 
