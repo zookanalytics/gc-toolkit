@@ -2,9 +2,10 @@
 # Hermetic test for doctor/check-visit-outcome-recorded. Stub gc/bd only; no
 # city, no network. A CLOSED visit (task_kind=visit) must carry a non-empty
 # gc.outcome; an open visit, a non-visit, and a stamped closed visit are all out
-# of scope. Every store is read at once, and a store whose read fails, is cut by
-# the budget, or answers with something other than one JSON array is reported
-# as NOT checked.
+# of scope. Every store is read at once, no more of them than the fan-out cap,
+# and a store whose read fails, is cut by the budget, or answers with something
+# other than one JSON array is reported as NOT checked. A failed read's warning
+# carries the probe's stderr.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -35,7 +36,13 @@ rigs alpha
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "rig list")
-    rc="${RIGS_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"; cat "$RIGS_JSON" ;;
+    rc="${RIGS_RC:-0}"
+    [ "$rc" -eq 0 ] || { [ -n "${RIGS_ERR:-}" ] && printf '%s\n' "$RIGS_ERR" >&2; exit "$rc"; }
+    cat "$RIGS_JSON" ;;
+  # Like real gc, a bd list, ready, search or show first names the store that
+  # answers it on stderr, before bd runs and whether or not the read fails.
+  "bd list"|"bd ready"|"bd search"|"bd show")
+    shift; echo 'gc bd: answering from the rig "stub" store' >&2; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
   "bd "*)    shift; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
   *) exit 0 ;;
 esac
@@ -63,8 +70,15 @@ if [ -n "${BD_BARRIER_DIR:-}" ]; then
     sleep 0.1; waited=$((waited + 1))
   done
 fi
+# With INFLIGHT set, each read marks its store in flight for a second and
+# appends how many stores were then in flight to INFLIGHT.peaks.
+if [ -n "${INFLIGHT:-}" ]; then
+  mkdir "$INFLIGHT/$name"; ls "$INFLIGHT" | wc -l | tr -d ' ' >> "$INFLIGHT.peaks"
+  sleep 1; rmdir "$INFLIGHT/$name"
+fi
 [ "$name" = "${BD_SLOW_STORE:-}" ] && sleep "$BD_SLOW_SECS"
-[ "$name" = "${BD_FAIL_STORE:-}" ] && exit 3
+# A failed read prints BD_ERR on stderr when set.
+[ "$name" = "${BD_FAIL_STORE:-}" ] && { [ -n "${BD_ERR:-}" ] && printf '%s\n' "$BD_ERR" >&2; exit 3; }
 if [ "$name" = "${BD_BAD_STORE:-}" ]; then
   printf '%s' "$BD_BAD_OUTPUT"
 else
@@ -230,6 +244,34 @@ eq "$RC" "1" "a store the budget cut warns"
 has "$OUT" "beta: could not list closed visits in $TMP/beta/.beads (rc=124) — this store was NOT checked" "the wedged store is named as cut"
 has "$OUT" "across 2 store(s)" "the stores read beside it are still checked"
 has "$OUT" "doctor budget before every probe ran" "and it says the budget, not the data, ended the run"
+
+echo "── a failed read says why ──"
+rigs alpha
+store "$(vis v-1 closed moot)"
+OUT=$(BD_FAIL_STORE=alpha BD_ERR="dolt: database is locked" run_check); RC=$?
+eq "$RC" "1" "a failed store read warns"
+has "$OUT" "alpha: could not list closed visits in $TMP/alpha/.beads (rc=3) — this store was NOT checked; \`gc bd list\` stderr: dolt: database is locked" "its warning carries \`gc bd list\` stderr"
+OUT=$(RIGS_RC=1 RIGS_ERR="rig registry: permission denied" run_check); RC=$?
+eq "$RC" "1" "a failed rig list warns"
+has "$OUT" "\`gc rig list\` stderr: rig registry: permission denied" "and its detail carries the probe's stderr"
+OUT=$(BD_FAIL_STORE=alpha run_check); RC=$?
+hasnt "$OUT" "stderr:" "a read that wrote no stderr adds no stderr clause"
+
+echo "── the stores are read through the fan-out cap ──"
+# With a cap of one, each store's read runs alone. beta's read fails after the
+# cap has moved on to gamma, and its rc still reaches the warning. "every store
+# is read at once" above is the control: under the default cap the reads overlap.
+rigs alpha beta gamma
+for s in alpha beta gamma; do store_in "$s" "$(vis "v-$s" closed ABSENT)"; done
+mkdir -p "$TMP/inflight"; rm -f "$TMP/inflight.peaks"
+OUT=$(INFLIGHT="$TMP/inflight" BD_FAIL_STORE=beta GC_DOCTOR_FANOUT=1 run_check); RC=$?
+eq "$(sort -n "$TMP/inflight.peaks" | tail -1)" "1" "with GC_DOCTOR_FANOUT=1 no two stores' reads were in flight at once"
+eq "$(grep -c . "$TMP/inflight.peaks")" "3" "and every store was read"
+eq "$RC" "1" "the unstamped visits and the failed store warn"
+has "$OUT" "beta: could not list closed visits in $TMP/beta/.beads (rc=3) — this store was NOT checked" "the failed read keeps its own rc through the cap"
+has "$OUT" "v-alpha" "a store read before it is still judged"
+has "$OUT" "v-gamma" "a store read after it is still judged"
+has "$OUT" "across 2 store(s)" "the checked count leaves out only the failed store"
 
 echo "── every run removes its scratch ──"
 eq "$(ls -A "$TMP/tmpdir")" "" "no run above left anything in its TMPDIR"

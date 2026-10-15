@@ -502,9 +502,6 @@ func (m *merger) handle(row *gcbd.Bead) {
 		return
 	}
 	if isHeld(hold) {
-		if hold == "signoff_cap" && fresh.Meta("signoff_cap") != "" {
-			m.recordMachine(id, "wedged-exception", headOid, aroute)
-		}
 		fmt.Fprintf(m.stdout, "%s: PR#%s merge_hold set (operator gate); merge held (anchor %s)\n", mergeProg, num, id)
 		m.held++
 		return

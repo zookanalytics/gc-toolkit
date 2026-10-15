@@ -611,12 +611,12 @@ func TestParkedParentBandsGateNotActive(t *testing.T) {
 }
 
 // TestTakeawayRowsDoNotCluster: a row carrying a takeaway never clusters, however
-// many share its needs — a deterministic signoff-cap headline templated across
-// anchors does not fold into a count-plus-id soup that loses the per-bead
-// content. A deterministic STATE phrase, which no bead authored,
+// many share its needs — a deterministic headline templated across anchors
+// (the bring-current question's) does not fold into a count-plus-id soup that
+// loses the per-bead content. A deterministic STATE phrase, which no bead authored,
 // still clusters.
 func TestTakeawayRowsDoNotCluster(t *testing.T) {
-	tmpl := "signoff did not converge after 3 rework rounds (cap 3)"
+	tmpl := "Needs a decision before its branch can be brought current; the visit on its anchor asks it"
 	anchors := []Anchor{
 		// Three parked beads with the SAME templated takeaway → must not cluster.
 		{ID: "tk-t1", Kind: "parked", Source: "parked", Rig: "gc-toolkit", Prefix: "tk",
