@@ -36,7 +36,7 @@ it wait, or leave it for placement.
   armed to a pool only when it is an epic member, PR-finishing work carrying
   `anchor_bead`, a confirmed emergency, or routed by the operator in a sitting,
   by hand or by Accept. Any other bead carries `placement=pending` in its create
-  and no route, and the placement sitting places it (`docs/steering.md`).
+  and no route or arm, and the placement sitting places it (`docs/steering.md`).
 
 Writer: `gc bd create "<title>" -t task --parent <parent> -d "<what needs doing, why, and what done looks like>" --json`,
 with `--metadata '{"placement":"pending"}'` added when intake does not admit it.
@@ -53,16 +53,17 @@ the city's default sling formula.
 
 - **One dispatch, never two.** A sling pours a workflow and stamps
   `gc.execution_routed_to` on the bead. A raw route, `gc.routed_to=<pool>`,
-  which a sitting's sign-off `--route <pool>` also writes, has the pool claim
-  the bead itself. Send it one way. Both start two workers on one branch.
+  which a sitting's sign-off `--route <pool>` also writes when it releases a
+  held subject, has the pool claim the bead itself. Send it one way. Both start
+  two workers on one branch.
 - **Release its wait first.** A worker's first step builds nothing that still
   waits. It re-arms a bead with an open blocker to be sent again when the
   blocker closes, and it ends the run on a bead that carries a `merge_result`,
   `held` included, as finished. Release the wait (the waits skill), then send.
-- **A named agent takes an assignee, not a route.** The mechanik, deacon,
-  witness, refinery and keeper never read the routed tier. Send one of them a
-  bead with `gc bd update <bead> --assignee <qualified-name>`, the name
-  `gc agent list` prints.
+- **A named agent takes an assignee.** The mechanik, deacon, witness,
+  refinery and keeper never claim a pool's route. Send one of them a bead with
+  `gc bd update <bead> --assignee <qualified-name>`, the name `gc agent list`
+  prints.
 
 In a sitting, the sign-off's `--route` says where the subject itself goes once
 its wait is released (the converse-settle step), so first decide which bead
@@ -73,9 +74,9 @@ carries the work:
   `--route <rig>/<pool>` would route the subject raw as well, a second dispatch.
 - **New work carries it, and the subject waits for it.** File the work beside
   the subject, send it, and sign off with `--ruled yes --route human --waiting-on <the work>`.
-  The liveness sweep brings the subject back once the work lands. A
-  `--route <rig>/<pool>` here would have that pool claim the subject itself once
-  the work lands, a conversation seed no worker can close.
+  The board shows the subject as a ruling in flight until the work lands, then
+  as settled. A `--route <rig>/<pool>` here would have that pool claim the
+  subject itself once the work lands, a conversation seed no worker can close.
 
 ## Take a recommendation
 
@@ -141,7 +142,9 @@ A pull request in flight is retired, not stopped (the prs skill).
 
 The message is that nothing will be built for this bead. The writer closes it,
 and nothing downstream picks it up. In a sitting, close a subject only on the
-operator's agreement.
+operator's agreement. The sitting's own open visit holds that close: the
+writer records the pointer and exits 5, and the same call closes the subject
+once the visit is closed.
 
 Record the no-op, then close through the disposition writer:
 

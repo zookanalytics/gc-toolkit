@@ -66,18 +66,20 @@ parks on the helm board until the operator engages it, which starts a converse
 sitting on that bead.
 
 Writer: `"$S/gc-helm.sh" open <bead> --reason "<what this visit needs>" --body "<the brief the sitting reads>"`.
-A bead has one open visit at a time. When one is already open, `open` files
+`open` files one visit per bead. While a visit on the bead is open, it files
 nothing and your brief goes nowhere, so append what you need to the bead's
 notes (the records skill), where the sitting reads it.
 
-For a blocker only a person can answer, filed once per situation however often
-you hit it, escalate instead:
+For a blocker only a person can answer, escalate instead. It keeps one open
+visit per bead and situation key, however often you hit it:
 `"$S/escalate.sh" --subject <bead> --key <situation-key> --message "<what you hit, what you tried, what unblocks it>"`.
-`--retract` with the same subject and key closes that visit when the situation
-clears by itself.
+When the situation clears by itself, the same call with `--retract` closes
+that visit, unless someone has already engaged it.
 
-A visit gates nothing by itself. To make work wait on the conversation, add a
-`blocks` edge from that work onto the visit.
+A visit keeps nothing out of `bd ready`. While it is open it holds only its
+own subject's finalization: the subject's PR does not merge and the subject
+does not close (`docs/finalize-gate.md`). To make other work wait on the
+conversation, add a `blocks` edge from that work onto the visit.
 
 ## Have work start by itself when its wait clears (an arm)
 

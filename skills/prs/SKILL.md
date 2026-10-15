@@ -24,8 +24,8 @@ done
 ## Answer its review comments
 
 The message is the city's answer to a reviewer: a fix that landed, an answer to
-a question, or a decision. The reviewer reads it, and the reconcile's
-write-back counts it as the city's answer.
+a question, or a decision. The reviewer reads it, and the reconcile reads it as
+the city's own post rather than new feedback.
 
 Writer: `pr-post.sh`, the only way the pack posts on a pull request.
 
@@ -35,9 +35,12 @@ Writer: `pr-post.sh`, the only way the pack posts on a pull request.
   `"$S/pr-post.sh" comment --repo github.com/<owner>/<name> --pr <number> --body-file <file>`.
 
 It appends the city's mark. The reconcile reads a post without that mark as new
-feedback and routes it into rework, so never post with `gh` directly. End a
-thread reply's body with the line `<!-- gc-writeback -->`, so the write-back
-counts the thread as answered and adds no reply of its own.
+feedback and routes it into rework, so never post with `gh` directly.
+
+A rework that answers a review's findings posts no answer of its own. It records
+each answer with `finding.sh answer`, as its work order says, and the city's one
+living comment per review shows the reviewer how each point was answered. A
+reply through `pr-post.sh` only adds detail that answer leaves out.
 
 Resolve a thread only once its answer has landed. The write-back resolves a
 thread whose fix a rework landed. A thread you answered yourself, with nothing
@@ -45,7 +48,7 @@ left to land, you resolve with GitHub's `resolveReviewThread` mutation on the
 thread's `PRRT_` id:
 `gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -f t=<PRRT_ id>`.
 Leave a thread open when a person replied in it after you, or when it holds a
-declined or deferred point, because those are the operator's to close.
+declined, deferred or needs-you point, because a person closes those.
 
 ## Send it back for rework
 
@@ -53,11 +56,12 @@ The message is that the branch must change before it lands. A rework child
 blocks the anchor, which holds the merge, and a polecat resumes the PR's own
 branch, so the PR keeps its history.
 
-Writer: `rework-child.sh`, the one writer of a rework child. A sitting reaches
-it through the sign-off, `converse-signoff.sh --ruled yes --rework` (the
-converse-settle step), which also returns every review lane to unreviewed so
-the whole branch is reviewed again once the rework lands. A review verdict
-reaches it through the reviewer's own sign-off.
+Writer: `rework-child.sh`, the one writer of a rework child that a ruling or a
+review verdict sends. A sitting reaches it through the sign-off,
+`converse-signoff.sh --ruled yes --rework` (the converse-settle step), which
+also returns every review lane to unreviewed so the whole branch is reviewed
+again once the rework lands. A review verdict reaches it through the reviewer's
+own sign-off.
 
 Scope found while the PR is open, with no ruling behind it, rides a supplement
 bead instead. It carries the PR's `branch`, `existing_pr` and `target`, written

@@ -44,15 +44,16 @@ the document instead (the work skill).
 ## Set the headline the board shows
 
 The message is one sentence saying what the bead needs now. The helm board
-shows it as the bead's NEEDS cell, and `doctor/check-wait-is-an-edge` reads
-whether it names a wait.
+shows it as the bead's NEEDS cell, and `doctor/check-wait-is-an-edge` checks
+the wait it declares against the bead's `blocks` edges.
 
 Writer: `"$S/gc-helm.sh" takeaway <bead> "<what it needs now, at most 140 characters>" --no-wait`
-when nothing is waiting on anything, or `--waiting-on <bead>` (repeatable) for
-each bead it waits on. Each named wait is also written as a `blocks` edge.
-Saying neither leaves a headline that parks the bead on prose, which the doctor
-reports.
+when the bead waits on nothing, or `--waiting-on <bead>` (repeatable) for each
+bead it waits on. Each named wait is also written as a `blocks` edge,
+best-effort: an edge that will not take only warns, so read it back when the
+wait matters (the waits skill). Saying neither parks the bead on prose, which
+the doctor reports unless a live `blocks` edge holds it.
 
-In a sitting, the hold and the sign-off write the subject's headline (the
-converse-hold and converse-settle steps). The one other headline a sitting
-writes is a stand-down, which stops work in flight (the work skill).
+In a sitting, the hold and the sign-off write the headlines (the converse-hold
+and converse-settle steps). The one other headline a sitting writes is a
+stand-down, which stops work in flight (the work skill).
