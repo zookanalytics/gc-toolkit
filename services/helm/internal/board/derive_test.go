@@ -2297,8 +2297,81 @@ func TestOpenVisitHoldsAMergeAnchorAtNeedsAttention(t *testing.T) {
 	if h.Frontier != "needs-attention · PR #1162" {
 		t.Errorf("the frontier leads with needs-attention, not working: got %q", h.Frontier)
 	}
-	if h.Needs != "green — held by an open visit, waiting on your answer" {
+	if h.Needs != "held by an open visit" {
 		t.Errorf("the needs line names the visit hold, not the merge pass: got %q", h.Needs)
+	}
+}
+
+// A held merge anchor's needs line says an open visit holds it at every position
+// the cadence records. The phase reads needs-attention whether the row is
+// settled, progressing or waiting on an approval, and the needs line agrees
+// instead of naming the merge pass, the cadence or a review. The unheld twin of
+// each position proves the visit is what moves the line.
+func TestHeldMergeAnchorNeedsNamesTheVisitAtEveryPosition(t *testing.T) {
+	at := fixtureNow.Add(-2 * time.Hour)
+	for _, pos := range []struct {
+		name, posture, machine, unheld string
+	}{
+		{"settled and approved", postureApproved, MachineSettled, "green — waiting on the merge pass"},
+		{"settled, waiting on a review", postureReviewRequired, MachineSettled, "green, waiting on your review"},
+		{"settled, changes requested", postureChangesRequested, MachineSettled, "changes requested — reviewer re-review needed"},
+		{"progressing", postureApproved, MachineProgressing, "in the merge cadence"},
+	} {
+		t.Run(pos.name, func(t *testing.T) {
+			md := map[string]string{
+				mdPRPosture: dated(pos.posture, headLive, at),
+				mdPRMachine: dated(pos.machine, headLive, at),
+				mdPRNumber:  "1162",
+			}
+			b := BuildBoard([]Anchor{mergeAnchor("tk-held", md), mergeAnchor("tk-free", md)}, fixtureNow, false, nil,
+				Facts{Visits: map[string]bool{"tk-held": true}})
+			if fr := mustTile(t, b, "tk-free"); fr.Needs != pos.unheld {
+				t.Fatalf("test premise: the unheld twin reads %q; got %q", pos.unheld, fr.Needs)
+			}
+			h := mustTile(t, b, "tk-held")
+			if h.Phase != PhaseNeedsAttention || h.Needs != "held by an open visit" {
+				t.Errorf("a held row reads needs-attention and says the visit holds it: phase=%q needs=%q", h.Phase, h.Needs)
+			}
+		})
+	}
+}
+
+// The needs line names each visit that holds the row by the question its title
+// asks, from the row's own sittings. It never asserts who owes the answer, so a
+// visit a sitting is in reads the same as one waiting for a person.
+func TestHeldNeedsNamesEachHoldingVisitByItsQuestion(t *testing.T) {
+	md := map[string]string{
+		mdPRPosture: dated(postureApproved, headLive, fixtureNow.Add(-2*time.Hour)),
+		mdPRMachine: dated(MachineSettled, headLive, fixtureNow.Add(-2*time.Hour)),
+		mdPRNumber:  "1162",
+	}
+	visit := func(id, ask, status, session string) Sitting {
+		return Sitting{ID: id, Title: "visit: tk-held — " + ask, Subject: "tk-held", Subjects: []string{"tk-held"},
+			Status: status, Session: session}
+	}
+	moot := "is this PR moot now that main rewrote the code it edits?"
+	merge := "may the seed audit merge?"
+	for _, tc := range []struct {
+		name     string
+		sittings []Sitting
+		want     string
+	}{
+		{"one visit waiting for a person", []Sitting{visit("tk-v1", moot, "open", "")},
+			"held by an open visit: " + moot},
+		{"one visit a sitting is in", []Sitting{visit("tk-v1", moot, "in_progress", "converse-1")},
+			"held by an open visit: " + moot},
+		{"two visits", []Sitting{visit("tk-v1", moot, "open", ""), visit("tk-v2", merge, "open", "")},
+			"held by 2 open visits: " + moot + " · " + merge},
+		{"a closed sitting names nothing", []Sitting{visit("tk-v1", moot, "open", ""), visit("tk-v0", merge, "closed", "")},
+			"held by an open visit: " + moot},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := BuildBoard([]Anchor{mergeAnchor("tk-held", md)}, fixtureNow, false, nil,
+				Facts{Visits: map[string]bool{"tk-held": true}, Sittings: tc.sittings})
+			if h := mustTile(t, b, "tk-held"); h.Needs != tc.want {
+				t.Errorf("needs = %q, want %q", h.Needs, tc.want)
+			}
+		})
 	}
 }
 

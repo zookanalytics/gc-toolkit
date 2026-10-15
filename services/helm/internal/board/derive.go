@@ -864,7 +864,7 @@ func collapseWS(s string) string {
 // phrase. Otherwise a terse deterministic STATE phrase, never a bead-id list:
 // the mechanical heads (open_heads, cross_rig_refs) are --json-only so the
 // human table stays explanatory and cannot emit a raw or truncated bead id.
-func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled, humanGatedInFlight bool,
+func needs(a Anchor, r rollup, held bool, heldBy, takeaway string, dispDue, isRuled, humanGatedInFlight bool,
 	machine, approval string, ask *Blocker, prIsOwed bool, stallNeeds string) string {
 	// A closed anchor outranks even the takeaway. The sentence a sitting left
 	// describes what the row wanted while it was live; a closed row wants
@@ -944,7 +944,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled, hum
 	// takeaway under a hand-set route is the finding on those rows, and the
 	// phrase below is the one that names it.
 	case isMergeAnchor(a) && prIsOwed:
-		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], ask, held)
+		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], ask, heldBy)
 	// The two kinds a PERSON put here. On these the empty takeaway is itself
 	// the finding — whoever routed or parked the row never recorded what is
 	// owed — so the phrase names that rather than reading like a valid ask a
@@ -959,7 +959,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled, hum
 	// "no children — decompose or assign" would ask for work that is not the
 	// row's to do.
 	case isMergeAnchor(a):
-		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], ask, held)
+		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], ask, heldBy)
 	case r.mTotal == 0:
 		return "no children — decompose or assign"
 	case r.open == 0:
@@ -1474,14 +1474,16 @@ func humanSince(t, now time.Time) string {
 }
 
 // prNeeds is a merge anchor's one-glance ask, in the order an operator can act
-// on: a question names itself, a block names its cause, an unmet approval names
-// the one thing that would land the row — a first review, or the re-review a
-// standing changes_requested is waiting on — and a row nothing is owed on says
-// who has it. A settled row an open visit holds says so rather than naming the
-// merge pass, which holds the PR until the visit closes (finalize-gate.sh).
+// on: a question names itself, a block names its cause, an open visit names what
+// holds the row, an unmet approval names the one thing that would land the row —
+// a first review, or the re-review a standing changes_requested is waiting on —
+// and a row nothing is owed on says who has it. heldBy is the open-visit phrase
+// ([visitHold]), empty on a row no open visit covers. The merge pass's finalize
+// gate refuses the merge while a visit covers the anchor, so the visit outranks
+// the approval and the cadence's position, as it does in the row's phase.
 // `unknown` says the cadence has not recorded a position, which is a fact about
 // the city rather than an all-clear.
-func prNeeds(machine, approval, posture, reason string, ask *Blocker, held bool) string {
+func prNeeds(machine, approval, posture, reason string, ask *Blocker, heldBy string) string {
 	switch {
 	case ask != nil:
 		if t := collapseWS(ask.Title); t != "" {
@@ -1495,6 +1497,8 @@ func prNeeds(machine, approval, posture, reason string, ask *Blocker, held bool)
 			return "blocked: " + r
 		}
 		return "blocked — a person must clear it before the merge can proceed"
+	case heldBy != "":
+		return heldBy
 	case machine == MachineSettled && approval == ApprovalRequired:
 		if posture == postureChangesRequested {
 			return "changes requested — reviewer re-review needed"
@@ -1502,13 +1506,42 @@ func prNeeds(machine, approval, posture, reason string, ask *Blocker, held bool)
 		return "green, waiting on your review"
 	case machine == MachineProgressing:
 		return "in the merge cadence"
-	case machine == MachineSettled && held:
-		return "green — held by an open visit, waiting on your answer"
 	case machine == MachineSettled:
 		return "green — waiting on the merge pass"
 	default:
 		return "position unknown — the merge cadence has recorded none"
 	}
+}
+
+// visitHold is the needs phrase of a row an open visit covers. It says that an
+// open visit holds the row, and names each holding visit by the question it asks
+// ([holdingVisitAsks]) when the row has its sitting, never by a bead id. It
+// claims nothing about who owes the answer: an engaged visit, or one routed to
+// an agent, holds a row the operator's queue does not list.
+func visitHold(asks []string) string {
+	switch len(asks) {
+	case 0:
+		return "held by an open visit"
+	case 1:
+		return "held by an open visit: " + asks[0]
+	default:
+		return fmt.Sprintf("held by %d open visits: %s", len(asks), strings.Join(asks, " · "))
+	}
+}
+
+// holdingVisitAsks returns the question each running sitting whose visit covers
+// subject asks, read off the visit's title ([visitAsk]), in sitting order.
+func holdingVisitAsks(subject string, sittings []Sitting) []string {
+	var asks []string
+	for _, s := range sittings {
+		if s.Status == sittingClosed || !s.covers(subject) {
+			continue
+		}
+		if ask := visitAsk(s.Title); ask != "" {
+			asks = append(asks, ask)
+		}
+	}
+	return asks
 }
 
 // The pre-open state the stall signal reads. mergeResultPreOpenGate is the
@@ -1788,6 +1821,10 @@ func classifySection(t Tile) string {
 func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	r := rollUp(a, f)
 	held := f.Visits[a.ID]
+	heldBy := ""
+	if held {
+		heldBy = visitHold(holdingVisitAsks(a.ID, f.Sittings))
+	}
 	stale := staleDays(a.UpdatedAt, now)
 	closedDays := staleDays(a.ClosedAt, now)
 	xrefs := crossRigRefs(a, f)
@@ -1932,7 +1969,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,
 		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, closedDays, owedSince, now),
-		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, humanGatedInFlight, machine, approval, ask, prIsOwed, stallNeeds),
+		Needs:     needs(a, r, held, heldBy, takeaway, dispDue, isRuled, humanGatedInFlight, machine, approval, ask, prIsOwed, stallNeeds),
 		RankScore: rankScore(sev, w, stale, closedDays),
 
 		PRNumber:       prNumber(a),
