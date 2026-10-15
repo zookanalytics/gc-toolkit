@@ -75,7 +75,7 @@ SUT="$SD/gate-ensure.sh"
 # The SUT forwards GC_RIG into every sling; an ambient value would rewrite the
 # assertions below. Lane state is DERIVED (there is no dispatch ceiling and no
 # GC_MAX_REVIEW_DISPATCHES to unset), so a green lane is a closed approve review
-# bead in the store, never a check.<g>=green marker.
+# bead in the store.
 unset GC_RIG 2>/dev/null || true
 POOL="rig/gc-toolkit.polecat-codex"
 FIXP="rig/gc-toolkit.polecat"
@@ -146,7 +146,6 @@ live_steps() { # <root> <id-prefix>
 # --- graph-shape fixtures for the DERIVED lane state ---------------------------
 # A lane derives GREEN from a closed approve review bead: signoff_verdict=approve,
 # not superseded, with a reviewed_oid pin — exactly lane-state.sh's backing test.
-# This is what replaces a check.<g>=green marker everywhere a lane must read green.
 backed() { # <id> <anchor> [lane=correctness]
   printf '{"id":"%s","status":"closed","assignee":"","notes":"","metadata":{"task_kind":"review","check_name":"%s","anchor_bead":"%s","reviewed_oid":"%s","signoff_verdict":"approve","gc.outcome":"recorded"}}' \
     "$1" "${3:-correctness}" "$2" "$(oid "backing-$1")"
