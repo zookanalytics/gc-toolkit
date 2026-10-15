@@ -80,6 +80,21 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
     if length <= $n then .
     else .[0:$n] as $h | ($h | sub("\\s+\\S*$"; "")) as $w
       | (if ($w | length) >= ($n / 2) then $w else $h end) + "…" end;
+  # The caps each rendering tries, loosest first (ra_render): a review too long
+  # for one comment is shortened in its notes from the fix first, then in its
+  # quoted replies, then in its sentences. A notes cap of 0 leaves the notes out
+  # and names the fix units they are on.
+  def ra_tiers: [ { notes: 12000, quote: 4000, sentence: 1500 },
+                  { notes: 2000, quote: 4000, sentence: 1500 },
+                  { notes: 0, quote: 4000, sentence: 1500 },
+                  { notes: 0, quote: 1000, sentence: 1500 },
+                  { notes: 0, quote: 1000, sentence: 400 },
+                  { notes: 0, quote: 300, sentence: 200 } ];
+  # At most about $n characters, cut the way ra_cut cuts, the cut naming the bead
+  # that holds the whole text.
+  def ra_clip($n; $where):
+    if length <= $n then .
+    else ra_cut($n) + (if $where != "" then " (the full text is on " + $where + ")" else "" end) end;
   # The run of marks a comment can open with: severity emoji, bullets,
   # punctuation and space. Letters, digits, emphasis, code and links survive.
   def ra_unmark: sub("^[^\\p{L}\\p{N}*_`\\[]+"; "");
@@ -155,8 +170,6 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
   # A review body finding whose ruling owes its raiser an answer, which the
   # living comment delivers, since the comment sits in no thread.
   def ra_owes_reply: .body and .reply != "" and (.disp | ra_owes_disp);
-  # The sentence cap of the loosest rendering (ra_tiers).
-  def ra_sentence_cap: 1500;
   # A finding record as its point, or nothing for a body ruled restates. A
   # review body owed a decline or a deferral gets that reply whole in its entry:
   # as the sentence when the sentence is the reply and fits in one, and quoted
@@ -170,7 +183,7 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
     | ((.reply // "") | ra_squash) as $rp
     | ($rp | ra_ruled_reply($d)) as $ruled
     | ($f.body and ($d == "declined" or $d == "deferred") and $rp != "") as $carries
-    | (if $carries and ($ruled | length) > ra_sentence_cap then "" else $ruled end) as $said
+    | (if $carries and ($ruled | length) > ra_tiers[0].sentence then "" else $ruled end) as $said
     | (((.fix_flag // "") | tostring) == "1" and $fa != "") as $flag
     | (if .fix_unit != "" and .cid != "" then "{{gc-commits:" + .fix_unit + "|" + .cid + "}}" else "" end) as $commits
     | if $d == "restates" then empty
@@ -280,54 +293,105 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
                      { key: "progress", title: "In progress", one: "in progress", many: "in progress" },
                      { key: "done", title: "Done", one: "done", many: "done" } ];
   def ra_same: ascii_downcase | gsub("[^\\p{L}\\p{N}]+"; "");
-  # One point as a list entry. A sentence that only repeats the label is left
-  # out, and so is a reference the sentence already names. A sentence, a carried
-  # reply and the fix notes are clipped, so no comment outgrows what GitHub
-  # takes and fails on every pass.
-  def ra_entry:
+  # One point as a list entry at the caps $c (ra_tiers). A sentence that only
+  # repeats the label is left out, and so is a reference the sentence already
+  # names; a sentence several times the label length is never only a repeat of
+  # it. A clipped sentence or quoted reply names the finding holding it whole.
+  def ra_entry($c):
     (.label | if test("[.?!…]$") then . else . + "." end) as $l
+    | ((.id // "") | tostring) as $id
     | ((.ref // "") | tostring) as $ref
-    | ((.sentence // "") | ra_squash | ra_cut(1500)) as $s
-    | (if ($s | ra_same) == (.label | ra_same) then "" else $s end) as $say
+    | ((.sentence // "") | ra_clip($c.sentence; $id) | ra_squash) as $s
+    | (if ($s | length) <= 4 * ((.label | length) + 8) and ($s | ra_same) == (.label | ra_same) then "" else $s end) as $say
     | "- **" + (if (.url // "") != "" then "[" + $l + "](" + .url + ")" else $l end) + "**"
       + (if $say != "" then " " + $say else "" end)
       + (if $ref == "" or (($say | contains($ref)) and ($ref | startswith("{{") | not)) then ""
          elif ($ref | startswith("{{")) then $ref
          else " (" + $ref + ")" end)
-      + (if (.extra // "") != "" then "\n" + ([ .extra | ra_cut(4000) | split("\n")[] | "  > " + . ] | join("\n")) else "" end);
-  # The comment body, ending with the write-back marker, the mark lines the plan
-  # owes it and the review key it is found again by. The writer appends the
-  # digest line. $marker is the write-back reply marker.
-  def ra_render($marker):
+      + (if (.extra // "") != "" then "\n" + ([ .extra | ra_clip($c.quote; $id) | split("\n")[] | "  > " + . ] | join("\n")) else "" end);
+  # Text cut inside a fenced code block gets the fence closed, so the cut does
+  # not swallow the markup after it.
+  def ra_fence_closed: if ([ scan("(?:^|\\n)[ \\t]*```") ] | length) % 2 == 1 then . + "\n```" else . end;
+  # The notes from the fix at the caps $c: folded under the points, each fix
+  # unit notes clipped to the cap and naming the fix unit holding them whole, or
+  # at a cap of 0 one line naming the fix units they are on.
+  def ra_notes($c):
+    .notes as $ns
+    | if ($ns | length) == 0 then empty
+      elif $c.notes == 0 then
+        "The notes from the fix are on " + ([ $ns[].by ] | join(", ")) + ", left out here to fit the size GitHub allows a comment."
+      else
+        "<details>\n<summary>Notes from the fix</summary>\n\n"
+        + ([ $ns[] | .by as $by
+             | (if ($ns | length) > 1 then "**" + $by + "**\n\n" else "" end)
+               + (.text | ra_clip($c.notes; $by) | ra_fence_closed | gsub("</details>"; "&lt;/details&gt;")) ] | join("\n\n"))
+        + "\n\n</details>"
+      end;
+  # The comment above its trailing lines at the caps $c, listing the points in
+  # $shown (ra_render orders and fills them): every point, or the first ones
+  # when even the tightest caps leave the comment too long, with a line naming
+  # the findings of the points left out. The counts always cover every point.
+  # $c.bare leaves out the callout and the notes, the last resort ra_render has.
+  def ra_body($c; $shown):
     . as $m
     | ($m.points // []) as $ps
-    | ([ if ($m.visits | length) > 0 then
-           "> [!IMPORTANT]\n" + ([ $m.visits[] | "> **Needs you: visit " + .id + ".**"
-                                   + (if (.question // "") != "" then " " + .question else "" end) ] | join("\n>\n"))
-         else empty end,
-         "### " + ($m | ra_heading),
-         ([ (if $m.dismissed == "requeued" then "Review dismissed; your review is requested again."
-             elif $m.dismissed != "" then "Review dismissed." else empty end),
-            (if any($ps[]; .ruled) then
-               ([ ra_sections[] | . as $s | ([ $ps[] | select(.section == $s.key) ] | length) as $c
-                  | select($c > 0) | "\($c) " + (if $c == 1 then $s.one else $s.many end) ] | join(", ")) + "."
-             else empty end) ] | join(" ") | select(. != "")),
-         (any($ps[]; .ruled)) as $anyruled
-         | (ra_sections[] | . as $s | [ $ps[] | select(.section == $s.key)
-              | if (.ruled | not) and .sentence == "" and $anyruled then .sentence = "Not ruled yet." else . end ]
-            | select(length > 0)
-            | "**" + $s.title + "**\n" + (map(ra_entry) | join("\n"))),
-         (if ($m.notes | length) > 0 then
-            "<details>\n<summary>Notes from the fix</summary>\n\n"
-            + ([ $m.notes[] | (if ($m.notes | length) > 1 then "**" + .by + "**\n\n" else "" end)
-                 + (.text | ra_cut(12000) | gsub("</details>"; "&lt;/details&gt;")) ] | join("\n\n"))
-            + "\n\n</details>"
-          else empty end) ]
-       | join("\n\n"))
-      + "\n\n" + $marker
-      + ([ ($m.marks // [])[] | "\n<!-- gc-writeback-mark:" + . + " -->" ] | join(""))
-      + "\n<!-- gc-review-answer:r" + $m.rid + " -->"
-      + (if $m.dismissed == "requeued" or $m.dismissed == "self" then "\n<!-- gc-review-answer:r" + $m.rid + ":dismissed -->" else "" end);
+    | any($ps[]; .ruled) as $anyruled
+    | (($ps | map(.id)) - ($shown | map(.id))) as $out
+    | [ if ($m.visits | length) > 0 and ($c.bare | not) then
+          "> [!IMPORTANT]\n" + ([ $m.visits[] | . as $v | "> **Needs you: visit " + $v.id + ".**"
+                                  + (if ($v.question // "") != "" then " " + ($v.question | ra_clip($c.sentence; $v.id)) else "" end) ]
+                                | join("\n>\n"))
+        else empty end,
+        "### " + ($m | ra_heading),
+        ([ (if $m.dismissed == "requeued" then "Review dismissed; your review is requested again."
+            elif $m.dismissed != "" then "Review dismissed." else empty end),
+           (if $anyruled then
+              ([ ra_sections[] | . as $s | ([ $ps[] | select(.section == $s.key) ] | length) as $nc
+                 | select($nc > 0) | "\($nc) " + (if $nc == 1 then $s.one else $s.many end) ] | join(", ")) + "."
+            else empty end) ] | join(" ") | select(. != "")),
+        (ra_sections[] | . as $s | [ $shown[] | select(.section == $s.key) ]
+           | select(length > 0)
+           | "**" + $s.title + "**\n" + (map(ra_entry($c)) | join("\n"))),
+        (($out | length) as $no
+         | if $no == 0 then empty
+           else (if $no == 1 then "1 more point is left out here to fit the size GitHub allows a comment; its finding is "
+                 else "\($no) more points are left out here to fit the size GitHub allows a comment; their findings are " end)
+             + ($out[0:30] | join(", ")) + (if $no > 30 then " and \($no - 30) more" else "" end) + "."
+           end),
+        (if $c.bare then empty else $m | ra_notes($c) end) ]
+    | join("\n\n");
+  # The lines the comment ends with: the write-back marker, the mark lines the
+  # plan owes it, the review key it is found again by, and the dismissed mark.
+  def ra_trailer($marker):
+    $marker
+    + ([ (.marks // [])[] | "\n<!-- gc-writeback-mark:" + . + " -->" ] | join(""))
+    + "\n<!-- gc-review-answer:r" + .rid + " -->"
+    + (if .dismissed == "requeued" or .dismissed == "self" then "\n<!-- gc-review-answer:r" + .rid + ":dismissed -->" else "" end);
+  # GitHub refuses a comment over 65,536 characters, and the dismissal waits on
+  # the comment, so a comment that outgrew it would hold its review forever. The
+  # comment stays under ra_budget, counted in UTF-8 bytes, never fewer than its
+  # characters, with each commit token at the longest citation wb_expand
+  # (pr-facts.sh) can turn it into. The room above the budget holds the digest
+  # line and the city mark added after it.
+  def ra_budget: 60000;
+  def ra_size: utf8bytelength + 80 * ((split("{{gc-commits:") | length) - 1);
+  # The comment body at the loosest caps under which it fits ra_budget, ending
+  # with its trailing lines. Past the tightest caps, the points are listed in
+  # section order for as long as they fit, and the rest are named. The writer
+  # appends the digest line. $marker is the write-back reply marker.
+  def ra_render($marker):
+    . as $m
+    | ($m | ra_trailer($marker)) as $tail
+    | any(($m.points // [])[]; .ruled) as $anyruled
+    | [ ra_sections[] as $s | ($m.points // [])[] | select(.section == $s.key)
+        | if (.ruled | not) and .sentence == "" and $anyruled then .sentence = "Not ruled yet." else . end ] as $all
+    | first( ra_tiers[] as $c | ($m | ra_body($c; $all)) + "\n\n" + $tail | select(ra_size <= ra_budget) )
+      // ( ra_tiers[-1] as $c
+           | (ra_budget - ((($m | ra_body($c; [])) + "\n\n" + $tail) | ra_size) - 200) as $room
+           | (reduce ($all[] | ra_entry($c) | ra_size + 1) as $z ({ sum: 0, k: 0, full: false };
+                if .full or .sum + $z > $room then .full = true else .sum += $z | .k += 1 end) | .k) as $k
+           | ($m | ra_body($c; $all[0:$k])) + "\n\n" + $tail | select(ra_size <= ra_budget) )
+      // (($m | ra_body(ra_tiers[-1] + { bare: true }; [])) + "\n\n" + $tail);
   # The one-line note a dismissal of the review carries: the count line, the
   # comment holding the answer, and that dismissal is not approval.
   def ra_dismiss_note($url):

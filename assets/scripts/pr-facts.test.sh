@@ -6136,6 +6136,31 @@ eq "$(grep -c '^ICEDIT' "$STUB_GH_LOG")" "1" "the fix unit landing edits the liv
 has "$(lanswer 607 6008)" "the config key was renamed in the same change. (7a7a7a7a)" "…to cite the commit that made the change"
 eq "$(lcount 607 6008)" "1" "…still in the one living answer"
 
+echo "# a review whose answers outgrow one comment still gets its living answer and its dismissal"
+# Forty points each answered at length, and long notes from the fix, would render
+# past the 65,536 characters GitHub takes in one comment, and the stub refuses
+# such a body the way GitHub does. The rendering shortens itself to fit.
+L9_LONG=$(printf 'said %.0s' $(seq 280))
+L9_ROWS=""
+for i in $(seq 1 40); do
+  L9_ROWS="$L9_ROWS,$(lfind "LJ$i" LA9 "$((6900 + i))" 6009 must-fix closed "**Point $i needs a fix.**" \
+    "$(jq -cn --arg a "Fixed as you suggested: $L9_LONG" '{"finding.fix_unit":"KL9","finding.fix_answer":$a}')")"
+done
+store "[$(anchor LA9 608 "$(lmeta rework:KL9 6940 6009)"), $(fixunit KL9 closed "$(printf 'n %.0s' $(seq 9000))")$L9_ROWS]"
+printf '%s' "$(prview 608 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_608.json"
+# shellcheck disable=SC2046  # one inline comment id per word
+threads 608 "$(lreview 608 6009 CHANGES_REQUESTED '' $(seq 6901 6940))"
+commits 608 '[{"oid":"9b9b9b9bbbbb","message":"fix: the forty points (KL9)"}]'
+: > "$STUB_GH_LOG"
+out=$(run)
+L9=$(lanswer 608 6009)
+eq "$(lcount 608 6009)" "1" "the review gets its living answer"
+[ "${#L9}" -le 65536 ] && ok "…within what GitHub takes (${#L9} characters)" || bad "…within what GitHub takes (got ${#L9} characters)"
+has "$L9" "### Your review: 40 points, all answered" "…counting every point"
+has "$L9" "The notes from the fix are on KL9, left out here to fit the size GitHub allows a comment." "…its notes named rather than carried"
+has "$L9" "(the full text is on LJ1)" "…and each shortened answer naming the finding that holds it whole"
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/608/reviews/6009/dismissals" "…so the answered review is dismissed"
+
 fi # part living
 
 # ==== part pacing: the paced walks, their visit order, and the posture basis ====

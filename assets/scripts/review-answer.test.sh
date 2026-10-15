@@ -188,6 +188,54 @@ BIG=$(jq -n --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'{rid:"1",self:false,dismissed
   visits:[],notes:[{by:"k",text:("n " * 9000)}],marks:[]} | ra_render($m) | length')
 [ "$BIG" -lt 15000 ] && ok "(RENDER) a long sentence and long notes are clipped, so the comment stays postable ($BIG characters)" \
   || bad "(RENDER) a long sentence and long notes are clipped, so the comment stays postable (got $BIG characters)"
+CLIPPED=$(jq -rn --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'{rid:"1",self:false,dismissed:"",
+  points:[{id:"tk-f1",section:"done",label:"L",url:"",sentence:("word " * 600),ref:"",answered:true,ruled:true,extra:""}],
+  visits:[],notes:[{by:"tk-k",text:("n " * 9000)}],marks:[]} | ra_render($m)')
+has "$CLIPPED" "… (the full text is on tk-f1)" "(RENDER) a clipped sentence names the finding that holds it whole"
+has "$CLIPPED" "… (the full text is on tk-k)" "(RENDER) …and clipped notes name the fix unit that holds them"
+FENCE=$(jq -rn --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'{rid:"1",self:false,dismissed:"",points:[],visits:[],
+  notes:[{by:"tk-k",text:("Before.\n\n```\n" + ("line\n" * 4000) + "```\n\nAfter.")}],marks:[]} | ra_render($m)')
+eq "$(printf '%s' "$FENCE" | grep -c '^```$')" "2" "(RENDER) notes cut inside a code block get the block closed, so the cut swallows nothing after it"
+has "$FENCE" "</details>" "(RENDER) …and the notes block still closes"
+
+echo "# (BUDGET)"
+eq "$(jq -rn "$REVIEW_ANSWER_DEF"'"{{gc-commits:tk-k|11}}" | ra_size')" "102" \
+  "(BUDGET) a commit token counts its own 22 bytes plus room for the longest citation it can expand to"
+eq "$(jq -rn "$REVIEW_ANSWER_DEF"'"✅" | ra_size')" "3" "(BUDGET) the size is UTF-8 bytes, never fewer than characters"
+# A review too long for one comment at the loosest caps: forty points, each
+# with a long sentence and a long quoted reply, and long notes from two fix units.
+HUGE=$(jq -cn '{rid:"9",self:false,dismissed:"requeued",
+  points:[ range(40) as $i | {id:("tk-p" + ($i|tostring)),section:(if $i < 5 then "worth" else "done" end),label:("Point " + ($i|tostring)),
+           url:"",sentence:("said " * 400),ref:"{{gc-commits:tk-k|1}}",answered:true,ruled:true,extra:("quoted " * 700)} ],
+  visits:[{id:"tk-v9",question:"Ship it now?"}],
+  notes:[{by:"tk-k",text:("n " * 9000)},{by:"tk-k2",text:("m " * 9000)}],marks:["resolved r9"]}')
+HR=$(printf '%s' "$HUGE" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')
+HS=$(printf '%s' "$HR" | jq -Rs "$REVIEW_ANSWER_DEF"'ra_size')
+[ "$HS" -le 60000 ] && ok "(BUDGET) a review too long for one comment renders within the budget ($HS bytes)" \
+  || bad "(BUDGET) a review too long for one comment renders within the budget (got $HS bytes)"
+has "$HR" "The notes from the fix are on tk-k, tk-k2, left out here to fit the size GitHub allows a comment." \
+  "(BUDGET) the notes go first, naming the fix units they are on"
+has "$HR" "(the full text is on tk-p0)" "(BUDGET) …then quotes and sentences are cut harder, each cut naming its finding"
+has "$HR" "- **Point 39.**" "(BUDGET) …and every point still has its entry"
+has "$HR" "### Your review: 40 points, all answered" "(BUDGET) the count line still covers every point"
+has "$HR" "> **Needs you: visit tk-v9.** Ship it now?" "(BUDGET) …and the callout still leads"
+case "$HR" in *"$MARKER
+<!-- gc-writeback-mark:resolved r9 -->
+<!-- gc-review-answer:r9 -->
+<!-- gc-review-answer:r9:dismissed -->") ok "(BUDGET) the trailing lines stay whole" ;; *) bad "(BUDGET) the trailing lines stay whole" ;; esac
+# Past the tightest caps, the points are listed from the top until they fit.
+MANY=$(jq -cn '{rid:"8",self:false,dismissed:"",
+  points:[ range(400) as $i | {id:("tk-q" + ($i|tostring)),section:(if $i == 0 then "worth" else "done" end),label:("A point whose label runs long enough to matter " + ($i|tostring)),
+           url:"https://github.com/o/r/pull/7#discussion_r1234567890",sentence:("said " * 400),ref:"{{gc-commits:tk-k|1}}",answered:true,ruled:true,extra:""} ],
+  visits:[],notes:[],marks:[]}')
+MR=$(printf '%s' "$MANY" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')
+MS=$(printf '%s' "$MR" | jq -Rs "$REVIEW_ANSWER_DEF"'ra_size')
+[ "$MS" -le 60000 ] && ok "(BUDGET) four hundred points render within the budget ($MS bytes)" \
+  || bad "(BUDGET) four hundred points render within the budget (got $MS bytes)"
+has "$MR" "### Your review: 400 points, all answered" "(BUDGET) the count line covers every point"
+has "$MR" "- **[A point whose label runs long enough to matter 0.]" "(BUDGET) the points worth a look come first"
+has "$MR" "more points are left out here to fit the size GitHub allows a comment; their findings are tk-q" "(BUDGET) …and a line names the findings of the points left out"
+hasnt "$MR" "A point whose label runs long enough to matter 399." "(BUDGET) …the last of which have no entry"
 
 echo "# (MODEL)"
 ROWS='[

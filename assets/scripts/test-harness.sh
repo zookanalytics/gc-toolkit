@@ -781,7 +781,8 @@ case "$sub" in
         # ids the suites pick. On a PR with no threads fixture nothing reads the
         # post back. STUB_PR_COMMENT_RC models a post the API refuses;
         # STUB_PR_COMMENT_QUIET makes it land and print nothing, so the caller
-        # cannot read the new id back.
+        # cannot read the new id back. A body over 65,536 characters is refused,
+        # as GitHub refuses it.
         [ "${STUB_PR_COMMENT_RC:-0}" = "0" ] || exit "${STUB_PR_COMMENT_RC:-0}"
         n="${1:-}"; shift || true
         b=""; rq=""
@@ -793,6 +794,7 @@ case "$sub" in
           esac
           shift || true
         done
+        [ "${#b}" -le 65536 ] || { echo "gh pr stub: Body is too long (maximum is 65536 characters)" >&2; exit 1; }
         printf 'PRCOMMENT %s\n' "$n" >> "${STUB_GH_LOG:?}"
         f="$G/threads_$n.json"
         [ -s "$f" ] || exit 0
@@ -1094,6 +1096,8 @@ case "$sub" in
         [ "${STUB_ICEDIT_RC:-0}" = "0" ] || exit "${STUB_ICEDIT_RC:-0}"
         cid="${path##*/issues/comments/}"
         gqvar b body
+        # GitHub refuses an edit to a body over 65,536 characters.
+        [ "${#b}" -le 65536 ] || { echo "gh api stub: Body is too long (maximum is 65536 characters)" >&2; exit 1; }
         hit=""
         for cand in "$G"/threads_*.json; do
           [ -s "$cand" ] || continue
