@@ -64,7 +64,6 @@ carries, not the first one that appears.
   when they are better; flag them either way.
 - **Correctness** — bugs, reachable edge cases, error handling, the failure
   mode nobody wrote a test for.
-<!-- rule:tk-prvea src:pr:#1045:comment:4212283737, pr:#1075:comment:4211952314, pr:#1067:review:5423601195 (operator feedback) adopted:2026-10-08 -->
 - **Contract** — does it break a caller, a stored format, a metadata key, or
   a script that greps for the old shape? Find the other call sites of
   anything it changed; the recurring defect class is a predicate fixed in
@@ -74,7 +73,6 @@ carries, not the first one that appears.
   serves every site, and a follow-up to fold the copies later does not
   answer it. Where the surface has no include mechanism, that definition is
   a marker-fenced block a test holds every copy to.
-<!-- rule:tk-0rhvews src:pr:#964:comment:4171895604, pr:#1117:comment:4198995344 (operator feedback) adopted:2026-10-07 -->
 - **Testing** — do the tests exercise real behavior, is the new path
   covered, does a regression pin the bug that was fixed? A new case pins its
   change only if it fails when the change is reverted, so the correctness
@@ -82,8 +80,6 @@ carries, not the first one that appears.
   failure-path case's stub can produce the failure it names.
 - **Readiness** — back-compat and migration, fail-closed where fail-closed
   was intended, docs the change just made false.
-<!-- rule:tk-wamr3 src:pr:#105 (operator feedback) adopted:2026-09-03 -->
-<!-- rule:tk-v32d2u src:pr:#1015:comment:4180705562, pr:#1025:comment:4180671214, visit:tk-cm64ub1 (operator feedback) adopted:2026-10-06 -->
 - **Comments** — a comment carries the code's non-obvious why. Narration of
   the change, the bead, or the design doc belongs in the commit message
   instead. Prose duplicated across files, or restating a comment a few lines

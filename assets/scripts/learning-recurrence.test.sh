@@ -111,16 +111,17 @@ cat > "$REPO/template-fragments/operator-profile.template.md" <<MD
 - An entry with no pattern-bead anchor, so recurrence cannot be attributed.
 {{ end }}
 MD
-# The review-rubric carrier is the correctness method, a skill rather than a
-# fragment, so the inventory has to reach it too.
+# The review-rubric carrier anchors in a ledger beside the correctness method,
+# not in the method a reviewer reads, so the inventory reads the ledger and
+# never the method.
 mkdir -p "$REPO/skills/review-correctness"
+cat > "$REPO/skills/review-correctness/rubric-ledger.md" <<MD
+    <!-- rule:<pattern-bead> src:<refs> adopted:<date> --> <dimension>
+    <!-- rule:tk-rub1 src:audit:tk-test adopted:$ADOPTED --> Contract
+MD
 cat > "$REPO/skills/review-correctness/SKILL.md" <<MD
-## What to check
-
-<!-- rule:<pattern-bead> src:<refs> adopted:<date> -->
-- **Intent** — a dimension no amendment has touched.
-<!-- rule:tk-rub1 src:audit:tk-test adopted:$ADOPTED -->
-- **Contract** — a dimension an adopted amendment sharpened.
+<!-- rule:tk-instray src:audit:tk-test adopted:$ADOPTED -->
+- **Contract** — a dimension.
 MD
 
 # --- 1. inventory ---------------------------------------------------------
@@ -129,7 +130,8 @@ eq "$(grep -c . <<< "$INV")" "4" "inventory lists one row per adopted entry"
 hasnt "$INV" 'rule:<pattern-bead>' "inventory skips the seeded placeholder anchor"
 has "$INV" "tk-pat1" "inventory extracts the pattern bead from a rule: anchor"
 has "$INV" "operator-profile.template.md	-	2026-08-25" "an anchor with no rule: field reports '-' rather than guessing"
-has "$INV" "skills/review-correctness/SKILL.md	tk-rub1" "the review-rubric carrier is inventoried beside the fragment carriers"
+has "$INV" "skills/review-correctness/rubric-ledger.md	tk-rub1" "the review-rubric ledger is inventoried beside the fragment carriers"
+hasnt "$INV" "tk-instray" "the correctness method itself is not inventoried"
 
 # --- 2. report over the fixture corpus ------------------------------------
 J=$("$SUT" --repo "$REPO" --window-days 30 --json 2>&1)
@@ -296,15 +298,14 @@ eq "$(jq -r '.m2_post_adoption.adopted_total' <<< "$R")" "2" \
    "and without --ref the working tree is what it reads"
 SREPO="$TMP/srepo"; mkdir -p "$SREPO/skills/review-correctness"
 git -C "$SREPO" init -q >/dev/null 2>&1
-cat > "$SREPO/skills/review-correctness/SKILL.md" <<MD
-<!-- rule:tk-rubref src:audit:tk-test adopted:$ADOPTED -->
-- **Testing** — a dimension an adopted amendment sharpened.
+cat > "$SREPO/skills/review-correctness/rubric-ledger.md" <<MD
+    <!-- rule:tk-rubref src:audit:tk-test adopted:$ADOPTED --> Testing
 MD
 git -C "$SREPO" add -A >/dev/null 2>&1
 git -C "$SREPO" -c user.email=t@example.invalid -c user.name=t -c commit.gpgsign=false \
     commit -q --no-verify -m seed >/dev/null 2>&1
 R=$("$SUT" --inventory --repo "$SREPO" --ref HEAD 2>&1)
-has "$R" "skills/review-correctness/SKILL.md	tk-rubref" "--ref reads the review-rubric carrier from the ref too"
+has "$R" "skills/review-correctness/rubric-ledger.md	tk-rubref" "--ref reads the review-rubric ledger from the ref too"
 
 # --- 6. usage ------------------------------------------------------------
 OUT=$("$SUT" --window-days 0 --repo "$REPO" 2>&1); eq "$?" "2" "--window-days 0 is rejected"

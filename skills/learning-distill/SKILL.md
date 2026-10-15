@@ -156,9 +156,11 @@ Choose by what the learning *is*:
 Retirements and hardens use the same vocabulary — a retirement names the
 carrier it removes from, so the retirement pass can walk every surface.
 
-A `review-rubric` amendment anchors immediately above the dimension it amends
-in the correctness method's "What to check" list, one anchor per amendment, so
-the retirement pass finds what an anchor refers to by where it sits.
+A `review-rubric` amendment anchors in the ledger beside the correctness
+method, `skills/review-correctness/rubric-ledger.md`, not beside the dimension
+it amends: a reviewer reads the whole method file, where an HTML comment is
+noise in the text it reads. The ledger line names the dimension, so the
+retirement pass can find what an anchor refers to.
 
 An `exemplar` entry is a `###` section under its anchor, holding a trigger
 line and the pair:
@@ -315,8 +317,8 @@ Promotion without pruning is how prompts rot. Walk the adopted entries in
 **every** carrier. `assets/scripts/learning-recurrence.sh --inventory` emits
 one row per anchored entry across all five — the conventions fragments, the
 profile, the work-quality fragments, the exemplar corpus, and the
-`review-rubric` dimensions in `skills/review-correctness/SKILL.md`. Of each
-entry, ask:
+`review-rubric` ledger in `skills/review-correctness/rubric-ledger.md`. Of
+each entry, ask:
 
 - **Hardenable?** If the violation is mechanically detectable, propose
   the lint or doctor check and **retire the prose bullet in the same

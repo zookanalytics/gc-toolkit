@@ -24,10 +24,11 @@
 #                note borrows no other check's method.
 #   (KEEPALIVE)  every long command a method runs goes through hb: the
 #                correctness suites and the demo capture.
-#   (RUBRIC)     the learning loop's review-rubric anchors each sit above a
-#                dimension, an anchor whose dimension was recorded at adoption
-#                above that one, and the inventory reads every one; the method
-#                carries no other comment.
+#   (RUBRIC)     the learning loop's review-rubric anchors sit in the ledger
+#                beside the method, each line naming a dimension of its What
+#                to check list, an anchor whose dimension was recorded at
+#                adoption naming that one, and the inventory reads every one;
+#                the method itself carries no HTML comment.
 #   (EVIDENCE)   the review-test-evidence block counts the anchor's self-review
 #                stamp only on an exact match in a rig that declares a test
 #                command, in bash and in zsh.
@@ -204,35 +205,33 @@ awk '/^ *```/ {f = !f; next} f && /rig-demo-capture\.sh/' "$DEMO" > "$TMP/captur
 [ -s "$TMP/capture-lines" ] && ok "(KEEPALIVE) the demo method runs a capture" || bad "(KEEPALIVE) no capture command found in the demo method"
 notE "$TMP/capture-lines" '^[[:space:]]*([^h[:space:]]|h[^b]|hb[^[:space:]])' "(KEEPALIVE) every demo capture runs through hb"
 
-echo "# the rubric's anchors sit on the dimensions they amend, and are inventoried"
-# Each anchor is followed, past any further anchors, by a dimension bullet.
-awk '
-  /^<!-- rule:/ && /adopted:/ && !/rule:<pattern-bead>/ { n++; pending = 1; next }
-  pending && /^<!-- rule:/ { next }
-  pending { if ($0 !~ /^- \*\*/) bad++; pending = 0 }
-  END { printf "%d %d\n", n, bad + pending }
-' "$METHOD" > "$TMP/anchors"
-read -r ANCHORS MISPLACED < "$TMP/anchors"
-eq "$MISPLACED" "0" "(RUBRIC) every adopted anchor sits immediately above a dimension"
+echo "# the rubric's anchors sit in the ledger beside the method, and are inventoried"
+LEDGER_REL="$(dirname "$METHOD_REL")/rubric-ledger.md"
+LEDGER="$ROOT/$LEDGER_REL"
+[ -r "$LEDGER" ] && ok "(RUBRIC) the review-rubric ledger ships beside the correctness method" || bad "(RUBRIC) $LEDGER_REL is missing"
+# The reviewer reads the whole method file, comments included, so no anchor,
+# nor any other HTML comment, sits in it.
+notF "$METHOD" '<!--' "(RUBRIC) the correctness method carries no HTML comment, so no anchor reaches the reviewer"
+awk '/^## What to check/ {f = 1; next} /^## / {f = 0} f && /^- \*\*/ {sub(/^- \*\*/, ""); sub(/\*\*.*/, ""); print}' "$METHOD" > "$TMP/dimensions"
+[ -s "$TMP/dimensions" ] && ok "(RUBRIC) the What to check list's dimensions are read" || bad "(RUBRIC) no dimension found in the What to check list"
+# Each adopted anchor's ledger line ends with a dimension the list names.
+grep -E '<!-- [^>]*adopted:[0-9]{4}-[0-9]{2}-[0-9]{2}[^>]*-->' "$LEDGER" > "$TMP/ledger-lines" || true
+ANCHORS=$(grep -c . "$TMP/ledger-lines" || true)
+UNKNOWN=$(sed 's/.*--> *//' "$TMP/ledger-lines" | grep -vxF -f "$TMP/dimensions" | head -n1 || true)
+eq "$UNKNOWN" "" "(RUBRIC) every ledger line names a dimension of the What to check list"
 # The dimension each of these anchors amends, as recorded at its adoption: each
 # is held to that dimension, not to any.
 while read -r rule dim; do
-  got=$(awk -v a="<!-- rule:$rule " 'index($0, a) == 1 {f = 1; next} f && /^- \*\*/ {sub(/^- \*\*/, ""); sub(/\*\*.*/, ""); print; exit}' "$METHOD")
-  eq "$got" "$dim" "(RUBRIC) $rule's anchor sits on $dim, the dimension it amends"
+  got=$(grep -F -- "<!-- rule:$rule " "$LEDGER" | sed 's/.*--> *//')
+  eq "$got" "$dim" "(RUBRIC) $rule's ledger line names $dim, the dimension it amends"
 done <<'MAP'
 tk-wamr3 Comments
 tk-v32d2u Comments
 tk-0rhvews Testing
 tk-prvea Contract
 MAP
-INV=$(bash "$ROOT/assets/scripts/learning-recurrence.sh" --inventory --repo "$ROOT" | grep -c "^$METHOD_REL	" || true)
-eq "$INV" "$ANCHORS" "(RUBRIC) the inventory reads every anchor in the correctness method"
-# The reviewer reads the whole file, comments included, so the method carries
-# no comment but its adopted anchors. Where an anchor goes, and in what format,
-# is docs/feedback-learning.md's to say.
-grep -F -- '<!--' "$METHOD" | grep -vE '^<!-- [^>]*adopted:[0-9]{4}-[0-9]{2}-[0-9]{2}[^>]*-->$' > "$TMP/other-comments" || true
-[ ! -s "$TMP/other-comments" ] && ok "(RUBRIC) the correctness method carries no comment but its adopted anchors" \
-  || bad "(RUBRIC) the correctness method carries a comment that is not an adopted anchor: $(head -n1 "$TMP/other-comments")"
+INV=$(bash "$ROOT/assets/scripts/learning-recurrence.sh" --inventory --repo "$ROOT" | grep -c "^$LEDGER_REL	" || true)
+eq "$INV" "$ANCHORS" "(RUBRIC) the inventory reads every anchor in the ledger"
 
 echo "# the test evidence block, run as written"
 awk '/^# >>> review-test-evidence$/ {f = 1} f {print} /^# <<< review-test-evidence$/ {f = 0}' "$METHOD" > "$TMP/evidence.sh"

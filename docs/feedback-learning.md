@@ -224,15 +224,19 @@ reviewer sees the moment it goes wrong.
 Preferred over `convention` whenever the failure is visible in a diff: one
 dimension reaches every agent's version of the mistake through the reviewer,
 where a bullet reaches only the role whose fragment renders it. An amendment
-is one dimension sharpened or added.
+is one dimension sharpened or added. Its anchor goes in the ledger beside the
+method, `skills/review-correctness/rubric-ledger.md`, not beside the
+dimension: a reviewer reads the whole method file, where an HTML comment is
+noise.
 
 **`exemplar` — the exemplar corpus.**
 `template-fragments/learning-exemplars.template.md`, at most **8**
 before/after pairs, resolved on demand during a review rather than injected
 into any prompt. For lessons that are a shape rather than a statement.
 
-Every adopted entry carries an anchor comment immediately above it, and a
-`review-rubric` amendment's anchor sits above the dimension it amends:
+Every adopted entry carries an anchor comment, immediately above it in the
+four fragment carriers and in the ledger for `review-rubric`, where its line
+ends with the dimension it amends:
 
 ```
 <!-- rule:<pattern-bead> src:<refs> adopted:<date> -->
