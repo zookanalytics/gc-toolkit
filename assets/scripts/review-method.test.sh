@@ -15,6 +15,10 @@
 #   (METHOD)     the correctness row points at its own method file, which
 #                carries the What to check list, the severity ladder, the
 #                review-test-evidence block and the Verification line.
+#   (STANDARDS)  the method reads the work-quality fragments and the exemplar
+#                corpus from its own references/ directory and resolves no
+#                pack file by path; each fragment it reads has a relative link
+#                there, and every link there is one of them.
 #   (QUORUM)     the quorum's lanes load the method skill the dispatch note
 #                names, and point at no mol-review review step; a lane
 #                runs nothing anywhere, and the synthesis runs what the method
@@ -97,6 +101,33 @@ awk '/^## What to check$/ {f = 1; next} f && /^## / {exit} f' "$METHOD" \
 DIMS=$(grep -c . "$TMP/dimensions" || true)
 [ "$DIMS" -ge 5 ] && ok "(METHOD) the What to check list names its dimensions ($DIMS)" \
   || bad "(METHOD) the What to check list names only $DIMS dimensions"
+
+echo "# the method reads its standards from its own skill directory"
+notE "$METHOD" 'GC_PACK_DIR|GC_RIG_ROOT|GC_CITY_PATH|template-fragments/' "(STANDARDS) the method resolves no pack file by path"
+hasF "$METHOD" '`references/work-quality-*.template.md`' "(STANDARDS) it reads the work-quality fragments from its references"
+hasF "$METHOD" '`references/learning-exemplars.template.md`' "(STANDARDS) …and the exemplar corpus"
+# A skill reaches a reviewer as a link to its directory, so a relative link in
+# references/ resolves wherever the pack is installed. A new class fragment
+# fails here until it has its link.
+REFS="$(dirname "$METHOD")/references"
+for frag in "$ROOT"/template-fragments/work-quality-*.template.md "$ROOT/template-fragments/learning-exemplars.template.md"; do
+  b=$(basename "$frag")
+  if [ -L "$REFS/$b" ] && [ "$REFS/$b" -ef "$frag" ]; then
+    case "$(readlink "$REFS/$b")" in
+      /*) bad "(STANDARDS) references/$b links template-fragments/$b by an absolute path" ;;
+      *) ok "(STANDARDS) references/$b is a relative link to template-fragments/$b" ;;
+    esac
+  else
+    bad "(STANDARDS) references/$b is not a link to template-fragments/$b"
+  fi
+done
+for l in "$REFS"/*; do
+  b=$(basename "$l")
+  case "$b" in work-quality-*.template.md|learning-exemplars.template.md) ;; *) b="" ;; esac
+  [ -n "$b" ] && [ "$l" -ef "$ROOT/template-fragments/$b" ] \
+    && ok "(STANDARDS) references/$(basename "$l") is a fragment the method reads" \
+    || bad "(STANDARDS) references/$(basename "$l") is not a fragment the method reads"
+done
 
 echo "# the flags only a check's method passes to signoff.sh"
 # A check-specific flag is one signoff.sh takes, a method file or dispatch arm

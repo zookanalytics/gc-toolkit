@@ -206,9 +206,13 @@ changing a repo does not reach the human converse class. The classes: polecats
 (polecat, polecat-codex), human (the converse-opus, converse-fable and
 converse-codex sittings), system (deacon, mechanik, proactive, witness,
 refinery, keeper).
-The correctness method, `skills/review-correctness/SKILL.md`, resolves these
-fragments during a review and holds the diff's output to them. Hard cap **12
-entries per fragment**.
+The correctness method, `skills/review-correctness/SKILL.md`, holds the diff's
+output to every one of these fragments. It reads them from its own
+`references/` directory, where a relative link to each fragment keeps one
+source for the text and delivers it with the skill, so the method resolves no
+pack file by path. A new class fragment gets its link there too, and
+`review-method.test.sh` fails until it has one. Hard cap **12 entries per
+fragment**.
 
 **`convention` — learned conventions, per role.**
 `template-fragments/learned-conventions-<role>` fragments — one per role,
@@ -231,8 +235,9 @@ noise.
 
 **`exemplar` — the exemplar corpus.**
 `template-fragments/learning-exemplars.template.md`, at most **8**
-before/after pairs, resolved on demand during a review rather than injected
-into any prompt. For lessons that are a shape rather than a statement.
+before/after pairs, read during a review through the correctness method's link
+to it rather than injected into any prompt. For lessons that are a shape rather
+than a statement.
 
 Every adopted entry carries an anchor comment. In the four fragment carriers
 it sits immediately above the entry. For `review-rubric` it sits in the

@@ -119,32 +119,17 @@ carries, not the first one that appears.
   means the branch carries work from more than one bead, and your verdict
   covers every one of them. Pre-open, your verdict becomes the PR's opening
   comment.
-- **Work-quality standards** — resolve the work-quality fragments from the
-  pack checkout and hold the diff's output (code, comments, docs) to their
-  "Standards for what you produce" entries. A violation is a blocking
-  (request-changes) finding. The operator profile is not read here: its
-  entries govern how a role addresses the operator at runtime, which is a
-  property of an agent and not of a diff. Read the exemplar corpus in the
-  same pass: it carries the lessons that are a shape rather than a
-  statement, and it is read here because nothing injects it into a prompt.
-
-```bash
-# Resolve on the directory, not on one fragment: a checkout lagging the commit
-# that added a fragment still resolves the pack, so a miss costs that fragment
-# and not the whole read. The carrier is a set of fragments — the shared base
-# plus one per role class — so glob them all: work-quality-base holds the
-# universal standards and each work-quality-<class> holds its class's.
-PACK=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -d "$c/template-fragments" ] && { PACK="$c"; break; }
-done
-if [ -n "$PACK" ] && ls "$PACK"/template-fragments/work-quality-*.template.md >/dev/null 2>&1; then
-  cat "$PACK"/template-fragments/work-quality-*.template.md
-else
-  echo "work-quality fragments not found in this checkout; note that in the verdict's coverage line"
-fi
-# Absent on an older pack pin, and empty until the first exemplar is adopted.
-[ -n "$PACK" ] && [ -r "$PACK/template-fragments/learning-exemplars.template.md" ] && cat "$PACK/template-fragments/learning-exemplars.template.md"
-```
+- **Work-quality standards** — hold the diff's output (code, comments,
+  docs) to the "Standards for what you produce" entries of the work-quality
+  fragments, which this skill carries in its `references/` directory as
+  `references/work-quality-*.template.md`: the shared base, which holds the
+  universal standards, and one fragment per role class. Read every one. A
+  violation is a blocking (request-changes) finding. The operator profile is
+  not read here: its entries govern how a role addresses the operator at
+  runtime, which is a property of an agent and not of a diff. Read the
+  exemplar corpus, `references/learning-exemplars.template.md`, in the same
+  pass: it carries the lessons that are a shape rather than a statement, and
+  no prompt carries it.
 
 ## Grade every finding
 

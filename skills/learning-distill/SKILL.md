@@ -121,7 +121,7 @@ target file, the budget, and what the adoption costs to keep.
 | `profile` | `template-fragments/operator-profile.template.md` | `profile_entry_cap` entries | every turn of every role that renders it |
 | `work-quality` | `template-fragments/work-quality-base.template.md` + one `work-quality-<class>` | `work_quality_entry_cap` entries per fragment | every turn of every role that renders it |
 | `review-rubric` | `skills/review-correctness/SKILL.md`, "What to check" | one dimension per amendment | every correctness review |
-| `exemplar` | `template-fragments/learning-exemplars.template.md` | `exemplar_cap` entries | per review, resolved on demand |
+| `exemplar` | `template-fragments/learning-exemplars.template.md` | `exemplar_cap` entries | every correctness review |
 
 Choose by what the learning *is*:
 
