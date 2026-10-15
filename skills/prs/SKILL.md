@@ -60,14 +60,27 @@ once the rework lands. A review verdict reaches it through the reviewer's own
 sign-off.
 
 Scope found while the PR is open, with no ruling behind it, rides a supplement
-bead instead. Its create carries the PR's `branch`, `existing_pr` and `target`,
-so they are set before it is sent to the polecat pool, and the polecat commits
-onto the PR's branch and the PR gains the commits:
+bead instead. A supplement is PR-finishing work, and its create sets up
+everything the PR needs from it before it is sent to the polecat pool:
+
+- `--rig <rig>` names the rig whose store holds the anchor. A pool reads only
+  its own rig's store, and `gc sling` refuses a bead filed in another rig's
+  store.
+- `branch`, `existing_pr` and `target` are the PR's, so the polecat commits
+  onto the PR's branch and the PR gains the commits.
+- `anchor_bead` makes it a child of the anchor, joined to it by
+  `related:<anchor>`, and `blocks:<anchor>` makes the anchor wait on it, so
+  the PR does not merge before the supplement lands.
+
+The command reads the edge back from the anchor before the sling, and slings
+nothing when the edge is missing:
 
 ```bash
-SUP=$(gc bd create "<what the PR still needs>" -t task -d "<what to add, why, and what done looks like>" \
-  --metadata '{"branch":"<the PR head branch>","existing_pr":"<the PR url>","target":"<the PR base branch>"}' --json | jq -r '.id')
-gc sling <rig>/<pool> "$SUP"
+SUP=$(gc bd --rig <rig> create "<what the PR still needs>" -t task -d "<what to add, why, and what done looks like>" \
+  --deps related:<anchor>,blocks:<anchor> \
+  --metadata '{"anchor_bead":"<anchor>","branch":"<the PR head branch>","existing_pr":"<the PR url>","target":"<the PR base branch>"}' --json | jq -r '.id') \
+  && gc bd --rig <rig> dep list <anchor> --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg s "$SUP" 'any(.[]; .id == $s)' >/dev/null \
+  && gc sling <rig>/<pool> "$SUP"
 ```
 
 Replace a PR only when its implementation is wrong, never because it is
@@ -103,6 +116,10 @@ was decided. Under `duplicate`, `folded`, `re-homed` and `fixed-upstream` it is
 the bead that carries the work now. Never close the PR by hand first: a PR
 closed with no disposition recorded reads as abandoned, and the reconcile files
 a visit asking what to do with it.
+
+A supplement still open on the PR keeps its `blocks` edge on the anchor, so the
+anchor's close waits until the supplement closes. Stop and close the supplement
+too (the work skill).
 
 In a sitting, retire a PR only on the operator's ruling, after the sign-off,
 and close the visit right after it:

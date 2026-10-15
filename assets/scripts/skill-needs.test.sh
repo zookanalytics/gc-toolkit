@@ -23,7 +23,9 @@
 # converse's vocabulary out of its description, and calls every writer as the
 # pack's own copy through the pack command `gc gc-toolkit scripts-dir`. It pins
 # that command, and that the converse steps give the exact command for each act
-# they name while the skills explain the act once.
+# they name while the skills explain the act once. It pins the prs skill's
+# supplement command: filed in the PR's rig, holding the anchor's merge, and
+# slung only once that hold reads back.
 #
 # Hermetic: reads the repo, and runs the pack command and the writer call shape
 # in a temporary directory outside any git repo, with a stub gc.
@@ -37,6 +39,7 @@ PROMPT="$REPO/agents/_converse/prompt.template.md"
 SETTLE="$REPO/skills/converse-settle/SKILL.md"
 MECHANIK="$REPO/agents/mechanik/prompt.template.md"
 WORK_SKILL="$REPO/skills/work/SKILL.md"
+PRS_SKILL="$REPO/skills/prs/SKILL.md"
 DESIGN_DOC="$REPO/docs/design-convoy.md"
 BLOCKS="work waits records prs"
 
@@ -235,6 +238,15 @@ have "the work skill reads the formulas a rig has now" 'gc formula list --rig <r
 lacks "the work skill's formula choice carries no one formula's variables" 'design_gated' "$WORK_SKILL" \
     "a formula's own doc says when it fits and how to tune it"
 have "the design-convoy doc says when to reach for one" 'high-blast-radius' "$DESIGN_DOC"
+# A supplement goes to the PR's own rig, because a pool reads only its rig's
+# store, and the anchor waits on it, because the merge holds on what blocks the
+# anchor and never on a bead that only names the PR's branch. The hold is read
+# back before the sling.
+have "the prs skill files a supplement in the PR's rig" 'SUP=$(gc bd --rig <rig> create' "$PRS_SKILL"
+have "…as a child of the anchor" '"anchor_bead":"<anchor>"' "$PRS_SKILL"
+have "…born joined to the anchor and holding its merge" '--deps related:<anchor>,blocks:<anchor>' "$PRS_SKILL"
+have "…reads the hold back from the anchor in the same rig" '&& gc bd --rig <rig> dep list <anchor> --direction=down -t blocks --json' "$PRS_SKILL"
+have "…and slings only after that read" '&& gc sling <rig>/<pool> "$SUP"' "$PRS_SKILL"
 
 echo "── each real need scores highest on the skill that answers it ──"
 # <expected skill> TAB <the need, verbatim>
