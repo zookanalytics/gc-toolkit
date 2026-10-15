@@ -13,7 +13,7 @@
 # refused, never read as "nothing to migrate"; a suspended rig is skipped
 # unqueried; an empty rig list exits 1; and --rig walks only the named rig.
 # No live city, Dolt, network, gc, bd or gh — stubs from test-harness.sh plus a
-# thin `gc rig list` / `gc bd list` shim (the migrate-lane-states.test.sh pattern).
+# thin `gc rig list` / `gc bd list` shim.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
