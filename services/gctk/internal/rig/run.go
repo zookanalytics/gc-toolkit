@@ -69,10 +69,12 @@ func Parses(command string) (bool, string) {
 // to the command as it is, so nothing it leaves running holds the wait open.
 //
 // The command leads a process group of its own, and Run stops a run by stopping
-// that group: SIGTERM, then SIGKILL if the command is still running after
-// StopGrace. The stop reaches every child that stays in the group. A child the
-// command starts in a group of its own, as a runner under bash's `set -m` does,
-// is the command's to stop. With a timeout above zero, a run still going at the
+// that group: SIGTERM, then SIGKILL to whatever is left of it after StopGrace.
+// The stop reaches every child that stays in the group, including one still
+// running after the command itself has exited, and a stopped run returns only
+// once its group is empty or has been sent SIGKILL. A child the command starts
+// in a group of its own, as a runner under bash's `set -m` does, is the
+// command's to stop. With a timeout above zero, a run still going at the
 // timeout is stopped and is a Machine outcome.
 //
 // Its own group also puts the command out of reach of a signal sent to this
@@ -83,8 +85,8 @@ func Parses(command string) (bool, string) {
 // signal. A signal this process inherited as ignored stays ignored.
 //
 // Run returns only once the command has been waited for, however the run
-// ended, so nothing the command started writes to stdout or stderr after Run
-// returns.
+// ended, so nothing the command started writes to a stdout or stderr that is
+// not a file after Run returns.
 func Run(dir, command string, timeout time.Duration, stdout, stderr io.Writer) Outcome {
 	cmd := exec.Command("bash", "-c", command)
 	cmd.Dir = dir
@@ -150,30 +152,57 @@ func Run(dir, command string, timeout time.Duration, stdout, stderr io.Writer) O
 	return o
 }
 
-// stopGroup stops the command's process group: SIGTERM, then SIGKILL if the
-// command is still running after StopGrace. It returns once the command has
-// been waited for, which WaitDelay bounds once the command has exited, and
-// returns the first SIGTERM or SIGINT that reached this process while it
-// waited, if one did.
+// groupPoll is how often a stop looks for members left in the command's group
+// once the command itself has been waited for.
+const groupPoll = 25 * time.Millisecond
+
+// stopGroup stops the command's process group: SIGTERM, then SIGKILL to
+// whatever is left of the group after StopGrace. The command's own exit does
+// not end the stop, because a child that ignores SIGTERM runs on after the
+// shell that started it has exited. So the stop ends before StopGrace only once
+// the command has been waited for and its group is empty. At StopGrace it
+// sends SIGKILL and returns once the command has been waited for, which
+// WaitDelay bounds once the command has exited. It returns the first SIGTERM
+// or SIGINT that reached this process while it waited, if one did.
 func stopGroup(group int, waited <-chan error, stop <-chan os.Signal) os.Signal {
 	_ = syscall.Kill(group, syscall.SIGTERM)
 	grace := time.NewTimer(StopGrace)
 	defer grace.Stop()
+	poll := time.NewTicker(groupPoll)
+	defer poll.Stop()
+	waitedFor := false
 	var got os.Signal
 	for {
 		select {
 		case <-waited:
-			return got
+			waitedFor = true
+			if groupEmpty(group) {
+				return got
+			}
+		case <-poll.C:
+			if waitedFor && groupEmpty(group) {
+				return got
+			}
 		case s := <-stop:
 			if got == nil {
 				got = s
 			}
 		case <-grace.C:
 			_ = syscall.Kill(group, syscall.SIGKILL)
-			<-waited
+			if !waitedFor {
+				<-waited
+			}
 			return got
 		}
 	}
+}
+
+// groupEmpty reports whether no process is left in the group. darwin answers
+// EPERM, not ESRCH, for a group whose only members have exited and are not yet
+// reaped, and a member this process may not signal answers EPERM too, so only
+// ESRCH reads as empty.
+func groupEmpty(group int) bool {
+	return errors.Is(syscall.Kill(group, 0), syscall.ESRCH)
 }
 
 // classify reads a finished command's status. A status the shell gives to a

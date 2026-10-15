@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -261,6 +262,155 @@ func TestRunKillsARelayedGroupThatIgnoresSIGTERM(t *testing.T) {
 			t.Fatalf("the command's group %d outlived the relayed stop", pid)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// outputFile is a file for a run's output. The CLI hands Run its own stdout
+// and stderr, which are files, so the command writes to them directly and no
+// pipe holds the wait open while a child the command started lives on.
+func outputFile(t *testing.T) *os.File {
+	t.Helper()
+	f, err := os.Create(filepath.Join(t.TempDir(), "out"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	return f
+}
+
+// outlivesItsShell is a command whose shell exits on SIGTERM while the child
+// it started ignores SIGTERM. The child writes its pid to child.pid once it
+// ignores the signal.
+const outlivesItsShell = `bash -c 'trap "" TERM; echo $$ > child.pid; exec sleep 60' & wait`
+
+// requireExited fails the test unless the process whose pid is in path exits
+// within a few seconds, and kills it if it has not.
+func requireExited(t *testing.T, path string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the command's child never wrote its pid, so the stop reached it before it ignored SIGTERM: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A child killed outright still answers until it has been reaped.
+	deadline := time.Now().Add(5 * time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatalf("the command's child %d outlived the stop", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// A stop is over when the command's group is, not when the command is: a child
+// that ignores SIGTERM after its shell has exited is killed at the grace
+// deadline, before Run returns.
+func TestRunTimeoutKillsAChildThatOutlivesItsShell(t *testing.T) {
+	shortGrace(t)
+	dir := t.TempDir()
+	f := outputFile(t)
+	const timeout = time.Second
+	start := time.Now()
+	o := Run(dir, outlivesItsShell, timeout, f, f)
+	elapsed := time.Since(start)
+	if o.Kind != Machine || !strings.Contains(o.Reason, "timed out") {
+		t.Fatalf("Run = %+v, want a timeout", o)
+	}
+	requireExited(t, filepath.Join(dir, "child.pid"))
+	if elapsed < timeout+StopGrace {
+		t.Fatalf("Run returned after %s, before the grace deadline at %s, while the command's child ignored SIGTERM", elapsed, timeout+StopGrace)
+	}
+}
+
+func TestRunRelayedStopKillsAChildThatOutlivesItsShell(t *testing.T) {
+	shortGrace(t)
+	held := make(chan os.Signal, 4)
+	signal.Notify(held, syscall.SIGTERM)
+	defer signal.Stop(held)
+
+	dir := t.TempDir()
+	sigtermWhenReady(filepath.Join(dir, "child.pid"))
+	f := outputFile(t)
+	start := time.Now()
+	o := Run(dir, outlivesItsShell, time.Minute, f, f)
+	elapsed := time.Since(start)
+	if o.Kind != Interrupted || o.Signal != syscall.SIGTERM {
+		t.Fatalf("Run = %+v, want Interrupted by SIGTERM", o)
+	}
+	requireExited(t, filepath.Join(dir, "child.pid"))
+	if elapsed < StopGrace {
+		t.Fatalf("Run returned after %s, inside the %s grace, while the command's child ignored SIGTERM", elapsed, StopGrace)
+	}
+}
+
+// A child still stopping after its shell has exited is waited for, and the
+// stop ends when that child does, not at the grace deadline.
+func TestRunStopWaitsForAChildThatIsStillStopping(t *testing.T) {
+	old := StopGrace
+	StopGrace = 20 * time.Second
+	t.Cleanup(func() { StopGrace = old })
+	held := make(chan os.Signal, 4)
+	signal.Notify(held, syscall.SIGTERM)
+	defer signal.Stop(held)
+
+	dir := t.TempDir()
+	sigtermWhenReady(filepath.Join(dir, "ready"))
+	f := outputFile(t)
+	start := time.Now()
+	o := Run(dir, `bash -c 'trap "sleep 0.5; touch stopped; exit 0" TERM; touch ready; sleep 30 & wait $!' & wait`, time.Minute, f, f)
+	elapsed := time.Since(start)
+	if o.Kind != Interrupted || o.Signal != syscall.SIGTERM {
+		t.Fatalf("Run = %+v, want Interrupted by SIGTERM", o)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "stopped")); err != nil {
+		t.Fatalf("Run returned after %s, before the command's child had finished stopping", elapsed)
+	}
+	if elapsed > StopGrace/2 {
+		t.Fatalf("Run returned after %s, waiting toward the %s grace deadline for a group that had exited", elapsed, StopGrace)
+	}
+}
+
+// slowWriter takes each write only after a delay, so a command's output is
+// still being delivered for a while after its whole group has exited.
+type slowWriter struct {
+	mu    sync.Mutex
+	delay time.Duration
+	buf   bytes.Buffer
+}
+
+func (w *slowWriter) Write(p []byte) (int, error) {
+	time.Sleep(w.delay)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(p)
+}
+
+func (w *slowWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
+
+// An empty group does not end a stop while the command's output is still
+// being delivered to a writer that is not a file.
+func TestRunStopWaitsForTheCommandsOutputToBeDelivered(t *testing.T) {
+	held := make(chan os.Signal, 4)
+	signal.Notify(held, syscall.SIGTERM)
+	defer signal.Stop(held)
+
+	dir := t.TempDir()
+	sigtermWhenReady(filepath.Join(dir, "ready"))
+	w := &slowWriter{delay: 500 * time.Millisecond}
+	o := Run(dir, `trap 'echo stopped; exit 143' TERM; touch ready; sleep 30 & wait $!`, time.Minute, w, w)
+	if o.Kind != Interrupted || o.Signal != syscall.SIGTERM {
+		t.Fatalf("Run = %+v, want Interrupted by SIGTERM", o)
+	}
+	if got := w.String(); got != "stopped\n" {
+		t.Fatalf("output when Run returned = %q, want the line the command wrote as it stopped", got)
 	}
 }
 
