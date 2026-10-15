@@ -1253,45 +1253,27 @@ printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha
 out=$("$SUT" 2>&1)
 eq "$(pinned V2)" "progressing@sha-88" "a veto with an open fix unit in flight stays progressing"
 
-echo "# a lane short of green is progressing; the cap's park is the wedge"
-# The shared predicate (also gate-ensure.sh's): merge_hold is the literal
-# string "signoff_cap" AND signoff_cap is non-empty. signoff.sh writes that
-# literal for its round-cap park; an operator's own hold writes merge_hold=true.
-store "[$(anchor V3 82),
-        $(anchor V4 83 ',"merge_hold":"signoff_cap","signoff_cap":"correctness","gc.routed_to":"human"')]"
+echo "# a lane short of green is progressing"
+store "[$(anchor V3 82)]"
 : > "$STUB_DEPS"
 printf '%s' "$(prview 82 OPEN CLEAN)" > "$GH_DIR/pr_view_82.json"
-printf '%s' "$(prview 83 OPEN CLEAN)" > "$GH_DIR/pr_view_83.json"
 # No approver: a GitHub approval would back V3's bead-less lane green through the
 # fallback, hiding the lane-short-of-green state this records.
 echo '[]' > "$GH_DIR/reviews_82.json"
-approved 83
 out=$("$SUT" 2>&1)
 eq "$(pinned V3)" "progressing@sha-82" "a lane short of green is a check a review is due to raise"
-eq "$(pinned V4)" "wedged-exception@sha-83" "merge_hold=signoff_cap with signoff_cap beside it is the convergence cap's wedge"
 
-# An operator's own hold carries no signoff_cap, and the board must not read it
-# as a wedge no automated actor will lift.
-echo "# an operator hold with no cap stamp records no wedge"
+# An operator's hold is theirs to lift. The merge pass stops at it and records
+# nothing; gate-ensure.sh's pass is what records the anchor's lanes.
+echo "# an operator hold holds the merge and records no verdict"
 store "[$(anchor V4b 90 ',"merge_hold":"true"')]"
 printf '%s' "$(prview 90 OPEN CLEAN)" > "$GH_DIR/pr_view_90.json"
 approved 90
 out=$("$SUT" 2>&1)
 has "$out" "merge_hold set (operator gate)" "the hold holds the merge"
-eq "$(pinned V4b)" "<absent>" "…and nothing records it as the cap's wedge"
+eq "$(pinned V4b)" "<absent>" "…and records no verdict"
 
-# An operator's own hold (merge_hold=true, not the literal "signoff_cap") is
-# not the cap's wedge, even beside a signoff_cap value orphaned by an earlier
-# park the operator has since taken over.
-echo "# an operator hold beside a STALE orphan signoff_cap is not the cap's wedge"
-store "[$(anchor V4c 91 ',"merge_hold":"true","signoff_cap":"correctness"')]"
-printf '%s' "$(prview 91 OPEN CLEAN)" > "$GH_DIR/pr_view_91.json"
-approved 91
-out=$("$SUT" 2>&1)
-has "$out" "merge_hold set (operator gate)" "the hold still holds the merge"
-eq "$(pinned V4c)" "<absent>" "…but the orphaned signoff_cap does not make it the cap's wedge"
-
-echo "# checks green and waiting on a person: settled, not wedged"
+echo "# checks green and waiting on a person: settled, not blocked"
 store "[$(anchor V5 84), $(rev V5)]"
 printf '%s' "$(prview 84 OPEN CLEAN)" > "$GH_DIR/pr_view_84.json"
 # Correctness is green (local backing), so the only thing left is the universal
@@ -1302,13 +1284,13 @@ has "$out" "no external APPROVED review" "the approval hold fires"
 eq "$(pinned V5)" "settled@sha-84" "the cadence is done; the pull request waits on an approval"
 
 echo "# recording a verdict moves no route"
-store "[$(anchor V8 87 ',"merge_hold":"signoff_cap","signoff_cap":"correctness","gc.routed_to":"human"')]"
+store "[$(anchor V8 87 ',"gc.routed_to":"human"'), $(rev V8)]"
 : > "$STUB_DEPS"
 printf '%s' "$(prview 87 OPEN CLEAN)" > "$GH_DIR/pr_view_87.json"
-approved 87
+echo '[]' > "$GH_DIR/reviews_87.json"
 out=$("$SUT" 2>&1)
-eq "$(pinned V8)" "wedged-exception@sha-87" "the verdict is recorded"
-eq "$(meta V8 'gc.routed_to')" "human" "…and the anchor keeps the park route the cap gave it"
+eq "$(pinned V8)" "settled@sha-87" "the verdict is recorded"
+eq "$(meta V8 'gc.routed_to')" "human" "…and the anchor keeps the route it carried"
 
 echo "# an open blocker is progressing only when a POOL is behind it"
 store "[$(anchor V6 85), $(rev V6),

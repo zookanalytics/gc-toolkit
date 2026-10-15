@@ -27,8 +27,9 @@
 #   workflow-step-dead
 #                  the step's root has CLOSED, so there is no molecule left to
 #                  resume and releasing it would offer a finished chain to a
-#                  pool as fresh work. Delegate to dead-molecule-dispose.sh,
-#                  which de-routes the whole chain before it closes anything.
+#                  pool as fresh work. Delegate to run-cancel.sh --ended, which
+#                  ends what the run left open through gascity's own close of a
+#                  workflow and writes no member itself.
 #   workflow-step-unresolved
 #                  the step names a root that will not read. An unreadable root
 #                  is not a live one, so nothing is written: the step stays
@@ -117,7 +118,7 @@ read_bead() { gc bd show "$1" --json 2>/dev/null | scrub; }
 
 # Resolved from $0 so a copy of this script runs against the copy beside it.
 HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-DEAD_DISPOSE="${GC_DEAD_MOLECULE_TOOL:-$HERE/dead-molecule-dispose.sh}"
+RUN_CANCEL="${GC_RUN_CANCEL_TOOL:-$HERE/run-cancel.sh}"
 
 # The source arm's two `gc workflow` calls run under a hard bound. They are slow
 # rather than stuck: each scans every store in the city, and a healthy call takes
@@ -371,55 +372,29 @@ case "$CLASS" in
         # The molecule is over. The chain, not this bead, is the disposal unit:
         # closing one step readies the next, so a per-bead close here would be
         # the partial teardown that offers a successor of a finished molecule
-        # to a pool. dead-molecule-dispose.sh de-routes the whole chain before
-        # it closes anything, and refuses a chain holding a work bead.
-        #
-        # A 0 exit does not by itself mean the chain is gone. The disposer
-        # exits 0 for a real teardown (result=disposed) or an already-empty
-        # chain (result=clean), and equally for a refusal that wrote nothing:
-        # result=refused when the chain still holds a work bead, result=live_root
-        # when the root was no longer closed on re-read. Reading every 0 as a
-        # landed disposal reports a recovery that never happened and loses the
-        # reason it was refused. Discriminate on result — only disposed/clean is
-        # a landing; a refusal is a skip that carries the disposer's result and
-        # detail, leaving the bead owned to be re-examined next cycle.
-        #
-        # Exit 3 is a chain left half torn down — some members de-routed or
-        # closed, some not. The witness patrol escalates that partial write
-        # (witness-partial-release) rather than retrying, so it must survive the
-        # wrapper as this script's own exit-3 partial carrying the member detail
-        # the disposer named. Any other nonzero is a plain failed=dead-chain.
+        # to a pool. run-cancel.sh --ended closes every member the run left open
+        # in one gascity call, and refuses (exit 2) a root that reads live on
+        # its own read or a chain holding a work bead. A refusal is a skip that
+        # leaves the bead owned to be re-examined next cycle; any other non-zero
+        # exit is a failed dead-chain.
         ACTION="dispose-dead-chain"
         DETAIL="root_closed"
         if [ "$APPLY" = "1" ]; then
-            if [ -x "$DEAD_DISPOSE" ]; then
-                DEAD_OUT="$("$DEAD_DISPOSE" "$BEAD" --apply --json 2>/dev/null)"
-                DEAD_RC=$?
-                DEAD_RESULT="$(printf '%s' "$DEAD_OUT" | jq -r '.result // ""' 2>/dev/null)"
-                DEAD_DETAIL="$(printf '%s' "$DEAD_OUT" | jq -r '(.detail // .members // "") | select(. != "")' 2>/dev/null)"
-                case "$DEAD_RC" in
-                    0)
-                        case "$DEAD_RESULT" in
-                            disposed|clean) note_landed dead-chain ;;
-                            *)
-                                ACTION="skip"
-                                DETAIL="root_closed;not-disposed=${DEAD_RESULT:-no-result}"
-                                [ -n "$DEAD_DETAIL" ] && DETAIL="$DETAIL;$DEAD_DETAIL"
-                                ;;
-                        esac
+            if [ -x "$RUN_CANCEL" ]; then
+                END_ERR="$("$RUN_CANCEL" --root "$ROOT_ID" --ended --reason "orphan recovery: $BEAD is a step of run $ROOT_ID, which has ended" 2>&1 >/dev/null)"
+                END_RC=$?
+                case "$END_RC" in
+                    0) note_landed dead-chain ;;
+                    2)
+                        ACTION="skip"
+                        DETAIL="root_closed;not-ended=refused"
                         ;;
-                    3)
-                        note_landed dead-chain
-                        note_failed dead-chain-incomplete
-                        [ -n "$DEAD_DETAIL" ] && DETAIL="root_closed;$DEAD_DETAIL"
-                        ;;
-                    *)
-                        note_failed dead-chain
-                        [ -n "$DEAD_DETAIL" ] && DETAIL="root_closed;$DEAD_DETAIL"
-                        ;;
+                    *) note_failed dead-chain ;;
                 esac
+                [ "$END_RC" -eq 0 ] || [ -z "$END_ERR" ] \
+                    || echo "orphan-dispose: run-cancel.sh: $(printf '%s' "$END_ERR" | tr '\n' ' ')" >&2
             else
-                note_failed "dead-molecule-dispose-missing"
+                note_failed "run-cancel-missing"
             fi
         fi
         ;;
