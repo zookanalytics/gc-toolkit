@@ -64,9 +64,10 @@ loop, the polecat's wake nudge and the refinery's named session are deleted.
    in-flight work running, and a handed-off branch is in flight. So the refinery
    reads an offer's readiness from the offer's own blockers only, through one
    script that the claim, the demand count and the alarm all call. The cost is
-   that gascity's idle-claim backstop does not apply to a pool with a custom
-   demand count. The alarm covers that case until gascity gc-tj666s adds the
-   readiness mode as a pool option, which would let the custom query go.
+   that gascity's idle-claim backstop covers only the offers its default query
+   can see, so it misses a session woken only for an offer under a parked epic.
+   The alarm covers that case until gascity gc-tj666s adds the readiness mode as
+   a pool option, which would let the custom query go.
 
 ## What this design rests on
 
@@ -140,31 +141,37 @@ three paths, and none of them needs a migration script.
 1. **Handoffs waiting at cutover.** Removing the `[[named_session]]` stanza makes
    gascity retire that session. `retireRemovedConfiguredNamedSessionBead`
    (gascity `cmd/gc/session_beads.go:878-905`) stops the session's runtime,
-   retires its bead, and releases every bead assigned to it with
-   `retiredSessionFallbackRoute`. That fallback route is the session's
-   `template` (`:907-912`), which is `<rig>/gc-toolkit.refinery`. Every waiting
-   old-style handoff comes out open, unassigned and routed to the pool, so it is
-   an offer.
+   retires its bead, and releases every bead assigned to it. The release clears
+   the assignee. An old-style handoff carries no route, so the release also
+   stamps the fallback route, the session's `template`, into `gc.run_target`
+   (`retiredSessionFallbackRoute`, `:907-912`, and `ReleaseWorkBead`,
+   `work_assignment.go:188-206`). That template is `<rig>/gc-toolkit.refinery`.
+   gascity's route recovery then copies `gc.run_target` into the empty
+   `gc.routed_to` of a plain bead (`carriedPoolRoute`), so every waiting
+   old-style handoff becomes an offer.
 2. **Handoffs a pre-cutover polecat writes after cutover.** A molecule poured
    before the change runs the submit text frozen into its steps at pour time.
    That text still assigns the refinery by name and still runs its own wake and
    nudge. The new refinery's claim still serves the bead. The claim's second tier
-   returns open work assigned to the session's own identities (section 2), and
-   the pool session's alias is `<rig>/gc-toolkit.refinery`, the same string the
-   old text writes. This window closes when the last molecule
-   poured before cutover submits. A query for open beads assigned to the
-   refinery that carry no route counts what is left. If PR #1217 lands first,
-   the handoff is a script that every pour calls by name, and the window does
-   not open at all.
+   returns open work assigned to the session's own identities, which include
+   `<rig>/gc-toolkit.refinery` (section 2), the same string the old text writes.
+   This window closes when the last molecule poured before cutover submits. A
+   query for open beads assigned to the refinery that carry no route counts what
+   is left. If PR #1217 lands first, the handoff is a script that every pour
+   calls by name, and the window does not open at all.
 3. **The patrol wisps.** These are the `mol-refinery-patrol` molecules assigned
-   to the old identity. The retire release lists both tiers (`seat_work.go:156`),
-   so it unassigns the wisps along with the handoffs. A molecule container is never
-   routable demand (`internal/config/workquery.go:1052-1053`), so a released wisp
-   is never offered as work. A pool session also cannot start before the
-   retirement, because a live session holding the alias stops the pool from
-   minting one (section 8). So the new session's first tier cannot find a wisp
-   still assigned to the alias and resume it as its claim. Nothing reads the wisps
-   after cutover, and the cutover burns them by hand (section 12).
+   to the old identity. The retire release reads the wisp tier as well as the
+   issue tier (`seat_work.go:160`), so it unassigns the wisps along with the
+   handoffs and stamps the same `gc.run_target` on them. A molecule container is
+   never routable demand on gascity's default query
+   (`internal/config/workquery.go:1052-1053`), and no tier of
+   `refinery-offers.sh` serves one (section 2), so a released wisp is never
+   offered as work, whatever route recovery writes on it. A pool session also
+   cannot start before the retirement, because the named session's row holds the
+   alias, which stops the pool from minting one beside it (section 8). So the new
+   session's first tier cannot find a wisp still assigned to the alias and
+   resume it as its claim. Nothing reads the wisps after cutover, and the
+   cutover burns them by hand (section 12).
 
 ## 2. Claiming and releasing a handoff
 
@@ -177,18 +184,20 @@ alias (`namedSelfTargetAdmit`, `internal/config/workquery.go:905-929`). So
 assignment by name is no longer the only way to wake or feed a named refinery.
 The pool is still the right shape, for three reasons.
 
-- **Recovery.** gascity's dead-assignee sweep keeps any claim held by a
-  configured named identity, on the assumption that the session comes back
-  (`assigneePreservesNamedSessionRoute`, `pool_session_name.go:338-340`). A pool
-  claim is released once no open session holds it.
+- **Recovery.** gascity's dead-assignee sweep keeps a claim held by the
+  configured named identity that backs the claim's route, even with that
+  session's bead closed, on the assumption that the session comes back
+  (`assigneePreservesNamedSessionRoute`, `pool_session_name.go:1078-1108`,
+  called at `:338-340`). A pool claim is released once no open session holds
+  it.
 - **One materialization path.** With the stanza gone, pool demand is the only
   automated way to start a refinery session. That is the shape tk-77txj0 asked
   for (section 8).
 - **The ruling.** The operator's target model in tk-zvu0bd6 names a pool.
 
-gascity's idle-claim backstop would be a fourth reason, because it serves pool
-slots only. It does not reach this pool while the pool declares its own demand
-count (section 4).
+gascity's idle-claim backstop is a fourth reason, because it serves pool slots
+only. While the pool declares its own demand count, it reaches only the offers
+gascity's default query can see (section 4).
 
 ### Configuration
 
@@ -197,8 +206,9 @@ count (section 4).
 - It sets `min_active_sessions = 0` beside `max_active_sessions = 1`. A template
   capped at one counts as a pool, and gets pool reconciliation, only when it
   sets a minimum or a scale check. Without either it is treated as the backing of
-  a named session (`internal/config/session_capacity.go:93-127`). So the minimum
-  is load-bearing, and the polecat pool sets it the same way.
+  a named session (`internal/config/session_capacity.go:93-127`). The scale
+  check below already qualifies it, and the minimum keeps it a pool once
+  gc-tj666s lets the scale check go. The polecat pool sets it the same way.
 - It keeps `wake_mode = "fresh"` and the per-instance `work_dir`. A pool capped at
   one uses the canonical identity, with no `-1` suffix
   (`UsesCanonicalSingletonPoolIdentity`). So `{{.AgentBase}}` resolves to
@@ -239,30 +249,40 @@ the alarm (section 5) also calls, so the three cannot disagree. The script reads
 the work by `bd list` and gives the claim three tiers in the default order:
 
 1. In-progress beads assigned to the session's own identities. These are its own
-   claim, resumed after a crash.
+   claim, resumed after a crash. The identities are the session's id, its
+   session name and its alias, and `<rig>/gc-toolkit.refinery` is always among
+   them, so a session whose alias gascity deferred still finds work held under
+   it (see the claim below).
 2. Open beads assigned to those identities. These are old-style handoffs during
    cutover.
 3. Open, unassigned beads routed to `<rig>/gc-toolkit.refinery`. Epics and
    beads carrying a dispatch-hold or `human` label are excluded, which matches the
    default tier's serving rules (`workquery.go:216-222`). The result is sorted
    by priority, then `created_at`. The tier keeps the default query's origin gate.
-   It serves a session whose origin is ephemeral, or whose alias is the refinery's
-   own, and no other (`poolDemandOriginGateScript`, `workquery.go:931-938`).
+   It serves a session whose origin is ephemeral or empty, or whose alias is the
+   refinery's own, and no other (`poolDemandOriginGateScript`,
+   `workquery.go:931-938`).
 
-In tiers 2 and 3 a bead is ready when none of its own `blocks`, `waits-for` or
-`conditional-blocks` dependencies points at a bead that is not closed. Its
-ancestors are not read. The `scale_check` counts tier 3.
+No tier serves a molecule container. gascity's default query never offers one,
+because `bd ready` excludes it, but the script reads `bd list` and so excludes
+molecules itself. In tiers 2 and 3 a bead is ready when none of its own
+`blocks`, `waits-for` or `conditional-blocks` dependencies points at a bead that
+is not closed. Its ancestors are not read. The `scale_check` counts tier 3.
 
 A bead parked on a refinery wait has an open blocker of its own, so it is not
 ready (section 3). A bead under a parked epic has none, so it is. gascity's own
 queries stay as they are for every other pool.
 
-The custom demand count has one cost. gascity selects concrete demand beads only
-on its default demand path. A custom `scale_check` returns a count, so the slot
-gets no trigger bead (`pool_desired_state.go:589-640`). The idle-claim backstop
-keys on that trigger bead, so it does not serve this pool (section 4). gascity
-gc-tj666s asks for own-blocker readiness as a pool option. With it, the refinery
-could drop the custom query and keep concrete demand.
+The custom demand count has one cost. A custom `scale_check` returns a count,
+and a count names no bead (`pool_desired_state.go:589-640`). While the pool is
+cold, gascity also runs its default demand probe for it, clamped to one, and
+that probe names a concrete trigger bead for the slot it wakes
+(`build_desired_state.go:1428-1440`, `:2451-2467`). The probe reads `bd ready`,
+so it never names an offer under a parked epic. A session woken only for such an
+offer has no trigger bead, and the idle-claim backstop keys on that bead, so it
+does not serve that session (section 4). gascity gc-tj666s asks for own-blocker
+readiness as a pool option. With it, the refinery could drop the custom query,
+and the backstop would serve every offer.
 
 ### The claim
 
@@ -270,15 +290,19 @@ A refinery session runs `gc hook --claim --drain-ack --json`. That command claim
 one item, or acknowledges drain when there is none. The hook takes its candidates
 only from the work query's output (`tryHookClaim`, `cmd_hook_claim.go:473-495`).
 So `refinery-offers.sh` carries the same three tiers gascity's default query
-does (`EffectiveWorkQuery`, `workquery.go:1039-1074`), with readiness read as
-above.
+does (`EffectiveWorkQuery` and `buildWorkQuery`, `workquery.go:1039-1117`), with
+readiness read as above.
 
 The claim writes these fields:
 
 - `status=in_progress`.
 - `assignee` is the session's alias. A stable identity claims under its alias
   (`hookClaimAssigneeIdentity`, `cmd/gc/cmd_hook.go:1040-1064`, and the
-  rationale at `build_desired_state.go:4462-4471`).
+  rationale at `build_desired_state.go:4462-4471`). gascity defers a new
+  session's alias while an earlier session row still holds it or its create is
+  pending. A session started then runs with a blank `GC_ALIAS` and claims under
+  its session id (`setPoolTemplateRuntimeIdentityInfo`,
+  `build_desired_state_pool_info.go:55-65`).
 - `gc.session_id` and `gc.session_name` name the concrete session
   (`hookClaimIdentityPatch`, `cmd_hook_claim.go:1819-1827`).
 - `gc.claimed_at` is stamped write-once at the bead's first claim
@@ -309,24 +333,29 @@ recycle hook and the cost gascity #2980 describes have nothing to accumulate.
 ### Release paths
 
 gascity has one release verb with a policy per path (`cmd/gc/work_release.go:3-21`,
-`:77-100`). A pool claim with a route is served by all of them.
+`:77-100`). Each path also picks the identities it releases under, and the paths
+differ on the stable alias. A pool claim with a route is served by every path
+whose identities include its assignee.
 
 | Path | What it does to a refinery claim |
 |---|---|
-| Drain-ack | `gc runtime drain-ack` gives back every in-progress claim the session still holds (`releaseUnexecutedClaimsOnDrainAck`, `session_beads.go:1215-1263`). A session that drains without ending its claim cannot strand it. |
-| Killed seat | A seat the controller kills keeps work it started, so the same slot resumes it. |
-| Retired session, close cascade, stranded repair | The claim is given back with its route. |
+| Drain-ack | `gc runtime drain-ack` gives back the in-progress claims held under the session's id or session name (`releaseUnexecutedClaimsOnDrainAck`, `session_beads.go:1215-1263`). It leaves out the stable alias (`releaseScopeOwn`, `work_location.go:219-225`), so a claim held under the alias stays in progress, for the next session's first tier to resume or for a path below to give back. |
+| Killed seat | A seat that `gc session kill` stops keeps work it started, so the same seat resumes it (`releaseKilledSeat`, `work_release.go:93`). |
+| Retired session (`gc session close`, a removed named session) | The claims held under the session's id, session name or named identity are given back with their route (`session_beads.go:1199-1212`). Like drain-ack, it leaves out the alias. |
+| Close cascade, stranded repair | The claim is given back with its route, including one held under the alias. |
 | Dead-assignee sweep | Routed work whose assignee maps to no open session is reopened (`releaseOrphanedPoolAssignments`, `pool_session_name.go:196-417`). |
 
-A crash leaves the claim in progress under the alias. The slot's session bead
-stays open while it sleeps, and in-progress assigned work is wake demand. So the
-slot wakes, and its first tier returns the claim, which it resumes.
+A crash leaves the claim in progress. Once the runtime has stayed dead through
+gascity's two-minute confirm window, the stranded repair retires the session and
+gives the claim back with its route (`strandedRepairConfirmGrace`,
+`session_beads.go:1517`), so the bead is offered again. A session that holds the
+alias before then resumes the claim through its first tier instead.
 
 ### Every reader that must cover the claim
 
 | Reader | How it covers a refinery claim | Change |
 |---|---|---|
-| gascity session liveness and release (above) | The claim carries a route and the session's pins, which is the shape every release path serves. | None. |
+| gascity session liveness and release (above) | The claim carries a route and the session's pins. The release paths above serve it, each under the identities it covers. | None. |
 | Witness orphan recovery (`mol-witness-patrol.toml` `recover-orphaned-beads`) | `host-bead-skip` ranks `gc.session_id` first (`:223-229`), so the owner is the concrete refinery session, not the alias the next session inherits. A dead owner sends the bead to `orphan-dispose.sh`'s source arm. That arm runs `delete-source`, which finds no workflow, then `reopen-source`, which keeps the route it finds, then clears the pins. The restore step leaves a present route alone (`orphan-dispose.sh:226-255`), so the bead is offered to the refinery again. `downstream-court-skip` does not drop it, because a claim carries no `merge_result`. | The prose at `:338-344`, which excludes the refinery as an infrastructure identity and describes the polecat-to-refinery pin handoff, is rewritten. A refinery claim is pool work. `orphan-dispose.test.sh` gains a fixture for a claimed refinery bead. |
 | Liveness census (`liveness-sweep.sh`, `liveness-classify.sh`) | An offer is in `bd ready --unassigned` and classifies as `routed-and-claimable` (`liveness-classify.sh:150`). An offer under a parked epic is outside the ready set, and its wait is the park's edge on the epic. A claim is in progress and outside the ready set, like every claimed step. A bead parked on a refinery wait is blocked, so it is outside the ready set and its wait is an edge. | None. A test fixture pins the offer's class. |
 | I11 (`doctor/check-claim-advancing`) | Arm 1 judges a claim's holder: UNHELD, ORPHANED, DEAD, or STALLED. It takes only in-progress beads that carry `gc.step_ref` (`run.sh:309-312`), so today a refinery claim is invisible to it. | Arm 1 widens to in-progress beads routed to a pool agent. A refinery claim's holder is then judged exactly as a step's is. Arm 2, offers nobody claims, stays step-scoped, because refinery offers belong to the one alarm in section 5. `gc.claimed_at` is write-once, so a re-claim is aged from the first claim. That only makes I11 check the holder sooner. A working holder stays clean, because STALLED also needs the holder's `last_active` past the bound. |
@@ -354,23 +383,30 @@ it:
 Every exit that ends a claim follows two rules.
 
 - **It clears the claim's pins** (`gc.session_id`, `gc.session_name`), as every
-  release in the pack does. The witness ranks `gc.session_id` first, so a pin
-  left behind names a drained session, and `doctor/executor-identity-residue`
-  reports it. The pins go in the same write that clears the route, or in an
-  earlier one. gascity's detached-handoff orphan sweep restores a pool route from
-  a session pin on any bead that is open, unassigned and unrouted, carries a
-  `branch`, and has no `merge_result` (`isDetachedHandoffOrphanCandidate`,
-  `pool_detached_orphan_sweep.go:204-240`). A rejection passes through exactly
-  that shape between `rejection-repool.sh`'s unanchoring write and its pour. A pin
-  left there would send the rejected bead straight back to the refinery. Today
-  the handoff carries no pins, because the polecat clears its own and the
-  refinery never claims, so `rejection-repool.sh` has never needed to clear them.
-- **It ends the claim before it reassigns.** bd lets the holder clear its own
-  assignee in one write, which `docs/gascity-routing-model.md:47` records from a
-  live probe. bd refuses a reassignment off an in-progress bead that batches
-  other fields, and the refusal drops the whole write. So an exit that hands the
-  bead to another identity first writes the status, then the assignee, in the
-  order the polecat's submit already uses. The keeper race loss is one such exit.
+  release in the pack does. The witness ranks `gc.session_id` first, so a
+  `gc.session_id` left behind names a drained session as the bead's owner. A
+  `gc.session_name` left behind is the residue `doctor/executor-identity-residue`
+  reports once the bead carries a route the stamp does not match. The pins go in
+  the same write that clears the route, or in an earlier one. gascity's
+  detached-handoff orphan sweep restores a pool route from a session pin on any
+  bead that is open, unassigned and unrouted, carries a `branch`, and carries no
+  `merge_result`, `gc.run_target`, `gc.kind` or step key
+  (`isDetachedHandoffOrphanCandidate`, `pool_detached_orphan_sweep.go:204-240`).
+  A rejection takes exactly that shape at `rejection-repool.sh`'s unanchoring
+  write, and keeps it while the rebuild runs, because a rebuild's workflow never
+  claims its work bead. A pin left there would send the rejected bead straight
+  back to the refinery. Today the handoff carries no pins, because the polecat
+  clears its own and the refinery never claims, so `rejection-repool.sh` has
+  never needed to clear them. Its unanchoring transition clears them too
+  (unit 2).
+- **It ends the claim before it reassigns.** bd refuses an assignee change on an
+  in-progress bead from an actor that is not its holder, and the refusal drops
+  every field batched with it. The holder's own clear lands.
+  `docs/gascity-routing-model.md:47` records both from a live probe. So an exit
+  that hands the bead to another identity writes the status first and the
+  assignee after it, in separate writes, the order the polecat's submit already
+  uses. Once the bead is open the guard no longer applies, whichever actor bd
+  sees. The keeper race loss is one such exit.
 
 The merge-push terminal transitions already pass `--assignee ""`. They add the two
 pin unsets. Their `merge_result` keeps them out of the orphan sweep either way.
@@ -459,8 +495,12 @@ after `refinery-`.
 | 266 | The prep worktree cannot be staged | Transient | Release |
 | 275-307 | The merge conflicts | Outcome | Rejection to the polecat pool (unchanged) |
 | 300 | `rejection-repool.sh` not found | Rig | `pack-script-missing` |
-| 307 | `rejection-repool.sh` exits 3, having recorded nothing | Transient | Release. `reopen-source` has already reopened the bead, and its route is preserved. |
+| 307 | `rejection-repool.sh` exits 3 with the bead still routed to the refinery: it stopped before its unanchoring write landed, and no visit landed | Transient | Release. `reopen-source` has already reopened the bead and kept its route, so the bead is an offer again. |
+| 307 | `rejection-repool.sh` exits 3 after its unanchoring write cleared the route: the rejection is recorded, but no pour was proved and no visit landed | Rig | `repool-unfinished`, with no edge. The bead has left the refinery's queue, and a pour may have started, so it is not released to the refinery. The finding carries the command that finishes the repool. |
 | 307 | `rejection-repool.sh` exits 1 (usage) | Rig | `repool-refused` |
+
+The two exit-3 rows are told apart by reading the bead's route. `reopen-source`
+keeps it, and the unanchoring write clears it.
 
 **Gate (`run-tests` step)**
 
@@ -511,7 +551,7 @@ after `refinery-`.
 | Line | Today | Disposition |
 |---|---|---|
 | 113 | `GC_AGENT` is empty | Deleted. The claim is gascity's, and the runtime supplies the identity. |
-| 158 | The work list does not parse | Deleted. `refinery-offers.sh` exits non-zero on a read it cannot parse, rather than reading it as an empty queue. A failing work query makes `gc hook --claim` exit non-zero and claim nothing (`gc hook --help`), so the session drains holding nothing. |
+| 158 | The work list does not parse | Deleted. `refinery-offers.sh` exits non-zero on a read it cannot parse, rather than reading it as an empty queue. A failing work query makes `gc hook --claim` exit non-zero and claim nothing, and it writes no drain result, even with `--drain-ack` (`gc hook --help`). So the claim protocol drains the session itself, holding nothing. |
 | 1105, 1112, 1119 | The next wisp could not be poured, assigned or burned | Deleted with the wisp loop. |
 
 **The keeper's refinery exits (gascity rig only, `refinery-rebase-handling.template.md`)**
@@ -520,11 +560,11 @@ after `refinery-`.
 |---|---|---|---|
 | 74, 237-270 | The preflight refusal and the race loss (lease miss) | Outcome | The bead goes back to the keeper, its existing wait. It is written in the claim-safe order, status then assignee. The operator signal becomes a valid `escalate.sh --subject "$WORK" --key rebase-race-loss` call, which repairs tk-vfgmu8k. |
 
-A second transient exit on a bead never reaches the table's "Release". The attempt
-count sends the bead's third claim to `refinery-repeat-unresolved` first. In
-practice the transient rows are what tk-rohu7om's intermittent refusal and an
-ordinary store blip look like: they cost one more claim, and only for the bead
-they hit.
+No bead reaches the table's "Release" more than twice. Its third claim finds the
+attempt count at two and sends the bead to `refinery-repeat-unresolved` before
+working it. In practice the transient rows are what tk-rohu7om's intermittent
+refusal and an ordinary store blip look like: they cost one more claim, and only
+for the bead they hit.
 
 ## 4. What wakes the pool
 
@@ -539,12 +579,15 @@ is not counted, so it does not wake the pool.
 
 gascity's idle-claim backstop (`idle_nudge.go:45-98`) nudges a running pool slot
 whose trigger offer stays unclaimed, and recycles it after three tries. It needs
-a trigger bead, which a custom count does not supply (section 2), so it does not
-serve the refinery. A refinery session that sits at its prompt without claiming
-while an offer waits is caught by the alarm in section 5. That alarm files its
-finding at the second pass that sees nothing taken and nothing held, and the
-finding's first reaction puts the stopped session to whoever can act on it.
-gc-tj666s restores the backstop.
+a trigger bead. The refinery's custom count supplies none, and gascity's
+cold-pool probe supplies one only for an offer its default query can see
+(section 2). So the backstop serves a refinery session woken for an ordinary
+offer, and not one woken only for an offer under a parked epic. Every refinery
+session that sits at its prompt without claiming while an offer waits is caught
+by the alarm in section 5. That alarm files its finding at the second pass that
+sees nothing taken and nothing held, and the finding's first reaction puts the
+stopped session to whoever can act on it. gc-tj666s extends the backstop to
+every offer.
 
 So the design adds no nudge and no wake order. It deletes the polecat's step-6
 wake and nudge, and the keeper's.
@@ -568,9 +611,11 @@ holder has stopped is I11's to report (section 2).
    same set the claim serves and the demand count counts.
 2. No in-progress bead is routed to the refinery. That is, the refinery holds
    nothing.
-3. Every offer that was waiting at the previous pass is still waiting. That is,
-   the pool took nothing since the last look. The pass's state directory keeps
-   the previous pass's offer ids.
+3. Every offer that was waiting at the previous pass is still waiting, with the
+   same `refinery_attempts`. That is, the pool took nothing since the last look.
+   The count matters because a claim raises it even when its exit releases the
+   bead again, so a bead claimed and released between two passes waits at both.
+   The pass's state directory keeps the previous pass's offer ids and counts.
 4. Neither the refinery agent nor its rig is suspended. A suspended pool is a
    note.
 
@@ -582,8 +627,8 @@ A recurrence updates the one finding's occurrence count, so a lane-wide failure
 is one bead, not one per handoff. The finding's first reaction disposes it, and it
 can put it to the operator. The alarm never retracts itself. A retract through
 `escalate.sh --retract` records a moot verdict, and escalate.sh's 24-hour window
-would then mute the next recurrence. That is the case tk-eiphpx and tk-5ogyne
-report, and the initiative rules out patching the window for it.
+would then mute every recurrence for a day. That is the case tk-eiphpx and
+tk-5ogyne report, and the initiative rules out patching the window for it.
 
 **Why the merge cadence hosts it.** The refinery-reconcile order runs every pass
 for every rig, with no session. It keeps running while the refinery session is
@@ -634,10 +679,10 @@ with a silent sweep is a double fault that this design leaves to tk-dk2aqb7.
   (`mol-refinery-patrol.toml:467-470`, `:487-500`), and it goes too.
   tk-16ku05d, which reads the gate record into I14, is superseded.
 - **The patrol wisp loop.** This is the prompt's adopt-before-pour reconcile and
-  its "Patrol lifecycle" section (`agents/refinery/prompt.template.md:35-86`). It also covers the formula's `validate-identity`, `check-inbox`,
-  `find-work`, `patrol-summary` and `next-iteration` steps, and the tests that
-  extract their blocks (`find-work-gating-guard`, `patrol-wisp-reconcile`,
-  `patrol-pour-vars`).
+  its "Patrol lifecycle" section (`agents/refinery/prompt.template.md:35-86`).
+  It also covers the formula's `validate-identity`, `check-inbox`, `find-work`,
+  `patrol-summary` and `next-iteration` steps, and the tests that extract their
+  blocks (`find-work-gating-guard`, `patrol-wisp-reconcile`, `patrol-pour-vars`).
 - **The refinery's `[[named_session]]` stanza** in `pack.toml`.
 - **The wake and nudge** in the polecat's submit step and in the keeper's handoff.
 - **Its own debris.** Between 10-06 and 10-08 the witness filed nine findings
@@ -673,24 +718,27 @@ delivers, because the alias is stable, but nothing reads it as state.
 
 ## 8. Merges stay serialized
 
-`max_active_sessions = 1` counts every active or creating session of the
-template, whatever started it (`engdocs/design/session-model-unification.md:1212-1233`).
-The paths that can start a refinery session are these:
+gascity's session-model design counts every active or creating session of a
+template against `max_active_sessions` (`engdocs/design/session-model-unification.md:1212-1233`).
+The reconciler this city runs bounds each start path on its own. These are the
+paths that can start a refinery session:
 
 | Path | Bounded by |
 |---|---|
-| Pool demand | `capNewDemandCount` subtracts the template's live and accepted sessions from the cap (`pool_desired_state.go:1368-1398`), and counts creates in flight (`:572-580`). |
-| Explicit wake (`gc session wake`) | `underMaxActive` counts every other row of the template that is woken, alive or of unknown liveness, plus planned and in-flight creates (`allocator_decide.go:778-806`). |
+| Pool demand | `capNewDemandCount` caps new sessions at the template's maximum less its accepted requests (`pool_desired_state.go:1368-1398`), and a session holding a claim is one of those (`:532`). A pool session that has not claimed yet takes the first new-demand slot before any new session is created (`:537-544`, `:583-604`), and a create in flight is counted (`:572-580`). So at a cap of one, a session that holds a claim, or one that is about to claim, leaves no room for a second. |
+| Explicit wake (`gc session wake`) | It wakes a session row that already exists, and creates one only for a configured named session, which the refinery no longer has (`resolveSessionIDMaterializingNamed`, `cmd_session_wake.go:105`). The legacy reconciler applies no cap to a wake (`compute_awake_set.go:298-305`). gascity's v2 allocator, whose `underMaxActive` would (`allocator_decide.go:778-806`), is refused while any agent declares a custom `scale_check` (`reconcile_latch.go:39-82`). A wake by the alias reaches the one row that holds it. A wake of another row by its id is an explicit operator action, like a manual session. |
 | The named session | Removed. |
 | `min_active_sessions` floor | Zero. |
 | Dependency floor | No agent depends on the refinery. |
-| A manual session (`gc session new`) | A manual session may soft-exceed the cap, because it is an explicit operator action (`session-model-unification.md:1231-1233`). It cannot claim an offer unless an operator gives it the refinery's alias by hand, because tier 3 of `refinery-offers.sh` keeps gascity's origin gate (`workquery.go:920-938`). |
+| A manual session (`gc session new`) | A manual session may soft-exceed the cap, because it is an explicit operator action (`session-model-unification.md:1231-1233`). It cannot claim an offer unless an operator gives it the refinery's alias by hand, because tier 3 of `refinery-offers.sh` keeps gascity's origin gate (`workquery.go:931-938`). A manual session that holds the alias also stops the pool from minting one beside it, as below. |
 
 tk-77txj0 reports a named path and a pool path that do not share a count. At
-`46db7fbee` a live session holding a canonical singleton's alias already stops the
-pool from minting a standby (`canonicalSingletonAliasHeldTemplates`,
-`pool_desired_state.go:745-785`, applied at `:569-571`). With the named path
-removed, the question has no second path to ask about.
+`46db7fbee` a session outside the pool that holds a canonical singleton's alias,
+as the named session does, stops the pool from minting a standby beside it
+(`canonicalSingletonAliasHeldTemplates`, `pool_desired_state.go:745-785`,
+applied at `:569-571`). The check skips the pool's own sessions, which the pool's
+count bounds. With the named path removed, the pool is the only automated path,
+so the question has no second path to ask about.
 
 The merge itself stays where it is. `merge.sh` runs in the refinery-reconcile
 pass under its per-rig flock, and the refinery session's direct-mode push runs
@@ -699,16 +747,15 @@ inside its one claim.
 ## 9. What belongs upstream in gascity
 
 - **A shared count for named and pool sessions (tk-77txj0).** Nothing to file.
-  gascity already suppresses a pool standby beside a live alias holder at a cap of
-  one, and its accepted model counts every origin against the cap. This design
-  removes the second path.
+  gascity already suppresses a pool standby beside a named session that holds the
+  alias at a cap of one (section 8). This design removes the second path.
 - **A custom `work_query` and `scale_check` for the refinery.** Needed, and filed
   upstream as gascity gc-tj666s. gascity's default routed tier and demand count
   read `bd ready`, which holds a parked epic's members, and a handoff is in flight
   (section 2). gc-tj666s asks for own-blocker readiness as a pool option. Until it
   lands, the refinery declares both queries through `refinery-offers.sh`. Once it
-  lands, the refinery deletes them and gets concrete demand, and so the idle-claim
-  backstop, back.
+  lands, the refinery deletes them and gets concrete demand for every offer, and
+  with it the idle-claim backstop.
 - **The repeated `--status` trap behind tk-cg7k9zi.** Filed as gascity gc-3zov2j.
   `gc bd list --status=open --status=in_progress` keeps only the last value. A
   live probe on the polecat route returned 4 rows that way against 57 for
@@ -747,22 +794,23 @@ where one speaks the old shape to the other.
 
 1. **The exit writer.** Write `assets/scripts/refinery-exit.sh` and its test. It
    covers release, demand and finding, the attempt count, the edge read-back, the
-   self-block refusal, and pin clearing. Register `refinery_attempts` in
-   `lifecycle/lifecycle.toml`. The test covers each class against a bead held in
-   progress under the alias, a crash count reaching two, and an edge that fails
-   to land.
+   self-block refusal, pin clearing, and the unfinished repool's finding, which
+   takes no edge. Register `refinery_attempts` in `lifecycle/lifecycle.toml`. The
+   test covers each class against a bead held in progress under the alias, a
+   crash count reaching two, and an edge that fails to land.
 2. **The refinery pool.** This changes `agents/refinery/agent.toml` (min 0, max 1,
    the claim nudge, and the `work_query` and `scale_check` that call
    `assets/scripts/refinery-offers.sh`), adds that script, and deletes the stanza
    in `pack.toml`. The script's test covers four cases: a handoff under a parked
    epic is listed and counted; a handoff with an open blocker of its own is not;
    the session's own in-progress claim comes first; and the sort is priority, then
-   age. The prompt
-   (`agents/refinery/prompt.template.md`) describes the claim protocol and drops
-   the wisp reconcile. In `mol-refinery-patrol.toml`, the loop steps are
-   deleted, the claim's `$WORK` is used, every exit goes through unit 1, and the
-   terminal transitions clear the pins. The formula's block tests and
-   `refinery-escalation-wiring.test.sh` follow the edits. It depends on unit 1.
+   age. The prompt (`agents/refinery/prompt.template.md`) describes the claim
+   protocol and drops the wisp reconcile. In `mol-refinery-patrol.toml`, the loop
+   steps are deleted, the claim's `$WORK` is used, every exit goes through unit 1,
+   and the terminal transitions clear the pins. `rejection-repool.sh`'s
+   unanchoring transition clears them too (section 2). The formula's block tests,
+   `rejection-repool.test.sh` and `refinery-escalation-wiring.test.sh` follow the
+   edits. It depends on unit 1.
 3. **The handoff writers.** These are the submit handoff (the route through
    `pool-route.sh`, with no wake or nudge), `convoy-graduate.sh`, the keeper's
    `mol-upstream-gc-rebase.toml` handoff, and its `refinery-rebase-handling` race
@@ -773,8 +821,9 @@ where one speaks the old shape to the other.
    `orphan-dispose.test.sh` fixture, the census fixture, and the witness's orphan
    recovery prose.
 5. **The alarm and the deletions.** Add the refinery-reconcile alarm arm and its
-   test. Delete I14, the witness's `check-refinery` step and its test, and the
-   run-tests wisp note.
+   test. Delete I14, the witness's `check-refinery` step and its test
+   (`refinery-stuck-escalate.test.sh`), the `witness-refinery-queue` assertion in
+   `witness-escalation-wiring.test.sh`, and the run-tests wisp note.
 6. **Documents.** The central docs that describe the refinery's intake change with
    the unit that makes them stale: `docs/refinery-merge-cadence.md`,
    `docs/gascity-routing-model.md` (the handoff and claim rows),
@@ -824,7 +873,7 @@ recorded in tk-fhkllrb's notes when run, and no script for them lands in the rep
   left stale when its work bead moves on, and a crash window between the work
   bead's transition and the offer's close. Readers would also have to follow the
   offer to the work bead. The custom query costs one script and, until gc-tj666s,
-  the backstop.
+  the backstop for offers under a parked epic.
 - **Let a park hold handoffs.** This keeps gascity's default queries and needs
   nothing custom. It is not chosen, because it reverses steer-by-epic's approved
   rule that a park leaves in-flight work running: a branch already built would
