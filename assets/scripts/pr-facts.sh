@@ -10,8 +10,8 @@
 # bead-rehome.sh once its parked children, its machine review scaffolding
 # (scaffolding-sweep.sh) and any stale rework-or-close visit are retired;
 # otherwise abandoned + escalate.sh visit; base moved -> retargeted +
-# escalate (check markers cleared: a review of the pre-retarget diff proves
-# nothing about the new base); CONFLICTING with no feedback owed, on an APPROVED
+# escalate (the lanes' reviews stand: a person restores the base or accepts
+# the new one); CONFLICTING with no feedback owed, on an APPROVED
 # PR (review-verdict.sh, the rule merge.sh lands on; an unapproved one records
 # its posture and files nothing) -> file ONE
 # merge-in rework child while none is in flight, to the fix pool that brings the

@@ -279,8 +279,8 @@ SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --sh
 done
 "${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "$REVIEW_BEAD" --verdict <approve|request-changes> --reviewed-oid "$REVIEWED_OID" --notes-file findings.md --findings-file findings.json
 ```
-Do not post the review yourself, do not touch `check.*`, do not file rework or
-finding beads, and never run `gh pr review --approve`.
+Do not post the review yourself, do not write to the anchor, do not file rework
+or finding beads, and never run `gh pr review --approve`.
 
 Pass on this same call any flag the check section of the review bead's dispatch
 note names for the verdict, such as triage's `--add-gates` or demo's `--visual`,

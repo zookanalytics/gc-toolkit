@@ -948,9 +948,9 @@ bead already gates this branch, $WORK is a rework hand-back: move it to
 `unanchored` and close it landed-on-branch, never stamp `merge_result` on it
 (a merge_result-carrying rework child joins the anchor enumeration as a
 gateless second anchor), and let gating continue on the existing anchor: its
-lane markers are states of the lane, not of the head, so the rework's push does
-not touch them — the cadence re-reads the existing anchor's check and holds
-until it reads green.
+lanes derive their state from its reviews, not from the head, so the rework's
+push does not move them — the cadence re-derives the existing anchor's checks
+and holds until each derives green.
 
 Branch is the join key and `merge_result` present is the whole predicate: any
 declared state carries one, so an anchor parked for a person (`blocked`,
