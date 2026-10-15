@@ -1226,14 +1226,40 @@ where one speaks the old shape to the other.
    saw a claim held, or for the first pass that sees an offer. Delete I14, the
    witness's `check-refinery` step and its test
    (`refinery-stuck-escalate.test.sh`), the `witness-refinery-queue` assertion in
-   `witness-escalation-wiring.test.sh`, and the run-tests wisp note.
+   `witness-escalation-wiring.test.sh`, and the run-tests wisp note. The
+   witness's prompt stops describing the queue watch
+   (`agents/witness/prompt.template.md:6` and `:138`), and
+   `witness-route.test.sh`'s header stops naming
+   `refinery-stuck-escalate.test.sh` as the test that runs the queue read
+   (`:1-7`).
 6. **Documents.** The central docs that describe the refinery's intake change with
-   the unit that makes them stale: `docs/refinery-merge-cadence.md`,
-   `docs/gascity-routing-model.md` (the handoff and claim rows),
-   `docs/state-machine.md`, `docs/authority-map.md` (the new writer, and who writes
-   a refinery wait) and `docs/architecture.md`. `docs/component-model.md` and
-   `docs/steering.md` name the hold's new reader (unit 2). Each unit carries its
-   own document edits rather than a final docs pass.
+   the unit that makes them stale:
+   - `docs/refinery-merge-cadence.md`, `docs/state-machine.md` and
+     `docs/architecture.md`.
+   - `docs/gascity-routing-model.md`: the handoff and claim rows.
+   - `docs/authority-map.md`: the new writer and who writes a refinery wait, and
+     the retract row (`:51`), which names the witness's refinery check and
+     `witness-refinery-queue` (unit 5).
+   - `docs/component-model.md`: the hold's new reader (unit 2), I14's row (`:193`)
+     and the run-tests wisp note in the `mol-refinery-patrol.toml` row (`:394`)
+     (unit 5).
+   - `docs/steering.md`: the hold's new reader (unit 2).
+   - `docs/install.md`: I14's row in the check table (`:197`) (unit 5).
+   - `docs/gascity-agents.md`: the passages that describe this pack's refinery as
+     an `on_demand` named singleton and a patrol agent, which are the variants
+     table's examples (`:40`), the full startup walk (`:735`), the patrol health
+     line (`:770-772`) and the refinery's entry among the examples
+     (`:803-805`) (unit 2). Also the witness recipes, which name the
+     `refinery-stuck-escalate` block and its test (`:1469-1474`) (unit 5). The
+     gastown base's declarations it quotes (`:478-487`, `:684-690`) stay, and so
+     do the passages that keep the refinery's alias an infrastructure identity
+     (`:1233`, `:1374`).
+
+   Each unit carries its own document edits rather than a final docs pass. Each
+   also regenerates the seed-audit renders of the formulas and prompts it edits
+   (`generated/seed-audit/`, which `doctor/check-seed-audit-current` checks):
+   `mol-refinery-patrol`, `mol-polecat-work`, `mol-witness-patrol` and
+   `mol-upstream-gc-rebase`, the refinery and witness prompts, and `INDEX.md`.
 
 The design splits into units by surface, not by risk, so a reviewer reads each
 unit against one part of this document.
