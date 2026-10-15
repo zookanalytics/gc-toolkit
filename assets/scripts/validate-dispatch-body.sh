@@ -56,7 +56,7 @@ anchor), `check_name` (the lane whose batch this pass rules), and `reviewed_oid`
 `task_kind=finding` beads on that anchor for that lane.
 
 **What the pass writes**: a `finding.disposition` on each finding via
-`finding.sh set-disposition` (must-fix, deferred, declined, or needs-you —
+`finding.sh set-disposition` (must-fix, deferred, declined, needs-you or restates —
 decisions 1 and 2; a human-sourced finding is ruled on its merits like a machine one
 — the operator is a highly informed peer, not an authority the pass may not
 overrule — but declining a human objection owes them an answer, passed as
@@ -67,8 +67,10 @@ visit, holds the review changes-requested until the operator rules it, and posts
 the visit id to their thread; a comment whose question an open visit on the
 anchor's feedback already carries is `needs-you --visit` on that visit, never
 ruled on its merits, and `finding.sh` refuses any other ruling while that visit
-sits on the comment's own rework; a re-raise re-blocks because the closed
-finding re-adopts fresh on re-review),
+sits on the comment's own rework; a human review body that only frames the
+review's own inline comments is `restates`, no point of its own; a human ruling
+also writes the label and sentence the review's living answer shows; a re-raise
+re-blocks because the closed finding re-adopts fresh on re-review),
 and one convergence outcome via `review-outcome.sh` whose shape follows
 `check_name` (decision 3). A reviewer's lane batch backs its lane (`back-lane`)
 on convergence, or supersedes it (`supersede-lane`) when a fresh whole-diff
