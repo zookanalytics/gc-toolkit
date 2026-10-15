@@ -17,9 +17,9 @@ import (
 // flipping it blind — because pr-status-label.sh calls this in place of its own
 // shell and pr-status-label.test.sh is the acceptance bar. The anchor read goes
 // through gcbd.Show (daemon-first against the supervisor API, falling back to
-// `gc bd`); the in-flight set and the open visits list through `gc bd`. The cli
-// tests pin GC_NO_API, so every read answers from the same `gc bd` stub the
-// shell acceptance drives.
+// `gc bd`); the in-flight set and the anchor's open visits read through `gc bd`.
+// The cli tests pin GC_NO_API, so every read answers from the same `gc bd` stub
+// the shell acceptance drives.
 //
 // The value is decided by prstatus.Derive, the package exported for the helm
 // board to derive the same per-bead state: one code path, so a bead's PR label
@@ -104,30 +104,10 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	// The open visits that cover the anchor. Coverage is the shared visit
-	// identity the finalize gate holds the merge on: a visit covers the bead its
-	// tracks edge names, and its gc.continuation_group stamp only when it has no
-	// tracks edge. The stamp can land empty while the edge stands, so no metadata
-	// filter selects every visit on the anchor. The read lists every visit that is
-	// open or in_progress, the statuses the finalize gate holds on: a visit waiting
-	// for a person, and one a sitting is holding. Each row carries its own edges,
-	// and visitCovers judges it.
-	visits, ok := client.List(
-		"--metadata-field", "task_kind=visit",
-		"--status", "open,in_progress",
-		"--limit", "0",
-		"--json",
-	)
+	openVisit, ok := anchorOpenVisit(client, anchor)
 	if !ok {
 		fmt.Fprintf(stderr, "%s: could not read the open visits on %s; cannot derive a status\n", prStatusProg, anchor)
 		return 2
-	}
-	openVisit := false
-	for i := range visits {
-		if visitCovers(&visits[i], anchor) {
-			openVisit = true
-			break
-		}
 	}
 
 	state := prstatus.Derive(prstatus.Facts{
@@ -142,6 +122,57 @@ func prStatusDerive(args []string, stdout, stderr io.Writer) int {
 	})
 	fmt.Fprintf(stdout, "%s\n", state)
 	return 0
+}
+
+// anchorOpenVisit reports whether an open or in_progress visit covers anchor by
+// the shared visit identity. It reads from the anchor's end, with the two probes
+// clause_no_open_visit in assets/scripts/finalize-gate.sh makes, so the cost
+// follows the anchor rather than the number of open visits in the store. The
+// first read lists the beads whose tracks edge names the anchor, and a visit
+// among them covers it. The second lists the beads stamped with the anchor
+// (gc.continuation_group), and a visit among them covers it only when it has no
+// tracks edge, which its own edge rows tell (visitCovers). open and in_progress
+// are the statuses the finalize gate holds on: a visit waiting for a person, and
+// one a sitting is holding. ok is false when either read does not answer, so the
+// caller derives nothing rather than reading a failed read as no visit.
+func anchorOpenVisit(client *gcbd.Client, anchor string) (covered, ok bool) {
+	trackers, ok := client.DepList(anchor, "--direction=up", "-t", "tracks", "--json")
+	if !ok {
+		return false, false
+	}
+	for i := range trackers {
+		if isOpenVisit(&trackers[i]) {
+			return true, true
+		}
+	}
+	stamped, ok := client.List(
+		"--metadata-field", "gc.continuation_group="+anchor,
+		"--status", "open,in_progress",
+		"--limit", "0",
+		"--json",
+	)
+	if !ok {
+		return false, false
+	}
+	for i := range stamped {
+		if isOpenVisit(&stamped[i]) && visitCovers(&stamped[i], anchor) {
+			return true, true
+		}
+	}
+	return false, true
+}
+
+// isOpenVisit reports whether b is a task_kind=visit bead that is open or
+// in_progress. A row with no status reads open, as the finalize gate reads it.
+func isOpenVisit(b *gcbd.Bead) bool {
+	if b.Meta("task_kind") != "visit" {
+		return false
+	}
+	switch b.StatusLowerOr("open") {
+	case "open", "in_progress":
+		return true
+	}
+	return false
 }
 
 // visitCovers reports whether visit v covers subject by the shared visit
