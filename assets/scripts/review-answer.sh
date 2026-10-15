@@ -228,7 +228,11 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
   # visits waiting on the operator, the fix notes, the mark lines the plan owes
   # it, and the comment already on the PR. $vl maps a review id to the mark lines
   # and batch visits the write-back plan asks of it ({marks, visits, swaps}),
-  # and $beads maps a bead id to the title, fix notes and close read for it.
+  # and $beads maps a bead id to the title, fix notes and close read for it. A
+  # review dismissed with every finding closed reads as re-requested when its
+  # comment carries the dismissed mark, or when the read of the PR lists its
+  # author among the pending review requests ($view.requested). So a dismissal
+  # whose edit of the comment failed still says so on the next pass.
   def ra_models($view; $prurl; $self; $vl; $beads; $marker):
     [ .[]? | select(((.metadata.task_kind // "") | tostring) == "finding")
            | select(((.metadata["finding.lane"] // "") | tostring) == "human")
@@ -271,7 +275,8 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
             unstamped: [ $fs[] | select(ra_owes_reply and (.posted | not)) | .id ],
             existing: $have,
             dismissed: (if $have != null and $have.dismissed then (if $selfrev then "self" else "requeued" end)
-                        elif ((($rv.state // "") | tostring) == "DISMISSED") and all($fs[]; .open | not) then "plain"
+                        elif ((($rv.state // "") | tostring) == "DISMISSED") and all($fs[]; .open | not) then
+                          (if $login != "" and any(($view.requested // [])[]; . == $login) then "requeued" else "plain" end)
                         else "" end),
             live: (any($fs[]; .open) or ((($rv.state // "") | tostring) == "CHANGES_REQUESTED")
                    or any($fs[]; ra_owes_reply and (.posted | not))

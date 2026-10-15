@@ -6165,6 +6165,22 @@ eq "$(grep -c '^ICEDIT' "$STUB_GH_LOG")" "1" "the fix unit landing edits the liv
 has "$(lanswer 607 6008)" "the config key was renamed in the same change. (7a7a7a7a)" "…to cite the commit that made the change"
 eq "$(lcount 607 6008)" "1" "…still in the one living answer"
 
+echo "# a dismissal whose edit of the living answer is refused still reads as re-requested on the next pass"
+store "[$(anchor LA11 610 "$(lmeta rework:KL11 7101 6011)"), $(fixunit KL11 closed),
+  $(lfind LL1 LA11 7101 6011 must-fix closed '**Quote the expansion.**' '{"finding.fix_unit":"KL11","finding.fix_answer":"Fixed as you suggested."}')]"
+printf '%s' "$(prview 610 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_610.json"
+threads 610 "$(lreview 610 6011 CHANGES_REQUESTED '' 7101)"
+commits 610 '[{"oid":"1b1b1b1bbbbb","message":"fix: quote the expansion (KL11)"}]'
+: > "$STUB_GH_LOG"
+out=$(STUB_ICEDIT_RC=1 run)
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/610/reviews/6011/dismissals" "the answered review is dismissed, its author re-requested"
+hasnt "$(lanswer 610 6011)" "Review dismissed" "…but the edit saying so is refused"
+rdismissed 610 6011
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(lanswer 610 6011)" "Review dismissed; your review is requested again." "the next pass says so, reading the pending review request"
+has "$(lanswer 610 6011)" "<!-- gc-review-answer:r6011:dismissed -->" "…and the comment keeps the dismissed mark from then on"
+
 echo "# a review whose answers outgrow one comment still gets its living answer and its dismissal"
 # Forty points each answered at length, and long notes from the fix, would render
 # past the 65,536 characters GitHub takes in one comment, and the stub refuses

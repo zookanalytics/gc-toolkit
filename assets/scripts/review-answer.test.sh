@@ -268,6 +268,9 @@ DONE_ROWS=$(printf '%s' "$ROWS" | jq -c 'map(if .id == "I" then .status = "close
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "DISMISSED"')" \
   --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m) | .[0] | [ .live, .dismissed ]')" '[false,"plain"]' \
   "(MODEL) a dismissed review with every finding closed and nothing owed is not live, and reads dismissed without a re-request claim"
+eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "DISMISSED" | .requested = ["op"]')" \
+  --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m) | .[0].dismissed')" '"requeued"' \
+  "(MODEL) …and reads re-requested when its author has a pending review request, though no comment carries the dismissed mark"
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "COMMENTED"')" \
   --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {"10":{"marks":["resolved r10"],"visits":[],"swaps":"-"}}; {}; $m) | .[0].live')" "true" \
   "(MODEL) a mark the plan asks of it keeps it live, so a body answered after its findings closed still gets its answer"

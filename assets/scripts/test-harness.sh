@@ -1053,9 +1053,12 @@ case "$sub" in
                 nodes: (.issue_comments // [])}}}}}' "$f"
           exit 0 ;;
         *reviews*)
+          # The reviews, and the logins the PR has pending review requests
+          # from, which the fixture keeps as .review_requests.
           [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
           [ -s "$f" ] || { echo "gh graphql stub: no threads fixture for PR $num" >&2; exit 1; }
           jq -c '{data: {repository: {pullRequest: {
+              reviewRequests: {nodes: [ (.review_requests // [])[] | {requestedReviewer: {login: .}} ]},
               reviews: {pageInfo: {hasNextPage: false, endCursor: null}, nodes: (.reviews // [])}}}}}' "$f"
           exit 0 ;;
         *) echo "gh graphql stub: unsupported query" >&2; exit 2 ;;
@@ -1098,12 +1101,23 @@ case "$sub" in
         gqvar b body
         # GitHub refuses an edit to a body over 65,536 characters.
         [ "${#b}" -le 65536 ] || { echo "gh api stub: Body is too long (maximum is 65536 characters)" >&2; exit 1; }
-        hit=""
+        # The ids this stub gives new comments start over on each PR fixture, so
+        # two PRs can hold one id. GitHub's ids are unique, and an edit names its
+        # comment by id alone, so the stub picks the fixture whose comment with
+        # that id carries the review or finding key the new body carries, and
+        # otherwise the first fixture holding the id.
+        key=$(printf '%s' "$b" | grep -Eo '<!-- gc-(review-answer:r[0-9]+|finding:[A-Za-z0-9._-]+) -->' | head -1)
+        hit=""; first=""
         for cand in "$G"/threads_*.json; do
           [ -s "$cand" ] || continue
           jq -e --arg c "$cid" '[ .issue_comments[]? | select(((.databaseId // 0) | tostring) == $c) ] | length > 0' "$cand" >/dev/null 2>&1 || continue
-          hit="$cand"; break
+          [ -n "$first" ] || first="$cand"
+          if [ -z "$key" ] || jq -e --arg c "$cid" --arg k "$key" '[ .issue_comments[]? | select(((.databaseId // 0) | tostring) == $c)
+               | select((.body // "") | contains($k)) ] | length > 0' "$cand" >/dev/null 2>&1; then
+            hit="$cand"; break
+          fi
         done
+        [ -n "$hit" ] || hit="$first"
         [ -n "$hit" ] || { echo "gh api stub: no fixture holds issue comment $cid" >&2; exit 1; }
         t=$(mktemp "${hit%/*}/.gc-stub.XXXXXX")
         jq --arg c "$cid" --arg b "$b" '.issue_comments = ((.issue_comments // []) | map(if ((.databaseId // 0) | tostring) == $c then .body = $b else . end))' \
@@ -1156,9 +1170,19 @@ case "$sub" in
       */pulls/*/requested_reviewers)
         # Re-request a reviewer. The reviewer login rides the -f arg the full-args
         # log above already captured; this marks the endpoint hit for a test to
-        # assert, and STUB_REREQUEST_RC models a re-request the API refuses.
+        # assert, and STUB_REREQUEST_RC models a re-request the API refuses. One
+        # that lands joins the PR fixture's pending review requests, as GitHub
+        # records it, so the next read serves it.
         printf 'REREQUEST %s\n' "$path" >> "${STUB_GH_LOG:?}"
-        exit "${STUB_REREQUEST_RC:-0}" ;;
+        [ "${STUB_REREQUEST_RC:-0}" = "0" ] || exit "${STUB_REREQUEST_RC:-0}"
+        n="${path##*/pulls/}"; n="${n%%/*}"
+        gqvar rr 'reviewers[]'
+        f="$G/threads_$n.json"
+        if [ -n "$rr" ] && [ -s "$f" ]; then
+          t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+          jq --arg r "$rr" '.review_requests = ((.review_requests // []) + [$r] | unique)' "$f" > "$t" && mv "$t" "$f"
+        fi
+        exit 0 ;;
       */pulls/*/reviews*|*/pulls/*/comments*)
         n="${path##*/pulls/}"; n="${n%%/*}"
         # STUB_GH_LIST_RC: the history delivered as a real gh failure. An absent

@@ -3554,7 +3554,10 @@ fi
 # Every node carries its author, body and creation instant, and a thread comment
 # its review's submission: the facts gc_city_own reads to tell the city's own
 # post from feedback. A thread comment also names its review, which ties a review
-# body to the inline comments it carries.
+# body to the inline comments it carries. The reviews read also carries the
+# reviewers the PR has pending review requests from, its first 100 on every page
+# and never paginated, since the read follows the reviews' cursor: a living
+# answer reads them to say a dismissed review's author is requested again.
 #
 # Those reads cost at least four GitHub calls an anchor, so the sweep is paced
 # like the walk above (pace-lib.sh): the same deadline, a rotation on a cursor
@@ -3564,6 +3567,7 @@ fi
 WB_REVIEWS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$num){
+      reviewRequests(first:100){nodes{requestedReviewer{... on User{login}}}}
       reviews(first:100,after:$endCursor){
         pageInfo{hasNextPage endCursor}
         nodes{id databaseId state body url author{login} submittedAt createdAt
@@ -4193,6 +4197,7 @@ WB_RECORDS
   # an empty Conversation, and the guard above holds the pass for it.
   wview=$(printf '%s\n%s\n%s' "$wrraw" "$wtraw" "$wiraw" | scrub | jq -sc '{
       reviews: [ .[].data.repository.pullRequest.reviews.nodes[]? ],
+      requested: ([ .[].data.repository.pullRequest.reviewRequests.nodes[]? | .requestedReviewer.login? // empty ] | unique),
       threads: [ .[].data.repository.pullRequest.reviewThreads.nodes[]? ],
       issue_comments: [ .[].data.repository.pullRequest.comments.nodes[]? ]
     }' 2>/dev/null) || wview=""
