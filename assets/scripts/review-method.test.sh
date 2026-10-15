@@ -15,7 +15,10 @@
 #                carries the What to check list, the severity ladder, the
 #                review-test-evidence block and the Verification line.
 #   (QUORUM)     the quorum's lanes apply the check's method, naming the
-#                correctness method, and not mol-review's review step.
+#                correctness method, and not mol-review's review step; a lane
+#                runs nothing anywhere, and the synthesis runs what the method
+#                runs inside a workspace made by the review-workspace-add block
+#                alone, which leaves the synthesis's own keepalive in place.
 #   (SPECIALIST) no other check's dispatch note or method file asks for a test
 #                run or its result, or runs a suite, and an undeclared check's
 #                note borrows no other check's method.
@@ -130,10 +133,28 @@ notE "$LIFE" 'adopted:' "(RUBRIC) mol-review carries no adopted rubric anchor"
 neutral "$TMP/quorum.txt" "the quorum formula"
 
 echo "# the quorum's lanes apply the check's method"
+# flat <file> : the file's prose on one line, so a pinned phrase may wrap.
+flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
 for lane in review-lane-one review-lane-two; do
   hasF "$TMP/quorum.$lane.txt" "$METHOD_REL" "(QUORUM) $lane names the correctness method"
   notF "$TMP/quorum.$lane.txt" "'s \`review\` step" "(QUORUM) $lane points at no mol-review review step"
+  flat "$TMP/quorum.$lane.txt" > "$TMP/quorum.$lane.flat"
+  hasF "$TMP/quorum.$lane.flat" 'read from the pack by that note'"'"'s `review-method-read` block' "(QUORUM) $lane reads the method from the pack"
+  hasF "$TMP/quorum.$lane.flat" 'no review workspace and no keepalive' "(QUORUM) $lane names what of the frame a lane lacks"
+  hasF "$TMP/quorum.$lane.flat" 'runs nothing the method runs, anywhere: not at the reviewed commit and not against the pre-change code' \
+    "(QUORUM) $lane runs nothing anywhere"
 done
+flat "$TMP/quorum.synthesize-and-signoff.txt" > "$TMP/synth.flat"
+hasF "$TMP/synth.flat" 'against the pre-change code alike' "(QUORUM) the synthesis owns every run the method calls for, the pre-change code's included"
+hasF "$TMP/synth.flat" 'the `review-workspace-add` block of `formulas/mol-review.toml`, and only that block' \
+  "(QUORUM) the synthesis makes its workspace with the review-workspace-add block alone"
+# The synthesis runs this block alone, after its own keepalive, so the block
+# must leave hb alone: mol-review's keepalive keys hb on a step bead the
+# synthesis never sets.
+awk '/^# >>> review-workspace-add$/ {f = 1} f {print} /^# <<< review-workspace-add$/ {f = 0}' "$LIFE" > "$TMP/workspace-add.sh"
+[ -s "$TMP/workspace-add.sh" ] && ok "(QUORUM) mol-review's review-workspace-add block extracts" || bad "(QUORUM) no review-workspace-add block in mol-review"
+notE "$TMP/workspace-add.sh" '(^|[^[:alnum:]_])hb[[:space:]]*\(\)' "(QUORUM) the review-workspace-add block defines no hb"
+notF "$TMP/workspace-add.sh" 'CLAIMED_STEP_BEAD_ID' "(QUORUM) …and reads no claimed step bead"
 
 echo "# no other check is asked for test results"
 : > "$TMP/specialists"

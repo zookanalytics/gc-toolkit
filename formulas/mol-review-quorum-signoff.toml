@@ -94,15 +94,18 @@ REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1
 M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
 ```
 
-**2. Apply the check's method to the diff, read-only.** The method is the one
-the check section of the review bead's dispatch note names; for the
-correctness check it is `skills/review-correctness/SKILL.md`. Read the diff
-(`git diff origin/<base>...<reviewed_oid>`) as that method directs and judge it
-as the method does. Run nothing at the reviewed commit: whatever the method
-runs there, the synthesis step runs once for the quorum, and a finding that
-depends on its result is the synthesis's to confirm. Record a mutation
-baseline with `git status --porcelain=v1 -z` before and after and report any
-delta you introduced (there should be none).
+**2. Apply the check's method to the diff, read-only.** The method is the file
+the check section of the review bead's dispatch note names, read from the pack
+by that note's `review-method-read` block; for the correctness check it is
+`skills/review-correctness/SKILL.md`. A lane has the pins from step 1 and the
+diff, `git diff origin/<base>...<reviewed_oid>`, and none of the rest of the
+frame the method's blocks assume: no review workspace and no keepalive. So a
+lane reads what the method reads and judges as the method does, and runs
+nothing the method runs, anywhere: not at the reviewed commit and not against
+the pre-change code. The synthesis step runs all of that once for the quorum,
+and a finding that depends on its result is the synthesis's to confirm. Record
+a mutation baseline with `git status --porcelain=v1 -z` before and after and
+report any delta you introduced (there should be none).
 
 **3. Write your durable lane output** to this step bead's `gc.output_json` as
 a `review-quorum.lane.v1` object, then close the step. The keys:
@@ -158,15 +161,18 @@ REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1
 M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
 ```
 
-**2. Apply the check's method to the diff, read-only.** The method is the one
-the check section of the review bead's dispatch note names; for the
-correctness check it is `skills/review-correctness/SKILL.md`. Read the diff
-(`git diff origin/<base>...<reviewed_oid>`) as that method directs and judge it
-as the method does. Run nothing at the reviewed commit: whatever the method
-runs there, the synthesis step runs once for the quorum, and a finding that
-depends on its result is the synthesis's to confirm. Record a mutation
-baseline with `git status --porcelain=v1 -z` before and after and report any
-delta you introduced (there should be none).
+**2. Apply the check's method to the diff, read-only.** The method is the file
+the check section of the review bead's dispatch note names, read from the pack
+by that note's `review-method-read` block; for the correctness check it is
+`skills/review-correctness/SKILL.md`. A lane has the pins from step 1 and the
+diff, `git diff origin/<base>...<reviewed_oid>`, and none of the rest of the
+frame the method's blocks assume: no review workspace and no keepalive. So a
+lane reads what the method reads and judges as the method does, and runs
+nothing the method runs, anywhere: not at the reviewed commit and not against
+the pre-change code. The synthesis step runs all of that once for the quorum,
+and a finding that depends on its result is the synthesis's to confirm. Record
+a mutation baseline with `git status --porcelain=v1 -z` before and after and
+report any delta you introduced (there should be none).
 
 **3. Write your durable lane output** to this step bead's `gc.output_json` as
 a `review-quorum.lane.v1` object, then close the step. The keys:
@@ -245,12 +251,13 @@ a pass: say so in the verdict body and, when the missing lane leaves you unable
 to reach a confident verdict, treat the review as request-changes with a
 finding that names the coverage gap rather than approving on one lane.
 
-**3. Run what the check's method runs at the pinned commit, once,** in the
-review's workspace, made exactly as `formulas/mol-review.toml`'s `review` step
-2 makes it (`review-workspace.sh add`; anything else you write to disk goes in
-the same workspace). The lanes ran nothing there, so this is the quorum's one
-run, and a method that runs nothing there leaves this step nothing to do. Run
-each long command under `hb`, this step's claim-lease keepalive:
+**3. Run what the check's method runs, once,** in the review's workspace. Make
+it with the `review-workspace-add` block of `formulas/mol-review.toml`, and
+only that block, because `hb` here is this step's own keepalive, below.
+Anything else you write to disk goes in the same workspace. The lanes ran
+nothing, so this is the quorum's one run of everything the method runs, at the
+pinned commit and against the pre-change code alike, and a method that runs
+nothing leaves this step nothing to do. Run each long command under `hb`:
 ```bash
 SYNTH_BEAD="<the bead_id your gc hook --claim returned for this step>"
 # >>> quorum-lease-keepalive
@@ -325,10 +332,10 @@ done
 gc runtime drain-ack
 ```
 
-**Exit criteria:** both lanes read (or reduced coverage recorded), whatever the
-check's method runs at the pinned commit run once under `hb`, findings.md +
-findings.json written, exactly one signoff.sh call succeeded (or findings
-appended and the route restored), step chain closed forward, the workspace
-removed unless the bead went back to the pool, drain acknowledged.
+**Exit criteria:** both lanes read (or reduced coverage recorded), the check
+method's commands run once under `hb`, findings.md + findings.json written,
+exactly one signoff.sh call succeeded (or findings appended and the route
+restored), step chain closed forward, the workspace removed unless the bead
+went back to the pool, drain acknowledged.
 """
 metadata = { "gc.run_target" = "{{synthesis_target}}", "gc.review_quorum_role" = "synthesis" }
