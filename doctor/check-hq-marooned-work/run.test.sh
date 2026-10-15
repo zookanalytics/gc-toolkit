@@ -10,9 +10,9 @@
 # still exempt when the agent list is down; a mix names only the marooned beads;
 # an empty store passes; the probes' scratch tree is removed on exit; and the
 # fail-closed arms — no locatable city, an unreadable store (its warning ends
-# with bd's error, never with gc's line naming the store), a scratch tree that
-# cannot be made, and the GC_CITY_PATH fallback when `gc agent list` cannot
-# answer.
+# with bd's error, never with gc's line naming the store), a listing that exits
+# 0 with no output, a scratch tree that cannot be made, and the GC_CITY_PATH
+# fallback when `gc agent list` cannot answer.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -54,6 +54,7 @@ name=$(basename "$(dirname "$db")")
 # this read runs.
 [ -z "${TREE_SEEN:-}" ] || ls -d "${TMPDIR:-/tmp}"/gctk-check-hq-marooned-work.* > "$TREE_SEEN" 2>/dev/null
 [ "$name" = "${BD_FAIL_STORE:-}" ] && { [ -n "${BD_ERR:-}" ] && printf '%s\n' "$BD_ERR" >&2; exit 3; }
+[ "$name" = "${BD_SILENT_STORE:-}" ] && exit 0
 case "$sub" in
   list) f="$STORES/$name.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
   *) printf '[]' ;;
@@ -162,6 +163,11 @@ OUT=$(BD_FAIL_STORE=testcity BD_ERR="dolt: relation \"issues\" does not exist" r
 eq "$RC" "1" "an unreadable HQ store still warns"
 has "$OUT" "\`gc bd list\` stderr: dolt: relation \"issues\" does not exist" "the store-skip warning ends with bd's error"
 hasnt "$OUT" "answering from" "the warning passes over gc's line naming the store"
+# A listing that exits 0 and prints nothing is no answer: an empty store
+# answers [].
+OUT=$(BD_SILENT_STORE=testcity run_check); RC=$?
+eq "$RC" "1" "a listing that exits 0 with no output warns instead of passing"
+has "$OUT" "NOT checked" "the silent listing's warning says the store was skipped, not clean"
 
 # --- 9. city machinery and standing subjects are exempt; a real marooned bead
 #        among them is still caught -----------------------------------------
