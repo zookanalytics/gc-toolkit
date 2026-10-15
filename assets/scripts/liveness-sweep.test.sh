@@ -307,7 +307,6 @@ run_sweep() { # run_sweep [baseline-csv|ABSENT] -> RC/OUT
     : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_BODIES"
     RC=0
     OUT="$(bash "$SCRIPT" 2>"$TMP/err")" || RC=$?
-    ERR="$(cat "$TMP/err")"
 }
 
 # The full unnamed set this population classifies to (ports the retired

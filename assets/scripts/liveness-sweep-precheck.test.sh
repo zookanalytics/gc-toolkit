@@ -242,14 +242,14 @@ STATE="$LIVENESS_SWEEP_STATE_DIR/testrig"
 OUT=""; RC=0
 # BASELINE_CSV, when set, is written into the per-rig state file — the delta
 # baseline liveness-sweep.sh keeps beside the cooldown stamp.
-run_precheck() { # run_precheck [args...] -> sets OUT and RC
+run_precheck() { # run_precheck -> sets OUT and RC
     rm -rf "$LIVENESS_SWEEP_STATE_DIR"
     if [ -n "${BASELINE_CSV:-}" ]; then
         mkdir -p "$STATE"
         printf '%s\n' "$BASELINE_CSV" > "$STATE/reported"
     fi
     : > "$FIXDIR/reads"
-    OUT="$("$SCRIPT" "$@" 2>&1)"; RC=$?
+    OUT="$("$SCRIPT" 2>&1)"; RC=$?
 }
 BASELINE_CSV="f-carried"
 survivors_of() { printf '%s\n' "$1" | sed -n 's/^  new: //p' | tr -d ' '; }
@@ -740,6 +740,7 @@ FIXDIR="$CFIX"; export FIXDIR
 LIVE="$CFIX/live.json" READY="$CFIX/ready.json" ALIVE="$CFIX/alive.json"
 jq -s 'add' "$LIVE" "$CFIX/widen.json" > "$ALIVE"
 export LIVE READY ALIVE
+# shellcheck disable=SC2034  # read by the extracted classify block sourced below
 PROG=liveness-sweep
 # The classifier's batched inputs. OPEN_PRS answers for the one PR-parked bead
 # in the fixture; WORKED for the one convoy-driven bead; PREOPEN_GREEN_MAP for
@@ -754,6 +755,7 @@ OPEN_PRS='["https://github.com/zook/gc-toolkit/pull/521"]'
 # shellcheck disable=SC2089
 WORKED='["f-worked"]'
 HUSK_STEPS='[]'
+# shellcheck disable=SC2089
 PREOPEN_GREEN_MAP='{"f-preopen-green":true}'
 # shellcheck disable=SC2090
 export OPEN_PRS WORKED HUSK_STEPS PREOPEN_GREEN_MAP
