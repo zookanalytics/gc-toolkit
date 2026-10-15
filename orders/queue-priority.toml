@@ -1,0 +1,26 @@
+# queue-priority — settle the polecat queue at the priorities its beads follow.
+# A bead's priority is the priority of what it follows plus its own shift
+# (docs/steering.md), and the writers that move or settle a bead write it there.
+# This pass is for the raw writes no writer sees, such as a hand
+# `bd update --priority` on an epic or a hand re-parent: it reads the beads
+# `bd ready` offers the polecat pool, and settles each one queued at another
+# priority together with its whole workflow. It reads the queue and what each
+# queued bead follows, never the whole store. Exec, not a formula: one ready
+# read, one read per generation of followed beads and a few writes per stale
+# bead need no LLM. Rig-scoped: one pass per importing rig against its own
+# store.
+# Single-flight is the runtime's open-tracking gate plus the store's priority
+# lock, which the script holds for the life of a pass and which a priority move
+# and a settle take too, so a pass that read an old priority never writes it
+# back over a move. A pass that finds the lock held skips its tick.
+# `timeout` covers the script's pass budget (QUEUE_PRIORITY_PASS_BUDGET_SECS)
+# plus one settle's allowance, and the lock's stall bound sits above it;
+# queue-priority.test.sh asserts both, so an override that lowers `timeout` has
+# to lower the budget in its env too. Tune from city.toml [[orders.overrides]].
+[order]
+description = "Queue priority: settle every bead queued for the polecat pool at the priority of what it follows, for raw writes no writer saw"
+trigger = "cooldown"
+interval = "15m"
+timeout = "300s"
+exec = "$PACK_DIR/assets/scripts/queue-priority.sh reconcile"
+scope = "rig"
