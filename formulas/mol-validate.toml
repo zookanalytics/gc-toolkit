@@ -182,7 +182,7 @@ metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require"
 
 [[steps]]
 id = "triage-findings"
-title = "Decisions 1 and 2: rule each finding must-fix, deferred, declined, or needs-you"
+title = "Decisions 1 and 2: rule each finding must-fix, deferred, declined, needs-you or restates"
 needs = ["load-dispatch"]
 description = """
 Each block is its own shell, so re-derive the pins AND re-read the batch first.
@@ -304,6 +304,16 @@ dependency edge by hand:
   a question the diff already answers — is declined like a machine finding, with
   no `--reply`: there is no objection to overrule, so none is owed an answer.
 
+- **restates** — a HUMAN review body that only frames the review's own inline
+  comments, each a finding of its own. A decline would read as a refusal and
+  must-fix would hold the same fix twice; this closes it holding nothing, owing
+  no answer, with no entry in the review's living answer. A body raising a point
+  of its own is ruled on that point. `finding.sh` refuses it on anything but a
+  review body whose review raised another finding.
+  ```bash
+  "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition restates
+  ```
+
 - **needs-you** — a human comment this pass genuinely cannot judge: it turns on
   product intent, a business fact, or a call that is the operator's to make, not
   one you can weigh against the diff. `finding.sh` files a visit (board-visible,
@@ -321,6 +331,14 @@ dependency edge by hand:
   ```bash
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition needs-you --reason "<the decision you need from the operator, and why this pass cannot make it>"
   ```
+
+**The words the operator reads.** The PR keeps one living answer per human
+review: a label and a sentence per point. With any human ruling, pass
+`--label "<a few words>"` when the comment has no bold headline, and with a
+decline, a deferral or needs-you pass `--answer "<one sentence>"` that starts by
+saying, in your own words, how you answered compared with what was asked
+(needs-you: the visit's question; it defaults to `--reason`). "Declined: …" and
+"Noted; no change asked" are examples, not a template.
 
 **Check every exit status.** `finding.sh set-disposition` stamps the
 disposition FIRST and wires the edge second, so a non-zero exit can leave a
@@ -364,7 +382,8 @@ done
 ```
 
 **Exit criteria:** every finding in the batch carries a ruled disposition
-(must-fix, deferred, declined, or needs-you), none left unvalidated, this step closed.
+(must-fix, deferred, declined, needs-you or restates), none left unvalidated,
+this step closed.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
