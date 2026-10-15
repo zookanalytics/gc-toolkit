@@ -1262,7 +1262,8 @@ them.
 `wake_mode = "fresh"` bumps `continuation_epoch` on **every** wake
 after the first, while keeping the *same* session bead —
 `shouldBumpContinuationEpoch` (`rigs/gascity/cmd/gc/session_wake.go`)
-is `WakeMode == "fresh" && LastWokeAt != ""`. Pair it with `mode =
+is true for `WakeMode == "fresh" && LastWokeAt != ""`, and under any
+wake mode while a conversation reset is pending. Pair it with `mode =
 "always"` and the recycle becomes continuous rather than occasional:
 the agent drains, and an always-mode session — desired every tick,
 against no predicate — is spawned straight back, fresh, on a new
@@ -1270,6 +1271,15 @@ epoch. The config loader flags the pairing rather than rejecting it —
 `IsAlwaysFreshWakeModeWarning` (`internal/config/config.go`), *"use
 only for a deliberate restart-per-cycle actor"* — and in gc-toolkit
 the deacon and every witness run it.
+
+mechanik is the always-mode named session that runs `wake_mode =
+"resume"` instead, because it holds the operator's standing
+conversation. Its epoch moves only when a conversation reset is
+pending, such as `gc handoff`, which starts a fresh conversation on
+purpose, or the config-drift repair that `agents/mechanik/agent.toml`
+describes. An ordinary wake leaves the epoch where it was, so a nudge
+queued to `gc-toolkit.mechanik` meets an unmoved fence after a
+restart, where one queued to the deacon meets a moved one.
 
 A queued nudge is stamped with the target's session id **and** its
 epoch, so any nudge that outlives one recycle meets a moved fence at
