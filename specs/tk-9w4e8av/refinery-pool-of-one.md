@@ -32,13 +32,14 @@ Every failure ends the claim, and moves only the bead it failed on:
   routes the fix.
 
 The next offer proceeds in every case, so one bad bead cannot hold the line.
-The refinery reads an offer as ready when the offer's own blockers are closed,
-whatever its epic waits on, so parking an epic never holds a branch that was
-already handed off. Routed demand wakes the pool. One structural alarm,
-"offers wait, the refinery takes none and holds none", is raised by the
-refinery-reconcile order, and I10 already notices when that order goes silent.
-No clock decides that work is stuck. The witness's 4h timer, I14, the patrol wisp
-loop, the polecat's wake nudge and the refinery's named session are deleted.
+The refinery reads an offer's readiness through the pack's one definition of a
+hold, `hold-lib.sh`, which holds a bead in flight only by blockers of its own.
+So parking an epic never holds a branch that was already handed off. Routed
+demand wakes the pool. One structural alarm, "offers wait, the refinery takes
+none and holds none", is raised by the refinery-reconcile order, and I10 already
+notices when that order goes silent. No clock decides that work is stuck. The
+witness's 4h timer, I14, the patrol wisp loop, the polecat's wake nudge and the
+refinery's named session are deleted.
 
 ### What the operator approves here
 
@@ -62,13 +63,15 @@ loop, the polecat's wake nudge and the refinery's named session are deleted.
 5. **The refinery declares its own claim and demand query.** On gascity's default
    query a parked epic would hold every handoff under it, because `bd ready`
    withholds a parked epic's members. steer-by-epic rules that a park leaves
-   in-flight work running, and a handed-off branch is in flight. So the refinery
-   reads an offer's readiness from the offer's own blockers only, through one
-   script that the claim, the demand count and the alarm all call. The cost is
-   that gascity's idle-claim backstop covers only the offers its default query
-   can see, so it misses a session woken only for an offer under a parked epic.
-   The alarm covers that case until gascity gc-tj666s adds the readiness mode as
-   a pool option, which would let the custom query go.
+   in-flight work running, and a handed-off branch is in flight. The pack's one
+   definition of a hold, `hold-lib.sh`, already leaves a bead in flight running
+   under a park, and deferred dispatch reads holds through it. So one script,
+   which the claim, the demand count and the alarm all call, selects the
+   refinery's beads and keeps the ones `hold-lib.sh` finds nothing holding. The
+   cost is that gascity's idle-claim backstop covers only the offers its default
+   query can see, so it misses a session woken only for an offer under a parked
+   epic. The alarm covers that case. gascity gc-9h08f6 asks for a custom demand
+   count that names the beads it counts, which would remove the cost.
 
 ## What this design rests on
 
@@ -226,8 +229,8 @@ gascity's default query can see (section 4).
   capped at one counts as a pool, and gets pool reconciliation, only when it
   sets a minimum or a scale check. Without either it is treated as the backing of
   a named session (`internal/config/session_capacity.go:93-127`). The scale
-  check below already qualifies it, and the minimum keeps it a pool once
-  gc-tj666s lets the scale check go. The polecat pool sets it the same way.
+  check below already qualifies it. The minimum makes the template a pool on its
+  own, whatever its demand query, as it does for the polecat and proactive pools.
 - It keeps `wake_mode = "fresh"` and the per-instance `work_dir`. A pool capped at
   one uses the canonical identity, with no `-1` suffix
   (`UsesCanonicalSingletonPoolIdentity`). So `{{.AgentBase}}` resolves to
@@ -246,7 +249,7 @@ session the alias `<rig>/gc-toolkit.refinery`, and `GC_ALIAS` carries it
 `usesTransientPoolSlotIdentity` with `poolDesiredRequestIdentity`,
 `:4456-4491`). Mail, nudges, `gc session peek` and routes keep their address.
 
-### Readiness is the offer's own blockers
+### Readiness is the pack's hold
 
 gascity's default routed tier and its default demand count both read `bd ready`.
 `bd ready` withholds every bead whose parent-child ancestor has an open `blocks`
@@ -261,6 +264,16 @@ holds work that has not started and leaves work in flight running, and it counts
 on the refinery reading its queue by `bd list`, not `bd ready`
 (`specs/tk-rl8gz4b.2/steer-by-epic.md`, "What a hold leaves running"). A
 handed-off branch is in flight.
+
+The pack already has one definition of a hold, and it leaves work in flight
+running. `assets/scripts/hold-lib.sh` holds a bead when the bead, or one of its
+parent-child ancestors, has a `blocks` edge onto a bead that is still open. A
+bead that carries a `branch`, a `merge_result` or a `rejection_reason` is in
+flight. Only a blocker of its own holds it, and the walk reads none of its
+ancestors (`hold_chain`, `hold-lib.sh:101-112`, and `docs/component-model.md:491`).
+Deferred dispatch reads holds through it, and `doctor/check-armed-dispatch-owed`
+reports no held arm as owed. The refinery reads readiness through the same
+definition and adds no rule of its own.
 
 So the refinery declares a `work_query` and a `scale_check`, as the proactive pool
 already does. Both call one script, `assets/scripts/refinery-offers.sh`, which
@@ -284,16 +297,58 @@ the work by `bd list` and gives the claim three tiers in the default order:
 
 No tier serves a molecule container. gascity's default query never offers one,
 because `bd ready` excludes it, but the script reads `bd list` and so excludes
-molecules itself. In tiers 2 and 3 a bead is ready when none of its own
-`blocks`, `waits-for` or `conditional-blocks` dependencies points at a bead that
-is not closed. Its ancestors are not read. The `scale_check` counts tier 3 and
-the old-style handoffs of tier 2, which are the open beads assigned to
-`<rig>/gc-toolkit.refinery`. So an old-style handoff wakes the pool the way an
-offer does (section 4).
+molecules itself. Those are the only rules the script owns: the tiers, the route
+and the assignee, the label, epic and molecule exclusions, the origin gate and
+the sort.
 
-A bead parked on a refinery wait has an open blocker of its own, so it is not
-ready (section 3). A bead under a parked epic has none, so it is. gascity's own
-queries stay as they are for every other pool.
+Readiness is the shared hold's. The script sources `hold-lib.sh` and builds, with
+`hold_graph`, the graph of the beads that tiers 2 and 3 select. Its reader reads
+the ids it is given from the rig's own store, at every status and class, as
+`hold-lib.sh` asks of every reader. The script keeps a bead in either tier only
+when `hold_held` finds nothing holding it. A walk whose read fails leaves every
+bead it was for unread, never free, so the script exits non-zero, as it does on
+any read it cannot parse (section 3). The claim then takes nothing. gascity counts
+a `scale_check` that fails as no new demand (`evaluatePoolNewDemand`,
+`cmd/gc/pool.go:217-232`). The alarm records no observation for that pass
+(section 5).
+
+The exception for a parked epic rests on the handoff being in flight, and every
+handoff carries a `branch` by the time it is handed over. A polecat's work bead
+gets it at workspace-setup (`mol-polecat-work.toml:772`), and a rework child gets
+it from `rework-child.sh` when the child is filed (`:173`). Submit's branch gate
+refuses a handoff whose checkout is not on that branch
+(`mol-polecat-work.toml:1391-1430`). Convoy graduation sets
+`branch=<integration branch>` in its assignee write (`convoy-graduate.sh:287-289`),
+and the keeper sets `branch=rebase/<issue>` (`mol-upstream-gc-rebase.toml:842`)
+ahead of its handoff at `:866`. So the shared hold reads only a handoff's own
+blockers:
+
+- an open `blocks` blocker holds it, and a closed or pinned one holds nothing;
+- a demand gate of its own holds it;
+- a blocker of its own that the store does not return holds it, marked unread;
+- a park on its epic, or on any other ancestor, holds nothing.
+
+A routed bead with no `branch` is not in flight. The ancestor rule applies to it,
+so a park holds it as it holds any work that has not started. Once claimed, such
+a bead has nothing to prepare, and the prepare step puts it to a person
+(section 3, line 219).
+
+The shared hold reads `blocks` edges only, while `bd ready` also honors
+`waits-for` and `conditional-blocks`. Neither reaches a handoff, so the shared
+contract needs no rule for them and the refinery adds none. gascity writes
+`waits-for` only between the step beads of a compiled formula, from a step's
+`waits_for` field (`internal/formula/compile.go:757-775`), and a handoff is a work
+bead, never a compiled step. No code in the pack or in gascity writes
+`conditional-blocks`. Every wait the refinery writes is a `blocks` edge its one
+writer files (section 3), and so is a hold request (section 7).
+
+The `scale_check` counts the beads tier 3 keeps and the old-style handoffs tier 2
+keeps, which are the open beads assigned to `<rig>/gc-toolkit.refinery`. So an
+old-style handoff wakes the pool the way an offer does (section 4).
+
+A bead parked on a refinery wait has an open blocker of its own, so the shared
+hold holds it (section 3). A bead under a parked epic has none, so nothing holds
+it. gascity's own queries stay as they are for every other pool.
 
 The custom demand count has one cost. A custom `scale_check` returns a count,
 and a count names no bead (`pool_desired_state.go:589-640`). While the pool is
@@ -302,9 +357,11 @@ that probe names a concrete trigger bead for the slot it wakes
 (`build_desired_state.go:1428-1440`, `:2451-2467`). The probe reads `bd ready`,
 so it never names an offer under a parked epic. A session woken only for such an
 offer has no trigger bead, and the idle-claim backstop keys on that bead, so it
-does not serve that session (section 4). gascity gc-tj666s asks for own-blocker
-readiness as a pool option. With it, the refinery could drop the custom query,
-and the backstop would serve every offer.
+does not serve that session (section 4). A readiness option in gascity's default
+query would not remove the cost, because its rule would be a second definition
+of a hold beside `hold-lib.sh`. gascity gc-9h08f6 asks instead for a
+`scale_check` that names the beads it counts. With it, the backstop would serve
+every offer, and readiness would stay the pack's.
 
 ### The claim
 
@@ -526,10 +583,10 @@ one. There are four exit classes:
 | **Rig** | Something outside the bead stops it, and would stop the next bead the same way: a pack defect, a rig setup fault, or a process on the host. | A finding. `patrol-finding.sh --scope refinery-findings --key refinery-<exit>` files one bead per fault, deduped on the key. The bead blocks on it. The finding's first reaction routes the fix to a pool, or puts it to the operator. |
 
 A parked bead keeps its route, which the claim made the refinery's. Its wait is
-an open blocker of its own, so `refinery-offers.sh` reads it as not ready, and
+an open blocker of its own, which holds it under the shared hold (section 2), so
 the pool neither counts it as demand nor serves it. When the demand or the
-finding closes, the edge clears. The bead is ready again and is offered again,
-with no deferred-dispatch arm and no re-sling. This is the raw pool routing case
+finding closes, nothing holds the bead, and it is offered again, with no
+deferred-dispatch arm and no re-sling. This is the raw pool routing case
 load-context already describes: the work bead itself is the routed unit, so a
 blocker of its own holds it.
 
@@ -671,8 +728,8 @@ for the bead they hit.
 ## 4. What wakes the pool
 
 Routed demand wakes the pool. The controller runs the refinery's `scale_check`,
-which counts tier 3 of `refinery-offers.sh`, the offers that are ready by their
-own blockers, and the old-style handoffs of tier 2 (section 2). Those are the
+which counts tier 3 of `refinery-offers.sh`, the offers nothing holds, and the
+old-style handoffs of tier 2 (section 2). Those are the
 beads a session that holds nothing claims, so the demand count and the claim
 agree. In bead-backed mode a pool's `scale_check` is its authoritative count of
 new unassigned demand (`build_desired_state.go:1365-1368`). The controller runs
@@ -698,7 +755,8 @@ old-style handoff. Every refinery session that sits at its prompt without
 claiming while an offer waits is caught by the alarm in section 5. That alarm
 files its finding at the second pass that sees nothing taken and nothing held,
 and the finding's first reaction puts the stopped session to whoever can act on
-it. gc-tj666s extends the backstop to every offer.
+it. gascity gc-9h08f6, a `scale_check` that names the beads it counts, would
+extend the backstop to every offer.
 
 So the design adds no nudge and no wake order. It deletes the polecat's step-6
 wake and nudge, and the keeper's.
@@ -727,7 +785,9 @@ holder has stopped is I11's to report (section 2).
    same `refinery_attempts`. That is, the pool took nothing since the last look.
    The count matters because a claim raises it even when its exit releases the
    bead again, so a bead claimed and released between two passes waits at both.
-   The pass's state directory keeps the previous pass's offer ids and counts.
+   The pass's state directory keeps the previous pass's offer ids and counts. A
+   pass whose read of the offers fails records nothing (section 2), so the
+   comparison is always between two passes that read them.
 4. Neither the refinery agent nor its rig is suspended. A suspended pool is a
    note.
 
@@ -770,6 +830,17 @@ refinery-reconcile is registered once per rig, so I10 names the rig. A silent
 reconcile also stops every merge and every PR open on that rig, so the silence is
 not quiet in effect. I10 runs in the doctor sweep. A silent reconcile together
 with a silent sweep is a double fault that this design leaves to tk-dk2aqb7.
+
+### A handoff the walk cannot read
+
+The pass reads the same walk as the claim, so it also sees a bead that tiers 2
+and 3 select and whose only holds are unread: a blocker of its own that the rig's
+store does not return. Such a bead is not an offer, so it never meets the alarm's
+first condition. Nothing will release it either, because the walk cannot see its
+blocker close. So the pass files it under its own key, `refinery-offer-unread`,
+through the same writer as the alarm. That is one finding per rig, whose message
+names each such bead and the ids the walk could not read. `check-armed-dispatch-owed`
+reports an arm in the same state as one it could not check.
 
 ## 6. What the design deletes
 
@@ -861,13 +932,18 @@ inside its one claim.
 - **A shared count for named and pool sessions (tk-77txj0).** Nothing to file.
   gascity already suppresses a pool standby beside a named session that holds the
   alias at a cap of one (section 8). This design removes the second path.
-- **A custom `work_query` and `scale_check` for the refinery.** Needed, and filed
-  upstream as gascity gc-tj666s. gascity's default routed tier and demand count
-  read `bd ready`, which holds a parked epic's members, and a handoff is in flight
-  (section 2). gc-tj666s asks for own-blocker readiness as a pool option. Until it
-  lands, the refinery declares both queries through `refinery-offers.sh`. Once it
-  lands, the refinery deletes them and gets concrete demand for every offer, and
-  with it the idle-claim backstop.
+- **A custom `work_query` and `scale_check` for the refinery.** Needed, and they
+  stay. gascity's default routed tier and demand count read `bd ready`, which
+  holds a parked epic's members, and a handoff is in flight (section 2). The
+  custom queries are how the refinery reads readiness through the pack's one
+  definition of a hold, so no gascity readiness option replaces them: its rule
+  would be a second definition beside `hold-lib.sh`. What the refinery lacks is
+  concrete demand. A custom `scale_check` prints a count (`parseScaleCheckCount`,
+  `cmd/gc/pool.go:234-247`), so a session started for one has no trigger bead and
+  no idle-claim backstop. Filed as gascity gc-9h08f6: let a `scale_check` name the
+  beads it counts. gascity gc-tj666s asks for own-blocker readiness as a pool
+  option. That is such a second definition, so the refinery would not adopt it,
+  and the bead's notes say so.
 - **The repeated `--status` trap behind tk-cg7k9zi.** Filed as gascity gc-3zov2j.
   `gc bd list --status=open --status=in_progress` keeps only the last value. A
   live probe on the polecat route returned 4 rows that way against 57 for
@@ -914,11 +990,23 @@ where one speaks the old shape to the other.
    the claim nudge that runs `assets/scripts/refinery-claim.sh`, and the
    `work_query` and `scale_check` that call `assets/scripts/refinery-offers.sh`),
    adds both scripts, and deletes the stanza in `pack.toml`.
+   `refinery-offers.sh` reads readiness only through `hold-lib.sh` (section 2).
+   It sources the file, builds its graph with `hold_graph` over a reader of the
+   rig's own store, and applies `$HOLD_JQ`. It joins the readers that
+   `hold-lib.test.sh` lists, so that test fails if the script stops sourcing the
+   file, applying the predicate, or building its graph with `hold_graph`. The unit
+   also names the script wherever the hold's readers are listed: the header of
+   `hold-lib.sh`, its row in `docs/component-model.md`, and `docs/steering.md`'s
+   account of what a park holds and leaves running, which says a park holds every
+   pool-routed member.
    `refinery-offers.sh`'s test covers these cases: a handoff under a parked epic
-   is listed and counted; a handoff with an open blocker of its own is not; an
-   old-style handoff, assigned to the alias with no route, is listed and counted;
-   the session's own in-progress claim comes first; and the sort is priority, then
-   age. `refinery-claim.sh`'s test admits an old-style handoff written after the
+   is listed and counted; a handoff with an open blocker of its own is not; the
+   in-flight, pinned-blocker and unread-blocker cases of `hold-lib.fixture.json`,
+   each with its bead routed to the refinery, list a bead exactly when the case
+   finds nothing holding it; a walk whose read fails makes the script exit
+   non-zero; an old-style handoff, assigned to the alias with no route, is
+   listed and counted; the session's own in-progress claim comes first; and the
+   sort is priority, then age. `refinery-claim.sh`'s test admits an old-style handoff written after the
    named session has retired, so nothing has routed it, and another that also
    carries an archived `gc.run_target` naming the polecat pool. For each, it
    proves that the claim writes the refinery's route, unsets `gc.run_target` and
@@ -946,16 +1034,17 @@ where one speaks the old shape to the other.
    `orphan-dispose.test.sh` fixture, the census fixture, and the witness's orphan
    recovery prose, which keeps the refinery's alias an infrastructure owner
    (section 2).
-5. **The alarm and the deletions.** Add the refinery-reconcile alarm arm and its
-   test. Delete I14, the witness's `check-refinery` step and its test
+5. **The alarm and the deletions.** Add the refinery-reconcile alarm arm, its
+   `refinery-offer-unread` report (section 5) and their test. Delete I14, the witness's `check-refinery` step and its test
    (`refinery-stuck-escalate.test.sh`), the `witness-refinery-queue` assertion in
    `witness-escalation-wiring.test.sh`, and the run-tests wisp note.
 6. **Documents.** The central docs that describe the refinery's intake change with
    the unit that makes them stale: `docs/refinery-merge-cadence.md`,
    `docs/gascity-routing-model.md` (the handoff and claim rows),
    `docs/state-machine.md`, `docs/authority-map.md` (the new writer, and who writes
-   a refinery wait) and `docs/architecture.md`. Each unit carries its own document
-   edits rather than a final docs pass.
+   a refinery wait) and `docs/architecture.md`. `docs/component-model.md` and
+   `docs/steering.md` name the hold's new reader (unit 2). Each unit carries its
+   own document edits rather than a final docs pass.
 
 The design splits into units by surface, not by risk, so a reviewer reads each
 unit against one part of this document.
@@ -1006,8 +1095,9 @@ repo.
   consistent with its work bead. That means one live offer per work bead, an offer
   left stale when its work bead moves on, and a crash window between the work
   bead's transition and the offer's close. Readers would also have to follow the
-  offer to the work bead. The custom query costs one script and, until gc-tj666s,
-  the backstop for offers under a parked epic.
+  offer to the work bead, and the offer's readiness would be `bd ready`'s rule
+  rather than the pack's hold. The custom query costs one script and, until
+  gascity gc-9h08f6, the backstop for offers under a parked epic.
 - **Let a park hold handoffs.** This keeps gascity's default queries and needs
   nothing custom. It is not chosen, because it reverses steer-by-epic's approved
   rule that a park leaves in-flight work running: a branch already built would
