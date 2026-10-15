@@ -12,13 +12,17 @@ and lands the PR once it is approved and nothing holds it. Each option says what
 the message means, who acts on it, and the one writer that sends it. The
 writer's `--help` carries its flags.
 
-The writers are in the pack's `assets/scripts/`, the directory a converse
-sitting already has as `$CONV`. Anywhere else, find it once:
+The writers are in the pack's `assets/scripts/`, and the examples call them
+through `$S`. Each tool call starts a fresh shell, so run this block in the
+same call as the writer. It takes `$CONV` where a converse sitting has set it,
+and otherwise finds the directory:
 
 ```bash
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/pr-post.sh" ] && { S="$c/assets/scripts"; break; }
+S=""
+for d in "${CONV:-}" "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  [ -x "$d/pr-post.sh" ] && { S="$d"; break; }
 done
+: "${S:?no assets/scripts with pr-post.sh found}"
 ```
 
 ## Answer its review comments
@@ -102,6 +106,6 @@ a visit asking what to do with it.
 
 In a sitting, retire a PR only on the operator's ruling, after the sign-off,
 and close the visit right after it
-(`"$CONV/pr-dispose.sh" ... && "$CONV/visit-close.sh" ...`). The sitting's open
+(`"$S/pr-dispose.sh" ... && "$S/visit-close.sh" ...`). The sitting's open
 visit holds the anchor's close (`docs/finalize-gate.md`), so the reconcile
 closes the anchor once the visit is closed.

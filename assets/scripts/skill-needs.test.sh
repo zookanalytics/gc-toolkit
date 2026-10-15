@@ -20,10 +20,12 @@
 # a real need used, and one that passes still has to read well.
 #
 # The same file pins the skills' shape: each names its neighbors, keeps
-# converse's vocabulary out of its description, and the converse steps name its
-# options rather than re-explain them.
+# converse's vocabulary out of its description, sets the directory its examples
+# call writers through in a converse sitting and anywhere else, and the converse
+# steps name its options rather than re-explain them.
 #
-# Hermetic: reads the repo only.
+# Hermetic: reads the repo, and runs each skill's setup block in a temporary
+# directory outside any git repo.
 
 set -u
 
@@ -99,6 +101,78 @@ for s in $BLOCKS; do
     done
     [ -n "$named" ] && ok "$s: description names a neighbor to use instead ($named )" \
         || bad "$s: description names a neighbor to use instead" "no 'use <work|waits|records|prs>' in: $desc"
+done
+
+echo "── each building-block skill's examples reach their writers, in a converse sitting and anywhere else ──"
+# Each tool call starts a fresh shell, so an agent runs a skill's setup block in
+# the same call as the writer it calls through S. A converse sitting has CONV,
+# any other session finds the directory, and a session with neither has to stop
+# before "$S/<writer>" runs /<writer>. Each case runs the block and then a line
+# standing in for the writer, in a fresh shell outside any git repo with only
+# the variables the case names.
+ROOT="$(cd "$REPO" && pwd)"
+mkdir -p "$TMP/away" "$TMP/city"
+# setup_block <file> — the first fenced bash block that assigns S.
+setup_block() {
+    awk '
+        /^```bash$/ { inb = 1; buf = ""; sets = 0; next }
+        inb && /^```$/ { inb = 0; if (sets) { printf "%s", buf; exit } next }
+        inb { buf = buf $0 "\n"; if ($0 ~ /(^|[^A-Za-z0-9_])S=/) sets = 1 }
+    ' "$1"
+}
+# outside_setup <file> — the file without its setup block.
+outside_setup() {
+    awk '
+        /^```bash$/ { inb = 1; buf = $0 "\n"; sets = 0; next }
+        inb && /^```$/ { inb = 0; if (!sets) printf "%s%s\n", buf, $0; next }
+        inb { buf = buf $0 "\n"; if ($0 ~ /(^|[^A-Za-z0-9_])S=/) sets = 1; next }
+        { print }
+    ' "$1"
+}
+# call <shell> <script> [NAME=value ...] — the script's output in a fresh shell;
+# fails when the script stops.
+call() {
+    c_shell=$1 c_script=$2
+    shift 2
+    (cd "$TMP/away" && env -u CONV -u GC_RIG_ROOT -u BASH_ENV -u ENV \
+        GIT_DIR="$TMP/no-repo" GC_CITY_PATH="$TMP/city" "$@" $c_shell "$c_script" 2>/dev/null)
+}
+shells="bash"
+command -v zsh >/dev/null 2>&1 && shells="bash zsh"
+for s in $BLOCKS; do
+    f="$SKILLS/$s/SKILL.md"
+    [ -r "$f" ] || continue
+    setup_block "$f" >"$TMP/setup-$s"
+    if [ ! -s "$TMP/setup-$s" ]; then
+        bad "$s: has a setup block that sets S" "no fenced bash block in $f assigns S"
+        continue
+    fi
+    { cat "$TMP/setup-$s"; echo 'printf "%s" "$S"'; } >"$TMP/call-$s"
+    for sh_ in $shells; do
+        run=$sh_
+        [ "$sh_" = zsh ] && run="zsh -f"
+        got=$(call "$run" "$TMP/call-$s" CONV="$ROOT/assets/scripts")
+        [ "$got" = "$ROOT/assets/scripts" ] && ok "$s ($sh_): in a converse sitting, S is CONV" \
+            || bad "$s ($sh_): in a converse sitting, S is CONV" "S='$got' with only CONV set"
+        got=$(call "$run" "$TMP/call-$s" GC_RIG_ROOT="$ROOT")
+        [ "$got" = "$ROOT/assets/scripts" ] && ok "$s ($sh_): anywhere else, S is found under GC_RIG_ROOT" \
+            || bad "$s ($sh_): anywhere else, S is found under GC_RIG_ROOT" "S='$got' with only GC_RIG_ROOT set"
+        if got=$(call "$run" "$TMP/call-$s"); then
+            bad "$s ($sh_): with no directory found, the call stops before its writer" "the writer line ran with S='$got'"
+        else
+            ok "$s ($sh_): with no directory found, the call stops before its writer"
+        fi
+    done
+    refs=$(outside_setup "$f" | grep -oE '"\$[A-Za-z_][A-Za-z_0-9]*/[A-Za-z0-9._-]+"' | tr -d '"' | sort -u)
+    stray=$(printf '%s\n' "$refs" | grep -v -e '^\$S/' -e '^$' | tr '\n' ' ')
+    [ -n "$refs" ] && [ -z "$stray" ] && ok "$s: every writer an example calls goes through \$S" \
+        || bad "$s: every writer an example calls goes through \$S" "${stray:-no \"\$S/<writer>\" call found}"
+    missing=""
+    for r in $refs; do
+        [ -x "$ROOT/assets/scripts/${r##*/}" ] || missing="$missing ${r##*/}"
+    done
+    [ -z "$missing" ] && ok "$s: every writer an example calls is in assets/scripts" \
+        || bad "$s: every writer an example calls is in assets/scripts" "missing:$missing"
 done
 
 echo "── the converse steps name an option and leave its how to the skill ──"

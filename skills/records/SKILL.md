@@ -11,13 +11,17 @@ starts from what is written there, not from your context, which ends with your
 session. Each option says what the record means, who reads it, and the one
 writer that sends it.
 
-The writers are in the pack's `assets/scripts/`, the directory a converse
-sitting already has as `$CONV`. Anywhere else, find it once:
+The writers are in the pack's `assets/scripts/`, and the examples call them
+through `$S`. Each tool call starts a fresh shell, so run this block in the
+same call as the writer. It takes `$CONV` where a converse sitting has set it,
+and otherwise finds the directory:
 
 ```bash
-for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/gc-helm.sh" ] && { S="$c/assets/scripts"; break; }
+S=""
+for d in "${CONV:-}" "${GC_RIG_ROOT:-}/assets/scripts" "$(git rev-parse --show-toplevel 2>/dev/null)/assets/scripts" "${GC_CITY_PATH:-}/rigs/gc-toolkit/assets/scripts"; do
+  [ -x "$d/gc-helm.sh" ] && { S="$d"; break; }
 done
+: "${S:?no assets/scripts with gc-helm.sh found}"
 ```
 
 ## Record an outcome on a bead
