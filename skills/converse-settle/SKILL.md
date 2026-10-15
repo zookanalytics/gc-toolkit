@@ -36,7 +36,8 @@ all. `converse-signoff.sh` writes the durable trace and discharges whichever
 demands the hold filed — the conversation wait on the visit, and any explicit
 merge hold on the anchor; you tell it what this sitting settled. It resolves
 each demand gate when the sitting settled the question (`--ruled yes`, with the
-`--ruling` it resolves with and the `--route` the subject is released to)
+`--ruling` it resolves with and the `--route` the subject itself is released
+to, which the `work` skill helps you choose)
 and re-states each when it did not (`--ruled no`, with what is
 `--still-owed`). What is waiting on the subject is yours to state: one
 `--waiting-on <bead>` per bead this sitting ROUTED work into, `--no-wait`

@@ -36,9 +36,9 @@ link across two stores prints success and lands nothing.
 
 - The two are never parent and child. bd refuses a `blocks` edge from a parent
   to its own descendant, so file the blocker beside the bead (the work skill).
-- An edge onto a pull request's anchor holds that PR's merge. When a follow-up
-  needs the PR on main, make the follow-up wait on the anchor, never the anchor
-  on the follow-up.
+- A pull request's anchor that waits on an open bead cannot merge until that
+  bead closes. When a follow-up needs the PR on main, make the follow-up wait
+  on the anchor, never the anchor on the follow-up.
 
 ## Wait on a person
 
