@@ -46,8 +46,9 @@
 #   (15) every case exits 0 — a hook that fails must never block a tool call
 #   (16) a claimed workflow root whose molecule has a step in progress under
 #        another session -> released in one write guarded on the claim's
-#        assignee and status (route cleared, open, unassigned, a note naming
-#        the running session), no step bead written, no formula body injected
+#        assignee and status (route and assignee cleared, status unchanged, a
+#        note naming the running session), no step bead written, no formula
+#        body injected
 #   (17) the same when the live step is open but held by a session, on a root
 #        the claim left open, with the claimer read from $GC_SESSION_ID
 #   (18) the same when the live step waits in the pool the root came from,
@@ -231,10 +232,10 @@ root_reads() { # root_reads <id>: status|assignee|route of the bead's fixture
     jq -r '.[0] | [.status, (.assignee // ""), ((.metadata // {})["gc.routed_to"] // "<absent>")] | join("|")' \
         "$FX/bead-$1.json" 2>/dev/null
 }
-released() { # released <label> <root>: the root reads open, unassigned, unrouted
+released() { # released <label> <root> <status>: unassigned, unrouted, status unchanged
     local got
     got="$(root_reads "$2")"
-    [ "$got" = "open||" ] && ok "$1" || bad "$1" "status|assignee|route = $got"
+    [ "$got" = "$3||" ] && ok "$1" || bad "$1" "status|assignee|route = $got"
 }
 unwritten() { # unwritten <label>: calls.log records no bd update
     local u
@@ -363,7 +364,7 @@ has_text "live root: names the running step and its session" "$ctx16" \
     "mol-polecat-work.implement (tk-lr-impl) in progress under lx-runner"
 has_text "live root: says the claim was released" "$ctx16" "released the claim"
 has_text "live root: sends the session back to the hook" "$ctx16" "gc hook --claim --json again"
-released "live root: reads open, unassigned and unrouted" tk-liveroot
+released "live root: reads unassigned and unrouted, still in progress" tk-liveroot in_progress
 case "$(jq -r '.[0].notes // ""' "$FX/bead-tk-liveroot.json")" in
     *"work-context hook"*lx-spare*"in progress under lx-runner"*) ok "live root: the note names the claimer and the running session" ;;
     *) bad "live root: the note names the claimer and the running session" "notes: $(jq -r '.[0].notes // ""' "$FX/bead-tk-liveroot.json")" ;;
@@ -386,7 +387,7 @@ ctx16b="$(ctx_of "$(run_hook "$(claim_payload s16b '{"bead_id":"tk-busyroot","as
 no_body "root with an unowned step in progress" "$ctx16b"
 has_text "root with an unowned step in progress: names the step" "$ctx16b" \
     "mol-polecat-work.implement (tk-br-impl) in progress"
-released "root with an unowned step in progress: reads open, unassigned and unrouted" tk-busyroot
+released "root with an unowned step in progress: reads unassigned and unrouted, still in progress" tk-busyroot in_progress
 
 # (17) the live step is open and held by the running session, under a route of
 # its own; the claim left the root open, and its response names no assignee,
@@ -400,7 +401,7 @@ ctx17="$(ctx_of "$(run_hook "$(claim_payload s17 '{"action":"work","reason":"rea
 no_body "held root" "$ctx17"
 has_text "held root: names the step and its holder" "$ctx17" \
     "mol-feedback-distiller.judge-and-cluster (tk-hr-judge) held by lx-runner2"
-released "held root: reads open, unassigned and unrouted" tk-heldroot
+released "held root: reads unassigned and unrouted, still open" tk-heldroot open
 has_text "held root: the write is guarded on the open status it read" "$(calls 'bd update tk-heldroot')" \
     "--if-assignee=lx-spare2 --if-status=open"
 
@@ -416,7 +417,7 @@ ctx18="$(ctx_of "$(run_hook "$(claim_payload s18 '{"bead_id":"tk-gaproot","assig
 no_body "root between sessions" "$ctx18"
 has_text "root between sessions: names the step waiting in the pool" "$ctx18" \
     "self-review.iteration.1 (tk-gr-iter) waiting in the pool"
-released "root between sessions: reads open, unassigned and unrouted" tk-gaproot
+released "root between sessions: reads unassigned and unrouted, still in progress" tk-gaproot in_progress
 
 # (19) an orphaned root: its steps have closed and only the finalizer is open.
 # It is injected as before, under the work-bead header, and left as claimed.

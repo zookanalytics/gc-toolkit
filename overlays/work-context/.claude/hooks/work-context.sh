@@ -6,7 +6,7 @@
 # title-only. Runs as a Claude `PostToolUse` hook on Bash: after every claim
 # it resolves the claimed bead to its work bead and injects the description
 # as `additionalContext`. Full derivation: specs/tk-osf13/. A claim that hands
-# the session the workflow root of a molecule another session is running is
+# the session the workflow root of a molecule that is still running is
 # released instead, and the session is told why (guard_workflow_root).
 #
 # Invariants:
@@ -81,8 +81,12 @@ emit_notice() {
 #
 # The release is one update guarded on the assignee and status read here, so a
 # root that changed hands or closed since is never written. It clears the
-# route, because an open, unassigned and routed root is pool demand again, and
-# it touches no step.
+# assignee and the route, and touches neither the root's status nor any step.
+# Sling launches a root in_progress, gascity's continuation nudge serves a
+# pre-assigned step only while its root reads in_progress, and bd's claim
+# refuses an in_progress bead. The route goes because a routed root is pool
+# demand again once anything reopens it, as the on_boot hook does at every
+# city start. The workflow-finalize step closes the root from either status.
 guard_workflow_root() {
   formula="$(printf '%s' "$claimed_json" | jq -r '.[0].metadata["gc.formula_name"] // .[0].title // "workflow"' 2>/dev/null)"
   route="$(printf '%s' "$response" | grep -o '"route":"[^"]*"' | head -1 | sed 's/.*:"//; s/"$//')"
@@ -133,15 +137,15 @@ guard_workflow_root() {
     emit_notice "$about The work-context hook did not release it, because the root does not read as this claim: its assignee is ${holder:-empty} and its status ${read_status:-unknown}. $dont Read it (gc bd show $claimed --json) before acting on it."
   fi
 
-  note="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] work-context hook: gc hook --claim handed this workflow root to $me while its molecule ran. Live steps: $held. A root is not work while its steps run, so the hook released the claim before any step ran, leaving the root open, unassigned and unrouted. The molecule's workflow-finalize step closes it."
+  note="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] work-context hook: gc hook --claim handed this workflow root to $me while its molecule ran. Live steps: $held. A root is not work while its steps run, so the hook released the claim before the session acted on it, leaving the root unassigned and unrouted with its status unchanged. The molecule's workflow-finalize step closes it."
   run_bounded gc bd update "$claimed" --if-assignee="$holder" --if-status="$status" \
-    --set-metadata=gc.routed_to= --status=open --assignee= --append-notes="$note" \
+    --set-metadata=gc.routed_to= --assignee= --append-notes="$note" \
     </dev/null >/dev/null 2>&1
   rc=$?
   case "$rc" in
-    0) emit_notice "$about The work-context hook released the claim: the root is open, unassigned and unrouted again, with a note saying why, so no pool offers it, and the molecule's workflow-finalize step closes it. $dont Run gc hook --claim --json again for your own work." ;;
+    0) emit_notice "$about The work-context hook released the claim: the root is unassigned and unrouted again, with a note saying why, so no pool offers it, and the molecule's workflow-finalize step closes it. $dont Run gc hook --claim --json again for your own work." ;;
     13) emit_notice "$about The work-context hook wrote nothing, because the root changed after the claim: its assignee or status no longer matches what the hook read. $dont Read it (gc bd show $claimed --json) before acting on it." ;;
-    *) emit_notice "$about The work-context hook could not release the claim (gc bd update exited $rc). $dont Release only the root, then claim again: gc bd update $claimed --if-assignee=$holder --if-status=$status --set-metadata=gc.routed_to= --status=open --assignee= --append-notes=\"<why>\"" ;;
+    *) emit_notice "$about The work-context hook could not release the claim (gc bd update exited $rc). $dont Release only the root, then claim again: gc bd update $claimed --if-assignee=$holder --if-status=$status --set-metadata=gc.routed_to= --assignee= --append-notes=\"<why>\"" ;;
   esac
 }
 
