@@ -487,7 +487,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    sorted into Needs you, Worth a look, In progress and Done, each a label
    linked to the comment, a sentence in the words of whoever answered it, and
    the commit, follow-up or visit carrying it. It carries a digest of its own
-   rendering, so a pass that changes nothing writes nothing. Once every finding
+   rendering, so a pass that changes nothing writes nothing. It is rendered to
+   fit the size GitHub takes in one comment: a long review shortens its notes
+   from the fix, then its quoted replies, then its sentences, each cut naming
+   the bead that holds the whole text, and past that lists the points that fit
+   and names the rest. Once every finding
    a human CHANGES_REQUESTED review raised has closed and every answer one of
    them owes is on the PR, the sweep re-requests the reviewer and dismisses the
    review with a one-line note linking the living answer, which then says the
