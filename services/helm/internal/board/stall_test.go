@@ -1,6 +1,7 @@
 package board
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -21,6 +22,31 @@ func preOpenGateAnchor(id string, days int, extra map[string]string, blockers ..
 	}
 	a := mergeAnchor(id, md, blockers...)
 	a.UpdatedAt = fixtureNow.Add(-time.Duration(days) * 24 * time.Hour)
+	return a
+}
+
+// approved is the closed approve review that backs each lane of anchor id, the
+// record lane-state.sh derives a lane's green from.
+func approved(id string, lanes ...string) []Child {
+	var out []Child
+	for i, lane := range lanes {
+		out = append(out, review(fmt.Sprintf("%s-rv%d", id, i), id, lane, "closed", "approve", "recorded"))
+	}
+	return out
+}
+
+// review is one review bead of anchor id for lane, closed or open, carrying a
+// reviewed_oid and the given verdict and outcome.
+func review(rid, id, lane, status, verdict, outcome string) Child {
+	return Child{ID: rid, Status: status, Metadata: map[string]string{
+		"task_kind": "review", "anchor_bead": id, "check_name": lane, "reviewed_oid": "deadbeef",
+		"signoff_verdict": verdict, "gc.outcome": outcome,
+	}}
+}
+
+// withReviews sets an anchor's review beads.
+func withReviews(a Anchor, reviews ...Child) Anchor {
+	a.Reviews = reviews
 	return a
 }
 
@@ -78,6 +104,7 @@ func TestPreOpenCheckStallNamesFirstUngreenLane(t *testing.T) {
 	cases := []struct {
 		name  string
 		extra map[string]string
+		green []string
 		want  string
 	}{
 		{
@@ -87,26 +114,20 @@ func TestPreOpenCheckStallNamesFirstUngreenLane(t *testing.T) {
 		},
 		{
 			name:  "correctness green, triage not",
-			extra: map[string]string{"check.correctness": checkGreen},
+			green: []string{"correctness"},
 			want:  "triage check stalled — no review has run",
 		},
 		{
-			name: "triage widened the set: correctness and triage green, arch not",
-			extra: map[string]string{
-				"check_set":         "correctness,triage,arch",
-				"check.correctness": checkGreen,
-				"check.triage":      checkGreen,
-			},
-			want: "arch check stalled — no review has run",
+			name:  "triage widened the set: correctness and triage green, arch not",
+			extra: map[string]string{"check_set": "correctness,triage,arch"},
+			green: []string{"correctness", "triage"},
+			want:  "arch check stalled — no review has run",
 		},
 		{
-			name: "a later lane green does not settle an earlier one",
-			extra: map[string]string{
-				"check_set":    "correctness,triage,arch",
-				"check.triage": checkGreen,
-				"check.arch":   checkGreen,
-			},
-			want: "correctness check stalled — no review has run",
+			name:  "a later lane green does not settle an earlier one",
+			extra: map[string]string{"check_set": "correctness,triage,arch"},
+			green: []string{"triage", "arch"},
+			want:  "correctness check stalled — no review has run",
 		},
 		{
 			name:  "legacy codex anchor",
@@ -119,10 +140,10 @@ func TestPreOpenCheckStallNamesFirstUngreenLane(t *testing.T) {
 			want:  "shellcheck check stalled — no review has run",
 		},
 		{
-			name: "a marker that is not a bare green does not settle its lane",
+			name: "a stored check.<lane>=green marker settles nothing",
 			extra: map[string]string{
-				"check.correctness": "green@abc123",
-				"check.triage":      checkGreen,
+				"check.correctness": "green",
+				"check.triage":      "green",
 			},
 			want: "correctness check stalled — no review has run",
 		},
@@ -133,7 +154,7 @@ func TestPreOpenCheckStallNamesFirstUngreenLane(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
-		a := preOpenGateAnchor("tk-lane", 5, c.extra)
+		a := withReviews(preOpenGateAnchor("tk-lane", 5, c.extra), approved("tk-lane", c.green...)...)
 		tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-lane")
 		if tile.Needs != c.want {
 			t.Errorf("%s: needs = %q, want %q", c.name, tile.Needs, c.want)
@@ -210,39 +231,39 @@ func TestPreOpenCheckStallDoesNotFire(t *testing.T) {
 			wantNeeds: unknown,
 		},
 		{
-			name: "every lane is a bare green — the PR is about to open",
-			anchor: preOpenGateAnchor("tk-green", 5, map[string]string{
-				"check.correctness": checkGreen,
-				"check.triage":      checkGreen,
-			}),
+			name: "every lane derives green — the PR is about to open",
+			anchor: withReviews(preOpenGateAnchor("tk-green", 5, nil),
+				approved("tk-green", "correctness", "triage")...),
 			wantOwed:  false,
 			wantNeeds: unknown,
 		},
 		{
 			name: "a widened set with every lane green",
-			anchor: preOpenGateAnchor("tk-wide", 5, map[string]string{
-				"check_set":         "correctness,triage,arch,pm",
-				"check.correctness": checkGreen,
-				"check.triage":      checkGreen,
-				"check.arch":        checkGreen,
-				"check.pm":          checkGreen,
-			}),
+			anchor: withReviews(preOpenGateAnchor("tk-wide", 5, map[string]string{"check_set": "correctness,triage,arch,pm"}),
+				approved("tk-wide", "correctness", "triage", "arch", "pm")...),
 			wantOwed:  false,
 			wantNeeds: unknown,
 		},
 		{
 			name:      "a legacy codex anchor gone green",
-			anchor:    preOpenGateAnchor("tk-codex", 5, map[string]string{"check_set": "codex", "check.codex": checkGreen}),
+			anchor:    withReviews(preOpenGateAnchor("tk-codex", 5, map[string]string{"check_set": "codex"}), approved("tk-codex", "codex")...),
 			wantOwed:  false,
 			wantNeeds: unknown,
 		},
 		{
 			name: "lane names are read with their whitespace stripped",
-			anchor: preOpenGateAnchor("tk-ws", 5, map[string]string{
-				"check_set":         " correctness , triage ",
-				"check.correctness": checkGreen,
-				"check.triage":      checkGreen,
-			}),
+			anchor: withReviews(preOpenGateAnchor("tk-ws", 5, map[string]string{"check_set": " correctness , triage "}),
+				approved("tk-ws", "correctness", "triage")...),
+			wantOwed:  false,
+			wantNeeds: unknown,
+		},
+		{
+			name: "reviews the source could not read name no lane",
+			anchor: func() Anchor {
+				a := preOpenGateAnchor("tk-unread", 5, nil)
+				a.ReviewsUnknown = true
+				return a
+			}(),
 			wantOwed:  false,
 			wantNeeds: unknown,
 		},
@@ -282,6 +303,36 @@ func TestPreOpenCheckStallDoesNotFire(t *testing.T) {
 		}
 		if tile.Needs != c.wantNeeds {
 			t.Errorf("%s: needs = %q, want %q", c.name, tile.Needs, c.wantNeeds)
+		}
+	}
+}
+
+// TestPreOpenCheckStallReadsTheReviews: a lane derives green only from a closed
+// review that backs it, the shape lane-state.sh reads. A review that requested
+// changes, a superseded approve, an approve naming no reviewed commit, and an
+// approve beside an open review for the lane each leave the lane short of green,
+// so the stall names it; a correctness backing greens no other lane.
+func TestPreOpenCheckStallReadsTheReviews(t *testing.T) {
+	noOID := review("rv-x", "tk-rev", "correctness", "closed", "approve", "recorded")
+	delete(noOID.Metadata, "reviewed_oid")
+	absentName := review("rv-y", "tk-rev", "", "closed", "approve", "recorded")
+	delete(absentName.Metadata, "check_name")
+	cases := []struct {
+		name    string
+		reviews []Child
+		want    string
+	}{
+		{"request-changes backs nothing", []Child{review("rv-1", "tk-rev", "correctness", "closed", "request-changes", "recorded")}, "correctness check stalled"},
+		{"a superseded approve backs nothing", []Child{review("rv-1", "tk-rev", "correctness", "closed", "approve", "superseded")}, "correctness check stalled"},
+		{"an approve naming no reviewed commit backs nothing", []Child{noOID}, "correctness check stalled"},
+		{"an open review holds the lane beside its backing", append(approved("tk-rev", "correctness"), review("rv-2", "tk-rev", "correctness", "open", "", "")), "correctness check stalled"},
+		{"an absent check_name backs correctness, and only correctness", []Child{absentName}, "triage check stalled"},
+	}
+	for _, c := range cases {
+		a := withReviews(preOpenGateAnchor("tk-rev", 5, nil), c.reviews...)
+		tile := mustTile(t, BuildBoard([]Anchor{a}, fixtureNow, false, nil, Facts{}), "tk-rev")
+		if !strings.HasPrefix(tile.Needs, c.want) {
+			t.Errorf("%s: needs = %q, want it to start %q", c.name, tile.Needs, c.want)
 		}
 	}
 }

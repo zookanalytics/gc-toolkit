@@ -504,11 +504,12 @@ field would be lying on a normal day.
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
 
 **Recorded, not re-derived.** Every stage of the merge cadence reaches the
-machine axis once per pass: `assets/scripts/gate-ensure.sh` classifies each gate
-marker, and `assets/scripts/merge.sh` decides it again at each of its holds. Both
-record it through the lifecycle writer, gate-ensure through `lifecycle.sh` and
-`gctk merge` in-process, in the head-pinned `<value>@<oid>@<since>` shape the
-gate markers already use. Nothing here adds a pass, a scanner or a GitHub read.
+machine axis once per pass: `assets/scripts/gate-ensure.sh` classifies each
+declared lane, and `assets/scripts/merge.sh` decides it again at each of its
+holds. Both record it through the lifecycle writer, gate-ensure through
+`lifecycle.sh` and `gctk merge` in-process, in the head-pinned
+`<value>@<oid>@<since>` shape. Nothing here adds a pass, a scanner or a GitHub
+read.
 
 **No per-PR GitHub call.** A conversation read costs one GitHub round trip per
 open pull request, and a backlog of ordinary size spends the board's whole cache
@@ -548,8 +549,18 @@ yet green and nothing advancing it, meaning no review or rework a live session i
 working. Its checks are the lanes its `check_set` declares, split by the rule
 `merge.sh` and `pr-open.sh` apply: commas separate lanes, whitespace is stripped,
 and `none`, `off` and `approval` name no lane. Every lane holds the PR, and a lane
-is green when its `check.<lane>` marker reads `green`. A legacy `codex` lane counts
-like any other, and a `check_set` that declares no lane is never a stalled check.
+is green when a review backs it the way `lane-state.sh` reads a local backing
+(`laneGreen`): a closed review bead naming the anchor in `anchor_bead` and the
+lane in `check_name`, carrying a `reviewed_oid` and `signoff_verdict=approve`
+and not superseded, with no review for the lane still open. The library backend
+gathers a live pre-open anchor's reviews the way `bd-lib.sh` reads an anchor's
+children in a store marked joined: the live ones by `anchor_bead`, and the
+closed ones through the anchor's inbound edges. In a store without the mark,
+where only a scan of the whole closed ledger would find the closed ones, and
+when a review read fails, it marks the reviews unread. The supervisor backend
+reads no closed bead, so it marks them unread too, and unread reviews fire no
+stall. A legacy `codex` lane counts like any other, and a `check_set` that
+declares no lane is never a stalled check.
 Childless the anchor would otherwise band `LOW` and read `in the merge cadence` (a
 stale `progressing` marker) or `position unknown`, so it sinks with no age; the
 signal bands it `ELEVATED`, dates it from the anchor's `updated_at`, and its

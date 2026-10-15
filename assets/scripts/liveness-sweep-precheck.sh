@@ -285,13 +285,13 @@ SURVIVORS=""; N_SURVIVORS=""; NEW_IDS=""; N_NEW=""
 JQ_OK=0
 if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
     # The local survivor set: the beads the classifier leaves unnamed when every
-    # read beyond the bead set is empty. have_resolver "1" with an empty gate map
-    # gates no pre-open anchor; "0" would gate one on its own check_set.
+    # read beyond the bead set is empty. An empty pre-open map gates no pre-open
+    # anchor.
     SURVIVORS=$(jq -n --slurpfile ready "$READY" --slurpfile live "$LIVE" --slurpfile alive "$ALIVE" \
       --argjson livesessions "${LIVE_SESSIONS_JSON:-[]}" --argjson livenessknown "${LIVENESS_KNOWN:-false}" \
       --argjson unreadable_liveness_covers false \
       --argjson openprs '[]' --argjson worked '[]' --argjson husks '[]' \
-      --argjson preopen_gates '{}' --arg have_resolver 1 \
+      --argjson preopen_green '{}' \
       "$VISIT_IDENTITY_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ$LIVENESS_CLASSIFY_JQ"'
       [ liveness_classify[] | select(.class == "unnamed") | .id ]' 2>/dev/null)
     if printf '%s' "$SURVIVORS" | jq -e 'type == "array"' >/dev/null 2>&1; then

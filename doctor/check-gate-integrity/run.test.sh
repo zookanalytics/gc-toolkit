@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for doctor/check-gate-integrity (I6+I7 surface). Stub gc/bd.
+# Hermetic test for doctor/check-gate-integrity (I6). Stub gc/bd.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -59,7 +59,7 @@ store "$(bead g-1 '{"merge_result":"pull_request","check_set":"correctness","bra
       "$(bead g-3d '{"merge_result":"pull_request","check_set":"correctness","branch":"b","check.correctness":"validating"}')" \
       "$(bead g-3e '{"merge_result":"pull_request","check_set":"correctness","branch":"b"}')"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "every lane state, the none sentinel, an absent marker and sidecar keys all pass"
+eq "$RC" "0" "a declared check_set or the none sentinel passes, whatever check.<g> residue the anchor carries"
 has "$OUT" "OK:" "the pass message is the OK line"
 
 # --- 2. missing / empty check_set on a gating anchor ------------------------------
@@ -71,25 +71,16 @@ has "$OUT" "g-4" "the absent declaration is flagged"
 has "$OUT" "g-5" "the explicitly empty declaration is flagged"
 has "$OUT" "ungated" "the finding says what empty means to merge.sh"
 
-# --- 3. markers outside the lane vocabulary ---------------------------------------
-# The retired <verb>@<oid> grammar is the case that matters: a marker in it
-# reads as a state no reader knows, and this check is what says so.
+# --- 3. stored check.<g> residue is no finding ---------------------------------------
+# A lane's state is derived from its reviews and nothing reads a stored value,
+# so a key left in any grammar, the retired <verb>@<oid> one included, holds
+# nothing and is not this check's.
 store "$(bead g-6 "{\"merge_result\":\"pull_request\",\"check_set\":\"correctness\",\"branch\":\"b\",\"check.correctness\":\"green@$OID\"}")" \
       "$(bead g-7 "{\"merge_result\":\"pull_request\",\"check_set\":\"correctness\",\"branch\":\"b\",\"check.correctness\":\"exception@$OID\"}")" \
       "$(bead g-8 '{"merge_result":"pull_request","check_set":"correctness","branch":"b","check.correctness":"passed"}')"
 OUT=$(run_check); RC=$?
-eq "$RC" "2" "a marker outside the lane vocabulary is an ERROR"
-has "$OUT" "g-6" "a green@<oid> in the retired grammar is flagged"
-has "$OUT" "g-7" "an exception@<oid> in the retired grammar is flagged"
-has "$OUT" "g-8" "a bare word that names no lane state is flagged"
-
-# --- 4. a green lane needs no branch to be well-formed ------------------------------
-# The old warning asked whether the marker's oid could be compared to a head.
-# A lane state names no oid, so there is nothing a missing branch makes
-# unverifiable here.
-store "$(bead g-9 '{"merge_result":"pull_request","check_set":"correctness","check.correctness":"green"}')"
-OUT=$(run_check); RC=$?
-eq "$RC" "0" "a green lane on an anchor with no branch is well-formed"
+eq "$RC" "0" "check.<g> residue in any grammar is no finding"
+hasnt "$OUT" "g-6" "…none of it is named"
 
 # --- 5. non-gating anchors are out of scope ------------------------------------------
 store "$(bead g-10 '{"merge_result":"abandoned"}')" \

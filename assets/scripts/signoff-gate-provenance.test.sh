@@ -163,7 +163,10 @@ echo "# signoff's own output satisfies the provenance check"
 seed
 "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1; rc=$?
 eq "$rc" 0 "the post-open approve records a verdict"
-eq "$(meta tk-anc check.correctness)" "green" "…still stamping the green marker signoff writes"
+eq "$(jq -r '.[] | select(.id == "rv-1") | .status' "$STUB_STORE")/$(meta rv-1 signoff_verdict)/$(meta rv-1 gc.outcome)" \
+  "closed/approve/recorded" "…closing the review with the verdict and the outcome the check reads"
+eq "$(jq -r '[.[] | select(.id == "tk-anc") | (.metadata // {}) | keys[] | select(startswith("check."))] | join(",")' "$STUB_STORE")" \
+  "" "…storing no lane state on the anchor"
 eq "$(meta rv-1 reviewed_oid)" "$HEAD_OID" "…and recording the same commit on the review bead"
 OUT=$(bash "$CHECK" 2>&1); RC=$?
 eq "$RC" 0 "the provenance check passes on the store signoff just wrote"
