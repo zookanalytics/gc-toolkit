@@ -214,16 +214,17 @@ eq "$(bstatus tk-unrouted)" "open" "unrouted step still released"
 echo "--- step arm: a root that CLOSED means there is no molecule to resume ---"
 # Releasing here would set the step open+unassigned+routed — a pool's offer
 # predicate exactly — for a molecule that is over. The chain, not this bead, is
-# the disposal unit, so the arm delegates. A stub stands in for the disposer:
-# what this suite owns is the DELEGATION, not the teardown.
-cat > "$TMP/bin/dead-dispose-stub" <<'STUB'
+# the disposal unit, so the arm delegates to run-cancel.sh --ended, which ends
+# what the run left open through gascity. A stub stands in for it: what this
+# suite owns is the DELEGATION and how its exit is read.
+cat > "$TMP/bin/run-cancel-stub" <<'STUB'
 #!/usr/bin/env bash
-printf 'dead-molecule-dispose %s\n' "$*" >> "${STUB_GC_LOG:?}"
-[ -n "${STUB_DEAD_OUT:-}" ] && printf '%s\n' "$STUB_DEAD_OUT"
-exit "${STUB_DEAD_RC:-0}"
+printf 'run-cancel %s\n' "$*" >> "${STUB_GC_LOG:?}"
+[ -n "${STUB_END_ERR:-}" ] && printf '%s\n' "$STUB_END_ERR" >&2
+exit "${STUB_END_RC:-0}"
 STUB
-chmod +x "$TMP/bin/dead-dispose-stub"
-export GC_DEAD_MOLECULE_TOOL="$TMP/bin/dead-dispose-stub"
+chmod +x "$TMP/bin/run-cancel-stub"
+export GC_RUN_CANCEL_TOOL="$TMP/bin/run-cancel-stub"
 
 dead_fixture() {
   store '[{"id":"tk-step","status":"in_progress","assignee":"lx-dead","title":"step",
@@ -235,80 +236,50 @@ dead_fixture() {
 }
 
 dead_fixture
-export STUB_DEAD_OUT='{"result":"disposed","detail":"passes=1"}'
 OUT=$("$SCRIPT" tk-step --owner lx-dead --apply 2>&1); rc=$?
-export STUB_DEAD_OUT=""
 eq "$rc" "0" "a step under a closed root exits 0"
 has "$OUT" "class=workflow-step-dead" "it is classified dead, not releasable"
 has "$OUT" "root_status=closed" "the report carries the root status it judged on"
-has "$OUT" "action=dispose-dead-chain" "the arm disposes rather than releases"
-has "$OUT" "result=disposed" "a disposed chain is reported disposed"
-has "$(cat "$STUB_GC_LOG")" "dead-molecule-dispose tk-step --apply" "the chain disposer is invoked with --apply"
+has "$OUT" "action=dispose-dead-chain" "the arm ends the chain rather than releases"
+has "$OUT" "result=disposed" "an ended chain is reported disposed"
+has "$(cat "$STUB_GC_LOG")" "run-cancel --root tk-root --ended" "the run is ended through run-cancel.sh --ended, naming the step's root"
 hasnt "$(cat "$STUB_GC_LOG")" "--status=open" "the dead step is never reopened"
 hasnt "$(cat "$STUB_GC_LOG")" "--assignee" "the dead step is never returned to a pool"
+hasnt "$(cat "$STUB_GC_LOG")" "--status=closed" "the arm closes no member itself"
 hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "the dead arm never calls reopen-source"
 
-echo "--- step arm: a 0-exit refusal is a skip, not a landed disposal ---"
-# dead-molecule-dispose.sh exits 0 for a refusal that wrote nothing as well as
-# for a real teardown: result=refused when the chain still holds a work bead,
-# result=live_root when the root read back live. Trusting the 0 exit reports a
-# recovery that never happened and drops the reason; the wrapper discriminates
-# on result, skips, and carries the disposer's detail.
+echo "--- step arm: a refusal (exit 2) is a skip, not a landed disposal ---"
+# run-cancel.sh --ended refuses with exit 2 and writes nothing when the root
+# reads live on its own read, or when a member left open carries a branch or a
+# merge_result (a work bead, which only the refinery closes). That is a skip
+# that leaves the step owned for the next cycle.
 dead_fixture
-export STUB_DEAD_OUT='{"result":"refused","detail":"work_bead_in_chain=tk-anchor"}'
+export STUB_END_RC=2 STUB_END_ERR="run-cancel: run tk-root is closed but leaves 2 member(s) open, and tk-anchor carries a branch or a merge_result."
 OUT=$("$SCRIPT" tk-step --owner lx-dead --apply 2>&1); rc=$?
-export STUB_DEAD_OUT=""
+export STUB_END_RC=0 STUB_END_ERR=""
 eq "$rc" "0" "a refused chain still exits 0"
 has "$OUT" "result=skipped" "a refusal is not reported as a disposal"
 hasnt "$OUT" "result=disposed" "the wrapper does not claim a landing it did not make"
 hasnt "$OUT" "landed=dead-chain" "nothing is marked landed when the chain is intact"
-has "$OUT" "not-disposed=refused" "the disposer's result is named"
-has "$OUT" "work_bead_in_chain=tk-anchor" "the reason it was refused survives"
-
-dead_fixture
-export STUB_DEAD_OUT='{"result":"live_root","detail":"root_status=open"}'
-OUT=$("$SCRIPT" tk-step --owner lx-dead --apply 2>&1); rc=$?
-export STUB_DEAD_OUT=""
-eq "$rc" "0" "a root that read back live exits 0"
-has "$OUT" "result=skipped" "a live root is a skip, not a disposal"
-hasnt "$OUT" "landed=dead-chain" "a live root lands nothing"
-has "$OUT" "not-disposed=live_root" "the live-root result is named"
-has "$OUT" "root_status=open" "the disposer's detail survives"
-
-dead_fixture
-export STUB_DEAD_OUT=""
-OUT=$("$SCRIPT" tk-step --owner lx-dead --apply 2>&1); rc=$?
-eq "$rc" "0" "an unparseable 0-exit still exits 0"
-has "$OUT" "result=skipped" "an unconfirmed disposal is a skip, never a landing"
-has "$OUT" "not-disposed=no-result" "an absent result is named, not read as disposed"
+has "$OUT" "not-ended=refused" "the refusal is named"
+has "$OUT" "tk-anchor carries a branch or a merge_result" "the reason it was refused survives on stderr"
 
 dead_fixture
 OUT=$("$SCRIPT" tk-step 2>&1)
 has "$OUT" "result=preview" "preview of a dead step says preview"
-hasnt "$(cat "$STUB_GC_LOG")" "dead-molecule-dispose" "preview does not invoke the disposer"
+hasnt "$(cat "$STUB_GC_LOG")" "run-cancel" "preview does not end the run"
 
 dead_fixture
-export STUB_DEAD_RC=1
+export STUB_END_RC=1
 OUT=$("$SCRIPT" tk-step --apply 2>&1); rc=$?
-export STUB_DEAD_RC=0
-eq "$rc" "1" "a failed chain disposal exits non-zero"
+export STUB_END_RC=0
+eq "$rc" "1" "a run that could not be ended exits non-zero"
 has "$OUT" "failed=dead-chain" "the failure is named, not swallowed"
 
-echo "--- step arm: an inner PARTIAL teardown (exit 3) survives as partial ---"
-# dead-molecule-dispose.sh reserves exit 3 for a chain left half torn down. The
-# witness patrol escalates that as a partial write (witness-partial-release),
-# not a retry, so the wrapper must propagate it as its own exit-3 partial and
-# carry the member detail — collapsing it to failed=dead-chain (exit 1) would
-# drop the exact signal the caller acts on.
 dead_fixture
-export STUB_DEAD_RC=3
-export STUB_DEAD_OUT='{"result":"partial","members":"tk-step,tk-sib","detail":"unclosed=tk-sib"}'
-OUT=$("$SCRIPT" tk-step --apply 2>&1); rc=$?
-export STUB_DEAD_RC=0
-export STUB_DEAD_OUT=""
-eq "$rc" "3" "an inner partial teardown exits 3, not 1"
-has "$OUT" "result=partial" "the wrapper reports partial, not failed"
-has "$OUT" "unclosed=tk-sib" "the disposer's member detail is carried into the report"
+OUT=$(GC_RUN_CANCEL_TOOL="$TMP/bin/no-such-tool" "$SCRIPT" tk-step --apply 2>&1); rc=$?
+eq "$rc" "1" "a missing run-cancel.sh exits non-zero"
+has "$OUT" "failed=run-cancel-missing" "the missing tool is named"
 
 echo "--- step arm: an unreadable root withholds the release ---"
 # An unreadable root is not a live one. Releasing on a failed probe is how a
@@ -323,9 +294,9 @@ eq "$rc" "0" "an unresolved root exits 0"
 has "$OUT" "class=workflow-step-unresolved" "it is classified unresolved"
 has "$OUT" "detail=root_unreadable" "the skip states why"
 hasnt "$(cat "$STUB_GC_LOG")" "bd update" "nothing is written"
-hasnt "$(cat "$STUB_GC_LOG")" "dead-molecule-dispose" "and nothing is torn down on a failed probe"
+hasnt "$(cat "$STUB_GC_LOG")" "run-cancel" "and nothing is ended on a failed probe"
 eq "$(bstatus tk-step)" "in_progress" "the step stays owned for the next cycle"
-unset GC_DEAD_MOLECULE_TOOL
+unset GC_RUN_CANCEL_TOOL
 
 echo "--- half-landed write is not a clean release ---"
 fixture

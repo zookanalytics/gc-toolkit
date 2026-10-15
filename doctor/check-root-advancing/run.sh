@@ -354,7 +354,7 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
             mins=$(( (NOW - lt) / 60 ))
             owner="${S_SNAME[$root]:-}"; [ -n "$owner" ] || owner="(no session recorded on the root)"
             fr="${S_FRONTIER[$root]}"; fr_n=$(printf '%s\n' $fr | grep -c .)
-            errors+=("$label root $root (${S_FORMULA[$root]:-?}): STRANDED — silent ${mins}m, its session \"$owner\" is gone, $closed_count step(s) closed, work bead not landed (convoy $convoy open), and its executable frontier is unreachable: $fr_n step(s) [$(echo $fr | tr ' ' ',')] open, unassigned AND unrouted, so no pool can be offered them and the witness's orphan recovery, which keys on an assignee, cannot reach them. Give the frontier a route so it re-offers, or dispose the molecule.")
+            errors+=("$label root $root (${S_FORMULA[$root]:-?}): STRANDED — silent ${mins}m, its session \"$owner\" is gone, $closed_count step(s) closed, work bead not landed (convoy $convoy open), and its executable frontier is unreachable: $fr_n step(s) [$(echo $fr | tr ' ' ',')] open, unassigned AND unrouted, so no pool can be offered them and the witness's orphan recovery, which keys on an assignee, cannot reach them. Give the frontier a route so it re-offers, or end the run through gascity (assets/scripts/run-cancel.sh --root $root).")
         done
         unset -v CSTATUS
     fi

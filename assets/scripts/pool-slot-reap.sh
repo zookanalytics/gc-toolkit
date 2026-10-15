@@ -61,10 +61,10 @@
 #
 # Blocked, deferred and pinned work does not keep a bead. Blocked and deferred
 # work is parked behind a hold, an edge or a date, and nothing executes it until
-# that release. molecule-hold.sh leaves a held step blocked and still assigned
-# to the session that held it, so counting blocked work would keep the bead of
-# every pool session that ever held a molecule. Pinned is bd's frozen status,
-# and nothing in the pack or core pins work to a pool session.
+# that release. A step a worker blocked itself, as gascity's core formula does on
+# a duplicate dispatch, stays assigned to that session, so counting blocked work
+# would keep the bead of every pool session that ever parked one. Pinned is bd's
+# frozen status, and nothing in the pack or core pins work to a pool session.
 #
 # Each close is recorded as one `cleanup` entry in the city's incident ledger
 # (gc-deacon-ledger.sh), naming the bead, its slot and why it slept. The

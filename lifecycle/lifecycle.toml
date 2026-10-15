@@ -543,8 +543,8 @@ keys = [
 #   brought current. Never cleared.
 # blocked_reason — the human-readable reason an anchor sits in a human state
 #   (existing_pr unusable, a PR closed or retargeted out of band). Written by
-#   pr-facts.sh and molecule-hold.sh; it is also a [holds] marker, so a live
-#   bead carrying it owes a blocks edge. Freeform.
+#   pr-facts.sh; it is also a [holds] marker, so a live bead carrying it owes a
+#   blocks edge. Freeform.
 # work_dir — the polecat's per-bead git worktree, an absolute path, written by
 #   workspace-setup so a restart or witness recovery can find the work in flight.
 #   Absent means no worktree is recorded yet. Never cleared. Absolute path.
@@ -1096,8 +1096,8 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # doctor/check-claim-advancing exempts a step or root carrying it (or gc.takeaway)
 # from its stall arms with the remedy status=blocked, and duplicate-sweep.sh notes
 # that a disposed duplicate had been parked, leaving the text on the bead. No pack
-# script writes it — molecule-hold.sh writes blocked_reason instead; an operator or
-# the refinery stamps it by hand when parking a branch. Never cleared. Freeform.
+# script writes it; an operator or the refinery stamps it by hand when parking a
+# branch. Never cleared. Freeform.
 
 [metadata.proactive]
 # The proactive first-reaction surface. A first reaction is its own leased task
@@ -1448,7 +1448,7 @@ keys = [
   "gc.dispatch_when_ready_reason", "gc.dispatch_when_ready_slung",
   "gc.dispatch_when_ready_fail_count",
   "gc.deferred_routed_to", "gc.deferred_execution_routed_to",
-  "gc.deferred_assignee",
+  "gc.deferred_assignee", "resling_target",
 ]
 # gc.dispatch_when_ready — the sling target (agent or pool); its PRESENCE means
 #   armed, and its value is what deferred-dispatch.sh slings to. Cleared with
@@ -1475,7 +1475,16 @@ keys = [
 #   the deferred counterparts of gc.routed_to, gc.execution_routed_to and the
 #   assignee: the routing a fired dispatch restores. mol-polecat-work's bd-ready
 #   guard clears them (to "") alongside the live route when it de-routes a bead
-#   that reached a polecat while blocked.
+#   that reached a polecat while blocked, and await-ruling.sh clears them the
+#   same way before it arms a declined run's re-sling.
+# resling_target — the pool a declined run's work re-slings to. await-ruling.sh
+#   writes it in the update that clears the work bead's route keys before the
+#   arm, because from that clear until the arm lands nothing else on the bead
+#   names the pool. Its own pool lookup reads it last, after the route keys and
+#   gc.dispatch_when_ready, so a re-run after an arm that was refused or failed
+#   still finds the pool with no --target. Absent means no ruling wait has
+#   cleared the bead's routes. Never cleared; the next wait overwrites it. A
+#   rig-qualified pool identity (<rig>/<agent>).
 
 [metadata.learning]
 # The feedback-learning loop's beads (docs/feedback-learning.md). obs.* is the
@@ -1521,8 +1530,8 @@ keys = [
 # step semantics belong to the Gas City runtime, not to pack transitions. The
 # pack does write some of these as decisions — gc.routed_to is a routing stamp
 # (lifecycle.sh --route, stamp-don't-sling), gc.execution_routed_to is cleared by
-# mol-polecat-work's blocked-work guard, and gc.outcome is stamped by many pack
-# components — but their meaning is the runtime's.
+# mol-polecat-work's blocked-work guard and by await-ruling.sh, and gc.outcome
+# is stamped by many pack components — but their meaning is the runtime's.
 [metadata.runtime_owned]
 keys = [
   "gc.routed_to", "gc.execution_routed_to", "gc.run_target", "gc.outcome",
@@ -1536,10 +1545,11 @@ keys = [
 ]
 # gc.outcome — the terminal disposition a workflow step or bead records: a broad
 #   enum whose members include `pass` and `recorded` (a step or verdict that
-#   stood), `superseded`, `moot`, `dismissed` and `stand-down`; written by the
-#   pack component that reached the outcome (step-close.sh, signoff.sh,
-#   review-outcome.sh, pr-facts.sh, gc-helm.sh and the done arms) and read by the
-#   done gates and the review graph. gc.routed_to and gc.execution_routed_to are
+#   stood), `superseded`, `moot` and `dismissed`, written by the pack component
+#   that reached the outcome (step-close.sh, signoff.sh, review-outcome.sh,
+#   pr-facts.sh, gc-helm.sh and the done arms), and `canceled`, which gascity's
+#   run cancel stamps on every member of a run it ends; read by the done gates
+#   and the review graph. gc.routed_to and gc.execution_routed_to are
 #   the route stamps (see the ROUTE rule in the preamble). The rest — assignee,
 #   the session and claim stamps, the step and root linkage, the poured vars and
 #   gc.formula_source, gc.session_affinity (the runtime pins it to gc.session_id)
@@ -1549,15 +1559,13 @@ keys = [
 #   gc.execution_routed_to, written by the runtime: gascity's
 #   ReleaseWorkBead re-stamps it as a fallback route on a drained session's work
 #   bead it finds otherwise unrouted, so the pool re-offers stranded work. No
-#   pack script writes or reads it; dead-molecule-dispose.sh clears it with the
-#   other ROUTE_KEYS when de-routing a dead molecule's members. Absent or empty
-#   means unrouted. A route value, per the ROUTE rule in the preamble. A formula
-#   step can also declare it in its step metadata: gascity's sling routes a
-#   poured step by its assignee, else by this key, which is how
-#   mol-review-quorum-signoff sends each lane to its provider's pool
-#   ([metadata.review_quorum]).
+#   pack script writes or reads it. Absent or empty means unrouted. A route
+#   value, per the ROUTE rule in the preamble. A formula step can also declare
+#   it in its step metadata: gascity's sling routes a poured step by its
+#   assignee, else by this key, which is how mol-review-quorum-signoff sends
+#   each lane to its provider's pool ([metadata.review_quorum]).
 # gc.formula_contract — `graph.v2` on a workflow root, stamped by the formula
-#   pour beside gc.kind=workflow. orphan-dispose.sh, dead-molecule-dispose.sh and
+#   pour beside gc.kind=workflow. orphan-dispose.sh, run-cancel.sh and
 #   mol-witness-patrol.toml read it, or gc.kind=workflow, to classify a bead as a
 #   workflow root — the runtime's own IsWorkflowRoot test, mirrored in the pack.
 # gc.work_dir / gc.work_commit / gc.work_branch — the runtime's work-record
@@ -1590,7 +1598,7 @@ keys = [
 #   GC_WORK_RECORD_ENFORCE makes it block the close. The pack stamps `shipped`
 #   from the lifecycle writer's transition into `merged` and from
 #   mol-refinery-patrol.toml's rework hand-back close, and `no-op` from
-#   dead-molecule-dispose.sh, duplicate-sweep.sh on a rework twin it disposes,
+#   duplicate-sweep.sh on a rework twin it disposes,
 #   first-reaction-dispose.sh on the reaction bead it closes,
 #   mol-validate-close, work-outcome.sh on every visit close, the
 #   observation-filing recipes, and converse by hand. duplicate-sweep.sh reads it

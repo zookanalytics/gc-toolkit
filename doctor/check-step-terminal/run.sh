@@ -18,10 +18,11 @@
 # waits on a live blocker, is inert. Nothing can offer it, so it is a note.
 #
 # Offerability is measured, not assumed, and the listing therefore selects open
-# AND blocked. A chain quiesced at its frontier parks that frontier at
-# status=blocked, so a selector narrowed back to open alone would drop the
-# parked row and then report the dep-blocked steps sitting behind it — the ones
-# whose blocker it had just discarded.
+# AND blocked. A worker that blocks its own step, as gascity's core formula does
+# on a duplicate dispatch, parks that frontier at status=blocked, so a selector
+# narrowed back to open alone would drop the parked row and then report the
+# dep-blocked steps sitting behind it — the ones whose blocker it had just
+# discarded.
 #
 # Under a root that is OPEN, an offerable step untouched past the stall bound
 # (default 48h, GC_DOCTOR_STEP_STALL_HOURS) is a warning, the stalled-frontier
