@@ -204,38 +204,44 @@ chmod +x "$TMP/bin/git" "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export WORK_BEAD_ID=tk-work
 
-# molecule-hold.sh and escalate.sh, resolved out of $GC_PACK_DIR exactly as the
-# arms resolve them. Every fail-closed arm ESCALATES (records a release path),
-# then HOLDS, then drains: a step left `open` and routed is re-offered to a fresh
-# polecat every cycle, and a hold with no visit is a silent park no human is
-# asked to clear. Each stub records its call so the order can be asserted, and
-# returns a code the assertions control.
+# run-cancel.sh, await-ruling.sh and escalate.sh, resolved out of $GC_PACK_DIR
+# exactly as the arms resolve them. Every fail-closed arm ESCALATES (files the
+# visit), then makes the work bead WAIT on it, then CANCELS the run, then drains:
+# a cancelled run with no visit and no wait behind it leaves work nothing
+# re-offers. Each stub records its call so the order can be asserted, and returns
+# a code the assertions control.
 mkdir -p "$TMP/pack/assets/scripts"
-cat > "$TMP/pack/assets/scripts/molecule-hold.sh" <<'HOLD'
+cat > "$TMP/pack/assets/scripts/run-cancel.sh" <<'CANCEL'
 #!/usr/bin/env bash
 # The verb alone goes in the ordered trace; the argv goes where the reason
 # assertions can read it without widening every expected log string.
-printf 'HOLD\n' >> "$FAKE_LOG"
-printf '%s\n' "$*" >> "${FAKE_HOLD:-/dev/null}"
-exit "${FAKE_HOLD_RC:-0}"
-HOLD
+printf 'CANCEL\n' >> "$FAKE_LOG"
+printf '%s\n' "$*" >> "${FAKE_CANCEL:-/dev/null}"
+exit "${FAKE_CANCEL_RC:-0}"
+CANCEL
+cat > "$TMP/pack/assets/scripts/await-ruling.sh" <<'AWAIT'
+#!/usr/bin/env bash
+printf 'AWAIT\n' >> "$FAKE_LOG"
+printf '%s\n' "$*" >> "${FAKE_AWAIT:-/dev/null}"
+exit "${FAKE_AWAIT_RC:-0}"
+AWAIT
 cat > "$TMP/pack/assets/scripts/escalate.sh" <<'ESC'
 #!/usr/bin/env bash
 printf 'ESCALATE\n' >> "$FAKE_LOG"
 printf '%s\n' "$*" >> "${FAKE_ESCALATE:-/dev/null}"
 exit "${FAKE_ESC_RC:-0}"
 ESC
-chmod +x "$TMP/pack/assets/scripts/molecule-hold.sh" "$TMP/pack/assets/scripts/escalate.sh"
+chmod +x "$TMP/pack/assets/scripts/run-cancel.sh" "$TMP/pack/assets/scripts/await-ruling.sh" "$TMP/pack/assets/scripts/escalate.sh"
 export GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH=""
-export FAKE_HOLD="$TMP/hold" FAKE_HOLD_RC=0 FAKE_ESCALATE="$TMP/escalate" FAKE_ESC_RC=0
-: > "$TMP/hold"; : > "$TMP/escalate"
+export FAKE_CANCEL="$TMP/cancel" FAKE_CANCEL_RC=0 FAKE_AWAIT="$TMP/await" FAKE_AWAIT_RC=0 FAKE_ESCALATE="$TMP/escalate" FAKE_ESC_RC=0
+: > "$TMP/cancel"; : > "$TMP/await"; : > "$TMP/escalate"
 
 # run_gate <current-branch> <metadata-json>
 #   -> prints "<rc>|<log>"; the log is the recorded gc writes, newline-joined
 #      into one field so a single `eq` can assert both the outcome and the
 #      side effects.
 run_gate() {
-  : > "$TMP/log"; : > "$TMP/hold"
+  : > "$TMP/log"; : > "$TMP/cancel"; : > "$TMP/await"
   printf '%s\n' "$GATE" > "$TMP/gate.sh"
   local rc=0
   FAKE_BRANCH="$1" FAKE_META="$2" FAKE_LOG="$TMP/log" \
@@ -248,7 +254,7 @@ run_gate() {
 # `{{base_branch}}` is a formula placeholder, substituted here exactly as the
 # molecule materializer substitutes it before the polecat reads the step.
 run_resolve() {
-  : > "$TMP/log"; : > "$TMP/hold"
+  : > "$TMP/log"; : > "$TMP/cancel"; : > "$TMP/await"
   printf '%s\n' "$RESOLVE" | sed "s|{{base_branch}}|$2|g" > "$TMP/resolve.sh"
   local rc=0
   CURRENT_BRANCH="$1" FAKE_META="$3" FAKE_LOG="$TMP/log" \
@@ -277,7 +283,7 @@ eq "$(run_gate polecat/tk-work '{}')" \
 # still on its agent home branch. Nothing recorded a branch, so the convention
 # catches it. Must halt, and must not record the wrong branch.
 eq "$(run_gate polecat/tk-agent-home '{}')" \
-   "1|ESCALATE;HOLD;DRAIN;" \
+   "1|ESCALATE;AWAIT;CANCEL;DRAIN;" \
    "fresh + wrong branch: escalates, halts, drain-acks, records no branch"
 
 # THE REGRESSION. Rework child: metadata.branch names the reviewed
@@ -292,7 +298,7 @@ eq "$(run_gate polecat/su-uzy9.5 '{"branch":"polecat/su-uzy9.5"}')" \
 # polecat/<bead-id> from the reviewed branch instead of resuming it. That forks
 # the branch under review, so it must halt even though the name looks correct.
 eq "$(run_gate polecat/tk-work '{"branch":"polecat/su-uzy9.5"}')" \
-   "1|ESCALATE;HOLD;DRAIN;" \
+   "1|ESCALATE;AWAIT;CANCEL;DRAIN;" \
    "rework: halts on a forked polecat/<bead-id> branch, not just any mismatch"
 
 # An empty branch name must never be treated as a match. The branch release
@@ -300,10 +306,10 @@ eq "$(run_gate polecat/tk-work '{"branch":"polecat/su-uzy9.5"}')" \
 # so a detached HEAD here is not a stage the recipe walks through on its way
 # to one.
 eq "$(run_gate '' '{"branch":"polecat/su-uzy9.5"}')" \
-   "1|ESCALATE;HOLD;DRAIN;" \
+   "1|ESCALATE;AWAIT;CANCEL;DRAIN;" \
    "detached HEAD with metadata.branch set: halts"
 eq "$(run_gate '' '{}')" \
-   "1|ESCALATE;HOLD;DRAIN;" \
+   "1|ESCALATE;AWAIT;CANCEL;DRAIN;" \
    "detached HEAD with no metadata.branch: halts"
 
 # An empty-STRING metadata.branch is the absent case, not a branch named "".
@@ -376,7 +382,7 @@ ROSTER_OK='[{"qualified_name":"gc-toolkit/gc-toolkit.refinery"},{"qualified_name
 # $3 is set-but-empty on purpose in the empty-prefix case, so `${3-...}` and not
 # `${3:-...}` is the expansion that renders it.
 run_consume() { # <landing-target> [gc-rig] [binding-prefix] [agents-json|UNREADABLE]
-  : > "$TMP/hold"
+  : > "$TMP/cancel"; : > "$TMP/await"
   : > "$TMP/log"
   printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|${3-gc-toolkit.}|g" > "$TMP/consume.sh"
   local rc=0
@@ -418,58 +424,60 @@ eq "$(run_consume main myrig)" \
 # metadata value round-trips as set-but-empty and is not the same as absent,
 # so a silent empty write is its own strand.
 eq "$(run_consume '')" \
-   "1|ESCALATE;HOLD;DRAIN;" \
-   "unset LANDING_TARGET: escalates, holds, then halts instead of writing an empty target"
-has_hold() { grep -q -- "$1" "$TMP/hold"; }
+   "1|ESCALATE;AWAIT;CANCEL;DRAIN;" \
+   "unset LANDING_TARGET: escalates, waits, cancels the run, then halts instead of writing an empty target"
+has_cancel() { grep -q -- "$1" "$TMP/cancel"; }
 
 # The handoff itself fails closed. gc bd update exits non-zero and rolls its call
 # back when a write is refused, so the three writes are chained; if one is
 # refused even after --status=open — a shape the guard should never take, forced
 # here with FAKE_FORCE_GUARD — the step must NOT close its chain and drain past
 # the strand. The first two writes land; the assignee write is refused, so
-# HANDOFF_OK stays 0 and the arm escalates, holds, then drains.
+# HANDOFF_OK stays 0 and the arm escalates, waits, cancels the run, then drains.
 printf '%s\n' "$CONSUME" | sed "s|{{binding_prefix}}|gc-toolkit.|g" > "$TMP/consume.sh"
-: > "$TMP/log"; : > "$TMP/hold"
+: > "$TMP/log"; : > "$TMP/cancel"; : > "$TMP/await"
 REFUSED_HANDOFF_RC=0
 LANDING_TARGET=main GC_RIG="" FAKE_AGENTS="$ROSTER_OK" FAKE_FORCE_GUARD=1 FAKE_LOG="$TMP/log" \
   bash "$TMP/consume.sh" > "$TMP/out" 2>&1 || REFUSED_HANDOFF_RC=$?
 eq "$REFUSED_HANDOFF_RC|$(tr '\n' ';' < "$TMP/log")" \
-   "1|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;ESCALATE;HOLD;DRAIN;" \
-   "a refused handoff write escalates, holds, then drains — never closes the chain"
-has_hold "refinery handoff refused" \
-  && ok "the handoff-refusal hold names why it held" \
-  || bad "handoff-refusal hold has no reason: $(cat "$TMP/hold")"
-has_hold "--step mol-polecat-work.submit-and-exit" \
-  && ok "the handoff-refusal holds its own step" \
-  || bad "handoff-refusal did not hold submit-and-exit: $(cat "$TMP/hold")"
+   "1|UPDATE|tk-work --set-metadata target=main --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Implemented: <brief summary>;UPDATE|tk-work --status=open;ESCALATE;AWAIT;CANCEL;DRAIN;" \
+   "a refused handoff write escalates, waits, cancels the run, then drains — never closes the chain"
+has_cancel "refinery handoff refused" \
+  && ok "the handoff-refusal cancel names why the run ended" \
+  || bad "handoff-refusal cancel has no reason: $(cat "$TMP/cancel")"
+has_cancel "--step mol-polecat-work.submit-and-exit" \
+  && ok "the handoff-refusal cancels the run of its own step" \
+  || bad "handoff-refusal did not name submit-and-exit: $(cat "$TMP/cancel")"
 
-# --- 3b. Fail-closed arms HOLD before they drain. -----------------------------
-# `open` is half the pool's offer predicate, so an arm that drains leaving its
-# step open is re-offered to a fresh polecat every cycle, which re-derives the
-# same refusal. Every arm below must name the step it holds; a hold that names
-# nothing holds nothing.
+# --- 3b. Fail-closed arms CANCEL their run before they drain. -----------------
+# An arm that drains leaving its step claimable hands it to a fresh polecat,
+# which re-derives the same refusal. Every arm below cancels the run of the
+# step it holds, through run-cancel.sh, after the work bead waits on the visit.
 run_gate polecat/tk-work '{"branch":"polecat/su-uzy9.5"}' >/dev/null
-has_hold "--step mol-polecat-work.submit-and-exit" \
-  && ok "branch-shape refusal holds its own step" \
-  || bad "branch-shape refusal drained without holding: $(cat "$TMP/hold")"
-has_hold "branch shape gate" \
-  && ok "and the hold carries the reason a human releases it on" \
-  || bad "branch-shape hold has no reason: $(cat "$TMP/hold")"
+has_cancel "--step mol-polecat-work.submit-and-exit" \
+  && ok "branch-shape refusal cancels the run of its own step" \
+  || bad "branch-shape refusal drained without cancelling: $(cat "$TMP/cancel")"
+has_cancel "branch shape gate" \
+  && ok "and the cancel carries the reason" \
+  || bad "branch-shape cancel has no reason: $(cat "$TMP/cancel")"
+grep -q -- "tk-work --key polecat-branch-shape --formula mol-polecat-work" "$TMP/await" \
+  && ok "and the work bead waits on the branch-shape visit, re-slung through mol-polecat-work" \
+  || bad "branch-shape refusal recorded no wait: $(cat "$TMP/await")"
 
 run_resolve polecat/su-uzy9.5 polecat/su-uzy9.5 '{}' >/dev/null
-has_hold "--step mol-polecat-work.submit-and-exit" \
-  && ok "target-resolution refusal holds its own step" \
-  || bad "target-resolution refusal drained without holding: $(cat "$TMP/hold")"
-has_hold "no landing branch" \
+has_cancel "--step mol-polecat-work.submit-and-exit" \
+  && ok "target-resolution refusal cancels the run of its own step" \
+  || bad "target-resolution refusal drained without cancelling: $(cat "$TMP/cancel")"
+has_cancel "no landing branch" \
   && ok "and names what must be set to release it" \
-  || bad "target-resolution hold has no reason: $(cat "$TMP/hold")"
-eq "$(tr '\n' ';' < "$TMP/log")" "ESCALATE;HOLD;DRAIN;" \
-   "and escalates, then holds, before it drains"
+  || bad "target-resolution cancel has no reason: $(cat "$TMP/cancel")"
+eq "$(tr '\n' ';' < "$TMP/log")" "ESCALATE;AWAIT;CANCEL;DRAIN;" \
+   "and escalates, then waits, then cancels, before it drains"
 
 run_consume '' >/dev/null
-has_hold "LANDING_TARGET unset" \
-  && ok "the handoff guard holds before it drains" \
-  || bad "handoff guard drained without holding: $(cat "$TMP/hold")"
+has_cancel "LANDING_TARGET unset" \
+  && ok "the handoff guard cancels before it drains" \
+  || bad "handoff guard drained without cancelling: $(cat "$TMP/cancel")"
 
 # An empty {{binding_prefix}} is what the formula's declared default renders
 # whenever this command is rebuilt from the .toml instead of read out of the
@@ -766,37 +774,45 @@ eq "$(run_consume_title '   ' tk-anchor)" "0|$HANDOFF3" \
 eq "$(FAKE_TITLE_REFUSE=1 run_consume_title 'Compare heads, not names' tk-anchor)" "0|$HANDOFF3" \
    "a refused retitle costs the title, and the handoff still lands whole"
 
-# A hold that did not land must not drain. molecule-hold.sh exits non-zero when
-# it cannot resolve the step, when duplicate step beads make that ambiguous,
-# when the blocking write is refused, or when a route on the molecule root or a
-# sibling step survived; draining there leaves something claimable, which is the
-# loop the hold exists to stop. The escalation still ran first, so the log
-# carries ESCALATE then HOLD, and no DRAIN.
-FAKE_HOLD_RC=1
+# A cancel that did not land must not drain. run-cancel.sh exits non-zero when it
+# cannot prove which step this shell is executing or when gascity does not
+# confirm the cancel; draining there hands the step to a fresh polecat while the
+# run is still live. The escalation and the wait still ran first, so the log
+# carries ESCALATE, AWAIT, CANCEL, and no DRAIN.
+FAKE_CANCEL_RC=1
 eq "$(run_gate polecat/tk-agent-home '{}')" \
-   "1|ESCALATE;HOLD;" \
-   "branch-shape refusal: a refused hold halts WITHOUT draining"
+   "1|ESCALATE;AWAIT;CANCEL;" \
+   "branch-shape refusal: a cancel that did not land halts WITHOUT draining"
 run_resolve polecat/su-uzy9.5 polecat/su-uzy9.5 '{}' >/dev/null
-eq "$(tr '\n' ';' < "$TMP/log")" "ESCALATE;HOLD;" \
-   "target resolution: a refused hold halts WITHOUT draining"
+eq "$(tr '\n' ';' < "$TMP/log")" "ESCALATE;AWAIT;CANCEL;" \
+   "target resolution: a cancel that did not land halts WITHOUT draining"
 eq "$(run_consume '')" \
-   "1|ESCALATE;HOLD;" \
-   "the handoff guard: a refused hold halts WITHOUT draining"
-FAKE_HOLD_RC=0
+   "1|ESCALATE;AWAIT;CANCEL;" \
+   "the handoff guard: a cancel that did not land halts WITHOUT draining"
+FAKE_CANCEL_RC=0
 
-# An escalation that did not land must not hold or drain. escalate.sh records the
-# release path — the visit a human claims — so a hold with no visit is a silent
-# park, worse than the loop. When escalate.sh exits non-zero the arm escalates,
-# then neither holds nor drains, leaving the step claimable and visible: a
-# successful hold is not enough by itself. The submit-and-exit twin of the
-# workspace-setup regression in molecule-hold.test.sh.
+# A wait that did not land must not cancel or drain: a cancelled run with no wait
+# recorded on the work bead leaves work nothing re-slings.
+FAKE_AWAIT_RC=1
+eq "$(run_gate polecat/tk-agent-home '{}')" \
+   "1|ESCALATE;AWAIT;" \
+   "branch-shape refusal: a wait that did not land neither cancels nor drains"
+eq "$(run_consume '')" \
+   "1|ESCALATE;AWAIT;" \
+   "the handoff guard: a wait that did not land neither cancels nor drains"
+FAKE_AWAIT_RC=0
+
+# An escalation that did not land must not wait, cancel or drain. escalate.sh
+# files the visit a human claims, so a cancel with no visit behind it is a run
+# ended on a question nobody is asked. When escalate.sh exits non-zero the arm
+# stops there, leaving the step claimed for the next worker.
 FAKE_ESC_RC=1
 eq "$(run_gate polecat/tk-agent-home '{}')" \
    "1|ESCALATE;" \
-   "branch-shape refusal: a refused escalation neither holds nor drains"
+   "branch-shape refusal: a refused escalation neither cancels nor drains"
 eq "$(run_consume '')" \
    "1|ESCALATE;" \
-   "the handoff guard: a refused escalation neither holds nor drains"
+   "the handoff guard: a refused escalation neither cancels nor drains"
 FAKE_ESC_RC=0
 
 # --- 4. The snippets compose. -------------------------------------------------

@@ -62,7 +62,7 @@ func TestPreOpenCheckStallFires(t *testing.T) {
 			t.Errorf("%s: the row carries its age on the frontier, got %q", c.id, tile.Frontier)
 		}
 		// It is a merge anchor, so it still reads in the REVIEW band beside the
-		// wedged pre-open rows, not re-sectioned.
+		// other pre-open rows, not re-sectioned.
 		if tile.Section != SectionReview {
 			t.Errorf("%s: section = %q, want review", c.id, tile.Section)
 		}
@@ -121,7 +121,7 @@ func TestPreOpenCheckStallNamesFirstUngreenLane(t *testing.T) {
 		{
 			name: "a marker that is not a bare green does not settle its lane",
 			extra: map[string]string{
-				"check.correctness": "exception@abc123",
+				"check.correctness": "green@abc123",
 				"check.triage":      checkGreen,
 			},
 			want: "correctness check stalled — no review has run",
@@ -193,10 +193,9 @@ func TestPreOpenCheckLiveVsDeadReview(t *testing.T) {
 }
 
 // TestPreOpenCheckStallDoesNotFire: every shape that must NOT surface as a
-// stall. A fresh hold, every lane green, a recorded wedge, and a check_set that
-// declares no lane each keep their own position phrase.
+// stall. A fresh hold, every lane green, and a check_set that declares no lane
+// each keep their own position phrase.
 func TestPreOpenCheckStallDoesNotFire(t *testing.T) {
-	wedgedAt := fixtureNow.Add(-120 * time.Hour)
 	const unknown = "position unknown — the merge cadence has recorded none"
 	cases := []struct {
 		name      string
@@ -246,12 +245,6 @@ func TestPreOpenCheckStallDoesNotFire(t *testing.T) {
 			}),
 			wantOwed:  false,
 			wantNeeds: unknown,
-		},
-		{
-			name:      "a recorded wedge already owns the row",
-			anchor:    preOpenGateAnchor("tk-wedge", 5, map[string]string{"pr.machine": dated(MachineWedgedException, headLive, wedgedAt)}),
-			wantOwed:  true, // owed, but by the wedge — not the stall
-			wantNeeds: "wedged: the review cap parked this anchor — a ruling releases it, a new commit does not",
 		},
 		{
 			name:      "check_set none is the checkless opt-out",
@@ -327,8 +320,8 @@ func TestCheckLanes(t *testing.T) {
 
 // TestPreOpenCheckStallYieldsToStrongerSurfacing: a takeaway or a human route
 // already carries the row's NEEDS, so the stall defers rather than renaming it.
-// A human-routed signoff-cap park and a converse takeaway each carry their own
-// NEEDS, and the human route also owns the band.
+// An operator hold routed to a person and a converse takeaway each carry their
+// own NEEDS, and the human route also owns the band.
 func TestPreOpenCheckStallYieldsToStrongerSurfacing(t *testing.T) {
 	// A converse sitting parked it: gathered as the parked kind, carrying its
 	// takeaway as the NEEDS sentence.
@@ -336,10 +329,10 @@ func TestPreOpenCheckStallYieldsToStrongerSurfacing(t *testing.T) {
 	parked.Kind, parked.Source = "parked", "parked"
 	parked.Takeaway = "waiting on the upstream decision"
 
-	// Routed to a person after the signoff cap: humanGated owns it.
+	// Held for a person and routed to them: humanGated owns it.
 	human := preOpenGateAnchor("tk-human", 5, map[string]string{
 		"gc.routed_to": "human",
-		"merge_hold":   "signoff_cap",
+		"merge_hold":   "true",
 	})
 	human.Kind, human.Source = "human", "human"
 

@@ -171,14 +171,14 @@ export interface Tile {
   pr_url: string;
   /**
    * The branch the anchor's work sits on — the row's identity for the whole
-   * span before a number exists, which is where most wedged anchors are. A
-   * field of its own rather than a read out of `frontier`, which is prose and
-   * is not rendered on every table. `''` when the anchor records no branch.
+   * span before a number exists. A field of its own rather than a read out of
+   * `frontier`, which is prose and is not rendered on every table. `''` when
+   * the anchor records no branch.
    */
   pr_branch: string;
   /**
    * What the merge cadence can do next: `'progressing'`, `'settled'`,
-   * `'wedged-exception'`, `'blocked'`, or `'unknown'`.
+   * `'blocked'`, or `'unknown'`.
    *
    * `'blocked'` is a hold no automated actor will clear and no review verdict is
    * owed on — an unresolved required review thread, a base gone BEHIND, or an
@@ -221,7 +221,7 @@ export interface Tile {
    * when the only candidate cause reads `'unknown'`: an unreadable input
    * belongs in the coverage sentence, not in a clock reporting the wait as new.
    *
-   * Not `updated_at`, which a wedged anchor's every reconcile pass touches.
+   * Not `updated_at`, which every reconcile pass touches on an owed anchor.
    */
   pr_owed_since?: string;
 

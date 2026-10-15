@@ -212,14 +212,13 @@ blk "$R_TK" tk-w-hidden open "$POOL"
 
 # Merge anchors read their recorded merge axis, not their empty route.
 blk "$R_TK" tk-w-anchors open '{}' tk-a-approval tk-a-progress tk-a-preopen tk-a-approved \
-  tk-a-hold tk-a-wedged tk-a-blocked tk-a-stale tk-a-noaxis tk-a-heldstate
+  tk-a-hold tk-a-blocked tk-a-stale tk-a-noaxis tk-a-heldstate
 AX='@h1@2026-10-01T00:00:00Z'
 blk "$R_TK" tk-a-approval open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled$AX\",\"pr_posture\":\"review_required$AX\"}"
 blk "$R_TK" tk-a-progress open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"progressing$AX\",\"pr_posture\":\"changes_requested$AX\"}"
 blk "$R_TK" tk-a-preopen open "{\"merge_result\":\"pre_open_gate\",\"pr.machine\":\"settled$AX\"}"
 blk "$R_TK" tk-a-approved open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled$AX\",\"pr_posture\":\"approved$AX\"}"
 blk "$R_TK" tk-a-hold open "{\"merge_result\":\"pre_open_gate\",\"merge_hold\":\"true\",\"pr.machine\":\"settled$AX\"}"
-blk "$R_TK" tk-a-wedged open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"wedged-exception$AX\"}"
 blk "$R_TK" tk-a-blocked open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"blocked$AX\"}"
 blk "$R_TK" tk-a-stale open "{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled$AX\",\"pr_posture\":\"review_required@h0@2026-09-30T00:00:00Z\"}"
 blk "$R_TK" tk-a-noaxis open '{"merge_result":"pre_open_gate"}'
@@ -629,12 +628,11 @@ eq "$(blkr tk-a-progress)" "advancing - -" "a progressing anchor advances, a req
 eq "$(blkr tk-a-preopen)" "advancing - -" "a settled anchor before its PR opens advances: the PR-open pass publishes it"
 eq "$(blkr tk-a-approved)" "advancing - -" "a settled, approved PR advances to the merge pass"
 eq "$(blkr tk-a-hold)" "stuck tk-a-hold merge-hold" "an operator merge hold is stuck"
-eq "$(blkr tk-a-wedged)" "stuck tk-a-wedged wedged" "a wedged anchor is stuck"
 eq "$(blkr tk-a-blocked)" "stuck tk-a-blocked merge-blocked" "an anchor its machine axis records blocked is stuck"
 eq "$(blkr tk-a-stale)" "stuck tk-a-stale unread" "a posture read at another head than the axis is unread, so stuck"
 eq "$(blkr tk-a-noaxis)" "stuck tk-a-noaxis unread" "an anchor with no recorded axis is unread, so stuck"
 eq "$(blkr tk-a-heldstate)" "stuck tk-a-heldstate human" "an anchor parked in a human state is stuck on a person"
-eq "$(logcount 'list --id')" 1 "  ... ten same-store blockers cost one read"
+eq "$(logcount 'list --id')" 1 "  ... nine same-store blockers cost one read"
 
 # A bead's own state, one rule per blocker.
 run tk-w-kinds --frontier --json

@@ -2322,15 +2322,15 @@ func TestDoneSince(t *testing.T) {
 // the rest of the store, and a `progressing` or `settled` anchor carries no
 // human route for any other gather kind to select on.
 //
-// Keyed on merge_result PRESENCE, never on pr_number: an anchor that wedges at
+// Keyed on merge_result PRESENCE, never on pr_number: an anchor at
 // pre_open_gate has no pull request open, so a number-keyed query would omit
-// the bulk of the condition.
+// it.
 func mergeStore() *fakeStore {
 	return &fakeStore{
 		issues: map[string][]*beads.Issue{
 			"task": {
-				issue("tk-pre", "wedged before the PR opened", "task", 1, testNow.Add(-3*24*time.Hour),
-					`{"merge_result":"pre_open_gate","branch":"polecat/tk-pre","gc.routed_to":"human","pr.machine":"wedged-exception@aaaa@2026-08-28T04:05:06Z"}`),
+				issue("tk-pre", "held for a person before the PR opened", "task", 1, testNow.Add(-3*24*time.Hour),
+					`{"merge_result":"pre_open_gate","branch":"polecat/tk-pre","gc.routed_to":"human","pr.machine":"progressing@aaaa@2026-08-28T04:05:06Z"}`),
 				issue("tk-open", "an ordinary open PR", "task", 2, testNow,
 					`{"merge_result":"pull_request","pr_number":"512","branch":"polecat/tk-open"}`),
 				issue("tk-quiet", "no merge_result at all", "task", 2, testNow, `{"branch":"polecat/tk-quiet"}`),
@@ -2362,10 +2362,10 @@ func TestMergeAnchorsAreGathered(t *testing.T) {
 	for _, a := range res.Anchors {
 		kinds[a.ID] = append(kinds[a.ID], a.Kind)
 	}
-	// A wedged anchor carries BOTH markers and gathers twice, exactly as a
-	// human+parked bead does. `human` comes FIRST so BuildBoard's id-dedup —
-	// which keeps the first at equal rank — leaves it a human row rather than
-	// letting the kind flip between passes.
+	// A merge anchor routed to a person carries BOTH markers and gathers twice,
+	// exactly as a human+parked bead does. `human` comes FIRST so BuildBoard's
+	// id-dedup — which keeps the first at equal rank — leaves it a human row
+	// rather than letting the kind flip between passes.
 	if got := kinds["tk-pre"]; len(got) != 2 || got[0] != "human" || got[1] != "merge" {
 		t.Errorf("tk-pre kinds = %v, want [human merge] in that order", got)
 	}
