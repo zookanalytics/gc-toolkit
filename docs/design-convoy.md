@@ -40,7 +40,7 @@ code and needs no worktree of its own. Its steps:
 
 | Step | What it does |
 |---|---|
-| `load-context` | Read the subject and its recommendation card for the design topic and intended implementation. Resolve `design_gated` (var, default `true`). |
+| `load-context` | Decline a subject that a hold holds, on it or on one of its ancestors: `held-work-gate.sh` arms a re-dispatch with the same `design_gated`, which fires once nothing holds the subject, and cancels the run before `seed-convoy` pushes anything. Read the subject and its recommendation card for the design topic and intended implementation. Resolve `design_gated` (var, default `true`). |
 | `seed-convoy` | Run `convoy-seed.sh`: create the owned convoy, set `target = integration/<convoy-id>`, cut and push the branch. Record the convoy id on the subject. |
 | `arm-design` | File the design child, link it parent-child to the convoy, read the link back, and sling `mol-polecat-work`. |
 | `arm-implementation` | File one implementation child that builds the initiative per the design. `design_gated=true`: a `blocks` edge from the design child plus a `deferred-dispatch.sh arm`, so the design's closure dispatches it. `design_gated=false`: sling it now, in parallel. Each edge is read back before anything dispatches. |
