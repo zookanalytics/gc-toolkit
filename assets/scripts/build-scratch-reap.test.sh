@@ -150,5 +150,29 @@ gone "$ROOT/go-build-psblind" "while a tree with no pid in its name is reaped in
 bash "$SUT" --root "$ROOT" --no-lock >/dev/null 2>&1
 gone "$ROOT/gct${DEADP}-888"  "with ps answering, the same dead pid's tree is reaped"
 
+# --- the single-flight lock ---
+# A lock another pass holds skips this one. A holder past the stall bound, and a
+# lock that cannot be taken at all, leave the pass to run unlocked, because two
+# passes racing is safe: each re-checks the holder before it removes anything.
+LOCKD="$TMP/lockdir"; mkdir -p "$LOCKD"
+( exec 9>>"$LOCKD/pass.lock"; flock -n 9 || exit 1; : >"$TMP/lock-held"
+  i=0; while [ ! -e "$TMP/lock-release" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i + 1)); done ) </dev/null >/dev/null 2>&1 &
+LH=$!; HOLDERS+=("$LH")
+i=0; while [ ! -e "$TMP/lock-held" ] && [ "$i" -lt 400 ]; do sleep 0.05; i=$((i + 1)); done
+printf '%s %s\n' "$LH" "$(date -u +%s)" >"$LOCKD/pass.holder"
+mkdir -p "$ROOT/go-build-lockcase"; : >"$ROOT/go-build-lockcase/a.o"
+OUT="$(BUILD_SCRATCH_REAP_LOCK_DIR="$LOCKD" bash "$SUT" --root "$ROOT" --verbose 2>&1)"
+has "$OUT" "another pass holds $LOCKD/pass.lock (pid $LH" "a held lock skips the pass, naming its holder"
+kept "$ROOT/go-build-lockcase" "a skipped pass removes nothing"
+printf '%s 1\n' "$LH" >"$LOCKD/pass.holder"
+OUT="$(BUILD_SCRATCH_REAP_LOCK_DIR="$LOCKD" BUILD_SCRATCH_REAP_LOCK_STALL_SECS=60 bash "$SUT" --root "$ROOT" 2>&1)"
+has "$OUT" "lock held past 60s (pid $LH" "a holder past the stall bound is reported"
+gone "$ROOT/go-build-lockcase" "…and does not stop the reap"
+: >"$TMP/lock-release"; wait "$LH" 2>/dev/null || true
+mkdir -p "$TMP/lockdir-blocked/pass.lock" "$ROOT/go-build-lockcase2"
+OUT="$(BUILD_SCRATCH_REAP_LOCK_DIR="$TMP/lockdir-blocked" bash "$SUT" --root "$ROOT" 2>&1)"
+has "$OUT" "lock unavailable (cannot create $TMP/lockdir-blocked/pass.lock); proceeding unlocked" "a lock that cannot be taken is reported"
+gone "$ROOT/go-build-lockcase2" "…and the pass runs unlocked"
+
 echo "build-scratch-reap.test.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

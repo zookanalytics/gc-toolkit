@@ -66,22 +66,9 @@ done
 
 command -v jq >/dev/null 2>&1 || { echo "$PROG: jq is required" >&2; exit 1; }
 
-# --- per-rig state (same keying as liveness-sweep-precheck.sh) ---------------
-state_key() {
-    local readable="$1" identity="$2" safe
-    safe="$(printf '%s' "$readable" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"
-    case "$safe" in ''|.|..) safe=rig ;; esac
-    if [ "$safe" = "$readable" ] && [ "$readable" = "$identity" ] && [ "${#safe}" -le 64 ]; then
-        printf '%s' "$safe"
-    else
-        printf '%s-%s' "${safe:0:64}" "$(printf '%s' "$identity" | cksum | cut -d' ' -f1)"
-    fi
-}
-if [ -n "${GC_RIG:-}" ]; then RIG_KEY="$(state_key "$GC_RIG" "$GC_RIG")"
-elif [ -n "${GC_RIG_ROOT:-}" ]; then ROOT_TAIL="${GC_RIG_ROOT%/}"; RIG_KEY="$(state_key "${ROOT_TAIL##*/}" "$GC_RIG_ROOT")"
-else RIG_KEY=_unscoped; fi
+# --- per-rig state (bd-lib.sh's rig_state_key, as liveness-sweep-precheck.sh) -
 STATE_BASE="${LIVENESS_SWEEP_STATE_DIR:-${GC_PACK_STATE_DIR:-${TMPDIR:-/tmp}/gc}/liveness-sweep}"
-STATE_DIR="$STATE_BASE/$RIG_KEY"
+STATE_DIR="$STATE_BASE/$(rig_state_key)"
 BASELINE_FILE="$STATE_DIR/reported"
 STAMP="$STATE_DIR/last-pass"
 
