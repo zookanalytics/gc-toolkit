@@ -96,8 +96,7 @@ M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
 
 **2. Apply the check's method to the diff, read-only.** The method is the skill
 the check section of the review bead's dispatch note names, loaded from your
-skill catalog; for the correctness check it is the `review-correctness` skill.
-A lane has the pins from step 1 and the diff,
+skill catalog. A lane has the pins from step 1 and the diff,
 `git diff origin/<base>...<reviewed_oid>`, and none of the rest of the frame
 the method's blocks assume: no review workspace and no keepalive. So a lane
 reads what the method reads and judges as the method does, and runs nothing the
@@ -163,8 +162,7 @@ M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
 
 **2. Apply the check's method to the diff, read-only.** The method is the skill
 the check section of the review bead's dispatch note names, loaded from your
-skill catalog; for the correctness check it is the `review-correctness` skill.
-A lane has the pins from step 1 and the diff,
+skill catalog. A lane has the pins from step 1 and the diff,
 `git diff origin/<base>...<reviewed_oid>`, and none of the rest of the frame
 the method's blocks assume: no review workspace and no keepalive. So a lane
 reads what the method reads and judges as the method does, and runs nothing the

@@ -9,13 +9,14 @@
 # Covered:
 #   (NEUTRAL)    neither review formula names a test or a suite, a P0/P1/P2
 #                grade, the Verification line, a dimension of the correctness
-#                method's What to check list, or a signoff.sh flag that only a
-#                check's method passes; mol-review names no severity at all.
+#                method's What to check list, a check's method skill, or a
+#                signoff.sh flag that only a check's method passes; mol-review
+#                names no severity at all.
 #   (METHOD)     the correctness row points at its own method file, which
 #                carries the What to check list, the severity ladder, the
 #                review-test-evidence block and the Verification line.
-#   (QUORUM)     the quorum's lanes apply the check's method, naming the
-#                correctness method, and not mol-review's review step; a lane
+#   (QUORUM)     the quorum's lanes load the method skill the dispatch note
+#                names, and point at no mol-review review step; a lane
 #                runs nothing anywhere, and the synthesis runs what the method
 #                runs inside a workspace made by the review-workspace-add block
 #                alone, which leaves the synthesis's own keepalive in place.
@@ -81,8 +82,6 @@ echo "# the correctness method is its own file, beside the other checks' methods
 METHOD_REL=$("$CHECKS" --file "$INDEX" --check correctness | cut -f2)
 eq "$METHOD_REL" "skills/review-correctness/SKILL.md" "(METHOD) the correctness row points at its own method file"
 METHOD="$ROOT/$METHOD_REL"
-# The skill a reviewer loads from its catalog: the method file's directory name.
-METHOD_SKILL=$(basename "$(dirname "$METHOD_REL")")
 [ -r "$METHOD" ] && ok "(METHOD) the correctness method ships" || bad "(METHOD) $METHOD_REL is missing"
 eq "$(sed -n 's/^name: //p' "$METHOD" | head -1)" "review-correctness" "(METHOD) its skill name matches its directory"
 hasF "$METHOD" '## What to check' "(METHOD) it carries the What to check list"
@@ -105,11 +104,18 @@ echo "# the flags only a check's method passes to signoff.sh"
 grep -oE '^    --[a-z][a-z-]*\)' "$ROOT/assets/scripts/signoff.sh" | tr -d ' )' | sort -u > "$TMP/signoff-flags"
 grep -F '/signoff.sh" --review-bead' "$LIFE" | grep -oE -- '--[a-z][a-z-]*' | sort -u > "$TMP/call-flags"
 : > "$TMP/method-text"
+: > "$TMP/method-skills"
 "$CHECKS" --file "$INDEX" | while IFS="$(printf '\t')" read -r name method _; do
   bash "$BODY" --check-name "$name" >> "$TMP/method-text"
   printf '%s\n' "$method" | awk '{n = split($0, m, / [+] /); for (i = 1; i <= n; i++) print m[i]}' \
-    | while IFS= read -r f; do cat "$ROOT/$f" >> "$TMP/method-text"; done
+    | while IFS= read -r f; do
+        cat "$ROOT/$f" >> "$TMP/method-text"
+        # The skill a reviewer loads from its catalog: the method file's directory.
+        basename "$(dirname "$f")" >> "$TMP/method-skills"
+      done
 done
+[ -s "$TMP/method-skills" ] && ok "(NEUTRAL) each declared check's method skill is read from the index" \
+  || bad "(NEUTRAL) no method skill read from the index"
 grep -oE -- '--[a-z][a-z-]*' "$TMP/method-text" | sort -u > "$TMP/method-flags"
 comm -12 "$TMP/signoff-flags" "$TMP/method-flags" | comm -23 - "$TMP/call-flags" > "$TMP/check-flags"
 hasF "$TMP/check-flags" '--add-gates' "(NEUTRAL) triage's --add-gates is found as a check-specific flag"
@@ -122,13 +128,16 @@ neutral() {  # neutral <text file> <label>
   notE "$1" '(^|[^[:alnum:]_])P[0-2]([^[:alnum:]_]|$)' "(NEUTRAL) $2 names no P0/P1/P2 grade"
   notF "$1" 'Verification:' "(NEUTRAL) $2 has no Verification line"
   notF "$1" 'What to check' "(NEUTRAL) $2 points at no What to check list"
-  local d f
+  local d f s
   while IFS= read -r d; do
     notF "$1" "**$d**" "(NEUTRAL) $2 carries no '$d' dimension"
   done < "$TMP/dimensions"
   while IFS= read -r f; do
     notE "$1" "(^|[^[:alnum:]-])$f([^[:alnum:]-]|$)" "(NEUTRAL) $2 names no check-specific flag $f"
   done < "$TMP/check-flags"
+  while IFS= read -r s; do
+    notF "$1" "$s" "(NEUTRAL) $2 names no check's method skill ($s)"
+  done < "$TMP/method-skills"
 }
 neutral "$TMP/life.txt" "mol-review"
 notE "$TMP/life.txt" 'severity' "(NEUTRAL) mol-review names no severity" -i
@@ -141,10 +150,10 @@ echo "# the quorum's lanes apply the check's method"
 # flat <file> : the file's prose on one line, so a pinned phrase may wrap.
 flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
 for lane in review-lane-one review-lane-two; do
-  hasF "$TMP/quorum.$lane.txt" "\`$METHOD_SKILL\` skill" "(QUORUM) $lane names the correctness method skill"
-  notF "$TMP/quorum.$lane.txt" "'s \`review\` step" "(QUORUM) $lane points at no mol-review review step"
   flat "$TMP/quorum.$lane.txt" > "$TMP/quorum.$lane.flat"
-  hasF "$TMP/quorum.$lane.flat" 'loaded from your skill catalog' "(QUORUM) $lane loads the method skill from its catalog"
+  hasF "$TMP/quorum.$lane.flat" "The method is the skill the check section of the review bead's dispatch note names, loaded from your skill catalog." \
+    "(QUORUM) $lane loads the method skill the dispatch note names, from its catalog"
+  notF "$TMP/quorum.$lane.txt" "'s \`review\` step" "(QUORUM) $lane points at no mol-review review step"
   notF "$TMP/quorum.$lane.txt" 'review-method-read' "(QUORUM) …and names no read block"
   hasF "$TMP/quorum.$lane.flat" 'no review workspace and no keepalive' "(QUORUM) $lane names what of the frame a lane lacks"
   hasF "$TMP/quorum.$lane.flat" 'runs nothing the method runs, anywhere: not at the reviewed commit and not against the pre-change code' \
