@@ -1,1 +1,1 @@
-description = "I6+I7 (surface): every open gating anchor (merge_result=pre_open_gate|pull_request) declares a non-empty check_set or the explicit \"none\" sentinel, and every check.<g> marker is one of the lane states unreviewed|reviewing|validating|fixing|green — a lane carries a state of the lane, never a verb bound to a commit"
+description = "I6: every open gating anchor (merge_result=pre_open_gate|pull_request) declares a non-empty check_set or the explicit \"none\" sentinel"
