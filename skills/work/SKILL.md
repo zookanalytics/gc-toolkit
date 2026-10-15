@@ -60,7 +60,8 @@ workers claim the workflow the sling pours, and the formula's steps are their
 plan.
 
 Writer: `gc sling <rig>/<pool> <bead> --on <formula>`. With no `--on` it pours
-the city's default sling formula.
+the target's `default_sling_formula`, which for a polecat pool is
+`mol-polecat-work`.
 
 - **One dispatch, never two.** A sling pours a workflow and stamps
   `gc.execution_routed_to` on the bead. A raw route, `gc.routed_to=<pool>`,
@@ -111,25 +112,29 @@ sitting has engaged.
 
 ## Choose the formula
 
-`gc formula list` names the formulas, and `gc formula show <name>` says what
-each one does. Name the formula you chose when you put the choice to the
-operator. Ask, in order:
+A formula is the method a pool's worker follows. Formulas are added and
+improved over time, so read the current set rather than recall it:
 
-1. Is there executable work at all? If not, ask for a visit (the waits skill).
-   A judgment or decision the operator owns, with nothing to build, has nothing
-   to dispatch.
-2. Does the work need a design settled before or beside the build, and is it
-   large or high-blast-radius enough that one holistic review beats scattered
-   PRs? If so, use a design-convoy (`mol-design-convoy`). It stands up an owned
-   integration convoy for the initiative: a design child lands its doc on the
-   convoy's branch, implementation builds there, and the whole unit graduates
-   to the default branch as one reviewed PR, so a wrong shape is caught at the
-   design gate before it is built. If not, send a plain work bead, which lands
-   as one PR to the default branch.
+```bash
+gc formula list --rig <rig>               # every formula the rig can run
+gc formula show <formula> --rig <rig>     # what one does, the variables that tune it, and its steps
+```
 
-`design_gated` defaults to `true`, which holds implementation until the
-operator approves the design's PR. `docs/design-convoy.md` describes the gates
-and when all-in-one (`--var design_gated=false`) fits.
+Weigh what done looks like for the work:
+
+1. **Nothing to build.** A judgment or a decision the operator owns has
+   nothing to dispatch. Ask for a visit (the waits skill).
+2. **A change to a repository that lands as one pull request.** That is what
+   a polecat pool's default formula builds, so send it with no `--on`.
+3. **Any other kind of done**, such as findings with no change, a design
+   settled and reviewed before the build, or a demo. Read the descriptions of
+   the formulas whose names fit, and any doc a description names, and send it
+   on the one whose description produces that.
+
+Patrol, review and validation formulas are the city's own machinery, poured
+by its orders and its review cadence, not methods for new work. A formula's
+variables are set with `--var <name>=<value>` on the sling. Name the formula
+you chose, and why, when you put the choice to the operator.
 
 ## Stop or redirect work in flight
 

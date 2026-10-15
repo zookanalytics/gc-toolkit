@@ -35,6 +35,9 @@ REPO="$HERE/../.."
 SKILLS="$REPO/skills"
 PROMPT="$REPO/agents/_converse/prompt.template.md"
 SETTLE="$REPO/skills/converse-settle/SKILL.md"
+MECHANIK="$REPO/agents/mechanik/prompt.template.md"
+WORK_SKILL="$REPO/skills/work/SKILL.md"
+DESIGN_DOC="$REPO/docs/design-convoy.md"
 BLOCKS="work waits records prs"
 
 PASS=0
@@ -207,6 +210,14 @@ lacks "the prompt no longer carries the design-convoy questions" 'design-convoy-
 lacks "the settle step no longer re-explains the arm" 'deferred-dispatch.sh arm' "$SETTLE" \
     "the arm is the waits skill's option; the step names it"
 have "the settle step points routed work at the work skill" 'as the `work` skill says' "$SETTLE"
+lacks "the mechanik prompt does not single out a design-first initiative" 'design-first initiative' "$MECHANIK" \
+    "choosing a formula is the work skill's option"
+lacks "the converse prompt does not single out a design-convoy" 'design-convoy included' "$PROMPT" \
+    "choosing a formula is the work skill's option"
+have "the work skill reads the formulas a rig has now" 'gc formula list --rig <rig>' "$WORK_SKILL"
+lacks "the work skill's formula choice carries no one formula's variables" 'design_gated' "$WORK_SKILL" \
+    "a formula's own doc says when it fits and how to tune it"
+have "the design-convoy doc says when to reach for one" 'high-blast-radius' "$DESIGN_DOC"
 
 echo "── each real need scores highest on the skill that answers it ──"
 # <expected skill> TAB <the need, verbatim>

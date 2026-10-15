@@ -1,6 +1,6 @@
 ---
 name: Design-convoy pattern
-description: The executable owned-convoy pattern converse reaches by recommendation. mol-design-convoy stands up an owned integration convoy, cuts its branch, files a design child, and arms implementation behind the design's approval, so design and implementation graduate to the default branch as one reviewed unit. Covers the molecule, the seed script, the two operator gates under the universal approval rule, and the design-gated default. The rubric for when to choose one is in the work skill.
+description: The executable owned-convoy pattern converse reaches by recommendation. mol-design-convoy stands up an owned integration convoy, cuts its branch, files a design child, and arms implementation behind the design's approval, so design and implementation graduate to the default branch as one reviewed unit. Covers the molecule, the seed script, the two operator gates under the universal approval rule, the design-gated default, and when a design-convoy is the formula to choose.
 ---
 
 # Design-convoy pattern
@@ -14,14 +14,14 @@ arms implementation, with no human running git.
 
 ## Scope
 
-**Mandate.** How a design-convoy runs once it is chosen: the molecule that
-stands one up, the branch cut it performs, the operator gates the unit passes
-through on its way to the default branch, and the choice between design-gated
-and all-in-one.
+**Mandate.** When a design-convoy is the formula to choose, and how one runs
+once it is chosen: the molecule that stands one up, the branch cut it performs,
+the operator gates the unit passes through on its way to the default branch,
+and the choice between design-gated and all-in-one.
 
-**Boundaries.** Whether a follow-up should be a design-convoy at all, rather
-than a plain work bead or a visit, is the formula choice in the `work` skill
-(`skills/work/SKILL.md`). The owned convoy as the default PR unit, and how its
+**Boundaries.** How an agent chooses among the formulas a rig can run is the
+formula choice in the `work` skill (`skills/work/SKILL.md`), which reads each
+formula's description and the doc it names. The owned convoy as the default PR unit, and how its
 children branch and land, is the mechanik's dispatch doctrine
 (`agents/mechanik/prompt.template.md`). The merge rule the gates apply is
 `gctk merge`'s, which `assets/scripts/merge.sh` runs; this page says how the
@@ -172,8 +172,14 @@ graduates.
 
 ## When to reach for it
 
-The rubric that chooses a design-convoy over a plain work bead or a bare visit is
-the formula choice in the `work` skill (`skills/work/SKILL.md`). It is a pack
-skill, so every agent that routes work has it from session start and loads it
-when it chooses a formula: converse recommends the formula, and mechanik slings
-it.
+The `work` skill's formula choice reaches this page through
+`mol-design-convoy`'s description. Ask, in order:
+
+1. Is there executable work at all? A judgment or a decision the operator owns,
+   with nothing to build, has nothing to dispatch. It is a visit.
+2. Does the work need a design settled before or beside the build, and is it
+   large or high-blast-radius enough that one holistic review beats scattered
+   PRs? Then it is a design-convoy, so design and implementation land as one
+   reviewed unit and the design gate catches a wrong shape before it is built.
+   Otherwise it is a plain work bead, which lands as one PR to the default
+   branch.

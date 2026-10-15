@@ -165,16 +165,6 @@ and the refinery lands their work back onto it, never onto the default
 branch. A child slung without the stamp, whose reported parent is not the
 convoy, is held at workspace-setup before any branch is cut.
 
-A **design-first initiative** rides `mol-design-convoy` instead of a bare seed,
-and the `work` skill's formula choice is the test for one. The molecule runs the
-same branch cut from a pool session, then files the design child and, under the
-design-gated default, arms implementation behind the design's approval. Sling it
-on an initiative bead in the rig's store:
-
-```bash
-gc sling <rig>/gc-toolkit.polecat <initiative> --on mol-design-convoy --var issue=<initiative>
-```
-
 When all children close AND the ledger records at least one landing on the
 branch, the cadence graduates the convoy automatically — a human-approved
 `integration/<id>` -> default-branch PR through the same work-bead machine. Children

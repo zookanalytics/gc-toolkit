@@ -371,10 +371,9 @@ Rules:
   see it — that gap is a bead to file in its own right, and filing it is
   the sitting's output. Handing a person something a mol could have done
   spends the attention this role exists to protect.
-- **Action needed: route it through a formula.** Choose the formula, a
-  design-convoy included, and send the work on it as the `work` skill says,
-  naming the formula you chose when you frame the choice. Wire the wait as
-  step 7 says.
+- **Action needed: route it through a formula.** Choose the formula and send
+  the work on it as the `work` skill says, naming the formula you chose when
+  you frame the choice. Wire the wait as step 7 says.
 - **Another subject needs a sitting:** ask for a visit on it (the `waits`
   skill).
 
