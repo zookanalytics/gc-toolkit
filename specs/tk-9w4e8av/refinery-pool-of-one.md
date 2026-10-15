@@ -587,11 +587,17 @@ Every exit that ends a claim follows two rules.
 - **It clears the claim's pins** (`gc.session_id`, `gc.session_name`), as every
   release in the pack does. The witness ranks `gc.session_id` first, so a
   `gc.session_id` left behind names a drained session as the bead's owner. A
-  `gc.session_name` left behind is the residue `doctor/executor-identity-residue`
-  reports once the bead carries a route the stamp does not match. The pins go in
-  the same write that clears the route, or in an earlier one. gascity's
-  detached-handoff orphan sweep restores a pool route from a session pin on any
-  bead that is open, unassigned and unrouted, carries a `branch`, and carries no
+  `gc.session_name` left behind is the residue gascity's `gc doctor` check
+  `executor-identity-residue` reports
+  (`cmd/gc/doctor_executor_identity_residue_check.go`, registered at
+  `cmd/gc/cmd_doctor.go:444`), and the deacon's doctor sweep runs `gc doctor`
+  (`assets/scripts/doctor-sweep.sh`). The check reports a bead that is neither
+  closed nor in progress, carries a route, and has a `gc.session_name` that is
+  neither the session name the route resolves to nor another identity legitimate
+  for that route (`staleSessionNameStamp`, `:394-422`). The pins go in the same
+  write that clears the route, or in an earlier one. gascity's detached-handoff
+  orphan sweep restores a pool route from a session pin on any bead that is
+  open, unassigned and unrouted, carries a `branch`, and carries no
   `merge_result`, `gc.run_target`, `gc.kind` or step key
   (`isDetachedHandoffOrphanCandidate`, `pool_detached_orphan_sweep.go:204-240`).
   A rejection takes exactly that shape at `rejection-repool.sh`'s unanchoring
