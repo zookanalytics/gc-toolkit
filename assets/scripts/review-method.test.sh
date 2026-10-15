@@ -26,7 +26,8 @@
 #                correctness suites and the demo capture.
 #   (RUBRIC)     the learning loop's review-rubric anchors each sit above a
 #                dimension, an anchor whose dimension was recorded at adoption
-#                above that one, and the inventory reads every one.
+#                above that one, and the inventory reads every one; the method
+#                carries no other comment.
 #   (EVIDENCE)   the review-test-evidence block counts the anchor's self-review
 #                stamp only on an exact match in a rig that declares a test
 #                command, in bash and in zsh.
@@ -223,6 +224,12 @@ tk-prvea Contract
 MAP
 INV=$(bash "$ROOT/assets/scripts/learning-recurrence.sh" --inventory --repo "$ROOT" | grep -c "^$METHOD_REL	" || true)
 eq "$INV" "$ANCHORS" "(RUBRIC) the inventory reads every anchor in the correctness method"
+# The reviewer reads the whole file, comments included, so the method carries
+# no comment but its adopted anchors. Where an anchor goes, and in what format,
+# is docs/feedback-learning.md's to say.
+grep -F -- '<!--' "$METHOD" | grep -vE '^<!-- [^>]*adopted:[0-9]{4}-[0-9]{2}-[0-9]{2}[^>]*-->$' > "$TMP/other-comments" || true
+[ ! -s "$TMP/other-comments" ] && ok "(RUBRIC) the correctness method carries no comment but its adopted anchors" \
+  || bad "(RUBRIC) the correctness method carries a comment that is not an adopted anchor: $(head -n1 "$TMP/other-comments")"
 
 echo "# the test evidence block, run as written"
 awk '/^# >>> review-test-evidence$/ {f = 1} f {print} /^# <<< review-test-evidence$/ {f = 0}' "$METHOD" > "$TMP/evidence.sh"

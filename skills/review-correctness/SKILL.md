@@ -55,12 +55,6 @@ defect.
 
 ## What to check
 
-<!-- The review-rubric carrier of the feedback-learning loop
-     (docs/feedback-learning.md). An adopted amendment's anchor sits
-     immediately above the dimension it amends, one anchor per amendment, in
-     this format: -->
-<!-- rule:<pattern-bead> src:<refs> adopted:<date> -->
-
 Work the whole list on every round. A P0 or a P1 is not a stopping point: a
 blocking finding discovered a round later costs another rework and another
 full review, so one verdict enumerates every blocking finding this diff
