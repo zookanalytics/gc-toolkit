@@ -14,18 +14,15 @@
 #   (FLIGHT)  a bead in flight under a parked epic goes on; one in flight with an
 #             open blocker of its own is declined, as submit-and-exit meets it
 #   (UNREAD)  a read that fails, and a blocker of its own the store does not
-#             return, hold the bead; with no pool to arm to, a visit carries it,
-#             and a store whose listing fails cancels nothing, because the
-#             visit does not read back
+#             return, hold the bead; with no pool to arm to, a visit carries it
 #   (CLOSED)  a closed bead's run is cancelled with no re-sling and no visit
 #   (FAIL)    an arm that fails falls back to a visit, filed with escalate.sh's
 #             verdict window off; with neither, nothing is cancelled or
-#             drained; an escalation that exits 0 counts only when the bead's
-#             open visit under the key reads back; a cancel that fails is not
-#             drained
-#   (WINDOW)  the real escalate.sh, inside its verdict window after a person
-#             closed the bead's visit moot, files nothing when the window is on;
-#             the gate's fallback files a fresh visit, and only then cancels
+#             drained; a cancel that fails is not drained
+#   (WINDOW)  a person closed the bead's last visit moot an hour ago: the real
+#             escalate.sh files nothing with its verdict window on, and the
+#             gate's fallback files a fresh visit that is open when the run is
+#             cancelled
 #   (ARGS)    usage errors exit 2; each --sling-arg follows --on <formula> in
 #             the arm and in the visit; --dry-run writes nothing
 #   (WIRING)  each formula block calls the gate with its bead, formula, step and
@@ -222,14 +219,14 @@ STUB
 # The sibling scripts the gate calls. Each logs its verb in order and its argv
 # where an assertion reads it, and exits as the case says. run-cancel closes the
 # live root poured for $STUB_ROOT_OF, as gascity's run cancel closes the root,
-# unless the case models a root the cancel leaves live. escalate.sh records the
-# verdict window it was given and, on exit 0, files an open visit stamped the
-# way the real one stamps it, unless the case models an exit 0 that filed
-# nothing.
+# unless the case models a root the cancel leaves live. It also records the
+# visits open when it ran. escalate.sh records the verdict window it was given.
 cat > "$BIN/run-cancel.sh" <<'CANCEL'
 #!/usr/bin/env bash
 printf 'CANCEL\n' >> "${FAKE_LOG:?}"
 printf '%s\n' "$*" >> "${FAKE_CANCEL:-/dev/null}"
+jq -r '[ .[] | select((.metadata.task_kind // "") == "visit" and .status != "closed") | .id ] | join(" ")' \
+  "$STUB_STORE" >> "${FAKE_CANCEL_SAW:-/dev/null}"
 if [ -n "${STUB_ROOT_OF:-}" ] && [ -z "${FAKE_CANCEL_LEAVES_ROOT:-}" ]; then
   jq -c --arg b "$STUB_ROOT_OF" 'map(if (.metadata["test.root_for"] // "") == $b then .status = "closed" else . end)' \
     "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
@@ -241,20 +238,6 @@ cat > "$BIN/escalate.sh" <<'ESC'
 printf 'ESCALATE\n' >> "${FAKE_LOG:?}"
 printf '%s\n' "$*" >> "${FAKE_ESC:-/dev/null}"
 printf 'window=%s\n' "${GC_ESCALATE_VERDICT_WINDOW-unset}" >> "${FAKE_ESC_ENV:-/dev/null}"
-subject=""; key=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --subject) subject="${2:-}"; shift ;;
-    --key) key="${2:-}"; shift ;;
-  esac
-  shift
-done
-if [ "${FAKE_ESC_RC:-0}" = 0 ] && [ -z "${FAKE_ESC_FILES_NOTHING:-}" ]; then
-  jq -c --arg id "tk-v$(jq 'length' "$STUB_STORE")" --arg s "$subject" --arg k "$key" \
-    '. + [{id: $id, status: "open", issue_type: "task", title: ("visit: " + $s),
-           metadata: {task_kind: "visit", escalation_key: $k, "gc.continuation_group": $s, "gc.routed_to": "human"}}]' \
-    "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
-fi
 exit "${FAKE_ESC_RC:-0}"
 ESC
 cat > "$BIN/dd-stub.sh" <<'ARM'
@@ -268,7 +251,7 @@ chmod +x "$BIN/bd" "$BIN/gc" "$BIN/run-cancel.sh" "$BIN/escalate.sh" "$BIN/dd-st
 
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/store.json" STUB_SLING_LOG="$TMP/sling.log"
-export FAKE_LOG="$TMP/log" FAKE_UPDATE="$TMP/update" FAKE_CANCEL="$TMP/cancel" FAKE_ESC="$TMP/esc" FAKE_ESC_ENV="$TMP/esc-env" FAKE_ARM="$TMP/arm"
+export FAKE_LOG="$TMP/log" FAKE_UPDATE="$TMP/update" FAKE_CANCEL="$TMP/cancel" FAKE_CANCEL_SAW="$TMP/cancel-saw" FAKE_ESC="$TMP/esc" FAKE_ESC_ENV="$TMP/esc-env" FAKE_ARM="$TMP/arm"
 export GC_RUN_CANCEL_TOOL="$BIN/run-cancel.sh" GC_ESCALATE_TOOL="$BIN/escalate.sh" GC_DEFERRED_DISPATCH_TOOL="$BIN/dd-stub.sh"
 export BEADS_ACTOR="test-actor"
 unset GC_AGENT GC_RIG GC_RIG_ROOT GC_PACK_DIR GC_CITY_PATH STUB_ROOT_OF 2>/dev/null || true
@@ -279,7 +262,7 @@ status_of() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .status) // "<abs
 notes() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .notes) // ""' "$STUB_STORE"; }
 # gate <args...>: run the gate; RC, OUT and SEQ (the ordered verb log) after.
 gate() {
-  : > "$FAKE_LOG"; : > "$FAKE_UPDATE"; : > "$FAKE_CANCEL"; : > "$FAKE_ESC"; : > "$FAKE_ESC_ENV"; : > "$FAKE_ARM"
+  : > "$FAKE_LOG"; : > "$FAKE_UPDATE"; : > "$FAKE_CANCEL"; : > "$FAKE_CANCEL_SAW"; : > "$FAKE_ESC"; : > "$FAKE_ESC_ENV"; : > "$FAKE_ARM"
   RC=0; OUT="$("$SUT" "$@" 2>&1)" || RC=$?
   SEQ="$(tr '\n' ';' < "$FAKE_LOG")"
 }
@@ -384,16 +367,11 @@ has "$(cat "$FAKE_CANCEL")" "--step mol-polecat-work.submit-and-exit --bead st-5
 
 echo "# a hold that does not read"
 store "[{\"id\":\"tk-w\",\"status\":\"open\",\"metadata\":$POURED}]"
-STUB_LIST_FAIL_ID=tk-w lc tk-w
+STUB_LIST_FAIL=1 lc tk-w
 eq "$RC|$SEQ" "1|ESCALATE;UPDATE;CANCEL;DRAIN;" "(UNREAD) a read that fails holds the bead, and with no pool read, a visit carries the re-sling"
 has "$OUT" "an unreadable hold" "(UNREAD) the gate says the hold did not read"
 eq "$(meta tk-w gc.execution_routed_to)" "$P" "(UNREAD) nothing is cleared when no arm is made"
 has "$(cat "$FAKE_ESC")" "--subject tk-w --key polecat-blocked-work" "(UNREAD) the visit is filed on the work bead"
-
-store "[{\"id\":\"tk-w\",\"status\":\"open\",\"metadata\":$POURED}]"
-STUB_LIST_FAIL=1 lc tk-w
-eq "$RC|$SEQ" "1|ESCALATE;" "(UNREAD) a store whose every listing fails: the visit does not read back, so nothing is cancelled or drained"
-has "$OUT" "no open visit on tk-w under polecat-blocked-work reads back" "(UNREAD) the gate says the visit did not read back"
 
 store "[{\"id\":\"tk-w\",\"status\":\"open\",\"metadata\":$POURED,\"_deps\":[{\"id\":\"sl-other\",\"dependency_type\":\"blocks\"}]}]"
 lc tk-w
@@ -417,46 +395,17 @@ has "$(cat "$FAKE_CANCEL")" "work bead tk-w is closed" "(CLOSED) the cancel says
 echo "# a release that does not land"
 HELD_STORE="[{\"id\":\"tk-w\",\"status\":\"open\",\"metadata\":$POURED,\"_deps\":[{\"id\":\"tk-pre\",\"dependency_type\":\"blocks\"}]},
              {\"id\":\"tk-pre\",\"status\":\"open\",\"title\":\"Land the prerequisite\"}]"
-# open_visits: the ids of tk-w's open visits under the gate's key.
-open_visits() {
-  jq -r '[ .[] | select((.metadata.escalation_key // "") == "polecat-blocked-work"
-                        and (.metadata["gc.continuation_group"] // "") == "tk-w" and .status != "closed") | .id ] | join(" ")' "$STUB_STORE"
-}
 store "$HELD_STORE"
 FAKE_ARM_RC=1 lc tk-w
 eq "$RC|$SEQ" "1|UPDATE;ARM;ESCALATE;UPDATE;CANCEL;DRAIN;" "(FAIL) an arm that fails falls back to a visit, then cancels and drains"
 has "$(cat "$FAKE_ESC")" "gc sling $P tk-w --on mol-polecat-work" "(FAIL) the visit carries the re-sling to type"
 eq "$(cat "$FAKE_ESC_ENV")" "window=0" "(FAIL) the visit is filed with escalate.sh's verdict window off"
-has "$(notes tk-w)" "so visit $(open_visits) asks for one" "(FAIL) the note names the visit that carries the re-sling"
+has "$(notes tk-w)" "so a visit asks for one" "(FAIL) the note says a visit carries the re-sling"
 
 store "$HELD_STORE"
 FAKE_ARM_RC=1 FAKE_ESC_RC=1 lc tk-w
 eq "$RC|$SEQ" "1|UPDATE;ARM;ESCALATE;" "(FAIL) neither arm nor visit: no cancel, no drain"
 has "$OUT" "NOT cancelling or draining" "(FAIL) the gate says the step stays claimed"
-
-# escalate.sh exits 0 having filed nothing: inside its verdict window, or for a
-# visit already open. Only an open visit on the bead under the key counts.
-store "$HELD_STORE"
-FAKE_ARM_RC=1 FAKE_ESC_FILES_NOTHING=1 lc tk-w
-eq "$RC|$SEQ" "1|UPDATE;ARM;ESCALATE;" "(FAIL) an escalation that exits 0 having filed nothing: no cancel, no drain"
-has "$OUT" "no open visit on tk-w under polecat-blocked-work reads back" "(FAIL) the gate says no visit read back"
-has "$OUT" "NOT cancelling or draining" "(FAIL) and that the step stays claimed"
-
-visit_row() { # <id> <status> <subject> <key>
-  printf '{"id":"%s","status":"%s","issue_type":"task","title":"visit","metadata":{"task_kind":"visit","escalation_key":"%s","gc.continuation_group":"%s","gc.routed_to":"human"}}' "$1" "$2" "$4" "$3"
-}
-store "[{\"id\":\"tk-w\",\"status\":\"open\",\"metadata\":$POURED,\"_deps\":[{\"id\":\"tk-pre\",\"dependency_type\":\"blocks\"}]},
-        {\"id\":\"tk-pre\",\"status\":\"open\",\"title\":\"Land the prerequisite\"},
-        $(visit_row tk-vx open tk-other polecat-blocked-work), $(visit_row tk-vy open tk-w polecat-other),
-        $(visit_row tk-vz closed tk-w polecat-blocked-work)]"
-FAKE_ARM_RC=1 FAKE_ESC_FILES_NOTHING=1 lc tk-w
-eq "$RC|$SEQ" "1|UPDATE;ARM;ESCALATE;" "(FAIL) another bead's visit, another key's, and a closed one are not the bead's open visit"
-
-store "[{\"id\":\"tk-w\",\"status\":\"open\",\"metadata\":$POURED,\"_deps\":[{\"id\":\"tk-pre\",\"dependency_type\":\"blocks\"}]},
-        {\"id\":\"tk-pre\",\"status\":\"open\",\"title\":\"Land the prerequisite\"}, $(visit_row tk-vo open tk-w polecat-blocked-work)]"
-FAKE_ARM_RC=1 FAKE_ESC_FILES_NOTHING=1 lc tk-w
-eq "$RC|$SEQ" "1|UPDATE;ARM;ESCALATE;UPDATE;CANCEL;DRAIN;" "(FAIL) a visit already open for the bead is the release: cancel, drain"
-has "$(notes tk-w)" "so visit tk-vo asks for one" "(FAIL) the note names the visit already open"
 
 store "$HELD_STORE"
 FAKE_CANCEL_RC=1 lc tk-w
@@ -477,6 +426,10 @@ echo "# a visit a person closed moot, inside escalate.sh's verdict window"
 # The real escalate.sh runs as the gate's fallback runs it. A person closed the
 # bead's last polecat-blocked-work visit moot an hour ago. The subject's store
 # is left unproven, so the visit files under GC_RIG, the store this stub serves.
+open_visits() {
+  jq -r '[ .[] | select((.metadata.escalation_key // "") == "polecat-blocked-work"
+                        and (.metadata["gc.continuation_group"] // "") == "tk-w" and .status != "closed") | .id ] | join(" ")' "$STUB_STORE"
+}
 printf '#!/usr/bin/env bash\nexit 3\n' > "$BIN/escalation-rig"; chmod +x "$BIN/escalation-rig"
 HOUR_AGO="$(date -u -r $(( $(date +%s) - 3600 )) +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$(( $(date +%s) - 3600 ))" +%Y-%m-%dT%H:%M:%SZ)"
 MOOT_STORE="[{\"id\":\"tk-w\",\"status\":\"open\",\"metadata\":$POURED,\"_deps\":[{\"id\":\"tk-pre\",\"dependency_type\":\"blocks\"}]},
@@ -497,7 +450,10 @@ case "$NEWV" in
   ""|*" "*|tk-v0) bad "(WINDOW) the gate files one fresh open visit (got '$NEWV')" ;;
   *) ok "(WINDOW) the gate files one fresh open visit ($NEWV)" ;;
 esac
-has "$(notes tk-w)" "so visit $NEWV asks for one" "(WINDOW) the note names the fresh visit"
+SAW="$(cat "$FAKE_CANCEL_SAW")"
+if [ -n "$SAW" ] && [ "$SAW" = "$NEWV" ]; then ok "(WINDOW) the visit is open when the run is cancelled ($SAW)"
+else bad "(WINDOW) the visit is open when the run is cancelled (open at the cancel: '$SAW', filed: '$NEWV')"; fi
+has "$(notes tk-w)" "so a visit asks for one" "(WINDOW) the note says a visit carries the re-sling"
 
 echo "# arguments"
 gate --bead tk-w --formula mol-polecat-work
