@@ -66,22 +66,9 @@ done
 
 command -v jq >/dev/null 2>&1 || { echo "$PROG: jq is required" >&2; exit 1; }
 
-# --- per-rig state (same keying as liveness-sweep-precheck.sh) ---------------
-state_key() {
-    local readable="$1" identity="$2" safe
-    safe="$(printf '%s' "$readable" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"
-    case "$safe" in ''|.|..) safe=rig ;; esac
-    if [ "$safe" = "$readable" ] && [ "$readable" = "$identity" ] && [ "${#safe}" -le 64 ]; then
-        printf '%s' "$safe"
-    else
-        printf '%s-%s' "${safe:0:64}" "$(printf '%s' "$identity" | cksum | cut -d' ' -f1)"
-    fi
-}
-if [ -n "${GC_RIG:-}" ]; then RIG_KEY="$(state_key "$GC_RIG" "$GC_RIG")"
-elif [ -n "${GC_RIG_ROOT:-}" ]; then ROOT_TAIL="${GC_RIG_ROOT%/}"; RIG_KEY="$(state_key "${ROOT_TAIL##*/}" "$GC_RIG_ROOT")"
-else RIG_KEY=_unscoped; fi
+# --- per-rig state (bd-lib.sh's rig_state_key, as liveness-sweep-precheck.sh) -
 STATE_BASE="${LIVENESS_SWEEP_STATE_DIR:-${GC_PACK_STATE_DIR:-${TMPDIR:-/tmp}/gc}/liveness-sweep}"
-STATE_DIR="$STATE_BASE/$RIG_KEY"
+STATE_DIR="$STATE_BASE/$(rig_state_key)"
 BASELINE_FILE="$STATE_DIR/reported"
 STAMP="$STATE_DIR/last-pass"
 
@@ -295,16 +282,18 @@ fi
 # every read the classifier takes; its precheck runs the same classifier with
 # the reads beyond the bead set left empty.
 #
-# The pre-open gate set per pre_open_gate anchor, from the ONE resolver — the same
-# review-checks.sh --resolve pr-open.sh and merge.sh ask — so an undeclared or
-# legacy token (codex) gates pre-open here exactly as it does there, instead of
-# this sweep re-deriving the phase filter and dropping it (which classed a green
-# legacy-token anchor as un-gated and flagged it). The census counts only the
-# gates that must be green BEFORE the PR opens, so an open-as-draft check (demo),
-# which runs against the open PR, never holds a pre_open_gate anchor as not-yet-
-# gated. Built once per pass as a {anchor-id: [gates]} map, read by the
-# classifier's pre_open_all_green. If the resolver script is absent
-# (have_resolver=0) the classifier falls back to the anchor's own check_set.
+# The pre_open_gate anchors whose lanes are all green, as an {anchor-id: true}
+# map the classifier's pre_open_all_green reads: such an anchor waits only on
+# pr-open.sh, so it is gated, not an unnamed wait. The gates come from the ONE
+# resolver, the review-checks.sh --resolve pr-open.sh and merge.sh ask, so an
+# undeclared or legacy token (codex) gates pre-open here exactly as it does
+# there, and an open-as-draft check (demo), which runs against the open PR,
+# never holds a pre_open_gate anchor as not yet gated. Each gate derives through
+# lane-state.sh, the derivation pr-open.sh opens the PR on, pinned to this
+# sweep's store and bound by its per-call timeout. --no-remote: a pre_open_gate
+# anchor has no PR, so no GitHub approval backs a lane, as pr-open.sh reads it.
+# An anchor whose gates the resolver cannot name, or that has a lane that does
+# not derive green or cannot be read, stays out of the map and a candidate.
 _LS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # The index the resolver reads; GC_REVIEW_CHECKS_INDEX overrides the default (the
 # rig's own review-checks.toml beside the pack) so a hermetic test can point it at
@@ -312,34 +301,36 @@ _LS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # token gates). Passed as --file when readable; otherwise the resolver resolves it
 # itself (the inherited env override, then the working tree).
 _LS_IDX="${GC_REVIEW_CHECKS_INDEX-$_LS_DIR/../../review-checks.toml}"
-PREOPEN_GATES_MAP="{}"; HAVE_RESOLVER=0
-if [ -x "$_LS_DIR/review-checks.sh" ]; then
-  HAVE_RESOLVER=1
-  _ls_idx_arg=()
-  [ -r "$_LS_IDX" ] && _ls_idx_arg=(--file "$_LS_IDX")
-  PREOPEN_GATES_MAP=$(
-    jq -r '.[] | select((.metadata.merge_result // "") == "pre_open_gate")
-           | [(.id // ""), (.metadata.check_set // "")] | @tsv' "$READY" 2>/dev/null \
-    | while IFS=$'\t' read -r _aid _acs; do
-        [ -n "$_aid" ] || continue
-        _g=$("$_LS_DIR/review-checks.sh" --resolve --check-set "$_acs" --through pre-open \
-             ${_ls_idx_arg[@]+"${_ls_idx_arg[@]}"} 2>/dev/null) || continue
-        printf '%s\n' "$_g" | jq -R . | jq -sc --arg id "$_aid" \
-          'map(select(length > 0)) | {($id): .}'
-      done \
-    | jq -sc 'add // {}' 2>/dev/null)
-  [ -n "$PREOPEN_GATES_MAP" ] || PREOPEN_GATES_MAP="{}"
-fi
+LANE_STATE="${GC_LANE_STATE_TOOL:-$_LS_DIR/lane-state.sh}"
+_ls_idx_arg=()
+[ -r "$_LS_IDX" ] && _ls_idx_arg=(--file "$_LS_IDX")
+PREOPEN_GREEN_MAP=$(
+  jq -r '.[] | select((.metadata.merge_result // "") == "pre_open_gate")
+         | [(.id // ""), (.metadata.check_set // "")] | @tsv' "$READY" 2>/dev/null \
+  | while IFS=$'\t' read -r _aid _acs; do
+      [ -n "$_aid" ] || continue
+      _g=$("$_LS_DIR/review-checks.sh" --resolve --check-set "$_acs" --through pre-open \
+           ${_ls_idx_arg[@]+"${_ls_idx_arg[@]}"} 2>/dev/null </dev/null) || continue
+      [ -n "$(printf '%s' "$_g" | tr -d '[:space:]')" ] || continue
+      _green=1
+      while IFS= read -r _l; do
+        [ -n "$_l" ] || continue
+        bounded "$LANE_STATE" green --anchor "$_aid" --lane "$_l" --no-remote ${DB:+--db "$DB"} \
+          >/dev/null 2>&1 </dev/null || { _green=0; break; }
+      done <<< "$_g"
+      [ "$_green" = 1 ] && jq -nc --arg id "$_aid" '{($id): true}'
+    done \
+  | jq -sc 'add // {}' 2>/dev/null)
+[ -n "$PREOPEN_GREEN_MAP" ] || PREOPEN_GREEN_MAP="{}"
 
 # >>> classify
-# PREOPEN_GATES_MAP and HAVE_RESOLVER are set above for the whole-sweep run;
-# default them here as well, since the precheck test extracts this marked block
-# and sources it on its own under `set -u`.
-[ -n "${HAVE_RESOLVER:-}" ] || HAVE_RESOLVER=0
-[ -n "${PREOPEN_GATES_MAP:-}" ] || PREOPEN_GATES_MAP="{}"
+# PREOPEN_GREEN_MAP is set above for the whole-sweep run; default it here as
+# well, since the precheck test extracts this marked block and sources it on its
+# own under `set -u`.
+[ -n "${PREOPEN_GREEN_MAP:-}" ] || PREOPEN_GREEN_MAP="{}"
 CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfile alive "$ALIVE" \
       --argjson openprs "${OPEN_PRS:-[]}" --argjson worked "${WORKED:-[]}" --argjson husks "${HUSK_STEPS:-[]}" \
-      --argjson preopen_gates "$PREOPEN_GATES_MAP" --arg have_resolver "$HAVE_RESOLVER" \
+      --argjson preopen_green "$PREOPEN_GREEN_MAP" \
       --argjson livesessions "${LIVE_SESSIONS_JSON:-[]}" --argjson livenessknown "${LIVENESS_KNOWN:-false}" \
       --argjson unreadable_liveness_covers true \
       "$VISIT_IDENTITY_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ$LIVENESS_CLASSIFY_JQ"'liveness_classify')

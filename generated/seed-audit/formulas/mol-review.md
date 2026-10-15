@@ -13,7 +13,7 @@ Hard rules, in force for every step:
   after one succeeded.
 - Never close the review bead by hand — signoff.sh disposes of it.
 - Never close, edit, or route the anchor bead; signoff.sh owns every write
-  your verdict implies (artifact, check.<gate> marker, rework child).
+  your verdict implies (artifact, the review bead's close, rework child).
 - No code fixes, however small: a fix belongs in the rework child a
   request-changes verdict files.
 - A pre-open verdict is replayed verbatim as the PR's opening comment, so

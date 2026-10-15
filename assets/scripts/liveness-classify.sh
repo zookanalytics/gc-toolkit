@@ -30,15 +30,17 @@
 #                             when the session list was unreadable. The sweep
 #                             passes true, since an unprovable death is not a
 #                             death; the precheck passes false and fails closed.
-#   $openprs $worked $husks $preopen_gates $have_resolver
+#   $openprs $worked $husks $preopen_green
 #                             the reads beyond the bead set: open PR urls,
 #                             convoy-worked bead ids, husk step ids, and the
-#                             pre-open gate map with whether its resolver
-#                             answered. Each arm that reads one drops only
-#                             the beads its input names, so an empty input
-#                             drops nothing. That is what lets the precheck
-#                             pass them empty and keep a survivor set that
-#                             contains the sweep's candidates.
+#                             pre_open_gate anchors whose every pre-open gate
+#                             derives green, as an {anchor-id: true} map the
+#                             sweep builds through lane-state.sh. Each arm that
+#                             reads one drops only the beads its input names,
+#                             so an empty input drops nothing. That is what
+#                             lets the precheck pass them empty and keep a
+#                             survivor set that contains the sweep's
+#                             candidates.
 #
 # Every drop is a NAMED class. Structural edges fold in from $alive: a parent
 # is gated iff a not-closed child names it (the child holds the edge), and an
@@ -98,22 +100,11 @@ LIVENESS_CLASSIFY_JQ='
   def order_wisp:
     ((.id // "") | contains("-wisp-"))
     and ((.title // "") | startswith("order:"));
-  # The pre-open gates of an anchor come from $preopen_gates when the resolver
-  # answered ($have_resolver "1"). Without it they fall back to the check_set
-  # minus the none/off/approval sentinels. Either way a gate keeps the case of
-  # its check_set token, deduped case-insensitively: gate-ensure dispatches that
-  # token as the check_name and signoff stamps `check.<token>`, so the census
-  # reads the marker under the same key every other reader does.
+  # A pre_open_gate anchor whose every pre-open gate derives green waits only
+  # on pr-open.sh. The sweep derives it; an anchor it could not prove green is
+  # absent from the map.
   def pre_open_all_green:
-    (.metadata // {}) as $m
-    | (if $have_resolver == "1" then ($preopen_gates[(.id // "")] // [])
-       else (($m.check_set // "")
-             | split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(length > 0))
-             | map(select((ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))
-             | reduce .[] as $t ([]; if any(.[]; ascii_downcase == ($t | ascii_downcase)) then . else . + [$t] end))
-       end) as $gates
-    | ($gates | length) > 0
-      and all($gates[]; ($m["check." + .] // "") == "green");
+    ($preopen_green[(.id // "")] // false) == true;
   # A visit holder is live, or it has none. A claim writes one of assignee /
   # gc.session_id / gc.session_name; $livesessions holds every name a listed
   # (live) session carries. No holder is an UNCLAIMED visit, a pending

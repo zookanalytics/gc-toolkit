@@ -156,7 +156,7 @@ cat > "$FIX/ready.json" <<'JSON'
   {"id":"f-tracks-dead","title":"tracks something already CLOSED — a wait no more","issue_type":"task","metadata":{},"dependencies":[{"issue_id":"f-tracks-dead","depends_on_id":"f-root-closed","type":"tracks"}]},
   {"id":"f-child","title":"a child whose parent is open — workable, not a wait","issue_type":"bug","metadata":{},"dependencies":[{"issue_id":"f-child","depends_on_id":"f-epic-open","type":"parent-child"}]},
   {"id":"f-pr-open","title":"done, parked on an open PR awaiting approval","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"521","pr_url":"https://github.com/zook/gc-toolkit/pull/521"}},
-  {"id":"f-preopen-green","title":"pre-open, codex green — waits on pre-open-resolve","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green"}},
+  {"id":"f-preopen-green","title":"pre-open, codex green — waits on pre-open-resolve","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}},
   {"id":"f-worked","title":"a work bead a live molecule is driving","issue_type":"bug","metadata":{}},
   {"id":"f-trackedvisit","title":"subject of a live visit whose group stamp landed EMPTY","issue_type":"task","metadata":{}},
   {"id":"f-input-convoy","title":"input convoy for tk-xxxxx","issue_type":"convoy","metadata":{}},
@@ -242,14 +242,14 @@ STATE="$LIVENESS_SWEEP_STATE_DIR/testrig"
 OUT=""; RC=0
 # BASELINE_CSV, when set, is written into the per-rig state file — the delta
 # baseline liveness-sweep.sh keeps beside the cooldown stamp.
-run_precheck() { # run_precheck [args...] -> sets OUT and RC
+run_precheck() { # run_precheck -> sets OUT and RC
     rm -rf "$LIVENESS_SWEEP_STATE_DIR"
     if [ -n "${BASELINE_CSV:-}" ]; then
         mkdir -p "$STATE"
         printf '%s\n' "$BASELINE_CSV" > "$STATE/reported"
     fi
     : > "$FIXDIR/reads"
-    OUT="$("$SCRIPT" "$@" 2>&1)"; RC=$?
+    OUT="$("$SCRIPT" 2>&1)"; RC=$?
 }
 BASELINE_CSV="f-carried"
 survivors_of() { printf '%s\n' "$1" | sed -n 's/^  new: //p' | tr -d ' '; }
@@ -740,9 +740,11 @@ FIXDIR="$CFIX"; export FIXDIR
 LIVE="$CFIX/live.json" READY="$CFIX/ready.json" ALIVE="$CFIX/alive.json"
 jq -s 'add' "$LIVE" "$CFIX/widen.json" > "$ALIVE"
 export LIVE READY ALIVE
+# shellcheck disable=SC2034  # read by the extracted classify block sourced below
 PROG=liveness-sweep
-# The classifier's two batched inputs. OPEN_PRS answers for the one PR-parked
-# bead in the fixture; WORKED for the one convoy-driven bead. Supplying them is
+# The classifier's batched inputs. OPEN_PRS answers for the one PR-parked bead
+# in the fixture; WORKED for the one convoy-driven bead; PREOPEN_GREEN_MAP for
+# the one pre-open anchor whose lanes the sweep derived green. Supplying them is
 # what makes this a real subset test: they are precisely the exclusions the
 # precheck does NOT make, so they are the ones that must shrink the classifier's
 # set below the precheck's.
@@ -753,8 +755,10 @@ OPEN_PRS='["https://github.com/zook/gc-toolkit/pull/521"]'
 # shellcheck disable=SC2089
 WORKED='["f-worked"]'
 HUSK_STEPS='[]'
+# shellcheck disable=SC2089
+PREOPEN_GREEN_MAP='{"f-preopen-green":true}'
 # shellcheck disable=SC2090
-export OPEN_PRS WORKED HUSK_STEPS
+export OPEN_PRS WORKED HUSK_STEPS PREOPEN_GREEN_MAP
 # The classify block runs the shared classifier, and the classifier matches
 # visit coverage and standing records through more shared definitions.
 # liveness-sweep.sh sources every one of these libs before the block. Supply
@@ -812,31 +816,6 @@ for id in $(printf '%s' "$PRE_IDS" | tr ',' ' '); do
     case "$class" in worked|gated|husk) ;; *) UNEXPLAINED="$UNEXPLAINED $id:$class" ;; esac
 done
 eq "$UNEXPLAINED" "" "every bead only the precheck keeps was dropped on a non-local read (containment is tight)"
-
-echo "── the no-resolver census reads each lane's marker under its token's own case ──"
-# The extracted block runs with HAVE_RESOLVER=0, the sweep's fallback, which takes
-# the gates from the check_set itself. A mixed-case token reads check.<Token> —
-# the key signoff stamps — so an all-green anchor is gated, while the same anchor
-# missing that marker is still a candidate (the positive control).
-MFIX="$TMP/mfix"; mkdir -p "$MFIX"
-cat > "$MFIX/ready.json" <<'JSON'
-[
-  {"id":"f-mixed-green","title":"pre-open, mixed-case lanes green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch","check.correctness":"green","check.Arch":"green"}},
-  {"id":"f-mixed-red","title":"pre-open, mixed-case lane not green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch","check.correctness":"green"}}
-]
-JSON
-READY="$MFIX/ready.json"; export READY
-# shellcheck disable=SC1090
-. "$TMP/classify.sh"
-MIXED_IDS=",$(printf '%s' "$CANDIDATES" | jq -r '[.[].id] | sort | join(",")'),"
-case "$MIXED_IDS" in
-  *",f-mixed-green,"*) bad "an all-green mixed-case anchor is gated, not a candidate" "candidates: $MIXED_IDS" ;;
-  *) ok "an all-green mixed-case anchor is gated, not a candidate" ;;
-esac
-case "$MIXED_IDS" in
-  *",f-mixed-red,"*) ok "…while one missing its check.Arch marker is still a candidate" ;;
-  *) bad "…while one missing its check.Arch marker is still a candidate" "candidates: $MIXED_IDS" ;;
-esac
 
 echo "── holder liveness gates the visit exclusions (mirrors liveness-sweep.sh) ──"
 # A live-held visit excludes its subject (the pass can skip it); a dead-held

@@ -10,8 +10,8 @@
 # bead-rehome.sh once its parked children, its machine review scaffolding
 # (scaffolding-sweep.sh) and any stale rework-or-close visit are retired;
 # otherwise abandoned + escalate.sh visit; base moved -> retargeted +
-# escalate (check markers cleared: a review of the pre-retarget diff proves
-# nothing about the new base); CONFLICTING with no feedback owed, on an APPROVED
+# escalate (the lanes' reviews stand: a person restores the base or accepts
+# the new one); CONFLICTING with no feedback owed, on an APPROVED
 # PR (review-verdict.sh, the rule merge.sh lands on; an unapproved one records
 # its posture and files nothing) -> file ONE
 # merge-in rework child while none is in flight, to the fix pool that brings the
@@ -211,6 +211,9 @@ PATROL_FINDING="$SCRIPTS_DIR/patrol-finding.sh"
 # which drops the non-lanes none/off and the approval merge rule in one place.
 REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
 [ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); cannot reconcile" >&2; exit 1; }
+# Each lane those reads name derives its green through lane-state.sh, the one
+# derivation merge.sh holds on (lanes_green).
+LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
 # The merged-record retry cap, shared with merge.sh: this arm and merge.sh's two
 # record arms perform the same repair on the same anchor, so their failures
 # count against one budget rather than each keeping a private tally.
@@ -648,6 +651,22 @@ review_gates_for() { # <branch>
   case "$PROT_THREAD_REQ" in true|false) : ;; *) PROT_THREAD_REQ="false" ;; esac
   case "$PROT_APPROVALS" in ''|*[!0-9]*) PROT_APPROVALS="0" ;; esac
   PROT_STATE="known"
+}
+
+# Every lane <check_set> declares, of every phase (`--through merge`), derives
+# green through lane-state.sh, as merge.sh reads it, the operator's GitHub
+# approval included. Non-zero when a lane does not, when lane-state.sh cannot
+# tell (a store that will not read, or the helper missing), and when the
+# resolver fails: a crash prints nothing, and an empty list would read as every
+# lane green. A check_set that declares no lane passes.
+lanes_green() { # <anchor-id> <check_set>
+  local gates g
+  gates=$("$REVIEW_CHECKS" --resolve --check-set "$2" --through merge 2>/dev/null) || return 1
+  while IFS= read -r g; do
+    [ -n "$g" ] || continue
+    "$LANE_STATE" green --anchor "$1" --lane "$g" >/dev/null 2>&1 </dev/null || return 1
+  done <<< "$gates"
+  return 0
 }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
@@ -1139,13 +1158,13 @@ unengaged_thread_count() { # count over RT_NODES on stdout; non-zero = could not
 # the one visit without a second read; a later pass holds off the standing visit
 # and leaves UT_COUNT empty.
 # UH_CANDIDATE is 1 once the cheap pre-gate below finds such a post. Past it the
-# answer also turns on bead state (the lane markers, the standing visit, the
-# children in flight), which the PR's own facts do not show, so the posture arm
-# keeps no basis for that anchor and reads it whole every pass.
+# answer also turns on bead state (the lanes' derived state, the standing visit,
+# the children in flight), which the PR's own facts do not show, so the posture
+# arm keeps no basis for that anchor and reads it whole every pass.
 UT_COUNT=""
 UH_CANDIDATE=0
 unengaged_holds() { # <id> <num> <head-oid> <row-json> <live-comments-json>
-  local id="$1" num="$2" head="$3" row="$4" cmts="$5" sf g m grn=1 stamp inflight utc
+  local id="$1" num="$2" head="$3" row="$4" cmts="$5" sf stamp inflight utc
   UH_CANDIDATE=0
   [ -n "$head" ] && [ -n "$num" ] && [ -n "$SELF_LOGIN" ] && [ -n "$cmts" ] || return 1
   # Cheap pre-gate off the comments already fetched: the gap is an unmarked
@@ -1157,25 +1176,12 @@ unengaged_holds() { # <id> <num> <head-oid> <row-json> <live-comments-json>
   case "$sf" in ''|*[!0-9]*) sf=0 ;; esac
   [ "$sf" -gt 0 ] || return 1
   UH_CANDIDATE=1
-  # Only a green check hides findings: a red lane is already re-reviewing. The one
-  # resolver names the declared lanes and drops the non-lanes; the marker read is
-  # the census's own fast green check, kept. The resolver's exit status is
-  # load-bearing: a crash prints nothing, and an empty check list would leave grn=1
-  # (vacuously "all green") and flag a hold with no basis. If it cannot name the
-  # checks, this probe cannot establish its own precondition — return no hold here;
-  # merge.sh's lane gate holds on an unreadable resolver independently.
-  local utgates
-  if ! utgates=$("$REVIEW_CHECKS" --resolve --check-set "$checkset" --through merge 2>/dev/null); then
-    return 1
-  fi
-  while IFS= read -r g; do
-    [ -n "$g" ] || continue
-    m=$(printf '%s' "$row" | jq -r --arg k "check.$g" '(.metadata[$k] // "") | tostring')
-    [ "$m" = "green" ] || grn=0
-  done <<UTGATES
-$utgates
-UTGATES
-  [ "$grn" = 1 ] || return 1
+  # Only a green check hides findings: a red lane is already re-reviewing. Green
+  # is what merge.sh reads (lanes_green). A lane that cannot be derived, or a
+  # resolver that cannot name the lanes, establishes no precondition, so this
+  # probe returns no hold, and merge.sh's lane gate holds on that unreadable
+  # read independently.
+  lanes_green "$id" "$checkset" || return 1
   stamp=$(printf '%s' "$row" | jq -r '(.metadata.pr_unengaged_threads // "") | tostring')
   if [ "$stamp" = "$head" ]; then
     # This head was flagged already. The hold stands while its visit is open, and
@@ -2208,27 +2214,26 @@ MP_EOF
   # full pass's.
   [ "$POSTURE_ONLY" != 1 ] || continue
 
-  # --- base moved: retargeted + visit; a pre-retarget review proves nothing ------
+  # --- base moved: retargeted + visit -------------------------------------------
+  # The anchor parks for a person, who restores the base or accepts the new one.
+  # The lanes' reviews stand either way: a retarget is not one of the two things
+  # that move a lane backwards, a human feedback batch and the validator's
+  # ruling (specs/tk-ztapg/review-cycle-architecture.md). Feedback that asks for
+  # a fresh look at a new base opens the validation pass that can rule one.
   rec_target=$(printf '%s' "$row" | jq -r '.metadata.merged_target // ""')
   if [ -n "$rec_target" ] && [ -n "$base" ] && [ "$rec_target" != "$base" ]; then
     # An early arm defers retarget handling to the full pass. A retargeted
     # anchor does not merge this pass, and its feedback is not routed while it
     # sits on the wrong base, so the early feedback arm skips it.
     [ "$ROUTE_ONLY" != 1 ] || continue
-    UNSETS=()
-    while IFS= read -r g; do
-      [ -n "$g" ] && UNSETS+=(--unset "check.$g")
-    done <<GATES
-$(printf '%s' "$checkset" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d')
-GATES
     if "$LIFECYCLE" transition "$id" --to retargeted --expect pull_request \
-         --assignee "" ${UNSETS[@]+"${UNSETS[@]}"} \
+         --assignee "" \
          --set "blocked_reason=PR#$num retargeted: base '$base' != expected target '$rec_target'" \
          --takeaway "PR#$num sits on a base other than its expected target — retarget it back, or update merged_target"; then
       flagged=$((flagged + 1))
       escalate "$id" "pr-retargeted.$num" \
         "PR#$num ($live_url) was retargeted: base '$base' != expected '$rec_target'. Retarget it back and reset merge_result=pull_request to re-engage, or update merged_target if the new base is intentional."
-      echo "$PROG: $id — PR#$num retargeted (base '$base' != '$rec_target'); routed to human, check markers cleared, escalated"
+      echo "$PROG: $id — PR#$num retargeted (base '$base' != '$rec_target'); routed to human, escalated"
     else
       echo "$PROG: $id retargeted transition failed; retry next pass" >&2
       skipped=$((skipped + 1))
@@ -2455,12 +2460,17 @@ REAP_EOF
       # see it without one — and the dedup below matches it, so nothing retries it.
       # Narrow to open/unassigned/unrouted at THIS head: a metadata write ignores
       # bd's claim guard, so re-stamping a child someone holds stomps live work.
+      # A poured child (gc.execution_routed_to set) is its molecule's to run. An
+      # armed child (gc.dispatch_when_ready set) is its arm's to re-sling: a child
+      # whose run stopped to ask a person waits that way, its route keys cleared
+      # (await-ruling.sh). Neither is a strand.
       stranded=$(printf '%s' "$kids" | jq -r --arg id "$id" --arg h "$head_oid" '
         [ .[] | select(.id != $id)
           | select(((.status // "open") | ascii_downcase) == "open")
           | select(((.assignee // "") | tostring) == "")
           | select(((.metadata["gc.routed_to"] // "") | tostring) == "")
           | select(((.metadata["gc.execution_routed_to"] // "") | tostring) == "")
+          | select(((.metadata["gc.dispatch_when_ready"] // "") | tostring) == "")
           | select(((.metadata.merge_result // "") | tostring) == "")
           | select(($h != "") and (((.metadata.rejection_reason // "") | tostring) | contains("head " + $h)))
           | .id ] | .[0] // empty' 2>/dev/null)
@@ -3143,30 +3153,17 @@ $CBODY"
   fi
 
   # --- dismiss our OWN superseded CHANGES_REQUESTED when the check is green -------
-  # Only when every declared check reads green but GitHub is still red on our own
-  # block, left at a commit other than the live head. Our own is a review
+  # Only when every declared check derives green but GitHub is still red on our
+  # own block, left at a commit other than the live head. Our own is a review
   # gc_city_own reads as the city's: one pr-post.sh marked, or one under our login
   # from before the provenance cutover. An unmarked review under our login after
   # it is feedback, the same as a human's, and is never dismissed here. Skipped
   # when native auto-merge is armed (the dismissal would hand GitHub the landing).
-  all_green=1
-  # The resolver's exit status is safety-critical here: a crash prints nothing, and
-  # an empty check list would leave all_green=1 and dismiss the city's OWN standing
-  # CHANGES_REQUESTED block — removing a merge veto — with the checks possibly not
-  # green. Fail closed: a resolver that cannot name the checks cannot prove them
-  # green, so the block stands.
-  if ! dgates=$("$REVIEW_CHECKS" --resolve --check-set "$checkset" --through merge 2>/dev/null); then
-    all_green=0; dgates=""
-  fi
-  while IFS= read -r g; do
-    [ -n "$g" ] || continue
-    m=$(printf '%s' "$row" | jq -r --arg k "check.$g" '(.metadata[$k] // "") | tostring')
-    [ "$m" = "green" ] || all_green=0
-  done <<GATES
-$dgates
-GATES
-  if [ "$all_green" = 1 ] && [ -n "$head_oid" ] && [ "$rd" = "CHANGES_REQUESTED" ] \
-     && [ -n "$SELF_LOGIN" ]; then
+  # The lanes are derived last, once the PR's own facts ask for a dismissal. The
+  # read fails closed (lanes_green): a lane it cannot derive, or a resolver that
+  # cannot name the lanes, proves nothing green, so the block stands.
+  if [ -n "$head_oid" ] && [ "$rd" = "CHANGES_REQUESTED" ] && [ -n "$SELF_LOGIN" ] \
+     && lanes_green "$id" "$checkset"; then
     auto=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json autoMergeRequest 2>/dev/null \
       | jq -r 'if (.autoMergeRequest // null) == null then "off" else "armed" end' 2>/dev/null)
     if [ "$auto" != "off" ]; then
@@ -3364,9 +3361,9 @@ GATES
             rc_urls=$(printf '%s' "$rc_code_json" | jq -r '[ .[] | .url | select(. != "") ] | join(" ")' 2>/dev/null)
             # Every red-check child names the head it was sent to fix twice: in the
             # title it is minted with ("$RC_TITLE required check red at head <oid>")
-            # and in its rejection_reason ("... at head <oid>"). Two writers unset
-            # rejection_reason: resuming a rework (mol-polecat-work's
-            # rejected-branch-resume block) and the refinery's landed-on-branch close
+            # and in its rejection_reason ("... at head <oid>"). mol-polecat-work
+            # unsets rejection_reason once the merge a rework's resume runs
+            # concludes, and the refinery unsets it at its landed-on-branch close
             # (mol-refinery-patrol's one-anchor-per-pr-terminal). A child that has
             # been worked keeps its head only in the title, so rc_heads reads both.
             # The same-head park and the attempt cap below read a child's head
@@ -3388,12 +3385,18 @@ GATES
             # A strand: MY OWN prior red-check child, open/unclaimed/unrouted at
             # this head, whose route stamp exited 0 without landing. It matches the
             # live dedup below and would veto its own rescue, so exclude it from
-            # its own dedup and re-route it instead of twinning.
+            # its own dedup and re-route it instead of twinning. A poured child
+            # (gc.execution_routed_to set) is its molecule's to run. An armed
+            # child (gc.dispatch_when_ready set) is its arm's to re-sling: a child
+            # whose run stopped to ask a person waits that way, its route keys
+            # cleared (await-ruling.sh). Neither is a strand.
             rc_stranded=$(printf '%s' "$rc_kids" | jq -r --arg id "$id" --arg h "$head_oid" '
               [ .[] | select(.id != $id)
                 | select(((.status // "open") | ascii_downcase) == "open")
                 | select(((.assignee // "") | tostring) == "")
                 | select(((.metadata["gc.routed_to"] // "") | tostring) == "")
+                | select(((.metadata["gc.execution_routed_to"] // "") | tostring) == "")
+                | select(((.metadata["gc.dispatch_when_ready"] // "") | tostring) == "")
                 | select(((.metadata.merge_result // "") | tostring) == "")
                 | select(($h != "") and (((.metadata.rejection_reason // "") | tostring) | contains("head " + $h)))
                 | .id ] | .[0] // empty' 2>/dev/null)

@@ -65,15 +65,15 @@ SUT="$SD/merge.sh"
 # defaults, and a section that wants another sets it on its own call.
 unset MERGE_STATE_REREADS MERGE_STATE_REREAD_SECS
 
-# check_set declares the lane; the anchor carries no check.<lane> marker — a
-# lane's green is DERIVED from a backing review bead, not stored on the anchor.
+# check_set declares the lane; a lane's green is DERIVED from a backing review
+# bead, not stored on the anchor.
 anchor() { # id num extra-json
   printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","branch":"polecat/x%s","merged_target":"main","check_set":"correctness"%s}}' \
     "$1" "$2" "$2" "$2" "${3:-}"
 }
 # A closed approve review bead backing <anchor>'s <lane> (default correctness) — the
-# green record lane-state.sh derives, in place of the retired check.<lane>=green
-# marker. reviewed_oid is what a local backing bead must carry to green a lane.
+# green record lane-state.sh derives. reviewed_oid is what a local backing bead
+# must carry to green a lane.
 rev() { # anchor [lane] [oid]
   printf '{"id":"rev-%s","status":"closed","assignee":"","notes":"approve","metadata":{"task_kind":"review","anchor_bead":"%s","check_name":"%s","reviewed_oid":"%s","signoff_verdict":"approve"}}' \
     "$1" "$1" "${2:-correctness}" "${3:-sha-r}"

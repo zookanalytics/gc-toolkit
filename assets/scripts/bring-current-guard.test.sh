@@ -62,8 +62,9 @@
 #   leaves the line where it was, a later lift moves it on, and it never moves
 #   back; a retry carries out what was recorded.
 # The resume block, extracted from mol-polecat-work, stamps the start and the
-# scope and clears the last round's audit before its merge, and the filers'
-# rejection prefixes it reads are pinned.
+# scope and clears the last round's audit before its merge, and keeps the
+# rejection while that merge stops on a conflict; the filers' rejection
+# prefixes it reads are pinned.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -946,8 +947,8 @@ store "[$(child MI12 ",\"rejection_reason\":\"stale base at head sha-1: PR#1 con
 eq "$(meta MI12 bring_current_from)" "$A" "the stamp is the PR head the round started from"
 eq "$(meta MI12 bring_current_scope)" "merge-only" "…a stale-base rejection makes the round merge-only"
 eq "$(meta MI12 conflict_audit)" "<absent>" "…the last round's audit is cleared"
-eq "$(meta MI12 rejection_reason)" "<absent>" "…and the resume cleared the rejection as before"
 eq "$(git -C "$R" diff --name-only --diff-filter=U)" "v.txt" "the merge it ran stopped on the conflict"
+eq "$(meta MI12 rejection_reason)" "stale base at head sha-1: PR#1 conflicts with main." "…and the rejection stays until that merge concludes"
 resolve v.txt 'x=2\n'
 H=$(git -C "$R" rev-parse HEAD)
 fresh

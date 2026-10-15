@@ -46,7 +46,8 @@ case "$sub" in
   "bd list")
     case "$args" in
       *anchor_bead=*)
-        # The edge-less wedge's lane fix-unit census: reworks for an anchor,
+        # An anchor's children by anchor_bead, the read the edge-less wedge's
+        # lane fix-unit census and lane-state.sh's review derivation make,
         # served from $SHOW_DIR/reworks-<anchor>.json (default []), the rows in
         # the statuses the read asks for.
         aid=""; st=""
@@ -200,13 +201,13 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-pr-closed","title":"rejected — closed unmerged","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/zook/gc-toolkit/pull/999"}},
   {"id":"c-pr-otherrepo","title":"number 521 in another repository","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/someone/elsewhere/pull/521"}},
   {"id":"c-pr-nourl","title":"marker but no pr_url","issue_type":"task","metadata":{"merge_result":"pull_request"}},
-  {"id":"c-preopen-green","title":"pre-open, codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green"}},
-  {"id":"c-preopen-multigreen","title":"pre-open, two gates green (spaced)","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex, ci","check.codex":"green","check.ci":"green"}},
-  {"id":"c-preopen-approval","title":"pre-open, green + approval sentinel","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex,approval","check.codex":"green"}},
-  {"id":"c-preopen-fixable","title":"pre-open, fixable — stalled","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"fixing"}},
-  {"id":"c-preopen-partial","title":"pre-open, one of two markers absent","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex,ci","check.codex":"green"}},
-  {"id":"c-preopen-nomarker","title":"pre-open, no marker at all","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}},
-  {"id":"c-preopen-noset","title":"pre-open, marker but check_set unset","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check.codex":"green"}},
+  {"id":"c-preopen-green","title":"pre-open, codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}},
+  {"id":"c-preopen-multigreen","title":"pre-open, two gates green (spaced)","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex, ci"}},
+  {"id":"c-preopen-approval","title":"pre-open, green + approval sentinel","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex,approval"}},
+  {"id":"c-preopen-fixable","title":"pre-open, changes requested — stalled","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}},
+  {"id":"c-preopen-partial","title":"pre-open, one of two lanes backed","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex,ci"}},
+  {"id":"c-preopen-nomarker","title":"pre-open, no review at all","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}},
+  {"id":"c-preopen-noset","title":"pre-open, a backed lane but check_set unset","issue_type":"task","metadata":{"merge_result":"pre_open_gate"}},
   {"id":"c-preopen-none","title":"pre-open, check_set=none opt-out","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"none"}},
   {"id":"c-hold","title":"operator decided this waits","issue_type":"task","metadata":{"triage.hold":"deferred; operator direction pending"}},
   {"id":"c-hold-bare","title":"held, no reason named","issue_type":"task","metadata":{"triage.hold":"true"}},
@@ -281,13 +282,31 @@ printf '%s\n' '[{"id":"root-underconversation","metadata":{"gc.input_convoy_id":
 printf '%s\n' '[{"id":"conv-uc","issue_type":"convoy","dependencies":[{"id":"anchor-uc","dependency_type":"tracks","status":"open"}]}]' > "$TMP/show/conv-uc.json"
 printf '%s\n' '[{"id":"anchor-uc","status":"open","metadata":{}}]' > "$TMP/show/anchor-uc.json"
 
+# backing <anchor> <lane>... — the closed approve reviews lane-state.sh derives
+# each lane's green from, served as the anchor's anchor_bead listing. The sweep
+# runs the real lane-state.sh against these.
+backing() {
+    local a="$1" l rows="" n=0
+    shift
+    for l in "$@"; do
+        n=$((n + 1))
+        rows="${rows:+$rows,}{\"id\":\"rv-$a-$n\",\"status\":\"closed\",\"metadata\":{\"task_kind\":\"review\",\"anchor_bead\":\"$a\",\"check_name\":\"$l\",\"reviewed_oid\":\"deadbeef\",\"signoff_verdict\":\"approve\",\"gc.outcome\":\"recorded\"}}"
+    done
+    printf '[%s]\n' "$rows" > "$SHOW_DIR/reworks-$a.json"
+}
+backing c-preopen-green codex
+backing c-preopen-multigreen codex ci
+backing c-preopen-approval codex
+backing c-preopen-partial codex
+backing c-preopen-noset codex
+printf '%s\n' '[{"id":"rv-fix","status":"closed","metadata":{"task_kind":"review","anchor_bead":"c-preopen-fixable","check_name":"codex","reviewed_oid":"deadbeef","signoff_verdict":"request-changes","gc.outcome":"recorded"}}]' > "$SHOW_DIR/reworks-c-preopen-fixable.json"
+
 run_sweep() { # run_sweep [baseline-csv|ABSENT] -> RC/OUT
     rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"
     [ "${1:-ABSENT}" = "ABSENT" ] || printf '%s\n' "$1" > "$BASELINE_FILE"
     : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_BODIES"
     RC=0
     OUT="$(bash "$SCRIPT" 2>"$TMP/err")" || RC=$?
-    ERR="$(cat "$TMP/err")"
 }
 
 # The full unnamed set this population classifies to (ports the retired
@@ -685,6 +704,21 @@ for want in "bd kv --db $TMP/pin.db get anchor_edges.joined" \
 done
 rm -f "$TMP/show/dep-we-anchor.json"
 
+echo "── the pre-open derivation reads the sweep's own store under its --db pin ──"
+# lane-state.sh runs as its own process, so the sweep hands it the pin: a
+# pre-open anchor's lanes derive from the store the sweep reads, never from the
+# one the cwd resolves.
+printf '%s\n' '[{"id":"pin-preopen","title":"pre-open, backed, read under a pin","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}}]' > "$TMP/pin-ready.json"
+backing pin-preopen codex
+: > "$TMP/reads.log"
+LIVENESS_SWEEP_DB="$TMP/pin.db" READ_LOG="$TMP/reads.log" FAKE_READY="$TMP/pin-ready.json" run_sweep ABSENT
+eq "$RC" "0" "pinned: the pass completes"
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "" "pinned: the backed pre-open anchor derives green and is gated"
+LANE_READS="$(grep -F -- 'anchor_bead=pin-preopen' "$TMP/reads.log" || true)"
+[ -n "$LANE_READS" ] && ok "pinned: the derivation read the anchor's reviews" \
+    || bad "pinned: the derivation read the anchor's reviews" "no anchor_bead=pin-preopen read in: $(cat "$TMP/reads.log")"
+eq "$(printf '%s\n' "$LANE_READS" | grep -cvF -- "--db $TMP/pin.db")" "0" "pinned: …every one of them carrying the pin"
+
 echo "── …and a ruling's landed rework is no lane's fix, so it makes no wedge of a human finding ──"
 # A ruling's rework child carries no source_review_bead, like a human batch's, but
 # it answers the ruling. An anchor sent back to pre_open_gate keeps that closed
@@ -711,18 +745,22 @@ echo "── the phase-aware census asks the resolver, with a controlled index �
 PH_IDX="$TMP/phase-index.toml"
 printf '[checks.correctness]\nmethod="m"\npurpose="p"\nphase="pre-open"\n[checks.demo]\nmethod="m"\npurpose="p"\nphase="open-as-draft"\n' > "$PH_IDX"
 printf '%s\n' '[
-  {"id":"ph-legacy-green","title":"pre-open, legacy codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green"}},
-  {"id":"ph-draft-pending","title":"pre-open green, open-as-draft demo pending","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","check.correctness":"green"}},
-  {"id":"ph-preopen-ungreen","title":"pre-open correctness ungreen","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","check.demo":"green"}},
-  {"id":"ph-mixed-case-green","title":"pre-open, mixed-case lane green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch","check.correctness":"green","check.Arch":"green"}}
+  {"id":"ph-legacy-green","title":"pre-open, legacy codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}},
+  {"id":"ph-draft-pending","title":"pre-open green, open-as-draft demo pending","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo"}},
+  {"id":"ph-preopen-ungreen","title":"pre-open correctness ungreen","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo"}},
+  {"id":"ph-mixed-case-green","title":"pre-open, mixed-case lane green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch"}}
 ]' > "$TMP/ph-ready.json"
+backing ph-legacy-green codex
+backing ph-draft-pending correctness
+backing ph-preopen-ungreen demo
+backing ph-mixed-case-green correctness Arch
 GC_REVIEW_CHECKS_INDEX="$PH_IDX" FAKE_READY="$TMP/ph-ready.json" run_sweep ABSENT
 eq "$RC" "0" "the phase-aware pass completes"
 # Only ph-preopen-ungreen is an unnamed wait: the legacy codex token gated pre-open
 # (resolver default, not dropped) and its green read as converged; the open-as-draft
 # demo did NOT hold the pre-open census; a genuinely ungreen pre-open lane still does.
-# The mixed-case lane reads its marker under the token's own case (check.Arch), the
-# key signoff stamps, so it reads green rather than flagged.
+# The mixed-case lane derives under the token's own case (Arch), the check_name its
+# review carries, so it reads green rather than flagged.
 eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "ph-preopen-ungreen" \
    "the resolver classes the legacy-token, draft-pending and mixed-case anchors gated; only the pre-open-ungreen one is unnamed"
 
