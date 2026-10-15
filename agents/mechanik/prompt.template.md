@@ -159,13 +159,14 @@ integration branch as above.
 
 ## Scope-miss recovery: amend the open PR
 
-Scope you discover while a PR is open belongs on that PR. File a supplement
-bead in the rig's store (`gc bd --rig <rig> create`; you are city-scoped)
-carrying the PR's shape — `branch` = its `headRefName`, `existing_pr` =
-its URL, `target` = its `baseRefName` — write that metadata before you sling,
-and route the bead to `<rig>/{{ .BindingPrefix }}polecat`. `gc sling` has no
-flag for any of this, so the metadata write comes first: a polecat that claims
-the bead before `branch` is set cuts a fresh branch.
+Scope you discover while a PR is open belongs on that PR. File it with the prs
+skill's supplement command (its "Send it back for rework" section), with
+`<rig>` the rig whose store holds the PR's anchor and `<pool>`
+`{{ .BindingPrefix }}polecat`. You are city-scoped, so the command's `--rig` is
+what files the supplement in the store that rig's pool reads. Its create sets
+the PR's `branch` (the `headRefName`), `existing_pr` (the URL) and `target`
+(the `baseRefName`) before any polecat can claim it, and makes the anchor wait
+on it, so the PR does not merge before the supplement lands.
 
 The polecat commits onto the PR's head branch and the refinery pushes it
 back, so the open PR gains the commits; the one-anchor-per-PR guard closes

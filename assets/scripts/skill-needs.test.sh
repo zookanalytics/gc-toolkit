@@ -247,6 +247,7 @@ have "…as a child of the anchor" '"anchor_bead":"<anchor>"' "$PRS_SKILL"
 have "…born joined to the anchor and holding its merge" '--deps related:<anchor>,blocks:<anchor>' "$PRS_SKILL"
 have "…reads the hold back from the anchor in the same rig" '&& gc bd --rig <rig> dep list <anchor> --direction=down -t blocks --json' "$PRS_SKILL"
 have "…and slings only after that read" '&& gc sling <rig>/<pool> "$SUP"' "$PRS_SKILL"
+have "the mechanik files a supplement with the prs skill's command" "skill's supplement command (its \"Send it back for rework\" section)" "$MECHANIK"
 
 echo "── each real need scores highest on the skill that answers it ──"
 # <expected skill> TAB <the need, verbatim>
