@@ -147,7 +147,7 @@ branch. A child slung without the stamp, whose reported parent is not the
 convoy, is held at workspace-setup before any branch is cut.
 
 A **design-first initiative** rides `mol-design-convoy` instead of a bare seed,
-and choosing the formula in the `work` skill is the test for one. The molecule runs the
+and the `work` skill's formula choice is the test for one. The molecule runs the
 same branch cut from a pool session, then files the design child and, under the
 design-gated default, arms implementation behind the design's approval. Sling it
 on an initiative bead in the rig's store:

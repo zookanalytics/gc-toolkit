@@ -169,10 +169,11 @@ used main's skills at 132909cb5, which have no work, waits, records or prs.
 | 20 | prs | Glob for `pr-post.sh` |
 | 22, 23, 24, 25 | prs | converse-settle |
 
-With the new skills, every need reached its expected skill as the first skill
-the model loaded. On the capture's own need, the one-turn run loaded
-converse-settle first; that is the step a sitting is on, and it now points at
-work. The "API refusal" rows are the model provider's safeguard rejecting the
+With the new skills, every need but the capture's own reached its expected
+skill as the first skill the model loaded. On the capture's own need, the
+one-turn run loaded converse-settle first, which is the step a sitting is on
+and now points at work, and the three-turn re-run loaded work first. The
+"API refusal" rows are the model provider's safeguard rejecting the
 probe prompt ("Opus 5.5's safeguards flagged this message"), not a routing
 result. Without the new skills, five needs went straight to searching files,
 four loaded a core skill that says how to run `gc sling` but none of the
