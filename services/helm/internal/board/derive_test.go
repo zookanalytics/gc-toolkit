@@ -2193,9 +2193,9 @@ func dated(value, oid string, at time.Time) string {
 	return value + "@" + oid + "@" + at.Format(time.RFC3339)
 }
 
-// prPhase answers who acts next in the same values and precedence as
-// pr-status-label.sh's derive_value; these cases mirror that script's, since it
-// stamps nothing on the bead for the board to read instead.
+// prPhase names what stands between a PR and landing in the same values and
+// precedence as pr-status-label.sh's derive_value; these cases mirror that
+// script's, since it stamps nothing on the bead for the board to read instead.
 func TestPRPhaseMirrorsDeriveValue(t *testing.T) {
 	merge := func(md map[string]string) Anchor {
 		full := map[string]string{mdMergeResult: "pull_request"}

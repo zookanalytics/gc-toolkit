@@ -2142,14 +2142,15 @@ const (
 // signal that a resolved row merged rather than closed without merging.
 const mergeResultMerged = "merged"
 
-// classifyPhases stamps a row's tri-state — who must act on it next — from the
-// shared prstatus core. It fills two fields: PRPhase on a merge anchor (the PR
-// round-trip axis, empty elsewhere), and Phase on every live row (the per-bead
-// liveness, empty only on a closed row). Both read the holds and posture off the
-// anchor and its open visit off facts, and count the open rework children the
-// board already gathers (a child names its anchor in [mdAnchorBead]); a
-// non-merge bead's Phase reads its own live-workflow signal from facts instead.
-// Counting is deduped by child id, because one gather can list a bead twice.
+// classifyPhases stamps a row's tri-state — what stands between it and done —
+// from the shared prstatus core. It fills two fields: PRPhase on a merge anchor
+// (the PR round-trip axis, empty elsewhere), and Phase on every live row (the
+// per-bead liveness, empty only on a closed row). Both read the holds and
+// posture off the anchor and its open visit off facts, and count the open rework
+// children the board already gathers (a child names its anchor in
+// [mdAnchorBead]); a non-merge bead's Phase reads its own live-workflow signal
+// from facts instead. Counting is deduped by child id, because one gather can
+// list a bead twice.
 //
 // A bead WITH children on the board then takes its children's rolled-up state in
 // place of its own ([aggregatePhases]) — a parent's frontier is its children's
@@ -2353,9 +2354,10 @@ func aggregatePhases(tiles []Tile, anchors []Anchor) {
 	}
 }
 
-// prPhase answers who must act on a LIVE merge anchor next, delegating to
-// prstatus.Derive — the same function assets/scripts/pr-status-label.sh runs
-// through `gctk pr-status derive` to write the GitHub PR list's status: label.
+// prPhase names what stands between a LIVE merge anchor's PR and landing,
+// delegating to prstatus.Derive — the same function
+// assets/scripts/pr-status-label.sh runs through `gctk pr-status derive` to
+// write the GitHub PR list's status: label.
 // The board and the label derive the state from one code path, so a bead's board
 // liveness and its PR label cannot disagree. Empty on a non-merge row.
 // [classifyPhases] calls it only on a live row; a resolved anchor's PR state is

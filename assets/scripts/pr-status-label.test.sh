@@ -36,7 +36,7 @@ ghlog() { cat "$STUB_GH_LOG"; }
 resetlog() { : > "$STUB_GH_LOG"; }
 
 # ---------------------------------------------------------------------------
-# derive: who must act next, read off the anchor's own state.
+# derive: what stands between the PR and landing, read off the anchor's own state.
 # Precedence needs-attention > working > needs-review.
 # ---------------------------------------------------------------------------
 
@@ -138,8 +138,8 @@ store '[{"id":"tk-a","status":"open","metadata":{"merge_hold":"true"}},
 eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "needs-attention outranks working (hold + open child)"
 
 # needs-attention — an open visit on the anchor is a hold: the merge pass's finalize
-# gate holds the PR until a person answers, so an approved PR that would otherwise
-# read working (here conflicting, DIRTY) waits on the operator.
+# gate refuses the merge while it stands, so an approved PR that would otherwise
+# read working (here conflicting, DIRTY) waits on a person.
 store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"DIRTY@abc"}},
         {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "an open visit on an approved PR => needs-attention, not working"

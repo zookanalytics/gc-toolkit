@@ -1,13 +1,13 @@
 // Package prstatus is a PR anchor's status: vocabulary — the one dimension that
 // names where a PR stands. It has two halves. The live tri-state — working,
-// needs-review, needs-attention — answers who must act on an open PR next, and
-// [Derive] computes it from the facts the city records about the anchor. The
-// terminal states — merged, closed — name how a resolved PR ended. They are
-// stamped by the helm board off the anchor's close and its merge_result, not
-// returned by [Derive]: a resolved anchor freezes its live facts at their last
-// pre-merge values (a merged PR keeps posture=approved, merge_state=CLEAN, and
-// is never restamped), so the facts [Derive] reads carry no merged-or-closed
-// signal.
+// needs-review, needs-attention — names what stands between an open PR and
+// landing, and [Derive] computes it from the facts the city records about the
+// anchor. The terminal states — merged, closed — name how a resolved PR ended.
+// They are stamped by the helm board off the anchor's close and its
+// merge_result, not returned by [Derive]: a resolved anchor freezes its live
+// facts at their last pre-merge values (a merged PR keeps posture=approved,
+// merge_state=CLEAN, and is never restamped), so the facts [Derive] reads carry
+// no merged-or-closed signal.
 //
 // The `status:` PR label writer (assets/scripts/pr-status-label.sh) computes the
 // live tri-state through `gctk pr-status`, and the package is exported — not
@@ -43,21 +43,22 @@ import "strings"
 type State string
 
 const (
-	// Working: the city holds the ball — live work is anchored to the PR (a
-	// rework or fix child, a validation pass, a review, a finding), a draft the
-	// city opened still waits on the checks that flip it ready, or an approved
-	// PR is merging. No human input is needed.
+	// Working: only the city has work left before the PR lands — live work is
+	// anchored to it (a rework or fix child, a validation pass, a review, a
+	// finding), a draft the city opened still waits on the checks that flip it
+	// ready, or an approved PR is merging. No human input is needed.
 	Working State = "working"
-	// NeedsReview: settled at the head; the only thing left is a human's review
-	// verdict.
+	// NeedsReview: the only thing left before the PR lands is a human's review
+	// verdict on its settled head.
 	NeedsReview State = "needs-review"
-	// NeedsAttention: stopped without settling — a human must weigh in before the
-	// city can settle it (a merge or rebase hold, an open visit on the anchor, or
-	// an approved PR wedged at merge state BLOCKED with no rework in flight).
+	// NeedsAttention: something only a human can clear blocks the merge — a
+	// merge or rebase hold, an open visit on the anchor, or an approved PR wedged
+	// at merge state BLOCKED with no rework in flight. Any hold only a human can
+	// release is one of these inputs, whatever work is in flight beside it.
 	NeedsAttention State = "needs-attention"
 
-	// Merged and Closed are terminal: the PR round-trip has ended, so nobody acts
-	// on it next. Merged is a landed PR — the refinery closes its anchor carrying
+	// Merged and Closed are terminal: the PR round-trip has ended, so nothing
+	// stands between it and landing any more. Merged is a landed PR — the refinery closes its anchor carrying
 	// merge_result=merged. Closed is a merge anchor that closed without merging, a
 	// supersede or disposal. The board stamps these on a closed anchor; [Derive]
 	// never returns them, because the live facts it reads carry no terminal signal.
@@ -79,10 +80,11 @@ type Facts struct {
 	// bead, open or in_progress, whose subject is the anchor by the shared visit
 	// identity (assets/scripts/visit-identity.sh). That subject is the bead the
 	// visit's tracks edge names, or its gc.continuation_group stamp when it has
-	// no tracks edge. A visit is a conversation a person owes an answer to, and
-	// the merge pass's finalize gate (assets/scripts/finalize-gate.sh) holds the
-	// PR until it closes, so it reads as a hold, as merge_hold and rebase_hold
-	// do, whatever work is in flight.
+	// no tracks edge. Only a person closes a visit, and the merge pass refuses
+	// the merge while one covers the anchor: its finalize gate
+	// (assets/scripts/finalize-gate.sh) reads visits by the same identity. So it
+	// reads as a hold, as merge_hold and rebase_hold do, whatever work is in
+	// flight.
 	OpenVisit bool
 	// PRPosture is metadata.pr_posture, stored value@oid@instant; only the value
 	// before the first '@' is read.
@@ -106,12 +108,16 @@ type Facts struct {
 }
 
 // Derive returns the state the anchor projects. Precedence:
-// needs-attention > working > needs-review.
+// needs-attention > working > needs-review. The order follows from what each
+// value says stands between the PR and landing: a block only a human can clear
+// holds the PR whatever work is in flight beside it, live city work comes before
+// the review verdict it leads to, and the verdict is what remains when neither
+// stands.
 func Derive(f Facts) State {
 	posture := before(f.PRPosture, "@")
 	mstate := before(f.PRMergeState, "@")
 
-	// needs-attention: the city stopped without settling; a human must unstick it.
+	// needs-attention: something only a human can clear blocks the merge.
 	if isSet(f.MergeHold) || isSet(f.RebaseHold) || f.OpenVisit {
 		return NeedsAttention
 	}
@@ -119,7 +125,7 @@ func Derive(f Facts) State {
 		return NeedsAttention
 	}
 
-	// working: the city holds the ball; no human input needed.
+	// working: only the city has work left.
 	if f.InFlightCount > 0 {
 		return Working
 	}
@@ -130,7 +136,7 @@ func Derive(f Facts) State {
 		return Working
 	}
 
-	// needs-review: settled at the head, a human review or re-review is next.
+	// needs-review: only a human's verdict on the settled head is left.
 	return NeedsReview
 }
 
