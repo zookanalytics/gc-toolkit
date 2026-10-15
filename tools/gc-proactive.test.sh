@@ -41,7 +41,7 @@
 #   (PATH-SWEEP) a sweep skips a bead routed after its read without spending
 #                a cap slot
 #   (PATH-READS) on the live read, a route refuses, and any failed read, bd's
-#                not-found included, fails the sling closed
+#                not-found and an empty answer included, fails the sling closed
 # A task-typed molecule step (gc.step_ref) has no parent-child edge, so its step
 # key is all that sets it apart from raw input:
 #   (STEP-DROP)  scan_precision_filter drops a step bead, a control step included
@@ -1085,6 +1085,10 @@ hasnt "$OUT" "gc bd create" "(SUBJECT-VANISHED) …and files no reaction"
 #   tk-path-locked  any other failed read
 #   tk-path-gone    bd's not-found error: a subject the gate proved present and
 #                   that was deleted before this read
+#   tk-path-empty   no answer at all, with exit 0: a read that names no row is
+#                   no proof the bead has no path
+#   tk-path-twice   two answers to the one read, the second routed: neither is
+#                   the bead's one row
 # Each one's tracks-edge reads answer empty, so no guard before or after the
 # dispatch-path guard refuses it.
 SHOW="$TMP/stub-show"
@@ -1097,6 +1101,9 @@ case "\$*" in
   "bd show tk-path-locked --json") printf '{"error":"database is locked"}'; exit 1 ;;
   "bd show tk-path-gone --json")
       printf '{"error":"no issues found matching the provided IDs","schema_version":1}'; exit 1 ;;
+  "bd show tk-path-empty --json") exit 0 ;;
+  "bd show tk-path-twice --json")
+      printf '[{"id":"tk-path-twice","metadata":{}}]\n[{"id":"tk-path-twice","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}]' ;;
   "bd dep list tk-path-"*" --direction up -t tracks --json") printf '[]' ;;
   *) exec "$STUB/gc" "\$@" ;;
 esac
@@ -1123,6 +1130,14 @@ set -e
 eq "$RC" 1 "(PATH-READS) a not-found after the gate fails the sling closed too (exit 1)"
 has "$OUT" "cannot tell whether tk-path-gone already has a dispatch path" "(PATH-READS) …saying why"
 hasnt "$OUT" "gc bd create" "(PATH-READS) …and files no reaction"
+for b in tk-path-empty tk-path-twice; do
+    set +e
+    OUT="$(show_sling "$b")"; RC=$?
+    set -e
+    eq "$RC" 1 "(PATH-READS) a read answering anything but one row ($b) fails the sling closed (exit 1)"
+    has "$OUT" "cannot tell whether $b already has a dispatch path" "(PATH-READS) …saying why"
+    hasnt "$OUT" "gc bd create" "(PATH-READS) …and files no reaction for $b"
+done
 
 echo
 echo "gc-proactive stand-down: $PASS passed, $FAIL failed"

@@ -284,7 +284,9 @@ reaction_absent_guard() {
 #
 # Returns 0 when the bead has no dispatch path, 1 when it has one, and 2 when
 # its metadata cannot be read. A failed read is not proof that it has none, so
-# the caller fails closed on 2. bd's not-found error is no exception:
+# the caller fails closed on 2. The live read takes only one JSON array holding
+# one row as an answer, so an empty answer fails it even when gc exits 0, and
+# two answers fail it too. bd's not-found error is no exception:
 # subject_present_guard has proven the bead present, so a not-found here is a
 # bead deleted since, and nothing may be filed for it. The read comes from the
 # fixture under test (beads.json), live otherwise.
@@ -299,7 +301,8 @@ sling_dispatch_path_guard() {
         local db; db="$(rig_beads_db)"
         # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
         meta="$(gc bd show "$bead" ${db:+--db "$db"} --json 2>/dev/null | scrub \
-            | jq -c 'if type == "array" and length == 1 then (.[0].metadata // {}) else error("unreadable") end' 2>/dev/null)" \
+            | jq -cs 'if length == 1 and (.[0] | type) == "array" and (.[0] | length) == 1
+                      then (.[0][0].metadata // {}) else error("unreadable") end' 2>/dev/null)" \
             || { log "$unreadable"; return 2; }
     fi
     # Each key is asked on its own through the shared predicate, so the log can
