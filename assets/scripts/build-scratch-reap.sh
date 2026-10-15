@@ -38,8 +38,10 @@
 #   build-scratch-reap.sh --verbose    name each entry and why it was kept/reaped
 #   build-scratch-reap.sh --no-lock    skip the single-flight lock
 # Env: BUILD_SCRATCH_REAP_LOCK_DIR (lock location; default XDG_RUNTIME_DIR or
-#      /tmp/gc-build-scratch-reap.<uid>), GC_GCTK_GOTMP / GC_HELM_GOTMP (the Go
-#      scratch roots the build scripts use), TMPDIR.
+#      /tmp/gc-build-scratch-reap.<uid>), BUILD_SCRATCH_REAP_LOCK_STALL_SECS
+#      (how long a holder may hold the lock before a pass runs past it; default
+#      900), GC_GCTK_GOTMP / GC_HELM_GOTMP (the Go scratch roots the build
+#      scripts use), TMPDIR.
 # Exit: 0 reaped or nothing to do · 1 cannot verify holders (refused) · 2 usage.
 # Caller: the build-scratch-reap cooldown order (orders/build-scratch-reap.toml).
 # See specs/tk-jp1fg5/build-scratch-reap.md.
@@ -66,6 +68,11 @@ done
 
 log() { [ "$VERBOSE" -eq 1 ] && echo "$PROG: $1" || true; }
 
+# The pass lock (bd-lib.sh's take_pass_lock).
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/bd-lib.sh}" \
+    || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
+
 # Holders are read through lsof; refuse to reap if it cannot be trusted. A
 # missing lsof, or one that reports nothing for this very process (every process
 # has open files), would make every entry look unheld and reap live scratch.
@@ -83,24 +90,31 @@ if stat -c %u -- / >/dev/null 2>&1; then STAT=(stat -c); else STAT=(stat -f); fi
 
 # Single-flight across the host. The lock lives at a per-uid path every session
 # shares and that matches none of the reaped patterns, so a pass never reaps its
-# own lock. flock is contended -> another pass is running, nothing to do. flock
-# missing -> run unlocked and say so; two passes racing is safe (each re-checks
+# own lock. Held -> another pass is running, nothing to do. Held past the stall
+# bound, or not to be taken at all (no flock, or a lock dir this pass cannot
+# write) -> run unlocked and say so; two passes racing is safe (each re-checks
 # the holder before removing, and removing an already-gone tree is a no-op).
+# Nothing this pass runs leaves a process behind, so none of it needs
+# pass_child.
 if [ "$NO_LOCK" -eq 0 ]; then
     LOCK_DIR="${BUILD_SCRATCH_REAP_LOCK_DIR:-}"
     if [ -z "$LOCK_DIR" ]; then
         if [ -n "${XDG_RUNTIME_DIR:-}" ]; then LOCK_DIR="$XDG_RUNTIME_DIR/gc-build-scratch-reap"
         else LOCK_DIR="/tmp/gc-build-scratch-reap.$UID_NUM"; fi
     fi
-    if command -v flock >/dev/null 2>&1 && mkdir -p "$LOCK_DIR" 2>/dev/null && ( : >>"$LOCK_DIR/lock" ) 2>/dev/null; then
-        exec 9>>"$LOCK_DIR/lock"
-        if ! flock -n 9; then
-            log "another pass holds $LOCK_DIR/lock; skipping"
-            exit 0
-        fi
-    else
-        echo "$PROG: lock unavailable ($LOCK_DIR); proceeding unlocked" >&2
-    fi
+    # Above the order's timeout, so a pass the controller is still running is
+    # never taken for a wedged one.
+    LOCK_STALL_SECS="${BUILD_SCRATCH_REAP_LOCK_STALL_SECS:-900}"
+    case "$LOCK_STALL_SECS" in ''|*[!0-9]*) LOCK_STALL_SECS=900 ;; esac
+    LOCK_STALL_SECS=$((10#$LOCK_STALL_SECS))
+    lock_rc=0
+    take_pass_lock "$LOCK_DIR" "$LOCK_STALL_SECS" || lock_rc=$?
+    case "$lock_rc" in
+        0) ;;
+        1) log "another pass holds $LOCK_DIR/pass.lock ($LOCK_NOTE); skipping"; exit 0 ;;
+        2) echo "$PROG: lock held past ${LOCK_STALL_SECS}s ($LOCK_NOTE); proceeding unlocked" >&2 ;;
+        *) echo "$PROG: lock unavailable ($LOCK_NOTE); proceeding unlocked" >&2 ;;
+    esac
 fi
 
 # Default roots: wherever this host's runs land their temp. De-duplicate by

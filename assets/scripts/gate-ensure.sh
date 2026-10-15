@@ -6,13 +6,11 @@
 # onto it burns a pool slot on a diff no one ships, and the validation pass hangs a
 # blocks edge on the very close it awaits.
 # For every other open pre_open_gate/pull_request anchor: canonicalize check_set
-# (empty -> stamp the declared default; a list or `none` is left alone), clear
-# any check.<g> that both fails the marker grammar and names a check check_set
-# does not declare (nothing else reads it, so nothing else could ever rewrite
-# it), then ensure every declared unsettled check is RAISABLE. A lane's state is
-# DERIVED from the finding and review-outcome graph through lane-state.sh, the
-# one helper merge.sh and pr-open.sh derive green through — never a stored
-# check.<g> marker. A lane that derives green is settled; otherwise the lane
+# (empty -> stamp the declared default; a list or `none` is left alone), then
+# ensure every declared unsettled check is RAISABLE. A lane's state is DERIVED
+# from the finding and review-outcome graph through lane-state.sh, the one
+# helper merge.sh and pr-open.sh derive green through. A lane that derives
+# green is settled; otherwise the lane
 # owes a review, has one in flight, or the anchor is mid-change, and a fresh
 # dispatch goes out only when QUIESCENCE holds: no review is dispatched while
 # anything is acting on the anchor — a fix unit in flight (including one
@@ -136,8 +134,9 @@ REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
 [ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); cannot gate" >&2; exit 1; }
 WEDGE_KEY="review-wedge"
 
-# Origin pin for the live-head read; optional — an unresolvable origin or a
-# missing gh degrades to treating a present marker as satisfiable.
+# Origin pin for the live-head read; optional. An unresolvable origin or a
+# missing gh leaves the head unread: a review is dispatched without a
+# reviewed_oid pin, and the per-head bar and the machine verdict are skipped.
 ORIGIN_HOST=""; ORIGIN_REPO=""
 u=$(git remote get-url origin 2>/dev/null | tr -d '[:space:]')
 case "$u" in
@@ -156,8 +155,8 @@ live_head_for() { # <branch> -> sha, or nothing when unanswerable
   # head from a failure. Empty routes the callers to their "no head to test"
   # arms, which is the safe direction: an unread head cannot prove a branch
   # moved, and the next pass sees a merged anchor closed and out of scope.
-  # The head is only ever compared against a marker oid, so it is held to that
-  # same grammar.
+  # The head becomes a review's reviewed_oid pin and the oid of the dated
+  # machine verdict, so it is held to the full 40-hex shape both carry.
   [ "$HAVE_GH" = 1 ] && [ -n "$ORIGIN_REPO" ] && [ -n "${1:-}" ] || return 0
   local out
   out=$(gh api --hostname "$ORIGIN_HOST" \
@@ -260,12 +259,12 @@ reviewed_at_head() { # <anchor-id> <check> <head>
 # An open rework child already filed under <anchor>? Echoes its id. A rework
 # child here is a blocks-dep bead whose metadata carries a source key, which
 # rework-child.sh stamps on each child it files: source_review_bead on the one a
-# request-changes verdict files as it clears check.<g>, source_ruling_bead on the
-# one an operator ruling files. Either is changing the branch, so a review that
-# read it now would read a mid-change diff, and a lane back to unreviewed with
-# one still open is owed the rework landing, not a fresh review. Non-zero rc =
-# the ledger could not answer; the caller holds the dispatch, the same as an
-# unreadable in-flight-review lookup.
+# request-changes verdict files, source_ruling_bead on the one an operator
+# ruling files. Either is changing the branch, so a review that read it now
+# would read a mid-change diff, and a lane back to unreviewed with one still
+# open is owed the rework landing, not a fresh review. Non-zero rc = the ledger
+# could not answer; the caller holds the dispatch, the same as an unreadable
+# in-flight-review lookup.
 open_rework_child() { # <anchor-id>
   local raw
   raw=$(gc bd dep list "$1" --direction=down -t blocks --json 2>/dev/null | scrub)
@@ -318,8 +317,8 @@ open_validation_pass() { # <anchor-id>
 #   (b) a review's or a ruling's rework child in flight on the anchor     [open_rework_child]
 #   (c) a validation pass in flight on the anchor                         [open_validation_pass]
 # Clause (d), a full review already in flight on THIS lane, is per-lane and stays
-# with inflight_review at the dispatch site. Each clause is an open-bead query;
-# none reads a check.<g> marker, and each hold names a bead that is open.
+# with inflight_review at the dispatch site. Each clause is an open-bead query,
+# and each hold names a bead that is open.
 #
 # An open must-fix finding is a demand on the anchor, not an actor on it. The fix
 # unit answering it is what changes the diff, so clause (a) holds on that fix unit
@@ -475,7 +474,7 @@ CONVOYS
 # single read can catch a recovery mid-write and escalate a review that repairs
 # itself moments later. An unreadable root or step enumeration is HELD without
 # claiming a live pour — the merge stays held and the next pass re-probes.
-# Reads the current anchor's loop context ($id $g $title $marker $branch $target
+# Reads the current anchor's loop context ($id $g $title $branch $target
 # $REVIEW_POOL $ESCALATOR $WEDGE_KEY $PROG) and bumps $wedged on a filed visit.
 judge_pour_liveness() { # <review-bead-id>
   local rid="$1" spent_root="" spent_rc=0 rev_row seen rpool
@@ -498,7 +497,7 @@ judge_pour_liveness() { # <review-bead-id>
 "Review $rid is wedged: its poured workflow finished without a verdict, so check '$g' on $id is held with nothing driving it.
 
 Anchor:   $id — $title
-Check:    check.$g is ${marker:-absent}
+Check:    $g, which does not derive green until a review records a verdict
 Branch:   $branch -> $target
 Review:   $rid (open; no route, no assignee)
 Workflow: $spent_root — every step closed but the finalizer
@@ -533,7 +532,7 @@ recorded_verdict() { # <have> <want "value@oid">
   case "$rest" in ''|*@*) return 1 ;; *) return 0 ;; esac
 }
 
-# The oid half of the marker grammar <green|fixable|exception>@<40-hex>.
+# A full 40-hex commit oid, the shape of the live head this arm reads.
 is_oid() { # <string>
   local v="${1:-}"
   case "$v" in *[!0-9a-f]*|"") return 1 ;; esac
@@ -587,7 +586,7 @@ total=$(printf '%s' "$ROWS" | awk 'NF { n++ } END { print n + 0 }')
 # records them all and puts first only the anchors that owe a stamp or have no
 # verdict. A child list that does not read leaves those two rules and records
 # no marks. Unpaced, the walk keeps the enumerated order.
-stamped=0; dispatched=0; validated=0; held=0; unsafe=0; skipped=0; wedged=0; cleared=0; disposed=0
+stamped=0; dispatched=0; validated=0; held=0; unsafe=0; skipped=0; wedged=0; disposed=0
 pace_start "$CURSOR" "$DEADLINE"
 pace_seen_start "${CURSOR:+$CURSOR.seen}"
 first_rows=""; rest_rows=""; first_n=0
@@ -695,43 +694,6 @@ while IFS= read -r tagged; do
     canon=$(cs_canon "$checkset")
     echo "$PROG: $id had no normalized check_set; stamped '$DEFAULT_CHECK_SET'"
   fi
-  # --- retire markers no arm of the cadence can ever rewrite ------------------
-  # merge.sh and the checks loop below both read only the checks named in
-  # check_set, so a check.<g> outside it governs nothing and nothing rewrites
-  # it. Clear it when it also fails the marker grammar: a word no lane state
-  # names is not a state, and check-gate-integrity errors on it forever.
-  # A well-formed marker survives — a narrowed check_set keeps its history.
-  # A legacy exception@<oid> park is exempt from the sweep: until
-  # migrate-lane-states.sh runs it is still an operator's park to retire, not
-  # damage to clear, and clearing it silently would leave the migration
-  # nothing to find.
-  declared=",$(printf '%s' "$checkset" | tr -d '[:space:]'),"
-  stray=$(printf '%s' "$row" | jq -r --arg d "$declared" '
-    (.metadata // {}) | to_entries[]
-    | select(.key | test("^check\\.[^.]+$"))
-    | select((.value | type) == "string")
-    | select((.value | test("^(unreviewed|reviewing|validating|fixing|green)$")) | not)
-    | select((.value | test("^exception@")) | not)
-    | (.key | sub("^check\\."; "")) as $g
-    | select(($d | contains("," + $g + ",")) | not)
-    | .key' 2>/dev/null)
-  while IFS= read -r k; do
-    [ -n "${k:-}" ] || continue
-    was=$(meta_of "$row" "$k")
-    gc bd update "$id" --unset-metadata "$k" \
-      --append-notes "gate-ensure: cleared $k=\"$was\" — check_set '$checkset' does not declare that check and the marker is not a well-formed verdict, so no signoff or merge could ever act on it." \
-      >/dev/null 2>&1 </dev/null
-    still=$(gc bd show "$id" --json </dev/null 2>/dev/null | scrub \
-      | jq -r --arg k "$k" '.[0].metadata[$k] // empty' 2>/dev/null)
-    if [ -n "$still" ]; then
-      echo "$PROG: WARN $id $k still reads '$still' after the clear; retry next pass" >&2
-    else
-      cleared=$((cleared + 1))
-      echo "$PROG: $id cleared undeclared malformed check marker $k=\"$was\" (check_set '$checkset')"
-    fi
-  done <<STRAY
-$stray
-STRAY
 
   # --- dispatch the validator onto every open, undispatched validation pass -----
   # A lane enters validating when an open task_kind=validation bead sits on the
@@ -799,22 +761,9 @@ STRAY
   mr=$(meta_of "$row" merge_result)
   head=$(live_head_for "$branch")
   # The machine axis this pass reaches for the anchor as a whole. The check loop
-  # already derives each lane as green (settled) or short of green; these two
-  # flags keep that answer instead of discarding it at the end of the iteration.
-  #
-  # The cap's wedge — shared with gctk merge's merge_hold arm — is evaluated once
-  # HERE, per anchor, not inside the per-check loop: the park sits on the
-  # anchor's own merge_hold, not on any one lane, so a fully green capped
-  # anchor (one check hand-greened, or all of them) must still record the
-  # wedge even though the loop below never reaches a hold check for it.
-  # merge_hold's value must be the literal string "signoff_cap" — an
-  # operator's own hold (merge_hold=true) beside a stale orphan signoff_cap
-  # is not the cap's park.
-  mach_wedge=0
+  # already derives each lane as green (settled) or short of green; this flag
+  # keeps that answer instead of discarding it at the end of the iteration.
   mach_progress=0
-  if [ "$hold" = "signoff_cap" ] && [ -n "$(meta_of "$row" signoff_cap)" ]; then
-    mach_wedge=1
-  fi
   # Quiescence is anchor-wide and read at most once per anchor, lazily: the first
   # non-green lane to reach the dispatch decision computes it, and a fully green
   # anchor computes it once at the settle decision below (settling asserts nothing
@@ -871,23 +820,6 @@ STRAY
   fi
   while IFS= read -r g; do
     [ -n "$g" ] || continue
-    # The marker is read for two legacy purposes only — never to classify the
-    # lane. First, a legacy exception@ park: signoff.sh refuses to stamp green
-    # over it and migrate-lane-states.sh rewrites it to merge_hold=true, so until
-    # that migration runs a review poured against the parked anchor is wasted
-    # reach — it reads as wedged and held. Second, the wedge escalation's
-    # diagnostic line (judge_pour_liveness reads $marker). Both retire with the
-    # marker grammar itself, once the legacy-surface endgame lands; the lane
-    # STATE is DERIVED below.
-    marker=$(meta_of "$row" "check.$g")
-    case "$marker" in
-      exception@*)
-        mach_progress=1
-        mach_wedge=1
-        echo "$PROG: $id check '$g' carries a legacy park (check.$g=$marker); awaits migrate-lane-states.sh — no dispatch"
-        held=$((held + 1)); continue ;;
-    esac
-
     # Derive the lane's state from the finding and review-outcome graph, never a
     # marker: lane-state.sh is the one helper merge.sh and pr-open.sh derive green
     # through, so the readers agree. Green is settled — a non-superseded approve
@@ -954,9 +886,7 @@ STRAY
     mach_progress=1
 
     # Operator hold gates a re-dispatch (pipeline work toward landing); the armed
-    # check already holds the merge, so held-and-gated is safe. Whether this hold
-    # IS the cap's park (wedged, not merely progressing) was already decided once
-    # for the whole anchor, above.
+    # check already holds the merge, so held-and-gated is safe.
     case "$hold" in
       ""|false|False|FALSE|0|null) : ;;
       *) echo "$PROG: $id check '$g' needs raising ($why) but merge_hold is set (operator gate); no dispatch"
@@ -1174,11 +1104,6 @@ GATES
   #
   # Only with a readable head. The value is head-pinned so a stale verdict can
   # never read as current, and a verdict pinned to nothing is not evidence.
-  #
-  # A wedged check outranks a progressing one. The two can co-occur only on a
-  # multi-check check_set, and there the anchor still cannot land: the cap's park
-  # holds every check at once, so no amount of progress on the others moves it,
-  # and the operator's move is the same one either way.
   if [ -n "$head" ]; then
     # Settling asserts nothing is owed, which is more than every lane deriving
     # green: an in-flight fix unit or a validation pass acts on the anchor as a
@@ -1188,7 +1113,7 @@ GATES
     # fully green anchor lets the loop skip the lazy compute, so run it here
     # before settling and fail closed — a hold, an unanswered must-fix finding,
     # or a probe that cannot answer is progressing, not settled.
-    if [ "$mach_wedge" = 0 ] && [ "$mach_progress" = 0 ]; then
+    if [ "$mach_progress" = 0 ]; then
       if [ "$quiesce_computed" = 0 ]; then
         quiesce_computed=1
         compute_quiescence "$id"
@@ -1197,8 +1122,7 @@ GATES
         mach_progress=1
       fi
     fi
-    if [ "$mach_wedge" = 1 ]; then mach="wedged-exception"
-    elif [ "$mach_progress" = 1 ]; then mach="progressing"
+    if [ "$mach_progress" = 1 ]; then mach="progressing"
     else mach="settled"
     fi
     #
@@ -1232,7 +1156,7 @@ if [ -n "$PACE_RESUME_AT" ] || [ "$PACE_FIRST_SKIPPED" -gt 0 ]; then
   [ "$PACE_FIRST_SKIPPED" -eq 0 ] || paced="$paced; $PACE_FIRST_SKIPPED needing action wait for the next pass"
 fi
 echo "$PROG: $paced"
-echo "$PROG: $stamped check_sets stamped, $cleared stray markers cleared, $dispatched reviews dispatched/re-routed, $validated validation passes dispatched, $held operator-held, $disposed disposed-skipped, $skipped held-for-retry, $wedged wedged/escalated, $unsafe UNSAFE"
+echo "$PROG: $stamped check_sets stamped, $dispatched reviews dispatched/re-routed, $validated validation passes dispatched, $held operator-held, $disposed disposed-skipped, $skipped held-for-retry, $wedged wedged/escalated, $unsafe UNSAFE"
 if [ "$unsafe" -gt 0 ]; then
   echo "$PROG: UNSAFE — $unsafe anchor(s) visible to merge.sh with no check_set; merge.sh holds each on its own read; exiting rc=$UNSAFE_RC" >&2
   exit "$UNSAFE_RC"

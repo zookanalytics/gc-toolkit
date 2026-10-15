@@ -9,16 +9,13 @@
 # finding, or a validation pass is out on the anchor — anchor-wide, so the fix
 # for a sibling lane's must-fix holds this lane too; a must-fix finding no fix
 # unit answers holds the merge, not the dispatch; a closed validation pass holds
-# nothing; an unreadable probe holds the dispatch fail-closed); a declared lane
-# still carrying a legacy exception@<oid>
-# park is a pre-migration hold (wedged, no dispatch); the live-head read, which
-# decides only the dispatch pin and the machine axis (a deleted ref, a body
-# without .sha, and a failed read are all unanswerable); the stray-marker sweep
-# (undeclared and outside the lane vocabulary is cleared, the retired green@
-# grammar included; a declared or well-formed one is not, and neither is an
-# undeclared legacy exception@ — left for migrate-lane-states.sh; an unpersisted
-# clear is reported); a multi-check check_set split per check rather than joined
-# into one name; in-flight dedup (routed, poured, claimed) + stranded repair
+# nothing; an unreadable probe holds the dispatch fail-closed); a declared lane's
+# exception@<oid> marker is read as nothing, so the lane derives from the graph;
+# the live-head read, which decides only the dispatch pin and the machine axis
+# (a deleted ref, a body without .sha, and a failed read are all unanswerable);
+# a stored marker's residue, which nothing reads or clears; a multi-check
+# check_set split per check rather than joined into one name; in-flight dedup
+# (routed, poured, claimed) + stranded repair
 # (root probe: re-sling a review with no LIVE tracking convoy, or one whose live
 # convoy carries no workflow root — a pour that minted the convoy but died before
 # the root drives nothing and must not hold the anchor in flight forever; and
@@ -30,11 +27,11 @@
 # a lost create reply is re-slung as stranded and never twinned; then gc sling
 # --on mol-review with
 # gc.execution_routed_to read-back, never retried in-pass; no dispatch tally is
-# written, and there is no dispatch ceiling); merge_hold, and the cap's park
-# under it reading as the wedge; and the review-wedge escalation, shared by both
-# reach shapes (an exec-stamp-only poured review, and a no-stamp review a
-# tracking convoy's root drives) -> a spent workflow is one deduped visit, held
-# one pass first.
+# written, and there is no dispatch ceiling); merge_hold, which holds the
+# dispatch while the machine axis still reads the lanes; and the review-wedge
+# escalation, shared by both reach shapes (an exec-stamp-only poured review, and
+# a no-stamp review a tracking convoy's root drives) -> a spent workflow is one
+# deduped visit, held one pass first.
 #
 # The sections run in the parts declared below, each wrapped in an `if part`
 # block. tools/run-tests.sh runs each part as its own run under its own
@@ -78,7 +75,7 @@ SUT="$SD/gate-ensure.sh"
 # The SUT forwards GC_RIG into every sling; an ambient value would rewrite the
 # assertions below. Lane state is DERIVED (there is no dispatch ceiling and no
 # GC_MAX_REVIEW_DISPATCHES to unset), so a green lane is a closed approve review
-# bead in the store, never a check.<g>=green marker.
+# bead in the store.
 unset GC_RIG 2>/dev/null || true
 POOL="rig/gc-toolkit.polecat-codex"
 FIXP="rig/gc-toolkit.polecat"
@@ -94,10 +91,9 @@ anchor() { # id mr checkset marker branch extra-json
     "${6:-}"
 }
 
-# sha1sum is exactly 40 lowercase hex, so a labelled fixture oid satisfies the
-# marker grammar. A shorter string is a MALFORMED marker — a different arm.
-# live_head_for holds the head it reads to that same grammar, so fixture HEADS
-# go through here too; a mnemonic like "sha-b4" now reads as no head at all.
+# sha1sum is exactly 40 lowercase hex, the shape live_head_for holds the head it
+# reads to, so fixture HEADS go through here; a mnemonic like "sha-b4" reads as
+# no head at all.
 oid() { printf '%s' "$1" | sha1sum | cut -d' ' -f1; }
 # The machine axis (lifecycle/lifecycle.toml [machine_axis]) as the anchor
 # carries it, and with the instant stripped.
@@ -150,7 +146,6 @@ live_steps() { # <root> <id-prefix>
 # --- graph-shape fixtures for the DERIVED lane state ---------------------------
 # A lane derives GREEN from a closed approve review bead: signoff_verdict=approve,
 # not superseded, with a reviewed_oid pin — exactly lane-state.sh's backing test.
-# This is what replaces a check.<g>=green marker everywhere a lane must read green.
 backed() { # <id> <anchor> [lane=correctness]
   printf '{"id":"%s","status":"closed","assignee":"","notes":"","metadata":{"task_kind":"review","check_name":"%s","anchor_bead":"%s","reviewed_oid":"%s","signoff_verdict":"approve","gc.outcome":"recorded"}}' \
     "$1" "${3:-correctness}" "$2" "$(oid "backing-$1")"
@@ -192,9 +187,9 @@ judged_rc() { # <id> <anchor> <head-oid> [oc=recorded] [lane=codex]
     "$1" "${5:-codex}" "$2" "$3" "${4:-recorded}"
 }
 
-# ==== part dispatch: the default stamp, settled lanes, the cap's park,
+# ==== part dispatch: the default stamp, settled lanes, the operator hold,
 # quiescence, the per-head bar, the validation-pass dispatch, disposed anchors,
-# the live-head read and the stray-marker sweep ====
+# the live-head read and stored-marker residue ====
 if part dispatch; then
 
 echo "# every section sits inside a part"
@@ -292,36 +287,23 @@ mrid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
 eq "$(meta "$mrid" check_name)" "triage" "the dispatched review names the real check"
 has "$out" "1 reviews dispatched" "the backed correctness lane bought no dispatch; only the ungated triage lane did"
 
-echo "# the cap's park suppresses the dispatch and reads as the wedge"
-# The shared predicate (also merge.sh's): merge_hold is the literal string
-# "signoff_cap" AND signoff_cap is non-empty. An operator's own hold writes
-# merge_hold=true, never this value.
-store "[$(anchor B4 pull_request correctness unreviewed polecat/b4 ',"merge_hold":"signoff_cap","signoff_cap":"correctness","gc.routed_to":"human"')]"
+echo "# an operator hold suppresses the dispatch; the machine axis still reads the lanes"
+store "[$(anchor B4 pull_request correctness unreviewed polecat/b4 ',"merge_hold":"true"')]"
 oid b4 > "$GH_DIR/head_polecat_b4"
 : > "$STUB_GC_LOG"
 out=$(run); rc=$?
-eq "$rc" 0 "the park pass exits 0"
-has "$out" "0 reviews dispatched" "a parked anchor buys no review"
-has "$out" "1 operator-held" "…and is counted as held"
-eq "$(pinned B4)" "wedged-exception@$(oid b4)" "…and the machine axis is the cap's wedge"
-
-echo "# an operator hold beside a STALE orphan signoff_cap is not the cap's wedge"
-# merge_hold=true (not the literal "signoff_cap") is an operator's own hold,
-# even with a signoff_cap value left over from an earlier park.
-store "[$(anchor B4b pull_request correctness unreviewed polecat/b4b ',"merge_hold":"true","signoff_cap":"correctness"')]"
-oid b4b > "$GH_DIR/head_polecat_b4b"
-out=$(run); rc=$?
 eq "$rc" 0 "the held pass exits 0"
-has "$out" "0 reviews dispatched" "an operator hold still suppresses the dispatch"
-eq "$(pinned B4b)" "progressing@$(oid b4b)" "…but the machine axis reads progressing, not the cap's wedge"
+has "$out" "0 reviews dispatched" "a held anchor buys no review"
+has "$out" "1 operator-held" "…and is counted as held"
+eq "$(pinned B4)" "progressing@$(oid b4)" "…and the machine axis reads progressing: a lane is short of green"
 
-echo "# a fully green capped anchor still records the wedge — the park sits on the anchor, not the lane"
-store "[$(anchor B4c pull_request correctness "" polecat/b4c ',"merge_hold":"signoff_cap","signoff_cap":"correctness","gc.routed_to":"human"'), $(backed rev-b4c B4c)]"
+echo "# a held anchor whose every lane is green records settled; the hold rides merge_hold"
+store "[$(anchor B4c pull_request correctness "" polecat/b4c ',"merge_hold":"true"'), $(backed rev-b4c B4c)]"
 oid b4c > "$GH_DIR/head_polecat_b4c"
 out=$(run); rc=$?
-eq "$rc" 0 "the settled-but-parked pass exits 0"
-has "$out" "0 reviews dispatched" "a green lane dispatches nothing, capped or not"
-eq "$(pinned B4c)" "wedged-exception@$(oid b4c)" "…but the machine axis still reads the cap's wedge, not settled"
+eq "$rc" 0 "the settled-but-held pass exits 0"
+has "$out" "0 reviews dispatched" "a green lane dispatches nothing, held or not"
+eq "$(pinned B4c)" "settled@$(oid b4c)" "…and the machine axis reads settled"
 
 echo "# a lane with no backing review dispatches, whatever stale marker it carries"
 # The marker is not read for the lane state, so a lane with no closed approve
@@ -563,57 +545,31 @@ out=$(run); rc=$?
 eq "$rc" 0 "malformed-head pass exits 0"
 eq "$(pinned C7)" "<absent>" "a non-SHA answer at rc=0 is unanswerable, and records nothing"
 
-echo "# stray markers: a check.<g> outside check_set that no arm could rewrite"
-# The declared correctness lane derives green from a backing review; the stray
-# check.refinery is what the sweep clears. A declared well-formed marker is left
-# alone (it is history, and this design's readers ignore it).
+echo "# a stored marker's residue is neither read nor cleared"
+# A check.<g> key a stored-marker writer left behind is inert: the declared lane
+# derives green from its backing review whatever the key says, and a key outside
+# check_set is left as it is, in any grammar.
 store "[$(anchor N1 pull_request correctness green polecat/n1 ',"check.refinery":"green@'"$SHORT"'"'), $(backed rev-n1 N1)]"
 oid n1 > "$GH_DIR/head_polecat_n1"
+: > "$STUB_GC_LOG"
 out=$(run); rc=$?
-eq "$rc" 0 "the sweep pass exits 0"
-eq "$(meta N1 check.refinery)" "<absent>" "the undeclared legacy marker is cleared"
-eq "$(meta N1 check.correctness)" "green" "…and the declared lane state is untouched"
-has "$out" "cleared undeclared malformed check marker check.refinery" "the clear is reported"
-has "$out" "1 stray markers cleared" "…and counted"
-has "$out" "0 reviews dispatched" "…and a marker that governs nothing dispatches nothing"
-has "$(jq -r '.[] | select(.id == "N1") | .notes' "$STUB_STORE")" "does not declare that check" "the anchor records why it was cleared"
+eq "$rc" 0 "the pass exits 0"
+eq "$(meta N1 check.refinery)" "green@$SHORT" "an undeclared key is left as it is"
+eq "$(meta N1 check.correctness)" "green" "…and so is a declared one"
+has "$out" "0 reviews dispatched" "…and the backed lane settles on its review alone"
+hasnt "$(cat "$STUB_GC_LOG")" "-metadata check." "…with no check.<g> key written or cleared"
 
-echo "# …a WELL-FORMED undeclared lane state is history, not damage"
-store "[$(anchor N2 pull_request correctness green polecat/n2 ',"check.refinery":"fixing"'), $(backed rev-n2 N2)]"
-oid n2 > "$GH_DIR/head_polecat_n2"
-out=$(run)
-eq "$(meta N2 check.refinery)" "fixing" "a narrowed check_set keeps its well-formed history"
-has "$out" "0 stray markers cleared" "…and nothing was swept"
-
-echo "# …an undeclared legacy exception@ is EXEMPT from the sweep — migrate-lane-states.sh's to retire"
-# Between this PR merging and the migration running, an anchor can still carry
-# check.<g>=exception@<oid> with merge_hold unset. Sweeping it here the moment
-# check_set narrows would leave the migration nothing to find, so it survives
-# like an operator's park, not like the rest of the retired grammar.
-store "[$(anchor N3 pull_request correctness green polecat/n3 ',"check.refinery":"exception@'"$SHORT"'"'), $(backed rev-n3 N3)]"
-oid n3 > "$GH_DIR/head_polecat_n3"
-out=$(run)
-eq "$(meta N3 check.refinery)" "exception@$SHORT" "the legacy park survives the sweep"
-has "$out" "0 stray markers cleared" "…and nothing is counted as swept"
-
-echo "# …a DECLARED lane still carrying that legacy exception@ park is a pre-migration hold"
-store "[$(anchor N3b pull_request correctness "exception@$SHORT" polecat/n3b ',"gc.routed_to":"human","blocked_reason":"round cap"')]"
+echo "# …a DECLARED lane's exception@ marker is not read: the lane derives from the graph"
+store "[$(anchor N3b pull_request correctness "exception@$SHORT" polecat/n3b)]"
 oid n3b > "$GH_DIR/head_polecat_n3b"
 : > "$STUB_GC_LOG"
 out=$(run); rc=$?
-eq "$rc" 0 "the pre-migration park pass exits 0"
-has "$out" "0 reviews dispatched" "a legacy exception@ park on a declared check buys no review"
-has "$out" "awaits migrate-lane-states.sh" "…and says why"
-has "$out" "1 operator-held" "…and is counted as held"
-eq "$(pinned N3b)" "wedged-exception@$(oid n3b)" "…and the machine axis reads the cap's wedge"
+eq "$rc" 0 "the pass exits 0"
+has "$out" "1 reviews dispatched" "an unbacked lane is owed its review whatever its marker says"
+has "$out" "0 operator-held" "…and nothing holds it"
+eq "$(pinned N3b)" "progressing@$(oid n3b)" "…and the machine axis reads progressing"
 
-echo "# …the none opt-out does not exempt an anchor from the sweep"
-store "[$(anchor N4 pull_request none "" polecat/n4 ',"check.refinery":"green@'"$SHORT"'"')]"
-out=$(run)
-eq "$(meta N4 check.refinery)" "<absent>" "check_set=none still gets its stray marker cleared"
-has "$out" "0 reviews dispatched" "…and none still dispatches nothing"
-
-echo "# …nor from the validation-pass dispatch: a checkless anchor's open pass still gets the validator"
+echo "# the none opt-out does not exempt an anchor from the validation-pass dispatch: a checkless anchor's open pass still gets the validator"
 # pr-facts.sh opens a human feedback pass without consulting check_set, so a
 # check_set=none anchor can carry one. The dispatch that releases its blocks edge
 # runs before the none|off opt-out; after it, the pass would hold the merge with
@@ -624,15 +580,6 @@ has "$out" "dispatched validation pass vp-n4v to $VALP" "a checkless anchor's op
 eq "$(meta vp-n4v 'gc.execution_routed_to')" "$VALP" "…and the pour read back"
 has "$out" "1 validation passes dispatched" "…counted as a validation dispatch"
 has "$out" "0 reviews dispatched" "…while check_set=none still dispatches no review"
-
-echo "# …a clear that does not persist is reported, not counted"
-store "[$(anchor N5 pull_request correctness green polecat/n5 ',"check.refinery":"green@'"$SHORT"'"'), $(backed rev-n5 N5)]"
-oid n5 > "$GH_DIR/head_polecat_n5"
-out=$(STUB_DROP_KEYS="N5:check.refinery" run 2>&1); rc=$?
-eq "$rc" 0 "an unpersisted clear does not hold the merge (the marker gates nothing)"
-eq "$(meta N5 check.refinery)" "green@$SHORT" "the marker is still there"
-has "$out" "still reads" "the failed clear is reported"
-has "$out" "0 stray markers cleared" "…and not counted"
 
 fi # part dispatch
 
@@ -1232,7 +1179,7 @@ has "$esc" "--key review-wedge" "…under one situation key, so repeats dedup"
 has "$esc" "check 'correctness' on W1 is held" "…naming the anchor and check that are stuck"
 has "$esc" "gc bd update rev-w1 --set-metadata gc.routed_to=$POOL" "…and the route-restore repair"
 has "$esc" "root-w1" "…and the spent workflow"
-has "$esc" "check.correctness is absent" "…and the marker state, not the dispatch arm's rationale"
+has "$esc" "correctness, which does not derive green until a review records a verdict" "…and the lane it holds, not the dispatch arm's rationale"
 has "$out" "0 reviews dispatched" "escalating still dispatches nothing"
 
 echo "# a pour still running its chain is never escalated"
@@ -1360,29 +1307,26 @@ if part machine; then
 # Recording that answer is what lets the helm board say whether an anchor is
 # moving without re-implementing these predicates, and the value is head-pinned
 # so a stale verdict can never read as current.
-echo "# machine axis: the wedge, the settled check, and the one being raised"
-# X1 is a fully green capped anchor (like B4c): the cap park records the wedge,
-# and the green lane derives from a local backing review — read through bd list,
-# never a per-anchor bd show — which is what keeps the unchanged re-record pass
-# below from re-reading the anchor.
-store "[$(anchor X1 pull_request correctness "" polecat/x1 ',"merge_hold":"signoff_cap","signoff_cap":"correctness","gc.routed_to":"human"'), $(backed rev-x1 X1),
+echo "# machine axis: the settled check, and the one being raised"
+# X1 is fully green and routed to a person. Its green lane derives from a local
+# backing review — read through bd list, never a per-anchor bd show — which is
+# what keeps the unchanged re-record pass below from re-reading the anchor.
+store "[$(anchor X1 pull_request correctness "" polecat/x1 ',"merge_hold":"true","gc.routed_to":"human"'), $(backed rev-x1 X1),
         $(anchor X2 pull_request correctness "" polecat/x2), $(backed rev-x2 X2),
         $(anchor X3 pull_request correctness "" polecat/x3), $(mustfix find-x3 X3),
-        $(anchor X4 pre_open_gate correctness unreviewed polecat/x4 ',"merge_hold":"signoff_cap","signoff_cap":"correctness","gc.routed_to":"human"')]"
+        $(anchor X4 pre_open_gate correctness unreviewed polecat/x4 ',"merge_hold":"true"')]"
 oid x1 > "$GH_DIR/head_polecat_x1"
 oid x2 > "$GH_DIR/head_polecat_x2"
 oid x3 > "$GH_DIR/head_polecat_x3"
 oid x4 > "$GH_DIR/head_polecat_x4"
 out=$(run); rc=$?
 eq "$rc" 0 "the recording pass exits 0"
-# The commonest wedge: the convergence cap parked the anchor under merge_hold
-# and routed it to a person. No automated actor lifts that, and no commit does.
-eq "$(pinned X1)" "wedged-exception@$(oid x1)" "the cap's park records the wedge, with its shape named"
+eq "$(pinned X1)" "settled@$(oid x1)" "a green anchor held for a person records settled"
 eq "$(pinned X2)" "settled@$(oid x2)" "every check green records settled"
 eq "$(pinned X3)" "progressing@$(oid x3)" "a lane short of green records progressing"
-# Most wedged anchors have no PR at all, so a key written only for open PRs
-# would miss the majority of the condition.
-eq "$(pinned X4)" "wedged-exception@$(oid x4)" "a pre_open_gate anchor is recorded the same way"
+# An anchor stalls before its PR exists as readily as after, so a key written
+# only for open PRs would miss the pre-open ones.
+eq "$(pinned X4)" "progressing@$(oid x4)" "a pre_open_gate anchor is recorded the same way"
 case "$(machine X1)" in
   *@*@20[0-9][0-9]-*Z) ok "the recorded verdict dates its own turn" ;;
   *) bad "no @<since> component: '$(machine X1)'" ;;
@@ -1403,7 +1347,7 @@ echo "# recording a verdict moves no route"
 # The stamp rides a lifecycle self-transition, and a detached state's default is
 # to clear the route. An observation must not retract a routing decision it
 # never looked at, so the anchor's own route rides back with it.
-eq "$(meta X1 'gc.routed_to')" "human" "a parked anchor keeps the route the cap gave it"
+eq "$(meta X1 'gc.routed_to')" "human" "an anchor routed to a person keeps that route"
 store "[$(anchor X6 pull_request correctness "" polecat/x6 ',"gc.routed_to":"rig/gc-toolkit.polecat"'), $(backed rev-x6 X6)]"
 oid x6 > "$GH_DIR/head_polecat_x6"
 run >/dev/null

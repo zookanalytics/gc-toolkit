@@ -109,9 +109,9 @@ family by it (`flattenFamilies` in `web/src/App.tsx`); the CLI board renders one
 level deep.
 
 `cluster_key` is the shared `needs` of a run of at least three same-section rows
-that are one template (a visit family, a signoff cap); a renderer folds them
-into one entry while the wire keeps every member. `specs/tk-9tbbk.4/` records
-the band taxonomy and the wrapper fold.
+that are one template (a visit family, a run of PRs green and waiting on
+review); a renderer folds them into one entry while the wire keeps every
+member. `specs/tk-9tbbk.4/` records the band taxonomy and the wrapper fold.
 
 ### The two questions, and why they are two surfaces
 
@@ -235,12 +235,12 @@ Six kinds are gathered. The first three are selected by the bead's issue
 
 `merge` is keyed on `merge_result` PRESENCE and never on `pr_number`: an anchor
 at `pre_open_gate` has a branch, a gate set and a machine axis with no number
-yet, so a number-keyed query cannot see a gate that wedges before the PR opens.
+yet, so a number-keyed query cannot see a gate that stalls before the PR opens.
 `pr_branch` is what identifies those rows, and it travels as its own field
 because a table without a `frontier` column has nothing else to name them with.
-It is gathered LAST, so a wedged anchor — which carries `gc.routed_to=human` too
-— keeps its `human` row through the dedup instead of flipping kind between
-passes.
+It is gathered LAST, so a merge anchor routed to a person — which carries
+`gc.routed_to=human` too — keeps its `human` row through the dedup instead of
+flipping kind between passes.
 
 All six are gathered by **both** backends. The library backend filters the two
 metadata kinds in the store query; the HTTP backend filters them client-side
@@ -498,17 +498,18 @@ field would be lying on a normal day.
 
 | field | values | read from |
 |---|---|---|
-| `pr_machine` | `progressing`, `settled`, `wedged-exception`, `blocked`, `unknown` | `pr.machine` on the anchor |
+| `pr_machine` | `progressing`, `settled`, `blocked`, `unknown` | `pr.machine` on the anchor |
 | `pr_conversation` | `quiet`, `outstanding`, `answered`, `asking`, `unknown` | `pr.conversation` on the anchor; `asking` from the demand edge |
 | `pr_approval` | `required`, `met`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
 
 **Recorded, not re-derived.** Every stage of the merge cadence reaches the
-machine axis once per pass: `assets/scripts/gate-ensure.sh` classifies each gate
-marker, and `assets/scripts/merge.sh` decides it again at each of its holds. Both
-record it through the lifecycle writer, gate-ensure through `lifecycle.sh` and
-`gctk merge` in-process, in the head-pinned `<value>@<oid>@<since>` shape the
-gate markers already use. Nothing here adds a pass, a scanner or a GitHub read.
+machine axis once per pass: `assets/scripts/gate-ensure.sh` classifies each
+declared lane, and `assets/scripts/merge.sh` decides it again at each of its
+holds. Both record it through the lifecycle writer, gate-ensure through
+`lifecycle.sh` and `gctk merge` in-process, in the head-pinned
+`<value>@<oid>@<since>` shape. Nothing here adds a pass, a scanner or a GitHub
+read.
 
 **No per-PR GitHub call.** A conversation read costs one GitHub round trip per
 open pull request, and a backlog of ordinary size spends the board's whole cache
@@ -523,11 +524,9 @@ not grow with the number of pull requests.
 `progressing` whatever the last gate pass recorded, because that half of the
 derivation is a bead read the gather already makes. The route is the
 discriminator: an anchor also blocks on ordinary prerequisites and on the demand
-bead that makes it `asking`, and no pool will claim either. A recorded wedge
-always stands, since an operator who loses sight of a wedge has lost the row this
-surface exists to show.
+bead that makes it `asking`, and no pool will claim either.
 
-**Whose move.** A row is owed by the operator when the machine axis is wedged,
+**Whose move.** A row is owed by the operator when the machine axis is blocked,
 when an open `blocks` edge to a demand bead means the city is asking, or when the
 cadence is `settled` and GitHub is holding the merge for a human review — one
 never given, or a standing `changes_requested` the city has reworked as far as it
@@ -550,8 +549,18 @@ yet green and nothing advancing it, meaning no review or rework a live session i
 working. Its checks are the lanes its `check_set` declares, split by the rule
 `merge.sh` and `pr-open.sh` apply: commas separate lanes, whitespace is stripped,
 and `none`, `off` and `approval` name no lane. Every lane holds the PR, and a lane
-is green when its `check.<lane>` marker reads `green`. A legacy `codex` lane counts
-like any other, and a `check_set` that declares no lane is never a stalled check.
+is green when a review backs it the way `lane-state.sh` reads a local backing
+(`laneGreen`): a closed review bead naming the anchor in `anchor_bead` and the
+lane in `check_name`, carrying a `reviewed_oid` and `signoff_verdict=approve`
+and not superseded, with no review for the lane still open. The library backend
+gathers a live pre-open anchor's reviews the way `bd-lib.sh` reads an anchor's
+children in a store marked joined: the live ones by `anchor_bead`, and the
+closed ones through the anchor's inbound edges. In a store without the mark,
+where only a scan of the whole closed ledger would find the closed ones, and
+when a review read fails, it marks the reviews unread. The supervisor backend
+reads no closed bead, so it marks them unread too, and unread reviews fire no
+stall. A legacy `codex` lane counts like any other, and a `check_set` that
+declares no lane is never a stalled check.
 Childless the anchor would otherwise band `LOW` and read `in the merge cadence` (a
 stale `progressing` marker) or `position unknown`, so it sinks with no age; the
 signal bands it `ELEVATED`, dates it from the anchor's `updated_at`, and its
@@ -562,9 +571,9 @@ on the anchor, because a rework title names no lane.
 Routed-ness is not liveness: a review routed to a pool no session is draining is
 itself the stall, not a healthy hold, so the suppression turns on a live worker
 (`ownerLive`/`wfLive`), not on the route `pr_machine` reads as `progressing`. A
-wedge, a demand, a takeaway or a human route already owns the row and names it, so
-the signal defers to each; it is a merge anchor either way, so it reads in the
-`review` band beside the wedged pre-open rows.
+demand, a takeaway or a human route already owns the row and names it, so the
+signal defers to each; it is a merge anchor either way, so it reads in the
+`review` band beside the other pre-open rows.
 
 **`pr_conversation` reads the recorded position.** `asking` is the demand edge,
 rendered wherever it is there. `quiet`, `outstanding` and `answered` are read

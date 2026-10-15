@@ -62,8 +62,9 @@
 #   leaves the line where it was, a later lift moves it on, and it never moves
 #   back; a retry carries out what was recorded.
 # The resume block, extracted from mol-polecat-work, stamps the start and the
-# scope and clears the last round's audit before its merge, and the filers'
-# rejection prefixes it reads are pinned.
+# scope and clears the last round's audit before its merge, and keeps the
+# rejection while that merge stops on a conflict; the filers' rejection
+# prefixes it reads are pinned.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -946,8 +947,8 @@ store "[$(child MI12 ",\"rejection_reason\":\"stale base at head sha-1: PR#1 con
 eq "$(meta MI12 bring_current_from)" "$A" "the stamp is the PR head the round started from"
 eq "$(meta MI12 bring_current_scope)" "merge-only" "…a stale-base rejection makes the round merge-only"
 eq "$(meta MI12 conflict_audit)" "<absent>" "…the last round's audit is cleared"
-eq "$(meta MI12 rejection_reason)" "<absent>" "…and the resume cleared the rejection as before"
 eq "$(git -C "$R" diff --name-only --diff-filter=U)" "v.txt" "the merge it ran stopped on the conflict"
+eq "$(meta MI12 rejection_reason)" "stale base at head sha-1: PR#1 conflicts with main." "…and the rejection stays until that merge concludes"
 resolve v.txt 'x=2\n'
 H=$(git -C "$R" rev-parse HEAD)
 fresh
@@ -977,7 +978,7 @@ for flag in --bead --path --rating --collided --resolution --check; do
   grep -q -- "      $flag) " "$HERE/bring-current-audit.sh" && ok "…$flag is one the audit script's add reads" || bad "bring-current-audit.sh add does not read $flag"
 done
 
-echo "# the stop-and-ask block asks once, aborts the merge, pushes nothing, parks or holds, and drains"
+echo "# the stop-and-ask block asks once, aborts the merge, pushes nothing, parks or ends the run, and drains"
 UNRES=$(awk '/# >>> bring-current-unresolvable$/ {f=1; next} /# <<< bring-current-unresolvable$/ {f=0} f' "$ROOT/formulas/mol-polecat-work.toml" \
   | sed -e 's/"<file>"/"v.txt"/' \
         -e 's/"<the two intents that met>"/"main set x to 3 while the branch set it to 2"/' \
@@ -988,13 +989,18 @@ hasnt "$UNRES" "git push" "the block pushes nothing"
 PK="$TMP/askpack/assets/scripts"; mkdir -p "$PK"
 cat > "$PK/bring-current-audit.sh" <<'S'
 #!/usr/bin/env bash
+if [ "${1:-}" = "anchor" ]; then printf '%s\n' "${ASK_ANCHOR:-ANC}"; exit "${ANCHOR_RC:-0}"; fi
 printf 'ASK %s\n' "$*" >> "${ASK_LOG:?}"; exit "${ASK_RC:-0}"
 S
-cat > "$PK/molecule-hold.sh" <<'S'
+cat > "$PK/await-ruling.sh" <<'S'
 #!/usr/bin/env bash
-printf 'HOLD %s\n' "$*" >> "${ASK_LOG:?}"; exit "${HOLD_RC:-0}"
+printf 'AWAIT %s\n' "$*" >> "${ASK_LOG:?}"; exit "${AWAIT_RC:-0}"
 S
-chmod +x "$PK/bring-current-audit.sh" "$PK/molecule-hold.sh"
+cat > "$PK/run-cancel.sh" <<'S'
+#!/usr/bin/env bash
+printf 'CANCEL %s\n' "$*" >> "${ASK_LOG:?}"; exit "${CANCEL_RC:-0}"
+S
+chmod +x "$PK/bring-current-audit.sh" "$PK/await-ruling.sh" "$PK/run-cancel.sh"
 export ASK_LOG="$TMP/ask.log"
 unres() { ( cd "$R" && GC_PACK_DIR="$TMP/askpack" WORK_BEAD_ID="$1" bash -c "$UNRES" ) >/dev/null 2>&1; }
 R="$MODIFY_R"; A="$MODIFY_A"; restart; bring
@@ -1014,8 +1020,23 @@ store "[$(child MI21)]"
 : > "$STUB_GC_LOG"; : > "$ASK_LOG"
 ( cd "$R" && GC_PACK_DIR="$TMP/askpack" WORK_BEAD_ID=MI21 CLAIMED_STEP_BEAD_ID=ST1 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
 eq "$rc" "0" "a molecule's step: the block exits 0"
-has "$(cat "$ASK_LOG")" "HOLD --step mol-polecat-work.workspace-setup --bead ST1" "the molecule is held at the step"
+has "$(cat "$ASK_LOG")" "AWAIT MI21 --key bring-current-question.MI21 --subject ANC --formula mol-polecat-work" "the work bead waits on the question's visit, filed on its anchor"
+has "$(cat "$ASK_LOG")" "CANCEL --step mol-polecat-work.workspace-setup --bead ST1" "…and the run is cancelled at the step"
+eq "$(sed -n 's/ .*//p' "$ASK_LOG" | tr '\n' ';')" "ASK;AWAIT;CANCEL;" "…in that order: the question, the wait, the cancel"
 eq "$(meta MI21 gc.routed_to)" "<absent>" "…and the bead is not parked as well"
+restart; bring
+store "[$(child MI23)]"
+: > "$STUB_GC_LOG"; : > "$ASK_LOG"
+( cd "$R" && AWAIT_RC=1 GC_PACK_DIR="$TMP/askpack" WORK_BEAD_ID=MI23 CLAIMED_STEP_BEAD_ID=ST1 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
+eq "$rc" "1" "a molecule's step whose wait does not land exits 1"
+hasnt "$(cat "$ASK_LOG")" "CANCEL" "…and cancels nothing"
+hasnt "$(cat "$STUB_GC_LOG")" "drain-ack" "…and does not drain"
+restart; bring
+store "[$(child MI24)]"
+: > "$STUB_GC_LOG"; : > "$ASK_LOG"
+( cd "$R" && CANCEL_RC=1 GC_PACK_DIR="$TMP/askpack" WORK_BEAD_ID=MI24 CLAIMED_STEP_BEAD_ID=ST1 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
+eq "$rc" "1" "a molecule's step whose cancel does not land exits 1"
+hasnt "$(cat "$STUB_GC_LOG")" "drain-ack" "…and does not drain"
 restart; bring
 store "[$(child MI22)]"
 : > "$STUB_GC_LOG"; : > "$ASK_LOG"

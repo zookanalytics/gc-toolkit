@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# signoff.sh — the single writer of check verdicts (component-model I7: one
-# audited writer for check.<gate> markers). Run once by the review agent after
-# mol-review's review step produced a verdict:
+# signoff.sh — the single writer of check verdicts (component-model I7). Run
+# once by the review agent after mol-review's review step produced a verdict:
 #   signoff.sh --review-bead <id> --verdict approve|request-changes
 #              [--notes-file <path>] [--reviewed-oid <oid>] [--needs-you <text>]
 # The posted artifact opens with one line, the same for every check: the check
@@ -17,26 +16,27 @@
 # carries a reviewed_oid, so recording it here is what lets an approve close back
 # the lane.
 # approve: post the artifact (gh pr review --comment post-open; review-bead
-# notes pre-open), stamp check.<name>=green on the anchor, and dismiss the
-# city's own superseded CHANGES_REQUESTED review. request-changes: clear the
-# marker, returning the lane to unreviewed, and file ONE routed rework child
-# through rework-child.sh.
+# notes pre-open), dismiss the city's own superseded CHANGES_REQUESTED review,
+# and close the review bead signoff_verdict=approve, the record the lane's
+# green derives from. request-changes: file ONE routed rework child through
+# rework-child.sh, with the reviewer's findings beside it and the lane's
+# validation pass, then close the review bead signoff_verdict=request-changes.
 # Convergence is judged, not counted. The validator rules whether a further
 # whole-diff review is warranted once the must-fix set closes
 # (specs/tk-ztapg/review-cycle-architecture.md), so request-changes files a
 # rework child on every round and this script bounds none.
 # The city never approves its own PRs: nothing here ever passes --approve.
-# A lane state is a state of the lane, never a claim about a commit: the marker
-# is one bare word, a verdict binds to no oid, and a commit landing on the
-# branch neither stales a verdict nor buys a review. The reviewed oid survives
-# as the artifact's audit trail and as the dispatch pin mol-review reads.
+# A lane state is a state of the lane, never a claim about a commit: a verdict
+# binds to no oid, and a commit landing on the branch neither stales a verdict
+# nor buys a review. The reviewed oid survives as the artifact's audit trail and
+# as the dispatch pin mol-review reads.
 # The pin still names real content, though: commits added on top of it leave it
 # reachable and change nothing here, but a rewrite that drops it from the
 # branch (rebase, amend, force-push) means mol-review read and tested a commit
-# nobody can merge. Both verdicts are refused on a gone pin — no marker, no
-# rework, no round spent — and the review bead is closed gc.outcome=superseded
-# instead of recorded, so gate-ensure's in-flight probe stops seeing it and
-# pours a fresh review at the live head next pass.
+# nobody can merge. Both verdicts are refused on a gone pin, with no verdict
+# recorded and no rework filed, and the review bead is closed
+# gc.outcome=superseded instead of recorded, so gate-ensure's in-flight probe
+# stops seeing it and pours a fresh review at the live head next pass.
 # Both are refused on an already-closed review bead: signoff closes the bead
 # itself, last, so a closed one was recorded or retired before it was judged.
 # Callers: mol-review's verdict-and-drain step (the reviewing polecat).
@@ -67,8 +67,7 @@ SCRIPT_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
 REWORK_CHILD="$HERE/rework-child.sh"
 # The single writer of the workflow-owned `status:` PR label. A verdict is the
 # event-precise flip: request-changes sets the PR working (a rework child now
-# stands on it), the cap park sets needs-attention, and an approve reconciles to
-# the current state. Post-open only.
+# stands on it), and an approve reconciles to the current state. Post-open only.
 PR_STATUS_LABEL="${GC_PR_STATUS_LABEL_TOOL:-$HERE/pr-status-label.sh}"
 # The dispatch note carried by the validation pass a request-changes verdict
 # opens, so the validator polecat that claims it names the method. Same builder
@@ -112,11 +111,11 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
   --reviewed-oid the commit the review read; default: the review bead's own
                  reviewed_oid (stamped at dispatch), else the live head of the
                  anchor's branch (git ls-remote origin <branch>). It names the
-                 commit in the posted artifact; it does not bind the marker,
-                 which is a bare lane state — except that a pin the branch no
-                 longer carries (rewritten out from under it) is refused, not
-                 recorded. Whichever source wins is written back to the review
-                 bead as the commit this verdict judged.
+                 commit in the posted artifact and binds the verdict to no
+                 head, except that a pin the branch no longer carries
+                 (rewritten out from under it) is refused, not recorded.
+                 Whichever source wins is written back to the review bead as
+                 the commit this verdict judged.
   --add-gates    checks to union into the anchor's check_set (triage only, with
                  --verdict approve). A set union with read-back that can never
                  remove a declared check, validated against the check index at
@@ -253,23 +252,11 @@ file_findings() { # <anchor> <lane> <findings-file>
   done < <(jq -c '.[]?' "$ff" 2>/dev/null)
 }
 
-# Both verbs write to the anchor; these two read and write it.
-stamp_anchor() { # <key> <value> [note]: write, read back, exit 2 when it did not stick
-  local args=(--set-metadata "$1=$2")
-  [ $# -lt 3 ] || args+=(--append-notes "$3")
-  gc bd update "$ANCHOR" "${args[@]}" >/dev/null 2>&1 || true
-  local got; got=$(row_meta "$(bd_json show "$ANCHOR")" "$1")
-  if [ "$got" != "$2" ]; then
-    warn "$1 did not read back on anchor $ANCHOR (got '${got:-}', want '$2'); review bead left OPEN so the check stays owed"
-    exit 2
-  fi
-}
-
 REVIEW_ROW=$(bd_json show "$REVIEW_BEAD")
 is_rows "$REVIEW_ROW" || { warn "review bead $REVIEW_BEAD does not resolve; nothing written"; exit 1; }
 
-# A verdict answering a closed bead may not clear a marker or spend a round:
-# the dispatch it answers was already recorded, or retired unjudged.
+# A verdict answering a closed bead records nothing: the dispatch it answers was
+# already recorded, or retired unjudged.
 REVIEW_STATUS=$(printf '%s' "$REVIEW_ROW" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null)
 if [ "$REVIEW_STATUS" = "closed" ]; then
   warn "review bead $REVIEW_BEAD is already closed (gc.outcome='$(row_meta "$REVIEW_ROW" gc.outcome)'); refusing — a retired dispatch records no verdict. Nothing written; re-dispatch the check if it is still owed."
@@ -279,7 +266,7 @@ CHECK_NAME=$(row_meta "$REVIEW_ROW" check_name)
 [ -n "$CHECK_NAME" ] || CHECK_NAME=correctness
 
 # --add-gates carries triage's classification, so it is recorded only by a triage
-# approve. Refuse anything else before a marker is touched.
+# approve. Refuse anything else before anything is written.
 if [ -n "$ADD_GATES" ]; then
   [ "$VERDICT" = "approve" ] || { warn "--add-gates carries a classification, which only an approve verdict records; nothing written"; exit 1; }
   [ "$CHECK_NAME" = "$TRIAGE_GATE" ] || { warn "only the '$TRIAGE_GATE' check may widen a check_set (this review is '$CHECK_NAME'); nothing written"; exit 1; }
@@ -289,7 +276,7 @@ fi
 # and, when it does, the modality that conveys it. A demo verdict without one is
 # refused rather than recorded without the decision it exists to make, and no
 # other check records one. none is approve-only: a check that found no visual
-# needed has nothing to block on. Refused before a marker is touched.
+# needed has nothing to block on. Refused before anything is written.
 #
 # --visual-fallback-from records that the visual delivered stands in for the
 # modality that fits, which could not be produced here. A fallback is cheaper
@@ -329,8 +316,8 @@ elif [ -n "$VISUAL" ] || [ -n "$VISUAL_FALLBACK" ]; then
 fi
 
 # The anchor the check lands on: the durable anchor_bead stamp first, the
-# blocks edge second. Unresolvable is a refusal — a verdict with nowhere to
-# record its marker must not write anything.
+# blocks edge second. Unresolvable is a refusal — a verdict with no anchor to
+# land on must not write anything.
 ANCHOR=$(row_meta "$REVIEW_ROW" anchor_bead)
 if [ -z "$ANCHOR" ]; then
   ANCHOR=$(bd_json dep list "$REVIEW_BEAD" --direction=up -t blocks \
@@ -423,9 +410,8 @@ BRANCH=$(row_meta "$ANCHOR_ROW" branch)
 # reviewed_oid the DISPATCH pinned on the review bead (gate-ensure/pr-facts
 # stamp the live head at dispatch time); only then the live head. It names the
 # commit in the posted artifact and in the pre-open record, so a dispatch pin
-# wins over a live head read after the fact. The lane state it accompanies is
-# not bound to it: the verdict is about the lane, and the merge compares no
-# marker to a head.
+# wins over a live head read after the fact. The verdict is about the lane and
+# is not bound to it, and the merge compares no verdict to a head.
 REVIEWED_OID="$OID_OVERRIDE"
 [ -n "$REVIEWED_OID" ] || REVIEWED_OID=$(row_meta "$REVIEW_ROW" reviewed_oid)
 
@@ -455,8 +441,8 @@ esac
 
 # Answers on | gone | unknown for whether <oid> is still in the branch's
 # history. Commits added on top keep it 'on' — the pin still names real
-# content, and no marker compares to a head, so a grown branch is not this
-# check's business. Only a rewrite makes it 'gone'. Unknown proceeds: a probe
+# content, and nothing compares a verdict to a head, so a grown branch is not
+# this check's business. Only a rewrite makes it 'gone'. Unknown proceeds: a probe
 # that cannot reach the remote must not discard a review round that happened.
 oid_on_branch() { # <oid> <live-head>
   local oid="$1" live="${2:-}" base rc
@@ -487,7 +473,7 @@ if [ "$(oid_on_branch "$REVIEWED_OID" "$LIVE_HEAD")" = "gone" ]; then
   # and are not this check's business — and it is not a failure to retry: the
   # review bead is closed superseded so gate-ensure's in-flight probe stops
   # seeing it and pours a fresh review at the live head next pass. Neither
-  # verdict is recorded, no marker is touched, no round is spent.
+  # verdict is recorded.
   #
   # mol-review re-reads the dispatch pin on the next claim, so a dead one left
   # in place would re-review the same departed commit — clear only the bead's
@@ -510,7 +496,7 @@ if [ "$(oid_on_branch "$REVIEWED_OID" "$LIVE_HEAD")" = "gone" ]; then
     fi
   fi
   gc bd update "$REVIEW_BEAD" --append-notes \
-    "signoff refused a verdict at $REVIEWED_OID: that commit has left branch '${BRANCH:-?}', now at ${LIVE_HEAD:-unknown}. No marker written, no round spent; closing this review as superseded so gate-ensure pours a fresh one at the live head." \
+    "signoff refused a verdict at $REVIEWED_OID: that commit has left branch '${BRANCH:-?}', now at ${LIVE_HEAD:-unknown}. No verdict recorded; closing this review as superseded so gate-ensure pours a fresh one at the live head." \
     >/dev/null 2>&1 || true
   gc bd update "$REVIEW_BEAD" --set-metadata gc.outcome=superseded --status=closed >/dev/null 2>&1 || true
   SUPERSEDED_ROW=$(bd_json show "$REVIEW_BEAD")
@@ -521,7 +507,7 @@ if [ "$(oid_on_branch "$REVIEWED_OID" "$LIVE_HEAD")" = "gone" ]; then
     exit 2
   fi
   warn "head moved: reviewed oid $REVIEWED_OID has left branch '${BRANCH:-?}', now at $LIVE_HEAD. No verdict written — review $REVIEW_BEAD closed as superseded; gate-ensure pours a fresh review at the live head."
-  echo "signoff: $REVIEW_BEAD superseded — $REVIEWED_OID left branch '${BRANCH:-?}' (now at ${LIVE_HEAD:-unknown}); no marker written, no round spent"
+  echo "signoff: $REVIEW_BEAD superseded — $REVIEWED_OID left branch '${BRANCH:-?}' (now at ${LIVE_HEAD:-unknown}); no verdict recorded"
   exit 0
 fi
 
@@ -578,20 +564,24 @@ compose_artifact() {
 # only evidence a city verdict leaves: a lane state names no commit and nothing
 # here ever posts an APPROVED GitHub review, so a closed review bead carrying
 # anchor_bead, reviewed_oid, check_name and the signoff_verdict close_review()
-# stamps below is what lane-state.sh derives a local backing's green from — and
-# what doctor/check-gate-marker-provenance's marker arm resolves a green marker
-# against. Where the artifact was posted says where the findings are
-# read, never which commit was judged, so the record does not vary with it.
-# request-changes records it too: it leaves no marker, but the round it spent
-# is part of the same ledger. Because the record is written first, a store that
-# will not take it costs a re-run instead of a marker nothing accounts for. A
-# demo verdict's visual decision rides in the same write, so the record names
-# what the check decided as well as the commit it decided on. So does its
-# fallback, which the write clears when this verdict names none, because a
-# retried verdict must not keep an earlier attempt's.
+# stamps below is what lane-state.sh derives a local backing's green from, and
+# what doctor/check-gate-marker-provenance audits. Where the artifact was posted
+# says where the findings are read, never which commit was judged, so the record
+# does not vary with it. request-changes records it too: gate-ensure.sh's
+# per-head bar reads it back off the closed review, so no second whole-diff
+# review pours at a head this one judged. Because the record is written first, a
+# store that will not take it costs a re-run instead of a posted verdict that
+# backs nothing. A demo verdict's visual decision rides in the same write, so
+# the record names what the check decided as well as the commit it decided on.
+# So does its fallback, which the write clears when this verdict names none,
+# because a retried verdict must not keep an earlier attempt's.
+# A review whose anchor resolved through the blocks edge alone names no
+# anchor_bead, and lane-state.sh finds an anchor's reviews only by that key and
+# the membership edge. Such a review is joined to its anchor first and takes
+# the key in the same write, so its close backs the lane it judged.
 post_artifact() {
   compose_artifact
-  local rec=(--set-metadata "reviewed_oid=$REVIEWED_OID")
+  local rec=(--set-metadata "reviewed_oid=$REVIEWED_OID") adopt=""
   if [ -n "$VISUAL" ]; then
     rec+=(--set-metadata "visual=$VISUAL")
     if [ -n "$VISUAL_FALLBACK" ]; then
@@ -600,53 +590,66 @@ post_artifact() {
       rec+=(--unset-metadata visual_fallback_from)
     fi
   fi
+  if [ -z "$(row_meta "$REVIEW_ROW" anchor_bead)" ]; then
+    if ! bd_anchor_link "$ANCHOR" "$REVIEW_BEAD"; then
+      warn "review $REVIEW_BEAD could not be joined to anchor $ANCHOR; nothing posted, review left open for a retry"
+      exit 2
+    fi
+    rec+=(--set-metadata "anchor_bead=$ANCHOR")
+    adopt=1
+  fi
   gc bd update "$REVIEW_BEAD" "${rec[@]}" >/dev/null 2>&1 || true
   local row got
   row=$(bd_json show "$REVIEW_BEAD")
   got=$(row_meta "$row" reviewed_oid)
   if [ "$got" != "$REVIEWED_OID" ]; then
-    warn "the reviewed commit did not read back on $REVIEW_BEAD (reviewed_oid='$got', want '$REVIEWED_OID'); nothing posted and no marker stamped, review left open for a retry"
+    warn "the reviewed commit did not read back on $REVIEW_BEAD (reviewed_oid='$got', want '$REVIEWED_OID'); nothing posted, review left open for a retry"
+    exit 2
+  fi
+  got=$(row_meta "$row" anchor_bead)
+  if [ -n "$adopt" ] && [ "$got" != "$ANCHOR" ]; then
+    warn "the anchor did not read back on $REVIEW_BEAD (anchor_bead='$got', want '$ANCHOR'); nothing posted, review left open for a retry"
     exit 2
   fi
   got=$(row_meta "$row" visual)
   if [ -n "$VISUAL" ] && [ "$got" != "$VISUAL" ]; then
-    warn "the visual decision did not read back on $REVIEW_BEAD (visual='$got', want '$VISUAL'); nothing posted and no marker stamped, review left open for a retry"
+    warn "the visual decision did not read back on $REVIEW_BEAD (visual='$got', want '$VISUAL'); nothing posted, review left open for a retry"
     exit 2
   fi
   got=$(row_meta "$row" visual_fallback_from)
   if [ -n "$VISUAL" ] && [ "$got" != "$VISUAL_FALLBACK" ]; then
-    warn "the visual fallback did not read back on $REVIEW_BEAD (visual_fallback_from='$got', want '$VISUAL_FALLBACK'); nothing posted and no marker stamped, review left open for a retry"
+    warn "the visual fallback did not read back on $REVIEW_BEAD (visual_fallback_from='$got', want '$VISUAL_FALLBACK'); nothing posted, review left open for a retry"
     exit 2
   fi
   if [ -n "$POST_OPEN" ]; then
     # COMMENT for both verdicts, NEVER --approve: approval is external/human,
-    # and the merge is held by the recorded marker, not by a bot review.
+    # and the merge is held by the lane state the recorded verdict derives, not
+    # by a bot review.
     "$PR_POST" review --repo "$PR_REPO_Q" --pr "$PR_NUMBER" --body-file "$BODY_FILE" >/dev/null 2>&1 \
-      || warn "could not post the review comment on PR#$PR_NUMBER; the recorded marker still governs"
+      || warn "could not post the review comment on PR#$PR_NUMBER; the recorded verdict still governs"
   else
     # Pre-open, the bead's notes are the only copy of the body. pr-open.sh
     # replays them into the PR it opens, and on request-changes they are the
     # findings the rework child is pointed at. So this append is verified on
     # the same terms as the record above: the trailer line names this anchor,
     # check and commit, and nothing but this function writes it. Absent, the
-    # append did not land, and exiting here leaves no marker stamped and no
+    # append did not land, and exiting here leaves the review open, with no
     # rework filed against findings nobody can read.
     gc bd update "$REVIEW_BEAD" --append-notes "$(cat "$BODY_FILE")" >/dev/null 2>&1 || true
     local trailer landed
     trailer="Anchor: $ANCHOR — check.$CHECK_NAME @ $REVIEWED_OID"
     landed=$(row_field "$(bd_json show "$REVIEW_BEAD")" notes)
     if ! grep -qF -- "$trailer" <<< "$landed"; then
-      warn "the verdict body did not read back on $REVIEW_BEAD (its notes carry no '$trailer'); no marker stamped and no rework filed, review left open for a retry"
+      warn "the verdict body did not read back on $REVIEW_BEAD (its notes carry no '$trailer'); no rework filed, review left open for a retry"
       exit 2
     fi
   fi
 }
 
 close_review() {
-  # signoff_verdict rides in the same write as the close: doctor's
-  # check-gate-marker-provenance reads it to tell an approving review bead from
-  # one that recorded request-changes, now that (anchor, lane) alone no longer
-  # carries an oid to key on.
+  # signoff_verdict rides in the same write as the close: lane-state.sh reads it
+  # to tell an approving review bead from one that recorded request-changes, and
+  # so does doctor's check-gate-marker-provenance.
   gc bd update "$REVIEW_BEAD" --set-metadata gc.outcome=recorded \
     --set-metadata "signoff_verdict=$VERDICT" --status=closed >/dev/null 2>&1 || true
   local row st oc sv
@@ -819,9 +822,9 @@ dismiss_superseded() {
 # A disposed anchor — pr-dispose.sh stamped gc.pr_close_disposition_kind on it when
 # the PR was withdrawn or superseded — awaits only pr-facts.sh's terminal close. A
 # verdict that lands in that window (a review dispatched before the disposal, ruling
-# after it) is moot: the PR will not ship, so stamping green, filing a rework child,
-# or opening a validation pass would each spawn work on a dead anchor, and the pass
-# would hang a blocks edge that holds the very close the disposal is waiting on. Write
+# after it) is moot: the PR will not ship, so a rework child or a validation pass
+# would spawn work on a dead anchor, and the pass would hang a blocks edge that
+# holds the very close the disposal is waiting on. Write
 # nothing to the anchor. Close the review the caller drains behind as moot — not
 # recorded, so it backs no lane green (lane-state.sh), and not superseded, so
 # gate-ensure pours no fresh review at the live head — then exit. pr-facts.sh
@@ -831,20 +834,20 @@ dismiss_superseded() {
 # unresolvable probe leaves the review open rather than falling through.
 DISPOSED_ROW=$(bd_json show "$ANCHOR")
 if ! is_rows "$DISPOSED_ROW"; then
-  warn "disposition re-read of anchor $ANCHOR returned no row; a failed read cannot be told from an undisposed anchor, so refusing to stamp a marker or file rework on a possibly-disposed anchor. Review $REVIEW_BEAD left open for a retry."
+  warn "disposition re-read of anchor $ANCHOR returned no row; a failed read cannot be told from an undisposed anchor, so refusing to record the verdict or file rework on a possibly-disposed anchor. Review $REVIEW_BEAD left open for a retry."
   exit 2
 fi
 DISPOSED=$(row_meta "$DISPOSED_ROW" "gc.pr_close_disposition_kind")
 if [ -n "$DISPOSED" ]; then
   gc bd update "$REVIEW_BEAD" --set-metadata gc.outcome=moot \
-    --append-notes "signoff: $VERDICT verdict is MOOT — anchor $ANCHOR was disposed (gc.pr_close_disposition_kind=$DISPOSED) before this verdict was ruled. No marker stamped, no rework filed, no validation pass opened; pr-facts.sh consummates the disposition." \
+    --append-notes "signoff: $VERDICT verdict is MOOT — anchor $ANCHOR was disposed (gc.pr_close_disposition_kind=$DISPOSED) before this verdict was ruled. No verdict recorded, no rework filed, no validation pass opened; pr-facts.sh consummates the disposition." \
     --status=closed >/dev/null 2>&1 || true
   DISPOSED_ST=$(row_field "$(bd_json show "$REVIEW_BEAD")" status)
   if [ "$DISPOSED_ST" != "closed" ]; then
     warn "anchor $ANCHOR is disposed (gc.pr_close_disposition_kind=$DISPOSED) but closing review $REVIEW_BEAD as moot did not read back (status='$DISPOSED_ST'); review left open for a retry"
     exit 2
   fi
-  echo "signoff: anchor $ANCHOR is disposed (gc.pr_close_disposition_kind=$DISPOSED); $VERDICT verdict is moot — no marker stamped, no rework filed, no validation pass opened. Review $REVIEW_BEAD closed."
+  echo "signoff: anchor $ANCHOR is disposed (gc.pr_close_disposition_kind=$DISPOSED); $VERDICT verdict is moot — no verdict recorded, no rework filed, no validation pass opened. Review $REVIEW_BEAD closed."
   exit 0
 fi
 
@@ -874,9 +877,9 @@ index_has_check() { # <check>
 
 # Triage's classification: union the added checks into check_set and record one
 # triage-add note per check added, in ONE write with read-back. Runs BEFORE the
-# artifact and the green stamp, so a refused or unpersisted widening leaves
-# check.triage absent and the check still owed — the opposite order would read
-# green over a narrower set than triage decided on.
+# artifact and the review's close, so a refused or unpersisted widening leaves
+# the triage review open and the check still owed — the opposite order would
+# derive triage green over a narrower set than triage decided on.
 WIDEN_SUMMARY=""
 apply_triage_decision() {
   [ -n "$ADD_GATES" ] || return 0
@@ -935,8 +938,8 @@ $tok"
 # Triage's ruling on the bring-current round: recorded and carried out by the
 # guard's `decide` (the lanes to run again, the dismissal), AFTER the widening so
 # a lane added on this call is reopened with the rest, and BEFORE the artifact
-# and the green stamp, so a ruling that did not land leaves the review open and
-# the round still owed. The artifact then carries the round's account under its
+# and the review's close, so a ruling that did not land leaves the review open
+# and the round still owed. The artifact then carries the round's account under its
 # opening line, and a ruling that lifts the approval gives that line its ask,
 # both rendered from the anchor's record.
 apply_round_decision() {
@@ -961,26 +964,9 @@ apply_round_decision() {
 }
 
 if [ "$VERDICT" = "approve" ]; then
-  # A legacy `exception@<oid>` marker is an operator-granted gate exception that
-  # predates this cadence's park shape. migrate-lane-states.sh is what rewrites
-  # it — to merge_hold=true plus a board visit — over a store still carrying one,
-  # and until that runs the marker is not lane vocabulary this verdict may read
-  # or overwrite: stamping green over it would silently release a park a human is
-  # relying on, on an anchor no reader here has re-classified. Refuse instead of
-  # guessing, before anything is posted or stamped — nothing is written, the
-  # review is left open, and the migration is named. This refusal retires with
-  # the marker grammar itself, once the legacy-surface endgame lands.
-  CURRENT_MARKER=$(row_meta "$(bd_json show "$ANCHOR")" "check.$CHECK_NAME")
-  case "$CURRENT_MARKER" in
-    exception@*)
-      warn "check.$CHECK_NAME on $ANCHOR is '$CURRENT_MARKER', a legacy gate exception awaiting migrate-lane-states.sh; refusing to stamp green over it. Nothing written — run migrate-lane-states.sh to rewrite this marker to merge_hold=true plus a board visit, then re-submit this verdict. Review bead $REVIEW_BEAD left open."
-      exit 2
-      ;;
-  esac
   apply_triage_decision
   apply_round_decision
   post_artifact
-  stamp_anchor "check.$CHECK_NAME" green
   dismiss_superseded
   close_review
   # The verdict is in; reconcile rather than assert a value, so an open rework
@@ -997,20 +983,11 @@ if [ "$VERDICT" = "approve" ]; then
   # if the anchor merges or closes before that pass, on gate-ensure's orphaned
   # sweep, which sheds a closed anchor's still-unvalidated findings (no validator
   # runs on closed work), so the deferral strands nothing.
-  echo "signoff: check.$CHECK_NAME=green recorded on $ANCHOR at $REVIEWED_OID$WIDEN_SUMMARY; review $REVIEW_BEAD closed"
+  echo "signoff: $CHECK_NAME approve recorded on $ANCHOR at $REVIEWED_OID$WIDEN_SUMMARY; review $REVIEW_BEAD closed"
   exit 0
 fi
 
 post_artifact
-
-# This lane owes a fresh look once the rework lands, so clear the marker — the
-# lane returns to unreviewed — then file ONE child.
-gc bd update "$ANCHOR" --unset-metadata "check.$CHECK_NAME" >/dev/null 2>&1 || true
-GOT=$(row_meta "$(bd_json show "$ANCHOR")" "check.$CHECK_NAME")
-if [ -n "$GOT" ]; then
-  warn "check.$CHECK_NAME still reads '$GOT' on $ANCHOR after the clear; review left open for a retry"
-  exit 2
-fi
 
 # File the reviewer's objections as findings beside the fix unit, deduped by
 # finding.key, so one objection cannot be filed twice across rounds and each
@@ -1079,6 +1056,6 @@ close_review
 if [ "$FIX_STATE" = in-flight ]; then
   echo "signoff: request-changes recorded on $ANCHOR — rework $FIX_BEAD already dispatched to $FIX_POOL"
 else
-  echo "signoff: request-changes recorded on $ANCHOR — check.$CHECK_NAME cleared (lane unreviewed), rework $FIX_BEAD slung mol-polecat-work to $FIX_POOL"
+  echo "signoff: request-changes recorded on $ANCHOR — rework $FIX_BEAD slung mol-polecat-work to $FIX_POOL"
 fi
 exit 0

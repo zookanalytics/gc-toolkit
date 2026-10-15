@@ -196,6 +196,23 @@ type Anchor struct {
 	// readers apply only to rows [humanGated] accepts, and for an epic or a
 	// convoy that route is the only way in.
 	WaitingUnknown bool `json:"waiting_unknown,omitempty"`
+
+	// Reviews is the anchor's review beads, open and closed: each carries
+	// task_kind=review and names this anchor in anchor_bead. A lane's green
+	// derives from them ([laneGreen]). The beads source gathers them for a live
+	// merge anchor at pre_open_gate, the one row whose stall signal reads a
+	// lane's green, the way bd-lib.sh reads an anchor's children in a store
+	// marked joined: the live ones by anchor_bead, and the closed ones through
+	// the anchor's inbound edges ([source.BeadsSource.readReviews]).
+	//
+	// ReviewsUnknown says the source could not read them, so an empty Reviews
+	// is an absence of knowledge, not a lane no review backs. The beads source
+	// sets it in a store not marked joined, where the edges do not answer for
+	// the closed reviews, and when a read the reviews come from fails. The
+	// supervisor backend reads no closed bead and sets it on every
+	// metadata-keyed row it serves.
+	Reviews        []Child `json:"reviews,omitempty"`
+	ReviewsUnknown bool    `json:"reviews_unknown,omitempty"`
 }
 
 // Blocker is one `blocks` dependency of an anchor, as the gather read it.
@@ -375,7 +392,7 @@ type Tile struct {
 	PRBranch string `json:"pr_branch"`
 
 	// PRMachine is what the merge cadence can do with this anchor on its next
-	// pass: progressing, settled, wedged-exception, blocked, or unknown.
+	// pass: progressing, settled, blocked, or unknown.
 	//
 	// `blocked` is a hold no automated actor will clear and no review verdict is
 	// owed on — an unresolved required review thread, a base gone BEHIND, or an

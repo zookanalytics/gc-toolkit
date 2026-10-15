@@ -38,10 +38,12 @@
 #   bring-current-audit.sh ask --bead <id> --path <file> [--path <file> ...]
 #       --collided <text> --question <text>
 #   bring-current-audit.sh show (--bead <id> | --anchor <id>)
+#   bring-current-audit.sh anchor --bead <id>
 #   bring-current-audit.sh render --anchor <id> --as comment|dismissal|ask
 # add records or replaces the entry for <file>. show prints the bead's entries,
-# or the anchor's stored record, as JSON. render prints a message composed from
-# the anchor's record; ask prints nothing when the ruling keeps the approval.
+# or the anchor's stored record, as JSON. anchor prints the bead `ask` files its
+# visit on. render prints a message composed from the anchor's record; ask
+# prints nothing when the ruling keeps the approval.
 # Sourced (BASH_SOURCE != $0), it defines its functions and runs nothing, for
 # bring-current-guard.sh.
 # Exit: 0 done · 1 a read or a write failed, or the input was refused, and
@@ -233,13 +235,14 @@ bca_render_question() { # <audit-json> <question-json> <bead> <anchor> <branch> 
       + (if ($e | length) > 0
          then "Resolved before the stop, not pushed:\n" + ($e | map("- `\(.path)`, \(.rating). Decided: \(.resolution | sentence)") | join("\n"))
          else "Nothing else was resolved before the stop." end) + "\n\n"
-      + "Your call: answer the question here. Record the answer in the notes of \($bead) as you release it to the polecat pool; the worker that resumes it merges \($target) in again with your answer."' 2>/dev/null
+      + "Your call: answer the question here, and record the answer in the notes of \($bead). Then release it: when \($bead) waits on this visit, closing the visit re-slings it, and when it is parked for a person, route it back to the polecat pool. The worker that resumes it merges \($target) in again with your answer."' 2>/dev/null
 }
 
 bca_usage() {
   echo "usage: bring-current-audit.sh add --bead <id> --path <file> --collided <text> --resolution <text> --check <text> --rating routine|judgment" >&2
   echo "       bring-current-audit.sh ask --bead <id> --path <file> [--path <file> ...] --collided <text> --question <text>" >&2
   echo "       bring-current-audit.sh show (--bead <id> | --anchor <id>)" >&2
+  echo "       bring-current-audit.sh anchor --bead <id>" >&2
   echo "       bring-current-audit.sh render --anchor <id> --as comment|dismissal|ask" >&2
   exit 2
 }
@@ -329,7 +332,11 @@ bca_cmd_ask() {
   msg=$(bca_render_question "$audit" "$q" "$bead" "$anchor" "$branch" "$target" "$head" "$num" "$url")
   [ -n "$msg" ] || { echo "bring-current-audit: the visit could not be composed; nothing filed" >&2; return 1; }
   key="bring-current-question.$bead"
-  if ! "$BCA_DIR/escalate.sh" --subject "$anchor" --key "$key" --message "$msg"; then
+  # The visit is what the caller waits on, so it has to be open. escalate.sh
+  # files nothing for a key a person closed moot or benign inside its verdict
+  # window, and an earlier round's question shares this key, so the window is
+  # off.
+  if ! GC_ESCALATE_VERDICT_WINDOW=0 "$BCA_DIR/escalate.sh" --subject "$anchor" --key "$key" --message "$msg"; then
     echo "bring-current-audit: the visit on $anchor did not land; the question is recorded on $bead, and nothing is held until a visit asks it" >&2
     return 1
   fi
@@ -363,6 +370,20 @@ bca_cmd_show() {
   printf '%s' "${a:-null}" | jq .
 }
 
+bca_cmd_anchor() {
+  local bead="" row
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --bead) bead="${2:-}"; shift 2 ;;
+      *) bca_usage ;;
+    esac
+  done
+  [ -n "$bead" ] || bca_usage
+  row=$(bd_json show "$bead")
+  printf '%s' "$row" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 || { echo "bring-current-audit: $bead could not be read" >&2; return 1; }
+  bca_anchor_of "$row" || { echo "bring-current-audit: the beads on $bead's branch could not be listed" >&2; return 1; }
+}
+
 bca_cmd_render() {
   local anchor="" as="" row rec out
   while [ $# -gt 0 ]; do
@@ -391,6 +412,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     add)    shift; bca_cmd_add "$@" ;;
     ask)    shift; bca_cmd_ask "$@" ;;
     show)   shift; bca_cmd_show "$@" ;;
+    anchor) shift; bca_cmd_anchor "$@" ;;
     render) shift; bca_cmd_render "$@" ;;
     *) bca_usage ;;
   esac
