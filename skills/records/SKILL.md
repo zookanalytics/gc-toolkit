@@ -1,0 +1,58 @@
+---
+name: records
+description: Use when you need to write down what was decided, what happened, or what a bead needs, so whoever reads it next inherits it. Covers recording an outcome or a finding in a bead's notes, summing up long notes with a current-state block, and setting the one-line headline the board shows for a bead. To ask a person to decide, use waits; for a durable document such as a spec or an analysis, use filing-documentation.
+compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
+---
+
+# Records: what a bead's next reader inherits
+
+A bead carries its own record. The next worker, sitting or person who reads it
+starts from what is written there, not from your context, which ends with your
+session. Each option says what the record means, who reads it, and the one
+writer that sends it.
+
+The writers are in the pack's `assets/scripts/`, the directory a converse
+sitting already has as `$CONV`. Anywhere else, find it once:
+
+```bash
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/gc-helm.sh" ] && { S="$c/assets/scripts"; break; }
+done
+```
+
+## Record an outcome on a bead
+
+The message is what was decided or found, why, and what changed. The next
+reader of the bead picks it up: a sitting primes from the bead's notes, and a
+worker reads them before it starts.
+
+Writer: `gc bd update <bead> --append-notes "<decision or finding, the reason, what changed>"`.
+
+Notes are append-only. `--notes` replaces the whole field and erases every
+note other writers left there, so never use it.
+
+When the notes have grown past a quick read, append a block headed
+`## Current state (<date>)`: where things stand, the decisions in force, and the
+open questions. The newest current-state block is the one in force, so a reader
+starts there.
+
+A bead's notes are operational state. A durable document, such as a spec, an
+analysis or a decision record, is a file in a repo, filed through the
+filing-documentation skill. A sitting writes no files, so it files a bead for
+the document instead (the work skill).
+
+## Set the headline the board shows
+
+The message is one sentence saying what the bead needs now. The helm board
+shows it as the bead's NEEDS cell, and `doctor/check-wait-is-an-edge` reads
+whether it names a wait.
+
+Writer: `"$S/gc-helm.sh" takeaway <bead> "<what it needs now, at most 140 characters>" --no-wait`
+when nothing is waiting on anything, or `--waiting-on <bead>` (repeatable) for
+each bead it waits on. Each named wait is also written as a `blocks` edge.
+Saying neither leaves a headline that parks the bead on prose, which the doctor
+reports.
+
+In a sitting, the hold and the sign-off write the subject's headline (the
+converse-hold and converse-settle steps). The one other headline a sitting
+writes is a stand-down, which stops work in flight (the work skill).
