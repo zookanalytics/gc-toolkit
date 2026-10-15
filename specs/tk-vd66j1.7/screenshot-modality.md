@@ -24,9 +24,9 @@ attaches one file.
 **The engine's browser, through a driver of the pack's own.** The demo agent's
 Playwright MCP launches Google Chrome, which this host does not have
 (tk-qrga4h5). The SprintShow engine's Playwright launches the
-chromium-headless-shell build that `rig-demo-capture.sh` already provisions, so
-the screenshot finds the engine where the video capture finds it and provisions
-the browser with the same command. Two shorter paths were set aside:
+chromium-headless-shell build that the video capture already provisions, so the
+screenshot uses the same engine and the same browser. Two shorter paths were set
+aside:
 
 - The engine's proof mode burns a caption into each frame, assembles an MP4,
   which needs ffmpeg, and keeps its frames only when a step fails or `--keep`
@@ -38,6 +38,20 @@ So `demo-screenshot.mjs` loads Playwright and the engine library from the engine
 directory. For a page it uses the engine's script parser, server seam, action
 runner and assertion checks. A page screenshot takes the script and the app
 target a video takes, and checks the same proofs.
+
+**One engine policy for both captures.** The arch review at fb0bd76f found
+that the screenshot had copied the video's engine lookup, package-name guard,
+dependency install and browser provisioning, so a fix to any of them needed the
+same edit in two scripts (finding tk-xrxhtxy). `assets/scripts/demo-engine-lib.sh`
+is now the one definition of that policy, and both captures source it. Each
+capture keeps what only it needs. The video fetches ffmpeg for a checkout and
+runs the engine's CLI. The screenshot holds Node to its driver's floor before
+anything is installed, and runs its driver. `demo-engine-lib.test.sh` checks
+the policy through both captures. It fails when either capture stops sourcing
+the library or runs one of its steps itself, and when any other script in
+`assets/scripts` finds the engine or provisions its browser. The finding named
+the two scripts; `skills/demo-capture/SKILL.md` still spells the same steps out
+for an agent working the engine by hand at a shell.
 
 **Terminal output.** The command runs with bash from `--cwd`, with stdout and
 stderr captured together and stdin closed. Its exit status is reported, not
@@ -82,11 +96,24 @@ Each PNG was opened and judged.
 | The engine's sample app, its own demo script with one assertion made false | page, `--selector '#board'` | 3 | The board reading "3 tasks · 1 done" against a script that asserted 2 done (1280x658 px). |
 
 `demo-screenshot.test.sh` runs the script's cases under `env -i` with stubs for
-node, npm, npx, gc and gh, and the driver's renderers in a real node. Each
-mutant of the two scripts turns it red, among them a dropped stale-PNG removal,
-an open stdin, a lost stderr, a skipped PNG check, a lost engine argument, a
-missing repository context, a greedy `--expand`, a carriage return that ends a
-line read as an empty redraw, and SGR sub-parameters read as parameters.
+node, npm, gc and gh, and the driver's renderers in a real node. Each mutant of
+the two scripts turns it red, among them a dropped stale-PNG removal, an open
+stdin, a lost stderr, a skipped PNG check, a lost engine argument, a missing
+repository context, a greedy `--expand`, a carriage return that ends a line
+read as an empty redraw, and SGR sub-parameters read as parameters.
+
+`demo-engine-lib.test.sh` runs the shared engine policy through both captures,
+under the same kind of stubs. Each mutant made when the library was extracted
+turned a suite red. The mutants dropped the package-name guard, skipped or
+stopped checking the dependency install and either browser install, sent an
+installer's output to stdout, and removed the npx check. They also made a
+capture run one of the library's steps itself or define its own resolver, ran a
+capture on the wrong engine, checked the screenshot's Node floor only after
+installing, broke the video's ffmpeg fetch, and added a script that provisions
+the browser on its own. A script that only names a provisioning command in a
+comment stays green. After the extraction, two captures ran live through the
+library on this host, both on the local engine checkout: a terminal screenshot,
+and a proof-mode video of the engine's sample app, six steps held.
 
 **Not proven live: the attach.** No PNG has been attached to a real PR in this
 city. `demo-deliver.sh` is unchanged, and the gh on this host (2.102.0)
