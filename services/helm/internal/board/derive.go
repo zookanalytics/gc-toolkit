@@ -1501,14 +1501,9 @@ func prNeeds(machine, approval, posture, reason string, ask *Blocker) string {
 
 // The pre-open state the stall signal reads. mergeResultPreOpenGate is the
 // merge_result of an anchor parked before its PR exists; pr-open.sh opens the PR
-// once every lane the anchor's check_set declares derives green. mdCheckPrefix
-// plus a lane names that lane's marker (check.correctness), and checkGreen is the
-// value signoff.sh stamps there when the lane's review approves and clears when a
-// review requests changes.
+// once every lane the anchor's check_set declares derives green.
 const (
 	mergeResultPreOpenGate = "pre_open_gate"
-	mdCheckPrefix          = "check."
-	checkGreen             = "green"
 
 	stallReasonNeverReviewed       = "never-reviewed"
 	stallReasonFindingsOpen        = "findings-open"
@@ -1528,10 +1523,12 @@ const preOpenStaleThresholdDays = 3
 // does not read green, and dates the stall for the owed clock.
 //
 // Every declared lane holds the PR, so the anchor is past its checks only once
-// each lane's marker reads green, and any lane name counts — a legacy codex lane
-// as much as correctness. A check_set that declares no lane is not a stalled
-// check: pr-open.sh opens none, off or approval alone without a review, and
-// gate-ensure.sh stamps the default over an empty one.
+// each lane derives green from the anchor's reviews ([laneGreen]), and any lane
+// name counts — a legacy codex lane as much as correctness. A check_set that
+// declares no lane is not a stalled check: pr-open.sh opens none, off or
+// approval alone without a review, and gate-ensure.sh stamps the default over
+// an empty one. Reviews the source could not read name no lane, so they fire
+// no stall.
 //
 // It fires only on the bare held shape — the one prOwed leaves with no cause of
 // its own. A demand or a settled-and-unapproved position already owns the row:
@@ -1555,12 +1552,11 @@ func preOpenCheckStall(a Anchor, blockers []Blocker, stale int, f Facts) (stalle
 		return false, time.Time{}, "", ""
 	}
 	lanes := checkLanes(a.Metadata[mdCheckSet])
-	if len(lanes) == 0 {
+	if len(lanes) == 0 || a.ReviewsUnknown {
 		return false, time.Time{}, "", ""
 	}
-	// Every lane reads green: pr-open.sh opens the PR on its next pass, so the
-	// anchor is about to leave this state, not stalled in it. A lane marker
-	// carries a bare state word, so a settled lane is an exact "green".
+	// Every lane derives green: pr-open.sh opens the PR on its next pass, so the
+	// anchor is about to leave this state, not stalled in it.
 	lane = firstUngreenLane(a, lanes)
 	if lane == "" {
 		return false, time.Time{}, "", ""
@@ -1581,7 +1577,7 @@ func preOpenCheckStall(a Anchor, blockers []Blocker, stale int, f Facts) (stalle
 // character, and drop the tokens that name no lane. none and off are the
 // checkless opt-out, and approval is met by a GitHub review, which cannot exist
 // before the PR does. The drop is case-insensitive; a surviving name keeps its
-// case, because it names a lane and that lane's marker.
+// case, because it names a lane and the check_name its reviews carry.
 func checkLanes(checkSet string) []string {
 	var lanes []string
 	for _, tok := range strings.Split(checkSet, ",") {
@@ -1594,11 +1590,11 @@ func checkLanes(checkSet string) []string {
 	return lanes
 }
 
-// firstUngreenLane returns the first of lanes whose check marker on a is not
-// checkGreen, or "" when every lane reads green.
+// firstUngreenLane returns the first of lanes that does not derive green from
+// a's reviews, or "" when every lane does.
 func firstUngreenLane(a Anchor, lanes []string) string {
 	for _, lane := range lanes {
-		if a.Metadata[mdCheckPrefix+lane] != checkGreen {
+		if !laneGreen(a.Reviews, lane) {
 			return lane
 		}
 	}

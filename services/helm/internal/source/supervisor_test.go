@@ -570,6 +570,9 @@ func TestSupervisorBackendReadsThePRAxes(t *testing.T) {
 	if len(a.Blockers) != 0 {
 		t.Error("no edges were resolved, so none are reported")
 	}
+	if !a.ReviewsUnknown || len(a.Reviews) != 0 {
+		t.Errorf("this backend reads no closed review bead and must say its reviews are unread: unknown=%v reviews=%v", a.ReviewsUnknown, a.Reviews)
+	}
 }
 
 // TestOpenBeadsTruncationIsReported: a scan that comes back short must SAY so.

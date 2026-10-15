@@ -81,8 +81,8 @@ index gap as an observation (below).
 ## Recording the decision
 
 One `signoff.sh` call carries the verdict and the widening together. The verdict
-is `approve`: triage passed at this commit, which is what makes `check.triage`
-green and lets the rest of the cadence proceed.
+is `approve`: triage passed at this commit, and the closed approve review is
+what derives the triage lane green and lets the rest of the cadence proceed.
 
 ```bash
 signoff.sh --review-bead "$REVIEW_BEAD" --verdict approve \
@@ -202,8 +202,8 @@ OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty
   say so in the verdict body and let that check hold it.
 - It never fixes anything, and it never touches the anchor other than through
   `signoff.sh`.
-- It never re-runs because the branch grew. Its verdict binds no marker to a
-  commit: an appended commit does not re-stale `check.triage`, and no pass
+- It never re-runs because the branch grew. Its verdict binds the lane to no
+  commit: an appended commit does not re-stale the triage lane, and no pass
   re-classifies the grown diff. Two things reopen the lane: a rewrite that takes
   the reviewed commit off the branch supersedes the review, and a bring-current
   round that conflicted reopens it to rule on that round. gate-ensure then pours
