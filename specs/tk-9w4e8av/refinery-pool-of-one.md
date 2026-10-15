@@ -131,6 +131,20 @@ is the one gascity's detached-handoff orphan sweep re-routes from a session pin
 write is a no-op and the bead becomes an offer at the first write. That is safe,
 because the branch is already pushed and verified by then.
 
+It does change what a failed write means. The three writes are chained, and today
+the refusal arm reads any failure as a handoff that did not happen: it escalates
+`polecat-handoff-refused`, says the bead is not handed off, and holds the
+molecule (`mol-polecat-work.toml:1750-1763`). On a molecule-run bead, a store
+fault in the second or third write would leave an offer the refinery can claim
+and merge while the polecat sits held on a false alarm. So the arm reads the bead
+back before it escalates. A bead that is open, unassigned, routed to the rig's
+refinery and carrying the landing target has been handed off, because the writes
+that failed had nothing left to change, and submit goes on to close its chain. Any
+other shape is a refused handoff, and the arm escalates as it does today, naming
+the shape it read. Moving the route to the last write would avoid the false alarm
+too, but on a claimed bead it would let the bead rest open, unassigned and
+unrouted if the last write failed, and nothing would offer it again.
+
 Step 6, the wake and nudge, is deleted, because the offer itself wakes the pool
 (section 4).
 
@@ -1211,8 +1225,11 @@ where one speaks the old shape to the other.
    `pool-route.sh`, with no wake or nudge), `convoy-graduate.sh`, the keeper's
    `mol-upstream-gc-rebase.toml` handoff, and its `refinery-rebase-handling` race
    loss. The unit also covers the readers of the old shape: the load-context gate
-   and the `gc-helm.sh` rider proof. Their tests follow, including
-   `submit-branch-gate.test.sh`. It depends on unit 1, for the race-loss exit.
+   and the `gc-helm.sh` rider proof, and the submit refusal arm's read-back of a
+   handoff that already landed (section 1). Their tests follow, including
+   `submit-branch-gate.test.sh`, which gains a case where the second or third
+   write fails after the first landed on a molecule-run bead, and the arm hands
+   off instead of escalating. It depends on unit 1, for the race-loss exit.
 4. **The claim's readers.** Widen I11 arm 1 to in-progress beads routed to the
    rig's refinery, with a fixture for a refinery claim beside the step fixtures,
    which stay as they are. Add the
