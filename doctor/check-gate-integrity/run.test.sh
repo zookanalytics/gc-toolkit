@@ -72,15 +72,15 @@ has "$OUT" "g-5" "the explicitly empty declaration is flagged"
 has "$OUT" "ungated" "the finding says what empty means to merge.sh"
 
 # --- 3. markers outside the lane vocabulary ---------------------------------------
-# The legacy grammar is the case that matters: an unmigrated anchor reads as a
-# state no reader knows, and this check is what says so.
+# The retired <verb>@<oid> grammar is the case that matters: a marker in it
+# reads as a state no reader knows, and this check is what says so.
 store "$(bead g-6 "{\"merge_result\":\"pull_request\",\"check_set\":\"correctness\",\"branch\":\"b\",\"check.correctness\":\"green@$OID\"}")" \
       "$(bead g-7 "{\"merge_result\":\"pull_request\",\"check_set\":\"correctness\",\"branch\":\"b\",\"check.correctness\":\"exception@$OID\"}")" \
       "$(bead g-8 '{"merge_result":"pull_request","check_set":"correctness","branch":"b","check.correctness":"passed"}')"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a marker outside the lane vocabulary is an ERROR"
-has "$OUT" "g-6" "an unmigrated green@<oid> is flagged"
-has "$OUT" "g-7" "an unmigrated exception@<oid> is flagged"
+has "$OUT" "g-6" "a green@<oid> in the retired grammar is flagged"
+has "$OUT" "g-7" "an exception@<oid> in the retired grammar is flagged"
 has "$OUT" "g-8" "a bare word that names no lane state is flagged"
 
 # --- 4. a green lane needs no branch to be well-formed ------------------------------
