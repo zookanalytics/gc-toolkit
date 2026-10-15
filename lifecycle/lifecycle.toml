@@ -859,9 +859,11 @@ keys = [
   # Set by pr-facts.sh's write-back once the answer finding.reply holds is on the
   # PR: for a thread or Conversation answer once its own text is posted or found
   # there, and dropped when that text is missing and its post fails; for a review
-  # body once the review's living answer carrying it is on the PR. The write-back
-  # reads the answer back off GitHub on every pass, so this records the read for
-  # the review dismissal, which waits for it.
+  # body once the review's living answer carrying it is on the PR. A living
+  # answer too long for one comment can shorten the reply it quotes, and the cut
+  # names the finding that holds it whole. The write-back reads the answer back
+  # off GitHub on every pass, so this records the read for the review dismissal,
+  # which waits for it.
   "finding.reply_posted",
   # The GitHub databaseId of the comment pr-facts.sh's write-back posted to carry
   # a machine finding ruled must-fix or deferred to its PR: a file-level review

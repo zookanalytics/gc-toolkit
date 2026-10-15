@@ -33,11 +33,17 @@
 # answered says which stage it is at. A link goes only to a comment the read of
 # the PR found, and no sentence points at a reply or thread: the answer is in
 # the entry itself. A review body has no thread to carry a decline's or a
-# deferral's reply, so its entry carries that reply whole, quoted under the
-# entry whenever the sentence is not the reply itself, and the comment is what
+# deferral's reply, so its entry carries that reply, quoted under the entry
+# whenever the sentence is not the reply itself, and the comment is what
 # delivers it, as it delivers the mark that records the body answered. A
 # review stays live, and gets its comment, while a finding is open, its
 # changes-requested block stands, or the comment owes it an answer or a mark.
+#
+# The comment always fits the size GitHub takes in one comment, because the
+# dismissal waits on it (ra_render). A long review shortens its notes from the
+# fix first, then its quoted replies, then its sentences, and each cut names
+# the bead that holds the whole text. Past the tightest caps it lists the
+# points that fit and names the findings of the rest.
 #
 # A point cites the commits that made its fix only once the fix has landed. The
 # rendering holds a token for them, which the writer expands as it posts, and
