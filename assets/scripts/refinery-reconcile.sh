@@ -62,8 +62,8 @@ RIG_HEAD="$(git -C "$RIG_ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unk
 # Siblings resolve from $0: the pack lives under the owning rig, so an importer
 # rig's own root has no assets/scripts at all.
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-# The rig's state key, the pass lock, pass_child and the per-pass bd_list cache.
-# Unsourceable, nothing serialises the arms, so none runs.
+# The pass lock, pass_child and the per-pass bd_list cache. Unsourceable,
+# nothing serialises the arms, so none runs.
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script — refusing to run any arm without the pass lock" >&2; exit 1; }
 
@@ -142,7 +142,14 @@ fi
 [ -n "$TARGET" ] || TARGET=main
 
 # Per-rig state (GC_PACK_STATE_DIR is city+pack scoped; this order runs per rig).
-STATE_DIR="${REFINERY_RECONCILE_STATE_DIR:-${GC_PACK_STATE_DIR:-${TMPDIR:-/tmp}/gc}/refinery-reconcile}/$(rig_state_key)"
+# The key also names the pass lock below, so every version of this driver must
+# derive it the same way. A deploy can start a new driver while the one it
+# replaces is still running a pass, and the two passes stay apart only on one
+# lock file. bd-lib.sh's rig_state_key is not this key: it cuts a rig name past
+# 64 bytes and adds a checksum to any name it rewrites.
+RIG_KEY="$(printf '%s' "$RIG" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"
+case "$RIG_KEY" in ''|.|..) RIG_KEY=rig ;; esac
+STATE_DIR="${REFINERY_RECONCILE_STATE_DIR:-${GC_PACK_STATE_DIR:-${TMPDIR:-/tmp}/gc}/refinery-reconcile}/$RIG_KEY"
 LOG="$STATE_DIR/pass.log"
 LOG_KEEP="${REFINERY_RECONCILE_LOG_KEEP:-2000}"
 mkdir -p "$STATE_DIR" 2>/dev/null || true

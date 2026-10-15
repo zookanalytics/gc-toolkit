@@ -23,10 +23,11 @@
 # two overlapping ticks, a wedged holder reported rather than skipped over, an
 # unobtainable lock refusing the pass before any arm, every arm and the
 # drop-tail report run without its descriptor while it is held, a process an arm
-# leaves running holding no lock, and a driver killed by itself leaving it held
-# while the arm it started runs on); a killed pass leaving its partial output in
-# pass.log; and the invariant binding the order timeout to the controller's
-# tracking-sweep window.
+# leaves running holding no lock, a driver killed by itself leaving it held
+# while the arm it started runs on, and one lock file per rig for a driver of
+# any version, whatever the rig's name); a killed pass leaving its partial
+# output in pass.log; and the invariant binding the order timeout to the
+# controller's tracking-sweep window.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -622,6 +623,58 @@ else
   bad "the process the fixture's arm starts never ran"
 fi
 [ -n "$dpid" ] && kill "$dpid" 2>/dev/null
+
+echo "# a driver of any version names the same lock for a rig, whatever the rig's name"
+# A deploy can start this driver while the one it replaces is still running a
+# pass over the same queue, and only a lock file both name keeps the two apart.
+# A stand-in for that pass holds <state-dir>/<key>/pass.lock as a driver does,
+# under the key written beside each rig name below: a name past 64 bytes, one
+# with bytes the key rewrites, and one the key replaces whole.
+for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
+NAMES="$TMP/state-names"
+LONG="$(printf '%070d' 0 | tr 0 r)"
+names_drive() { # <rig>
+  REFINERY_RECONCILE_STATE_DIR="$NAMES" REFINERY_RECONCILE_AGENT="$1/gc-toolkit.refinery" \
+    GC_RIG="$1" GC_RIG_ROOT="$TMP" "$SD/refinery-reconcile.sh" 2>&1
+}
+for pair in "$LONG|$LONG" "team a/rig:one|team_a_rig_one" ".|rig"; do
+  name="${pair%%|*}" key="${pair#*|}"
+  rm -f "$TMP/names-held" "$TMP/names-release"
+  ( mkdir -p "$NAMES/$key"
+    exec 9>>"$NAMES/$key/pass.lock"
+    flock -n 9 || exit 1
+    printf '4242 %s\n' "$(date -u +%s)" > "$NAMES/$key/pass.holder"
+    : > "$TMP/names-held"
+    i=0
+    while [ ! -f "$TMP/names-release" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i + 1)); done ) >/dev/null 2>&1 &
+  dn=$!
+  if await "$TMP/names-held"; then
+    : > "$ARM_LOG"
+    out=$(names_drive "$name"); rc=$?
+    eq "$rc" 0 "rig '$name': a tick beside the other driver's pass exits 0"
+    has "$out" "already in flight (pid 4242" "…because it finds that pass holding the lock under '$key'"
+    if [ -s "$ARM_LOG" ]; then
+      bad "rig '$name': arms ran beside the other driver's pass: $(cut -d'|' -f1 "$ARM_LOG" | paste -sd, -)"
+    else
+      ok "…and runs no arm beside it"
+    fi
+  else
+    bad "rig '$name': the stand-in never took the lock"
+  fi
+  : > "$TMP/names-release"; wait "$dn" 2>/dev/null
+  : > "$ARM_LOG"
+  export FD9_LOG="$TMP/names-fd9.log" LOCK_PROBE="$NAMES/$key/pass.lock"; : > "$FD9_LOG"
+  out=$(names_drive "$name"); rc=$?
+  unset FD9_LOG LOCK_PROBE
+  eq "$rc" 0 "rig '$name': with the lock free, the pass completes"
+  n_all=$(grep -c ' lock=' "$TMP/names-fd9.log"); n_held=$(grep -c ' lock=held' "$TMP/names-fd9.log")
+  if [ "$n_all" -gt 0 ] && [ "$n_held" = "$n_all" ]; then
+    ok "…and each of its $n_all arm runs holds the lock under '$key', which the other driver would find held"
+  else
+    bad "rig '$name': $n_held of $n_all arm runs held the lock under '$key'"
+  fi
+done
+eq "$(ls -1 "$NAMES" | LC_ALL=C sort | paste -sd, -)" "rig,$LONG,team_a_rig_one" "no pass kept its state under any other key"
 
 echo "# the marked interlock block executes standalone against stubs"
 GATE="$(awk '/# >>> posture-gates-merge/{f=1;next} /# <<< posture-gates-merge/{f=0} f' "$RUNNER")"
