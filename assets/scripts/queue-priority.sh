@@ -459,9 +459,12 @@ cmd_move() {
         fi
     fi
 
+    # The live beads, among them every bead that can follow the moved one.
+    # Gates are listed too: gc-helm.sh demand files its gate under the gated
+    # bead's parent, so the gate follows that parent like any member.
     local listing raw one status out
     mktemp_tracked || return 1; listing="$REPLY"
-    raw="$(bd_ list --status=open,in_progress,blocked,deferred,hooked --brief --json --limit 0 2>/dev/null)" \
+    raw="$(bd_ list --status=open,in_progress,blocked,deferred,hooked --include-gates --brief --json --limit 0 2>/dev/null)" \
         || { echo "$PROG: move: could not list the store $BD_DB to find what follows $bead. Nothing was written." >&2; return 1; }
     printf '%s' "$raw" | scrub | jq -c "$ROWS_JQ" > "$listing" 2>/dev/null \
         || { echo "$PROG: move: the listing of $BD_DB did not parse. Nothing was written." >&2; return 1; }
@@ -478,7 +481,8 @@ cmd_move() {
                 echo "$PROG: move: $bead is $status, so nothing that follows it waits in a queue. Nothing was written." >&2
                 return 2 ;;
         esac
-        # A live bead of a class the listing hides, such as a gate, joins it.
+        # A live bead of a class the listing hides, such as an infra bead,
+        # joins it.
         mktemp_tracked || return 1
         jq -c --argjson one "$one" '. + [$one]' "$listing" > "$REPLY" 2>/dev/null && listing="$REPLY" \
             || { echo "$PROG: move: could not add $bead to the listing of $BD_DB. Nothing was written." >&2; return 1; }

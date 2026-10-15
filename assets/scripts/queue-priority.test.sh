@@ -13,9 +13,9 @@
 #               a lock held past the wait each exit 1.
 #   (MOVE)      gc-helm.sh priority <bead> <P> sets a bead that follows nothing,
 #               and --shift sets a bead that follows a parent or an anchor; the
-#               move then writes every bead that follows it, held ones included,
-#               their live workflows and their anchors' PR-finishing work, and
-#               reads them back. The moved bead's own input, a P-value or a
+#               move then writes every bead that follows it, held ones and gates
+#               included, their live workflows and their anchors' PR-finishing
+#               work, and reads them back. The moved bead's own input, a P-value or a
 #               shift, is written even when it is claimed. A P-value on a member
 #               is refused naming the shift that lands it there; a shift on a
 #               bead that follows nothing, either form on a workflow's convoy,
@@ -89,8 +89,9 @@ mkdir -p "$TMP/bin" "$TMP/rig-tk/.beads"
 #   bd list            --id (comma list), --all, --status, --metadata-field
 #                      (repeatable, ANDed) and --has-metadata-key filter the
 #                      store; with neither --all nor --status it leaves out
-#                      closed and pinned beads, and without --include-gates
-#                      every gate, as bd does. STUB_LIST_FAIL fails it.
+#                      closed and pinned beads, without --include-gates every
+#                      gate, and without --include-infra every agent, role and
+#                      message bead, as bd does. STUB_LIST_FAIL fails it.
 #   bd ready           the open beads that no open blocker holds, on themselves
 #                      or on a parent-child ancestor, filtered by
 #                      --metadata-field and --unassigned, most urgent first.
@@ -144,7 +145,7 @@ mf_json() { printf '%s\n' "$@" | jq -Rsc 'split("\n") | map(select(length > 0) |
 case "$verb" in
   list)
     [ -n "${STUB_LIST_FAIL:-}" ] && { echo "gc: simulated list failure" >&2; exit 1; }
-    ids=""; all=0; st=""; hk=""; gates=0; mf=()
+    ids=""; all=0; st=""; hk=""; gates=0; infra=0; mf=()
     while [ $# -gt 0 ]; do
       case "$1" in
         --id) shift; ids="${1:-}" ;;
@@ -156,14 +157,15 @@ case "$verb" in
         --metadata-field=*) mf+=("${1#--metadata-field=}") ;;
         --has-metadata-key) shift; hk="${1:-}" ;;
         --include-gates) gates=1 ;;
-        --brief|--json|--include-infra|--include-templates) : ;;
+        --include-infra) infra=1 ;;
+        --brief|--json|--include-templates) : ;;
         --limit) shift ;;
         --limit=*) : ;;
         *) echo "gc stub: list: unexpected argument '$1'" >&2; exit 2 ;;
       esac
       shift || true
     done
-    jq -c --arg ids "$ids" --argjson all "$all" --arg st "$st" --arg hk "$hk" --argjson gates "$gates" \
+    jq -c --arg ids "$ids" --argjson all "$all" --arg st "$st" --arg hk "$hk" --argjson gates "$gates" --argjson infra "$infra" \
       --argjson mf "$(mf_json ${mf[@]+"${mf[@]}"})" "$LIVE"'
       [ .[]
         | select($ids == "" or (.id as $i | ($ids | split(",")) | index($i)))
@@ -171,7 +173,8 @@ case "$verb" in
                  elif $all == 1 then true else live end)
         | select(. as $r | all($mf[]; (($r.metadata // {})[.k] // "" | tostring) == .v))
         | select($hk == "" or ((.metadata // {}) | has($hk)))
-        | select($gates == 1 or .issue_type != "gate") ]' "$S" ;;
+        | select($gates == 1 or .issue_type != "gate")
+        | select($infra == 1 or ((.issue_type // "") as $t | (["agent", "role", "message"] | index($t)) == null)) ]' "$S" ;;
   ready)
     [ -n "${STUB_READY_FAIL:-}" ] && { echo "gc: simulated ready failure" >&2; exit 1; }
     un=0; mf=()
@@ -511,8 +514,13 @@ helm priority tk-e3 P1
 eq "$RC" 2 "(MOVE) a closed bead is refused"
 has "$ERR" "tk-e3 is closed" "(MOVE) and says so"
 helm priority tk-g1 P0
-eq "$RC" 0 "(MOVE) a live bead of a class the listing hides, a gate, takes a P-value"
+eq "$RC" 0 "(MOVE) a gate that follows nothing takes a P-value"
 eq "$(prio tk-g1)" 0 "(MOVE) and is written"
+jq -c '. + [{"id":"tk-ag","status":"open","issue_type":"agent","priority":2,"metadata":{},"dependencies":[]}]' \
+  "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+helm priority tk-ag P1
+eq "$RC" 0 "(MOVE) a live bead of a class the listing hides, an infra bead, takes a P-value"
+eq "$(prio tk-ag)" 1 "(MOVE) and is written"
 helm priority tk-e1 P7;         eq "$RC" 2 "(MOVE) a priority past P4 is refused"
 helm priority tk-e1 --shift up; eq "$RC" 2 "(MOVE) a shift that is not a number is refused"
 helm priority tk-e1 P1 --shift -1; eq "$RC" 2 "(MOVE) both forms at once are refused"
@@ -551,6 +559,19 @@ eq "$RC" 0 "(RULES) a move on a parked epic exits 0"
 eq "$(prio tk-w1)" 0 "(RULES) a parked epic's member takes the new priority while the park holds it"
 eq "$(prio tk-s1a)" 0 "(RULES) and so does its workflow"
 eq "$(prio tk-w2)" 0 "(RULES) a member at shift -1 under a P0 epic stays at P0"
+
+# gc-helm.sh demand files its gate under the gated bead's parent, so the gate is
+# a member, and a move on that parent re-ranks it as settle computes it.
+reset_store
+jq -c '. + [{"id":"tk-gd","status":"open","issue_type":"gate","priority":1,"metadata":{"gc.demand_for":"tk-w2"},
+  "dependencies":[{"issue_id":"tk-gd","depends_on_id":"tk-e1","type":"parent-child"}]}]' \
+  "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+helm priority tk-e1 P0
+eq "$RC" 0 "(MOVE) a move on an epic with a gate among its members exits 0"
+eq "$(prio tk-gd)" 0 "(MOVE) the gate takes the epic's new priority"
+has "$OUT" "tk-gd P1->P0" "(MOVE) and the move names it"
+qp settle tk-gd --print
+eq "$OUT" "0" "(MOVE) the priority settle computes for it"
 
 echo "# a shared fixture: settle and the move agree"
 # priority-lib.fixture.json's store, every id given this rig's prefix, without
