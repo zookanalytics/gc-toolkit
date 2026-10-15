@@ -124,7 +124,8 @@ pre-existing fail beside the refinery caller that needs it.
 - **`--timeout`, default two hours.** The refinery stops its detached gate at
   two hours. Without a bound, a wedged suite under the lease heartbeat would
   hold its pool slot indefinitely. A timeout sends SIGTERM to the group, then
-  SIGKILL after ten seconds.
+  SIGKILL after ten seconds to whatever is left of it. That includes a child
+  that ignores SIGTERM and runs on after the command's own shell has exited.
 - **A dirty tree is refused in every recorded mode**, `--check` and
   `--nothing-declared` included. A pass reported for a dirty tree would certify
   content no record saw. `setup` and `build` record nothing, so they run in a
@@ -156,7 +157,9 @@ pre-existing fail beside the refinery caller that needs it.
   top level, with stdin closed and the caller's environment, leading a process
   group of its own. The group and the signal relay follow `gitIn` in
   `internal/cli/lifecycle.go`. A relayed signal stops the group the way a
-  timeout does, and `Run` returns only once the command has been waited for.
+  timeout does. `Run` returns only once the command has been waited for, and
+  a stop ends only once the group is empty or has been sent SIGKILL, so the
+  shell's exit does not end it.
   An agent runs the same line in its own shell tool: zsh for a Claude session
   on this host, and `/bin/zsh -lc` for Codex. gc-toolkit's declared lines use
   `$(...)`, `$?`, `;`, `&&` and `[ ]`, which zsh and bash read the same way,
@@ -237,6 +240,12 @@ build's `--check` measured median 182 ms at load average 40-47, and median
   the command changed. A command bash cannot parse, find or execute exits 4
   on every call too, but that comes from the rig's configuration, not the
   commit, and `rig`'s line names it the same way.
+- **A caller that stops `rig` gives it more than ten seconds.** `rig` passes
+  a stop on to the command's group and takes up to ten seconds to finish it
+  when a member ignores SIGTERM. A SIGKILL to `rig` in that time leaves
+  whatever is still in the group running. `detached-job.sh` also waits ten
+  seconds by default between its TERM and its KILL, so a detached caller
+  sets `DETACHED_JOB_STOP_GRACE` above that.
 - **review-test-evidence** reads `--check`'s one JSON line: `result`, and
   `scope`, where `none` certifies no tests and `affected` certifies the subset.
 - **The refinery** resolves its vars at run time and passes them, so its
