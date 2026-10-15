@@ -93,22 +93,22 @@ name only when its content is that one check's: `docs/review-arch.md` holds the
 arch method extension and nothing else. The check index serves every check, so
 it is named for its function, `review-checks.toml`, not for any one check.
 
-## Read from the reviewed commit
+## Where each layer is read from
 
-Every file here is read pinned to the commit under review, through
-`git show <reviewed_oid>:<path>`, never from the working tree or the installed
-skill catalog. A branch is judged against the index and the method extensions
-its own commit carries, so a rig that tightens a check's extension tightens it
-for the commits made after the change, not for work already in flight. This is
-also why a method extension is a plain repository file rather than a skill: a
-skill loads from the installed catalog, which cannot be pinned to the diff's
-commit.
+The index and a method extension are the rig's, so they are read pinned to the
+commit under review, through `git show <reviewed_oid>:<path>`, never from the
+working tree. A branch is judged against the index and the extensions its own
+commit carries, so a rig that tightens a check's extension tightens it for the
+commits made after the change, not for work already in flight. This is why an
+extension is a plain repository file rather than a skill: a skill loads from
+the installed catalog, which cannot be pinned to a commit.
 
-The method an index row names is not read from the reviewed commit. It is a
-pack skill, and the dispatch note has the reviewer load it from its skill
-catalog, where gascity links every pack skill from the pack the city installs.
-Read at the reviewed commit, a change to a method would be judged by the
-change itself, and a rig other than gc-toolkit would find no method at all.
+The method is the pack's, so it comes from the pack the city installs, not from
+any commit. The dispatch note names it as the `gc-toolkit.review-<check>`
+skill, and the reviewer loads it from its skill catalog, where gascity links
+every pack skill. Read at the reviewed commit instead, a change to a method
+would be judged by the change itself, and a rig other than gc-toolkit would
+find no method at all.
 
 ## Summary
 
