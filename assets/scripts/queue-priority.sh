@@ -181,8 +181,10 @@ qp_read() {
     bd_ list --id "$1" --all --include-gates --include-infra --include-templates --brief --json --limit 0 2>/dev/null
 }
 
-# A row read as a JSON array, from either shape a listing answers in.
-ROWS_JQ='if type == "object" and ((.issues // null) | type) == "array" then .issues elif type == "array" then . else error("not a listing") end'
+# A row read as a JSON array, from either shape a listing answers in. The
+# parentheses make it one term wherever a program places it, because jq before
+# 1.8 does not compile a bare `if ... end` followed by `as`, an index or a field.
+ROWS_JQ='(if type == "object" and ((.issues // null) | type) == "array" then .issues elif type == "array" then . else error("not a listing") end)'
 
 # What a reader prints for a computed priority: the bead, its level, and what it
 # follows.
