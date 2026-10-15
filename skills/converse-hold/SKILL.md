@@ -85,8 +85,8 @@ Never park a live conversation: the writer's `--release` clears the
 assignee and route, and the only place it belongs is a stand-down
 ruling, written as
 `gc-helm.sh takeaway <anchor> "<ruling>" --release --no-wait`. It parks
-the anchor AND quiesces its routed steps, and `--no-wait` records that
-the ruling ended the wait rather than moving it.
+the anchor AND cancels the run beneath it through gascity, and `--no-wait`
+records that the ruling ended the wait rather than moving it.
 
 Then post the framing as a **hand-back** in the shape the prompt's
 Definitions define (**The hand-back**): detail and evidence first, the

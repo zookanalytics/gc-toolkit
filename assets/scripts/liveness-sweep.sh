@@ -252,7 +252,7 @@ HUSK_ROOTS=$(jq -R . < "$HUSK_ROOTS_TMP" | jq -sc 'map(select(length > 0)) | uni
 # --- live sitting identities: "conversing" requires a live holder -------------
 # A visit covers its subject (and is itself conversing) only while the sitting
 # holding it is live. This pass is mechanical but reads sessions here — the one
-# liveness source the pack trusts (mol-witness-patrol, dead-molecule-dispose):
+# liveness source the pack trusts (mol-witness-patrol):
 # a holder GONE from the session list is dead, and so is one still listed in a
 # terminal state — archived or closed, the dead states helm's ownerLive keys on
 # (services/helm/internal/board/derive.go); a holder listed in any other state
