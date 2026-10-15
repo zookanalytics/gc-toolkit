@@ -235,16 +235,9 @@ marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 # cannot inherit the disposition of the sitting before it
 # (assets/scripts/takeaway-settled-pairing.test.sh).
 settled_keys = ["gc.takeaway=gc.takeaway_settled"]
-# One key per check, so the declaration is a prefix. dispatch_backstop.<g> is
-# written by gate-ensure.sh only where a check has spent its dispatch ceiling,
-# and its value carries the count and the head it holds, so its presence is
-# "dispatch_count at the ceiling" as the writer itself recorded it.
-marker_prefixes = ["dispatch_backstop."]
 # merge_hold is not a marker_key: an operator's freeze is theirs to lift, and a
 # hold that must show as an edge asserts it through blocked_reason or
 # gc.takeaway beside it, both declared above, which carry the wait's sentence.
-# Leaving the two gate scalars out is what disables that arm; the check reads
-# an omitted field as a marker the declaration dropped.
 # The route that parks a bead for a person is park_route in [machine]. A bead
 # resting on it waits on somebody, and that wait has the same shape as any
 # other.
