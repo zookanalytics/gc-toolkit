@@ -282,10 +282,16 @@ the alarm (section 5) also calls, so the three cannot disagree. The script reads
 the work by `bd list` and gives the claim three tiers in the default order:
 
 1. In-progress beads assigned to the session's own identities. These are its own
-   claim, resumed after a crash. The identities are the session's id, its
-   session name and its alias, and `<rig>/gc-toolkit.refinery` is always among
-   them, so a session whose alias gascity deferred still finds work held under
-   it (see the claim below).
+   claim, resumed after a crash. The identities are the ones gascity passes
+   every work query and accepts at the claim: `$GC_SESSION_ID`,
+   `$GC_SESSION_NAME` and `$GC_ALIAS`. `$GC_ALIAS` carries
+   `<rig>/gc-toolkit.refinery` only for the session that holds the alias,
+   because the alias is the one identity no two live sessions share
+   (`hookClaimCollapsedIdentity`, `cmd/gc/cmd_hook.go:697-716`, applied to the
+   query's environment at `:451-465`). So a session whose alias gascity deferred
+   serves no work held under the alias, and the hook would not claim it if the
+   query listed it. That work waits for the session that holds the alias, or for
+   a release path below.
 2. Open beads assigned to those identities. These are old-style handoffs during
    cutover. They carry no refinery route until the claim writes one (below).
 3. Open, unassigned beads routed to `<rig>/gc-toolkit.refinery`. Epics and
@@ -383,14 +389,49 @@ The claim writes these fields:
   session's alias while an earlier session row still holds it or its create is
   pending. A session started then runs with a blank `GC_ALIAS` and claims under
   its session id (`setPoolTemplateRuntimeIdentityInfo`,
-  `build_desired_state_pool_info.go:55-65`). A bead that tier 2 serves keeps the
-  assignee it carries, because the hook claims assigned work under that assignee
-  (`claimFirstReadyHookAssignment`, `cmd_hook_claim.go:776-777`). So an
-  old-style handoff is claimed under `<rig>/gc-toolkit.refinery`.
+  `build_desired_state_pool_info.go:55-65`). The hook claims a bead that tier 2
+  serves under the assignee it carries, because bd's idempotent claim needs that
+  actor (`claimFirstReadyHookAssignment`, `cmd_hook_claim.go:772-777`). It then
+  moves the claim to the session's claim identity, as it does for a claim it
+  adopts in tier 1 (`restampHookAdoption`, `:1178-1200`, called at `:502` and
+  `:841`). So an old-style handoff stays under `<rig>/gc-toolkit.refinery` for a
+  session that started holding the alias. It moves to the session id of a
+  session whose alias gascity granted only after the session started.
 - `gc.session_id` and `gc.session_name` name the concrete session
   (`hookClaimIdentityPatch`, `cmd_hook_claim.go:1819-1827`).
 - `gc.claimed_at` is stamped write-once at the bead's first claim
   (`internal/beadmeta/keys.go:62-69`).
+
+Every write the session makes on its claim is the holder's own. gascity sets a
+session's `BEADS_ACTOR` to the identity it records the session's claims under:
+the alias for a session that holds it, and otherwise, for a pool session, its
+session id (`AssigneeIdentifier`,
+`internal/session/assignee_identities.go:145-160`, exported by
+`RuntimeEnvWithSessionContext`, `internal/session/lifecycle.go:67-81`). The
+claim identity is the same string, alias first and then session id
+(`hookClaimAssigneeIdentity`, above), and the re-stamp runs when the two agree.
+So a claim the hook hands a refinery session is held under the session's
+`BEADS_ACTOR`, and bd accepts the holder's writes on it: the Outcome
+transitions' assignee clear, the merged close, a release and a put-back (section
+3, and "Ending a claim" below). A live pool session shows the equality. A
+polecat session's `BEADS_ACTOR`, its `GC_SESSION_ID` and the assignee its claim
+recorded are one string.
+
+The equality has one gap. When the re-stamp of a claim the hook has just made
+fails, gascity still hands the bead over under the assignee it carried, and
+prints the command that repairs it (`adoptAfterFailedRestamp`,
+`cmd_hook_claim.go:1206-1221`). bd would then refuse the session's assignee
+clear and its close. gascity's close-actor rewrite does not cover that case,
+because it counts only `GC_SESSION_ID` and `BEADS_ACTOR` as the session's own
+identities, never its alias (`closeActorForOwnClaim`,
+`cmd/gc/bd_close_actor.go:9-65`). So `refinery-claim.sh` reads the claim's
+assignee before anything else. When it is not `$BEADS_ACTOR`, the script runs
+gascity's repair itself, the conditional transfer `gc bd update <bead>
+--if-assignee <held> --if-status in_progress --assignee "$BEADS_ACTOR"`. bd
+accepts it from any actor, because its precondition names the holder
+(`docs/gascity-routing-model.md:47`). If the transfer does not land, the script
+works nothing, and puts the bead back as a failed route write does (below), with
+the same precondition on the put-back write.
 
 The hook writes no route, so `gc.routed_to` stays on the claimed bead as it was.
 Every release path below reads that route, so the claim makes it the refinery's
@@ -423,28 +464,30 @@ route is right, gascity's drain-ack, retirement, close-cascade and
 stranded-repair releases route an unrouted bead by it (`releaseRoute`). An
 old-style handoff can carry one that names the polecat pool (section 1).
 
-So `refinery-claim.sh` settles the claimed bead's route before it does anything
-else. Unless the bead already carries `gc.routed_to=<rig>/gc-toolkit.refinery`
-and no `gc.run_target`, the script writes that route, resolved through
-`pool-route.sh gc-toolkit.refinery`, and unsets `gc.run_target` in the same
-write. Then it reads both back. Only a read-back that matches lets it go on to
-the attempt count (section 3) and lets the session run the working steps. From
-then on, every release and wait in section 3, every gascity release path and the
-witness's source arm give the bead back to the refinery. A transient release
-leaves an offer, and a wait leaves one when its blocker closes.
+So `refinery-claim.sh` settles the claimed bead's route next, before it does
+anything else to the bead. Unless the bead already carries
+`gc.routed_to=<rig>/gc-toolkit.refinery` and no `gc.run_target`, the script
+writes that route, resolved through `pool-route.sh gc-toolkit.refinery`, and
+unsets `gc.run_target` in the same write. Then it reads both back. Only a
+read-back that matches lets it go on to the attempt count (section 3) and lets
+the session run the working steps. From then on, every release and wait in
+section 3, every gascity release path and the witness's source arm give the bead
+back to the refinery. A transient release leaves an offer, and a wait leaves one
+when its blocker closes.
 
 When the read-back does not match, the script writes once more. If the write
 still does not land, the script does not work the bead. It puts the bead back
 with the pins cleared and no attempt counted, and the route the bead carries
 decides how.
 
-- A bead with no refinery route is an old-style handoff, held under
-  `<rig>/gc-toolkit.refinery` because the hook claims tier 2's beads under the
-  assignee they carry. A release would leave it unrouted, so the script sets its
-  status back to `open` and leaves the assignee as it is. That write changes no
-  assignee, so bd's claim guard does not refuse it ("Ending a claim", below). The
-  bead is an old-style handoff again. Tier 2 returns it, the demand count wakes
-  the pool for it, and the next claim routes it first.
+- A bead with no refinery route is an old-style handoff. A release would leave
+  it unrouted, so the script puts it back in the shape it was handed off in:
+  status `open` and assignee `<rig>/gc-toolkit.refinery`, in one write. The
+  claim may be held under the alias or, after the hook's re-stamp, under the
+  session id. Either way the session is its holder (above), so bd's claim guard
+  accepts the write ("Ending a claim", below). The bead is an old-style handoff
+  again. Tier 2 returns it to a session that holds the alias, the demand count
+  wakes the pool for it, and the next claim routes it first.
 - A bead from tier 3 already carries the refinery's route, and only its
   `gc.run_target` did not clear. The script releases it as a transient exit
   does (section 3): open and unassigned, with the route kept. It is an offer
@@ -461,17 +504,19 @@ unchanged count, which the alarm reads as nothing taken (section 5).
 
 A claim the script has not settled outlives its session only if the put-back
 fails too, or if the session dies between the claim and the route write. An
-unrouted claim then stays in progress under the alias, which drain-ack leaves
-alone (the release table below), and the next session's first tier resumes it
-and routes it first. The stranded repair can reach a dead session's claim first.
-It gives the claim back on a `gc.run_target` the bead carries, or otherwise on
-the seat's route, `<rig>/gc-toolkit.refinery`, which route recovery restores.
-After a failed put-back the witness can reach the claim first instead, once the
-drained session's row is gone. Its restore step would route an unrouted claim by
-`gc.execution_routed_to`, and its `reopen-source` would route a tier-3 claim by
-the `gc.run_target` that did not clear. So a misroute needs either a session
-that dies between the claim and the route write, on a bead that carries an
-archived `gc.run_target`, or three failed writes on the bead in a row.
+unrouted claim held under the alias then stays in progress, which drain-ack
+leaves alone (the release table below), and the next session's first tier
+resumes it and routes it first. drain-ack gives back one held under the session
+id, and like the paths below it routes an unrouted bead by a `gc.run_target` the
+bead carries (`releaseRoute`). The stranded repair can reach a dead session's
+claim first. It gives the claim back on a `gc.run_target` the bead carries, or
+otherwise on the seat's route, `<rig>/gc-toolkit.refinery`, which route recovery
+restores. After a failed put-back the witness can reach the claim first instead,
+once the drained session's row is gone. Its restore step would route an unrouted
+claim by `gc.execution_routed_to`, and its `reopen-source` would route a tier-3
+claim by the `gc.run_target` that did not clear. So a misroute needs either a
+session that dies between the claim and the route write, on a bead that carries
+an archived `gc.run_target`, or three failed writes on the bead in a row.
 
 ### One claim per session
 
@@ -552,21 +597,27 @@ Every exit that ends a claim follows two rules.
   A rejection takes exactly that shape at `rejection-repool.sh`'s unanchoring
   write, and keeps it while the rebuild runs, because a rebuild's workflow never
   claims its work bead. A pin left there would send the rejected bead straight
-  back to the refinery. Today the handoff carries no pins, because the polecat
-  clears its own and the refinery never claims, so `rejection-repool.sh` has
-  never needed to clear them. Its unanchoring transition clears them too
-  (unit 2).
-- **It ends the claim before it reassigns.** bd refuses an assignee change on an
+  back to the refinery. Under this design a rejected bead carries the refinery
+  session's pins. `rejection-repool.sh`'s unanchoring transition passes
+  `--assignee ""`, and the lifecycle writer unsets both pins whenever it clears
+  an assignee (`services/gctk/internal/cli/lifecycle.go:651-664`), so that
+  transition clears them as it stands.
+- **It writes as the claim's holder.** bd refuses an assignee change on an
   in-progress bead from an actor that is not its holder, and the refusal drops
   every field batched with it. The holder's own clear lands.
-  `docs/gascity-routing-model.md:47` records both from a live probe. So an exit
-  that hands the bead to another identity writes the status first and the
-  assignee after it, in separate writes, the order the polecat's submit already
-  uses. Once the bead is open the guard no longer applies, whichever actor bd
-  sees. The keeper race loss is one such exit.
+  `docs/gascity-routing-model.md:47` records both from a live probe. A refinery
+  session is the holder of its claim, because the claim is held under the
+  session's `BEADS_ACTOR` and `refinery-claim.sh` checks that before the bead is
+  worked (section 2, "The claim"). So an exit that clears the assignee writes
+  everything in one atomic update, and the Outcome transitions keep their one
+  write. An exit that hands the bead to another agent writes the status first
+  and the assignee after it, in separate writes, the order the polecat's submit
+  already uses, so the hand-off lands whichever actor bd sees. The keeper race
+  loss is one such exit.
 
-The merge-push terminal transitions already pass `--assignee ""`. They add the two
-pin unsets. Their `merge_result` keeps them out of the orphan sweep either way.
+The merge-push terminal transitions already pass `--assignee ""`, so the
+lifecycle writer already clears their pins, and they need no change for either
+rule. Their `merge_result` keeps them out of the orphan sweep either way.
 
 ## 3. Failure exits move only their own bead
 
@@ -1058,14 +1109,22 @@ where one speaks the old shape to the other.
    proves that a transient release leaves an offer `refinery-offers.sh` lists in
    tier 3, and that a person wait and a rig wait each leave one once their
    blocker closes. When a route write does not read back, the old-style handoff
-   goes back open under the alias, still listed in tier 2, and a tier-3 offer
-   whose `gc.run_target` did not clear goes back open and unassigned, listed in
-   tier 3. Neither counts an attempt. The prompt
+   goes back open and assigned to the alias, still listed in tier 2, whether the
+   claim was held under the alias or re-stamped to the session id, and a tier-3
+   offer whose `gc.run_target` did not clear goes back open and unassigned,
+   listed in tier 3. Neither counts an attempt. Against a store stub that refuses
+   an assignee change from an actor that is not the holder, as bd does, the test
+   works a claim held under the session's `BEADS_ACTOR`, both the alias and a
+   session id, through an Outcome transition, a release and the merged close.
+   It transfers a claim held under any other string with the conditional update
+   before working it, and puts the bead back unworked when the transfer does not
+   land. The prompt
    (`agents/refinery/prompt.template.md`) describes the claim
    protocol and drops the wisp reconcile. In `mol-refinery-patrol.toml`, the loop
-   steps are deleted, the claim's `$WORK` is used, every exit goes through unit 1,
-   and the terminal transitions clear the pins. `rejection-repool.sh`'s
-   unanchoring transition clears them too (section 2). The formula's block tests,
+   steps are deleted, the claim's `$WORK` is used, and every exit goes through
+   unit 1. The terminal transitions and `rejection-repool.sh`'s unanchoring
+   transition already clear the pins through the lifecycle writer (section 2),
+   so they keep their one write. The formula's block tests,
    `rejection-repool.test.sh` and `refinery-escalation-wiring.test.sh` follow the
    edits. It depends on unit 1.
 3. **The handoff writers.** These are the submit handoff (the route through
