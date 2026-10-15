@@ -347,9 +347,9 @@ else
 fi
 clear_fixtures
 
-# --- 18. a chain quiesced at its frontier is inert, not a strand ------------------
-# Quiesce parks the frontier at status=blocked and leaves the steps behind it
-# waiting on it, so nothing offers any of them. The parked frontier is also the
+# --- 18. a chain parked at its frontier is inert, not a strand -------------------
+# A step blocked at the frontier leaves the steps behind it waiting on it, so
+# nothing offers any of them. The parked frontier is also the
 # evidence: a listing that selects only open drops it, then reports the very
 # steps whose blocker it discarded.
 steps "$(step s-f1 r-q '' "$(blocks)" blocked)" \
@@ -439,7 +439,7 @@ clear_fixtures
 
 # --- 25. a parked step under an OPEN root is not a stalled frontier -----------------
 # The stall warning names a frontier nobody is advancing. A parked step is not a
-# frontier, and widening the selector must not turn each quiesced molecule into
+# frontier, and widening the selector must not turn each parked molecule into
 # a stall report of its own.
 steps "$(step s-p1 r-p '' ",\"updated_at\":\"$STALE\"" blocked)"
 roots "{\"id\":\"r-p\",\"status\":\"open\"}"
