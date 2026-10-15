@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic tests for first-reaction-dispose.sh — the five exits a first reaction
-# ends in, in the reaction-bead model, and the frozen no-reaction-bead call an
-# in-flight mol-first-reaction molecule still makes. Runs the REAL script with a
+# ends in, in the reaction-bead model, the stand-down it asks before it reacts,
+# and the frozen no-reaction-bead call an in-flight mol-first-reaction molecule
+# still makes. Runs the REAL script with a
 # stubbed `gc`, a stubbed gc-helm.sh, a stubbed gc-proactive.sh and a stubbed
 # deferred-dispatch.sh (all reached through the tool-override env vars), so no
 # live city, Dolt or network is touched. What each block guards is named above it.
@@ -41,10 +42,12 @@ case "$1 ${2:-}" in
     printf 'UPDATE %s\n' "$*" >> "$FAKE_LOG"
     # FAKE_PROACTIVE_STAMP_FAILS models the frozen path's landed-proof write
     # failing: the update carrying gc.proactive_reaction=1 exits non-zero.
-    # FAKE_NOTES_FAILS models a notes append that does not land.
+    # FAKE_NOTES_FAILS models a notes append that does not land, and
+    # FAKE_CLOSE_FAILS a close of the reaction bead the store refuses.
     case " $* " in
       *" gc.proactive_reaction=1 "*) [ -n "${FAKE_PROACTIVE_STAMP_FAILS:-}" ] && exit 1 ;;
       *" --append-notes "*) [ -n "${FAKE_NOTES_FAILS:-}" ] && exit 1 ;;
+      *" --status=closed "*) [ -n "${FAKE_CLOSE_FAILS:-}" ] && exit 1 ;;
     esac
     # Model read-after-write for gc.recommended_formula so the script's read-back
     # guard can be exercised: apply the set/unset to the state file a later
@@ -1092,6 +1095,111 @@ eq "$RC" "0" "(REOFFER) a marker from a DIFFERENT reaction does not block this o
 has "HELM takeaway tk-sub" "$LOG" "(REOFFER) …the reaction proceeds"
 unset FAKE_SHOW_JSON
 
+# ── Stand-down: a subject that takes no reaction from R ──────────────────────
+# The reaction asks this before it reads the subject. Either marker closes R
+# through the close every exit ends in and writes nothing to the subject; with
+# neither, nothing is written and exit 3 sends the reaction ahead.
+#   (SDLANDED)    this R's write-back already landed: R closes with its outcome
+#                 and the no-op work record, and the subject is not touched
+#   (SDOWNED)     a live owner holds the reaction: R closes, the marker stays
+#   (SDNUM)       the number form bd stores reads as the owner's marker too
+#   (SDOTHER)     a gc.reacted_by naming a different R does not stand this one down
+#   (SDNONE)      neither marker: nothing is written, and the exit says react
+#   (SDREAD)      an unreadable subject carries neither marker
+#   (SDDRY)       --dry-run names the close it would make and writes nothing
+#   (SDARGS)      no R, an exit's flag, or R as the subject is refused; the
+#                 common flags pass
+#   (SDPIN)       the read and the close carry the subject's store pin
+#   (SDCLOSEFAIL) a refused close still stands down, naming the full hand repair
+export FAKE_SHOW_JSON='[{"id":"tk-sub","status":"open","metadata":{"gc.reacted_by":"tk-react"}}]'
+run tk-sub --stand-down --reaction-bead "$R"
+eq "$RC" "0" "(SDLANDED) a subject already reacted-by this R stands the reaction down"
+has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed" "$LOG" \
+    "(SDLANDED) …closing R with its outcome and the no-op work record, the close every exit makes"
+hasnt "UPDATE bd update tk-sub" "$LOG" "(SDLANDED) …and writing nothing to the subject"
+hasnt "HELM" "$LOG" "(SDLANDED) …which is not released again"
+has "already carries this reaction's write-back" "$ERR" "(SDLANDED) …and it says why it stood down"
+
+export FAKE_SHOW_JSON='[{"id":"tk-sub","status":"open","metadata":{"gc.reaction_owned":"1","gc.origin":"operator"}}]'
+run tk-sub --stand-down --reaction-bead "$R"
+eq "$RC" "0" "(SDOWNED) a subject a live owner holds stands the reaction down"
+has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed" "$LOG" \
+    "(SDOWNED) …closing R through the same close"
+hasnt "UPDATE bd update tk-sub" "$LOG" "(SDOWNED) …and leaving the subject and its marker untouched"
+has "gc.reaction_owned=1" "$ERR" "(SDOWNED) …naming the marker"
+
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.reaction_owned":1}}]'
+run tk-sub --stand-down --reaction-bead "$R"
+eq "$RC" "0" "(SDNUM) the number form bd stores reads as the owner's marker too"
+has "UPDATE bd update $R" "$LOG" "(SDNUM) …and R is closed"
+
+export FAKE_SHOW_JSON='[{"id":"tk-sub","status":"open","metadata":{"gc.reacted_by":"tk-oldreact"}}]'
+run tk-sub --stand-down --reaction-bead "$R"
+eq "$RC" "3" "(SDOTHER) a marker from a DIFFERENT reaction does not stand this one down"
+hasnt "UPDATE" "$LOG" "(SDOTHER) …and nothing is written"
+
+export FAKE_SHOW_JSON='[{"id":"tk-sub","status":"open","metadata":{}}]'
+run tk-sub --stand-down --reaction-bead "$R"
+eq "$RC" "3" "(SDNONE) a subject with neither marker sends the reaction ahead"
+hasnt "UPDATE" "$LOG" "(SDNONE) …R stays open for the disposition to close"
+hasnt "HELM" "$LOG" "(SDNONE) …and nothing is disposed"
+has "the reaction goes ahead" "$ERR" "(SDNONE) …and it says so"
+
+export FAKE_SHOW_JSON='not json'
+run tk-sub --stand-down --reaction-bead "$R"
+eq "$RC" "3" "(SDREAD) an unreadable subject is not evidence of either marker"
+hasnt "UPDATE" "$LOG" "(SDREAD) …so nothing is written"
+
+export FAKE_SHOW_JSON='[{"id":"tk-sub","metadata":{"gc.reacted_by":"tk-react"}}]'
+run tk-sub --stand-down --reaction-bead "$R" --dry-run
+eq "$RC" "0" "(SDDRY) a dry-run stand-down succeeds"
+has "would close reaction bead $R" "$OUT" "(SDDRY) …naming the close it would make"
+hasnt "UPDATE" "$LOG" "(SDDRY) …and writing nothing"
+
+run tk-sub --stand-down
+eq "$RC" "2" "(SDARGS) a stand-down with no reaction bead is refused"
+eq "$LOG" "" "(SDARGS) …before anything is read or written"
+has "needs --reaction-bead" "$ERR" "(SDARGS) …naming the bead it would close"
+# A whole actionable call, --route included: without GC_RIG the actionable arm
+# refuses an unqualified route, so a call missing it would be refused there.
+run tk-sub --stand-down --reaction-bead "$R" --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat
+eq "$RC" "2" "(SDARGS) a stand-down carrying an exit's flags is refused"
+eq "$LOG" "" "(SDARGS) …and nothing was read or written"
+has "--stand-down takes --reaction-bead only" "$ERR" "(SDARGS) …naming the one flag it takes"
+# The subject carries this R's marker, so a flag the check let through would
+# stand down and close R instead of being refused.
+run tk-sub --stand-down --reaction-bead "$R" --emergency "test-macos"
+eq "$RC" "2" "(SDARGS) a stand-down carrying --emergency is refused, as every exit flag is"
+eq "$LOG" "" "(SDARGS) …and nothing was read or written"
+has "was given --emergency" "$ERR" "(SDARGS) …naming the flag it does not take"
+run tk-sub --stand-down --reaction-bead "$R" --by proactive --db "$TMP/sd.beads"
+eq "$RC" "0" "(SDARGS) the common flags pass the stand-down's check"
+has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed --db $TMP/sd.beads" "$LOG" \
+    "(SDARGS) …and the stand-down closes R in the store --db names"
+run tk-sub --stand-down --reaction-bead tk-sub
+eq "$RC" "2" "(SDARGS) the reaction bead cannot be the subject itself"
+
+mkdir -p "$TMP/rig/.beads"
+export FAKE_RIG_PATH="$TMP/rig"
+run tk-sub --stand-down --reaction-bead "$R"
+has "SHOW bd show tk-sub --json --db $TMP/rig/.beads" "$LOG" "(SDPIN) the markers are read from the subject's own store"
+has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed --db $TMP/rig/.beads" \
+    "$LOG" "(SDPIN) …and R's close is written there"
+unset FAKE_RIG_PATH
+
+export FAKE_CLOSE_FAILS=1
+run tk-sub --stand-down --reaction-bead "$R"
+eq "$RC" "0" "(SDCLOSEFAIL) a close the store refuses still stands the reaction down"
+has "its re-offer reaches this close again" "$ERR" "(SDCLOSEFAIL) …since R's re-offer reaches the close again"
+has "Close it by hand: gc bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed" \
+    "$ERR" "(SDCLOSEFAIL) …and the hand repair writes every field the close does"
+unset FAKE_SHOW_JSON
+run tk-sub --disposition actionable --reason "r" --takeaway "t" --route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
+eq "$RC" "0" "(SDCLOSEFAIL) an exit whose close of R is refused still reports its landed disposition"
+has "Close it by hand: gc bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed" \
+    "$ERR" "(SDCLOSEFAIL) …and names the same full hand repair"
+unset FAKE_CLOSE_FAILS
+
 # ── The frozen mol-first-reaction call (no --reaction-bead) ───────────────────
 # An in-flight molecule calls this without --reaction-bead, so it has no R to key
 # exactly-once on. The write-back runs and, in place of gc.reacted_by, stamps the
@@ -1200,6 +1308,73 @@ eq "$(grep 'status=closed' "$SCRIPT" | grep -v -E '^[[:space:]]*(note|die|#)' | 
    "(NEVERCLOSE) …its one closed-status write is the reaction bead's"
 eq "$(grep 'status=closed' "$SCRIPT" | grep -v -E '^[[:space:]]*(note|die|#)' | grep -c .)" "1" \
    "(NEVERCLOSE) …and it has no other"
+
+# ── R has one close: the prompt that runs this script writes none ────────────
+# The proactive prompt is this script's caller. A close of R written into the
+# prompt is a second copy of close_reaction's write, free to drift from the work
+# record that close carries, so the prompt stands a reaction down through
+# --stand-down and closes nothing itself. This suite is the merge gate a prompt
+# change runs, since tools/run-tests.sh maps the prompt's path below to it;
+# tools/proactive-first-reaction-fixture.sh asserts the same, by hand only.
+PROMPT_MD="$HERE/../../agents/proactive/prompt.template.md"
+if [ -f "$PROMPT_MD" ]; then
+  PM="$(cat "$PROMPT_MD")"
+  has '"$DISPOSE" "$SUBJECT" --stand-down --reaction-bead <R>' "$PM" \
+      "(ONECLOSE) the prompt stands a reaction down through this script"
+  hasnt "--status=closed" "$PM" "(ONECLOSE) …and writes no close of its own"
+else
+  bad "(ONECLOSE) the proactive prompt is missing at $PROMPT_MD"
+fi
+
+# ── The prompt reacts only when the stand-down says to ───────────────────────
+# --stand-down answers 0 when it closed R, and the worker drains, or 3 when the
+# reaction goes ahead. Any other status means it did not answer, and a reaction
+# run on one skips the marker check. The prompt's stand-down block runs here the
+# way a worker runs it: R filled in, a stand-in for this script that exits each
+# status, a gc that only logs, and a line after the block standing for the
+# reaction.
+#   (SDGATE) 0 drains and 3 goes on to react; every other status stops the block
+#            with a failure, before the reaction and with no drain
+SD_BLOCK="$(awk '/^### Before you react/{f=1} f && /^```bash$/{b=1; next} b && /^```$/{exit} b' "$PROMPT_MD" 2>/dev/null || true)"
+SD_BLOCK="${SD_BLOCK//<R>/$R}"
+mkdir -p "$TMP/sdbin"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/sdbin/gc" <<'SDGC'
+printf 'GC %s\n' "$*" >> "$FAKE_LOG"
+SDGC
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/sd-dispose" <<'SDD'
+printf 'DISPOSE %s\n' "$*" >> "$FAKE_LOG"
+exit "$FAKE_SD_RC"
+SDD
+chmod +x "$TMP/sdbin/gc" "$TMP/sd-dispose"
+sd_block() {
+  : > "$FAKE_LOG"
+  RC=0
+  OUT="$(FAKE_SD_RC="$1" DISPOSE="$TMP/sd-dispose" SUBJECT=tk-sub PATH="$TMP/sdbin:$PATH" \
+    bash -c "$SD_BLOCK"$'\n''echo REACTING' 2>"$TMP/err")" || RC=$?
+  ERR="$(cat "$TMP/err")"; LOG="$(cat "$FAKE_LOG")"
+}
+if [ -n "$SD_BLOCK" ]; then
+  sd_block 0
+  has "DISPOSE tk-sub --stand-down --reaction-bead $R" "$LOG" "(SDGATE) the prompt's block asks the stand-down about S and R"
+  has "GC runtime drain-ack" "$LOG" "(SDGATE) exit 0, R closed, drains"
+  hasnt "REACTING" "$OUT" "(SDGATE) …and does not go on to react"
+  eq "$RC" "0" "(SDGATE) …and the block succeeds"
+
+  sd_block 3
+  has "REACTING" "$OUT" "(SDGATE) exit 3, neither marker, goes on to react"
+  hasnt "drain-ack" "$LOG" "(SDGATE) …without draining"
+  eq "$RC" "0" "(SDGATE) …and the block succeeds"
+
+  for SD_RC in 1 2 4 127; do
+    sd_block "$SD_RC"
+    hasnt "REACTING" "$OUT" "(SDGATE) exit $SD_RC is no answer, so the block does not go on to react"
+    hasnt "drain-ack" "$LOG" "(SDGATE) …and does not drain, since R is still open"
+    [ "$RC" -ne 0 ] && ok "(SDGATE) …and the block fails" || bad "(SDGATE) …and the block fails (got $RC)"
+    has "exited $SD_RC" "$ERR" "(SDGATE) …naming the status it stopped on"
+  done
+else
+  bad "(SDGATE) no stand-down block under 'Before you react' in $PROMPT_MD"
+fi
 
 # ── A failed act refers to the cause ─────────────────────────────────────────
 # gc-helm.sh exits non-zero for a release that did not write AND for a release
