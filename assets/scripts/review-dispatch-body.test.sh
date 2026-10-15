@@ -108,7 +108,7 @@ hasF "$TMP/tri.out" 'only when the round made a call that is the operator' "(CHE
 notF "$TMP/tri.out" 'whether the human approval still covers it' "(CHECK) …not whenever the approval predates the round"
 bash "$SCRIPT" --check-name demo > "$TMP/demo.out" 2>/dev/null
 hasF "$TMP/demo.out" '## Check: `demo`' "(CHECK) --check-name demo names the demo check"
-hasF "$TMP/demo.out" 'Your method is the `review-demo` skill.' "(CHECK) demo names its method skill"
+hasF "$TMP/demo.out" 'Your method is the `gc-toolkit.review-demo` skill.' "(CHECK) demo names its method skill"
 hasF "$TMP/demo.out" 'needs a visual to be understood' "(CHECK) demo decides need first"
 hasF "$TMP/demo.out" 'attach nothing' "(CHECK) demo approves a no-need change with a note and no attachment"
 hasF "$TMP/demo.out" 'never a block' "(CHECK) demo never blocks on a visual the city cannot produce"
@@ -120,7 +120,7 @@ notF "$TMP/demo.out" 'that is a finding against the change, not a' "(CHECK) an u
   || bad "(CHECK) skills/review-demo/SKILL.md missing — the note names a method the pack does not ship"
 bash "$SCRIPT" --check-name pm > "$TMP/pm.out" 2>/dev/null
 hasF "$TMP/pm.out" '## Check: `pm`' "(CHECK) --check-name pm names the pm check"
-hasF "$TMP/pm.out" 'Your method is the `review-pm` skill.' "(CHECK) pm names its method skill"
+hasF "$TMP/pm.out" 'Your method is the `gc-toolkit.review-pm` skill.' "(CHECK) pm names its method skill"
 hasF "$TMP/pm.out" 'product lens' "(CHECK) pm carries the product lens"
 hasF "$TMP/pm.out" 'needs a visual, and delivering it, is `demo`'"'"'s' "(CHECK) pm leaves the visual decision to demo"
 bash "$SCRIPT" --check-name arch > "$TMP/arch.out" 2>/dev/null
@@ -128,7 +128,7 @@ hasF "$TMP/arch.out" '## Check: `arch`' "(CHECK) --check-name arch names the arc
 hasF "$TMP/arch.out" 'The Architect' "(CHECK) arch names the Architect persona"
 hasF "$TMP/arch.out" 'docs/architecture.md' "(CHECK) arch reads the architecture reference docs before judging"
 hasF "$TMP/arch.out" 'never edit' "(CHECK) arch enforces and never edits"
-hasF "$TMP/arch.out" 'Your method is the `review-arch` skill.' "(CHECK) arch names its method skill, the way demo and triage do"
+hasF "$TMP/arch.out" 'Your method is the `gc-toolkit.review-arch` skill.' "(CHECK) arch names its method skill, the way demo and triage do"
 notF "$TMP/arch.out" 'this pack ships no method' "(CHECK) a declared check gets its method, not the no-method note"
 notF "$TMP/arch.out" 'declared nowhere' "(CHECK) …nor the declared-nowhere note"
 # Run outside any repository, so no index declares the check.
@@ -141,7 +141,7 @@ RCC=0; bash "$SCRIPT" --check-name nonesuch >/dev/null 2>&1 || RCC=$?
 eq "$RCC" "0" "(RC) an undeclared check still exits 0"
 
 echo "# correctness names its method file, which carries the test evidence and every suite run"
-hasF "$OUT" 'Your method is the `review-correctness` skill.' "(CHECK) correctness names its method skill, the way the other checks do"
+hasF "$OUT" 'Your method is the `gc-toolkit.review-correctness` skill.' "(CHECK) correctness names its method skill, the way the other checks do"
 [ -r "$ROOT/skills/review-correctness/SKILL.md" ] \
   && ok "(CHECK) the correctness method skill ships where the note points" \
   || bad "(CHECK) skills/review-correctness/SKILL.md missing — the note names a method the pack does not ship"
@@ -155,13 +155,14 @@ echo "# every declared check names its method skill, loaded from the skill catal
 for c in correctness triage demo arch pm; do
   for formula in mol-review mol-review-quorum-signoff; do
     bash "$SCRIPT" --formula "$formula" --check-name "$c" > "$TMP/skill.$formula.$c.out" 2>/dev/null
-    hasF "$TMP/skill.$formula.$c.out" "Your method is the \`review-$c\` skill." "(SKILL) the $c note under $formula names its method skill"
-    hasF "$TMP/skill.$formula.$c.out" 'Load it from your skill catalog,' "(SKILL) …which the reviewer loads from its skill catalog"
+    hasF "$TMP/skill.$formula.$c.out" "Your method is the \`gc-toolkit.review-$c\` skill." "(SKILL) the $c note under $formula names its method skill"
+    hasF "$TMP/skill.$formula.$c.out" 'Load it from your skill catalog and apply it' "(SKILL) …which the reviewer loads from its skill catalog"
     notF "$TMP/skill.$formula.$c.out" 'skills/review-' "(SKILL) …and names no method path a reviewer would read from a checkout"
     notF "$TMP/skill.$formula.$c.out" '>>> review-method-read' "(SKILL) …and carries no read block"
   done
-  # The catalog lists a pack skill by its frontmatter name and links it by its
-  # directory name, so the pack ships the named skill under both.
+  # gascity links a pack skill into the catalog as gc-toolkit.<directory>, and
+  # codex lists it by its frontmatter name, so the two must agree for the
+  # name the note gives to reach the skill under either listing.
   name=$(awk '/^---$/ {n++; next} n == 1 && /^name:/ {sub(/^name:[[:space:]]*/, ""); print; exit}' "$ROOT/skills/review-$c/SKILL.md" 2>/dev/null)
   eq "$name" "review-$c" "(SKILL) the pack ships skills/review-$c under the name the note gives it"
 done

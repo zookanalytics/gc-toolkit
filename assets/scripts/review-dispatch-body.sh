@@ -136,8 +136,9 @@ exactly once; never `gh pr review`, because the city does not approve its own PR
 S
     ;;
 esac
-# A declared arm names its method skill, which the reviewer loads from its
-# skill catalog (below).
+# A declared arm names its method skill's directory, the one its index row
+# points at; the note names the skill as gascity surfaces every pack skill,
+# gc-toolkit.<directory>, for the reviewer to load from its catalog (below).
 METHOD_SKILL=""
 case "$CHECK_NAME" in
   correctness)
@@ -268,11 +269,9 @@ esac
 if [ -n "$METHOD_SKILL" ]; then
   cat <<R
 
-**Your method is the \`$METHOD_SKILL\` skill.** Load it from your skill catalog,
-which links the copy in the pack this city installs. A copy in the review
-worktree is the change under review, not your method. A rig's extension to the
-method comes from the reviewed commit instead, and is appended below when that
-commit carries one.
+**Your method is the \`gc-toolkit.$METHOD_SKILL\` skill.**
+Load it from your skill catalog and apply it; a copy in the review worktree is
+the change under review, not your method.
 R
 fi
 
