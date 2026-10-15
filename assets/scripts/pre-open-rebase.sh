@@ -248,13 +248,17 @@ while IFS= read -r row; do
   # route is what makes it reachable, and the dedup below matches it, so nothing
   # retries it. Narrowed to open/unassigned/unrouted at THIS head: a metadata
   # write ignores bd's claim guard, so re-stamping a child someone holds stomps
-  # live work.
+  # live work. A poured child (gc.execution_routed_to set) is its molecule's to
+  # run. An armed child (gc.dispatch_when_ready set) is its arm's to re-sling: a
+  # child whose run stopped to ask a person waits that way, its route keys
+  # cleared (await-ruling.sh). Neither is a strand.
   stranded=$(printf '%s' "$kids" | jq -r --arg id "$id" --arg h "$head_oid" '
     [ .[] | select(.id != $id)
       | select(((.status // "open") | ascii_downcase) == "open")
       | select(((.assignee // "") | tostring) == "")
       | select(((.metadata["gc.routed_to"] // "") | tostring) == "")
       | select(((.metadata["gc.execution_routed_to"] // "") | tostring) == "")
+      | select(((.metadata["gc.dispatch_when_ready"] // "") | tostring) == "")
       | select(((.metadata.merge_result // "") | tostring) == "")
       | select(($h != "") and (((.metadata.rejection_reason // "") | tostring) | contains("head " + $h)))
       | .id ] | .[0] // empty' 2>/dev/null)

@@ -166,5 +166,27 @@ case_store "[$ANCHOR,$(review closed approve recorded)]"
 if green --anchor tk-anc --lane correctness --no-remote; then ok "unmarked: a closed approve with no edge still derives green"; else bad "unmarked: an edgeless approve lost its backing"; fi
 eq "$(grep -c '' "$STUB_DEPS")" 0 "unmarked: …and the read wrote no edge"
 
+# ---------------------------------------------------------------------------
+# --db pins every store read: a caller that reads one store (liveness-sweep.sh)
+# derives the lane from that store, and the bd_list memo, which keys an entry by
+# the cwd and never the pin, stays off under it.
+# ---------------------------------------------------------------------------
+case_store "[$ANCHOR,$(review closed approve recorded)]" rv-1
+: > "$STUB_GC_LOG"
+if green --anchor tk-anc --lane correctness --no-remote --db /pinned/.beads; then ok "--db: the pinned reads derive green"; else bad "--db: the pinned reads did not derive green"; fi
+eq "$(grep -c '^bd ' "$STUB_GC_LOG")" "$(grep -c -- ' --db /pinned/.beads' "$STUB_GC_LOG")" "--db: …and every store read carries the pin"
+printf '[{"state":"APPROVED","id":3}]' > "$GH_DIR/reviews_42.json"
+case_store "[$ANCHOR]"
+: > "$STUB_GC_LOG"
+if green --anchor tk-anc --lane correctness --db /pinned/.beads; then ok "--db: the GitHub fallback still backs the lane"; else bad "--db: the GitHub fallback did not back the lane"; fi
+has "$(grep '^bd show' "$STUB_GC_LOG")" "--db /pinned/.beads" "--db: …and the anchor read it makes carries the pin"
+rm -f "$GH_DIR/reviews_42.json"
+mkdir -p "$TMP/memo"
+case_store "[$ANCHOR,$(review closed approve recorded)]" rv-1
+GC_RECONCILE_BD_CACHE="$TMP/memo" green --anchor tk-anc --lane correctness --no-remote --db /pinned/.beads >/dev/null 2>&1
+eq "$(find "$TMP/memo" -type f | wc -l | tr -d ' ')" 0 "--db: the memo stores nothing under the pin"
+GC_RECONCILE_BD_CACHE="$TMP/memo" green --anchor tk-anc --lane correctness --no-remote >/dev/null 2>&1
+if [ "$(find "$TMP/memo" -type f | wc -l | tr -d ' ')" -gt 0 ]; then ok "…while an unpinned read does use it"; else bad "the memo stayed empty without a pin, so the assertion above proves nothing"; fi
+
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

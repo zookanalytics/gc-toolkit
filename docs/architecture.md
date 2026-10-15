@@ -58,7 +58,7 @@ flowchart LR
   FORM -->|push| BR
   FORM -->|via lifecycle.sh| LIFE
   LIFE -->|one atomic bd update| LEDGER
-  SIGN -->|check markers| LEDGER
+  SIGN -->|verdicts on review beads| LEDGER
   ORD -->|every 60s| CAD
   CAD -->|reads + writes via lifecycle.sh| LEDGER
   CAD -->|opens / merges| PR
@@ -100,10 +100,10 @@ performer; the full transition table with writers is
    unanchored here; its first lifecycle transition is the refinery's.
 6. **Gate.** The merge cadence's gate-ensure arm makes every declared check
    raisable; a review bead is routed to the polecat-codex pool; the reviewer's
-   single call to `signoff.sh` writes the verdict marker or files one rework
-   child.
-7. **PR.** With every declared check green at the live head, `pr-open.sh` opens
-   (or adopts) the pull request.
+   single call to `signoff.sh` records the verdict on the review bead and, on
+   request-changes, files one rework child.
+7. **PR.** With every `pre-open` check deriving green from its reviews,
+   `pr-open.sh` opens (or adopts) the pull request.
 8. **Merge.** `merge.sh` validates the full authorization set, merges pinned to
    the validated commit, then closes the anchor and records `merged_sha` in one
    `lifecycle.sh` call.

@@ -66,8 +66,8 @@ gc.takeaway'
 # or empty. Same list as the declaration, same standby role.
 BUILTIN_SETTLED_KEYS='gc.takeaway=gc.takeaway_settled'
 BUILTIN_MARKER_PREFIXES='dispatch_backstop.'
-# No gate marker is a hold: a lane state is a state of one reviewer's lane, and
-# each is one some actor moves on from. Empty disables the gate arm.
+# No gate marker is a hold: a lane's state is derived from its reviews and never
+# stored on the anchor. Empty disables the gate arm.
 BUILTIN_GATE_PREFIX=''
 BUILTIN_GATE_VERB=''
 BUILTIN_ROUTE_KEY='gc.routed_to'

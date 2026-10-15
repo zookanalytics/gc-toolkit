@@ -14,8 +14,8 @@
 # `none` is the explicit no-lanes opt-out the old approval-only anchor meant. The
 # universal rule still requires the approval either way.
 #
-# approval takes no check.approval marker and no review or finding bead, so unlike
-# migrate-codex-to-correctness there is nothing else to rewrite — only the token.
+# approval names no lane, so no review or finding bead carries it, and the token
+# is the only thing to rewrite.
 #
 # RUN IT AFTER the code lands: before it, merge.sh still reads the token to arm
 # approval per-anchor, so removing it from an anchor that is NOT otherwise covered

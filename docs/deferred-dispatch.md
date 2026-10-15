@@ -89,12 +89,15 @@ is silent manual-follow-up debt — the exact miss
 
 An arm is a dispatch path, as a route is. Both are defined once, in
 `assets/scripts/dispatch-path.sh`, and each reader that asks whether a bead's
-dispatch is already decided sources that file: the proactive scan,
+dispatch is already decided sources that file: the proactive scan and sling,
 `doctor/check-blocked-work-armed` and `doctor/check-step-terminal`. So an arm
 also keeps the bead out of the proactive scan. `tools/gc-proactive.sh scan`
 looks for raw input to react to, and it drops a bead that has a dispatch path.
 Otherwise a sweep that ran between a blocker closing and the next reconcile
 pass would sling a first reaction at a bead the arm is about to dispatch.
+`gc-helm.sh react` and `gc-visit-open.sh` skip the scan and name a bead to
+`tools/gc-proactive.sh sling` directly, so the sling refuses a bead that has a
+dispatch path too, and a reaction they ask for cannot race the arm either.
 
 To see what is owed, in this rig's store:
 
@@ -250,15 +253,22 @@ the pass carries its own lock:
   `GC_RIG`. With only `GC_RIG_ROOT` set, it is the root's last path element
   plus a checksum of the whole path, so two rigs never share a lock. The
   lock depends on no bead surviving.
-- Only the pass process holds the lock's descriptor. Every `gc` and
-  `escalate.sh` call the pass makes runs with it closed. A process that a
-  `gc` call starts can outlive the pass: a store read can bring up a Dolt
-  server, and `gc` hands the descriptors it was given to what it starts. A
-  process that kept the descriptor would hold the lock against every later
-  pass. The kernel releases the lock when the pass exits, however it exits,
-  `SIGKILL` included. The order's timeout kills the pass's whole process
-  group, its `gc sling` with it, and the next pass re-attempts the
-  unconfirmed sling through the `slinging@` recovery.
+- The lock, its state key and the way a pass runs what it calls are
+  `bd-lib.sh`'s `take_pass_lock`, `rig_state_key` and `pass_child`.
+  `refinery-reconcile.sh` takes its pass lock through the same
+  `take_pass_lock` and runs its arms through `pass_child`, under a state key
+  of its own.
+- Every `gc` and `escalate.sh` call the pass makes runs through `pass_child`,
+  with the lock's descriptor closed. A process that a `gc` call starts can
+  outlive the pass: a store read can bring up a Dolt server, and `gc` hands
+  the descriptors it was given to what it starts. A process that kept the
+  descriptor would hold the lock against every later pass. The subshell
+  `pass_child` runs a call from holds the descriptor until the call exits, so
+  a pass killed by itself leaves the lock held while the call it was making
+  runs on. The kernel releases the lock once the pass and its calls have
+  exited, however they exit, `SIGKILL` included. The order's timeout kills
+  the pass's whole process group, its `gc sling` with it, and the next pass
+  re-attempts the unconfirmed sling through the `slinging@` recovery.
 - A pass that finds the lock held prints one line and exits 0 without
   listing or slinging. Under the order it also declares the run `skipped`
   in the file the controller names in `GC_ORDER_OUTCOME_FILE` (gascity's
