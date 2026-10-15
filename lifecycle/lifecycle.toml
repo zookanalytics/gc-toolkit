@@ -938,6 +938,9 @@ keys = [
   #   departed from their suggestion, or changed code the ruling declined. A
   #   flagged point sits under Worth a look. Absent means unflagged, and an
   #   answer given without --flag removes it.
+  #   A later batch's child taking the finding over (`finding.sh upsert
+  #   --fix-unit`) clears finding.fix_answer and finding.fix_flag in the write
+  #   that records it, so neither outlives the fix unit that wrote it.
   "finding.label", "finding.answer", "finding.fix_answer", "finding.fix_flag",
   # fix_notes — on the fix unit (task_kind=rework), not a finding: its notes on
   #   the round, written by the fix unit through `finding.sh fix-notes` and shown

@@ -432,16 +432,21 @@ hasnt "$(deps)" "cfuQ2|blocks|$QU" "…hanging no edge onto a finding the valida
 QM=$(upsert_q mf "ruled must-fix" cfuQ1)
 "$SUT" set-disposition --finding "$QM" --anchor tk-ancQ --disposition must-fix
 has "$(deps)" "cfuQ1|blocks|$QM" "the first batch's child answers the finding it raised"
+"$SUT" answer --finding "$QM" --answer "You asked for a decision, and the fix chose X." --flag
 eq "$(upsert_q mf "ruled must-fix" cfuQ2)" "$QM" "a later batch re-raises the must-fix finding"
 eq "$(meta "$QM" 'finding.fix_unit')" "cfuQ2" "…which records the later child"
+eq "$(meta "$QM" 'finding.fix_answer')|$(meta "$QM" 'finding.fix_flag')" "<absent>|<absent>" \
+  "…and clears the earlier child's answer and flag in the same write, so the point waits on the later child's answer"
 has "$(deps)" "cfuQ2|blocks|$QM" "…and hangs its close-ordering edge onto the already-ruled finding"
 has "$(deps)" "cfuQ1|blocks|$QM" "…beside the first child's, which stays"
 gc bd update cfuQ1 --status=closed >/dev/null
 "$SUT" close-answered --anchor tk-ancQ
 eq "$(bstatus "$QM")" "open" "the earlier child landing does not close a finding the later batch re-raised"
+"$SUT" answer --finding "$QM" --answer "Fixed as you suggested."
 : > "$STUB_GC_LOG"
 eq "$(upsert_q mf "ruled must-fix" cfuQ2)" "$QM" "re-raising with the child already recorded re-adopts it"
 hasnt "$(cat "$STUB_GC_LOG")" "update $QM" "…and writes nothing"
+eq "$(meta "$QM" 'finding.fix_answer')" "Fixed as you suggested." "…so the answer that child gave stands"
 hasnt "$(cat "$STUB_GC_LOG")" "dep cfuQ2 --blocks" "…and hangs no second edge"
 eq "$("$SUT" upsert --anchor tk-ancQ --lane human --locus "assets/scripts/q.sh:mf()" --message "ruled must-fix")" "$QM" "a re-raise with no --fix-unit re-adopts the finding"
 eq "$(meta "$QM" 'finding.fix_unit')" "cfuQ2" "…and leaves its recorded child alone"
@@ -497,11 +502,11 @@ eq "$(bstatus "$FR")" "open" "…so the earlier child landing does not close it 
 FS=$(upsert_r readopt "crossed by a ruling" cfuR1)
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/cross/gc" <<SHIM
 "$BIN/gc" "\$@"; rc=\$?
-if [ "\$*" = "bd update $FS --set-metadata finding.fix_unit=cfuR2" ]; then
+case "\$*" in "bd update $FS --set-metadata finding.fix_unit=cfuR2"*)
   "$BIN/gc" bd dep "$FS" --blocks tk-ancR >/dev/null
   "$BIN/gc" bd dep cfuR1 --blocks "$FS" >/dev/null
-  "$BIN/gc" bd update "$FS" --set-metadata finding.disposition=must-fix >/dev/null
-fi
+  "$BIN/gc" bd update "$FS" --set-metadata finding.disposition=must-fix >/dev/null ;;
+esac
 exit \$rc
 SHIM
 eq "$(PATH="$TMP/cross:$PATH" upsert_r readopt "crossed by a ruling" cfuR2)" "$FS" "a re-raise crossed by a ruling re-adopts the finding"

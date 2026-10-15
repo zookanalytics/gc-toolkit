@@ -472,6 +472,12 @@ cmd_key() {
 # closed. Fail closed (exit 2): a finding left recording the earlier child closes
 # as answered when that child lands, and the caller's retry re-adopts it.
 #
+# The new child answers the point afresh, so the write that records it clears the
+# earlier child's answer and flag (finding.fix_answer, finding.fix_flag). The
+# living answer then shows the point at its ruling's stage until the new child
+# answers, never under the earlier child's claim or citing the new child's
+# commits for it.
+#
 # The disposition is read after the record is written, never before. A must-fix
 # ruling can be in flight on the same finding, and it re-reads the record after it
 # commits (set-disposition). Whichever side reads second sees the other's write,
@@ -483,7 +489,7 @@ readopt_fix_unit() { # <finding> <fix-unit>
     || { warn "could not read re-raised finding $f to record fix unit $fu"; return 2; }
   got=$(printf '%s' "$row" | jq -r '(.[0].metadata["finding.fix_unit"] // "") | tostring' 2>/dev/null)
   if [ "$got" != "$fu" ]; then
-    gc bd update "$f" --set-metadata finding.fix_unit="$fu" >/dev/null 2>&1 || true
+    gc bd update "$f" --set-metadata finding.fix_unit="$fu" --unset-metadata finding.fix_answer --unset-metadata finding.fix_flag >/dev/null 2>&1 || true
     row=$(bd_json show "$f")
     got=$(printf '%s' "$row" | jq -r '(.[0].metadata["finding.fix_unit"] // "") | tostring' 2>/dev/null)
     [ "$got" = "$fu" ] \
