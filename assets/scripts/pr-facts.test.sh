@@ -5474,7 +5474,7 @@ out=$(run)
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/140/reviews/555/dismissals" "the human review is dismissed once all its findings clear"
 has "$(cat "$STUB_GH_LOG")" "REREQUEST repos/zook/gc-toolkit/pulls/140/requested_reviewers" "…and a fresh review is requested"
 has "$(cat "$STUB_GH_LOG")" "reviewers[]=johnzook" "…from the review's own author"
-has "$(cat "$STUB_GH_LOG")" "message=Your review: 2 points, all answered at sha-140 (https://github.com/zook/gc-toolkit/pull/140#issuecomment-" "the dismiss message is the count line, linking the review's living answer"
+has "$(cat "$STUB_GH_LOG")" "message=Your review: 2 points, all answered (https://github.com/zook/gc-toolkit/pull/140#issuecomment-" "the dismiss message is the count line, linking the review's living answer"
 has "$(cat "$STUB_GH_LOG")" "Dismissal is not approval; the merge still gates on an explicit approving review." "…and says dismissal is not approval"
 hasnt "$(cat "$STUB_GH_LOG")" "in its thread" "…and points at no reply or thread"
 hasnt "$(cat "$STUB_GH_LOG")" "addressed" "…and calls none of them addressed"
@@ -5938,7 +5938,9 @@ commits 600 '[{"oid":"09290b4eaaaa","message":"fix: a lifted approval reads revi
 out=$(run)
 L1=$(lanswer 600 6001)
 eq "$(lcount 600 6001)" "1" "the review gets one living answer"
-has "$L1" "### Your review: 3 points, all answered at sha-600" "it counts three points: the summary paragraph is no point of its own"
+has "$L1" "### Your review: 3 points, all answered
+" "it counts three points: the summary paragraph is no point of its own"
+hasnt "$L1" "answered at" "…and names no commit, so a push leaves it as it stands"
 hasnt "$L1" "Requesting changes for three issues" "…and has no entry"
 has "$L1" "Review dismissed; your review is requested again. 2 worth a look, 1 done." "it leads with the dismissal and the section counts"
 has "$L1" "**Worth a look**
@@ -5956,7 +5958,7 @@ Each point is its own commit, so each reply names one." "the fix unit's notes ar
 eq "$(jq -r '[ .issue_comments[]? ] | length' "$GH_DIR/threads_600.json")" "1" "no other comment answers the review on the Conversation tab: no summary post, no check-mark ack"
 eq "$(grep -c '^PRCOMMENT 600' "$STUB_GH_LOG")" "1" "…one post in all"
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/600/reviews/6001/dismissals" "the answered review is dismissed"
-eq "$(grep -c 'message=Your review: 3 points, all answered at sha-600 (https://github.com/zook/gc-toolkit/pull/600#issuecomment-[0-9]*)\. Dismissal is not approval; the merge still gates on an explicit approving review\.$' "$STUB_GH_LOG")" "1" \
+eq "$(grep -c 'message=Your review: 3 points, all answered (https://github.com/zook/gc-toolkit/pull/600#issuecomment-[0-9]*)\. Dismissal is not approval; the merge still gates on an explicit approving review\.$' "$STUB_GH_LOG")" "1" \
   "…with a one-line note: the count line, the living answer's link, and that dismissal is not approval"
 eq "$(thumbed 600 RV-600),$(reacted 600 RV-600)" "true,false" "the review body trades its pickup EYES for THUMBS_UP once the living answer marks it resolved"
 has "$L1" "<!-- gc-writeback-mark:resolved r6001 -->" "…the mark line the living answer carries for it"
@@ -5970,6 +5972,12 @@ hasnt "$(cat "$STUB_GH_LOG")" "PRCOMMENT" "no second living answer"
 hasnt "$(cat "$STUB_GH_LOG")" "ICEDIT" "…and no edit, since the rendering has not changed"
 hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…and no second dismissal"
 eq "$(lanswer 600 6001)" "$L1" "the living answer is unchanged"
+echo "# …and neither does a push, since the count line names no commit"
+printf '%s' "$(prview 600 OPEN CLEAN MERGEABLE | jq -c '.headRefOid = "sha-600-pushed"')" > "$GH_DIR/pr_view_600.json"
+: > "$STUB_GH_LOG"
+out=$(run)
+hasnt "$(cat "$STUB_GH_LOG")" "ICEDIT" "a push leaves the settled living answer as it stands, with no edit"
+eq "$(lanswer 600 6001)" "$L1" "…so it reads as before"
 
 echo "# a review shaped like PR #1212: four inline comments, all fixed as asked"
 L2_SUMMARY="Requesting a few fixes before merge. Details are in the inline comments."
@@ -5985,7 +5993,8 @@ commits 601 '[{"oid":"aa11aa11aaaa","message":"fix: the four review points (KL2)
 : > "$STUB_GH_LOG"
 out=$(run)
 L2=$(lanswer 601 6002)
-has "$L2" "### Your review: 4 points, all answered at sha-601" "four points, all answered"
+has "$L2" "### Your review: 4 points, all answered
+" "four points, all answered"
 has "$L2" "4 done." "…all done"
 hasnt "$L2" "Worth a look" "…with nothing worth a look"
 has "$L2" "- **[A partial landing writes a mismatched work record.](https://github.com/zook/gc-toolkit/pull/601#discussion_r6201)** Fixed as you suggested" "a bold lead loses its 'Please fix on this PR:'"
@@ -5993,7 +6002,7 @@ has "$L2" "- **[Small doc fix.](https://github.com/zook/gc-toolkit/pull/601#disc
 hasnt "$L2" "Notes from the fix" "a fix unit with no notes adds no notes block"
 eq "$(jq -r '[ .issue_comments[]? ] | length' "$GH_DIR/threads_601.json")" "1" "no separate summary post or check-mark ack: the living answer is the one Conversation comment"
 hasnt "$(jq -r '[ .issue_comments[]? | .body ] | join(" ")' "$GH_DIR/threads_601.json")" "✅" "…and nothing on the Conversation tab carries the check-mark ack"
-eq "$(grep -c 'message=Your review: 4 points, all answered at sha-601 (https://github.com/zook/gc-toolkit/pull/601#issuecomment-[0-9]*)\. Dismissal is not approval; the merge still gates on an explicit approving review\.$' "$STUB_GH_LOG")" "1" \
+eq "$(grep -c 'message=Your review: 4 points, all answered (https://github.com/zook/gc-toolkit/pull/601#issuecomment-[0-9]*)\. Dismissal is not approval; the merge still gates on an explicit approving review\.$' "$STUB_GH_LOG")" "1" \
   "the dismissal note is one line linking the living answer"
 showcase pr-1212-shape 601 6002
 
@@ -6106,9 +6115,8 @@ eq "$(jq -r '[ .issue_comments[]? ] | length' "$GH_DIR/threads_606.json")" "1" "
 
 echo "# a decline its fix unit flagged cites the fix's commits once that fix unit lands, in an edit"
 # The decline closed its finding at the ruling, before the fix unit that changed
-# the code anyway had pushed. The point needing the operator keeps the head out
-# of the count line, so the landing alone has to change the rendering for the
-# writer to edit the comment and cite the commit.
+# the code anyway had pushed, so the landing alone has to change the rendering
+# for the writer to edit the comment and cite the commit.
 store "[$(anchor LA8 607 "$(lmeta rework:KL8 6802 6008)"), $(fixunit KL8 open),
   $(lfind LI1 LA8 6801 6008 declined closed '**Rename the cap to budget.**' '{"finding.fix_unit":"KL8","finding.reply":"the name matches the config key it reads.","finding.fix_flag":"1","finding.fix_answer":"Renamed anyway, though the ruling declined it: the config key was renamed in the same change."}'),
   $(lfind LI2 LA8 6802 6008 needs-you open 'Should the cap apply to retries too?' '{"finding.fix_unit":"KL8","finding.visit":"tk-v607","finding.answer":"Should the cap apply to retries too?","finding.reply":"This comment needs your decision — opened visit tk-v607."}')]"

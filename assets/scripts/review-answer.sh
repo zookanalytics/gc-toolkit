@@ -216,7 +216,7 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
   # it, and the comment already on the PR. $vl maps a review id to the mark lines
   # and batch visits the write-back plan asks of it ({marks, visits, swaps}),
   # and $beads maps a bead id to the title, fix notes and close read for it.
-  def ra_models($view; $prurl; $self; $head; $vl; $beads; $marker):
+  def ra_models($view; $prurl; $self; $vl; $beads; $marker):
     [ .[]? | select(((.metadata.task_kind // "") | tostring) == "finding")
            | select(((.metadata["finding.lane"] // "") | tostring) == "human")
            | ra_record($view; $prurl; $beads) | select(.rid != "") ]
@@ -250,7 +250,7 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
         | ([ $fs[] | .fix_unit | select(. != "") ] | unique
            | map({ by: ., text: ((($beads[.] // {}).fix_notes // "") | tostring) }) | map(select(.text | test("\\S")))) as $notes
         | ([ $fs[] | select(ra_owes_reply) | .id ]) as $replied
-        | { rid: $rid, head: $head, self: $selfrev, author: $login,
+        | { rid: $rid, self: $selfrev, author: $login,
             state: ((($rv.state // "") | tostring)),
             points: $ps, visits: $visits, notes: $notes,
             marks: (if (($v.marks // []) | length) > 0 then $v.marks else $exmarks end), swaps: ($v.swaps // "-"),
@@ -264,12 +264,14 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
                    or any($fs[]; ra_owes_reply and (.posted | not))
                    or ((($v.marks // []) | length) > 0)) });
   def ra_count($n; $word): "\($n) \($word)" + (if $n == 1 then "" else "s" end);
-  # The count line: how many points the review raised and how far they are.
+  # The count line: how many points the review raised and how far they are. It
+  # names no commit, so a push leaves a settled review comment as it stands;
+  # each point cites the commits that answered it.
   def ra_heading:
     (.points // []) as $ps | ($ps | length) as $n
     | ([ $ps[] | select(.answered) ] | length) as $k
     | "Your review: " + ra_count($n; "point")
-      + (if $n > 0 and $k == $n then ", all answered" + (if (.head // "") != "" then " at " + .head[0:8] else "" end)
+      + (if $n > 0 and $k == $n then ", all answered"
          elif $k > 0 then ", \($k) answered so far"
          elif any($ps[]; .ruled | not) then ", picked up; the ruling is in progress"
          else ", none answered yet" end);

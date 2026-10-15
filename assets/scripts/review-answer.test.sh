@@ -140,7 +140,7 @@ eq "$(url '{"cid":"10","body":true}')" "$PRURL#pullrequestreview-10" "(URL) a re
 eq "$(url '{"cid":"99"}')" "" "(URL) a comment the read does not hold gets no link"
 
 echo "# (RENDER)"
-MODEL='{"rid":"10","head":"abcdef123456","self":false,"dismissed":"requeued",
+MODEL='{"rid":"10","self":false,"dismissed":"requeued",
   "points":[
     {"id":"a","section":"worth","label":"Guard rewrites the opt-out","url":"U1","sentence":"You asked for a decision, and the fix chose your second option.","ref":"","answered":true,"ruled":true,"extra":""},
     {"id":"b","section":"done","label":"A refused dismissal tells nobody.","url":"","sentence":"Fixed with your option (a).","ref":"{{gc-commits:k|3}}","answered":true,"ruled":true,"extra":""},
@@ -151,7 +151,9 @@ MODEL='{"rid":"10","head":"abcdef123456","self":false,"dismissed":"requeued",
 R=$(printf '%s' "$MODEL" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')
 case "$R" in "> [!IMPORTANT]"*) ok "(RENDER) an open visit leads the comment" ;; *) bad "(RENDER) an open visit leads the comment (got: $R)" ;; esac
 has "$R" "> **Needs you: visit tk-v1.** Should enforcement turn on now?" "(RENDER) …naming the visit and its question"
-has "$R" "### Your review: 3 points, all answered at abcdef12" "(RENDER) the count line names the head the answers stand at"
+has "$R" "### Your review: 3 points, all answered
+" "(RENDER) the count line says every point is answered"
+hasnt "$R" "answered at" "(RENDER) …naming no commit, so a push leaves a settled review comment as it stands"
 has "$R" "Review dismissed; your review is requested again. 2 worth a look, 1 done." "(RENDER) the dismissal and the section counts follow it"
 has "$R" "**Worth a look**
 - **[Guard rewrites the opt-out.](U1)** You asked for a decision, and the fix chose your second option." "(RENDER) an entry: a linked label, its sentence"
@@ -181,7 +183,7 @@ has "$P" "### Your review: 3 points, picked up; the ruling is in progress" "(REN
 hasnt "$P" "Not ruled yet" "(RENDER) …and no entry repeats it"
 hasnt "$P" "in progress." "(RENDER) …nor adds a count line"
 
-BIG=$(jq -n --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'{rid:"1",head:"",self:false,dismissed:"",
+BIG=$(jq -n --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'{rid:"1",self:false,dismissed:"",
   points:[{id:"a",section:"done",label:"L",url:"",sentence:("word " * 600),ref:"",answered:true,ruled:true,extra:""}],
   visits:[],notes:[{by:"k",text:("n " * 9000)}],marks:[]} | ra_render($m) | length')
 [ "$BIG" -lt 15000 ] && ok "(RENDER) a long sentence and long notes are clipped, so the comment stays postable ($BIG characters)" \
@@ -202,7 +204,7 @@ VIEW2='{"reviews":[{"databaseId":10,"state":"COMMENTED","author":{"login":"op"},
     {"databaseId":900,"author":{"login":"bot"},"body":"x\n<!-- gc-writeback -->\n<!-- gc-writeback-mark:resolved r10 -->\n<!-- gc-review-answer:r10 -->\n<!-- gc-review-answer:r10:dismissed -->\n<!-- gc-review-answer:r10:digest:12345 -->"},
     {"databaseId":901,"author":{"login":"op"},"body":"<!-- gc-writeback -->\n<!-- gc-review-answer:r10 -->"}]}'
 models() { printf '%s' "$ROWS" | jq -c --argjson v "$1" --argjson vl "${2:-}" --argjson b '{"K":{"title":"rework","fix_notes":"notes from K"}}' \
-  --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; "abc"; $vl; $b; $m)'; }
+  --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; $vl; $b; $m)'; }
 M=$(models "$VIEW2" '{}')
 eq "$(printf '%s' "$M" | jq 'length')" "1" "(MODEL) one model per review: a machine finding and a Conversation comment belong to none"
 eq "$(printf '%s' "$M" | jq -r '.[0].existing.db + " " + .[0].existing.digest')" "900 12345" "(MODEL) the comment on the PR is ours carrying the review key, with its digest read back"
@@ -216,19 +218,19 @@ eq "$(printf '%s' "$M" | jq -r '.[0].notes[0].text')" "notes from K" "(MODEL) th
 eq "$(printf '%s' "$M" | jq -r '[ .[0].points[].id ] | join(",")')" "B,I" "(MODEL) the body leads its inline comments"
 DONE_ROWS=$(printf '%s' "$ROWS" | jq -c 'map(if .id == "I" then .status = "closed" else . end | if .id == "B" then .metadata["finding.reply_posted"] = "1" else . end)')
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "DISMISSED"')" \
-  --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; "abc"; {}; {}; $m) | .[0] | [ .live, .dismissed ]')" '[false,"plain"]' \
+  --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m) | .[0] | [ .live, .dismissed ]')" '[false,"plain"]' \
   "(MODEL) a dismissed review with every finding closed and nothing owed is not live, and reads dismissed without a re-request claim"
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "COMMENTED"')" \
-  --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; "abc"; {"10":{"marks":["resolved r10"],"visits":[],"swaps":"-"}}; {}; $m) | .[0].live')" "true" \
+  --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {"10":{"marks":["resolved r10"],"visits":[],"swaps":"-"}}; {}; $m) | .[0].live')" "true" \
   "(MODEL) a mark the plan asks of it keeps it live, so a body answered after its findings closed still gets its answer"
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "CHANGES_REQUESTED"')" \
-  --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; "abc"; {}; {}; $m) | .[0].live')" "true" \
+  --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m) | .[0].live')" "true" \
   "(MODEL) a standing changes-requested block keeps it live"
 FL_ROWS='[{"id":"D","status":"closed","title":"finding[human]: d","description":"Locus: a.sh:2\n\n**Rename the cap.**\n\nRaised by human:op reviewing anchor A.",
   "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"declined","finding.comment_id":"11","finding.review_id":"10",
               "finding.fix_unit":"K","finding.fix_flag":"1","finding.fix_answer":"Renamed anyway, though the ruling declined it."}}]'
 flref() { printf '%s' "$FL_ROWS" | jq -r --argjson v "$VIEW2" --argjson b "$1" --arg m "$MARKER" \
-  "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; "abc"; {}; $b; $m) | .[0].points[0].ref'; }
+  "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; $b; $m) | .[0].points[0].ref'; }
 eq "$(flref '{"K":{"title":"rework","fix_notes":"","closed":true}}')" "{{gc-commits:K|11}}" \
   "(MODEL) a flagged decline reads its fix unit's landing from the close read for it"
 eq "$(flref '{"K":{"title":"rework","fix_notes":"","closed":false}}')" "" "(MODEL) …so a fix unit still open cites nothing"
@@ -238,14 +240,14 @@ eq "$(flref '{}')" "" "(MODEL) …and neither does one that did not read back"
 DL_ROWS='[{"id":"D2","status":"closed","title":"finding[human]: d2","description":"Locus: PR review\n\nA summary with a point of its own.\n\nRaised by human:op reviewing anchor A.",
   "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"declined","finding.comment_id":"10","finding.review_id":"10",
               "finding.reply":"We keep Y because Z","finding.fix_unit":"K","finding.fix_flag":"1","finding.fix_answer":"Changed it anyway."}}]'
-DLM=$(printf '%s' "$DL_ROWS" | jq -c --argjson v "$VIEW2" --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; "abc"; {}; {}; $m) | .[0]')
+DLM=$(printf '%s' "$DL_ROWS" | jq -c --argjson v "$VIEW2" --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m) | .[0]')
 eq "$(printf '%s' "$DLM" | jq -c '.unstamped')" '["D2"]' "(MODEL) a flagged review body decline is an answer the comment delivers"
 has "$(printf '%s' "$DLM" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')" "  > Declined: We keep Y because Z" \
   "(MODEL) …and the rendering it is stamped against carries it"
 
 echo "# (DISMISS)"
 N=$(printf '%s' "$MODEL" | jq -r "$REVIEW_ANSWER_DEF"'ra_dismiss_note("U")')
-eq "$N" "Your review: 3 points, all answered at abcdef12 (U). Dismissal is not approval; the merge still gates on an explicit approving review." \
+eq "$N" "Your review: 3 points, all answered (U). Dismissal is not approval; the merge still gates on an explicit approving review." \
   "(DISMISS) one line: the count line, the living answer, and that dismissal is not approval"
 has "$(printf '%s' "$MODEL" | jq -r "$REVIEW_ANSWER_DEF"'.self = true | ra_dismiss_note("U")')" "no fresh review is requested" \
   "(DISMISS) a review under the city's own account says no fresh review is requested"

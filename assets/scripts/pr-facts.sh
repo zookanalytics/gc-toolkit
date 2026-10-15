@@ -4739,9 +4739,9 @@ WB_FIX_UNITS
     wbx=$(printf '%s' "$wbxl" | jq -sc 'add // {}' 2>/dev/null) || wbx='{}'
     [ -n "$wbx" ] || wbx='{}'
     wmodels=$({ printf '%s\n' "$wview"; printf '%s\n' "$wbx"; printf '%s\n' "$wvl"; printf '%s\n' "$wrf"; } \
-      | jq -cn --arg prurl "$wurl" --arg self "$SELF_LOGIN" --arg head "$whead" --arg marker "$WB_MARKER" "$REVIEW_ANSWER_DEF"'
+      | jq -cn --arg prurl "$wurl" --arg self "$SELF_LOGIN" --arg marker "$WB_MARKER" "$REVIEW_ANSWER_DEF"'
         input as $view | input as $beads | input as $vl | input
-        | ra_models($view; $prurl; $self; $head; $vl; $beads; $marker) | .[]' 2>/dev/null) || wmodels=""
+        | ra_models($view; $prurl; $self; $vl; $beads; $marker) | .[]' 2>/dev/null) || wmodels=""
     wrstamped=0
     while IFS= read -r wm; do
       [ -n "$wm" ] || continue
