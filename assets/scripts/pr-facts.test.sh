@@ -107,6 +107,28 @@ vpass_id() { jq -r --arg a "$1" '[ .[] | select((.metadata.task_kind // "") == "
 
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/visit-close.sh" "$HERE/finalize-gate.sh" "$HERE/scaffolding-sweep.sh"
+# lane-state.sh's contract, answered from the environment: every lane derives
+# green unless STUB_LANE_UNGREEN names "<anchor>:<lane>" (or the bare anchor,
+# for each of its lanes), and STUB_LANE_UNREADABLE does the same for exit 2, a
+# store that will not read. lane-state.test.sh and gate-ensure.test.sh run the
+# real derivation; here the question is what pr-facts asks and does with the
+# answer, and STUB_LANE_LOG records each ask.
+cat > "$SD/lane-state.sh" <<'LANE'
+#!/usr/bin/env bash
+set -u
+printf '%s\n' "$*" >> "${STUB_LANE_LOG:?}"
+[ "${1:-}" = green ] || exit 1
+shift
+a=""; l=""
+while [ $# -gt 0 ]; do
+  case "$1" in --anchor) a="${2:-}"; shift 2 ;; --lane) l="${2:-}"; shift 2 ;; *) shift ;; esac
+done
+for k in ${STUB_LANE_UNREADABLE:-}; do { [ "$k" = "$a" ] || [ "$k" = "$a:$l" ]; } && exit 2; done
+for k in ${STUB_LANE_UNGREEN:-}; do { [ "$k" = "$a" ] || [ "$k" = "$a:$l" ]; } && exit 1; done
+exit 0
+LANE
+chmod +x "$SD/lane-state.sh"
+export STUB_LANE_LOG="$TMP/lane.log"; : > "$STUB_LANE_LOG"
 # escalate.sh's contract, not just its call log: ONE visit per subject+key,
 # stamped so the caller can find it again. pr-facts reads the visit back to
 # block the anchor on it, so a stub that only logged would test nothing.
@@ -244,7 +266,7 @@ run() { "$SUT" --fix-pool "$FIX" --review-pool "$REV" 2>&1; }
 run_posture() { "$SUT" --posture-only 2>&1; }
 
 anchor() { # id num extra [branch]
-  printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","branch":"%s","merged_target":"main","check_set":"correctness","check.correctness":"green"%s}}' \
+  printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","branch":"%s","merged_target":"main","check_set":"correctness"%s}}' \
     "$1" "$2" "$2" "${4:-polecat/x$2}" "${3:-}"
 }
 prview() { # num state mergeState mergeable extra [headRefName]
@@ -855,7 +877,7 @@ echo "# the sweep's retract runs through the real escalate.sh and visit-close.sh
 # GC_RIG names the store, since no rig set is served here to derive it from.
 SD2="$TMP/scripts-real-escalate"
 mk_sut_dir "$SD2" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/visit-close.sh" "$HERE/finalize-gate.sh" "$HERE/escalate.sh"
-cp "$SD/bead-rehome.sh" "$SD/review-dispatch-body.sh" "$SD/validate-dispatch-body.sh" "$SD2/"
+cp "$SD/bead-rehome.sh" "$SD/review-dispatch-body.sh" "$SD/validate-dispatch-body.sh" "$SD/lane-state.sh" "$SD2/"
 : > "$STUB_DEPS"
 store "[$(anchor F2w 127 ',"gc.superseded_by":"tk-w"' | jq -c '.status = "closed"'), $(dvisit VW F2w pr-dispose-failed.127)]"
 printf 'VW|tracks|F2w\n' > "$STUB_DEPS"
@@ -915,15 +937,18 @@ eq "$(bstatus VO)" "open" "another PR's feedback visit is left"
 eq "$(bstatus VQ2)" "open" "a visit under another key is left"
 eq "$(bstatus F2zb)" "open" "…and they still hold the anchor's close"
 
-echo "# base moved -> retargeted + markers cleared"
-store "[$(anchor F3 12)]"
+echo "# base moved -> retargeted, the lanes' reviews standing"
+# A retarget parks the anchor for a person. It is not one of the two things that
+# move a lane backwards, so the review that backs the lane stays recorded.
+store "[$(anchor F3 12), {\"id\":\"rv-f3\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"Review PR#12\",\"metadata\":{\"task_kind\":\"review\",\"anchor_bead\":\"F3\",\"check_name\":\"correctness\",\"reviewed_oid\":\"sha-12\",\"signoff_verdict\":\"approve\",\"gc.outcome\":\"recorded\"}}]"
 printf '%s' "$(prview 12 OPEN CLEAN MERGEABLE)" | jq -c '.baseRefName = "release"' > "$GH_DIR/pr_view_12.json"
 : > "$STUB_ESC_LOG"
 out=$(run)
 has "$out" "retargeted (base 'release'" "the retarget is recorded"
 eq "$(meta F3 merge_result)" "retargeted" "merge_result=retargeted"
 eq "$(meta F3 'gc.routed_to')" "human" "routed to human"
-eq "$(meta F3 'check.correctness')" "<absent>" "the pre-retarget check marker is cleared"
+eq "$(meta rv-f3 gc.outcome)" "recorded" "the lane's backing review is not superseded"
+eq "$(bstatus rv-f3)" "closed" "…and stays the closed record its green derives from"
 has "$(cat "$STUB_ESC_LOG")" "--key pr-retargeted.12" "escalated once per situation key"
 
 echo "# CONFLICTING -> one rework child per head"
@@ -1538,6 +1563,24 @@ has "$out" "unrouted sibling strand-rw is redundant" "…and the unreachable str
 eq "$(meta strand-rw 'gc.routed_to')" "<absent>" "…the strand is NOT routed into a race with it"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no twin is minted"
 
+echo "# …a merge-in child armed to re-sling at this head covers the branch, and is no strand"
+# A child whose run stopped to ask a person keeps its rejection_reason, which
+# names this head, and waits armed to re-sling with its route keys cleared
+# (await-ruling.sh). Its arm re-dispatches it once the person rules, so a route
+# to the pool as well would run it twice.
+armed='{"id":"armed-rw","status":"open","assignee":"","notes":"",'
+armed="$armed"'"title":"Merge main into polecat/x187: base rewritten, PR conflicts",'
+armed="$armed"'"metadata":{"task_kind":"rework","anchor_bead":"RT4","branch":"polecat/x187","rejection_reason":"stale base at head sha-187: x",'
+armed="$armed"'"gc.routed_to":"","gc.execution_routed_to":"","resling_target":"'"$FIX"'","gc.dispatch_when_ready":"'"$FIX"'"}}'
+store "[$armed, $(anchor RT4 187)]"
+printf '%s' "$(prview 187 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_187.json"
+approve 187
+out=$(run)
+has "$out" "rework armed-rw already covers branch 'polecat/x187' at this head, no new child" "an armed child at this head covers the branch"
+hasnt "$out" "re-routing stranded rework armed-rw" "…and is not taken for a strand"
+eq "$(meta armed-rw 'gc.routed_to')" "" "…so it is not routed to the pool while it waits for its arm"
+eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no twin is minted"
+
 echo "# CONFLICTING: a branch a landed change superseded gets the operator's decision, not a child"
 # The stub git serves STUB_FETCHED_HEAD for every rev-parse, so both fetched tips
 # read as the PR's head: the head GitHub reported is the head classified.
@@ -1751,6 +1794,33 @@ out=$(run)
 has "$out" "dismissed our own superseded CHANGES_REQUESTED (review 901)" "the stale own block is dismissed"
 eq "$(meta D1 signoff_dismissed)" "901@sha-20" "signoff_dismissed recorded (and read back) first"
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/20/reviews/901/dismissals" "the dismissal hit the pinned endpoint"
+eq "$(grep -cxF 'green --anchor D1 --lane correctness' "$STUB_LANE_LOG")" "1" "…once its lane derived green, asked as merge.sh asks it, the GitHub approval included"
+
+echo "# …a lane that does not derive green keeps the block"
+store "[$(anchor D7 266)]"
+printf '%s' "$(prview 266 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_266.json"
+printf '[{"id":907,"user":{"login":"gc-city-bot"},"state":"CHANGES_REQUESTED","commit_id":"sha-OLD","submitted_at":"2026-08-19T00:00:00Z"}]' > "$GH_DIR/reviews_266.json"
+: > "$STUB_GH_LOG"
+out=$(STUB_LANE_UNGREEN="D7:correctness" run)
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "a lane short of green leaves our own block standing"
+eq "$(meta D7 signoff_dismissed)" "<absent>" "…and no marker is recorded"
+
+echo "# …and so does a lane whose derivation cannot read the store"
+store "[$(anchor D8 267)]"
+printf '%s' "$(prview 267 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_267.json"
+printf '[{"id":908,"user":{"login":"gc-city-bot"},"state":"CHANGES_REQUESTED","commit_id":"sha-OLD","submitted_at":"2026-08-19T00:00:00Z"}]' > "$GH_DIR/reviews_267.json"
+: > "$STUB_GH_LOG"
+out=$(STUB_LANE_UNREADABLE="D8" run)
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "an unreadable derivation proves nothing green, so the block stands"
+eq "$(meta D8 signoff_dismissed)" "<absent>" "…and no marker is recorded"
+
+echo "# …a PR GitHub shows no block on asks no lane"
+store "[$(anchor D9 268)]"
+printf '%s' "$(prview 268 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_268.json"
+echo '[]' > "$GH_DIR/reviews_268.json"
+: > "$STUB_LANE_LOG"
+out=$(run)
+eq "$(grep -c -- '--anchor D9 ' "$STUB_LANE_LOG")" "0" "the derivation runs only once the PR's own facts ask for a dismissal"
 
 echo "# …a human's CHANGES_REQUESTED is never dismissed"
 store "[$(anchor D2 21)]"
@@ -2843,7 +2913,7 @@ eq "$(meta "$VP" reviewed_oid)" "sha-70" "…pinned to the head the batch was pr
 eq "$(meta "$VP" 'gc.routed_to')" "<absent>" "…and unrouted: gate-ensure dispatches mol-validate onto a validating lane"
 grep -qxF "$VP|blocks|V1" "$STUB_DEPS" && ok "…and blocks the anchor: merge.sh holds the merge until the validator closes the pass" || bad "validation-pass blocks edge missing"
 eq "$(meta V1 signoff_rounds_reset)" "<absent>" "the batch writes no signoff_rounds_reset"
-eq "$(meta V1 'check.correctness')" "green" "…and no check.<lane>=validating marker is written; the lane derives that"
+eq "$(jq -r '[ .[] | select(.id == "V1") | (.metadata // {}) | keys[] | select(startswith("check.")) ] | join(",")' "$STUB_STORE")" "" "…and no check.<lane> key is written; the lane derives validating from the pass"
 eq "$(meta V1 pr_comment_disposition)" "rework:new-2" "the comments still route to work (the pass is opened after, as new-3)"
 has "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is woken"
 # …and the comment becomes a finding the validator rules, the shape a machine
@@ -2909,7 +2979,7 @@ echo "# a multi-lane anchor opens ONE human-lane pass, not a synthetic correctne
 # finding.lane == check_name and a human batch's findings are finding.lane=human,
 # so the pass names human whatever the anchor's lanes are. The whole check_set
 # (correctness,arch) is one synthetic lane no finding carries — the multi-lane bug.
-store "[$(anchor Vm 75 ',"check_set":"correctness,arch","check.arch":"green"')]"
+store "[$(anchor Vm 75 ',"check_set":"correctness,arch"')]"
 printf '%s' "$(prview 75 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_75.json"
 echo '[]' > "$GH_DIR/reviews_75.json"
 printf '[{"id":8750,"user":{"login":"human1"},"body":"this misreads the arch lane"}]' > "$GH_DIR/comments_75.json"
@@ -4822,6 +4892,29 @@ UTVID=$(jq -r '[ .[] | select(((.metadata.escalation_key // "") | tostring) | st
 eq "$(meta "$UTVID" pr_number)" "60" "…stamped with the PR so merge.sh holds the merge"
 eq "$(meta "$UTVID" anchor_bead)" "UT1" "…and anchored to the gating bead"
 eq "$(meta UT1 pr_unengaged_threads)" "sha-60" "…and the anchor is head-watermarked against re-filing"
+eq "$(grep -cxF 'green --anchor UT1 --lane correctness' "$STUB_LANE_LOG")" "1" "…once its lane derived green, asked as merge.sh asks it"
+
+echo "# …a lane that does not derive green hides nothing: it is owed its own review"
+store "[$(anchor UT8 269 "$UTCUT")]"
+printf '%s' "$(prview 269 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_269.json"
+printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","pull_request_review_id":null,"created_at":"2026-10-06T12:00:00Z"}]' > "$GH_DIR/comments_269.json"
+echo '[]' > "$GH_DIR/reviews_269.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-269","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-269","databaseId":100,"author":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_269.json"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(STUB_LANE_UNGREEN="UT8" run)
+hasnt "$out" "unengaged review-thread finding" "a lane short of green raises no unengaged hold"
+eq "$(meta UT8 pr_unengaged_threads)" "<absent>" "…and writes no head watermark"
+hasnt "$(gh_since "$mark")" "graphql" "…and the threads are not read"
+
+echo "# …nor does a lane whose derivation cannot read the store; the merge's own lane gate holds it"
+store "[$(anchor UT9 270 "$UTCUT")]"
+printf '%s' "$(prview 270 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_270.json"
+printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","pull_request_review_id":null,"created_at":"2026-10-06T12:00:00Z"}]' > "$GH_DIR/comments_270.json"
+echo '[]' > "$GH_DIR/reviews_270.json"
+printf '%s\n' '{"reviews":[],"threads":[{"id":"T-270","isResolved":false,"viewerCanResolve":true,"comments":{"nodes":[{"id":"NC-270","databaseId":100,"author":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","reactionGroups":[]}]}}]}' > "$GH_DIR/threads_270.json"
+out=$(STUB_LANE_UNREADABLE="UT9" run)
+hasnt "$out" "unengaged review-thread finding" "an unreadable derivation flags nothing"
+eq "$(meta UT9 pr_unengaged_threads)" "<absent>" "…and writes no head watermark"
 
 echo "# a RESOLVED thread is done — the finding exists but nothing is flagged"
 store "[$(anchor UT2 61 "$UTCUT")]"
@@ -5102,6 +5195,38 @@ has "$out" "could not form the red-check rework for PR#71" "the red-check arm re
 eq "$(bstatus new-2)" "closed" "the veto-capable-but-unrescuable newborn is unmade"
 eq "$(meta new-2 gc.outcome)" "abandoned" "…and marked abandoned"
 eq "$(jq '[.[] | select((.metadata.task_kind // "") == "rework") | select(.status == "open") | select((.metadata.rejection_reason // "") == "")] | length' "$STUB_STORE")" "0" "no OPEN red-check rework child survives able to veto but missing rejection_reason"
+rm -f "$GH_DIR/rules_main.json"
+
+echo "# …a red-check child stranded at this head is re-routed, but a poured one is its molecule's and an armed one its arm's"
+# A strand is a child whose route stamp did not land: open, unassigned and
+# unrouted, its rejection_reason naming this head. A child keeps its
+# rejection_reason until the merge its resume runs concludes. While a
+# mol-polecat-work pour runs it, it carries gc.execution_routed_to instead of a
+# route. Once that run stops to ask a person, await-ruling.sh clears both route
+# keys and arms a re-sling (gc.dispatch_when_ready). Routing either to the pool
+# as well would run it twice.
+printf '[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"test"}]}}]' > "$GH_DIR/rules_main.json"
+printf '%s' "$(prview 86 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE"}]')" > "$GH_DIR/pr_view_86.json"
+RSC='{"id":"RSC","status":"open","assignee":"","notes":"","title":"Fix failing required check(s) on PR#86: required check red at head sha-86","metadata":{"task_kind":"rework","anchor_bead":"RS1","branch":"polecat/x86","target":"main","rejection_reason":"Required check(s) failing on PR#86 at head sha-86: test."}}'
+store "[$(anchor RS1 86),$RSC]"
+out=$(run)
+has "$out" "re-routing stranded red-check rework RSC" "an unrouted child at this head is a strand, re-routed"
+eq "$(meta RSC 'gc.routed_to')" "$FIX" "…to the fix pool"
+store "[$(anchor RS1 86),$(printf '%s' "$RSC" | jq -c '.metadata["gc.execution_routed_to"] = "rig/gc-toolkit.polecat"')]"
+out=$(run)
+has "$out" "child RSC already covers this head, no new child" "a poured child at this head covers it"
+hasnt "$out" "re-routing stranded red-check rework RSC" "…and is not taken for a strand"
+eq "$(meta RSC 'gc.routed_to')" "<absent>" "…so it is not routed to the pool beside its molecule"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no twin is minted"
+store "[$(anchor RS1 86),$(printf '%s' "$RSC" | jq -c '.metadata += {"gc.routed_to": "", "gc.execution_routed_to": "",
+  "resling_target": "rig/gc-toolkit.polecat", "gc.dispatch_when_ready": "rig/gc-toolkit.polecat",
+  "gc.dispatch_when_ready_args": "[\"--on\",\"mol-polecat-work\"]",
+  "gc.dispatch_when_ready_reason": "waits on the ruling in visit V86 (bring-current-question.RSC)"}')]"
+out=$(run)
+has "$out" "child RSC already covers this head, no new child" "a child armed to re-sling at this head, its route keys cleared, covers it"
+hasnt "$out" "re-routing stranded red-check rework RSC" "…and is not taken for a strand"
+eq "$(meta RSC 'gc.routed_to')" "" "…so it is not routed to the pool while it waits for its arm"
+eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "0" "…and no twin is minted"
 rm -f "$GH_DIR/rules_main.json"
 
 fi # part checks

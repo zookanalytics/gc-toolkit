@@ -279,6 +279,17 @@ else
   bad "the stranded child was not joined before its work order was written (join at log line '${JL:-none}', write at '${WL:-none}')"
 fi
 
+# A child whose run stopped to ask a person keeps its rejection_reason, which
+# names this head, and waits armed to re-sling with its route keys cleared
+# (await-ruling.sh). Its arm re-dispatches it once the person rules, so it
+# covers the branch and is no strand.
+reset "$(pre AA4 polecat/tk-c1)" "$(printf '{"id":"S4","status":"open","assignee":"","title":"waiting","metadata":{"branch":"polecat/tk-c1","task_kind":"rework","anchor_bead":"AA4","rejection_reason":"stale base at head %s: ...","gc.routed_to":"","gc.execution_routed_to":"","resling_target":"%s","gc.dispatch_when_ready":"%s"}}' "$C1_HEAD" "$POOL" "$POOL")"
+OUT=$(run --fix-pool "$POOL")
+eq "$(newcount)" "0" "a child armed to re-sling at this head is not twinned"
+has "$OUT" "already covers this branch" "…it covers the branch"
+hasnt "$OUT" "re-routing stranded rework S4" "…and is not taken for a strand"
+eq "$(meta S4 "gc.routed_to")" "" "…so it is not routed to the pool while it waits for its arm"
+
 # A stranded child that cannot be joined to the anchor is neither written nor
 # routed, so no child carries anchor_bead where the anchor's closed-children read
 # cannot reach it, and the next pass tries the join again.
