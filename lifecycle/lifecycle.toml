@@ -235,16 +235,9 @@ marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 # cannot inherit the disposition of the sitting before it
 # (assets/scripts/takeaway-settled-pairing.test.sh).
 settled_keys = ["gc.takeaway=gc.takeaway_settled"]
-# One key per check, so the declaration is a prefix. dispatch_backstop.<g> is
-# written by gate-ensure.sh only where a check has spent its dispatch ceiling,
-# and its value carries the count and the head it holds, so its presence is
-# "dispatch_count at the ceiling" as the writer itself recorded it.
-marker_prefixes = ["dispatch_backstop."]
 # merge_hold is not a marker_key: an operator's freeze is theirs to lift, and a
 # hold that must show as an edge asserts it through blocked_reason or
 # gc.takeaway beside it, both declared above, which carry the wait's sentence.
-# Leaving the two gate scalars out is what disables that arm; the check reads
-# an omitted field as a marker the declaration dropped.
 # The route that parks a bead for a person is park_route in [machine]. A bead
 # resting on it waits on somebody, and that wait has the same shape as any
 # other.
@@ -647,23 +640,16 @@ keys = [
 
 [metadata.gates]
 keys = [
-  "check_set", "check.<g>", "signoff_dismissed", "approval_dismissed",
+  "check_set", "signoff_dismissed", "approval_dismissed",
   "signoff_verdict", "visual", "visual_fallback_from",
   "check_name", "anchor_bead", "review_branch", "review_base", "reviewed_oid",
   "review_pool", "source_review_bead", "source_ruling_bead", "source_review", "task_kind",
   "fix_target_pool", "wedge_seen_root",
-  "signoff_cap", "signoff_rounds_reset", "signoff_round_floor",
-  "dispatch_count", "dispatch_backstop.<g>",
 ]
 # check_set carries its mechanics in [gates] above: the comma list of check
 # names (default `correctness,triage` stamped by gate-ensure.sh when empty,
 # sentinel `none` the opt-out), and empty is never `none` — a reader holds the
 # merge closed on it.
-# check.<g> — RETIRED. A lane's state is derived from its reviews
-# (lane-state.sh), and nothing writes or reads a stored lane value. Residue on a
-# bead holds a lane-state word or the older <verb>@<oid> grammar. Registered so
-# that residue reads as known, not as a stray, until the store-wide sweep
-# clears it.
 #
 # signoff_dismissed — `<github-review-id>@<oid>`: a stale GitHub review the city
 #   dismissed at that head. Written by signoff.sh and pr-facts.sh, each reading it
@@ -778,17 +764,10 @@ keys = [
 # fix_target_pool — the pool a rework fix unit routes to, written on the review
 #   child by gate-ensure.sh when a fix pool is configured; read by signoff.sh,
 #   which defaults it to `<rig>.polecat`. Never cleared. A pool name.
-# wedge_seen_root — the workflow root gate-ensure.sh last saw spend its dispatch
-#   ceiling, stamped on the review bead so a wedge gets one quiet pass before it
+# wedge_seen_root — the workflow root gate-ensure.sh last saw spent (every step
+#   closed but the finalizer) while the review it drives has no verdict and no
+#   route, stamped on that review bead so a wedge gets one quiet pass before it
 #   escalates; a differing or absent value is the first sighting. A root bead id.
-# signoff_cap / signoff_rounds_reset / signoff_round_floor — RETIRED. The
-#   review-round cap is gone: convergence is judged by the validator, not
-#   counted (specs/tk-ztapg/review-cycle-architecture.md), so nothing writes
-#   these now. Registered so that residue on a pre-retirement bead reads as
-#   known, not as a stray.
-# dispatch_count / dispatch_backstop.<g> — RETIRED. gate-ensure.sh removed the
-#   review dispatch ceiling, so nothing writes these now. Registered so that
-#   residue on a pre-retirement bead reads as known, not as a stray.
 
 [metadata.review_findings]
 # A finding is a review objection with an identity of its own, so it outlives

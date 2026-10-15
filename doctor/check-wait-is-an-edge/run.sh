@@ -65,11 +65,6 @@ gc.takeaway'
 # <marker>=<settled-key>: the marker holds only while the settled-key is absent
 # or empty. Same list as the declaration, same standby role.
 BUILTIN_SETTLED_KEYS='gc.takeaway=gc.takeaway_settled'
-BUILTIN_MARKER_PREFIXES='dispatch_backstop.'
-# No gate marker is a hold: a lane's state is derived from its reviews and never
-# stored on the anchor. Empty disables the gate arm.
-BUILTIN_GATE_PREFIX=''
-BUILTIN_GATE_VERB=''
 BUILTIN_ROUTE_KEY='gc.routed_to'
 BUILTIN_PARK_ROUTE='human'
 # The terminal end of a wait — the bead others block ON. It can carry no
@@ -90,14 +85,11 @@ toml_array() { # <file> <key> — quoted strings of the first `<key> = [...]`
     awk -v k="$2" 'ok { print } $0 ~ ("^[[:space:]]*" k "[[:space:]]*=[[:space:]]*\\[") { ok = 1; print }' "$1" 2>/dev/null \
         | awk '{ print } /\]/ { exit }' | grep -o '"[^"]*"' | tr -d '"'
 }
-marker_keys=""; marker_prefixes=""; gate_prefix=""; gate_verb=""; route_key=""; park_route=""
+marker_keys=""; route_key=""; park_route=""
 settled_keys=""; severity=""; terminal_wait_key=""; declared=""
 if [ -f "$lifecycle" ]; then
     marker_keys=$(toml_array "$lifecycle" "marker_keys")
     settled_keys=$(toml_array "$lifecycle" "settled_keys")
-    marker_prefixes=$(toml_array "$lifecycle" "marker_prefixes")
-    gate_prefix=$(toml_scalar "$lifecycle" "gate_marker_prefix")
-    gate_verb=$(toml_scalar "$lifecycle" "gate_hold_verb")
     route_key=$(toml_scalar "$lifecycle" "route_key")
     park_route=$(toml_scalar "$lifecycle" "park_route")
     terminal_wait_key=$(toml_scalar "$lifecycle" "terminal_wait_key")
@@ -112,9 +104,6 @@ fi
 if [ -z "$declared" ]; then
     marker_keys="$BUILTIN_MARKER_KEYS"
     settled_keys="$BUILTIN_SETTLED_KEYS"
-    marker_prefixes="$BUILTIN_MARKER_PREFIXES"
-    gate_prefix="$BUILTIN_GATE_PREFIX"
-    gate_verb="$BUILTIN_GATE_VERB"
     route_key="$BUILTIN_ROUTE_KEY"
     park_route="$BUILTIN_PARK_ROUTE"
     terminal_wait_key="$BUILTIN_TERMINAL_WAIT_KEY"
@@ -123,7 +112,6 @@ fi
 # declaration that omits it is asking for the default rather than for silence.
 [ -n "$severity" ] || severity="$BUILTIN_SEVERITY"
 MKEYS_JSON=$(printf '%s\n' "$marker_keys" | jq -R . | jq -cs 'map(select(. != ""))')
-MPFX_JSON=$(printf '%s\n' "$marker_prefixes" | jq -R . | jq -cs 'map(select(. != ""))')
 # {<marker>: <settled-key>}. A pair with either half missing is dropped rather
 # than half-applied: half of this declaration is a marker answered by a key
 # nothing writes, which reads every hold as settled.
@@ -237,9 +225,6 @@ def unsettled($m; $k): ($settled[$k] // "") as $sk
       | .key as $k | (.value | txt) as $v
       | select(
             (($mkeys | index($k)) != null and ($v | length) > 0 and unsettled($m; $k))
-         or ($mpfx | any(. as $p | $k | startswith($p)))
-         or ($gatepfx != "" and $gateverb != ""
-             and ($k | startswith($gatepfx)) and ($v | startswith($gateverb + "@")))
          or ($routekey != "" and $park != "" and $k == $routekey and $v == $park)
         )
       | $k + "=" + ($v | clip) ] | sort ) as $marks
@@ -317,9 +302,8 @@ while IFS=$'\037' read -r rig_name rig_path hq suspended; do
     fi
 
     rows=$(printf '%s' "$live_json" | jq -r \
-        --argjson mkeys "$MKEYS_JSON" --argjson mpfx "$MPFX_JSON" \
+        --argjson mkeys "$MKEYS_JSON" \
         --argjson settled "$SETTLED_JSON" \
-        --arg gatepfx "$gate_prefix" --arg gateverb "$gate_verb" \
         --arg routekey "$route_key" --arg park "$park_route" \
         --arg twkey "$terminal_wait_key" \
         "$WAIT_JQ" 2>/dev/null); rows_rc=$?
