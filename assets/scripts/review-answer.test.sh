@@ -42,6 +42,15 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit
   || bad "(DEF) sourcing the file exposes \$REVIEW_ANSWER_DEF"
 eq "$(jq -n "$REVIEW_ANSWER_DEF"'"compiled"' 2>&1)" '"compiled"' "(DEF) the defs compile"
 case "$REVIEW_ANSWER_DEF" in *"'"*) bad "(DEF) the program carries no apostrophe" ;; *) ok "(DEF) the program carries no apostrophe" ;; esac
+case "$REVIEW_ANSWER_DEF" in "$REVIEW_OWED_REPLY_DEF"*) ok "(DEF) the defs open with the owed-reply defs every reader of an owed answer shares" ;;
+  *) bad "(DEF) the defs open with the owed-reply defs every reader of an owed answer shares" ;; esac
+ruled() { jq -rn --arg r "$1" "$REVIEW_OWED_REPLY_DEF"'$r | ra_ruled_reply("'"$2"'")'; }
+eq "$(ruled "the cap is a budget" declined)" "Declined: the cap is a budget" "(DEF) a decline reply is led by its ruling"
+eq "$(ruled "  declined, since the cap is a budget" declined)" "  declined, since the cap is a budget" "(DEF) …unless it already opens with the word, after any space"
+eq "$(ruled "next release" deferred)|$(ruled "Deferred — tracked as follow-up tk-fu." deferred)" "Deferred: next release|Deferred — tracked as follow-up tk-fu." \
+  "(DEF) …and a deferral reply the same way"
+eq "$(jq -cn "$REVIEW_OWED_REPLY_DEF"'[ "declined", "deferred", "needs-you", "must-fix", "restates", "unvalidated" ] | map(ra_owes_disp)')" \
+  '[true,true,true,false,false,false]' "(DEF) a decline, a deferral and a question for the operator owe their raiser an answer"
 
 MARKER='<!-- gc-writeback -->'
 PRURL="https://github.com/o/r/pull/7"
@@ -97,6 +106,28 @@ eq "$(pfield '{"disp":"declined","fix_landed":true,'"$FLAGGED"'}' ref)" "{{gc-co
 eq "$(pfield '{"disp":"declined",'"$FLAGGED"'}' ref)" "" \
   "(SECTION) …and none before, though the decline closed its finding at the ruling"
 eq "$(pfield '{"disp":"deferred","follow_up":"tk-fu","fix_landed":true,'"$FLAGGED"'}' ref)" "tk-fu" "(SECTION) a flagged deferral keeps its follow-up"
+# A review body sits in no thread, so its entry is the one place the decline or
+# deferral it owes reaches the PR, and the entry carries that reply whole.
+BODY='"body":true,"cid":"10","rid":"10"'
+BFLAG='"fix_answer":"Changed it anyway.","fix_flag":"1"'
+eq "$(pfield '{'"$BODY"',"disp":"declined","reply":"We keep Y because Z",'"$BFLAG"'}' sentence)" "Changed it anyway." \
+  "(SECTION) a review body's flagged decline answers in the fix unit's words"
+eq "$(pfield '{'"$BODY"',"disp":"declined","reply":"We keep Y because Z",'"$BFLAG"'}' extra)" "Declined: We keep Y because Z" \
+  "(SECTION) …and still carries the decline it owes, quoted under the entry"
+eq "$(pfield '{'"$BODY"',"disp":"deferred","follow_up":"tk-fu","reply":"Deferred — tracked as follow-up tk-fu: later.",'"$BFLAG"'}' extra)" \
+  "Deferred — tracked as follow-up tk-fu: later." "(SECTION) …and so does a flagged deferral"
+eq "$(pfield '{'"$BODY"',"disp":"declined","reply":"We keep Y because Z","answer":"Declined: kept as is."}' extra)" "Declined: We keep Y because Z" \
+  "(SECTION) a body decline the validator answered in its own words quotes the reply it owes"
+eq "$(pfield '{'"$BODY"',"disp":"declined","reply":"We keep Y because Z"}' sentence)|$(pfield '{'"$BODY"',"disp":"declined","reply":"We keep Y because Z"}' extra)" \
+  "Declined: We keep Y because Z|" "(SECTION) a body decline whose sentence is the reply quotes nothing more"
+LONGREPLY=$(jq -cn '{body: true, cid: "10", rid: "10", disp: "declined", reply: ("because " * 400)}')
+eq "$(pfield "$LONGREPLY" sentence)" "Declined; the reason follows." "(SECTION) a body decline too long for a sentence leads with the ruling"
+LONGQUOTE=$(pfield "$LONGREPLY" extra)
+eq "${#LONGQUOTE}" "3209" "(SECTION) …and quotes its reply whole, never cut at the sentence cap"
+eq "$(pfield '{"disp":"declined","reply":"We keep Y","fix_answer":"Changed anyway.","fix_flag":"1"}' extra)" "" \
+  "(SECTION) an inline comment's decline quotes nothing: its thread carries the reply"
+eq "$(pfield '{'"$BODY"',"disp":"needs-you","open":true,"visit":"tk-v","answer":"Ship it now?","reply":"This comment needs your decision — opened visit tk-v."}' extra)" "" \
+  "(SECTION) a body question for the operator quotes nothing: the entry names its visit"
 eq "$(pfield '{"disp":"needs-you","ruling_visit":"tk-v"}' sentence)" "Settled by your ruling on visit tk-v." "(SECTION) a needs-you finding the ruling settled is done"
 eq "$(pfield '{"disp":"unvalidated","open":true}' section),$(pfield '{"disp":"unvalidated","open":true}' ruled)" "progress,false" "(SECTION) an unruled point is in progress"
 eq "$(point '{"disp":"restates","body":true,"cid":"10"}')" '"none"' "(SECTION) a body ruled restates is no point"
@@ -202,6 +233,15 @@ eq "$(flref '{"K":{"title":"rework","fix_notes":"","closed":true}}')" "{{gc-comm
   "(MODEL) a flagged decline reads its fix unit's landing from the close read for it"
 eq "$(flref '{"K":{"title":"rework","fix_notes":"","closed":false}}')" "" "(MODEL) …so a fix unit still open cites nothing"
 eq "$(flref '{}')" "" "(MODEL) …and neither does one that did not read back"
+# The writer stamps each review body answer in unstamped delivered once the
+# comment carries the rendering, so the rendering has to hold every one.
+DL_ROWS='[{"id":"D2","status":"closed","title":"finding[human]: d2","description":"Locus: PR review\n\nA summary with a point of its own.\n\nRaised by human:op reviewing anchor A.",
+  "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"declined","finding.comment_id":"10","finding.review_id":"10",
+              "finding.reply":"We keep Y because Z","finding.fix_unit":"K","finding.fix_flag":"1","finding.fix_answer":"Changed it anyway."}}]'
+DLM=$(printf '%s' "$DL_ROWS" | jq -c --argjson v "$VIEW2" --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; "abc"; {}; {}; $m) | .[0]')
+eq "$(printf '%s' "$DLM" | jq -c '.unstamped')" '["D2"]' "(MODEL) a flagged review body decline is an answer the comment delivers"
+has "$(printf '%s' "$DLM" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')" "  > Declined: We keep Y because Z" \
+  "(MODEL) …and the rendering it is stamped against carries it"
 
 echo "# (DISMISS)"
 N=$(printf '%s' "$MODEL" | jq -r "$REVIEW_ANSWER_DEF"'ra_dismiss_note("U")')
@@ -216,6 +256,9 @@ has "$(cat "$PF")" '. "$_bd_lib_dir/review-answer.sh"' "(READERS) pr-facts.sh so
 for d in ra_models ra_render ra_dismiss_note; do
   has "$(cat "$PF")" "$d(" "(READERS) pr-facts.sh reads $d"
 done
+has "$(cat "$PF")" 'WB_OWED_REPLY_DEF="$REVIEW_OWED_REPLY_DEF"' \
+  "(READERS) the owed-reply set the reply arm and the dismissal read is built on these defs, so it cannot drift from the living answer's"
+has "$(cat "$PF")" 'ra_ruled_reply($disp)' "(READERS) …and a thread reply leads with its ruling through the same def"
 OTHERS=$(cd "$ROOT" && git grep -l -F 'gc-review-answer:' -- . ':!assets/scripts/review-answer.sh' ':!assets/scripts/pr-facts.sh' ':!*.test.sh' ':!docs/**' ':!specs/**' ':!lifecycle/**' 2>/dev/null)
 eq "$OTHERS" "" "(READERS) no other file writes a living answer's review key"
 

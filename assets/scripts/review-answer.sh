@@ -33,8 +33,9 @@
 # answered says which stage it is at. A link goes only to a comment the read of
 # the PR found, and no sentence points at a reply or thread: the answer is in
 # the entry itself. A review body has no thread to carry a decline's or a
-# deferral's full reply, so its entry carries that reply too, and the comment is
-# what delivers it, as it delivers the mark that records the body answered. A
+# deferral's reply, so its entry carries that reply whole, quoted under the
+# entry whenever the sentence is not the reply itself, and the comment is what
+# delivers it, as it delivers the mark that records the body answered. A
 # review stays live, and gets its comment, while a finding is open, its
 # changes-requested block stands, or the comment owes it an answer or a mark.
 #
@@ -52,8 +53,26 @@
 # defs to a jq program. No comment or string inside the program may carry an
 # apostrophe, since the program is one single-quoted shell word.
 #   jq -n "$REVIEW_ANSWER_DEF"'... | ra_render($marker)'
+#
+# Which rulings owe a human finding raiser an answer on the PR, and how that
+# answer reads there, are REVIEW_OWED_REPLY_DEF. pr-facts.sh posts the answer in
+# a thread or on the Conversation tab, the living answer carries a review body
+# answer, and the review dismissal waits until each is delivered. All three read
+# these defs, and REVIEW_ANSWER_DEF opens with them.
 # shellcheck disable=SC2034  # read by the scripts that source this file
-REVIEW_ANSWER_DEF='
+REVIEW_OWED_REPLY_DEF='
+  # A ruling that owes its raiser an answer when the finding carries one
+  # (finding.reply): a decline, a deferral, or a question for the operator.
+  def ra_owes_disp: . == "declined" or . == "deferred" or . == "needs-you";
+  # A decline or a deferral reply as the PR shows it: led by its ruling, unless
+  # it already opens with that word.
+  def ra_ruled_reply($disp):
+    if $disp == "declined" then (if test("^\\s*declin"; "i") then . else "Declined: " + . end)
+    elif $disp == "deferred" then (if test("^\\s*defer"; "i") then . else "Deferred: " + . end)
+    else . end;
+'
+# shellcheck disable=SC2034  # read by the scripts that source this file
+REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
   def ra_squash: gsub("\\s+"; " ") | sub("^ "; "") | sub(" $"; "");
   # At most $n characters, cut at a word boundary when one falls in the second
   # half, with an ellipsis marking the cut.
@@ -134,16 +153,24 @@ REVIEW_ANSWER_DEF='
     | . + { body: (.rid != "" and .rid == .cid) }
     | . + { url: ra_url($view; $prurl), fix_landed: (($beads[.fix_unit] // {}).closed == true) };
   # A review body finding whose ruling owes its raiser an answer, which the
-  # living comment delivers: the set WB_OWED_REPLY_DEF names, for a comment
-  # that sits in no thread.
-  def ra_owes_reply: .body and .reply != "" and (.disp == "declined" or .disp == "deferred" or .disp == "needs-you");
-  # A finding record as its point, or nothing for a body ruled restates.
+  # living comment delivers, since the comment sits in no thread.
+  def ra_owes_reply: .body and .reply != "" and (.disp | ra_owes_disp);
+  # The sentence cap of the loosest rendering (ra_tiers).
+  def ra_sentence_cap: 1500;
+  # A finding record as its point, or nothing for a body ruled restates. A
+  # review body owed a decline or a deferral gets that reply whole in its entry:
+  # as the sentence when the sentence is the reply and fits in one, and quoted
+  # under the entry otherwise. A needs-you body answer is its visit, which the
+  # entry names and the callout on top carries.
   def ra_point:
     . as $f
     | .disp as $d
     | ((.fix_answer // "") | ra_squash) as $fa
     | ((.answer // "") | ra_squash) as $an
     | ((.reply // "") | ra_squash) as $rp
+    | ($rp | ra_ruled_reply($d)) as $ruled
+    | ($f.body and ($d == "declined" or $d == "deferred") and $rp != "") as $carries
+    | (if $carries and ($ruled | length) > ra_sentence_cap then "" else $ruled end) as $said
     | (((.fix_flag // "") | tostring) == "1" and $fa != "") as $flag
     | (if .fix_unit != "" and .cid != "" then "{{gc-commits:" + .fix_unit + "|" + .cid + "}}" else "" end) as $commits
     | if $d == "restates" then empty
@@ -164,12 +191,14 @@ REVIEW_ANSWER_DEF='
         { section: "done", sentence: (if $fa != "" then $fa else "Fixed." end), ref: $commits, answered: true }
       elif $d == "declined" and $rp != "" then
         { section: "worth",
-          sentence: (if $an != "" then $an elif ($rp | test("^declin"; "i")) then $rp else "Declined: " + $rp end),
+          sentence: (if $an != "" then $an elif $said != "" then $said else "Declined; the reason follows." end),
           ref: "", answered: true }
       elif $d == "declined" then
         { section: "done", sentence: (if $an != "" then $an else "Noted; no change asked." end), ref: "", answered: true }
       elif $d == "deferred" then
-        { section: "worth", sentence: (if $an != "" then $an elif $rp != "" then $rp else "Deferred to a follow-up." end),
+        { section: "worth",
+          sentence: (if $an != "" then $an elif $said != "" then $said
+                     elif $rp != "" then "Deferred; the reason follows." else "Deferred to a follow-up." end),
           ref: .follow_up, answered: true }
       elif $d == "needs-you" then
         { section: "done",
@@ -181,8 +210,7 @@ REVIEW_ANSWER_DEF='
         { section: "progress", sentence: $fa, ref: "", answered: false }
       end
     | . + { id: $f.id, label: ($f | ra_label), url: $f.url, ruled: ($d != "unvalidated"),
-            extra: (if $f.body and ($d == "declined" or $d == "deferred") and $an != "" and $rp != "" and $an != $rp
-                    then $rp else "" end) };
+            extra: (if $carries and .sentence != $ruled then $ruled else "" end) };
   # One model per human review the findings on input name: its points, the
   # visits waiting on the operator, the fix notes, the mark lines the plan owes
   # it, and the comment already on the PR. $vl maps a review id to the mark lines

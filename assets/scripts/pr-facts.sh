@@ -493,19 +493,6 @@ WB_RESOLVED_REACTION="THUMBS_UP"
 WB_MARKER="<!-- gc-writeback -->"
 WB_GLYPH_RESOLVED="✅"
 WB_GLYPH_AWAITING="❓"
-# The findings that owe their raiser an answer on the PR: a human finding ruled
-# declined, deferred or needs-you that carries finding.reply. The reply arm posts
-# each one's answer and stamps finding.reply_posted once the answer is on the PR,
-# and the review dismissal waits for that stamp on each one. Both read this one
-# definition, so a review is never dismissed while an answer the reply arm owes
-# is still undelivered.
-WB_OWED_REPLY_DEF='
-  def owes_reply:
-    ((.metadata["finding.disposition"] // "") | tostring) as $d
-    | (((.metadata.task_kind // "") | tostring) == "finding")
-      and (((.metadata["finding.lane"] // "") | tostring) == "human")
-      and ($d == "declined" or $d == "deferred" or $d == "needs-you")
-      and (((.metadata["finding.reply"] // "") | tostring) != "");'
 # A ruled machine finding the city posts to the PR carries
 # `<!-- gc-finding:<id> -->`, and the answer it posts once the finding closes
 # carries `<!-- gc-finding:<id>:answered -->`. An answer that leaves its thread
@@ -685,6 +672,20 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # write-back sweep is its one writer.
 # shellcheck source=review-answer.sh
 . "$_bd_lib_dir/review-answer.sh" || { echo "cannot source review-answer.sh beside this script" >&2; exit 1; }
+# The findings that owe their raiser an answer on the PR: a human finding whose
+# ruling owes one (ra_owes_disp) and that carries finding.reply. The reply arm
+# posts each one's answer, and the living answer carries a review body's, and
+# each stamps finding.reply_posted once the answer is on the PR. The review
+# dismissal waits for that stamp on each one. All three take the set from
+# REVIEW_OWED_REPLY_DEF, so a review is never dismissed while an answer it owes
+# is still undelivered.
+WB_OWED_REPLY_DEF="$REVIEW_OWED_REPLY_DEF"'
+  def owes_reply:
+    ((.metadata["finding.disposition"] // "") | tostring) as $d
+    | (((.metadata.task_kind // "") | tostring) == "finding")
+      and (((.metadata["finding.lane"] // "") | tostring) == "human")
+      and ($d | ra_owes_disp)
+      and (((.metadata["finding.reply"] // "") | tostring) != "");'
 escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups the situation
   [ -x "$ESCALATE" ] || return 0
   "$ESCALATE" --subject "$1" --key "$2" --message "$3" >/dev/null 2>&1 || true
@@ -4636,9 +4637,7 @@ WB_SWAPS
                        and (((.body // "") | contains($line)) or (((.body // "") | test("<!-- gc-writeback-finding:")) | not)))) as $posted
         | select(if $stamp != "" then ($here and ($posted | not)) else true end)
         | { id: $id, thread: (if $t != null then $t.id else "" end), posted: $posted, stamped: ($stamp != ""),
-            body: ((if $disp == "needs-you" then $gwait + " " + $reply
-                    elif $disp == "declined" then (if ($reply | test("^\\s*declin"; "i")) then $reply else "Declined: " + $reply end)
-                    else (if ($reply | test("^\\s*defer"; "i")) then $reply else "Deferred: " + $reply end) end)
+            body: ((if $disp == "needs-you" then $gwait + " " + $reply else ($reply | ra_ruled_reply($disp)) end)
                    + (if $ref != "" then " In reply to " + $ref + "." else "" end)
                    + "\n" + $m + "\n" + $line) }
         | @base64' 2>/dev/null)
