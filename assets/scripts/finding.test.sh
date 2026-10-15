@@ -477,9 +477,9 @@ upsert_r() { "$SUT" upsert --anchor tk-ancR --lane human --source "human:johnzoo
 mkdir -p "$TMP/cross"
 FR=$(upsert_r rule "crossed by a re-raise" cfuR1)
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/cross/gc" <<SHIM
-if [ "\$*" = "bd update $FR --set-metadata finding.disposition=must-fix" ]; then
-  "$BIN/gc" bd update "$FR" --set-metadata finding.fix_unit=cfuR2 >/dev/null
-fi
+case "\$*" in "bd update $FR --set-metadata finding.disposition=must-fix"*)
+  "$BIN/gc" bd update "$FR" --set-metadata finding.fix_unit=cfuR2 >/dev/null ;;
+esac
 exec "$BIN/gc" "\$@"
 SHIM
 chmod +x "$TMP/cross/gc"
@@ -1261,6 +1261,26 @@ eq "$(meta "$FRI" 'finding.reply')" "the guard keeps the opt-out on this branch"
 FRN=$(human_finding tk-ancR "b.sh:9" "Should this be on by default?" 9102 9100)
 "$SUT" set-disposition --finding "$FRN" --anchor tk-ancR --disposition needs-you --reason "Should enforcement turn on now?" >/dev/null
 eq "$(meta "$FRN" 'finding.answer')" "Should enforcement turn on now?" "a needs-you ruling with no --answer records its reason as the question the living answer shows"
+# A re-ruling states its words whole: the write that commits it clears each one
+# it does not supply, so a later ruling never shows an earlier ruling's words.
+FRQ=$(human_finding tk-ancR "d.sh:4" "Should we drop X?" 9103 9100)
+"$SUT" set-disposition --finding "$FRQ" --anchor tk-ancR --disposition needs-you --reason "Should we drop X?" --label "Dropping X" >/dev/null
+eq "$(meta "$FRQ" 'finding.answer')|$(meta "$FRQ" 'finding.label')" "Should we drop X?|Dropping X" "a needs-you ruling records its question and label"
+"$SUT" set-disposition --finding "$FRQ" --anchor tk-ancR --disposition deferred --reason "dropping X waits for the next release" >/dev/null
+eq "$(meta "$FRQ" 'finding.answer')|$(meta "$FRQ" 'finding.label')" "<absent>|<absent>" \
+  "a re-ruling that supplies neither --answer nor --label clears both, so the deferral never shows the earlier question"
+has "$(meta "$FRQ" 'finding.reply')" "Deferred — tracked as follow-up" "…and the living answer reads the deferral's own reply"
+FRD=$(human_finding tk-ancR "e.sh:5" "Is this needed?" 9104 9100)
+"$SUT" set-disposition --finding "$FRD" --anchor tk-ancR --disposition needs-you --reason "Is this needed?" >/dev/null
+has "$(meta "$FRD" 'finding.reply')" "needs your decision" "a needs-you ruling stamps the reply naming its visit"
+"$SUT" set-disposition --finding "$FRD" --anchor tk-ancR --disposition declined --reason "the operator ruled it needs no change" >/dev/null
+eq "$(meta "$FRD" 'finding.reply')|$(meta "$FRD" 'finding.answer')" "<absent>|<absent>" \
+  "a decline given no --reply clears the reply an earlier ruling stamped, so it owes no answer and posts no stale question"
+FRF=$(human_finding tk-ancR "f.sh:6" "Is this the intent?" 9105 9100)
+"$SUT" set-disposition --finding "$FRF" --anchor tk-ancR --disposition needs-you --reason "Is this the intent?" >/dev/null
+"$SUT" set-disposition --finding "$FRF" --anchor tk-ancR --disposition must-fix --label "The intent" >/dev/null
+eq "$(meta "$FRF" 'finding.reply')|$(meta "$FRF" 'finding.answer')|$(meta "$FRF" 'finding.label')" "<absent>|<absent>|The intent" \
+  "a must-fix re-ruling clears the reply and the question, and keeps the label it gives"
 
 # ---------------------------------------------------------------------------
 # answer: the fix unit's own sentence on a point, and its flag; fix-notes: its

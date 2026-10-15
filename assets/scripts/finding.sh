@@ -26,14 +26,16 @@
 #                        body, or a Conversation comment linking a Conversation
 #                        comment. A declined finding's overrule, a deferred
 #                        finding's follow-up id, or a needs-you finding's visit id.
-#                        A machine or no-objection finding owes none and sets it not.
+#                        A machine or no-objection finding owes none and sets it not,
+#                        and a ruling that owes none clears one an earlier ruling set
 #   finding.label        a few words naming the point, which the validator writes as
 #                        it rules (--label); the review's living answer shows it when
 #                        the comment opens with no bold headline of its own
 #   finding.answer       the one sentence the validator answers the point with in the
 #                        review's living answer (--answer): a decline's reason, a
 #                        deferral, or for needs-you the question (its --reason when
-#                        no --answer is given)
+#                        no --answer is given). Each ruling sets or clears both, so
+#                        neither outlives the ruling that wrote it
 #   finding.fix_answer   the fix unit's own sentence on how it answered the point
 #                        compared with what was asked (the answer verb)
 #   finding.fix_flag     1 when the fix unit flags the point for the reviewer's look:
@@ -590,12 +592,15 @@ cmd_set_disposition() {
     warn "--visit names the open visit a needs-you ruling defers to; it does not apply to --disposition $disp"; exit 1
   fi
   # The words the review's living answer shows for this point ride the write
-  # that commits the ruling, so a ruled finding never shows an earlier ruling's
-  # words. A needs-you ruling's question defaults to its reason.
+  # that commits the ruling, and that write clears each one the ruling does not
+  # supply, so a ruled finding never shows an earlier ruling's words. A needs-you
+  # ruling's question defaults to its reason. The reply is cleared the same way
+  # by a ruling that owes none, below: a must-fix, a restates, and a decline
+  # given no --reply.
   [ -n "$answer" ] || [ "$disp" != needs-you ] || answer="$reason"
   local words=()
-  [ -z "$label" ] || words+=(--set-metadata "finding.label=$label")
-  [ -z "$answer" ] || words+=(--set-metadata "finding.answer=$answer")
+  if [ -n "$label" ]; then words+=(--set-metadata "finding.label=$label"); else words+=(--unset-metadata finding.label); fi
+  if [ -n "$answer" ]; then words+=(--set-metadata "finding.answer=$answer"); else words+=(--unset-metadata finding.answer); fi
   # restates is a review body that only frames its own inline comments, so it
   # takes a human finding raised by a review body (its comment is the review
   # itself) whose review raised at least one other finding on the anchor.
@@ -703,7 +708,7 @@ cmd_set_disposition() {
           || warn "could not hang fix unit $fu --blocks must-fix finding $finding; the finding's own anchor edge still holds the merge"
       fi
       # Commit the disposition now the anchor-blocking hold is proven wired.
-      gc bd update "$finding" --set-metadata finding.disposition=must-fix ${words[@]+"${words[@]}"} >/dev/null 2>&1 \
+      gc bd update "$finding" --set-metadata finding.disposition=must-fix ${words[@]+"${words[@]}"} --unset-metadata finding.reply >/dev/null 2>&1 \
         || { warn "could not record finding.disposition=must-fix on $finding"; exit 2; }
       # A later batch can re-raise this finding during the ruling and record its own
       # child after the read above. Its re-adoption reads the disposition only after
@@ -843,15 +848,17 @@ cmd_set_disposition() {
       # caller asked for is a silent decline the write-back can no longer post,
       # and a closed finding is off the validator's unvalidated set so nothing
       # re-attempts it. A machine or no-objection decline passes no --reply and
-      # owes nothing.
+      # owes nothing, so its close clears any reply an earlier ruling stamped.
+      local unreply=(--unset-metadata finding.reply)
       if [ -n "$reply" ]; then
         gc bd update "$finding" --set-metadata finding.reply="$reply" >/dev/null 2>&1 \
           || { warn "could not stamp finding.reply on $finding; NOT closing (a silent decline)"; exit 2; }
+        unreply=()
       fi
       strip_inbound_blocks "$finding"
       local note="declined"
       [ -n "$reason" ] && note="declined: $reason"
-      gc bd update "$finding" --set-metadata finding.disposition=declined ${words[@]+"${words[@]}"} --status=closed --append-notes "$note" >/dev/null 2>&1 \
+      gc bd update "$finding" --set-metadata finding.disposition=declined ${words[@]+"${words[@]}"} ${unreply[@]+"${unreply[@]}"} --status=closed --append-notes "$note" >/dev/null 2>&1 \
         || { warn "could not close declined finding $finding"; exit 2; }
       release_hold "$finding" "$anchor" \
         || warn "declined $finding still blocks $anchor after its close; the edge on a closed finding holds nothing"
@@ -865,7 +872,7 @@ cmd_set_disposition() {
       strip_inbound_blocks "$finding"
       local rnote="restates its review's inline comments"
       [ -n "$reason" ] && rnote="$rnote: $reason"
-      gc bd update "$finding" --set-metadata finding.disposition=restates ${words[@]+"${words[@]}"} --status=closed --append-notes "$rnote" >/dev/null 2>&1 \
+      gc bd update "$finding" --set-metadata finding.disposition=restates ${words[@]+"${words[@]}"} --unset-metadata finding.reply --status=closed --append-notes "$rnote" >/dev/null 2>&1 \
         || { warn "could not close restates finding $finding"; exit 2; }
       release_hold "$finding" "$anchor" \
         || warn "restates $finding still blocks $anchor after its close; the edge on a closed finding holds nothing"

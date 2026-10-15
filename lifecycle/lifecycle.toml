@@ -851,6 +851,8 @@ keys = [
   # overrule (set on `set-disposition declined --reply`), a deferred finding's
   # follow-up id, or a needs-you finding's visit id (both set by set-disposition
   # as it rules). A machine or no-objection finding owes none and sets it not.
+  # A ruling that owes none clears it in the write that commits the ruling: a
+  # must-fix, a restates, and a decline given no --reply.
   # The peer model: the validator may overrule or defer a human objection, or
   # send it to them, never in silence.
   "finding.reply",
@@ -915,8 +917,7 @@ keys = [
   "finding.fix_unit",
   # The words the review's living answer shows for a human finding
   # (assets/scripts/review-answer.sh, written by pr-facts.sh's write-back). Each
-  # is plain text, absent until its writer records it, and never cleared, since
-  # a later write replaces it.
+  # is plain text and absent until its writer records it.
   # finding.label — a few words naming the point, written by the validator as it
   #   rules (`set-disposition --label`). The living answer labels a point with
   #   its comment's own bold lead first, so this one shows only for a comment
@@ -926,6 +927,9 @@ keys = [
   #   its own words (`set-disposition --answer`): a decline's reason, a deferral,
   #   or for needs-you the question the visit asks, which defaults to the
   #   ruling's --reason. Absent, the living answer shows finding.reply.
+  #   Each ruling sets finding.label and finding.answer, or clears each one it
+  #   does not supply, in the write that commits it, so neither outlives the
+  #   ruling that wrote it.
   # finding.fix_answer — the fix unit's own sentence on how it answered the point
   #   compared with what was asked (`finding.sh answer`). The living answer shows
   #   it for a must-fix point, and for any point the fix flagged.
