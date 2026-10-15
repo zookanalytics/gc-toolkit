@@ -13,6 +13,7 @@
 # Exit 0 always: a dispatch is never blocked on prose.
 # Caller: gate-ensure.sh.
 set -uo pipefail
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 usage() {
   cat >&2 <<'U'
@@ -229,13 +230,36 @@ change the operator must see to trust that the PR gives them nothing to look at.
 M
     ;;
   *)
-    cat <<M
-The pack declares no method for the \`$CHECK_NAME\` check, so judge the diff
-against the check's stated purpose: the \`purpose\` line of its row in
-\`review-checks.toml\` at the reviewed commit. Say in your verdict's
-coverage line that the check had no declared method. An undeclared method is
-a gap worth an observation.
+    # The check's purpose, from its row in the index at the reviewed commit
+    # (the working tree's index when no commit is named), through the index's
+    # one parser. Empty when no row there declares the check.
+    PURPOSE=""
+    for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
+      [ -n "$root" ] || continue
+      if [ -n "$REVIEWED_OID" ]; then IDX=$(git -C "$root" show "$REVIEWED_OID:review-checks.toml" 2>/dev/null)
+      else IDX=$(cat "$root/review-checks.toml" 2>/dev/null); fi
+      PURPOSE=$(printf '%s\n' "$IDX" | bash "$HERE/review-checks.sh" --file /dev/stdin --check "$CHECK_NAME" 2>/dev/null | cut -f3)
+      [ -n "$PURPOSE" ] && break
+    done
+    if [ -n "$PURPOSE" ]; then
+      cat <<M
+The reviewed repo's \`review-checks.toml\` declares the \`$CHECK_NAME\` check,
+and this pack ships no method for it. Judge the diff against the check's
+purpose, as its row states it:
+
+> $PURPOSE
+
+Say in your verdict's coverage line that the pack has no method for this
+check. The missing method is a gap worth an observation.
 M
+    else
+      cat <<M
+Neither this pack nor the reviewed repo's \`review-checks.toml\` declares the
+\`$CHECK_NAME\` check, so nothing says what it judges. Approve, and pass
+\`--needs-you\` on the verdict call saying the check is declared nowhere, so
+the operator decides whether it stays in this anchor's check set.
+M
+    fi
     ;;
 esac
 

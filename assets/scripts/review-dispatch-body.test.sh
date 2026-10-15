@@ -16,8 +16,10 @@
 #   (RC)        exits 0: a dispatch is never blocked on prose.
 #   (NOTE)      --note appends a dispatch-context section; absent without it.
 #   (CHECK)     --check-name emits a per-check section (correctness default,
-#               triage, demo, arch, pm, and a neutral no-method note for an
-#               undeclared check, judged on its stated purpose).
+#               triage, demo, arch, pm, and a no-method note for a check
+#               this pack has no arm for: its purpose, printed from the
+#               reviewed commit's index, or the declared-nowhere note when
+#               no row declares it).
 #   (READ)      every declared check's section reads its method file from the
 #               pack, never from the reviewing shell's own checkout.
 #   (BOTH)      the formula and check axes coexist in one note.
@@ -122,13 +124,14 @@ hasF "$TMP/arch.out" 'The Architect' "(CHECK) arch names the Architect persona"
 hasF "$TMP/arch.out" 'docs/architecture.md' "(CHECK) arch reads the architecture reference docs before judging"
 hasF "$TMP/arch.out" 'never edit' "(CHECK) arch enforces and never edits"
 hasF "$TMP/arch.out" 'skills/review-arch/SKILL.md' "(CHECK) arch points at its method skill, the way demo and triage do"
-notF "$TMP/arch.out" 'The pack declares no method' "(CHECK) a declared check gets its method, not the no-method note"
-bash "$SCRIPT" --check-name nonesuch > "$TMP/undeclared.out" 2>/dev/null
-hasF "$TMP/undeclared.out" 'The pack declares no method for the `nonesuch` check' "(CHECK) an undeclared check gets the no-method note, never a guess"
+notF "$TMP/arch.out" 'this pack ships no method' "(CHECK) a declared check gets its method, not the no-method note"
+notF "$TMP/arch.out" 'declared nowhere' "(CHECK) …nor the declared-nowhere note"
+# Run outside any repository, so no index declares the check.
+( cd "$TMP" && env -u GC_RIG_ROOT bash "$SCRIPT" --check-name nonesuch ) > "$TMP/undeclared.out" 2>/dev/null
+hasF "$TMP/undeclared.out" '`nonesuch` check, so nothing says what it judges' "(CHECK) a check no index row declares gets the declared-nowhere note, never a guess"
+hasF "$TMP/undeclared.out" '`--needs-you` on the verdict call saying the check is declared nowhere' "(CHECK) …which approves and puts the check set to the operator"
 notF "$TMP/undeclared.out" 'review-correctness' "(CHECK) …and names no other check's method"
-hasF "$TMP/undeclared.out" 'against the check'"'"'s stated purpose: the `purpose` line' "(CHECK) …so the reviewer judges the check's stated purpose"
 notF "$TMP/undeclared.out" 'docs/review-' "(CHECK) …and is not pointed at a rig extension, which a rig need not keep"
-hasF "$TMP/undeclared.out" 'coverage line that the check had no declared method' "(CHECK) …and says so in the coverage line"
 RCC=0; bash "$SCRIPT" --check-name nonesuch >/dev/null 2>&1 || RCC=$?
 eq "$RCC" "0" "(RC) an undeclared check still exits 0"
 
@@ -187,7 +190,8 @@ REPO="$TMP/repo"; mkdir -p "$REPO/docs"
 git -C "$REPO" init -q
 git -C "$REPO" config user.email t@t; git -C "$REPO" config user.name t
 printf 'RIG-EXT-MARK: the Architect reads architecture.md first.\n' > "$REPO/docs/review-arch.md"
-git -C "$REPO" add docs/review-arch.md
+printf '[checks.security]\nmethod = "docs/review-security.md"\npurpose = "PURPOSE-MARK: secrets stay out of logs."\nphase = "pre-open"\n' > "$REPO/review-checks.toml"
+git -C "$REPO" add docs/review-arch.md review-checks.toml
 git -C "$REPO" commit -qm ext
 SHA=$(git -C "$REPO" rev-parse HEAD)
 ( cd "$REPO" && bash "$SCRIPT" --check-name arch --reviewed-oid "$SHA" ) > "$TMP/ext.out" 2>/dev/null
@@ -196,6 +200,16 @@ hasF "$TMP/ext.out" 'RIG-EXT-MARK: the Architect reads architecture.md first.' "
 ( cd "$REPO" && bash "$SCRIPT" --check-name demo --reviewed-oid "$SHA" ) > "$TMP/noext.out" 2>/dev/null
 notF "$TMP/noext.out" 'Rig extension' "(EXT) a check with no extension file degrades — no extension section"
 notF "$OUT" 'Rig extension' "(EXT) no --reviewed-oid means no extension read at all"
+
+echo "# a check the reviewed repo's index declares and this pack ships no method for"
+# The working tree's row differs from the reviewed commit's: the commit's is read.
+sed 's/PURPOSE-MARK/WORKTREE-MARK/' "$REPO/review-checks.toml" > "$TMP/worktree-index" && cp "$TMP/worktree-index" "$REPO/review-checks.toml"
+( cd "$REPO" && env -u GC_RIG_ROOT bash "$SCRIPT" --check-name security --reviewed-oid "$SHA" ) > "$TMP/indexed.out" 2>/dev/null
+hasF "$TMP/indexed.out" 'declares the `security` check,' "(CHECK) a check only the reviewed repo's index declares is named as that case"
+hasF "$TMP/indexed.out" '> PURPOSE-MARK: secrets stay out of logs.' "(CHECK) …with its purpose printed from its row at the reviewed commit"
+notF "$TMP/indexed.out" 'WORKTREE-MARK' "(CHECK) …never from the working tree"
+hasF "$TMP/indexed.out" 'coverage line that the pack has no method for this' "(CHECK) …and the coverage line says the pack has no method for it"
+notF "$TMP/indexed.out" 'declared nowhere' "(CHECK) …and it is not the declared-nowhere note"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
