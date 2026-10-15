@@ -66,7 +66,8 @@ FINDING="$SCRIPTS_DIR/finding.sh"
 REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
 [ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); NOTHING is opened or readied this pass" >&2; exit 1; }
 # The single writer of the workflow-owned PR labels. A PR is born check-green with
-# no review yet, so its initial status is needs-review; reconcile derives that (and
+# no review yet, so its initial status is needs-review, or working while it is a
+# draft whose ready flip the city still owes; reconcile derives that (and
 # self-heals an adopted PR mid-rework). mark-base stamps the standing `base:` marker
 # on an integration-targeted checkpoint, the PR-list counterpart to the body banner.
 PR_STATUS_LABEL="$SCRIPTS_DIR/pr-status-label.sh"
@@ -761,9 +762,12 @@ while IFS=$'\x1f' read -r rid rcs rnum rhold rrhold rdisp; do
     # this PR and gate-ensure moves the anchor to its ready-for-review stage. A
     # hold does not stop this write: recording that GitHub reads the PR ready
     # surfaces nothing, and skipping it would pin the anchor's dispatch at the
-    # draft stage for as long as the hold stands.
+    # draft stage for as long as the hold stands. The status: label reads the
+    # same marker, so it is re-derived after the stamp, as the flip below does.
     gc bd update "$rid" --set-metadata draft_readied="$rhead" >/dev/null 2>&1 \
       || echo "$PROG: WARN $rid PR#$rnum is ready but draft_readied did not stamp; will re-read next pass" >&2
+    "$PR_STATUS_LABEL" reconcile --anchor "$rid" --pr "$rnum" \
+      --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" >/dev/null 2>&1 || true
     continue
   fi
   # The draft is the operator's while they hold it: never surface it.
@@ -796,6 +800,8 @@ RGATESEOF
   [ -z "$rungreen" ] || continue
   # All green: surface it, and record draft_readied so this arm never re-reads or
   # re-flips the PR — including after an operator later re-drafts it to park it.
+  # The status: label reads draft_readied as the end of the draft stage, so it is
+  # reconciled after the stamp.
   if gh pr ready "$rnum" --repo "$ORIGIN_REPO_Q" >/dev/null 2>&1; then
     readied=$((readied + 1))
     gc bd update "$rid" --set-metadata draft_readied="$rhead" >/dev/null 2>&1 \

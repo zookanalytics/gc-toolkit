@@ -375,7 +375,7 @@ type Tile struct {
 	PRBranch string `json:"pr_branch"`
 
 	// PRMachine is what the merge cadence can do with this anchor on its next
-	// pass: progressing, settled, wedged-exception, blocked, or unknown.
+	// pass: progressing, settled, blocked, or unknown.
 	//
 	// `blocked` is a hold no automated actor will clear and no review verdict is
 	// owed on — an unresolved required review thread, a base gone BEHIND, or an
@@ -501,10 +501,10 @@ type Tile struct {
 	// `working`, `needs-review`, or `needs-attention` — and the word the frontier
 	// leads with on every live row. It begins as the per-bead value
 	// [prstatus.Derive] names from the same inputs PRPhase reads: holds, posture,
-	// and for a merge anchor its open rework/review children, or for any other
-	// bead the live-workflow signal standing over it. A bead's board liveness and
-	// its GitHub `status:` label come from that one core. A row WITH child tiles
-	// then takes their rolled-up state in place of that per-bead value
+	// the draft stage, and for a merge anchor its open rework/review children, or
+	// for any other bead the live-workflow signal standing over it. A bead's board
+	// liveness and its GitHub `status:` label come from that one core. A row WITH
+	// child tiles then takes their rolled-up state in place of that per-bead value
 	// ([aggregatePhases]): an epic's frontier is its children's frontier.
 	//
 	// Phase and PRPhase are therefore two independent axes. PRPhase is the PR

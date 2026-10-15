@@ -6,8 +6,8 @@
 #   status:  who must act on the PR next — the city holds the ball, a human should
 #            review the head, or a human must weigh in before the PR can settle.
 #            One value at a time, and pr-facts.sh recomputes it every cadence pass
-#            from the anchor's posture, holds, and rework children. It is workflow
-#            state, never an approval, and never asserts a PR may merge:
+#            from the anchor's posture, holds, draft stage and rework children. It
+#            is workflow state, never an approval, and never asserts a PR may merge:
 #            machine-readiness rides pr.machine and the draft flag. The tri-state
 #            itself — the values, what each projects from, and their precedence —
 #            is decided by one Go package, services/gctk/prstatus, reached through
@@ -59,7 +59,7 @@ label_desc() { # <value> — the label's GitHub description (GitHub caps these a
   case "$1" in
     working)         printf 'Workflow: the city holds the ball — rework or merge in flight; no human input needed.' ;;
     needs-review)    printf 'Workflow: settled at the current head; awaiting a human review or re-review.' ;;
-    needs-attention) printf 'Workflow: stopped without settling (signoff cap, hold, blocked merge); needs a human to unstick.' ;;
+    needs-attention) printf 'Workflow: stopped without settling (a hold, a blocked merge); needs a human to unstick.' ;;
     *)               printf 'Workflow status label.' ;;
   esac
 }

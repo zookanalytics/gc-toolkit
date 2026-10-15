@@ -285,31 +285,35 @@ needs a conversation is the visit `escalate.sh` files. Filing the demand
 without wiring the edge is the common failure, and a demand that gates nothing
 is a note.
 
-**The shape law** is that a bead which will ever carry a `blocks` edge must
-have no `parent-child` children. Containers do not block; blockers do not
-parent.
+**The shape law** is that a blocker on a bead with `parent-child` children
+holds every part of it, so such a bead carries a `blocks` edge only for a wait
+that belongs to all of its parts. A wait that belongs to one part goes on that
+part.
 
 The reason is what `parent-child` means. It is decomposition: the child is part
 of the parent's work, so the parent's blocked state cascades down to it. That
 cascade is the correct reading of containment and is not a defect to route
-around. It does damage only where the edge has been used for something that is
-not decomposition, and whether routed work is that case depends on what the work
-is. Work `W` a sitting hands out on subject `S` is a dependency by default: `S`
-is waiting for it and does not contain it, so `W` is not a part of `S`. Filing
-that `W` as a child of `S` would state a containment that is not true, and the
-stranding would follow from the false statement rather than from the cascade;
-filed as the graph is, `W` sits beside `S` and `S` blocks on `W`, which reads
-correctly and keeps `W` claimable. The exception is work that genuinely
-decomposes an epic subject — a story or task that is part of the epic. That `W`
-is a member, a `parent-child` child, and it carries no `blocks` edge back to the
-subject: the completion-wait is implicit in containment, and beads refuses a
-parent→descendant `blocks` edge in any case. "The subject is an epic" is the
-indicator that tells the two apart, and the shape law decides the mechanism
-either way — a dependency sibling carries the `blocks` edge, a member child
-never does (`specs/tk-xgj2ko/membership-mechanics.md`). beads enforces the
+around. A wait of the whole is what the cascade carries: a park on an epic
+([steering.md](steering.md)), or a prerequisite that all of an epic's work
+needs, holds every part that has not started, and the blocker's close releases
+them together. The cascade does damage where a wait of one part is put on the
+whole, which holds every other part with it, and where the edge has been used
+for something that is not decomposition. Whether routed work is that case
+depends on what the work is. Work `W` a sitting hands out on subject `S` is a
+dependency by default: `S` is waiting for it and does not contain it, so `W` is
+not a part of `S`. Filing that `W` as a child of `S` would state a containment
+that is not true, and the stranding would follow from the false statement rather
+than from the cascade; filed as the graph is, `W` sits beside `S` and `S` blocks
+on `W`, which reads correctly and keeps `W` claimable. The exception is work
+that genuinely decomposes an epic subject — a story or task that is part of the
+epic. That `W` is a member, a `parent-child` child, and it carries no `blocks`
+edge back to the subject: the completion-wait is implicit in containment, and
+beads refuses a parent→descendant `blocks` edge in any case. "The subject is an
+epic" is the indicator that tells the two apart, and the shape law decides the
+mechanism either way — a dependency sibling carries the `blocks` edge, a member
+child never does (`specs/tk-xgj2ko/membership-mechanics.md`). beads enforces the
 sharpest case directly, refusing an edge that would make a parent wait on its
-own descendant. Where a container is wanted for roll-up, it is a bead that never
-blocks.
+own descendant.
 
 Two boundaries. A conclusion is prose, stored once and never cleared, and it
 does not become a wait by being written down; that seam is
@@ -372,6 +376,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 |---|---|---|
 | `formulas/mol-polecat-work.toml` | work | The work lifecycle: claim, worktree, implement, push, hand to the refinery. |
 | `assets/scripts/work-tree-holder.sh` | work | Tells load-context whether a live session is working the bead's tree, the one sign of a run in flight on a work bead the workflow never claims. |
+| `assets/scripts/await-ruling.sh` | work | Records a declined run's wait on its work bead: a `blocks` edge onto the visit that asks for the ruling, and a deferred-dispatch arm that re-slings the work when the visit closes, after it releases a claim on the work bead that no live worker holds. |
 | `orders/deferred-dispatch.toml` | work | Routes work whose blockers have closed. |
 | `assets/scripts/deferred-dispatch.sh` | work | The pass that order runs: a pending dispatch is a fact about the work, so it lives on the work bead. |
 | `formulas/mol-review.toml` | review | The review lifecycle every check shares: claim, pin, apply the check's method, one `signoff.sh` verdict, drain. |
@@ -379,9 +384,9 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/review-dispatch-body.sh` | review | Emits the dispatch note a review bead carries. |
 | `assets/scripts/signoff.sh` | review | The single writer of check verdicts (I7). |
 | `assets/scripts/review-workspace.sh` | review | A review's directory on disk, named for its review bead: makes the detached worktree where the review reads its pinned commit and runs any suite its check calls for, removes the directory at the verdict step, and, as the review-workspace-reap order's pass, removes the directories of reviews that closed some other way. |
-| `assets/scripts/finding.sh` | review | The finding-bead primitive: files a review objection as a bead with a rebase-stable `finding.key`, rules its disposition (must-fix `blocks` the anchor, and a later ruling releases that hold only once it has committed; deferred files a claimable follow-up in one create carrying both its edges, the anchor's `blocks` and a `discovered-from` onto the finding, reuses that follow-up when a failed ruling is retried, then closes; declined closes; needs-you files a visit, or names one already open on the anchor's feedback, and stays open until the operator rules that visit, or the one a fold hands its question to, and no fix unit on its lane, nor a ruling's rework child, is in flight), refuses any other ruling of a human finding while an open visit tracks or holds the rework minted for its feedback batch, lists the open visits on an anchor's feedback, wires the fix unit's two `blocks` edges, and reads whether a must-fix finding is open. |
+| `assets/scripts/finding.sh` | review | The finding-bead primitive: files a review objection as a bead with a rebase-stable `finding.key`, rules its disposition (must-fix `blocks` the anchor, and a later ruling releases that hold only once it has committed; deferred files a claimable follow-up in one create carrying both its edges, the anchor's `blocks` and a `discovered-from` onto the finding, reuses that follow-up when a failed ruling is retried, then closes; declined closes; needs-you files a visit, or names one already open on the anchor's feedback, and stays open until the operator rules that visit, or the one a fold hands its question to, and no fix unit on its lane, nor a ruling's rework child, is in flight; restates closes a human review body that only frames the review's own inline comments), refuses any other ruling of a human finding while an open visit tracks or holds the rework minted for its feedback batch, lists the open visits on an anchor's feedback, wires the fix unit's two `blocks` edges, and reads whether a must-fix finding is open. It records the words a review's living answer shows for a human finding: the label and sentence the validator rules with, and the fix unit's own sentence, flag and notes (`answer`, `fix-notes`). |
 | `assets/scripts/lane-state.sh` | review | Derives a lane's `green` from the review-outcome graph — a closed approve-verdict review bead, non-superseded — so every check reader agrees without a stored `check.<lane>` marker. A GitHub approval backs a lane only when no conflicted bring-current round reopened the lane after the approval was given. |
-| `formulas/mol-validate.toml` | review | The validator method: one pass per review batch that rules each finding's disposition (must-fix, deferred, declined, or needs-you — decisions 1 and 2) and whether a fresh whole-diff review is warranted (decision 3), so convergence is judged rather than counted. A human finding whose question an open visit on the anchor's feedback already carries is ruled needs-you on that visit, never on its merits. The `{{defer_policy}}` variable carries the fix-now-versus-defer threshold. It writes no `check.<lane>` marker. A ruling that a fresh whole-diff review is warranted also runs `approval-withdraw.sh`, whose note is the one write the anchor takes from the pass. |
+| `formulas/mol-validate.toml` | review | The validator method: one pass per review batch that rules each finding's disposition (must-fix, deferred, declined, needs-you or restates — decisions 1 and 2) and whether a fresh whole-diff review is warranted (decision 3), so convergence is judged rather than counted. A human finding whose question an open visit on the anchor's feedback already carries is ruled needs-you on that visit, never on its merits, and a human ruling writes the label and sentence the review's living answer shows. The `{{defer_policy}}` variable carries the fix-now-versus-defer threshold. It writes no `check.<lane>` marker. A ruling that a fresh whole-diff review is warranted also runs `approval-withdraw.sh`, whose note is the one write the anchor takes from the pass. |
 | `assets/scripts/validate-dispatch-body.sh` | review | Emits the dispatch note a validation-pass bead carries. |
 | `assets/scripts/review-outcome.sh` | review | The write side of a lane's approve outcome, the bead lane-state.sh reads: `back-lane` files the closed approve outcome that greens a lane, `supersede-lane` stamps it superseded to return the lane to `unreviewed`, and `supersede-anchor` does that for every lane the anchor declares. The validator calls every verb; `converse-rework.sh` calls `supersede-anchor` once an operator ruling's rework is filed; `bring-current-guard.sh` calls `supersede-lane` on each lane a conflicted bring-current round reopens. |
 | `assets/scripts/demo-repo-artifact.sh` | review | The demo check's repo-artifact modality: lists the visuals a reviewed commit carries that its change adds, names, or sits beside, and attaches the chosen one to the PR inline, as the commit stores it, through `demo-deliver.sh`. The comment says what the change does to the visual and names the commit that last changed it. |
@@ -401,7 +406,8 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/branch-supersession.sh` | merge | Asked by arms 5 and 7 before they file a merge-in child. When the conflict comes from a landed change that deleted or rewrote the code the branch edits, it files the operator's `rework-base-supersession` decision instead. No merge authority. |
 | `assets/scripts/rejection-repool.sh` | merge | The patrol's rejection: hands a work bead the refinery will not land back to the polecat pool as a fresh `mol-polecat-work` pour, which no hold on the bead's epic reaches, after a release that records why. A failed sling is armed for a retry, and any other stop files a visit. No merge authority. |
 | `assets/scripts/pr-open.sh` | merge | Arm 3: `pre_open_gate` to `pull_request`. |
-| `assets/scripts/pr-facts.sh` | merge | Arm 7: records external PR facts. No merge authority. |
+| `assets/scripts/pr-facts.sh` | merge | Arm 7: records external PR facts. No merge authority. Its write-back is the one writer of each human review's living answer, the Conversation comment that says what became of every point the review raised. |
+| `assets/scripts/review-answer.sh` | merge | What a human review's living answer shows, as jq definitions sourced by `pr-facts.sh`, its one writer: a point per finding, labelled and answered in the words the validator and the fix unit recorded, sorted into Needs you, Worth a look, In progress and Done, and the one-line note the review's dismissal carries. |
 | `assets/scripts/convoy-graduate.sh` | merge | Arm 8: graduates a complete owned integration convoy. |
 | `assets/scripts/review-sweep.sh` | merge | Arm 9: closes a dispatched review with no reviewable surface left. No merge authority. |
 | `assets/scripts/scaffolding-sweep.sh` | merge | Arm 10: retires a disposed anchor's machine review scaffolding (`task_kind=validation\|finding\|rework`) so it can finalize, and carries a finding that can cite code the target branch already carries forward to a bug bead instead of mooting it. `pr-facts.sh` runs it for one anchor before consummating that anchor's PR-close disposition. Leaves reviews, human visits, operator freezes, and the anchor itself alone. No merge authority. |
@@ -410,11 +416,11 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/reconcile-rig-checkouts.sh` | merge | The pass that order runs. It fast-forwards each checkout, heals a refusal it can prove lossless, and escalates the rest. |
 | `assets/scripts/detached-job.sh` | merge | Runs a command that can outlive one tool call in a session of its own, reports a launch that did not happen, and waits for it in bounded foreground calls that end when the command exits, whether or not it recorded an exit code. The refinery's run-tests step runs its gates through it. |
 | `formulas/mol-visit.toml` | visit | Files one visit on a subject bead, parked on the helm board (`gc.routed_to=human`) for an operator to engage. |
-| `assets/scripts/first-reaction-dispose.sh` | visit | Performs a first reaction's disposition — one of five exits (route the bead to a pool or to the named agent whose work it is, recommend an action for the operator to trigger, hold it on an edge, route it to a validating closer, or put it to the operator as a human gate for their judgment) — stamps `gc.reacted_by` on the subject, and closes the reaction bead. A pool route, or a blocked exit's arm, reaches only a bead the intake rule admits: a member of an epic, PR-finishing work, or an emergency whose named check it confirms failing on main, routed at P0. It marks any other bead `placement=pending` and leaves it unrouted for the placement sitting ([steering.md](steering.md)). The reaction is its own leased task bead R filed by `tools/gc-proactive.sh`; the prompt is the method. It sits in visit because its product is a bead the human no longer has to triage. It never closes the subject: the close disposition slings it to a validating closer. |
+| `assets/scripts/first-reaction-dispose.sh` | visit | Performs a first reaction's disposition — one of five exits (route the bead to a pool or to the named agent whose work it is, recommend an action for the operator to trigger, hold it on an edge, route it to a validating closer, or put it to the operator as a human gate for their judgment) — stamps `gc.reacted_by` on the subject, and closes the reaction bead. A pool route, or a blocked exit's arm, reaches only a bead the intake rule admits: a member of an epic, PR-finishing work, or an emergency whose named check it confirms failing on main, routed at P0. It marks any other bead `placement=pending` and leaves it unrouted for the placement sitting ([steering.md](steering.md)). Its `--stand-down`, which the reaction runs before it reads the subject, closes the reaction bead the same way and writes nothing else when the subject already carries this reaction's `gc.reacted_by` or a live owner's `gc.reaction_owned`. The reaction is its own leased task bead R filed by `tools/gc-proactive.sh`; the prompt is the method. It sits in visit because its product is a bead the human no longer has to triage. It never closes the subject: the close disposition slings it to a validating closer. |
 | `formulas/mol-validate-close.toml` | visit | The validating closer a `close` disposition routes to: a capable pool re-checks the no-work conclusion against live state and closes the subject (`gc.work_outcome=no-op`) when it holds, or files a visit when it does not. The one bead-closer outside the refinery, gated on its own confident check. |
 | `orders/helm-build.toml` | visit | Keeps the served board binary current with `services/helm`. |
 | `services/helm` | visit | The board. Derives every row per render from the ledger. |
-| `assets/scripts/gc-helm.sh` | visit | The board's write verbs (takeaway, open, engage, react, dismiss, demand, accept) and its read-only verbs: resolve, and unplaced, which lists the placement sitting's queue. |
+| `assets/scripts/gc-helm.sh` | visit | The board's write verbs (takeaway, open, engage, react, dismiss, demand, accept, and the operator's [park](steering.md)) and its read-only verbs: resolve, and unplaced, which lists the placement sitting's queue. |
 | `assets/scripts/gc-helm-svc.sh` | visit | The `proxy_process` launcher for the board backend. |
 | `assets/scripts/gc-visit-open.sh` | visit | Operator-origin visit intake in one command. |
 | `assets/scripts/city-liveness.sh` | visit | The one reading of the liveness flags in `gc rig list --json`: whether a rig is suspended, and whether the city controller is running, where the HQ row's `running=false` counts only when `gc status` does not contradict it. `gc-helm.sh`'s engage refuses on them and `gc-visit-open.sh` notes that a report will wait. |
@@ -490,6 +496,8 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/icu4c-cgo.sh` | shared primitive | The cgo flags every compile of `services/helm` needs on macOS, where Homebrew keeps icu4c off the default search path and Dolt's go-icu-regex needs its headers. Visit sources it for the helm-svc build (`gc-build.sh helm`), and merge sources it for the go vet in `tools/lint.sh`, which the gc-toolkit rig's lint command runs. |
 | `assets/scripts/branch-end.sh` | shared primitive | Ends a retired bead's branch on the git remote, the way delete-on-merge ends a landed one: keeps a branch a live bead still names, pins the tip (the PR's `refs/pull/<n>/head`, or an annotated `archive/<branch>@<short-sha>` tag read back on origin), then deletes it at that tip. `bead-rehome.sh` runs it after every disposition close, so it serves that writer's callers for the same reason: converse (visit), and `pr-facts.sh`, `duplicate-sweep.sh` and `scaffolding-sweep.sh` (merge). Its origin write is granted in [authority-map.md](authority-map.md). |
 | `assets/scripts/rework-child.sh` | shared primitive | The one writer of a review- or ruling-sourced rework child, the fix unit that blocks an anchor while a worker resumes its branch. Review (`signoff.sh`, on a request-changes verdict) and visit (`converse-rework.sh`, on an operator ruling) file through it for the same reason, each passing its provenance as the child's source key and deciding the work order. |
+| `assets/scripts/run-cancel.sh` | shared primitive | Ends a molecule's run through gascity's run cancel, which closes the root and every step that is not closed, so no pack script writes a molecule member. Work (`mol-polecat-work`'s declines), review (`mol-validate`'s), visit (`gc-helm.sh takeaway --release`) and patrol (the witness's orphan recovery, for a run whose root already closed) call it for the same reason: a run that should not continue. |
+| `assets/scripts/molecule-hold.sh` | shared primitive | The name that step text from an earlier version of a formula calls to decline. A molecule keeps the step text it was poured with, so such a run still requires this script and calls it. It hands the call to `run-cancel.sh --step` unchanged and reads or writes no bead itself. Step text of `mol-polecat-work` (work), `mol-validate` (review) and `mol-rig-demo` calls it for the same reason: a decline. It goes once no open step bead names it. |
 
 ### The placements worth arguing about
 
