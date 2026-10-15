@@ -457,8 +457,7 @@ decides how.
   under its session id drains.
 
 Either way, a route write that keeps failing leaves the bead waiting with an
-unchanged count, which is what the alarm's third condition looks for
-(section 5).
+unchanged count, which the alarm reads as nothing taken (section 5).
 
 A claim the script has not settled outlives its session only if the put-back
 fails too, or if the session dies between the claim and the route write. An
@@ -754,10 +753,11 @@ cold-pool probe supplies one only for an offer its default query can see
 offer, and not one woken only for an offer under a parked epic or for an
 old-style handoff. Every refinery session that sits at its prompt without
 claiming while an offer waits is caught by the alarm in section 5. That alarm
-files its finding at the second pass that sees nothing taken and nothing held,
-and the finding's first reaction puts the stopped session to whoever can act on
-it. gascity gc-9h08f6, a `scale_check` that names the beads it counts, would
-extend the backstop to every offer.
+files its finding at the second of two passes in a row that each see offers
+waiting and nothing held, when nothing was taken between them. The finding's
+first reaction puts the stopped session to whoever can act on it. gascity
+gc-9h08f6, a `scale_check` that names the beads it counts, would extend the
+backstop to every offer.
 
 So the design adds no nudge and no wake order. It deletes the polecat's step-6
 wake and nudge, and the keeper's.
@@ -775,22 +775,38 @@ holder has stopped is I11's to report (section 2).
 
 ### The alarm
 
-**Predicate**, per rig, evaluated once a pass. All four conditions must hold:
+**Predicate**, per rig, evaluated once a pass. A pass is idle when all three of
+these conditions hold:
 
 1. At least one offer waits. The offers are the beads the demand count counts:
    tier 3 of `refinery-offers.sh`, and the old-style handoffs of tier 2
    (section 4).
 2. No in-progress bead is routed to the refinery. That is, the refinery holds
    nothing.
-3. Every offer that was waiting at the previous pass is still waiting, with the
-   same `refinery_attempts`. That is, the pool took nothing since the last look.
-   The count matters because a claim raises it even when its exit releases the
-   bead again, so a bead claimed and released between two passes waits at both.
-   The pass's state directory keeps the previous pass's offer ids and counts. A
-   pass whose read of the offers fails records nothing (section 2), so the
-   comparison is always between two passes that read them.
-4. Neither the refinery agent nor its rig is suspended. A suspended pool is a
+3. Neither the refinery agent nor its rig is suspended. A suspended pool is a
    note.
+
+The alarm fires at an idle pass whose previous pass was idle too, when every
+offer that waited at the previous pass still waits, with the same
+`refinery_attempts`. That is, the refinery held nothing at either look and took
+nothing between them. The count matters because a claim raises it even when its
+exit releases the bead again, so a bead claimed and released between two passes
+waits at both.
+
+Each pass records in the pass's state directory whether it was idle, and if it
+was, the ids and counts of the offers it saw. A pass that was not idle resets
+the comparison, because the pass after it has no idle pass to compare with. Two
+ordinary events depend on the reset:
+
+- **Session turnover.** A pass that sees a claim held is not idle. When the
+  claim reaches its outcome and the session drains, the first pass that finds
+  nothing held only records the offers it sees. So the next session has at least
+  one whole interval between passes to claim before the alarm can fire.
+- **A first offer.** A pass that sees no offer is not idle, so the first pass
+  that sees a fresh handoff only records it.
+
+A pass whose read of the offers fails records nothing (section 2), so the
+comparison is always between the last two passes that read them.
 
 **What it files.** One finding per rig, through `patrol-finding.sh --scope
 refinery-findings --key refinery-offers-untaken`. It goes through the same writer
@@ -817,13 +833,21 @@ were considered:
 - **The witness patrol**, where the timer runs today. No check reads whether the
   witness's patrol is cycling.
 
-**Why it is not a clock.** Nothing in the predicate is a duration. Condition 3
-compares two observations: was anything taken between them? gascity gives a fresh
-slot a 90-second grace to claim before its backstop first nudges it
-(`idle_nudge.go:57`). Passes are at least 60 seconds apart and usually further,
-because the supervisor fires a short-interval order once per trip of its dispatch
-rotation (I10's description). So a working pool almost always takes something
-between passes. The finding's first reaction dismisses the rare false start.
+**Why it is not a clock.** Nothing in the predicate is a duration. The alarm
+compares two idle observations and asks whether anything was taken between
+them. The cadence decides how far apart they are. The order's interval is 60
+seconds, and passes run further apart than that, because the supervisor fires a
+short-interval order once per trip of its dispatch rotation (I10's
+description). On 2026-10-15, by the start lines of each rig's pass log, the
+gc-toolkit rig's passes started 571 to 1049 seconds apart, and the two smallest
+rigs' passes 67 to 206 seconds apart. In the same window three fresh polecat
+sessions, which run the refinery's `pre_start`, made their first claim 48 to 60
+seconds after they were created. So the interval the reset guarantees covers an
+ordinary cold start on every rig. On the smallest rigs it can be shorter than
+the 90 seconds gascity waits before its backstop first nudges a fresh slot
+(`idle_nudge.go:57`), so a slower start there can still file the finding. Its
+first reaction dismisses that false start, and the finding's occurrence count
+shows how often it happens.
 
 **What notices when the host goes silent.** I10 (`doctor/check-cadence-live`)
 reports any order the pack ships that has not fired within its cadence window.
@@ -1039,7 +1063,10 @@ where one speaks the old shape to the other.
    recovery prose, which keeps the refinery's alias an infrastructure owner
    (section 2).
 5. **The alarm and the deletions.** Add the refinery-reconcile alarm arm, its
-   `refinery-offer-unread` report (section 5) and their test. Delete I14, the
+   `refinery-offer-unread` report (section 5) and their test. The test files the
+   alarm's finding for two idle passes in a row with nothing taken between them,
+   and files nothing for a session turnover, where the pass before the idle one
+   saw a claim held, or for the first pass that sees an offer. Delete I14, the
    witness's `check-refinery` step and its test
    (`refinery-stuck-escalate.test.sh`), the `witness-refinery-queue` assertion in
    `witness-escalation-wiring.test.sh`, and the run-tests wisp note.
