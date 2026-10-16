@@ -30,7 +30,10 @@ arm (below), or nothing sends it.
 
 Writer: `gc bd dep add <waiting-bead> <blocker> --type=blocks`. Read the edge
 back with `gc bd dep list <waiting-bead> --direction=down -t blocks`, because a
-link across two stores prints success and lands nothing.
+link across two stores prints success and holds nothing. When it does not read
+back, the blocker is in another rig's store, so remove that edge and make the
+bead wait on a demand in its own store that names the blocker (below), which
+the operator resolves once the blocker lands.
 
 - The two are never parent and child. bd refuses a `blocks` edge from a parent
   to its own descendant, so never file the blocker under the bead that waits
