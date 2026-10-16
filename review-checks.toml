@@ -12,13 +12,19 @@
 # Read from the commit under review (git show <oid>:review-checks.toml), so a
 # branch is judged against the index it carries. assets/scripts/review-checks.sh
 # is the one parser and the one resolver of that grammar. correctness and triage
-# are the forced baseline; triage may widen check_set to add any check declared
-# here and may not invent one. `approval` is not a check here: it is a universal
-# merge rule (merge.sh) requiring a standing non-city APPROVED review.
+# are the forced baseline, set on every anchor that does not opt out, whether or
+# not the repo keeps an index; triage may widen check_set to add any check
+# declared here and may not invent one, so a repo with no index gets the
+# baseline alone. `approval` is not a check here: it is a universal merge rule
+# (merge.sh) requiring a standing non-city APPROVED review.
 #
-# The naming convention for this file, the per-check method extensions
-# (docs/review-<check>.md), and the reference docs a check reads is
-# docs/review-config.md.
+# The other review file a rig may keep is a check's extension,
+# docs/review-<check>.md, which holds that one check's guidance and nothing
+# else. The dispatch body appends it to the review's note from the commit under
+# review, so it adds to the check's method, the pack's skill, and never replaces
+# it; absent is the common case. A rig keeps one to add guidance of its own, or
+# to say where it keeps a reference doc the method reads when that doc is not
+# where the method looks.
 #
 # Adding a check. Declare it here as a [checks.<name>] row whose `method` points
 # at the skill that carries its whole generic method, the boundary lines that
@@ -27,9 +33,8 @@
 # whose note then names that skill and repeats none of it. The shared specialist
 # stance — enforce through findings, never edit, leave another check's concern
 # to that check — is emitted once by the dispatch body ahead of every specialist
-# check's section, so no skill restates it. A rig tunes a check for its own
-# repo with docs/review-<check>.md, which the dispatch body appends from the
-# reviewed commit; the pack skill stays rig-agnostic.
+# check's section, so no skill restates it. The skill stays rig-agnostic: what
+# one rig needs goes in that rig's extension.
 
 [checks.correctness]
 method = "skills/review-correctness/SKILL.md"

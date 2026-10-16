@@ -138,8 +138,10 @@ S
 esac
 # A declared check's method is its skill, which the note names as gascity
 # surfaces every pack skill, gc-toolkit.<directory>, for the reviewer to load
-# from its catalog (below). An undeclared check has no skill, so its section
-# says which case it is.
+# from its catalog (below). The catalog links the installed pack, so a branch
+# that edits a method is not judged by its own edit, and a rig other than
+# gc-toolkit has the method too. An undeclared check has no skill, so its
+# section says which case it is.
 METHOD_SKILL=""
 case "$CHECK_NAME" in
   correctness|triage|demo|arch|pm) METHOD_SKILL="review-$CHECK_NAME" ;;
