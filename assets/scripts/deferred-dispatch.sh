@@ -510,9 +510,57 @@ send_notice() {
     echo "$PROG: requested $agent's turn for $id with gc session nudge: $why"
 }
 
-retire_notice() { # id reason -> rc
-    bd_ update "$1" --unset-metadata "$K_NOTIFY" \
-        --append-notes "$PROG: notice record cleared at $(now_utc) — $2" >/dev/null 2>&1
+# Why a notice to <agent> is no longer owed on a bead at <status> assigned to
+# <assignee>, or nothing while it is owed.
+notice_unowed_why() { # status assignee agent
+    if [ "$1" = "closed" ]; then
+        printf '%s' "the bead closed, so no notice is owed"
+    elif [ "$2" != "$3" ]; then
+        printf '%s' "the bead is no longer assigned to $3${2:+ (its assignee is $2)}, so the notice is moot"
+    elif [ "$1" = "in_progress" ]; then
+        printf '%s' "$3 already claimed the bead, so no notice is owed"
+    fi
+}
+
+# retire_notice <sent|unowed> <id> <agent> — clear the notice on <id> once it
+# was sent to <agent>, or once it is no longer owed to <agent>. The caller read
+# <agent> from a listing, and notify can record a notice for another agent
+# after that read, when the bead is reassigned while a pass runs. That notice
+# belongs to the new agent, so the retire re-reads the bead and clears the
+# record only while it still names <agent>. An unowed retire also needs the
+# fresh read to show the notice still unowed, and records the reason that read
+# gives. The fresh fields have their control characters replaced, as
+# notice_rows prints them, so the two reads compare alike. bd has no
+# conditional unset, so a notice recorded between the re-read and the unset is
+# still lost. The re-read narrows that window from the pass's whole run to the
+# gap between two store calls.
+# rc 0: cleared, or already clear. rc 1: the bead was unreadable, or the write
+# failed. rc 3: left, because the record names another agent now or the notice
+# is owed again; RETIRE_NOTE says which. RETIRE_WHY is the reason recorded.
+retire_notice() {
+    local mode="$1" id="$2" agent="$3" json fresh f_status f_assignee f_agent
+    RETIRE_NOTE=""
+    RETIRE_WHY="notice sent to $agent: bd reports the bead ready"
+    json="$(show_bead "$id")" || json=""
+    [ -n "$json" ] || return 1
+    fresh="$(printf '%s' "$json" | jq -r --arg k "$K_NOTIFY" '
+        [ (.status // ""), (.assignee // ""), ((.metadata // {})[$k] // "") ]
+        | map(tostring | gsub("[[:cntrl:]]"; " ")) | join("\u001f")' 2>/dev/null)" || return 1
+    IFS=$'\037' read -r f_status f_assignee f_agent <<< "$fresh"
+    [ -n "$f_agent" ] || return 0
+    if [ "$f_agent" != "$agent" ]; then
+        RETIRE_NOTE="its record now names $f_agent, a notice recorded since it was read, so it stays for that notice's own send"
+        return 3
+    fi
+    if [ "$mode" = unowed ]; then
+        RETIRE_WHY="$(notice_unowed_why "$f_status" "$f_assignee" "$agent")"
+        if [ -z "$RETIRE_WHY" ]; then
+            RETIRE_NOTE="a fresh read shows the notice to $agent owed again, so it stays for the next pass"
+            return 3
+        fi
+    fi
+    bd_ update "$id" --unset-metadata "$K_NOTIFY" \
+        --append-notes "$PROG: notice record cleared at $(now_utc) — $RETIRE_WHY" >/dev/null 2>&1
 }
 
 # One line per bead that carries a notice record:
@@ -601,8 +649,13 @@ cmd_notify() {
         echo "$PROG: notify: recorded the notice on $bead, but $agent's turn was not requested; the next reconcile pass tries again" >&2
         return 0
     fi
-    retire_notice "$bead" "notice sent to $agent: bd reports the bead ready" \
-        || echo "$PROG: notify: notified $agent, but could not clear the notice on $bead; the next reconcile pass requests $agent's turn again, and the dedup key keeps a second copy of the mail out of its mailbox" >&2
+    local retire_rc=0
+    retire_notice sent "$bead" "$agent" || retire_rc=$?
+    case "$retire_rc" in
+        0) ;;
+        3) echo "$PROG: notify: notified $agent, and left the notice on $bead: $RETIRE_NOTE" >&2 ;;
+        *) echo "$PROG: notify: notified $agent, but could not clear the notice on $bead; the next reconcile pass requests $agent's turn again, and the dedup key keeps a second copy of the mail out of its mailbox" >&2 ;;
+    esac
     echo "$PROG: notified $agent that $bead is ready"
 }
 
@@ -832,7 +885,9 @@ sling_bead() { # id target args_json -> rc
 # its record is retired once the agent's turn is requested; a notice that gets
 # no turn requested stays armed and fails the pass. One whose bead closed, was
 # claimed by its agent, or is no longer assigned to that agent owes nothing,
-# and its record is retired unsent. Any other notice waits for bd to report its
+# and its record is retired unsent. Either retire re-reads the bead first and
+# leaves a record that now names another agent, or a notice owed again, for the
+# next pass (retire_notice). Any other notice waits for bd to report its
 # bead ready. A notice starts under the bound a sling starts under, only while
 # the pass budget has a sling's allowance left. Notices run ahead of the slings,
 # because a notice is a mail and at most one nudge, and a sling can take a
@@ -843,7 +898,7 @@ NOTICE_FAILED=0
 NOTICE_LEFT_IDS=()
 reconcile_notices() {
     local rows expected processed=0 sent=0 retired=0 waiting=0 failed=0
-    local id status assignee agent ready title why
+    local id status assignee agent ready title why rc
     if ! { mktemp_tracked && rows="$REPLY" && notice_rows "$rows"; }; then
         echo "$PROG: reconcile: could not enumerate the notices owed — NOT treating this as an empty queue" >&2
         NOTICE_FAILED=1
@@ -853,23 +908,19 @@ reconcile_notices() {
     while IFS=$'\037' read -r id status assignee agent ready title; do
         [ -n "${id:-}" ] || continue
         processed=$((processed + 1))
-        why=""
-        if [ "$status" = "closed" ]; then
-            why="the bead closed, so no notice is owed"
-        elif [ "$assignee" != "$agent" ]; then
-            why="the bead is no longer assigned to $agent${assignee:+ (its assignee is $assignee)}, so the notice is moot"
-        elif [ "$status" = "in_progress" ]; then
-            why="$agent already claimed the bead, so no notice is owed"
-        fi
+        why="$(notice_unowed_why "$status" "$assignee" "$agent")"
         if [ -n "$why" ]; then
             if [ "$DRY_RUN" = 1 ]; then
                 echo "$PROG: DRY-RUN would retire the notice on $id: $why"
-            elif retire_notice "$id" "$why"; then
-                echo "$PROG: retired the notice on $id: $why"
-            else
-                echo "$PROG: WARN could not retire the notice on $id" >&2; failed=$((failed + 1)); continue
+                retired=$((retired + 1)); continue
             fi
-            retired=$((retired + 1)); continue
+            rc=0; retire_notice unowed "$id" "$agent" || rc=$?
+            case "$rc" in
+                0) echo "$PROG: retired the notice on $id: $RETIRE_WHY"; retired=$((retired + 1)) ;;
+                3) echo "$PROG: left the notice on $id: $RETIRE_NOTE"; waiting=$((waiting + 1)) ;;
+                *) echo "$PROG: WARN could not retire the notice on $id" >&2; failed=$((failed + 1)) ;;
+            esac
+            continue
         fi
         if [ "$ready" != "1" ]; then
             waiting=$((waiting + 1)); continue
@@ -883,11 +934,12 @@ reconcile_notices() {
         fi
         sent=$((sent + 1))
         [ "$DRY_RUN" = 1 ] && continue
-        if retire_notice "$id" "notice sent to $agent: bd reports the bead ready"; then
-            echo "$PROG: notified $agent that $id is ready"
-        else
-            echo "$PROG: WARN notified $agent that $id is ready, but could not clear the notice — the next pass requests $agent's turn again, and the dedup key keeps a second copy of the mail out of its mailbox" >&2
-        fi
+        rc=0; retire_notice sent "$id" "$agent" || rc=$?
+        case "$rc" in
+            0) echo "$PROG: notified $agent that $id is ready" ;;
+            3) echo "$PROG: notified $agent that $id is ready, and left the notice on $id: $RETIRE_NOTE" ;;
+            *) echo "$PROG: WARN notified $agent that $id is ready, but could not clear the notice — the next pass requests $agent's turn again, and the dedup key keeps a second copy of the mail out of its mailbox" >&2 ;;
+        esac
     done < "$rows"
     if [ "$processed" != "$expected" ]; then
         echo "$PROG: reconcile: enumerated $expected notice(s) but processed $processed" >&2
