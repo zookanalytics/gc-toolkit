@@ -26,7 +26,9 @@ Prints the review bead's dispatch note on stdout.
                       mol-review emits the single-agent method note; any other
                       formula (e.g. the two-lane quorum) emits a note that
                       defers method and verdict path to that formula's steps.
-  --check-name <check> The check this review satisfies (default correctness).
+  --check-name <check> The check this review satisfies (default correctness),
+                      in any case: it is matched by its name case-folded, as
+                      the check index's resolver matches a check_set token.
                       Selects the check section, which names the method skill
                       the reviewer loads.
   --reviewed-oid <oid> The commit under review. When the reviewed repo carries
@@ -50,6 +52,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$CHECK_NAME" ] || CHECK_NAME="correctness"
+# A check is known by its name case-folded, the rule review-checks.sh resolves a
+# check_set token by, and the caller passes the token in the case the anchor's
+# check_set wrote it. Folding it once here means the stance, the method skill,
+# the index row and the rig extension below are all looked up by the check
+# itself, whatever case its token was written in.
+CHECK_NAME=$(printf '%s' "$CHECK_NAME" | tr '[:upper:]' '[:lower:]')
 
 # --- The formula frame: the dispatch topology --------------------------------
 if [ "$FORMULA" = "mol-review" ]; then
@@ -148,7 +156,8 @@ case "$CHECK_NAME" in
   *)
     # The check's purpose, from its row in the index at the reviewed commit
     # (the working tree's index when no commit is named), through the index's
-    # one parser. Empty when no row there declares the check.
+    # one parser, which matches the row's name case-folded too. Empty when no
+    # row there declares the check.
     PURPOSE=""
     for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
       [ -n "$root" ] || continue

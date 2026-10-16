@@ -36,6 +36,11 @@
 #   (EVIDENCE)  no check's section carries a test run: the correctness
 #               method file does (review-method.test.sh), and the frame
 #               presumes none.
+#   (CASE)      a check is known by its name case-folded, the rule the index's
+#               resolver matches a check_set token by: the token the resolver
+#               hands on, in the case the check_set wrote it, gets the note its
+#               folded name gets, and an index row written in another case
+#               still declares its check.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -221,6 +226,53 @@ hasF "$TMP/indexed.out" '> PURPOSE-MARK: secrets stay out of logs.' "(CHECK) …
 notF "$TMP/indexed.out" 'WORKTREE-MARK' "(CHECK) …never from the working tree"
 hasF "$TMP/indexed.out" 'coverage line that the pack has no method for this' "(CHECK) …and the coverage line says the pack has no method for it"
 notF "$TMP/indexed.out" 'declared nowhere' "(CHECK) …and it is not the declared-nowhere note"
+
+echo "# a check is known by its name case-folded, whatever case its check_set token is in"
+# gate-ensure.sh hands the dispatch body each token the index's resolver emits,
+# and the resolver emits a token in the case the anchor's check_set wrote it.
+TOK=$(env -u GC_REVIEW_CHECKS_INDEX bash "$HERE/review-checks.sh" --resolve --check-set Correctness --through pre-open --file "$ROOT/review-checks.toml" 2>/dev/null) || TOK=""
+eq "$TOK" "Correctness" "(CASE) the resolver hands on the check_set token Correctness as written"
+for formula in mol-review mol-review-quorum-signoff; do
+  bash "$SCRIPT" --formula "$formula" --check-name "$TOK" > "$TMP/case.$formula.tok" 2>/dev/null
+  bash "$SCRIPT" --formula "$formula" --check-name correctness > "$TMP/case.$formula.correctness" 2>/dev/null
+  cmp -s "$TMP/case.$formula.tok" "$TMP/case.$formula.correctness" \
+    && ok "(CASE) under $formula the resolver's token Correctness gets correctness's note" \
+    || bad "(CASE) under $formula the resolver's token Correctness gets another note: $(diff "$TMP/case.$formula.correctness" "$TMP/case.$formula.tok" | sed -n 's/^> //p' | head -1)"
+  notF "$TMP/case.$formula.tok" 'declared nowhere' "(CASE) …under $formula it is never the declared-nowhere note"
+done
+for c in correctness triage demo arch pm; do
+  up=$(printf '%s' "$c" | tr '[:lower:]' '[:upper:]')
+  # Output names differ beyond case: the filesystem may fold case.
+  ( cd "$REPO" && bash "$SCRIPT" --check-name "$up" --reviewed-oid "$SHA" ) > "$TMP/case.upper.$c.out" 2>/dev/null
+  ( cd "$REPO" && bash "$SCRIPT" --check-name "$c" --reviewed-oid "$SHA" ) > "$TMP/case.lower.$c.out" 2>/dev/null
+  cmp -s "$TMP/case.upper.$c.out" "$TMP/case.lower.$c.out" \
+    && ok "(CASE) $up gets the note $c gets, its rig extension included" \
+    || bad "(CASE) $up gets another note than $c: $(diff "$TMP/case.lower.$c.out" "$TMP/case.upper.$c.out" | sed -n 's/^> //p' | head -1)"
+done
+hasF "$TMP/case.upper.arch.out" 'RIG-EXT-MARK' "(CASE) …ARCH's note carries the arch extension"
+# A check the reviewed repo's index declares in a row written in another case.
+CREPO="$TMP/case-repo"; mkdir -p "$CREPO/docs"
+git -C "$CREPO" init -q
+git -C "$CREPO" config user.email t@t; git -C "$CREPO" config user.name t
+printf '[checks.Security]\nmethod = "docs/review-security.md"\npurpose = "CASE-PURPOSE-MARK: tokens stay out of logs."\nphase = "open-as-draft"\n' > "$CREPO/review-checks.toml"
+printf 'CASE-EXT-MARK: read the logging guide first.\n' > "$CREPO/docs/review-security.md"
+git -C "$CREPO" add review-checks.toml docs/review-security.md
+git -C "$CREPO" commit -qm case
+CSHA=$(git -C "$CREPO" rev-parse HEAD)
+# The row's phase is not the pre-open an undeclared token takes, so the phase
+# the resolver pairs with a token shows it read the row.
+n=0
+for tok in security SECURITY; do
+  n=$((n + 1))
+  RROW=$(cd "$CREPO" && env -u GC_RIG_ROOT -u GC_REVIEW_CHECKS_INDEX bash "$HERE/review-checks.sh" --resolve --check-set "$tok" --through merge --with-phase --at "$CSHA" 2>/dev/null) || RROW=""
+  eq "$RROW" "$(printf '%s\topen-as-draft' "$tok")" "(CASE) the resolver reads [checks.Security] as declaring the token $tok"
+  RTOK=$(printf '%s' "$RROW" | cut -f1)
+  ( cd "$CREPO" && env -u GC_RIG_ROOT bash "$SCRIPT" --check-name "$RTOK" --reviewed-oid "$CSHA" ) > "$TMP/case.rig.$n.out" 2>/dev/null
+  hasF "$TMP/case.rig.$n.out" 'declares the `security` check,' "(CASE) …and the dispatch body reads the row as declaring $tok too"
+  hasF "$TMP/case.rig.$n.out" '> CASE-PURPOSE-MARK: tokens stay out of logs.' "(CASE) …printing the row's purpose for $tok"
+  notF "$TMP/case.rig.$n.out" 'declared nowhere' "(CASE) …and never the declared-nowhere note for $tok"
+  hasF "$TMP/case.rig.$n.out" 'CASE-EXT-MARK' "(CASE) …and appending the check's extension for $tok"
+done
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
