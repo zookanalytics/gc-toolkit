@@ -140,10 +140,11 @@ what it settled.
 ```
 **If this sitting ROUTED work, file and send it, then pass
 `--waiting-on <work-bead>` to the sign-off for each bead it sent.** The
-`work` skill says which bead carries the work and how to choose its formula:
+`work` skill says which bead carries the work and how to choose its formula.
+The sling runs only once the create returned the bead's id:
 ```bash
-WORK=$(gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json | jq -r '.id')
-gc sling <rig>/<pool> "$WORK" --on <formula>
+WORK=$(gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json | jq -er '.id') \
+  && gc sling <rig>/<pool> "$WORK" --on <formula>
 ```
 Never file it under the subject. Add `--parent <epic>` to the create only when
 the work belongs to that epic. The subject's own parent,
@@ -158,10 +159,12 @@ unrouted** (the `waits` skill). Slinging it now is wrong, because it is
 blocked, and leaving it to route once the blocker closes is the
 come-back-later that keeps you or a person on the hook. Make it wait on the
 blocker, then arm it, so it routes itself when the blocker closes and the
-sitting can queue everything and close:
+sitting can queue everything and close. The arm runs only once the edge
+landed, because an arm with nothing holding it sends the follow-up on the next
+pass:
 ```bash
-gc bd dep add <follow-up> <blocker> --type=blocks
-"$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>"
+gc bd dep add <follow-up> <blocker> --type=blocks \
+  && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>"
 ```
 
 **A recorded wait is also the return trip.** Once every recorded wait

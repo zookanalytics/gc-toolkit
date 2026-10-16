@@ -275,11 +275,12 @@ carries the outcome.
 
 A bead that closes without landing, because its work moved or is not needed,
 closes through the disposition writer and never by hand (the `work` skill,
-closing a bead that needs no work):
+closing a bead that needs no work). The writer runs only once the no-op record
+landed:
 
 ```bash
-gc bd update <bead> --set-metadata gc.work_outcome=no-op
-"[[PACK-ROOT]]/assets/scripts/bead-rehome.sh" --origin <bead> --successor <carrier-or-evidence> \
+gc bd update <bead> --set-metadata gc.work_outcome=no-op \
+  && "[[PACK-ROOT]]/assets/scripts/bead-rehome.sh" --origin <bead> --successor <carrier-or-evidence> \
   --kind re-homed|folded|fixed-upstream|duplicate|not-needed --note "<why, one sentence>"
 ```
 

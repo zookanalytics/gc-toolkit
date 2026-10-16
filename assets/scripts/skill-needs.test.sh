@@ -28,7 +28,8 @@
 # supplement command: filed in the PR's rig, holding the anchor's merge, and
 # slung only once that hold reads back, with the mechanik's copy the same
 # command. It pins that a formula's own description, not a doc, says which work
-# the formula fits.
+# the formula fits. It runs each example whose second step depends on its first
+# under a gc that refuses the first step, and fails if anything after it runs.
 #
 # Hermetic: reads the repo, and runs the pack command and the writer call shape
 # in a temporary directory outside any git repo, with a stub gc.
@@ -276,17 +277,29 @@ have "…reads the hold back from the anchor in the same rig" '&& gc bd --rig <r
 have "…and slings only after that read" '&& gc sling <rig>/<pool> "$SUP"' "$PRS_SKILL"
 have "…whose target is the PR's base, an integration branch under an owned convoy" 'integration/<convoy-id>' "$PRS_SKILL"
 have "…one at a time on a branch" 'Send one supplement at a time' "$PRS_SKILL"
+# fenced_block <file> <marker> — the fenced bash block that holds <marker>, with
+# the fence's own indent taken off each of its lines.
+fenced_block() {
+    awk -v m="$2" '
+        /^[ \t]*```/ {
+            if (inb) { if (hit) { printf "%s", buf; exit } inb = 0; buf = ""; hit = 0 }
+            else if ($0 ~ /```bash[ \t]*$/) { inb = 1; match($0, /^[ \t]*/); ind = RLENGTH }
+            next
+        }
+        inb {
+            l = $0
+            if (ind > 0 && substr(l, 1, ind) ~ /^[ \t]+$/) l = substr(l, ind + 1)
+            buf = buf l "\n"
+            if (index($0, m)) hit = 1
+        }
+    ' "$1"
+}
 # The mechanik names the act where it routes work, so it gives the command too:
 # the prs skill's own, sent to its rig's polecat pool. Compared whole, the two
 # copies cannot drift apart.
-sup_block() {
-    awk -v m='SUP=$(gc bd --rig <rig> create' '
-        /^```/ { if (inb) { if (hit) { printf "%s", buf; exit } inb = 0; buf = ""; hit = 0 } else inb = 1; next }
-        inb { buf = buf $0 "\n"; if (index($0, m)) hit = 1 }
-    ' "$1"
-}
-sup_block "$PRS_SKILL" >"$TMP/sup-prs"
-sup_block "$MECHANIK" | sed 's#{{ \.BindingPrefix }}polecat#<pool>#' >"$TMP/sup-mechanik"
+SUP_MARK='SUP=$(gc bd --rig <rig> create'
+fenced_block "$PRS_SKILL" "$SUP_MARK" >"$TMP/sup-prs"
+fenced_block "$MECHANIK" "$SUP_MARK" | sed 's#{{ \.BindingPrefix }}polecat#<pool>#' >"$TMP/sup-mechanik"
 if [ -s "$TMP/sup-prs" ] && cmp -s "$TMP/sup-prs" "$TMP/sup-mechanik"; then
     ok "the mechanik's supplement command is the prs skill's, sent to its rig's polecat pool"
 else
@@ -302,6 +315,114 @@ for probe in 'GC_RIG_ROOT' 'rev-parse --show-toplevel' 'GC_CITY_PATH'; do
     grep -qF -- "$probe" "$DISPOSITION" && found="$found [$probe]"
 done
 [ -z "$found" ] && ok "…and looks for it in no checkout" || bad "…and looks for it in no checkout" "found:$found"
+
+echo "── a step that depends on the one before it runs only once that one succeeded ──"
+# An example that sends work and then records the dispatch, records an outcome
+# and then closes, files a bead and then sends it, or adds an edge and then
+# arms, chains the second step onto the first with &&. Run apart, a refused
+# first step leaves the second recording what never happened: a dispatch marker
+# over a failed sling strips the recommendation, and the board's Accept reads
+# the marker as a dispatch already sent; an arm with no edge sends its bead on
+# the next pass. Each example runs as written, its placeholders filled, under a
+# stub gc that refuses its first call, and nothing may run after that call.
+CH="$TMP/chain"
+mkdir -p "$CH/bin" "$CH/pack/assets/scripts"
+cat >"$CH/bin/gc" <<'STUB'
+#!/usr/bin/env bash
+# Logs each call, and refuses the first one when CHAIN_FAIL_FIRST is set. It
+# answers scripts-dir under any binding, prints an id for a create, and applies
+# an update's --set-metadata and --unset-metadata to a store of one file per key.
+n=$(( $(cat "$CHAIN_DIR/count" 2>/dev/null || echo 0) + 1 ))
+echo "$n" >"$CHAIN_DIR/count"
+printf 'gc %s\n' "$*" >>"$CHAIN_DIR/log"
+if [ -n "${CHAIN_FAIL_FIRST:-}" ] && [ "$n" -eq 1 ]; then echo "gc: refused" >&2; exit 1; fi
+[ "${2:-}" = scripts-dir ] && { printf '%s\n' "$CHAIN_DIR/pack/assets/scripts"; exit 0; }
+case "$1 ${2:-}" in
+    "bd create") echo '{"id":"tk-new"}' ;;
+    "bd update")
+        shift 3
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --set-metadata) printf '%s' "${2#*=}" >"$CHAIN_DIR/store/${2%%=*}"; shift 2 ;;
+                --unset-metadata) rm -f "$CHAIN_DIR/store/$2"; shift 2 ;;
+                *) shift ;;
+            esac
+        done ;;
+esac
+exit 0
+STUB
+cat >"$CH/pack/assets/scripts/bead-rehome.sh" <<'STUB'
+#!/usr/bin/env bash
+printf 'writer %s %s\n' "${0##*/}" "$*" >>"$CHAIN_DIR/log"
+STUB
+cp "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/deferred-dispatch.sh"
+chmod +x "$CH/bin/gc" "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/deferred-dispatch.sh"
+# fill_block — an example with each <placeholder> filled with x, the stub pack in
+# for a template's {{ .ConfigDir }}, and the disposition kinds cut to one.
+fill_block() {
+    sed -e "s#{{ \\.ConfigDir }}#$CH/pack#g" \
+        -e 's#--kind re-homed|folded|fixed-upstream|duplicate|not-needed#--kind not-needed#' \
+        -e 's#<[^>]*>#x#g'
+}
+# run_chain <shell> <block> [fail] — one run of a filled example in a fresh shell,
+# from an empty log and a store holding one recommendation; prints its status.
+run_chain() {
+    rm -rf "$CH/store" "$CH/count"
+    mkdir -p "$CH/store"
+    : >"$CH/log"
+    printf 'x' >"$CH/store/gc.recommended_formula"
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV CHAIN_DIR="$CH" CHAIN_FAIL_FIRST="${3:-}" \
+        CONV="$CH/pack/assets/scripts" SUBJECT=tk-x VISIT=tk-v PATH="$CH/bin:$PATH" \
+        $1 "$2" </dev/null >/dev/null 2>&1)
+    echo $?
+}
+while IFS='|' read -r label file marker; do
+    fenced_block "$file" "$marker" | fill_block >"$CH/block"
+    if [ ! -s "$CH/block" ]; then
+        bad "$label: the example is found" "no fenced bash block holds '$marker' in $file"
+        continue
+    fi
+    for sh_ in $shells; do
+        run=$sh_
+        [ "$sh_" = zsh ] && run="zsh -f"
+        rc=$(run_chain "$run" "$CH/block" 1)
+        calls=$(grep -c . "$CH/log")
+        if [ "$rc" -ne 0 ] && [ "$calls" -eq 1 ]; then
+            ok "($sh_) $label: a refused first step stops the example"
+        else
+            bad "($sh_) $label: a refused first step stops the example" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
+        fi
+        rc=$(run_chain "$run" "$CH/block")
+        calls=$(grep -c . "$CH/log")
+        if [ "$rc" -eq 0 ] && [ "$calls" -ge 2 ]; then
+            ok "($sh_) $label: …and the next step runs once the first succeeds"
+        else
+            bad "($sh_) $label: …and the next step runs once the first succeeds" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
+        fi
+    done
+done <<SPECS
+work: taking a recommendation|$WORK_SKILL|gc.recommended_formula_dispatched=
+work: closing a bead that needs no work|$WORK_SKILL|gc.work_outcome=no-op
+converse prompt: disposing of a no-work subject|$PROMPT|gc.work_outcome=no-op
+disposition fragment: closing a bead that did not land|$DISPOSITION|gc.work_outcome=no-op
+converse-settle: filing and sending routed work|$SETTLE|gc sling <rig>/<pool> "\$WORK"
+converse-settle: arming a follow-up|$SETTLE|gc bd dep add <follow-up> <blocker>
+SPECS
+# Taking a recommendation records the dispatch only once the sling went: a
+# refused sling leaves both keys as they were, and a sent one swaps them.
+fenced_block "$WORK_SKILL" 'gc.recommended_formula_dispatched=' | fill_block >"$CH/block"
+run_chain bash "$CH/block" 1 >/dev/null
+if [ "$(cat "$CH/store/gc.recommended_formula" 2>/dev/null)" = x ] && [ ! -e "$CH/store/gc.recommended_formula_dispatched" ]; then
+    ok "work: a refused sling leaves the recommendation and records no dispatch"
+else
+    bad "work: a refused sling leaves the recommendation and records no dispatch" "store holds: $(ls "$CH/store" | tr '\n' ' ')"
+fi
+run_chain bash "$CH/block" >/dev/null
+if [ ! -e "$CH/store/gc.recommended_formula" ] && [ "$(cat "$CH/store/gc.recommended_formula_dispatched" 2>/dev/null)" = x ]; then
+    ok "work: …and a sent one strips the recommendation and records the dispatch"
+else
+    bad "work: …and a sent one strips the recommendation and records the dispatch" "store holds: $(ls "$CH/store" | tr '\n' ' ')"
+fi
 
 echo "── each real need scores highest on the skill that answers it ──"
 # <expected skill> TAB <the need, verbatim>

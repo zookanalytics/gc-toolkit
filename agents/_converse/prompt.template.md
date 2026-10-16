@@ -348,11 +348,12 @@ Rules:
   have agreed, in this sitting, that the subject should close; what the ruling
   licenses then follows the subject's state. A **no-work** subject closes
   through the disposition writer (the `work` skill, closing a bead that needs
-  no work), with this sitting's visit as the evidence:
+  no work), with this sitting's visit as the evidence. The writer runs only
+  once the no-op record landed:
 
   ```bash
-  gc bd update "$SUBJECT" --set-metadata gc.work_outcome=no-op
-  "$CONV/bead-rehome.sh" --origin "$SUBJECT" --successor "$VISIT" --kind not-needed --note "<the sitting's reason, one sentence>"
+  gc bd update "$SUBJECT" --set-metadata gc.work_outcome=no-op \
+    && "$CONV/bead-rehome.sh" --origin "$SUBJECT" --successor "$VISIT" --kind not-needed --note "<the sitting's reason, one sentence>"
   ```
 
   While this visit is open, the writer records the pointer and exits 5. Run

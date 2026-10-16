@@ -100,15 +100,17 @@ on the operator's go. The pool on that formula acts.
 
 Release the wait that put it to the operator (in a sitting, the sign-off for a
 subject that is the work, above), send it on that formula, then record the
-dispatch in one update:
+dispatch in one update, which runs only once the sling succeeded:
 
 ```bash
-gc sling <rig>/<pool> <bead> --on <the recommended formula>
-gc bd update <bead> --set-metadata gc.recommended_formula_dispatched=<the formula> --unset-metadata gc.recommended_formula
+gc sling <rig>/<pool> <bead> --on <the recommended formula> \
+  && gc bd update <bead> --set-metadata gc.recommended_formula_dispatched=<the formula> --unset-metadata gc.recommended_formula
 ```
 
 The marker records the dispatch, and the strip stops a later visit from
-offering Accept for work that already ran. Outside a sitting, the board's
+offering Accept for work that already ran. Written over a failed sling, the
+marker would record work that never went: the board's Accept reads it as a
+dispatch already sent, so it would never send the work either. Outside a sitting, the board's
 Accept is the operator's own form of this act, and it refuses a visit that a
 sitting has engaged.
 
@@ -167,11 +169,12 @@ operator's agreement. The sitting's own open visit holds that close: the
 writer records the pointer and exits 5, and the same call closes the subject
 once the visit is closed.
 
-Record the no-op, then close through the disposition writer:
+Record the no-op, then close through the disposition writer, which runs only
+once the record landed:
 
 ```bash
-gc bd update <bead> --set-metadata gc.work_outcome=no-op
-"$(gc gc-toolkit scripts-dir)/bead-rehome.sh" --origin <bead> --successor <successor> --kind not-needed --note "<why, one sentence>"
+gc bd update <bead> --set-metadata gc.work_outcome=no-op \
+  && "$(gc gc-toolkit scripts-dir)/bead-rehome.sh" --origin <bead> --successor <successor> --kind not-needed --note "<why, one sentence>"
 ```
 
 Under `not-needed` the successor is the evidence that ruled the work out, such
