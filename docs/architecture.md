@@ -27,8 +27,8 @@ structured into epics and when an epic closes by [epics.md](epics.md).
 
 ## The boundary
 
-Four parties, one data plane. Every durable fact is a bead; the pack owns no
-storage of its own.
+Four parties, one data plane. Lifecycle transitions, routes, waits and review
+verdicts are all written on beads.
 
 ```mermaid
 flowchart LR
@@ -73,6 +73,29 @@ paths matter: `lifecycle.sh` is the only writer of lifecycle transitions,
 `signoff.sh` is the only writer of check verdicts, and the merge cadence is the
 only thing that opens or merges a PR. Everything else reads.
 
+**Beside the ledger.** The pack also keeps files of its own. Some hold a run's
+progress, such as a paced cadence arm's cursor or the job directory of the
+refinery's merge gate. `gctk rig`'s check records differ, because a later call
+takes a record's result in place of running the check. A record holds the
+result of one of a rig's checks, such as its tests or its lint, at one commit.
+[`services/gctk/README.md`](../services/gctk/README.md#rig) states which checks
+are recorded and where the records live.
+
+- **Writer.** Only `gctk rig` writes a record, from a run it made itself, in a
+  checkout holding nothing HEAD does not.
+- **Authority.** A record answers a later `gctk rig` call that declares the
+  same run: the same command line and, for a test run, the same scope. That
+  call takes the recorded result without running the check, unless it forces a
+  run. A full-suite test pass also answers for every commit with the same tree.
+- **Lifetime.** Every worktree of a rig clone shares the records, and they
+  outlive any one worktree. A re-clone loses them, and the loss costs one run
+  of each check.
+- **What a record is not.** A record is evidence about a commit. It is neither
+  workflow state nor a review's verdict, and both of those stay on beads,
+  written by their own writers. `--publish-bead` copies a record onto a bead's
+  `rig_check.<check>` key for whoever reads that bead. The record, not the
+  copy, answers `gctk rig`.
+
 ## How work moves
 
 One pipeline, from a filed bead to a landed change. Each step names its
@@ -87,7 +110,9 @@ performer; the full transition table with writers is
    emergency, or the operator's own move. Other new work waits for the
    operator's placement sitting first ([steering.md](steering.md)).
 3. **Claim.** A polecat claims via `gc hook --claim`; the runtime writes
-   assignee and claim in one step.
+   assignee and claim in one step. It takes the ready bead with the most urgent
+   priority first, and the pack computes that priority from what the bead
+   follows ([steering.md](steering.md#priority)).
 4. **Implement.** The polecat works in a per-bead worktree on a
    `polecat/<bead>` branch, driven by `mol-polecat-work`.
 5. **Hand off.** Push, verify the push landed, then one atomic `gc bd update`
@@ -110,13 +135,15 @@ performer; the full transition table with writers is
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
 session dying, a pool slot the runtime does not free, a provider quota park —
-are handled by six reactive paths: `pr-facts.sh` (an arm of the cadence)
+are handled by these reactive paths: `pr-facts.sh` (an arm of the cadence)
 records PR events and files a visit, the witness patrol recovers work orphaned
 by dead sessions, the `dog` pool is warrant executor for due-process recovery
 of wedged sessions (demand-scaled 0-2), `pool-slot-reap.sh` closes a pool
 session bead the runtime left holding its slot with no runtime and no work,
-`quota-park-nudge.sh` nudges a session parked behind a provider limit, and
-`boot-health.sh` detects a wedged deacon (report-only by design). See
+`quota-park-nudge.sh` nudges a session parked behind a provider limit,
+`boot-health.sh` detects a wedged deacon (report-only by design), and
+`queue-priority.sh reconcile` settles queued work after a raw priority or parent
+edit no writer saw. See
 [authority-map.md](authority-map.md). There is no healer category: writers
 complete their own transitions, so nothing reconstructs pack-written state
 after the fact.
@@ -149,10 +176,15 @@ The human surface is subject / visit / takeaway on native primitives
   it. bd's cascade keeps the routed work under the bead out of every pool's
   offer, work already in flight finishes, and closing the gate releases the
   park. [steering.md](steering.md) says what a park holds and what it does not.
+- **A priority decides the order work runs in.** A bead's priority is the
+  priority of the bead it follows plus its own shift, so work under an epic
+  queues at the epic's priority. `gc-helm.sh priority` sets an epic's priority,
+  or a member's shift, and re-ranks the work that follows it, workflows already
+  poured included ([steering.md](steering.md#priority)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
   per render from the ledger. `gc-helm.sh` carries the write verbs open,
-  engage, react, takeaway, demand, dismiss, accept and park, and the read-only
-  verbs resolve and unplaced. `gc-helm.sh unplaced` lists the placement
+  engage, react, takeaway, demand, dismiss, accept, park and priority, and the
+  read-only verbs resolve and unplaced. `gc-helm.sh unplaced` lists the placement
   sitting's queue ([steering.md](steering.md)). Everything works without the
   board: it spends no state, so it can never be wrong for longer than one
   render.
