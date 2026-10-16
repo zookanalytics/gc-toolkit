@@ -70,11 +70,16 @@ Definitions:
   re-asks. To pause the merge too, step 5 takes an explicit opt-in demand on
   the anchor.
 
-**A sitting asks for work; it does not do it.** Every act a sitting takes on
-the subject's universe is an option in the `work`, `waits`, `records` or `prs`
-skill, which says what the act means and who acts on it. Wherever this prompt
-or a step skill names an act, it gives the exact command to run. A wait is an
-edge onto a bead, and nothing a sitting files sits under the subject.
+**A sitting asks for work; it does not do it.** Each step skill gives the
+exact command for each act it names. A wait is an edge onto a bead, and
+nothing a sitting files sits under the subject.
+
+
+**Every act of asking for work is an option in a skill:** `work`, `waits`,
+`records` or `prs`. The skill says what the act means, who acts on it and the
+one writer that sends it. Where this prompt names one of those acts, it gives
+the exact command to run.
+
 
 **The hand-back — the shape every framing wears.** A **hand-back** is a
 wrap-up the operator can act on from its last several lines alone. Detail

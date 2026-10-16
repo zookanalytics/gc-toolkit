@@ -22,10 +22,13 @@
 # The same file pins the skills' shape: each names its neighbors, keeps
 # converse's vocabulary out of its description, and calls every writer as the
 # pack's own copy through the pack command `gc gc-toolkit scripts-dir`. It pins
-# that command, and that the converse steps give the exact command for each act
-# they name while the skills explain the act once. It pins the prs skill's
+# that command, and that the converse steps and the mechanik give the exact
+# command for each act they name while the skills explain the act once, with
+# one fragment pointing both prompts at the skills. It pins the prs skill's
 # supplement command: filed in the PR's rig, holding the anchor's merge, and
-# slung only once that hold reads back.
+# slung only once that hold reads back, with the mechanik's copy the same
+# command. It pins that a formula's own description, not a doc, says which work
+# the formula fits.
 #
 # Hermetic: reads the repo, and runs the pack command and the writer call shape
 # in a temporary directory outside any git repo, with a stub gc.
@@ -227,10 +230,20 @@ for f in "$PROMPT" "$SETTLE"; do
     [ -z "$missing" ] && ok "$(basename "$(dirname "$f")")/$(basename "$f"): every \$CONV writer it calls is in assets/scripts" \
         || bad "$(basename "$(dirname "$f")")/$(basename "$f"): every \$CONV writer it calls is in assets/scripts" "missing:$missing"
 done
-# The skill descriptions every agent sees already say what each skill covers,
-# so a prompt says it once or not at all, and no prompt singles out one formula.
-lacks "the mechanik prompt does not restate the skills" 'Each act of asking for work is an option in a skill' "$MECHANIK" \
-    "the skill descriptions reach the mechanik at session start"
+# The roles that route work point at the four skills through one fragment, so
+# the pointer is written once: each prompt includes it and keeps no copy of its
+# own. The skill descriptions every agent sees say what each skill covers, so
+# no prompt restates that, and no prompt singles out one formula.
+ASK="$REPO/template-fragments/ask-for-work.template.md"
+tr '\n' ' ' <"$ASK" >"$TMP/ask-joined"
+have "one fragment names the four skills" '`work`, `waits`, `records` or `prs`' "$TMP/ask-joined"
+for f in "$PROMPT" "$MECHANIK"; do
+    role=$(basename "$(dirname "$f")")
+    have "$role: the prompt includes that fragment" '{{ template "ask-for-work" . }}' "$f"
+    tr '\n' ' ' <"$f" >"$TMP/joined-$role"
+    lacks "$role: …and keeps no copy of its own" '`records` or `prs`' "$TMP/joined-$role" \
+        "the ask-for-work fragment says it once for every prompt that includes it"
+done
 lacks "the mechanik prompt does not single out a design-first initiative" 'design-first initiative' "$MECHANIK" \
     "choosing a formula is the work skill's option"
 lacks "the converse prompt does not single out a design-convoy" 'design-convoy included' "$PROMPT" \
@@ -261,7 +274,25 @@ have "…as a child of the anchor" '"anchor_bead":"<anchor>"' "$PRS_SKILL"
 have "…born joined to the anchor and holding its merge" '--deps related:<anchor>,blocks:<anchor>' "$PRS_SKILL"
 have "…reads the hold back from the anchor in the same rig" '&& gc bd --rig <rig> dep list <anchor> --direction=down -t blocks --json' "$PRS_SKILL"
 have "…and slings only after that read" '&& gc sling <rig>/<pool> "$SUP"' "$PRS_SKILL"
-have "the mechanik files a supplement with the prs skill's command" "skill's supplement command (its \"Send it back for rework\" section)" "$MECHANIK"
+have "…whose target is the PR's base, an integration branch under an owned convoy" 'integration/<convoy-id>' "$PRS_SKILL"
+have "…one at a time on a branch" 'Send one supplement at a time' "$PRS_SKILL"
+# The mechanik names the act where it routes work, so it gives the command too:
+# the prs skill's own, sent to its rig's polecat pool. Compared whole, the two
+# copies cannot drift apart.
+sup_block() {
+    awk -v m='SUP=$(gc bd --rig <rig> create' '
+        /^```/ { if (inb) { if (hit) { printf "%s", buf; exit } inb = 0; buf = ""; hit = 0 } else inb = 1; next }
+        inb { buf = buf $0 "\n"; if (index($0, m)) hit = 1 }
+    ' "$1"
+}
+sup_block "$PRS_SKILL" >"$TMP/sup-prs"
+sup_block "$MECHANIK" | sed 's#{{ \.BindingPrefix }}polecat#<pool>#' >"$TMP/sup-mechanik"
+if [ -s "$TMP/sup-prs" ] && cmp -s "$TMP/sup-prs" "$TMP/sup-mechanik"; then
+    ok "the mechanik's supplement command is the prs skill's, sent to its rig's polecat pool"
+else
+    bad "the mechanik's supplement command is the prs skill's, sent to its rig's polecat pool" \
+        "$(diff "$TMP/sup-prs" "$TMP/sup-mechanik" 2>&1 | head -4 | tr '\n' ' ')"
+fi
 
 echo "── each real need scores highest on the skill that answers it ──"
 # <expected skill> TAB <the need, verbatim>

@@ -79,6 +79,8 @@ convention documentation, and beads dispatched to polecats.
 
 ## Dispatch doctrine: an owned convoy is the PR unit
 
+{{ template "ask-for-work" . }}
+
 The default shape for any PR-bearing dispatch is an **owned convoy** that
 anchors the PR — and its rework — to landed: a lone bead is the one-child
 convoy, a multi-bead initiative the many-child convoy. The convoy stays open
@@ -159,28 +161,18 @@ integration branch as above.
 
 ## Scope-miss recovery: amend the open PR
 
-Scope you discover while a PR is open belongs on that PR. File it with the prs
-skill's supplement command (its "Send it back for rework" section), with
-`<rig>` the rig whose store holds the PR's anchor and `<pool>`
-`{{ .BindingPrefix }}polecat`. You are city-scoped, so the command's `--rig` is
-what files the supplement in the store that rig's pool reads. Its create sets
-the PR's `branch` (the `headRefName`), `existing_pr` (the URL) and `target`
-(the `baseRefName`) before any polecat can claim it, and makes the anchor wait
-on it, so the PR does not merge before the supplement lands.
+Scope you discover while a PR is open belongs on that PR, as a supplement (the
+`prs` skill, sending it back for rework). You are city-scoped, so `<rig>` is
+the rig whose store holds the PR's anchor, and that rig's polecat pool takes
+the supplement:
 
-The polecat commits onto the PR's head branch and the refinery pushes it
-back, so the open PR gains the commits; the one-anchor-per-PR guard closes
-the supplement landed-on-branch and leaves gating with the original anchor.
-
-Close-and-replace is for an implementation that is **wrong**, not one that is
-incomplete: the commits are not something to build on. Missing docs, a test a
-reviewer asked for, an edge case the diff exposed — all supplements.
-
-`target` is the PR's base, not always `main`: a PR under an owned convoy is
-based on `integration/<convoy-id>`, and a supplement that names `main` fails
-the refinery's `base == target` check and blocks. Serialize supplements: the
-polecat pushes with a plain `git push`, so a second one in flight on the same
-branch is rejected non-fast-forward and stays with its polecat.
+```bash
+SUP=$(gc bd --rig <rig> create "<what the PR still needs>" -t task -d "<what to add, why, and what done looks like>" \
+  --deps related:<anchor>,blocks:<anchor> \
+  --metadata '{"anchor_bead":"<anchor>","branch":"<the PR head branch>","existing_pr":"<the PR url>","target":"<the PR base branch>"}' --json | jq -r '.id') \
+  && gc bd --rig <rig> dep list <anchor> --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg s "$SUP" 'any(.[]; .id == $s)' >/dev/null \
+  && gc sling <rig>/{{ .BindingPrefix }}polecat "$SUP"
+```
 
 {{ template "watch-dispatched-work" . }}
 

@@ -67,7 +67,10 @@ everything the PR needs from it before it is sent to the polecat pool:
   its own rig's store, and `gc sling` refuses a bead filed in another rig's
   store.
 - `branch`, `existing_pr` and `target` are the PR's, so the polecat commits
-  onto the PR's branch and the PR gains the commits.
+  onto the PR's branch and the PR gains the commits. `target` is the PR's base,
+  which for a PR under an owned convoy is `integration/<convoy-id>`, not the
+  default branch. The refinery blocks a supplement whose `target` is not the
+  PR's base.
 - `anchor_bead` makes it a child of the anchor, joined to it by
   `related:<anchor>`, and `blocks:<anchor>` makes the anchor wait on it, so
   the PR does not merge before the supplement lands.
@@ -83,8 +86,15 @@ SUP=$(gc bd --rig <rig> create "<what the PR still needs>" -t task -d "<what to 
   && gc sling <rig>/<pool> "$SUP"
 ```
 
+Once the supplement's work lands on the branch, the refinery closes the
+supplement and the anchor keeps gating the PR. Send one supplement at a time
+on a branch. A polecat pushes with a plain `git push`, so a second supplement
+in flight on the same branch is rejected non-fast-forward at its push and stays
+with its polecat.
+
 Replace a PR only when its implementation is wrong, never because it is
-incomplete.
+incomplete. Missing docs, a test a reviewer asked for or an edge case the diff
+exposed is a supplement.
 
 ## Hold its merge
 
