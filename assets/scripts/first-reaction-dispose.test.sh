@@ -127,6 +127,13 @@ case "$1 ${2:-}" in
     fi
     [ -n "$_placement" ] && _shown=$(printf '%s' "$_shown" | jq -c --arg v "$_placement" '.[0].metadata.placement = $v' 2>/dev/null || printf '%s' "$_shown")
     [ -n "$_priority" ] && _shown=$(printf '%s' "$_shown" | jq -c --argjson v "$_priority" '.[0].priority = $v' 2>/dev/null || printf '%s' "$_shown")
+    # The notice the real deferred-dispatch.sh records, as the store returns
+    # it: its retire re-reads the bead and clears only a record that still
+    # names the agent it notified.
+    _notice_rec="$(cat "$FAKE_STATE.notice" 2>/dev/null || printf '')"
+    if [ -n "$_notice_rec" ]; then
+      _shown=$(printf '%s' "$_shown" | jq -c --arg v "$_notice_rec" '.[0].metadata = ((.[0].metadata // {}) + {"gc.notify_when_ready": $v})' 2>/dev/null || printf '%s' "$_shown")
+    fi
     # The release's --assign, which the helm stub records: the bead is open and
     # held by that agent from then on.
     _assignee="$(cat "$FAKE_STATE.assignee" 2>/dev/null || printf '')"
