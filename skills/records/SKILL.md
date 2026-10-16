@@ -12,9 +12,11 @@ session. Each option says what the record means, who reads it, and the one
 writer that sends it.
 
 The writers are the gc-toolkit pack's own scripts.
-`gc gc-toolkit scripts-dir` prints their directory in the pack as gc loaded it,
-so each example calls the pack's copy inside the command itself, and runs as
-written in a fresh shell.
+`gc <binding> scripts-dir` prints their directory in the pack as gc loaded it,
+so each example calls the pack's copy inside the command itself, and runs in a
+fresh shell. `<binding>` is the name the city imports the pack under, which gc
+puts in front of this skill's name: `gc-toolkit` in `gc-toolkit.records`.
+`gc skill list` prints it in this skill's FROM column.
 
 ## Record an outcome on a bead
 
@@ -49,7 +51,7 @@ The message is one sentence saying what the bead needs now. The helm board
 shows it as the bead's NEEDS cell, and `doctor/check-wait-is-an-edge` checks
 the wait it declares against the bead's `blocks` edges.
 
-Writer: `"$(gc gc-toolkit scripts-dir)/gc-helm.sh" takeaway <bead> "<what it needs now, at most 140 characters>" --no-wait`
+Writer: `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<what it needs now, at most 140 characters>" --no-wait`
 when the bead waits on nothing, or `--waiting-on <bead>` (repeatable) for each
 bead it waits on. Each named wait is also written as a `blocks` edge,
 best-effort: an edge that will not take only warns, so read it back when the

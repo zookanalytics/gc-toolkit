@@ -566,8 +566,15 @@ that references them resolves an empty path.
 An agent's own shell, where a skill's examples run, has no template pass
 either, and no variable set in one tool call survives into the next. It asks
 gc for the pack instead: `commands/scripts-dir/run.sh` is the pack command
-`gc gc-toolkit scripts-dir`, and gc runs a pack command with `$GC_PACK_DIR` set
-to the root of the pack it loaded. So `"$(gc gc-toolkit scripts-dir)/foo.sh"`
-runs the pack's own copy wherever the city imports the pack from, and never a
-checkout the agent is standing in. The ask-for-work skills (`work`, `waits`,
-`records`, `prs`) call every writer this way.
+`scripts-dir`, and gc runs a pack command with `$GC_PACK_DIR` set to the root
+of the pack it loaded. gc registers a pack command under its import binding
+and under no other name, so a city that imports the pack as
+`[imports.gc-toolkit]` runs `gc gc-toolkit scripts-dir`, and one that imports
+it as `[imports.kit]` runs `gc kit scripts-dir`. A skill is not rendered, so its
+text cannot carry the binding. Its examples write
+`"$(gc <binding> scripts-dir)/foo.sh"`, and the agent fills in the binding gc
+puts in front of the skill's own name (`gc-toolkit.work`), which `gc skill list`
+prints as the skill's FROM. The call then runs the pack's own copy wherever the
+city imports the pack from, and never a checkout the agent is standing in. The
+ask-for-work skills (`work`, `waits`, `records`, `prs`) call every writer this
+way.

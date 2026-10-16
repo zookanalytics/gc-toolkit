@@ -21,18 +21,23 @@
 #
 # The same file pins the skills' shape: each names its neighbors, keeps
 # converse's vocabulary out of its description, and calls every writer as the
-# pack's own copy through the pack command `gc gc-toolkit scripts-dir`. It pins
-# that command, and that the converse steps and the mechanik give the exact
-# command for each act they name while the skills explain the act once, with
-# one fragment pointing both prompts at the skills. It pins the prs skill's
-# supplement command: filed in the PR's rig, holding the anchor's merge, and
-# slung only once that hold reads back, with the mechanik's copy the same
+# pack's own copy through the pack command `gc <binding> scripts-dir`, leaving
+# the agent to fill in the binding the city imports the pack under, so no pack
+# skill names one. It pins that command and checks it against the real gc
+# under a renamed import. It pins that the converse steps and the mechanik give
+# the exact command for each act they name while the skills explain the act
+# once, with one fragment pointing both prompts at the skills. It pins the prs
+# skill's supplement command: filed in the PR's rig, holding the anchor's merge,
+# and slung only once that hold reads back, with the mechanik's copy the same
 # command. It pins that a formula's own description, not a doc, says which work
 # the formula fits. It runs each example whose second step depends on its first
 # under a gc that refuses the first step, and fails if anything after it runs.
 #
 # Hermetic: reads the repo, and runs the pack command and the writer call shape
-# in a temporary directory outside any git repo, with a stub gc.
+# in a temporary directory outside any git repo, with a stub gc. The one case
+# that runs the real gc, the one GC_BIN names, points it at a scratch city that
+# is never started, where gc reads the config, lists skills and runs the pack
+# command. With no GC_BIN, as in CI, that case prints SKIP.
 
 set -u
 
@@ -118,12 +123,15 @@ done
 echo "── each building-block skill calls the pack's own writers, never a checkout's ──"
 # A skill's writers are the pack's own scripts. The pack command
 # commands/scripts-dir prints their directory from GC_PACK_DIR, which gc sets
-# to the pack it loaded, so an example calls "$(gc gc-toolkit scripts-dir)/<writer>"
-# inside the one command that runs it. Nothing looks in the rig checkout or the
-# caller's git toplevel, which can be a branch's worktree, and nothing relies on
-# a variable an earlier tool call set, since each call starts a fresh shell.
+# to the pack it loaded, so an example calls "$(gc <binding> scripts-dir)/<writer>"
+# inside the one command that runs it. gc registers the command under the
+# binding the city imports the pack as, which a skill's text cannot know, so
+# the call leaves <binding> for the agent and the skill says where to read it.
+# Nothing looks in the rig checkout or the caller's git toplevel, which can be a
+# branch's worktree, and nothing relies on a variable an earlier tool call set,
+# since each call starts a fresh shell.
 ROOT="$(cd "$REPO" && pwd)"
-RESOLVE='"$(gc gc-toolkit scripts-dir)/'
+RESOLVE='"$(gc <binding> scripts-dir)/'
 for s in $BLOCKS; do
     f="$SKILLS/$s/SKILL.md"
     [ -r "$f" ] || continue
@@ -134,9 +142,16 @@ for s in $BLOCKS; do
     [ -z "$found" ] && ok "$s: looks for no writer in a checkout or a variable an earlier call set" \
         || bad "$s: looks for no writer in a checkout or a variable an earlier call set" "found:$found"
     refs=$(grep -oF -- "$RESOLVE" "$f" | wc -l | tr -d ' ')
-    writers=$(grep -oE '"\$\(gc gc-toolkit scripts-dir\)/[A-Za-z0-9._-]+"' "$f" | sed 's#.*/##; s#"$##' | sort -u)
-    [ "${refs:-0}" -gt 0 ] && ok "$s: calls its writers through gc gc-toolkit scripts-dir (calls: $refs)" \
-        || bad "$s: calls its writers through gc gc-toolkit scripts-dir" "no $RESOLVE<writer>\" call found"
+    writers=$(grep -oE '"\$\(gc <binding> scripts-dir\)/[A-Za-z0-9._-]+"' "$f" | sed 's#.*/##; s#"$##' | sort -u)
+    [ "${refs:-0}" -gt 0 ] && ok "$s: calls its writers through gc <binding> scripts-dir (calls: $refs)" \
+        || bad "$s: calls its writers through gc <binding> scripts-dir" "no $RESOLVE<writer>\" call found"
+    tr '\n' ' ' <"$f" >"$TMP/joined-$s"
+    if grep -qF "\`gc-toolkit\` in \`gc-toolkit.$s\`" "$TMP/joined-$s" \
+        && grep -qF "\`gc skill list\` prints it in this skill's FROM column" "$TMP/joined-$s"; then
+        ok "$s: says where the agent reads the binding: this skill's name, and gc skill list's FROM"
+    else
+        bad "$s: says where the agent reads the binding" "no \`gc-toolkit\` in \`gc-toolkit.$s\` with gc skill list's FROM column"
+    fi
     stray=$(grep -oE '"\$(\{[^}]*\}|[A-Za-z_][A-Za-z_0-9]*)/[A-Za-z0-9._-]+' "$f" | sort -u | tr '\n' ' ')
     [ -z "$stray" ] && ok "$s: every writer an example calls goes through the pack command" \
         || bad "$s: every writer an example calls goes through the pack command" "stray: $stray"
@@ -147,8 +162,13 @@ for s in $BLOCKS; do
     [ -n "$writers" ] && [ -z "$missing" ] && ok "$s: every writer an example calls is an executable in assets/scripts" \
         || bad "$s: every writer an example calls is an executable in assets/scripts" "missing:${missing:- none named}"
 done
+# gc answers `gc gc-toolkit <command>` only in a city that imports the pack as
+# gc-toolkit, so no pack skill writes that binding into a command.
+bound=$(grep -lE 'gc gc-toolkit [a-z]' "$SKILLS"/*/SKILL.md 2>/dev/null | sed "s#^$SKILLS/##" | tr '\n' ' ')
+[ -z "$bound" ] && ok "no pack skill writes a binding into a gc command" \
+    || bad "no pack skill writes a binding into a gc command" "found in: $bound"
 
-echo "── gc gc-toolkit scripts-dir prints the scripts of the pack gc loaded ──"
+echo "── gc <binding> scripts-dir prints the scripts of the pack gc loaded ──"
 CMD="$ROOT/commands/scripts-dir/run.sh"
 [ -x "$CMD" ] && ok "commands/scripts-dir/run.sh is an executable pack command" \
     || bad "commands/scripts-dir/run.sh is an executable pack command" "missing or not executable: $CMD"
@@ -167,41 +187,95 @@ if got=$(cd "$TMP/away" && env GC_PACK_DIR="$TMP/no-scripts" "$CMD" 2>/dev/null)
 else
     ok "with no assets/scripts under GC_PACK_DIR it fails"
 fi
-# gc runs a pack command with GC_PACK_DIR set to the pack's root and the
-# caller's arguments, so a stub gc that does the same for this one command
-# stands in for it. The call shape then holds in a fresh bash and zsh, and when
-# the command cannot answer, the writer path names no file and the call fails.
-mkdir -p "$TMP/stub-ok" "$TMP/stub-fail"
-cat >"$TMP/stub-ok/gc" <<STUB
+# gc registers a pack command under the binding the city imports the pack as,
+# and under no other name, and runs it with GC_PACK_DIR set to the pack's root
+# and the caller's arguments. The stub gc below does the same for a city that
+# imports the pack as kit. The skills' call shape with that binding filled in
+# then holds in a fresh bash and zsh, and the same call naming gc-toolkit fails,
+# because its writer path names no file.
+mkdir -p "$TMP/stub"
+cat >"$TMP/stub/gc" <<STUB
 #!/usr/bin/env bash
-[ "\$1 \$2" = "gc-toolkit scripts-dir" ] || { echo "gc: unknown command \\"\$1\\"" >&2; exit 1; }
+[ "\$1 \$2" = "kit scripts-dir" ] || { echo "gc: unknown command \\"\$1\\"" >&2; exit 1; }
 GC_PACK_DIR="$ROOT" exec "$CMD"
 STUB
-printf '#!/usr/bin/env bash\necho "gc: unknown command \\"$1\\"" >&2\nexit 1\n' >"$TMP/stub-fail/gc"
-chmod +x "$TMP/stub-ok/gc" "$TMP/stub-fail/gc"
-printf '%s\n' 'printf "%s" "$(gc gc-toolkit scripts-dir)/gc-helm.sh"' >"$TMP/call-path"
-printf '%s\n' '"$(gc gc-toolkit scripts-dir)/gc-helm.sh" --help >/dev/null 2>&1' >"$TMP/call-writer"
+chmod +x "$TMP/stub/gc"
+# call_files <binding> — the skills' call shape with <binding> filled in: one
+# file prints the path the call resolves, and one runs the writer there.
+call_files() {
+    printf 'printf "%%s" %sgc-helm.sh"\n' "${RESOLVE/<binding>/$1}" >"$TMP/call-path-$1"
+    printf '%sgc-helm.sh" --help >/dev/null 2>&1\n' "${RESOLVE/<binding>/$1}" >"$TMP/call-writer-$1"
+}
+call_files kit
+call_files gc-toolkit
+# phys <path> — <path> with every symlink in its directory resolved.
+phys() { (cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s' "$(pwd -P)" "$(basename "$1")"); }
+WANT="$(phys "$ROOT/assets/scripts/gc-helm.sh")"
 shells="bash"
 command -v zsh >/dev/null 2>&1 && shells="bash zsh"
 for sh_ in $shells; do
     run=$sh_
     [ "$sh_" = zsh ] && run="zsh -f"
-    got=$(cd "$TMP/away" && env -u GC_PACK_DIR -u BASH_ENV -u ENV PATH="$TMP/stub-ok:$PATH" $run "$TMP/call-path" 2>/dev/null)
-    [ "$got" = "$ROOT/assets/scripts/gc-helm.sh" ] && ok "($sh_) the call resolves to the pack's own writer" \
-        || bad "($sh_) the call resolves to the pack's own writer" "resolved '$got'"
-    if (cd "$TMP/away" && env -u GC_PACK_DIR -u BASH_ENV -u ENV PATH="$TMP/stub-ok:$PATH" $run "$TMP/call-writer") 2>/dev/null; then
-        ok "($sh_) the resolved writer runs"
+    got=$(cd "$TMP/away" && env -u GC_PACK_DIR -u BASH_ENV -u ENV PATH="$TMP/stub:$PATH" $run "$TMP/call-path-kit" 2>/dev/null)
+    [ "$got" = "$ROOT/assets/scripts/gc-helm.sh" ] && ok "($sh_) the call with the city's binding resolves to the pack's own writer" \
+        || bad "($sh_) the call with the city's binding resolves to the pack's own writer" "resolved '$got'"
+    if (cd "$TMP/away" && env -u GC_PACK_DIR -u BASH_ENV -u ENV PATH="$TMP/stub:$PATH" $run "$TMP/call-writer-kit") 2>/dev/null; then
+        ok "($sh_) …and the writer there runs"
     else
-        bad "($sh_) the resolved writer runs" "gc-helm.sh --help through the call failed"
+        bad "($sh_) …and the writer there runs" "gc-helm.sh --help through the call failed"
     fi
     if [ -e /gc-helm.sh ]; then
-        bad "($sh_) a call whose pack command cannot answer fails" "/gc-helm.sh exists on this host, so the case cannot tell"
-    elif (cd "$TMP/away" && env -u GC_PACK_DIR -u BASH_ENV -u ENV PATH="$TMP/stub-fail:$PATH" $run "$TMP/call-writer") 2>/dev/null; then
-        bad "($sh_) a call whose pack command cannot answer fails" "it exited 0"
+        bad "($sh_) the same call naming gc-toolkit fails" "/gc-helm.sh exists on this host, so the case cannot tell"
+    elif (cd "$TMP/away" && env -u GC_PACK_DIR -u BASH_ENV -u ENV PATH="$TMP/stub:$PATH" $run "$TMP/call-writer-gc-toolkit") 2>/dev/null; then
+        bad "($sh_) the same call naming gc-toolkit fails" "it exited 0"
     else
-        ok "($sh_) a call whose pack command cannot answer fails"
+        ok "($sh_) the same call naming gc-toolkit fails"
     fi
 done
+
+echo "── under a renamed import, the real gc answers the binding the skill names ──"
+# The stub above stands in for gc's registration; this case runs gc itself. A
+# city that imports the pack as [imports.kit] lists the work skill as kit.work
+# with kit as its FROM, answers gc kit scripts-dir with this pack's scripts, and
+# has no gc gc-toolkit command at all. The scratch city is never started: gc
+# reads its config, lists its skills and runs the pack command, with GC_CITY
+# naming it and nothing in the environment naming a live city, rig or store.
+if [ -z "${GC_BIN:-}" ] || [ ! -x "${GC_BIN:-}" ]; then
+    printf '  SKIP  GC_BIN names no gc, so the renamed import was not checked against the real gc (set GC_BIN to run it)\n'
+else
+    CITY="$TMP/city-kit"
+    mkdir -p "$CITY" "$TMP/real-gc" "$TMP/gc-home"
+    ln -s "$GC_BIN" "$TMP/real-gc/gc"
+    printf '[workspace]\nprovider = "claude"\n\n[providers.claude]\nbase = "builtin:claude"\n\n[providers.codex]\nbase = "builtin:codex"\n\n[providers.gemini]\nbase = "builtin:gemini"\n' >"$CITY/city.toml"
+    printf '[pack]\nname = "skill-needs-probe"\nschema = 2\n\n[imports.kit]\nsource = "%s"\n' "$ROOT" >"$CITY/pack.toml"
+    # in_city <command...> — run in the scratch city, with the real gc first on PATH.
+    in_city() {
+        (cd "$CITY" && env -u GC_CITY_PATH -u GC_RIG -u GC_RIG_ROOT -u GC_DIR -u GC_PACK_DIR \
+            -u BEADS_DIR -u GC_BEADS_SCOPE_ROOT -u GC_DOLT_PORT -u BEADS_DOLT_SERVER_PORT -u BASH_ENV -u ENV \
+            GC_CITY="$CITY" GC_HOME="$TMP/gc-home" PATH="$TMP/real-gc:$PATH" "$@")
+    }
+    binding=$(in_city gc skill list --json 2>/dev/null \
+        | jq -r '[.entries[]? | select((.path // "") | endswith("/skills/work/SKILL.md")) | .source] | unique | join(" ")')
+    [ "$binding" = kit ] && ok "gc lists the work skill with FROM kit, the binding the city imports the pack as" \
+        || bad "gc lists the work skill with FROM kit, the binding the city imports the pack as" "FROM '$binding'"
+    for sh_ in $shells; do
+        run=$sh_
+        [ "$sh_" = zsh ] && run="zsh -f"
+        got=$(in_city $run "$TMP/call-path-kit" 2>/dev/null)
+        [ -n "$got" ] && [ "$(phys "$got")" = "$WANT" ] && ok "($sh_) with kit filled in, the real gc resolves the call to the pack's own writer" \
+            || bad "($sh_) with kit filled in, the real gc resolves the call to the pack's own writer" "resolved '$got'"
+        if in_city $run "$TMP/call-writer-kit" 2>/dev/null; then
+            ok "($sh_) …and the writer there runs"
+        else
+            bad "($sh_) …and the writer there runs" "gc-helm.sh --help through the call failed"
+        fi
+    done
+    if in_city gc gc-toolkit scripts-dir >/dev/null 2>&1; then
+        bad "the real gc has no gc gc-toolkit scripts-dir under [imports.kit]" "it exited 0"
+    else
+        ok "the real gc has no gc gc-toolkit scripts-dir under [imports.kit]"
+    fi
+fi
 
 echo "── a step that names an act gives its exact command, and the skill explains it once ──"
 lacks() {

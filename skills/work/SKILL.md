@@ -12,9 +12,11 @@ one writer that sends it. The writer's `--help` carries its flags. Doing the
 work is a molecule's job, so nothing here changes a repo.
 
 The writers are the gc-toolkit pack's own scripts.
-`gc gc-toolkit scripts-dir` prints their directory in the pack as gc loaded it,
-so each example calls the pack's copy inside the command itself, and runs as
-written in a fresh shell.
+`gc <binding> scripts-dir` prints their directory in the pack as gc loaded it,
+so each example calls the pack's copy inside the command itself, and runs in a
+fresh shell. `<binding>` is the name the city imports the pack under, which gc
+puts in front of this skill's name: `gc-toolkit` in `gc-toolkit.work`.
+`gc skill list` prints it in this skill's FROM column.
 
 ## File new work
 
@@ -28,7 +30,7 @@ it wait, or leave it for placement.
   of that epic: a park on the epic holds it, and the epic's priority ranks it.
   The parent of the bead it came from applies only when the new work serves the
   same epic. This prints that parent, or an empty line:
-  `"$(gc gc-toolkit scripts-dir)/converse-parent.sh" <bead>`. When no epic
+  `"$(gc <binding> scripts-dir)/converse-parent.sh" <bead>`. When no epic
   applies, give the bead no parent.
 - **File it in the store of the pool that will work it.** A pool reads only its
   own rig's store, so a city-scoped session names the rig:
@@ -145,17 +147,17 @@ you chose, and why, when you put the choice to the operator.
 The message is that work already sent should stop, or go somewhere else.
 
 - **Stop it.**
-  `"$(gc gc-toolkit scripts-dir)/gc-helm.sh" takeaway <bead> "<why it stops>" --release --no-wait`
+  `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<why it stops>" --release --no-wait`
   stops the run beneath the bead and leaves the bead open, unassigned and
   routed to no pool, with that sentence as its headline. When the bead now
   waits on something, pass `--waiting-on <bead>` in place of `--no-wait`.
 - **Send it elsewhere.** The same release names where it goes, in one write:
-  `"$(gc gc-toolkit scripts-dir)/gc-helm.sh" takeaway <bead> "<where it goes now, and why>" --release --no-wait --route <rig>/<pool>`.
+  `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<where it goes now, and why>" --release --no-wait --route <rig>/<pool>`.
   For a named agent, pass `--assign <named-agent>` in place of
   `--route <rig>/<pool>`.
 - **Withdraw a recommendation** the bead should not take, while the bead stays
   open for discussion:
-  `SUBJECT=<bead> VISIT=<visit> "$(gc gc-toolkit scripts-dir)/converse-invalidate-recommendation.sh" "<why it no longer holds>"`.
+  `SUBJECT=<bead> VISIT=<visit> "$(gc <binding> scripts-dir)/converse-invalidate-recommendation.sh" "<why it no longer holds>"`.
   It strips `gc.recommended_formula`, so the board stops offering Accept once
   no sitting holds the visit. When the bead itself should go, close it instead.
 
@@ -174,7 +176,7 @@ once the record landed:
 
 ```bash
 gc bd update <bead> --set-metadata gc.work_outcome=no-op \
-  && "$(gc gc-toolkit scripts-dir)/bead-rehome.sh" --origin <bead> --successor <successor> --kind not-needed --note "<why, one sentence>"
+  && "$(gc <binding> scripts-dir)/bead-rehome.sh" --origin <bead> --successor <successor> --kind not-needed --note "<why, one sentence>"
 ```
 
 Under `not-needed` the successor is the evidence that ruled the work out, such
@@ -191,6 +193,6 @@ already closed by hand, the same writer adds the missing pointer.
   PR unlanded. Check the shape yourself: the doctor exempts a disposed bead, so
   nothing downstream checks it again.
 - Disarm an armed bead first, so a wait released before the close lands cannot
-  send it: `"$(gc gc-toolkit scripts-dir)/deferred-dispatch.sh" disarm <bead> --reason "<why>"`.
+  send it: `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" disarm <bead> --reason "<why>"`.
 
 `docs/state-machine.md` ("Disposition") is the doctrine.
