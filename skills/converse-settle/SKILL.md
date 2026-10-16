@@ -158,9 +158,9 @@ the same epic. Work that genuinely decomposes an epic subject is the one
 exception. It is the subject's member, created with `--parent "$SUBJECT"`, and
 it gets no `--waiting-on`, because bd refuses a `blocks` edge from a parent to
 its own descendant. Run the create as `gc bd --rig <rig> create` when the
-pool's rig is not this session's. The takeaway alone cannot carry the wait: *waiting
-and holding are graph states, not comments.* An edge that will not take warns
-on stderr and the takeaway still lands.
+pool's rig is not this session's. The takeaway alone cannot carry the wait:
+*waiting and holding are graph states, not comments.* An edge that will not
+take warns on stderr and the takeaway still lands.
 
 **A follow-up that cannot run until another bead lands is ARMED, not left
 unrouted** (the `waits` skill). Slinging it now is wrong, because it is
