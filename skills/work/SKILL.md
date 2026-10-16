@@ -1,6 +1,6 @@
 ---
 name: work
-description: Use when you have to say that something needs doing, carry out a decision about who does it, or change work already asked for. Covers filing new work or a follow-up in the right rig and under the right parent, never under the bead it came from, sending a bead to a pool on a formula (routing, slinging, dispatching, releasing a held bead to a pool, assigning it to an agent, taking a recommended formula), choosing which formula, stopping or redirecting work in flight, and closing or retiring a bead that needs no work (a duplicate, or work no longer needed). Not for doing the work yourself. To make work wait for something first, use waits; for a change that is already a pull request, use prs.
+description: Use when you have to say that something needs doing, carry out a decision about who does it, or change work already asked for. Covers filing new work or a follow-up in the right rig and under the right parent (a sibling of the bead that waits on it, or a member of the epic it is part of), sending a bead to a pool on a formula (routing, slinging, dispatching, releasing a held bead to a pool, assigning it to an agent, taking a recommended formula), choosing which formula, stopping or redirecting work in flight, and closing or retiring a bead that needs no work (a duplicate, or work no longer needed). Not for doing the work yourself. To make work wait for something first, use waits; for a change that is already a pull request, use prs.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -23,9 +23,15 @@ puts in front of this skill's name: `gc-toolkit` in `gc-toolkit.work`.
 A new bead says that work needs doing. Filing it starts nothing: send it, make
 it wait, or leave it for placement.
 
-- **Never file it under the bead it came from.** bd refuses a `blocks` edge
-  from a parent to its own descendant, so a child could never gate the bead it
-  came from. Work already filed under the bead it came from stays where it is.
+- **A dependency goes beside the bead it came from, never under it.** Work
+  that bead waits on is a dependency, and this is the default. bd refuses a
+  `blocks` edge from a parent to its own descendant, so a child could never
+  gate the bead it came from. Work already filed under the bead it came from
+  stays where it is.
+- **Work that genuinely decomposes an epic is a member of that epic.** A story
+  or task that is part of the epic's work is filed with `--parent <that epic>`,
+  even when the epic is the bead it came from. Nothing makes the epic wait on
+  it with a `blocks` edge, because containment already carries that wait.
 - **Give it a parent only when one applies.** A parent makes the bead a member
   of that epic: a park on the epic holds it, and the epic's priority ranks it.
   The parent of the bead it came from applies only when the new work serves the
@@ -93,6 +99,12 @@ carries the work:
   The board shows the subject as a ruling in flight until the work lands, then
   as settled. A `--route <rig>/<pool>` here would have that pool claim the
   subject itself once the work lands, a conversation seed no worker can close.
+- **New work decomposes an epic subject.** It is the subject's member: file it
+  with `--parent <subject>`, send it, and sign off with
+  `--ruled yes --route human --no-wait`. `--waiting-on` names a dependency
+  only, because bd refuses a `blocks` edge from a parent to its own
+  descendant, and containment already carries the wait. When the sitting also
+  sent a dependency, name that one with `--waiting-on` in place of `--no-wait`.
 
 ## Take a recommendation
 

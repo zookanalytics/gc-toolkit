@@ -289,8 +289,21 @@ have "the record step gives the append it runs" 'gc bd update "$SUBJECT" --appen
 have "…and the append of a current-state block" 'gc bd update "$SUBJECT" --append-notes "## Current state' "$SETTLE"
 have "the settle step gives the create and the sling for routed work" 'gc sling <rig>/<pool> "$WORK" --on <formula>' "$SETTLE"
 have "the settle step gives the subject's parent lookup" 'converse-parent.sh" "$SUBJECT"' "$SETTLE"
-have "…and the work skill states the rule it serves: new work is never filed under the bead it came from" \
-    'Never file it under the bead it came from' "$WORK_SKILL"
+# Where new work is filed has two cases (docs/component-model.md, I1). A
+# dependency sits beside the bead that waits on it, because bd refuses a blocks
+# edge from a parent to its own descendant. Work that decomposes an epic is that
+# epic's member, and nothing makes the epic wait on it. A blanket "never under
+# the bead it came from" would keep an epic's own decomposition out of it.
+have "…and the work skill states the rule it serves: a dependency goes beside the bead it came from" \
+    'A dependency goes beside the bead it came from, never under it.' "$WORK_SKILL"
+have "…and work that decomposes an epic is that epic's member" \
+    'Work that genuinely decomposes an epic is a member of that epic.' "$WORK_SKILL"
+lacks "…and no blanket rule keeps new work out from under the bead it came from" \
+    'Never file it under the bead it came from' "$WORK_SKILL" \
+    "an epic's decomposition is filed under that epic, even when the epic is the bead it came from"
+lacks "…in the body or in the description every agent reads" \
+    'never under the bead it came from' "$WORK_SKILL" \
+    "the description carries the rule to every role, so it states both cases"
 have "the settle step gives the arm it names" 'deferred-dispatch.sh" arm <follow-up>' "$SETTLE"
 have "the prompt gives the disposal writer's call" 'bead-rehome.sh" --origin "$SUBJECT"' "$PROMPT"
 have "the prompt gives the retire call" 'pr-dispose.sh" --anchor "$SUBJECT"' "$PROMPT"
