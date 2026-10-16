@@ -386,6 +386,9 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/await-ruling.sh` | work | Records a declined run's wait on its work bead: a `blocks` edge onto the visit that asks for the ruling, and a deferred-dispatch arm that re-slings the work when the visit closes, after it releases a claim on the work bead that no live worker holds. |
 | `orders/deferred-dispatch.toml` | work | Routes work whose blockers have closed. |
 | `assets/scripts/deferred-dispatch.sh` | work | The pass that order runs: a pending dispatch is a fact about the work, so it lives on the work bead. |
+| `orders/queue-priority.toml` | work | Settles the polecat queue at the priorities its beads follow, for the raw priority and parent edits no writer saw. |
+| `assets/scripts/queue-priority.sh` | work | Writes the priority work competes at, under one lock per store: `settle` on one bead and its live workflows, the `move` that `gc-helm.sh priority` runs over everything that follows a bead, and the order's pass over the polecat queue ([steering.md](steering.md#priority)). |
+| `assets/scripts/priority-lib.sh` | work | The one definition of a bead's priority: the priority of the bead it follows plus its own shift, kept within P0 to P4 at each level, where a member follows its most urgent parent, PR-finishing work its anchor, and a workflow's convoy, root and steps the bead they were poured for. Its walk reads a generation of followed beads per listing. `queue-priority.sh` sources it. |
 | `formulas/mol-review.toml` | review | The review method: claim, pin, judge, one `signoff.sh` verdict, drain. |
 | `assets/scripts/gate-ensure.sh` | review | Makes every declared check raisable and routes the review bead. Runs as arm 6 of the merge cadence. |
 | `assets/scripts/review-dispatch-body.sh` | review | Emits the dispatch note a review bead carries. |
@@ -427,7 +430,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `formulas/mol-validate-close.toml` | visit | The validating closer a `close` disposition routes to: a capable pool re-checks the no-work conclusion against live state and closes the subject (`gc.work_outcome=no-op`) when it holds, or files a visit when it does not. The one bead-closer outside the refinery, gated on its own confident check. |
 | `orders/helm-build.toml` | visit | Keeps the served board binary current with `services/helm`. |
 | `services/helm` | visit | The board. Derives every row per render from the ledger. |
-| `assets/scripts/gc-helm.sh` | visit | The board's write verbs (takeaway, open, engage, react, dismiss, demand, accept, and the operator's [park](steering.md)) and its read-only verbs: resolve, and unplaced, which lists the placement sitting's queue. |
+| `assets/scripts/gc-helm.sh` | visit | The board's write verbs (takeaway, open, engage, react, dismiss, demand, accept, and the operator's [park](steering.md) and [priority](steering.md#priority), whose writes `queue-priority.sh move` makes) and its read-only verbs: resolve, and unplaced, which lists the placement sitting's queue. |
 | `assets/scripts/gc-helm-svc.sh` | visit | The `proxy_process` launcher for the board backend. |
 | `assets/scripts/gc-visit-open.sh` | visit | Operator-origin visit intake in one command. |
 | `assets/scripts/city-liveness.sh` | visit | The one reading of the liveness flags in `gc rig list --json`: whether a rig is suspended, and whether the city controller is running, where the HQ row's `running=false` counts only when `gc status` does not contradict it. `gc-helm.sh`'s engage refuses on them and `gc-visit-open.sh` notes that a report will wait. |

@@ -1020,13 +1020,11 @@ while IFS= read -r tagged; do
       echo "$PROG: $id check '$g' is armed but no --review-pool was given; no dispatch (merge is HELD until one is)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    # No dispatch ceiling. GC_MAX_REVIEW_DISPATCHES and its dispatch_backstop
-    # stamp were a convergence proxy — a converging PR could spend its budget on
-    # redundant rounds and park on the board as a failure that never happened.
-    # Quiescence above forbids the redundant round, so there is no budget left to
-    # bound and no anchor carries a dispatch tally. The runaway shapes that remain
-    # — a reviewer that dies after claim, a fix unit filed with its edge reversed
-    # — stop the PR moving rather than spin the dispatcher.
+    # There is no dispatch ceiling: quiescence above forbids the redundant round
+    # a ceiling would have bounded, so no anchor carries a dispatch tally. The
+    # runaway shapes that remain — a reviewer that dies after claim, a fix unit
+    # filed with its edge reversed — stop the PR moving rather than spin the
+    # dispatcher.
 
     # A review an earlier two-write create left behind carries this title but
     # not the keys inflight_review reads, so the probe above never saw it, and

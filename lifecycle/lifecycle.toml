@@ -235,16 +235,9 @@ marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 # cannot inherit the disposition of the sitting before it
 # (assets/scripts/takeaway-settled-pairing.test.sh).
 settled_keys = ["gc.takeaway=gc.takeaway_settled"]
-# One key per check, so the declaration is a prefix. dispatch_backstop.<g> is
-# written by gate-ensure.sh only where a check has spent its dispatch ceiling,
-# and its value carries the count and the head it holds, so its presence is
-# "dispatch_count at the ceiling" as the writer itself recorded it.
-marker_prefixes = ["dispatch_backstop."]
 # merge_hold is not a marker_key: an operator's freeze is theirs to lift, and a
 # hold that must show as an edge asserts it through blocked_reason or
 # gc.takeaway beside it, both declared above, which carry the wait's sentence.
-# Leaving the two gate scalars out is what disables that arm; the check reads
-# an omitted field as a marker the declaration dropped.
 # The route that parks a bead for a person is park_route in [machine]. A bead
 # resting on it waits on somebody, and that wait has the same shape as any
 # other.
@@ -647,23 +640,16 @@ keys = [
 
 [metadata.gates]
 keys = [
-  "check_set", "check.<g>", "signoff_dismissed", "approval_dismissed",
+  "check_set", "signoff_dismissed", "approval_dismissed",
   "signoff_verdict", "visual", "visual_fallback_from",
   "check_name", "anchor_bead", "review_branch", "review_base", "reviewed_oid",
   "review_pool", "source_review_bead", "source_ruling_bead", "source_review", "task_kind",
   "fix_target_pool", "wedge_seen_root",
-  "signoff_cap", "signoff_rounds_reset", "signoff_round_floor",
-  "dispatch_count", "dispatch_backstop.<g>",
 ]
 # check_set carries its mechanics in [gates] above: the comma list of check
 # names (default `correctness,triage` stamped by gate-ensure.sh when empty,
 # sentinel `none` the opt-out), and empty is never `none` — a reader holds the
 # merge closed on it.
-# check.<g> — RETIRED. A lane's state is derived from its reviews
-# (lane-state.sh), and nothing writes or reads a stored lane value. Residue on a
-# bead holds a lane-state word or the older <verb>@<oid> grammar. Registered so
-# that residue reads as known, not as a stray, until the store-wide sweep
-# clears it.
 #
 # signoff_dismissed — `<github-review-id>@<oid>`: a stale GitHub review the city
 #   dismissed at that head. Written by signoff.sh and pr-facts.sh, each reading it
@@ -778,17 +764,10 @@ keys = [
 # fix_target_pool — the pool a rework fix unit routes to, written on the review
 #   child by gate-ensure.sh when a fix pool is configured; read by signoff.sh,
 #   which defaults it to `<rig>.polecat`. Never cleared. A pool name.
-# wedge_seen_root — the workflow root gate-ensure.sh last saw spend its dispatch
-#   ceiling, stamped on the review bead so a wedge gets one quiet pass before it
+# wedge_seen_root — the workflow root gate-ensure.sh last saw spent (every step
+#   closed but the finalizer) while the review it drives has no verdict and no
+#   route, stamped on that review bead so a wedge gets one quiet pass before it
 #   escalates; a differing or absent value is the first sighting. A root bead id.
-# signoff_cap / signoff_rounds_reset / signoff_round_floor — RETIRED. The
-#   review-round cap is gone: convergence is judged by the validator, not
-#   counted (specs/tk-ztapg/review-cycle-architecture.md), so nothing writes
-#   these now. Registered so that residue on a pre-retirement bead reads as
-#   known, not as a stray.
-# dispatch_count / dispatch_backstop.<g> — RETIRED. gate-ensure.sh removed the
-#   review dispatch ceiling, so nothing writes these now. Registered so that
-#   residue on a pre-retirement bead reads as known, not as a stray.
 
 [metadata.review_findings]
 # A finding is a review objection with an identity of its own, so it outlives
@@ -1008,6 +987,25 @@ keys = ["self_review_passed_sha", "aborted_at", "self_review_loop_attempts"]
 #   written in the same handback. No pack path reads it back. Absent means no
 #   handback has run. Never cleared. An integer string.
 
+[metadata.rig_checks]
+# The published copy of a check's result, which `gctk rig <check>
+# --publish-bead <bead>` writes on the bead its caller names. The result that
+# answers a later `gctk rig` call is the record under the rig clone's git
+# common directory (services/gctk/README.md, "rig"); this copy is for whoever
+# reads the bead.
+keys = ["rig_check.test", "rig_check.lint", "rig_check.typecheck"]
+# rig_check.test, rig_check.lint, rig_check.typecheck — the record the
+#   publishing call answered with, as one JSON object: check, result, scope
+#   (absent on a lint or typecheck run), commit, tree, exit_code, duration_ms,
+#   runner, recorded_at and command. gctk writes it only once the record store
+#   holds the result it copies: after recording a result, and after answering
+#   from a record. It reads the copy back once to confirm the write. No other
+#   pack path reads it. Absent means no call published that check to the bead.
+#   Never cleared: the next publish replaces it. Its commit is the one the check
+#   ran at: the head the call answered for, or, for a full-suite test pass
+#   answered through the tree, an earlier commit with the same tree. A JSON
+#   object stored as a string.
+
 [metadata.pr_posture]
 # pr_posture, pr_merge_state, the two watermarks and pr_comment_disposition
 # carry their mechanics in [posture] above (pr_posture is also a [dated_keys]
@@ -1202,6 +1200,23 @@ keys = ["placement"]
 #   arm, an assignee or a live pour places a bead whatever the marker says, so a
 #   marker left on a placed bead names no wait. Absent means intake never held
 #   the bead. No pack writer clears it. A string.
+
+[metadata.priority]
+# The priority flow (docs/steering.md): a bead's priority is the priority of the
+# bead it follows plus its own shift, computed by assets/scripts/priority-lib.sh,
+# and the bd priority field holds the result, because a claim reads that field
+# and a pour copies it once.
+keys = ["priority_shift"]
+# priority_shift — the bead's shift from the bead it follows: +1 is one level
+#   later and -1 one level sooner, and each level stops at P0 and P4. Written by
+#   queue-priority.sh move, which `gc-helm.sh priority --shift` runs, and read
+#   back there. Read by priority-lib.sh wherever a priority is computed:
+#   queue-priority.sh settle, its move and its reconcile pass. Read only on a
+#   bead that follows a parent or an anchor: a workflow's convoy, root and steps
+#   carry no shift, and a bead that follows nothing has nothing to shift from.
+#   Absent or empty reads as 0. A value that is not a signed integer makes the
+#   bead unreadable, and every bead that follows it, so no priority is computed
+#   from it. No pack writer clears it. A signed integer, stored as a number.
 
 [metadata.supersede]
 # The re-home / supersede pointers, written by bead-rehome.sh when work moves to
