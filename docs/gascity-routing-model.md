@@ -182,8 +182,9 @@ answer for.
   `notify` reads `notified` from the mail's `--json` result and
   otherwise requests the turn with `gc session nudge`. The notice goes
   once `bd` reports the bead ready, since a bead still waiting on a
-  blocker is not offered yet: at once when `bd` already does, and
-  otherwise from the deferred-dispatch pass when it does
+  blocker is not offered yet. It goes at once when `bd` already reports
+  the bead ready, and otherwise from the deferred-dispatch pass once it
+  does
   ([deferred-dispatch.md](deferred-dispatch.md#work-assigned-to-a-named-agent-owes-a-notice)).
 - **Does NOT:** set `gc.routed_to`. The named session's hook query
   finds the work via assignee, not via routed metadata.
