@@ -1,30 +1,15 @@
 {{ define "bead-disposition" }}
 ### Closing a bead that did not land: stamp the successor
 
-Not every close is a landing. A bead also closes because its work MOVED —
-re-homed to another rig's store, folded into an absorbing bead, fixed
-upstream, a duplicate — or because the work turned out not to be needed at
-all. The first four hand the work to a successor. `not-needed` hands it to
-nobody: there the pointer names the EVIDENCE that concluded the bead was
-unnecessary, typically the visit bead from the sitting that ruled. Either
-way a close that names nothing is indistinguishable from a careless close,
-so the pointer is required under every kind.
-
-**Never write that close by hand.** One writer:
+A bead that closes without landing, because its work moved or is not needed,
+closes through the disposition writer and never by hand (the `work` skill,
+closing a bead that needs no work):
 
 ```bash
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/bead-rehome.sh" ] && { REHOME="$cand/assets/scripts/bead-rehome.sh"; break; }
-done
-"$REHOME" --origin <bead-being-closed> --successor <carrier-or-evidence> \
-  --kind re-homed|folded|fixed-upstream|duplicate|not-needed \
-  --note "<why, one sentence>"
+gc bd update <bead> --set-metadata gc.work_outcome=no-op
+"{{ .ConfigDir }}/assets/scripts/bead-rehome.sh" --origin <bead> --successor <carrier-or-evidence> \
+  --kind re-homed|folded|fixed-upstream|duplicate|not-needed --note "<why, one sentence>"
 ```
-
-It stamps `gc.superseded_by` + `gc.superseded_by_store`, reads them back,
-and only then closes with a reason naming kind + successor + store; it
-refuses to close a bead unpointed. On an already-closed bead it is the
-repair tool (pointer + note, nothing reopened).
 
 **The read side: a missing successor is not proof of a false close.**
 Before reopening or escalating a closed bead, read the pointer under both

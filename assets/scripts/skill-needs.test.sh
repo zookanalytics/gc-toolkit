@@ -293,6 +293,15 @@ else
     bad "the mechanik's supplement command is the prs skill's, sent to its rig's polecat pool" \
         "$(diff "$TMP/sup-prs" "$TMP/sup-mechanik" 2>&1 | head -4 | tr '\n' ' ')"
 fi
+# The mechanik's disposition fragment names the work skill's option and calls
+# the pack's own writer, never a copy found in a checkout.
+DISPOSITION="$REPO/template-fragments/bead-disposition.template.md"
+have "the disposition fragment calls the pack's own writer" '"{{ .ConfigDir }}/assets/scripts/bead-rehome.sh" --origin <bead>' "$DISPOSITION"
+found=""
+for probe in 'GC_RIG_ROOT' 'rev-parse --show-toplevel' 'GC_CITY_PATH'; do
+    grep -qF -- "$probe" "$DISPOSITION" && found="$found [$probe]"
+done
+[ -z "$found" ] && ok "…and looks for it in no checkout" || bad "…and looks for it in no checkout" "found:$found"
 
 echo "── each real need scores highest on the skill that answers it ──"
 # <expected skill> TAB <the need, verbatim>
