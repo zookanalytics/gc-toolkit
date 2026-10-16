@@ -417,8 +417,7 @@ gc mail send gc-toolkit.mechanik -s "..." -m "..."
 # notice that wakes the agent to claim it, since the assignee write wakes
 # nobody (see below).
 bd update tk-abcde --assignee gc-toolkit.mechanik
-gc mail send gc-toolkit.mechanik --notify -s "Ready for you: tk-abcde" \
-  -m "tk-abcde is assigned to you and ready to claim: run gc hook to pick it up."
+assets/scripts/deferred-dispatch.sh notify tk-abcde --agent gc-toolkit.mechanik
 
 # Rig-scoped singletons keep the rig name as a prefix.
 gc session nudge gc-toolkit/gc-toolkit.witness "..."
@@ -432,15 +431,18 @@ claim, continuation and execution backstops govern pool sessions only, the
 agent's `nudge` text is typed at launch, and the controller restarts an
 alive named session onto a new assignment only under `wake_mode = "fresh"`.
 Under `"resume"`, an idle agent sits beside a claimable bead until something
-else gives it a turn. So send the notice with the write.
-`gc mail send --notify` requests the agent's turn, wakes it when it is not
-running, and leaves the bead id in its inbox. Send it once `bd` reports the
-bead ready. A bead that still waits on a blocker is not offered yet, and a
-notice then wakes the agent for nothing.
-`assets/scripts/deferred-dispatch.sh notify <bead> --agent <agent>` takes
-both cases: it mails at once when `bd` reports the bead ready, and
-otherwise records the notice for the deferred-dispatch pass to send when
-it does ([deferred-dispatch.md](deferred-dispatch.md#work-assigned-to-a-named-agent-owes-a-notice)).
+else gives it a turn. So send the notice with the write, with
+`assets/scripts/deferred-dispatch.sh notify <bead> --agent <agent>`. It
+mails the agent the bead id with `gc mail send --notify`, which asks for the
+agent's turn and wakes it when it is not running. That command saves the
+mail before it asks, and it exits 0 even when the request fails, so `notify`
+reads `notified` from the mail's `--json` result and otherwise requests the
+turn with `gc session nudge`. The notice goes once `bd` reports the bead
+ready, since a bead that still waits on a blocker is not offered yet, and a
+notice then would wake the agent for nothing. `notify` mails at once when
+`bd` already reports the bead ready, and otherwise records the notice for
+the deferred-dispatch pass to send when it does
+([deferred-dispatch.md](deferred-dispatch.md#work-assigned-to-a-named-agent-owes-a-notice)).
 
 Every command above expects the **QualifiedName** form — the alias
 shown in `gc session list`. The rule is the same for both scopes:

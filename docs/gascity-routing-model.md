@@ -136,7 +136,7 @@ answer for.
   gc sling gc-toolkit/gc-toolkit.polecat tk-abcde   # pool, rig-scoped: gc.routed_to, claimable
   gc sling gc-toolkit.mechanik tk-abcde             # singleton, city-scoped (no <rig>/): gc.routed_to, NOT claimable
   bd update tk-abcde --assignee gc-toolkit.mechanik  # Lane 2: the exact name its hook matches, claimable
-  gc mail send gc-toolkit.mechanik --notify -s "Ready for you: tk-abcde" -m "..."  # Lane 2's notice: the write wakes nobody
+  assets/scripts/deferred-dispatch.sh notify tk-abcde --agent gc-toolkit.mechanik  # Lane 2's notice: the write wakes nobody
   ```
 - **Does NOT:** set `assignee`, for any target. On a pool that is the
   point: the reconciler picks an available worker by matching
@@ -166,8 +166,7 @@ answer for.
 - **CLI example:**
   ```bash
   bd update tk-abcde --assignee gc-toolkit.mechanik   # city-scoped singleton: no <rig>/ prefix
-  gc mail send gc-toolkit.mechanik --notify -s "Ready for you: tk-abcde" \
-    -m "tk-abcde is assigned to you and ready to claim: run gc hook to pick it up."
+  assets/scripts/deferred-dispatch.sh notify tk-abcde --agent gc-toolkit.mechanik
   ```
 - **Pair it with a notice.** The assignee write makes the bead
   claimable and wakes nobody. The session claims it the next time it
@@ -175,13 +174,16 @@ answer for.
   `wake_mode = "resume"` nothing gives it one for a new assignment:
   the controller's claim, continuation and execution backstops govern
   pool sessions only, and its restart of an alive named session onto
-  a new assignment runs only under `"fresh"`. `gc mail send --notify`
-  requests that turn, wakes the session when it is not running, and
-  leaves the bead id in its inbox. Send it once `bd` reports the bead
-  ready, since a bead still waiting on a blocker is not offered yet.
+  a new assignment runs only under `"fresh"`.
   `assets/scripts/deferred-dispatch.sh notify <bead> --agent <name>`
-  mails at once when `bd` reports the bead ready and otherwise sends
-  the notice when it does
+  requests that turn. It mails the session the bead id with
+  `gc mail send --notify`, which wakes the session when it is not
+  running. That command exits 0 even when its turn request fails, so
+  `notify` reads `notified` from the mail's `--json` result and
+  otherwise requests the turn with `gc session nudge`. The notice goes
+  once `bd` reports the bead ready, since a bead still waiting on a
+  blocker is not offered yet: at once when `bd` already does, and
+  otherwise from the deferred-dispatch pass when it does
   ([deferred-dispatch.md](deferred-dispatch.md#work-assigned-to-a-named-agent-owes-a-notice)).
 - **Does NOT:** set `gc.routed_to`. The named session's hook query
   finds the work via assignee, not via routed metadata.
