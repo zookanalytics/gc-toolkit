@@ -2113,11 +2113,11 @@ func TestGatherResolvesEdgeOnlyVisitSubject(t *testing.T) {
 	}
 }
 
-// TestEdgeSubjectResolutionReadsOnlyForStamplessVisits: the tracks-edge read fires
-// only for a visit whose stamp is empty. Two stores that differ only in whether the
-// visit carries a gc.continuation_group stamp make dependency reads that differ by
-// exactly one — the stamped board spends nothing resolving its subject.
-func TestEdgeSubjectResolutionReadsOnlyForStamplessVisits(t *testing.T) {
+// TestVisitSubjectsResolveInOneBatchedRead: the tracks edges of every gathered
+// visit come from one batched dependency read, whether a visit carries the stamp
+// or not, so the read does not grow with the number of visits. A store with no
+// visit spends nothing on it.
+func TestVisitSubjectsResolveInOneBatchedRead(t *testing.T) {
 	gather := func(st *fakeStore) *fakeStore {
 		root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
 		src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
@@ -2126,24 +2126,124 @@ func TestEdgeSubjectResolutionReadsOnlyForStamplessVisits(t *testing.T) {
 		}
 		return st
 	}
-	stamped := gather(&fakeStore{issues: map[string][]*beads.Issue{"task": {
-		issue("tk-rec", "a recommendation subject", "task", 2, testNow, ""),
+	rec := issue("tk-rec", "a recommendation subject", "task", 2, testNow, "")
+	none := gather(&fakeStore{issues: map[string][]*beads.Issue{"task": {rec}}})
+	one := gather(&fakeStore{issues: map[string][]*beads.Issue{"task": {
+		rec,
 		visitBead("tk-sit-stamped", "visit: tk-rec — stamped",
 			`{"task_kind":"visit","gc.continuation_group":"tk-rec"}`, testNow),
 	}}})
-	edgeOnly := gather(&fakeStore{
+	three := gather(&fakeStore{
 		issues: map[string][]*beads.Issue{"task": {
-			issue("tk-rec", "a recommendation subject", "task", 2, testNow, ""),
+			rec,
+			visitBead("tk-sit-stamped", "visit: tk-rec — stamped",
+				`{"task_kind":"visit","gc.continuation_group":"tk-rec"}`, testNow),
 			visitBead("tk-sit-edge", "visit: tk-rec — edge only",
 				`{"task_kind":"visit"}`, testNow),
+			visitBead("tk-sit-both", "visit: tk-rec — stamped and edged",
+				`{"task_kind":"visit","gc.continuation_group":"tk-rec"}`, testNow),
 		}},
 		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
 			"tk-sit-edge": {withDepType(child("tk-rec", "open", testNow, ""), "tracks")},
+			"tk-sit-both": {withDepType(child("tk-rec", "open", testNow, ""), "tracks")},
 		},
 	})
-	if edgeOnly.depyN != stamped.depyN+1 {
-		t.Errorf("the tracks-edge read must fire only for a stamp-less visit: stamped=%d edge-only=%d (want edge-only = stamped+1)",
-			stamped.depyN, edgeOnly.depyN)
+	if one.depyN != none.depyN+1 || three.depyN != one.depyN {
+		t.Errorf("the visits' tracks edges must come from one batched read: no visit=%d, one=%d, three=%d (want one = no visit + 1, three = one)",
+			none.depyN, one.depyN, three.depyN)
+	}
+}
+
+// gatherOneStore runs a gather over one gc-toolkit store.
+func gatherOneStore(t *testing.T, st *fakeStore) *Result {
+	t.Helper()
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
+	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": st})
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	return res
+}
+
+// TestVisitSubjectIsTheTracksEdgeOverAStaleStamp: the shared visit identity reads
+// the tracks edge first, so a visit stamped with one bead and tracking another
+// holds the tracked bead, and its stamp holds nothing. The tracked bead is the one
+// the status label and the merge pass's finalize gate hold on.
+func TestVisitSubjectIsTheTracksEdgeOverAStaleStamp(t *testing.T) {
+	res := gatherOneStore(t, &fakeStore{
+		issues: map[string][]*beads.Issue{"task": {
+			issue("tk-stamped", "the bead the stale stamp names", "task", 2, testNow, ""),
+			issue("tk-tracked", "the bead the tracks edge names", "task", 2, testNow, ""),
+			visitBead("tk-sit", "visit: tk-tracked — the edge wins",
+				`{"task_kind":"visit","gc.continuation_group":"tk-stamped"}`, testNow),
+		}},
+		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-sit": {withDepType(child("tk-tracked", "open", testNow, ""), "tracks")},
+		},
+	})
+	s := sittingsByID(res)["tk-sit"]
+	if s.Subject != "tk-tracked" {
+		t.Errorf("Subject = %q, want the tracks-edge target %q over the stamp", s.Subject, "tk-tracked")
+	}
+	if !res.Facts.Visits["tk-tracked"] || res.Facts.Visits["tk-stamped"] {
+		t.Errorf("the visit holds the bead it tracks and not the one its stale stamp names: visits=%v", res.Facts.Visits)
+	}
+	if want := "the bead the tracks edge names"; s.SubjectTitle != want {
+		t.Errorf("SubjectTitle = %q, want the tracked bead's title %q", s.SubjectTitle, want)
+	}
+}
+
+// TestVisitWithTwoTracksEdgesHoldsBoth: a visit covers every bead its tracks edges
+// name (visit_identity_subjects), so both beads are held, and the row names the
+// first in id order (visit_subject's choice), whatever order the edges come in.
+func TestVisitWithTwoTracksEdgesHoldsBoth(t *testing.T) {
+	res := gatherOneStore(t, &fakeStore{
+		issues: map[string][]*beads.Issue{"task": {
+			issue("tk-a", "the first tracked bead", "task", 2, testNow, ""),
+			issue("tk-b", "the second tracked bead", "task", 2, testNow, ""),
+			visitBead("tk-sit", "visit: tk-a — two tracks edges", `{"task_kind":"visit"}`, testNow),
+		}},
+		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-sit": {
+				withDepType(child("tk-b", "open", testNow, ""), "tracks"),
+				withDepType(child("tk-a", "open", testNow, ""), "tracks"),
+			},
+		},
+	})
+	s := sittingsByID(res)["tk-sit"]
+	if s.Subject != "tk-a" || !slices.Equal(s.Subjects, []string{"tk-a", "tk-b"}) {
+		t.Errorf("Subject = %q, Subjects = %v; want tk-a and [tk-a tk-b]", s.Subject, s.Subjects)
+	}
+	if !res.Facts.Visits["tk-a"] || !res.Facts.Visits["tk-b"] {
+		t.Errorf("a visit with two tracks edges holds both beads: visits=%v", res.Facts.Visits)
+	}
+}
+
+// TestFailedVisitEdgeReadFallsBackToTheStamp: when the tracks-edge read fails,
+// each visit falls back to its stamp, the identity's fallback, and the gather
+// reports itself partial.
+func TestFailedVisitEdgeReadFallsBackToTheStamp(t *testing.T) {
+	res := gatherOneStore(t, &fakeStore{
+		issues: map[string][]*beads.Issue{"task": {
+			issue("tk-stamped", "the bead the stamp names", "task", 2, testNow, ""),
+			issue("tk-tracked", "the bead the tracks edge names", "task", 2, testNow, ""),
+			visitBead("tk-sit", "visit: tk-tracked — the edge read fails",
+				`{"task_kind":"visit","gc.continuation_group":"tk-stamped"}`, testNow),
+		}},
+		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-sit": {withDepType(child("tk-tracked", "open", testNow, ""), "tracks")},
+		},
+		failDeps: map[string]error{"tk-sit": errors.New("edge read failed")},
+	})
+	if s := sittingsByID(res)["tk-sit"]; s.Subject != "tk-stamped" {
+		t.Errorf("Subject = %q, want the stamp %q when the edge read fails", s.Subject, "tk-stamped")
+	}
+	if !res.Facts.Visits["tk-stamped"] {
+		t.Errorf("the stamped bead is held when the edge read fails: visits=%v", res.Facts.Visits)
+	}
+	if !res.Partial {
+		t.Error("a failed tracks-edge read is reported as partial")
 	}
 }
 

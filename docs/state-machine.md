@@ -518,28 +518,37 @@ options.
 
 Posture is recorded on the bead. Its projection onto GitHub's pull request list is
 a workflow-owned label from a mutually-exclusive `status:` group, so a person
-scanning the list sees who must act on each PR next without opening it. The group
-is extensible: one value is set at a time, and setting one removes any other
-`status:` value.
+scanning the list sees what stands between each PR and landing without opening
+it. The group is extensible: one value is set at a time, and setting one removes
+any other `status:` value.
 
-| Label | Who acts next | When |
+| Label | What stands between the PR and landing | When |
 |---|---|---|
-| `status: working` | the city | an open rework child stands on the anchor, a draft the city opened still waits on the checks that flip it ready, or an approved PR is merging |
-| `status: needs-review` | a human reviews the head | settled at the head, no open rework: opened check-green or flipped from draft to ready, reworked and handed back, or a non-blocking review left comments |
-| `status: needs-attention` | a human weighs in | a hold stands — an operator freeze, or a topic held for discussion — or an approved PR is wedged with no rework in flight |
+| `status: working` | only the city has work left | an open rework child stands on the anchor, a draft the city opened still waits on the checks that flip it ready, or an approved PR is merging |
+| `status: needs-review` | only a human's review verdict is left | settled at the head, no open rework: opened check-green or flipped from draft to ready, reworked and handed back, or a non-blocking review left comments |
+| `status: needs-attention` | something only a human can clear blocks the merge | a hold stands, whatever rework is in flight — an operator freeze, a rebase hold, or an open visit on the anchor — or an approved PR is wedged with no rework in flight |
 
 Precedence when inputs overlap: `needs-attention` > `working` > `needs-review`.
+It follows from the middle column. A block only a human can clear stops the
+merge whatever else is in flight, city work comes before the verdict it leads
+to, and the verdict is what remains when neither stands. A hold that only a
+human can release reads `needs-attention` with no rule of its own.
 
-`needs-review` asks a human only for a review verdict on a settled head;
-`needs-attention` means the head cannot settle until a human acts — to unstick a
-block or to resolve what a hold stands for.
+An open visit covers the anchor by the shared visit identity
+(`assets/scripts/visit-identity.sh`): the bead its tracks edge names, or its
+`gc.continuation_group` stamp when it has no tracks edge. The merge pass's
+finalize gate (`finalize-gate.sh`) reads visits by the same identity and refuses
+the merge while one covers the anchor. The label counts each open or
+`in_progress` visit that covers the anchor, a visit a sitting is in included,
+and the helm board's phase and held marker count the same ones.
 
 The label reads the city's own state — the refinery-computed posture and merge
-state on the anchor, its holds, its draft-stage markers, and its rework
-children — not GitHub's review posture or draft flag directly. The
-`working`->`needs-review` flip rests on the rework child, which is scoped to the
-reviewed commit and closes when the fix lands, so a sticky `CHANGES_REQUESTED`
-never traps the label in `working` after a rework hands back.
+state on the anchor, its holds, any open visit on it, its draft-stage markers,
+and its rework children — not GitHub's review posture or draft flag directly.
+The `working`->`needs-review` flip rests on the rework child, which is scoped to
+the reviewed commit and closes when the fix lands, so a sticky
+`CHANGES_REQUESTED` never traps the label in `working` after a rework hands
+back.
 
 The label is workflow state and never says a PR may merge: machine readiness
 rides `pr.machine`. The draft flag is a phase signal, not a merge signal — a PR
@@ -563,16 +572,29 @@ head or merge state that moves under an unchanged posture value does not
 re-derive the label there. GitHub reports `UNKNOWN` while it computes a PR's
 mergeability, so those moves are most posture writes, and re-deriving on them
 would cost a derivation for dozens of open PRs at once. The full `pr-facts.sh`
-pass re-derives the label for every open PR, so those moves, the other inputs,
-and a missed event all self-heal there. Every write is pinned to the origin, and
-a label is not an approval.
+pass re-derives the label for each open PR its walk reaches, so those moves, the
+other inputs, and a missed event self-heal there. The walk is paced: it visits
+first the PRs that left the open list, owe a merge-in, or changed on GitHub
+since its last visit, then rotates through the rest until its deadline, and a
+PR it does not reach waits for a later pass.
+
+Nothing re-derives the label when a visit opens or closes, and a visit change
+does not put its anchor first in that walk. The label follows a visit on the
+next full pass that reaches the anchor: within one reconcile pass while the walk
+reaches every open PR, and after more passes when the deadline stops it short.
+`signoff.sh` also sets `working` on a request-changes verdict without deriving
+it, because the rework child it files is live work. On an anchor an open visit
+covers, the label then reads `working` until the next full pass that reaches the
+anchor re-derives `needs-attention`. In both windows the label trails the
+visit. Every write is pinned to the origin, and a label is not an approval.
 
 ## The base label (GitHub projection)
 
-The `status:` label says who must act next; it does not say where an approved
-change lands. A checkpoint pull request into a convoy integration branch is at once
-`status: needs-review` and targeted away from `main`, so the base is a second,
-orthogonal dimension carried by a sibling `base:` group.
+The `status:` label says what stands between a PR and landing; it does not say
+where an approved change lands. A checkpoint pull request into a convoy
+integration branch is at once `status: needs-review` and targeted away from
+`main`, so the base is a second, orthogonal dimension carried by a sibling
+`base:` group.
 
 | Label | Meaning |
 |---|---|

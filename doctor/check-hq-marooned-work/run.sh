@@ -93,35 +93,95 @@ detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
-# >>> probe-stderr-capture
-# The gc probes below send stderr to $PROBE_ERR, not /dev/null, so a failure the
-# check reports names the reason it failed instead of only its rc. Each probe's
-# `2>"$PROBE_ERR"` truncates the file, so it never holds a prior probe's stderr.
-# probe_err returns the first non-blank line, control characters stripped to keep
-# it one line and length-capped. mktemp failing degrades to /dev/null (always
-# empty), so probe_err yields nothing and every detail reads as before.
-PROBE_ERR=$(mktemp "${TMPDIR:-/tmp}/gctk-check-hq-marooned-work.XXXXXX" 2>/dev/null) || PROBE_ERR=/dev/null
-[ "$PROBE_ERR" = /dev/null ] || trap 'rm -f "$PROBE_ERR"' EXIT
-probe_err() {
-    [ -s "$PROBE_ERR" ] || return 0
-    tr -d '\000-\010\013-\037' < "$PROBE_ERR" 2>/dev/null | grep -m1 '[^[:space:]]' | cut -c1-200
+# >>> doctor-parallel-reads
+# A check that overlaps its probes runs each one as a background job, and a job
+# cannot hand its parent a variable, so every read lands in a file under one
+# scratch tree. reads_init <check> makes that tree, sets WORK to it, and removes
+# it when the check exits. It holds a file in the tree open on fd 9, because the
+# host's scratch reaper removes any gctk-* tree that no process holds open. It
+# returns non-zero when the tree cannot be made or held, and then nothing can be
+# read.
+reads_init() {
+    WORK=$(mktemp -d "${TMPDIR:-/tmp}/gctk-$1.XXXXXX" 2>/dev/null) || { WORK=""; return 1; }
+    trap '[ -z "$WORK" ] || rm -rf "$WORK"' EXIT
+    { exec 9>"$WORK/.hold"; } 2>/dev/null
 }
-# <<< probe-stderr-capture
+# read_to <file> <probe...> runs one bounded probe with its stdout scrubbed into
+# <file> and its stderr in <file>.err, and returns the probe's own exit status.
+# err_of <file> prints the first non-blank line of that stderr, with control
+# characters stripped and cut to 200 characters, so the warning for a failed
+# read names why it failed and not only its rc. Before a `gc bd` list, ready,
+# search or show runs bd, gc writes a line naming the store that answers it,
+# whether or not the read then fails. That line never says why a read failed,
+# so err_of passes over it.
+read_to() {
+    local f="$1"; shift
+    run_bounded "$@" 2>"$f.err" | scrub >"$f"
+    return "${PIPESTATUS[0]}"
+}
+err_of() {
+    [ -s "$1.err" ] || return 0
+    tr -d '\000-\010\013-\037' <"$1.err" 2>/dev/null \
+        | grep -v '^gc bd: answering from the .* store$' | grep -m1 '[^[:space:]]' | cut -c1-200
+}
+# fanout <command...> starts <command> as a background job once fewer than
+# FANOUT_CAP of the jobs fanout started are still running, so a check scans at
+# most that many stores at once however many rigs the city lists. FANOUT_PID is
+# the job it started. fanout_wait <pid> waits for one of those jobs and returns
+# its exit status, which the cap keeps for a job it has already waited for. The
+# cap waits only for fanout's own jobs, because a bare `wait -n` also returns
+# for the check's other background reads, and the count of running jobs would
+# drift. When `wait -n` reports no job, the cap waits for the oldest one, so
+# each wait frees a slot. GC_DOCTOR_FANOUT overrides the cap, in jobs.
+FANOUT_CAP="${GC_DOCTOR_FANOUT:-8}"
+case "$FANOUT_CAP" in ''|*[!0-9]*) FANOUT_CAP=8 ;; esac
+[ "$FANOUT_CAP" -ge 1 ] 2>/dev/null || FANOUT_CAP=8
+fanout_live=(); declare -A fanout_rc=()
+fanout_reaped() {
+    local p keep=()
+    fanout_rc["$1"]="$2"
+    for p in ${fanout_live[@]+"${fanout_live[@]}"}; do [ "$p" = "$1" ] || keep+=("$p"); done
+    fanout_live=(${keep[@]+"${keep[@]}"})
+}
+fanout() {
+    local pid rc
+    while [ "${#fanout_live[@]}" -ge "$FANOUT_CAP" ]; do
+        pid=""; wait -n -p pid "${fanout_live[@]}"; rc=$?
+        if [ -z "$pid" ]; then pid="${fanout_live[0]}"; wait "$pid"; rc=$?; fi
+        fanout_reaped "$pid" "$rc"
+    done
+    "$@" &
+    FANOUT_PID=$!
+    fanout_live+=("$FANOUT_PID")
+}
+fanout_wait() {
+    local rc
+    if [ -n "${fanout_rc[$1]+set}" ]; then return "${fanout_rc[$1]}"; fi
+    wait "$1"; rc=$?
+    fanout_reaped "$1" "$rc"
+    return "$rc"
+}
+# <<< doctor-parallel-reads
+if ! reads_init check-hq-marooned-work; then
+    echo "cannot determine whether the HQ store holds marooned work"
+    detail "could not create a scratch directory under ${TMPDIR:-/tmp}, which every probe reads into; the HQ store was NOT checked."
+    exit 1
+fi
 
 # --- Locate the HQ store ----------------------------------------------------
 # `gc agent list` resolves the city root authoritatively; GC_CITY_PATH is the
 # fallback when that probe cannot answer. Without a city root there is no HQ
 # store to read, so the check cannot run — a warning, never a clean pass.
-agents_raw=$(run_bounded gc agent list --json 2>"$PROBE_ERR"); agents_rc=$?; agents_err=$(probe_err)
+read_to "$WORK/agents.json" gc agent list --json; agents_rc=$?; agents_err=$(err_of "$WORK/agents.json")
 city_path=""
-[ "$agents_rc" -eq 0 ] && city_path=$(printf '%s' "$agents_raw" | scrub | jq -r '.city_path // ""' 2>/dev/null)
+[ "$agents_rc" -eq 0 ] && city_path=$(jq -r '.city_path // ""' "$WORK/agents.json" 2>/dev/null)
 [ -n "$city_path" ] || city_path="$city"
 # City-scoped agents read the HQ store, so a bead routed to one is reachable, not
 # marooned. Resolve their identities from the same agent list (bare, the form a
 # route carries — resolve-route.sh). When the list cannot answer the set is
 # empty, and only the `warrant` label still exempts city machinery.
 CITY_ROUTES='[]'
-[ "$agents_rc" -eq 0 ] && CITY_ROUTES=$(printf '%s' "$agents_raw" | scrub | jq -c '[.agents[]? | select(.scope == "city") | .qualified_name // empty] | unique' 2>/dev/null)
+[ "$agents_rc" -eq 0 ] && CITY_ROUTES=$(jq -c '[.agents[]? | select(.scope == "city") | .qualified_name // empty] | unique' "$WORK/agents.json" 2>/dev/null)
 [ -n "$CITY_ROUTES" ] || CITY_ROUTES='[]'
 if [ -z "$city_path" ]; then
     echo "cannot determine whether the HQ store holds marooned work"
@@ -132,13 +192,14 @@ fi
 STORE="$city_path/.beads"
 
 # --- Read the HQ store and classify ----------------------------------------
-raw=$(run_bounded gc bd list --db "$STORE" --status open --json --limit 0 2>"$PROBE_ERR"); rc=$?; list_err=$(probe_err)
-if [ "$rc" -ne 0 ] || [ -z "$raw" ]; then
+listing="$WORK/open.json"
+read_to "$listing" gc bd list --db "$STORE" --status open --json --limit 0; rc=$?; list_err=$(err_of "$listing")
+if [ "$rc" -ne 0 ] || [ ! -s "$listing" ]; then
     echo "cannot determine whether the HQ store holds marooned work"
     detail "could not list open beads in $STORE (rc=$rc) — the HQ store was NOT checked; an unreadable store is not proof it is clean.${list_err:+ \`gc bd list\` stderr: $list_err}"
     exit 1
 fi
-rows=$(printf '%s' "$raw" | scrub | jq -r --argjson infra "$INFRA_TYPES" --argjson city_routes "$CITY_ROUTES" "$STANDING_KINDS_JQ"'
+rows=$(jq -r --argjson infra "$INFRA_TYPES" --argjson city_routes "$CITY_ROUTES" "$STANDING_KINDS_JQ"'
     .[]? | . as $b
     | (($b.issue_type // "") | tostring) as $t
     | (($b.metadata // {})) as $m
@@ -161,7 +222,7 @@ rows=$(printf '%s' "$raw" | scrub | jq -r --argjson infra "$INFRA_TYPES" --argjs
     | [ ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")),
         (if $t == "" then "untyped" else $t end),
         (if $rt == "" then "unrouted" else "routed to " + $rt end)
-      ] | join("\u001f")' 2>/dev/null)
+      ] | join("\u001f")' "$listing" 2>/dev/null)
 if [ $? -ne 0 ]; then
     echo "cannot determine whether the HQ store holds marooned work"
     detail "the open-bead listing from $STORE could not be parsed — the HQ store was NOT checked."
@@ -176,7 +237,7 @@ done <<< "$rows"
 if budget_spent; then
     warnings+=("this run reached its ${BUDGET_TOTAL}s doctor budget before every probe ran — what follows is partial, and an arm skipped for time is not an arm that passed")
 fi
-examined=$(printf '%s' "$raw" | scrub | jq -r 'length' 2>/dev/null)
+examined=$(jq -r 'length' "$listing" 2>/dev/null)
 if [ "${#findings[@]}" -ne 0 ]; then
     echo "rig-workable bead(s) marooned in the HQ store: ${#findings[@]} finding(s)"
     detail "${findings[@]}"
