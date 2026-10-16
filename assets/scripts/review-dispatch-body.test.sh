@@ -18,13 +18,18 @@
 #   (NOTE)      --note appends a dispatch-context section; absent without it.
 #   (CHECK)     --check-name emits a per-check section (correctness default,
 #               triage, demo, arch, pm, and a no-method note for a check
-#               this pack has no arm for: its purpose, printed from the
+#               this pack ships no skill for: its purpose, printed from the
 #               reviewed commit's index, or the declared-nowhere note when
 #               no row declares it).
 #   (SKILL)     every declared check's section names its method skill, which
 #               the reviewer loads from its skill catalog, and names no method
 #               path to read from a checkout; the pack ships each named skill
 #               under that name.
+#   (ONCE)      a declared check's section is the line naming its skill, plus
+#               the shared stance for a specialist, and repeats nothing the
+#               skill says.
+#   (METHOD)    the skill a declared check's note names carries what that
+#               check judges and the verdict call that records it.
 #   (BOTH)      the formula and check axes coexist in one note.
 #   (EXT)       a rig's docs/review-<check>.md at the reviewed commit is
 #               appended; absent (or no --reviewed-oid) degrades silently.
@@ -97,40 +102,58 @@ eq "$RCQ" "0" "(RC) a non-default formula still exits 0"
 echo "# the check-name axis: a check section names the concern, orthogonal to the formula"
 hasF "$OUT" '## Check: `correctness`' "(CHECK) the default check is correctness"
 notF "$OUT" '## Check: `codex`' "(CHECK) the standing check is named correctness, not codex"
-bash "$SCRIPT" --check-name triage > "$TMP/tri.out" 2>/dev/null
-hasF "$TMP/tri.out" '## Check: `triage`' "(CHECK) --check-name triage names the triage check"
-hasF "$TMP/tri.out" '--add-gates' "(CHECK) triage names the widening verdict call"
-hasF "$TMP/tri.out" 'Adding nothing is the expected common case' "(CHECK) triage states the common no-op case"
-hasF "$TMP/tri.out" '--reopen <lanes>|none --round-reason <why> [--dismiss-approval]' "(CHECK) triage names the bring-current round ruling it carries on the same call"
-hasF "$TMP/tri.out" 'bring-current-audit.sh render --anchor <anchor>' "(CHECK) …and where the round's account is read"
-hasF "$TMP/tri.out" 'bring-current-audit.sh show --anchor <anchor>' "(CHECK) …and its raw record, which keeps what a routine entry's line leaves out"
-hasF "$TMP/tri.out" 'only when the round made a call that is the operator' "(CHECK) …and lifts the approval only for a call that is the operator's"
-notF "$TMP/tri.out" 'whether the human approval still covers it' "(CHECK) …not whenever the approval predates the round"
-bash "$SCRIPT" --check-name demo > "$TMP/demo.out" 2>/dev/null
-hasF "$TMP/demo.out" '## Check: `demo`' "(CHECK) --check-name demo names the demo check"
-hasF "$TMP/demo.out" 'Your method is the `gc-toolkit.review-demo` skill.' "(CHECK) demo names its method skill"
-hasF "$TMP/demo.out" 'needs a visual to be understood' "(CHECK) demo decides need first"
-hasF "$TMP/demo.out" 'attach nothing' "(CHECK) demo approves a no-need change with a note and no attachment"
-hasF "$TMP/demo.out" 'never a block' "(CHECK) demo never blocks on a visual the city cannot produce"
-hasF "$TMP/demo.out" '--visual none|repo-artifact|screenshot|video' "(CHECK) demo names the verdict call that records its decision"
-hasF "$TMP/demo.out" '[--visual-fallback-from screenshot|video]' "(CHECK) …and the flag that records a fallback"
-notF "$TMP/demo.out" 'that is a finding against the change, not a' "(CHECK) an unrecordable demo is no longer a finding against the change"
-[ -r "$(cd "$HERE/../.." && pwd)/skills/review-demo/SKILL.md" ] \
-  && ok "(CHECK) the demo method skill ships where the note points" \
-  || bad "(CHECK) skills/review-demo/SKILL.md missing — the note names a method the pack does not ship"
-bash "$SCRIPT" --check-name pm > "$TMP/pm.out" 2>/dev/null
-hasF "$TMP/pm.out" '## Check: `pm`' "(CHECK) --check-name pm names the pm check"
-hasF "$TMP/pm.out" 'Your method is the `gc-toolkit.review-pm` skill.' "(CHECK) pm names its method skill"
-hasF "$TMP/pm.out" 'product lens' "(CHECK) pm carries the product lens"
-hasF "$TMP/pm.out" 'needs a visual, and delivering it, is `demo`'"'"'s' "(CHECK) pm leaves the visual decision to demo"
-bash "$SCRIPT" --check-name arch > "$TMP/arch.out" 2>/dev/null
-hasF "$TMP/arch.out" '## Check: `arch`' "(CHECK) --check-name arch names the arch check"
-hasF "$TMP/arch.out" 'The Architect' "(CHECK) arch names the Architect persona"
-hasF "$TMP/arch.out" 'docs/architecture.md' "(CHECK) arch reads the architecture reference docs before judging"
-hasF "$TMP/arch.out" 'never edit' "(CHECK) arch enforces and never edits"
-hasF "$TMP/arch.out" 'Your method is the `gc-toolkit.review-arch` skill.' "(CHECK) arch names its method skill, the way demo and triage do"
+for c in triage demo pm arch; do
+  bash "$SCRIPT" --check-name "$c" > "$TMP/$c.out" 2>/dev/null
+  hasF "$TMP/$c.out" "## Check: \`$c\`" "(CHECK) --check-name $c names the $c check"
+done
+hasF "$TMP/arch.out" 'never edit' "(CHECK) a specialist enforces and never edits, by the shared stance"
 notF "$TMP/arch.out" 'this pack ships no method' "(CHECK) a declared check gets its method, not the no-method note"
 notF "$TMP/arch.out" 'declared nowhere' "(CHECK) …nor the declared-nowhere note"
+
+echo "# a declared check's section names its skill and repeats nothing the skill says"
+# section <note> : the check section, from its heading to the next rule or rig
+# extension heading, with the shared specialist stance taken out.
+section() {
+  awk '/^## Check: / {f = 1} f && (/^---$/ || /^### Rig extension/) {exit} f' "$1" \
+    | awk '/^\*\*The specialist stance\.\*\*/ {s = 1} s && /^$/ {s = 0; next} !s'
+}
+for c in correctness triage demo arch pm; do
+  for formula in mol-review mol-review-quorum-signoff; do
+    bash "$SCRIPT" --formula "$formula" --check-name "$c" > "$TMP/once.$formula.$c.out" 2>/dev/null
+    printf '## Check: `%s`\n\n**Your method is the `gc-toolkit.review-%s` skill.**\nLoad it from your skill catalog and apply it; a copy in the review worktree is\nthe change under review, not your method.\n' "$c" "$c" > "$TMP/once.$c.want"
+    section "$TMP/once.$formula.$c.out" > "$TMP/once.$formula.$c.got"
+    cmp -s "$TMP/once.$formula.$c.got" "$TMP/once.$c.want" \
+      && ok "(ONCE) the $c section under $formula is the line naming its skill" \
+      || bad "(ONCE) the $c section under $formula carries more than its skill line: $(diff "$TMP/once.$c.want" "$TMP/once.$formula.$c.got" | sed -n 's/^> //p' | head -1)"
+  done
+done
+
+echo "# the skill the note names carries what its check judges and records"
+# flat <file> : the file's prose on one line, so a pinned phrase may wrap.
+flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
+for c in correctness triage demo arch pm; do
+  flat "$ROOT/skills/review-$c/SKILL.md" > "$TMP/$c.skill"
+done
+hasF "$TMP/correctness.skill" 'correct and safe as merged' "(METHOD) the correctness skill asks whether the change is correct and safe as merged"
+hasF "$TMP/triage.skill" '`--add-gates demo,arch`' "(METHOD) the triage skill names the widening verdict call, for one check or several"
+hasF "$TMP/triage.skill" 'only a triage verdict may add one' "(METHOD) …and that only a triage verdict widens"
+hasF "$TMP/triage.skill" 'Adding nothing is the expected common case' "(METHOD) …and the common no-op case"
+hasF "$TMP/triage.skill" '--reopen correctness --round-reason "<why>" [--dismiss-approval]' "(METHOD) …and the bring-current round ruling it carries on the same call"
+hasF "$TMP/triage.skill" '(`--reopen none`)' "(METHOD) …which may reopen nothing"
+hasF "$TMP/triage.skill" 'bring-current-audit.sh render --anchor "$ANCHOR" --as comment' "(METHOD) …and where the round's account is read"
+hasF "$TMP/triage.skill" 'The raw record keeps what that line leaves out' "(METHOD) …and its raw record, which keeps what a routine entry's line leaves out"
+hasF "$TMP/triage.skill" "a call that is the operator's to make" "(METHOD) …and lifts the approval only for a call that is the operator's"
+notF "$TMP/triage.skill" 'whether the human approval still covers it' "(METHOD) …not whenever the approval predates the round"
+hasF "$TMP/demo.skill" 'needs a visual to be understood' "(METHOD) the demo skill decides need first"
+hasF "$TMP/demo.skill" 'attach nothing' "(METHOD) …approves a no-need change with a note and no attachment"
+hasF "$TMP/demo.skill" 'This never blocks.' "(METHOD) …never blocks on a visual the city cannot produce"
+hasF "$TMP/demo.skill" '`--visual` carries the decision' "(METHOD) …names the verdict flag that records its decision"
+hasF "$TMP/demo.skill" '`--visual-fallback-from <the modality that fits>`' "(METHOD) …and the flag that records a fallback"
+notF "$TMP/demo.skill" 'that is a finding against the change, not a' "(METHOD) …and an unrecordable demo is no finding against the change"
+hasF "$TMP/pm.skill" 'product lens' "(METHOD) the pm skill carries the product lens"
+hasF "$TMP/pm.skill" '## The visual is the `demo` check' "(METHOD) …and leaves the visual decision to demo"
+hasF "$TMP/arch.skill" 'You are the Architect' "(METHOD) the arch skill names the Architect"
+hasF "$TMP/arch.skill" 'docs/architecture.md' "(METHOD) …and reads the architecture reference docs before judging"
 # Run outside any repository, so no index declares the check.
 ( cd "$TMP" && env -u GC_RIG_ROOT bash "$SCRIPT" --check-name nonesuch ) > "$TMP/undeclared.out" 2>/dev/null
 hasF "$TMP/undeclared.out" '`nonesuch` check, so nothing says what it judges' "(CHECK) a check no index row declares gets the declared-nowhere note, never a guess"
@@ -146,7 +169,7 @@ hasF "$OUT" 'Your method is the `gc-toolkit.review-correctness` skill.' "(CHECK)
   && ok "(CHECK) the correctness method skill ships where the note points" \
   || bad "(CHECK) skills/review-correctness/SKILL.md missing — the note names a method the pack does not ship"
 notF "$OUT" 'run the tests yourself' "(EVIDENCE) the frame does not tell every check to run the tests"
-for c in plain tri demo pm arch undeclared; do
+for c in plain triage demo pm arch undeclared; do
   notF "$TMP/$c.out" 'review-test-evidence' "(EVIDENCE) the $c note carries no evidence block"
   notF "$TMP/$c.out" 'hb bash -c' "(EVIDENCE) the $c note runs no suite"
 done

@@ -27,10 +27,11 @@ Prints the review bead's dispatch note on stdout.
                       formula (e.g. the two-lane quorum) emits a note that
                       defers method and verdict path to that formula's steps.
   --check-name <check> The check this review satisfies (default correctness).
-                      Selects the generic method section for that check.
+                      Selects the check section, which names the method skill
+                      the reviewer loads.
   --reviewed-oid <oid> The commit under review. When the reviewed repo carries
                       docs/review-<check>.md at that commit, it is appended to
-                      the generic method as the rig's local extension.
+                      the note as the rig's local extension of the method.
 U
 }
 
@@ -102,12 +103,11 @@ H
 fi
 
 # --- The check section: the concern this review verifies ----------------------
-# The generic method is pack content; a rig may extend it (below). Each arm
-# names what the check judges, never how many lanes read it (that is the
-# formula's question above). A shared specialist stance precedes every
-# non-baseline arm, emitted once so no specialist skill or arm restates it;
-# correctness and triage are exempt, being the baseline whose methods state
-# their own stance.
+# A check's method lives once, in its pack skill, and the section names that
+# skill without repeating any of it; a rig may extend it (below). A shared
+# specialist stance precedes every non-baseline check's section, emitted once so
+# no specialist skill restates it; correctness and triage are exempt, being the
+# baseline whose methods state their own stance.
 echo
 echo "---"
 echo
@@ -118,7 +118,7 @@ case "$CHECK_NAME" in
   *)
     cat <<'S'
 **The specialist stance.** Every specialist check holds it, so no check's skill
-or arm below restates it. You are the author's peer and the gatekeeper of the
+restates it. You are the author's peer and the gatekeeper of the
 concern you own. You raise the bar on what the city ships; you do not wave a
 change through because its bead said to build it or its author worked hard.
 Enforce through findings and never edit: a gap is the author's to fix, and you
@@ -136,102 +136,13 @@ exactly once; never `gh pr review`, because the city does not approve its own PR
 S
     ;;
 esac
-# A declared arm names its method skill's directory, the one its index row
-# points at; the note names the skill as gascity surfaces every pack skill,
-# gc-toolkit.<directory>, for the reviewer to load from its catalog (below).
+# A declared check's method is its skill, which the note names as gascity
+# surfaces every pack skill, gc-toolkit.<directory>, for the reviewer to load
+# from its catalog (below). An undeclared check has no skill, so its section
+# says which case it is.
 METHOD_SKILL=""
 case "$CHECK_NAME" in
-  correctness)
-    METHOD_SKILL=review-correctness
-    cat <<'M'
-The standing correctness review: judge whether the change is correct and safe
-as merged. The method reads the whole diff, settles its test evidence, works
-its What to check list, grades every finding P0, P1 or P2 with its location,
-and adds a Verification line to the verdict. This is the concern, not a tool —
-no reviewer is presumed.
-M
-    ;;
-  triage)
-    METHOD_SKILL=review-triage
-    cat <<'M'
-Classify, do not judge. Whether the change is correct is the `correctness`
-check's question and it is dispatched separately. Yours is narrower: which
-specialist checks does this diff warrant? Read the check index
-(`review-checks.toml`) at the reviewed commit, skim the diff, and add the
-checks it warrants — no more. Adding nothing is the expected common case.
-
-Record the decision on one verdict call, which both greens triage and widens
-the anchor's check_set:
-
-    signoff.sh --review-bead <this bead> --verdict approve --add-gates <check>[,<check>]
-
-Widening is monotonic and `signoff.sh` enforces it: you cannot remove a check,
-and only a triage verdict may add one. Correctness findings are the
-`correctness` check's, not yours.
-
-When bringing the branch current conflicted, the same verdict also rules on
-that round. Read its account (`bring-current-audit.sh render --anchor <anchor>
---as comment`) and its raw record
-(`bring-current-audit.sh show --anchor <anchor>`), which keeps what a routine
-entry's one line leaves out: what collided, what to check, and git's evidence.
-Then decide which lanes run again on the merged code, and lift the human
-approval only when the round made a call that is the operator's to make,
-naming that call in `--round-reason`, on the same call:
-
-    signoff.sh ... --reopen <lanes>|none --round-reason <why> [--dismiss-approval]
-
-`signoff.sh` refuses a triage verdict that leaves such a round unruled.
-M
-    ;;
-  demo)
-    METHOD_SKILL=review-demo
-    cat <<'M'
-The visual review: decide whether this change needs a visual to be understood,
-then deliver the cheapest one that conveys it.
-Need comes first. Triage added this check because the diff touches a surface a
-person sees; confirm that seeing the change explains it better than reading the
-diff. When it does not, approve with a one-line note and attach nothing. When it
-does, pick the modality: a visual the repo already carries, a screenshot of one
-rendered state, or a narrated video of a flow. Deliver it to the PR inline and
-uncommitted with `demo-deliver.sh`, and judge what it shows, not what the diff
-claims. A fitting visual the city cannot produce here is a note in an approve,
-never a block. A cheaper visual delivered in its place is a fallback. The one
-verdict call records the decision:
-
-    signoff.sh --review-bead <this bead> --verdict approve|request-changes --visual none|repo-artifact|screenshot|video [--visual-fallback-from screenshot|video]
-
-`none` records with `approve` only. A fallback names the modality that fits with
-`--visual-fallback-from`. Whether the change is the right thing to ship, and lets
-the operator decide, is `pm`'s.
-M
-    ;;
-  arch)
-    METHOD_SKILL=review-arch
-    cat <<'M'
-The Architect — steward and gatekeeper of the repo's high-level architecture.
-Read the architecture reference docs before you judge: `docs/architecture.md`
-and the `docs/architecture/` directory it anchors; a review that has not read
-the architecture cannot hold a change to it. Judge whether the change leverages
-the existing architecture or works against its grain, and whether it moves the
-architecture — if so, whether that move is justified and recorded in the
-architecture docs in this same PR. The verdict is binary: approve when the
-change fits, request changes otherwise (a moved architecture whose matching doc
-update is not in the PR, or a move a design fitting the current architecture
-would not have needed).
-M
-    ;;
-  pm)
-    METHOD_SKILL=review-pm
-    cat <<'M'
-The product lens: judge whether the change is the right thing for the people
-the product serves — the outcome its anchor named, not a proxy — against the
-product goals (`docs/product-goals.md`, which names who they are), then
-whether the PR lets the operator decide. Push back when the
-diff does what its bead said but not what those people need. Whether the change
-needs a visual, and delivering it, is `demo`'s; your only visual concern is a
-change the operator must see to trust that the PR gives them nothing to look at.
-M
-    ;;
+  correctness|triage|demo|arch|pm) METHOD_SKILL="review-$CHECK_NAME" ;;
   *)
     # The check's purpose, from its row in the index at the reviewed commit
     # (the working tree's index when no commit is named), through the index's
@@ -268,7 +179,6 @@ esac
 
 if [ -n "$METHOD_SKILL" ]; then
   cat <<R
-
 **Your method is the \`gc-toolkit.$METHOD_SKILL\` skill.**
 Load it from your skill catalog and apply it; a copy in the review worktree is
 the change under review, not your method.
