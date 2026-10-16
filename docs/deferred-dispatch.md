@@ -102,7 +102,8 @@ dispatch path too, and a reaction they ask for cannot race the arm either.
 To see what is owed, in this rig's store:
 
 ```bash
-deferred-dispatch.sh list        # each armed bead: held (and by what) / dispatchable / closed
+deferred-dispatch.sh list        # each armed bead: held (and by what) / dispatchable / closed; then each notice owed
+deferred-dispatch.sh list --json # the armed beads alone, as bd lists them: no hold, no notice
 deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 ```
 
@@ -163,7 +164,8 @@ it again. Unless the agent has archived the first mail, the dedup key keeps
 that retry from adding a second copy, and `gc session nudge` requests the
 turn. A pass that dies between the send and the retire costs no second
 message either, only a second turn request. `list` shows each notice owed
-and what decides it. The `disarm` verb clears a notice with the rest of the
+and what decides it, while `list --json` prints the armed beads alone and no
+notice. The `disarm` verb clears a notice with the rest of the
 record, while a pass that retires an arm on the same bead leaves its notice
 owed.
 

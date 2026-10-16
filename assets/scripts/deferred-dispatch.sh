@@ -192,7 +192,8 @@ Usage:
   deferred-dispatch.sh arm <bead> --target <agent> [--sling-arg <arg>]... [--reason <text>] [--db <path>]
   deferred-dispatch.sh notify <bead> --agent <named-agent> [--reason <text>] [--db <path>]
   deferred-dispatch.sh disarm <bead> [--reason <text>] [--db <path>]
-  deferred-dispatch.sh list [--json] [--db <path>]
+  deferred-dispatch.sh list [--db <path>]
+  deferred-dispatch.sh list --json [--db <path>]
   deferred-dispatch.sh reconcile [--dry-run] [--db <path>]
 
 Verbs:
@@ -222,7 +223,8 @@ Verbs:
   list       Show every armed bead in this store and whether it is held (and
              by which blocker), dispatchable now, or closed with a dispatch
              still owed; then every notice owed, and whether bd reports its
-             bead ready.
+             bead ready. With --json it prints the armed beads alone, as bd
+             lists them: no hold, and no notice owed.
   reconcile  One pass. It first sends every notice whose bead bd reports
              ready, and retires the notice on a bead that closed, that its
              agent claimed, or that is no longer assigned to that agent.
