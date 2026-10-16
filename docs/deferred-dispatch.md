@@ -133,21 +133,36 @@ for a bead its hook does not offer yet. The notice waits on `bd`'s readiness,
 the predicate the hook reads, and not on what `hold-lib.sh` calls a hold: a
 bead `bd` keeps unready is not offered to the agent, whatever holds it.
 
+A notice is done once the agent's turn is requested, not once its mail is
+saved, because mail alone requests no turn. `gc mail send` saves the mail
+before it requests the turn, and when that request fails it says so on
+stderr and still exits 0. So the notice reads `notified` from the command's
+`--json` result, not its exit status. The mail's dedup key,
+`ready-notice:<bead>`, keeps a second copy out of the agent's mailbox while
+the first notice about the bead is still there, read or not, and a send it
+suppresses requests no turn either. So whenever the mail requests no turn,
+the notice requests it with `gc session nudge <agent> --reference-bead <bead>`,
+whose exit status is its outcome. A nudge still queued for the agent about
+the same bead gives way to the new one. A notice that gets no turn requested
+either way keeps its record, and the log keeps what `gc mail send` and
+`gc session nudge` printed about the failure.
+
 `notify` refuses a bead that is not assigned to the agent, since that
 agent's hook would never offer it, so assign the bead first. A closed bead,
 or one the agent already claimed, owes no notice, and `notify` writes
-nothing and exits 0. Once the record is down the notice is owed: a send, or a
-readiness read, that fails leaves the record for the pass, and `notify` still
-exits 0.
+nothing and exits 0. Once the record is down the notice is owed: a readiness
+read that fails, or a notice that gets no turn requested, leaves the record
+for the pass, and `notify` still exits 0.
 
 Each pass sends the notices whose beads `bd` reports ready, ahead of its
 slings, and retires a notice unsent on a bead that closed, that its agent
-claimed, or that is no longer assigned to that agent. A send that fails
-keeps the record and fails the pass. The mail's dedup key,
-`ready-notice:<bead>`, collapses a resend while the first notice is still
-unread, so a pass that dies between the send and the retire costs no second
-message. `list` shows each notice owed and what decides it, and `disarm`
-clears one with the rest of the record.
+claimed, or that is no longer assigned to that agent. A notice that gets no
+turn requested keeps the record and fails the pass, and the next pass tries
+it again. Unless the agent has archived the first mail, the dedup key keeps
+that retry from adding a second copy, and `gc session nudge` requests the
+turn. A pass that dies between the send and the retire costs no second
+message either, only a second turn request. `list` shows each notice owed
+and what decides it, and `disarm` clears one with the rest of the record.
 
 `first-reaction-dispose.sh` asks for the notice on both of its named-agent
 exits: `--assign`, whose bead is normally ready, and `--then-assign`, whose
