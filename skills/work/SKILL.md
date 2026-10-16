@@ -130,8 +130,8 @@ Weigh what done looks like for the work:
    a polecat pool's default formula builds, so send it with no `--on`.
 3. **Any other kind of done**, such as findings with no change, a design
    settled and reviewed before the build, or a demo. Read the descriptions of
-   the formulas whose names fit, and any doc a description names, and send it
-   on the one whose description produces that.
+   the formulas whose names fit, and send it on the one whose description says
+   it produces that and fits work like this.
 
 Patrol, review and validation formulas are the city's own machinery, poured
 by its orders and its review cadence, not methods for new work. A formula's

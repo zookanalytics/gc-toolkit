@@ -41,6 +41,7 @@ MECHANIK="$REPO/agents/mechanik/prompt.template.md"
 WORK_SKILL="$REPO/skills/work/SKILL.md"
 PRS_SKILL="$REPO/skills/prs/SKILL.md"
 DESIGN_DOC="$REPO/docs/design-convoy.md"
+DESIGN_FORMULA="$REPO/formulas/mol-design-convoy.toml"
 BLOCKS="work waits records prs"
 
 PASS=0
@@ -236,8 +237,19 @@ lacks "the prompt no longer carries the design-convoy questions" 'design-convoy-
     "choosing the formula is the work skill's option"
 have "the work skill reads the formulas a rig has now" 'gc formula list --rig <rig>' "$WORK_SKILL"
 lacks "the work skill's formula choice carries no one formula's variables" 'design_gated' "$WORK_SKILL" \
-    "a formula's own doc says when it fits and how to tune it"
-have "the design-convoy doc says when to reach for one" 'high-blast-radius' "$DESIGN_DOC"
+    "a formula's own description says when it fits and how to tune it"
+# Which work a formula fits is its own description, the text `gc formula show`
+# prints and the work skill reads. A doc describes the pattern; it does not
+# tell an agent which formula to choose.
+lacks "the work skill's formula choice sends an agent to no doc" 'any doc a description names' "$WORK_SKILL" \
+    "the description is where an agent's choice comes from"
+awk '/^\[/ { exit }
+     /^description = """/ { f = 1; sub(/^description = """/, ""); if ($0 != "") print; next }
+     f && /^"""/ { exit }
+     f { print }' "$DESIGN_FORMULA" >"$TMP/design-description"
+have "the design-convoy formula's own description says which work it fits" 'high-blast-radius' "$TMP/design-description"
+lacks "the design-convoy doc carries no formula choice for an agent" 'When to reach for it' "$DESIGN_DOC" \
+    "which work a formula fits is its own description, which the work skill reads"
 # A supplement goes to the PR's own rig, because a pool reads only its rig's
 # store, and the anchor waits on it, because the merge holds on what blocks the
 # anchor and never on a bead that only names the PR's branch. The hold is read
