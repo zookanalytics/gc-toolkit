@@ -43,9 +43,13 @@
 #     reports the bead ready, otherwise a notice recorded for the pass; it
 #     refuses a bead not assigned to the agent, owes nothing on a closed or
 #     claimed one, and keeps the record when its send or its readiness read
-#     fails. The pass sends a notice once bd reports its bead ready, retires one
-#     on a closed, claimed or reassigned bead, fails on a send it cannot make or
-#     a notice listing it cannot read while its slings still run, leaves one
+#     fails. A notice is done only once the agent's turn is requested: a mail
+#     saved with no turn requested is followed by gc session nudge, and a
+#     notice whose nudge fails too stays owed, and the next pass recovers it
+#     while its first mail still holds the dedup key. The pass sends a notice
+#     once bd reports its bead ready, retires one on a closed, claimed or
+#     reassigned bead, fails on a send it cannot make, a turn it cannot request
+#     or a notice listing it cannot read while its slings still run, leaves one
 #     past its budget, and list shows them; disarm clears one;
 #   * the closed-bead retire arm;
 #   * the CONVOY-LEAK guards — gc sling mints an input convoy per call, so an arm
@@ -308,11 +312,48 @@ if [ "${1:-}" = "sling" ]; then
     fi
     exit "${STUB_SLING_RC:-0}"
 fi
-# A notice is a `gc mail send`: one line per call, and STUB_MAIL_RC is its exit.
+# A notice is a `gc mail send`, one line per call, answering as gascity's
+# doMailSendJSON does. STUB_MAIL_RC fails the send outright, saving nothing.
+# A send whose dedup key matches a message still in the agent's mailbox
+# (STUB_MAILBOX, one "<to> <key>" line per saved message) saves nothing,
+# requests no turn and exits 0 with already_done. Any other send saves the
+# message and then requests the turn, and STUB_MAIL_NUDGE_FAILS fails that
+# request: the real command then says so only on stderr and by leaving
+# `notified` out of its --json result, and still exits 0.
 if [ "${1:-}" = "mail" ]; then
     shift
     printf '%s\n' "$*" >> "${STUB_MAIL_LOG:?}"
-    exit "${STUB_MAIL_RC:-0}"
+    if [ "${STUB_MAIL_RC:-0}" != 0 ]; then
+        echo "gc mail send: simulated send failure" >&2; exit "$STUB_MAIL_RC"
+    fi
+    to="${2:-}"; dedup=""; json=0; prev=""
+    for a in "$@"; do
+        [ "$prev" = "--dedup" ] && dedup="$a"
+        [ "$a" = "--json" ] && json=1
+        prev="$a"
+    done
+    if [ -n "$dedup" ] && grep -qxF -- "$to $dedup" "${STUB_MAILBOX:?}" 2>/dev/null; then
+        [ "$json" = 1 ] && printf '%s\n' '{"schema_version":"1","ok":true,"command":"mail.send","action":"send","id":"m-first","count":0,"already_done":true}'
+        exit 0
+    fi
+    printf '%s %s\n' "$to" "$dedup" >> "$STUB_MAILBOX"
+    if [ -n "${STUB_MAIL_NUDGE_FAILS:-}" ]; then
+        echo "gc mail send: nudge failed: simulated nudge-store failure" >&2
+        [ "$json" = 1 ] && printf '%s\n' '{"schema_version":"1","ok":true,"command":"mail.send","action":"send","id":"m-new","count":1}'
+        exit 0
+    fi
+    [ "$json" = 1 ] && printf '%s\n' '{"schema_version":"1","ok":true,"command":"mail.send","action":"send","id":"m-new","count":1,"notified":true}'
+    exit 0
+fi
+# A turn requested directly is a `gc session nudge`: one line per call, and
+# STUB_NUDGE_RC is its exit.
+if [ "${1:-}" = "session" ] && [ "${2:-}" = "nudge" ]; then
+    shift 2
+    printf '%s\n' "$*" >> "${STUB_NUDGE_LOG:?}"
+    if [ "${STUB_NUDGE_RC:-0}" != 0 ]; then
+        echo "gc session nudge: simulated nudge failure" >&2; exit "$STUB_NUDGE_RC"
+    fi
+    exit 0
 fi
 echo "gc stub: unsupported '${1:-}'" >&2; exit 2
 STUB
@@ -359,6 +400,8 @@ export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/beads.json"
 export STUB_SLING_LOG="$TMP/sling.log"
 export STUB_MAIL_LOG="$TMP/mail.log"
+export STUB_MAILBOX="$TMP/mailbox"
+export STUB_NUDGE_LOG="$TMP/nudge.log"
 export ESC_CALLS="$TMP/escalate.log"
 export GC_ESCALATE_TOOL="$BIN/escalate.sh"
 export BEADS_ACTOR="test-actor"
@@ -372,11 +415,16 @@ export DEFERRED_DISPATCH_PASS_BUDGET_SECS=0
 unset GC_PACK_STATE_DIR GC_ORDER_OUTCOME_FILE \
     DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS DEFERRED_DISPATCH_LOCK_STALL_SECS 2>/dev/null || true
 
-store() { printf '%s' "$1" > "$STUB_STORE"; : > "$STUB_SLING_LOG"; : > "$STUB_MAIL_LOG"; : > "$ESC_CALLS"; }
+store() {
+    printf '%s' "$1" > "$STUB_STORE"
+    : > "$STUB_SLING_LOG"; : > "$STUB_MAIL_LOG"; : > "$STUB_MAILBOX"; : > "$STUB_NUDGE_LOG"; : > "$ESC_CALLS"
+}
 meta()  { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 notes() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .notes) // ""' "$STUB_STORE"; }
 slings() { wc -l < "$STUB_SLING_LOG" | tr -d ' '; }
 mails() { wc -l < "$STUB_MAIL_LOG" | tr -d ' '; }
+mailbox() { wc -l < "$STUB_MAILBOX" | tr -d ' '; }
+nudges() { wc -l < "$STUB_NUDGE_LOG" | tr -d ' '; }
 # A pass's list reads, split by half. The notices half of every pass reads its
 # listing, plus bd's readiness when a notice is owed; a bound on the arms' reads
 # leaves those out.
@@ -1124,6 +1172,8 @@ has "$(cat "$STUB_MAIL_LOG")" "-s Ready for you: n-1" "the mail names the bead"
 has "$(cat "$STUB_MAIL_LOG")" "n-1 (Edit city.toml) is assigned to you" "with its title"
 has "$(cat "$STUB_MAIL_LOG")" "run gc hook" "and says how to pick it up"
 has "$(cat "$STUB_MAIL_LOG")" "--dedup ready-notice:n-1" "a resend about the same bead collapses onto the first"
+has "$(cat "$STUB_MAIL_LOG")" "--json" "and the send reports whether it requested the turn"
+eq "$(nudges)" "0" "a mail that requested the turn needs no nudge"
 eq "$(meta n-1 gc.notify_when_ready)" "<absent>" "a notice sent at once leaves no record behind"
 has "$(notes n-1)" "card: a city.toml edit" "notify APPENDS to notes (prior note survives)"
 has "$(notes n-1)" "first reaction: r" "the note carries the reason"
@@ -1172,7 +1222,46 @@ store '[{"id":"n-6","status":"open","assignee":"gc-toolkit.mechanik","metadata":
 out="$(STUB_MAIL_RC=1 "$SUT" notify n-6 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
 eq "$rc" 0 "a send that fails still exits 0, since the notice is recorded"
 eq "$(meta n-6 gc.notify_when_ready)" "gc-toolkit.mechanik" "and the record stays for the pass"
-has "$out" "the next reconcile pass sends it" "notify says who sends it"
+has "$out" "the next reconcile pass tries again" "notify says who tries again"
+has "$out" "simulated send failure" "with gc mail send's own reason"
+eq "$(nudges)" "0" "a mail that was never saved is not followed by a nudge"
+
+# gc mail send saves the mail before it requests the agent's turn, and exits 0
+# when that request fails: it says so on stderr and leaves `notified` out of its
+# --json result. Unread mail requests no turn, so the notice is not done.
+echo "# notify on mail saved with no turn requested"
+store '[{"id":"n-6","title":"Edit city.toml","status":"open","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":true}]'
+out="$(STUB_MAIL_NUDGE_FAILS=1 "$SUT" notify n-6 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
+eq "$rc" 0 "notify exits 0"
+eq "$(mailbox)" "1" "the mail is saved in the agent's mailbox"
+eq "$(nudges)" "1" "and, since it requested no turn, the turn is requested with gc session nudge"
+has "$(cat "$STUB_NUDGE_LOG")" "gc-toolkit.mechanik Ready for you: n-6 (Edit city.toml) is assigned to you" "naming the agent and the bead"
+has "$(cat "$STUB_NUDGE_LOG")" "--reference-bead n-6" "about that bead, so a nudge still queued for it gives way"
+eq "$(meta n-6 gc.notify_when_ready)" "<absent>" "the requested turn retires the notice"
+has "$out" "nudge failed: simulated nudge-store failure" "gc mail send's diagnostic is kept, not discarded"
+has "$out" "requested gc-toolkit.mechanik's turn for n-6 with gc session nudge" "notify says how the turn was requested"
+
+store '[{"id":"n-6","title":"Edit city.toml","status":"open","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":true}]'
+out="$(STUB_MAIL_NUDGE_FAILS=1 STUB_NUDGE_RC=1 "$SUT" notify n-6 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
+eq "$rc" 0 "a notice that gets no turn requested still exits 0, since it is recorded"
+eq "$(meta n-6 gc.notify_when_ready)" "gc-toolkit.mechanik" "and stays owed for the pass, though its mail was saved"
+eq "$(mailbox)" "1" "the saved mail stays in the mailbox"
+has "$out" "nudge failed: simulated nudge-store failure" "the mail's diagnostic is kept"
+has "$out" "simulated nudge failure" "and so is the nudge's"
+has "$out" "turn was not requested; the next reconcile pass tries again" "notify says the turn was not requested"
+hasnt "$(notes n-6)" "notice sent" "and no note says the agent was told"
+# The recovery: the first mail is still in the agent's mailbox, unread, so the
+# dedup key suppresses the resend and its turn request with it. The pass
+# requests the turn directly.
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the next pass recovers the notice"
+eq "$(mails)" "2" "it sends the mail again"
+eq "$(mailbox)" "1" "and the dedup key keeps a second copy out of the mailbox"
+eq "$(nudges)" "2" "so it requests the turn with gc session nudge"
+has "$(tail -n 1 "$STUB_NUDGE_LOG")" "gc-toolkit.mechanik Ready for you: n-6 (Edit city.toml)" "naming the agent and the bead"
+eq "$(meta n-6 gc.notify_when_ready)" "<absent>" "and the notice retires once the turn is requested"
+has "$(notes n-6)" "notice sent to gc-toolkit.mechanik" "with a note that the agent was told"
+has "$out" "the notice mailed about n-6 earlier is still in its mailbox" "the pass log says why it nudged"
 store '[{"id":"n-7","status":"open","assignee":"gc-toolkit.mechanik","metadata":{},"notes":"","_ready":true}]'
 out="$(STUB_BD_LIST_FAIL_KEY=gc.notify_when_ready "$SUT" notify n-7 --agent gc-toolkit.mechanik 2>&1)"; rc=$?
 eq "$rc" 0 "a readiness read that fails still exits 0"
@@ -1227,6 +1316,25 @@ eq "$rc" 1 "a notice that cannot be sent fails the pass"
 eq "$(meta n-1 gc.notify_when_ready)" "gc-toolkit.mechanik" "and stays armed for the next pass"
 has "$out" "could not notify gc-toolkit.mechanik that n-1 is ready" "the pass names it"
 eq "$(slings)" "1" "the armed sling still runs"
+
+echo "# a pass whose notice gets no turn requested fails, and the next pass recovers it"
+store '[{"id":"n-1","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":true},
+        {"id":"b-2","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
+out="$(STUB_MAIL_NUDGE_FAILS=1 STUB_NUDGE_RC=1 "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "a notice whose mail was saved but got no turn requested fails the pass"
+eq "$(meta n-1 gc.notify_when_ready)" "gc-toolkit.mechanik" "and stays armed"
+eq "$(mailbox)" "1" "its mail is in the agent's mailbox"
+has "$out" "nudge failed: simulated nudge-store failure" "the pass log keeps the mail's diagnostic"
+has "$out" "could not request gc-toolkit.mechanik's turn for n-1" "and says the turn was not requested"
+has "$out" "1 failed (of 1)" "the pass counts the notice failed"
+eq "$(slings)" "1" "the armed sling still runs"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the next pass recovers it, though the first mail still sits unread"
+eq "$(mailbox)" "1" "adding no second copy to the mailbox"
+eq "$(nudges)" "2" "and requesting the turn with gc session nudge"
+eq "$(meta n-1 gc.notify_when_ready)" "<absent>" "the notice retires"
+has "$out" "notices: 1 sent" "and the pass counts it sent"
+
 store '[{"id":"n-1","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":true},
         {"id":"b-2","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
 out="$(STUB_BD_LIST_FAIL_KEY=gc.notify_when_ready "$SUT" reconcile 2>&1)"; rc=$?

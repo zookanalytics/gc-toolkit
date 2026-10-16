@@ -27,7 +27,9 @@
 # for `reconcile` to send when bd does. A notice waits on bd's readiness, the
 # predicate the hook reads, and not on hold-lib.sh's: a bead bd keeps unready is
 # one the hook does not offer, and a notice then would wake the agent for
-# nothing.
+# nothing. A notice is done once the agent's turn is requested, not once its
+# mail is saved, because mail alone requests no turn; until then the record
+# stays for the next pass.
 #
 # `arm` is the default move for a blocked follow-up you file or keep back by
 # hand: arm it instead of leaving it unrouted for someone to route once its
@@ -85,9 +87,11 @@ SLUNG_DONE="slung@"        # value prefix: sling returned success, arm may retir
 
 # A notice owed to the named agent a bead is assigned to. Like K_TARGET it is
 # index and payload: its presence is the record, and its value is the agent the
-# notice goes to. A mail is cheap to repeat and mints nothing, so a notice needs
-# none of the sling's marker or counter: the send's dedup key collapses a repeat
-# while the first notice about the bead is still unread.
+# notice goes to. The record stays until the agent's turn is requested, so the
+# next pass tries a notice again when its request failed. A repeat mints nothing,
+# so a notice needs none of the sling's marker or counter: the mail's dedup key
+# keeps a second copy out of the agent's mailbox while the first notice about
+# the bead is still there.
 K_NOTIFY="gc.notify_when_ready"
 NOTICE_DEDUP_PREFIX="ready-notice:"
 
@@ -206,9 +210,13 @@ Verbs:
              Under wake_mode = "resume" nothing else wakes an idle named
              session for a new assignee. The mail goes at once when bd
              reports the bead ready; otherwise the notice is recorded on the
-             bead and reconcile sends it once bd does. The bead must be
-             assigned to <named-agent>. A closed bead, or one the agent
-             already claimed, owes no notice and exits 0.
+             bead and reconcile sends it once bd does. When the mail requests
+             no turn, because that request failed or because an earlier
+             notice about the bead is still in the agent's mailbox,
+             gc session nudge requests it. The notice stays recorded until a
+             turn is requested. The bead must be assigned to <named-agent>.
+             A closed bead, or one the agent already claimed, owes no notice
+             and exits 0.
   disarm     Remove a pending dispatch, and any notice owed. The bead is left
              otherwise untouched.
   list       Show every armed bead in this store and whether it is held (and
@@ -448,20 +456,49 @@ cmd_disarm() {
 }
 
 # --- notify ------------------------------------------------------------------
-# send_notice <id> <agent> [<title>] — mail <agent> that <id> is ready for it.
-# --notify requests the agent's turn and wakes it when it is not running, so the
-# mail reaches an idle named session, and the dedup key keeps a resend from
-# stacking while the first notice about <id> is unread.
+# A child's stderr as one line, for the log line that says why the child failed.
+stderr_text() { # file
+    local text
+    text="$(awk 'NF { printf "%s%s", sep, $0; sep = "; " }' "$1" 2>/dev/null | scrub)"
+    printf '%s' "${text:-it printed no cause}"
+}
+
+# send_notice <id> <agent> [<title>] — tell <agent> that <id> is ready for it,
+# and succeed only once the agent's turn is requested. The mail names the bead,
+# and its --notify requests the turn, waking the agent when it is not running.
+# gc mail send saves the mail before it requests the turn and still exits 0 when
+# that request fails, so the proof is `notified` in its --json result, not its
+# exit status. The dedup key keeps a second copy out of the agent's mailbox
+# while the first notice about <id> is still there, and a send it suppresses
+# requests no turn either. So whenever the mail requests none, gc session nudge
+# requests it, and that command's exit status is its outcome. Its
+# --reference-bead makes a nudge still queued for the agent about <id> give way
+# to this one.
 send_notice() {
-    local id="$1" agent="$2" title="${3:-}"
+    local id="$1" agent="$2" title="${3:-}" text out err why
+    text="$id${title:+ ($title)} is assigned to you and ready to claim: run gc hook to pick it up."
     if [ "$DRY_RUN" = 1 ]; then
-        echo "$PROG: DRY-RUN would notify $agent that $id is ready (gc mail send $agent --notify --dedup $NOTICE_DEDUP_PREFIX$id)"
+        echo "$PROG: DRY-RUN would notify $agent that $id is ready (gc mail send $agent --notify --dedup $NOTICE_DEDUP_PREFIX$id, and gc session nudge $agent if the mail requests no turn)"
         return 0
     fi
-    pass_child gc mail send "$agent" --notify --dedup "$NOTICE_DEDUP_PREFIX$id" \
-        -s "Ready for you: $id" \
-        -m "$id${title:+ ($title)} is assigned to you and ready to claim: run gc hook to pick it up." \
-        >/dev/null 2>&1
+    mktemp_tracked || { echo "$PROG: could not notify $agent that $id is ready: mktemp failed" >&2; return 1; }
+    err="$REPLY"
+    if ! out="$(pass_child gc mail send "$agent" --notify --dedup "$NOTICE_DEDUP_PREFIX$id" --json \
+            -s "Ready for you: $id" -m "$text" 2>"$err")"; then
+        echo "$PROG: gc mail send could not mail $agent about $id: $(stderr_text "$err")" >&2
+        return 1
+    fi
+    printf '%s' "$out" | scrub | jq -e 'select(type == "object") | .notified == true' >/dev/null 2>&1 && return 0
+    if printf '%s' "$out" | scrub | jq -e 'select(type == "object") | .already_done == true' >/dev/null 2>&1; then
+        why="the notice mailed about $id earlier is still in its mailbox, so the dedup key sent no new mail and requested no turn"
+    else
+        why="the mail was saved but requested no turn ($(stderr_text "$err"))"
+    fi
+    if ! pass_child gc session nudge "$agent" "Ready for you: $text" --reference-bead "$id" >/dev/null 2>"$err"; then
+        echo "$PROG: could not request $agent's turn for $id: $why, and gc session nudge failed: $(stderr_text "$err")" >&2
+        return 1
+    fi
+    echo "$PROG: requested $agent's turn for $id with gc session nudge: $why"
 }
 
 retire_notice() { # id reason -> rc
@@ -530,8 +567,8 @@ cmd_notify() {
     fi
 
     # The record goes down first, so the notice is owed from here on: a read
-    # that cannot tell whether the bead is ready, or a send that fails, leaves
-    # it for the next reconcile pass.
+    # that cannot tell whether the bead is ready, or a notice that gets the
+    # agent no turn, leaves it for the next reconcile pass.
     bd_ update "$bead" --set-metadata "$K_NOTIFY=$agent" \
         --append-notes "$PROG: notice armed by $(actor) at $(now_utc) — tells $agent once bd reports this bead ready${reason:+ — $reason}" >/dev/null 2>&1 || {
             echo "$PROG: notify: failed to record the notice on $bead" >&2; return 1; }
@@ -548,11 +585,11 @@ cmd_notify() {
         return 0
     fi
     if ! send_notice "$bead" "$agent" "$bead_title"; then
-        echo "$PROG: notify: recorded the notice on $bead, but sending it failed; the next reconcile pass sends it" >&2
+        echo "$PROG: notify: recorded the notice on $bead, but $agent's turn was not requested; the next reconcile pass tries again" >&2
         return 0
     fi
     retire_notice "$bead" "notice sent to $agent: bd reports the bead ready" \
-        || echo "$PROG: notify: notified $agent, but could not clear the notice on $bead; the next reconcile pass sends it again, and its dedup key collapses the repeat" >&2
+        || echo "$PROG: notify: notified $agent, but could not clear the notice on $bead; the next reconcile pass requests $agent's turn again, and the dedup key keeps a second copy of the mail out of its mailbox" >&2
     echo "$PROG: notified $agent that $bead is ready"
 }
 
@@ -778,13 +815,15 @@ sling_bead() { # id target args_json -> rc
     fi
 }
 
-# The notices half of a pass. A notice whose bead bd reports ready is sent and
-# its record retired. One whose bead closed, was claimed by its agent, or is no
-# longer assigned to that agent owes nothing, and its record is retired unsent.
-# Any other notice waits for bd to report its bead ready. A notice starts under
-# the bound a sling starts under, only while the pass budget has a sling's
-# allowance left. Notices run ahead of the slings, because a send is one mail
-# and a sling can take a minute. Sets NOTICE_FAILED and NOTICE_LEFT_IDS for the
+# The notices half of a pass. A notice whose bead bd reports ready is sent, and
+# its record is retired once the agent's turn is requested; a notice that gets
+# no turn requested stays armed and fails the pass. One whose bead closed, was
+# claimed by its agent, or is no longer assigned to that agent owes nothing,
+# and its record is retired unsent. Any other notice waits for bd to report its
+# bead ready. A notice starts under the bound a sling starts under, only while
+# the pass budget has a sling's allowance left. Notices run ahead of the slings,
+# because a notice is a mail and at most one nudge, and a sling can take a
+# minute. Sets NOTICE_FAILED and NOTICE_LEFT_IDS for the
 # pass's exit and its outcome declaration; an enumeration that fails counts as a
 # failure, so the pass still slings and then exits non-zero.
 NOTICE_FAILED=0
@@ -834,7 +873,7 @@ reconcile_notices() {
         if retire_notice "$id" "notice sent to $agent: bd reports the bead ready"; then
             echo "$PROG: notified $agent that $id is ready"
         else
-            echo "$PROG: WARN notified $agent that $id is ready, but could not clear the notice — the next pass sends it again, and its dedup key collapses the repeat" >&2
+            echo "$PROG: WARN notified $agent that $id is ready, but could not clear the notice — the next pass requests $agent's turn again, and the dedup key keeps a second copy of the mail out of its mailbox" >&2
         fi
     done < "$rows"
     if [ "$processed" != "$expected" ]; then

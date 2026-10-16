@@ -150,8 +150,28 @@ case "$1 ${2:-}" in
       *) printf '%s\n' "${FAKE_LIST_JSON:-[]}" ;;
     esac ;;
   "mail send")
+    # The --json answer gascity's doMailSendJSON gives. A send whose dedup key
+    # matches a message still in the mailbox saves nothing, requests no turn
+    # and reports already_done. Any other send saves the message and then
+    # requests the turn, reporting `notified` only when that succeeds.
+    # FAKE_MAIL_NUDGE_FAILS fails the request, which the real command reports
+    # on stderr while it still exits 0.
     printf 'MAIL %s\n' "$*" >> "$FAKE_LOG"
-    [ -n "${FAKE_MAIL_FAILS:-}" ] && exit 1 ;;
+    [ -n "${FAKE_MAIL_FAILS:-}" ] && exit 1
+    _prev=""; _key=""
+    for _a in "$@"; do [ "$_prev" = "--dedup" ] && _key="$_a"; _prev="$_a"; done
+    if [ -n "$_key" ] && grep -qxF -- "$_key" "$FAKE_STATE.mailbox" 2>/dev/null; then
+      printf '%s\n' '{"ok":true,"action":"send","count":0,"already_done":true}'; exit 0
+    fi
+    printf '%s\n' "$_key" >> "$FAKE_STATE.mailbox"
+    if [ -n "${FAKE_MAIL_NUDGE_FAILS:-}" ]; then
+      echo "gc mail send: nudge failed: fake nudge-store failure" >&2
+      printf '%s\n' '{"ok":true,"action":"send","count":1}'; exit 0
+    fi
+    printf '%s\n' '{"ok":true,"action":"send","count":1,"notified":true}' ;;
+  "session nudge")
+    printf 'NUDGE %s\n' "$*" >> "$FAKE_LOG"
+    if [ -n "${FAKE_NUDGE_FAILS:-}" ]; then echo "gc session nudge: fake nudge failure" >&2; exit 1; fi ;;
   "bd dep")
     printf 'DEP %s\n' "$*" >> "$FAKE_LOG"
     # `dep list --json` answers with what the store holds AFTER the helm call;
@@ -320,7 +340,7 @@ R="tk-react"   # the reaction bead the worker holds
 # `bd show` matches FAKE_SHOW_JSON and later writes mutate it from there.
 run() {
   : > "$FAKE_LOG"; rm -f "$FAKE_STATE.dropped" "$FAKE_STATE.placement" "$FAKE_STATE.placement-dropped" "$FAKE_STATE.priority" \
-    "$FAKE_STATE.assignee" "$FAKE_STATE.notice"
+    "$FAKE_STATE.assignee" "$FAKE_STATE.notice" "$FAKE_STATE.mailbox"
   printf '%s' "${FAKE_SHOW_JSON:-$DEFAULT_SHOW}" \
     | jq -r '(.[0].metadata // {})["gc.recommended_formula"] // ""' > "$FAKE_STATE" 2>/dev/null || : > "$FAKE_STATE"
   RC=0; OUT="$("$SCRIPT" "$@" 2>"$TMP/err")" || RC=$?; ERR="$(cat "$TMP/err")"; LOG="$(cat "$FAKE_LOG")";
@@ -1750,6 +1770,11 @@ unset FAKE_SHOW_JSON FAKE_GH FAKE_ORIGIN_URL FAKE_RIG_PATH
 #               bead sends nothing
 #   (E2ELIFT)   the wait lifts: the next pass mails the agent, naming the
 #               bead, and retires the notice
+#   (E2ENOTURN) --assign whose mail is saved but gets the agent no turn, from
+#               the mail or from the nudge after it: the exit lands with the
+#               notice still recorded, and the next pass, with the first mail
+#               still unread in the mailbox, requests the turn with
+#               gc session nudge and retires the notice
 unset GC_RIG_ROOT GC_PACK_STATE_DIR GC_ORDER_OUTCOME_FILE
 export DEFERRED_DISPATCH_STATE_DIR="$TMP/deferred-state" DEFERRED_DISPATCH_PASS_BUDGET_SECS=0
 REAL_DD="$HERE/deferred-dispatch.sh"
@@ -1762,6 +1787,7 @@ has "MAIL mail send gc-toolkit.mechanik --notify" "$LOG" "(E2EASSIGN) …the age
 has "Ready for you: tk-sub" "$LOG" "(E2EASSIGN) …naming the bead"
 before '^HELM takeaway' '^MAIL ' "(E2EASSIGN) …once the release has made it the assignee"
 before '^MAIL ' 'gc.reacted_by' "(E2EASSIGN) …and before the landed proof"
+hasnt "NUDGE " "$LOG" "(E2EASSIGN) …with no nudge, since the mail requested the turn"
 [ ! -e "$FAKE_STATE.notice" ] && ok "(E2EASSIGN) …leaving no notice recorded" \
     || bad "(E2EASSIGN) a notice sent at once is still recorded"
 
@@ -1787,7 +1813,27 @@ has "MAIL mail send gc-toolkit.mechanik --notify" "$LOG" "(E2ELIFT) …asking fo
 has "Ready for you: tk-sub" "$LOG" "(E2ELIFT) …naming the bead"
 [ ! -e "$FAKE_STATE.notice" ] && ok "(E2ELIFT) …and the notice retires" \
     || bad "(E2ELIFT) the notice is still recorded after it was sent"
-unset FAKE_DEPS_JSON DEFERRED_DISPATCH_STATE_DIR DEFERRED_DISPATCH_PASS_BUDGET_SECS
+
+unset FAKE_DEPS_JSON
+GC_DEFERRED_DISPATCH_TOOL="$REAL_DD" FAKE_SUBJECT_READY=1 FAKE_MAIL_NUDGE_FAILS=1 FAKE_NUDGE_FAILS=1 \
+    run tk-sub --disposition actionable --reason "the remedy is a city.toml edit" \
+    --takeaway "city.toml edit routed to mechanik" --assign gc-toolkit.mechanik --reaction-bead "$R"
+eq "$RC" "0" "(E2ENOTURN) the --assign exit lands though no turn was requested, since the notice is recorded"
+eq "$(grep -c '^MAIL ' "$FAKE_LOG")" "1" "(E2ENOTURN) the agent is mailed once"
+eq "$(grep -c '^NUDGE ' "$FAKE_LOG")" "1" "(E2ENOTURN) …and, the mail having requested no turn, nudged once"
+before '^NUDGE ' 'gc.reacted_by' "(E2ENOTURN) …before the landed proof"
+eq "$(cat "$FAKE_STATE.notice" 2>/dev/null)" "gc-toolkit.mechanik" "(E2ENOTURN) …and the notice stays recorded for the agent"
+has "nudge failed: fake nudge-store failure" "$ERR" "(E2ENOTURN) …and the mail's diagnostic reaches the exit's output"
+: > "$FAKE_LOG"
+DD_RC=0; FAKE_SUBJECT_READY=1 "$REAL_DD" reconcile >/dev/null 2>&1 || DD_RC=$?
+LOG="$(cat "$FAKE_LOG")"
+eq "$DD_RC" "0" "(E2ENOTURN) the next pass is clean"
+eq "$(grep -c '^MAIL ' "$FAKE_LOG")" "1" "(E2ENOTURN) …it sends the mail again"
+eq "$(wc -l < "$FAKE_STATE.mailbox" | tr -d ' ')" "1" "(E2ENOTURN) …which the dedup key keeps to the one copy in the mailbox"
+has "NUDGE session nudge gc-toolkit.mechanik Ready for you: tk-sub" "$LOG" "(E2ENOTURN) …so it requests the turn with gc session nudge, naming the bead"
+[ ! -e "$FAKE_STATE.notice" ] && ok "(E2ENOTURN) …and the notice retires" \
+    || bad "(E2ENOTURN) the notice is still recorded after the turn was requested"
+unset DEFERRED_DISPATCH_STATE_DIR DEFERRED_DISPATCH_PASS_BUDGET_SECS
 
 echo ""
 echo "first-reaction-dispose (five exits, reaction-bead): $PASS passed, $FAIL failed"
