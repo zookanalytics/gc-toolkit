@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # review-checks.test.sh — the one parser of the check-index grammar
 # (assets/scripts/review-checks.sh). Asserts it emits <check>\t<method>\t<purpose>
-# TSV, narrows with --check, and fails closed on a missing index, an undeclared
-# check, and an index that declares nothing. Also asserts the repo's own
-# review-checks.toml declares the forced baseline (correctness, triage).
+# TSV, narrows with --check by the check's name case-folded, and fails closed
+# on a missing index, an undeclared check, and an index that declares nothing.
+# Also asserts the repo's own review-checks.toml declares the forced baseline
+# (correctness, triage).
 #
 # Hermetic: runs the script against fixtures in a mktemp dir; no gc, no bd, no
 # network.
@@ -65,6 +66,17 @@ has "--check emits the asked row" "$OUT" "triage	skills/review-triage/SKILL.md	"
 # --check for an undeclared check fails closed.
 "$SUT" --file "$IDX" --check nonesuch >/dev/null 2>&1
 is "undeclared --check exits 1" "$?" "1"
+
+# --check knows a check by its name case-folded, the rule --resolve matches a
+# check_set token by, and emits the row as the index writes it.
+OUT="$("$SUT" --file "$IDX" --check TRIAGE)"; RC=$?
+is  "--check TRIAGE exit 0" "$RC" "0"
+has "--check TRIAGE emits the triage row" "$OUT" "triage	skills/review-triage/SKILL.md	"
+MIXED="$TMP/mixed-case.toml"
+printf '[checks.Security]\nmethod = "m"\npurpose = "p"\nphase = "pre-open"\n' >"$MIXED"
+OUT="$("$SUT" --file "$MIXED" --check security)"; RC=$?
+is  "--check security exit 0 on a row written [checks.Security]" "$RC" "0"
+is  "…and the row keeps the name the index wrote" "$OUT" "Security	m	p	pre-open"
 
 # A missing index fails closed.
 "$SUT" --file "$TMP/nope.toml" >/dev/null 2>&1
