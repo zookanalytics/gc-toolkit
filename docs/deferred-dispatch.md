@@ -141,7 +141,8 @@ stderr and still exits 0. So the notice reads `notified` from the command's
 `ready-notice:<bead>`, keeps a second copy out of the agent's mailbox while
 the first notice about the bead is still there, read or not, and a send it
 suppresses requests no turn either. So whenever the mail requests no turn,
-the notice requests it with `gc session nudge <agent> --reference-bead <bead>`,
+whether the send failed, its turn request failed or the dedup key suppressed
+it, the notice requests it with `gc session nudge <agent> --reference-bead <bead>`,
 whose exit status is its outcome. A nudge still queued for the agent about
 the same bead gives way to the new one. A notice that gets no turn requested
 either way keeps its record, and the log keeps what `gc mail send` and

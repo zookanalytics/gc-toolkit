@@ -211,8 +211,8 @@ Verbs:
              session for a new assignee. The mail goes at once when bd
              reports the bead ready; otherwise the notice is recorded on the
              bead and reconcile sends it once bd does. When the mail requests
-             no turn, because that request failed or because an earlier
-             notice about the bead is still in the agent's mailbox,
+             no turn, because the send or its turn request failed or because
+             an earlier notice about the bead is still in the agent's mailbox,
              gc session nudge requests it. The notice stays recorded until a
              turn is requested. The bead must be assigned to <named-agent>.
              A closed bead, or one the agent already claimed, owes no notice
@@ -479,10 +479,12 @@ stderr_text() { # file
 # that request fails, so the proof is `notified` in its --json result, not its
 # exit status. The dedup key keeps a second copy out of the agent's mailbox
 # while the first notice about <id> is still there, and a send it suppresses
-# requests no turn either. So whenever the mail requests none, gc session nudge
-# requests it, and that command's exit status is its outcome. Its
+# requests no turn either. So whenever the mail requests none, whether the send
+# failed, its turn request failed or the dedup key suppressed it, gc session
+# nudge requests it, and that command's exit status is its outcome. Its
 # --reference-bead makes a nudge still queued for the agent about <id> give way
-# to this one.
+# to this one. Whether the nudge succeeds or fails, its log line says why the
+# mail requested no turn, with what gc mail send printed.
 send_notice() {
     local id="$1" agent="$2" title="${3:-}" text out err why
     text="$id${title:+ ($title)} is assigned to you and ready to claim: run gc hook to pick it up."
@@ -494,11 +496,10 @@ send_notice() {
     err="$REPLY"
     if ! out="$(pass_child gc mail send "$agent" --notify --dedup "$NOTICE_DEDUP_PREFIX$id" --json \
             -s "Ready for you: $id" -m "$text" 2>"$err")"; then
-        echo "$PROG: gc mail send could not mail $agent about $id: $(stderr_text "$err")" >&2
-        return 1
-    fi
-    printf '%s' "$out" | scrub | jq -e 'select(type == "object") | .notified == true' >/dev/null 2>&1 && return 0
-    if printf '%s' "$out" | scrub | jq -e 'select(type == "object") | .already_done == true' >/dev/null 2>&1; then
+        why="gc mail send could not mail $agent about $id ($(stderr_text "$err"))"
+    elif printf '%s' "$out" | scrub | jq -e 'select(type == "object") | .notified == true' >/dev/null 2>&1; then
+        return 0
+    elif printf '%s' "$out" | scrub | jq -e 'select(type == "object") | .already_done == true' >/dev/null 2>&1; then
         why="the notice mailed about $id earlier is still in its mailbox, so the dedup key sent no new mail and requested no turn"
     else
         why="the mail was saved but requested no turn ($(stderr_text "$err"))"
