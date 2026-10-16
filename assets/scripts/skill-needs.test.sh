@@ -32,6 +32,8 @@
 # command. It pins that a formula's own description, not a doc, says which work
 # the formula fits. It runs each example whose second step depends on its first
 # under a gc that refuses the first step, and fails if anything after it runs.
+# It runs the settle step's arm under a gc that answers a dep add as bd does for
+# a blocker in another store, and fails if the arm runs.
 #
 # Hermetic: reads the repo, and runs the pack command and the writer call shape
 # in a temporary directory outside any git repo, with a stub gc. The one case
@@ -312,6 +314,8 @@ lacks "…and keeps no blanket rule against filing under the subject" \
     'Never file it under the subject' "$SETTLE" \
     "an epic subject's decomposition is filed as its member"
 have "the settle step gives the arm it names" 'deferred-dispatch.sh" arm <follow-up>' "$SETTLE"
+have "…once the follow-up's own store reads the edge back" '&& gc bd --rig <rig> dep list <follow-up> --direction=down -t blocks --json' "$SETTLE"
+have "…and holds a follow-up on another rig's bead with a demand in its own store" 'gc-helm.sh" demand <follow-up>' "$SETTLE"
 have "the prompt gives the disposal writer's call" 'bead-rehome.sh" --origin "$SUBJECT"' "$PROMPT"
 have "the prompt gives the retire call" 'pr-dispose.sh" --anchor "$SUBJECT"' "$PROMPT"
 have "the prompt gives the call that withdraws a recommendation" 'converse-invalidate-recommendation.sh" "<why' "$PROMPT"
@@ -412,7 +416,7 @@ done
 
 echo "── a step that depends on the one before it runs only once that one succeeded ──"
 # An example that sends work and then records the dispatch, records an outcome
-# and then closes, files a bead and then sends it, or adds an edge and then
+# and then closes, files a bead and then sends it, or adds a wait and then
 # arms, chains the second step onto the first with &&. Run apart, a refused
 # first step leaves the second recording what never happened: a dispatch marker
 # over a failed sling strips the recommendation, and the board's Accept reads
@@ -423,14 +427,19 @@ CH="$TMP/chain"
 mkdir -p "$CH/bin" "$CH/pack/assets/scripts"
 cat >"$CH/bin/gc" <<'STUB'
 #!/usr/bin/env bash
-# Logs each call, and refuses the first one when CHAIN_FAIL_FIRST is set. It
-# answers scripts-dir under any binding, prints an id for a create, and applies
-# an update's --set-metadata and --unset-metadata to a store of one file per key.
+# Logs each call, and refuses the one numbered CHAIN_FAIL_AT. It answers
+# scripts-dir under any binding, prints an id for a create, and applies an
+# update's --set-metadata and --unset-metadata to a store of one file per key.
+# A dep add records its edge as a "<waiting> <blocker>" line that a dep list
+# reads back and a dep remove deletes, in the one store a --rig names or not.
+# With CHAIN_CROSS_STORE set, a dep add answers as bd does for a blocker in
+# another store: it prints success and exits 0, and no edge reads back.
 n=$(( $(cat "$CHAIN_DIR/count" 2>/dev/null || echo 0) + 1 ))
 echo "$n" >"$CHAIN_DIR/count"
 printf 'gc %s\n' "$*" >>"$CHAIN_DIR/log"
-if [ -n "${CHAIN_FAIL_FIRST:-}" ] && [ "$n" -eq 1 ]; then echo "gc: refused" >&2; exit 1; fi
+if [ "$n" = "${CHAIN_FAIL_AT:-}" ]; then echo "gc: refused" >&2; exit 1; fi
 [ "${2:-}" = scripts-dir ] && { printf '%s\n' "$CHAIN_DIR/pack/assets/scripts"; exit 0; }
+[ "${1:-} ${2:-}" = "bd --rig" ] && set -- bd "${@:4}"
 case "$1 ${2:-}" in
     "bd create") echo '{"id":"tk-new"}' ;;
     "bd update")
@@ -442,15 +451,34 @@ case "$1 ${2:-}" in
                 *) shift ;;
             esac
         done ;;
+    "bd dep")
+        case "${3:-}" in
+            add)
+                [ -n "${CHAIN_CROSS_STORE:-}" ] || printf '%s %s\n' "$4" "$5" >>"$CHAIN_DIR/edges"
+                echo "✓ Added dependency: $4 depends on $5 (blocks)" ;;
+            remove)
+                grep -vxF -- "$4 $5" "$CHAIN_DIR/edges" >"$CHAIN_DIR/edges.new"
+                mv "$CHAIN_DIR/edges.new" "$CHAIN_DIR/edges" ;;
+            list)
+                awk -v w="$4" '$1 == w { printf "%s{\"id\":\"%s\",\"dependency_type\":\"blocks\"}", (n++ ? "," : "["), $2 }
+                    END { print (n ? "]" : "[]") }' "$CHAIN_DIR/edges" ;;
+        esac ;;
 esac
 exit 0
 STUB
 cat >"$CH/pack/assets/scripts/bead-rehome.sh" <<'STUB'
 #!/usr/bin/env bash
+# Logs its call, numbered with gc's, and refuses the one numbered CHAIN_FAIL_AT.
+n=$(( $(cat "$CHAIN_DIR/count" 2>/dev/null || echo 0) + 1 ))
+echo "$n" >"$CHAIN_DIR/count"
 printf 'writer %s %s\n' "${0##*/}" "$*" >>"$CHAIN_DIR/log"
+if [ "$n" = "${CHAIN_FAIL_AT:-}" ]; then echo "writer: refused" >&2; exit 1; fi
+exit 0
 STUB
 cp "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/deferred-dispatch.sh"
-chmod +x "$CH/bin/gc" "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/deferred-dispatch.sh"
+cp "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/gc-helm.sh"
+chmod +x "$CH/bin/gc" "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/deferred-dispatch.sh" \
+    "$CH/pack/assets/scripts/gc-helm.sh"
 # fill_block — an example with each <placeholder> filled with x, the stub pack in
 # for a template's {{ .ConfigDir }}, and the disposition kinds cut to one.
 fill_block() {
@@ -458,16 +486,18 @@ fill_block() {
         -e 's#--kind re-homed|folded|fixed-upstream|duplicate|not-needed#--kind not-needed#' \
         -e 's#<[^>]*>#x#g'
 }
-# run_chain <shell> <block> [fail] — one run of a filled example in a fresh shell,
-# from an empty log and a store holding one recommendation; prints its status.
+# run_chain <shell> <block> [fail-at] [cross-store] — one run of a filled example
+# in a fresh shell, from an empty log, no edges and a store holding one
+# recommendation, with call number <fail-at> refused; prints its status.
 run_chain() {
     rm -rf "$CH/store" "$CH/count"
     mkdir -p "$CH/store"
     : >"$CH/log"
+    : >"$CH/edges"
     printf 'x' >"$CH/store/gc.recommended_formula"
-    (cd "$TMP/away" && env -u BASH_ENV -u ENV CHAIN_DIR="$CH" CHAIN_FAIL_FIRST="${3:-}" \
-        CONV="$CH/pack/assets/scripts" SUBJECT=tk-x VISIT=tk-v PATH="$CH/bin:$PATH" \
-        $1 "$2" </dev/null >/dev/null 2>&1)
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV CHAIN_DIR="$CH" CHAIN_FAIL_AT="${3:-}" \
+        CHAIN_CROSS_STORE="${4:-}" CONV="$CH/pack/assets/scripts" SUBJECT=tk-x VISIT=tk-v \
+        PATH="$CH/bin:$PATH" $1 "$2" </dev/null >/dev/null 2>&1)
     echo $?
 }
 while IFS='|' read -r label file marker; do
@@ -500,8 +530,37 @@ work: closing a bead that needs no work|$WORK_SKILL|gc.work_outcome=no-op
 converse prompt: disposing of a no-work subject|$PROMPT|gc.work_outcome=no-op
 disposition fragment: closing a bead that did not land|$DISPOSITION|gc.work_outcome=no-op
 converse-settle: filing and sending routed work|$SETTLE|gc sling <rig>/<pool> "\$WORK"
-converse-settle: arming a follow-up|$SETTLE|gc bd dep add <follow-up> <blocker>
+converse-settle: arming a follow-up|$SETTLE|gc bd --rig <rig> dep add <follow-up> <blocker>
+converse-settle: arming a follow-up on a demand|$SETTLE|gc bd --rig <rig> dep remove <follow-up> <blocker>
 SPECS
+# The arm runs only once the follow-up's own store reads the edge back. A dep add
+# onto a bead in another store prints success and exits 0 but holds nothing, so
+# on that answer the example stops at the read-back and arms nothing. When the
+# wait goes on a demand instead, a demand that did not land arms nothing either.
+fenced_block "$SETTLE" 'gc bd --rig <rig> dep add <follow-up> <blocker>' | fill_block >"$CH/block"
+fenced_block "$SETTLE" 'gc bd --rig <rig> dep remove <follow-up> <blocker>' | fill_block >"$CH/demand-block"
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    rc=$(run_chain "$run" "$CH/block" "" 1)
+    if [ "$rc" -ne 0 ] && grep -q '^gc bd --rig x dep list x ' "$CH/log" && ! grep -q '^writer deferred-dispatch.sh arm ' "$CH/log"; then
+        ok "($sh_) converse-settle: a dep add that holds nothing arms nothing"
+    else
+        bad "($sh_) converse-settle: a dep add that holds nothing arms nothing" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
+    fi
+    rc=$(run_chain "$run" "$CH/block")
+    if [ "$rc" -eq 0 ] && grep -q '^writer deferred-dispatch.sh arm ' "$CH/log"; then
+        ok "($sh_) converse-settle: …and an edge that reads back is armed"
+    else
+        bad "($sh_) converse-settle: …and an edge that reads back is armed" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
+    fi
+    rc=$(run_chain "$run" "$CH/demand-block" 2)
+    if [ "$rc" -ne 0 ] && grep -q '^writer gc-helm.sh demand ' "$CH/log" && ! grep -q '^writer deferred-dispatch.sh arm ' "$CH/log"; then
+        ok "($sh_) converse-settle: a demand that did not land arms nothing"
+    else
+        bad "($sh_) converse-settle: a demand that did not land arms nothing" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
+    fi
+done
 # Taking a recommendation records the dispatch only once the sling went: a
 # refused sling leaves both keys as they were, and a sent one swaps them.
 fenced_block "$WORK_SKILL" 'gc.recommended_formula_dispatched=' | fill_block >"$CH/block"

@@ -167,12 +167,31 @@ unrouted** (the `waits` skill). Slinging it now is wrong, because it is
 blocked, and leaving it to route once the blocker closes is the
 come-back-later that keeps you or a person on the hook. Make it wait on the
 blocker, then arm it, so it routes itself when the blocker closes and the
-sitting can queue everything and close. The arm runs only once the edge
-landed, because an arm with nothing holding it sends the follow-up on the next
-pass:
+sitting can queue everything and close. An arm with nothing holding the
+follow-up sends it on the next pass, so the arm runs only once the follow-up's
+own store reads the edge back. A `dep add` onto a bead in another rig's store
+prints success and exits 0, but holds nothing. Each call names the
+follow-up's rig, the one its pool reads: unpinned, a command that also names a
+city bead is answered from the city's store.
 ```bash
-gc bd dep add <follow-up> <blocker> --type=blocks \
+gc bd --rig <rig> dep add <follow-up> <blocker> --type=blocks \
+  && gc bd --rig <rig> dep list <follow-up> --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg b <blocker> 'any(.[]; .id == $b)' >/dev/null \
   && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>"
+```
+When the edge does not read back and `dep list` warns that its target has no
+row in this database, the blocker is in another rig's store, where no edge can
+hold the follow-up. Make it wait on a demand in its own store that names the
+blocker, and arm it on that demand. The demand reaches the operator, who
+resolves it once the blocker lands, and the arm then sends the follow-up.
+Remove the edge first, because the arm reads it as a blocker that holds
+nothing and warns that the next pass sends the follow-up. The demand's
+headline, filled in, is at most 140 characters, and the demand verb refuses a
+longer one:
+```bash
+gc bd --rig <rig> dep remove <follow-up> <blocker> \
+  && "$CONV/gc-helm.sh" demand <follow-up> "Resolve once <what the blocker delivers> lands, so <what the follow-up does> can start" \
+    --body "<follow-up> waits for <blocker> in <its rig>. Resolve this once <blocker> closes." \
+  && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>, through its demand"
 ```
 
 **A recorded wait is also the return trip.** Once every recorded wait
