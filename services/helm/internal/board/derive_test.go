@@ -2193,9 +2193,9 @@ func dated(value, oid string, at time.Time) string {
 	return value + "@" + oid + "@" + at.Format(time.RFC3339)
 }
 
-// prPhase answers who acts next in the same values and precedence as
-// pr-status-label.sh's derive_value; these cases mirror that script's, since it
-// stamps nothing on the bead for the board to read instead.
+// prPhase names what stands between a PR and landing in the same values and
+// precedence as pr-status-label.sh's derive_value; these cases mirror that
+// script's, since it stamps nothing on the bead for the board to read instead.
 func TestPRPhaseMirrorsDeriveValue(t *testing.T) {
 	merge := func(md map[string]string) Anchor {
 		full := map[string]string{mdMergeResult: "pull_request"}
@@ -2224,7 +2224,7 @@ func TestPRPhaseMirrorsDeriveValue(t *testing.T) {
 		{"a held draft needs attention", merge(map[string]string{mdOpenedAsDraft: "abc", mdMergeHold: "true"}), 0, PhaseNeedsAttention},
 	}
 	for _, tc := range cases {
-		if got := prPhase(tc.a, tc.kids); got != tc.want {
+		if got := prPhase(tc.a, Facts{}, tc.kids); got != tc.want {
 			t.Errorf("%s: prPhase = %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -2260,6 +2260,118 @@ func TestDraftStageReadsWorkingOnBothAxes(t *testing.T) {
 		if tile.PRPhase != tc.want || tile.Phase != tc.want {
 			t.Errorf("%s: PRPhase=%q Phase=%q, want both %q", tc.id, tile.PRPhase, tile.Phase, tc.want)
 		}
+	}
+}
+
+// An open visit on a merge anchor is a hold: the merge pass's finalize gate holds
+// the PR until the visit closes. So an approved, settled PR, which reads working
+// with the merge pass next, reads needs-attention on both axes while a visit
+// names it, and its needs line stops naming the merge pass. The visit fact is the
+// one the held marker reads, so a visit a sitting is holding, which no wrapper
+// row folds onto the anchor, holds it too. The unheld twin proves the visit is
+// what moves the row.
+func TestOpenVisitHoldsAMergeAnchorAtNeedsAttention(t *testing.T) {
+	md := map[string]string{
+		mdPRPosture:    dated(postureApproved, headLive, fixtureNow.Add(-2*time.Hour)),
+		mdPRMergeState: "DIRTY@" + headLive,
+		mdPRMachine:    dated(MachineSettled, headLive, fixtureNow.Add(-2*time.Hour)),
+		mdPRNumber:     "1162",
+	}
+	held := mergeAnchor("tk-held", md)
+	free := mergeAnchor("tk-free", md)
+
+	b := BuildBoard([]Anchor{held, free}, fixtureNow, false, nil, Facts{Visits: map[string]bool{"tk-held": true}})
+
+	fr := mustTile(t, b, "tk-free")
+	if fr.PRPhase != PhaseWorking || fr.Phase != PhaseWorking || fr.Needs != "green — waiting on the merge pass" {
+		t.Fatalf("test premise: the unheld twin is working with the merge pass next; got pr_phase=%q phase=%q needs=%q", fr.PRPhase, fr.Phase, fr.Needs)
+	}
+
+	h := mustTile(t, b, "tk-held")
+	if !h.Held {
+		t.Fatalf("test premise: the visit fact holds the row; held=%v", h.Held)
+	}
+	if h.PRPhase != PhaseNeedsAttention || h.Phase != PhaseNeedsAttention {
+		t.Errorf("a PR an open visit holds needs attention on both axes: pr_phase=%q phase=%q", h.PRPhase, h.Phase)
+	}
+	if h.Frontier != "needs-attention · PR #1162" {
+		t.Errorf("the frontier leads with needs-attention, not working: got %q", h.Frontier)
+	}
+	if h.Needs != "held by an open visit" {
+		t.Errorf("the needs line names the visit hold, not the merge pass: got %q", h.Needs)
+	}
+}
+
+// A held merge anchor's needs line says an open visit holds it at every position
+// the cadence records. The phase reads needs-attention whether the row is
+// settled, progressing or waiting on an approval, and the needs line agrees
+// instead of naming the merge pass, the cadence or a review. The unheld twin of
+// each position proves the visit is what moves the line.
+func TestHeldMergeAnchorNeedsNamesTheVisitAtEveryPosition(t *testing.T) {
+	at := fixtureNow.Add(-2 * time.Hour)
+	for _, pos := range []struct {
+		name, posture, machine, unheld string
+	}{
+		{"settled and approved", postureApproved, MachineSettled, "green — waiting on the merge pass"},
+		{"settled, waiting on a review", postureReviewRequired, MachineSettled, "green, waiting on your review"},
+		{"settled, changes requested", postureChangesRequested, MachineSettled, "changes requested — reviewer re-review needed"},
+		{"progressing", postureApproved, MachineProgressing, "in the merge cadence"},
+	} {
+		t.Run(pos.name, func(t *testing.T) {
+			md := map[string]string{
+				mdPRPosture: dated(pos.posture, headLive, at),
+				mdPRMachine: dated(pos.machine, headLive, at),
+				mdPRNumber:  "1162",
+			}
+			b := BuildBoard([]Anchor{mergeAnchor("tk-held", md), mergeAnchor("tk-free", md)}, fixtureNow, false, nil,
+				Facts{Visits: map[string]bool{"tk-held": true}})
+			if fr := mustTile(t, b, "tk-free"); fr.Needs != pos.unheld {
+				t.Fatalf("test premise: the unheld twin reads %q; got %q", pos.unheld, fr.Needs)
+			}
+			h := mustTile(t, b, "tk-held")
+			if h.Phase != PhaseNeedsAttention || h.Needs != "held by an open visit" {
+				t.Errorf("a held row reads needs-attention and says the visit holds it: phase=%q needs=%q", h.Phase, h.Needs)
+			}
+		})
+	}
+}
+
+// The needs line names each visit that holds the row by the question its title
+// asks, from the row's own sittings. It never asserts who owes the answer, so a
+// visit a sitting is in reads the same as one waiting for a person.
+func TestHeldNeedsNamesEachHoldingVisitByItsQuestion(t *testing.T) {
+	md := map[string]string{
+		mdPRPosture: dated(postureApproved, headLive, fixtureNow.Add(-2*time.Hour)),
+		mdPRMachine: dated(MachineSettled, headLive, fixtureNow.Add(-2*time.Hour)),
+		mdPRNumber:  "1162",
+	}
+	visit := func(id, ask, status, session string) Sitting {
+		return Sitting{ID: id, Title: "visit: tk-held — " + ask, Subject: "tk-held", Subjects: []string{"tk-held"},
+			Status: status, Session: session}
+	}
+	moot := "is this PR moot now that main rewrote the code it edits?"
+	merge := "may the seed audit merge?"
+	for _, tc := range []struct {
+		name     string
+		sittings []Sitting
+		want     string
+	}{
+		{"one visit waiting for a person", []Sitting{visit("tk-v1", moot, "open", "")},
+			"held by an open visit: " + moot},
+		{"one visit a sitting is in", []Sitting{visit("tk-v1", moot, "in_progress", "converse-1")},
+			"held by an open visit: " + moot},
+		{"two visits", []Sitting{visit("tk-v1", moot, "open", ""), visit("tk-v2", merge, "open", "")},
+			"held by 2 open visits: " + moot + " · " + merge},
+		{"a closed sitting names nothing", []Sitting{visit("tk-v1", moot, "open", ""), visit("tk-v0", merge, "closed", "")},
+			"held by an open visit: " + moot},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := BuildBoard([]Anchor{mergeAnchor("tk-held", md)}, fixtureNow, false, nil,
+				Facts{Visits: map[string]bool{"tk-held": true}, Sittings: tc.sittings})
+			if h := mustTile(t, b, "tk-held"); h.Needs != tc.want {
+				t.Errorf("needs = %q, want %q", h.Needs, tc.want)
+			}
+		})
 	}
 }
 

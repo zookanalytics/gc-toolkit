@@ -40,13 +40,16 @@ import (
 // cadence reads. Metadata values keep their JSON types so Meta can reproduce
 // jq's tostring. Status is a pointer because jq's `.status // "open"` tells a
 // null or absent status from an empty string, so the decode has to keep that
-// distinction too.
+// distinction too. Dependencies keeps its JSON shape as well, so DependsOn reads
+// the edge rows the way the scripts do and a row shape no reader expects still
+// decodes the bead.
 type Bead struct {
-	ID       string         `json:"id"`
-	Status   *string        `json:"status"`
-	Assignee any            `json:"assignee"`
-	Notes    any            `json:"notes"`
-	Metadata map[string]any `json:"metadata"`
+	ID           string         `json:"id"`
+	Status       *string        `json:"status"`
+	Assignee     any            `json:"assignee"`
+	Notes        any            `json:"notes"`
+	Metadata     map[string]any `json:"metadata"`
+	Dependencies any            `json:"dependencies"`
 }
 
 // Scrub strips every C0 control byte (U+0000–U+001F), the range JSON requires
@@ -93,6 +96,38 @@ func (b *Bead) Meta(key string) string {
 		return ""
 	}
 	return jqString(b.Metadata[key])
+}
+
+// DependsOn returns the ids this bead's own edges of type typ point at, in the
+// order the read listed them. An edge row has two key spellings by read verb:
+// `gc bd show` gives {dependency_type, id} and `gc bd list` gives {type,
+// depends_on_id}. Each row is read as visit-identity.sh reads it,
+// `(.dependency_type // .type)` and `(.id // .depends_on_id)`, so one call
+// serves either read.
+func (b *Bead) DependsOn(typ string) []string {
+	if b == nil {
+		return nil
+	}
+	rows, _ := b.Dependencies.([]any)
+	var out []string
+	for _, r := range rows {
+		edge, ok := r.(map[string]any)
+		if !ok || jqString(jqAlt(edge["dependency_type"], edge["type"])) != typ {
+			continue
+		}
+		if id := jqString(jqAlt(edge["id"], edge["depends_on_id"])); id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// jqAlt reproduces jq's `a // b`: a, unless a is null or false.
+func jqAlt(a, b any) any {
+	if a == nil || a == false {
+		return b
+	}
+	return a
 }
 
 // AssigneeString returns `.assignee // "" | tostring`.
