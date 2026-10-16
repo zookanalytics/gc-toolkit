@@ -111,10 +111,10 @@ gc sling <rig>/<pool> <bead> --on <the recommended formula> \
 
 The marker records the dispatch, and the strip stops a later visit from
 offering Accept for work that already ran. Written over a failed sling, the
-marker would record work that never went: the board's Accept reads it as a
-dispatch already sent, so it would never send the work either. Outside a sitting, the board's
-Accept is the operator's own form of this act, and it refuses a visit that a
-sitting has engaged.
+marker would record work that never went. The board's Accept reads the marker
+as a dispatch already sent, so it would never send the work either. Outside a
+sitting, the board's Accept is the operator's own form of this act, and it
+refuses a visit that a sitting has engaged.
 
 ## Choose the formula
 
