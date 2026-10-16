@@ -158,7 +158,12 @@ for the pass, and `notify` still exits 0.
 
 Each pass sends the notices whose beads `bd` reports ready, ahead of its
 slings, and retires a notice unsent on a bead that closed, that its agent
-claimed, or that is no longer assigned to that agent. A notice that gets no
+claimed, or that is no longer assigned to that agent. `notify` takes no pass
+lock, so it can record a notice for a bead's new assignee while a pass runs.
+Every retire therefore re-reads the bead first, in a pass and in `notify`
+alike. A record that now names another agent, or a notice owed again, stays
+for the next pass. `bd` has no conditional unset, so a notice recorded between
+that read and the retire's write is still lost. A notice that gets no
 turn requested keeps the record and fails the pass, and the next pass tries
 it again. Unless the agent has archived the first mail, the dedup key keeps
 that retry from adding a second copy, and `gc session nudge` requests the
