@@ -162,7 +162,9 @@ it again. Unless the agent has archived the first mail, the dedup key keeps
 that retry from adding a second copy, and `gc session nudge` requests the
 turn. A pass that dies between the send and the retire costs no second
 message either, only a second turn request. `list` shows each notice owed
-and what decides it, and `disarm` clears one with the rest of the record.
+and what decides it. The `disarm` verb clears a notice with the rest of the
+record, while a pass that retires an arm on the same bead leaves its notice
+owed.
 
 `first-reaction-dispose.sh` asks for the notice on both of its named-agent
 exits: `--assign`, whose bead is normally ready, and `--then-assign`, whose

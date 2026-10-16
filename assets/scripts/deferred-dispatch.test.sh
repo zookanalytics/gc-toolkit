@@ -50,7 +50,9 @@
 #     once bd reports its bead ready, retires one on a closed, claimed or
 #     reassigned bead, fails on a send it cannot make, a turn it cannot request
 #     or a notice listing it cannot read while its slings still run, leaves one
-#     past its budget, and list shows them; disarm clears one;
+#     past its budget, and list shows them; disarm clears one, while a pass that
+#     retires an arm on the same bead leaves it; a title or a notice value that
+#     spells a second row forges none;
 #   * the closed-bead retire arm;
 #   * the CONVOY-LEAK guards — gc sling mints an input convoy per call, so an arm
 #     that never finalizes must not be re-slung forever: an arm whose work
@@ -1156,6 +1158,23 @@ has "$(notes b-1)" "superseded" "disarm records why"
 store '[{"id":"n-1","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":false}]'
 "$SUT" disarm n-1 >/dev/null 2>&1
 eq "$(meta n-1 gc.notify_when_ready)" "<absent>" "disarm clears a notice owed too"
+store '[{"id":"n-1","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]","gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":false}]'
+"$SUT" disarm n-1 >/dev/null 2>&1
+eq "$(meta n-1 gc.dispatch_when_ready)" "<absent>" "disarm on a bead with an arm and a notice clears the arm"
+eq "$(meta n-1 gc.notify_when_ready)" "<absent>" "and the notice, in the same verb"
+
+# A pass retires an arm through the same write, which leaves a notice owed on
+# the bead: only the notice's own send or retire, or the disarm verb, clears it.
+echo "# a pass that retires an arm leaves the bead's notice owed"
+store '[{"id":"b-1","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]","merge_result":"pull_request","gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":false},
+        {"id":"b-2","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_slung":"slung@2026-01-01T00:00:00Z","gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":false}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a pass that retires arms on beads with notices owed exits 0"
+eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "the pass retires an arm whose work another path delivered"
+eq "$(meta b-1 gc.notify_when_ready)" "gc-toolkit.mechanik" "and leaves the notice owed on the same bead"
+eq "$(meta b-2 gc.dispatch_when_ready)" "<absent>" "the pass retires an arm whose sling it proved"
+eq "$(meta b-2 gc.notify_when_ready)" "gc-toolkit.mechanik" "and leaves that bead's notice owed too"
+has "$out" "notices: 0 sent, 0 retired, 2 waiting" "the notices still wait on bd's readiness"
 
 # --- notify: the dispatch a named agent's work owes ---------------------------
 # A named session's hook offers it a bead by assignee once bd reports the bead

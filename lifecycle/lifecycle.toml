@@ -1484,8 +1484,9 @@ keys = [
 #   requested: by the mail's `notified`, or else by gc session nudge. Otherwise
 #   reconcile does both once bd does. A notice that gets no turn requested keeps
 #   it for the next pass. A pass clears it unsent on a bead that closed, that
-#   the agent claimed, or that is no longer assigned to that agent, and disarm
-#   clears it with the family.
+#   the agent claimed, or that is no longer assigned to that agent. The disarm
+#   verb clears it with the family, while reconcile retiring an arm on the same
+#   bead leaves it.
 # gc.deferred_routed_to / gc.deferred_execution_routed_to / gc.deferred_assignee —
 #   the deferred counterparts of gc.routed_to, gc.execution_routed_to and the
 #   assignee: the routing a fired dispatch restores. mol-polecat-work's bd-ready

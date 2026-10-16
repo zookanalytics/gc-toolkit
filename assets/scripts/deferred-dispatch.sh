@@ -424,8 +424,15 @@ hold_of() { # id seed_file graph_file -> summary on stdout
 }
 
 # --- disarm ------------------------------------------------------------------
-disarm_bead() { # id reason -> rc
+# Clears the dispatch record, and each further key the caller names in the same
+# write. reconcile retires an arm through it and names none, so a notice owed on
+# the same bead outlives the arm: only its own send or retire, or the disarm
+# verb, clears it.
+disarm_bead() { # id reason [key]... -> rc
     local id="$1" reason="${2:-}"
+    local -a also=()
+    shift 2 || shift $#
+    while [ $# -gt 0 ]; do also+=(--unset-metadata "$1"); shift; done
     bd_ update "$id" \
         --unset-metadata "$K_TARGET" \
         --unset-metadata "$K_ARGS" \
@@ -434,7 +441,7 @@ disarm_bead() { # id reason -> rc
         --unset-metadata "$K_REASON" \
         --unset-metadata "$K_SLUNG" \
         --unset-metadata "$K_FAILS" \
-        --unset-metadata "$K_NOTIFY" \
+        ${also[@]+"${also[@]}"} \
         --append-notes "$PROG: dispatch record cleared at $(now_utc)${reason:+ — $reason}" >/dev/null 2>&1
 }
 
@@ -450,7 +457,9 @@ cmd_disarm() {
         esac
         shift || true
     done
-    disarm_bead "$bead" "${reason:-disarmed by $(actor)}" || {
+    # The verb withdraws everything this script owes on the bead: the arm, and
+    # any notice owed.
+    disarm_bead "$bead" "${reason:-disarmed by $(actor)}" "$K_NOTIFY" || {
         echo "$PROG: disarm: failed to clear the dispatch record on $bead" >&2; return 1; }
     echo "$PROG: disarmed $bead"
 }
