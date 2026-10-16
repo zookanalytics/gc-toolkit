@@ -264,12 +264,17 @@ if [ "$REVIEW_STATUS" = "closed" ]; then
 fi
 CHECK_NAME=$(row_meta "$REVIEW_ROW" check_name)
 [ -n "$CHECK_NAME" ] || CHECK_NAME=correctness
+# CHECK_NAME is the lane token the review was dispatched under, in the case the
+# anchor's check_set wrote it. CHECK is the check whose method the review ran,
+# known by its name case-folded as the check index resolves a token, and the
+# triage and demo rules below go by it.
+CHECK=$(printf '%s' "$CHECK_NAME" | tr '[:upper:]' '[:lower:]')
 
 # --add-gates carries triage's classification, so it is recorded only by a triage
 # approve. Refuse anything else before anything is written.
 if [ -n "$ADD_GATES" ]; then
   [ "$VERDICT" = "approve" ] || { warn "--add-gates carries a classification, which only an approve verdict records; nothing written"; exit 1; }
-  [ "$CHECK_NAME" = "$TRIAGE_GATE" ] || { warn "only the '$TRIAGE_GATE' check may widen a check_set (this review is '$CHECK_NAME'); nothing written"; exit 1; }
+  [ "$CHECK" = "$TRIAGE_GATE" ] || { warn "only the '$TRIAGE_GATE' check may widen a check_set (this review is '$CHECK_NAME'); nothing written"; exit 1; }
 fi
 
 # --visual carries the demo check's decision: whether the change needs a visual
@@ -286,7 +291,7 @@ fi
 VISUAL=$(printf '%s' "$VISUAL" | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g')
 VISUAL_FALLBACK=$(printf '%s' "$VISUAL_FALLBACK" | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g')
 modality_cost() { case "$1" in repo-artifact) echo 1 ;; screenshot) echo 2 ;; video) echo 3 ;; *) echo 0 ;; esac; }
-if [ "$CHECK_NAME" = "$VISUAL_GATE" ]; then
+if [ "$CHECK" = "$VISUAL_GATE" ]; then
   case "$VISUAL" in
     none|repo-artifact|screenshot|video) ;;
     '') warn "the '$VISUAL_GATE' check records its visual decision on every verdict: pass --visual none|repo-artifact|screenshot|video. Nothing written"; exit 1 ;;
@@ -336,7 +341,7 @@ is_rows "$ANCHOR_ROW" || { warn "anchor $ANCHOR does not resolve; nothing writte
 # again, which carries out what was recorded. A round another review ruled on
 # owes this verdict nothing.
 ROUND_HEAD=""; ROUND_RULING=""
-if [ "$CHECK_NAME" = "$TRIAGE_GATE" ]; then
+if [ "$CHECK" = "$TRIAGE_GATE" ]; then
   ROUND=$(printf '%s' "$ANCHOR_ROW" | jq -c --arg rv "$REVIEW_BEAD" '(.[0].metadata.bring_current_record // null)
     | if type == "string" then (fromjson? // null) else . end
     | if type == "object" and .class == "conflicted"
@@ -346,7 +351,7 @@ if [ "$CHECK_NAME" = "$TRIAGE_GATE" ]; then
   ROUND_RULING=$(printf '%s' "$ROUND" | jq -c '.ruling // empty' 2>/dev/null)
 fi
 if [ -n "$REOPEN$ROUND_REASON$DISMISS_APPROVAL" ]; then
-  [ "$CHECK_NAME" = "$TRIAGE_GATE" ] && [ "$VERDICT" = "approve" ] \
+  [ "$CHECK" = "$TRIAGE_GATE" ] && [ "$VERDICT" = "approve" ] \
     || { warn "--reopen, --round-reason and --dismiss-approval carry triage's ruling on a bring-current round, which only a triage approve records; nothing written"; exit 1; }
   [ -n "$ROUND_HEAD" ] \
     || { warn "no bring-current round on $ANCHOR awaits triage's ruling; drop --reopen, --round-reason and --dismiss-approval. Nothing written"; exit 1; }
