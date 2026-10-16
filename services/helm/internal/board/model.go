@@ -264,10 +264,10 @@ type Tile struct {
 	// Weight is the rank PROXY: subtree size + priority weight + a capped
 	// cross-rig-ref count. It is the middle lane of rank_score.
 	Weight int `json:"weight"`
-	// Held is visit presence: an open visit bead names this anchor in its
-	// gc.continuation_group, so a conversation is holding it. A held anchor is
-	// never stranded — the conversation IS the attention it would be flagged
-	// for lacking.
+	// Held is visit presence: an open visit bead covers this anchor by the
+	// shared visit identity ([Facts.Visits]), so a conversation is holding it. A
+	// held anchor is never stranded — the conversation IS the attention it would
+	// be flagged for lacking.
 	Held bool `json:"held"`
 	// VisitState refines Held into the visit's engagement: VisitEngaged when a
 	// live sitting is in the conversation right now, VisitParked when the visit
@@ -506,22 +506,24 @@ type Tile struct {
 	// too. A rig the board holds no pull request URL for keeps the bare branch.
 	PRBranchURL string `json:"pr_branch_url"`
 
-	// PRPhase is this merge anchor's PR status. On a live anchor it is who must act
-	// next — `working`, `needs-review`, or `needs-attention` — the same status:
-	// taxonomy pr-status-label.sh projects to the GitHub PR list, so the board and
-	// the label read one vocabulary rather than two. On a closed anchor it is the
-	// PR's resolved state, `merged` or `closed`, so a done row names how its PR
-	// ended rather than freezing on its last live value. Empty on a non-merge row.
+	// PRPhase is this merge anchor's PR status. On a live anchor it is what stands
+	// between the PR and landing — `working`, `needs-review`, or
+	// `needs-attention` — the same status: taxonomy pr-status-label.sh projects
+	// to the GitHub PR list, so the board and the label read one vocabulary
+	// rather than two. On a closed anchor it is the PR's resolved state,
+	// `merged` or `closed`, so a done row names how its PR ended rather than
+	// freezing on its last live value. Empty on a non-merge row.
 	PRPhase string `json:"pr_phase"`
 
 	// Phase is this bead's liveness in the shared tri-state vocabulary —
 	// `working`, `needs-review`, or `needs-attention` — and the word the frontier
 	// leads with on every live row. It begins as the per-bead value
-	// [prstatus.Derive] names from the same inputs PRPhase reads: holds, posture,
-	// the draft stage, and for a merge anchor its open rework/review children, or
-	// for any other bead the live-workflow signal standing over it. A bead's board
-	// liveness and its GitHub `status:` label come from that one core. A row WITH
-	// child tiles then takes their rolled-up state in place of that per-bead value
+	// [prstatus.Derive] names from the same inputs PRPhase reads: holds, an open
+	// visit, posture, the draft stage, and for a merge anchor its open
+	// rework/review children, or for any other bead the live-workflow signal
+	// standing over it. A bead's board liveness and its GitHub `status:` label
+	// come from that one core. A row WITH child tiles then takes their rolled-up
+	// state in place of that per-bead value
 	// ([aggregatePhases]): an epic's frontier is its children's frontier.
 	//
 	// Phase and PRPhase are therefore two independent axes. PRPhase is the PR
@@ -558,10 +560,17 @@ type Tile struct {
 type Sitting struct {
 	ID  string `json:"id"`
 	Rig string `json:"rig"`
-	// Subject is the anchor this conversation is about, from the visit's
-	// gc.continuation_group — the same field Facts.Visits keys Tile.Held on.
+	// Subject is the bead this conversation is about, by the shared visit
+	// identity (assets/scripts/visit-identity.sh): the first bead the visit's
+	// tracks edges name, or its gc.continuation_group stamp when it has no tracks
+	// edge.
 	Subject string `json:"subject"`
-	Title   string `json:"title"`
+	// Subjects is every bead the visit covers by the same identity: each bead its
+	// tracks edges name, or the stamp alone when it has no tracks edge. A
+	// running sitting holds each of them (Facts.Visits). It is a derivation
+	// input, not part of the record the web renders, so it carries no wire tag.
+	Subjects []string `json:"-"`
+	Title    string   `json:"title"`
 	// Status is the visit bead's own status. A sitting is finished when this
 	// reads "closed" and running under any other value: a CLAIMED visit is a
 	// held conversation, which is why liveStatuses admits in_progress.
@@ -665,7 +674,8 @@ func (s Sitting) Headline() string {
 // every anchor then reads as unheld, with nothing in flight and no owner
 // liveness known.
 type Facts struct {
-	// Visits holds the ids of anchors an open visit bead names.
+	// Visits holds the ids of the beads an open visit covers, by the shared
+	// visit identity [Sitting.Subjects] carries.
 	Visits map[string]bool
 	// Inflight maps a work-bead id to the session names of the live graph.v2
 	// workflows standing over it. The gather resolves each live workflow root
