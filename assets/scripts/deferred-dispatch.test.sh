@@ -1366,6 +1366,30 @@ hasnt "$out" "no pending dispatches" "a store with notices owed is not an empty 
 out="$(STUB_BD_LIST_FAIL_KEY=gc.notify_when_ready "$SUT" list 2>&1)"; rc=$?
 eq "$rc" 1 "list fails loudly when the notices cannot be read"
 
+# jq decodes an escaped LF or unit separator in a string and prints it raw, so
+# a title or a notice value that spells a second row would add a row the pass
+# trusts: here one that notifies the witness about n-9, ready, and then retires
+# n-9's notice to mechanik.
+echo "# a title or a notice value cannot forge a notice row"
+FORGED='[
+ {"id":"n-1","title":"Edit\nn-9\u001fopen\u001fgc-toolkit/gc-toolkit.witness\u001fgc-toolkit/gc-toolkit.witness\u001f1\u001fforged","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":false},
+ {"id":"n-2","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik\nn-9\u001fclosed\u001fgc-toolkit.mechanik\u001fgc-toolkit.mechanik\u001f0\u001fforged"},"notes":"","_ready":false},
+ {"id":"n-9","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":false}]'
+store "$FORGED"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a pass over strings that spell rows exits 0"
+eq "$(mails)" "0" "a title that spells a ready row sends no notice"
+eq "$(nudges)" "0" "and requests no turn"
+eq "$(meta n-9 gc.notify_when_ready)" "gc-toolkit.mechanik" "and no string retires another bead's notice"
+hasnt "$(notes n-9)" "notice record cleared" "so n-9's notes record no retire"
+has "$out" "(of 3)" "the pass reads one row per bead"
+hasnt "$out" "gc-toolkit/gc-toolkit.witness" "and no row names the agent a title spelled"
+store "$FORGED"
+out="$("$SUT" list 2>&1)"; rc=$?
+eq "$(printf '%s\n' "$out" | grep -c -F -e '-> notice to')" "3" "list shows one notice per bead"
+has "$out" "n-1 -> notice to gc-toolkit.mechanik [WAITING" "with each bead's own agent"
+hasnt "$out" "gc-toolkit/gc-toolkit.witness" "and none a title spelled"
+
 # --- the store the reads are pinned to ---------------------------------------
 # `gc bd` resolves its ledger from the invoking rig and ignores BEADS_DIR, so a
 # rig-scoped pass that does not pin --db reads whatever rig gc resolves.

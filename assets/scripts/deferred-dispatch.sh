@@ -509,10 +509,14 @@ retire_notice() { # id reason -> rc
 # One line per bead that carries a notice record:
 # "<id>\037<status>\037<assignee>\037<agent>\037<bd_ready 0|1>\037<title>".
 # The ready column is bd's answer for the bead, the readiness the agent's hook
-# reads. Unreadable is not empty: a listing that fails, or answers no array,
-# fails the read. A store that owes no notice costs the one listing, since there
-# is nothing to ask bd's readiness about. Both snapshots reach jq over stdin, as
-# armed_rows' do.
+# reads. Every column has its control characters replaced inside jq. The scrub
+# removes only raw bytes, and jq decodes an escaped LF or unit separator in a
+# string and prints it raw, so a title, an assignee or a notice value carrying
+# one would split the line into a second row, with whatever bead, agent and
+# readiness it spells, or shift its columns. Unreadable is not empty: a listing
+# that fails, or answers no array, fails the read. A store that owes no notice
+# costs the one listing, since there is nothing to ask bd's readiness about.
+# Both snapshots reach jq over stdin, as armed_rows' do.
 notice_rows() { # out
     local out="$1" all ready
     all="$(bd_ list --has-metadata-key "$K_NOTIFY" --all --brief --json --limit 0 2>/dev/null)" || return 1
@@ -528,7 +532,7 @@ notice_rows() { # out
         | input | .[]
         | [ (.id // ""), (.status // ""), (.assignee // ""), ((.metadata // {})[$k] // ""),
             (if (.id as $i | $ready | index($i)) then "1" else "0" end), (.title // "") ]
-        | map(tostring) | join("\u001f")' > "$out" 2>/dev/null
+        | map(tostring | gsub("[[:cntrl:]]"; " ")) | join("\u001f")' > "$out" 2>/dev/null
 }
 
 cmd_notify() {
