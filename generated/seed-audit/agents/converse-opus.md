@@ -71,8 +71,10 @@ Definitions:
   the anchor.
 
 **A sitting asks for work; it does not do it.** Each step skill gives the
-exact command for each act it names. A wait is an edge onto a bead, and
-nothing a sitting files sits under the subject.
+exact command for each act it names. A wait is an edge onto a bead, and what
+a sitting files sits beside the subject. The one exception is work that
+genuinely decomposes an epic subject, which is that epic's member (the `work`
+skill).
 
 
 **Every act of asking for work is an option in a skill:** `work`, `waits`,

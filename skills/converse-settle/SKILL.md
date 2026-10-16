@@ -51,7 +51,7 @@ each demand gate when the sitting settled the question (`--ruled yes`, with the
 to, chosen as below)
 and re-states each when it did not (`--ruled no`, with what is
 `--still-owed`). What is waiting on the subject is yours to state: one
-`--waiting-on <bead>` per bead this sitting ROUTED work into, `--no-wait`
+`--waiting-on <bead>` per dependency this sitting ROUTED work into, `--no-wait`
 when it settled the subject and nothing is waiting, and NEITHER where the
 subject is parked for a person. It exits non-zero when it stopped short of
 discharging the hold, and then you must NOT sign off:
@@ -88,6 +88,10 @@ that one is theirs to close.
   then send the subject: `gc sling <rig>/<pool> "$SUBJECT" --on <formula>`.
 - **New work carries it.** File and send that work (below), then sign off
   with `--ruled yes --route human --waiting-on <the work>`.
+- **New work decomposes an epic subject.** File it as the subject's member and
+  send it (below), then sign off with `--ruled yes --route human --no-wait`,
+  or with `--waiting-on` naming only the dependencies the sitting also sent.
+  A member takes no `--waiting-on`, because bd refuses that edge.
 
 **On a `--ruled yes` sign-off whose subject is an open PR
 (`merge_result=pull_request`), answer whether the ruling changes what the
@@ -139,18 +143,22 @@ what it settled.
 "$CONV/pr-visit-comment.sh" close --visit "$VISIT" --subject "$SUBJECT" || true
 ```
 **If this sitting ROUTED work, file and send it, then pass
-`--waiting-on <work-bead>` to the sign-off for each bead it sent.** The
+`--waiting-on <work-bead>` to the sign-off for each dependency it sent.** The
 `work` skill says which bead carries the work and how to choose its formula.
 The sling runs only once the create returned the bead's id:
 ```bash
 WORK=$(gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json | jq -er '.id') \
   && gc sling <rig>/<pool> "$WORK" --on <formula>
 ```
-Never file it under the subject. Add `--parent <epic>` to the create only when
-the work belongs to that epic. The subject's own parent,
+File it beside the subject, not under it: work the subject waits on is a
+dependency, and that is the default. Add `--parent <epic>` to the create only
+when the work belongs to that epic. The subject's own parent,
 `"$CONV/converse-parent.sh" "$SUBJECT"`, applies only when the new work serves
-the same epic. Run the create as `gc bd --rig <rig> create` when the pool's
-rig is not this session's. The takeaway alone cannot carry the wait: *waiting
+the same epic. Work that genuinely decomposes an epic subject is the one
+exception. It is the subject's member, created with `--parent "$SUBJECT"`, and
+it gets no `--waiting-on`, because bd refuses a `blocks` edge from a parent to
+its own descendant. Run the create as `gc bd --rig <rig> create` when the
+pool's rig is not this session's. The takeaway alone cannot carry the wait: *waiting
 and holding are graph states, not comments.* An edge that will not take warns
 on stderr and the takeaway still lands.
 

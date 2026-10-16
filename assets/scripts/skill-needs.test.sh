@@ -304,6 +304,13 @@ lacks "…and no blanket rule keeps new work out from under the bead it came fro
 lacks "…in the body or in the description every agent reads" \
     'never under the bead it came from' "$WORK_SKILL" \
     "the description carries the rule to every role, so it states both cases"
+have "the settle step files an epic subject's decomposition as its member" \
+    'created with `--parent "$SUBJECT"`' "$SETTLE"
+have "…and gives that member no --waiting-on" \
+    'it gets no `--waiting-on`' "$SETTLE"
+lacks "…and keeps no blanket rule against filing under the subject" \
+    'Never file it under the subject' "$SETTLE" \
+    "an epic subject's decomposition is filed as its member"
 have "the settle step gives the arm it names" 'deferred-dispatch.sh" arm <follow-up>' "$SETTLE"
 have "the prompt gives the disposal writer's call" 'bead-rehome.sh" --origin "$SUBJECT"' "$PROMPT"
 have "the prompt gives the retire call" 'pr-dispose.sh" --anchor "$SUBJECT"' "$PROMPT"
