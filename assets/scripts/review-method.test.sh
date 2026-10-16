@@ -130,8 +130,8 @@ for l in "$REFS"/*; do
 done
 
 echo "# the flags only a check's method passes to signoff.sh"
-# A check-specific flag is one signoff.sh takes, a method file or dispatch arm
-# names, and the lifecycle's own verdict call does not carry.
+# A check-specific flag is one signoff.sh takes, a check's method file or
+# dispatch note names, and the lifecycle's own verdict call does not carry.
 grep -oE '^    --[a-z][a-z-]*\)' "$ROOT/assets/scripts/signoff.sh" | tr -d ' )' | sort -u > "$TMP/signoff-flags"
 grep -F '/signoff.sh" --review-bead' "$LIFE" | grep -oE -- '--[a-z][a-z-]*' | sort -u > "$TMP/call-flags"
 : > "$TMP/method-text"
