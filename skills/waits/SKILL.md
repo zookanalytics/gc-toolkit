@@ -1,16 +1,18 @@
 ---
 name: waits
-description: Use when something must not go yet because it has to wait for other work to land, or for a person to decide or act. Covers making a bead wait on another (blocked by, depends on, after that lands), asking a person for a decision, a task or a conversation (a demand gate, a visit, escalating a blocker), having work start by itself once its wait clears (arming a deferred dispatch), and releasing a wait (resolving a demand, removing an edge, disarming). To send work that is free to go, use work; to hold a pull request's merge, use prs.
+description: Use when something must not go yet because it has to wait for other work to land, or for a person to decide or act. Covers making a bead wait on another (blocked by, depends on, after that lands), having a bead close by itself when the work that resolves it lands, instead of coming back to triage (an until edge, for a bead that is done or moot once that lands), asking a person for a decision, a task or a conversation (a demand gate, a visit, escalating a blocker), having work start by itself once its wait clears (arming a deferred dispatch), and releasing a wait (resolving a demand, removing an edge, disarming). To send work that is free to go, use work; to hold a pull request's merge, use prs.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
 # Waits: when work can go
 
-A wait is an edge onto a bead, and a bead is either ready or blocked. There is
-no parked state. What a person owes is a demand bead and what a pool owes is a
-work bead, and either way the thing waiting carries a `blocks` edge to it, which
-keeps it out of `bd ready` until that bead closes. Never write `triage.hold`,
-and never leave a stamped, still bead as the record of a wait.
+A wait is an edge onto a bead, and there is no parked state. What a person owes
+is a demand bead and what a pool owes is a work bead. A bead that still has work
+to do once that bead closes is blocked by it: a `blocks` edge keeps it out of
+`bd ready` until that bead closes, and then it is ready. A bead whose whole job
+ends when that bead closes carries an `until` edge to it instead, and is closed
+once that bead has closed. Never write `triage.hold`, and never leave a
+stamped, still bead as the record of a wait.
 
 Each option says what the message means, who acts on it, and the one writer
 that sends it. The writer's `--help` carries its flags. The writers are the
@@ -41,6 +43,40 @@ the operator resolves once the blocker lands.
 - A pull request's anchor that waits on an open bead cannot merge until that
   bead closes. When a follow-up needs the PR on main, make the follow-up wait
   on the anchor, never the anchor on the follow-up.
+
+## Have a bead close by itself when other work lands
+
+The message is that this bead's whole job ends once that one closes: when that
+work lands, nothing is left to do here. The deferred-dispatch order's reconcile
+pass acts on it. Once every `until` target of the bead has closed, the pass
+closes the bead through `bead-rehome.sh`, pointing it at the target that closed
+last (`gc.superseded_by`), instead of letting it come back to triage as fresh
+work.
+
+Writer: `gc bd dep add <bead> <target> --type=until`. Read the edge back with
+`gc bd dep list <bead> --direction=down -t until`. When it does not read back,
+the target is in another rig's store, where the pass cannot see it close, so
+remove that edge and ask a person to close the bead once the target lands (a
+demand, below).
+
+- bd keeps one edge type per pair of beads and refuses a second, so the bead
+  carries `until` to its target and not `blocks` as well. To turn a `blocks`
+  wait into this one, remove that edge first with
+  `gc bd dep remove <bead> <target>`.
+- `until` does not block, so the bead reads as ready while its target is open.
+  Give it no route and no arm: a pool takes a routed bead that is ready, the
+  next pass sends an armed one, and the pass never closes a bead that has
+  either. Disarm an arm it has (below).
+- The pass closes only a pure wait: an open, unassigned bead that no open
+  `blocks` blocker of its own holds and that carries no live work. Live work
+  includes a route or an arm, a branch or a PR, a `task_kind`, an open child, a
+  convoy that tracks the bead, and an issue type other than task, bug, feature,
+  chore or spike. `assets/scripts/live-work.sh` defines every mark. The pass
+  leaves a resolved bead with live work open, and
+  `doctor/check-until-resolved-owed` reports it as a decision for a person.
+- A headline on the bead (the records skill) takes `--no-wait`, because
+  nothing holds it: `--waiting-on` writes a `blocks` edge, which bd refuses
+  beside the `until` one.
 
 ## Wait on a person
 
@@ -102,6 +138,8 @@ limits arming too (the work skill).
 
 - **Work waiting on work** needs nothing: closing the blocker releases it. To
   drop a wait that no longer applies, `gc bd dep remove <waiting-bead> <blocker>`.
+- **A bead other work resolves** needs nothing: the pass closes it. To keep it,
+  remove the edge: `gc bd dep remove <bead> <target>`.
 - **A decision a person owed** is released by the answer:
   `gc bd gate resolve <gate> --reason "<the answer>"`. In a sitting, the
   sign-off's `--ruled yes` resolves the demands its hold filed and releases a
