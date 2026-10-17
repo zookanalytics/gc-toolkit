@@ -316,9 +316,12 @@ when it lands.
 
 ### A short record
 
-A record the dispatch wrote is never short. gate-ensure writes the whole record
-before it pours the review (`gate-ensure.sh:1050-1067`), a pour that lacks a
-required var fails, and nothing moves or removes a value afterwards.
+A review the dispatch pours is never short of its record. gate-ensure slings a
+review only once its whole record reads back (`gate-ensure.sh:1050-1067`). A
+create that reads back short is not slung. bd_create closes one the in-flight
+probe could not find, and the stranded arm completes any other before it slings
+it (`:1045-1049`, section 2). A pour that lacks a required var fails, and
+nothing moves or removes a value afterwards.
 
 signoff.sh is the one writer that removes a value today. When it refuses a
 verdict whose commit a rewrite took off the branch, it clears `reviewed_oid`
@@ -340,25 +343,28 @@ fresh review at the live head.
 
 signoff.sh is also the one writer that can move the pin. Today a
 `--reviewed-oid` that names another commit replaces it (`signoff.sh:414-421`,
-`:589`), as `signoff.test.sh:541-545` asserts. Under this design signoff.sh
+`:589`), as `signoff.test.sh:538-542` asserts. Under this design signoff.sh
 refuses that call and writes nothing, so a verdict either names the commit its
 review was dispatched for or is not recorded. Every review formula's verdict
 call passes `{{reviewed_oid}}`, so no dispatched review meets the refusal. A
 record with no pin, a review made by hand or before this design, still takes
 the commit the call names.
 
-A short record therefore means a review made by hand or before this design.
-load-dispatch says what a missing value means, and the quorum's lanes and its
-synthesis say the same. A value the review lacks is empty, as the PR keys are
-before a PR opens. When a value the table marks always is empty, the step
-reviews nothing. It appends to the review's notes which key is missing and
+So a claimant meets a short record only on a review made by hand or before this
+design. load-dispatch says what a missing value means, and the quorum's lanes
+and its synthesis say the same. A value the review lacks is empty, as the PR
+keys are before a PR opens. When a value the table marks always is empty, the
+step reviews nothing. It appends to the review's notes which key is missing and
 ends as the verdict step's failure arm does, except that it leaves the route
-empty, because the next claim would meet the same gap. A claimant holding the
-review with no workflow releases its claim. A dispatched review never meets
-that refusal. A review meets it when a person slung it with a required var
-given empty, which a pour accepts (`parser.go:728-731` refuses only a var not
-given), or when its claimant holds it with no workflow and its record lacks
-the key.
+empty, because the next claim would meet the same gap. A quorum lane writes
+nothing outside its own step bead (`mol-review-quorum-signoff.toml:80-82`), so
+a lane that meets the gap names the key in its lane output with the `blocked`
+verdict and closes its step, and the synthesis makes the refusal. A claimant
+holding the review with no workflow releases its claim. A dispatched review
+never meets that refusal. A review meets it when a person slung it with a
+required var given empty, which a pour accepts (`parser.go:728-731` refuses
+only a var not given), or when its claimant holds it with no workflow and its
+record lacks the key.
 
 The refused review is left open with nothing driving it. One that was never
 poured is the stranded arm's, which completes its record before it slings the
@@ -895,7 +901,7 @@ review.
    still recorded and no verdict. A `--reviewed-oid` that names a commit other
    than the record's is refused with nothing written, and one given for a
    record with no pin is recorded. The suite's cases that assert today's clear
-   (`:667`) and the flag replacing the pin (`:463-467`, `:541-545`,
+   (`:667`) and the flag replacing the pin (`:463-467`, `:538-542`,
    `:698-705`) are rewritten to these.
 3. **The vars meet the formulas** (new, structural). Every `{{name}}` in
    `mol-review` and the quorum is a var the formula declares, `convoy_id`
