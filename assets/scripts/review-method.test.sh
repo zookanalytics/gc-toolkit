@@ -40,9 +40,9 @@
 #                of the full suite or the affected subset is evidence and runs
 #                no suite, a fail whose record the anchor's pre-existing mark
 #                holds at that commit is not run again, any other fail is run
-#                again with --force, and no record, a pass that ran nothing, a machine
-#                failure or no binary runs the suites the diff touches through
-#                the gate; in bash and in zsh.
+#                again with --force, and no record, a pass that ran nothing,
+#                a machine failure or no binary runs the suites the diff
+#                touches through the gate; in bash and in zsh.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

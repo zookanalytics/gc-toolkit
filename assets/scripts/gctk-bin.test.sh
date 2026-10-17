@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Hermetic test for the gctk-bin block: the one line by which a formula step,
 # the review frame, self-review-check.sh and rig-check-pre-existing.sh find the
-# gctk binary they call directly, as $GCTK. Formula text has no include mechanism, so each caller
-# carries the line in a `# >>> gctk-bin` block, and this holds every copy to
-# the one definition and runs it.
+# gctk binary they call directly, as $GCTK. Formula text has no include
+# mechanism, so each caller carries the line in a `# >>> gctk-bin` block, and
+# this holds every copy to the one definition and runs it.
 #
 # run-tests-scope: tree
 #
