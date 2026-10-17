@@ -70,23 +70,13 @@ Definitions:
   re-asks. To pause the merge too, step 5 takes an explicit opt-in demand on
   the anchor.
 
-**A wait is an edge onto a bead, and a bead is either ready or blocked.**
-There is no parked state: what a person owes is a demand bead, what a
-pool owes is a work bead, and either way the thing waiting carries a
-`blocks` edge to it. Never write `triage.hold`, and never leave a
-stamped, still subject as the record of a wait.
+**A sitting asks for work; it does not do it.** Each step skill gives the
+exact command for each act it names. A wait is an edge onto a bead, and what
+a sitting files sits beside the subject. The one exception is work that
+genuinely decomposes an epic subject, which is that epic's member (the `work`
+skill).
 
-**So everything a sitting files is a SIBLING of the subject, never a
-child.** beads REFUSES a `blocks` edge from a parent to its own
-descendant, so anything filed under the subject could never gate it.
-`gc-helm.sh demand` gives the demand the subject's OWN parent; file work
-you route the same way (`--parent <the subject's parent>`, or no parent
-when the subject has none). Read that parent with `converse-parent.sh`
-(it takes `$SUBJECT` in its environment or as its one argument and prints
-the subject's own parent, or an empty line when the subject has none),
-since a `parent-child` edge is stored on the child. Work already filed as
-a child of its subject stays where it is
-(`docs/gascity-human-engagement.md`).
+{{ template "ask-for-work" . }}
 
 **The hand-back — the shape every framing wears.** A **hand-back** is a
 wrap-up the operator can act on from its last several lines alone. Detail
@@ -282,6 +272,7 @@ even when you think you remember the procedure.
 | **Step 5** — hold: file the demand gate and post the framing *(safety-critical)* | `converse-hold` |
 | **Steps 6–7** — record the outcome, sign off, and close the visit *(safety-critical close)* | `converse-settle` |
 | **Step 8** — continue within this group, or drain | `converse-continue` |
+| **Acting on a ruling, at any step** | `work`, `waits`, `records`, `prs` |
 
 Step 1's arms name later steps by number: its `action=hold` recovery
 re-opens a held sitting "at step 4 and then step 5", its `finish` arm runs
@@ -297,10 +288,12 @@ Rules:
 - **A visit acts on its universe; it does not change a repo.** Within a
   sitting you act on beads and on the subject's PR: you file, update, close
   and dispose beads; comment on the PR; reply to and resolve its review
-  threads; and retire it. Post every comment and reply through
-  `assets/scripts/pr-post.sh` (`comment`, `reply`), which marks it as the
-  city's own; the reconcile reads an unmarked post on the PR as new feedback
-  and routes it into rework. What you never do is change a repository. Never
+  threads; and retire it. Every post on the PR goes through `pr-post.sh`,
+  which adds the city's mark (the `prs` skill):
+  `"$CONV/pr-post.sh" reply --host github.com --thread <PRRT_ id> --body-file <file>`
+  in a review thread, and
+  `"$CONV/pr-post.sh" comment --repo github.com/<owner>/<name> --pr <number> --body-file <file>`
+  on the conversation. What you never do is change a repository. Never
   write files into one and never run `git commit`, in any repository, not
   only the rig checkout. The reason is not what a particular checkout holds:
   a sitting is a conversation, and a conversation is not a unit of work.
@@ -355,44 +348,41 @@ Rules:
   the subject to `mol-validate-close`, which closes it on its own confident
   check and otherwise leaves it open and files the visit. The operator must
   have agreed, in this sitting, that the subject should close; what the ruling
-  licenses then follows the subject's state. A **no-work** subject you dispose
-  directly: its `merge_result` empty or absent, or `merged`, unassigned,
-  holding no branch or PR still in flight to a pool, and not a review, step, or
-  workflow bead. This is the no-work shape `bead-rehome.sh` disposes, proved by
-  `gc.work_outcome=no-op` or no work-product key (the
-  `Close-with-successor` row of `docs/authority-map.md`); record
-  `gc.work_outcome=no-op` on the subject, then close it through the one writer:
-  `assets/scripts/bead-rehome.sh --origin <subject> --successor <bead> --kind
-  re-homed|folded|fixed-upstream|duplicate|not-needed --note "<the sitting's
-  reason>"` (find it as the scripts are found in step 1). A subject whose
-  **in-flight PR** the ruling is to close, you **retire**: the PR is
-  closed and the anchor disposed as superseded in one act, so no
-  `abandoned` husk is left and `pr-facts.sh` finds an already-closed anchor
-  instead of filing a re-ask visit. A non-closed `merge_result` such as
-  `pull_request` or `pre_open_gate` does not bar the ruling; the only bar
-  is a repo change, which routes to a molecule. The forbidden shape is a
-  bare close of a subject carrying a non-closed `merge_result`:
-  that leaves the PR unlanded and is the shape `lifecycle.sh reopen` and
-  `check-closed-implies-landed` catch. Both paths close through the disposition
-  writer, which stamps `gc.superseded_by` + `gc.superseded_by_store`, reads
-  them back, and only then closes with a populated reason; under `not-needed`
-  nothing carries the work and the successor names the evidence that ruled it
-  out, this sitting's visit bead; on an already-closed bead it is the repair
-  tool. That pointer is why the guard is yours, not the doctor's:
-  `doctor/check-closed-implies-landed` exempts a disposed bead, so nothing
-  downstream re-checks the `merge_result` you did not. Doctrine:
-  `docs/state-machine.md` → "Disposition".
+  licenses then follows the subject's state. A **no-work** subject closes
+  through the disposition writer (the `work` skill, closing a bead that needs
+  no work), with this sitting's visit as the evidence. The writer runs only
+  once the no-op record landed:
+
+  ```bash
+  gc bd update "$SUBJECT" --set-metadata gc.work_outcome=no-op \
+    && "$CONV/bead-rehome.sh" --origin "$SUBJECT" --successor "$VISIT" --kind not-needed --note "<the sitting's reason, one sentence>"
+  ```
+
+  While this visit is open, the writer records the pointer and exits 5. Run
+  the same `bead-rehome.sh` line again once step 7 has closed the visit, and
+  it closes the subject. When another bead carries the work, that bead is the
+  successor, under `--kind duplicate`, `folded`, `re-homed` or
+  `fixed-upstream`. A subject whose **in-flight PR** the ruling is to close is
+  **retired**: the PR is closed and the anchor disposed as superseded in one
+  act (the `prs` skill). Retire it after the sign-off, and close the visit
+  right after it:
+
+  ```bash
+  "$CONV/pr-dispose.sh" --anchor "$SUBJECT" --successor "$VISIT" --kind not-needed --note "<the sitting's reason, one sentence>" \
+    && "$CONV/visit-close.sh" --visit "$VISIT" --outcome "<one-word-outcome>" --reason "<one line: why this sitting closed>"
+  ```
+
+  A non-closed `merge_result` such as `pull_request` or `pre_open_gate` does
+  not bar the ruling; the only bar is a repo change, which routes to a
+  molecule.
 - **Invalidating a recommendation: strip it, never edit it in place.** A
-  first-reaction visit can carry a recommendation — `gc.recommended_formula` on
-  the subject, the execution mol the operator's Accept runs. When the sitting
-  judges that recommendation no longer the right course but the subject still
-  needs discussion, withdraw Accept and keep Discuss with
-  `SUBJECT="$SUBJECT" VISIT="$VISIT" "$CONV/converse-invalidate-recommendation.sh" "<why it is no longer valid>"`
-  (`$CONV` as resolved in step 1). It strips the key, so the board stops offering
-  Accept once this visit un-engages, and leaves the visit, so Discuss remains.
-  This is disagreement short of disposal: where the ruling is that the subject
-  itself should go, use the disposition writer above — that closes the subject
-  and its gate, and a closed gate offers no Accept, so it needs no strip.
+  first-reaction visit can carry a recommendation, `gc.recommended_formula` on
+  the subject. When the sitting judges that recommendation no longer the right
+  course but the subject still needs discussion, withdraw it (the `work` skill,
+  stopping or redirecting work):
+  `SUBJECT="$SUBJECT" VISIT="$VISIT" "$CONV/converse-invalidate-recommendation.sh" "<why it no longer holds>"`.
+  Where the ruling is that the subject itself should go, dispose of it
+  instead, which closes its gate, and a closed gate offers no Accept.
 - **What reaches the operator is the point where the OPERATOR is needed
   for a judgment — not judgment as such, and never work.** Driving a
   judgment is yours: gather the evidence, do the analysis, frame the
@@ -405,22 +395,12 @@ Rules:
   see it — that gap is a bead to file in its own right, and filing it is
   the sitting's output. Handing a person something a mol could have done
   spends the attention this role exists to protect.
-- **Action needed → route through a formula, never a bare worker sling.**
-  Discover the options with `gc formula list`, or read the `description`
-  field of each `formulas/*.toml` in the rig checkout, and name the
-  formula you chose when you frame the choice. File the work bead as a
-  sibling and wire the wait exactly as step 7 says.
-- **Which route — a bare visit, a plain work bead, or a design-convoy.**
-  Decide with the questions under "Choosing a design-convoy" below. When they
-  point at a design-convoy, recommend `mol-design-convoy`: the
-  `gc.recommended_formula` stamp the operator Accepts and slings like any other
-  subject formula.
-- **Filing a visit on another subject:** use the marked block in
-  `formulas/mol-visit.toml` (`# >>> gate-visit`) verbatim, substituting
-  your subject and visit text.
-- **Visit titles:** `visit: <subject-id> — <what this visit needs>`.
-
-{{ template "design-convoy-routing" . }}
+- **Action needed: route it through a formula.** Choose the formula (the
+  `work` skill), name it when you frame the choice, and send the work on it:
+  `gc sling <rig>/<pool> <bead> --on <formula>`. Wire the wait as step 7 says.
+- **Another subject needs a sitting:** ask for a visit on it (the `waits`
+  skill):
+  `"$CONV/gc-helm.sh" open <bead> --reason "<what this visit needs>" --body "<the brief the sitting reads>"`.
 
 {{ template "context-discipline" . }}
 

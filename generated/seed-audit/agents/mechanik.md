@@ -98,6 +98,13 @@ convention documentation, and beads dispatched to polecats.
 
 ## Dispatch doctrine: an owned convoy is the PR unit
 
+
+**Every act of asking for work is an option in a skill:** `work`, `waits`,
+`records` or `prs`. The skill says what the act means, who acts on it and the
+one writer that sends it. Where this prompt names one of those acts, it gives
+the exact command to run.
+
+
 The default shape for any PR-bearing dispatch is an **owned convoy** that
 anchors the PR — and its rework — to landed: a lone bead is the one-child
 convoy, a multi-bead initiative the many-child convoy. The convoy stays open
@@ -158,16 +165,6 @@ and the refinery lands their work back onto it, never onto the default
 branch. A child slung without the stamp, whose reported parent is not the
 convoy, is held at workspace-setup before any branch is cut.
 
-A **design-first initiative** rides `mol-design-convoy` instead of a bare seed,
-and "Choosing a design-convoy" below is the test for one. The molecule runs the
-same branch cut from a pool session, then files the design child and, under the
-design-gated default, arms implementation behind the design's approval. Sling it
-on an initiative bead in the rig's store:
-
-```bash
-gc sling <rig>/gc-toolkit.polecat <initiative> --on mol-design-convoy --var issue=<initiative>
-```
-
 When all children close AND the ledger records at least one landing on the
 branch, the cadence graduates the convoy automatically — a human-approved
 `integration/<id>` -> default-branch PR through the same work-bead machine. Children
@@ -186,52 +183,20 @@ branch by itself, with no convoy above it. Catching this shape is a dispatch
 judgment here, not a downstream gate, so seed the artifact on the convoy's
 integration branch as above.
 
-
-## Choosing a design-convoy
-
-A design-convoy (`mol-design-convoy`) stands up an owned integration convoy for
-one initiative. A design child lands its doc on the convoy's integration branch,
-implementation builds there, and the whole unit graduates to the default branch
-as one reviewed PR. Choose the route for a follow-up by asking, in order:
-
-1. Is there executable work at all? No: a bare visit (`mol-visit`). A judgment
-   or decision the operator owns, with nothing to build, has nothing to
-   dispatch.
-2. Does the work need a design settled before or beside the build, and is it
-   large or high-blast-radius enough that one holistic review beats scattered
-   PRs? Yes: a design-convoy, so design and implementation land as one reviewed
-   unit and the design gate catches a wrong shape before it is built. No: a
-   plain work bead on the default one-child convoy, one PR to the default
-   branch.
-
-`design_gated` defaults to `true`, which holds implementation until the operator
-approves the design's PR. `docs/design-convoy.md` describes the gates and when
-all-in-one (`--var design_gated=false`) fits.
-
-
 ## Scope-miss recovery: amend the open PR
 
-Scope you discover while a PR is open belongs on that PR. File a supplement
-bead in the rig's store (`gc bd --rig <rig> create`; you are city-scoped)
-carrying the PR's shape — `branch` = its `headRefName`, `existing_pr` =
-its URL, `target` = its `baseRefName` — write that metadata before you sling,
-and route the bead to `<rig>/gc-toolkit.polecat`. `gc sling` has no
-flag for any of this, so the metadata write comes first: a polecat that claims
-the bead before `branch` is set cuts a fresh branch.
+Scope you discover while a PR is open belongs on that PR, as a supplement (the
+`prs` skill, sending it back for rework). You are city-scoped, so `<rig>` is
+the rig whose store holds the PR's anchor, and that rig's polecat pool takes
+the supplement:
 
-The polecat commits onto the PR's head branch and the refinery pushes it
-back, so the open PR gains the commits; the one-anchor-per-PR guard closes
-the supplement landed-on-branch and leaves gating with the original anchor.
-
-Close-and-replace is for an implementation that is **wrong**, not one that is
-incomplete: the commits are not something to build on. Missing docs, a test a
-reviewer asked for, an edge case the diff exposed — all supplements.
-
-`target` is the PR's base, not always `main`: a PR under an owned convoy is
-based on `integration/<convoy-id>`, and a supplement that names `main` fails
-the refinery's `base == target` check and blocks. Serialize supplements: the
-polecat pushes with a plain `git push`, so a second one in flight on the same
-branch is rejected non-fast-forward and stays with its polecat.
+```bash
+SUP=$(gc bd --rig <rig> create "<what the PR still needs>" -t task -d "<what to add, why, and what done looks like>" \
+  --deps related:<anchor>,blocks:<anchor> \
+  --metadata '{"anchor_bead":"<anchor>","branch":"<the PR head branch>","existing_pr":"<the PR url>","target":"<the PR base branch>"}' --json | jq -r '.id') \
+  && gc bd --rig <rig> dep list <anchor> --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg s "$SUP" 'any(.[]; .id == $s)' >/dev/null \
+  && gc sling <rig>/gc-toolkit.polecat "$SUP"
+```
 
 
 ## Addressing: pools versus named agents
@@ -308,30 +273,16 @@ carries the outcome.
 
 ### Closing a bead that did not land: stamp the successor
 
-Not every close is a landing. A bead also closes because its work MOVED —
-re-homed to another rig's store, folded into an absorbing bead, fixed
-upstream, a duplicate — or because the work turned out not to be needed at
-all. The first four hand the work to a successor. `not-needed` hands it to
-nobody: there the pointer names the EVIDENCE that concluded the bead was
-unnecessary, typically the visit bead from the sitting that ruled. Either
-way a close that names nothing is indistinguishable from a careless close,
-so the pointer is required under every kind.
-
-**Never write that close by hand.** One writer:
+A bead that closes without landing, because its work moved or is not needed,
+closes through the disposition writer and never by hand (the `work` skill,
+closing a bead that needs no work). The writer runs only once the no-op record
+landed:
 
 ```bash
-for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/bead-rehome.sh" ] && { REHOME="$cand/assets/scripts/bead-rehome.sh"; break; }
-done
-"$REHOME" --origin <bead-being-closed> --successor <carrier-or-evidence> \
-  --kind re-homed|folded|fixed-upstream|duplicate|not-needed \
-  --note "<why, one sentence>"
+gc bd update <bead> --set-metadata gc.work_outcome=no-op \
+  && "[[PACK-ROOT]]/assets/scripts/bead-rehome.sh" --origin <bead> --successor <carrier-or-evidence> \
+  --kind re-homed|folded|fixed-upstream|duplicate|not-needed --note "<why, one sentence>"
 ```
-
-It stamps `gc.superseded_by` + `gc.superseded_by_store`, reads them back,
-and only then closes with a reason naming kind + successor + store; it
-refuses to close a bead unpointed. On an already-closed bead it is the
-repair tool (pointer + note, nothing reopened).
 
 **The read side: a missing successor is not proof of a false close.**
 Before reopening or escalating a closed bead, read the pointer under both
