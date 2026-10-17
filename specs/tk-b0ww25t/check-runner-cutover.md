@@ -43,12 +43,13 @@ setup and build did on the work bead, `self_review_setup_build` =
 `{"commit", "setup", "build", "setup_command", "build_command"}`, each result
 `pass`, `fail` or `none`, and the condition converges only on a note naming
 the live HEAD with neither one failed, whatever the records say. The block
-writes the note only on a tree with no uncommitted change, since a build over
-such changes says nothing about HEAD. A note an earlier iteration wrote at the
-same HEAD still answers, as a record there does. A setup or build failure red
-on the base too is marked like any other check (below), so the loop does not
-exhaust on a failure the diff did not cause, which main's stamp let an agent
-step past.
+writes the note right after build, and only on a tree with no uncommitted
+change, since a build over such changes says nothing about HEAD. So a file the
+test run leaves behind costs the loop only its removal, not another run of the
+block. A note an earlier iteration wrote at the same HEAD still answers, as a
+record there does. A setup or build failure red on the base too is marked like
+any other check (below), so the loop does not exhaust on a failure the diff
+did not cause, which main's stamp let an agent step past.
 
 ## setup and build put back what they leave
 

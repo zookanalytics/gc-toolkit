@@ -391,6 +391,13 @@ for sh in $SHELLS; do
   eq "$(git -C "$WT" status --porcelain)/$(cat "$WT/f")" "/more" "$sh: …which leaves the tree HEAD holds"
   # Whatever the case left must not reach the cases after it.
   git -C "$WT" reset -q --hard; git -C "$WT" clean -fdq
+  # A test run that leaves a file keeps its record, and the note the block
+  # wrote before the run stands, so removing the file is all the loop needs.
+  reset_env; MD_SETUP_BUILD=""; write_state
+  AFFECTED='printf x > cover.out' run_checks "$sh" 'true'
+  run_case "$sh: FAIL while the file a test run left is in the tree" 1
+  rm -f "$WT/cover.out"
+  run_case "$sh: PASS once that file is removed, without running the block again" 0
 done
 # Records already at HEAD outlive an edit, so a build run over uncommitted
 # changes must note nothing: those changes, not HEAD, are what it built.

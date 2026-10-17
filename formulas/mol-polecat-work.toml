@@ -1256,10 +1256,10 @@ SETUP=none; [ -z "$SETUP_CMD" ] || { hb "$GCTK" rig setup --command "$SETUP_CMD"
 if [ -n "$TYPECHECK_CMD" ]; then hb "$GCTK" rig typecheck --command "$TYPECHECK_CMD" "${PUB[@]}"; else "$GCTK" rig typecheck --nothing-declared "${PUB[@]}"; fi
 if [ -n "$LINT_CMD" ]; then hb "$GCTK" rig lint --command "$LINT_CMD" "${PUB[@]}"; else "$GCTK" rig lint --nothing-declared "${PUB[@]}"; fi
 BUILD=none; [ -z "$BUILD_CMD" ] || { hb "$GCTK" rig build --command "$BUILD_CMD" && BUILD=pass || BUILD=fail; }
+[ -n "$(git status --porcelain)" ] || gc bd update "$WORK_BEAD_ID" --set-metadata "self_review_setup_build=$(jq -nc --arg c "$(git rev-parse HEAD)" --arg s "$SETUP" --arg b "$BUILD" --arg sc "$SETUP_CMD" --arg bc "$BUILD_CMD" '{commit: $c, setup: $s, build: $b, setup_command: $sc, build_command: $bc}')"
 if [ -n "$AFFECTED_CMD" ]; then hb "$GCTK" rig test --scope affected --command "$AFFECTED_CMD" "${PUB[@]}"
 elif [ -n "$TEST_CMD" ]; then hb "$GCTK" rig test --scope full --command "$TEST_CMD" "${PUB[@]}"
 else "$GCTK" rig test --nothing-declared "${PUB[@]}"; fi
-[ -n "$(git status --porcelain)" ] || gc bd update "$WORK_BEAD_ID" --set-metadata "self_review_setup_build=$(jq -nc --arg c "$(git rev-parse HEAD)" --arg s "$SETUP" --arg b "$BUILD" --arg sc "$SETUP_CMD" --arg bc "$BUILD_CMD" '{commit: $c, setup: $s, build: $b, setup_command: $sc, build_command: $bc}')"
 ```
 A call exits 0 on a pass and 1 on a fail. Fix a failure your diff introduced,
 commit, and run the checks again. A fail answered from its record prints no
