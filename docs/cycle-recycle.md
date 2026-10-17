@@ -84,7 +84,12 @@ hook defers when:
   tree, in either the refinery's own worktree or the rig's canonical
   checkout (`GC_RIG_ROOT`). Witness and deacon are idle pollers with no
   long git operations, so this guard is refinery-only. Untracked files are
-  normal scratch and do not count.
+  normal scratch and do not count. Neither does a change under the tree's
+  top-level `.beads/`. gc rewrites the bead store's tracked config there at
+  runtime, and that write is no git op. A commit clears it only until gc
+  writes again, so counting it would hold the guard true for good. A
+  rebase, merge, cherry-pick or revert in progress still defers the
+  recycle, whatever paths it touches.
 
 The bias is **uncertain → skip**. Deferring only delays the recycle: the
 hook re-checks next turn, and Claude's `PreCompact` hook remains the
@@ -111,6 +116,8 @@ gap. It asserts the capability rather than the installation:
   (24h by default, `GC_DOCTOR_RECYCLE_LATCH_HOURS`). The guard cannot tell
   a rebase in flight from a tracked file nobody has committed, so the check
   ages it by the oldest currently-dirty path and names the file holding it.
+  It counts what the guard counts, so a change under `.beads/` neither
+  defers the recycle nor latches the check.
 
 The check is silent when the mechanism is healthy and merely idle. It reads
 the rig's canonical checkout. The hook also defers on its own working

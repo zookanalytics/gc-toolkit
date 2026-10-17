@@ -3,7 +3,10 @@
 # arm runs the REAL overlay hook, because that arm exists to assert the shipped
 # script and a stub would prove only that the fixture agrees with itself. The
 # defer-guard arm runs against a REAL git repo, because that arm parses git's
-# porcelain output and ages real mtimes.
+# porcelain output and ages real mtimes. That arm mirrors the hook's own guard,
+# so each case that builds a new guard state also runs the shipped hook on that
+# tree: the hook must defer where the check reads the guard true, and recycle
+# where it does not.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -73,8 +76,37 @@ git -C "$TMP/rigs/alpha" init -q
 git -C "$TMP/rigs/alpha" config user.email t@example.com
 git -C "$TMP/rigs/alpha" config user.name Tester
 printf 'dolt.mode: local\n' > "$TMP/rigs/alpha/.beads/config.yaml"
+printf 'alpha\n' > "$TMP/rigs/alpha/README.md"
 git -C "$TMP/rigs/alpha" add -A
 git -C "$TMP/rigs/alpha" -c commit.gpgsign=false commit -qm init
+
+# hook_verdict <tree> — what the shipped hook does at the end of a turn over its
+# threshold, as the alpha refinery with <tree> as both its working directory and
+# GC_RIG_ROOT: "recycles" (it called gc handoff) or "defers" (its git-op guard
+# held it and it called no gc). The hook prepends $HOME/go/bin to PATH, so the
+# logging stub there wins over this suite's gc stub.
+mkdir -p "$TMP/hookhome/go/bin"
+cat > "$TMP/hookhome/go/bin/gc" <<'HOOKGC'
+#!/bin/sh
+printf '%s\n' "$*" >> "$HOOK_GC_LOG"
+HOOKGC
+chmod +x "$TMP/hookhome/go/bin/gc"
+printf '%s\n' '{"type":"assistant","message":{"usage":{"input_tokens":100,"cache_read_input_tokens":250000,"cache_creation_input_tokens":1000}}}' > "$TMP/over-threshold.jsonl"
+hook_verdict() {
+  local err calls
+  : > "$TMP/hook-gc.log"
+  err=$(cd "$1" && printf '{"transcript_path":"%s"}' "$TMP/over-threshold.jsonl" \
+    | env -i PATH="$PATH" HOME="$TMP/hookhome" HOOK_GC_LOG="$TMP/hook-gc.log" \
+        GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+        GC_AGENT=alpha/gc-toolkit.refinery GC_RIG_ROOT="$1" GC_CITY_PATH="$TMP/city" \
+        GC_SESSION_ID=refinery-1 sh "$HOOKDIR/hooks/cycle-recycle.sh" 2>&1 >/dev/null)
+  calls=$(cat "$TMP/hook-gc.log")
+  case "$calls" in
+    "handoff "*) echo recycles ;;
+    "") case "$err" in *"refinery mid git-op"*) echo defers ;; *) echo "neither: $err" ;; esac ;;
+    *) echo "unexpected gc calls: $calls" ;;
+  esac
+}
 
 run_check() {
   : > "$TMP/curl.log"; : > "$TMP/gc.log"
@@ -93,6 +125,7 @@ eq "$(cat "$TMP/curl.log")" "" "the check reaches no HTTP endpoint — the API m
 hasnt "$(cat "$TMP/gc.log")" "cities --json" "and resolves no city name, which only the API URL needed"
 has "$OUT" "beta/gc-toolkit.refinery: suspended" "a suspended refinery is noted, not judged"
 has "$OUT" "gamma/gc-toolkit.refinery: not running" "an asleep refinery is noted, not judged"
+eq "$(hook_verdict "$TMP/rigs/alpha")" "recycles" "the shipped hook recycles on the same clean tree, so the agreement cases below reach its guard"
 
 # --- 2. a hook that measures NOTHING — the live failure this check exists for -
 cat > "$HOOKDIR/hooks/cycle-recycle.sh" <<'MUTE'
@@ -178,14 +211,15 @@ OUT=$(STATUS_JSON="$TMP/status-empty.json" run_check); RC=$?
 eq "$RC" "0" "a city that runs no agent at all reads no guard and stays silent"
 
 # --- 8. LATCHED defer guard — the other live failure -------------------------
-printf 'dolt.mode: server\n' > "$TMP/rigs/alpha/.beads/config.yaml"
-age_file "$TMP/rigs/alpha/.beads/config.yaml" $((23 * 86400))
+printf 'changed\n' >> "$TMP/rigs/alpha/README.md"
+age_file "$TMP/rigs/alpha/README.md" $((23 * 86400))
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a tracked file dirty past the bound is an ERROR, not a deferral"
-has "$OUT" ".beads/config.yaml" "the finding names the file that latched the guard"
+has "$OUT" "README.md" "the finding names the file that latched the guard"
 has "$OUT" "23d" "the finding states how long the guard has been true"
 has "$OUT" "rig alpha" "the finding names the rig whose refinery is stuck"
 has "$OUT" "24h bound" "the finding states the bound it crossed"
+eq "$(hook_verdict "$TMP/rigs/alpha")" "defers" "the shipped hook defers on the same tree"
 
 # --- 9. the bound is configurable --------------------------------------------
 OUT=$(GC_DOCTOR_RECYCLE_LATCH_HOURS=$((30 * 24)) run_check); RC=$?
@@ -193,18 +227,19 @@ eq "$RC" "0" "a bound wider than the age reads the same tree as a git op in flig
 has "$OUT" "inside the 720h bound" "the override is the bound the note reports"
 
 # --- 10. a TRANSIENT dirty tree is not a latch -------------------------------
-touch "$TMP/rigs/alpha/.beads/config.yaml"
+touch "$TMP/rigs/alpha/README.md"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a freshly dirtied tree is a git op in flight, not a latch"
 has "$OUT" "defer guard true" "the transient deferral is noted"
 hasnt "$OUT" "cannot fire" "and it is not a finding"
-git -C "$TMP/rigs/alpha" checkout -q -- .beads/config.yaml
+git -C "$TMP/rigs/alpha" checkout -q -- README.md
 
 # --- 11. an in-flight git-op marker is recognised ----------------------------
 : > "$TMP/rigs/alpha/.git/MERGE_HEAD"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a fresh merge marker defers normally"
 has "$OUT" "MERGE_HEAD (git-op in progress)" "the marker is named as the guard's source"
+eq "$(hook_verdict "$TMP/rigs/alpha")" "defers" "the shipped hook defers on the same marker"
 age_file "$TMP/rigs/alpha/.git/MERGE_HEAD" $((3 * 86400))
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a merge marker older than the bound is a latch, not an op in flight"
@@ -218,20 +253,45 @@ age_file "$TMP/rigs/alpha/scratch.tmp" $((40 * 86400))
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "an untracked file is scratch, not a defer guard"
 hasnt "$OUT" "scratch.tmp" "and it is named in no finding"
+eq "$(hook_verdict "$TMP/rigs/alpha")" "recycles" "the shipped hook does not defer on it either"
 rm -f "$TMP/rigs/alpha/scratch.tmp"
 
-# --- 13. a rig with no refinery is not read ----------------------------------
+# --- 13. a change under .beads/ is no git op ---------------------------------
+# gc rewrites the bead store's tracked config at runtime, so the hook leaves the
+# tree's top-level .beads/ out of its guard, and this arm leaves it out too.
+printf 'dolt.mode: server\n' >> "$TMP/rigs/alpha/.beads/config.yaml"
+age_file "$TMP/rigs/alpha/.beads/config.yaml" $((23 * 86400))
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a dirty .beads/config.yaml alone past the bound latches nothing"
+hasnt "$OUT" "config.yaml" "and it is named in no finding or note"
+hasnt "$OUT" "defer guard true" "and no deferral is noted for it"
+eq "$(hook_verdict "$TMP/rigs/alpha")" "recycles" "the shipped hook does not defer on the same tree"
+
+# --- 14. a change under .beads/ hides no dirty file beside it ----------------
+printf 'changed\n' >> "$TMP/rigs/alpha/README.md"
+age_file "$TMP/rigs/alpha/.beads/config.yaml" $((40 * 86400))
+age_file "$TMP/rigs/alpha/README.md" $((23 * 86400))
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a tracked file dirty outside .beads/ still latches the check"
+has "$OUT" "latched by \"README.md\"" "the finding names the file outside .beads/"
+has "$OUT" "23d" "and ages the guard by that file"
+hasnt "$OUT" "config.yaml" "the older change under .beads/ is not what latched it"
+hasnt "$OUT" "40d" "and does not age the guard"
+eq "$(hook_verdict "$TMP/rigs/alpha")" "defers" "the shipped hook defers on the same tree"
+git -C "$TMP/rigs/alpha" checkout -q -- .beads/config.yaml README.md
+
+# --- 15. a rig with no refinery is not read ----------------------------------
 cat > "$TMP/status-nowork.json" <<'EOF'
 {"agents":[{"name":"gc-toolkit.witness","qualified_name":"alpha/gc-toolkit.witness","scope":"rig","running":true,"suspended":false}]}
 EOF
-printf 'dolt.mode: server\n' > "$TMP/rigs/alpha/.beads/config.yaml"
-age_file "$TMP/rigs/alpha/.beads/config.yaml" $((23 * 86400))
+printf 'changed\n' >> "$TMP/rigs/alpha/README.md"
+age_file "$TMP/rigs/alpha/README.md" $((23 * 86400))
 OUT=$(STATUS_JSON="$TMP/status-nowork.json" run_check); RC=$?
 eq "$RC" "1" "the guard is refinery-only — a witness-only rig is not read"
-hasnt "$OUT" "config.yaml" "no dirty-tree finding is raised for it"
-git -C "$TMP/rigs/alpha" checkout -q -- .beads/config.yaml
+hasnt "$OUT" "README.md" "no dirty-tree finding is raised for it"
+git -C "$TMP/rigs/alpha" checkout -q -- README.md
 
-# --- 14. a pack that ships no hook has nothing to assert ---------------------
+# --- 16. a pack that ships no hook has nothing to assert ---------------------
 mkdir -p "$TMP/emptypack"
 OUT=$(GC_PACK_DIR="$TMP/emptypack" GC_CITY_PATH="$TMP/city" bash "$CHECK" 2>&1); RC=$?
 eq "$RC" "0" "a pack with no cycle-recycle overlay is OK"

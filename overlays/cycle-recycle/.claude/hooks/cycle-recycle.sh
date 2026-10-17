@@ -106,7 +106,13 @@ fi
 # tree is dirty, in either the refinery's own worktree (CWD) or the rig's
 # canonical checkout ($GC_RIG_ROOT). Witness/deacon are idle pollers with no
 # long git ops, so this is refinery-only. Untracked files are normal scratch and
-# are ignored (mirrors the formula's rig ff-merge dirtiness check).
+# are ignored. So is everything under the tree's top-level .beads/. gc rewrites
+# the bead store's tracked config there at runtime, and that write is no git op.
+# A commit clears it only until gc's next write, so counting it would hold the
+# guard true for good. A git op in progress defers whatever paths it touches.
+# doctor/check-recycle-capable reads this guard with the same exclusion, and its
+# suite runs this script to prove the two agree. A change to what counts here
+# belongs there too.
 if [ "$role" = refinery ]; then
   _git_busy() { # $1=dir; exit 0 if a git op is in progress or the tree is dirty
     [ -n "$1" ] || return 1
@@ -116,11 +122,11 @@ if [ "$role" = refinery ]; then
       for m in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
         [ -e "$gd/$m" ] && exit 0
       done
-      [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ] && exit 0
+      [ -n "$(git status --porcelain --untracked-files=no -- ':/' ':(top,exclude).beads' 2>/dev/null)" ] && exit 0
       exit 1 )
   }
   if _git_busy "$PWD" || _git_busy "${GC_RIG_ROOT:-}"; then
-    echo "cycle-recycle: refinery mid git-op (rebase/merge or dirty tree); deferring recycle" >&2
+    echo "cycle-recycle: refinery mid git-op (rebase/merge, or a dirty tracked file outside .beads/); deferring recycle" >&2
     exit 0
   fi
 fi
