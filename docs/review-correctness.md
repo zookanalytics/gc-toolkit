@@ -42,7 +42,8 @@ stated in its header under `tools/lint-learned.d/`. The Go services under
   `-e`, so check that each command whose failure matters is tested where it
   runs, with `|| rc=$?`, `if !` or `|| exit`. Without pipefail,
   `gc bd list … | jq …` returns jq's status, and a failed read passes as an
-  empty one. With pipefail, `… | grep -q` fails on a match
+  empty one. With pipefail, `… | grep -q` can fail on a match, because grep
+  exits at the first one and a writer with more to write dies of SIGPIPE
   (`pipefail-grep-q.sh`). Under `set -e`, a `[ … ] && x=1` that ends a function
   or a sourced block kills the caller on the false path, which
   `crash-loop-window.test.sh` pins by sourcing its block under `bash -eu`.
@@ -73,10 +74,11 @@ stated in its header under `tools/lint-learned.d/`. The Go services under
   true for an explicit false, and it does not catch an error raised on its
   left. `id-read-unguarded.sh` flags `.id // .[0].id` on a bd answer, and any
   other `a // b` over a value of uncertain shape needs a type guard.
-- **jq versions.** The Linux CI job runs jq 1.7 and the host runs 1.8. jq 1.7
-  does not compile a bare `if … end` or `reduce …` followed by `as`, `[i]` or
-  `.key`, so such a program fails only on Linux. Parenthesize the term, and
-  probe with the host's `/usr/bin/jq`, which is 1.7.
+- **jq versions.** jq 1.7 does not compile a bare `if … end` or `reduce …`
+  followed by `as`, `[i]` or `.key`, and jq 1.8 does. The host runs 1.8, and
+  its `/usr/bin/jq` is 1.7. The Linux CI job runs the jq of its Ubuntu image,
+  1.7 on 24.04 and 1.8 on 26.04, so such a program can pass on the host and
+  fail on Linux. Parenthesize the term, and probe with `/usr/bin/jq`.
 - **BSD and GNU userland.** The host is macOS: `sed`, `grep`, `awk`, `date`,
   `stat` and `find` are BSD, `/bin/bash` is 3.2, and `#!/usr/bin/env bash`
   finds bash 5. Where the userlands disagree, the repository tries both
