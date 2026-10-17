@@ -47,10 +47,10 @@ has push rights.
 
 ## mol-design-convoy — the molecule
 
-`formulas/mol-design-convoy.toml` is a dispatch molecule shaped like
-`mol-first-reaction`: slung `--on` a single subject (the initiative), it reads
-the input convoy's one tracked member, orchestrates, and drains. It writes no
-code and needs no worktree of its own. Its steps:
+`formulas/mol-design-convoy.toml` is a dispatch molecule: slung `--on` a single
+subject (the initiative), it reads the input convoy's one tracked member,
+orchestrates, and drains. It writes no code and needs no worktree of its own.
+Its steps:
 
 | Step | What it does |
 |---|---|
@@ -157,11 +157,11 @@ implementation.
 ## How converse reaches it
 
 The recommend-to-Accept-to-sling path carries the pattern with no special
-handling. Converse stamps `gc.recommended_formula = mol-design-convoy` on the
-subject visit; the board offers Accept while that key is non-empty; and
-`gc-helm.sh accept` slings `gc sling <pool> <subject> --on mol-design-convoy
---var issue=<subject>`, the same single-formula, single-subject shape
-`mol-first-reaction` rides.
+handling. The recommendation is `gc.recommended_formula = mol-design-convoy` on
+the subject, the board offers Accept while that key is non-empty, and
+`gc-helm.sh accept` slings `gc sling <subject> --on mol-design-convoy`. The
+sling carries no `--var`, because a graph.v2 formula refuses a caller-supplied
+`issue`.
 
 Two convoys share the word. Accept's sling creates an **input convoy** whose
 one tracked member is the subject, which the formula reads as `{{convoy_id}}`.
