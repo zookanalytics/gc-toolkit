@@ -1,24 +1,30 @@
-# deferred-dispatch — perform the dispatches owed once their blockers clear.
+# deferred-dispatch — perform the dispatches owed once their blockers clear, and
+# dispose the beads an `until` dependency resolved.
 # `gc sling` reads no `blocks` deps, so a dep between work beads holds nothing;
 # `deferred-dispatch.sh arm` records the owed dispatch ON the bead and this
 # order slings each armed bead once `bd` reports it ready. It also mails each
 # named agent a notice owed to it (`deferred-dispatch.sh notify`) once `bd`
-# reports the bead assigned to it ready. Exec, not a formula: one `bd list` +
-# one sling or mail per ready bead needs no LLM. Rig-scoped: one pass per
-# importing rig against its own store.
+# reports the bead assigned to it ready. An `until` dep says "X resolves me":
+# once every `until` target of an open, unassigned bead has closed, the same
+# pass disposes that bead through bead-rehome, so its close carries a successor
+# pointer. A `blocks` dep never disposes, and neither does a bead that carries
+# live work (assets/scripts/live-work.sh) or that its own open `blocks` blocker
+# still holds. Exec, not a formula: store reads plus one sling, mail or
+# bead-rehome call per owed bead need no LLM. Rig-scoped: one pass per importing
+# rig against its own store.
 # Single-flight is the runtime's open-tracking gate plus a per-rig pass lock the
 # script holds for the life of a pass. The gate holds only while a run's
 # tracking bead stays open, and a controller sweep can close that bead under a
 # pass still running, so never set no_work_gate and never drop the lock.
 # `timeout` gives a pass room to list the armed set, which can take two minutes
 # on a loaded store, and then finish several slings of 30-80s each. The script's
-# pass budget (DEFERRED_DISPATCH_PASS_BUDGET_SECS) starts no sling it cannot
-# finish before the timeout and leaves the rest armed for the next pass, so an
+# pass budget (DEFERRED_DISPATCH_PASS_BUDGET_SECS) starts no sling or disposal it
+# cannot finish before the timeout and leaves the rest for the next pass, so an
 # override that lowers `timeout` has to lower that budget in its env too.
 # deferred-dispatch.test.sh asserts the budget sits below this timeout and the
 # script's lock-stall bound above it. Tune from city.toml [[orders.overrides]].
 [order]
-description = "Deferred dispatch: sling every bead whose dispatch was armed and whose blockers have now cleared, and send every notice owed to a named agent whose bead is now ready; retire the record on beads that closed first"
+description = "Deferred dispatch: sling every bead whose dispatch was armed and whose blockers have now cleared, and send every notice owed to a named agent whose bead is now ready; retire the record on beads that closed first; dispose through bead-rehome each open, unassigned bead whose until targets have all closed, that no open blocks blocker of its own holds, and that carries no live work"
 trigger = "cooldown"
 interval = "5m"
 timeout = "600s"

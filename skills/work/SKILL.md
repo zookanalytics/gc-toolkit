@@ -206,5 +206,8 @@ already closed by hand, the same writer adds the missing pointer.
   nothing downstream checks it again.
 - Disarm an armed bead first, so a wait released before the close lands cannot
   send it: `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" disarm <bead> --reason "<why>"`.
+- A bead that needs no work only once another bead lands is not closed now.
+  Give it an `until` edge to that bead instead (the waits skill), and it is
+  closed once that bead closes.
 
 `docs/state-machine.md` ("Disposition") is the doctrine.
