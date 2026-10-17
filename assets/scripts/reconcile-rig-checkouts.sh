@@ -12,8 +12,10 @@
 # content in the way of what they write. --no-overwrite-ignore makes that
 # include an ignored file, which git otherwise overwrites. A refusal on a
 # checkout that is only behind gets the set-aside heal, and one on a diverged
-# checkout gets the reset heal. Each acts only on what it can prove loses
-# nothing, and what neither heals escalates.
+# checkout gets the reset heal. A checkout that is only behind also keeps in
+# place each file the incoming commits stop tracking while the remote's tree
+# ignores it, where the fast-forward would delete it. Each acts only on what it
+# can prove loses nothing, and what none of them heals escalates.
 #
 # The rig root must also stay ON the default branch: it is a deploy mirror, and a
 # HEAD parked elsewhere (detached, or a feature/integration branch an agent
@@ -55,6 +57,27 @@
 # such as local bd config, stays as it is. Recover a path with
 # `git checkout <ref> -- <path>` for its working copy, or
 # `git checkout <ref>^2 -- <path>` for its staged copy.
+#
+# An incoming commit that deletes a tracked path while the remote's tree
+# ignores it turns that path into machine-local state, such as the bd config
+# gascity rewrites, which the runtime reads from the working tree. The
+# fast-forward would delete the file, or refuse over a modified copy, so a
+# checkout that is only behind keeps it in place untracked instead. A path is
+# kept when:
+#   - HEAD tracks it as a regular file, and the incoming commits delete it and
+#     leave nothing at or under it and no file above it;
+#   - the .gitignore files of the remote's tree ignore it. Only the remote's
+#     tree says the path is local state now, so a machine-local exclude rule
+#     does not count;
+#   - its working copy is a regular file with no symlink above it, and its
+#     staged copy is HEAD's or none.
+# A modified copy is pinned with the rest. git refuses to fast-forward past the
+# deletion while a file sits on the path, unless it may overwrite ignored
+# files, which no move here allows. So each kept copy waits under
+# .git/gc-toolkit-reconcile-kept while git fast-forwards, and the path holds no
+# file for that long. The copy then goes back on its path with its bytes
+# unchanged, never over a file written there meanwhile. A pass interrupted in
+# that window leaves the copy there, and the next pass puts it back.
 #
 # A checkout that has diverged is almost always SHA churn from an upstream
 # rebase/squash/force-push: the live rigs/* checkout is a pure deployment mirror
@@ -100,12 +123,14 @@
 # change or an untracked file their judgment missed. A local commit does not
 # stop it, so saving real work comes first.
 #
-# Set RECONCILE_NO_AUTOHEAL=1 to disable the set-aside and reset heals and
-# escalate every refusal instead.
+# Set RECONCILE_NO_AUTOHEAL=1 to turn off the set-aside heal, the keep and the
+# reset heal. The fast-forward then runs as plain git, which deletes a file the
+# incoming commits stop tracking, and every refusal escalates.
 #
-# A refusal neither heal resolves takes the exception path: one idempotent bead
-# per blocked rig records why, and escalate.sh raises it so someone actually
-# acts. The exception path never touches the checkout.
+# What no heal resolves takes the exception path: one idempotent bead per
+# blocked rig records why, and escalate.sh raises it so someone actually acts.
+# That includes a failed read of which paths to keep, since the fast-forward
+# could then delete one. The exception path never touches the checkout.
 #
 # The escalation must never rot silently, which is the whole reason this script
 # exists: a stalled deploy has to reach someone. So a blocked rig is NOT handed
@@ -133,6 +158,9 @@ RECONCILE_RIG="${RECONCILE_BEAD_RIG:-gc-toolkit}"
 # escalate.sh's human helm board. RECONCILE_MAYOR_ADDR is the prior name for
 # this knob and is still honored.
 ESC_POOL="${RECONCILE_ESCALATION_POOL:-${RECONCILE_MAYOR_ADDR:-}}"
+# Where a kept path's working copy waits, under the checkout's .git directory,
+# while git fast-forwards: on the checkout's file system and out of git's sight.
+KEPT_DIR=".git/gc-toolkit-reconcile-kept"
 
 # id of the single open reconcile bead for a rig (empty if none).
 open_bead() {
@@ -289,17 +317,133 @@ report_in_way() {
     fi
 }
 
-# The behind-checkout heal (see the header). On success the checkout has
-# fast-forwarded, and set_aside_ref names the pin when tracked paths were set
-# aside. On failure blocking_report says what blocked it and names whatever the
-# heal had already pinned, restored or removed; set_aside_ref is set once a pin
-# exists.
-set_aside_ref=""; blocking_report=""; upstream_report=""
+# The paths of the checkout at $1 that a fast-forward to $2 keeps in place
+# untracked (see the header), in kept[]. A name git quotes is no usable
+# pathspec, so it is never kept. The .gitignore files of the remote's tree are
+# read into a scratch repository with no exclude file, and global excludes are
+# off, so they alone decide what is ignored. A read that fails returns 1 with
+# kept_report saying what failed, since the fast-forward could then delete a
+# file that qualifies.
+kept=(); kept_report=""
+kept_paths() {
+    local path="$1" remote="$2" deleted line mode p rest a ok scratch d entry oid ignored="" rc=0
+    local -a cand=() dirs=() ign=()
+    kept=(); kept_report=""
+    deleted=$(git -C "$path" -c core.quotepath=false diff-tree -r --no-renames --diff-filter=D HEAD "$remote" 2>/dev/null) \
+        || { kept_report="could not list the paths the incoming commits delete"; return 1; }
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        mode="${line#:}"; mode="${mode%% *}"; p="${line#*$'\t'}"
+        case "$mode" in 100644|100755) ;; *) continue ;; esac
+        case "$p" in \"*) continue ;; esac
+        [ -f "$path/$p" ] && [ ! -L "$path/$p" ] || continue
+        git -C "$path" cat-file -e "${remote}:${p}" 2>/dev/null && continue
+        ok=1; rest="$p"; a=""
+        while [ "${rest#*/}" != "$rest" ]; do
+            a="${a:+$a/}${rest%%/*}"; rest="${rest#*/}"
+            if [ -L "$path/$a" ]; then ok=""; break; fi
+            case "$(git -C "$path" cat-file -t "${remote}:${a}" 2>/dev/null)" in
+                ""|tree) ;;
+                *) ok=""; break ;;
+            esac
+        done
+        [ -n "$ok" ] || continue
+        # A staged copy other than HEAD's is left to the set-aside's proof.
+        git --literal-pathspecs -C "$path" diff --cached --quiet HEAD -- "$p" 2>/dev/null \
+            || [ -z "$(git --literal-pathspecs -C "$path" ls-files -- "$p" 2>/dev/null)" ] || continue
+        cand+=("$p")
+    done <<< "$deleted"
+    [ "${#cand[@]}" -gt 0 ] || return 0
+    scratch=$(mktemp -d "${TMPDIR:-/tmp}/reconcile-rig-checkouts.XXXXXX" 2>/dev/null) \
+        || { kept_report="could not make a scratch repository to read the remote's .gitignore files"; return 1; }
+    git init -q --template= "$scratch" >/dev/null 2>&1 || rc=1
+    for p in "${cand[@]}"; do
+        [ "$rc" -eq 0 ] || break
+        # The .gitignore of the top directory and of each directory above p.
+        d=""; rest="$p"
+        while :; do
+            if ! in_list "$d" ${dirs[@]+"${dirs[@]}"}; then
+                dirs+=("$d")
+                entry=$(git --literal-pathspecs -C "$path" ls-tree "$remote" -- "${d}.gitignore" 2>/dev/null) || { rc=1; break; }
+                case "$entry" in
+                    "100644 blob "*|"100755 blob "*)
+                        oid="${entry#* blob }"; oid="${oid%%$'\t'*}"
+                        { mkdir -p "$scratch/$d" && git -C "$path" cat-file blob "$oid" > "$scratch/${d}.gitignore"; } 2>/dev/null \
+                            || { rc=1; break; } ;;
+                esac
+            fi
+            [ "${rest#*/}" != "$rest" ] || break
+            d="$d${rest%%/*}/"; rest="${rest#*/}"
+        done
+    done
+    if [ "$rc" -eq 0 ]; then
+        # check-ignore exits 1 when it ignores none of them.
+        ignored=$(printf '%s\n' "${cand[@]}" \
+            | git -C "$scratch" -c core.excludesFile=/dev/null -c core.quotepath=false check-ignore --stdin 2>/dev/null) \
+            || rc=$?
+        [ "$rc" -ne 1 ] || rc=0
+    fi
+    rm -rf "${scratch:?}"
+    [ "$rc" -eq 0 ] || { kept_report="could not read whether the remote's .gitignore files ignore ${cand[*]}"; return 1; }
+    while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        ign+=("$p")
+    done <<< "$ignored"
+    for p in "${cand[@]}"; do
+        if in_list "$p" ${ign[@]+"${ign[@]}"}; then kept+=("$p"); fi
+    done
+    return 0
+}
+
+# Links the file at $1/$3 to $2/$3, making the directories above it, unless
+# anything is on $2/$3, since ln links into a directory it is given as the
+# target. Then unlinks $1/$3, so the bytes always have a name.
+relink() {
+    local dir="${3%/*}"
+    [ "$dir" != "$3" ] || dir=""
+    { [ ! -e "$2/$3" ] && [ ! -L "$2/$3" ]; } || return 1
+    mkdir -p "$2/$dir" 2>/dev/null && ln -- "$1/$3" "$2/$3" 2>/dev/null && rm -f -- "${1:?}/${3:?}"
+}
+
+# Moves the working copy of $2 in the checkout at $1 aside under $KEPT_DIR,
+# never over a copy already there.
+move_aside() { relink "$1" "$1/$KEPT_DIR" "$2"; }
+
+# Moves the copy of $2 that waits under $KEPT_DIR back to its path in the
+# checkout at $1, never over anything now on that path. git removes a directory
+# the fast-forward empties, so the directories above it are made again.
+put_back() { relink "$1/$KEPT_DIR" "$1" "$2"; }
+
+# Puts back each copy that a pass interrupted while git fast-forwarded left
+# under the checkout at $1. A copy whose path holds a file again stays where it
+# is, and a keep of that path refuses while it does.
+restore_kept() {
+    local path="$1" root="$1/$KEPT_DIR" f p
+    [ -d "$root" ] || return 0
+    while IFS= read -r -d '' f; do
+        p="${f#"$root"/}"
+        if put_back "$path" "$p"; then
+            warn "put back $path/$p, which an interrupted pass had moved to $f"
+        else
+            warn "could not put back $path/$p, which an interrupted pass had moved to $f, so it stays there"
+        fi
+    done < <(find "$root" -type f -print0 2>/dev/null)
+    find "$root" -depth -type d -empty -delete 2>/dev/null || true
+}
+
+# The behind-checkout heal (see the header), which also keeps the paths in
+# kept[] in place. On success the checkout has fast-forwarded, set_aside_ref
+# names the pin when modified tracked paths moved, and heal_reading says what
+# the heal did. On failure blocking_report says what blocked it and names
+# whatever the heal had already pinned, restored, removed or moved aside;
+# set_aside_ref is set once a pin exists.
+set_aside_ref=""; blocking_report=""; upstream_report=""; heal_reading=""
 set_aside_and_advance() {
     local path="$1" remote="$2" name="$3"
     local dirty incoming in_way_out kind p blob listed="" gone="" stuck="" moved="" msg pin ref unsafe=0
-    local -a dirty_paths=() blocking=() in_way=()
-    set_aside_ref=""; blocking_report=""
+    local root="$1/$KEPT_DIR" keeping="" pinning="" what advanced="" asidelist="" left="" back=""
+    local -a dirty_paths=() blocking=() in_way=() aside=()
+    set_aside_ref=""; blocking_report=""; heal_reading=""
     # Tracked paths whose working tree or index differs from HEAD. git quotes a
     # name holding a control character, a double quote or a backslash, and a
     # quoted name is no usable pathspec, so it fails the proof.
@@ -317,6 +461,8 @@ set_aside_and_advance() {
             || { blocking_report="could not list the paths the fast-forward rewrites"; return 1; }
         while IFS= read -r p; do
             [ -n "$p" ] || continue
+            # A kept path stays as it is, so nothing restores it.
+            in_list "$p" ${kept[@]+"${kept[@]}"} && continue
             blocking+=("$p")
         done <<< "$incoming"
     fi
@@ -336,7 +482,7 @@ set_aside_and_advance() {
             unsafe=1
         fi
     done <<< "$in_way_out"
-    if [ "${#blocking[@]}" -eq 0 ] && [ "${#in_way[@]}" -eq 0 ] && [ "$unsafe" -eq 0 ]; then
+    if [ "${#blocking[@]}" -eq 0 ] && [ "${#in_way[@]}" -eq 0 ] && [ "$unsafe" -eq 0 ] && [ "${#kept[@]}" -eq 0 ]; then
         blocking_report="no local change sits on a path the fast-forward rewrites"
         return 1
     fi
@@ -359,17 +505,27 @@ set_aside_and_advance() {
         fi
     done
     [ "$unsafe" -eq 0 ] || return 1
-    if [ "${#blocking[@]}" -gt 0 ]; then
-        msg="reconcile-rig-checkouts set aside $listed so rigs/$name could fast-forward to $remote. This commit's tree holds each dirty path's working copy and its second parent the staged copy."
+    # A modified kept path is pinned with the rest before it moves.
+    [ "${#blocking[@]}" -eq 0 ] || pinning=1
+    for p in ${kept[@]+"${kept[@]}"}; do
+        keeping="${keeping:+$keeping, }$p"
+        if in_list "$p" ${dirty_paths[@]+"${dirty_paths[@]}"}; then pinning=1; fi
+    done
+    what="${listed:+set aside $listed}"
+    [ -z "$keeping" ] || what="${what:+$what and }kept $keeping in place untracked"
+    if [ -n "$pinning" ]; then
+        msg="reconcile-rig-checkouts $what so rigs/$name could fast-forward to $remote. This commit's tree holds each dirty path's working copy and its second parent the staged copy."
         ref="refs/gc-toolkit/reconcile-set-aside/$(date -u +%Y%m%dT%H%M%SZ)"
         pin=$(GIT_AUTHOR_NAME=reconcile-rig-checkouts GIT_AUTHOR_EMAIL=reconcile-rig-checkouts@localhost \
             GIT_COMMITTER_NAME=reconcile-rig-checkouts GIT_COMMITTER_EMAIL=reconcile-rig-checkouts@localhost \
             git -C "$path" stash create "$msg" 2>/dev/null) && [ -n "$pin" ] \
-            || { blocking_report="could not pin the local changes on $listed"; return 1; }
+            || { blocking_report="could not pin the local changes on ${listed:-$keeping}"; return 1; }
         # An empty old value makes the ref create-only, so no earlier pin is replaced.
         git -C "$path" update-ref -m "$msg" "$ref" "$pin" "" 2>/dev/null \
-            || { blocking_report="could not record the pin of $listed at $ref"; return 1; }
+            || { blocking_report="could not record the pin of ${listed:-$keeping} at $ref"; return 1; }
         set_aside_ref="$ref"
+    fi
+    if [ "${#blocking[@]}" -gt 0 ]; then
         # Hooks off: git restore runs the rig's post-checkout hook and exits
         # with its status, so a failing hook would report a done restore as failed.
         if ! git -c core.hooksPath=/dev/null --literal-pathspecs -C "$path" restore --source=HEAD --staged --worktree -- "${blocking[@]}" 2>/dev/null; then
@@ -390,10 +546,53 @@ set_aside_and_advance() {
         blocking_report="could not remove the untracked $stuck${moved:+ after $moved}"
         return 1
     fi
-    if ! git -C "$path" merge --ff-only --no-overwrite-ignore "$remote" >/dev/null 2>&1; then
-        blocking_report="the fast-forward still refused after $moved"
+    # Each kept copy waits under the keep directory while git fast-forwards,
+    # and goes back on its path whether or not git did.
+    for p in ${kept[@]+"${kept[@]}"}; do
+        if ! move_aside "$path" "$p"; then
+            stuck="$p"
+            break
+        fi
+        aside+=("$p")
+        asidelist="${asidelist:+$asidelist, }$p"
+    done
+    [ -z "$asidelist" ] || moved="${moved:+$moved and }moving $asidelist aside"
+    if [ -z "$stuck" ] && git -C "$path" merge --ff-only --no-overwrite-ignore "$remote" >/dev/null 2>&1; then
+        advanced=1
+    fi
+    for p in ${aside[@]+"${aside[@]}"}; do
+        put_back "$path" "$p" || left="${left:+$left, }$p"
+    done
+    find "$root" -depth -type d -empty -delete 2>/dev/null || true
+    # A file written on a kept path meanwhile stays where it is, and the kept
+    # copy waits under the keep directory, pinned too when it was modified.
+    back=""
+    if [ -n "$left" ]; then
+        back="; $left could not go back on its path and waits under $root"
+    elif [ "${#aside[@]}" -gt 0 ]; then
+        back="; each kept copy went back on its path"
+    fi
+    if [ -n "$stuck" ]; then
+        if [ -e "$root/$stuck" ]; then
+            blocking_report="could not move the working copy of $stuck aside: an earlier pass's copy of it waits at $root/$stuck"
+        else
+            blocking_report="could not move the working copy of $stuck aside to $root"
+        fi
+        blocking_report+="${moved:+, after $moved}$back"
         return 1
     fi
+    if [ -z "$advanced" ]; then
+        blocking_report="the fast-forward still refused after $moved$back"
+        return 1
+    fi
+    [ -z "$left" ] || warn "rigs/$name fast-forwarded to $remote$back"
+    heal_reading=""
+    if [ -n "$listed" ] || [ -n "$gone" ]; then
+        heal_reading="set aside the local changes blocking its fast-forward"
+    fi
+    [ -z "$keeping" ] || heal_reading="${heal_reading:+$heal_reading and }kept $keeping in place untracked, since $remote stops tracking them and ignores them"
+    heal_reading="$heal_reading${set_aside_ref:+ (pinned at $set_aside_ref)}, then fast-forwarded to $remote"
+    [ -z "$left" ] || heal_reading+="$back"
 }
 
 # The diverged-checkout heal (see the header). On success the branch $3, which
@@ -512,28 +711,44 @@ while IFS=$'\t' read -r name path; do
     parked=""
     [ "$local_branch" = "$default_branch" ] || parked="HEAD is on ${local_branch:-<detached HEAD>}, not $default_branch"
 
-    if [ -z "$parked" ] && git -C "$path" merge --ff-only --no-overwrite-ignore "$remote" >/dev/null 2>&1; then
+    # A kept copy an interrupted pass left aside goes back before anything
+    # reads the working tree.
+    restore_kept "$path"
+
+    # A checkout that is only behind its remote keeps in place each path the
+    # fast-forward would delete while the remote's tree ignores it. The plain
+    # fast-forward runs only when there is none and the read that finds them
+    # worked, since it would delete each one.
+    behind=""; kept=(); kept_report=""; kept_read=1
+    if [ -z "$parked" ] && git -C "$path" merge-base --is-ancestor HEAD "$remote" 2>/dev/null; then
+        behind=1
+        if [ "${RECONCILE_NO_AUTOHEAL:-0}" != "1" ] && ! kept_paths "$path" "$remote"; then
+            kept_read=""
+        fi
+    fi
+
+    if [ -z "$parked" ] && [ -n "$kept_read" ] && [ "${#kept[@]}" -eq 0 ] \
+       && git -C "$path" merge --ff-only --no-overwrite-ignore "$remote" >/dev/null 2>&1; then
         # Advanced or already up to date: clear any lingering escalation.
         advanced=$((advanced + 1))
         resolve_subject "$name" "rigs/$name fast-forwarded cleanly to $remote"
         continue
     fi
 
-    # ff-only refused, or the HEAD is parked. A checkout that is only behind its
-    # remote takes the set-aside heal; a diverged one takes the guarded reset
-    # below. Neither runs on a parked HEAD, where it would act on the wrong
-    # branch, or under RECONCILE_NO_AUTOHEAL=1.
-    behind=""
-    if [ -z "$parked" ] && git -C "$path" merge-base --is-ancestor HEAD "$remote" 2>/dev/null; then
-        behind=1
-    fi
-    set_aside_ref=""; blocking_report=""; upstream_report=""
-    if [ -n "$behind" ] && [ "${RECONCILE_NO_AUTOHEAL:-0}" != "1" ] \
+    # ff-only refused or did not run, or the HEAD is parked. A checkout that is
+    # only behind its remote takes the set-aside heal, which also keeps the
+    # kept paths in place; a diverged one takes the guarded reset below.
+    # Neither runs on a parked HEAD, where it would act on the wrong branch, or
+    # under RECONCILE_NO_AUTOHEAL=1, and the set-aside does not run when the
+    # kept paths could not be read.
+    set_aside_ref=""; blocking_report=""; upstream_report=""; heal_reading=""
+    if [ -n "$behind" ] && [ -n "$kept_read" ] && [ "${RECONCILE_NO_AUTOHEAL:-0}" != "1" ] \
        && set_aside_and_advance "$path" "$remote" "$name"; then
         healed=$((healed + 1))
-        resolve_subject "$name" "rigs/$name auto-healed: set aside the local changes blocking its fast-forward${set_aside_ref:+ (pinned at $set_aside_ref)}, then fast-forwarded to $remote"
+        resolve_subject "$name" "rigs/$name auto-healed: $heal_reading"
         continue
     fi
+    [ -n "$kept_read" ] || blocking_report="$kept_report"
 
     # A diverged checkout is almost always SHA churn from an upstream
     # rebase/squash/force-push, with its content already upstream, and takes
@@ -548,9 +763,9 @@ while IFS=$'\t' read -r name path; do
     fi
 
     # Reached three ways: the HEAD is parked off the default branch, a behind
-    # checkout's blocking changes could not all be set aside, or a divergence
-    # the reset heal could not prove lossless or git refused to reset. File the
-    # subject bead and escalate.
+    # checkout's blocking changes could not all be set aside or its kept paths
+    # could not be read or kept, or a divergence the reset heal could not prove
+    # lossless or git refused to reset. File the subject bead and escalate.
     blocked=$((blocked + 1))
     # The reset a diverged checkout's escalation hands a person. Like the reset
     # heal's own checkout, it refuses rather than loses what is in its way.
@@ -566,9 +781,9 @@ while IFS=$'\t' read -r name path; do
         report="${blocking_report%"$nl"}"
         [ -n "$report" ] || report="not examined: RECONCILE_NO_AUTOHEAL=1 turns the heals off"
         pinned=""
-        [ -z "$set_aside_ref" ] || pinned=$(printf 'The blocking paths were pinned at %s and restored to HEAD.\nRecover a path with git checkout %s -- <path> (working copy)\nor git checkout %s^2 -- <path> (staged copy).' \
+        [ -z "$set_aside_ref" ] || pinned=$(printf 'The local changes were pinned at %s before anything moved.\nRecover a path with git checkout %s -- <path> (working copy)\nor git checkout %s^2 -- <path> (staged copy).' \
             "$set_aside_ref" "$set_aside_ref" "$set_aside_ref")"$nl$nl"
-        body=$(printf 'rigs/%s could not fast-forward to %s — local changes in the live checkout\nsit on paths the incoming commits rewrite, and not all of them could be set\naside without losing content.\nPath: %s\n\n## Blocking the fast-forward\n%s\n\n%sJudge and act, then close this bead (it auto-closes when the rig next\nff-s cleanly): stray write -> git -C %s restore --source=HEAD --staged --worktree -- <path>;\nmachine-local config -> carry it across the incoming change by hand;\nreal work -> save it elsewhere first.\n\n## git status --porcelain\n%s\n' \
+        body=$(printf 'rigs/%s could not fast-forward to %s — the incoming commits rewrite paths\nwhere the live checkout holds local changes or files it keeps in place, and\nnot all of them could be set aside or kept without losing content.\nPath: %s\n\n## Blocking the fast-forward\n%s\n\n%sJudge and act, then close this bead (it auto-closes when the rig next\nff-s cleanly): stray write -> git -C %s restore --source=HEAD --staged --worktree -- <path>;\nmachine-local config -> carry it across the incoming change by hand;\nreal work -> save it elsewhere first.\n\n## git status --porcelain\n%s\n' \
             "$name" "$remote" "$path" "$report" "$pinned" "$path" \
             "$(git -C "$path" status --porcelain 2>/dev/null)")
     else
@@ -599,7 +814,7 @@ while IFS=$'\t' read -r name path; do
         msg=$(printf 'rigs/%s is parked off its deploy branch %s — HEAD is on %s, so reconcile cannot advance it and its working tree serves an off-%s build to every directory-imported pack.\nPath: %s\nSubject bead %s carries the full git status and log, and clears when rigs/%s next fast-forwards cleanly.\nRestore it: save any local work elsewhere, then git -C %s checkout %s.' \
             "$name" "$default_branch" "${local_branch:-<detached HEAD>}" "$default_branch" "$path" "$bead" "$name" "$path" "$default_branch")
     elif [ -n "$behind" ]; then
-        msg=$(printf 'rigs/%s cannot fast-forward to %s — local changes in its live checkout sit on paths the incoming commits rewrite, and its deploy is stalled.\nPath: %s\nSubject bead %s names the blocking paths and carries the full git status, and clears when rigs/%s next ff-s cleanly.\nstray write -> git -C %s restore --source=HEAD --staged --worktree -- <path>; machine-local config -> carry it across the incoming change by hand; real work -> save it elsewhere first.' \
+        msg=$(printf 'rigs/%s cannot fast-forward to %s — the incoming commits rewrite paths where its live checkout holds local changes or files it keeps in place, and its deploy is stalled.\nPath: %s\nSubject bead %s names the blocking paths and carries the full git status, and clears when rigs/%s next ff-s cleanly.\nstray write -> git -C %s restore --source=HEAD --staged --worktree -- <path>; machine-local config -> carry it across the incoming change by hand; real work -> save it elsewhere first.' \
             "$name" "$remote" "$path" "$bead" "$name" "$path")
     else
         msg=$(printf 'rigs/%s cannot fast-forward to %s — its live checkout diverged and its deploy is stalled.\nPath: %s\nSubject bead %s names what stopped the reset heal and the steps to reset by hand, carries the full git status and divergence log, and clears when rigs/%s next ff-s cleanly.\nTo reset by hand: save real work elsewhere, restore each dirty path that is already upstream or a stray write, and move aside each untracked file in the way, as the subject bead lists them. Then run %s, which refuses rather than overwrites or deletes a local change or an untracked file still in its way, an ignored file included.' \
