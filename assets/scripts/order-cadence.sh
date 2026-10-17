@@ -25,12 +25,13 @@
 # reader that cannot read the registry uses CADENCE_FLOOR_MIN.
 #
 # Sourced (never executed) by doctor/check-cadence-live (I10), which calls an
-# order stopped once it has not fired inside its window, and by
+# order stopped once it has not fired inside its window, by
 # doctor/check-armed-dispatch-owed, which calls a ready arm owed once it has
-# waited out the deferred-dispatch order's window. One definition keeps the
-# second from flagging a gap the first reads as healthy. order-cadence.test.sh
-# fails when either reader stops sourcing this file or carries a window of its
-# own.
+# waited out the deferred-dispatch order's window, and by
+# doctor/check-until-resolved-owed, which calls a resolved-by disposition owed
+# once it has waited out that same window. One definition keeps an owed check
+# from flagging a gap I10 reads as healthy. order-cadence.test.sh fails when a
+# reader stops sourcing this file or carries a window of its own.
 
 CADENCE_FLOOR_MIN=1800
 CADENCE_PASS_SPACING=120

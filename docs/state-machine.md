@@ -946,9 +946,49 @@ instead. The read side searches every store before concluding a close was
 false. Consumers: the mechanik/converse close paths
 (`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
 cadence's reader for `duplicate_of`, and the closer of never-dispatched rework
-twins), `preexisting-failure.sh` (a pre-existing-failure gate follows a closed
-tracker's pointer to the live bead that carries its failure, and a
-`not-needed` close ends that chain), and any patrol judging a closed bead.
+twins), the deferred-dispatch reconcile pass (`deferred-dispatch.sh`, the closer
+of a bead its `until` dependency resolved), `preexisting-failure.sh` (a
+pre-existing-failure gate follows a closed tracker's pointer to the live bead
+that carries its failure, and a `not-needed` close ends that chain), and any
+patrol judging a closed bead.
+
+`bead-rehome.sh` proves the evidence kinds itself. Under `fixed-upstream` and
+`duplicate` it re-establishes that the successor is closed or shipped in the
+same store and that the origin recorded no work, unless the origin carries the
+operator's pre-recorded PR-close disposition for that kind and successor.
+Under `re-homed`, `folded` and `not-needed` it applies only the checks every
+kind gets: the origin is not a review bead, a step bead or a workflow root, and
+no other session holds it in progress. The judgment that the bead should close
+is the caller's. A hand disposition, by the mechanik, converse or the operator,
+judges the bead itself. An automated caller proves its own case before it
+calls, and [authority-map.md](authority-map.md) records the power in its
+Close-with-successor row. The deferred-dispatch reconcile pass passes
+`folded` only for a pure wait: an open, unassigned bead whose own `until`
+targets have all closed, whose `until` edge to the successor still stands, that
+no open `blocks` blocker of its own holds, and that carries no live work as
+`assets/scripts/live-work.sh` defines it. The pass checks them on its
+pass-start listing and again on a fresh read of the bead and what depends on
+it, made just before the call under a claim the pass takes on the bead. Both
+reads take the bead's edges from its `bd list` row, because `bd show` leaves
+out an edge whose target has no row in this store, so an `until` target, a
+`blocks` blocker or a parent the store cannot read leaves its condition
+unproven. It leaves a bead that fails any of them, or that it cannot prove
+meets one, as it is and never calls `bead-rehome.sh` on it. It runs
+`bead-rehome.sh` as its claim, and reads the bead once more after the close:
+anything that landed on the bead or its edges while the pass held it makes the
+pass withdraw the disposal, reopening the bead and removing the pointer
+([deferred-dispatch.md](deferred-dispatch.md), "The resolved-by consumer").
+Whoever judges, `bead-rehome.sh` stays the one writer of the pointer and the
+close. It stamps the pointer in one write bd applies only while the bead still
+has the status and assignee its gates read, so a caller whose gates passed
+before another actor claimed the bead stamps nothing while that claim holds.
+The one other write to the pointer is the pass's withdrawal of a pointer it
+had `bead-rehome.sh` stamp under its claim: after a close its check finds
+raced, and when the close is held or fails, in the write that gives the bead
+back. Under its claim no other caller's stamp lands, and the pass marks the
+bead with the successor before `bead-rehome.sh` runs, so it removes only a
+pointer that is its own. A pointer on an open bead is live work to the pass,
+so it never disposes a bead another closer has pointed.
 
 A disposition ends the bead's branch, the way a merge ends a landed one
 through the repository's delete-on-merge setting. Once the close reads back,
