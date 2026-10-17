@@ -1,6 +1,6 @@
 ---
 name: The review path as one lifecycle formula and one skill per check
-description: The design for tk-zif1d8u, the design child of convoy tk-gaklsnk under initiative tk-febol6c. A review bead becomes data. gate-ensure.sh writes the review's whole record once, at dispatch, and every formula step and check skill reads it by name through one script. A check's method is the skill named from the check, and a check with no skill is a paragraph of the formula. The specialist stance is one skill. Every rig gets every check the pack ships, and every reader takes a rig's review guidance at the commit it judges. It settles the frame contract, the review bead's data, method loading, the skill shape, where a rig's guidance is read, rig content and pack content, the tests, the sequencing with the review-coverage epic, and the implementation breakdown. Read it to approve the design at its checkpoint or to build one of its units.
+description: The design for tk-zif1d8u, the design child of convoy tk-gaklsnk under initiative tk-febol6c. A review bead becomes data. gate-ensure.sh writes the review's values once, at dispatch, on the bead's metadata and as the formula vars its pour fills into the step text, so the reviewer reads its commit, its base and its check's skill by name and reads the change with plain git. A check's method is the skill named from the check, and a check with no skill is a paragraph of the formula. The specialist stance is one skill. Every rig gets every check the pack ships, and every reader takes a rig's review guidance at the commit it judges. It settles the values a review is told, the frame contract, the review bead's data, method loading, the skill shape, where a rig's guidance is read, rig content and pack content, the tests, the sequencing with the review-coverage epic, and the implementation breakdown. Read it to approve the design at its checkpoint or to build one of its units.
 ---
 
 # The review path as one lifecycle formula and one skill per check
@@ -13,29 +13,36 @@ the same values into shell variables. The check skills then use those variables
 without saying where they come from. Separately, a rig that keeps no
 `review-checks.toml` can never get the demo, arch or pm check.
 
-1. **The review bead's metadata is the review's whole record, written once at
-   dispatch.** gate-ensure.sh already writes the check, the anchor, the branch,
-   the base and usually the reviewed commit. It adds the PR once one is open,
-   the reason for the dispatch, and the formula that runs the review. It
-   dispatches a review only once it has read the branch's head, so every review
-   is pinned. Every formula step and every check skill reads a value by name
-   through one script, `review-frame.sh`, given the review bead's id. When a
-   dispatched review is left short of its record, as when signoff.sh clears a
-   departed commit's pin and then cannot close the review, gate-ensure retires
-   it and dispatches a fresh one, with the merge held. A person hears of a
-   short review only when that retirement keeps failing or the review was made
-   by hand. Cost: a review whose head neither GitHub nor `git ls-remote` can
-   read waits a pass instead of starting unpinned. This refines the card's "the
-   formula records its pins once": the dispatch records them, because the
-   quorum's two lanes start in parallel and a recovered review has no workflow
-   to record them.
-2. **A check's method is the skill named from the check.** The formula loads
-   `gc-toolkit.review-<check>`. A check a rig's index declares with no pack
-   skill is judged against its row's purpose. A check declared nowhere is
-   approved with `--needs-you`. Both cases are a paragraph of the formula.
-   `review-dispatch-body.sh` and its test are deleted, and the bead's
-   description becomes one fixed paragraph on how to recover a review with no
-   workflow. Cost: none for today's five checks.
+1. **The dispatch writes the review's values once, and the step text carries
+   them.** A review needs the commit it reads, the base its diff starts from
+   and the check whose method it applies. "What a review is told", below,
+   lists every value with one meaning each. gate-ensure.sh writes them on the
+   review bead's metadata, as it writes most of them today, and passes the same
+   values as formula vars when it pours the review. The pour fills them into
+   the step text, so the reviewer reads its commit, its base and its check's
+   skill by name, and a pour that lacks a required value fails. No step
+   re-derives a value, and no script stands between the reviewer and its
+   values: the reviewer runs plain git in a worktree at the reviewed commit.
+   gate-ensure pours a review only once it has read the branch's head, and
+   nothing moves or clears a value afterwards, signoff.sh included. So a review
+   reads only the commit its dispatch recorded, and main's fallback of
+   reviewing the branch's latest commit when none was recorded ends. A review
+   held with no workflow reads the same values from its metadata. Cost: a
+   review whose head neither GitHub nor `git ls-remote` can read waits a pass,
+   and a person who slings a review by hand passes its values too. This
+   refines the card's "the formula records its pins once". The card's pin is
+   `reviewed_oid`, the branch's head at the moment the review was dispatched,
+   frozen so the verdict certifies the commit the reviewer read and cannot
+   slide onto a later push. The dispatch records it, because the quorum's two
+   lanes start in parallel and a recovered review has no workflow to record
+   it.
+2. **A check's method is the skill named from the check.** The step text names
+   `gc-toolkit.review-<check>` with the check filled in at pour. A check a
+   rig's index declares with no pack skill is judged against its row's
+   purpose. A check declared nowhere is approved with `--needs-you`. Both cases
+   are a paragraph of the formula. `review-dispatch-body.sh` and its test are
+   deleted, and the bead's description becomes one fixed paragraph on how to
+   recover a review with no workflow. Cost: none for today's five checks.
 3. **The specialist stance is one skill, `gc-toolkit.specialist-stance`.** The
    demo, arch and pm skills load it, and so does the formula's no-skill case.
    Cost: one more entry in every agent's skill list.
@@ -64,30 +71,77 @@ without saying where they come from. Separately, a rig that keeps no
    the default branch's copy so that a process change reaches work in flight
    (PR #1262 comment 4290610037). The operator's review of this design prefers
    the branch's own copy (comments 4303521122 and 4303534443).
-6. **Tests pin behavior where the pieces meet, iterating the index.** Each
+6. **Tests hold behavior where the pieces meet, iterating the index.** Each
    declared check resolves to its skill or its purpose, the dispatch writes the
-   record, the reader refuses a short one and gate-ensure replaces a short one
-   it dispatched, every skill block runs given only a record, and signoff.sh
-   refuses each flag a check does not own. Cost: no test holds a formula's
-   wording, so a step that loses an instruction is caught in review, not by the
-   suite.
+   record and passes the same values as vars, every value a review formula
+   names is one the dispatch passes, every skill block runs given only the
+   values the step text names, and signoff.sh leaves a departed commit recorded
+   and refuses each flag a check does not own. Cost: no test holds a formula's wording, so a step that loses an
+   instruction is caught in review, not by the suite.
 7. **This lands before the review-coverage epic's method units.** It changes
    the review path's structure and no check's judgment. Those units then edit
-   inside the new skill shape, build their prep script on `review-frame.sh`, and
-   relax the subagent rule in the one place it is left. Cost: they wait for this
-   convoy's build. The epic's contract sitting rules on this (section 9).
+   inside the new skill shape, build their prep script on the values the step
+   text carries, and relax the subagent rule in the one place it is left. Cost:
+   they wait for this convoy's build. The epic's contract sitting rules on this
+   (section 9).
 8. **The build is two beads onto this integration branch, in order.** First the
-   layered index, which every gating reader takes. Then the record, the frame
-   and the skills. Cost: one more PR to approve on the
-   integration branch, for two diffs that are each reviewable in one sitting.
-   The single build the card intended is the alternative, at the cost of one PR
-   across about forty files.
+   layered index, which every gating reader takes. Then the values, the
+   formulas and the skills. Cost: one more PR to approve on the integration
+   branch, for two diffs that are each reviewable in one sitting. The single
+   build the card intended is the alternative, at the cost of one PR across
+   about forty files.
+
+## What a review is told
+
+A review needs two things to start: the commit it reads and the base its diff
+starts from. The commit is the branch's latest commit when gate-ensure
+dispatches the review. It is written down then, and nothing moves or clears it,
+so the diff the reviewer reads, every command its method runs and the commit
+its verdict names are the same code, even if someone pushes while it reads.
+The quorum's two lanes read the same commit for the same reason. The base is
+the branch the change lands on. The diff runs from where the branch left the base, so it shows
+what the branch changed and not what the base did since.
+
+Every value a step or a skill uses is in this table. gate-ensure.sh writes each
+one at dispatch, on the review bead's metadata, and passes it as the formula
+var of the same name, so the step text names it wherever the formula writes
+`{{<key>}}`. A skill has no template pass, so it names a value as `<key>`, and
+the agent fills it in from the step text it holds.
+
+| Key | Required | What it is | Example |
+|---|---|---|---|
+| `review_bead` | always | this review bead | `tk-hyt71ck` |
+| `check` | always | the check this review applies, in lowercase | `arch` |
+| `anchor_bead` | always | the work bead the verdict lands on, whose description says what the change is for | `tk-zif1d8u` |
+| `review_branch` | always | the branch under review | `polecat/tk-zif1d8u` |
+| `review_base` | always | the branch it lands on, where the diff starts | `integration/tk-gaklsnk` |
+| `reviewed_oid` | always | the commit under review: the branch's head when the review was dispatched, which is the card's pin | `11810d325ac7…` |
+| `review_pr_url` | once a PR is open | the anchor's PR, else empty | `https://github.com/zookanalytics/gc-toolkit/pull/1277` |
+| `review_pr_number` | with `review_pr_url` | that PR's number, else empty | `1277` |
+| `review_context` | no | why this review went out, such as a bring-current round for triage to rule, else empty | |
+
+`review_bead` is the bead itself, and `check` is its `check_name` folded to
+lowercase. Every other key is the metadata key of the same name.
+
+One more value exists only once the review runs: `<worktree>`, the review's
+worktree at the reviewed commit, whose path load-dispatch prints. In it the
+diff is `git diff origin/<review_base>...HEAD`, with three dots so the diff
+starts where the branch left its base, and every other git command works as
+usual.
+
+The record also carries `task_kind`, `check_name`, `review_formula`,
+`review_pool` and `fix_target_pool`, all five on every review. The machinery
+reads them and no step does: `review_formula` names the formula a review held
+with no workflow follows, and the two pools say where a returned review and a
+rework go, as today. A record is whole when it carries those five, every key
+the table marks always, and both PR keys once a PR is open. It is short when it
+lacks any of them.
 
 ## What this design rests on
 
 The pack is read at `9db3fea95`, which is main with PR #1262 landed and the
 commit integration/tk-gaklsnk was cut from. Line numbers in this document are at
-that commit.
+that commit. gascity is read at `11a09362a`.
 
 The sources are the operator's three reviews of PR #1262 (5536090671,
 5538944776, 5542707712), the review comments 4286312773 ("A repo does not need
@@ -108,6 +162,18 @@ Facts read from the running city:
 - `gc <binding> scripts-dir` (PR #1269) prints the installed pack's script
   directory. The ask-for-work skills call every pack script through it
   (`docs/gascity-packs.md:566-580`).
+- A pour fills each `{{name}}` in a step's text once. The value comes from the
+  sling's `--var`, else the rig's formula_vars, else the vars sling adds,
+  `binding_prefix` among them, else the formula's declared default
+  (gascity `internal/sling/sling.go:1166-1206`,
+  `internal/formula/parser.go:615-624`). A var the formula declares `required`
+  fails the pour when nothing gives it (`parser.go:728-731`). graph.v2 reserves
+  `issue`, `bead_id` and `convoy_id` (`internal/formula/graphv2_validation.go:18-22`).
+  gate-ensure already forwards `--var` values to every review it pours
+  (`gate-ensure.sh:106-109`, `:964`, `:1072`), today one list for every review
+  in a pass, which is how the quorum gets its lane config.
+- A skill has no template pass, and no variable set in one tool call survives
+  into the next (`docs/gascity-packs.md:566-567`).
 - Each rig's `review-checks.toml` on its default branch today:
 
   | Rig | `review-checks.toml` | `docs/review-<check>.md` |
@@ -127,14 +193,17 @@ on its own:
   runs (`formulas/mol-review.toml:79-88`). The correctness skill's read of the
   published page then runs with an empty `$PR` and `$PR_REPO_Q`
   (`skills/review-correctness/SKILL.md:104`).
-- **The triage skill cannot find its parser outside gc-toolkit.** It looks for
-  `review-checks.sh` under `GC_PACK_DIR`, which agent sessions never have, and
-  under `GC_RIG_ROOT`, which holds the pack only when the rig is gc-toolkit
+- **The triage skill cannot find its parser outside gc-toolkit.** It predates
+  `gc <binding> scripts-dir` and still looks for `review-checks.sh` with a loop
+  of its own: under `GC_PACK_DIR`, which agent sessions never have, and under
+  `GC_RIG_ROOT`, which holds the pack only when the rig is gc-toolkit
   (`skills/review-triage/SKILL.md:38-41`). In every other rig the parse prints
-  nothing, and triage reads that as no menu.
+  nothing, and triage reads that as no menu. The fix is the `scripts-dir` call
+  the ask-for-work skills make.
 - **The triage skill uses `$ANCHOR`, which no frame block sets.** It feeds the
   bring-current round read and the observation's provenance
-  (`skills/review-triage/SKILL.md:122-123`, `:187`, `:191`, `:196`).
+  (`skills/review-triage/SKILL.md:122-123`, `:187`, `:191`, `:196`). The anchor
+  is `anchor_bead` in "What a review is told".
 - **liveness-sweep.sh classifies every rig's anchors against gc-toolkit's own
   index**, the file two directories above the script
   (`assets/scripts/liveness-sweep.sh:303`).
@@ -161,178 +230,113 @@ The skills use those variables by name. The correctness skill uses `$M`,
 skill's block works only when the agent pastes the formula's blocks in front of
 it in one shell, which is what `mol-review.toml:197-201` asks.
 
-### The record
+### The values reach the reviewer in the step text
 
-The review's record is the review bead's metadata. gate-ensure.sh writes all of
-it when it dispatches the review (section 2), and no formula step writes to it.
+gate-ensure.sh writes the record on the review bead and passes the same values
+on the sling (section 2). The record is what readers other than the reviewer
+read: signoff.sh, gate-ensure's own arms, the board, and a claimant of a review
+held with no workflow. The vars are what the reviewer reads. Both come from the
+one work order gate-ensure builds, and a test holds the two lists together
+(section 8).
 
-| Key | Required | What it names |
-|---|---|---|
-| `task_kind` | yes | `review` |
-| `check_name` | yes | the check, as the anchor's `check_set` wrote it |
-| `anchor_bead` | yes | the anchor the verdict lands on |
-| `review_branch` | yes | the branch under review |
-| `review_base` | yes | the branch it lands on, which is the diff's base |
-| `reviewed_oid` | yes | the commit the review reads, the head at dispatch |
-| `review_formula` | yes | the formula that runs the review |
-| `review_pr_url`, `review_pr_number` | both once a PR is open, neither before | the anchor's PR at dispatch |
-| `review_context` | no | why this dispatch went out |
-| `review_pool`, `fix_target_pool` | routing | where the failure arm and a rework go, as today |
+`mol-review` and the quorum declare a var for each value of "What a review is
+told". The six every review has, `review_bead`, `check`, `anchor_bead`,
+`review_branch`, `review_base` and `reviewed_oid`, are declared `required`, so
+a sling that leaves one out pours nothing. The three that can be empty default
+to empty. gate-ensure slings a review only once its record reads back
+(`gate-ensure.sh:1050-1067`), and its stranded arm re-slings one with the
+values its record holds (`:954`, `:964`), so a review it dispatches is never
+poured short.
 
-The reader computes five more values and stores none of them:
+Each step names a value where it uses it. The method paragraph names the skill
+as `{{binding_prefix}}review-{{check}}`, which a pour in this city fills in as
+`gc-toolkit.review-arch`. load-dispatch makes the worktree at
+`{{reviewed_oid}}`, and the verdict call passes `--review-bead
+{{review_bead}}` and `--reviewed-oid {{reviewed_oid}}`, so the agent retypes
+nothing. No value has to survive from one shell to the next, because each is
+in the text.
 
-| Value | What it is |
-|---|---|
-| `review_bead` | the review bead, resolved from the input convoy |
-| `check` | `check_name` folded to lowercase, the form a skill name and the index use |
-| `pr_repo` | `host/owner/repo` parsed from `review_pr_url`, the pin every `gh` call takes |
-| `repo` | the rig's repository: `GC_RIG_ROOT`, else the rig `GC_RIG` names in `gc rig list` |
-| `worktree` | the path of the review's worktree at the reviewed commit |
+One step gathers what the dispatch cannot know, because it exists only once
+the review starts. load-dispatch prints the anchor's description, the PR's page
+when one is open, the rig's guidance for the check, which
+`review-checks.sh --extension {{check}} --at {{reviewed_oid}}` reads from the
+reviewed commit's `docs/review-{{check}}.md`, and the path of the review's
+worktree at the reviewed commit. Each quorum lane gathers the same in its first
+block. The agent carries that output into the steps that follow, as it carries
+the step text.
 
-### The reader: review-frame.sh
+No reader script is built. A script that printed one value, wrapped `git diff`
+or `git show`, or built the worktree would only stand in front of what the
+reviewer already has: the step text names each value, the reviewer runs git in
+the worktree with whatever options it needs, and load-dispatch calls
+`review-workspace.sh add` as the review step does today.
 
-`assets/scripts/review-frame.sh` is the contract written once: what a step or a
-method may ask of the review. Every verb takes the review bead as `--bead <id>`,
-or as `--convoy <id>` from a step. `--convoy` resolves the convoy's one tracked
-member and refuses any other count, the check each step writes inline today.
+The template pass stops in three places:
 
-- `record` prints the record and the derived values, one `name=value` per line,
-  with `review_bead` first. It exits 3 when the record is short of any required
-  key.
-- `pin <name>` prints one value. It exits 3 only when that value is required
-  and missing. An optional key the record does not carry prints nothing and
-  exits 0.
-- `diff [--stat]` prints the diff under review,
-  `origin/<review_base>...<reviewed_oid>`, in the rig's repository. Three dots
-  compare against the merge-base, as `mol-review` does today. It fetches the
-  base and the commit when the repository lacks them.
-- `show <path>` prints a file as the reviewed commit carries it, from the rig's
-  repository. It exits 3 when the commit has no such file. This is the subject
-  read of section 7.
-- `worktree` makes the review's worktree at the reviewed commit through
-  `review-workspace.sh add`, or finds the one already there, and prints its
-  path. It fetches the commit when the repository lacks it.
-
-Every verb exits 0 when it printed, 1 when the bead or the convoy cannot be
-read, and 2 on a usage error. A verb that needs the PR exits 3 on a
-`review_pr_url` it cannot parse, or on one PR key without the other. Every exit
-3 names the key on stderr. A test hands the script a fixture row instead of a
-store, which is what lets a method's blocks run outside a city (section 8).
+- A skill is a file in the catalog, with no template pass. It names a value as
+  `<key>`, and the agent fills it in from the step text.
+- A review held with no workflow has no poured text. Its claimant reads the
+  steps with `gc formula show` and the values from the bead's metadata, as the
+  fixed description says (section 2).
+- The worktree's path and the step bead a keepalive refreshes exist only once
+  the review runs. load-dispatch prints the first, and the agent has the second
+  from its own claim.
 
 ### What a step and a skill may assume
 
-1. The review bead's id. `load-dispatch` prints it at the head of the record.
-   In recovery, it is the bead you hold.
-2. Any value of the record, read by name:
-   `review-frame.sh pin <name> --bead <id>`.
-3. The diff under review, and any file at the reviewed commit, through
-   `review-frame.sh diff` and `review-frame.sh show`.
-4. The review's worktree at the reviewed commit, through
-   `review-frame.sh worktree`.
-5. A keepalive for a long command:
+1. The values of "What a review is told", in the step text.
+2. The review's worktree at the reviewed commit, whose path load-dispatch
+   prints. The reviewer reads the change there with git: the diff, the log, and
+   any file at that commit.
+3. What load-dispatch gathered: the anchor's description, the PR's page and
+   the rig's guidance for the check.
+4. A keepalive for a long command:
    `lease-heartbeat.sh <the step bead your claim returned> -- <command>`. The
    lease belongs to the claimed step, which differs per step and per lane, so
-   the record cannot carry it. The agent has it from its own claim.
-6. The rig's guidance for the check, which the review step prints (section 3).
-7. The verdict envelope, `findings.md` and `findings.json`, and the one
-   `signoff.sh` call the frame makes with the flags the method names.
+   the dispatch cannot pass it. The agent has it from its own claim.
+5. The verdict envelope, `findings.md` and `findings.json`, and the one
+   `signoff.sh` call the formula makes with the flags the method names.
 
-Nothing else. A block that needs a value reads it inside that block. A skill
-names a value in its prose by its key, as `<reviewed_oid>`.
-
-A formula step reaches a pack script the way every formula reaches one today,
-through the candidate loop that tk-60i7nl6 replaces when it lands. A skill
-reaches one as `"$(gc <binding> scripts-dir)/<script>"`, the form the
-ask-for-work skills use.
+Nothing else. A skill's block that calls a pack script reaches it as
+`"$(gc <binding> scripts-dir)/<script>"`, the form the ask-for-work skills use.
+A formula step reaches one through the candidate loop that tk-60i7nl6 replaces
+when it lands.
 
 ### A short record
 
-A review dispatched under this design reaches a reviewer short of its record in
-one case. gate-ensure.sh slings a review only once its whole work order reads
-back (`gate-ensure.sh:1050-1067`), and its stranded arm writes the whole order
-before it slings a review again (`:954`). The case is signoff.sh refusing a
-verdict whose pin a rewrite took off the branch. It clears the pin and closes
-the review superseded, and when that close does not read back, the review stays
-open without its pin (`signoff.sh:473-517`). On main that case heals without a
-person. `load-dispatch` pins an absent `reviewed_oid` to the live head
-(`mol-review.toml:113-114`) and the failure arm restores the route
-(`:374-376`), so the next claim reviews the live head. This design ends that
-fallback, because a review reads only the commit its dispatch pinned. The
-repair moves to gate-ensure. Otherwise a short record means a bead made by hand
-or before this design.
+A record the dispatch wrote is never short. gate-ensure writes the whole record
+before it pours the review (`gate-ensure.sh:1050-1067`), a pour that lacks a
+required var fails, and nothing moves or removes a value afterwards.
 
-`load-dispatch` reads the record with `record`, which refuses a short one with
-exit 3 and names the key. The step then appends that message to the review
-bead's notes, closes the chain forward and drains. The quorum's lanes and its
-synthesis meet a short record the same way. The verdict step's failure arm
-(`mol-review.toml:368-384`), which the quorum's synthesis repeats, restores the
-bead's route only when `record` reads the record whole. After signoff.sh's
-interrupted retirement, the arm closes the chain and drains without restoring
-the route. A claimant can also hold a short review with no workflow, because a
-person routed it, or because the failure arm of a workflow poured before this
-design restored its route. That claimant appends the refusal and releases its
-claim with the route left empty. No path returns a short review to the pool,
-because the next claim would meet the same refusal.
-Reviewing an unpinned commit is never the fallback.
+signoff.sh is the one writer that removes a value today. When it refuses a
+verdict whose commit a rewrite took off the branch, it clears `reviewed_oid`
+(`signoff.sh:483-488`). The clear exists so that main's load-dispatch, which
+reviews the branch's latest commit when a review records none
+(`mol-review.toml:113-114`), does not review the departed commit again on the
+next claim. This design ends that fallback, so the clear protects nothing, and
+it goes. signoff.sh's departed-commit path becomes: refuse the verdict, append
+the note, close the review superseded, read the close back, and exit 2 if the
+close did not land. The verdict step's failure arm restores the route as it
+does today, and the next claimant meets the same refusal and retries the same
+close.
 
-Each of those paths leaves the review open, with no route and nothing driving
-it. A short review that was never poured is the stranded arm's, which writes
-the whole record before it slings the review (section 2). Any other has a spent
-workflow, the shape gate-ensure's spent-workflow arm judges
-(`gate-ensure.sh:479-520`). The arm holds a spent review for one pass, because
-a failure arm closes its chain before it restores a route (`:472-475`), and
-that hold stays. On its next pass the arm reads the record with
-`review-frame.sh record`. What it does with a short record depends on who wrote
-the record. The arm takes `review_pool` as the mark of a record the dispatch
-wrote, because gate-ensure's work order writes that key on every review
-(`gate-ensure.sh:189-196`). A read that cannot reach the bead (exit 1) changes
-nothing that pass. The merge stays held and the next pass reads again, as with
-every gate-ensure probe the ledger cannot answer, so an unreadable store is
-never taken for a short record or for a record without `review_pool`.
+A short record therefore means a bead made by hand or before this design. A
+claimant that finds a required key missing appends what is missing to the
+review's notes and drains with the route left empty, because the next claim
+would meet the same gap. A review that was never poured is the stranded
+arm's, which writes its record before it slings the review again
+(`gate-ensure.sh:954`). One whose workflow is spent is the wedge gate-ensure's
+spent-workflow arm escalates today (`gate-ensure.sh:479-520`). Reviewing a
+commit the dispatch did not record is never the fallback.
 
-A short review the dispatch wrote can produce no verdict, and its repair is
-known, so the arm retires it. After signoff.sh's interrupted retirement, that
-is the close signoff.sh could not confirm. The arm closes the review
-`gc.outcome=superseded` with no verdict, appends a note naming what the record
-lacks, and reads the close back. The same pass then dispatches a fresh review
-with the whole record at the live head, through the quiescence gate and the
-per-head bar that every dispatch passes. gate-ensure already closes a review it
-cannot use. It unmakes one filed short of the keys its probe selects by before
-it files a fresh one (`:1033-1037`).
+### The quorum reads the same values
 
-The merge stays held, and no verdict is recorded, until the fresh review
-records one. The open review holds its lane out of green. The retired one backs
-no lane, because backing needs `signoff_verdict=approve` on a review that is
-not superseded (`lane-state.sh:137-157`). It bars no fresh dispatch either,
-because the per-head bar counts only a review closed `recorded`
-(`gate-ensure.sh:244-257`).
-
-A close that does not read back leaves the review open and the merge held, and
-the next pass tries again. The arm records each failed attempt on the review,
-as it records the spent root its hold saw. When the retirement fails on a
-second pass, the repair is blocked. Only then does the arm escalate, under a key
-of its own, `review-retire-blocked`, naming the review, what its record lacks
-and the close that does not land. A later pass whose retirement reads back
-retracts that visit through `escalate.sh --retract`.
-
-Two spent reviews stay a person's to decide. A short review without
-`review_pool` was made by hand, and a fresh dispatch could drop what its maker
-meant by it. The arm escalates it under `review-short-record`, offering the two
-repairs that fit a short record: complete the record and return the review to
-the pool, or close it so the next pass dispatches a fresh one. A bare return to
-the pool is not offered, because the next claim would meet the same refusal. A
-spent review whose record is whole is still the wedge the arm escalates today.
-Its workflow ended without a verdict for a reason the record does not show, so
-the arm asks a person for one of its two repairs.
-
-### The quorum reads one record
-
-The two lanes and the synthesis each read the same record through
-`review-frame.sh --convoy`. A lane's whole input is `record` and `diff`. No lane
-derives a value, so the two lanes cannot read different commits, and the
-quorum needs no pin step of its own. The quorum's `base_ref` var retires: it
-stood in for a `review_base` the record now always carries, and
-refinery-reconcile.sh never passes it (`refinery-reconcile.sh:118-133`).
+The two lanes and the synthesis are poured by one sling, so they are filled in
+with the same values. No lane derives a value, so the two lanes cannot read
+different commits, and the quorum needs no step of its own to fix the commit.
+The quorum's `base_ref` var retires: it stood in for `review_base`, which the
+vars now carry, and refinery-reconcile.sh never passes it
+(`refinery-reconcile.sh:118-133`).
 
 ## 2. The review bead's data
 
@@ -357,13 +361,24 @@ things:
 - **`review_formula`**, the formula the dispatch pours, `REVIEW_FORMULA`.
 - **`reviewed_oid` on every review.** `live_head_for` reads the head through the
   GitHub API and returns nothing when `gh` or a parseable GitHub origin is
-  missing, and the review then goes out unpinned (`gate-ensure.sh:137-139`,
+  missing, and the review then goes out with no commit (`gate-ensure.sh:137-139`,
   `:152-166`). Under this design it falls back to
   `git ls-remote origin refs/heads/<branch>`, which needs only the origin the
   review fetches from anyway. An anchor whose head neither read answers is held
   for the pass, which is the arm's ordinary "merge stays held, retry next
-  pass". The stranded arm writes `reviewed_oid` only when the review has none.
-  It pins the live head, and it never moves a pin a dispatch wrote.
+  pass". The stranded arm writes `reviewed_oid` only when the review has none,
+  from the live head, and never changes one a dispatch wrote.
+
+### What gate-ensure passes on the sling
+
+Every sling of a review, the fresh dispatch's (`:1072`) and the stranded arm's
+(`:964`), passes each value of "What a review is told" as `--var <key>=<value>`,
+read from the record it has just written or read back, beside the
+`--sling-var` values it forwards today. `check` is `check_name` folded to
+lowercase, the form a skill name and the index use, and `review_bead` is the
+bead being slung. `review_context` is the one free-text value, so the formulas
+name it in prose and never inside a shell block, where a quote in it would
+split the command.
 
 ### The description
 
@@ -374,7 +389,13 @@ into it:
 > anchor, the reviewed branch, base and commit, the PR once one is open, and the
 > formula that runs it. If you hold this bead with no poured workflow, run
 > `gc formula show` on the formula its `review_formula` names and follow its
-> steps in order, with this bead as the review bead they read.
+> steps in order. In recovery there is no input convoy and there are no step
+> beads to close. Read each `{{<key>}}` in the steps as this bead's value under
+> that key, `{{check}}` as its `check_name` in lowercase, `{{review_bead}}` as
+> this bead, and `{{binding_prefix}}` as the binding your skill catalog shows on
+> the pack's skills. When the bead lacks a key the steps name, review nothing:
+> append what is missing to its notes and release your claim with the route
+> left empty.
 
 gate-ensure passes it on the create, where it passes the composed body today
 (`gate-ensure.sh:1053-1058`).
@@ -392,20 +413,20 @@ tests.
 
 | Reader | Reads today | Reads instead |
 |---|---|---|
-| `mol-review` load-dispatch, step 5 (`mol-review.toml:118-122`) | the note's check section, which names the method | the record's `check`. The review step names the skill (section 3). |
+| `mol-review` load-dispatch, step 5 (`mol-review.toml:118-122`) | the note's check section, which names the method | the check, which the step text names. The review step names the skill (section 3). |
 | The quorum lanes, step 2 (`mol-review-quorum-signoff.toml:97-99`, `:163-165`) | the skill the check section names | the same |
 | The demo, arch and pm skills (`review-demo/SKILL.md:15`, `review-arch/SKILL.md:10`, `review-pm/SKILL.md:13`) | "the dispatch note's shared specialist stance" | `gc-toolkit.specialist-stance` (section 4) |
-| The demo skill on `docs/review-demo.md` (`review-demo/SKILL.md:138-140`) | the extension the note appended from the reviewed commit | the guidance the review step prints from the reviewed commit (sections 3 and 6) |
+| The demo skill on `docs/review-demo.md` (`review-demo/SKILL.md:138-140`) | the extension the note appended from the reviewed commit | the guidance load-dispatch prints from the reviewed commit (sections 3 and 6) |
 | A claimant of a review the failure arm returned to its pool (`mol-review.toml:372-384`) | the note's recovery paragraph | the fixed paragraph and `review_formula` |
-| The reviewer reading why it was dispatched | the note's "Context from the dispatch" | `review_context`, which load-dispatch prints with the record |
-| A Claude lane of the quorum, through the work-context hook (`overlays/work-context`) | the whole description, at claim | the fixed paragraph. The record arrives through the frame. |
+| The reviewer reading why it was dispatched | the note's "Context from the dispatch" | `review_context`, in the step text |
+| A Claude lane of the quorum, through the work-context hook (`overlays/work-context`) | the whole description, at claim | the fixed paragraph. The values arrive in the step text. |
 | `gate-ensure.test.sh` (`:61-62`, `:232`) | a stub body script and its marker | assertions on the record and the fixed paragraph |
 | `pr-facts.test.sh` (`:191`, named again at `:195` and `:880`) | a stub body script that pr-facts.sh never calls | nothing. The stub goes, and the `validate-dispatch-body.sh` stub beside it stays. |
 
 `review-dispatch-body.sh`, its test and its row in `docs/component-model.md`
 (`:394`) are deleted. The rules its frame section shares with the formula
 stay in the formula: one verdict, never `gh pr review --approve`, and what to
-do when a rewrite takes the pinned commit off the branch. Its "One agent,
+do when a rewrite takes the reviewed commit off the branch. Its "One agent,
 single pass. No fan-out" line goes with the script. That leaves `mol-review`'s
 own rule as the one place the subagent policy lives (section 9).
 
@@ -413,32 +434,40 @@ own rule as the one place the subagent policy lives (section 9).
 
 Every step that applies a method carries this paragraph: `mol-review`'s review
 step, and the quorum's two lanes and its synthesis, which judges and runs under
-the same method. It names no check:
+the same method. The pour fills in the check, and load-dispatch has already
+printed the rig's guidance for it (section 1):
 
-> The check's method is the skill `gc-toolkit.review-<check>`, where `<check>`
-> is the record's `check`. Load it from your skill catalog and apply it, and no
-> other review skill. A copy of a skill in the review's worktree is the change
-> under review, not your method. When your catalog has no such skill:
+> The check's method is the skill `{{binding_prefix}}review-{{check}}`. Load it
+> from your skill catalog and apply it, and no other review skill. A copy of a
+> skill in the review's worktree is the change under review, not your method.
+> When your catalog has no such skill:
 >
-> - If the rig's check index declares the check
->   (`review-checks.sh --check <check> --at <reviewed_oid>` prints its row),
+> - If the rig's check index declares `{{check}}`
+>   (`review-checks.sh --check {{check}} --at {{reviewed_oid}}` prints its row),
 >   judge the diff against the purpose the row states. Load
->   `gc-toolkit.specialist-stance` and hold it. Say in your coverage line that
->   the pack ships no method for this check.
+>   `{{binding_prefix}}specialist-stance` and hold it. Say in your coverage line
+>   that the pack ships no method for this check.
 > - If no index declares it, approve, and pass `--needs-you` saying the check
 >   is declared nowhere, so the operator decides whether it stays in the
 >   anchor's `check_set`.
 >
-> Then print the rig's guidance for the check,
-> `git show <reviewed_oid>:docs/review-<check>.md`, when the reviewed commit
+> The rig's guidance for this check is the reviewed commit's
+> `docs/review-{{check}}.md`, which load-dispatch printed when the commit
 > carries one. It adds to the method and never replaces it. Most rigs keep
 > none.
 
 - **The name.** `gc-toolkit.<name>` is the name `docs/skills.md` gives every
   pack skill, and the one the operator ruled for pack text (review
-  5538944776). A city that imports the pack under another binding sees
-  `<binding>.review-<check>`. The ask-for-work skills make the same
-  substitution for `gc <binding> scripts-dir`.
+  5538944776). `{{binding_prefix}}` is the var sling adds to every pour
+  (`internal/sling/sling.go:1196`), so a city that imports the pack under
+  another binding fills in `<binding>.review-<check>`. The ask-for-work skills
+  make the same substitution by hand for `gc <binding> scripts-dir`.
+- **Where the template pass stops.** The check is known at dispatch, so the
+  skill's name is filled in before the agent reads it. Whether the catalog
+  holds that skill is the session's to answer, and a template has no
+  conditional, so the two no-skill cases stay sentences the agent reads. Both
+  are rare: no rig here declares a check of its own, and an undeclared token is
+  a legacy one.
 - **No list.** Which checks have a skill is the catalog's answer. The formula
   names the skill from the check, and the pack's index declares a check only
   where `skills/review-<check>/` exists, which a test holds (section 8). The
@@ -465,20 +494,20 @@ Each check's skill carries these parts, under these headings:
 - **The opening.** The concern, in a paragraph. A specialist check's opening
   loads the stance: "This check holds the specialist stance: load
   `gc-toolkit.specialist-stance` before you judge."
-- **`## What it reads`.** The record's values it uses, by key. The subject
-  documents it holds the change to, read at the reviewed commit with
-  `review-frame.sh show`. The rig's guidance the frame prints.
+- **`## What it reads`.** The values it uses, by key, as `<reviewed_oid>`. The
+  subject documents it holds the change to, read in the review's worktree at
+  the reviewed commit. The rig's guidance load-dispatch printed.
 - **`## What it judges`.** The method, as it stands.
 - **`## What blocks`.** Which findings make the verdict `request-changes`, and
   which ride along.
 - **`## The verdict`.** The lines it adds to the envelope, what `findings.json`
-  carries, and each `signoff.sh` flag it passes beyond the frame's call, or
+  carries, and each `signoff.sh` flag it passes beyond the formula's call, or
   "none".
 
-The mechanics a method needs are calls given the review bead (section 1). A
-block reads every value it uses through `review-frame.sh`, in that block.
+A block names each value it uses by its key, and the agent fills it in from the
+step text (section 1). It reads the change with git in `<worktree>`.
 
-The reshaping moves sentences between headings and rewrites how a block reads
+The reshaping moves sentences between headings and rewrites how a block names
 its values. It changes no sentence of judgment. That is the initiative's first
 boundary, and the build's review holds it.
 
@@ -513,11 +542,11 @@ and pm do.
 
 | Skill | Frame values it uses today | Moves |
 |---|---|---|
-| correctness | `$M`, `$BASE`, `$REVIEWED_OID`, `$PR`, `$PR_REPO_Q`, `hb`, and `$ANCHOR` set from `$M` | Its preamble about the formula's blocks goes (`:12-17`). The test-evidence block reads `anchor_bead` and `reviewed_oid` through `review-frame.sh`. The page read becomes `gh pr view <review_pr_number> --repo <pr_repo>`. Suites run under the keepalive. Flags: none. |
-| triage | `$REVIEW_BEAD`, `$REVIEWED_OID`, and `$ANCHOR`, which nothing sets | The index parse becomes `review-checks.sh --show --at <reviewed_oid>`, reached through `scripts-dir` (sections 5 and 6). Its no-index fallback and the missing-index observation go, because every rig has the pack's menu. That observation is the one every gascity triage files today, and tk-ymhd3o4 plans to file it once per repository instead (section 9). The observation stays for a rig row the resolver rejects. The anchor comes from the record. It never blocks. Flags: `--add-gates`, `--reopen`, `--round-reason`, `--dismiss-approval`. |
-| demo | `$REVIEW_BEAD`, `$REVIEWED_OID`, `$BASE`, `$REVIEW_WT`, `$SCRIPTS`, `hb` | Loads the stance. The capture runs beside the worktree `review-frame.sh` returns, under the keepalive. `demo-repo-artifact.sh` and `demo-deliver.sh` are reached through `scripts-dir`. `docs/review-demo.md` is the guidance the frame prints. Flags: `--visual`, `--visual-fallback-from`. |
-| pm | `$REVIEWED_OID` | Loads the stance. Reads `docs/product-goals.md` with `review-frame.sh show`. Flags: none. |
-| arch | none | Loads the stance. Reads `docs/architecture.md` and `docs/architecture/` with `review-frame.sh show`. Flags: none. |
+| correctness | `$M`, `$BASE`, `$REVIEWED_OID`, `$PR`, `$PR_REPO_Q`, `hb`, and `$ANCHOR` set from `$M` | Its preamble about the formula's blocks goes (`:12-17`). The test-evidence block names `<anchor_bead>` and `<reviewed_oid>`. The page read becomes `gh pr view <review_pr_url>`, which `gh` resolves to that repository's PR. Suites run under the keepalive. Flags: none. |
+| triage | `$REVIEW_BEAD`, `$REVIEWED_OID`, and `$ANCHOR`, which nothing sets | The index parse becomes `review-checks.sh --show --at <reviewed_oid>`, reached through `scripts-dir` (sections 5 and 6). Its no-index fallback and the missing-index observation go, because every rig has the pack's menu. That observation is the one every gascity triage files today, and tk-ymhd3o4 plans to file it once per repository instead (section 9). The observation stays for a rig row the resolver rejects. The anchor is `<anchor_bead>`. It never blocks. Flags: `--add-gates`, `--reopen`, `--round-reason`, `--dismiss-approval`. |
+| demo | `$REVIEW_BEAD`, `$REVIEWED_OID`, `$BASE`, `$REVIEW_WT`, `$SCRIPTS`, `hb` | Loads the stance. The capture runs beside `<worktree>`, under the keepalive. `demo-repo-artifact.sh` and `demo-deliver.sh` are reached through `scripts-dir`. `docs/review-demo.md` is the guidance load-dispatch prints. Flags: `--visual`, `--visual-fallback-from`. |
+| pm | `$REVIEWED_OID` | Loads the stance. Reads `docs/product-goals.md` in `<worktree>`. Flags: none. |
+| arch | none | Loads the stance. Reads `docs/architecture.md` and `docs/architecture/` in `<worktree>`. Flags: none. |
 
 ## 5. A rig needs nothing
 
@@ -560,8 +589,8 @@ and a rig's index declares its own. No script, formula or skill lists checks.
 
 ### A rig steers triage in words
 
-Triage's guidance is the rig's `docs/review-triage.md`, which the review step
-prints for triage as it prints any check's guidance (section 3). A rig that
+Triage's guidance is the rig's `docs/review-triage.md`, which load-dispatch
+prints for triage as it prints any check's guidance (sections 1 and 3). A rig that
 writes "never add demo here" or "add arch only for changes under `internal/`"
 puts that sentence in front of triage on every review. A rig row that restates
 a pack check's purpose for the rig changes the line triage's menu shows for
@@ -612,15 +641,16 @@ bind a flag or a round to the check that owns it, and list no checks.
 Walk a gascity PR through the design:
 
 1. gate-ensure runs for gascity with `GC_RIG_ROOT=rigs/gascity`. It resolves
-   the lanes from the pack's index, since gascity keeps none, and writes the
-   record from gascity's branch, base, head and PR.
+   the lanes from the pack's index, since gascity keeps none, writes the record
+   from gascity's branch, base, head and PR, and passes the same values on the
+   sling.
 2. The review runs on gascity's `polecat-codex` pool. Its catalog links the
    installed pack's skills, so `gc-toolkit.review-arch` loads from the pack gc
    loaded, wherever the city imports it from.
-3. `review-frame.sh` reads the record from gascity's store, and diffs and builds
-   the worktree in gascity's repository.
-4. The reviewed commit carries no `docs/review-arch.md`, so the review prints
-   no guidance for arch. Arch reads `docs/architecture.md` at the reviewed commit,
+3. The step text names gascity's branch, base, commit and PR. load-dispatch
+   builds the worktree in gascity's repository, where the reviewer runs git.
+4. The reviewed commit carries no `docs/review-arch.md`, so load-dispatch
+   prints no guidance for arch. Arch reads `docs/architecture.md` at the reviewed commit,
    which gascity does not keep, and says so in its coverage line, as its method
    already provides. gascity's architecture lives under `engdocs/architecture/`,
    and gascity carries no review files of its own: the operator closed its
@@ -664,6 +694,8 @@ index, and takes on the layered index of section 5:
 - `--check <name> [--at <oid>]` prints one check's effective row, which the
   purpose case reads. `--show [--at <oid>]` prints the whole effective index,
   which is triage's menu.
+- `--extension <check> [--at <oid>]` prints the rig's `docs/review-<check>.md`
+  at the commit `--at` names, and exits 3 when the rig keeps none.
 - `--file <index>` stays for a test that parses one file.
   `GC_REVIEW_CHECKS_INDEX` keeps naming the whole effective index, so a hermetic
   test fixes what every reader sees.
@@ -683,7 +715,7 @@ branches whose commit carries the row.
 | `signoff.sh --add-gates` (`:859-883`, `:907-913`) | `git show <reviewed_oid>:review-checks.toml`, through a scratch file | `review-checks.sh --check <name> --at <reviewed_oid>`. The no-index arm goes. |
 | the triage skill (`:37-48`) | `git show ${REVIEWED_OID}:review-checks.toml`, with a parser it finds only in gc-toolkit | `review-checks.sh --show --at <reviewed_oid>`, through `scripts-dir` |
 | `review-dispatch-body.sh` (`:161-168`, `:199-215`) | the purpose and the extension at the reviewed commit | the purpose through `--check --at`, until unit B deletes it and the formula makes both reads (section 3) |
-| the demo skill (`:138-140`) | the extension the note appended | the guidance the review step prints |
+| the demo skill (`:138-140`) | the extension the note appended | the guidance load-dispatch prints |
 | `pr-facts.sh` (`:664`), `review-outcome.sh` (`:339`), `gctk merge` (`services/gctk/internal/cli/merge.go:989`) | the working tree | the same, against the effective index |
 
 The last row is a choice. These three resolve `--through merge`, which names
@@ -752,35 +784,24 @@ stewards at the reviewed commit is this rule, and it stays.
 
 ### New behavior tests
 
-1. **The record** (`gate-ensure.test.sh`). A fresh dispatch writes every
-   required key and the fixed paragraph. A `pull_request` anchor's dispatch
+1. **The record and the vars** (`gate-ensure.test.sh`). A fresh dispatch writes
+   every required key and the fixed paragraph, and its sling passes every value
+   of "What a review is told" as a `--var`. A `pull_request` anchor's dispatch
    carries its PR as `review_pr_url` and `review_pr_number`. `review_context`
    carries the reason, the bring-current ruling line included. A head that
    neither `gh` nor `ls-remote` reads holds the dispatch, and the `ls-remote`
-   fallback pins. The stranded arm writes `reviewed_oid` only where it is
-   absent.
-2. **Recovering a short review** (`signoff.test.sh`, `gate-ensure.test.sh`).
-   signoff.sh's refusal of a gone pin whose superseded close does not read back
-   exits 2 with the pin cleared and no verdict. gate-ensure holds a spent
-   review short of a required key for one pass. On the next pass, when the
-   review carries `review_pool`, it closes the review superseded with no
-   verdict, and the same pass files a fresh review with the whole record at the
-   live head. The lane derives no green from the retired review, and the
-   per-head bar does not count it. A close that does not read back leaves the
-   review open and files no visit, and the next pass retries it. A second
-   failed pass escalates under `review-retire-blocked`, and a later retirement
-   that reads back retracts that visit. A short review without `review_pool` is
-   never retired. It is escalated under `review-short-record`, and the visit
-   offers no bare return to the pool. A spent review whose record is whole is
-   still escalated under `review-wedge`. A record the arm cannot read retires
-   nothing and files no visit.
-3. **The reader** (`review-frame.test.sh`, new). `record` prints each key and
-   each derived value. Removing any required key makes it exit 3 and name that
-   key. An unparseable PR URL, or one PR key without the other, exits 3.
-   `--convoy` refuses a convoy with no member or with two. `diff` and `show`
-   read the reviewed commit, not the working tree, from a cwd in another
-   repository. `worktree` builds the worktree in the repository `GC_RIG_ROOT`
-   names, from a wrong cwd, and returns the same one when run twice.
+   fallback supplies the commit. The stranded arm writes `reviewed_oid` only
+   where it is absent, and re-slings with the values its record holds.
+2. **A departed commit stays recorded** (`signoff.test.sh`). signoff.sh's
+   refusal of a departed commit leaves `reviewed_oid` in place and closes the
+   review superseded, and a close that does not read back exits 2 with the
+   commit still recorded and no verdict.
+3. **The vars meet the formulas** (new, structural). Every `{{name}}` in
+   `mol-review` and the quorum is a var the formula declares, `convoy_id`
+   aside, and every declared var is one gate-ensure passes or sling adds. The
+   six values every review has are declared `required`, and the three that can
+   be empty default to empty. No `{{review_context}}` sits inside a shell
+   block.
 4. **Method resolution, iterating the pack's index** (new). Every row has a
    `skills/review-<check>/SKILL.md` whose frontmatter `name` is
    `review-<check>` and which has a verdict section. Every `skills/review-*`
@@ -791,14 +812,16 @@ stewards at the reviewed commit is this rule, and it stays.
    a check with no skill resolves to its purpose through `--check`, and a token
    no index declares resolves to nothing. The `review-method-load` region is the
    same text in every step that carries it.
-5. **The frame contract, iterating the pack's index.** Every shell block in each
-   check's skill runs under `set -u` in a fresh shell, given only a review bead
-   id, a stub store serving a fixture record, and a scratch rig repository. The
-   block's placeholders are filled from the fixture, and the commands with
-   effects outside the scratch repository (`gh`, `bd create`, the capture
-   engine) are stubbed. No block uses a value it did not read itself. The
-   correctness test-evidence block's bash and zsh cases, now
-   `review-method.test.sh` (EVIDENCE), become two of these runs.
+5. **The skill blocks run on the values alone, iterating the pack's index.**
+   Every shell block in each check's skill runs under `set -u` in a fresh
+   shell. Its `<key>` placeholders are filled from a fixture record, with a
+   scratch rig repository holding the fixture's commit, `<worktree>` a checkout
+   of that commit, and `scripts-dir` answering the pack's script directory. The
+   commands with effects outside the scratch repository (`gh`, `bd create`, the
+   capture engine) are stubbed. Every placeholder a block uses is a key of
+   "What a review is told" or `<worktree>`. The correctness test-evidence
+   block's bash and zsh cases, now `review-method.test.sh` (EVIDENCE), become
+   two of these runs.
 6. **The layered index** (`review-checks.test.sh`). A commit with no index
    resolves to the pack's rows. A rig row changes a pack check's phase and
    keeps its purpose. A rig row adds a check. A `method` key is ignored. The
@@ -814,18 +837,17 @@ stewards at the reviewed commit is this rule, and it stays.
    declare. An add of a pack check that the reviewed commit's own index leaves
    out is now accepted.
 8. **One reader, one list** (new, structural). No script, formula or skill
-   outside `review-checks.sh` reads `review-checks.toml`, by path or at a
-   commit, and nothing outside the review steps' `review-method-load` region
-   reads a `docs/review-<check>.md`. No script or formula carries a list of two
-   or more of the pack's checks, as a `case` alternation or a comma list,
-   except the four configuration sites of section 5. The test takes the names
-   from the pack's index.
+   outside `review-checks.sh` reads `review-checks.toml` or a
+   `docs/review-<check>.md`, by path or at a commit. No script or formula
+   carries a list of two or more of the pack's checks, as a `case` alternation
+   or a comma list, except the four configuration sites of section 5. The test
+   takes the names from the pack's index.
 
-### What becomes of each test that pins prose
+### What becomes of each test that holds prose
 
 - `review-dispatch-body.test.sh` goes with its script.
 - `review-method.test.sh` goes. Its (NEUTRAL), (METHOD), (QUORUM), (SPECIALIST)
-  and (KEEPALIVE) cases pin formula and skill wording. (STANDARDS) becomes part
+  and (KEEPALIVE) cases hold formula and skill wording. (STANDARDS) becomes part
   of test 4, as a property of the correctness skill's files. (RUBRIC), the
   learning loop's anchors in `rubric-ledger.md`, moves beside
   `learning-recurrence.test.sh`, which already inventories that ledger.
@@ -842,11 +864,15 @@ stewards at the reviewed commit is this rule, and it stays.
 `step-close.test.sh` (`:1400-1413`) rewrites a copy of `mol-review`'s
 review-step close without `--convoy` and checks that its scan catches the
 mutant. They test where a formula meets a script, so they stay. The first two
-are re-pointed at the new blocks, where the worktree is built through
-`review-frame.sh`. The chain closes as before, so the third needs only the
-review step's close to keep its one `--convoy` call. The review formulas keep no
-keepalive block, because no formula block runs a long command any more, so
-`lease-heartbeat.test.sh` drops its two lines for them (`:190-191`).
+are re-pointed at load-dispatch's blocks, which build the worktree at
+`{{reviewed_oid}}` and print the reviewed commit's `docs/review-{{check}}.md`.
+A fixture commit carrying `docs/review-triage.md` shows triage's guidance
+reaching a triage review, and the verdict step's failure arm is run on a
+record with no `reviewed_oid` to show it restores the route. The chain closes
+as before, so the third needs only the review step's close to keep its one
+`--convoy` call. The review formulas keep no keepalive block, because no
+formula block runs a long command any more, so `lease-heartbeat.test.sh` drops
+its two lines for them (`:190-191`).
 
 ## 9. Sequencing with the review-coverage epic
 
@@ -858,13 +884,13 @@ ruled.
 
 | File | This design | The epic |
 |---|---|---|
-| `formulas/mol-review.toml` | Every step reads the record. The review step loads the skill named from the check and prints the rig's guidance. The verdict call stops passing `--reviewed-oid`. | U1.6 moves the review step's mechanics into a prep script. U1.5 relaxes the "single honest pass, no subagents" rule (`:31-36`). |
-| `formulas/mol-review-quorum-signoff.toml` | The lanes and the synthesis read the record, and `base_ref` retires. | U1.5 lets a lane fan out. |
-| `skills/review-correctness/SKILL.md` | The uniform headings. The test-evidence block and the page read go through `review-frame.sh`. | U1.1 to U1.4 change the method: the finding contract, hunting angles, verify-or-demote and the sweep. The cutover tk-b0ww25t edits the test-evidence block. |
+| `formulas/mol-review.toml` | Every step names the values the pour filled in. load-dispatch gathers the anchor, the PR, the worktree and the rig's guidance, and the review step loads the skill named from the check. | U1.6 moves the review step's mechanics into a prep script. U1.5 relaxes the "single honest pass, no subagents" rule (`:31-36`). |
+| `formulas/mol-review-quorum-signoff.toml` | The lanes and the synthesis name the values the pour filled in, and `base_ref` retires. | U1.5 lets a lane fan out. |
+| `skills/review-correctness/SKILL.md` | The uniform headings. The test-evidence block and the page read name the values by key. | U1.1 to U1.4 change the method: the finding contract, hunting angles, verify-or-demote and the sweep. The cutover tk-b0ww25t edits the test-evidence block. |
 | `skills/review-correctness/rubric-ledger.md` | Nothing. Its anchors name What to check dimensions, which keep their names. | U1.1 to U1.4 amend the dimensions it anchors. |
 | `assets/scripts/review-dispatch-body.sh` | Deleted. | The epic's Belongs names its correctness arm, gone since #1262. U1.5 names its No fan-out line. |
 | `assets/scripts/review-method.test.sh` | Retired. | Closure check 3 leans on its (NEUTRAL) cases. |
-| `docs/review-<check>.md` | Read at the reviewed commit by the review step. | U1.7 writes gc-toolkit's `docs/review-correctness.md`. |
+| `docs/review-<check>.md` | Read at the reviewed commit by `review-checks.sh --extension`, which load-dispatch calls. | U1.7 writes gc-toolkit's `docs/review-correctness.md`. |
 | `assets/scripts/signoff.sh` | Its index read moves to the resolver. | U1.1 may change what `findings.json` carries, which signoff.sh files as finding beads. |
 | PR #1217 (tk-gfb2hbq), open and conflicting with main | Rewrites the same review step. | Carries `review-context.sh` and `review-file-bug.sh`, a first prep script, and the 9,000-character step bound. |
 
@@ -874,17 +900,15 @@ ruled.
   line with its script and writes no subagent text of its own. U1.5 then
   rewrites one place, `mol-review`'s hard rule, and adds what the quorum lanes
   lack.
-- **The review's mechanics.** This design turns the pins, the diff, the
-  worktree and the rig's guidance into script calls. U1.6's prep script
-  packages what is left of the review step. Built on `review-frame.sh`, as verbs
-  of it or calls to it, it reads the record rather than deriving the values
-  again.
-- **Generic in the pack, specific in the rig.** The review step's read of the
-  rig's `docs/review-<check>.md` at the reviewed commit is the delivery half of
-  U1.7.
+- **The review's mechanics.** This design puts the review's values in the step
+  text and has load-dispatch gather the rest. U1.6's prep script is that
+  gathering, packaged as a script: it starts from the values the pour filled
+  in rather than deriving them again.
+- **Generic in the pack, specific in the rig.** `review-checks.sh --extension`
+  at the reviewed commit is the delivery half of U1.7.
 - **The step-size bound.** This design shortens every review step, because the
-  re-derivation blocks become script calls. The review step is 8,915
-  characters today, against #1217's bound of 9,000.
+  re-derivation blocks go. The review step is 8,915 characters today, against
+  #1217's bound of 9,000.
 
 ### Another open bead on this surface
 
@@ -899,11 +923,11 @@ A, it changes a block unit A then deletes. Built after, it is that one case.
 
 This convoy's build lands first. It changes structure and no judgment, so the
 method units then edit content under headings that will not move again. U1.6
-builds on the record instead of re-deriving it, and U1.5 has one rule to relax.
-The other order costs this build a reshaping of a skill those units have just
-rewritten, and leaves a prep script deriving the values the record replaces.
-#1217 targets main, so whichever of it and this convoy's graduation lands
-second merges the other in.
+builds on the values the pour fills in instead of re-deriving them, and U1.5
+has one rule to relax. The other order costs this build a reshaping of a skill
+those units have just rewritten, and leaves a prep script deriving the values
+the step text now carries. #1217 targets main, so whichever of it and this
+convoy's graduation lands second merges the other in.
 
 ## 10. The breakdown
 
@@ -935,21 +959,19 @@ when unit A lands.
 It changes which checks every gating reader sees in a rig whose commit declares
 none, so it lands alone, reviewable as one change.
 
-### Unit B: the review bead is data, the frame reads it, and each check is one skill
+### Unit B: the review bead is data, the step text carries it, and each check is one skill
 
-- gate-ensure.sh writes the record (section 2), requires a head, writes the fixed
-  description, and stops calling `review-dispatch-body.sh`.
-- gate-ensure.sh's spent-workflow arm retires a short review the dispatch wrote
-  and dispatches a fresh one in the same pass. It escalates a retirement that
-  fails on a second pass, and a short review made by hand (section 1). The
-  arm's account in `docs/refinery-merge-cadence.md` (`:344-350`) and the
-  `review_pool` entry in `lifecycle/lifecycle.toml` (`:734-736`) change with it.
-- `review-frame.sh` and its test.
-- `mol-review` and the quorum read the record and load the skill named from the
-  check (sections 1 and 3). Their failure arm restores a route only to a review
-  whose record reads whole.
-- The five check skills take the uniform shape and read values through the
-  frame, and `skills/specialist-stance/SKILL.md` is new.
+- gate-ensure.sh writes the record (section 2), passes it as vars on every
+  sling, requires a head, writes the fixed description, and stops calling
+  `review-dispatch-body.sh`.
+- `mol-review` and the quorum declare the vars, name each value where they use
+  it, gather in load-dispatch, and load the skill named from the check
+  (sections 1 and 3). Their failure arm restores the route as today.
+- signoff.sh's departed-commit path stops clearing `reviewed_oid`, and the
+  `reviewed_oid` entry in `lifecycle/lifecycle.toml` (`:728-733`), which says
+  only that path clears it, says it is never cleared.
+- The five check skills take the uniform shape and name values by key, and
+  `skills/specialist-stance/SKILL.md` is new.
 - `review-dispatch-body.sh`, its test, its component-model row,
   `pr-facts.test.sh`'s stub and `review-method.test.sh` go. Tests 1 to 5 of
   section 8 land, with the list half of test 8, which can hold only once the
@@ -967,27 +989,25 @@ the formulas and the skills in one step.
 A review poured before then keeps the step text it was poured with. That text
 reads the description and the metadata the bead was dispatched with, so the
 review finishes under the old frame. The skills it loads from the catalog are
-the new ones. They read the keys an old bead already carries through
-`review-frame.sh pin`, which refuses only when a required value it was asked
-for is missing, so an old bead's lack of `review_formula` stops nothing. The
-exception is an old review dispatched without a pin, which today's gate-ensure
-sends out when its read of the head fails (`gate-ensure.sh:137-139`). A
-skill's read of `reviewed_oid` refuses it. Once its workflow ends without a
-verdict, gate-ensure retires it and dispatches it again, pinned, as it does any
-short review the dispatch wrote (section 1). A review stranded across the
+the new ones, which name values by key. The old steps print the same values
+under shell names, `REVIEWED_OID` for `reviewed_oid` and `BASE` for
+`review_base`, so the agent fills a new skill's placeholders from them. An old
+review that today's gate-ensure dispatched with no commit, because its read of
+the head failed (`gate-ensure.sh:137-139`), still takes the live head through
+its old load-dispatch (`mol-review.toml:113-114`), because nothing in the new
+skills refuses a value the old steps supply. A review stranded across the
 change is slung again by the new gate-ensure, whose stranded arm writes the
-whole record first.
+whole record and passes it as vars.
 
 ## What this design does not change
 
-- No check's judgment. Sentences move between headings, and how a block reads a
+- No check's judgment. Sentences move between headings, and how a block names a
   value changes.
 - The formula names `mol-review` and `mol-review-quorum-signoff`, which the
   board, the witness, orphan disposal, gate-ensure and the learning loop key on.
 - How a formula reaches the pack's scripts (`lease-heartbeat.sh`,
-  `review-workspace.sh`, `signoff.sh`, `step-close.sh`, `review-checks.sh`, and
-  the new `review-frame.sh` alike): through the candidate loop, until
-  tk-60i7nl6 lands.
+  `review-workspace.sh`, `signoff.sh`, `step-close.sh` and `review-checks.sh`):
+  through the candidate loop, until tk-60i7nl6 lands.
 - The default `check_set`, and who stamps it (section 5).
 - `findings.md`, `findings.json`, signoff.sh's verdicts and what it writes, and
   the validator.
