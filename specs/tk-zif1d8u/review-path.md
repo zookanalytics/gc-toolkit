@@ -1,6 +1,6 @@
 ---
 name: The review path as one lifecycle formula and one skill per check
-description: The design for tk-zif1d8u, the design child of convoy tk-gaklsnk under initiative tk-febol6c. A review bead becomes data. gate-ensure.sh writes the review's whole record once, at dispatch, and every formula step and check skill reads it by name through one script. A check's method is the skill named from the check, and a check with no skill is a paragraph of the formula. The specialist stance is one skill. Every rig gets every check the pack ships, and every reader takes a rig's review guidance from the rig's default branch. It settles the frame contract, the review bead's data, method loading, the skill shape, the live read, process versus subject, the tests, the sequencing with the review-coverage epic, and the implementation breakdown. Read it to approve the design at its checkpoint or to build one of its units.
+description: The design for tk-zif1d8u, the design child of convoy tk-gaklsnk under initiative tk-febol6c. A review bead becomes data. gate-ensure.sh writes the review's whole record once, at dispatch, and every formula step and check skill reads it by name through one script. A check's method is the skill named from the check, and a check with no skill is a paragraph of the formula. The specialist stance is one skill. Every rig gets every check the pack ships, and every reader takes a rig's review guidance at the commit it judges. It settles the frame contract, the review bead's data, method loading, the skill shape, where a rig's guidance is read, rig content and pack content, the tests, the sequencing with the review-coverage epic, and the implementation breakdown. Read it to approve the design at its checkpoint or to build one of its units.
 ---
 
 # The review path as one lifecycle formula and one skill per check
@@ -11,9 +11,7 @@ Today three layers of bash assemble a review. A script writes the reviewer's
 instructions into the review bead's description. Each formula step re-derives
 the same values into shell variables. The check skills then use those variables
 without saying where they come from. Separately, a rig that keeps no
-`review-checks.toml` can never get the demo, arch or pm check. And the rig
-files that steer a review are read at the commit under review, so a process fix
-merged on a rig's main does not reach work already in flight.
+`review-checks.toml` can never get the demo, arch or pm check.
 
 1. **The review bead's metadata is the review's whole record, written once at
    dispatch.** gate-ensure.sh already writes the check, the anchor, the branch,
@@ -50,15 +48,18 @@ merged on a rig's main does not reach work already in flight.
    correctness and triage and says it leaves the other three out on purpose. A
    rig has no way to withdraw a pack check. Triage's judgment does not change,
    and adding nothing stays its common case.
-5. **Every reader takes a rig's review guidance from its default branch, at
-   most a minute old.** That guidance is `review-checks.toml` and
-   `docs/review-<check>.md`, read through `review-checks.sh` by the cadence,
-   signoff.sh, the formula and triage. A process change merged on a rig's main
-   applies to work in flight. A branch's own edit to those two files governs
-   nothing until it lands. Everything else a check reads, the diff and the docs
-   it holds the change to, is read at the reviewed commit. Cost: one fetch of
-   the default branch per rig per minute, and pr-open's gates follow main's
-   phases rather than the PR head's.
+5. **A rig's review guidance is read at the commit under review.** That
+   guidance is `review-checks.toml` and `docs/review-<check>.md`. A review
+   reads both at the commit it reviews, and a gating reader reads the index at
+   the anchor's head, as gate-ensure and pr-open do today. A branch's own edit
+   to either file governs that branch's review, so what a person reads in the
+   branch is what applies to it. Nothing is fetched on a schedule. Cost: a
+   guidance change merged on a rig's default branch reaches an open branch only
+   once that branch merges its base in. This reverses part 4 of the
+   initiative's Target and its fifth Done-when line, which had every reader take
+   the default branch's copy so that a process change reaches work in flight
+   (PR #1262 comment 4290610037). The operator's review of this design prefers
+   the branch's own copy (comments 4303521122 and 4303534443).
 6. **Tests pin behavior where the pieces meet, iterating the index.** Each
    declared check resolves to its skill or its purpose, the dispatch writes the
    record, the reader refuses a short one and gate-ensure replaces a short one
@@ -72,8 +73,8 @@ merged on a rig's main does not reach work already in flight.
    relax the subagent rule in the one place it is left. Cost: they wait for this
    convoy's build. The epic's contract sitting rules on this (section 9).
 8. **The build is two beads onto this integration branch, in order.** First the
-   live read and the layered index, which every gating reader takes. Then the
-   record, the frame and the skills. Cost: one more PR to approve on the
+   layered index, which every gating reader takes. Then the record, the frame
+   and the skills. Cost: one more PR to approve on the
    integration branch, for two diffs that are each reviewable in one sitting.
    The single build the card intended is the alternative, at the cost of one PR
    across about forty files.
@@ -87,8 +88,11 @@ that commit.
 The sources are the operator's three reviews of PR #1262 (5536090671,
 5538944776, 5542707712), the review comments 4286312773 ("A repo does not need
 to include anything to get a great review") and 4290610037 ("the new process
-inside of that rig should absolutely be applied"), the ruling in visit
-tk-0smmk03, and the Target, Done-when and Boundaries of tk-febol6c.
+inside of that rig should absolutely be applied"), the operator's review of
+this design's first draft (5558827752), the ruling in visit tk-0smmk03, and
+the Target, Done-when and Boundaries of tk-febol6c. Where the review of the
+draft and an earlier source disagree, the review governs, and decision 5 names
+the one place that happens.
 
 Facts read from the running city:
 
@@ -387,7 +391,7 @@ tests.
 | `mol-review` load-dispatch, step 5 (`mol-review.toml:118-122`) | the note's check section, which names the method | the record's `check`. The review step names the skill (section 3). |
 | The quorum lanes, step 2 (`mol-review-quorum-signoff.toml:97-99`, `:163-165`) | the skill the check section names | the same |
 | The demo, arch and pm skills (`review-demo/SKILL.md:15`, `review-arch/SKILL.md:10`, `review-pm/SKILL.md:13`) | "the dispatch note's shared specialist stance" | `gc-toolkit.specialist-stance` (section 4) |
-| The demo skill on `docs/review-demo.md` (`review-demo/SKILL.md:138-140`) | the extension the note appended from the reviewed commit | the guidance the review step prints, read live (sections 3 and 6) |
+| The demo skill on `docs/review-demo.md` (`review-demo/SKILL.md:138-140`) | the extension the note appended from the reviewed commit | the guidance the review step prints from the reviewed commit (sections 3 and 6) |
 | A claimant of a review the failure arm returned to its pool (`mol-review.toml:372-384`) | the note's recovery paragraph | the fixed paragraph and `review_formula` |
 | The reviewer reading why it was dispatched | the note's "Context from the dispatch" | `review_context`, which load-dispatch prints with the record |
 | A Claude lane of the quorum, through the work-context hook (`overlays/work-context`) | the whole description, at claim | the fixed paragraph. The record arrives through the frame. |
@@ -413,16 +417,18 @@ the same method. It names no check:
 > under review, not your method. When your catalog has no such skill:
 >
 > - If the rig's check index declares the check
->   (`review-checks.sh --check <check>` prints its row), judge the diff against
->   the purpose the row states. Load `gc-toolkit.specialist-stance` and hold it.
->   Say in your coverage line that the pack ships no method for this check.
+>   (`review-checks.sh --check <check> --at <reviewed_oid>` prints its row),
+>   judge the diff against the purpose the row states. Load
+>   `gc-toolkit.specialist-stance` and hold it. Say in your coverage line that
+>   the pack ships no method for this check.
 > - If no index declares it, approve, and pass `--needs-you` saying the check
 >   is declared nowhere, so the operator decides whether it stays in the
 >   anchor's `check_set`.
 >
 > Then print the rig's guidance for the check,
-> `review-checks.sh --extension <check>`. It adds to the method and never
-> replaces it. Most rigs keep none.
+> `git show <reviewed_oid>:docs/review-<check>.md`, when the reviewed commit
+> carries one. It adds to the method and never replaces it. Most rigs keep
+> none.
 
 - **The name.** `gc-toolkit.<name>` is the name `docs/skills.md` gives every
   pack skill, and the one the operator ruled for pack text (review
@@ -504,7 +510,7 @@ and pm do.
 | Skill | Frame values it uses today | Moves |
 |---|---|---|
 | correctness | `$M`, `$BASE`, `$REVIEWED_OID`, `$PR`, `$PR_REPO_Q`, `hb`, and `$ANCHOR` set from `$M` | Its preamble about the formula's blocks goes (`:12-17`). The test-evidence block reads `anchor_bead` and `reviewed_oid` through `review-frame.sh`. The page read becomes `gh pr view <review_pr_number> --repo <pr_repo>`. Suites run under the keepalive. Flags: none. |
-| triage | `$REVIEW_BEAD`, `$REVIEWED_OID`, and `$ANCHOR`, which nothing sets | The index parse becomes `review-checks.sh --show` (sections 5 and 6). Its no-index fallback and the missing-index observation go, because every rig has the pack's menu. That observation is the one every gascity triage files today, and tk-ymhd3o4 plans to file it once per repository instead (section 9). The observation stays for a rig row the resolver rejects. The anchor comes from the record. It never blocks. Flags: `--add-gates`, `--reopen`, `--round-reason`, `--dismiss-approval`. |
+| triage | `$REVIEW_BEAD`, `$REVIEWED_OID`, and `$ANCHOR`, which nothing sets | The index parse becomes `review-checks.sh --show --at <reviewed_oid>`, reached through `scripts-dir` (sections 5 and 6). Its no-index fallback and the missing-index observation go, because every rig has the pack's menu. That observation is the one every gascity triage files today, and tk-ymhd3o4 plans to file it once per repository instead (section 9). The observation stays for a rig row the resolver rejects. The anchor comes from the record. It never blocks. Flags: `--add-gates`, `--reopen`, `--round-reason`, `--dismiss-approval`. |
 | demo | `$REVIEW_BEAD`, `$REVIEWED_OID`, `$BASE`, `$REVIEW_WT`, `$SCRIPTS`, `hb` | Loads the stance. The capture runs beside the worktree `review-frame.sh` returns, under the keepalive. `demo-repo-artifact.sh` and `demo-deliver.sh` are reached through `scripts-dir`. `docs/review-demo.md` is the guidance the frame prints. Flags: `--visual`, `--visual-fallback-from`. |
 | pm | `$REVIEWED_OID` | Loads the stance. Reads `docs/product-goals.md` with `review-frame.sh show`. Flags: none. |
 | arch | none | Loads the stance. Reads `docs/architecture.md` and `docs/architecture/` with `review-frame.sh show`. Flags: none. |
@@ -530,17 +536,19 @@ A rig's effective index is the pack's index with the rig's rows laid over it.
   and purpose. `review-checks.sh` reads it beside itself, the way it reaches
   every sibling file. So it is always the installed pack's copy, wherever the
   city imports the pack from, and never a checkout the caller stands in.
-- **The rig's index** is the rig's own `review-checks.toml` on its default
-  branch (section 6), and it is optional. A row for a check the pack declares
+- **The rig's index** is the `review-checks.toml` that the commit being judged
+  carries (section 6), and it is optional. A row for a check the pack declares
   changes that check's phase or purpose for the rig, key by key, and a key the
   row leaves out keeps the pack's value. A row for any other check adds a
   check of the rig's own, judged against its purpose (section 3) with whatever
   guidance its extension adds.
-- **In gc-toolkit the two are one file**, so its effective index is that file as
-  its default branch carries it. It follows that a check gc-toolkit declares is
-  a pack check, which every rig gets. The test that every pack row has a skill
-  keeps a skill-less check out of that file. gc-toolkit has no rig-only check
-  today, and one would need a second file.
+- **In gc-toolkit the two are one file.** The pack's layer is the installed
+  copy, and the rig's layer is the copy the commit being judged carries, so a
+  gc-toolkit branch that edits the index governs its own review, as any rig's
+  branch does. It follows that a check gc-toolkit declares is a pack check,
+  which every rig gets. The test that every pack row has a skill keeps a
+  skill-less check out of that file. gc-toolkit has no rig-only check today,
+  and one would need a second file.
 
 The initiative's constraint holds with one refinement: a check is declared in an
 index and nowhere else. The pack's index declares the checks the pack ships,
@@ -594,8 +602,8 @@ Walk a gascity PR through the design:
    loaded, wherever the city imports it from.
 3. `review-frame.sh` reads the record from gascity's store, and diffs and builds
    the worktree in gascity's repository.
-4. `review-checks.sh --extension arch` reads gascity's default branch and finds
-   no extension. So arch reads `docs/architecture.md` at the reviewed commit,
+4. The reviewed commit carries no `docs/review-arch.md`, so the review prints
+   no guidance for arch. Arch reads `docs/architecture.md` at the reviewed commit,
    which gascity does not keep, and says so in its coverage line, as its method
    already provides. gascity's architecture lives under `engdocs/architecture/`,
    and gascity carries no review files of its own: the operator closed its
@@ -609,135 +617,114 @@ Walk a gascity PR through the design:
 Each step names the rig by `GC_RIG_ROOT` and the pack by the pack gc loaded.
 None of them reads gc-toolkit as the rig under review.
 
-## 6. The live read
+## 6. Where a rig's guidance is read
 
-### What current means
+### The commit being judged
 
-A rig's current copy of a file is the file at the tip of the rig's default
-branch as origin has it: `refs/remotes/origin/<default>` in the rig's
-repository, where `<default>` is the branch `refs/remotes/origin/HEAD` names,
-else `main`. refinery-reconcile.sh resolves the graduation target the same way
-when no override names it (`:136-142`). Every worktree of the rig's repository shares that ref.
+Each reader takes a rig's guidance at the commit it is judging. A review reads
+the index and `docs/review-<check>.md` at its reviewed commit. A gating reader
+reads the index at the anchor's head, the commit whose transition it decides.
+That is the rule the index header states today (`review-checks.toml:12-13`),
+and gate-ensure and pr-open already follow it (`gate-ensure.sh:817`,
+`pr-open.sh:456`). A branch's edit to either file governs that branch's review
+and no other. A guidance change merged on a rig's default branch reaches an
+open branch when that branch next merges its base in.
 
-The resolver refreshes the ref with one `git fetch origin <default>` when its
-own last refresh is more than a minute old. A merge on the rig's main therefore
-reaches every reader within a cadence pass, and a pass that resolves fifty
-anchors fetches once. A fetch that fails leaves the ref as it stands, and the
-resolver reads it with a warning, because a slightly stale copy of the rig's
-process is better than none.
-
-Current is not:
-
-- **the rig root's working tree**, which trails origin until
-  reconcile-rig-checkouts fast-forwards it on its cooldown, and stalls whenever
-  that fast-forward is refused;
-- **the checkout the caller stands in**, which for a worker is its own branch and
-  for a reviewer is the worktree of the change under review. That is what
-  `review-checks.sh:148-152` and `:171-173` read today;
-- **the reviewed commit.**
-
-The rig's repository is `GC_RIG_ROOT`, else the rig `GC_RIG` names in
-`gc rig list`. A caller that has neither gets a refusal, never a guess. A
-repository with no such ref has no rig layer, which reads as a rig that keeps
-no index, with a warning.
+No reader reads a default branch, so nothing is fetched to keep a copy current.
+A reader that lacks the commit it judges fetches that commit by id, as
+`review-checks.sh --at` does today (`review-checks.sh:157-164`).
 
 ### The one resolver
 
 `review-checks.sh` keeps its job as the one parser and resolver of the check
-index, and it takes on the rig's extensions:
+index, and takes on the layered index of section 5:
 
-- `--resolve --check-set <cs> --through <phase> [--with-phase]` resolves against
-  the effective index, read live. `--at` and the working-tree read retire.
-- `--check <name>` prints one check's effective row, which the purpose case
-  reads. `--show` prints the whole effective index, which is triage's menu.
-- `--extension <check>` prints the rig's `docs/review-<check>.md` from the same
-  ref, and exits 3 when the rig keeps none.
+- `--resolve --check-set <cs> --through <phase> [--at <oid>] [--with-phase]`
+  resolves against the effective index: the pack's rows from beside the
+  script, with the rows of the index `<oid>` carries laid over them. A commit
+  that carries no index adds no rows. Today such a commit falls through to the
+  working tree's copy (`review-checks.sh:36-37`, `:169`).
+- `--check <name> [--at <oid>]` prints one check's effective row, which the
+  purpose case reads. `--show [--at <oid>]` prints the whole effective index,
+  which is triage's menu.
 - `--file <index>` stays for a test that parses one file.
   `GC_REVIEW_CHECKS_INDEX` keeps naming the whole effective index, so a hermetic
   test fixes what every reader sees.
 
-### A bad rig index degrades, it does not stall
-
-Read at the reviewed commit, an index with a phase outside the ordered set held
-only the PRs that carried it (`review-checks.sh:227-235`). Read live, the same
-refusal would hold every transition of every PR in the rig until someone fixed
-main. So the resolver ignores a rig row it cannot use, with a warning. A pack
-check keeps the pack's row. A rig-only check takes pre-open, the phase that
-gates every transition. Nothing opens or leaves draft ungated, and nothing
-stalls.
+A rig row whose phase is outside the ordered set is refused, as today
+(`review-checks.sh:227-235`). Read at a commit, that refusal holds only the
+branches whose commit carries the row.
 
 ### Every reader and its move
 
-| Reader | Reads today | Moves to |
+| Reader | Reads today | Under this design |
 |---|---|---|
-| `gate-ensure.sh` (`:817`) | `--resolve --at` the PR head | `--resolve`, live |
-| `pr-open.sh` (`:456`, `:553`, `:789`) | `--resolve --at` the head the PR opens at, directly and through `prs_resolve_phased` | live. The pass's one fetch of branch heads stays, for the heads themselves. |
-| `pr-summary-region.sh` `prs_resolve_phased` (`:37-42`), and `pr-stack.sh`, which calls it (`:263`) | `--at <head>` | live. The head stays the region's, not the index's. |
-| `pr-facts.sh` (`:664`) | the working tree | live |
-| `review-outcome.sh` (`:339`) | the working tree | live |
-| `gctk merge` (`services/gctk/internal/cli/merge.go:989`) | the working tree, through the script | live, with no Go change, because it calls the resolver with no source flag |
-| `liveness-sweep.sh` (`:298-313`) | gc-toolkit's own index, two directories above the script | the effective index of the rig it sweeps |
-| `signoff.sh --add-gates` (`:859-883`, `:907-913`) | `git show <reviewed_oid>:review-checks.toml`, through a scratch file | `review-checks.sh --check`, live. The no-index arm goes. |
-| the triage skill (`:37-48`) | `git show ${REVIEWED_OID}:review-checks.toml`, with a parser it finds only in gc-toolkit | `review-checks.sh --show`, through `scripts-dir` |
-| `review-dispatch-body.sh` (`:161-168`, `:199-215`) | the purpose and the extension at the reviewed commit | `--check` and `--extension`, live, until unit B deletes it and the formula makes both reads (section 3) |
+| `gate-ensure.sh` (`:817`) | `--resolve --at` the PR head | the same, against the effective index |
+| `pr-open.sh` (`:456`, `:553`, `:789`) | `--resolve --at` the head the PR opens at, directly and through `prs_resolve_phased` | the same, against the effective index |
+| `pr-summary-region.sh` `prs_resolve_phased` (`:37-42`), and `pr-stack.sh`, which calls it (`:263`) | `--at <head>` | the same, against the effective index |
+| `liveness-sweep.sh` (`:298-313`) | gc-toolkit's own index, two directories above the script, through `--file` | `--at` the head of the anchor's branch, the commit pr-open would open it at, with no `--file` |
+| `signoff.sh --add-gates` (`:859-883`, `:907-913`) | `git show <reviewed_oid>:review-checks.toml`, through a scratch file | `review-checks.sh --check <name> --at <reviewed_oid>`. The no-index arm goes. |
+| the triage skill (`:37-48`) | `git show ${REVIEWED_OID}:review-checks.toml`, with a parser it finds only in gc-toolkit | `review-checks.sh --show --at <reviewed_oid>`, through `scripts-dir` |
+| `review-dispatch-body.sh` (`:161-168`, `:199-215`) | the purpose and the extension at the reviewed commit | the purpose through `--check --at`, until unit B deletes it and the formula makes both reads (section 3) |
 | the demo skill (`:138-140`) | the extension the note appended | the guidance the review step prints |
+| `pr-facts.sh` (`:664`), `review-outcome.sh` (`:339`), `gctk merge` (`services/gctk/internal/cli/merge.go:989`) | the working tree | the same, against the effective index |
+
+The last row is a choice. These three resolve `--through merge`, which names
+every check_set token except the three non-lanes, whatever the index declares,
+so where they read the index does not change their answer. The exception is a
+phase outside the ordered set. One merged on a rig's default branch fails all
+three for every PR in the rig until the index is fixed, where a read at each
+PR's head would fail only the branches that carry it. review-outcome.sh is
+given an anchor and no head, and gctk merge would need a Go change, so for that
+one case they keep the working tree.
 
 The pm skill reads neither file. Its one read of the rig is
-`docs/product-goals.md`, which is subject (section 7), and it names the index
-only in prose.
+`docs/product-goals.md` (section 7), and it names the index only in prose.
 
-On merge the move changes nothing in practice: `--through merge` gates every
-declared token whatever its phase. The live read matters for which checks gate
-a PR's opening and its leaving draft.
+In practice the layered index changes what a gating reader sees only in a rig
+whose commit declares no row for a check the pack declares. There that check
+now has the pack's phase and purpose, where today it is undeclared and takes
+pre-open.
 
-#1262 deleted `docs/review-config.md`, so the pinning rule and its in-flight
-rationale now sit in the index header (`review-checks.toml:12-13`), beside the
-paragraph that reads an extension at the commit under review (`:21-27`). Both
-paragraphs are rewritten to the live rule, and to who reads an extension.
-The rule is rewritten wherever else it is stated:
+The index header keeps its rule, and the statements the layered index makes
+untrue are rewritten:
 
-- `review-checks.sh`'s header (`:33-43`);
-- `signoff.sh`'s usage and comment (`:119-123`, `:859`);
-- the comments on resolving at the head in `gate-ensure.sh` (`:804`) and
-  `pr-open.sh` (`:254-260`);
-- the triage skill's index contract (`:28-35`, `:55-59`);
-- the demo skill (`:138-140`);
-- `mol-refinery-patrol`'s `check_set` var description (`:95`), which says
-  triage reads the index at the reviewed commit;
-- sprintshow's own index header, which states the rule and says why sprintshow
-  leaves demo, arch and pm out. It is sprintshow's file, so unit A's builder
-  files a bead for its rewrite in sprintshow's store.
+- the index header's baseline paragraph, which says a repo with no index gets
+  correctness and triage alone (`review-checks.toml:14-18`), and its extension
+  paragraph, which says the dispatch body appends an extension (`:21-27`);
+- `review-checks.sh`'s header, where a commit with no index falls through to
+  the working tree (`:33-43`);
+- `signoff.sh`'s usage and comment (`:119-123`, `:859`), which validate an add
+  against the reviewed commit's own index alone;
+- the triage skill's index contract (`:28-35`, `:55-59`), which refuses the
+  pack's copy;
+- the demo skill (`:138-140`), on where its extension comes from;
+- sprintshow's own index header, which says sprintshow leaves demo, arch and pm
+  out on purpose. It is sprintshow's file, so unit A's builder files a bead for
+  its rewrite in sprintshow's store.
 
-## 7. Process versus subject
+## 7. Rig content and pack content
 
-Two rig files are process: `review-checks.toml` and `docs/review-<check>.md`.
-They say how the rig wants its changes reviewed. Every reader takes them live,
-through `review-checks.sh`. A branch that edits either is reviewed like any
-other change, and its edit governs nothing until it lands.
-
-Everything else a review reads in the rig is subject. That is the diff, and
-every document a check holds the change to, read at the reviewed commit through
-`review-frame.sh show` or in the review's worktree, which is that commit. Arch
-reads `docs/architecture.md` and `docs/architecture/`, pm reads
+Everything a review reads from the rig is read at the reviewed commit. That is
+the diff, every document a check holds the change to, and the rig's review
+guidance. Arch reads `docs/architecture.md` and `docs/architecture/`, pm reads
 `docs/product-goals.md`, and demo reads the visuals `demo-repo-artifact.sh`
-lists. A change may edit those documents itself, and the check judges it
-against the version it carries. Arch's question, whether an architecture change
-is reflected in the docs in the same PR, depends on that.
+lists. A change may edit any of them, and the check judges it against the
+version it carries. Arch's question, whether an architecture change is
+reflected in the docs in the same PR, depends on that. A rig's
+`docs/review-arch.md` that says its architecture lives in `ARCHITECTURE.md`
+points to a file at the same commit.
 
-A document an extension points to is subject, though the pointer is process. A
-rig's `docs/review-arch.md` that says its architecture lives in
-`ARCHITECTURE.md` is read live, and `ARCHITECTURE.md` is read at the reviewed
-commit.
-
-The pack's content is neither. The methods and the stance load from the
+The pack's content is the exception. The methods and the stance load from the
 installed pack's catalog, and the correctness skill's work-quality fragments
 come with it through its `references/` links. In gc-toolkit, where pack and rig
 share one repository, a branch that edits a method is reviewed under the
-installed method, not under its own edit.
+installed method, not under its own edit. Its edit to the index or to a
+`docs/review-<check>.md` governs its own review, as in any rig.
 
-An extension is named for its check, and the frame reads one only for the
-review's check. gc-toolkit's `docs/review-workspace.md` shares the prefix, and
-it is never read as an extension, because no index declares a check named
+An extension is named for its check, and a review reads one only for its own
+check. gc-toolkit's `docs/review-workspace.md` shares the prefix, and it is
+never read as an extension, because no index declares a check named
 `workspace`.
 
 The specialist stance's instruction to read the reference docs a check
@@ -794,27 +781,27 @@ stewards at the reviewed commit is this rule, and it stays.
    engine) are stubbed. No block uses a value it did not read itself. The
    correctness test-evidence block's bash and zsh cases, now
    `review-method.test.sh` (EVIDENCE), become two of these runs.
-6. **The live read** (`review-checks.test.sh`). A rig with no index resolves to
-   the pack's rows. A rig row changes a pack check's phase and keeps its
-   purpose. A rig row adds a check. A `method` key is ignored. A rig row with a
-   bad phase is ignored with a warning, a pack check keeps its row, and a
-   rig-only check takes pre-open. The rig layer comes from origin's default
-   branch, not from the rig root's working tree and not from the caller's
-   checkout, which the test proves by running from a worktree whose branch
-   carries a different index. The ref is fetched at most once a minute and read
-   as it stands when the fetch fails. `--extension` prints the default branch's
-   copy, ignores the reviewed commit's, and exits 3 when the rig keeps none.
+6. **The layered index** (`review-checks.test.sh`). A commit with no index
+   resolves to the pack's rows. A rig row changes a pack check's phase and
+   keeps its purpose. A rig row adds a check. A `method` key is ignored. The
+   rig's rows come from the commit `--at` names, not from the working tree,
+   which the test proves by resolving at a commit whose index differs from the
+   working tree's, and a commit with no index adds no rows even when the
+   working tree has one. A rig row with a phase outside the ordered set is
+   refused.
 7. **What signoff.sh refuses** (`signoff.test.sh`), iterating the effective
    index. It refuses `--add-gates` from every declared check but triage,
    `--visual` from every check but demo, a demo verdict without `--visual`, and
-   an add of a check the effective index does not declare. An add that the live
-   index declares and the reviewed commit's does not is now accepted.
+   an add of a check the effective index at the reviewed commit does not
+   declare. An add of a pack check that the reviewed commit's own index leaves
+   out is now accepted.
 8. **One reader, one list** (new, structural). No script, formula or skill
-   outside `review-checks.sh` reads `review-checks.toml` or a
-   `docs/review-<check>.md`, by path or at a commit. No script or formula
-   carries a list of two or more of the pack's checks, as a `case` alternation
-   or a comma list, except the four configuration sites of section 5. The test
-   takes the names from the pack's index.
+   outside `review-checks.sh` reads `review-checks.toml`, by path or at a
+   commit, and nothing outside the review steps' `review-method-load` region
+   reads a `docs/review-<check>.md`. No script or formula carries a list of two
+   or more of the pack's checks, as a `case` alternation or a comma list,
+   except the four configuration sites of section 5. The test takes the names
+   from the pack's index.
 
 ### What becomes of each test that pins prose
 
@@ -859,7 +846,7 @@ ruled.
 | `skills/review-correctness/rubric-ledger.md` | Nothing. Its anchors name What to check dimensions, which keep their names. | U1.1 to U1.4 amend the dimensions it anchors. |
 | `assets/scripts/review-dispatch-body.sh` | Deleted. | The epic's Belongs names its correctness arm, gone since #1262. U1.5 names its No fan-out line. |
 | `assets/scripts/review-method.test.sh` | Retired. | Closure check 3 leans on its (NEUTRAL) cases. |
-| `docs/review-<check>.md` | Read live by `review-checks.sh --extension`. | U1.7 writes gc-toolkit's `docs/review-correctness.md`. |
+| `docs/review-<check>.md` | Read at the reviewed commit by the review step. | U1.7 writes gc-toolkit's `docs/review-correctness.md`. |
 | `assets/scripts/signoff.sh` | Its index read moves to the resolver. | U1.1 may change what `findings.json` carries, which signoff.sh files as finding beads. |
 | PR #1217 (tk-gfb2hbq), open and conflicting with main | Rewrites the same review step. | Carries `review-context.sh` and `review-file-bug.sh`, a first prep script, and the 9,000-character step bound. |
 
@@ -874,8 +861,9 @@ ruled.
   packages what is left of the review step. Built on `review-frame.sh`, as verbs
   of it or calls to it, it reads the record rather than deriving the values
   again.
-- **Generic in the pack, specific in the rig.** The live `--extension` read is
-  the delivery half of U1.7.
+- **Generic in the pack, specific in the rig.** The review step's read of the
+  rig's `docs/review-<check>.md` at the reviewed commit is the delivery half of
+  U1.7.
 - **The step-size bound.** This design shortens every review step, because the
   re-derivation blocks become script calls. The review step is 8,915
   characters today, against #1217's bound of 9,000.
@@ -907,26 +895,26 @@ B as its sibling in the convoy, with `target` stamped to the integration
 branch, blocked on itself and armed with a deferred dispatch, so unit B starts
 when unit A lands.
 
-### Unit A: every reader takes the rig's review guidance live, and every rig gets every pack check
+### Unit A: every rig gets every pack check, read at the commit being judged
 
 - `review-checks.sh` takes on the layered index: the pack's rows beside the
-  script, the rig's on origin's default branch. It gains the refresh, `--check`,
-  `--show`, `--extension` and the degraded bad row. `--at` and the working-tree
-  read retire, and the `method` key is ignored.
-- Every reader in section 6 moves, `review-dispatch-body.sh`'s two reads
-  included, so the dispatch body reads live until unit B deletes it.
-- signoff.sh validates `--add-gates` against the effective index. Its
-  scratch-file read and its no-index arm go.
-- The triage skill reads its menu with `review-checks.sh --show` through
+  script, the rig's from the commit `--at` names. It gains `--check` and
+  `--show`, a commit with no index stops falling through to the working tree,
+  and the `method` key is ignored.
+- liveness-sweep.sh resolves at the head of each anchor's branch, and
+  `review-dispatch-body.sh` reads a check's purpose through `--check --at` until
+  unit B deletes it (section 6).
+- signoff.sh validates `--add-gates` against the effective index at the
+  reviewed commit. Its scratch-file read and its no-index arm go.
+- The triage skill reads its menu with `review-checks.sh --show --at` through
   `scripts-dir`, and its no-index fallback goes.
 - `review-checks.toml` loses its `method` keys. Its header states the layered
-  index and the live rule, and points at the configuration that holds the
-  baseline.
+  index and points at the configuration that holds the baseline.
 - A bead in sprintshow's store for its index header (section 6).
 - Tests 6 and 7 of section 8, and the reader half of test 8.
 
-It touches every gating reader, so it lands alone, reviewable as one change to
-what every transition reads.
+It changes which checks every gating reader sees in a rig whose commit declares
+none, so it lands alone, reviewable as one change.
 
 ### Unit B: the review bead is data, the frame reads it, and each check is one skill
 
@@ -949,7 +937,7 @@ what every transition reads.
   dispatch body's case arm is gone. The formula-block tests are re-pointed, and
   the lint case gets its fixture.
 
-It depends on unit A for `--check` and `--extension`.
+It depends on unit A for `--check`.
 
 ### The change at graduation
 
