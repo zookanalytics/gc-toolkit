@@ -8,7 +8,8 @@
 #               of "schedule an action for a bead": a routed, unassigned,
 #               open bead is what a pool's find-work offers. Work that is a
 #               named agent's own (a town-repo edit is mechanik's) is released
-#               TO that agent instead, as its assignee (--assign).
+#               TO that agent instead, as its assignee (--assign), and the
+#               agent is told.
 #   recommend   the action is known but warrants the operator's trigger -> put
 #               it to the operator as a human gate (as ruling does) AND stamp
 #               gc.recommended_formula on the subject, so the board offers
@@ -20,7 +21,8 @@
 #               bead in the SAME store (component-model I1). Optionally arm a
 #               deferred dispatch, so the wait converts to work when it lifts,
 #               or assign the bead to the named agent whose work it is, whose
-#               hook offers it once the wait lifts.
+#               hook offers it once the wait lifts, and arm the notice that
+#               tells the agent then.
 #   close       there is nothing to do -> hand the bead to a validating-closer
 #               pool (mol-validate-close), which re-checks the call and closes
 #               the bead or escalates. A first reaction never closes a bead. Run
@@ -159,9 +161,13 @@ Usage:
   route is stamped. A town-repo edit (city.toml, packs.lock) is mechanik's, so
   it takes --assign gc-toolkit.mechanik. Refused unless the agent is a
   registered named session whose hook reads this bead's store
-  (tools/gc-proactive.sh assignable).
+  (tools/gc-proactive.sh assignable). The agent is then told, because under
+  wake_mode = "resume" nothing else wakes an idle named session for a new
+  assignee: deferred-dispatch.sh notify mails it the bead id at once when bd
+  reports the bead ready, and otherwise arms the notice to go when bd does.
   --then-assign (blocked) assigns the held bead to a named agent in the same
-  release. Its hook offers the bead once the wait lifts, so nothing is armed.
+  release. Its hook offers the bead once the wait lifts, and the notice
+  deferred-dispatch.sh notify arms tells the agent then, not before.
   ruling and recommend put the subject to the operator as a native human gate:
   the script files it with gc-helm.sh demand under the topic first-reaction,
   the takeaway as its question, and holds the subject on it. One open gate
@@ -282,6 +288,10 @@ case "$DISPOSITION" in
         if [ -n "$ASSIGN" ]; then
             [ -z "$ROUTE" ] || usage_die "--route and --assign both name where $BEAD goes; pass --route for a pool or --assign for a named agent, not both"
             [ -z "$EMERGENCY" ] || usage_die "--emergency admits a bead to a pool at P0, and --assign hands it to a named agent instead, which intake does not hold. Pass --route for the pool an emergency goes to, or drop --emergency."
+            # Telling the agent is part of this exit's write-back, and with no
+            # tool to send it the exit cannot land, so it does not start.
+            [ -x "$DEFERRED" ] \
+                || die "--assign needs $DEFERRED to tell $ASSIGN about $BEAD, and it is not executable. Nothing was written. Restore it and re-run this command."
         else
             [ -n "$ROUTE" ] || ROUTE="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
             case "$ROUTE" in
@@ -340,6 +350,10 @@ case "$DISPOSITION" in
         else
             [ -z "$EMERGENCY" ] \
                 || usage_die "--emergency admits the dispatch a --then-route arms, at P0, and this blocked exit arms none. Pass --then-route <rig>/<agent>, or drop --emergency."
+        fi
+        if [ -n "$THEN_ASSIGN" ]; then
+            [ -x "$DEFERRED" ] \
+                || die "--then-assign needs $DEFERRED to arm the notice that tells $THEN_ASSIGN when $BEAD's wait lifts, and it is not executable. Nothing was written. Restore it and re-run this command."
         fi
         ;;
     recommend|ruling)
@@ -717,6 +731,7 @@ if [ -n "$DRY" ]; then
     case "$DISPOSITION" in
         actionable) if [ -n "$ASSIGN" ]; then
                         printf 'would release %s to named agent %s (assignee, no route)\n' "$BEAD" "$ASSIGN"
+                        printf 'would tell %s about %s once bd reports it ready, at once if it already does (deferred-dispatch.sh notify)\n' "$ASSIGN" "$BEAD"
                     elif [ -z "$ADMIT" ]; then
                         printf 'would hold %s for placement (placement=pending, unrouted): %s\n' "$BEAD" "$HOLD_WHY"
                     elif [ "$ADMIT" = emergency ]; then
@@ -730,6 +745,8 @@ if [ -n "$DRY" ]; then
                         printf 'would file a human gate on %s recommending %s and hold %s on it\n' "$BEAD" "$RECOMMENDED_FORMULA" "$BEAD"
                     fi ;;
         blocked)    printf 'would wait %s on:%s%s%s\n' "$BEAD" "$WAITING" "${BLOCKER_TITLE:+ (new: $BLOCKER_TITLE)}" "${THEN_ASSIGN:+, assigned to $THEN_ASSIGN}"
+                    [ -z "$THEN_ASSIGN" ] \
+                        || printf 'would tell %s about %s once bd reports it ready, at once if it already does (deferred-dispatch.sh notify)\n' "$THEN_ASSIGN" "$BEAD"
                     if [ -n "$THEN_ROUTE" ] && [ -z "$ADMIT" ]; then
                         printf 'would hold %s for placement (placement=pending) and arm no dispatch to %s: %s\n' "$BEAD" "$THEN_ROUTE" "$HOLD_WHY"
                     elif [ -n "$THEN_ROUTE" ]; then
@@ -885,6 +902,31 @@ stamp_landed() {
     else
         gc_bd update "$BEAD" --set-metadata "gc.proactive_reaction=1" >/dev/null 2>&1 \
             || die "the $DISPOSITION disposition landed on $BEAD but gc.proactive_reaction=1 did not stamp; a re-offered frozen mol-first-reaction step reads no landed proof and would re-dispose, reopening and re-routing a bead a worker may already hold. Stamp it by hand: gc bd update $BEAD${DB:+ --db $DB} --set-metadata gc.proactive_reaction=1"
+    fi
+}
+
+# ── A named agent hears about the bead it was assigned ───────────────
+# An assignment by itself wakes nobody. A named session's hook offers it a
+# bead by its assignee once bd reports the bead ready, and the agent reads its
+# hook only in a turn: at launch, when the operator types, or when a nudge
+# arrives. The controller's claim, continuation and execution backstops govern
+# pool sessions only, and its restart of an alive named session onto a new
+# assignment runs only under wake_mode = "fresh", so under "resume" nothing
+# gives an idle agent that turn. So the exit that assigns asks
+# deferred-dispatch.sh notify to tell the agent, by the identity
+# gc-proactive.sh assignable checked above. The mail goes at once when bd reports the bead ready, the actionable
+# exit's case. Otherwise the notice is recorded for the deferred-dispatch pass
+# to send once bd does, the blocked exit's case, since a notice sent while the
+# bead still waits would wake the agent for a bead its hook does not offer yet.
+# A notice that is neither sent nor recorded fails the exit before the landed
+# proof, as a missing arm does, so a re-run resumes it.
+notify_assignee() { # <named-agent>
+    local out
+    # shellcheck disable=SC2086  # $BD_DB_ARGS expands to 0 or 2 space-free fields
+    if out=$("$DEFERRED" notify "$BEAD" --agent "$1" --reason "first reaction: $REASON" $BD_DB_ARGS 2>&1); then
+        [ -z "$out" ] || printf '%s\n' "$out" >&2
+    else
+        die "the $DISPOSITION disposition on $BEAD did not land. $1 was not told about it and no notice was armed (${out:-deferred-dispatch.sh notify exited non-zero and named no cause}), so nothing would wake $1 into its hook for it. The headline and the release stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
     fi
 }
 
@@ -1114,6 +1156,10 @@ if [ -n "$HOLD_WAITS" ]; then
         fi
     fi
 fi
+
+# --assign and --then-assign told the release who the bead goes to, and that
+# agent is told the bead is its own once its hook offers it.
+[ -z "$WHO" ] || notify_assignee "$WHO"
 
 stamp_landed
 close_reaction

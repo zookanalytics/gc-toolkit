@@ -7,7 +7,7 @@
 # field rationale is documented on converse-opus.
 scope = "rig"
 provider = "codex"
-option_defaults = { model = "gpt-5.3-codex" }
+option_defaults = { model = "gpt-6.1-sol" }
 prompt_template = "agents/_converse/prompt.template.md"
 work_dir = ".gc/worktrees/{{.Rig}}/converse-codex/{{.AgentBase}}"
 # Codex reads no .claude overlay, so the gh origin guard is registered in the

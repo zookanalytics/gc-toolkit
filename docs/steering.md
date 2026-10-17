@@ -1,6 +1,6 @@
 ---
 name: Steering — how the operator steers the city's work
-description: How the operator steers the city's work, deciding which work runs and when. It states the intake rule for which beads may be routed or armed to a work pool, the placement=pending marker that holds every other bead and the writers that set it, the emergency check, the placement sitting's queue (gc-helm.sh unplaced) and how the sitting places a bead. It states the park, an ordinary blocker on a bead that holds work under the bead that has not started while work in flight finishes, with the moves that make and release a park and what a park holds and leaves running. Read it before writing anything that files, routes or arms new work, before parking or releasing work, or before changing a reader that must see a park.
+description: How the operator steers the city's work, deciding which work runs and when. It states the intake rule for which beads may be routed or armed to a work pool, the placement=pending marker that holds every other bead and the writers that set it, the emergency check, the placement sitting's queue (gc-helm.sh unplaced) and how the sitting places a bead. It states the park, an ordinary blocker on a bead that holds work under the bead that has not started while work in flight finishes, with the moves that make and release a park and what a park holds and leaves running. It states priority flow: a bead's priority is the priority of the bead it follows plus its own shift, the move that sets either, settle, the pass that catches raw writes, and the lock the three share. Read it before writing anything that files, routes or arms new work, before parking or releasing work, before writing a bead's priority, or before changing a reader that must see a park.
 ---
 
 # Steering
@@ -10,7 +10,9 @@ New work reaches a work pool once the operator has placed it, and not on its
 own. An epic is an ordinary bead, and each move acts on a bead and everything
 under it, with no logic for epics alone. A park holds work under a bead that
 has not started and leaves work already in flight running. Which work it holds,
-and which it does not, is [below](#what-a-park-holds).
+and which it does not, is [below](#what-a-park-holds). A priority decides the
+order work queues in, and work under a bead follows the bead's priority, moved
+sooner or later by a shift of its own ([Priority](#priority)).
 
 ## Scope
 
@@ -19,7 +21,8 @@ intake rule, the `placement=pending` marker and the writers that set it, the
 emergency check, the placement sitting's queue, and how a bead is placed. How
 the operator decides when work runs: the steering moves, the state each move
 writes, what that state holds and what it leaves running, and how each move is
-released.
+released. The order work queues in: how a bead's priority is derived, where it
+is written, and the writers that keep it there.
 
 **Boundaries.** The design that decides how work is steered by epic, with the
 alternatives it rejected and the units that build it, is
@@ -278,3 +281,144 @@ one only for a wait that belongs to all of its parts: a park on an epic, or a
 prerequisite of all of an epic's work. A wait that belongs to one part goes on
 that part. This is I1's shape law in
 [component-model.md](component-model.md#i1-in-full-the-hold-the-demand-and-the-shape-law).
+
+## Priority
+
+A pool claims the ready bead with the most urgent priority first, and within a
+level the oldest ([gascity-routing-model.md](gascity-routing-model.md#the-read-side-the-claim-predicate)).
+So a bead's priority decides where it queues.
+
+### The rule
+
+A bead's priority is the priority of the bead it follows, plus its own shift,
+kept within P0 to P4 at each level.
+
+- A member follows its parent. A member with several parents follows the most
+  urgent one, the parent with the lowest P-number.
+- PR-finishing work, a bead carrying `anchor_bead`, follows its anchor.
+- A workflow's input convoy, root and steps follow the bead the workflow was
+  poured for, at shift 0. They carry no shift of their own. An input convoy
+  follows the bead it tracks only when it tracks exactly one; a convoy that
+  tracks several follows none of them.
+- A bead that follows nothing has its priority set directly. An epic with no
+  parent is such a bead, and its priority is where its work starts.
+
+A bead is followed only when its own store holds it and it is neither closed
+nor pinned, so a member of a closed epic follows nothing and keeps the priority
+it last had.
+
+The shift is a signed integer in the key `priority_shift`: +1 is one level
+later, -1 is one level sooner, and absent or empty reads as 0. Shifts add up
+through levels, and each level stops at P0 and P4. Under a P1 epic, a member
+with no shift queues at P1, a member at shift -1 at P0, and a member at shift +2
+at P3. Under a P0 epic, a feature at shift -1 stays at P0, and a task under it
+at shift +1 queues at P1. A shift that is not a signed integer makes its bead
+unreadable, and every bead that follows it, so no writer computes a priority
+from it.
+
+`assets/scripts/priority-lib.sh` is the one definition of the rule, and
+`priority-lib.fixture.json` holds the cases any copy of it must agree with.
+
+### Where a priority is written
+
+The bd priority field holds the priority a bead competes at, because a claim
+reads that field and a pour copies it once into the workflow's convoy, root and
+steps. So the field of a bead that follows something is computed, never chosen:
+a hand edit of it is overwritten at the bead's next computation, and the way to
+rank such a bead is its shift.
+
+A writer rewrites a bead's computed priority only while the bead is open,
+blocked or deferred. A claim already made stands, so a bead `in_progress` or
+`hooked` keeps the priority it was claimed at, and a closed or pinned bead is
+never written. A workflow root is the exception: its pour sets it `in_progress`
+with no claim behind it, and work the workflow fans out later takes the root's
+priority, so the root is written while it is live. A move's input is not a
+computed priority. The move writes its P-value or its shift to the bead it
+moves even when that bead is claimed, because everything that follows the bead
+is computed from that input.
+
+Each writer reads the store asking for every class of bead a listing hides by
+default: gates, infrastructure beads, template molecules and ephemeral rows. A
+bead of any class can be followed, so the move, settle and the pass read the
+same beads and compute the same priority for each.
+
+### Moving a priority
+
+```
+gc-helm.sh priority <bead-id> <P0-P4> [--dry-run]
+gc-helm.sh priority <bead-id> --shift <±n> [--dry-run]
+```
+
+A P-value sets the priority of a bead that follows nothing. `--shift` sets the
+shift of a bead that follows a parent or an anchor. A P-value on a bead that
+follows something is refused, and the refusal names the shift that lands it
+there: for a member of a P1 epic, P3 is `--shift +2`. A shift on a bead that
+follows nothing is refused, because nothing is there to shift from. Either form
+on a workflow's convoy, root or step is refused, because it takes the priority
+of the bead the workflow was poured for, and the refusal names that bead.
+
+The move writes the bead's own input first. It then writes every bead that
+follows the bead, directly or through others: the members under it, the
+PR-finishing work of each anchor among them, and the live workflow of each,
+meaning its input convoy, its root and every open step. Held beads are written
+too, so a parked epic's members take a new priority while the park holds them,
+and each is at its priority when the park is released. The move reads every
+write back. `--dry-run` prints what it would write and writes nothing. The
+writer is `assets/scripts/queue-priority.sh move`.
+
+### Settle
+
+`queue-priority.sh settle <bead-id>` computes a bead's priority, writes it to the
+bead and to every live workflow poured for it, and reads it back. It exits
+non-zero when the priority cannot be computed or does not read back. A bead
+that follows nothing keeps its own priority, and its workflows take it.
+`queue-priority.sh settle <bead-id> --print` computes the same priority, prints
+the number and writes nothing, for a writer that puts the priority in the same
+`bd update` as a route, which bd writes as one row.
+
+### The pass
+
+`orders/queue-priority.toml` runs `queue-priority.sh reconcile` in each rig every
+fifteen minutes. The pass reads the beads `bd ready` offers the polecat pool,
+ephemeral ones included, as the pool's claim reads them, and settles each one
+queued at a priority other than the one it follows, together with its whole
+workflow. It is there for the raw writes no writer sees: a hand
+`bd update --priority` on an epic, a parent edge written by hand or by
+`bd create --parent`, and a bead routed or slung without a settle, which queues
+at the priority it was filed with until the pass reaches it. Nothing tells the
+pack such a write happened, so the pass looks. It takes only the ids from the
+queue and reads each queued bead again, the way settle and the move read beads,
+then reads what each queued bead follows, never the whole store. A bead that is
+not queued waits for its own writer, or for the pass once it is queued. A pass
+settles the most urgent beads first and leaves what its time budget cannot
+cover for the next pass.
+
+A queued workflow bead is settled with the bead its workflow was poured for.
+The pass also writes the queued bead itself and every bead between it and that
+bead, because a workflow poured for a step of another workflow is not one of
+the workflows poured for the outer one, and still follows it. A pass whose
+writes do not reach a stale queued bead names it and fails, so a bead it cannot
+settle is never reported settled.
+
+The pool is the agent that `gc agent list` places in the rig under the name
+`polecat`. That agent's name carries the binding the city imports the pack
+under, which the pack cannot know, and a queue read under any other name reads
+back empty. So a pass that cannot read the roster, or finds no such agent in
+the rig, or finds several, fails and reads no queue.
+
+### The lock
+
+The move, settle and the pass take one lock per store, a `flock` on
+`queue-priority.lock` in the store's `.beads` directory, the path every caller
+names the same way. A pass or a settle that read an old priority therefore
+cannot write it back after a move. The move and settle wait for the lock, and a
+pass that finds it held skips its tick.
+
+The writer that holds the lock records its pid and the time it took the lock in
+`queue-priority.holder` beside it, and clears the record when it exits, while it
+still holds the lock. A pass that finds the lock held fails, reporting the lock
+wedged, only when the writer the record names is still running and took the
+lock longer ago than the stall bound (`QUEUE_PRIORITY_LOCK_STALL_SECS`, 900
+seconds, above the order's timeout). A writer records itself only after it
+takes the lock, so a record whose writer has exited is not the holder's: the
+pass skips its tick.

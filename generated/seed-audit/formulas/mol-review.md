@@ -4,8 +4,10 @@ drain. Attached at dispatch (gc sling --on mol-review) to a review bead:
 metadata.task_kind=review, check_name (the check the verdict satisfies),
 anchor_bead (the gating anchor), and the review target — review_branch /
 review_base pre-open, or pr_url / pr_number once a PR exists — plus the
-dispatch-pinned reviewed_oid. The steps carry the whole method; the agent
-prompt carries only worker doctrine.
+dispatch-pinned reviewed_oid. The steps carry the lifecycle every check
+shares. The check's method, which the dispatch note's check section names,
+carries what the review reads, runs and judges, and the agent prompt carries
+only worker doctrine.
 
 Hard rules, in force for every step:
 
@@ -13,7 +15,7 @@ Hard rules, in force for every step:
   after one succeeded.
 - Never close the review bead by hand — signoff.sh disposes of it.
 - Never close, edit, or route the anchor bead; signoff.sh owns every write
-  your verdict implies (artifact, check.<gate> marker, rework child).
+  your verdict implies (artifact, the review bead's close, rework child).
 - No code fixes, however small: a fix belongs in the rework child a
   request-changes verdict files.
 - A pre-open verdict is replayed verbatim as the PR's opening comment, so
@@ -42,6 +44,6 @@ track the current step.
 
 Steps (4):
   ├── mol-review.load-dispatch: Read the dispatch and pin what you are reviewing
-  ├── mol-review.review: Read the diff and its test evidence, write the verdict body [needs: mol-review.load-dispatch]
+  ├── mol-review.review: Apply the check's method to the diff, write the verdict body [needs: mol-review.load-dispatch]
   ├── mol-review.verdict-and-drain: Hand the verdict to signoff.sh — once — then drain [needs: mol-review.review]
   └── mol-review.workflow-finalize: Finalize workflow [needs: mol-review.verdict-and-drain]

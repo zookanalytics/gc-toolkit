@@ -7,9 +7,11 @@
 # holds a city-resolved binary to this checkout's services/gctk tree (matched,
 # skewed, unstamped, a hand build's commit stamp, -dirty); GCTK_FALLBACK, which
 # forces only the subcommands it names onto their shell; arguments passed
-# through verbatim; GCTK_SCRIPTS_DIR exported as the helper's directory; and
+# through verbatim; GCTK_SCRIPTS_DIR exported as the helper's directory;
 # gctk_require, which runs the same chain with no skew guard and no fallback:
-# it execs the binary, or refuses with exit 1 and never returns to its script.
+# it execs the binary, or refuses with exit 1 and never returns to its script;
+# and a binary built from this checkout, which answers `gctk_require rig` with
+# its own subcommand, since the helper hands any subcommand over unread.
 #
 # The guard compares tree hashes, so this suite builds a scratch checkout with
 # real git rather than sourcing test-harness.sh, whose stub git answers nothing.
@@ -176,6 +178,35 @@ has "$out" "no gctk binary at $EMPTY_CITY/.gc/services/gctk/bin/gctk" "…naming
 has "$out" "gctk-build order" "…and the order that publishes it"
 has "$out" "$EMPTY_CITY/.gc/services/gctk/build-status.json" "…and the record of that order's last build"
 hasnt "$out" "RETURNED" "…and the script never runs past the call"
+
+echo "# gctk_require rig: the real binary's subcommand, reached unchanged"
+harness_build_gctk
+if [ -n "$GCTK_BUILT" ]; then
+    RIGREQ="$REPO/assets/scripts/fake-rig.sh"
+    cat > "$RIGREQ" <<'RIG_SH'
+#!/usr/bin/env bash
+set -u
+SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+. "$SCRIPTS_DIR/gctk-resolve.sh" || exit 1
+gctk_require rig "$@"
+printf 'RETURNED %s\n' "$*"
+RIG_SH
+    chmod +x "$RIGREQ"
+    # --check needs no command and reads only git and the record store, so a
+    # clean clone with no record answers it.
+    CLONE="$TMP/clean-clone"
+    git init -q "$CLONE"
+    git -C "$CLONE" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false \
+        commit -q --allow-empty -m one
+    out=$(cd "$CLONE" && env -u GCTK_FALLBACK GCTK_BIN="$GCTK_BUILT" "$RIGREQ" test --check 2>&1); rc=$?
+    eq "$rc" "3" "gctk_require rig test --check reaches the built binary's rig: nothing is recorded, exit 3"
+    has "$out" "gctk rig test: nothing is recorded at $(git -C "$CLONE" rev-parse HEAD)" "…which names the commit it read"
+    hasnt "$out" "RETURNED" "…and the script never runs past the call"
+    out=$(cd "$CLONE" && env -u GCTK_FALLBACK GCTK_BIN="$GCTK_BUILT" "$RIGREQ" deploy 2>&1); rc=$?
+    eq "$rc" "2" "a verb rig does not know is the binary's usage error, exit 2"
+else
+    bad "${GCTK_BUILD_ERR:-gctk was not built}"
+fi
 
 echo
 echo "passed: $PASS  failed: $FAIL"

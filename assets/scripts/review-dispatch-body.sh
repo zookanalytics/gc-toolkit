@@ -13,6 +13,7 @@
 # Exit 0 always: a dispatch is never blocked on prose.
 # Caller: gate-ensure.sh.
 set -uo pipefail
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 usage() {
   cat >&2 <<'U'
@@ -25,11 +26,14 @@ Prints the review bead's dispatch note on stdout.
                       mol-review emits the single-agent method note; any other
                       formula (e.g. the two-lane quorum) emits a note that
                       defers method and verdict path to that formula's steps.
-  --check-name <check> The check this review satisfies (default correctness).
-                      Selects the generic method section for that check.
+  --check-name <check> The check this review satisfies (default correctness),
+                      in any case: it is matched by its name case-folded, as
+                      the check index's resolver matches a check_set token.
+                      Selects the check section, which names the method skill
+                      the reviewer loads.
   --reviewed-oid <oid> The commit under review. When the reviewed repo carries
                       docs/review-<check>.md at that commit, it is appended to
-                      the generic method as the rig's local extension.
+                      the note as the rig's local extension of the method.
 U
 }
 
@@ -48,6 +52,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$CHECK_NAME" ] || CHECK_NAME="correctness"
+# A check is known by its name case-folded, the rule review-checks.sh resolves a
+# check_set token by, and the caller passes the token in the case the anchor's
+# check_set wrote it. Folding it once here means the stance, the method skill,
+# the index row and the rig extension below are all looked up by the check
+# itself, whatever case its token was written in.
+CHECK_NAME=$(printf '%s' "$CHECK_NAME" | tr '[:upper:]' '[:lower:]')
 
 # --- The formula frame: the dispatch topology --------------------------------
 if [ "$FORMULA" = "mol-review" ]; then
@@ -64,11 +74,11 @@ check method named below governs what you read and judge inside them.
 is no input convoy: REVIEW_BEAD is this bead itself — substitute its id
 wherever the steps derive REVIEW_BEAD from the convoy.
 
-**Do not substitute any other review method.** Do not match a review-shaped
-skill out of your catalog, and do not improvise one. **One agent, single
-pass. No fan-out**: read the diff yourself and write the verdict
-yourself — no subagents, no persona reviewers,
-no parallel review pass.
+**Do not substitute any other review method.** Load the method skill the
+check section below names, and no other review-shaped skill out of your
+catalog; do not improvise one. **One agent, single pass. No fan-out**: read
+the diff yourself and write the verdict yourself — no subagents,
+no persona reviewers, no parallel review pass.
 
 **What to review** is on this bead's metadata: `pr_number` (post-open) or
 `review_branch`/`review_base` (pre-open), plus `anchor_bead` for the intent.
@@ -86,10 +96,11 @@ cat <<'H' | sed "s|__FORMULA__|$FORMULA|g"
 This is a **dispatched signoff review** conducted by the `__FORMULA__`
 formula, attached to this bead at dispatch (`gc sling --on __FORMULA__`). The
 formula's step descriptions ARE the frame — follow the step you hold, in
-order — and the check method named below governs what you read and judge. Do
-not substitute a review-shaped skill from your catalog, and do not improvise a
-verdict path: the formula decides how the review is conducted, how many lanes
-read the diff, and which of its steps makes the single verdict.
+order — and the check method named below governs what you read and judge.
+Load the method skill the check section names and no other review-shaped
+skill from your catalog, and do not improvise a verdict path: the formula
+decides how the review is conducted, how many lanes read the diff, and
+which of its steps makes the single verdict.
 
 **Recovery:** if you hold this bead with no poured workflow, run
 `gc formula show __FORMULA__` and follow its steps in order.
@@ -100,23 +111,22 @@ H
 fi
 
 # --- The check section: the concern this review verifies ----------------------
-# The generic method is pack content; a rig may extend it (below). Each arm
-# names what the check judges, never how many lanes read it (that is the
-# formula's question above). A shared specialist stance precedes every
-# non-baseline arm, emitted once so no specialist skill or arm restates it;
-# correctness and triage are exempt, being the baseline that holds its own
-# stance in its own arm.
+# A check's method lives once, in its pack skill, and the section names that
+# skill without repeating any of it; a rig may extend it (below). A shared
+# specialist stance precedes every non-baseline check's section, emitted once so
+# no specialist skill restates it; correctness and triage are exempt, being the
+# baseline whose methods state their own stance.
 echo
 echo "---"
 echo
 printf '## Check: `%s`\n' "$CHECK_NAME"
 echo
 case "$CHECK_NAME" in
-  correctness|triage) : ;;   # baseline: its own stance is in its arm, below
+  correctness|triage) : ;;   # baseline: its method states its own stance
   *)
     cat <<'S'
 **The specialist stance.** Every specialist check holds it, so no check's skill
-or arm below restates it. You are the author's peer and the gatekeeper of the
+restates it. You are the author's peer and the gatekeeper of the
 concern you own. You raise the bar on what the city ships; you do not wave a
 change through because its bead said to build it or its author worked hard.
 Enforce through findings and never edit: a gap is the author's to fix, and you
@@ -134,136 +144,61 @@ exactly once; never `gh pr review`, because the city does not approve its own PR
 S
     ;;
 esac
+# A declared check's method is its skill, which the note names as gascity
+# surfaces every pack skill, gc-toolkit.<directory>, for the reviewer to load
+# from its catalog (below). The catalog links the installed pack, so a branch
+# that edits a method is not judged by its own edit, and a rig other than
+# gc-toolkit has the method too. An undeclared check has no skill, so its
+# section says which case it is.
+METHOD_SKILL=""
 case "$CHECK_NAME" in
-  correctness)
-    cat <<'M'
-The standing correctness review. Judge whether the change is correct and safe
-as merged: read the whole diff, settle its test evidence as below, and hold it
-to the work-quality standards, grading findings P0/P1/P2 with file:line. This is
-the concern, not a tool — no reviewer is presumed.
-
-**Test evidence.** The self-review that built a commit runs the rig's declared
-test command and stamps the head it saw pass on the work bead as
-`self_review_passed_sha`. The anchor's stamp is evidence only when it is the
-reviewed commit's full sha and the rig declares a test command. A merge of the
-base or a rework round leaves it naming an older head, and where the rig
-declares no test command the stamp certifies no declared tests. Read it in the
-review step, in the same shell as that step's pin block:
-
-```bash
-# >>> review-test-evidence
-ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
-STAMP=""
-[ -n "$ANCHOR" ] && STAMP=$(gc bd show "$ANCHOR" --json 2>/dev/null | jq -r '.[0].metadata.self_review_passed_sha // empty' 2>/dev/null)
-DECLARED=$(gc formula show mol-polecat-work ${GC_RIG:+--rig="$GC_RIG"} --json 2>/dev/null | jq -r '[.vars[]? | select(.name == "affected_tests_command" or .name == "test_command") | if .rig_default != null then .rig_default else (.default // "") end | select(. != "")] | length' 2>/dev/null)
-if [ -n "$STAMP" ] && [ "$STAMP" = "$REVIEWED_OID" ] && [ "${DECLARED:-0}" -gt 0 ] 2>/dev/null; then
-  echo "test evidence: the anchor's self-review passed the rig's declared tests at $REVIEWED_OID; run no suite"
-else
-  echo "no test evidence at ${REVIEWED_OID:-an unpinned commit} (anchor stamp: ${STAMP:-none}; declared test commands: ${DECLARED:-unread}); run the suites the diff touches"
-fi
-# <<< review-test-evidence
-```
-
-With evidence, run no suite. Without it, run the suites the diff touches in the
-review's worktree, each as `hb bash -c '<suite>'` through the review step's
-keepalive, and record the real pass and fail counts. Either way you may run one
-targeted suite for a gap you suspect, and the Testing check's run of each new
-case against the pre-change code is yours. A failing suite is not automatically
-a finding: check whether it fails on the base too. A pre-existing failure
-belongs in the verdict as context, not as this branch's defect.
-M
-    ;;
-  triage)
-    cat <<'M'
-Classify, do not judge. Whether the change is correct is the `correctness`
-check's question and it is dispatched separately. Yours is narrower: which
-specialist checks does this diff warrant? Read the check index
-(`review-checks.toml`) at the reviewed commit, skim the diff, and add the
-checks it warrants — no more. Adding nothing is the expected common case.
-
-Record the decision on one verdict call, which both greens triage and widens
-the anchor's check_set:
-
-    signoff.sh --review-bead <this bead> --verdict approve --add-gates <check>[,<check>]
-
-Widening is monotonic and `signoff.sh` enforces it: you cannot remove a check,
-and only a triage verdict may add one. See `skills/review-triage/SKILL.md` for
-the method. Correctness findings are the `correctness` check's, not yours.
-
-When bringing the branch current conflicted, the same verdict also rules on
-that round. Read its account (`bring-current-audit.sh render --anchor <anchor>
---as comment`) and its raw record
-(`bring-current-audit.sh show --anchor <anchor>`), which keeps what a routine
-entry's one line leaves out: what collided, what to check, and git's evidence.
-Then decide which lanes run again on the merged code, and lift the human
-approval only when the round made a call that is the operator's to make,
-naming that call in `--round-reason`, on the same call:
-
-    signoff.sh ... --reopen <lanes>|none --round-reason <why> [--dismiss-approval]
-
-`signoff.sh` refuses a triage verdict that leaves such a round unruled.
-M
-    ;;
-  demo)
-    cat <<'M'
-`skills/review-demo/SKILL.md`. The visual review: decide whether this change
-needs a visual to be understood, then deliver the cheapest one that conveys it.
-Need comes first. Triage added this check because the diff touches a surface a
-person sees; confirm that seeing the change explains it better than reading the
-diff. When it does not, approve with a one-line note and attach nothing. When it
-does, pick the modality: a visual the repo already carries, a screenshot of one
-rendered state, or a narrated video of a flow. Deliver it to the PR inline and
-uncommitted with `demo-deliver.sh`, and judge what it shows, not what the diff
-claims. A fitting visual the city cannot produce here is a note in an approve,
-never a block. A cheaper visual delivered in its place is a fallback. The one
-verdict call records the decision:
-
-    signoff.sh --review-bead <this bead> --verdict approve|request-changes --visual none|repo-artifact|screenshot|video [--visual-fallback-from screenshot|video]
-
-`none` records with `approve` only. A fallback names the modality that fits with
-`--visual-fallback-from`. Whether the change is the right thing to ship, and lets
-the operator decide, is `pm`'s.
-M
-    ;;
-  arch)
-    cat <<'M'
-The Architect — steward and gatekeeper of the repo's high-level architecture.
-Read the architecture reference docs before you judge: `docs/architecture.md`
-and the `docs/architecture/` directory it anchors; a review that has not read
-the architecture cannot hold a change to it. Judge whether the change leverages
-the existing architecture or works against its grain, and whether it moves the
-architecture — if so, whether that move is justified and recorded in the
-architecture docs in this same PR. The verdict is binary: approve when the
-change fits, request changes otherwise (a moved architecture whose matching doc
-update is not in the PR, or a move a design fitting the current architecture
-would not have needed). `skills/review-arch/SKILL.md` carries the full method.
-M
-    ;;
-  pm)
-    cat <<'M'
-`skills/review-pm/SKILL.md`. The product lens: judge whether the change is the
-right thing for the people the product serves — the outcome its anchor named,
-not a proxy — against the product goals (`docs/product-goals.md`, which names
-who they are), then whether the PR lets the operator decide. Push back when the
-diff does what its bead said but not what those people need. Whether the change
-needs a visual, and delivering it, is `demo`'s; your only visual concern is a
-change the operator must see to trust that the PR gives them nothing to look at.
-M
-    ;;
+  correctness|triage|demo|arch|pm) METHOD_SKILL="review-$CHECK_NAME" ;;
   *)
-    cat <<M
-No generic method is declared for the \`$CHECK_NAME\` check in the dispatching
-pack. Follow the \`mol-review\` steps as written, hold the diff to the reviewed
-repo's own method for this check where one exists, and say in your verdict's
-coverage line that the check had no declared method — an undeclared method is a
-gap worth an observation.
+    # The check's purpose, from its row in the index at the reviewed commit
+    # (the working tree's index when no commit is named), through the index's
+    # one parser, which matches the row's name case-folded too. Empty when no
+    # row there declares the check.
+    PURPOSE=""
+    for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
+      [ -n "$root" ] || continue
+      if [ -n "$REVIEWED_OID" ]; then IDX=$(git -C "$root" show "$REVIEWED_OID:review-checks.toml" 2>/dev/null)
+      else IDX=$(cat "$root/review-checks.toml" 2>/dev/null); fi
+      PURPOSE=$(printf '%s\n' "$IDX" | bash "$HERE/review-checks.sh" --file /dev/stdin --check "$CHECK_NAME" 2>/dev/null | cut -f3)
+      [ -n "$PURPOSE" ] && break
+    done
+    if [ -n "$PURPOSE" ]; then
+      cat <<M
+The reviewed repo's \`review-checks.toml\` declares the \`$CHECK_NAME\` check,
+and this pack ships no method for it. Judge the diff against the check's
+purpose, as its row states it:
+
+> $PURPOSE
+
+Say in your verdict's coverage line that the pack has no method for this
+check. The missing method is a gap worth an observation.
 M
+    else
+      cat <<M
+Neither this pack nor the reviewed repo's \`review-checks.toml\` declares the
+\`$CHECK_NAME\` check, so nothing says what it judges. Approve, and pass
+\`--needs-you\` on the verdict call saying the check is declared nowhere, so
+the operator decides whether it stays in this anchor's check set.
+M
+    fi
     ;;
 esac
 
+if [ -n "$METHOD_SKILL" ]; then
+  cat <<R
+**Your method is the \`gc-toolkit.$METHOD_SKILL\` skill.**
+Load it from your skill catalog and apply it; a copy in the review worktree is
+the change under review, not your method.
+R
+fi
+
 # The rig's local extension, appended to the generic method — read from the
 # COMMIT UNDER REVIEW, never the working tree, so a branch is judged against the
-# method its own commit declared. Absent is the common case and changes nothing.
+# extension its own commit declared. Absent is the common case and changes nothing.
 if [ -n "$REVIEWED_OID" ]; then
   EXT=""
   for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do

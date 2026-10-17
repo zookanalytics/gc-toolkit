@@ -147,7 +147,7 @@ run_region() {
     rm -f "$TMP/hb-ran"
     ( cd "$TMP" && env GC_PACK_DIR="$2" GC_RIG_ROOT="" GC_CITY_PATH="$TMP/no-city" \
         CLAIMED_STEP_BEAD_ID=tk-claimed-step CLAIMED_ITER_BEAD=tk-claimed-iter \
-        REVIEW_BEAD=tk-review-bead WORK_BEAD_ID=tk-work-bead \
+        SYNTH_BEAD=tk-claimed-synth REVIEW_BEAD=tk-review-bead WORK_BEAD_ID=tk-work-bead \
         bash -c '. "$1" && hb touch "$2"' _ "$1" "$TMP/hb-ran" )
 }
 
@@ -188,6 +188,7 @@ check_region() {  # check_region <toml-path-under-root> <marker> <want-target>
 check_region formulas/mol-polecat-work.toml preflight-lease-keepalive   tk-claimed-step
 check_region formulas/mol-polecat-work.toml self-review-lease-keepalive tk-claimed-iter
 check_region formulas/mol-review.toml       review-lease-keepalive      tk-claimed-step
+check_region formulas/mol-review-quorum-signoff.toml quorum-lease-keepalive tk-claimed-synth
 
 # --- the rig's test command reaches the keepalive verbatim -------------------
 # A pour renders the rig's test command into the step text, so a quote inside

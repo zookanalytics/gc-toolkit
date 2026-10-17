@@ -20,8 +20,7 @@ mk_sut_dir "$SD" "$HERE/migrate-approval-out-of-check-set.sh"
 SUT="$SD/migrate-approval-out-of-check-set.sh"
 
 # The SUT enumerates rigs via `gc rig list` and reaches each store with
-# `gc bd ... --db <path>`; shim both onto the harness gc stub (the
-# migrate-codex-to-correctness.test.sh pattern).
+# `gc bd ... --db <path>`; shim both onto the harness gc stub.
 mkdir -p "$TMP/bin2"
 export STUB_RIGS="$TMP/rigs.json"
 export STUB_BD_LIST_GARBAGE=""

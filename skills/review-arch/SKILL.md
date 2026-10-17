@@ -17,7 +17,9 @@ Read the architecture reference docs before you judge the diff: `docs/architectu
 and the `docs/architecture/` directory it anchors. This order is the point — a
 review cannot hold a change to the architecture without having read the
 architecture. `docs/architecture.md` links the deeper references; follow the ones
-the diff touches. Read the diff at the pinned commit, not your worktree.
+the diff touches. A reference missing at the reviewed commit is a gap you note,
+not a reason to pass or fail the change. Read the diff at the pinned commit, not
+your worktree.
 
 ## Judge two questions
 

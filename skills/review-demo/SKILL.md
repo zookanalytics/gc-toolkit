@@ -85,7 +85,8 @@ reports whether the `gh` it needs is present.
   anchor and the diff. Keep the script and the clip in the review workspace,
   the directory that holds `$REVIEW_WT`, and capture from there, so the
   engine's working files stay out of the reviewed tree. Run the capture under
-  `hb`, the review step's lease keepalive, because a capture takes minutes:
+  `hb`, the review formula's claim-lease keepalive, because a capture takes
+  minutes:
 
   ```bash
   cd "$(dirname "$REVIEW_WT")"

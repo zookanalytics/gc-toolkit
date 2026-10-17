@@ -81,27 +81,30 @@ index gap as an observation (below).
 ## Recording the decision
 
 One `signoff.sh` call carries the verdict and the widening together. The verdict
-is `approve`: triage passed at this commit, which is what makes `check.triage`
-green and lets the rest of the cadence proceed.
+is `approve`: triage passed at this commit, and the closed approve review is
+what derives the triage lane green and lets the rest of the cadence proceed.
 
 ```bash
 signoff.sh --review-bead "$REVIEW_BEAD" --verdict approve \
   --add-gates demo
 ```
 
+`--add-gates` takes one check or several, comma-separated, as in
+`--add-gates demo,arch`.
+
 - **Widening is monotonic and `signoff.sh` enforces it.** The write is a set
   union with read-back: nothing you pass can remove a check already declared,
-  and no dispatcher, formula, or other reviewer may pre-set or shrink
-  `check_set`. The checks-needed decision lives here, in one place a human can
-  audit.
+  only a triage verdict may add one, and no dispatcher, formula, or other
+  reviewer may pre-set or shrink `check_set`. The checks-needed decision lives
+  here, in one place a human can audit.
 - **Every added check is recorded** on the anchor's notes as a `triage-add:`
   line, so the add-rate the distiller watches stays countable. Name the check
   you added and what in the diff warranted it, in your verdict body.
 - **Adding nothing needs no flag** — approve on its own is the full verdict.
 
 Your verdict body is the triage trail, collapsed under the line `signoff.sh`
-opens the comment with: what you read, each check you added or left out and
-why, and any test runs. Triage files no findings, so it has no findings block.
+opens the comment with: what you read, and each check you added or left out
+and why. Triage files no findings, so it has no findings block.
 
 ## A bring-current round that conflicted
 
@@ -119,6 +122,9 @@ Read the round first:
 bring-current-audit.sh render --anchor "$ANCHOR" --as comment   # the account
 bring-current-audit.sh show --anchor "$ANCHOR"                  # the raw record
 ```
+
+The account gives a routine entry one line. The raw record keeps what that
+line leaves out: what collided, what to check, and git's evidence.
 
 Each entry says what collided (the two intents), what the worker decided and
 why, what a reviewer should check, and the worker's rating: `routine` for an
@@ -202,8 +208,8 @@ OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty
   say so in the verdict body and let that check hold it.
 - It never fixes anything, and it never touches the anchor other than through
   `signoff.sh`.
-- It never re-runs because the branch grew. Its verdict binds no marker to a
-  commit: an appended commit does not re-stale `check.triage`, and no pass
+- It never re-runs because the branch grew. Its verdict binds the lane to no
+  commit: an appended commit does not re-stale the triage lane, and no pass
   re-classifies the grown diff. Two things reopen the lane: a rewrite that takes
   the reviewed commit off the branch supersedes the review, and a bring-current
   round that conflicted reopens it to rule on that round. gate-ensure then pours

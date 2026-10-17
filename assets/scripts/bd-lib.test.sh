@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# bd-lib.test.sh — hermetic tests for the bd_list memoization and the anchor
+# bd-lib.test.sh — hermetic tests for the bd_list memoization, the anchor
 # graph reads and writes (bd_anchor_children, bd_anchor_link, bd_create_child,
-# bd_anchor_backfill, bd_live_children).
+# bd_anchor_backfill, bd_live_children), and the per-rig state key, the pass
+# lock and pass_child (state_key, rig_state_key, take_pass_lock, pass_child).
 #
 # The cache is off unless GC_RECONCILE_BD_CACHE names a directory, and the
 # refinery-reconcile order is its only caller (it clears per arm and removes the
@@ -671,6 +672,109 @@ eq "$(validation_work_order tk-anc human "")" '{"task_kind":"validation","anchor
   "…and an empty head leaves the pin out"
 eq "$(printf '%s' "$(validation_work_order tk-anc human x)" | jq -r --arg s "$VALIDATION_SELECT" '. as $m | $s | split(",") | all(.[]; . as $k | $m | has($k))')" "true" \
   "…carrying every key VALIDATION_SELECT names"
+
+# --- state_key: one directory name per identity --------------------------------
+ck() { printf '%s' "$1" | cksum | cut -d' ' -f1; }
+eq "$(state_key gc-toolkit gc-toolkit)" "gc-toolkit" "state_key: a safe name that is its own identity is used as it is"
+eq "$(state_key 'a/b' 'a/b')" "a_b-$(ck 'a/b')" "…a name with a character outside the safe set is its safe form and a checksum"
+eq "$(state_key 'a_b' 'a_b')" "a_b" "…so it never lands on the name its safe form spells"
+eq "$(state_key '..' '..')" "rig-$(ck '..')" "…a name that would climb out of its directory reads as rig"
+eq "$(state_key '' '')" "rig-$(ck '')" "…and so does an empty one"
+LONG="$(printf '%070d' 0 | tr 0 x)"
+eq "$(state_key "$LONG" "$LONG")" "$(printf '%064d' 0 | tr 0 x)-$(ck "$LONG")" "…a name longer than 64 bytes is cut to 64, then the checksum"
+eq "$(state_key dup /one/dup)" "dup-$(ck /one/dup)" "…and a name that reads other than its identity carries the identity's checksum"
+
+# --- rig_state_key: GC_RIG, else the rig root, else _unscoped -----------------
+eq "$(GC_RIG=gc-toolkit GC_RIG_ROOT=/x/gc-toolkit rig_state_key)" "gc-toolkit" "rig_state_key: GC_RIG names the rig"
+eq "$(GC_RIG_ROOT=/one/dup rig_state_key)" "dup-$(ck /one/dup)" "…with only GC_RIG_ROOT, the root's last element and a checksum of the whole root"
+[ "$(GC_RIG_ROOT=/one/dup rig_state_key)" != "$(GC_RIG_ROOT=/two/dup rig_state_key)" ] \
+  && ok "…so two roots that end in one name keep apart" || bad "two roots that end in one name share a key"
+eq "$(GC_RIG_ROOT=/one/dup/ rig_state_key)" "dup-$(ck /one/dup/)" "…a trailing slash still reads the last element"
+eq "$(rig_state_key)" "_unscoped" "…and with neither the key is _unscoped"
+
+# --- take_pass_lock: one pass at a time ------------------------------------------
+lock_free() { ( exec 8>>"$1/pass.lock"; flock -n 8 ) 2>/dev/null; }
+await_file() { local i=0; while [ ! -e "$1" ] && [ "$i" -lt 400 ]; do sleep 0.05; i=$((i + 1)); done; [ -e "$1" ]; }
+LD="$TMP/locks/rig"
+out=$(take_pass_lock "$LD" 60; rc=$?
+      printf 'rc=%s note=%s\n' "$rc" "$LOCK_NOTE"
+      if lock_free "$LD"; then echo held=no; else echo held=yes; fi
+      if { : >&9; } 2>/dev/null; then echo fd9=open; else echo fd9=closed; fi)
+has "$out" "rc=0 note=" "take_pass_lock: a free lock is taken (0)"
+has "$out" "held=yes" "…and held while the process that took it runs"
+has "$out" "fd9=open" "…on fd 9"
+read -r hpid hsince < "$LD/pass.holder"
+eq "$hpid" "$$" "…recording the pid of the process that took it"
+case "$hsince" in ''|*[!0-9]*) bad "…and when it took it (got '$hsince')" ;; *) ok "…and when it took it" ;; esac
+lock_free "$LD" && ok "…and freed once that process exits" || bad "the lock outlived the process that took it"
+( exec 9>>"$LD/pass.lock"; flock -n 9 || exit 1; : > "$TMP/lock-held"
+  i=0; while [ ! -e "$TMP/lock-release" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i + 1)); done ) </dev/null >/dev/null 2>&1 &
+LH=$!
+if await_file "$TMP/lock-held"; then
+  printf '%s %s\n' "$LH" "$(( $(date -u +%s) - 5 ))" > "$LD/pass.holder"
+  out=$(take_pass_lock "$LD" 60; rc=$?
+        printf 'rc=%s note=%s\n' "$rc" "$LOCK_NOTE"
+        if { : >&9; } 2>/dev/null; then echo fd9=open; else echo fd9=closed; fi)
+  has "$out" "rc=1 note=pid $LH, " "take_pass_lock: a lock another pass took inside the stall bound is busy (1), naming that pass"
+  has "$out" "s elapsed" "…and how long it has held the lock"
+  has "$out" "fd9=closed" "…and a busy lock leaves no descriptor open"
+  printf '%s 1\n' "$LH" > "$LD/pass.holder"
+  eq "$(take_pass_lock "$LD" 60; echo "rc=$?")" "rc=2" "…one taken longer ago than the stall bound is stalled (2)"
+  rm -f "$LD/pass.holder"
+  eq "$(take_pass_lock "$LD" 60; echo "rc=$? note=$LOCK_NOTE")" "rc=1 note=pid unknown" "…and a holder that left no record is busy, by an unknown pid"
+else
+  bad "the holder fixture never took the lock"
+fi
+: > "$TMP/lock-release"; wait "$LH" 2>/dev/null
+mkdir -p "$TMP/noflock"
+eq "$(PATH="$TMP/noflock" take_pass_lock "$LD" 60; echo "rc=$? note=$LOCK_NOTE")" "rc=3 note=flock not found on PATH" \
+  "take_pass_lock: with no flock on PATH there is no lock (3)"
+mkdir -p "$TMP/locks/blocked/pass.lock"
+eq "$(take_pass_lock "$TMP/locks/blocked" 60; echo "rc=$? note=$LOCK_NOTE")" "rc=3 note=cannot create $TMP/locks/blocked/pass.lock" \
+  "…nor with a lock file that cannot be created"
+
+# --- pass_child: nothing a pass runs holds the lock after it ----------------------
+eq "$(pass_child sh -c 'exit 7'; echo "$?")" "7" "pass_child: returns the program's status"
+# A pass that takes the lock and runs one program through pass_child. The
+# program records whether it was handed fd 9, leaves a process running that
+# keeps every descriptor it has, and waits for its release.
+cat > "$TMP/pass.sh" <<'PASS'
+. "$1"
+take_pass_lock "$2" 60 || exit 9
+pass_child "$3"
+PASS
+cat > "$TMP/prog.sh" <<'PROG'
+#!/usr/bin/env bash
+if { : >&9; } 2>/dev/null; then echo open; else echo closed; fi > "$PROG_DIR/fd9"
+( exec sleep 300 ) </dev/null >/dev/null 2>&1 &
+echo "$!" > "$PROG_DIR/daemon"
+: > "$PROG_DIR/started"
+i=0; while [ ! -e "$PROG_DIR/release" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i + 1)); done
+PROG
+chmod +x "$TMP/prog.sh"
+export PROG_DIR="$TMP/prog"; mkdir -p "$PROG_DIR"
+LC="$TMP/locks/child"
+bash "$TMP/pass.sh" "$HERE/bd-lib.sh" "$LC" "$TMP/prog.sh" </dev/null >/dev/null 2>&1 &
+PP=$!
+if await_file "$PROG_DIR/started"; then
+  eq "$(cat "$PROG_DIR/fd9")" "closed" "pass_child: the program runs without fd 9"
+  kill -9 "$PP" 2>/dev/null; wait "$PP" 2>/dev/null
+  lock_free "$LC" && bad "killing the pass by itself freed the lock while its program ran on" \
+    || ok "…the lock stays held while it runs, though the pass that started it was killed"
+  : > "$PROG_DIR/release"
+  i=0; while ! lock_free "$LC" && [ "$i" -lt 400 ]; do sleep 0.05; i=$((i + 1)); done
+  lock_free "$LC" && ok "…and is freed once the program exits" || bad "the lock outlived the program pass_child ran"
+  dpid="$(cat "$PROG_DIR/daemon" 2>/dev/null)"
+  if [ -n "$dpid" ] && kill -0 "$dpid" 2>/dev/null; then
+    ok "…while the process the program left behind still runs, holding no lock"
+  else
+    bad "the process the program leaves behind never ran, so nothing about it was proven"
+  fi
+  [ -n "$dpid" ] && kill "$dpid" 2>/dev/null
+else
+  bad "the pass fixture never started its program"
+  : > "$PROG_DIR/release"; kill -9 "$PP" 2>/dev/null; wait "$PP" 2>/dev/null
+fi
 
 echo
 echo "passed: $PASS  failed: $FAIL"

@@ -215,7 +215,8 @@ esac
    "$DISPOSE" "$SUBJECT" --disposition actionable --reaction-bead <R> --by proactive --reason "<what is red on main, and why this bead fixes it>" --takeaway "<headline>" --emergency "<the failing check on main>"
    # Work that is a named agent's own goes TO that agent: --assign makes it the
    # subject's assignee, the address the agent's own hook matches, since a named
-   # agent never reads gc.routed_to. A town-repo edit takes gc-toolkit.mechanik.
+   # agent never reads gc.routed_to, and the exit mails the agent the bead id.
+   # A town-repo edit takes gc-toolkit.mechanik.
    "$DISPOSE" "$SUBJECT" --disposition actionable --reaction-bead <R> --by proactive --reason "<why this is work, and why it is mechanik's>" --takeaway "<headline>" --assign gc-toolkit.mechanik
 
    # blocked — the wait is an EDGE, never prose: an unheld bead is still ready
@@ -228,9 +229,10 @@ esac
    # instead, so pass --then-route either way. A blocked work bead left unrouted
    # and unplaced is the debt doctor/check-blocked-work-armed flags. Waiting
    # work that is a named agent's own takes --then-assign <agent> instead: the
-   # subject is assigned in the same release and the agent's hook offers it once
-   # the wait lifts, so nothing is armed. Omit both only for a bead nobody takes
-   # (a decision, a research note).
+   # subject is assigned in the same release, the agent's hook offers it once
+   # the wait lifts, and the exit arms the notice that mails the agent then, so
+   # no dispatch is armed. Omit both only for a bead nobody takes (a decision, a
+   # research note).
    "$DISPOSE" "$SUBJECT" --disposition blocked --reaction-bead <R> --by proactive --reason "<what it waits on and why>" --takeaway "<headline>" --waiting-on <blocker-id> --then-route <rig>/<rig>.polecat
    "$DISPOSE" "$SUBJECT" --disposition blocked --reaction-bead <R> --by proactive --reason "<what it waits on and why>" --takeaway "<headline>" --blocker "<what has to happen first>" --blocker-key "<short-cause-slug>" --then-route <rig>/<rig>.polecat
    "$DISPOSE" "$SUBJECT" --disposition blocked --reaction-bead <R> --by proactive --reason "<what it waits on and why>" --takeaway "<headline>" --waiting-on <blocker-id> --then-assign gc-toolkit.mechanik
