@@ -1152,9 +1152,13 @@ until_confirm() { # id successor
 # claimed and never closed, so it is given back, and the listing then reads it
 # as it reads any bead. A bead closed under UNTIL_FENCE is one a pass closed and
 # never checked, so it is checked now, against the successor pointer bead-rehome
-# stamped. Returns non-zero when the listing fails, or a give-back or a check.
+# stamped. Finishing one takes a disposal's allowance of the pass budget, and a
+# bead the budget leaves is named, counted and declared as left for the next
+# pass, as a disposal the budget leaves is. Returns non-zero when the listing
+# fails, or a give-back or a check.
 until_recover() {
-    local listing rows id st succ rc=0 released=0 confirmed=0 reopened=0 failed=0 total
+    local listing rows id st succ rc=0 released=0 confirmed=0 reopened=0 left=0 failed=0 total
+    local -a left_ids=()
     if ! listing="$(bd_ list --assignee="$UNTIL_FENCE" --status=in_progress,closed --brief --json --limit 0 </dev/null 2>/dev/null)" || [ -z "$listing" ]; then
         echo "$PROG: reconcile: could not list the beads an earlier pass left under $UNTIL_FENCE — finishing none of them this pass" >&2
         return 1
@@ -1180,8 +1184,8 @@ until_recover() {
             continue
         fi
         if ! dispose_fits_budget; then
-            echo "$PROG: pass budget spent — $id, which an earlier pass left under $UNTIL_FENCE, waits for the next pass"
-            continue
+            [ "$left" -gt 0 ] || echo "$PROG: pass budget spent ($(( $(now_epoch) - PASS_T0 ))s of ${PASS_BUDGET_SECS}s gone, finishing a bead needs ${DISPOSE_ALLOWANCE_SECS}s) — finishing nothing more an earlier pass left under $UNTIL_FENCE this pass"
+            left=$((left + 1)); left_ids+=("$id"); continue
         fi
         if [ "$st" != closed ]; then
             if fence_release "$id"; then
@@ -1210,7 +1214,12 @@ until_recover() {
             *) failed=$((failed + 1)) ;;
         esac
     done 3<<< "$rows"
-    [ "$DRY_RUN" = 1 ] || echo "$PROG: until-resolved: $total bead(s) an earlier pass left under $UNTIL_FENCE: $released given back, $confirmed closes stand, $reopened reopened, $failed failed"
+    if [ "$left" -gt 0 ]; then
+        echo "$PROG: left $left bead(s) an earlier pass left under $UNTIL_FENCE for the next pass to finish: ${left_ids[*]}"
+        LEFT_REASON="${LEFT_REASON:+$LEFT_REASON, }$left bead(s) an earlier pass left under $UNTIL_FENCE, for the next pass to finish"
+        for id in "${left_ids[@]}"; do LEFT_SCOPES+=("$id" "claim left for the next pass to finish"); done
+    fi
+    [ "$DRY_RUN" = 1 ] || echo "$PROG: until-resolved: $total bead(s) an earlier pass left under $UNTIL_FENCE: $released given back, $confirmed closes stand, $reopened reopened, $left left for the next pass, $failed failed"
     [ "$failed" = 0 ]
 }
 
@@ -1240,6 +1249,12 @@ reconcile_until() {
     # What an earlier pass left under its claim is finished first.
     local recover_rc=0
     until_recover || recover_rc=1
+    # Finishing it spends the same budget, and once no disposal fits, the scan too
+    # would only spend what the timeout has left.
+    if [ "$DRY_RUN" != 1 ] && ! dispose_fits_budget; then
+        echo "$PROG: until-resolved: pass budget spent ($(( $(now_epoch) - PASS_T0 ))s of ${PASS_BUDGET_SECS}s gone, a disposal needs ${DISPOSE_ALLOWANCE_SECS}s) after the beads an earlier pass left under $UNTIL_FENCE — every until-gated bead waits for the next pass"
+        return "$recover_rc"
+    fi
     local rows scan_rc=0
     mktemp_tracked || { echo "$PROG: reconcile: mktemp failed" >&2; return 1; }; rows="$REPLY"
     until_scan bd_ > "$rows" || scan_rc=$?

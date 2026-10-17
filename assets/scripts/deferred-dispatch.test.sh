@@ -76,8 +76,9 @@
 #     while the pass holds the bead, through this suite's disposer and through
 #     the real bead-rehome.sh, reopens it and withdraws its pointer, and so does
 #     an `until` edge removed then. A held or failed close gives the bead back.
-#     A claim, or an unchecked close, a pass left is finished by the next pass,
-#     and a give-back or a check that fails is left for it;
+#     A claim, or an unchecked close, a pass left is finished by the next pass.
+#     A give-back or a check that fails is left for the pass after, and so is
+#     one the budget leaves, which the pass declares as it does a disposal;
 #   * the CONVOY-LEAK guards — gc sling mints an input convoy per call, so an arm
 #     that never finalizes must not be re-slung forever: an arm whose work
 #     another path already delivered (a merge_result stamp) RETIRES without
@@ -159,11 +160,15 @@ done
 # STUB_RACE_AT and STUB_RACE_JQ land a write another actor makes: the first
 # call whose arguments contain STUB_RACE_AT applies the jq program STUB_RACE_JQ
 # to the store before it is answered. It fires once; STUB_RACE_FIRED records it.
+# With STUB_CLOCK set, that call also advances the test's clock STUB_RACE_SECS.
 if [ -n "${STUB_RACE_AT:-}" ] && [ ! -e "${STUB_RACE_FIRED:?}" ]; then
     case " $* " in
         *"$STUB_RACE_AT"*)
             : > "$STUB_RACE_FIRED"
-            jq -c "${STUB_RACE_JQ:?}" "$STUB_STORE" > "$STUB_STORE.race" && mv "$STUB_STORE.race" "$STUB_STORE" ;;
+            jq -c "${STUB_RACE_JQ:?}" "$STUB_STORE" > "$STUB_STORE.race" && mv "$STUB_STORE.race" "$STUB_STORE"
+            if [ -n "${STUB_CLOCK:-}" ] && [ -n "${STUB_RACE_SECS:-}" ]; then
+                printf '%s\n' "$(( $(cat "$STUB_CLOCK") + STUB_RACE_SECS ))" > "$STUB_CLOCK"
+            fi ;;
     esac
 fi
 # STUB_FRESH_STORE, when set, is the store as it stands once the until half
@@ -1977,6 +1982,37 @@ eq "$(rehomes)" "0" "and disposes nothing"
 has "$out" "before the until half began" "it says the budget was spent before the until half"
 eq "$(grep -cx 'list --brief --json --limit 0' "$STUB_BD_LOG")" "0" "and makes no store listing it could not act on"
 unset STUB_BD_LOG
+
+echo "# until: a budget spent on what an earlier pass left is declared, and skips the scan"
+# Listing what an earlier pass left takes 80s of a 100s budget, so the 30s that
+# finishing each bead needs is gone before the first one.
+store '[
+ {"id":"g-1","issue_type":"task","status":"in_progress","assignee":"deferred-dispatch","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"g-2","issue_type":"task","status":"closed","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1"},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+printf '1000\n' > "$CLOCK"
+: > "$TMP/outcome-recover.json"
+export STUB_BD_LOG="$TMP/bd-recover-budget.log"; : > "$STUB_BD_LOG"
+out="$(STUB_CLOCK="$CLOCK" STUB_RACE_AT='--assignee=deferred-dispatch' STUB_RACE_JQ='.' STUB_RACE_SECS=80 \
+    DEFERRED_DISPATCH_PASS_BUDGET_SECS=100 DEFERRED_DISPATCH_DISPOSE_ALLOWANCE_SECS=30 \
+    GC_ORDER_OUTCOME_FILE="$TMP/outcome-recover.json" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a pass its budget stops before it finishes what an earlier pass left exits 0"
+eq "$(status_of g-1)/$(assignee_of g-1)" "in_progress/deferred-dispatch" "the claim it did not reach stays for the next pass"
+eq "$(status_of g-2)/$(assignee_of g-2)" "closed/deferred-dispatch" "and so does the close it did not check"
+has "$out" "until-resolved: 2 bead(s) an earlier pass left under deferred-dispatch: 0 given back, 0 closes stand, 0 reopened, 2 left for the next pass, 0 failed" "the summary counts both as left for the next pass"
+has "$out" "left 2 bead(s) an earlier pass left under deferred-dispatch for the next pass to finish: g-1 g-2" "its output names them"
+eq "$(jq -r '.outcome' "$TMP/outcome-recover.json" 2>/dev/null)" "partial" "the pass declares itself partial"
+eq "$(jq -r '[.scopes[] | "\(.scope): \(.reason)"] | join(",")' "$TMP/outcome-recover.json" 2>/dev/null)" \
+    "g-1: claim left for the next pass to finish,g-2: claim left for the next pass to finish" "naming each bead and what was left on it"
+has "$(jq -r '.reason' "$TMP/outcome-recover.json" 2>/dev/null)" "2 bead(s) an earlier pass left under deferred-dispatch, for the next pass to finish" "and giving their count as its reason"
+has "$out" "after the beads an earlier pass left under deferred-dispatch — every until-gated bead waits for the next pass" "the pass says the budget ran out before its scan"
+eq "$(grep -cx 'list --brief --json --limit 0' "$STUB_BD_LOG")" "0" "and makes no store listing it could not act on"
+unset STUB_BD_LOG
+printf '1000\n' > "$CLOCK"
+out="$(STUB_CLOCK="$CLOCK" DEFERRED_DISPATCH_PASS_BUDGET_SECS=100 DEFERRED_DISPATCH_DISPOSE_ALLOWANCE_SECS=30 "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the next pass is clean"
+has "$out" "gave back g-1" "it gives back the claim"
+has "$out" "the close an earlier pass made under deferred-dispatch stands" "and checks the close"
 
 echo "# until: a zero budget is unpaced, and a dry run spends no budget"
 store "$THREE_OWED"

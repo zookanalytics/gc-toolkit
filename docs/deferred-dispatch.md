@@ -495,10 +495,11 @@ claim leaves, so none lands on a bead somebody else has taken since.
 
 A pass that stops while it holds a claim leaves the bead in progress, or
 closed, under `deferred-dispatch`. The next pass finishes both before it lists
-the store: it gives back a bead it finds in progress, so its listing reads that
-bead as it reads any other, and it checks a bead it finds closed as step 4
-does. Until a pass finishes it, a bead in progress under the claim reads to the
-doctor check below as the bead the pass claimed.
+the store, as far as its budget (below) allows: it gives back a bead it finds
+in progress, so its listing reads that bead as it reads any other, and it
+checks a bead it finds closed as step 4 does. Until a pass finishes it, a bead
+in progress under the claim reads to the doctor check below as the bead the
+pass claimed.
 
 When the close is held, commonly by an open visit tracking the bead,
 `bead-rehome` records the successor pointer and refuses the close rather than
@@ -524,13 +525,16 @@ order's timeout. The timeout kills a pass mid-loop,
 before it prints its summary. So the until half starts a disposal only while
 one disposal's allowance (`DEFERRED_DISPATCH_DISPOSE_ALLOWANCE_SECS`, 30s) is
 left in the same pass budget (`DEFERRED_DISPATCH_PASS_BUDGET_SECS`, 420s from the
-start of the pass, 0 for unpaced). The owed beads past that point wait,
-untouched, for the next pass. The pass names them, its summary counts them as
-left for the next pass, and its `partial` declaration names each one beside the
-notices, slings and escalations the other halves left. A failure in any half
-fails the pass, which then declares nothing. The budget counts from the start of
-the pass, so the until half spends only what the dispatch half left, and with
-nothing left it does not list the store at all. The budget sits at least one
+start of the pass, 0 for unpaced). Finishing a bead an earlier pass left under
+its claim takes the same allowance. The owed beads past that point wait,
+untouched, for the next pass, and so do the beads under a claim that the pass
+did not reach. The pass names them, its summary counts them as left for the
+next pass, and its `partial` declaration names each one beside the notices,
+slings and escalations the other halves left. A failure in any half fails the
+pass, which then declares nothing. The budget counts from the start of the
+pass, so the until half spends only what the dispatch half left. With nothing
+left it does not list the store at all, and when finishing what an earlier pass
+left spends the rest, it skips its scan. The budget sits at least one
 disposal allowance below the order's timeout, so the last disposal a pass starts
 can run for twice its allowance, and `deferred-dispatch.test.sh` holds the
 budget and each allowance against the order's timeout. A dry run spends no
