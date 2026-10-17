@@ -40,9 +40,11 @@ provision_worktree() {
     git -C "$WT" submodule init 2>/dev/null || true
 
     # Runtime ignores live in git metadata (--git-path resolves the exclude file
-    # for linked-worktree layouts), never in the tracked .gitignore. A worktree
-    # whose git metadata git cannot find has no exclude file to write, and git
-    # cannot stage anything from it either.
+    # for linked-worktree layouts), never in the tracked .gitignore. git shares
+    # that file among all of a repo's worktrees, the rig checkout included, so
+    # these rules hide gc's writes there too. A worktree whose git metadata git
+    # cannot find has no exclude file to write, and git cannot stage anything
+    # from it either.
     EXCLUDE=$(git -C "$WT" rev-parse --git-path info/exclude) || return 0
     case "$EXCLUDE" in
         /*) ;;
@@ -73,6 +75,17 @@ provision_worktree() {
     append_exclude ".github/hooks/"
     append_exclude ".github/copilot-instructions.md"
     append_exclude "state.json"
+    # gc links each skill into .agents/skills/ for Codex and pi, one symlink per
+    # skill, and records them in .gc-skill-ownership.json beside them. A repo
+    # can track skills of its own there, and a skill is a directory, so every
+    # entry directly under .agents/skills/ is hidden except a directory. The
+    # negation must follow the rule it narrows.
+    append_exclude ".agents/skills/*"
+    append_exclude "!.agents/skills/*/"
+    # Session start stages the city's .gc/settings.json into every session's
+    # work dir, and bd's workspace gate sits beside .beads, outside it.
+    append_exclude ".gc/"
+    append_exclude ".beads.gate.lock"
 }
 
 append_exclude() {

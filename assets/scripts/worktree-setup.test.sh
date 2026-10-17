@@ -42,6 +42,11 @@
 #       its exclude file is left alone;
 #   (q) a worktree whose git metadata is gone still gets its redirect, and the
 #       run still exits 0.
+#   (r) gc's writes stay out of git status in the worktree and in the rig
+#       checkout that shares its exclude file: the skill links and ownership
+#       manifest under .agents/skills/, .gc/settings.json and .beads.gate.lock.
+#       A skill directory a person adds there still shows, and so do changes
+#       to a skill the repo tracks.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -315,6 +320,38 @@ case "$ADMIN" in   # git records the real path
 esac
 eq "$(rc_of "$RIG" "$P/agentQ" agentQ --sync)" "0" "(q) a worktree with no git metadata still exits 0"
 eq "$(cat "$P/agentQ/.beads/redirect" 2>/dev/null)" "$RIG/.beads" "(q) it still gets its bead redirect"
+
+# --- (r) gc's writes stay out of git status, in the worktree and in the rig
+#         checkout, which shares its exclude file. The repo tracks a skill of
+#         its own under .agents/skills/, so a skill a person adds there must
+#         still show. Its own rig, so no other case's exclude file is reused. --
+SR="$TMP/skillsrc"; git init -q -b main "$SR"
+mkdir -p "$SR/.agents/skills/tracked-skill"
+echo seed > "$SR/README.md"; echo skill > "$SR/.agents/skills/tracked-skill/SKILL.md"
+git -C "$SR" add -A; git -C "$SR" commit -qm init
+git clone -q --bare "$SR" "$TMP/skills.git"
+SKR="$TMP/skillrig"; git clone -q "$TMP/skills.git" "$SKR"
+P="$TMP/r"; mkdir -p "$P" "$TMP/linked/work" "$TMP/linked/local"; W="$P/agentR"
+eq "$(rc_of "$SKR" "$W" agentR --sync)" "0" "(r) the run succeeds"
+# gc_writes <checkout> — what gc and bd leave in a checkout: a skill link from
+# an imported pack, a bare one from an agent-local skill, the ownership
+# manifest, the staged session settings, and bd's workspace gate.
+gc_writes() {
+    ln -s "$TMP/linked/work" "$1/.agents/skills/gc-toolkit.work"
+    ln -s "$TMP/linked/local" "$1/.agents/skills/local-skill"
+    echo '{"targets":{}}' > "$1/.agents/skills/.gc-skill-ownership.json"
+    mkdir -p "$1/.gc"; echo '{}' > "$1/.gc/settings.json"
+    : > "$1/.beads.gate.lock"
+}
+gc_writes "$W"; gc_writes "$SKR"
+eq "$(git -C "$W" status --porcelain)" ""    "(r) gc's writes stay out of the worktree's git status"
+eq "$(git -C "$SKR" status --porcelain)" ""  "(r) and out of the rig checkout's, which shares the exclude file"
+mkdir -p "$W/.agents/skills/new-skill"; echo mine > "$W/.agents/skills/new-skill/SKILL.md"
+has "$(git -C "$W" status --porcelain)" "?? .agents/skills/new-skill/" "(r) a skill directory a person adds still shows"
+echo more >> "$W/.agents/skills/tracked-skill/SKILL.md"
+echo extra > "$W/.agents/skills/tracked-skill/notes.md"
+has "$(git -C "$W" status --porcelain)" " M .agents/skills/tracked-skill/SKILL.md" "(r) an edit to a tracked skill still shows"
+has "$(git -C "$W" status --porcelain)" "?? .agents/skills/tracked-skill/notes.md" "(r) and so does a new file inside it"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
