@@ -186,8 +186,9 @@ ALL_STATUSES="$LIVE_STATUSES,closed"
 # the verdict to. review_pr_url and review_pr_number are the anchor's open PR,
 # which mol-review pins its gh calls to and the correctness check reads the
 # published page through. They take keys of their own because gc-helm.sh
-# resolves a PR number to every live bead whose pr_number matches, and the PR
-# must keep resolving to its anchor alone. fix_target_pool is the pool
+# resolves a PR number to every live bead whose pr_number matches, and refuses
+# the number when more than one does, so a review carrying pr_number would
+# leave its PR ambiguous while the review is live. fix_target_pool is the pool
 # signoff.sh routes a request-changes rework to. An empty <reviewed-oid> leaves
 # the pin out, an empty <pr-url> or <pr-number> leaves out both PR keys, and an
 # empty FIX_POOL leaves out fix_target_pool.
