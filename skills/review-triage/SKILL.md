@@ -41,12 +41,18 @@ against:
 
 ```bash
 # >>> triage-index-read
-INDEX=$(mktemp "${TMPDIR:-/tmp}/gctk-triage-index.XXXXXX"); FOUND=""
+INDEX=$(mktemp "${TMPDIR:-/tmp}/gctk-triage-index.XXXXXX"); FOUND=""; INDEX_RC=0
 for c in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
-  [ -n "$c" ] || continue
-  git -C "$c" show "${REVIEWED_OID}:review-checks.toml" >"$INDEX" 2>/dev/null && { FOUND=1; break; }
+  [ -n "$c" ] && git -C "$c" cat-file -e "${REVIEWED_OID}^{commit}" 2>/dev/null || continue
+  FOUND=none; git -C "$c" show "${REVIEWED_OID}:review-checks.toml" >"$INDEX" 2>/dev/null && FOUND=index; break
 done
-[ -n "$FOUND" ] && "$(gc <binding> scripts-dir)/review-checks.sh" --file "$INDEX"
+case "$FOUND" in
+  index) "$(gc <binding> scripts-dir)/review-checks.sh" --file "$INDEX" || INDEX_RC=$? ;;
+  none)  echo "no review-checks.toml at $REVIEWED_OID: the no-index case, widen nothing" ;;
+  *)     echo "no commit '$REVIEWED_OID' in this checkout: the index went unread" >&2; INDEX_RC=1 ;;
+esac
+rm -f "$INDEX"
+[ "$INDEX_RC" = 0 ]
 # <<< triage-index-read
 ```
 
@@ -55,12 +61,14 @@ the stage transition by which it must read green. When a check applies is a
 judgment its method states, so read the method; the phase is fixed per check and
 not triage's to choose, and there is no applies-when column in the index.
 
-A commit that carries no index is the no-index case below, not a reason to reach
-for the pack's copy or the tree you happen to be in. `signoff.sh` resolves it the
-same way: it validates `--add-gates` against the reviewed commit's own index, and
-widens nothing when that commit carries none — the added checks are dropped and
-correctness carries the change. A parser that does not run is not that case:
-the index went unread, so stop and say so rather than classify with no menu.
+A commit that carries no index is the no-index case below, which the block names
+when it finds it, and not a reason to reach for the pack's copy or the tree you
+happen to be in. `signoff.sh` resolves it the same way: it validates
+`--add-gates` against the reviewed commit's own index, and widens nothing when
+that commit carries none — the added checks are dropped and correctness carries
+the change. A non-zero exit is not that case. A commit the checkout cannot read
+or a parser that does not run leaves the index unread, so stop and say so rather
+than classify with no menu.
 
 ## Deciding
 

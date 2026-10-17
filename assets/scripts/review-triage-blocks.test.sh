@@ -12,8 +12,10 @@
 #   triage-index-read  in a scratch rig repo whose reviewed commit carries an
 #                      index, with GC_PACK_DIR unset and no pack under
 #                      GC_RIG_ROOT: the pack's parser lists the rig's checks. A
-#                      commit with no index lists nothing and runs no parser,
-#                      and a scripts dir gc cannot print fails loudly instead.
+#                      commit with no index says so, exits 0 and runs no
+#                      parser. A commit the checkout cannot read and a scripts
+#                      dir gc cannot print fail loudly instead, and no read
+#                      leaves its temp file behind.
 #   triage-round-read  reads the bring-current round of the anchor $M names.
 #   triage-index-gap   files the observation with that anchor in its title,
 #                      provenance and quote.
@@ -84,6 +86,10 @@ WITH_INDEX=$(git -C "$RIG" rev-parse HEAD)
 git -C "$RIG" rm -q review-checks.toml
 git -C "$RIG" commit -q -m "no index"
 NO_INDEX=$(git -C "$RIG" rev-parse HEAD)
+# The checkout stages an index no commit carries. `git show :review-checks.toml`
+# reads it, which is what a lost OID would make of the index read.
+printf '[checks.staged]\nmethod = "m3"\npurpose = "p3"\nphase = "pre-open"\n' > "$RIG/review-checks.toml"
+git -C "$RIG" add review-checks.toml
 
 # A scripts dir holding a bring-current-audit.sh that records how it was called.
 FAKE_SCRIPTS="$TMP/scripts"; mkdir -p "$FAKE_SCRIPTS"
@@ -95,7 +101,8 @@ M_JSON='{"task_kind":"review","check_name":"triage","anchor_bead":"tk-anchor1","
 
 # run <shell> <block> <scripts dir> <reviewed oid> : the block's stdout in OUT,
 # its stderr in ERR and its status in RC, run in the rig's checkout. TMPDIR is
-# the test's own directory, so the temp file the index read leaves goes with it.
+# the test's own directory, where the index read's temp file must not outlive
+# the block.
 run() {
   : > "$STUB_LOG"
   RC=0
@@ -115,12 +122,27 @@ for sh in $SHELLS; do
     || bad "($sh) the parser is found through gc <binding> scripts-dir" "gc calls: $(tr '\n' ';' < "$STUB_LOG")"
 
   run "$sh" triage-index-read "$ROOT/assets/scripts" "$NO_INDEX"
-  eq "$OUT" "" "($sh) a commit with no index lists no checks"
+  eq "$RC" "0" "($sh) a commit with no index exits 0"
+  eq "$OUT" "no review-checks.toml at $NO_INDEX: the no-index case, widen nothing" \
+     "($sh) …naming the no-index case"
   eq "$(cat "$STUB_LOG")" "" "($sh) …and runs no parser"
+
+  # A commit the checkout does not hold, or an OID the shell lost, is an index
+  # nobody read, not a commit that carries none.
+  for unread in 0000000000000000000000000000000000000000 ""; do
+    run "$sh" triage-index-read "$ROOT/assets/scripts" "$unread"
+    [ "$RC" -ne 0 ] && ok "($sh) a reviewed oid the checkout cannot read ('$unread') fails" \
+      || bad "($sh) a reviewed oid the checkout cannot read ('$unread') fails" "rc=$RC"
+    has "$ERR" "the index went unread" "($sh) …saying the index went unread"
+    eq "$OUT" "" "($sh) …naming no no-index case"
+    eq "$(cat "$STUB_LOG")" "" "($sh) …and running no parser"
+  done
 
   run "$sh" triage-index-read "" "$WITH_INDEX"
   [ "$RC" -ne 0 ] && [ -n "$ERR" ] && ok "($sh) a scripts dir gc cannot print fails loudly, unlike a missing index" \
     || bad "($sh) a scripts dir gc cannot print fails loudly, unlike a missing index" "rc=$RC stderr='$ERR'"
+  eq "$(find "$TMP" -maxdepth 1 -name 'gctk-triage-index.*' | wc -l | tr -d ' ')" "0" \
+     "($sh) no index read leaves its temp file behind"
 
   echo "# $sh: the bring-current round read"
   : > "$AUDIT_LOG"
