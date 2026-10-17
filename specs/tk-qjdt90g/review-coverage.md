@@ -175,7 +175,7 @@ epic's notes carry each ruling as it was made.
   category and the severity are separate `findings.json` fields. The verdict
   writer carries them onto the finding outside its dedup key. That key is the
   lane plus a hash of the normalized locus and message
-  (`assets/scripts/finding.sh:216-226`), so a scenario carried inside the
+  (`assets/scripts/finding.sh:216-228`), so a scenario carried inside the
   message would change the key every round and file a twin of each re-raised
   objection.
 - **Outside feedback** is classified by the mark first, then by login. A post
@@ -196,7 +196,7 @@ epic's notes carry each ruling as it was made.
   convoy tk-gaklsnk) to reach main, because it reshapes the same files.
   gc-toolkit's own guidance and the outside-feedback capture start at once,
   because main already appends a rig's `docs/review-<check>.md`, read at the
-  reviewed commit (`assets/scripts/review-dispatch-body.sh:199-214`). The gctk
+  reviewed commit (`assets/scripts/review-dispatch-body.sh:199-215`). The gctk
   cutover lands first.
 - **#1217** (tk-gfb2hbq) is on the operator's hold until things are stable, and
   the operator will then have it update itself. This epic neither folds it in
@@ -273,13 +273,15 @@ not opt out (the `review-checks.toml` header), and
 `assets/scripts/refinery-reconcile.sh:95` sets the default check set to
 `correctness,triage`. So every docs-only or spec-only change is graded by the
 correctness method, and that grading is shaped for code. Settle the test
-evidence runs the suites the diff touches. A prose diff touches none, so the
-step yields no evidence either way, and the skill does not say what the
-Verification line records then. What to check leads its substance with
-Correctness: bugs, reachable edge cases, error handling. P1 is "wrong behavior on
-a reachable input", and on a document about work that is not built, every
-interleaving a reader imagines meets that definition. The grading has no point
-at which it runs out of findings.
+evidence counts the anchor's self-review stamp only when it names the reviewed
+commit and the rig declares a test command, and otherwise runs the suites the
+diff touches. A prose diff may touch no suite, and then the step yields no
+evidence either way, and the skill does not say what the Verification line
+records. What to check leads its substance with Correctness: bugs, reachable
+edge cases, error handling. P1 is "wrong behavior on a reachable input", and on
+a document about work that is not built, every interleaving a reader imagines
+meets that definition. The grading has no point at which it runs out of
+findings.
 
 **What the gap costs now.** When tk-wigtu9 was filed on 2026-08-26, two
 signal-loom docs-only branches, sl-bgmuy (PR#552) and sl-kg9z6.1.2 (PR#559), had
@@ -320,11 +322,15 @@ later, or a second `mol-review` mode. Read against main, only the first stands.
   grading since #1262, and the (NEUTRAL) case of
   `assets/scripts/review-method.test.sh` fails if a grade or a What to check
   dimension comes back into it.
-- **A prose home in triage** needs a way to take `correctness` off an anchor,
-  and main has none. Triage only widens `check_set`, and the triage waiver that
-  [the review-gates scope](../2026-08-review-gates/scope.md) allowed for checks
-  marked waivable was never built. Building one is the structure of the review
-  path, which the epic's boundaries leave to the review-path redesign.
+- **A prose home in triage** needs a way for triage to take `correctness` off
+  an anchor, and main has none. Triage only widens `check_set`, and the triage
+  waiver that [the review-gates scope](../2026-08-review-gates/scope.md)
+  allowed for checks marked waivable was never built. The one narrowing main
+  has is a `check_set` of `none` or `off`, which only a person sets and which
+  opts the anchor out of every review
+  (`assets/scripts/bring-current-guard.sh:56-58`). Building one for triage is
+  the structure of the review path, which the epic's boundaries leave to the
+  review-path redesign.
 
 The direction keeps the constraint of the 2026-08-24 ruling that the bead names:
 nothing selects a review mode by reading the diff in a dispatcher. There is no
@@ -396,10 +402,12 @@ armed bead carries each one. Until the units land:
   neither fixes it nor declines it on purpose.
 - **Outside feedback reaches the learning loop only by chance.** The miner drops
   ordinary review of the diff (`formulas/mol-feedback-miner.toml:170-176`), and
-  an operator's `/code-review` finding about the diff is exactly that. One
-  reaches the loop only when the worker answering it files an observation of
-  its own, as the evidence behind tk-0rhvews did. This lasts until the capture
-  unit lands, and that unit runs now.
+  an operator's `/code-review` finding is written about the diff. One reaches
+  the loop only when the miner reads a standing lesson into it anyway, or when
+  the worker answering it files an observation of its own. The evidence behind
+  tk-0rhvews came both ways: the miner filed tk-jijs5mc from an inline finding
+  the operator posted on #964, and the worker answering #1117 filed tk-zcv9gp3.
+  This lasts until the capture unit lands, and that unit runs now.
 - **A prose review ends only on the validator's ruling.** Each finding the
   method raises on prose and should not costs a validator ruling, and one ruled
   must-fix costs a rework round, until tk-wigtu9 lands.
@@ -440,7 +448,7 @@ carried as the brief recorded them.
   reviewer's prompt. For `mol-review` it prints "One agent, single pass. No
   fan-out" (`:79-81`). It names the check's skill for each declared check
   (`:153-155`), and appends the rig's `docs/review-<check>.md` read from the
-  commit under review (`:199-214`). gc-toolkit carries no
+  commit under review (`:199-215`). gc-toolkit carries no
   `docs/review-correctness.md`.
 - **The check index**, `review-checks.toml`, declares correctness, triage, demo,
   arch and pm. Its header puts correctness and triage in the forced baseline of
