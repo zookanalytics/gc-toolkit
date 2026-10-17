@@ -897,8 +897,7 @@ review.
    working tree has one. A call that names no commit answers from the pack's
    rows alone, even when the working tree has an index. `--extension` prints a
    commit's extension, and prints nothing and exits 0 at a commit that carries
-   none. A rig row with a phase outside the
-   ordered set is refused.
+   none. A rig row with a phase outside the ordered set is refused.
 7. **What signoff.sh refuses** (`signoff.test.sh`), iterating the effective
    index. It refuses `--add-gates` from every declared check but triage,
    `--visual` from every check but demo, a demo verdict without `--visual`, and
@@ -947,6 +946,53 @@ as before, so the third needs only the review step's close to keep its one
 `--convoy` call. The review formulas keep no keepalive block, because no
 formula block runs a long command any more, so `lease-heartbeat.test.sh` drops
 its two lines for them (`:190-191`).
+
+### Suites that reach the resolver
+
+Every reader now passes `--at`, the working-tree read is gone, and the pack's
+rows come from beside the resolver. Each suite that runs a reader of the index
+is re-derived against that shape. The harness these suites share clears every
+`GC_*` variable and stubs git to report no toplevel (`test-harness.sh:55`,
+`:1264`), so a resolver run under it finds no repository and reads no rig
+layer, today or after this change.
+
+- `review-outcome.test.sh` runs the resolver beside the real
+  `review-outcome.sh` and sets no `GC_REVIEW_CHECKS_INDEX`. Today that resolver
+  reads no index. Under this design it reads the pack's index from the tree
+  under test. The suite sets `GC_REVIEW_CHECKS_INDEX` so its lanes do not follow
+  that file, its `supersede-anchor` calls (`:195-242`) pass `--oid`, and a new
+  case shows the verb refuses without one.
+- `signoff.test.sh` stubs `git show <oid>:review-checks.toml` for signoff.sh's
+  own read (`:299-313`). That read moves into the resolver, where the same stub
+  serves the rig's layer, and the pack's layer is the index of the tree under
+  test, which test 7's accepted pack check reads. The suite also takes test 2
+  and the backstop's cases, for which its stub answers the paths a change
+  touches.
+- `pr-facts.test.sh` (`:109`, `:879`) and `merge.test.sh` (`:58`) copy the
+  resolver into a scratch directory, where it finds no pack index, and the
+  harness serves it no rig index. It reads no index before this change or
+  after it.
+  Each suite gains a case in which a stub resolver logs its arguments, showing
+  `lanes_green` passing the PR head and gctk merge passing the head it merges.
+- `approval-withdraw.test.sh` runs mol-validate's `validate-not-converged`
+  block and pins its `supersede-anchor` call (`:337-346`). The call now carries
+  `--oid` with the pass's `reviewed_oid`, which the block's runner sets.
+- `converse-rework.test.sh` fixes the index with `GC_REVIEW_CHECKS_INDEX`
+  (`:172`) and runs the real `review-outcome.sh`. converse-rework.sh now reads
+  the anchor's branch head for `--oid`, so the suite stubs `git ls-remote` and
+  adds the case where no head reads and the supersede fails closed.
+- `liveness-sweep.test.sh` sets `GC_REVIEW_CHECKS_INDEX` (`:21`), which the
+  sweep forwards as `--file` today (`liveness-sweep.sh:303-306`). The sweep now
+  passes `--at` each anchor's head and no `--file`, so the variable keeps fixing
+  the index through the resolver, and the suite stubs the sweep's new read of
+  each head.
+- `review-checks.test.sh` takes test 6. Its case of a commit with no index
+  (`:268-274`) asserts today's fall-through to the working tree, and asserts
+  the pack's rows instead.
+- `gate-ensure.test.sh`, `pr-open.test.sh` and `pr-stack.test.sh` already reach
+  the resolver through `--at`, under the harness or with
+  `GC_REVIEW_CHECKS_INDEX` set, so the resolver's new shape leaves them as they
+  are.
 
 ## 9. Sequencing with the review-coverage epic
 
