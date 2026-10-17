@@ -137,6 +137,9 @@ fi
 # The guard is correct per turn and cannot tell a rebase in flight from a
 # tracked file nobody has committed. Age it: the guard has been continuously
 # true at least since the OLDEST currently-dirty path was last written.
+# It reads what the hook's guard reads, the git-op markers and every dirty
+# tracked path. run.test.sh runs the shipped hook on the same fixture trees to
+# prove the two agree.
 refinery_rigs=""
 if ! command -v gc >/dev/null 2>&1; then
     notes+=("gc is not on PATH — the refinery defer-guard arm did not run")
