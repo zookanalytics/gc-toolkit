@@ -14,8 +14,9 @@
 # and asserts the id it hands the wrapper is the bead the step's own
 # `gc hook --claim` returned — never the review bead or the work bead, which
 # carry no lease for the holder to refresh. It also renders each polecat step's
-# test-command lines with a command carrying both quote kinds and runs them, so
-# the rig's test command reaches the keepalive verbatim.
+# check lines with a command carrying both quote kinds and runs them against a
+# stub gctk, so the rig's test command reaches the gate, under the keepalive,
+# verbatim.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -190,12 +191,25 @@ check_region formulas/mol-polecat-work.toml self-review-lease-keepalive tk-claim
 check_region formulas/mol-review.toml       review-lease-keepalive      tk-claimed-step
 check_region formulas/mol-review-quorum-signoff.toml quorum-lease-keepalive tk-claimed-synth
 
-# --- the rig's test command reaches the keepalive verbatim -------------------
+# --- the rig's test command reaches the gate verbatim ------------------------
 # A pour renders the rig's test command into the step text, so a quote inside
-# it must not re-split the command the step hands to hb. Each block runs from
-# its keepalive region to its closing fence, rendered the way a pour renders
-# it, against the stub wrapper. The command carries both quote kinds and a
-# pipe character, which a single-quoted rendering turns into shell syntax.
+# it must not re-split the command the step hands to gctk rig through hb. Each
+# block runs from its keepalive region to its closing fence, rendered the way a
+# pour renders it, against the stub wrapper and a stub gctk that logs its call
+# and runs --command as gctk rig does. The command carries both quote kinds and
+# a pipe character, which a single-quoted rendering turns into shell syntax.
+cat > "$TMP/gctk" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GCTK_LOG"
+cmd=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in --command) cmd="$2"; shift ;; esac
+    shift
+done
+[ -z "$cmd" ] || bash -c "$cmd" </dev/null
+EOF
+chmod +x "$TMP/gctk"
+export GCTK_LOG="$TMP/gctk.log"
 block_tail() {  # block_tail <toml> <marker> : the lines after the region, up to the closing fence
     awk -v m="$2" '
         $0 ~ ("# <<< " m "$") {f=1; next}
@@ -225,9 +239,11 @@ run_block() {  # run_block <toml-path-under-root> <marker> : status lands in BLO
     extract "$ROOT/$1" "$2" > "$TMP/region.sh"
     block_tail "$ROOT/$1" "$2" | render > "$TMP/tail.sh"
     : > "$TARGET_LOG"
+    : > "$GCTK_LOG"
     rm -f "$TMP/cmd-out"
     BLOCK_RC=0
     ( cd "$TMP" && env GC_PACK_DIR="$STUB_PACK" GC_RIG_ROOT="" GC_CITY_PATH="$TMP/no-city" \
+        GCTK_BIN="$TMP/gctk" WORK_BEAD_ID=tk-work-bead \
         CLAIMED_STEP_BEAD_ID=tk-claimed-step CLAIMED_ITER_BEAD=tk-claimed-iter \
         bash -c '. "$1"; . "$2"' _ "$TMP/region.sh" "$TMP/tail.sh" ) 2> /dev/null || BLOCK_RC=$?
 }
@@ -252,27 +268,37 @@ check_tail() {  # check_tail <toml-path-under-root> <marker>
 check_tail formulas/mol-polecat-work.toml preflight-lease-keepalive
 check_tail formulas/mol-polecat-work.toml self-review-lease-keepalive
 
+# gate_calls : each gctk call's flags with its --command value dropped, one per line.
+gate_calls() { sed -E -e 's/ --command .* --/ --command <cmd> --/' -e t -e 's/ --command .*$/ --command <cmd>/' "$GCTK_LOG"; }
+
 TC="$QUOTED"; ATC=""; run_block formulas/mol-polecat-work.toml preflight-lease-keepalive
 eq "$BLOCK_RC" "0" "preflight: a quoted test command exits 0"
-eq "$(cat "$TMP/cmd-out" 2> /dev/null || true)" "$WANT_OUT" "preflight: a quoted test command runs verbatim"
+eq "$(cat "$TMP/cmd-out" 2> /dev/null || true)" "$WANT_OUT" "preflight: a quoted test command reaches the gate verbatim"
 eq "$(cat "$TARGET_LOG")" "tk-claimed-step" "preflight: the test command runs under the keepalive"
+eq "$(gate_calls)" "rig test --scope full --command <cmd>" "preflight: the test command is the full suite, recorded at the base and published nowhere"
 
 TC=""; ATC=""; run_block formulas/mol-polecat-work.toml preflight-lease-keepalive
 eq "$BLOCK_RC" "0" "preflight: an empty test command exits 0"
 eq "$(cat "$TARGET_LOG")" "" "preflight: an empty test command runs nothing"
+eq "$(cat "$GCTK_LOG")" "" "preflight: an empty command reaches no gate"
 
 TC="false"; ATC="$QUOTED"; run_block formulas/mol-polecat-work.toml self-review-lease-keepalive
 eq "$BLOCK_RC" "0" "self-review: a quoted affected-tests command exits 0"
-eq "$(cat "$TMP/cmd-out" 2> /dev/null || true)" "$WANT_OUT" "self-review: the affected-tests command runs verbatim, in place of the full suite"
+eq "$(cat "$TMP/cmd-out" 2> /dev/null || true)" "$WANT_OUT" "self-review: the affected-tests command reaches the gate verbatim, in place of the full suite"
 eq "$(cat "$TARGET_LOG")" "tk-claimed-iter" "self-review: the affected-tests command runs under the keepalive"
+has "$(gate_calls)" "rig test --scope affected --command <cmd> --publish-bead tk-work-bead" "self-review: the affected run is declared as such and published to the work bead"
+has "$(gate_calls)" "rig lint --nothing-declared --publish-bead tk-work-bead" "self-review: a check the rig declares nothing for records a pass that ran nothing"
+has "$(gate_calls)" "rig typecheck --nothing-declared --publish-bead tk-work-bead" "self-review: …typecheck too, so the exit condition finds a record for each"
 
 TC="$QUOTED"; ATC=""; run_block formulas/mol-polecat-work.toml self-review-lease-keepalive
 eq "$BLOCK_RC" "0" "self-review: a quoted test command exits 0"
-eq "$(cat "$TMP/cmd-out" 2> /dev/null || true)" "$WANT_OUT" "self-review: with no affected-tests command, the test command runs verbatim"
+eq "$(cat "$TMP/cmd-out" 2> /dev/null || true)" "$WANT_OUT" "self-review: with no affected-tests command, the test command reaches the gate verbatim"
+has "$(gate_calls)" "rig test --scope full --command <cmd> --publish-bead tk-work-bead" "self-review: …declared as the full suite"
 
 TC=""; ATC=""; run_block formulas/mol-polecat-work.toml self-review-lease-keepalive
 eq "$BLOCK_RC" "0" "self-review: no test command exits 0"
-eq "$(cat "$TARGET_LOG")" "" "self-review: no test command runs nothing"
+eq "$(cat "$TARGET_LOG")" "" "self-review: no test command runs nothing under the keepalive"
+has "$(gate_calls)" "rig test --nothing-declared --publish-bead tk-work-bead" "self-review: no test command records a test pass that ran nothing"
 
 echo "----"
 echo "lease-heartbeat.test.sh: $PASS passed, $FAIL failed"
