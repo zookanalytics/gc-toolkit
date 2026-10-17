@@ -1,6 +1,6 @@
 ---
 name: The review path as one lifecycle formula and one skill per check
-description: The design for tk-zif1d8u, the design child of convoy tk-gaklsnk under initiative tk-febol6c. A review bead becomes data. gate-ensure.sh writes the review's values once, at dispatch, on the bead's metadata and as the formula vars its pour fills into the step text, so the reviewer reads its commit, its base and its check's skill by name and reads the change with plain git. A check's method is the skill named from the check, and a check with no skill is a paragraph of the formula. The specialist stance is one skill. Every rig gets every check the pack ships, and every reader takes a rig's review guidance at the commit it judges. It settles the values a review is told, the frame contract, the review bead's data, method loading, the skill shape, where a rig's guidance is read, rig content and pack content, the tests, the sequencing with the review-coverage epic, and the implementation breakdown. Read it to approve the design at its checkpoint or to build one of its units.
+description: The design for tk-zif1d8u, the design child of convoy tk-gaklsnk under initiative tk-febol6c. A review bead becomes data. gate-ensure.sh writes the review's values once, at dispatch, on the bead's metadata and as the formula vars its pour fills into the step text, so the reviewer reads its commit, its base and its check's skill by name and reads the change with plain git. A check's method is the skill named from the check, and a check with no skill is a paragraph of the formula. The specialist stance is one skill. Every rig gets every check the pack ships, every reader takes a rig's review guidance at the commit it judges, and a change that edits that guidance is named to its approver on the correctness verdict. It settles the values a review is told, the frame contract, the review bead's data, method loading, the skill shape, where a rig's guidance is read and the backstop for a change to it, the tests, the sequencing with the review-coverage epic, and the implementation breakdown. Read it to approve the design at its checkpoint or to build one of its units.
 ---
 
 # The review path as one lifecycle formula and one skill per check
@@ -65,10 +65,12 @@ without saying where they come from. Separately, a rig that keeps no
    the commit it judges: a review its reviewed commit, and a gating reader the
    anchor's head, as gate-ensure and pr-open do today. A branch's own edit to
    its guidance governs that branch's review, so what a person reads in the
-   branch is what applies to it. Nothing is fetched to keep a copy current.
-   Cost: a process fix merged on a rig's default branch reaches an open PR when
-   that PR next merges its base in, and a PR that never does is reviewed under
-   the rules it was written against. That lag is the cost this design chooses,
+   branch is what applies to it, and signoff.sh holds the correctness approve
+   on such a branch until it names the edit to the person who approves the
+   merge (section 6). Nothing is fetched to keep a copy current. Cost: a
+   process fix merged on a rig's default branch reaches an open PR when that
+   PR next merges its base in, and a PR that never does is reviewed under the
+   rules it was written against. That lag is the cost this design chooses,
    not an oversight: closing it means reading the default branch live, which
    the operator ruled out (comment 6237592575). This reverses part 4 of the
    initiative's Target and its fifth Done-when line, which had every reader take
@@ -88,9 +90,10 @@ without saying where they come from. Separately, a rig that keeps no
    they wait for this convoy's build. The epic's contract sitting rules on this
    (section 9).
 8. **The build is two beads onto this integration branch, in order.** First the
-   layered index, which every reader takes at the commit it judges. Then the
-   values, the formulas and the skills. Cost: one more PR to approve on the
-   integration branch, for two diffs that are each reviewable in one sitting.
+   layered index, which every reader takes at the commit it judges, with the
+   backstop for a change to the guidance. Then the values, the formulas and the
+   skills. Cost: one more PR to approve on the integration branch, for two
+   diffs that are each reviewable in one sitting.
    The single build the card intended is the alternative, at the cost of one PR
    across about forty files.
 
@@ -769,32 +772,55 @@ untrue are rewritten:
   its rewrite in sprintshow's store. The bead points that intent at a
   `docs/review-triage.md` that tells triage so (section 5).
 
-## 7. Rig content and pack content
+### A change to its own guidance is named to the approver
 
-Everything a review reads from the rig is read at the reviewed commit. That is
-the diff, every document a check holds the change to, and the rig's review
-guidance. Arch reads `docs/architecture.md` and `docs/architecture/`, pm reads
-`docs/product-goals.md`, and demo reads the visuals `demo-repo-artifact.sh`
-lists. A change may edit any of them, and the check judges it against the
-version it carries. Arch's question, whether an architecture change is
-reflected in the docs in the same PR, depends on that. A rig's
-`docs/review-arch.md` that says its architecture lives in `ARCHITECTURE.md`
-points to a file at the same commit.
+Read at the reviewed commit, a branch's edit to `review-checks.toml` or a
+`docs/review-<check>.md` governs that branch's own review. The backstop makes
+the review say so to the person who approves the merge.
 
-The pack's content is the exception. The methods and the stance load from the
-installed pack's catalog, and the correctness skill's work-quality fragments
-come with it through its `references/` links. In gc-toolkit, where pack and rig
-share one repository, a branch that edits a method is reviewed under the
-installed method, not under its own edit. Its edit to the index or to a
-`docs/review-<check>.md` governs its own review, as in any rig.
+signoff.sh refuses a correctness approve that passes no `--needs-you` when the
+change touches `review-checks.toml` or a `docs/review-*.md`. It lists the paths
+the change touches, from where the branch left `review_base` to
+`reviewed_oid`, names the guidance files among them in the refusal, and writes
+nothing. Both review formulas already have the reviewer re-run a call
+signoff.sh refuses for a missing flag (`mol-review.toml:353-355`,
+`mol-review-quorum-signoff.toml:301-303`). So the reviewer runs it again with
+`--needs-you` saying what the edit changes about the review, and the verdict's
+opening line carries that sentence (`signoff.sh:550`).
 
-An extension is named for its check, and a review reads one only for its own
-check. gc-toolkit's `docs/review-workspace.md` shares the prefix, and it is
-never read as an extension, because no index declares a check named
-`workspace`.
+- **What it adds.** It holds no merge. Every merge already waits for an
+  approving review from an account other than the city's
+  (`review-checks.toml:18-19`), and `--needs-you` only names a decision on the
+  verdict's opening line (`signoff.sh:98-103`). What the backstop adds is that
+  the approver is told the change edits its own review guidance and that its
+  review ran under that edit.
+- **Why signoff.sh.** The ruling named two places for the rule: the
+  correctness skill, or a path check in signoff.sh. A rule in the skill is an
+  instruction the reviewer weighs beside the rig's guidance for the check, and
+  that guidance is the file the branch may have edited. signoff.sh is pack code
+  the branch under review does not supply, so it refuses whatever the guidance
+  says, and `signoff.test.sh` holds it.
+- **Why correctness.** It is in the default check_set (section 5), so every
+  anchor that does not opt out of review runs it. It takes no round ruling, so
+  the `--needs-you` it must pass never meets signoff.sh's refusal of one beside
+  `--dismiss-approval` (`signoff.sh:380-382`). Only its approve is held,
+  because the approve is what readies the merge. A request-changes verdict
+  sends the change back, and the approve that follows the rework carries the
+  sentence.
+- **What it leaves out.** A method needs no backstop: the methods load from the
+  installed pack (section 3), so a branch that edits a skill is reviewed under
+  the installed one. The pattern `docs/review-*.md` also matches gc-toolkit's
+  `docs/review-workspace.md`, which no index reads as guidance, so a change to
+  that file costs one needless sentence on its correctness verdict.
+- **Cost.** signoff.sh reads a change's paths, which it does not do today. The
+  operator's stance is to let a branch strengthen its own review and keep a
+  backstop for when that goes wrong, rather than block the change's own path to
+  improving the process (comment 6237592575).
 
-The specialist stance's instruction to read the reference docs a check
-stewards at the reviewed commit is this rule, and it stays.
+## 7. Process versus subject
+
+A change may edit its own review guidance, and that edit governs its own
+review.
 
 ## 8. Tests where the pieces meet
 
@@ -853,10 +879,15 @@ stewards at the reviewed commit is this rule, and it stays.
    `--visual` from every check but demo, a demo verdict without `--visual`, and
    an add of a check the effective index at the reviewed commit does not
    declare. An add of a pack check that the reviewed commit's own index leaves
-   out is now accepted.
+   out is now accepted. It refuses a correctness approve with no `--needs-you`
+   when the change touches `review-checks.toml` or a `docs/review-*.md`, and
+   the refusal names the files. The same approve with `--needs-you` records, as
+   do a change that touches neither and a correctness request-changes.
 8. **One reader, one list** (new, structural). No script, formula or skill
    outside `review-checks.sh` reads `review-checks.toml` or a
-   `docs/review-<check>.md`, by path or at a commit. No script or formula
+   `docs/review-<check>.md`, by path or at a commit. signoff.sh's backstop
+   names both only to match the paths a change touches, and reads neither, so
+   the test looks for reads, not names. No script or formula
    carries a list of two or more of the pack's checks, as a `case` alternation
    or a comma list, except the four configuration sites of section 5. The test
    takes the names from the pack's index.
@@ -969,7 +1000,9 @@ when unit A lands.
   which mol-validate and converse-rework.sh pass, and gctk merge's
   `firstNotgreenLane` takes the head it merges, a Go change.
 - signoff.sh validates `--add-gates` against the effective index at the
-  reviewed commit. Its scratch-file read and its no-index arm go.
+  reviewed commit. Its scratch-file read and its no-index arm go. It refuses a
+  correctness approve with no `--needs-you` on a change that touches the
+  review guidance (section 6).
 - The triage skill reads its menu with `review-checks.sh --show --at` through
   `scripts-dir`, and its no-index fallback goes.
 - `review-checks.toml` loses its `method` keys. Its header states the layered
