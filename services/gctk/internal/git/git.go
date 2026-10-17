@@ -119,9 +119,11 @@ func (c *Checkout) Changes() (moved, untracked string, err error) {
 
 // PutBack returns the worktree to the commit Open read: every tracked file as
 // HEAD holds it, staged or not, and no untracked file or nested repository
-// that git does not ignore. Ignored files stay. A HEAD at another commit is not
-// moved back, and PutBack then changes nothing. It returns what Dirty lists
-// afterwards, which changes inside a submodule can leave.
+// that git does not ignore. Ignored files stay, other than one inside a nested
+// repository it removes or in the way of a tracked file that goes back. A
+// submodule stays as it is, whatever submodule.recurse says. A HEAD at another
+// commit is not moved back, and PutBack then changes nothing. It returns what
+// Dirty lists afterwards, which changes inside a submodule can leave.
 func (c *Checkout) PutBack() (string, error) {
 	head, err := Output(c.Top, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil {
@@ -130,7 +132,8 @@ func (c *Checkout) PutBack() (string, error) {
 	if head = strings.TrimSpace(head); head != c.Commit {
 		return "", fmt.Errorf("HEAD moved from %s to %s", c.Commit, head)
 	}
-	if _, err := Output(c.Top, "reset", "--hard", "--quiet", "HEAD"); err != nil {
+	// submodule.recurse would also reset a submodule's files and HEAD.
+	if _, err := Output(c.Top, "reset", "--hard", "--quiet", "--no-recurse-submodules", "HEAD"); err != nil {
 		return "", err
 	}
 	// The second -f also removes an untracked nested repository.
