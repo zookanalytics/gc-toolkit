@@ -51,6 +51,13 @@ record there does. A setup or build failure red on the base too is marked like
 any other check (below), so the loop does not exhaust on a failure the diff
 did not cause, which main's stamp let an agent step past.
 
+A `--check` that exits 4 read nothing about the code: the record store was
+unreadable, or gctk's status counts a change that the plain status of the
+condition's clean-tree step does not, such as an untracked file under
+`status.showUntrackedFiles=no`. So the condition fails with gctk's own reason
+rather than naming the check as red, and that reason is what the exhaustion
+handback carries.
+
 ## setup and build put back what they leave
 
 The recorded checks refuse a checkout HEAD does not hold, and setup and build

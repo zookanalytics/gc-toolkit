@@ -356,16 +356,22 @@ judged() {
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
 [ -x "$GCTK" ] || fail "no gctk binary at $GCTK to read the recorded checks; the city's gctk-build order publishes it"
+RIG_ERR=$(mktemp "${TMPDIR:-/tmp}/self-review-check.XXXXXX") || fail "could not make a file to read gctk rig's lines into"
+trap 'rm -f "$RIG_ERR"' EXIT
 for CHECK in test lint typecheck; do
-	# rig's own line goes to stderr, where it says what is recorded, and the
-	# record it found is the one JSON line on stdout.
-	REC=$(cd "$WORKTREE" && "$GCTK" rig "$CHECK" --check)
+	# rig's own lines go to stderr, where they say what is recorded, and the
+	# record it found is the one JSON line on stdout. Exit 4 is a read gctk
+	# could not make, which says nothing about the code, so the verdict quotes
+	# gctk's reason: an unreadable store, or a change its status counts and
+	# step 4's does not.
+	REC=$(cd "$WORKTREE" && "$GCTK" rig "$CHECK" --check 2>"$RIG_ERR")
 	RC=$?
+	cat "$RIG_ERR" >&2
 	case "$RC" in
 	0) ;;
 	1) judged "$CHECK" "$REC" ;;
 	3) UNRECORDED="$UNRECORDED $CHECK" ;;
-	4) FAILED="$FAILED $CHECK" ;;
+	4) fail "gctk rig $CHECK --check read nothing at $HEAD_SHA: $(head -n 4 "$RIG_ERR" | paste -sd ' ' -)" ;;
 	*) fail "gctk rig $CHECK --check exited $RC in $WORKTREE" ;;
 	esac
 done

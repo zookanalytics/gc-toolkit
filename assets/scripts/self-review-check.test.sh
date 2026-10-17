@@ -439,6 +439,18 @@ run_case "FAIL when the worktree is dirty" 1
 assert_out "names the dirty-tree reason" "worktree is dirty"
 rm -f "$WT/untracked"
 
+# --- 4b. a read gctk cannot make ---------------------------------------------
+# Config hides the untracked file from step 4's status but not from gctk's, so
+# --check reads nothing, and the verdict gives gctk's reason, not a red check.
+reset_env; write_state; green
+git -C "$WT" config status.showUntrackedFiles no
+echo dirt > "$WT/untracked"
+run_case "FAIL when gctk rig --check reads nothing at HEAD" 1
+assert_out "gives gctk's reason" "gctk rig test --check read nothing at $HEAD_SHA: gctk rig test: machine failure, nothing recorded: the checkout has changes HEAD does not hold"
+assert_out "…naming the file" "?? untracked"
+grep -qF "not green" "$TMP/out" && bad "it does not call the code red" || ok "it does not call the code red"
+rm -f "$WT/untracked"; git -C "$WT" config --unset status.showUntrackedFiles
+
 # --- 5. fail-closed on an absent worktree ------------------------------------
 reset_env; MD_WORK_DIR="$TMP/does-not-exist"; write_state
 run_case "FAIL (fail-closed) when recorded work_dir does not exist" 1
