@@ -320,6 +320,9 @@ const MARKDOWN_CSS = `
 const DRAWN_FROM_MARKUP = new Set([
   'markdown-accessiblity-table', // GitHub's spelling; it wraps a <table>
   'themed-picture', // it wraps a <picture>
+  // It wraps an emoji. Its script changes the text only for a tag carrying a
+  // fallback-src or a tone, and GitHub's markdown API writes neither.
+  'g-emoji',
 ]);
 
 // A start tag: GitHub's renderer escapes every < in text and in attribute

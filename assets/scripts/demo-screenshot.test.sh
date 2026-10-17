@@ -473,8 +473,9 @@ HTML
 E = mc^2
 $$</math-renderer></p>
 HTML
-  # What draws from its own markup: a table and a picture in GitHub's wrapper
-  # elements, an issue link, and code that names the markers above as text.
+  # What draws from its own markup: a table, a picture and an emoji in GitHub's
+  # wrapper elements, an issue link, and code that names the markers above as
+  # text.
   cat >"$TMPD/drawn.html" <<'HTML'
 <markdown-accessiblity-table><table role="table">
 <thead>
@@ -492,6 +493,7 @@ HTML
 </table></markdown-accessiblity-table>
 <p dir="auto"><a class="issue-link js-issue-link" data-error-text="Failed to load title" data-id="5862710674" data-permission-text="Title is private" data-url="https://github.com/zookanalytics/gc-toolkit/issues/1266" data-hovercard-type="pull_request" data-hovercard-url="/zookanalytics/gc-toolkit/pull/1266/hovercard" href="https://github.com/zookanalytics/gc-toolkit/pull/1266">#1266</a></p>
 <p dir="auto"><themed-picture data-catalyst-inline="true"><picture><source media="(prefers-color-scheme: dark)" srcset="https://camo.githubusercontent.com/593b9d749a3d6d38d285dc0a0c1e8dab748afc1d424e03cd0064954796371962/68747470733a2f2f6578616d706c652e636f6d2f642e706e67" data-canonical-src="https://example.com/d.png"><img alt="pic" src="https://camo.githubusercontent.com/7b2d815f6cdd1b13c10bec8b2b9e1bde64ecab1aae71164f8b393dea9ddfb08d/68747470733a2f2f6578616d706c652e636f6d2f6c2e706e67" data-canonical-src="https://example.com/l.png"></picture></themed-picture></p>
+<p dir="auto">Unicode 👍 ✅ <g-emoji class="g-emoji" alias="warning">⚠️</g-emoji> here.</p>
 <p dir="auto"><code class="notranslate">&lt;math-renderer&gt;</code> and <code class="notranslate">js-render-needs-enrichment</code> as code.</p>
 <div class="highlight highlight-text-html-basic" dir="auto"><pre class="notranslate"><span class="pl-kos">&lt;</span><span class="pl-ent">section</span> <span class="pl-c1">class</span>="<span class="pl-s">js-render-needs-enrichment</span>"<span class="pl-kos">&gt;</span><span class="pl-kos">&lt;</span><span class="pl-ent">math-renderer</span><span class="pl-kos">&gt;</span>$x$<span class="pl-kos">&lt;/</span><span class="pl-ent">math-renderer</span><span class="pl-kos">&gt;</span><span class="pl-kos">&lt;/</span><span class="pl-ent">section</span><span class="pl-kos">&gt;</span></pre></div>
 HTML
@@ -505,7 +507,7 @@ HTML
   r=$(js "m.unfinishedBlocks('<p><diagram-viewer data-src=\"x\">a</diagram-viewer></p>')")
   eq "$r" '["<diagram-viewer>"]' "a custom element not known to draw from its own markup is one too"
   r=$(js "m.unfinishedBlocks(read('$TMPD/drawn.html', 'utf8'))")
-  eq "$r" '[]' "GitHub's table and picture wrappers, an issue link, and code naming the markers are not"
+  eq "$r" '[]' "GitHub's table, picture and emoji wrappers, an issue link, and code naming the markers are not"
   r=$(js "(() => { try { m.commentDocument({ fragment: read('$TMPD/mermaid.html', 'utf8') }); return 'drawn'; } catch (e) { return e.message; } })()")
   has "github.com finishes part of this comment with its page script, which this page does not carry: mermaid (1)." "$r" "a comment holding a mermaid block is not drawn, and the refusal names the block"
   r=$(js "(() => { try { m.commentDocument({ fragment: read('$TMPD/math.html', 'utf8') + read('$TMPD/mermaid.html', 'utf8'), expand: true }); return 'drawn'; } catch (e) { return e.message; } })()")
@@ -514,6 +516,7 @@ HTML
   has "mermaid (1)" "$r" "a block in a collapsed <details> is refused too, since --expand would show it"
   r=$(js "m.commentDocument({ fragment: read('$TMPD/drawn.html', 'utf8') })")
   has '<div class="markdown-body"><markdown-accessiblity-table><table role="table">' "$r" "a comment with no such block is drawn as GitHub returned it"
+  has '<g-emoji class="g-emoji" alias="warning">' "$r" "an emoji in GitHub's wrapper is drawn as GitHub returned it"
 
   # Run as a script, the renderer writes the page and nothing else.
   printf '\033[31mred\033[0m\n' >"$TMPD/real.txt"
