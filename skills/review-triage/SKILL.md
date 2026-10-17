@@ -17,8 +17,8 @@ none.
    declares the checks you may add. Read it first; it is the one place the
    available checks are declared.
 2. **The review bead** — `check_name`, `anchor_bead`, `review_branch` /
-   `review_base` or `pr_number`, and the dispatch-pinned `reviewed_oid`. The
-   anchor states what the change was for.
+   `review_base`, `review_pr_number` once the PR is open, and the
+   dispatch-pinned `reviewed_oid`. The anchor states what the change was for.
 3. **The diff, at the pinned commit** — `git diff --stat` first, then a skim of
    the files the stat names. A skim is the method here; reading every hunk is
    the specialist reviewer's job, not yours.
