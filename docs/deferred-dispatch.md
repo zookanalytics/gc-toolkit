@@ -198,8 +198,7 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
   `gc.dispatch_when_ready_slung` marker in its unproven `slinging@` state,
   running the recorded sling, promoting the marker to `slung@` on success,
   then clearing the record;
-- **retires** the record on an armed bead that has closed, unless it closed
-  under the resolved-by consumer's claim, or whose sling
+- **retires** the record on an armed bead that has closed, or whose sling
   reconcile has proven — a `slung@` (or pre-two-state bare-timestamp)
   `gc.dispatch_when_ready_slung` marker surviving into a later pass, from a
   pass that died before disarming — so recovery reads one marker reconcile
@@ -216,7 +215,8 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
   the pass has spent its budget, or when the bead is in progress or closed
   under the resolved-by consumer's claim, a disposal no pass has finished;
 - **names as STRANDED**, every pass and on stderr, an armed bead sitting
-  at a non-`open` live status. The record is kept, because the status may
+  at a non-`open` live status, unless it is in progress under the
+  resolved-by consumer's claim. The record is kept, because the status may
   yet be cleared, but it is counted apart from `held` and reported rather
   than left in a silent count. `list` marks the same beads
   `STRANDED — status=<s> is never --ready`. A stranded bead and a held
