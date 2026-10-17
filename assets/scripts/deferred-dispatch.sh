@@ -29,7 +29,7 @@
 # PR or work slung to a pool, is left open and reported, never closed, and a
 # bead its own open `blocks` blocker still holds waits for that blocker. What
 # is owed is read and decided by until-resolved.sh, the same file the doctor
-# mirror reads. The two halves enumerate independently, and the until half
+# mirror reads. Each half of the pass enumerates on its own, and the until half
 # starts a disposal only while the pass budget has room for one.
 #
 # Work assigned to a named agent owes a notice, not a sling (`notify`). A named
@@ -189,8 +189,8 @@ UNTIL_KIND="folded"
 # re-read: until-resolved.sh, which reads live work from live-work.sh. The
 # doctor mirror sources the same file, so the two agree on what is owed and what
 # is a pure wait. Nothing else in this script reads it, so when it cannot be
-# sourced the consumer disposes nothing and fails the pass, while arm, disarm,
-# list and the dispatch half still run.
+# sourced the consumer disposes nothing and fails the pass, while arm, notify,
+# disarm, list and the other halves still run.
 # shellcheck source=until-resolved.sh
 . "$SCRIPTS_DIR/until-resolved.sh" 2>/dev/null || UNTIL_RESOLVED_JQ=""
 
@@ -1462,8 +1462,8 @@ cmd_reconcile() {
         esac
     fi
     # Each half enumerates on its own, so a half that cannot read its set, or
-    # stops short of it, still lets the other run. A failure in either fails the
-    # pass.
+    # stops short of it, still lets the others run. A failure in any of them
+    # fails the pass.
     # LEFT_REASON and LEFT_SCOPES gather what the halves leave for the next pass:
     # the reason's clauses, and the bead and what was left on it, in the pairs
     # declare_outcome takes.
@@ -1475,15 +1475,15 @@ cmd_reconcile() {
     notice_left="${#NOTICE_LEFT_IDS[@]}"
     if [ "$notice_left" -gt 0 ]; then
         echo "$PROG: left $notice_left ready notice(s) armed for the next pass: ${NOTICE_LEFT_IDS[*]}"
-        LEFT_REASON="$notice_left ready notice(s) left armed for the next pass"
+        LEFT_REASON="${LEFT_REASON:+$LEFT_REASON, }$notice_left ready notice(s) left armed for the next pass"
         for id in "${NOTICE_LEFT_IDS[@]}"; do LEFT_SCOPES+=("$id" "notice left for the next pass"); done
     fi
     reconcile_dispatch || dispatch_rc=1
     reconcile_until || until_rc=1
-    # The pass declares what both halves left in one declaration. The controller
+    # The pass declares what its halves left in one declaration. The controller
     # reads a declaration only after a run that exits 0, so a pass with a failure
-    # in either half declares nothing. The controller keeps a failed run's output,
-    # and the lines each half printed about what it left are in it.
+    # in any half declares nothing. The controller keeps a failed run's output,
+    # and the lines the pass printed about what each half left are in it.
     if [ -n "$LEFT_REASON" ] && [ "$NOTICE_FAILED" = 0 ] && [ "$dispatch_rc" = 0 ] && [ "$until_rc" = 0 ]; then
         declare_outcome partial "pass budget spent: $LEFT_REASON" "${LEFT_SCOPES[@]}"
     fi

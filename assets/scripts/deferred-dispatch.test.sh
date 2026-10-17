@@ -581,8 +581,8 @@ mails() { wc -l < "$STUB_MAIL_LOG" | tr -d ' '; }
 mailbox() { wc -l < "$STUB_MAILBOX" | tr -d ' '; }
 nudges() { wc -l < "$STUB_NUDGE_LOG" | tr -d ' '; }
 # A pass's list reads, split by half. The notices half of every pass reads its
-# listing, plus bd's readiness when a notice is owed; a bound on the arms' reads
-# leaves those out.
+# listing, plus bd's readiness when a notice is owed; a bound on the other
+# halves' reads leaves those out.
 arm_list_reads() { grep '^list' "$STUB_BD_LOG" | grep -c -v -F -e 'gc.notify_when_ready'; }
 notice_list_reads() { grep '^list' "$STUB_BD_LOG" | grep -c -F -e 'gc.notify_when_ready'; }
 escalations() { wc -l < "$ESC_CALLS" | tr -d ' '; }
@@ -1423,9 +1423,9 @@ echo "# until: without until-resolved.sh the consumer disposes nothing"
 store '[
  {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
  {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
-# hold-lib.sh goes beside the copy, because without it the script exits before
-# any verb, so until-resolved.sh is the one library missing.
-mkdir -p "$TMP/lonely"; cp "$SUT" "$TMP/lonely/deferred-dispatch.sh"; cp "$HERE/hold-lib.sh" "$TMP/lonely/"
+# hold-lib.sh and bd-lib.sh go beside the copy, because without either the
+# script exits before any verb, so until-resolved.sh is the one library missing.
+mkdir -p "$TMP/lonely"; cp "$SUT" "$TMP/lonely/deferred-dispatch.sh"; cp "$HERE/hold-lib.sh" "$HERE/bd-lib.sh" "$TMP/lonely/"
 out="$("$TMP/lonely/deferred-dispatch.sh" reconcile 2>&1)"; rc=$?
 eq "$rc" 1 "a pass that cannot read the guard fails"
 eq "$(rehomes)" "0" "and disposes nothing"
@@ -1501,7 +1501,7 @@ eq "$(rehomes)" "3" "all three resolved until-gated beads are disposed in one pa
 # whatever the candidate count. A disposal re-reads its own bead, its own row by
 # id and its dependents just before the close; the waiting candidate u-4 costs
 # nothing.
-eq "$(grep '^list' "$STUB_BD_LOG" | grep -vc '^list --id u-[0-9] ')" "4" "enumeration costs a bounded read count (candidate scan + one target-status batch), not one per bead"
+eq "$(grep '^list' "$STUB_BD_LOG" | grep -v -F -e 'gc.notify_when_ready' | grep -vc '^list --id u-[0-9] ')" "4" "enumeration costs a bounded read count (candidate scan + one target-status batch), not one per bead"
 eq "$(grep -c '^show' "$STUB_BD_LOG")" "3" "each disposal re-reads its own bead once, and a waiting candidate is not read"
 eq "$(grep -c '^list --id u-[0-9] ' "$STUB_BD_LOG")" "3" "each disposal reads its own row by id once, and a waiting candidate is not read"
 eq "$(grep -c '^dep list' "$STUB_BD_LOG")" "3" "each disposal reads its own dependents once, and a waiting candidate is not read"
@@ -1696,7 +1696,7 @@ store '[
 eq "$(rehomes)" "2" "both owed beads are disposed"
 eq "$(wc -l < "$TMP/rig.log" | tr -d ' ')" "1" "with one roster read for the pass"
 
-# --- the two halves are independent -------------------------------------------
+# --- the halves are independent -----------------------------------------------
 echo "# until: a dispatch half that cannot read its armed set still lets the until half run"
 store "$ONE_OWED"
 out="$(STUB_BD_ARMED_FAIL=1 "$SUT" reconcile 2>&1)"; rc=$?
@@ -2523,7 +2523,7 @@ has "$out" "2 left for the next pass, 2 failed" "and its summary counts both"
 
 # The until half spends the same budget, so the disposals it leaves are as much
 # a part of what the pass did not do as the slings, and the one declaration a
-# pass makes names both. A failure in either half fails the pass, so a failed
+# pass makes names them all. A failure in any half fails the pass, so a failed
 # until half leaves no declaration of the slings the dispatch half left.
 echo "# a pass that leaves a disposal declares it, naming the bead"
 store "$THREE_OWED"
@@ -2537,7 +2537,7 @@ eq "$(jq -r '.outcome' "$TMP/outcome-until.json" 2>/dev/null)" "partial" "the pa
 eq "$(jq -r '[.scopes[] | "\(.scope): \(.reason)"] | join(",")' "$TMP/outcome-until.json" 2>/dev/null)" "u-3: disposal left for the next pass" \
     "naming the bead and the disposal left on it"
 
-echo "# a pass whose halves both leave work declares all of it once"
+echo "# a pass whose dispatch and until halves both leave work declares all of it once"
 # 140s, a 30s sling allowance and a 10s disposal allowance: three 40s slings
 # start and the fourth would begin with 20s left, then one 40s disposal starts
 # with 20s left and the other two find the budget gone.
@@ -2553,9 +2553,9 @@ eq "$(rehomes)" "1" "and one disposal"
 eq "$(jq -r '.outcome' "$TMP/outcome-both.json" 2>/dev/null)" "partial" "the pass declares itself partial"
 eq "$(jq -r '[.scopes[] | "\(.scope): \(.reason)"] | join(",")' "$TMP/outcome-both.json" 2>/dev/null)" \
     "b-4: sling left for the next pass,u-2: disposal left for the next pass,u-3: disposal left for the next pass" \
-    "naming every bead either half left, and what it left there"
+    "naming every bead a half left, and what it left there"
 has "$(jq -r '.reason' "$TMP/outcome-both.json" 2>/dev/null)" "1 ready bead(s) left armed for the next pass, 2 until-resolved bead(s) left for the next pass to dispose" \
-    "and giving both halves' counts as its reason"
+    "and giving each half's count as its reason"
 
 echo "# a pass whose until half fails declares nothing, though its dispatch half left slings"
 store "$(jq -cn --argjson a "$FOUR_READY" --argjson b "$ONE_OWED" '$a + $b')"
@@ -2567,6 +2567,40 @@ out="$(STUB_CLOCK="$CLOCK" STUB_SLING_SECS=40 STUB_REHOME_RC=1 DEFERRED_DISPATCH
 eq "$rc" 1 "a pass whose disposal failed exits 1"
 has "$out" "left 2 ready bead(s) armed for the next pass: b-3 b-4" "its output still names the slings it left"
 [ -s "$TMP/outcome-until-failed.json" ] && bad "a failed pass wrote an outcome declaration: $(cat "$TMP/outcome-until-failed.json")" \
+    || ok "and it writes no declaration the controller would not read"
+
+echo "# a pass whose every half leaves work declares all of it once, the notices first"
+# 20s of budget is less than the 30s a notice or a sling needs, so the ready
+# notice and all four ready slings are left. A disposal's 10s allowance still
+# fits, and the one 40s disposal it starts leaves the other two.
+store "$(jq -cn --argjson a "$FOUR_READY" --argjson b "$THREE_OWED" '[{"id":"n-1","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":true}] + $a + $b')"
+printf '1000\n' > "$CLOCK"
+: > "$TMP/outcome-every.json"
+out="$(STUB_CLOCK="$CLOCK" STUB_REHOME_SECS=40 DEFERRED_DISPATCH_PASS_BUDGET_SECS=20 \
+    DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS=30 DEFERRED_DISPATCH_DISPOSE_ALLOWANCE_SECS=10 \
+    GC_ORDER_OUTCOME_FILE="$TMP/outcome-every.json" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the pass exits 0"
+eq "$(mails)" "0" "it sends no notice"
+eq "$(slings)" "0" "starts no sling"
+eq "$(rehomes)" "1" "and starts one disposal"
+has "$out" "left 1 ready notice(s) armed for the next pass: n-1" "its output names the notice it left"
+eq "$(jq -r '[.scopes[] | "\(.scope): \(.reason)"] | join(",")' "$TMP/outcome-every.json" 2>/dev/null)" \
+    "n-1: notice left for the next pass,b-1: sling left for the next pass,b-2: sling left for the next pass,b-3: sling left for the next pass,b-4: sling left for the next pass,u-2: disposal left for the next pass,u-3: disposal left for the next pass" \
+    "the declaration names every bead each half left, the notice first"
+has "$(jq -r '.reason' "$TMP/outcome-every.json" 2>/dev/null)" "1 ready notice(s) left armed for the next pass, 4 ready bead(s) left armed for the next pass, 2 until-resolved bead(s) left for the next pass to dispose" \
+    "and gives each half's count as its reason, in the order the halves run"
+
+echo "# a pass whose notice fails declares nothing, though its dispatch half left slings"
+store "$(jq -cn --argjson a "$FOUR_READY" '[{"id":"n-1","status":"open","assignee":"gc-toolkit.mechanik","metadata":{"gc.notify_when_ready":"gc-toolkit.mechanik"},"notes":"","_ready":true}] + $a')"
+printf '1000\n' > "$CLOCK"
+: > "$TMP/outcome-notice-failed.json"
+out="$(STUB_CLOCK="$CLOCK" STUB_SLING_SECS=40 STUB_MAIL_RC=1 STUB_NUDGE_RC=1 DEFERRED_DISPATCH_PASS_BUDGET_SECS=100 \
+    DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS=30 \
+    GC_ORDER_OUTCOME_FILE="$TMP/outcome-notice-failed.json" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "a pass whose notice got no turn requested exits 1"
+eq "$(slings)" "2" "after its dispatch half started two slings"
+has "$out" "left 2 ready bead(s) armed for the next pass: b-3 b-4" "its output still names the slings it left"
+[ -s "$TMP/outcome-notice-failed.json" ] && bad "a failed pass wrote an outcome declaration: $(cat "$TMP/outcome-notice-failed.json")" \
     || ok "and it writes no declaration the controller would not read"
 
 # --- positive control over the shipped cadence -------------------------------
