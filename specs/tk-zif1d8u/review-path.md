@@ -144,10 +144,9 @@ reads them and no step does: `review_formula` names the formula a review held
 with no workflow follows, and the two pools say where a returned review and a
 rework go, as today. A record is whole when it carries those five, every key
 the table marks always, and both PR keys once a PR is open. It is short when it
-lacks any of them. A sling that lacks a required var pours nothing (section
-1). A claimant of a review held with no workflow refuses only a record that
-lacks a key the table marks always, and reads any other key the record lacks
-as empty (section 2's description).
+lacks any of them. A sling that leaves out a required var pours nothing. The
+review formulas refuse a review that lacks a value the table marks always, and
+read any other value a review lacks as empty (section 1).
 
 ## What this design rests on
 
@@ -348,15 +347,28 @@ call passes `{{reviewed_oid}}`, so no dispatched review meets the refusal. A
 record with no pin, a review made by hand or before this design, still takes
 the commit the call names.
 
-A short record therefore means a bead made by hand or before this design. A
-claimant that finds a required key missing appends what is missing to the
-review's notes and drains with the route left empty, because the next claim
-would meet the same gap. A review that was never poured is the stranded
-arm's, which completes its record before it slings the review again, writing
-the pin only where the record has none (`gate-ensure.sh:954`, section 2). One
-whose workflow is spent is the wedge gate-ensure's
-spent-workflow arm escalates today (`gate-ensure.sh:479-520`). Reviewing a
-commit the dispatch did not record is never the fallback.
+A short record therefore means a review made by hand or before this design.
+load-dispatch says what a missing value means, and the quorum's lanes and its
+synthesis say the same. A value the review lacks is empty, as the PR keys are
+before a PR opens. When a value the table marks always is empty, the step
+reviews nothing. It appends to the review's notes which key is missing and
+ends as the verdict step's failure arm does, except that it leaves the route
+empty, because the next claim would meet the same gap. A claimant holding the
+review with no workflow releases its claim. A dispatched review never meets
+that refusal. A review meets it when a person slung it with a required var
+given empty, which a pour accepts (`parser.go:728-731` refuses only a var not
+given), or when its claimant holds it with no workflow and its record lacks
+the key.
+
+The refused review is left open with nothing driving it. One that was never
+poured is the stranded arm's, which completes its record before it slings the
+review again, writing the pin only where the record has none
+(`gate-ensure.sh:954`, section 2). One whose workflow is spent is the wedge
+gate-ensure's spent-workflow arm escalates today (`gate-ensure.sh:479-520`).
+That visit offers two repairs, a return to the pool and a close. For a short
+record only the close helps, because the next pass then dispatches a fresh
+review, and the refusal's note says so. Reviewing a commit the dispatch did not
+record is never the fallback.
 
 ### The quorum reads the same values
 
@@ -432,14 +444,15 @@ into it:
 > beads to close. Read each `{{<key>}}` in the steps as this bead's value under
 > that key, `{{check}}` as its `check_name` in lowercase, `{{review_bead}}` as
 > this bead, and `{{binding_prefix}}` as the binding your skill catalog shows on
-> the pack's skills. A key the steps name that the bead does not carry is
-> empty, as the PR keys are before a PR opens. The exception is a key every
-> review carries: when the bead lacks `check_name`, `anchor_bead`,
-> `review_branch`, `review_base` or `reviewed_oid`, review nothing. Append what
-> is missing to its notes and release your claim with the route left empty.
+> the pack's skills. The steps say what a key the bead does not carry means,
+> and when it means you review nothing.
 
 gate-ensure passes it on the create, where it passes the composed body today
-(`gate-ensure.sh:1053-1058`).
+(`gate-ensure.sh:1053-1058`). The formula carries the rule for a missing value,
+not this paragraph, because the reviews that can lack one were made by hand or
+before this design, and neither carries this paragraph. One dispatched before
+it carries the old note, which sends its claimant to the same steps (section
+1).
 
 ### Every reader of today's description
 
@@ -962,12 +975,12 @@ mutant. They test where a formula meets a script, so they stay. The first two
 are re-pointed at load-dispatch's blocks, which build the worktree at
 `{{reviewed_oid}}` and print the reviewed commit's `docs/review-{{check}}.md`.
 A fixture commit carrying `docs/review-triage.md` shows triage's guidance
-reaching a triage review, and the verdict step's failure arm is run on a
-record with no `reviewed_oid` to show it restores the route. The chain closes
-as before, so the third needs only the review step's close to keep its one
-`--convoy` call. The review formulas keep no keepalive block, because no
-formula block runs a long command any more, so `lease-heartbeat.test.sh` drops
-its two lines for them (`:190-191`).
+reaching a triage review, and load-dispatch's refusal is run with
+`reviewed_oid` empty to show it reviews nothing, names the key and leaves the
+route empty. The chain closes as before, so the third needs only the review
+step's close to keep its one `--convoy` call. The review formulas keep no
+keepalive block, because no formula block runs a long command any more, so
+`lease-heartbeat.test.sh` drops its two lines for them (`:190-191`).
 
 ### Suites that reach the resolver
 
@@ -1114,8 +1127,9 @@ one change.
   sling, requires a head, pins a stranded review only where it has no pin,
   writes the fixed description, and stops calling `review-dispatch-body.sh`.
 - `mol-review` and the quorum declare the vars, name each value where they use
-  it, gather in load-dispatch, and load the skill named from the check
-  (sections 1 and 3). Their failure arm restores the route as today.
+  it, refuse a short record, gather in load-dispatch, and load the skill named
+  from the check (sections 1 and 3). Their failure arm restores the route as
+  today.
 - signoff.sh's departed-commit path stops clearing `reviewed_oid`, and
   signoff.sh refuses a `--reviewed-oid` that names a commit other than the
   record's (section 1). The `reviewed_oid` entry in `lifecycle/lifecycle.toml`
@@ -1145,14 +1159,22 @@ reads the description and the metadata the bead was dispatched with, so the
 review finishes under the old frame. The skills it loads from the catalog are
 the new ones, which name values by key. The old steps print the same values
 under shell names, `REVIEWED_OID` for `reviewed_oid` and `BASE` for
-`review_base`, so the agent fills a new skill's placeholders from them. An old
-review that today's gate-ensure dispatched with no commit, because its read of
-the head failed (`gate-ensure.sh:137-139`), still takes the live head through
-its old load-dispatch (`mol-review.toml:113-114`), because nothing in the new
-skills refuses a value the old steps supply. A review stranded across the
-change is slung again by the new gate-ensure, whose stranded arm completes the
-record, writing the pin only where there is none, and passes the record as
-vars (section 2).
+`review_base`, so the agent fills a new skill's placeholders from them. A
+review stranded across the change is slung again by the new gate-ensure, whose
+stranded arm completes the record, writing the pin only where there is none,
+and passes the record as vars (section 2).
+
+The one exception to reading only the dispatch's commit is an old review that
+today's gate-ensure dispatched with no commit, because its read of the head
+failed (`gate-ensure.sh:137-139`). If its old workflow is still running, it
+takes the live head through its old load-dispatch (`mol-review.toml:113-114`)
+and the review step's re-derivation (`:156`). Nothing new refuses a value the
+old steps supply: signoff.sh compares the call's commit only with a pin the
+record holds. If it is held with no workflow, because an old failure arm
+returned it to the pool, its claimant follows its old description to the new
+steps, and they refuse it for the commit it lacks (section 1). Once the
+claimant releases it, its old workflow reads as spent with no verdict, and
+gate-ensure's spent-workflow arm escalates it as a wedge.
 
 An old review bead carries none of the keys this design adds:
 `review_formula`, `review_pr_url`, `review_pr_number` and `review_context`.
@@ -1163,8 +1185,8 @@ without the PR keys skips the PR's page and reads the change with git, which
 is what every review on main does today, because no writer stamps a PR on a
 review bead. `review_context` may be empty on any review. So an old review
 poured before graduation finishes as above, and an old one held with no
-workflow follows its old description to the new steps, where the four keys it
-lacks read as empty.
+workflow that carries its commit follows its old description to the new steps,
+where the four keys it lacks read as empty.
 
 ## What this design does not change
 
