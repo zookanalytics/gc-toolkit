@@ -42,8 +42,9 @@ merged on a rig's main does not reach work already in flight.
    purpose for that rig. The `method` column goes. Cost: triage can now add
    demo, arch or pm in the three rigs here that keep no index (gascity,
    shutupandlisten, signal-loom) and in sprintshow, whose index lists only
-   correctness and triage. Triage's judgment does not change, and adding
-   nothing stays its common case.
+   correctness and triage and says it leaves the other three out on purpose. A
+   rig has no way to withdraw a pack check. Triage's judgment does not change,
+   and adding nothing stays its common case.
 5. **Every reader takes a rig's review guidance from its default branch, at
    most a minute old.** That guidance is `review-checks.toml` and
    `docs/review-<check>.md`, read through `review-checks.sh` by the cadence,
@@ -101,7 +102,7 @@ Facts read from the running city:
   | gascity | none | none |
   | shutupandlisten | none | none |
   | signal-loom | none | none |
-  | sprintshow | correctness and triage, no phase, `method = "formulas/mol-review.toml"` | none |
+  | sprintshow | correctness and triage, no phase. Correctness's `method` is `formulas/mol-review.toml`. The header says sprintshow leaves demo, arch and pm out on purpose. | none |
 
 Settling the design turned up four defects on main. Each is the frame contract
 or the index read showing through, so the build fixes each and none is filed
@@ -119,7 +120,7 @@ on its own:
   nothing, and triage reads that as no menu.
 - **The triage skill uses `$ANCHOR`, which no frame block sets.** It feeds the
   bring-current round read and the observation's provenance
-  (`skills/review-triage/SKILL.md:122-123`, `:187`, `:196`).
+  (`skills/review-triage/SKILL.md:122-123`, `:187`, `:191`, `:196`).
 - **liveness-sweep.sh classifies every rig's anchors against gc-toolkit's own
   index**, the file two directories above the script
   (`assets/scripts/liveness-sweep.sh:303`).
@@ -134,8 +135,9 @@ shell block. That happens in `load-dispatch` (`formulas/mol-review.toml:73-116`)
 in `review` (`:148-156`, then the keepalive and workspace blocks at `:174-192`),
 and in `verdict-and-drain` (`:336-345`), where the agent retypes the reviewed
 commit by hand. It happens again in each quorum lane
-(`formulas/mol-review-quorum-signoff.toml:91-95`) and in the synthesis
-(`:219-231`, `:260-267`).
+(`formulas/mol-review-quorum-signoff.toml:91-95`, `:157-160`) and in the
+synthesis (`:219-231`, then the keepalive block at `:260-267` and the chain
+close at `:318-319`).
 
 The skills use those variables by name. The correctness skill uses `$M`,
 `$BASE`, `$REVIEWED_OID`, `$PR`, `$PR_REPO_Q` and `hb`. Triage uses
@@ -231,19 +233,25 @@ ask-for-work skills use.
 
 ### A short record
 
-A review dispatched under this design cannot reach a reviewer short of its
-record. gate-ensure.sh slings a review only once its whole work order reads
-back (`gate-ensure.sh:1050-1067`). Its stranded arm writes the whole order
-before it slings a review again (`:954`). So a short record means a bead made
-by hand or before this design.
+A review dispatched under this design reaches a reviewer short of its record in
+one case. gate-ensure.sh slings a review only once its whole work order reads
+back (`gate-ensure.sh:1050-1067`), and its stranded arm writes the whole order
+before it slings a review again (`:954`). The case is signoff.sh refusing a
+verdict whose pin a rewrite took off the branch. It clears the pin and closes
+the review superseded, and when that close does not read back, the review stays
+open without its pin (`signoff.sh:473-517`). The verdict step's failure arm
+then returns it to the pool (`mol-review.toml:368-384`). Otherwise a short
+record means a bead made by hand or before this design.
 
 `load-dispatch` reads the record with `record`, which refuses a short one with
 exit 3 and names the key. The step then appends that message to the review
 bead's notes, closes the chain forward and drains. It does not restore the
 bead's route, because the next claim would meet the same short record.
 gate-ensure's spent-workflow arm then reads the review as wedged and asks a
-person for one of its two repairs (`gate-ensure.sh:479-520`). Reviewing an
-unpinned commit is never the fallback.
+person for one of its two repairs (`gate-ensure.sh:479-520`). Closing the
+review is the repair that clears a short record, because the next pass
+dispatches a fresh review with the whole record. A review returned to the pool
+meets the same refusal. Reviewing an unpinned commit is never the fallback.
 
 ### The quorum reads one record
 
@@ -252,7 +260,7 @@ The two lanes and the synthesis each read the same record through
 derives a value, so the two lanes cannot read different commits, and the
 quorum needs no pin step of its own. The quorum's `base_ref` var retires: it
 stood in for a `review_base` the record now always carries, and
-refinery-reconcile.sh never passes it (`refinery-reconcile.sh:120-133`).
+refinery-reconcile.sh never passes it (`refinery-reconcile.sh:118-133`).
 
 ## 2. The review bead's data
 
@@ -301,10 +309,14 @@ gate-ensure passes it on the create, where it passes the composed body today
 
 ### Every reader of today's description
 
-No script reads a review bead's description. The scripts that read a
-description read an anchor's or a finding's: `pr-open.sh`, `pr-stack.sh`,
-`review-answer.sh` and `scaffolding-sweep.sh`. The readers are the agents and
-two tests.
+No script acts on a review bead's description. The scripts that read a
+description read another bead's: an anchor's (`pr-open.sh`, `pr-stack.sh`,
+`demo-repo-artifact.sh`), a finding's or a visit's (`review-answer.sh`,
+`scaffolding-sweep.sh`, `pr-facts.sh`), a park gate's (`gc-helm.sh`) or a
+ledger entry's (`gc-deacon-ledger.sh`). The work-context hook and
+`tools/gc-bd-universe.sh` pass a description through to an agent, and
+`tools/gc-proactive.sh` skips review beads. The readers are the agents and two
+tests.
 
 | Reader | Reads today | Reads instead |
 |---|---|---|
@@ -316,7 +328,7 @@ two tests.
 | The reviewer reading why it was dispatched | the note's "Context from the dispatch" | `review_context`, which load-dispatch prints with the record |
 | A Claude lane of the quorum, through the work-context hook (`overlays/work-context`) | the whole description, at claim | the fixed paragraph. The record arrives through the frame. |
 | `gate-ensure.test.sh` (`:61-62`, `:232`) | a stub body script and its marker | assertions on the record and the fixed paragraph |
-| `pr-facts.test.sh` (`:191-195`, `:880`) | a stub body script that pr-facts.sh never calls | nothing. The stub goes. |
+| `pr-facts.test.sh` (`:191`, named again at `:195` and `:880`) | a stub body script that pr-facts.sh never calls | nothing. The stub goes, and the `validate-dispatch-body.sh` stub beside it stays. |
 
 `review-dispatch-body.sh`, its test and its row in `docs/component-model.md`
 (`:394`) are deleted. The rules its frame section shares with the formula
@@ -541,7 +553,7 @@ A rig's current copy of a file is the file at the tip of the rig's default
 branch as origin has it: `refs/remotes/origin/<default>` in the rig's
 repository, where `<default>` is the branch `refs/remotes/origin/HEAD` names,
 else `main`. refinery-reconcile.sh resolves the graduation target the same way
-(`:136-141`). Every worktree of the rig's repository shares that ref.
+when no override names it (`:136-142`). Every worktree of the rig's repository shares that ref.
 
 The resolver refreshes the ref with one `git fetch origin <default>` when its
 own last refresh is more than a minute old. A merge on the rig's main therefore
@@ -615,8 +627,9 @@ declared token whatever its phase. The live read matters for which checks gate
 a PR's opening and its leaving draft.
 
 #1262 deleted `docs/review-config.md`, so the pinning rule and its in-flight
-rationale now sit in the index header (`review-checks.toml:12-13`, `:21-27`).
-Both paragraphs are rewritten to the live rule, and to who reads an extension.
+rationale now sit in the index header (`review-checks.toml:12-13`), beside the
+paragraph that reads an extension at the commit under review (`:21-27`). Both
+paragraphs are rewritten to the live rule, and to who reads an extension.
 The rule is rewritten wherever else it is stated:
 
 - `review-checks.sh`'s header (`:33-43`);
@@ -626,7 +639,10 @@ The rule is rewritten wherever else it is stated:
 - the triage skill's index contract (`:28-35`, `:55-59`);
 - the demo skill (`:138-140`);
 - `mol-refinery-patrol`'s `check_set` var description (`:95`), which says
-  triage reads the index at the reviewed commit.
+  triage reads the index at the reviewed commit;
+- sprintshow's own index header, which states the rule and says why sprintshow
+  leaves demo, arch and pm out. It is sprintshow's file, so unit A's builder
+  files a bead for its rewrite in sprintshow's store.
 
 ## 7. Process versus subject
 
@@ -737,11 +753,14 @@ stewards at the reviewed commit is this rule, and it stays.
 
 ### Tests that run a formula's blocks
 
-`formula-worktree-rig.test.sh` (`:183-188`), `review-workspace.test.sh`
-(`:176-178`) and `step-close.test.sh` (`:1404-1413`) extract a review formula's
-marked blocks and run them. They test where a formula meets a script, so they
-stay, re-pointed at the new blocks: the worktree is built through
-`review-frame.sh`, and the chain closes as before. The review formulas keep no
+`formula-worktree-rig.test.sh` (`:183-188`) and `review-workspace.test.sh`
+(`:176-178`) extract a review formula's marked blocks and run them.
+`step-close.test.sh` (`:1400-1413`) rewrites a copy of `mol-review`'s
+review-step close without `--convoy` and checks that its scan catches the
+mutant. They test where a formula meets a script, so they stay. The first two
+are re-pointed at the new blocks, where the worktree is built through
+`review-frame.sh`. The chain closes as before, so the third needs only the
+review step's close to keep its one `--convoy` call. The review formulas keep no
 keepalive block, because no formula block runs a long command any more, so
 `lease-heartbeat.test.sh` drops its two lines for them (`:190-191`).
 
@@ -824,6 +843,7 @@ when unit A lands.
 - `review-checks.toml` loses its `method` keys. Its header states the layered
   index and the live rule, and points at the configuration that holds the
   baseline.
+- A bead in sprintshow's store for its index header (section 6).
 - Tests 5 and 6 of section 8, and the reader half of test 7.
 
 It touches every gating reader, so it lands alone, reviewable as one change to
@@ -856,10 +876,14 @@ A review poured before then keeps the step text it was poured with. That text
 reads the description and the metadata the bead was dispatched with, so the
 review finishes under the old frame. The skills it loads from the catalog are
 the new ones. They read the keys an old bead already carries through
-`review-frame.sh pin`, which refuses only a missing value it was asked for, so
-an old bead's lack of `review_formula` stops nothing. A review stranded across
-the change is slung again by the new gate-ensure, whose stranded arm writes the
-whole record first.
+`review-frame.sh pin`, which refuses only when a required value it was asked
+for is missing, so an old bead's lack of `review_formula` stops nothing. The
+exception is an old review dispatched without a pin, which today's gate-ensure
+sends out when its read of the head fails (`gate-ensure.sh:137-139`). A
+skill's read of `reviewed_oid` refuses it, and closing that review lets the
+next pass dispatch it again, pinned. A review stranded across the change is
+slung again by the new gate-ensure, whose stranded arm writes the whole record
+first.
 
 ## What this design does not change
 
