@@ -1,6 +1,6 @@
 ---
 name: Every check-runner cut over to gctk rig, as built
-description: What cutting the rig-check call sites over to `gctk rig` and retiring `self_review_passed_sha` settled beyond the bead. Covers why the self-review exit condition reads three records, the pre-existing mark that stands in for the disposition field the gate dropped, the transitional read of the retired stamp, how each caller finds the binary, and the refinery's exit-4 and time bounds.
+description: What cutting the rig-check call sites over to `gctk rig` and retiring `self_review_passed_sha` settled beyond the bead. Covers why the self-review exit condition reads three records, the pre-existing mark that stands in for the disposition field the gate dropped and holds the record it judged, the transitional read of the retired stamp, how each caller finds the binary, and the refinery's exit-4 and time bounds.
 ---
 
 # Every check-runner cut over to `gctk rig`, as built
@@ -49,13 +49,21 @@ readers need one:
 - **A correctness review at the merged head**, after the refinery merged on red,
   which the ruling keeps supported.
 
-The mark is `rig_check_pre_existing.<check>` = `{"commit", "trackers"}`, and
-`assets/scripts/rig-check-pre-existing.sh` is its one writer. It sits on a bead,
-beside the published copies (`rig_check.<check>`), so no store was added beside
-the records. Each reader compares its commit, so a mark never answers for
-another commit. A bead-keyed stamp lacked that property, which is why
-commit-keyed records replaced it. The self-review writes the mark on the work
-bead, which its condition reads. The refinery writes it on the anchor (the work
+The mark is `rig_check_pre_existing.<check>` = `{"commit", "record",
+"trackers"}`, and `assets/scripts/rig-check-pre-existing.sh` is its one writer.
+It sits on a bead, beside the published copies (`rig_check.<check>`), so no
+store was added beside the records. The writer reads the record itself, with
+`--check` in the caller's worktree, and refuses unless it is a fail at the
+commit the caller names. A call that declares another command or scope at that
+commit runs and replaces the record, and its fail is not the one judged: a
+changed formula var, or a full suite run where the affected subset failed. So
+each reader honors a mark only while `--check` reads the very record it holds,
+and a mark answers for neither another commit nor another run at its own. The
+first build held only commit and trackers, and the correctness review of
+fde3f9212 showed a replacement fail passing on the old tracker. A bead-keyed
+stamp lacked the commit half of that property, which is why commit-keyed
+records replaced it. The self-review writes the mark on the work bead, which
+its condition reads. The refinery writes it on the anchor (the work
 bead's `anchor_bead`, else the work bead), which the reviews read, so a rework
 round's merged head is covered too. A mark names at least one tracker, so the
 judgment can be audited.

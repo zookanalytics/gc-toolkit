@@ -94,7 +94,8 @@ are recorded and where the records live.
   workflow state nor a review's verdict, and both of those stay on beads,
   written by their own writers. Nor is it a judgment of whose failure a fail
   is: a caller that finds a recorded fail red on the base too writes that on a
-  bead as `rig_check_pre_existing.<check>`, naming the commit it judged.
+  bead as `rig_check_pre_existing.<check>`, holding the record it judged, so a
+  run that replaces that record needs a judgment of its own.
   `--publish-bead` copies a record onto a bead's `rig_check.<check>` key for
   whoever reads that bead. The record, not the copy, answers `gctk rig`.
 

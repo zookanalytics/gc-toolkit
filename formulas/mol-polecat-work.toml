@@ -1270,8 +1270,9 @@ way, such as `hb "$GCTK" rig test --scope full --command '<its test command>'
 
 **4. A failure your diff did not cause.** A red check that fails the same way on
 `origin/{{base_branch}}` is pre-existing and does not hold the loop. Find or
-file its tracker as preflight-tests' step 3 does, then mark it on the work bead
-at this HEAD; the exit condition takes the mark in place of a passing record:
+file its tracker as preflight-tests' step 3 does, then mark its record at this
+HEAD on the work bead; the exit condition takes the mark in place of a passing
+record while that record stands:
 ```bash
 # >>> self-review-pre-existing
 CHECK="<test, lint or typecheck: the red check>"
@@ -1280,9 +1281,11 @@ SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --sh
 "${SCRIPTS:?rig-check-pre-existing.sh not found in the pack}/rig-check-pre-existing.sh" --bead "$WORK_BEAD_ID" --check "$CHECK" --commit "$(git rev-parse HEAD)" --trackers "$TRACKERS"
 # <<< self-review-pre-existing
 ```
-Mark only a failure you reproduced on the base. A check still red after your
-best effort stays red: the exit condition reads it as "not yet", and the loop
-iterates. `git status` must be clean before you close the iteration.
+Mark only a failure you reproduced on the base. A run of that check with
+another command or scope replaces the record, and its fail needs a judgment of
+its own. A check still red after your best effort stays red: the exit condition
+reads it as "not yet", and the loop iterates. `git status` must be clean before
+you close the iteration.
 
 **5. Close this iteration bead — closing is what runs the exit condition.**
 Close by the explicit id you claimed; `$GC_BEAD_ID` is unset for a pool-claimed

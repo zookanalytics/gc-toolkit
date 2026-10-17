@@ -38,9 +38,9 @@
 #   (EVIDENCE)   the review-test-evidence block reads gctk rig's record of the
 #                tests at the pinned commit, in the review's worktree: a pass
 #                of the full suite or the affected subset is evidence and runs
-#                no suite, a fail the anchor marks pre-existing at that commit
-#                is not run again, a fail with no such mark is run again with
-#                --force, and no record, a pass that ran nothing, a machine
+#                no suite, a fail whose record the anchor's pre-existing mark
+#                holds at that commit is not run again, any other fail is run
+#                again with --force, and no record, a pass that ran nothing, a machine
 #                failure or no binary runs the suites the diff touches through
 #                the gate; in bash and in zsh.
 set -euo pipefail
@@ -306,7 +306,8 @@ WT_REAL=$(cd "$TMP/wt" && pwd -P)
 OID=0123456789abcdef0123456789abcdef01234567
 OTHER=fedcba9876543210fedcba9876543210fedcba98
 record() { jq -nc --arg r "$1" --arg s "$2" --arg c "$OID" '{check: "test", result: $r, scope: $s, commit: $c, exit_code: (if $r == "pass" then 0 else 1 end), command: "tools/run-tests.sh --affected origin/main"}'; }
-marked() { jq -nc --arg c "$1" --arg t "$2" '[{id: "tk-a", metadata: {"rig_check_pre_existing.test": ({commit: $c, trackers: [$t]} | tojson)}}]'; }
+# marked <commit> <tracker> <record> : an anchor whose pre-existing mark holds <record>.
+marked() { jq -nc --arg c "$1" --arg t "$2" --argjson r "$3" '[{id: "tk-a", metadata: {"rig_check_pre_existing.test": ({commit: $c, record: $r, trackers: [$t]} | tojson)}}]'; }
 # evidence <shell> <rc> <record> [anchor json] [review-bead metadata] : the line the block prints
 DEFAULT_M='{"anchor_bead":"tk-a"}'
 DEFAULT_ANCHOR='[{"id":"tk-a","metadata":{}}]'
@@ -331,15 +332,17 @@ for sh in $SHELLS; do
   OUT=$(evidence "$sh" 0 "$(record pass none)")
   eq "$(word "$OUT")" "no test evidence" "(EVIDENCE) $sh: a pass that ran nothing is no evidence"
   case "$OUT" in *"run the suites the diff touches through the gate"*) ok "(EVIDENCE) $sh: …and sends the reviewer through the gate" ;; *) bad "(EVIDENCE) $sh: a run of nothing does not send the reviewer through the gate (got: $OUT)" ;; esac
-  OUT=$(evidence "$sh" 1 "$(record fail affected)" "$(marked "$OID" tk-t1)")
+  OUT=$(evidence "$sh" 1 "$(record fail affected)" "$(marked "$OID" tk-t1 "$(record fail affected)")")
   eq "$(word "$OUT")" "test evidence" "(EVIDENCE) $sh: a fail the anchor marks pre-existing at the pin is evidence"
   case "$OUT" in *"tracked by tk-t1; do not run them again"*) ok "(EVIDENCE) $sh: …which names its tracker and is not run again" ;; *) bad "(EVIDENCE) $sh: a pre-existing fail is not told apart (got: $OUT)" ;; esac
-  OUT=$(evidence "$sh" 1 "$(record fail affected)" "$(marked "$OTHER" tk-t1)")
+  OUT=$(evidence "$sh" 1 "$(record fail full)" "$(marked "$OID" tk-t1 "$(record fail affected)")")
+  eq "$(word "$OUT")" "recorded fail" "(EVIDENCE) $sh: a mark holding the record another run replaced does not answer for the fail at the pin"
+  OUT=$(evidence "$sh" 1 "$(record fail affected)" "$(marked "$OTHER" tk-t1 "$(record fail affected)")")
   eq "$(word "$OUT")" "recorded fail" "(EVIDENCE) $sh: a pre-existing mark naming another commit does not answer for the pin"
   case "$OUT" in *"command: tools/run-tests.sh --affected origin/main"*"--force"*) ok "(EVIDENCE) $sh: …and the fail is run again with --force, its command named" ;; *) bad "(EVIDENCE) $sh: a recorded fail does not name its command and --force (got: $OUT)" ;; esac
   eq "$(word "$(evidence "$sh" 1 "$(record fail full)" "" '{}')")" "recorded fail" \
      "(EVIDENCE) $sh: a recorded fail on a review bead with no anchor is the commit's"
-  eq "$(word "$(STUB_BD_FAIL=1 evidence "$sh" 1 "$(record fail full)" "$(marked "$OID" tk-t1)")")" "recorded fail" \
+  eq "$(word "$(STUB_BD_FAIL=1 evidence "$sh" 1 "$(record fail full)" "$(marked "$OID" tk-t1 "$(record fail full)")")")" "recorded fail" \
      "(EVIDENCE) $sh: a recorded fail with an unreadable anchor is the commit's"
   OUT=$(evidence "$sh" 3 "")
   eq "$(word "$OUT")" "no test evidence" "(EVIDENCE) $sh: nothing recorded at the pin is no evidence"

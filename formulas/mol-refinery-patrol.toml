@@ -748,10 +748,11 @@ TRACKERS="<the tracker id each run of the block above printed for it, space-sepa
 RIG_ROOT="${GC_RIG_ROOT:-}"
 [ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
-HEAD_OID=$(git -C "$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep" rev-parse HEAD)
+PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
+HEAD_OID=$(git -C "$PREP_WT" rev-parse HEAD)
 ANCHOR=$(gc bd show "$WORK" --json 2>/dev/null | jq -r '.[0].metadata.anchor_bead // empty' 2>/dev/null)
 PRE=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-check-pre-existing.sh" ] && { PRE="$c/assets/scripts/rig-check-pre-existing.sh"; break; }; done
-"${PRE:?rig-check-pre-existing.sh not found in the pack}" --bead "${ANCHOR:-$WORK}" --check "$CHECK" --commit "$HEAD_OID" --trackers "$TRACKERS" || echo "the mark did not land; the merge goes on, and a review at this head runs the suite itself"
+"${PRE:?rig-check-pre-existing.sh not found in the pack}" --bead "${ANCHOR:-$WORK}" --check "$CHECK" --commit "$HEAD_OID" --worktree "$PREP_WT" --trackers "$TRACKERS" || echo "the mark did not land; the merge goes on, and a review at this head runs the suite itself"
 # <<< refinery-pre-existing-mark
 ```
 

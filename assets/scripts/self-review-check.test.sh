@@ -68,6 +68,7 @@ show)
     [ -n "$MD_ABORTED_AT" ]  && { printf '%s"aborted_at":"%s"' "$sep" "$MD_ABORTED_AT"; sep=","; }
     # A pre-existing mark is JSON kept as a string, as bd keeps it.
     [ -n "$MD_PRE_LINT" ]    && { printf '%s"rig_check_pre_existing.lint":%s' "$sep" "$(printf '%s' "$MD_PRE_LINT" | jq -Rs .)"; sep=","; }
+    [ -n "$MD_PRE_TEST" ]    && { printf '%s"rig_check_pre_existing.test":%s' "$sep" "$(printf '%s' "$MD_PRE_TEST" | jq -Rs .)"; sep=","; }
     printf '}}]'
     ;;
   *)
@@ -156,6 +157,11 @@ green() {
   record "$d" typecheck --nothing-declared
 }
 clear_records() { rm -rf "${WT:?}/.git/gc-rig-checks"; }
+# recorded <check> : the record `--check` prints at the fixture worktree's HEAD.
+recorded() { ( cd "$WT" && "$GCTK_BUILT" rig "$1" --check 2>/dev/null ); }
+# premark <commit> <record> [tracker...] : a pre-existing mark, in the shape
+# rig-check-pre-existing.sh writes.
+premark() { local c="$1" r="$2"; shift 2; jq -cn --arg c "$c" --argjson r "$r" '{commit: $c, record: $r, trackers: $ARGS.positional}' --args "$@"; }
 
 write_state() {
   local issue_id="${ISSUE_ID-gc-issue}"
@@ -178,6 +184,7 @@ UPDATE_FAILS="${UPDATE_FAILS-0}"
 EOF
   # A JSON value carries quotes, so it is written shell-quoted.
   printf 'MD_PRE_LINT=%q\n' "${MD_PRE_LINT-}" >> "$STATE"
+  printf 'MD_PRE_TEST=%q\n' "${MD_PRE_TEST-}" >> "$STATE"
 }
 
 # Run the script in a cwd that is deliberately NOT the fixture worktree: the
@@ -213,7 +220,7 @@ assert_out() {
 reset_env() {
   unset ROOT_ID CONVOY_ID CONVOY_MEMBERS ISSUE_ID MD_ROOT_ISSUE DEP_TREE_FAILS GC_COLD
   unset MD_WORK_DIR MD_BRANCH MD_GATE MD_ROUTE MD_ABORTED_AT MD_MAX_ATTEMPTS MD_SUBJECT_MAX
-  unset UPDATE_FAILS ITERATION MD_PRE_LINT GCTK
+  unset UPDATE_FAILS ITERATION MD_PRE_LINT MD_PRE_TEST GCTK
   clear_records
 }
 
@@ -243,18 +250,32 @@ run_case "FAIL when a check's record at HEAD is a fail" 1
 assert_out "names the red check" "not green at $HEAD_SHA: lint"
 
 # --- 3d. a red check marked pre-existing at HEAD ------------------------------
-reset_env; MD_PRE_LINT="{\"commit\":\"$HEAD_SHA\",\"trackers\":[\"tk-t1\"]}"; write_state
-green; record "$WT" lint --command false
-run_case "PASS when the red check's fail is marked pre-existing at HEAD" 0
+reset_env; green; record "$WT" lint --command false
+MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)" tk-t1); write_state
+run_case "PASS when the red check's record is marked pre-existing at HEAD" 0
 assert_out "names the tracker that carries it" "pre-existing, tracked by tk-t1"
 
-reset_env; MD_PRE_LINT="{\"commit\":\"$OLD_SHA\",\"trackers\":[\"tk-t1\"]}"; write_state
-green; record "$WT" lint --command false
+reset_env; green; record "$WT" lint --command false
+MD_PRE_LINT=$(premark "$OLD_SHA" "$(recorded lint)" tk-t1); write_state
 run_case "FAIL when the pre-existing mark names another commit" 1
 
-reset_env; MD_PRE_LINT="{\"commit\":\"$HEAD_SHA\",\"trackers\":[]}"; write_state
-green; record "$WT" lint --command false
+reset_env; green; record "$WT" lint --command false
+MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)"); write_state
 run_case "FAIL when the pre-existing mark names no tracker" 1
+
+# --- 3d2. a run that replaced the marked record --------------------------------
+# gctk rig replaces a commit's record when a call declares another run, and the
+# new run's fail is not the one judged pre-existing.
+reset_env; green; record "$WT" lint --command false
+MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)" tk-t1); write_state
+record "$WT" lint --command 'exit 3'
+run_case "FAIL when a run with another command replaced the marked record at HEAD" 1
+assert_out "says the mark judged another run" "judged another run's fail"
+
+reset_env; green; record "$WT" test --scope affected --command false
+MD_PRE_TEST=$(premark "$HEAD_SHA" "$(recorded test)" tk-t1); write_state
+record "$WT" test --scope full --command false
+run_case "FAIL when a full-suite run replaced the marked record of the affected subset" 1
 
 # --- 3e. some checks recorded, one not ----------------------------------------
 reset_env; MD_GATE="$HEAD_SHA"; write_state

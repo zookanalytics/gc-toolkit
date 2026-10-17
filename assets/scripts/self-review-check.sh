@@ -326,8 +326,10 @@ HEAD_SHA=$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null) ||
 # command for is recorded as a pass that ran nothing, so each of the three has a
 # record to read. setup and build record nothing, so nothing here reads them.
 # A recorded fail passes only when the work bead's rig_check_pre_existing.<check>
-# names this HEAD: the iteration found the same failure red on the base and
-# carried by a tracker (rig-check-pre-existing.sh).
+# carries that very record at this HEAD: the iteration found the same failure
+# red on the base and carried by a tracker (rig-check-pre-existing.sh). A run
+# with another command or scope replaces the record, and its fail needs a
+# judgment of its own.
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
@@ -335,29 +337,31 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 FAILED=""
 UNRECORDED=""
 for CHECK in test lint typecheck; do
-	# rig's own lines go to stderr, and the record it prints on stdout is not
-	# needed here.
-	LINE=$(cd "$WORKTREE" && "$GCTK" rig "$CHECK" --check 2>&1 >/dev/null)
+	# rig's own line goes to stderr, where it says what is recorded, and the
+	# record it found is the one JSON line on stdout.
+	REC=$(cd "$WORKTREE" && "$GCTK" rig "$CHECK" --check)
 	RC=$?
-	LINE=$(printf '%s' "$LINE" | tr '\n' ' ')
 	case "$RC" in
-	0) note "$CHECK: ${LINE:-recorded pass}" ;;
+	0) ;;
 	1)
-		PRE=$(printf '%s' "$ISSUE_JSON" | jq -r --arg k "rig_check_pre_existing.$CHECK" --arg c "$HEAD_SHA" '
-			.[0].metadata[$k] // empty
+		PRE=$(printf '%s' "$ISSUE_JSON" | jq -r --arg k "rig_check_pre_existing.$CHECK" --arg c "$HEAD_SHA" --arg rec "$REC" '
+			($rec | fromjson? // null) as $r
+			| .[0].metadata[$k] // empty
 			| (if type == "string" then (fromjson? // empty) else . end)
 			| select(type == "object" and .commit == $c and ((.trackers // []) | length) > 0)
-			| .trackers | join(", ")' 2>/dev/null)
-		if [ -n "$PRE" ]; then
-			note "$CHECK: the recorded fail at $HEAD_SHA is pre-existing, tracked by $PRE"
-		else
+			| if $r != null and .record == $r then "tracked by " + (.trackers | join(", ")) else "another run" end' 2>/dev/null)
+		case "$PRE" in
+		"tracked by "*) note "$CHECK: the recorded fail at $HEAD_SHA is pre-existing, $PRE" ;;
+		"another run")
 			FAILED="$FAILED $CHECK"
-			note "$CHECK: ${LINE:-recorded fail}"
-		fi
+			note "$CHECK: the pre-existing mark at $HEAD_SHA judged another run's fail, so this one needs a judgment of its own"
+			;;
+		*) FAILED="$FAILED $CHECK" ;;
+		esac
 		;;
 	3) UNRECORDED="$UNRECORDED $CHECK" ;;
-	4) FAILED="$FAILED $CHECK"; note "$CHECK: ${LINE:-machine failure}" ;;
-	*) fail "gctk rig $CHECK --check exited $RC in $WORKTREE: ${LINE:-no output}" ;;
+	4) FAILED="$FAILED $CHECK" ;;
+	*) fail "gctk rig $CHECK --check exited $RC in $WORKTREE" ;;
 	esac
 done
 [ -z "$FAILED" ] || incomplete "not green at $HEAD_SHA:$FAILED; another iteration is needed"

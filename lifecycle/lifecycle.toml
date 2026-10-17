@@ -1011,19 +1011,21 @@ keys = [
 #   ran at: the head the call answered for, or, for a full-suite test pass
 #   answered through the tree, an earlier commit with the same tree. A JSON
 #   object stored as a string.
-# rig_check_pre_existing.test, .lint, .typecheck — a caller's judgment that the
-#   check's recorded fail at one commit is pre-existing: the same failure is red
-#   on the base branch, and a tracker carries it. One JSON object stored as a
-#   string: commit, the full sha the judgment is about, and trackers, the
-#   tracker bead ids. assets/scripts/rig-check-pre-existing.sh is its one
-#   writer. The self-review writes it on the work bead at the HEAD it reviews,
-#   and the refinery's handle-failures writes it on the anchor at the merged
-#   head. A write for the same commit adds its trackers; one for another commit
-#   replaces the value. self-review-check.sh reads the work bead's to pass a
-#   recorded fail at HEAD, and the correctness review reads the anchor's test
-#   value to run no suite for a recorded fail at the reviewed commit; each reads
-#   a value naming another commit as no judgment. Absent means no caller judged
-#   a fail pre-existing. Never cleared.
+# rig_check_pre_existing.test, .lint, .typecheck — a caller's judgment that one
+#   recorded fail of the check is pre-existing: the same failure is red on the
+#   base branch, and a tracker carries it. One JSON object stored as a string:
+#   commit, the full sha the judgment is about; record, the fail `gctk rig
+#   <check> --check` read at that commit when the judgment was written; and
+#   trackers, the tracker bead ids. assets/scripts/rig-check-pre-existing.sh is
+#   its one writer. The self-review writes it on the work bead at the HEAD it
+#   reviews, and the refinery's handle-failures writes it on the anchor at the
+#   merged head. A write for the same record adds its trackers; one for another
+#   record replaces the value. self-review-check.sh reads the work bead's to
+#   pass a recorded fail at HEAD, and the correctness review reads the anchor's
+#   test value to run no suite for a recorded fail at the reviewed commit; each
+#   reads a value whose record is not the one --check reads now, such as one a
+#   run with another command or scope replaced, as no judgment. Absent means no
+#   caller judged a fail pre-existing. Never cleared.
 
 [metadata.pr_posture]
 # pr_posture, pr_merge_state, the two watermarks and pr_comment_disposition

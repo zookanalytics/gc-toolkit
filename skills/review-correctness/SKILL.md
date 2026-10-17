@@ -27,7 +27,8 @@ Every run of the rig's tests through `gctk rig`, whether by a self-review, the
 refinery or an earlier review, is recorded against the commit it ran at, and
 every worktree of the rig's clone reads the records. `gctk rig test --check`
 reads the record at the pinned commit and runs nothing. A test fail the
-refinery judged pre-existing carries a mark on the anchor naming that commit:
+refinery judged pre-existing carries a mark on the anchor holding the record it
+judged, which answers only while that record stands:
 
 ```bash
 # >>> review-test-evidence
@@ -35,7 +36,7 @@ REC=$(cd "$REVIEW_WT" && "$GCTK" rig test --check 2>/dev/null); RC=$?
 SCOPE=$(printf '%s' "$REC" | jq -r '.scope // empty' 2>/dev/null)
 ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
 PRE=""
-[ "$RC" = 1 ] && [ -n "$ANCHOR" ] && PRE=$(gc bd show "$ANCHOR" --json 2>/dev/null | jq -r --arg c "$REVIEWED_OID" '.[0].metadata["rig_check_pre_existing.test"] // empty | (if type == "string" then (fromjson? // empty) else . end) | select(type == "object" and .commit == $c) | (.trackers // []) | join(", ")' 2>/dev/null)
+[ "$RC" = 1 ] && [ -n "$ANCHOR" ] && PRE=$(gc bd show "$ANCHOR" --json 2>/dev/null | jq -r --arg c "$REVIEWED_OID" --arg rec "$REC" '($rec | fromjson? // null) as $r | .[0].metadata["rig_check_pre_existing.test"] // empty | (if type == "string" then (fromjson? // empty) else . end) | select(type == "object" and .commit == $c and $r != null and .record == $r) | (.trackers // []) | join(", ")' 2>/dev/null)
 if [ "$RC" = 0 ] && { [ "$SCOPE" = full ] || [ "$SCOPE" = affected ]; }; then
   echo "test evidence: the rig's tests passed at $REVIEWED_OID (scope $SCOPE); run no suite"
 elif [ "$RC" = 1 ] && [ -n "$PRE" ]; then
@@ -51,9 +52,10 @@ fi
 With evidence, run no suite. A pass recorded for the subset the commit's diff
 selects (scope `affected`) counts as one for the whole suite. A fail marked
 pre-existing goes in the verdict as context, with its trackers. A recorded
-fail with no mark is the commit's: run the record's command again through the
-gate, `hb "$GCTK" rig test --scope <its scope> --command '<its command>'
---force`, to see what failed, and check whether it fails on the base too.
+fail with no mark holding its record is the commit's: run the record's command
+again through the gate, `hb "$GCTK" rig test --scope <its scope> --command
+'<its command>' --force`, to see what failed, and check whether it fails on the
+base too.
 Without a record, or with a pass that ran nothing (scope `none`, a rig that
 declares no test command), run the suites the diff touches in the review's
 worktree through the gate, so that run is recorded as well:
