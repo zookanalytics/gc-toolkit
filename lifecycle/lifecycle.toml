@@ -1236,7 +1236,11 @@ keys = [
 #   DIFFERENT successor. Flat dotted keys read by bracket access; the non-dotted
 #   `superseded_by` and `superseded_by_store` are legacy fallbacks, read only —
 #   bead-rehome.sh and duplicate-sweep.sh fall back to them when the dotted form
-#   is absent, and no pack path writes them. Never cleared. Bead id / store.
+#   is absent, and no pack path writes them. Cleared only by
+#   deferred-dispatch.sh, in the write that reopens a bead it has disposed when
+#   its read after the close finds something that landed on the bead or its
+#   edges after it claimed the bead (docs/authority-map.md, Withdraw a
+#   disposal). Bead id / store.
 # gc.supersedes / _store — the reverse pointer on the SUCCESSOR bead, naming the
 #   origin it replaced; written best-effort by bead-rehome.sh, not read back.
 # duplicate_of — the survivor a duplicate names, the handle duplicate-sweep.sh

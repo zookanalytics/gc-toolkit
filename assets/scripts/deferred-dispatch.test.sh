@@ -69,6 +69,15 @@
 #     and no jq process per candidate, a disposal starts only while the pass
 #     budget has room for one, a pinned pass names its store to bead-rehome, and
 #     the until half runs when the dispatch half cannot read its armed set;
+#   * the CLAIM a disposal is made under — the pass claims a bead in one write
+#     conditional on its status and assignee, before the read it decides the
+#     disposal on, and runs bead-rehome as the claim. A dispatch or a worker's
+#     claim that lands before the claim keeps the bead. A dispatch that lands
+#     while the pass holds the bead, through this suite's disposer and through
+#     the real bead-rehome.sh, reopens it and withdraws its pointer, and so does
+#     an `until` edge removed then. A held or failed close gives the bead back.
+#     A claim, or an unchecked close, a pass left is finished by the next pass,
+#     and a give-back or a check that fails is left for it;
 #   * the CONVOY-LEAK guards — gc sling mints an input convoy per call, so an arm
 #     that never finalizes must not be re-slung forever: an arm whose work
 #     another path already delivered (a merge_result stamp) RETIRES without
@@ -137,8 +146,26 @@ STORE="${STUB_STORE:?}"
 # Global flags precede the verb, as they do for real bd. The store is a single
 # fixture file, so --db is consumed rather than honoured; it only records that
 # the read is pinned, which turns off the by-id routing modeled under `list`.
-pinned=0
-while [ "${1:-}" = "--db" ]; do pinned=1; shift 2 || shift || true; done
+# --actor names who writes, as BEADS_ACTOR does when it is absent; `close`
+# reads it.
+pinned=0; actor="${BEADS_ACTOR:-}"
+while :; do
+    case "${1:-}" in
+        --db) pinned=1; shift 2 || shift || true ;;
+        --actor) actor="${2:-}"; shift 2 || shift || true ;;
+        *) break ;;
+    esac
+done
+# STUB_RACE_AT and STUB_RACE_JQ land a write another actor makes: the first
+# call whose arguments contain STUB_RACE_AT applies the jq program STUB_RACE_JQ
+# to the store before it is answered. It fires once; STUB_RACE_FIRED records it.
+if [ -n "${STUB_RACE_AT:-}" ] && [ ! -e "${STUB_RACE_FIRED:?}" ]; then
+    case " $* " in
+        *"$STUB_RACE_AT"*)
+            : > "$STUB_RACE_FIRED"
+            jq -c "${STUB_RACE_JQ:?}" "$STUB_STORE" > "$STUB_STORE.race" && mv "$STUB_STORE.race" "$STUB_STORE" ;;
+    esac
+fi
 # STUB_FRESH_STORE, when set, is the store as it stands once the until half
 # starts a fresh read: a write that lands between the pass-start listing and
 # that read. The fresh read opens with `bd show`, the only show a reconcile pass
@@ -153,6 +180,10 @@ fi
 if [ -n "${STUB_BD_LIST_FAIL:-}" ] && [ "${1:-}" = "list" ]; then
     echo "bd: simulated listing failure" >&2; exit 1
 fi
+# Every `show` fails once the file STUB_SHOW_FAIL_WHEN names exists.
+if [ -n "${STUB_SHOW_FAIL_WHEN:-}" ] && [ -e "$STUB_SHOW_FAIL_WHEN" ] && [ "${1:-}" = "show" ]; then
+    echo "bd: simulated show failure" >&2; exit 1
+fi
 # STUB_BD_ARMED_FAIL fails only the armed listings (--has-metadata-key), so the
 # dispatch half cannot read its set while the until half's reads still answer.
 if [ -n "${STUB_BD_ARMED_FAIL:-}" ] && [ "${1:-}" = "list" ]; then
@@ -161,7 +192,7 @@ fi
 case "${1:-}" in
   list)
     shift
-    key=""; ready=0; all=0; gates=0; id=""
+    key=""; ready=0; all=0; gates=0; id=""; who="-"; st=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --has-metadata-key) shift; key="${1:-}" ;;
@@ -169,6 +200,10 @@ case "${1:-}" in
         --ready) ready=1 ;;
         --all) all=1 ;;
         --include-gates) gates=1 ;;
+        --assignee) shift; who="${1:-}" ;;
+        --assignee=*) who="${1#--assignee=}" ;;
+        --status) shift; st="${1:-}" ;;
+        --status=*) st="${1#--status=}" ;;
         *) : ;;
       esac
       shift || true
@@ -222,12 +257,17 @@ case "${1:-}" in
     fi
     # Real bd hides a gate bead from a listing unless --include-gates asks for
     # it, so a fixture bead with issue_type "gate" is hidden the same way.
-    jq -c --arg k "$key" --arg id "$id" --argjson ready "$ready" --argjson all "$all" --argjson gates "$gates" '
+    # --status names the statuses listed, a comma list, closed included when it
+    # is named; --assignee names the one assignee.
+    jq -c --arg k "$key" --arg id "$id" --argjson ready "$ready" --argjson all "$all" --argjson gates "$gates" \
+          --arg who "$who" --arg st "$st" '
       ($id | if . == "" then [] else split(",") end) as $ids
+      | ($st | if . == "" then [] else split(",") end) as $sts
       | [ .[]
         | select($k == "" or (.metadata | has($k)))
         | select(($ids | length) == 0 or (.id as $i | $ids | index($i)))
-        | select($all == 1 or .status != "closed")
+        | select(if ($sts | length) > 0 then (.status as $s | $sts | index($s)) != null else ($all == 1 or .status != "closed") end)
+        | select($who == "-" or (.assignee // "") == $who)
         | select($ready == 0 or (._ready == true))
         | select($gates == 1 or (.issue_type // "") != "gate")
         | . as $b
@@ -260,21 +300,62 @@ case "${1:-}" in
   update)
     shift
     id="${1:-}"; shift || true
+    upd_args="$*"
     sets=(); unsets=(); note=""; note_mode=""
+    new_st="-"; new_who="-"; if_st="-"; if_who="-"
     while [ $# -gt 0 ]; do
       case "$1" in
         --set-metadata) shift; sets+=("${1:-}") ;;
+        --set-metadata=*) sets+=("${1#--set-metadata=}") ;;
         --unset-metadata) shift; unsets+=("${1:-}") ;;
+        --unset-metadata=*) unsets+=("${1#--unset-metadata=}") ;;
         --append-notes) shift; note="${1:-}"; note_mode="append" ;;
+        --append-notes=*) note="${1#--append-notes=}"; note_mode="append" ;;
         # Modelled deliberately: bd's --notes REPLACES. A stub that ignored it
         # would let a destructive-write regression pass the append assertions.
         --notes) shift; note="${1:-}"; note_mode="replace" ;;
+        --notes=*) note="${1#--notes=}"; note_mode="replace" ;;
+        --status|-s) shift; new_st="${1:-}" ;;
+        --status=*) new_st="${1#--status=}" ;;
+        --assignee|-a) shift; new_who="${1:-}" ;;
+        --assignee=*) new_who="${1#--assignee=}" ;;
+        --if-status) shift; if_st="${1:-}" ;;
+        --if-status=*) if_st="${1#--if-status=}" ;;
+        --if-assignee) shift; if_who="${1:-}" ;;
+        --if-assignee=*) if_who="${1#--if-assignee=}" ;;
         *) : ;;
       esac
       shift || true
     done
+    # STUB_UPDATE_FAIL_AT fails, writing nothing, every update whose arguments
+    # contain it.
+    if [ -n "${STUB_UPDATE_FAIL_AT:-}" ]; then
+      case " $id $upd_args " in
+        *"$STUB_UPDATE_FAIL_AT"*) echo "bd: simulated update failure" >&2; exit 1 ;;
+      esac
+    fi
+    # bd's --if-status and --if-assignee guards: the update lands only while the
+    # bead still has that status and that assignee ("" is unassigned), checked in
+    # the same write; a stale guard writes nothing and exits 13.
+    if [ "$if_st" != "-" ] || [ "$if_who" != "-" ]; then
+      cur="$(jq -r --arg id "$id" '(.[] | select(.id == $id) | [(.status // ""), (.assignee // "")] | @tsv) // empty' "$STORE")"
+      [ -n "$cur" ] || { echo "bd: no issue found matching $id" >&2; exit 1; }
+      if { [ "$if_st" != "-" ] && [ "${cur%%$'\t'*}" != "$if_st" ]; } \
+         || { [ "$if_who" != "-" ] && [ "${cur#*$'\t'}" != "$if_who" ]; }; then
+        echo "Error: precondition failed for $id: status/assignee changed" >&2; exit 13
+      fi
+    fi
     tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-deferred-dispatch-test.XXXXXX")"
     cp "$STORE" "$tmp"
+    # A status that leaves closed takes the close with it, as bd's reopen does.
+    if [ "$new_st" != "-" ]; then
+      jq -c --arg id "$id" --arg s "$new_st" \
+        'map(if .id == $id then ((if .status == "closed" and $s != "closed" then del(.close_reason) else . end) | .status = $s) else . end)' \
+        "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
+    fi
+    if [ "$new_who" != "-" ]; then
+      jq -c --arg id "$id" --arg a "$new_who" 'map(if .id == $id then .assignee = $a else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
+    fi
     for kv in ${sets[@]+"${sets[@]}"}; do
       k="${kv%%=*}"; v="${kv#*=}"
       jq -c --arg id "$id" --arg k "$k" --arg v "$v" \
@@ -294,6 +375,33 @@ case "${1:-}" in
     fi
     mv "$tmp" "$STORE"
     echo "updated $id"
+    ;;
+  close)
+    # `bd close <id> --reason R`. bd closes an assigned bead only for its
+    # assignee, the actor, and refuses one a `blocks` blocker still holds.
+    shift
+    id="${1:-}"; shift || true
+    reason=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --reason|-r) shift; reason="${1:-}" ;;
+        --reason=*) reason="${1#--reason=}" ;;
+        *) : ;;
+      esac
+      shift || true
+    done
+    who="$(jq -r --arg id "$id" '(.[] | select(.id == $id) | (.assignee // "")) // empty' "$STORE")"
+    jq -e --arg id "$id" 'any(.[]; .id == $id)' "$STORE" >/dev/null || { echo "Error: no issue found matching $id" >&2; exit 1; }
+    if [ -n "$who" ] && [ "$who" != "$actor" ]; then
+      echo "Error: cannot close $id: assignee is \"$who\", actor is \"$actor\"; reclaim or use --force to override" >&2; exit 1
+    fi
+    if jq -e --arg id "$id" '. as $s | ([.[] | select(.id == $id)] | .[0]) as $b
+         | any(($b._deps // [])[]; .dependency_type == "blocks" and (.id as $t | any($s[]; .id == $t and .status != "closed")))' "$STORE" >/dev/null; then
+      echo "Error: cannot close $id: blocked by an open issue" >&2; exit 1
+    fi
+    tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-deferred-dispatch-test.XXXXXX")"
+    jq -c --arg id "$id" --arg r "$reason" 'map(if .id == $id then (.status = "closed" | .close_reason = $r) else . end)' "$STORE" > "$tmp" && mv "$tmp" "$STORE"
+    echo "✓ Closed $id"
     ;;
   dep)
     # `dep list <id> --json` reads a bead's own outgoing edges
@@ -506,19 +614,33 @@ while [ $# -gt 0 ]; do
   esac
   shift || true
 done
-printf '%s\t%s\t%s\t%s|%s\n' "$origin" "$successor" "$kind" "$ostore" "$sstore" >> "${REHOME_CALLS:?}"
+printf '%s\t%s\t%s\t%s|%s\t%s\n' "$origin" "$successor" "$kind" "$ostore" "$sstore" "${BEADS_ACTOR:-}" >> "${REHOME_CALLS:?}"
 if [ -n "${STUB_CLOCK:-}" ] && [ -n "${STUB_REHOME_SECS:-}" ]; then
   printf '%s\n' "$(( $(cat "$STUB_CLOCK") + STUB_REHOME_SECS ))" > "$STUB_CLOCK"
 fi
 rc="${STUB_REHOME_RC:-0}"
 if [ "$rc" = 0 ]; then
   tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-rehome-stub.XXXXXX")"
-  jq -c --arg o "$origin" --arg s "$successor" \
-    'map(if .id == $o then (.status = "closed" | .metadata["gc.superseded_by"] = $s) else . end)' \
+  jq -c --arg o "$origin" --arg s "$successor" --arg ss "$sstore" \
+    'map(if .id == $o then (.status = "closed" | .metadata["gc.superseded_by"] = $s | .metadata["gc.superseded_by_store"] = $ss) else . end)' \
     "${STUB_STORE:?}" > "$tmp" && mv "$tmp" "$STUB_STORE"
 fi
 exit "$rc"
 RH
+# A bead-rehome a write races: it applies the jq program STUB_REHOME_RACE_JQ to
+# the store, a write another actor lands the moment the pass hands the bead to
+# its disposer, then runs the disposer STUB_REHOME_NEXT names (the stub above
+# when unset).
+# STUB_REHOME_TOUCH names a file it creates once the disposer returns.
+cat > "$BIN/rehome-race.sh" <<'RR'
+#!/usr/bin/env bash
+set -u
+jq -c "${STUB_REHOME_RACE_JQ:?}" "${STUB_STORE:?}" > "$STUB_STORE.race" && mv "$STUB_STORE.race" "$STUB_STORE"
+"${STUB_REHOME_NEXT:-$(dirname "$0")/bead-rehome.sh}" "$@"
+rc=$?
+[ -z "${STUB_REHOME_TOUCH:-}" ] || : > "$STUB_REHOME_TOUCH"
+exit "$rc"
+RR
 # date stub: the epoch form the pass budget reads comes from $STUB_CLOCK when a
 # test sets it; every other form reaches the real date. The pass reads the clock
 # from its own shell, so under STUB_FD9_LOG the stub also records that the pass
@@ -534,7 +656,7 @@ fi
 if [ -n "${STUB_CLOCK:-}" ] && [ "$*" = "-u +%s" ]; then cat "$STUB_CLOCK"; exit 0; fi
 exec "${STUB_REAL_DATE:?}" "$@"
 DATE
-chmod +x "$BIN/bd" "$BIN/gc" "$BIN/escalate.sh" "$BIN/bead-rehome.sh" "$BIN/date"
+chmod +x "$BIN/bd" "$BIN/gc" "$BIN/escalate.sh" "$BIN/bead-rehome.sh" "$BIN/rehome-race.sh" "$BIN/date"
 # A jq that counts its runs, put on PATH only by the case that counts them.
 export STUB_REAL_JQ; STUB_REAL_JQ="$(command -v jq)"
 mkdir -p "$TMP/jqbin"
@@ -553,6 +675,7 @@ export STUB_MAILBOX="$TMP/mailbox"
 export STUB_NUDGE_LOG="$TMP/nudge.log"
 export ESC_CALLS="$TMP/escalate.log"
 export REHOME_CALLS="$TMP/rehome.log"
+export STUB_RACE_FIRED="$TMP/race.fired"
 export GC_ESCALATE_TOOL="$BIN/escalate.sh"
 export GC_REHOME_TOOL="$BIN/bead-rehome.sh"
 export BEADS_ACTOR="test-actor"
@@ -570,6 +693,7 @@ unset GC_PACK_STATE_DIR GC_ORDER_OUTCOME_FILE STUB_RIGS_JSON \
 store() {
     printf '%s' "$1" > "$STUB_STORE"
     : > "$STUB_SLING_LOG"; : > "$STUB_MAIL_LOG"; : > "$STUB_MAILBOX"; : > "$STUB_NUDGE_LOG"; : > "$ESC_CALLS"; : > "$REHOME_CALLS"
+    rm -f "$STUB_RACE_FIRED"
 }
 # The store as the fresh read finds it, for STUB_FRESH_STORE, with the switch
 # to it reset, so a pass reads its listing and status read from the store again.
@@ -590,6 +714,8 @@ rehomes() { wc -l < "$REHOME_CALLS" | tr -d ' '; }
 rehome_call() { sed -n "${1}p" "$REHOME_CALLS" | cut -f1-3; }   # tab-separated: origin<TAB>successor<TAB>kind
 rehome_stores() { sed -n "${1}p" "$REHOME_CALLS" | cut -f4; }   # <origin-store>|<successor-store>, "-" for one not passed
 status_of() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .status) // "<absent>"' "$STUB_STORE"; }
+assignee_of() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .assignee // "") // "<absent>"' "$STUB_STORE"; }
+rehome_actor() { sed -n "${1}p" "$REHOME_CALLS" | cut -f5; }   # the BEADS_ACTOR bead-rehome ran as
 await() { # <file> — bounded wait for a sentinel to appear
     local i=0
     while [ ! -e "$1" ] && [ "$i" -lt 1200 ]; do sleep 0.05; i=$((i + 1)); done
@@ -994,7 +1120,7 @@ eq "$(slings)" "1" "an arm in flight is slung though its epic is parked"
 eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "its record is cleared after the dispatch"
 has "$out" "nothing holds b-1: it is in flight (rejection_reason set), so a hold on an ancestor leaves it running" "the pass log says why it slung a bead under a parked epic"
 hasnt "$out" "HELD by" "the park is not named as holding it"
-eq "$(arm_list_reads)" "4" "the walk reads no ancestor of a bead in flight (all + ready + its own blocker, plus the until consumer's one candidate scan)"
+eq "$(arm_list_reads)" "5" "the walk reads no ancestor of a bead in flight (all + ready + its own blocker, plus the until consumer's one candidate scan and its one listing of unchecked closes)"
 unset STUB_BD_LOG
 
 echo "# reconcile holds an arm in flight whose own blocker is open"
@@ -1094,11 +1220,12 @@ eq "$rc" 0 "a bulk pass over four arms held out of --ready is a clean pass"
 eq "$(slings)" "4" "all four arms nothing holds dispatch in one pass"
 eq "$(grep -c '^dep list' "$STUB_BD_LOG")" "0" "reconcile makes NO per-bead dep-list call — the N+1 is gone"
 eq "$(grep -c '^show' "$STUB_BD_LOG")" "0" "reconcile makes NO per-bead show call — fields come from the cached snapshot"
-# Four bounded reads, none per-bead: armed all + armed ready + one armed
+# Five bounded reads, none per-bead: armed all + armed ready + one armed
 # blocker-status batch (these four arms are all cascade-held), plus the until
 # consumer's one whole-store candidate scan (no until candidates here, so it
-# adds no blocker batch of its own).
-eq "$(arm_list_reads)" "4" "the whole set costs a bounded read count, not one per bead"
+# adds no blocker batch of its own) and its one listing of the closes an
+# earlier pass left unchecked.
+eq "$(arm_list_reads)" "5" "the whole set costs a bounded read count, not one per bead"
 eq "$(notice_list_reads)" "1" "and a pass that owes no notice reads the notice listing once"
 
 # The same bound with ancestors: four arms under one parked epic cost one more
@@ -1115,7 +1242,7 @@ has "$out" "4 held" "all four are counted held"
 has "$out" 'HELD by park "Parked until the operator unparks it" on ancestor epic: a-1 a-2 a-3 a-4' "the pass log names the park once, with every arm it keeps"
 eq "$(printf '%s\n' "$out" | grep -c 'HELD by')" "1" "one line for one park, however many arms it keeps"
 eq "$(grep -c '^dep list\|^show' "$STUB_BD_LOG")" "0" "the walk makes no per-bead call"
-eq "$(arm_list_reads)" "5" "four arms under one epic cost five list reads (all + ready + the epic + its blocker, plus the until consumer's one candidate scan), not one per arm"
+eq "$(arm_list_reads)" "6" "four arms under one epic cost six list reads (all + ready + the epic + its blocker, plus the until consumer's one candidate scan and its one listing of unchecked closes), not one per arm"
 unset STUB_BD_LOG
 
 # --- the ARG_MAX fix: a large armed set enumerates, never dies on argv --------
@@ -1497,14 +1624,15 @@ out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 0 "a bulk pass over four until-gated beads is a clean pass"
 eq "$(rehomes)" "3" "all three resolved until-gated beads are disposed in one pass"
 # No armed beads here, so armed costs two reads (all + ready, no blocker batch);
-# the until consumer costs two more (candidate scan + one target-status batch),
-# whatever the candidate count. A disposal re-reads its own bead, its own row by
-# id and its dependents just before the close; the waiting candidate u-4 costs
-# nothing.
-eq "$(grep '^list' "$STUB_BD_LOG" | grep -v -F -e 'gc.notify_when_ready' | grep -vc '^list --id u-[0-9] ')" "4" "enumeration costs a bounded read count (candidate scan + one target-status batch), not one per bead"
-eq "$(grep -c '^show' "$STUB_BD_LOG")" "3" "each disposal re-reads its own bead once, and a waiting candidate is not read"
-eq "$(grep -c '^list --id u-[0-9] ' "$STUB_BD_LOG")" "3" "each disposal reads its own row by id once, and a waiting candidate is not read"
-eq "$(grep -c '^dep list' "$STUB_BD_LOG")" "3" "each disposal reads its own dependents once, and a waiting candidate is not read"
+# the until consumer costs three more (candidate scan + one target-status batch
+# + one listing of the closes an earlier pass left unchecked), whatever the
+# candidate count. A disposal reads its own bead, its own row by id and its
+# dependents twice: under its claim just before the close, and again just
+# after it. The waiting candidate u-4 costs nothing.
+eq "$(grep '^list' "$STUB_BD_LOG" | grep -v -F -e 'gc.notify_when_ready' | grep -vc '^list --id u-[0-9] ')" "5" "enumeration costs a bounded read count (candidate scan + one target-status batch + one listing of unchecked closes), not one per bead"
+eq "$(grep -c '^show' "$STUB_BD_LOG")" "6" "each disposal reads its own bead before its close and after it, and a waiting candidate is not read"
+eq "$(grep -c '^list --id u-[0-9] ' "$STUB_BD_LOG")" "6" "each disposal reads its own row by id before its close and after it, and a waiting candidate is not read"
+eq "$(grep -c '^dep list' "$STUB_BD_LOG")" "6" "each disposal reads its own dependents before its close and after it, and a waiting candidate is not read"
 unset STUB_BD_LOG
 
 echo "# until: a bead whose until edge was removed after the listing is kept"
@@ -1597,6 +1725,209 @@ fresh_store '[
 out="$(STUB_FRESH_STORE="$TMP/fresh-store.json" "$SUT" reconcile 2>&1)"
 eq "$(rehomes)" "0" "a blocks blocker this store cannot read, added after the listing, holds the bead as well"
 has "$out" "UNRESOLVED g-1 — its edges name far-2" "and is named"
+
+# --- the claim a disposal is made under ---------------------------------------
+# A dispatch writes its mark whatever the bead holds, so no read before a close
+# can keep one out of the gap between that read and the close. The pass claims
+# the bead in one write conditional on its status and assignee, decides the
+# disposal on a read under that claim, closes the bead through bead-rehome
+# acting as the claim, and reads it again after the close: a mark that landed
+# while the pass held the bead reopens it and withdraws the pointer. A pass that
+# stopped holding a claim leaves it for the next pass to finish.
+G1_OWED='[
+ {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+ROUTE_G1='map(if .id == "g-1" then .metadata["gc.routed_to"] = "rig/rig.polecat" else . end)'
+
+echo "# until: the disposal is made under a claim, released once the close stands"
+store "$G1_OWED"
+export STUB_BD_LOG="$TMP/bd-claim.log"; : > "$STUB_BD_LOG"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a disposal under the claim is a clean pass"
+eq "$(rehomes)" "1" "the bead is handed to bead-rehome once"
+eq "$(rehome_actor 1)" "deferred-dispatch" "bead-rehome acts as the claim, the actor bd's close requires of a bead assigned to it"
+eq "$(status_of g-1)" "closed" "the bead is closed"
+eq "$(assignee_of g-1)" "" "the claim is released from the closed bead"
+eq "$(meta g-1 gc.superseded_by)" "x-1" "the successor pointer stands"
+claim_at="$(grep -n -F -x -e 'update g-1 --if-status=open --if-assignee= --status=in_progress --assignee=deferred-dispatch' "$STUB_BD_LOG" | head -1 | cut -d: -f1)"
+read_at="$(grep -n '^show g-1' "$STUB_BD_LOG" | head -1 | cut -d: -f1)"
+if [ -n "$claim_at" ] && [ -n "$read_at" ] && [ "$claim_at" -lt "$read_at" ]; then
+    ok "the claim is one conditional write, made before the read the disposal is decided on"
+else
+    bad "the claim is one conditional write, made before the read the disposal is decided on (claim at line '${claim_at:-none}', read at line '${read_at:-none}')"
+fi
+eq "$(grep -c '^show g-1' "$STUB_BD_LOG")" "2" "the bead is read under the claim and again after its close"
+eq "$(grep -c -F -x -e 'update g-1 --if-status=closed --if-assignee=deferred-dispatch --assignee=' "$STUB_BD_LOG")" "1" "the release from the closed bead is conditional on the claim"
+unset STUB_BD_LOG
+
+echo "# until: a dispatch that lands before the claim keeps the bead"
+store "$G1_OWED"
+out="$(STUB_RACE_AT='--if-status=open' STUB_RACE_JQ="$ROUTE_G1" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a bead routed before the claim is a clean pass"
+eq "$(rehomes)" "0" "a bead routed between the listing and the claim never reaches bead-rehome"
+eq "$(status_of g-1)" "open" "it is open again"
+eq "$(assignee_of g-1)" "" "the claim is given back"
+eq "$(meta g-1 gc.routed_to)" "rig/rig.polecat" "the route stands, so its pool can claim the bead"
+has "$out" "LEFT g-1" "the bead is reported"
+has "$out" "gc.routed_to=rig/rig.polecat" "with the route the read under the claim found"
+has "$out" "until-resolved: 0 disposed, 1 live" "it counts as live work"
+
+echo "# until: a worker's claim that lands before the pass claims the bead stands"
+store "$G1_OWED"
+out="$(STUB_RACE_AT='--if-status=open' STUB_RACE_JQ='map(if .id == "g-1" then (.status = "in_progress" | .assignee = "rig/rig.polecat-1") else . end)' "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a bead a worker claimed first is a clean pass"
+eq "$(rehomes)" "0" "the worker's bead never reaches bead-rehome"
+eq "$(status_of g-1)" "in_progress" "it stays in progress"
+eq "$(assignee_of g-1)" "rig/rig.polecat-1" "under the worker that claimed it"
+has "$out" "LEFT g-1 — it is no longer open and unassigned" "the pass says why it left the bead"
+has "$out" "until-resolved: 0 disposed, 1 live" "it counts as live work"
+
+echo "# until: a dispatch that lands while the pass holds the bead reopens it"
+# The bead is routed after the read under the claim and before bead-rehome
+# closes it, the gap no read before the close can see into.
+store "$G1_OWED"
+out="$(GC_REHOME_TOOL="$BIN/rehome-race.sh" STUB_REHOME_RACE_JQ="$ROUTE_G1" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a disposal a dispatch raced is a clean pass"
+eq "$(rehomes)" "1" "the bead reached bead-rehome, which closed it"
+eq "$(status_of g-1)" "open" "the bead is reopened"
+eq "$(assignee_of g-1)" "" "and unassigned, so its pool can claim it"
+eq "$(meta g-1 gc.routed_to)" "rig/rig.polecat" "the route stands"
+eq "$(meta g-1 gc.superseded_by)" "<absent>" "the successor pointer is withdrawn"
+eq "$(meta g-1 gc.superseded_by_store)" "<absent>" "and so is its store"
+has "$(notes g-1)" "Reopened" "the bead records why it was reopened"
+has "$(notes g-1)" "gc.routed_to=rig/rig.polecat" "naming the mark that landed"
+has "$out" "REOPENED g-1" "the pass reports the reopen"
+has "$out" "until-resolved: 0 disposed, 1 live" "and counts the bead as live work, not a disposal"
+
+echo "# until: an until edge removed while the pass holds the bead reopens it"
+store "$G1_OWED"
+out="$(GC_REHOME_TOOL="$BIN/rehome-race.sh" STUB_REHOME_RACE_JQ='map(if .id == "g-1" then ._deps = [] else . end)' "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the pass is clean"
+eq "$(status_of g-1)" "open" "a bead whose edge was removed while the pass held it is reopened"
+eq "$(meta g-1 gc.superseded_by)" "<absent>" "with no successor pointer"
+has "$(notes g-1)" "its until edge to x-1 is gone" "the bead records the removed edge"
+
+# The real disposer, against the same fixture store: a pinned pass names its
+# store, so bead-rehome resolves it through `gc rig list` and every read and
+# write it makes reaches this store through `gc bd`. bd closes an assigned bead
+# only for its assignee, which the stub's close enforces, so a pass that did not
+# run bead-rehome as the claim would leave the bead unclosed.
+mkdir -p "$TMP/rig-a/.beads"
+printf '{"rigs":[{"name":"rig-a","path":"%s"}]}\n' "$TMP/rig-a" > "$TMP/rigs-a.json"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$BIN/finalize-gate-pass.sh"; chmod +x "$BIN/finalize-gate-pass.sh"
+real_rehome() { STUB_RIGS_JSON="$TMP/rigs-a.json" GC_FINALIZE_GATE_TOOL="$BIN/finalize-gate-pass.sh" "$@"; }
+close_reason() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .close_reason) // ""' "$STUB_STORE"; }
+
+echo "# until: through the real bead-rehome, a disposal closes the bead with its pointer"
+store "$G1_OWED"
+out="$(real_rehome env GC_REHOME_TOOL="$HERE/bead-rehome.sh" "$SUT" reconcile --db "$TMP/rig-a/.beads" 2>&1)"; rc=$?
+eq "$rc" 0 "the real disposer's close is a clean pass"
+eq "$(status_of g-1)" "closed" "the real bead-rehome closes the claimed bead"
+eq "$(assignee_of g-1)" "" "and the claim is released from it"
+eq "$(meta g-1 gc.superseded_by)" "x-1" "the pointer the real disposer stamped stands"
+has "$(close_reason g-1)" "folded into x-1" "its close reason names the successor"
+has "$out" "disposed g-1" "the disposal is reported"
+
+echo "# until: through the real bead-rehome, a dispatch that lands while the pass holds the bead reopens it"
+store "$G1_OWED"
+out="$(real_rehome env GC_REHOME_TOOL="$BIN/rehome-race.sh" STUB_REHOME_NEXT="$HERE/bead-rehome.sh" STUB_REHOME_RACE_JQ="$ROUTE_G1" "$SUT" reconcile --db "$TMP/rig-a/.beads" 2>&1)"; rc=$?
+eq "$rc" 0 "the raced disposal through the real disposer is a clean pass"
+eq "$(status_of g-1)" "open" "the bead the real disposer closed is reopened"
+eq "$(assignee_of g-1)" "" "unassigned"
+eq "$(meta g-1 gc.routed_to)" "rig/rig.polecat" "with its route"
+eq "$(meta g-1 gc.superseded_by)" "<absent>" "and no successor pointer"
+eq "$(close_reason g-1)" "" "and no close reason"
+has "$out" "REOPENED g-1" "the reopen is reported"
+has "$out" "until-resolved: 0 disposed, 1 live" "the bead counts as live work"
+
+echo "# until: a held close gives the bead back"
+store "$G1_OWED"
+out="$(STUB_REHOME_RC=5 "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a held close is an expected state"
+eq "$(status_of g-1)" "open" "the bead is open again"
+eq "$(assignee_of g-1)" "" "and unassigned"
+has "$out" "HELD g-1" "the hold is reported"
+
+echo "# until: a failed disposal gives the bead back and fails the pass"
+store "$G1_OWED"
+out="$(STUB_REHOME_RC=1 "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "a hard disposal failure fails the pass"
+eq "$(status_of g-1)" "open" "the bead is open again"
+eq "$(assignee_of g-1)" "" "and unassigned"
+
+echo "# until: a claim an earlier pass left is given back, and the bead disposed"
+store '[
+ {"id":"g-1","issue_type":"task","status":"in_progress","assignee":"deferred-dispatch","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "finishing a claim a pass left is a clean pass"
+has "$out" "gave back g-1" "the claim a pass left is given back first"
+eq "$(status_of g-1)" "closed" "then the owed bead is disposed"
+eq "$(assignee_of g-1)" "" "and left unassigned"
+eq "$(meta g-1 gc.superseded_by)" "x-1" "with its pointer"
+
+echo "# until: a claim an earlier pass left on a bead since routed gives it to its pool"
+store '[
+ {"id":"g-1","issue_type":"task","status":"in_progress","assignee":"deferred-dispatch","metadata":{"gc.routed_to":"rig/rig.polecat"},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the pass is clean"
+eq "$(rehomes)" "0" "the routed bead is not disposed"
+eq "$(status_of g-1)" "open" "it is open"
+eq "$(assignee_of g-1)" "" "and unassigned, so its pool can claim it"
+has "$out" "LEFT g-1" "its live work is reported"
+
+echo "# until: a close an earlier pass made and did not check is checked"
+store '[
+ {"id":"g-1","issue_type":"task","status":"closed","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1"},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "checking a close a pass left is a clean pass"
+has "$out" "the close an earlier pass made under deferred-dispatch stands" "the close is checked"
+eq "$(status_of g-1)" "closed" "and stands"
+eq "$(assignee_of g-1)" "" "with the claim released"
+store '[
+ {"id":"g-1","issue_type":"task","status":"closed","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1","gc.routed_to":"rig/rig.polecat"},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the pass is clean"
+eq "$(status_of g-1)" "open" "a close a dispatch raced, found by the next pass, is withdrawn"
+eq "$(meta g-1 gc.superseded_by)" "<absent>" "with its pointer"
+has "$out" "REOPENED g-1" "and reported"
+store '[
+ {"id":"g-1","issue_type":"task","status":"closed","assignee":"deferred-dispatch","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the pass is clean"
+eq "$(status_of g-1)" "closed" "a close with no pointer is not a disposal, and stands"
+eq "$(assignee_of g-1)" "" "only the claim is released from it"
+has "$out" "closed with no successor pointer" "the pass says why"
+
+echo "# until: a close the pass cannot check stays under the claim, and the next pass checks it"
+store "$G1_OWED"
+rm -f "$TMP/rehomed"
+out="$(GC_REHOME_TOOL="$BIN/rehome-race.sh" STUB_REHOME_RACE_JQ='.' STUB_REHOME_TOUCH="$TMP/rehomed" STUB_SHOW_FAIL_WHEN="$TMP/rehomed" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "a close the pass could not check fails the pass"
+eq "$(status_of g-1)" "closed" "the close stands"
+eq "$(assignee_of g-1)" "deferred-dispatch" "under the claim, which marks it unchecked"
+has "$out" "could not re-read g-1 after closing it" "the failure is reported"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the next pass is clean"
+has "$out" "the close an earlier pass made under deferred-dispatch stands" "it checks the close"
+eq "$(assignee_of g-1)" "" "and releases the claim"
+
+echo "# until: a give-back that fails leaves the claim for the next pass, and fails this one"
+store "$G1_OWED"
+out="$(STUB_RACE_AT='--if-status=open' STUB_RACE_JQ="$ROUTE_G1" STUB_UPDATE_FAIL_AT='--if-status=in_progress' "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "a claim the pass could not give back fails the pass"
+eq "$(assignee_of g-1)" "deferred-dispatch" "the claim stays"
+has "$out" "could not release the claim on g-1" "the failure is reported"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the next pass is clean"
+has "$out" "gave back g-1" "it gives the claim back"
+eq "$(status_of g-1)" "open" "the bead is open"
+eq "$(assignee_of g-1)" "" "and unassigned"
+eq "$(meta g-1 gc.routed_to)" "rig/rig.polecat" "with its route"
 
 # --- the disposal budget ------------------------------------------------------
 # The order's timeout kills a pass wherever it stands, and a killed pass prints

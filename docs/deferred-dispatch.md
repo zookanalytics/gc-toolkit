@@ -443,14 +443,14 @@ live work fall into these groups:
 - **Structural:** a convoy that tracks the bead or parents it, or an open child
   under it.
 
-The pass reads these marks twice. The first read is the row the pass-start
-listing returns. The second is a fresh read of the bead and of what depends on
-it, made just before the close, because a sling or a claim can land
-mid-pass. That includes a sling the pass's own dispatch half made moments
-earlier. A bead with any mark is reported and left open, which is never a pass
-failure. The fresh read also confirms the bead is still owed: its `until` edge
-to the successor is still there, no `until` target has reopened, and no
-`blocks` blocker has opened. It takes the bead's edges from the bead's own
+Before the close, the pass reads these marks twice. The first read is the row
+the pass-start listing returns. The second is a fresh read of the bead and of
+what depends on it, made under the pass's claim on the bead (below) just before
+the close, because a sling or a claim can land mid-pass. That includes a sling
+the pass's own dispatch half made moments earlier. A bead with any mark is
+reported and left open, which is never a pass failure. The fresh read also
+confirms the bead is still owed: its `until` edge to the successor is still
+there, no `until` target has reopened, and no `blocks` blocker has opened. It takes the bead's edges from the bead's own
 `bd list` row, as the listing does, because `bd show` leaves out an edge whose
 target has no row in this store. An edge added since the listing to a bead in
 another store, or to an external reference, is such an edge. When an `until`
@@ -459,13 +459,46 @@ cannot be decided: the target's status is unknown, and an unknown parent could
 be a convoy. The pass reports the bead and leaves it waiting, as it does a
 bead whose target the status read cannot resolve. Removing the edge is how a
 person keeps a bead the pass would otherwise dispose, so a bead whose edge
-went after the listing is kept. A dispatch that lands after the fresh read
-meets a closed bead: no pool offers it, and `mol-polecat-work`'s load-context
-quiesces a pour over it.
+went after the listing is kept.
 The guard runs before `bead-rehome` is called, because `bead-rehome` can stamp
 its successor pointer and still have the close refused. A pointer on an anchor
 reads as a disposed anchor to `scaffolding-sweep.sh`, which then retires that
 anchor's review scaffolding.
+
+No read can keep a dispatch out of the gap between that read and the close. A
+dispatch writes its mark (a pool route, an arm, a pour) whatever the bead
+holds, and bd makes a write conditional only on the status and assignee it
+finds. So the pass disposes a bead under a claim of its own:
+
+1. It claims the bead in one write that bd applies only while the bead is
+   still open and unassigned. The write sets it in progress under the assignee
+   `deferred-dispatch`. While the pass holds the claim, bd refuses a worker's
+   claim and an assignment, and no pool offers the bead.
+2. It makes the fresh read above under the claim, and goes on only when that
+   read finds the bead still owed and carrying no mark. Otherwise it gives the
+   bead back, open and unassigned, with whatever landed on it.
+3. `bead-rehome` stamps the pointer and closes the bead, acting as
+   `deferred-dispatch`, the actor bd's close requires of a bead assigned to it.
+4. It reads the bead and its edges again. A mark that landed while the pass
+   held the bead landed before this read, so the read finds it, and the pass
+   reopens the bead, removes its successor pointer and appends a note naming
+   what landed. A removed `until` edge, a reopened target and an opened
+   blocker reopen it too. Otherwise it releases the claim from the closed
+   bead.
+
+A dispatch that lands before the pass's last read of the bead therefore keeps
+it open, unassigned and dispatched. One that lands after that read meets a
+closed bead, as a dispatch of any closed bead does: no pool offers it, and
+`mol-polecat-work`'s load-context cancels a run poured over it. Each write the
+pass makes under its claim is conditional on the status and assignee the
+claim leaves, so none lands on a bead somebody else has taken since.
+
+A pass that stops while it holds a claim leaves the bead in progress, or
+closed, under `deferred-dispatch`. The next pass finishes both before it lists
+the store: it gives back a bead it finds in progress, so its listing reads that
+bead as it reads any other, and it checks a bead it finds closed as step 4
+does. Until a pass finishes it, a bead in progress under the claim reads to the
+doctor check below as the bead the pass claimed.
 
 When the close is held, commonly by an open visit tracking the bead,
 `bead-rehome` records the successor pointer and refuses the close rather than
@@ -484,9 +517,10 @@ because a close aimed by id prefix could land in another store. An unpinned
 pass leaves the store to `bead-rehome`, whose derivation by prefix is the
 routing an unpinned read of an id takes.
 
-A disposal costs a fresh read and a `bead-rehome` call, which makes several
-store reads and writes of its own, so a target with many `until` dependents
-could run a pass past the order's timeout. The timeout kills a pass mid-loop,
+A disposal costs a claim, a fresh read, a `bead-rehome` call, which makes
+several store reads and writes of its own, and a read and a write after the
+close, so a target with many `until` dependents could run a pass past the
+order's timeout. The timeout kills a pass mid-loop,
 before it prints its summary. So the until half starts a disposal only while
 one disposal's allowance (`DEFERRED_DISPATCH_DISPOSE_ALLOWANCE_SECS`, 30s) is
 left in the same pass budget (`DEFERRED_DISPATCH_PASS_BUDGET_SECS`, 420s from the

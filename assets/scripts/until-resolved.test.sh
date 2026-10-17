@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/until-resolved.sh, the one place that
 # decides which beads an `until` edge has resolved. Covers:
-#   (SCAN)    until_scan selects an open, unassigned bead with an `until` edge
-#             and nothing else; decides it waiting, unresolved, blocked or owed;
+#   (SCAN)    until_scan selects an open, unassigned bead with an `until` edge,
+#             and one in progress under the pass's own claim, read as the bead
+#             it claimed, and nothing else; decides it waiting, unresolved,
+#             blocked or owed;
 #             names the successor that closed last and the moment the bead
 #             became owed (the latest of its targets' closes, its edges'
 #             creation and its blockers' closes); carries the live-work marks of
@@ -15,7 +17,9 @@
 #             blocker reopened or added, an edge `bd show` leaves out because
 #             its target has no row in the store, live work on the row or the
 #             edges, or nothing, and fails closed on a read that fails or does
-#             not parse
+#             not parse; it reads the pass's own claim as the bead the pass
+#             claimed, and with `closed` reads a bead the pass just closed the
+#             same way, so only what landed on it meanwhile reads live
 #   (READERS) the until consumer and its doctor mirror source this file and
 #             call both functions
 #   (NO-COPY) no other file in the pack defines these names
@@ -83,6 +87,21 @@ eq "$rc" "0" "(SCAN) a readable store exits 0"
 eq "$(printf '%s\n' "$out" | cut -f1 | paste -sd, -)" "c-1" "(SCAN) only the open, unassigned bead with an until edge is a candidate"
 eq "$(grep -c -- '--id' "$TMP/reads")" "1" "(SCAN) every referenced bead is read in one status read"
 eq "$(grep -c -- '--id x-1 --all --include-gates --include-infra --include-templates' "$TMP/reads")" "1" "(SCAN) the status read asks for closed beads and every hidden class"
+
+echo "# until_scan: a bead under the pass's own claim"
+# A pass claims a bead before it disposes it. A bead it claimed and did not
+# finish is in progress under UNTIL_FENCE, and reads as the open, unassigned bead
+# it claimed. Any other claim is a live worker's.
+listing '[
+ {"id":"f-1","issue_type":"task","status":"in_progress","assignee":"deferred-dispatch","metadata":{},"dependencies":[{"depends_on_id":"x-1","type":"until"}]},
+ {"id":"n-4","issue_type":"task","status":"in_progress","assignee":"rig/rig.polecat-1","metadata":{},"dependencies":[{"depends_on_id":"x-1","type":"until"}]},
+ {"id":"n-5","issue_type":"task","status":"blocked","assignee":"deferred-dispatch","metadata":{},"dependencies":[{"depends_on_id":"x-1","type":"until"}]}]'
+statuses '[{"id":"x-1","status":"closed","closed_at":"2026-01-01T00:00:00Z"}]'
+out="$(until_scan fake_bd)"
+eq "${UNTIL_FENCE:-}" "deferred-dispatch" "(SCAN) the claim's assignee is deferred-dispatch"
+eq "$(printf '%s\n' "$out" | cut -f1 | paste -sd, -)" "f-1" "(SCAN) a bead in progress under the claim is a candidate, and one another worker holds, or under the claim at another status, is not"
+eq "$(col "$(row_of "$out" f-1)" 2)" "owed" "(SCAN) …decided as the bead the pass claimed"
+eq "$(col "$(row_of "$out" f-1)" 8)" "-" "(SCAN) …with no mark for the claim itself"
 
 echo "# until_scan: the four states"
 listing '[
@@ -181,6 +200,35 @@ fresh_case "a convoy tracking the bead reads live" \
     '{"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"dependencies":['"$CLEAN_UNTIL"']}' '[{"id":"c-1","dependency_type":"tracks","issue_type":"convoy","status":"closed"}]' "$(printf 'live\ttracked by convoy c-1 (closed)')"
 fresh_case "a claim since the listing reads live" \
     '{"id":"g-1","issue_type":"task","status":"in_progress","assignee":"rig__polecat-1","metadata":{},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'live\tstatus=in_progress; assignee=rig__polecat-1')"
+fresh_case "the pass's own claim reads as the bead it claimed" \
+    '{"id":"g-1","issue_type":"task","status":"in_progress","assignee":"deferred-dispatch","metadata":{},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'clear\t-')"
+fresh_case "a route on a bead the pass holds reads live, naming the route alone" \
+    '{"id":"g-1","issue_type":"task","status":"in_progress","assignee":"deferred-dispatch","metadata":{"gc.routed_to":"rig/rig.polecat"},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'live\tgc.routed_to=rig/rig.polecat')"
+fresh_case "a bead closed under the claim, read before a close, reads live" \
+    '{"id":"g-1","issue_type":"task","status":"closed","assignee":"deferred-dispatch","metadata":{},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'live\tstatus=closed; assignee=deferred-dispatch')"
+
+echo "# until_fresh closed: the bead just after the pass closed it"
+# The read after a close: a bead closed under the claim, or closed and unassigned
+# once a pass has released the claim from it, reads as the bead the pass
+# claimed. Anything that landed on it meanwhile reads as it would before.
+closed_case() { # name show-row up-array want
+    printf '%s' "[$2]" > "$TMP/show_g-1"
+    printf '%s' "$3" > "$TMP/up_g-1"
+    printf '%s' "[$2]" | jq -c '[ .[] | .dependencies = [ (.dependencies // [])[] | {depends_on_id: .id, type: .dependency_type} ] ]' > "$TMP/row_g-1"
+    eq "$(until_fresh fake_bd g-1 x-1 closed)" "$4" "(FRESH) $1"
+}
+closed_case "a bead closed under the claim, with nothing new on it, reads clear" \
+    '{"id":"g-1","issue_type":"task","status":"closed","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1"},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'clear\t-')"
+closed_case "so does one closed and unassigned" \
+    '{"id":"g-1","issue_type":"task","status":"closed","assignee":"","metadata":{"gc.superseded_by":"x-1"},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'clear\t-')"
+closed_case "a route that landed on it reads live" \
+    '{"id":"g-1","issue_type":"task","status":"closed","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1","gc.routed_to":"rig/rig.polecat"},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'live\tgc.routed_to=rig/rig.polecat')"
+closed_case "a convoy that began tracking it reads live" \
+    '{"id":"g-1","issue_type":"task","status":"closed","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1"},"dependencies":['"$CLEAN_UNTIL"']}' '[{"id":"c-1","dependency_type":"tracks","issue_type":"convoy","status":"open"}]' "$(printf 'live\ttracked by convoy c-1 (open)')"
+closed_case "a bead closed under another assignee reads live" \
+    '{"id":"g-1","issue_type":"task","status":"closed","assignee":"rig__polecat-1","metadata":{"gc.superseded_by":"x-1"},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'live\tstatus=closed; assignee=rig__polecat-1')"
+closed_case "a removed until edge reads gone" \
+    '{"id":"g-1","issue_type":"task","status":"closed","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1"},"dependencies":[]}' '[]' "$(printf 'gone\t-')"
 
 CLEAN_ROW='{"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"dependencies":['"$CLEAN_UNTIL"']}'
 fresh_case "an until edge bd show leaves out, to a target with no row in this store, reads unresolved" \
@@ -251,7 +299,7 @@ done
 
 echo "# no private copies"
 # Specs and generated renders are history and output, not readers.
-DEF_RE='def[[:space:]]+(until_candidate|until_status_map|until_judge|until_row|until_fresh_verdict)|(^|[[:space:]])(until_scan|until_fresh)[[:space:]]*\(\)'
+DEF_RE='def[[:space:]]+(until_unfenced|until_candidate|until_status_map|until_judge|until_row|until_fresh_verdict)|(^|[[:space:]])(until_scan|until_fresh)[[:space:]]*\(\)'
 COPIES=""
 for d in agents assets doctor formulas lifecycle orders overlays packs services skills template-fragments tools; do
     [ -d "$ROOT/$d" ] || continue

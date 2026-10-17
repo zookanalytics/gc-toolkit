@@ -968,15 +968,19 @@ targets have all closed, whose `until` edge to the successor still stands, that
 no open `blocks` blocker of its own holds, and that carries no live work as
 `assets/scripts/live-work.sh` defines it. The pass checks them on its
 pass-start listing and again on a fresh read of the bead and what depends on
-it, made just before the call. Both reads take the bead's edges from its
-`bd list` row, because `bd show` leaves out an edge whose target has no row in
-this store, so an `until` target, a `blocks` blocker or a parent the store
-cannot read leaves its condition unproven. It leaves a bead that fails any of
-them, or that it cannot prove meets one, as it is and never calls
-`bead-rehome.sh` on it ([deferred-dispatch.md](deferred-dispatch.md), "The
-resolved-by consumer").
+it, made just before the call under a claim the pass takes on the bead. Both
+reads take the bead's edges from its `bd list` row, because `bd show` leaves
+out an edge whose target has no row in this store, so an `until` target, a
+`blocks` blocker or a parent the store cannot read leaves its condition
+unproven. It leaves a bead that fails any of them, or that it cannot prove
+meets one, as it is and never calls `bead-rehome.sh` on it. It runs
+`bead-rehome.sh` as its claim, and reads the bead once more after the close:
+anything that landed on the bead or its edges while the pass held it makes the
+pass withdraw the disposal, reopening the bead and removing the pointer
+([deferred-dispatch.md](deferred-dispatch.md), "The resolved-by consumer").
 Whoever judges, `bead-rehome.sh` stays the one writer of the pointer and the
-close.
+close. The one other write to the pointer is that withdrawal, which removes a
+pointer the pass had `bead-rehome.sh` stamp moments before.
 
 A disposition ends the bead's branch, the way a merge ends a landed one
 through the repository's delete-on-merge setting. Once the close reads back,

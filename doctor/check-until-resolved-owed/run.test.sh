@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Hermetic test for doctor/check-until-resolved-owed. Stub gc/bd only; no live
 # city, Dolt, or network. Covers: the OWED finding (open, unassigned bead whose
-# `until` targets closed long ago but that was never disposed); the exemptions
-# (an until target still open; closed only recently, within the reconcile window;
-# an assigned bead; a non-open bead; a bead held by its own open `blocks` blocker;
-# a bead with a `blocks` edge but no `until` edge — the scope guard, only `until`
-# disposes); the multi-target rule (owed only when ALL until targets closed, owed-
+# `until` targets closed long ago but that was never disposed, and a bead the
+# pass claimed and did not finish disposing, read as the bead it claimed); the
+# exemptions (an until target still open; closed only recently, within the
+# reconcile window; an assigned bead; a non-open bead; a bead held by its own
+# open `blocks` blocker; a bead with a `blocks` edge but no `until` edge — the
+# scope guard, only `until` disposes); the multi-target rule (owed only when ALL until targets closed, owed-
 # since the latest); the fail-closed probes (unreadable open listing, unreadable
 # status listing, an until target the status read drops as unresolvable, an
 # unreadable rig list); the gate-target resolution (bd hides gates unless asked);
@@ -223,6 +224,20 @@ refs_store alpha "$(r_closed x-0 "$OLD")"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a non-open resolved-by bead is a deliberate hold, not flagged"
 hasnt "$OUT" "alpha bead u-5" "a held-status bead is not reported"
+clear_stores
+
+# --- 5b. OWED: a bead the pass claimed and did not finish disposing -----------
+# The pass claims a bead before it disposes it (in progress under
+# deferred-dispatch), and its next run gives back a claim it left. A bead still
+# under that claim past the window is a disposal the order did not finish, read
+# as the open, unassigned bead the pass claimed: owed, not a live worker's.
+open_store alpha '{"id":"u-5c","issue_type":"task","status":"in_progress","assignee":"deferred-dispatch","dependencies":[{"depends_on_id":"x-0","type":"until"}]}'
+refs_store alpha "$(r_closed x-0 "$OLD")"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a bead the pass claimed and did not finish, owed past the window, warns"
+has "$OUT" "owed but not firing" "it is reported as an owed disposition"
+has "$OUT" "alpha bead u-5c" "the finding names the bead"
+hasnt "$OUT" "carries live work" "the pass's own claim is not live work"
 clear_stores
 
 # --- 6. SCOPE GUARD: ONLY until disposes — a blocks edge to a closed target

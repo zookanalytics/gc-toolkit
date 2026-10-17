@@ -6,6 +6,13 @@
 # blocker of its own is still open. It is disposed only when it also carries no
 # live work, as live-work.sh (which this file sources) defines it.
 #
+# The pass claims a bead before its last read of the bead and holds that claim
+# through the close (docs/deferred-dispatch.md). While it holds the claim the
+# bead is in progress under UNTIL_FENCE, and once bead-rehome has closed it the
+# bead stays closed under UNTIL_FENCE until the pass confirms the close. The
+# claim is the pass's own, not live work, so both functions below read a bead
+# under it as the open, unassigned bead the pass claimed.
+#
 # Sourced (never executed) by deferred-dispatch.sh, whose reconcile pass
 # disposes an owed bead through bead-rehome, and by
 # doctor/check-until-resolved-owed, which reports an owed bead that pass has
@@ -22,8 +29,10 @@
 #   One listing of the store, then one status read of every bead the
 #   candidates' edges name, decided per candidate in one jq pass. A candidate
 #   is an OPEN, UNASSIGNED bead with at least one `until` edge: any other
-#   status is a deliberate hold, and an assignee is a live worker. Prints one
-#   TAB-separated row per candidate:
+#   status is a deliberate hold, and an assignee is a live worker. A bead in
+#   progress under UNTIL_FENCE is a candidate too, as the open, unassigned bead
+#   a pass claimed and did not finish disposing. Prints one TAB-separated row
+#   per candidate:
 #     id  state  successor  owed-since  until-targets  blocks-blockers  detail  marks
 #   state is one of:
 #     waiting     an `until` target is not closed (detail: those targets)
@@ -43,10 +52,14 @@
 #   read does. Either way nothing is printed, so an unread store never reads as
 #   one with nothing owed.
 #
-# until_fresh <reader> <id> <successor>
+# until_fresh <reader> <id> <successor> [closed]
 #   The bead, every edge it has, and the beads that depend on it, as the store
 #   holds them now. A caller reads them just before it acts, because a scan
-#   ages while a pass runs. `bd show` gives each edge with its target's status,
+#   ages while a pass runs. With `closed`, it reads them just after the pass
+#   has closed the bead: a bead closed under UNTIL_FENCE, or closed and
+#   unassigned, reads as the open, unassigned bead the pass claimed, so a clear
+#   verdict says the close took nothing that landed on the bead or its edges
+#   while the pass held it. `bd show` gives each edge with its target's status,
 #   but it leaves out an edge whose target has no row in this store, such as
 #   one in another store or an external reference. The bead's `bd list` row
 #   carries every edge it has, so the two reads together say which edges the
@@ -98,8 +111,9 @@ until_scan() { # reader -> one row per candidate on stdout; exit 1 listing unrea
         || return 2
 }
 
-until_fresh() { # reader id successor -> "<verdict>\t<detail>" on stdout; exit 1 when a read fails or does not parse
-    local reader="$1" id="$2" succ="$3" row listed up
+until_fresh() { # reader id successor [closed] -> "<verdict>\t<detail>" on stdout; exit 1 when a read fails or does not parse
+    local reader="$1" id="$2" succ="$3" closed=false row listed up
+    [ "${4:-}" = closed ] && closed=true
     [ -n "${UNTIL_RESOLVED_JQ:-}" ] || return 1
     # `bd show` gives the bead's own edges with each target's status, and
     # `bd list --id` gives the bead's row with every edge it has, including one
@@ -112,7 +126,7 @@ until_fresh() { # reader id successor -> "<verdict>\t<detail>" on stdout; exit 1
     up="$("$reader" dep list "$id" --direction=up --json </dev/null 2>/dev/null)" || return 1
     [ -n "$row" ] && [ -n "$listed" ] && [ -n "$up" ] || return 1
     { printf '%s' "$row" | scrub; printf '\n'; printf '%s' "$listed" | scrub; printf '\n'; printf '%s' "$up" | scrub; printf '\n'; } \
-        | jq -rn --arg id "$id" --arg succ "$succ" "$UNTIL_RESOLVED_JQ"'
+        | jq -rn --arg id "$id" --arg succ "$succ" --argjson closed "$closed" "$UNTIL_RESOLVED_JQ"'
             input as $row | input as $listed | input as $up
             # `bd show` answers an array on a hit and an {"error": ...} object
             # on a miss, both at exit 0. `bd list --id` answers an array, with
@@ -125,10 +139,13 @@ until_fresh() { # reader id successor -> "<verdict>\t<detail>" on stdout; exit 1
                               | if length == 1 then .[0] else null end
                          else null end) as $l
             | if ($b | type) == "object" and ($l | type) == "object" and ($up | type) == "array"
-              then $b | until_fresh_verdict($l; $up; $succ)
+              then $b | until_unfenced($closed) | until_fresh_verdict($l; $up; $succ)
               else error("unreadable") end' 2>/dev/null
 }
 
+# The assignee the until consumer claims a bead under while it disposes it.
+# shellcheck disable=SC2034  # read by the scripts that source this file
+UNTIL_FENCE="deferred-dispatch"
 UNTIL_RESOLVED_JQ=""
 # shellcheck source=live-work.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/live-work.sh" 2>/dev/null || LIVE_WORK_JQ=""
@@ -137,6 +154,19 @@ if [ -n "${LIVE_WORK_JQ:-}" ]; then
     # defs to a jq program. The live-work defs come first, because the decision
     # reads them.
     UNTIL_RESOLVED_JQ="$LIVE_WORK_JQ"'
+  # A bead row with the claim of the pass read away: a row in progress under
+  # UNTIL_FENCE reads as the open, unassigned row the pass claimed. With $closed
+  # true, so does a closed row under UNTIL_FENCE, the bead the pass has closed
+  # and not yet confirmed, and a closed unassigned row, the bead once a pass has
+  # confirmed its close. Any other row reads as it stands.
+  def until_unfenced($closed):
+    "'"$UNTIL_FENCE"'" as $fence
+    | ((.status // "") | tostring | ascii_downcase) as $st
+    | ((.assignee // "") | tostring) as $a
+    | if ($st == "in_progress" and $a == $fence)
+         or ($closed and $st == "closed" and ($a == $fence or $a == ""))
+      then .status = "open" | .assignee = ""
+      else . end;
   # One candidate from a row of `bd list --json`, whose .dependencies carry the
   # edges of the bead itself as {depends_on_id, type, created_at}. Empty for a
   # row that is not a candidate. An `until` edge whose target id is blank still
@@ -145,7 +175,8 @@ if [ -n "${LIVE_WORK_JQ:-}" ]; then
     def edges($t): [ (.dependencies // [])[]? | objects
                      | select(((.type // "") | tostring) == $t) ];
     def ids: [ .[] | ((.depends_on_id // "") | tostring) | select(length > 0) ] | unique;
-    select(((.status // "") | tostring) == "open")
+    until_unfenced(false)
+    | select(((.status // "") | tostring) == "open")
     | select(((.assignee // "") | tostring) == "")
     | edges("until") as $u
     | select(($u | length) > 0)

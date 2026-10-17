@@ -30,7 +30,10 @@
 # closing leaves the dependent fully owed — so it is never a disposal and a bead
 # held by an open `blocks` blocker of its own is correctly waiting, never flagged. A bead already assigned is
 # a live worker's, and reconcile would not dispose over it; a non-open bead is a
-# deliberate hold the pass leaves alone; neither is owed a disposition.
+# deliberate hold the pass leaves alone; neither is owed a disposition. The
+# pass's own claim is the exception: a bead in progress under it is a disposal a
+# pass began and did not finish, which until-resolved.sh reads as the open,
+# unassigned bead the pass claimed, so it is owed like any other.
 #
 # A bead that carries live work is never disposed either, and the marks that
 # say so come from assets/scripts/live-work.sh, read through until-resolved.sh
