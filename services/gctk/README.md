@@ -52,8 +52,17 @@ them. `test`, `lint` and `typecheck` run the command their caller passes and
 record the result against the commit it ran at. `setup` and `build` run their
 command and record nothing. The caller passes every input: the command, which
 test run it is, and, when the rig declares no command for a check, that there
-is nothing to run. gctk reads no formula var and works out no diff. No formula
-or script calls `gctk rig` yet.
+is nothing to run. gctk reads no formula var and works out no diff.
+
+Every place that runs a rig's declared checks calls it, passing the command
+from the rig's formula vars: `mol-polecat-work`'s workspace-setup, its
+preflight-tests at the base commit and its self-review, the refinery's
+run-tests at the merged head, and the correctness review when the pinned
+commit has no record to read. `assets/scripts/self-review-check.sh`, the
+self-review's exit condition, and the correctness review read the records with
+`--check`. Each caller finds the binary by one line, the `gctk-bin` block,
+which takes `$GCTK_BIN` or else the city's build and calls no `gc`, because
+`self-review-check.sh` runs where `gc` can fail.
 
 The records live under the rig clone's git common directory, which every
 worktree of the clone shares and which outlives any one of them:
@@ -64,7 +73,10 @@ worktree of the clone shares and which outlives any one of them:
 | `gc-rig-checks/test/trees/<tree>.json` | the full-suite test pass every commit with that tree reads |
 
 `--publish-bead <bead>` copies a record onto the bead's `rig_check.<check>` key,
-which `lifecycle/lifecycle.toml` registers. `gctk rig --help` states the flags,
+which `lifecycle/lifecycle.toml` registers. A record says what a command did at
+a commit and never whose failure it is: a caller that judges a recorded fail
+pre-existing writes that judgment on a bead with
+`assets/scripts/rig-check-pre-existing.sh`. `gctk rig --help` states the flags,
 which record answers a call, and the exit codes. `specs/tk-1hazlo2/rig-checks.md`
 records the design and its measured cost.
 

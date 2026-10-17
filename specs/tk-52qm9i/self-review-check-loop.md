@@ -5,6 +5,14 @@ description: How the mol-polecat-work self-review step composes with a ralph che
 
 # self-review is a bounded verified-green check loop
 
+> **Gate addendum (tk-b0ww25t):** the stamp this spec describes is superseded in
+> the implementation. Each iteration runs the declared checks through `gctk
+> rig`, which records each result against the commit it ran at, and the exit
+> condition reads those records at the live HEAD with `gctk rig <check>
+> --check` in place of `metadata.self_review_passed_sha`. The verify-not-run
+> shape and the session split below stand. The cutover is recorded in
+> [specs/tk-b0ww25t/check-runner-cutover.md](../tk-b0ww25t/check-runner-cutover.md).
+
 The self-review step of `mol-polecat-work` is a `[steps.check]` loop
 (`max_attempts = 3`). Each iteration runs the rig's declared checks in its own
 session and, on green, stamps `metadata.self_review_passed_sha = <HEAD>` on the
