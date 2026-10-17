@@ -73,12 +73,16 @@ the hand-added checks of a rig that declares none included. In a checkout they
 find clean, they reset each tracked file to HEAD and remove each untracked file
 and nested repository git does not ignore, after a pass or a fail, and name
 what they put back. A checkout that already had changes keeps what the command
-leaves, because its changes cannot be told from the caller's, so nothing of an
-agent's is touched; that is why a call site runs no `git clean`
-([specs/tk-1hazlo2/rig-checks.md](../tk-1hazlo2/rig-checks.md)). Ignored files
-stay, so what an install puts in an ignored directory, or a build writes there
-for the tests to read, survives. No step text grows, and the self-review step
-stays under the hook cap.
+leaves, because its changes cannot be told from the caller's, so an agent's
+uncommitted work is left alone; that is why a call site runs no `git clean`
+([specs/tk-1hazlo2/rig-checks.md](../tk-1hazlo2/rig-checks.md)). The exception
+is a change to a file git is told to assume unchanged, which escapes the clean
+read, as it escapes every recorded check's, and is put back with whatever the
+run left. Ignored files stay, other than one inside a nested repository the
+put-back removes or one in the way of a tracked file that goes back, so what an
+install puts in an ignored directory, or a build writes there for the tests to
+read, survives. No step text grows, and the self-review step stays under the
+hook cap.
 
 Two things are not put back, and each is named in a WARN line, so the
 refusal that follows explains itself: a HEAD the command moved, and changes
