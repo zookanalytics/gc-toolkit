@@ -732,10 +732,13 @@ source for a rig's rows:
 
 The working-tree read goes. Today a resolve with no `--at`, or at a commit
 that carries no index, reads the working tree's `review-checks.toml`
-(`review-checks.sh:33-43`, `:169-173`). Under this design a call that names
-neither a commit nor an index, through `--file` or `GC_REVIEW_CHECKS_INDEX`,
-is a usage error, so no reader can fall back to the checkout it happens to run
-in.
+(`review-checks.sh:33-43`, `:169-173`). Under this design the rig's layer
+comes from the commit `--at` names and from nowhere else, so no reader falls
+back to the checkout it happens to run in. A call that names no commit has no
+rig layer: it answers from the pack's rows alone, and `--extension` prints
+nothing. Every reader in the table below names its commit. The one that can
+still call with none is gate-ensure when its head read fails, until unit B
+makes it hold that anchor for the pass (section 2).
 
 A rig row whose phase is outside the ordered set is refused, as today
 (`review-checks.sh:227-235`). Read at a commit, that refusal holds only the
@@ -891,9 +894,10 @@ review.
    rig's rows come from the commit `--at` names, not from the working tree,
    which the test proves by resolving at a commit whose index differs from the
    working tree's, and a commit with no index adds no rows even when the
-   working tree has one. A call that names neither a commit nor an index is
-   refused. `--extension` prints a commit's extension, and prints nothing and
-   exits 0 at a commit that carries none. A rig row with a phase outside the
+   working tree has one. A call that names no commit answers from the pack's
+   rows alone, even when the working tree has an index. `--extension` prints a
+   commit's extension, and prints nothing and exits 0 at a commit that carries
+   none. A rig row with a phase outside the
    ordered set is refused.
 7. **What signoff.sh refuses** (`signoff.test.sh`), iterating the effective
    index. It refuses `--add-gates` from every declared check but triage,
@@ -1011,8 +1015,8 @@ when unit A lands.
 
 - `review-checks.sh` takes on the layered index: the pack's rows beside the
   script, the rig's from the commit `--at` names. It gains `--check`, `--show`
-  and `--extension`, its working-tree read goes, a call that names neither a
-  commit nor an index is refused, and the `method` key is ignored.
+  and `--extension`, its working-tree read goes, a call that names no commit
+  answers from the pack's rows alone, and the `method` key is ignored.
 - liveness-sweep.sh resolves at the head of each anchor's branch, and
   `review-dispatch-body.sh` reads a check's purpose through `--check --at` and
   its extension through `--extension --at` until unit B deletes it (section 6).
