@@ -147,8 +147,10 @@ reports whether the `gh` it needs is present.
   For a page, write the script as you would for a video
   (`skills/gc-demo-script/SKILL.md`). Its steps drive the app to the state, the
   capture is the state the last step leaves, and the app target is the one a
-  video takes. `--selector <css>` captures one element instead of the viewport,
-  and `--full-page` captures the whole page. For a terminal, the command runs
+  video takes. A `--serve` command given `--port` finds that port in `$PORT`,
+  and `--port 0` picks a free one, so two captures never share a server.
+  `--selector <css>` captures one element instead of the viewport, and
+  `--full-page` captures the whole page. For a terminal, the command runs
   with bash from `--cwd`, so a relative path runs the reviewed commit's script.
   The capture shows the command after a `$` prompt, then what it printed. Run
   only a command that reads, because one that files, routes or closes anything

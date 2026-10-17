@@ -53,7 +53,10 @@
 #   --script     the demo:capture script whose steps drive the app to the state.
 #   --serve-dir  serve a static directory, on a free port unless --port names one.
 #   --serve      spawn a dev-server command, wait for it on --port, then tear it
-#                down. --cwd is its working directory.
+#                down. --cwd is its working directory. With --port, the
+#                command's environment carries the port as PORT, and --port 0
+#                picks a free one, so captures side by side never share a
+#                server.
 #   --base-url   drive a server that is already running.
 #                Exactly one of --serve-dir / --serve / --base-url is required.
 #   --selector   capture this element instead of the viewport.
@@ -144,7 +147,7 @@ case "$OUTPUT" in *.png|*.PNG) ;; *) usage_err "--output must name a .png file (
 # and the file's name is the alt text it shows otherwise.
 case "${OUTPUT##*/}" in *'#'*) usage_err "--output's file name must not contain '#', which gh reads as the start of an image's alt text" ;; esac
 posint() { case "$2" in ''|*[!0-9]*|0*) usage_err "$1 must be a positive integer (got '$2')" ;; esac; }
-[ -z "$PORT" ] || posint --port "$PORT"
+[ -z "$PORT" ] || [ "$PORT" = 0 ] || posint --port "$PORT"
 [ -z "$COLUMNS" ] || posint --columns "$COLUMNS"
 [ -z "$MAX_LINES" ] || posint --max-lines "$MAX_LINES"
 case "$KIND" in
@@ -158,6 +161,9 @@ case "$KIND" in
     # The engine refuses the pair too, but this script reaches the engine only
     # after provisioning its browser.
     if [ -n "$SELECTOR" ] && [ "$FULL_PAGE" -eq 1 ]; then usage_err "page takes --selector or --full-page, not both"; fi
+    # Only a command can be told which port to take; --serve-dir takes a free
+    # one by itself.
+    [ "$PORT" != 0 ] || [ -n "$SERVE_CMD" ] || usage_err "--port 0 picks a free port for a --serve command; give it with --serve only"
     [ -f "$SCRIPT" ] || fail "--script '$SCRIPT' does not exist"
     [ -z "$SERVE_DIR" ] || [ -d "$SERVE_DIR" ] || fail "--serve-dir '$SERVE_DIR' is not a directory"
     [ -z "$CWD" ] || [ -d "$CWD" ] || fail "--cwd '$CWD' is not a directory" ;;
@@ -223,6 +229,15 @@ draw() {
 CMD_RC=""
 case "$KIND" in
   page)
+    # The engine reuses whatever already answers on a --serve port and spawns
+    # nothing, so a capture that must not meet another one's server takes a
+    # port of its own. The port is free when it is read here, and stays so
+    # unless another process binds it before the command does.
+    if [ "$PORT" = 0 ]; then
+      PORT=$(node -e 'const s = require("net").createServer(); s.listen(0, "127.0.0.1", () => { process.stdout.write(String(s.address().port)); s.close(); });' 2>/dev/null)
+      case "$PORT" in ''|*[!0-9]*|0*) fail "could not find a free port for the --serve command" ;; esac
+    fi
+    [ -z "$SERVE_CMD" ] || [ -z "$PORT" ] || export PORT
     set -- "$SCRIPT"
     if [ -n "$SERVE_DIR" ]; then set -- "$@" --serve-dir "$SERVE_DIR"
     elif [ -n "$SERVE_CMD" ]; then set -- "$@" --serve "$SERVE_CMD"

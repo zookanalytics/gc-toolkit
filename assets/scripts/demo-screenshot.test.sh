@@ -46,8 +46,9 @@ for c in bash sed tr head tail dirname mkdir mktemp rm tee wc cat od awk cp git;
 done
 
 # Stubs. node answers --version with $NODE_VERSION, hands the checkout's CLI to
-# $ENGINE_STUB, runs the real renderer under $REAL_NODE when that is set, and
-# otherwise stands in for the renderer, failing on $RENDER_RC; npm records what
+# $ENGINE_STUB, answers the free-port pick (-e) with $FREE_PORT, runs the real
+# renderer or pick under $REAL_NODE when that is set, and otherwise stands in
+# for the renderer, failing on $RENDER_RC; npm records what
 # it runs and where; gc lists the sprintshow rig at $SS_RIG; gh stands in for
 # GitHub's markdown renderer, answering with the file $GH_HTML when that is
 # set. Each logs to $CALLLOG.
@@ -59,6 +60,7 @@ cat >"$BIN/node" <<'NODE'
 if [ "${1:-}" = "--version" ]; then echo "${NODE_VERSION:-v24.0.0}"; exit 0; fi
 printf 'node' >>"${CALLLOG:?}"; printf ' [%s]' "$@" >>"$CALLLOG"; printf '\n' >>"$CALLLOG"
 case "${1:-}" in */src/cli.ts) shift; exec "${ENGINE_STUB:?}" "$@" ;; esac
+if [ "${1:-}" = "-e" ]; then [ -z "${REAL_NODE:-}" ] || exec "$REAL_NODE" "$@"; printf '%s' "${FREE_PORT-50123}"; exit 0; fi
 [ -z "${REAL_NODE:-}" ] || exec "$REAL_NODE" "$@"
 o=""; prev=""
 for a in "$@"; do
@@ -93,8 +95,9 @@ GH
 chmod +x "$BIN"/node "$BIN"/npm "$BIN"/gc "$BIN"/gh
 
 # The engine's CLI. help lists the screenshot command unless $ENGINE_OLD is set,
-# and exits $HELP_RC. screenshot keeps the script it was handed and the page a
-# --serve-dir serves, then leaves what $ENGINE_MODE plants.
+# and exits $HELP_RC. screenshot logs the PORT its environment carries, which a
+# --serve command it spawns would inherit, keeps the script it was handed and
+# the page a --serve-dir serves, then leaves what $ENGINE_MODE plants.
 ENGINE_STUB="$TMPD/engine"
 cat >"$ENGINE_STUB" <<'ENGINE'
 #!/usr/bin/env bash
@@ -108,6 +111,7 @@ case "${1:-}" in
   screenshot) ;;
   *) echo "engine stub: unexpected command: $*" >&2; exit 97 ;;
 esac
+printf 'engine-env PORT=%s\n' "${PORT-unset}" >>"$CALLLOG"
 o=""; d=""; prev=""
 for a in "$@"; do
   [ "$prev" = "-o" ] && o="$a"
@@ -268,6 +272,32 @@ has "[--serve] [npm run dev] [--port] [5175] [--cwd] [$APP]" "$(calls)" "the dev
 out="$(run -- page --script "$SCRIPT" --base-url http://localhost:3000 --output "$OUT")"; rc=$?
 eq "$rc" 0 "a --base-url capture exits 0"
 has "[--base-url] [http://localhost:3000]" "$(calls)" "the base URL reaches the engine"
+
+echo "# page: a --serve command is told its port as PORT, and --port 0 picks a free one"
+out="$(run -- page --script "$SCRIPT" --serve 'npm run dev' --port 5175 --cwd "$APP" --output "$OUT")"; rc=$?
+has "engine-env PORT=5175" "$(calls)" "--port reaches the engine's environment as PORT, which its --serve command inherits"
+out="$(run FREE_PORT=50123 -- page --script "$SCRIPT" --serve 'go run ./cmd/helm-fixture' --port 0 --cwd "$APP" --output "$OUT")"; rc=$?
+eq "$rc" 0 "a --port 0 capture exits 0"
+has "[--serve] [go run ./cmd/helm-fixture] [--port] [50123] [--cwd] [$APP]" "$(calls)" "the engine waits on the free port the pick found"
+has "engine-env PORT=50123" "$(calls)" "and the --serve command inherits it as PORT"
+P=$(line_of "node [-e]"); H=$(line_of "[help]"); S=$(line_of "[screenshot]")
+ok "the port is picked after the engine resolves and before the capture (lines $H, $P, $S)" "[ '$H' -gt 0 ] && [ '$P' -gt '$H' ] && [ '$S' -gt '$P' ]"
+out="$(run -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
+has "engine-env PORT=unset" "$(calls)" "a capture with no --serve command sets no PORT"
+out="$(run -- page --script "$SCRIPT" --serve 'npm run dev' --output "$OUT")"; rc=$?
+has "engine-env PORT=unset" "$(calls)" "nor does a --serve capture with no --port, which waits on the engine's own default"
+for target in "--serve-dir $APP" "--base-url http://localhost:3000"; do
+  # shellcheck disable=SC2086 # the target is a flag and its value
+  out="$(run -- page --script "$SCRIPT" $target --port 0 --output "$OUT")"; rc=$?
+  eq "$rc" 2 "--port 0 with ${target%% *} exits 2"
+  has "give it with --serve only" "$out" "it says --port 0 is for a --serve command"
+done
+for got in "" 0 abc; do
+  out="$(run FREE_PORT="$got" -- page --script "$SCRIPT" --serve 'go run ./cmd/helm-fixture' --port 0 --output "$OUT")"; rc=$?
+  eq "$rc" 1 "a free-port pick that answers '$got' exits 1"
+  has "could not find a free port for the --serve command" "$out" "it says no port was found"
+  hasnt "[screenshot]" "$(calls)" "and nothing is captured"
+done
 
 echo "# page: a step whose proof failed still yields the capture -> exit 3"
 out="$(run ENGINE_MODE=failed -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
@@ -534,6 +564,13 @@ HTML
   eq "$rc" 1 "the renderer exits 1 for a comment it refuses"
   has "demo-screenshot.mjs: github.com finishes part of this comment" "$out" "it says why"
   ok "no page is written for a refused comment" "[ ! -e '$TMPD/refused.html' ]"
+
+  echo "# page: the real node picks the free port"
+  out="$(run REAL_NODE="$NODE_BIN" -- page --script "$SCRIPT" --serve 'go run ./cmd/helm-fixture' --port 0 --output "$OUT")"; rc=$?
+  eq "$rc" 0 "a --port 0 capture exits 0 with the port the real node found"
+  P=$(sed -n 's/^engine-env PORT=//p' "$CALLLOG" | head -n 1)
+  ok "the port is one a server can listen on (got '$P')" "case '$P' in ''|*[!0-9]*|0*) false ;; *) [ '$P' -le 65535 ] ;; esac"
+  has "[--port] [$P]" "$(calls)" "the engine waits on that port"
 
   echo "# markdown end to end, on HTML GitHub returned, through the real renderer"
   rm -f "$OUT"
