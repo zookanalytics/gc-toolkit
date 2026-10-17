@@ -35,7 +35,7 @@ without saying where they come from. Separately, a rig that keeps no
    (section 1). This refines the card's "the formula records its pins once".
    The card's pin is `reviewed_oid`, the branch's head at the moment the review
    was dispatched, frozen so the verdict certifies the commit the reviewer read
-   and cannot slide onto a later push. The dispatch records it, because the
+   and cannot slide onto a later push. The dispatch writes it once, because the
    quorum's two lanes start in parallel and a recovered review has no workflow
    to record it.
 2. **A check's method is the skill named from the check.** The step text names
@@ -82,9 +82,10 @@ without saying where they come from. Separately, a rig that keeps no
    declared check resolves to its skill or its purpose, the dispatch writes the
    record and passes the same values as vars, every value a review formula
    names is one the dispatch passes, every skill block runs given only the
-   values the step text names, and signoff.sh leaves a departed commit recorded
-   and refuses each flag a check does not own. Cost: no test holds a formula's wording, so a step that loses an
-   instruction is caught in review, not by the suite.
+   values the step text names, and signoff.sh keeps the recorded commit, a
+   departed one included, and refuses each flag a check does not own. Cost: no
+   test holds a formula's wording, so a step that loses an instruction is
+   caught in review, not by the suite.
 7. **This lands before the review-coverage epic's method units.** It changes
    the review path's structure and no check's judgment. Those units then edit
    inside the new skill shape, build their prep script on the values the step
@@ -123,7 +124,7 @@ the agent fills it in from the step text it holds.
 | `anchor_bead` | always | the work bead the verdict lands on, whose description says what the change is for | `tk-zif1d8u` |
 | `review_branch` | always | the branch under review | `polecat/tk-zif1d8u` |
 | `review_base` | always | the branch it lands on, where the diff starts | `integration/tk-gaklsnk` |
-| `reviewed_oid` | always | the commit under review: the branch's head when the review was dispatched, which is the card's pin | `11810d325ac7…` |
+| `reviewed_oid` | always | the commit under review, which is the card's pin: the branch's head when the review was dispatched, written once and never moved or cleared | `11810d325ac7…` |
 | `review_pr_url` | once a PR is open | the anchor's PR, else empty | `https://github.com/zookanalytics/gc-toolkit/pull/1277` |
 | `review_pr_number` | with `review_pr_url` | that PR's number, else empty | `1277` |
 | `review_context` | no | why this review went out, such as a bring-current round for triage to rule, else empty | |
@@ -337,6 +338,15 @@ close that does not read back costs one more review of a commit that cannot
 merge, and a close fails to read back only when the store refuses
 signoff.sh's write or its read. Once a close lands, the next pass dispatches a
 fresh review at the live head.
+
+signoff.sh is also the one writer that can move the pin. Today a
+`--reviewed-oid` that names another commit replaces it (`signoff.sh:414-421`,
+`:589`), as `signoff.test.sh:541-545` asserts. Under this design signoff.sh
+refuses that call and writes nothing, so a verdict either names the commit its
+review was dispatched for or is not recorded. Every review formula's verdict
+call passes `{{reviewed_oid}}`, so no dispatched review meets the refusal. A
+record with no pin, a review made by hand or before this design, still takes
+the commit the call names.
 
 A short record therefore means a bead made by hand or before this design. A
 claimant that finds a required key missing appends what is missing to the
@@ -866,11 +876,14 @@ review.
    where it is absent: a stranded review whose pin differs from the live head
    keeps its pin through the arm's write, one with no pin is pinned at the live
    head, and each re-sling passes the pin its record then holds.
-2. **A departed commit stays recorded** (`signoff.test.sh`). signoff.sh's
-   refusal of a departed commit leaves `reviewed_oid` in place and closes the
-   review superseded, and a close that does not read back exits 2 with the
-   commit still recorded and no verdict. The suite's case that asserts today's
-   clear (`:667`) is rewritten to this.
+2. **The commit stays recorded** (`signoff.test.sh`). signoff.sh's refusal of
+   a departed commit leaves `reviewed_oid` in place and closes the review
+   superseded, and a close that does not read back exits 2 with the commit
+   still recorded and no verdict. A `--reviewed-oid` that names a commit other
+   than the record's is refused with nothing written, and one given for a
+   record with no pin is recorded. The suite's cases that assert today's clear
+   (`:667`) and the flag replacing the pin (`:463-467`, `:541-545`,
+   `:698-705`) are rewritten to these.
 3. **The vars meet the formulas** (new, structural). Every `{{name}}` in
    `mol-review` and the quorum is a var the formula declares, `convoy_id`
    aside, and every declared var is one gate-ensure passes or sling adds. The
@@ -1020,7 +1033,7 @@ ruled.
 | `assets/scripts/review-dispatch-body.sh` | Deleted. | The epic's Belongs names its correctness arm, gone since #1262. U1.5 names its No fan-out line. |
 | `assets/scripts/review-method.test.sh` | Retired. | Closure check 3 leans on its (NEUTRAL) cases. |
 | `docs/review-<check>.md` | Read at the reviewed commit by `review-checks.sh --extension`, which load-dispatch calls. | U1.7 writes gc-toolkit's `docs/review-correctness.md`. |
-| `assets/scripts/signoff.sh` | Its index read moves to the resolver. | U1.1 may change what `findings.json` carries, which signoff.sh files as finding beads. |
+| `assets/scripts/signoff.sh` | Its index read moves to the resolver. It keeps the recorded commit, and it holds a correctness approve on a change to the review guidance until the verdict names the edit. | U1.1 may change what `findings.json` carries, which signoff.sh files as finding beads. |
 | PR #1217 (tk-gfb2hbq), open and conflicting with main | Rewrites the same review step. | Carries `review-context.sh` and `review-file-bug.sh`, a first prep script, and the 9,000-character step bound. |
 
 ### Rules both touch
@@ -1103,12 +1116,14 @@ one change.
 - `mol-review` and the quorum declare the vars, name each value where they use
   it, gather in load-dispatch, and load the skill named from the check
   (sections 1 and 3). Their failure arm restores the route as today.
-- signoff.sh's departed-commit path stops clearing `reviewed_oid`, and the
-  `reviewed_oid` entry in `lifecycle/lifecycle.toml` (`:728-733`), which says
-  only that path clears it, says it is never cleared. The other living
-  accounts of the clear drop it: `docs/state-machine.md` (`:342-365`), the
-  verdict row of `docs/authority-map.md` (`:35`), and gate-ensure.sh's comment
-  on a superseded review (`:238-241`).
+- signoff.sh's departed-commit path stops clearing `reviewed_oid`, and
+  signoff.sh refuses a `--reviewed-oid` that names a commit other than the
+  record's (section 1). The `reviewed_oid` entry in `lifecycle/lifecycle.toml`
+  (`:728-733`), which says only that path clears it, says the dispatch writes
+  it once and nothing moves or clears it. The other living accounts of the
+  clear drop it: `docs/state-machine.md` (`:342-365`), the verdict row of
+  `docs/authority-map.md` (`:35`), and gate-ensure.sh's comment on a superseded
+  review (`:238-241`).
 - The five check skills take the uniform shape and name values by key, and
   `skills/specialist-stance/SKILL.md` is new.
 - `review-dispatch-body.sh`, its test, its component-model row,
@@ -1161,5 +1176,5 @@ lacks read as empty.
   `review-workspace.sh`, `signoff.sh`, `step-close.sh` and `review-checks.sh`):
   through the candidate loop, until tk-60i7nl6 lands.
 - The default `check_set`, and who stamps it (section 5).
-- `findings.md`, `findings.json`, signoff.sh's verdicts and what it writes, and
-  the validator.
+- `findings.md`, `findings.json`, the verdicts signoff.sh records and what it
+  writes for each, and the validator.
