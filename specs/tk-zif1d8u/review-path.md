@@ -276,7 +276,10 @@ that hold stays. On its next pass the arm reads the record with
 `review-frame.sh record`. What it does with a short record depends on who wrote
 the record. The arm takes `review_pool` as the mark of a record the dispatch
 wrote, because gate-ensure's work order writes that key on every review
-(`gate-ensure.sh:189-196`).
+(`gate-ensure.sh:189-196`). A read that cannot reach the bead (exit 1) changes
+nothing that pass. The merge stays held and the next pass reads again, as with
+every gate-ensure probe the ledger cannot answer, so an unreadable store is
+never taken for a short record or for a record without `review_pool`.
 
 A short review the dispatch wrote can produce no verdict, and its repair is
 known, so the arm retires it. After signoff.sh's interrupted retirement, that
@@ -763,7 +766,8 @@ stewards at the reviewed commit is this rule, and it stays.
    that reads back retracts that visit. A short review without `review_pool` is
    never retired. It is escalated under `review-short-record`, and the visit
    offers no bare return to the pool. A spent review whose record is whole is
-   still escalated under `review-wedge`.
+   still escalated under `review-wedge`. A record the arm cannot read retires
+   nothing and files no visit.
 3. **The reader** (`review-frame.test.sh`, new). `record` prints each key and
    each derived value. Removing any required key makes it exit 3 and name that
    key. An unparseable PR URL, or one PR key without the other, exits 3.
