@@ -398,7 +398,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/queue-priority.toml` | work | Settles the polecat queue at the priorities its beads follow, for the raw priority and parent edits no writer saw. |
 | `assets/scripts/queue-priority.sh` | work | Writes the priority work competes at, under one lock per store: `settle` on one bead and its live workflows, the `move` that `gc-helm.sh priority` runs over everything that follows a bead, and the order's pass over the polecat queue ([steering.md](steering.md#priority)). |
 | `assets/scripts/priority-lib.sh` | work | The one definition of a bead's priority: the priority of the bead it follows plus its own shift, kept within P0 to P4 at each level, where a member follows its most urgent parent, PR-finishing work its anchor, and a workflow's convoy, root and steps the bead they were poured for. Its walk reads a generation of followed beads per listing. `queue-priority.sh` sources it. |
-| `formulas/mol-review.toml` | review | The review method: claim, pin, judge, one `signoff.sh` verdict, drain. |
+| `formulas/mol-review.toml` | review | The review lifecycle every check shares: claim, pin, apply the check's method, one `signoff.sh` verdict, drain. |
 | `assets/scripts/gate-ensure.sh` | review | Makes every declared check raisable and routes the review bead. Runs as arm 6 of the merge cadence. |
 | `assets/scripts/review-dispatch-body.sh` | review | Emits the dispatch note a review bead carries. |
 | `assets/scripts/signoff.sh` | review | The single writer of check verdicts (I7). |

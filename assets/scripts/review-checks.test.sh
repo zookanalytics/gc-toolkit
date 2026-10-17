@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # review-checks.test.sh — the one parser of the check-index grammar
 # (assets/scripts/review-checks.sh). Asserts it emits <check>\t<method>\t<purpose>
-# TSV, narrows with --check, and fails closed on a missing index, an undeclared
-# check, and an index that declares nothing. Also asserts the repo's own
-# review-checks.toml declares the forced baseline (correctness, triage).
+# TSV, narrows with --check by the check's name case-folded, and fails closed
+# on a missing index, an undeclared check, and an index that declares nothing.
+# Also asserts the repo's own review-checks.toml declares the forced baseline
+# (correctness, triage).
 #
 # Hermetic: runs the script against fixtures in a mktemp dir; no gc, no bd, no
 # network.
@@ -29,7 +30,7 @@ IDX="$TMP/review-checks.toml"
 cat >"$IDX" <<'TOML'
 # a comment line, ignored
 [checks.correctness]
-method = "formulas/mol-review.toml"
+method = "skills/review-correctness/SKILL.md"
 purpose = "Is the change correct and safe as merged?"
 phase = "pre-open"
 
@@ -51,7 +52,7 @@ TOML
 OUT="$("$SUT" --file "$IDX")"; RC=$?
 is  "all-rows exit 0" "$RC" "0"
 is  "declares exactly three checks" "$(printf '%s\n' "$OUT" | grep -c .)" "3"
-has "correctness row carries its method" "$OUT" "correctness	formulas/mol-review.toml	"
+has "correctness row carries its method" "$OUT" "correctness	skills/review-correctness/SKILL.md	"
 has "triage row present" "$OUT" "triage	skills/review-triage/SKILL.md	"
 has "demo method keeps the + join" "$OUT" "gc-demo-script/SKILL.md + skills/demo-capture/SKILL.md"
 case "$OUT" in *"unrelated"*) bad "a key outside [checks.*] is not read as a check" "leaked 'unrelated'" ;; *) ok "a key outside [checks.*] is not read as a check" ;; esac
@@ -65,6 +66,17 @@ has "--check emits the asked row" "$OUT" "triage	skills/review-triage/SKILL.md	"
 # --check for an undeclared check fails closed.
 "$SUT" --file "$IDX" --check nonesuch >/dev/null 2>&1
 is "undeclared --check exits 1" "$?" "1"
+
+# --check knows a check by its name case-folded, the rule --resolve matches a
+# check_set token by, and emits the row as the index writes it.
+OUT="$("$SUT" --file "$IDX" --check TRIAGE)"; RC=$?
+is  "--check TRIAGE exit 0" "$RC" "0"
+has "--check TRIAGE emits the triage row" "$OUT" "triage	skills/review-triage/SKILL.md	"
+MIXED="$TMP/mixed-case.toml"
+printf '[checks.Security]\nmethod = "m"\npurpose = "p"\nphase = "pre-open"\n' >"$MIXED"
+OUT="$("$SUT" --file "$MIXED" --check security)"; RC=$?
+is  "--check security exit 0 on a row written [checks.Security]" "$RC" "0"
+is  "…and the row keeps the name the index wrote" "$OUT" "Security	m	p	pre-open"
 
 # A missing index fails closed.
 "$SUT" --file "$TMP/nope.toml" >/dev/null 2>&1
@@ -105,7 +117,7 @@ fi
 
 # ---- the phase column ---------------------------------------------------------
 OUT="$("$SUT" --file "$IDX")"
-has "emit carries the phase column (correctness pre-open)" "$OUT" "correctness	formulas/mol-review.toml	Is the change correct and safe as merged?	pre-open"
+has "emit carries the phase column (correctness pre-open)" "$OUT" "correctness	skills/review-correctness/SKILL.md	Is the change correct and safe as merged?	pre-open"
 has "emit carries open-as-draft (demo)" "$OUT" "	open-as-draft"
 has "--check demo carries its phase" "$("$SUT" --file "$IDX" --check demo)" "	open-as-draft"
 

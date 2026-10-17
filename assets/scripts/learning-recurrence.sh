@@ -65,19 +65,20 @@ REPO="$REPO_ARG"
 # entry descends from, which is what makes post-adoption recurrence
 # attributable; an anchor without one is adopted but unmeasurable, and the
 # report says so rather than counting it as zero recurrence.
-# formulas/mol-review.toml is the review-rubric carrier: its anchors sit in
-# a TOML comment ledger, not in the step description a reviewer reads.
+# The review-rubric carrier is the correctness method's What to check list.
+# Its anchors sit in skills/review-correctness/rubric-ledger.md, one line per
+# amendment naming the dimension it amends, not in the method a reviewer reads.
 inventory_files() {
   if [ -n "$REF" ]; then
     git -C "$REPO" ls-tree -r --name-only "$REF" 2>/dev/null \
-      | grep -E '^(template-fragments/(learned-conventions-|operator-profile|work-quality|learning-exemplars)|formulas/mol-review\.toml$)'
+      | grep -E '^(template-fragments/(learned-conventions-|operator-profile|work-quality|learning-exemplars)|skills/review-correctness/rubric-ledger\.md$)'
   else
     local f
     for f in "$REPO"/template-fragments/learned-conventions-*.template.md \
              "$REPO"/template-fragments/operator-profile.template.md \
              "$REPO"/template-fragments/work-quality-*.template.md \
              "$REPO"/template-fragments/learning-exemplars.template.md \
-             "$REPO"/formulas/mol-review.toml; do
+             "$REPO"/skills/review-correctness/rubric-ledger.md; do
       [ -r "$f" ] && printf '%s\n' "${f#"$REPO"/}"
     done
   fi
