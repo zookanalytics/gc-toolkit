@@ -1,7 +1,15 @@
 # mechanik — city-scoped structural engineer (named singleton, always;
 # stanza in pack.toml). Dispatches pack edits to polecats; direct-edits city.toml.
 scope = "city"
-wake_mode = "fresh"
+# mechanik holds the operator's standing conversation. resume brings it back
+# after a restart the pin does not prevent, such as the process exiting on its
+# own. One restart still starts fresh: after a config change moves mechanik's
+# fingerprint while it is alive, the pin defers the drift, and the next restart
+# repairs it with a new conversation. Running `gc reload --soft` after such a
+# change rebaselines started_config_hash in place, and the next restart resumes.
+# `gc handoff` always starts a fresh conversation.
+wake_mode = "resume"
 work_dir = ".gc/agents/mechanik"
 nudge = "Check mail (gc mail inbox) and assigned work (gc hook), then act accordingly."
-idle_timeout = "2h"
+# 0, as the controller applies no idle_timeout to an always-mode named session.
+idle_timeout = "0"

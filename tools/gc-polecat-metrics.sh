@@ -16,7 +16,7 @@
 #     the rework beads on that branch (task_kind=rework, which every rework
 #     dispatch carries — pre-open "Rework branch ..." children included — plus a
 #     legacy "Rework PR" title match for beads filed before that convention);
-#     check_set and dispatch_count are surfaced when present.
+#     check_set is surfaced when present.
 #   - tokens + estimated cost: joined from the usage sink by session id.
 #
 # Token attribution, and why it needs a trace. The sink is keyed by session id;
@@ -240,7 +240,6 @@ jq -n -c \
         merged_sha: nz("merged_sha"),
         merged_target: nz("merged_target"),
         check_set: nz("check_set"),
-        dispatch_count: (nz("dispatch_count")),
         created_at: .created_at,
         started_at: $started,
         start_at: $start.t,

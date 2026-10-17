@@ -14,9 +14,9 @@
 # `gc-proactive.sh deliverable` answers no (divert-on-no is the contract —
 # a reaction routed into a downed pool waits invisibly; today's tool always says
 # yes), and when the subject already has an open first reaction or a live owner
-# owns it (gc-helm react exit 5) or a live workflow already drives it (exit 6),
-# so react is a no-op that files nothing: nothing would file the visit, so this
-# does.
+# owns it (gc-helm react exit 5), a live workflow already drives it (exit 6), or
+# it is already routed or armed (exit 7), so react is a no-op that files
+# nothing: nothing would file the visit, so this does.
 # Exit: 0 conversation queued · 2 usage · 3 environment (rig enumeration
 # matches gc-helm.sh's per-cause taxonomy) · 4 runtime failure.
 set -u
@@ -436,16 +436,20 @@ if [ -n "$REACT" ]; then
     # fall through and file it directly; a conversation beats a bead nobody is
     # coming to. gc-helm react exit 5 is the already-reacting no-op (the guard
     # filed nothing because a first reaction happens once at a time, or a live
-    # owner owns it) and exit 6 the live-workflow no-op (the guard filed nothing
-    # because a reaction never races work in flight), both distinct from a real
-    # failure to file: name the actual cause so the visit body the converse
-    # session reads is accurate.
+    # owner owns it), exit 6 the live-workflow no-op (the guard filed nothing
+    # because a reaction never races work in flight), and exit 7 the
+    # dispatch-path no-op (the guard filed nothing because the subject is already
+    # routed or armed), each distinct from a real failure to file: name the
+    # actual cause so the visit body the converse session reads is accurate.
     if [ "$REACT_RC" -eq 5 ]; then
         note "$PROG: subject $SUBJECT already has an open first reaction, or a live owner owns its reaction — no new reaction was filed; filing the visit directly"
         REACT_WHY="no: subject already has an open first reaction or a live owner (a first reaction happens once at a time)"
     elif [ "$REACT_RC" -eq 6 ]; then
         note "$PROG: a live workflow already drives subject $SUBJECT — no reaction was filed; filing the visit directly"
         REACT_WHY="no: a live workflow already drives the subject (a first reaction never races work in flight)"
+    elif [ "$REACT_RC" -eq 7 ]; then
+        note "$PROG: subject $SUBJECT is already routed or armed — no reaction was filed; filing the visit directly"
+        REACT_WHY="no: the subject is already routed or armed (a first reaction never second-guesses a dispatch already decided)"
     else
         note "$PROG: filing the first reaction FAILED — falling back to filing the visit directly"
         REACT_WHY="no: filing the first reaction failed"

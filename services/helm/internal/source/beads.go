@@ -79,8 +79,8 @@ type BeadsSource struct {
 }
 
 // beadStore is the slice of [beads.Storage] this source uses. Narrowing it to
-// four methods keeps the seam testable with a fake — the full Storage interface
-// is ~70 methods.
+// the methods below keeps the seam testable with a fake — the full Storage
+// interface is ~70 methods.
 //
 // The two edge reads are BATCHED, not per-anchor: one round-trip resolves the
 // relations of a whole set of anchors. GetDependencyRecordsForIssues reads the
@@ -91,10 +91,15 @@ type BeadsSource struct {
 // id. Both return raw edge rows; [BeadsSource.hydrate] fetches the far-end
 // issues in one further SearchIssues, which is the join the library's own
 // per-id GetDependenciesWithMetadata ran internally on every call.
+//
+// GetConfig reads one key of the store's config table, where `bd kv` keeps its
+// keys, and answers "" with no error for a key that is not set. The one key read
+// is [anchorJoinedKey].
 type beadStore interface {
 	SearchIssues(ctx context.Context, query string, filter beads.IssueFilter) ([]*beads.Issue, error)
 	GetDependencyRecordsForIssues(ctx context.Context, issueIDs []string) (map[string][]*beads.Dependency, error)
 	GetDependentRecordsForIssues(ctx context.Context, targetIDs []string) (map[string][]*beads.Dependency, error)
+	GetConfig(ctx context.Context, key string) (string, error)
 	Close() error
 }
 
@@ -665,6 +670,13 @@ func needsParentChildren(kind string) bool {
 	return false
 }
 
+// needsReviews reports whether an anchor's review beads are gathered: a live
+// merge anchor at pre_open_gate, the one row whose stall signal derives a lane's
+// green from them (board.preOpenCheckStall).
+func needsReviews(p pendingAnchor) bool {
+	return p.kind == "merge" && p.anchor.ClosedAt.IsZero() && p.anchor.Metadata["merge_result"] == "pre_open_gate"
+}
+
 // needsWaitingEdges reports the kinds whose `blocks` waits the derivation reads.
 // The readers that spend them: board.ruled and the merge row's PR axes
 // (decision, human, parked, merge), and the dependency-family grouping, which
@@ -680,30 +692,44 @@ func needsWaitingEdges(kind string) bool {
 	return false
 }
 
-// attachEdges resolves the relations of every anchor in pending with at most
-// three store reads for the whole set, never one per anchor: one batched
-// INBOUND read (parent-child children), one batched OUTBOUND read (a convoy's
-// `tracks`, everything else's `blocks`), and one SearchIssues that hydrates
-// every far-end issue both name. The read count is fixed by the rig+status
-// pass, so it does not scale with the number of anchors.
+// attachEdges resolves the relations of every anchor in pending with a fixed
+// number of store reads for the whole set, never one per anchor: one batched
+// INBOUND read (parent-child children, and the closed reviews of an anchor whose
+// reviews are gathered), one batched OUTBOUND read (a convoy's `tracks`,
+// everything else's `blocks`), and one SearchIssues that hydrates every far-end
+// issue both name. A pass that gathers any anchor's reviews adds the reads
+// [BeadsSource.readReviews] makes, once for the whole set. The read count is
+// fixed by the rig+status pass, so it does not scale with the number of anchors.
 //
 // The two batched reads fail INDEPENDENTLY, and each failure degrades only the
 // roll-ups it feeds. A failed dependents read (or a failed hydration) leaves the
-// parent-child roll-ups empty and notes partial. A failed dependencies read
+// parent-child roll-ups empty, marks every gathered anchor's reviews UNKNOWN,
+// and notes partial. A failed dependencies read
 // leaves `tracks` roll-ups empty AND marks every `blocks`-spending anchor's
 // waits UNKNOWN — not empty — because board.ruled reads an empty wait set as
 // "every recorded wait has landed" and would stand a row down on a graph it
 // could not read.
 func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadStore, r rigRef, pending []pendingAnchor) {
 	var dependentIDs, dependencyIDs []string
+	reviewed := map[string]bool{}
 	for i := range pending {
 		id := pending[i].anchor.ID
-		if needsParentChildren(pending[i].kind) {
+		if needsReviews(pending[i]) {
+			reviewed[id] = true
+		}
+		if needsParentChildren(pending[i].kind) || reviewed[id] {
 			dependentIDs = append(dependentIDs, id)
 		}
 		if pending[i].kind == "convoy" || needsWaitingEdges(pending[i].kind) {
 			dependencyIDs = append(dependencyIDs, id)
 		}
+	}
+
+	// The live reviews are read before the edges, as bd-lib.sh reads an anchor's
+	// live children before its closed ones.
+	var rv reviewReads
+	if len(reviewed) > 0 {
+		rv = s.readReviews(ctx, g, st, r, reviewed)
 	}
 
 	var (
@@ -718,14 +744,15 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 	}
 
 	// Hydrate the far-end issues the two reads reference — the children on the
-	// parent-child edges, the members and blockers on the tracks/blocks ones — in
-	// one SearchIssues. Only the edge types actually spent are hydrated; a
-	// `related` edge that shares a target is never fetched.
+	// parent-child edges, the members and blockers on the tracks/blocks ones, and
+	// every dependent of an anchor whose reviews are gathered — in one
+	// SearchIssues. Only the edges actually spent are hydrated; a `related` edge
+	// into any other anchor is never fetched.
 	farEnds := map[string]struct{}{}
 	if depnErr == nil {
-		for _, recs := range depnRecs {
+		for target, recs := range depnRecs {
 			for _, d := range recs {
-				if d != nil && string(d.Type) == "parent-child" {
+				if d != nil && (string(d.Type) == "parent-child" || (rv.known && reviewed[target])) {
 					farEnds[d.IssueID] = struct{}{}
 				}
 			}
@@ -762,6 +789,9 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 			}
 		} else if needsParentChildren(p.kind) && dependentsOK {
 			p.anchor.Children = childrenFromEdges(depnRecs[p.anchor.ID], "parent-child", inboundFarEnd, issueByID)
+		}
+		if reviewed[p.anchor.ID] {
+			p.anchor.Reviews, p.anchor.ReviewsUnknown = rv.forAnchor(p.anchor.ID, depnRecs[p.anchor.ID], issueByID, dependentsOK)
 		}
 		// The `blocks` waits come from the SAME outbound read a convoy already
 		// spends on its `tracks`, so a convoy gathers both from one read; an epic
@@ -842,6 +872,142 @@ func childrenFromEdges(recs []*beads.Dependency, want string, side farEndSide, i
 		})
 	}
 	return out
+}
+
+// anchorJoinedKey is bd-lib.sh's ANCHOR_JOINED_KEY (anchor_edges.joined) as the
+// config table stores it, since `bd kv` files every key under a "kv." prefix.
+// tools/anchor-edges-backfill.sh --mark sets it once no anchor child in the
+// store lacks its edge, and from then the edge answers for an anchor's closed
+// children.
+const anchorJoinedKey = "kv.anchor_edges.joined"
+
+// anchorChildLiveStatuses are the statuses bd-lib.sh reads an anchor's live
+// children over: its _BD_ANCHOR_STATUSES less closed. The library exports no
+// constant for hooked or pinned.
+var anchorChildLiveStatuses = []beads.Status{
+	beads.StatusOpen, beads.StatusInProgress, beads.StatusBlocked,
+	beads.StatusDeferred, beads.Status("hooked"), beads.Status("pinned"),
+}
+
+// reviewReads is what [BeadsSource.readReviews] read for one rig+status pass.
+// known says the pass can gather reviews at all: the store is marked joined, so
+// the edges answer for the closed ones, and the live read answered. live holds
+// the live reviews, each keyed by the anchor it names in anchor_bead.
+type reviewReads struct {
+	known bool
+	live  map[string][]board.Child
+}
+
+// readReviews reads the live review beads of the anchors in reviewed by the
+// contract bd-lib.sh's bd_anchor_children keeps for an anchor's children
+// (docs/component-model.md, "An anchor's children"), batched over the pass
+// rather than run per anchor. They are read by anchor_bead over bd-lib.sh's live
+// statuses, so a review filed without its edge still holds its lane. A metadata
+// filter matches a key against one value, never a set of anchors, so the one
+// read selects task_kind=review and the rows are keyed by their anchor_bead
+// here. The closed ones come through the inbound edges ([reviewReads.forAnchor]),
+// and this read runs before the edge read, so a review that closes between the
+// two is reported live rather than missed.
+//
+// The edges answer for the closed reviews only in a store marked joined. In a
+// store without the mark, bd-lib.sh reads them by anchor_bead, which reads the
+// whole closed ledger, and the board would pay for that scan on every render.
+// Its reviews are reported unknown instead, and an anchor whose reviews are
+// unknown fires no stall. A mark read that fails reads as no mark, as it does in
+// bd-lib.sh. The failure is noted partial, where a store without the mark is
+// not, because it silences these anchors' stalls in a store that may be marked.
+func (s *BeadsSource) readReviews(ctx context.Context, g *gatherState, st beadStore, r rigRef, reviewed map[string]bool) reviewReads {
+	v, err := st.GetConfig(ctx, anchorJoinedKey)
+	if err != nil {
+		g.note(true, []string{"reviews@" + r.name + ": " + err.Error()})
+		return reviewReads{}
+	}
+	if v == "" {
+		return reviewReads{}
+	}
+	issues, err := st.SearchIssues(ctx, "", beads.IssueFilter{
+		Statuses:       anchorChildLiveStatuses,
+		MetadataFields: map[string]string{"task_kind": "review"},
+		SkipWisps:      true,
+		// Lite: a review becomes a board.Child, which carries no heavy column.
+		Lite: true,
+	})
+	if err != nil {
+		g.note(true, []string{"reviews@" + r.name + ": " + err.Error()})
+		return reviewReads{}
+	}
+	rv := reviewReads{known: true, live: map[string][]board.Child{}}
+	for _, iss := range issues {
+		if iss == nil {
+			continue
+		}
+		md := decodeMetadata(iss.Metadata)
+		if a := md["anchor_bead"]; md["task_kind"] == "review" && reviewed[a] {
+			rv.live[a] = append(rv.live[a], reviewChild(iss, md))
+		}
+	}
+	return rv
+}
+
+// forAnchor is one anchor's review beads: its live ones, then its closed ones
+// from its inbound edges recs. A closed row whose id the live read returned is
+// dropped, so a review that closed between the reads stays live. dependentsOK
+// says the edge read and its hydration answered. unknown is true when the set
+// cannot be told: the store is not marked joined, or a read the set comes from
+// failed.
+func (rv reviewReads) forAnchor(anchorID string, recs []*beads.Dependency, issueByID map[string]*beads.Issue, dependentsOK bool) (reviews []board.Child, unknown bool) {
+	if !rv.known || !dependentsOK {
+		return nil, true
+	}
+	seen := map[string]bool{}
+	for _, set := range [][]board.Child{rv.live[anchorID], closedReviewsFromEdges(recs, anchorID, issueByID)} {
+		for _, c := range set {
+			if !seen[c.ID] {
+				seen[c.ID] = true
+				reviews = append(reviews, c)
+			}
+		}
+	}
+	return reviews, false
+}
+
+// closedReviewsFromEdges is the anchor's closed review beads among the far ends
+// of its inbound edges, of any type: bd-lib.sh joins a child to its anchor with a
+// `related` edge, or by an edge the pair already carried, and the child names
+// the anchor in anchor_bead, the key that makes it this anchor's. A far end whose
+// issue did not hydrate is dropped, and so is one not closed, which the live
+// read answers for.
+func closedReviewsFromEdges(recs []*beads.Dependency, anchorID string, issueByID map[string]*beads.Issue) []board.Child {
+	var out []board.Child
+	seen := map[string]bool{}
+	for _, d := range recs {
+		if d == nil || seen[d.IssueID] {
+			continue
+		}
+		iss, ok := issueByID[d.IssueID]
+		if !ok || iss.Status != beads.StatusClosed {
+			continue
+		}
+		md := decodeMetadata(iss.Metadata)
+		if md["task_kind"] != "review" || md["anchor_bead"] != anchorID {
+			continue
+		}
+		seen[d.IssueID] = true
+		out = append(out, reviewChild(iss, md))
+	}
+	return out
+}
+
+// reviewChild projects a review bead, its metadata already decoded, onto the
+// shape [board.Anchor.Reviews] carries.
+func reviewChild(iss *beads.Issue, md map[string]string) board.Child {
+	return board.Child{
+		ID:        iss.ID,
+		Status:    string(iss.Status),
+		Assignee:  iss.Assignee,
+		UpdatedAt: iss.UpdatedAt,
+		Metadata:  md,
+	}
 }
 
 // waitingFromEdges is [childrenFromEdges]'s sibling for the `blocks` waits, from

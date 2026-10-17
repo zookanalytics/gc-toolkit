@@ -413,14 +413,38 @@ gc session nudge gc-toolkit.mechanik "..."
 # Mail to the canonical singleton.
 gc mail send gc-toolkit.mechanik -s "..." -m "..."
 
-# Direct work assignment (Lane 2 — see gascity-routing-model.md).
+# Direct work assignment (Lane 2 — see gascity-routing-model.md), and the
+# notice that wakes the agent to claim it, since the assignee write wakes
+# nobody (see below).
 bd update tk-abcde --assignee gc-toolkit.mechanik
+assets/scripts/deferred-dispatch.sh notify tk-abcde --agent gc-toolkit.mechanik
 
 # Rig-scoped singletons keep the rig name as a prefix.
 gc session nudge gc-toolkit/gc-toolkit.witness "..."
 ```
 
-All four commands expect the **QualifiedName** form — the alias
+**Pair an assignment with a notice.** The assignee write makes the bead
+claimable, and the agent claims it the next time it runs `gc hook`, which
+it does when it has a turn: at launch, when the operator types, or when a
+nudge arrives. The assignment itself gives it no turn. The controller's
+claim, continuation and execution backstops govern pool sessions only, the
+agent's `nudge` text is typed at launch, and the controller restarts an
+alive named session onto a new assignment only under `wake_mode = "fresh"`.
+Under `"resume"`, an idle agent sits beside a claimable bead until something
+else gives it a turn. So send the notice with the write, with
+`assets/scripts/deferred-dispatch.sh notify <bead> --agent <agent>`. It
+mails the agent the bead id with `gc mail send --notify`, which asks for the
+agent's turn and wakes it when it is not running. That command saves the
+mail before it asks, and it exits 0 even when the request fails, so `notify`
+reads `notified` from the mail's `--json` result and otherwise requests the
+turn with `gc session nudge`. The notice goes once `bd` reports the bead
+ready, since a bead that still waits on a blocker is not offered yet, and a
+notice then would wake the agent for nothing. `notify` mails at once when
+`bd` already reports the bead ready, and otherwise records the notice for
+the deferred-dispatch pass to send when it does
+([deferred-dispatch.md](deferred-dispatch.md#work-assigned-to-a-named-agent-owes-a-notice)).
+
+Every command above expects the **QualifiedName** form — the alias
 shown in `gc session list`. The rule is the same for both scopes:
 the address is exactly what `NamedSession.QualifiedName()` computes
 (see [Identity](#identity)). Bare template names (without the
@@ -1166,9 +1190,10 @@ assignee write:
 bd update <bead> --assignee <singleton-qualified-name>
 ```
 
-Do that instead of the sling, or right after it. The diagnostic
-for a bead you suspect is stranded is that the two `gc hook` forms
-disagree: `gc hook <qualified-name>`, with the name as an
+Do that instead of the sling, or right after it, and pair it with the
+notice [Addressing](#addressing) describes, since the write wakes
+nobody. The diagnostic for a bead you suspect is stranded is that the
+two `gc hook` forms disagree: `gc hook <qualified-name>`, with the name as an
 argument, reports the controller's view and will show the bead,
 while a bare `gc hook` inside the target's own session reports the
 agent's view and shows nothing. See [gascity-routing-model.md, Lane
@@ -1262,14 +1287,24 @@ them.
 `wake_mode = "fresh"` bumps `continuation_epoch` on **every** wake
 after the first, while keeping the *same* session bead —
 `shouldBumpContinuationEpoch` (`rigs/gascity/cmd/gc/session_wake.go`)
-is `WakeMode == "fresh" && LastWokeAt != ""`. Pair it with `mode =
+is true for `WakeMode == "fresh" && LastWokeAt != ""`, and under any
+wake mode while a conversation reset is pending. Pair it with `mode =
 "always"` and the recycle becomes continuous rather than occasional:
 the agent drains, and an always-mode session — desired every tick,
 against no predicate — is spawned straight back, fresh, on a new
 epoch. The config loader flags the pairing rather than rejecting it —
 `IsAlwaysFreshWakeModeWarning` (`internal/config/config.go`), *"use
 only for a deliberate restart-per-cycle actor"* — and in gc-toolkit
-the deacon, mechanik and every witness run it.
+the deacon and every witness run it.
+
+mechanik is the always-mode named session that runs `wake_mode =
+"resume"` instead, because it holds the operator's standing
+conversation. Its epoch moves only when a conversation reset is
+pending, such as `gc handoff`, which starts a fresh conversation on
+purpose, or the config-drift repair that `agents/mechanik/agent.toml`
+describes. An ordinary wake leaves the epoch where it was, so a nudge
+queued to `gc-toolkit.mechanik` meets an unmoved fence after a
+restart, where one queued to the deacon meets a moved one.
 
 A queued nudge is stamped with the target's session id **and** its
 epoch, so any nudge that outlives one recycle meets a moved fence at

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -110,6 +111,37 @@ func TestMetaOnNilBeadIsEmpty(t *testing.T) {
 	var b *Bead
 	if got := b.Meta("anything"); got != "" {
 		t.Errorf("Meta on a nil bead = %q, want empty", got)
+	}
+}
+
+// An edge row renders as {dependency_type, id} under `gc bd show` and as {type,
+// depends_on_id} under `gc bd list`. DependsOn reads both with jq's `//`, as
+// visit-identity.sh does, so a null key falls through to the other spelling and
+// an empty id names nothing. A dependencies value of an unexpected shape still
+// decodes the bead and names no edge.
+func TestDependsOnReadsBothEdgeSpellings(t *testing.T) {
+	for _, tc := range []struct {
+		name, row string
+		want      []string
+	}{
+		{"show spelling", `[{"id":"v","dependencies":[{"id":"s","dependency_type":"tracks","title":"the subject"}]}]`, []string{"s"}},
+		{"list spelling", `[{"id":"v","dependencies":[{"issue_id":"v","depends_on_id":"s","type":"tracks","metadata":"{}"}]}]`, []string{"s"}},
+		{"other types are skipped and order is kept", `[{"id":"v","dependencies":[
+			{"depends_on_id":"b","type":"blocks"},{"depends_on_id":"s1","type":"tracks"},{"id":"s2","dependency_type":"tracks"}]}]`, []string{"s1", "s2"}},
+		{"a null key falls through to the other spelling", `[{"id":"v","dependencies":[{"dependency_type":null,"type":"tracks","id":null,"depends_on_id":"s"}]}]`, []string{"s"}},
+		{"an empty id names nothing", `[{"id":"v","dependencies":[{"depends_on_id":"","type":"tracks"}]}]`, nil},
+		{"no dependencies", `[{"id":"v"}]`, nil},
+		{"not an array", `[{"id":"v","dependencies":{"depends_on_id":"s","type":"tracks"}}]`, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := decode(t, tc.row).DependsOn("tracks"); !slices.Equal(got, tc.want) {
+				t.Errorf("DependsOn(tracks) = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	var b *Bead
+	if got := b.DependsOn("tracks"); got != nil {
+		t.Errorf("DependsOn on a nil bead = %q, want nil", got)
 	}
 }
 

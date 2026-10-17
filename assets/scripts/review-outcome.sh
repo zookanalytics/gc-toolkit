@@ -2,7 +2,7 @@
 # review-outcome.sh — the WRITE side of a review lane's approve-outcome bead.
 # lane-state.sh READS these beads to derive a lane's green; this writes them, so
 # the validator can make a lane green or send it back to unreviewed without ever
-# touching a stored check.<lane> marker.
+# writing a lane state onto the anchor.
 #
 # The approve backing is a first-class review-outcome bead, the same shape
 # gate-ensure.sh files at dispatch and signoff.sh closes on an approve verdict —

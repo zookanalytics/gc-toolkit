@@ -3,11 +3,12 @@
 # It projects the city's own state onto GitHub's pull request list, where that
 # state is otherwise invisible until you open the PR. Two orthogonal groups:
 #
-#   status:  who must act on the PR next — the city holds the ball, a human should
-#            review the head, or a human must weigh in before the PR can settle.
-#            One value at a time, and pr-facts.sh recomputes it every cadence pass
-#            from the anchor's posture, holds, draft stage and rework children. It
-#            is workflow state, never an approval, and never asserts a PR may merge:
+#   status:  what stands between the PR and landing — only the city has work left,
+#            only a human's review verdict is left, or something only a human can
+#            clear blocks the merge. One value at a time, and pr-facts.sh's full
+#            pass recomputes it for each open PR its paced walk reaches, from the
+#            anchor's posture, holds, open visits, draft stage and rework children.
+#            It is workflow state, never an approval, and never asserts a PR may merge:
 #            machine-readiness rides pr.machine and the draft flag. The tri-state
 #            itself — the values, what each projects from, and their precedence —
 #            is decided by one Go package, services/gctk/prstatus, reached through
