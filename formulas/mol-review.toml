@@ -84,11 +84,17 @@ if [ -n "$PR" ]; then
   [ -n "$PR_REPO_Q" ] || { echo "post-open review bead has no parseable review_pr_url: refusing to resolve PR#$PR from ambient gh context" >&2; exit 1; }
   PR_HOST="${PR_REPO_Q%%/*}"   # for gh api --hostname
   PR_REPO="${PR_REPO_Q#*/}"    # <owner>/<repo> for gh api REST paths
-  BRANCH=$(gh pr view "$PR" --repo "$PR_REPO_Q" --json headRefName -q .headRefName)
-  BASE=$(gh pr view "$PR" --repo "$PR_REPO_Q" --json baseRefName -q .baseRefName)
+  REFS=$(gh pr view "$PR" --repo "$PR_REPO_Q" --json headRefName,baseRefName -q '.headRefName + " " + .baseRefName') \\
+    || { echo "gh pr view $PR_REPO_Q#$PR failed: refusing to review an unpinned diff" >&2; exit 1; }
+  BRANCH="${REFS%% *}"; BASE="${REFS#* }"
+  [ -n "$BRANCH" ] && [ -n "$BASE" ] || { echo "PR $PR_REPO_Q#$PR resolved no head/base" >&2; exit 1; }
 fi
 # <<< review-pr-pin
 ```
+One `gh` call reads the PR's head and base, so both come from one state of the
+PR. A read that fails or leaves either empty refuses the review rather than
+diff against a base nobody pinned.
+
 Carry the pin on every later call: `--repo "$PR_REPO_Q"` for `gh pr`,
 `--hostname "$PR_HOST"` plus explicit `repos/$PR_REPO/...` paths for `gh api`.
 A bare number resolves from ambient gh context, and every repository has a PR

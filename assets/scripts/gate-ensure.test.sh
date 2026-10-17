@@ -268,11 +268,24 @@ printf '{"headRefName":"polecat/p1","baseRefName":"main"}' > "$GH_DIR/pr_view_77
 pin() { # pin <review metadata json> : the pins the block sets, or its refusal
   M="$1" bash -c '. "$1"; printf "%s|%s|%s|%s|%s|%s\n" "$PR" "$PR_REPO_Q" "$PR_HOST" "$PR_REPO" "$BRANCH" "$BASE"' _ "$TMP/pr-pin.sh" 2>&1
 }
+: > "$STUB_GH_LOG"
 eq "$(pin "$(jq -c --arg id "$prid" '.[] | select(.id == $id) | .metadata' "$STUB_STORE")")" \
   "77|github.com/zook/gc-toolkit|github.com|zook/gc-toolkit|polecat/p1|main" \
   "load-dispatch pins the PR the dispatch wrote: the repository from its URL, the branch and base from the PR"
+eq "$(grep -c '^pr view 77 ' "$STUB_GH_LOG")" "1" "…reading the head and base in one gh call"
 eq "$(pin '{"review_branch":"polecat/a1","review_base":"main"}')" "|||||" "…and a pre-open review pins no PR"
 has "$(pin '{"review_pr_number":"77","review_pr_url":"PR 77"}')" "no parseable review_pr_url" "…and refuses a PR whose URL names no repository"
+# A PR gh cannot read, or one whose head or base reads empty, pins nothing: the
+# block exits before load-dispatch's fetch and the review's diff use the refs.
+out=$(pin '{"review_branch":"polecat/p1","review_base":"main","review_pr_number":"91","review_pr_url":"https://github.com/zook/gc-toolkit/pull/91"}'); rc=$?
+[ "$rc" -ne 0 ] && ok "…and exits non-zero when gh cannot read the PR" || bad "…and exits non-zero when gh cannot read the PR (rc=$rc: $out)"
+has "$out" "refusing to review an unpinned diff" "…saying it refuses the unpinned diff"
+hasnt "$out" "91|" "…before any later command reads the refs"
+printf '{"headRefName":"","baseRefName":"main"}' > "$GH_DIR/pr_view_92.json"
+out=$(pin '{"review_pr_number":"92","review_pr_url":"https://github.com/zook/gc-toolkit/pull/92"}'); rc=$?
+[ "$rc" -ne 0 ] && ok "…and exits non-zero when the PR's head reads empty" || bad "…and exits non-zero when the PR's head reads empty (rc=$rc: $out)"
+has "$out" "resolved no head/base" "…saying the PR resolved no head"
+hasnt "$out" "92|" "…before any later command reads the refs"
 
 echo "# an open PR recorded by its URL alone gives the review its number"
 store "[$(anchor P2 pull_request correctness "" polecat/p2 ',"pr_url":"https://github.com/zook/gc-toolkit/pull/78"')]"
