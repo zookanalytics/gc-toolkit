@@ -75,10 +75,15 @@
 #     claim that lands before the claim keeps the bead. A dispatch that lands
 #     while the pass holds the bead, through this suite's disposer and through
 #     the real bead-rehome.sh, reopens it and withdraws its pointer, and so does
-#     an `until` edge removed then. A held or failed close gives the bead back.
-#     A claim, or an unchecked close, a pass left is finished by the next pass.
-#     A give-back or a check that fails is left for the pass after, and so is
-#     one the budget leaves, which the pass declares as it does a disposal;
+#     an `until` edge removed then. The pass marks the bead before bead-rehome
+#     stamps its pointer, and a held or failed close, through the real
+#     bead-rehome.sh too, gives the bead back without that pointer. A claim, or
+#     an unchecked close, a pass left is finished by the next pass: a pass
+#     stopped after the stamp leaves a pointer its mark
+#     names, which the next pass withdraws, while a pointer no mark names, or
+#     one another closer records before the claim, stays and reads as live
+#     work. A give-back or a check that fails is left for the pass after, and so
+#     is one the budget leaves, which the pass declares as it does a disposal;
 #   * the CONVOY-LEAK guards — gc sling mints an input convoy per call, so an arm
 #     that never finalizes must not be re-slung forever: an arm whose work
 #     another path already delivered (a merge_result stamp) RETIRES without
@@ -1754,7 +1759,7 @@ eq "$(rehome_actor 1)" "deferred-dispatch" "bead-rehome acts as the claim, the a
 eq "$(status_of g-1)" "closed" "the bead is closed"
 eq "$(assignee_of g-1)" "" "the claim is released from the closed bead"
 eq "$(meta g-1 gc.superseded_by)" "x-1" "the successor pointer stands"
-claim_at="$(grep -n -F -x -e 'update g-1 --if-status=open --if-assignee= --status=in_progress --assignee=deferred-dispatch' "$STUB_BD_LOG" | head -1 | cut -d: -f1)"
+claim_at="$(grep -n -F -x -e 'update g-1 --if-status=open --if-assignee= --status=in_progress --assignee=deferred-dispatch --unset-metadata=gc.until_disposal' "$STUB_BD_LOG" | head -1 | cut -d: -f1)"
 read_at="$(grep -n '^show g-1' "$STUB_BD_LOG" | head -1 | cut -d: -f1)"
 if [ -n "$claim_at" ] && [ -n "$read_at" ] && [ "$claim_at" -lt "$read_at" ]; then
     ok "the claim is one conditional write, made before the read the disposal is decided on"
@@ -1762,7 +1767,15 @@ else
     bad "the claim is one conditional write, made before the read the disposal is decided on (claim at line '${claim_at:-none}', read at line '${read_at:-none}')"
 fi
 eq "$(grep -c '^show g-1' "$STUB_BD_LOG")" "2" "the bead is read under the claim and again after its close"
-eq "$(grep -c -F -x -e 'update g-1 --if-status=closed --if-assignee=deferred-dispatch --assignee=' "$STUB_BD_LOG")" "1" "the release from the closed bead is conditional on the claim"
+mark_at="$(grep -n -F -x -e 'update g-1 --if-status=in_progress --if-assignee=deferred-dispatch --set-metadata=gc.until_disposal=x-1' "$STUB_BD_LOG" | head -1 | cut -d: -f1)"
+reread_at="$(grep -n '^show g-1' "$STUB_BD_LOG" | sed -n 2p | cut -d: -f1)"
+if [ -n "$mark_at" ] && [ -n "$read_at" ] && [ -n "$reread_at" ] && [ "$read_at" -lt "$mark_at" ] && [ "$mark_at" -lt "$reread_at" ]; then
+    ok "the pass marks the bead with its successor in one write conditional on the claim, after the read under the claim and before the close"
+else
+    bad "the pass marks the bead with its successor in one write conditional on the claim, after the read under the claim and before the close (read at '${read_at:-none}', mark at '${mark_at:-none}', read after the close at '${reread_at:-none}')"
+fi
+eq "$(meta g-1 gc.until_disposal)" "<absent>" "the mark goes with the claim"
+eq "$(grep -c -F -x -e 'update g-1 --if-status=closed --if-assignee=deferred-dispatch --assignee= --unset-metadata=gc.until_disposal' "$STUB_BD_LOG")" "1" "the release from the closed bead is conditional on the claim, and clears its mark"
 unset STUB_BD_LOG
 
 echo "# until: a dispatch that lands before the claim keeps the bead"
@@ -1851,6 +1864,7 @@ out="$(STUB_REHOME_RC=5 "$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 0 "a held close is an expected state"
 eq "$(status_of g-1)" "open" "the bead is open again"
 eq "$(assignee_of g-1)" "" "and unassigned"
+eq "$(meta g-1 gc.until_disposal)" "<absent>" "and unmarked"
 has "$out" "HELD g-1" "the hold is reported"
 
 echo "# until: a failed disposal gives the bead back and fails the pass"
@@ -1859,6 +1873,63 @@ out="$(STUB_REHOME_RC=1 "$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 1 "a hard disposal failure fails the pass"
 eq "$(status_of g-1)" "open" "the bead is open again"
 eq "$(assignee_of g-1)" "" "and unassigned"
+eq "$(meta g-1 gc.until_disposal)" "<absent>" "and unmarked"
+
+# The real disposer stamps its pointer before its finalize gate and its close,
+# so a close the gate holds leaves that pointer behind. A gate that refuses
+# stands in for an open visit on the bead.
+printf '#!/usr/bin/env bash\necho "an open visit holds the close"\nexit 1\n' > "$BIN/finalize-gate-hold.sh"; chmod +x "$BIN/finalize-gate-hold.sh"
+held_rehome() { STUB_RIGS_JSON="$TMP/rigs-a.json" GC_FINALIZE_GATE_TOOL="$BIN/finalize-gate-hold.sh" "$@"; }
+
+echo "# until: through the real bead-rehome, a held close gives the bead back without the pointer it stamped"
+store "$G1_OWED"
+export STUB_BD_LOG="$TMP/bd-held.log"; : > "$STUB_BD_LOG"
+out="$(held_rehome env GC_REHOME_TOOL="$HERE/bead-rehome.sh" "$SUT" reconcile --db "$TMP/rig-a/.beads" 2>&1)"; rc=$?
+eq "$rc" 0 "a close the real disposer had held is an expected state"
+mark_at="$(grep -n -F -e 'update g-1 --if-status=in_progress --if-assignee=deferred-dispatch --set-metadata=gc.until_disposal=x-1' "$STUB_BD_LOG" | head -1 | cut -d: -f1)"
+stamp_at="$(grep -n -F -e 'update g-1 --set-metadata gc.superseded_by=x-1' "$STUB_BD_LOG" | head -1 | cut -d: -f1)"
+if [ -n "$mark_at" ] && [ -n "$stamp_at" ] && [ "$mark_at" -lt "$stamp_at" ]; then
+    ok "the pass marks the bead before the real disposer stamps its pointer"
+else
+    bad "the pass marks the bead before the real disposer stamps its pointer (mark at line '${mark_at:-none}', stamp at line '${stamp_at:-none}')"
+fi
+unset STUB_BD_LOG
+eq "$(status_of g-1)/$(assignee_of g-1)" "open/" "the bead is open and unassigned again"
+eq "$(meta g-1 gc.superseded_by)" "<absent>" "the pointer the real disposer stamped is withdrawn"
+eq "$(meta g-1 gc.superseded_by_store)" "<absent>" "and so is its store"
+eq "$(meta g-1 gc.until_disposal)" "<absent>" "and the mark"
+eq "$(close_reason g-1)" "" "and nothing closed it"
+has "$out" "HELD g-1" "the hold is reported"
+has "$out" "the successor pointer bead-rehome stamped is withdrawn" "with the withdrawal"
+out="$(held_rehome env GC_REHOME_TOOL="$HERE/bead-rehome.sh" "$SUT" reconcile --db "$TMP/rig-a/.beads" 2>&1)"
+has "$out" "HELD g-1" "the next pass retries the disposal, since nothing marks the bead live"
+out="$(real_rehome env GC_REHOME_TOOL="$HERE/bead-rehome.sh" "$SUT" reconcile --db "$TMP/rig-a/.beads" 2>&1)"
+eq "$(status_of g-1)" "closed" "once the hold clears, a pass disposes it"
+eq "$(meta g-1 gc.superseded_by)" "x-1" "with its pointer"
+
+echo "# until: through the real bead-rehome, a dispatch that lands under the claim before a held close leaves the bead routed and unpointed"
+store "$G1_OWED"
+out="$(held_rehome env GC_REHOME_TOOL="$BIN/rehome-race.sh" STUB_REHOME_NEXT="$HERE/bead-rehome.sh" STUB_REHOME_RACE_JQ="$ROUTE_G1" "$SUT" reconcile --db "$TMP/rig-a/.beads" 2>&1)"; rc=$?
+eq "$rc" 0 "the pass is clean"
+eq "$(status_of g-1)/$(assignee_of g-1)" "open/" "the bead is given back, open and unassigned"
+eq "$(meta g-1 gc.routed_to)" "rig/rig.polecat" "with the route that landed, so its pool can claim it"
+eq "$(meta g-1 gc.superseded_by)" "<absent>" "and no pointer, which would read as a disposal once the bead carries a PR"
+out="$(held_rehome env GC_REHOME_TOOL="$HERE/bead-rehome.sh" "$SUT" reconcile --db "$TMP/rig-a/.beads" 2>&1)"
+has "$out" "LEFT g-1" "the next pass leaves the routed bead as live work"
+eq "$(meta g-1 gc.superseded_by)" "<absent>" "and no pointer reappears"
+
+echo "# until: a give-back after a held close that does not land keeps the claim, the pointer and its mark, and the next pass withdraws the pointer"
+store "$G1_OWED"
+out="$(held_rehome env GC_REHOME_TOOL="$HERE/bead-rehome.sh" STUB_UPDATE_FAIL_AT='--if-assignee=deferred-dispatch --status=open' "$SUT" reconcile --db "$TMP/rig-a/.beads" 2>&1)"; rc=$?
+eq "$rc" 1 "a give-back that did not land fails the pass"
+eq "$(status_of g-1)/$(assignee_of g-1)" "in_progress/deferred-dispatch" "the bead stays under the claim"
+eq "$(meta g-1 gc.superseded_by)/$(meta g-1 gc.until_disposal)" "x-1/x-1" "with the pointer and the mark that names it"
+has "$out" "with the successor pointer this pass had bead-rehome stamp" "the failure names the pointer it left"
+out="$(held_rehome env GC_REHOME_TOOL="$HERE/bead-rehome.sh" "$SUT" reconcile --db "$TMP/rig-a/.beads" 2>&1)"; rc=$?
+eq "$rc" 0 "the next pass is clean"
+has "$out" "withdrawing the successor pointer to x-1 that pass had bead-rehome stamp" "it gives the bead back first, withdrawing that pointer"
+eq "$(meta g-1 gc.superseded_by)" "<absent>" "the pointer is gone"
+eq "$(status_of g-1)/$(assignee_of g-1)" "open/" "and the bead is open and unassigned once its retry is held again"
 
 echo "# until: a claim an earlier pass left is given back, and the bead disposed"
 store '[
@@ -1933,6 +2004,75 @@ has "$out" "gave back g-1" "it gives the claim back"
 eq "$(status_of g-1)" "open" "the bead is open"
 eq "$(assignee_of g-1)" "" "and unassigned"
 eq "$(meta g-1 gc.routed_to)" "rig/rig.polecat" "with its route"
+
+echo "# until: a pointer another closer records between the listing and the claim keeps the bead, and that pointer"
+store "$G1_OWED"
+out="$(STUB_RACE_AT='--if-status=open' STUB_RACE_JQ='map(if .id == "g-1" then (.metadata["gc.superseded_by"] = "x-1" | .metadata["gc.superseded_by_store"] = "rig:rig-a") else . end)' "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the pass is clean"
+eq "$(rehomes)" "0" "the pointed bead never reaches bead-rehome"
+eq "$(status_of g-1)/$(assignee_of g-1)" "open/" "it is given back, open and unassigned"
+eq "$(meta g-1 gc.superseded_by)" "x-1" "with the other closer's pointer, which the pass neither stamped nor withdraws"
+has "$out" "gc.superseded_by=x-1" "the pointer is reported as live work"
+
+echo "# until: a claim an earlier pass left with a pointer its mark does not name keeps that pointer"
+store '[
+ {"id":"g-1","issue_type":"task","status":"in_progress","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1","gc.superseded_by_store":"rig:rig-a"},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the pass is clean"
+has "$out" "gave back g-1, which an earlier pass claimed and did not close" "the claim is given back"
+hasnt "$out" "withdrawing the successor pointer" "without withdrawing a pointer no mark shows is the pass's own"
+eq "$(status_of g-1)/$(assignee_of g-1)" "open/" "open and unassigned"
+eq "$(meta g-1 gc.superseded_by)" "x-1" "the other closer's pointer stands"
+eq "$(rehomes)" "0" "and the bead is not disposed"
+has "$out" "LEFT g-1" "its pointer is reported as live work"
+
+echo "# until: a pass stopped after the real bead-rehome stamped its pointer leaves the claim and the mark, and the next pass withdraws the pointer"
+# The gate stub stops the pass where it stands: the real disposer has stamped
+# and read back its pointer, and has not closed the bead. With routed=yes, a
+# dispatch lands on the bead the moment the pass hands it to the disposer.
+cat > "$BIN/finalize-gate-stop.sh" <<'GATE'
+#!/usr/bin/env bash
+: > "${STUB_GATE_AT:?}"
+i=0; while [ ! -e "$STUB_GATE_AT.release" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i + 1)); done
+exit 1
+GATE
+chmod +x "$BIN/finalize-gate-stop.sh"
+UNTIL_LOCKF="$TMP/state/_unscoped/pass.lock"
+for routed in no yes; do
+    store "$G1_OWED"
+    GATE_AT="$TMP/gate-stop-$routed"; rm -f "$GATE_AT" "$GATE_AT.release"
+    race='.'; [ "$routed" = no ] || race="$ROUTE_G1"
+    # Launched as a simple command, so $! is the pass itself. A SIGKILL runs no
+    # EXIT trap, so the pass stages its files under $TMP, which the suite removes.
+    TMPDIR="$TMP" STUB_RIGS_JSON="$TMP/rigs-a.json" GC_FINALIZE_GATE_TOOL="$BIN/finalize-gate-stop.sh" STUB_GATE_AT="$GATE_AT" \
+        GC_REHOME_TOOL="$BIN/rehome-race.sh" STUB_REHOME_NEXT="$HERE/bead-rehome.sh" STUB_REHOME_RACE_JQ="$race" \
+        "$SUT" reconcile --db "$TMP/rig-a/.beads" > /dev/null 2>&1 &
+    first=$!
+    if await "$GATE_AT"; then
+        kill -9 "$first" 2>/dev/null; wait "$first" 2>/dev/null
+        : > "$GATE_AT.release"
+        i=0; while ! ( exec 8>>"$UNTIL_LOCKF"; flock -n 8 ) 2>/dev/null && [ "$i" -lt 400 ]; do sleep 0.05; i=$((i + 1)); done
+        eq "$(status_of g-1)/$(assignee_of g-1)" "in_progress/deferred-dispatch" "(routed=$routed) the stopped pass leaves the bead under its claim"
+        eq "$(meta g-1 gc.superseded_by)/$(meta g-1 gc.until_disposal)" "x-1/x-1" "(routed=$routed) with the pointer the real disposer stamped and the mark that names it"
+        out="$(real_rehome env GC_REHOME_TOOL="$HERE/bead-rehome.sh" "$SUT" reconcile --db "$TMP/rig-a/.beads" 2>&1)"; rc=$?
+        eq "$rc" 0 "(routed=$routed) the next pass is clean"
+        has "$out" "gave back g-1, which an earlier pass claimed and did not close, withdrawing the successor pointer to x-1 that pass had bead-rehome stamp" \
+            "(routed=$routed) it gives the bead back first, withdrawing the pointer its mark names"
+        if [ "$routed" = yes ]; then
+            eq "$(status_of g-1)/$(assignee_of g-1)" "open/" "the routed bead is open and unassigned, so its pool can claim it"
+            eq "$(meta g-1 gc.superseded_by)" "<absent>" "with no pointer"
+            has "$out" "LEFT g-1" "and its route is reported as live work"
+        else
+            eq "$(status_of g-1)" "closed" "the bead is then disposed afresh"
+            eq "$(meta g-1 gc.superseded_by)" "x-1" "with a pointer of this pass's own"
+            eq "$(meta g-1 gc.until_disposal)" "<absent>" "and no mark"
+        fi
+    else
+        bad "(routed=$routed) the pass to be stopped never reached the finalize gate (fixture wedged)"
+        : > "$GATE_AT.release"; wait "$first" 2>/dev/null
+    fi
+done
 
 # --- the disposal budget ------------------------------------------------------
 # The order's timeout kills a pass wherever it stands, and a killed pass prints

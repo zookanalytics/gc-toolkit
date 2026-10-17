@@ -3,7 +3,8 @@
 # decides which beads an `until` edge has resolved. Covers:
 #   (SCAN)    until_scan selects an open, unassigned bead with an `until` edge,
 #             and one in progress under the pass's own claim, read as the bead
-#             it claimed, and nothing else; decides it waiting, unresolved,
+#             it claimed, without a successor pointer the claim's mark names,
+#             and nothing else; decides it waiting, unresolved,
 #             blocked or owed;
 #             names the successor that closed last and the moment the bead
 #             became owed (the latest of its targets' closes, its edges'
@@ -18,8 +19,10 @@
 #             its target has no row in the store, live work on the row or the
 #             edges, or nothing, and fails closed on a read that fails or does
 #             not parse; it reads the pass's own claim as the bead the pass
-#             claimed, and with `closed` reads a bead the pass just closed the
-#             same way, so only what landed on it meanwhile reads live
+#             claimed, without a successor pointer the claim's mark names, and
+#             with `closed` reads a bead the pass just closed the same way,
+#             without the pointer its close recorded, so only what landed on it
+#             meanwhile reads live; any other successor pointer reads live
 #   (READERS) the until consumer and its doctor mirror source this file and
 #             call both functions
 #   (NO-COPY) no other file in the pack defines these names
@@ -102,6 +105,17 @@ eq "${UNTIL_FENCE:-}" "deferred-dispatch" "(SCAN) the claim's assignee is deferr
 eq "$(printf '%s\n' "$out" | cut -f1 | paste -sd, -)" "f-1" "(SCAN) a bead in progress under the claim is a candidate, and one another worker holds, or under the claim at another status, is not"
 eq "$(col "$(row_of "$out" f-1)" 2)" "owed" "(SCAN) …decided as the bead the pass claimed"
 eq "$(col "$(row_of "$out" f-1)" 8)" "-" "(SCAN) …with no mark for the claim itself"
+# A pass that stopped after bead-rehome stamped its pointer leaves the pointer
+# beside its mark. That pointer is the claim's, not live work. A pointer the
+# mark does not name is somebody else's disposition, which is live work.
+listing '[
+ {"id":"f-2","issue_type":"task","status":"in_progress","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1","gc.superseded_by_store":"rig:rig-a","gc.until_disposal":"x-1"},"dependencies":[{"depends_on_id":"x-1","type":"until"}]},
+ {"id":"f-3","issue_type":"task","status":"in_progress","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1"},"dependencies":[{"depends_on_id":"x-1","type":"until"}]},
+ {"id":"p-1","issue_type":"task","status":"open","assignee":"","metadata":{"gc.superseded_by":"x-1"},"dependencies":[{"depends_on_id":"x-1","type":"until"}]}]'
+out="$(until_scan fake_bd)"
+eq "$(col "$(row_of "$out" f-2)" 2)/$(col "$(row_of "$out" f-2)" 8)" "owed/-" "(SCAN) the pass's own pointer, which its mark names, is no mark on a bead under the claim"
+eq "$(col "$(row_of "$out" f-3)" 8)" "gc.superseded_by=x-1" "(SCAN) a pointer the mark does not name is a mark"
+eq "$(col "$(row_of "$out" p-1)" 8)" "gc.superseded_by=x-1" "(SCAN) so is a pointer on an open bead"
 
 echo "# until_scan: the four states"
 listing '[
@@ -206,6 +220,14 @@ fresh_case "a route on a bead the pass holds reads live, naming the route alone"
     '{"id":"g-1","issue_type":"task","status":"in_progress","assignee":"deferred-dispatch","metadata":{"gc.routed_to":"rig/rig.polecat"},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'live\tgc.routed_to=rig/rig.polecat')"
 fresh_case "a bead closed under the claim, read before a close, reads live" \
     '{"id":"g-1","issue_type":"task","status":"closed","assignee":"deferred-dispatch","metadata":{},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'live\tstatus=closed; assignee=deferred-dispatch')"
+fresh_case "a successor pointer another closer recorded reads live" \
+    '{"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{"gc.superseded_by":"x-1","gc.superseded_by_store":"rig:rig-a"},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'live\tgc.superseded_by=x-1')"
+fresh_case "the pass's own pointer on a bead it holds, which its mark names, reads as the bead it claimed" \
+    '{"id":"g-1","issue_type":"task","status":"in_progress","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1","gc.superseded_by_store":"rig:rig-a","gc.until_disposal":"x-1"},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'clear\t-')"
+fresh_case "a pointer on a bead the pass holds that its mark does not name reads live" \
+    '{"id":"g-1","issue_type":"task","status":"in_progress","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1"},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'live\tgc.superseded_by=x-1')"
+fresh_case "so does one naming another successor than the mark" \
+    '{"id":"g-1","issue_type":"task","status":"in_progress","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-7","gc.until_disposal":"x-1"},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'live\tgc.superseded_by=x-7')"
 
 echo "# until_fresh closed: the bead just after the pass closed it"
 # The read after a close: a bead closed under the claim, or closed and unassigned
@@ -225,8 +247,10 @@ closed_case "a route that landed on it reads live" \
     '{"id":"g-1","issue_type":"task","status":"closed","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1","gc.routed_to":"rig/rig.polecat"},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'live\tgc.routed_to=rig/rig.polecat')"
 closed_case "a convoy that began tracking it reads live" \
     '{"id":"g-1","issue_type":"task","status":"closed","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1"},"dependencies":['"$CLEAN_UNTIL"']}' '[{"id":"c-1","dependency_type":"tracks","issue_type":"convoy","status":"open"}]' "$(printf 'live\ttracked by convoy c-1 (open)')"
-closed_case "a bead closed under another assignee reads live" \
-    '{"id":"g-1","issue_type":"task","status":"closed","assignee":"rig__polecat-1","metadata":{"gc.superseded_by":"x-1"},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'live\tstatus=closed; assignee=rig__polecat-1')"
+closed_case "a bead closed under another assignee reads live, its pointer with it" \
+    '{"id":"g-1","issue_type":"task","status":"closed","assignee":"rig__polecat-1","metadata":{"gc.superseded_by":"x-1"},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'live\tstatus=closed; assignee=rig__polecat-1; gc.superseded_by=x-1')"
+closed_case "the pointer and the mark the pass's close left read as the bead it claimed" \
+    '{"id":"g-1","issue_type":"task","status":"closed","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1","gc.superseded_by_store":"rig:rig-a","gc.until_disposal":"x-1"},"dependencies":['"$CLEAN_UNTIL"']}' '[]' "$(printf 'clear\t-')"
 closed_case "a removed until edge reads gone" \
     '{"id":"g-1","issue_type":"task","status":"closed","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1"},"dependencies":[]}' '[]' "$(printf 'gone\t-')"
 

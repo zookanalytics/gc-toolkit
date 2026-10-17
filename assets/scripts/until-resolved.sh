@@ -9,9 +9,13 @@
 # The pass claims a bead before its last read of the bead and holds that claim
 # through the close (docs/deferred-dispatch.md). While it holds the claim the
 # bead is in progress under UNTIL_FENCE, and once bead-rehome has closed it the
-# bead stays closed under UNTIL_FENCE until the pass confirms the close. The
-# claim is the pass's own, not live work, so both functions below read a bead
-# under it as the open, unassigned bead the pass claimed.
+# bead stays closed under UNTIL_FENCE until the pass confirms the close. Before
+# bead-rehome stamps the successor pointer, the pass marks the bead under its
+# claim with that successor (UNTIL_MARK), so a pointer the mark names is the
+# pass's own. The claim, and a pointer the pass had stamped, are not live work,
+# so both functions below read a bead under the claim as the open, unassigned,
+# unpointed bead the pass claimed. A pointer any other closer recorded is live
+# work (live-work.sh).
 #
 # Sourced (never executed) by deferred-dispatch.sh, whose reconcile pass
 # disposes an owed bead through bead-rehome, and by
@@ -57,9 +61,10 @@
 #   holds them now. A caller reads them just before it acts, because a scan
 #   ages while a pass runs. With `closed`, it reads them just after the pass
 #   has closed the bead: a bead closed under UNTIL_FENCE, or closed and
-#   unassigned, reads as the open, unassigned bead the pass claimed, so a clear
-#   verdict says the close took nothing that landed on the bead or its edges
-#   while the pass held it. `bd show` gives each edge with its target's status,
+#   unassigned, reads as the open, unassigned bead the pass claimed, without
+#   the successor pointer that close recorded, so a clear verdict says the
+#   close took nothing that landed on the bead or its edges while the pass held
+#   it. `bd show` gives each edge with its target's status,
 #   but it leaves out an edge whose target has no row in this store, such as
 #   one in another store or an external reference. The bead's `bd list` row
 #   carries every edge it has, so the two reads together say which edges the
@@ -146,6 +151,10 @@ until_fresh() { # reader id successor [closed] -> "<verdict>\t<detail>" on stdou
 # The assignee the until consumer claims a bead under while it disposes it.
 # shellcheck disable=SC2034  # read by the scripts that source this file
 UNTIL_FENCE="deferred-dispatch"
+# The metadata key the until consumer marks a bead under its claim with, naming
+# the successor it is about to have bead-rehome point the bead at.
+# shellcheck disable=SC2034  # read by the scripts that source this file
+UNTIL_MARK="gc.until_disposal"
 UNTIL_RESOLVED_JQ=""
 # shellcheck source=live-work.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/live-work.sh" 2>/dev/null || LIVE_WORK_JQ=""
@@ -154,18 +163,30 @@ if [ -n "${LIVE_WORK_JQ:-}" ]; then
     # defs to a jq program. The live-work defs come first, because the decision
     # reads them.
     UNTIL_RESOLVED_JQ="$LIVE_WORK_JQ"'
+  # A bead row without its successor pointer.
+  def until_unpointed:
+    if (.metadata | type) == "object"
+    then .metadata |= del(.["gc.superseded_by"], .["gc.superseded_by_store"])
+    else . end;
   # A bead row with the claim of the pass read away: a row in progress under
-  # UNTIL_FENCE reads as the open, unassigned row the pass claimed. With $closed
-  # true, so does a closed row under UNTIL_FENCE, the bead the pass has closed
-  # and not yet confirmed, and a closed unassigned row, the bead once a pass has
-  # confirmed its close. Any other row reads as it stands.
+  # UNTIL_FENCE reads as the open, unassigned row the pass claimed, and without
+  # a successor pointer its UNTIL_MARK names, which the pass had bead-rehome
+  # stamp. With $closed true, so does a closed row under UNTIL_FENCE, the bead
+  # the pass has closed and not yet confirmed, and a closed unassigned row, the
+  # bead once a pass has confirmed its close, each without the pointer that
+  # close recorded. Any other row reads as it stands.
   def until_unfenced($closed):
     "'"$UNTIL_FENCE"'" as $fence
     | ((.status // "") | tostring | ascii_downcase) as $st
     | ((.assignee // "") | tostring) as $a
-    | if ($st == "in_progress" and $a == $fence)
-         or ($closed and $st == "closed" and ($a == $fence or $a == ""))
+    | (if (.metadata | type) == "object" then .metadata else {} end) as $m
+    | (($m["gc.superseded_by"] // "") | tostring) as $ptr
+    | if $st == "in_progress" and $a == $fence
       then .status = "open" | .assignee = ""
+           | if $ptr != "" and $ptr == (($m["'"$UNTIL_MARK"'"] // "") | tostring)
+             then until_unpointed else . end
+      elif $closed and $st == "closed" and ($a == $fence or $a == "")
+      then .status = "open" | .assignee = "" | until_unpointed
       else . end;
   # One candidate from a row of `bd list --json`, whose .dependencies carry the
   # edges of the bead itself as {depends_on_id, type, created_at}. Empty for a

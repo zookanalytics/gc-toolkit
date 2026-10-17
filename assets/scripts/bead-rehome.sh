@@ -55,9 +55,10 @@
 # still stands, that no open `blocks` blocker of its own holds, and that carries
 # no live work as live-work.sh defines it, checked on its listing and again on
 # a fresh read just before the call. It claims the bead before that read and
-# runs this script as the claim, its holder, and it reopens the bead and removes
-# the pointer itself when its read after the close finds something that landed
-# on the bead or its edges while it held the bead).
+# runs this script as the claim, its holder. It removes the pointer itself:
+# reopening the bead when its read after the close finds something that landed
+# on the bead or its edges while it held the bead, and giving the bead back
+# when this script stamped the pointer and did not close the bead).
 # Doctrine: docs/state-machine.md "Disposition". Test: bead-rehome.test.sh.
 set -euo pipefail
 

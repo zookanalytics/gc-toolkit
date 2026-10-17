@@ -5,10 +5,10 @@
 #             two shapes a disposal must never close: an anchor mid-PR and work
 #             slung to a pool; the plain-work types are the work allowlist
 #   (ROW)     live_work_reasons is empty for a plain open bead and names every
-#             mark otherwise: each key with a non-blank value, a non-open
-#             status, an assignee, and a type outside the allowlist, a missing
-#             one included; a blank value, a disposition pointer and an
-#             unknown key are no mark
+#             mark otherwise: each key with a non-blank value, a successor
+#             pointer among them, a non-open status, an assignee, and a type
+#             outside the allowlist, a missing one included; a blank value, a
+#             pointer's store alone and an unknown key are no mark
 #   (EDGES)   live_work_edge_reasons names a convoy that tracks the bead,
 #             whatever its status, an open child, and a convoy parent; a closed
 #             child and a bead waiting on this one are no mark; an unreadable
@@ -80,10 +80,12 @@ for t in epic convoy decision spec event gate molecule message; do
     eq "$(row "{\"id\":\"a\",\"issue_type\":\"$t\",\"status\":\"open\"}")" "[\"issue_type=$t\"]" "(ROW) a $t is not plain work"
 done
 eq "$(row '{"id":"a","status":"open"}')" '["issue_type="]' "(ROW) a row with no issue_type refuses (an unread mark is a mark)"
-for case in '{"gc.superseded_by":"x-1"}' '{"gc.takeaway":"waits on x-1"}' '{"gc.first_reaction":"actionable"}' '{"gc.routed_to_hint":"rig/rig.polecat"}'; do
+for case in '{"gc.takeaway":"waits on x-1"}' '{"gc.first_reaction":"actionable"}' '{"gc.routed_to_hint":"rig/rig.polecat"}' '{"gc.superseded_by_store":"rig:rig-a"}'; do
     eq "$(row "$(jq -nc --argjson m "$case" '{id:"a", issue_type:"task", status:"open", metadata:$m}')")" "[]" \
        "(ROW) $case is no mark"
 done
+eq "$(row '{"id":"a","issue_type":"task","status":"open","metadata":{"gc.superseded_by":"x-1"}}')" '["gc.superseded_by=x-1"]' \
+   "(ROW) a successor pointer on an open bead marks live work: a disposition another closer recorded and has not closed"
 eq "$(row '{"id":"a","issue_type":"task","status":"open","metadata":{"merge_result":"pull_request","gc.routed_to":"rig/rig.polecat"}}' | jq -r 'length')" \
    "2" "(ROW) every mark is named, not just the first"
 LONG="$(printf 'x%.0s' $(seq 1 200))"

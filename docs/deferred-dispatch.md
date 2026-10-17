@@ -414,8 +414,7 @@ only when EVERY `until` target has closed — a target still open, or one the
 status read cannot resolve, leaves the bead waiting, never disposed on a guess.
 A bead that one of its own `blocks` blockers still holds waits for that blocker
 as well, and so does one whose blocker the status read cannot resolve. `bd
-close` refuses a blocked bead, and `bead-rehome` stamps its pointer before that
-refusal, so a call there would leave a live bead pointing at a successor.
+close` refuses a blocked bead, so a call there could only fail.
 ONLY `until` disposes: a `blocks` edge is never a dispose trigger, so the common
 sequencing edge ("land A before B", where B is still owed after A) is never
 auto-closed.
@@ -437,8 +436,10 @@ live work fall into these groups:
 - **Worked:** a branch, a worktree, a commit, a review round, a landing target,
   a PR, a landing state, or an outcome.
 - **Owned by another closer:** any `task_kind`, a molecule step or workflow
-  root, a demand, a duplicate diagnosis, or an issue type outside plain work
-  (task, bug, feature, chore, spike). An epic closes on its own ruling.
+  root, a demand, a duplicate diagnosis, a successor pointer
+  (`gc.superseded_by`) that a disposition recorded without its close landing,
+  or an issue type outside plain work (task, bug, feature, chore, spike). An
+  epic closes on its own ruling.
 - **Parked:** a `hold_reason` or a `rebase_hold`.
 - **Structural:** a convoy that tracks the bead or parents it, or an open child
   under it.
@@ -477,9 +478,13 @@ finds. So the pass disposes a bead under a claim of its own:
 2. It makes the fresh read above under the claim, and goes on only when that
    read finds the bead still owed and carrying no mark. Otherwise it gives the
    bead back, open and unassigned, with whatever landed on it.
-3. `bead-rehome` stamps the pointer and closes the bead, acting as
+3. It marks the bead with the successor it is about to point it at
+   (`gc.until_disposal`), in one write bd applies only while the claim still
+   holds the bead. From then on, a pointer to that successor on the bead under
+   the claim is the pass's own.
+4. `bead-rehome` stamps the pointer and closes the bead, acting as
    `deferred-dispatch`, the actor bd's close requires of a bead assigned to it.
-4. It reads the bead and its edges again. A mark that landed while the pass
+5. It reads the bead and its edges again. A mark that landed while the pass
    held the bead landed before this read, so the read finds it, and the pass
    reopens the bead, removes its successor pointer and appends a note naming
    what landed. A removed `until` edge, a reopened target and an opened
@@ -493,21 +498,36 @@ closed bead, as a dispatch of any closed bead does: no pool offers it, and
 pass makes under its claim is conditional on the status and assignee the
 claim leaves, so none lands on a bead somebody else has taken since.
 
+`bead-rehome` stamps the pointer before its finalize gate and before its
+close, so a close that is held or refused leaves the pass's pointer on a bead
+the pass did not close. The write that gives the bead back removes that
+pointer, in the same write that reopens it and clears the mark. A bead the
+pass gives back therefore never carries its pointer, which on a bead that goes
+on to carry a PR would read as a disposed anchor to `scaffolding-sweep.sh`.
+When that write fails, the bead stays in progress under the claim with its
+pointer and its mark, and the next pass removes both.
+
 A pass that stops while it holds a claim leaves the bead in progress, or
-closed, under `deferred-dispatch`. The next pass finishes both before it lists
-the store, as far as its budget (below) allows: it gives back a bead it finds
-in progress, so its listing reads that bead as it reads any other, and it
-checks a bead it finds closed as step 4 does. Until a pass finishes it, a bead
-in progress under the claim reads to the doctor check below as the bead the
-pass claimed.
+closed, under `deferred-dispatch`. The next pass finishes both before it
+lists the store, as far as its budget (below) allows. It gives back a bead it
+finds in progress, so its listing reads that bead as it reads any other. When
+the bead's mark names the successor its pointer names, the pass stopped after
+`bead-rehome` stamped that pointer, and the give-back removes it. A pointer
+the mark does not name is another closer's, and stays. It checks a bead it
+finds closed as step 5 does. Until a pass finishes it, a bead in progress
+under the claim reads to the doctor check below as the bead the pass claimed.
 
 When the close is held, commonly by an open visit tracking the bead,
-`bead-rehome` records the successor pointer and refuses the close rather than
-forcing it, leaving an open, pointed, findable bead that a later pass retries
-once the hold clears. Enumeration is fail-closed the way the dispatch half is:
-an unreadable store leaves every until-gated bead for the next pass rather than
-reading "none owed". The same-store limit below holds for an `until` target as
-much as for a `blocks` blocker — one in another rig is not seen here.
+`bead-rehome` refuses the close rather than forcing it, after it has stamped
+the pointer. The pass gives the bead back without the pointer, and a later
+pass retries the disposal once the hold clears. A successor pointer on an open
+bead is live work, a disposition another closer recorded and has not closed,
+so the pass never disposes a bead another closer has pointed.
+
+Enumeration is fail-closed the way the dispatch half is: an unreadable store
+leaves every until-gated bead for the next pass rather than reading "none
+owed". The same-store limit below holds for an `until` target as much as for a
+`blocks` blocker — one in another rig is not seen here.
 
 A pass pinned to a store, by the order's `GC_RIG_ROOT` or by `--db`, reads
 every bead from that store whatever its id prefix says. Left to itself,
@@ -518,9 +538,9 @@ because a close aimed by id prefix could land in another store. An unpinned
 pass leaves the store to `bead-rehome`, whose derivation by prefix is the
 routing an unpinned read of an id takes.
 
-A disposal costs a claim, a fresh read, a `bead-rehome` call, which makes
-several store reads and writes of its own, and a read and a write after the
-close, so a target with many `until` dependents could run a pass past the
+A disposal costs a claim, a fresh read, a mark, a `bead-rehome` call, which
+makes several store reads and writes of its own, and a read and a write after
+the close, so a target with many `until` dependents could run a pass past the
 order's timeout. The timeout kills a pass mid-loop,
 before it prints its summary. So the until half starts a disposal only while
 one disposal's allowance (`DEFERRED_DISPATCH_DISPOSE_ALLOWANCE_SECS`, 30s) is
