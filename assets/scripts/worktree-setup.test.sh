@@ -49,8 +49,9 @@
 #       there still shows and stages, in both: a plain file, a link of their
 #       own, a new skill directory, and changes to a skill the repo tracks. A
 #       link gc adds later is hidden by the next run, a manifest name git
-#       would read as a pattern is never written, and without jq or a readable
-#       manifest the run still succeeds and adds no name.
+#       would read as a pattern or that ends in a newline is never written, and
+#       without jq or a readable manifest the run still succeeds and adds no
+#       name.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -388,14 +389,17 @@ has "$(git -C "$W" status --porcelain)" "?? .agents/skills/later-skill" "(r) a l
 eq "$(rc_of "$SKR" "$W" agentR --sync)" "0" "(r) the next run succeeds"
 lacks "$(git -C "$W" status --porcelain)" "later-skill" "(r) and hides it"
 # A manifest name git would read as a pattern is never written, so it cannot
-# hide what a person keeps there.
-printf '{"targets":{"*":"%s","README*":"%s","a b":"%s",".":"%s","..":"%s"}}' \
-    "$TMP/linked/x" "$TMP/linked/x" "$TMP/linked/x" "$TMP/linked/x" "$TMP/linked/x" > "$W/.agents/skills/.gc-skill-ownership.json"
+# hide what a person keeps there. Nor is a name that ends in a newline, which
+# would reach the file as the name before it.
+printf '{"targets":{"*":"%s","README*":"%s","a b":"%s",".":"%s","..":"%s","README.md\\n":"%s"}}' \
+    "$TMP/linked/x" "$TMP/linked/x" "$TMP/linked/x" "$TMP/linked/x" "$TMP/linked/x" "$TMP/linked/x" \
+    > "$W/.agents/skills/.gc-skill-ownership.json"
 eq "$(rc_of "$SKR" "$W" agentR --sync)" "0" "(r) a run over a manifest of pattern names succeeds"
 EXF=$(git -C "$W" rev-parse --path-format=absolute --git-path info/exclude)
 eq "$(grep '^\.agents/skills/' "$EXF" | grep -v '^\.agents/skills/[A-Za-z0-9._-]*$' || true)" "" \
     "(r) no name git would read as a pattern reaches the exclude file"
 eq "$(grep -cxE '\.agents/skills/\.{1,2}' "$EXF" || true)" "0" "(r) nor the names . and .."
+eq "$(grep -cxF '.agents/skills/README.md' "$EXF" || true)" "0" "(r) nor a name that ends in a newline"
 has "$(git -C "$W" status --porcelain)" "?? .agents/skills/README.md" "(r) so a person's file still shows"
 # With no jq, or a manifest jq cannot read, the run still succeeds and adds no
 # name, so a link it cannot read shows rather than anything being hidden.
