@@ -39,14 +39,18 @@ without saying where they come from. Separately, a rig that keeps no
 3. **The specialist stance is one skill, `gc-toolkit.specialist-stance`.** The
    demo, arch and pm skills load it, and so does the formula's no-skill case.
    Cost: one more entry in every agent's skill list.
-4. **Every rig gets every check the pack ships.** The pack's
-   `review-checks.toml` declares the five checks. A rig's own index is optional:
-   its rows add a check of the rig's own or change a pack check's phase or
-   purpose for that rig. The `method` column goes. Cost: triage can now add
-   demo, arch or pm in the three rigs here that keep no index (gascity,
+4. **Every rig gets every check the pack ships, and a rig steers triage in
+   words.** The pack's `review-checks.toml` declares the five checks. A rig's
+   own index is optional: its rows add a check of the rig's own or change a
+   pack check's phase or purpose for that rig. The `method` column goes. A
+   rig's `docs/review-triage.md` reaches triage like any check's guidance, so a
+   rig can tell triage never to add a check, or to add one only for one kind of
+   change. That is advice triage weighs, not a refusal signoff.sh enforces, and
+   how reliably it holds is the operator's open question. Cost: triage can now
+   add demo, arch or pm in the three rigs here that keep no index (gascity,
    shutupandlisten, signal-loom) and in sprintshow, whose index lists only
-   correctness and triage and says it leaves the other three out on purpose. A
-   rig has no way to withdraw a pack check. Triage's judgment does not change,
+   correctness and triage and says it leaves the other three out on purpose.
+   No row withdraws a pack check outright. Triage's judgment does not change,
    and adding nothing stays its common case.
 5. **A rig's review guidance is read at the commit under review.** That
    guidance is `review-checks.toml` and `docs/review-<check>.md`. A review
@@ -554,10 +558,23 @@ The initiative's constraint holds with one refinement: a check is declared in an
 index and nowhere else. The pack's index declares the checks the pack ships,
 and a rig's index declares its own. No script, formula or skill lists checks.
 
-A rig cannot withdraw a pack check. Triage judges whether a diff warrants each
-check, and adding nothing is its common case, so a rig with no screens never
-gets demo added for want of a visual surface. A row that withdraws a check can
-come later, if a rig needs one.
+### A rig steers triage in words
+
+Triage's guidance is the rig's `docs/review-triage.md`, which the review step
+prints for triage as it prints any check's guidance (section 3). A rig that
+writes "never add demo here" or "add arch only for changes under `internal/`"
+puts that sentence in front of triage on every review. A rig row that restates
+a pack check's purpose for the rig changes the line triage's menu shows for
+that check, which is a second place a rig can say what the check is for there.
+
+Both are advice. Triage weighs them with its own reading of the diff, and
+signoff.sh validates an add only against the index, so nothing refuses an add
+the guidance argued against. How reliably the guidance holds against a diff
+that seems to warrant the check is the operator's open question, and no test
+of this build answers it. No row withdraws a pack check outright. Triage judges
+whether a diff warrants each check, and adding nothing is its common case, so a
+rig with no screens does not get demo added for want of a visual surface. A row
+that withdraws a check can come later, if advice proves too weak.
 
 ### The method column
 
@@ -701,7 +718,8 @@ untrue are rewritten:
 - the demo skill (`:138-140`), on where its extension comes from;
 - sprintshow's own index header, which says sprintshow leaves demo, arch and pm
   out on purpose. It is sprintshow's file, so unit A's builder files a bead for
-  its rewrite in sprintshow's store.
+  its rewrite in sprintshow's store. The bead points that intent at a
+  `docs/review-triage.md` that tells triage so (section 5).
 
 ## 7. Rig content and pack content
 
@@ -910,7 +928,8 @@ when unit A lands.
   `scripts-dir`, and its no-index fallback goes.
 - `review-checks.toml` loses its `method` keys. Its header states the layered
   index and points at the configuration that holds the baseline.
-- A bead in sprintshow's store for its index header (section 6).
+- A bead in sprintshow's store for its index header, which points its intent to
+  leave demo, arch and pm out at a `docs/review-triage.md` (sections 5 and 6).
 - Tests 6 and 7 of section 8, and the reader half of test 8.
 
 It changes which checks every gating reader sees in a rig whose commit declares
