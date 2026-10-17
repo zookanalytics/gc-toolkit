@@ -295,22 +295,21 @@ fi
 # An anchor whose gates the resolver cannot name, or that has a lane that does
 # not derive green or cannot be read, stays out of the map and a candidate.
 _LS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-# The index the resolver reads; GC_REVIEW_CHECKS_INDEX overrides the default (the
-# rig's own review-checks.toml beside the pack) so a hermetic test can point it at
+# The resolver finds the index itself: the review-checks.toml of the rig
+# checkout the sweep runs in, which is the rig whose anchors it classifies (the
+# order runs it there, and GC_RIG_ROOT names it). The pack's copy beside this
+# script is gc-toolkit's own index and answers for no other rig.
+# GC_REVIEW_CHECKS_INDEX overrides the read, so a hermetic test can point it at
 # a fixture, or at a missing file for the no-index fallback (every non-sentinel
-# token gates). Passed as --file when readable; otherwise the resolver resolves it
-# itself (the inherited env override, then the working tree).
-_LS_IDX="${GC_REVIEW_CHECKS_INDEX-$_LS_DIR/../../review-checks.toml}"
+# token gates).
 LANE_STATE="${GC_LANE_STATE_TOOL:-$_LS_DIR/lane-state.sh}"
-_ls_idx_arg=()
-[ -r "$_LS_IDX" ] && _ls_idx_arg=(--file "$_LS_IDX")
 PREOPEN_GREEN_MAP=$(
   jq -r '.[] | select((.metadata.merge_result // "") == "pre_open_gate")
          | [(.id // ""), (.metadata.check_set // "")] | @tsv' "$READY" 2>/dev/null \
   | while IFS=$'\t' read -r _aid _acs; do
       [ -n "$_aid" ] || continue
       _g=$("$_LS_DIR/review-checks.sh" --resolve --check-set "$_acs" --through pre-open \
-           ${_ls_idx_arg[@]+"${_ls_idx_arg[@]}"} 2>/dev/null </dev/null) || continue
+           2>/dev/null </dev/null) || continue
       [ -n "$(printf '%s' "$_g" | tr -d '[:space:]')" ] || continue
       _green=1
       while IFS= read -r _l; do
