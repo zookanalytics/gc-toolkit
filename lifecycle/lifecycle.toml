@@ -643,6 +643,7 @@ keys = [
   "check_set", "signoff_dismissed", "approval_dismissed",
   "signoff_verdict", "visual", "visual_fallback_from",
   "check_name", "anchor_bead", "review_branch", "review_base", "reviewed_oid",
+  "review_pr_url", "review_pr_number",
   "review_pool", "source_review_bead", "source_ruling_bead", "source_review", "task_kind",
   "fix_target_pool", "wedge_seen_root",
 ]
@@ -725,6 +726,11 @@ keys = [
 # review_branch / review_base — the branch under review and its base, stamped on
 #   the review child by gate-ensure.sh; read by signoff.sh as the fallback when
 #   the anchor names no branch or no landing target. Never cleared. Branch names.
+# review_pr_url / review_pr_number — the anchor's open PR, stamped on the review
+#   child by gate-ensure.sh when the anchor is a pull_request, both or neither;
+#   mol-review pins its gh calls to them. They are not pr_url / pr_number, which
+#   gc-helm.sh resolves a PR number by, so a live review does not make its PR
+#   ambiguous. Never cleared. A PR URL and its number.
 # reviewed_oid — the head a review pinned, and the head a green backing vouches
 #   for. Written by gate-ensure.sh (only when the head resolves), signoff.sh and
 #   review-outcome.sh. signoff.sh reads it as the dispatch pin; lane-state.sh and

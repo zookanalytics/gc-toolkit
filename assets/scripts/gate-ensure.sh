@@ -178,20 +178,27 @@ LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 # last value, so both halves ride a single comma list.
 ALL_STATUSES="$LIVE_STATUSES,closed"
 
-# review_work_order <check> <anchor> <branch> <target> <reviewed-oid> — the
-# metadata a review bead carries. task_kind, check_name and anchor_bead are what
-# inflight_review selects it by. review_branch and review_base are what
-# mol-review reads, review_pool is the route its failure path restores, and
-# reviewed_oid pins the dispatch head that signoff.sh binds the verdict to.
-# fix_target_pool is the pool signoff.sh routes a request-changes rework to. An
-# empty <reviewed-oid> leaves the pin out, and an empty FIX_POOL leaves out
-# fix_target_pool.
+# review_work_order <check> <anchor> <branch> <target> <reviewed-oid> <pr-url>
+# <pr-number> — the metadata a review bead carries. task_kind, check_name and
+# anchor_bead are what inflight_review selects it by. review_branch and
+# review_base are what mol-review reads, review_pool is the route its failure
+# path restores, and reviewed_oid pins the dispatch head that signoff.sh binds
+# the verdict to. review_pr_url and review_pr_number are the anchor's open PR,
+# which mol-review pins its gh calls to and the correctness check reads the
+# published page through. They take keys of their own because gc-helm.sh
+# resolves a PR number to every live bead whose pr_number matches, and refuses
+# the number when more than one does, so a review carrying pr_number would
+# leave its PR ambiguous while the review is live. fix_target_pool is the pool
+# signoff.sh routes a request-changes rework to. An empty <reviewed-oid> leaves
+# the pin out, an empty <pr-url> or <pr-number> leaves out both PR keys, and an
+# empty FIX_POOL leaves out fix_target_pool.
 review_work_order() {
   jq -nc --arg g "$1" --arg a "$2" --arg br "$3" --arg tg "$4" \
-    --arg rp "$REVIEW_POOL" --arg oid "$5" --arg fp "$FIX_POOL" '
+    --arg rp "$REVIEW_POOL" --arg oid "$5" --arg pu "${6:-}" --arg pn "${7:-}" --arg fp "$FIX_POOL" '
     {task_kind: "review", check_name: $g, anchor_bead: $a, review_branch: $br,
      review_base: $tg, review_pool: $rp}
     + (if $oid == "" then {} else {reviewed_oid: $oid} end)
+    + (if $pu == "" or $pn == "" then {} else {review_pr_url: $pu, review_pr_number: $pn} end)
     + (if $fp == "" then {} else {fix_target_pool: $fp} end)' 2>/dev/null
 }
 
@@ -760,6 +767,15 @@ while IFS= read -r tagged; do
   # signal the moot close keys on (the lane loop below reads local backing first).
   mr=$(meta_of "$row" merge_result)
   head=$(live_head_for "$branch")
+  # Only a pull_request anchor's PR is a published page; before then a review
+  # reads the pending pr_summary instead. The number is parsed from the URL when
+  # the anchor records only the URL, as signoff.sh parses it.
+  pr_url=""; pr_number=""
+  if [ "$mr" = pull_request ]; then
+    pr_url=$(meta_of "$row" pr_url)
+    pr_number=$(meta_of "$row" pr_number)
+    [ -n "$pr_number" ] || { pr_number="${pr_url##*/pull/}"; pr_number="${pr_number%%[!0-9]*}"; }
+  fi
   # The machine axis this pass reaches for the anchor as a whole. The check loop
   # already derives each lane as green (settled) or short of green; this flag
   # keeps that answer instead of discarding it at the end of the iteration.
@@ -951,7 +967,7 @@ while IFS= read -r tagged; do
           # out: the pin is the head the review was dispatched for, and it is
           # never moved here. A review without one is pinned by mol-review to
           # the head it reads.
-          if ! rshort=$(bd_meta_ensure "$rid" "$(review_work_order "$g" "$id" "$branch" "$target" "")"); then
+          if ! rshort=$(bd_meta_ensure "$rid" "$(review_work_order "$g" "$id" "$branch" "$target" "" "$pr_url" "$pr_number")"); then
             echo "$PROG: WARN $id stranded review $rid did not record its whole work order (short: $rshort); not re-slung, merge stays held, retry next pass" >&2
             skipped=$((skipped + 1)); continue
           fi
@@ -1047,7 +1063,7 @@ while IFS= read -r tagged; do
     # (rc 1). One short of any other key (rc 2) is not slung, because a pour
     # onto it could run against a work order the bead does not carry; the
     # stranded arm above finds it next pass and slings it once it is whole.
-    RID_META=$(review_work_order "$g" "$id" "$branch" "$target" "$head")
+    RID_META=$(review_work_order "$g" "$id" "$branch" "$target" "$head" "$pr_url" "$pr_number")
     RID_TITLE="Review branch $branch -> $target ($g): $title"
     body=""
     [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --formula "$REVIEW_FORMULA" --check-name "$g" --reviewed-oid "$head" --note "$why" 2>/dev/null) || body=""
