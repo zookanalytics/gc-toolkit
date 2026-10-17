@@ -933,7 +933,9 @@ what every transition reads.
   description, and stops calling `review-dispatch-body.sh`.
 - gate-ensure.sh's spent-workflow arm retires a short review the dispatch wrote
   and dispatches a fresh one in the same pass. It escalates a retirement that
-  fails on a second pass, and a short review made by hand (section 1).
+  fails on a second pass, and a short review made by hand (section 1). The
+  arm's account in `docs/refinery-merge-cadence.md` (`:344-350`) and the
+  `review_pool` entry in `lifecycle/lifecycle.toml` (`:734-736`) change with it.
 - `review-frame.sh` and its test.
 - `mol-review` and the quorum read the record and load the skill named from the
   check (sections 1 and 3). Their failure arm restores a route only to a review
