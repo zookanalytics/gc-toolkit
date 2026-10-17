@@ -21,11 +21,15 @@ merged on a rig's main does not reach work already in flight.
    the reason for the dispatch, and the formula that runs the review. It
    dispatches a review only once it has read the branch's head, so every review
    is pinned. Every formula step and every check skill reads a value by name
-   through one script, `review-frame.sh`, given the review bead's id. Cost: a
-   review whose head neither GitHub nor `git ls-remote` can read waits a pass
-   instead of starting unpinned. This refines the card's "the formula records
-   its pins once": the dispatch records them, because the quorum's two lanes
-   start in parallel and a recovered review has no workflow to record them.
+   through one script, `review-frame.sh`, given the review bead's id. A review
+   left short of its record, as when signoff.sh clears a departed commit's pin
+   and then cannot close the review, is retired and dispatched again by
+   gate-ensure, with the merge held. A person hears of it only when that
+   retirement keeps failing. Cost: a review whose head neither GitHub nor
+   `git ls-remote` can read waits a pass instead of starting unpinned. This
+   refines the card's "the formula records its pins once": the dispatch records
+   them, because the quorum's two lanes start in parallel and a recovered
+   review has no workflow to record them.
 2. **A check's method is the skill named from the check.** The formula loads
    `gc-toolkit.review-<check>`. A check a rig's index declares with no pack
    skill is judged against its row's purpose. A check declared nowhere is
@@ -56,10 +60,10 @@ merged on a rig's main does not reach work already in flight.
    phases rather than the PR head's.
 6. **Tests pin behavior where the pieces meet, iterating the index.** Each
    declared check resolves to its skill or its purpose, the dispatch writes the
-   record and the reader refuses a short one, every skill block runs given only
-   a record, and signoff.sh refuses each flag a check does not own. Cost: no
-   test holds a formula's wording, so a step that loses an instruction is
-   caught in review, not by the suite.
+   record, the reader refuses a short one and gate-ensure replaces that review,
+   every skill block runs given only a record, and signoff.sh refuses each flag
+   a check does not own. Cost: no test holds a formula's wording, so a step
+   that loses an instruction is caught in review, not by the suite.
 7. **This lands before the review-coverage epic's method units.** It changes
    the review path's structure and no check's judgment. Those units then edit
    inside the new skill shape, build their prep script on `review-frame.sh`, and
@@ -239,19 +243,58 @@ back (`gate-ensure.sh:1050-1067`), and its stranded arm writes the whole order
 before it slings a review again (`:954`). The case is signoff.sh refusing a
 verdict whose pin a rewrite took off the branch. It clears the pin and closes
 the review superseded, and when that close does not read back, the review stays
-open without its pin (`signoff.sh:473-517`). The verdict step's failure arm
-then returns it to the pool (`mol-review.toml:368-384`). Otherwise a short
-record means a bead made by hand or before this design.
+open without its pin (`signoff.sh:473-517`). Otherwise a short record means a
+bead made by hand or before this design. Either way the review can never
+produce a verdict as it stands, and its repair is known. gate-ensure makes the
+repair without a person, and escalates only a repair that stays blocked.
 
 `load-dispatch` reads the record with `record`, which refuses a short one with
 exit 3 and names the key. The step then appends that message to the review
-bead's notes, closes the chain forward and drains. It does not restore the
-bead's route, because the next claim would meet the same short record.
-gate-ensure's spent-workflow arm then reads the review as wedged and asks a
-person for one of its two repairs (`gate-ensure.sh:479-520`). Closing the
-review is the repair that clears a short record, because the next pass
-dispatches a fresh review with the whole record. A review returned to the pool
-meets the same refusal. Reviewing an unpinned commit is never the fallback.
+bead's notes, closes the chain forward and drains. The quorum's lanes and its
+synthesis meet a short record the same way. The verdict step's failure arm
+(`mol-review.toml:368-384`), which the quorum's synthesis repeats, restores the
+bead's route only when `record` reads the record whole. After signoff.sh's
+interrupted retirement, the arm closes the chain and drains without restoring
+the route. A claimant that holds a short review with no workflow, because a
+person or a failure arm poured before this design routed it, appends the
+refusal and releases its claim with the route left empty. No path returns a
+short review to the pool, because the next claim would meet the same refusal.
+Reviewing an unpinned commit is never the fallback.
+
+Each of those paths leaves the review open, with no route and nothing driving
+it. A short review that was never poured is the stranded arm's, which writes
+the whole record before it slings the review (section 2). Any other has a spent
+workflow, the shape gate-ensure's spent-workflow arm judges
+(`gate-ensure.sh:479-520`). The arm holds a spent review for one pass, because
+a failure arm closes its chain before it restores a route (`:472-475`), and
+that hold stays. On its next pass the arm reads the record with
+`review-frame.sh record`. A short record means no verdict can come from this
+review, so the arm retires it. After signoff.sh's interrupted retirement, that
+is the close signoff.sh could not confirm. The arm closes the review
+`gc.outcome=superseded` with no verdict, appends a note naming the missing key,
+and reads the close back. The same pass then dispatches a fresh review with the
+whole record at the live head, through the quiescence gate and the per-head bar
+that every dispatch passes. gate-ensure already closes a review it cannot use.
+It unmakes one filed short of the keys its probe selects by before it files a
+fresh one (`:1033-1037`).
+
+The merge stays held, and no verdict is recorded, until the fresh review
+records one. The open review holds its lane out of green. The retired one backs
+no lane, because backing needs `signoff_verdict=approve` on a review that is
+not superseded (`lane-state.sh:137-157`). It bars no fresh dispatch either,
+because the per-head bar counts only a review closed `recorded`
+(`gate-ensure.sh:244-257`).
+
+A close that does not read back leaves the review open and the merge held, and
+the next pass tries again. The arm records each failed attempt on the review,
+as it records the spent root its hold saw. When the retirement fails on a
+second pass, the repair is blocked. Only then does the arm escalate, under a key
+of its own, `review-retire-blocked`, naming the review, the missing key and the
+close that does not land. A later pass whose retirement reads back retracts that
+visit through `escalate.sh --retract`. A spent review whose record is whole is
+still the wedge the arm escalates today. Its workflow ended without a verdict
+for a reason the record does not show, so the arm asks a person for one of its
+two repairs.
 
 ### The quorum reads one record
 
@@ -690,14 +733,25 @@ stewards at the reviewed commit is this rule, and it stays.
    neither `gh` nor `ls-remote` reads holds the dispatch, and the `ls-remote`
    fallback pins. The stranded arm writes `reviewed_oid` only where it is
    absent.
-2. **The reader** (`review-frame.test.sh`, new). `record` prints each key and
+2. **Recovering a short review** (`signoff.test.sh`, `gate-ensure.test.sh`).
+   signoff.sh's refusal of a gone pin whose superseded close does not read back
+   exits 2 with the pin cleared and no verdict. gate-ensure holds a spent
+   review short of a required key for one pass. On the next pass it closes the
+   review superseded with no verdict, and the same pass files a fresh review
+   with the whole record at the live head. The lane derives no green from the
+   retired review, and the per-head bar does not count it. A close that does
+   not read back leaves the review open and files no visit, and the next pass
+   retries it. A second failed pass escalates under `review-retire-blocked`,
+   and a later retirement that reads back retracts that visit. A spent review
+   whose record is whole is still escalated under `review-wedge`.
+3. **The reader** (`review-frame.test.sh`, new). `record` prints each key and
    each derived value. Removing any required key makes it exit 3 and name that
    key. An unparseable PR URL, or one PR key without the other, exits 3.
    `--convoy` refuses a convoy with no member or with two. `diff` and `show`
    read the reviewed commit, not the working tree, from a cwd in another
    repository. `worktree` builds the worktree in the repository `GC_RIG_ROOT`
    names, from a wrong cwd, and returns the same one when run twice.
-3. **Method resolution, iterating the pack's index** (new). Every row has a
+4. **Method resolution, iterating the pack's index** (new). Every row has a
    `skills/review-<check>/SKILL.md` whose frontmatter `name` is
    `review-<check>` and which has a verdict section. Every `skills/review-*`
    directory has a row. Every flag a skill's verdict section names is one
@@ -707,7 +761,7 @@ stewards at the reviewed commit is this rule, and it stays.
    a check with no skill resolves to its purpose through `--check`, and a token
    no index declares resolves to nothing. The `review-method-load` region is the
    same text in every step that carries it.
-4. **The frame contract, iterating the pack's index.** Every shell block in each
+5. **The frame contract, iterating the pack's index.** Every shell block in each
    check's skill runs under `set -u` in a fresh shell, given only a review bead
    id, a stub store serving a fixture record, and a scratch rig repository. The
    block's placeholders are filled from the fixture, and the commands with
@@ -715,7 +769,7 @@ stewards at the reviewed commit is this rule, and it stays.
    engine) are stubbed. No block uses a value it did not read itself. The
    correctness test-evidence block's bash and zsh cases, now
    `review-method.test.sh` (EVIDENCE), become two of these runs.
-5. **The live read** (`review-checks.test.sh`). A rig with no index resolves to
+6. **The live read** (`review-checks.test.sh`). A rig with no index resolves to
    the pack's rows. A rig row changes a pack check's phase and keeps its
    purpose. A rig row adds a check. A `method` key is ignored. A rig row with a
    bad phase is ignored with a warning, a pack check keeps its row, and a
@@ -725,12 +779,12 @@ stewards at the reviewed commit is this rule, and it stays.
    carries a different index. The ref is fetched at most once a minute and read
    as it stands when the fetch fails. `--extension` prints the default branch's
    copy, ignores the reviewed commit's, and exits 3 when the rig keeps none.
-6. **What signoff.sh refuses** (`signoff.test.sh`), iterating the effective
+7. **What signoff.sh refuses** (`signoff.test.sh`), iterating the effective
    index. It refuses `--add-gates` from every declared check but triage,
    `--visual` from every check but demo, a demo verdict without `--visual`, and
    an add of a check the effective index does not declare. An add that the live
    index declares and the reviewed commit's does not is now accepted.
-7. **One reader, one list** (new, structural). No script, formula or skill
+8. **One reader, one list** (new, structural). No script, formula or skill
    outside `review-checks.sh` reads `review-checks.toml` or a
    `docs/review-<check>.md`, by path or at a commit. No script or formula
    carries a list of two or more of the pack's checks, as a `case` alternation
@@ -742,10 +796,10 @@ stewards at the reviewed commit is this rule, and it stays.
 - `review-dispatch-body.test.sh` goes with its script.
 - `review-method.test.sh` goes. Its (NEUTRAL), (METHOD), (QUORUM), (SPECIALIST)
   and (KEEPALIVE) cases pin formula and skill wording. (STANDARDS) becomes part
-  of test 3, as a property of the correctness skill's files. (RUBRIC), the
+  of test 4, as a property of the correctness skill's files. (RUBRIC), the
   learning loop's anchors in `rubric-ledger.md`, moves beside
   `learning-recurrence.test.sh`, which already inventories that ledger.
-  (EVIDENCE) becomes part of test 4.
+  (EVIDENCE) becomes part of test 5.
 - `tools/lint-learned.d.test.sh`'s zsh-colon-modifier case rebuilds two lines of
   the live triage skill (`:1225-1250`), and this design rewrites both. It gets a
   fixture of its own, so a lint rule's regression case stops depending on a
@@ -844,7 +898,7 @@ when unit A lands.
   index and the live rule, and points at the configuration that holds the
   baseline.
 - A bead in sprintshow's store for its index header (section 6).
-- Tests 5 and 6 of section 8, and the reader half of test 7.
+- Tests 6 and 7 of section 8, and the reader half of test 8.
 
 It touches every gating reader, so it lands alone, reviewable as one change to
 what every transition reads.
@@ -853,14 +907,18 @@ what every transition reads.
 
 - gate-ensure.sh writes the record (section 2), requires a head, writes the fixed
   description, and stops calling `review-dispatch-body.sh`.
+- gate-ensure.sh's spent-workflow arm retires a review short of its record,
+  dispatches a fresh one in the same pass, and escalates only a retirement that
+  fails on a second pass (section 1).
 - `review-frame.sh` and its test.
 - `mol-review` and the quorum read the record and load the skill named from the
-  check (sections 1 and 3).
+  check (sections 1 and 3). Their failure arm restores a route only to a review
+  whose record reads whole.
 - The five check skills take the uniform shape and read values through the
   frame, and `skills/specialist-stance/SKILL.md` is new.
 - `review-dispatch-body.sh`, its test, its component-model row,
-  `pr-facts.test.sh`'s stub and `review-method.test.sh` go. Tests 1 to 4 of
-  section 8 land, with the list half of test 7, which can hold only once the
+  `pr-facts.test.sh`'s stub and `review-method.test.sh` go. Tests 1 to 5 of
+  section 8 land, with the list half of test 8, which can hold only once the
   dispatch body's case arm is gone. The formula-block tests are re-pointed, and
   the lint case gets its fixture.
 
@@ -880,8 +938,9 @@ the new ones. They read the keys an old bead already carries through
 for is missing, so an old bead's lack of `review_formula` stops nothing. The
 exception is an old review dispatched without a pin, which today's gate-ensure
 sends out when its read of the head fails (`gate-ensure.sh:137-139`). A
-skill's read of `reviewed_oid` refuses it, and closing that review lets the
-next pass dispatch it again, pinned. A review stranded across the change is
+skill's read of `reviewed_oid` refuses it. Once its workflow ends without a
+verdict, gate-ensure retires it and dispatches it again, pinned, as it does any
+review short of its record (section 1). A review stranded across the change is
 slung again by the new gate-ensure, whose stranded arm writes the whole record
 first.
 
