@@ -1079,10 +1079,15 @@ report_unresolved() { # id detail ("-" when an until edge names no target)
 #      when that read still finds the bead owed and carrying no live work. A
 #      successor pointer already on the bead is live work: a disposition
 #      another closer recorded.
-#   3. It marks the bead with the successor (UNTIL_MARK). From here on, a
-#      pointer to that successor on the bead under the claim is the pass's own.
+#   3. It marks the bead with the successor (UNTIL_MARK).
 #   4. bead-rehome stamps the successor pointer and closes the bead, acting as
 #      UNTIL_FENCE, the actor bd's close requires of a bead assigned to it.
+#      bead-rehome stamps in one write bd applies only while the bead still has
+#      the status and assignee its gates read. So a closer that read the bead
+#      before the claim stamps nothing once the claim lands, and one that reads
+#      it under the claim is refused as another session's: under the claim the
+#      only pointer that can land is the pass's own, to the successor the mark
+#      names.
 #   5. It reads the bead again. A mark that landed while the pass held the bead
 #      landed before this read, so this read finds it, and the pass reopens the
 #      bead and withdraws its pointer. Otherwise it releases the claim, and the
@@ -1114,8 +1119,10 @@ until_mark() { # id successor
 
 # Give back a bead the pass claimed and did not close: open, unassigned and
 # unmarked again, in one write conditional on the claim. With `withdraw`, the
-# same write removes the successor pointer, which is the pass's own on a bead it
-# marked before bead-rehome ran, so a bead the pass gives back never carries it.
+# same write removes the successor pointer, so a bead the pass gives back never
+# carries it. A pass withdraws only from a bead its read under the claim found
+# unpointed and that it then marked, and under the claim no pointer but its own
+# can land (step 4 above), so the pointer it removes is never another closer's.
 # 0 also when the claim no longer holds the bead and nothing of the pass's is on
 # it. A dry run claimed nothing.
 fence_release() { # id [withdraw]
@@ -1132,7 +1139,7 @@ fence_release() { # id [withdraw]
         0) return 0 ;;
         13)
             [ -n "$kept" ] || return 0
-            echo "$PROG: WARN $1 is no longer in progress under $UNTIL_FENCE, so this pass neither gave it back nor withdrew the successor pointer it had bead-rehome stamp — the next pass checks it if it is closed under $UNTIL_FENCE, and otherwise a person decides whether that pointer stands" >&2
+            echo "$PROG: WARN $1 is no longer in progress under $UNTIL_FENCE, so this pass did not give it back, nor withdraw any successor pointer it had bead-rehome stamp — the next pass checks it if it is closed under $UNTIL_FENCE, and otherwise a person decides whether such a pointer stands" >&2
             return 1 ;;
         *) echo "$PROG: WARN could not release the claim on $1 (rc=$rc); it stays in progress under $UNTIL_FENCE$kept until the next pass gives it back" >&2
            return 1 ;;

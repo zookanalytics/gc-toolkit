@@ -485,10 +485,14 @@ finds. So the pass disposes a bead under a claim of its own:
    bead back, open and unassigned, with whatever landed on it.
 3. It marks the bead with the successor it is about to point it at
    (`gc.until_disposal`), in one write bd applies only while the claim still
-   holds the bead. From then on, a pointer to that successor on the bead under
-   the claim is the pass's own.
+   holds the bead.
 4. `bead-rehome` stamps the pointer and closes the bead, acting as
    `deferred-dispatch`, the actor bd's close requires of a bead assigned to it.
+   `bead-rehome` stamps in one write bd applies only while the bead still has
+   the status and assignee its gates read. So a closer whose gates passed
+   before the claim stamps nothing once the claim lands, and its gate refuses
+   one that reads the bead under the claim. Under the claim, the only pointer
+   that can land is the pass's own, to the successor the mark names.
 5. It reads the bead and its edges again. A mark that landed while the pass
    held the bead landed before this read, so the read finds it, and the pass
    reopens the bead, removes its successor pointer and appends a note naming

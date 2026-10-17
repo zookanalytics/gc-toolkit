@@ -979,13 +979,16 @@ anything that landed on the bead or its edges while the pass held it makes the
 pass withdraw the disposal, reopening the bead and removing the pointer
 ([deferred-dispatch.md](deferred-dispatch.md), "The resolved-by consumer").
 Whoever judges, `bead-rehome.sh` stays the one writer of the pointer and the
-close. The one other write to the pointer is the pass's withdrawal of a
-pointer it had `bead-rehome.sh` stamp under its claim: after a close its check
-finds raced, and when the close is held or fails, in the write that gives the
-bead back. The pass marks the bead with the successor before `bead-rehome.sh`
-runs, so it removes only a pointer that is its own. A pointer on an open bead
-is live work to the pass, so it never disposes a bead another closer has
-pointed.
+close. It stamps the pointer in one write bd applies only while the bead still
+has the status and assignee its gates read, so a caller whose gates passed
+before another actor claimed the bead stamps nothing while that claim holds.
+The one other write to the pointer is the pass's withdrawal of a pointer it
+had `bead-rehome.sh` stamp under its claim: after a close its check finds
+raced, and when the close is held or fails, in the write that gives the bead
+back. Under its claim no other caller's stamp lands, and the pass marks the
+bead with the successor before `bead-rehome.sh` runs, so it removes only a
+pointer that is its own. A pointer on an open bead is live work to the pass,
+so it never disposes a bead another closer has pointed.
 
 A disposition ends the bead's branch, the way a merge ends a landed one
 through the repository's delete-on-merge setting. Once the close reads back,

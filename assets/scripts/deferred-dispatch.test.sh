@@ -82,7 +82,12 @@
 #     other half runs: a pass stopped after the stamp leaves a pointer its mark
 #     names, which the next pass withdraws, while a pointer no mark names, or
 #     one another closer records before the claim, stays and reads as live
-#     work. An arm that lands while the pass holds the bead outlives a close no
+#     work. Another closer whose gates passed before the claim, run through
+#     the real bead-rehome.sh, stamps nothing while the pass holds the bead,
+#     whether it is released after the pass's stamp or before it, so the pass
+#     neither withdraws nor overwrites a pointer it did not stamp; and a stamp
+#     the claim no longer covers writes nothing, leaving the bead to whoever
+#     took it. An arm that lands while the pass holds the bead outlives a close no
 #     pass could check, and fires once the check reopens the bead. A give-back
 #     or a check that fails is left for the pass after, and so is one the budget
 #     leaves, which the pass declares as it does a disposal;
@@ -339,6 +344,21 @@ case "${1:-}" in
       esac
       shift || true
     done
+    # STUB_UPDATE_HOLD_AT holds the first update whose arguments contain it,
+    # which creates the file STUB_UPDATE_HOLD and waits for
+    # "$STUB_UPDATE_HOLD.release": before its guard is checked, or, with
+    # STUB_UPDATE_HOLD_AFTER set, once its write has landed. A test parks one
+    # writer there while another acts.
+    held=""
+    if [ -n "${STUB_UPDATE_HOLD_AT:-}" ] && [ ! -e "${STUB_UPDATE_HOLD:?}" ]; then
+      case " $id $upd_args " in *"$STUB_UPDATE_HOLD_AT"*) held=1 ;; esac
+    fi
+    hold_update() {
+      : > "$STUB_UPDATE_HOLD"
+      local i=0
+      while [ ! -e "$STUB_UPDATE_HOLD.release" ] && [ "$i" -lt 2400 ]; do sleep 0.05; i=$((i + 1)); done
+    }
+    [ -z "$held" ] || [ -n "${STUB_UPDATE_HOLD_AFTER:-}" ] || hold_update
     # STUB_UPDATE_FAIL_AT fails, writing nothing, every update whose arguments
     # contain it.
     if [ -n "${STUB_UPDATE_FAIL_AT:-}" ]; then
@@ -386,6 +406,7 @@ case "${1:-}" in
         'map(if .id == $id then .notes = $n else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp"
     fi
     mv "$tmp" "$STORE"
+    [ -z "$held" ] || [ -z "${STUB_UPDATE_HOLD_AFTER:-}" ] || hold_update
     echo "updated $id"
     ;;
   close)
@@ -1892,11 +1913,11 @@ export STUB_BD_LOG="$TMP/bd-held.log"; : > "$STUB_BD_LOG"
 out="$(held_rehome env GC_REHOME_TOOL="$HERE/bead-rehome.sh" "$SUT" reconcile --db "$TMP/rig-a/.beads" 2>&1)"; rc=$?
 eq "$rc" 0 "a close the real disposer had held is an expected state"
 mark_at="$(grep -n -F -e 'update g-1 --if-status=in_progress --if-assignee=deferred-dispatch --set-metadata=gc.until_disposal=x-1' "$STUB_BD_LOG" | head -1 | cut -d: -f1)"
-stamp_at="$(grep -n -F -e 'update g-1 --set-metadata gc.superseded_by=x-1' "$STUB_BD_LOG" | head -1 | cut -d: -f1)"
+stamp_at="$(grep -n -F -e 'update g-1 --if-status=in_progress --if-assignee=deferred-dispatch --set-metadata gc.superseded_by=x-1' "$STUB_BD_LOG" | head -1 | cut -d: -f1)"
 if [ -n "$mark_at" ] && [ -n "$stamp_at" ] && [ "$mark_at" -lt "$stamp_at" ]; then
-    ok "the pass marks the bead before the real disposer stamps its pointer"
+    ok "the pass marks the bead before the real disposer stamps its pointer, in a write conditional on the claim"
 else
-    bad "the pass marks the bead before the real disposer stamps its pointer (mark at line '${mark_at:-none}', stamp at line '${stamp_at:-none}')"
+    bad "the pass marks the bead before the real disposer stamps its pointer, in a write conditional on the claim (mark at line '${mark_at:-none}', stamp at line '${stamp_at:-none}')"
 fi
 unset STUB_BD_LOG
 eq "$(status_of g-1)/$(assignee_of g-1)" "open/" "the bead is open and unassigned again"
@@ -2031,6 +2052,69 @@ eq "$(status_of g-1)/$(assignee_of g-1)" "open/" "open and unassigned"
 eq "$(meta g-1 gc.superseded_by)" "x-1" "the other closer's pointer stands"
 eq "$(rehomes)" "0" "and the bead is not disposed"
 has "$out" "LEFT g-1" "its pointer is reported as live work"
+
+# Another closer's gates pass while the bead is open and unassigned, and its
+# stamp is still to come when the pass claims the bead. The real bead-rehome
+# runs as both closers: the other one points g-1 at y-1 and is parked just
+# before its stamp, then released once the pass has stamped, or once the pass
+# is about to stamp.
+G1_OWED_Y1='[
+ {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""},
+ {"id":"y-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":""}]'
+OTHER_AT="$TMP/other-closer-hold"; PASS_AT="$TMP/pass-stamp-hold"
+other_closer() { # starts the other closer, parked before its stamp; its pid in OTHER
+    rm -f "$OTHER_AT" "$OTHER_AT.release" "$PASS_AT" "$PASS_AT.release"
+    real_rehome env BEADS_ACTOR=other-closer STUB_UPDATE_HOLD_AT='gc.superseded_by=y-1' STUB_UPDATE_HOLD="$OTHER_AT" \
+        "$HERE/bead-rehome.sh" --origin g-1 --successor y-1 --kind re-homed \
+        --origin-store rig:rig-a --successor-store rig:rig-a --note "another closer's ruling" \
+        > "$TMP/other-closer.out" 2>&1 &
+    OTHER=$!
+}
+for when in after-the-pass-stamps before-the-pass-stamps; do
+    echo "# until: a closer whose gates passed before the claim stamps nothing while the pass holds the bead, released $when"
+    store "$G1_OWED_Y1"
+    other_closer
+    if ! await "$OTHER_AT"; then
+        bad "($when) the other closer never reached its stamp (fixture wedged)"
+        : > "$OTHER_AT.release"; wait "$OTHER" 2>/dev/null; continue
+    fi
+    after=""; [ "$when" = before-the-pass-stamps ] || after=1
+    real_rehome env GC_REHOME_TOOL="$HERE/bead-rehome.sh" STUB_UPDATE_HOLD_AT='gc.superseded_by=x-1' STUB_UPDATE_HOLD="$PASS_AT" \
+        STUB_UPDATE_HOLD_AFTER="$after" "$SUT" reconcile --db "$TMP/rig-a/.beads" > "$TMP/pass.out" 2>&1 &
+    pass_pid=$!
+    if ! await "$PASS_AT"; then
+        bad "($when) the pass never reached its stamp (fixture wedged)"
+        : > "$PASS_AT.release"; : > "$OTHER_AT.release"; wait "$pass_pid" "$OTHER" 2>/dev/null; continue
+    fi
+    eq "$(status_of g-1)/$(assignee_of g-1)" "in_progress/deferred-dispatch" "($when) the pass holds the bead under its claim"
+    : > "$OTHER_AT.release"; wait "$OTHER"; orc=$?
+    eq "$orc" 4 "($when) the other closer's stamp, judged before the claim, is refused"
+    has "$(cat "$TMP/other-closer.out")" "g-1 is no longer open and unassigned" "($when) the other closer says the bead changed after it judged it"
+    if [ -n "$after" ]; then
+        eq "$(meta g-1 gc.superseded_by)" "x-1" "($when) the pass's pointer stands, untouched by the other closer"
+    else
+        eq "$(meta g-1 gc.superseded_by)" "<absent>" "($when) nothing the other closer wrote is on the bead for the pass to overwrite"
+    fi
+    : > "$PASS_AT.release"; wait "$pass_pid"; prc=$?
+    out="$(cat "$TMP/pass.out")"
+    eq "$prc" 0 "($when) the pass is clean"
+    eq "$(status_of g-1)/$(assignee_of g-1)" "closed/" "($when) the pass disposes the bead and releases its claim"
+    eq "$(meta g-1 gc.superseded_by)" "x-1" "($when) onto its until target"
+    has "$(close_reason g-1)" "folded into x-1" "($when) with a close reason that names the pointer the bead carries"
+    has "$out" "disposed g-1" "($when) and reports the disposal"
+    eq "$(meta y-1 gc.supersedes)" "<absent>" "($when) the other closer recorded nothing on its successor"
+done
+
+echo "# until: a stamp the claim no longer covers writes nothing, and the pass leaves the bead to whoever took it"
+store "$G1_OWED"
+out="$(real_rehome env GC_REHOME_TOOL="$HERE/bead-rehome.sh" STUB_RACE_AT='gc.superseded_by=x-1' \
+    STUB_RACE_JQ='map(if .id == "g-1" then (.status = "in_progress" | .assignee = "rig/rig.polecat-1") else . end)' \
+    "$SUT" reconcile --db "$TMP/rig-a/.beads" 2>&1)"; rc=$?
+eq "$rc" 1 "a disposal whose claim was taken from the pass fails the pass"
+eq "$(status_of g-1)/$(assignee_of g-1)" "in_progress/rig/rig.polecat-1" "the bead stays with whoever took it"
+eq "$(meta g-1 gc.superseded_by)" "<absent>" "with no pointer, since bead-rehome stamps nothing on a bead the claim no longer holds"
+has "$out" "g-1 is no longer in progress under deferred-dispatch, so this pass did not give it back" "the pass says it left the bead"
 
 echo "# until: a pass stopped after the real bead-rehome stamped its pointer leaves the claim and the mark, and the next pass withdraws the pointer"
 # The gate stub stops the pass where it stands: the real disposer has stamped

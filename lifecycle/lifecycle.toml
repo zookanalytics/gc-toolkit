@@ -1232,16 +1232,17 @@ keys = [
 ]
 # gc.superseded_by / _store — on the ORIGIN bead, the successor it retired into
 #   and (only where the id prefix is ambiguous) that successor's store.
-#   bead-rehome.sh writes and reads them back and refuses to overwrite a
-#   DIFFERENT successor. Flat dotted keys read by bracket access; the non-dotted
-#   `superseded_by` and `superseded_by_store` are legacy fallbacks, read only —
-#   bead-rehome.sh and duplicate-sweep.sh fall back to them when the dotted form
-#   is absent, and no pack path writes them. Cleared only by
-#   deferred-dispatch.sh, and only a pointer it had bead-rehome.sh stamp under
-#   its claim: in the write that reopens a bead it has disposed when its read
-#   after the close finds something that landed on the bead or its edges after
-#   it claimed the bead, and in the write that gives back a claimed bead whose
-#   close bead-rehome.sh did not make (docs/authority-map.md, Withdraw a
+#   bead-rehome.sh writes them, in one write bd applies only while the origin
+#   still has the status and assignee its gates read, reads them back, and
+#   refuses to overwrite a DIFFERENT successor. Flat dotted keys read by bracket
+#   access; the non-dotted `superseded_by` and `superseded_by_store` are legacy
+#   fallbacks, read only — bead-rehome.sh and duplicate-sweep.sh fall back to
+#   them when the dotted form is absent, and no pack path writes them. Cleared
+#   only by deferred-dispatch.sh, and only a pointer it had bead-rehome.sh stamp
+#   under its claim: in the write that reopens a bead it has disposed when its
+#   read after the close finds something that landed on the bead or its edges
+#   after it claimed the bead, and in the write that gives back a claimed bead
+#   whose close bead-rehome.sh did not make (docs/authority-map.md, Withdraw a
 #   disposal). On an open bead the pointer is live work (live-work.sh), so the
 #   until consumer never disposes a bead another closer has pointed. Bead id /
 #   store.
