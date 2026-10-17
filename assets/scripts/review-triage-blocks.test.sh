@@ -94,11 +94,12 @@ export AUDIT_LOG="$TMP/audit.log"
 M_JSON='{"task_kind":"review","check_name":"triage","anchor_bead":"tk-anchor1","review_branch":"polecat/x","review_base":"main"}'
 
 # run <shell> <block> <scripts dir> <reviewed oid> : the block's stdout in OUT,
-# its stderr in ERR and its status in RC, run in the rig's checkout.
+# its stderr in ERR and its status in RC, run in the rig's checkout. TMPDIR is
+# the test's own directory, so the temp file the index read leaves goes with it.
 run() {
   : > "$STUB_LOG"
   RC=0
-  OUT=$(cd "$RIG" && PATH="$BIN:$PATH" STUB_SCRIPTS="$3" GC_RIG_ROOT="$RIG" GC_RIG=rig-x \
+  OUT=$(cd "$RIG" && PATH="$BIN:$PATH" TMPDIR="$TMP" STUB_SCRIPTS="$3" GC_RIG_ROOT="$RIG" GC_RIG=rig-x \
           M="$M_JSON" REVIEW_BEAD=tk-review1 REVIEWED_OID="$4" "$1" "$TMP/$2.sh" 2>"$TMP/err") || RC=$?
   ERR=$(cat "$TMP/err")
 }
