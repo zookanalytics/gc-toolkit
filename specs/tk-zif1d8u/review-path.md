@@ -59,18 +59,21 @@ without saying where they come from. Separately, a rig that keeps no
    correctness and triage and says it leaves the other three out on purpose.
    No row withdraws a pack check outright. Triage's judgment does not change,
    and adding nothing stays its common case.
-5. **A rig's review guidance is read at the commit under review.** That
-   guidance is `review-checks.toml` and `docs/review-<check>.md`. A review
-   reads both at the commit it reviews, and a gating reader reads the index at
-   the anchor's head, as gate-ensure and pr-open do today. A branch's own edit
-   to either file governs that branch's review, so what a person reads in the
-   branch is what applies to it. Nothing is fetched on a schedule. Cost: a
-   guidance change merged on a rig's default branch reaches an open branch only
-   once that branch merges its base in. This reverses part 4 of the
+5. **Every file a review reads is read at the reviewed commit, the rig's
+   review guidance included.** That guidance is `review-checks.toml` and
+   `docs/review-<check>.md`. Every reader of it passes `review-checks.sh --at`
+   the commit it judges: a review its reviewed commit, and a gating reader the
+   anchor's head, as gate-ensure and pr-open do today. A branch's own edit to
+   its guidance governs that branch's review, so what a person reads in the
+   branch is what applies to it. Nothing is fetched to keep a copy current.
+   Cost: a process fix merged on a rig's default branch reaches an open PR when
+   that PR next merges its base in, and a PR that never does is reviewed under
+   the rules it was written against. That lag is the cost this design chooses,
+   not an oversight: closing it means reading the default branch live, which
+   the operator ruled out (comment 6237592575). This reverses part 4 of the
    initiative's Target and its fifth Done-when line, which had every reader take
    the default branch's copy so that a process change reaches work in flight
-   (PR #1262 comment 4290610037). The operator's review of this design prefers
-   the branch's own copy (comments 4303521122 and 4303534443).
+   (PR #1262 comment 4290610037).
 6. **Tests hold behavior where the pieces meet, iterating the index.** Each
    declared check resolves to its skill or its purpose, the dispatch writes the
    record and passes the same values as vars, every value a review formula
@@ -85,11 +88,11 @@ without saying where they come from. Separately, a rig that keeps no
    they wait for this convoy's build. The epic's contract sitting rules on this
    (section 9).
 8. **The build is two beads onto this integration branch, in order.** First the
-   layered index, which every gating reader takes. Then the values, the
-   formulas and the skills. Cost: one more PR to approve on the integration
-   branch, for two diffs that are each reviewable in one sitting. The single
-   build the card intended is the alternative, at the cost of one PR across
-   about forty files.
+   layered index, which every reader takes at the commit it judges. Then the
+   values, the formulas and the skills. Cost: one more PR to approve on the
+   integration branch, for two diffs that are each reviewable in one sitting.
+   The single build the card intended is the alternative, at the cost of one PR
+   across about forty files.
 
 ## What a review is told
 
@@ -147,10 +150,11 @@ The sources are the operator's three reviews of PR #1262 (5536090671,
 5538944776, 5542707712), the review comments 4286312773 ("A repo does not need
 to include anything to get a great review") and 4290610037 ("the new process
 inside of that rig should absolutely be applied"), the operator's review of
-this design's first draft (5558827752), the ruling in visit tk-0smmk03, and
-the Target, Done-when and Boundaries of tk-febol6c. Where the review of the
-draft and an earlier source disagree, the review governs, and decision 5 names
-the one place that happens.
+this design's first draft (5558827752) and the operator's rulings on it (PR
+comments 6237592575 and 6237655823), the ruling in visit tk-0smmk03, and the
+Target, Done-when and Boundaries of tk-febol6c. Where the review of the draft
+and an earlier source disagree, the review governs, and decision 5 names the
+one place that happens.
 
 Facts read from the running city:
 
@@ -673,9 +677,11 @@ the index and `docs/review-<check>.md` at its reviewed commit. A gating reader
 reads the index at the anchor's head, the commit whose transition it decides.
 That is the rule the index header states today (`review-checks.toml:12-13`),
 and gate-ensure and pr-open already follow it (`gate-ensure.sh:817`,
-`pr-open.sh:456`). A branch's edit to either file governs that branch's review
-and no other. A guidance change merged on a rig's default branch reaches an
-open branch when that branch next merges its base in.
+`pr-open.sh:456`). Every other reader passes the commit it acts on, as the
+table below says, the three that read the working tree today included. A
+branch's edit to either file governs that branch's review and no other. A
+guidance change merged on a rig's default branch reaches an open branch when
+that branch next merges its base in, which is the lag decision 5 chooses.
 
 No reader reads a default branch, so nothing is fetched to keep a copy current.
 A reader that lacks the commit it judges fetches that commit by id, as
@@ -684,21 +690,30 @@ A reader that lacks the commit it judges fetches that commit by id, as
 ### The one resolver
 
 `review-checks.sh` keeps its job as the one parser and resolver of the check
-index, and takes on the layered index of section 5:
+index, and takes on the layered index of section 5. `--at <oid>` is its one
+source for a rig's rows:
 
-- `--resolve --check-set <cs> --through <phase> [--at <oid>] [--with-phase]`
+- `--resolve --check-set <cs> --through <phase> --at <oid> [--with-phase]`
   resolves against the effective index: the pack's rows from beside the
   script, with the rows of the index `<oid>` carries laid over them. A commit
-  that carries no index adds no rows. Today such a commit falls through to the
-  working tree's copy (`review-checks.sh:36-37`, `:169`).
-- `--check <name> [--at <oid>]` prints one check's effective row, which the
-  purpose case reads. `--show [--at <oid>]` prints the whole effective index,
+  that carries no index adds no rows.
+- `--check <name> --at <oid>` prints one check's effective row, which the
+  purpose case reads. `--show --at <oid>` prints the whole effective index,
   which is triage's menu.
-- `--extension <check> [--at <oid>]` prints the rig's `docs/review-<check>.md`
-  at the commit `--at` names, and exits 3 when the rig keeps none.
+- `--extension <check> --at <oid>` prints the rig's `docs/review-<check>.md` at
+  that commit. When the commit carries none, it prints nothing and exits 0.
+  That is the common case, so load-dispatch runs it for every review and
+  prints whatever it returns.
 - `--file <index>` stays for a test that parses one file.
   `GC_REVIEW_CHECKS_INDEX` keeps naming the whole effective index, so a hermetic
   test fixes what every reader sees.
+
+The working-tree read goes. Today a resolve with no `--at`, or at a commit
+that carries no index, reads the working tree's `review-checks.toml`
+(`review-checks.sh:33-43`, `:169-173`). Under this design a call that names
+neither a commit nor an index, through `--file` or `GC_REVIEW_CHECKS_INDEX`,
+is a usage error, so no reader can fall back to the checkout it happens to run
+in.
 
 A rig row whose phase is outside the ordered set is refused, as today
 (`review-checks.sh:227-235`). Read at a commit, that refusal holds only the
@@ -714,21 +729,22 @@ branches whose commit carries the row.
 | `liveness-sweep.sh` (`:298-313`) | gc-toolkit's own index, two directories above the script, through `--file` | `--at` the head of the anchor's branch, the commit pr-open would open it at, with no `--file` |
 | `signoff.sh --add-gates` (`:859-883`, `:907-913`) | `git show <reviewed_oid>:review-checks.toml`, through a scratch file | `review-checks.sh --check <name> --at <reviewed_oid>`. The no-index arm goes. |
 | the triage skill (`:37-48`) | `git show ${REVIEWED_OID}:review-checks.toml`, with a parser it finds only in gc-toolkit | `review-checks.sh --show --at <reviewed_oid>`, through `scripts-dir` |
-| `review-dispatch-body.sh` (`:161-168`, `:199-215`) | the purpose and the extension at the reviewed commit | the purpose through `--check --at`, until unit B deletes it and the formula makes both reads (section 3) |
+| `review-dispatch-body.sh` (`:161-168`, `:199-215`) | the purpose and the extension at the reviewed commit | the purpose through `--check --at` and the extension through `--extension --at`, until unit B deletes it and the formula makes both reads (section 3) |
 | the demo skill (`:138-140`) | the extension the note appended | the guidance load-dispatch prints |
-| `pr-facts.sh` (`:664`), `review-outcome.sh` (`:339`), `gctk merge` (`services/gctk/internal/cli/merge.go:989`) | the working tree | the same, against the effective index |
+| `pr-facts.sh` `lanes_green` (`:662-670`), called at `:1184` and `:3166` | the working tree | `--at` the PR head its caller already holds: the head the unengaged-threads probe is given, and the head the dismissal arm read |
+| `review-outcome.sh supersede-anchor` (`:339`) | the working tree | `--at` the commit a new, required `--oid` names, as back-lane already takes one. mol-validate passes the pass's `reviewed_oid` (`mol-validate.toml:418`, `:495`). converse-rework.sh (`:127`) passes the head of the anchor's branch, which it reads as signoff.sh reads one (`signoff.sh:430`). |
+| `gctk merge` `firstNotgreenLane` (`services/gctk/internal/cli/merge.go:988`), called at `:532` and `:760` | the working tree | `--at` the head it merges, `headOid` (`:400`), which its `gh pr merge --match-head-commit` already pins (`:782`). This is a Go change. |
 
-The last row is a choice. These three resolve `--through merge`, which names
-every check_set token except the three non-lanes, whatever the index declares,
-so where they read the index does not change their answer. The exception is a
-phase outside the ordered set. One merged on a rig's default branch fails all
-three for every PR in the rig until the index is fixed, where a read at each
-PR's head would fail only the branches that carry it. review-outcome.sh is
-given an anchor and no head, and gctk merge would need a Go change, so for that
-one case they keep the working tree.
+pr-facts.sh, review-outcome.sh and gctk merge resolve `--through merge`, which
+names every check_set token but the three non-lanes, whatever the index
+declares. So the commit each passes changes its answer only when that commit
+carries a phase outside the ordered set, and then each refuses and holds, as
+gate-ensure and pr-open do. Read at the head it merges, gctk merge holds a PR
+whose head adds such a row. Today it reads the working tree, which carries the
+row only once the PR has landed, so nothing at the merge stops it.
 
 The pm skill reads neither file. Its one read of the rig is
-`docs/product-goals.md` (section 7), and it names the index only in prose.
+`docs/product-goals.md` (section 4), and it names the index only in prose.
 
 In practice the layered index changes what a gating reader sees only in a rig
 whose commit declares no row for a check the pack declares. There that check
@@ -828,8 +844,10 @@ stewards at the reviewed commit is this rule, and it stays.
    rig's rows come from the commit `--at` names, not from the working tree,
    which the test proves by resolving at a commit whose index differs from the
    working tree's, and a commit with no index adds no rows even when the
-   working tree has one. A rig row with a phase outside the ordered set is
-   refused.
+   working tree has one. A call that names neither a commit nor an index is
+   refused. `--extension` prints a commit's extension, and prints nothing and
+   exits 0 at a commit that carries none. A rig row with a phase outside the
+   ordered set is refused.
 7. **What signoff.sh refuses** (`signoff.test.sh`), iterating the effective
    index. It refuses `--add-gates` from every declared check but triage,
    `--visual` from every check but demo, a demo verdict without `--visual`, and
@@ -940,12 +958,16 @@ when unit A lands.
 ### Unit A: every rig gets every pack check, read at the commit being judged
 
 - `review-checks.sh` takes on the layered index: the pack's rows beside the
-  script, the rig's from the commit `--at` names. It gains `--check` and
-  `--show`, a commit with no index stops falling through to the working tree,
-  and the `method` key is ignored.
+  script, the rig's from the commit `--at` names. It gains `--check`, `--show`
+  and `--extension`, its working-tree read goes, a call that names neither a
+  commit nor an index is refused, and the `method` key is ignored.
 - liveness-sweep.sh resolves at the head of each anchor's branch, and
-  `review-dispatch-body.sh` reads a check's purpose through `--check --at` until
-  unit B deletes it (section 6).
+  `review-dispatch-body.sh` reads a check's purpose through `--check --at` and
+  its extension through `--extension --at` until unit B deletes it (section 6).
+- pr-facts.sh, review-outcome.sh and gctk merge pass `--at` the commit each
+  acts on (section 6). review-outcome.sh's supersede-anchor gains `--oid`,
+  which mol-validate and converse-rework.sh pass, and gctk merge's
+  `firstNotgreenLane` takes the head it merges, a Go change.
 - signoff.sh validates `--add-gates` against the effective index at the
   reviewed commit. Its scratch-file read and its no-index arm go.
 - The triage skill reads its menu with `review-checks.sh --show --at` through
@@ -957,7 +979,8 @@ when unit A lands.
 - Tests 6 and 7 of section 8, and the reader half of test 8.
 
 It changes which checks every gating reader sees in a rig whose commit declares
-none, so it lands alone, reviewable as one change.
+none, and it carries the build's Go change, so it lands alone, reviewable as
+one change.
 
 ### Unit B: the review bead is data, the step text carries it, and each check is one skill
 
