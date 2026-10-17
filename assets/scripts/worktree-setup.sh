@@ -82,8 +82,8 @@ provision_worktree() {
     # negation must follow the rule it narrows.
     append_exclude ".agents/skills/*"
     append_exclude "!.agents/skills/*/"
-    # Session start stages the city's .gc/settings.json into every session's
-    # work dir, and bd's workspace gate sits beside .beads, outside it.
+    # Session start stages the city's .gc/settings.json into every Claude
+    # session's work dir, and bd's workspace gate sits beside .beads, outside it.
     append_exclude ".gc/"
     append_exclude ".beads.gate.lock"
 }
