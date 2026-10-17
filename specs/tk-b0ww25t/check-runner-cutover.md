@@ -40,12 +40,15 @@ mean the condition could not gate them, and the correctness review of
 fde3f9212 showed a failing build converging the loop, because the block ran on
 past the build's fail and the three records passed. So the block notes what
 setup and build did on the work bead, `self_review_setup_build` =
-`{"commit", "setup", "build"}`, each `pass`, `fail` or `none`, and the
-condition converges only on a note naming the live HEAD with neither one
-failed, whatever the records say. The block writes the note only on a tree
-with no uncommitted change, since a build over such changes says nothing about
-HEAD. A note an earlier iteration wrote at the same HEAD still answers, as a
-record there does.
+`{"commit", "setup", "build", "setup_command", "build_command"}`, each result
+`pass`, `fail` or `none`, and the condition converges only on a note naming
+the live HEAD with neither one failed, whatever the records say. The block
+writes the note only on a tree with no uncommitted change, since a build over
+such changes says nothing about HEAD. A note an earlier iteration wrote at the
+same HEAD still answers, as a record there does. A setup or build failure red
+on the base too is marked like any other check (below), so the loop does not
+exhaust on a failure the diff did not cause, which main's stamp let an agent
+step past.
 
 ## A pre-existing failure is a mark beside the record
 
@@ -71,7 +74,12 @@ changed formula var, or a full suite run where the affected subset failed. So
 each reader honors a mark only while `--check` reads the very record it holds,
 and a mark answers for neither another commit nor another run at its own. The
 first build held only commit and trackers, and the correctness review of
-fde3f9212 showed a replacement fail passing on the old tracker. A bead-keyed
+fde3f9212 showed a replacement fail passing on the old tracker. setup and
+build have no record, so their mark holds the self-review's note instead,
+which carries the commands they ran, and the condition honors it only while
+the note reads the same. Only the self-review writes or reads such a mark: the
+refinery's gate fails on setup and build like any check, and the reviews read
+only test. A bead-keyed
 stamp lacked the commit half of that property, which is why commit-keyed
 records replaced it. The self-review writes the mark on the work bead, which
 its condition reads. The refinery writes it on the anchor (the work
@@ -129,10 +137,10 @@ section of `review-method.test.sh`), so the review frame sets `GCTK` in its
 
 Measured with PR #1217's renderer (formula defaults only, so an empty rig var
 renders empty), before and after: `mol-polecat-work.self-review` 7,356 to
-9,476, `preflight-tests` 11,377 to 12,338, `workspace-setup` 26,275 to 26,661;
+9,569, `preflight-tests` 11,377 to 12,338, `workspace-setup` 26,275 to 26,661;
 `mol-refinery-patrol.run-tests` 11,283 to 13,349 and `handle-failures` 9,601 to
 11,171. Each step that grew carries a heredoc per command it hands the gate and
 the gate's exit handling, the self-review and handle-failures carry the
 pre-existing mark, and the self-review notes setup and build. The self-review
 stays under the 10,000-character hook cap with gc-toolkit's own commands
-rendered in, at 9,657; handle-failures crosses it.
+rendered in, at 9,750; handle-failures crosses it.

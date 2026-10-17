@@ -1259,7 +1259,7 @@ BUILD=none; [ -z "$BUILD_CMD" ] || { hb "$GCTK" rig build --command "$BUILD_CMD"
 if [ -n "$AFFECTED_CMD" ]; then hb "$GCTK" rig test --scope affected --command "$AFFECTED_CMD" "${PUB[@]}"
 elif [ -n "$TEST_CMD" ]; then hb "$GCTK" rig test --scope full --command "$TEST_CMD" "${PUB[@]}"
 else "$GCTK" rig test --nothing-declared "${PUB[@]}"; fi
-[ -n "$(git status --porcelain)" ] || gc bd update "$WORK_BEAD_ID" --set-metadata "self_review_setup_build=$(jq -nc --arg c "$(git rev-parse HEAD)" --arg s "$SETUP" --arg b "$BUILD" '{commit: $c, setup: $s, build: $b}')"
+[ -n "$(git status --porcelain)" ] || gc bd update "$WORK_BEAD_ID" --set-metadata "self_review_setup_build=$(jq -nc --arg c "$(git rev-parse HEAD)" --arg s "$SETUP" --arg b "$BUILD" --arg sc "$SETUP_CMD" --arg bc "$BUILD_CMD" '{commit: $c, setup: $s, build: $b, setup_command: $sc, build_command: $bc}')"
 ```
 A call exits 0 on a pass and 1 on a fail. Fix a failure your diff introduced,
 commit, and run the checks again. A fail answered from its record prints no
@@ -1277,7 +1277,7 @@ HEAD on the work bead; the exit condition takes the mark in place of a passing
 record while that record stands:
 ```bash
 # >>> self-review-pre-existing
-CHECK="<test, lint or typecheck: the red check>"
+CHECK="<test, lint, typecheck, setup or build: the red check>"
 TRACKERS="<the tracker id of each failure in it, space-separated>"
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-check-pre-existing.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
 "${SCRIPTS:?rig-check-pre-existing.sh not found in the pack}/rig-check-pre-existing.sh" --bead "$WORK_BEAD_ID" --check "$CHECK" --commit "$(git rev-parse HEAD)" --trackers "$TRACKERS"
@@ -1302,9 +1302,9 @@ the exit condition hands the work bead back itself
 spent.
 
 **Exit criteria (for the loop, not for you):** the records of test, lint and
-typecheck at HEAD pass, or name a failure the work bead marks pre-existing at
-that HEAD, setup and build passed at that HEAD, and this iteration bead is
-closed. Any iteration that leaves the tree closer to that has done its job."""
+typecheck and the note of setup and build at HEAD pass, or name a failure the
+work bead marks pre-existing at that HEAD, and this iteration bead is closed.
+Any iteration that leaves the tree closer to that has done its job."""
 
 [steps.check]
 # Total attempts including the first. A red iteration spawns the next; this

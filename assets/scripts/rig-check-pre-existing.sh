@@ -2,7 +2,8 @@
 # rig-check-pre-existing.sh — record on a bead that one recorded fail of a
 # check is pre-existing: the same failure is red on the base branch, and a
 # tracker carries it.
-#   rig-check-pre-existing.sh --bead <id> --check test|lint|typecheck
+#   rig-check-pre-existing.sh --bead <id>
+#                             --check test|lint|typecheck|setup|build
 #                             --commit <sha> --trackers "<id> [<id>...]"
 #                             [--worktree <dir>]
 # Callers: the self-review of formulas/mol-polecat-work.toml, on the work bead
@@ -23,6 +24,12 @@
 # bead at HEAD, and the correctness review runs no suite for it on the anchor
 # at the reviewed commit.
 #
+# setup and build have no record, so for them the record is the bead's own
+# self_review_setup_build, the self-review's note of what setup and build did
+# at <sha> with the commands they ran, which must name the check failed there.
+# self-review-check.sh honors that judgment only while the note reads the same,
+# so a run with another command needs a judgment of its own too.
+#
 # A second write for the same record adds its trackers to the ones already
 # there, because a gate files one tracker per failing test or linted file. A
 # write for another record, at that commit or another, replaces the value, so
@@ -40,7 +47,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
   [ -z "${1:-}" ] || echo "$PROG: $1" >&2
-  echo "usage: $PROG --bead <id> --check test|lint|typecheck --commit <sha> --trackers \"<id> [<id>...]\" [--worktree <dir>]" >&2
+  echo "usage: $PROG --bead <id> --check test|lint|typecheck|setup|build --commit <sha> --trackers \"<id> [<id>...]\" [--worktree <dir>]" >&2
   exit 2
 }
 
@@ -62,8 +69,8 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$BEAD" ] || usage "--bead is required"
 case "$CHECK" in
-  test|lint|typecheck) ;;
-  *) usage "--check must be test, lint or typecheck, not '$CHECK'" ;;
+  test|lint|typecheck|setup|build) ;;
+  *) usage "--check must be test, lint, typecheck, setup or build, not '$CHECK'" ;;
 esac
 # The full object name: an abbreviation is no commit a reader can compare.
 case "$COMMIT" in
@@ -80,22 +87,37 @@ printf '%s' "$LIST" | jq -e 'all(.[]; test("^[A-Za-z0-9][A-Za-z0-9._-]*$"))' >/d
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
-[ -x "$GCTK" ] || { echo "$PROG: no gctk binary at $GCTK to read the recorded fail, so nothing was written" >&2; exit 1; }
-# rig's own line goes to stderr, where it says what is recorded, and the record
-# it found is the one JSON line on stdout.
-RECORD=$(cd "$WORKTREE" && "$GCTK" rig "$CHECK" --check)
-RC=$?
-RECORD=$(printf '%s' "$RECORD" | jq -c --arg c "$COMMIT" 'select(type == "object" and .result == "fail" and .commit == $c)' 2>/dev/null)
-if [ "$RC" != 1 ] || [ -z "$RECORD" ]; then
-  echo "$PROG: $WORKTREE holds no recorded $CHECK fail at $COMMIT (gctk rig $CHECK --check exit $RC), so there is nothing to mark and nothing was written" >&2
-  exit 1
-fi
+RECORD=""
+case "$CHECK" in
+  test|lint|typecheck)
+    [ -x "$GCTK" ] || { echo "$PROG: no gctk binary at $GCTK to read the recorded fail, so nothing was written" >&2; exit 1; }
+    # rig's own line goes to stderr, where it says what is recorded, and the
+    # record it found is the one JSON line on stdout.
+    RECORD=$(cd "$WORKTREE" && "$GCTK" rig "$CHECK" --check)
+    RC=$?
+    RECORD=$(printf '%s' "$RECORD" | jq -c --arg c "$COMMIT" 'select(type == "object" and .result == "fail" and .commit == $c)' 2>/dev/null)
+    if [ "$RC" != 1 ] || [ -z "$RECORD" ]; then
+      echo "$PROG: $WORKTREE holds no recorded $CHECK fail at $COMMIT (gctk rig $CHECK --check exit $RC), so there is nothing to mark and nothing was written" >&2
+      exit 1
+    fi ;;
+esac
 
 ROW=$(bd_json show "$BEAD")
 if ! printf '%s' "$ROW" | jq -e --arg id "$BEAD" 'type == "array" and length > 0 and (.[0].id // "") == $id' >/dev/null 2>&1; then
   echo "$PROG: could not read $BEAD, so nothing was written" >&2
   exit 1
 fi
+case "$CHECK" in
+  setup|build)
+    RECORD=$(printf '%s' "$ROW" | jq -c --arg c "$COMMIT" --arg k "$CHECK" '
+      .[0].metadata.self_review_setup_build // empty
+      | (if type == "string" then (fromjson? // empty) else . end)
+      | select(type == "object" and .commit == $c and .[$k] == "fail")' 2>/dev/null)
+    if [ -z "$RECORD" ]; then
+      echo "$PROG: $BEAD notes no $CHECK fail at $COMMIT in self_review_setup_build, so there is nothing to mark and nothing was written" >&2
+      exit 1
+    fi ;;
+esac
 KEY="rig_check_pre_existing.$CHECK"
 # bd keeps a JSON value as a string, so the earlier value is parsed before its
 # trackers are kept.
@@ -111,5 +133,5 @@ if [ "${GOT%%$'\t'*}" != landed ]; then
   echo "$PROG: $KEY on $BEAD did not read back as written ($GOT)" >&2
   exit 1
 fi
-RUN=$(printf '%s' "$RECORD" | jq -r '"the run of \(.command | @sh)" + (if .scope then " (scope \(.scope))" else "" end)')
+RUN=$(printf '%s' "$RECORD" | jq -r --arg k "$CHECK" '"the run of \(.command // .[$k + "_command"] | @sh)" + (if .scope then " (scope \(.scope))" else "" end)')
 echo "$PROG: $BEAD records $CHECK's fail at $COMMIT as pre-existing, for $RUN: $(printf '%s' "$VALUE" | jq -r '.trackers | join(", ")')"

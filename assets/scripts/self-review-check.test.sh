@@ -70,6 +70,7 @@ show)
     [ -n "$MD_PRE_LINT" ]    && { printf '%s"rig_check_pre_existing.lint":%s' "$sep" "$(printf '%s' "$MD_PRE_LINT" | jq -Rs .)"; sep=","; }
     [ -n "$MD_PRE_TEST" ]    && { printf '%s"rig_check_pre_existing.test":%s' "$sep" "$(printf '%s' "$MD_PRE_TEST" | jq -Rs .)"; sep=","; }
     [ -n "$MD_SETUP_BUILD" ] && { printf '%s"self_review_setup_build":%s' "$sep" "$(printf '%s' "$MD_SETUP_BUILD" | jq -Rs .)"; sep=","; }
+    [ -n "$MD_PRE_BUILD" ]   && { printf '%s"rig_check_pre_existing.build":%s' "$sep" "$(printf '%s' "$MD_PRE_BUILD" | jq -Rs .)"; sep=","; }
     printf '}}]'
     ;;
   *)
@@ -151,8 +152,9 @@ echo base > "$WT/f"; git -C "$WT" add f; git -C "$WT" commit -qm base
 echo more > "$WT/f"; git -C "$WT" add f; git -C "$WT" commit -qm work
 HEAD_SHA=$(git -C "$WT" rev-parse HEAD)
 OLD_SHA=$(git -C "$WT" rev-parse HEAD~1)
-# The step's note of setup and build at <commit>: setup <s>, build <b>.
-noted() { jq -nc --arg c "$1" --arg s "$2" --arg b "$3" '{commit: $c, setup: $s, build: $b}'; }
+# The step's note of setup and build at <commit>: setup <s>, build <b>, and the
+# build command [bc], default make.
+noted() { jq -nc --arg c "$1" --arg s "$2" --arg b "$3" --arg bc "${4:-make}" '{commit: $c, setup: $s, build: $b, setup_command: "", build_command: $bc}'; }
 # Unless a case says otherwise, setup and build passed at HEAD.
 SB_GREEN=$(noted "$HEAD_SHA" none pass)
 # A second worktree of the same clone, at HEAD~1, and a third at HEAD: records
@@ -201,6 +203,7 @@ EOF
   printf 'MD_PRE_LINT=%q\n' "${MD_PRE_LINT-}" >> "$STATE"
   printf 'MD_PRE_TEST=%q\n' "${MD_PRE_TEST-}" >> "$STATE"
   printf 'MD_SETUP_BUILD=%q\n' "${MD_SETUP_BUILD-$SB_GREEN}" >> "$STATE"
+  printf 'MD_PRE_BUILD=%q\n' "${MD_PRE_BUILD-}" >> "$STATE"
 }
 
 # Run the script in a cwd that is deliberately NOT the fixture worktree: the
@@ -236,7 +239,7 @@ assert_out() {
 reset_env() {
   unset ROOT_ID CONVOY_ID CONVOY_MEMBERS ISSUE_ID MD_ROOT_ISSUE DEP_TREE_FAILS GC_COLD
   unset MD_WORK_DIR MD_BRANCH MD_GATE MD_ROUTE MD_ABORTED_AT MD_MAX_ATTEMPTS MD_SUBJECT_MAX
-  unset UPDATE_FAILS ITERATION MD_PRE_LINT MD_PRE_TEST MD_SETUP_BUILD GCTK
+  unset UPDATE_FAILS ITERATION MD_PRE_LINT MD_PRE_TEST MD_SETUP_BUILD MD_PRE_BUILD GCTK
   clear_records
 }
 
@@ -312,6 +315,21 @@ run_case "FAIL when nothing notes setup and build" 1
 reset_env; MD_SETUP_BUILD="{\"commit\":\"$HEAD_SHA\"}"; write_state; green
 run_case "FAIL when the note at HEAD names no outcome" 1
 
+# A setup or build failure red on the base too is marked like any other check,
+# and the mark holds the note it judged in place of a record.
+reset_env; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none fail)
+MD_PRE_BUILD=$(premark "$HEAD_SHA" "$MD_SETUP_BUILD" tk-b1); write_state; green
+run_case "PASS when the failed build's note at HEAD is marked pre-existing" 0
+assert_out "names the build's tracker" "build: the fail at $HEAD_SHA is pre-existing, tracked by tk-b1"
+reset_env; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none fail 'make all')
+MD_PRE_BUILD=$(premark "$HEAD_SHA" "$(noted "$HEAD_SHA" none fail)" tk-b1); write_state; green
+run_case "FAIL when the build mark holds a note of another command" 1
+assert_out "says the build mark judged another run" "build: the pre-existing mark at $HEAD_SHA judged another run's fail"
+reset_env; MD_SETUP_BUILD=$(noted "$HEAD_SHA" fail fail)
+MD_PRE_BUILD=$(premark "$HEAD_SHA" "$MD_SETUP_BUILD" tk-b1); write_state; green
+run_case "FAIL when setup failed too and only the build is marked" 1
+assert_out "names the unmarked setup" "not green at $HEAD_SHA: setup"
+
 # --- 3d4. the step's own block, rendered as a pour renders it -------------------
 # The self-review step's check block, rendered with the rig's commands, runs in
 # the fixture worktree against the gctk built from this checkout. Its note of
@@ -354,6 +372,13 @@ for sh in $SHELLS; do
   run_checks "$sh" 'exit 1'
   run_case "$sh: FAIL after the step's own block ran a build that fails on a clean tree" 1
   assert_out "$sh: …naming the build" "not green at $HEAD_SHA: build"
+  # The note the block wrote is the last MD_SETUP_BUILD line in the state.
+  # shellcheck disable=SC1090  # the generated state file the stubs read
+  BLOCK_NOTE=$(MD_SETUP_BUILD=""; . "$STATE"; printf '%s' "$MD_SETUP_BUILD")
+  eq "$(printf '%s' "$BLOCK_NOTE" | jq -r '[.commit, .setup, .build, .build_command] | join(" ")')" "$HEAD_SHA none fail exit 1" \
+    "$sh: the block notes HEAD, no setup, the failed build and its command"
+  printf 'MD_PRE_BUILD=%q\n' "$(premark "$HEAD_SHA" "$BLOCK_NOTE" tk-b1)" >> "$STATE"
+  run_case "$sh: PASS once a pre-existing mark holds the note the block wrote" 0
   reset_env; MD_SETUP_BUILD=""; write_state
   run_checks "$sh" 'true'
   run_case "$sh: PASS after the step's own block ran a build that passes" 0

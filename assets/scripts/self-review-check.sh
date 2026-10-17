@@ -4,11 +4,12 @@
 # Exit 0 ("pass" — closes the control bead and releases submit-and-exit) ONLY
 # when the tree checked out right now is clean, `gctk rig` holds a passing
 # record of each of the rig's recorded checks (test, lint and typecheck) at its
-# HEAD, and the work bead notes that setup and build passed at that HEAD. Every
-# other state, including any internal error in this script, exits
-# non-zero so the loop spawns the next iteration. Fail-closed is deliberate: a
-# false pass hands an unverified diff to the refinery, which is the red handoff
-# this loop exists to stop.
+# HEAD, and the work bead notes that setup and build passed at that HEAD, a fail
+# of any of them passing only by the work bead's pre-existing mark for it. Every
+# other state, including any internal error in this script, exits non-zero so
+# the loop spawns the next iteration. Fail-closed is deliberate: a false pass
+# hands an unverified diff to the refinery, which is the red handoff this loop
+# exists to stop.
 #
 # ## Why this READS the records instead of running the checks
 #
@@ -326,17 +327,35 @@ HEAD_SHA=$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null) ||
 # The iteration ran each check through `gctk rig`. A check the rig declares no
 # command for is recorded as a pass that ran nothing, so each of the three has a
 # record to read. A recorded fail passes only when the work bead's
-# rig_check_pre_existing.<check>
-# carries that very record at this HEAD: the iteration found the same failure
-# red on the base and carried by a tracker (rig-check-pre-existing.sh). A run
-# with another command or scope replaces the record, and its fail needs a
-# judgment of its own.
+# rig_check_pre_existing.<check> holds that very record at this HEAD: the
+# iteration found the same failure red on the base and carried by a tracker
+# (rig-check-pre-existing.sh). A run with another command or scope replaces the
+# record, and its fail needs a judgment of its own.
+FAILED=""
+UNRECORDED=""
+# judged <check> <record> : a fail at HEAD fails the check unless the work
+# bead's pre-existing mark for it holds <record> and names a tracker.
+judged() {
+	local pre
+	pre=$(printf '%s' "$ISSUE_JSON" | jq -r --arg k "rig_check_pre_existing.$1" --arg c "$HEAD_SHA" --arg rec "$2" '
+		($rec | fromjson? // null) as $r
+		| .[0].metadata[$k] // empty
+		| (if type == "string" then (fromjson? // empty) else . end)
+		| select(type == "object" and .commit == $c and ((.trackers // []) | length) > 0)
+		| if $r != null and .record == $r then "tracked by " + (.trackers | join(", ")) else "another run" end' 2>/dev/null)
+	case "$pre" in
+	"tracked by "*) note "$1: the fail at $HEAD_SHA is pre-existing, $pre" ;;
+	"another run")
+		FAILED="$FAILED $1"
+		note "$1: the pre-existing mark at $HEAD_SHA judged another run's fail, so this one needs a judgment of its own"
+		;;
+	*) FAILED="$FAILED $1" ;;
+	esac
+}
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
 [ -x "$GCTK" ] || fail "no gctk binary at $GCTK to read the recorded checks; the city's gctk-build order publishes it"
-FAILED=""
-UNRECORDED=""
 for CHECK in test lint typecheck; do
 	# rig's own line goes to stderr, where it says what is recorded, and the
 	# record it found is the one JSON line on stdout.
@@ -344,22 +363,7 @@ for CHECK in test lint typecheck; do
 	RC=$?
 	case "$RC" in
 	0) ;;
-	1)
-		PRE=$(printf '%s' "$ISSUE_JSON" | jq -r --arg k "rig_check_pre_existing.$CHECK" --arg c "$HEAD_SHA" --arg rec "$REC" '
-			($rec | fromjson? // null) as $r
-			| .[0].metadata[$k] // empty
-			| (if type == "string" then (fromjson? // empty) else . end)
-			| select(type == "object" and .commit == $c and ((.trackers // []) | length) > 0)
-			| if $r != null and .record == $r then "tracked by " + (.trackers | join(", ")) else "another run" end' 2>/dev/null)
-		case "$PRE" in
-		"tracked by "*) note "$CHECK: the recorded fail at $HEAD_SHA is pre-existing, $PRE" ;;
-		"another run")
-			FAILED="$FAILED $CHECK"
-			note "$CHECK: the pre-existing mark at $HEAD_SHA judged another run's fail, so this one needs a judgment of its own"
-			;;
-		*) FAILED="$FAILED $CHECK" ;;
-		esac
-		;;
+	1) judged "$CHECK" "$REC" ;;
 	3) UNRECORDED="$UNRECORDED $CHECK" ;;
 	4) FAILED="$FAILED $CHECK" ;;
 	*) fail "gctk rig $CHECK --check exited $RC in $WORKTREE" ;;
@@ -367,21 +371,26 @@ for CHECK in test lint typecheck; do
 done
 
 # --- 6. setup and build must have passed at THIS HEAD ------------------------
-# gctk rig records nothing for them, so the iteration notes their outcome on the
-# work bead's self_review_setup_build, against the HEAD of the clean tree it ran
-# them in: pass, fail, or none for a check the rig declares no command for. A
-# fail holds the loop even when the records above all pass.
-SETUP_BUILD=$(printf '%s' "$ISSUE_JSON" | jq -r --arg c "$HEAD_SHA" '
+# gctk rig records nothing for them, so the iteration notes on the work bead's
+# self_review_setup_build what they did at the HEAD of the clean tree it ran
+# them in, and the commands they ran: pass, fail, or none for a check the rig
+# declares no command for. A fail holds the loop even when every record above
+# passes, unless a pre-existing mark holds that very note.
+NOTE=$(printf '%s' "$ISSUE_JSON" | jq -c --arg c "$HEAD_SHA" '
 	.[0].metadata.self_review_setup_build // empty
 	| (if type == "string" then (fromjson? // empty) else . end)
-	| select(type == "object" and .commit == $c)
-	| [("setup", "build") as $k | select(.[$k] != "pass" and .[$k] != "none") | $k]
-	| if length == 0 then "passed" else join(" ") end' 2>/dev/null)
-case "$SETUP_BUILD" in
-passed) ;;
-"") UNRECORDED="$UNRECORDED setup build" ;;
-*) FAILED="$FAILED $SETUP_BUILD" ;;
-esac
+	| select(type == "object" and .commit == $c)' 2>/dev/null)
+if [ -z "$NOTE" ]; then
+	UNRECORDED="$UNRECORDED setup build"
+else
+	for CHECK in setup build; do
+		case "$(printf '%s' "$NOTE" | jq -r --arg k "$CHECK" '.[$k] // ""' 2>/dev/null)" in
+		pass | none) ;;
+		fail) judged "$CHECK" "$NOTE" ;;
+		*) FAILED="$FAILED $CHECK" ;;
+		esac
+	done
+fi
 [ -z "$FAILED" ] || incomplete "not green at $HEAD_SHA:$FAILED; another iteration is needed"
 
 # A molecule poured before its self-review ran the checks through gctk rig

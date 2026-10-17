@@ -10,12 +10,16 @@
 #     another scope, or a fail at another commit, so a judgment never carries
 #     over to a run it did not see;
 #   - each check keeps its own key;
+#   - setup and build, which gctk rig does not record, take the work bead's
+#     self_review_setup_build as their record: the mark holds the note of the
+#     failed check at that commit, with the command it ran, so a note of
+#     another command starts the judgment over, and no gctk call is made;
 #   - with no recorded fail of the named commit to mark (a pass, nothing
 #     recorded, another commit's fail, no gctk binary), a bead that does not
 #     read, or a write that does not read back, it exits 1 and writes nothing;
-#   - a check outside test, lint and typecheck, an abbreviated or missing
-#     commit, no tracker, and a worktree that is not a directory are refused
-#     before anything is written;
+#   - a check outside test, lint, typecheck, setup and build, an abbreviated
+#     or missing commit, no tracker, and a worktree that is not a directory
+#     are refused before anything is written;
 #   - its two callers, extracted verbatim from the formulas, mark the record
 #     they judge on the bead whose readers act on it: the self-review
 #     (self-review-pre-existing) the work bead at the worktree's HEAD, and the
@@ -116,6 +120,34 @@ run --bead tk-w --check lint --commit "$WORK_HEAD" --trackers "tk-l1"
 eq "$(value tk-w lint)" "$(mark "$WORK_HEAD" "$RL" tk-l1)" "lint has its own value"
 eq "$(value tk-w test)" "$(mark "$PREP_HEAD" "$RP" tk-t9)" "…and the test value is unchanged"
 
+echo "# setup and build: the mark holds the self-review's note"
+# note <build result> <build command> : the self-review's note at the work head.
+note() { jq -nc --arg c "$WORK_HEAD" --arg b "$1" --arg bc "$2" '{commit: $c, setup: "none", build: $b, setup_command: "", build_command: $bc}'; }
+# set_note <note> : the note on tk-w, its other keys kept.
+set_note() { jq --arg n "$1" '(.[] | select(.id == "tk-w") | .metadata.self_review_setup_build) = $n' "$STUB_STORE" > "$TMP/store.new" && mv "$TMP/store.new" "$STUB_STORE"; }
+N1=$(note fail make)
+set_note "$N1"
+GCTK_BIN="$TMP/no-gctk" run --bead tk-w --check build --commit "$WORK_HEAD" --trackers "tk-b1"
+eq "$RC" 0 "a build mark exits 0, with no gctk binary to call"
+eq "$(value tk-w build)" "$(mark "$WORK_HEAD" "$N1" tk-b1)" "it holds the note of the failed build at that commit"
+has "$OUT" "records build's fail at $WORK_HEAD as pre-existing, for the run of 'make': tk-b1" "…and names the build command"
+run --bead tk-w --check build --commit "$WORK_HEAD" --trackers "tk-b2"
+eq "$(value tk-w build)" "$(mark "$WORK_HEAD" "$N1" tk-b1 tk-b2)" "a second write for the same note adds its tracker"
+N2=$(note fail 'make all')
+set_note "$N2"
+run --bead tk-w --check build --commit "$WORK_HEAD" --trackers "tk-b3"
+eq "$(value tk-w build)" "$(mark "$WORK_HEAD" "$N2" tk-b3)" "a note of another build command starts the judgment over"
+: > "$STUB_GC_LOG"
+run --bead tk-w --check setup --commit "$WORK_HEAD" --trackers "tk-x"
+eq "$RC" 1 "a setup the note does not record as failed exits 1"
+has "$OUT" "notes no setup fail at $WORK_HEAD" "…and says there is nothing to mark"
+run --bead tk-w --check build --commit "$PREP_HEAD" --trackers "tk-x"
+eq "$RC" 1 "a note at another commit than the one named exits 1"
+set_note "$(note pass make)"
+run --bead tk-w --check build --commit "$WORK_HEAD" --trackers "tk-x"
+eq "$RC" 1 "a note of a build that passed exits 1"
+eq "$(grep -c 'bd update' "$STUB_GC_LOG")" 0 "none of them wrote anything"
+
 echo "# no recorded fail of the named commit to mark"
 : > "$STUB_GC_LOG"
 rec "$REPO" typecheck --command true
@@ -145,7 +177,7 @@ has "$OUT" "did not read back as written" "…and says so"
 echo "# usage is refused before any write"
 : > "$STUB_GC_LOG"
 for args in \
-  "--bead tk-w --check build --commit $WORK_HEAD --trackers tk-x" \
+  "--bead tk-w --check format --commit $WORK_HEAD --trackers tk-x" \
   "--bead tk-w --check test --commit ${WORK_HEAD:0:12} --trackers tk-x" \
   "--bead tk-w --check test --trackers tk-x" \
   "--bead tk-w --check test --commit $WORK_HEAD --trackers ," \
