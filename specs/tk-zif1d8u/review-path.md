@@ -141,7 +141,10 @@ reads them and no step does: `review_formula` names the formula a review held
 with no workflow follows, and the two pools say where a returned review and a
 rework go, as today. A record is whole when it carries those five, every key
 the table marks always, and both PR keys once a PR is open. It is short when it
-lacks any of them.
+lacks any of them. A sling that lacks a required var pours nothing (section
+1). A claimant of a review held with no workflow refuses only a record that
+lacks a key the table marks always, and reads any other key the record lacks
+as empty (section 2's description).
 
 ## What this design rests on
 
@@ -331,8 +334,9 @@ A short record therefore means a bead made by hand or before this design. A
 claimant that finds a required key missing appends what is missing to the
 review's notes and drains with the route left empty, because the next claim
 would meet the same gap. A review that was never poured is the stranded
-arm's, which writes its record before it slings the review again
-(`gate-ensure.sh:954`). One whose workflow is spent is the wedge gate-ensure's
+arm's, which completes its record before it slings the review again, writing
+the pin only where the record has none (`gate-ensure.sh:954`, section 2). One
+whose workflow is spent is the wedge gate-ensure's
 spent-workflow arm escalates today (`gate-ensure.sh:479-520`). Reviewing a
 commit the dispatch did not record is never the fallback.
 
@@ -373,8 +377,18 @@ things:
   `git ls-remote origin refs/heads/<branch>`, which needs only the origin the
   review fetches from anyway. An anchor whose head neither read answers is held
   for the pass, which is the arm's ordinary "merge stays held, retry next
-  pass". The stranded arm writes `reviewed_oid` only when the review has none,
-  from the live head, and never changes one a dispatch wrote.
+  pass". The stranded arm writes `reviewed_oid` only where the record has
+  none. For a record that carries one, its order leaves the key out, as it
+  does today (`gate-ensure.sh:950-954`, `:194`). That is what keeps the pin in
+  place: `bd_meta_ensure` rewrites every key of an order once any key reads
+  short (`bd-lib.sh:567-590`), so an order carrying the live head would move a
+  pin the dispatch wrote. A record with no pin gets the anchor's head, which
+  the pass reads once per anchor (`:762`), and an unreadable head holds the
+  pass, as it holds a fresh dispatch. Such a record is a create that read back
+  short (`:1045-1049`), or a review made by hand or before this design. Main
+  heals it today through mol-review's fallback to the live head
+  (`mol-review.toml:113-114`). This design ends that fallback, so the repair
+  moves into the arm, which owns the record.
 
 ### What gate-ensure passes on the sling
 
@@ -400,9 +414,11 @@ into it:
 > beads to close. Read each `{{<key>}}` in the steps as this bead's value under
 > that key, `{{check}}` as its `check_name` in lowercase, `{{review_bead}}` as
 > this bead, and `{{binding_prefix}}` as the binding your skill catalog shows on
-> the pack's skills. When the bead lacks a key the steps name, review nothing:
-> append what is missing to its notes and release your claim with the route
-> left empty.
+> the pack's skills. A key the steps name that the bead does not carry is
+> empty, as the PR keys are before a PR opens. The exception is a key every
+> review carries: when the bead lacks `check_name`, `anchor_bead`,
+> `review_branch`, `review_base` or `reviewed_oid`, review nothing. Append what
+> is missing to its notes and release your claim with the route left empty.
 
 gate-ensure passes it on the create, where it passes the composed body today
 (`gate-ensure.sh:1053-1058`).
@@ -582,13 +598,16 @@ A rig's effective index is the pack's index with the rig's rows laid over it.
   row leaves out keeps the pack's value. A row for any other check adds a
   check of the rig's own, judged against its purpose (section 3) with whatever
   guidance its extension adds.
-- **In gc-toolkit the two are one file.** The pack's layer is the installed
-  copy, and the rig's layer is the copy the commit being judged carries, so a
-  gc-toolkit branch that edits the index governs its own review, as any rig's
-  branch does. It follows that a check gc-toolkit declares is a pack check,
-  which every rig gets. The test that every pack row has a skill keeps a
-  skill-less check out of that file. gc-toolkit has no rig-only check today,
-  and one would need a second file.
+- **In gc-toolkit both layers read one path, and they are two copies.** The
+  pack's layer is the installed copy of gc-toolkit's `review-checks.toml`, and
+  the rig's layer is the copy at the commit being judged. They differ whenever
+  a branch edits the index, and the branch's edit then governs its own review,
+  as any rig's branch does. Once installed, every row gc-toolkit keeps is a
+  pack row, which every rig gets. So gc-toolkit cannot declare a check for its
+  own reviews alone: the resolver reads one path per layer, and gc-toolkit's
+  path feeds both. It needs no such check today. Test 4 iterates the pack's
+  index in the tree under test, so a gc-toolkit commit that adds a row with no
+  skill fails the suite before it can merge.
 
 The initiative's constraint holds with one refinement: a check is declared in an
 index and nowhere else. The pack's index declares the checks the pack ships,
@@ -833,7 +852,9 @@ review.
    carries the reason, the bring-current ruling line included. A head that
    neither `gh` nor `ls-remote` reads holds the dispatch, and the `ls-remote`
    fallback supplies the commit. The stranded arm writes `reviewed_oid` only
-   where it is absent, and re-slings with the values its record holds.
+   where it is absent: a stranded review whose pin differs from the live head
+   keeps its pin through the arm's write, one with no pin is pinned at the live
+   head, and each re-sling passes the pin its record then holds.
 2. **A departed commit stays recorded** (`signoff.test.sh`). signoff.sh's
    refusal of a departed commit leaves `reviewed_oid` in place and closes the
    review superseded, and a close that does not read back exits 2 with the
@@ -1018,8 +1039,8 @@ one change.
 ### Unit B: the review bead is data, the step text carries it, and each check is one skill
 
 - gate-ensure.sh writes the record (section 2), passes it as vars on every
-  sling, requires a head, writes the fixed description, and stops calling
-  `review-dispatch-body.sh`.
+  sling, requires a head, pins a stranded review only where it has no pin,
+  writes the fixed description, and stops calling `review-dispatch-body.sh`.
 - `mol-review` and the quorum declare the vars, name each value where they use
   it, gather in load-dispatch, and load the skill named from the check
   (sections 1 and 3). Their failure arm restores the route as today.
@@ -1052,8 +1073,21 @@ review that today's gate-ensure dispatched with no commit, because its read of
 the head failed (`gate-ensure.sh:137-139`), still takes the live head through
 its old load-dispatch (`mol-review.toml:113-114`), because nothing in the new
 skills refuses a value the old steps supply. A review stranded across the
-change is slung again by the new gate-ensure, whose stranded arm writes the
-whole record and passes it as vars.
+change is slung again by the new gate-ensure, whose stranded arm completes the
+record, writing the pin only where there is none, and passes the record as
+vars (section 2).
+
+An old review bead carries none of the keys this design adds:
+`review_formula`, `review_pr_url`, `review_pr_number` and `review_context`.
+Lacking them stops nothing. `review_formula` is read only by the fixed
+description, which an old bead does not carry, and its own description names
+its formula outright (`review-dispatch-body.sh:72-75`, `:105-106`). A review
+without the PR keys skips the PR's page and reads the change with git, which
+is what every review on main does today, because no writer stamps a PR on a
+review bead. `review_context` may be empty on any review. So an old review
+poured before graduation finishes as above, and an old one held with no
+workflow follows its old description to the new steps, where the four keys it
+lacks read as empty.
 
 ## What this design does not change
 
