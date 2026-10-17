@@ -4,11 +4,16 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -167,4 +172,184 @@ func TestRunServesUntilItIsStopped(t *testing.T) {
 	if !strings.Contains(stderr.String(), "with 1 canned answer(s)") {
 		t.Errorf("stderr %q does not say how many answers it serves", stderr.String())
 	}
+}
+
+// docCommand reads the board's capture line from docs/review-demo.md and returns
+// the command it gives demo-screenshot.sh as --serve, the directory its --cwd
+// names under $REVIEW_WT, and its --port.
+func docCommand(t *testing.T) (serve, cwd, port string) {
+	t.Helper()
+	doc, err := os.ReadFile(filepath.Join(moduleRoot, "../../docs/review-demo.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var line string
+	for _, l := range strings.Split(string(doc), "\n") {
+		if strings.Contains(l, `demo-screenshot.sh" page`) && strings.Contains(l, "helm-fixture") {
+			if line != "" {
+				t.Fatalf("docs/review-demo.md gives more than one capture of the board:\n%s\n%s", line, l)
+			}
+			line = l
+		}
+	}
+	if line == "" {
+		t.Fatal("docs/review-demo.md gives no capture of the board through helm-fixture")
+	}
+	for _, f := range []struct {
+		re  *regexp.Regexp
+		out *string
+	}{
+		{regexp.MustCompile(`--serve "([^"]+)"`), &serve},
+		{regexp.MustCompile(`--cwd "\$REVIEW_WT/([^"]+)"`), &cwd},
+		{regexp.MustCompile(`--port (\S+)`), &port},
+	} {
+		m := f.re.FindStringSubmatch(line)
+		if m == nil {
+			t.Fatalf("the board's capture line has no %s: %s", f.re, line)
+		}
+		*f.out = m[1]
+	}
+	return serve, cwd, port
+}
+
+// lockedBuffer collects a command's output, which the test reads while the
+// command may still be writing it.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+// startServe runs cmdline with bash from dir on a free port it hands over as
+// PORT, as the engine runs a --serve command, waits for it to answer, and stops
+// its process group when the test ends, as the engine does.
+func startServe(t *testing.T, cmdline, dir string) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)
+	ln.Close()
+
+	var stderr lockedBuffer
+	cmd := exec.Command("bash", "-c", cmdline)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "PORT="+port)
+	cmd.Stdout, cmd.Stderr = &stderr, &stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	// exited is closed once the command has exited, so every reader sees it,
+	// the wait below and the cleanup alike.
+	exited := make(chan struct{})
+	var waitErr error
+	go func() { waitErr = cmd.Wait(); close(exited) }()
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		select {
+		case <-exited:
+		case <-time.After(10 * time.Second):
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			<-exited
+		}
+	})
+
+	base := "http://127.0.0.1:" + port
+	// A cold build cache makes go run compile the standard library's HTTP stack
+	// first, so this waits longer than a capture's engine does.
+	deadline := time.Now().Add(3 * time.Minute)
+	for time.Now().Before(deadline) {
+		select {
+		case <-exited:
+			t.Fatalf("%q exited before it answered: %v\n%s", cmdline, waitErr, stderr.String())
+		default:
+		}
+		if res, err := http.Get(base + "/"); err == nil {
+			res.Body.Close()
+			if res.StatusCode == http.StatusOK {
+				return base
+			}
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	t.Fatalf("%q did not answer on %s within 3m:\n%s", cmdline, base, stderr.String())
+	return ""
+}
+
+// TestTheDocumentedCommandServesTheBoard runs the --serve command
+// docs/review-demo.md gives a capture of the board, from the directory its --cwd
+// names, on the free port its --port 0 has demo-screenshot.sh hand over, and
+// reads back what the capture's browser reads: the app, the board as JSON at its
+// own path, and a verb refused for want of an answer. It runs the command again
+// with the --answers the page tells a reviewer to add, and a click's answer
+// comes back.
+func TestTheDocumentedCommandServesTheBoard(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and runs the command with go run")
+	}
+	serve, cwd, port := docCommand(t)
+	if port != "0" {
+		t.Errorf("the board's capture passes --port %s; it needs --port 0, the free port the command reads from PORT", port)
+	}
+	repo, err := filepath.Abs(filepath.Join(moduleRoot, "../.."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mod, err := filepath.Abs(moduleRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rel, _ := filepath.Rel(repo, mod); rel != cwd {
+		t.Fatalf("the board's capture runs its command from $REVIEW_WT/%s, but the command's default board resolves from $REVIEW_WT/%s", cwd, rel)
+	}
+	board, err := os.ReadFile(filepath.Join(mod, defaultBoard))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shell, err := os.ReadFile(filepath.Join(mod, "web/dist/index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("as the page gives it", func(t *testing.T) {
+		base := startServe(t, serve, mod)
+		if res, body := get(t, http.MethodGet, base+"/", "text/html"); res.StatusCode != http.StatusOK || !bytes.Equal(body, shell) {
+			t.Errorf("GET /: %d, want the app shell the reviewed commit embeds", res.StatusCode)
+		}
+		res, body := get(t, http.MethodGet, base+"/helm", "")
+		if res.StatusCode != http.StatusOK || !bytes.Equal(body, board) {
+			t.Errorf("GET /helm: %d, want %s byte for byte", res.StatusCode, defaultBoard)
+		}
+		if ct := res.Header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("GET /helm: Content-Type %q, want application/json", ct)
+		}
+		if res, body := get(t, http.MethodPost, base+"/helm/dismiss", ""); res.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(body), `"reason":"unavailable"`) {
+			t.Errorf("POST /helm/dismiss with no answer: %d %s, want 503 unavailable", res.StatusCode, body)
+		}
+	})
+
+	t.Run("with the answers a reviewer adds", func(t *testing.T) {
+		answers := t.TempDir()
+		answer := `{"bead":"tk-abc12","verb":"dismiss","message":"dismissed"}`
+		if err := os.WriteFile(filepath.Join(answers, "dismiss.json"), []byte(answer), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		base := startServe(t, serve+" --answers "+answers, mod)
+		if res, body := get(t, http.MethodPost, base+"/helm/dismiss", ""); res.StatusCode != http.StatusOK || string(body) != answer {
+			t.Errorf("POST /helm/dismiss: %d %s, want the canned answer", res.StatusCode, body)
+		}
+	})
 }

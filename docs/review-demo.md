@@ -21,27 +21,34 @@ particular to this rig.
 
 ## The helm board
 
-The board is a static build that the Go service embeds, committed at
-`services/helm/web/dist`. It reads the board from the document-relative path
-`helm`, and its actuation verbs (accept, engage and dismiss) post to
-`helm/<verb>`. The engine's file server answers any request with the file at its
-path, whatever the method, and answers a directory with its `index.html`. So a
-capture serves a copy of the reviewed commit's build, with fixture files at
-those paths:
+The board is the app the helm service embeds. The service's `helm-fixture`
+command serves the reviewed commit's board on fixture data, with no city behind
+it (`services/helm/README.md`). Capture it from the review workspace, as every
+capture runs:
 
 ```bash
-cd "$(dirname "$REVIEW_WT")"
-mkdir -p helm-app/helm
-cp -R "$REVIEW_WT/services/helm/web/dist/." helm-app/
-cp "$REVIEW_WT/services/helm/web/src/board.fixture.json" helm-app/helm/index.html
-hb "$SCRIPTS/demo-screenshot.sh" page --script board.md --serve-dir helm-app --output board.png
+hb "$SCRIPTS/demo-screenshot.sh" page --script board.md --serve "go run ./cmd/helm-fixture" --port 0 --cwd "$REVIEW_WT/services/helm" --output board.png
 ```
 
-A state that a verb leads to needs that verb's answer at `helm-app/helm/<verb>`,
-in the shape the reviewed commit's `services/helm/web/src/actuate/client.ts`
-reads. `?drill=<id>` in the script's start path opens a row's drill panel. The
-panel's own reads go to the supervisor and fail against a fixture, and the panel
-still offers its actions.
+The board shows `services/helm/web/src/board.fixture.json`, the contract sample,
+which carries every key of the board contract. To show another board, write it
+in the shape `services/helm/web/src/contract.ts` names and add
+`--board $PWD/<file>` to the command. `--port 0` gives the command a free port
+of its own, so two captures never share a server. On a cold Go build cache the
+first run compiles Go's HTTP stack and can take most of the 30 s the engine
+waits for the command. When the engine reports that the command did not answer
+in time, capture again, because what the first run compiled stays cached.
+
+A state that a verb leads to needs that verb's answer. Add
+`--answers $PWD/answers` to the command. A file there named for the verb, such
+as `dismiss.json`, is the answer a click on Dismiss gets, in the shape
+`services/helm/web/src/actuate/client.ts` reads, or `open/client.ts` for open.
+Name it `dismiss.409.json` and it answers with status 409, as a refusal does. A
+verb answers the same way on every click. A verb with no answer is refused as
+unavailable, so the board shows the refusal and nothing runs. `?drill=<id>` in
+the script's start path opens a row's drill panel. The panel's own reads go to
+the supervisor and fail against a fixture, and the panel still offers its
+actions.
 
 Never point a capture at a running helm service. Its verbs file, dispatch and
 close visits in the live city, and a script that clicks one does that for real.

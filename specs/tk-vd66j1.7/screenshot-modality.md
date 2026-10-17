@@ -137,14 +137,35 @@ and the first build probed for a free port itself until ss-pc8t moved the
 choice into the engine. That server listens on every network interface while a
 capture runs (ss-tbv5, open in sprintshow). An app page served with
 `--serve-dir` was already exposed that way. A terminal or markdown page is now
-exposed too, on its random port, for the seconds its capture takes.
+exposed too, on its random port, for the seconds its capture takes. A `--serve`
+command gets the same separation another way. The engine reuses whatever
+already answers on a `--serve` port and spawns nothing, so `demo-screenshot.sh`
+hands the command its port as `PORT`, and `--port 0` picks a free one first.
 
 **This rig's surfaces.** gc-toolkit now carries `docs/review-demo.md`, which the
 dispatch note appends to every demo review here. It names this rig's surface of
-each kind and how to capture it without touching the live city. The helm board
-is served from the reviewed commit's committed build with fixture files at the
-paths it reads, because a running helm service's verbs file, dispatch and close
-visits for real.
+each kind and how to capture it without touching the live city. A running helm
+service's verbs file, dispatch and close visits for real, so the board is
+captured from `helm-fixture`, a command of the helm service. It serves the
+reviewed commit's embedded app, answers the board's path with a board file as
+JSON (by default the contract sample `TestBoardFixture` writes), and answers
+each verb from a canned answer, or refuses it as unavailable. It imports
+`internal/fixture`, the app's package and the standard library only, and its
+tests hold that, so nothing it serves reads or writes a city. The page names
+it as the one `--serve` command a capture passes.
+
+The first build had no such mode to call. Its page held a shell recipe that
+copied the committed build into a directory and copied the fixture to
+`helm/index.html`, so the engine's file server answered the board's path with
+the fixture, typed as HTML. The operator's review of that page read the recipe
+as code in the docs standing in for something the board lacked, and the
+validation pass ruled that the board get a fixture mode its own service owns
+and tests. It is a command of its own, not a `helm-svc` subcommand: helm-svc
+links Dolt through cgo, and its cold build here ran 196 s at a load of 50
+before it stopped at the ICU headers, far past the 30 s the engine waits for a
+`--serve` command. The fixture command built cold in 25 s at the same load, and
+starts in about 3 s once the Go build cache is warm. It builds with no module
+download and no cgo flags.
 
 ## Proof
 
@@ -156,8 +177,8 @@ capture took 7 s and the `git log` terminal capture 4 s.
 
 | Surface | Kind | Exit | What the PNG showed |
 |---|---|---|---|
-| The helm board: the reviewed commit's build, served with `board.fixture.json` as `helm` | page | 0 | The viewport: the board's header, its owed summary, pack builds and anchors table, rendered from the fixture with no service running (2560x1800 px). |
-| PR 1240's held dismiss: its build at f02847d2, the fixture board at `helm/index.html`, a held answer at `helm/dismiss` | page, one click on Dismiss, `--selector .drill-conversation` | 0 | "Dismiss is held" with the gate's question, Resolve, Leave open, and a disabled Confirm dismissal (2396x152 px). |
+| The helm board: the command `docs/review-demo.md` gives, `go run ./cmd/helm-fixture` from `services/helm` with `--port 0` | page | 0 | The viewport: the board's header, its owed summary, pack builds and anchors table, drawn from the contract sample with no city behind it (2560x1800 px). |
+| Accept on the board's review row, with `--answers` holding `accept.json`, and again holding `accept.409.json` | page, one click on Accept, `--selector .actuate` | 0, 0 | "Accepted: mol-dispose-pr dispatched at tk-01n5cc, and its visit dismissed." under the button; with the 409, the refusal's sentence in the board's alert colour instead (380x156 px, 360x156 px). |
 | PR 1243's report: `assets/scripts/gc-helm.sh unplaced`, run against the live city | terminal | 0 | Fifty-one unplaced beads, tab-aligned and wrapped at 120 columns, after the `$` prompt, captured whole though it runs far past the viewport (1948x5096 px). |
 | `git log --oneline --decorate -8 origin/main` with colour forced | terminal | 0 | The hashes in yellow and the ref names in red and green, as git coloured them, in a window titled gc-toolkit (1948x876 px). |
 | A triage verdict written by hand in the shape PR 1251's summary describes | markdown, then `--expand` | 0, 0 | The first line, two collapsed `<details>` blocks and the anchor line; expanded, the table and the trail inside them, with `#1266` linked (1604x408 px, 1604x708 px). |
@@ -166,6 +187,10 @@ capture took 7 s and the `git log` terminal capture 4 s.
 | A comment holding one mermaid fence, `graph LR` with `A[Claim work] --> B[Review]`, at 903b29df5 and again with the refusal | markdown | 0, 1 | At 903b29df5, the fence's source and a "Loading" spinner where github.com draws the diagram (1604x276 px). With the refusal, no PNG, and the message named the block: mermaid (1). |
 | A comment of ordinary markup with the refusal in place: a heading, a table, a task list, an emoji, an @mention, two `#` references, a footnote, an alert, a collapsed `<details>` and a code fence | markdown, `--title` | 0 | Each drawn as GitHub returned it, the table inside GitHub's wrapper element and both references linked (1604x1424 px). |
 | A comment holding ⚠️ as the character and as `:warning:`, and ‼️, at d2e3f4f3d and again with `g-emoji` drawn from its markup | markdown | 1, 0 | At d2e3f4f3d, no PNG, and the message named `<g-emoji> (3)`. With `g-emoji` drawn, all three emoji in colour beside the text (1604x258 px). |
+
+The two helm rows ran in the round that added `helm-fixture`, on the same
+engine, each in 3 to 4 s with the Go build cache warm, and left no fixture
+process behind.
 
 After the library took over the engine's CLI, a proof-mode clip of the engine's
 sample app ran through `rig-demo-capture.sh` on it: six steps held, and a
@@ -205,6 +230,28 @@ own. Of the mutants made when the library was extracted, a dropped package-name
 guard, an installer writing to stdout and a dropped npx check still turn it
 red, and `rig-demo-capture.test.sh` still catches a dropped ffmpeg fetch.
 
+`services/helm`'s own Go tests cover the fixture. `internal/fixture`'s cases
+serve the board as JSON at its path, send every other path to the app, answer a
+verb from its file with the status the name gives, refuse a verb with no answer
+as unavailable and any method but POST, and refuse an answers directory that
+holds anything else. `cmd/helm-fixture`'s cases check its import graph and its
+arguments, and `TestTheDocumentedCommandServesTheBoard` runs the `--serve`
+command `docs/review-demo.md` gives, from the directory its `--cwd` names, on a
+port handed over as `PORT`, then with `--answers` added. Each mutant turned
+them red: the board typed as HTML, the status in an answer's name ignored, the
+405 dropped, two answers for one verb accepted, an answer that is not JSON
+accepted, a missing answer answered 404, a dotfile read as an answer, a
+non-loopback address accepted, `PORT` bound on every interface, a package from
+outside the allowed graph imported, and stray arguments accepted. So did each
+change to the page's command: a fixed port, the command run from the
+repository's root, a flag the command refuses, a board that does not exist, the
+old `--serve-dir` recipe, and a command that ignores `PORT`. Like the rest of
+that module's tests, they run under `go test`, which the pack's CI does not
+run. `demo-screenshot.test.sh` checks the port hand-over, and each mutant
+turned it red: `PORT` not exported, `--port 0` taken with `--serve-dir` or
+`--base-url`, a pick that found no port taken anyway, and `--port 0` passed to
+the engine unpicked.
+
 **Not proven live: the attach.** No PNG has been attached to a real PR in this
 city. `demo-deliver.sh` is unchanged, and the gh on this host (2.102.0)
 documents `--attach` for images: an attached file the body does not reference is
@@ -220,6 +267,8 @@ video modality's does for a clip.
   answered 404), so the npx fallback the two captures share works only once a
   release with the screenshot command is published.
 - gh, for the markdown kind's renderer and for delivery.
+- Go, at the helm module's version, to capture the helm board. Its fixture
+  command needs no cgo flags and no module download.
 - No ffmpeg and no `OPENAI_API_KEY`.
 - The browser's provisioning runs on every capture, and skips a build that is
   already installed.
