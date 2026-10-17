@@ -59,7 +59,9 @@ record. --check needs no command: it reports whatever is recorded at HEAD, and
 calls nothing but git.
 
 A checkout with changes HEAD does not hold is refused, except by setup and
-build: a record certifies a commit. A run that moves HEAD or changes a
+build: a record certifies a commit. In a checkout they find clean, setup and
+build put back what their command changes, other than files git ignores, so
+the recorded checks after them can run. A run that moves HEAD or changes a
 tracked file records nothing, pass or fail. Untracked files a run leaves
 behind do not stop its record, but the next call refuses them, so a check
 command leaves none that git does not ignore.
@@ -328,7 +330,11 @@ func rigRecorded(check string, o rigOpts, stdout, stderr io.Writer) int {
 	return resultExit(rec)
 }
 
-// rigRunOnly runs setup or build, which record nothing.
+// rigRunOnly runs setup or build, which record nothing. In a checkout it finds
+// clean, it puts back what the command changes there, other than files git
+// ignores, because the recorded checks that follow in the same checkout refuse
+// changes HEAD does not hold. A checkout that already has such changes keeps
+// what the command leaves, since its changes cannot be told from the caller's.
 func rigRunOnly(verb string, o rigOpts, stdout, stderr io.Writer) int {
 	say := func(format string, a ...any) {
 		fmt.Fprintf(stderr, "gctk rig %s: %s\n", verb, fmt.Sprintf(format, a...))
@@ -344,20 +350,50 @@ func rigRunOnly(verb string, o rigOpts, stdout, stderr io.Writer) int {
 	if ok, reason := rig.Parses(o.command); !ok {
 		return machine("%s; the command is %q", reason, o.command)
 	}
+	// A status git cannot read proves nothing clean, so nothing is put back.
+	before, err := co.Dirty()
+	clean := err == nil && before == ""
 	say("running %s", o.command)
 	out := rig.Run(co.Top, o.command, o.timeout, stdout, stderr)
+	code := rigExitPass
 	switch out.Kind {
 	case rig.Interrupted:
 		say("stopped by signal %d (%s); the command's process group was stopped", int(out.Signal), out.Signal)
 		return 128 + int(out.Signal)
 	case rig.Machine:
-		return machine("%s, after %s", out.Reason, out.Duration.Round(time.Millisecond))
+		code = machine("%s, after %s", out.Reason, out.Duration.Round(time.Millisecond))
 	case rig.Failed:
 		say("fail (exit %d, %s)", out.ExitCode, out.Duration.Round(time.Millisecond))
-		return rigExitFail
+		code = rigExitFail
+	default:
+		say("pass (%s)", out.Duration.Round(time.Millisecond))
 	}
-	say("pass (%s)", out.Duration.Round(time.Millisecond))
-	return rigExitPass
+	if clean {
+		rigPutBack(co, say)
+	}
+	return code
+}
+
+// rigPutBack puts back what a run left in a checkout that was clean before
+// it, and says what it put back and what it could not.
+func rigPutBack(co *git.Checkout, say func(string, ...any)) {
+	left, err := co.Dirty()
+	if err != nil {
+		say("WARN nothing was put back: %v", err)
+		return
+	}
+	if left == "" {
+		return
+	}
+	remains, err := co.PutBack()
+	if err != nil {
+		say("WARN the run left changes HEAD does not hold, and they were not put back (%v), so a recorded check here is refused until they are gone:\n%s", err, firstLines(left, 10))
+		return
+	}
+	say("put back what the run left that git does not ignore, since a recorded check refuses it:\n%s", firstLines(left, 10))
+	if remains != "" {
+		say("WARN these could not be put back, so a recorded check here is refused until they are gone:\n%s", firstLines(remains, 10))
+	}
 }
 
 func newRecord(check, result, scope string, co *git.Checkout, command string, exit int, d time.Duration) *rig.Record {

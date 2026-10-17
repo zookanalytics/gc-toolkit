@@ -116,3 +116,26 @@ func (c *Checkout) Changes() (moved, untracked string, err error) {
 	untracked, err = c.Dirty()
 	return "", untracked, err
 }
+
+// PutBack returns the worktree to the commit Open read: every tracked file as
+// HEAD holds it, staged or not, and no untracked file or nested repository
+// that git does not ignore. Ignored files stay. A HEAD at another commit is not
+// moved back, and PutBack then changes nothing. It returns what Dirty lists
+// afterwards, which changes inside a submodule can leave.
+func (c *Checkout) PutBack() (string, error) {
+	head, err := Output(c.Top, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return "", fmt.Errorf("cannot read HEAD: %w", err)
+	}
+	if head = strings.TrimSpace(head); head != c.Commit {
+		return "", fmt.Errorf("HEAD moved from %s to %s", c.Commit, head)
+	}
+	if _, err := Output(c.Top, "reset", "--hard", "--quiet", "HEAD"); err != nil {
+		return "", err
+	}
+	// The second -f also removes an untracked nested repository.
+	if _, err := Output(c.Top, "clean", "-ffd", "--quiet"); err != nil {
+		return "", err
+	}
+	return c.Dirty()
+}

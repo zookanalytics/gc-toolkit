@@ -50,9 +50,12 @@ leaves the label unchanged.
 `gctk rig` holds the actions gctk takes on a rig, and checks are the first of
 them. `test`, `lint` and `typecheck` run the command their caller passes and
 record the result against the commit it ran at. `setup` and `build` run their
-command and record nothing. The caller passes every input: the command, which
-test run it is, and, when the rig declares no command for a check, that there
-is nothing to run. gctk reads no formula var and works out no diff.
+command and record nothing. In a checkout they find clean, they put back what
+the command changes, other than files git ignores, so the recorded checks that
+follow in the same checkout can run. The caller passes every input: the
+command, which test run it is, and, when the rig declares no command for a
+check, that there is nothing to run. gctk reads no formula var and works out no
+diff.
 
 Every place that runs a rig's declared checks calls it, passing the command
 from the rig's formula vars: `mol-polecat-work`'s workspace-setup, its

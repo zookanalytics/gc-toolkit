@@ -1,6 +1,6 @@
 ---
 name: Every check-runner cut over to gctk rig, as built
-description: What cutting the rig-check call sites over to `gctk rig` and retiring `self_review_passed_sha` settled beyond the bead. Covers why the self-review exit condition reads three records and a note of setup and build, the pre-existing mark that stands in for the disposition field the gate dropped and holds the record it judged, the transitional read of the retired stamp, how each caller finds the binary, and the refinery's exit-4 and time bounds.
+description: What cutting the rig-check call sites over to `gctk rig` and retiring `self_review_passed_sha` settled beyond the bead. Covers why the self-review exit condition reads three records and a note of setup and build, why setup and build put back what they leave in a clean checkout, the pre-existing mark that stands in for the disposition field the gate dropped and holds the record it judged, the transitional read of the retired stamp, how each caller finds the binary, and the refinery's exit-4 and time bounds.
 ---
 
 # Every check-runner cut over to `gctk rig`, as built
@@ -49,6 +49,37 @@ same HEAD still answers, as a record there does. A setup or build failure red
 on the base too is marked like any other check (below), so the loop does not
 exhaust on a failure the diff did not cause, which main's stamp let an agent
 step past.
+
+## setup and build put back what they leave
+
+The recorded checks refuse a checkout HEAD does not hold, and setup and build
+run in any checkout, so whatever they leave there stops every recorded check
+after them in the same checkout: a rewritten lockfile, a build's output git
+does not ignore. The PR#1278 review found three places this reaches: the
+refinery gate, where the retry reproduced it and sent a green branch to its
+author; the self-review block, where re-running it reproduced the stall; and
+preflight-tests after workspace-setup's setup.
+
+gctk's `setup` and `build` put it back, in the one place every caller shares,
+the hand-added checks of a rig that declares none included. In a checkout they
+find clean, they reset each tracked file to HEAD and remove each untracked file
+and nested repository git does not ignore, after a pass or a fail, and name
+what they put back. A checkout that already had changes keeps what the command
+leaves, because its changes cannot be told from the caller's, so nothing of an
+agent's is touched; that is why a call site runs no `git clean`
+([specs/tk-1hazlo2/rig-checks.md](../tk-1hazlo2/rig-checks.md)). Ignored files
+stay, so what an install puts in an ignored directory, or a build writes there
+for the tests to read, survives. No step text grows, and the self-review step
+stays under the hook cap.
+
+Two things are not put back, and each is named in a WARN line, so the
+refusal that follows explains itself: a HEAD the command moved, and changes
+inside a submodule. One cost: a tracked file the commit should carry and the
+setup rewrites, such as a stale lockfile an `npm install` refreshes, is put
+back rather than refused, so it shows only in that line. A rig whose checks
+need a file its setup or build writes outside an ignored path needs an ignore
+entry for it, the remedy the cutover already asks of a check command's
+leftovers.
 
 ## A pre-existing failure is a mark beside the record
 
@@ -124,6 +155,8 @@ section of `review-method.test.sh`), so the review frame sets `GCTK` in its
   The checks that passed then answer from their records. A second stop at the
   same head takes the branch-caused path with `gctk rig`'s line as the reason,
   so the work goes to its author and not to ops, as the inheritance list asks.
+  The prep worktree starts clean, and setup and build put back what they leave
+  in it, so that stop is not their leftovers.
 - **Time.** `gate.sh` gives each check a `--timeout` that ends 7080 seconds into
   the gate, inside the wait's 7200-second limit, and starts no check with less
   than a minute left.

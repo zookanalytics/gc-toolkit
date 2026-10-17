@@ -785,6 +785,86 @@ func TestRigSetupAndBuildRunAndRecordNothing(t *testing.T) {
 	}
 }
 
+// What setup or build changes in a checkout they found clean, they put back,
+// pass or fail, so the recorded checks after them run in the same checkout.
+// What git ignores stays.
+func TestRigSetupAndBuildPutBackWhatTheyChangeInACleanCheckout(t *testing.T) {
+	leaves := `printf 'two\n' > a.txt; printf 'x\n' > staged.txt; git add staged.txt; mkdir -p d ignored; ` +
+		`printf 'y\n' > d/f; printf 'z\n' > ignored/kept; printf 'w\n' > dist.txt; git init -q vendor/dep; `
+	for _, verb := range []string{"setup", "build"} {
+		for _, rc := range []string{"0", "2"} {
+			t.Run(verb+" exit "+rc, func(t *testing.T) {
+				f := newRigFixture(t)
+				f.write(".gitignore", "ignored/\n")
+				f.git("add", ".gitignore")
+				f.git("commit", "-q", "-m", "ignore")
+				t.Setenv("CHECK_RC", rc)
+				want := 0
+				if rc != "0" {
+					want = 1
+				}
+				code, _, errs := f.call(verb, "--command", leaves+countCmd(verb))
+				if code != want || !strings.Contains(errs, "put back what the run left") {
+					t.Fatalf("%s = %d, want %d and a line saying what it put back:\n%s", verb, code, want, errs)
+				}
+				for _, p := range []string{" M a.txt", "A  staged.txt", "?? d/", "?? dist.txt", "?? vendor/"} {
+					if !strings.Contains(errs, p) {
+						t.Fatalf("the put-back line does not name %q:\n%s", p, errs)
+					}
+				}
+				if s := f.git("status", "--porcelain", "--untracked-files=normal"); s != "" {
+					t.Fatalf("the checkout after %s is not clean:\n%s", verb, s)
+				}
+				if raw, _ := os.ReadFile(filepath.Join(f.repo, "a.txt")); string(raw) != "one\n" {
+					t.Fatalf("a.txt after %s = %q, want HEAD's", verb, raw)
+				}
+				if _, err := os.Stat(filepath.Join(f.repo, "ignored", "kept")); err != nil {
+					t.Fatalf("the ignored file %s wrote did not stay: %v", verb, err)
+				}
+				t.Setenv("CHECK_RC", "0")
+				if code, _, errs := f.call("test", "--scope", "full", "--command", countCmd("full")); code != 0 {
+					t.Fatalf("test after %s = %d, want 0:\n%s", verb, code, errs)
+				}
+				if r := f.record(rig.CheckTest, f.head()); r == nil || r.Result != rig.ResultPass {
+					t.Fatalf("record after %s = %+v, want the pass", verb, r)
+				}
+			})
+		}
+	}
+}
+
+// A checkout that had changes before setup or build ran keeps what the
+// command leaves, since those changes cannot be told from the caller's. A run
+// that moves HEAD is not moved back.
+func TestRigSetupAndBuildLeaveWhatTheyCannotTellApart(t *testing.T) {
+	t.Run("a checkout that was dirty", func(t *testing.T) {
+		f := newRigFixture(t)
+		f.write("mine.txt", "the caller's\n")
+		code, _, errs := f.call("build", "--command", `printf 'out\n' > out.txt; printf 'two\n' > a.txt`)
+		if code != 0 || strings.Contains(errs, "put back") {
+			t.Fatalf("build = %d, want 0 and nothing put back:\n%s", code, errs)
+		}
+		// f.git trims the output, so the first line's leading space is gone.
+		if s := f.git("status", "--porcelain"); s != "M a.txt\n?? mine.txt\n?? out.txt" {
+			t.Fatalf("the checkout after build:\n%s", s)
+		}
+	})
+	t.Run("a run that moves HEAD", func(t *testing.T) {
+		f := newRigFixture(t)
+		start := f.head()
+		code, _, errs := f.call("setup", "--command", `git commit -q --allow-empty -m moved; printf 'w\n' > left.txt`)
+		if code != 0 || !strings.Contains(errs, "they were not put back (HEAD moved from "+start) {
+			t.Fatalf("setup = %d, want 0 and a WARN that HEAD moved:\n%s", code, errs)
+		}
+		if _, err := os.Stat(filepath.Join(f.repo, "left.txt")); err != nil {
+			t.Fatalf("a run that moved HEAD had its file put back: %v", err)
+		}
+		if f.head() == start {
+			t.Fatal("HEAD was moved back")
+		}
+	})
+}
+
 // A SIGTERM during the run reaches the command's group, and rig exits 128+15
 // with nothing recorded. The test's own Notify keeps a build without the relay
 // from killing the test binary.

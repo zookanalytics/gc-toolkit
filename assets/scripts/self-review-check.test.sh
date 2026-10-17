@@ -344,9 +344,10 @@ grep -qF 'self_review_setup_build=' "$TMP/checks.tmpl" \
   && ok "the self-review check block extracts, with its note of setup and build" \
   || bad "the self-review check block did not extract with its note of setup and build"
 # render_checks <build_command> : the block, its command vars filled the way a
-# pour fills them, with true as the affected test command.
+# pour fills them, with $SETUP as the setup command (none unless set) and
+# $AFFECTED as the affected test command (true unless set).
 render_checks() {
-  BUILD="$1" awk '
+  BUILD="$1" SETUP="${SETUP-}" AFFECTED="${AFFECTED-true}" awk '
     function rep(s, k, v,   i, out) {
       out = ""
       while ((i = index(s, k)) > 0) { out = out substr(s, 1, i - 1) v; s = substr(s, i + length(k)) }
@@ -354,8 +355,8 @@ render_checks() {
     }
     {
       s = rep($0, "{{build_command}}", ENVIRON["BUILD"])
-      s = rep(s, "{{affected_tests_command}}", "true")
-      s = rep(s, "{{setup_command}}", ""); s = rep(s, "{{typecheck_command}}", "")
+      s = rep(s, "{{affected_tests_command}}", ENVIRON["AFFECTED"])
+      s = rep(s, "{{setup_command}}", ENVIRON["SETUP"]); s = rep(s, "{{typecheck_command}}", "")
       s = rep(s, "{{lint_command}}", ""); s = rep(s, "{{test_command}}", "")
       print s
     }' "$TMP/checks.tmpl"
@@ -382,6 +383,14 @@ for sh in $SHELLS; do
   reset_env; MD_SETUP_BUILD=""; write_state
   run_checks "$sh" 'true'
   run_case "$sh: PASS after the step's own block ran a build that passes" 0
+  # What setup and build leave that git does not ignore is put back, so the
+  # checks after them run, and the block notes them, in one run of the block.
+  reset_env; MD_SETUP_BUILD=""; write_state
+  SETUP='printf rewritten > f' run_checks "$sh" 'printf out > dist.txt'
+  run_case "$sh: PASS after the block ran a setup that rewrites a tracked file and a build that leaves a file" 0
+  eq "$(git -C "$WT" status --porcelain)/$(cat "$WT/f")" "/more" "$sh: …which leaves the tree HEAD holds"
+  # Whatever the case left must not reach the cases after it.
+  git -C "$WT" reset -q --hard; git -C "$WT" clean -fdq
 done
 # Records already at HEAD outlive an edit, so a build run over uncommitted
 # changes must note nothing: those changes, not HEAD, are what it built.

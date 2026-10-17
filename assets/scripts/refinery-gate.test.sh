@@ -224,6 +224,22 @@ OUT=$(run_block "$TMP/wait.raw" "$CITY"); RC=$?
 eq "$RC/$(field "$OUT" state)/$(field "$OUT" rc)" 1/done/4 "the wait reports done, rc=4"
 has "$(cat "$GATE/log")" "GATE CUT SHORT: lint:4" "the log names the check cut short, with gctk's exit"
 
+echo "── what setup and build leave does not cut the checks after them short ──"
+# setup stages a new file and leaves another; build leaves one and writes its
+# output under a path git ignores, which the test run reads.
+fresh
+cp "$REPO/.git/info/exclude" "$TMP/exclude.saved" 2>/dev/null || : > "$TMP/exclude.saved"
+printf 'built/\n' >> "$REPO/.git/info/exclude"
+checks 'printf x > staged.txt; git add staged.txt; printf y > left.txt' 'true' '' 'mkdir -p built; printf z > built/out; printf z > dist.txt' 'test -s built/out && test ! -e dist.txt' true
+run_block "$TMP/start.raw" "$CITY" >/dev/null
+OUT=$(run_block "$TMP/wait.raw" "$CITY"); RC=$?
+eq "$RC/$(field "$OUT" state)/$(field "$OUT" rc)" 0/done/0 "the wait reports done, rc=0"
+has "$(cat "$GATE/log")" "put back what the run left that git does not ignore" "the log says what setup and build left was put back"
+eq "$(git -C "$PREP_WT" status --porcelain)" "" "the prep worktree is clean after the gate"
+# Whatever the case left must not reach the cases after it.
+git -C "$PREP_WT" reset -q --hard; git -C "$PREP_WT" clean -fdq; rm -rf "$PREP_WT/built"
+cp "$TMP/exclude.saved" "$REPO/.git/info/exclude"
+
 echo "── each command runs as configured: a trailing comment, a heredoc ──"
 fresh
 checks $'cat > "$HD_OUT" <<\'EOF\'\nfrom a heredoc\nEOF' '' 'true  # a trailing comment' '' 'test -s "$HD_OUT"' true
