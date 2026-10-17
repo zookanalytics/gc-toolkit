@@ -29,13 +29,15 @@ without saying where they come from. Separately, a rig that keeps no
    reviewing the branch's latest commit when none was recorded ends. A review
    held with no workflow reads the same values from its metadata. Cost: a
    review whose head neither GitHub nor `git ls-remote` can read waits a pass,
-   and a person who slings a review by hand passes its values too. This
-   refines the card's "the formula records its pins once". The card's pin is
-   `reviewed_oid`, the branch's head at the moment the review was dispatched,
-   frozen so the verdict certifies the commit the reviewer read and cannot
-   slide onto a later push. The dispatch records it, because the quorum's two
-   lanes start in parallel and a recovered review has no workflow to record
-   it.
+   a person who slings a review by hand passes its values too, and when a
+   rewrite takes a review's commit off the branch and the store drops
+   signoff.sh's superseded close, the retry reviews that commit once more
+   (section 1). This refines the card's "the formula records its pins once".
+   The card's pin is `reviewed_oid`, the branch's head at the moment the review
+   was dispatched, frozen so the verdict certifies the commit the reviewer read
+   and cannot slide onto a later push. The dispatch records it, because the
+   quorum's two lanes start in parallel and a recovered review has no workflow
+   to record it.
 2. **A check's method is the skill named from the check.** The step text names
    `gc-toolkit.review-<check>` with the check filled in at pour. A check a
    rig's index declares with no pack skill is judged against its row's
@@ -320,15 +322,21 @@ required var fails, and nothing moves or removes a value afterwards.
 
 signoff.sh is the one writer that removes a value today. When it refuses a
 verdict whose commit a rewrite took off the branch, it clears `reviewed_oid`
-(`signoff.sh:483-488`). The clear exists so that main's load-dispatch, which
-reviews the branch's latest commit when a review records none
-(`mol-review.toml:113-114`), does not review the departed commit again on the
-next claim. This design ends that fallback, so the clear protects nothing, and
-it goes. signoff.sh's departed-commit path becomes: refuse the verdict, append
-the note, close the review superseded, read the close back, and exit 2 if the
-close did not land. The verdict step's failure arm restores the route as it
-does today, and the next claimant meets the same refusal and retries the same
-close.
+and reads the clear back (`signoff.sh:483-502`). The clear exists so that
+main's load-dispatch, which reviews the branch's latest commit when a review
+records none (`mol-review.toml:113-114`), does not review the departed commit
+again on the next claim. This design ends that fallback, so the clear no
+longer sends the next claim to the live head. It would only leave the record
+short, and it goes. signoff.sh's departed-commit path becomes: refuse the
+verdict, append the note, close the review superseded, read the close back,
+and exit 2 if the close did not land. The verdict step's failure arm restores
+the route as it does today (`mol-review.toml:368-376`), and the next claimant
+retries the same close. It reviews the departed commit again first, because
+only signoff.sh tests whether that commit is still on the branch. So each
+close that does not read back costs one more review of a commit that cannot
+merge, and a close fails to read back only when the store refuses
+signoff.sh's write or its read. Once a close lands, the next pass dispatches a
+fresh review at the live head.
 
 A short record therefore means a bead made by hand or before this design. A
 claimant that finds a required key missing appends what is missing to the
@@ -861,7 +869,8 @@ review.
 2. **A departed commit stays recorded** (`signoff.test.sh`). signoff.sh's
    refusal of a departed commit leaves `reviewed_oid` in place and closes the
    review superseded, and a close that does not read back exits 2 with the
-   commit still recorded and no verdict.
+   commit still recorded and no verdict. The suite's case that asserts today's
+   clear (`:667`) is rewritten to this.
 3. **The vars meet the formulas** (new, structural). Every `{{name}}` in
    `mol-review` and the quorum is a var the formula declares, `convoy_id`
    aside, and every declared var is one gate-ensure passes or sling adds. The
@@ -1096,7 +1105,10 @@ one change.
   (sections 1 and 3). Their failure arm restores the route as today.
 - signoff.sh's departed-commit path stops clearing `reviewed_oid`, and the
   `reviewed_oid` entry in `lifecycle/lifecycle.toml` (`:728-733`), which says
-  only that path clears it, says it is never cleared.
+  only that path clears it, says it is never cleared. The other living
+  accounts of the clear drop it: `docs/state-machine.md` (`:342-365`), the
+  verdict row of `docs/authority-map.md` (`:35`), and gate-ensure.sh's comment
+  on a superseded review (`:238-241`).
 - The five check skills take the uniform shape and name values by key, and
   `skills/specialist-stance/SKILL.md` is new.
 - `review-dispatch-body.sh`, its test, its component-model row,
