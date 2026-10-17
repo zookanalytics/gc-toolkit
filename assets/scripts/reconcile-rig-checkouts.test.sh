@@ -1431,6 +1431,21 @@ body_has untrackedunread "^could not make a scratch repository to read the remot
   && ok "the escalation says the read failed" \
   || bad "the escalation says the read failed (got '$(body_for untrackedunread)')"
 
+# untrackedunreadstray: the same failed read, with a stray write of f.txt that
+# the set-aside could heal. The set-aside does not run either, since its
+# fast-forward would delete the clean files the read could not judge.
+untrack_rig untrackedunreadstray '.beads/*'
+echo upstream > "$TMP/untrackedunreadstray/f.txt"
+UNTRACKEDUNREADSTRAY_HEAD="$(git -C "$TMP/untrackedunreadstray" rev-parse HEAD)"
+rigs_json untrackedunreadstray
+: > "$TMP/escalations"
+TMPDIR="$TMP/absent" bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/untrackedunreadstray" rev-parse HEAD)" "$UNTRACKEDUNREADSTRAY_HEAD" "a failed read of the kept paths stops the set-aside heal too"
+eq "$(git -C "$TMP/untrackedunreadstray" ls-files .beads/metadata.json)" ".beads/metadata.json" "a failed read of the kept paths leaves the clean files tracked when a stray write blocks the fast-forward"
+body_has untrackedunreadstray "^could not make a scratch repository to read the remote's \.gitignore files$" \
+  && ok "the escalation names the failed read, not the stray write" \
+  || bad "the escalation names the failed read, not the stray write (got '$(body_for untrackedunreadstray)')"
+
 # untrackednoheal: RECONCILE_NO_AUTOHEAL=1 turns the keep off, so the
 # fast-forward runs as plain git and deletes the clean files.
 untrack_rig untrackednoheal '.beads/*'
