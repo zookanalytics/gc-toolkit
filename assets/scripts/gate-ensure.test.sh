@@ -282,6 +282,17 @@ prid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
 eq "$(meta "$prid" review_pr_url)|$(meta "$prid" review_pr_number)" "https://github.com/zook/gc-toolkit/pull/78|78" \
   "the number is parsed from the URL, as signoff.sh parses it"
 
+echo "# an open PR whose URL names no number gives the review neither key"
+# Half a PR is no pin: mol-review refuses a number with no URL to pin its
+# repository, and reads a URL with no number as no PR at all.
+store "[$(anchor P2n pull_request correctness "" polecat/p2n ',"pr_url":"https://github.com/zook/gc-toolkit/pulls"')]"
+oid p2n > "$GH_DIR/head_polecat_p2n"
+out=$(run)
+has "$out" "dispatched review" "the lane of a PR whose URL names no number is still dispatched a review"
+prid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$prid" review_pr_url)|$(meta "$prid" review_pr_number)" "<absent>|<absent>" \
+  "…carrying neither PR key"
+
 echo "# a PR recorded on an anchor still at pre_open_gate is not the published page"
 # pr-open.sh has yet to adopt it, and adoption republishes its body from the
 # pending pr_summary, which a pre-open review reads.
