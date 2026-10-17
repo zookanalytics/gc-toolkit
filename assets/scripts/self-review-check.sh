@@ -2,13 +2,14 @@
 # Exit condition for the `self-review` check loop in mol-polecat-work.
 #
 # Exit 0 ("pass" — closes the control bead and releases submit-and-exit) ONLY
-# when the work bead carries a self-review green stamp bound to exactly the tree
-# checked out right now, and that tree is clean. Every other state, including any
-# internal error in this script, exits non-zero so the loop spawns the next
-# iteration. Fail-closed is deliberate: a false pass hands an unverified diff to
-# the refinery, which is the red handoff this loop exists to stop.
+# when the tree checked out right now is clean and `gctk rig` holds a passing
+# record of each of the rig's recorded checks (test, lint and typecheck) at its
+# HEAD. Every other state, including any internal error in this script, exits
+# non-zero so the loop spawns the next iteration. Fail-closed is deliberate: a
+# false pass hands an unverified diff to the refinery, which is the red handoff
+# this loop exists to stop.
 #
-# ## Why this VERIFIES the gate instead of running it
+# ## Why this READS the records instead of running the checks
 #
 # The runtime executes this script inline in the control dispatcher
 # (internal/dispatch/ralph.go -> internal/convergence/condition.go), which
@@ -24,12 +25,14 @@
 #      build/module caches under the redirected HOME start cold.
 #
 # So the iteration agent runs the declared checks in its own session — real
-# HOME, real toolchain, no dispatcher held open — and stamps the result on the
-# work bead as metadata.self_review_passed_sha. This script confirms that stamp
-# still names the live HEAD. The stamp is bound to a commit sha, so any later
-# commit invalidates it and re-gates the loop; it can go stale, but it cannot
-# silently certify a different tree. The refinery re-runs the real gate as the
-# backstop that catches a stamp written without the checks having passed.
+# HOME, real toolchain, no dispatcher held open — through `gctk rig`, which runs
+# each command itself and records its result against the commit it ran at,
+# under the rig clone's git common directory that every worktree of the clone
+# shares. This script reads those records at the live HEAD with `gctk rig
+# <check> --check`, which runs nothing and calls nothing but git, so it answers
+# here, where gc can fail. A record names one commit, so any later commit has
+# none until the checks run again, and a record cannot certify a tree the
+# command did not run on.
 #
 # ## Why cwd is not trusted
 #
@@ -307,7 +310,7 @@ git -C "$WORKTREE" rev-parse --git-dir >/dev/null 2>&1 ||
 
 # --- 4. The tree must be clean ----------------------------------------------
 # Uncommitted changes mean the iteration left work the declared checks never
-# saw, and the stamp below cannot describe them.
+# saw, and no record at HEAD describes them.
 DIRTY=$(git -C "$WORKTREE" status --porcelain 2>/dev/null) ||
 	fail "could not read git status in $WORKTREE"
 if [ -n "$DIRTY" ]; then
@@ -318,16 +321,58 @@ fi
 HEAD_SHA=$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null) ||
 	fail "could not resolve HEAD in $WORKTREE"
 
-# --- 5. The declared checks must be green at THIS HEAD -----------------------
-# The iteration agent ran the declared typecheck/lint/build/test in its own
-# session and, on green, stamped the HEAD it verified. A stamp that names an
-# earlier commit is stale by construction: any commit since moved HEAD off it.
-GATE_SHA=$(printf '%s' "$ISSUE_JSON" | jq -r '.[0].metadata.self_review_passed_sha // empty')
-if [ -z "$GATE_SHA" ]; then
-	incomplete "no metadata.self_review_passed_sha recorded; the checks have not passed yet"
-fi
-if [ "$GATE_SHA" != "$HEAD_SHA" ]; then
-	incomplete "self-review stamp is stale (passed at $GATE_SHA, HEAD is $HEAD_SHA); another iteration is needed"
+# --- 5. Every recorded check must pass at THIS HEAD --------------------------
+# The iteration ran each check through `gctk rig`. A check the rig declares no
+# command for is recorded as a pass that ran nothing, so each of the three has a
+# record to read. setup and build record nothing, so nothing here reads them.
+# A recorded fail passes only when the work bead's rig_check_pre_existing.<check>
+# names this HEAD: the iteration found the same failure red on the base and
+# carried by a tracker (rig-check-pre-existing.sh).
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+[ -x "$GCTK" ] || fail "no gctk binary at $GCTK to read the recorded checks; the city's gctk-build order publishes it"
+FAILED=""
+UNRECORDED=""
+for CHECK in test lint typecheck; do
+	# rig's own lines go to stderr, and the record it prints on stdout is not
+	# needed here.
+	LINE=$(cd "$WORKTREE" && "$GCTK" rig "$CHECK" --check 2>&1 >/dev/null)
+	RC=$?
+	LINE=$(printf '%s' "$LINE" | tr '\n' ' ')
+	case "$RC" in
+	0) note "$CHECK: ${LINE:-recorded pass}" ;;
+	1)
+		PRE=$(printf '%s' "$ISSUE_JSON" | jq -r --arg k "rig_check_pre_existing.$CHECK" --arg c "$HEAD_SHA" '
+			.[0].metadata[$k] // empty
+			| (if type == "string" then (fromjson? // empty) else . end)
+			| select(type == "object" and .commit == $c and ((.trackers // []) | length) > 0)
+			| .trackers | join(", ")' 2>/dev/null)
+		if [ -n "$PRE" ]; then
+			note "$CHECK: the recorded fail at $HEAD_SHA is pre-existing, tracked by $PRE"
+		else
+			FAILED="$FAILED $CHECK"
+			note "$CHECK: ${LINE:-recorded fail}"
+		fi
+		;;
+	3) UNRECORDED="$UNRECORDED $CHECK" ;;
+	4) FAILED="$FAILED $CHECK"; note "$CHECK: ${LINE:-machine failure}" ;;
+	*) fail "gctk rig $CHECK --check exited $RC in $WORKTREE: ${LINE:-no output}" ;;
+	esac
+done
+[ -z "$FAILED" ] || incomplete "not green at $HEAD_SHA:$FAILED; another iteration is needed"
+
+# A molecule poured before its self-review ran the checks through gctk rig
+# keeps step text that records nothing and stamps self_review_passed_sha on the
+# work bead. With no record at all, that stamp naming HEAD stands in for the
+# records, so such a run still converges.
+if [ -n "$UNRECORDED" ]; then
+	LEGACY_SHA=$(printf '%s' "$ISSUE_JSON" | jq -r '.[0].metadata.self_review_passed_sha // empty')
+	if [ "$UNRECORDED" = " test lint typecheck" ] && [ "$LEGACY_SHA" = "$HEAD_SHA" ]; then
+		note "PASS: self-review green at $HEAD_SHA, by the stamp of a run poured before its checks were recorded"
+		exit 0
+	fi
+	incomplete "nothing recorded at $HEAD_SHA for:$UNRECORDED; the checks have not run at this commit, so another iteration is needed"
 fi
 
 note "PASS: self-review green at $HEAD_SHA"

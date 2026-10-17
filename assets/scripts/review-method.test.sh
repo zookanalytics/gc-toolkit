@@ -28,15 +28,21 @@
 #                run or its result, or runs a suite, and an undeclared check's
 #                note borrows no other check's method.
 #   (KEEPALIVE)  every long command a method runs goes through hb: the
-#                correctness suites and the demo capture.
+#                correctness suites, through the gate or plain, and the demo
+#                capture.
 #   (RUBRIC)     the learning loop's review-rubric anchors sit in the ledger
 #                beside the method, each line naming a dimension of its What
 #                to check list, an anchor whose dimension was recorded at
 #                adoption naming that one, and the inventory reads every one;
 #                the method itself carries no HTML comment.
-#   (EVIDENCE)   the review-test-evidence block counts the anchor's self-review
-#                stamp only on an exact match in a rig that declares a test
-#                command, in bash and in zsh.
+#   (EVIDENCE)   the review-test-evidence block reads gctk rig's record of the
+#                tests at the pinned commit, in the review's worktree: a pass
+#                of the full suite or the affected subset is evidence and runs
+#                no suite, a fail the anchor marks pre-existing at that commit
+#                is not run again, a fail with no such mark is run again with
+#                --force, and no record, a pass that ran nothing, a machine
+#                failure or no binary runs the suites the diff touches through
+#                the gate; in bash and in zsh.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -240,6 +246,7 @@ done < "$TMP/specialist-methods"
 
 echo "# every long command a method runs goes through hb"
 hasF "$METHOD" "hb bash -c '<suite>'" "(KEEPALIVE) the correctness suites run through hb"
+hasF "$METHOD" "\`hb \"\$GCTK\" rig test --scope affected --command '<the suites>'\`" "(KEEPALIVE) …and a run through the gate does too"
 DEMO="$ROOT/skills/review-demo/SKILL.md"
 awk '/^ *```/ {f = !f; next} f && /rig-demo-capture\.sh/' "$DEMO" > "$TMP/capture-lines"
 [ -s "$TMP/capture-lines" ] && ok "(KEEPALIVE) the demo method runs a capture" || bad "(KEEPALIVE) no capture command found in the demo method"
@@ -276,53 +283,70 @@ eq "$INV" "$ANCHORS" "(RUBRIC) the inventory reads every anchor in the ledger"
 echo "# the test evidence block, run as written"
 awk '/^# >>> review-test-evidence$/ {f = 1} f {print} /^# <<< review-test-evidence$/ {f = 0}' "$METHOD" > "$TMP/evidence.sh"
 [ -s "$TMP/evidence.sh" ] && ok "(EVIDENCE) the block extracts from the method" || bad "(EVIDENCE) the block did not extract"
-# A stub gc: bd show answers the anchor, and formula show answers the rig's
-# mol-polecat-work vars.
-mkdir -p "$TMP/bin"
+# A stub gctk answers `rig test --check` with STUB_REC on stdout and STUB_RC as
+# its exit, and logs its call and the directory it ran in. A stub gc answers the
+# anchor's bd show.
+mkdir -p "$TMP/bin" "$TMP/wt"
+cat > "$TMP/gctk" <<'GCTK'
+#!/usr/bin/env bash
+printf '%s|%s\n' "$*" "$(pwd -P)" >> "$STUB_LOG"
+[ -n "${STUB_REC:-}" ] && printf '%s\n' "$STUB_REC"
+exit "${STUB_RC:-3}"
+GCTK
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >> "$STUB_LOG"
+printf 'gc %s\n' "$*" >> "$STUB_LOG"
 case "$1 $2" in
   "bd show") [ "${STUB_BD_FAIL:-0}" = 1 ] && exit 1; printf '%s\n' "$STUB_ANCHOR_JSON" ;;
-  "formula show") [ "${STUB_FORMULA_FAIL:-0}" = 1 ] && exit 1; printf '%s\n' "$STUB_FORMULA_JSON" ;;
   *) exit 1 ;;
 esac
 GC
-chmod +x "$TMP/bin/gc"
+chmod +x "$TMP/gctk" "$TMP/bin/gc"
+WT_REAL=$(cd "$TMP/wt" && pwd -P)
 OID=0123456789abcdef0123456789abcdef01234567
-DECLARES='{"ok":true,"vars":[{"name":"affected_tests_command","default":"","rig_default":"tools/run-tests.sh x"},{"name":"test_command","default":"","rig_default":null}]}'
-# A rig's own empty value wins over a formula default, the way the self-review renders it.
-DECLARES_NONE='{"ok":true,"vars":[{"name":"affected_tests_command","default":"","rig_default":null},{"name":"test_command","default":"make test","rig_default":""}]}'
-stamped() { printf '[{"id":"tk-a","metadata":{"self_review_passed_sha":"%s"}}]' "$1"; }
-# evidence <shell> <review-bead metadata> <anchor json> <formula json> [GC_RIG] : the block's verdict word
+OTHER=fedcba9876543210fedcba9876543210fedcba98
+record() { jq -nc --arg r "$1" --arg s "$2" --arg c "$OID" '{check: "test", result: $r, scope: $s, commit: $c, exit_code: (if $r == "pass" then 0 else 1 end), command: "tools/run-tests.sh --affected origin/main"}'; }
+marked() { jq -nc --arg c "$1" --arg t "$2" '[{id: "tk-a", metadata: {"rig_check_pre_existing.test": ({commit: $c, trackers: [$t]} | tojson)}}]'; }
+# evidence <shell> <rc> <record> [anchor json] [review-bead metadata] : the line the block prints
+DEFAULT_M='{"anchor_bead":"tk-a"}'
+DEFAULT_ANCHOR='[{"id":"tk-a","metadata":{}}]'
 evidence() {
   : > "$TMP/stub.log"
-  ( PATH="$TMP/bin:$PATH" M="$2" REVIEWED_OID="$OID" GC_RIG="${5-gc-toolkit}" STUB_LOG="$TMP/stub.log" \
-      STUB_ANCHOR_JSON="$3" STUB_FORMULA_JSON="$4" "$1" "$TMP/evidence.sh" 2>/dev/null ) | sed -nE 's/^(test evidence|no test evidence).*/\1/p'
+  ( cd "$TMP" && PATH="$TMP/bin:$PATH" M="${5-$DEFAULT_M}" REVIEWED_OID="$OID" REVIEW_WT="$TMP/wt" \
+      GCTK="${STUB_GCTK-$TMP/gctk}" STUB_LOG="$TMP/stub.log" STUB_RC="$2" STUB_REC="$3" \
+      STUB_ANCHOR_JSON="${4-$DEFAULT_ANCHOR}" "$1" "$TMP/evidence.sh" 2>/dev/null )
 }
+# word <line> : the verdict the line opens with
+word() { printf '%s\n' "$1" | sed -nE 's/^(test evidence|no test evidence|recorded fail).*/\1/p'; }
 SHELLS="bash"; command -v zsh >/dev/null 2>&1 && SHELLS="bash zsh"
 for sh in $SHELLS; do
-  eq "$(evidence "$sh" '{"anchor_bead":"tk-a"}' "$(stamped "$OID")" "$DECLARES")" "test evidence" \
-     "(EVIDENCE) $sh: a stamp on the reviewed commit in a rig that declares a test command is evidence"
-  grep -qx -- 'formula show mol-polecat-work --rig=gc-toolkit --json' "$TMP/stub.log" \
-    && ok "(EVIDENCE) $sh: the rig's declared commands are read with --rig=<rig> as one word" \
-    || bad "(EVIDENCE) $sh: the formula read did not pass --rig=gc-toolkit (log: $(tr '\n' ';' < "$TMP/stub.log"))"
-  eq "$(evidence "$sh" '{"anchor_bead":"tk-a"}' "$(stamped "$OID")" "$DECLARES_NONE")" "no test evidence" \
-     "(EVIDENCE) $sh: a rig whose own values declare no test command gives no evidence"
-  eq "$(evidence "$sh" '{"anchor_bead":"tk-a"}' "$(stamped fedcba9876543210fedcba9876543210fedcba98)" "$DECLARES")" "no test evidence" \
-     "(EVIDENCE) $sh: a stamp naming another commit is no evidence"
-  eq "$(evidence "$sh" '{"anchor_bead":"tk-a"}' "$(stamped "${OID:0:12}")" "$DECLARES")" "no test evidence" \
-     "(EVIDENCE) $sh: a short sha is no exact match, so no evidence"
-  eq "$(evidence "$sh" '{}' "$(stamped "$OID")" "$DECLARES")" "no test evidence" \
-     "(EVIDENCE) $sh: a review bead with no anchor gives no evidence"
-  eq "$(STUB_BD_FAIL=1 evidence "$sh" '{"anchor_bead":"tk-a"}' "$(stamped "$OID")" "$DECLARES")" "no test evidence" \
-     "(EVIDENCE) $sh: an unreadable anchor gives no evidence"
-  eq "$(STUB_FORMULA_FAIL=1 evidence "$sh" '{"anchor_bead":"tk-a"}' "$(stamped "$OID")" "$DECLARES")" "no test evidence" \
-     "(EVIDENCE) $sh: unreadable rig commands give no evidence"
-  evidence "$sh" '{"anchor_bead":"tk-a"}' "$(stamped "$OID")" "$DECLARES" "" >/dev/null
-  grep -qx -- 'formula show mol-polecat-work --json' "$TMP/stub.log" \
-    && ok "(EVIDENCE) $sh: with GC_RIG unset the formula is read with no --rig" \
-    || bad "(EVIDENCE) $sh: with GC_RIG unset the formula read was not bare (log: $(tr '\n' ';' < "$TMP/stub.log"))"
+  OUT=$(evidence "$sh" 0 "$(record pass full)")
+  eq "$(word "$OUT")" "test evidence" "(EVIDENCE) $sh: a full-suite pass recorded at the pin is evidence"
+  case "$OUT" in *"run no suite"*) ok "(EVIDENCE) $sh: …and reads run no suite" ;; *) bad "(EVIDENCE) $sh: a recorded pass does not read run no suite (got: $OUT)" ;; esac
+  grep -qx -- "rig test --check|$WT_REAL" "$TMP/stub.log" \
+    && ok "(EVIDENCE) $sh: the record is read with --check, in the review's worktree" \
+    || bad "(EVIDENCE) $sh: the record was not read with --check in the review's worktree (log: $(tr '\n' ';' < "$TMP/stub.log"))"
+  eq "$(word "$(evidence "$sh" 0 "$(record pass affected)")")" "test evidence" \
+     "(EVIDENCE) $sh: a pass of the affected subset is evidence"
+  OUT=$(evidence "$sh" 0 "$(record pass none)")
+  eq "$(word "$OUT")" "no test evidence" "(EVIDENCE) $sh: a pass that ran nothing is no evidence"
+  case "$OUT" in *"run the suites the diff touches through the gate"*) ok "(EVIDENCE) $sh: …and sends the reviewer through the gate" ;; *) bad "(EVIDENCE) $sh: a run of nothing does not send the reviewer through the gate (got: $OUT)" ;; esac
+  OUT=$(evidence "$sh" 1 "$(record fail affected)" "$(marked "$OID" tk-t1)")
+  eq "$(word "$OUT")" "test evidence" "(EVIDENCE) $sh: a fail the anchor marks pre-existing at the pin is evidence"
+  case "$OUT" in *"tracked by tk-t1; do not run them again"*) ok "(EVIDENCE) $sh: …which names its tracker and is not run again" ;; *) bad "(EVIDENCE) $sh: a pre-existing fail is not told apart (got: $OUT)" ;; esac
+  OUT=$(evidence "$sh" 1 "$(record fail affected)" "$(marked "$OTHER" tk-t1)")
+  eq "$(word "$OUT")" "recorded fail" "(EVIDENCE) $sh: a pre-existing mark naming another commit does not answer for the pin"
+  case "$OUT" in *"command: tools/run-tests.sh --affected origin/main"*"--force"*) ok "(EVIDENCE) $sh: …and the fail is run again with --force, its command named" ;; *) bad "(EVIDENCE) $sh: a recorded fail does not name its command and --force (got: $OUT)" ;; esac
+  eq "$(word "$(evidence "$sh" 1 "$(record fail full)" "" '{}')")" "recorded fail" \
+     "(EVIDENCE) $sh: a recorded fail on a review bead with no anchor is the commit's"
+  eq "$(word "$(STUB_BD_FAIL=1 evidence "$sh" 1 "$(record fail full)" "$(marked "$OID" tk-t1)")")" "recorded fail" \
+     "(EVIDENCE) $sh: a recorded fail with an unreadable anchor is the commit's"
+  OUT=$(evidence "$sh" 3 "")
+  eq "$(word "$OUT")" "no test evidence" "(EVIDENCE) $sh: nothing recorded at the pin is no evidence"
+  case "$OUT" in *"run the suites the diff touches through the gate"*) ok "(EVIDENCE) $sh: …and sends the reviewer through the gate" ;; *) bad "(EVIDENCE) $sh: no record does not send the reviewer through the gate (got: $OUT)" ;; esac
+  eq "$(word "$(evidence "$sh" 4 "")")" "no test evidence" "(EVIDENCE) $sh: a machine failure is no evidence"
+  eq "$(word "$(STUB_GCTK="$TMP/no-gctk" evidence "$sh" 0 "$(record pass full)")")" "no test evidence" \
+     "(EVIDENCE) $sh: no gctk binary is no evidence"
 done
 
 echo "---"

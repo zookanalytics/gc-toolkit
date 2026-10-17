@@ -189,6 +189,10 @@ SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --sh
 done
 REVIEW_WT=$("${SCRIPTS:?review-workspace.sh not found in the pack}/review-workspace.sh" add --review-bead "$REVIEW_BEAD" --oid "$REVIEWED_OID" --repo "$REPO") || exit 1
 cd "$REVIEW_WT"
+# GCTK is the pack's own CLI, for a check's method to call in the workspace.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 # <<< review-workspace-add
 ```
 Anything else the review writes to disk goes in the workspace beside `wt`

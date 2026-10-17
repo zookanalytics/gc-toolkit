@@ -2,18 +2,25 @@
 # Test for self-review-check.sh — the exit condition of the self-review check
 # loop in mol-polecat-work.
 #
-# It EXECUTES the real shipped script against stub `bd` / `gc` binaries and a
-# real fixture git worktree, so the exit-code contract (0 verified-green, 1
-# everything else, fail-closed on any unreadable state) and the exhaustion
-# handback are pinned against the code that ships, not a paraphrase.
+# It EXECUTES the real shipped script against stub `bd` / `gc` binaries, a real
+# fixture git worktree, and the real `gctk` built from this checkout, whose
+# records the cases write by running `gctk rig` in the fixture the way an
+# iteration does. So the exit-code contract (0 verified-green, 1 everything
+# else, fail-closed on any unreadable state), the record reads and the
+# exhaustion handback are pinned against the code that ships, not a paraphrase.
 set -uo pipefail
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/self-review-check-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=test-harness.sh
+. "$HERE/test-harness.sh"   # harness_build_gctk
+harness_build_gctk
+[ -n "$GCTK_BUILT" ] || { echo "FAIL - $GCTK_BUILD_ERR"; exit 1; }
 # Host signing of commits and tags must not make this suite need a signing agent.
 export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false \
   GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
-SCRIPT="$(cd "$(dirname "$0")" && pwd)/self-review-check.sh"
+SCRIPT="$HERE/self-review-check.sh"
 [ -f "$SCRIPT" ] || { echo "missing $SCRIPT" >&2; exit 1; }
 
 PASS=0; FAIL=0
@@ -59,6 +66,8 @@ show)
     [ -n "$MD_GATE" ]        && { printf '%s"self_review_passed_sha":"%s"' "$sep" "$MD_GATE"; sep=","; }
     [ -n "$MD_ROUTE" ]       && { printf '%s"gc.execution_routed_to":"%s"' "$sep" "$MD_ROUTE"; sep=","; }
     [ -n "$MD_ABORTED_AT" ]  && { printf '%s"aborted_at":"%s"' "$sep" "$MD_ABORTED_AT"; sep=","; }
+    # A pre-existing mark is JSON kept as a string, as bd keeps it.
+    [ -n "$MD_PRE_LINT" ]    && { printf '%s"rig_check_pre_existing.lint":%s' "$sep" "$(printf '%s' "$MD_PRE_LINT" | jq -Rs .)"; sep=","; }
     printf '}}]'
     ;;
   *)
@@ -130,6 +139,23 @@ echo base > "$WT/f"; git -C "$WT" add f; git -C "$WT" commit -qm base
 echo more > "$WT/f"; git -C "$WT" add f; git -C "$WT" commit -qm work
 HEAD_SHA=$(git -C "$WT" rev-parse HEAD)
 OLD_SHA=$(git -C "$WT" rev-parse HEAD~1)
+# A second worktree of the same clone, at HEAD~1, and a third at HEAD: records
+# live under the clone's git common directory, which every worktree shares.
+git -C "$WT" worktree add -q --detach "$TMP/old" "$OLD_SHA"
+git -C "$WT" worktree add -q --detach "$TMP/twin" "$HEAD_SHA"
+
+# record <dir> <check> <gctk rig args...> : write a record the way an
+# iteration does, by running the check through gctk rig in <dir>.
+record() { local d="$1"; shift; ( cd "$d" && "$GCTK_BUILT" rig "$@" ) >/dev/null 2>&1; }
+# green [dir] : test, lint and typecheck each pass at <dir>'s HEAD (default the
+# fixture worktree); typecheck as a rig that declares no command for it.
+green() {
+  local d="${1:-$WT}"
+  record "$d" test --scope affected --command true
+  record "$d" lint --command true
+  record "$d" typecheck --nothing-declared
+}
+clear_records() { rm -rf "${WT:?}/.git/gc-rig-checks"; }
 
 write_state() {
   local issue_id="${ISSUE_ID-gc-issue}"
@@ -143,13 +169,15 @@ DEP_TREE_FAILS="${DEP_TREE_FAILS-0}"
 GC_COLD="${GC_COLD-0}"
 MD_WORK_DIR="${MD_WORK_DIR-$WT}"
 MD_BRANCH="${MD_BRANCH-polecat/gc-issue}"
-MD_GATE="${MD_GATE-$HEAD_SHA}"
+MD_GATE="${MD_GATE-}"
 MD_ROUTE="${MD_ROUTE-gc-toolkit/gc-toolkit.polecat}"
 MD_ABORTED_AT="${MD_ABORTED_AT-}"
 MD_MAX_ATTEMPTS="${MD_MAX_ATTEMPTS-3}"
 MD_SUBJECT_MAX="${MD_SUBJECT_MAX-}"
 UPDATE_FAILS="${UPDATE_FAILS-0}"
 EOF
+  # A JSON value carries quotes, so it is written shell-quoted.
+  printf 'MD_PRE_LINT=%q\n' "${MD_PRE_LINT-}" >> "$STATE"
 }
 
 # Run the script in a cwd that is deliberately NOT the fixture worktree: the
@@ -160,7 +188,7 @@ run_case() {
   local desc="$1" want="$2"
   : > "$CALLS"
   ( cd "$TMP" && GC_WISP_ID="${ROOT_ID-wisp-1}" GC_BEAD_ID=iter-1 \
-      GC_ITERATION="${ITERATION-1}" bash "$SCRIPT" ) >"$TMP/out" 2>&1
+      GC_ITERATION="${ITERATION-1}" GCTK_BIN="${GCTK-$GCTK_BUILT}" bash "$SCRIPT" ) >"$TMP/out" 2>&1
   local got=$?
   if [ "$got" = "$want" ]; then ok "$desc (exit $got)"
   else bad "$desc (got exit $got, want $want)"; sed 's/^/       /' "$TMP/out"; fi
@@ -185,26 +213,70 @@ assert_out() {
 reset_env() {
   unset ROOT_ID CONVOY_ID CONVOY_MEMBERS ISSUE_ID MD_ROOT_ISSUE DEP_TREE_FAILS GC_COLD
   unset MD_WORK_DIR MD_BRANCH MD_GATE MD_ROUTE MD_ABORTED_AT MD_MAX_ATTEMPTS MD_SUBJECT_MAX
-  unset UPDATE_FAILS ITERATION
+  unset UPDATE_FAILS ITERATION MD_PRE_LINT GCTK
+  clear_records
 }
 
 # --- 1. happy path -----------------------------------------------------------
+reset_env; write_state; green
+run_case "PASS when the tree is clean and every check's record at HEAD passes" 0
+assert_out "PASS names the verified HEAD" "PASS: self-review green at $HEAD_SHA"
+assert_out "a check the rig declares nothing for reads as a pass" "typecheck:"
+
+# --- 2. checks not yet run ---------------------------------------------------
 reset_env; write_state
-run_case "PASS when tree is clean and the stamp names HEAD" 0
-assert_out "PASS names the verified HEAD" "PASS: self-review green"
+run_case "FAIL when nothing is recorded at HEAD" 1
+assert_out "says nothing is recorded" "nothing recorded at $HEAD_SHA for: test lint typecheck"
 
-# --- 2. gate not yet run -----------------------------------------------------
-reset_env; MD_GATE=""; write_state
-run_case "FAIL when no self_review_passed_sha is recorded" 1
-assert_out "says the checks have not passed yet" "not passed yet"
+# --- 3. records at an older commit only --------------------------------------
+reset_env; write_state; green "$TMP/old"
+run_case "FAIL when only an older commit carries records" 1
+assert_out "names the commit that has none" "nothing recorded at $HEAD_SHA"
 
-# --- 3. stale stamp ----------------------------------------------------------
+# --- 3b. records another worktree wrote at HEAD ------------------------------
+reset_env; write_state; green "$TMP/twin"
+run_case "PASS on records another worktree of the clone wrote at HEAD" 0
+
+# --- 3c. one check recorded red ----------------------------------------------
+reset_env; write_state; green; record "$WT" lint --command false
+run_case "FAIL when a check's record at HEAD is a fail" 1
+assert_out "names the red check" "not green at $HEAD_SHA: lint"
+
+# --- 3d. a red check marked pre-existing at HEAD ------------------------------
+reset_env; MD_PRE_LINT="{\"commit\":\"$HEAD_SHA\",\"trackers\":[\"tk-t1\"]}"; write_state
+green; record "$WT" lint --command false
+run_case "PASS when the red check's fail is marked pre-existing at HEAD" 0
+assert_out "names the tracker that carries it" "pre-existing, tracked by tk-t1"
+
+reset_env; MD_PRE_LINT="{\"commit\":\"$OLD_SHA\",\"trackers\":[\"tk-t1\"]}"; write_state
+green; record "$WT" lint --command false
+run_case "FAIL when the pre-existing mark names another commit" 1
+
+reset_env; MD_PRE_LINT="{\"commit\":\"$HEAD_SHA\",\"trackers\":[]}"; write_state
+green; record "$WT" lint --command false
+run_case "FAIL when the pre-existing mark names no tracker" 1
+
+# --- 3e. some checks recorded, one not ----------------------------------------
+reset_env; MD_GATE="$HEAD_SHA"; write_state
+record "$WT" test --scope affected --command true
+record "$WT" lint --command true
+run_case "FAIL when a check has no record, even beside a stamp naming HEAD" 1
+assert_out "names the check with no record" "nothing recorded at $HEAD_SHA for: typecheck"
+
+# --- 3f. a run poured before its checks were recorded --------------------------
+reset_env; MD_GATE="$HEAD_SHA"; write_state
+run_case "PASS on a stamp naming HEAD when nothing is recorded" 0
+assert_out "says the stamp stood in" "by the stamp of a run poured before its checks were recorded"
 reset_env; MD_GATE="$OLD_SHA"; write_state
-run_case "FAIL when the stamp is stale (an older HEAD)" 1
-assert_out "names the stale-stamp reason" "stamp is stale"
+run_case "FAIL on a stamp naming an older HEAD when nothing is recorded" 1
+
+# --- 3g. no gctk binary ------------------------------------------------------
+reset_env; GCTK=none; write_state; green
+run_case "FAIL (fail-closed) with no gctk binary to read the records" 1
+assert_out "names the missing binary" "no gctk binary"
 
 # --- 4. dirty worktree -------------------------------------------------------
-reset_env; write_state
+reset_env; write_state; green
 echo dirt > "$WT/untracked"
 run_case "FAIL when the worktree is dirty" 1
 assert_out "names the dirty-tree reason" "worktree is dirty"
@@ -223,8 +295,8 @@ reset_env; DEP_TREE_FAILS=1; MD_ROOT_ISSUE=""; write_state
 run_case "FAIL (fail-closed) when convoy membership is unreadable and no gc.var.issue" 1
 
 # --- 8. resilient fallback: membership unreadable but gc.var.issue set --------
-reset_env; DEP_TREE_FAILS=1; write_state
-run_case "PASS via gc.var.issue fallback when membership is unreadable but the stamp is green" 0
+reset_env; DEP_TREE_FAILS=1; write_state; green
+run_case "PASS via gc.var.issue fallback when membership is unreadable but the records are green" 0
 assert_out "warns that the one-member invariant went unverified" "membership unverified"
 
 # --- 9. fail-closed on a malformed convoy (two members) ----------------------
@@ -238,15 +310,15 @@ run_case "FAIL (fail-closed) when gc.var.issue disagrees with the convoy member"
 # --- 11. bd-only under a cold gc -------------------------------------------
 # A cold import cache kills every gc call; the verdict must still be correct
 # because resolution is bd-only, and gc convoy must never be reached.
-reset_env; GC_COLD=1; write_state
-run_case "PASS under a cold gc (resolution is bd-only)" 0
+reset_env; GC_COLD=1; write_state; green
+run_case "PASS under a cold gc (resolution is bd-only, and the record reads call no gc)" 0
 refute_call "resolution must not shell out to gc convoy" "gc convoy"
 
 # --- 12. exhaustion handback -------------------------------------------------
 # The last failing attempt (GC_ITERATION >= gc.max_attempts) hands the work bead
 # back itself, because nothing runs after the budget is spent.
 reset_env; MD_GATE=""; ITERATION=3; MD_MAX_ATTEMPTS=3; write_state
-run_case "FAIL on the last attempt with no green stamp" 1
+run_case "FAIL on the last attempt with nothing recorded" 1
 assert_call "last attempt stamps aborted_at=self-review-exhausted" "aborted_at=self-review-exhausted"
 assert_call "last attempt reassigns to the witness (derived from the pool route)" "gc-toolkit/gc-toolkit.witness"
 assert_call "last attempt clears the pool route" "gc.routed_to="
@@ -262,7 +334,7 @@ refute_call "does not re-stamp an already-aborted bead" "aborted_at=self-review-
 
 # --- 14. no handback before the budget is spent ------------------------------
 reset_env; MD_GATE=""; ITERATION=2; MD_MAX_ATTEMPTS=3; write_state
-run_case "FAIL mid-budget without a green stamp" 1
+run_case "FAIL mid-budget with nothing recorded" 1
 refute_call "no handback before the last attempt" "aborted_at=self-review-exhausted"
 
 # --- 15. budget read from the subject bead when carried there ----------------
