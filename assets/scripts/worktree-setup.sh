@@ -76,12 +76,15 @@ provision_worktree() {
     append_exclude ".github/copilot-instructions.md"
     append_exclude "state.json"
     # gc links each skill into .agents/skills/ for Codex and pi, one symlink per
-    # skill, and records them in .gc-skill-ownership.json beside them. A repo
-    # can track skills of its own there, and a skill is a directory, so every
-    # entry directly under .agents/skills/ is hidden except a directory. The
-    # negation must follow the rule it narrows.
-    append_exclude ".agents/skills/*"
-    append_exclude "!.agents/skills/*/"
+    # skill, and records each link's name in an ownership manifest beside them.
+    # A person can keep files, links and skills of their own in that directory,
+    # so only the manifest and the names it records are hidden, each by its
+    # exact path. The names come from this worktree's manifest and the rig
+    # checkout's, so a link gc adds later shows until the next run reads it.
+    # Lines are only ever added, so a name gc drops stays hidden.
+    append_exclude ".agents/skills/.gc-skill-ownership.json"
+    exclude_skill_links "$WT"
+    exclude_skill_links "$RIG_ROOT"
     # Session start stages the city's .gc/settings.json into every Claude
     # session's work dir, and bd's workspace gate sits beside .beads, outside it.
     append_exclude ".gc/"
@@ -91,6 +94,23 @@ provision_worktree() {
 append_exclude() {
     PATTERN="$1"
     grep -qxF "$PATTERN" "$EXCLUDE" 2>/dev/null || printf '%s\n' "$PATTERN" >> "$EXCLUDE"
+}
+
+# exclude_skill_links <checkout> — hides each skill link whose name the
+# ownership manifest in <checkout>/.agents/skills/ records. git reads each
+# line of the exclude file as a pattern, so a name is taken only when it is
+# letters, digits, dots, dashes and underscores, which git matches literally.
+# Any other name stays visible rather than risk a pattern that hides a
+# person's file. A missing or unreadable manifest, or no jq, adds nothing.
+exclude_skill_links() {
+    MANIFEST="$1/.agents/skills/.gc-skill-ownership.json"
+    [ -f "$MANIFEST" ] || return 0
+    NAMES=$(jq -r '.targets | keys[] | select(test("^[A-Za-z0-9._-]+$") and . != "." and . != "..")' \
+        "$MANIFEST" 2>/dev/null) || return 0
+    printf '%s\n' "$NAMES" | while IFS= read -r NAME; do
+        [ -n "$NAME" ] || continue
+        append_exclude ".agents/skills/$NAME"
+    done
 }
 
 rebase_in_progress() {

@@ -43,10 +43,14 @@
 #   (q) a worktree whose git metadata is gone still gets its redirect, and the
 #       run still exits 0.
 #   (r) gc's writes stay out of git status in the worktree and in the rig
-#       checkout that shares its exclude file: the skill links and ownership
-#       manifest under .agents/skills/, .gc/settings.json and .beads.gate.lock.
-#       A skill directory a person adds there still shows, and so do changes
-#       to a skill the repo tracks.
+#       checkout that shares its exclude file: the skill links its ownership
+#       manifests name under .agents/skills/, the manifest itself,
+#       .gc/settings.json and .beads.gate.lock. Everything else a person keeps
+#       there still shows and stages, in both: a plain file, a link of their
+#       own, a new skill directory, and changes to a skill the repo tracks. A
+#       link gc adds later is hidden by the next run, a manifest name git
+#       would read as a pattern is never written, and without jq or a readable
+#       manifest the run still succeeds and adds no name.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -87,6 +91,7 @@ head_of()   { git -C "$1" rev-parse HEAD; }
 branch_of() { git -C "$1" symbolic-ref -q --short HEAD || echo DETACHED; }
 lines()     { printf '%s' "$1" | grep -c '' || true; }   # "" counts as 0
 has()       { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (stderr '$1' lacks '$2')" ;; esac; }
+lacks()     { case "$1" in *"$2"*) bad "$3 ('$1' has '$2')" ;; *) ok "$3" ;; esac; }
 # the run's exit status, captured so an expected failure does not end the suite
 rc_of()     { local rc=0; sh "$SCRIPT" "$@" >>"$TMP/run.log" 2>&1 || rc=$?; echo "$rc"; }
 # whether the exclude file git resolves for a checkout carries the Gas City marker
@@ -322,36 +327,85 @@ eq "$(rc_of "$RIG" "$P/agentQ" agentQ --sync)" "0" "(q) a worktree with no git m
 eq "$(cat "$P/agentQ/.beads/redirect" 2>/dev/null)" "$RIG/.beads" "(q) it still gets its bead redirect"
 
 # --- (r) gc's writes stay out of git status, in the worktree and in the rig
-#         checkout, which shares its exclude file. The repo tracks a skill of
-#         its own under .agents/skills/, so a skill a person adds there must
-#         still show. Its own rig, so no other case's exclude file is reused. --
+#         checkout, which shares its exclude file. gc's skill links are hidden
+#         by the exact names its ownership manifest records, so what a person
+#         keeps under .agents/skills/ still shows: a skill the repo tracks, a
+#         new skill, a plain file and a link of their own. Its own rig, so no
+#         other case's exclude file is reused. --------------------------------
 SR="$TMP/skillsrc"; git init -q -b main "$SR"
 mkdir -p "$SR/.agents/skills/tracked-skill"
 echo seed > "$SR/README.md"; echo skill > "$SR/.agents/skills/tracked-skill/SKILL.md"
 git -C "$SR" add -A; git -C "$SR" commit -qm init
 git clone -q --bare "$SR" "$TMP/skills.git"
 SKR="$TMP/skillrig"; git clone -q "$TMP/skills.git" "$SKR"
-P="$TMP/r"; mkdir -p "$P" "$TMP/linked/work" "$TMP/linked/local"; W="$P/agentR"
-eq "$(rc_of "$SKR" "$W" agentR --sync)" "0" "(r) the run succeeds"
-# gc_writes <checkout> — what gc and bd leave in a checkout: a skill link from
-# an imported pack, a bare one from an agent-local skill, the ownership
-# manifest, the staged session settings, and bd's workspace gate.
-gc_writes() {
-    ln -s "$TMP/linked/work" "$1/.agents/skills/gc-toolkit.work"
-    ln -s "$TMP/linked/local" "$1/.agents/skills/local-skill"
-    echo '{"targets":{}}' > "$1/.agents/skills/.gc-skill-ownership.json"
-    mkdir -p "$1/.gc"; echo '{}' > "$1/.gc/settings.json"
-    : > "$1/.beads.gate.lock"
+P="$TMP/r"; mkdir -p "$P"; W="$P/agentR"
+# gc_link <checkout> <name>... — what gc's skill pass leaves in a checkout's
+# .agents/skills/: a link per name to a skill directory by its absolute path,
+# and the ownership manifest recording every name it linked there.
+gc_link() {
+    local co="$1" name json="" sep=""; shift
+    for name in "$@"; do
+        mkdir -p "$TMP/linked/$name"
+        [ -L "$co/.agents/skills/$name" ] || ln -s "$TMP/linked/$name" "$co/.agents/skills/$name"
+        json="$json$sep\"$name\":\"$TMP/linked/$name\""; sep=","
+    done
+    printf '{"targets":{%s}}' "$json" > "$co/.agents/skills/.gc-skill-ownership.json"
 }
-gc_writes "$W"; gc_writes "$SKR"
+# gc_writes <checkout> — the rest of what gc and bd leave in a checkout: the
+# staged session settings and bd's workspace gate.
+gc_writes() { mkdir -p "$1/.gc"; echo '{}' > "$1/.gc/settings.json"; : > "$1/.beads.gate.lock"; }
+# The rig checkout's links exist before the agent starts: a skill from an
+# imported pack, and a bare name from an agent-local skill.
+gc_link "$SKR" gc-toolkit.work local-skill; gc_writes "$SKR"
+eq "$(rc_of "$SKR" "$W" agentR --sync)" "0" "(r) the run succeeds"
+gc_link "$W" gc-toolkit.work local-skill; gc_writes "$W"
 eq "$(git -C "$W" status --porcelain)" ""    "(r) gc's writes stay out of the worktree's git status"
 eq "$(git -C "$SKR" status --porcelain)" ""  "(r) and out of the rig checkout's, which shares the exclude file"
+# A person's plain file and their own link to a skill directory, in each.
+for CO in "$W" "$SKR"; do
+    echo notes > "$CO/.agents/skills/README.md"
+    ln -s tracked-skill "$CO/.agents/skills/alias-skill"
+done
+for CO in "$W" "$SKR"; do
+    ST=$(git -C "$CO" status --porcelain)
+    has "$ST" "?? .agents/skills/README.md"   "(r) a file a person adds there shows (${CO##*/})"
+    has "$ST" "?? .agents/skills/alias-skill" "(r) and so does a link of their own (${CO##*/})"
+    ADDED=$(git -C "$CO" add -A --dry-run)
+    has "$ADDED" "add '.agents/skills/README.md'"   "(r) git add -A stages the file (${CO##*/})"
+    has "$ADDED" "add '.agents/skills/alias-skill'" "(r) and the link (${CO##*/})"
+    lacks "$ADDED" "gc-toolkit.work" "(r) and none of gc's links (${CO##*/})"
+done
 mkdir -p "$W/.agents/skills/new-skill"; echo mine > "$W/.agents/skills/new-skill/SKILL.md"
 has "$(git -C "$W" status --porcelain)" "?? .agents/skills/new-skill/" "(r) a skill directory a person adds still shows"
 echo more >> "$W/.agents/skills/tracked-skill/SKILL.md"
 echo extra > "$W/.agents/skills/tracked-skill/notes.md"
 has "$(git -C "$W" status --porcelain)" " M .agents/skills/tracked-skill/SKILL.md" "(r) an edit to a tracked skill still shows"
 has "$(git -C "$W" status --porcelain)" "?? .agents/skills/tracked-skill/notes.md" "(r) and so does a new file inside it"
+# A link gc adds later, such as a skill local to this worktree's agent, shows
+# until the next run reads the worktree's manifest.
+gc_link "$W" gc-toolkit.work local-skill later-skill
+has "$(git -C "$W" status --porcelain)" "?? .agents/skills/later-skill" "(r) a link gc adds later shows before the next run"
+eq "$(rc_of "$SKR" "$W" agentR --sync)" "0" "(r) the next run succeeds"
+lacks "$(git -C "$W" status --porcelain)" "later-skill" "(r) and hides it"
+# A manifest name git would read as a pattern is never written, so it cannot
+# hide what a person keeps there.
+printf '{"targets":{"*":"%s","README*":"%s","a b":"%s",".":"%s","..":"%s"}}' \
+    "$TMP/linked/x" "$TMP/linked/x" "$TMP/linked/x" "$TMP/linked/x" "$TMP/linked/x" > "$W/.agents/skills/.gc-skill-ownership.json"
+eq "$(rc_of "$SKR" "$W" agentR --sync)" "0" "(r) a run over a manifest of pattern names succeeds"
+EXF=$(git -C "$W" rev-parse --path-format=absolute --git-path info/exclude)
+eq "$(grep '^\.agents/skills/' "$EXF" | grep -v '^\.agents/skills/[A-Za-z0-9._-]*$' || true)" "" \
+    "(r) no name git would read as a pattern reaches the exclude file"
+eq "$(grep -cxE '\.agents/skills/\.{1,2}' "$EXF" || true)" "0" "(r) nor the names . and .."
+has "$(git -C "$W" status --porcelain)" "?? .agents/skills/README.md" "(r) so a person's file still shows"
+# With no jq, or a manifest jq cannot read, the run still succeeds and adds no
+# name, so a link it cannot read shows rather than anything being hidden.
+mkdir -p "$TMP/nojq"; printf '#!/bin/sh\nexit 127\n' > "$TMP/nojq/jq"; chmod +x "$TMP/nojq/jq"
+gc_link "$W" gc-toolkit.work local-skill later-skill unread-skill
+eq "$(PATH="$TMP/nojq:$PATH" rc_of "$SKR" "$W" agentR --sync)" "0" "(r) a run without jq succeeds"
+has "$(git -C "$W" status --porcelain)" "?? .agents/skills/unread-skill" "(r) and leaves the link it could not read showing"
+echo '{"targets":' > "$W/.agents/skills/.gc-skill-ownership.json"
+eq "$(rc_of "$SKR" "$W" agentR --sync)" "0" "(r) a run over a manifest jq cannot read succeeds"
+has "$(git -C "$W" status --porcelain)" "?? .agents/skills/unread-skill" "(r) and adds no name either"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
