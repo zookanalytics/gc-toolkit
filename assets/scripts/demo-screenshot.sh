@@ -37,7 +37,7 @@
 # Usage:
 #   demo-screenshot.sh page --script <demo.md> --output <file.png>
 #       ( --serve-dir <dir> | --serve <command> | --base-url <url> ) [--port <n>]
-#       [--cwd <dir>] [--selector <css>] [--full-page]
+#       [--cwd <dir>] [--selector <css> | --full-page]
 #   demo-screenshot.sh terminal --output <file.png> ( --command <command> | --text <file> )
 #       [--cwd <dir>] [--title <text>] [--columns <n>] [--max-lines <n>]
 #   demo-screenshot.sh markdown --file <file.md> --output <file.png>
@@ -54,6 +54,7 @@
 #                Exactly one of --serve-dir / --serve / --base-url is required.
 #   --selector   capture this element instead of the viewport.
 #   --full-page  capture the whole scrollable page instead of the viewport.
+#                At most one of --selector / --full-page is given.
 #   terminal:
 #   --command    the command to run with bash from --cwd (default: here). The
 #                capture shows it after a $ prompt, then what it printed.
@@ -150,6 +151,9 @@ case "$KIND" in
     [ -n "$SERVE_CMD" ] && TARGETS=$((TARGETS + 1))
     [ -n "$BASE_URL" ] && TARGETS=$((TARGETS + 1))
     [ "$TARGETS" -eq 1 ] || usage_err "page needs exactly one of --serve-dir / --serve / --base-url (got $TARGETS)"
+    # The engine refuses the pair too, but this script reaches the engine only
+    # after provisioning its browser.
+    if [ -n "$SELECTOR" ] && [ "$FULL_PAGE" -eq 1 ]; then usage_err "page takes --selector or --full-page, not both"; fi
     [ -f "$SCRIPT" ] || fail "--script '$SCRIPT' does not exist"
     [ -z "$SERVE_DIR" ] || [ -d "$SERVE_DIR" ] || fail "--serve-dir '$SERVE_DIR' is not a directory"
     [ -z "$CWD" ] || [ -d "$CWD" ] || fail "--cwd '$CWD' is not a directory" ;;

@@ -178,6 +178,10 @@ eq "$rc" 2 "page with no app target exits 2"
 has "exactly one of --serve-dir / --serve / --base-url (got 0)" "$out" "it names the app-target requirement"
 out="$(run -- page --script "$SCRIPT" --output "$OUT" --serve-dir "$APP" --base-url http://localhost:3000)"; rc=$?
 eq "$rc" 2 "page with two app targets exits 2"
+out="$(run -- page --script "$SCRIPT" --output "$OUT" --serve-dir "$APP" --selector '#board' --full-page)"; rc=$?
+eq "$rc" 2 "page with both --selector and --full-page exits 2"
+has "page takes --selector or --full-page, not both" "$out" "it says the two capture areas exclude each other"
+eq "$(calls)" "" "the pair is refused before the engine's browser is provisioned"
 out="$(run -- page --script "$SCRIPT" --output "$OUT" --serve-dir "$APP" --command ls)"; rc=$?
 eq "$rc" 2 "a flag of another kind exits 2"
 has "page takes no '--command'" "$out" "it names the flag the kind does not take"
@@ -238,15 +242,18 @@ has "the SprintShow engine's CLI did not run ('sprintshow help' exited 1): Synta
 hasnt "has no screenshot command" "$out" "a CLI that failed is not reported as one without the command"
 hasnt "engine [screenshot]" "$(calls)" "nothing is captured when the CLI fails"
 
-echo "# page: the engine's screenshot command runs with every option, by absolute path, on the engine checkout"
+echo "# page: the engine's screenshot command runs with the options it is given, by absolute path, on the engine checkout"
 rm -rf "$WORK/shots"
-out="$(run -- page --script demo.md --serve-dir app --output shots/shot.png --port 4321 --selector '#board' --full-page)"; rc=$?
+out="$(run -- page --script demo.md --serve-dir app --output shots/shot.png --port 4321 --selector '#board')"; rc=$?
 eq "$rc" 0 "a capture exits 0"
-has "node [$CLI] [screenshot] [$SCRIPT] [--serve-dir] [$APP] [--port] [4321] [--selector] [#board] [--full-page] [-o] [$OUT] [--scale] [2]" "$(calls)" "the checkout's CLI captures with the script, every option, absolute paths, and a scale of 2"
+has "node [$CLI] [screenshot] [$SCRIPT] [--serve-dir] [$APP] [--port] [4321] [--selector] [#board] [-o] [$OUT] [--scale] [2]" "$(calls)" "the checkout's CLI captures with the script, its options, absolute paths, and a scale of 2"
 hasnt "[$RENDERER]" "$(calls)" "a page is not drawn by the renderer"
 hasnt "--transparent" "$(calls)" "a page keeps its own background"
 has "captured $OUT (page, 1948x1132 px, " "$out" "the last line names the PNG and its pixel size"
 ok "the PNG is on disk, in the directory --output named" "[ -s '$OUT' ]"
+out="$(run -- page --script "$SCRIPT" --serve-dir "$APP" --full-page --output "$OUT")"; rc=$?
+eq "$rc" 0 "a --full-page capture exits 0"
+has "node [$CLI] [screenshot] [$SCRIPT] [--serve-dir] [$APP] [--full-page] [-o] [$OUT] [--scale] [2]" "$(calls)" "--full-page reaches the engine"
 
 echo "# page: --serve with --cwd, and --base-url, are forwarded"
 out="$(run -- page --script "$SCRIPT" --serve 'npm run dev' --port 5175 --cwd "$APP" --output "$OUT")"; rc=$?
