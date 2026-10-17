@@ -76,7 +76,6 @@ git -C "$TMP/rigs/alpha" init -q
 git -C "$TMP/rigs/alpha" config user.email t@example.com
 git -C "$TMP/rigs/alpha" config user.name Tester
 printf 'dolt.mode: local\n' > "$TMP/rigs/alpha/.beads/config.yaml"
-printf 'alpha\n' > "$TMP/rigs/alpha/README.md"
 git -C "$TMP/rigs/alpha" add -A
 git -C "$TMP/rigs/alpha" -c commit.gpgsign=false commit -qm init
 
@@ -211,15 +210,15 @@ OUT=$(STATUS_JSON="$TMP/status-empty.json" run_check); RC=$?
 eq "$RC" "0" "a city that runs no agent at all reads no guard and stays silent"
 
 # --- 8. LATCHED defer guard — the other live failure -------------------------
-printf 'changed\n' >> "$TMP/rigs/alpha/README.md"
-age_file "$TMP/rigs/alpha/README.md" $((23 * 86400))
+printf 'dolt.mode: server\n' > "$TMP/rigs/alpha/.beads/config.yaml"
+age_file "$TMP/rigs/alpha/.beads/config.yaml" $((23 * 86400))
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a tracked file dirty past the bound is an ERROR, not a deferral"
-has "$OUT" "README.md" "the finding names the file that latched the guard"
+has "$OUT" ".beads/config.yaml" "the finding names the file that latched the guard"
 has "$OUT" "23d" "the finding states how long the guard has been true"
 has "$OUT" "rig alpha" "the finding names the rig whose refinery is stuck"
 has "$OUT" "24h bound" "the finding states the bound it crossed"
-eq "$(hook_verdict "$TMP/rigs/alpha")" "defers" "the shipped hook defers on the same tree"
+eq "$(hook_verdict "$TMP/rigs/alpha")" "defers" "the shipped hook defers on the same dirty .beads/config.yaml"
 
 # --- 9. the bound is configurable --------------------------------------------
 OUT=$(GC_DOCTOR_RECYCLE_LATCH_HOURS=$((30 * 24)) run_check); RC=$?
@@ -227,12 +226,12 @@ eq "$RC" "0" "a bound wider than the age reads the same tree as a git op in flig
 has "$OUT" "inside the 720h bound" "the override is the bound the note reports"
 
 # --- 10. a TRANSIENT dirty tree is not a latch -------------------------------
-touch "$TMP/rigs/alpha/README.md"
+touch "$TMP/rigs/alpha/.beads/config.yaml"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a freshly dirtied tree is a git op in flight, not a latch"
 has "$OUT" "defer guard true" "the transient deferral is noted"
 hasnt "$OUT" "cannot fire" "and it is not a finding"
-git -C "$TMP/rigs/alpha" checkout -q -- README.md
+git -C "$TMP/rigs/alpha" checkout -q -- .beads/config.yaml
 
 # --- 11. an in-flight git-op marker is recognised ----------------------------
 : > "$TMP/rigs/alpha/.git/MERGE_HEAD"
@@ -256,42 +255,18 @@ hasnt "$OUT" "scratch.tmp" "and it is named in no finding"
 eq "$(hook_verdict "$TMP/rigs/alpha")" "recycles" "the shipped hook does not defer on it either"
 rm -f "$TMP/rigs/alpha/scratch.tmp"
 
-# --- 13. a change under .beads/ is no git op ---------------------------------
-# gc rewrites the bead store's tracked config at runtime, so the hook leaves the
-# tree's top-level .beads/ out of its guard, and this arm leaves it out too.
-printf 'dolt.mode: server\n' >> "$TMP/rigs/alpha/.beads/config.yaml"
-age_file "$TMP/rigs/alpha/.beads/config.yaml" $((23 * 86400))
-OUT=$(run_check); RC=$?
-eq "$RC" "0" "a dirty .beads/config.yaml alone past the bound latches nothing"
-hasnt "$OUT" "config.yaml" "and it is named in no finding or note"
-hasnt "$OUT" "defer guard true" "and no deferral is noted for it"
-eq "$(hook_verdict "$TMP/rigs/alpha")" "recycles" "the shipped hook does not defer on the same tree"
-
-# --- 14. a change under .beads/ hides no dirty file beside it ----------------
-printf 'changed\n' >> "$TMP/rigs/alpha/README.md"
-age_file "$TMP/rigs/alpha/.beads/config.yaml" $((40 * 86400))
-age_file "$TMP/rigs/alpha/README.md" $((23 * 86400))
-OUT=$(run_check); RC=$?
-eq "$RC" "2" "a tracked file dirty outside .beads/ still latches the check"
-has "$OUT" "latched by \"README.md\"" "the finding names the file outside .beads/"
-has "$OUT" "23d" "and ages the guard by that file"
-hasnt "$OUT" "config.yaml" "the older change under .beads/ is not what latched it"
-hasnt "$OUT" "40d" "and does not age the guard"
-eq "$(hook_verdict "$TMP/rigs/alpha")" "defers" "the shipped hook defers on the same tree"
-git -C "$TMP/rigs/alpha" checkout -q -- .beads/config.yaml README.md
-
-# --- 15. a rig with no refinery is not read ----------------------------------
+# --- 13. a rig with no refinery is not read ----------------------------------
 cat > "$TMP/status-nowork.json" <<'EOF'
 {"agents":[{"name":"gc-toolkit.witness","qualified_name":"alpha/gc-toolkit.witness","scope":"rig","running":true,"suspended":false}]}
 EOF
-printf 'changed\n' >> "$TMP/rigs/alpha/README.md"
-age_file "$TMP/rigs/alpha/README.md" $((23 * 86400))
+printf 'dolt.mode: server\n' > "$TMP/rigs/alpha/.beads/config.yaml"
+age_file "$TMP/rigs/alpha/.beads/config.yaml" $((23 * 86400))
 OUT=$(STATUS_JSON="$TMP/status-nowork.json" run_check); RC=$?
 eq "$RC" "1" "the guard is refinery-only — a witness-only rig is not read"
-hasnt "$OUT" "README.md" "no dirty-tree finding is raised for it"
-git -C "$TMP/rigs/alpha" checkout -q -- README.md
+hasnt "$OUT" "config.yaml" "no dirty-tree finding is raised for it"
+git -C "$TMP/rigs/alpha" checkout -q -- .beads/config.yaml
 
-# --- 16. a pack that ships no hook has nothing to assert ---------------------
+# --- 14. a pack that ships no hook has nothing to assert ---------------------
 mkdir -p "$TMP/emptypack"
 OUT=$(GC_PACK_DIR="$TMP/emptypack" GC_CITY_PATH="$TMP/city" bash "$CHECK" 2>&1); RC=$?
 eq "$RC" "0" "a pack with no cycle-recycle overlay is OK"

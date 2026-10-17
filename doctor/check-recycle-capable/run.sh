@@ -137,11 +137,9 @@ fi
 # The guard is correct per turn and cannot tell a rebase in flight from a
 # tracked file nobody has committed. Age it: the guard has been continuously
 # true at least since the OLDEST currently-dirty path was last written.
-# It reads what the hook's guard reads: the git-op markers, and the dirty
-# tracked paths outside the tree's top-level .beads/. The hook leaves .beads/
-# out because gc rewrites the bead store's config there at runtime, and this
-# arm leaves it out with it. run.test.sh runs the shipped hook on the same
-# fixture trees to prove the two agree.
+# It reads what the hook's guard reads, the git-op markers and every dirty
+# tracked path. run.test.sh runs the shipped hook on the same fixture trees to
+# prove the two agree.
 refinery_rigs=""
 if ! command -v gc >/dev/null 2>&1; then
     notes+=("gc is not on PATH — the refinery defer-guard arm did not run")
@@ -233,7 +231,7 @@ for rig in $(printf '%s' "$refinery_rigs" | tr ' ' '\n' | sort -u); do
         held=$((held + 1))
         ts=$(mtime_of "$root/$path"); [ -n "$ts" ] || continue
         if [ -z "$oldest" ] || [ "$ts" -lt "$oldest" ]; then oldest="$ts"; latched_by="$path"; fi
-    done < <(git -C "$root" status --porcelain=v1 -z --untracked-files=no -- ':/' ':(top,exclude).beads' 2>/dev/null)
+    done < <(git -C "$root" status --porcelain=v1 -z --untracked-files=no 2>/dev/null)
 
     [ "$held" -eq 0 ] && continue   # guard clear — the healthy case is silent
     if [ -z "$oldest" ]; then

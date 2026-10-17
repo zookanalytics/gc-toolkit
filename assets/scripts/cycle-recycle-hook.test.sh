@@ -5,8 +5,8 @@
 # Over its threshold the hook recycles a refinery (gc handoff, then gc session
 # reset) unless a git op is in flight in the refinery's working directory or in
 # the rig's canonical checkout (GC_RIG_ROOT). A git-op marker counts, and so
-# does a dirty tracked file anywhere outside the tree's top-level .beads/, which
-# gc rewrites at runtime. The hook exits 0 with an empty stdout either way, so
+# does a dirty tracked file anywhere in either tree, the bead store's files
+# under .beads/ included. The hook exits 0 with an empty stdout either way, so
 # from outside a guard that defers every turn looks like a hook with nothing to
 # do. This test tells the two apart.
 #
@@ -52,16 +52,14 @@ printf '%s\n' '{"type":"assistant","message":{"usage":{"input_tokens":100,"cache
 RECYCLED_CALLS="handoff context cycle: context reached 251100 tokens
 session reset refinery-1"
 
-# new_repo <dir> — one commit tracking the store's files under .beads/, a
-# README, a file whose name only starts with .beads, and a nested .beads/.
+# new_repo <dir> — one commit tracking a README and the bead store's files
+# under .beads/, as a repo that commits them does.
 new_repo() {
-    mkdir -p "$1/.beads" "$1/sub/.beads"
+    mkdir -p "$1/.beads"
     git -C "$1" init -q
     printf 'readme\n' > "$1/README.md"
-    printf 'rc\n' > "$1/.beadsrc"
     printf 'issue_prefix: tk\n' > "$1/.beads/config.yaml"
     printf '{}\n' > "$1/.beads/metadata.json"
-    printf 'nested\n' > "$1/sub/.beads/config.yaml"
     git -C "$1" add -A
     git -C "$1" -c user.email=t@example.com -c user.name=Tester -c commit.gpgsign=false commit -qm init
 }
@@ -118,61 +116,42 @@ echo "cycle-recycle hook: the refinery git-op defer guard"
 # --- 1. control: a clean refinery over its threshold recycles ---------------
 expect recycled "$WT" "a clean worktree and rig checkout: the refinery recycles"
 
-# --- 2. a change under .beads/ is no git op ----------------------------------
-dirty "$WT/.beads/config.yaml"
-expect recycled "$WT" "a dirty .beads/config.yaml alone in the refinery's worktree does not defer"
-reset_repo "$WT"
-
-dirty "$RIG/.beads/config.yaml"
-expect recycled "$WT" "a dirty .beads/config.yaml alone in the rig checkout does not defer"
-reset_repo "$RIG"
-
-dirty "$WT/.beads/config.yaml"; dirty "$RIG/.beads/config.yaml"
-dirty "$WT/.beads/metadata.json"; git -C "$WT" add .beads/metadata.json
-expect recycled "$WT" "changes under .beads/ in both trees, staged or not, do not defer"
-reset_repo "$WT"; reset_repo "$RIG"
-
-mkdir -p "$WT/sub/deep"
-dirty "$WT/.beads/config.yaml"
-expect recycled "$WT/sub/deep" "run from a subdirectory, a dirty .beads/config.yaml alone still does not defer"
-reset_repo "$WT"
-
-# --- 3. a dirty tracked file anywhere else still defers ----------------------
+# --- 2. a dirty tracked file defers, in either tree ---------------------------
 dirty "$WT/README.md"
-expect deferred "$WT" "a dirty tracked file elsewhere in the refinery's worktree defers"
+expect deferred "$WT" "a dirty tracked file in the refinery's worktree defers"
 reset_repo "$WT"
 
 dirty "$RIG/README.md"
-expect deferred "$WT" "a dirty tracked file elsewhere in the rig checkout defers"
+expect deferred "$WT" "a dirty tracked file in the rig checkout defers"
 reset_repo "$RIG"
 
 dirty "$RIG/README.md"; git -C "$RIG" add README.md
-expect deferred "$WT" "a staged change elsewhere defers"
+expect deferred "$WT" "a staged change defers"
 reset_repo "$RIG"
-
-dirty "$WT/.beads/config.yaml"; dirty "$WT/README.md"
-expect deferred "$WT" "a change under .beads/ does not hide a dirty file beside it"
-reset_repo "$WT"
-
-dirty "$WT/.beadsrc"
-expect deferred "$WT" "a file whose name only starts with .beads still counts"
-reset_repo "$WT"
-
-dirty "$WT/sub/.beads/config.yaml"
-expect deferred "$WT" "only the tree's top-level .beads/ is left out, not a nested one"
-reset_repo "$WT"
 
 mkdir -p "$WT/sub/deep"
 dirty "$WT/README.md"
 expect deferred "$WT/sub/deep" "run from a subdirectory, a dirty file at the top still defers"
 reset_repo "$WT"
 
-# --- 4. a git op in progress defers whatever paths it touches ----------------
+# --- 3. the bead store's tracked files count like any other -------------------
+dirty "$WT/.beads/config.yaml"
+expect deferred "$WT" "a dirty .beads/config.yaml in the refinery's worktree defers"
+reset_repo "$WT"
+
+dirty "$RIG/.beads/config.yaml"
+expect deferred "$WT" "a dirty .beads/config.yaml in the rig checkout defers"
+reset_repo "$RIG"
+
+dirty "$WT/.beads/metadata.json"; git -C "$WT" add .beads/metadata.json
+expect deferred "$WT" "a staged change under .beads/ defers"
+reset_repo "$WT"
+
+# --- 4. a git op in progress defers on a clean tree ---------------------------
 for marker in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
     gd=$(git -C "$WT" rev-parse --absolute-git-dir)
     case "$marker" in rebase-*) mkdir -p "$gd/$marker" ;; *) git -C "$WT" rev-parse HEAD > "$gd/$marker" ;; esac
-    dirty "$WT/.beads/config.yaml"
-    expect deferred "$WT" "$marker in progress defers, even when the only dirty file is under .beads/"
+    expect deferred "$WT" "$marker in progress defers, with no file dirty"
     reset_repo "$WT"
 done
 
@@ -181,7 +160,7 @@ git -C "$RIG" rev-parse HEAD > "$gd/MERGE_HEAD"
 expect deferred "$WT" "a merge in progress in the rig checkout defers"
 reset_repo "$RIG"
 
-# --- 5. what the guard has always left out -----------------------------------
+# --- 5. what the guard leaves out --------------------------------------------
 printf 'scratch\n' > "$WT/scratch.tmp"
 expect recycled "$WT" "an untracked file is scratch, not a git op"
 reset_repo "$WT"
