@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 # demo-screenshot.sh — the demo check's screenshot modality: render one state of
-# the surface a change affects in a headless browser and save it as a PNG, which
-# demo-deliver.sh then attaches to the PR inline and uncommitted.
+# the surface a change affects and save it as a PNG, which demo-deliver.sh then
+# attaches to the PR inline and uncommitted.
+#
+# The SprintShow engine's screenshot command takes every PNG. It drives a demo
+# script's steps in the engine's headless browser, checks each step's proof
+# through the step runner the engine's videos use, and saves the state the last
+# step leaves. demo-engine-lib.sh finds the engine, provisions its browser and
+# runs its CLI, as it does for the video capture. A screenshot needs neither
+# ffmpeg nor a narration key.
 #
 # A surface is one of three kinds, and each has a subcommand:
 #   page      an app page. A demo:capture script drives the app to the state,
@@ -17,17 +24,15 @@
 #             markdown API, turns the file into HTML in the context of the rig's
 #             origin, so #123 and @name link as they do on the PR, and the HTML is
 #             drawn in a comment box with GitHub's comment styles.
+# A terminal or markdown surface has no app to drive. demo-screenshot.mjs,
+# beside this script, draws it as a page of its own, and the engine serves that
+# page from a directory and captures the surface's element, with a one-step
+# script whose proof is that the surface is drawn.
 #
-# The browser is the SprintShow engine's: its Playwright and the
-# chromium-headless-shell build that Playwright installs. demo-engine-lib.sh
-# finds the engine and installs that build, as it does for the video capture.
-# demo-screenshot.mjs, beside this script, drives it. A screenshot needs neither
-# ffmpeg nor a narration key.
-#
-# It FAILS CLOSED. A missing engine, a browser that cannot be installed, a
-# renderer that errors, or a capture that leaves no PNG behind all exit 1,
-# because a capture that quietly produces nothing is the undelivered visual this
-# modality exists to end.
+# It FAILS CLOSED. A missing engine, an engine with no screenshot command, a
+# browser that cannot be installed, a renderer that errors, or a capture that
+# leaves no PNG behind all exit 1, because a capture that quietly produces
+# nothing is the undelivered visual this modality exists to end.
 #
 # Usage:
 #   demo-screenshot.sh page --script <demo.md> --output <file.png>
@@ -74,7 +79,7 @@ set -u
 
 PROG=demo-screenshot
 HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-DRIVER="$HERE/demo-screenshot.mjs"
+RENDERER="$HERE/demo-screenshot.mjs"
 # shellcheck source=demo-engine-lib.sh
 . "$HERE/demo-engine-lib.sh" || { echo "$PROG: cannot source demo-engine-lib.sh beside this script" >&2; exit 1; }
 
@@ -164,7 +169,7 @@ case "$KIND" in
       *) usage_err "--repo must be owner/name (got '$REPO')" ;;
     esac ;;
 esac
-[ -f "$DRIVER" ] || fail "demo-screenshot.mjs not found beside this script"
+[ "$KIND" = page ] || [ -f "$RENDERER" ] || fail "demo-screenshot.mjs not found beside this script"
 
 # The engine resolves relative paths against its own working directory, so every
 # path it is handed is absolute.
@@ -180,32 +185,37 @@ TMPD=$(mktemp -d "${TMPDIR:-/tmp}/demo-screenshot.XXXXXX") || fail "cannot make 
 trap 'rm -rf "$TMPD"' EXIT
 
 # --- the engine ------------------------------------------------------------
-# demo-engine-lib.sh finds the engine and provisions its browser. What only a
-# screenshot needs stays here: the driver strips the TypeScript of a checkout
-# natively, so Node must be at least the engine's floor, 22.18, before anything
-# is installed; and the driver runs with the checkout as its --engine, or under
-# npx beside the published package.
-command -v node >/dev/null 2>&1 || fail "node not found; the SprintShow engine needs Node >= 22.18. doctor/check-demo-toolchain names this gap."
-NODEVER=$(node --version 2>/dev/null | sed 's/^v//')
-NODE_MAJOR=${NODEVER%%.*}; NODE_REST=${NODEVER#*.}; NODE_MINOR=${NODE_REST%%.*}
-case "$NODE_MAJOR" in ''|*[!0-9]*) NODE_MAJOR=0 ;; esac
-case "$NODE_MINOR" in ''|*[!0-9]*) NODE_MINOR=0 ;; esac
-if [ "$NODE_MAJOR" -lt 22 ] || { [ "$NODE_MAJOR" -eq 22 ] && [ "$NODE_MINOR" -lt 18 ]; }; then
-  fail "Node ${NODEVER:-unknown} is below the engine's floor of 22.18"
-fi
+# demo-engine-lib.sh holds Node to the engine's floor, finds the engine,
+# provisions its browser and runs its CLI. A sprintshow checkout that predates
+# the screenshot command, or a published package without it, can capture
+# nothing here, so the engine's own help is read for the command before a
+# command runs or a renderer is called.
 demo_engine_resolve || exit 1
-if [ -n "$DEMO_ENGINE_DIR" ]; then
-  driver() { node "$DRIVER" "$@" --engine "$DEMO_ENGINE_DIR"; }
-else
-  driver() { npx --yes --package="$DEMO_ENGINE_PACKAGE" -- node "$DRIVER" "$@"; }
-fi
+ENGINE_HELP=$(demo_engine_cli help 2>"$TMPD/help.err")
+HELP_RC=$?
+[ "$HELP_RC" -eq 0 ] || fail "the SprintShow engine's CLI did not run ('sprintshow help' exited $HELP_RC): $(head -c 400 "$TMPD/help.err" | tr '\n' ' ')"
+case "$ENGINE_HELP" in
+  *"sprintshow screenshot "*) ;;
+  *) fail "the SprintShow engine (${DEMO_ENGINE_DIR:-the published $DEMO_ENGINE_PACKAGE}) has no screenshot command, which every kind captures through; update it to a SprintShow whose 'sprintshow help' lists 'sprintshow screenshot'" ;;
+esac
 
-# --- what the driver renders ---------------------------------------------
-set -- "$KIND" --output "$OUTPUT"
+# draw <renderer options...>: the renderer draws the surface as the page
+# $TMPD/surface/index.html, whose element #surface the capture crops to, and
+# $TMPD/surface.md is the one-step script the engine captures it with.
+draw() {
+  mkdir -p "$TMPD/surface" || fail "cannot make a directory for the $KIND page"
+  node "$RENDERER" "$KIND" "$@" --output "$TMPD/surface/index.html" \
+    || fail "the renderer could not draw the $KIND surface"
+  printf '%s\n' "# Demo: $KIND" '**Start:** `/`' '' '## Steps' \
+      '1. **The surface is drawn**' '   _Prove:_ the surface is on the page `visible #surface`' \
+      >"$TMPD/surface.md" || fail "cannot write the script that captures the $KIND page"
+}
+
+# --- what the engine captures --------------------------------------------
 CMD_RC=""
 case "$KIND" in
   page)
-    set -- "$@" --script "$SCRIPT"
+    set -- "$SCRIPT"
     if [ -n "$SERVE_DIR" ]; then set -- "$@" --serve-dir "$SERVE_DIR"
     elif [ -n "$SERVE_CMD" ]; then set -- "$@" --serve "$SERVE_CMD"
     else set -- "$@" --base-url "$BASE_URL"; fi
@@ -219,13 +229,14 @@ case "$KIND" in
       # instead of waiting on a terminal that is not there.
       ( cd "${CWD:-.}" && bash -c "$COMMAND" ) >"$TMPD/output.txt" 2>&1 </dev/null
       CMD_RC=$?
-      set -- "$@" --text "$TMPD/output.txt" --prompt "$COMMAND"
+      set -- --text "$TMPD/output.txt" --prompt "$COMMAND"
     else
-      set -- "$@" --text "$TEXT"
+      set -- --text "$TEXT"
     fi
     [ -z "$TITLE" ] || set -- "$@" --title "$TITLE"
     [ -z "$COLUMNS" ] || set -- "$@" --columns "$COLUMNS"
-    [ -z "$MAX_LINES" ] || set -- "$@" --max-lines "$MAX_LINES" ;;
+    [ -z "$MAX_LINES" ] || set -- "$@" --max-lines "$MAX_LINES"
+    draw "$@" ;;
   markdown)
     # The context is the repository the comment's references resolve in: --repo,
     # else this rig's origin, else the origin of the checkout this runs from.
@@ -252,18 +263,24 @@ case "$KIND" in
       fail "GitHub's markdown renderer failed: $(head -c 400 "$TMPD/gh.err" | tr '\n' ' ')"
     fi
     [ -s "$TMPD/comment.html" ] || fail "GitHub's markdown renderer returned nothing for '$FILE'"
-    set -- "$@" --html "$TMPD/comment.html"
+    set -- --html "$TMPD/comment.html"
     [ -z "$TITLE" ] || set -- "$@" --title "$TITLE"
-    [ "$EXPAND" -eq 0 ] || set -- "$@" --expand ;;
+    [ "$EXPAND" -eq 0 ] || set -- "$@" --expand
+    draw "$@" ;;
 esac
+# A drawn surface is captured by its element, with no page background around
+# its rounded corners.
+[ "$KIND" = page ] || set -- "$TMPD/surface.md" --serve-dir "$TMPD/surface" --selector '#surface' --transparent
 
 # --- capture --------------------------------------------------------------
-# A PNG left by an earlier run must not pass for this one.
+# A GitHub comment shows an image at most as wide as its column, so a capture is
+# taken at two device pixels per CSS pixel, and its text stays sharp there. A
+# PNG left by an earlier run must not pass for this one.
 rm -f "$OUTPUT"
 echo "$PROG: capturing $KIND -> $OUTPUT" >&2
-driver "$@" | tee "$TMPD/report"
+demo_engine_cli screenshot "$@" -o "$OUTPUT" --scale 2 | tee "$TMPD/report"
 RC=${PIPESTATUS[0]}
-case "$RC" in 0|3) ;; *) fail "capture failed (the driver exited $RC)" ;; esac
+case "$RC" in 0|3) ;; *) fail "capture failed (sprintshow screenshot exited $RC)" ;; esac
 
 # --- the produced file must be a PNG -------------------------------------
 [ -f "$OUTPUT" ] || fail "the capture reported success but '$OUTPUT' does not exist"
@@ -276,7 +293,7 @@ SIZE="$(dim 16)x$(dim 20) px, $(wc -c <"$OUTPUT" | tr -d ' ') bytes"
 
 if [ "$RC" -eq 3 ]; then
   FAILED=$(sed -n -E 's/.* ([0-9]+) step\(s\) failed their proof.*/\1/p' "$TMPD/report" | tail -n 1)
-  echo "$PROG: captured $OUTPUT (page, $SIZE), but ${FAILED:-at least one} step(s) failed their proof"
+  echo "$PROG: captured $OUTPUT ($KIND, $SIZE), but ${FAILED:-at least one} step(s) failed their proof"
   exit 3
 fi
 if [ -n "$CMD_RC" ]; then

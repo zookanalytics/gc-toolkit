@@ -2,14 +2,17 @@
 # demo-engine-lib.test.sh — the demo captures' one engine policy, checked
 # through each capture that sources it.
 #
-# demo-engine-lib.sh finds the SprintShow engine and provisions the browser it
-# launches for rig-demo-capture.sh, the video, and demo-screenshot.sh, the
-# screenshot. Each behavior below runs through both scripts, so a change to the
-# policy is proven on every capture that runs it:
+# demo-engine-lib.sh holds Node to the SprintShow engine's floor, finds the
+# engine, provisions the browser it launches, and runs its CLI, for
+# rig-demo-capture.sh, the video, and demo-screenshot.sh, the screenshot. Each
+# behavior below runs through both scripts, so a change to the policy is proven
+# on every capture that runs it:
+#   (FLOOR)     a Node below the engine's floor of 22.18, or no node at all,
+#               stops the capture before anything is installed
 #   (LOCAL)     a rig named sprintshow whose package.json names the engine is
 #               the engine: its dependencies are installed when it has none, its
 #               own provision:browser runs before the capture starts, and the
-#               capture runs on that checkout
+#               capture runs the checkout's CLI under node
 #   (REJECT)    a rig named sprintshow that is not the engine is passed over,
 #               and nothing runs in it
 #   (PUBLISHED) with no local engine, or with a rig list that cannot be read,
@@ -21,9 +24,10 @@
 #   (STDERR)    the installers' output goes to stderr, so a capture's stdout
 #               carries only its own report
 #   (READERS)   each capture sources the library, calls demo_engine_resolve,
-#               and runs none of its steps itself
-#   (NO-COPY)   no other script in assets/scripts finds the engine or
-#               provisions its browser
+#               runs the engine through demo_engine_cli, and runs none of the
+#               library's steps itself
+#   (NO-COPY)   no other script in assets/scripts finds the engine, provisions
+#               its browser, checks Node's version or names the CLI's entry
 # What each capture adds to the policy is tested beside it, in
 # rig-demo-capture.test.sh and demo-screenshot.test.sh.
 #
@@ -38,8 +42,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB="$HERE/demo-engine-lib.sh"
 VIDEO="$HERE/rig-demo-capture.sh"
 SHOT="$HERE/demo-screenshot.sh"
-DRIVER="$HERE/demo-screenshot.mjs"
-for f in "$LIB" "$VIDEO" "$SHOT" "$DRIVER"; do
+RENDERER="$HERE/demo-screenshot.mjs"
+for f in "$LIB" "$VIDEO" "$SHOT" "$RENDERER"; do
   [ -f "$f" ] || { echo "not found: $f" >&2; exit 2; }
 done
 
@@ -59,13 +63,13 @@ for c in bash sed tr head tail dirname mkdir mktemp rm tee wc cat od awk; do
   ln -s "$p" "$FARM/$c"
 done
 
-# Stubs. node answers --version and otherwise stands in for the screenshot's
-# driver, leaving a PNG at --output. npm and npx stand in for the installers:
-# each prints what an installer prints, to the stdout it was given, and fails
-# on NPM_INSTALL_RC or INSTALL_RC. npx hands the engine's CLI to $ENGINE_STUB
-# and a driver run to node. gc lists the sprintshow rig at $SS_RIG beside
-# another rig, or fails on GC_RC. ffmpeg is the host's, so the video fetches
-# none.
+# Stubs. node answers --version, hands a checkout's CLI to $ENGINE_STUB, and
+# otherwise stands in for the screenshot's renderer, leaving a page at
+# --output. npm and npx stand in for the installers: each prints what an
+# installer prints, to the stdout it was given, and fails on NPM_INSTALL_RC or
+# INSTALL_RC. npx hands the published engine's CLI to $ENGINE_STUB. gc lists
+# the sprintshow rig at $SS_RIG beside another rig, or fails on GC_RC. ffmpeg is
+# the host's, so the video fetches none.
 JQ="$(command -v jq)" || { echo "test setup: required tool 'jq' not found" >&2; exit 2; }
 BIN="$TMPD/bin"; mkdir -p "$BIN"
 ln -s "$JQ" "$BIN/jq"
@@ -73,10 +77,10 @@ cat >"$BIN/node" <<'NODE'
 #!/usr/bin/env bash
 if [ "${1:-}" = "--version" ]; then echo "${NODE_VERSION:-v24.0.0}"; exit 0; fi
 printf 'node' >>"${CALLLOG:?}"; printf ' [%s]' "$@" >>"$CALLLOG"; printf '\n' >>"$CALLLOG"
+case "${1:-}" in */src/cli.ts) shift; exec "${ENGINE_STUB:?}" "$@" ;; esac
 o=""; prev=""
 for a in "$@"; do [ "$prev" = "--output" ] && o="$a"; prev="$a"; done
-# A PNG signature and an IHDR chunk naming a 1x1 image.
-printf '\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00' >"$o"
+printf '<!doctype html><div id="surface">drawn</div>\n' >"$o"
 exit 0
 NODE
 cat >"$BIN/npm" <<'NPM'
@@ -95,16 +99,10 @@ NPM
 cat >"$BIN/npx" <<'NPX'
 #!/usr/bin/env bash
 printf 'npx %s\n' "$*" >>"${CALLLOG:?}"
-if [ "${1:-}" = "tsx" ]; then shift 2; exec "${ENGINE_STUB:?}" "$@"; fi
 if [ "${1:-} ${2:-}" = "--yes @zookanalytics/sprintshow" ]; then shift 2; exec "${ENGINE_STUB:?}" "$@"; fi
-if [ "${1:-} ${2:-} ${3:-}" = "--yes --package=@zookanalytics/sprintshow --" ]; then
-  shift 3
-  case "${1:-}" in
-    playwright)
-      if [ "${INSTALL_RC:-0}" != 0 ]; then echo 'Failed to install browsers'; exit "$INSTALL_RC"; fi
-      echo 'chromium-headless-shell is already installed'; exit 0 ;;
-    node) shift; exec "${STUBS:?}/node" "$@" ;;
-  esac
+if [ "${1:-} ${2:-} ${3:-} ${4:-}" = "--yes --package=@zookanalytics/sprintshow -- playwright" ]; then
+  if [ "${INSTALL_RC:-0}" != 0 ]; then echo 'Failed to install browsers'; exit "$INSTALL_RC"; fi
+  echo 'chromium-headless-shell is already installed'; exit 0
 fi
 echo "npx stub: unexpected call: $*" >&2; exit 97
 NPX
@@ -118,22 +116,30 @@ exit 0
 GC
 printf '#!/usr/bin/env bash\nexit 0\n' >"$BIN/ffmpeg"
 chmod +x "$BIN"/node "$BIN"/npm "$BIN"/npx "$BIN"/gc "$BIN"/ffmpeg
-# The same stubs without npx.
+# The same stubs without npx, and without node.
 NONPX="$TMPD/bin-nonpx"; mkdir -p "$NONPX"
 for s in jq node npm gc ffmpeg; do ln -s "$BIN/$s" "$NONPX/$s"; done
+NONODE="$TMPD/bin-nonode"; mkdir -p "$NONODE"
+for s in jq npx npm gc ffmpeg; do ln -s "$BIN/$s" "$NONODE/$s"; done
 
-# The engine's CLI, which the video runs: lint passes, and run writes the clip
-# and the engine's closing report.
+# The engine's CLI: help lists its commands, lint passes, run writes the clip
+# and the engine's closing report, and screenshot writes the PNG.
 ENGINE_STUB="$TMPD/engine"
 cat >"$ENGINE_STUB" <<'ENGINE'
 #!/usr/bin/env bash
 printf 'engine %s\n' "$*" >>"${CALLLOG:?}"
-if [ "${1:-}" = "run" ]; then
-  o=""; prev=""
-  for a in "$@"; do [ "$prev" = "-o" ] && o="$a"; prev="$a"; done
-  printf 'mp4-bytes\n' >"$o"
-  printf '\n✅ silent demo → %s\n' "$o"
-fi
+o=""; prev=""
+for a in "$@"; do [ "$prev" = "-o" ] && o="$a"; prev="$a"; done
+case "${1:-}" in
+  help) printf 'Usage:\n  sprintshow run <demo.md> [options]\n  sprintshow screenshot <demo.md> -o <file.png> [options]\n' ;;
+  run)
+    printf 'mp4-bytes\n' >"$o"
+    printf '\n✅ silent demo → %s\n' "$o" ;;
+  screenshot)
+    # A PNG signature and an IHDR chunk naming a 1x1 image.
+    printf '\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00' >"$o"
+    printf '\n✅ screenshot → %s\n' "$o" ;;
+esac
 exit 0
 ENGINE
 chmod +x "$ENGINE_STUB"
@@ -156,9 +162,9 @@ CALLLOG="$TMPD/calls.log"; OUTF="$TMPD/stdout"; ERRF="$TMPD/stderr"
 # starts its capture, and the call that shows the capture runs on a local
 # checkout or on the published package.
 output_of() { case "$1" in video) echo "$WORK/clip.mp4" ;; screenshot) echo "$WORK/shot.png" ;; esac; }
-start_of() { case "$1" in video) echo "lint $SCRIPT" ;; screenshot) echo "$DRIVER" ;; esac; }
-local_call() { case "$1" in video) echo "npx tsx $ENGINE/src/cli.ts run $SCRIPT" ;; screenshot) echo "[--engine] [$ENGINE]" ;; esac; }
-published_call() { case "$1" in video) echo "npx --yes @zookanalytics/sprintshow run $SCRIPT" ;; screenshot) echo "npx --yes --package=@zookanalytics/sprintshow -- node $DRIVER terminal" ;; esac; }
+start_of() { case "$1" in video) echo "engine lint $SCRIPT" ;; screenshot) echo "engine screenshot " ;; esac; }
+local_call() { case "$1" in video) echo "node [$ENGINE/src/cli.ts] [run] [$SCRIPT]" ;; screenshot) echo "node [$ENGINE/src/cli.ts] [screenshot]" ;; esac; }
+published_call() { case "$1" in video) echo "npx --yes @zookanalytics/sprintshow run $SCRIPT" ;; screenshot) echo "npx --yes @zookanalytics/sprintshow screenshot " ;; esac; }
 
 # capture <video|screenshot> [VAR=VAL ...]: run that capture against the stubs,
 # from $WORK, with stdout in $OUTF, stderr in $ERRF and the exit status in $RC.
@@ -172,7 +178,7 @@ capture() {
   esac
   : >"$CALLLOG"; rm -f "$(output_of "$cap")"
   ( cd "$WORK" && env -i PATH="${STUB_PATH:-$BIN}:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
-      ENGINE_STUB="$ENGINE_STUB" STUBS="$BIN" "$@" "${argv[@]}" >"$OUTF" 2>"$ERRF" )
+      ENGINE_STUB="$ENGINE_STUB" "$@" "${argv[@]}" >"$OUTF" 2>"$ERRF" )
   RC=$?
 }
 calls() { cat "$CALLLOG"; }
@@ -185,6 +191,20 @@ not_captured() {
 }
 
 for cap in video screenshot; do
+  echo "# ($cap) FLOOR: Node below the engine's floor stops the capture before anything is installed"
+  capture "$cap" SS_RIG="$ENGINE" NODE_VERSION=v22.17.1
+  eq "$RC" 1 "($cap) Node 22.17 exits 1"
+  has "Node 22.17.1 is below the engine's floor of 22.18" "$(err)" "($cap) it names the floor"
+  eq "$(calls)" "" "($cap) nothing is installed, and nothing runs, for a Node below the floor"
+  not_captured "$cap"
+  capture "$cap" SS_RIG="$ENGINE" NODE_VERSION=v22.18.0
+  eq "$RC" 0 "($cap) Node 22.18 captures"
+  STUB_PATH="$NONODE" capture "$cap" SS_RIG="$ENGINE"
+  eq "$RC" 1 "($cap) no node exits 1"
+  has "node not found; the SprintShow engine needs Node >= 22.18" "$(err)" "($cap) it says node is missing"
+  eq "$(calls)" "" "($cap) nothing is installed, and nothing runs, without node"
+  not_captured "$cap"
+
   echo "# ($cap) LOCAL: the engine checkout, its browser provisioned before the capture starts"
   capture "$cap" SS_RIG="$ENGINE"
   eq "$RC" 0 "($cap) a capture on the local engine exits 0"
@@ -194,7 +214,8 @@ for cap in video screenshot; do
   ok "($cap) the browser is provisioned before the capture starts (provision line $P, capture line $S)" "[ '$P' -gt 0 ] && [ '$S' -gt '$P' ]"
   hasnt "npm install" "$(calls)" "($cap) a checkout with its dependencies does not reinstall them"
   hasnt "playwright install" "$(calls)" "($cap) the published package's installer does not run"
-  has "$(local_call "$cap")" "$(calls)" "($cap) the capture runs on the checkout"
+  hasnt "npx " "$(calls)" "($cap) a checkout's CLI runs without npx"
+  has "$(local_call "$cap")" "$(calls)" "($cap) the capture runs the checkout's CLI under node"
   ok "($cap) the captured file is on disk" "[ -s '$(output_of "$cap")' ]"
 
   echo "# ($cap) LOCAL: a checkout without its dependencies has them installed first; STDERR: the installers write nothing to stdout"
@@ -232,6 +253,7 @@ for cap in video screenshot; do
   eq "$RC" 0 "($cap) the capture still runs"
   has "engine = published @zookanalytics/sprintshow" "$(err)" "($cap) it falls back to the published package"
   hasnt "(in $OTHER)" "$(calls)" "($cap) nothing runs in the other rig"
+  hasnt "$OTHER/src/cli.ts" "$(calls)" "($cap) the other rig's CLI does not run"
   has "$(published_call "$cap")" "$(calls)" "($cap) the capture runs on the published package"
 
   echo "# ($cap) PUBLISHED: no local engine"
@@ -267,7 +289,7 @@ for cap in video screenshot; do
   not_captured "$cap"
 done
 
-echo "# READERS: each capture sources the library and runs none of its steps itself"
+echo "# READERS: each capture sources the library, runs the engine through it, and runs none of its steps itself"
 # Comment lines are left out, so a capture that names a step in prose but no
 # longer runs it passes, and one that names the library but no longer sources
 # it fails.
@@ -279,29 +301,32 @@ for f in "$VIDEO" "$SHOT"; do
   else
     printf 'FAIL - %s\n' "($name) it sources demo-engine-lib.sh"; FAIL=1
   fi
-  if grep -qE '(^|[^[:alnum:]_])demo_engine_resolve([^[:alnum:]_]|$)' <<<"$code"; then
-    printf 'ok   - %s\n' "($name) it calls demo_engine_resolve"
-  else
-    printf 'FAIL - %s\n' "($name) it calls demo_engine_resolve"; FAIL=1
-  fi
-  for step in 'rig list' 'package.json' 'npm install' 'provision:browser' 'playwright install'; do
+  for fn in demo_engine_resolve demo_engine_cli; do
+    if grep -qE "(^|[^[:alnum:]_])$fn([^[:alnum:]_]|\$)" <<<"$code"; then
+      printf 'ok   - %s\n' "($name) it calls $fn"
+    else
+      printf 'FAIL - %s\n' "($name) it calls $fn"; FAIL=1
+    fi
+  done
+  for step in 'rig list' 'package.json' 'npm install' 'provision:browser' 'playwright install' 'node --version' 'src/cli.ts' 'npx --yes'; do
     hasnt "$step" "$code" "($name) it runs no '$step' of its own"
   done
 done
 
-echo "# NO-COPY: no other script finds the engine or provisions its browser"
+echo "# NO-COPY: no other script finds the engine, provisions its browser, checks Node's version or names the CLI's entry"
 # One grep finds the files that name a step anywhere; only those are read again
 # without their comment lines, so a script that names a step in prose passes.
-# The steps are the browser install, by either installer, and the rig lookup's
-# select, however a copy spaces them.
-STEPS='provision:browser|playwright[[:space:]]+install|\.name[[:space:]]*==[[:space:]]*"sprintshow"'
+# The steps are the browser install, by either installer, the rig lookup's
+# select, however a copy spaces them, the Node version read, and the path of
+# the engine's CLI in a checkout.
+STEPS='provision:browser|playwright[[:space:]]+install|\.name[[:space:]]*==[[:space:]]*"sprintshow"|node[[:space:]]+--version|src/cli\.ts'
 COPIES=""
 while IFS= read -r f; do
   case "$f" in ""|"$LIB"|*.test.sh) continue ;; esac
   code="$(grep -vE '^[[:space:]]*(#|//)' "$f")"
   grep -qE "$STEPS" <<<"$code" && COPIES="$COPIES ${f##*/}"
 done <<<"$(grep -lE "$STEPS" "$HERE"/*.sh "$HERE"/*.mjs 2>/dev/null)"
-eq "${COPIES# }" "" "(NO-COPY) no script in assets/scripts outside demo-engine-lib.sh finds the engine or provisions its browser"
+eq "${COPIES# }" "" "(NO-COPY) no script in assets/scripts outside demo-engine-lib.sh finds the engine, provisions its browser, checks Node's version or names the CLI's entry"
 
 echo
 if [ "$FAIL" -eq 0 ]; then echo "PASS: all demo-engine-lib assertions passed"; else echo "FAIL: demo-engine-lib had failures"; fi

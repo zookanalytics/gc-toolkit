@@ -1,20 +1,13 @@
-// demo-screenshot.mjs — the browser half of demo-screenshot.sh: render one state
-// of a surface in the SprintShow engine's headless Chromium and save it as a PNG.
+// demo-screenshot.mjs — the renderer behind demo-screenshot.sh's terminal and
+// markdown kinds: draw a surface that has no app of its own as one HTML page,
+// which the SprintShow engine's screenshot command then serves and captures.
 //
-// demo-screenshot.sh resolves the engine directory and hands it over with
-// --engine; under npx the published package's bin directory leads PATH, and the
-// engine is found there instead. Playwright is loaded from the engine, so the
-// capture launches the chromium-headless-shell build the engine's Playwright
-// installed. The engine library supplies the browser's sandbox arguments and,
-// for an app page, the demo:capture grammar, the server seam, the action runner
-// and the proof checks, so a page screenshot takes the script and the app
-// target a video takes.
+// The page carries no script. Its surface is the element with id="surface",
+// which the capture crops to, and the page paints no background around it, so
+// a capture that leaves out the default white background keeps the surface's
+// rounded corners transparent.
 //
-// Kinds, one per surface a change can show:
-//   page      drive an app to a state with a demo:capture script, then capture
-//             the viewport, the whole page, or one element. The steps run
-//             without the walkthrough's pointer or captions, and each step's
-//             proof is checked as the engine's proof mode checks it.
+// Kinds, one per surface with no app to drive:
 //   terminal  render a command's captured output as a terminal window shows
 //             it: ANSI SGR colour and weight kept, every other escape dropped,
 //             a carriage return's redraw kept over what it overwrote.
@@ -22,47 +15,32 @@
 //             comment box carrying GitHub's comment styles.
 //
 // Usage (demo-screenshot.sh is the interface; this is its contract):
-//   node demo-screenshot.mjs page --output <png> --script <demo.md>
-//       (--base-url <url> | --serve-dir <dir> | --serve <command>) [--port <n>]
-//       [--cwd <dir>] [--selector <css>] [--full-page] [--engine <dir>]
-//   node demo-screenshot.mjs terminal --output <png> --text <file>
-//       [--prompt <command>] [--title <text>] [--columns <n>] [--max-lines <n>] [--engine <dir>]
-//   node demo-screenshot.mjs markdown --output <png> --html <file>
-//       [--title <text>] [--expand] [--engine <dir>]
+//   node demo-screenshot.mjs terminal --output <page.html> --text <file>
+//       [--prompt <command>] [--title <text>] [--columns <n>] [--max-lines <n>]
+//   node demo-screenshot.mjs markdown --output <page.html> --html <file>
+//       [--title <text>] [--expand]
 //
-// Exit: 0 captured, 3 a page captured with at least one step whose proof
-// failed, 2 bad arguments, 1 anything that stopped the capture.
+// Exit: 0 the page is written, 2 bad arguments, 1 anything that stopped the
+// write.
 
-import { existsSync, readFileSync } from 'node:fs';
-import { createServer } from 'node:net';
-import { createRequire } from 'node:module';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const PROG = 'demo-screenshot.mjs';
-// Device pixels per CSS pixel. A GitHub comment shows an image at most as wide
-// as its column, so text captured at 2x stays sharp at that width.
-const SCALE = 2;
-const PROVE_TIMEOUT = 10000;
-const SELECTOR_TIMEOUT = 15000;
-const CONTENT_TIMEOUT = 30000;
 
 class UsageError extends Error {}
 
-const VALUE_FLAGS = new Set([
-  'output', 'engine', 'script', 'base-url', 'serve-dir', 'serve', 'port', 'cwd', 'selector',
-  'text', 'prompt', 'title', 'columns', 'max-lines', 'html',
-]);
-const BOOLEAN_FLAGS = new Set(['full-page', 'expand']);
+const VALUE_FLAGS = new Set(['output', 'text', 'prompt', 'title', 'columns', 'max-lines', 'html']);
+const BOOLEAN_FLAGS = new Set(['expand']);
 const KIND_FLAGS = {
-  page: ['output', 'engine', 'script', 'base-url', 'serve-dir', 'serve', 'port', 'cwd', 'selector', 'full-page'],
-  terminal: ['output', 'engine', 'text', 'prompt', 'title', 'columns', 'max-lines'],
-  markdown: ['output', 'engine', 'html', 'title', 'expand'],
+  terminal: ['output', 'text', 'prompt', 'title', 'columns', 'max-lines'],
+  markdown: ['output', 'html', 'title', 'expand'],
 };
 
 export function parseArgs(argv) {
   const [kind, ...rest] = argv;
-  if (!kind || !(kind in KIND_FLAGS)) throw new UsageError(`a kind is required: page, terminal or markdown (got '${kind ?? ''}')`);
+  if (!kind || !Object.hasOwn(KIND_FLAGS, kind)) throw new UsageError(`a kind is required: terminal or markdown (got '${kind ?? ''}')`);
   const opts = { kind };
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
@@ -77,39 +55,12 @@ export function parseArgs(argv) {
     }
   }
   if (!opts.output) throw new UsageError('--output is required');
-  const need = { page: 'script', terminal: 'text', markdown: 'html' }[kind];
+  const need = { terminal: 'text', markdown: 'html' }[kind];
   if (!opts[need]) throw new UsageError(`${kind} needs --${need}`);
-  if (kind === 'page') {
-    const targets = ['base-url', 'serve-dir', 'serve'].filter((t) => opts[t]);
-    if (targets.length !== 1) throw new UsageError(`page needs exactly one of --base-url, --serve-dir, --serve (got ${targets.length})`);
-  }
-  for (const n of ['port', 'columns', 'max-lines']) {
+  for (const n of ['columns', 'max-lines']) {
     if (opts[n] !== undefined && !/^[1-9][0-9]*$/.test(opts[n])) throw new UsageError(`--${n} must be a positive integer (got '${opts[n]}')`);
   }
   return opts;
-}
-
-// ── The engine ────────────────────────────────────────────────────────────
-
-/** The engine directory: --engine, else the published package that npx put on PATH. */
-export function findEngine(given, envPath = process.env.PATH ?? '') {
-  if (given) return path.resolve(given);
-  for (const dir of envPath.split(path.delimiter)) {
-    if (path.basename(dir) !== '.bin' || path.basename(path.dirname(dir)) !== 'node_modules') continue;
-    const cand = path.join(dir, '..', '@zookanalytics', 'sprintshow');
-    if (existsSync(path.join(cand, 'package.json'))) return cand;
-  }
-  return null;
-}
-
-async function loadEngine(dir) {
-  // A checkout runs its TypeScript source, which Node strips natively; the
-  // published package carries only its build.
-  const src = path.join(dir, 'src', 'index.ts');
-  const entry = existsSync(src) ? src : path.join(dir, 'dist', 'index.js');
-  const engine = await import(pathToFileURL(entry).href);
-  const { chromium } = createRequire(path.join(dir, 'package.json'))('playwright');
-  return { engine, chromium };
 }
 
 // ── Terminal output ───────────────────────────────────────────────────────
@@ -277,7 +228,7 @@ html, body { margin: 0; background: transparent; }
 pre { margin: 0; padding: 12px 16px 14px; width: ${width}ch; color: ${TERM_FG}; font: 13px/1.4 ${MONO}; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: ${TAB}; }
 .prompt { color: #23d18b; }
 .more { color: #8b8b8b; font-style: italic; }
-</style></head><body><div class="terminal"><div class="bar"><div class="dots"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span></div><div class="title">${escapeHtml(title ?? '')}</div></div><pre>${promptLine}${body.html}${more}</pre></div></body></html>`;
+</style></head><body><div class="terminal" id="surface"><div class="bar"><div class="dots"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span></div><div class="title">${escapeHtml(title ?? '')}</div></div><pre>${promptLine}${body.html}${more}</pre></div></body></html>`;
 }
 
 // ── A rendered comment ────────────────────────────────────────────────────
@@ -356,8 +307,8 @@ const MARKDOWN_CSS = `
 `;
 
 export function commentDocument({ fragment, title, expand = false }) {
-  // Without JavaScript nothing toggles a <details>, so --expand opens each one
-  // in the markup itself.
+  // The page has no script, and the capture clicks nothing, so --expand opens
+  // each <details> in the markup itself.
   const body = expand ? fragment.replace(/<details(?![\w-])/gi, '<details open') : fragment;
   const header = title ? `<div class="comment-header">${escapeHtml(title)}</div>` : '';
   return `<!doctype html>
@@ -367,100 +318,26 @@ html, body { margin: 0; background: transparent; }
 .comment-header { padding: 8px 16px; background: #f6f8fa; border-bottom: 1px solid #d1d9e0; color: #59636e; font: 14px/1.5 ${SANS}; }
 .comment > .markdown-body { padding: 16px; }
 ${MARKDOWN_CSS}
-</style></head><body><div class="comment">${header}<div class="markdown-body">${body}</div></div></body></html>`;
+</style></head><body><div class="comment" id="surface">${header}<div class="markdown-body">${body}</div></div></body></html>`;
 }
 
-// ── Capture ───────────────────────────────────────────────────────────────
+// ── The page ──────────────────────────────────────────────────────────────
 
-function log(m) {
-  console.log(m);
-}
-
-/** Render a static document with scripts off and capture one element of it. */
-async function captureDocument(chromium, engine, html, selector, output) {
-  const browser = await chromium.launch({ headless: true, args: engine.chromiumLaunchArgs() });
-  try {
-    const context = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: SCALE, javaScriptEnabled: false });
-    const page = await context.newPage();
-    await page.setContent(html, { waitUntil: 'load', timeout: CONTENT_TIMEOUT });
-    await page.locator(selector).screenshot({ path: output, omitBackground: true });
-  } finally {
-    await browser.close();
-  }
-}
-
-function joinUrl(base, pathAndQuery) {
-  return base.replace(/\/$/, '') + (pathAndQuery.startsWith('/') ? '' : '/') + pathAndQuery;
-}
-
-/** A port nothing is listening on now, as the system assigns one. */
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once('error', reject);
-    srv.listen(0, () => {
-      const { port } = srv.address();
-      srv.close(() => resolve(port));
+/** The page a parsed call draws. */
+export function renderPage(opts) {
+  if (opts.kind === 'terminal') {
+    return terminalDocument({
+      text: readFileSync(opts.text, 'utf8'),
+      prompt: opts.prompt,
+      title: opts.title,
+      columns: opts.columns ? Number(opts.columns) : undefined,
+      maxLines: opts['max-lines'] ? Number(opts['max-lines']) : undefined,
     });
-  });
-}
-
-/** Drive the app to the script's last state and capture it; returns the failed-proof count. */
-async function capturePage(chromium, engine, opts) {
-  const demo = engine.parseDemoScript(readFileSync(opts.script, 'utf8'));
-  // A static directory is served on a port of this capture's own unless one is
-  // named, so captures running side by side on one host never share a server.
-  // A --serve command binds the port it chooses, so --port names it.
-  let port = opts.port ? Number(opts.port) : undefined;
-  if (port === undefined && opts['serve-dir']) port = await freePort();
-  const server = await engine.ensureServer({
-    baseUrl: opts['base-url'] ?? null,
-    serve: opts.serve ?? null,
-    serveDir: opts['serve-dir'] ?? null,
-    port,
-    cwd: opts.cwd,
-    log,
-  });
-  let failures = 0;
-  try {
-    const browser = await chromium.launch({ headless: true, args: engine.chromiumLaunchArgs() });
-    try {
-      const page = await browser.newPage({ viewport: engine.VIEWPORT, deviceScaleFactor: SCALE });
-      await page.goto(joinUrl(server.baseUrl, demo.start), { waitUntil: 'load' });
-      for (const step of demo.steps) {
-        log(`step ${step.index}/${demo.steps.length}: ${step.narration}`);
-        for (const act of step.actions) await engine.runAction(page, server.baseUrl, act, false, log);
-        let proved = true;
-        let reason = '';
-        if (step.prove?.assertion) {
-          proved = await engine.awaitAssertion(page, step.prove.assertion, PROVE_TIMEOUT);
-          if (!proved) reason = `_Prove:_ did not hold: \`${step.prove.assertion.raw}\``;
-        }
-        if (proved && step.failIf?.assertion && (await engine.checkAssertion(page, step.failIf.assertion))) {
-          proved = false;
-          reason = `_Fail if:_ condition matched: \`${step.failIf.assertion.raw}\``;
-        }
-        const manual = !step.prove?.assertion && !step.failIf?.assertion;
-        log(proved ? (manual ? '  ✓ (manual — no machine assertion)' : '  ✓ proof held') : `  ✗ ${reason}`);
-        if (!proved) failures++;
-      }
-      if (opts.selector) {
-        const el = page.locator(opts.selector).first();
-        await el.waitFor({ state: 'visible', timeout: SELECTOR_TIMEOUT });
-        await el.screenshot({ path: opts.output });
-      } else {
-        await page.screenshot({ path: opts.output, fullPage: Boolean(opts['full-page']) });
-      }
-    } finally {
-      await browser.close();
-    }
-  } finally {
-    await server.stop();
   }
-  return failures;
+  return commentDocument({ fragment: readFileSync(opts.html, 'utf8'), title: opts.title, expand: Boolean(opts.expand) });
 }
 
-async function main(argv) {
+function main(argv) {
   let opts;
   try {
     opts = parseArgs(argv);
@@ -471,43 +348,15 @@ async function main(argv) {
     }
     throw e;
   }
-  const dir = findEngine(opts.engine);
-  if (!dir) {
-    console.error(`${PROG}: no SprintShow engine: pass --engine <dir>, or run under npx --package=@zookanalytics/sprintshow`);
-    return 1;
-  }
-  const { engine, chromium } = await loadEngine(dir);
-  const output = path.resolve(opts.output);
-  if (opts.kind === 'page') {
-    const failures = await capturePage(chromium, engine, { ...opts, output });
-    if (failures > 0) {
-      console.log(`${PROG}: ${failures} step(s) failed their proof`);
-      return 3;
-    }
-    return 0;
-  }
-  if (opts.kind === 'terminal') {
-    const html = terminalDocument({
-      text: readFileSync(opts.text, 'utf8'),
-      prompt: opts.prompt,
-      title: opts.title,
-      columns: opts.columns ? Number(opts.columns) : undefined,
-      maxLines: opts['max-lines'] ? Number(opts['max-lines']) : undefined,
-    });
-    await captureDocument(chromium, engine, html, '.terminal', output);
-    return 0;
-  }
-  const html = commentDocument({ fragment: readFileSync(opts.html, 'utf8'), title: opts.title, expand: Boolean(opts.expand) });
-  await captureDocument(chromium, engine, html, '.comment', output);
+  writeFileSync(path.resolve(opts.output), renderPage(opts));
   return 0;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main(process.argv.slice(2)).then(
-    (rc) => process.exit(rc),
-    (e) => {
-      console.error(`${PROG}: ${e?.message?.split('\n')[0] ?? e}`);
-      process.exit(1);
-    },
-  );
+  try {
+    process.exitCode = main(process.argv.slice(2));
+  } catch (e) {
+    console.error(`${PROG}: ${e?.message?.split('\n')[0] ?? e}`);
+    process.exitCode = 1;
+  }
 }

@@ -201,14 +201,20 @@ has "does not exist" "$out" "it says the script is missing"
 # checkout fetches its ffmpeg-static binary when the host has none. Stubs on
 # PATH stand in for node, npx, npm and gc, and a host ffmpeg is on PATH only for
 # a case that names HOST_FFMPEG=1. jq is the real one, because the library reads
-# the rig list and the engine's package.json with it. npm and npx log every call
-# to $CALLLOG in order and hand lint and run to the engine stub. The fetch prints
-# npm's header line to the stdout it was given, as npm does, and $FFMPEG_RC
-# fails it.
+# the rig list and the engine's package.json with it. npm, npx and node log every
+# call to $CALLLOG in order, and node and npx hand the engine's CLI, its lint and
+# its run, to the engine stub. The fetch prints npm's header line to the stdout
+# it was given, as npm does, and $FFMPEG_RC fails it.
 JQ="$(command -v jq)" || { echo "test setup: required tool 'jq' not found" >&2; exit 2; }
 RBIN="$TMPD/resolve-bin"; mkdir -p "$RBIN"
 ln -s "$JQ" "$RBIN/jq"
-printf '#!/usr/bin/env bash\necho v24.0.0\n' >"$RBIN/node"
+cat >"$RBIN/node" <<'NODE'
+#!/usr/bin/env bash
+if [ "${1:-}" = "--version" ]; then echo v24.0.0; exit 0; fi
+printf 'node %s\n' "$*" >>"${CALLLOG:?}"
+case "${1:-}" in */src/cli.ts) shift; exec "${ENGINE_STUB:?}" "$@" ;; esac
+echo "node stub: unexpected call: $*" >&2; exit 97
+NODE
 HOSTBIN="$TMPD/host-bin"; mkdir -p "$HOSTBIN"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$HOSTBIN/ffmpeg"
 cat >"$RBIN/gc" <<'GC'
@@ -229,7 +235,6 @@ cat >"$RBIN/npx" <<'NPX'
 #!/usr/bin/env bash
 printf 'npx %s\n' "$*" >>"${CALLLOG:?}"
 case "$1 $2" in
-  "tsx "*) shift 2; exec "${ENGINE_STUB:?}" "$@" ;;
   "--yes @zookanalytics/sprintshow") shift 2; exec "${ENGINE_STUB:?}" "$@" ;;
   "--yes --package=@zookanalytics/sprintshow") exit 0 ;;
 esac

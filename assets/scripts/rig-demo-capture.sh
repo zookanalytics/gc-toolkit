@@ -12,10 +12,10 @@
 #
 # The engine is @zookanalytics/sprintshow, consumed from the local `sprintshow`
 # rig checkout when the city has one and the published npm package otherwise.
-# demo-engine-lib.sh finds it and provisions its browser, as it does for the
-# screenshot capture. Capture is engine-driven (the engine drives Playwright
-# headlessly): the only path available to a pool session, which carries no
-# browser MCP.
+# demo-engine-lib.sh finds it, provisions its browser and runs its CLI, as it
+# does for the screenshot capture. Capture is engine-driven (the engine drives
+# Playwright headlessly): the only path available to a pool session, which
+# carries no browser MCP.
 #
 # It FAILS CLOSED. A missing engine, a browser that cannot be installed, a
 # script the linter rejects, a capture that errors, or an output file that never
@@ -37,7 +37,8 @@
 #   --base-url   drive a server that is already running.
 #                Exactly one of --serve-dir / --serve / --base-url is required;
 #                it is how this rig's app is reached, the one rig-specific input.
-#   --port       port for --serve / --serve-dir (default 5173).
+#   --port       port for --serve (default 5173) or --serve-dir (default: a free
+#                port the system assigns).
 #   --cwd        working directory for the --serve command.
 #   --mode       walkthrough (default, one continuous take) | proof (one checked
 #                screenshot per step).
@@ -106,7 +107,7 @@ fi
 [ -z "$MUSIC" ] || [ -f "$MUSIC" ] || { echo "$PROG: --music '$MUSIC' does not exist" >&2; exit 1; }
 
 # The engine resolves relative --script / --serve-dir against its own cwd, which
-# the npx-tsx form does not change; absolute paths make the capture independent
+# its CLI shares with this script; absolute paths make the capture independent
 # of where this script runs.
 abspath() { case "$1" in /*) printf '%s\n' "$1" ;; *) printf '%s/%s\n' "$(pwd)" "$1" ;; esac; }
 SCRIPT=$(abspath "$SCRIPT")
@@ -119,23 +120,18 @@ OUT_DIR=$(dirname "$OUTPUT")
 mkdir -p "$OUT_DIR" || { echo "$PROG: cannot create output directory '$OUT_DIR'" >&2; exit 1; }
 
 # --- the engine ------------------------------------------------------------
-# demo-engine-lib.sh finds the engine and provisions its browser. What only a
-# clip needs stays here: ffmpeg to assemble it, which is a host ffmpeg when
-# there is one and otherwise a checkout's ffmpeg-static binary, fetched on first
-# use; and the engine's CLI, which a checkout runs from its TypeScript source
-# through `npx tsx`. $SPRINTSHOW_BIN overrides all of it.
+# demo-engine-lib.sh finds the engine, provisions its browser and runs its CLI.
+# What only a clip needs stays here: ffmpeg to assemble it, which is a host
+# ffmpeg when there is one and otherwise a checkout's ffmpeg-static binary,
+# fetched on first use. $SPRINTSHOW_BIN overrides all of it.
 if [ -n "${SPRINTSHOW_BIN:-}" ] && [ -x "${SPRINTSHOW_BIN}" ]; then
   sprintshow() { "$SPRINTSHOW_BIN" "$@"; }
 else
-  command -v node >/dev/null 2>&1 || { echo "$PROG: node not found; the SprintShow engine needs Node >= 22.18. doctor/check-demo-toolchain names this gap." >&2; exit 1; }
-  command -v npx  >/dev/null 2>&1 || { echo "$PROG: npx not found; it ships with Node and runs the engine." >&2; exit 1; }
   demo_engine_resolve || exit 1
   if [ -n "$DEMO_ENGINE_DIR" ]; then
     command -v ffmpeg >/dev/null 2>&1 || [ -x "$DEMO_ENGINE_DIR/node_modules/ffmpeg-static/ffmpeg" ] || ( cd "$DEMO_ENGINE_DIR" && npm run provision:ffmpeg ) >&2 || { echo "$PROG: could not provision ffmpeg (no host ffmpeg and ffmpeg-static fetch failed)" >&2; exit 1; }
-    sprintshow() { npx tsx "$DEMO_ENGINE_DIR/src/cli.ts" "$@"; }
-  else
-    sprintshow() { npx --yes "$DEMO_ENGINE_PACKAGE" "$@"; }
   fi
+  sprintshow() { demo_engine_cli "$@"; }
 fi
 
 # --- lint before capturing ----------------------------------------------

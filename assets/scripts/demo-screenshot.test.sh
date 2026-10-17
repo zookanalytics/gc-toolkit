@@ -1,27 +1,30 @@
 #!/usr/bin/env bash
 # demo-screenshot.test.sh — hermetic coverage of the screenshot modality.
 #
-# demo-screenshot.sh validates its arguments, holds Node to the driver's floor,
-# resolves the SprintShow engine, prepares what the driver renders (a command's
-# captured output, or GitHub's rendering of a markdown file), runs the driver,
-# and checks the PNG it leaves. demo-engine-lib.sh finds the engine and
-# provisions its browser, and demo-engine-lib.test.sh checks that through this
-# script. Every case runs under `env -i` with a PATH of a coreutils symlink farm
-# and stubs for node, npm, gc and gh, so nothing reaches the network, a
-# browser, or a city. The node stub stands in for the driver: it logs its argv,
-# keeps a copy of the file it was handed, and leaves the PNG, or the failure,
-# each case plants.
+# demo-screenshot.sh validates its arguments, resolves the SprintShow engine,
+# reads the engine's help for its screenshot command, prepares what a kind
+# captures (an app page's script and target, or a terminal or markdown surface
+# the renderer draws as a page of its own), runs the engine's screenshot
+# command, and checks the PNG it leaves. demo-engine-lib.sh holds Node to the
+# engine's floor, finds the engine, provisions its browser and runs its CLI,
+# and demo-engine-lib.test.sh checks that through this script. Every case runs
+# under `env -i` with a PATH of a coreutils symlink farm and stubs for node,
+# npm, gc and gh, so nothing reaches the network, a browser, or a city. The
+# node stub hands the engine checkout's CLI to an engine stub, and otherwise
+# stands in for the renderer: it logs its argv, keeps a copy of the file it was
+# handed, and leaves a page at --output. The engine stub keeps the script and
+# the page it was handed, and leaves the PNG, or the failure, each case plants.
 #
-# The driver's renderers are pure functions of their input, so the last part
-# imports demo-screenshot.mjs into a real node, when the host has Node 18 or
-# later, and checks what they emit; without one those cases are skipped.
+# The renderers are pure functions of their input, so the last part imports
+# demo-screenshot.mjs into a real node, when the host has Node 18 or later, and
+# checks what they emit; without one those cases are skipped.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUT="$HERE/demo-screenshot.sh"
-DRIVER="$HERE/demo-screenshot.mjs"
+RENDERER="$HERE/demo-screenshot.mjs"
 [ -x "$SUT" ] || { echo "not found or not executable: $SUT" >&2; exit 2; }
-[ -f "$DRIVER" ] || { echo "not found: $DRIVER" >&2; exit 2; }
+[ -f "$RENDERER" ] || { echo "not found: $RENDERER" >&2; exit 2; }
 
 FAIL=0
 ok()    { if eval "$2"; then printf 'ok   - %s\n' "$1"; else printf 'FAIL - %s\n' "$1"; FAIL=1; fi; }
@@ -39,8 +42,9 @@ for c in bash sed tr head tail dirname mkdir mktemp rm tee wc cat od awk cp git;
   ln -s "$p" "$FARM/$c"
 done
 
-# Stubs. node answers --version with $NODE_VERSION and otherwise stands in for
-# the driver; npm records what it runs and where; gc lists the sprintshow rig
+# Stubs. node answers --version with $NODE_VERSION, hands the checkout's CLI to
+# $ENGINE_STUB, and otherwise stands in for the renderer, failing on
+# $RENDER_RC; npm records what it runs and where; gc lists the sprintshow rig
 # at $SS_RIG; gh stands in for GitHub's markdown renderer. Each logs to
 # $CALLLOG.
 JQ="$(command -v jq)" || { echo "test setup: required tool 'jq' not found" >&2; exit 2; }
@@ -50,6 +54,7 @@ cat >"$BIN/node" <<'NODE'
 #!/usr/bin/env bash
 if [ "${1:-}" = "--version" ]; then echo "${NODE_VERSION:-v24.0.0}"; exit 0; fi
 printf 'node' >>"${CALLLOG:?}"; printf ' [%s]' "$@" >>"$CALLLOG"; printf '\n' >>"$CALLLOG"
+case "${1:-}" in */src/cli.ts) shift; exec "${ENGINE_STUB:?}" "$@" ;; esac
 o=""; prev=""
 for a in "$@"; do
   [ "$prev" = "--output" ] && o="$a"
@@ -57,17 +62,8 @@ for a in "$@"; do
   [ "$prev" = "--html" ] && cp "$a" "${HANDED:?}"
   prev="$a"
 done
-# A PNG signature and an IHDR chunk naming a 1948x1132 image.
-png() { printf '\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x07\x9c\x00\x00\x04\x6c\x08\x06\x00\x00\x00' >"$1"; }
-case "${DRIVER_MODE:-png}" in
-  png)     png "$o" ;;
-  failed)  png "$o"; echo "demo-screenshot.mjs: 2 step(s) failed their proof"; exit 3 ;;
-  failed-nofile) echo "demo-screenshot.mjs: 2 step(s) failed their proof"; exit 3 ;;
-  error)   echo "demo-screenshot.mjs: boom" >&2; exit 1 ;;
-  nofile)  : ;;
-  empty)   : >"$o" ;;
-  notpng)  echo 'not a png' >"$o" ;;
-esac
+if [ "${RENDER_RC:-0}" != 0 ]; then echo "demo-screenshot.mjs: boom" >&2; exit "$RENDER_RC"; fi
+printf '<!doctype html><div id="surface">drawn by the renderer</div>\n' >"$o"
 exit 0
 NODE
 cat >"$BIN/npm" <<'NPM'
@@ -90,9 +86,49 @@ exit 0
 GH
 chmod +x "$BIN"/node "$BIN"/npm "$BIN"/gc "$BIN"/gh
 
+# The engine's CLI. help lists the screenshot command unless $ENGINE_OLD is set,
+# and exits $HELP_RC. screenshot keeps the script it was handed and the page a
+# --serve-dir serves, then leaves what $ENGINE_MODE plants.
+ENGINE_STUB="$TMPD/engine"
+cat >"$ENGINE_STUB" <<'ENGINE'
+#!/usr/bin/env bash
+printf 'engine' >>"${CALLLOG:?}"; printf ' [%s]' "$@" >>"$CALLLOG"; printf '\n' >>"$CALLLOG"
+case "${1:-}" in
+  help)
+    printf 'Usage:\n  sprintshow run <demo.md> [options]\n'
+    [ -n "${ENGINE_OLD:-}" ] || printf '  sprintshow screenshot <demo.md> -o <file.png> [options]\n'
+    if [ "${HELP_RC:-0}" != 0 ]; then echo 'SyntaxError: Unexpected token' >&2; exit "$HELP_RC"; fi
+    exit 0 ;;
+  screenshot) ;;
+  *) echo "engine stub: unexpected command: $*" >&2; exit 97 ;;
+esac
+o=""; d=""; prev=""
+for a in "$@"; do
+  [ "$prev" = "-o" ] && o="$a"
+  [ "$prev" = "--serve-dir" ] && d="$a"
+  prev="$a"
+done
+cp "$2" "${SCRIPT_HANDED:?}"
+[ -z "$d" ] || [ ! -f "$d/index.html" ] || cp "$d/index.html" "${SERVED:?}"
+# A PNG signature and an IHDR chunk naming a 1948x1132 image.
+png() { printf '\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x07\x9c\x00\x00\x04\x6c\x08\x06\x00\x00\x00' >"$1"; }
+case "${ENGINE_MODE:-png}" in
+  png)     png "$o"; printf '\n✅ screenshot → %s\n' "$o" ;;
+  failed)  png "$o"; printf '\n✅ screenshot → %s\n   ⚠️  2 step(s) failed their proof — the screenshot shows the state they left\n' "$o"; exit 3 ;;
+  failed-nofile) printf '   ⚠️  2 step(s) failed their proof — the screenshot shows the state they left\n'; exit 3 ;;
+  error)   echo '✖ screenshot: no visible `#board` to capture' >&2; exit 1 ;;
+  nofile)  : ;;
+  empty)   : >"$o" ;;
+  notpng)  echo 'not a png' >"$o" ;;
+esac
+exit 0
+ENGINE
+chmod +x "$ENGINE_STUB"
+
 # A local engine checkout with its deps installed.
 ENGINE="$TMPD/sprintshow"; mkdir -p "$ENGINE/node_modules"
 printf '{"name":"@zookanalytics/sprintshow"}\n' >"$ENGINE/package.json"
+CLI="$ENGINE/src/cli.ts"
 
 # Fixtures: a demo script, a static app, a markdown file, captured output.
 WORK="$TMPD/work"; mkdir -p "$WORK"
@@ -102,6 +138,7 @@ MD="$WORK/comment.md"; printf '**Approve.** Nothing needs you.\n\n<details>\n<su
 TXT="$WORK/out.txt"; printf 'line one\nline two\n' >"$TXT"
 OUT="$WORK/shots/shot.png"
 CALLLOG="$TMPD/calls.log"; HANDED="$TMPD/handed"; GH_REQ="$TMPD/gh-request.json"
+SCRIPT_HANDED="$TMPD/script-handed"; SERVED="$TMPD/served"
 
 # run [VAR=VAL ...] -- <sut args...>: combined stdout and stderr, run from $WORK.
 # The local engine is listed unless a case sets SS_RIG itself.
@@ -109,13 +146,17 @@ run() {
   local envs=(SS_RIG="$ENGINE")
   while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
   [ $# -gt 0 ] && shift
-  : >"$CALLLOG"; rm -f "$HANDED" "$GH_REQ"
-  ( cd "$WORK" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" \
-      CALLLOG="$CALLLOG" HANDED="$HANDED" GH_REQ="$GH_REQ" "${envs[@]}" bash "$SUT" "$@" 2>&1 )
+  : >"$CALLLOG"; rm -f "$HANDED" "$GH_REQ" "$SCRIPT_HANDED" "$SERVED"
+  ( cd "$WORK" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" HANDED="$HANDED" \
+      GH_REQ="$GH_REQ" ENGINE_STUB="$ENGINE_STUB" SCRIPT_HANDED="$SCRIPT_HANDED" SERVED="$SERVED" \
+      "${envs[@]}" bash "$SUT" "$@" 2>&1 )
 }
 calls() { cat "$CALLLOG"; }
 # line_of <substring>: the first $CALLLOG line holding it, or 0 when none does.
 line_of() { awk -v s="$1" 'index($0, s) { print NR; found = 1; exit } END { if (!found) print 0 }' "$CALLLOG"; }
+# surface_dir: the directory the last capture of a drawn surface served, which
+# holds its page and sits beside its script.
+surface_dir() { sed -n 's/.*\[screenshot\] \[\(.*\)\.md\] \[--serve-dir\].*/\1/p' "$CALLLOG" | head -n 1; }
 
 echo "# usage errors exit 2 and run nothing"
 out="$(run --)"; rc=$?
@@ -158,7 +199,7 @@ for bad in nope a/b/c /a a/ 'a b/c'; do
   out="$(run -- markdown --file "$MD" --output "$OUT" --repo "$bad")"; rc=$?
   eq "$rc" 2 "markdown --repo '$bad' exits 2"
 done
-eq "$(calls)" "" "no usage error reached the engine, the renderer or the driver"
+eq "$(calls)" "" "no usage error reached the engine, the renderer or GitHub"
 
 echo "# inputs that do not exist exit 1"
 out="$(run -- page --script "$WORK/nope.md" --serve-dir "$APP" --output "$OUT")"; rc=$?
@@ -172,60 +213,75 @@ eq "$rc" 1 "a missing --cwd exits 1"
 out="$(run -- markdown --file "$WORK/nope.md" --output "$OUT")"; rc=$?
 eq "$rc" 1 "a missing --file exits 1"
 
-echo "# page: the driver runs with every option, by absolute path, on the engine checkout"
+echo "# the engine: its help must list the screenshot command, read before anything is run or rendered"
+out="$(run -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
+eq "$rc" 0 "an engine with the command captures"
+P=$(line_of "provision:browser"); H=$(line_of "engine [help]"); S=$(line_of "engine [screenshot]")
+ok "the browser is provisioned, then the help is read, then the capture runs (lines $P, $H, $S)" "[ '$P' -gt 0 ] && [ '$H' -gt '$P' ] && [ '$S' -gt '$H' ]"
+rm -f "$WORK/ran" "$OUT"
+out="$(run ENGINE_OLD=1 -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
+eq "$rc" 1 "an engine without the screenshot command exits 1"
+has "the SprintShow engine ($ENGINE) has no screenshot command" "$out" "it names the engine that lacks the command"
+has "lists 'sprintshow screenshot'" "$out" "it says what the engine must offer"
+hasnt "engine [screenshot]" "$(calls)" "nothing is captured"
+ok "no PNG is written" "[ ! -e '$OUT' ]"
+out="$(run ENGINE_OLD=1 -- terminal --command 'echo ran >ran' --cwd "$WORK" --output "$OUT")"; rc=$?
+eq "$rc" 1 "a terminal on an engine without the command exits 1"
+ok "the command does not run" "[ ! -e '$WORK/ran' ]"
+hasnt "[$RENDERER]" "$(calls)" "the renderer does not run"
+out="$(run ENGINE_OLD=1 -- markdown --file "$MD" --output "$OUT")"; rc=$?
+eq "$rc" 1 "a markdown capture on an engine without the command exits 1"
+hasnt "gh api" "$(calls)" "GitHub's renderer is not asked"
+out="$(run HELP_RC=1 -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
+eq "$rc" 1 "an engine whose CLI does not run exits 1"
+has "the SprintShow engine's CLI did not run ('sprintshow help' exited 1): SyntaxError: Unexpected token" "$out" "it says the CLI failed, with the CLI's own error"
+hasnt "has no screenshot command" "$out" "a CLI that failed is not reported as one without the command"
+hasnt "engine [screenshot]" "$(calls)" "nothing is captured when the CLI fails"
+
+echo "# page: the engine's screenshot command runs with every option, by absolute path, on the engine checkout"
 rm -rf "$WORK/shots"
 out="$(run -- page --script demo.md --serve-dir app --output shots/shot.png --port 4321 --selector '#board' --full-page)"; rc=$?
 eq "$rc" 0 "a capture exits 0"
-has "[$DRIVER] [page] [--output] [$OUT] [--script] [$SCRIPT] [--serve-dir] [$APP] [--port] [4321] [--selector] [#board] [--full-page] [--engine] [$ENGINE]" "$(calls)" "the driver gets the kind, every option, absolute paths, and the engine"
+has "node [$CLI] [screenshot] [$SCRIPT] [--serve-dir] [$APP] [--port] [4321] [--selector] [#board] [--full-page] [-o] [$OUT] [--scale] [2]" "$(calls)" "the checkout's CLI captures with the script, every option, absolute paths, and a scale of 2"
+hasnt "[$RENDERER]" "$(calls)" "a page is not drawn by the renderer"
+hasnt "--transparent" "$(calls)" "a page keeps its own background"
 has "captured $OUT (page, 1948x1132 px, " "$out" "the last line names the PNG and its pixel size"
 ok "the PNG is on disk, in the directory --output named" "[ -s '$OUT' ]"
 
 echo "# page: --serve with --cwd, and --base-url, are forwarded"
 out="$(run -- page --script "$SCRIPT" --serve 'npm run dev' --port 5175 --cwd "$APP" --output "$OUT")"; rc=$?
 eq "$rc" 0 "a --serve capture exits 0"
-has "[--serve] [npm run dev] [--port] [5175] [--cwd] [$APP]" "$(calls)" "the dev-server command, its port and its directory reach the driver"
+has "[--serve] [npm run dev] [--port] [5175] [--cwd] [$APP]" "$(calls)" "the dev-server command, its port and its directory reach the engine"
 out="$(run -- page --script "$SCRIPT" --base-url http://localhost:3000 --output "$OUT")"; rc=$?
 eq "$rc" 0 "a --base-url capture exits 0"
-has "[--base-url] [http://localhost:3000]" "$(calls)" "the base URL reaches the driver"
+has "[--base-url] [http://localhost:3000]" "$(calls)" "the base URL reaches the engine"
 
 echo "# page: a step whose proof failed still yields the capture -> exit 3"
-out="$(run DRIVER_MODE=failed -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
+out="$(run ENGINE_MODE=failed -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
 eq "$rc" 3 "a capture with a failed proof exits 3"
 has "captured $OUT (page, 1948x1132 px, " "$out" "it names the PNG"
 has "but 2 step(s) failed their proof" "$out" "it counts the failed steps"
-out="$(run DRIVER_MODE=failed-nofile -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
+out="$(run ENGINE_MODE=failed-nofile -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
 eq "$rc" 1 "a failed-proof report with no PNG exits 1"
 
 echo "# fail closed: no PNG, an empty one, or a file that is not a PNG"
-out="$(run DRIVER_MODE=error -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
-eq "$rc" 1 "a driver error exits 1"
-has "capture failed (the driver exited 1)" "$out" "it reports the driver's failure"
-out="$(run DRIVER_MODE=nofile -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
+out="$(run ENGINE_MODE=error -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
+eq "$rc" 1 "an engine error exits 1"
+has "capture failed (sprintshow screenshot exited 1)" "$out" "it reports the engine's failure"
+has "no visible \`#board\` to capture" "$out" "the engine's own error reaches the caller"
+out="$(run ENGINE_MODE=nofile -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
 eq "$rc" 1 "success with no file exits 1"
 has "does not exist" "$out" "it catches the missing PNG"
-out="$(run DRIVER_MODE=empty -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
+out="$(run ENGINE_MODE=empty -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
 eq "$rc" 1 "an empty file exits 1"
 has "is empty" "$out" "it catches the empty PNG"
-out="$(run DRIVER_MODE=notpng -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
+out="$(run ENGINE_MODE=notpng -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
 eq "$rc" 1 "a file that is not a PNG exits 1"
 has "is not a PNG" "$out" "it checks the PNG signature"
 printf '\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x00\x01\x00\x00\x00\x01' >"$OUT"
-out="$(run DRIVER_MODE=nofile -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
+out="$(run ENGINE_MODE=nofile -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
 eq "$rc" 1 "a PNG left by an earlier run does not pass for this one"
 ok "the earlier PNG was removed before the capture" "[ ! -e '$OUT' ]"
-
-echo "# Node: the driver's floor, checked before anything is installed"
-out="$(run NODE_VERSION=v22.17.1 -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
-eq "$rc" 1 "Node below 22.18 exits 1"
-has "below the engine's floor of 22.18" "$out" "it names the floor"
-eq "$(calls)" "" "nothing is installed, and no driver runs, for a Node below the floor"
-out="$(run NODE_VERSION=v22.18.0 -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
-eq "$rc" 0 "Node 22.18 captures"
-mv "$BIN/node" "$BIN/node.off"
-out="$(run -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
-mv "$BIN/node.off" "$BIN/node"
-eq "$rc" 1 "no node exits 1"
-has "node not found" "$out" "it says node is missing"
 
 echo "# terminal: the command runs in --cwd, stdout and stderr together, stdin closed"
 mkdir -p "$WORK/repo"; printf 'from the reviewed tree\n' >"$WORK/repo/marker"
@@ -239,42 +295,63 @@ H="$(cat "$HANDED" 2>/dev/null)"
 has "from the reviewed tree" "$H" "the command ran in --cwd"
 has "to stderr" "$H" "stderr is captured with stdout"
 has "stdin closed" "$H" "the command reads no input"
-has "[terminal] [--output] [$OUT] [--text] [" "$(calls)" "the driver renders the captured output"
-has "[--prompt] [$CMD] [--title] [gc-toolkit] [--columns] [100] [--max-lines] [50]" "$(calls)" "the command is the prompt line, and the window options reach the driver"
+D=$(surface_dir)
+case "$D" in "$TMPD"/demo-screenshot.*/surface) printf 'ok   - %s\n' "the surface is served from a directory of the capture's own" ;; *) printf 'FAIL - %s\n     got: %s\n' "the surface is served from a directory of the capture's own" "$D"; FAIL=1 ;; esac
+has "node [$RENDERER] [terminal] [--text] [" "$(calls)" "the renderer draws the captured output"
+has "[--prompt] [$CMD] [--title] [gc-toolkit] [--columns] [100] [--max-lines] [50] [--output] [$D/index.html]" "$(calls)" "the command is the prompt line, the window options reach the renderer, and its page is the one served"
+has "node [$CLI] [screenshot] [$D.md] [--serve-dir] [$D] [--selector] [#surface] [--transparent] [-o] [$OUT] [--scale] [2]" "$(calls)" "the engine captures the drawn surface's element, with no page background, at a scale of 2"
+R=$(line_of "[$RENDERER]"); S=$(line_of "engine [screenshot]")
+ok "the surface is drawn before the engine captures it (renderer line $R, capture line $S)" "[ '$R' -gt 0 ] && [ '$S' -gt '$R' ]"
+has "drawn by the renderer" "$(cat "$SERVED" 2>/dev/null)" "the page the engine serves is the renderer's"
+eq "$(cat "$SCRIPT_HANDED" 2>/dev/null)" "# Demo: terminal
+**Start:** \`/\`
+
+## Steps
+1. **The surface is drawn**
+   _Prove:_ the surface is on the page \`visible #surface\`" "the engine's script opens the page and proves the surface is drawn"
 out="$(run -- terminal --text "$TXT" --output "$OUT")"; rc=$?
 eq "$rc" 0 "captured output renders"
-has "[--text] [$TXT]" "$(calls)" "the driver gets the captured output's absolute path"
+has "[--text] [$TXT]" "$(calls)" "the renderer gets the captured output's absolute path"
 hasnt "[--prompt]" "$(calls)" "output captured earlier has no prompt line"
 hasnt "exited" "$out" "no exit status is claimed for output this run did not produce"
+out="$(run RENDER_RC=1 -- terminal --text "$TXT" --output "$OUT")"; rc=$?
+eq "$rc" 1 "a renderer that fails exits 1"
+has "the renderer could not draw the terminal surface" "$out" "it says the surface was not drawn"
+hasnt "engine [screenshot]" "$(calls)" "nothing is captured without a drawn surface"
 
-echo "# markdown: GitHub's renderer, in the repository's context, then the driver"
+echo "# markdown: GitHub's renderer, in the repository's context, then the renderer and the engine"
 out="$(run -- markdown --file "$MD" --repo octo/widgets --title 'Rendered comment' --expand --output "$OUT")"; rc=$?
 eq "$rc" 0 "a markdown capture exits 0"
 has "gh api --hostname github.com markdown --input " "$(calls)" "it asks GitHub's markdown API on github.com"
 eq "$(jq -r '.text' "$GH_REQ" 2>/dev/null)" "$(cat "$MD")" "the request carries the file's text as it stands"
 eq "$(jq -r '.mode + " " + .context' "$GH_REQ" 2>/dev/null)" "gfm octo/widgets" "it renders GitHub-flavoured, in the --repo context"
-has "<summary>trail</summary>" "$(cat "$HANDED" 2>/dev/null)" "the driver gets the HTML GitHub returned"
-has "[--title] [Rendered comment] [--expand]" "$(calls)" "the header and the expand option reach the driver"
-G=$(line_of "gh api"); D=$(line_of "node [")
-ok "the renderer answers before the driver runs (gh line $G, driver line $D)" "[ '$G' -gt 0 ] && [ '$D' -gt '$G' ]"
+has "<summary>trail</summary>" "$(cat "$HANDED" 2>/dev/null)" "the renderer gets the HTML GitHub returned"
+D=$(surface_dir)
+has "[--title] [Rendered comment] [--expand] [--output] [$D/index.html]" "$(calls)" "the header and the expand option reach the renderer"
+has "node [$CLI] [screenshot] [$D.md] [--serve-dir] [$D] [--selector] [#surface] [--transparent] [-o] [$OUT] [--scale] [2]" "$(calls)" "the engine captures the drawn comment's element"
+G=$(line_of "gh api"); R=$(line_of "[$RENDERER]"); S=$(line_of "engine [screenshot]")
+ok "GitHub answers, then the renderer draws, then the engine captures (lines $G, $R, $S)" "[ '$G' -gt 0 ] && [ '$R' -gt '$G' ] && [ '$S' -gt '$R' ]"
+has "# Demo: markdown" "$(cat "$SCRIPT_HANDED" 2>/dev/null)" "the engine's script names the kind"
 RIG="$TMPD/rig"; git init -q "$RIG" && git -C "$RIG" remote add origin git@github.com:zookanalytics/gc-toolkit.git
 out="$(run GC_RIG_ROOT="$RIG" -- markdown --file "$MD" --output "$OUT")"; rc=$?
 eq "$rc" 0 "the rig's origin gives the context"
 eq "$(jq -r '.context' "$GH_REQ" 2>/dev/null)" "zookanalytics/gc-toolkit" "references resolve in the rig's origin"
 NOGIT="$TMPD/norepo"; mkdir -p "$NOGIT"
-out="$(cd "$NOGIT" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" HANDED="$HANDED" GH_REQ="$GH_REQ" SS_RIG="$ENGINE" bash "$SUT" markdown --file "$MD" --output "$OUT" 2>&1)"; rc=$?
+out="$(cd "$NOGIT" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" HANDED="$HANDED" GH_REQ="$GH_REQ" \
+  ENGINE_STUB="$ENGINE_STUB" SCRIPT_HANDED="$SCRIPT_HANDED" SERVED="$SERVED" SS_RIG="$ENGINE" bash "$SUT" markdown --file "$MD" --output "$OUT" 2>&1)"; rc=$?
 eq "$rc" 0 "no origin still renders"
 has "render without a repository context" "$out" "it says references render without a context"
 eq "$(jq -r 'has("context")' "$GH_REQ" 2>/dev/null)" "false" "the request names no context"
 out="$(run GH_RC=1 -- markdown --file "$MD" --output "$OUT")"; rc=$?
 eq "$rc" 1 "a renderer failure exits 1"
 has "GitHub's markdown renderer failed: HTTP 502" "$out" "it passes the renderer's error on"
-hasnt "node [" "$(calls)" "the driver does not run without the rendering"
+hasnt "[$RENDERER]" "$(calls)" "nothing is drawn without GitHub's rendering"
+hasnt "engine [screenshot]" "$(calls)" "nothing is captured without GitHub's rendering"
 out="$(run GH_EMPTY=1 -- markdown --file "$MD" --output "$OUT")"; rc=$?
 eq "$rc" 1 "an empty rendering exits 1"
 has "returned nothing" "$out" "it says the renderer returned nothing"
 
-# --- the driver's renderers, in a real node ---------------------------------
+# --- the renderers, in a real node ------------------------------------------
 NODE_BIN=""
 for c in "$(command -v node 2>/dev/null)" /opt/homebrew/bin/node /usr/local/bin/node; do
   [ -n "$c" ] && [ -x "$c" ] || continue
@@ -283,11 +360,11 @@ for c in "$(command -v node 2>/dev/null)" /opt/homebrew/bin/node /usr/local/bin/
   [ "$m" -ge 18 ] && { NODE_BIN="$c"; break; }
 done
 if [ -z "$NODE_BIN" ]; then
-  echo "# the driver's renderers: SKIPPED (no Node 18 or later on this host)"
+  echo "# the renderers: SKIPPED (no Node 18 or later on this host)"
 else
-  echo "# the driver's renderers ($NODE_BIN)"
-  # js <expression>: what the expression evaluates to, with the driver imported as m.
-  js() { "$NODE_BIN" --input-type=module -e "import * as m from '$DRIVER'; const v = await ($1); process.stdout.write(typeof v === 'string' ? v : JSON.stringify(v));" 2>&1; }
+  echo "# the renderers ($NODE_BIN)"
+  # js <expression>: what the expression evaluates to, with the renderer imported as m.
+  js() { "$NODE_BIN" --input-type=module -e "import * as m from '$RENDERER'; const v = await ($1); process.stdout.write(typeof v === 'string' ? v : JSON.stringify(v));" 2>&1; }
 
   r=$(js "m.ansiToHtml('\x1b[1;32mok\x1b[0m plain').html")
   eq "$r" '<span style="color:#0dbc79;font-weight:bold">ok</span> plain' "SGR colour and weight become a span, and a reset ends it"
@@ -320,6 +397,8 @@ next' "a carriage return that ends a line redraws nothing"
   has '<div class="title">&lt;t&gt;</div>' "$r" "the title is escaped"
   has 'width: 40ch' "$r" "a narrow output keeps the narrowest window"
   hasnt 'more line(s)' "$r" "output within the cap shows no cut line"
+  has '<div class="terminal" id="surface">' "$r" "the terminal window is the surface a capture crops to"
+  hasnt '<script' "$r" "the terminal page carries no script"
   r=$(js "m.terminalDocument({ text: 'a\nb\nc\n', maxLines: 1 })")
   has '[2 more line(s) not shown]' "$r" "a cut says how many lines it hid"
   r=$(js "m.terminalDocument({ text: 'x'.repeat(300) + '\n', columns: 100 })")
@@ -328,21 +407,31 @@ next' "a carriage return that ends a line redraws nothing"
   has '<details open><summary>s</summary>' "$r" "--expand opens each <details>"
   has '</details><detailsx>' "$r" "an element merely named like details is left alone"
   has '<div class="comment-header">a&amp;b</div>' "$r" "the header is escaped"
+  has '<div class="comment" id="surface">' "$r" "the comment box is the surface a capture crops to"
   r=$(js "m.commentDocument({ fragment: '<details><summary>s</summary></details>' })")
   hasnt 'details open' "$r" "a <details> stays collapsed without --expand"
   hasnt '<div class="comment-header">' "$r" "no title draws no header"
-  r=$(js "(() => { try { m.parseArgs(['page', '--output', 'o.png', '--script', 'd.md']); return 'parsed'; } catch (e) { return e.message; } })()")
-  has 'exactly one of --base-url, --serve-dir, --serve (got 0)' "$r" "the driver refuses a page with no app target"
-  r=$(js "(() => { try { m.parseArgs(['terminal', '--output', 'o.png', '--text', 't', '--html', 'h']); return 'parsed'; } catch (e) { return e.message; } })()")
-  eq "$r" 'terminal takes no --html' "the driver refuses a flag of another kind"
-  r=$(js "m.parseArgs(['markdown', '--output', 'o.png', '--html', 'h', '--expand'])")
-  eq "$r" '{"kind":"markdown","output":"o.png","html":"h","expand":true}' "the driver parses a markdown call"
-  mkdir -p "$TMPD/npx-cache/node_modules/.bin" "$TMPD/npx-cache/node_modules/@zookanalytics/sprintshow"
-  printf '{"name":"@zookanalytics/sprintshow"}\n' >"$TMPD/npx-cache/node_modules/@zookanalytics/sprintshow/package.json"
-  r=$(js "m.findEngine(undefined, '/usr/bin:$TMPD/npx-cache/node_modules/.bin:/bin')")
-  eq "$r" "$TMPD/npx-cache/node_modules/@zookanalytics/sprintshow" "without --engine it finds the published engine npx put on PATH"
-  r=$(js "String(m.findEngine(undefined, '/usr/bin:/bin'))")
-  eq "$r" 'null' "with no engine on PATH it finds none"
+  r=$(js "(() => { try { m.parseArgs(['page', '--output', 'o.html', '--script', 'd.md']); return 'parsed'; } catch (e) { return e.message; } })()")
+  eq "$r" "a kind is required: terminal or markdown (got 'page')" "the renderer draws no page kind, which the engine drives itself"
+  r=$(js "(() => { try { m.parseArgs(['toString', '--output', 'o.html']); return 'parsed'; } catch (e) { return e.message; } })()")
+  eq "$r" "a kind is required: terminal or markdown (got 'toString')" "a name every object inherits is no kind"
+  r=$(js "(() => { try { m.parseArgs(['terminal', '--output', 'o.html', '--text', 't', '--html', 'h']); return 'parsed'; } catch (e) { return e.message; } })()")
+  eq "$r" 'terminal takes no --html' "the renderer refuses a flag of another kind"
+  r=$(js "m.parseArgs(['markdown', '--output', 'o.html', '--html', 'h', '--expand'])")
+  eq "$r" '{"kind":"markdown","output":"o.html","html":"h","expand":true}' "the renderer parses a markdown call"
+
+  # Run as a script, the renderer writes the page and nothing else.
+  printf '\033[31mred\033[0m\n' >"$TMPD/real.txt"
+  out=$("$NODE_BIN" "$RENDERER" terminal --text "$TMPD/real.txt" --output "$TMPD/real.html" --title t 2>&1); rc=$?
+  eq "$rc" 0 "the renderer exits 0 once the page is written"
+  eq "$out" "" "the renderer prints nothing on success"
+  has '<span style="color:#cd3131">red</span>' "$(cat "$TMPD/real.html" 2>/dev/null)" "the page holds the rendered output"
+  out=$("$NODE_BIN" "$RENDERER" terminal --output "$TMPD/real.html" 2>&1); rc=$?
+  eq "$rc" 2 "the renderer exits 2 on bad arguments"
+  has "terminal needs --text" "$out" "it names what is missing"
+  out=$("$NODE_BIN" "$RENDERER" markdown --html "$TMPD/nope.html" --output "$TMPD/real2.html" 2>&1); rc=$?
+  eq "$rc" 1 "the renderer exits 1 when its input cannot be read"
+  ok "no page is written for input that cannot be read" "[ ! -e '$TMPD/real2.html' ]"
 fi
 
 echo
