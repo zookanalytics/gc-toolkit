@@ -78,12 +78,14 @@
 #     an `until` edge removed then. The pass marks the bead before bead-rehome
 #     stamps its pointer, and a held or failed close, through the real
 #     bead-rehome.sh too, gives the bead back without that pointer. A claim, or
-#     an unchecked close, a pass left is finished by the next pass: a pass
-#     stopped after the stamp leaves a pointer its mark
+#     an unchecked close, a pass left is finished by the next pass, before any
+#     other half runs: a pass stopped after the stamp leaves a pointer its mark
 #     names, which the next pass withdraws, while a pointer no mark names, or
 #     one another closer records before the claim, stays and reads as live
-#     work. A give-back or a check that fails is left for the pass after, and so
-#     is one the budget leaves, which the pass declares as it does a disposal;
+#     work. An arm that lands while the pass holds the bead outlives a close no
+#     pass could check, and fires once the check reopens the bead. A give-back
+#     or a check that fails is left for the pass after, and so is one the budget
+#     leaves, which the pass declares as it does a disposal;
 #   * the CONVOY-LEAK guards — gc sling mints an input convoy per call, so an arm
 #     that never finalizes must not be re-slung forever: an arm whose work
 #     another path already delivered (a merge_result stamp) RETIRES without
@@ -1559,7 +1561,8 @@ has "$out" "could not re-read g-1" "that failure is reported too"
 echo "# until: without until-resolved.sh the consumer disposes nothing"
 store '[
  {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
- {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""},
+ {"id":"a-1","issue_type":"task","status":"closed","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":""}]'
 # hold-lib.sh and bd-lib.sh go beside the copy, because without either the
 # script exits before any verb, so until-resolved.sh is the one library missing.
 mkdir -p "$TMP/lonely"; cp "$SUT" "$TMP/lonely/deferred-dispatch.sh"; cp "$HERE/hold-lib.sh" "$HERE/bd-lib.sh" "$TMP/lonely/"
@@ -1567,6 +1570,8 @@ out="$("$TMP/lonely/deferred-dispatch.sh" reconcile 2>&1)"; rc=$?
 eq "$rc" 1 "a pass that cannot read the guard fails"
 eq "$(rehomes)" "0" "and disposes nothing"
 has "$out" "cannot source until-resolved.sh" "the reason is reported"
+has "$out" "KEPT the arm on closed a-1" "with no way to tell a close under the claim, the dispatch half keeps the arm on a closed bead"
+eq "$(meta a-1 gc.dispatch_when_ready)" "rig/pool" "and the arm stands"
 
 echo "# until: dispose only when ALL targets closed; successor is the latest-closed"
 store '[
@@ -2074,6 +2079,79 @@ for routed in no yes; do
     fi
 done
 
+# An arm whose `arm` read the bead before the pass claimed it lands while the
+# pass holds the bead. The check after the close reopens the bead for it, and a
+# pass that cannot make that check leaves the close for the next pass, whose
+# dispatch half must not retire the arm before the check reads it.
+ARM_G1='map(if .id == "g-1" then (.metadata["gc.dispatch_when_ready"] = "rig/pool" | .metadata["gc.dispatch_when_ready_args"] = "[\"--on\",\"mol-polecat-work\"]") else . end)'
+G1_OWED_READY='[
+ {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_ready":true,"_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+
+echo "# until: an arm that lands while the pass holds the bead outlives a close no pass checked, and fires"
+store "$G1_OWED_READY"
+rm -f "$TMP/rehomed"
+out="$(GC_REHOME_TOOL="$BIN/rehome-race.sh" STUB_REHOME_RACE_JQ="$ARM_G1" STUB_REHOME_TOUCH="$TMP/rehomed" STUB_SHOW_FAIL_WHEN="$TMP/rehomed" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "a close the pass could not check fails the pass"
+eq "$(status_of g-1)/$(assignee_of g-1)" "closed/deferred-dispatch" "the bead stays closed under the claim"
+eq "$(meta g-1 gc.dispatch_when_ready)" "rig/pool" "with the arm that landed while the pass held it"
+# The sling leaves the route a real pool sling leaves, which is live work to the
+# until half that runs after it.
+out="$(STUB_SLING_STAMPS=1 "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the next pass is clean"
+has "$out" "REOPENED g-1" "it checks the close, finds the arm, and reopens the bead"
+hasnt "$out" "retired arm on closed g-1" "the arm is never retired as one on a closed bead"
+reopen_at="$(printf '%s\n' "$out" | grep -n 'REOPENED g-1' | head -1 | cut -d: -f1)"
+sling_at="$(printf '%s\n' "$out" | grep -n 'dispatched g-1 -> rig/pool' | head -1 | cut -d: -f1)"
+if [ -n "$reopen_at" ] && [ -n "$sling_at" ] && [ "$reopen_at" -lt "$sling_at" ]; then
+    ok "the check comes before the dispatch half, which slings the reopened bead in the same pass"
+else
+    bad "the check comes before the dispatch half, which slings the reopened bead in the same pass (reopen at line '${reopen_at:-none}', sling at line '${sling_at:-none}')"
+fi
+eq "$(slings)" "1" "the arm fires once"
+eq "$(head -1 "$STUB_SLING_LOG")" "rig/pool g-1 --on mol-polecat-work" "with its recorded target and args"
+eq "$(meta g-1 gc.superseded_by)" "<absent>" "the disposal is withdrawn"
+eq "$(meta g-1 gc.dispatch_when_ready)" "<absent>" "and the proven dispatch clears the arm"
+eq "$(status_of g-1)/$(meta g-1 gc.routed_to)" "open/rig/pool" "the bead stays open, routed to the pool its arm named"
+has "$out" "LEFT g-1" "and the until half leaves it as live work"
+
+CLOSED_ARMED='[
+ {"id":"g-1","issue_type":"task","status":"closed","assignee":"deferred-dispatch","metadata":{"gc.superseded_by":"x-1","gc.until_disposal":"x-1","gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true,"_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+echo "# until: while no pass can check a close made under the claim, its arm is kept"
+store "$CLOSED_ARMED"
+: > "$TMP/show-fails"
+out="$(STUB_SHOW_FAIL_WHEN="$TMP/show-fails" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "a close the pass still cannot check fails the pass"
+has "$out" "KEPT the arm on closed g-1" "the dispatch half keeps its arm for that check"
+hasnt "$out" "retired arm on closed g-1" "rather than retiring it"
+eq "$(meta g-1 gc.dispatch_when_ready)" "rig/pool" "the arm stands"
+eq "$(slings)" "0" "and nothing is slung"
+has "$("$SUT" list 2>&1)" "g-1 -> rig/pool [CLOSED under the until consumer's claim" "list says why the arm on it stands"
+
+echo "# until: a close under the claim that the budget leaves keeps its arm, and the pass declares it"
+store "$CLOSED_ARMED"
+printf '1000\n' > "$TMP/clock-kept"
+: > "$TMP/outcome-kept.json"
+out="$(STUB_CLOCK="$TMP/clock-kept" DEFERRED_DISPATCH_PASS_BUDGET_SECS=20 DEFERRED_DISPATCH_DISPOSE_ALLOWANCE_SECS=30 \
+    GC_ORDER_OUTCOME_FILE="$TMP/outcome-kept.json" "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "a pass its budget stops exits 0"
+has "$out" "KEPT the arm on closed g-1" "the dispatch half keeps the arm on the close it did not reach"
+eq "$(meta g-1 gc.dispatch_when_ready)" "rig/pool" "the arm stands"
+eq "$(jq -r '[.scopes[]? | "\(.scope): \(.reason)"] | join(",")' "$TMP/outcome-kept.json" 2>/dev/null)" "g-1: claim left for the next pass to finish" \
+    "the pass declares the close it left"
+
+echo "# until: an armed bead still in progress under the claim is held for its give-back, not stranded"
+store '[
+ {"id":"g-1","issue_type":"task","status":"in_progress","assignee":"deferred-dispatch","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$(STUB_UPDATE_FAIL_AT='--if-status=in_progress' "$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 1 "a give-back that fails fails the pass"
+has "$out" "HELD g-1 — it is in progress under the until consumer's claim" "the dispatch half holds the arm for the give-back"
+hasnt "$out" "STRANDED g-1" "rather than calling it stranded"
+eq "$(slings)" "0" "and slings nothing"
+has "$("$SUT" list 2>&1)" "g-1 -> rig/pool [HELD by the until consumer's claim" "list shows the claim"
+
 # --- the disposal budget ------------------------------------------------------
 # The order's timeout kills a pass wherever it stands, and a killed pass prints
 # no summary. So a disposal starts only while a full allowance is left in the
@@ -2145,7 +2223,7 @@ eq "$(jq -r '.outcome' "$TMP/outcome-recover.json" 2>/dev/null)" "partial" "the 
 eq "$(jq -r '[.scopes[] | "\(.scope): \(.reason)"] | join(",")' "$TMP/outcome-recover.json" 2>/dev/null)" \
     "g-1: claim left for the next pass to finish,g-2: claim left for the next pass to finish" "naming each bead and what was left on it"
 has "$(jq -r '.reason' "$TMP/outcome-recover.json" 2>/dev/null)" "2 bead(s) an earlier pass left under deferred-dispatch, for the next pass to finish" "and giving their count as its reason"
-has "$out" "after the beads an earlier pass left under deferred-dispatch — every until-gated bead waits for the next pass" "the pass says the budget ran out before its scan"
+has "$out" "before the until half began — every until-gated bead waits for the next pass" "the pass says the budget ran out before its scan"
 eq "$(grep -cx 'list --brief --json --limit 0' "$STUB_BD_LOG")" "0" "and makes no store listing it could not act on"
 unset STUB_BD_LOG
 printf '1000\n' > "$CLOCK"

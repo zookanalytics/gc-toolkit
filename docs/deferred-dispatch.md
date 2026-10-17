@@ -185,7 +185,10 @@ one pass at a time (see
 [One pass at a time, inside the timeout](#one-pass-at-a-time-inside-the-timeout)).
 Each pass runs `deferred-dispatch.sh reconcile`, which:
 
-- **notifies** first: it sends every notice owed whose bead `bd` reports
+- **finishes** first the disposals an earlier pass left under its claim (see
+  [The resolved-by consumer](#the-resolved-by-consumer-until)), before any
+  other half reads the store;
+- **notifies**: it sends every notice owed whose bead `bd` reports
   ready, and retires the notices no longer owed (see
   [Work assigned to a named agent owes a notice](#work-assigned-to-a-named-agent-owes-a-notice));
 - **dispatches** every armed open bead nothing holds — the ones `bd` reports
@@ -195,7 +198,8 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
   `gc.dispatch_when_ready_slung` marker in its unproven `slinging@` state,
   running the recorded sling, promoting the marker to `slung@` on success,
   then clearing the record;
-- **retires** the record on an armed bead that has closed, or whose sling
+- **retires** the record on an armed bead that has closed, unless it closed
+  under the resolved-by consumer's claim, or whose sling
   reconcile has proven — a `slung@` (or pre-two-state bare-timestamp)
   `gc.dispatch_when_ready_slung` marker surviving into a later pass, from a
   pass that died before disarming — so recovery reads one marker reconcile
@@ -208,8 +212,9 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
   retiring it would silently lose the work;
 - **withholds** — leaving the record armed and saying so — when a blocker
   holds the bead, on it or on an ancestor, when someone has it by `assignee`,
-  when the sling fails, when the recorded arguments are malformed, or when
-  the pass has spent its budget;
+  when the sling fails, when the recorded arguments are malformed, when
+  the pass has spent its budget, or when the bead is in progress or closed
+  under the resolved-by consumer's claim, a disposal no pass has finished;
 - **names as STRANDED**, every pass and on stderr, an armed bead sitting
   at a non-`open` live status. The record is kept, because the status may
   yet be cleared, but it is counted apart from `held` and reported rather
@@ -508,14 +513,20 @@ When that write fails, the bead stays in progress under the claim with its
 pointer and its mark, and the next pass removes both.
 
 A pass that stops while it holds a claim leaves the bead in progress, or
-closed, under `deferred-dispatch`. The next pass finishes both before it
-lists the store, as far as its budget (below) allows. It gives back a bead it
-finds in progress, so its listing reads that bead as it reads any other. When
-the bead's mark names the successor its pointer names, the pass stopped after
-`bead-rehome` stamped that pointer, and the give-back removes it. A pointer
-the mark does not name is another closer's, and stays. It checks a bead it
-finds closed as step 5 does. Until a pass finishes it, a bead in progress
-under the claim reads to the doctor check below as the bead the pass claimed.
+closed, under `deferred-dispatch`. The next pass finishes both first, before
+any half reads the store, as far as its budget (below) allows. It gives back a
+bead it finds in progress, so its listing reads that bead as it reads any
+other. When the bead's mark names the successor its pointer names, the pass
+stopped after `bead-rehome` stamped that pointer, and the give-back removes
+it. A pointer the mark does not name is another closer's, and stays. It checks
+a bead it finds closed as step 5 does. That check reads the marks that landed
+on the bead while the pass held it, a deferred-dispatch arm among them: it
+finds the arm, reopens the bead, and the arm fires once nothing holds it. A
+close the pass cannot check, or that its budget leaves, stays closed under the
+claim, and the dispatch half keeps the arm on it rather than retiring it as it
+retires an arm on any other closed bead. Until a pass finishes it, a bead in
+progress under the claim reads to the doctor check below as the bead the pass
+claimed.
 
 When the close is held, commonly by an open visit tracking the bead,
 `bead-rehome` refuses the close rather than forcing it, after it has stamped
@@ -552,13 +563,13 @@ did not reach. The pass names them, its summary counts them as left for the
 next pass, and its `partial` declaration names each one beside the notices,
 slings and escalations the other halves left. A failure in any half fails the
 pass, which then declares nothing. The budget counts from the start of the
-pass, so the until half spends only what the dispatch half left. With nothing
-left it does not list the store at all, and when finishing what an earlier pass
-left spends the rest, it skips its scan. The budget sits at least one
-disposal allowance below the order's timeout, so the last disposal a pass starts
-can run for twice its allowance, and `deferred-dispatch.test.sh` holds the
-budget and each allowance against the order's timeout. A dry run spends no
-budget.
+pass, so each half spends only what the halves before it left: finishing what
+an earlier pass left comes first, and the until half's scan comes last. With
+nothing left the until half does not list the store at all. The budget sits at
+least one disposal allowance below the order's timeout, so the last disposal a
+pass starts can run for twice its allowance, and `deferred-dispatch.test.sh`
+holds the budget and each allowance against the order's timeout. A dry run
+spends no budget.
 
 Each half of the pass enumerates on its own. A dispatch half that cannot read
 its armed set, or that stops short of it, still lets the until half run, and
