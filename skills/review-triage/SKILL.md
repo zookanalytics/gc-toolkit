@@ -89,19 +89,22 @@ signoff.sh --review-bead "$REVIEW_BEAD" --verdict approve \
   --add-gates demo
 ```
 
+`--add-gates` takes one check or several, comma-separated, as in
+`--add-gates demo,arch`.
+
 - **Widening is monotonic and `signoff.sh` enforces it.** The write is a set
   union with read-back: nothing you pass can remove a check already declared,
-  and no dispatcher, formula, or other reviewer may pre-set or shrink
-  `check_set`. The checks-needed decision lives here, in one place a human can
-  audit.
+  only a triage verdict may add one, and no dispatcher, formula, or other
+  reviewer may pre-set or shrink `check_set`. The checks-needed decision lives
+  here, in one place a human can audit.
 - **Every added check is recorded** on the anchor's notes as a `triage-add:`
   line, so the add-rate the distiller watches stays countable. Name the check
   you added and what in the diff warranted it, in your verdict body.
 - **Adding nothing needs no flag** — approve on its own is the full verdict.
 
 Your verdict body is the triage trail, collapsed under the line `signoff.sh`
-opens the comment with: what you read, each check you added or left out and
-why, and any test runs. Triage files no findings, so it has no findings block.
+opens the comment with: what you read, and each check you added or left out
+and why. Triage files no findings, so it has no findings block.
 
 ## A bring-current round that conflicted
 
@@ -119,6 +122,9 @@ Read the round first:
 bring-current-audit.sh render --anchor "$ANCHOR" --as comment   # the account
 bring-current-audit.sh show --anchor "$ANCHOR"                  # the raw record
 ```
+
+The account gives a routine entry one line. The raw record keeps what that
+line leaves out: what collided, what to check, and git's evidence.
 
 Each entry says what collided (the two intents), what the worker decided and
 why, what a reviewer should check, and the worker's rating: `routine` for an

@@ -1,0 +1,1 @@
+../../../template-fragments/work-quality-base.template.md

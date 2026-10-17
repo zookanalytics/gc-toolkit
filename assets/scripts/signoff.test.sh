@@ -1229,6 +1229,16 @@ has "$(meta tk-anc check_set)" "demo" "the added check reaches check_set"
 has "$(notes tk-anc)" "triage-add: demo @" "the widening is recorded as a triage-add note"
 has "$out" "check_set now" "the verdict line names the widened check_set"
 
+echo "# a review dispatched under a triage token in another case is the triage check"
+# The review's check_name is the check_set token, in the case the anchor wrote
+# it; the check is known by the name case-folded, as the index resolves it.
+TRI_CASED=$(printf '%s' "$TRI" | sed 's/"check_name":"triage"/"check_name":"Triage"/')
+reset "$ANCHOR_PR" ",$TRI_CASED"; anchor_meta "check_set=correctness,Triage"
+out=$(STUB_INDEX="$IDX" "$SUT" --review-bead rv-tri --verdict approve --add-gates demo 2>&1); rc=$?
+eq "$rc" 0 "a Triage approve carrying --add-gates exits 0"
+has "$(meta tk-anc check_set)" "demo" "…and the added check reaches check_set"
+eq "$(meta rv-tri signoff_verdict)" "approve" "…and the approve is recorded"
+
 echo "# --add-gates is monotonic: re-adding a declared check is a no-op"
 reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
 out=$(STUB_INDEX="$IDX" "$SUT" --review-bead rv-tri --verdict approve --add-gates triage 2>&1); rc=$?
@@ -1307,6 +1317,16 @@ eq "$(sed -n 3p "$STUB_GH_BODY")" "ROUND ACCOUNT: what collided and what was dec
 eq "$(sed -n 5p "$STUB_GH_BODY")" "triage body" "…and the reviewer's own notes follow it"
 eq "$(meta rv-tri signoff_verdict)" "approve" "the approve is recorded"
 eq "$(status rv-tri)" "closed" "…and the review closed"
+
+echo "# a review dispatched under a triage token in another case owes the round's ruling too"
+reset "$ANCHOR_PR" ",$TRI_CASED"; anchor_meta "check_set=correctness,Triage" "bring_current_record=$ROUND_OWED"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve 2>&1); rc=$?
+eq "$rc" 1 "a Triage approve with no ruling exits 1"
+has "$out" "awaits this triage's ruling: pass --reopen" "…naming the flags the ruling takes"
+reset "$ANCHOR_PR" ",$TRI_CASED"; anchor_meta "check_set=correctness,Triage" "bring_current_record=$ROUND_OWED"; : > "$STUB_BC_LOG"
+out=$("$SUT" --review-bead rv-tri --verdict approve --reopen correctness --round-reason "the merged default changes behaviour" 2>&1); rc=$?
+eq "$rc" 0 "a ruled Triage approve exits 0"
+has "$(cat "$STUB_BC_LOG")" "decide --anchor tk-anc --review-bead rv-tri --reopen correctness" "…and its ruling reaches the guard's decide"
 
 echo "# lanes triage adds, and a dismissal, reach the ruling, and the lift's ask opens the verdict"
 reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage" "bring_current_record=$ROUND_OWED"; : > "$STUB_BC_LOG"
@@ -1453,6 +1473,16 @@ reset "$ANCHOR_PR" ",$DEMO"
 out=$("$SUT" --review-bead rv-demo --verdict approve --visual ' Repo-Artifact ' 2>&1); rc=$?
 eq "$rc" 0 "a mixed-case --visual is accepted"
 eq "$(meta rv-demo visual)" "repo-artifact" "…and stamped lowercase"
+
+echo "# a review dispatched under a demo token in another case is the demo check"
+DEMO_CASED=$(printf '%s' "$DEMO" | sed 's/"check_name":"demo"/"check_name":"Demo"/')
+reset "$ANCHOR_PR" ",$DEMO_CASED"
+out=$("$SUT" --review-bead rv-demo --verdict approve --visual screenshot 2>&1); rc=$?
+eq "$rc" 0 "a Demo approve carrying --visual exits 0"
+eq "$(meta rv-demo visual)" "screenshot" "…and its decision is stamped on the review bead"
+reset "$ANCHOR_PR" ",$DEMO_CASED"
+out=$("$SUT" --review-bead rv-demo --verdict approve 2>&1); rc=$?
+eq "$rc" 1 "a Demo verdict without --visual is refused, as a demo verdict is"
 
 echo "# a demo request-changes records the modality whose capture showed the defect"
 reset "$ANCHOR_PR" ",$DEMO"

@@ -206,8 +206,13 @@ changing a repo does not reach the human converse class. The classes: polecats
 (polecat, polecat-codex), human (the converse-opus, converse-fable and
 converse-codex sittings), system (deacon, mechanik, proactive, witness,
 refinery, keeper).
-`formulas/mol-review.toml` resolves these fragments during a review and holds
-the diff's output to them. Hard cap **12 entries per fragment**.
+The correctness method, `skills/review-correctness/SKILL.md`, holds the diff's
+output to every one of these fragments. It reads them from its own
+`references/` directory, where a relative link to each fragment keeps one
+source for the text and delivers it with the skill, so the method resolves no
+pack file by path. A new class fragment gets its link there too, and
+`review-method.test.sh` fails until it has one. Hard cap **12 entries per
+fragment**.
 
 **`convention` — learned conventions, per role.**
 `template-fragments/learned-conventions-<role>` fragments — one per role,
@@ -218,22 +223,25 @@ both render `{{ template "learned-conventions-polecat" . }}`). Use this
 carrier when the behavior must be carried into the turn by one role and no
 reviewer sees the moment it goes wrong.
 
-**`review-rubric` — what a reviewer checks.** `formulas/mol-review.toml`,
-step `review`, the "What to check" dimensions. Preferred over `convention`
-whenever the failure is visible in a diff: one dimension reaches every
-agent's version of the mistake through the reviewer, where a bullet reaches
-only the role whose fragment renders it. An amendment is one dimension
-sharpened or added. The anchor goes in the TOML comment ledger above the
-review step, not beside the dimension: the step description renders into a
-step bead, where an HTML comment is noise in the text a reviewer reads.
+**`review-rubric` — what a reviewer checks.** The correctness method,
+`skills/review-correctness/SKILL.md`: its "What to check" dimensions.
+Preferred over `convention` whenever the failure is visible in a diff: one
+dimension reaches every agent's version of the mistake through the reviewer,
+where a bullet reaches only the role whose fragment renders it. An amendment
+is one dimension sharpened or added. Its anchor goes in the ledger beside the
+method, `skills/review-correctness/rubric-ledger.md`, not beside the
+dimension: a reviewer reads the whole method file, where an HTML comment is
+noise.
 
 **`exemplar` — the exemplar corpus.**
 `template-fragments/learning-exemplars.template.md`, at most **8**
-before/after pairs, resolved on demand during a review rather than injected
-into any prompt. For lessons that are a shape rather than a statement.
+before/after pairs, read during a review through the correctness method's link
+to it rather than injected into any prompt. For lessons that are a shape rather
+than a statement.
 
-Every adopted entry carries an anchor comment — immediately above it in the
-four fragment carriers, in the ledger for `review-rubric`:
+Every adopted entry carries an anchor comment. In the four fragment carriers
+it sits immediately above the entry. For `review-rubric` it sits in the
+ledger, on a line that ends with the dimension it amends:
 
 ```
 <!-- rule:<pattern-bead> src:<refs> adopted:<date> -->

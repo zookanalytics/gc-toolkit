@@ -17,6 +17,11 @@
 #     transition (create, draft-to-ready, merge) asks this instead of carrying
 #     its own list, so one anchor is judged by one rule.
 #
+# Both jobs know a check by its name case-folded. --check TRIAGE emits the
+# [checks.triage] row as the index writes it, and a check_set token Correctness
+# resolves by [checks.correctness] but is emitted as written, since it names a
+# lane.
+#
 # Phase ordering: pre-open < open-as-draft < ready-for-review < merge. A check
 # that reads only the diff is pre-open; one that needs the deployed preview is
 # open-as-draft. A check_set token the index does not declare takes pre-open
@@ -245,7 +250,7 @@ if [ -z "$ROWS" ]; then
 fi
 
 if [ -n "$ONLY_CHECK" ]; then
-  ROW=$(printf '%s\n' "$ROWS" | awk -F'\t' -v c="$ONLY_CHECK" '$1 == c { print; exit }')
+  ROW=$(printf '%s\n' "$ROWS" | awk -F'\t' -v c="$ONLY_CHECK" 'tolower($1) == tolower(c) { print; exit }')
   [ -n "$ROW" ] || { echo "review-checks: '$FILE' does not declare check '$ONLY_CHECK'" >&2; exit 1; }
   printf '%s\n' "$ROW"
   exit 0
