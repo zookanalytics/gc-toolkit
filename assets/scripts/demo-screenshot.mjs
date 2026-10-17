@@ -12,7 +12,9 @@
 //             it: ANSI SGR colour and weight kept, every other escape dropped,
 //             a carriage return's redraw kept over what it overwrote.
 //   markdown  render an HTML fragment from GitHub's markdown API inside a
-//             comment box carrying GitHub's comment styles.
+//             comment box carrying GitHub's comment styles. A fragment holding
+//             a block that github.com's page script finishes, such as a mermaid
+//             diagram or math, is refused, because this page has no script.
 //
 // Usage (demo-screenshot.sh is the interface; this is its contract):
 //   node demo-screenshot.mjs terminal --output <page.html> --text <file>
@@ -21,7 +23,7 @@
 //       [--title <text>] [--expand]
 //
 // Exit: 0 the page is written, 2 bad arguments, 1 anything that stopped the
-// write.
+// write, a refused fragment included.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -306,7 +308,53 @@ const MARKDOWN_CSS = `
 .markdown-body .pl-mi1 { color: #116329; background-color: #dafbe1; }
 `;
 
+// GitHub's markdown API leaves some blocks of a comment for github.com's page
+// script to finish. A mermaid, geojson, topojson or stl fence comes back as a
+// section marked js-render-needs-enrichment, holding the fence's source and a
+// loading spinner, and naming its renderer at viewscreen.githubusercontent.com,
+// whose content security policy lets only github.com frame it. Math comes back
+// as its TeX inside a <math-renderer>. A page with no script would draw that
+// markup in place of what GitHub shows. Every enrichment type carries the same
+// marker, and a custom element is drawn only when its own markup is what GitHub
+// shows, so a block of a kind GitHub adds later is refused as well.
+const DRAWN_FROM_MARKUP = new Set([
+  'markdown-accessiblity-table', // GitHub's spelling; it wraps a <table>
+  'themed-picture', // it wraps a <picture>
+]);
+
+// A start tag: GitHub's renderer escapes every < in text and in attribute
+// values, so each raw < that opens a name is a tag. The attributes run to the
+// first >, which is enough to find the marker and the type GitHub writes there.
+const START_TAG = /<([a-zA-Z][a-zA-Z0-9-]*)([^>]*)>/g;
+const ENRICHMENT = /(?:^|[\s"'=])js-render-needs-enrichment(?=[\s"'>/]|$)/;
+const DATA_TYPE = /\sdata-type\s*=\s*"([^"]*)"/i;
+
+/**
+ * The blocks of a fragment from GitHub's markdown API that github.com's page
+ * script finishes, in document order: an enrichment section by its type
+ * (`mermaid`), math as `math`, and any other custom element by its tag.
+ */
+export function unfinishedBlocks(fragment) {
+  const blocks = [];
+  for (const [, tag, attrs] of fragment.matchAll(START_TAG)) {
+    const name = tag.toLowerCase();
+    if (ENRICHMENT.test(attrs)) blocks.push(attrs.match(DATA_TYPE)?.[1] || 'enrichment');
+    else if (name === 'math-renderer') blocks.push('math');
+    else if (name.includes('-') && !DRAWN_FROM_MARKUP.has(name)) blocks.push(`<${name}>`);
+  }
+  return blocks;
+}
+
 export function commentDocument({ fragment, title, expand = false }) {
+  // A block inside a collapsed <details> is refused as well, because the
+  // same comment captured with --expand would show it.
+  const unfinished = unfinishedBlocks(fragment);
+  if (unfinished.length) {
+    const counts = new Map();
+    for (const b of unfinished) counts.set(b, (counts.get(b) ?? 0) + 1);
+    const named = [...counts].map(([b, n]) => `${b} (${n})`).join(', ');
+    throw new Error(`github.com finishes part of this comment with its page script, which this page does not carry: ${named}. A capture would show that part unfinished, so no page is written.`);
+  }
   // The page has no script, and the capture clicks nothing, so --expand opens
   // each <details> in the markup itself.
   const body = expand ? fragment.replace(/<details(?![\w-])/gi, '<details open') : fragment;

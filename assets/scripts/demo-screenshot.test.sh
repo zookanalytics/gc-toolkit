@@ -17,7 +17,10 @@
 #
 # The renderers are pure functions of their input, so the last part imports
 # demo-screenshot.mjs into a real node, when the host has Node 18 or later, and
-# checks what they emit; without one those cases are skipped.
+# checks what they emit; without one those cases are skipped. There the gh stub
+# answers with HTML GitHub's markdown API returned, kept verbatim, and the node
+# stub runs the real renderer on it, so a markdown capture is checked end to
+# end on what GitHub actually sends.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,10 +46,11 @@ for c in bash sed tr head tail dirname mkdir mktemp rm tee wc cat od awk cp git;
 done
 
 # Stubs. node answers --version with $NODE_VERSION, hands the checkout's CLI to
-# $ENGINE_STUB, and otherwise stands in for the renderer, failing on
-# $RENDER_RC; npm records what it runs and where; gc lists the sprintshow rig
-# at $SS_RIG; gh stands in for GitHub's markdown renderer. Each logs to
-# $CALLLOG.
+# $ENGINE_STUB, runs the real renderer under $REAL_NODE when that is set, and
+# otherwise stands in for the renderer, failing on $RENDER_RC; npm records what
+# it runs and where; gc lists the sprintshow rig at $SS_RIG; gh stands in for
+# GitHub's markdown renderer, answering with the file $GH_HTML when that is
+# set. Each logs to $CALLLOG.
 JQ="$(command -v jq)" || { echo "test setup: required tool 'jq' not found" >&2; exit 2; }
 BIN="$TMPD/bin"; mkdir -p "$BIN"
 ln -s "$JQ" "$BIN/jq"
@@ -55,6 +59,7 @@ cat >"$BIN/node" <<'NODE'
 if [ "${1:-}" = "--version" ]; then echo "${NODE_VERSION:-v24.0.0}"; exit 0; fi
 printf 'node' >>"${CALLLOG:?}"; printf ' [%s]' "$@" >>"$CALLLOG"; printf '\n' >>"$CALLLOG"
 case "${1:-}" in */src/cli.ts) shift; exec "${ENGINE_STUB:?}" "$@" ;; esac
+[ -z "${REAL_NODE:-}" ] || exec "$REAL_NODE" "$@"
 o=""; prev=""
 for a in "$@"; do
   [ "$prev" = "--output" ] && o="$a"
@@ -81,6 +86,7 @@ cat >"$BIN/gh" <<'GH'
 printf 'gh %s\n' "$*" >>"${CALLLOG:?}"
 prev=""; for a in "$@"; do [ "$prev" = "--input" ] && cp "$a" "${GH_REQ:?}"; prev="$a"; done
 if [ "${GH_RC:-0}" != 0 ]; then echo 'HTTP 502: Bad Gateway (https://api.github.com/markdown)' >&2; exit "$GH_RC"; fi
+if [ -n "${GH_HTML:-}" ]; then cat "$GH_HTML"; exit 0; fi
 [ -n "${GH_EMPTY:-}" ] || printf '<p dir="auto"><strong>Approve.</strong></p>\n<details>\n<summary>trail</summary>\n<p dir="auto">x</p>\n</details>\n'
 exit 0
 GH
@@ -370,8 +376,9 @@ if [ -z "$NODE_BIN" ]; then
   echo "# the renderers: SKIPPED (no Node 18 or later on this host)"
 else
   echo "# the renderers ($NODE_BIN)"
-  # js <expression>: what the expression evaluates to, with the renderer imported as m.
-  js() { "$NODE_BIN" --input-type=module -e "import * as m from '$RENDERER'; const v = await ($1); process.stdout.write(typeof v === 'string' ? v : JSON.stringify(v));" 2>&1; }
+  # js <expression>: what the expression evaluates to, with the renderer imported
+  # as m and node's readFileSync as read.
+  js() { "$NODE_BIN" --input-type=module -e "import * as m from '$RENDERER'; import { readFileSync as read } from 'node:fs'; const v = await ($1); process.stdout.write(typeof v === 'string' ? v : JSON.stringify(v));" 2>&1; }
 
   r=$(js "m.ansiToHtml('\x1b[1;32mok\x1b[0m plain').html")
   eq "$r" '<span style="color:#0dbc79;font-weight:bold">ok</span> plain' "SGR colour and weight become a span, and a reset ends it"
@@ -427,6 +434,87 @@ next' "a carriage return that ends a line redraws nothing"
   r=$(js "m.parseArgs(['markdown', '--output', 'o.html', '--html', 'h', '--expand'])")
   eq "$r" '{"kind":"markdown","output":"o.html","html":"h","expand":true}' "the renderer parses a markdown call"
 
+  # GitHub's markdown API output, kept verbatim. A mermaid fence comes back as
+  # an enrichment section holding the fence's source and a loading spinner.
+  cat >"$TMPD/mermaid.html" <<'HTML'
+<section class="js-render-needs-enrichment render-needs-enrichment position-relative" data-identity="324bbaed-8ff8-4c0b-b999-1620f27986cc" data-host="https://viewscreen.githubusercontent.com" data-src="https://viewscreen.githubusercontent.com/markdown/mermaid?docs_host=https%3A%2F%2Fdocs.github.com" data-type="mermaid" aria-label="mermaid rendered output container">
+  <div class="js-render-enrichment-target" data-json="{&quot;data&quot;:&quot;graph LR\n  A[Claim work] --&gt; B[Review]\n&quot;}" data-plain="graph LR
+  A[Claim work] --&gt; B[Review]
+" dir="auto">
+    <div class="render-plaintext-hidden" dir="auto">
+      <pre lang="mermaid" aria-label="Raw mermaid code" class="notranslate">graph LR
+  A[Claim work] --&gt; B[Review]
+</pre>
+    </div>
+  </div>
+  <span class="js-render-enrichment-loader d-flex flex-justify-center flex-items-center width-full" style="min-height:100px" role="presentation">
+    <span data-view-component="true">
+  <svg style="box-sizing: content-box; color: var(--color-icon-primary);" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" data-view-component="true" class="octospinner mx-auto tmp-mx-auto anim-rotate">
+    <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-opacity="0.25" stroke-width="2" vector-effect="non-scaling-stroke" fill="none"></circle>
+    <path d="M15 8a7.002 7.002 0 00-7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>
+</svg>    <span class="sr-only">Loading</span>
+</span>
+  </span>
+</section>
+HTML
+  # Every other enrichment type opens the same section, with its own type.
+  cat >"$TMPD/maps.html" <<'HTML'
+<section class="js-render-needs-enrichment render-needs-enrichment position-relative" data-identity="01f85847-b958-48c9-bf40-aafd91a97b93" data-host="https://viewscreen.githubusercontent.com" data-src="https://viewscreen.githubusercontent.com/markdown/geojson?docs_host=https%3A%2F%2Fdocs.github.com" data-type="geojson" aria-label="geojson rendered output container">
+</section>
+<section class="js-render-needs-enrichment render-needs-enrichment position-relative" data-identity="0aa274a0-27f6-4428-a2a1-301fe158454a" data-host="https://viewscreen.githubusercontent.com" data-src="https://viewscreen.githubusercontent.com/markdown/topojson?docs_host=https%3A%2F%2Fdocs.github.com" data-type="topojson" aria-label="topojson rendered output container">
+</section>
+<section class="js-render-needs-enrichment render-needs-enrichment position-relative" data-identity="c1b5b5d3-c90b-4c1e-b75e-491f86bbd42b" data-host="https://viewscreen.githubusercontent.com" data-src="https://viewscreen.githubusercontent.com/markdown/stl?docs_host=https%3A%2F%2Fdocs.github.com" data-type="stl" aria-label="stl rendered output container">
+</section>
+HTML
+  # Math, inline and on lines of its own, comes back as its TeX.
+  cat >"$TMPD/math.html" <<'HTML'
+<p dir="auto">Inline <math-renderer class="js-inline-math" style="display: inline-block" data-run-id="673979dbfab6cd1763fe9b43579747f0">$x^2 + 1$</math-renderer> here.</p>
+<p dir="auto"><math-renderer class="js-display-math" style="display: block" data-run-id="e92a7e1d009e85a28f5b4de55c7a0d06">$$
+E = mc^2
+$$</math-renderer></p>
+HTML
+  # What draws from its own markup: a table and a picture in GitHub's wrapper
+  # elements, an issue link, and code that names the markers above as text.
+  cat >"$TMPD/drawn.html" <<'HTML'
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>a</th>
+<th>b</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>2</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p dir="auto"><a class="issue-link js-issue-link" data-error-text="Failed to load title" data-id="5862710674" data-permission-text="Title is private" data-url="https://github.com/zookanalytics/gc-toolkit/issues/1266" data-hovercard-type="pull_request" data-hovercard-url="/zookanalytics/gc-toolkit/pull/1266/hovercard" href="https://github.com/zookanalytics/gc-toolkit/pull/1266">#1266</a></p>
+<p dir="auto"><themed-picture data-catalyst-inline="true"><picture><source media="(prefers-color-scheme: dark)" srcset="https://camo.githubusercontent.com/593b9d749a3d6d38d285dc0a0c1e8dab748afc1d424e03cd0064954796371962/68747470733a2f2f6578616d706c652e636f6d2f642e706e67" data-canonical-src="https://example.com/d.png"><img alt="pic" src="https://camo.githubusercontent.com/7b2d815f6cdd1b13c10bec8b2b9e1bde64ecab1aae71164f8b393dea9ddfb08d/68747470733a2f2f6578616d706c652e636f6d2f6c2e706e67" data-canonical-src="https://example.com/l.png"></picture></themed-picture></p>
+<p dir="auto"><code class="notranslate">&lt;math-renderer&gt;</code> and <code class="notranslate">js-render-needs-enrichment</code> as code.</p>
+<div class="highlight highlight-text-html-basic" dir="auto"><pre class="notranslate"><span class="pl-kos">&lt;</span><span class="pl-ent">section</span> <span class="pl-c1">class</span>="<span class="pl-s">js-render-needs-enrichment</span>"<span class="pl-kos">&gt;</span><span class="pl-kos">&lt;</span><span class="pl-ent">math-renderer</span><span class="pl-kos">&gt;</span>$x$<span class="pl-kos">&lt;/</span><span class="pl-ent">math-renderer</span><span class="pl-kos">&gt;</span><span class="pl-kos">&lt;/</span><span class="pl-ent">section</span><span class="pl-kos">&gt;</span></pre></div>
+HTML
+  { printf '<details><summary>trail</summary>\n'; cat "$TMPD/mermaid.html"; printf '</details>\n'; } >"$TMPD/collapsed.html"
+  r=$(js "m.unfinishedBlocks(read('$TMPD/mermaid.html', 'utf8'))")
+  eq "$r" '["mermaid"]' "a mermaid fence, as GitHub's markdown API returns it, is a block github.com finishes"
+  r=$(js "m.unfinishedBlocks(read('$TMPD/maps.html', 'utf8'))")
+  eq "$r" '["geojson","topojson","stl"]' "every other enrichment section is one too, named by its type"
+  r=$(js "m.unfinishedBlocks(read('$TMPD/math.html', 'utf8'))")
+  eq "$r" '["math","math"]' "inline math and math on lines of its own are blocks github.com finishes"
+  r=$(js "m.unfinishedBlocks('<p><diagram-viewer data-src=\"x\">a</diagram-viewer></p>')")
+  eq "$r" '["<diagram-viewer>"]' "a custom element not known to draw from its own markup is one too"
+  r=$(js "m.unfinishedBlocks(read('$TMPD/drawn.html', 'utf8'))")
+  eq "$r" '[]' "GitHub's table and picture wrappers, an issue link, and code naming the markers are not"
+  r=$(js "(() => { try { m.commentDocument({ fragment: read('$TMPD/mermaid.html', 'utf8') }); return 'drawn'; } catch (e) { return e.message; } })()")
+  has "github.com finishes part of this comment with its page script, which this page does not carry: mermaid (1)." "$r" "a comment holding a mermaid block is not drawn, and the refusal names the block"
+  r=$(js "(() => { try { m.commentDocument({ fragment: read('$TMPD/math.html', 'utf8') + read('$TMPD/mermaid.html', 'utf8'), expand: true }); return 'drawn'; } catch (e) { return e.message; } })()")
+  has ": math (2), mermaid (1)." "$r" "the refusal counts each kind of block, in the order the comment holds them"
+  r=$(js "(() => { try { m.commentDocument({ fragment: read('$TMPD/collapsed.html', 'utf8') }); return 'drawn'; } catch (e) { return e.message; } })()")
+  has "mermaid (1)" "$r" "a block in a collapsed <details> is refused too, since --expand would show it"
+  r=$(js "m.commentDocument({ fragment: read('$TMPD/drawn.html', 'utf8') })")
+  has '<div class="markdown-body"><markdown-accessiblity-table><table role="table">' "$r" "a comment with no such block is drawn as GitHub returned it"
+
   # Run as a script, the renderer writes the page and nothing else.
   printf '\033[31mred\033[0m\n' >"$TMPD/real.txt"
   out=$("$NODE_BIN" "$RENDERER" terminal --text "$TMPD/real.txt" --output "$TMPD/real.html" --title t 2>&1); rc=$?
@@ -439,6 +527,22 @@ next' "a carriage return that ends a line redraws nothing"
   out=$("$NODE_BIN" "$RENDERER" markdown --html "$TMPD/nope.html" --output "$TMPD/real2.html" 2>&1); rc=$?
   eq "$rc" 1 "the renderer exits 1 when its input cannot be read"
   ok "no page is written for input that cannot be read" "[ ! -e '$TMPD/real2.html' ]"
+  out=$("$NODE_BIN" "$RENDERER" markdown --html "$TMPD/mermaid.html" --output "$TMPD/refused.html" 2>&1); rc=$?
+  eq "$rc" 1 "the renderer exits 1 for a comment it refuses"
+  has "demo-screenshot.mjs: github.com finishes part of this comment" "$out" "it says why"
+  ok "no page is written for a refused comment" "[ ! -e '$TMPD/refused.html' ]"
+
+  echo "# markdown end to end, on HTML GitHub returned, through the real renderer"
+  rm -f "$OUT"
+  out="$(run REAL_NODE="$NODE_BIN" GH_HTML="$TMPD/mermaid.html" -- markdown --file "$MD" --output "$OUT")"; rc=$?
+  eq "$rc" 1 "markdown GitHub returns with a mermaid block exits 1"
+  has "which this page does not carry: mermaid (1)." "$out" "the renderer's refusal reaches the caller"
+  has "the renderer could not draw the markdown surface" "$out" "the script says the surface was not drawn"
+  hasnt "engine [screenshot]" "$(calls)" "nothing is captured"
+  ok "no PNG is written" "[ ! -e '$OUT' ]"
+  out="$(run REAL_NODE="$NODE_BIN" GH_HTML="$TMPD/drawn.html" -- markdown --file "$MD" --output "$OUT")"; rc=$?
+  eq "$rc" 0 "markdown GitHub returns with no such block is drawn and captured"
+  has '<markdown-accessiblity-table><table role="table">' "$(cat "$SERVED" 2>/dev/null)" "the page the engine serves is the real renderer's, drawn from GitHub's HTML"
 fi
 
 echo

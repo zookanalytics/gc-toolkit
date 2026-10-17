@@ -23,16 +23,20 @@
 #   markdown  markdown as GitHub shows a PR comment. GitHub's own renderer, its
 #             markdown API, turns the file into HTML in the context of the rig's
 #             origin, so #123 and @name link as they do on the PR, and the HTML is
-#             drawn in a comment box with GitHub's comment styles.
+#             drawn in a comment box with GitHub's comment styles. github.com's
+#             page script finishes some blocks after the API returns, such as a
+#             mermaid diagram or math, and markdown holding one is refused,
+#             because the page drawn here has no script.
 # A terminal or markdown surface has no app to drive. demo-screenshot.mjs,
 # beside this script, draws it as a page of its own, and the engine serves that
 # page from a directory and captures the surface's element, with a one-step
 # script whose proof is that the surface is drawn.
 #
 # It FAILS CLOSED. A missing engine, an engine with no screenshot command, a
-# browser that cannot be installed, a renderer that errors, or a capture that
-# leaves no PNG behind all exit 1, because a capture that quietly produces
-# nothing is the undelivered visual this modality exists to end.
+# browser that cannot be installed, a renderer that errors or refuses its
+# surface, or a capture that leaves no PNG behind all exit 1, because a capture
+# that quietly produces nothing is the undelivered visual this modality exists
+# to end, and one that shows a surface unfinished misleads whoever reads it.
 #
 # Usage:
 #   demo-screenshot.sh page --script <demo.md> --output <file.png>
