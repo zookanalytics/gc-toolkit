@@ -29,22 +29,25 @@ The check index is closed: you may add any check it declares and you may not
 invent one. Parse it rather than eyeballing it. The parser and the index come
 from different places and must be resolved separately: the parser is a pack
 script, the index is the reviewed repo's own. A pack rung on the index ladder
-would classify this rig against gc-toolkit's checks. The index comes out of the
-dispatch-pinned commit, `$REVIEWED_OID` from input 2, not off disk — the tree
-you stand in is your own worktree, not the commit you are classifying, and a
-branch may change the index it is judged against:
+would classify this rig against gc-toolkit's checks. The parser is the pack's
+own copy, which `gc <binding> scripts-dir` finds from any rig: it prints the
+directory holding the pack's scripts. `<binding>` is the name the city imports
+the pack under, which gc puts in front of this skill's name: `gc-toolkit` in
+`gc-toolkit.review-triage`. `gc skill list` prints it in this skill's FROM
+column. The index comes out of the dispatch-pinned commit, `$REVIEWED_OID` from
+input 2, not off disk — the tree you stand in is your own worktree, not the
+commit you are classifying, and a branch may change the index it is judged
+against:
 
 ```bash
-PARSER=""
-for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}"; do
-  [ -n "$c" ] && [ -x "$c/assets/scripts/review-checks.sh" ] && { PARSER="$c/assets/scripts/review-checks.sh"; break; }
-done
-INDEX=$(mktemp); FOUND=""
+# >>> triage-index-read
+INDEX=$(mktemp "${TMPDIR:-/tmp}/gctk-triage-index.XXXXXX"); FOUND=""
 for c in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
   [ -n "$c" ] || continue
   git -C "$c" show "${REVIEWED_OID}:review-checks.toml" >"$INDEX" 2>/dev/null && { FOUND=1; break; }
 done
-[ -n "$FOUND" ] && [ -n "$PARSER" ] && "$PARSER" --file "$INDEX"
+[ -n "$FOUND" ] && "$(gc <binding> scripts-dir)/review-checks.sh" --file "$INDEX"
+# <<< triage-index-read
 ```
 
 Each row gives you the check, its method, one line of purpose, and its phase —
@@ -56,7 +59,8 @@ A commit that carries no index is the no-index case below, not a reason to reach
 for the pack's copy or the tree you happen to be in. `signoff.sh` resolves it the
 same way: it validates `--add-gates` against the reviewed commit's own index, and
 widens nothing when that commit carries none — the added checks are dropped and
-correctness carries the change.
+correctness carries the change. A parser that does not run is not that case:
+the index went unread, so stop and say so rather than classify with no menu.
 
 ## Deciding
 
@@ -119,8 +123,11 @@ the ruling.
 Read the round first:
 
 ```bash
-bring-current-audit.sh render --anchor "$ANCHOR" --as comment   # the account
-bring-current-audit.sh show --anchor "$ANCHOR"                  # the raw record
+# >>> triage-round-read
+ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
+"$(gc <binding> scripts-dir)/bring-current-audit.sh" render --anchor "$ANCHOR" --as comment   # the account
+"$(gc <binding> scripts-dir)/bring-current-audit.sh" show --anchor "$ANCHOR"                  # the raw record
+# <<< triage-round-read
 ```
 
 The account gives a routine entry one line. The raw record keeps what that
@@ -184,6 +191,8 @@ above. Filing is recording, not proposing: the distiller judges it and a
 reviewed PR writes the index.
 
 ```bash
+# >>> triage-index-gap
+ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
 OBS_META=$(jq -nc --arg scope "repo:${GC_RIG:-unknown}" --arg prov "bead:${ANCHOR}:turn:$(date -u +%Y-%m-%d)" \
   '{task_kind: "observation", "obs.category": "review-index-gap", "obs.scope": $scope,
     "obs.source": "self", "obs.directive": "standing", "obs.provenance": $prov,
@@ -199,6 +208,7 @@ Triage on $ANCHOR at $REVIEWED_OID.
 <draft — explicitly non-binding>" --json)
 OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
+# <<< triage-index-gap
 ```
 
 ## What triage never does
