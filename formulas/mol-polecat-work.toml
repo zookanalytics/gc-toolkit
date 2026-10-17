@@ -1151,11 +1151,11 @@ description = """
 Prove the change is green before it can hand off. This step is a bounded check
 loop: each iteration runs the declared checks in its own session through `gctk
 rig`, which records each result against the commit it ran at, and the exit
-condition (assets/scripts/self-review-check.sh) converges the loop only when the
-records of test, lint and typecheck at the live HEAD pass. A red iteration
-spawns the next, up to `max_attempts`, so a failure the refinery would have
-bounced a hop later — deleting the workflow and repouring a fresh molecule — is
-fixed here instead. The refinery still runs the real gate as the backstop.
+condition (assets/scripts/self-review-check.sh) converges the loop only when
+test, lint, typecheck, setup and build all passed at the live HEAD. A red
+iteration spawns the next, up to `max_attempts`, so a failure the refinery
+would have bounced a hop later is fixed here instead. The refinery still runs
+the real gate as the backstop.
 
 Each iteration runs in a FRESH pooled session with none of the previous one's
 context — the loop clears session affinity on every pool retry, by design.
@@ -1209,8 +1209,10 @@ whose worktree they run in and whose work bead they publish to. test, lint and
 typecheck record their result against HEAD through `gctk rig`, and
 `--publish-bead` copies it onto the work bead's `rig_check.<check>`; a check the
 rig declares no command for records a pass that ran nothing. setup and build
-record nothing. A run already recorded at HEAD answers from its record. The
-test run is the affected subset when the rig declares one, else the full suite.
+record nothing, so on a clean tree the block notes their outcome at HEAD on the
+work bead (`self_review_setup_build`). A run already recorded at HEAD answers
+from its record. The test run is the affected subset when the rig declares one,
+else the full suite.
 The long calls go through `hb`, the claim-lease keepalive
 (`assets/scripts/lease-heartbeat.sh`): it refreshes `$CLAIMED_ITER_BEAD` while a
 call runs, so a suite that outlives the five-minute lease does not read as a
@@ -1250,23 +1252,23 @@ TEST_CMD=$(cat <<'CMD_EOF'
 CMD_EOF
 )
 PUB=(--publish-bead "$WORK_BEAD_ID")
-[ -z "$SETUP_CMD" ] || hb "$GCTK" rig setup --command "$SETUP_CMD"
+SETUP=none; [ -z "$SETUP_CMD" ] || { hb "$GCTK" rig setup --command "$SETUP_CMD" && SETUP=pass || SETUP=fail; }
 if [ -n "$TYPECHECK_CMD" ]; then hb "$GCTK" rig typecheck --command "$TYPECHECK_CMD" "${PUB[@]}"; else "$GCTK" rig typecheck --nothing-declared "${PUB[@]}"; fi
 if [ -n "$LINT_CMD" ]; then hb "$GCTK" rig lint --command "$LINT_CMD" "${PUB[@]}"; else "$GCTK" rig lint --nothing-declared "${PUB[@]}"; fi
-[ -z "$BUILD_CMD" ] || hb "$GCTK" rig build --command "$BUILD_CMD"
+BUILD=none; [ -z "$BUILD_CMD" ] || { hb "$GCTK" rig build --command "$BUILD_CMD" && BUILD=pass || BUILD=fail; }
 if [ -n "$AFFECTED_CMD" ]; then hb "$GCTK" rig test --scope affected --command "$AFFECTED_CMD" "${PUB[@]}"
 elif [ -n "$TEST_CMD" ]; then hb "$GCTK" rig test --scope full --command "$TEST_CMD" "${PUB[@]}"
 else "$GCTK" rig test --nothing-declared "${PUB[@]}"; fi
+[ -n "$(git status --porcelain)" ] || gc bd update "$WORK_BEAD_ID" --set-metadata "self_review_setup_build=$(jq -nc --arg c "$(git rev-parse HEAD)" --arg s "$SETUP" --arg b "$BUILD" '{commit: $c, setup: $s, build: $b}')"
 ```
 A call exits 0 on a pass and 1 on a fail. Fix a failure your diff introduced,
 commit, and run the checks again. A fail answered from its record prints no
 output; `--force` runs it again to show what failed. Exit 4 says nothing about
-the code, and `gctk rig`'s line names why, such as files a run left that git
-does not ignore, or a crash; a repeat at one commit is the code's or the
-command's doing. When the rig declares no command and you run the repo's own
-quality gate (CLAUDE.md or AGENTS.md) instead, run it through the gate the same
-way, such as `hb "$GCTK" rig test --scope full --command '<its test command>'
-"${PUB[@]}"`.
+the code, and `gctk rig`'s line names why, such as untracked files a run left,
+or a crash; a repeat at one commit is the code's or the command's doing. When
+the rig declares no command and you run the repo's own quality gate (CLAUDE.md
+or AGENTS.md) instead, run it through the gate the same way, such as
+`hb "$GCTK" rig test --scope full --command '<its test command>' "${PUB[@]}"`.
 
 **4. A failure your diff did not cause.** A red check that fails the same way on
 `origin/{{base_branch}}` is pre-existing and does not hold the loop. Find or
@@ -1281,11 +1283,10 @@ SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --sh
 "${SCRIPTS:?rig-check-pre-existing.sh not found in the pack}/rig-check-pre-existing.sh" --bead "$WORK_BEAD_ID" --check "$CHECK" --commit "$(git rev-parse HEAD)" --trackers "$TRACKERS"
 # <<< self-review-pre-existing
 ```
-Mark only a failure you reproduced on the base. A run of that check with
-another command or scope replaces the record, and its fail needs a judgment of
-its own. A check still red after your best effort stays red: the exit condition
-reads it as "not yet", and the loop iterates. `git status` must be clean before
-you close the iteration.
+Mark only a failure you reproduced on the base; a run with another command or
+scope replaces the record and needs a mark of its own. A check still red after
+your best effort stays red: the exit condition reads it as "not yet", and the
+loop iterates. `git status` must be clean before you close the iteration.
 
 **5. Close this iteration bead — closing is what runs the exit condition.**
 Close by the explicit id you claimed; `$GC_BEAD_ID` is unset for a pool-claimed
@@ -1302,8 +1303,8 @@ spent.
 
 **Exit criteria (for the loop, not for you):** the records of test, lint and
 typecheck at HEAD pass, or name a failure the work bead marks pre-existing at
-that HEAD, and this iteration bead is closed. Any iteration that leaves the tree
-closer to that has done its job."""
+that HEAD, setup and build passed at that HEAD, and this iteration bead is
+closed. Any iteration that leaves the tree closer to that has done its job."""
 
 [steps.check]
 # Total attempts including the first. A red iteration spawns the next; this

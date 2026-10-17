@@ -1,6 +1,6 @@
 ---
 name: Every check-runner cut over to gctk rig, as built
-description: What cutting the rig-check call sites over to `gctk rig` and retiring `self_review_passed_sha` settled beyond the bead. Covers why the self-review exit condition reads three records, the pre-existing mark that stands in for the disposition field the gate dropped and holds the record it judged, the transitional read of the retired stamp, how each caller finds the binary, and the refinery's exit-4 and time bounds.
+description: What cutting the rig-check call sites over to `gctk rig` and retiring `self_review_passed_sha` settled beyond the bead. Covers why the self-review exit condition reads three records and a note of setup and build, the pre-existing mark that stands in for the disposition field the gate dropped and holds the record it judged, the transitional read of the retired stamp, how each caller finds the binary, and the refinery's exit-4 and time bounds.
 ---
 
 # Every check-runner cut over to `gctk rig`, as built
@@ -17,24 +17,35 @@ cutover inherits"). This records what the build decided on top of those.
 |---|---|---|
 | `mol-polecat-work` workspace-setup | setup | nothing is recorded |
 | `mol-polecat-work` preflight-tests | typecheck, lint, test as the full suite | the base commit, shared by every polecat on that base |
-| `mol-polecat-work` self-review | setup, typecheck, lint, build, then test: the affected subset, else the full suite, else a pass that ran nothing | the branch HEAD, published to the work bead |
+| `mol-polecat-work` self-review | setup, typecheck, lint, build, then test: the affected subset, else the full suite, else a pass that ran nothing | the branch HEAD, published to the work bead, which also notes what setup and build did there |
 | `mol-refinery-patrol` run-tests | setup, typecheck, lint, build, and test as the full suite when `run_tests` is true | the merged head the reviews are pinned to |
 | the correctness method's review-test-evidence | reads `test --check`, and runs the suites the diff touches through the gate only when there is no record | the pinned commit |
 
 The quorum's synthesis runs what the method runs, so it takes the evidence
 block as it stands. `self-review-check.sh` reads the records with `--check`.
 
-## The exit condition reads three records
+## The exit condition reads three records and a note of setup and build
 
 The bead named `gctk rig test --check`. The stamp it replaces certified every
-declared check: an iteration stamped only once lint and typecheck were green
-too. A condition that read the test record alone would pass a lint failure on
-to the refinery, the hop-later bounce the loop exists to stop. So
+declared check: an iteration stamped only once lint, typecheck and build were
+green too. A condition that read the test record alone would pass a lint
+failure on to the refinery, the hop-later bounce the loop exists to stop. So
 `self-review-check.sh` reads test, lint and typecheck at HEAD, and the
 self-review records a pass that ran nothing (`--nothing-declared`) for a check
-the rig declares no command for, so each check has a record to read. setup and
-build record nothing, by the gate's design, so the condition cannot gate them.
-An iteration fixes a failing build as it would any red check.
+the rig declares no command for, so each check has a record to read.
+
+setup and build record nothing, by the gate's design: setup leaves environment
+state behind, and a build makes itself current. The first build took that to
+mean the condition could not gate them, and the correctness review of
+fde3f9212 showed a failing build converging the loop, because the block ran on
+past the build's fail and the three records passed. So the block notes what
+setup and build did on the work bead, `self_review_setup_build` =
+`{"commit", "setup", "build"}`, each `pass`, `fail` or `none`, and the
+condition converges only on a note naming the live HEAD with neither one
+failed, whatever the records say. The block writes the note only on a tree
+with no uncommitted change, since a build over such changes says nothing about
+HEAD. A note an earlier iteration wrote at the same HEAD still answers, as a
+record there does.
 
 ## A pre-existing failure is a mark beside the record
 
@@ -77,10 +88,13 @@ nothing, so the new condition alone would read nothing at HEAD on every
 iteration and exhaust the run's budget. Seven molecules were in self-review or
 before it when this was built. So `self-review-check.sh` takes the stamp, when
 it names the live HEAD, in place of records only when nothing at all is
-recorded there. No pour writes the stamp after the cutover, so the fallback
-answers for those runs alone. tk-57ormgo removes it once a census finds none of
-them left in self-review. Until then the key has one reader and no writer in
-the pack, and the registry marks it RETIRED.
+recorded there. Such a run notes no setup and build either, and its stamp
+certified them, so the stamp naming HEAD stands in for that note too, also
+where another run's records answer at the same HEAD. No pour writes the stamp
+after the cutover, so the fallback answers for those runs alone. tk-57ormgo
+removes it once a census finds none of them left in self-review. Until then
+the key has one reader and no writer in the pack, and the registry marks it
+RETIRED.
 
 ## Finding the binary
 
@@ -115,9 +129,10 @@ section of `review-method.test.sh`), so the review frame sets `GCTK` in its
 
 Measured with PR #1217's renderer (formula defaults only, so an empty rig var
 renders empty), before and after: `mol-polecat-work.self-review` 7,356 to
-8,974, `preflight-tests` 11,377 to 12,338, `workspace-setup` 26,275 to 26,661;
+9,476, `preflight-tests` 11,377 to 12,338, `workspace-setup` 26,275 to 26,661;
 `mol-refinery-patrol.run-tests` 11,283 to 13,349 and `handle-failures` 9,601 to
-11,130. Each step that grew carries a heredoc per command it hands the gate and
-the gate's exit handling, and the self-review and handle-failures carry the
-pre-existing mark. The self-review stays under the 10,000-character hook cap
-with gc-toolkit's own commands rendered in; handle-failures crosses it.
+11,171. Each step that grew carries a heredoc per command it hands the gate and
+the gate's exit handling, the self-review and handle-failures carry the
+pre-existing mark, and the self-review notes setup and build. The self-review
+stays under the 10,000-character hook cap with gc-toolkit's own commands
+rendered in, at 9,657; handle-failures crosses it.

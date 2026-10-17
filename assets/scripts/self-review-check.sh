@@ -2,9 +2,10 @@
 # Exit condition for the `self-review` check loop in mol-polecat-work.
 #
 # Exit 0 ("pass" — closes the control bead and releases submit-and-exit) ONLY
-# when the tree checked out right now is clean and `gctk rig` holds a passing
+# when the tree checked out right now is clean, `gctk rig` holds a passing
 # record of each of the rig's recorded checks (test, lint and typecheck) at its
-# HEAD. Every other state, including any internal error in this script, exits
+# HEAD, and the work bead notes that setup and build passed at that HEAD. Every
+# other state, including any internal error in this script, exits
 # non-zero so the loop spawns the next iteration. Fail-closed is deliberate: a
 # false pass hands an unverified diff to the refinery, which is the red handoff
 # this loop exists to stop.
@@ -324,8 +325,8 @@ HEAD_SHA=$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null) ||
 # --- 5. Every recorded check must pass at THIS HEAD --------------------------
 # The iteration ran each check through `gctk rig`. A check the rig declares no
 # command for is recorded as a pass that ran nothing, so each of the three has a
-# record to read. setup and build record nothing, so nothing here reads them.
-# A recorded fail passes only when the work bead's rig_check_pre_existing.<check>
+# record to read. A recorded fail passes only when the work bead's
+# rig_check_pre_existing.<check>
 # carries that very record at this HEAD: the iteration found the same failure
 # red on the base and carried by a tracker (rig-check-pre-existing.sh). A run
 # with another command or scope replaces the record, and its fail needs a
@@ -364,19 +365,41 @@ for CHECK in test lint typecheck; do
 	*) fail "gctk rig $CHECK --check exited $RC in $WORKTREE" ;;
 	esac
 done
+
+# --- 6. setup and build must have passed at THIS HEAD ------------------------
+# gctk rig records nothing for them, so the iteration notes their outcome on the
+# work bead's self_review_setup_build, against the HEAD of the clean tree it ran
+# them in: pass, fail, or none for a check the rig declares no command for. A
+# fail holds the loop even when the records above all pass.
+SETUP_BUILD=$(printf '%s' "$ISSUE_JSON" | jq -r --arg c "$HEAD_SHA" '
+	.[0].metadata.self_review_setup_build // empty
+	| (if type == "string" then (fromjson? // empty) else . end)
+	| select(type == "object" and .commit == $c)
+	| [("setup", "build") as $k | select(.[$k] != "pass" and .[$k] != "none") | $k]
+	| if length == 0 then "passed" else join(" ") end' 2>/dev/null)
+case "$SETUP_BUILD" in
+passed) ;;
+"") UNRECORDED="$UNRECORDED setup build" ;;
+*) FAILED="$FAILED $SETUP_BUILD" ;;
+esac
 [ -z "$FAILED" ] || incomplete "not green at $HEAD_SHA:$FAILED; another iteration is needed"
 
 # A molecule poured before its self-review ran the checks through gctk rig
 # keeps step text that records nothing and stamps self_review_passed_sha on the
-# work bead. With no record at all, that stamp naming HEAD stands in for the
-# records, so such a run still converges.
+# work bead once every declared check, setup and build included, has passed.
+# That stamp naming HEAD stands in for the setup and build outcome such a run
+# never notes, and for the records when none of the three is recorded there,
+# so such a run still converges.
 if [ -n "$UNRECORDED" ]; then
 	LEGACY_SHA=$(printf '%s' "$ISSUE_JSON" | jq -r '.[0].metadata.self_review_passed_sha // empty')
-	if [ "$UNRECORDED" = " test lint typecheck" ] && [ "$LEGACY_SHA" = "$HEAD_SHA" ]; then
-		note "PASS: self-review green at $HEAD_SHA, by the stamp of a run poured before its checks were recorded"
-		exit 0
+	if [ "$LEGACY_SHA" = "$HEAD_SHA" ]; then
+		UNRECORDED="${UNRECORDED% setup build}"
+		if [ "$UNRECORDED" = " test lint typecheck" ]; then
+			note "PASS: self-review green at $HEAD_SHA, by the stamp of a run poured before its checks were recorded"
+			exit 0
+		fi
 	fi
-	incomplete "nothing recorded at $HEAD_SHA for:$UNRECORDED; the checks have not run at this commit, so another iteration is needed"
+	[ -z "$UNRECORDED" ] || incomplete "nothing recorded at $HEAD_SHA for:$UNRECORDED; the checks have not run at this commit, so another iteration is needed"
 fi
 
 note "PASS: self-review green at $HEAD_SHA"

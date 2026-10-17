@@ -968,15 +968,29 @@ keys = [
 # runs the rig's declared checks in its own session through `gctk rig`, which
 # records each result against the commit it ran at. The loop's exit condition,
 # assets/scripts/self-review-check.sh, converges only when those records pass at
-# the worktree's live HEAD on a clean tree. All three keys sit on the work bead.
-keys = ["self_review_passed_sha", "aborted_at", "self_review_loop_attempts"]
+# the worktree's live HEAD on a clean tree, and setup and build passed there.
+# Every key here sits on the work bead.
+keys = [
+  "self_review_passed_sha", "self_review_setup_build", "aborted_at",
+  "self_review_loop_attempts",
+]
 # self_review_passed_sha — RETIRED. The full commit sha an iteration verified,
 #   which the self-review step stamped when an agent's word stood for the
 #   checks' result. No step text a pour renders writes it now. A molecule
 #   poured before keeps step text that does, so self-review-check.sh still
 #   takes it, when it names the live HEAD, in place of records only where
-#   nothing is recorded at that HEAD. Registered so that residue on a
+#   nothing is recorded at that HEAD, and in place of self_review_setup_build,
+#   which such a run never writes. Registered so that residue on a
 #   pre-retirement bead reads as known, not as a stray.
+# self_review_setup_build — what setup and build, the declared checks `gctk
+#   rig` records nothing for, did at the commit an iteration ran them at. One
+#   JSON object stored as a string: commit, the full sha, and setup and build,
+#   each pass, fail, or none for a check the rig declares no command for. The
+#   self-review step writes it after its checks, and only on a tree with no
+#   uncommitted change, because a build over such changes says nothing about
+#   HEAD. self-review-check.sh converges the loop only when it names the live
+#   HEAD with neither one failed. Each run of the step rewrites it. Absent means
+#   no run noted them. Never cleared.
 # aborted_at — `self-review-exhausted`, stamped by self-review-check.sh on the
 #   budget's last failing attempt. The same update reopens the work bead, clears
 #   its route and session pins, reassigns it to the witness derived from its

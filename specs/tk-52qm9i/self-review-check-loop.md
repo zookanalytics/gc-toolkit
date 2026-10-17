@@ -9,8 +9,10 @@ description: How the mol-polecat-work self-review step composes with a ralph che
 > the implementation. Each iteration runs the declared checks through `gctk
 > rig`, which records each result against the commit it ran at, and the exit
 > condition reads those records at the live HEAD with `gctk rig <check>
-> --check` in place of `metadata.self_review_passed_sha`. The verify-not-run
-> shape and the session split below stand. The cutover is recorded in
+> --check`, with the work bead's note of setup and build, which `gctk rig`
+> does not record, in place of `metadata.self_review_passed_sha`. The
+> verify-not-run shape and the session split below stand. The cutover is
+> recorded in
 > [specs/tk-b0ww25t/check-runner-cutover.md](../tk-b0ww25t/check-runner-cutover.md).
 
 The self-review step of `mol-polecat-work` is a `[steps.check]` loop
