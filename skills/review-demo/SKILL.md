@@ -129,9 +129,10 @@ reports whether the `gh` it needs is present.
   that last changed it. The delivery's last line says the same, and the verdict
   body repeats it.
 - `screenshot`: render the one state that shows the change and capture it with
-  `assets/scripts/demo-screenshot.sh`, which saves a PNG from the headless
-  browser the video capture drives. Its subcommand is the kind of surface the
-  change affects:
+  `assets/scripts/demo-screenshot.sh`. It saves the PNG with the SprintShow
+  engine's screenshot command, in the headless browser the video capture
+  drives, and checks each step's proof as a video does. Its subcommand is the
+  kind of surface the change affects:
 
   ```bash
   cd "$(dirname "$REVIEW_WT")"

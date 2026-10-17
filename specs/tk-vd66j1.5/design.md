@@ -121,10 +121,10 @@ layout change is a screenshot, not a video; a new multi-step flow is a video.
 
 ## Modalities
 
-- Screenshot (new). Render one state of the surface a change affects in the
-  headless browser the video capture drives (the SprintShow engine's Playwright
-  and its chromium-headless-shell), save a PNG, and deliver it with
-  `demo-deliver.sh`. The surface is one of three kinds: an app page, driven to the
+- Screenshot (new). Render one state of the surface a change affects, save it
+  as a PNG with the SprintShow engine's screenshot command, in the headless
+  browser the video capture drives, and deliver it with `demo-deliver.sh`. The
+  surface is one of three kinds: an app page, driven to the
   state by a demo:capture script; a command's output, as a terminal shows it; or
   markdown, such as a PR comment, as GitHub's own renderer renders it.
   `assets/scripts/demo-screenshot.sh` captures each kind. Owned by tk-vd66j1.7.
