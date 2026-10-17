@@ -1462,8 +1462,10 @@ have "the sitting resolves the demand gate when it settles the question" \
      'gc bd gate resolve "$DEMAND"' "$REPO/assets/scripts/converse-signoff.sh"
 have "…and re-states the wait on the SUBJECT when it does not (cut-short consolidation)" \
      '"$HELM" demand "$SUBJECT" "$STILL_OWED"' "$REPO/assets/scripts/converse-signoff.sh"
-have "the prompt states the sibling rule for everything a sitting files" \
-     'SIBLING of the subject, never a' "$PROMPT"
+have "the prompt says what a sitting files sits beside the subject" \
+     'a sitting files sits beside the subject' "$PROMPT"
+have "…except work that decomposes an epic subject, which is its member" \
+     'genuinely decomposes an epic subject' "$PROMPT"
 
 # THE POINT OF ALL OF IT. A prose hold is a dispatch only a person can resume:
 # it requires someone to come back, read a sentence, and hand-clear a field.

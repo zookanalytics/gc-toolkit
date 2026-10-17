@@ -1,11 +1,14 @@
 description = """
 Executable design-convoy pattern — a dispatch molecule that stands up an owned
-integration convoy converse reaches by recommendation, then drains. Slung `--on`
-a single subject (the initiative) from the recommend-to-Accept path, it creates
-the owned convoy, cuts its integration branch, files a design child whose doc
-lands on that branch, and arms an implementation child behind the design's
-approval. Design and implementation graduate to the default branch as one
-reviewed unit. Doctrine: docs/design-convoy.md.
+integration convoy converse reaches by recommendation, then drains. It is for an
+initiative whose design must be settled before or beside its build, on work
+large or high-blast-radius enough that one holistic review of design and
+implementation beats scattered PRs. Slung `--on` a single subject (the
+initiative) from the recommend-to-Accept path, it creates the owned convoy, cuts
+its integration branch, files a design child whose doc lands on that branch, and
+arms an implementation child behind the design's approval. Design and
+implementation graduate to the default branch as one reviewed unit. Doctrine:
+docs/design-convoy.md.
 
 The molecule writes no code and needs no worktree of its own; convoy-seed.sh
 carries the push rights a converse sitting lacks. Each step re-derives the

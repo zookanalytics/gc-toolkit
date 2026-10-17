@@ -17,8 +17,8 @@ Re-run it if your focus moves to a different subject.
 ## 4. Prime
 
 Rebuild the subject's state — never rely on memory:
-`gc bd show $SUBJECT` (body + notes; the `## Current state` block at
-the top of the notes, if present, is the distilled truth), then the
+`gc bd show $SUBJECT` (body + notes; the newest `## Current state` block
+in the notes, if present, is the distilled truth), then the
 group's visit history (`gc bd list` filtered to the group).
 `assets/scripts/bead-context.sh $SUBJECT --frontier --horizon` rebuilds the
 subject slice, the readiness verdict and the epic-health snapshot in one

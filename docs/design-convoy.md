@@ -1,6 +1,6 @@
 ---
 name: Design-convoy pattern
-description: The executable owned-convoy pattern converse reaches by recommendation. mol-design-convoy stands up an owned integration convoy, cuts its branch, files a design child, and arms implementation behind the design's approval, so design and implementation graduate to the default branch as one reviewed unit. Covers the molecule, the seed script, the two operator gates under the universal approval rule, and the design-gated default. The when-to-recommend rubric ships in the converse and mechanik prompts.
+description: The executable owned-convoy pattern converse reaches by recommendation. mol-design-convoy stands up an owned integration convoy, cuts its branch, files a design child, and arms implementation behind the design's approval, so design and implementation graduate to the default branch as one reviewed unit. Covers the molecule, the seed script, the two operator gates under the universal approval rule, and the design-gated default.
 ---
 
 # Design-convoy pattern
@@ -11,6 +11,20 @@ approval, so the whole unit graduates to the default branch as one reviewed PR.
 A molecule converse recommends and the operator Accepts stands the convoy up:
 it creates the convoy, cuts the integration branch, files the design child, and
 arms implementation, with no human running git.
+
+## Scope
+
+**Mandate.** How a design-convoy runs: the molecule that stands one up, the
+branch cut it performs, the operator gates the unit passes through on its way to
+the default branch, and the choice between design-gated and all-in-one.
+
+**Boundaries.** Which work a design-convoy fits is stated in its formula's own
+description (`formulas/mol-design-convoy.toml`), which the `work` skill's
+formula choice reads. The owned convoy as the default PR unit, and how its
+children branch and land, is the mechanik's dispatch doctrine
+(`agents/mechanik/prompt.template.md`). The merge rule the gates apply is
+`gctk merge`'s, which `assets/scripts/merge.sh` runs; this page says how the
+pattern meets that rule and does not define it.
 
 ## Why a molecule stands it up
 
@@ -154,11 +168,3 @@ one tracked member is the subject, which the formula reads as `{{convoy_id}}`.
 `seed-convoy` creates the durable **owned convoy** for the PR unit. The input
 convoy is only this pour's handle on the subject. The owned convoy lives on and
 graduates.
-
-## When to reach for it
-
-The rubric that chooses a design-convoy over a plain work bead or a bare visit is
-routing guidance for the roles that route work, so it ships in their prompts.
-`template-fragments/design-convoy-routing.template.md` holds it, and the
-converse and mechanik prompts include it, each beside its own verb: converse
-recommends the formula, and mechanik slings it.
