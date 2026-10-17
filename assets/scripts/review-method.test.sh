@@ -40,9 +40,10 @@
 #                of the full suite or the affected subset is evidence and runs
 #                no suite, a fail whose record the anchor's pre-existing mark
 #                holds at that commit is not run again, any other fail is run
-#                again with --force, and no record, a pass that ran nothing,
-#                a machine failure or no binary runs the suites the diff
-#                touches through the gate; in bash and in zsh.
+#                again with --force, no record, a pass that ran nothing or a
+#                machine failure runs the suites the diff touches through the
+#                gate, and no binary is named and runs them plain; in bash and
+#                in zsh.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -348,8 +349,10 @@ for sh in $SHELLS; do
   eq "$(word "$OUT")" "no test evidence" "(EVIDENCE) $sh: nothing recorded at the pin is no evidence"
   case "$OUT" in *"run the suites the diff touches through the gate"*) ok "(EVIDENCE) $sh: …and sends the reviewer through the gate" ;; *) bad "(EVIDENCE) $sh: no record does not send the reviewer through the gate (got: $OUT)" ;; esac
   eq "$(word "$(evidence "$sh" 4 "")")" "no test evidence" "(EVIDENCE) $sh: a machine failure is no evidence"
-  eq "$(word "$(STUB_GCTK="$TMP/no-gctk" evidence "$sh" 0 "$(record pass full)")")" "no test evidence" \
-     "(EVIDENCE) $sh: no gctk binary is no evidence"
+  OUT=$(STUB_GCTK="$TMP/no-gctk" evidence "$sh" 0 "$(record pass full)")
+  eq "$(word "$OUT")" "no test evidence" "(EVIDENCE) $sh: no gctk binary is no evidence"
+  case "$OUT" in *"no gctk binary at '$TMP/no-gctk'"*"gctk-build order"*"plain, each as hb bash -c"*) ok "(EVIDENCE) $sh: …which names the missing binary, its build order and the plain run" ;; *) bad "(EVIDENCE) $sh: a missing binary is not named (got: $OUT)" ;; esac
+  case "$(STUB_GCTK="" evidence "$sh" 0 "$(record pass full)")" in *"no gctk binary at ''"*) ok "(EVIDENCE) $sh: an unset GCTK is no binary" ;; *) bad "(EVIDENCE) $sh: an unset GCTK is not named as no binary" ;; esac
 done
 
 echo "---"

@@ -32,12 +32,15 @@ judged, which answers only while that record stands:
 
 ```bash
 # >>> review-test-evidence
-REC=$(cd "$REVIEW_WT" && "$GCTK" rig test --check 2>/dev/null); RC=$?
+REC=""; RC=127
+if [ -x "${GCTK:-}" ]; then REC=$(cd "$REVIEW_WT" && "$GCTK" rig test --check 2>/dev/null); RC=$?; fi
 SCOPE=$(printf '%s' "$REC" | jq -r '.scope // empty' 2>/dev/null)
 ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
 PRE=""
 [ "$RC" = 1 ] && [ -n "$ANCHOR" ] && PRE=$(gc bd show "$ANCHOR" --json 2>/dev/null | jq -r --arg c "$REVIEWED_OID" --arg rec "$REC" '($rec | fromjson? // null) as $r | .[0].metadata["rig_check_pre_existing.test"] // empty | (if type == "string" then (fromjson? // empty) else . end) | select(type == "object" and .commit == $c and $r != null and .record == $r) | (.trackers // []) | join(", ")' 2>/dev/null)
-if [ "$RC" = 0 ] && { [ "$SCOPE" = full ] || [ "$SCOPE" = affected ]; }; then
+if [ ! -x "${GCTK:-}" ]; then
+  echo "no test evidence at ${REVIEWED_OID:-an unpinned commit}: no gctk binary at '${GCTK:-}' (the frame's workspace block sets GCTK, and the city's gctk-build order publishes the binary); run the suites the diff touches plain, each as hb bash -c '<suite>'"
+elif [ "$RC" = 0 ] && { [ "$SCOPE" = full ] || [ "$SCOPE" = affected ]; }; then
   echo "test evidence: the rig's tests passed at $REVIEWED_OID (scope $SCOPE); run no suite"
 elif [ "$RC" = 1 ] && [ -n "$PRE" ]; then
   echo "test evidence: the tests fail at $REVIEWED_OID as they do on the base, tracked by $PRE; do not run them again"

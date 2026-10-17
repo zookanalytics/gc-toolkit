@@ -154,7 +154,12 @@ sets `GCTK` by one line instead: `$GCTK_BIN`, else the city's build under
 mechanism, so each copy sits in a `gctk-bin` block, and `gctk-bin.test.sh`
 holds them to one line. The correctness method names no pack path (the STANDARDS
 section of `review-method.test.sh`), so the review frame sets `GCTK` in its
-`review-workspace-add` block, which the quorum's synthesis also runs.
+`review-workspace-add` block, which the quorum's synthesis also runs. The
+correctness method's evidence block tests the binary before its read, as
+`self-review-check.sh`, `rig-check-pre-existing.sh` and the refinery's gate
+start do. With none, it names the binary and the build order that publishes
+it, and the reviewer runs the suites plain, since there is no gate to record
+them through.
 
 ## The refinery's bounds
 
