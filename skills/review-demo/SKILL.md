@@ -155,9 +155,13 @@ reports whether the `gh` it needs is present.
   does it in the live city. `--text <file>` renders output captured earlier
   instead. For markdown, write the markdown the reviewed commit composes to the
   file. GitHub's own markdown renderer turns it into HTML in the context of the
-  rig's origin, so the capture shows it as the PR would. GitHub shows a
-  `<details>` block collapsed, and `--expand` opens every one, for a second
-  capture of what the collapsed blocks hold.
+  rig's origin, so the capture shows it as the PR would. github.com's page
+  script finishes some blocks after that renderer returns, such as a mermaid
+  diagram or math, and the capture has no such script. So markdown holding one
+  exits 1 with no capture and names each such block, and that comment is a
+  surface none of these captures renders. GitHub shows a `<details>` block
+  collapsed, and `--expand` opens every one, for a second capture of what the
+  collapsed blocks hold.
 
   Write the PNG in the review workspace, as the block above does, and name it
   for what it shows, because the file's name is the image's alt text on the

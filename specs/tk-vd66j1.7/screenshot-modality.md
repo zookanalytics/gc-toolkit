@@ -101,6 +101,31 @@ GitHub does not render an alert nested in another element, on github.com
 either, so the API's HTML is drawn as it stands. `--expand` opens every
 `<details>`.
 
+**A comment github.com finishes in the browser is refused.** The API's HTML is
+not the finished comment for every block. The correctness review at 903b29df5
+(finding tk-xf1prdl) captured a mermaid fence: the capture exited 0, and its PNG
+showed the fence's source and a "Loading" spinner where github.com draws the
+diagram. A mermaid, geojson, topojson or stl fence comes back as a section
+marked `js-render-needs-enrichment` that holds the fence's source and the
+spinner, and math comes back as its TeX inside a `<math-renderer>`. github.com's
+page script finishes both. Finishing them here is not possible as GitHub does
+it: the section names its renderer at viewscreen.githubusercontent.com, whose
+content security policy (`frame-ancestors 'self' https://github.com
+https://*.github.com`) lets no local page frame it. Drawing the diagram or the
+math with another library would show what that library draws, not what GitHub
+shows. So the renderer refuses a comment holding such a block. It exits 1,
+writes no page, and names each block, and the review takes the fallback its
+method gives for a surface none of these captures renders. The refusal covers
+every section carrying the enrichment marker, whatever its type, and every
+custom element except the two wrappers GitHub's renderer puts around markup
+that draws on its own: `markdown-accessiblity-table` (GitHub's spelling) around
+a table, and `themed-picture` around a picture. A block GitHub finishes with a
+script it adds later is refused too, not drawn unfinished. A block inside a
+collapsed `<details>` is refused as well, because the same comment captured
+with `--expand` would show it. `docs/architecture.md` and
+`docs/state-machine.md` carry mermaid fences, so a demo review that captures
+either one rendered reaches the refusal.
+
 **A port of the capture's own.** The engine serves a `--serve-dir` on a free
 port unless `--port` names one, so reviews capturing side by side on one host
 never share a server. The engine used to listen on 5173 for every one of them,
@@ -134,6 +159,8 @@ capture took 7 s and the `git log` terminal capture 4 s.
 | A triage verdict written by hand in the shape PR 1251's summary describes | markdown, then `--expand` | 0, 0 | The first line, two collapsed `<details>` blocks and the anchor line; expanded, the table and the trail inside them, with `#1266` linked (1604x408 px, 1604x708 px). |
 | The engine's sample app, its own demo script, and again with its last assertion made false | page, `--selector '#board'` | 0, 3 | The board reading "3 tasks · 1 done"; the second run counted the one step that asserted 2 done as failed (1280x658 px each). |
 | The engine at 0368d41, before its screenshot command, standing in as the rig checkout | terminal | 1 | No PNG. The message named the engine that lacks the command, and the command it was given did not run. |
+| A comment holding one mermaid fence, `graph LR` with `A[Claim work] --> B[Review]`, at 903b29df5 and again with the refusal | markdown | 0, 1 | At 903b29df5, the fence's source and a "Loading" spinner where github.com draws the diagram (1604x276 px). With the refusal, no PNG, and the message named the block: mermaid (1). |
+| A comment of ordinary markup with the refusal in place: a heading, a table, a task list, an emoji, an @mention, two `#` references, a footnote, an alert, a collapsed `<details>` and a code fence | markdown, `--title` | 0 | Each drawn as GitHub returned it, the table inside GitHub's wrapper element and both references linked (1604x1424 px). |
 
 After the library took over the engine's CLI, a proof-mode clip of the engine's
 sample app ran through `rig-demo-capture.sh` on it: six steps held, and a
@@ -150,6 +177,19 @@ the renderer, ignored a renderer that failed, read exit 3 as a failure, and
 dropped the stale-PNG removal. The first build's mutants still turn it red: an
 open stdin, a lost stderr, a greedy `--expand`, a missing repository context,
 and a carriage return that ends a line read as an empty redraw.
+
+The refusal's cases run on HTML GitHub's markdown API returned, kept verbatim
+in the suite: a mermaid section, the opening tags of the geojson, topojson and
+stl sections, math inline and on lines of its own, and markup that draws on its
+own (GitHub's table and picture wrappers, an issue link, and code that names
+the markers as text). The suite also runs the script end to end on that HTML,
+its node stub handing the renderer to a real node. The mermaid comment exits 1
+with nothing captured, and the ordinary one is drawn and captured. Each mutant
+of the refusal turned it red. The mutants dropped the refusal, refused only under
+`--expand`, dropped the math check or the section's type, drew every custom
+element, refused only mermaid, matched a marker in the comment's text, dropped
+either wrapper from the elements drawn from their markup, dropped the counts
+from the message, and ignored a renderer that failed.
 
 `demo-engine-lib.test.sh` runs the shared engine policy through both captures,
 under the same kind of stubs. Each mutant turned it red. The mutants put the
