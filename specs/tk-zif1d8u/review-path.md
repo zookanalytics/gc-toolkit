@@ -428,7 +428,7 @@ and pm do.
 | Skill | Frame values it uses today | Moves |
 |---|---|---|
 | correctness | `$M`, `$BASE`, `$REVIEWED_OID`, `$PR`, `$PR_REPO_Q`, `hb`, and `$ANCHOR` set from `$M` | Its preamble about the formula's blocks goes (`:12-17`). The test-evidence block reads `anchor_bead` and `reviewed_oid` through `review-frame.sh`. The page read becomes `gh pr view <review_pr_number> --repo <pr_repo>`. Suites run under the keepalive. Flags: none. |
-| triage | `$REVIEW_BEAD`, `$REVIEWED_OID`, and `$ANCHOR`, which nothing sets | The index parse becomes `review-checks.sh --show` (sections 5 and 6). Its no-index fallback and the missing-index observation go, because every rig has the pack's menu. The observation stays for a rig row the resolver rejects. The anchor comes from the record. It never blocks. Flags: `--add-gates`, `--reopen`, `--round-reason`, `--dismiss-approval`. |
+| triage | `$REVIEW_BEAD`, `$REVIEWED_OID`, and `$ANCHOR`, which nothing sets | The index parse becomes `review-checks.sh --show` (sections 5 and 6). Its no-index fallback and the missing-index observation go, because every rig has the pack's menu. That observation is the one every gascity triage files today, and tk-ymhd3o4 plans to file it once per repository instead (section 9). The observation stays for a rig row the resolver rejects. The anchor comes from the record. It never blocks. Flags: `--add-gates`, `--reopen`, `--round-reason`, `--dismiss-approval`. |
 | demo | `$REVIEW_BEAD`, `$REVIEWED_OID`, `$BASE`, `$REVIEW_WT`, `$SCRIPTS`, `hb` | Loads the stance. The capture runs beside the worktree `review-frame.sh` returns, under the keepalive. `demo-repo-artifact.sh` and `demo-deliver.sh` are reached through `scripts-dir`. `docs/review-demo.md` is the guidance the frame prints. Flags: `--visual`, `--visual-fallback-from`. |
 | pm | `$REVIEWED_OID` | Loads the stance. Reads `docs/product-goals.md` with `review-frame.sh show`. Flags: none. |
 | arch | none | Loads the stance. Reads `docs/architecture.md` and `docs/architecture/` with `review-frame.sh show`. Flags: none. |
@@ -519,7 +519,12 @@ Walk a gascity PR through the design:
 3. `review-frame.sh` reads the record from gascity's store, and diffs and builds
    the worktree in gascity's repository.
 4. `review-checks.sh --extension arch` reads gascity's default branch and finds
-   no extension.
+   no extension. So arch reads `docs/architecture.md` at the reviewed commit,
+   which gascity does not keep, and says so in its coverage line, as its method
+   already provides. gascity's architecture lives under `engdocs/architecture/`,
+   and gascity carries no review files of its own: the operator closed its
+   index bead, gc-7dr9l, as below the fork's change bar. Pointing a pack check at
+   a rig's own docs from outside the rig is a limit this design leaves in place.
 5. Triage can add arch, pm or demo, and signoff.sh validates the add against the
    same effective index.
 6. liveness-sweep classifies gascity's anchors against that index, not
@@ -776,6 +781,15 @@ ruled.
 - **The step-size bound.** This design shortens every review step, because the
   re-derivation blocks become script calls. The review step is 8,915
   characters today, against #1217's bound of 9,000.
+
+### Another open bead on this surface
+
+tk-ymhd3o4 (routed to the polecat pool, no branch yet) changes the triage
+skill's index-gap observation so a repository's missing index is recorded once
+rather than on every review. Unit A (section 10) removes the missing-index case
+altogether, because a rig with no index gets the pack's checks. What is left for
+tk-ymhd3o4 is the stale case, a rig row the resolver rejects. Built before unit
+A, it changes a block unit A then deletes. Built after, it is that one case.
 
 ### Recommendation for the sitting
 
