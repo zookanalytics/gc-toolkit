@@ -12,9 +12,10 @@ change, not an implementation detail — amend this table in the same PR.
 ## Scope
 
 **Mandate.** Who may exercise each destructive or state-bearing power in the
-pack, over beads, over origin refs, over the live rig checkouts, over the city's
-own config and over sessions: the sole holder of each power, the evidence an act
-requires, and what the holder may never do.
+pack, over beads, over origin refs, over the live rig checkouts, over the
+worktrees a rig's checks run in, over the city's own config and over sessions:
+the sole holder of each power, the evidence an act requires, and what the holder
+may never do.
 
 **Boundaries.** It names holders and their limits, not how an act runs; each
 holder's own script or doc carries its mechanics. The anchor lifecycle these
@@ -82,6 +83,12 @@ apart from them.
 | Power | Sole holder | Evidence required | May never |
 |---|---|---|---|
 | Move a live `rigs/*` checkout: fast-forward it to its default branch, set aside the local changes that block that fast-forward, or reset away SHA churn | `assets/scripts/reconcile-rig-checkouts.sh`, which `orders/reconcile-rig-checkouts.toml` runs | HEAD on the default branch. A set-aside only on a checkout that is only behind its remote, when no blocking path is unmerged, each blocking tracked path's working copy is absent, equals HEAD or the remote, or matches a blob a remote-tracking ref's history holds, and each untracked file in the way of what the fast-forward writes, an ignored file included, already holds the bytes written on its own path. Before a tracked path moves, every dirty path's staged and working-tree state is pinned under `refs/gc-toolkit/reconcile-set-aside/`. A reset only on a diverged checkout whose local commits, merges, and staged and working-tree content are all proven upstream, and where nothing untracked, an ignored file included, is in the way of the remote's tree but a copy of the remote's bytes on its own path. Each move runs with `--no-overwrite-ignore`, the fast-forward as `git merge --ff-only` and the reset as `git checkout -B` onto the remote, so git refuses rather than overwrites or deletes untracked content in its way, ignored or not | commit, merge or rebase in the checkout; move a HEAD parked off the default branch; change a dirty path the fast-forward does not rewrite; discard content it has neither pinned nor proven upstream, an ignored file included |
+
+## Powers over the worktrees a rig's checks run in
+
+| Power | Sole holder | Evidence required | May never |
+|---|---|---|---|
+| Put back what a setup or build command leaves in the worktree it ran in: reset each tracked file to HEAD, staged or not, and remove each untracked file and each untracked nested repository git does not ignore, a nested repository with everything in it (`git reset --hard`, then `git clean -ffd`) | `gctk rig setup` and `gctk rig build` (`services/gctk/internal/cli/rig.go`, through `Checkout.PutBack` in `services/gctk/internal/git/git.go`), which `mol-polecat-work` runs in the work bead's worktree (workspace-setup's setup, the self-review's setup and build) and the refinery's run-tests gate runs in its prep worktree | a worktree its caller alone writes while the command runs. Each pack caller runs it in a linked worktree it holds, never in a clone's main worktree such as a live `rigs/*` checkout, which is `reconcile-rig-checkouts.sh`'s (above). gctk does not check which kind of worktree it is in, and puts back in either once it reads it clean. The worktree read clean just before the command ran, with no tracked change, no untracked file git does not ignore and no change inside a submodule, whatever the config would hide, so every change the status lists after the run is taken as the command's. A status that could not be read counts as not clean. A change to a file git is told to assume unchanged escapes that read, as it escapes every recorded check's, and is put back with whatever the run left. The command ended in a pass, a fail or a machine failure, not in a signal sent to gctk, and HEAD is still at the commit read before the run. gctk names on stderr what the run left and what is left after the put-back, ten paths of each and a count of the rest | put back anything in a worktree that read with changes before the run, or whose status it could not read, since those changes cannot be told from the command's; move HEAD, or put back anything once the command has moved it; remove an ignored file, other than one inside a nested repository it removes or one the command left where a tracked file it removed goes back; change anything inside a submodule, whatever `submodule.recurse` says: a submodule the command changed, its HEAD, files and untracked files alike, stays as the command left it and is named; put back after test, lint or typecheck, which refuse a worktree with changes instead |
 
 ## Powers over the city's own config
 
