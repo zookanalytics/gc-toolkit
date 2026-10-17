@@ -260,10 +260,11 @@ synthesis meet a short record the same way. The verdict step's failure arm
 (`mol-review.toml:368-384`), which the quorum's synthesis repeats, restores the
 bead's route only when `record` reads the record whole. After signoff.sh's
 interrupted retirement, the arm closes the chain and drains without restoring
-the route. A claimant that holds a short review with no workflow, because a
-person or a failure arm poured before this design routed it, appends the
-refusal and releases its claim with the route left empty. No path returns a
-short review to the pool, because the next claim would meet the same refusal.
+the route. A claimant can also hold a short review with no workflow, because a
+person routed it, or because the failure arm of a workflow poured before this
+design restored its route. That claimant appends the refusal and releases its
+claim with the route left empty. No path returns a short review to the pool,
+because the next claim would meet the same refusal.
 Reviewing an unpinned commit is never the fallback.
 
 Each of those paths leaves the review open, with no route and nothing driving
