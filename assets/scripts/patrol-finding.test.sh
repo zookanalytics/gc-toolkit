@@ -77,6 +77,7 @@ case "${1:-}" in
             | if ($mine | length) > 0 then . + {dependencies: $mine} else . end)')
     printf '%s\n' "$out" ;;
   show)
+    [ -n "${STUB_SHOW_FAIL:-}" ] && { echo "bd: down" >&2; exit 1; }
     shift; id="${1:-}"
     out=$(jq -c --arg id "$id" '[.[] | select(.id == $id)]' "$STORE")
     if [ "$(printf '%s' "$out" | jq 'length')" = "0" ]; then
@@ -176,6 +177,7 @@ reset() {
   echo '[]' > "$STUB_STORE"; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_PROACTIVE_LOG"
   printf '0' > "$STUB_SEQ"
   export STUB_CREATE_FAIL="" STUB_UPD_FAIL="" STUB_LIST_FAIL="" STUB_LIST_FAIL_FIELD="" STUB_DROP_KEYS=""
+  export STUB_SHOW_FAIL=""
   export STUB_CREATE_NO_ID="" STUB_DELIVERABLE_RC=0 STUB_SLING_RC=0
   export GC_RIG="gc-toolkit"
 }
@@ -701,6 +703,119 @@ eq "$(beads)" "1" "(wisp) the next pass's wisp lands on the same bead"
 eq "$(meta fnd-1 'finding.occurrences')" "2" "(wisp) as an occurrence"
 OUT=$("$SUT" --key witness-binding-prefix-empty --about tk-wisp-ghi --title t --message m --dry-run 2>&1)
 hasnt "$OUT" "about=" "(wisp) a dry run shows no subject either"
+
+# ── 20. a recurrence's note is one bounded line, under a notes cap ────
+# A doctor check's finding is its whole JSON result, details array included,
+# and the array changes on nearly every pass. A JSON listing of live beads
+# carries each bead's whole row, so a recurrence notes only the head of the
+# new text, and the notes stop growing at 65536 bytes.
+# doctor_msg <n> -> a check's finding naming n sessions in its details.
+doctor_msg() {
+  jq -nc --argjson n "$1" '{name: "gc-toolkit:nudge-unconfirmed", status: "warning", severity: "advisory",
+    message: "\($n) session(s) have an unconfirmed nudge delivery",
+    details: [range(0; $n) | "session \"pool-\(.)\" has an unconfirmed startup nudge (attempt 5 of 5)"]}'
+}
+# set_notes <id> <file> — replace a bead's notes with the file's text.
+set_notes() {
+  local tmp
+  tmp=$(mktemp "$TMP/store.XXXXXX")
+  jq -c --arg id "$1" --rawfile n "$2" 'map(if .id == $id then .notes = $n else . end)' \
+    "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
+}
+notes_bytes() { jq -r --arg id "$1" '(.[] | select(.id==$id) | .notes // "") | utf8bytelength' "$STUB_STORE"; }
+# longest_line <text> -> the byte length of its longest line.
+longest_line() { printf '%s\n' "$1" | LC_ALL=C awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }'; }
+# filler <bytes> -> a file of that many bytes of note text.
+filler() { head -c "$1" < /dev/zero | tr '\0' 'x' > "$TMP/filler"; printf '%s' "$TMP/filler"; }
+
+reset
+"$SUT" --check gc-toolkit:nudge-unconfirmed --scope deacon-findings \
+  --title "doctor nudge-unconfirmed" --message "$(doctor_msg 300)" >/dev/null 2>&1
+has "$(body fnd-1)" "pool-299" "(bounded) the first text is the body, verbatim"
+has "$(body fnd-1)" "until the notes reach 65536 bytes" "(bounded) the body names the notes cap"
+for n in $(seq 301 312); do
+  OUT=$("$SUT" --check gc-toolkit:nudge-unconfirmed --scope deacon-findings \
+          --title "doctor nudge-unconfirmed" --message "$(doctor_msg "$n")" 2>&1)
+done
+NOTES=$(notes fnd-1)
+eq "$(beads)" "1" "(bounded) twelve changed recurrences are one bead"
+eq "$(meta fnd-1 'finding.occurrences')" "13" "(bounded) all counted on it"
+eq "$(grep -c 'finding recurred with changed text' <<< "$NOTES")" "12" "(bounded) one note per changed text"
+eq "$(printf '%s\n' "$NOTES" | wc -l | tr -d ' ')" "12" "(bounded) and each note is one line"
+L=$(longest_line "$NOTES")
+if [ "$L" -le 400 ]; then ok "(bounded) a note is at most 400 bytes (longest $L)"; else bad "(bounded) a note runs $L bytes"; fi
+hasnt "$NOTES" "pool-150" "(bounded) the details array is not noted"
+has "$NOTES" "312 session(s) have an unconfirmed nudge delivery" "(bounded) the head of the new text is"
+has "$(tail -n 1 <<< "$NOTES")" "digest $(meta fnd-1 'finding.digest'))" "(bounded) the last note names the digest finding.digest holds"
+has "$OUT" "a one-line note of the changed text" "(bounded) says what it noted"
+
+# Notes just under the cap: the text keeps changing, and the notes never pass
+# the cap. One marker line says the text is no longer noted, and nothing
+# follows it.
+reset
+"$SUT" --check gc-toolkit:nudge-unconfirmed --scope deacon-findings \
+  --title "doctor nudge-unconfirmed" --message "$(doctor_msg 10)" >/dev/null 2>&1
+set_notes fnd-1 "$(filler 64000)"
+for n in $(seq 11 18); do
+  D_BEFORE=$(meta fnd-1 'finding.digest')
+  OUT=$("$SUT" --check gc-toolkit:nudge-unconfirmed --scope deacon-findings \
+          --title "doctor nudge-unconfirmed" --message "$(doctor_msg "$n")" 2>&1)
+done
+NB=$(notes_bytes fnd-1)
+if [ "$NB" -le 65536 ]; then ok "(cap) eight changed recurrences leave the notes under the cap ($NB bytes)"; else bad "(cap) the notes grew to $NB bytes, past the 65536-byte cap"; fi
+eq "$(grep -c 'and their text is not noted' <<< "$(notes fnd-1)")" "1" "(cap) the marker goes in once"
+has "$(tail -n 1 <<< "$(notes fnd-1)")" "and their text is not noted" "(cap) and nothing is noted after it"
+eq "$(meta fnd-1 'finding.occurrences')" "9" "(cap) every recurrence is still counted"
+if [ "$(meta fnd-1 'finding.digest')" != "$D_BEFORE" ]; then ok "(cap) finding.digest still moves with the text"; else bad "(cap) finding.digest stopped at $D_BEFORE"; fi
+has "$OUT" "not noted, because the notes are at their 65536-byte cap" "(cap) says why the text was not noted"
+has "$(cat "$STUB_GC_LOG")" "--append-notes" "(cap) appends, never replaces"
+hasnt "$(cat "$STUB_GC_LOG")" " --notes " "(cap) --notes would erase the other writers' notes"
+
+# 500 bytes of room: enough for a line (about 310 bytes) or for the marker
+# twice (about 240 each), but not for a line and the marker. The line is held
+# back so the marker that says why still fits, and the marker goes in once.
+reset
+"$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 10)" >/dev/null 2>&1
+set_notes fnd-1 "$(filler 65036)"
+"$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 11)" >/dev/null 2>&1
+"$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 12)" >/dev/null 2>&1
+eq "$(grep -c 'and their text is not noted' <<< "$(notes fnd-1)")" "1" "(cap/reserve) the marker goes in where a line alone would have fit"
+hasnt "$(notes fnd-1)" ", digest " "(cap/reserve) and no line goes in ahead of it"
+NB=$(notes_bytes fnd-1)
+if [ "$NB" -le 65536 ]; then ok "(cap/reserve) the notes stay under the cap ($NB bytes)"; else bad "(cap/reserve) the notes grew to $NB bytes"; fi
+
+# Notes already past the cap get nothing at all, not even the marker.
+reset
+"$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 10)" >/dev/null 2>&1
+set_notes fnd-1 "$(filler 100000)"
+OUT=$("$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 11)" 2>&1); RC=$?
+eq "$RC" "0" "(past cap) exit 0"
+eq "$(notes_bytes fnd-1)" "100000" "(past cap) notes past the cap are left as they are"
+eq "$(meta fnd-1 'finding.occurrences')" "2" "(past cap) the recurrence is counted"
+has "$OUT" "not noted" "(past cap) says the text was not noted"
+
+# Notes that cannot be read get nothing appended.
+reset
+"$SUT" --key doctor-unread --title t --message "first" >/dev/null 2>&1
+export STUB_SHOW_FAIL=1
+OUT=$("$SUT" --key doctor-unread --title t --message "second" 2>&1); RC=$?
+export STUB_SHOW_FAIL=""
+eq "$RC" "0" "(unread) the recurrence is still recorded"
+eq "$(notes fnd-1)" "" "(unread) unreadable notes get nothing appended"
+has "$OUT" "notes could not be read" "(unread) says why the text was not noted"
+
+# The head is cut by character on one line, under any locale: a multi-byte
+# character is never split, and a line break does not start a second note.
+reset
+"$SUT" --key doctor-wide --title t --message "first" >/dev/null 2>&1
+WIDE=$(printf '中%.0s' $(seq 1 300))
+LC_ALL=C "$SUT" --key doctor-wide --title t --message "$WIDE" >/dev/null 2>&1
+HEAD=$(notes fnd-1 | sed 's/^[^)]*): //')
+eq "$(printf '%s' "$HEAD" | jq -Rr 'length')" "201" "(head) cut at 200 characters plus the ellipsis, under the C locale"
+eq "$HEAD" "$(printf '中%.0s' $(seq 1 200))…" "(head) and no character is split"
+"$SUT" --key doctor-wide --title t --message "$(printf 'line one\n\tline two\r\nline three')" >/dev/null 2>&1
+eq "$(notes fnd-1 | wc -l | tr -d ' ')" "2" "(head) a multi-line text is one note line"
+has "$(tail -n 1 <<< "$(notes fnd-1)")" "): line one line two line three" "(head) its whitespace squashed to single spaces"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
