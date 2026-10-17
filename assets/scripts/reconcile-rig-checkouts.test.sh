@@ -57,9 +57,9 @@
 # and does not refuse over a local commit; (u) a checkout that is only behind
 # keeps in place, byte for byte, each file the incoming commits stop tracking
 # while the remote's tree ignores it, modified, clean or staged for deletion,
-# pins a modified one first, and ends with git status empty, also when the
-# remote starts tracking a file the checkout holds as an ignored copy of the
-# same bytes; it keeps no path
+# one whose name starts with a colon included, pins a modified one first, and
+# ends with git status empty, also when the remote starts tracking a file the
+# checkout holds as an ignored copy of the same bytes; it keeps no path
 # the remote's tree does not ignore, whatever the checkout ignores, no path the
 # remote rewrites, writes under or writes a file above, and no path with a
 # staged edit; a refused fast-forward puts the kept copies back; the next pass
@@ -1384,6 +1384,24 @@ bash "$SCRIPT" >/dev/null
 eq "$(git -C "$TMP/untrackedabsent" rev-parse HEAD)" "$UNTRACKEDABSENT_REMOTE" "a path with no working copy is not kept, and the checkout advances"
 eq "$(cat "$TMP/untrackedabsent/.beads/config.yaml" 2>/dev/null)" "cfg" "the other file is kept"
 eq "$(git -C "$TMP/untrackedabsent" status --porcelain)" "" "the path with no working copy ends untracked"
+
+# untrackedcolon: the remote stops tracking and ignores a clean file whose name
+# starts with a colon, which check-ignore would read as pathspec magic. The file
+# is kept like any other.
+s="$TMP/untrackedcolon.src"; git init -q -b main "$s"
+echo x > "$s/:!x"; git -C "$s" add -A; git -C "$s" commit -qm u1
+git clone -q --bare "$s" "$TMP/untrackedcolon.git"; git clone -q "$TMP/untrackedcolon.git" "$TMP/untrackedcolon"
+printf '/:!x\n' > "$s/.gitignore"; git --literal-pathspecs -C "$s" rm -q --cached ':!x'
+git -C "$s" add .gitignore; git -C "$s" commit -qm u2
+git -C "$s" push -q "$TMP/untrackedcolon.git" main; git -C "$TMP/untrackedcolon" fetch -q origin
+UNTRACKEDCOLON_REMOTE="$(git -C "$TMP/untrackedcolon.git" rev-parse main)"
+rigs_json untrackedcolon
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$TMP/untrackedcolon" rev-parse HEAD)" "$UNTRACKEDCOLON_REMOTE" "a path whose name starts with a colon is read as a path, and the checkout advances"
+eq "$(cat "$TMP/untrackedcolon/:!x" 2>/dev/null)" "x" "a file whose name starts with a colon is kept in place"
+eq "$(git -C "$TMP/untrackedcolon" status --porcelain)" "" "the kept file whose name starts with a colon ends untracked and ignored"
+eq "$(esc_count untrackedcolon)" "0" "keeping a file whose name starts with a colon is not escalated"
 
 # leftoverdir: an interrupted pass left a copy of cfg aside, and a directory now
 # sits on its path. The copy stays aside rather than land inside the directory,

@@ -377,8 +377,10 @@ kept_paths() {
         done
     done
     if [ "$rc" -eq 0 ]; then
-        # check-ignore exits 1 when it ignores none of them.
-        ignored=$(printf '%s\n' "${cand[@]}" \
+        # check-ignore exits 1 when it ignores none of them. It reads a path
+        # that starts with a colon as pathspec magic, so each path goes in
+        # behind ./, which it prints back as given.
+        ignored=$(printf './%s\n' "${cand[@]}" \
             | git -C "$scratch" -c core.excludesFile=/dev/null -c core.quotepath=false check-ignore --stdin 2>/dev/null) \
             || rc=$?
         [ "$rc" -ne 1 ] || rc=0
@@ -387,7 +389,7 @@ kept_paths() {
     [ "$rc" -eq 0 ] || { kept_report="could not read whether the remote's .gitignore files ignore ${cand[*]}"; return 1; }
     while IFS= read -r p; do
         [ -n "$p" ] || continue
-        ign+=("$p")
+        ign+=("${p#./}")
     done <<< "$ignored"
     for p in "${cand[@]}"; do
         if in_list "$p" ${ign[@]+"${ign[@]}"}; then kept+=("$p"); fi
