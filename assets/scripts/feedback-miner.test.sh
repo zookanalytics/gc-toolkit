@@ -414,7 +414,7 @@ echo "── file: the outside capture ──"
 OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
 {"key": "$(key 11 review 101)", "statement": "The reviewer asks for the function to be split because it does three things.", "directive": "diff"}
 {"key": "$(key 11 comment 201)", "statement": "The loop never ends on empty input.", "directive": "diff", "context": "The PR added the loop."}
-{"key": "$(key 11 review 108)", "statement": "A long review.", "directive": "standing"}
+{"key": "$(key 11 review 108)", "statement": "A long review.", "directive": "standing", "correction": "keep-reviews-short"}
 ROWS_EOF
 ); RC=$?
 eq "$RC" "0" "(38) filing outside rows exits 0"
@@ -440,6 +440,11 @@ has "$LONG_BODY" " …
 — johnzook" "(51) a long quote is cut, and the link carries the rest"
 eq "$(jq -r --arg k "$(key 11 review 108)" '.[] | select(.metadata["obs.provenance"] == $k) | .metadata["obs.directive"]' "$STORE/obs.json")" \
    "standing" "(52) the row's directive is kept"
+eq "$(jq -r --arg k "$(key 11 review 108)" '.[] | select(.metadata["obs.provenance"] == $k) | .metadata["obs.correction"] // "absent"' "$STORE/obs.json")" \
+   "keep-reviews-short" "(52a) a row's correction is filed as obs.correction"
+eq "$(jq -r --arg k "$(key 11 review 108)" '.[] | select(.metadata["obs.provenance"] == $k) | .metadata["obs.category"]' "$STORE/obs.json")" \
+   "outside-review" "(52b) under the outside capture's category still"
+eq "$(jq -r '.metadata | has("obs.correction")' <<< "$OBS")" "false" "(52c) and a row with no correction files none"
 
 CREATES=$(grep -c '^bd create' "$TMP/gc.log")
 OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
@@ -453,6 +458,8 @@ has "$OUT" "== 0 of 0 unrecorded outside post(s) not yet shown whole ==" "(55) s
 has "$OUT" "== 6 outside post(s) an earlier call showed whole are not recorded yet; file each from what that call printed: " \
     "(55a) and names the ones not recorded yet"
 hasnt "$OUT" "$(key 11 comment 201)" "(55b) leaving out what this run filed"
+has "$OUT" "== corrections outside posts already name, to reuse when one fits: keep-reviews-short (1) ==" \
+    "(55c) and it lists the corrections this run's outside posts named"
 
 OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
 {"key": "$(key 11 comment 304)", "statement": "Asks for a demo video.", "directive": "diff"}
@@ -478,6 +485,9 @@ OUT=$(GC_RIG=another-rig "$SUT" file --dir "$W" <<ROWS_EOF 2>&1
 {"key": "$(key 11 review 105)", "statement": "Copilot flags a null dereference.", "directive": "loud"}
 not json
 {"key": "$(key 11 review 105)", "statement": "Copilot flags a possible null dereference."}
+{"key": "$(key 11 comment 203)", "statement": "The guard reads the wrong variable.", "correction": "Read The Right Variable"}
+{"key": "$(key 11 comment 203)", "statement": "The guard reads the wrong variable.", "correction": "outside-review"}
+{"key": "$(key 11 review 104)", "statement": "A point.", "category": "a-point", "norm": "N.", "correction": "a-point"}
 ROWS_EOF
 ); RC=$?
 eq "$RC" "1" "(58) a call with refused rows exits 1"
@@ -486,6 +496,9 @@ has "$OUT" "an app account notice is not review feedback" "(60) an app notice is
 has "$OUT" "the row has no statement" "(61) an empty statement is refused"
 has "$OUT" "directive must be standing or diff" "(62) a bad directive is refused"
 has "$OUT" "row is not a JSON object" "(63) a line that is not JSON is refused"
+has "$OUT" "correction must be a lowercase slug" "(63a) a correction that is not a slug is refused"
+has "$OUT" "correction names the standing correction the post makes, not outside-review" "(63b) as is outside-review as a correction"
+has "$OUT" "a city post names its correction in its category; leave correction out" "(63c) and a correction on a city post"
 has "$OUT" "filed 1," "(64) the valid row in the same call is still filed"
 eq "$(cat "$TMP/obs-list.rig" 2>/dev/null)" "fixture-rig" "(64a) file dedups against the swept rig's store, whatever GC_RIG its shell carries"
 eq "$(cat "$TMP/obs.rig" 2>/dev/null)" "fixture-rig" "(64b) and files the observation there"
@@ -586,6 +599,8 @@ hasnt "$OUT" "so the sweep reads back to then" "(78) a sweep after a finished ru
 eq "$(class_of "$(key 12 comment 401)")" "" "(79) the back-fill PR is out of the window"
 eq "$(field_of "$(key 11 comment 201)" captured)" "true" "(80) a post recorded by an earlier run reads as captured"
 has "$("$SUT" show --dir "$W" --city)" "already recorded on this post: tk-obs" "(81) show names what is already recorded on a post"
+has "$("$SUT" show --dir "$W" --outside)" "== corrections outside posts already name, to reuse when one fits: keep-reviews-short (1) ==" \
+    "(81a) a later run's show lists the corrections the store records"
 OUT=$(GC_RIG=another-rig "$SUT" flag --dir "$W" 2>&1); RC=$?
 eq "$RC" "0" "(82) a flag whose posts a finding already names exits 0"
 has "$OUT" "already named in a finding under unmarked-city-post" "(82a) and says so"
@@ -968,6 +983,21 @@ eq "$(printf '%s' "$SEEN" | grep . | sort | uniq -d | grep -c . || true)" "0" "(
 "$SUT" show --dir "$W" --outside --max-chars 0 >/dev/null 2>&1; eq "$?" "2" "(106) --max-chars must be a positive integer"
 mv "$FIX/prs.ours.keep" "$FIX/prs.ours.json"
 rm -f "$FIX/15.reviews.json" "$FIX/15.inline.json" "$FIX/15.issue.json"
+
+echo "── show counts each correction once per observation ──"
+fresh_dir z
+echo '[]' > "$STORE/obs.json"
+"$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
+"$SUT" show --dir "$W" --outside >/dev/null
+"$SUT" file --dir "$W" >/dev/null 2>&1 <<ROWS_EOF
+{"key": "$(key 11 comment 201)", "statement": "The loop never ends on empty input.", "correction": "guard-empty-input"}
+{"key": "$(key 11 comment 304)", "statement": "Asks for a demo video.", "correction": "guard-empty-input"}
+{"key": "$(key 11 review 101)", "statement": "Asks for the function to be split.", "correction": "split-long-functions"}
+ROWS_EOF
+NAMED="== corrections outside posts already name, to reuse when one fits: guard-empty-input (2), split-long-functions (1) =="
+has "$("$SUT" show --dir "$W" --outside)" "$NAMED" "(107) show counts this run's corrections, most used first"
+"$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
+has "$("$SUT" show --dir "$W" --outside)" "$NAMED" "(108) and a sweep re-run into the run's dir, which reads them from the store too, counts each once"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

@@ -69,14 +69,17 @@
 #       before the post that would take its bodies past --max-chars characters
 #       (default 16000). A post longer than that is printed in parts, one part a
 #       call, each call going on where the last one stopped. A call with
-#       --outside ends by naming the outside posts an earlier call printed
-#       whole that no observation records yet.
+#       --outside lists the corrections outside posts already name, and ends
+#       by naming the outside posts an earlier call printed whole that no
+#       observation records yet.
 #   feedback-miner.sh file --dir <work-dir> [--max-standing <n>]
 #       Read one JSON row per line on stdin and file an observation for each:
 #         {"key": <provenance>, "statement": <text>, "directive": "standing|diff",
 #          "context": <text, optional>, "scope": <obs.scope, optional>}
-#       A row on an outside post files the outside capture. A row on a city post
-#       is a standing-behavior capture and also needs "category" and "norm".
+#       A row on an outside post files the outside capture, and may name the
+#       standing correction the post makes in "correction", a lowercase slug
+#       filed as obs.correction. A row on a city post is a standing-behavior
+#       capture and also needs "category" and "norm".
 #       A row on a post that show has not printed whole in this --dir is
 #       refused. --max-standing caps the standing-behavior captures this run
 #       files.
@@ -225,10 +228,11 @@ read_surface() { # <out-file>
         | select(((.metadata // {}).task_kind // "") == "observation")
         | { id, title: (.title // ""),
             provenance: ((.metadata["obs.provenance"] // "") | tostring),
-            category: ((.metadata["obs.category"] // "") | tostring) }
+            category: ((.metadata["obs.category"] // "") | tostring),
+            correction: ((.metadata["obs.correction"] // "") | tostring) }
         | select(.provenance != "") ]
       | group_by(.provenance)
-      | map({key: .[0].provenance, value: map({id, category, title})})
+      | map({key: .[0].provenance, value: map({id, category, correction, title})})
       | from_entries' "$raw" > "$1"
 }
 
@@ -455,9 +459,15 @@ if [ "$VERB" = show ]; then
   is_count "$LIMIT" && [ "$LIMIT" -gt 0 ] || die_usage "--limit must be a positive integer"
   is_count "$MAX_CHARS" && [ "$MAX_CHARS" -gt 0 ] || die_usage "--max-chars must be a positive integer"
   PLAN="$DIR/plan.$$.json"
+  # The corrections outside posts already name, in the store and in this run's
+  # filings, most used first, so the agent can reuse a slug.
   jq -s --arg which "$WHICH" --argjson limit "$LIMIT" --argjson budget "$MAX_CHARS" \
-        --rawfile filed "$DIR/filed.tsv" --rawfile shown "$DIR/shown.tsv" '
-    ($filed | split("\n") | map(select(length > 0) | split("\t")[0])) as $done
+        --rawfile filed "$DIR/filed.tsv" --rawfile shown "$DIR/shown.tsv" --slurpfile obs "$DIR/obs.json" '
+    ($filed | split("\n") | map(select(length > 0) | split("\t"))) as $f
+    | ($f | map(.[0])) as $done
+    | ([($obs[0] // {})[][] | {id, c: (.correction // "")}] + ($f | map({id: .[2], c: (.[3] // "")}))
+       | map(select(.c != "")) | unique_by(.id) | group_by(.c)
+       | map({c: .[0].c, n: length}) | sort_by(-.n, .c)) as $named
     | ('"$SHOWN_POS"') as $pos
     | map(. + {len: (.body | length), from: ($pos[.key] // 0)})
     | (if $which == "outside"
@@ -471,10 +481,14 @@ if [ "$VERB" = show ]; then
         elif .used == 0 then .out += [$p + {to: ($p.from + $budget)}] | .used = $budget | .full = true
         else .full = true end)
     | {total: ($set | length), out,
-       unfiled: (if $which == "outside" then $offer | map(select(.from >= .len) | .key) else [] end)}' "$DIR/sweep.jsonl" > "$PLAN" \
+       unfiled: (if $which == "outside" then $offer | map(select(.from >= .len) | .key) else [] end),
+       named: (if $which == "outside" then $named else [] end)}' "$DIR/sweep.jsonl" > "$PLAN" \
     || { err "could not read the sweep in $DIR"; rm -f "$PLAN"; exit 1; }
   jq -r --arg which "$WHICH" '
     "== \(.out | length) of \(.total) \(if $which == "outside" then "unrecorded outside post(s) not yet shown whole" else "city post(s) in the standing window not yet shown whole" end) ==",
+    (if (.named | length) > 0
+     then "== corrections outside posts already name, to reuse when one fits: \(.named[0:50] | map("\(.c) (\(.n))") | join(", "))\(if (.named | length) > 50 then ", and \((.named | length) - 50) more" else "" end) =="
+     else empty end),
     (.out[]
      | "--- \(.key)",
        "by \(.login), \(.at), \(.url)",
@@ -540,8 +554,12 @@ if [ "$VERB" = file ]; then
       else
         (if $it.class == "outside" then "outside" else "standing" end) as $kind
         | (if $kind == "outside" then $oc else ($r.category // "" | trim) end) as $cat
+        | ($r.correction // "" | trim) as $cor
         | if $kind == "standing" and ($cat == "" or $cat == $oc) then {i: $i, key: $k, act: "error", why: "a city post needs its own category, other than \($oc)"}
           elif $kind == "standing" and (($r.norm // "" | trim) == "") then {i: $i, key: $k, act: "error", why: "a city post needs a proposed norm"}
+          elif $kind == "standing" and $cor != "" then {i: $i, key: $k, act: "error", why: "a city post names its correction in its category; leave correction out"}
+          elif $cor == $oc then {i: $i, key: $k, act: "error", why: "correction names the standing correction the post makes, not \($oc)"}
+          elif $cor != "" and ($cor | test("^[a-z0-9]+(-[a-z0-9]+)*$") | not) then {i: $i, key: $k, act: "error", why: "correction must be a lowercase slug, such as redundant-comments"}
           elif any(($recorded[$k] // [])[]; .category == $cat) then {i: $i, key: $k, act: "skip", why: "already recorded under \($cat)"}
           elif ($pos[$k] // 0) < ($it.body | length) then {i: $i, key: $k, act: "error",
             why: (if ($pos[$k] // 0) == 0 then "show has not printed this post in this run; read it with show, then file it"
@@ -549,15 +567,16 @@ if [ "$VERB" = file ]; then
           else
             ($r.statement | trim) as $st
             | ($r.context // "" | trim) as $cx
-            | {i: $i, key: $k, act: "file", kind: $kind, cat: $cat,
+            | {i: $i, key: $k, act: "file", kind: $kind, cat: $cat, cor: $cor,
                title: ("obs: " + ($st | one_line(160)) + " (pr:" + $slug + "#" + ($it.pr | tostring) + ")"),
                body: ("## Statement\n" + $st + "\n\n## Quote\n" + ($it | quote) + "\n— " + $it.login + ", " + $it.url + "\n\n"
                       + (if $kind == "standing" then "## Proposed norm\n" + ($r.norm | trim) + "\n\n(Draft rule text only — explicitly non-binding; the distiller judges.)\n\n" else "" end)
                       + "## Context\nPR #" + ($it.pr | tostring) + ", \"" + $it.title + "\": " + ($it | locus) + "." + (if $cx != "" then " " + $cx else "" end)),
-               meta: {task_kind: "observation", "obs.category": $cat,
-                      "obs.scope": ($r.scope // $scope | trim | if . == "" then $scope else . end),
-                      "obs.source": "miner", "obs.directive": ($r.directive // "diff"),
-                      "obs.provenance": $k, "gc.outcome": "recorded", "gc.work_outcome": "no-op"}}
+               meta: ({task_kind: "observation", "obs.category": $cat,
+                       "obs.scope": ($r.scope // $scope | trim | if . == "" then $scope else . end),
+                       "obs.source": "miner", "obs.directive": ($r.directive // "diff"),
+                       "obs.provenance": $k, "gc.outcome": "recorded", "gc.work_outcome": "no-op"}
+                      + (if $cor != "" then {"obs.correction": $cor} else {} end))}
           end
       end' > "$ACTIONS" 2>"$DIR/actions.err" \
     || { err "could not compose the rows: $(head -c 300 "$DIR/actions.err")"; rm -f "$ROWS" "$ACTIONS"; exit 1; }
@@ -579,7 +598,7 @@ if [ "$VERB" = file ]; then
              awk -F'\t' -v k="$key" '$1 == k { f = 1 } END { exit !f }' "$DIR/filed.tsv" || printf '%s\n' "$key" >> "$REFRESH"
              continue ;;
     esac
-    kind=$(printf '%s' "$a" | jq -r '.kind'); cat_=$(printf '%s' "$a" | jq -r '.cat')
+    kind=$(printf '%s' "$a" | jq -r '.kind'); cat_=$(printf '%s' "$a" | jq -r '.cat'); cor=$(printf '%s' "$a" | jq -r '.cor // ""')
     case "$THIS_CALL" in *$'\n'"$key|$cat_"$'\n'*)
       echo "$PROG: $key already filed under $cat_ by an earlier row of this call — skipped"; SKIPPED=$((SKIPPED + 1)); continue ;;
     esac
@@ -597,7 +616,7 @@ if [ "$VERB" = file ]; then
       FAILED=$((FAILED + 1)); continue
     fi
     THIS_CALL="$THIS_CALL$key|$cat_"$'\n'
-    printf '%s\t%s\t%s\n' "$key" "$kind" "$id" >> "$DIR/filed.tsv"
+    printf '%s\t%s\t%s\t%s\n' "$key" "$kind" "$id" "$cor" >> "$DIR/filed.tsv"
     [ "$kind" = standing ] && STANDING_DONE=$((STANDING_DONE + 1))
     echo "$PROG: filed $id ($kind) for $key"
     FILED=$((FILED + 1))

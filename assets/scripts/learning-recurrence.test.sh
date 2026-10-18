@@ -67,6 +67,11 @@ obs() { # id created_at provenance category pattern source
   jq -nc --arg id "$1" --arg c "$2" --arg p "$3" --arg cat "$4" --arg pat "$5" --arg s "$6" \
     '{id:$id, created_at:$c, metadata:{task_kind:"observation", "obs.provenance":$p, "obs.category":$cat, "obs.distilled":$pat, "obs.source":$s}}'
 }
+outside() { # id created_at provenance correction — the miner's outside capture
+  jq -nc --arg id "$1" --arg c "$2" --arg p "$3" --arg cor "$4" \
+    '{id:$id, created_at:$c, metadata:({task_kind:"observation", "obs.provenance":$p, "obs.category":"outside-review", "obs.source":"miner"}
+       + (if $cor == "" then {} else {"obs.correction":$cor} end))}'
+}
 mislabelled() { # id created_at category — carries the label, not the kind
   jq -nc --arg id "$1" --arg c "$2" --arg cat "$3" \
     '{id:$id, created_at:$c, metadata:{"obs.provenance":("prov-" + $id), "obs.category":$cat}}'
@@ -194,7 +199,32 @@ eq "$(jq -r '.m1_category_repeat.outside_events.window' <<< "$O")" "3" "the repo
 eq "$(jq -r '[.m2_post_adoption.rules[] | select(.pattern=="tk-pat1")] | .[0].since_adoption' <<< "$O")" "1" \
    "an outside post the distiller stamped still counts in M2"
 has "$(STUB_RIGS="$TMP/rigs2o.json" "$SUT" --repo "$REPO" --window-days 30 2>&1)" \
-    "outside review posts, not counted above: 3 this window" "the text report names them"
+    "outside review posts that name no correction, not counted above: 3 this window" "the text report names them"
+
+# --- 2a3. an outside post that names a standing correction ----------------
+# The same correction posted on three PRs, each filed as an outside post that
+# names it, counts as one category repeating. An outside post that names none
+# stays out of M1. A self-report of one of those posts under the same slug is
+# the same event, read twice.
+mkdir -p "$TMP/stores2c"
+{
+  outside c1 "$(ago 9)" "pr:o/r#50:comment:50" redundant-comments
+  outside c2 "$(ago 7)" "pr:o/r#51:comment:51" redundant-comments
+  outside c3 "$(ago 5)" "pr:o/r#52:review:52"  redundant-comments
+  obs     c4 "$(ago 4)" "pr:o/r#52:review:52"  redundant-comments "" self
+  outside c5 "$(ago 3)" "pr:o/r#53:comment:53" ""
+  outside c6 "$(ago 2)" "pr:o/r#54:comment:54" ""
+} | jq -s . > "$TMP/stores2c/alpha.json"
+cat > "$TMP/rigs2c.json" <<JSON
+{"rigs":[{"name":"alpha","path":"$TMP/stores2c/alpha.json"}]}
+JSON
+C=$(STUB_RIGS="$TMP/rigs2c.json" "$SUT" --repo "$REPO" --window-days 30 --json 2>&1)
+eq "$(jq -r '.m1_category_repeat.window.categorised' <<< "$C")" "3" "M1 counts each outside post that names a correction under it"
+eq "$(jq -r '.m1_category_repeat.window.repeats' <<< "$C")" "2" "so the second and third posting of one correction are repeats"
+eq "$(jq -c '.m1_category_repeat.top_repeating' <<< "$C")" '[{"category":"redundant-comments","count":2}]' \
+   "and the repeating category is the correction's slug"
+eq "$(jq -r '.corpus.events_after_dedup' <<< "$C")" "5" "a self-report of a post under the slug its outside capture names is the same event"
+eq "$(jq -r '.m1_category_repeat.outside_events.window' <<< "$C")" "2" "the outside posts that name no correction stay out of M1, counted beside it"
 
 # --- 2b. one provenance key, several distinct corrections -----------------
 # A whole-turn provenance (bead:<id>:turn:<date>) covers every correction made

@@ -194,14 +194,18 @@ characters; a post with one point takes a sentence or two. A short reply
 again", "change all occurrences", "stop doing X everywhere"); everything
 phrased about this change is `diff`, and so is anything unsure. An optional
 **`context`** says what the diff was doing when the statement needs it; the
-PR, file and line are added for you.
+PR, file and line are added for you. An optional **`correction`** names, as a
+lowercase slug, the standing correction a post makes: one about how the work
+is done in general, not a point about this diff. The recurrence metric counts
+repeats by it, so reuse a slug when one fits: show lists the corrections
+already named, and the categories recorded on the post.
 
 Show and file in turns until show reports nothing left to show or file, and
-file a post shown in parts after its last part. Every outside post gets its observation, the brief
-ones too, and so does a post an earlier observation already covers: the
-distiller reads the set, and a post left out is a miss it never sees. A
-back-filling first run can hold hundreds. The script skips what the store
-already records, so a fresh session resumes by starting again at §1.
+file a post shown in parts after its last part. Every outside post gets its
+observation, the brief ones too, and so does a post an earlier observation
+already covers: the distiller reads the set, and a post left out is a miss it
+never sees. A back-filling first run can hold hundreds. The script skips what
+the store already records, so a fresh session resumes by starting again at §1.
 
 ## 3. The standing-behavior capture: the city's own posts
 
