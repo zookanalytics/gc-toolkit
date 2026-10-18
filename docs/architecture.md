@@ -203,7 +203,8 @@ corrective feedback into standing behavior, so attention is never spent twice:
 
 1. **Capture.** Working agents self-report observation beads when a turn
    brings corrective feedback; the `feedback-miner` order sweeps merged PRs'
-   review comments for what self-report missed; "learn this: …" is the
+   review comments, recording every review post from outside the city and
+   what self-report missed in the city's own; "learn this: …" is the
    operator fast path.
 2. **Distill.** The `feedback-distiller` order clusters observations into
    patterns and promotes recurring ones as ordinary PRs against the pack —
