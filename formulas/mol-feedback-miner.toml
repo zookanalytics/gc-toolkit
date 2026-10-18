@@ -251,8 +251,9 @@ dropped with a logged count, and the window re-covers those PRs next run.
 Every post the city writes carries its mark from its PR's provenance cutover
 on. A city post without it, posted after that cutover and not `/code-review`
 output, came from a writer that skipped the mark, and pr-facts.sh then reads
-the city's own words as feedback to answer. The flag files or refreshes one
-patrol finding naming those posts, which a proactive first reaction disposes.
+the city's own words as feedback to answer. The flag names each of those posts
+once, in one patrol finding it files or refreshes, which a proactive first
+reaction disposes.
 
 ```bash
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do

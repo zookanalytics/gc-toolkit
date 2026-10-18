@@ -58,7 +58,8 @@
 #       is a standing-behavior capture and also needs "category" and "norm".
 #       --max-standing caps the standing-behavior captures this run files.
 #   feedback-miner.sh flag --dir <work-dir>
-#       File or refresh one patrol finding naming the flagged posts.
+#       File or refresh one patrol finding naming the flagged posts that no
+#       finding under its key names yet.
 #   feedback-miner.sh summary --dir <work-dir>
 #       Print what the sweep read and what this run filed.
 #
@@ -473,20 +474,44 @@ fi
 # --- flag ----------------------------------------------------------------------------
 if [ "$VERB" = flag ]; then
   SLUG=$(meta repo); SELF=$(meta self); RIG=$(meta rig)
-  LIST=$(jq -rs 'map(select(.flag)) | sort_by(.at) | reverse
-    | (.[0:20][] | "- \(.url) (posted \(.at)): \(.body | split("\n") | map(select(test("\\S"))) | (.[0] // "") | gsub("\\s+"; " ") | .[0:120])"),
-      (if length > 20 then "- and \(length - 20) more" else empty end)' "$DIR/sweep.jsonl")
-  if [ -z "$LIST" ]; then
+  FLAG_KEY=unmarked-city-post
+  jq -s 'map(select(.flag)) | sort_by(.at) | reverse' "$DIR/sweep.jsonl" > "$DIR/flagged.json" \
+    || { err "could not read the flagged posts"; exit 1; }
+  if [ "$(jq 'length' "$DIR/flagged.json")" = 0 ]; then
     echo "$PROG: no unmarked city post to flag"
     exit 0
   fi
   cd "$(meta checkout)" 2>/dev/null || { err "cannot enter the swept checkout"; exit 1; }
+  # The windows overlap, so a post stays in reach for several runs, and
+  # patrol-finding.sh answers a key raised again after its bead closed with a
+  # new bead reporting that the fix did not hold. So a post that a finding under
+  # this key already names, open or closed, is left out, and each post is named
+  # once. When those findings do not read, nothing is raised, and the next run
+  # raises the posts still in its window.
+  if [ -n "$RIG" ]; then
+    GC_RIG="$RIG" gc bd list --all --metadata-field "finding.key=$FLAG_KEY" --json --limit 0 2>/dev/null | scrub > "$DIR/reported.raw"
+  else
+    gc bd list --all --metadata-field "finding.key=$FLAG_KEY" --json --limit 0 2>/dev/null | scrub > "$DIR/reported.raw"
+  fi
+  jq -e 'type == "array"' "$DIR/reported.raw" >/dev/null 2>&1 \
+    || { err "the findings that already name unmarked city posts did not read, so none is raised this run"; exit 1; }
+  LIST=$(jq -r --slurpfile f "$DIR/reported.raw" '
+    def named: "- \(.url) (posted ";
+    ($f[0] | map((.description // "") + "\n" + (.notes // "")) | join("\n")) as $text
+    | map(select(named as $n | $text | contains($n) | not))
+    | (.[0:20][] | named + "\(.at)): \(.body | split("\n") | map(select(test("\\S"))) | (.[0] // "") | gsub("\\s+"; " ") | .[0:120])"),
+      (if length > 20 then "- and \(length - 20) more" else empty end)' "$DIR/flagged.json") \
+    || { err "could not compare the flagged posts with the findings that name them"; exit 1; }
+  if [ -z "$LIST" ]; then
+    echo "$PROG: every unmarked city post in the window is already named in a finding under $FLAG_KEY"
+    exit 0
+  fi
   [ -x "$PATROL_FINDING" ] || { err "patrol-finding.sh is missing ($PATROL_FINDING); the unmarked posts below are unrecorded:"; printf '%s\n' "$LIST" >&2; exit 1; }
   MSG="These posts on $SLUG's pull requests are under the city's login ($SELF), carry no city mark, are not Claude Code /code-review output, and were posted after their PR's provenance cutover, when every city post on that PR carries the mark:
 $LIST
 
-Every pack script posts through assets/scripts/pr-post.sh, which tools/lint-learned.d/pr-post-bypass.sh enforces, and gh-origin-guard.sh refuses an unmarked post an agent types, so each of these came from a writer neither covers. Find what posted each one and send its posts through pr-post.sh. Until then pr-facts.sh reads each such post as feedback for the city to answer, and the feedback miner leaves it out of the outside capture."
-  ARGS=(--scope miner-findings --key unmarked-city-post --title "City posts on $SLUG pull requests without the city's mark" --message "$MSG" --type bug --priority 2)
+Every pack script posts through assets/scripts/pr-post.sh, which tools/lint-learned.d/pr-post-bypass.sh enforces, and gh-origin-guard.sh refuses an unmarked post an agent types, so each of these came from a writer neither covered when it posted. Find what posted each one. A writer that neither covers yet needs its posts sent through pr-post.sh, and one that they cover now needs nothing more. Until a writer is covered, pr-facts.sh reads each post it makes as feedback for the city to answer, and the feedback miner leaves those posts out of the outside capture."
+  ARGS=(--scope miner-findings --key "$FLAG_KEY" --title "City posts on $SLUG pull requests without the city's mark" --message "$MSG" --type bug --priority 2)
   [ -n "$RIG" ] && ARGS+=(--rig "$RIG")
   "$PATROL_FINDING" "${ARGS[@]}" || { err "the unmarked-post finding did not record"; exit 1; }
   exit 0

@@ -82,7 +82,9 @@ chmod +x "$BIN/gh"
 
 # --- stub gc ---------------------------------------------------------------------
 # `bd list -l observation` reads the store; `--has-metadata-key
-# pr_provenance_since` reads the anchors; `bd create` appends to the store so a
+# pr_provenance_since` reads the anchors; the `finding.key` listing reads the
+# findings the patrol-finding stand-in filed, closed ones only with --all as bd
+# does, and records the rig it read; `bd create` appends to the store so a
 # later listing sees what was filed.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
@@ -93,6 +95,14 @@ case "${1:-}" in
   list)
     case " $* " in
       *" --has-metadata-key pr_provenance_since "*) cat "$STUB_STORE/anchors.json"; exit 0 ;;
+      *" --metadata-field finding.key=unmarked-city-post "*)
+        printf '%s\n' "${GC_RIG:-}" > "$STUB_LOG/findings.rig"
+        [ -n "${STUB_FINDINGS_BROKEN:-}" ] && { echo "bd: store unreachable" >&2; exit 1; }
+        case " $* " in
+          *" --all "*) cat "$STUB_STORE/findings.json" ;;
+          *) jq 'map(select(.status != "closed"))' "$STUB_STORE/findings.json" ;;
+        esac
+        exit 0 ;;
       *" -l observation "*)
         [ -n "${STUB_OBS_BROKEN:-}" ] && { echo "bd: store unreachable" >&2; exit 1; }
         cat "$STUB_STORE/obs.json"; exit 0 ;;
@@ -125,10 +135,23 @@ exit 1
 STUB
 chmod +x "$BIN/gc"
 
-# patrol-finding.sh stand-in: records its argv one argument per line.
+# patrol-finding.sh stand-in: records its argv one argument per line, and files
+# the finding as an open bead whose description is the message.
 cat > "$BIN/patrol-finding" <<'STUB'
 #!/usr/bin/env bash
 for a in "$@"; do printf '%s\n' "$a"; done > "$STUB_LOG/finding.args"
+key=""; msg=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --key) key="$2"; shift 2 ;;
+    --message) msg="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+n=$(( $(jq 'length' "$STUB_STORE/findings.json") + 1 ))
+jq --arg id "tk-find$n" --arg k "$key" --arg m "$msg" \
+  '. + [{id: $id, status: "open", description: $m, notes: "", metadata: {"finding.key": $k}}]' \
+  "$STUB_STORE/findings.json" > "$STUB_STORE/findings.next" && mv "$STUB_STORE/findings.next" "$STUB_STORE/findings.json"
 exit 0
 STUB
 chmod +x "$BIN/patrol-finding"
@@ -209,6 +232,7 @@ echo '[]' > "$FIX/12.inline.json"
 # cutover, issue 301 three days ago before it.
 jq -n --arg c "$CUT" '[{id: "tk-anchor11", metadata: {pr_number: 11, pr_provenance_since: $c}}]' > "$STORE/anchors.json"
 echo '[]' > "$STORE/obs.json"
+echo '[]' > "$STORE/findings.json"
 
 key() { printf 'pr:ours/repo#%s:%s:%s' "$1" "$2" "$3"; }
 class_of() { jq -r --arg k "$1" 'select(.key == $k) | .class' "$W/sweep.jsonl"; }
@@ -397,8 +421,33 @@ hasnt "$OUT" "reads the last 30 days" "(78) a sweep once the capture is a window
 eq "$(class_of "$(key 12 comment 401)")" "" "(79) the back-fill PR is out of the window"
 eq "$(field_of "$(key 11 comment 201)" captured)" "true" "(80) a post recorded by an earlier run reads as captured"
 has "$("$SUT" show --dir "$W" --city)" "already recorded on this post: tk-obs" "(81) show names what is already recorded on a post"
+raised() { [ -f "$TMP/finding.args" ] && echo raised || echo none; }
+OUT=$(GC_RIG=another-rig "$SUT" flag --dir "$W" 2>&1); RC=$?
+eq "$RC" "0" "(82) a flag whose posts a finding already names exits 0"
+has "$OUT" "already named in a finding under unmarked-city-post" "(82a) and says so"
+eq "$(raised)" "none" "(82b) a post an open finding names is not raised again"
+eq "$(cat "$TMP/findings.rig" 2>/dev/null)" "fixture-rig" "(82c) the findings are read in the swept rig's store"
+jq 'map(. + {status: "closed"})' "$STORE/findings.json" > "$STORE/findings.next" && mv "$STORE/findings.next" "$STORE/findings.json"
+rm -f "$TMP/finding.args"
 "$SUT" flag --dir "$W" >/dev/null 2>&1
-has "$(cat "$TMP/finding.args" 2>/dev/null)" "pullrequestreview-104" "(82) the flag is raised again while the post is in the window"
+eq "$(raised)" "none" "(82d) nor once its finding is closed, where a raise would file a fix that did not hold"
+rm -f "$TMP/finding.args"
+STUB_FINDINGS_BROKEN=1 "$SUT" flag --dir "$W" >/dev/null 2>&1; RC=$?
+eq "$RC" "1" "(82e) findings that do not read stop the flag"
+eq "$(raised)" "none" "(82f) and it raises nothing"
+# A new unmarked post: review 10, whose link is a prefix of review 104's.
+cp "$FIX/11.reviews.json" "$FIX/11.reviews.keep"
+review 10 city-bot User COMMENTED "Another notice a city writer posted without the mark." "$(ago_h 1)" \
+  | jq -s --slurpfile old "$FIX/11.reviews.keep" '$old[0] + .' > "$FIX/11.reviews.json"
+fresh_dir n
+"$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
+rm -f "$TMP/finding.args"
+"$SUT" flag --dir "$W" >/dev/null 2>&1
+ARGS=$(cat "$TMP/finding.args" 2>/dev/null)
+has "$ARGS" "- https://github.com/ours/repo/pull/11#pullrequestreview-10 (posted" \
+    "(82g) a post no finding names yet is raised, though its link is a prefix of a named one"
+hasnt "$ARGS" "pullrequestreview-104" "(82h) and the finding names only the new post"
+mv "$FIX/11.reviews.keep" "$FIX/11.reviews.json"
 
 echo "── sweep, an outside-review observation whose date does not read ──"
 fresh_dir g
@@ -406,7 +455,7 @@ cp "$STORE/obs.json" "$STORE/obs.keep"
 jq 'map(if .metadata["obs.category"] == "outside-review" then . + {created_at: "not a date"} else . end)' \
   "$STORE/obs.keep" > "$STORE/obs.json"
 OUT=$("$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1)
-hasnt "$OUT" "reads the last 30 days" "(82a) an undated outside capture counts as old, so it never back-fills again"
+hasnt "$OUT" "reads the last 30 days" "(82i) an undated outside capture counts as old, so it never back-fills again"
 mv "$STORE/obs.keep" "$STORE/obs.json"
 
 echo "── sweep, failures ──"
@@ -425,7 +474,7 @@ fresh_dir d
 OUT=$(STUB_OBS_BROKEN=1 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1); RC=$?
 eq "$RC" "1" "(86) an unreadable observation store stops the sweep"
 has "$OUT" "nothing can be deduped" "(87) and says why"
-eq "$(grep -c '^pr list' "$TMP/gh.log")" "0" "(88) it reads no PR before it can dedup"
+eq "$(grep -c '^api graphql' "$TMP/gh.log")" "0" "(88) it lists no PR before it can dedup"
 
 echo "── summary ──"
 fresh_dir e
