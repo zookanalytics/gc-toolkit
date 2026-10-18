@@ -193,8 +193,9 @@ epic's notes carry each ruling as it was made.
   `gc_city_own` decides an unmarked post under the city's login by when it was
   posted: the city's own before the PR's provenance cutover, and feedback after
   it. The ruling decides that post by what it is, `/code-review` output or not.
-  So the capture reuses `gc_city_marked` for the mark and does not reuse
-  `gc_city_own`.
+  So the capture classifies a post by `gc_city_marked`, the login and the
+  `/code-review` signature, and uses `gc_city_own`'s cutover test only to tell
+  which unmarked city post is recent enough to flag.
 - **The back-fill** is one run over the last 30 days with the per-run cap
   lifted, and one condensed observation per outside comment. The operator
   accepted that unit as the sitting framed it (round 1, item 14, on the epic's
@@ -203,10 +204,11 @@ epic's notes carry each ruling as it was made.
   classifies nothing, so every observation it files from one comment would
   carry the same key. Dedup would keep the first of them and drop the rest
   unread, which is the loss tk-wsg12v describes. One observation that condenses
-  the whole comment and links it leaves dedup nothing to drop. A comment that
-  raises eight findings still counts as one occurrence, which it would under
-  any unit of capture, because the distiller counts occurrences by distinct
-  provenance (`formulas/mol-feedback-distiller.toml`, step 3).
+  the whole comment and links it leaves dedup nothing to drop. Within a
+  pattern, a comment that raises eight findings counts as one occurrence
+  whichever unit the capture files, because the distiller counts a pattern's
+  occurrences by distinct provenance (`formulas/mol-feedback-distiller.toml`,
+  step 3).
 - **The verifier** is a subagent or a separate pass, whichever the reviewing
   provider supports. Reviews run on the polecat-codex pool
   (`assets/scripts/refinery-reconcile.sh:89`), so the verify-or-demote unit
@@ -651,8 +653,8 @@ local binary does not show.
 
   | Model family | medium | high | xhigh |
   |---|---|---|---|
-  | Sonnet 5 | eight angles as subagents, up to six candidates each, verify, precision | the same, with a verify biased to recall | ten angles as subagents, up to eight candidates each, verify, the sweep |
-  | Opus 4.8, and any model without a recipe of its own | eight angles in sequence in one context, dedup with no verify | the same, biased to recall | ten angles in one context, dedup with no verify, the sweep in the same context |
+  | Sonnet 5 | eight angles as subagents, up to six candidates each, verify, precision | the same angles and candidates, biased to recall, with a verify biased to recall too | ten angles as subagents, up to eight candidates each, verify, the sweep, recall |
+  | Opus 4.8, and any model without a recipe of its own | eight angles in sequence in one context, dedup with no verify, erring toward surfacing, up to eight findings; a model without a recipe of its own runs the high recipe here | eight angles in one context, dedup with no verify, biased to recall, up to ten findings | ten angles in one context, dedup with no verify, the sweep in the same context |
   | Opus 5 | one careful diff pass, with no angles | the same | as on Opus 4.8 |
 
   A subagent tier that finds no subagent tool works its angles in one context
@@ -660,8 +662,8 @@ local binary does not show.
   and max size the finder count to the diff, about one finder per 150 lines,
   between two and eight.
 - **Output.** Ranked most severe first and capped per tier. A review that
-  reports through its findings tool gives each finding a summary under sixty
-  characters and a category slug. Correctness outranks cleanup when the cap
+  reports through its findings tool gives each finding a summary of at most
+  sixty characters and a category slug. Correctness outranks cleanup when the cap
   forces a cut. Some tiers set a floor on the finding count, and report fewer
   when fewer are genuine.
 
