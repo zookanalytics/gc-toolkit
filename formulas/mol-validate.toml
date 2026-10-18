@@ -466,7 +466,8 @@ the lane's standing verdict whether or not it is an approve backing: on a
 request-changes batch there is no backing, so it retires the recorded
 request-changes review itself, which is what lifts gate-ensure's per-head bar and
 lets the fresh review pour at the unmoved head. A human batch supersedes EVERY
-declared lane, since the whole diff owes a fresh look. Superseding only the
+declared lane, since the whole diff owes a fresh look, and names the lanes at
+the commit the pass judged, its `reviewed_oid`. Superseding only the
 `human` pseudo-lane would leave the real checks green and let the anchor merge
 without the review this ruling requires.
 
@@ -492,7 +493,7 @@ words what the change will be and why it needs another look.
 # >>> validate-not-converged
 REASON="<what the change will be, and why it needs a fresh whole-diff look>"
 "$SCRIPTS/approval-withdraw.sh" --pass "$VALIDATION_PASS" --reason "$REASON" && if [ "$LANE" = human ]; then
-  "$SCRIPTS/review-outcome.sh" supersede-anchor --anchor "$ANCHOR" --reason "$REASON"
+  "$SCRIPTS/review-outcome.sh" supersede-anchor --anchor "$ANCHOR" --oid "$REVIEWED_OID" --reason "$REASON"
 else
   "$SCRIPTS/review-outcome.sh" supersede-lane --anchor "$ANCHOR" --lane "$LANE" --reason "$REASON"
 fi

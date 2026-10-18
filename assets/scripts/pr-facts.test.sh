@@ -1790,11 +1790,17 @@ store "[$(anchor D1 20)]"
 printf '%s' "$(prview 20 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_20.json"
 printf '[{"id":901,"user":{"login":"gc-city-bot"},"state":"CHANGES_REQUESTED","commit_id":"sha-OLD","submitted_at":"2026-08-19T00:00:00Z"}]' > "$GH_DIR/reviews_20.json"
 : > "$STUB_GH_LOG"
+# The resolver logs the arguments it is asked with, then runs as itself.
+cp "$SD/review-checks.sh" "$TMP/review-checks.real"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexec "%s" "$@"\n' "$TMP/resolver.log" "$TMP/review-checks.real" > "$SD/review-checks.sh"
+chmod +x "$SD/review-checks.sh"; : > "$TMP/resolver.log"
 out=$(run)
+cp "$TMP/review-checks.real" "$SD/review-checks.sh"; chmod +x "$SD/review-checks.sh"
 has "$out" "dismissed our own superseded CHANGES_REQUESTED (review 901)" "the stale own block is dismissed"
 eq "$(meta D1 signoff_dismissed)" "901@sha-20" "signoff_dismissed recorded (and read back) first"
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/20/reviews/901/dismissals" "the dismissal hit the pinned endpoint"
 eq "$(grep -cxF 'green --anchor D1 --lane correctness' "$STUB_LANE_LOG")" "1" "…once its lane derived green, asked as merge.sh asks it, the GitHub approval included"
+has "$(cat "$TMP/resolver.log")" "--through merge --at sha-20" "…its lanes resolved at the PR head the arm read, as merge.sh resolves at the head it merges"
 
 echo "# …a lane that does not derive green keeps the block"
 store "[$(anchor D7 266)]"
