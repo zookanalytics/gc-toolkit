@@ -80,8 +80,8 @@ catalog; do not improvise one. **One agent, single pass. No fan-out**: read
 the diff yourself and write the verdict yourself — no subagents,
 no persona reviewers, no parallel review pass.
 
-**What to review** is on this bead's metadata: `pr_number` (post-open) or
-`review_branch`/`review_base` (pre-open), plus `anchor_bead` for the intent.
+**What to review** is on this bead's metadata: `review_pr_number` (post-open)
+or `review_branch`/`review_base` (pre-open), plus `anchor_bead` for the intent.
 **Where the verdict goes**: `signoff.sh --review-bead <this bead> --verdict
 approve|request-changes` exactly once — it owns the mechanics. Never
 `gh pr review --approve` — the city does not approve PRs. If it refuses
@@ -105,8 +105,8 @@ which of its steps makes the single verdict.
 **Recovery:** if you hold this bead with no poured workflow, run
 `gc formula show __FORMULA__` and follow its steps in order.
 
-**What to review** is on this bead's metadata: `pr_number` (post-open) or
-`review_branch`/`review_base` (pre-open), plus `anchor_bead` for the intent.
+**What to review** is on this bead's metadata: `review_pr_number` (post-open)
+or `review_branch`/`review_base` (pre-open), plus `anchor_bead` for the intent.
 H
 fi
 
