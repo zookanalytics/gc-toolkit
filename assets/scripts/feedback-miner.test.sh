@@ -579,6 +579,17 @@ OUT=$("$SUT" advance --dir "$W" 2>&1); RC=$?
 eq "$RC" "1" "(85i) advance after a sweep that did not finish exits 1"
 has "$OUT" "the sweep in $W did not finish, so the outside capture stays at" "(85i2) and says the sweep did not finish"
 eq "$(kv_day)" "$(day 30)" "(85j) and keeps the day"
+# A sweep removes unread.txt before anything that can stop it. Otherwise one
+# that stops partway in a dir where an earlier sweep finished would leave that
+# sweep's list for advance to read beside its own partial posts.
+fresh_dir u
+unread_list() { [ -f "$W/unread.txt" ] && echo written || echo none; }
+"$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
+eq "$(unread_list)" "written" "(85m) a sweep that finishes writes unread.txt"
+STUB_KV_BROKEN=1 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
+eq "$(unread_list)" "none" "(85n) a sweep that stops partway in the same dir removes it"
+"$SUT" advance --dir "$W" >/dev/null 2>&1; eq "$?" "1" "(85o) so advance refuses to move the day"
+eq "$(kv_day)" "$(day 30)" "(85p) which stays where it was"
 # PR 12 closed before the recorded day, and a 30-day window still lists it.
 # When it does not read, the day moves back to its close, so a run whose
 # standing window has passed it still reads it.

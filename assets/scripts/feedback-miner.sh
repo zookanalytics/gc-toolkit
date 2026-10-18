@@ -215,7 +215,7 @@ meta() { jq -r --arg k "$1" '.[$k] // "" | tostring' "$DIR/meta.json"; }
 # Each worker reads the PR's reviews, its inline review comments and its
 # conversation comments at once, and writes the PR's posts, classified, to
 # prs/<n>.jsonl. A PR any read failed on is marked failed and contributes
-# nothing; the window re-covers it next run. A PR already written is kept.
+# nothing, and the next run reads it again. A PR already written is kept.
 # A worker writes under its own pid and renames the posts file into place
 # whole, so a worker killed partway, or one still running when a resumed sweep
 # reads the PR again, never leaves a partial posts file for the resume to keep.
@@ -369,8 +369,8 @@ if [ "$VERB" = sweep ]; then
   fi
   # A PR whose worker wrote no posts file did not read, whether a read failed
   # or the worker never ran. Its posts are missing from this sweep only:
-  # unread.txt keeps the outside capture's day from moving, so the next run
-  # reads the PR again.
+  # unread.txt keeps the outside capture's day from moving past the PR's
+  # close, so the next run reads the PR again.
   UNREAD=""
   while IFS= read -r n; do
     [ -f "$DIR/prs/$n.jsonl" ] || UNREAD="$UNREAD $n"
