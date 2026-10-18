@@ -83,35 +83,99 @@ chmod +x "$BIN/gh"
 
 # --- stub gc ---------------------------------------------------------------------
 # `bd list -l observation` reads the store; `--has-metadata-key
-# pr_provenance_since` reads the anchors; the `finding.key` listing reads the
-# findings the patrol-finding stand-in filed, closed ones only with --all as bd
-# does, and records the rig it read; `bd create` appends to the store so a
-# later listing sees what was filed. `bd kv get|set` serve the key-value table
-# from kv.json, a get printing {found, key, value} and exiting 1 for an unset
-# key, as bd does, and record the rig they ran in.
+# pr_provenance_since` reads the anchors. The findings live in findings.json
+# and serve the real patrol-finding.sh as bd does: a listing filtered by
+# `--metadata-field` and `--status` (every status but closed by default, all
+# with --all) that records the rig it read, `show`, and `update` with
+# --set-metadata and --append-notes, an append joining notes with a newline.
+# `bd create --title` files a finding, recording the rig it filed in; a create
+# with a positional title files an observation, so a later listing sees it.
+# `bd kv get|set|list` serve the key-value table from kv.json, a get printing
+# {found, key, value} and exiting 1 for an unset key and a list printing the
+# whole table with schema_version, as bd does, each recording the rig it ran in.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 printf '%s\n' "$*" >> "$STUB_LOG/gc.log"
 [ "${1:-}" = bd ] || { echo "stub gc: unexpected call: $*" >&2; exit 1; }
 shift
+FINDINGS="$STUB_STORE/findings.json"
 case "${1:-}" in
   list)
     case " $* " in
       *" --has-metadata-key pr_provenance_since "*) cat "$STUB_STORE/anchors.json"; exit 0 ;;
-      *" --metadata-field finding.key=unmarked-city-post "*)
-        printf '%s\n' "${GC_RIG:-}" > "$STUB_LOG/findings.rig"
-        [ -n "${STUB_FINDINGS_BROKEN:-}" ] && { echo "bd: store unreachable" >&2; exit 1; }
-        case " $* " in
-          *" --all "*) cat "$STUB_STORE/findings.json" ;;
-          *) jq 'map(select(.status != "closed"))' "$STUB_STORE/findings.json" ;;
-        esac
-        exit 0 ;;
       *" -l observation "*)
         [ -n "${STUB_OBS_BROKEN:-}" ] && { echo "bd: store unreachable" >&2; exit 1; }
         cat "$STUB_STORE/obs.json"; exit 0 ;;
+      *" --metadata-field finding."*)
+        printf '%s\n' "${GC_RIG:-}" > "$STUB_LOG/findings.rig"
+        [ -n "${STUB_FINDINGS_BROKEN:-}" ] && { echo "bd: store unreachable" >&2; exit 1; }
+        shift
+        statuses=open,in_progress,blocked,deferred,hooked,pinned; fields='[]'
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --all) statuses=all ;;
+            --status=*) statuses="${1#--status=}" ;;
+            --status) shift; statuses="${1:-}" ;;
+            --metadata-field) shift; fields=$(jq -c --arg f "${1:-}" '. + [$f]' <<< "$fields") ;;
+          esac
+          shift
+        done
+        jq --arg st "$statuses" --argjson fields "$fields" '
+          ($fields | map(capture("^(?<k>[^=]*)=(?<v>.*)$"))) as $want
+          | [ .[] | select($st == "all" or (.status as $s | $st | split(",") | index([$s]) != null))
+                  | select(. as $b | all($want[]; (($b.metadata // {})[.k] // "" | tostring) == .v)) ]' "$FINDINGS"
+        exit 0 ;;
     esac ;;
+  show)
+    row=$(jq -c --arg id "${2:-}" '[.[] | select(.id == $id)]' "$FINDINGS")
+    [ "$(jq 'length' <<< "$row")" != 0 ] || { echo '{"error":"no issue found"}'; exit 1; }
+    printf '%s\n' "$row"
+    exit 0 ;;
+  update)
+    id="${2:-}"; shift 2
+    work="$FINDINGS.upd"; cp "$FINDINGS" "$work"
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --set-metadata)
+          jq --arg id "$id" --arg k "${2%%=*}" --arg v "${2#*=}" 'map(if .id == $id then .metadata[$k] = $v else . end)' \
+            "$work" > "$work.n" && mv "$work.n" "$work"
+          shift 2 ;;
+        --append-notes)
+          if [ -n "${STUB_NOTE_FAIL:-}" ]; then
+            case "$2" in *"$STUB_NOTE_FAIL"*) rm -f "$work"; echo "bd: update refused" >&2; exit 1 ;; esac
+          fi
+          jq --arg id "$id" --arg n "$2" 'map(if .id == $id then .notes = (if (.notes // "") == "" then $n else .notes + "\n" + $n end) else . end)' \
+            "$work" > "$work.n" && mv "$work.n" "$work"
+          shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    mv "$work" "$FINDINGS"
+    exit 0 ;;
   create)
     shift
+    finding=""
+    for a in "$@"; do [ "$a" = --title ] && finding=1; done
+    if [ -n "$finding" ]; then
+      title=""; body=""; meta='{}'; typ=task; prio=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --title) title="$2"; shift 2 ;;
+          -d) body="$2"; shift 2 ;;
+          -t) typ="$2"; shift 2 ;;
+          --metadata) meta="$2"; shift 2 ;;
+          --priority) prio="$2"; shift 2 ;;
+          *) shift ;;
+        esac
+      done
+      printf '%s\n' "${GC_RIG:-}" > "$STUB_LOG/finding.rig"
+      n=$(( $(jq 'length' "$FINDINGS") + 1 ))
+      jq --arg id "tk-find$n" --arg t "$title" --arg d "$body" --arg ty "$typ" --arg p "$prio" --argjson m "$meta" \
+        '. + [{id: $id, status: "open", title: $t, description: $d, issue_type: $ty, priority: $p, notes: "", metadata: $m}]' \
+        "$FINDINGS" > "$FINDINGS.next" && mv "$FINDINGS.next" "$FINDINGS"
+      printf '{"id":"tk-find%s"}\n' "$n"
+      exit 0
+    fi
     title="$1"; shift; body=""; meta='{}'; labels=(); status=open
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -130,6 +194,8 @@ case "${1:-}" in
       '. + [{id: $id, title: $t, description: $d, status: $s, created_at: $at,
              labels: ($l | split(",") | map(select(. != ""))), metadata: $m}]' \
       "$STUB_STORE/obs.json" > "$STUB_STORE/obs.next" && mv "$STUB_STORE/obs.next" "$STUB_STORE/obs.json"
+    # STUB_CREATE_LOST: bd files the observation but its answer is lost.
+    [ -n "${STUB_CREATE_LOST:-}" ] && { echo '{}'; exit 0; }
     printf '{"id":"%s"}\n' "$id"
     exit 0 ;;
   kv)
@@ -142,6 +208,7 @@ case "${1:-}" in
       set) [ -n "${STUB_KV_SET_FAIL:-}" ] && { echo "bd: write refused" >&2; exit 1; }
            jq --arg k "${3:-}" --arg v "${4:-}" '.[$k] = $v' "$f" > "$f.next" && mv "$f.next" "$f"
            exit 0 ;;
+      list) jq -c '. + {schema_version: 1}' "$f"; exit 0 ;;
     esac ;;
 esac
 echo "stub gc: unexpected call: bd $*" >&2
@@ -149,26 +216,14 @@ exit 1
 STUB
 chmod +x "$BIN/gc"
 
-# patrol-finding.sh stand-in: records its argv one argument per line, and files
-# the finding as an open bead whose description is the message.
-cat > "$BIN/patrol-finding" <<'STUB'
+# gc-proactive.sh stand-in for the real patrol-finding.sh: the pool takes a
+# reaction, and each call is recorded.
+cat > "$BIN/gc-proactive" <<'STUB'
 #!/usr/bin/env bash
-for a in "$@"; do printf '%s\n' "$a"; done > "$STUB_LOG/finding.args"
-key=""; msg=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --key) key="$2"; shift 2 ;;
-    --message) msg="$2"; shift 2 ;;
-    *) shift ;;
-  esac
-done
-n=$(( $(jq 'length' "$STUB_STORE/findings.json") + 1 ))
-jq --arg id "tk-find$n" --arg k "$key" --arg m "$msg" \
-  '. + [{id: $id, status: "open", description: $m, notes: "", metadata: {"finding.key": $k}}]' \
-  "$STUB_STORE/findings.json" > "$STUB_STORE/findings.next" && mv "$STUB_STORE/findings.next" "$STUB_STORE/findings.json"
+printf '%s\n' "$*" >> "$STUB_LOG/proactive.log"
 exit 0
 STUB
-chmod +x "$BIN/patrol-finding"
+chmod +x "$BIN/gc-proactive"
 
 # jq stand-in, put on PATH for one sweep only: it plays a sweep worker killed
 # while it writes PR STUB_KILL_PR's posts, by printing part of a line and then
@@ -186,7 +241,9 @@ chmod +x "$KILLBIN/jq"
 
 export PATH="$BIN:$PATH"
 export STUB_LOG="$TMP" STUB_FIX="$FIX" STUB_STORE="$STORE"
-export GC_PATROL_FINDING_TOOL="$BIN/patrol-finding"
+# The flag files through the real patrol-finding.sh beside the miner.
+unset GC_PATROL_FINDING_TOOL GC_BD_LIB GC_FINDING_DEFAULT_RIG
+export GC_PROACTIVE_TOOL="$BIN/gc-proactive"
 export GC_RIG=fixture-rig
 
 MARK='<!-- gc:city -->'
@@ -273,6 +330,19 @@ key() { printf 'pr:ours/repo#%s:%s:%s' "$1" "$2" "$3"; }
 class_of() { jq -r --arg k "$1" 'select(.key == $k) | .class' "$W/sweep.jsonl"; }
 field_of() { jq -r --arg k "$1" --arg f "$2" 'select(.key == $k) | .[$f] | tostring' "$W/sweep.jsonl"; }
 fresh_dir() { W="$TMP/work.$1"; rm -rf "$W"; mkdir -p "$W"; : > "$TMP/gh.log"; : > "$TMP/gc.log"; }
+# The findings store: how many findings, one finding's field, and the record
+# of an unmarked post the flag named.
+findings_n() { jq 'length' "$STORE/findings.json"; }
+f_field() { jq -r --arg id "$1" ".[] | select(.id == \$id) | $2 // \"\" | tostring" "$STORE/findings.json"; }
+# set_status <status> [<id>]: one finding's status, or every finding's.
+set_status() { jq --arg s "$1" --arg id "${2:-}" 'map(if $id == "" or .id == $id then . + {status: $s} else . end)' "$STORE/findings.json" > "$STORE/findings.next" && mv "$STORE/findings.next" "$STORE/findings.json"; }
+post_record() { jq -r --arg k "feedback_miner.unmarked_post.$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')" '.[$k] // ""' "$STORE/kv.json"; }
+# add_review <id> <body>: an unmarked review under the city's login on PR 11,
+# posted an hour ago, after the PR's cutover.
+add_review() {
+  review "$1" city-bot User COMMENTED "$2" "$(ago_h 1)" \
+    | jq -s --slurpfile old "$FIX/11.reviews.json" '$old[0] + .' > "$FIX/11.reviews.next" && mv "$FIX/11.reviews.next" "$FIX/11.reviews.json"
+}
 
 echo "── identity: the slug is origin's, never what gh picks by itself ──"
 eq "$(gh repo view --json nameWithOwner -q .nameWithOwner)" "them/repo" \
@@ -452,15 +522,18 @@ has "$OUT" "so something moved it after the sweep and this run leaves it" "(70h)
 eq "$(kv_day)" "$(day -1)" "(70i) as it stands"
 kv_put "$(day 0)"
 
-echo "── flag ──"
-"$SUT" flag --dir "$W" >/dev/null 2>&1; RC=$?
+echo "── flag: the real patrol-finding.sh files the finding ──"
+OUT=$("$SUT" flag --dir "$W" 2>&1); RC=$?
 eq "$RC" "0" "(71) flag exits 0"
-ARGS=$(cat "$TMP/finding.args" 2>/dev/null)
-has "$ARGS" "unmarked-city-post" "(72) the finding is keyed on the situation"
-has "$ARGS" "miner-findings" "(73) it is filed in the miner's scope"
-has "$ARGS" "https://github.com/ours/repo/pull/11#pullrequestreview-104" "(74) it names the flagged post"
-hasnt "$ARGS" "#issuecomment-301" "(75) it leaves out the post from before the cutover"
-has "$ARGS" "fixture-rig" "(76) it lands in the swept rig's store"
+eq "$(findings_n)" "1" "(71a) it files one finding"
+eq "$(f_field tk-find1 '.metadata["finding.key"]')" "unmarked-city-post" "(72) the finding is keyed on the situation"
+eq "$(f_field tk-find1 '.metadata["finding.scope"]')" "miner-findings" "(73) it is filed in the miner's scope"
+has "$(f_field tk-find1 .description)" "- https://github.com/ours/repo/pull/11#pullrequestreview-104 (posted" "(74) it names the flagged post"
+hasnt "$(f_field tk-find1 .description)" "#issuecomment-301" "(75) it leaves out the post from before the cutover"
+eq "$(cat "$TMP/finding.rig" 2>/dev/null)" "fixture-rig" "(76) it lands in the swept rig's store"
+eq "$(post_record "$(key 11 review 104)")" "named in tk-find1" "(76d) the store records the post with the finding that names it"
+has "$(cat "$TMP/proactive.log" 2>/dev/null)" "sling tk-find1" "(76e) the finding goes to its first reaction"
+has "$OUT" "named 1 unmarked city post(s) in tk-find1" "(76f) flag says where it named the post"
 
 echo "── sweep, a paged listing stops at the first PR updated before the window ──"
 fresh_dir p
@@ -494,39 +567,113 @@ has "$OUT" "moves to $(day 0): every PR the sweep listed read" "(77e) once the s
 
 echo "── sweep, a later run: the outside capture's day is the last finished run's ──"
 fresh_dir b
-rm -f "$TMP/finding.args"
 OUT=$("$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1)
 hasnt "$OUT" "so the sweep reads back to then" "(78) a sweep after a finished run reads the standing window"
 eq "$(class_of "$(key 12 comment 401)")" "" "(79) the back-fill PR is out of the window"
 eq "$(field_of "$(key 11 comment 201)" captured)" "true" "(80) a post recorded by an earlier run reads as captured"
 has "$("$SUT" show --dir "$W" --city)" "already recorded on this post: tk-obs" "(81) show names what is already recorded on a post"
-raised() { [ -f "$TMP/finding.args" ] && echo raised || echo none; }
 OUT=$(GC_RIG=another-rig "$SUT" flag --dir "$W" 2>&1); RC=$?
 eq "$RC" "0" "(82) a flag whose posts a finding already names exits 0"
 has "$OUT" "already named in a finding under unmarked-city-post" "(82a) and says so"
-eq "$(raised)" "none" "(82b) a post an open finding names is not raised again"
-eq "$(cat "$TMP/findings.rig" 2>/dev/null)" "fixture-rig" "(82c) the findings are read in the swept rig's store"
-jq 'map(. + {status: "closed"})' "$STORE/findings.json" > "$STORE/findings.next" && mv "$STORE/findings.next" "$STORE/findings.json"
-rm -f "$TMP/finding.args"
+eq "$(f_field tk-find1 '.metadata["finding.occurrences"]')" "1" "(82b) a post the store records as named is not raised again"
+eq "$(cat "$TMP/kv.rig" 2>/dev/null)" "fixture-rig" "(82c) the record is read in the swept rig's store"
+set_status closed
 "$SUT" flag --dir "$W" >/dev/null 2>&1
-eq "$(raised)" "none" "(82d) nor once its finding is closed, where a raise would file a fix that did not hold"
-rm -f "$TMP/finding.args"
-STUB_FINDINGS_BROKEN=1 "$SUT" flag --dir "$W" >/dev/null 2>&1; RC=$?
-eq "$RC" "1" "(82e) findings that do not read stop the flag"
-eq "$(raised)" "none" "(82f) and it raises nothing"
+eq "$(findings_n)" "1" "(82d) nor once its finding is closed, where a raise would file a fix that did not hold"
+STUB_KV_BROKEN=1 "$SUT" flag --dir "$W" >/dev/null 2>&1; RC=$?
+eq "$RC" "1" "(82e) a record that does not read stops the flag"
+eq "$(findings_n)" "1" "(82f) and it raises nothing"
 # A new unmarked post: review 10, whose link is a prefix of review 104's.
 cp "$FIX/11.reviews.json" "$FIX/11.reviews.keep"
-review 10 city-bot User COMMENTED "Another notice a city writer posted without the mark." "$(ago_h 1)" \
-  | jq -s --slurpfile old "$FIX/11.reviews.keep" '$old[0] + .' > "$FIX/11.reviews.json"
+add_review 10 "Another notice a city writer posted without the mark."
 fresh_dir n
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
-rm -f "$TMP/finding.args"
 "$SUT" flag --dir "$W" >/dev/null 2>&1
-ARGS=$(cat "$TMP/finding.args" 2>/dev/null)
-has "$ARGS" "- https://github.com/ours/repo/pull/11#pullrequestreview-10 (posted" \
-    "(82g) a post no finding names yet is raised, though its link is a prefix of a named one"
-hasnt "$ARGS" "pullrequestreview-104" "(82h) and the finding names only the new post"
+eq "$(findings_n)" "2" "(82g) a post no finding names yet is raised, though its link is a prefix of a named one"
+has "$(f_field tk-find2 .description)" "- https://github.com/ours/repo/pull/11#pullrequestreview-10 (posted" "(82g2) the new finding names it"
+hasnt "$(f_field tk-find2 .description)" "pullrequestreview-104" "(82h) and only it"
+eq "$(f_field tk-find2 '.metadata["finding.recurrence_of"]')" "tk-find1" \
+   "(82h2) a post first flagged after the finding closed files a new one that names the closed one"
+
+echo "── flag: a post flagged while its finding is open joins that finding, once ──"
+# tk-find2 is open. Review 9 is posted while it is.
+add_review 9 "A third notice a city writer posted without the mark."
+fresh_dir s
+"$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
+OUT=$("$SUT" flag --dir "$W" 2>&1); RC=$?
+eq "$RC" "0" "(82s1) a raise while the finding is open exits 0"
+eq "$(findings_n)" "2" "(82s2) it files no new finding"
+eq "$(f_field tk-find2 '.metadata["finding.occurrences"]')" "2" "(82s3) the finding writer counts it on the open finding"
+has "$(f_field tk-find2 .notes)" "- https://github.com/ours/repo/pull/11#pullrequestreview-9 (posted" \
+    "(82s4) whose notes name the new post whole, past the 200 characters the writer notes"
+hasnt "$(f_field tk-find2 .notes)" "#pullrequestreview-10 (posted" "(82s5) and only the new post"
+eq "$(post_record "$(key 11 review 9)")" "named in tk-find2" "(82s6) the store records it with the open finding"
+has "$OUT" "named 1 unmarked city post(s) in tk-find2" "(82s7) flag says where it named the post"
+OUT=$("$SUT" flag --dir "$W" 2>&1)
+has "$OUT" "already named in a finding under unmarked-city-post" "(82s8) the same scan again raises nothing"
+eq "$(f_field tk-find2 '.metadata["finding.occurrences"]')" "2" "(82s9) so the open finding counts no third occurrence"
+set_status closed
+"$SUT" flag --dir "$W" >/dev/null 2>&1
+eq "$(findings_n)" "2" "(82s10) and once it closes, no new finding reports that its fix did not hold"
+# The rest of the section raises onto tk-find2, open again.
+set_status open tk-find2
+# A note that does not land records nothing, so the next run names the post.
+add_review 8 "A fourth notice."
+fresh_dir s2
+"$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
+OUT=$(STUB_NOTE_FAIL="more unmarked city post(s)" "$SUT" flag --dir "$W" 2>&1); RC=$?
+eq "$RC" "1" "(82s11) a raise whose note does not land exits 1"
+eq "$(post_record "$(key 11 review 8)")" "" "(82s12) and records nothing"
+"$SUT" flag --dir "$W" >/dev/null 2>&1
+has "$(f_field tk-find2 .notes)" "- https://github.com/ours/repo/pull/11#pullrequestreview-8 (posted" "(82s13) the next run names the post"
+eq "$(post_record "$(key 11 review 8)")" "named in tk-find2" "(82s14) and records it"
+# A record that does not land leaves the post to the next run, not lost.
+add_review 7 "A fifth notice."
+fresh_dir s3
+"$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
+OUT=$(STUB_KV_SET_FAIL=1 "$SUT" flag --dir "$W" 2>&1); RC=$?
+eq "$RC" "1" "(82s15) a raise whose record does not land exits 1"
+has "$OUT" "the record of them did not read back, so the next run raises them again" "(82s16) and says so"
+"$SUT" flag --dir "$W" >/dev/null 2>&1
+eq "$(post_record "$(key 11 review 7)")" "named in tk-find2" "(82s17) the next run records it"
+# Findings that do not read stop a raise before it starts.
+add_review 6 "A sixth notice."
+fresh_dir s4
+"$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
+OCC=$(f_field tk-find2 '.metadata["finding.occurrences"]')
+OUT=$(STUB_FINDINGS_BROKEN=1 "$SUT" flag --dir "$W" 2>&1); RC=$?
+eq "$RC" "1" "(82s18) findings that do not read stop the flag"
+eq "$(f_field tk-find2 '.metadata["finding.occurrences"]')" "$OCC" "(82s19) before anything is raised"
+eq "$(post_record "$(key 11 review 6)")" "" "(82s20) or recorded"
+# A finding held at blocked with nothing open to wait on takes no raise: the
+# writer files a new finding beside it, and the flag names the post there.
+set_status blocked tk-find2
+OUT=$("$SUT" flag --dir "$W" 2>&1); RC=$?
+eq "$RC" "0" "(82s21) a raise beside a finding held at blocked exits 0"
+eq "$(f_field tk-find3 '.metadata["finding.recurrence_of"]')" "tk-find2" "(82s22) the writer files a new finding beside the held one"
+has "$(f_field tk-find3 .description)" "- https://github.com/ours/repo/pull/11#pullrequestreview-6 (posted" "(82s23) which names the post"
+hasnt "$(f_field tk-find2 .notes)" "#pullrequestreview-6 (posted" "(82s24) and the held finding's notes do not"
+eq "$(post_record "$(key 11 review 6)")" "named in tk-find3" "(82s25) the store records the post with the new finding"
 mv "$FIX/11.reviews.keep" "$FIX/11.reviews.json"
+
+echo "── flag: one raise names every new post, however many ──"
+set_status closed
+cp "$FIX/prs.ours.json" "$FIX/prs.ours.keep"; cp "$STORE/anchors.json" "$STORE/anchors.keep"
+jq --arg r "$(ago_h 1)" '. + [{number: 16, title: "A busy writer", closedAt: $r, mergedAt: $r, updatedAt: $r}]' \
+  "$FIX/prs.ours.keep" > "$FIX/prs.ours.json"
+jq --arg c "$CUT" '. + [{id: "tk-anchor16", metadata: {pr_number: 16, pr_provenance_since: $c}}]' "$STORE/anchors.keep" > "$STORE/anchors.json"
+for i in $(seq 1 25); do review $((600 + i)) city-bot User COMMENTED "Unmarked notice $i." "$(ago_h 1)"; done | jq -s . > "$FIX/16.reviews.json"
+echo '[]' > "$FIX/16.inline.json"; echo '[]' > "$FIX/16.issue.json"
+fresh_dir t
+"$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
+OUT=$("$SUT" flag --dir "$W" 2>&1); RC=$?
+eq "$RC" "0" "(82t1) a raise of 25 posts exits 0"
+eq "$(f_field tk-find4 .description | grep -c '^- https://github.com/ours/repo/pull/11#pullrequestreview-6[0-9][0-9] (posted')" "25" \
+   "(82t2) the new finding names all 25"
+eq "$(jq '[keys[] | select(startswith("feedback_miner.unmarked_post.pr_ours_repo_16_"))] | length' "$STORE/kv.json")" "25" \
+   "(82t3) and the store records all 25"
+mv "$FIX/prs.ours.keep" "$FIX/prs.ours.json"; mv "$STORE/anchors.keep" "$STORE/anchors.json"
+rm -f "$FIX/16.reviews.json" "$FIX/16.inline.json" "$FIX/16.issue.json"
 
 echo "── sweep, an outside capture day that is not a date, or does not read ──"
 fresh_dir g

@@ -72,8 +72,11 @@
 #       refused. --max-standing caps the standing-behavior captures this run
 #       files.
 #   feedback-miner.sh flag --dir <work-dir>
-#       File or refresh one patrol finding naming the flagged posts that no
-#       finding under its key names yet.
+#       Name each flagged post once, on the patrol finding under its key: a
+#       first raise files the finding, and a post flagged while it is live is
+#       added to its notes. The store's key-value table records every post
+#       named, with the finding that names it, and a recorded post is never
+#       raised again.
 #   feedback-miner.sh advance --dir <work-dir>
 #       Move the outside capture's day to the close of the oldest PR the run
 #       still owes, one that did not read or carries an outside post the store
@@ -142,11 +145,20 @@ day_start() { # <days-ago> -> YYYY-MM-DD, GNU/BSD-portable
   date -u -d "@$e" +%Y-%m-%d 2>/dev/null || date -u -r "$e" +%Y-%m-%d
 }
 
-# --- the outside capture's day -----------------------------------------------------
-# One key per repository in the store's key-value table, the table of the store
-# the observations are filed in. It holds the day from which the outside capture
-# still owes every PR closed.
+# --- the store's key-value table -----------------------------------------------------
+# The table of the store the observations are filed in holds two records: one
+# key per repository for the day from which the outside capture still owes
+# every PR closed, and one key per unmarked city post the flag has named, whose
+# value names the finding that names it. A post's key is its provenance key with
+# every character outside [A-Za-z0-9._-] turned into "_", after this prefix.
+POST_KEY_PREFIX=feedback_miner.unmarked_post.
 day_key() { printf 'feedback_miner.outside_since.%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"; }
+# kv_all <out-file> writes the whole table there as one JSON object and returns
+# 0, or returns 1 when the listing did not answer with one.
+kv_all() {
+  gc bd kv list --json </dev/null 2>/dev/null | scrub > "$1"
+  jq -e 'type == "object"' "$1" >/dev/null 2>&1
+}
 # day_get <key> prints the day and returns 0, returns 3 when no day is
 # recorded, and 1 when the read did not answer. `kv get` exits 1 for an unset
 # key and still prints {"found": false}, so the answer is read from the JSON.
@@ -570,6 +582,18 @@ if [ "$VERB" = file ]; then
 fi
 
 # --- flag ----------------------------------------------------------------------------
+# Each flagged post is named once, on the finding that holds the
+# unmarked-city-post key when the post is first raised. patrol-finding.sh puts a
+# raise either on a new finding, whose body lists the posts, or on the live one
+# as a recurrence, which it notes as one line cut at 200 characters, too short
+# to name a post. On a recurrence the flag appends its own note listing the
+# posts. The store's key-value table then records each post with the finding
+# that names it, and a recorded post is never raised again: not while that
+# finding is open, where the raise would only repeat, and not after it closes,
+# where patrol-finding.sh would file a new bead reporting that the fix did not
+# hold. A post is recorded only once a finding names it, so a raise that stops
+# partway leaves the post for the next run, which raises it again while it is in
+# the window.
 if [ "$VERB" = flag ]; then
   SLUG=$(meta repo); SELF=$(meta self); RIG=$(meta rig)
   FLAG_KEY=unmarked-city-post
@@ -579,39 +603,63 @@ if [ "$VERB" = flag ]; then
     echo "$PROG: no unmarked city post to flag"
     exit 0
   fi
+  # The store the sweep read, which holds the record and the findings.
+  [ -n "$RIG" ] && export GC_RIG="$RIG"
   cd "$(meta checkout)" 2>/dev/null || { err "cannot enter the swept checkout"; exit 1; }
-  # The windows overlap, so a post stays in reach for several runs, and
-  # patrol-finding.sh answers a key raised again after its bead closed with a
-  # new bead reporting that the fix did not hold. So a post that a finding under
-  # this key already names, open or closed, is left out, and each post is named
-  # once. When those findings do not read, nothing is raised, and the next run
-  # raises the posts still in its window.
-  if [ -n "$RIG" ]; then
-    GC_RIG="$RIG" gc bd list --all --metadata-field "finding.key=$FLAG_KEY" --json --limit 0 2>/dev/null | scrub > "$DIR/reported.raw"
-  else
-    gc bd list --all --metadata-field "finding.key=$FLAG_KEY" --json --limit 0 2>/dev/null | scrub > "$DIR/reported.raw"
-  fi
-  jq -e 'type == "array"' "$DIR/reported.raw" >/dev/null 2>&1 \
-    || { err "the findings that already name unmarked city posts did not read, so none is raised this run"; exit 1; }
-  LIST=$(jq -r --slurpfile f "$DIR/reported.raw" '
-    def named: "- \(.url) (posted ";
-    ($f[0] | map((.description // "") + "\n" + (.notes // "")) | join("\n")) as $text
-    | map(select(named as $n | $text | contains($n) | not))
-    | (.[0:20][] | named + "\(.at)): \(.body | split("\n") | map(select(test("\\S"))) | (.[0] // "") | gsub("\\s+"; " ") | .[0:120])"),
-      (if length > 20 then "- and \(length - 20) more" else empty end)' "$DIR/flagged.json") \
-    || { err "could not compare the flagged posts with the findings that name them"; exit 1; }
-  if [ -z "$LIST" ]; then
+  kv_all "$DIR/kv.json" || { err "the record of the unmarked posts already named did not read, so none is raised this run"; exit 1; }
+  jq --slurpfile kv "$DIR/kv.json" --arg prefix "$POST_KEY_PREFIX" '
+    map(. + {record: ($prefix + (.key | gsub("[^A-Za-z0-9._-]"; "_")))})
+    | map(select(.record as $r | $kv[0] | has($r) | not))' "$DIR/flagged.json" > "$DIR/raise.json" \
+    || { err "could not compare the flagged posts with the record of those already named"; exit 1; }
+  N=$(jq 'length' "$DIR/raise.json")
+  if [ "$N" = 0 ]; then
     echo "$PROG: every unmarked city post in the window is already named in a finding under $FLAG_KEY"
     exit 0
   fi
+  LIST=$(jq -r '.[] | "- \(.url) (posted \(.at)): \(.body | split("\n") | map(select(test("\\S"))) | (.[0] // "") | gsub("\\s+"; " ") | .[0:120])"' "$DIR/raise.json") \
+    || { err "could not list the unmarked posts to raise"; exit 1; }
   [ -x "$PATROL_FINDING" ] || { err "patrol-finding.sh is missing ($PATROL_FINDING); the unmarked posts below are unrecorded:"; printf '%s\n' "$LIST" >&2; exit 1; }
+  # The live findings under the key, read before and after the raise: the one
+  # the raise filed, or whose finding.last_seen or finding.occurrences it moved,
+  # holds the raise.
+  live_findings() { # <out-file>
+    gc bd list --status=open,in_progress,blocked,deferred,hooked,pinned --metadata-field "finding.key=$FLAG_KEY" --json --limit 0 </dev/null 2>/dev/null | scrub > "$1"
+    jq -e 'type == "array"' "$1" >/dev/null 2>&1
+  }
+  live_findings "$DIR/findings.before" \
+    || { err "the findings under $FLAG_KEY did not read, so none is raised this run"; exit 1; }
   MSG="These posts on $SLUG's pull requests are under the city's login ($SELF), carry no city mark, are not Claude Code /code-review output, and were posted after their PR's provenance cutover, when every city post on that PR carries the mark:
 $LIST
 
-Every pack script posts through assets/scripts/pr-post.sh, which tools/lint-learned.d/pr-post-bypass.sh enforces, and gh-origin-guard.sh refuses an unmarked post an agent types, so each of these came from a writer neither covered when it posted. Find what posted each one. A writer that neither covers yet needs its posts sent through pr-post.sh, and one that they cover now needs nothing more. Until a writer is covered, pr-facts.sh reads each post it makes as feedback for the city to answer, and the feedback miner leaves those posts out of the outside capture."
+Every pack script posts through assets/scripts/pr-post.sh, which tools/lint-learned.d/pr-post-bypass.sh enforces, and gh-origin-guard.sh refuses an unmarked post an agent types, so each of these came from a writer neither covered when it posted. Find what posted each one. A writer that neither covers yet needs its posts sent through pr-post.sh, and one that they cover now needs nothing more. Until a writer is covered, pr-facts.sh reads each post it makes as feedback for the city to answer, and the feedback miner leaves those posts out of the outside capture. A post flagged while this finding is open is added to its notes."
   ARGS=(--scope miner-findings --key "$FLAG_KEY" --title "City posts on $SLUG pull requests without the city's mark" --message "$MSG" --type bug --priority 2)
   [ -n "$RIG" ] && ARGS+=(--rig "$RIG")
   "$PATROL_FINDING" "${ARGS[@]}" || { err "the unmarked-post finding did not record"; exit 1; }
+  live_findings "$DIR/findings.after" \
+    || { err "the unmarked-post finding recorded, but the findings under $FLAG_KEY did not read back, so these posts are not recorded as named and the next run raises them again:"; printf '%s\n' "$LIST" >&2; exit 1; }
+  HOLDER=$(jq -r --slurpfile before "$DIR/findings.before" '
+    def seen: (.metadata // {}) | [.["finding.last_seen"], .["finding.occurrences"]] | map(. // "" | tostring);
+    ($before[0] | map({key: .id, value: seen}) | from_entries) as $was
+    | map(select($was[.id] != seen) | .id)
+    | if length == 1 then .[0] else empty end' "$DIR/findings.after")
+  [ -n "$HOLDER" ] \
+    || { err "the unmarked-post finding recorded, but no single finding under $FLAG_KEY shows the raise, so these posts are not recorded as named and the next run raises them again:"; printf '%s\n' "$LIST" >&2; exit 1; }
+  if jq -e --arg h "$HOLDER" 'any(.[]; .id == $h)' "$DIR/findings.before" >/dev/null 2>&1; then
+    NOTE="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $PROG: $N more unmarked city post(s) on $SLUG's pull requests, flagged while this finding is open:
+$LIST"
+    gc bd update "$HOLDER" --append-notes "$NOTE" </dev/null >/dev/null 2>&1 \
+      || { err "the raise landed on $HOLDER, but the note naming these posts did not, so they are not recorded as named and the next run raises them again:"; printf '%s\n' "$LIST" >&2; exit 1; }
+  fi
+  jq -r '.[].record' "$DIR/raise.json" | while IFS= read -r r; do
+    gc bd kv set "$r" "named in $HOLDER" </dev/null >/dev/null 2>&1
+  done
+  kv_all "$DIR/kv.json" || echo '{}' > "$DIR/kv.json"
+  UNRECORDED=$(jq -r --slurpfile kv "$DIR/kv.json" --arg v "named in $HOLDER" '.[] | select($kv[0][.record] != $v) | "- \(.url)"' "$DIR/raise.json") \
+    || UNRECORDED=$(jq -r '.[] | "- \(.url)"' "$DIR/raise.json")
+  if [ -n "$UNRECORDED" ]; then
+    err "$HOLDER names these posts, but the record of them did not read back, so the next run raises them again:"; printf '%s\n' "$UNRECORDED" >&2; exit 1
+  fi
+  echo "$PROG: named $N unmarked city post(s) in $HOLDER"
   exit 0
 fi
 
