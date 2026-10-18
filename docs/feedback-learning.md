@@ -95,11 +95,13 @@ Four producers file the same bead contract:
      it carries the city's mark (`assets/scripts/pr-post.sh`). An unmarked
      post is outside when another login posted it, or when it is Claude
      Code's `/code-review` output posted under the city's login. A GitHub
-     App's conversation comments and approvals are notices, not review
-     feedback. Until a rig's outside capture is one window old, while its
-     store holds no outside-review observation older than the window, the
-     outside capture reaches back `outside_backfill_days` (30) instead, so a
-     rig's first runs back-fill the month before it. The distiller reads
+     App's approvals and deploy notices are not review feedback. A deploy
+     notice is told by what it says: Vercel's opens with its `[vc]:` line.
+     Any other conversation comment an app posts is outside. Until a rig's
+     outside capture is one window old, while its store holds no
+     outside-review observation older than the window, the outside capture
+     reaches back `outside_backfill_days` (30) instead, so a rig's first runs
+     back-fill the month before it. The distiller reads
      these observations as a set for what the city's review missed, and a
      proposal from them is a `review-rubric` amendment or a change to the
      correctness method, never a rule per observation

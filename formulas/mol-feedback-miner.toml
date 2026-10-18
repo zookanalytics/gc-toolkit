@@ -163,10 +163,11 @@ day(s). Until the rig's outside capture is one window old, while its store
 holds no outside-review observation older than that, the outside capture
 reaches back {{outside_backfill_days}} days.
 It classes each non-empty post: one carrying the city's mark is the city's; an
-unmarked one from another login is outside, except a GitHub App's conversation
-comment or approval, a notice that is skipped; an unmarked one under the city's
-login is outside when it is Claude Code's `/code-review` output, and otherwise
-the city's, flagged when posted after its PR's provenance cutover (§4).
+unmarked one from another login is outside, except a GitHub App's approval or
+deploy notice (Vercel's opens with its `[vc]:` line), a notice that is skipped;
+an unmarked one under the city's login is outside when it is Claude Code's
+`/code-review` output, and otherwise the city's, flagged when posted after its
+PR's provenance cutover (§4).
 
 A back-filling sweep reads hundreds of PRs and takes minutes, so give its call
 a long timeout. If a time limit cuts it short, run the same sweep command again

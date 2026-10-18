@@ -8,10 +8,10 @@
 #   1. A post carrying the city's mark is the city's (gc_city_marked, from
 #      `pr-post.sh own-def`, the one definition of the mark).
 #   2. An unmarked post from any login other than the one gh posts as is
-#      outside, except a GitHub App account's conversation comment or approval,
-#      which is a notice such as a deploy preview or an auto-approval, not
-#      review feedback. An app's inline comments and its reviews that comment
-#      or request changes are review feedback, and are outside.
+#      outside, except a GitHub App account's approval and its deploy notice,
+#      which are notices, not review feedback. A deploy notice is told by what
+#      it says: Vercel's opens with its "[vc]:" link-reference line. Any other
+#      post an app makes, a conversation comment among them, is outside.
 #   3. An unmarked post under the city's own login is outside when it is the
 #      output of Claude Code's /code-review: a review whose body names itself a
 #      code review or Claude Code in its first line, or carries the "Generated
@@ -203,7 +203,8 @@ if [ "$VERB" = fetch-pr ]; then
       or ((.body // "") | tostring | test("(?i)generated with \\[?claude code"));
     def app_notice:
       ((.user.type // "") == "Bot")
-      and ((.gc_stream == "issue") or (.gc_stream == "review" and (.state // "") == "APPROVED"));
+      and ((.gc_stream == "review" and (.state // "") == "APPROVED")
+           or (.gc_stream == "issue" and (first_line | test("^\\s*\\[vc\\]:"))));
     ($prs[0] | map(select(.number == $pr)) | .[0] // {}) as $p
     | ($seen[0] // {}) as $obs
     | ($reviews | map(select(((.user.login // "") == $self) and (gc_city_marked | not) and code_review_signed) | .id)) as $signed

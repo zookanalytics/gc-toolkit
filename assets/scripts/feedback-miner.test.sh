@@ -235,6 +235,8 @@ $MARK" "$(ago_h 4)" 201
   issue 302 "vercel[bot]" Bot "[vc]: deployment preview ready" "$(ago_h 3)"
   issue 303 johnzook User "   " "$(ago_h 2)"
   issue 304 johnzook User "Could this use a demo video?" "$(ago_h 1)"
+  issue 305 "reviewer[bot]" Bot "The query interpolates the user's input into its SQL; bind it as a parameter.
+[vc]: is mentioned here, not at the top." "$(ago_h 2)"
 } | jq -s . > "$FIX/11.issue.json"
 issue 401 johnzook User "Old feedback from last week." "$(ago 10)" 12 | jq -s . > "$FIX/12.issue.json"
 # PR 12's city post is a review body.
@@ -286,7 +288,8 @@ eq "$(class_of "$(key 11 comment 301)")" "city" "(18) an unmarked city post from
 eq "$(field_of "$(key 11 comment 301)" flag)" "false" "(19) it is not flagged"
 eq "$(class_of "$(key 11 review 105)")" "outside" "(20) an app account's commenting review is outside"
 eq "$(class_of "$(key 11 review 106)")" "notice" "(21) an app account's approval is a notice"
-eq "$(class_of "$(key 11 comment 302)")" "notice" "(22) an app account's conversation comment is a notice"
+eq "$(class_of "$(key 11 comment 302)")" "notice" "(22) an app account's deploy notice is a notice"
+eq "$(class_of "$(key 11 comment 305)")" "outside" "(22a) an app account's conversation comment that is not a deploy notice is outside"
 eq "$(class_of "$(key 11 review 107)")" "" "(23) an approval with no body is not read"
 eq "$(class_of "$(key 11 comment 303)")" "" "(24) a whitespace-only comment is not read"
 eq "$(class_of "$(key 12 comment 401)")" "outside" "(25) a back-fill PR's outside comment is read"
@@ -298,9 +301,10 @@ eq "$(field_of "$(key 11 comment 202)" reply_to)" "201" "(29) a reply records th
 
 echo "── show ──"
 OUT=$("$SUT" show --dir "$W" --outside --limit 50)
-has "$OUT" "== 8 of 8 outside post(s) not yet recorded ==" "(30) show --outside counts the unrecorded outside posts"
+has "$OUT" "== 9 of 9 outside post(s) not yet recorded ==" "(30) show --outside counts the unrecorded outside posts"
 hasnt "$OUT" "$(key 11 review 102)" "(31) show --outside leaves the city's posts out"
 hasnt "$OUT" "$(key 11 comment 302)" "(32) show --outside leaves app notices out"
+has "$OUT" "--- $(key 11 comment 305)" "(32a) and shows an app account's conversation comment that is not a deploy notice"
 eq "$(printf '%s\n' "$OUT" | grep '^--- ' | head -1)" "--- $(key 11 comment 304)" "(33) the newest outside post is shown first"
 eq "$("$SUT" show --dir "$W" --outside --limit 2 | grep -c '^--- ')" "2" "(34) --limit caps how many are shown"
 OUT=$("$SUT" show --dir "$W" --city)
@@ -347,7 +351,7 @@ ROWS_EOF
 has "$OUT" "already recorded under outside-review" "(53) a post already recorded is skipped"
 eq "$(grep -c '^bd create' "$TMP/gc.log")" "$CREATES" "(54) and nothing is created for it"
 OUT=$("$SUT" show --dir "$W" --outside --limit 50)
-has "$OUT" "== 5 of 5 outside post(s) not yet recorded ==" "(55) show --outside drops what this run filed"
+has "$OUT" "== 6 of 6 outside post(s) not yet recorded ==" "(55) show --outside drops what this run filed"
 
 OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
 {"key": "$(key 11 comment 304)", "statement": "Asks for a demo video.", "directive": "diff"}
@@ -357,6 +361,11 @@ ROWS_EOF
 has "$OUT" "already filed under outside-review by an earlier row of this call" "(56) a second row on one post in one call is skipped"
 eq "$(jq --arg k "$(key 11 comment 304)" '[.[] | select(.metadata["obs.provenance"] == $k)] | length' "$STORE/obs.json")" "1" \
    "(57) one observation per outside post"
+OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
+{"key": "$(key 11 comment 305)", "statement": "The query interpolates the user's input into SQL; bind it as a parameter.", "directive": "diff"}
+ROWS_EOF
+)
+has "$OUT" "filed 1, skipped 0" "(57a) an app account's conversation comment that is not a deploy notice is filed"
 
 echo "── file: refused rows ──"
 OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
@@ -505,7 +514,7 @@ echo '[]' > "$STORE/obs.json"
 ROWS_EOF
 OUT=$("$SUT" summary --dir "$W")
 has "$OUT" "outside window 3 day(s)" "(89) with no back-fill window the first run reads the normal window"
-has "$OUT" "outside posts: 7 read, 0 recorded before this run, 1 filed now, 6 left unrecorded" "(90) the summary counts the outside capture"
+has "$OUT" "outside posts: 8 read, 0 recorded before this run, 1 filed now, 7 left unrecorded" "(90) the summary counts the outside capture"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
