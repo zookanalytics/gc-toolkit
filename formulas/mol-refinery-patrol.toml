@@ -882,8 +882,8 @@ re-run the prepare block, retry. Never plain `--force`, and never force a
 branch the prepare block put in merge mode.
 
 2. Validate a caller-supplied `existing_pr` (must be OPEN, head==$BRANCH,
-base==$TARGET, in the origin repo — `gh pr view <ref> --json
-url,number,state,headRefName,baseRefName`). Any mismatch is a durable block,
+base==$TARGET, in the origin repo — `gh pr view <ref> --repo "$(git remote
+get-url origin)" --json url,number,state,headRefName,baseRefName`). Any mismatch is a durable block,
 not a retry. Fill BOTH placeholders: `blocked_reason` is the row's detail and
 `--takeaway` the one line the operator's board renders as what this bead
 needs, capped at 140 characters.
@@ -918,7 +918,15 @@ fi
 # skipped by merge.sh and pr-facts.sh forever).
 PR_URL=""; PR_NUMBER=""
 if [ -n "$RECORDED_PR" ] && command -v gh >/dev/null 2>&1; then
-  PR_VIEW=$(gh pr view "$RECORDED_PR" --json url,number,state,headRefName,baseRefName 2>/dev/null)
+  # A bare pr_number resolves against gh's default repository, which with no
+  # `gh repo set-default` is the first remote in gh's own order, upstream ahead
+  # of origin. Naming origin pins it; a recorded URL names its own repository.
+  PR_REPO=$(git remote get-url origin 2>/dev/null)
+  if [ -n "$PR_REPO" ]; then
+    PR_VIEW=$(gh pr view "$RECORDED_PR" --repo "$PR_REPO" --json url,number,state,headRefName,baseRefName 2>/dev/null)
+  else
+    PR_VIEW=$(gh pr view "$RECORDED_PR" --json url,number,state,headRefName,baseRefName 2>/dev/null)
+  fi
   PR_URL=$(printf '%s' "$PR_VIEW" | jq -r '.url // empty' 2>/dev/null)
   PR_NUMBER=$(printf '%s' "$PR_VIEW" | jq -r '.number // empty | tostring' 2>/dev/null)
 fi

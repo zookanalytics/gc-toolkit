@@ -61,7 +61,7 @@ routed, never assigned, and never blocks anything.
 | `obs.source` | `self` \| `miner` \| `operator` |
 | `obs.directive` | `standing` \| `diff` — capture-time guess; the distiller re-judges |
 | `obs.endorsed` | `operator` when filed via "learn this" |
-| `obs.provenance` | the event half of the dedup key: `pr:<owner/repo>#<n>:comment:<id>`, `pr:<owner/repo>#<n>:veto`, or `bead:<id>:turn:<date>` — `<owner/repo>` is the full slug (`gh repo view --json nameWithOwner -q .nameWithOwner`, or parse the origin URL) |
+| `obs.provenance` | the event half of the dedup key: `pr:<owner/repo>#<n>:comment:<id>`, `pr:<owner/repo>#<n>:review:<id>`, `pr:<owner/repo>#<n>:veto`, or `bead:<id>:turn:<date>` — `<owner/repo>` is origin's full slug (`gh repo view "$(git remote get-url origin)" --json nameWithOwner -q .nameWithOwner`, or parse the origin URL). A bare `gh repo view` names whichever remote gh picks, which is upstream in a checkout that has one and no `gh repo set-default` |
 | `gc.outcome` | `recorded`; `--status=closed` in the same update |
 | `gc.work_outcome` | `no-op` — an observation records feedback and ships no code, so this is the honest value for the work-record gate that fires on every close |
 
