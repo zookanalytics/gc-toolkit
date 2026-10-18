@@ -214,11 +214,13 @@ merges once every check, of every phase, derives green. An empty `check_set` is
 not the opt-out at any transition: it means never normalized, and gate-ensure
 stamps the default earlier in the same pass. A `check_set` whose checks are all
 `pre-open` (gc-toolkit today) opens its PR ready at once — the draft stage
-appears only when a check names a later phase. A name the index does not
-declare takes `pre-open`, and so does every name in a repo that keeps no index,
-so it gates every transition. A declared phase outside the four is an index
-error: every transition whose check_set names that check holds until the index
-is fixed.
+appears only when a check names a later phase. The index is the pack's
+`review-checks.toml`, which declares every check the pack ships, with the rows
+of the rig's own `review-checks.toml` at the commit being judged laid over it, so
+a rig that keeps none has the pack's checks. A name no layer declares takes
+`pre-open`, so it gates every transition. A declared phase outside the four is
+an index error: every transition whose check_set names that check holds until
+the index is fixed.
 
 Each check is a **lane**. A lane's state is derived from the anchor's beads and
 never stored on the anchor, and it is a state of the lane, never a claim about a
