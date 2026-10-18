@@ -146,10 +146,10 @@ day_start() { # <days-ago> -> YYYY-MM-DD, GNU/BSD-portable
 }
 
 # --- the store's key-value table -----------------------------------------------------
-# The table of the store the observations are filed in holds two records: one
-# key per repository for the day from which the outside capture still owes
-# every PR closed, and one key per unmarked city post the flag has named, whose
-# value names the finding that names it. A post's key is its provenance key with
+# The table of the store the observations are filed in holds the day from which
+# the outside capture still owes every PR closed, one key per repository, and
+# each unmarked city post the flag has named, one key per post, whose value
+# names the finding that names it. A post's key is its provenance key with
 # every character outside [A-Za-z0-9._-] turned into "_", after this prefix.
 POST_KEY_PREFIX=feedback_miner.unmarked_post.
 day_key() { printf 'feedback_miner.outside_since.%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"; }
@@ -603,9 +603,9 @@ fi
 # Each flagged post is named once, on the finding that holds the
 # unmarked-city-post key when the post is first raised. patrol-finding.sh puts a
 # raise either on a new finding, whose body lists the posts, or on the live one
-# as a recurrence, which it notes as one line cut at 200 characters, too short
-# to name a post. On a recurrence the flag appends its own note listing the
-# posts. The store's key-value table then records each post with the finding
+# as a recurrence, which it notes as the message's first 200 characters on one
+# line. The message opens with a longer paragraph, so that line names no post,
+# and on a recurrence the flag appends its own note listing the posts. The store's key-value table then records each post with the finding
 # that names it, and a recorded post is never raised again: not while that
 # finding is open, where the raise would only repeat, and not after it closes,
 # where patrol-finding.sh would file a new bead reporting that the fix did not
