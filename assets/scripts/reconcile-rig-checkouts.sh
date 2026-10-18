@@ -76,9 +76,11 @@
 # files, which no move here allows. So each kept copy waits under
 # .git/gc-toolkit-reconcile-kept while git fast-forwards, and the path holds no
 # file for that long. The copy then goes back on its path with its bytes
-# unchanged. It never goes over a file written there meanwhile, and when that
-# file already holds the same bytes, the copy goes instead. A pass interrupted in
-# that window leaves the copy there, and the next pass puts it back before it
+# unchanged. It never goes over a file written there meanwhile, or through a
+# symlink above the path. When a regular file reached through no symlink
+# already holds the same bytes there, the copy goes instead, as long as
+# removing it leaves those bytes on the path. A pass interrupted in that
+# window leaves the copy there, and the next pass puts it back before it
 # fetches, since that needs no network. A copy that cannot go back stays there.
 # Once its fast-forward has landed, HEAD no longer tracks its path, so no later
 # keep finds it. While any copy waits there, the rig escalates whatever its
@@ -419,20 +421,44 @@ relink() {
 # never over a copy already there.
 move_aside() { relink "$1" "$1/$KEPT_DIR" "$2"; }
 
+# Prints the first directory between the checkout at $1 and its path $2 that is
+# a symlink, and returns 1 when none is.
+symlink_above() {
+    local rest="$2" a=""
+    while [ "${rest#*/}" != "$rest" ]; do
+        a="${a:+$a/}${rest%%/*}"; rest="${rest#*/}"
+        if [ -L "$1/$a" ]; then printf '%s\n' "$a"; return 0; fi
+    done
+    return 1
+}
+
+# 0 when the path $2 in the checkout at $1 is the copy that waits for it under
+# $KEPT_DIR: its directory is the copy's directory under another name, so the
+# path reads the copy itself, and removing the copy empties the path too.
+is_the_copy() {
+    local dir="${2%/*}"
+    [ "$dir" != "$2" ] || dir=""
+    [ "$1/$KEPT_DIR/$dir" -ef "$1/$dir" ]
+}
+
 # Moves the copy of $2 that waits under $KEPT_DIR back to its path in the
-# checkout at $1, never over anything now on that path. A regular file written
-# there meanwhile that already holds the copy's bytes loses nothing to the copy,
-# so the copy goes instead. git removes a directory the fast-forward empties, so
-# the directories above it are made again.
+# checkout at $1, never over anything now on that path and never through a
+# symlink above it, which kept_paths refuses at keep time too. A regular file
+# written there meanwhile that already holds the copy's bytes loses nothing to
+# the copy, so the copy goes instead, unless the path is the copy itself, which
+# cmp then compares with itself. A hard link to the copy is a second name, so
+# its bytes stay on the path. git removes a directory the fast-forward empties,
+# so the directories above it are made again.
 put_back() {
+    symlink_above "$1" "$2" >/dev/null && return 1
     relink "$1/$KEPT_DIR" "$1" "$2" && return 0
-    [ -f "$1/$2" ] && [ ! -L "$1/$2" ] && cmp -s -- "$1/$KEPT_DIR/$2" "$1/$2" \
-        && rm -f -- "$1/${KEPT_DIR:?}/${2:?}"
+    [ -f "$1/$2" ] && [ ! -L "$1/$2" ] && ! is_the_copy "$1" "$2" \
+        && cmp -s -- "$1/$KEPT_DIR/$2" "$1/$2" && rm -f -- "$1/${KEPT_DIR:?}/${2:?}"
 }
 
 # Puts back each copy that a pass interrupted while git fast-forwarded left
-# under the checkout at $1. A copy whose path holds something else again stays
-# where it is, and a keep of that path refuses while it does.
+# under the checkout at $1. A copy that cannot go back stays where it is, and a
+# keep of its path refuses while it waits.
 restore_kept() {
     local path="$1" root="$1/$KEPT_DIR" f p
     [ -d "$root" ] || return 0
@@ -452,7 +478,7 @@ restore_kept() {
 # proves that no copy waits.
 waiting_report=""
 waiting_copies() {
-    local root="$1/$KEPT_DIR" listing f p
+    local root="$1/$KEPT_DIR" listing f p link
     waiting_report=""
     [ -e "$root" ] || return 0
     listing=$(find "$root" -type f 2>/dev/null) \
@@ -460,7 +486,13 @@ waiting_copies() {
     while IFS= read -r f; do
         [ -n "$f" ] || continue
         p="${f#"$root"/}"
-        if [ -e "$1/$p" ] || [ -L "$1/$p" ]; then
+        if link=$(symlink_above "$1" "$p"); then
+            if is_the_copy "$1" "$p"; then
+                waiting_report+="$p waits at $f, and $1/$p reads this copy itself through the symlink $1/$link: deleting or moving the copy takes it from the runtime too, so remove the symlink instead, and the next pass puts the copy back"$'\n'
+            else
+                waiting_report+="$p waits at $f: $1/$link is a symlink, and a kept copy never goes back through one"$'\n'
+            fi
+        elif [ -e "$1/$p" ] || [ -L "$1/$p" ]; then
             waiting_report+="$p waits at $f: something else was written on $1/$p after it moved aside, and a kept copy never goes back over it"$'\n'
         else
             waiting_report+="$p waits at $f: it could not go back on its path"$'\n'

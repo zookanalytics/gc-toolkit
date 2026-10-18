@@ -66,14 +66,17 @@
 # puts back a copy an interrupted pass left aside, also when it cannot fetch,
 # and a copy waiting aside for a path that holds a file again blocks the keep;
 # a regular file written on a kept path meanwhile with the copy's bytes takes
-# the copy's place, and a symlink to them does not; a copy that cannot go back,
-# because something else was written on its path meanwhile, leaves both copies
-# in place and keeps the rig escalated after a keep, a plain fast-forward, a
-# reset heal or a pass already up to date, and on a blocked, parked or diverged
-# checkout, until no copy waits aside, and a keep directory that cannot be
-# listed escalates too; a failed read of the kept paths stops the fast-forward;
-# RECONCILE_NO_AUTOHEAL turns the keep off; no escalation tells a person to run
-# git reset --hard or --keep.
+# the copy's place, and so does a second name for the copy, but a symlink to
+# them does not, nor does the copy itself under another name for its
+# directory; a copy never goes back through a symlinked directory, and copies
+# their paths read through one stay aside, escalated, until the symlink goes;
+# a copy that cannot go back, because something else was written on its path
+# meanwhile, leaves both copies in place and keeps the rig escalated after a
+# keep, a plain fast-forward, a reset heal or a pass already up to date, and on
+# a blocked, parked or diverged checkout, until no copy waits aside, and a keep
+# directory that cannot be listed escalates too; a failed read of the kept paths
+# stops the fast-forward; RECONCILE_NO_AUTOHEAL turns the keep off; no
+# escalation tells a person to run git reset --hard or --keep.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -1442,6 +1445,27 @@ grep -q '1 auto-healed, 0 blocked' <<< "$UNTRACKEDSAME_OUT" \
   && ok "the summary counts the keep as an auto-heal" \
   || bad "the summary counts the keep as an auto-heal (got '$UNTRACKEDSAME_OUT')"
 
+# untrackedrelinked: while git fast-forwards, something moves the directory the
+# kept copies wait in onto .beads and leaves a symlink to it in its place, here
+# a post-merge hook. Each path then holds its own copy, and the copy aside is
+# that same file under another name for its directory, so removing it would
+# empty the path. Both files stay on their paths unchanged.
+untrack_rig untrackedrelinked '.beads/*'
+gascity_writes untrackedrelinked
+mkdir -p "$TMP/relinkhooks"
+cat > "$TMP/relinkhooks/post-merge" <<'HOOK'
+#!/bin/sh
+mv .git/gc-toolkit-reconcile-kept/.beads .beads && ln -s ../../.beads .git/gc-toolkit-reconcile-kept/.beads
+HOOK
+chmod +x "$TMP/relinkhooks/post-merge"
+git -C "$TMP/untrackedrelinked" config core.hooksPath "$TMP/relinkhooks"
+UNTRACKEDRELINKED_REMOTE="$(git -C "$TMP/untrackedrelinked.git" rev-parse main)"
+rigs_json untrackedrelinked
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null 2>&1
+eq "$(git -C "$TMP/untrackedrelinked" rev-parse HEAD)" "$UNTRACKEDRELINKED_REMOTE" "a fast-forward whose kept copies move back under another name lands"
+eq "$(cat "$TMP/untrackedrelinked/.beads/config.yaml" 2>/dev/null)/$(cat "$TMP/untrackedrelinked/.beads/metadata.json" 2>/dev/null)" "$GASCITY_CFG/meta" "a copy aside that is its path's own file under another name is not removed"
+
 # untrackedstale: an earlier pass left a copy of config.yaml aside, and a file
 # was written on its path since. The copy stays aside, and the keep refuses
 # rather than overwrite it, naming where it waits.
@@ -1597,6 +1621,66 @@ rigs_json leftoverlink
 bash "$SCRIPT" >/dev/null 2>&1
 eq "$(cat "$TMP/leftoverlink/.git/gc-toolkit-reconcile-kept/cfg" 2>/dev/null)" "older" "a copy whose path holds a symlink to its bytes stays aside"
 eq "$(esc_count leftoverlink)" "1" "a copy whose path holds a symlink to its bytes escalates"
+
+# leftoverlinkdir: an interrupted keep left config.yaml and metadata.json aside,
+# and .beads is now a symlink to the directory where they wait, so each path
+# reads its own copy. Removing a copy would take it from the runtime too, so
+# both stay aside and the rig escalates. Once the symlink is removed, the next
+# pass puts both copies back and keeps them.
+untrack_rig leftoverlinkdir '.beads/*'
+gascity_writes leftoverlinkdir
+LEFTOVERLINKDIR_KEPT="$TMP/leftoverlinkdir/.git/gc-toolkit-reconcile-kept/.beads"
+mkdir -p "$LEFTOVERLINKDIR_KEPT"
+mv "$TMP/leftoverlinkdir/.beads/config.yaml" "$TMP/leftoverlinkdir/.beads/metadata.json" "$LEFTOVERLINKDIR_KEPT/"
+rmdir "$TMP/leftoverlinkdir/.beads"; ln -s .git/gc-toolkit-reconcile-kept/.beads "$TMP/leftoverlinkdir/.beads"
+LEFTOVERLINKDIR_REMOTE="$(git -C "$TMP/leftoverlinkdir.git" rev-parse main)"
+rigs_json leftoverlinkdir
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null 2>&1
+eq "$(cat "$LEFTOVERLINKDIR_KEPT/config.yaml" 2>/dev/null)/$(cat "$LEFTOVERLINKDIR_KEPT/metadata.json" 2>/dev/null)" "$GASCITY_CFG/meta" "copies their paths read through a symlinked directory stay aside unchanged"
+eq "$(esc_count leftoverlinkdir)" "1" "copies their paths read through a symlinked directory escalate"
+body_has leftoverlinkdir "^\.beads/config\.yaml waits at .*/leftoverlinkdir/\.git/gc-toolkit-reconcile-kept/\.beads/config\.yaml, and .*/leftoverlinkdir/\.beads/config\.yaml reads this copy itself through the symlink .*/leftoverlinkdir/\.beads: deleting or moving the copy takes it from the runtime too" \
+  && ok "the subject says the path reads the copy itself through the symlink" \
+  || bad "the subject says the path reads the copy itself through the symlink (got '$(body_for leftoverlinkdir)')"
+rm "$TMP/leftoverlinkdir/.beads"
+bash "$SCRIPT" >/dev/null 2>&1
+eq "$(cat "$TMP/leftoverlinkdir/.beads/config.yaml" 2>/dev/null)/$(cat "$TMP/leftoverlinkdir/.beads/metadata.json" 2>/dev/null)" "$GASCITY_CFG/meta" "once the symlink is removed, the next pass puts both copies back"
+eq "$(git -C "$TMP/leftoverlinkdir" rev-parse HEAD)" "$LEFTOVERLINKDIR_REMOTE" "once the symlink is removed, the copies are kept and the checkout advances"
+eq "$(kept_waiting leftoverlinkdir)" "0" "once the symlink is removed, no copy waits aside"
+eq "$(open_count leftoverlinkdir)" "0" "the subject closes once the copies are back"
+
+# leftoverlinkaway: copies wait for d/sub/a and d/sub/b, and d/sub is now a
+# symlink to a directory outside the checkout, which holds a file b with the
+# copy's bytes. A copy never goes back through a symlinked directory, so a does
+# not go there, the copy of b is not removed for the bytes found there, and the
+# rig escalates.
+behind_rig leftoverlinkaway
+LEFTOVERLINKAWAY_KEPT="$TMP/leftoverlinkaway/.git/gc-toolkit-reconcile-kept/d/sub"
+mkdir -p "$LEFTOVERLINKAWAY_KEPT" "$TMP/leftoverlinkaway/d" "$TMP/leftoverlinkaway.away"
+echo a > "$LEFTOVERLINKAWAY_KEPT/a"; echo b > "$LEFTOVERLINKAWAY_KEPT/b"; echo b > "$TMP/leftoverlinkaway.away/b"
+ln -s "$TMP/leftoverlinkaway.away" "$TMP/leftoverlinkaway/d/sub"
+rigs_json leftoverlinkaway
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null 2>&1
+eq "$(cat "$LEFTOVERLINKAWAY_KEPT/a" 2>/dev/null)/$(cat "$LEFTOVERLINKAWAY_KEPT/b" 2>/dev/null)" "a/b" "copies whose paths sit behind a symlinked directory stay aside"
+[ ! -e "$TMP/leftoverlinkaway.away/a" ] && ok "a copy never goes back through a symlinked directory" || bad "a copy never goes back through a symlinked directory"
+eq "$(esc_count leftoverlinkaway)" "1" "copies whose paths sit behind a symlinked directory escalate"
+body_has leftoverlinkaway "^d/sub/b waits at .*/leftoverlinkaway/\.git/gc-toolkit-reconcile-kept/d/sub/b: .*/leftoverlinkaway/d/sub is a symlink, and a kept copy never goes back through one$" \
+  && ok "the subject names the symlinked directory a copy does not go back through" \
+  || bad "the subject names the symlinked directory a copy does not go back through (got '$(body_for leftoverlinkaway)')"
+
+# leftoverhardlink: a pass was interrupted between linking a copy and removing
+# its first name, so cfg and the copy aside are one file under two names. The
+# copy aside goes, cfg keeps the bytes, and nothing escalates.
+behind_rig leftoverhardlink
+echo older > "$TMP/leftoverhardlink/cfg"
+mkdir -p "$TMP/leftoverhardlink/.git/gc-toolkit-reconcile-kept"; ln "$TMP/leftoverhardlink/cfg" "$TMP/leftoverhardlink/.git/gc-toolkit-reconcile-kept/cfg"
+rigs_json leftoverhardlink
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null 2>&1
+eq "$(cat "$TMP/leftoverhardlink/cfg" 2>/dev/null)" "older" "a path that is a second name of its copy keeps the bytes"
+eq "$(kept_waiting leftoverhardlink)" "0" "a copy whose path is a second name of it does not wait aside"
+eq "$(esc_count leftoverhardlink)" "0" "a copy whose path is a second name of it is not escalated"
 
 # unreadablekept: part of the keep directory cannot be read, so nothing proves
 # no copy waits there. The rig escalates though its fast-forward lands. Root
