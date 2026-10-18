@@ -6,8 +6,10 @@
 #   settle <bead> [--print] [--db <path>]
 #       compute the bead's priority and write it to the bead and to every live
 #       workflow poured for it (the input convoy, the root and each open step),
-#       then read it back. --print computes the same priority and writes
-#       nothing, for a writer that puts it in the same `bd update` as a route.
+#       then read it back. A writer that routes or slings a bead settles it
+#       first and writes no priority of its own. --print computes the same
+#       priority and writes nothing. It takes no lock, so no writer writes the
+#       number it prints.
 #   move <bead> (<P0-P4> | --shift <±n>) [--dry-run] [--db <path>]
 #       the writer `gc-helm.sh priority` runs: set the bead's own input, then
 #       write every bead that follows it, directly or through others (members,
@@ -51,11 +53,11 @@
 #
 # Callers: gc-helm.sh priority (move), orders/queue-priority.toml (reconcile),
 # and the writers that route, sling or release a bead (settle). Those writers
-# are the creators of PR-finishing work: rework-child.sh and gate-ensure.sh
-# settle a child before they sling it, and pr-facts.sh and pre-open-rebase.sh
-# put settle --print's priority in the update that routes one. pr-facts.sh also
-# settles an anchor's PR-finishing work when the posture it records turns
-# approved or stops being approved.
+# are the creators of PR-finishing work, and each settles a child before it
+# makes the child claimable: rework-child.sh and gate-ensure.sh before they
+# sling it, and pr-facts.sh and pre-open-rebase.sh before they write its route,
+# which carries no priority. pr-facts.sh also settles an anchor's PR-finishing
+# work when the posture it records turns approved or stops being approved.
 # Exit codes: 0 ok; 1 a read, a write, a read-back or the lock failed; 2 usage,
 # a move refused before anything was written, or a pass that finds no one
 # polecat pool to read.
@@ -134,6 +136,8 @@ Verbs:
              cannot be computed or does not read back. A bead that follows
              nothing keeps its own priority, and its workflows take it. --print
              computes the same priority, prints the number and writes nothing.
+             It takes no lock, so no writer writes the number it prints: a
+             writer settles the bead, then routes or slings it.
   move       The writer gc-helm.sh priority runs. A P-value sets a bead that
              follows nothing; --shift sets the shift of a bead that follows a
              parent or an anchor. It then writes every bead that follows the

@@ -1009,7 +1009,16 @@ eq "$(bprio "$K1")" "0" "an approved PR's merge-in is routed at P0"
 eq "$(bprio "$K2")" "1" "…and one whose PR is not approved, under a P2 epic, at P1"
 eq "$(meta "$K1" priority_shift)|$(meta "$K2" priority_shift)" "-1|-1" "…each born carrying the PR-finishing shift"
 eq "$(bparents "$K1")$(bparents "$K2")" "" "…and neither filed with a parent"
-has "$(grep "^bd update $K1 --set-metadata gc.routed_to" "$STUB_GC_LOG")" "--priority 0" "…the priority riding the route's own write"
+# The priority writer's own write is the one pinned to its store (--db), so a
+# route that carried a priority, or a priority the creator wrote itself, fails.
+PL=$(grep -n "^bd update $K1 --priority 0 --db " "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+RL=$(grep -n "^bd update $K1 --set-metadata gc.routed_to=$FIX" "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+if [ -n "$PL" ] && [ -n "$RL" ] && [ "$PL" -lt "$RL" ]; then
+  ok "…its priority written by the priority writer before the route"
+else
+  bad "the merge-in's priority was not written by the priority writer before its route (priority write at log line '${PL:-none}', route at '${RL:-none}')"
+fi
+hasnt "$(grep "^bd update $K1 --set-metadata gc.routed_to" "$STUB_GC_LOG")" "--priority" "…and the route written with no priority in it"
 
 echo "# …a merge-in whose priority does not settle is left unrouted, and the stranded arm routes it next pass"
 printf '#!/usr/bin/env bash\necho "queue-priority: settle: cannot compute the priority of $2" >&2\nexit 1\n' > "$TMP/qp-fail"

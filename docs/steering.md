@@ -375,9 +375,18 @@ writer is `assets/scripts/queue-priority.sh move`.
 bead and to every live workflow poured for it, and reads it back. It exits
 non-zero when the priority cannot be computed or does not read back. A bead
 that follows nothing keeps its own priority, and its workflows take it.
+
+Every writer that settles a bead before making it claimable does so in one
+order. It runs settle first and goes on only once settle exits zero. A sling
+then pours a workflow, which copies the bead's priority. A route is then
+written on its own, with no priority in it. Until then no pool can claim the
+bead, and a move that runs after the settle rewrites the bead itself. Such a
+writer computes and writes no priority of its own.
+
 `queue-priority.sh settle <bead-id> --print` computes the same priority, prints
-the number and writes nothing, for a writer that puts the priority in the same
-`bd update` as a route, which bd writes as one row.
+the number and writes nothing. It takes no lock, so no writer writes the number
+it prints. A move that ran between that computation and a write would be undone
+by the write.
 
 ### PR-finishing work
 
@@ -422,17 +431,17 @@ on it. The posture is not the approval rule `merge.sh` lands on
 posture, and a PR whose base requires no approving review reports no review
 decision, so either ranks as not approved.
 
-**Where it is written.** Each creator settles a child before it makes the child
-claimable. `rework-child.sh` and `gate-ensure.sh` run `queue-priority.sh settle`
-before the sling, whose pour copies the priority, and `pr-facts.sh` and
-`pre-open-rebase.sh` put `settle --print`'s priority in the `bd update` that
-routes the child. A child whose priority does not settle is neither slung nor
-routed, and the creator's retry settles it: the next pass of the cadence arm,
-or the caller of `rework-child.sh` running it again. When the posture
-`pr-facts.sh` records moves into or out of `approved`, the same pass settles the
-anchor's open reviews, reworks and validation passes and their live workflows.
-A finding or a visit carries `anchor_bead` too, but no pool claims it, so that
-settle leaves it as it is.
+**Where it is written.** Each creator runs `queue-priority.sh settle` on a child
+before it makes the child claimable, in the order [Settle](#settle) gives.
+`rework-child.sh` and `gate-ensure.sh` then sling the child, and the pour copies
+its priority. `pr-facts.sh` and `pre-open-rebase.sh` then route it, in a write
+that carries no priority. A child whose priority does not settle is neither
+slung nor routed, and the creator's retry settles it: the next pass of the
+cadence arm, or the caller of `rework-child.sh` running it again. When the
+posture `pr-facts.sh` records moves into or out of `approved`, the same pass
+settles the anchor's open reviews, reworks and validation passes and their live
+workflows. A finding or a visit carries `anchor_bead` too, but no pool claims
+it, so that settle leaves it as it is.
 
 ### The pass
 

@@ -49,11 +49,11 @@
 # posture at that head, keeps it without the per-PR reads; any other anchor is
 # read as before.
 # Every child this script files is PR-finishing work (docs/steering.md): born
-# carrying the PR-finishing shift and no parent, and routed at the priority
-# queue-priority.sh settle --print computes for it, in the route's own write. An
-# approved PR's finishing work runs at P0, so a posture recorded into or out of
-# approved re-ranks the anchor's open reviews, reworks and validation passes in
-# the pass that records it.
+# carrying the PR-finishing shift and no parent, and settled at its priority by
+# queue-priority.sh settle before its route, which is written with no priority
+# in it. An approved PR's finishing work runs at P0, so a posture recorded into
+# or out of approved re-ranks the anchor's open reviews, reworks and validation
+# passes in the pass that records it.
 # Unanswered review feedback routes to something — a fix-pool rework child
 # carrying the review bodies and inline comments verbatim, or a visit when the
 # city has nowhere to route work (no head branch or no fix pool) — with the
@@ -245,9 +245,9 @@ VISIT_CLOSE="$SCRIPTS_DIR/visit-close.sh"
 # claims the bead reads this note to know the pass is a mol-validate pour.
 VALIDATE_BODY="$SCRIPTS_DIR/validate-dispatch-body.sh"
 # The priority writer (docs/steering.md). Every child this script routes is
-# PR-finishing work, routed at the priority settle --print computes for it in the
-# route's own write, and a posture that turns approved, or stops being approved,
-# re-ranks the anchor's open PR-finishing work through its settle.
+# PR-finishing work, settled at its priority before it is routed, and a posture
+# that turns approved, or stops being approved, re-ranks the anchor's open
+# PR-finishing work through its settle.
 QUEUE_PRIORITY="${GC_QUEUE_PRIORITY_TOOL:-$SCRIPTS_DIR/queue-priority.sh}"
 # The finding primitive. The human-feedback arm files each unanswered item as a
 # task_kind=finding bead through it, so the validation pass it opens has a finding
@@ -930,14 +930,17 @@ mint_rework_verify() { # <bead> <anchor> <branch> <target> <reason> <mode> <pr-u
 }
 
 route_finishing() { # <child> — route a PR-finishing child to the fix pool at its priority
-  # The route makes the child claimable, so the priority it competes at rides the
-  # same write: settle --print computes it (docs/steering.md), and bd writes the
-  # route and the priority in one row, so the child is never claimable at another
-  # priority. Returns 1, having written nothing, when the priority cannot be
-  # computed. The caller reads the route back.
-  local p
-  p=$("$QUEUE_PRIORITY" settle "$1" --print) || return 1
-  gc bd update "$1" --set-metadata gc.routed_to="$FIX_POOL" --priority "$p" >/dev/null 2>&1 || true
+  # The route makes the child claimable, so the child is settled first: the
+  # priority writer computes and writes its priority under the store's priority
+  # lock and reads it back (docs/steering.md#settle). The route is then written
+  # alone. No pool can claim the child before the route lands, and a move that
+  # runs between the two writes rewrites the child itself. The settle waits for
+  # the lock 30 seconds at most, as settle_finishing's does: the cadence runs its
+  # arms one after another, so a long wait here holds every arm after it, and a
+  # child left unrouted is routed by a later pass. Returns 1, having routed
+  # nothing, when the child does not settle. The caller reads the route back.
+  QUEUE_PRIORITY_LOCK_WAIT_SECS=30 "$QUEUE_PRIORITY" settle "$1" >/dev/null || return 1
+  gc bd update "$1" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
 }
 
 settle_finishing() { # <anchor> <old-posture> <new-posture> — re-rank its PR-finishing work
