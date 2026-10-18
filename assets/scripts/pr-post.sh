@@ -2,9 +2,9 @@
 # pr-post.sh — the single writer of the city's posts on a pull request, and the
 # owner of the provenance mark every one of them carries.
 #
-# The city posts under the same GitHub login the operator's own review tools
-# can post under, so an author does not say whether a comment is a city notice
-# or feedback for the city to answer. The mark says it. Every body this script
+# The city posts under the bot account that backs every agent's gh token, so an
+# author does not say whether a comment is a city notice or feedback for the
+# city to answer. The mark says it. Every body this script
 # posts carries the marker below, and a review, inline comment, or conversation
 # comment without one is feedback, whoever wrote it. The readers ask that
 # question through `own-def`, which prints the one definition of "the city's

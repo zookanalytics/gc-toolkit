@@ -58,7 +58,8 @@
 # conversation comment that is not the city's own post (pr-post.sh's
 # gc_city_own: marked by pr-post.sh, or under the city's login before the
 # anchor's provenance cutover, pr_provenance_since) is feedback, whoever posted
-# it, so a model review run under the city's own account routes like a person's.
+# it, so an unmarked review under the city's own login after the cutover routes
+# like a person's.
 # This runs even while the anchor still conflicts: the rework child is
 # prepare_mode=merge, so it brings the branch current as it answers, and the
 # CONFLICTING arm above stands down when feedback is owed rather than file a
@@ -1016,8 +1017,8 @@ foreign_ids() { # <rows-json>
 # The ids of the reviews in <reviews-json> whose body counts as feedback, as a
 # JSON array: not the city's own post (gc_city_own), COMMENTED or
 # CHANGES_REQUESTED, and carrying a body. An unmarked review under our own login
-# after the provenance cutover is a model or operator review run on the city's
-# account, and is feedback like any other. A review with an empty body carries
+# after the provenance cutover is not the city's own, so it is feedback like
+# any other. A review with an empty body carries
 # only its inline comments, which the comment space already sees; counting it
 # would leave a posture no comment id can ever answer. CHANGES_REQUESTED counts
 # beside COMMENTED: an operator uses it to mean "change this", and it is the
@@ -4820,8 +4821,8 @@ WB_REVIEW_ANSWERS
           echo "$PROG: $wid — PR#$wnum review $wrid is answered, but its living answer is not on the PR yet; NOT dismissing (retry next pass)" >&2
           continue
         fi
-        # A review under our own login that is feedback (a model review run on the
-        # city's account, unmarked, after the cutover) has no reviewer to re-queue:
+        # A review under our own login that is feedback (unmarked, posted after
+        # the cutover) has no reviewer to re-queue:
         # the account it would re-request is the one making the request, and
         # GitHub refuses a re-request of the PR's author. That review is dismissed
         # without one, so a re-request that can never land does not hold its
