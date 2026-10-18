@@ -41,7 +41,12 @@
 # DIRECT_MERGE_PUSH_BACKOFF seconds (default 2) times the attempt between
 # tries. The transition records and closes the bead and clears the stamp. It is
 # handed this script's rig root as GC_RIG_ROOT, the checkout lifecycle.sh checks
-# the landing in.
+# the landing in. A transition can write and still fail, since lifecycle.sh
+# exits 2 when its read-back does not verify a write it made. So after each
+# failed try the bead is read, and a bead that reads merge_result=merged at
+# this merged_sha is recorded. A write that lands on the last try has no retry
+# left to record it again, and a retry of an earlier one would append a second
+# note.
 #
 # A push refused for branch protection (GH006, GH013, "protected branch",
 # "refusing to allow", "Changes must be made through a pull request",
@@ -109,9 +114,23 @@ retry() {
     n=$((n + 1))
   done
 }
+# bead_row: the work bead's `gc bd show` row, in ROW. Non-zero when the store
+# does not return the bead, which a read of one key cannot tell from a bead
+# that lacks the key.
+bead_row() {
+  ROW=$(bd_json show "$WORK")
+  printf '%s' "$ROW" | jq -e --arg id "$WORK" 'type == "array" and ((.[0].id // "") | tostring) == $id' >/dev/null 2>&1
+}
+# recorded: the bead reads merge_result=merged at this landing's merged_sha.
+# shellcheck disable=SC2329  # run through record
+recorded() {
+  bead_row && [ "$(row_meta "$ROW" merge_result)" = merged ] && [ "$(row_meta "$ROW" merged_sha)" = "$MERGED_SHA" ]
+}
 # shellcheck disable=SC2329  # run through retry
 record() {
-  GC_RIG_ROOT="$RIG_ROOT" "$LC" transition "$WORK" --to merged --close --set merged_sha="$MERGED_SHA" --set merged_target="$TARGET" --unset rejection_reason --unset direct_landing_sha --append-notes "Merged to $TARGET at $(git -C "$RIG_ROOT" rev-parse --short "$MERGED_SHA")"
+  GC_RIG_ROOT="$RIG_ROOT" "$LC" transition "$WORK" --to merged --close --set merged_sha="$MERGED_SHA" --set merged_target="$TARGET" --unset rejection_reason --unset direct_landing_sha --append-notes "Merged to $TARGET at $(git -C "$RIG_ROOT" rev-parse --short "$MERGED_SHA")" && return 0
+  recorded || return 1
+  echo "$WORK reads merge_result=merged at $MERGED_SHA, so the transition wrote the landing before it failed; it is recorded"
 }
 
 fetch_target || { echo "could not fetch origin/$TARGET; nothing landed"; exit 1; }

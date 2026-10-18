@@ -22,6 +22,8 @@
 #     one that still fails exits 1 and keeps its stamp, so the next patrol's
 #     attempt records it at the stamp, whether origin/main stayed at the
 #     landing or moved on past it;
+#   - a transition that writes and then fails, on any try, is recorded once the
+#     bead reads merged at the landing, and is not written again;
 #   - a commit landed on top of the push before the read-back does not fail it;
 #   - a push refused for branch protection promotes the bead to
 #     merge_strategy=pr and clears the stamp in one write, and exits 3, and any
@@ -54,7 +56,10 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 # The script under test and the bd-lib.sh it sources, beside a stub
 # lifecycle.sh that logs each transition and the GC_RIG_ROOT it was handed. The
 # stub refuses every call when LC_FAIL is set, and the first LC_FAIL_TIMES calls
-# when that is set.
+# when that is set. With LC_WRITE_RC set, a call it does not refuse writes the
+# transition to the bead file, as the real writer's one update does, and then
+# exits LC_WRITE_RC; lifecycle.sh exits 2 when its read-back does not verify
+# what it wrote.
 SUT="$TMP/sut"
 mkdir -p "$SUT" "$TMP/bin" "$TMP/gitshim" "$TMP/sleepshim"
 cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$SUT/"
@@ -68,7 +73,23 @@ if [ -n "${LC_FAIL_TIMES:-}" ] && [ "$(wc -l < "$FAKE_LC_LOG" | tr -d ' ')" -le 
   echo "lifecycle: the store is busy" >&2
   exit 1
 fi
-exit 0
+[ -n "${LC_WRITE_RC:-}" ] || exit 0
+shift 2
+while [ $# -gt 0 ]; do
+  v=""
+  case "$1" in
+    --to) prog='.[0].metadata.merge_result = $v'; v="$2"; shift ;;
+    --set) prog='.[0].metadata[($v | sub("=.*$"; ""))] = ($v | sub("^[^=]*="; ""))'; v="$2"; shift ;;
+    --unset) prog='del(.[0].metadata[$v])'; v="$2"; shift ;;
+    --close) prog='.[0].status = "closed"' ;;
+    --append-notes) prog='.[0].notes = ((.[0].notes // "") + (if (.[0].notes // "") == "" then "" else "\n" end) + $v)'; v="$2"; shift ;;
+    *) prog="" ;;
+  esac
+  [ -z "$prog" ] || { jq --arg v "$v" "$prog" "$FAKE_BEAD" > "$FAKE_BEAD.new" && mv "$FAKE_BEAD.new" "$FAKE_BEAD"; }
+  shift
+done
+[ "$LC_WRITE_RC" = 0 ] || echo "lifecycle: wrote but did NOT verify" >&2
+exit "$LC_WRITE_RC"
 LC
 chmod +x "$SUT/lifecycle.sh"
 # gc answers the roster for `rig list` and the bead file for `bd show`, applies
@@ -369,6 +390,23 @@ run LC_FAIL_TIMES=1
 eq "$RC" 0 "lc-once: exits 0"
 eq "$(transitions)" 2 "lc-once: the transition ran twice"
 eq "$(sed -n 1p "$D/lc.log")" "$(sed -n 2p "$D/lc.log")" "lc-once: the second try is the same transition"
+
+echo "── a transition that writes and then fails its read-back has recorded the landing ──"
+setup "$TMP/lc-wrote"
+run LC_WRITE_RC=2
+eq "$RC" 0 "lc-wrote: exits 0"
+eq "$(transitions)" 1 "lc-wrote: the transition is not written again"
+has "$OUT" "wb reads merge_result=merged at $FEATURE" "lc-wrote: it says the bead reads the landing"
+eq "$(jq -r '.[0] | [.status, .metadata.merge_result, .metadata.merged_sha] | join(" ")' "$D/bead.json")" "closed merged $FEATURE" "lc-wrote: the bead reads closed and merged at the landing"
+eq "$(jq -r '.[0].notes' "$D/bead.json" | grep -c '^Merged to main at ')" 1 "lc-wrote: one note records the landing"
+no_drain lc-wrote
+
+echo "── the same, on the last try ──"
+setup "$TMP/lc-wrote-last"
+run LC_FAIL_TIMES=2 LC_WRITE_RC=2
+eq "$RC" 0 "lc-wrote-last: exits 0"
+eq "$(transitions)" 3 "lc-wrote-last: the third try is the one that writes"
+eq "$(jq -r '.[0].metadata.merge_result // "none"' "$D/bead.json")" merged "lc-wrote-last: the bead reads merged"
 
 echo "── a pause with a leading zero is read in base 10 ──"
 for b in 08 010; do
