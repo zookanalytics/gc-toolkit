@@ -12,12 +12,12 @@ SCRIPT="$HERE/liveness-sweep.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-liveness-sweep-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-# The census phases its pre-open gates against review-checks.toml; the SUT runs
-# in place, so by default it would read the live pack's index and classify these
-# fixtures' synthetic lanes (codex, ci) as non-pre-open. Point the override at a
-# missing file so the census takes its pre-phase drop and these fixtures are
-# judged on their lane names alone, hermetically. The phase-aware path has its
-# own case at the end, with a controlled index.
+# The census phases its pre-open gates against review-checks.toml, which the
+# resolver reads from the checkout the sweep runs in, so by default it would
+# read whatever index that checkout carries. Point the override at a missing
+# file so the census takes its pre-phase drop and these fixtures are judged on
+# their lane names alone, hermetically. The phase-aware path has its own cases
+# at the end, one with a controlled index and one with a rig checkout's own.
 export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 
 PASS=0; FAIL=0
@@ -763,6 +763,37 @@ eq "$RC" "0" "the phase-aware pass completes"
 # review carries, so it reads green rather than flagged.
 eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "ph-preopen-ungreen" \
    "the resolver classes the legacy-token, draft-pending and mixed-case anchors gated; only the pre-open-ungreen one is unnamed"
+
+echo "── the census reads the index of the rig checkout it runs in, not the pack's ──"
+# The order runs the sweep in its rig's checkout, and that rig's index says
+# which lanes gate pre-open. The pack's index beside the script phases demo
+# open-as-draft. Rig A's phases it pre-open, so an anchor whose demo lane is
+# not green there is an unnamed wait. Rig B's phases it open-as-draft, so the
+# same anchor is gated: the rig's index is read, not merely no index, under
+# which demo would take pre-open too. No override is set, as in a real pass.
+RIG_A="$TMP/rig-a"; RIG_B="$TMP/rig-b"
+for r in "$RIG_A" "$RIG_B"; do mkdir -p "$r" && git -C "$r" init -q; done
+rig_index() { # rig_index <rig> <demo phase>
+    printf '[checks.correctness]\nmethod="m"\npurpose="p"\nphase="pre-open"\n[checks.demo]\nmethod="m"\npurpose="p"\nphase="%s"\n' "$2" > "$1/review-checks.toml"
+}
+rig_index "$RIG_A" pre-open
+rig_index "$RIG_B" open-as-draft
+printf '%s\n' '[{"id":"ri-demo","title":"pre-open, correctness green, demo pending","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo"}}]' > "$TMP/ri-ready.json"
+backing ri-demo correctness
+in_rig() { # in_rig <rig> : run_sweep from the rig's checkout, with no index override
+    rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"
+    : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_BODIES"
+    RC=0
+    OUT="$(cd "$1" && env -u GC_REVIEW_CHECKS_INDEX FAKE_READY="$TMP/ri-ready.json" bash "$SCRIPT" 2>"$TMP/err")" || RC=$?
+}
+in_rig "$RIG_A"
+eq "$RC" "0" "the pass in a rig checkout completes"
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "ri-demo" \
+   "a rig whose own index phases demo pre-open holds the anchor on its demo lane, whatever the pack's index says"
+in_rig "$RIG_B"
+eq "$RC" "0" "the pass in the second rig checkout completes"
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "" \
+   "a rig whose own index phases demo open-as-draft gates the same anchor"
 
 echo "── holder liveness gates the conversing class (readable session list) ──"
 # Two visits track two ready subjects: one held by a live session (lx-live-1 is

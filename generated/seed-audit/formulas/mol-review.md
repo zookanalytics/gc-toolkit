@@ -3,11 +3,11 @@ Description: Signoff review lifecycle — claim -> pin -> judge -> ONE signoff.s
 drain. Attached at dispatch (gc sling --on mol-review) to a review bead:
 metadata.task_kind=review, check_name (the check the verdict satisfies),
 anchor_bead (the gating anchor), and the review target — review_branch /
-review_base pre-open, or pr_url / pr_number once a PR exists — plus the
-dispatch-pinned reviewed_oid. The steps carry the lifecycle every check
-shares. The check's method, which the dispatch note's check section names,
-carries what the review reads, runs and judges, and the agent prompt carries
-only worker doctrine.
+review_base, plus the anchor's PR as review_pr_url / review_pr_number once it
+is open — and the dispatch-pinned reviewed_oid. The steps carry the lifecycle
+every check shares. The check's method, which the dispatch note's check
+section names, carries what the review reads, runs and judges, and the agent
+prompt carries only worker doctrine.
 
 Hard rules, in force for every step:
 
