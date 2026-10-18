@@ -6,9 +6,10 @@
 .idea/
 
 # Gas City
+# gc rewrites the bead store's config.yaml and metadata.json at runtime, so git
+# tracks only the scope's identity, as gascity's own rig setup writes it.
 .beads/*
-!.beads/config.yaml
-!.beads/metadata.json
+!.beads/identity.toml
 # bd's workspace gate sits BESIDE .beads, not inside it (`<dir>/.beads.gate.lock`),
 # so the pattern above never covers it. These flock files are never deleted, so
 # every scope root accumulates one as an untracked stray -- which `git status

@@ -777,8 +777,20 @@ gc bd update "$WORK_BEAD_ID" "${RECORD[@]}"
 # <<< workspace-setup-record-worktree
 ```
 
-**4. Clean state + setup:** `git status` should be clean; run
-`{{setup_command}}` (empty = skip).
+**4. Clean state + setup:** `git status` should be clean. The rig's setup
+command runs in the worktree through `gctk rig setup`, which records nothing;
+an empty one is skipped:
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+# A quoted heredoc hands the command over verbatim, whatever quotes it carries.
+SETUP_CMD=$(cat <<'CMD_EOF'
+{{setup_command}}
+CMD_EOF
+)
+[ -z "$SETUP_CMD" ] || "$GCTK" rig setup --command "$SETUP_CMD"
+```
 
 **Exit criteria:** in the worktree, on a clean recorded branch, current with
 {{base_branch}}, deps installed."""
@@ -798,36 +810,56 @@ Check if the codebase is healthy BEFORE starting your work.
 **Skip this step if resuming a rejected branch** — pre-flights were
 already verified on the prior attempt. Close this step and proceed.
 
-**1. Run pre-flights (skip empty commands silently).** The test suite can run
-far longer than a claim's five-minute lease TTL, so run it through the
-claim-lease keepalive: `assets/scripts/lease-heartbeat.sh` refreshes your claim
-every couple of minutes while the suite runs, so a live holder is not taken for
-a dead one. `CLAIMED_STEP_BEAD_ID` is the `bead_id` your `gc hook --claim
---json` returned for this step. The lease is on that step bead, and an earlier
-step's claim is already closed, so its id refreshes nothing. The keepalive is
-best-effort — an unresolved wrapper runs the command plain.
+**1. Run pre-flights (skip empty commands silently).** Each runs in the
+worktree through `gctk rig`, which records its result against the base commit
+you are on, so every polecat starting from this base shares one run: a call
+whose run is already recorded there answers from the record without running.
+The test suite can run far longer than a claim's five-minute lease TTL, so the
+calls go through the claim-lease keepalive: `assets/scripts/lease-heartbeat.sh`
+refreshes your claim every couple of minutes while one runs, so a live holder
+is not taken for a dead one. `CLAIMED_STEP_BEAD_ID` is the `bead_id` your `gc
+hook --claim --json` returned for this step. The lease is on that step bead,
+and an earlier step's claim is already closed, so its id refreshes nothing. The
+keepalive is best-effort — an unresolved wrapper runs the command plain.
 ```bash
 CLAIMED_STEP_BEAD_ID="<the bead_id your gc hook --claim returned for this step>"
 # >>> preflight-lease-keepalive
 LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
 hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_STEP_BEAD_ID" -- "$@"; else "$@"; fi; }
 # <<< preflight-lease-keepalive
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+# A quoted heredoc hands each command over verbatim, whatever quotes it carries.
+TYPECHECK_CMD=$(cat <<'CMD_EOF'
 {{typecheck_command}}
-{{lint_command}}
-# A quoted heredoc hands the test command over verbatim, whatever quotes it carries.
-TEST_CMD=$(cat <<'TEST_CMD_EOF'
-{{test_command}}
-TEST_CMD_EOF
+CMD_EOF
 )
-if [ -n "$TEST_CMD" ]; then hb bash -c "$TEST_CMD"; fi
+LINT_CMD=$(cat <<'CMD_EOF'
+{{lint_command}}
+CMD_EOF
+)
+TEST_CMD=$(cat <<'CMD_EOF'
+{{test_command}}
+CMD_EOF
+)
+[ -z "$TYPECHECK_CMD" ] || hb "$GCTK" rig typecheck --command "$TYPECHECK_CMD"
+[ -z "$LINT_CMD" ] || hb "$GCTK" rig lint --command "$LINT_CMD"
+[ -z "$TEST_CMD" ] || hb "$GCTK" rig test --scope full --command "$TEST_CMD"
 ```
+A call exits 0 on a pass and 1 on a fail. A fail answered from the record
+prints no output of its own; run the same call with `--force` when you need
+what failed to key it (3a). Exit 4 says nothing about the code, and `gctk
+rig`'s line names why, such as files an earlier run left that git does not
+ignore.
 
 **If ALL commands above are empty**, check the repo's CLAUDE.md or AGENTS.md
 (whichever your provider uses) for quality-gate guidance. Look for sections
 named "Quality Gates", "CI", "Testing", "Build", or "Lint" and run the
-verification commands listed there — in code blocks or bullet lists. Run the
-test command through the keepalive the same way, `hb bash -c '<test command>'`,
-so a long suite keeps the lease fresh.
+verification commands listed there — in code blocks or bullet lists. Run each
+through the gate and the keepalive the same way, such as `hb "$GCTK" rig test
+--scope full --command '<test command>'`, so its result is recorded at this
+base and a long suite keeps the lease fresh.
 
 Run ONLY read-only verification commands (typecheck, lint, build, test).
 Do NOT run install, cleanup, publish, release, `git push`, or any
@@ -1117,31 +1149,25 @@ title = "Self-review and verify green (affected-aware, bounded check loop)"
 needs = ["implement"]
 description = """
 Prove the change is green before it can hand off. This step is a bounded check
-loop: each iteration runs the declared checks in its own session and, on green,
-stamps the verified HEAD on the work bead; the exit condition
-(assets/scripts/self-review-check.sh) converges the loop only when the stamp
-names the live HEAD. A red iteration spawns the next, up to `max_attempts`, so a
-failure the refinery would have bounced a hop later — deleting the workflow and
-repouring a fresh molecule — is fixed here instead. The refinery still re-runs
+loop: each iteration runs the declared checks in its own session through `gctk
+rig`, which records each result against the commit it ran at, and the exit
+condition (assets/scripts/self-review-check.sh) converges the loop only when
+test, lint, typecheck, setup and build all passed at the live HEAD. A red
+iteration spawns the next, up to `max_attempts`, so a failure the refinery
+would have bounced a hop later is fixed here instead. The refinery still runs
 the real gate as the backstop.
 
 Each iteration runs in a FRESH pooled session with none of the previous one's
 context — the loop clears session affinity on every pool retry, by design.
 Recover what you need from durable state; assume nothing carried over.
 
-**Config: setup_command = {{setup_command}}**
-**Config: typecheck_command = {{typecheck_command}}**
-**Config: lint_command = {{lint_command}}**
-**Config: build_command = {{build_command}}**
-**Config: test_command = {{test_command}}**
-**Config: affected_tests_command = {{affected_tests_command}}**
-
 **1. Recover the work bead and worktree.** `CLAIMED_ITER_BEAD` is the `bead_id`
 your `gc hook --claim --json` returned for this iteration; it is the only id
-that names this attempt unambiguously, and you close it in step 6. A work bead
+that names this attempt unambiguously, and you close it in step 5. A work bead
 closed while this run was mid-flight was withdrawn, and gascity's autoclose
 leaves a run with open steps alone, so this iteration cancels the run instead
-of reviewing it:
+of reviewing it. `gc.var.issue` on the root gives the exit condition a
+resilient handle on the work bead when the store is degraded:
 ```bash
 CLAIMED_ITER_BEAD="<the bead_id your gc hook --claim returned>"
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
@@ -1160,6 +1186,8 @@ if [ "$(printf '%s' "$WORK_JSON" | jq -r 'if type == "array" then (.[0].status /
   exit 1
 fi
 # <<< self-review-withdrawn-work
+ROOT=$(gc bd show "$CLAIMED_ITER_BEAD" --json | jq -r '.[0].metadata."gc.root_bead_id" // empty')
+[ -n "$ROOT" ] && gc bd update "$ROOT" --set-metadata gc.var.issue="$WORK_BEAD_ID"
 WORKTREE=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.work_dir // empty')
 BRANCH=$(printf '%s' "$WORK_JSON" | jq -r '.[0].metadata.branch // empty')
 cd "$WORKTREE" || { echo "recorded work_dir is missing: $WORKTREE" >&2; exit 1; }
@@ -1176,64 +1204,91 @@ unintended file changes. Fix what you find. On a retry, the previous attempt's
 failure reproduces in the checks below — run them and read the failure rather
 than re-deriving from scratch.
 
-**3. Quality checks (skip empty commands):**
+**3. Run the declared checks through the gate**, in the shell that ran step 1,
+whose worktree they run in and whose work bead they publish to. test, lint and
+typecheck record their result against HEAD through `gctk rig`, and
+`--publish-bead` copies it onto the work bead's `rig_check.<check>`; a check the
+rig declares no command for records a pass that ran nothing. setup and build
+record nothing, so on a clean tree the block notes their outcome at HEAD on the
+work bead (`self_review_setup_build`). A run already recorded at HEAD answers
+from its record, and for a declared command no other run's record counts. The
+test run is the affected subset when the rig declares one, else the full suite.
+The long calls go through `hb`, the claim-lease keepalive
+(`assets/scripts/lease-heartbeat.sh`): it refreshes `$CLAIMED_ITER_BEAD` while a
+call runs, so a suite that outlives the five-minute lease does not read as a
+dead holder, and an unresolved wrapper runs the command plain.
 ```bash
-{{setup_command}}
-{{typecheck_command}}
-{{lint_command}}
-{{build_command}}
-```
-
-**4. Tests — affected subset when the rig provides one, full suite otherwise.**
-Run them through the claim-lease keepalive. A claim's lease has a fixed
-five-minute TTL and the suite routinely outlives it, so a live holder whose
-lease expired reads, to any lease consumer, exactly like a dead one;
-`assets/scripts/lease-heartbeat.sh` refreshes `$CLAIMED_ITER_BEAD` every couple
-of minutes while the command runs. It is best-effort. An unresolved wrapper runs
-the command plain, and a refresh the store refuses is reported once on stderr.
-Neither fails the command.
-```bash
+: "${WORK_BEAD_ID:?run step 1 first, in this same shell}"
 # >>> self-review-lease-keepalive
 LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
 hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_ITER_BEAD" -- "$@"; else "$@"; fi; }
 # <<< self-review-lease-keepalive
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 # A quoted heredoc hands each command over verbatim, whatever quotes it carries.
-TEST_CMD=$(cat <<'TEST_CMD_EOF'
+SETUP_CMD=$(cat <<'CMD_EOF'
+{{setup_command}}
+CMD_EOF
+)
+TYPECHECK_CMD=$(cat <<'CMD_EOF'
+{{typecheck_command}}
+CMD_EOF
+)
+LINT_CMD=$(cat <<'CMD_EOF'
+{{lint_command}}
+CMD_EOF
+)
+BUILD_CMD=$(cat <<'CMD_EOF'
+{{build_command}}
+CMD_EOF
+)
+AFFECTED_CMD=$(cat <<'CMD_EOF'
 {{affected_tests_command}}
-TEST_CMD_EOF
+CMD_EOF
 )
-[ -n "$TEST_CMD" ] || TEST_CMD=$(cat <<'TEST_CMD_EOF'
+TEST_CMD=$(cat <<'CMD_EOF'
 {{test_command}}
-TEST_CMD_EOF
+CMD_EOF
 )
-if [ -n "$TEST_CMD" ]; then hb bash -c "$TEST_CMD"; fi
+PUB=(--publish-bead "$WORK_BEAD_ID")
+SETUP=none; [ -z "$SETUP_CMD" ] || { hb "$GCTK" rig setup --command "$SETUP_CMD" && SETUP=pass || SETUP=fail; }
+if [ -n "$TYPECHECK_CMD" ]; then hb "$GCTK" rig typecheck --command "$TYPECHECK_CMD" "${PUB[@]}"; else "$GCTK" rig typecheck --nothing-declared "${PUB[@]}"; fi
+if [ -n "$LINT_CMD" ]; then hb "$GCTK" rig lint --command "$LINT_CMD" "${PUB[@]}"; else "$GCTK" rig lint --nothing-declared "${PUB[@]}"; fi
+BUILD=none; [ -z "$BUILD_CMD" ] || { hb "$GCTK" rig build --command "$BUILD_CMD" && BUILD=pass || BUILD=fail; }
+[ -n "$(git status --porcelain)" ] || gc bd update "$WORK_BEAD_ID" --set-metadata "self_review_setup_build=$(jq -nc --arg c "$(git rev-parse HEAD)" --arg s "$SETUP" --arg b "$BUILD" --arg sc "$SETUP_CMD" --arg bc "$BUILD_CMD" '{commit: $c, setup: $s, build: $b, setup_command: $sc, build_command: $bc}')"
+if [ -n "$AFFECTED_CMD" ]; then hb "$GCTK" rig test --scope affected --command "$AFFECTED_CMD" "${PUB[@]}"
+elif [ -n "$TEST_CMD" ]; then hb "$GCTK" rig test --scope full --command "$TEST_CMD" "${PUB[@]}"
+else "$GCTK" rig test --nothing-declared "${PUB[@]}"; fi
 ```
-If the rig declares no test command (both empty) and you run the repo's own
-quality gate instead, invoke it the same way — `hb bash -c '<your test
-command>'` — so the long run keeps the lease fresh.
+A call exits 0 on a pass and 1 on a fail. Fix a failure your diff introduced,
+commit, and run the checks again. A fail answered from its record prints no
+output; `--force` runs it again to show what failed. Exit 4 says nothing about
+the code, and `gctk rig`'s line names why, such as untracked files a run left,
+or a crash; a repeat at one commit is the code's or the command's doing. When
+the rig declares no command and you run the repo's own quality gate (CLAUDE.md
+or AGENTS.md) instead, run it through the gate the same way, such as
+`hb "$GCTK" rig test --scope full --command '<its test command>' "${PUB[@]}"`.
 
-**A failure your diff introduced blocks the stamp — fix it and commit.** A
-failure that reproduces on `origin/{{base_branch}}` is pre-existing:
-preflight-tests already filed it, so it neither blocks your stamp nor earns a
-second bead. `git status` must be clean before you stamp.
-
-**5. Stamp the verified HEAD — only when every check above is green.** The exit
-condition converges on `self_review_passed_sha == live HEAD`, so the stamp
-certifies exactly the tree whose checks you saw pass. `gc.var.issue` on the root
-gives the exit condition a resilient handle on this bead when the store is
-degraded.
+**4. A failure your diff did not cause.** A red check that fails the same way on
+`origin/{{base_branch}}` is pre-existing and does not hold the loop. Find or
+file its tracker as preflight-tests' step 3 does, then mark its record at this
+HEAD on the work bead; the exit condition takes the mark in place of a passing
+record while that record stands:
 ```bash
-HEAD_SHA=$(git rev-parse HEAD)
-ROOT=$(gc bd show "$CLAIMED_ITER_BEAD" --json | jq -r '.[0].metadata."gc.root_bead_id" // empty')
-gc bd update "$WORK_BEAD_ID" --set-metadata self_review_passed_sha="$HEAD_SHA"
-[ -n "$ROOT" ] && gc bd update "$ROOT" --set-metadata gc.var.issue="$WORK_BEAD_ID"
+# >>> self-review-pre-existing
+CHECK="<test, lint, typecheck, setup or build: the red check>"
+TRACKERS="<the tracker id of each failure in it, space-separated>"
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-check-pre-existing.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+"${SCRIPTS:?rig-check-pre-existing.sh not found in the pack}/rig-check-pre-existing.sh" --bead "$WORK_BEAD_ID" --check "$CHECK" --commit "$(git rev-parse HEAD)" --trackers "$TRACKERS"
+# <<< self-review-pre-existing
 ```
-If it is not green after your best effort this iteration, stamp nothing: an
-absent or stale stamp is exactly what the exit condition reads as "not yet", and
-the loop iterates. Never stamp a HEAD whose checks you did not watch pass — the
-refinery re-runs them, and a forged green only wastes the round.
+Mark only a failure you reproduced on the base; a run with another command or
+scope replaces the record and needs a mark of its own. A check still red after
+your best effort stays red: the exit condition reads it as "not yet", and the
+loop iterates. `git status` must be clean before you close the iteration.
 
-**6. Close this iteration bead — closing is what runs the exit condition.**
+**5. Close this iteration bead — closing is what runs the exit condition.**
 Close by the explicit id you claimed; `$GC_BEAD_ID` is unset for a pool-claimed
 polecat, and a guarded close silently no-ops and stalls the loop.
 ```bash
@@ -1246,9 +1301,11 @@ the exit condition hands the work bead back itself
 (`aborted_at=self-review-exhausted`), because nothing runs after the budget is
 spent.
 
-**Exit criteria (for the loop, not for you):** the declared checks are green at
-HEAD, `self_review_passed_sha` names that HEAD, and this iteration bead is
-closed. Any iteration that leaves the tree closer to that has done its job."""
+**Exit criteria (for the loop, not for you):** the records of the test, lint and
+typecheck runs above and the note of setup and build at HEAD pass, or name a
+failure the work bead marks pre-existing at that HEAD, and this iteration bead
+is closed.
+Any iteration that leaves the tree closer to that has done its job."""
 
 [steps.check]
 # Total attempts including the first. A red iteration spawns the next; this
@@ -1262,10 +1319,11 @@ max_attempts = 3
 [steps.check.check]
 mode = "exec"
 path = "../assets/scripts/self-review-check.sh"
-# The script verifies a sha-bound stamp; it does not run the gate (its header
-# explains why — the exec is inline in the control dispatcher, sandboxed, and
-# time-bounded, so a real test suite would time out and stall the city). 2m is
-# slack for a few bead reads and the exhaustion handback, not a test budget.
+# The script reads the checks' records at HEAD; it does not run the checks (its
+# header explains why — the exec is inline in the control dispatcher, sandboxed,
+# and time-bounded, so a real test suite would time out and stall the city). 2m
+# is slack for a few bead and record reads and the exhaustion handback, not a
+# test budget.
 timeout = "2m"
 
 [[steps]]

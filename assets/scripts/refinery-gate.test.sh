@@ -3,10 +3,14 @@
 # runs the rig's checks as one detached job and waits for it in bounded
 # foreground calls. Executes the step's two marked blocks (refinery-gate-start
 # and refinery-gate-wait) as written, against a real git repo with a prep
-# worktree, the real detached-job.sh, and a stub gc whose `formula show`
-# answers with the rig's check commands from a fixture. Proves:
-#   - the gate runs in the prep worktree and reports every failed check by
-#     name and exit code, not just the last one;
+# worktree, the real detached-job.sh, the gctk built from this checkout, and a
+# stub gc whose `formula show` answers with the rig's check commands from a
+# fixture. Proves:
+#   - the gate runs its checks through gctk rig in the prep worktree and
+#     reports every failed check by name, not just the last one, and a check
+#     cut short ahead of any failure;
+#   - the merged head's records are read by `gctk rig --check` in any other
+#     worktree of the clone at that commit;
 #   - each command runs as configured, so a trailing comment or a heredoc in
 #     it works, and the rig's own value wins over the formula default;
 #   - a wait that finds the gate still running notes it on this patrol's own
@@ -23,14 +27,22 @@
 #     its CLAUDE.md is added, and an added one runs only for such a rig;
 #   - a wait that cannot find its launcher exits 1, leaves the gate running,
 #     and does not drain;
-#   - with no detached-job.sh reachable, no prep worktree, or an unreadable
-#     read of the check commands, nothing runs and the cycle drains.
+#   - with no detached-job.sh reachable, no gctk binary, no prep worktree, or
+#     an unreadable read of the check commands, nothing runs and the cycle
+#     drains;
+#   - every stop and wait the patrol makes on the gate gives gctk longer than
+#     the ten seconds it takes to stop a check's command.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-refinery-patrol.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-refinery-gate-test.XXXXXX")"
+# shellcheck source=test-harness.sh
+. "$HERE/test-harness.sh"   # harness_build_gctk; this suite's own helpers follow
+harness_build_gctk
+[ -n "$GCTK_BUILT" ] || { echo "FAIL - $GCTK_BUILD_ERR"; exit 1; }
+export GCTK_BIN="$GCTK_BUILT"
 cleanup() {
   [ -f "$TMP/repo/.git/gc-refinery-gate/pid" ] && "$HERE/detached-job.sh" stop "$TMP/repo/.git/gc-refinery-gate" >/dev/null 2>&1
   rm -rf "$TMP"
@@ -91,6 +103,9 @@ git -C "$REPO" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
 git -C "$REPO" worktree add -q --detach "$REPO/.git/gc-refinery-prep" HEAD
 PREP_WT="$REPO/.git/gc-refinery-prep"
 GATE="$REPO/.git/gc-refinery-gate"
+# fresh: clear the records earlier cases left at the prep HEAD, so a case's
+# checks run instead of answering from them.
+fresh() { rm -rf "${REPO:?}/.git/gc-rig-checks"; }
 
 # The pack, where the blocks find detached-job.sh and refinery-workspace.sh:
 # $GC_CITY_PATH/rigs/gc-toolkit.
@@ -184,19 +199,52 @@ sed -n '/^ *CURRENT_WISP=/,/^ *fi$/p' "$TMP/wait.raw" | sed 's/^  //' > "$TMP/wa
 [ -s "$TMP/pour-lookup" ] && ok "patrol-wisp-pour's wisp lookup extracted" || bad "patrol-wisp-pour's wisp lookup extracted"
 eq "$(cat "$TMP/wait-lookup")" "$(cat "$TMP/pour-lookup")" "the wait block's wisp lookup is patrol-wisp-pour's"
 
+echo "── the merged head's records are read in any worktree of the clone ──"
+git -C "$REPO" worktree add -q --detach "$TMP/reader" HEAD
+REC=$(cd "$TMP/reader" && "$GCTK_BUILT" rig test --check 2>/dev/null); RC=$?
+eq "$RC/$(printf '%s' "$REC" | jq -r '.result + " " + .scope')" "0/pass full" "another worktree at the merged head reads the gate's full-suite pass"
+eq "$(cd "$TMP/reader" && "$GCTK_BUILT" rig lint --check >/dev/null 2>&1; echo $?)" 0 "…and its lint pass"
+
 echo "── a failing gate names every failed check ──"
+fresh
 checks '' 'exit 3' 'cd /' '' 'echo test-output; pwd; false' true
 run_block "$TMP/start.raw" "$CITY" >/dev/null
 OUT=$(run_block "$TMP/wait.raw" "$CITY"); RC=$?
 eq "$RC/$(field "$OUT" state)/$(field "$OUT" rc)" 1/done/1 "the wait reports done, rc=1"
 LOG=$(cat "$GATE/log")
-has "$LOG" "GATE FAILED: typecheck_command:3 test_command:1" "the log names each failed check and its exit code"
+has "$LOG" "GATE FAILED: typecheck:1 test:1" "the log names each failed check"
+has "$LOG" "(exit 3, " "gctk's line keeps the failed command's own exit status"
 has "$LOG" "test-output" "the failed check's output is in the log"
-has "$LOG" "== test_command" "each check's output sits under its own header"
+has "$LOG" "== test" "each check's output sits under its own header"
 case "$LOG" in *"test-output"$'\n'"/"$'\n'*) bad "a cd in one check does not move the next" "the test check ran in /" ;; *) ok "a cd in one check does not move the next" ;; esac
-case "$LOG" in *lint_command:*) bad "a passing check is not named" "lint appears in: $LOG" ;; *) ok "a passing check is not named" ;; esac
+case "$(printf '%s\n' "$LOG" | grep '^GATE FAILED')" in *lint*) bad "a passing check is not named" "lint appears in: $LOG" ;; *) ok "a passing check is not named" ;; esac
+
+echo "── a check that stops short of a verdict cuts the gate short ──"
+fresh
+checks '' '' 'kill -SEGV $$' '' 'true' true
+run_block "$TMP/start.raw" "$CITY" >/dev/null
+OUT=$(run_block "$TMP/wait.raw" "$CITY"); RC=$?
+eq "$RC/$(field "$OUT" state)/$(field "$OUT" rc)" 1/done/4 "the wait reports done, rc=4"
+has "$(cat "$GATE/log")" "GATE CUT SHORT: lint:4" "the log names the check cut short, with gctk's exit"
+
+echo "── what setup and build leave does not cut the checks after them short ──"
+# setup stages a new file and leaves another; build leaves one and writes its
+# output under a path git ignores, which the test run reads.
+fresh
+cp "$REPO/.git/info/exclude" "$TMP/exclude.saved" 2>/dev/null || : > "$TMP/exclude.saved"
+printf 'built/\n' >> "$REPO/.git/info/exclude"
+checks 'printf x > staged.txt; git add staged.txt; printf y > left.txt' 'true' '' 'mkdir -p built; printf z > built/out; printf z > dist.txt' 'test -s built/out && test ! -e dist.txt' true
+run_block "$TMP/start.raw" "$CITY" >/dev/null
+OUT=$(run_block "$TMP/wait.raw" "$CITY"); RC=$?
+eq "$RC/$(field "$OUT" state)/$(field "$OUT" rc)" 0/done/0 "the wait reports done, rc=0"
+has "$(cat "$GATE/log")" "put back what the run left that git does not ignore" "the log says what setup and build left was put back"
+eq "$(git -C "$PREP_WT" status --porcelain)" "" "the prep worktree is clean after the gate"
+# Whatever the case left must not reach the cases after it.
+git -C "$PREP_WT" reset -q --hard; git -C "$PREP_WT" clean -fdq; rm -rf "$PREP_WT/built"
+cp "$TMP/exclude.saved" "$REPO/.git/info/exclude"
 
 echo "── each command runs as configured: a trailing comment, a heredoc ──"
+fresh
 checks $'cat > "$HD_OUT" <<\'EOF\'\nfrom a heredoc\nEOF' '' 'true  # a trailing comment' '' 'test -s "$HD_OUT"' true
 HD_OUT="$TMP/heredoc-out" run_block "$TMP/start.raw" "$CITY" >/dev/null
 OUT=$(run_block "$TMP/wait.raw" "$CITY"); RC=$?
@@ -205,6 +253,7 @@ eq "$(cat "$TMP/heredoc-out" 2>/dev/null)" "from a heredoc" "the heredoc command
 has "$(cat "$GATE/log")" "GATE PASSED" "the log ends GATE PASSED"
 
 echo "── the rig's own check command wins over the formula default ──"
+fresh
 checks '' '' 'echo default-lint >> "$RAN"' '' '' true
 rig_lint 'echo rig-lint >> "$RAN"'
 : > "$TMP/ran"
@@ -228,10 +277,10 @@ checks 'pwd > "$PWD_OUT"' '' 'true' '' 'true' true
 OUT=$(PWD_OUT="$TMP/gate-pwd-2" run_block "$TMP/start.raw" "$CITY"); RC=$?
 eq "$RC/$(field "$OUT" state)" 0/started "the new gate starts over a running one"
 kill -0 -- "-$OLD" 2>/dev/null && bad "the old gate's process group is gone" "it survived" || ok "the old gate's process group is gone"
-eq "$(ls "$GATE/checks" | tr '\n' ' ')" "01-setup_command 02-lint_command 03-test_command " "the new gate's checks replace the old gate's"
+eq "$(ls "$GATE/checks" | tr '\n' ' ')" "01-setup 02-lint 03-test " "the new gate's checks replace the old gate's"
 OUT=$(run_block "$TMP/wait.raw" "$CITY"); RC=$?
 eq "$RC/$(field "$OUT" rc)" 0/0 "the new gate's result is the one reported"
-case "$(cat "$GATE/log")" in *"== build_command"*) bad "the old gate's check does not run again" "build_command ran" ;; *) ok "the old gate's check does not run again" ;; esac
+case "$(cat "$GATE/log")" in *"== build"*) bad "the old gate's check does not run again" "build ran" ;; *) ok "the old gate's check does not run again" ;; esac
 
 echo "── a gate that will not stop: nothing is rewritten under it, and the cycle drains ──"
 # A launcher whose stop reports the gate still running, as detached-job.sh does
@@ -305,17 +354,17 @@ case "$(cat "$STUB_GC_LOG")" in
 esac
 # The agent adds a quality gate from the rig's CLAUDE.md where the block marks.
 cat > "$TMP/claude-md.line" <<'LINE'
-  add_check claude-md-check 'echo from-claude-md >> "$RAN"'
+  add_check lint 'echo from-claude-md >> "$RAN"'
 LINE
-awk -v f="$TMP/claude-md.line" '{print} /^  #   add_check <name> / {while ((getline l < f) > 0) print l}' "$TMP/start.raw" > "$TMP/start-claude.sh"
-eq "$(grep -c 'add_check claude-md-check' "$TMP/start-claude.sh")" 1 "the CLAUDE.md gate goes where the block marks"
+awk -v f="$TMP/claude-md.line" '{print} /^  #   add_check <setup\|typecheck\|lint\|build\|test> / {while ((getline l < f) > 0) print l}' "$TMP/start.raw" > "$TMP/start-claude.sh"
+eq "$(grep -c "add_check lint 'echo from-claude-md" "$TMP/start-claude.sh")" 1 "the CLAUDE.md gate goes where the block marks"
 : > "$TMP/ran"
 OUT=$(RAN="$TMP/ran" run_block "$TMP/start-claude.sh" "$CITY"); RC=$?
 eq "$RC/$(field "$OUT" state)" 0/started "with a CLAUDE.md gate added, the gate starts"
 OUT=$(run_block "$TMP/wait.raw" "$CITY"); RC=$?
 eq "$RC/$(field "$OUT" rc)" 0/0 "the added check passes"
 eq "$(cat "$TMP/ran")" "from-claude-md" "the added check ran"
-has "$(cat "$GATE/log")" "== claude-md-check" "it runs under the name it was given"
+has "$(cat "$GATE/log")" "== lint" "it runs as the gctk rig check it was given"
 # A rig that sets a check command runs that, not the CLAUDE.md gate.
 checks '' '' 'echo configured-lint >> "$RAN"' '' '' true
 : > "$TMP/ran"
@@ -345,6 +394,26 @@ eq "$RC" 1 "the start block exits 1"
 has "$OUT" "cannot find the prep worktree" "it says why"
 has "$(cat "$STUB_GC_LOG")" "runtime drain-ack" "it drains"
 [ -e "$BARE/.git/gc-refinery-gate/pid" ] && bad "no gate started" "a job record exists" || ok "no gate started"
+
+echo "── no gctk binary: nothing runs, and the cycle drains ──"
+: > "$STUB_GC_LOG"
+checks 'touch "$RAN"' '' 'true' '' '' true
+PID_BEFORE=$(cat "$GATE/pid" 2>/dev/null)
+OUT=$(GCTK_BIN="$TMP/no-gctk" RAN="$TMP/ran-nogctk" run_block "$TMP/start.raw" "$CITY" 2>&1); RC=$?
+eq "$RC" 1 "the start block exits 1"
+has "$OUT" "no gctk binary at $TMP/no-gctk" "it says why"
+has "$(cat "$STUB_GC_LOG")" "runtime drain-ack" "it drains"
+eq "$(cat "$GATE/pid" 2>/dev/null)" "$PID_BEFORE" "no gate started"
+
+echo "── every stop and wait outlasts gctk's own stop ──"
+# gctk rig takes up to ten seconds to stop a check's command, so a launcher
+# that kills sooner leaves the command running.
+grep -E '"[$]JOB" (stop|wait) ' "$TOML" > "$TMP/job-calls"
+[ -s "$TMP/job-calls" ] && ok "the patrol's stop and wait calls are found" || bad "the patrol's stop and wait calls are found"
+while IFS= read -r line; do
+  grace=$(printf '%s\n' "$line" | sed -n 's/.*DETACHED_JOB_STOP_GRACE=\([0-9][0-9]*\) .*/\1/p')
+  [ -n "$grace" ] && [ "$grace" -gt 10 ] && ok "grace $grace on: ${line## }" || bad "no grace above 10 on: ${line## }"
+done < "$TMP/job-calls"
 
 echo "── no detached-job.sh: nothing runs, and the cycle drains ──"
 : > "$STUB_GC_LOG"

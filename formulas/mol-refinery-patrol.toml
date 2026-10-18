@@ -245,14 +245,15 @@ PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)
 # A gate an interrupted iteration left running still runs in the prep worktree,
 # so it is stopped before the worktree is rebuilt under it. A gate that will not
 # stop leaves the work with the refinery. The launcher is found by path, as the
-# rig root is, never from cwd.
+# rig root is, never from cwd. Its TERM-to-KILL grace outlasts the ten seconds
+# `gctk rig` takes to stop a check's command, so no command outlives the stop.
 GATE="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-gate"
 JOB=""
 for c in "$RIG_ROOT" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/detached-job.sh" ] && { JOB="$c/assets/scripts/detached-job.sh"; break; }
 done
 [ -n "$JOB" ] || { echo "detached-job.sh not found, so a gate left running in $GATE cannot be stopped. NOT rebuilding the prep worktree; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
-if ! STOP_OUT=$("$JOB" stop "$GATE"); then
+if ! STOP_OUT=$(DETACHED_JOB_STOP_GRACE=20 "$JOB" stop "$GATE"); then
   printf '%s' "$STOP_OUT"; echo
   echo "the gate left running in $GATE did not stop. NOT rebuilding the prep worktree under it; leaving the work with the refinery to retry"
   gc runtime drain-ack
@@ -348,16 +349,20 @@ one `gc formula show --rig` call and gives the gate the rig's value wherever
 the rig sets one, so every session runs the same checks. Never type a
 configured check in by hand.
 
-The gate runs each check in a bash of its own, in the prep worktree, with
-stdin closed. A comment, a quote, a heredoc or a `cd` in a command means what
-it would at a prompt, an `exit` in it ends only that check, and the checks
+The gate runs each check through `gctk rig`, which runs the command with bash
+in the prep worktree, with stdin closed, and records the result of test (the
+full suite), lint and typecheck against the merged head: the commit merge-push
+pushes and the reviews are pinned to. A run already recorded there answers
+from its record. A comment, a quote, a heredoc or a `cd` in a command means
+what it would at a prompt, an `exit` in it ends only that check, and the checks
 after a failed one still run. A check's verdict is its command's exit status,
 so a command that sends its work to the background passes before that work
 ends: each must finish in the foreground.
 
 When the rig sets no check commands, the block says so and starts no gate.
 Add the quality gates documented in the rig's CLAUDE.md where the block marks,
-each as `add_check <name> '<command>'` with the command as documented and any
+each as `add_check <check> '<command>'`, where <check> is the one it is
+(setup, typecheck, lint, build or test), with the command as documented and any
 environment it needs, and run the block again. Those checks run only for a rig
 that sets no check commands, and a gate with no check never starts, so the
 gates are never skipped silently. Start the gate:
@@ -374,11 +379,15 @@ for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC
   [ -x "$c/assets/scripts/detached-job.sh" ] && { JOB="$c/assets/scripts/detached-job.sh"; break; }
 done
 [ -n "$JOB" ] || { echo "detached-job.sh not found; NOT running the gate, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+[ -x "$GCTK" ] || { echo "no gctk binary at $GCTK to run the checks through; NOT running the gate, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 [ -d "$PREP_WT" ] || { echo "cannot find the prep worktree $PREP_WT; running no checks and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 # A gate a previous session left running reads the checks and the script this
 # block rewrites, so it is stopped first. One that survives the stop still
 # runs, so nothing is rewritten under it and the work stays with the refinery.
-if ! STOP_OUT=$("$JOB" stop "$GATE"); then
+if ! STOP_OUT=$(DETACHED_JOB_STOP_GRACE=20 "$JOB" stop "$GATE"); then
   printf '%s' "$STOP_OUT"; echo
   echo "the gate a previous session left running in $GATE did not stop, so its checks are not rewritten under it; leaving the work with the refinery to retry"
   gc runtime drain-ack
@@ -408,9 +417,9 @@ fi
 check_value() {
   printf '%s' "$CHECKS_JSON" | jq -r --arg n "$1" '[.vars[] | select(.name == $n)][0] | if . == null then "" elif .rig_default != null then .rig_default else (.default // "") end'
 }
-# add_check <name> <command>: the command becomes the gate's next check. A
-# check that cannot be written runs nothing and leaves the work with the
-# refinery to retry.
+# add_check <check> <command>: the command becomes the gate's next check, run as
+# the gctk rig check of that name. A check that cannot be written runs nothing
+# and leaves the work with the refinery to retry.
 CHECKS=0
 add_check() {
   CHECKS=$((CHECKS + 1))
@@ -420,17 +429,17 @@ add_check() {
   exit 1
 }
 RUN_TESTS=$(check_value run_tests)
-for CHECK in setup_command typecheck_command lint_command build_command test_command; do
-  if [ "$CHECK" = "test_command" ] && [ "$RUN_TESTS" != "true" ]; then
+for CHECK in setup typecheck lint build test; do
+  if [ "$CHECK" = "test" ] && [ "$RUN_TESTS" != "true" ]; then
     echo "run-tests: test_command skipped (run_tests=${RUN_TESTS})"
     continue
   fi
-  CHECK_CMD=$(check_value "$CHECK")
+  CHECK_CMD=$(check_value "${CHECK}_command")
   if [ -z "$CHECK_CMD" ]; then
-    echo "run-tests: ${CHECK} not set"
+    echo "run-tests: ${CHECK}_command not set"
     continue
   fi
-  echo "run-tests: ${CHECK} = ${CHECK_CMD}"
+  echo "run-tests: ${CHECK}_command = ${CHECK_CMD}"
   add_check "$CHECK" "$CHECK_CMD"
 done
 [ "$CHECKS" -gt 0 ] || echo "run-tests: rig ${GC_RIG} sets no check commands"
@@ -438,22 +447,42 @@ done
 if [ "$CHECKS" -eq 0 ]; then
   # The rig sets no check commands. Add each quality gate its CLAUDE.md
   # documents here, in the order it gives them, as
-  #   add_check <name> '<the command as documented, with any environment it needs>'
+  #   add_check <setup|typecheck|lint|build|test> '<the command as documented, with any environment it needs>'
   :
 fi
 [ "$CHECKS" -gt 0 ] || { echo "run-tests: no check to run, so no gate started; add the quality gates the rig's CLAUDE.md documents where this block marks, and run it again"; exit 1; }
 cat > "$GATE/gate.sh" <<'GATE'
 cd "$1" || exit 2
+gctk="$3"
+# Every check ends this many seconds into the gate, inside the two hours its
+# wait allows, so the wait never stops gctk in the middle of a stop of its own.
+deadline=7080
 failed=""
-# check <name>: run the command on stdin in a bash of its own, with stdin
-# closed, and note its exit status when it fails.
+stopped=""
+# check <check>: run the command on stdin through gctk rig and note its exit
+# when it is not a pass: 1 a fail, any other a run that says nothing about the
+# code.
 check() {
-  local cmd rc
+  local cmd rc left
   cmd=$(cat)
   echo "== $1"
-  bash -c "$cmd" </dev/null
+  left=$((deadline - SECONDS))
+  if [ "$left" -lt 60 ]; then
+    echo "no time left in the gate's bound to run $1"
+    stopped="$stopped $1:timeout"
+    return
+  fi
+  if [ "$1" = test ]; then
+    "$gctk" rig test --scope full --command "$cmd" --timeout "${left}s" </dev/null
+  else
+    "$gctk" rig "$1" --command "$cmd" --timeout "${left}s" </dev/null
+  fi
   rc=$?
-  [ "$rc" -eq 0 ] || failed="$failed $1:$rc"
+  case "$rc" in
+    0) ;;
+    1) failed="$failed $1:1" ;;
+    *) stopped="$stopped $1:$rc" ;;
+  esac
 }
 # Each check is a file in the directory the job names, its name led by its
 # place in the order.
@@ -462,10 +491,11 @@ for f in "$2"/*; do
   name=${f##*/}
   check "${name#*-}" < "$f"
 done
+[ -z "$stopped" ] || { echo "GATE CUT SHORT:$stopped${failed:+ (failed:$failed)}"; exit 4; }
 [ -z "$failed" ] || { echo "GATE FAILED:$failed"; exit 1; }
 echo "GATE PASSED"
 GATE
-"$JOB" start "$GATE" -- bash "$GATE/gate.sh" "$PREP_WT" "$GATE/checks" || { echo "the gate did not start; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+"$JOB" start "$GATE" -- bash "$GATE/gate.sh" "$PREP_WT" "$GATE/checks" "$GCTK" || { echo "the gate did not start; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 # <<< refinery-gate-start
 ```
 
@@ -493,7 +523,7 @@ for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC
   [ -x "$c/assets/scripts/detached-job.sh" ] && { JOB="$c/assets/scripts/detached-job.sh"; break; }
 done
 [ -n "$JOB" ] || { echo "detached-job.sh not found from here, so this call cannot wait on the gate, which keeps running in $GATE; run this block again from the pack checkout, or with GC_RIG_ROOT or GC_CITY_PATH naming it, and do not end the turn"; exit 1; }
-WAIT_OUT=$("$JOB" wait "$GATE" --limit 7200); WAIT_RC=$?
+WAIT_OUT=$(DETACHED_JOB_STOP_GRACE=20 "$JOB" wait "$GATE" --limit 7200); WAIT_RC=$?
 printf '%s' "$WAIT_OUT"; echo
 if [ "$WAIT_RC" -eq 3 ]; then
   # This patrol's own wisp, found the way patrol-wisp-pour finds the wisp it
@@ -515,8 +545,17 @@ exit "$WAIT_RC"
 
 Read the result off the report and the job's log (`$GATE/log`):
 - `state=done rc=0`: every check passed and the log ends `GATE PASSED`.
-- `state=done rc=1`: the log's `GATE FAILED:` line names each failed check
-  with its exit code, and the log above it holds their output.
+- `state=done rc=1`: the log's `GATE FAILED:` line names each failed check,
+  and the log above it holds their output. A fail answered from its record
+  prints none; `--force` runs it again, through `detached-job.sh` with a
+  directory of its own, when handle-failures needs what failed.
+- `state=done rc=4`: a check stopped short of a verdict, which says nothing
+  about the branch. The log's `GATE CUT SHORT:` line names it, and `gctk rig`'s
+  line above it says why, such as a crash or a command that changed a tracked
+  file. Start the gate once more; the checks that passed answer from their
+  records. When the same check stops short again at the same head, take
+  handle-failures' branch-caused path with `gctk rig`'s line as the failure
+  summary, so the work goes back to its author.
 - `state=running` from a wait that exits 1: the gate ran past the limit and
   its process group survived TERM and KILL, so it still runs in the prep
   worktree. Never start another gate beside it. Escalate with key
@@ -708,6 +747,24 @@ fi
 # <<< preexisting-failure-dedup
 ```
 Note the resulting bug id in your merge notes — it satisfies the GATE.
+
+Then mark each check you judged pre-existing, once per check with every
+tracker the block printed for it, on the anchor at the merged head, so a review
+pinned there does not run into the known wall again:
+```bash
+# >>> refinery-pre-existing-mark
+CHECK="<test, lint or typecheck: the check whose failures you judged pre-existing>"
+TRACKERS="<the tracker id each run of the block above printed for it, space-separated>"
+RIG_ROOT="${GC_RIG_ROOT:-}"
+[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
+HEAD_OID=$(git -C "$PREP_WT" rev-parse HEAD)
+ANCHOR=$(gc bd show "$WORK" --json 2>/dev/null | jq -r '.[0].metadata.anchor_bead // empty' 2>/dev/null)
+PRE=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-check-pre-existing.sh" ] && { PRE="$c/assets/scripts/rig-check-pre-existing.sh"; break; }; done
+"${PRE:?rig-check-pre-existing.sh not found in the pack}" --bead "${ANCHOR:-$WORK}" --check "$CHECK" --commit "$HEAD_OID" --worktree "$PREP_WT" --trackers "$TRACKERS" || echo "the mark did not land; the merge goes on, and a review at this head runs the suite itself"
+# <<< refinery-pre-existing-mark
+```
 
 **GATE**: no merge without all checks passing OR every pre-existing
 failure's bug filed/found."""

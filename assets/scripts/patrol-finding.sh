@@ -70,7 +70,8 @@ usage: patrol-finding.sh --key <situation-key> --title <one line>
               give exactly one
   --title     the board label for the bead; cut at a word boundary past 200
   --message   the finding, verbatim — it becomes the bead body, and it is
-              what the first reaction reads
+              what the first reaction reads. A recurrence whose text changed
+              notes only its first 200 characters, on one line
   --about     the bead this finding is ABOUT. Adds a `tracks` edge and
               narrows the dedup to that bead. A wisp (`*-wisp-*`) is dropped
               with a warning: its pass burns it, so the key alone is the
@@ -194,6 +195,31 @@ digest_of() {
   fi
 }
 DIGEST=$(digest_of "$MESSAGE")
+
+# A recurrence's note is one line, and the notes stop growing at a cap. A JSON
+# listing of live beads (`bd ready`, `bd list`) carries each bead's whole row,
+# notes included, and a finding's text can be large and change on every pass:
+# a doctor check's message carries its whole details array. The bead's
+# description keeps the first text verbatim, and finding.occurrences,
+# finding.last_seen and finding.digest record every recurrence, so a note
+# carries only the head of the new text. Once a line no longer fits under the
+# cap, one marker line says so if it fits, and this script appends nothing more.
+NOTE_HEAD_MAX=200
+NOTES_CAP=65536
+CAP_MARK="are counted in finding.occurrences and finding.last_seen, and their text is not noted"
+
+# note_head <text> -> the text on one line, cut to NOTE_HEAD_MAX characters.
+# jq slices by character, so the cut never splits a multi-byte one, whatever
+# the locale.
+note_head() {
+  printf '%s' "$1" | tr '\n\r\t' '   ' | scrub | tr -s ' ' \
+    | jq -Rrs --argjson n "$NOTE_HEAD_MAX" \
+        'ltrimstr(" ") | rtrimstr(" ")
+         | if length > $n then (.[0:$n] | rtrimstr(" ")) + "…" else . end' 2>/dev/null
+}
+
+# byte_len <text> -> its length in bytes, whatever the locale.
+byte_len() { printf '%s' "$1" | wc -c | tr -d ' '; }
 
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
@@ -350,19 +376,42 @@ if [ -n "$EXISTING" ]; then
 
   set -- --set-metadata "finding.occurrences=$SEEN" \
          --set-metadata "finding.last_seen=$(now_utc)"
+  NOTED=""
   if [ "$WAS" != "$DIGEST" ]; then
+    set -- "$@" --set-metadata "finding.digest=$DIGEST"
+    # The notes as they stand: their size in bytes, and whether the cap marker
+    # is already among them. Notes that cannot be read get nothing appended.
+    NOTES_NOW=$(printf '%s' "$ROW" | jq -r --arg m "$CAP_MARK" \
+        '(.[0].notes // "") | "\(utf8bytelength) \(contains($m))"' 2>/dev/null)
+    HAVE="${NOTES_NOW%% *}"; MARKED="${NOTES_NOW#* }"
+    LINE="[$(now_utc)] $SCOPE_LABEL: finding recurred with changed text (occurrence $SEEN, digest $DIGEST): $(note_head "$MESSAGE")"
+    MARK="[$(now_utc)] $SCOPE_LABEL: finding recurred with changed text (occurrence $SEEN). The notes are at their $NOTES_CAP-byte cap, so this and later recurrences $CAP_MARK."
+    # A line goes in only while the marker would still fit after it, so the
+    # lines stop at least a marker's length short of the cap. Another writer's
+    # note can still take that room, and then the marker is left out too. Each
+    # append adds one separator byte to notes that are not empty, counted here
+    # whether or not they are.
     # --append-notes, never --notes: --notes REPLACES, and the body a patrol
     # would erase is the one the first reaction read.
-    set -- "$@" --set-metadata "finding.digest=$DIGEST" \
-           --append-notes "[$(now_utc)] $SCOPE_LABEL: finding recurred with changed text (occurrence $SEEN):
-$MESSAGE"
+    case "$HAVE" in
+      ''|*[!0-9]*) NOTED=unread ;;
+      *)
+        if [ $(( HAVE + 1 + $(byte_len "$LINE") + 1 + $(byte_len "$MARK") )) -le "$NOTES_CAP" ]; then
+          set -- "$@" --append-notes "$LINE"; NOTED=line
+        elif [ "$MARKED" != true ] && [ $(( HAVE + 1 + $(byte_len "$MARK") )) -le "$NOTES_CAP" ]; then
+          set -- "$@" --append-notes "$MARK"; NOTED=cap
+        else
+          NOTED=cap
+        fi ;;
+    esac
   fi
   if gc bd update "$EXISTING" "$@" >/dev/null 2>&1; then
-    if [ "$WAS" != "$DIGEST" ]; then
-      echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN and the changed text"
-    else
-      echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN, text unchanged"
-    fi
+    case "$NOTED" in
+      line)   echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN and a one-line note of the changed text" ;;
+      cap)    echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN; the changed text is not noted, because the notes are at their $NOTES_CAP-byte cap" ;;
+      unread) echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN; the changed text is not noted, because the bead's notes could not be read" ;;
+      *)      echo "$PROG: $EXISTING already tracks $DEDUP_SCOPE — recorded occurrence $SEEN, text unchanged" ;;
+    esac
     exit 0
   fi
   warn "could not record the recurrence on $EXISTING; the finding is still tracked there"
@@ -412,7 +461,8 @@ BODY="$MESSAGE
 ## Filing
 Filed by the $SCOPE_LABEL patrol under finding key \`$KEY\`. A recurrence
 updates \`finding.occurrences\` and \`finding.last_seen\` on this bead rather
-than filing another, and appends a note when the finding text changes."
+than filing another. When the finding text changes, it also appends a one-line
+note with the head of the new text, until the notes reach $NOTES_CAP bytes."
 if [ -n "$HELD" ] && [ -n "$HELD_ON" ]; then
   BODY="$BODY
 
