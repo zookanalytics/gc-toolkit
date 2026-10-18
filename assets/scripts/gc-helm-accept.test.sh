@@ -9,9 +9,10 @@
 # weigh instead.
 #
 # THE CONTRACT this pins:
-#   - dispatch is `gc sling <subject> --on <formula> --var issue=<subject>`: the
-#     subject is the routed anchor AND is passed as gc.var.issue so the worker
-#     reads its card (a slung formula does not receive the description).
+#   - dispatch is `gc sling <subject> --on <formula>` with no --var: the subject
+#     is the routed anchor, and gc sling hands it to the formula. A graph.v2
+#     formula refuses a caller-supplied issue, so a graph.v2 recommendation
+#     dispatches, resolves its gate and dismisses its visit like any other.
 #   - SLING FIRST, dismiss only on success: a failed dispatch leaves the visit
 #     for the operator to retry or Discuss, never a dismissed decision with
 #     nothing running.
@@ -62,7 +63,10 @@ mkdir -p "$TMP/bin"
 # gc.session_name $FAKE_VISIT_SESSION — the fields the un-engaged predicate
 # reads; $FAKE_LIST_MODE=notarray/fail drives the fail-closed path. sling and
 # close are recorded; update is recorded AND persists gc.outcome/gc.outcome_reason
-# to $FAKE_OUTCOME_DIR; sling's exit is $FAKE_SLING_RC.
+# to $FAKE_OUTCOME_DIR; sling's exit is $FAKE_SLING_RC. $FAKE_SLING_GRAPHV2 makes
+# the recommended formula a graph.v2 one: sling then refuses a caller-supplied
+# reserved var (issue, convoy_id, bead_id) and exits 1, as gascity does before
+# it pours anything.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 sub="${1:-}"; verb="${2:-}"
 case "$sub" in
@@ -70,6 +74,20 @@ case "$sub" in
     jq -n '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"}]}' ;;
   sling)
     printf '%s\n' "$*" >> "$FAKE_CALLS"
+    if [ -n "${FAKE_SLING_GRAPHV2:-}" ]; then
+      _prev=""
+      for a in "$@"; do
+        _var=""
+        case "$a" in --var=*) _var="${a#--var=}" ;; esac
+        [ "$_prev" = "--var" ] && _var="$a"
+        case "${_var%%=*}" in
+          issue|convoy_id|bead_id)
+            echo "gc sling: formulas v2 reserved variable \"${_var%%=*}\" cannot be supplied by the caller" >&2
+            exit 1 ;;
+        esac
+        _prev="$a"
+      done
+    fi
     exit "${FAKE_SLING_RC:-0}" ;;
   bd)
     case "$verb" in
@@ -232,8 +250,9 @@ run_accept "$SUBJ"
 eq "$RC" "0" "(DISPATCH) accepting a recommendation exits 0"
 grep -q "sling .*$SUBJ --on $FORMULA" <<< "$CALLS" \
   && ok "(DISPATCH) slings the recommended formula at the subject" || bad "(DISPATCH) sling --on formula (calls: $CALLS)"
-grep -q 'sling .*--var issue='"$SUBJ" <<< "$CALLS" \
-  && ok "(DISPATCH) passes the subject as gc.var.issue" || bad "(DISPATCH) --var issue=<subject> (calls: $CALLS)"
+grep -q '^sling .*--var' <<< "$CALLS" \
+  && bad "(DISPATCH) the sling must carry no --var; gc sling hands the formula its subject (calls: $CALLS)" \
+  || ok "(DISPATCH) the sling carries no --var: gc sling hands the formula its subject"
 grep -q "bd close $VIS" <<< "$CALLS" \
   && ok "(DISPATCH) dismisses the visit after the dispatch lands" || bad "(DISPATCH) visit dismissed (calls: $CALLS)"
 # Sling must precede the dismiss: the recording order is the execution order.
@@ -310,6 +329,24 @@ grep -q '^bd gate resolve tk-gate1' <<< "$CALLS" \
 grep -q '^sling ' <<< "$CALLS" \
   && bad "(GATERESUME) must NOT sling again (calls: $CALLS)" || ok "(GATERESUME) does not sling again"
 unset FAKE_DISPATCHED FAKE_DEMAND; export FAKE_FORMULA="$FORMULA" FAKE_VISIT=1
+
+# --- (GRAPHV2) a graph.v2 recommendation held on a gate goes through whole ------
+# mol-polecat-work is graph.v2, and gascity refuses a graph.v2 sling that carries
+# a caller-supplied issue before it pours anything. A sling that carried one would
+# fail here and leave the gate, the live recommendation and the visit open, so the
+# operator's Accept would dispatch nothing.
+export FAKE_FORMULA="mol-polecat-work" FAKE_SLING_GRAPHV2=1 FAKE_DEMAND="tk-gate1"
+run_accept "$SUBJ"
+eq "$RC" "0" "(GRAPHV2) accepting a gate-held graph.v2 recommendation exits 0"
+grep -q "^sling .*$SUBJ --on mol-polecat-work" <<< "$CALLS" \
+  && ok "(GRAPHV2) slings the graph.v2 formula at the subject" || bad "(GRAPHV2) sling --on mol-polecat-work (calls: $CALLS)"
+grep -q "^bd update $SUBJ .*gc.recommended_formula_dispatched=mol-polecat-work.*--unset-metadata gc.recommended_formula" <<< "$CALLS" \
+  && ok "(GRAPHV2) records the dispatch and withdraws the live recommendation" || bad "(GRAPHV2) dispatch record (calls: $CALLS; err: $ERR)"
+grep -q "^bd gate resolve tk-gate1 --reason accepted: dispatched mol-polecat-work" <<< "$CALLS" \
+  && ok "(GRAPHV2) resolves the recommend gate" || bad "(GRAPHV2) gate resolved (calls: $CALLS; err: $ERR)"
+grep -q "bd close $VIS" <<< "$CALLS" \
+  && ok "(GRAPHV2) dismisses the visit" || bad "(GRAPHV2) visit dismissed (calls: $CALLS; err: $ERR)"
+unset FAKE_SLING_GRAPHV2 FAKE_DEMAND; export FAKE_FORMULA="$FORMULA"
 
 # --- (MARK) a landed Accept strips the live recommendation and records the dispatch
 # So a later open visit on the subject cannot re-offer Accept for a formula that

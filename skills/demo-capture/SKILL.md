@@ -17,32 +17,37 @@ carries no capture, encode, or narration code of its own.
 
 ## Resolve the engine
 
-Consume the engine from the local `sprintshow` rig checkout when the city has
-one, and fall back to the published npm package otherwise. Both are driven the
-same way once resolved.
+The pack's `demo-engine-lib.sh` resolves the engine, and the pack's own
+captures source it too. It uses the local `sprintshow` rig checkout when the
+city has one and the published npm package otherwise. It holds Node to the
+engine's floor of 22.18, installs a checkout's dependencies on first use, and
+provisions the browser. Source it from the pack gc loaded and resolve the
+engine once. A video also needs ffmpeg, which the library leaves to the
+capture that assembles one:
 
 ```bash
-# Prefer the local rig checkout; the guard confirms it is the engine before use.
-SS_DIR=$(gc rig list --json 2>/dev/null | jq -r '.rigs[] | select(.name=="sprintshow") | .path // empty')
-if [ -n "$SS_DIR" ] && [ "$(jq -r '.name // empty' "$SS_DIR/package.json" 2>/dev/null)" = "@zookanalytics/sprintshow" ]; then
-  # First use installs the engine's deps (playwright, ffmpeg-static). The host
-  # has npm but not pnpm, so run the TypeScript source through `npx tsx` — no
-  # build step, and an absolute path to cli.ts means the caller's cwd stays put
-  # so relative demo-script and --serve-dir paths resolve as written.
-  [ -d "$SS_DIR/node_modules" ] || ( cd "$SS_DIR" && npm install )
-  # A host ffmpeg on PATH is used when present; otherwise fetch ffmpeg-static's
-  # binary once (npm >= 12 blocks its automatic install script).
-  command -v ffmpeg >/dev/null 2>&1 || [ -x "$SS_DIR/node_modules/ffmpeg-static/ffmpeg" ] || ( cd "$SS_DIR" && npm run provision:ffmpeg )
-  # The browser comes from the engine's own Playwright, whose installer skips a
-  # build that is already installed.
-  ( cd "$SS_DIR" && npm run provision:browser )
-  sprintshow() { npx tsx "$SS_DIR/src/cli.ts" "$@"; }
-else
-  # Any-rig path: the published package, run through npx, with the browser
-  # installed by that package's own Playwright.
-  npx --yes --package=@zookanalytics/sprintshow -- playwright install chromium-headless-shell
-  sprintshow() { npx --yes @zookanalytics/sprintshow "$@"; }
-fi
+. "$(gc <binding> scripts-dir)/demo-engine-lib.sh" && demo_engine_resolve && {
+  # A host ffmpeg on PATH is used when present; otherwise a checkout fetches
+  # ffmpeg-static's binary once (npm >= 12 blocks its automatic install script).
+  [ -z "$DEMO_ENGINE_DIR" ] || command -v ffmpeg >/dev/null 2>&1 \
+    || [ -x "$DEMO_ENGINE_DIR/node_modules/ffmpeg-static/ffmpeg" ] \
+    || ( cd "$DEMO_ENGINE_DIR" && npm run provision:ffmpeg )
+}
+```
+
+`<binding>` is the name the city imports the pack under, which gc puts in
+front of this skill's name: `gc-toolkit` in `gc-toolkit.demo-capture`.
+`gc skill list` prints it in this skill's FROM column.
+
+`demo_engine_cli <command> <arguments...>` runs the engine's CLI in the current
+directory, so relative demo-script and `--serve-dir` paths resolve as written.
+Each tool call starts a fresh shell, which has neither the library nor the
+engine it chose. So each engine command below runs after sourcing the library
+again and calling `demo_engine_find`, which finds the same engine and installs
+nothing:
+
+```bash
+. "$(gc <binding> scripts-dir)/demo-engine-lib.sh" && demo_engine_find && demo_engine_cli <command> <arguments...>
 ```
 
 ## Lint before you capture
@@ -52,7 +57,7 @@ the linter reads a script exactly as the driver will and reports what the
 driver would silently ignore:
 
 ```bash
-sprintshow lint demo.md          # --strict makes warnings non-zero
+demo_engine_cli lint demo.md          # --strict makes warnings non-zero
 ```
 
 ## Capture — the engine drives (default)
@@ -61,9 +66,9 @@ Point the engine at the app and let it drive the browser, check each step, and
 assemble the MP4:
 
 ```bash
-sprintshow run demo.md --serve-dir ./public          # serve a static directory
-sprintshow run demo.md --serve "npm run dev" --port 5173   # spin up a dev server, tear it down
-sprintshow run demo.md --base-url http://localhost:3000    # drive a server already running
+demo_engine_cli run demo.md --serve-dir ./public          # serve a static directory
+demo_engine_cli run demo.md --serve "npm run dev" --port 5173   # spin up a dev server, tear it down
+demo_engine_cli run demo.md --base-url http://localhost:3000    # drive a server already running
 ```
 
 Two capture modes come from one script:
@@ -113,7 +118,7 @@ the engine to assemble. This is the Gas City path, where the agent already
 holds the browser.
 
 ```bash
-sprintshow assemble .captures/agent-run -o demos/board.mp4
+demo_engine_cli assemble .captures/agent-run -o demos/board.mp4
 ```
 
 `manifest.json` is the contract `assemble` reads — one entry per frame with

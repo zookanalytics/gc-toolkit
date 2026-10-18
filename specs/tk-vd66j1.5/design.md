@@ -112,7 +112,8 @@ Modality. When a visual helps, pick the cheapest one that conveys the change.
 
 - Repo-artifact, when a committed visual already illustrates the change. No
   capture.
-- Screenshot, when one rendered state carries it: a page, a board, a layout.
+- Screenshot, when one rendered state carries it: an app page, a command's
+  output in a terminal, or markdown, such as a PR comment, as GitHub renders it.
 - Video, when motion or a multi-step flow carries it, and narration explains it.
 
 Prefer the cheaper modality unless the change needs the richer one. A static
@@ -120,9 +121,13 @@ layout change is a screenshot, not a video; a new multi-step flow is a video.
 
 ## Modalities
 
-- Screenshot (new). Drive the headless browser already provisioned for the
-  demo-gated `agents/demo` session (Playwright) to render the affected app state,
-  save a PNG, and deliver it with `demo-deliver.sh`. Owned by tk-vd66j1.7.
+- Screenshot (new). Render one state of the surface a change affects, save it
+  as a PNG with the SprintShow engine's screenshot command, in the headless
+  browser the video capture drives, and deliver it with `demo-deliver.sh`. The
+  surface is one of three kinds: an app page, driven to the
+  state by a demo:capture script; a command's output, as a terminal shows it; or
+  markdown, such as a PR comment, as GitHub's own renderer renders it.
+  `assets/scripts/demo-screenshot.sh` captures each kind. Owned by tk-vd66j1.7.
 - Repo-artifact (new). Locate a committed visual near the diff or named by the
   change, and deliver it inline. A committed-file URL renders only as a link, so
   inline delivery re-attaches the file through `demo-deliver.sh`. Owned by

@@ -47,10 +47,10 @@ has push rights.
 
 ## mol-design-convoy — the molecule
 
-`formulas/mol-design-convoy.toml` is a dispatch molecule shaped like
-`mol-first-reaction`: slung `--on` a single subject (the initiative), it reads
-the input convoy's one tracked member, orchestrates, and drains. It writes no
-code and needs no worktree of its own. Its steps:
+`formulas/mol-design-convoy.toml` is a dispatch molecule: slung `--on` a single
+subject (the initiative), it reads the input convoy's one tracked member,
+orchestrates, and drains. It writes no code and needs no worktree of its own.
+Its steps:
 
 | Step | What it does |
 |---|---|
@@ -133,11 +133,17 @@ unit, design and implementation together, before the default branch moves.
 
 ## Design-gated versus all-in-one
 
-`design_gated` is a var, default `true`, settled per initiative at the
-recommend-to-Accept point or overridden with `--var design_gated=false`. It is
-read case-insensitively: `false`, `0`, `no`, or `off` selects all-in-one, and
-`true`, `1`, `yes`, or `on` selects design-gated. An empty or unrecognized value
-also selects design-gated, with a warning, so a typo never drops the design gate.
+`design_gated` is a var, default `true`. The operator settles it per initiative
+when acting on the recommendation. Accept's sling passes no var, so an Accept
+takes the design-gated default. For all-in-one, the operator takes the
+recommendation to a sitting (Discuss) instead. The sitting follows the `work`
+skill's steps for taking a recommendation and adds `--var design_gated=false`
+to the sling those steps run. The same steps release the gate that put the
+recommendation to the operator and record the dispatch, which a bare sling
+leaves undone. The var is read case-insensitively: `false`, `0`, `no`, or `off`
+selects all-in-one, and `true`, `1`, `yes`, or `on` selects design-gated. An
+empty or unrecognized value also selects design-gated, with a warning, so a typo
+never drops the design gate.
 
 - **Design-gated** (`true`): implementation waits behind gate 1, so it starts
   only after the operator approves the design. Use it when the design decision
@@ -157,11 +163,13 @@ implementation.
 ## How converse reaches it
 
 The recommend-to-Accept-to-sling path carries the pattern with no special
-handling. Converse stamps `gc.recommended_formula = mol-design-convoy` on the
-subject visit; the board offers Accept while that key is non-empty; and
-`gc-helm.sh accept` slings `gc sling <pool> <subject> --on mol-design-convoy
---var issue=<subject>`, the same single-formula, single-subject shape
-`mol-first-reaction` rides.
+handling. The recommendation is `gc.recommended_formula = mol-design-convoy` on
+the subject, and the board offers Accept while that key is non-empty. Accept
+(`gc-helm.sh accept`) runs
+`gc sling --rig <the subject's rig> <subject> --on mol-design-convoy`. The
+`--rig` pin resolves the subject in its own rig's store, whatever directory the
+sling runs from. The sling carries no `issue` var, because graph.v2 reserves
+`issue`, `convoy_id` and `bead_id`.
 
 Two convoys share the word. Accept's sling creates an **input convoy** whose
 one tracked member is the subject, which the formula reads as `{{convoy_id}}`.

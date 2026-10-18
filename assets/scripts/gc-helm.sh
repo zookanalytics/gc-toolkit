@@ -61,7 +61,7 @@ Usage:
   gc-helm priority <bead-id> <P0-P4> [--dry-run]  set the priority of a bead that follows nothing, and re-rank the work that follows it
   gc-helm priority <bead-id> --shift <±n> [--dry-run]  set the shift of a bead that follows a parent or an anchor: +1 is one level later, -1 one level sooner
   gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
-  gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject (passed as gc.var.issue), resolve the human gate that put it to the operator, and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
+  gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject, resolve the human gate that put it to the operator, and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
   gc-helm unplaced [--json]  list the placement sitting's queue: every live bead in the city's stores marked placement=pending that nothing has placed since (no parent, route, arm, assignee or live pour), priority then age; --json prints one object for a caller: the rows as beads, the suspended rigs it skipped, and the rigs whose store did not answer. Read-only, files nothing; exits 4 after the list when a store did not answer
 
@@ -2896,10 +2896,8 @@ accept_demand_refused() {
 # Discuss (engage) stays the path for a recommendation the operator wants to
 # weigh instead.
 #
-# The subject is passed as gc.var.issue so the worker reads its card; a slung
-# formula does not receive the subject's description. Sling FIRST: only a landed
-# dispatch dismisses the visit, so a sling that fails leaves the visit for the
-# operator to retry or Discuss.
+# Sling FIRST: only a landed dispatch dismisses the visit, so a sling that fails
+# leaves the visit for the operator to retry or Discuss.
 cmd_accept() {
     bead=""; accept_reason=""
     while [ $# -gt 0 ]; do
@@ -3032,13 +3030,15 @@ cmd_accept() {
         exit 4
     fi
 
-    # Dispatch the recommendation AT the subject: the subject is the routed
-    # anchor (--on) and is also passed as gc.var.issue so a formula that reads its
-    # card by that var finds it. A resume skips the sling — it already ran — and
-    # only finishes the record and the dismiss.
+    # Dispatch the recommendation AT the subject, the routed anchor (--on). gc
+    # sling hands the formula its subject: a graph.v2 formula reads it as its
+    # input convoy's one tracked member, and a classic formula gets it as the
+    # issue var sling stamps. A graph.v2 formula refuses a caller-supplied issue,
+    # so the sling carries no var of its own. A resume skips the sling — it
+    # already ran — and only finishes the record and the dismiss.
     if [ "$resume" = 1 ]; then
         echo "$PROG: accept: $bead already carries a dispatched recommendation ($formula); resuming its dismiss, not dispatching again" >&2
-    elif ! gc sling ${GC_RIG:+--rig "$GC_RIG"} "$bead" --on "$formula" --var "issue=$bead"; then
+    elif ! gc sling ${GC_RIG:+--rig "$GC_RIG"} "$bead" --on "$formula"; then
         echo "$PROG: accept: 'gc sling ... --on $formula' failed for $bead — the visit is left open for retry or Discuss. Nothing dismissed." >&2
         exit 1
     else
