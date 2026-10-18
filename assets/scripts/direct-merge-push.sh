@@ -28,7 +28,11 @@
 # record does not land therefore stays provable after the session that pushed
 # it. The next patrol's zero-diff guard finds a branch with no change against a
 # target that carries the stamped commit, and sends the bead back here, where
-# it records as landed at that commit.
+# it records as landed at that commit. The stamp's store calls stand between
+# the fetch and the push, so a target that moves meanwhile refuses the push. A
+# push refused for any reason but branch protection is checked against a fresh
+# fetch, and one whose target has moved past the prepared head exits 4, as a
+# target that moved before the fetch does.
 #
 # A push that lands is read back from a fresh fetch, and the landing is
 # recorded only once origin/<target> carries the pushed commit, at its tip or
@@ -134,6 +138,12 @@ elif carries "$PREPARED" "$TIP"; then
         gc bd update "$WORK" --set-metadata merge_strategy=pr --unset-metadata direct_landing_sha || { echo "could not record merge_strategy=pr on $WORK; nothing landed"; exit 1; }
         exit 3 ;;
     esac
+    if fetch_target && NOW=$(git -C "$RIG_ROOT" rev-parse --verify -q "refs/remotes/origin/$TARGET") &&
+      ! carries "$NOW" "$MERGED_SHA" && ! carries "$MERGED_SHA" "$NOW" &&
+      git -C "$RIG_ROOT" merge-base "$MERGED_SHA" "$NOW" >/dev/null 2>&1; then
+      echo "the push of $MERGED_SHA was refused, and origin/$TARGET has moved from $TIP to $NOW since it was fetched, so the prepared head is no longer a fast-forward of it; nothing landed or recorded, so the next patrol prepares the branch again"
+      exit 4
+    fi
     echo "Push failed: $PUSH_OUT. STOP. Debug and retry; do NOT continue."
     exit 1
   fi

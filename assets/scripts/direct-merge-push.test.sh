@@ -12,8 +12,9 @@
 #     no scratch file and no local branch moved;
 #   - a bead the stamp does not reach is not pushed;
 #   - a prepared head origin/main moved past since it was prepared lands
-#     nothing, records nothing and exits 4, and one that shares no history with
-#     origin/main exits 1;
+#     nothing, records nothing and exits 4, whether origin/main moved before the
+#     fetch or while the landing was stamped, and one that shares no history
+#     with origin/main exits 1;
 #   - a prepared head origin/main already carries closes as that tip, or at the
 #     bead's stamp when origin/main carries the stamp too;
 #   - a landing whose read-back fetch or transition fails is tried again, and
@@ -71,7 +72,8 @@ chmod +x "$SUT/lifecycle.sh"
 # gc answers the roster for `rig list` and the bead file for `bd show`, applies
 # each --set-metadata and --unset-metadata of a `bd update` to that file, and
 # logs every call. BD_UPDATE_DROP makes an update exit 0 and write nothing,
-# which `gc bd update` can do.
+# which `gc bd update` can do. BD_UPDATE_THEN names a command each update runs
+# once it has written.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE_GC_LOG"
@@ -92,7 +94,8 @@ case "$1 $2" in
           shift 2 ;;
         *) shift ;;
       esac
-    done ;;
+    done
+    [ -z "${BD_UPDATE_THEN:-}" ] || "$BD_UPDATE_THEN" ;;
 esac
 exit 0
 GC
@@ -229,6 +232,19 @@ eq "$(git -C "$D/origin.git" rev-parse main)" "$MOVED" "moved: origin/main is un
 eq "$(stamp)" none "moved: nothing is stamped"
 no_transition moved
 no_drain moved
+
+echo "── origin/main moved while the landing was stamped: nothing lands, exit 4 ──"
+setup "$TMP/moved-stamp"
+MOVED=$(commit "$D/seed" "landed while the landing was stamped")
+printf '#!/usr/bin/env bash\ngit -C %q push -q %q main\n' "$D/seed" "$D/origin.git" > "$D/move.sh"
+chmod +x "$D/move.sh"
+run BD_UPDATE_THEN="$D/move.sh"
+eq "$RC" 4 "moved-stamp: exits 4"
+has "$OUT" "origin/main has moved from $BASE to $MOVED since it was fetched" "moved-stamp: it says the target moved after the fetch"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$MOVED" "moved-stamp: origin/main is untouched by the refused push"
+eq "$(stamp)" "$FEATURE" "moved-stamp: the stamp names the refused push, a commit origin/main does not carry"
+no_transition moved-stamp
+no_drain moved-stamp
 
 echo "── origin/main shares no history with the prepared head: nothing lands ──"
 setup "$TMP/unrelated"
