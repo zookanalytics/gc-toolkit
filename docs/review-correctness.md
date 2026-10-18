@@ -30,12 +30,12 @@ declares.
   `tools/lint-learned.sh` and then `tools/lint.sh` over the files the branch
   changes. It runs the suites `tools/run-tests.sh --affected origin/main`
   selects, by the rules in that script's header, and stamps the head that
-  passed as the anchor's `self_review_passed_sha`. On a stamp that names the
-  reviewed commit, the method runs no suite.
+  passed on its work bead as `self_review_passed_sha`. When the anchor's stamp
+  names the reviewed commit, the method runs no suite.
 - The refinery runs the same `lint_command` at merge, and no tests.
 - CI runs the whole `*.test.sh` suite on Linux and on macOS
-  (`.github/workflows/tests.yml`) and nothing else. Every merge waits on the
-  checks main's ruleset requires.
+  (`.github/workflows/tests.yml`), and no lint, Go test or web check. Every
+  merge waits on the checks main's ruleset requires.
 
 ## Bash and jq scripts
 
@@ -94,14 +94,14 @@ defect only on a line some test executes.
 
 No shell block in a formula, skill, prompt or doc is shellchecked. The learned
 detectors that read formula and skill text each catch one shape, and a block
-runs in a test only where a marker fences it.
+runs in a test only where a suite extracts it, usually by its markers.
 
 - **The agent's shell.** An agent pastes a step's blocks into its own tool
   shell. A codex agent's is zsh, and a Claude agent's is the shell its
   provider's `CLAUDE_CODE_SHELL` names, or else its login shell, zsh on macOS.
   So a block is written for zsh as well as bash. Of zsh's unsplit unquoted
   expansions, `formula-unquoted-for.sh` flags only `for x in $LIST`, so a
-  `cmd $FILES` is the review's. An unbraced name before a colon takes a zsh
+  `cmd $FILES` is the review's. An unbraced name before a colon can take a zsh
   modifier, so `"$REV:review-checks.toml"` reaches git as
   `<rev>eview-checks.toml`, and `zsh-colon-modifier.sh` flags it. JSON reaches
   jq through `printf '%s'`, since zsh's `echo` expands its escapes, and
@@ -129,27 +129,28 @@ runs in a test only where a marker fences it.
 
 ## Marker-fenced blocks
 
-A `# >>> <name>` line and a `# <<< <name>` line fence a block that a test runs.
+A `# >>> <name>` line and a `# <<< <name>` line fence a block for a test to run.
 In a formula or a skill the fence marks step shell that a suite extracts and
-executes. In scripts it marks a shared helper that each file needing it carries
-as a copy, because neither formulas nor pack scripts have an include mechanism.
+executes. In a script it marks a block for a suite to extract, or a helper that
+each file needing it carries as a copy.
 
 - **Read the suite that names the block.** `formula-marker-coverage.test.sh`
   fails when no suite names a formula's marker, but not when the naming suite
-  stops asserting what the block does. When a block's behavior changes, find
-  its suite with `git grep -l -F -e '<name>' -- '*.test.sh'` and check that a
-  case pins the change.
-- **The markers are the contract.** An extracting suite matches the exact
-  marker line and fails on an empty extraction, so renaming or duplicating a
+  stops asserting what the block does, and nothing checks that a suite names a
+  marker in a script, a skill or a prompt. When a block's behavior changes,
+  find its suite with `git grep -l -F -e '<name>' -- '*.test.sh'` and check
+  that a case pins the change.
+- **The markers are the contract.** A suite finds its block by the marker's
+  name, and most fail on an empty extraction, so renaming or duplicating a
   marker changes its suite in the same diff.
 - **Only the region is tested.** Lines in the same code fence outside the
   markers run untested, unless the suite reads past the closing marker as
   `lease-heartbeat.test.sh` does.
 - **Copies change together.** A helper's suite, such as
   `control-char-scrub.test.sh` or `doctor-budget.test.sh`, finds its copies by
-  sweeping named directories and executes each one. An edit to one copy is
-  owed to every copy, and a copy outside the swept directories is held by no
-  suite.
+  sweeping named directories, executes one, and fails when another differs
+  from it. An edit to one copy is owed to every copy, and a copy outside the
+  swept directories is held by no suite.
 
 ## The Go services
 
@@ -159,9 +160,9 @@ and runs none of them, and no gate runs `go test`. CI's whole suite drives gctk
 end to end, because each suite whose scripts reach `lifecycle.sh` or
 `merge.sh` builds gctk from the checkout (`harness_build_gctk` in
 `assets/scripts/test-harness.sh`). `merge.test.sh` and `lifecycle.test.sh`
-name none of gctk's `.go` files, so the affected subset leaves them out of a Go
-change, and a self-review stamp on such a change covers the tree-wide suites
-alone. No suite builds or runs helm-svc. So on a Go diff the review runs
+name none of gctk's `.go` files, so the affected subset leaves them out of a
+gctk change, and no suite it selects for a Go change builds the code that
+changed. No suite builds or runs helm-svc. So on a Go diff the review runs
 `go test ./...` in each module the diff touches, and for gctk the suites of the
 commands it changes. On the host helm compiles only with ICU's cgo flags, so
 its tests run with `CGO_CPPFLAGS` and `CGO_LDFLAGS` set from `icu4c_cgo_flags`
@@ -170,18 +171,19 @@ in `assets/scripts/icu4c-cgo.sh`, as `tools/lint.sh` sets them for vet.
 - **Live at the next build, with no fallback.** The `gctk-build` and
   `helm-build` orders run `assets/scripts/gc-build.sh` every five minutes, so
   each binary is rebuilt from the rig checkout soon after a change reaches it.
-  `gctk merge` is the merge cadence's only writer of merged truth and
-  `gctk lifecycle` its state machine, and their bridges `merge.sh` and
+  `gctk merge` lands the pull requests the merge cadence merges, and every
+  merged record is a `gctk lifecycle` transition. The bridges `merge.sh` and
   `lifecycle.sh` have no shell fallback, so a gctk defect reaches every landing
   in the city.
 - **One meaning, several lists.** `lifecycle/lifecycle.toml` declares the
   anchor states and the machine axis. gctk carries the states as a typed table
   and helm carries the machine values as Go constants in
-  `internal/board/derive.go`, and `lifecycle.test.sh` holds both to the TOML. A
-  machine value added on one side only renders as `unknown` on every board row
-  that carries it.
+  `internal/board/derive.go`, and `lifecycle.test.sh` holds both to the TOML.
+  No test holds the machine values the writers record to it (`recordMachine`
+  in gctk's `internal/cli/merge.go`, `assets/scripts/gate-ensure.sh`), and a
+  recorded value helm does not know renders as `unknown` on the board.
 - **A port reads what its script read.** gctk reads bead fields the way jq
-  does. `Bead.Meta` in `internal/gcbd/gcbd.go` stringifies a value as
+  does. `Bead.Meta` in `internal/gcbd/gcbd.go` stringifies a scalar as
   `(v // "") | tostring` would, so a metadata number reads as its digits, and
   `Scrub` strips the control bytes the shell `scrub` strips. A Go type
   assertion where jq would raise an error fails open, so the unreadable case is
@@ -193,21 +195,23 @@ in `assets/scripts/icu4c-cgo.sh`, as `tools/lint.sh` sets them for vet.
   can lag a write just made, so a read that verifies a write, or one that needs
   notes, uses `ShowDirect`. A bead that cannot be read comes back nil, and the
   caller refuses to act rather than read it as empty.
-- **Child process groups.** gctk starts git and the rig's check commands in
-  their own process group (`gitIn` in `internal/cli/lifecycle.go`, `Run` in
-  `internal/rig/run.go`), out of reach of the order runner's group stop, so it
-  relays SIGTERM and SIGINT to the child's group and exits 128 plus the signal.
-  A git fetch killed outright leaves a ref lock in the rig checkout that fails
-  every later fetch there, so a stop sends the group SIGTERM before anything
-  harder. A new subprocess follows the same pattern.
+- **Child process groups.** `gitIn` in `internal/cli/lifecycle.go` runs git,
+  and `Run` in `internal/rig/run.go` runs the rig's check commands, each in a
+  process group of its own, out of reach of the order runner's group stop. A
+  SIGTERM or SIGINT that reaches gctk during the call stops the child's group
+  with SIGTERM, and gctk exits 128 plus the signal. A git fetch killed outright
+  leaves a ref lock in the rig checkout that fails every later fetch there, so
+  a stop sends the group SIGTERM before anything harder. gctk's other
+  subprocesses, `gctk merge`'s git calls among them, stay in its own group.
 - **The board's gather loads the shared store.** helm-svc's gather reads every
   rig's store on a cache miss. A full-row read pulls the heavy text columns out
   of the Dolt store the city's agents share, and a round trip per epic or
   convoy made under the board's lock serializes every board request behind one
   slow gather. `internal/source/beads_test.go` pins which reads take the lite
-  projection, and `internal/server/server_test.go` and
-  `internal/source/supervisor_test.go` pin the bounded fan-out, so a gather
-  change is read for a new per-row call or a heavy column.
+  projection and that edges, visits and pull requests cost no read per row,
+  and `internal/server/server_test.go` pins that concurrent misses share one
+  gather, run outside the board's lock. So a gather change is read for a new
+  per-row call or a heavy column.
 - **A derivation key follows the sling's shapes.** `Facts.Inflight` is keyed by
   an input convoy's tracked member, which in the common sling shape is the
   anchor's own bead, so a roll-up over children alone shows live work as
@@ -217,17 +221,16 @@ in `assets/scripts/icu4c-cgo.sh`, as `tools/lint.sh` sets them for vet.
 
 ## The helm web app
 
-No gate runs the web checks or reads TypeScript. `npm run typecheck`,
-`npm test` and `npm run build` run in no CI job, suite or gate command, and the
-affected subset selects only the tree-wide suites for a path under
-`services/helm/web`. The review runs them in `services/helm/web` after
-`npm ci`, then checks that `git status --porcelain -- dist` prints nothing.
+No gate runs the web checks or lints TypeScript. `npm run typecheck`,
+`npm test` and `npm run build` run in no CI job, suite or gate command, and no
+suite the affected subset selects for a path under `services/helm/web` runs
+the app's code. The review runs them in `services/helm/web` after `npm ci`,
+then checks that `git status --porcelain -- dist` prints nothing.
 
 - **The bundle is committed.** helm-svc embeds `dist/` (`web/embed.go`) and
   its builder never runs npm, so a change to the app's runtime code ships only
-  with the rebuilt `dist/` in the same diff. Vite names the bundle by a hash of
-  its content, so a runtime change that ships renames
-  `dist/assets/index-*.js`. No gate compares `dist/` with `src/`.
+  with the rebuilt `dist/` in the same diff. A runtime change that ships
+  renames `dist/assets/index-*.js`, and no gate compares `dist/` with `src/`.
 - **The contract is a hand-written mirror.** `src/contract.ts` mirrors the Go
   wire structs by hand, because the board's `/svc/` surface is not in the
   supervisor's OpenAPI document, and a Go field renamed without its mirror
@@ -238,13 +241,15 @@ affected subset selects only the tree-wide suites for a path under
   regenerates the sample. Neither check runs in a gate.
 - **Writes carry `X-GC-Request`.** The supervisor proxies helm-svc and refuses
   a mutation without that header, with a 403 that never reaches helm-svc.
-  Every write client takes `SVC_WRITE_HEADERS` from `src/svcWrite.ts`, which
-  `ActuateButton.test.tsx` and `OpenConversation.test.tsx` assert.
+  Every write client takes `SVC_WRITE_HEADERS` from `src/svcWrite.ts`, and
+  `ActuateButton.test.tsx` and `OpenConversation.test.tsx` assert the header on
+  each write.
 - **URLs are document-relative.** The app is served under
   `/v0/city/<city>/svc/helm/`, a prefix the proxy strips, so `vite.config.ts`
   keeps `base: './'` and `App.tsx` fetches `helm`, not `/helm`. A root-absolute
-  URL works on the dev server and 404s under the mount. `web/handler_test.go`
-  resolves every asset `dist/index.html` names through the mount.
+  URL works on the dev server and misses helm-svc under the mount.
+  `web/handler_test.go` resolves every asset `dist/index.html` names through
+  the mount.
 - **Supervisor types are a pruned snapshot.** `src/drill/gen/supervisor.d.ts`
   is generated from a live supervisor's OpenAPI document for the operations
   `scripts/gen-supervisor-types.mjs` lists, and committed. A new supervisor
