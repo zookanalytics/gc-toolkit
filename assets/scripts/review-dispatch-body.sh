@@ -154,18 +154,11 @@ METHOD_SKILL=""
 case "$CHECK_NAME" in
   correctness|triage|demo|arch|pm) METHOD_SKILL="review-$CHECK_NAME" ;;
   *)
-    # The check's purpose, from its row in the index at the reviewed commit
-    # (the working tree's index when no commit is named), through the index's
-    # one parser, which matches the row's name case-folded too. Empty when no
-    # row there declares the check.
-    PURPOSE=""
-    for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
-      [ -n "$root" ] || continue
-      if [ -n "$REVIEWED_OID" ]; then IDX=$(git -C "$root" show "$REVIEWED_OID:review-checks.toml" 2>/dev/null)
-      else IDX=$(cat "$root/review-checks.toml" 2>/dev/null); fi
-      PURPOSE=$(printf '%s\n' "$IDX" | bash "$HERE/review-checks.sh" --file /dev/stdin --check "$CHECK_NAME" 2>/dev/null | cut -f3)
-      [ -n "$PURPOSE" ] && break
-    done
+    # The check's purpose, from its row in the effective index at the reviewed
+    # commit, through the index's one resolver, which matches the row's name
+    # case-folded too. Empty when no row there declares the check, and when no
+    # commit is named, since the resolver reads a rig's rows only at one.
+    PURPOSE=$("$HERE/review-checks.sh" --check "$CHECK_NAME" --at "$REVIEWED_OID" 2>/dev/null | cut -f2)
     if [ -n "$PURPOSE" ]; then
       cat <<M
 The reviewed repo's \`review-checks.toml\` declares the \`$CHECK_NAME\` check,
@@ -196,16 +189,12 @@ the change under review, not your method.
 R
 fi
 
-# The rig's local extension, appended to the generic method — read from the
-# COMMIT UNDER REVIEW, never the working tree, so a branch is judged against the
-# extension its own commit declared. Absent is the common case and changes nothing.
+# The rig's local extension, appended to the generic method. The resolver reads
+# it from the COMMIT UNDER REVIEW, never the working tree, so a branch is judged
+# against the extension its own commit declared. Absent is the common case and
+# changes nothing.
 if [ -n "$REVIEWED_OID" ]; then
-  EXT=""
-  for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
-    [ -n "$root" ] || continue
-    EXT=$(git -C "$root" show "$REVIEWED_OID:docs/review-$CHECK_NAME.md" 2>/dev/null) && [ -n "$EXT" ] && break
-    EXT=""
-  done
+  EXT=$("$HERE/review-checks.sh" --extension "$CHECK_NAME" --at "$REVIEWED_OID" 2>/dev/null) || EXT=""
   if [ -n "$EXT" ]; then
     echo
     printf '### Rig extension: `docs/review-%s.md` @ %.12s\n' "$CHECK_NAME" "$REVIEWED_OID"
