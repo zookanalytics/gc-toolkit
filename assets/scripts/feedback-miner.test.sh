@@ -394,13 +394,15 @@ eq "$(field_of "$(key 11 comment 201)" at)" "$(jq -r '.[] | select(.id == 101) |
 eq "$(field_of "$(key 11 comment 202)" reply_to)" "201" "(29) a reply records the comment it answers"
 
 echo "── show ──"
+eq "$("$SUT" show --dir "$W" --outside --limit 2 | grep -c '^--- ')" "2" "(34) --limit caps how many are shown"
+# The rest of the section reads as a run whose first show call comes next.
+: > "$W/shown.tsv"
 OUT=$("$SUT" show --dir "$W" --outside --limit 50)
-has "$OUT" "== 9 of 9 outside post(s) not yet recorded ==" "(30) show --outside counts the unrecorded outside posts"
+has "$OUT" "== 9 of 9 unrecorded outside post(s) not yet shown whole ==" "(30) show --outside counts the unrecorded outside posts"
 hasnt "$OUT" "$(key 11 review 102)" "(31) show --outside leaves the city's posts out"
 hasnt "$OUT" "$(key 11 comment 302)" "(32) show --outside leaves app notices out"
 has "$OUT" "--- $(key 11 comment 305)" "(32a) and shows an app account's conversation comment that is not a deploy notice"
 eq "$(printf '%s\n' "$OUT" | grep '^--- ' | head -1)" "--- $(key 11 comment 304)" "(33) the newest outside post is shown first"
-eq "$("$SUT" show --dir "$W" --outside --limit 2 | grep -c '^--- ')" "2" "(34) --limit caps how many are shown"
 OUT=$("$SUT" show --dir "$W" --city)
 has "$OUT" "$(key 11 review 104)" "(35) show --city lists the city's posts in the standing window"
 hasnt "$OUT" "$(key 12 review 402)" "(36) show --city leaves out a back-fill PR's city post"
@@ -445,7 +447,10 @@ ROWS_EOF
 has "$OUT" "already recorded under outside-review" "(53) a post already recorded is skipped"
 eq "$(grep -c '^bd create' "$TMP/gc.log")" "$CREATES" "(54) and nothing is created for it"
 OUT=$("$SUT" show --dir "$W" --outside --limit 50)
-has "$OUT" "== 6 of 6 outside post(s) not yet recorded ==" "(55) show --outside drops what this run filed"
+has "$OUT" "== 0 of 0 unrecorded outside post(s) not yet shown whole ==" "(55) show --outside prints no post an earlier call printed whole"
+has "$OUT" "== 6 outside post(s) an earlier call showed whole are not recorded yet; file each from what that call printed: " \
+    "(55a) and names the ones not recorded yet"
+hasnt "$OUT" "$(key 11 comment 201)" "(55b) leaving out what this run filed"
 
 OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
 {"key": "$(key 11 comment 304)", "statement": "Asks for a demo video.", "directive": "diff"}
@@ -790,13 +795,16 @@ store_obs() { # <id> <post key> <category>
     "$STORE/obs.json" > "$STORE/obs.next" && mv "$STORE/obs.next" "$STORE/obs.json"
 }
 store_obs tk-other1 "$(key 11 review 101)" outside-review
-has "$("$SUT" show --dir "$W" --outside --limit 50)" "--- $(key 11 review 101)" "(90b) show offers a post the store recorded after the sweep"
+# Every outside post here was printed whole by the run's first show call, so a
+# later call names the ones it reads as unrecorded at its end.
+unfiled_line() { "$SUT" show --dir "$W" --outside --limit 50 | grep '^== .* an earlier call showed whole are not recorded yet'; }
+has "$(unfiled_line)" "$(key 11 review 101)" "(90b) show names a post the store recorded after the sweep as not recorded yet"
 OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
 {"key": "$(key 11 review 101)", "statement": "Asks for the function to be split."}
 ROWS_EOF
 )
 has "$OUT" "filed 0, skipped 1" "(90c) file skips it as already recorded"
-hasnt "$("$SUT" show --dir "$W" --outside --limit 50)" "--- $(key 11 review 101)" "(90d) and show no longer offers it"
+hasnt "$("$SUT" show --dir "$W" --outside --limit 50)" "$(key 11 review 101)" "(90d) and show no longer names it"
 has "$("$SUT" summary --dir "$W")" "outside posts: 8 read, 1 recorded before this run, 1 filed now, 6 left unrecorded" \
     "(90e) the summary counts it as recorded, not as filed now"
 # A create whose observation landed but whose answer was lost.
@@ -805,13 +813,13 @@ OUT=$(STUB_CREATE_LOST=1 "$SUT" file --dir "$W" <<ROWS_EOF 2>&1
 ROWS_EOF
 ); RC=$?
 eq "$RC" "1" "(90f) a create that answers with no id fails the call"
-has "$("$SUT" show --dir "$W" --outside --limit 50)" "--- $(key 11 review 105)" "(90g) and show still offers the post"
+has "$(unfiled_line)" "$(key 11 review 105)" "(90g) and show still names the post as not recorded yet"
 OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
 {"key": "$(key 11 review 105)", "statement": "Copilot found a possible null dereference."}
 ROWS_EOF
 )
 has "$OUT" "filed 0, skipped 1" "(90h) the retry finds the observation the create left"
-hasnt "$("$SUT" show --dir "$W" --outside --limit 50)" "--- $(key 11 review 105)" "(90i) and show no longer offers the post"
+hasnt "$("$SUT" show --dir "$W" --outside --limit 50)" "$(key 11 review 105)" "(90i) and show no longer names the post"
 # A city post the store records under its own category is not captured.
 store_obs tk-other2 "$(key 11 review 104)" verdict-names-commit
 "$SUT" file --dir "$W" >/dev/null 2>&1 <<ROWS_EOF
@@ -842,7 +850,7 @@ ROWS_EOF
 )
 has "$OUT" "show has not printed this post in this run" "(91) file refuses a row on a post show never printed"
 OUT1=$("$SUT" show --dir "$W" --outside)
-has "$OUT1" "== 1 of 10 outside post(s) not yet recorded ==" "(92) a post longer than the budget is printed alone"
+has "$OUT1" "== 1 of 10 unrecorded outside post(s) not yet shown whole ==" "(92) a post longer than the budget is printed alone"
 has "$OUT1" "[characters 1 to 16000 of $HUGE_LEN; the rest comes in the next show call" "(93) its first part is labelled with the characters it holds"
 has "$OUT1" "$(slice "$HUGE" 0 16000)" "(94) and holds the first 16,000 characters"
 OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
@@ -857,12 +865,21 @@ OUT3=$("$SUT" show --dir "$W" --outside)
 has "$OUT3" "[characters 32001 to $HUGE_LEN of $HUGE_LEN, its last part]" "(98) the last part is labelled as last"
 has "$OUT3" "$(slice "$HUGE" 32000 "$HUGE_LEN")" "(99) and holds the rest, LAST_POINT included, so no character is lost between parts"
 has "$OUT3" "TAIL_FINDING: the retry loop never backs off." "(100) a post past the old 2,000-character cut is printed to its end"
+# The agent runs show again before it files the long post.
+OUT4=$("$SUT" show --dir "$W" --outside)
+hasnt "$OUT4" "--- $(key 15 comment 502)" "(100a) a long post printed whole is not printed again"
+hasnt "$OUT4" "$(slice "$HUGE" 0 200)" "(100b) so its opening is not offered from character 0"
+has "$(printf '%s\n' "$OUT4" | grep 'an earlier call showed whole are not recorded yet')" "$(key 15 comment 502)" \
+    "(100c) show names it as printed whole and not recorded yet"
+hasnt "$OUT4" "more after these: run show again" "(100d) and the posts left after it all fit in this one call"
+# A post stands at the furthest position any call printed it to.
+printf '%s\t%s\n' "$(key 15 comment 502)" 16000 >> "$W/shown.tsv"
 OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
 {"key": "$(key 15 comment 502)", "statement": "Asks to drop the cache, after a long walk through the paragraphs."}
 {"key": "$(key 15 review 501)", "statement": "The retry loop never backs off."}
 ROWS_EOF
 ); RC=$?
-eq "$RC" "0" "(101) once each post was printed to its end, its row files"
+eq "$RC" "0" "(101) once each post was printed to its end, its row files, a later show call and a smaller position after it notwithstanding"
 has "$OUT" "filed 2, skipped 0" "(102) both rows file"
 # The city's posts: each call prints what no earlier call printed whole.
 SEEN=""; CALLS=0

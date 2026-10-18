@@ -202,8 +202,8 @@ phrased about this change is `diff`, and so is anything unsure. An optional
 **`context`** says what the diff was doing when the statement needs it; the
 PR, file and line are added for you.
 
-Show and file in turns until show reports none left, and file a post shown in
-parts after its last part. Every outside post gets its observation, the brief
+Show and file in turns until show reports nothing left to show or file, and
+file a post shown in parts after its last part. Every outside post gets its observation, the brief
 ones too, and so does a post an earlier observation already covers: the
 distiller reads the set, and a post left out is a miss it never sees. A
 back-filling first run can hold hundreds. The script skips what the store

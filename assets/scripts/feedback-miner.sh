@@ -55,13 +55,15 @@
 #       same --dir keeps the PRs it already read, so one a tool call's time
 #       limit cut short resumes.
 #   feedback-miner.sh show --dir <work-dir> (--outside | --city) [--limit <n>] [--max-chars <n>]
-#       Print posts for the agent to read, newest first and each one whole:
-#       --outside the outside posts no observation records yet, --city the
-#       city's posts in the standing window that no earlier call printed whole.
-#       A call prints at most --limit posts (default 25), and stops before the
-#       post that would take its bodies past --max-chars characters (default
-#       16000). A post longer than that is printed in parts, one part a call,
-#       each call going on where the last one stopped.
+#       Print posts for the agent to read, newest first and each one whole,
+#       that no earlier call printed whole: --outside the outside posts no
+#       observation records yet, --city the city's posts in the standing
+#       window. A call prints at most --limit posts (default 25), and stops
+#       before the post that would take its bodies past --max-chars characters
+#       (default 16000). A post longer than that is printed in parts, one part a
+#       call, each call going on where the last one stopped. A call with
+#       --outside ends by naming the outside posts an earlier call printed
+#       whole that no observation records yet.
 #   feedback-miner.sh file --dir <work-dir> [--max-standing <n>]
 #       Read one JSON row per line on stdin and file an observation for each:
 #         {"key": <provenance>, "statement": <text>, "directive": "standing|diff",
@@ -422,17 +424,19 @@ fi
 touch "$DIR/filed.tsv" "$DIR/shown.tsv"
 
 # How far show has printed each post: shown.tsv holds one line per post a call
-# printed, its key and the characters printed through, and a post's last line
-# is where it stands.
+# printed, its key and the characters printed through, and a post stands at the
+# furthest of its lines.
 SHOWN_POS='reduce ($shown | split("\n") | map(select(length > 0) | split("\t")))[] as $s
-             ({}; .[$s[0]] = ($s[1] | tonumber))'
+             ({}; .[$s[0]] = ([.[$s[0]] // 0, ($s[1] | tonumber)] | max))'
 
 # --- show ------------------------------------------------------------------------
 # The agent condenses or judges a post from what show prints, so show prints
 # every post whole. The bodies of one call stay under --max-chars, so its output
 # comes back whole from a tool call, and a post longer than that is printed in
-# parts across calls. An outside post stays on offer until it is recorded, and a
-# city post until a call has printed it whole.
+# parts across calls, each call going on from where the post stands. A post
+# printed whole is never printed again, so a long one cannot take every later
+# call's budget. An outside post printed whole stays named at the end of each
+# call until it is recorded, so the agent files it.
 if [ "$VERB" = show ]; then
   [ -n "$WHICH" ] || die_usage "show needs --outside or --city"
   is_count "$LIMIT" && [ "$LIMIT" -gt 0 ] || die_usage "--limit must be a positive integer"
@@ -442,21 +446,22 @@ if [ "$VERB" = show ]; then
         --rawfile filed "$DIR/filed.tsv" --rawfile shown "$DIR/shown.tsv" '
     ($filed | split("\n") | map(select(length > 0) | split("\t")[0])) as $done
     | ('"$SHOWN_POS"') as $pos
-    | map(. + {len: (.body | length), through: ($pos[.key] // 0)})
+    | map(. + {len: (.body | length), from: ($pos[.key] // 0)})
     | (if $which == "outside"
        then map(select(.class == "outside" and (.captured | not) and (.key as $k | ($done | index([$k])) == null)))
-       else map(select(.class == "city" and .in_window and .through < .len)) end)
-    | map(. + {from: (if .through < .len then .through else 0 end)})
-    | (sort_by(.at) | reverse) as $set
+       else map(select(.class == "city" and .in_window)) end)
+    | (sort_by(.at) | reverse) as $offer
+    | ($offer | map(select(.from < .len))) as $set
     | reduce $set[] as $p ({used: 0, out: [], full: false};
         if .full or (.out | length) >= $limit then .full = true
         elif .used + ($p.len - $p.from) <= $budget then .out += [$p + {to: $p.len}] | .used += ($p.len - $p.from)
         elif .used == 0 then .out += [$p + {to: ($p.from + $budget)}] | .used = $budget | .full = true
         else .full = true end)
-    | {total: ($set | length), out}' "$DIR/sweep.jsonl" > "$PLAN" \
+    | {total: ($set | length), out,
+       unfiled: (if $which == "outside" then $offer | map(select(.from >= .len) | .key) else [] end)}' "$DIR/sweep.jsonl" > "$PLAN" \
     || { err "could not read the sweep in $DIR"; rm -f "$PLAN"; exit 1; }
   jq -r --arg which "$WHICH" '
-    "== \(.out | length) of \(.total) \(if $which == "outside" then "outside post(s) not yet recorded" else "city post(s) in the standing window not yet shown whole" end) ==",
+    "== \(.out | length) of \(.total) \(if $which == "outside" then "unrecorded outside post(s) not yet shown whole" else "city post(s) in the standing window not yet shown whole" end) ==",
     (.out[]
      | "--- \(.key)",
        "by \(.login), \(.at), \(.url)",
@@ -466,7 +471,8 @@ if [ "$VERB" = show ]; then
         else "[characters \(.from + 1) to \(.to) of \(.len)\(if .to < .len then "; the rest comes in the next show call, and this post is filed only after its last part" else ", its last part" end)]",
              .body[.from:.to] end),
        ""),
-    (if .total > (.out | length) then "== \(.total - (.out | length)) more after these: run show again ==" else empty end)' "$PLAN" \
+    (if .total > (.out | length) then "== \(.total - (.out | length)) more after these: run show again ==" else empty end),
+    (if (.unfiled | length) > 0 then "== \(.unfiled | length) outside post(s) an earlier call showed whole are not recorded yet; file each from what that call printed: \(.unfiled | join(" ")) ==" else empty end)' "$PLAN" \
     && jq -r '.out[] | "\(.key)\t\(.to)"' "$PLAN" >> "$DIR/shown.tsv" \
     || { err "could not print the posts, or record what was printed"; rm -f "$PLAN"; exit 1; }
   rm -f "$PLAN"
