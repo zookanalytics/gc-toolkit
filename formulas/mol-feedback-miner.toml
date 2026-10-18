@@ -171,8 +171,8 @@ A back-filling sweep reads hundreds of PRs and takes minutes, so give its call
 a long timeout. If a time limit cuts it short, run the same sweep command again
 with the same `--dir`: it keeps the PRs it already read.
 
-Each block below runs in a fresh shell: set `FM` and `MINER_DIR` to the paths
-§1 printed at its top.
+Each block below runs in a fresh shell: fill in the paths §1 printed at its
+top where the block names them.
 
 ## 2. The outside capture: one observation per outside post
 
