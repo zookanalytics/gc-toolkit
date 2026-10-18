@@ -312,12 +312,12 @@ eq "$(bare_git "$TMP/push.sh")" "" "push: every git call in the block names its 
 
 printf '%s\n' '[{"metadata":{"branch":"polecat/wb","target":"main"}}]' > "$TMP/meta.json"
 # The pack, where the prep block finds detached-job.sh to stop a gate left
-# running in the prep worktree, and the direct-merge block finds
-# direct-merge-push.sh, beside a lifecycle.sh that logs. It is named by path,
-# so the cwd plays no part.
+# running in the prep worktree and refinery-workspace.sh to stage it, and the
+# direct-merge block finds direct-merge-push.sh, beside a lifecycle.sh that
+# logs. It is named by path, so the cwd plays no part.
 PACK_CITY="$TMP/pack-city"
 mkdir -p "$PACK_CITY/rigs/gc-toolkit/assets/scripts"
-cp "$HERE/detached-job.sh" "$HERE/direct-merge-push.sh" "$PACK_CITY/rigs/gc-toolkit/assets/scripts/"
+cp "$HERE/detached-job.sh" "$HERE/refinery-workspace.sh" "$HERE/direct-merge-push.sh" "$PACK_CITY/rigs/gc-toolkit/assets/scripts/"
 cp "$BIN/lifecycle" "$PACK_CITY/rigs/gc-toolkit/assets/scripts/lifecycle.sh"
 prep_case() { # <mode>; sets RC, D, NEWHEAD, STALE (and patrol_rig's globals)
   local d="$TMP/prep-$1" rc=0
