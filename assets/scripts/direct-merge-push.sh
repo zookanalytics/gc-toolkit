@@ -18,7 +18,11 @@
 # The fast-forward is checked against origin/<target> fetched first. A prepared
 # head that is neither behind nor ahead of it was prepared on a target that has
 # moved since. Nothing is pushed or recorded, and the exit (4) tells the caller
-# that the next patrol prepares the branch again.
+# that the next patrol prepares the branch again. The bead can still carry a
+# direct_landing_sha after an exit 4, from a push the moved target refused
+# (below). That stamp is harmless: it names a commit the target does not carry,
+# so the zero-diff guard ignores it, and the next direct landing overwrites or
+# clears it.
 #
 # A prepared head origin/<target> already carries has nothing to push and is
 # recorded as landed: at the bead's direct_landing_sha when origin/<target>
@@ -70,7 +74,9 @@
 #       landing that could not be verified or recorded (the output says which;
 #       the stamp lets a later patrol record it) · 2 usage · 3 promoted to
 #       merge_strategy=pr (take the mr path) · 4 origin/<target> moved after
-#       the branch was prepared; nothing pushed or recorded
+#       the branch was prepared; nothing landed or recorded, though the bead
+#       can keep its stamp, which names a commit the target does not carry,
+#       so the zero-diff guard ignores it and the next landing overwrites it
 set -uo pipefail
 
 PROG="direct-merge-push"
@@ -181,7 +187,7 @@ elif carries "$PREPARED" "$TIP"; then
     if [ -n "$NOW" ] && carries "$NOW" "$MERGED_SHA"; then
       echo "the push of $MERGED_SHA reported a failure, but origin/$TARGET at $NOW carries it, so the push landed and only its reply was lost; reading it back to record it. The push said: $PUSH_OUT"
     elif [ -n "$NOW" ] && ! carries "$MERGED_SHA" "$NOW" && git -C "$RIG_ROOT" merge-base "$MERGED_SHA" "$NOW" >/dev/null 2>&1; then
-      echo "the push of $MERGED_SHA was refused, and origin/$TARGET has moved from $TIP to $NOW since it was fetched, so the prepared head is no longer a fast-forward of it; nothing landed or recorded, so the next patrol prepares the branch again"
+      echo "the push of $MERGED_SHA was refused, and origin/$TARGET has moved from $TIP to $NOW since it was fetched, so the prepared head is no longer a fast-forward of it. Nothing landed or was recorded, and the next patrol prepares the branch again. $WORK keeps direct_landing_sha=$STAMP, which is harmless: origin/$TARGET does not carry it, so the zero-diff guard ignores it, and the next direct landing overwrites or clears it"
       exit 4
     elif [ -z "$NOW" ]; then
       echo "Push failed: $PUSH_OUT. origin/$TARGET could not be fetched again to tell whether the push landed anyway. $WORK keeps direct_landing_sha=$STAMP, so a later patrol records the landing if origin/$TARGET carries it. STOP; do NOT continue."

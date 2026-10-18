@@ -909,7 +909,7 @@ request"/"approving review"/"Cannot update this protected ref") promoted the
 bead to `merge_strategy=pr`, and the block falls through to the mr block — the
 prep worktree is untouched and still holds the prepared head for the PR push.
 Exit 4 means origin/$TARGET moved past the prepared head after the prepare, so
-nothing landed and nothing was recorded. That is routine, not a fault: the block
+nothing landed. That is routine, not a fault: the block
 stops without draining, and the next patrol prepares the branch again. Any
 other non-zero exit stops the wisp, and the block leaves the work with the
 refinery; the script's output says what landed, if anything.
