@@ -34,9 +34,12 @@
 # target that carries the stamped commit, and sends the bead back here, where
 # it records as landed at that commit. The stamp's store calls stand between
 # the fetch and the push, so a target that moves meanwhile refuses the push. A
-# push refused for any reason but branch protection is checked against a fresh
-# fetch, and one whose target has moved past the prepared head exits 4, as a
-# target that moved before the fetch does.
+# push that fails for any reason but branch protection is checked against a
+# fresh fetch. A target that carries the pushed commit took the push and only
+# the reply was lost, so the landing is read back and recorded like any other.
+# A target that has moved past the prepared head exits 4, as a target that
+# moved before the fetch does. When that fetch fails, nothing shows whether the
+# push landed, so the exit is 1 and the stamp stays for a later patrol.
 #
 # A push that lands is read back from a fresh fetch, and the landing is
 # recorded only once origin/<target> carries the pushed commit, at its tip or
@@ -173,14 +176,20 @@ elif carries "$PREPARED" "$TIP"; then
         gc bd update "$WORK" --set-metadata merge_strategy=pr --unset-metadata direct_landing_sha || { echo "could not record merge_strategy=pr on $WORK; nothing landed"; exit 1; }
         exit 3 ;;
     esac
-    if fetch_target && NOW=$(git -C "$RIG_ROOT" rev-parse --verify -q "refs/remotes/origin/$TARGET") &&
-      ! carries "$NOW" "$MERGED_SHA" && ! carries "$MERGED_SHA" "$NOW" &&
-      git -C "$RIG_ROOT" merge-base "$MERGED_SHA" "$NOW" >/dev/null 2>&1; then
+    NOW=""
+    fetch_target && NOW=$(git -C "$RIG_ROOT" rev-parse --verify -q "refs/remotes/origin/$TARGET")
+    if [ -n "$NOW" ] && carries "$NOW" "$MERGED_SHA"; then
+      echo "the push of $MERGED_SHA reported a failure, but origin/$TARGET at $NOW carries it, so the push landed and only its reply was lost; reading it back to record it. The push said: $PUSH_OUT"
+    elif [ -n "$NOW" ] && ! carries "$MERGED_SHA" "$NOW" && git -C "$RIG_ROOT" merge-base "$MERGED_SHA" "$NOW" >/dev/null 2>&1; then
       echo "the push of $MERGED_SHA was refused, and origin/$TARGET has moved from $TIP to $NOW since it was fetched, so the prepared head is no longer a fast-forward of it; nothing landed or recorded, so the next patrol prepares the branch again"
       exit 4
+    elif [ -z "$NOW" ]; then
+      echo "Push failed: $PUSH_OUT. origin/$TARGET could not be fetched again to tell whether the push landed anyway. $WORK keeps direct_landing_sha=$STAMP, so a later patrol records the landing if origin/$TARGET carries it. STOP; do NOT continue."
+      exit 1
+    else
+      echo "Push failed: $PUSH_OUT. STOP. Debug and retry; do NOT continue."
+      exit 1
     fi
-    echo "Push failed: $PUSH_OUT. STOP. Debug and retry; do NOT continue."
-    exit 1
   fi
   retry fetch_target || { echo "PUSH UNVERIFIED — could not re-fetch origin/$TARGET after the push. STOP; do not mutate bead state. $WORK keeps direct_landing_sha=$STAMP, so a later patrol records the landing once origin/$TARGET reads back carrying it."; exit 1; }
   REMOTE=$(git -C "$RIG_ROOT" rev-parse --verify -q "refs/remotes/origin/$TARGET")

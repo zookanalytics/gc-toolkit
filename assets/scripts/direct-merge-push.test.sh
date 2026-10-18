@@ -27,6 +27,9 @@
 #   - a transition that writes and then fails, on any try, is recorded once the
 #     bead reads merged at the landing, and is not written again;
 #   - a commit landed on top of the push before the read-back does not fail it;
+#   - a push that reports a failure after origin took it is read back and
+#     recorded, and one whose target cannot be fetched again exits 1 and keeps
+#     its stamp for the next patrol;
 #   - a push refused for branch protection promotes the bead to
 #     merge_strategy=pr and clears the stamp in one write, and exits 3, and any
 #     other refused push, or a push origin does not read back, exits 1;
@@ -134,10 +137,17 @@ chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 # A git that fails a fetch from origin once FETCH_FAIL_MARK exists, which the
 # origin's post-receive hook creates, so only the fetches after the push fail:
-# the first FETCH_FAIL_TIMES of them.
+# the first FETCH_FAIL_TIMES of them. With PUSH_REPLY_LOST set, a push to
+# origin runs and then reports a failure, as a push whose reply is lost does.
 REAL_GIT=$(command -v git)
 { printf '#!/usr/bin/env bash\n'; printf 'REAL_GIT=%q\n' "$REAL_GIT"; cat; } > "$TMP/gitshim/git" <<'SHIM'
 case " $* " in
+  *" push origin "*)
+    if [ -n "${PUSH_REPLY_LOST:-}" ]; then
+      "$REAL_GIT" "$@" >/dev/null 2>&1
+      echo "fatal: the remote end hung up unexpectedly" >&2
+      exit 128
+    fi ;;
   *" fetch origin "*)
     if [ -n "${FETCH_FAIL_MARK:-}" ] && [ -e "$FETCH_FAIL_MARK" ]; then
       n=$(( $(cat "$FETCH_FAIL_MARK.count" 2>/dev/null || echo 0) + 1 ))
@@ -349,6 +359,32 @@ has "$OUT" "the remote is read-only today" "refused: it prints what the remote s
 case "$(cat "$D/gc.log")" in *"merge_strategy=pr"*) bad "refused: the bead is not promoted" ;; *) ok "refused: the bead is not promoted" ;; esac
 no_transition refused
 no_drain refused
+
+echo "── a push origin took, whose reply was lost, is read back and recorded ──"
+setup "$TMP/lost-reply"
+run PATH="$TMP/gitshim:$PATH" PUSH_REPLY_LOST=1
+eq "$RC" 0 "lost-reply: exits 0"
+has "$OUT" "the push of $FEATURE reported a failure, but origin/main at $FEATURE carries it" "lost-reply: it says the push landed though it reported a failure"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$FEATURE" "lost-reply: origin/main is the prepared head"
+recorded_at lost-reply "$FEATURE"
+no_drain lost-reply
+
+echo "── the same, when origin cannot be fetched again: the stamp stays, and the next patrol records it ──"
+setup "$TMP/lost-reply-down"
+printf '#!/usr/bin/env bash\ntouch %q\n' "$D/pushed" > "$D/origin.git/hooks/post-receive"
+chmod +x "$D/origin.git/hooks/post-receive"
+run PATH="$TMP/gitshim:$PATH" PUSH_REPLY_LOST=1 FETCH_FAIL_MARK="$D/pushed" FETCH_FAIL_TIMES=100
+eq "$RC" 1 "lost-reply-down: exits 1"
+has "$OUT" "could not be fetched again to tell whether the push landed anyway" "lost-reply-down: it says nothing shows whether the push landed"
+has "$OUT" "wb keeps direct_landing_sha=$FEATURE" "lost-reply-down: it says the bead keeps the stamp"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$FEATURE" "lost-reply-down: the landing stands"
+eq "$(stamp)" "$FEATURE" "lost-reply-down: the bead keeps the stamp"
+no_transition lost-reply-down
+no_drain lost-reply-down
+next_patrol
+run
+eq "$RC" 0 "lost-reply-down, next patrol: exits 0"
+recorded_at "lost-reply-down, next patrol" "$FEATURE"
 
 echo "── a push origin does not read back stops before any bead state moves ──"
 setup "$TMP/unverified"
