@@ -203,7 +203,7 @@ DIGEST=$(digest_of "$MESSAGE")
 # description keeps the first text verbatim, and finding.occurrences,
 # finding.last_seen and finding.digest record every recurrence, so a note
 # carries only the head of the new text. Once a line no longer fits under the
-# cap, one marker line says so and nothing more is appended.
+# cap, one marker line says so if it fits, and this script appends nothing more.
 NOTE_HEAD_MAX=200
 NOTES_CAP=65536
 CAP_MARK="are counted in finding.occurrences and finding.last_seen, and their text is not noted"
@@ -386,9 +386,11 @@ if [ -n "$EXISTING" ]; then
     HAVE="${NOTES_NOW%% *}"; MARKED="${NOTES_NOW#* }"
     LINE="[$(now_utc)] $SCOPE_LABEL: finding recurred with changed text (occurrence $SEEN, digest $DIGEST): $(note_head "$MESSAGE")"
     MARK="[$(now_utc)] $SCOPE_LABEL: finding recurred with changed text (occurrence $SEEN). The notes are at their $NOTES_CAP-byte cap, so this and later recurrences $CAP_MARK."
-    # A line goes in only while the marker still fits after it, so the marker
-    # always has room. Each append adds one separator byte to notes that are
-    # not empty, counted here whether or not they are.
+    # A line goes in only while the marker would still fit after it, so the
+    # lines stop at least a marker's length short of the cap. Another writer's
+    # note can still take that room, and then the marker is left out too. Each
+    # append adds one separator byte to notes that are not empty, counted here
+    # whether or not they are.
     # --append-notes, never --notes: --notes REPLACES, and the body a patrol
     # would erase is the one the first reaction read.
     case "$HAVE" in

@@ -794,6 +794,15 @@ eq "$(notes_bytes fnd-1)" "100000" "(past cap) notes past the cap are left as th
 eq "$(meta fnd-1 'finding.occurrences')" "2" "(past cap) the recurrence is counted"
 has "$OUT" "not noted" "(past cap) says the text was not noted"
 
+# Less room than the marker takes, as another writer's note can leave: nothing
+# goes in, not even the marker, and the notes stay under the cap.
+reset
+"$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 10)" >/dev/null 2>&1
+set_notes fnd-1 "$(filler 65436)"
+OUT=$("$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 11)" 2>&1)
+eq "$(notes_bytes fnd-1)" "65436" "(no room) 100 bytes of room leave the notes as they are"
+has "$OUT" "not noted, because the notes are at their 65536-byte cap" "(no room) says the cap held the text back"
+
 # Notes that cannot be read get nothing appended.
 reset
 "$SUT" --key doctor-unread --title t --message "first" >/dev/null 2>&1
