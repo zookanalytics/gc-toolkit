@@ -56,6 +56,7 @@ show)
   "$ROOT_ID")
     printf '[{"id":"%s","metadata":{"gc.input_convoy_id":"%s"' "$ROOT_ID" "$CONVOY_ID"
     [ -n "$MD_ROOT_ISSUE" ] && printf ',"gc.var.issue":"%s"' "$MD_ROOT_ISSUE"
+    [ -n "$MD_ROOT_VARS" ] && printf ',%s' "$MD_ROOT_VARS"
     printf '}}]'
     ;;
   "$ISSUE_ID")
@@ -179,6 +180,16 @@ recorded() { ( cd "$WT" && "$GCTK_BUILT" rig "$1" --check 2>/dev/null ); }
 # premark <commit> <record> [tracker...] : a pre-existing mark, in the shape
 # rig-check-pre-existing.sh writes.
 premark() { local c="$1" r="$2"; shift 2; jq -cn --arg c "$c" --argjson r "$r" '{commit: $c, record: $r, trackers: $ARGS.positional}' --args "$@"; }
+# pour_vars : the vars the case's pour renders, as one JSON object. A command
+# defaults to what green and SB_GREEN ran, and a case sets VAR_<NAME> to declare
+# another, or to empty for a command the rig does not declare.
+pour_vars() {
+  jq -nc --arg base "${VAR_BASE-main}" --arg setup "${VAR_SETUP-}" --arg typecheck "${VAR_TYPECHECK-}" \
+    --arg lint "${VAR_LINT-true}" --arg build "${VAR_BUILD-make}" --arg affected "${VAR_AFFECTED-true}" \
+    --arg test "${VAR_TEST-}" '{base_branch: $base, setup_command: $setup,
+      typecheck_command: $typecheck, lint_command: $lint, build_command: $build,
+      affected_tests_command: $affected, test_command: $test}'
+}
 
 write_state() {
   local issue_id="${ISSUE_ID-gc-issue}"
@@ -204,6 +215,12 @@ EOF
   printf 'MD_PRE_TEST=%q\n' "${MD_PRE_TEST-}" >> "$STATE"
   printf 'MD_SETUP_BUILD=%q\n' "${MD_SETUP_BUILD-$SB_GREEN}" >> "$STATE"
   printf 'MD_PRE_BUILD=%q\n' "${MD_PRE_BUILD-}" >> "$STATE"
+  # The root carries gc.var.<name> for each var the pour rendered non-empty, as
+  # gascity stamps it, and the stub splices these pairs into its metadata.
+  local stamps
+  stamps=$(pour_vars | jq -c 'with_entries(select(.value != "") | .key |= "gc.var." + .)')
+  stamps=${stamps#\{}
+  printf 'MD_ROOT_VARS=%q\n' "${stamps%\}}" >> "$STATE"
 }
 
 # Run the script in a cwd that is deliberately NOT the fixture worktree: the
@@ -240,6 +257,7 @@ reset_env() {
   unset ROOT_ID CONVOY_ID CONVOY_MEMBERS ISSUE_ID MD_ROOT_ISSUE DEP_TREE_FAILS GC_COLD
   unset MD_WORK_DIR MD_BRANCH MD_GATE MD_ROUTE MD_ABORTED_AT MD_MAX_ATTEMPTS MD_SUBJECT_MAX
   unset UPDATE_FAILS ITERATION MD_PRE_LINT MD_PRE_TEST MD_SETUP_BUILD MD_PRE_BUILD GCTK
+  unset VAR_BASE VAR_SETUP VAR_TYPECHECK VAR_LINT VAR_BUILD VAR_AFFECTED VAR_TEST
   clear_records
 }
 
@@ -264,37 +282,75 @@ reset_env; write_state; green "$TMP/twin"
 run_case "PASS on records another worktree of the clone wrote at HEAD" 0
 
 # --- 3c. one check recorded red ----------------------------------------------
-reset_env; write_state; green; record "$WT" lint --command false
+reset_env; VAR_LINT=false; write_state; green; record "$WT" lint --command false
 run_case "FAIL when a check's record at HEAD is a fail" 1
 assert_out "names the red check" "not green at $HEAD_SHA: lint"
 
 # --- 3d. a red check marked pre-existing at HEAD ------------------------------
-reset_env; green; record "$WT" lint --command false
+reset_env; VAR_LINT=false; green; record "$WT" lint --command false
 MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)" tk-t1); write_state
 run_case "PASS when the red check's record is marked pre-existing at HEAD" 0
 assert_out "names the tracker that carries it" "pre-existing, tracked by tk-t1"
 
-reset_env; green; record "$WT" lint --command false
+reset_env; VAR_LINT=false; green; record "$WT" lint --command false
 MD_PRE_LINT=$(premark "$OLD_SHA" "$(recorded lint)" tk-t1); write_state
 run_case "FAIL when the pre-existing mark names another commit" 1
 
-reset_env; green; record "$WT" lint --command false
+reset_env; VAR_LINT=false; green; record "$WT" lint --command false
 MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)"); write_state
 run_case "FAIL when the pre-existing mark names no tracker" 1
 
 # --- 3d2. a run that replaced the marked record --------------------------------
-# gctk rig replaces a commit's record when a call declares another run, and the
-# new run's fail is not the one judged pre-existing.
-reset_env; green; record "$WT" lint --command false
+# gctk rig replaces a commit's record when a call declares another run. When the
+# replacing run is the declared one, its fail is not the one judged pre-existing;
+# when it is not, its record answers nothing for the declared run.
+reset_env; VAR_LINT='exit 3'; green; record "$WT" lint --command false
 MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)" tk-t1); write_state
 record "$WT" lint --command 'exit 3'
-run_case "FAIL when a run with another command replaced the marked record at HEAD" 1
+run_case "FAIL when the declared run replaced the marked record of another command at HEAD" 1
 assert_out "says the mark judged another run" "judged another run's fail"
 
-reset_env; green; record "$WT" test --scope affected --command false
+reset_env; VAR_LINT=false; green; record "$WT" lint --command false
+MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)" tk-t1); write_state
+record "$WT" lint --command 'exit 3'
+run_case "FAIL when a run with another command replaced the declared run's marked record at HEAD" 1
+assert_out "says the record is another run's" "lint: the record at $HEAD_SHA is of \"exit 3\", not of the declared \"false\", so it answers nothing here"
+
+reset_env; VAR_AFFECTED=""; VAR_TEST=false; green; record "$WT" test --scope affected --command false
 MD_PRE_TEST=$(premark "$HEAD_SHA" "$(recorded test)" tk-t1); write_state
 record "$WT" test --scope full --command false
-run_case "FAIL when a full-suite run replaced the marked record of the affected subset" 1
+run_case "FAIL when the declared full-suite run replaced the marked record of the affected subset" 1
+assert_out "says the test mark judged another run" "test: the pre-existing mark at $HEAD_SHA judged another run's fail"
+
+# --- 3d2b. a record at HEAD that is not the declared run's ----------------------
+# --check reports whatever is recorded at HEAD. A record counts only when it is
+# the run the step declares: the same command and, for test, the same scope.
+reset_env; VAR_LINT='tools/lint.sh'; write_state; green
+run_case "FAIL when HEAD holds only a pass of a command the step does not declare" 1
+assert_out "names the other command and the declared one" "lint: the record at $HEAD_SHA is of \"true\", not of the declared \"tools/lint.sh\""
+assert_out "…and counts the check as unrecorded" "nothing recorded at $HEAD_SHA for: lint by the runs the step declares"
+
+reset_env; write_state; green; record "$WT" test --scope full --command true
+run_case "FAIL when HEAD holds a full-suite pass where the step declares the affected subset" 1
+assert_out "names both scopes" "test: the record at $HEAD_SHA is of \"true\" (scope full), not of the declared \"true\" (scope affected)"
+
+# The block records a pass that ran nothing, and the iteration may then run the
+# repo's own gate in its place.
+reset_env; VAR_LINT=""; write_state; green; record "$WT" lint --nothing-declared
+record "$WT" lint --command 'printf ok'
+run_case "PASS on another run's pass for a check the rig declares no command for" 0
+
+reset_env; VAR_AFFECTED=""; VAR_TEST=true; write_state
+record "$WT" lint --command true; record "$WT" typecheck --nothing-declared
+SAME_TREE=$(git -C "$WT" commit-tree "$HEAD_SHA^{tree}" -p "$HEAD_SHA" -m same-tree)
+git -C "$WT" worktree add -q --detach "$TMP/same-tree" "$SAME_TREE"
+record "$TMP/same-tree" test --scope full --command true
+run_case "PASS on the declared full-suite pass a commit with HEAD's tree recorded" 0
+git -C "$WT" worktree remove --force "$TMP/same-tree"
+
+reset_env; VAR_BASE=""; write_state; green
+run_case "FAIL (fail-closed) when the root carries no stamp of what its pour rendered" 1
+assert_out "names the missing stamp" "carries no gc.var.base_branch"
 
 # --- 3d3. setup and build, which gctk rig does not record ----------------------
 reset_env; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none fail); write_state; green
@@ -321,20 +377,26 @@ reset_env; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none fail)
 MD_PRE_BUILD=$(premark "$HEAD_SHA" "$MD_SETUP_BUILD" tk-b1); write_state; green
 run_case "PASS when the failed build's note at HEAD is marked pre-existing" 0
 assert_out "names the build's tracker" "build: the fail at $HEAD_SHA is pre-existing, tracked by tk-b1"
-reset_env; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none fail 'make all')
+reset_env; VAR_BUILD='make all'; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none fail 'make all')
 MD_PRE_BUILD=$(premark "$HEAD_SHA" "$(noted "$HEAD_SHA" none fail)" tk-b1); write_state; green
 run_case "FAIL when the build mark holds a note of another command" 1
 assert_out "says the build mark judged another run" "build: the pre-existing mark at $HEAD_SHA judged another run's fail"
+# A note counts only while its commands are the ones the step declares.
+reset_env; VAR_BUILD='make all'; write_state; green
+run_case "FAIL when the note at HEAD is of another build command than the step declares" 1
+assert_out "names the noted command and the declared one" "setup and build: the note at $HEAD_SHA is of setup \"\" and build \"make\", not of the declared setup \"\" and build \"make all\""
+assert_out "…and counts setup and build as unrecorded" "nothing recorded at $HEAD_SHA for: setup build"
 reset_env; MD_SETUP_BUILD=$(noted "$HEAD_SHA" fail fail)
 MD_PRE_BUILD=$(premark "$HEAD_SHA" "$MD_SETUP_BUILD" tk-b1); write_state; green
 run_case "FAIL when setup failed too and only the build is marked" 1
 assert_out "names the unmarked setup" "not green at $HEAD_SHA: setup"
 
 # --- 3d4. the step's own block, rendered as a pour renders it -------------------
-# The self-review step's check block, rendered with the rig's commands, runs in
-# the fixture worktree against the gctk built from this checkout. Its note of
-# setup and build reaches the state the bd stub serves, so the exit condition
-# reads what the block wrote.
+# The self-review step's check block, rendered with the case's commands, runs in
+# the fixture worktree against the gctk built from this checkout. The root stub
+# stamps the same commands, as a pour does, and the block's note of setup and
+# build reaches the state the bd stub serves, so the exit condition reads what
+# the block wrote.
 ROOT="$(cd "$HERE/../.." && pwd)"
 awk '
   /^```bash$/ {buf = ""; f = 1; next}
@@ -343,34 +405,26 @@ awk '
 grep -qF 'self_review_setup_build=' "$TMP/checks.tmpl" \
   && ok "the self-review check block extracts, with its note of setup and build" \
   || bad "the self-review check block did not extract with its note of setup and build"
-# render_checks <build_command> : the block, its command vars filled the way a
-# pour fills them, with $SETUP as the setup command (none unless set) and
-# $AFFECTED as the affected test command (true unless set).
+# render_checks : the block, each placeholder filled with what the case's pour
+# renders (pour_vars).
 render_checks() {
-  BUILD="$1" SETUP="${SETUP-}" AFFECTED="${AFFECTED-true}" awk '
-    function rep(s, k, v,   i, out) {
-      out = ""
-      while ((i = index(s, k)) > 0) { out = out substr(s, 1, i - 1) v; s = substr(s, i + length(k)) }
-      return out s
-    }
-    {
-      s = rep($0, "{{build_command}}", ENVIRON["BUILD"])
-      s = rep(s, "{{affected_tests_command}}", ENVIRON["AFFECTED"])
-      s = rep(s, "{{setup_command}}", ENVIRON["SETUP"]); s = rep(s, "{{typecheck_command}}", "")
-      s = rep(s, "{{lint_command}}", ""); s = rep(s, "{{test_command}}", "")
-      print s
-    }' "$TMP/checks.tmpl"
+  jq -Rr --argjson v "$(pour_vars)" \
+    'reduce ($v | to_entries[]) as $e (.; split("{{" + $e.key + "}}") | join($e.value))' "$TMP/checks.tmpl"
 }
-# run_checks <shell> <build_command> : the rendered block in the fixture worktree.
+# run_checks <shell> : the rendered block in the fixture worktree.
 run_checks() {
-  render_checks "$2" > "$TMP/checks.sh"
+  render_checks > "$TMP/checks.sh"
   ( cd "$WT" && env GC_PACK_DIR="" GC_RIG_ROOT="" GC_CITY_PATH="$TMP/no-city" GCTK_BIN="$GCTK_BUILT" \
       WORK_BEAD_ID="${ISSUE_ID-gc-issue}" CLAIMED_ITER_BEAD=iter-1 "$1" "$TMP/checks.sh" ) >"$TMP/checks.out" 2>&1
 }
+reset_env; render_checks > "$TMP/checks.sh"
+grep -qF '{{' "$TMP/checks.sh" \
+  && bad "the block renders with a placeholder pour_vars does not fill" \
+  || ok "pour_vars fills every placeholder in the block"
 SHELLS="bash"; command -v zsh >/dev/null 2>&1 && SHELLS="bash zsh"
 for sh in $SHELLS; do
-  reset_env; MD_SETUP_BUILD=""; write_state
-  run_checks "$sh" 'exit 1'
+  reset_env; MD_SETUP_BUILD=""; VAR_BUILD='exit 1'; write_state
+  run_checks "$sh"
   run_case "$sh: FAIL after the step's own block ran a build that fails on a clean tree" 1
   assert_out "$sh: …naming the build" "not green at $HEAD_SHA: build"
   # The note the block wrote is the last MD_SETUP_BUILD line in the state.
@@ -380,30 +434,44 @@ for sh in $SHELLS; do
     "$sh: the block notes HEAD, no setup, the failed build and its command"
   printf 'MD_PRE_BUILD=%q\n' "$(premark "$HEAD_SHA" "$BLOCK_NOTE" tk-b1)" >> "$STATE"
   run_case "$sh: PASS once a pre-existing mark holds the note the block wrote" 0
-  reset_env; MD_SETUP_BUILD=""; write_state
-  run_checks "$sh" 'true'
+  reset_env; MD_SETUP_BUILD=""; VAR_BUILD=true; write_state
+  run_checks "$sh"
   run_case "$sh: PASS after the step's own block ran a build that passes" 0
   # What setup and build leave that git does not ignore is put back, so the
   # checks after them run, and the block notes them, in one run of the block.
-  reset_env; MD_SETUP_BUILD=""; write_state
-  SETUP='printf rewritten > f' run_checks "$sh" 'printf out > dist.txt'
+  reset_env; MD_SETUP_BUILD=""; VAR_SETUP='printf rewritten > f'; VAR_BUILD='printf out > dist.txt'; write_state
+  run_checks "$sh"
   run_case "$sh: PASS after the block ran a setup that rewrites a tracked file and a build that leaves a file" 0
   eq "$(git -C "$WT" status --porcelain)/$(cat "$WT/f")" "/more" "$sh: …which leaves the tree HEAD holds"
   # Whatever the case left must not reach the cases after it.
   git -C "$WT" reset -q --hard; git -C "$WT" clean -fdq
   # A test run that leaves a file keeps its record, and the note the block
   # wrote before the run stands, so removing the file is all the loop needs.
-  reset_env; MD_SETUP_BUILD=""; write_state
-  AFFECTED='printf x > cover.out' run_checks "$sh" 'true'
+  reset_env; MD_SETUP_BUILD=""; VAR_AFFECTED='printf x > cover.out'; VAR_BUILD=true; write_state
+  run_checks "$sh"
   run_case "$sh: FAIL while the file a test run left is in the tree" 1
   rm -f "$WT/cover.out"
   run_case "$sh: PASS once that file is removed, without running the block again" 0
+  # A declared run that stops short of a result, a crash or a command bash
+  # cannot find, exits 4 and records nothing, which leaves the pass another
+  # command recorded at HEAD. That pass must not converge the loop.
+  for crash in 'kill -KILL $$' no-such-lint-command; do
+    reset_env; MD_SETUP_BUILD=""; VAR_BUILD=true; VAR_LINT="$crash"; write_state
+    record "$WT" lint --command true
+    run_checks "$sh"
+    grep -qF "gctk rig lint: machine failure, nothing recorded" "$TMP/checks.out" \
+      && ok "$sh: the block's lint run of $crash stops at exit 4 with nothing recorded" \
+      || { bad "$sh: the block's lint run of $crash stops at exit 4 with nothing recorded"; sed 's/^/       /' "$TMP/checks.out"; }
+    eq "$(recorded lint | jq -r '.command')" "true" "$sh: …which leaves the pass of another command at HEAD"
+    run_case "$sh: FAIL when the declared lint run stopped beside another command's pass at HEAD ($crash)" 1
+    assert_out "$sh: …naming that pass as another run's" "lint: the record at $HEAD_SHA is of \"true\", not of the declared $(jq -nr --arg c "$crash" '$c | @json'), so it answers nothing here"
+  done
 done
 # Records already at HEAD outlive an edit, so a build run over uncommitted
 # changes must note nothing: those changes, not HEAD, are what it built.
-reset_env; MD_SETUP_BUILD=""; write_state; green
+reset_env; MD_SETUP_BUILD=""; VAR_BUILD=true; write_state; green
 echo dirt > "$WT/untracked"
-run_checks bash 'true'
+run_checks bash
 rm -f "$WT/untracked"
 run_case "FAIL when the block ran over uncommitted changes, beside records that pass" 1
 assert_out "…because the block noted no setup and build" "nothing recorded at $HEAD_SHA for: setup build"
@@ -424,6 +492,11 @@ reset_env; MD_GATE="$OLD_SHA"; MD_SETUP_BUILD=""; write_state
 run_case "FAIL on a stamp naming an older HEAD when nothing is recorded" 1
 reset_env; MD_GATE="$HEAD_SHA"; MD_SETUP_BUILD=""; write_state; green
 run_case "PASS on a stamp naming HEAD in place of the setup and build note, beside records that pass" 0
+# Records of runs the step does not declare say nothing about its own, so the
+# stamp still stands in where they are all that HEAD holds.
+reset_env; MD_GATE="$HEAD_SHA"; MD_SETUP_BUILD=""; write_state
+record "$WT" test --scope full --command true; record "$WT" lint --command 'printf other'
+run_case "PASS on a stamp naming HEAD where only records of other runs are" 0
 reset_env; MD_GATE="$HEAD_SHA"; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none fail); write_state; green
 run_case "FAIL when the note at HEAD says the build failed, even beside a stamp naming HEAD" 1
 

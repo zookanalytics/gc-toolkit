@@ -3,9 +3,10 @@
 #
 # Exit 0 ("pass" — closes the control bead and releases submit-and-exit) ONLY
 # when the tree checked out right now is clean, `gctk rig` holds a passing
-# record of each of the rig's recorded checks (test, lint and typecheck) at its
-# HEAD, and the work bead notes that setup and build passed at that HEAD, a fail
-# of any of them passing only by the work bead's pre-existing mark for it. Every
+# record at its HEAD of the run the step declares for each of the rig's recorded
+# checks (test, lint and typecheck), and the work bead notes that setup and
+# build, as the step declares them, passed at that HEAD, a fail of any of them
+# passing only by the work bead's pre-existing mark for it. Every
 # other state, including any internal error in this script, exits non-zero so
 # the loop spawns the next iteration. Fail-closed is deliberate: a false pass
 # hands an unverified diff to the refinery, which is the red handoff this loop
@@ -323,10 +324,25 @@ fi
 HEAD_SHA=$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null) ||
 	fail "could not resolve HEAD in $WORKTREE"
 
-# --- 5. Every recorded check must pass at THIS HEAD --------------------------
+# --- 5. Every recorded check must pass at THIS HEAD, as the step declares it --
 # The iteration ran each check through `gctk rig`. A check the rig declares no
 # command for is recorded as a pass that ran nothing, so each of the three has a
-# record to read. A recorded fail passes only when the work bead's
+# record to read. `--check` reports whatever is recorded at HEAD, whichever run
+# made it, and a run that stops short of a result (exit 4, or a signal) records
+# nothing and leaves the record it found. A run call answers only from the
+# record of the run it declares, the same command line and, for test, the same
+# scope, and a record counts here on the same terms: only when it is the run the
+# step declares. Another run's record, such as one an earlier pour's commands
+# left at this HEAD, says nothing about the declared run, which may have
+# stopped. The declared runs are the commands the pour rendered into the step:
+# gascity stamps each var it rendered non-empty on the root as gc.var.<name>,
+# base_branch among them since the formula defaults it to main, so a root
+# without that stamp carries none to read. The step's heredocs drop a value's
+# trailing newlines, as the command substitution below does. A check the rig
+# declares no command for has no command to match, and the iteration may run
+# the repo's own gate in its place, so any run's record answers for it.
+#
+# A recorded fail passes only when the work bead's
 # rig_check_pre_existing.<check> holds that very record at this HEAD: the
 # iteration found the same failure red on the base and carried by a tracker
 # (rig-check-pre-existing.sh). A run with another command or scope replaces the
@@ -352,6 +368,30 @@ judged() {
 	*) FAILED="$FAILED $1" ;;
 	esac
 }
+# declared <var> : what the pour rendered into the step for {{<var>}}, empty for
+# nothing.
+declared() { printf '%s' "$ROOT_JSON" | jq -r --arg k "gc.var.$1" '.[0].metadata[$k] // "" | tostring'; }
+[ -n "$(declared base_branch)" ] ||
+	fail "root $ROOT carries no gc.var.base_branch, so the commands its pour rendered into the step cannot be read"
+if ! { TEST_RUN=$(declared affected_tests_command) && FULL_RUN=$(declared test_command) &&
+	LINT_RUN=$(declared lint_command) && TYPECHECK_RUN=$(declared typecheck_command) &&
+	SETUP_RUN=$(declared setup_command) && BUILD_RUN=$(declared build_command); }; then
+	fail "could not read the commands root $ROOT's pour rendered into the step"
+fi
+TEST_SCOPE=affected
+[ -n "$TEST_RUN" ] || {
+	TEST_SCOPE=full
+	TEST_RUN=$FULL_RUN
+}
+# another_run <record> <scope> <command> : what the record at HEAD ran, against
+# the run the step declares.
+another_run() {
+	printf '%s' "$1" | jq -r --arg s "$2" --arg c "$3" --arg h "$HEAD_SHA" '
+		def run($s; $c): if $s == "none" then "a pass that ran nothing"
+			else ($c | @json) + (if $s == "" then "" else " (scope " + $s + ")" end) end;
+		"the record at \($h) is of " + run(.scope // ""; .command // "") + ", not of the declared " + run($s; $c) + ", so it answers nothing here"' 2>/dev/null ||
+		printf 'the record at %s is not of the declared run, so it answers nothing here' "$HEAD_SHA"
+}
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
@@ -359,6 +399,11 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 RIG_ERR=$(mktemp "${TMPDIR:-/tmp}/self-review-check.XXXXXX") || fail "could not make a file to read gctk rig's lines into"
 trap 'rm -f "$RIG_ERR"' EXIT
 for CHECK in test lint typecheck; do
+	case "$CHECK" in
+	test) SCOPE=$TEST_SCOPE RUN=$TEST_RUN ;;
+	lint) SCOPE="" RUN=$LINT_RUN ;;
+	*) SCOPE="" RUN=$TYPECHECK_RUN ;;
+	esac
 	# rig's own lines go to stderr, where they say what is recorded, and the
 	# record it found is the one JSON line on stdout. Exit 4 is a read gctk
 	# could not make, which says nothing about the code, so the verdict quotes
@@ -368,24 +413,37 @@ for CHECK in test lint typecheck; do
 	RC=$?
 	cat "$RIG_ERR" >&2
 	case "$RC" in
-	0) ;;
-	1) judged "$CHECK" "$REC" ;;
-	3) UNRECORDED="$UNRECORDED $CHECK" ;;
+	0 | 1) ;;
+	3)
+		UNRECORDED="$UNRECORDED $CHECK"
+		continue
+		;;
 	4) fail "gctk rig $CHECK --check read nothing at $HEAD_SHA: $(head -n 4 "$RIG_ERR" | paste -sd ' ' -)" ;;
 	*) fail "gctk rig $CHECK --check exited $RC in $WORKTREE" ;;
 	esac
+	if [ -n "$RUN" ] && ! printf '%s' "$REC" | jq -e --arg s "$SCOPE" --arg c "$RUN" '(.scope // "") == $s and (.command // "") == $c' >/dev/null 2>&1; then
+		note "$CHECK: $(another_run "$REC" "$SCOPE" "$RUN")"
+		UNRECORDED="$UNRECORDED $CHECK"
+		continue
+	fi
+	[ "$RC" = 0 ] || judged "$CHECK" "$REC"
 done
 
 # --- 6. setup and build must have passed at THIS HEAD ------------------------
 # gctk rig records nothing for them, so the iteration notes on the work bead's
 # self_review_setup_build what they did at the HEAD of the clean tree it ran
 # them in, and the commands they ran: pass, fail, or none for a check the rig
-# declares no command for. A fail holds the loop even when every record above
-# passes, unless a pre-existing mark holds that very note.
+# declares no command for. A note counts only while its commands are the ones
+# the step declares, as a record does above. A fail holds the loop even when
+# every record above passes, unless a pre-existing mark holds that very note.
 NOTE=$(printf '%s' "$ISSUE_JSON" | jq -c --arg c "$HEAD_SHA" '
 	.[0].metadata.self_review_setup_build // empty
 	| (if type == "string" then (fromjson? // empty) else . end)
 	| select(type == "object" and .commit == $c)' 2>/dev/null)
+if [ -n "$NOTE" ] && ! printf '%s' "$NOTE" | jq -e --arg s "$SETUP_RUN" --arg b "$BUILD_RUN" '(.setup_command // "") == $s and (.build_command // "") == $b' >/dev/null 2>&1; then
+	note "setup and build: $(printf '%s' "$NOTE" | jq -r --arg s "$SETUP_RUN" --arg b "$BUILD_RUN" '"the note at \(.commit) is of setup \(.setup_command // "" | @json) and build \(.build_command // "" | @json), not of the declared setup \($s | @json) and build \($b | @json), so it answers nothing here"' 2>/dev/null)"
+	NOTE=""
+fi
 if [ -z "$NOTE" ]; then
 	UNRECORDED="$UNRECORDED setup build"
 else
@@ -403,8 +461,8 @@ fi
 # keeps step text that records nothing and stamps self_review_passed_sha on the
 # work bead once every declared check, setup and build included, has passed.
 # That stamp naming HEAD stands in for the setup and build outcome such a run
-# never notes, and for the records when none of the three is recorded there,
-# so such a run still converges.
+# never notes, and for the records when none of the three declared runs has one
+# there, so such a run still converges.
 if [ -n "$UNRECORDED" ]; then
 	LEGACY_SHA=$(printf '%s' "$ISSUE_JSON" | jq -r '.[0].metadata.self_review_passed_sha // empty')
 	if [ "$LEGACY_SHA" = "$HEAD_SHA" ]; then
@@ -414,7 +472,7 @@ if [ -n "$UNRECORDED" ]; then
 			exit 0
 		fi
 	fi
-	[ -z "$UNRECORDED" ] || incomplete "nothing recorded at $HEAD_SHA for:$UNRECORDED; the checks have not run at this commit, so another iteration is needed"
+	[ -z "$UNRECORDED" ] || incomplete "nothing recorded at $HEAD_SHA for:$UNRECORDED by the runs the step declares, so another iteration is needed"
 fi
 
 note "PASS: self-review green at $HEAD_SHA"
