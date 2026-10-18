@@ -46,17 +46,23 @@
 #       parallel workers (default 8). A sweep re-run into the same --dir keeps
 #       the PRs it already read, so one a tool call's time limit cut short
 #       resumes.
-#   feedback-miner.sh show --dir <work-dir> (--outside | --city) [--limit <n>]
-#       Print posts for the agent to read, newest first: --outside the outside
-#       posts no observation records yet, --city the city's posts in the
-#       standing window.
+#   feedback-miner.sh show --dir <work-dir> (--outside | --city) [--limit <n>] [--max-chars <n>]
+#       Print posts for the agent to read, newest first and each one whole:
+#       --outside the outside posts no observation records yet, --city the
+#       city's posts in the standing window that no earlier call printed whole.
+#       A call prints at most --limit posts (default 25), and stops before the
+#       post that would take its bodies past --max-chars characters (default
+#       16000). A post longer than that is printed in parts, one part a call,
+#       each call going on where the last one stopped.
 #   feedback-miner.sh file --dir <work-dir> [--max-standing <n>]
 #       Read one JSON row per line on stdin and file an observation for each:
 #         {"key": <provenance>, "statement": <text>, "directive": "standing|diff",
 #          "context": <text, optional>, "scope": <obs.scope, optional>}
 #       A row on an outside post files the outside capture. A row on a city post
 #       is a standing-behavior capture and also needs "category" and "norm".
-#       --max-standing caps the standing-behavior captures this run files.
+#       A row on a post that show has not printed whole in this --dir is
+#       refused. --max-standing caps the standing-behavior captures this run
+#       files.
 #   feedback-miner.sh flag --dir <work-dir>
 #       File or refresh one patrol finding naming the flagged posts that no
 #       finding under its key names yet.
@@ -98,7 +104,7 @@ case "$VERB" in
   *) die_usage "first argument must be identity, sweep, show, file, flag or summary" ;;
 esac
 
-CHECKOUT=""; DAYS=""; BACKFILL=""; DIR=""; JOBS=8; WHICH=""; LIMIT=25; MAX_STANDING=""
+CHECKOUT=""; DAYS=""; BACKFILL=""; DIR=""; JOBS=8; WHICH=""; LIMIT=25; MAX_CHARS=16000; MAX_STANDING=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --checkout)      [ $# -ge 2 ] || die_usage "--checkout needs a value"; CHECKOUT="$2"; shift 2 ;;
@@ -109,6 +115,7 @@ while [ $# -gt 0 ]; do
     --outside)       WHICH=outside; shift ;;
     --city)          WHICH=city; shift ;;
     --limit)         [ $# -ge 2 ] || die_usage "--limit needs a value"; LIMIT="$2"; shift 2 ;;
+    --max-chars)     [ $# -ge 2 ] || die_usage "--max-chars needs a value"; MAX_CHARS="$2"; shift 2 ;;
     --max-standing)  [ $# -ge 2 ] || die_usage "--max-standing needs a value"; MAX_STANDING="$2"; shift 2 ;;
     --) shift; break ;;
     -*) die_usage "unknown argument '$1'" ;;
@@ -351,26 +358,57 @@ if [ "$VERB" = sweep ]; then
 fi
 
 [ -f "$DIR/sweep.jsonl" ] && [ -f "$DIR/meta.json" ] || { err "$DIR holds no sweep; run sweep first"; exit 1; }
-touch "$DIR/filed.tsv"
+touch "$DIR/filed.tsv" "$DIR/shown.tsv"
+
+# How far show has printed each post: shown.tsv holds one line per post a call
+# printed, its key and the characters printed through, and a post's last line
+# is where it stands.
+SHOWN_POS='reduce ($shown | split("\n") | map(select(length > 0) | split("\t")))[] as $s
+             ({}; .[$s[0]] = ($s[1] | tonumber))'
 
 # --- show ------------------------------------------------------------------------
+# The agent condenses or judges a post from what show prints, so show prints
+# every post whole. The bodies of one call stay under --max-chars, so its output
+# comes back whole from a tool call, and a post longer than that is printed in
+# parts across calls. An outside post stays on offer until it is recorded, and a
+# city post until a call has printed it whole.
 if [ "$VERB" = show ]; then
   [ -n "$WHICH" ] || die_usage "show needs --outside or --city"
   is_count "$LIMIT" && [ "$LIMIT" -gt 0 ] || die_usage "--limit must be a positive integer"
-  jq -rs --arg which "$WHICH" --argjson limit "$LIMIT" --rawfile filed "$DIR/filed.tsv" '
+  is_count "$MAX_CHARS" && [ "$MAX_CHARS" -gt 0 ] || die_usage "--max-chars must be a positive integer"
+  PLAN="$DIR/plan.$$.json"
+  jq -s --arg which "$WHICH" --argjson limit "$LIMIT" --argjson budget "$MAX_CHARS" \
+        --rawfile filed "$DIR/filed.tsv" --rawfile shown "$DIR/shown.tsv" '
     ($filed | split("\n") | map(select(length > 0) | split("\t")[0])) as $done
+    | ('"$SHOWN_POS"') as $pos
+    | map(. + {len: (.body | length), through: ($pos[.key] // 0)})
     | (if $which == "outside"
        then map(select(.class == "outside" and (.captured | not) and (.key as $k | ($done | index([$k])) == null)))
-       else map(select(.class == "city" and .in_window)) end) as $set
-    | ($set | sort_by(.at) | reverse) as $sorted
-    | "== \([$limit, ($sorted | length)] | min) of \($sorted | length) \(if $which == "outside" then "outside post(s) not yet recorded" else "city post(s) in the standing window" end) ==",
-      ($sorted[0:$limit][]
-       | "--- \(.key)",
-         "by \(.login), \(.at), \(.url)",
-         "PR #\(.pr) \"\(.title)\": \(if .stream == "inline" then "inline on \(.path // "?")\(if .line then ":\(.line)" else "" end)\(if .reply_to then ", in reply to comment \(.reply_to)" else "" end)" elif .stream == "review" then "review body (\(.review_state // "?"))" else "conversation comment" end)\(if .flag then " [FLAGGED: unmarked]" else "" end)",
-         (.recorded[]? | "already recorded on this post: \(.id) (\(.category)) \(.title)"),
-         (.body | if length > 2000 then .[0:2000] + " …[cut]" else . end),
-         "")' "$DIR/sweep.jsonl"
+       else map(select(.class == "city" and .in_window and .through < .len)) end)
+    | map(. + {from: (if .through < .len then .through else 0 end)})
+    | (sort_by(.at) | reverse) as $set
+    | reduce $set[] as $p ({used: 0, out: [], full: false};
+        if .full or (.out | length) >= $limit then .full = true
+        elif .used + ($p.len - $p.from) <= $budget then .out += [$p + {to: $p.len}] | .used += ($p.len - $p.from)
+        elif .used == 0 then .out += [$p + {to: ($p.from + $budget)}] | .used = $budget | .full = true
+        else .full = true end)
+    | {total: ($set | length), out}' "$DIR/sweep.jsonl" > "$PLAN" \
+    || { err "could not read the sweep in $DIR"; rm -f "$PLAN"; exit 1; }
+  jq -r --arg which "$WHICH" '
+    "== \(.out | length) of \(.total) \(if $which == "outside" then "outside post(s) not yet recorded" else "city post(s) in the standing window not yet shown whole" end) ==",
+    (.out[]
+     | "--- \(.key)",
+       "by \(.login), \(.at), \(.url)",
+       "PR #\(.pr) \"\(.title)\": \(if .stream == "inline" then "inline on \(.path // "?")\(if .line then ":\(.line)" else "" end)\(if .reply_to then ", in reply to comment \(.reply_to)" else "" end)" elif .stream == "review" then "review body (\(.review_state // "?"))" else "conversation comment" end)\(if .flag then " [FLAGGED: unmarked]" else "" end)",
+       (.recorded[]? | "already recorded on this post: \(.id) (\(.category)) \(.title)"),
+       (if .from == 0 and .to == .len then .body
+        else "[characters \(.from + 1) to \(.to) of \(.len)\(if .to < .len then "; the rest comes in the next show call, and this post is filed only after its last part" else ", its last part" end)]",
+             .body[.from:.to] end),
+       ""),
+    (if .total > (.out | length) then "== \(.total - (.out | length)) more after these: run show again ==" else empty end)' "$PLAN" \
+    && jq -r '.out[] | "\(.key)\t\(.to)"' "$PLAN" >> "$DIR/shown.tsv" \
+    || { err "could not print the posts, or record what was printed"; rm -f "$PLAN"; exit 1; }
+  rm -f "$PLAN"
   exit 0
 fi
 
@@ -397,7 +435,7 @@ if [ "$VERB" = file ]; then
   ACTIONS="$DIR/actions.$$.jsonl"
   jq -c -n --slurpfile rows "$ROWS" --slurpfile obs "$DIR/obs.now.json" \
         --arg slug "$SLUG" --arg scope "$DEFAULT_SCOPE" --arg oc "$OUTSIDE_CATEGORY" --argjson qmax "$QUOTE_MAX" \
-        --slurpfile items "$DIR/sweep.jsonl" '
+        --slurpfile items "$DIR/sweep.jsonl" --rawfile shown "$DIR/shown.tsv" '
     def trim: tostring | gsub("^\\s+|\\s+$"; "");
     def one_line($n): trim | gsub("\\s+"; " ") | if length > $n then (.[0:$n] | sub(" [^ ]*$"; "")) + " …" else . end;
     def quote: (.body | trim) as $b
@@ -408,6 +446,7 @@ if [ "$VERB" = file ]; then
         elif .stream == "review" then "the body of a review (\(.review_state // "?" | ascii_downcase | gsub("_"; " ")))"
         else "a conversation comment" end;
     ($items | map({key: .key, value: .}) | from_entries) as $byKey
+    | ('"$SHOWN_POS"') as $pos
     | ($obs[0] // {}) as $recorded
     | $rows | to_entries[] | .key as $i | .value as $r
     | ($r.key // "" | tostring) as $k
@@ -422,6 +461,9 @@ if [ "$VERB" = file ]; then
         | if $kind == "standing" and ($cat == "" or $cat == $oc) then {i: $i, key: $k, act: "error", why: "a city post needs its own category, other than \($oc)"}
           elif $kind == "standing" and (($r.norm // "" | trim) == "") then {i: $i, key: $k, act: "error", why: "a city post needs a proposed norm"}
           elif any(($recorded[$k] // [])[]; .category == $cat) then {i: $i, key: $k, act: "skip", why: "already recorded under \($cat)"}
+          elif ($pos[$k] // 0) < ($it.body | length) then {i: $i, key: $k, act: "error",
+            why: (if ($pos[$k] // 0) == 0 then "show has not printed this post in this run; read it with show, then file it"
+                  else "show has printed this post only through character \($pos[$k]) of \($it.body | length); run show for the rest, then file it" end)}
           else
             ($r.statement | trim) as $st
             | ($r.context // "" | trim) as $cx

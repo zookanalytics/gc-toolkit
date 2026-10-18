@@ -509,12 +509,72 @@ echo "── summary ──"
 fresh_dir e
 echo '[]' > "$STORE/obs.json"
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
+"$SUT" show --dir "$W" --outside >/dev/null
 "$SUT" file --dir "$W" >/dev/null 2>&1 <<ROWS_EOF
 {"key": "$(key 11 comment 201)", "statement": "The loop never ends on empty input."}
 ROWS_EOF
 OUT=$("$SUT" summary --dir "$W")
 has "$OUT" "outside window 3 day(s)" "(89) with no back-fill window the first run reads the normal window"
 has "$OUT" "outside posts: 8 read, 0 recorded before this run, 1 filed now, 7 left unrecorded" "(90) the summary counts the outside capture"
+
+echo "── show prints every post whole, and a long one in parts ──"
+# PR 15 joins the fixture for this section: a review whose point sits past
+# character 2,000, and a conversation comment longer than one call's budget.
+cp "$FIX/prs.ours.json" "$FIX/prs.ours.keep"
+jq --arg r "$(ago_h 1)" '. + [{number: 15, title: "A long review", closedAt: $r, mergedAt: $r, updatedAt: $r}]' \
+  "$FIX/prs.ours.keep" > "$FIX/prs.ours.json"
+TAIL_REVIEW="$(printf 'A sentence that fills the long review out. %.0s' $(seq 1 60))TAIL_FINDING: the retry loop never backs off."
+HUGE="$(printf 'Paragraph %05d of the huge comment, padded out to sixty characters.\n' $(seq 1 600))LAST_POINT: drop the cache."
+review 501 johnzook User COMMENTED "$TAIL_REVIEW" "$(ago_h 1)" | jq -s . > "$FIX/15.reviews.json"
+echo '[]' > "$FIX/15.inline.json"
+issue 502 johnzook User "$HUGE" "$(ago 0)" 15 | jq -s . > "$FIX/15.issue.json"
+slice() { jq -rn --arg s "$1" --argjson a "$2" --argjson b "$3" '$s[$a:$b]'; }
+HUGE_LEN=$(jq -rn --arg s "$HUGE" '$s | length')
+fresh_dir l
+echo '[]' > "$STORE/obs.json"
+"$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
+OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
+{"key": "$(key 15 review 501)", "statement": "Filed unread."}
+ROWS_EOF
+)
+has "$OUT" "show has not printed this post in this run" "(91) file refuses a row on a post show never printed"
+OUT1=$("$SUT" show --dir "$W" --outside)
+has "$OUT1" "== 1 of 10 outside post(s) not yet recorded ==" "(92) a post longer than the budget is printed alone"
+has "$OUT1" "[characters 1 to 16000 of $HUGE_LEN; the rest comes in the next show call" "(93) its first part is labelled with the characters it holds"
+has "$OUT1" "$(slice "$HUGE" 0 16000)" "(94) and holds the first 16,000 characters"
+OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
+{"key": "$(key 15 comment 502)", "statement": "Half read."}
+ROWS_EOF
+)
+has "$OUT" "show has printed this post only through character 16000 of $HUGE_LEN" "(95) file refuses a row on a post shown only in part"
+OUT2=$("$SUT" show --dir "$W" --outside)
+has "$OUT2" "--- $(key 15 comment 502)" "(96) the next call continues the unfinished post first"
+has "$OUT2" "$(slice "$HUGE" 16000 32000)" "(97) with the next 16,000 characters"
+OUT3=$("$SUT" show --dir "$W" --outside)
+has "$OUT3" "[characters 32001 to $HUGE_LEN of $HUGE_LEN, its last part]" "(98) the last part is labelled as last"
+has "$OUT3" "$(slice "$HUGE" 32000 "$HUGE_LEN")" "(99) and holds the rest, LAST_POINT included, so no character is lost between parts"
+has "$OUT3" "TAIL_FINDING: the retry loop never backs off." "(100) a post past the old 2,000-character cut is printed to its end"
+OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
+{"key": "$(key 15 comment 502)", "statement": "Asks to drop the cache, after a long walk through the paragraphs."}
+{"key": "$(key 15 review 501)", "statement": "The retry loop never backs off."}
+ROWS_EOF
+); RC=$?
+eq "$RC" "0" "(101) once each post was printed to its end, its row files"
+has "$OUT" "filed 2, skipped 0" "(102) both rows file"
+# The city's posts: each call prints what no earlier call printed whole.
+SEEN=""; CALLS=0
+while [ "$CALLS" -lt 10 ]; do
+  OUT=$("$SUT" show --dir "$W" --city --max-chars 70)
+  CALLS=$((CALLS + 1))
+  case "$OUT" in "== 0 of 0 "*) break ;; esac
+  SEEN="$SEEN$(printf '%s\n' "$OUT" | sed -n 's/^--- //p')"$'\n'
+done
+eq "$(printf '%s' "$SEEN" | grep -c .)" "4" "(103) the --city calls print each of the window's 4 city posts"
+eq "$(printf '%s' "$SEEN" | grep . | sort | uniq -d | grep -c . || true)" "0" "(104) and none of them twice"
+[ "$CALLS" -gt 2 ]; eq "$?" "0" "(105) a call stops before the post that would take it past --max-chars"
+"$SUT" show --dir "$W" --outside --max-chars 0 >/dev/null 2>&1; eq "$?" "2" "(106) --max-chars must be a positive integer"
+mv "$FIX/prs.ours.keep" "$FIX/prs.ours.json"
+rm -f "$FIX/15.reviews.json" "$FIX/15.inline.json" "$FIX/15.issue.json"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

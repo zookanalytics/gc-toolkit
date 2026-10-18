@@ -192,14 +192,21 @@ MINER_DIR="<the directory §1 printed>"
 ROWS_EOF
 ```
 
-Each row's **`statement`** condenses what the post says into one or two
-sentences of your own: what the reviewer said, not which kind of miss it is and
-not how to fix it. A short reply ("same as above") is condensed with what it
-refers to. **`directive`** is `standing` ONLY when the post itself states
-universal intent ("never do this again", "change all occurrences", "stop doing
-X everywhere"); everything phrased about this change is `diff`, and so is
-anything unsure. An optional **`context`** says what the diff was doing when
-the statement needs it; the PR, file and line are added for you.
+Show prints each post whole. A post longer than one call's budget comes in
+parts, one a call, each labelled with the characters it holds, and file refuses
+the post's row until its last part has been shown.
+
+Each row's **`statement`** condenses what the post says, in your own words:
+what the reviewer said, not which kind of miss it is and not how to fix it. It
+covers every point the post makes, the late ones in a long review too, because
+the observation quotes only the post's first 1,500 characters and links the
+rest. A post with one point takes a sentence or two. A short reply ("same as
+above") is condensed with what it refers to. **`directive`** is `standing`
+ONLY when the post itself states universal intent ("never do this again",
+"change all occurrences", "stop doing X everywhere"); everything phrased about
+this change is `diff`, and so is anything unsure. An optional **`context`**
+says what the diff was doing when the statement needs it; the PR, file and
+line are added for you.
 
 Show and file in turns until show reports none left. Every outside post gets
 its observation, the brief ones too, and so does a post an earlier observation
@@ -214,12 +221,16 @@ FM=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-to
   [ -x "$c/assets/scripts/feedback-miner.sh" ] && { FM="$c/assets/scripts/feedback-miner.sh"; break; }
 done
 MINER_DIR="<the directory §1 printed>"
-"${FM:?feedback-miner.sh not found in the pack}" show --dir "$MINER_DIR" --city --limit 1000
+"${FM:?feedback-miner.sh not found in the pack}" show --dir "$MINER_DIR" --city
 # Then, in the next call, the rows for the candidates:
 "${FM:?feedback-miner.sh not found in the pack}" file --dir "$MINER_DIR" --max-standing {{max_obs_per_run}} <<'ROWS_EOF'
 {"key": "<the key after --- >", "statement": "<the generalizable point>", "category": "<slug>", "norm": "<draft rule text>", "directive": "diff"}
 ROWS_EOF
 ```
+
+Show and judge in turns until show reports none left. Each call prints, whole,
+the city's posts in the window that no earlier call printed whole, a long one
+in parts as in §2, so a post's row files only once its last part is shown.
 
 For each post, ask: is this **corrective feedback of a generalizable kind
 about how the work was done** — would it apply to future changes, not just
