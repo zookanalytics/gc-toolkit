@@ -1211,8 +1211,8 @@ typecheck record their result against HEAD through `gctk rig`, and
 rig declares no command for records a pass that ran nothing. setup and build
 record nothing, so on a clean tree the block notes their outcome at HEAD on the
 work bead (`self_review_setup_build`). A run already recorded at HEAD answers
-from its record. The test run is the affected subset when the rig declares one,
-else the full suite.
+from its record, and for a declared command no other run's record counts. The
+test run is the affected subset when the rig declares one, else the full suite.
 The long calls go through `hb`, the claim-lease keepalive
 (`assets/scripts/lease-heartbeat.sh`): it refreshes `$CLAIMED_ITER_BEAD` while a
 call runs, so a suite that outlives the five-minute lease does not read as a
@@ -1301,9 +1301,10 @@ the exit condition hands the work bead back itself
 (`aborted_at=self-review-exhausted`), because nothing runs after the budget is
 spent.
 
-**Exit criteria (for the loop, not for you):** the records of test, lint and
-typecheck and the note of setup and build at HEAD pass, or name a failure the
-work bead marks pre-existing at that HEAD, and this iteration bead is closed.
+**Exit criteria (for the loop, not for you):** the records of the test, lint and
+typecheck runs above and the note of setup and build at HEAD pass, or name a
+failure the work bead marks pre-existing at that HEAD, and this iteration bead
+is closed.
 Any iteration that leaves the tree closer to that has done its job."""
 
 [steps.check]

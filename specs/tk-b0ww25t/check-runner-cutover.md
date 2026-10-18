@@ -1,6 +1,6 @@
 ---
 name: Every check-runner cut over to gctk rig, as built
-description: What cutting the rig-check call sites over to `gctk rig` and retiring `self_review_passed_sha` settled beyond the bead. Covers why the self-review exit condition reads three records and a note of setup and build, why setup and build put back what they leave in a clean checkout, the pre-existing mark that stands in for the disposition field the gate dropped and holds the record it judged, the transitional read of the retired stamp, how each caller finds the binary, and the refinery's exit-4 and time bounds.
+description: What cutting the rig-check call sites over to `gctk rig` and retiring `self_review_passed_sha` settled beyond the bead. Covers why the self-review exit condition reads three records and a note of setup and build, and counts each only when it is of the run the step declares, why setup and build put back what they leave in a clean checkout, the pre-existing mark that stands in for the disposition field the gate dropped and holds the record it judged, the transitional read of the retired stamp, how each caller finds the binary, and the refinery's exit-4 and time bounds.
 ---
 
 # Every check-runner cut over to `gctk rig`, as built
@@ -50,6 +50,25 @@ block. A note an earlier iteration wrote at the same HEAD still answers, as a
 record there does. A setup or build failure red on the base too is marked like
 any other check (below), so the loop does not exhaust on a failure the diff
 did not cause, which main's stamp let an agent step past.
+
+A record or note counts only when it is of the run the step declares. `--check`
+reports whatever is recorded at HEAD, whichever run made it, while a run call
+answers only from a record of the same command and, for test, the same scope.
+A declared run that stops short of a result, at exit 4 or by a signal, records
+nothing and leaves the record it found, so the correctness review of c57610d14
+showed a lint command killed by a signal converging on an older pass of
+another command at the same HEAD, and a changed rig command between pours does
+the same. The condition reads the declared commands from the `gc.var.<name>`
+stamps gascity writes on the molecule root, one for each var the pour rendered
+non-empty, from the values the step's block runs. A record counts only when its
+command and scope are those, and the note only when its setup and build
+commands are. A check the rig declares no command for has no command to match,
+and the step invites the repo's own gate in its place, so any run's record
+answers for it. A root with no `gc.var.base_branch`, a var the formula
+defaults to main, is read as carrying no stamps, and fails the condition
+closed. The block's exit statuses stay unread: a run that stops leaves no
+record of itself, so what can stand for it at HEAD is only a record of the
+same run made earlier, the one a later call answers from without running.
 
 A `--check` that exits 4 read nothing about the code: the record store was
 unreadable, or gctk's status counts a change that the plain status of the
@@ -138,10 +157,11 @@ A run poured before the cutover stamps `self_review_passed_sha` and records
 nothing, so the new condition alone would read nothing at HEAD on every
 iteration and exhaust the run's budget. Seven molecules were in self-review or
 before it when this was built. So `self-review-check.sh` takes the stamp, when
-it names the live HEAD, in place of records only when nothing at all is
-recorded there. Such a run notes no setup and build either, and its stamp
+it names the live HEAD, in place of records only when no run its step declares
+is recorded there. Such a run notes no setup and build either, and its stamp
 certified them, so the stamp naming HEAD stands in for that note too, also
-where another run's records answer at the same HEAD. No pour writes the stamp
+where records of its declared runs, which only another session can have
+written, stand at the same HEAD. No pour writes the stamp
 after the cutover, so the fallback answers for those runs alone. tk-57ormgo
 removes it once a census finds none of them left in self-review. Until then
 the key has one reader and no writer in the pack, and the registry marks it
@@ -187,10 +207,10 @@ them through.
 
 Measured with PR #1217's renderer (formula defaults only, so an empty rig var
 renders empty), before and after: `mol-polecat-work.self-review` 7,356 to
-9,569, `preflight-tests` 11,377 to 12,338, `workspace-setup` 26,275 to 26,661;
+9,641, `preflight-tests` 11,377 to 12,338, `workspace-setup` 26,275 to 26,661;
 `mol-refinery-patrol.run-tests` 11,283 to 13,349 and `handle-failures` 9,601 to
 11,171. Each step that grew carries a heredoc per command it hands the gate and
 the gate's exit handling, the self-review and handle-failures carry the
 pre-existing mark, and the self-review notes setup and build. The self-review
 stays under the 10,000-character hook cap with gc-toolkit's own commands
-rendered in, at 9,750; handle-failures crosses it.
+rendered in, at 9,816; handle-failures crosses it.
