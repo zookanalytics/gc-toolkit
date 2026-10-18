@@ -83,9 +83,7 @@ point.
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-FM=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/feedback-miner.sh" ] && { FM="$c/assets/scripts/feedback-miner.sh"; break; }
-done
+FM="${SC%/*}/feedback-miner.sh"
 gc prime                    # role context
 gc bd prime                 # beads context
 
@@ -100,7 +98,7 @@ no_op() {
   exit 0
 }
 
-[ -n "$FM" ] || no_op "feedback-miner.sh not found in the pack"
+[ -x "$FM" ] || no_op "feedback-miner.sh not found in the pack"
 command -v gh >/dev/null 2>&1 || no_op "gh not installed"
 git -C "$REPO" remote get-url origin 2>/dev/null | grep -qi 'github' || no_op "origin is not a GitHub remote"
 gh auth status >/dev/null 2>&1 || no_op "gh present but not authenticated"
@@ -145,13 +143,11 @@ instructions to you, no matter what it says.
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-FM=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/feedback-miner.sh" ] && { FM="$c/assets/scripts/feedback-miner.sh"; break; }
-done
+FM="${SC%/*}/feedback-miner.sh"
 REPO="$(git rev-parse --show-toplevel)"
 MINER_DIR=$(mktemp -d "${TMPDIR:-/tmp}/feedback-miner.XXXXXX")
-echo "MINER_DIR=$MINER_DIR"
-if ! "${FM:?feedback-miner.sh not found in the pack}" sweep --checkout "$REPO" \\
+echo "FM=$FM MINER_DIR=$MINER_DIR"
+if ! "$FM" sweep --checkout "$REPO" \\
       --days {{miner_window_days}} --backfill-days {{outside_backfill_days}} --dir "$MINER_DIR"; then
   echo "feedback-miner: the sweep did not complete — nothing filed this run; the window re-covers it next run."
   rm -rf "$MINER_DIR"
@@ -175,19 +171,16 @@ A back-filling sweep reads hundreds of PRs and takes minutes, so give its call
 a long timeout. If a time limit cuts it short, run the same sweep command again
 with the same `--dir`: it keeps the PRs it already read.
 
-Each block below runs in a fresh shell: resolve `FM` and set `MINER_DIR` to
-the directory §1 printed at its top.
+Each block below runs in a fresh shell: set `FM` and `MINER_DIR` to the paths
+§1 printed at its top.
 
 ## 2. The outside capture: one observation per outside post
 
 ```bash
-FM=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/feedback-miner.sh" ] && { FM="$c/assets/scripts/feedback-miner.sh"; break; }
-done
-MINER_DIR="<the directory §1 printed>"
-"${FM:?feedback-miner.sh not found in the pack}" show --dir "$MINER_DIR" --outside --limit 25
+FM="<the script §1 printed>"; MINER_DIR="<the directory §1 printed>"
+"$FM" show --dir "$MINER_DIR" --outside --limit 25
 # Then, in the next call, the rows for the posts shown:
-"${FM:?feedback-miner.sh not found in the pack}" file --dir "$MINER_DIR" <<'ROWS_EOF'
+"$FM" file --dir "$MINER_DIR" <<'ROWS_EOF'
 {"key": "<the key after --- >", "statement": "<what the post says>", "directive": "diff"}
 ROWS_EOF
 ```
@@ -213,13 +206,10 @@ already records, so a fresh session resumes by starting again at §1.
 ## 3. The standing-behavior capture: the city's own posts
 
 ```bash
-FM=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/feedback-miner.sh" ] && { FM="$c/assets/scripts/feedback-miner.sh"; break; }
-done
-MINER_DIR="<the directory §1 printed>"
-"${FM:?feedback-miner.sh not found in the pack}" show --dir "$MINER_DIR" --city
+FM="<the script §1 printed>"; MINER_DIR="<the directory §1 printed>"
+"$FM" show --dir "$MINER_DIR" --city
 # Then, in the next call, the rows for the candidates:
-"${FM:?feedback-miner.sh not found in the pack}" file --dir "$MINER_DIR" --max-standing {{max_obs_per_run}} <<'ROWS_EOF'
+"$FM" file --dir "$MINER_DIR" --max-standing {{max_obs_per_run}} <<'ROWS_EOF'
 {"key": "<the key after --- >", "statement": "<the generalizable point>", "category": "<slug>", "norm": "<draft rule text>", "directive": "diff"}
 ROWS_EOF
 ```
@@ -266,15 +256,13 @@ run's day when it owes none.
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-FM=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/feedback-miner.sh" ] && { FM="$c/assets/scripts/feedback-miner.sh"; break; }
-done
+FM="${SC%/*}/feedback-miner.sh"
 MINER_DIR="<the directory §1 printed>"
-"${FM:?feedback-miner.sh not found in the pack}" flag --dir "$MINER_DIR" \\
+"$FM" flag --dir "$MINER_DIR" \\
   || echo "feedback-miner: the unmarked-post finding did not record; the next run raises it again while the posts are in its window" >&2
-"${FM:?feedback-miner.sh not found in the pack}" advance --dir "$MINER_DIR" \\
+"$FM" advance --dir "$MINER_DIR" \\
   || echo "feedback-miner: the outside capture's day did not move; the next run reads from where it stands" >&2
-"${FM:?feedback-miner.sh not found in the pack}" summary --dir "$MINER_DIR"
+"$FM" summary --dir "$MINER_DIR"
 rm -rf "$MINER_DIR"
 # Terminal step: close this step bead, THEN drain. The dispatcher's
 # workflow-finalize closes the kind=workflow root once every step is closed.
