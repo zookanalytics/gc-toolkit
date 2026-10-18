@@ -9,8 +9,8 @@ review-quorum.lane.v1 durable schema), wired to this rig's signoff seam.
 Attached at dispatch to a review bead exactly as mol-review is
 (gc sling <pool> <review-bead> --on mol-review-quorum-signoff), and reads the
 same dispatch metadata: task_kind=review, check_name (the check the verdict
-satisfies), anchor_bead, review_branch / review_base pre-open or
-pr_url / pr_number post-open, and the dispatch-pinned reviewed_oid.
+satisfies), anchor_bead, review_branch / review_base, plus review_pr_url /
+review_pr_number post-open, and the dispatch-pinned reviewed_oid.
 
 The mol-review hard contract is preserved intact: ONE verdict per claim — the
 synthesis makes the single signoff.sh call and the lanes never call it; the
@@ -84,9 +84,10 @@ bead other than writing your own durable output onto this step bead.
 **1. Derive the review bead and pin what you are reviewing.** The review bead
 is the single tracked member of the input convoy; read it exactly as
 `formulas/mol-review.toml`'s `load-dispatch` step does — discriminate pre-open
-(`review_branch`/`review_base`) from post-open (`pr_number`/`pr_url`, pin the
-repo from `pr_url`), and pin the commit from `reviewed_oid`. Use `{{base_ref}}`
-as the diff baseline when `review_base` is absent; never fall back to main.
+(`review_branch`/`review_base`) from post-open
+(`review_pr_number`/`review_pr_url`, pin the repo from `review_pr_url`), and
+pin the commit from `reviewed_oid`. Use `{{base_ref}}` as the diff baseline
+when `review_base` is absent; never fall back to main.
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
@@ -150,9 +151,10 @@ bead other than writing your own durable output onto this step bead.
 **1. Derive the review bead and pin what you are reviewing.** The review bead
 is the single tracked member of the input convoy; read it exactly as
 `formulas/mol-review.toml`'s `load-dispatch` step does — discriminate pre-open
-(`review_branch`/`review_base`) from post-open (`pr_number`/`pr_url`, pin the
-repo from `pr_url`), and pin the commit from `reviewed_oid`. Use `{{base_ref}}`
-as the diff baseline when `review_base` is absent; never fall back to main.
+(`review_branch`/`review_base`) from post-open
+(`review_pr_number`/`review_pr_url`, pin the repo from `review_pr_url`), and
+pin the commit from `reviewed_oid`. Use `{{base_ref}}` as the diff baseline
+when `review_base` is absent; never fall back to main.
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
