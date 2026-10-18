@@ -145,7 +145,7 @@ hasF "$TMP/triage.skill" 'only a triage verdict may add one' "(METHOD) …and th
 hasF "$TMP/triage.skill" 'Adding nothing is the expected common case' "(METHOD) …and the common no-op case"
 hasF "$TMP/triage.skill" '--reopen correctness --round-reason "<why>" [--dismiss-approval]' "(METHOD) …and the bring-current round ruling it carries on the same call"
 hasF "$TMP/triage.skill" '(`--reopen none`)' "(METHOD) …which may reopen nothing"
-hasF "$TMP/triage.skill" 'bring-current-audit.sh render --anchor "$ANCHOR" --as comment' "(METHOD) …and where the round's account is read"
+hasF "$TMP/triage.skill" '"$(gc <binding> scripts-dir)/bring-current-audit.sh" render --anchor "$ANCHOR" --as comment' "(METHOD) …and where the round's account is read, through the pack's own copy"
 hasF "$TMP/triage.skill" 'The raw record keeps what that line leaves out' "(METHOD) …and its raw record, which keeps what a routine entry's line leaves out"
 hasF "$TMP/triage.skill" "a call that is the operator's to make" "(METHOD) …and lifts the approval only for a call that is the operator's"
 notF "$TMP/triage.skill" 'whether the human approval still covers it' "(METHOD) …not whenever the approval predates the round"
