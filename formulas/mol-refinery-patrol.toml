@@ -789,55 +789,33 @@ if ! branch_has_real_change "origin/$TARGET" "$PREP_SHA"; then
 fi
 ```
 
-**If MERGE_STRATEGY = "direct":** merge in a throwaway detached worktree
-(the real target branch may be checked out in the rig's canonical
-worktree), push, verify the remote ref, then record + close through ONE
-lifecycle call. The call is handed the `RIG_ROOT` this block resolved as
-`GC_RIG_ROOT`: the writer checks the landing in that checkout, and the lookup
-reads the roster when the session carries no `GC_RIG_ROOT` of its own. A push
-rejected for branch protection (GH006/GH013/
-"protected branch"/"Changes must be made through a pull request"/"approving
-review"/"Cannot update this protected ref") auto-promotes the bead to
-`merge_strategy=pr` and falls through to the mr block — the prep worktree is
-untouched and still holds the prepared head for the PR push. Any other push
-failure stops the wisp.
+**If MERGE_STRATEGY = "direct":** `direct-merge-push.sh` lands the prepared
+head on `$TARGET` as a fast-forward pushed by its commit id, so nothing is
+checked out for the merge and nothing is left to remove. It verifies the remote
+ref, then records and closes the bead through ONE lifecycle call, handed the
+rig root as `GC_RIG_ROOT`: the writer checks the landing in that checkout. Exit
+3 means a push rejected for branch protection (GH006/GH013/"protected
+branch"/"Changes must be made through a pull request"/"approving
+review"/"Cannot update this protected ref") promoted the bead to
+`merge_strategy=pr`, and the block falls through to the mr block — the prep
+worktree is untouched and still holds the prepared head for the PR push. Any
+other non-zero exit stops the wisp, and the block leaves the work with the
+refinery; the script's output says what landed, if anything. A prepared head
+that origin/$TARGET moved past while the gate ran lands nothing, and the next
+patrol prepares the branch again.
 ```bash
 # >>> direct-merge-push
-set -e
-RIG_ROOT="${GC_RIG_ROOT:-}"
-[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
-PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
-MERGE_PARENT=$(mktemp -d "${TMPDIR:-/tmp}/gascity-refinery-merge.XXXXXX")
-MERGE_WT="$MERGE_PARENT/target"
-# $PUSH_ERR is allocated further down but torn down here: every arm that reads
-# it exits without reaching a removal of its own.
-PUSH_ERR=""
-merge_scratch_rm() { git -C "$RIG_ROOT" worktree remove --force "$MERGE_WT" >/dev/null 2>&1 || true; rm -rf "$MERGE_PARENT"; [ -n "$PUSH_ERR" ] && rm -f "$PUSH_ERR"; return 0; }
-trap merge_scratch_rm EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-git -C "$RIG_ROOT" fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
-TEMP_SHA=$(git -C "$PREP_WT" rev-parse HEAD)
-git -C "$RIG_ROOT" worktree add --detach "$MERGE_WT" "origin/$TARGET"
-git -C "$MERGE_WT" merge --ff-only "$TEMP_SHA"
-MERGED_SHA=$(git -C "$MERGE_WT" rev-parse HEAD)
-PUSH_ERR=$(mktemp "${TMPDIR:-/tmp}/gctk-refinery-patrol.XXXXXX")
-if git -C "$MERGE_WT" push origin "HEAD:$TARGET" 2>"$PUSH_ERR"; then
-  git -C "$RIG_ROOT" fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
-  REMOTE=$(git -C "$RIG_ROOT" rev-parse "origin/$TARGET")
-  if [ "$MERGED_SHA" != "$REMOTE" ]; then
-    echo "PUSH FAILED — origin/$TARGET is $REMOTE, want $MERGED_SHA. STOP; do not mutate bead state."
-    gc runtime drain-ack; exit 1
-  fi
-  GC_RIG_ROOT="$RIG_ROOT" "$LC" transition "$WORK" --to merged --close --set merged_sha="$MERGED_SHA" --set merged_target="$TARGET" --unset rejection_reason --append-notes "Merged to $TARGET at $(git -C "$MERGE_WT" rev-parse --short HEAD)"
-else
-  case "$(cat "$PUSH_ERR")" in
-    *GH006*|*GH013*|*"protected branch"*|*"refusing to allow"*|*"Changes must be made through a pull request"*|*"approving review"*|*"Cannot update this protected ref"*)
-      echo "Direct push to '$TARGET' rejected (protected branch). Auto-promoting to merge_strategy=pr."
-      gc bd update "$WORK" --set-metadata merge_strategy=pr
-      MERGE_STRATEGY=mr ;;
-    *) echo "Push failed: $(cat "$PUSH_ERR"). STOP. Debug and retry; do NOT continue."; gc runtime drain-ack; exit 1 ;;
-  esac
-fi
+DMP=""
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/direct-merge-push.sh" ] && { DMP="$c/assets/scripts/direct-merge-push.sh"; break; }
+done
+[ -n "$DMP" ] || { echo "direct-merge-push.sh not found; NOT landing $WORK, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+"$DMP" --work "$WORK" --target "$TARGET"; DIRECT_RC=$?
+case "$DIRECT_RC" in
+  0) ;;
+  3) MERGE_STRATEGY=mr ;;
+  *) echo "direct-merge-push.sh exited $DIRECT_RC; leaving the work with the refinery"; gc runtime drain-ack; exit 1 ;;
+esac
 # <<< direct-merge-push
 ```
 After a successful direct merge: tear down the prep worktree (`git -C

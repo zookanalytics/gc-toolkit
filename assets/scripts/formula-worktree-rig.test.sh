@@ -282,7 +282,7 @@ eq "$(git -C "$D/rig" rev-parse origin/main)" "$STALE" "sync/nomatch: refused be
 eq "$(wt_paths "$D/rig" | count)" 1 "sync/nomatch: nothing registered in the rig repo"
 eq "$(wt_paths "$D/cwd" | count)" 1 "sync/nomatch: nothing registered in the cwd repo"
 
-# --- 5. mol-refinery-patrol: the prep and direct-merge worktrees. ---------------
+# --- 5. mol-refinery-patrol: the prep worktree and the direct landing. ----------
 # patrol_rig <dir> <label>: an origin carrying main and polecat/wb one commit
 # ahead, the rig cloned from it, and a foreign cwd repo whose own origin also
 # carries a main. Sets BASE, FEATURE, FOREIGN and PREP (the rig's prep path).
@@ -312,10 +312,13 @@ eq "$(bare_git "$TMP/push.sh")" "" "push: every git call in the block names its 
 
 printf '%s\n' '[{"metadata":{"branch":"polecat/wb","target":"main"}}]' > "$TMP/meta.json"
 # The pack, where the prep block finds detached-job.sh to stop a gate left
-# running in the prep worktree. It is named by path, so the cwd plays no part.
+# running in the prep worktree, and the direct-merge block finds
+# direct-merge-push.sh, beside a lifecycle.sh that logs. It is named by path,
+# so the cwd plays no part.
 PACK_CITY="$TMP/pack-city"
 mkdir -p "$PACK_CITY/rigs/gc-toolkit/assets/scripts"
-cp "$HERE/detached-job.sh" "$PACK_CITY/rigs/gc-toolkit/assets/scripts/"
+cp "$HERE/detached-job.sh" "$HERE/direct-merge-push.sh" "$PACK_CITY/rigs/gc-toolkit/assets/scripts/"
+cp "$BIN/lifecycle" "$PACK_CITY/rigs/gc-toolkit/assets/scripts/lifecycle.sh"
 prep_case() { # <mode>; sets RC, D, NEWHEAD, STALE (and patrol_rig's globals)
   local d="$TMP/prep-$1" rc=0
   mkdir -p "$d"
@@ -351,7 +354,9 @@ grep -qxF 'runtime drain-ack' "$D/gc.log" 2>/dev/null \
 
 echo "── mol-refinery-patrol: direct-merge-push ──"
 block "$PATROL_TOML" direct-merge-push "$TMP/merge.sh"
-eq "$(bare_git "$TMP/merge.sh")" "" "direct-merge: every git call in the block names its repo with -C"
+# The block runs direct-merge-push.sh, which makes the landing's git calls.
+eq "$(bare_git "$TMP/merge.sh")" "rev-parse " "direct-merge: the only git call without -C is the pack-script locator's"
+eq "$(bare_git "$HERE/direct-merge-push.sh")" "" "direct-merge: every git call in direct-merge-push.sh names its repo with -C"
 
 merge_case() { # <mode>; sets RC, D (and patrol_rig's globals)
   local d="$TMP/merge-$1" rc=0
@@ -361,7 +366,7 @@ merge_case() { # <mode>; sets RC, D (and patrol_rig's globals)
   git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
   pick "$1" "$d/rig"
   ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET=main BRANCH=polecat/wb \
-      LC="$BIN/lifecycle" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$TMP/merge.sh" ) >"$d/out" 2>&1 || rc=$?
+      GC_CITY_PATH="$PACK_CITY" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$TMP/merge.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
 
@@ -379,9 +384,9 @@ for mode in env roster; do
   # The transition checks the landing in the checkout GC_RIG_ROOT names, so it
   # gets the rig this block resolved, from the roster too.
   eq "$(cat "$D/lc.log.root" 2>/dev/null || true)" "$D/rig" "direct-merge/$mode: the transition runs with GC_RIG_ROOT naming the rig the block resolved"
-  eq "$(wt_paths "$D/rig" | count)" 2 "direct-merge/$mode: the merge worktree is unregistered on exit; the rig and its prep worktree remain"
+  eq "$(wt_paths "$D/rig" | count)" 2 "direct-merge/$mode: no worktree is added for the landing; the rig and its prep worktree remain"
   eq "$(wt_paths "$D/cwd" | count)" 1 "direct-merge/$mode: no worktree is left registered in the cwd repo"
-  eq "$(ls -A "$D/tmp" | count)" 0 "direct-merge/$mode: the scratch directory is removed on exit"
+  eq "$(ls -A "$D/tmp" | count)" 0 "direct-merge/$mode: nothing is left under TMPDIR"
 done
 
 merge_case nomatch
@@ -392,7 +397,7 @@ eq "$(git -C "$D/foreign.git" rev-parse main)" "$FOREIGN" "direct-merge/nomatch:
 grep -qxF 'runtime drain-ack' "$D/gc.log" 2>/dev/null \
   && ok "direct-merge/nomatch: the refinery drains, leaving the work to retry" \
   || bad "direct-merge/nomatch: the refinery drains, leaving the work to retry"
-eq "$(ls -A "$D/tmp" | count)" 0 "direct-merge/nomatch: refused before creating any scratch directory"
+eq "$(ls -A "$D/tmp" | count)" 0 "direct-merge/nomatch: nothing is left under TMPDIR"
 
 # --- 6. mol-refinery-patrol resolves RIG_ROOT one way. -------------------------
 # Every refinery block derives the prep worktree's path from RIG_ROOT, so two
