@@ -51,11 +51,28 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 BIN="$TMP/bin"; mkdir -p "$BIN"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'GC'
 # rig list answers the roster file and bd show the bead file; every other call
-# is logged and succeeds.
+# is logged and succeeds, and a bd update also writes its --set-metadata and
+# --unset-metadata to the bead file.
 case "$1 $2" in
   "rig list") cat "$FAKE_ROSTER" ;;
   "bd show")  cat "$FAKE_META" ;;
-  *)          echo "$*" >> "$FAKE_LOG" ;;
+  *)
+    echo "$*" >> "$FAKE_LOG"
+    if [ "$1 $2" = "bd update" ] && [ -n "${FAKE_META:-}" ]; then
+      shift 3
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --set-metadata)
+            jq --arg kv "$2" '.[0].metadata[($kv | sub("=.*$"; ""))] = ($kv | sub("^[^=]*="; ""))' "$FAKE_META" > "$FAKE_META.new" \
+              && mv "$FAKE_META.new" "$FAKE_META"
+            shift 2 ;;
+          --unset-metadata)
+            jq --arg k "$2" 'del(.[0].metadata[$k])' "$FAKE_META" > "$FAKE_META.new" && mv "$FAKE_META.new" "$FAKE_META"
+            shift 2 ;;
+          *) shift ;;
+        esac
+      done
+    fi ;;
 esac
 GC
 cat > "$BIN/lifecycle" <<'LC'
@@ -313,11 +330,12 @@ eq "$(bare_git "$TMP/push.sh")" "" "push: every git call in the block names its 
 printf '%s\n' '[{"metadata":{"branch":"polecat/wb","target":"main"}}]' > "$TMP/meta.json"
 # The pack, where the prep block finds detached-job.sh to stop a gate left
 # running in the prep worktree and refinery-workspace.sh to stage it, and the
-# direct-merge block finds direct-merge-push.sh, beside a lifecycle.sh that
-# logs. It is named by path, so the cwd plays no part.
+# direct-merge block finds direct-merge-push.sh, beside the bd-lib.sh it
+# sources and a lifecycle.sh that logs. It is named by path, so the cwd plays
+# no part.
 PACK_CITY="$TMP/pack-city"
 mkdir -p "$PACK_CITY/rigs/gc-toolkit/assets/scripts"
-cp "$HERE/detached-job.sh" "$HERE/refinery-workspace.sh" "$HERE/direct-merge-push.sh" "$PACK_CITY/rigs/gc-toolkit/assets/scripts/"
+cp "$HERE/detached-job.sh" "$HERE/refinery-workspace.sh" "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$PACK_CITY/rigs/gc-toolkit/assets/scripts/"
 cp "$BIN/lifecycle" "$PACK_CITY/rigs/gc-toolkit/assets/scripts/lifecycle.sh"
 prep_case() { # <mode>; sets RC, D, NEWHEAD, STALE (and patrol_rig's globals)
   local d="$TMP/prep-$1" rc=0
@@ -358,15 +376,19 @@ block "$PATROL_TOML" direct-merge-push "$TMP/merge.sh"
 eq "$(bare_git "$TMP/merge.sh")" "rev-parse " "direct-merge: the only git call without -C is the pack-script locator's"
 eq "$(bare_git "$HERE/direct-merge-push.sh")" "" "direct-merge: every git call in direct-merge-push.sh names its repo with -C"
 
+# bead_file <dir>: the work bead direct-merge-push.sh stamps before its push.
+bead_file() { printf '%s\n' '[{"id":"wb","metadata":{"branch":"polecat/wb","target":"main"}}]' > "$1/meta.json"; }
+
 merge_case() { # <mode>; sets RC, D (and patrol_rig's globals)
   local d="$TMP/merge-$1" rc=0
   mkdir -p "$d/tmp"
   patrol_rig "$d" "merge $1"
+  bead_file "$d"
   # The rebase step leaves the prepared head staged here, detached.
   git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
   pick "$1" "$d/rig"
   ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET=main BRANCH=polecat/wb \
-      GC_CITY_PATH="$PACK_CITY" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$TMP/merge.sh" ) >"$d/out" 2>&1 || rc=$?
+      GC_CITY_PATH="$PACK_CITY" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$TMP/merge.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
 
@@ -376,6 +398,7 @@ for mode in env roster; do
   eq "$(git -C "$D/origin.git" rev-parse main)" "$FEATURE" "direct-merge/$mode: the merge landed on the RIG's origin"
   eq "$(git -C "$D/foreign.git" rev-parse main)" "$FOREIGN" "direct-merge/$mode: the cwd repo's origin is untouched"
   eq "$(git -C "$D/rig" rev-parse origin/main)" "$FEATURE" "direct-merge/$mode: the push is verified against the rig's refreshed origin/main"
+  eq "$(jq -r '.[0].metadata.direct_landing_sha // "none"' "$D/meta.json")" "$FEATURE" "direct-merge/$mode: the landing is stamped on the bead"
   case "$(cat "$D/lc.log" 2>/dev/null || true)" in
     "transition wb --to merged --close --set merged_sha=$FEATURE --set merged_target=main "*)
       ok "direct-merge/$mode: recorded and closed through one lifecycle transition" ;;
@@ -408,13 +431,14 @@ protected_case() {
   shift
   mkdir -p "$d/tmp"
   patrol_rig "$d" "merge protected"
+  bead_file "$d"
   git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
   printf '%s\n' '#!/usr/bin/env bash' 'echo "GH006: Protected branch update failed for refs/heads/main." >&2' 'exit 1' \
     > "$d/origin.git/hooks/pre-receive"
   chmod +x "$d/origin.git/hooks/pre-receive"
   pick env "$d/rig"
   ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET=main BRANCH=polecat/wb \
-      GC_CITY_PATH="$PACK_CITY" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$@" "$TMP/merge-then.sh" ) >"$d/out" 2>&1 || rc=$?
+      GC_CITY_PATH="$PACK_CITY" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$@" "$TMP/merge-then.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
 
@@ -424,9 +448,9 @@ for errexit in off on; do
   if [ "$errexit" = on ]; then protected_case "$errexit" -eu; else protected_case "$errexit"; fi
   eq "$RC" 0 "direct-merge/protected, errexit $errexit: the block goes on past the promotion"
   eq "$(grep '^MERGE_STRATEGY=' "$D/out" || true)" "MERGE_STRATEGY=mr" "direct-merge/protected, errexit $errexit: the block takes the mr path"
-  grep -qxF 'bd update wb --set-metadata merge_strategy=pr' "$D/gc.log" 2>/dev/null \
-    && ok "direct-merge/protected, errexit $errexit: the bead is promoted to merge_strategy=pr" \
-    || bad "direct-merge/protected, errexit $errexit: the bead is promoted to merge_strategy=pr"
+  grep -qxF 'bd update wb --set-metadata merge_strategy=pr --unset-metadata direct_landing_sha' "$D/gc.log" 2>/dev/null \
+    && ok "direct-merge/protected, errexit $errexit: the bead is promoted to merge_strategy=pr and its stamp cleared" \
+    || bad "direct-merge/protected, errexit $errexit: the bead is promoted to merge_strategy=pr and its stamp cleared"
   grep -qxF 'runtime drain-ack' "$D/gc.log" 2>/dev/null \
     && bad "direct-merge/protected, errexit $errexit: the refinery does not drain" \
     || ok "direct-merge/protected, errexit $errexit: the refinery does not drain"
@@ -443,13 +467,14 @@ moved_case() {
   shift
   mkdir -p "$d/tmp"
   patrol_rig "$d" "merge moved"
+  bead_file "$d"
   git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
   git -C "$d/seed" checkout -q main
   MOVED=$(commit "$d/seed" "landed while the gate ran")
   git -C "$d/seed" push -q "$d/origin.git" main
   pick env "$d/rig"
   ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET=main BRANCH=polecat/wb \
-      GC_CITY_PATH="$PACK_CITY" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$@" "$TMP/merge-then.sh" ) >"$d/out" 2>&1 || rc=$?
+      GC_CITY_PATH="$PACK_CITY" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$@" "$TMP/merge-then.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
 

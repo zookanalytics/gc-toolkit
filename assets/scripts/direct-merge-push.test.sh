@@ -4,18 +4,26 @@
 # Runs the real script against real git repositories: a bare origin, the rig
 # cloned from it, and the prep worktree the rebase step leaves at
 # <rig git dir>/gc-refinery-prep. lifecycle.sh and gc are stubs that log their
-# calls. Proves:
-#   - a prepared head that fast-forwards origin/main lands there by commit id,
-#     is read back from origin, and is recorded and closed through one
-#     lifecycle transition handed the rig as GC_RIG_ROOT, with no scratch
-#     worktree, no scratch file and no local branch moved;
+# calls, and gc keeps the bead in a file its updates write. Proves:
+#   - a prepared head that fast-forwards origin/main is stamped on the bead as
+#     direct_landing_sha before the push, lands by commit id, is read back from
+#     origin, and is recorded and closed through one lifecycle transition handed
+#     the rig as GC_RIG_ROOT, which clears the stamp, with no scratch worktree,
+#     no scratch file and no local branch moved;
+#   - a bead the stamp does not reach is not pushed;
 #   - a prepared head origin/main moved past since it was prepared lands
 #     nothing, records nothing and exits 4, and one that shares no history with
 #     origin/main exits 1;
-#   - a prepared head origin/main already carries closes as that tip;
+#   - a prepared head origin/main already carries closes as that tip, or at the
+#     bead's stamp when origin/main carries the stamp too;
+#   - a landing whose read-back fetch or transition fails is tried again, and
+#     one that still fails exits 1 and keeps its stamp, so the next patrol's
+#     attempt records it at the stamp, whether origin/main stayed at the
+#     landing or moved on past it;
+#   - a commit landed on top of the push before the read-back does not fail it;
 #   - a push refused for branch protection promotes the bead to
-#     merge_strategy=pr and exits 3, and any other refused push, a push origin
-#     does not read back, or a transition that does not land, exits 1;
+#     merge_strategy=pr and clears the stamp in one write, and exits 3, and any
+#     other refused push, or a push origin does not read back, exits 1;
 #   - an unresolvable rig and a missing prepared head land nothing;
 #   - the script never drains the session.
 set -uo pipefail
@@ -34,42 +42,90 @@ has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3" "missing '$2' in: $1" ;; esa
 command -v git >/dev/null 2>&1 || { echo "git is required" >&2; exit 1; }
 command -v jq  >/dev/null 2>&1 || { echo "jq is required"  >&2; exit 1; }
 
-unset GC_RIG_ROOT GC_RIG GC_CITY_PATH GC_PACK_DIR 2>/dev/null || true
+unset GC_RIG_ROOT GC_RIG GC_CITY_PATH GC_PACK_DIR GC_BD_LIB GC_RECONCILE_BD_CACHE 2>/dev/null || true
+unset DIRECT_MERGE_PUSH_ATTEMPTS DIRECT_MERGE_PUSH_BACKOFF 2>/dev/null || true
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR 2>/dev/null || true
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
-# The script under test, beside a stub lifecycle.sh that logs each transition
-# and the GC_RIG_ROOT it was handed, and fails when LC_FAIL is set.
+# The script under test and the bd-lib.sh it sources, beside a stub
+# lifecycle.sh that logs each transition and the GC_RIG_ROOT it was handed. The
+# stub refuses every call when LC_FAIL is set, and the first LC_FAIL_TIMES calls
+# when that is set.
 SUT="$TMP/sut"
-mkdir -p "$SUT" "$TMP/bin"
-cp "$HERE/direct-merge-push.sh" "$SUT/"
+mkdir -p "$SUT" "$TMP/bin" "$TMP/gitshim"
+cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$SUT/"
 chmod +x "$SUT/direct-merge-push.sh"
 cat > "$SUT/lifecycle.sh" <<'LC'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE_LC_LOG"
 echo "${GC_RIG_ROOT:-<unset>}" >> "$FAKE_LC_LOG.root"
 [ -z "${LC_FAIL:-}" ] || { echo "lifecycle: refused" >&2; exit 1; }
+if [ -n "${LC_FAIL_TIMES:-}" ] && [ "$(wc -l < "$FAKE_LC_LOG" | tr -d ' ')" -le "$LC_FAIL_TIMES" ]; then
+  echo "lifecycle: the store is busy" >&2
+  exit 1
+fi
+exit 0
 LC
 chmod +x "$SUT/lifecycle.sh"
-# gc answers the roster for `rig list` and logs every call.
+# gc answers the roster for `rig list` and the bead file for `bd show`, applies
+# each --set-metadata and --unset-metadata of a `bd update` to that file, and
+# logs every call. BD_UPDATE_DROP makes an update exit 0 and write nothing,
+# which `gc bd update` can do.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE_GC_LOG"
 case "$1 $2" in
   "rig list") cat "$FAKE_ROSTER" ;;
+  "bd show")  cat "$FAKE_BEAD" ;;
+  "bd update")
+    [ -z "${BD_UPDATE_DROP:-}" ] || exit 0
+    shift 3
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --set-metadata)
+          jq --arg kv "$2" '.[0].metadata[($kv | sub("=.*$"; ""))] = ($kv | sub("^[^=]*="; ""))' "$FAKE_BEAD" > "$FAKE_BEAD.new" \
+            && mv "$FAKE_BEAD.new" "$FAKE_BEAD"
+          shift 2 ;;
+        --unset-metadata)
+          jq --arg k "$2" 'del(.[0].metadata[$k])' "$FAKE_BEAD" > "$FAKE_BEAD.new" && mv "$FAKE_BEAD.new" "$FAKE_BEAD"
+          shift 2 ;;
+        *) shift ;;
+      esac
+    done ;;
 esac
 exit 0
 GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
+# A git that fails a fetch from origin once FETCH_FAIL_MARK exists, which the
+# origin's post-receive hook creates, so only the fetches after the push fail:
+# the first FETCH_FAIL_TIMES of them.
+REAL_GIT=$(command -v git)
+{ printf '#!/usr/bin/env bash\n'; printf 'REAL_GIT=%q\n' "$REAL_GIT"; cat; } > "$TMP/gitshim/git" <<'SHIM'
+case " $* " in
+  *" fetch origin "*)
+    if [ -n "${FETCH_FAIL_MARK:-}" ] && [ -e "$FETCH_FAIL_MARK" ]; then
+      n=$(( $(cat "$FETCH_FAIL_MARK.count" 2>/dev/null || echo 0) + 1 ))
+      echo "$n" > "$FETCH_FAIL_MARK.count"
+      if [ "$n" -le "${FETCH_FAIL_TIMES:-0}" ]; then
+        echo "fatal: unable to access origin: the network is down" >&2
+        exit 128
+      fi
+    fi ;;
+esac
+exec "$REAL_GIT" "$@"
+SHIM
+chmod +x "$TMP/gitshim/git"
 
 commit() { git -C "$1" commit -q --allow-empty -m "$2"; git -C "$1" rev-parse HEAD; }
 wt_count() { git -C "$1" worktree list --porcelain | grep -c '^worktree '; }
+stamp() { jq -r '.[0].metadata.direct_landing_sha // "none"' "$D/bead.json"; }
+transitions() { if [ -s "$D/lc.log" ]; then wc -l < "$D/lc.log" | tr -d ' '; else echo 0; fi; }
 
 # setup <dir>: origin with main and polecat/wb one commit ahead, the rig
-# cloned from it, and the prep worktree staged at polecat/wb. Sets D, BASE,
-# FEATURE and PREP.
+# cloned from it, the prep worktree staged at polecat/wb, and the bead. Sets D,
+# BASE, FEATURE and PREP.
 setup() {
   D="$1"
   mkdir -p "$D/tmp"
@@ -85,15 +141,28 @@ setup() {
   PREP="$(git -C "$D/rig" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
   git -C "$D/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
   printf '{"rigs":[{"name":"myrig","path":"%s"}]}\n' "$D/rig" > "$D/roster.json"
+  printf '%s\n' '[{"id":"wb","status":"in_progress","metadata":{"branch":"polecat/wb","target":"main"}}]' > "$D/bead.json"
   : > "$D/gc.log"; : > "$D/lc.log"
 }
 
 # run [<env>...]: the script from a directory outside every repository, with
-# GC_RIG_ROOT naming the rig unless the case overrides it. Sets RC and OUT.
+# GC_RIG_ROOT naming the rig unless the case overrides it, and no pause between
+# tries. Sets RC and OUT.
 run() {
   OUT=$(cd "$D/tmp" && env TMPDIR="$D/tmp" GC_RIG_ROOT="$D/rig" GC_RIG=myrig FAKE_ROSTER="$D/roster.json" \
-    FAKE_GC_LOG="$D/gc.log" FAKE_LC_LOG="$D/lc.log" "$@" "$SUT/direct-merge-push.sh" --work wb --target main 2>&1)
+    FAKE_GC_LOG="$D/gc.log" FAKE_LC_LOG="$D/lc.log" FAKE_BEAD="$D/bead.json" DIRECT_MERGE_PUSH_BACKOFF=0 \
+    "$@" "$SUT/direct-merge-push.sh" --work wb --target main 2>&1)
   RC=$?
+}
+# next_patrol: what the next patrol's rebase step does before it lands again:
+# fetch, stage the prep worktree at origin/polecat/wb, and merge origin/main in.
+# The logs start over, so each attempt's assertions read only its own calls.
+next_patrol() {
+  git -C "$D/rig" fetch -q origin
+  git -C "$D/rig" worktree remove --force --force "$PREP"
+  git -C "$D/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+  git -C "$PREP" merge -q --no-edit origin/main
+  : > "$D/gc.log"; : > "$D/lc.log"; : > "$D/lc.log.root"
 }
 no_drain() {
   if grep -q 'runtime drain-ack' "$D/gc.log"; then bad "$1: the script does not drain the session"; else ok "$1: the script does not drain the session"; fi
@@ -101,20 +170,31 @@ no_drain() {
 no_transition() {
   if [ -s "$D/lc.log" ]; then bad "$1: no lifecycle transition" "$(cat "$D/lc.log")"; else ok "$1: no lifecycle transition"; fi
 }
+recorded_at() { # <label> <sha>: exactly one transition, recording and closing at <sha> and clearing the stamp
+  case "$(cat "$D/lc.log")" in
+    "transition wb --to merged --close --set merged_sha=$2 --set merged_target=main --unset rejection_reason --unset direct_landing_sha --append-notes Merged to main at "*)
+      ok "$1: recorded and closed at ${2:0:9} through one lifecycle transition that clears the stamp" ;;
+    *) bad "$1: recorded and closed at ${2:0:9} through one lifecycle transition that clears the stamp" "$(cat "$D/lc.log")" ;;
+  esac
+}
 
 echo "── a prepared head that fast-forwards main lands by commit id ──"
 setup "$TMP/ff"
+# The stamp the bead carries at the moment origin receives the push.
+cat > "$D/origin.git/hooks/pre-receive" <<HOOK
+#!/usr/bin/env bash
+jq -r '.[0].metadata.direct_landing_sha // "none"' "$D/bead.json" > "$D/stamp-at-push"
+HOOK
+chmod +x "$D/origin.git/hooks/pre-receive"
 RIG_HEAD_BEFORE=$(git -C "$D/rig" rev-parse HEAD)
 run
 eq "$RC" 0 "ff: exits 0"
+eq "$(cat "$D/stamp-at-push" 2>/dev/null)" "$FEATURE" "ff: the bead carries the stamp when origin receives the push"
+has "$(cat "$D/gc.log")" "bd update wb --set-metadata direct_landing_sha=$FEATURE" "ff: the stamp is written through gc bd"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$FEATURE" "ff: origin/main is the prepared head"
 eq "$(git -C "$D/rig" rev-parse origin/main)" "$FEATURE" "ff: the rig's origin/main is read back at the prepared head"
-case "$(cat "$D/lc.log")" in
-  "transition wb --to merged --close --set merged_sha=$FEATURE --set merged_target=main --unset rejection_reason --append-notes Merged to main at "*)
-    ok "ff: recorded and closed through one lifecycle transition" ;;
-  *) bad "ff: recorded and closed through one lifecycle transition" "$(cat "$D/lc.log")" ;;
-esac
-eq "$(wc -l < "$D/lc.log" | tr -d ' ')" 1 "ff: exactly one transition"
+recorded_at ff "$FEATURE"
+eq "$(transitions)" 1 "ff: exactly one transition"
 eq "$(cat "$D/lc.log.root")" "$D/rig" "ff: the transition is handed the rig as GC_RIG_ROOT"
 eq "$(wt_count "$D/rig")" 2 "ff: no worktree is added; the rig and its prep worktree remain"
 eq "$(ls -A "$D/tmp" | wc -l | tr -d ' ')" 0 "ff: nothing is written under TMPDIR"
@@ -129,6 +209,15 @@ eq "$RC" 0 "roster: exits 0"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$FEATURE" "roster: the prepared head landed on the rig's origin"
 eq "$(cat "$D/lc.log.root")" "$D/rig" "roster: the transition is handed the rig the roster named"
 
+echo "── a bead the stamp does not reach is not pushed ──"
+setup "$TMP/nostamp"
+run BD_UPDATE_DROP=1
+eq "$RC" 1 "nostamp: exits 1"
+has "$OUT" "could not stamp direct_landing_sha=$FEATURE on wb" "nostamp: it says the stamp did not land"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "nostamp: nothing pushed"
+no_transition nostamp
+no_drain nostamp
+
 echo "── origin/main moved past the prepared head: nothing lands, exit 4 ──"
 setup "$TMP/moved"
 MOVED=$(commit "$D/seed" "landed while the gate ran")
@@ -137,6 +226,7 @@ run
 eq "$RC" 4 "moved: exits 4"
 has "$OUT" "is not a fast-forward of origin/main" "moved: it says the target moved"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$MOVED" "moved: origin/main is untouched"
+eq "$(stamp)" none "moved: nothing is stamped"
 no_transition moved
 no_drain moved
 
@@ -157,10 +247,17 @@ setup "$TMP/landed"
 git -C "$D/seed" checkout -q polecat/wb
 AHEAD=$(commit "$D/seed" "landed on top")
 git -C "$D/seed" push -q "$D/origin.git" "HEAD:main"
+# A stamp origin/main does not carry, left by a push that did not land.
+git -C "$D/seed" checkout -q -b side "$BASE"
+SIDE=$(commit "$D/seed" "a push that never landed")
+git -C "$D/seed" push -q "$D/origin.git" side
+git -C "$D/rig" fetch -q origin
+jq --arg s "$SIDE" '.[0].metadata.direct_landing_sha = $s' "$D/bead.json" > "$D/bead.json.new" && mv "$D/bead.json.new" "$D/bead.json"
 run
 eq "$RC" 0 "landed: exits 0"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$AHEAD" "landed: origin/main stays at its tip"
-has "$(cat "$D/lc.log")" "--set merged_sha=$AHEAD " "landed: the transition records the tip that carries the work"
+recorded_at "landed, a stamp origin/main does not carry" "$AHEAD"
+case "$(cat "$D/gc.log")" in *"bd update"*) bad "landed: nothing is stamped, since nothing is pushed" "$(cat "$D/gc.log")" ;; *) ok "landed: nothing is stamped, since nothing is pushed" ;; esac
 
 echo "── a push refused for branch protection promotes the bead ──"
 setup "$TMP/protected"
@@ -172,7 +269,8 @@ HOOK
 chmod +x "$D/origin.git/hooks/pre-receive"
 run
 eq "$RC" 3 "protected: exits 3"
-has "$(cat "$D/gc.log")" "bd update wb --set-metadata merge_strategy=pr" "protected: the bead is promoted to merge_strategy=pr"
+has "$(cat "$D/gc.log")" "bd update wb --set-metadata merge_strategy=pr --unset-metadata direct_landing_sha" "protected: one write promotes the bead to merge_strategy=pr and clears the stamp"
+eq "$(jq -r '.[0].metadata.merge_strategy // "none"' "$D/bead.json")/$(stamp)" "pr/none" "protected: the bead reads merge_strategy=pr and no stamp"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "protected: origin/main is untouched"
 no_transition protected
 no_drain protected
@@ -203,17 +301,87 @@ HOOK
 chmod +x "$D/origin.git/hooks/post-receive"
 run
 eq "$RC" 1 "unverified: exits 1"
-has "$OUT" "PUSH FAILED — origin/main is $BASE, want $FEATURE" "unverified: it names what origin holds"
+has "$OUT" "PUSH FAILED — origin/main is $BASE, which does not carry $FEATURE" "unverified: it names what origin holds"
 no_transition unverified
 no_drain unverified
 
-echo "── a transition that does not land is reported ──"
+echo "── a commit landed on top of the push before the read-back ──"
+setup "$TMP/ontop"
+cat > "$D/origin.git/hooks/post-receive" <<'HOOK'
+#!/usr/bin/env bash
+read -r old new ref
+git update-ref "$ref" "$(git commit-tree -p "$new" -m "landed right after" "$new^{tree}")"
+HOOK
+chmod +x "$D/origin.git/hooks/post-receive"
+run
+eq "$RC" 0 "ontop: exits 0"
+eq "$(git -C "$D/origin.git" rev-parse main^)" "$FEATURE" "ontop: origin/main carries the push one commit down"
+recorded_at ontop "$FEATURE"
+
+echo "── a read-back fetch that fails once is tried again ──"
+setup "$TMP/fetch-once"
+printf '#!/usr/bin/env bash\ntouch %q\n' "$D/pushed" > "$D/origin.git/hooks/post-receive"
+chmod +x "$D/origin.git/hooks/post-receive"
+run PATH="$TMP/gitshim:$PATH" FETCH_FAIL_MARK="$D/pushed" FETCH_FAIL_TIMES=1
+eq "$RC" 0 "fetch-once: exits 0"
+eq "$(cat "$D/pushed.count" 2>/dev/null)" 2 "fetch-once: the read-back fetch ran twice"
+recorded_at fetch-once "$FEATURE"
+
+echo "── a transition that fails once is tried again ──"
+setup "$TMP/lc-once"
+run LC_FAIL_TIMES=1
+eq "$RC" 0 "lc-once: exits 0"
+eq "$(transitions)" 2 "lc-once: the transition ran twice"
+eq "$(sed -n 1p "$D/lc.log")" "$(sed -n 2p "$D/lc.log")" "lc-once: the second try is the same transition"
+
+echo "── a transition that does not land keeps the stamp, and the next patrol records it ──"
 setup "$TMP/lcfail"
 run LC_FAIL=1
 eq "$RC" 1 "lcfail: exits 1"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$FEATURE" "lcfail: the landing stands"
 has "$OUT" "so wb has landed, but the transition recording it as merged did not land" "lcfail: it says the work landed unrecorded"
+has "$OUT" "wb keeps direct_landing_sha=$FEATURE" "lcfail: it says the bead keeps the stamp"
+eq "$(transitions)" 3 "lcfail: the transition is tried three times"
+eq "$(stamp)" "$FEATURE" "lcfail: the bead keeps the stamp"
 no_drain lcfail
+next_patrol
+eq "$(git -C "$PREP" rev-parse HEAD)" "$FEATURE" "lcfail, next patrol: precondition, its prepare stages origin/main itself"
+run
+eq "$RC" 0 "lcfail, next patrol: exits 0"
+has "$OUT" "already carries the prepared head" "lcfail, next patrol: it pushes nothing"
+recorded_at "lcfail, next patrol" "$FEATURE"
+no_drain "lcfail, next patrol"
+
+echo "── the same, after origin/main moved on past the landing ──"
+setup "$TMP/lcfail-later"
+run LC_FAIL=1
+eq "$RC/$(stamp)" "1/$FEATURE" "lcfail-later: the landing is unrecorded and the bead keeps the stamp"
+git -C "$D/seed" fetch -q "$D/origin.git" main
+git -C "$D/seed" checkout -q -B main FETCH_HEAD
+LATER=$(commit "$D/seed" "landed after the unrecorded landing")
+git -C "$D/seed" push -q "$D/origin.git" main
+next_patrol
+eq "$(git -C "$PREP" rev-parse HEAD)" "$LATER" "lcfail-later, next patrol: precondition, its prepare stages the later tip"
+run
+eq "$RC" 0 "lcfail-later, next patrol: exits 0"
+recorded_at "lcfail-later, next patrol (the landing, not the later tip)" "$FEATURE"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$LATER" "lcfail-later, next patrol: origin/main stays at the later tip"
+
+echo "── a read-back fetch that keeps failing keeps the stamp, and the next patrol records it ──"
+setup "$TMP/fetch-down"
+printf '#!/usr/bin/env bash\ntouch %q\n' "$D/pushed" > "$D/origin.git/hooks/post-receive"
+chmod +x "$D/origin.git/hooks/post-receive"
+run PATH="$TMP/gitshim:$PATH" FETCH_FAIL_MARK="$D/pushed" FETCH_FAIL_TIMES=100
+eq "$RC" 1 "fetch-down: exits 1"
+has "$OUT" "PUSH UNVERIFIED" "fetch-down: it says the push could not be read back"
+eq "$(cat "$D/pushed.count" 2>/dev/null)" 3 "fetch-down: the read-back fetch is tried three times"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$FEATURE" "fetch-down: the landing stands"
+eq "$(stamp)" "$FEATURE" "fetch-down: the bead keeps the stamp"
+no_transition fetch-down
+next_patrol
+run
+eq "$RC" 0 "fetch-down, next patrol: exits 0"
+recorded_at "fetch-down, next patrol" "$FEATURE"
 
 echo "── an unresolvable rig lands nothing ──"
 setup "$TMP/nomatch"

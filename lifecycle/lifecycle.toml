@@ -441,6 +441,7 @@ keys = [
   "bring_current_from", "bring_current_scope", "conflict_audit", "conflict_question",
   "bring_current_record", "bring_current_reopened", "bring_current_round_at",
   "bring_current_lifted_at",
+  "direct_landing_sha",
 ]
 # merge_result is the anchor state itself and is defined in [machine] / [states]
 # above: lifecycle.sh is its only writer (set on every transition, unset on
@@ -637,6 +638,18 @@ keys = [
 #   board shows the approval owed, and one submitted after it lands the PR.
 #   A later round whose ruling keeps the approval leaves it as it is. Absent
 #   means no ruling lifted the approval. Never cleared.
+# direct_landing_sha — the commit a direct landing pushes, stamped by
+#   direct-merge-push.sh and read back before the push, so a landing whose
+#   record fails stays provable to a later patrol. Read by
+#   mol-refinery-patrol.toml's zero-diff guard: a branch with no change against
+#   a target that carries the stamp goes down the direct path instead of being
+#   refused as a false completion, and direct-merge-push.sh records the landing
+#   at the stamp. A stamp whose push did not land names a commit the target does
+#   not carry, so the guard ignores it, and the next landing overwrites it.
+#   Absent means no direct push waits on its record. Cleared by the merged
+#   transition that records the landing, and by the write that promotes the
+#   bead to merge_strategy=pr after a push refused for branch protection. An
+#   oid.
 
 [metadata.gates]
 keys = [
