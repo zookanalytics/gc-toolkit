@@ -94,9 +94,10 @@ without saying where they come from. Separately, a rig that keeps no
    (section 9).
 8. **The build is two beads onto this integration branch, in order.** First the
    layered index, which every reader takes at the commit it judges, with the
-   backstop for a change to the guidance. Then the values, the formulas and the
-   skills. Cost: one more PR to approve on the integration branch, for two
-   diffs that are each reviewable in one sitting.
+   backstop for a change to the guidance and the `git ls-remote` read of a
+   head GitHub does not answer. Then the values, the formulas and the skills.
+   Cost: one more PR to approve on the integration branch, for two diffs that
+   are each reviewable in one sitting.
    The single build the card intended is the alternative, at the cost of one PR
    across about forty files.
 
@@ -802,7 +803,9 @@ read of the head fails (section 2). The resolver refuses that call, and
 gate-ensure's fail-closed arm holds the anchor for the pass: it dispatches
 nothing, settles nothing and retries on the next pass
 (`gate-ensure.sh:813-820`). That is the hold section 2 gives an anchor whose
-head no read answers, so the refusal needs no interim behavior.
+head no read answers, so the refusal needs no interim behavior. Unit A also
+brings section 2's `git ls-remote` fallback, so the head that goes unread is
+one neither GitHub nor `git ls-remote` answers.
 
 A rig row whose phase is outside the ordered set is refused, as today
 (`review-checks.sh:227-235`). Read at a commit, that refusal holds only the
@@ -916,12 +919,11 @@ review.
    every required key and the fixed paragraph, and its sling passes every value
    of "What a review is told" as a `--var`. A `pull_request` anchor's dispatch
    carries its PR as `review_pr_url` and `review_pr_number`. `review_context`
-   carries the reason, the bring-current ruling line included. A head that
-   neither `gh` nor `ls-remote` reads holds the dispatch, and the `ls-remote`
-   fallback supplies the commit. The stranded arm writes `reviewed_oid` only
-   where it is absent: a stranded review whose pin differs from the live head
-   keeps its pin through the arm's write, one with no pin is pinned at the live
-   head, and each re-sling passes the pin its record then holds.
+   carries the reason, the bring-current ruling line included. The stranded
+   arm writes `reviewed_oid` only where it is absent: a stranded review whose
+   pin differs from the live head keeps its pin through the arm's write, one
+   with no pin is pinned at the live head, and each re-sling passes the pin its
+   record then holds.
 2. **The commit stays recorded** (`signoff.test.sh`). signoff.sh's refusal of
    a departed commit leaves `reviewed_oid` in place and closes the review
    superseded, and a close that does not read back exits 2 with the commit
@@ -1072,9 +1074,10 @@ with neither a commit nor an index override.
   head its `gh` stub answers. Its case of an unread head (`:523-536`) asserts
   that a backed lane still settles and an unbacked one still dispatches, with
   no pin. The refusal holds both anchors for the pass instead, so the case
-  asserts the hold, with nothing settled and nothing dispatched. Its other
-  anchors with no head fixture stop before the resolve, or assert nothing the
-  hold changes.
+  asserts the hold, with nothing settled and nothing dispatched. A case shows a
+  head that `gh` does not answer read through `git ls-remote` and pinned on the
+  review. Its other anchors with no head fixture stop before the resolve, or
+  assert nothing the hold changes.
 
 ## 9. Sequencing with the review-coverage epic
 
@@ -1146,9 +1149,11 @@ when unit A lands.
   and `--extension`, its working-tree read goes, a call that names no commit
   is refused unless `--file` or `GC_REVIEW_CHECKS_INDEX` names the index, and
   the `method` key is ignored.
-- gate-ensure.sh's comment that says an unread head sends a review out with
-  no pin (`gate-ensure.sh:137-139`) is rewritten, because the refusal holds
-  that anchor for the pass (section 6).
+- gate-ensure.sh's `live_head_for` reads a head that GitHub does not answer
+  through `git ls-remote` (section 2). An anchor whose head neither read
+  answers is then held for the pass by the refusal (section 6), so the comment
+  that says an unread head sends a review out with no pin
+  (`gate-ensure.sh:137-139`) is rewritten with the function.
 - liveness-sweep.sh resolves at the head of each anchor's branch, and
   `review-dispatch-body.sh` reads a check's purpose through `--check --at` and
   its extension through `--extension --at` until unit B deletes it (section 6).
@@ -1167,7 +1172,7 @@ when unit A lands.
 - A bead in sprintshow's store for its index header, which points its intent to
   leave demo, arch and pm out at a `docs/review-triage.md` (sections 5 and 6).
 - Tests 6 and 7 of section 8, the reader half of test 8, and
-  `gate-ensure.test.sh`'s case of an unread head (section 8).
+  `gate-ensure.test.sh`'s cases of an unread head (section 8).
 
 It changes which checks every gating reader sees in a rig whose commit declares
 none, and it carries the build's Go change, so it lands alone, reviewable as
