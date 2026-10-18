@@ -637,6 +637,25 @@ bd_unmake_orphans() {
   return 0
 }
 
+# PR-finishing work, the reviews, validation passes, merge-ins, red-check fixes
+# and review reworks that carry an anchor's branch to its merge, is filed one
+# level sooner than its anchor (docs/steering.md, "PR-finishing work"). Each
+# creator files its child carrying this shift in the create, so the child is
+# born with it, and each creator's suite asserts it. A child adopted or re-routed
+# later keeps the shift it carries: after its birth the shift is the child's own
+# input, which a priority move may have set.
+# shellcheck disable=SC2034  # read by the scripts that source this file
+PR_FINISHING_SHIFT=-1
+
+# pr_finishing_birth <metadata-json> — the create payload of a PR-finishing
+# child: its work order with priority_shift added. Prints nothing and returns
+# non-zero for a work order that is not a JSON object, so the create that would
+# carry it files nothing.
+pr_finishing_birth() {
+  printf '%s' "${1:-}" | jq -c --argjson s "$PR_FINISHING_SHIFT" \
+    'if type == "object" then . + {priority_shift: $s} else error("not an object") end' 2>/dev/null
+}
+
 # The keys a validation pass is found by: signoff.sh's machine-lane probe and
 # pr-facts.sh's human-lane probe both select a pass by its task_kind, its anchor
 # and its lane, so a pass short of one of them is one neither can find.
@@ -644,15 +663,16 @@ bd_unmake_orphans() {
 VALIDATION_SELECT="task_kind,anchor_bead,check_name"
 
 # validation_work_order <anchor> <lane> <reviewed-oid> — the metadata a
-# validation pass carries, the shape mol-validate reads. task_kind, anchor_bead
-# and check_name are VALIDATION_SELECT. check_name is the lane: mol-validate
-# rules the findings whose finding.lane matches it. reviewed_oid pins the head
-# the batch was produced at, which mol-validate needs to back a machine lane; an
-# empty <reviewed-oid> leaves the pin out.
+# validation pass is filed with, the shape mol-validate reads, born carrying the
+# PR-finishing shift. task_kind, anchor_bead and check_name are
+# VALIDATION_SELECT. check_name is the lane: mol-validate rules the findings
+# whose finding.lane matches it. reviewed_oid pins the head the batch was
+# produced at, which mol-validate needs to back a machine lane; an empty
+# <reviewed-oid> leaves the pin out.
 validation_work_order() {
-  jq -nc --arg a "${1:-}" --arg l "${2:-}" --arg o "${3:-}" \
+  pr_finishing_birth "$(jq -nc --arg a "${1:-}" --arg l "${2:-}" --arg o "${3:-}" \
     '{task_kind: "validation", anchor_bead: $a, check_name: $l}
-     + (if $o == "" then {} else {reviewed_oid: $o} end)' 2>/dev/null
+     + (if $o == "" then {} else {reviewed_oid: $o} end)' 2>/dev/null)"
 }
 
 # The gating-PR read. The pr-facts arm (pr-facts.sh) and the merge arm

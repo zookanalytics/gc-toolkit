@@ -422,6 +422,11 @@ The postures, in the precedence the derivation applies:
 | `review_required` | GitHub reports `REVIEW_REQUIRED`, or reports `APPROVED` while every standing approval was given at or before `bring_current_lifted_at` | none; the anchor is waiting on a human approval and now says so |
 | `none` | no `reviewDecision` applies | none |
 
+The priority function reads the posture too. An `approved` posture on an anchor
+that rests in `pull_request` ranks the anchor's PR-finishing work at P0, and the
+pass of `pr-facts.sh` that records a posture moving into or out of `approved`
+re-ranks that work ([steering.md](steering.md#pr-finishing-work)).
+
 A comment outranks an approval on purpose: one reviewer's approval does not
 answer another reviewer's question. `merge.sh` holds on a recorded `commented`
 whatever head it is pinned to, because a comment survives a head move. An

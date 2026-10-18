@@ -301,6 +301,16 @@ child() { # id branch [extra-metadata] [status] [assignee]
 
 ROOT="$(cd "$HERE/../.." && pwd)"
 
+# A P2 epic, and a fixture row moved under it with its own stored priority made
+# stale, so a priority read off the row rather than computed from the epic
+# fails. PR-finishing work follows its anchor (docs/steering.md): under a P2
+# epic it runs at P1 at the shift its creator files, and at P0 once its PR is
+# approved.
+EP2='{"id":"EP2","status":"open","assignee":"","notes":"","title":"epic","issue_type":"epic","priority":2,"metadata":{}}'
+under_ep2() { jq -c '.priority = 0 | .dependencies = [{issue_id: .id, depends_on_id: "EP2", type: "parent-child"}]'; }
+# The live rework children of <anchor>, oldest first.
+reworks_of() { jq -r --arg a "$1" '[ .[] | select((.metadata.anchor_bead // "") == $a) | select((.metadata.task_kind // "") == "rework") | .id ] | join(" ")' "$STUB_STORE"; }
+
 # ==== part reconcile: merged, closed, retargeted and conflicting PRs, through
 # the approval a conflicting PR's merge-in waits for ====
 if part reconcile; then
@@ -971,11 +981,50 @@ hasnt "$(meta new-2 rejection_reason)" "force-push with --force-with-lease" "a m
 has "$(meta new-2 rejection_reason)" "Do NOT rebase it and do NOT force-push it" "…and forbids the rewrite in words"
 grep -qxF "new-2|blocks|F4" "$STUB_DEPS" && ok "child blocks the anchor" || bad "blocks edge missing"
 eq "$(meta F4 merge_result)" "pull_request" "the anchor keeps gating (no state flip)"
+eq "$(meta new-2 priority_shift)" "-1" "the merge-in is born carrying the PR-finishing shift"
+eq "$(bparents new-2)" "" "…with no parent, so no hold on an epic reaches it"
+eq "$(bprio new-2)" "1" "…and is routed at F4's priority less one: F4 reads at bd's default P2, and with no review decision on the PR its posture is not approved"
 
 echo "# …dedup: second pass files nothing"
 out=$(run)
 has "$out" "already covers branch" "an existing child suppresses a twin"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "still exactly one child"
+
+echo "# …an approved PR's merge-in is routed at P0, and one under a P2 epic whose posture is not approved at P1"
+# GitHub reports PR#701 APPROVED, so its posture records approved, in the shape
+# pr-facts.sh stores it. PR#702 carries the external approval the merge-in waits
+# for, but GitHub reports no review decision for it, so its posture reads none.
+# A rank that compared the whole stored posture with approved would route
+# PR#701's merge-in at P1.
+store "[$EP2, $(anchor AP1 701 | under_ep2), $(anchor AP2 702 | under_ep2)]"
+printf '%s' "$(prview 701 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_701.json"
+printf '%s' "$(prview 702 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_702.json"
+approve 701; approve 702
+: > "$STUB_GC_LOG"
+out=$(run)
+K1=$(reworks_of AP1); K2=$(reworks_of AP2)
+eq "$(meta_pinned AP1 pr_posture)" "approved@sha-701" "PR#701's posture is recorded approved"
+has "$(meta AP1 pr_posture)" "approved@sha-701@" "…in the stored shape, dated with the instant it was first read"
+eq "$(bprio "$K1")" "0" "an approved PR's merge-in is routed at P0"
+eq "$(bprio "$K2")" "1" "…and one whose PR is not approved, under a P2 epic, at P1"
+eq "$(meta "$K1" priority_shift)|$(meta "$K2" priority_shift)" "-1|-1" "…each born carrying the PR-finishing shift"
+eq "$(bparents "$K1")$(bparents "$K2")" "" "…and neither filed with a parent"
+has "$(grep "^bd update $K1 --set-metadata gc.routed_to" "$STUB_GC_LOG")" "--priority 0" "…the priority riding the route's own write"
+
+echo "# …a merge-in whose priority does not settle is left unrouted, and the stranded arm routes it next pass"
+printf '#!/usr/bin/env bash\necho "queue-priority: settle: cannot compute the priority of $2" >&2\nexit 1\n' > "$TMP/qp-fail"
+chmod +x "$TMP/qp-fail"
+store "[$(anchor SQ1 703)]"
+printf '%s' "$(prview 703 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_703.json"
+approve 703
+out=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-fail" run)
+K=$(reworks_of SQ1)
+has "$out" "rework $K formed but did not settle at its priority; left unrouted" "the child is formed but held, named"
+eq "$(meta "$K" 'gc.routed_to')" "<absent>" "…carrying no route, so no pool claims it at a priority it was never ranked at"
+out=$(run)
+has "$out" "re-routing stranded rework $K" "the next pass re-routes the strand"
+eq "$(meta "$K" 'gc.routed_to')" "$FIX" "…to the fix pool"
+eq "$(bprio "$K")" "1" "…at its priority"
 
 echo "# …an UNAPPROVED conflicting PR files no merge-in: its posture is recorded, and one line says why"
 # A bring-current costs a polecat round and a CI run, and goes stale whenever
@@ -1270,6 +1319,11 @@ eq "$(jq '[.[] | select((.metadata.rejection_reason // "") | test("stale base"))
 VP=$(vpass_id CF1)
 hasnt "$VP" "<none>" "…a human-lane validation pass is opened on the anchor"
 eq "$(meta "$VP" check_name)" "human" "…on the lane the validator's finding query selects"
+eq "$(meta "$VP" priority_shift)" "-1" "…born carrying the PR-finishing shift"
+eq "$(bparents "$VP")" "" "…with no parent, so no hold on an epic reaches it"
+eq "$(meta "$CFIX" priority_shift)" "-1" "…and the comment rework is born carrying the shift too"
+eq "$(bparents "$CFIX")" "" "…with no parent"
+eq "$(bprio "$CFIX")" "1" "…routed at CF1's priority less one: CF1 reads at bd's default P2, its posture holding a change request"
 FID=$(jq -r '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "CF1") | .id ] | .[0] // "<none>"' "$STUB_STORE")
 hasnt "$FID" "<none>" "…the comment becomes a finding on the anchor, so the write-back has an input"
 eq "$(meta "$FID" 'finding.lane')" "human" "…on the human lane the validator rules"
@@ -2224,6 +2278,48 @@ eq "$(meta AG3 pr_comment_watermark)" "9605" "…the new comment routes"
 CB=$(jq -r '[ .[] | select((.metadata.anchor_bead // "") == "AG3") | select((.metadata.task_kind // "") == "rework") | .description ] | .[0] // ""' "$STUB_STORE")
 has "$CB" "a new comment" "the work order carries the new comment"
 hasnt "$CB" "confirmed comment" "…and not the one the mark confirmed"
+
+echo "# a posture that turns approved re-ranks the anchor's PR-finishing work in the pass that records it"
+# The anchor sits under the P2 epic EP2 with review_required recorded, so its
+# PR-finishing work runs at P1: a rework, a review slung with its workflow (input
+# convoy, root and step), and a validation pass, each at shift -1. GitHub now
+# reports PR#710 APPROVED. The posture-only pass that records approved settles
+# each at P0 with its workflow. A finding carries anchor_bead too, but it is a
+# record no pool claims, so it is left as it is.
+finishing() { # <id> <kind> [extra-metadata]
+  printf '{"id":"%s","status":"open","assignee":"","notes":"","title":"%s of PRF1","priority":1,"metadata":{"anchor_bead":"PRF1","task_kind":"%s","priority_shift":-1%s}}' \
+    "$1" "$2" "$2" "${3:-}"
+}
+store "[$EP2, $(anchor PRF1 710 ',"pr_posture":"review_required@sha-710@2026-10-11T00:00:00Z","pr_merge_state":"BLOCKED@sha-710"' | under_ep2),
+        $(finishing PRW rework ',"gc.routed_to":"rig/gc-toolkit.polecat","branch":"polecat/x710"'),
+        $(finishing PRV review ',"gc.execution_routed_to":"rig/gc-toolkit.polecat-codex","check_name":"correctness"'),
+        {\"id\":\"PCV\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"convoy\",\"issue_type\":\"convoy\",\"priority\":1,\"metadata\":{\"gc.synthetic\":\"true\"},\"dependencies\":[{\"issue_id\":\"PCV\",\"depends_on_id\":\"PRV\",\"type\":\"tracks\"}]},
+        {\"id\":\"PRT\",\"status\":\"in_progress\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"root\",\"priority\":1,\"metadata\":{\"gc.kind\":\"workflow\",\"gc.input_convoy_id\":\"PCV\"}},
+        {\"id\":\"PST\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"step\",\"priority\":1,\"metadata\":{\"gc.root_bead_id\":\"PRT\",\"gc.routed_to\":\"rig/gc-toolkit.polecat-codex\"}},
+        $(finishing PVP validation ',"check_name":"correctness"'),
+        $(finishing PFD finding | jq -c '.priority = 2 | .metadata |= del(.priority_shift)')]"
+printf 'PCV|tracks|PRV\n' >> "$STUB_DEPS"
+printf '%s' "$(prview 710 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_710.json"
+approve 710; echo '[]' > "$GH_DIR/comments_710.json"
+out=$(run_posture)
+eq "$(meta_pinned PRF1 pr_posture)" "approved@sha-710" "the posture-only pass records approved"
+for b in PRW PRV PCV PRT PST PVP; do eq "$(bprio "$b")" "0" "…and $b, PR-finishing work or the workflow of one, reaches P0 in that pass"; done
+eq "$(bprio PFD)" "2" "…while a finding, which no pool claims, is left as it is"
+has "$out" "PRF1 — its PR's posture moved from review_required to approved; re-ranked 3 bead(s) of its PR-finishing work" "…and the pass names the re-rank"
+echo "# …and once the PR stops being approved, the same work returns to its anchor's priority less one"
+printf '%s' "$(prview 710 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_710.json"
+echo '[]' > "$GH_DIR/reviews_710.json"
+out=$(run_posture)
+eq "$(meta_pinned PRF1 pr_posture)" "review_required@sha-710" "the posture-only pass records review_required"
+for b in PRW PRV PCV PRT PST PVP; do eq "$(bprio "$b")" "1" "…and $b is back at P1"; done
+echo "# …a posture that moves between two others re-ranks nothing"
+printf '[{"id":881710,"user":{"login":"human2"},"state":"CHANGES_REQUESTED","body":"","commit_id":"sha-710","submitted_at":"2026-08-21T01:00:00Z"}]' > "$GH_DIR/reviews_710.json"
+printf '%s' "$(prview 710 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_710.json"
+: > "$STUB_GC_LOG"
+out=$(run_posture)
+eq "$(meta_pinned PRF1 pr_posture)" "changes_requested@sha-710" "the posture moves to changes_requested"
+hasnt "$out" "re-ranked" "…and nothing is re-ranked, since neither posture is approved"
+hasnt "$(cat "$STUB_GC_LOG")" "--priority" "…and no priority is written"
 
 fi # part posture
 
@@ -5120,6 +5216,9 @@ has "$(meta new-2 rejection_reason)" "test" "…names the failing check"
 has "$(meta new-2 rejection_reason)" "actions/runs/999" "…and carries the run log url"
 grep -qxF "new-2|blocks|RC1" "$STUB_DEPS" && ok "child blocks the anchor" || bad "blocks edge missing"
 eq "$(meta RC1 merge_result)" "pull_request" "the anchor keeps gating (no state flip)"
+eq "$(meta new-2 priority_shift)" "-1" "the red-check rework is born carrying the PR-finishing shift"
+eq "$(bparents new-2)" "" "…with no parent, so no hold on an epic reaches it"
+eq "$(bprio new-2)" "1" "…routed at RC1's priority less one, RC1 reading at bd's default P2"
 
 echo "# …dedup: an open child at this head suppresses a twin (rework OR review)"
 out=$(run)

@@ -664,11 +664,20 @@ eq "$(bstatus tk-w1)|$(bstatus tk-h1)|$(bstatus tk-r1)|$(bstatus tk-p1)|$(bstatu
 out=$(STUB_LIST_FAIL=1 bd_unmake_orphans task_kind "Review branch" "n"); rc=$?
 eq "$rc|$out" "1|" "bd_unmake_orphans: a listing that does not answer returns 1 and closes nothing"
 
+# --- pr_finishing_birth: a PR-finishing child is born carrying the shift -------
+eq "$PR_FINISHING_SHIFT" "-1" "PR_FINISHING_SHIFT: PR-finishing work is filed one level sooner than its anchor"
+eq "$(pr_finishing_birth '{"task_kind":"rework","anchor_bead":"tk-anc"}')" \
+  '{"task_kind":"rework","anchor_bead":"tk-anc","priority_shift":-1}' \
+  "pr_finishing_birth: the work order with priority_shift added, as a number"
+out=$(pr_finishing_birth '["not","an","object"]'); rc=$?
+[ "$rc" -ne 0 ] && [ -z "$out" ] && ok "…and a work order that is not an object prints nothing and fails" \
+  || bad "…and a work order that is not an object prints nothing and fails (rc=$rc out='$out')"
+
 # --- validation_work_order: the shape mol-validate reads ----------------------
 eq "$(validation_work_order tk-anc correctness abc123)" \
-  '{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"correctness","reviewed_oid":"abc123"}' \
-  "validation_work_order: task_kind, anchor, lane and the reviewed head"
-eq "$(validation_work_order tk-anc human "")" '{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"human"}' \
+  '{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"correctness","reviewed_oid":"abc123","priority_shift":-1}' \
+  "validation_work_order: task_kind, anchor, lane and the reviewed head, born carrying the PR-finishing shift"
+eq "$(validation_work_order tk-anc human "")" '{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"human","priority_shift":-1}' \
   "…and an empty head leaves the pin out"
 eq "$(printf '%s' "$(validation_work_order tk-anc human x)" | jq -r --arg s "$VALIDATION_SELECT" '. as $m | $s | split(",") | all(.[]; . as $k | $m | has($k))')" "true" \
   "…carrying every key VALIDATION_SELECT names"

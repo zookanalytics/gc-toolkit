@@ -181,9 +181,11 @@ The human surface is subject / visit / takeaway on native primitives
   park. [steering.md](steering.md) says what a park holds and what it does not.
 - **A priority decides the order work runs in.** A bead's priority is the
   priority of the bead it follows plus its own shift, so work under an epic
-  queues at the epic's priority. `gc-helm.sh priority` sets an epic's priority,
-  or a member's shift, and re-ranks the work that follows it, workflows already
-  poured included ([steering.md](steering.md#priority)).
+  queues at the epic's priority. A PR's finishing work, which never has a
+  parent, runs one level sooner than its anchor, and at P0 once the PR is
+  approved. `gc-helm.sh priority` sets an epic's priority, or a member's shift,
+  and re-ranks the work that follows it, workflows already poured included
+  ([steering.md](steering.md#priority)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
   per render from the ledger. `gc-helm.sh` carries the write verbs open,
   engage, react, takeaway, demand, dismiss, accept, park and priority, and the

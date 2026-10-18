@@ -1258,7 +1258,11 @@ keys = ["priority_shift"]
 # priority_shift — the bead's shift from the bead it follows: +1 is one level
 #   later and -1 one level sooner, and each level stops at P0 and P4. Written by
 #   queue-priority.sh move, which `gc-helm.sh priority --shift` runs, and read
-#   back there. Read by priority-lib.sh wherever a priority is computed:
+#   back there. Each creator of PR-finishing work (gate-ensure.sh, pr-facts.sh,
+#   pre-open-rebase.sh, rework-child.sh and signoff.sh) also writes it, -1, in
+#   the create that files a child, through bd-lib.sh's pr_finishing_birth, and
+#   never rewrites it on a child it adopts or re-routes. Read by priority-lib.sh
+#   wherever a priority is computed:
 #   queue-priority.sh settle, its move and its reconcile pass. Read only on a
 #   bead that follows a parent or an anchor: a workflow's convoy, root and steps
 #   carry no shift, and a bead that follows nothing has nothing to shift from.

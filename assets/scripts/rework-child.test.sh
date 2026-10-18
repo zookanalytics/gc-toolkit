@@ -41,9 +41,11 @@ if [ "${1:-}" = "sling" ]; then
     esac
     shift || true
   done
+  # A pour copies the bead's priority into its workflow once: poured_priority
+  # records it, bd's default 2 when none was written.
   tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-rc.XXXXXX")
   jq -c --arg id "$bead" --arg p "$pool" \
-    'map(if .id == $id then (.metadata["gc.execution_routed_to"] = $p | .metadata |= del(.["gc.routed_to"])) else . end)' \
+    'map(if .id == $id then (.metadata["gc.execution_routed_to"] = $p | .metadata |= del(.["gc.routed_to"]) | .poured_priority = (.priority // 2)) else . end)' \
     "$STORE" > "$tmp" && mv "$tmp" "$STORE"
   exit 0
 fi
@@ -54,7 +56,8 @@ fi
 shift
 case "${1:-}" in
   show)
-    out=$(jq -c --arg id "$2" '[.[] | select(.id == $id)]' "$STORE")
+    # Every bead bd prints carries a priority, P2 unless one was written.
+    out=$(jq -c --arg id "$2" '[.[] | select(.id == $id) | .priority //= 2]' "$STORE")
     if [ "$(printf '%s' "$out" | jq 'length')" = "0" ]; then echo '{"error":"no issues found"}'
     else printf '%s\n' "$out"; fi ;;
   update)
@@ -65,6 +68,9 @@ case "${1:-}" in
         --set-metadata) shift; k="${1%%=*}"; v="${1#*=}"
           jq -c --arg id "$id" --arg k "$k" --arg v "$v" \
             'map(if .id == $id then .metadata[$k] = $v else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
+        --priority|-p) shift
+          jq -c --arg id "$id" --arg p "${1#P}" \
+            'map(if .id == $id then .priority = ($p | tonumber) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
       esac
       shift || true
     done
@@ -72,18 +78,21 @@ case "${1:-}" in
   create)
     shift; title="$1"; shift
     # --deps <type:id> rides the insert, as an edge row from the new bead.
-    cmeta='{}'; cdeps=""
+    # --parent <id> rides the insert as bd writes it: .parent and a
+    # parent-child edge row onto <id>.
+    cmeta='{}'; cdeps=""; cparent=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --metadata) shift; cmeta="${1:-}" ;;
         --deps) shift; cdeps="$cdeps ${1:-}" ;;
+        --parent) shift; cparent="${1:-}"; cdeps="$cdeps parent-child:${1:-}" ;;
       esac
       shift || true
     done
     n=$(cat "$STUB_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$STUB_SEQ"
     printf '%s\n' "$title" >> "${STUB_CREATED:?}"
     tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-rc.XXXXXX")
-    jq -c --arg id "fix-$n" --argjson m "$cmeta" '. + [{"id":$id,"status":"open","assignee":"","metadata":$m,"notes":""}]' "$STORE" > "$tmp" && mv "$tmp" "$STORE"
+    jq -c --arg id "fix-$n" --argjson m "$cmeta" --arg par "$cparent" '. + [{"id":$id,"status":"open","assignee":"","metadata":$m,"notes":""} + (if $par == "" then {} else {parent: $par} end)]' "$STORE" > "$tmp" && mv "$tmp" "$STORE"
     for d in $cdeps; do printf 'fix-%s|%s|%s\n' "$n" "${d#*:}" "${d%%:*}" >> "$DEPS"; done
     printf '{"id":"fix-%s"}\n' "$n" ;;
   dep)
@@ -136,7 +145,7 @@ case "${1:-}" in
       shift || true
     done
     out=$(jq -c --arg st "$statuses" '[ .[] | (.status // "open") as $b
-      | select($st == "" or (($st | split(",")) | index($b))) ]' "$STORE")
+      | select($st == "" or (($st | split(",")) | index($b))) | .priority //= 2 ]' "$STORE")
     for f in ${fields[@]+"${fields[@]}"}; do
       out=$(printf '%s' "$out" | jq -c --arg k "${f%%=*}" --arg v "${f#*=}" \
         '[ .[] | select(((((.metadata // {})[$k]) // "") | tostring) == $v) ]')
@@ -147,6 +156,14 @@ STUB
 chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
 export GC_RIG="gc-toolkit"
+# The priority writer the SUT settles a child with: this tree's queue-priority.sh
+# over the stub store, named by GC_QUEUE_PRIORITY_TOOL. The writer finds a bead's
+# store in the rig list, which the stub does not serve, so the wrapper names a
+# store directory of the suite's own, where the writer keeps its lock.
+mkdir -p "$TMP/qp-rig/.beads"
+printf '#!/usr/bin/env bash\nexec %q "$@" --db %q\n' "$HERE/queue-priority.sh" "$TMP/qp-rig/.beads" > "$BIN/queue-priority"
+chmod +x "$BIN/queue-priority"
+export GC_QUEUE_PRIORITY_TOOL="$BIN/queue-priority"
 export STUB_STORE="$TMP/store.json" STUB_DEPS="$TMP/deps" STUB_GC_LOG="$TMP/gc.log"
 export STUB_SEQ="$TMP/seq" STUB_CREATED="$TMP/created"
 
@@ -160,6 +177,15 @@ reset() {
 }
 meta()    { jq -r --arg id "$1" --arg k "$2" 'first(.[] | select(.id == $id) | .metadata[$k]) // ""' "$STUB_STORE"; }
 created() { wc -l < "$STUB_CREATED" | tr -d ' '; }
+# A bead's priority (bd's default 2 when none was written), the priority the
+# sling poured its workflow at, and every parent it carries: a parent-child edge
+# row or the parent field a create wrote.
+prio()    { jq -r --arg id "$1" 'first(.[] | select(.id == $id) | (.priority // 2)) // "<absent>"' "$STUB_STORE"; }
+poured()  { jq -r --arg id "$1" 'first(.[] | select(.id == $id) | (.poured_priority // "<unpoured>")) // "<absent>"' "$STUB_STORE"; }
+parents() {
+  { awk -F'|' -v id="$1" '$1 == id && $3 == "parent-child" { print $2 }' "$STUB_DEPS"
+    jq -r --arg id "$1" '.[] | select(.id == $id) | (.parent // empty)' "$STUB_STORE"; } | sort -u | paste -sd, -
+}
 WORK=(--anchor anc-1 --branch polecat/anc-1 --target main --title "Rework PR#42: t" --reason "r")
 ROUTE="gc-toolkit/gc-toolkit.polecat"
 
@@ -312,15 +338,70 @@ printf 'c1|anc-1|tracks\n' > "$STUB_DEPS"
 RES=$(STUB_DEP_ADD_FAIL=1 "$SUT" "${WORK[@]}" --ruling-bead vis-1 2>/dev/null)
 eq "$RES" "c1 $ROUTE adopted" "an adopted child already on the pair by another type counts as joined"
 
+echo "# --- PR-finishing work: born with the shift, no parent, slung at its priority ---"
+# Both anchors sit under a P2 epic, each posture in the shape pr-facts.sh stores
+# it. anc-ap's PR is approved, so its rework is slung at P0. anc-cm's carries an
+# unanswered comment, so its rework runs one level sooner than the epic, at P1.
+# A rank that compared the whole stored posture with approved would sling
+# anc-ap's rework at P1, and one that read no shift would sling anc-cm's at P2.
+EPIC='{"id":"ep-2","status":"open","assignee":"","notes":"","issue_type":"epic","priority":2,"metadata":{}}'
+OID=0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901
+anchor_under() { # <id> <posture>: a PR anchor under ep-2, its own stored priority stale
+  jq -nc --arg id "$1" --arg p "$2" '{id: $id, status: "open", assignee: "", notes: "", priority: 4,
+    metadata: {merge_result: "pull_request", branch: ("polecat/" + $id), target: "main", pr_posture: $p},
+    dependencies: [{issue_id: $id, depends_on_id: "ep-2", type: "parent-child"}]}'
+}
+reset "$EPIC" "$(anchor_under anc-ap "approved@$OID@2026-10-11T00:00:00Z")" "$(anchor_under anc-cm "commented@$OID@2026-10-11T00:00:00Z")"
+RES=$("$SUT" --anchor anc-cm --branch polecat/anc-cm --target main --title "Rework PR#43: t" --reason r --review-bead rv-7 2>/dev/null); RC=$?
+eq "$RES" "fix-1 $ROUTE filed" "a review's rework of a PR that is not approved is filed"
+eq "$(meta fix-1 priority_shift)" "-1" "…born carrying the PR-finishing shift"
+eq "$(jq -r 'first(.[] | select(.id == "fix-1") | .metadata.priority_shift | type)' "$STUB_STORE")" "number" "…stored as a number"
+eq "$(parents fix-1)" "" "…with no parent, so no hold on an epic reaches it"
+eq "$(prio fix-1)" "1" "…settled at P1, one level sooner than its anchor under a P2 epic"
+eq "$(poured fix-1)" "1" "…and slung at P1"
+SETTLE_AT=$(grep -n '^bd update fix-1 --priority' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+SLING_AT=$(grep -n '^sling ' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+if [ -n "$SETTLE_AT" ] && [ -n "$SLING_AT" ] && [ "$SETTLE_AT" -lt "$SLING_AT" ]; then
+  ok "…its priority written before the sling"
+else
+  bad "…its priority written before the sling (priority write at log line '${SETTLE_AT:-none}', sling at '${SLING_AT:-none}')"
+fi
+RES=$("$SUT" --anchor anc-ap --branch polecat/anc-ap --target main --title "Rework PR#44: t" --reason r \
+  --ruling-bead vis-7 --pr-url https://github.com/o/r/pull/44 --pr-number 44 2>/dev/null)
+eq "$RES" "fix-2 $ROUTE filed" "an operator ruling's rework of an approved PR is filed"
+eq "$(meta fix-2 priority_shift)" "-1" "…born carrying the shift"
+eq "$(parents fix-2)" "" "…with no parent"
+eq "$(poured fix-2)" "0" "…and slung at P0, since its PR is approved"
+# An adopted child keeps the shift it carries: after its birth the shift is the
+# child's own input. anc-1 carries no priority, so it reads at bd's default P2.
+reset '{"id":"c1","status":"open","assignee":"","notes":"","metadata":{"task_kind":"rework","anchor_bead":"anc-1","source_ruling_bead":"vis-1","priority_shift":2}}'
+RES=$("$SUT" "${WORK[@]}" --ruling-bead vis-1 2>/dev/null)
+eq "$RES" "c1 $ROUTE adopted" "an adopted child is dispatched"
+eq "$(meta c1 priority_shift)" "2" "…keeping the shift it carries"
+eq "$(poured c1)" "4" "…slung at its anchor's priority plus that shift"
+# A settle that does not land slings nothing: the pour would copy a priority the
+# child was never ranked at.
+printf '#!/usr/bin/env bash\necho "queue-priority: settle: could not take the priority lock" >&2\nexit 1\n' > "$TMP/qp-fail"
+chmod +x "$TMP/qp-fail"
+reset
+OUT=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-fail" "$SUT" "${WORK[@]}" --review-bead rv-1 2>&1); RC=$?
+eq "$RC" "2" "a child whose priority does not settle is not dispatched"
+has "$OUT" "fix-1 did not settle at its priority" "…naming the child"
+has "$OUT" "could not take the priority lock" "…with the writer's own reason"
+eq "$(grep -c '^sling ' "$STUB_GC_LOG")" "0" "…and nothing is slung"
+eq "$(meta fix-1 gc.execution_routed_to)" "" "…so no workflow is poured for it"
+eq "$(grep -c '^anc-1|fix-1|blocks$' "$STUB_DEPS")" "1" "…while it blocks the anchor for a retry to adopt"
+
 echo "# --- metadata-key drift against lifecycle.toml ---"
 # A key the writer stamps that nothing registers is state no audit can account
-# for. The provenance keys are written through a variable, outside the
-# extraction, so they are checked by name.
+# for. The provenance keys are written through a variable, and the shift
+# through the create's payload, outside the extraction, so they are checked by
+# name.
 REGISTERED=$(sed -n '/^# The metadata-key registry/,$p' "$HERE/../../lifecycle/lifecycle.toml" \
   | sed 's/#.*//' | grep -oE '"[^"]+"' | tr -d '"' | sort -u)
 WRITTEN=$( { grep -hoE -- '--set-metadata "[A-Za-z_][A-Za-z0-9_.]*=' "$SUT" \
                | sed -E 's/^--set-metadata "//; s/=$//'
-             printf '%s\n' source_review_bead source_ruling_bead; } | sort -u)
+             printf '%s\n' source_review_bead source_ruling_bead priority_shift; } | sort -u)
 if grep -qx 'merge_strategy' <<< "$WRITTEN"; then
   ok "the extraction reads the writer's work-order stamps"
 else

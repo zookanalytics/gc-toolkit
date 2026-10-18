@@ -48,6 +48,12 @@
 # anchor whose facts all read the same, and whose bead still carries that
 # posture at that head, keeps it without the per-PR reads; any other anchor is
 # read as before.
+# Every child this script files is PR-finishing work (docs/steering.md): born
+# carrying the PR-finishing shift and no parent, and routed at the priority
+# queue-priority.sh settle --print computes for it, in the route's own write. An
+# approved PR's finishing work runs at P0, so a posture recorded into or out of
+# approved re-ranks the anchor's open reviews, reworks and validation passes in
+# the pass that records it.
 # Unanswered review feedback routes to something — a fix-pool rework child
 # carrying the review bodies and inline comments verbatim, or a visit when the
 # city has nowhere to route work (no head branch or no fix pool) — with the
@@ -238,6 +244,11 @@ VISIT_CLOSE="$SCRIPTS_DIR/visit-close.sh"
 # method. The human-feedback arm opens such a pass below; a validator that
 # claims the bead reads this note to know the pass is a mol-validate pour.
 VALIDATE_BODY="$SCRIPTS_DIR/validate-dispatch-body.sh"
+# The priority writer (docs/steering.md). Every child this script routes is
+# PR-finishing work, routed at the priority settle --print computes for it in the
+# route's own write, and a posture that turns approved, or stops being approved,
+# re-ranks the anchor's open PR-finishing work through its settle.
+QUEUE_PRIORITY="${GC_QUEUE_PRIORITY_TOOL:-$SCRIPTS_DIR/queue-priority.sh}"
 # The finding primitive. The human-feedback arm files each unanswered item as a
 # task_kind=finding bead through it, so the validation pass it opens has a finding
 # set to rule (specs/tk-ztapg/review-cycle-architecture.md, "Findings").
@@ -827,7 +838,10 @@ mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason
   # newborn that will not verify is closed rather than left half-stamped. Prints the
   # fully-formed, dep-attached, UNROUTED child id and returns 0; the caller stamps
   # gc.routed_to last, so only a complete child becomes claimable. Prints nothing
-  # and returns 1 when the caller should retry next pass.
+  # and returns 1 when the caller should retry next pass. A created child is
+  # PR-finishing work, born carrying the PR-finishing shift and no parent. A
+  # reused one keeps the shift it carries, which after its birth is its own
+  # input.
   #
   # The child is joined to the anchor before anchor_bead lands on it: a create
   # carries the edge (bd_create_child), and a reused strand or orphan is joined
@@ -848,6 +862,7 @@ mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason
       --set-metadata merge_strategy=mr --set-metadata existing_pr="$prurl" \
       --set-metadata pr_url="$prurl" --set-metadata pr_number="$prnum" >/dev/null 2>&1 || true
   else
+    meta=$(pr_finishing_birth "$meta") || return 1
     fix=$(bd_create_child "$anchor" "$title" -t task --metadata "$meta" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   fi
   [ -n "$fix" ] || return 1
@@ -912,6 +927,47 @@ mint_rework_verify() { # <bead> <anchor> <branch> <target> <reason> <mode> <pr-u
        and ($m.merge_strategy // "") == "mr"
        and ($m.existing_pr // "") == $ep and ($m.pr_url // "") == $ep
        and (($m.pr_number // "") | tostring) == $pn) | tostring' 2>/dev/null
+}
+
+route_finishing() { # <child> — route a PR-finishing child to the fix pool at its priority
+  # The route makes the child claimable, so the priority it competes at rides the
+  # same write: settle --print computes it (docs/steering.md), and bd writes the
+  # route and the priority in one row, so the child is never claimable at another
+  # priority. Returns 1, having written nothing, when the priority cannot be
+  # computed. The caller reads the route back.
+  local p
+  p=$("$QUEUE_PRIORITY" settle "$1" --print) || return 1
+  gc bd update "$1" --set-metadata gc.routed_to="$FIX_POOL" --priority "$p" >/dev/null 2>&1 || true
+}
+
+settle_finishing() { # <anchor> <old-posture> <new-posture> — re-rank its PR-finishing work
+  # An approved PR's finishing work runs at P0 whatever its shift, and any other
+  # PR's at its anchor's priority plus its shift (docs/steering.md). So when the
+  # posture this pass recorded moves the PR into or out of approved, the anchor's
+  # open reviews, reworks and validation passes, the work a pool claims, are
+  # settled with their live workflows in this pass. Each settle waits for the
+  # store's priority lock a short while only, since the merge arm waits on this
+  # pass. A child that does not settle is named and keeps its priority until the
+  # next writer of its priority reaches it.
+  local a="$1" was="${2%%@*}" now="${3%%@*}" kids k settled=0 left=""
+  [ "$was" != "$now" ] || return 0
+  [ "$was" = approved ] || [ "$now" = approved ] || return 0
+  if ! kids=$(bd_anchor_children "$a" "open,in_progress,blocked,deferred,hooked"); then
+    echo "$PROG: WARN $a — its PR's posture moved from ${was:-none} to $now, but its PR-finishing work could not be read, so none of it was re-ranked" >&2
+    return 1
+  fi
+  for k in $(printf '%s' "$kids" | jq -r '.[]
+      | select(((.metadata.task_kind // "") | tostring) as $t | ["review", "rework", "validation"] | index($t))
+      | .id' 2>/dev/null); do
+    if QUEUE_PRIORITY_LOCK_WAIT_SECS=30 "$QUEUE_PRIORITY" settle "$k" >/dev/null; then
+      settled=$((settled + 1))
+    else
+      left="${left:+$left }$k"
+    fi
+  done
+  [ "$settled" -eq 0 ] || echo "$PROG: $a — its PR's posture moved from ${was:-none} to $now; re-ranked $settled bead(s) of its PR-finishing work"
+  [ -z "$left" ] || echo "$PROG: WARN $a — its PR's posture moved from ${was:-none} to $now, but $left did not settle at the new priority" >&2
+  [ -z "$left" ]
 }
 
 gh_rows() { # <api path> — one paginated endpoint re-collected into ONE array
@@ -2167,6 +2223,9 @@ MP_EOF
       # that arm, and the full pass reconciles those. A conversation-only write
       # moves no label input.
       [ -z "$wrote_p" ] || [ "${have_p%%@*}" = "$posture" ] || reconcile_status_label "$id" "$num"
+      # A posture moving into or out of approved moves the rank of the anchor's
+      # PR-finishing work, re-ranked in the pass that records it.
+      [ -z "$wrote_p" ] || settle_finishing "$id" "$have_p" "$posture" || true
     else
       echo "$PROG: $id posture/conversation record failed for PR#$num; retry next pass" >&2
     fi
@@ -2585,7 +2644,10 @@ REAP_EOF
         echo "$PROG: $id could not form the rework child for PR#$num; retry next pass" >&2
         skipped=$((skipped + 1)); continue
       fi
-      gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
+      if ! route_finishing "$FIX"; then
+        echo "$PROG: WARN rework $FIX formed but did not settle at its priority; left unrouted, the stranded arm re-routes it next pass" >&2
+        skipped=$((skipped + 1)); continue
+      fi
       rgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
       if [ "$rgot" != "$FIX_POOL" ]; then
         echo "$PROG: WARN rework $FIX formed but not routed to $FIX_POOL; left unrouted, the stranded arm re-routes it next pass" >&2
@@ -2737,7 +2799,10 @@ $CBODY"
         # comes back). It prints the id of a child short of any other key too
         # (its rc 2), so the id says the child exists, not that it can be
         # routed. The work-order check below says that.
-        CFIX=$(printf '%s\n' "$CBODY" | bd_create --select "$CSELECT" --child-of "$id" "$CMETA" "$CTITLE" -t task --deps "blocks:$id" --body-file -); crc=$?
+        # The create alone carries the PR-finishing shift: a child the batch
+        # probe finds keeps the shift it carries, since after its birth the
+        # shift is its own input.
+        CFIX=$(printf '%s\n' "$CBODY" | bd_create --select "$CSELECT" --child-of "$id" "$(pr_finishing_birth "$CMETA")" "$CTITLE" -t task --deps "blocks:$id" --body-file -); crc=$?
         if [ -z "$CFIX" ]; then
           echo "$PROG: $id could not file the comment rework for PR#$num; retry next pass" >&2
           skipped=$((skipped + 1)); continue
@@ -2799,7 +2864,10 @@ $CBODY"
           rgot=$(printf '%s' "$crow" | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
         fi
         if [ "$rgot" != "$FIX_POOL" ]; then
-          gc bd update "$CFIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
+          if ! route_finishing "$CFIX"; then
+            echo "$PROG: WARN comment rework $CFIX did not settle at its priority; NOT routed and NOT watermarking (retry next pass)" >&2
+            skipped=$((skipped + 1)); continue
+          fi
           rgot=$(gc bd show "$CFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
         fi
         if [ "$rgot" != "$FIX_POOL" ]; then
@@ -3504,7 +3572,10 @@ $CBODY"
               echo "$PROG: $id could not form the red-check rework for PR#$num; retry next pass" >&2
               skipped=$((skipped + 1)); continue
             fi
-            gc bd update "$RCFIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
+            if ! route_finishing "$RCFIX"; then
+              echo "$PROG: WARN red-check rework $RCFIX formed but did not settle at its priority; left unrouted, the stranded arm re-routes it next pass" >&2
+              skipped=$((skipped + 1)); continue
+            fi
             rc_rgot=$(gc bd show "$RCFIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
             if [ "$rc_rgot" != "$FIX_POOL" ]; then
               echo "$PROG: WARN red-check rework $RCFIX formed but not routed to $FIX_POOL; left unrouted, the stranded arm re-routes it next pass" >&2

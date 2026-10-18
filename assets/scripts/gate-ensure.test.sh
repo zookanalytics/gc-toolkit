@@ -233,6 +233,56 @@ eq "$(meta A1 dispatch_count)" "<absent>" "no dispatch tally is written on the a
 d=$(jq -r --arg id "$rid" '.[] | select(.id == $id) | .description' "$STUB_STORE")
 has "$d" "METHOD" "the dispatch body came from review-dispatch-body.sh"
 eq "$(meta "$rid" review_pr_url)|$(meta "$rid" review_pr_number)" "<absent>|<absent>" "a pre-open anchor's review carries no PR"
+eq "$(meta "$rid" priority_shift)" "-1" "the review is born carrying the PR-finishing shift"
+eq "$(bparents "$rid")" "" "…with no parent, so no hold on an epic reaches it"
+eq "$(bpoured "$rid")" "1" "…and is slung at its anchor's priority less one (A1 reads at bd's default P2)"
+
+echo "# a review and a validation pass are slung at their rank: P1 under a P2 epic, P0 once the PR is approved"
+# Each anchor sits under the P2 epic EP2, its own stored priority stale, its
+# posture in the shape pr-facts.sh stores it. A review of a PR that is not
+# approved is slung one level sooner than its anchor; a review or a validation
+# pass of an approved PR at P0. A rank that compared the whole stored posture
+# with approved would sling the approved PR's work at P1.
+EP2='{"id":"EP2","status":"open","assignee":"","notes":"","issue_type":"epic","priority":2,"metadata":{}}'
+under_ep2() { # <anchor-json> <posture>
+  printf '%s' "$1" | jq -c --arg p "$2" '.metadata.pr_posture = $p | .priority = 0
+    | .dependencies = [{issue_id: .id, depends_on_id: "EP2", type: "parent-child"}]'
+}
+store "[$EP2, $(under_ep2 "$(anchor RK1 pull_request correctness "" polecat/rk1)" "commented@$(oid rk1)@2026-10-11T00:00:00Z"),
+        $(under_ep2 "$(anchor RK2 pull_request correctness "" polecat/rk2)" "approved@$(oid rk2)@2026-10-11T00:00:00Z"),
+        $(under_ep2 "$(anchor RK3 pull_request correctness "" polecat/rk3)" "approved@$(oid rk3)@2026-10-11T00:00:00Z"),
+        $(validation vp-rk3 RK3 | jq -c '.metadata.priority_shift = -1')]"
+oid rk1 > "$GH_DIR/head_polecat_rk1"; oid rk2 > "$GH_DIR/head_polecat_rk2"; oid rk3 > "$GH_DIR/head_polecat_rk3"
+out=$(run_val)
+rk1=$(jq -r '.[] | select((.metadata.anchor_bead // "") == "RK1" and (.metadata.task_kind // "") == "review") | .id' "$STUB_STORE")
+rk2=$(jq -r '.[] | select((.metadata.anchor_bead // "") == "RK2" and (.metadata.task_kind // "") == "review") | .id' "$STUB_STORE")
+eq "$(bpoured "$rk1")" "1" "a review of a PR that is not approved is slung at P1 under a P2 epic"
+eq "$(bpoured "$rk2")" "0" "a review of an approved PR is slung at P0"
+eq "$(bpoured vp-rk3)" "0" "a validation pass of an approved PR is slung at P0"
+has "$out" "settled vp-rk3 at P0: anchor RK3 has an approved PR, shift -1 aside" "…the settle naming why"
+
+echo "# a review that does not settle at its priority is not slung, and the stranded arm slings it next pass"
+printf '#!/usr/bin/env bash\necho "queue-priority: settle: could not take the priority lock" >&2\nexit 1\n' > "$TMP/qp-fail"
+chmod +x "$TMP/qp-fail"
+store "[$(anchor SF1 pre_open_gate correctness "" polecat/sf1), $(validation vp-sf1 SF1)]"
+oid sf1 > "$GH_DIR/head_polecat_sf1"
+: > "$STUB_GC_LOG"
+out=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-fail" run_val)
+has "$out" "validation pass vp-sf1 did not settle at its priority; not dispatched" "a validation pass that does not settle is held, named"
+hasnt "$(cat "$STUB_GC_LOG")" "sling $VALP vp-sf1" "…and nothing is poured onto it"
+store "[$(anchor SF2 pre_open_gate correctness "" polecat/sf2)]"
+oid sf2 > "$GH_DIR/head_polecat_sf2"
+: > "$STUB_GC_LOG"
+out=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-fail" run)
+sf2=$(jq -r '.[] | select((.metadata.anchor_bead // "") == "SF2") | .id' "$STUB_STORE")
+has "$out" "review $sf2 did not settle at its priority; not slung" "a fresh review that does not settle is filed but not slung"
+hasnt "$(cat "$STUB_GC_LOG")" "sling $POOL" "…so no workflow is poured for it"
+out=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-fail" run)
+has "$out" "stranded review $sf2 did not settle at its priority; not re-slung" "the stranded arm holds it too while its settle fails"
+out=$(run)
+has "$out" "STRANDED review $sf2" "once the settle lands, the stranded arm takes it"
+eq "$(bpoured "$sf2")" "1" "…and slings it at its priority"
+eq "$(jq -r '[ .[] | select((.metadata.anchor_bead // "") == "SF2") ] | length' "$STUB_STORE")" "1" "…with no twin filed beside it"
 
 echo "# a review of an open PR carries the PR, and mol-review pins its gh calls to it"
 # The PR rides keys of its own: gc-helm.sh resolves a PR number to every live
