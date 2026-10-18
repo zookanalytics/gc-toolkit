@@ -322,9 +322,10 @@ if [ "$VERB" = sweep ]; then
   [ -x "$PR_POST" ] || { err "the PR posting helper is missing ($PR_POST); cannot tell the city's posts from feedback"; exit 1; }
   mkdir -p "$DIR/prs" || { err "cannot create $DIR/prs"; exit 1; }
   DIR=$(cd "$DIR" && pwd) && CHECKOUT=$(cd "$CHECKOUT" && pwd) || { err "cannot resolve the work dir or the checkout"; exit 1; }
-  # unread.txt is written once every listed PR has been tried, so a sweep cut
-  # short leaves none, and advance then keeps the outside capture's day.
-  rm -f "$DIR/unread.txt"
+  # read.txt names each PR whose posts sweep.jsonl holds, and is written last,
+  # once the sweep has finished. A sweep cut short leaves none, and advance
+  # then keeps the outside capture's day.
+  rm -f "$DIR/read.txt" || { err "cannot remove an earlier sweep's $DIR/read.txt"; exit 1; }
   cd "$CHECKOUT" || { err "cannot enter $CHECKOUT"; exit 1; }
   "$PR_POST" own-def > "$DIR/own-def.jq" && [ -s "$DIR/own-def.jq" ] \
     || { err "the PR posting helper did not print its provenance definition; cannot tell the city's posts from feedback"; exit 1; }
@@ -390,23 +391,26 @@ if [ "$VERB" = sweep ]; then
       window_since: $window_since, day_key: $day_key, capture_day: $capture_day, swept_on: $swept_on}' > "$DIR/meta.json" \
     || { err "cannot write $DIR/meta.json"; exit 1; }
 
-  jq -r '.[].number' "$DIR/prs.json" > "$DIR/prs.txt"
-  : > "$DIR/sweep.jsonl"
+  jq -r '.[].number' "$DIR/prs.json" > "$DIR/prs.txt" \
+    || { err "could not list the PRs to read from $DIR/prs.json"; exit 1; }
   if [ -s "$DIR/prs.txt" ]; then
     xargs -n 1 -P "$JOBS" "$ME" fetch-pr --dir "$DIR" < "$DIR/prs.txt"
-    while IFS= read -r n; do
-      [ -f "$DIR/prs/$n.jsonl" ] && cat "$DIR/prs/$n.jsonl" >> "$DIR/sweep.jsonl"
-    done < "$DIR/prs.txt"
   fi
-  # A PR whose worker wrote no posts file did not read, whether a read failed
-  # or the worker never ran. Its posts are missing from this sweep only:
-  # unread.txt keeps the outside capture's day from moving past the PR's
-  # close, so the next run reads the PR again.
+  # The sweep is assembled aside and replaces sweep.jsonl whole. read.part
+  # names each PR whose posts were copied in. A PR whose worker wrote no posts
+  # file did not read, whether a read failed or the worker never ran, and is
+  # left out, so advance holds the outside capture's day at the PR's last
+  # update and the next run reads it again. A posts file that does not copy in
+  # stops the sweep with no read.txt, because the copy can leave a cut line
+  # that no reader of the sweep could parse.
+  : > "$DIR/sweep.part" && : > "$DIR/read.part" || { err "cannot write the sweep in $DIR"; exit 1; }
   UNREAD=""
   while IFS= read -r n; do
-    [ -f "$DIR/prs/$n.jsonl" ] || UNREAD="$UNREAD $n"
+    if [ ! -f "$DIR/prs/$n.jsonl" ]; then UNREAD="$UNREAD $n"; continue; fi
+    cat "$DIR/prs/$n.jsonl" >> "$DIR/sweep.part" && printf '%s\n' "$n" >> "$DIR/read.part" \
+      || { err "could not add PR #$n's posts to the sweep, so the sweep did not finish"; exit 1; }
   done < "$DIR/prs.txt"
-  for n in $UNREAD; do echo "$n"; done > "$DIR/unread.txt" || { err "cannot write $DIR/unread.txt"; exit 1; }
+  mv -f "$DIR/sweep.part" "$DIR/sweep.jsonl" || { err "cannot write $DIR/sweep.jsonl"; exit 1; }
   [ -z "$UNREAD" ] || warn "PR(s) that did not read, left for the next run:$UNREAD"
 
   # The flag needs each PR's provenance cutover, read only when some unmarked
@@ -428,6 +432,7 @@ if [ "$VERB" = sweep ]; then
       warn "the anchors' provenance cutovers did not read, so no unmarked city post is flagged this run"
     fi
   fi
+  mv -f "$DIR/read.part" "$DIR/read.txt" || { err "cannot write $DIR/read.txt"; exit 1; }
 
   jq -rs --arg slug "$SLUG" --arg since "$SINCE" --arg ws "$WINDOW_SINCE" --argjson listed "$(jq 'length' "$DIR/prs.json")" '
     "\($slug): read \($listed) merged or closed PR(s) updated since \($since); the standing window starts \($ws)",
@@ -723,23 +728,26 @@ $LIST"
 fi
 
 # --- advance -------------------------------------------------------------------------
-# The run still owes each PR that did not read, and each PR with an outside post
-# the store does not record. The outside capture's day moves to the oldest last
-# update among them, so the next run, which lists every PR updated since, reads
-# every one again, or to the sweep's own day when the run owes none. A PR's
-# last update only moves later, so no owed PR falls before the day. A day that
-# another run moved after this sweep read it is left alone.
+# The run still owes each PR the sweep listed that read.txt does not name, and
+# each PR with an outside post the store does not record. A PR is read only
+# when read.txt names it, so a PR that leaves the sweep by any path stays owed.
+# The outside capture's day moves to the oldest last update among the owed PRs,
+# so the next run, which lists every PR updated since, reads every one again,
+# or to the sweep's own day when the run owes none. A PR's last update only
+# moves later, so no owed PR falls before the day. A day that another run moved
+# after this sweep read it is left alone.
 if [ "$VERB" = advance ]; then
   RIG=$(meta rig); DAY_KEY=$(meta day_key); CAPTURE_DAY=$(meta capture_day); SWEPT=$(meta swept_on)
   [ -n "$DAY_KEY" ] && is_day "$SWEPT" || { err "$DIR's sweep records no outside capture day; run sweep again"; exit 1; }
-  [ -f "$DIR/unread.txt" ] || { err "the sweep in $DIR did not finish, so the outside capture stays at $CAPTURE_DAY"; exit 1; }
+  [ -f "$DIR/read.txt" ] || { err "the sweep in $DIR did not finish, so the outside capture stays at $CAPTURE_DAY"; exit 1; }
   # The store the sweep read, which is the one the day was read from.
   [ -n "$RIG" ] && export GC_RIG="$RIG"
   cd "$(meta checkout)" 2>/dev/null || { err "cannot enter the swept checkout"; exit 1; }
   read_surface "$DIR/obs.now.json" || exit 1
-  OWED=$(jq -sc --slurpfile obs "$DIR/obs.now.json" --slurpfile prs "$DIR/prs.json" --rawfile unread "$DIR/unread.txt" \
+  OWED=$(jq -sc --slurpfile obs "$DIR/obs.now.json" --slurpfile prs "$DIR/prs.json" --rawfile read "$DIR/read.txt" \
               --arg oc "$OUTSIDE_CATEGORY" '
-    ($unread | split("\n") | map(select(length > 0) | tonumber)) as $u
+    ($read | split("\n") | map(select(length > 0) | tonumber)) as $r
+    | ($prs[0] | map(.number | select(IN($r[]) | not))) as $u
     | map(select(.class == "outside" and (.key as $k | any(($obs[0][$k] // [])[]; .category == $oc) | not))) as $left
     | ($prs[0] | map({key: (.number | tostring), value: (.updated // "")}) | from_entries) as $updated
     | (($u + ($left | map(.pr))) | unique) as $owed

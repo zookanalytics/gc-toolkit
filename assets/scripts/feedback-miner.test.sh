@@ -242,6 +242,30 @@ exec "$REAL_JQ" "$@"
 STUB
 chmod +x "$KILLBIN/jq"
 
+# cat and jq stand-ins, put on PATH for one sweep only, that each fail one
+# call. cat exits 1 on the file whose path ends in STUB_CAT_FAIL, the way a
+# read that fails does. jq, when STUB_JQ_LIST_FAIL is set, prints the first
+# number of the sweep's PR list and exits 5, the way a write that fails partway
+# does. Every other call goes to the real tool.
+FAULTBIN="$TMP/faultbin"; mkdir -p "$FAULTBIN"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'REAL_CAT=%q\n' "$(command -v cat)"; cat; } > "$FAULTBIN/cat" <<'STUB'
+if [ -n "${STUB_CAT_FAIL:-}" ]; then
+  case "${!#}" in
+    *"$STUB_CAT_FAIL") echo "cat: ${!#}: Input/output error" >&2; exit 1 ;;
+  esac
+fi
+exec "$REAL_CAT" "$@"
+STUB
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'REAL_JQ=%q\n' "$(command -v jq)"; cat; } > "$FAULTBIN/jq" <<'STUB'
+if [ -n "${STUB_JQ_LIST_FAIL:-}" ]; then
+  case " $* " in
+    *" -r .[].number "*) "$REAL_JQ" "$@" | head -n 1; exit 5 ;;
+  esac
+fi
+exec "$REAL_JQ" "$@"
+STUB
+chmod +x "$FAULTBIN/cat" "$FAULTBIN/jq"
+
 export PATH="$BIN:$PATH"
 export STUB_LOG="$TMP" STUB_FIX="$FIX" STUB_STORE="$STORE"
 # The flag files through the real patrol-finding.sh beside the miner.
@@ -780,7 +804,7 @@ has "$OUT" "did not read, left for the next run: 11" "(84) the PR that did not r
 eq "$(class_of "$(key 12 comment 401)")" "outside" "(85) the other PRs are still swept"
 OUT=$("$SUT" advance --dir "$W" 2>&1)
 has "$OUT" "moves to $(updated_on 11): 1 PR(s) still owe a read (#11): 1 did not read, and 0 outside post(s) are not recorded yet" \
-    "(85f) a PR that did not read holds the day at its close"
+    "(85f) a PR that did not read holds the day at its last update"
 eq "$(kv_day)" "$(updated_on 11)" "(85g) so the next run reads it again"
 : > "$TMP/gh.log"
 "$SUT" sweep --checkout "$CO" --days 30 --backfill-days 30 --dir "$W" >/dev/null 2>&1
@@ -794,22 +818,22 @@ has "$OUT" "did not read, left for the next run: 11" "(85c) a worker killed whil
 "$SUT" sweep --checkout "$CO" --days 30 --backfill-days 30 --dir "$W" >/dev/null 2>&1
 eq "$(class_of "$(key 11 review 101)")" "outside" "(85d) so a resumed sweep into the same dir reads it again"
 jq -s 'length' "$W/sweep.jsonl" >/dev/null 2>&1; eq "$?" "0" "(85e) and every line of the resumed sweep parses"
-# A sweep cut short before it tried every PR writes no unread.txt.
-rm -f "$W/unread.txt"
+# A sweep cut short before it finished writes no read.txt.
+rm -f "$W/read.txt"
 kv_put "$(day 30)"
 OUT=$("$SUT" advance --dir "$W" 2>&1); RC=$?
 eq "$RC" "1" "(85i) advance after a sweep that did not finish exits 1"
 has "$OUT" "the sweep in $W did not finish, so the outside capture stays at" "(85i2) and says the sweep did not finish"
 eq "$(kv_day)" "$(day 30)" "(85j) and keeps the day"
-# A sweep removes unread.txt before anything that can stop it. Otherwise one
+# A sweep removes read.txt before anything that can stop it. Otherwise one
 # that stops partway in a dir where an earlier sweep finished would leave that
 # sweep's list for advance to read beside its own partial posts.
 fresh_dir u
-unread_list() { [ -f "$W/unread.txt" ] && echo written || echo none; }
+read_list() { [ -f "$W/read.txt" ] && echo written || echo none; }
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
-eq "$(unread_list)" "written" "(85m) a sweep that finishes writes unread.txt"
+eq "$(read_list)" "written" "(85m) a sweep that finishes writes read.txt"
 STUB_KV_BROKEN=1 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
-eq "$(unread_list)" "none" "(85n) a sweep that stops partway in the same dir removes it"
+eq "$(read_list)" "none" "(85n) a sweep that stops partway in the same dir removes it"
 "$SUT" advance --dir "$W" >/dev/null 2>&1; eq "$?" "1" "(85o) so advance refuses to move the day"
 eq "$(kv_day)" "$(day 30)" "(85p) which stays where it was"
 # PR 12 was last updated before the recorded day, and a 30-day window still
@@ -826,6 +850,34 @@ has "$OUT" "moves to $(updated_on 12): 1 PR(s) still owe a read (#12): 1 did not
 fresh_dir o2
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
 eq "$(class_of "$(key 12 comment 401)")" "outside" "(85l) so a later run with a 3-day window reads it again"
+# A PR's posts that do not copy into the sweep whole stop the sweep with no
+# read.txt, so advance cannot move the day past that PR. The cat stand-in fails
+# partway through PR 12's posts, the ten-day-old PR only the back-fill reads.
+fresh_dir catfail
+kv_put "$(day 30)"
+OUT=$(PATH="$FAULTBIN:$PATH" STUB_CAT_FAIL=/prs/12.jsonl "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1); RC=$?
+eq "$RC" "1" "(85q) a PR's posts that do not copy into the sweep stop the sweep"
+has "$OUT" "could not add PR #12's posts to the sweep" "(85r) and it names the PR"
+eq "$(read_list)" "none" "(85s) with no read.txt"
+eq "$([ -f "$W/sweep.jsonl" ] && echo published || echo none)" "none" "(85t) and no sweep.jsonl for show or file to read"
+"$SUT" advance --dir "$W" >/dev/null 2>&1; eq "$?" "1" "(85u) so advance refuses to move the day"
+eq "$(kv_day)" "$(day 30)" "(85v) which stays before PR 12's last update"
+# A PR list that does not write whole stops the sweep before it reads a PR.
+fresh_dir listfail
+OUT=$(PATH="$FAULTBIN:$PATH" STUB_JQ_LIST_FAIL=1 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1); RC=$?
+eq "$RC" "1" "(85w) a PR list that does not write whole stops the sweep"
+has "$OUT" "could not list the PRs to read" "(85x) and says why"
+eq "$(grep -c '^api repos/' "$TMP/gh.log" || true)|$(read_list)" "0|none" "(85y) before it reads a PR, with no read.txt"
+# advance owes every PR the sweep listed that read.txt does not name, so a PR
+# that leaves the sweep by any path holds the day at its last update.
+fresh_dir held
+kv_put "$(day 30)"
+"$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
+awk '$0 != "12"' "$W/read.txt" > "$W/read.next" && mv "$W/read.next" "$W/read.txt"
+OUT=$("$SUT" advance --dir "$W" 2>&1)
+has "$OUT" "moves to $(updated_on 12): 1 PR(s) still owe a read (#12): 1 did not read, and 0 outside post(s) are not recorded yet" \
+    "(85z) a listed PR that read.txt does not name is owed"
+eq "$(kv_day)" "$(updated_on 12)" "(85z2) so the day holds at its last update"
 kv_put "$(day 0)"
 fresh_dir d
 OUT=$(STUB_OBS_BROKEN=1 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1); RC=$?
