@@ -26,8 +26,18 @@
 # roster entry for GC_RIG, the lookup the patrol's blocks make. Every git call
 # names the repository with -C, so the caller's cwd plays no part. The prep
 # worktree is detached, so staging and teardown create and delete no branch,
-# and the rig root's HEAD never moves. A leftover git will not remove fails the
-# add, and stage says so.
+# and the rig root's HEAD never moves.
+#
+# A `worktree add` killed partway leaves its worktree locked, and git refuses
+# a locked worktree a single --force. So both remove the prep worktree with
+# --force given twice, and stage adds it with -f given twice, which git needs
+# to reuse the path of a locked worktree whose directory holds no .git file,
+# one the removal cannot clear. A directory git does not know as a worktree is
+# left alone: teardown says it is still there, and stage's add fails and says
+# so. Neither prunes. A prune reaches every worktree of the rig, and at the
+# prep path it changes no stage's outcome: it skips a locked worktree, and where
+# it drops a registration, the add meets the same directory it meets without
+# the prune.
 #
 # Exit: 0 done · 1 stage could not add the worktree, teardown left it behind,
 #       or checks could not empty the directory · 2 usage, or no rig root git
@@ -79,12 +89,12 @@ gone() { [ ! -e "$1" ] && [ ! -L "$1" ]; }
 
 case "$SUB" in
   stage)
-    git -C "$RIG_ROOT" worktree remove --force "$PREP" >/dev/null 2>&1 || true
-    git -C "$RIG_ROOT" worktree add -f --detach "$PREP" "origin/$BRANCH" \
+    git -C "$RIG_ROOT" worktree remove --force --force "$PREP" >/dev/null 2>&1 || true
+    git -C "$RIG_ROOT" worktree add -f -f --detach "$PREP" "origin/$BRANCH" \
       || { echo "$PROG: could not add the prep worktree $PREP at origin/$BRANCH" >&2; exit 1; }
     ;;
   teardown)
-    git -C "$RIG_ROOT" worktree remove --force "$PREP" >/dev/null 2>&1 || true
+    git -C "$RIG_ROOT" worktree remove --force --force "$PREP" >/dev/null 2>&1 || true
     gone "$PREP" || { echo "$PROG: the prep worktree $PREP is still there" >&2; exit 1; }
     ;;
   checks)
