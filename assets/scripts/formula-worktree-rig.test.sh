@@ -435,6 +435,43 @@ for errexit in off on; do
     || bad "direct-merge/protected, errexit $errexit: no lifecycle transition"
 done
 
+# moved_case <label> [<bash option>...]: the block against an origin/main that
+# moved on after the branch was prepared, followed by the strategy the mr path
+# reads. Sets RC, D and MOVED (and patrol_rig's globals).
+moved_case() {
+  local d="$TMP/merge-moved-$1" rc=0
+  shift
+  mkdir -p "$d/tmp"
+  patrol_rig "$d" "merge moved"
+  git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+  git -C "$d/seed" checkout -q main
+  MOVED=$(commit "$d/seed" "landed while the gate ran")
+  git -C "$d/seed" push -q "$d/origin.git" main
+  pick env "$d/rig"
+  ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET=main BRANCH=polecat/wb \
+      GC_CITY_PATH="$PACK_CITY" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$@" "$TMP/merge-then.sh" ) >"$d/out" 2>&1 || rc=$?
+  RC=$rc; D=$d
+}
+
+# The script's exit 4 ends the block undrained, and sends the cycle to
+# next-iteration instead of either landing path.
+for errexit in off on; do
+  if [ "$errexit" = on ]; then moved_case "$errexit" -eu; else moved_case "$errexit"; fi
+  eq "$RC" 4 "direct-merge/moved, errexit $errexit: the block exits 4"
+  grep -qF 'jump to next-iteration' "$D/out" \
+    && ok "direct-merge/moved, errexit $errexit: it says to jump to next-iteration" \
+    || bad "direct-merge/moved, errexit $errexit: it says to jump to next-iteration" "$(cat "$D/out")"
+  grep -q '^MERGE_STRATEGY=' "$D/out" \
+    && bad "direct-merge/moved, errexit $errexit: the block goes on to neither landing path" \
+    || ok "direct-merge/moved, errexit $errexit: the block goes on to neither landing path"
+  grep -qxF 'runtime drain-ack' "$D/gc.log" 2>/dev/null \
+    && bad "direct-merge/moved, errexit $errexit: the refinery does not drain" \
+    || ok "direct-merge/moved, errexit $errexit: the refinery does not drain"
+  eq "$(git -C "$D/origin.git" rev-parse main)" "$MOVED" "direct-merge/moved, errexit $errexit: origin/main is untouched"
+  [ ! -s "$D/lc.log" ] && ok "direct-merge/moved, errexit $errexit: no lifecycle transition" \
+    || bad "direct-merge/moved, errexit $errexit: no lifecycle transition"
+done
+
 # --- 6. mol-refinery-patrol resolves RIG_ROOT one way. -------------------------
 # Every refinery block derives the prep worktree's path from RIG_ROOT, so two
 # blocks that resolved it differently could stage and read different repos.

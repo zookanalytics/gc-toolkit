@@ -18,15 +18,15 @@
 # The fast-forward is checked against origin/<target> fetched first. A prepared
 # head origin/<target> already carries lands as that tip, which the push leaves
 # as it is. One that is neither behind nor ahead of it was prepared on a target
-# that has moved since, so nothing is pushed or recorded and the work goes back
-# through the next patrol's prepare. A push that lands is read back from a
-# fresh fetch before any bead state moves, and the transition is handed this
-# script's rig root as GC_RIG_ROOT, the checkout lifecycle.sh checks the landing
-# in. A push refused for branch protection (GH006, GH013, "protected branch",
-# "refusing to allow", "Changes must be made through a pull request",
-# "approving review", "Cannot update this protected ref") promotes the bead to
-# merge_strategy=pr and exits 3: the caller takes the mr path, and the prep
-# worktree still holds the prepared head for the PR push.
+# that has moved since. Nothing is pushed or recorded, and the exit (4) tells
+# the caller that the next patrol prepares the branch again. A push that lands
+# is read back from a fresh fetch before any bead state moves, and the
+# transition is handed this script's rig root as GC_RIG_ROOT, the checkout
+# lifecycle.sh checks the landing in. A push refused for branch protection
+# (GH006, GH013, "protected branch", "refusing to allow", "Changes must be made
+# through a pull request", "approving review", "Cannot update this protected
+# ref") promotes the bead to merge_strategy=pr and exits 3: the caller takes the
+# mr path, and the prep worktree still holds the prepared head for the PR push.
 #
 # It never drains the session; the caller decides what a failure ends.
 #
@@ -34,7 +34,8 @@
 # is direct.
 # exit: 0 landed, verified and closed · 1 nothing landed or recorded, or the
 #       landing could not be recorded (the output says which) · 2 usage ·
-#       3 promoted to merge_strategy=pr (take the mr path)
+#       3 promoted to merge_strategy=pr (take the mr path) · 4 origin/<target>
+#       moved after the branch was prepared; nothing pushed or recorded
 set -uo pipefail
 
 PROG="direct-merge-push"
@@ -73,8 +74,11 @@ if git -C "$RIG_ROOT" merge-base --is-ancestor "$PREPARED" "$TIP"; then
   MERGED_SHA="$TIP"
 elif git -C "$RIG_ROOT" merge-base --is-ancestor "$TIP" "$PREPARED"; then
   MERGED_SHA="$PREPARED"
-else
+elif git -C "$RIG_ROOT" merge-base "$PREPARED" "$TIP" >/dev/null 2>&1; then
   echo "the prepared head $PREPARED is not a fast-forward of origin/$TARGET at $TIP, which moved after the branch was prepared; nothing pushed or recorded, so the next patrol prepares the branch again"
+  exit 4
+else
+  echo "the prepared head $PREPARED and origin/$TARGET at $TIP share no history; nothing pushed or recorded"
   exit 1
 fi
 

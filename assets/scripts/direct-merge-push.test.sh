@@ -10,8 +10,8 @@
 #     lifecycle transition handed the rig as GC_RIG_ROOT, with no scratch
 #     worktree, no scratch file and no local branch moved;
 #   - a prepared head origin/main moved past since it was prepared lands
-#     nothing and records nothing (the case a merge's errexit used to be the
-#     only stop for);
+#     nothing, records nothing and exits 4, and one that shares no history with
+#     origin/main exits 1;
 #   - a prepared head origin/main already carries closes as that tip;
 #   - a push refused for branch protection promotes the bead to
 #     merge_strategy=pr and exits 3, and any other refused push, a push origin
@@ -129,16 +129,28 @@ eq "$RC" 0 "roster: exits 0"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$FEATURE" "roster: the prepared head landed on the rig's origin"
 eq "$(cat "$D/lc.log.root")" "$D/rig" "roster: the transition is handed the rig the roster named"
 
-echo "── origin/main moved past the prepared head: nothing lands ──"
+echo "── origin/main moved past the prepared head: nothing lands, exit 4 ──"
 setup "$TMP/moved"
 MOVED=$(commit "$D/seed" "landed while the gate ran")
 git -C "$D/seed" push -q "$D/origin.git" main
 run
-eq "$RC" 1 "moved: exits 1"
+eq "$RC" 4 "moved: exits 4"
 has "$OUT" "is not a fast-forward of origin/main" "moved: it says the target moved"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$MOVED" "moved: origin/main is untouched"
 no_transition moved
 no_drain moved
+
+echo "── origin/main shares no history with the prepared head: nothing lands ──"
+setup "$TMP/unrelated"
+git -C "$D/seed" checkout -q --orphan unrelated
+UNRELATED=$(commit "$D/seed" "an unrelated root")
+git -C "$D/seed" push -q -f "$D/origin.git" HEAD:main
+run
+eq "$RC" 1 "unrelated: exits 1"
+has "$OUT" "share no history" "unrelated: it says why"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$UNRELATED" "unrelated: origin/main is untouched"
+no_transition unrelated
+no_drain unrelated
 
 echo "── origin/main already carries the prepared head: it closes as that tip ──"
 setup "$TMP/landed"
