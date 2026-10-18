@@ -1,122 +1,126 @@
 ---
 name: The correctness check on gc-toolkit
-description: The method extension the correctness check appends on gc-toolkit reviews. It names the shell, jq and formula-prose defects this repository's lint and tests leave to the reviewer, and the guard that catches the rest of each.
+description: The method extension the correctness check appends on gc-toolkit reviews. For each surface the repository ships, its bash and jq scripts, the shell blocks in its formulas and skills, its Go services and the helm web app, it names what the gates run and the defects a review there hunts.
 ---
 
 # The correctness check on gc-toolkit
 
-gc-toolkit's scripts are bash and jq, and its formulas and skills carry shell
-blocks that agents run. Each entry below names a defect class a review here
-hunts and the guard that catches part of it, so the review looks hardest where
-no guard reaches.
+gc-toolkit ships bash and jq scripts, shell blocks that agents run from its
+formulas and skills, the Go services `services/gctk` and `services/helm`, and
+the helm web app in `services/helm/web`. Each surface's section opens with what
+the gates run on it, then names the defects that have bitten there and the
+guard for each, so the review looks hardest where no guard reaches.
 
 ## Scope
 
 **Mandate.** The defect classes particular to gc-toolkit that a correctness
-review hunts for, and how much of each the repository's lint and tests catch.
+review hunts on each surface the repository ships, and how much of each the
+repository's gates catch.
 
 **Boundaries.** The method, its grades and the verdict are pack content, in
 `skills/review-correctness/SKILL.md`. The rule a lint detector enforces is
-stated in its header under `tools/lint-learned.d/`. The Go services under
-`services/` get the method alone.
+stated in its header under `tools/lint-learned.d/`.
 
-## What the gates leave to the review
+## Where the gates run
 
-- `tools/lint.sh` shellchecks the `.sh` and shell-shebang files a change names,
-  at warning severity (`assets/scripts/shellcheck-run.sh`). An unquoted
-  expansion (SC2086) and a variable set in a pipeline's subshell (SC2030,
-  SC2031) are info findings, so the gate never reports them. A
-  `# shellcheck disable=` directive a change adds hides its finding from the
-  gate, so read the reason it gives. A shell block in a formula, skill, prompt
-  or doc is never shellchecked.
-- Each detector `tools/lint-learned.sh` runs enforces one rule, inside the
-  scope its header states, and any other shape is the review's.
-- CI runs the suites on Linux and on macOS (`.github/workflows/tests.yml`), so
-  a portability defect fails a job only on a line some test executes.
+`gc formula show mol-polecat-work --rig gc-toolkit` shows the commands the rig
+declares.
 
-## Shell and jq
+- The polecat's self-review runs `lint_command`, which is
+  `tools/lint-learned.sh` and then `tools/lint.sh` over the files the branch
+  changes. It runs the suites `tools/run-tests.sh --affected origin/main`
+  selects, by the rules in that script's header, and stamps the head that
+  passed as the anchor's `self_review_passed_sha`. On a stamp that names the
+  reviewed commit, the method runs no suite.
+- The refinery runs the same `lint_command` at merge, and no tests.
+- CI runs the whole `*.test.sh` suite on Linux and on macOS
+  (`.github/workflows/tests.yml`) and nothing else. Every merge waits on the
+  checks main's ruleset requires.
 
-- **Unquoted expansions.** bash splits and globs an unquoted `$VAR`, so check
-  each one whose value can be empty or hold a space or a glob character.
-- **Errexit and pipelines.** Most scripts set `-u` or `-uo pipefail` without
-  `-e`, so check that each command whose failure matters is tested where it
-  runs, with `|| rc=$?`, `if !` or `|| exit`. Without pipefail,
-  `gc bd list … | jq …` returns jq's status, and a failed read passes as an
-  empty one. With pipefail, `… | grep -q` can fail on a match, because grep
-  exits at the first one and a writer with more to write dies of SIGPIPE
-  (`pipefail-grep-q.sh`). Under `set -e`, a `[ … ] && x=1` that ends a function
-  or a sourced block kills the caller on the false path, which
-  `crash-loop-window.test.sh` pins by sourcing its block under `bash -eu`.
-- **Masked exit codes.** shellcheck reports `local x=$(cmd)` and its `export`,
-  `declare` and `readonly` forms (SC2155). It does not report
-  `if ! x=$(cmd); then rc=$?`, where `$?` is the negation's 0, or an `rc=$?`
-  after `x=$(cmd) || true`. The repository's form is `x=$(cmd) || rc=$?`.
-- **Variables lost in subshells.** An assignment, an array append or an `exit`
-  inside a command substitution, a pipeline stage or a `( … )` group never
-  reaches the caller, and the caller's EXIT trap does not fire there. The
-  repository keeps such state in the caller's shell: `mktemp_tracked` in
-  `assets/scripts/deferred-dispatch.sh` answers in `REPLY` instead of on
-  stdout, and `assets/scripts/converse-reap.sh` loops over a checked temp file
-  with `done < "$FILE"` instead of a pipe. A `<<<` here-string is not that file:
-  bash writes a large one to a temp file of its own, and when that cannot be
-  written the loop runs zero times and reports an empty queue.
-- **Unreadable read as empty.** `jq -r '.x'` prints the string `null` for a
-  missing key, which passes `[ -n "$X" ]`, and `.x // empty` prints nothing.
-  Nothing is also what comes back from a store that did not answer, from input
-  jq could not parse, and from a `2>/dev/null` that hid either. Unreadable is
-  not empty here (`assets/scripts/deferred-dispatch.sh`,
-  `assets/scripts/gate-visit-sweep.sh`): a read whose emptiness decides
-  anything checks its exit status, and an unreadable answer holds or fails
-  closed. A raw control byte in a JSON string makes jq refuse the whole
-  payload, so store text goes through the shared `scrub` helper first, and
-  `inline-ctrl-scrub.sh` flags a scrub written inline.
-- **jq's `//`.** It replaces `false` as well as null, so `.enabled // true` is
-  true for an explicit false, and it does not catch an error raised on its
-  left. `id-read-unguarded.sh` flags `.id // .[0].id` on a bd answer, and any
-  other `a // b` over a value of uncertain shape needs a type guard.
-- **jq versions.** jq 1.7 does not compile a bare `if … end` or `reduce …`
-  followed by `as`, `[i]` or `.key`, and jq 1.8 does. The host runs 1.8, and
-  its `/usr/bin/jq` is 1.7. The Linux CI job runs the jq of its Ubuntu image,
-  1.7 on 24.04 and 1.8 on 26.04, so such a program can pass on the host and
-  fail on Linux. Parenthesize the term, and probe with `/usr/bin/jq`.
+## Bash and jq scripts
+
+`tools/lint.sh` shellchecks the `.sh` and shell-shebang files a change names,
+at warning severity (`assets/scripts/shellcheck-run.sh`). An unquoted expansion
+(SC2086) and a variable set in a pipeline's subshell (SC2030, SC2031) are info
+findings, so the gate never reports them. A `# shellcheck disable=` directive a
+change adds hides its finding from the gate, so read the reason it gives. Each
+detector `tools/lint-learned.sh` runs enforces one rule, inside the scope its
+header states, and any other shape is the review's. CI fails a portability
+defect only on a line some test executes.
+
+- **Errexit.** Most scripts set `-u` or `-uo pipefail` without `-e`, so a
+  command whose failure matters is tested where it runs, with `|| rc=$?`,
+  `if !` or `|| exit`. The repository keeps a status with `x=$(cmd) || rc=$?`.
+  shellcheck reports `local x=$(cmd)` (SC2155), and not
+  `if ! x=$(cmd); then rc=$?` or an `rc=$?` after `x=$(cmd) || true`, which
+  lose the status the same way. Suites source some blocks under `bash -eu`, as
+  `crash-loop-window.test.sh` does, so a block or function that ends on a false
+  `[ … ] && x=1` fails there.
+- **Unreadable is not empty.** A read whose emptiness decides anything checks
+  its exit status, and an unreadable answer holds or fails closed
+  (`assets/scripts/deferred-dispatch.sh`, `assets/scripts/gate-visit-sweep.sh`).
+  A `gc bd list … | jq …` without pipefail reads a store that did not answer as
+  an empty list. `gc bd … --json` can carry a raw control byte inside a note,
+  which makes jq refuse the whole payload, so store text goes through the
+  shared `scrub` helper first, and `inline-ctrl-scrub.sh` flags a scrub written
+  inline.
+- **Loop input.** A loop that can report an all-clear reads an explicit,
+  checked temp file, as `assets/scripts/convoy-graduate.sh` and
+  `assets/scripts/converse-reap.sh` do, never a `<<<` here-string. Under disk
+  pressure bash cannot write the temp file behind a large here-string, so the
+  loop runs zero times and the caller reports nothing found, and no detector
+  flags the shape. A helper whose side effects the caller needs answers in a
+  variable instead of on stdout, as `mktemp_tracked` in
+  `assets/scripts/deferred-dispatch.sh` answers in `REPLY`.
+- **bd metadata in jq.** bd infers a scalar's type at `--set-metadata`, so
+  `k=1` stores a number and `k=true` a boolean, and a comparison with a string
+  takes `tostring` first. `id-read-unguarded.sh` flags `.id // .[0].id` on a bd
+  answer.
+- **jq versions.** The host resolves jq 1.8 first, its `/usr/bin/jq` is 1.7,
+  and the Linux CI job runs its Ubuntu image's jq, 1.7 on 24.04 and 1.8 on
+  26.04. A program that only jq 1.8 compiles, such as a bare `if … end`
+  followed by `[i]` or `.key`, passes on the host and fails that job. Probe
+  with `/usr/bin/jq`.
 - **BSD and GNU userland.** The host is macOS: `sed`, `grep`, `awk`, `date`,
   `stat` and `find` are BSD, `/bin/bash` is 3.2, and `#!/usr/bin/env bash`
   finds bash 5. Where the userlands disagree, the repository tries both
   spellings, as `epoch_of` in `assets/scripts/gc-deacon-ledger.sh` does for
   `date` and `mtime_of` in `formulas/mol-deacon-patrol.toml` does for `stat`,
-  or writes the one form both accept, such as `sed -i.bak … && rm -f ….bak`
-  for an in-place edit.
+  or writes the one form both accept, such as `sed -i.bak … && rm -f ….bak` for
+  an in-place edit. CI's macOS job fails by name when one of those tools
+  resolves outside `/usr/bin` and `/bin`.
 
-## Shell blocks in formula prose
+## Shell blocks in formulas and skills
 
-An agent pastes a formula step's shell blocks into its own tool shell. Review a
-block as that shell runs it.
+No shell block in a formula, skill, prompt or doc is shellchecked. The learned
+detectors that read formula and skill text each catch one shape, and a block
+runs in a test only where a marker fences it.
 
-- **Write for zsh as well as bash.** A block runs in whatever shell the agent
-  has, and a Claude Code agent's is zsh. zsh leaves an unquoted `$VAR`
-  unsplit, so `for x in $LIST` and `cmd $FILES` each get one word, while an
-  unquoted `$(…)` is split. `formula-unquoted-for.sh` flags only the `for`
-  form. An unbraced name before a colon can take a zsh modifier that rewrites
-  what follows, so `"$REV:review-checks.toml"` reaches git as
-  `<rev>eview-checks.toml`. The name is braced, `"${REV}:…"`, and
-  `zsh-colon-modifier.sh` flags the unbraced form. zsh's `echo` expands the
-  backslash escapes in JSON, so JSON reaches jq through `printf '%s'`, never
-  `echo "$X"`. `candidate-pipeline.test.sh` runs its block under
-  `bash -O xpg_echo` and `zsh -f` to catch it.
-- **Each block starts in a fresh shell.** Nothing an earlier block or step set
-  survives, so a block sets every variable it reads, the claimed step's id
-  included, and resolves each script path itself.
-- **`set -e` stops nothing.** In the Claude Code tool shell a block runs on
-  past a failed command even after `set -e`, so a block gates each write with
-  `if` or `|| exit`. Suites source some blocks under `bash -eu`, so a block
-  also has to complete under errexit.
-- **TOML decodes the block first.** Formula descriptions are TOML basic
-  strings. `\\` in the file is one backslash, a backslash before a character
-  TOML does not escape, such as `\$`, stops the formula from parsing, and a
-  backslash at the end of a line joins the next line to it. A suite that
-  extracts a region with awk reads the raw file instead, so a backslash in the
-  region makes it test text the agent never runs, and `lease-heartbeat.test.sh`
-  asserts its regions hold none.
+- **The agent's shell.** An agent pastes a step's blocks into its own tool
+  shell. A codex agent's is zsh, and a Claude agent's is the shell its
+  provider's `CLAUDE_CODE_SHELL` names, or else its login shell, zsh on macOS.
+  So a block is written for zsh as well as bash. Of zsh's unsplit unquoted
+  expansions, `formula-unquoted-for.sh` flags only `for x in $LIST`, so a
+  `cmd $FILES` is the review's. An unbraced name before a colon takes a zsh
+  modifier, so `"$REV:review-checks.toml"` reaches git as
+  `<rev>eview-checks.toml`, and `zsh-colon-modifier.sh` flags it. JSON reaches
+  jq through `printf '%s'`, since zsh's `echo` expands its escapes, and
+  `candidate-pipeline.test.sh` runs its block under `bash -O xpg_echo` and
+  `zsh -f` to catch an `echo`.
+- **No variable survives a tool call.** Each call runs in a fresh shell, so a
+  block sets every variable it reads, the claimed step's id included, and
+  resolves each script path itself, as the formulas' candidate loop does.
+- **`set -e` stops nothing.** In the Claude Code tool shell a block runs on past
+  a failed command even after `set -e`, so a block gates each write with `if`
+  or `|| exit`. Suites source some blocks under `bash -eu`, so a block also has
+  to complete under errexit.
+- **TOML decodes the block first.** A formula step's description is a TOML
+  basic string, so the agent runs the block as TOML decodes it: `\\` in the
+  file is one backslash, `\$` stops the formula from parsing, and a backslash
+  at the end of a line joins the next line to it. A suite that extracts a
+  region with awk reads the raw file, so a backslash in the region tests text
+  the agent never runs, and `lease-heartbeat.test.sh` asserts its regions hold
+  none.
 - **A rendered var is raw text.** A pour writes each `{{var}}` into the step as
   it stands, so a var that holds a command, quotes and all, reaches the block
   through a quoted heredoc, never inside quotes. The test command in
@@ -146,3 +150,104 @@ as a copy, because neither formulas nor pack scripts have an include mechanism.
   sweeping named directories and executes each one. An edit to one copy is
   owed to every copy, and a copy outside the swept directories is held by no
   suite.
+
+## The Go services
+
+`tools/lint.sh` runs `go vet ./...` in each module and `gofmt -l` over every
+tracked Go file, at the self-review and at merge. Vet type-checks test files
+and runs none of them, and no gate runs `go test`. CI's whole suite drives gctk
+end to end, because each suite whose scripts reach `lifecycle.sh` or
+`merge.sh` builds gctk from the checkout (`harness_build_gctk` in
+`assets/scripts/test-harness.sh`). `merge.test.sh` and `lifecycle.test.sh`
+name none of gctk's `.go` files, so the affected subset leaves them out of a Go
+change, and a self-review stamp on such a change covers the tree-wide suites
+alone. No suite builds or runs helm-svc. So on a Go diff the review runs
+`go test ./...` in each module the diff touches, and for gctk the suites of the
+commands it changes. On the host helm compiles only with ICU's cgo flags, so
+its tests run with `CGO_CPPFLAGS` and `CGO_LDFLAGS` set from `icu4c_cgo_flags`
+in `assets/scripts/icu4c-cgo.sh`, as `tools/lint.sh` sets them for vet.
+
+- **Live at the next build, with no fallback.** The `gctk-build` and
+  `helm-build` orders run `assets/scripts/gc-build.sh` every five minutes, so
+  each binary is rebuilt from the rig checkout soon after a change reaches it.
+  `gctk merge` is the merge cadence's only writer of merged truth and
+  `gctk lifecycle` its state machine, and their bridges `merge.sh` and
+  `lifecycle.sh` have no shell fallback, so a gctk defect reaches every landing
+  in the city.
+- **One meaning, several lists.** `lifecycle/lifecycle.toml` declares the
+  anchor states and the machine axis. gctk carries the states as a typed table
+  and helm carries the machine values as Go constants in
+  `internal/board/derive.go`, and `lifecycle.test.sh` holds both to the TOML. A
+  machine value added on one side only renders as `unknown` on every board row
+  that carries it.
+- **A port reads what its script read.** gctk reads bead fields the way jq
+  does. `Bead.Meta` in `internal/gcbd/gcbd.go` stringifies a value as
+  `(v // "") | tostring` would, so a metadata number reads as its digits, and
+  `Scrub` strips the control bytes the shell `scrub` strips. A Go type
+  assertion where jq would raise an error fails open, so the unreadable case is
+  fixtured: `merge.test.sh` feeds `gctk merge` a required check with a numeric
+  `conclusion` and expects a hold. `Scrub`'s match with the shell helper is
+  pinned only by `gcbd_test.go`.
+- **Reads through the supervisor API.** `gcbd.Show` reads through the
+  supervisor API, whose bead payload carries no notes and whose cached answer
+  can lag a write just made, so a read that verifies a write, or one that needs
+  notes, uses `ShowDirect`. A bead that cannot be read comes back nil, and the
+  caller refuses to act rather than read it as empty.
+- **Child process groups.** gctk starts git and the rig's check commands in
+  their own process group (`gitIn` in `internal/cli/lifecycle.go`, `Run` in
+  `internal/rig/run.go`), out of reach of the order runner's group stop, so it
+  relays SIGTERM and SIGINT to the child's group and exits 128 plus the signal.
+  A git fetch killed outright leaves a ref lock in the rig checkout that fails
+  every later fetch there, so a stop sends the group SIGTERM before anything
+  harder. A new subprocess follows the same pattern.
+- **The board's gather loads the shared store.** helm-svc's gather reads every
+  rig's store on a cache miss. A full-row read pulls the heavy text columns out
+  of the Dolt store the city's agents share, and a round trip per epic or
+  convoy made under the board's lock serializes every board request behind one
+  slow gather. `internal/source/beads_test.go` pins which reads take the lite
+  projection, and `internal/server/server_test.go` and
+  `internal/source/supervisor_test.go` pin the bounded fan-out, so a gather
+  change is read for a new per-row call or a heavy column.
+- **A derivation key follows the sling's shapes.** `Facts.Inflight` is keyed by
+  an input convoy's tracked member, which in the common sling shape is the
+  anchor's own bead, so a roll-up over children alone shows live work as
+  stranded (`TestAnchorOwnWorkflowCounts` in `internal/board`). A derivation
+  change is checked against each shape a key takes: the anchor itself, a
+  child, and a review or rework bead.
+
+## The helm web app
+
+No gate runs the web checks or reads TypeScript. `npm run typecheck`,
+`npm test` and `npm run build` run in no CI job, suite or gate command, and the
+affected subset selects only the tree-wide suites for a path under
+`services/helm/web`. The review runs them in `services/helm/web` after
+`npm ci`, then checks that `git status --porcelain -- dist` prints nothing.
+
+- **The bundle is committed.** helm-svc embeds `dist/` (`web/embed.go`) and
+  its builder never runs npm, so a change to the app's runtime code ships only
+  with the rebuilt `dist/` in the same diff. Vite names the bundle by a hash of
+  its content, so a runtime change that ships renames
+  `dist/assets/index-*.js`. No gate compares `dist/` with `src/`.
+- **The contract is a hand-written mirror.** `src/contract.ts` mirrors the Go
+  wire structs by hand, because the board's `/svc/` surface is not in the
+  supervisor's OpenAPI document, and a Go field renamed without its mirror
+  reads `undefined` in the browser with nothing failing.
+  `web/contract_parity_test.go` compares the two in both directions, and
+  `src/contract.fixture.ts` fails `npm run build` when the committed wire
+  sample stops matching the type. `go test ./web -run TestBoardFixture -update`
+  regenerates the sample. Neither check runs in a gate.
+- **Writes carry `X-GC-Request`.** The supervisor proxies helm-svc and refuses
+  a mutation without that header, with a 403 that never reaches helm-svc.
+  Every write client takes `SVC_WRITE_HEADERS` from `src/svcWrite.ts`, which
+  `ActuateButton.test.tsx` and `OpenConversation.test.tsx` assert.
+- **URLs are document-relative.** The app is served under
+  `/v0/city/<city>/svc/helm/`, a prefix the proxy strips, so `vite.config.ts`
+  keeps `base: './'` and `App.tsx` fetches `helm`, not `/helm`. A root-absolute
+  URL works on the dev server and 404s under the mount. `web/handler_test.go`
+  resolves every asset `dist/index.html` names through the mount.
+- **Supervisor types are a pruned snapshot.** `src/drill/gen/supervisor.d.ts`
+  is generated from a live supervisor's OpenAPI document for the operations
+  `scripts/gen-supervisor-types.mjs` lists, and committed. A new supervisor
+  call adds its operation there and regenerates with
+  `npm run gen:supervisor-types`, and when the supervisor's API moves, the
+  snapshot goes stale with nothing failing.
