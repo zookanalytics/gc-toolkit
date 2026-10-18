@@ -605,13 +605,14 @@ fi
 # raise either on a new finding, whose body lists the posts, or on the live one
 # as a recurrence, which it notes as the message's first 200 characters on one
 # line. The message opens with a longer paragraph, so that line names no post,
-# and on a recurrence the flag appends its own note listing the posts. The store's key-value table then records each post with the finding
-# that names it, and a recorded post is never raised again: not while that
-# finding is open, where the raise would only repeat, and not after it closes,
-# where patrol-finding.sh would file a new bead reporting that the fix did not
-# hold. A post is recorded only once a finding names it, so a raise that stops
-# partway leaves the post for the next run, which raises it again while it is in
-# the window.
+# and on a recurrence the flag appends its own note listing the posts. The
+# store's key-value table then records each post with the finding that names
+# it, and a recorded post is never raised again: not while that finding is
+# open, where the raise would only repeat, and not after it closes, where
+# patrol-finding.sh would file a new bead reporting that the fix did not hold.
+# A post is recorded only once a finding names it, so a raise that stops
+# partway leaves the post for the next run, which raises it again while it is
+# in the window.
 if [ "$VERB" = flag ]; then
   SLUG=$(meta repo); SELF=$(meta self); RIG=$(meta rig)
   FLAG_KEY=unmarked-city-post
