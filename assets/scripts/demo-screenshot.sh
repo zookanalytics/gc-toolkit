@@ -182,7 +182,10 @@ case "$KIND" in
       */*/*|/*|*/|*[!A-Za-z0-9_./-]*) usage_err "--repo must be owner/name (got '$REPO')" ;;
       */*) ;;
       *) usage_err "--repo must be owner/name (got '$REPO')" ;;
-    esac ;;
+    esac
+    # Checked here, before the engine's installs, which can take minutes.
+    command -v gh >/dev/null 2>&1 || fail "gh not found; GitHub's markdown renderer is reached through it"
+    command -v jq >/dev/null 2>&1 || fail "jq not found; it builds the renderer's request" ;;
 esac
 [ "$KIND" = page ] || [ -f "$RENDERER" ] || fail "demo-screenshot.mjs not found beside this script"
 
@@ -278,8 +281,6 @@ case "$KIND" in
       case "$REPO" in */*/*|/*|*/) REPO="" ;; */*) : ;; *) REPO="" ;; esac
       [ -n "$REPO" ] || echo "$PROG: no GitHub origin found, so #123 and @name references render without a repository context" >&2
     fi
-    command -v gh >/dev/null 2>&1 || fail "gh not found; GitHub's markdown renderer is reached through it"
-    command -v jq >/dev/null 2>&1 || fail "jq not found; it builds the renderer's request"
     jq -n --rawfile text "$FILE" --arg ctx "$REPO" \
         '{text: $text, mode: "gfm"} + (if $ctx == "" then {} else {context: $ctx} end)' >"$TMPD/request.json" \
       || fail "cannot read '$FILE' into the renderer's request"

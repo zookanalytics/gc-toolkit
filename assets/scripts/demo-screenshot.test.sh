@@ -404,6 +404,29 @@ out="$(run GH_EMPTY=1 -- markdown --file "$MD" --output "$OUT")"; rc=$?
 eq "$rc" 1 "an empty rendering exits 1"
 has "returned nothing" "$out" "it says the renderer returned nothing"
 
+echo "# markdown: gh and jq are checked with the arguments, before the engine is resolved"
+# The stubs without gh, and without jq. A later PATH in run's arguments wins.
+# With no jq the engine lookup cannot read the rig list and takes the published
+# package, so that directory has an npx, which logs what it would install.
+NOGH="$TMPD/bin-nogh"; mkdir -p "$NOGH"
+for s in jq node npm gc; do ln -s "$BIN/$s" "$NOGH/$s"; done
+NOJQ="$TMPD/bin-nojq"; mkdir -p "$NOJQ"
+for s in node npm gc gh; do ln -s "$BIN/$s" "$NOJQ/$s"; done
+cat >"$NOJQ/npx" <<'NPX'
+#!/usr/bin/env bash
+printf 'npx %s\n' "$*" >>"${CALLLOG:?}"
+exit 0
+NPX
+chmod +x "$NOJQ/npx"
+out="$(run PATH="$NOGH:$FARM" -- markdown --file "$MD" --output "$OUT")"; rc=$?
+eq "$rc" 1 "a markdown capture with no gh exits 1"
+has "gh not found; GitHub's markdown renderer is reached through it" "$out" "it says gh is missing"
+eq "$(calls)" "" "nothing is installed or provisioned, and the engine is not called, before it says so"
+out="$(run PATH="$NOJQ:$FARM" -- markdown --file "$MD" --output "$OUT")"; rc=$?
+eq "$rc" 1 "a markdown capture with no jq exits 1"
+has "jq not found; it builds the renderer's request" "$out" "it says jq is missing"
+eq "$(calls)" "" "nor before it says jq is missing"
+
 # --- the renderers, in a real node ------------------------------------------
 NODE_BIN=""
 for c in "$(command -v node 2>/dev/null)" /opt/homebrew/bin/node /usr/local/bin/node; do
