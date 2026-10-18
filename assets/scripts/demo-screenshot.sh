@@ -34,9 +34,10 @@
 #
 # It FAILS CLOSED. A missing engine, an engine with no screenshot command, a
 # browser that cannot be installed, a renderer that errors or refuses its
-# surface, or a capture that leaves no PNG behind all exit 1, because a capture
-# that quietly produces nothing is the undelivered visual this modality exists
-# to end, and one that shows a surface unfinished misleads whoever reads it.
+# surface, a drawn surface the engine cannot prove is on its page, or a capture
+# that leaves no PNG behind all exit 1, because a capture that quietly produces
+# nothing is the undelivered visual this modality exists to end, and one that
+# shows a surface unfinished misleads whoever reads it.
 #
 # Usage:
 #   demo-screenshot.sh page --script <demo.md> --output <file.png>
@@ -303,7 +304,10 @@ rm -f "$OUTPUT"
 echo "$PROG: capturing $KIND -> $OUTPUT" >&2
 demo_engine_cli screenshot "$@" -o "$OUTPUT" --scale 2 | tee "$TMPD/report"
 RC=${PIPESTATUS[0]}
-case "$RC" in 0|3) ;; *) fail "capture failed (sprintshow screenshot exited $RC)" ;; esac
+# The engine exits 3 when a step fails its proof and the capture shows the
+# state the steps left. A drawn surface's one step proves only that the surface
+# is on its page, so a 3 there is a surface that was not drawn.
+case "$KIND:$RC" in *:0|page:3) ;; *) fail "capture failed (sprintshow screenshot exited $RC)" ;; esac
 
 # --- the produced file must be a PNG -------------------------------------
 [ -f "$OUTPUT" ] || fail "the capture reported success but '$OUTPUT' does not exist"

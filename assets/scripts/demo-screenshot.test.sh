@@ -307,6 +307,16 @@ has "but 2 step(s) failed their proof" "$out" "it counts the failed steps"
 out="$(run ENGINE_MODE=failed-nofile -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
 eq "$rc" 1 "a failed-proof report with no PNG exits 1"
 
+echo "# terminal and markdown: a drawn surface whose one step fails its proof is no capture -> exit 1"
+out="$(run ENGINE_MODE=failed -- terminal --text "$TXT" --output "$OUT")"; rc=$?
+eq "$rc" 1 "a terminal surface the engine cannot prove is drawn exits 1"
+has "capture failed (sprintshow screenshot exited 3)" "$out" "it reports the engine's exit"
+hasnt "captured $OUT (" "$out" "it reports no capture"
+out="$(run ENGINE_MODE=failed -- markdown --file "$MD" --output "$OUT")"; rc=$?
+eq "$rc" 1 "a markdown surface the engine cannot prove is drawn exits 1"
+has "capture failed (sprintshow screenshot exited 3)" "$out" "it reports the engine's exit"
+hasnt "captured $OUT (" "$out" "it reports no capture"
+
 echo "# fail closed: no PNG, an empty one, or a file that is not a PNG"
 out="$(run ENGINE_MODE=error -- page --script "$SCRIPT" --serve-dir "$APP" --output "$OUT")"; rc=$?
 eq "$rc" 1 "an engine error exits 1"
