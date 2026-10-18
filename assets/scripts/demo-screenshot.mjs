@@ -237,10 +237,12 @@ pre { margin: 0; padding: 12px 16px 14px; width: ${width}ch; color: ${TERM_FG}; 
 
 // ── A rendered comment ────────────────────────────────────────────────────
 
-// GitHub's comment styles (Primer, light theme) for the elements its markdown
-// renderer emits.
+// GitHub's comment styles (Primer, light theme) for the markup its markdown
+// renderer emits, the utility classes it writes on that markup included, such
+// as a colour swatch's.
 const MARKDOWN_CSS = `
 .markdown-body { font-family: ${SANS}; font-size: 14px; line-height: 1.5; color: #1f2328; word-wrap: break-word; }
+.markdown-body * { box-sizing: border-box; }
 .markdown-body > *:first-child { margin-top: 0 !important; }
 .markdown-body > *:last-child { margin-bottom: 0 !important; }
 .markdown-body p, .markdown-body blockquote, .markdown-body ul, .markdown-body ol, .markdown-body dl,
@@ -248,6 +250,9 @@ const MARKDOWN_CSS = `
 .markdown-body a { color: #0969da; text-decoration: underline; text-underline-offset: .2rem; }
 .markdown-body a.user-mention, .markdown-body a.team-mention { font-weight: 600; color: #1f2328; text-decoration: none; }
 .markdown-body strong, .markdown-body b { font-weight: 600; }
+.markdown-body sub, .markdown-body sup { position: relative; font-size: 75%; line-height: 0; vertical-align: baseline; }
+.markdown-body sub { bottom: -.25em; }
+.markdown-body sup { top: -.5em; }
 .markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6 { margin-top: 24px; margin-bottom: 16px; font-weight: 600; line-height: 1.25; }
 .markdown-body h1 { font-size: 2em; padding-bottom: .3em; border-bottom: 1px solid #d1d9e0b3; }
 .markdown-body h2 { font-size: 1.5em; padding-bottom: .3em; border-bottom: 1px solid #d1d9e0b3; }
@@ -278,6 +283,12 @@ const MARKDOWN_CSS = `
 .markdown-body img { max-width: 100%; box-sizing: content-box; background-color: #ffffff; }
 .markdown-body details summary { cursor: pointer; }
 .markdown-body kbd { display: inline-block; padding: 4px; font: 11px ${MONO}; line-height: 10px; color: #1f2328; vertical-align: middle; background-color: #f6f8fa; border: 1px solid #d1d9e0b3; border-radius: 6px; box-shadow: inset 0 -1px 0 #d1d9e0b3; }
+.markdown-body [data-footnote-ref]::before { content: "["; }
+.markdown-body [data-footnote-ref]::after { content: "]"; }
+.markdown-body .footnotes { font-size: 12px; color: #59636e; border-top: 1px solid #d1d9e0; }
+.markdown-body .footnotes ol { padding-left: 16px; }
+.markdown-body .footnotes ol ul { display: inline-block; padding-left: 16px; margin-top: 16px; }
+.markdown-body .footnotes li { position: relative; }
 .markdown-body .markdown-alert { padding: .5rem 1rem; margin-bottom: 16px; color: inherit; border-left: .25em solid #d1d9e0; }
 .markdown-body .markdown-alert > :first-child { margin-top: 0; }
 .markdown-body .markdown-alert > :last-child { margin-bottom: 0; }
@@ -294,6 +305,12 @@ const MARKDOWN_CSS = `
 .markdown-body .markdown-alert.markdown-alert-caution .markdown-alert-title { color: #cf222e; }
 .markdown-body .octicon { display: inline-block; overflow: visible; vertical-align: text-bottom; fill: currentColor; }
 .markdown-body .mr-2 { margin-right: 8px; }
+.markdown-body .ml-1 { margin-left: 4px; }
+.markdown-body .d-inline-block { display: inline-block; }
+.markdown-body .border { border: 1px solid #d1d9e0; }
+.markdown-body .color-border-subtle { border-color: #d1d9e0b3; }
+.markdown-body .circle { border-radius: 50%; }
+.markdown-body .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: rect(0 0 0 0); overflow-wrap: normal; border: 0; }
 .markdown-body g-emoji { display: inline-block; min-width: 1ch; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"; font-size: 1em; font-style: normal; font-weight: 400; line-height: 1; vertical-align: -.075em; }
 .markdown-body .pl-c { color: #59636e; }
 .markdown-body .pl-c1, .markdown-body .pl-s .pl-v { color: #0550ae; }
