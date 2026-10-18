@@ -1222,30 +1222,57 @@ OUT="$(PATH="$ZC/broken-awk:${PATH:-}" "$DET_ZC" "$SKILL" 2>&1)"; RC=$?
 eq "$RC" 2 "a scan that fails exits 2"
 has "$OUT" "cannot scan" "and names the file it could not scan"
 
-echo "── zsh-colon-modifier: the review-triage lines, unbraced ──"
+echo "── zsh-colon-modifier: two shipped lines, unbraced in their context ──"
 
-# Put back the shape these two lines shipped with, and both are found in their
-# real context, past every quote, heredoc and substitution above them. The
-# braced skill is clean.
-REAL_TRIAGE="$HERE/../skills/review-triage/SKILL.md"
-MUT="$ZC/skills/review-triage/SKILL.md"
-mkdir -p "$ZC/skills/review-triage"
+# Two lines a review skill once shipped unbraced, braced here, each after a
+# quote, a heredoc and a command substitution the scanner has to read past.
+# Put back the unbraced shape and both are found in that context; the braced
+# fixture is clean.
+BRACED="$ZC/skills/braced/SKILL.md"
+MUT="$ZC/skills/unbraced/SKILL.md"
+mkdir -p "$ZC/skills/braced" "$ZC/skills/unbraced"
+cat > "$BRACED" <<'FIXTURE'
+---
+name: braced
+description: a fixture
+---
+
+# Braced
+
+```bash
+INDEX=$(mktemp "${TMPDIR:-/tmp}/gctk-index.XXXXXX"); FOUND=""
+for c in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
+  [ -n "$c" ] && git -C "$c" cat-file -e "${REVIEWED_OID}^{commit}" 2>/dev/null || continue
+  FOUND=none; git -C "$c" show "${REVIEWED_OID}:review-checks.toml" >"$INDEX" 2>/dev/null && FOUND=index; break
+done
+```
+
+```bash
+OBS_META=$(jq -nc --arg scope "repo:${GC_RIG:-unknown}" --arg prov "bead:${ANCHOR}:turn:$(date -u +%Y-%m-%d)" \
+  '{task_kind: "observation", "obs.provenance": $prov}')
+OBS_JSON=$(gc bd create "obs: a gap (bead:$ANCHOR)" -d "## Statement
+<the gap>
+
+## Quote
+Triage on $ANCHOR at $REVIEWED_OID." --json)
+```
+FIXTURE
 sed -e 's/"${REVIEWED_OID}:review-checks.toml"/"$REVIEWED_OID:review-checks.toml"/' \
-    -e 's/bead:${ANCHOR}:turn:/bead:$ANCHOR:turn:/' "$REAL_TRIAGE" > "$MUT"
+    -e 's/bead:${ANCHOR}:turn:/bead:$ANCHOR:turn:/' "$BRACED" > "$MUT"
 L1="$(grep -nF '"$REVIEWED_OID:review-checks.toml"' "$MUT" | cut -d: -f1)"
 L2="$(grep -nF 'bead:$ANCHOR:turn:' "$MUT" | cut -d: -f1)"
 if [ -n "$L1" ] && [ -n "$L2" ]; then
     ok "both lines are unbraced in the copy"
 else
-    bad "both lines are unbraced in the copy" "the braced lines were not found in $REAL_TRIAGE"
+    bad "both lines are unbraced in the copy" "the braced lines were not found in $BRACED"
 fi
 runz "$MUT"
 eq "$RC" 1 "the unbraced lines are findings"
 has "$OUT" "SKILL.md:$L1: unbraced \$REVIEWED_OID:r" "the index read is reported"
 has "$OUT" "SKILL.md:$L2: unbraced \$ANCHOR:t" "the provenance key is reported"
 eq "$(printf '%s\n' "$OUT" | grep -c .)" 2 "and nothing else in the skill is"
-runz "$REAL_TRIAGE"
-eq "$RC" 0 "the braced skill is clean"
+runz "$BRACED"
+eq "$RC" 0 "the braced fixture is clean"
 
 echo "── zsh-colon-modifier: every real shell fence is scanned to its end ──"
 

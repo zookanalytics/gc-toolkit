@@ -11,11 +11,11 @@
 # and zsh:
 #   triage-index-read  in a scratch rig repo whose reviewed commit carries an
 #                      index, with GC_PACK_DIR unset and no pack under
-#                      GC_RIG_ROOT: the pack's parser lists the rig's checks. A
-#                      commit with no index says so, exits 0 and runs no
-#                      parser. A commit the checkout cannot read and a scripts
-#                      dir gc cannot print fail loudly instead, and no read
-#                      leaves its temp file behind.
+#                      GC_RIG_ROOT: the pack's resolver lists the pack's checks
+#                      with the rig's own laid over them. A commit with no index
+#                      lists the pack's checks alone. A commit the checkout
+#                      cannot read, a lost oid and a scripts dir gc cannot print
+#                      fail loudly instead, and a staged index answers for none.
 #   triage-round-read  reads the bring-current round of the anchor $M names.
 #   triage-index-gap   files the observation with that anchor in its title,
 #                      provenance and quote.
@@ -75,8 +75,9 @@ GC
 chmod +x "$BIN/gc"
 export STUB_LOG="$TMP/gc.log" STUB_CREATE="$TMP/create.args"
 
-# A rig that is not the pack's: its commit carries an index declaring a check
-# no pack declares, and its checkout holds no assets/scripts.
+# A rig that is not the pack's: its commit carries an index that restates a pack
+# check and declares one no pack declares, and its checkout holds no
+# assets/scripts.
 RIG="$TMP/rig"; mkdir -p "$RIG"
 git -C "$RIG" init -q
 printf '[checks.correctness]\nmethod = "m"\npurpose = "p"\nphase = "pre-open"\n[checks.ux]\nmethod = "m2"\npurpose = "p2"\nphase = "pre-open"\n' > "$RIG/review-checks.toml"
@@ -87,7 +88,7 @@ git -C "$RIG" rm -q review-checks.toml
 git -C "$RIG" commit -q -m "no index"
 NO_INDEX=$(git -C "$RIG" rev-parse HEAD)
 # The checkout stages an index no commit carries. `git show :review-checks.toml`
-# reads it, which is what a lost OID would make of the index read.
+# reads it, which is what a lost OID would make of a read that took one.
 printf '[checks.staged]\nmethod = "m3"\npurpose = "p3"\nphase = "pre-open"\n' > "$RIG/review-checks.toml"
 git -C "$RIG" add review-checks.toml
 
@@ -98,6 +99,9 @@ chmod +x "$FAKE_SCRIPTS/bring-current-audit.sh"
 export AUDIT_LOG="$TMP/audit.log"
 
 M_JSON='{"task_kind":"review","check_name":"triage","anchor_bead":"tk-anchor1","review_branch":"polecat/x","review_base":"main"}'
+# The pack's checks, as the resolver of the tree under test lists them.
+PACK_NAMES=$("$ROOT/assets/scripts/review-checks.sh" --file "$ROOT/review-checks.toml" 2>/dev/null | cut -f1 | tr '\n' ' ')
+[ -n "$PACK_NAMES" ] && ok "the pack's index lists its checks" || bad "the pack's index lists its checks" "none"
 
 # run <shell> <block> <scripts dir> <reviewed oid> : the block's stdout in OUT,
 # its stderr in ERR and its status in RC, run in the rig's checkout. TMPDIR is
@@ -116,33 +120,31 @@ for sh in $SHELLS; do
   echo "# $sh: the index read"
   run "$sh" triage-index-read "$ROOT/assets/scripts" "$WITH_INDEX"
   eq "$RC" "0" "($sh) the read exits 0"
-  eq "$(printf '%s\n' "$OUT" | cut -f1 | tr '\n' ' ')" "correctness ux " \
-     "($sh) the pack's parser lists the rig's own checks, from a checkout that holds no pack"
-  grep -qx 'kit scripts-dir' "$STUB_LOG" && ok "($sh) the parser is found through gc <binding> scripts-dir" \
-    || bad "($sh) the parser is found through gc <binding> scripts-dir" "gc calls: $(tr '\n' ';' < "$STUB_LOG")"
+  eq "$(printf '%s\n' "$OUT" | cut -f1 | tr '\n' ' ')" "${PACK_NAMES}ux " \
+     "($sh) the pack's resolver lists the pack's checks and the rig's own, from a checkout that holds no pack"
+  has "$(printf '%s\n' "$OUT" | grep '^correctness')" "	p	pre-open" "($sh) …the rig's row laid over the pack's correctness"
+  grep -qx 'kit scripts-dir' "$STUB_LOG" && ok "($sh) the resolver is found through gc <binding> scripts-dir" \
+    || bad "($sh) the resolver is found through gc <binding> scripts-dir" "gc calls: $(tr '\n' ';' < "$STUB_LOG")"
 
   run "$sh" triage-index-read "$ROOT/assets/scripts" "$NO_INDEX"
   eq "$RC" "0" "($sh) a commit with no index exits 0"
-  eq "$OUT" "no review-checks.toml at $NO_INDEX: the no-index case, widen nothing" \
-     "($sh) …naming the no-index case"
-  eq "$(cat "$STUB_LOG")" "" "($sh) …and runs no parser"
+  eq "$(printf '%s\n' "$OUT" | cut -f1 | tr '\n' ' ')" "$PACK_NAMES" "($sh) …listing the pack's checks alone"
 
   # A commit the checkout does not hold, or an OID the shell lost, is an index
-  # nobody read, not a commit that carries none.
+  # nobody read, not a commit that carries none, and the staged index answers
+  # for neither.
   for unread in 0000000000000000000000000000000000000000 ""; do
     run "$sh" triage-index-read "$ROOT/assets/scripts" "$unread"
     [ "$RC" -ne 0 ] && ok "($sh) a reviewed oid the checkout cannot read ('$unread') fails" \
       || bad "($sh) a reviewed oid the checkout cannot read ('$unread') fails" "rc=$RC"
-    has "$ERR" "the index went unread" "($sh) …saying the index went unread"
-    eq "$OUT" "" "($sh) …naming no no-index case"
-    eq "$(cat "$STUB_LOG")" "" "($sh) …and running no parser"
+    [ -n "$ERR" ] && ok "($sh) …saying why on stderr" || bad "($sh) …saying why on stderr" "stderr empty"
+    eq "$OUT" "" "($sh) …and listing no menu"
   done
+  has "$ERR" "no commit named" "($sh) a lost oid is refused as naming no commit"
 
   run "$sh" triage-index-read "" "$WITH_INDEX"
-  [ "$RC" -ne 0 ] && [ -n "$ERR" ] && ok "($sh) a scripts dir gc cannot print fails loudly, unlike a missing index" \
-    || bad "($sh) a scripts dir gc cannot print fails loudly, unlike a missing index" "rc=$RC stderr='$ERR'"
-  eq "$(find "$TMP" -maxdepth 1 -name 'gctk-triage-index.*' | wc -l | tr -d ' ')" "0" \
-     "($sh) no index read leaves its temp file behind"
+  [ "$RC" -ne 0 ] && [ -n "$ERR" ] && ok "($sh) a scripts dir gc cannot print fails loudly" \
+    || bad "($sh) a scripts dir gc cannot print fails loudly" "rc=$RC stderr='$ERR'"
 
   echo "# $sh: the bring-current round read"
   : > "$AUDIT_LOG"
