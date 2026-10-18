@@ -899,7 +899,9 @@ guidance_edits() {
   git -C "$repo" fetch --quiet --no-tags origin "+refs/heads/$base:refs/remotes/origin/$base" >/dev/null 2>&1 || true
   fork=$(git -C "$repo" merge-base "refs/remotes/origin/$base" "$REVIEWED_OID" 2>/dev/null)
   [ -n "$fork" ] || { GUIDANCE_WHY="no fork point between origin/$base and $REVIEWED_OID reads"; return 1; }
-  paths=$(git -C "$repo" diff --name-only "$fork" "$REVIEWED_OID" 2>/dev/null) \
+  # --no-renames: git's rename detection lists a renamed file by the path it
+  # lands at alone, and a guidance file moved away is an edit to the guidance.
+  paths=$(git -C "$repo" diff --no-renames --name-only "$fork" "$REVIEWED_OID" 2>/dev/null) \
     || { GUIDANCE_WHY="the paths from $fork to $REVIEWED_OID did not read"; return 1; }
   GUIDANCE_EDITS=$(printf '%s\n' "$paths" | awk '/^review-checks\.toml$/ || /^docs\/review-[^\/]*\.md$/' | paste -sd' ' -)
   return 0

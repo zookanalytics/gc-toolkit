@@ -322,13 +322,19 @@ if [ "${1:-}" = "ls-remote" ]; then
 fi
 # The backstop's path list: `-C <root> merge-base <base> <oid>` answers the fork
 # point (STUB_FORK, set empty for one that does not read), and
-# `-C <root> diff --name-only` answers STUB_DIFF_PATHS, one path per line.
+# `-C <root> diff --name-only` answers STUB_DIFF_PATHS, one path per line. The
+# path a rename left, STUB_DIFF_RENAMED_FROM, is listed only beside
+# --no-renames, as git lists it: with rename detection on, the default, a
+# renamed file is named by the path it lands at alone.
 if [ "${_g[0]:-}" = "merge-base" ] && [ "${_g[1]:-}" != "--is-ancestor" ]; then
   [ -n "${STUB_FORK-fork0}" ] && printf '%s\n' "${STUB_FORK-fork0}"
   exit 0
 fi
 if [ "${_g[0]:-}" = "diff" ]; then
   [ -n "${STUB_DIFF_PATHS:-}" ] && printf '%s\n' "$STUB_DIFF_PATHS"
+  case " ${_g[*]} " in
+    *" --no-renames "*) [ -n "${STUB_DIFF_RENAMED_FROM:-}" ] && printf '%s\n' "$STUB_DIFF_RENAMED_FROM" ;;
+  esac
   exit 0
 fi
 # merge-base --is-ancestor: 0 ancestor, 1 not, 128 a commit git cannot resolve.
@@ -1682,6 +1688,12 @@ has "$out" "re-run with --needs-you" "…and the flag that records it"
 eq "$(cat "$STUB_GH_BODY")" "" "…posting nothing"
 eq "$(status rv-1)" "in_progress" "…and leaving the review open"
 eq "$(meta rv-1 signoff_verdict)" "<absent>" "…with no verdict recorded"
+# A guidance file renamed away is an edit to the guidance, though rename
+# detection would name only the path it lands at.
+reset "$ANCHOR_PR"
+out=$(STUB_DIFF_PATHS=$'specs/x/old-correctness-guidance.md' STUB_DIFF_RENAMED_FROM=$'docs/review-correctness.md' "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 1 "a correctness approve on a change that renames a guidance file away is refused"
+has "$out" "edits its own review guidance (docs/review-correctness.md)" "…naming the path the rename left"
 reset "$ANCHOR_PR"
 out=$(STUB_DIFF_PATHS=$'docs/review-demo.md' "$SUT" --review-bead rv-1 --verdict approve --needs-you "this change adds demo guidance, which its own demo review ran under" 2>&1); rc=$?
 eq "$rc" 0 "the same approve with --needs-you records"
