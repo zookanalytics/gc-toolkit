@@ -571,6 +571,13 @@ HTML
 <p dir="auto"><code class="notranslate">&lt;math-renderer&gt;</code> and <code class="notranslate">js-render-needs-enrichment</code> as code.</p>
 <div class="highlight highlight-text-html-basic" dir="auto"><pre class="notranslate"><span class="pl-kos">&lt;</span><span class="pl-ent">section</span> <span class="pl-c1">class</span>="<span class="pl-s">js-render-needs-enrichment</span>"<span class="pl-kos">&gt;</span><span class="pl-kos">&lt;</span><span class="pl-ent">math-renderer</span><span class="pl-kos">&gt;</span>$x$<span class="pl-kos">&lt;/</span><span class="pl-ent">math-renderer</span><span class="pl-kos">&gt;</span><span class="pl-kos">&lt;/</span><span class="pl-ent">section</span><span class="pl-kos">&gt;</span></pre></div>
 HTML
+  # A horizontal rule, from a --- between two paragraphs. It comes back as a
+  # bare <hr>, so the comment's hr rule is what draws it.
+  cat >"$TMPD/rule.html" <<'HTML'
+<p dir="auto">Above the rule.</p>
+<hr>
+<p dir="auto">Below it.</p>
+HTML
   { printf '<details><summary>trail</summary>\n'; cat "$TMPD/mermaid.html"; printf '</details>\n'; } >"$TMPD/collapsed.html"
   r=$(js "m.unfinishedBlocks(read('$TMPD/mermaid.html', 'utf8'))")
   eq "$r" '["mermaid"]' "a mermaid fence, as GitHub's markdown API returns it, is a block github.com finishes"
@@ -644,6 +651,11 @@ HTML
   out="$(run REAL_NODE="$NODE_BIN" GH_HTML="$TMPD/drawn.html" -- markdown --file "$MD" --output "$OUT")"; rc=$?
   eq "$rc" 0 "markdown GitHub returns with no such block is drawn and captured"
   has '<markdown-accessiblity-table><table role="table">' "$(cat "$SERVED" 2>/dev/null)" "the page the engine serves is the real renderer's, drawn from GitHub's HTML"
+  out="$(run REAL_NODE="$NODE_BIN" GH_HTML="$TMPD/rule.html" -- markdown --file "$MD" --output "$OUT")"; rc=$?
+  eq "$rc" 0 "markdown GitHub returns with a horizontal rule is drawn and captured"
+  has '<div class="markdown-body"><p dir="auto">Above the rule.</p>
+<hr>' "$(cat "$SERVED" 2>/dev/null)" "the rule is drawn as GitHub returned it, inside the comment's styles"
+  has '.markdown-body hr { height: 1px; margin: 24px 0; background-color: #d1d9e0; border: 0; padding: 0; }' "$(cat "$SERVED" 2>/dev/null)" "and as GitHub's stylesheet draws it: a 1px line in GitHub's border colour, 24px from the text around it"
 
   echo "# a capture from a symlinked checkout, through the real renderer"
   out="$(SUT="$TMPD/linked-dir/demo-screenshot.sh" run REAL_NODE="$NODE_BIN" -- terminal --text "$TXT" --output "$OUT")"; rc=$?
