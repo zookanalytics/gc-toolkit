@@ -9,7 +9,13 @@
 #     poured for, at shift 0. A step follows its root (gc.root_bead_id), a root
 #     its input convoy (gc.input_convoy_id), and an input convoy (gc.synthetic,
 #     tracking exactly one bead) the bead it tracks.
-#   * PR-finishing work, a bead carrying anchor_bead, follows its anchor.
+#   * PR-finishing work, a bead carrying anchor_bead, follows its anchor. Once
+#     the anchor's PR is approved, it runs at P0 whatever its shift. A PR is
+#     approved when its anchor rests in pull_request (merge_result) and the
+#     posture pr-facts.sh records there (pr_posture, stored as
+#     <posture>@<oid>@<since>) reads approved before its first @. An anchor
+#     that rests anywhere else has no open PR to be approved, whatever posture
+#     an earlier PR left on it.
 #   * A member follows its parent, and the most urgent one, the lowest
 #     P-number, when it has several.
 #   * A bead that follows nothing has its priority set directly: its bd
@@ -86,6 +92,12 @@ PRIORITY_JQ='
         | if $s == "" then {ok: true, n: 0}
           elif ($s | test("^[+-]?[0-9]+$")) then {ok: true, n: ($s | ltrimstr("+") | tonumber)}
           else {ok: false, raw: $s} end end;
+  # Whether the PR of this anchor is approved, which ranks its PR-finishing work
+  # at P0: it rests in pull_request, and the dated posture pr-facts.sh records
+  # on it reads approved before its first @.
+  def prio_pr_approved:
+    prio_str("merge_result") == "pull_request"
+    and ((prio_str("pr_posture") | split("@") | .[0]) // "") == "approved";
 
   # What this bead can follow: {kind, on}, where kind is workflow, anchor,
   # parent or none, and on lists the beads it could follow. priority_of
@@ -109,9 +121,11 @@ PRIORITY_JQ='
 
   # The priority of this bead over $g, an object keyed by bead id (null for an id
   # the walk asked for and the store did not return):
-  #   {id, priority, kind, via, base, shift}
+  #   {id, priority, kind, via, base, shift, approved}
   # where kind is what it follows (workflow, anchor, parent, or none), via the
-  # bead it follows, base the priority of that bead, and shift its own shift. A
+  # bead it follows, base the priority of that bead, shift its own shift, and
+  # approved true when the bead is PR-finishing work whose anchor has an
+  # approved PR, which puts it at P0 whatever base and shift say. A
   # bead that cannot be computed answers {id, error} instead: a followed bead
   # the walk has not read, a chain deeper than PRIORITY_MAX_DEPTH or one that
   # comes back to itself, a shift that is not a signed integer, or a priority
@@ -131,7 +145,7 @@ PRIORITY_JQ='
               | if ($cands | length) == 0 then
                   prio_own as $p
                   | if $p == null then fault($id; "its priority field is not a number")
-                    else {id: $id, priority: $p, kind: "none", via: null, base: null, shift: 0} end
+                    else {id: $id, priority: $p, kind: "none", via: null, base: null, shift: 0, approved: false} end
                 else
                   [ $cands[] | calc($seen + [$id]) ] as $rs
                   | ([ $rs[] | select(has("error")) ] | first) as $bad
@@ -140,9 +154,10 @@ PRIORITY_JQ='
                        at: $bad.at, reason: $bad.reason}
                     else ($rs | sort_by(.priority, .id) | first) as $best
                       | (if $f.kind == "workflow" then {ok: true, n: 0} else prio_shift end) as $s
+                      | ($f.kind == "anchor" and ($g[$best.id] | prio_pr_approved)) as $ap
                       | if ($s.ok | not) then fault($id; "its priority_shift is \"\($s.raw)\", not a signed integer")
-                        else {id: $id, priority: (($best.priority + $s.n) | prio_clamp), kind: $f.kind,
-                              via: $best.id, base: $best.priority, shift: $s.n} end
+                        else {id: $id, priority: (if $ap then 0 else (($best.priority + $s.n) | prio_clamp) end),
+                              kind: $f.kind, via: $best.id, base: $best.priority, shift: $s.n, approved: $ap} end
                     end
                 end
             end
