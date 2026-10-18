@@ -979,7 +979,8 @@ while [ "$CALLS" -lt 10 ]; do
 done
 eq "$(printf '%s' "$SEEN" | grep -c .)" "4" "(103) the --city calls print each of the window's 4 city posts"
 eq "$(printf '%s' "$SEEN" | grep . | sort | uniq -d | grep -c . || true)" "0" "(104) and none of them twice"
-[ "$CALLS" -gt 2 ]; eq "$?" "0" "(105) a call stops before the post that would take it past --max-chars"
+if [ "$CALLS" -gt 2 ]; then ok "(105) a call stops before the post that would take it past --max-chars"
+else bad "(105) a call stops before the post that would take it past --max-chars (took $CALLS call(s))"; fi
 "$SUT" show --dir "$W" --outside --max-chars 0 >/dev/null 2>&1; eq "$?" "2" "(106) --max-chars must be a positive integer"
 mv "$FIX/prs.ours.keep" "$FIX/prs.ours.json"
 rm -f "$FIX/15.reviews.json" "$FIX/15.inline.json" "$FIX/15.issue.json"
