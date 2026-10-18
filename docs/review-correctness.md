@@ -76,11 +76,6 @@ defect only on a line some test executes.
   `k=1` stores a number and `k=true` a boolean, and a comparison with a string
   takes `tostring` first. `id-read-unguarded.sh` flags `.id // .[0].id` on a bd
   answer.
-- **jq versions.** The host resolves jq 1.8 first, its `/usr/bin/jq` is 1.7,
-  and the Linux CI job runs its Ubuntu image's jq, 1.7 on 24.04 and 1.8 on
-  26.04. A program that only jq 1.8 compiles, such as a bare `if … end`
-  followed by `[i]` or `.key`, passes on the host and fails that job. Probe
-  with `/usr/bin/jq`.
 - **BSD and GNU userland.** The host is macOS: `sed`, `grep`, `awk`, `date`,
   `stat` and `find` are BSD, `/bin/bash` is 3.2, and `#!/usr/bin/env bash`
   finds bash 5. Where the userlands disagree, the repository tries both
