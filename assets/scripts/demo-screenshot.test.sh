@@ -627,7 +627,7 @@ HTML
   has '.markdown-body .ml-1 { margin-left: 4px; }' "$r" "it sits 4px after the colour's text"
   has '.markdown-body .border { border: 1px solid #d1d9e0; }' "$r" "it has GitHub's 1px border"
   has '.markdown-body .color-border-subtle { border-color: #d1d9e0b3; }' "$r" "in GitHub's muted border colour"
-  has '.markdown-body .circle { border-radius: 50%; }' "$r" "and it is round"
+  has '.markdown-body .circle { border-radius: 9999px; }' "$r" "and it is round"
   order=$(js "(() => { const p = m.commentDocument({ fragment: '' }); return p.indexOf('.markdown-body .color-border-subtle {') > p.indexOf('.markdown-body .border {'); })()")
   eq "$order" 'true' "the muted colour follows the border rule it recolours, as in GitHub's stylesheet"
 

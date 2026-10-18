@@ -309,7 +309,7 @@ const MARKDOWN_CSS = `
 .markdown-body .d-inline-block { display: inline-block; }
 .markdown-body .border { border: 1px solid #d1d9e0; }
 .markdown-body .color-border-subtle { border-color: #d1d9e0b3; }
-.markdown-body .circle { border-radius: 50%; }
+.markdown-body .circle { border-radius: 9999px; }
 .markdown-body .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: rect(0 0 0 0); overflow-wrap: normal; border: 0; }
 .markdown-body g-emoji { display: inline-block; min-width: 1ch; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"; font-size: 1em; font-style: normal; font-weight: 400; line-height: 1; vertical-align: -.075em; }
 .markdown-body .pl-c { color: #59636e; }
