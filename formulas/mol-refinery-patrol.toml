@@ -259,11 +259,17 @@ if ! STOP_OUT=$(DETACHED_JOB_STOP_GRACE=20 "$JOB" stop "$GATE"); then
   gc runtime drain-ack
   exit 1
 fi
-git -C "$RIG_ROOT" worktree remove --force "$PREP_WT" 2>/dev/null || true
-# Check the add result before any conflict path can run: a failed staging is
+# refinery-workspace.sh clears the leftover and stages the branch, so this block
+# removes nothing itself. It is found the way the launcher is.
+WS=""
+for c in "$RIG_ROOT" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
+done
+[ -n "$WS" ] || { echo "refinery-workspace.sh not found, so the prep worktree cannot be staged. NOT preparing the branch; leaving it with the refinery to retry"; gc runtime drain-ack; exit 1; }
+# Check the staging result before any conflict path can run: a failed staging is
 # prep-setup infrastructure, not an origin/$TARGET conflict, so it leaves the
 # work with the refinery to retry instead of repooling it with a false rejection.
-if ! git -C "$RIG_ROOT" worktree add -f --detach "$PREP_WT" "origin/$BRANCH"; then
+if ! "$WS" stage --rig-root "$RIG_ROOT" --branch "$BRANCH"; then
   echo "could not stage the prep worktree at $PREP_WT — NOT preparing the branch; leaving it with the refinery to retry (prep-setup failure, not an origin/$TARGET conflict)"
   gc runtime drain-ack
   exit 1
@@ -311,11 +317,22 @@ esac
 ```
 
 Do NOT delete `origin/$BRANCH` (the resuming polecat needs it). Tear down the
-prep worktree (`git -C "$RIG_ROOT" worktree remove --force "$PREP_WT"`,
-re-resolving `RIG_ROOT`/`PREP_WT` as the rebase step did); the prep worktree is
-detached and holds no branch, so nothing else has to be deleted, the rig root's
-HEAD was never moved, and an interrupted teardown is cleared by the next
-iteration's rebase step.
+prep worktree with `refinery-workspace.sh teardown`, the script the rebase step
+staged it with. The prep worktree is detached and holds no branch, so nothing
+else has to be deleted, and the rig root's HEAD was never moved. A teardown
+that does not complete is no reason to stop, because the next iteration's
+rebase step clears the leftover before it stages:
+```bash
+# >>> prep-teardown
+WS=""
+for c in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
+done
+if [ -z "$WS" ] || ! "$WS" teardown; then
+  echo "the prep worktree was not torn down; carry on, since the next rebase step clears it before staging"
+fi
+# <<< prep-teardown
+```
 Then jump to next-iteration (pour before burn) — the rejection ends this
 cycle."""
 
@@ -388,8 +405,14 @@ if ! STOP_OUT=$(DETACHED_JOB_STOP_GRACE=20 "$JOB" stop "$GATE"); then
   gc runtime drain-ack
   exit 1
 fi
-rm -rf "${GATE:?}/checks"
-mkdir -p "$GATE/checks"
+# refinery-workspace.sh empties the checks directory, so this block removes
+# nothing itself. It is found the way the launcher is.
+WS=""
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
+done
+[ -n "$WS" ] || { echo "refinery-workspace.sh not found, so the previous gate's checks cannot be cleared; NOT running the gate, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+"$WS" checks --rig-root "$RIG_ROOT" || { echo "could not empty $GATE/checks; running no checks and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 # >>> rig-check-commands
 # One read serves every check. An unreadable answer gives every check an empty
 # value, which is also what a rig with no checks gives, so the block runs
@@ -648,10 +671,22 @@ else
 fi
 # <<< rejection-branch-keep
 ```
-Tear down the prep worktree (`git -C "$RIG_ROOT" worktree remove --force
-"$PREP_WT"`, re-resolving `RIG_ROOT`/`PREP_WT` as the rebase step did); it is
-detached and holds no branch, so nothing else has to be deleted. Then jump to
-next-iteration.
+Tear down the prep worktree with `refinery-workspace.sh teardown`, the script
+the rebase step staged it with. It is detached and holds no branch, so nothing
+else has to be deleted, and a teardown that does not complete is cleared by the
+next rebase step:
+```bash
+# >>> prep-teardown
+WS=""
+for c in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
+done
+if [ -z "$WS" ] || ! "$WS" teardown; then
+  echo "the prep worktree was not torn down; carry on, since the next rebase step clears it before staging"
+fi
+# <<< prep-teardown
+```
+Then jump to next-iteration.
 
 **Pre-existing on target:** dedup FIRST, file only if none, then proceed
 with the merge. One block, one shell — a probe result that does not survive
@@ -846,64 +881,55 @@ if ! branch_has_real_change "origin/$TARGET" "$PREP_SHA"; then
 fi
 ```
 
-**If MERGE_STRATEGY = "direct":** merge in a throwaway detached worktree
-(the real target branch may be checked out in the rig's canonical
-worktree), push, verify the remote ref, then record + close through ONE
-lifecycle call. The call is handed the `RIG_ROOT` this block resolved as
-`GC_RIG_ROOT`: the writer checks the landing in that checkout, and the lookup
-reads the roster when the session carries no `GC_RIG_ROOT` of its own. A push
-rejected for branch protection (GH006/GH013/
-"protected branch"/"Changes must be made through a pull request"/"approving
-review"/"Cannot update this protected ref") auto-promotes the bead to
-`merge_strategy=pr` and falls through to the mr block — the prep worktree is
-untouched and still holds the prepared head for the PR push. Any other push
-failure stops the wisp.
+**If MERGE_STRATEGY = "direct":** `direct-merge-push.sh` lands the prepared
+head on `$TARGET` as a fast-forward pushed by its commit id, so nothing is
+checked out for the merge and nothing is left to remove. It verifies the remote
+ref, then records and closes the bead through ONE lifecycle call, handed the
+rig root as `GC_RIG_ROOT`: the writer checks the landing in that checkout. Exit
+3 means a push rejected for branch protection (GH006/GH013/"protected
+branch"/"Changes must be made through a pull request"/"approving
+review"/"Cannot update this protected ref") promoted the bead to
+`merge_strategy=pr`, and the block falls through to the mr block — the prep
+worktree is untouched and still holds the prepared head for the PR push. Any
+other non-zero exit stops the wisp, and the block leaves the work with the
+refinery; the script's output says what landed, if anything. A prepared head
+that origin/$TARGET moved past while the gate ran lands nothing, and the next
+patrol prepares the branch again.
 ```bash
 # >>> direct-merge-push
-set -e
-RIG_ROOT="${GC_RIG_ROOT:-}"
-[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
-PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
-MERGE_PARENT=$(mktemp -d "${TMPDIR:-/tmp}/gascity-refinery-merge.XXXXXX")
-MERGE_WT="$MERGE_PARENT/target"
-# $PUSH_ERR is allocated further down but torn down here: every arm that reads
-# it exits without reaching a removal of its own.
-PUSH_ERR=""
-merge_scratch_rm() { git -C "$RIG_ROOT" worktree remove --force "$MERGE_WT" >/dev/null 2>&1 || true; rm -rf "$MERGE_PARENT"; [ -n "$PUSH_ERR" ] && rm -f "$PUSH_ERR"; return 0; }
-trap merge_scratch_rm EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-git -C "$RIG_ROOT" fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
-TEMP_SHA=$(git -C "$PREP_WT" rev-parse HEAD)
-git -C "$RIG_ROOT" worktree add --detach "$MERGE_WT" "origin/$TARGET"
-git -C "$MERGE_WT" merge --ff-only "$TEMP_SHA"
-MERGED_SHA=$(git -C "$MERGE_WT" rev-parse HEAD)
-PUSH_ERR=$(mktemp "${TMPDIR:-/tmp}/gctk-refinery-patrol.XXXXXX")
-if git -C "$MERGE_WT" push origin "HEAD:$TARGET" 2>"$PUSH_ERR"; then
-  git -C "$RIG_ROOT" fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
-  REMOTE=$(git -C "$RIG_ROOT" rev-parse "origin/$TARGET")
-  if [ "$MERGED_SHA" != "$REMOTE" ]; then
-    echo "PUSH FAILED — origin/$TARGET is $REMOTE, want $MERGED_SHA. STOP; do not mutate bead state."
-    gc runtime drain-ack; exit 1
-  fi
-  GC_RIG_ROOT="$RIG_ROOT" "$LC" transition "$WORK" --to merged --close --set merged_sha="$MERGED_SHA" --set merged_target="$TARGET" --unset rejection_reason --append-notes "Merged to $TARGET at $(git -C "$MERGE_WT" rev-parse --short HEAD)"
-else
-  case "$(cat "$PUSH_ERR")" in
-    *GH006*|*GH013*|*"protected branch"*|*"refusing to allow"*|*"Changes must be made through a pull request"*|*"approving review"*|*"Cannot update this protected ref"*)
-      echo "Direct push to '$TARGET' rejected (protected branch). Auto-promoting to merge_strategy=pr."
-      gc bd update "$WORK" --set-metadata merge_strategy=pr
-      MERGE_STRATEGY=mr ;;
-    *) echo "Push failed: $(cat "$PUSH_ERR"). STOP. Debug and retry; do NOT continue."; gc runtime drain-ack; exit 1 ;;
-  esac
-fi
+DMP=""
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/direct-merge-push.sh" ] && { DMP="$c/assets/scripts/direct-merge-push.sh"; break; }
+done
+[ -n "$DMP" ] || { echo "direct-merge-push.sh not found; NOT landing $WORK, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+DIRECT_RC=0
+"$DMP" --work "$WORK" --target "$TARGET" || DIRECT_RC=$?
+case "$DIRECT_RC" in
+  0) ;;
+  3) MERGE_STRATEGY=mr ;;
+  *) echo "direct-merge-push.sh exited $DIRECT_RC; leaving the work with the refinery"; gc runtime drain-ack; exit 1 ;;
+esac
 # <<< direct-merge-push
 ```
-After a successful direct merge: tear down the prep worktree (`git -C
-"$RIG_ROOT" worktree remove --force "$PREP_WT"` — it is detached and holds no
-branch, and the rig root's HEAD was never moved, so nothing is restored); if
-delete_merged_branches = "true", `git -C "$RIG_ROOT" push origin --delete
-"$BRANCH"`; and if auto_ff_rig_main = "true", best-effort ff the rig canonical
-checkout (`$RIG_ROOT`) when it is on `$TARGET` with a clean tree — never abort
-on its failure.
+After a successful direct merge, tear down the prep worktree with
+`refinery-workspace.sh teardown`. It is detached and holds no branch, and the
+rig root's HEAD was never moved, so nothing is restored; a teardown that does
+not complete is cleared by the next rebase step:
+```bash
+# >>> prep-teardown
+WS=""
+for c in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
+done
+if [ -z "$WS" ] || ! "$WS" teardown; then
+  echo "the prep worktree was not torn down; carry on, since the next rebase step clears it before staging"
+fi
+# <<< prep-teardown
+```
+Then, if delete_merged_branches = "true",
+`git -C "$RIG_ROOT" push origin --delete "$BRANCH"`; and if auto_ff_rig_main =
+"true", best-effort ff the rig canonical checkout (`$RIG_ROOT`) when it is on
+`$TARGET` with a clean tree — never abort on its failure.
 
 **If MERGE_STRATEGY = "mr":** the refinery does NOT land the branch. It
 pushes the prepared branch and transitions the anchor into the gated
@@ -1104,10 +1130,21 @@ later, on a verified merge, via the cadence — never here. A failed
 transition leaves $WORK assigned and open; the next patrol retries
 idempotently (push and anchor resolution are both re-runnable).
 
-6. Cleanup: tear down the prep worktree (`git -C "$RIG_ROOT" worktree remove
---force "$PREP_WT"`, re-resolving `RIG_ROOT`/`PREP_WT` as the push block did; an
-interrupted teardown is cleared by the next iteration's rebase step). The prep
-worktree is detached and holds no branch, so nothing else has to be deleted.
+6. Cleanup: tear down the prep worktree with `refinery-workspace.sh teardown`,
+the script the rebase step staged it with; a teardown that does not complete is
+cleared by the next iteration's rebase step. The prep worktree is detached and
+holds no branch, so nothing else has to be deleted:
+```bash
+# >>> prep-teardown
+WS=""
+for c in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
+done
+if [ -z "$WS" ] || ! "$WS" teardown; then
+  echo "the prep worktree was not torn down; carry on, since the next rebase step clears it before staging"
+fi
+# <<< prep-teardown
+```
 Never delete `$BRANCH` in mr mode — the PR needs it. The rig root's HEAD was
 never moved, so nothing has to be restored here.
 
