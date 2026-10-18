@@ -252,18 +252,19 @@ workspace `review-workspace.sh` made under macOS's `$TMPDIR`, a path through
 path, so the renderer's check that it was the script being run compared the
 `/var` path the caller gave with the `/private/var` path Node loaded. The check
 failed, and the renderer exited 0 without writing a page. Every terminal and
-markdown capture from that checkout then failed its `visible #surface` proof
-and left no PNG. The renderer now compares the real paths of both sides, so no
-caller has to canonicalize its checkout first. In `demo-screenshot.test.sh`,
-the renderer run through a symlinked directory and through a symlink to the
-file writes its page, and a terminal capture run from a symlinked checkout
-serves the page the real renderer drew. Each of those fails at 1f8b45af6. Two
-more cases hold what the check already did. Run under
-`--preserve-symlinks-main`, which keeps the symlink in the module's own URL,
-the renderer writes its page, and imported with an argument that names no
-file, it only exports. Each mutant of the check turned the suite red: the check
-as it was, a real path on either side alone, a failed resolution left uncaught,
-and one read as this file.
+markdown capture run through that `/var` path then failed its
+`visible #surface` proof and left no PNG, so the review took its terminal and
+markdown PNGs through the checkout's `/private/var` path instead. The renderer
+now compares the real paths of both sides, so no caller has to canonicalize
+its checkout first. In `demo-screenshot.test.sh`, the renderer run through a
+symlinked directory and through a symlink to the file writes its page, and a
+terminal capture run from a symlinked checkout serves the page the real
+renderer drew. Each of those fails at 1f8b45af6. Two more cases hold what the
+check already did. Run under `--preserve-symlinks-main`, which keeps the
+symlink in the module's own URL, the renderer writes its page, and imported
+with an argument that names no file, it only exports. Each mutant of the check
+turned the suite red: the check as it was, a real path on either side alone, a
+failed resolution left uncaught, and one read as this file.
 
 `services/helm`'s own Go tests cover the fixture. `internal/fixture`'s cases
 serve the board as JSON at its path, send every other path to the app, answer a
@@ -288,11 +289,13 @@ turned it red: `PORT` not exported, `--port 0` taken with `--serve-dir` or
 the engine unpicked.
 
 **The attach, proven live.** `demo-deliver.sh` is unchanged, and the demo
-reviews of PR 1266 attached their PNGs to it inline and uncommitted: the helm
-board and a collapsed comment at 903b29df5, then at 1f8b45af6 the helm board, a
-terminal transcript of the renderer's path check, and a comment collapsed and
-expanded. Each PNG follows its comment's text, with the file's name as its alt
-text, as the gh on this host (2.102.0) documents for `--attach`.
+reviews of PR 1266 at c7a354d58, 903b29df5 and 1f8b45af6 each attached four
+PNGs to it inline and uncommitted: the helm board, one terminal capture, and the
+comment `bring-current-audit.sh` renders for this bead, collapsed and expanded.
+The terminal capture was the `gc-helm.sh unplaced` report at c7a354d58, a
+coloured `git log` at 903b29df5, and at 1f8b45af6 a transcript of the
+renderer's path check. Each PNG follows its comment's text, with the file's name
+as its alt text, as the gh on this host (2.102.0) documents for `--attach`.
 
 ## What a review session needs
 
