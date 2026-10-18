@@ -1089,6 +1089,17 @@ keys = [
   # watermark is not re-read on every pass. They never stand in for the
   # watermarks: a routing writes those, and the write-back reads only those.
   "pr_comment_answered", "pr_review_answered",
+  # The rank all of the anchor's PR-finishing work, its open reviews, reworks
+  # and validation passes with their live workflows, was last settled at:
+  # approved, the P0 an approved PR's finishing work runs at, or unapproved, the
+  # anchor's priority plus each bead's shift (docs/steering.md#pr-finishing-work).
+  # Each pass of pr-facts.sh compares it with the rank the recorded pr_posture
+  # gives and, while the two differ, settles that work and writes the rank once
+  # every bead of it has settled. It clears a record naming the other rank
+  # before the first settle, so a pass that stops partway leaves none. Absent
+  # means no pass is known to have settled all of that work at either rank, and
+  # the next pass settles it. One of the two words.
+  "pr_finishing_settled",
 ]
 
 [metadata.pr_round_trip]

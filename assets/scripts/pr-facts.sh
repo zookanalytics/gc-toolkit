@@ -53,7 +53,10 @@
 # queue-priority.sh settle before its route, which is written with no priority
 # in it. An approved PR's finishing work runs at P0, so a posture recorded into
 # or out of approved re-ranks the anchor's open reviews, reworks and validation
-# passes in the pass that records it.
+# passes in the pass that records it. The anchor's pr_finishing_settled records
+# the rank that work was last settled at in full, and every pass settles it
+# again while the record names no rank or another one, so a re-rank a failed
+# settle left short is finished on a later pass.
 # Unanswered review feedback routes to something — a fix-pool rework child
 # carrying the review bodies and inline comments verbatim, or a visit when the
 # city has nowhere to route work (no head branch or no fix pool) — with the
@@ -943,20 +946,30 @@ route_finishing() { # <child> — route a PR-finishing child to the fix pool at 
   gc bd update "$1" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
 }
 
-settle_finishing() { # <anchor> <old-posture> <new-posture> — re-rank its PR-finishing work
+settle_finishing() { # <anchor> <posture> <settled-rank> — finish the re-rank of its PR-finishing work
   # An approved PR's finishing work runs at P0 whatever its shift, and any other
-  # PR's at its anchor's priority plus its shift (docs/steering.md). So when the
-  # posture this pass recorded moves the PR into or out of approved, the anchor's
-  # open reviews, reworks and validation passes, the work a pool claims, are
-  # settled with their live workflows in this pass. Each settle waits for the
-  # store's priority lock a short while only, since the merge arm waits on this
-  # pass. A child that does not settle is named and keeps its priority until the
-  # next writer of its priority reaches it.
-  local a="$1" was="${2%%@*}" now="${3%%@*}" kids k settled=0 left=""
-  [ "$was" != "$now" ] || return 0
-  [ "$was" = approved ] || [ "$now" = approved ] || return 0
+  # PR's at its anchor's priority plus its shift (docs/steering.md). That work is
+  # the anchor's open reviews, reworks and validation passes, the work a pool
+  # claims, with their live workflows. The anchor's pr_finishing_settled names
+  # the rank all of it was last settled at, approved or unapproved. When the
+  # anchor's recorded posture gives the other rank, or no rank is recorded, the
+  # work is settled, and the rank is recorded only once every bead of it has
+  # settled. So a settle that fails leaves no record, and each later pass settles
+  # the work again, whether or not the posture moves, until all of it settles. A
+  # record naming the other rank is cleared before the first settle, so a pass
+  # that stops partway leaves no record that a return to that rank would read as
+  # settled. Each settle waits for the store's priority lock a short while only,
+  # since the merge arm waits on the posture pass.
+  local a="$1" posture="${2:-unrecorded}" want=unapproved rec="$3" kids k settled=0 left=""
+  [ "$posture" != approved ] || want=approved
+  [ "$rec" != "$want" ] || return 0
+  if [ -n "$rec" ] && ! "$LIFECYCLE" transition "$a" --to pull_request --expect pull_request \
+       --unset pr_finishing_settled >/dev/null; then
+    echo "$PROG: WARN $a — its PR-finishing work is recorded at the $rec rank and its posture $posture gives the $want rank, but the record did not clear, so none of that work was re-ranked (retry next pass)" >&2
+    return 1
+  fi
   if ! kids=$(bd_anchor_children "$a" "open,in_progress,blocked,deferred,hooked"); then
-    echo "$PROG: WARN $a — its PR's posture moved from ${was:-none} to $now, but its PR-finishing work could not be read, so none of it was re-ranked" >&2
+    echo "$PROG: WARN $a — its PR-finishing work could not be read, so none of it was re-ranked to the $want rank (posture $posture; retry next pass)" >&2
     return 1
   fi
   for k in $(printf '%s' "$kids" | jq -r '.[]
@@ -968,9 +981,16 @@ settle_finishing() { # <anchor> <old-posture> <new-posture> — re-rank its PR-f
       left="${left:+$left }$k"
     fi
   done
-  [ "$settled" -eq 0 ] || echo "$PROG: $a — its PR's posture moved from ${was:-none} to $now; re-ranked $settled bead(s) of its PR-finishing work"
-  [ -z "$left" ] || echo "$PROG: WARN $a — its PR's posture moved from ${was:-none} to $now, but $left did not settle at the new priority" >&2
-  [ -z "$left" ]
+  [ "$settled" -eq 0 ] || echo "$PROG: $a — settled $settled bead(s) of its PR-finishing work at the $want rank (posture $posture)"
+  if [ -n "$left" ]; then
+    echo "$PROG: WARN $a — $left did not settle at the $want rank (posture $posture); the next pass settles its PR-finishing work again" >&2
+    return 1
+  fi
+  if ! "$LIFECYCLE" transition "$a" --to pull_request --expect pull_request \
+       --set "pr_finishing_settled=$want" >/dev/null; then
+    echo "$PROG: WARN $a — its PR-finishing work settled at the $want rank, but the record did not land, so the next pass settles it again" >&2
+    return 1
+  fi
 }
 
 gh_rows() { # <api path> — one paginated endpoint re-collected into ONE array
@@ -1933,7 +1953,7 @@ MP_EOF
   # separator (never valid inside these values) and split on the same, so an
   # empty field keeps its slot instead of collapsing the way a tab or
   # default-IFS split would.
-  IFS=$'\037' read -r cwm rwm iwm have_c adisp obatch orbatch oibatch have_p have_m lifted < <(
+  IFS=$'\037' read -r cwm rwm iwm have_c adisp obatch orbatch oibatch have_p have_m lifted have_fs < <(
     printf '%s' "$row" | jq -r '[
         (.metadata.pr_comment_watermark // ""),
         (.metadata.pr_review_watermark // ""),
@@ -1945,7 +1965,8 @@ MP_EOF
         (.metadata.pr_issue_comment_batch // ""),
         (.metadata.pr_posture // ""),
         (.metadata.pr_merge_state // ""),
-        (.metadata.bring_current_lifted_at // "")
+        (.metadata.bring_current_lifted_at // ""),
+        (.metadata.pr_finishing_settled // "")
       ] | map(tostring) | join("\u001f")')
   # The recorded conversation parsed once: have_cvh is <value>@<head> (the dated
   # key minus its instant), have_cv just the value. The derivation reads the
@@ -2212,9 +2233,10 @@ MP_EOF
   if [ "$POSTURE_ONLY" != 1 ] && [ -n "$conv" ] && [ "$have_cvh" != "$conv@$head_oid" ]; then
     PC_SETS+=(--set-dated "pr.conversation=$conv@$head_oid"); wrote_c="$conv@$head_oid"
   fi
+  stored_p="${have_p%%@*}"
   if [ ${#PC_SETS[@]} -gt 0 ]; then
     if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request "${PC_SETS[@]}" >/dev/null; then
-      [ -n "$wrote_p" ] && { pinned=1; postured=$((postured + 1)); }
+      [ -n "$wrote_p" ] && { pinned=1; postured=$((postured + 1)); stored_p="$posture"; }
       echo "$PROG: $id — PR#$num recorded${wrote_p:+ posture $wrote_p, merge state $want_m}${wrote_c:+ conversation $wrote_c}"
       # The posture value is where a review on the PR lands: an approval, a
       # comment, a change request, or a dismissal. A pass that changes it
@@ -2226,13 +2248,17 @@ MP_EOF
       # that arm, and the full pass reconciles those. A conversation-only write
       # moves no label input.
       [ -z "$wrote_p" ] || [ "${have_p%%@*}" = "$posture" ] || reconcile_status_label "$id" "$num"
-      # A posture moving into or out of approved moves the rank of the anchor's
-      # PR-finishing work, re-ranked in the pass that records it.
-      [ -z "$wrote_p" ] || settle_finishing "$id" "$have_p" "$posture" || true
     else
       echo "$PROG: $id posture/conversation record failed for PR#$num; retry next pass" >&2
     fi
   fi
+  # The priority function ranks the anchor's PR-finishing work from the posture
+  # the store holds: the one this pass recorded, or the one it found standing.
+  # settle_finishing brings that work to the rank the posture gives whenever the
+  # anchor's record says it is not there yet, so a posture moving into or out of
+  # approved re-ranks it in the pass that records it, and a re-rank that pass left
+  # short is finished by a later one, whether or not the posture moves again.
+  settle_finishing "$id" "$stored_p" "$have_fs" || true
   # merge.sh validates the posture recorded here and never asks GitHub, so an
   # anchor this pass could not make current is one it would clear against a
   # fact from an earlier tick. A standing `commented@` is already holding that

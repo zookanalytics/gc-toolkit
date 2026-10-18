@@ -411,6 +411,7 @@ non-draft anchor and read off the bead by everything downstream. Declared in
 | `pr_review_answered` | `<id>` | every counted review body above `pr_review_watermark`, through this id, was answered by its threads at the last read |
 | `pr_comment_disposition` | `rework:<id>` / `visit:<id>` | what the last outstanding batch was routed to |
 | `pr_provenance_since` | `<UTC instant>` | when `pr-facts.sh` first read the open PR; an unmarked post under the city's login from before it is the city's own |
+| `pr_finishing_settled` | `approved` / `unapproved` | the rank all of the anchor's PR-finishing work was last settled at; absent while no pass is known to have settled all of it |
 
 The postures, in the precedence the derivation applies:
 
@@ -425,7 +426,10 @@ The postures, in the precedence the derivation applies:
 The priority function reads the posture too. An `approved` posture on an anchor
 that rests in `pull_request` ranks the anchor's PR-finishing work at P0, and the
 pass of `pr-facts.sh` that records a posture moving into or out of `approved`
-re-ranks that work ([steering.md](steering.md#pr-finishing-work)).
+re-ranks that work. `pr_finishing_settled` records the rank all of it settled
+at, and every pass settles the work again while that record differs from the
+rank the posture gives, so a re-rank a failed settle left short is finished on a
+later pass ([steering.md](steering.md#pr-finishing-work)).
 
 A comment outranks an approval on purpose: one reviewer's approval does not
 answer another reviewer's question. `merge.sh` holds on a recorded `commented`

@@ -440,8 +440,15 @@ slung nor routed, and the creator's retry settles it: the next pass of the
 cadence arm, or the caller of `rework-child.sh` running it again. When the
 posture `pr-facts.sh` records moves into or out of `approved`, the same pass
 settles the anchor's open reviews, reworks and validation passes and their live
-workflows. A finding or a visit carries `anchor_bead` too, but no pool claims
-it, so that settle leaves it as it is.
+workflows. Once every one of them has settled, it records the rank they settled
+at on the anchor, `approved` or `unapproved`, in `pr_finishing_settled`. Every
+pass of `pr-facts.sh` compares that record with the rank the recorded posture
+gives, and settles the work again while the two differ. So a settle that fails
+leaves no record, and a later pass finishes the re-rank, whether or not the
+posture moves again. A record naming the other rank is cleared before the first
+settle, so a pass that stops partway leaves no record that a return to that rank
+would read as settled. A finding or a visit carries `anchor_bead` too, but no
+pool claims it, so that settle leaves it as it is.
 
 ### The pass
 
