@@ -77,7 +77,8 @@
 # .git/gc-toolkit-reconcile-kept while git fast-forwards, and the path holds no
 # file for that long. The copy then goes back on its path with its bytes
 # unchanged, never over a file written there meanwhile. A pass interrupted in
-# that window leaves the copy there, and the next pass puts it back.
+# that window leaves the copy there, and the next pass puts it back before it
+# fetches, since that needs no network.
 #
 # A checkout that has diverged is almost always SHA churn from an upstream
 # rebase/squash/force-push: the live rigs/* checkout is a pure deployment mirror
@@ -697,6 +698,10 @@ rigs=$(gc rig list --json 2>/dev/null | jq -r '.rigs[] | select(.hq != true) | "
 
 while IFS=$'\t' read -r name path; do
     [ -n "${name:-}" ] && [ -d "$path/.git" ] || continue
+    # A kept copy an interrupted pass left aside goes back before anything
+    # reads the working tree. That needs no network, so it runs before the
+    # fetch, and a failed fetch does not keep the copy off its path.
+    restore_kept "$path"
     git -C "$path" fetch origin --quiet 2>/dev/null || continue
     remote=$(git -C "$path" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)
     default_branch="${remote#origin/}"
@@ -712,10 +717,6 @@ while IFS=$'\t' read -r name path; do
     local_branch=$(git -C "$path" symbolic-ref --short HEAD 2>/dev/null || true)
     parked=""
     [ "$local_branch" = "$default_branch" ] || parked="HEAD is on ${local_branch:-<detached HEAD>}, not $default_branch"
-
-    # A kept copy an interrupted pass left aside goes back before anything
-    # reads the working tree.
-    restore_kept "$path"
 
     # A checkout that is only behind its remote keeps in place each path the
     # fast-forward would delete while the remote's tree ignores it. The plain

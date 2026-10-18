@@ -63,10 +63,11 @@
 # the remote's tree does not ignore, whatever the checkout ignores, no path the
 # remote rewrites, writes under or writes a file above, and no path with a
 # staged edit; a refused fast-forward puts the kept copies back; the next pass
-# puts back a copy an interrupted pass left aside, and a copy waiting aside for
-# a path that holds a file again blocks the keep; a failed read of the kept
-# paths stops the fast-forward; RECONCILE_NO_AUTOHEAL turns the keep off; no
-# escalation tells a person to run git reset --hard or --keep.
+# puts back a copy an interrupted pass left aside, also when it cannot fetch,
+# and a copy waiting aside for a path that holds a file again blocks the keep;
+# a failed read of the kept paths stops the fast-forward; RECONCILE_NO_AUTOHEAL
+# turns the keep off; no escalation tells a person to run git reset --hard or
+# --keep.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -1334,6 +1335,24 @@ eq "$(cat "$TMP/untrackedleftover/.beads/config.yaml" 2>/dev/null)" "$GASCITY_CF
 eq "$(cat "$TMP/untrackedleftover/.beads/metadata.json" 2>/dev/null)" "meta" "every copy an interrupted pass left aside goes back"
 eq "$(kept_waiting untrackedleftover)" "0" "no copy is left waiting aside after the next pass"
 eq "$(git -C "$TMP/untrackedleftover" status --porcelain)" "" "the files put back end untracked and ignored"
+
+# untrackedoffline: the same interrupted pass, but the next pass cannot fetch.
+# Putting the kept files back needs no network, so they go back anyway, and
+# nothing else moves.
+untrack_rig untrackedoffline '.beads/*'
+gascity_writes untrackedoffline
+mkdir -p "$TMP/untrackedoffline/.git/gc-toolkit-reconcile-kept/.beads"
+mv "$TMP/untrackedoffline/.beads/config.yaml" "$TMP/untrackedoffline/.beads/metadata.json" "$TMP/untrackedoffline/.git/gc-toolkit-reconcile-kept/.beads/"
+git -C "$TMP/untrackedoffline" remote set-url origin "$TMP/absent.git"
+UNTRACKEDOFFLINE_HEAD="$(git -C "$TMP/untrackedoffline" rev-parse HEAD)"
+rigs_json untrackedoffline
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null 2>&1
+eq "$(cat "$TMP/untrackedoffline/.beads/config.yaml" 2>/dev/null)" "$GASCITY_CFG" "a pass that cannot fetch still puts back a copy an interrupted pass left aside"
+eq "$(cat "$TMP/untrackedoffline/.beads/metadata.json" 2>/dev/null)" "meta" "a pass that cannot fetch puts back every copy left aside"
+eq "$(kept_waiting untrackedoffline)" "0" "a pass that cannot fetch leaves no copy waiting aside"
+eq "$(git -C "$TMP/untrackedoffline" rev-parse HEAD)" "$UNTRACKEDOFFLINE_HEAD" "a pass that cannot fetch moves nothing else"
+eq "$(git -C "$TMP/untrackedoffline" status --porcelain)" " M .beads/config.yaml" "the files put back are tracked again, as before the interrupted pass"
 
 # untrackedstale: an earlier pass left a copy of config.yaml aside, and a file
 # was written on its path since. The copy stays aside, and the keep refuses
