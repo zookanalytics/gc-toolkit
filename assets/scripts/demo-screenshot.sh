@@ -276,7 +276,7 @@ case "$KIND" in
       case "$u" in
         git@github.com:*|https://github.com/*|ssh://git@github.com/*)
           REPO=$(printf '%s' "$u" | sed -e 's#^ssh://git@github.com/##' \
-            -e 's#^git@github.com:##' -e 's#^https://github.com/##' -e 's#\.git$##' -e 's#/*$##') ;;
+            -e 's#^git@github.com:##' -e 's#^https://github.com/##' -e 's#/*$##' -e 's#\.git$##') ;;
       esac
       case "$REPO" in */*/*|/*|*/) REPO="" ;; */*) : ;; *) REPO="" ;; esac
       [ -n "$REPO" ] || echo "$PROG: no GitHub origin found, so #123 and @name references render without a repository context" >&2

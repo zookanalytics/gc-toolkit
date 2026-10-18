@@ -389,6 +389,10 @@ RIG="$TMPD/rig"; git init -q "$RIG" && git -C "$RIG" remote add origin git@githu
 out="$(run GC_RIG_ROOT="$RIG" -- markdown --file "$MD" --output "$OUT")"; rc=$?
 eq "$rc" 0 "the rig's origin gives the context"
 eq "$(jq -r '.context' "$GH_REQ" 2>/dev/null)" "zookanalytics/gc-toolkit" "references resolve in the rig's origin"
+SLASHED="$TMPD/rig-slashed"; git init -q "$SLASHED" && git -C "$SLASHED" remote add origin https://github.com/octo/widgets.git/
+out="$(run GC_RIG_ROOT="$SLASHED" -- markdown --file "$MD" --output "$OUT")"; rc=$?
+eq "$rc" 0 "an origin ending in .git/ gives the context"
+eq "$(jq -r '.context' "$GH_REQ" 2>/dev/null)" "octo/widgets" "its trailing slash and its .git are both dropped"
 NOGIT="$TMPD/norepo"; mkdir -p "$NOGIT"
 out="$(cd "$NOGIT" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" HANDED="$HANDED" GH_REQ="$GH_REQ" \
   ENGINE_STUB="$ENGINE_STUB" SCRIPT_HANDED="$SCRIPT_HANDED" SERVED="$SERVED" SS_RIG="$ENGINE" bash "$SUT" markdown --file "$MD" --output "$OUT" 2>&1)"; rc=$?
