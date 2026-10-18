@@ -20,7 +20,10 @@
 # checks what they emit; without one those cases are skipped. There the gh stub
 # answers with HTML GitHub's markdown API returned, kept verbatim, and the node
 # stub runs the real renderer on it, so a markdown capture is checked end to
-# end on what GitHub actually sends.
+# end on what GitHub actually sends. That part also runs the renderer from a
+# symlinked checkout, directly and through a whole capture, because a review
+# workspace under macOS's $TMPDIR is reached through /var, a symlink to
+# /private/var.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -595,6 +598,23 @@ HTML
   eq "$rc" 0 "the renderer exits 0 once the page is written"
   eq "$out" "" "the renderer prints nothing on success"
   has '<span style="color:#cd3131">red</span>' "$(cat "$TMPD/real.html" 2>/dev/null)" "the page holds the rendered output"
+  # Node runs a script from its real path, and the path it is run by can pass
+  # through a symlink, as macOS's /var does to /private/var. Through a
+  # symlinked directory, or a symlink to the file itself, the renderer still
+  # writes its page.
+  ln -s "$HERE" "$TMPD/linked-dir"
+  ln -s "$RENDERER" "$TMPD/linked.mjs"
+  for via in "$TMPD/linked-dir/demo-screenshot.mjs" "$TMPD/linked.mjs"; do
+    rm -f "$TMPD/linked.html"
+    out=$("$NODE_BIN" "$via" terminal --text "$TMPD/real.txt" --output "$TMPD/linked.html" 2>&1); rc=$?
+    eq "$rc" 0 "the renderer run as ${via#"$TMPD"/} exits 0"
+    has '<span style="color:#cd3131">red</span>' "$(cat "$TMPD/linked.html" 2>/dev/null)" "and writes its page"
+  done
+  rm -f "$TMPD/linked.html"
+  "$NODE_BIN" --preserve-symlinks-main "$TMPD/linked-dir/demo-screenshot.mjs" terminal --text "$TMPD/real.txt" --output "$TMPD/linked.html" >/dev/null 2>&1
+  has '<span style="color:#cd3131">red</span>' "$(cat "$TMPD/linked.html" 2>/dev/null)" "so does one run under --preserve-symlinks-main, which keeps the symlink in its own URL"
+  r=$("$NODE_BIN" --input-type=module -e "import * as m from '$RENDERER'; process.stdout.write(typeof m.parseArgs);" no-such-file 2>&1)
+  eq "$r" 'function' "imported with an argument that names no file, the renderer only exports"
   out=$("$NODE_BIN" "$RENDERER" terminal --output "$TMPD/real.html" 2>&1); rc=$?
   eq "$rc" 2 "the renderer exits 2 on bad arguments"
   has "terminal needs --text" "$out" "it names what is missing"
@@ -624,6 +644,12 @@ HTML
   out="$(run REAL_NODE="$NODE_BIN" GH_HTML="$TMPD/drawn.html" -- markdown --file "$MD" --output "$OUT")"; rc=$?
   eq "$rc" 0 "markdown GitHub returns with no such block is drawn and captured"
   has '<markdown-accessiblity-table><table role="table">' "$(cat "$SERVED" 2>/dev/null)" "the page the engine serves is the real renderer's, drawn from GitHub's HTML"
+
+  echo "# a capture from a symlinked checkout, through the real renderer"
+  out="$(SUT="$TMPD/linked-dir/demo-screenshot.sh" run REAL_NODE="$NODE_BIN" -- terminal --text "$TXT" --output "$OUT")"; rc=$?
+  eq "$rc" 0 "a terminal capture run from a symlinked checkout exits 0"
+  has "node [$TMPD/linked-dir/demo-screenshot.mjs] [terminal]" "$(calls)" "the renderer is run by its symlinked path"
+  has 'line one' "$(cat "$SERVED" 2>/dev/null)" "the page the engine serves is the one the real renderer drew"
 fi
 
 echo

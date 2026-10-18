@@ -25,7 +25,7 @@
 // Exit: 0 the page is written, 2 bad arguments, 1 anything that stopped the
 // write, a refused fragment included.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -405,7 +405,21 @@ function main(argv) {
   return 0;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Node runs a script from its real path, so import.meta.url names this file
+// with every symlink resolved, while process.argv[1] keeps the path it was run
+// by, such as macOS's /var for /private/var. --preserve-symlinks-main keeps the
+// symlink in import.meta.url instead, so both sides are resolved. A path that
+// does not resolve, such as an argument after node -e, is not this file.
+function runAsScript() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (runAsScript()) {
   try {
     process.exitCode = main(process.argv.slice(2));
   } catch (e) {
