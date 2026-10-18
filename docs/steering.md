@@ -382,21 +382,26 @@ the number and writes nothing, for a writer that puts the priority in the same
 ### PR-finishing work
 
 PR-finishing work carries an anchor's built branch to its merge. Its creators
-are `gate-ensure.sh`, which slings the reviews and the validation passes that
-`pr-facts.sh` and `signoff.sh` open, `pr-facts.sh`, which routes the merge-in of
-an approved PR that conflicts, the fix for a red required check and the comment
-rework, `pre-open-rebase.sh`, which routes the merge-in before a PR exists, and
-`rework-child.sh`, which slings the rework a review verdict or an operator
-ruling asks for. Each child carries `anchor_bead` and follows its anchor.
+are the scripts that make it claimable:
 
-**It never has a parent.** Each creator joins its child to the anchor with a
-`blocks` edge and a membership edge, never a parent-child edge, so no cascade
-reaches it: a park or a decision hold on the anchor's epic leaves the PR's
-finishing work running. Each creator's suite asserts that the child it files
-has no parent.
+- `gate-ensure.sh` slings the reviews it files, and the validation passes that
+  `pr-facts.sh` and `signoff.sh` file.
+- `pr-facts.sh` routes the merge-in of an approved PR that conflicts, the fix
+  for a red required check, and the comment rework.
+- `pre-open-rebase.sh` routes the merge-in before a PR exists.
+- `rework-child.sh` slings the rework that a review verdict or an operator
+  ruling asks for.
 
-**Its rank.** Each creator files its child with `priority_shift=-1` in the
-create, so the child is born one level sooner than its anchor. Its priority is:
+Each child carries `anchor_bead` and follows its anchor.
+
+**It never has a parent.** Each child is joined to its anchor with a `blocks`
+edge and a membership edge, never a parent-child edge, so no cascade reaches
+it: a park or a decision hold on the anchor's epic leaves the PR's finishing
+work running. The suite of each script that files a child asserts that the
+child has no parent.
+
+**Its rank.** Each child is filed with `priority_shift=-1` in its create, so it
+is born one level sooner than its anchor. Its priority is:
 
 - P0 once the anchor's PR is approved, whatever its shift;
 - otherwise its anchor's priority plus its shift: at -1, P1 for an anchor at P2,
@@ -417,8 +422,8 @@ on it. The posture is not the approval rule `merge.sh` lands on
 posture, and a PR whose base requires no approving review reports no review
 decision, so either ranks as not approved.
 
-**Where it is written.** Each creator settles its child before the child can be
-claimed. `rework-child.sh` and `gate-ensure.sh` run `queue-priority.sh settle`
+**Where it is written.** Each creator settles a child before it makes the child
+claimable. `rework-child.sh` and `gate-ensure.sh` run `queue-priority.sh settle`
 before the sling, whose pour copies the priority, and `pr-facts.sh` and
 `pre-open-rebase.sh` put `settle --print`'s priority in the `bd update` that
 routes the child. A child whose priority does not settle is neither slung nor
