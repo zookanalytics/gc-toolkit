@@ -294,6 +294,9 @@ turn, and a turn carries several distinct corrections. It gives two numbers:
   its own, the repeat count is pinned to (categorised minus distinct) and the
   share measures slug reuse rather than recurrence. The report withholds the
   rate when the key does not discriminate, and reports the spread instead.
+  The outside capture's `outside-review` names where feedback came from, not a
+  correction, so M1 leaves it out and the report counts those posts on a line
+  of their own.
 - **M2, recurrence after adoption.** Per adopted entry, the observations
   attributed to its pattern bead since its adoption date. Attribution runs
   through `obs.distilled`, which only the distiller stamps. An anchor records

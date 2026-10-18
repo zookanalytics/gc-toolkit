@@ -172,6 +172,30 @@ eq "$(jq -r '.corpus.observations' <<< "$K")" "1" \
 eq "$(jq -r '.m1_category_repeat.fragmentation.categorised' <<< "$K")" "1" \
    "and its obs.category never reaches the M1 accounting"
 
+# --- 2a2. the outside capture is not a correction category ---------------
+# The miner files every outside review post under outside-review, so a window
+# of them would read as one category repeating. M1 leaves them out; the
+# corpus and M2 still count them.
+mkdir -p "$TMP/stores2o"
+{
+  obs o1 "$(ago 6)" "pr:o/r#40:comment:40" real-slug    ""      self
+  obs o2 "$(ago 5)" "pr:o/r#41:comment:41" outside-review ""    miner
+  obs o3 "$(ago 4)" "pr:o/r#42:review:42"  outside-review tk-pat1 miner
+  obs o4 "$(ago 3)" "pr:o/r#43:comment:43" outside-review ""    miner
+} | jq -s . > "$TMP/stores2o/alpha.json"
+cat > "$TMP/rigs2o.json" <<JSON
+{"rigs":[{"name":"alpha","path":"$TMP/stores2o/alpha.json"}]}
+JSON
+O=$(STUB_RIGS="$TMP/rigs2o.json" "$SUT" --repo "$REPO" --window-days 30 --json 2>&1)
+eq "$(jq -r '.corpus.events_after_dedup' <<< "$O")" "4" "outside-review observations are in the corpus"
+eq "$(jq -r '.m1_category_repeat.window.categorised' <<< "$O")" "1" "M1 leaves the outside capture out of its denominator"
+eq "$(jq -r '.m1_category_repeat.window.repeats' <<< "$O")" "0" "and never counts an outside post as a repeat"
+eq "$(jq -r '.m1_category_repeat.outside_events.window' <<< "$O")" "3" "the report counts the outside posts beside M1"
+eq "$(jq -r '[.m2_post_adoption.rules[] | select(.pattern=="tk-pat1")] | .[0].since_adoption' <<< "$O")" "1" \
+   "an outside post the distiller stamped still counts in M2"
+has "$(STUB_RIGS="$TMP/rigs2o.json" "$SUT" --repo "$REPO" --window-days 30 2>&1)" \
+    "outside review posts, not counted above: 3 this window" "the text report names them"
+
 # --- 2b. one provenance key, several distinct corrections -----------------
 # A whole-turn provenance (bead:<id>:turn:<date>) covers every correction made
 # in that turn. Collapsing the group to one row loses real recurrence, and
