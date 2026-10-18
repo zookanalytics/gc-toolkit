@@ -95,7 +95,9 @@ judged, because a failing command can still print the surface. The renderer
 keeps ANSI SGR colour and weight, drops every other escape, keeps what a
 carriage return's last redraw shows, honours tab stops, wraps at `--columns`
 (default 120), and cuts at `--max-lines` (default 200) with a line that counts
-what it hid.
+what it hid. A window its content sizes is at least 40 columns wide, which
+leaves its title bar room, and an explicit `--columns` below 40 still sets the
+width.
 
 **Markdown through GitHub's own renderer.** GitHub's markdown API, in gfm mode
 with the rig's origin as context, returns the HTML GitHub renders: collapsed
@@ -235,6 +237,14 @@ check of its own, and gave the screenshot a published-package runner of its
 own. Of the mutants made when the library was extracted, a dropped package-name
 guard, an installer writing to stdout and a dropped npx check still turn it
 red, and `rig-demo-capture.test.sh` still catches a dropped ffmpeg fetch.
+
+The cases added for review 5560096102 each fail at da0e1dd3d, the head that
+review read. In `demo-screenshot.test.sh`, a terminal or markdown surface whose
+one step fails its proof exits 1, a markdown capture with no gh or no jq stops
+before anything is installed or run, an origin ending in `.git/` gives the
+context owner/name, and `--columns 30` draws a 30-column window. In
+`demo-engine-lib.test.sh`, the demo:capture skill's cases fail on the skill's
+old copy of the steps, and the widened scan names it.
 
 `services/helm`'s own Go tests cover the fixture. `internal/fixture`'s cases
 serve the board as JSON at its path, send every other path to the app, answer a
