@@ -412,10 +412,12 @@ things:
   `:152-166`). Under this design it falls back to
   `git ls-remote origin refs/heads/<branch>`, which needs only the origin the
   review fetches from anyway. An anchor whose head neither read answers is held
-  for the pass, which is the arm's ordinary "merge stays held, retry next
-  pass". The stranded arm writes `reviewed_oid` only where the record has
-  none. For a record that carries one, its order leaves the key out, as it
-  does today (`gate-ensure.sh:950-954`, `:194`). That is what keeps the pin in
+  for the pass. gate-ensure then passes the resolver an empty commit, the
+  resolver refuses it, and gate-ensure's resolve arm keeps the merge held and
+  retries on the next pass (`gate-ensure.sh:813-820`, section 6). The stranded
+  arm writes `reviewed_oid` only where the record has none. For a record that
+  carries one, its order leaves the key out, as it does today
+  (`gate-ensure.sh:950-954`, `:194`). That is what keeps the pin in
   place: `bd_meta_ensure` rewrites every key of an order once any key reads
   short (`bd-lib.sh:567-590`), so an order carrying the live head would move a
   pin the dispatch wrote. A record with no pin gets the anchor's head, which
@@ -771,11 +773,36 @@ The working-tree read goes. Today a resolve with no `--at`, or at a commit
 that carries no index, reads the working tree's `review-checks.toml`
 (`review-checks.sh:33-43`, `:169-173`). Under this design the rig's layer
 comes from the commit `--at` names and from nowhere else, so no reader falls
-back to the checkout it happens to run in. A call that names no commit has no
-rig layer: it answers from the pack's rows alone, and `--extension` prints
-nothing. Every reader in the table below names its commit. The one that can
-still call with none is gate-ensure when its head read fails, until unit B
-makes it hold that anchor for the pass (section 2).
+back to the checkout it happens to run in. A call that names no commit, with
+`--at` missing or empty, is refused as a usage error and emits no rows.
+`--file` and `GC_REVIEW_CHECKS_INDEX` are the two exceptions. Each names an
+index outright, which is how a test fixes the index a reader sees.
+`--extension` reads a file that only a commit carries, so it is refused
+without a commit even then. A reader that loses its commit fails at once,
+where an answer from the pack's rows alone would judge the change by the
+pack's defaults and skip the rig's own rows without a word.
+
+Every reader in the table below names its commit. Each reader that gates a
+transition already holds when its resolve fails, so a refusal holds what that
+reader gates and never decides on a guess. gate-ensure and pr-open hold the
+anchor for the pass, gctk merge holds the merge, review-outcome refuses the
+supersede, pr-facts proves nothing green, and liveness-sweep keeps the anchor
+a candidate (`liveness-sweep.sh:295-296`). pr-open resolves only once it has
+read the head (`pr-open.sh:452-455`, `:544-547`, `:758-759`). liveness-sweep
+reads the head as pr-open does, so an anchor whose head it cannot read stays a
+candidate as well. The readers at review time always hold a commit. signoff.sh
+refuses a verdict that names none before it reads the index
+(`signoff.sh:442-445`). The triage skill reads at its review's commit, which
+mol-review always names: the recorded one, or on main the live head when none
+is recorded (`mol-review.toml:113-114`). gate-ensure writes a review's
+dispatch body only after its own resolve succeeds.
+
+The one reader that can still pass an empty commit is gate-ensure, when its
+read of the head fails (section 2). The resolver refuses that call, and
+gate-ensure's fail-closed arm holds the anchor for the pass: it dispatches
+nothing, settles nothing and retries on the next pass
+(`gate-ensure.sh:813-820`). That is the hold section 2 gives an anchor whose
+head no read answers, so the refusal needs no interim behavior.
 
 A rig row whose phase is outside the ordered set is refused, as today
 (`review-checks.sh:227-235`). Read at a commit, that refusal holds only the
@@ -935,10 +962,13 @@ review.
    rig's rows come from the commit `--at` names, not from the working tree,
    which the test proves by resolving at a commit whose index differs from the
    working tree's, and a commit with no index adds no rows even when the
-   working tree has one. A call that names no commit answers from the pack's
-   rows alone, even when the working tree has an index. `--extension` prints a
-   commit's extension, and prints nothing and exits 0 at a commit that carries
-   none. A rig row with a phase outside the ordered set is refused.
+   working tree has one. A call that names no commit is refused, with `--at`
+   missing and with `--at ""`, even when the working tree has an index.
+   `--file` and `GC_REVIEW_CHECKS_INDEX` each resolve without `--at`, and
+   `--extension` is refused without a commit even when one of them is given.
+   `--extension` prints a commit's extension, and prints nothing and exits 0
+   at a commit that carries none. A rig row with a phase outside the ordered
+   set is refused.
 7. **What signoff.sh refuses** (`signoff.test.sh`), iterating the effective
    index. It refuses `--add-gates` from every declared check but triage,
    `--visual` from every check but demo, a demo verdict without `--visual`, and
@@ -995,7 +1025,9 @@ rows come from beside the resolver. Each suite that runs a reader of the index
 is re-derived against that shape. The harness these suites share clears every
 `GC_*` variable and stubs git to report no toplevel (`test-harness.sh:55`,
 `:1264`), so a resolver run under it finds no repository and reads no rig
-layer, today or after this change.
+layer, today or after this change. A call there that names no commit is
+refused as it is anywhere, so the refusal changes only a suite that resolves
+with neither a commit nor an index override.
 
 - `review-outcome.test.sh` runs the resolver beside the real
   `review-outcome.sh` and sets no `GC_REVIEW_CHECKS_INDEX`. Today that resolver
@@ -1026,14 +1058,23 @@ layer, today or after this change.
   sweep forwards as `--file` today (`liveness-sweep.sh:303-306`). The sweep now
   passes `--at` each anchor's head and no `--file`, so the variable keeps fixing
   the index through the resolver, and the suite stubs the sweep's new read of
-  each head.
+  each head. The variable would let a call with no commit resolve, so a case
+  in which a head does not read shows the sweep keeps that anchor a candidate
+  without resolving it.
 - `review-checks.test.sh` takes test 6. Its case of a commit with no index
   (`:268-274`) asserts today's fall-through to the working tree, and asserts
   the pack's rows instead.
-- `gate-ensure.test.sh`, `pr-open.test.sh` and `pr-stack.test.sh` already reach
-  the resolver through `--at`, under the harness or with
-  `GC_REVIEW_CHECKS_INDEX` set, so the resolver's new shape leaves them as they
-  are.
+- `pr-open.test.sh` and `pr-stack.test.sh` already reach the resolver through
+  `--at` with a head, under the harness or with `GC_REVIEW_CHECKS_INDEX` set,
+  so the resolver's new shape leaves them as they are. pr-open reads the head
+  before it resolves, and every PR in pr-stack's fixtures carries one.
+- `gate-ensure.test.sh` reaches the resolver through `--at` as well, at the
+  head its `gh` stub answers. Its case of an unread head (`:523-536`) asserts
+  that a backed lane still settles and an unbacked one still dispatches, with
+  no pin. The refusal holds both anchors for the pass instead, so the case
+  asserts the hold, with nothing settled and nothing dispatched. Its other
+  anchors with no head fixture stop before the resolve, or assert nothing the
+  hold changes.
 
 ## 9. Sequencing with the review-coverage epic
 
@@ -1103,7 +1144,11 @@ when unit A lands.
 - `review-checks.sh` takes on the layered index: the pack's rows beside the
   script, the rig's from the commit `--at` names. It gains `--check`, `--show`
   and `--extension`, its working-tree read goes, a call that names no commit
-  answers from the pack's rows alone, and the `method` key is ignored.
+  is refused unless `--file` or `GC_REVIEW_CHECKS_INDEX` names the index, and
+  the `method` key is ignored.
+- gate-ensure.sh's comment that says an unread head sends a review out with
+  no pin (`gate-ensure.sh:137-139`) is rewritten, because the refusal holds
+  that anchor for the pass (section 6).
 - liveness-sweep.sh resolves at the head of each anchor's branch, and
   `review-dispatch-body.sh` reads a check's purpose through `--check --at` and
   its extension through `--extension --at` until unit B deletes it (section 6).
@@ -1121,7 +1166,8 @@ when unit A lands.
   index and points at the configuration that holds the baseline.
 - A bead in sprintshow's store for its index header, which points its intent to
   leave demo, arch and pm out at a `docs/review-triage.md` (sections 5 and 6).
-- Tests 6 and 7 of section 8, and the reader half of test 8.
+- Tests 6 and 7 of section 8, the reader half of test 8, and
+  `gate-ensure.test.sh`'s case of an unread head (section 8).
 
 It changes which checks every gating reader sees in a rig whose commit declares
 none, and it carries the build's Go change, so it lands alone, reviewable as
@@ -1132,6 +1178,9 @@ one change.
 - gate-ensure.sh writes the record (section 2), passes it as vars on every
   sling, requires a head, pins a stranded review only where it has no pin,
   writes the fixed description, and stops calling `review-dispatch-body.sh`.
+  Unit A's refusal already holds an anchor whose head no read answers.
+  gate-ensure's own check for a head before it pours holds it where an index
+  override lets the resolve pass with no commit.
 - `mol-review` and the quorum declare the vars, name each value where they use
   it, refuse a short record, gather in load-dispatch, and load the skill named
   from the check (sections 1 and 3). Their failure arm restores the route as
