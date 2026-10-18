@@ -204,6 +204,47 @@ func TestChangesReadsASubmoduleByWhatChangedInIt(t *testing.T) {
 	expectChanges(t, c, "the submodule's HEAD moved", " M sub", "")
 }
 
+// PutBack leaves a submodule as it finds it, even under submodule.recurse,
+// which would carry the reset into the submodule, and returns its change.
+func TestPutBackLeavesASubmoduleWhateverTheConfigSays(t *testing.T) {
+	for _, step := range []string{"a changed file in the submodule", "the submodule's HEAD moved"} {
+		t.Run(step, func(t *testing.T) {
+			inner := repo(t)
+			dir := repo(t)
+			gitIn(t, dir, "-c", "protocol.file.allow=always", "submodule", "add", "-q", inner, "sub")
+			gitIn(t, dir, "commit", "-q", "-m", "sub")
+			gitIn(t, dir, "config", "submodule.recurse", "true")
+			c, err := Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sub := filepath.Join(dir, "sub")
+			if err := os.WriteFile(filepath.Join(sub, "a.txt"), []byte("two\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if step == "the submodule's HEAD moved" {
+				gitIn(t, sub, "commit", "-q", "-am", "moved")
+			}
+			subHead := gitIn(t, sub, "rev-parse", "HEAD")
+			if err := os.WriteFile(filepath.Join(dir, "left.txt"), []byte("x\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := c.PutBack(); err != nil || got != " M sub" {
+				t.Fatalf("PutBack = %q, %v; want the submodule's change left", got, err)
+			}
+			if raw, _ := os.ReadFile(filepath.Join(sub, "a.txt")); string(raw) != "two\n" {
+				t.Fatalf("the submodule's a.txt = %q; PutBack reset it", raw)
+			}
+			if got := gitIn(t, sub, "rev-parse", "HEAD"); got != subHead {
+				t.Fatalf("the submodule's HEAD = %s, want %s; PutBack moved it", got, subHead)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "left.txt")); !os.IsNotExist(err) {
+				t.Fatalf("the untracked left.txt was not removed: %v", err)
+			}
+		})
+	}
+}
+
 func TestOutputCarriesGitsOwnMessage(t *testing.T) {
 	dir := repo(t)
 	_, err := Output(dir, "rev-parse", "--verify", "no-such-ref")

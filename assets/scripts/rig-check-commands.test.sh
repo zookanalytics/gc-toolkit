@@ -13,10 +13,15 @@
 #       empty rig value turns that check off.
 #   (D) DEFAULT. A var the rig does not set runs the formula default.
 #   (O) ORDER AND PLACE. setup, typecheck, lint and build run in that order,
-#       then test when run_tests is "true", each in the prep worktree (cwd). The
-#       gate names a failing check with its exit code and the checks after it
+#       then test when run_tests is "true", each through gctk rig in the prep
+#       worktree. The gate names every failing check and the checks after it
 #       still run; a check that exits or changes directory touches nothing
 #       outside itself.
+#   (G) THE GATE. Each check runs through the real gctk rig built from this
+#       checkout, so test, lint and typecheck are recorded against the prep
+#       worktree's HEAD, the test command as the full suite, and a run already
+#       recorded there answers without running. A check that stops short of a
+#       verdict cuts the gate short with its own exit, ahead of any failure.
 #   (F) FAIL-CLOSED. An unreadable `gc formula show` answer, or no GC_RIG, runs
 #       no check and drains. An empty read would look like a rig with no checks.
 #       A check the block cannot write drains too, so the gate never runs a
@@ -32,8 +37,8 @@
 # It runs the real snippet extracted verbatim from the formula against a stub
 # `gc` that answers `formula show` from a fixture shaped like gc's --json
 # output, then runs the gate script, also extracted verbatim, over the checks
-# the snippet wrote, the way the detached job runs it. No live city, Dolt, or
-# network.
+# the snippet wrote, the way the detached job runs it, with the gctk built from
+# this checkout. No live city, Dolt, or network.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,8 +48,12 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-rig-check-commands-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 # shellcheck source=test-harness.sh
-. "$HERE/test-harness.sh"   # ok/bad/eq/has/hasnt and tomllib_python
+. "$HERE/test-harness.sh"   # ok/bad/eq/has/hasnt, tomllib_python and harness_build_gctk
 PASS=0; FAIL=0
+harness_build_gctk
+[ -n "$GCTK_BUILT" ] || { echo "FAIL - $GCTK_BUILD_ERR"; exit 1; }
+# Host signing of commits must not make this suite need a signing agent.
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 [ -s "$TOML" ] || { echo "missing $TOML" >&2; exit 1; }
@@ -86,7 +95,10 @@ bash -n "$TMP/gate.sh" && ok "gate script is valid bash" || bad "gate script is 
 
 # --- Stub gc. --------------------------------------------------------------------
 # `formula show` prints $STUB_SHOW and exits $STUB_SHOW_RC; every call is logged.
-mkdir -p "$TMP/bin" "$TMP/prep" "$TMP/gate"
+mkdir -p "$TMP/bin" "$TMP/gate"
+# The prep worktree is a checkout, because gctk rig records against its HEAD.
+git init -q "$TMP/prep"
+git -C "$TMP/prep" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$STUB_LOG"
@@ -121,13 +133,16 @@ show_ok() {
 # run_block [SHELL ARGV...] — the block under bash unless a shell is named,
 # over an empty check list as the step leaves it, then the gate script over the
 # checks the block wrote, under bash as the detached job runs it. For one call,
-# RIG overrides GC_RIG, STUB_SHOW_RC sets the stub's exit code, and CHECKS_RO=1
-# makes the check list read-only. Sets OUT (the block's stdout+stderr), RC,
-# GATE_OUT and GATE_RC (empty when the gate did not run), the check list
-# CHECKLIST, the check-run log RANLOG and the gc call log GCLOG.
+# RIG overrides GC_RIG, STUB_SHOW_RC sets the stub's exit code, CHECKS_RO=1
+# makes the check list read-only, and KEEP_RECORDS=1 keeps the records earlier
+# runs left at the prep HEAD, which are otherwise cleared so each case runs its
+# checks. Sets OUT (the block's stdout+stderr), RC, GATE_OUT and GATE_RC (empty
+# when the gate did not run), the check list CHECKLIST, the check-run log
+# RANLOG and the gc call log GCLOG.
 run_block() {
   [ "$#" -gt 0 ] || set -- bash
   : > "$STUB_LOG"; : > "$RAN"
+  [ -n "${KEEP_RECORDS:-}" ] || rm -rf "${PREP:?}/.git/gc-rig-checks"
   chmod 755 "$GATE_DIR/checks" 2>/dev/null || true
   rm -rf "${GATE_DIR:?}/checks"; mkdir -p "$GATE_DIR/checks"
   [ -z "${CHECKS_RO:-}" ] || chmod 555 "$GATE_DIR/checks"
@@ -137,7 +152,7 @@ run_block() {
   CHECKLIST=$(ls "$GATE_DIR/checks" | tr '\n' ' ' | sed 's/ $//')
   GATE_OUT=""; GATE_RC=""
   if [ "$RC" -eq 0 ] && [ -n "$CHECKLIST" ]; then
-    GATE_OUT=$(cd "$TMP" && bash "$TMP/gate.sh" "$PREP" "$GATE_DIR/checks" </dev/null 2>&1)
+    GATE_OUT=$(cd "$TMP" && bash "$TMP/gate.sh" "$PREP" "$GATE_DIR/checks" "$GCTK_BUILT" </dev/null 2>&1)
     GATE_RC=$?
   fi
   set -e
@@ -184,7 +199,7 @@ eq "$(lines "$RANLOG")" "DEFAULT-TYPECHECK RIG-LINT" "(D1) default typecheck and
 echo "── (O) order, place, failures ──"
 vars_reset; all_checks_default; show_ok; run_block
 eq "$(lines "$RANLOG")" "setup typecheck lint build test" "(O1) checks run setup, typecheck, lint, build, then test"
-eq "$CHECKLIST" "01-setup_command 02-typecheck_command 03-lint_command 04-build_command 05-test_command" "(O1) the check list holds one file per check, named for its place and its var"
+eq "$CHECKLIST" "01-setup 02-typecheck 03-lint 04-build 05-test" "(O1) the check list holds one file per check, named for its place and the gctk rig check it is"
 eq "$GATE_RC" 0 "(O1) the gate exits 0 when every check passed"
 has "$GATE_OUT" 'GATE PASSED' "(O1) the gate reports that every check passed"
 
@@ -204,7 +219,8 @@ var test_command 'echo test >> "$RAN"'
 show_ok; run_block
 eq "$GATE_RC" 1 "(O3) a gate with a failing check exits 1"
 eq "$(lines "$RANLOG")" "lint build test" "(O3) the checks after a failing one still run"
-has "$GATE_OUT" 'GATE FAILED: typecheck_command:3 build_command:1' "(O3) the gate names every failed check with its exit code, a check whose last command fails included"
+has "$GATE_OUT" 'GATE FAILED: typecheck:1 build:1' "(O3) the gate names every failed check, a check whose last command fails included"
+has "$GATE_OUT" '(exit 3, ' "(O3) gctk's line keeps the command's own exit status"
 hasnt "$GATE_OUT" 'GATE PASSED' "(O3) a run with a failure never reports all passed"
 
 # A rig value is a shell command line, not one program: the eval must keep its
@@ -215,12 +231,12 @@ var run_tests "true"
 var lint_command 'false; FIRST_RC=$?; echo second >> "$RAN" && [ "$FIRST_RC" -eq 0 ]'
 show_ok; run_block
 eq "$(lines "$RANLOG")" "second" "(O4) the second command of a list runs after the first fails"
-has "$GATE_OUT" 'GATE FAILED: lint_command:1' "(O4) the list fails when its first command failed"
+has "$GATE_OUT" 'GATE FAILED: lint:1' "(O4) the list fails when its first command failed"
 vars_reset
 var run_tests "true"
 var lint_command 'true; FIRST_RC=$?; false && [ "$FIRST_RC" -eq 0 ]'
 show_ok; run_block
-has "$GATE_OUT" 'GATE FAILED: lint_command:1' "(O4) the list fails when its second command failed"
+has "$GATE_OUT" 'GATE FAILED: lint:1' "(O4) the list fails when its second command failed"
 vars_reset
 var run_tests "true"
 var lint_command 'true; FIRST_RC=$?; true && [ "$FIRST_RC" -eq 0 ]'
@@ -261,6 +277,33 @@ eq "$RANLOG" "" "(O9) nothing runs when the rig sets no check"
 eq "$CHECKLIST" "" "(O9) the check list is empty"
 has "$OUT" 'run-tests: rig fixture-rig sets no check commands' "(O9) no checks is reported, so the CLAUDE.md fallback applies"
 
+echo "── (G) the checks run through gctk rig, which records them ──"
+# rec <check> : what gctk rig holds for <check> at the prep HEAD, as "<result> <scope>".
+rec() { (cd "$PREP" && "$GCTK_BUILT" rig "$1" --check 2>/dev/null) | jq -r '"\(.result) \(.scope // "-")"'; }
+vars_reset
+var run_tests "true"
+var lint_command 'echo lint >> "$RAN"'
+var test_command 'echo test >> "$RAN"'
+show_ok; run_block
+eq "$GATE_RC" 0 "(G1) the gate passes"
+eq "$(rec lint)" "pass -" "(G1) lint's pass is recorded at the prep HEAD"
+eq "$(rec test)" "pass full" "(G1) the test command is recorded as the full suite"
+eq "$(rec typecheck)" "" "(G1) a check the rig does not set leaves no record"
+KEEP_RECORDS=1 run_block
+eq "$GATE_RC" 0 "(G2) a second gate at the same head passes"
+eq "$RANLOG" "" "(G2) …answering from the records, running nothing"
+has "$GATE_OUT" 'not run again' "(G2) …and says so"
+
+vars_reset
+var run_tests "true"
+var lint_command 'false'
+var test_command 'kill -SEGV $$'
+show_ok; run_block
+eq "$GATE_RC" 4 "(G3) a check that stops short of a verdict cuts the gate short, ahead of a failure"
+has "$GATE_OUT" 'GATE CUT SHORT: test:4 (failed: lint:1)' "(G3) the gate names the check cut short with gctk's exit, and the failure beside it"
+hasnt "$GATE_OUT" 'GATE PASSED' "(G3) a gate cut short never reports all passed"
+eq "$(rec test)" "" "(G3) the crash is not recorded as a fail of the code"
+
 echo "── (F) an unreadable read runs nothing ──"
 fail_closed() {   # fail_closed LABEL — assert the last run drained and ran nothing
   eq "$RC" 1 "$1: block exits 1"
@@ -284,7 +327,7 @@ hasnt "$GCLOG" 'formula show' "(F5) no rig to scope the read to, so nothing is r
 # A check the block cannot write would leave the gate a list without it.
 vars_reset; all_checks_default; show_ok
 CHECKS_RO=1 run_block; fail_closed "(F6) a check list it cannot write"
-has "$OUT" 'cannot write the setup_command check' "(F6) it names the check it could not write"
+has "$OUT" 'cannot write the setup check' "(F6) it names the check it could not write"
 
 echo "── (Z) zsh runs the block the same way ──"
 if command -v zsh >/dev/null 2>&1; then
@@ -298,7 +341,7 @@ if command -v zsh >/dev/null 2>&1; then
   show_ok; run_block zsh -f
   eq "$RC" 0 "(Z1) under zsh: block exits 0 when it wrote its checks"
   eq "$(lines "$RANLOG")" "RIG-LINT second test" "(Z1) under zsh: rig value wins, checks run in order past failures"
-  has "$GATE_OUT" 'GATE FAILED: typecheck_command:3 build_command:1' "(Z1) under zsh: the gate names every failed check with its exit code"
+  has "$GATE_OUT" 'GATE FAILED: typecheck:1 build:1' "(Z1) under zsh: the gate names every failed check"
   printf 'not json' > "$STUB_SHOW"
   run_block zsh -f; fail_closed "(Z2) under zsh: an unreadable read"
 else

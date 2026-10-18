@@ -3,11 +3,11 @@ Signoff review lifecycle — claim -> pin -> judge -> ONE signoff.sh verdict ->
 drain. Attached at dispatch (gc sling --on mol-review) to a review bead:
 metadata.task_kind=review, check_name (the check the verdict satisfies),
 anchor_bead (the gating anchor), and the review target — review_branch /
-review_base pre-open, or pr_url / pr_number once a PR exists — plus the
-dispatch-pinned reviewed_oid. The steps carry the lifecycle every check
-shares. The check's method, which the dispatch note's check section names,
-carries what the review reads, runs and judges, and the agent prompt carries
-only worker doctrine.
+review_base, plus the anchor's PR as review_pr_url / review_pr_number once it
+is open — and the dispatch-pinned reviewed_oid. The steps carry the lifecycle
+every check shares. The check's method, which the dispatch note's check
+section names, carries what the review reads, runs and judges, and the agent
+prompt carries only worker doctrine.
 
 Hard rules, in force for every step:
 
@@ -63,12 +63,12 @@ M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
 ```
 
 **2. Discriminate the two shapes and pin the identity.** PRE-OPEN carries
-`review_branch` and no `pr_number` — the verdict decides whether the PR opens
-at all. POST-OPEN carries `pr_number` — the PR is published and held on the
-signoff. Post-open, a number names a PR only inside one repository on one
-host, so pin both from the bead's own `pr_url` before asking `gh` anything;
-an unparseable `pr_url` is a malformed bead — refuse it (one re-dispatch is
-cheaper than posting a review on someone else's work):
+`review_branch` and no `review_pr_number` — the verdict decides whether the PR
+opens at all. POST-OPEN carries `review_pr_number` — the PR is published and
+held on the signoff. Post-open, a number names a PR only inside one repository
+on one host, so pin both from the bead's own `review_pr_url` before asking
+`gh` anything; an unparseable `review_pr_url` is a malformed bead — refuse it
+(one re-dispatch is cheaper than posting a review on someone else's work):
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
@@ -76,17 +76,25 @@ REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1
 M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
 BRANCH=$(printf '%s' "$M" | jq -r '.review_branch // empty')
 BASE=$(printf   '%s' "$M" | jq -r '.review_base   // empty')
-PR=$(printf     '%s' "$M" | jq -r '.pr_number     // empty')
-PR_URL=$(printf '%s' "$M" | jq -r '.pr_url        // empty')
+# >>> review-pr-pin
+PR=$(printf     '%s' "$M" | jq -r '.review_pr_number // empty')
+PR_URL=$(printf '%s' "$M" | jq -r '.review_pr_url    // empty')
 if [ -n "$PR" ]; then
   PR_REPO_Q=$(printf '%s' "$PR_URL" | sed -n 's#^[A-Za-z][A-Za-z0-9+.-]*://\\([^/][^/]*\\)/\\([^/][^/]*/[^/][^/]*\\)/pull/[0-9].*#\\1/\\2#p')
-  [ -n "$PR_REPO_Q" ] || { echo "post-open review bead has no parseable pr_url: refusing to resolve PR#$PR from ambient gh context" >&2; exit 1; }
+  [ -n "$PR_REPO_Q" ] || { echo "post-open review bead has no parseable review_pr_url: refusing to resolve PR#$PR from ambient gh context" >&2; exit 1; }
   PR_HOST="${PR_REPO_Q%%/*}"   # for gh api --hostname
   PR_REPO="${PR_REPO_Q#*/}"    # <owner>/<repo> for gh api REST paths
-  BRANCH=$(gh pr view "$PR" --repo "$PR_REPO_Q" --json headRefName -q .headRefName)
-  BASE=$(gh pr view "$PR" --repo "$PR_REPO_Q" --json baseRefName -q .baseRefName)
+  REFS=$(gh pr view "$PR" --repo "$PR_REPO_Q" --json headRefName,baseRefName -q '.headRefName + " " + .baseRefName') \\
+    || { echo "gh pr view $PR_REPO_Q#$PR failed: refusing to review an unpinned diff" >&2; exit 1; }
+  BRANCH="${REFS%% *}"; BASE="${REFS#* }"
+  [ -n "$BRANCH" ] && [ -n "$BASE" ] || { echo "PR $PR_REPO_Q#$PR resolved no head/base" >&2; exit 1; }
 fi
+# <<< review-pr-pin
 ```
+One `gh` call reads the PR's head and base, so both come from one state of the
+PR. A read that fails or leaves either empty refuses the review rather than
+diff against a base nobody pinned.
+
 Carry the pin on every later call: `--repo "$PR_REPO_Q"` for `gh pr`,
 `--hostname "$PR_HOST"` plus explicit `repos/$PR_REPO/...` paths for `gh api`.
 A bare number resolves from ambient gh context, and every repository has a PR
@@ -153,7 +161,8 @@ M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
 BRANCH=$(printf '%s' "$M" | jq -r '.review_branch // empty')
 BASE=$(printf '%s' "$M" | jq -r '.review_base // empty')
 REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
-# Post-open or missing fields: re-derive exactly as load-dispatch did.
+# Post-open or missing fields: re-derive exactly as load-dispatch did, its
+# review-pr-pin block included.
 ```
 
 **1. The diff under review:**
@@ -189,6 +198,10 @@ SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --sh
 done
 REVIEW_WT=$("${SCRIPTS:?review-workspace.sh not found in the pack}/review-workspace.sh" add --review-bead "$REVIEW_BEAD" --oid "$REVIEWED_OID" --repo "$REPO") || exit 1
 cd "$REVIEW_WT"
+# GCTK is the pack's own CLI, for a check's method to call in the workspace.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 # <<< review-workspace-add
 ```
 Anything else the review writes to disk goes in the workspace beside `wt`
