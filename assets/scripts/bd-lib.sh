@@ -649,10 +649,10 @@ PR_FINISHING_SHIFT=-1
 
 # pr_finishing_birth <metadata-json> — the create payload of a PR-finishing
 # child: its work order with priority_shift added. Prints nothing and returns
-# non-zero for a work order that is not a JSON object, so the create that would
-# carry it files nothing.
+# non-zero for a work order that is not a JSON object, an empty one included, so
+# the create that would carry it files nothing.
 pr_finishing_birth() {
-  printf '%s' "${1:-}" | jq -c --argjson s "$PR_FINISHING_SHIFT" \
+  printf '%s' "${1:-}" | jq -ce --argjson s "$PR_FINISHING_SHIFT" \
     'if type == "object" then . + {priority_shift: $s} else error("not an object") end' 2>/dev/null
 }
 

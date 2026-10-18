@@ -672,6 +672,9 @@ eq "$(pr_finishing_birth '{"task_kind":"rework","anchor_bead":"tk-anc"}')" \
 out=$(pr_finishing_birth '["not","an","object"]'); rc=$?
 [ "$rc" -ne 0 ] && [ -z "$out" ] && ok "…and a work order that is not an object prints nothing and fails" \
   || bad "…and a work order that is not an object prints nothing and fails (rc=$rc out='$out')"
+out=$(pr_finishing_birth ''); rc=$?
+[ "$rc" -ne 0 ] && [ -z "$out" ] && ok "…and so does an empty work order" \
+  || bad "…and so does an empty work order (rc=$rc out='$out')"
 
 # --- validation_work_order: the shape mol-validate reads ----------------------
 eq "$(validation_work_order tk-anc correctness abc123)" \
