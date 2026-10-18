@@ -133,11 +133,17 @@ unit, design and implementation together, before the default branch moves.
 
 ## Design-gated versus all-in-one
 
-`design_gated` is a var, default `true`, settled per initiative at the
-recommend-to-Accept point or overridden with `--var design_gated=false`. It is
-read case-insensitively: `false`, `0`, `no`, or `off` selects all-in-one, and
-`true`, `1`, `yes`, or `on` selects design-gated. An empty or unrecognized value
-also selects design-gated, with a warning, so a typo never drops the design gate.
+`design_gated` is a var, default `true`. The operator settles it per initiative
+when acting on the recommendation. Accept's sling passes no var, so an Accept
+takes the design-gated default. For all-in-one, the operator takes the
+recommendation to a sitting (Discuss) instead. The sitting follows the `work`
+skill's steps for taking a recommendation and adds `--var design_gated=false`
+to the sling those steps run. The same steps release the gate that put the
+recommendation to the operator and record the dispatch, which a bare sling
+leaves undone. The var is read case-insensitively: `false`, `0`, `no`, or `off`
+selects all-in-one, and `true`, `1`, `yes`, or `on` selects design-gated. An
+empty or unrecognized value also selects design-gated, with a warning, so a typo
+never drops the design gate.
 
 - **Design-gated** (`true`): implementation waits behind gate 1, so it starts
   only after the operator approves the design. Use it when the design decision
