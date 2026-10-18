@@ -82,10 +82,13 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$WORK" ] && [ -n "$TARGET" ] || { echo "$PROG: --work and --target are required" >&2; usage; }
 
+# Each count is read in base 10, so a leading zero such as 08 does not make
+# bash's arithmetic read it as octal and refuse it.
 ATTEMPTS="${DIRECT_MERGE_PUSH_ATTEMPTS:-3}"
-case "$ATTEMPTS" in ''|*[!0-9]*|0) ATTEMPTS=3 ;; esac
+case "$ATTEMPTS" in ''|*[!0-9]*) ATTEMPTS=3 ;; *) ATTEMPTS=$((10#$ATTEMPTS)) ;; esac
+[ "$ATTEMPTS" -gt 0 ] || ATTEMPTS=3
 BACKOFF="${DIRECT_MERGE_PUSH_BACKOFF:-2}"
-case "$BACKOFF" in ''|*[!0-9]*) BACKOFF=2 ;; esac
+case "$BACKOFF" in ''|*[!0-9]*) BACKOFF=2 ;; *) BACKOFF=$((10#$BACKOFF)) ;; esac
 
 # The rig root resolves as the patrol's blocks resolve it, so this script and
 # the block that staged the prepared head name one repository.

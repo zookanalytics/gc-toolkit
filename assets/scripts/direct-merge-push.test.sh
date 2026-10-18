@@ -25,6 +25,7 @@
 #   - a push refused for branch protection promotes the bead to
 #     merge_strategy=pr and clears the stamp in one write, and exits 3, and any
 #     other refused push, or a push origin does not read back, exits 1;
+#   - a pause with a leading zero is read in base 10;
 #   - an unresolvable rig and a missing prepared head land nothing;
 #   - the script never drains the session.
 set -uo pipefail
@@ -54,7 +55,7 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 # stub refuses every call when LC_FAIL is set, and the first LC_FAIL_TIMES calls
 # when that is set.
 SUT="$TMP/sut"
-mkdir -p "$SUT" "$TMP/bin" "$TMP/gitshim"
+mkdir -p "$SUT" "$TMP/bin" "$TMP/gitshim" "$TMP/sleepshim"
 cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$SUT/"
 chmod +x "$SUT/direct-merge-push.sh"
 cat > "$SUT/lifecycle.sh" <<'LC'
@@ -120,6 +121,9 @@ esac
 exec "$REAL_GIT" "$@"
 SHIM
 chmod +x "$TMP/gitshim/git"
+# A sleep that logs its pause to SLEEP_LOG and returns at once.
+printf '#!/usr/bin/env bash\necho "$*" >> "$SLEEP_LOG"\n' > "$TMP/sleepshim/sleep"
+chmod +x "$TMP/sleepshim/sleep"
 
 commit() { git -C "$1" commit -q --allow-empty -m "$2"; git -C "$1" rev-parse HEAD; }
 wt_count() { git -C "$1" worktree list --porcelain | grep -c '^worktree '; }
@@ -349,6 +353,15 @@ run LC_FAIL_TIMES=1
 eq "$RC" 0 "lc-once: exits 0"
 eq "$(transitions)" 2 "lc-once: the transition ran twice"
 eq "$(sed -n 1p "$D/lc.log")" "$(sed -n 2p "$D/lc.log")" "lc-once: the second try is the same transition"
+
+echo "── a pause with a leading zero is read in base 10 ──"
+for b in 08 010; do
+  setup "$TMP/backoff-$b"
+  run PATH="$TMP/sleepshim:$PATH" SLEEP_LOG="$D/sleeps" DIRECT_MERGE_PUSH_BACKOFF="$b" LC_FAIL_TIMES=1
+  eq "$RC" 0 "backoff $b: exits 0"
+  eq "$(transitions)" 2 "backoff $b: the transition is tried again after the first one fails"
+  eq "$(cat "$D/sleeps" 2>/dev/null)" "$((10#$b))" "backoff $b: the pause before the second try is $((10#$b)) seconds"
+done
 
 echo "── a transition that does not land keeps the stamp, and the next patrol records it ──"
 setup "$TMP/lcfail"
