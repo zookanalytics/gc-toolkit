@@ -171,16 +171,20 @@ meta() { jq -r --arg k "$1" '.[$k] // "" | tostring' "$DIR/meta.json"; }
 # conversation comments at once, and writes the PR's posts, classified, to
 # prs/<n>.jsonl. A PR any read failed on is marked failed and contributes
 # nothing; the window re-covers it next run. A PR already written is kept.
+# A worker writes under its own pid and renames the posts file into place
+# whole, so a worker killed partway, or one still running when a resumed sweep
+# reads the PR again, never leaves a partial posts file for the resume to keep.
 if [ "$VERB" = fetch-pr ]; then
   N="${1:-}"
   is_count "$N" || die_usage "fetch-pr needs a PR number"
   base="$DIR/prs/$N"
   [ -f "$base.jsonl" ] && exit 0
+  part="$base.$$"
   rm -f "$base.failed"
   SLUG=$(meta repo); SELF=$(meta self)
-  gh api "repos/$SLUG/pulls/$N/reviews?per_page=100" --paginate --jq '.[]' > "$base.reviews" 2>/dev/null & r1=$!
-  gh api "repos/$SLUG/pulls/$N/comments?per_page=100" --paginate --jq '.[]' > "$base.inline" 2>/dev/null & r2=$!
-  gh api "repos/$SLUG/issues/$N/comments?per_page=100" --paginate --jq '.[]' > "$base.issue" 2>/dev/null & r3=$!
+  gh api "repos/$SLUG/pulls/$N/reviews?per_page=100" --paginate --jq '.[]' > "$part.reviews" 2>/dev/null & r1=$!
+  gh api "repos/$SLUG/pulls/$N/comments?per_page=100" --paginate --jq '.[]' > "$part.inline" 2>/dev/null & r2=$!
+  gh api "repos/$SLUG/issues/$N/comments?per_page=100" --paginate --jq '.[]' > "$part.issue" 2>/dev/null & r3=$!
   read_ok=1
   for r in "$r1" "$r2" "$r3"; do wait "$r" || read_ok=0; done
   if [ "$read_ok" = 0 ]; then
@@ -190,7 +194,7 @@ if [ "$VERB" = fetch-pr ]; then
   OWN_DEF=$(cat "$DIR/own-def.jq") || { : > "$base.failed"; exit 0; }
   if ! jq -nc --arg self "$SELF" --arg repo "$SLUG" --argjson pr "$N" \
        --slurpfile prs "$DIR/prs.json" --slurpfile seen "$DIR/obs.json" \
-       --slurpfile reviews "$base.reviews" --slurpfile inline "$base.inline" --slurpfile issue "$base.issue" \
+       --slurpfile reviews "$part.reviews" --slurpfile inline "$part.inline" --slurpfile issue "$part.issue" \
        --arg outside_category "$OUTSIDE_CATEGORY" "$OWN_DEF"'
     def has_text: ((.body // "") | tostring | test("\\S"));
     def first_line: ((.body // "") | tostring | split("\n") | map(select(test("\\S"))) | (.[0] // ""));
@@ -227,9 +231,11 @@ if [ "$VERB" = fetch-pr ]; then
         reply_to: (.in_reply_to_id // null), review_state: (.state // null),
         class: $class, marked: $marked, signed: $is_signed, flag: false,
         recorded: $recorded, captured: any($recorded[]; .category == $outside_category),
-        body: (.body | tostring) }' > "$base.jsonl" 2> "$base.err"; then
-    rm -f "$base.jsonl"
+        body: (.body | tostring) }' > "$part.jsonl" 2> "$part.err"; then
+    rm -f "$part.jsonl"
     : > "$base.failed"
+  else
+    mv -f "$part.jsonl" "$base.jsonl" || : > "$base.failed"
   fi
   exit 0
 fi

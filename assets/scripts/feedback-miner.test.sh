@@ -156,6 +156,20 @@ exit 0
 STUB
 chmod +x "$BIN/patrol-finding"
 
+# jq stand-in, put on PATH for one sweep only: it plays a sweep worker killed
+# while it writes PR STUB_KILL_PR's posts, by printing part of a line and then
+# killing the worker that started it. Every other call goes to the real jq.
+KILLBIN="$TMP/killbin"; mkdir -p "$KILLBIN"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'REAL_JQ=%q\n' "$(command -v jq)"; cat; } > "$KILLBIN/jq" <<'STUB'
+case " $* " in
+  *" --argjson pr $STUB_KILL_PR "*)
+    printf '{"key": "pr:ours/repo#%s:review:' "$STUB_KILL_PR"
+    kill -9 "$PPID"; exit 137 ;;
+esac
+exec "$REAL_JQ" "$@"
+STUB
+chmod +x "$KILLBIN/jq"
+
 export PATH="$BIN:$PATH"
 export STUB_LOG="$TMP" STUB_FIX="$FIX" STUB_STORE="$STORE"
 export GC_PATROL_FINDING_TOOL="$BIN/patrol-finding"
@@ -470,6 +484,12 @@ eq "$(class_of "$(key 12 comment 401)")" "outside" "(85) the other PRs are still
 "$SUT" sweep --checkout "$CO" --days 30 --backfill-days 30 --dir "$W" >/dev/null 2>&1
 eq "$(class_of "$(key 11 comment 201)")" "outside" "(85a) a sweep re-run into the same dir reads the PR it missed"
 eq "$(grep -c '^api repos/ours/repo/issues/12/' "$TMP/gh.log" || true)" "0" "(85b) and keeps the PRs it already read"
+fresh_dir k
+OUT=$(PATH="$KILLBIN:$PATH" STUB_KILL_PR=11 "$SUT" sweep --checkout "$CO" --days 30 --backfill-days 30 --dir "$W" --jobs 1 2>&1)
+has "$OUT" "did not read, left for the next run: 11" "(85c) a worker killed while it writes a PR's posts leaves that PR unread"
+"$SUT" sweep --checkout "$CO" --days 30 --backfill-days 30 --dir "$W" >/dev/null 2>&1
+eq "$(class_of "$(key 11 review 101)")" "outside" "(85d) so a resumed sweep into the same dir reads it again"
+jq -s 'length' "$W/sweep.jsonl" >/dev/null 2>&1; eq "$?" "0" "(85e) and every line of the resumed sweep parses"
 fresh_dir d
 OUT=$(STUB_OBS_BROKEN=1 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1); RC=$?
 eq "$RC" "1" "(86) an unreadable observation store stops the sweep"
