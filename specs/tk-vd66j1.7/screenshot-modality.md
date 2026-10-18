@@ -246,6 +246,25 @@ context owner/name, and `--columns 30` draws a 30-column window. In
 `demo-engine-lib.test.sh`, the demo:capture skill's cases fail on the skill's
 old copy of the steps, and the widened scan names it.
 
+The demo review at 1f8b45af6 (finding tk-utafi4k) ran the captures from the
+workspace `review-workspace.sh` made under macOS's `$TMPDIR`, a path through
+`/var`, which is a symlink to `/private/var`. Node runs a script from its real
+path, so the renderer's check that it was the script being run compared the
+`/var` path the caller gave with the `/private/var` path Node loaded. The check
+failed, and the renderer exited 0 without writing a page. Every terminal and
+markdown capture from that checkout then failed its `visible #surface` proof
+and left no PNG. The renderer now compares the real paths of both sides, so no
+caller has to canonicalize its checkout first. In `demo-screenshot.test.sh`,
+the renderer run through a symlinked directory and through a symlink to the
+file writes its page, and a terminal capture run from a symlinked checkout
+serves the page the real renderer drew. Each of those fails at 1f8b45af6. Two
+more cases hold what the check already did. Run under
+`--preserve-symlinks-main`, which keeps the symlink in the module's own URL,
+the renderer writes its page, and imported with an argument that names no
+file, it only exports. Each mutant of the check turned the suite red: the check
+as it was, a real path on either side alone, a failed resolution left uncaught,
+and one read as this file.
+
 `services/helm`'s own Go tests cover the fixture. `internal/fixture`'s cases
 serve the board as JSON at its path, send every other path to the app, answer a
 verb from its file with the status the name gives, refuse a verb with no answer
@@ -268,12 +287,12 @@ turned it red: `PORT` not exported, `--port 0` taken with `--serve-dir` or
 `--base-url`, a pick that found no port taken anyway, and `--port 0` passed to
 the engine unpicked.
 
-**Not proven live: the attach.** No PNG has been attached to a real PR in this
-city. `demo-deliver.sh` is unchanged, and the gh on this host (2.102.0)
-documents `--attach` for images: an attached file the body does not reference is
-appended to the comment inline, with the file's name as its alt text. The first
-engaged review that picks a screenshot makes the first live attach, as the
-video modality's does for a clip.
+**The attach, proven live.** `demo-deliver.sh` is unchanged, and the demo
+reviews of PR 1266 attached their PNGs to it inline and uncommitted: the helm
+board and a collapsed comment at 903b29df5, then at 1f8b45af6 the helm board, a
+terminal transcript of the renderer's path check, and a comment collapsed and
+expanded. Each PNG follows its comment's text, with the file's name as its alt
+text, as the gh on this host (2.102.0) documents for `--attach`.
 
 ## What a review session needs
 
