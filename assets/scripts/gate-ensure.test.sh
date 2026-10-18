@@ -11,8 +11,10 @@
 # unit answers holds the merge, not the dispatch; a closed validation pass holds
 # nothing; an unreadable probe holds the dispatch fail-closed); a declared lane's
 # exception@<oid> marker is read as nothing, so the lane derives from the graph;
-# the live-head read, which decides only the dispatch pin and the machine axis
-# (a deleted ref, a body without .sha, and a failed read are all unanswerable);
+# the live-head read, which decides the dispatch pin, the machine axis and the
+# commit the gates resolve at (a deleted ref, a body without .sha, and a failed
+# read are all unanswerable, and git ls-remote answers a head GitHub does not;
+# a head neither answers holds the anchor for the pass);
 # a stored marker's residue, which nothing reads or clears; a multi-check
 # check_set split per check rather than joined into one name; in-flight dedup
 # (routed, poured, claimed) + stranded repair
@@ -604,20 +606,34 @@ out=$(run_val)
 has "$out" "DP2 carries a PR-close disposition (gc.pr_close_disposition_kind=duplicate)" "the disposed anchor is named as skipped"
 has "$out" "0 reviews dispatched" "…and no fresh review is dispatched onto it"
 
-echo "# an unreadable live head neither settles a lane nor stops a dispatch"
-# gh answers a deleted ref with a 422: error body on STDOUT, non-zero exit. The
-# derivation never consulted it, so the only thing the head decides now is the
-# dispatch pin and the machine axis.
+echo "# an unreadable live head holds the anchor for the pass"
+# gh answers a deleted ref with a 422: error body on STDOUT, non-zero exit, and
+# git ls-remote names no such ref. The gates resolve only at the commit they
+# judge, so the resolver refuses a call at none, and that refusal holds each
+# anchor: nothing settles, nothing dispatches, and the next pass reads again.
 store "[$(anchor C5 pre_open_gate correctness "" polecat/c5), $(backed rev-c5 C5),
         $(anchor C5b pull_request correctness "" polecat/c5b)]"
 : > "$STUB_GC_LOG"
 out=$(run); rc=$?
 eq "$rc" 0 "no-head pass exits 0"
-has "$out" "1 reviews dispatched" "the backed lane is settled and the unreviewed one still dispatches"
+has "$out" "C5 head of 'polecat/c5' unread" "the backed anchor is held, naming the head it could not read"
+has "$out" "C5b head of 'polecat/c5b' unread" "…and so is the unreviewed one"
+has "$out" "0 reviews dispatched" "…so no review goes out at no commit"
+has "$out" "2 held-for-retry" "…and both are retried next pass"
 hasnt "$out" "No commit found" "the gh error body never becomes a dispatch reason"
-eq "$(pinned C5b)" "<absent>" "an unreadable head records no machine axis"
-c5brid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
-eq "$(meta "$c5brid" reviewed_oid)" "<absent>" "…and the dispatch carries no pin it could not read"
+eq "$(pinned C5)" "<absent>" "an unreadable head records no machine axis"
+eq "$(pinned C5b)" "<absent>" "…on either anchor"
+
+echo "# a head GitHub does not answer is read through git ls-remote, and pins the review"
+# No head file stands for this branch, so the gh stub fails the API read.
+store "[$(anchor LR1 pull_request correctness "" polecat/lr1)]"
+printf 'polecat/lr1\n' > "$TMP/ls-remote-heads"
+: > "$STUB_GC_LOG"
+out=$(STUB_LS_REMOTE="$TMP/ls-remote-heads" run); rc=$?
+eq "$rc" 0 "ls-remote pass exits 0"
+has "$out" "1 reviews dispatched" "the head ls-remote read lets the dispatch go"
+lr1rid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$lr1rid" reviewed_oid)" "$(oid polecat/lr1)" "…pinned at the head ls-remote names"
 
 echo "# a head that is not a SHA is not a head"
 # gh exits 0 and prints 'null' when the body carries no .sha: the exit code

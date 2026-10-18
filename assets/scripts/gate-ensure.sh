@@ -134,9 +134,9 @@ REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
 [ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); cannot gate" >&2; exit 1; }
 WEDGE_KEY="review-wedge"
 
-# Origin pin for the live-head read; optional. An unresolvable origin or a
-# missing gh leaves the head unread: a review is dispatched without a
-# reviewed_oid pin, and the per-head bar and the machine verdict are skipped.
+# Origin pin for the live-head read through the GitHub API, which needs gh and a
+# GitHub origin. Without them, or when the API does not answer, the head is read
+# with git ls-remote, which needs only the origin a review fetches from anyway.
 ORIGIN_HOST=""; ORIGIN_REPO=""
 u=$(git remote get-url origin 2>/dev/null | tr -d '[:space:]')
 case "$u" in
@@ -152,15 +152,20 @@ HAVE_GH=0; command -v gh >/dev/null 2>&1 && HAVE_GH=1
 live_head_for() { # <branch> -> sha, or nothing when unanswerable
   # gh writes its error body to STDOUT, and --jq on a body without .sha prints
   # "null" at rc=0, so neither the exit code nor the output alone separates a
-  # head from a failure. Empty routes the callers to their "no head to test"
-  # arms, which is the safe direction: an unread head cannot prove a branch
-  # moved, and the next pass sees a merged anchor closed and out of scope.
-  # The head becomes a review's reviewed_oid pin and the oid of the dated
-  # machine verdict, so it is held to the full 40-hex shape both carry.
-  [ "$HAVE_GH" = 1 ] && [ -n "$ORIGIN_REPO" ] && [ -n "${1:-}" ] || return 0
-  local out
-  out=$(gh api --hostname "$ORIGIN_HOST" \
-    "repos/$ORIGIN_REPO/commits/$1" --jq '.sha' 2>/dev/null) || return 0
+  # head from a failure. ls-remote is matched on the exact ref, since its
+  # pattern also matches a ref whose tail is the branch's name. The head becomes
+  # a review's reviewed_oid pin and the oid of the dated machine verdict, so it
+  # is held to the full 40-hex shape both carry. Empty means neither read
+  # answered: the gate read at no commit is refused, so the pass holds the
+  # anchor, dispatching and settling nothing, and the next pass reads again.
+  [ -n "${1:-}" ] || return 0
+  local out=""
+  if [ "$HAVE_GH" = 1 ] && [ -n "$ORIGIN_REPO" ]; then
+    out=$(gh api --hostname "$ORIGIN_HOST" \
+      "repos/$ORIGIN_REPO/commits/$1" --jq '.sha' 2>/dev/null) || out=""
+  fi
+  is_oid "$out" || out=$(git ls-remote origin "refs/heads/$1" 2>/dev/null \
+    | awk -v r="refs/heads/$1" '$2 == r { print $1; exit }')
   is_oid "$out" || return 0
   printf '%s\n' "$out"
 }
@@ -829,9 +834,15 @@ while IFS= read -r tagged; do
   # The resolver's exit status is load-bearing: a crash prints nothing, and an
   # empty gate list would dispatch nothing AND let this anchor settle on the axis
   # below while a lane is actually short of green. Fail closed — skip the whole
-  # anchor this pass (no dispatch, no settle), retry next pass.
+  # anchor this pass (no dispatch, no settle), retry next pass. A head neither
+  # read answered is held the same way: the resolver reads a rig's rows only at
+  # the commit it judges, so it refuses a call at none.
   if ! gates=$("$REVIEW_CHECKS" --resolve --check-set "$checkset" --through "$GE_THROUGH" --at "$head" 2>/dev/null); then
-    echo "$PROG: $id gate resolver failed for check_set '$checkset'; dispatching nothing this pass (merge stays held, retry next pass)" >&2
+    if [ -z "$head" ]; then
+      echo "$PROG: $id head of '$branch' unread (neither GitHub nor git ls-remote answered), so its gates have no commit to resolve at; dispatching nothing this pass (merge stays held, retry next pass)" >&2
+    else
+      echo "$PROG: $id gate resolver failed for check_set '$checkset'; dispatching nothing this pass (merge stays held, retry next pass)" >&2
+    fi
     skipped=$((skipped + 1)); continue
   fi
   while IFS= read -r g; do
