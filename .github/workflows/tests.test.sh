@@ -82,14 +82,20 @@ jq_check_lines() {
         job != "" && suite == 0 && /run-tests\.sh/ { suite = NR }
         END { flush() }' "$WF"
 }
+suite_jobs=0
 while IFS=$'\t' read -r j check suite; do
     [ "$suite" -gt 0 ] || continue
+    suite_jobs=$((suite_jobs + 1))
     if [ "$check" -eq 0 ]; then
         note "job '$j' must run check-jq.sh, or it runs the suite on whatever jq its runner resolves"
     elif [ "$check" -gt "$suite" ]; then
         note "job '$j' must run check-jq.sh before the suite, not after it"
     fi
 done < <(jq_check_lines)
+# A job counts as running the suite when it names run-tests.sh, so with no such
+# job the check above has checked nothing.
+[ "$suite_jobs" -gt 0 ] \
+    || note "found no job that runs run-tests.sh in tests.yml, so the jq check checked no job"
 
 grep -qx test <<<"$jobs" \
     || note "a job with the id 'test' must exist; main's ruleset requires the check named test"
