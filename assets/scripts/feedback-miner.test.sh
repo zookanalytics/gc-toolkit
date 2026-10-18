@@ -82,17 +82,18 @@ STUB
 chmod +x "$BIN/gh"
 
 # --- stub gc ---------------------------------------------------------------------
-# `bd list -l observation` reads the store; `--has-metadata-key
-# pr_provenance_since` reads the anchors. The findings live in findings.json
-# and serve the real patrol-finding.sh as bd does: a listing filtered by
-# `--metadata-field` and `--status` (every status but closed by default, all
-# with --all) that records the rig it read, `show`, and `update` with
-# --set-metadata and --append-notes, an append joining notes with a newline.
-# `bd create --title` files a finding, recording the rig it filed in; a create
-# with a positional title files an observation, so a later listing sees it.
-# `bd kv get|set|list` serve the key-value table from kv.json, a get printing
-# {found, key, value} and exiting 1 for an unset key and a list printing the
-# whole table with schema_version, as bd does, each recording the rig it ran in.
+# `bd list -l observation` reads the store, recording the rig it read;
+# `--has-metadata-key pr_provenance_since` reads the anchors. The findings live
+# in findings.json and serve the real patrol-finding.sh as bd does: a listing
+# filtered by `--metadata-field` and `--status` (every status but closed by
+# default, all with --all) that records the rig it read, `show`, and `update`
+# with --set-metadata and --append-notes, an append joining notes with a
+# newline. `bd create --title` files a finding, and a create with a positional
+# title files an observation, so a later listing sees it; each records the rig
+# it filed in. `bd kv get|set|list` serve the key-value table from kv.json, a
+# get printing {found, key, value} and exiting 1 for an unset key and a list
+# printing the whole table with schema_version, as bd does, each recording the
+# rig it ran in.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 printf '%s\n' "$*" >> "$STUB_LOG/gc.log"
@@ -104,6 +105,7 @@ case "${1:-}" in
     case " $* " in
       *" --has-metadata-key pr_provenance_since "*) cat "$STUB_STORE/anchors.json"; exit 0 ;;
       *" -l observation "*)
+        printf '%s\n' "${GC_RIG:-}" > "$STUB_LOG/obs-list.rig"
         [ -n "${STUB_OBS_BROKEN:-}" ] && { echo "bd: store unreachable" >&2; exit 1; }
         cat "$STUB_STORE/obs.json"; exit 0 ;;
       *" --metadata-field finding."*)
@@ -187,6 +189,7 @@ case "${1:-}" in
       esac
     done
     [ -n "${STUB_CREATE_FAIL:-}" ] && { echo '{"error":"create refused"}'; exit 1; }
+    printf '%s\n' "${GC_RIG:-}" > "$STUB_LOG/obs.rig"
     n=$(( $(jq 'length' "$STUB_STORE/obs.json") + 1 ))
     id="tk-obs$n"
     jq --arg id "$id" --arg t "$title" --arg d "$body" --argjson m "$meta" --arg s "$status" \
@@ -459,7 +462,9 @@ ROWS_EOF
 has "$OUT" "filed 1, skipped 0" "(57a) an app account's conversation comment that is not a deploy notice is filed"
 
 echo "── file: refused rows ──"
-OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
+# This call runs in a shell whose GC_RIG names another rig.
+rm -f "$TMP/obs.rig" "$TMP/obs-list.rig"
+OUT=$(GC_RIG=another-rig "$SUT" file --dir "$W" <<ROWS_EOF 2>&1
 {"key": "pr:ours/repo#11:comment:999", "statement": "No such post."}
 {"key": "$(key 11 comment 302)", "statement": "A deploy preview."}
 {"key": "$(key 11 review 105)", "statement": ""}
@@ -475,6 +480,8 @@ has "$OUT" "the row has no statement" "(61) an empty statement is refused"
 has "$OUT" "directive must be standing or diff" "(62) a bad directive is refused"
 has "$OUT" "row is not a JSON object" "(63) a line that is not JSON is refused"
 has "$OUT" "filed 1," "(64) the valid row in the same call is still filed"
+eq "$(cat "$TMP/obs-list.rig" 2>/dev/null)" "fixture-rig" "(64a) file dedups against the swept rig's store, whatever GC_RIG its shell carries"
+eq "$(cat "$TMP/obs.rig" 2>/dev/null)" "fixture-rig" "(64b) and files the observation there"
 
 echo "── file: the standing-behavior capture on the city's posts ──"
 OUT=$("$SUT" file --dir "$W" --max-standing 1 <<ROWS_EOF 2>&1

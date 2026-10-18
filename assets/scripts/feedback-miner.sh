@@ -477,6 +477,8 @@ fi
 if [ "$VERB" = file ]; then
   [ -z "$MAX_STANDING" ] || is_count "$MAX_STANDING" || die_usage "--max-standing must be a non-negative integer"
   SLUG=$(meta repo); RIG=$(meta rig)
+  # The store the sweep read, which the dedup reads and the observations go to.
+  [ -n "$RIG" ] && export GC_RIG="$RIG"
   cd "$(meta checkout)" 2>/dev/null || { err "cannot enter the swept checkout"; exit 1; }
   ROWS="$DIR/rows.$$.jsonl"; : > "$ROWS"
   BAD=0
