@@ -1669,6 +1669,23 @@ body_has leftoverlinkaway "^d/sub/b waits at .*/leftoverlinkaway/\.git/gc-toolki
   && ok "the subject names the symlinked directory a copy does not go back through" \
   || bad "the subject names the symlinked directory a copy does not go back through (got '$(body_for leftoverlinkaway)')"
 
+# leftoverlinkdeep: a copy waits for d/sub/a, and d/sub is now a symlink to the
+# directory where it waits, while d is a plain directory. The path reads the copy
+# itself through its own directory, not its top one, so the copy stays aside and
+# its line says the path reads it.
+behind_rig leftoverlinkdeep
+LEFTOVERLINKDEEP_KEPT="$TMP/leftoverlinkdeep/.git/gc-toolkit-reconcile-kept/d/sub"
+mkdir -p "$LEFTOVERLINKDEEP_KEPT" "$TMP/leftoverlinkdeep/d"; echo a > "$LEFTOVERLINKDEEP_KEPT/a"
+ln -s ../.git/gc-toolkit-reconcile-kept/d/sub "$TMP/leftoverlinkdeep/d/sub"
+rigs_json leftoverlinkdeep
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null 2>&1
+eq "$(cat "$LEFTOVERLINKDEEP_KEPT/a" 2>/dev/null)" "a" "a copy its path reads through a symlinked subdirectory stays aside"
+eq "$(esc_count leftoverlinkdeep)" "1" "a copy its path reads through a symlinked subdirectory escalates"
+body_has leftoverlinkdeep "^d/sub/a waits at .*/leftoverlinkdeep/\.git/gc-toolkit-reconcile-kept/d/sub/a, and .*/leftoverlinkdeep/d/sub/a reads this copy itself through the symlink .*/leftoverlinkdeep/d/sub: " \
+  && ok "the subject says a path below a symlinked subdirectory reads the copy itself" \
+  || bad "the subject says a path below a symlinked subdirectory reads the copy itself (got '$(body_for leftoverlinkdeep)')"
+
 # leftoverhardlink: a pass was interrupted between linking a copy and removing
 # its first name, so cfg and the copy aside are one file under two names. The
 # copy aside goes, cfg keeps the bytes, and nothing escalates.
