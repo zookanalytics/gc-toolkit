@@ -78,10 +78,16 @@ CLI's `run`. The screenshot reads the CLI's help for `screenshot` and saves a
 PNG with it. `demo-engine-lib.test.sh` checks the policy through both captures.
 It fails when either capture stops sourcing the library, stops running the
 engine through it, or runs one of its steps itself. It also fails when any
-other script in `assets/scripts` finds the engine, provisions its browser,
-reads Node's version or names the CLI's entry. The finding named the two
-scripts. `skills/demo-capture/SKILL.md` still spells its own steps out for an
-agent working the engine by hand at a shell.
+other script in `assets/scripts`, or any pack skill's example code, finds the
+engine, provisions its browser, reads Node's version or names the CLI's entry.
+The skills came into that scan when review 5560096102 found that
+`skills/demo-capture/SKILL.md`, the method for an agent working the engine by
+hand at a shell, still spelled out its own copy of the steps, running the CLI
+through `npx tsx` with no Node floor. The skill now sources the library from
+the pack gc loaded, as `"$(gc <binding> scripts-dir)/demo-engine-lib.sh"`, and
+runs the engine through it, keeping only the video's ffmpeg fetch. The test
+checks the skill's fenced code as it checks the captures, and runs the skill's
+resolve block and its engine call against its stubs.
 
 **Terminal output.** The command runs with bash from `--cwd`, with stdout and
 stderr captured together and stdin closed. Its exit status is reported, not

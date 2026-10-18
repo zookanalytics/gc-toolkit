@@ -41,15 +41,18 @@
 #
 # Each capture keeps what only it needs. rig-demo-capture.sh provisions ffmpeg
 # for a checkout and records a clip with the CLI's `run`; demo-screenshot.sh
-# saves a PNG with its `screenshot`. demo-engine-lib.test.sh checks this policy
-# through both, and fails when either stops sourcing this file or runs a step of
-# it itself.
+# saves a PNG with its `screenshot`. The demo:capture skill's examples run the
+# engine through this file too. demo-engine-lib.test.sh checks this policy
+# through each capture and through the skill's examples, and fails when any of
+# them stops sourcing this file or runs a step of it itself.
 #
 # A caller resolves this file beside itself and sources it:
 #   # shellcheck source=demo-engine-lib.sh
 #   . "$HERE/demo-engine-lib.sh" || { echo "$PROG: cannot source demo-engine-lib.sh" >&2; exit 1; }
 #   demo_engine_resolve || exit 1
 #   demo_engine_cli <command> <arguments...>
+# An agent's shell has no script beside it, so the skill sources this file from
+# the pack gc loaded, as "$(gc <binding> scripts-dir)/demo-engine-lib.sh".
 
 DEMO_ENGINE_PACKAGE=@zookanalytics/sprintshow
 

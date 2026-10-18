@@ -25,9 +25,12 @@
 #               carries only its own report
 #   (READERS)   each capture sources the library, calls demo_engine_resolve,
 #               runs the engine through demo_engine_cli, and runs none of the
-#               library's steps itself
-#   (NO-COPY)   no other script in assets/scripts finds the engine, provisions
-#               its browser, checks Node's version or names the CLI's entry
+#               library's steps itself. The demo:capture skill's examples do
+#               the same, sourcing the library from the pack gc loaded, and its
+#               resolve block and its engine call run against the stubs
+#   (NO-COPY)   no other script in assets/scripts, and no pack skill's example
+#               code, finds the engine, provisions its browser, checks Node's
+#               version or names the CLI's entry
 # What each capture adds to the policy is tested beside it, in
 # rig-demo-capture.test.sh and demo-screenshot.test.sh.
 #
@@ -43,7 +46,9 @@ LIB="$HERE/demo-engine-lib.sh"
 VIDEO="$HERE/rig-demo-capture.sh"
 SHOT="$HERE/demo-screenshot.sh"
 RENDERER="$HERE/demo-screenshot.mjs"
-for f in "$LIB" "$VIDEO" "$SHOT" "$RENDERER"; do
+SKILLS="$(cd "$HERE/../../skills" && pwd)"
+SKILL="$SKILLS/demo-capture/SKILL.md"
+for f in "$LIB" "$VIDEO" "$SHOT" "$RENDERER" "$SKILL"; do
   [ -f "$f" ] || { echo "not found: $f" >&2; exit 2; }
 done
 
@@ -68,8 +73,9 @@ done
 # --output. npm and npx stand in for the installers: each prints what an
 # installer prints, to the stdout it was given, and fails on NPM_INSTALL_RC or
 # INSTALL_RC. npx hands the published engine's CLI to $ENGINE_STUB. gc lists
-# the sprintshow rig at $SS_RIG beside another rig, or fails on GC_RC. ffmpeg is
-# the host's, so the video fetches none.
+# the sprintshow rig at $SS_RIG beside another rig, or fails on GC_RC, and
+# answers the pack command `gc gc-toolkit scripts-dir` with $PACK_SCRIPTS.
+# ffmpeg is the host's, so the video fetches none.
 JQ="$(command -v jq)" || { echo "test setup: required tool 'jq' not found" >&2; exit 2; }
 BIN="$TMPD/bin"; mkdir -p "$BIN"
 ln -s "$JQ" "$BIN/jq"
@@ -112,15 +118,18 @@ if [ "${1:-} ${2:-}" = "rig list" ]; then
   if [ "${GC_RC:-0}" != 0 ]; then echo 'gc: the city did not answer' >&2; exit "$GC_RC"; fi
   [ -z "${SS_RIG:-}" ] || printf '{"rigs":[{"name":"gc-toolkit","path":"/nowhere"},{"name":"sprintshow","path":"%s"}]}\n' "$SS_RIG"
 fi
+[ "${1:-} ${2:-}" != "gc-toolkit scripts-dir" ] || printf '%s\n' "${PACK_SCRIPTS:?}"
 exit 0
 GC
 printf '#!/usr/bin/env bash\nexit 0\n' >"$BIN/ffmpeg"
 chmod +x "$BIN"/node "$BIN"/npm "$BIN"/npx "$BIN"/gc "$BIN"/ffmpeg
-# The same stubs without npx, and without node.
+# The same stubs without npx, without node, and without ffmpeg.
 NONPX="$TMPD/bin-nonpx"; mkdir -p "$NONPX"
 for s in jq node npm gc ffmpeg; do ln -s "$BIN/$s" "$NONPX/$s"; done
 NONODE="$TMPD/bin-nonode"; mkdir -p "$NONODE"
 for s in jq npx npm gc ffmpeg; do ln -s "$BIN/$s" "$NONODE/$s"; done
+NOFFMPEG="$TMPD/bin-noffmpeg"; mkdir -p "$NOFFMPEG"
+for s in jq node npx npm gc; do ln -s "$BIN/$s" "$NOFFMPEG/$s"; done
 
 # The engine's CLI: help lists its commands, lint passes, run writes the clip
 # and the engine's closing report, and screenshot writes the PNG.
@@ -308,17 +317,75 @@ for f in "$VIDEO" "$SHOT"; do
       printf 'FAIL - %s\n' "($name) it calls $fn"; FAIL=1
     fi
   done
-  for step in 'rig list' 'package.json' 'npm install' 'provision:browser' 'playwright install' 'node --version' 'src/cli.ts' 'npx --yes'; do
+  for step in 'rig list' 'package.json' 'npm install' 'provision:browser' 'playwright install' 'node --version' 'src/cli.ts' 'npx --yes' 'npx tsx'; do
     hasnt "$step" "$code" "($name) it runs no '$step' of its own"
   done
 done
 
-echo "# NO-COPY: no other script finds the engine, provisions its browser, checks Node's version or names the CLI's entry"
+echo "# READERS: the demo:capture skill's examples resolve the engine through the library, from the pack gc loaded"
+# A skill's examples are its fenced code blocks, read here without their
+# comment lines, as the captures are.
+code="$(awk '/^[[:space:]]*```/ { inb = !inb; next } inb' "$SKILL" | grep -vE '^[[:space:]]*#')"
+has '. "$(gc <binding> scripts-dir)/demo-engine-lib.sh"' "$code" "(demo-capture skill) it sources demo-engine-lib.sh from the pack gc loaded"
+for fn in demo_engine_resolve demo_engine_find demo_engine_cli; do
+  if grep -qE "(^|[^[:alnum:]_])$fn([^[:alnum:]_]|\$)" <<<"$code"; then
+    printf 'ok   - %s\n' "(demo-capture skill) it calls $fn"
+  else
+    printf 'FAIL - %s\n' "(demo-capture skill) it calls $fn"; FAIL=1
+  fi
+done
+for step in 'rig list' 'package.json' 'npm install' 'provision:browser' 'playwright install' 'node --version' 'src/cli.ts' 'npx --yes' 'npx tsx'; do
+  hasnt "$step" "$code" "(demo-capture skill) it runs no '$step' of its own"
+done
+
+# skill_block <n>: the n-th fenced block of the skill's "Resolve the engine"
+# section, with the binding filled in as an agent fills it in for a city that
+# imports the pack as gc-toolkit.
+skill_block() {
+  awk -v want="$1" '
+    /^## / { s = ($0 == "## Resolve the engine") }
+    s && /^[[:space:]]*```/ { if (inb) { inb = 0; if (n == want) exit; next } n++; inb = 1; next }
+    s && inb && n == want' "$SKILL" | sed 's#<binding>#gc-toolkit#g'
+}
+skill_block 1 >"$TMPD/skill-resolve.sh"
+skill_block 2 | sed 's#<command> <arguments\.\.\.>#lint demo.md#' >"$TMPD/skill-call.sh"
+# skill_run <block> [VAR=VAL ...]: run a block as a script of its own, in a
+# fresh shell, from $WORK, against the stubs, the way capture runs a capture.
+skill_run() {
+  local blk="$1"; shift
+  : >"$CALLLOG"
+  ( cd "$WORK" && env -i PATH="${STUB_PATH:-$BIN}:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+      ENGINE_STUB="$ENGINE_STUB" PACK_SCRIPTS="$HERE" "$@" bash "$blk" >"$OUTF" 2>"$ERRF" )
+  RC=$?
+}
+skill_run "$TMPD/skill-resolve.sh" SS_RIG="$ENGINE"
+eq "$RC" 0 "(demo-capture skill) its resolve block resolves the local engine"
+has "engine = local sprintshow rig ($ENGINE)" "$(err)" "(demo-capture skill) through the library, which says which engine it chose"
+has "npm run provision:browser (in $ENGINE)" "$(calls)" "(demo-capture skill) the library provisions the browser"
+hasnt "provision:ffmpeg" "$(calls)" "(demo-capture skill) with a host ffmpeg, no ffmpeg is fetched"
+STUB_PATH="$NOFFMPEG" skill_run "$TMPD/skill-resolve.sh" SS_RIG="$ENGINE"
+eq "$RC" 0 "(demo-capture skill) its resolve block resolves the local engine with no host ffmpeg"
+P=$(line_of "provision:browser"); F=$(line_of "npm run provision:ffmpeg (in $ENGINE)")
+ok "(demo-capture skill) with no host ffmpeg, the checkout fetches ffmpeg-static once the engine resolves (browser line $P, ffmpeg line $F)" "[ '$P' -gt 0 ] && [ '$F' -gt '$P' ]"
+STUB_PATH="$NOFFMPEG" skill_run "$TMPD/skill-resolve.sh" SS_RIG="$ENGINE" NODE_VERSION=v22.17.1
+eq "$RC" 1 "(demo-capture skill) a Node below the floor stops its resolve block"
+has "Node 22.17.1 is below the engine's floor of 22.18" "$(err)" "(demo-capture skill) with the library's reason"
+eq "$(calls)" "" "(demo-capture skill) and nothing, ffmpeg included, is fetched after the engine did not resolve"
+skill_run "$TMPD/skill-call.sh" SS_RIG="$ENGINE"
+eq "$RC" 0 "(demo-capture skill) its engine call runs in a fresh shell"
+eq "$(calls)" "node [$ENGINE/src/cli.ts] [lint] [demo.md]
+engine lint demo.md" "(demo-capture skill) on the checkout's CLI, with nothing installed first"
+skill_run "$TMPD/skill-call.sh"
+eq "$(calls)" "npx --yes @zookanalytics/sprintshow lint demo.md
+engine lint demo.md" "(demo-capture skill) and on the published package when there is no checkout"
+
+echo "# NO-COPY: no other script, and no skill's example code, finds the engine, provisions its browser, checks Node's version or names the CLI's entry"
 # One grep finds the files that name a step anywhere; only those are read again
 # without their comment lines, so a script that names a step in prose passes.
-# The steps are the browser install, by either installer, the rig lookup's
-# select, however a copy spaces them, the Node version read, and the path of
-# the engine's CLI in a checkout.
+# A skill is read again as its fenced code blocks alone, so its prose can name
+# a step too. The steps are the browser install, by either installer, the rig
+# lookup's select, however a copy spaces them, the Node version read, and the
+# path of the engine's CLI in a checkout.
 STEPS='provision:browser|playwright[[:space:]]+install|\.name[[:space:]]*==[[:space:]]*"sprintshow"|node[[:space:]]+--version|src/cli\.ts'
 COPIES=""
 while IFS= read -r f; do
@@ -326,7 +393,12 @@ while IFS= read -r f; do
   code="$(grep -vE '^[[:space:]]*(#|//)' "$f")"
   grep -qE "$STEPS" <<<"$code" && COPIES="$COPIES ${f##*/}"
 done <<<"$(grep -lE "$STEPS" "$HERE"/*.sh "$HERE"/*.mjs 2>/dev/null)"
-eq "${COPIES# }" "" "(NO-COPY) no script in assets/scripts outside demo-engine-lib.sh finds the engine, provisions its browser, checks Node's version or names the CLI's entry"
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  code="$(awk '/^[[:space:]]*```/ { inb = !inb; next } inb' "$f" | grep -vE '^[[:space:]]*#')"
+  grep -qE "$STEPS" <<<"$code" && COPIES="$COPIES skills/${f#"$SKILLS"/}"
+done <<<"$(grep -lE "$STEPS" "$SKILLS"/*/SKILL.md 2>/dev/null)"
+eq "${COPIES# }" "" "(NO-COPY) no script in assets/scripts outside demo-engine-lib.sh, and no pack skill's example code, finds the engine, provisions its browser, checks Node's version or names the CLI's entry"
 
 echo
 if [ "$FAIL" -eq 0 ]; then echo "PASS: all demo-engine-lib assertions passed"; else echo "FAIL: demo-engine-lib had failures"; fi
