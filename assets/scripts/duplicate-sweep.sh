@@ -276,7 +276,7 @@ else
       "gc.dispatch_when_ready_slung", "gc.deferred_routed_to",
       "gc.deferred_execution_routed_to", "gc.deferred_assignee",
       "gc.claimed_at", "gc.session_id", "gc.session_name",
-      "work_dir", "gc.work_dir", "gc.work_commit", "self_review_passed_sha",
+      "work_dir", "gc.work_dir", "gc.work_commit",
       "prepare_mode", "merge_result" ] as $dispatch
     | [ "gc.work_outcome", "work_outcome" ] as $outcome
     | .[]
