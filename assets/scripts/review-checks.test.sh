@@ -15,8 +15,8 @@
 #     them from the commit --at names and never from the working tree, a call that
 #     names no commit refused unless --file or GC_REVIEW_CHECKS_INDEX names the
 #     index, and --extension reading a commit's docs/review-<check>.md;
-#   - --at fetching a commit the checkout has not fetched, and failing on one
-#     nothing can fetch.
+#   - --at fetching a commit the checkout has not fetched, failing on one
+#     nothing can fetch, and asking each repository once.
 #
 # Hermetic: runs the script against fixtures in a mktemp dir, with a fixture pack
 # (a copy of the script under <pack>/assets/scripts beside a fixture index) and
@@ -374,6 +374,24 @@ if [ -n "$NEW" ] && [ -d "$CLONE/.git" ] && ! git -C "$CLONE" cat-file -e "$NEW^
   is "…emitting no gates" "$(count "$OUT")" "0"
   (cd "$CLONE" && "$PSUT" --extension ux --at 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1)
   is "--extension at a commit that cannot be fetched: exit 1" "$?" "1"
+  # Each repository is asked once. A git that logs the fetches it runs counts the
+  # asks for a commit no repository holds: the checkout named again as
+  # GC_RIG_ROOT, and a worktree beside the checkout it was added to, read one
+  # object store, so origin is asked once; two repositories are asked twice.
+  mkdir -p "$TMP/logbin"
+  printf '#!/usr/bin/env bash\ncase " $* " in *" fetch "*) printf "%%s\\n" "$*" >> "%s" ;; esac\nexec "%s" "$@"\n' \
+    "$TMP/fetch.log" "$(command -v git)" > "$TMP/logbin/git"
+  chmod +x "$TMP/logbin/git"
+  fetches() { # <cwd> <GC_RIG_ROOT> — the fetches one resolve at an unknown commit runs
+    : > "$TMP/fetch.log"
+    (cd "$1" && PATH="$TMP/logbin:$PATH" GC_RIG_ROOT="$2" "$PSUT" --resolve --check-set correctness \
+      --through pre-open --at 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1)
+    count "$(cat "$TMP/fetch.log")"
+  }
+  is "the checkout named again as GC_RIG_ROOT asks origin once" "$(fetches "$CLONE" "$CLONE")" "1"
+  git -C "$CLONE" worktree add -q --detach "$TMP/clone-wt" >/dev/null 2>&1
+  is "a worktree beside the checkout it was added to asks origin once" "$(fetches "$TMP/clone-wt" "$CLONE")" "1"
+  is "…while two repositories are each asked" "$(fetches "$CLONE" "$RIG")" "2"
   # A commit that carries no index of its own adds no rows: the pack's stand,
   # whatever the working tree holds.
   git -C "$CLONE" rm -q review-checks.toml && commit_q "$CLONE" -m noindex

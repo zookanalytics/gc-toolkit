@@ -184,11 +184,21 @@ overlay() {
 }
 
 # The repositories a commit is looked for in: the toplevel of the checkout the
-# caller runs in, then GC_RIG_ROOT's.
-REPOS=()
+# caller runs in, then GC_RIG_ROOT's. Each is listed once, keyed by the object
+# store it reads: the same directory named twice, or a worktree and the checkout
+# it was added to, hold the same commits, and a commit missing from one would be
+# fetched into that store a second time.
+REPOS=(); REPO_STORES=()
 for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
   [ -n "$root" ] || continue
-  git -C "$root" rev-parse --git-dir >/dev/null 2>&1 && REPOS+=("$root")
+  git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || continue
+  rstore=$(cd "$root" 2>/dev/null && rcommon=$(git rev-parse --git-common-dir 2>/dev/null) \
+           && [ -n "$rcommon" ] && cd "$rcommon" 2>/dev/null && pwd -P) || rstore=""
+  [ -n "$rstore" ] || rstore="$root"
+  rdup=""
+  for s in ${REPO_STORES[@]+"${REPO_STORES[@]}"}; do [ "$s" = "$rstore" ] && rdup=1; done
+  [ -n "$rdup" ] && continue
+  REPOS+=("$root"); REPO_STORES+=("$rstore")
 done
 # A full commit id, the only form worth asking origin for by name.
 is_oid() {
