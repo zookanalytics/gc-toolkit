@@ -557,10 +557,14 @@ visit, so a gated subject can wait up to one pass, a 5-minute cooldown, with no
 visit. A sitting resolves the gate when the operator rules, through converse's
 discharge. On a recommend, Accept is the operator's answer: `gc-helm.sh accept`
 resolves every open, unassigned demand on the subject, the reaction's gate among
-them, after it dispatches the recommended mol and before it dismisses the
-subject's visits. Dismissing the visit without an answer leaves the gate open
-and the question owed, with no second visit offered unless `gc.gate_visit` is
-unset.
+them, before it dispatches the recommended mol. The order matters because the
+dispatch starts the run at once, and `mol-polecat-work`'s load-context cancels a
+run whose work bead still has an open blocker. A demand that will not resolve
+stops Accept before the dispatch, and a dispatch that fails reopens the demands
+Accept resolved, so the question stands whenever nothing was sent. Accept
+dismisses the subject's visits only after the dispatch lands. Dismissing the
+visit without an answer leaves the gate open and the question owed, with no
+second visit offered unless `gc.gate_visit` is unset.
 
 ### Two visit channels: keyless conversation, keyed escalation
 
