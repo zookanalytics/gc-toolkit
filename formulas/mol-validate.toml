@@ -486,12 +486,19 @@ backing, so over an approval still standing the lane would read green on that
 approval alone, and only the `blocks` edge this pass holds on the anchor would
 keep the change from merging on it.
 
+A human batch whose pass records no `reviewed_oid` is refused before the
+withdrawal. Its supersede resolves the lanes at that commit and refuses a call
+that names none, so a withdrawal ahead of it would dismiss every approval and
+leave every lane green.
+
 Write `REASON` for the approver. It opens the dismissal message they read on
 GitHub, and it is the note on each review the supersede retires. Say in plain
 words what the change will be and why it needs another look.
 ```bash
 # >>> validate-not-converged
 REASON="<what the change will be, and why it needs a fresh whole-diff look>"
+[ "$LANE" != human ] || [ -n "$REVIEWED_OID" ] ||
+  { echo "validation pass $VALIDATION_PASS records no reviewed_oid, so a human batch has no commit to supersede its lanes at; nothing withdrawn or superseded" >&2; exit 1; }
 "$SCRIPTS/approval-withdraw.sh" --pass "$VALIDATION_PASS" --reason "$REASON" && if [ "$LANE" = human ]; then
   "$SCRIPTS/review-outcome.sh" supersede-anchor --anchor "$ANCHOR" --oid "$REVIEWED_OID" --reason "$REASON"
 else
