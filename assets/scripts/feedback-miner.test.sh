@@ -21,6 +21,7 @@ hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2')" ;; *) ok "$3" ;; esac; }
 
 ago() { jq -nr --argjson t "$(( $(date -u +%s) - $1 * 86400 ))" '$t | todate'; }
 ago_h() { jq -nr --argjson t "$(( $(date -u +%s) - $1 * 3600 ))" '$t | todate'; }
+day() { jq -nr --argjson t "$(( $(date -u +%s) - $1 * 86400 ))" '$t | strftime("%Y-%m-%d")'; }
 
 FIX="$TMP/fix"; STORE="$TMP/store"; BIN="$TMP/bin"
 mkdir -p "$FIX" "$STORE" "$BIN"
@@ -85,7 +86,9 @@ chmod +x "$BIN/gh"
 # pr_provenance_since` reads the anchors; the `finding.key` listing reads the
 # findings the patrol-finding stand-in filed, closed ones only with --all as bd
 # does, and records the rig it read; `bd create` appends to the store so a
-# later listing sees what was filed.
+# later listing sees what was filed. `bd kv get|set` serve the key-value table
+# from kv.json, a get printing {found, key, value} and exiting 1 for an unset
+# key, as bd does, and record the rig they ran in.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
 printf '%s\n' "$*" >> "$STUB_LOG/gc.log"
@@ -129,6 +132,17 @@ case "${1:-}" in
       "$STUB_STORE/obs.json" > "$STUB_STORE/obs.next" && mv "$STUB_STORE/obs.next" "$STUB_STORE/obs.json"
     printf '{"id":"%s"}\n' "$id"
     exit 0 ;;
+  kv)
+    printf '%s\n' "${GC_RIG:-}" > "$STUB_LOG/kv.rig"
+    [ -n "${STUB_KV_BROKEN:-}" ] && { echo "bd: store unreachable" >&2; exit 1; }
+    f="$STUB_STORE/kv.json"; [ -f "$f" ] || echo '{}' > "$f"
+    case "${2:-}" in
+      get) jq -c --arg k "${3:-}" '{found: has($k), key: $k, schema_version: 1, value: (.[$k] // "")}' "$f"
+           jq -e --arg k "${3:-}" 'has($k)' "$f" >/dev/null; exit $? ;;
+      set) [ -n "${STUB_KV_SET_FAIL:-}" ] && { echo "bd: write refused" >&2; exit 1; }
+           jq --arg k "${3:-}" --arg v "${4:-}" '.[$k] = $v' "$f" > "$f.next" && mv "$f.next" "$f"
+           exit 0 ;;
+    esac ;;
 esac
 echo "stub gc: unexpected call: bd $*" >&2
 exit 1
@@ -249,6 +263,11 @@ echo '[]' > "$FIX/12.inline.json"
 jq -n --arg c "$CUT" '[{id: "tk-anchor11", metadata: {pr_number: 11, pr_provenance_since: $c}}]' > "$STORE/anchors.json"
 echo '[]' > "$STORE/obs.json"
 echo '[]' > "$STORE/findings.json"
+echo '{}' > "$STORE/kv.json"
+KV_KEY="feedback_miner.outside_since.ours_repo"
+kv_day() { jq -r --arg k "$KV_KEY" '.[$k] // ""' "$STORE/kv.json"; }
+closed_on() { jq -r --argjson n "$1" '.[] | select(.number == $n) | .closedAt[0:10]' "$FIX/prs.ours.json"; }
+kv_put() { jq --arg k "$KV_KEY" --arg v "$1" '.[$k] = $v' "$STORE/kv.json" > "$STORE/kv.next" && mv "$STORE/kv.next" "$STORE/kv.json"; }
 
 key() { printf 'pr:ours/repo#%s:%s:%s' "$1" "$2" "$3"; }
 class_of() { jq -r --arg k "$1" 'select(.key == $k) | .class' "$W/sweep.jsonl"; }
@@ -264,11 +283,13 @@ git -C "$CO" remote remove origin
 "$SUT" identity --checkout "$CO" >/dev/null 2>&1; eq "$?" "1" "(2) a checkout with no origin resolves no identity"
 git -C "$CO" remote add origin git@github.com:ours/repo.git
 
-echo "── sweep, first run: no outside-review observation yet, so it back-fills ──"
+echo "── sweep, first run: no outside capture day recorded yet, so it back-fills ──"
 fresh_dir a
 OUT=$("$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1); RC=$?
 eq "$RC" "0" "(3) the first sweep exits 0"
-has "$OUT" "younger than one 3-day window, so it reads the last 30 days" "(4) the first sweep says it back-fills"
+has "$OUT" "still owes every PR closed since $(day 30), so the sweep reads back to then" "(4) the first sweep says it back-fills"
+eq "$(kv_day)" "$(day 30)" "(4a) it records the back-fill's start as the outside capture's day, under origin's repository"
+eq "$(cat "$TMP/kv.rig")" "fixture-rig" "(4b) in the store of the rig it sweeps"
 eq "$(grep -c '^api graphql' "$TMP/gh.log")" "1" "(5) one page lists every PR the window can hold"
 eq "$(grep '^api graphql' "$TMP/gh.log" | grep -c -- '-f owner=ours -f name=repo')" "1" "(6) the PR listing names origin's repository"
 eq "$(grep '^api repos/' "$TMP/gh.log" | grep -vc '^api repos/ours/repo/')" "0" "(7) every stream read names origin's repository"
@@ -409,6 +430,28 @@ ROWS_EOF
 has "$OUT" "a city post needs a proposed norm" "(69) a standing row with no norm is refused"
 has "$OUT" "a city post needs its own category, other than outside-review" "(70) a standing row cannot take the outside category"
 
+echo "── advance: the outside capture's day moves to what the run still owes ──"
+OUT=$("$SUT" advance --dir "$W" 2>&1); RC=$?
+eq "$RC" "0" "(70a) advance exits 0 while the capture is unfinished"
+has "$OUT" "moves to $(closed_on 12): 2 PR(s) still owe a read (#11, #12): 0 did not read, and 3 outside post(s) are not recorded yet" \
+    "(70b) it says what the run still owes"
+eq "$(kv_day)" "$(closed_on 12)" "(70c) and moves the day to the close of the oldest PR it owes, past the back-fill PRs it finished"
+"$SUT" file --dir "$W" >/dev/null 2>&1 <<ROWS_EOF
+{"key": "$(key 11 review 103)", "statement": "Two findings, the first of which blocks.", "directive": "diff"}
+{"key": "$(key 11 comment 203)", "statement": "The guard reads the wrong variable.", "directive": "diff"}
+{"key": "$(key 12 comment 401)", "statement": "Old feedback from last week.", "directive": "diff"}
+ROWS_EOF
+OUT=$(GC_RIG=another-rig "$SUT" advance --dir "$W" 2>&1); RC=$?
+eq "$RC" "0" "(70d) advance exits 0 once every outside post is recorded"
+has "$OUT" "moves to $(day 0): every PR the sweep listed read, and the store records every outside post it found" "(70e) and moves the day to the sweep's"
+eq "$(kv_day)" "$(day 0)" "(70f) the store holds the new day"
+eq "$(cat "$TMP/kv.rig")" "fixture-rig" "(70g) in the swept rig's store"
+kv_put "$(day -1)"
+OUT=$("$SUT" advance --dir "$W" 2>&1)
+has "$OUT" "so something moved it after the sweep and this run leaves it" "(70h) a day that moved after the sweep read it is left alone"
+eq "$(kv_day)" "$(day -1)" "(70i) as it stands"
+kv_put "$(day 0)"
+
 echo "── flag ──"
 "$SUT" flag --dir "$W" >/dev/null 2>&1; RC=$?
 eq "$RC" "0" "(71) flag exits 0"
@@ -428,19 +471,32 @@ fresh_dir q
 STUB_PAGE=1 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
 eq "$(grep -c '^api graphql' "$TMP/gh.log")" "3" "(76c) a 3-day listing stops at PR 12, ten days old, and never asks for PR 13"
 
-echo "── sweep, a resumed first run: the outside capture began today ──"
+echo "── sweep, a back-fill cut short and resumed four days later ──"
+# The first run, four days ago, recorded its start, filed outside posts and
+# stopped before PR 12's. Every observation it filed is four days old, older
+# than the window.
 fresh_dir r
+kv_put "$(day 34)"
+cp "$STORE/obs.json" "$STORE/obs.keep"
+jq --arg old "$(ago 4)" --arg k "$(key 12 comment 401)" 'map(select(.metadata["obs.provenance"] != $k) | . + {created_at: $old})' \
+  "$STORE/obs.keep" > "$STORE/obs.json"
 OUT=$("$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1)
-has "$OUT" "reads the last 30 days" "(77a) a run inside the capture's first window still back-fills"
-eq "$(class_of "$(key 12 comment 401)")" "outside" "(77b) so a back-fill a session could not finish is finished"
+has "$OUT" "still owes every PR closed since $(day 34), so the sweep reads back to then" \
+    "(77a) a resumed back-fill reads back to its recorded start, however old its observations"
+eq "$(field_of "$(key 12 comment 401)" captured)" "false" "(77b) so the ten-day-old PR's unrecorded post is read again"
+OUT=$("$SUT" advance --dir "$W" 2>&1)
+has "$OUT" "moves to $(closed_on 12): 1 PR(s) still owe a read (#12): 0 did not read, and 1 outside post(s) are not recorded yet" \
+    "(77c) and the day keeps that PR in reach until its post is recorded"
+eq "$(kv_day)" "$(closed_on 12)" "(77d) the store holds the day that PR closed"
+mv "$STORE/obs.keep" "$STORE/obs.json"
+OUT=$("$SUT" advance --dir "$W" 2>&1)
+has "$OUT" "moves to $(day 0): every PR the sweep listed read" "(77e) once the store records it, the day moves to the sweep's"
 
-echo "── sweep, a later run: the outside capture is a window old ──"
+echo "── sweep, a later run: the outside capture's day is the last finished run's ──"
 fresh_dir b
 rm -f "$TMP/finding.args"
-jq --arg old "$(ago 5)" 'map(if .metadata["obs.category"] == "outside-review" then . + {created_at: $old} else . end)' \
-  "$STORE/obs.json" > "$STORE/obs.next" && mv "$STORE/obs.next" "$STORE/obs.json"
 OUT=$("$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1)
-hasnt "$OUT" "reads the last 30 days" "(78) a sweep once the capture is a window old reads the normal window"
+hasnt "$OUT" "so the sweep reads back to then" "(78) a sweep after a finished run reads the standing window"
 eq "$(class_of "$(key 12 comment 401)")" "" "(79) the back-fill PR is out of the window"
 eq "$(field_of "$(key 11 comment 201)" captured)" "true" "(80) a post recorded by an earlier run reads as captured"
 has "$("$SUT" show --dir "$W" --city)" "already recorded on this post: tk-obs" "(81) show names what is already recorded on a post"
@@ -472,33 +528,71 @@ has "$ARGS" "- https://github.com/ours/repo/pull/11#pullrequestreview-10 (posted
 hasnt "$ARGS" "pullrequestreview-104" "(82h) and the finding names only the new post"
 mv "$FIX/11.reviews.keep" "$FIX/11.reviews.json"
 
-echo "── sweep, an outside-review observation whose date does not read ──"
+echo "── sweep, an outside capture day that is not a date, or does not read ──"
 fresh_dir g
-cp "$STORE/obs.json" "$STORE/obs.keep"
-jq 'map(if .metadata["obs.category"] == "outside-review" then . + {created_at: "not a date"} else . end)' \
-  "$STORE/obs.keep" > "$STORE/obs.json"
-OUT=$("$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1)
-hasnt "$OUT" "reads the last 30 days" "(82i) an undated outside capture counts as old, so it never back-fills again"
-mv "$STORE/obs.keep" "$STORE/obs.json"
+kv_put "not a date"
+OUT=$("$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1); RC=$?
+eq "$RC" "0" "(82i) a recorded day that is not a date does not stop the sweep"
+has "$OUT" "which is not a date, so the capture starts again" "(82j) it says the capture starts again"
+eq "$(kv_day)" "$(day 30)" "(82k) and records the back-fill's start"
+fresh_dir g2
+OUT=$(STUB_KV_BROKEN=1 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1); RC=$?
+eq "$RC" "1" "(82l) a day that does not read stops the sweep"
+has "$OUT" "did not read, so which PRs the capture owes is unknown" "(82m) and says why"
+eq "$(grep -c '^api graphql' "$TMP/gh.log")" "0" "(82n) before it lists a PR"
+fresh_dir g3
+echo '{}' > "$STORE/kv.json"
+STUB_KV_SET_FAIL=1 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1; RC=$?
+eq "$RC" "1" "(82o) a first run that cannot record its start stops"
+eq "$(grep -c '^api graphql' "$TMP/gh.log")" "0" "(82p) before it lists a PR"
+kv_put "$(day 0)"
 
 echo "── sweep, failures ──"
 fresh_dir c
 : > "$FIX/11.fail"
+kv_put "$(day 30)"
 OUT=$("$SUT" sweep --checkout "$CO" --days 30 --backfill-days 30 --dir "$W" 2>&1); RC=$?
 rm -f "$FIX/11.fail"
 eq "$RC" "0" "(83) a PR that does not read does not stop the sweep"
 has "$OUT" "did not read, left for the next run: 11" "(84) the PR that did not read is named"
 eq "$(class_of "$(key 12 comment 401)")" "outside" "(85) the other PRs are still swept"
+OUT=$("$SUT" advance --dir "$W" 2>&1)
+has "$OUT" "moves to $(closed_on 11): 1 PR(s) still owe a read (#11): 1 did not read, and 0 outside post(s) are not recorded yet" \
+    "(85f) a PR that did not read holds the day at its close"
+eq "$(kv_day)" "$(closed_on 11)" "(85g) so the next run reads it again"
 : > "$TMP/gh.log"
 "$SUT" sweep --checkout "$CO" --days 30 --backfill-days 30 --dir "$W" >/dev/null 2>&1
 eq "$(class_of "$(key 11 comment 201)")" "outside" "(85a) a sweep re-run into the same dir reads the PR it missed"
 eq "$(grep -c '^api repos/ours/repo/issues/12/' "$TMP/gh.log" || true)" "0" "(85b) and keeps the PRs it already read"
+"$SUT" advance --dir "$W" >/dev/null 2>&1
+eq "$(kv_day)" "$(day 0)" "(85h) once the PR has read and its posts are recorded, the day is the sweep's"
 fresh_dir k
 OUT=$(PATH="$KILLBIN:$PATH" STUB_KILL_PR=11 "$SUT" sweep --checkout "$CO" --days 30 --backfill-days 30 --dir "$W" --jobs 1 2>&1)
 has "$OUT" "did not read, left for the next run: 11" "(85c) a worker killed while it writes a PR's posts leaves that PR unread"
 "$SUT" sweep --checkout "$CO" --days 30 --backfill-days 30 --dir "$W" >/dev/null 2>&1
 eq "$(class_of "$(key 11 review 101)")" "outside" "(85d) so a resumed sweep into the same dir reads it again"
 jq -s 'length' "$W/sweep.jsonl" >/dev/null 2>&1; eq "$?" "0" "(85e) and every line of the resumed sweep parses"
+# A sweep cut short before it tried every PR writes no unread.txt.
+rm -f "$W/unread.txt"
+kv_put "$(day 30)"
+OUT=$("$SUT" advance --dir "$W" 2>&1); RC=$?
+eq "$RC" "1" "(85i) advance after a sweep that did not finish exits 1"
+has "$OUT" "the sweep in $W did not finish, so the outside capture stays at" "(85i2) and says the sweep did not finish"
+eq "$(kv_day)" "$(day 30)" "(85j) and keeps the day"
+# PR 12 closed before the recorded day, and a 30-day window still lists it.
+# When it does not read, the day moves back to its close, so a run whose
+# standing window has passed it still reads it.
+fresh_dir o
+kv_put "$(day 5)"
+: > "$FIX/12.fail"
+"$SUT" sweep --checkout "$CO" --days 30 --backfill-days 30 --dir "$W" >/dev/null 2>&1
+rm -f "$FIX/12.fail"
+OUT=$("$SUT" advance --dir "$W" 2>&1)
+has "$OUT" "moves to $(closed_on 12): 1 PR(s) still owe a read (#12): 1 did not read" "(85k) a PR the day had passed that did not read moves the day back to its close"
+fresh_dir o2
+"$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
+eq "$(class_of "$(key 12 comment 401)")" "outside" "(85l) so a later run with a 3-day window reads it again"
+kv_put "$(day 0)"
 fresh_dir d
 OUT=$(STUB_OBS_BROKEN=1 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1); RC=$?
 eq "$RC" "1" "(86) an unreadable observation store stops the sweep"
@@ -508,13 +602,14 @@ eq "$(grep -c '^api graphql' "$TMP/gh.log")" "0" "(88) it lists no PR before it 
 echo "── summary ──"
 fresh_dir e
 echo '[]' > "$STORE/obs.json"
+echo '{}' > "$STORE/kv.json"
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
 "$SUT" show --dir "$W" --outside >/dev/null
 "$SUT" file --dir "$W" >/dev/null 2>&1 <<ROWS_EOF
 {"key": "$(key 11 comment 201)", "statement": "The loop never ends on empty input."}
 ROWS_EOF
 OUT=$("$SUT" summary --dir "$W")
-has "$OUT" "outside window 3 day(s)" "(89) with no back-fill window the first run reads the normal window"
+has "$OUT" "outside capture from $(day 3)" "(89) with no back-fill window the first run reads the standing window"
 has "$OUT" "outside posts: 8 read, 0 recorded before this run, 1 filed now, 7 left unrecorded" "(90) the summary counts the outside capture"
 
 echo "── show prints every post whole, and a long one in parts ──"

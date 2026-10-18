@@ -25,11 +25,17 @@
 # Every outside post becomes one observation, obs.category=outside-review,
 # filed whether or not it is about standing behavior. The city's own posts in
 # the standing window are the miner's standing-behavior capture, which files
-# under a category the agent picks. Until a rig's outside capture is one window
-# old, while its store holds no outside-review observation older than the
-# window, its sweep reads the back-fill window for outside posts. A run that
-# stops partway and resumes still back-fills, and so do the next runs inside
-# that first window, so a back-fill one session could not finish is finished.
+# under a category the agent picks.
+#
+# The outside capture's progress outlives the run. The store's key-value table
+# holds, for each repository, the day from which the capture still owes every
+# PR closed. A rig's first sweep records the start of the back-fill window
+# there. Every sweep reads the PRs closed since that day, or since the standing
+# window's start when that is earlier. At the end of a run the day moves to the
+# close of the oldest PR the run still owes, one that did not read or carries an
+# outside post the store does not record, or to the sweep's own day when it owes
+# none. So a back-fill, a PR that did not read, and a post left unfiled are all
+# read again by the next run, however long after it comes.
 #
 # Usage:
 #   feedback-miner.sh identity --checkout <dir>
@@ -39,13 +45,15 @@
 #       which puts upstream ahead of origin, so the slug is resolved from
 #       origin's URL.
 #   feedback-miner.sh sweep --checkout <dir> --days <n> --backfill-days <n> --dir <work-dir> [--jobs <n>]
-#       Read every PR merged or closed in the window and write one JSON line per
-#       non-empty post to <work-dir>/sweep.jsonl, with its class (outside or
-#       city), whether the standing window covers it, the observations already
-#       recorded on it, and whether it is flagged. The PRs are read in --jobs
-#       parallel workers (default 8). A sweep re-run into the same --dir keeps
-#       the PRs it already read, so one a tool call's time limit cut short
-#       resumes.
+#       Read every PR merged or closed since the outside capture's day, or since
+#       the standing window's start (--days back) when that is earlier, and
+#       write one JSON line per non-empty post to <work-dir>/sweep.jsonl, with
+#       its class (outside, city or notice), whether the standing window covers
+#       it, the observations already recorded on it, and whether it is flagged.
+#       A rig with no day recorded yet records --backfill-days back. The PRs are
+#       read in --jobs parallel workers (default 8). A sweep re-run into the
+#       same --dir keeps the PRs it already read, so one a tool call's time
+#       limit cut short resumes.
 #   feedback-miner.sh show --dir <work-dir> (--outside | --city) [--limit <n>] [--max-chars <n>]
 #       Print posts for the agent to read, newest first and each one whole:
 #       --outside the outside posts no observation records yet, --city the
@@ -66,6 +74,10 @@
 #   feedback-miner.sh flag --dir <work-dir>
 #       File or refresh one patrol finding naming the flagged posts that no
 #       finding under its key names yet.
+#   feedback-miner.sh advance --dir <work-dir>
+#       Move the outside capture's day to the close of the oldest PR the run
+#       still owes, one that did not read or carries an outside post the store
+#       does not record, or to the sweep's day when it owes none, and say why.
 #   feedback-miner.sh summary --dir <work-dir>
 #       Print what the sweep read and what this run filed.
 #
@@ -99,9 +111,9 @@ warn() { echo "$PROG: WARN $*" >&2; }
 
 VERB="${1:-}"
 case "$VERB" in
-  identity|sweep|show|file|flag|summary|fetch-pr) shift ;;
+  identity|sweep|show|file|flag|advance|summary|fetch-pr) shift ;;
   -h|--help) usage; exit 0 ;;
-  *) die_usage "first argument must be identity, sweep, show, file, flag or summary" ;;
+  *) die_usage "first argument must be identity, sweep, show, file, flag, advance or summary" ;;
 esac
 
 CHECKOUT=""; DAYS=""; BACKFILL=""; DIR=""; JOBS=8; WHICH=""; LIMIT=25; MAX_CHARS=16000; MAX_STANDING=""
@@ -124,6 +136,32 @@ while [ $# -gt 0 ]; do
 done
 
 is_count() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac; }
+is_day() { case "${1:-}" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) return 0 ;; esac; return 1; }
+day_start() { # <days-ago> -> YYYY-MM-DD, GNU/BSD-portable
+  local e=$(( $(date -u +%s) - $1 * 86400 ))
+  date -u -d "@$e" +%Y-%m-%d 2>/dev/null || date -u -r "$e" +%Y-%m-%d
+}
+
+# --- the outside capture's day -----------------------------------------------------
+# One key per repository in the store's key-value table, the table of the store
+# the observations are filed in. It holds the day from which the outside capture
+# still owes every PR closed.
+day_key() { printf 'feedback_miner.outside_since.%s' "$(printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"; }
+# day_get <key> prints the day and returns 0, returns 3 when no day is
+# recorded, and 1 when the read did not answer. `kv get` exits 1 for an unset
+# key and still prints {"found": false}, so the answer is read from the JSON.
+day_get() {
+  local out
+  out=$(gc bd kv get "$1" --json </dev/null 2>/dev/null | scrub)
+  printf '%s' "$out" | jq -e 'type == "object" and has("found")' >/dev/null 2>&1 || return 1
+  [ "$(printf '%s' "$out" | jq -r '.found')" = true ] || return 3
+  printf '%s' "$out" | jq -r '.value // "" | tostring'
+}
+# day_set <key> <day> returns 0 only when the day reads back.
+day_set() {
+  gc bd kv set "$1" "$2" </dev/null >/dev/null 2>&1 || return 1
+  [ "$(day_get "$1")" = "$2" ]
+}
 
 # --- identity ----------------------------------------------------------------
 identity() {
@@ -257,6 +295,9 @@ if [ "$VERB" = sweep ]; then
   [ -x "$PR_POST" ] || { err "the PR posting helper is missing ($PR_POST); cannot tell the city's posts from feedback"; exit 1; }
   mkdir -p "$DIR/prs" || { err "cannot create $DIR/prs"; exit 1; }
   DIR=$(cd "$DIR" && pwd) && CHECKOUT=$(cd "$CHECKOUT" && pwd) || { err "cannot resolve the work dir or the checkout"; exit 1; }
+  # unread.txt is written once every listed PR has been tried, so a sweep cut
+  # short leaves none, and advance then keeps the outside capture's day.
+  rm -f "$DIR/unread.txt"
   cd "$CHECKOUT" || { err "cannot enter $CHECKOUT"; exit 1; }
   "$PR_POST" own-def > "$DIR/own-def.jq" && [ -s "$DIR/own-def.jq" ] \
     || { err "the PR posting helper did not print its provenance definition; cannot tell the city's posts from feedback"; exit 1; }
@@ -264,24 +305,28 @@ if [ "$VERB" = sweep ]; then
   SLUG=${ID%%$'\t'*}; SELF=${ID#*$'\t'}
 
   read_surface "$DIR/obs.json" || exit 1
-  OUT_DAYS="$DAYS"
-  # The oldest outside-review observation dates the outside capture. One with
-  # no readable creation time counts as old, so a store whose dates do not
-  # read never back-fills again.
-  CAPTURE_AGE=$(jq -r --arg c "$OUTSIDE_CATEGORY" --argjson now "$(date -u +%s)" '
-    [ .[] | select(((.metadata // {}).task_kind // "") == "observation")
-          | select(((.metadata["obs.category"] // "") | tostring) == $c)
-          | ((.created_at // "") | tostring | sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch 0) ]
-    | if length == 0 then "none" else ((($now - min) / 86400) | floor | tostring) end' "$DIR/obs.raw")
-  if [ "$BACKFILL" -gt "$DAYS" ] && { [ "$CAPTURE_AGE" = none ] || { is_count "$CAPTURE_AGE" && [ "$CAPTURE_AGE" -lt "$DAYS" ]; }; }; then
-    OUT_DAYS="$BACKFILL"
-    echo "$PROG: this rig's outside capture is younger than one $DAYS-day window, so it reads the last $OUT_DAYS days"
+  # A rig with no day recorded starts its outside capture --backfill-days back,
+  # and records that day before it reads, so a run cut short keeps the same
+  # start. A recorded day that is not a date starts the capture again.
+  DAY_KEY=$(day_key "$SLUG")
+  CAPTURE_DAY=$(day_get "$DAY_KEY"); KV_RC=$?
+  if [ "$KV_RC" = 0 ] && ! is_day "$CAPTURE_DAY"; then
+    warn "the outside capture's day ($DAY_KEY) reads '$CAPTURE_DAY', which is not a date, so the capture starts again"
+    KV_RC=3
   fi
-  day_start() { # <days-ago> -> YYYY-MM-DD, GNU/BSD-portable
-    local e=$(( $(date -u +%s) - $1 * 86400 ))
-    date -u -d "@$e" +%Y-%m-%d 2>/dev/null || date -u -r "$e" +%Y-%m-%d
-  }
-  SINCE=$(day_start "$OUT_DAYS"); WINDOW_SINCE=$(day_start "$DAYS")
+  case "$KV_RC" in
+    0) : ;;
+    3) CAPTURE_DAY=$(day_start "$BACKFILL")
+       day_set "$DAY_KEY" "$CAPTURE_DAY" \
+         || { err "could not record where the outside capture starts ($DAY_KEY=$CAPTURE_DAY); nothing read"; exit 1; }
+       echo "$PROG: this rig's outside capture starts with this run, at $CAPTURE_DAY ($DAY_KEY)" ;;
+    *) err "the outside capture's day ($DAY_KEY) did not read, so which PRs the capture owes is unknown; nothing read"; exit 1 ;;
+  esac
+  TODAY=$(day_start 0); WINDOW_SINCE=$(day_start "$DAYS"); SINCE="$WINDOW_SINCE"
+  if [[ "$CAPTURE_DAY" < "$WINDOW_SINCE" ]]; then
+    SINCE="$CAPTURE_DAY"
+    echo "$PROG: the outside capture still owes every PR closed since $CAPTURE_DAY, so the sweep reads back to then"
+  fi
 
   # The merged and closed PRs, newest update first. Closing a PR updates it, so
   # once a page ends on a PR last updated before the window, every PR after it
@@ -305,12 +350,14 @@ if [ "$VERB" = sweep ]; then
   jq -s --arg s "$SINCE" --arg w "$WINDOW_SINCE" '
     map(. + {closed: ((.closedAt // .mergedAt // "") | tostring | .[0:10])})
     | map(select(.closed != "" and .closed >= $s)) | unique_by(.number)
-    | map({number, title: (.title // ""), in_window: (.closed >= $w)})' "$DIR/prs.raw" > "$DIR/prs.json" \
+    | map({number, title: (.title // ""), closed, in_window: (.closed >= $w)})' "$DIR/prs.raw" > "$DIR/prs.json" \
     || { err "could not read $SLUG's PR listing"; exit 1; }
   jq -n --arg repo "$SLUG" --arg self "$SELF" --arg checkout "$(pwd)" --arg rig "${GC_RIG:-}" \
-        --argjson days "$DAYS" --argjson outside_days "$OUT_DAYS" --arg since "$SINCE" --arg window_since "$WINDOW_SINCE" \
-    '{repo: $repo, self: $self, checkout: $checkout, rig: $rig, days: $days, outside_days: $outside_days,
-      since: $since, window_since: $window_since}' > "$DIR/meta.json" || { err "cannot write $DIR/meta.json"; exit 1; }
+        --argjson days "$DAYS" --arg since "$SINCE" --arg window_since "$WINDOW_SINCE" \
+        --arg day_key "$DAY_KEY" --arg capture_day "$CAPTURE_DAY" --arg swept_on "$TODAY" \
+    '{repo: $repo, self: $self, checkout: $checkout, rig: $rig, days: $days, since: $since,
+      window_since: $window_since, day_key: $day_key, capture_day: $capture_day, swept_on: $swept_on}' > "$DIR/meta.json" \
+    || { err "cannot write $DIR/meta.json"; exit 1; }
 
   jq -r '.[].number' "$DIR/prs.json" > "$DIR/prs.txt"
   : > "$DIR/sweep.jsonl"
@@ -321,12 +368,14 @@ if [ "$VERB" = sweep ]; then
     done < "$DIR/prs.txt"
   fi
   # A PR whose worker wrote no posts file did not read, whether a read failed
-  # or the worker never ran. Its posts are missing from this sweep only: the
-  # window re-covers it next run.
+  # or the worker never ran. Its posts are missing from this sweep only:
+  # unread.txt keeps the outside capture's day from moving, so the next run
+  # reads the PR again.
   UNREAD=""
   while IFS= read -r n; do
     [ -f "$DIR/prs/$n.jsonl" ] || UNREAD="$UNREAD $n"
   done < "$DIR/prs.txt"
+  for n in $UNREAD; do echo "$n"; done > "$DIR/unread.txt" || { err "cannot write $DIR/unread.txt"; exit 1; }
   [ -z "$UNREAD" ] || warn "PR(s) that did not read, left for the next run:$UNREAD"
 
   # The flag needs each PR's provenance cutover, read only when some unmarked
@@ -566,11 +615,64 @@ Every pack script posts through assets/scripts/pr-post.sh, which tools/lint-lear
   exit 0
 fi
 
+# --- advance -------------------------------------------------------------------------
+# The run still owes each PR that did not read, and each PR with an outside post
+# the store does not record. The outside capture's day moves to the close of
+# the oldest of them, so the next run reads every one again, or to the sweep's
+# own day when the run owes none. A day that another run moved after this sweep
+# read it is left alone.
+if [ "$VERB" = advance ]; then
+  RIG=$(meta rig); DAY_KEY=$(meta day_key); CAPTURE_DAY=$(meta capture_day); SWEPT=$(meta swept_on)
+  [ -n "$DAY_KEY" ] && is_day "$SWEPT" || { err "$DIR's sweep records no outside capture day; run sweep again"; exit 1; }
+  [ -f "$DIR/unread.txt" ] || { err "the sweep in $DIR did not finish, so the outside capture stays at $CAPTURE_DAY"; exit 1; }
+  # The store the sweep read, which is the one the day was read from.
+  [ -n "$RIG" ] && export GC_RIG="$RIG"
+  cd "$(meta checkout)" 2>/dev/null || { err "cannot enter the swept checkout"; exit 1; }
+  read_surface "$DIR/obs.now.json" || exit 1
+  OWED=$(jq -sc --slurpfile obs "$DIR/obs.now.json" --slurpfile prs "$DIR/prs.json" --rawfile unread "$DIR/unread.txt" \
+              --arg oc "$OUTSIDE_CATEGORY" '
+    ($unread | split("\n") | map(select(length > 0) | tonumber)) as $u
+    | map(select(.class == "outside" and (.key as $k | any(($obs[0][$k] // [])[]; .category == $oc) | not))) as $left
+    | ($prs[0] | map({key: (.number | tostring), value: (.closed // "")}) | from_entries) as $closed
+    | (($u + ($left | map(.pr))) | unique) as $owed
+    | {owed: $owed, unread: ($u | length), unrecorded: ($left | length),
+       oldest: ($owed | map($closed[tostring] // "") | if length == 0 then "" else min end)}' "$DIR/sweep.jsonl") \
+    || { err "could not compare the sweep with the store, so the outside capture stays at $CAPTURE_DAY"; exit 1; }
+  if [ "$(printf '%s' "$OWED" | jq '.owed | length')" = 0 ]; then
+    NEW_DAY="$SWEPT"; WHY="every PR the sweep listed read, and the store records every outside post it found"
+  else
+    NEW_DAY=$(printf '%s' "$OWED" | jq -r '.oldest')
+    is_day "$NEW_DAY" || { err "could not date the PRs this run still owes, so the outside capture stays at $CAPTURE_DAY"; exit 1; }
+    WHY=$(printf '%s' "$OWED" | jq -r '"\(.owed | length) PR(s) still owe a read (\(.owed | map("#\(.)") | join(", "))): \(.unread) did not read, and \(.unrecorded) outside post(s) are not recorded yet"')
+  fi
+  NOW=$(day_get "$DAY_KEY"); KV_RC=$?
+  case "$KV_RC" in
+    0|3) : ;;
+    *) err "the outside capture's day ($DAY_KEY) did not read, so it stays where it is"; exit 1 ;;
+  esac
+  if [ "$KV_RC" != 0 ] || [ "$NOW" != "$CAPTURE_DAY" ]; then
+    echo "$PROG: the outside capture's day reads ${NOW:-unset}, not the $CAPTURE_DAY this sweep read, so something moved it after the sweep and this run leaves it"
+    exit 0
+  fi
+  if [ "$NEW_DAY" = "$NOW" ]; then
+    echo "$PROG: the outside capture stays at $NOW: $WHY"
+    exit 0
+  fi
+  day_set "$DAY_KEY" "$NEW_DAY" \
+    || { err "could not move the outside capture's day to $NEW_DAY ($DAY_KEY), so the next run reads from $NOW"; exit 1; }
+  # The run's own sweep now stands at the new day, so a second advance in this
+  # dir reads the day as this run's, not as another run's.
+  jq --arg d "$NEW_DAY" '.capture_day = $d' "$DIR/meta.json" > "$DIR/meta.next" && mv "$DIR/meta.next" "$DIR/meta.json" \
+    || warn "could not note the new day in $DIR/meta.json"
+  echo "$PROG: the outside capture moves to $NEW_DAY: $WHY"
+  exit 0
+fi
+
 # --- summary -------------------------------------------------------------------------
 if [ "$VERB" = summary ]; then
   jq -rs --rawfile filed "$DIR/filed.tsv" --slurpfile m "$DIR/meta.json" '
     ($filed | split("\n") | map(select(length > 0) | split("\t"))) as $f
-    | "feedback-miner: \($m[0].repo), outside window \($m[0].outside_days) day(s), standing window \($m[0].days) day(s)",
+    | "feedback-miner: \($m[0].repo), outside capture from \($m[0].since), standing window \($m[0].days) day(s)",
       "  outside posts: \(map(select(.class == "outside")) | length) read, \(map(select(.class == "outside" and .captured)) | length) recorded before this run, \($f | map(select(.[1] == "outside")) | length) filed now, \(map(select(.class == "outside" and (.captured | not))) | length - ($f | map(select(.[1] == "outside")) | length)) left unrecorded",
       "  standing-behavior observations filed from city posts: \($f | map(select(.[1] == "standing")) | length)",
       "  unmarked city posts flagged: \(map(select(.flag)) | length)"' "$DIR/sweep.jsonl"

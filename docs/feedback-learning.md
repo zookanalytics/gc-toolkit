@@ -97,12 +97,16 @@ Four producers file the same bead contract:
      Code's `/code-review` output posted under the city's login. A GitHub
      App's approvals and deploy notices are not review feedback. A deploy
      notice is told by what it says: Vercel's opens with its `[vc]:` line.
-     Any other conversation comment an app posts is outside. Until a rig's
-     outside capture is one window old, while its store holds no
-     outside-review observation older than the window, the outside capture
-     reaches back `outside_backfill_days` (30) instead, so a rig's first runs
-     back-fill the month before it. The distiller reads
-     these observations as a set for what the city's review missed, and a
+     Any other conversation comment an app posts is outside. The rig's
+     store records the day from which the outside capture still owes every
+     PR closed, and every run reads back to it. A rig's first run records
+     it `outside_backfill_days` (30) back, so the capture back-fills the
+     month before it. After each run the day moves to the close of the
+     oldest PR the run still owes, one that did not read or has an outside
+     post not yet recorded, or to the run's own day when it owes none. So a
+     back-fill one run could not finish is finished by the runs after it,
+     however long after they come. The distiller reads these
+     observations as a set for what the city's review missed, and a
      proposal from them is a `review-rubric` amendment or a change to the
      correctness method, never a rule per observation
      (`skills/learning-distill/SKILL.md`).

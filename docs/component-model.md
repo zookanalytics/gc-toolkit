@@ -462,7 +462,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `orders/feedback-miner.toml` | feedback | Fires the sweep of recently merged PR review threads. |
 | `orders/feedback-distiller.toml` | feedback | The daily heartbeat that judges pending observations. |
 | `formulas/mol-feedback-miner.toml` | feedback | Cold capture: records each review post from outside the city as one condensed observation, and each corrective-feedback hit in the city's own posts as another. |
-| `assets/scripts/feedback-miner.sh` | feedback | The miner's mechanical half: reads a window's PR review conversations, tells the city's posts from outside ones by `pr-post.sh`'s mark definition, files the observations the miner's agent condenses, and flags a city post that lacks its mark through `patrol-finding.sh`. |
+| `assets/scripts/feedback-miner.sh` | feedback | The miner's mechanical half: reads a window's PR review conversations, tells the city's posts from outside ones by `pr-post.sh`'s mark definition, files the observations the miner's agent condenses, and flags a city post that lacks its mark through `patrol-finding.sh`. It keeps the outside capture's day, from which the capture still owes every PR closed, in `gc bd kv` (`feedback_miner.outside_since.<owner>_<name>`). |
 | `formulas/mol-feedback-distiller.toml` | feedback | Turns pending observations into reviewed prompt-update proposals. |
 | `formulas/mol-witness-patrol.toml` | patrol | Mail triage, orphan recovery, and escalation for one rig. |
 | `formulas/mol-deacon-patrol.toml` | patrol | City infrastructure health: Dolt, orphan processes, doctor sweep. |

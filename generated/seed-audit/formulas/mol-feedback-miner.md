@@ -50,8 +50,8 @@ claim is a hint inside that root, never a way to establish one).
 
 Variables:
   {{max_obs_per_run}}: Maximum observation beads the standing-behavior capture files per run. Candidates beyond the cap are dropped with a logged count; the window re-covers them next run. The outside capture files one observation per outside post and has no cap. (default=10)
-  {{miner_window_days}}: Sweep window in days: PRs merged or closed within the last N days are read. Windows overlap across runs by design — dedup on (obs.provenance, obs.category) makes re-reading a post idempotent, and the overlap is what makes a capped or interrupted run naturally resumable. (default=3)
-  {{outside_backfill_days}}: How far back the outside capture reads until a rig's outside capture is one window old: while its store holds no outside-review observation older than miner_window_days. A first run's back-fill that stops partway is finished by the runs after it; once the capture is a window old, every run reads miner_window_days. (default=30)
+  {{miner_window_days}}: Sweep window in days: PRs merged or closed within the last N days are read, and earlier ones while the outside capture still owes them (outside_backfill_days). Windows overlap across runs by design — dedup on (obs.provenance, obs.category) makes re-reading a post idempotent, and the overlap is what makes a capped or interrupted run naturally resumable. (default=3)
+  {{outside_backfill_days}}: How far back a rig's first run starts the outside capture. The rig's store records the day from which the capture still owes every PR closed, and every run reads back to it. After each run the day moves to the close of the oldest PR the run still owes, one that did not read or has an outside post not yet recorded, or to the run's own day when it owes none, so a back-fill one run could not finish, or a PR that did not read, is read again by the next run. (default=30)
 
 Steps (3):
   ├── mol-feedback-miner.load-context: Prime, resolve the repo, and confirm gh is usable
