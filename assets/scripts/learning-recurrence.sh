@@ -147,6 +147,7 @@ while IFS="$TAB" read -r R RPATH; do
         rig: $rig,
         provenance: (.metadata["obs.provenance"] // ""),
         category:   (.metadata["obs.category"]   // ""),
+        correction: (.metadata["obs.correction"] // ""),
         pattern:    (.metadata["obs.distilled"]  // ""),
         source:     (.metadata["obs.source"]     // "")
       }]' "$RAW" > "$RAW.norm"
@@ -160,12 +161,24 @@ emit_inventory > "$TMP/inventory.tsv"
 # The report is process-local: $TMP is the mktemp -d above and the EXIT trap
 # removes it. --json prints it to stdout; nothing here persists an artifact.
 NOW=$(date -u +%s)
+# M1 counts corrections by category. The feedback miner files every review post
+# from outside the city under the one category outside-review, which names where
+# the feedback came from rather than which correction it makes. An outside post
+# that makes a standing correction carries the correction's slug as
+# obs.correction, and its event takes that slug as its category before anything
+# is counted, so a self-report of the same post under the same slug is one
+# event with it. An outside post that names no correction keeps outside-review,
+# and M1 leaves it out: counted, every such post after the first would read as
+# a repeat. Those posts stay in the corpus, and in M2 once the distiller stamps
+# them.
 jq -n \
   --slurpfile obs "$OBS" \
   --argjson now "$NOW" \
   --argjson window "$WINDOW_DAYS" \
+  --arg outside "outside-review" \
   --rawfile inventory "$TMP/inventory.tsv" '
   def epoch: (try (sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) catch null);
+  def correction: .category != "" and .category != $outside;
 
   ($window * 86400)                as $span
   | ($now - $span)                 as $w_start
@@ -184,6 +197,8 @@ jq -n \
   | ( $all
       | map(. + {ts: (.created_at | epoch)})
       | map(select(.ts != null))
+      | map(if .category == $outside and (.correction | tostring) != ""
+            then . + {category: (.correction | tostring)} else . end)
       | group_by(if .provenance == "" then "id:" + .id
                  else "prov:" + .provenance + "\u001f" + .category end)
       | map( (sort_by(.ts) | .[0])
@@ -197,21 +212,21 @@ jq -n \
   # an earlier event already carried its category: the correction has been
   # made before. Anchoring on the corpus rather than on the window boundary
   # keeps the number readable on a corpus younger than two windows.
-  | ( $events | map(select(.category != ""))
+  | ( $events | map(select(correction))
       | group_by(.category)
       | map({key: .[0].category, value: (map(.ts) | min)})
       | from_entries )                                             as $cat_first
-  | def repeats($set): $set | map(select(.category != "" and $cat_first[.category] < .ts));
-    ($window_ev | map(select(.category != "")))                    as $w_cat
+  | def repeats($set): $set | map(select(correction and $cat_first[.category] < .ts));
+    ($window_ev | map(select(correction)))                         as $w_cat
   | (repeats($window_ev))                                          as $w_repeat
-  | ($prior_ev  | map(select(.category != "")))                    as $p_cat
+  | ($prior_ev  | map(select(correction)))                         as $p_cat
   | (repeats($prior_ev))                                           as $p_repeat
 
   # obs.category is a free slug minted at capture. When nearly every event
   # mints its own, M1 under-counts recurrence that a human would see, so the
   # report states the fragmentation beside the rate instead of letting a low
   # number read as a healthy loop.
-  | ($events | map(select(.category != "")))                       as $all_cat
+  | ($events | map(select(correction)))                            as $all_cat
   | ($all_cat | map(.category) | unique | length)                  as $distinct_cats
 
   # M2 — post-adoption recurrence, attributable only through obs.distilled.
@@ -257,7 +272,9 @@ jq -n \
                              else ((($all_cat|length) / $distinct_cats) >= 1.5) end),
         top_repeating: ( $w_repeat | group_by(.category)
                          | map({category: .[0].category, count: length})
-                         | sort_by(-.count) | .[0:8] )
+                         | sort_by(-.count) | .[0:8] ),
+        outside_events: {window: ($window_ev | map(select(.category == $outside)) | length),
+                         prior: ($prior_ev | map(select(.category == $outside)) | length)}
       },
       m2_post_adoption: {
         rules: $rule_rows,
@@ -295,6 +312,7 @@ jq -r '
   ( if (.m1_category_repeat.top_repeating | length) == 0 then "      no category recurred this window"
     else "      recurring: " + (.m1_category_repeat.top_repeating | map("\(.category) x\(.count)") | join(", ")) end),
   "      category spread: \(.m1_category_repeat.fragmentation.distinct) distinct categories over \(.m1_category_repeat.fragmentation.categorised) events",
+  "      outside review posts that name no correction, not counted above: \(.m1_category_repeat.outside_events.window) this window, \(.m1_category_repeat.outside_events.prior) prior",
   ( if .m1_category_repeat.key_discriminating == false
     then "      HIGH FRAGMENTATION: capture mints a fresh slug for nearly every event, so repeats is pinned to (categorised - distinct) and M1 restates the category spread instead of measuring recurrence. Its rate is withheld above; read the M2 pattern-bead clusters."
     else empty end),
