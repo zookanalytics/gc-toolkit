@@ -5,6 +5,7 @@
 # verification mismatch (exit 2); human states routing to human and detached
 # states clearing the route, both in the same call; the empty-route refusal that
 # keeps a human state from waiting on nobody; the `held` sitting-hold state; the
+# writes leaving a state makes (exit_sets), in the transition's own update; the
 # close/terminal pairing guards (--close only into a closed state, closed states
 # must --close); the non-empty merged_sha that --to merged must carry;
 # --set-dated's compare-and-preserve rule for the @<since> component; the reopen
@@ -49,6 +50,7 @@ toml_human()  { sed -n 's/^human_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' 
 toml_detached() { sed -n 's/^detached_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | sed 's/^ *//;s/ *$//' | tr -s ' '; }
 toml_park()   { sed -n 's/^park_route = "\(.*\)"/\1/p' "$TOML"; }
 toml_closed() { sed -n 's/^closed_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '", '; }
+toml_exit_sets() { sed -n 's/^exit_sets = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | sed 's/^ *//;s/ *$//' | tr -s ' '; }
 toml_edges()  {
   awk '
     /^\[\[transition\]\]/ { from=""; to="" }
@@ -66,6 +68,8 @@ eq "$(printf '%s\n' "$DUMP" | sed -n 's/^human_states //p')" "$(toml_human)" "hu
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^detached_states //p')" "$(toml_detached)" "detached states match lifecycle.toml"
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^park_route //p')" "$(toml_park)" "park route matches lifecycle.toml"
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^closed_states //p')" "$(toml_closed)" "closed states match lifecycle.toml"
+[ -n "$(toml_exit_sets)" ] && ok "exit sets declared in lifecycle.toml" || bad "exit_sets = [...] missing from lifecycle.toml"
+eq "$(printf '%s\n' "$DUMP" | sed -n 's/^exit_sets //p')" "$(toml_exit_sets)" "exit sets match lifecycle.toml"
 eq "$(printf '%s\n' "$DUMP" | sed -n 's/^transition //p' | sort)" "$(toml_edges)" "transition edges match lifecycle.toml"
 # The cap is not in lifecycle.toml. It is a rendering bound that the board's two
 # takeaway writers share, so the port's copy is held against gc-helm.sh's.
@@ -155,6 +159,50 @@ store '[{"id":"obj-2","status":"open","assignee":"","notes":"","metadata":{"merg
 out="$("$SUT" transition obj-2 --to unanchored --route rig/polecat 2>&1)"; rc=$?
 eq "$rc" 0 "non-closed transition exits 0"
 eq "$(meta obj-2 blocked_reason)" "merge_hold: still blocked" "blocked_reason survives a non-closed transition"
+
+# --- leaving a state writes what exit_sets declares for it -----------------------
+# The rank of an anchor's PR-finishing work is approved only while the anchor
+# rests in pull_request, so every transition out of it marks the record of that
+# rank unsettled, whatever the record read and whichever caller moves it. The
+# caller names no such key, so a writer that forgot it would still leave no
+# record a return to pull_request could read as settled.
+echo "# leaving pull_request marks the PR-finishing rank unsettled"
+store '[{"id":"ex-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition ex-1 --to retargeted --expect pull_request --assignee "" \
+  --set blocked_reason="PR#7 retargeted" --takeaway "PR#7 sits on another base" 2>&1)"; rc=$?
+eq "$rc" 0 "a retarget out of pull_request exits 0"
+eq "$(meta ex-1 pr_finishing_settled)" "unsettled" "…and an approved record reads unsettled"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "…written in the transition's one update"
+store '[{"id":"ex-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"unapproved"}},
+        {"id":"ex-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+"$SUT" transition ex-2 --to unanchored --assignee "" --route "" --unset gc.execution_routed_to \
+  --set rejection_reason="base moved; resume by merge" >/dev/null 2>&1
+eq "$(meta ex-2 pr_finishing_settled)" "unsettled" "a repool out of pull_request marks an unapproved record unsettled too"
+"$SUT" transition ex-3 --to abandoned --set blocked_reason="PR#8 closed" --takeaway "PR#8 was closed without merging" >/dev/null 2>&1
+eq "$(meta ex-3 pr_finishing_settled)" "unsettled" "…and an anchor that carried no record leaves with one"
+store '[{"id":"ex-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved"}},
+        {"id":"ex-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved"}},
+        {"id":"ex-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"retargeted","pr_finishing_settled":"unapproved","gc.routed_to":"human","gc.takeaway":"t"}},
+        {"id":"ex-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate","pr_finishing_settled":"unapproved"}}]'
+"$SUT" transition ex-4 --to merged --expect pull_request --close --set merged_sha=abc123 >/dev/null 2>&1
+eq "$(meta ex-4 pr_finishing_settled)" "approved" "a landing into the closed merged state writes no exit set"
+"$SUT" transition ex-5 --to pull_request --expect pull_request --set pr_merge_state=CLEAN@sha >/dev/null 2>&1
+eq "$(meta ex-5 pr_finishing_settled)" "approved" "a self-edge on pull_request leaves nothing"
+"$SUT" transition ex-6 --to pull_request --expect retargeted >/dev/null 2>&1
+eq "$(meta ex-6 merge_result)|$(meta ex-6 pr_finishing_settled)" "pull_request|unapproved" "a return into pull_request writes none"
+"$SUT" transition ex-7 --to unanchored --route "" >/dev/null 2>&1
+eq "$(meta ex-7 pr_finishing_settled)" "unapproved" "…nor does leaving a state that declares no exit set"
+store '[{"id":"ex-8","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved"}},
+        {"id":"ex-9","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved"}}]'
+"$SUT" transition ex-8 --to unanchored --route "" --set pr_finishing_settled=unapproved >/dev/null 2>&1
+eq "$(meta ex-8 pr_finishing_settled)" "unapproved" "a caller that sets the key itself keeps its own value"
+"$SUT" transition ex-9 --to unanchored --route "" --unset pr_finishing_settled >/dev/null 2>&1
+eq "$(meta ex-9 pr_finishing_settled)" "<absent>" "…and so does one that clears it"
+store '[{"id":"ex-10","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved"}}]'
+out="$(STUB_DROP_KEYS="ex-10:pr_finishing_settled" "$SUT" transition ex-10 --to unanchored --route "" 2>&1)"; rc=$?
+eq "$rc" 2 "an exit set that does not read back fails the transition"
+has "$out" "pr_finishing_settled" "…naming the field"
 
 # --- --set-dated: the @<since> compare-and-preserve rule ------------------------
 # The operator's queue is ordered by how long a row has been owed, so the instant

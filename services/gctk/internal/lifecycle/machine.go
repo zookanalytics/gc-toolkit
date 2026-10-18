@@ -11,6 +11,14 @@ type Edge struct {
 	To   string
 }
 
+// ExitSet is one write that leaving a state makes: a transition from State into
+// another open state sets Key to Value in the same atomic update.
+type ExitSet struct {
+	State string
+	Key   string
+	Value string
+}
+
 // States, HumanStates and ClosedStates are ordered as lifecycle.toml declares
 // them; --dump-machine prints them in this order, so the drift test compares
 // sequences rather than sets.
@@ -49,6 +57,17 @@ var (
 	// state may rest on it, and a transition that finds it leaves it alone
 	// rather than retracting a bead a person still owns.
 	ParkRoute = "human"
+
+	// ExitSets are the writes leaving a state makes, in lifecycle.toml's
+	// exit_sets order. A transition from a set's State into another open state
+	// writes its Key=Value in the same atomic update, unless the caller writes
+	// that key itself. A transition into a closed state writes none of them.
+	ExitSets = []ExitSet{
+		// The rank of an anchor's PR-finishing work is approved only while the
+		// anchor rests in pull_request, so the record of the rank that work
+		// settled at goes unsettled when the anchor leaves it.
+		{State: "pull_request", Key: "pr_finishing_settled", Value: "unsettled"},
+	}
 
 	Transitions = []Edge{
 		{"unanchored", "pre_open_gate"},

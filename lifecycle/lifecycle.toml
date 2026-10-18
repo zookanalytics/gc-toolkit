@@ -52,6 +52,16 @@ park_route = "human"
 # gives (gc.work_outcome, gc.work_commit, gc.work_branch; see
 # [metadata.runtime_owned]).
 closed_states = ["merged"]
+# What leaving a state writes, as <state>:<key>=<value>. A transition from that
+# state into another open state sets the key to the value in the same atomic
+# update, unless the caller writes the key itself, so no writer of such a
+# transition can leave the key behind. A transition into a closed state writes
+# none of them: the anchor's life ends there.
+# The rank of an anchor's PR-finishing work is approved only while the anchor
+# rests in pull_request (assets/scripts/priority-lib.sh), so leaving it marks
+# pr_finishing_settled unsettled, and pr-facts.sh settles that work at the rank
+# it then follows ([metadata.pr_posture]).
+exit_sets = ["pull_request:pr_finishing_settled=unsettled"]
 
 # Legal status x merge_result combinations.
 [states.unanchored]
@@ -1057,7 +1067,8 @@ keys = [
 [metadata.pr_posture]
 # pr_posture, pr_merge_state, the two watermarks and pr_comment_disposition
 # carry their mechanics in [posture] above (pr_posture is also a [dated_keys]
-# key). pr-facts.sh is the sole writer of this group.
+# key). pr-facts.sh is the sole writer of this group, apart from the
+# pr_finishing_settled write [machine] exit_sets makes on leaving pull_request.
 keys = [
   "pr_posture", "pr_merge_state", "pr_comment_watermark",
   "pr_review_watermark", "pr_issue_comment_watermark", "pr_comment_disposition",

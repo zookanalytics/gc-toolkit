@@ -74,6 +74,11 @@ func dumpMachine(stdout io.Writer) int {
 	fmt.Fprintf(stdout, "detached_states %s\n", strings.Join(lifecycle.DetachedStates, " "))
 	fmt.Fprintf(stdout, "park_route %s\n", lifecycle.ParkRoute)
 	fmt.Fprintf(stdout, "closed_states %s\n", strings.Join(lifecycle.ClosedStates, " "))
+	exits := make([]string, 0, len(lifecycle.ExitSets))
+	for _, e := range lifecycle.ExitSets {
+		exits = append(exits, e.State+":"+e.Key+"="+e.Value)
+	}
+	fmt.Fprintf(stdout, "exit_sets %s\n", strings.Join(exits, " "))
 	fmt.Fprintf(stdout, "takeaway_max %d\n", lifecycle.TakeawayMax)
 	for _, e := range lifecycle.Transitions {
 		fmt.Fprintf(stdout, "transition %s>%s\n", e.From, e.To)
@@ -161,6 +166,25 @@ func callerWrite(sets, unsets []string, key string) (value string, ok bool) {
 		}
 	}
 	return "", slices.Contains(unsets, key)
+}
+
+// exitWrites returns the key=value writes a transition from cur to to owes to
+// lifecycle.ExitSets: those of cur, when to is another state and an open one,
+// less any key the caller sets or clears itself.
+func exitWrites(cur, to string, sets, unsets []string) []string {
+	if cur == to || lifecycle.IsClosedState(to) {
+		return nil
+	}
+	var out []string
+	for _, e := range lifecycle.ExitSets {
+		if e.State != cur {
+			continue
+		}
+		if _, own := callerWrite(sets, unsets, e.Key); !own {
+			out = append(out, e.Key+"="+e.Value)
+		}
+	}
+	return out
 }
 
 // landingFetchTimeout bounds each git call fetchLanding makes, so a remote that
@@ -729,6 +753,12 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 			return reportTransition(stdout, stderr, o.asJSON, id, cur, o.to)
 		}
 	}
+
+	// Leaving a state writes what lifecycle.toml's exit_sets declares for it, in
+	// this same write, so no writer of a transition out of that state can leave
+	// the key behind. Into a closed state it writes none: the anchor's life ends
+	// there. The read-back below verifies each one like any other --set.
+	o.sets = append(o.sets, exitWrites(cur, o.to, o.sets, o.unsets)...)
 
 	// A transition into a closed state is a terminal land, and a landed bead
 	// carries no live objection: a rejection or a hold reason still on it now

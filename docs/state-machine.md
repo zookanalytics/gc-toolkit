@@ -140,6 +140,15 @@ the claim resolves. `doctor/check-state-space` also reads the non-open live
 statuses, so it reports all three violations: a detached anchor carrying a
 route, one carrying an assignee, and one that has left `status=open`.
 
+Leaving a state can owe a write of its own, declared in `exit_sets`. A
+transition out of `pull_request` into another open state sets
+`pr_finishing_settled` to `unsettled` in the same update, because the rank of an
+anchor's PR-finishing work is approved only while the anchor rests there
+([steering.md](steering.md#pr-finishing-work)). So whichever writer makes such a
+transition leaves a record that no return to `pull_request` reads as settled. A
+caller that writes the key itself keeps its own value, and a transition into a
+closed state writes none.
+
 ## Transition table
 
 | From → To | Writer | Trigger |
