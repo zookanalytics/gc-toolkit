@@ -54,12 +54,12 @@ formula_compiler = ">=2.0.0"
 
 [vars]
 [vars.miner_window_days]
-description = "Sweep window in days: PRs merged or closed within the last N days are read, and earlier ones while the outside capture still owes them (outside_backfill_days). Windows overlap across runs by design — dedup on (obs.provenance, obs.category) makes re-reading a post idempotent, and the overlap is what makes a capped or interrupted run naturally resumable."
+description = "Sweep window in days: merged or closed PRs updated within the last N days are read, and earlier ones while the outside capture still owes them (outside_backfill_days). The standing-behavior capture reads the PRs that closed within the window. Windows overlap across runs by design — dedup on (obs.provenance, obs.category) makes re-reading a post idempotent, and the overlap is what makes a capped or interrupted run naturally resumable."
 required = false
 default = "3"
 
 [vars.outside_backfill_days]
-description = "How far back a rig's first run starts the outside capture. The rig's store records the day from which the capture still owes every PR closed, and every run reads back to it. After each run the day moves to the close of the oldest PR the run still owes, one that did not read or has an outside post not yet recorded, or to the run's own day when it owes none, so a back-fill one run could not finish, or a PR that did not read, is read again by the next run."
+description = "How far back a rig's first run starts the outside capture. The rig's store records the day from which the capture still owes a read of every PR updated since, and every run reads back to it. After each run the day moves to the oldest last update among the PRs the run still owes, one that did not read or has an outside post not yet recorded, or to the run's own day when it owes none, so a back-fill one run could not finish, or a PR that did not read, is read again by the next run."
 required = false
 default = "30"
 
@@ -161,11 +161,12 @@ if ! "${FM:?feedback-miner.sh not found in the pack}" sweep --checkout "$REPO" \
 fi
 ```
 
-The sweep reads the PRs merged or closed in the last {{miner_window_days}}
-day(s), and back to the day the rig's store records while the outside capture
-still owes earlier PRs. A rig's first run records that day
-{{outside_backfill_days}} days back, and §4 moves it to the close of the oldest
-PR the run still owes. It classes each post by the rules that head
+The sweep reads the merged or closed PRs updated in the last
+{{miner_window_days}} day(s), and back to the day the rig's store records while
+the outside capture still owes earlier ones. A post updates its PR, so one made
+long after its PR closed is read. A rig's first run records that day
+{{outside_backfill_days}} days back, and §4 moves it to the oldest last update
+among the PRs the run still owes. It classes each post by the rules that head
 `feedback-miner.sh`: the city's, outside, or an app's approval or deploy
 notice, which is skipped. An unmarked city post is flagged when it was posted
 after its PR's provenance cutover (§4).
@@ -257,9 +258,9 @@ A city post without its mark, posted after its PR's provenance cutover and not
 `/code-review` output, came from a writer that skipped the mark, so
 pr-facts.sh reads it as feedback to answer. The flag names each such post
 once, in one patrol finding, which a proactive first reaction disposes.
-Advance moves the outside capture's day to the close of the oldest PR the run
-still owes, unread or with an outside post unrecorded, or to this run's day
-when it owes none.
+Advance moves the outside capture's day to the oldest last update among the
+PRs the run still owes, unread or with an outside post unrecorded, or to this
+run's day when it owes none.
 
 ```bash
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
