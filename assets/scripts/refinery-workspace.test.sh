@@ -16,7 +16,10 @@
 #     in the gate's record, and fails when it cannot empty it;
 #   - the rig root comes from --rig-root, then GC_RIG_ROOT, then the roster;
 #   - the patrol's formula and the refinery's prompt carry no removal, and the
-#     patrol's blocks hand theirs to this script.
+#     patrol's blocks hand theirs to this script;
+#   - each point a cycle ends carries the same teardown block, which finds
+#     this script without the cwd, tears the prep worktree down, and when it
+#     cannot, says so and carries on without draining.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -52,6 +55,7 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GC_LOG"
 case "$1 $2" in
   "rig list") cat "$FAKE_ROSTER" ;;
 esac
@@ -59,6 +63,8 @@ exit 0
 GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
+export GC_LOG="$TMP/gc.log"
+: > "$GC_LOG"
 
 commit() { git -C "$1" commit -q --allow-empty -m "$2"; git -C "$1" rev-parse HEAD; }
 wt_paths() { git -C "$1" worktree list --porcelain | sed -n 's/^worktree //p'; }
@@ -210,6 +216,61 @@ grep -qF '"$WS" checks --rig-root "$RIG_ROOT"' "$PATROL_TOML" \
   || bad "the gate start empties its checks through refinery-workspace.sh"
 eq "$(grep -cF 'refinery-workspace.sh teardown' "$PATROL_TOML")" 4 \
   "the rejection, failure and both merge-push paths tear down through refinery-workspace.sh"
+
+# --- The teardown block. ---------------------------------------------------------
+# A cycle ends in the rebase step's conflict arm, handle-failures' branch-caused
+# arm, or one of merge-push's two paths, and each tears down through one block.
+echo "── the teardown block ──"
+eq "$(awk '/^id = "/ { id = $3; gsub(/"/, "", id) } /^# >>> prep-teardown$/ { printf "%s ", id }' "$PATROL_TOML")" \
+  "rebase handle-failures merge-push merge-push " \
+  "the rejection, failure and both merge-push paths carry the teardown block"
+NBLOCKS=$(awk -v out="$TMP/teardown-" '
+  /^# >>> prep-teardown$/ { n++; f=1; next }
+  /^# <<< prep-teardown$/ { f=0; next }
+  f { print > (out n ".sh") }
+  END { print n + 0 }' "$PATROL_TOML")
+eq "$NBLOCKS" 4 "four teardown blocks are extracted"
+SAME=yes
+for i in 2 3 4; do cmp -s "$TMP/teardown-1.sh" "$TMP/teardown-$i.sh" || SAME=no; done
+eq "$SAME" yes "every teardown block is the same block"
+TEARDOWN="$TMP/teardown-1.sh"
+case "$(cat "$TEARDOWN")" in
+  *\\*) bad "the teardown block is backslash-free (TOML would eat it)" ;;
+  *)    ok  "the teardown block is backslash-free (TOML would eat it)" ;;
+esac
+bash -n "$TEARDOWN" && ok "the teardown block is valid bash" || bad "the teardown block is valid bash"
+
+# The block runs from a cwd in another repository, with the script reachable
+# only through the city's gc-toolkit rig, the way a rig other than gc-toolkit
+# reaches it. Sets RC and OUT.
+mkdir -p "$TMP/city/rigs/gc-toolkit/assets/scripts" "$TMP/no-pack-city"
+cp "$SUT" "$TMP/city/rigs/gc-toolkit/assets/scripts/"
+teardown_block() { OUT=$(cd "$D/cwd" && GC_RIG_ROOT="$D/rig" GC_CITY_PATH="$1" bash "$TEARDOWN" 2>&1); RC=$?; }
+: > "$GC_LOG"
+ws stage --rig-root "$D/rig" --branch polecat/wb >/dev/null
+teardown_block "$TMP/city"
+eq "$RC" 0 "teardown block: exits 0"
+[ ! -e "$PREP" ] && ok "teardown block: the prep worktree is gone" || bad "teardown block: the prep worktree is gone"
+eq "$(registered "$D/rig" "$PREP")" no "teardown block: the worktree is unregistered"
+case "$OUT" in
+  *"carry on"*) bad "teardown block: a teardown that completes says nothing of carrying on" "$OUT" ;;
+  *)            ok  "teardown block: a teardown that completes says nothing of carrying on" ;;
+esac
+mkdir -p "$PREP" && : > "$PREP/not-a-worktree"
+teardown_block "$TMP/city"
+eq "$RC" 0 "teardown block, the teardown fails: exits 0"
+has "$OUT" "is still there" "teardown block, the teardown fails: the script's reason is shown"
+has "$OUT" "carry on" "teardown block, the teardown fails: it says to carry on"
+[ -e "$PREP/not-a-worktree" ] && ok "teardown block, the teardown fails: the leftover is left for the next stage" \
+  || bad "teardown block, the teardown fails: the leftover is left for the next stage"
+chmod -R u+w "$PREP"; ( cd "$TMP" && rm -rf -- "${PREP:?}" )
+ws stage --rig-root "$D/rig" --branch polecat/wb >/dev/null
+teardown_block "$TMP/no-pack-city"
+eq "$RC" 0 "teardown block, no script reachable: exits 0"
+has "$OUT" "carry on" "teardown block, no script reachable: it says to carry on"
+eq "$(registered "$D/rig" "$PREP")" yes "teardown block, no script reachable: the prep worktree is left for the next stage"
+ws teardown --rig-root "$D/rig" >/dev/null
+eq "$(grep -c 'drain-ack' "$GC_LOG")" 0 "teardown block: no run drains the session"
 
 echo "-----"
 echo "refinery-workspace: $PASS passed, $FAIL failed"
