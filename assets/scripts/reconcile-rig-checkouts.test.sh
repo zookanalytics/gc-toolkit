@@ -65,9 +65,15 @@
 # staged edit; a refused fast-forward puts the kept copies back; the next pass
 # puts back a copy an interrupted pass left aside, also when it cannot fetch,
 # and a copy waiting aside for a path that holds a file again blocks the keep;
-# a failed read of the kept paths stops the fast-forward; RECONCILE_NO_AUTOHEAL
-# turns the keep off; no escalation tells a person to run git reset --hard or
-# --keep.
+# a regular file written on a kept path meanwhile with the copy's bytes takes
+# the copy's place, and a symlink to them does not; a copy that cannot go back,
+# because something else was written on its path meanwhile, leaves both copies
+# in place and keeps the rig escalated after a keep, a plain fast-forward, a
+# reset heal or a pass already up to date, and on a blocked, parked or diverged
+# checkout, until no copy waits aside, and a keep directory that cannot be
+# listed escalates too; a failed read of the kept paths stops the fast-forward;
+# RECONCILE_NO_AUTOHEAL turns the keep off; no escalation tells a person to run
+# git reset --hard or --keep.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -91,6 +97,8 @@ open_count() { awk -F'|' -v k="$1" '$2==k && $3=="open"' "$TMP/ledger" 2>/dev/nu
 bead_for()   { awk -F'|' -v k="$1" '$2==k && $3=="open"{print $1; exit}' "$TMP/ledger" 2>/dev/null; }
 # description of the OPEN reconcile bead for a rig key (empty if none).
 body_for()   { local id; id="$(bead_for "$1")"; [ -n "$id" ] && cat "$TMP/ledger.$id.body" 2>/dev/null; }
+# title of the OPEN reconcile bead for a rig key (empty if none).
+title_for()  { local id; id="$(bead_for "$1")"; [ -n "$id" ] && cat "$TMP/ledger.$id.title" 2>/dev/null; }
 # escalate.sh calls recorded for a rig key, and the subject/pool of the first/last.
 esc_count()   { awk -F'|' -v k="reconcile-diverged-$1" '$1==k' "$TMP/escalations" 2>/dev/null | wc -l | tr -d ' '; }
 esc_subject() { awk -F'|' -v k="reconcile-diverged-$1" '$1==k{print $2; exit}' "$TMP/escalations" 2>/dev/null; }
@@ -146,12 +154,14 @@ case "$1" in
       create)
         n=$(( $(wc -l < "$FAKE_LEDGER" 2>/dev/null || echo 0) + 1 )); id="esc-$n"
         printf '%s||open\n' "$id" >> "$FAKE_LEDGER"
+        printf '%s\n' "$1" > "$FAKE_LEDGER.$id.title"
         while [ $# -gt 0 ]; do [ "$1" = "-d" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.body"; shift; done
         printf '{"id":"%s"}\n' "$id" ;;
       update)
         id="$1"; shift; key=""
         while [ $# -gt 0 ]; do
           [ "$1" = "--set-metadata" ] && key="${2#reconcile_rig=}"
+          [ "$1" = "--title" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.title"
           [ "$1" = "--description" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.body"
           shift
         done
@@ -1354,6 +1364,84 @@ eq "$(kept_waiting untrackedoffline)" "0" "a pass that cannot fetch leaves no co
 eq "$(git -C "$TMP/untrackedoffline" rev-parse HEAD)" "$UNTRACKEDOFFLINE_HEAD" "a pass that cannot fetch moves nothing else"
 eq "$(git -C "$TMP/untrackedoffline" status --porcelain)" " M .beads/config.yaml" "the files put back are tracked again, as before the interrupted pass"
 
+# untrackedrefilled: something writes config.yaml while its kept copy waits
+# aside, here a post-merge hook. The fast-forward lands, but the copy does not
+# go back over the new file, and HEAD no longer tracks the path, so no later
+# keep finds it. Both copies stay, and the rig stays escalated, on that pass and
+# on the next, already up to date, until nothing waits aside. A subject a
+# refusal filed first is kept open too, and retitled.
+untrack_rig untrackedrefilled '.beads/*'
+gascity_writes untrackedrefilled
+mkdir -p "$TMP/refillhooks"
+printf '#!/bin/sh\nmkdir -p .beads && echo refilled > .beads/config.yaml\n' > "$TMP/refillhooks/post-merge"
+chmod +x "$TMP/refillhooks/post-merge"
+git -C "$TMP/untrackedrefilled" config core.hooksPath "$TMP/refillhooks"
+UNTRACKEDREFILLED_REMOTE="$(git -C "$TMP/untrackedrefilled.git" rev-parse main)"
+UNTRACKEDREFILLED_WAIT="$TMP/untrackedrefilled/.git/gc-toolkit-reconcile-kept/.beads/config.yaml"
+rigs_json untrackedrefilled
+: > "$TMP/escalations"; : > "$TMP/retractions"
+RECONCILE_NO_AUTOHEAL=1 bash "$SCRIPT" >/dev/null
+UNTRACKEDREFILLED_BEAD="$(bead_for untrackedrefilled)"
+eq "$(title_for untrackedrefilled)" "Reconcile: rigs/untrackedrefilled cannot fast-forward to origin/main" "a refused fast-forward files its subject as one that cannot fast-forward"
+UNTRACKEDREFILLED_OUT="$(bash "$SCRIPT" 2>/dev/null)"
+eq "$(git -C "$TMP/untrackedrefilled" rev-parse HEAD)" "$UNTRACKEDREFILLED_REMOTE" "a fast-forward whose kept copy cannot go back still lands"
+eq "$(cat "$TMP/untrackedrefilled/.beads/config.yaml" 2>/dev/null)" "refilled" "the file written on the kept path meanwhile is left as it is"
+eq "$(cat "$UNTRACKEDREFILLED_WAIT" 2>/dev/null)" "$GASCITY_CFG" "the kept copy that cannot go back waits aside unchanged"
+eq "$(cat "$TMP/untrackedrefilled/.beads/metadata.json" 2>/dev/null)" "meta" "a kept copy whose path stayed empty goes back"
+eq "$(bead_for untrackedrefilled)" "$UNTRACKEDREFILLED_BEAD" "a set-aside that leaves a kept copy waiting aside keeps the subject open"
+eq "$(retract_count untrackedrefilled)" "0" "a set-aside that leaves a kept copy waiting aside retracts nothing"
+eq "$(esc_count untrackedrefilled)" "2" "a kept copy that cannot go back escalates"
+eq "$(title_for untrackedrefilled)" "Reconcile: rigs/untrackedrefilled holds a kept file it could not put back" "the open subject is retitled for the copy waiting aside"
+body_has untrackedrefilled "^\.beads/config\.yaml waits at .*/untrackedrefilled/\.git/gc-toolkit-reconcile-kept/\.beads/config\.yaml: something else was written on " \
+  && ok "the subject names the copy waiting aside and where it waits" \
+  || bad "the subject names the copy waiting aside and where it waits (got '$(body_for untrackedrefilled)')"
+grep -q '0 auto-healed, 1 blocked' <<< "$UNTRACKEDREFILLED_OUT" \
+  && ok "the summary counts a rig with a copy waiting aside as blocked" \
+  || bad "the summary counts a rig with a copy waiting aside as blocked (got '$UNTRACKEDREFILLED_OUT')"
+UNTRACKEDREFILLED_OUT="$(bash "$SCRIPT" 2>/dev/null)"
+eq "$(cat "$TMP/untrackedrefilled/.beads/config.yaml" 2>/dev/null)/$(cat "$UNTRACKEDREFILLED_WAIT" 2>/dev/null)" "refilled/$GASCITY_CFG" "the next pass keeps both copies"
+eq "$(bead_for untrackedrefilled)" "$UNTRACKEDREFILLED_BEAD" "the next pass, already up to date, keeps the subject open"
+eq "$(retract_count untrackedrefilled)" "0" "the next pass retracts nothing while a kept copy waits aside"
+eq "$(esc_count untrackedrefilled)" "3" "the next pass escalates again"
+grep -q '0 advanced, 0 auto-healed, 1 blocked' <<< "$UNTRACKEDREFILLED_OUT" \
+  && ok "the next pass counts the rig as blocked, not advanced" \
+  || bad "the next pass counts the rig as blocked, not advanced (got '$UNTRACKEDREFILLED_OUT')"
+# A person keeps the copy that waits aside: the file on its path goes elsewhere.
+git -C "$TMP/untrackedrefilled" config --unset core.hooksPath
+mv "$TMP/untrackedrefilled/.beads/config.yaml" "$TMP/untrackedrefilled.refilled"
+UNTRACKEDREFILLED_OUT="$(bash "$SCRIPT" 2>/dev/null)"
+eq "$(cat "$TMP/untrackedrefilled/.beads/config.yaml" 2>/dev/null)" "$GASCITY_CFG" "once its path is free, the next pass puts the copy back"
+grep -q '1 advanced, 0 auto-healed, 0 blocked' <<< "$UNTRACKEDREFILLED_OUT" \
+  && ok "once the copy is back, the pass counts the rig as advanced" \
+  || bad "once the copy is back, the pass counts the rig as advanced (got '$UNTRACKEDREFILLED_OUT')"
+eq "$(kept_waiting untrackedrefilled)" "0" "once the copy is back, none waits aside"
+eq "$(open_count untrackedrefilled)" "0" "the subject closes once no kept copy waits aside"
+eq "$(retract_count untrackedrefilled)" "1" "the subject's tracking visit is retracted once no kept copy waits aside"
+eq "$(git -C "$TMP/untrackedrefilled" status --porcelain)" "" "the copy put back ends untracked and ignored"
+
+# untrackedsame: the writer puts the kept copy's own bytes on its path. That
+# file loses nothing to the copy, so the copy goes and the keep heals.
+untrack_rig untrackedsame '.beads/*'
+gascity_writes untrackedsame
+mkdir -p "$TMP/samehooks"
+cat > "$TMP/samehooks/post-merge" <<'HOOK'
+#!/bin/sh
+mkdir -p .beads && printf 'cfg\ndolt.mode: server\n' > .beads/config.yaml
+HOOK
+chmod +x "$TMP/samehooks/post-merge"
+git -C "$TMP/untrackedsame" config core.hooksPath "$TMP/samehooks"
+UNTRACKEDSAME_REMOTE="$(git -C "$TMP/untrackedsame.git" rev-parse main)"
+rigs_json untrackedsame
+: > "$TMP/escalations"
+UNTRACKEDSAME_OUT="$(bash "$SCRIPT" 2>/dev/null)"
+eq "$(git -C "$TMP/untrackedsame" rev-parse HEAD)" "$UNTRACKEDSAME_REMOTE" "a fast-forward whose kept path is written with the same bytes meanwhile lands"
+eq "$(cat "$TMP/untrackedsame/.beads/config.yaml" 2>/dev/null)" "$GASCITY_CFG" "the kept path holds the kept bytes"
+eq "$(kept_waiting untrackedsame)" "0" "a copy whose bytes its path holds again does not wait aside"
+eq "$(esc_count untrackedsame)" "0" "a kept path written with the same bytes meanwhile is not escalated"
+grep -q '1 auto-healed, 0 blocked' <<< "$UNTRACKEDSAME_OUT" \
+  && ok "the summary counts the keep as an auto-heal" \
+  || bad "the summary counts the keep as an auto-heal (got '$UNTRACKEDSAME_OUT')"
+
 # untrackedstale: an earlier pass left a copy of config.yaml aside, and a file
 # was written on its path since. The copy stays aside, and the keep refuses
 # rather than overwrite it, naming where it waits.
@@ -1372,6 +1460,9 @@ eq "$(esc_count untrackedstale)" "1" "a copy waiting aside that blocks the keep 
 body_has untrackedstale "an earlier pass's copy of it waits at .*/\.git/gc-toolkit-reconcile-kept/\.beads/config\.yaml" \
   && ok "the escalation names where the earlier copy waits" \
   || bad "the escalation names where the earlier copy waits (got '$(body_for untrackedstale)')"
+body_has untrackedstale "^\.beads/config\.yaml waits at .*/untrackedstale/\.git/gc-toolkit-reconcile-kept/\.beads/config\.yaml: something else was written on " \
+  && ok "a blocked keep's subject lists the copy waiting aside" \
+  || bad "a blocked keep's subject lists the copy waiting aside (got '$(body_for untrackedstale)')"
 
 # untrackedtree: the remote ignores and deletes the clean file cache but tracks
 # cache/x in its place, and ignores a/b while turning its directory a into a
@@ -1424,7 +1515,8 @@ eq "$(esc_count untrackedcolon)" "0" "keeping a file whose name starts with a co
 
 # leftoverdir: an interrupted pass left a copy of cfg aside, and a directory now
 # sits on its path. The copy stays aside rather than land inside the directory,
-# and the checkout still fast-forwards.
+# and the checkout still fast-forwards, but the rig stays escalated while the
+# copy waits.
 behind_rig leftoverdir
 mkdir -p "$TMP/leftoverdir/.git/gc-toolkit-reconcile-kept" "$TMP/leftoverdir/cfg"; echo older > "$TMP/leftoverdir/.git/gc-toolkit-reconcile-kept/cfg"
 LEFTOVERDIR_REMOTE="$(git -C "$TMP/leftoverdir.git" rev-parse main)"
@@ -1434,6 +1526,115 @@ bash "$SCRIPT" >/dev/null 2>&1
 eq "$(git -C "$TMP/leftoverdir" rev-parse HEAD)" "$LEFTOVERDIR_REMOTE" "a copy left aside does not stop a fast-forward that keeps nothing"
 [ ! -e "$TMP/leftoverdir/cfg/cfg" ] && ok "a copy left aside never lands inside a directory on its path" || bad "a copy left aside never lands inside a directory on its path"
 eq "$(cat "$TMP/leftoverdir/.git/gc-toolkit-reconcile-kept/cfg" 2>/dev/null)" "older" "a copy that cannot go back stays aside"
+eq "$(esc_count leftoverdir)" "1" "a plain fast-forward escalates while a kept copy waits aside"
+body_has leftoverdir "^This pass: rigs/leftoverdir fast-forwarded cleanly to origin/main\.$" \
+  && ok "the subject says what the pass did" \
+  || bad "the subject says what the pass did (got '$(body_for leftoverdir)')"
+body_has leftoverdir "^cfg waits at .*/leftoverdir/\.git/gc-toolkit-reconcile-kept/cfg: something else was written on " \
+  && ok "the subject names a copy that waits aside for a path a directory holds" \
+  || bad "the subject names a copy that waits aside for a path a directory holds (got '$(body_for leftoverdir)')"
+grep -q 'and the next pass puts the copy back' <<< "$(msg_for leftoverdir)" \
+  && ok "the visit says how a person settles a copy waiting aside" \
+  || bad "the visit says how a person settles a copy waiting aside (got '$(msg_for leftoverdir)')"
+
+# churnleftover: an already-upstream SHA churn, with a copy of cfg an
+# interrupted pass left aside while cfg holds a file again. The reset heal
+# lands, and the rig stays escalated while the copy waits.
+churned_rig churnleftover
+echo theirs > "$TMP/churnleftover.src/new.txt"; push_churn churnleftover
+mkdir -p "$TMP/churnleftover/.git/gc-toolkit-reconcile-kept"; echo older > "$TMP/churnleftover/.git/gc-toolkit-reconcile-kept/cfg"
+echo newer > "$TMP/churnleftover/cfg"
+CHURNLEFTOVER_REMOTE="$(git -C "$TMP/churnleftover.git" rev-parse main)"
+rigs_json churnleftover
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null 2>&1
+eq "$(git -C "$TMP/churnleftover" rev-parse HEAD)" "$CHURNLEFTOVER_REMOTE" "a copy left aside does not stop the reset heal"
+eq "$(cat "$TMP/churnleftover/cfg")/$(cat "$TMP/churnleftover/.git/gc-toolkit-reconcile-kept/cfg" 2>/dev/null)" "newer/older" "the reset heal keeps both copies"
+eq "$(esc_count churnleftover)" "1" "a reset heal escalates while a kept copy waits aside"
+body_has churnleftover "^This pass: rigs/churnleftover auto-healed: already-upstream, reset to origin/main\.$" \
+  && ok "the subject says the reset heal landed" \
+  || bad "the subject says the reset heal landed (got '$(body_for churnleftover)')"
+
+# divergedleftover: a genuine divergence, a local commit no ref holds, with a
+# copy waiting aside. The reset heal stops, and the subject names both.
+churned_rig divergedleftover
+echo theirs > "$TMP/divergedleftover.src/new.txt"; push_churn divergedleftover
+commit "$TMP/divergedleftover" local-only
+mkdir -p "$TMP/divergedleftover/.git/gc-toolkit-reconcile-kept" "$TMP/divergedleftover/cfg"; echo older > "$TMP/divergedleftover/.git/gc-toolkit-reconcile-kept/cfg"
+DIVERGEDLEFTOVER_HEAD="$(git -C "$TMP/divergedleftover" rev-parse HEAD)"
+rigs_json divergedleftover
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null 2>&1
+eq "$(git -C "$TMP/divergedleftover" rev-parse HEAD)" "$DIVERGEDLEFTOVER_HEAD" "a genuine divergence with a copy waiting aside is not reset"
+body_has divergedleftover '^local commit not upstream: [0-9a-f]+ local-only$' \
+  && ok "a diverged checkout's subject names what stopped the reset heal beside a copy waiting aside" \
+  || bad "a diverged checkout's subject names what stopped the reset heal beside a copy waiting aside (got '$(body_for divergedleftover)')"
+body_has divergedleftover "^cfg waits at .*/divergedleftover/\.git/gc-toolkit-reconcile-kept/cfg: something else was written on " \
+  && ok "a diverged checkout's subject lists the copy waiting aside" \
+  || bad "a diverged checkout's subject lists the copy waiting aside (got '$(body_for divergedleftover)')"
+
+# leftoverabove: a copy waits for sub/cfg while a file sits at sub, so it cannot
+# go back though nothing sits on its own path. The subject says so.
+behind_rig leftoverabove
+mkdir -p "$TMP/leftoverabove/.git/gc-toolkit-reconcile-kept/sub"; echo older > "$TMP/leftoverabove/.git/gc-toolkit-reconcile-kept/sub/cfg"
+echo file > "$TMP/leftoverabove/sub"
+rigs_json leftoverabove
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null 2>&1
+eq "$(cat "$TMP/leftoverabove/.git/gc-toolkit-reconcile-kept/sub/cfg" 2>/dev/null)/$(cat "$TMP/leftoverabove/sub")" "older/file" "a copy that a file above its path keeps aside stays there, and the file stays"
+body_has leftoverabove "^sub/cfg waits at .*/leftoverabove/\.git/gc-toolkit-reconcile-kept/sub/cfg: it could not go back on its path$" \
+  && ok "the subject says a copy with nothing on its path could not go back" \
+  || bad "the subject says a copy with nothing on its path could not go back (got '$(body_for leftoverabove)')"
+
+# leftoverlink: a copy waits for cfg, and cfg is now a symlink to the copy
+# itself, so the two read the same bytes. A symlink is no copy of the file, so
+# the copy stays aside rather than be removed under the link.
+behind_rig leftoverlink
+mkdir -p "$TMP/leftoverlink/.git/gc-toolkit-reconcile-kept"; echo older > "$TMP/leftoverlink/.git/gc-toolkit-reconcile-kept/cfg"
+ln -s .git/gc-toolkit-reconcile-kept/cfg "$TMP/leftoverlink/cfg"
+rigs_json leftoverlink
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null 2>&1
+eq "$(cat "$TMP/leftoverlink/.git/gc-toolkit-reconcile-kept/cfg" 2>/dev/null)" "older" "a copy whose path holds a symlink to its bytes stays aside"
+eq "$(esc_count leftoverlink)" "1" "a copy whose path holds a symlink to its bytes escalates"
+
+# unreadablekept: part of the keep directory cannot be read, so nothing proves
+# no copy waits there. The rig escalates though its fast-forward lands. Root
+# reads the directory anyway, so the case needs another user.
+if [ "$(id -u)" -eq 0 ]; then
+  ok "an unreadable keep directory escalates (skipped: running as root)"
+else
+  behind_rig unreadablekept
+  mkdir -p "$TMP/unreadablekept/.git/gc-toolkit-reconcile-kept/locked"; echo older > "$TMP/unreadablekept/.git/gc-toolkit-reconcile-kept/locked/cfg"
+  chmod 000 "$TMP/unreadablekept/.git/gc-toolkit-reconcile-kept/locked"
+  UNREADABLEKEPT_REMOTE="$(git -C "$TMP/unreadablekept.git" rev-parse main)"
+  rigs_json unreadablekept
+  : > "$TMP/escalations"
+  bash "$SCRIPT" >/dev/null 2>&1
+  chmod 755 "$TMP/unreadablekept/.git/gc-toolkit-reconcile-kept/locked"
+  eq "$(git -C "$TMP/unreadablekept" rev-parse HEAD)" "$UNREADABLEKEPT_REMOTE" "an unreadable keep directory does not stop the fast-forward"
+  eq "$(esc_count unreadablekept)" "1" "an unreadable keep directory escalates"
+  body_has unreadablekept "^could not list the kept copies waiting under .*/unreadablekept/\.git/gc-toolkit-reconcile-kept$" \
+    && ok "the subject says the keep directory could not be listed" \
+    || bad "the subject says the keep directory could not be listed (got '$(body_for unreadablekept)')"
+fi
+
+# parkedleftover: a parked checkout with a copy waiting aside. Its subject
+# names the copy beside the parked HEAD, and its visit says a copy waits.
+behind_rig parkedleftover
+git -C "$TMP/parkedleftover" checkout -q -b feature
+mkdir -p "$TMP/parkedleftover/.git/gc-toolkit-reconcile-kept"; echo older > "$TMP/parkedleftover/.git/gc-toolkit-reconcile-kept/cfg"
+mkdir -p "$TMP/parkedleftover/cfg"
+rigs_json parkedleftover
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null 2>&1
+eq "$(esc_count parkedleftover)" "1" "a parked checkout with a copy waiting aside escalates once"
+body_has parkedleftover "^cfg waits at .*/parkedleftover/\.git/gc-toolkit-reconcile-kept/cfg: something else was written on " \
+  && ok "a parked checkout's subject names the copy waiting aside" \
+  || bad "a parked checkout's subject names the copy waiting aside (got '$(body_for parkedleftover)')"
+grep -q 'A kept copy also waits under .*/parkedleftover/\.git/gc-toolkit-reconcile-kept' <<< "$(msg_for parkedleftover)" \
+  && ok "a parked checkout's visit says a kept copy waits aside" \
+  || bad "a parked checkout's visit says a kept copy waits aside (got '$(msg_for parkedleftover)')"
 
 # untrackedunread: the read of the remote's .gitignore files fails, so nothing
 # proves the clean files are not kept paths. The fast-forward, which would

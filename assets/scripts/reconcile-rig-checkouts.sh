@@ -76,9 +76,13 @@
 # files, which no move here allows. So each kept copy waits under
 # .git/gc-toolkit-reconcile-kept while git fast-forwards, and the path holds no
 # file for that long. The copy then goes back on its path with its bytes
-# unchanged, never over a file written there meanwhile. A pass interrupted in
+# unchanged. It never goes over a file written there meanwhile, and when that
+# file already holds the same bytes, the copy goes instead. A pass interrupted in
 # that window leaves the copy there, and the next pass puts it back before it
-# fetches, since that needs no network.
+# fetches, since that needs no network. A copy that cannot go back stays there,
+# and HEAD no longer tracks its path, so no later keep finds it. While any copy
+# waits there, the rig escalates whatever its fast-forward did, and the
+# escalation resolves only once none does.
 #
 # A checkout that has diverged is almost always SHA churn from an upstream
 # rebase/squash/force-push: the live rigs/* checkout is a pure deployment mirror
@@ -131,19 +135,21 @@
 # What no heal resolves takes the exception path: one idempotent bead per
 # blocked rig records why, and escalate.sh raises it so someone actually acts.
 # That includes a failed read of which paths to keep, since the fast-forward
-# could then delete one. The exception path never touches the checkout.
+# could then delete one, and a kept copy that could not go back on its path.
+# The exception path never touches the checkout.
 #
 # The escalation must never rot silently, which is the whole reason this script
 # exists: a stalled deploy has to reach someone. So a blocked rig is NOT handed
 # to a fixed agent address — an address no agent holds is a bead nobody works,
 # and a nudge into the void is worse than no safety net. The per-rig bead is the
 # durable, self-healing SUBJECT: it carries the diagnosis and auto-closes when
-# the rig next fast-forwards cleanly. escalate.sh then files a board-visible
-# visit that tracks it. escalate.sh proves its route against the live agent set,
-# exits non-zero rather than escalate into the void, and defaults to the human
-# helm board, which resolves in every city. Set RECONCILE_ESCALATION_POOL to a
-# rig-qualified pool to route the visit to a coordination agent instead; a pool
-# that does not resolve falls back to the human board.
+# the rig next fast-forwards cleanly with no kept copy waiting aside.
+# escalate.sh then files a board-visible visit that tracks it. escalate.sh
+# proves its route against the live agent set, exits non-zero rather than
+# escalate into the void, and defaults to the human helm board, which resolves
+# in every city. Set RECONCILE_ESCALATION_POOL to a rig-qualified pool to route
+# the visit to a coordination agent instead; a pool that does not resolve falls
+# back to the human board.
 #
 # Runs as an exec order (no LLM, no agent, no wisp).
 set -euo pipefail
@@ -211,9 +217,10 @@ retract_visit() {
     return 1
 }
 
-# A rig that advanced or healed clears its escalation: retract the tracking
-# visit as moot, then close the subject. The close waits on retract_visit, so a
-# failed retract leaves the subject open as the retry handle.
+# A rig that advanced or healed, with no kept copy waiting aside, clears its
+# escalation: retract the tracking visit as moot, then close the subject. The
+# close waits on retract_visit, so a failed retract leaves the subject open as
+# the retry handle.
 resolve_subject() {
     local name="$1" reading="$2" bead
     bead=$(open_bead "$name")
@@ -413,13 +420,19 @@ relink() {
 move_aside() { relink "$1" "$1/$KEPT_DIR" "$2"; }
 
 # Moves the copy of $2 that waits under $KEPT_DIR back to its path in the
-# checkout at $1, never over anything now on that path. git removes a directory
-# the fast-forward empties, so the directories above it are made again.
-put_back() { relink "$1/$KEPT_DIR" "$1" "$2"; }
+# checkout at $1, never over anything now on that path. A regular file written
+# there meanwhile that already holds the copy's bytes loses nothing to the copy,
+# so the copy goes instead. git removes a directory the fast-forward empties, so
+# the directories above it are made again.
+put_back() {
+    relink "$1/$KEPT_DIR" "$1" "$2" && return 0
+    [ -f "$1/$2" ] && [ ! -L "$1/$2" ] && cmp -s -- "$1/$KEPT_DIR/$2" "$1/$2" \
+        && rm -f -- "$1/${KEPT_DIR:?}/${2:?}"
+}
 
 # Puts back each copy that a pass interrupted while git fast-forwarded left
-# under the checkout at $1. A copy whose path holds a file again stays where it
-# is, and a keep of that path refuses while it does.
+# under the checkout at $1. A copy whose path holds something else again stays
+# where it is, and a keep of that path refuses while it does.
 restore_kept() {
     local path="$1" root="$1/$KEPT_DIR" f p
     [ -d "$root" ] || return 0
@@ -432,6 +445,27 @@ restore_kept() {
         fi
     done < <(find "$root" -type f -print0 2>/dev/null)
     find "$root" -depth -type d -empty -delete 2>/dev/null || true
+}
+
+# Each copy still waiting under the keep directory of the checkout at $1, a
+# line each in waiting_report. A listing that fails says so, since nothing then
+# proves that no copy waits.
+waiting_report=""
+waiting_copies() {
+    local root="$1/$KEPT_DIR" listing f p
+    waiting_report=""
+    [ -e "$root" ] || return 0
+    listing=$(find "$root" -type f 2>/dev/null) \
+        || { waiting_report="could not list the kept copies waiting under $root"$'\n'; return 0; }
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        p="${f#"$root"/}"
+        if [ -e "$1/$p" ] || [ -L "$1/$p" ]; then
+            waiting_report+="$p waits at $f: something else was written on $1/$p after it moved aside, and a kept copy never goes back over it"$'\n'
+        else
+            waiting_report+="$p waits at $f: it could not go back on its path"$'\n'
+        fi
+    done <<< "$listing"
 }
 
 # The behind-checkout heal (see the header), which also keeps the paths in
@@ -730,12 +764,12 @@ while IFS=$'\t' read -r name path; do
         fi
     fi
 
+    # A move that lands names itself in outcome and says what it did in reading.
+    outcome=""; reading=""
     if [ -z "$parked" ] && [ -n "$kept_read" ] && [ "${#kept[@]}" -eq 0 ] \
        && git -C "$path" merge --ff-only --no-overwrite-ignore "$remote" >/dev/null 2>&1; then
-        # Advanced or already up to date: clear any lingering escalation.
-        advanced=$((advanced + 1))
-        resolve_subject "$name" "rigs/$name fast-forwarded cleanly to $remote"
-        continue
+        # Advanced or already up to date.
+        outcome=advanced; reading="rigs/$name fast-forwarded cleanly to $remote"
     fi
 
     # ff-only refused or did not run, or the HEAD is parked. A checkout that is
@@ -745,11 +779,9 @@ while IFS=$'\t' read -r name path; do
     # under RECONCILE_NO_AUTOHEAL=1, and the set-aside does not run when the
     # kept paths could not be read.
     set_aside_ref=""; blocking_report=""; upstream_report=""; heal_reading=""
-    if [ -n "$behind" ] && [ -n "$kept_read" ] && [ "${RECONCILE_NO_AUTOHEAL:-0}" != "1" ] \
+    if [ -z "$outcome" ] && [ -n "$behind" ] && [ -n "$kept_read" ] && [ "${RECONCILE_NO_AUTOHEAL:-0}" != "1" ] \
        && set_aside_and_advance "$path" "$remote" "$name"; then
-        healed=$((healed + 1))
-        resolve_subject "$name" "rigs/$name auto-healed: $heal_reading"
-        continue
+        outcome=healed; reading="rigs/$name auto-healed: $heal_reading"
     fi
     [ -n "$kept_read" ] || blocking_report="$kept_report"
 
@@ -758,54 +790,71 @@ while IFS=$'\t' read -r name path; do
     # the reset heal (see the header). Anything its checks cannot prove — a real
     # divergence, an unreadable status, a local merge, untracked content in the
     # way — falls through to the escalation path untouched.
-    if [ -z "$parked" ] && [ -z "$behind" ] && [ "${RECONCILE_NO_AUTOHEAL:-0}" != "1" ] \
+    if [ -z "$outcome" ] && [ -z "$parked" ] && [ -z "$behind" ] && [ "${RECONCILE_NO_AUTOHEAL:-0}" != "1" ] \
        && reset_and_advance "$path" "$remote" "$default_branch"; then
-        healed=$((healed + 1))
-        resolve_subject "$name" "rigs/$name auto-healed: already-upstream, reset to $remote"
+        outcome=healed; reading="rigs/$name auto-healed: already-upstream, reset to $remote"
+    fi
+
+    # A kept copy still waiting aside is a file the runtime reads on its path,
+    # and HEAD no longer tracks that path, so no later keep finds it. A move
+    # that landed therefore clears a lingering escalation only when none waits.
+    waiting_copies "$path"
+    if [ -n "$outcome" ] && [ -z "$waiting_report" ]; then
+        if [ "$outcome" = advanced ]; then advanced=$((advanced + 1)); else healed=$((healed + 1)); fi
+        resolve_subject "$name" "$reading"
         continue
     fi
 
-    # Reached three ways: the HEAD is parked off the default branch, a behind
+    # Reached when the HEAD is parked off the default branch, when a behind
     # checkout's blocking changes could not all be set aside or its kept paths
-    # could not be read or kept, or a divergence the reset heal could not prove
-    # lossless or git refused to reset. File the subject bead and escalate.
+    # could not be read or kept, when the reset heal could not prove a
+    # divergence lossless or git refused to reset, and when a kept copy waits
+    # aside. File the subject bead and escalate.
     blocked=$((blocked + 1))
+    nl=$'\n'
+    waiting=""
+    [ -z "$waiting_report" ] || waiting=$(printf '## Waiting aside\n%s\n\nEach copy above is a working copy the keep moved aside while git fast-forwarded,\nwith its bytes unchanged, and this bead stays open while any of them waits.\nCompare each with what its path holds and keep the one the runtime should read:\nmove what the path holds elsewhere, and the next pass puts the copy back, or\ndelete the copy.' \
+        "${waiting_report%"$nl"}")"$nl$nl"
+    title="Reconcile: rigs/$name cannot fast-forward to $remote"
     # The reset a diverged checkout's escalation hands a person. Like the reset
     # heal's own checkout, it refuses rather than loses what is in its way.
     reset_cmd="git -C $path checkout --no-overwrite-ignore -B $default_branch $remote"
     if [ -n "$parked" ]; then
-        body=$(printf 'rigs/%s is parked off %s — its live checkout HEAD is on %s.\nPath: %s\n\nThe rig root is a deploy mirror: reconcile fast-forwards it to %s and\ndirectory-imported packs build from its working tree, so nothing checks out a\nbranch or commits there. Restore it once any local work is saved elsewhere:\n  git -C %s checkout %s\nIt auto-closes when the rig next fast-forwards cleanly.\n\n## git status --porcelain\n%s\n\n## git log --oneline %s..HEAD\n%s\n' \
+        body=$(printf 'rigs/%s is parked off %s — its live checkout HEAD is on %s.\nPath: %s\n\nThe rig root is a deploy mirror: reconcile fast-forwards it to %s and\ndirectory-imported packs build from its working tree, so nothing checks out a\nbranch or commits there. Restore it once any local work is saved elsewhere:\n  git -C %s checkout %s\nIt auto-closes when the rig next fast-forwards cleanly.\n\n%s## git status --porcelain\n%s\n\n## git log --oneline %s..HEAD\n%s\n' \
             "$name" "$default_branch" "${local_branch:-<detached HEAD>}" "$path" \
-            "$default_branch" "$path" "$default_branch" \
+            "$default_branch" "$path" "$default_branch" "$waiting" \
             "$(git -C "$path" status --porcelain 2>/dev/null)" \
             "$remote" "$(git -C "$path" log --oneline "$remote"..HEAD 2>/dev/null)")
+    elif [ -n "$outcome" ]; then
+        title="Reconcile: rigs/$name holds a kept file it could not put back"
+        body=$(printf 'rigs/%s holds a kept file it could not put back on its path.\nPath: %s\n\nThis pass: %s.\nIt auto-closes once no kept copy waits aside and the rig next ff-s cleanly.\n\n%s## git status --porcelain\n%s\n' \
+            "$name" "$path" "$reading" "$waiting" \
+            "$(git -C "$path" status --porcelain 2>/dev/null)")
     elif [ -n "$behind" ]; then
-        nl=$'\n'
         report="${blocking_report%"$nl"}"
         [ -n "$report" ] || report="not examined: RECONCILE_NO_AUTOHEAL=1 turns the heals off"
         pinned=""
         [ -z "$set_aside_ref" ] || pinned=$(printf 'The local changes were pinned at %s before anything moved.\nRecover a path with git checkout %s -- <path> (working copy)\nor git checkout %s^2 -- <path> (staged copy).' \
             "$set_aside_ref" "$set_aside_ref" "$set_aside_ref")"$nl$nl"
-        body=$(printf 'rigs/%s could not fast-forward to %s — the incoming commits rewrite paths\nwhere the live checkout holds local changes or files it keeps in place, and\nnot all of them could be set aside or kept without losing content.\nPath: %s\n\n## Blocking the fast-forward\n%s\n\n%sJudge and act, then close this bead (it auto-closes when the rig next\nff-s cleanly): stray write -> git -C %s restore --source=HEAD --staged --worktree -- <path>;\nmachine-local config -> carry it across the incoming change by hand;\nreal work -> save it elsewhere first.\n\n## git status --porcelain\n%s\n' \
-            "$name" "$remote" "$path" "$report" "$pinned" "$path" \
+        body=$(printf 'rigs/%s could not fast-forward to %s — the incoming commits rewrite paths\nwhere the live checkout holds local changes or files it keeps in place, and\nnot all of them could be set aside or kept without losing content.\nPath: %s\n\n## Blocking the fast-forward\n%s\n\n%sJudge and act, then close this bead (it auto-closes when the rig next\nff-s cleanly): stray write -> git -C %s restore --source=HEAD --staged --worktree -- <path>;\nmachine-local config -> carry it across the incoming change by hand;\nreal work -> save it elsewhere first.\n\n%s## git status --porcelain\n%s\n' \
+            "$name" "$remote" "$path" "$report" "$pinned" "$path" "$waiting" \
             "$(git -C "$path" status --porcelain 2>/dev/null)")
     else
-        nl=$'\n'
         report="${blocking_report%"$nl"}"
         [ -n "$report" ] || report="not examined: RECONCILE_NO_AUTOHEAL=1 turns the heals off"
         upstream=""
         [ -z "$upstream_report" ] || upstream="$nl$nl## Already upstream, but in a reset's way$nl${upstream_report%"$nl"}"
-        body=$(printf 'rigs/%s could not fast-forward to %s — the live checkout diverged.\nPath: %s\n\n## The reset heal stopped\n%s%s\n\nJudge and act, then close this bead (it auto-closes when the rig next\nff-s cleanly). To reset the checkout by hand once you have judged each item\nabove:\n1. Save real work elsewhere, since the reset drops a local commit that is\n   not upstream.\n2. Restore each dirty path listed as already upstream, and each listed as\n   local-only content that you judge a stray write:\n     git -C %s restore --source=HEAD --staged --worktree -- <path>\n3. Move aside each untracked or ignored file named above. One already\n   upstream can be deleted instead.\n4. Reset:\n     %s\nThe reset keeps a local change on a path it does not rewrite, such as\nmachine-local config. It refuses, rather than overwrites or deletes, a local\nchange or an untracked file still in its way, an ignored file included, so\nskipping step 2 or 3 costs a refusal, not content. A local commit does not\nstop it, so only step 1 keeps one. Carry machine-local config across by hand\nwhere the reset rewrites its path.\n\n## git status --porcelain\n%s\n\n## git log --oneline %s..HEAD\n%s\n' \
-            "$name" "$remote" "$path" "$report" "$upstream" "$path" "$reset_cmd" \
+        body=$(printf 'rigs/%s could not fast-forward to %s — the live checkout diverged.\nPath: %s\n\n## The reset heal stopped\n%s%s\n\nJudge and act, then close this bead (it auto-closes when the rig next\nff-s cleanly). To reset the checkout by hand once you have judged each item\nabove:\n1. Save real work elsewhere, since the reset drops a local commit that is\n   not upstream.\n2. Restore each dirty path listed as already upstream, and each listed as\n   local-only content that you judge a stray write:\n     git -C %s restore --source=HEAD --staged --worktree -- <path>\n3. Move aside each untracked or ignored file named above. One already\n   upstream can be deleted instead.\n4. Reset:\n     %s\nThe reset keeps a local change on a path it does not rewrite, such as\nmachine-local config. It refuses, rather than overwrites or deletes, a local\nchange or an untracked file still in its way, an ignored file included, so\nskipping step 2 or 3 costs a refusal, not content. A local commit does not\nstop it, so only step 1 keeps one. Carry machine-local config across by hand\nwhere the reset rewrites its path.\n\n%s## git status --porcelain\n%s\n\n## git log --oneline %s..HEAD\n%s\n' \
+            "$name" "$remote" "$path" "$report" "$upstream" "$path" "$reset_cmd" "$waiting" \
             "$(git -C "$path" status --porcelain 2>/dev/null)" \
             "$remote" "$(git -C "$path" log --oneline "$remote"..HEAD 2>/dev/null)")
     fi
 
     bead=$(open_bead "$name")
     if [ -n "$bead" ]; then
-        gc bd --rig "$RECONCILE_RIG" update "$bead" --description "$body" >/dev/null 2>&1 || true
+        gc bd --rig "$RECONCILE_RIG" update "$bead" --title "$title" --description "$body" >/dev/null 2>&1 || true
     else
-        bead=$(gc bd --rig "$RECONCILE_RIG" create "Reconcile: rigs/$name cannot fast-forward to $remote" \
+        bead=$(gc bd --rig "$RECONCILE_RIG" create "$title" \
             -t task -d "$body" --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null || true)
         [ -n "$bead" ] || { warn "could not file a reconcile bead for rigs/$name — divergence UNTRACKED and UNESCALATED"; continue; }
         gc bd --rig "$RECONCILE_RIG" update "$bead" --set-metadata reconcile_rig="$name" >/dev/null 2>&1 || true
@@ -816,6 +865,9 @@ while IFS=$'\t' read -r name path; do
     if [ -n "$parked" ]; then
         msg=$(printf 'rigs/%s is parked off its deploy branch %s — HEAD is on %s, so reconcile cannot advance it and its working tree serves an off-%s build to every directory-imported pack.\nPath: %s\nSubject bead %s carries the full git status and log, and clears when rigs/%s next fast-forwards cleanly.\nRestore it: save any local work elsewhere, then git -C %s checkout %s.' \
             "$name" "$default_branch" "${local_branch:-<detached HEAD>}" "$default_branch" "$path" "$bead" "$name" "$path" "$default_branch")
+    elif [ -n "$outcome" ]; then
+        msg=$(printf 'rigs/%s holds a kept file it could not put back on its path, so the runtime reads whatever that path holds now instead.\nPath: %s\nSubject bead %s names each copy waiting under %s, and clears once none waits and rigs/%s next ff-s cleanly.\nCompare each copy with what its path holds and keep the one the runtime should read: move what the path holds elsewhere, and the next pass puts the copy back, or delete the copy.' \
+            "$name" "$path" "$bead" "$path/$KEPT_DIR" "$name")
     elif [ -n "$behind" ]; then
         msg=$(printf 'rigs/%s cannot fast-forward to %s — the incoming commits rewrite paths where its live checkout holds local changes or files it keeps in place, and its deploy is stalled.\nPath: %s\nSubject bead %s names the blocking paths and carries the full git status, and clears when rigs/%s next ff-s cleanly.\nstray write -> git -C %s restore --source=HEAD --staged --worktree -- <path>; machine-local config -> carry it across the incoming change by hand; real work -> save it elsewhere first.' \
             "$name" "$remote" "$path" "$bead" "$name" "$path")
@@ -823,6 +875,8 @@ while IFS=$'\t' read -r name path; do
         msg=$(printf 'rigs/%s cannot fast-forward to %s — its live checkout diverged and its deploy is stalled.\nPath: %s\nSubject bead %s names what stopped the reset heal and the steps to reset by hand, carries the full git status and divergence log, and clears when rigs/%s next ff-s cleanly.\nTo reset by hand: save real work elsewhere, restore each dirty path that is already upstream or a stray write, and move aside each untracked file in the way, as the subject bead lists them. Then run %s, which refuses rather than overwrites or deletes a local change or an untracked file still in its way, an ignored file included.' \
             "$name" "$remote" "$path" "$bead" "$name" "$reset_cmd")
     fi
+    [ -z "$waiting_report" ] || [ -n "$outcome" ] \
+        || msg+="${nl}A kept copy also waits under $path/$KEPT_DIR, since it could not go back on its path, and the subject bead names it."
     if ! escalate_divergence "$bead" "reconcile-diverged-$name" "$msg"; then
         warn "rigs/$name divergence could NOT be escalated (escalate.sh failed) — subject bead $bead"
     fi

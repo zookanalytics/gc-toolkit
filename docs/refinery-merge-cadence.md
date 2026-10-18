@@ -866,11 +866,13 @@ path. A file the incoming commits stop tracking while the remote's tree
 ignores it, such as bd config a repository stops tracking, stays in place
 untracked where the fast-forward would delete it: pinned first when it is
 modified, its working copy waits under `.git/gc-toolkit-reconcile-kept` while
-git fast-forwards and goes back on its path unchanged. A diverged checkout
-resets to the remote when its content is provably upstream, with
-`git checkout --no-overwrite-ignore -B`, which refuses rather
-than overwrites or deletes untracked content in its way, ignored or not.
-Anything else files one idempotent visit per blocked rig (via `escalate.sh`,
-carrying what blocked it and `git status`), which auto-closes once the rig
-fast-forwards cleanly. The 15-minute window is also the exposure behind
+git fast-forwards and goes back on its path unchanged. A copy that cannot go
+back, because other content was written on its path meanwhile, waits there, and
+the rig stays escalated until none waits. A diverged checkout resets to the remote
+when its content is provably upstream, with
+`git checkout --no-overwrite-ignore -B`, which refuses rather than overwrites
+or deletes untracked content in its way, ignored or not. Anything else files
+one idempotent visit per blocked rig (via `escalate.sh`, carrying what blocked
+it and `git status`), which auto-closes once the rig fast-forwards cleanly with
+no kept copy waiting aside. The 15-minute window is also the exposure behind
 component-model I9, watched by `doctor/check-pour-text-current`.
