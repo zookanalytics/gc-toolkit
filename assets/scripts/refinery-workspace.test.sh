@@ -8,9 +8,11 @@
 # answering the roster. Proves:
 #   - stage adds the prep worktree to the RIG, detached at origin/<branch>,
 #     whatever the cwd, creating no branch and leaving the rig's HEAD where it
-#     was, and replaces a leftover from an earlier iteration;
-#   - teardown removes it, succeeds when there is none, and says so when git
-#     leaves a directory behind;
+#     was, replaces a leftover from an earlier iteration, a locked one
+#     included, and fails over a directory git does not know as a worktree,
+#     leaving it as it was;
+#   - teardown removes it, a locked one included, succeeds when there is none,
+#     and says so when git leaves a directory behind;
 #   - checks leaves the gate's checks directory empty, creating it when
 #     absent, removes every entry the next gate could run, touches nothing else
 #     in the gate's record, and fails when it cannot empty it;
@@ -69,6 +71,13 @@ export GC_LOG="$TMP/gc.log"
 commit() { git -C "$1" commit -q --allow-empty -m "$2"; git -C "$1" rev-parse HEAD; }
 wt_paths() { git -C "$1" worktree list --porcelain | sed -n 's/^worktree //p'; }
 registered() { if grep -qxF -- "$2" < <(wt_paths "$1"); then echo yes; else echo no; fi; }
+# locked <repo> <path> -> yes|no: git lists the worktree at <path> as locked.
+locked() {
+  git -C "$1" worktree list --porcelain | awk -v p="$2" '
+    /^worktree / { cur = substr($0, 10) }
+    /^locked/ && cur == p { f = 1 }
+    END { print (f ? "yes" : "no") }'
+}
 
 # The rig: origin carries main and polecat/wb, the rig is cloned from it, and
 # a foreign repository is where every call's cwd sits.
@@ -131,7 +140,64 @@ ws teardown --rig-root "$D/rig"
 eq "$RC" 1 "teardown of a directory git does not know: exits 1"
 has "$OUT" "is still there" "teardown of a directory git does not know: it says so"
 [ -e "$PREP/not-a-worktree" ] && ok "teardown removes only what git knows as the worktree" || bad "teardown removes only what git knows as the worktree"
+ws stage --rig-root "$D/rig" --branch polecat/wb
+eq "$RC" 1 "stage over a directory git does not know: exits 1"
+has "$OUT" "could not add the prep worktree" "stage over a directory git does not know: it says what failed"
+[ -e "$PREP/not-a-worktree" ] && ok "stage over a directory git does not know: the directory is left as it was" \
+  || bad "stage over a directory git does not know: the directory is left as it was"
 chmod -R u+w "$PREP"; ( cd "$TMP" && rm -rf -- "${PREP:?}" )
+
+# A `worktree add` killed partway leaves its worktree locked "initializing", and
+# git refuses a locked worktree a single --force. Each case locks the prep
+# worktree the way such an add leaves it.
+echo "── a locked leftover ──"
+ws stage --rig-root "$D/rig" --branch polecat/wb >/dev/null
+git -C "$D/rig" worktree lock --reason initializing "$PREP"
+eq "$(locked "$D/rig" "$PREP")" yes "locked: precondition, git lists the prep worktree as locked"
+ws teardown --rig-root "$D/rig"
+eq "$RC" 0 "locked, teardown: exits 0"
+[ ! -e "$PREP" ] && ok "locked, teardown: the directory is gone" || bad "locked, teardown: the directory is gone"
+eq "$(registered "$D/rig" "$PREP")" no "locked, teardown: the worktree is unregistered"
+
+ws stage --rig-root "$D/rig" --branch polecat/wb >/dev/null
+: > "$PREP/left-by-a-killed-add"
+git -C "$D/rig" worktree lock --reason initializing "$PREP"
+ws stage --rig-root "$D/rig" --branch polecat/wb
+eq "$RC" 0 "locked, stage: exits 0"
+eq "$(git -C "$PREP" rev-parse HEAD 2>/dev/null)" "$NEXT" "locked, stage: the prep worktree is at the branch tip"
+[ ! -e "$PREP/left-by-a-killed-add" ] && ok "locked, stage: the old worktree's files are gone" || bad "locked, stage: the old worktree's files are gone"
+eq "$(locked "$D/rig" "$PREP")" no "locked, stage: the new prep worktree is not locked"
+
+# The directory of a locked worktree moved away leaves git a locked registration
+# for a path with nothing at it, which `worktree add -f` given once refuses.
+git -C "$D/rig" worktree lock "$PREP"
+mv "$PREP" "$TMP/moved-away"
+ws teardown --rig-root "$D/rig"
+eq "$RC" 0 "locked and moved away, teardown: exits 0"
+eq "$(registered "$D/rig" "$PREP")" no "locked and moved away, teardown: the registration is cleared"
+( cd "$TMP" && rm -rf -- moved-away )
+ws stage --rig-root "$D/rig" --branch polecat/wb >/dev/null
+git -C "$D/rig" worktree lock "$PREP"
+mv "$PREP" "$TMP/moved-away"
+ws stage --rig-root "$D/rig" --branch polecat/wb
+eq "$RC" 0 "locked and moved away, stage: exits 0"
+eq "$(git -C "$PREP" rev-parse HEAD 2>/dev/null)" "$NEXT" "locked and moved away, stage: the prep worktree is added again at the branch tip"
+eq "$(locked "$D/rig" "$PREP")" no "locked and moved away, stage: the new prep worktree is not locked"
+( cd "$TMP" && rm -rf -- moved-away )
+
+# A locked worktree whose directory holds no .git file fails the removal's
+# validation, so only the add given -f twice can take the path back.
+git -C "$D/rig" worktree lock --reason initializing "$PREP"
+( cd "$TMP" && rm -rf -- "${PREP:?}" ) && mkdir "$PREP"
+ws teardown --rig-root "$D/rig"
+eq "$RC" 1 "locked with no .git file, teardown: exits 1"
+has "$OUT" "is still there" "locked with no .git file, teardown: it says the directory is still there"
+ws stage --rig-root "$D/rig" --branch polecat/wb
+eq "$RC" 0 "locked with no .git file, stage: exits 0"
+eq "$(git -C "$PREP" rev-parse HEAD 2>/dev/null)" "$NEXT" "locked with no .git file, stage: the prep worktree is at the branch tip"
+eq "$(locked "$D/rig" "$PREP")" no "locked with no .git file, stage: the new prep worktree is not locked"
+eq "$(wt_paths "$D/rig" | wc -l | tr -d ' ')" 2 "a locked leftover: one prep worktree is registered beside the rig"
+ws teardown --rig-root "$D/rig" >/dev/null
 
 echo "── checks ──"
 ws checks --rig-root "$D/rig"
