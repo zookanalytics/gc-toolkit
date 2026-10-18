@@ -484,6 +484,10 @@ next' "a carriage return that ends a line redraws nothing"
   has '[2 more line(s) not shown]' "$r" "a cut says how many lines it hid"
   r=$(js "m.terminalDocument({ text: 'x'.repeat(300) + '\n', columns: 100 })")
   has 'width: 100ch' "$r" "a wide output wraps at --columns"
+  r=$(js "m.terminalDocument({ text: 'x'.repeat(300) + '\n', columns: 30 })")
+  has 'width: 30ch' "$r" "--columns below 40 is honoured"
+  r=$(js "m.terminalDocument({ text: 'x\n', columns: 30 })")
+  has 'width: 30ch' "$r" "even for a narrow output, which otherwise keeps 40"
   r=$(js "m.commentDocument({ fragment: '<details><summary>s</summary>x</details><detailsx>', title: 'a&b', expand: true })")
   has '<details open><summary>s</summary>' "$r" "--expand opens each <details>"
   has '</details><detailsx>' "$r" "an element merely named like details is left alone"

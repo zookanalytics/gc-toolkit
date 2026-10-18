@@ -218,7 +218,9 @@ export function terminalDocument({ text, prompt, title, columns = 120, maxLines 
   const body = ansiToHtml(text, maxLines);
   const promptLine = prompt ? `<span class="prompt">$</span> ${escapeHtml(prompt)}\n` : '';
   const more = body.hidden > 0 ? `\n<span class="more">[${body.hidden} more line(s) not shown]</span>` : '';
-  const width = Math.max(40, Math.min(columns, Math.max(body.widest, prompt ? [...prompt].length + 2 : 0)));
+  // The window is as wide as its widest line, and at least 40 columns, which
+  // leaves its title bar room. --columns caps that width, below 40 too.
+  const width = Math.min(columns, Math.max(40, body.widest, prompt ? [...prompt].length + 2 : 0));
   return `<!doctype html>
 <html><head><meta charset="utf-8"><style>
 html, body { margin: 0; background: transparent; }
