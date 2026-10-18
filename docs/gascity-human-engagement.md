@@ -763,12 +763,17 @@ Two endings the idle setting does not own:
   the `no-wake-reason` drain that collects an ended pool session in about a
   minute never reaches it, and `converse-reap` above is what collects it. See
   *How a pane dies when no sitting is live*, below.
-- **`DecideMaxSessionAge` still fires regardless of who is holding**, so a
-  health restart can still take a held sitting out from under a reader. The
-  per-model converse templates run `wake_mode = "resume"`, so that restart
-  replays the thread and the sitting continues; the trace-before-you-wait
-  discipline holds because the demand is the durable gate the board reads
-  and the work blocks on, not because the thread is lost.
+- **No max-age restart reaches a sitting.** No `converse-<model>` template
+  sets `max_session_age`, and an unset age is off: the max-age tracker
+  registers only a template with a positive age (`buildMaxSessionAgeTracker`,
+  `cmd/gc/cmd_start.go`). Setting one would end long sittings instead of
+  refreshing them. The max-age ladder (`DecideMaxSessionAge`,
+  `internal/session/lifecycle_timers.go`) defers while the session holds open
+  assigned work, and a sitting's visit is assigned to it, so the restart would
+  fire on the first tick after the visit closes. The ladder has no attachment
+  rung, so that stop would destroy the pane and its scrollback under an
+  attached operator. The restarted session would wake unattached with its
+  visit closed, and `converse-reap` would collect it.
 
 The cost is real: a held visit nobody answers keeps its sitting's session
 running indefinitely, where an idle clock would recycle it. Nothing rations
@@ -1057,7 +1062,9 @@ deliberately narrow, so the mechanism above still holds:
   watched pane only to bounce it straight back awake — the same
   idle-kill/wake treadmill the assigned-work rung fixed (`ga-3ox7rk`).
 - **Idle-timeout only.** `DecideMaxSessionAge` (a health restart, e.g.
-  credential expiry) still fires regardless of who is attached.
+  credential expiry) still fires regardless of who is attached, which is why
+  no converse template sets `max_session_age` (*How a held sitting ends*,
+  above).
 
 Design record: `specs/tk-bzm86/design-doc.md`; the cross-rig filing
 `gc-rjtk1` is now resolved upstream.

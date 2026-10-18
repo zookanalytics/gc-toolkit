@@ -331,7 +331,7 @@ Rules:
   later pass, once its visit reads closed or gone; it reaps only an
   UNATTACHED pane, so a closed-visit sitting you are still attached to
   waits until it is no longer attended. The per-model sittings run
-  `wake_mode = "resume"` (`agents/converse-opus/agent.toml`), so a health
+  `wake_mode = "resume"` (`agents/converse-opus/agent.toml`), so a
   restart replays the thread and the sitting continues; the durable
   demand and the step-1 re-claim guard cover the rare respawn that comes
   up without it. The record never lives only in the thread, and the
