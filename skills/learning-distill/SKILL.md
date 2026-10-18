@@ -42,7 +42,9 @@ feedback *says*, not how loud it is.
   corrective feedback about standing behavior — a mis-capture,
   diff-content review, noise — is discarded with a one-line stated
   reason; discarded observations are stamped consumed like any judged
-  observation.
+  observation. Outside review feedback is the exception: it is read as
+  a set ([below](#outside-review-feedback-is-read-as-a-set)), never
+  discarded as diff review.
 
 ### 2. Has the pattern earned generalization?
 
@@ -109,6 +111,29 @@ A proposed bullet:
   that argument. Check a draft by asking what else it would catch: a rule
   that fires only on a re-run of its own evidence is scoped too narrowly,
   and the incident belongs in the evidence section.
+
+## Outside review feedback is read as a set
+
+An observation with `obs.category=outside-review` is one review post from
+outside the city: the operator's own review, another reviewer's, or Claude
+Code's `/code-review` output. The miner files one per post, whether or not it
+is about standing behavior, so most of them are about their diff. That is the
+point: together they show what the city's review let through. They are not
+judged one at a time under judgment 1, and none is discarded as diff review.
+
+Read the pending set as a whole, for what the city's review method missed: the
+kinds of defect it let through, the reasoning it skipped, the evidence it did
+not ask for. Cluster the members by the miss they show, each cluster on a
+pattern bead of its own, and stamp each member onto its cluster. A proposal
+from the set rests on a cluster, never on one member, and lands as one of two
+things: a `review-rubric` amendment, or a change to the correctness method
+itself (`skills/review-correctness/SKILL.md`), filed as an engineering bead
+for placement. It is never one tactical rule per observation. Judgment 2
+weighs a cluster's recurrence by its distinct `obs.provenance`, as it does
+any pattern's.
+
+A member that states universal intent (`obs.directive=standing`) is also a
+standing directive, and judgment 1 applies to it as to any other.
 
 ## Carriers — the five shapes a promotion can take
 

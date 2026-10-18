@@ -296,6 +296,29 @@ grep -q 'EXISTING_PR=' "$TMP/preopen.sh" \
   && bad "(18) the guard must not overwrite EXISTING_PR" "found an EXISTING_PR assignment" \
   || ok "(18) EXISTING_PR left intact (its block-and-escalate contract is unchanged)"
 
+echo "── 4. a recorded PR is looked up in origin's repository ──"
+
+# With no `gh repo set-default`, gh resolves a bare PR number against the first
+# remote in its own order, which puts upstream ahead of origin, so a bare
+# pr_number in a checkout with an upstream remote opened someone else's PR.
+GH_ARGV="$TMP/gh-argv.log"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'printf "%%s\\n" "$*" >> "%s"\nexit 0\n' "$GH_ARGV"; } > "$TMP/bin/gh"
+chmod +x "$TMP/bin/gh"
+ORIGIN_CO="$TMP/origin-checkout"
+git init -q "$ORIGIN_CO"
+git -C "$ORIGIN_CO" remote add upstream git@github.com:them/repo.git
+git -C "$ORIGIN_CO" remote add origin git@github.com:ours/repo.git
+: > "$GH_ARGV"
+( cd "$ORIGIN_CO" && preopen '' '' '55' >/dev/null )
+eq "$(grep -c -- '^pr view 55 --repo git@github.com:ours/repo.git ' "$GH_ARGV" || true)" "1" \
+   "(19) a bare pr_number is viewed in origin's repository"
+NO_ORIGIN="$TMP/no-origin"; mkdir -p "$NO_ORIGIN"
+: > "$GH_ARGV"
+( cd "$NO_ORIGIN" && preopen '' '' '55' >/dev/null )
+eq "$(grep -c -- '--repo' "$GH_ARGV" || true)" "0" \
+   "(20) with no origin to name, the view passes no --repo"
+eq "$(grep -c -- '^pr view 55 ' "$GH_ARGV" || true)" "1" "(21) and still looks the PR up"
+
 echo "---"
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

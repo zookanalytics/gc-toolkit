@@ -569,9 +569,10 @@ OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty
 The metadata and the closed status ride the create, so the observation is
 filed whole or not at all.
 
-The provenance key's `<owner/repo>` is the full slug — derive it with
-`gh repo view --json nameWithOwner -q .nameWithOwner`, or parse the
-origin URL.
+The provenance key's `<owner/repo>` is origin's full slug — derive it with
+`gh repo view "$(git remote get-url origin)" --json nameWithOwner -q .nameWithOwner`,
+or parse the origin URL. A bare `gh repo view` can answer for an upstream
+remote instead.
 
 Provenance names the turn or the comment, not the finding, so it is only
 half of the dedup key and `obs.category` is the other half. One turn can

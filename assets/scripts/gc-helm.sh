@@ -61,7 +61,7 @@ Usage:
   gc-helm priority <bead-id> <P0-P4> [--dry-run]  set the priority of a bead that follows nothing, and re-rank the work that follows it
   gc-helm priority <bead-id> --shift <±n> [--dry-run]  set the shift of a bead that follows a parent or an anchor: +1 is one level later, -1 one level sooner
   gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
-  gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject, resolve the human gate that put it to the operator, and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
+  gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: resolve the human gate that put it to the operator, dispatch the subject's gc.recommended_formula at the subject (a failed dispatch reopens the gate), and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
   gc-helm unplaced [--json]  list the placement sitting's queue: every live bead in the city's stores marked placement=pending that nothing has placed since (no parent, route, arm, assignee or live pour), priority then age; --json prints one object for a caller: the rows as beads, the suspended rigs it skipped, and the rigs whose store did not answer. Read-only, files nothing; exits 4 after the list when a store did not answer
 
@@ -2855,14 +2855,17 @@ accept_open_demands() {
 # does. A resolve can report success without the gate closing, so the demands
 # are listed again after: returns 0 only when none is left open, and leaves the
 # survivors, or "unreadable", in ACCEPT_DEMANDS_LEFT for the caller's message.
-ACCEPT_DEMANDS_LEFT=""
+# Every demand it sent an answer to is kept in ACCEPT_DEMANDS_ANSWERED, which
+# accept_reopen_demands puts back when the dispatch does not land.
+ACCEPT_DEMANDS_LEFT=""; ACCEPT_DEMANDS_ANSWERED=""
 accept_resolve_demands() {
-    _ard_subj="$1"; _ard_why="$2"; ACCEPT_DEMANDS_LEFT=""
+    _ard_subj="$1"; _ard_why="$2"; ACCEPT_DEMANDS_LEFT=""; ACCEPT_DEMANDS_ANSWERED=""
     if ! _ard_ids=$(accept_open_demands "$_ard_subj"); then
         ACCEPT_DEMANDS_LEFT="unreadable"; return 1
     fi
     [ -n "$_ard_ids" ] || return 0
     for _ard_d in $_ard_ids; do
+        ACCEPT_DEMANDS_ANSWERED="${ACCEPT_DEMANDS_ANSWERED:+$ACCEPT_DEMANDS_ANSWERED }$_ard_d"
         gc bd gate resolve "$_ard_d" --reason "$_ard_why" >/dev/null 2>&1 \
             || gc bd close "$_ard_d" --reason "$_ard_why" >/dev/null 2>&1 \
             || true
@@ -2886,18 +2889,76 @@ accept_demand_refused() {
     exit 4
 }
 
+# accept_reopen_demands <subject> <reason> — put back the demands
+# accept_resolve_demands answered, when accept stops before a dispatch lands.
+# The operator's question stands until the work it releases is sent, so the
+# gate goes back to the state accept found it in, for a retry or Discuss.
+# `bd reopen` answers 0 on a demand that is already open, so a survivor of the
+# resolve is left as it was. The demands are listed again after, as the resolve
+# does: returns 0 only when every answered demand reads open, and leaves the
+# ones that do not, or "unreadable", in ACCEPT_REOPEN_LEFT.
+ACCEPT_REOPEN_LEFT=""
+accept_reopen_demands() {
+    _arp_subj="$1"; _arp_why="$2"; ACCEPT_REOPEN_LEFT=""
+    [ -n "$ACCEPT_DEMANDS_ANSWERED" ] || return 0
+    for _arp_d in $ACCEPT_DEMANDS_ANSWERED; do
+        gc bd reopen "$_arp_d" --reason "$_arp_why" >/dev/null 2>&1 || true
+    done
+    if ! _arp_open=$(accept_open_demands "$_arp_subj"); then
+        ACCEPT_REOPEN_LEFT="unreadable"; return 1
+    fi
+    _arp_open=" $(printf '%s' "$_arp_open" | tr '\n' ' ') "
+    for _arp_d in $ACCEPT_DEMANDS_ANSWERED; do
+        case "$_arp_open" in
+            *" $_arp_d "*) ;;
+            *) ACCEPT_REOPEN_LEFT="${ACCEPT_REOPEN_LEFT:+$ACCEPT_REOPEN_LEFT }$_arp_d" ;;
+        esac
+    done
+    [ -z "$ACCEPT_REOPEN_LEFT" ]
+}
+
+# accept_reopen_failed — the sentence a refusal ends with when
+# accept_reopen_demands could not put back what accept answered: the demands
+# that still read closed, or the read-back that did not answer.
+accept_reopen_failed() {
+    if [ "$ACCEPT_REOPEN_LEFT" = "unreadable" ]; then
+        printf '%s' " The demands could not be read back after accept reopened $ACCEPT_DEMANDS_ANSWERED, so check that each reads open (gc bd show <id>) and reopen any that does not (gc bd reopen <id>)."
+    else
+        printf '%s' " $ACCEPT_REOPEN_LEFT did not reopen, so it reads answered while nothing is dispatched. Reopen it by hand (gc bd reopen <id>)."
+    fi
+}
+
+# accept_dispatch_withheld <subject> <formula> — the refusal when the subject's
+# demand did not resolve before the dispatch. Nothing is slung, because the run
+# would start with its work still blocked: mol-polecat-work's load-context
+# cancels a run whose work bead has an open blocks blocker. The demands this run
+# did answer are reopened, so a re-run starts from the question as it stood.
+accept_dispatch_withheld() {
+    _adw_left="$ACCEPT_DEMANDS_LEFT"; _adw_back=""
+    accept_reopen_demands "$1" "Accept dispatched nothing: not every demand on $1 resolved, so the question stands" \
+        || _adw_back=$(accept_reopen_failed)
+    if [ "$_adw_left" = "unreadable" ]; then
+        echo "$PROG: accept: could not read its demands on $1 to resolve the human gate that put $2 to the operator, so nothing is dispatched: a run started while that gate is open would find its work blocked and cancel itself. Re-run accept once the store answers.$_adw_back" >&2
+    else
+        echo "$PROG: accept: $1's human gate $_adw_left is still open after its resolve, so nothing is dispatched: a run started now would find its work blocked and cancel itself. Re-run accept. If the gate still will not resolve, resolve it by hand (gc bd gate resolve <id> --reason \"accepted\") and re-run accept.$_adw_back" >&2
+    fi
+    exit 4
+}
+
 # ── Verb: accept ─────────────────────────────────────────────────────
-# Accept a recommendation straight off the board: dispatch the subject's
-# gc.recommended_formula at the subject, resolve the human gate that put it to
-# the operator, and dismiss its visit, in one procedural order with no sitting.
+# Accept a recommendation straight off the board: resolve the human gate that
+# put it to the operator, dispatch the subject's gc.recommended_formula at the
+# subject, and dismiss its visit, in one procedural order with no sitting.
 # It is the low-friction actuation of a ruling the human has made
 # (Accept/Discuss flow); the board renders the affordance on a subject whose
 # visit is un-engaged, and this verb performs it.
 # Discuss (engage) stays the path for a recommendation the operator wants to
 # weigh instead.
 #
-# Sling FIRST: only a landed dispatch dismisses the visit, so a sling that fails
-# leaves the visit for the operator to retry or Discuss.
+# The gate goes BEFORE the sling: the sling pours the work at once, and the run
+# it starts finds its work bead still blocked if the gate is open when it gets
+# there. Only a landed dispatch dismisses the visit, so a sling that fails
+# reopens the gate and leaves the visit for the operator to retry or Discuss.
 cmd_accept() {
     bead=""; accept_reason=""
     while [ $# -gt 0 ]; do
@@ -3008,10 +3069,11 @@ cmd_accept() {
     # from a stale board row, a copied command, or the window after engage bound
     # the visit by assignee. Re-read the live visit state and require the same
     # un-engaged predicate the board derives Accept from, refusing BEFORE the
-    # sling — and before the dismiss below could force-close a held visit over
-    # its holder's claim. Fail closed: a state this cannot read is not proof the
-    # visit is un-engaged. On a resume the sling already ran, so an absent visit
-    # means the prior run's dismiss also landed and there is nothing left to do.
+    # gate resolve and the sling — and before the dismiss below could
+    # force-close a held visit over its holder's claim. Fail closed: a state this
+    # cannot read is not proof the visit is un-engaged. On a resume the sling
+    # already ran, so an absent visit means the prior run's dismiss also landed
+    # and there is nothing left to do.
     if ! subject_unengaged "$bead"; then
         case "$UNENGAGED_STATE" in
             engaged) echo "$PROG: accept: $bead has an engaged visit — $UNENGAGED_WHY. The board offers Accept only on an un-engaged visit; take it up in the sitting (Discuss) or dismiss it there. Nothing dispatched." >&2 ;;
@@ -3030,16 +3092,49 @@ cmd_accept() {
         exit 4
     fi
 
+    # The recommendation reached the operator as a human gate on the subject,
+    # and Accept is the operator's answer to it, so the gate is resolved here,
+    # before the sling. The sling pours the work at once, and mol-polecat-work's
+    # load-context cancels a run whose work bead still has an open blocks
+    # blocker, so a gate resolved after the sling races the run it releases.
+    # Left open past the dismiss, the gate would hold the dispatched work out of
+    # `bd ready` with no sitting ever offered for it: the dismiss below closes
+    # the gate's visit, and gate-visit-sweep does not re-offer a gate it has
+    # stamped. A subject held on its visit alone carries no demand, and this
+    # resolves nothing. The board suppresses a closed demand's unanswered
+    # question, so no answer is stamped back onto the gate. A gate that will not
+    # resolve stops accept before the sling, with the gates it did resolve
+    # reopened. On a resume the sling already ran, so a gate a prior run left
+    # open is the write still owed, and a re-run after a refusal there resumes
+    # here without dispatching again.
+    if [ "$resume" = 1 ]; then
+        answer="${accept_reason:-accepted: dispatched $formula}"
+    else
+        answer="${accept_reason:-accepted: dispatching $formula}"
+    fi
+    if ! accept_resolve_demands "$bead" "$answer"; then
+        if [ "$resume" = 1 ]; then accept_demand_refused "$bead" "$formula"; fi
+        accept_dispatch_withheld "$bead" "$formula"
+    fi
+
     # Dispatch the recommendation AT the subject, the routed anchor (--on). gc
     # sling hands the formula its subject: a graph.v2 formula reads it as its
     # input convoy's one tracked member, and a classic formula gets it as the
     # issue var sling stamps. A graph.v2 formula refuses a caller-supplied issue,
     # so the sling carries no var of its own. A resume skips the sling — it
-    # already ran — and only finishes the record and the dismiss.
+    # already ran — and only finishes the record and the dismiss. A sling that
+    # fails sent nothing, so the operator's question stands: the gate resolved
+    # above is reopened for the retry or Discuss, and the visit stays.
     if [ "$resume" = 1 ]; then
         echo "$PROG: accept: $bead already carries a dispatched recommendation ($formula); resuming its dismiss, not dispatching again" >&2
     elif ! gc sling ${GC_RIG:+--rig "$GC_RIG"} "$bead" --on "$formula"; then
-        echo "$PROG: accept: 'gc sling ... --on $formula' failed for $bead — the visit is left open for retry or Discuss. Nothing dismissed." >&2
+        if ! accept_reopen_demands "$bead" "Accept's sling of $formula failed, so the question stands for a retry or Discuss"; then
+            echo "$PROG: accept: 'gc sling ... --on $formula' failed for $bead — the visit is left open for retry or Discuss. Nothing dismissed.$(accept_reopen_failed)" >&2
+            exit 4
+        fi
+        reopened=""
+        [ -z "$ACCEPT_DEMANDS_ANSWERED" ] || reopened=" The human gate it resolved for the dispatch is open again ($ACCEPT_DEMANDS_ANSWERED)."
+        echo "$PROG: accept: 'gc sling ... --on $formula' failed for $bead — the visit is left open for retry or Discuss. Nothing dismissed.$reopened" >&2
         exit 1
     else
         echo "$PROG: accept: dispatched $formula at $bead"
@@ -3052,18 +3147,6 @@ cmd_accept() {
         echo "$PROG: accept: dispatched $formula at $bead, but could not withdraw gc.recommended_formula (it still reads live). NOT dismissing: a later visit could re-offer Accept and dispatch $formula again. Clear gc.recommended_formula on $bead by hand, then dismiss its visit." >&2
         exit 4
     fi
-
-    # The recommendation reached the operator as a human gate on the subject,
-    # and Accept is the operator's answer to it, so the gate is resolved here.
-    # Left open, it would hold the dispatched work out of `bd ready` with no
-    # sitting ever offered for it: the dismiss below closes the gate's visit, and
-    # gate-visit-sweep does not re-offer a gate it has stamped. A subject held on
-    # its visit alone carries no demand, and this resolves nothing. The board
-    # suppresses a closed demand's unanswered question, so no answer is stamped
-    # back onto the gate. A gate that will not resolve refuses the dismiss, and a
-    # re-run resumes here, after the dispatch the marker above records.
-    accept_resolve_demands "$bead" "${accept_reason:-accepted: dispatched $formula}" \
-        || accept_demand_refused "$bead" "$formula"
 
     # The recommendation is dispatched, so the operator's decision is made: dismiss
     # the visit, reusing the listing subject_unengaged already read so cmd_dismiss
