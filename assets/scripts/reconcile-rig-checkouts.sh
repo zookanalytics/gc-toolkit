@@ -79,10 +79,10 @@
 # unchanged. It never goes over a file written there meanwhile, and when that
 # file already holds the same bytes, the copy goes instead. A pass interrupted in
 # that window leaves the copy there, and the next pass puts it back before it
-# fetches, since that needs no network. A copy that cannot go back stays there,
-# and HEAD no longer tracks its path, so no later keep finds it. While any copy
-# waits there, the rig escalates whatever its fast-forward did, and the
-# escalation resolves only once none does.
+# fetches, since that needs no network. A copy that cannot go back stays there.
+# Once its fast-forward has landed, HEAD no longer tracks its path, so no later
+# keep finds it. While any copy waits there, the rig escalates whatever its
+# fast-forward did, and the escalation resolves only once none does.
 #
 # A checkout that has diverged is almost always SHA churn from an upstream
 # rebase/squash/force-push: the live rigs/* checkout is a pure deployment mirror
@@ -795,9 +795,10 @@ while IFS=$'\t' read -r name path; do
         outcome=healed; reading="rigs/$name auto-healed: already-upstream, reset to $remote"
     fi
 
-    # A kept copy still waiting aside is a file the runtime reads on its path,
-    # and HEAD no longer tracks that path, so no later keep finds it. A move
-    # that landed therefore clears a lingering escalation only when none waits.
+    # A kept copy still waiting aside is a file the runtime reads on its path.
+    # Once its fast-forward has landed, HEAD no longer tracks that path, so no
+    # later keep finds it. A move that landed therefore clears a lingering
+    # escalation only when none waits.
     waiting_copies "$path"
     if [ -n "$outcome" ] && [ -z "$waiting_report" ]; then
         if [ "$outcome" = advanced ]; then advanced=$((advanced + 1)); else healed=$((healed + 1)); fi
