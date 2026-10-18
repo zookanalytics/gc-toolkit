@@ -311,11 +311,12 @@ overlap in section 9 of `specs/tk-zif1d8u/review-path.md`, which is on PR
 The gctk cutover, PR #1278, rewrites the correctness skill's
 `review-test-evidence` block and the prose around it to read the gctk rig
 record at the pinned commit, and retires the `self_review_passed_sha` stamp
-that the block reads today. It also changes `mol-review`'s workspace block and
-the self-review step of `mol-polecat-work`. The method-only skill unit starts
-from the block as the cutover leaves it. That unit, the finding contract and
-the prose terminus each wait on the cutover reaching main, so the cutover lands
-ahead of the method units even when the redesign reaches main before it.
+that the block reads today. It also adds the gctk binary to `mol-review`'s
+workspace block, and moves the setup, pre-flight and self-review runs of
+`mol-polecat-work` onto `gctk rig`. The method-only skill unit starts from the
+block as the cutover leaves it. That unit, the finding contract and the prose
+terminus each wait on the cutover reaching main, so the cutover lands ahead of
+the method units even when the redesign reaches main before it.
 
 ### tk-wigtu9: the prose terminus
 
