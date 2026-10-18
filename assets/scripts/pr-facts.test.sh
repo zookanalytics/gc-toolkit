@@ -2071,9 +2071,8 @@ eq "$(meta AE7 pr_comment_watermark)" "5601" "…and its comment routes"
 
 echo "# an unmarked reply under our login after the provenance cutover answers nothing"
 # A reply of ours is a post that is the city's own. An unmarked one under our own
-# login after the cutover is feedback, an operator's or a model's run on the
-# city's account, so it answers nothing in the thread it sits in: both comments
-# route.
+# login after the cutover is not, so it is feedback, whoever posted it, and it
+# answers nothing in the thread it sits in: both comments route.
 store "[$(anchor AE10 485 ',"pr_provenance_since":"2026-10-07T00:00:00Z"')]"
 printf '%s' "$(prview 485 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_485.json"
 echo '[]' > "$GH_DIR/reviews_485.json"
@@ -4876,10 +4875,10 @@ has "$(treply 326 T-326a)" "✅ Fixed on this PR (KTG)." "the routed comment is 
 eq "$(thumbed 326 NC-326a)" "true" "…and marked resolved"
 
 echo "# an unmarked review under our OWN login from before the cutover leaves threads arm 7 never routes"
-# The gap: an outside review agent (or an operator-run review) posted findings on
-# a green PR under the automation's own login before the city marked its posts.
-# arm 7 reads such a post as the city's own, so it routes nothing; the check
-# stays green, and until this backstop nothing flagged it.
+# The gap: a review posted findings on a green PR under the automation's own
+# login before the city marked its posts. arm 7 reads such a post as the city's
+# own, so it routes nothing; the check stays green, and until this backstop
+# nothing flagged it.
 store "[$(anchor UT1 60 "$UTCUT")]"
 printf '%s' "$(prview 60 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_60.json"
 printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","pull_request_review_id":null,"created_at":"2026-10-06T12:00:00Z"}]' > "$GH_DIR/comments_60.json"

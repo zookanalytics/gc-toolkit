@@ -899,9 +899,9 @@ fi
 
 # --- provenance ----------------------------------------------------------
 
-# The city posts on a pull request under the same login an operator's review
-# tools can use, so pr-facts.sh tells the city's own post from feedback by the
-# provenance mark pr-post.sh appends, never by the author. A post on a
+# The city posts on a pull request under the bot account that backs every
+# agent's gh token, so pr-facts.sh tells the city's own post from feedback by
+# the provenance mark pr-post.sh appends, never by the author. A post on a
 # repository we own passes the origin rule and is then held to the mark: its
 # body, inline or in a file this guard can read, has to carry it. What counts as
 # the mark is pr-post.sh's own definition, read from beside this script.
@@ -1099,9 +1099,9 @@ SCANLINES
 if [ -n "$UNMARKED" ]; then
     deny "gh-origin-guard: refused \`gh $NOUN $VERB\`${TARGET:+ on $TARGET}: $UNMARKED.
 
-The city posts on a pull request under the same login an operator's review
-tools can use, so pr-facts.sh tells the city's own posts from feedback by the
-provenance mark, not by the author. A post without the mark reads back as
+The city posts on a pull request under the bot account that backs every
+agent's gh token, so pr-facts.sh tells the city's own posts from feedback by
+the provenance mark, not by the author. A post without the mark reads back as
 feedback, and the reconcile routes it into a rework child that answers the
 city's own words.
 

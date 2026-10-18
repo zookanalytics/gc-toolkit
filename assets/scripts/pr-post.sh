@@ -4,12 +4,12 @@
 #
 # The city posts under the bot account that backs every agent's gh token, so an
 # author does not say whether a comment is a city notice or feedback for the
-# city to answer. The mark says it. Every body this script
-# posts carries the marker below, and a review, inline comment, or conversation
-# comment without one is feedback, whoever wrote it. The readers ask that
-# question through `own-def`, which prints the one definition of "the city's
-# own post"; tools/lint-learned.d/pr-post-bypass.sh fails a post anywhere in the
-# pack that does not come through here.
+# city to answer. The mark says it. Every body this script posts carries the
+# marker below, and a review, inline comment, or conversation comment without
+# one is feedback, whoever wrote it. The readers ask that question through
+# `own-def`, which prints the one definition of "the city's own post";
+# tools/lint-learned.d/pr-post-bypass.sh fails a post anywhere in the pack that
+# does not come through here.
 #
 # The definition also covers what the city posted before it marked anything.
 # A post under the city's login that carries no mark is the city's own when it
