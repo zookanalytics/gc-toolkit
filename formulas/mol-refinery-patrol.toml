@@ -820,7 +820,8 @@ for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC
   [ -x "$c/assets/scripts/direct-merge-push.sh" ] && { DMP="$c/assets/scripts/direct-merge-push.sh"; break; }
 done
 [ -n "$DMP" ] || { echo "direct-merge-push.sh not found; NOT landing $WORK, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
-"$DMP" --work "$WORK" --target "$TARGET"; DIRECT_RC=$?
+DIRECT_RC=0
+"$DMP" --work "$WORK" --target "$TARGET" || DIRECT_RC=$?
 case "$DIRECT_RC" in
   0) ;;
   3) MERGE_STRATEGY=mr ;;

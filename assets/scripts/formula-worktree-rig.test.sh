@@ -399,6 +399,42 @@ grep -qxF 'runtime drain-ack' "$D/gc.log" 2>/dev/null \
   || bad "direct-merge/nomatch: the refinery drains, leaving the work to retry"
 eq "$(ls -A "$D/tmp" | count)" 0 "direct-merge/nomatch: nothing is left under TMPDIR"
 
+# protected_case <label> [<bash option>...]: the block against an origin that
+# refuses the push for branch protection, followed by the strategy the mr path
+# reads. Sets RC and D (and patrol_rig's globals).
+{ cat "$TMP/merge.sh"; echo 'echo "MERGE_STRATEGY=${MERGE_STRATEGY:-unset}"'; } > "$TMP/merge-then.sh"
+protected_case() {
+  local d="$TMP/merge-protected-$1" rc=0
+  shift
+  mkdir -p "$d/tmp"
+  patrol_rig "$d" "merge protected"
+  git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "GH006: Protected branch update failed for refs/heads/main." >&2' 'exit 1' \
+    > "$d/origin.git/hooks/pre-receive"
+  chmod +x "$d/origin.git/hooks/pre-receive"
+  pick env "$d/rig"
+  ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET=main BRANCH=polecat/wb \
+      GC_CITY_PATH="$PACK_CITY" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$@" "$TMP/merge-then.sh" ) >"$d/out" 2>&1 || rc=$?
+  RC=$rc; D=$d
+}
+
+# The script's exit 3 sends the block on to the mr path, undrained, with errexit
+# off as in an agent's Bash tool and on as in a shell that keeps it.
+for errexit in off on; do
+  if [ "$errexit" = on ]; then protected_case "$errexit" -eu; else protected_case "$errexit"; fi
+  eq "$RC" 0 "direct-merge/protected, errexit $errexit: the block goes on past the promotion"
+  eq "$(grep '^MERGE_STRATEGY=' "$D/out" || true)" "MERGE_STRATEGY=mr" "direct-merge/protected, errexit $errexit: the block takes the mr path"
+  grep -qxF 'bd update wb --set-metadata merge_strategy=pr' "$D/gc.log" 2>/dev/null \
+    && ok "direct-merge/protected, errexit $errexit: the bead is promoted to merge_strategy=pr" \
+    || bad "direct-merge/protected, errexit $errexit: the bead is promoted to merge_strategy=pr"
+  grep -qxF 'runtime drain-ack' "$D/gc.log" 2>/dev/null \
+    && bad "direct-merge/protected, errexit $errexit: the refinery does not drain" \
+    || ok "direct-merge/protected, errexit $errexit: the refinery does not drain"
+  eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "direct-merge/protected, errexit $errexit: nothing landed on the rig's origin"
+  [ ! -s "$D/lc.log" ] && ok "direct-merge/protected, errexit $errexit: no lifecycle transition" \
+    || bad "direct-merge/protected, errexit $errexit: no lifecycle transition"
+done
+
 # --- 6. mol-refinery-patrol resolves RIG_ROOT one way. -------------------------
 # Every refinery block derives the prep worktree's path from RIG_ROOT, so two
 # blocks that resolved it differently could stage and read different repos.
