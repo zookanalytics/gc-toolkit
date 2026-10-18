@@ -17,7 +17,9 @@
 #     fetch or while the landing was stamped, and one that shares no history
 #     with origin/main exits 1;
 #   - a prepared head origin/main already carries closes as that tip, or at the
-#     bead's stamp when origin/main carries the stamp too;
+#     bead's stamp when origin/main carries the stamp too, and a bead that does
+#     not read back is not recorded and keeps its stamp, so a later attempt
+#     records the landing at the stamp and not at a later tip;
 #   - a landing whose read-back fetch or transition fails is tried again, and
 #     one that still fails exits 1 and keeps its stamp, so the next patrol's
 #     attempt records it at the stamp, whether origin/main stayed at the
@@ -449,6 +451,29 @@ run
 eq "$RC" 0 "lcfail-later, next patrol: exits 0"
 recorded_at "lcfail-later, next patrol (the landing, not the later tip)" "$FEATURE"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$LATER" "lcfail-later, next patrol: origin/main stays at the later tip"
+
+echo "── the same, when the bead does not read back: nothing is recorded, and the stamp stays ──"
+setup "$TMP/unread"
+run LC_FAIL=1
+eq "$RC/$(stamp)" "1/$FEATURE" "unread: the landing is unrecorded and the bead keeps the stamp"
+git -C "$D/seed" fetch -q "$D/origin.git" main
+git -C "$D/seed" checkout -q -B main FETCH_HEAD
+LATER=$(commit "$D/seed" "landed after the unrecorded landing")
+git -C "$D/seed" push -q "$D/origin.git" main
+next_patrol
+# The stub writes each transition here, so one recorded at the later tip
+# would clear the stamp.
+run BD_SHOW_FAIL=1 LC_WRITE_RC=0
+eq "$RC" 1 "unread, next patrol: exits 1"
+has "$OUT" "but wb did not read back" "unread, next patrol: it says the bead did not read back"
+no_transition "unread, next patrol"
+eq "$(stamp)" "$FEATURE" "unread, next patrol: the bead keeps the stamp"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$LATER" "unread, next patrol: origin/main stays at the later tip"
+no_drain "unread, next patrol"
+run LC_WRITE_RC=0
+eq "$RC" 0 "unread, once the bead reads back: exits 0"
+recorded_at "unread, once the bead reads back (the landing, not the later tip)" "$FEATURE"
+eq "$(stamp)" none "unread, once the bead reads back: the transition clears the stamp"
 
 echo "── a read-back fetch that keeps failing keeps the stamp, and the next patrol records it ──"
 setup "$TMP/fetch-down"

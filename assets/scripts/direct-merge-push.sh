@@ -18,10 +18,14 @@
 # The fast-forward is checked against origin/<target> fetched first. A prepared
 # head that is neither behind nor ahead of it was prepared on a target that has
 # moved since. Nothing is pushed or recorded, and the exit (4) tells the caller
-# that the next patrol prepares the branch again. A prepared head
-# origin/<target> already carries has nothing to push and is recorded as
-# landed: at the bead's direct_landing_sha when origin/<target> carries that
-# too, else at the target's tip.
+# that the next patrol prepares the branch again.
+#
+# A prepared head origin/<target> already carries has nothing to push and is
+# recorded as landed: at the bead's direct_landing_sha when origin/<target>
+# carries that too, else at the target's tip. A bead that does not read back is
+# not recorded. Its stamp cannot be told from an absent one then, and a landing
+# recorded at the tip would name whatever commit landed after it and clear the
+# stamp that names the real one. The exit is 1, and a later patrol tries again.
 #
 # Before the push, the commit is stamped on the bead as direct_landing_sha and
 # read back, and a bead the stamp does not reach is not pushed. A landing whose
@@ -138,7 +142,11 @@ PREPARED=$(git -C "$PREP_WT" rev-parse --verify -q HEAD) || { echo "no prepared 
 TIP=$(git -C "$RIG_ROOT" rev-parse --verify -q "refs/remotes/origin/$TARGET") || { echo "origin/$TARGET did not resolve after its fetch; nothing landed"; exit 1; }
 STAMP=""
 if carries "$TIP" "$PREPARED"; then
-  STAMP=$(row_meta "$(bd_json show "$WORK")" direct_landing_sha)
+  if ! bead_row; then
+    echo "origin/$TARGET at $TIP already carries the prepared head $PREPARED, but $WORK did not read back, so nothing shows which commit its direct_landing_sha names; nothing recorded, and a later patrol tries again"
+    exit 1
+  fi
+  STAMP=$(row_meta "$ROW" direct_landing_sha)
   if [ -n "$STAMP" ] && carries "$TIP" "$STAMP"; then
     MERGED_SHA="$STAMP"
   else
