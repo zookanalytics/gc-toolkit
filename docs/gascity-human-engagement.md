@@ -560,8 +560,10 @@ resolves every open, unassigned demand on the subject, the reaction's gate among
 them, before it dispatches the recommended mol. The order matters because the
 dispatch starts the run at once, and `mol-polecat-work`'s load-context cancels a
 run whose work bead still has an open blocker. A demand that will not resolve
-stops Accept before the dispatch, and a dispatch that fails reopens the demands
-Accept resolved, so the question stands whenever nothing was sent. Accept
+stops Accept before the dispatch. When the dispatch does not land, because a
+demand would not resolve or the sling failed, Accept reopens the demands it
+resolved, so the question stands. When a reopen does not land or cannot be read
+back, Accept exits 4 and names the demands to check and reopen by hand. Accept
 dismisses the subject's visits only after the dispatch lands. Dismissing the
 visit without an answer leaves the gate open and the question owed, with no
 second visit offered unless `gc.gate_visit` is unset.

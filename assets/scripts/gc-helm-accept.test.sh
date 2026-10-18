@@ -384,12 +384,15 @@ grep -q 'nothing is dispatched' <<< "$ERR" \
 unset FAKE_DEMAND_STUCK
 
 # --- (GATESTUCKRESUME) a dispatched subject whose gate stays open -> no dismiss --
-# On a resume the sling already ran, so the gate is the write still owed: the
-# refusal says a re-run resumes at the resolve, nothing is slung again, and the
-# answer stands, since the dispatch it answers has landed.
+# On a resume the sling already ran, so the gate is the write still owed. Its
+# answer names the dispatch as landed, the refusal says a re-run resumes at the
+# resolve, nothing is slung again, and the answer stands, since the dispatch it
+# answers has landed.
 export FAKE_DEMAND_STUCK=1 FAKE_FORMULA="" FAKE_DISPATCHED="$FORMULA"
 run_accept "$SUBJ"
 eq "$RC" "4" "(GATESTUCKRESUME) a resume whose gate stays open fails closed (exit 4)"
+grep -q "^bd gate resolve tk-gate1 --reason accepted: dispatched $FORMULA" <<< "$CALLS" \
+  && ok "(GATESTUCKRESUME) answers the gate with the dispatch as landed" || bad "(GATESTUCKRESUME) resume answer (calls: $CALLS)"
 grep -q '^sling ' <<< "$CALLS" \
   && bad "(GATESTUCKRESUME) must NOT sling again (calls: $CALLS)" || ok "(GATESTUCKRESUME) does not sling again"
 grep -q "bd close $VIS" <<< "$CALLS" \
