@@ -158,10 +158,12 @@ implementation.
 
 The recommend-to-Accept-to-sling path carries the pattern with no special
 handling. The recommendation is `gc.recommended_formula = mol-design-convoy` on
-the subject, the board offers Accept while that key is non-empty, and
-`gc-helm.sh accept` slings `gc sling <subject> --on mol-design-convoy`. The
-sling carries no `--var`, because a graph.v2 formula refuses a caller-supplied
-`issue`.
+the subject, and the board offers Accept while that key is non-empty. Accept
+(`gc-helm.sh accept`) runs
+`gc sling --rig <the subject's rig> <subject> --on mol-design-convoy`. The
+`--rig` pin resolves the subject in its own rig's store, whatever directory the
+sling runs from. The sling carries no `issue` var, because graph.v2 reserves
+`issue`, `convoy_id` and `bead_id`.
 
 Two convoys share the word. Accept's sling creates an **input convoy** whose
 one tracked member is the subject, which the formula reads as `{{convoy_id}}`.
