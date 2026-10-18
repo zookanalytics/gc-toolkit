@@ -70,6 +70,18 @@ closed. The block's exit statuses stay unread: a run that stops leaves no
 record of itself, so what can stand for it at HEAD is only a record of the
 same run made earlier, the one a later call answers from without running.
 
+One case is left to tk-ogz7u5m. A run call that declares the full suite also
+answers from a full-suite pass of its command recorded at any commit whose
+tree is HEAD's, while `--check` reports HEAD's own record first. So when a rig
+declares the full suite and no affected subset, and HEAD's own test record is
+an affected or nothing-declared one, which leaves the tree's entry in place,
+the block's call runs nothing and the condition reads another run's record on
+every iteration. Only `--force` records the declared run there. No rig in this
+city declares the full suite alone. The lasting fix moves the match into gctk,
+so that `--check` answers for the run its caller declares. It ships in gctk
+before the script uses it, because the condition runs whichever binary is
+deployed, and an older one refuses the new flags.
+
 A `--check` that exits 4 read nothing about the code: the record store was
 unreadable, or gctk's status counts a change that the plain status of the
 condition's clean-tree step does not, such as an untracked file under
