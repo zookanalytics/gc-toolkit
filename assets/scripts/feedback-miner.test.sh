@@ -770,6 +770,49 @@ OUT=$("$SUT" summary --dir "$W")
 has "$OUT" "outside capture from $(day 3)" "(89) with no back-fill window the first run reads the standing window"
 has "$OUT" "outside posts: 8 read, 0 recorded before this run, 1 filed now, 7 left unrecorded" "(90) the summary counts the outside capture"
 
+echo "── file: a post the store already records leaves show's list ──"
+"$SUT" file --dir "$W" >/dev/null 2>&1 <<ROWS_EOF
+{"key": "$(key 11 comment 201)", "statement": "Again."}
+ROWS_EOF
+has "$("$SUT" summary --dir "$W")" "outside posts: 8 read, 0 recorded before this run, 1 filed now, 7 left unrecorded" \
+    "(90a) a post this run filed, filed again, is still counted once, as filed now"
+# Another writer records review 101 after the sweep read the store.
+store_obs() { # <id> <post key> <category>
+  jq --arg id "$1" --arg k "$2" --arg c "$3" '. + [{id: $id, title: "obs: recorded elsewhere", status: "closed",
+      labels: ["learning", "observation"], metadata: {task_kind: "observation", "obs.provenance": $k, "obs.category": $c}}]' \
+    "$STORE/obs.json" > "$STORE/obs.next" && mv "$STORE/obs.next" "$STORE/obs.json"
+}
+store_obs tk-other1 "$(key 11 review 101)" outside-review
+has "$("$SUT" show --dir "$W" --outside --limit 50)" "--- $(key 11 review 101)" "(90b) show offers a post the store recorded after the sweep"
+OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
+{"key": "$(key 11 review 101)", "statement": "Asks for the function to be split."}
+ROWS_EOF
+)
+has "$OUT" "filed 0, skipped 1" "(90c) file skips it as already recorded"
+hasnt "$("$SUT" show --dir "$W" --outside --limit 50)" "--- $(key 11 review 101)" "(90d) and show no longer offers it"
+has "$("$SUT" summary --dir "$W")" "outside posts: 8 read, 1 recorded before this run, 1 filed now, 6 left unrecorded" \
+    "(90e) the summary counts it as recorded, not as filed now"
+# A create whose observation landed but whose answer was lost.
+OUT=$(STUB_CREATE_LOST=1 "$SUT" file --dir "$W" <<ROWS_EOF 2>&1
+{"key": "$(key 11 review 105)", "statement": "Copilot found a possible null dereference."}
+ROWS_EOF
+); RC=$?
+eq "$RC" "1" "(90f) a create that answers with no id fails the call"
+has "$("$SUT" show --dir "$W" --outside --limit 50)" "--- $(key 11 review 105)" "(90g) and show still offers the post"
+OUT=$("$SUT" file --dir "$W" <<ROWS_EOF 2>&1
+{"key": "$(key 11 review 105)", "statement": "Copilot found a possible null dereference."}
+ROWS_EOF
+)
+has "$OUT" "filed 0, skipped 1" "(90h) the retry finds the observation the create left"
+hasnt "$("$SUT" show --dir "$W" --outside --limit 50)" "--- $(key 11 review 105)" "(90i) and show no longer offers the post"
+# A city post the store records under its own category is not captured.
+store_obs tk-other2 "$(key 11 review 104)" verdict-names-commit
+"$SUT" file --dir "$W" >/dev/null 2>&1 <<ROWS_EOF
+{"key": "$(key 11 review 104)", "statement": "Verdicts should name the commit.", "category": "verdict-names-commit", "norm": "Name the reviewed commit."}
+ROWS_EOF
+eq "$(field_of "$(key 11 review 104)" captured)" "false" "(90j) a city post skipped under its own category does not read as captured"
+has "$("$SUT" show --dir "$W" --city)" "already recorded on this post: tk-other2" "(90k) and show names the record it skipped on"
+
 echo "── show prints every post whole, and a long one in parts ──"
 # PR 15 joins the fixture for this section: a review whose point sits past
 # character 2,000, and a conversation comment longer than one call's budget.

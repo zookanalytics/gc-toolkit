@@ -543,6 +543,10 @@ if [ "$VERB" = file ]; then
 
   STANDING_DONE=$(awk -F'\t' '$2 == "standing" { n++ } END { print n + 0 }' "$DIR/filed.tsv")
   FILED=0; SKIPPED=0; CAPPED=0; FAILED=0
+  # The posts skipped because the store records them and this run did not file
+  # them: another run recorded them after the sweep read the store, or a create
+  # whose answer was lost did.
+  REFRESH="$DIR/refresh.$$"; : > "$REFRESH"
   # The store read above dedups against what earlier calls filed; this list
   # dedups two rows of this call that name one post and one category.
   THIS_CALL=$'\n'
@@ -550,7 +554,9 @@ if [ "$VERB" = file ]; then
     key=$(printf '%s' "$a" | jq -r '.key'); act=$(printf '%s' "$a" | jq -r '.act')
     case "$act" in
       error) err "row for $key not filed: $(printf '%s' "$a" | jq -r '.why')"; BAD=$((BAD + 1)); continue ;;
-      skip)  echo "$PROG: $key $(printf '%s' "$a" | jq -r '.why') — skipped"; SKIPPED=$((SKIPPED + 1)); continue ;;
+      skip)  echo "$PROG: $key $(printf '%s' "$a" | jq -r '.why') — skipped"; SKIPPED=$((SKIPPED + 1))
+             awk -F'\t' -v k="$key" '$1 == k { f = 1 } END { exit !f }' "$DIR/filed.tsv" || printf '%s\n' "$key" >> "$REFRESH"
+             continue ;;
     esac
     kind=$(printf '%s' "$a" | jq -r '.kind'); cat_=$(printf '%s' "$a" | jq -r '.cat')
     case "$THIS_CALL" in *$'\n'"$key|$cat_"$'\n'*)
@@ -575,7 +581,19 @@ if [ "$VERB" = file ]; then
     echo "$PROG: filed $id ($kind) for $key"
     FILED=$((FILED + 1))
   done < "$ACTIONS"
-  rm -f "$ROWS" "$ACTIONS" "$DIR/actions.err" "$DIR/obs.now.json" "$DIR/create.err"
+  # Each such post takes the store's record into the sweep, so show stops
+  # offering it and the summary counts it as recorded before this run, not as
+  # filed now. It reads as captured only when the store holds its
+  # outside-review observation.
+  if [ -s "$REFRESH" ]; then
+    jq -c --slurpfile obs "$DIR/obs.now.json" --rawfile keys "$REFRESH" --arg oc "$OUTSIDE_CATEGORY" '
+      ($keys | split("\n") | map(select(length > 0))) as $ks
+      | if (.key as $k | $ks | index([$k])) != null
+        then ($obs[0][.key] // []) as $r | . + {recorded: $r, captured: any($r[]; .category == $oc)}
+        else . end' "$DIR/sweep.jsonl" > "$DIR/sweep.next" && mv -f "$DIR/sweep.next" "$DIR/sweep.jsonl" \
+      || warn "could not take the store's record of the skipped post(s) into the sweep, so show may offer them again"
+  fi
+  rm -f "$ROWS" "$ACTIONS" "$DIR/actions.err" "$DIR/obs.now.json" "$DIR/create.err" "$REFRESH"
   echo "$PROG: filed $FILED, skipped $SKIPPED already recorded, dropped $CAPPED for the cap, $BAD row(s) refused, $FAILED create(s) failed"
   [ "$BAD" = 0 ] && [ "$FAILED" = 0 ] || exit 1
   exit 0
