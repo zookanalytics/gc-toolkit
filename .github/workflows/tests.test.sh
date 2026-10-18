@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# tests.test.sh — guards the draft CI-cost gate in tests.yml, and the name of
-# the check main's ruleset requires.
+# tests.test.sh — guards the draft CI-cost gate in tests.yml, the jq check
+# each job runs before the suite, and the name of the check main's ruleset
+# requires.
 #
 # A draft pull request must not run the *.test.sh suite, so a change still
 # taking follow-up commits does not spend Actions minutes on every push. A push
@@ -9,6 +10,10 @@
 # that runs the suite must hold them: a regression that drops any one spends
 # minutes on drafts or skips CI where it is required. The draft flag carries no
 # workflow state; this gate is only a CI-cost lever.
+#
+# Every job that runs the suite runs check-jq.sh before it, so a job whose
+# runner resolves a jq older than 1.8 fails by name instead of running the
+# suite on it.
 #
 # Main's ruleset requires the check named test. A job's check takes the job's
 # id unless the job sets name: or a matrix, and either one renames it, so every
@@ -61,6 +66,30 @@ for j in $jobs; do
     grep -Fq "github.event_name != 'pull_request'" <<<"$gate" \
         || note "job '$j' must let non-pull_request events run, or pushes to main stop running the suite"
 done
+
+# The first line outside a comment in each job that runs check-jq.sh, and the
+# first that runs the suite, as one "<job>\t<line>\t<line>" row per job, with 0
+# for a job that runs neither.
+jq_check_lines() {
+    awk '
+        function flush() { if (job != "") print job "\t" check "\t" suite; job = "" }
+        /^jobs:[[:space:]]*$/ { in_jobs = 1; next }
+        in_jobs && /^[^[:space:]#]/ { flush(); in_jobs = 0 }
+        !in_jobs { next }
+        /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { flush(); job = $1; sub(/:$/, "", job); check = 0; suite = 0; next }
+        /^[[:space:]]*#/ { next }
+        job != "" && check == 0 && /check-jq\.sh/ { check = NR }
+        job != "" && suite == 0 && /run-tests\.sh/ { suite = NR }
+        END { flush() }' "$WF"
+}
+while IFS=$'\t' read -r j check suite; do
+    [ "$suite" -gt 0 ] || continue
+    if [ "$check" -eq 0 ]; then
+        note "job '$j' must run check-jq.sh, or it runs the suite on whatever jq its runner resolves"
+    elif [ "$check" -gt "$suite" ]; then
+        note "job '$j' must run check-jq.sh before the suite, not after it"
+    fi
+done < <(jq_check_lines)
 
 grep -qx test <<<"$jobs" \
     || note "a job with the id 'test' must exist; main's ruleset requires the check named test"

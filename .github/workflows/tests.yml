@@ -77,6 +77,11 @@ jobs:
           chmod +x "$dir/jq"
           echo "$dir" >> "$GITHUB_PATH"
 
+      # A PATH change reaches only the steps after the one that makes it, so
+      # the jq the suite resolves is checked in a step of its own.
+      - name: Check the runner resolves jq 1.8 or later
+        run: bash .github/workflows/check-jq.sh
+
       # The runner serves this job alone, so the suite takes every core.
       # run-tests.sh defaults to half of them, which leaves a shared host's
       # agents room, and at that count this job runs about twice as long.
@@ -118,8 +123,9 @@ jobs:
       # This job tests the BSD userland only while the runner resolves the
       # tools the host does. Without a tomllib python3, the suites that read
       # TOML skip and still pass, and without tmux one case does the same. A
-      # GNU tool ahead of /usr/bin on PATH lets a GNU-only construct pass. Any
-      # such drift fails this step by name instead.
+      # GNU tool ahead of /usr/bin on PATH lets a GNU-only construct pass, and a
+      # jq older than 1.8 rejects programs the host's jq compiles. Any such
+      # drift fails this step by name instead.
       - name: Check the runner resolves the host's tools
         run: |
           sw_vers
@@ -129,7 +135,8 @@ jobs:
           env bash --version | head -n 1
           python3 -c 'import sys, tomllib; print(sys.executable, sys.version.split()[0], "has tomllib")' \
             || { echo "::error::python3 ($(command -v python3)) has no tomllib"; fail=1; }
-          for t in jq go git timeout flock tmux; do
+          bash .github/workflows/check-jq.sh || fail=1
+          for t in go git timeout flock tmux; do
             p="$(command -v "$t")" || { echo "::error::$t is not on PATH"; fail=1; continue; }
             echo "$t: $p"
           done
