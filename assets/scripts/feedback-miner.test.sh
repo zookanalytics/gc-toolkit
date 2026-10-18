@@ -852,7 +852,7 @@ fresh_dir o2
 eq "$(class_of "$(key 12 comment 401)")" "outside" "(85l) so a later run with a 3-day window reads it again"
 # A PR's posts that do not copy into the sweep whole stop the sweep with no
 # read.txt, so advance cannot move the day past that PR. The cat stand-in fails
-# partway through PR 12's posts, the ten-day-old PR only the back-fill reads.
+# on PR 12's posts, the ten-day-old PR only the back-fill reads.
 fresh_dir catfail
 kv_put "$(day 30)"
 OUT=$(PATH="$FAULTBIN:$PATH" STUB_CAT_FAIL=/prs/12.jsonl "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" 2>&1); RC=$?
