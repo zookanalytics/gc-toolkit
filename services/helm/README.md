@@ -1462,6 +1462,35 @@ The standalone invocation above reaches the supervisor over HTTP; to run it on
 the library backend instead, pass `GC_CITY_PATH` (the supervisor already injects
 it under a real service mount) and leave `GC_HELM_SOURCE` unset.
 
+## The board on fixture data (`helm-fixture`)
+
+`cmd/helm-fixture` serves the app this commit embeds with no city behind it.
+`/helm` answers a board file as JSON, and `POST /helm/<verb>` answers a canned
+answer, so nothing it serves reads or writes a city. A demo capture of the board
+runs it as its `--serve` command (`docs/review-demo.md`).
+
+```bash
+cd services/helm
+PORT=5199 go run ./cmd/helm-fixture        # the contract sample, on 127.0.0.1:5199
+go run ./cmd/helm-fixture --addr 127.0.0.1:5199 --board <file> --answers <dir>
+```
+
+- `--board` is the board answer, in the shape `web/src/contract.ts` names. The
+  default is `web/src/board.fixture.json`, the contract sample `TestBoardFixture`
+  writes, which carries every key of the board contract.
+- `--answers` is a directory of canned write answers. `dismiss.json` is the 200
+  answer to `POST /helm/dismiss`, in the shape `web/src/actuate/client.ts` reads
+  (`web/src/open/client.ts` for `open`). `dismiss.409.json` answers with status
+  409 instead, which the app reads as a refusal. A verb with no answer is refused
+  with 503 and reason `unavailable`, as helm-svc refuses a write when it has no
+  write tool.
+- It listens on loopback only: `--addr`, else `127.0.0.1:$PORT`.
+
+It is a command of its own, not a helm-svc subcommand, because a cold build of
+helm-svc, which links Dolt through cgo, takes minutes, past the 30 s a capture's
+engine waits for a `--serve` command to answer. Its tests hold its import graph
+to the standard library, the app's package and `internal/fixture`.
+
 ## What's proven vs. deferred
 
 **Proven** (the `tk-sy3vj` spike): the spine works end-to-end against the live
