@@ -274,7 +274,7 @@ const MARKDOWN_CSS = `
 .markdown-body .highlight { margin-bottom: 16px; }
 .markdown-body .highlight pre { margin-bottom: 0; word-break: normal; }
 .markdown-body blockquote { margin-left: 0; margin-right: 0; padding: 0 1em; color: #59636e; border-left: .25em solid #d1d9e0; }
-.markdown-body hr { box-sizing: content-box; height: .25em; padding: 0; margin: 24px 0; overflow: hidden; background-color: #d1d9e0; border: 0; }
+.markdown-body hr { height: 1px; margin: 24px 0; background-color: #d1d9e0; border: 0; padding: 0; }
 .markdown-body table { display: block; width: max-content; max-width: 100%; overflow: auto; border-spacing: 0; border-collapse: collapse; font-variant: tabular-nums; }
 .markdown-body table th { font-weight: 600; }
 .markdown-body table th, .markdown-body table td { padding: 6px 13px; border: 1px solid #d1d9e0; }
