@@ -529,7 +529,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 		m.held++
 		return
 	}
-	ng, laneOK := m.firstNotgreenLane(id, checkset)
+	ng, laneOK := m.firstNotgreenLane(id, checkset, headOid)
 	if !laneOK {
 		fmt.Fprintf(m.stdout, "%s: PR#%s lane state unreadable on anchor %s; merge held\n", mergeProg, num, id)
 		m.held++
@@ -757,7 +757,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 	freason := terminalReason(final, num, base, liveURL, headRef, lifted)
 	if freason == "OK" {
 		fcs := final.Meta("check_set")
-		if rg, ok := m.firstNotgreenLane(id, fcs); !ok {
+		if rg, ok := m.firstNotgreenLane(id, fcs, headOid); !ok {
 			freason = "lane state unreadable before the merge"
 		} else if rg != "" {
 			freason = "lane " + rg + " is no longer green"
@@ -979,14 +979,15 @@ func (m *merger) prViewSettled(num string, pinnedRaw []byte) (outcome settledOut
 }
 
 // firstNotgreenLane returns the first declared lane that does not derive green.
-// The lanes are the ones review-checks.sh resolves for the merge, which drops
-// the non-lanes none/off and the approval merge rule. ok=false is a state the
-// caller holds on: the resolver exited non-zero, or a lane was unreadable
-// (lane-state green exit 2). A resolver that dies prints nothing, and reading
-// that as no lanes would merge on approval alone. An empty lane with ok=true
-// means every declared lane is green.
-func (m *merger) firstNotgreenLane(anchor, checkSet string) (lane string, ok bool) {
-	lanes, rrc := m.scriptCapture("review-checks.sh", "--resolve", "--check-set", checkSet, "--through", "merge")
+// The lanes are the ones review-checks.sh resolves for the merge at headOid, the
+// head this pass merges with --match-head-commit, which drops the non-lanes
+// none/off and the approval merge rule. ok=false is a state the caller holds on:
+// the resolver exited non-zero, which it does for an empty headOid as well, or a
+// lane was unreadable (lane-state green exit 2). A resolver that dies prints
+// nothing, and reading that as no lanes would merge on approval alone. An empty
+// lane with ok=true means every declared lane is green.
+func (m *merger) firstNotgreenLane(anchor, checkSet, headOid string) (lane string, ok bool) {
+	lanes, rrc := m.scriptCapture("review-checks.sh", "--resolve", "--check-set", checkSet, "--through", "merge", "--at", headOid)
 	if rrc != 0 {
 		return "", false
 	}

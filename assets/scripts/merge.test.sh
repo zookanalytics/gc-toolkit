@@ -147,6 +147,19 @@ eq "$(meta M1 merged_sha)" "merged-sha-10" "merged_sha recorded from mergeCommit
 has "$(notes M1)" "Merged to main at merged-s" "the close reason names the landing"
 eq "$(grep -c '^bd update M1' "$STUB_GC_LOG" || true)" "1" "ONE lifecycle update carried close+record"
 
+echo "# the lanes are resolved at the head the merge is pinned to"
+# The resolver logs the arguments it is asked with, then runs as itself.
+store "[$(anchor MA1 9063), $(rev MA1)]"
+printf '%s' "$(prview 9063 OPEN CLEAN)" > "$GH_DIR/pr_view_9063.json"
+approved 9063
+cp "$SD/review-checks.sh" "$TMP/review-checks.real"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexec "%s" "$@"\n' "$TMP/resolver.log" "$TMP/review-checks.real" > "$SD/review-checks.sh"
+chmod +x "$SD/review-checks.sh"; : > "$TMP/resolver.log"; : > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1); rc=$?
+cp "$TMP/review-checks.real" "$SD/review-checks.sh"; chmod +x "$SD/review-checks.sh"
+has "$(cat "$STUB_GH_LOG")" "pr merge 9063 --repo github.com/zook/gc-toolkit --squash --match-head-commit sha-9063" "the merge is pinned to the PR head"
+eq "$(grep -c -- '--through merge --at sha-9063$' "$TMP/resolver.log")" "2" "…and both lane checks, the gate and the terminal re-read, resolve at that head"
+
 echo "# a resolver that dies mid-run holds the merge (never reads empty as 'no lanes')"
 # The lane check captures the resolver's exit status: a crash prints nothing,
 # and an empty lane list would read as all-green and merge on approval alone. Here
