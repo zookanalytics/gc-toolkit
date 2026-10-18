@@ -146,8 +146,10 @@ epic's notes carry each ruling as it was made.
 - **Where the method lives.** Belongs names the correctness skill and its
   ledger, including how correctness uses subagents. The shared review formula
   keeps only the guardrails every check shares. Since #1262 (tk-2ftpwgr) the
-  method lives in the skill and `mol-review.toml` carries the lifecycle, a split
-  `assets/scripts/review-method.test.sh` holds.
+  method lives in the skill and `mol-review.toml` carries the lifecycle. On
+  main, `assets/scripts/review-method.test.sh` holds that split. The review-path
+  redesign retires the test, and the method-only skill unit carries its guard
+  from then on ([below](#what-the-method-units-build-on)).
 - **Closure check 3** names the result, a correctness skill that reads as
   method, and no prep script, because the review-path redesign moves the
   gathering of commits, paths and test evidence into the formula's
@@ -179,15 +181,32 @@ epic's notes carry each ruling as it was made.
   message would change the key every round and file a twin of each re-raised
   objection.
 - **Outside feedback** is classified by the mark first, then by login. A post
-  carrying the city's mark is the city's. A post from any login other than
-  zook-bot is outside. An unmarked zook-bot post is outside only when it is
-  `/code-review` output signed by Claude. Any other unmarked zook-bot post is
-  the city's: it is skipped, and flagged when it is recent. The operator runs
-  `/code-review` as johnzook almost always and can keep it that way.
+  carrying the city's mark is the city's, and the mark is any marker that
+  `gc_city_marked` in `assets/scripts/pr-post.sh` matches
+  ([below](#gc-toolkits-review-as-main-carries-it)). A post from any login
+  other than zook-bot is outside. An unmarked zook-bot post is outside only
+  when it is `/code-review` output signed by Claude. Any other unmarked zook-bot
+  post is the city's: it is skipped, and flagged when it is recent. The
+  operator runs `/code-review` as johnzook almost always and can keep it that
+  way. The rule differs on purpose from `gc_city_own` (`pr-post.sh:83`), the
+  definition `pr-facts.sh` uses to find the feedback a PR owes an answer.
+  `gc_city_own` decides an unmarked post under the city's login by when it was
+  posted: the city's own before the PR's provenance cutover, and feedback after
+  it. The ruling decides that post by what it is, `/code-review` output or not.
+  So the capture reuses `gc_city_marked` for the mark and does not reuse
+  `gc_city_own`.
 - **The back-fill** is one run over the last 30 days with the per-run cap
-  lifted, and one condensed observation per outside comment. One observation
-  per comment avoids the collapse tk-wsg12v describes, where dedup folds several
-  findings from one comment into one.
+  lifted, and one condensed observation per outside comment. The operator
+  accepted that unit as the sitting framed it (round 1, item 14, on the epic's
+  notes). Its reason is the dedup key, which is an observation's provenance
+  and its category. The provenance names the comment, and the capture
+  classifies nothing, so every observation it files from one comment would
+  carry the same key. Dedup would keep the first of them and drop the rest
+  unread, which is the loss tk-wsg12v describes. One observation that condenses
+  the whole comment and links it leaves dedup nothing to drop. A comment that
+  raises eight findings still counts as one occurrence, which it would under
+  any unit of capture, because the distiller counts occurrences by distinct
+  provenance (`formulas/mol-feedback-distiller.toml`, step 3).
 - **The verifier** is a subagent or a separate pass, whichever the reviewing
   provider supports. Reviews run on the polecat-codex pool
   (`assets/scripts/refinery-reconcile.sh:89`), so the verify-or-demote unit
@@ -228,17 +247,37 @@ condition for landing this spec ahead of the units it describes.
 | tk-qjdt90g.1 | review-coverage elaboration | | This spec. | nothing | |
 | tk-qjdt90g.2 | gc-toolkit review guidance | U1.7 | gc-toolkit's own `docs/review-correctness.md`: its shell and jq pitfalls, the shell blocks in formula prose, and the marker-fenced block convention, each grounded where it bit or where a guard exists for it. | nothing, and routed now | closure check 5 |
 | tk-qjdt90g.3 | outside feedback capture | U1.8 | The feedback miner files one condensed observation per review comment from outside the city, classified as ruled above, and every city writer is checked for its mark. The distiller gains the rule that reads these observations as a set. A one-time 30-day back-fill runs. tk-mzevki5 folds in. | nothing, and routed now | closure check 4 |
-| tk-qjdt90g.4 | finding contract | U1.1 | Every finding carries a failure scenario, every blocking one a verification line, and each its category and severity, as `findings.json` fields that `signoff.sh` carries outside the finding key. The P2 rule lands in `signoff.sh`'s filing and the validator's ruling text. | the redesign, the elaboration | closure check 2 |
-| tk-qjdt90g.5 | hunting angles | U1.2 | The single Correctness bullet becomes named angles: line-by-line with the enclosing function read, a removed-behavior audit, the cross-file tracer, a language-pitfall specialist fed by the rig's guidance, and wrapper and delegate correctness. The ledger anchors the angles move are amended. | the redesign, the elaboration | closure checks 1 and 5 |
-| tk-qjdt90g.6 | verify or demote | U1.3 | A clean-context verifier checks each candidate P0 or P1 and returns CONFIRMED, PLAUSIBLE or REFUTED, and a refutation quotes the line that proves it. A refuted candidate does not block, and its refutation stays in the trail. | the redesign, the elaboration | closure checks 1 and 2 |
-| tk-qjdt90g.7 | fresh-eyes sweep | U1.4 | One fresh pass after dedup looks only for what the first passes missed: moved code that dropped a guard, setup and teardown asymmetry in tests, flipped config defaults, and second-tier footguns. | the redesign, the elaboration | closure check 1 |
-| tk-qjdt90g.8 | subagent policy | U1.5 | No review text forbids subagents. The correctness skill says when a finder or verifier adds unbiased feedback or saves tokens, and that it receives the diff and the relevant files, not the reviewer's whole context. The shared formula and the quorum lanes keep only the shared guardrails. | the redesign, the elaboration | the second machinery change in Boundaries |
-| tk-qjdt90g.9 | method-only skill | U1.6 | Whatever mechanics the correctness skill still carries move into the gathering the redesign puts in place, building on the values the pour fills in. | the redesign, the elaboration | closure check 3 |
-| tk-wigtu9 | prose terminus | | The correctness method says what blocks on a prose deliverable, and what the test evidence is when a diff touches no suite ([below](#tk-wigtu9-the-prose-terminus)). | the redesign, the elaboration, the finding contract, verify or demote | indicator 2, on prose diffs |
+| tk-qjdt90g.4 | finding contract | U1.1 | Every finding carries a failure scenario, every blocking one a verification line, and each its category and severity, as `findings.json` fields that `signoff.sh` carries outside the finding key. The P2 rule lands in `signoff.sh`'s filing and the validator's ruling text. | the redesign, the elaboration, the gctk cutover, the method-only skill | closure check 2 |
+| tk-qjdt90g.5 | hunting angles | U1.2 | The single Correctness bullet becomes named angles: line-by-line with the enclosing function read, a removed-behavior audit, the cross-file tracer, a language-pitfall specialist fed by the rig's guidance, and wrapper and delegate correctness. The ledger anchors the angles move are amended. | the redesign, the elaboration, the finding contract | closure checks 1 and 5 |
+| tk-qjdt90g.6 | verify or demote | U1.3 | A clean-context verifier checks each candidate P0 or P1 and returns CONFIRMED, PLAUSIBLE or REFUTED, and a refutation quotes the line that proves it. A refuted candidate does not block, and its refutation stays in the trail. | the redesign, the elaboration, hunting angles, the subagent policy | closure checks 1 and 2 |
+| tk-qjdt90g.7 | fresh-eyes sweep | U1.4 | One fresh pass after dedup looks only for what the first passes missed: moved code that dropped a guard, setup and teardown asymmetry in tests, flipped config defaults, and second-tier footguns. | the redesign, the elaboration, hunting angles, verify or demote | closure check 1 |
+| tk-qjdt90g.8 | subagent policy | U1.5 | No review text forbids subagents. The correctness skill says when a finder or verifier adds unbiased feedback or saves tokens, and that it receives the diff and the relevant files, not the reviewer's whole context. The shared formula and the quorum lanes keep only the shared guardrails. | the redesign, the elaboration, hunting angles | the second machinery change in Boundaries |
+| tk-qjdt90g.9 | method-only skill | U1.6 | Whatever mechanics the correctness skill still carries move into the gathering the redesign puts in place, building on the values the pour fills in. Its test also carries the guard the redesign retires: it fails when either review formula names a test or a suite, a grade, the Verification line or a What to check dimension. | the redesign, the elaboration, the gctk cutover | closure check 3 |
+| tk-wigtu9 | prose terminus | | The correctness method says what blocks on a prose deliverable, and what the test evidence is when a diff touches no suite ([below](#tk-wigtu9-the-prose-terminus)). | the redesign, the elaboration, the gctk cutover, the finding contract, verify or demote, the fresh-eyes sweep | indicator 2, on prose diffs |
 
 "The redesign" is design convoy tk-gaklsnk reaching main. Its design, tk-zif1d8u,
 is PR #1277 onto `integration/tk-gaklsnk`, and its build, tk-nuctjl8, waits on
-that design. "The elaboration" is this spec.
+that design. "The elaboration" is this spec. "The gctk cutover" is tk-b0ww25t,
+PR #1278, reaching main. The other names in the column are units of this table.
+
+Every method unit rewrites `skills/review-correctness/SKILL.md`, so they land
+one at a time. Each waits on the one before it, in this order:
+
+1. The method-only skill. It goes first so that its guard on the split holds
+   while the other units edit the skill and the review formula.
+2. The finding contract. Every later unit is written in its fields.
+3. Hunting angles. Each finding names the angle that found it in the
+   contract's category field.
+4. The subagent policy. It lifts the no-subagents rule and sets the guardrails
+   that verify or demote and the sweep run under.
+5. Verify or demote. It checks the candidates the angles raise.
+6. The fresh-eyes sweep. It runs after the angles' output is deduped, and its
+   findings go through the contract and the verifier.
+7. The prose terminus. It is stated in the terms of the contract and the
+   verifier.
+
+Verify or demote and the sweep also wait on hunting angles directly, so the
+angles land first even when a unit between them is closed without landing.
 
 The Feature's checkpoint reads the missed-issue sample, the validator's must-fix
 share, and three posted verdicts against the new contract.
@@ -261,10 +300,22 @@ overlap in section 9 of `specs/tk-zif1d8u/review-path.md`, which is on PR
 - A rig's `docs/review-<check>.md` is read at the reviewed commit by
   `review-checks.sh --extension`. That read is the delivery half of the
   gc-toolkit guidance unit.
+- It retires `assets/scripts/review-method.test.sh` (section 8 of the design).
+  That test's (NEUTRAL) cases are what fail today when a test or a suite, a
+  grade, the Verification line or a What to check dimension comes back into
+  either review formula, and none of the design's new tests checks for those.
+  The method-only skill unit carries that guard in its own test. It is the
+  first method unit to land, so the guard is back before any other unit edits
+  the skill or the formula.
 
 The gctk cutover, PR #1278, rewrites the correctness skill's
-`review-test-evidence` block to read the gctk rig record at the pinned commit.
-The method-only skill unit starts from the block as the cutover leaves it.
+`review-test-evidence` block and the prose around it to read the gctk rig
+record at the pinned commit, and retires the `self_review_passed_sha` stamp
+that the block reads today. It also changes `mol-review`'s workspace block and
+the self-review step of `mol-polecat-work`. The method-only skill unit starts
+from the block as the cutover leaves it. That unit, the finding contract and
+the prose terminus each wait on the cutover reaching main, so the cutover lands
+ahead of the method units even when the redesign reaches main before it.
 
 ### tk-wigtu9: the prose terminus
 
@@ -272,16 +323,19 @@ The method-only skill unit starts from the block as the cutover leaves it.
 not opt out (the `review-checks.toml` header), and
 `assets/scripts/refinery-reconcile.sh:95` sets the default check set to
 `correctness,triage`. So every docs-only or spec-only change is graded by the
-correctness method, and that grading is shaped for code. Settle the test
-evidence counts the anchor's self-review stamp only when it names the reviewed
-commit and the rig declares a test command, and otherwise runs the suites the
-diff touches. A prose diff may touch no suite, and then the step yields no
-evidence either way, and the skill does not say what the Verification line
-records. What to check leads its substance with Correctness: bugs, reachable
-edge cases, error handling. P1 is "wrong behavior on a reachable input", and on
-a document about work that is not built, every interleaving a reader imagines
-meets that definition. The grading has no point at which it runs out of
-findings.
+correctness method, and that grading is shaped for code. Until the gctk
+cutover (#1278) lands, Settle the test evidence counts the anchor's self-review
+stamp only when it names the reviewed commit and the rig declares a test
+command, and otherwise runs the suites the diff touches. Once it lands, the
+step reads the gctk rig record at the reviewed commit, and with no record, or
+with a pass that ran nothing, it runs the suites the diff touches. A prose diff
+may touch no suite, and then the step yields no evidence either way, and the
+skill does not say what the Verification line records. What to check opens
+with Intent, and its first dimension of substance is Correctness: bugs,
+reachable edge cases, error handling. P1 is "wrong behavior on a reachable
+input", and on a document about work that is not built, every interleaving a
+reader imagines meets that definition. The grading has no point at which it
+runs out of findings.
 
 **What the gap costs now.** When tk-wigtu9 was filed on 2026-08-26, two
 signal-loom docs-only branches, sl-bgmuy (PR#552) and sl-kg9z6.1.2 (PR#559), had
@@ -319,9 +373,11 @@ later, or a second `mol-review` mode. Read against main, only the first stands.
   - The test evidence for a diff that touches no suite: there is nothing to run,
     and the Verification line says so.
 - **A second `mol-review` mode** has nothing to switch. `mol-review` carries no
-  grading since #1262, and the (NEUTRAL) case of
+  grading since #1262. On main, the (NEUTRAL) case of
   `assets/scripts/review-method.test.sh` fails if a grade or a What to check
-  dimension comes back into it.
+  dimension comes back into it. The redesign retires that test, and the
+  method-only skill unit, the first method unit to land, carries the same guard
+  in its own test ([above](#what-the-method-units-build-on)).
 - **A prose home in triage** needs a way for triage to take `correctness` off
   an anchor, and main has none. Triage only widens `check_set`, and the triage
   waiver that [the review-gates scope](../2026-08-review-gates/scope.md)
@@ -341,10 +397,14 @@ scenario.
 which Feature 1 changes. The later Feature on rounds changes what a re-review
 reads, and would leave a fresh whole-diff review of prose as open-ended as it is
 now. tk-wigtu9 waits on what the other method units wait on, the redesign and
-this spec. It also waits on the finding contract (tk-qjdt90g.4) and verify or
-demote (tk-qjdt90g.6), because its terminus is stated in their terms. Like the
-other method units, it is armed to the polecat pool. Its title, description and
-takeaway carry this direction, and its filed body is in the bead's history.
+this spec. It waits on the gctk cutover too, because it says what the test
+evidence is when a diff touches no suite, and the cutover rewrites how that
+evidence is read. It also waits on the finding contract (tk-qjdt90g.4) and
+verify or demote (tk-qjdt90g.6), because its terminus is stated in their terms,
+and it is the last method unit to land, after the fresh-eyes sweep
+(tk-qjdt90g.7). Like the other method units, it is armed to the polecat pool.
+Its title, description and takeaway carry this direction, and its filed body is
+in the bead's history.
 
 ### Where model escalation lands
 
@@ -411,18 +471,27 @@ armed bead carries each one. Until the units land:
 - **A prose review ends only on the validator's ruling.** Each finding the
   method raises on prose and should not costs a validator ruling, and one ruled
   must-fix costs a rework round, until tk-wigtu9 lands.
-- **The method units wait on the redesign.** They start once tk-gaklsnk's build
-  reaches main. Building them first would have the redesign reshape a skill they
-  had just rewritten, and would leave the method-only skill unit deriving values
-  that the redesign's step text carries.
+- **The method units wait on the redesign and the gctk cutover.** They start
+  once tk-gaklsnk's build and tk-b0ww25t reach main. Building them first would
+  have the redesign reshape a skill they had just rewritten, and would leave the
+  method-only skill unit deriving values that the redesign's step text carries.
+- **The method units land one at a time.** Feature 1 takes one review cycle per
+  method unit, in sequence. Building them side by side would have several
+  branches rewrite one skill at once, some of them written against structure an
+  earlier unit had not yet defined.
+- **The split goes unguarded for a while.** From the redesign reaching main
+  until the method-only skill unit lands, nothing fails when a grade or a What
+  to check dimension comes back into a review formula. No other method unit
+  runs in that time.
 
 ## The research behind the units
 
 The brief's research was done in a separate session against the gc-toolkit
 checkout, the obra/superpowers repository and the review recipe bundled inside
 Claude Code. Its facts about gc-toolkit are re-read below at `d13df88ca`, since
-the tree has moved after the brief was written. The comparator appendices are
-carried as the brief recorded them.
+the tree has moved after the brief was written. The Claude Code recipe is
+re-read from the binary, as its section says. The other comparator appendices
+are carried as the brief recorded them.
 
 ### gc-toolkit's review as main carries it
 
@@ -443,7 +512,8 @@ carried as the brief recorded them.
   two-provider quorum as the multi-lane form (`:31-36`).
   `assets/scripts/review-method.test.sh` holds the split: its (NEUTRAL) case
   fails if a test, a grade, the Verification line or a What to check dimension
-  comes back into either review formula.
+  comes back into either review formula. The redesign retires that test
+  ([What the method units build on](#what-the-method-units-build-on)).
 - **The dispatch note**, `assets/scripts/review-dispatch-body.sh`, composes the
   reviewer's prompt. For `mol-review` it prints "One agent, single pass. No
   fan-out" (`:79-81`). It names the check's skill for each declared check
@@ -466,7 +536,10 @@ carried as the brief recorded them.
   whole-diff review is warranted. It does not re-read the diff (`:28-30`).
   Must-fix is the default for a real finding, and a cosmetic, already-handled or
   mistaken one is declined, never deferred (`:66-71`). It carries its own
-  single-pass rule (`:31-32`), and no unit of this epic changes it.
+  single-pass rule, one agent with no subagents (`:31-32`), and no unit of this
+  epic changes that rule. The subagent policy relaxes the review's rule, not
+  the validator's, and the finding contract adds the P2 rule to the validator's
+  ruling text.
 - **The quorum**, `formulas/mol-review-quorum-signoff.toml`, runs two lanes on
   two providers, each writing a `review-quorum.lane.v1` object, and a synthesis
   that makes the single `signoff.sh` call (`:16`, `:207`). The lanes carry no
@@ -478,9 +551,15 @@ carried as the brief recorded them.
   observations a run (`:43-46`). It keeps only corrective feedback about
   standing behavior and drops ordinary review of the diff (`:170-176`).
   Observations dedup on provenance and category.
-- **The city's mark** is `<!-- gc:city -->`, written by
-  `assets/scripts/pr-post.sh` (`:57`), whose `gc_city_own` lets a reader pick
-  out the city's own posts (`:83`).
+- **The city's mark** is any marker that `gc_city_marked` in
+  `assets/scripts/pr-post.sh` matches (`:72-76`). One is `<!-- gc:city -->`,
+  which pr-post.sh writes on every post it makes (`:57`). The others are
+  purpose markers only the city writes: `<!-- gc-writeback -->` on a write-back
+  reply (`assets/scripts/pr-facts.sh:496`) and `<!-- gc:visit:` on a visit
+  comment (`assets/scripts/pr-visit-comment.sh:147`). `gc_city_own` (`:83`)
+  adds the login and the PR's provenance cutover to that test to pick out the
+  city's own posts, and `pr-post.sh own-def` prints both definitions for a
+  reader to prepend.
 - **The learning loop's review-rubric carrier** amends What to check in
   `skills/review-correctness/SKILL.md`, one dimension per amendment, anchored in
   `rubric-ledger.md` (`skills/learning-distill/SKILL.md:123`, `:159`).
@@ -533,39 +612,64 @@ differ where main or the sitting did:
 
 ### The Claude Code review recipe, condensed
 
-Taken from the bundled `/code-review` skill, which ships inside the Claude Code
-binary and has no file on disk. The hosted Code Review service and ultrareview
-follow the same shape with an added independent reproduce step.
+Taken from the `/code-review` skill bundled inside the Claude Code binary,
+which has no file on disk, and read from the text embedded in Claude Code
+2.1.302 on 2026-10-18. Which phases a tier runs depends on the session's model
+family, so the phases are described in their fullest form, and the tiers say
+where each one runs. The brief adds that the hosted Code Review service and
+ultrareview follow the same shape with an independent reproduce step, which the
+local binary does not show.
 
 - **Phase 0.** Gather the diff: the committed range plus the working tree.
 - **Phase 1, finders.** Independent angles, each emitting candidates with
-  `file`, `line`, `summary` and `failure_scenario`. They run as subagents with
-  clean context when the tool is available, and sequentially in one context
-  otherwise. Finders must pass every candidate with a nameable failure scenario;
-  silently dropping half-believed candidates is named as the dominant cause of
-  misses. The angles: A, line-by-line with the enclosing function; B, the
-  removed-behavior auditor; C, the cross-file tracer (callers and callees); D,
-  the language-pitfall specialist; E, wrapper and proxy correctness; then reuse,
-  simplification, efficiency, altitude (root cause at the right depth), and
-  conventions (quote the exact CLAUDE.md rule and the exact line).
+  `file`, `line`, `summary` and `failure_scenario`. Finders must pass every
+  candidate with a nameable failure scenario; silently dropping half-believed
+  candidates is named as the dominant cause of misses. The angles: A,
+  line-by-line with the enclosing function; B, the removed-behavior auditor; C,
+  the cross-file tracer (callers and callees); D, the language-pitfall
+  specialist; E, wrapper and proxy correctness; then reuse, simplification,
+  efficiency, altitude (root cause at the right depth), and conventions (quote
+  the exact CLAUDE.md rule and the exact line). The eight-angle tiers leave out
+  D and E.
 - **Phase 2, verify.** Dedup on the same defect, the same location and the same
   reason. One verifier per candidate returns CONFIRMED (it can name the
-  trigger), PLAUSIBLE (the mechanism is real and the trigger uncertain, the
-  default for races and rare paths), or REFUTED (factually wrong with the line
-  quoted, provably impossible, already guarded in this diff, or pure style).
-  CONFIRMED and PLAUSIBLE are kept.
-- **Phase 3, sweep** (xhigh and max). One fresh finder with the verified list
+  trigger), PLAUSIBLE (the mechanism is real and the trigger uncertain, which
+  high makes the default for races and rare paths), or REFUTED (factually wrong
+  with the line quoted, provably impossible, already guarded in this diff, or
+  pure style). CONFIRMED and PLAUSIBLE are kept. Only a tier that runs its
+  finders as subagents verifies. A tier built to run its angles in one context
+  dedups only, and keeps every candidate that survives the dedup.
+- **Phase 3, sweep** (xhigh and max). One fresh finder with the list so far
   looks only for gaps: moved code that dropped a guard, second-tier footguns,
   setup and teardown asymmetry in tests, and flipped config defaults.
-- **Effort tiers.** low: one diff pass, a hunk-only bug taxonomy, no test files,
-  precision. medium: eight angles, up to six candidates each, one-vote verify,
-  precision. high: the same, biased to recall. xhigh and max: ten angles, up to
-  eight each, verify, the sweep, recall. The finder count scales with diff size,
-  about one per 150 lines, between two and eight.
-- **Output.** Ranked most severe first, capped per tier, each finding with a
-  summary under sixty characters and a category slug. Correctness outranks
-  cleanup when the cap forces a cut. Findings are never invented to reach a
-  floor.
+- **Effort tiers.** low is one pass over the diff's hunks with a hunk-only bug
+  taxonomy and no verify, and on every family but Opus 4.8 it skips test files.
+  max, on every family, runs the ten angles as subagents with up to eight
+  candidates each, the verify and the sweep. medium, high and xhigh depend on
+  the family:
+
+  | Model family | medium | high | xhigh |
+  |---|---|---|---|
+  | Sonnet 5 | eight angles as subagents, up to six candidates each, verify, precision | the same, with a verify biased to recall | ten angles as subagents, up to eight candidates each, verify, the sweep |
+  | Opus 4.8, and any model without a recipe of its own | eight angles in sequence in one context, dedup with no verify | the same, biased to recall | ten angles in one context, dedup with no verify, the sweep in the same context |
+  | Opus 5 | one careful diff pass, with no angles | the same | as on Opus 4.8 |
+
+  A subagent tier that finds no subagent tool works its angles in one context
+  and checks its own candidates in place of the verify. On Sonnet 5, high, xhigh
+  and max size the finder count to the diff, about one finder per 150 lines,
+  between two and eight.
+- **Output.** Ranked most severe first and capped per tier. A review that
+  reports through its findings tool gives each finding a summary under sixty
+  characters and a category slug. Correctness outranks cleanup when the cap
+  forces a cut. Some tiers set a floor on the finding count, and report fewer
+  when fewer are genuine.
+
+So the bar in closure check 1 and indicator 1 is whichever recipe the
+operator's model gets at the Claude Code version that runs it. The
+`/code-review` run behind the review of this spec's PR (#1282) reported the
+one-context recipe for high: eight angles without D or E, and no verify step. A
+Claude Code release or a different model can change that recipe between two
+checkpoints.
 
 ### The superpowers pointers
 
