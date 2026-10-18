@@ -50,13 +50,15 @@ routed, never assigned, and never blocks anything.
 - **Body sections:** `## Statement` (the generalizable point),
   `## Quote` (verbatim feedback + link), `## Proposed norm` (draft rule
   text, explicitly non-binding), optionally `## Context` (what the diff
-  was doing).
+  was doing). An outside-review observation carries no proposed norm: its
+  statement condenses what the review post said, and its context names the
+  PR and where the post sits.
 - **Metadata:**
 
 | key | values |
 |---|---|
 | `task_kind` | `observation` |
-| `obs.category` | free slug; the distiller owns the vocabulary and merges near-duplicates. Also the finding half of the dedup key, so two observations from one event need different slugs |
+| `obs.category` | free slug; the distiller owns the vocabulary and merges near-duplicates. Also the finding half of the dedup key, so two observations from one event need different slugs. `outside-review` is reserved for the miner's outside capture, one observation per review post |
 | `obs.scope` | `repo:<rig>` \| `agent:<role>` \| `global` — guess narrow |
 | `obs.source` | `self` \| `miner` \| `operator` |
 | `obs.directive` | `standing` \| `diff` — capture-time guess; the distiller re-judges |
@@ -85,9 +87,32 @@ Four producers file the same bead contract:
    instance first, then files one observation bead with
    `obs.source=self`.
 2. **PR miner.** The `mol-feedback-miner` order sweeps each importing
-   rig's merged/closed PRs' review and conversation comments and files
-   what self-report missed, with `obs.source=miner`. It files
-   observations only — never patterns, never proposals.
+   rig's merged/closed PRs' review and conversation comments, with
+   `obs.source=miner`, in two captures:
+   - **The outside capture.** Every review post from outside the city
+     becomes one condensed observation, `obs.category=outside-review`,
+     whether or not it is about standing behavior. A post is the city's when
+     it carries the city's mark (`assets/scripts/pr-post.sh`). An unmarked
+     post is outside when another login posted it, or when it is Claude
+     Code's `/code-review` output posted under the city's login. A GitHub
+     App's conversation comments and approvals are notices, not review
+     feedback. Until a rig's outside capture is one window old, while its
+     store holds no outside-review observation older than the window, the
+     outside capture reaches back `outside_backfill_days` (30) instead, so a
+     rig's first runs back-fill the month before it. The distiller reads
+     these observations as a set for what the city's review missed, and a
+     proposal from them is a `review-rubric` amendment or a change to the
+     correctness method, never a rule per observation
+     (`skills/learning-distill/SKILL.md`).
+   - **The standing-behavior capture.** The city's own posts are read for
+     corrective feedback about standing behavior that self-report missed, at
+     most `max_obs_per_run` a run. An outside post is never read here, so the
+     miner files one observation per outside post, not two of one point.
+
+   An unmarked post under the city's login that is not `/code-review` output,
+   posted after its PR's provenance cutover, means a writer skipped the mark;
+   the miner flags it in one patrol finding. The miner files observations and
+   that finding only — never patterns, never proposals.
 3. **Operator fast path.** "learn this: …" in any conversational session
    files the same bead with the operator's wording as `## Statement`,
    `obs.source=operator`, and `obs.endorsed=operator`. Endorsed

@@ -306,7 +306,9 @@ fi
 ```
 Degraded core (only when the skill is unreadable): standing directive or
 operator endorsement promotes at N=1; diff-scoped feedback waits for real
-recurrence; adjudicate every promotable statement against what exists
+recurrence; `obs.category=outside-review` observations are read as one set for
+what the review missed, never discarded one at a time as diff review;
+adjudicate every promotable statement against what exists
 (ADD/UPDATE/SUPERSEDE/NOOP); Gate 1 (external check) — a cluster with no
 external check, all-self or a lone unendorsed observation, does not
 auto-promote into an always-injected fragment; Gate 2 (remedy class) —
