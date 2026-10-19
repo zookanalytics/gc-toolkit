@@ -145,11 +145,18 @@ for r in "${READERS[@]}"; do
     grep -Fq '$PRIORITY_JQ' "$r" && ok "(READERS) $rel applies \$PRIORITY_JQ" || bad "(READERS) $rel applies \$PRIORITY_JQ"
     grep -Fq 'priority_graph ' "$r" && ok "(READERS) $rel builds its graph with priority_graph" || bad "(READERS) $rel builds its graph with priority_graph"
 done
+# pr-facts.sh reads the approval alone: the rank an anchor's PR-finishing work
+# follows, which it settles that work to and records.
+r="$HERE/pr-facts.sh"
+grep -Eq '^[[:space:]]*\.[[:space:]]+"[^"]*priority-lib\.sh"' "$r" && ok "(READERS) pr-facts.sh sources priority-lib.sh" || bad "(READERS) pr-facts.sh sources priority-lib.sh"
+grep -Fq 'prio_pr_approved' "$r" && grep -Fq '$PRIORITY_JQ' "$r" \
+    && ok "(READERS) pr-facts.sh reads the approval through \$PRIORITY_JQ's prio_pr_approved" \
+    || bad "(READERS) pr-facts.sh reads the approval through \$PRIORITY_JQ's prio_pr_approved"
 
 echo "# no other file defines the function"
-copies="$(git -C "$ROOT" grep -l -F -e 'def priority_of(' -e 'def prio_follows:' -e 'def prio_shift:' -- . 2>/dev/null \
+copies="$(git -C "$ROOT" grep -l -F -e 'def priority_of(' -e 'def prio_follows:' -e 'def prio_shift:' -e 'def prio_pr_approved:' -- . 2>/dev/null \
     | grep -v -e '^assets/scripts/priority-lib.sh$' -e '^assets/scripts/priority-lib.test.sh$' || true)"
-eq "$copies" "" "(NO-COPY) only priority-lib.sh defines the priority function"
+eq "$copies" "" "(NO-COPY) only priority-lib.sh defines the priority function and its reading of a PR's approval"
 
 echo
 echo "priority-lib: $PASS passed, $FAIL failed"

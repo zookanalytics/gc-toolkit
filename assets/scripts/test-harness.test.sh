@@ -319,6 +319,9 @@ mk_sut_dir "$TMP/sut-dd" "$HERE/deferred-dispatch.sh"
 out="$("$TMP/sut-dd/deferred-dispatch.sh" help 2>&1)"; rc=$?
 eq "$rc" "0" "a copied deferred-dispatch.sh runs a verb"
 hasnt "$out" "cannot source hold-lib.sh" "a copied deferred-dispatch.sh sources hold-lib.sh from its private dir"
+# pr-facts.sh sources the priority function's reading of a PR's approval.
+mk_sut_dir "$TMP/sut-pf" "$HERE/pr-facts.sh"
+[ -f "$TMP/sut-pf/priority-lib.sh" ] && ok "mk_sut_dir copies priority-lib.sh beside the SUT" || bad "mk_sut_dir left priority-lib.sh out"
 
 # The partial-read knobs model a store error that still printed an array: a
 # matching list, or any dep probe, prints [] and exits 1.

@@ -38,7 +38,9 @@
 #
 # Readers: queue-priority.sh settles a bead (settle), re-ranks the work that
 # follows a moved bead (move, which `gc-helm.sh priority` runs), and re-settles
-# the polecat queue (reconcile). priority-lib.test.sh runs the function over
+# the polecat queue (reconcile). pr-facts.sh reads prio_pr_approved alone, for
+# the rank an anchor's PR-finishing work follows, which it settles that work to
+# and records on the anchor. priority-lib.test.sh runs the function over
 # priority-lib.fixture.json, the cases a copy of it in another language must
 # agree with, and fails when another file defines it.
 #

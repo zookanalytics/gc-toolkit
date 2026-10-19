@@ -58,8 +58,8 @@
 # sling it, and pr-facts.sh and pre-open-rebase.sh before they write its route,
 # which carries no priority. pr-facts.sh also settles an anchor's PR-finishing
 # work when the posture it records turns approved or stops being approved, and
-# on each later pass until all of that work has settled at the rank the posture
-# gives.
+# when the anchor leaves pull_request, and on each later pass until all of that
+# work has settled at the rank the anchor's state and posture give.
 # Exit codes: 0 ok; 1 a read, a write, a read-back or the lock failed; 2 usage,
 # a move refused before anything was written, or a pass that finds no one
 # polecat pool to read.

@@ -1104,12 +1104,19 @@ keys = [
   # and validation passes with their live workflows, was last settled at:
   # approved, the P0 an approved PR's finishing work runs at, or unapproved, the
   # anchor's priority plus each bead's shift (docs/steering.md#pr-finishing-work).
-  # Each pass of pr-facts.sh compares it with the rank the recorded pr_posture
-  # gives and, while the two differ, settles that work and writes the rank once
-  # every bead of it has settled. It clears a record naming the other rank
-  # before the first settle, so a pass that stops partway leaves none. Absent
-  # means no pass is known to have settled all of that work at either rank, and
-  # the next pass settles it. One of the two words.
+  # unsettled says a re-rank is owed: the rank that work follows moved, or a
+  # settle began and did not finish. The rank is the priority function's: approved
+  # while the anchor rests in pull_request with an approved posture, unapproved
+  # anywhere else. A posture write that moves the rank and every transition out
+  # of pull_request ([machine] exit_sets) mark the record unsettled in the same
+  # write, so no reader takes the work for settled at a rank it has left. Every
+  # pass of pr-facts.sh compares the record of each anchor it reads in
+  # pull_request with that rank, and every full pass that of each open anchor
+  # resting elsewhere. While the two differ, it settles that work and writes the
+  # rank once every bead of it has settled, turning a record of the other rank
+  # unsettled before the first settle. Absent means no pass recorded a rank,
+  # which a pass in pull_request settles and a full pass leaves alone elsewhere.
+  # One of the three words.
   "pr_finishing_settled",
 ]
 

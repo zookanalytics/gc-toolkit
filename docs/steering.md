@@ -437,17 +437,29 @@ before it makes the child claimable, in the order [Settle](#settle) gives.
 its priority. `pr-facts.sh` and `pre-open-rebase.sh` then route it, in a write
 that carries no priority. A child whose priority does not settle is neither
 slung nor routed, and the creator's retry settles it: the next pass of the
-cadence arm, or the caller of `rework-child.sh` running it again. When the
-posture `pr-facts.sh` records moves into or out of `approved`, the same pass
-settles the anchor's open reviews, reworks and validation passes and their live
-workflows. Once every one of them has settled, it records the rank they settled
-at on the anchor, `approved` or `unapproved`, in `pr_finishing_settled`. Every
-pass of `pr-facts.sh` compares that record with the rank the recorded posture
-gives, and settles the work again while the two differ. So a settle that fails
-leaves no record, and a later pass finishes the re-rank, whether or not the
-posture moves again. A record naming the other rank is cleared before the first
-settle, so a pass that stops partway leaves no record that a return to that rank
-would read as settled. A finding or a visit carries `anchor_bead` too, but no
+cadence arm, or the caller of `rework-child.sh` running it again.
+
+**Re-ranked when its rank moves.** The rank moves when the posture `pr-facts.sh`
+records moves into or out of `approved`, and when the anchor leaves
+`pull_request`. Either way the anchor's open reviews, reworks and validation
+passes are settled again, with their live workflows. The anchor's
+`pr_finishing_settled` records the rank all of that work last settled at,
+`approved` or `unapproved`, and reads `unsettled` while a re-rank is owed. The
+write that moves the rank marks the record `unsettled` in the same update: the
+posture write in `pr-facts.sh`, and every transition out of `pull_request`,
+through the lifecycle writer's `exit_sets`
+([state-machine.md](state-machine.md#the-machine)). Every pass of `pr-facts.sh`
+compares the record of each anchor it reads in `pull_request` with the rank the
+priority function gives that anchor. Every full pass does the same for each open
+anchor that carries a record and rests anywhere else, whichever writer moved it
+there. While the two differ, the pass settles the work, and it records the rank
+only once every bead of it has settled. A record naming the other rank turns
+`unsettled` before the first settle. So a settle that fails, or a pass that
+stops partway, leaves a record that a later pass settles again and that no
+return to the other rank reads as settled. `pr-facts.sh` settles the work of an
+anchor it moves out of `pull_request` in the pass that moves it, and the next
+full pass settles an anchor that another writer moved, such as a repool through
+`rejection-repool.sh`. A finding or a visit carries `anchor_bead` too, but no
 pool claims it, so that settle leaves it as it is.
 
 ### The pass
