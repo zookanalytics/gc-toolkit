@@ -2660,6 +2660,34 @@ eq "$(meta PRF1 pr_head_oid)" "sha-710" "the pass records the draft's head, the 
 for b in PRW PRV PCV PRT PST PVP PV4; do eq "$(bprio "$b")" "0" "…so $b is at P0"; done
 eq "$(meta PRF1 pr_finishing_settled)" "approved" "…recording the approved rank"
 
+echo "# the full pass's sweep reads no rank of its own for an anchor whose work already settled at the unapproved rank"
+# Three anchors rest outside pull_request with their work recorded at the
+# unapproved rank, the one every anchor resting there follows. A fourth still
+# owes a settle. The sweep's listing compares each record with that rank in its
+# one read, so the pass reads a rank of its own only for the fourth, and the set
+# it walks does not grow with every anchor that ever left pull_request. A jq on
+# PATH counts the rank reads settle_finishing makes, the read that loads the
+# whole priority function per anchor.
+outside() { # <id> <state> <record>
+  jq -nc --arg id "$1" --arg st "$2" --arg r "$3" '{id: $id, status: "open", assignee: "", notes: "", title: "t",
+    metadata: ({pr_finishing_settled: $r, pr_posture: "approved@sha-9@2026-10-11T00:00:00Z"}
+      + (if $st == "unanchored" then {} else {merge_result: $st, "gc.routed_to": "human", "gc.takeaway": "t"} end))}'
+}
+store "[$(outside SW1 abandoned unapproved), $(outside SW2 retargeted unapproved), $(outside SW3 unanchored unapproved),
+        $(outside SW4 abandoned unsettled)]"
+REAL_JQ=$(command -v jq)
+mkdir -p "$TMP/jqcount"
+cat > "$TMP/jqcount/jq" <<JQ
+#!/usr/bin/env bash
+case "\$*" in *'{metadata: {merge_result: \$mr'*) echo rank >> "$TMP/jqcount.log" ;; esac
+exec "$REAL_JQ" "\$@"
+JQ
+chmod +x "$TMP/jqcount/jq"
+: > "$TMP/jqcount.log"
+out=$(PATH="$TMP/jqcount:$PATH" run)
+eq "$(meta SW4 pr_finishing_settled)" "unapproved" "the anchor that owed a settle records its rank"
+eq "$(grep -c '^rank$' "$TMP/jqcount.log")" "1" "…and the pass read a rank for it alone, none for the three already settled"
+
 fi # part posture
 
 # ==== part routing: a feedback batch's size, range and ledgers, the

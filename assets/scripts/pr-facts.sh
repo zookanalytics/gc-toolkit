@@ -1446,19 +1446,23 @@ fi
 # through rejection-repool.sh, is settled here. So every full pass reads the live
 # anchors that carry a record, and settles the PR-finishing work of each one
 # resting elsewhere while its record names anything but the rank that work
-# follows, a settle an exit left short included. The record's write moves no
-# route, so a human state keeps the route a person gave it, or none, and is
-# never re-parked. Like the sweeps above, this runs before the no-anchors
-# early-exit.
+# follows, a settle an exit left short included. The listing's one jq reads that
+# rank through the priority function's own approval read (prio_pr_approved) and
+# keeps only the anchors whose record differs from it, so an anchor whose work
+# already settled there costs no read of its own on later passes. The record's
+# write moves no route, so a human state keeps the route a person gave it, or
+# none, and is never re-parked. Like the sweeps above, this runs before the
+# no-anchors early-exit.
 if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
   if fs_rows=$(bd_list --status="$LIVE_STATUSES" --has-metadata-key=pr_finishing_settled); then
     while IFS=$'\037' read -r fsid fsstate fsposture fshead fsrec; do
       [ -n "${fsid:-}" ] || continue
       settle_finishing "$fsid" "$fsstate" "$fsposture" "$fshead" "$fsrec" || true
     done <<FS_EOF
-$(printf '%s' "$fs_rows" | jq -r '.[]? | (.metadata // {}) as $m
+$(printf '%s' "$fs_rows" | jq -r "$PRIORITY_JQ"'.[]? | (.metadata // {}) as $m
     | ((($m.merge_result // "") | tostring) | if . == "" then "unanchored" else . end) as $s
     | select($s != "pull_request")
+    | select((($m.pr_finishing_settled // "") | tostring) != (if prio_pr_approved then "approved" else "unapproved" end))
     | [ (.id // ""), $s, ($m.pr_posture // ""), ($m.pr_head_oid // ""), ($m.pr_finishing_settled // "") ]
     | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' 2>/dev/null)
 FS_EOF
