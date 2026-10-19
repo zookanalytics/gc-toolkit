@@ -2618,9 +2618,12 @@ echo "# an approved anchor with no PR head recorded gets one, and its work is se
 # same write marks the record unsettled and the pass brings the work to P0.
 prf1 approved approved 1
 jq -c 'map(if .id == "PRF1" then .metadata |= del(.pr_head_oid) else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
-approved_710
+printf '%s' "$(prview 710 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_710.json"
+approve 710; echo '[]' > "$GH_DIR/comments_710.json"
+: > "$STUB_GC_LOG"
 out=$(run_posture)
-eq "$(meta PRF1 pr_head_oid)" "sha-710" "the posture pass records the PR head"
+hasnt "$(grep '^bd update PRF1' "$STUB_GC_LOG")" "pr_posture=" "the posture pass finds the posture and the merge state current"
+eq "$(meta PRF1 pr_head_oid)" "sha-710" "…and records the PR head alone"
 for b in PRW PRV PCV PRT PST PVP; do eq "$(bprio "$b")" "0" "…and $b reaches P0 in that pass"; done
 eq "$(meta PRF1 pr_finishing_settled)" "approved" "…and the anchor records the approved rank"
 
