@@ -223,8 +223,8 @@ A pack imported by a plain directory path in `city.toml` is read from that
 directory's working tree:
 
 ```toml
-[rigs.imports.gc-toolkit]
-source = "rigs/gc-toolkit"   # a path: no ref, no version
+[imports.<binding>]
+source = "<directory>"   # a path: no ref, no version
 ```
 
 A URL import can be pinned with `version = "sha:…"`; this form has no such

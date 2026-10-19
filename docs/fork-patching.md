@@ -426,10 +426,12 @@ and drains on its own:
 bd update <bead> --assignee gascity/gascity-keeper.keeper   # assigned work is a wake reason
 ```
 
-Why a pin keeps the keeper up and `gc session wake` does not, and why
-reaching for `gc session new` instead spawns a second session beside
-the canonical one, is Gas City behavior:
+Why a pin keeps the keeper up and `gc session wake` does not is Gas
+City behavior:
 [gascity-agents.md](gascity-agents.md#what-keeps-a-named-session-up).
+So is why reaching for `gc session new` instead spawns a second
+session beside the canonical one:
+[gascity-agents.md](gascity-agents.md#gc-session-new-and-the-canonical-session).
 
 ---
 

@@ -190,9 +190,8 @@ gc bd show <iteration-N-bead> --json   | jq -r '.[0].assignee'
 gc bd show <iteration-N+1-bead> --json | jq -r '.[0].assignee'
 ```
 
-`mol-upstream-gc-rebase` is the pack's first check-loop adoption: it replaced
-its file-a-rework-bead-and-re-pour loop with a native one, for the crash-safe
-loop state the runtime keeps.
+`mol-polecat-work`'s `self-review` and `mol-upstream-gc-rebase`'s `rebase`
+are check loops, and both are slung at a pool.
 
 ## A rig-scoped agent runs in a worktree of its rig
 
