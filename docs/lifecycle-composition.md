@@ -40,7 +40,7 @@ through. It does not carry the board's rendering rules or the converse
 sitting's procedure, which belong to
 [human-engagement.md](human-engagement.md), nor the routing
 mechanics, which belong to
-[gascity-routing-model.md](gascity-routing-model.md). The general model of how
+[gascity/routing-model.md](gascity/routing-model.md). The general model of how
 a wait is represented, which is the hold primitive, the demand primitive and
 the shape law for routed work, is invariant I1 in
 [component-model.md](component-model.md); the rule below is that model applied

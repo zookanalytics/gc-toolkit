@@ -11,7 +11,7 @@ docs do not already say it. Each section names its evidence and the date it
 was read, and says where the city's gascity fork differs from upstream main.
 gc-toolkit's own model on top of these — subjects, visits, converse
 sittings, demands and the helm board — is
-[human-engagement.md](human-engagement.md).
+[human-engagement.md](../human-engagement.md).
 
 ## Scope
 
@@ -20,10 +20,10 @@ and its pane end, as far as upstream's docs do not state them: what each
 does, and when it was read.
 
 **Boundaries.** gc-toolkit's model on top of them is
-[human-engagement.md](human-engagement.md). Routing and the claim predicate
-are [gascity-routing-model.md](gascity-routing-model.md); agent variants and
-session identity are [gascity-agents.md](gascity-agents.md). Upstream's
-reference material is indexed by [gascity-reference.md](gascity-reference.md).
+[human-engagement.md](../human-engagement.md). Routing and the claim predicate
+are [gascity/routing-model.md](routing-model.md); agent variants and
+session identity are [gascity/agent-types.md](agent-types.md). Upstream's
+reference material is indexed by [gascity/README.md](README.md).
 Facts here are dated; an undated claim is a bug.
 
 ## What upstream's docs already say
@@ -233,7 +233,7 @@ drained and its template is still configured, so the `no-wake-reason` drain
 never begins for one. `gc session new` creates a manual session, with one
 exception: for an unbound named session's own name without `--alias`, it
 creates the canonical session, whose origin is `named`
-([gascity-agents.md](gascity-agents.md#gc-session-new-and-the-canonical-session)).
+([gascity/agent-types.md](agent-types.md#gc-session-new-and-the-canonical-session)).
 That session gets no manual keepalive; the named-session arms decide whether
 it stays desired. `gc session new` checks no session count, and the pool's
 scale-down drop paths skip manual sessions, so `max_active_sessions` does not

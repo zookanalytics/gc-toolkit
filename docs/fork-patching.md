@@ -27,7 +27,7 @@ carried by the opt-in `packs/gascity-keeper/` sub-pack.
 
 **Boundaries.** This is a workflow doc about *carrying* patches, not a
 reference for `gascity`'s own internals or behavior — that lives in
-[gascity-reference.md](gascity-reference.md) and upstream docs. Nor does it
+[gascity/README.md](gascity/README.md) and upstream docs. Nor does it
 cover constructing gc-toolkit's own pack *overlay* — layering pack artifacts
 over the base packs is a different layer from patching gascity *source*, and is
 out of this doc's mandate. It is deliberately temporary, and exists to make
@@ -432,10 +432,10 @@ bd update <bead> --assignee gascity/gascity-keeper.keeper   # assigned work is a
 
 Why a pin keeps the keeper up and `gc session wake` does not is Gas
 City behavior:
-[gascity-agents.md](gascity-agents.md#what-keeps-a-named-session-up).
+[gascity/agent-types.md](gascity/agent-types.md#what-keeps-a-named-session-up).
 So is why reaching for `gc session new` instead spawns a second
 session beside the canonical one:
-[gascity-agents.md](gascity-agents.md#gc-session-new-and-the-canonical-session).
+[gascity/agent-types.md](gascity/agent-types.md#gc-session-new-and-the-canonical-session).
 
 ---
 

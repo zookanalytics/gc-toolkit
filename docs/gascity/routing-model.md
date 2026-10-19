@@ -11,8 +11,8 @@ Each section names its evidence and the date it was read. Where the city's
 gascity fork behaves differently from upstream main, the section says which
 is which. gc-toolkit's own dispatch conventions — withholding a sling until
 its blockers close, the notice a named-agent assignment owes, the load-context
-guard in its work formula — are [deferred-dispatch.md](deferred-dispatch.md)
-and [pack-authoring.md](pack-authoring.md).
+guard in its work formula — are [deferred-dispatch.md](../deferred-dispatch.md)
+and [pack-authoring.md](../pack-authoring.md).
 
 ## Scope
 
@@ -23,11 +23,11 @@ predicate, and the route the controller restores — as far as upstream's docs
 do not state it, or state it wrongly.
 
 **Boundaries.** Who the agents are — identity, variants, session lifecycle —
-is [gascity-agents.md](gascity-agents.md). gc-toolkit's own dispatch
-conventions are [deferred-dispatch.md](deferred-dispatch.md), and which hold a
+is [gascity/agent-types.md](agent-types.md). gc-toolkit's own dispatch
+conventions are [deferred-dispatch.md](../deferred-dispatch.md), and which hold a
 pack component reaches for is invariant I1 in
-[component-model.md](component-model.md). Upstream's reference material is
-indexed by [gascity-reference.md](gascity-reference.md).
+[component-model.md](../component-model.md). Upstream's reference material is
+indexed by [gascity/README.md](README.md).
 
 ## What upstream's docs already say
 

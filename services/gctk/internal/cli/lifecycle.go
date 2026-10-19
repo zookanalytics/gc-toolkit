@@ -28,7 +28,7 @@ import (
 // Exits: 0 ok; 1 illegal edge / --expect mismatch / bd refusal / usage;
 // 2 post-write verification mismatch (or unreadable bead).
 //
-// CAVEAT (docs/gascity-routing-model.md, "Clearing an assignee can be refused"):
+// CAVEAT (docs/gascity/routing-model.md, "Clearing an assignee can be refused"):
 // clearing an assignee on a bead another actor holds in_progress is refused by
 // bd, and the refusal drops the WHOLE atomic update — a caller that passes
 // --assignee "" must hold the claim.

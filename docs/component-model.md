@@ -150,7 +150,7 @@ The machine itself — states, transitions, writers, checks — is drawn once, i
   to session death.
 - **One transition writer** — `lifecycle.sh`: validate → one `bd update`
   carrying every field of the transition → read back. A single `bd update` is
-  atomic ([gascity-routing-model.md](gascity-routing-model.md)); the old
+  atomic ([gascity/routing-model.md](gascity/routing-model.md)); the old
   healer passes existed because writers split transitions across calls.
 - **One check-verdict writer** — `signoff.sh`, which closes the review bead
   with its verdict, the record a lane's green derives from. Returning a lane
@@ -333,7 +333,7 @@ own descendant.
 Two boundaries. A conclusion is prose, stored once and never cleared, and it
 does not become a wait by being written down; that seam is
 [lifecycle-composition.md](lifecycle-composition.md). Which query term each
-mechanism falsifies is [gascity-routing-model.md](gascity-routing-model.md),
+mechanism falsifies is [gascity/routing-model.md](gascity/routing-model.md),
 which also carries the one dispatch path that reads no edges at all. `gc sling
 --on <formula>` pours a workflow root carrying none of the work bead's
 dependencies, so a blocked bead dispatched that way is held by nothing. On that

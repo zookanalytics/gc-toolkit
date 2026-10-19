@@ -1,14 +1,14 @@
 ---
 name: Pack authoring — gc-toolkit's own conventions
-description: The conventions gc-toolkit's own formulas, scripts, skills and agents follow where Gas City leaves the choice to the pack — how a step closes and how a run declines, how step text and skills reach a pack script, how a landed pack change is confirmed live, where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an owner or an address. A pack convention; the Gas City facts beneath it are gascity-packs.md and gascity-agents.md.
+description: The conventions gc-toolkit's own formulas, scripts, skills and agents follow where Gas City leaves the choice to the pack — how a step closes and how a run declines, how step text and skills reach a pack script, how a landed pack change is confirmed live, where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an owner or an address. A pack convention; the Gas City facts beneath it are gascity/packs.md and gascity/agent-types.md.
 ---
 
 # Pack authoring
 
 This page states gc-toolkit's own authoring conventions, not Gas City
 behavior. The platform facts each convention answers to are
-[gascity-packs.md](gascity-packs.md), for formulas and packs, and
-[gascity-agents.md](gascity-agents.md), for agents and sessions. Where a
+[gascity/packs.md](gascity/packs.md), for formulas and packs, and
+[gascity/agent-types.md](gascity/agent-types.md), for agents and sessions. Where a
 convention rests on one of them, it links there.
 
 ## Scope
@@ -21,8 +21,8 @@ where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves
 an owner or an address.
 
 **Boundaries.** What Gas City itself does when a formula runs or a pack loads
-is [gascity-packs.md](gascity-packs.md); agent variants, identity and session
-lifecycle are [gascity-agents.md](gascity-agents.md). Each component's own job
+is [gascity/packs.md](gascity/packs.md); agent variants, identity and session
+lifecycle are [gascity/agent-types.md](gascity/agent-types.md). Each component's own job
 is its row in [component-model.md](component-model.md) §4, and how work moves
 end to end is [architecture.md](architecture.md).
 
@@ -30,7 +30,7 @@ end to end is [architecture.md](architecture.md).
 
 A graph.v2 step advances only by closing its own step bead, and neither
 environment spelling the upstream bodies use names that bead reliably
-([gascity-packs.md](gascity-packs.md#a-v2-step-advances-by-closing-its-own-step-bead-not-by-drain-ack)).
+([gascity/packs.md](gascity/packs.md#a-v2-step-advances-by-closing-its-own-step-bead-not-by-drain-ack)).
 So every pack formula step closes through
 `assets/scripts/step-close.sh --step <formula>.<step-id> --convoy {{convoy_id}}`
 instead. It resolves the target from the store by (`metadata."gc.root_bead_id"`,
@@ -59,11 +59,11 @@ worker's commits. Leaving the step `open` is the respawn loop by another door:
 fresh worker re-derives the same refusal. Clearing `gc.routed_to` alone does
 not fix it either, because the runtime routes a step a drained session left
 assigned back to its pool
-([gascity-packs.md](gascity-packs.md#a-v2-step-advances-by-closing-its-own-step-bead-not-by-drain-ack)).
+([gascity/packs.md](gascity/packs.md#a-v2-step-advances-by-closing-its-own-step-bead-not-by-drain-ack)).
 
 A molecule's lifecycle is gascity's, so the refusal ends the run through
 gascity's run cancel
-([gascity-packs.md](gascity-packs.md#a-run-is-cancelled-through-the-supervisor-api)).
+([gascity/packs.md](gascity/packs.md#a-run-is-cancelled-through-the-supervisor-api)).
 `assets/scripts/run-cancel.sh` sends it, after resolving the run from the step
 this session holds, and the pack writes no member of the molecule. Nothing
 resumes a cancelled run, so a wait for a person sits on the work bead:
@@ -92,7 +92,7 @@ cancel like any other.
 
 A formula step body gets no template pass, and the variables that name the
 pack's own directory are not exported to agent sessions
-([gascity-packs.md](gascity-packs.md#a-formula-body-gets-no-template-pass)).
+([gascity/packs.md](gascity/packs.md#a-formula-body-gets-no-template-pass)).
 So step text resolves a pack script at shell runtime through the variables a
 session does carry:
 
@@ -126,7 +126,7 @@ and never a checkout the agent is standing in. The ask-for-work skills
 
 This city imports the pack by directory, so what is live is the rig
 checkout's working tree, not the merge
-([gascity-packs.md](gascity-packs.md#a-directory-imported-pack-is-live-from-the-working-tree-not-from-a-merge)).
+([gascity/packs.md](gascity/packs.md#a-directory-imported-pack-is-live-from-the-working-tree-not-from-a-merge)).
 Two silent failure modes follow, and a landing pack-content PR usually trips
 both at once:
 
@@ -169,7 +169,7 @@ already correct — and confirm re-registration in the supervisor log
 gc-toolkit imports no base pack: every agent, formula, and script here is
 authored in this pack under its own name, mostly as pack-distinct `mol-*`
 formulas, so none shadows a same-named artifact of another layer
-([gascity-packs.md](gascity-packs.md#what-upstreams-docs-already-say), "Layering and names").
+([gascity/packs.md](gascity/packs.md#what-upstreams-docs-already-say), "Layering and names").
 Keep it that way: check a new artifact's basename against any pack the
 importing city composes with before adding it, and never reuse a template
 `define` name you did not coin.
@@ -178,7 +178,7 @@ importing city composes with before adding it, and never reuse a template
 
 A check loop gets a fresh context per iteration only when its iterations are
 pool-routed, and nothing warns when they are not
-([gascity-packs.md](gascity-packs.md#stepscheck-is-fresh-context-per-iteration-only-if-pool-routed)).
+([gascity/packs.md](gascity/packs.md#stepscheck-is-fresh-context-per-iteration-only-if-pool-routed)).
 So pool routing is an **acceptance criterion** of any check-loop formula
 here, not a preference: sling the formula at a pool target, or set the
 step's `gc.run_target` to one, and verify it on the first failed iteration:
@@ -222,7 +222,7 @@ holds this wiring.
 ## Patrol agents run a patrol-wisp cycle
 
 A patrol agent is not a distinct Gas City variant. It is a named singleton
-([gascity-agents.md](gascity-agents.md#variant-a--named-singletons-named_session))
+([gascity/agent-types.md](gascity/agent-types.md#variant-a--named-singletons-named_session))
 whose prompt adds a patrol-wisp cycle on top of the standard lifecycle. The
 deacon, witness and refinery are this pack's patrol agents, as they are in
 upstream's gastown pack: each `[[named_session]]` declares them like any other
@@ -317,7 +317,7 @@ Beyond what the underlying named singleton provides:
 Same as the underlying named singleton — patrols use the same
 QualifiedName (`<rig>/<binding>.<template>` for the rig-scoped
 witness/refinery, `<binding>.<template>` for the city-scoped
-deacon). See [gascity-agents.md, Variant A](gascity-agents.md#variant-a--named-singletons-named_session).
+deacon). See [gascity/agent-types.md, Variant A](gascity/agent-types.md#variant-a--named-singletons-named_session).
 
 ### Work routing visibility
 
@@ -349,7 +349,7 @@ so a city-scoped session's alias is bare (`gc-toolkit.gc-z0vi2`) even when
 the bead it works belongs to a rig, while a pool instance or rig-scoped
 singleton is rig-qualified (`gc-toolkit/gc-toolkit.nux`). Both directions
 are live in one city, and which fields name a bead's holder is
-[gascity-agents.md](gascity-agents.md#which-fields-name-a-beads-holder).
+[gascity/agent-types.md](gascity/agent-types.md#which-fields-name-a-beads-holder).
 
 It costs any scan that resolves a bead's owner by exact lookup into a
 session map keyed on `id, name, session_name, alias, agent_name`. When
@@ -370,7 +370,7 @@ yanking a bead out from under a live owner mid-work.
 The scan resolves `gc.session_id` first, then `assignee`, then
 `gc.session_name`, because only the id always names one session; the other
 two can name an identity that a later session carries too
-([gascity-agents.md](gascity-agents.md#which-fields-name-a-beads-holder)).
+([gascity/agent-types.md](gascity/agent-types.md#which-fields-name-a-beads-holder)).
 Resolve a bead against an identity its successor shares and you read the
 successor's life as the dead owner's, leaving the bead `in_progress` under an
 owner that never returns.
@@ -399,7 +399,7 @@ recipe does — *exact first, then last segment, live wins*:
 
 The map the lookup reads holds to the same rule. Two listed sessions can
 carry one key, and `gc session list` lists the newest session first
-([gascity-agents.md](gascity-agents.md#which-fields-name-a-beads-holder)), so
+([gascity/agent-types.md](gascity/agent-types.md#which-fields-name-a-beads-holder)), so
 a map that let the later entry win would give such a key to its dead
 predecessor. In the map a dead state never replaces a live one, so a shared
 key reads as its live holder's state.
@@ -421,7 +421,7 @@ The hazard is the mismatch between the two sides, not bareness.
 The owner lookup above is the read side, where a normalizing retry recovers a
 mismatch after the fact. The write side has no retry. A pool offer and an
 assignment poll both compare raw strings
-([gascity-routing-model.md](gascity-routing-model.md)), so a `gc.routed_to`
+([gascity/routing-model.md](gascity/routing-model.md)), so a `gc.routed_to`
 or an `assignee` that is merely well-formed is claimed by nobody, reports
 success, and reads back clean.
 
@@ -463,6 +463,6 @@ the formula.
 This page states the pack's own conventions, so it changes with the pack's
 code: update it in the same PR as a change to the convention it states. The
 Gas City facts it links are re-verified by the refresh procedures of
-[gascity-packs.md](gascity-packs.md#refresh-procedure) and
-[gascity-agents.md](gascity-agents.md#refresh-procedure); when one of them
+[gascity/packs.md](gascity/packs.md#refresh-procedure) and
+[gascity/agent-types.md](gascity/agent-types.md#refresh-procedure); when one of them
 moves, re-derive the convention here that rests on it.

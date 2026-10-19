@@ -9,10 +9,10 @@ This page states Gas City behavior only: what the agent variants do where
 upstream's docs do not already say it, or say it wrongly. Each section names
 its evidence and the date it was read, and says where the city's gascity fork
 differs from upstream main. How work is routed to an agent is
-[gascity-routing-model.md](gascity-routing-model.md). gc-toolkit's own
+[gascity/routing-model.md](routing-model.md). gc-toolkit's own
 conventions for its agents — where a rig-scoped agent runs, the patrol-wisp
 cycle, how a scan resolves an owner or an address — are
-[pack-authoring.md](pack-authoring.md).
+[pack-authoring.md](../pack-authoring.md).
 
 ## Scope
 
@@ -21,10 +21,10 @@ identified, started, kept up and ended, as far as upstream's docs do not state
 it: the corners that surface only when the variants mix.
 
 **Boundaries.** How work moves between agents is
-[gascity-routing-model.md](gascity-routing-model.md), and how a session's
+[gascity/routing-model.md](routing-model.md), and how a session's
 pane and idle clock end it is
-[gascity-human-engagement.md](gascity-human-engagement.md#how-a-session-ends).
-gc-toolkit's own agent conventions are [pack-authoring.md](pack-authoring.md).
+[gascity/human-engagement.md](human-engagement.md#how-a-session-ends).
+gc-toolkit's own agent conventions are [pack-authoring.md](../pack-authoring.md).
 Prompt-template authoring and any one agent's role are out of scope.
 
 ## What upstream's docs already say
@@ -53,7 +53,7 @@ Read these first; this page does not restate them. Coverage checked
 - **`session_origin`** (`ephemeral`, `manual`, `named`) and which origins
   reach the routed tier — session model, "Sessions" and "Default
   `work_query`"; the exception for a session whose alias is its own target is
-  [gascity-routing-model.md](gascity-routing-model.md#the-read-side-the-claim-predicate).
+  [gascity/routing-model.md](routing-model.md#the-read-side-the-claim-predicate).
 - **Graph workflow continuity**: a pool-routed graph step stays unassigned
   until a session claims it, and a claim pre-assigns the step's continuation
   siblings to the same session —
@@ -482,7 +482,7 @@ route's declared order (`internal/api/supervisor_city_routes.go`); read at
 upstream `1e05ae624` and the fork `a319c2fd6` on 2026-10-19.
 `ReleaseSessionNameClaim` (`internal/session/name_release.go`) is fork-only,
 read at `a319c2fd6` on 2026-10-19. The pack's rule on these fields is
-[pack-authoring.md](pack-authoring.md#a-scan-resolves-an-owner-before-it-calls-one-absent).
+[pack-authoring.md](../pack-authoring.md#a-scan-resolves-an-owner-before-it-calls-one-absent).
 
 ## Refresh procedure
 

@@ -27,15 +27,15 @@ material lives in the sibling briefs, not here.
 
 ## The bar
 
-A doc lives under `docs/gascity-*.md` only when **all** of these hold:
+A page lives in `docs/gascity/` only when **all** of these hold:
 
-1. **It states Gas City behavior and nothing else.** A `gascity-*` page
-   says what the platform does: the `gc` and `bd` binaries and the packs
+1. **It states Gas City behavior and nothing else.** A page here says
+   what the platform does: the `gc` and `bd` binaries and the packs
    Gas City bundles, such as `core`. gc-toolkit's own conventions — its
    agents, formulas, scripts, orders and skills, and this city's
    configuration — belong to the page that owns that subsystem, never to
-   a `gascity-*` page, not even as an example of the behavior. A
-   `gascity-*` page may link to a pack page, labeled as gc-toolkit's.
+   a page here, not even as an example of the behavior. A page here may
+   link to a pack page, labeled as gc-toolkit's.
 2. **Upstream's docs do not already say it.** Lean on upstream Gas City
    documentation where it exists. A fact upstream documents is a link
    here, not a restatement of it.
@@ -160,15 +160,15 @@ missing, partial, or contradicted by a more recent maintainer ruling.
 Entries here are gc-toolkit-authored prose, not upstream pointers, and each
 states Gas City behavior only, under [the bar](#the-bar). The pack's own
 conventions built on them are its own pages, such as
-[human-engagement.md](human-engagement.md),
-[pack-authoring.md](pack-authoring.md),
-[deferred-dispatch.md](deferred-dispatch.md) and
-[fork-patching.md](fork-patching.md).
+[human-engagement.md](../human-engagement.md),
+[pack-authoring.md](../pack-authoring.md),
+[deferred-dispatch.md](../deferred-dispatch.md) and
+[fork-patching.md](../fork-patching.md).
 
-- [Gas City and human engagement](gascity-human-engagement.md) — the Gas City primitives a human conversation can ride and how a session and its pane end: human gates and the core orders that surface them, where a question surfaces, the idle ladder, max age, manual sessions, the stop and the backstops.
-- [Gas City agent types](gascity-agents.md) — the agent variants where upstream's docs leave them unsaid: scope expansion, named-session demand and patches, wake reasons and turns, pool slots and names, kill and close, the control-dispatcher, `gc session new`, nudge fences, and which fields name a bead's holder.
-- [Gas City routing model](gascity-routing-model.md) — how Gas City delivers a bead to the session that acts on it: what the sling router writes, the claim predicate, how a graph.v2 pour routes its records, what holds a bead, the bd guard that can refuse a detach, and the route the controller restores.
-- [Gas City pack & formula authoring](gascity-packs.md) — what Gas City does with a pack and a formula that its specs leave unsaid: how a v2 step advances and a run is cancelled, what processes `workflow-finalize`, when a check loop gets a fresh context, how a directory import goes live, how builtin pins resolve, and what a formula body can expand.
+- [Gas City and human engagement](human-engagement.md) — the Gas City primitives a human conversation can ride and how a session and its pane end: human gates and the core orders that surface them, where a question surfaces, the idle ladder, max age, manual sessions, the stop and the backstops.
+- [Gas City agent types](agent-types.md) — the agent variants where upstream's docs leave them unsaid: scope expansion, named-session demand and patches, wake reasons and turns, pool slots and names, kill and close, the control-dispatcher, `gc session new`, nudge fences, and which fields name a bead's holder.
+- [Gas City routing model](routing-model.md) — how Gas City delivers a bead to the session that acts on it: what the sling router writes, the claim predicate, how a graph.v2 pour routes its records, what holds a bead, the bd guard that can refuse a detach, and the route the controller restores.
+- [Gas City pack & formula authoring](packs.md) — what Gas City does with a pack and a formula that its specs leave unsaid: how a v2 step advances and a run is cancelled, what processes `workflow-finalize`, when a check loop gets a fresh context, how a directory import goes live, how builtin pins resolve, and what a formula body can expand.
 
 ## Refresh procedure
 
@@ -181,7 +181,7 @@ To detect drift:
    returns 200:
 
    ```bash
-   grep -oE 'https://[^ )]+' docs/gascity-reference.md \
+   grep -oE 'https://[^ )]+' docs/gascity/README.md \
      | sort -u \
      | while read u; do
          code=$(curl -sIfL -o /dev/null -w '%{http_code}' "$u" 2>/dev/null)

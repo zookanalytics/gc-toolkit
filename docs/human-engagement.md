@@ -1,6 +1,6 @@
 ---
 name: Human engagement — gc-toolkit's subject and visit model
-description: gc-toolkit's own model for engaging a person — the subject and visit nouns, how a conversation starts, how a sitting holds and ends, what a person owes as a demand bead and an edge, the helm boards, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity-human-engagement.md.
+description: gc-toolkit's own model for engaging a person — the subject and visit nouns, how a conversation starts, how a sitting holds and ends, what a person owes as a demand bead and an edge, the helm boards, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity/human-engagement.md.
 ---
 
 # Human engagement
@@ -9,7 +9,7 @@ This page is gc-toolkit's model for engaging a person, not Gas City
 behavior. The Gas City primitives it rides — continuation groups, human
 gates and the core orders that surface them, extmsg, pending interactions,
 and how a session and its pane end — are stated, each with its date, in
-[gascity-human-engagement.md](gascity-human-engagement.md). Where a passage
+[gascity/human-engagement.md](gascity/human-engagement.md). Where a passage
 below relies on one of them, it links there.
 
 **Vocabulary.** The pack's model has two
@@ -45,8 +45,8 @@ person owes as a demand bead and an edge, the helm boards, and the ground the
 pack builds itself.
 
 **Boundaries.** The Gas City primitives the model rides are
-[gascity-human-engagement.md](gascity-human-engagement.md), and the routing
-mechanics are [gascity-routing-model.md](gascity-routing-model.md). How the
+[gascity/human-engagement.md](gascity/human-engagement.md), and the routing
+mechanics are [gascity/routing-model.md](gascity/routing-model.md). How the
 pack's lifecycles compose, and how completion propagates back to a waiting
 conversation, is [lifecycle-composition.md](lifecycle-composition.md). The
 converse prompt and its skills are the sitting's procedure as an agent runs
@@ -66,7 +66,7 @@ what riding an ecosystem means.
 ## How the model rides the platform
 
 Each primitive below is stated, with its evidence and date, in
-[gascity-human-engagement.md](gascity-human-engagement.md). What follows is
+[gascity/human-engagement.md](gascity/human-engagement.md). What follows is
 the seam the pack builds at each.
 
 - **Continuation groups carry the identity of a conversation.** The
@@ -80,7 +80,7 @@ the seam the pack builds at each.
   it off the board. The read side is exact string match, so a direct stamp
   is rig-qualified, and under a `default_sling_formula` a bare sling is a
   formula attach that leaves no claim route — stamp, don't sling, or sling
-  with `--no-formula` ([gascity-routing-model.md](gascity-routing-model.md)).
+  with `--no-formula` ([gascity/routing-model.md](gascity/routing-model.md)).
 
 - **A conversation role is the upstream worker contract with its close
   replaced by a hold.** The pack read upstream's `gc-role-worker` contract
@@ -89,7 +89,7 @@ the seam the pack builds at each.
   session boundary, and a successful claim is authoritative even across
   groups. The version the gascity refs pin today words the boundary as
   continue only within the same group or root, otherwise drain
-  ([gascity-human-engagement.md](gascity-human-engagement.md#the-gc-roles-worker-contract)).
+  ([gascity/human-engagement.md](gascity/human-engagement.md#the-gc-roles-worker-contract)).
   The pack once read only the second clause (tk-msfmu, 2026-08-22). The converse prompt
   carried "a claim is authoritative even when it names a different subject
   than your last one — work it the same way" and dropped the hard boundary,
@@ -666,7 +666,7 @@ because live holds predate this and keep working.
 Every `converse-<model>` template sets `idle_timeout = "0"`, which takes a
 sitting off the idle ladder entirely: Gas City never registers a template whose
 idle timeout is at or below zero with its idle tracker
-([gascity-human-engagement.md](gascity-human-engagement.md#the-idle-ladder)). A held
+([gascity/human-engagement.md](gascity/human-engagement.md#the-idle-ladder)). A held
 converse sitting therefore ends when its VISIT closes: the agent's sign-off, or
 the operator's `gc-helm dismiss <subject>`. The sign-off is terminal — it stamps
 the outcome and closes the visit — so converse takes it only when nothing
@@ -688,7 +688,7 @@ Two endings the idle setting does not own:
 - **A settled sitting is collected by the pack's reap, not by a runtime
   clock.** A sitting is a manual session, which Gas City keeps desired for as
   long as it is neither closed nor drained
-  ([gascity-human-engagement.md](gascity-human-engagement.md#a-manual-session-stays-up-until-it-is-closed)),
+  ([gascity/human-engagement.md](gascity/human-engagement.md#a-manual-session-stays-up-until-it-is-closed)),
   so the `no-wake-reason` drain that collects an ended pool session in about a
   minute never reaches it, and `converse-reap` above is what collects it. See
   *How a pane dies when no sitting is live*, below.
@@ -696,7 +696,7 @@ Two endings the idle setting does not own:
   sets `max_session_age`, and an unset age is off. Setting one would end
   long sittings instead of refreshing them. Gas City's max-age restart defers
   while the session holds open assigned work and has no attachment rung
-  ([gascity-human-engagement.md](gascity-human-engagement.md#max_session_age)),
+  ([gascity/human-engagement.md](gascity/human-engagement.md#max_session_age)),
   and a sitting's visit is assigned to it, so the restart would fire on the
   first tick after the visit closes and destroy the pane and its scrollback
   under an attached operator. The restarted session would wake unattached
@@ -705,7 +705,7 @@ Two endings the idle setting does not own:
 The cost is real: a held visit nobody answers keeps its sitting's session
 running indefinitely, where an idle clock would recycle it. Nothing rations
 sittings either. `max_active_sessions` does not cap a manual session
-([gascity-human-engagement.md](gascity-human-engagement.md#a-manual-session-stays-up-until-it-is-closed)),
+([gascity/human-engagement.md](gascity/human-engagement.md#a-manual-session-stays-up-until-it-is-closed)),
 so every unanswered hold is one more live provider process. `gc-helm dismiss` is the release
 valve, and converse puts it at the foot of every framing it posts as a
 copyable line, so ending a sitting is a switch in the thread rather than an
@@ -731,7 +731,7 @@ which subject the sitting is on. Nothing is typed into the pane.
 The ending the pack cannot reach from config at all is the pane itself: Gas
 City's stop destroys the tmux session, its pane and its scrollback on every
 stop path
-([gascity-human-engagement.md](gascity-human-engagement.md#stopping-a-session-destroys-its-pane)),
+([gascity/human-engagement.md](gascity/human-engagement.md#stopping-a-session-destroys-its-pane)),
 so any stop takes the thread whole. Retiring the session rather than
 destroying it is upstream work, evaluated in
 `specs/tk-ghlg1e/layout-stability.md`.
@@ -743,7 +743,7 @@ timeout, and converse gets that back the moment someone puts a number in
 that defer a stop and the cap on the assigned-work defer, the attachment
 rung, the scrollback a stop clears, why `[daemon] wisp_ttl` is unrelated, and
 what a `wake_mode = "resume"` restart replays — is Gas City behavior, stated
-in [gascity-human-engagement.md](gascity-human-engagement.md#the-idle-ladder).
+in [gascity/human-engagement.md](gascity/human-engagement.md#the-idle-ladder).
 Read it as what the runtime does, not as what converse experiences.
 
 *Seam:* **nothing pack-owned runs at kill time**, so there is no
@@ -915,7 +915,7 @@ what protects a held sitting. A sitting runs as a manual session, never
 pool_managed, and no claim backstop governs a session that is not
 pool_managed, so no backstop nudge and no drain reaches a converse sitting
 whatever this field holds
-([gascity-human-engagement.md](gascity-human-engagement.md#the-controllers-backstops-govern-pool-sessions-only)).
+([gascity/human-engagement.md](gascity/human-engagement.md#the-controllers-backstops-govern-pool-sessions-only)).
 What the empty field does reach is the launch delivery, where the prompt is
 prepended to it and still arrives, so the second constraint above is what any
 text put here has to satisfy.
@@ -924,7 +924,7 @@ Attachment is the one reading signal the runtime has, and only this city's
 gascity fork reads it: there an attached terminal defers the idle stop, a
 detached reader is still indistinguishable from abandonment, and the max-age
 restart ignores attachment altogether
-([gascity-human-engagement.md](gascity-human-engagement.md#the-idle-ladder)).
+([gascity/human-engagement.md](gascity/human-engagement.md#the-idle-ladder)).
 That is why the trace is written when the hold begins rather than bought with
 a longer clock, and why no converse template sets `max_session_age` (*How a
 held sitting ends*, above). Design record: `specs/tk-bzm86/design-doc.md`.
@@ -951,7 +951,7 @@ sitting is a manual session, and Gas City keeps a manual session desired for
 as long as it is neither closed nor drained and its template is still
 configured, so the `no-wake-reason` drain, which begins when a live session
 has no wake reason left, never begins for a sitting
-([gascity-human-engagement.md](gascity-human-engagement.md#a-manual-session-stays-up-until-it-is-closed)).
+([gascity/human-engagement.md](gascity/human-engagement.md#a-manual-session-stays-up-until-it-is-closed)).
 Nothing idle-sleeps one either: that takes a `[chat_sessions] idle_timeout`
 or a `[session_sleep]` policy, and this city sets neither (`gc config show`,
 2026-10-05).
@@ -972,7 +972,7 @@ Three things about that path are worth knowing before trusting a pane:
   and then signals the pane's captured process tree
   (`KillSessionWithProcessesExcluding`), with
   no Ctrl-C keystroke injection into the pane first
-  ([gascity-human-engagement.md](gascity-human-engagement.md#stopping-a-session-destroys-its-pane)).
+  ([gascity/human-engagement.md](gascity/human-engagement.md#stopping-a-session-destroys-its-pane)).
   So the composer is never cleared first. A draft is still sitting in the
   pane, intact, until the pass that closes it, and then the pane is gone.
 - **Attachment protects, but only the pane on screen.** The reap skips an
@@ -989,7 +989,7 @@ Three things about that path are worth knowing before trusting a pane:
   that drain on the agent's behalf, so its stop event reads
   `"drain acknowledged by agent"` even when the agent never ran
   `gc runtime drain-ack`
-  ([gascity-human-engagement.md](gascity-human-engagement.md#a-pool-session-with-no-wake-reason-is-drained)).
+  ([gascity/human-engagement.md](gascity/human-engagement.md#a-pool-session-with-no-wake-reason-is-drained)).
   Do not read that event as an agent decision. A sitting's teardown is the
   reap's `gc session close`, never this drain.
 
@@ -1171,5 +1171,5 @@ This page states the pack's own model, so it changes with the pack's code:
 update it in the same PR as a change to a visit producer, the converse
 prompt or skills, `gc-helm.sh`, or the board. The Gas City facts it links are
 re-verified by the refresh procedure in
-[gascity-human-engagement.md](gascity-human-engagement.md#refresh-procedure);
+[gascity/human-engagement.md](gascity/human-engagement.md#refresh-procedure);
 when one of them moves, re-derive the seam here that rests on it.

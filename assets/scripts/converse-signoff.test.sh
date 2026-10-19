@@ -59,7 +59,7 @@ HELM="$REPO/assets/scripts/gc-helm.sh"
 # The pack's conversation model and the Gas City facts it rides are two
 # pages: each pin below reads the one that carries the text it guards.
 ENGAGE="$REPO/docs/human-engagement.md"
-ENGAGE_GC="$REPO/docs/gascity-human-engagement.md"
+ENGAGE_GC="$REPO/docs/gascity/human-engagement.md"
 # Steps 2–8 are carried by on-demand skills; step 1 and the routing table stay
 # in the prompt. Each pin below reads the file that carries the text it guards:
 # the prompt for step 1, the routing table and the shared Definitions/Rules, and

@@ -10,7 +10,7 @@ a pack and runs a formula, where upstream's specs and guides do not already
 say it. Each section names its evidence and the date it was read. The
 upstream specs stay authoritative for the formats themselves, and
 gc-toolkit's own conventions for writing its formulas, scripts and skills on
-top of these facts are [pack-authoring.md](pack-authoring.md).
+top of these facts are [pack-authoring.md](../pack-authoring.md).
 
 ## Scope
 
@@ -21,10 +21,10 @@ a check loop gets a fresh context, how a pack imported from a directory goes
 live, how builtin pack pins resolve, and what a formula body can expand.
 
 **Boundaries.** The full formats are upstream's specs, linked below and
-indexed by [gascity-reference.md](gascity-reference.md). gc-toolkit's own
-authoring conventions are [pack-authoring.md](pack-authoring.md). Carrying
-local fixes against `gascity` source is [fork-patching.md](fork-patching.md).
-Agent variants and session lifecycle are [gascity-agents.md](gascity-agents.md).
+indexed by [gascity/README.md](README.md). gc-toolkit's own
+authoring conventions are [pack-authoring.md](../pack-authoring.md). Carrying
+local fixes against `gascity` source is [fork-patching.md](../fork-patching.md).
+Agent variants and session lifecycle are [gascity/agent-types.md](agent-types.md).
 
 ## What upstream's docs already say
 
@@ -69,7 +69,7 @@ Read these first; this page does not restate them. Coverage checked
 - **Patches.** `[[patches.agent]]` modifies an existing agent and fails
   loading when the target is missing; list fields append through `_append`
   variants — pack spec §1.2.10 and §2.6. How a `[[patches.named_session]]`
-  target matches is [gascity-agents.md](gascity-agents.md#variant-a--named-singletons-named_session).
+  target matches is [gascity/agent-types.md](agent-types.md#variant-a--named-singletons-named_session).
 - **Builtin packs.** Pinning a bundled source at any commit other than the
   binary's canonical pin makes it an ordinary remote import, and
   `gc doctor --fix` re-pins superseded bundled pins —
@@ -180,7 +180,7 @@ workflow is purely dispatcher-gated: start the loop.
 *Evidence:* `processWorkflowFinalize` (`internal/dispatch/runtime.go`), read
 at fork `c0571088c` on 2026-07-29; present at upstream `1e05ae624` on
 2026-10-19. The dispatcher itself is
-[gascity-agents.md](gascity-agents.md#variant-e--deterministic-workers-no-prompt-loop).
+[gascity/agent-types.md](agent-types.md#variant-e--deterministic-workers-no-prompt-loop).
 
 ## `[steps.check]` is fresh-context per iteration only if pool-routed
 

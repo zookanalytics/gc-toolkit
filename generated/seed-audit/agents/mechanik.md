@@ -376,9 +376,9 @@ reshaped to fit what Gas City ships, under the boundaries in
 
 Reference docs under `[[PACK-ROOT]]/docs/`:
 
-- **gascity-reference.md** — index of canonical Gas City documentation.
+- **gascity/README.md** — index of canonical Gas City documentation.
   Consult before guessing at config syntax or CLI flags.
-- **gascity-agents.md** — agent variants, identity, session lifecycle,
+- **gascity/agent-types.md** — agent variants, identity, session lifecycle,
   and addressing. Consult before reasoning about session lifecycle or
   titling. (`assets/scripts/tmux-pick-session.sh` is the picker tool.)
 - **fork-patching.md** — the process for carrying local fixes

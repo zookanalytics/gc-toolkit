@@ -22,12 +22,12 @@ documented now.
 - **Ending a run that was poured too early** is Gas City's run cancel,
   `POST /v0/city/{city}/runs/{run_id}/cancel`, which closes the root and every
   member that is not closed:
-  [gascity-packs.md](gascity-packs.md#a-run-is-cancelled-through-the-supervisor-api).
+  [gascity/packs.md](packs.md#a-run-is-cancelled-through-the-supervisor-api).
 - **gc-toolkit's decline** records the wait on the work bead and then cancels
   the run through `assets/scripts/run-cancel.sh`; `mol-polecat-work`'s
   load-context step runs it when the work bead it claimed is still blocked:
-  [pack-authoring.md](pack-authoring.md#a-run-that-must-not-advance-is-cancelled-after-its-wait-is-recorded).
+  [pack-authoring.md](../pack-authoring.md#a-run-that-must-not-advance-is-cancelled-after-its-wait-is-recorded).
 - **Why a `blocks` edge between work beads does not hold a formula dispatch**:
-  [gascity-routing-model.md](gascity-routing-model.md#a-blocks-dep-between-work-beads-does-not-hold-a-graphv2-dispatch).
+  [gascity/routing-model.md](routing-model.md#a-blocks-dep-between-work-beads-does-not-hold-a-graphv2-dispatch).
 - **Withholding a dispatch until its blockers close**:
-  [deferred-dispatch.md](deferred-dispatch.md).
+  [deferred-dispatch.md](../deferred-dispatch.md).

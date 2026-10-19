@@ -92,7 +92,7 @@ render's byte and token counts.
 - [docs/install.md](docs/install.md) — wiring gc-toolkit into a city
 - [docs/human-engagement.md](docs/human-engagement.md) — how the pack engages a person: the subject and visit model, converse sittings, demands and the helm boards
 - [docs/pack-authoring.md](docs/pack-authoring.md) — the pack's own conventions for its formulas, scripts, skills and agents on top of Gas City
-- [docs/gascity-reference.md](docs/gascity-reference.md) — index of canonical Gas City documentation and the pack's local supplements, the `gascity-*` pages that state Gas City behavior only
+- [docs/gascity/](docs/gascity/README.md) — Gas City itself: the pages that state Gas City behavior only, cited and dated, and the index of canonical Gas City documentation
 - [docs/scratch-reclaim.md](docs/scratch-reclaim.md) — bounding agent scratch retention under the per-uid tmpfs quota
 - [docs/worktree-reclaim.md](docs/worktree-reclaim.md) — reclaiming the per-bead worktrees of closed work, reversibly
 - [docs/review-workspace.md](docs/review-workspace.md) — the directory a review works in, and its removal when the review ends
