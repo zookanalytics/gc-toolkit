@@ -684,7 +684,7 @@ echo "── the live prose surfaces state the current contract ──"
 # form never matches.
 flat() { sed -e 's/^[[:space:]]*#[[:space:]]*//' "$1" | tr '\n' ' ' | tr -s ' '; }
 for surface in "agents/proactive/agent.toml" "tools/gc-proactive.sh" \
-               "agents/proactive/PROVENANCE.md" "docs/gascity-human-engagement.md"; do
+               "agents/proactive/PROVENANCE.md" "docs/human-engagement.md"; do
     S="$(flat "$ROOT/$surface")"
     absent "$surface does not call max_active_sessions the ONLY bound" \
            "the only throttle" "$(printf '%s' "$S" | tr 'A-Z' 'a-z')"

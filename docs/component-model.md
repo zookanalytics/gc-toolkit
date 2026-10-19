@@ -19,7 +19,7 @@ mechanical check, and which workflow each component belongs to.
 **Boundaries.** It does not draw the lifecycle — [state-machine.md](state-machine.md)
 owns the diagram, the transition table, and the check vocabulary. It does not
 narrate the merge cadence ([refinery-merge-cadence.md](refinery-merge-cadence.md))
-or the human surface ([gascity-human-engagement.md](gascity-human-engagement.md)),
+or the human surface ([human-engagement.md](human-engagement.md)),
 and it does not compose the lifecycles —
 [lifecycle-composition.md](lifecycle-composition.md) owns the seam.
 
@@ -450,7 +450,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/gc-visit-open.sh` | visit | Operator-origin visit intake in one command. |
 | `assets/scripts/city-liveness.sh` | visit | The one reading of the liveness flags in `gc rig list --json`: whether a rig is suspended, and whether the city controller is running, where the HQ row's `running=false` counts only when `gc status` does not contradict it. `gc-helm.sh`'s engage refuses on them and `gc-visit-open.sh` notes that a report will wait. |
 | `orders/converse-reap.toml` | visit | Fires the converse sitting reaper every five minutes, city-wide. |
-| `assets/scripts/converse-reap.sh` | visit | The pass that order runs: closes each unattached converse session whose visit reads closed or gone. A sign-off or a `gc-helm dismiss` closes the visit and leaves the manual session running, so this pass is the teardown both endings rely on ([gascity-human-engagement.md](gascity-human-engagement.md)). It leaves an attached session alone, because attachment is the only signal the pack has that someone is at the pane. It sits in visit, not in patrol with the other reapers, because it completes a visit's ending the way `reconcile-rig-checkouts` completes a merge's effect. |
+| `assets/scripts/converse-reap.sh` | visit | The pass that order runs: closes each unattached converse session whose visit reads closed or gone. A sign-off or a `gc-helm dismiss` closes the visit and leaves the manual session running, so this pass is the teardown both endings rely on ([human-engagement.md](human-engagement.md)). It leaves an attached session alone, because attachment is the only signal the pack has that someone is at the pane. It sits in visit, not in patrol with the other reapers, because it completes a visit's ending the way `reconcile-rig-checkouts` completes a merge's effect. |
 | `assets/scripts/converse-claim.sh` | visit | Claims one turn for a continuation group, and puts back a turn belonging to another. |
 | `assets/scripts/bead-rehome.sh` | visit | The one evidence-gated close-with-successor writer: it re-establishes the evidence for each close itself, and `--check` evaluates it without writing. After a close it hands the branch the closed bead names to `branch-end.sh`. Callers are converse dispositions, operator re-homes, `duplicate-sweep.sh`, `pr-facts.sh` consummating a pre-recorded PR-close disposition, `scaffolding-sweep.sh` carrying a finding forward, and `deferred-dispatch.sh` disposing a bead its `until` targets resolved. |
 | `assets/scripts/pr-dispose.sh` | visit | Records a deliberate supersede/not-planned PR-close disposition on the open anchor and closes the PR, so `pr-facts.sh` consummates it through `bead-rehome.sh` instead of filing a rework-or-close visit. The PR side of the same disposition doctrine, with the same callers: converse dispositions and operator close-outs. |

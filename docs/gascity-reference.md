@@ -159,7 +159,7 @@ Topics gc-toolkit has captured locally, where upstream coverage is
 missing, partial, or contradicted by a more recent maintainer ruling.
 Entries here are gc-toolkit-authored prose, not upstream pointers.
 
-- [Gas City and human engagement](gascity-human-engagement.md) — how upstream supports human engagement (extmsg, gates, pending interactions, the dashboard's attention surfaces) and the pack's subject/visit vocabulary and seams, every claim dated.
+- [Gas City and human engagement](gascity-human-engagement.md) — the Gas City primitives a human conversation can ride and how a session and its pane end: human gates and the core orders that surface them, where a question surfaces, the idle ladder, max age, manual sessions, the stop and the backstops.
 - [Gas City agent types](gascity-agents.md) — the agent variants (named singletons, pool workers, conversation visits, patrol overlay, deterministic workers), with their identity, lifecycle, addressing, and work-routing contracts.
 - [Gas City routing model: sling vs assignee vs `--reassign` vs `--on`](gascity-routing-model.md) — four-lane routing model: Lanes 1–3 per the PR #1736 ruling, plus the `--on <formula>` attach the ruling did not address.
 - [Gas City graph.v2 dispatch containment](gascity-dispatch-containment.md) — the recovery procedure for a formula dispatch poured before it should have been: finding every record the pour created and taking delivery away from all of them.

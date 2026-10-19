@@ -11,7 +11,7 @@ The pack runs three lifecycles, and each already has exactly one owner:
 |---|---|
 | bead | [state-machine.md](state-machine.md) |
 | PR | [refinery-merge-cadence.md](refinery-merge-cadence.md) |
-| visit | [gascity-human-engagement.md](gascity-human-engagement.md) |
+| visit | [human-engagement.md](human-engagement.md) |
 
 This document owns none of them. It owns the **seam**: the place where a
 conversation routes work out of a subject, that work becomes a bead, the bead
@@ -38,7 +38,7 @@ above, and this doc defers to them rather than summarizing them. It is not a
 fourth lifecycle narrative: it describes no state a bead, PR, or visit passes
 through. It does not carry the board's rendering rules or the converse
 sitting's procedure, which belong to
-[gascity-human-engagement.md](gascity-human-engagement.md), nor the routing
+[human-engagement.md](human-engagement.md), nor the routing
 mechanics, which belong to
 [gascity-routing-model.md](gascity-routing-model.md). The general model of how
 a wait is represented, which is the hold primitive, the demand primitive and

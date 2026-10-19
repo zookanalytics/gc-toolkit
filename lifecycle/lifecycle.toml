@@ -36,7 +36,7 @@ human_states = ["abandoned", "retargeted", "blocked", "refused_false_completion"
 # hold to escalate rather than one to overwrite.
 detached_states = ["pre_open_gate", "pull_request"]
 # The one route value that is not a queue. No pool claims it, so it parks the
-# bead for a person (docs/gascity-human-engagement.md). A detached state may
+# bead for a person (docs/human-engagement.md). A detached state may
 # rest on it, and a transition that finds it leaves it alone. Every other route
 # is a pool offer.
 # A park must NAME what it waits for: writing this route without a gc.takeaway
