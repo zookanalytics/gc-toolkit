@@ -1111,12 +1111,12 @@ keys = [
   # of pull_request ([machine] exit_sets) mark the record unsettled in the same
   # write, so no reader takes the work for settled at a rank it has left. Every
   # pass of pr-facts.sh compares the record of each anchor it reads in
-  # pull_request with that rank, and every full pass that of each open anchor
-  # resting elsewhere. While the two differ, it settles that work and writes the
-  # rank once every bead of it has settled, turning a record of the other rank
-  # unsettled before the first settle. Absent means no pass recorded a rank,
-  # which a pass in pull_request settles and a full pass leaves alone elsewhere.
-  # One of the three words.
+  # pull_request with that rank, and every full pass compares the record of each
+  # live anchor resting elsewhere. While the two differ, it settles that work
+  # and writes the rank once every bead of it has settled, turning a record of
+  # the other rank unsettled before the first settle. Absent means no pass
+  # recorded a rank, which a pass in pull_request settles and a full pass leaves
+  # alone elsewhere. One of the three words.
   "pr_finishing_settled",
 ]
 

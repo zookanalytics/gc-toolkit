@@ -59,7 +59,7 @@
 # pr_finishing_settled records the rank that work was last settled at in full,
 # or unsettled while a re-rank is owed, and the work is settled again while the
 # record names anything but the rank it follows: by every pass for the anchors
-# it reads in pull_request, and by every full pass for the open anchors resting
+# it reads in pull_request, and by every full pass for the live anchors resting
 # elsewhere. So a re-rank a failed settle left short is finished on a later
 # pass, and an anchor another writer moved out of pull_request is re-ranked by
 # the next full pass.
@@ -1455,11 +1455,12 @@ fi
 # Whichever writer moves an anchor out, the transition marks its record
 # unsettled (lifecycle.toml exit_sets): the exits this script writes settle the
 # work in the pass that writes them, and every other exit, such as a repool
-# through rejection-repool.sh, is settled here. So every full pass reads the open
+# through rejection-repool.sh, is settled here. So every full pass reads the live
 # anchors that carry a record, and settles the PR-finishing work of each one
 # resting elsewhere while its record names anything but the rank that work
-# follows, a settle an exit left short included. A record carries the anchor's
-# own route back, which a human state requires. Like the sweeps above, this runs
+# follows, a settle an exit left short included. The record's write carries the
+# anchor's own route back, so a human state keeps a route a person gave it
+# rather than taking the park route by default. Like the sweeps above, this runs
 # before the no-anchors early-exit.
 if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
   if fs_rows=$(bd_list --status="$LIVE_STATUSES" --has-metadata-key=pr_finishing_settled); then
@@ -1959,9 +1960,9 @@ MP_EOF
       echo "$PROG: $id — PR#$num closed out-of-band; abandoned, routed to human, escalated"
       # The anchor left pull_request, so its PR-finishing work now follows the
       # unapproved rank, and the transition marked the record of the rank that
-      # work settled at unsettled (lifecycle.toml exit_sets). It is settled in
-      # this pass, and a settle that does not finish is the full pass's sweep of
-      # anchors outside pull_request to retry.
+      # work settled at unsettled (lifecycle.toml exit_sets). This pass settles
+      # that work, and the full pass's sweep of anchors outside pull_request
+      # retries a settle that does not finish.
       settle_finishing "$id" abandoned "" unsettled || true
     else
       echo "$PROG: $id abandoned transition failed; retry next pass" >&2
@@ -2404,8 +2405,8 @@ MP_EOF
       escalate "$id" "pr-retargeted.$num" \
         "PR#$num ($live_url) was retargeted: base '$base' != expected '$rec_target'. Retarget it back and reset merge_result=pull_request to re-engage, or update merged_target if the new base is intentional."
       echo "$PROG: $id — PR#$num retargeted (base '$base' != '$rec_target'); routed to human, escalated"
-      # Its PR-finishing work leaves the approved rank the same way an abandoned
-      # anchor's does, and is settled in this pass the same way.
+      # Its PR-finishing work now follows the unapproved rank, as an abandoned
+      # anchor's does, and this pass settles it the same way.
       settle_finishing "$id" retargeted "" unsettled || true
     else
       echo "$PROG: $id retargeted transition failed; retry next pass" >&2

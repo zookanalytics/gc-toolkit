@@ -2479,7 +2479,9 @@ has "$out" "at the unapproved rank (resting in abandoned)" "…and the pass name
 echo "# a retarget whose settle fails is finished by the next full pass, which reads anchors outside pull_request"
 # The priority writer is down for the pass that retargets PRF1, so its work stays
 # at P0, and the retarget left the record unsettled. The next full pass reads no
-# anchor in pull_request, yet settles PRF1's work at P1 from that record.
+# anchor in pull_request, yet settles PRF1's work at P1 from that record. A
+# person has meanwhile routed PRF1 to themselves, and the record's write keeps
+# that route: a human state's default route would put it back on the park.
 prf1 approved approved 0
 retargeted_710
 out=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-down" run)
@@ -2487,11 +2489,12 @@ eq "$(meta PRF1 merge_result)" "retargeted" "the pass retargets PRF1 while the p
 for b in PRW PRV PST PVP; do eq "$(bprio "$b")" "0" "…$b is left at P0"; done
 eq "$(meta PRF1 pr_finishing_settled)" "unsettled" "…and the record reads unsettled"
 has "$out" "did not settle at the unapproved rank (resting in retargeted); a later pass settles its PR-finishing work again" "…and the pass names what did not settle"
+gc bd update PRF1 --set-metadata gc.routed_to=rig/gc-toolkit.mechanik >/dev/null 2>&1
 out=$(run)
 has "$out" "no gating anchors" "the next full pass finds no anchor in pull_request"
 for b in PRW PRV PCV PRT PST PVP; do eq "$(bprio "$b")" "1" "…yet $b reaches P1"; done
 eq "$(meta PRF1 pr_finishing_settled)" "unapproved" "…and PRF1 records the unapproved rank"
-eq "$(meta PRF1 'gc.routed_to')" "human" "…carrying PRF1's own route back"
+eq "$(meta PRF1 'gc.routed_to')" "rig/gc-toolkit.mechanik" "…carrying PRF1's own route back"
 
 echo "# …and a return to pull_request before that retry still brings every bead to P0, work filed while away included"
 # The retarget's settle fails, and PRF1 returns to pull_request before any full
