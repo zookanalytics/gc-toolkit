@@ -134,11 +134,12 @@ Machine-readable artifacts. Each link is the canonical download.
 
 ## Gaps
 
-Topics gc-toolkit has hit in practice that have no upstream coverage
-yet. Entries here are a TBD list; the resolution is to file an
-upstream PR (per the upstream-engagement doctrine (mechanik prompt; keeper sub-pack)
-into the mechanik prompt) rather than restate the content
-in this index.
+Topics gc-toolkit has hit in practice that upstream's documentation
+does not cover yet. Entries here are a TBD list. Each is resolved by a
+local supplement that meets [the bar](#the-bar), and a fix sent
+upstream is the operator's send ([outbound-sends.md](outbound-sends.md)).
+A capability Gas City does not ship is not a documentation gap: it is a
+warrant, recorded in [warrants.md](warrants.md).
 
 - *(none recorded yet — when you find a gap, file the bead and add a
   pointer here)*

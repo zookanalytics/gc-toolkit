@@ -84,6 +84,7 @@ render's byte and token counts.
 
 - [docs/foundation.md](docs/foundation.md) — beliefs and operating discipline (the charter)
 - [docs/architecture.md](docs/architecture.md) — how the workflows compose Gas City's primitives, and the consistency test for new work
+- [docs/warrants.md](docs/warrants.md) — the warrants in force: what the pack keeps because Gas City lacks the primitive, the upstream evidence and when it was verified, and the trigger that retires each
 - [docs/state-machine.md](docs/state-machine.md) — the anchor state machine: every state, every transition, every writer
 - [docs/component-model.md](docs/component-model.md) — the primitives, and every invariant bound to its doctor check
 - [docs/epics.md](docs/epics.md) — what an epic is, the contract it carries, and when it closes
