@@ -327,7 +327,7 @@ dependency edge by hand:
   holding nothing, owing no answer, with no entry in the round's living answer.
   A body raising a point of its own is ruled on that point. `finding.sh`
   refuses it on anything but a review body whose review or review round raised
-  another finding.
+  an inline comment.
   ```bash
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition restates
   ```
@@ -351,7 +351,7 @@ dependency edge by hand:
   ```
 
 **The words the operator reads.** The PR keeps one living answer per human
-review: a label and a sentence per point. With any human ruling, pass
+review round: a label and a sentence per point. With any human ruling, pass
 `--label "<a few words>"` when the comment has no bold headline, and with a
 decline, a deferral or needs-you pass `--answer "<one sentence>"` that starts by
 saying, in your own words, how you answered compared with what was asked

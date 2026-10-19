@@ -1219,8 +1219,8 @@ eq "$(bstatus "$FT")" "open" "…and leaves one on an open anchor waiting on its
 # ---------------------------------------------------------------------------
 # restates: a human review body that only frames the inline comments of its
 # review round closes as no point of its own, with no edge and no answer owed.
-# It takes only a review body whose review, or review round, raised another
-# finding.
+# It takes only a review body whose review, or review round, raised an inline
+# comment.
 # ---------------------------------------------------------------------------
 : > "$STUB_DEPS"
 store '[{"id":"tk-ancR","status":"open","assignee":"","title":"ancR","notes":"","metadata":{"merge_result":"pull_request","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
@@ -1272,6 +1272,10 @@ FRU=$(round_finding "PR review" "A body review whose round raised nothing beside
 round_finding "e.sh:5" "An inline point the reviewer left against another commit." 9511 9501 johnzook@c96 >/dev/null
 "$SUT" set-disposition --finding "$FRU" --anchor tk-ancR --disposition restates 2>/dev/null; rc=$?
 eq "$rc|$(bstatus "$FRU")" "1|open" "restates refuses a body review whose round raised nothing beside it, whatever its reviewer raised in another round"
+FRV=$(round_finding "PR review" "A body review beside another body review of its round." 9600 9600 johnzook@c97)
+round_finding "PR review" "Another review body, against the same commit." 9700 9700 johnzook@c97 >/dev/null
+"$SUT" set-disposition --finding "$FRV" --anchor tk-ancR --disposition restates 2>/dev/null; rc=$?
+eq "$rc|$(bstatus "$FRV")" "1|open" "…and one whose round raised only the body of another review, which is no inline comment for it to frame"
 "$SUT" set-disposition --finding "$FRR" --anchor tk-ancR --disposition restates --reason "it lists the inline points of the pass"; rc=$?
 eq "$rc|$(meta "$FRR" 'finding.disposition')|$(bstatus "$FRR")" "0|restates|closed" \
   "restates rules a body review that frames inline comments other reviews of its round carry"

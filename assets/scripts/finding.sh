@@ -614,7 +614,8 @@ cmd_set_disposition() {
   # client can split into one review per comment. So it takes a human finding
   # raised by a review body (its comment is the review itself) whose review, or
   # whose review round (finding.review_round, stamped at intake), raised at
-  # least one other finding on the anchor.
+  # least one inline comment filed as a finding on the anchor. The body of
+  # another review in the round is not an inline comment, so it does not count.
   if [ "$disp" = restates ]; then
     local rrow rrid rcid rrnd rsib
     rrow=$(bd_json show "$finding")
@@ -626,8 +627,9 @@ cmd_set_disposition() {
     rsib=$(bd_list --metadata-field anchor_bead="$anchor" --status="$ALL_STATUSES" \
       | jq -r --arg r "$rrid" --arg rd "$rrnd" --arg f "$finding" '[ .[]? | select(.id != $f)
           | select(((.metadata.task_kind // "") | tostring) == "finding")
-          | select((((.metadata["finding.review_id"] // "") | tostring) == $r)
-                   or ($rd != "" and (((.metadata["finding.review_round"] // "") | tostring) == $rd))) ] | length' 2>/dev/null) \
+          | ((.metadata["finding.review_id"] // "") | tostring) as $sr
+          | select(((.metadata["finding.comment_id"] // "") | tostring) != $sr)
+          | select($sr == $r or ($rd != "" and (((.metadata["finding.review_round"] // "") | tostring) == $rd))) ] | length' 2>/dev/null) \
       || { warn "could not read the findings on anchor $anchor to check $finding's review; nothing ruled"; exit 2; }
     case "$rsib" in ''|*[!0-9]*) warn "could not count the findings review $rrid raised on anchor $anchor; nothing ruled"; exit 2 ;; esac
     [ "$rsib" -gt 0 ] \
