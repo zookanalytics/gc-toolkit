@@ -26,7 +26,7 @@ AI changed the cost of work. Agent iteration, parallel exploration, and self-cri
 
 ## Boundaries
 
-gc-toolkit uses Gas City as shipped. A pack is prose, config and thin glue. Judgment lives in prompts, flow in formulas, and mechanics in the platform. These tests decide what belongs in the pack:
+gc-toolkit uses Gas City as shipped. A pack is prose, config, thin glue and surfaces. Judgment lives in prompts, flow in formulas, mechanics in the platform, and visualization in surfaces. A surface is a visualization tailored to the pack, such as the helm board. These tests decide what belongs in the pack:
 
 1. **Prose and config are free.** Prompts, skills, checklists, formulas, orders and work queries need no warrant.
 2. **A pack noun needs a warrant.** A pack noun is a kind of object or state the pack defines for itself, such as a bead kind or a lifecycle state. Its warrant is a dated record that names the platform primitive it stands in for and the trigger that retires it. When Gas City ships that primitive, migrating onto it is scheduled work. A converter between a pack noun and a platform noun is the sign that the trigger was missed.
