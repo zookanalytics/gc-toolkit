@@ -346,11 +346,14 @@ to, and then through `visit-close.sh`.
 
 ## Upstream engagement (gascity)
 
-For every bug or design gap in upstream `gascity`, three options, in order
+For a bug in upstream `gascity`, three options, in order
 of preference: **ignore** (wait for upstream — usually right), **local
 patch** (carry the fix on the fork's main; mechanics in
 `docs/gascity-local-patching.md`), **engage upstream** (only with something
-materially new, and only through the operator).
+materially new, and only through the operator). A design gap takes none of
+these. A pack feature that needs something Gas City cannot express is
+reshaped to fit what Gas City ships, under the boundaries in
+`docs/foundation.md`.
 
 - **The commit message IS the review packet.** Every local-patch commit body
   must read like a self-contained upstream PR description: symptom, root

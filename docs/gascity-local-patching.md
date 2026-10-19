@@ -29,8 +29,8 @@ disappear](#when-this-doc-should-disappear)).
 
 ## When to local-patch
 
-When you hit a bug or design gap in `gascity` that's blocking your city,
-evaluate which of three options applies:
+When you hit a bug in `gascity` that's blocking your city, evaluate which
+of three options applies:
 
 1. **Ignore.** Wait for upstream to resolve, accept the cost in the meantime.
    This is the right answer most of the time, especially when others are
@@ -45,6 +45,10 @@ evaluate which of three options applies:
 Default to option 1. Move to option 2 when the bug is hot and you can't
 wait. Move to option 3 only when you have something new, *and* you've
 decided you want the public footprint of an upstream PR.
+
+A design gap is not a local-patch case. A gc-toolkit feature that needs
+something Gas City cannot express is reshaped to fit what Gas City ships,
+under the boundaries in [foundation.md](foundation.md#boundaries).
 
 ---
 
