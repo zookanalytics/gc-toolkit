@@ -316,7 +316,10 @@ fi
 if [ "${_g[0]:-}" = "show" ] && [ -n "${STUB_INDEX:-}" ]; then
   case "${_g[1]:-}" in *:review-checks.toml) cat "$STUB_INDEX"; exit 0 ;; esac
 fi
+# ls-remote matches its pattern against a ref's tail, so STUB_LSREMOTE_TAIL
+# serves a ref that ends in the branch's ref, sorted ahead of it as git sorts.
 if [ "${1:-}" = "ls-remote" ]; then
+  [ -n "${STUB_LSREMOTE_TAIL:-}" ] && printf '%s\trefs/heads/a/%s\n' "$STUB_LSREMOTE_TAIL" "$3"
   [ -n "${STUB_LSREMOTE:-}" ] && printf '%s\trefs/heads/%s\n' "$STUB_LSREMOTE" "${3#refs/heads/}"
   exit 0
 fi
@@ -480,6 +483,11 @@ eq "$(meta rv-1 reviewed_oid)" "$OID_HEAD" "pre-open records reviewed_oid on the
 has "$(notes rv-1)" "tk-anc" "pre-open verdict notes carry the anchor link"
 backed "pre-open closes the review bead as the lane's backing"
 no_lane_key "…and stores no lane state on the anchor"
+# A ref whose tail is the branch's ref answers the same ls-remote, listed first.
+reset "$ANCHOR_PRE"
+out=$(STUB_LSREMOTE_TAIL="$OID_OLD" "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "pre-open approve beside a ref that ends in the branch's ref exits 0"
+eq "$(meta rv-1 reviewed_oid)" "$OID_HEAD" "…and records the head of the branch's own ref"
 
 echo "# --reviewed-oid override"
 reset "$ANCHOR_PR"

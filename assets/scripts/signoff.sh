@@ -427,6 +427,13 @@ BRANCH=$(row_meta "$ANCHOR_ROW" branch)
 REVIEWED_OID="$OID_OVERRIDE"
 [ -n "$REVIEWED_OID" ] || REVIEWED_OID=$(row_meta "$REVIEW_ROW" reviewed_oid)
 
+# The head of the anchor's branch on origin. ls-remote matches its pattern
+# against a ref's tail, so only the line for the exact ref is taken.
+branch_head() {
+  git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null \
+    | awk -v r="refs/heads/$BRANCH" '$2 == r { print $1; exit }'
+}
+
 # The live head of the anchor's branch: the PR's own head post-open (what the
 # merge condition compares against), the remote ref pre-open. Empty is
 # "unanswerable", never "no head".
@@ -434,13 +441,13 @@ live_head() {
   if [ -n "$POST_OPEN" ]; then
     gh pr view "$PR_NUMBER" --repo "$PR_REPO_Q" --json headRefOid -q .headRefOid 2>/dev/null
   elif [ -n "$BRANCH" ]; then
-    git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null | awk 'NR == 1 {print $1}'
+    branch_head
   fi
 }
 
 if [ -z "$REVIEWED_OID" ]; then
   [ -n "$BRANCH" ] || { warn "anchor $ANCHOR names no branch and no --reviewed-oid was given; nothing names the commit this verdict read"; exit 1; }
-  REVIEWED_OID=$(git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null | awk 'NR == 1 {print $1}')
+  REVIEWED_OID=$(branch_head)
 fi
 # The artifact names the commit judged, and the pre-open record stamps it back
 # on the review bead, so a verdict still needs one. It is not held to a length:
