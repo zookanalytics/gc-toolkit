@@ -185,10 +185,11 @@ When the idle timeout fires, `DecideIdleTimeout` walks its rungs in order.
 Upstream's are: an active blocker, a pending interaction, assigned work, the
 `min_active_sessions` floor, then stop. The city's fork adds an attachment
 rung after the pending interaction: an attached terminal (`IsAttached`)
-defers the stop, re-evaluated every tick, so a forgotten attached pane is not
-immortal and a detached reader is still collected. Upstream's default
-reconciler has no such rung; only the opt-in v2 reconciler's stop fence
-checks attachment.
+defers the stop on every tick it stays attached, and so does an attachment
+probe that cannot tell. The defer has no cap, so an attached pane is never
+idle-stopped; the ladder reaches its later rungs only once the terminal
+detaches. Upstream's default reconciler has no such rung; only the opt-in v2
+reconciler's stop fence checks attachment.
 
 The assigned-work defer is capped: `assigned_work_defer_limit` (default 3)
 consecutive defers on the same anchor bead, after which the next tick stops
@@ -205,7 +206,8 @@ records, never a session.
 *Evidence:* `buildIdleTracker` (`cmd/gc/cmd_start.go`), `checkIdle`
 (`cmd/gc/idle_tracker.go`), `rawSessionActivity` and `discountedActivity`
 (`internal/runtime/tmux/tmux.go`), `DecideIdleTimeout`
-(`internal/session/lifecycle_timers.go`), `defaultAssignedWorkDeferLimit`
+(`internal/session/lifecycle_timers.go`), `attachmentHolds`
+(`cmd/gc/worker_handle.go`), `defaultAssignedWorkDeferLimit`
 (`cmd/gc/assigned_work_defer_tracker.go`), the stop path in
 `cmd/gc/session_reconciler.go` and `cmd/gc/reconcile_effect_stop.go`,
 `WispTTL` (`internal/config/config.go`) and `cmd/gc/wisp_gc.go`; read at
@@ -225,17 +227,24 @@ upstream `1e05ae624` and the fork on 2026-10-19.
 
 ### A manual session stays up until it is closed
 
-A session started with `gc session new` is manual. The awake set keeps a
-manual session desired, under the reason `manual`, for as long as it is
-neither closed nor drained and its template is still configured, so the
-`no-wake-reason` drain never begins for one. `gc session new` checks no
-session count, and the pool's scale-down drop paths skip manual sessions, so
-`max_active_sessions` does not cap them. A manual session can still be
+A session whose `session_origin` is `manual` stays desired: the awake set
+keeps it, under the reason `manual`, for as long as it is neither closed nor
+drained and its template is still configured, so the `no-wake-reason` drain
+never begins for one. `gc session new` creates a manual session, with one
+exception: for an unbound named session's own name without `--alias`, it
+creates the canonical session, whose origin is `named`
+([gascity-agents.md](gascity-agents.md#gc-session-new-and-the-canonical-session)).
+That session gets no manual keepalive; the named-session arms decide whether
+it stays desired. `gc session new` checks no session count, and the pool's
+scale-down drop paths skip manual sessions, so `max_active_sessions` does not
+cap them. A manual session can still be
 idle-slept by a `[chat_sessions]` idle timeout once its grace period ends, and
 a hold or quarantine overrides it.
 
-*Evidence:* `ComputeAwakeSet` (`cmd/gc/compute_awake_set.go`), `cmdSessionNew`
-(`cmd/gc/cmd_session.go`), the drop paths in `cmd/gc/build_desired_state.go`;
+*Evidence:* `ComputeAwakeSet` (`cmd/gc/compute_awake_set.go`),
+`isManualSessionInfo` (`cmd/gc/session_sleep.go`), `cmdSessionNew` and
+`sessionOriginForConfiguredNamed` (`cmd/gc/cmd_session.go`), the drop paths in
+`cmd/gc/build_desired_state.go`;
 read at upstream `1e05ae624` and the fork on 2026-10-19. Upstream's session
 model says manual sessions may soft-exceed the cap.
 
