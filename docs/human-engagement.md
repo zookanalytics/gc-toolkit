@@ -83,11 +83,14 @@ the seam the pack builds at each.
   with `--no-formula` ([gascity-routing-model.md](gascity-routing-model.md)).
 
 - **A conversation role is the upstream worker contract with its close
-  replaced by a hold.** Upstream's `gc-role-worker` contract holds two
-  clauses that are in tension for a conversation role: an empty
-  continuation group after close is a hard session boundary, and a
-  successful claim is authoritative even across groups. The pack read only
-  the second one (tk-msfmu, 2026-08-22). The converse prompt
+  replaced by a hold.** The pack read upstream's `gc-role-worker` contract
+  (gascity-packs `0b95742`, 2026-08-06) as two clauses in tension for a
+  conversation role: an empty continuation group after close is a hard
+  session boundary, and a successful claim is authoritative even across
+  groups. The version the gascity refs pin today words the boundary as
+  continue only within the same group or root, otherwise drain
+  ([gascity-human-engagement.md](gascity-human-engagement.md#the-gc-roles-worker-contract)).
+  The pack once read only the second clause (tk-msfmu, 2026-08-22). The converse prompt
   carried "a claim is authoritative even when it names a different subject
   than your last one — work it the same way" and dropped the hard boundary,
   so a session whose group went dry claimed an unrelated subject and prepped
