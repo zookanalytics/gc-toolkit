@@ -877,34 +877,34 @@ index_has_check() { # <check>
   return 1
 }
 
-# The review guidance a change edits: review-checks.toml at the root and the
-# docs/review-*.md files, among the paths it touches from where its branch left
-# its base to the reviewed commit. Every reader takes that guidance at the commit
+# The review guidance a change edits, as the one resolver lists it:
+# review-checks.toml and the docs/review-*.md files among the paths it touches
+# from where its branch left its base to the reviewed commit. The resolver finds
+# the commit as it finds any commit it reads, fetching it by id when no
+# repository here holds it yet. Every reader takes that guidance at the commit
 # it judges, so a branch's edit to it governed the branch's own review. Sets
 # GUIDANCE_EDITS, space-separated, and returns 0 once the paths are listed;
 # non-zero, with GUIDANCE_WHY, when they cannot be: no base names where the
-# branch left, or no repository here holds the reviewed commit and that base.
+# branch left, or the resolver could not list them and says why.
 GUIDANCE_EDITS=""; GUIDANCE_WHY=""
 guidance_edits() {
-  local base root repo="" fork paths
+  local base err out rc
   base=$(row_meta "$REVIEW_ROW" review_base)
   [ -n "$base" ] || base=$(row_meta "$ANCHOR_ROW" merged_target)
   [ -n "$base" ] || base=$(row_meta "$ANCHOR_ROW" target)
   [ -n "$base" ] || { GUIDANCE_WHY="neither the review nor its anchor names the base the branch left"; return 1; }
-  for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
-    [ -n "$root" ] && git -C "$root" cat-file -e "$REVIEWED_OID^{commit}" 2>/dev/null && { repo="$root"; break; }
-  done
-  [ -n "$repo" ] || { GUIDANCE_WHY="no repository here holds $REVIEWED_OID"; return 1; }
-  # The base as origin has it now, so the fork point is where the branch left it.
-  git -C "$repo" fetch --quiet --no-tags origin "+refs/heads/$base:refs/remotes/origin/$base" >/dev/null 2>&1 || true
-  fork=$(git -C "$repo" merge-base "refs/remotes/origin/$base" "$REVIEWED_OID" 2>/dev/null)
-  [ -n "$fork" ] || { GUIDANCE_WHY="no fork point between origin/$base and $REVIEWED_OID reads"; return 1; }
-  # --no-renames: git's rename detection lists a renamed file by the path it
-  # lands at alone, and a guidance file moved away is an edit to the guidance.
-  paths=$(git -C "$repo" diff --no-renames --name-only "$fork" "$REVIEWED_OID" 2>/dev/null) \
-    || { GUIDANCE_WHY="the paths from $fork to $REVIEWED_OID did not read"; return 1; }
-  GUIDANCE_EDITS=$(printf '%s\n' "$paths" | awk '/^review-checks\.toml$/ || /^docs\/review-[^\/]*\.md$/' | paste -sd' ' -)
-  return 0
+  [ -x "$INDEX_PARSER" ] || { GUIDANCE_WHY="the check resolver is missing ($INDEX_PARSER)"; return 1; }
+  err=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-edits.XXXXXX") || { GUIDANCE_WHY="no scratch file for the resolver's reason"; return 1; }
+  out=$("$INDEX_PARSER" --edits --base "$base" --at "$REVIEWED_OID" 2>"$err"); rc=$?
+  if [ "$rc" -eq 0 ]; then
+    rm -f "$err"
+    GUIDANCE_EDITS=$(printf '%s\n' "$out" | sed '/^$/d' | paste -sd' ' -)
+    return 0
+  fi
+  GUIDANCE_WHY=$(tr '\n' ' ' < "$err" | sed 's/review-checks: //g; s/ *$//')
+  rm -f "$err"
+  [ -n "$GUIDANCE_WHY" ] || GUIDANCE_WHY="the check resolver exited $rc"
+  return 1
 }
 
 # Triage's classification: union the added checks into check_set and record one

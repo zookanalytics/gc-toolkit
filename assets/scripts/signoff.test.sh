@@ -320,12 +320,24 @@ if [ "${1:-}" = "ls-remote" ]; then
   [ -n "${STUB_LSREMOTE:-}" ] && printf '%s\trefs/heads/%s\n' "$STUB_LSREMOTE" "${3#refs/heads/}"
   exit 0
 fi
-# The backstop's path list: `-C <root> merge-base <base> <oid>` answers the fork
-# point (STUB_FORK, set empty for one that does not read), and
-# `-C <root> diff --name-only` answers STUB_DIFF_PATHS, one path per line. The
-# path a rename left, STUB_DIFF_RENAMED_FROM, is listed only beside
-# --no-renames, as git lists it: with rename detection on, the default, a
-# renamed file is named by the path it lands at alone.
+# A reviewed commit this checkout has not fetched: `cat-file -e` on
+# STUB_UNFETCHED fails until a `fetch ... origin <that oid>` has asked origin for
+# it by id. Every fetch is logged to STUB_FETCH_LOG.
+if [ "${_g[0]:-}" = "fetch" ]; then
+  printf '%s\n' "${_g[*]}" >> "${STUB_FETCH_LOG:-/dev/null}"; exit 0
+fi
+if [ "${_g[0]:-}" = "cat-file" ] && [ -n "${STUB_UNFETCHED:-}" ]; then
+  case "${_g[2]:-}" in
+    "$STUB_UNFETCHED"*) grep -q -- " origin $STUB_UNFETCHED\$" "${STUB_FETCH_LOG:-/dev/null}" 2>/dev/null || exit 1 ;;
+  esac
+fi
+# The backstop's path list, which the resolver's --edits reads:
+# `-C <root> merge-base <base> <oid>` answers the fork point (STUB_FORK, set
+# empty for one that does not read), and `-C <root> diff --name-only` answers
+# STUB_DIFF_PATHS, one path per line. The path a rename left,
+# STUB_DIFF_RENAMED_FROM, is listed only beside --no-renames, as git lists it:
+# with rename detection on, the default, a renamed file is named by the path it
+# lands at alone.
 if [ "${_g[0]:-}" = "merge-base" ] && [ "${_g[1]:-}" != "--is-ancestor" ]; then
   [ -n "${STUB_FORK-fork0}" ] && printf '%s\n' "${STUB_FORK-fork0}"
   exit 0
@@ -1694,6 +1706,14 @@ reset "$ANCHOR_PR"
 out=$(STUB_DIFF_PATHS=$'specs/x/old-correctness-guidance.md' STUB_DIFF_RENAMED_FROM=$'docs/review-correctness.md' "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
 eq "$rc" 1 "a correctness approve on a change that renames a guidance file away is refused"
 has "$out" "edits its own review guidance (docs/review-correctness.md)" "…naming the path the rename left"
+# A head pushed after this checkout last fetched is in no repository here until
+# it is fetched by id, as the resolver fetches any commit it reads, so the edit
+# is still named rather than left unchecked.
+reset "$ANCHOR_PR"; : > "$TMP/fetch.log"
+out=$(STUB_UNFETCHED="$OID_HEAD" STUB_FETCH_LOG="$TMP/fetch.log" STUB_DIFF_PATHS=$'review-checks.toml' "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 1 "a correctness approve on a guidance edit at a head this checkout has not fetched is refused"
+has "$out" "edits its own review guidance (review-checks.toml)" "…naming the edit"
+has "$(cat "$TMP/fetch.log")" "origin $OID_HEAD" "…having fetched the reviewed commit by id"
 reset "$ANCHOR_PR"
 out=$(STUB_DIFF_PATHS=$'docs/review-demo.md' "$SUT" --review-bead rv-1 --verdict approve --needs-you "this change adds demo guidance, which its own demo review ran under" 2>&1); rc=$?
 eq "$rc" 0 "the same approve with --needs-you records"

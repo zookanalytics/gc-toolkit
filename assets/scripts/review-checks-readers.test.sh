@@ -8,8 +8,8 @@
 #
 # The test looks for reads, not names: a git object read (show <oid>:<path>), a
 # file read (cat, head, tail, source, a < redirect, a -r or -f test) and an
-# index handed to the resolver as --file. signoff.sh names both files to match
-# the paths a change touches and reads neither, and prose names them freely.
+# index handed to the resolver as --file. signoff.sh names both files in what it
+# tells a reviewer and reads neither, and prose names them freely.
 # A fixture of each read shape proves the scan finds it, and a fixture of
 # names proves it reads past them.
 #

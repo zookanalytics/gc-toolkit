@@ -44,6 +44,14 @@
 #     nothing and exits 0, the common case. The file exists only at a commit, so
 #     this always needs --at, whatever names the index.
 #
+#   review-checks.sh --edits --base <branch> --at <oid>
+#     Print the rig's guidance the change at <oid> edits, one path per line:
+#     review-checks.toml and each docs/review-*.md among the paths it touches
+#     from where it left <branch> on origin. A change that edits none prints
+#     nothing and exits 0. A rename counts at both of its paths, so a guidance
+#     file renamed away is an edit to it. A change exists only at a commit, so
+#     this always needs --at, whatever names the index.
+#
 # Phase ordering: pre-open < open-as-draft < ready-for-review < merge. A check
 # that reads only the diff is pre-open; one that needs the deployed preview is
 # open-as-draft. A check_set token no layer declares takes pre-open (the backstop
@@ -67,10 +75,10 @@
 # pr-facts.sh, review-outcome.sh, pr-summary-region.sh, liveness-sweep.sh,
 # review-dispatch-body.sh, review-checks.test.sh.
 # Exit: 0 ok · 1 a commit --at names cannot be read, an extension at a readable
-# commit cannot be read, --check names a check no layer declares or one whose
-# phase is outside the ordered set, a resolved check's phase is outside the
-# ordered set, or (emit) no index declares any check · 2 usage, a call that names
-# no commit included.
+# commit cannot be read, the paths --edits lists cannot be listed, --check names
+# a check no layer declares or one whose phase is outside the ordered set, a
+# resolved check's phase is outside the ordered set, or (emit) no index declares
+# any check · 2 usage, a call that names no commit included.
 set -uo pipefail
 
 usage() { sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
@@ -80,7 +88,7 @@ HERE="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PACK_INDEX="$(CDPATH='' cd -- "$HERE/../.." && pwd)/review-checks.toml"
 
 MODE=""
-FILE=""; ONLY_CHECK=""; CHECK_SET=""; THROUGH=""; AT=""; WITH_PHASE=""; EXT_CHECK=""
+FILE=""; ONLY_CHECK=""; CHECK_SET=""; THROUGH=""; AT=""; WITH_PHASE=""; EXT_CHECK=""; EDIT_BASE=""
 set_mode() { # <mode> — one mode per call
   if [ -n "$MODE" ] && [ "$MODE" != "$1" ]; then
     echo "review-checks: --$MODE and --$1 are different calls; name one" >&2; usage >&2; exit 2
@@ -92,6 +100,8 @@ while [ $# -gt 0 ]; do
     --resolve)     set_mode resolve; shift ;;
     --show)        set_mode show; shift ;;
     --extension)   set_mode extension; EXT_CHECK="${2:-}"; shift 2 || { usage >&2; exit 2; } ;;
+    --edits)       set_mode edits; shift ;;
+    --base)        EDIT_BASE="${2:-}"; shift 2 || { usage >&2; exit 2; } ;;
     --file)        FILE="${2:-}";      shift 2 || { usage >&2; exit 2; } ;;
     --check)       ONLY_CHECK="${2:-}"; shift 2 || { usage >&2; exit 2; } ;;
     --check-set)   CHECK_SET="${2:-}"; shift 2 || { usage >&2; exit 2; } ;;
@@ -105,10 +115,14 @@ done
 [ -n "$MODE" ] || MODE=show
 
 # A call names the commit it judges, unless an index is named outright. The
-# extension is a file only a commit carries, so nothing stands in for its commit.
+# extension is a file only a commit carries, and the edits a change only a
+# commit makes, so nothing stands in for their commit.
 if [ -z "$AT" ]; then
   if [ "$MODE" = extension ]; then
     echo "review-checks: --extension needs --at <oid>, the commit whose docs/review-<check>.md it reads" >&2; exit 2
+  fi
+  if [ "$MODE" = edits ]; then
+    echo "review-checks: --edits needs --at <oid>, the commit whose change it lists" >&2; exit 2
   fi
   if [ -z "$FILE" ] && [ -z "${GC_REVIEW_CHECKS_INDEX:-}" ]; then
     echo "review-checks: no commit named (--at is missing or empty) and no index named (--file, GC_REVIEW_CHECKS_INDEX); a rig's rows are read only at the commit being judged" >&2
@@ -250,6 +264,29 @@ if [ "$MODE" = extension ]; then
   fi
   read_at "$EXT_PATH" || { warn "$AT:$EXT_PATH is there but would not read"; exit 1; }
   [ -z "$AT_TEXT" ] || printf '%s\n' "$AT_TEXT"
+  exit 0
+fi
+
+# --- the guidance a change edits ---------------------------------------------
+if [ "$MODE" = edits ]; then
+  if [ -z "$EDIT_BASE" ] || ! git check-ref-format "refs/heads/$EDIT_BASE" >/dev/null 2>&1; then
+    echo "review-checks: --edits takes --base <branch>, the branch the change left, got '$EDIT_BASE'" >&2; exit 2
+  fi
+  find_at_repo || { no_commit_warning; exit 1; }
+  if [ -z "$AT_REPO" ]; then
+    warn "no repository here to read '$AT' from (no checkout toplevel, GC_RIG_ROOT unset); the paths it touches went unread"
+    exit 1
+  fi
+  # The base as origin has it now, so the fork point is where the change left it.
+  git -C "$AT_REPO" fetch --quiet --no-tags --no-write-fetch-head origin \
+    "+refs/heads/$EDIT_BASE:refs/remotes/origin/$EDIT_BASE" >/dev/null 2>&1 || true
+  FORK=$(git -C "$AT_REPO" merge-base "refs/remotes/origin/$EDIT_BASE" "$AT" 2>/dev/null)
+  [ -n "$FORK" ] || { warn "no fork point between origin/$EDIT_BASE and $AT reads"; exit 1; }
+  # --no-renames: rename detection names a renamed file by the path it lands at
+  # alone, and a guidance file moved away is an edit to the guidance.
+  PATHS=$(git -C "$AT_REPO" diff --no-renames --name-only "$FORK" "$AT" 2>/dev/null) \
+    || { warn "the paths from $FORK to $AT did not read"; exit 1; }
+  printf '%s\n' "$PATHS" | awk '/^review-checks\.toml$/ || /^docs\/review-[^\/]*\.md$/'
   exit 0
 fi
 

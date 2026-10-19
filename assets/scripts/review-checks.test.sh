@@ -16,7 +16,10 @@
 #     names no commit refused unless --file or GC_REVIEW_CHECKS_INDEX names the
 #     index, and --extension reading a commit's docs/review-<check>.md;
 #   - --at fetching a commit the checkout has not fetched, failing on one
-#     nothing can fetch, and asking each repository once.
+#     nothing can fetch, and asking each repository once;
+#   - --edits listing the guidance a change edits from where it left its base,
+#     a guidance file renamed away included, at a change the checkout has not
+#     fetched.
 #
 # Hermetic: runs the script against fixtures in a mktemp dir, with a fixture pack
 # (a copy of the script under <pack>/assets/scripts beside a fixture index) and
@@ -403,6 +406,60 @@ if [ -n "$NEW" ] && [ -d "$CLONE/.git" ] && ! git -C "$CLONE" cat-file -e "$NEW^
   is       "…and the working tree's index adds no row" "$(cd "$CLONE" && "$PSUT" --check ux --at "$CNOIDX" >/dev/null 2>&1; echo $?)" "1"
 else
   bad "--at fetch fixture setup" "could not build the origin/clone pair"
+fi
+
+# ---- --edits lists the guidance a change edits ---------------------------------
+# origin holds a base branch and a change cut from it. The change is pushed after
+# the clone, so the clone holds neither it nor the base's later commit.
+EO="$TMP/edits-origin"; EC="$TMP/edits-clone"
+mkdir -p "$EO/docs" && git -C "$EO" init -q && git -C "$EO" symbolic-ref HEAD refs/heads/base \
+  && printf 'x\n' > "$EO/README" && printf '[checks.ux]\nphase = "pre-open"\n' > "$EO/review-checks.toml" \
+  && printf 'old\n' > "$EO/docs/review-correctness.md" && git -C "$EO" add -A && commit_q "$EO" -m base \
+  && git clone -q "$EO" "$EC" 2>/dev/null
+# The change edits the index, renames the correctness guidance away, and touches
+# code and two docs that are not guidance. The base then edits guidance of its
+# own, which is not the change's edit.
+git -C "$EO" checkout -q -b change base 2>/dev/null
+printf '[checks.ux]\nphase = "merge"\n' > "$EO/review-checks.toml"
+git -C "$EO" mv docs/review-correctness.md correctness-notes.md 2>/dev/null
+mkdir -p "$EO/docs/sub" && printf 'n\n' > "$EO/docs/sub/review-x.md" && printf 'n\n' > "$EO/docs/architecture.md"
+printf 'y\n' >> "$EO/README"
+git -C "$EO" add -A && commit_q "$EO" -m change
+ECHANGE="$(git -C "$EO" rev-parse --verify -q HEAD 2>/dev/null)"
+git -C "$EO" checkout -q -b plain base 2>/dev/null && printf 'z\n' >> "$EO/README" && commit_q "$EO" -am plain
+EPLAIN="$(git -C "$EO" rev-parse --verify -q HEAD 2>/dev/null)"
+git -C "$EO" checkout -q base 2>/dev/null && printf 'base\n' > "$EO/docs/review-arch.md" \
+  && git -C "$EO" add -A && commit_q "$EO" -m "base moves"
+# A branch brought current by merging the moved base in: the base's guidance edit
+# reaches it through the merge, and the fork point is that base commit only when
+# the base is read as origin has it now.
+git -C "$EO" checkout -q -b merged change 2>/dev/null \
+  && git -C "$EO" -c user.email=t@t.test -c user.name=t -c commit.gpgsign=false merge -q --no-edit base >/dev/null 2>&1
+EMERGED="$(git -C "$EO" rev-parse --verify -q HEAD 2>/dev/null)"
+if [ -n "$ECHANGE" ] && [ -n "$EPLAIN" ] && [ -n "$EMERGED" ] && [ "$EMERGED" != "$ECHANGE" ] && [ -d "$EC/.git" ] && ! git -C "$EC" cat-file -e "$ECHANGE^{commit}" 2>/dev/null; then
+  OUT="$(cd "$EC" && "$PSUT" --edits --base base --at "$ECHANGE" 2>"$TMP/err")"; RC=$?
+  is "--edits at a change the clone has not fetched: exit 0" "$RC" "0"
+  is "…lists the guidance it edits, the path a rename left included" "$OUT" "$(printf 'docs/review-correctness.md\nreview-checks.toml')"
+  git -C "$EC" cat-file -e "$ECHANGE^{commit}" 2>/dev/null; is "…having fetched the change into the clone" "$?" "0"
+  is "…and saying nothing on stderr" "$(cat "$TMP/err")" ""
+  OUT="$(cd "$EC" && "$PSUT" --edits --base base --at "$EPLAIN" 2>/dev/null)"; RC=$?
+  is "--edits at a change that edits no guidance: exit 0" "$RC" "0"
+  is "…printing nothing" "$OUT" ""
+  OUT="$(cd "$EC" && "$PSUT" --edits --base base --at "$EMERGED" 2>/dev/null)"; RC=$?
+  is "--edits at a branch that merged its moved base in: exit 0" "$RC" "0"
+  is "…lists the branch's guidance edits and not the base's, read from the base origin has now" "$OUT" "$(printf 'docs/review-correctness.md\nreview-checks.toml')"
+  ERR="$(cd "$EC" && "$PSUT" --edits --base base --at 0123456789abcdef0123456789abcdef01234567 2>&1 >/dev/null)"; RC=$?
+  is  "--edits at a commit that cannot be fetched: exit 1" "$RC" "1"
+  has "…saying the commit is unreadable" "$ERR" "could not be fetched from origin"
+  ERR="$(cd "$EC" && "$PSUT" --edits --base nonesuch --at "$ECHANGE" 2>&1 >/dev/null)"; RC=$?
+  is  "--edits from a base origin does not have: exit 1" "$RC" "1"
+  has "…saying no fork point reads" "$ERR" "no fork point between origin/nonesuch and $ECHANGE reads"
+  (cd "$EC" && "$PSUT" --edits --at "$ECHANGE" >/dev/null 2>&1); is "--edits with no --base exits 2" "$?" "2"
+  (cd "$EC" && "$PSUT" --edits --base 'bad..base' --at "$ECHANGE" >/dev/null 2>&1); is "--edits with a base that is no branch name exits 2" "$?" "2"
+  (cd "$EC" && "$PSUT" --edits --base base >/dev/null 2>&1); is "--edits with no commit exits 2" "$?" "2"
+  (cd "$EC" && "$PSUT" --edits --base base --file "$IDX" >/dev/null 2>&1); is "…even beside --file" "$?" "2"
+else
+  bad "--edits fixture setup" "could not build the origin/clone pair with an unfetched change"
 fi
 
 echo
