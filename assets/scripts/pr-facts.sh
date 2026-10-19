@@ -3058,8 +3058,9 @@ $CBODY"
         # whole review. Best-effort: a missing comment id drops the decline reply
         # back to a PR-level answer, a missing review id drops only this review's
         # auto-dismissal, never the merge hold, and a missing round leaves a body
-        # review only its own review's comments to frame, so none gates the batch
-        # the way the finding filing above does.
+        # review only its own review's comments to frame until the write-back's
+        # next read of the PR records it, so none gates the batch the way the
+        # finding filing above does.
         case "$fcid" in ''|0) : ;; *) gc bd update "$fid" --set-metadata finding.comment_id="$fcid" >/dev/null 2>&1 || true ;; esac
         case "$frid" in ''|0) : ;; *) gc bd update "$fid" --set-metadata finding.review_id="$frid" >/dev/null 2>&1 || true ;; esac
         [ -z "$frnd" ] || gc bd update "$fid" --set-metadata finding.review_round="$frnd" >/dev/null 2>&1 || true
@@ -4273,6 +4274,36 @@ WB_LONG_THREADS
   if [ "$wtop_ok" != 1 ]; then
     echo "$PROG: $wid — PR#$wnum has a review thread that could not be read to its end; nothing written back (retry next pass)" >&2
     continue
+  fi
+
+  # A human finding names the round of the review that raised it
+  # (finding.review_round), which finding.sh reads to rule restates. The intake
+  # stamps it once, as it files the finding, and never reads a watermarked
+  # comment again, so a stamp it missed stays missing unless something derives
+  # it again. This read places every review on the PR by the derivation the
+  # living answers are grouped by, so each pass records the round on a finding
+  # whose round is missing or differs. A review this read does not place leaves
+  # the finding as it is. A write that fails is tried again on the next pass.
+  if [ -n "$disp" ] && wrnd_rows=$(bd_anchor_children "$wid" "$ALL_STATUSES"); then
+    wrnd_n=0
+    while IFS=$'\t' read -r wrnd_f wrnd_k; do
+      [ -n "$wrnd_f" ] && [ -n "$wrnd_k" ] || continue
+      if gc bd update "$wrnd_f" --set-metadata finding.review_round="$wrnd_k" >/dev/null 2>&1; then
+        wrnd_n=$((wrnd_n + 1))
+        echo "$PROG: $wid — PR#$wnum recorded review round $wrnd_k on finding $wrnd_f"
+      else
+        echo "$PROG: $wid — PR#$wnum could not record review round $wrnd_k on finding $wrnd_f; retry next pass" >&2
+      fi
+    done <<WB_ROUNDS
+$({ printf '%s\n' "$wview"; printf '%s\n' "$wrnd_rows"; } | jq -rn "$REVIEW_ROUND_DEF"'
+    (input | .reviews | ra_review_rounds) as $round | input
+    | .[]? | select(((.metadata.task_kind // "") | tostring) == "finding")
+    | select(((.metadata["finding.lane"] // "") | tostring) == "human")
+    | ($round[(.metadata["finding.review_id"] // "") | tostring] // "") as $k
+    | select($k != "" and $k != ((.metadata["finding.review_round"] // "") | tostring))
+    | [ .id, $k ] | @tsv' 2>/dev/null)
+WB_ROUNDS
+    [ "$wrnd_n" = 0 ] || bd_cache_clear
   fi
 
   # One jq pass decides everything, so the shell below only performs writes.

@@ -613,8 +613,8 @@ cmd_set_disposition() {
   # review round, the reviews its reviewer submitted against one commit, which a
   # client can split into one review per comment. So it takes a human finding
   # raised by a review body (its comment is the review itself) whose review, or
-  # whose review round (finding.review_round, stamped at intake), raised at
-  # least one inline comment filed as a finding on the anchor. The body of
+  # whose review round (finding.review_round, which pr-facts.sh records), raised
+  # at least one inline comment filed as a finding on the anchor. The body of
   # another review in the round is not an inline comment, so it does not count.
   if [ "$disp" = restates ]; then
     local rrow rrid rcid rrnd rsib

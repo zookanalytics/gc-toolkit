@@ -77,9 +77,10 @@
 # hand-written comment is labelled by its first sentence; a label links only to
 # a comment the PR holds; a review body's decline is delivered in it, not in a
 # post of its own; no check-mark ack is posted for a review body; each review's
-# dismissal is one line linking its round's comment; and a round the city
-# answered one review at a time keeps one comment, every mark its copies carry,
-# and deletes the rest.
+# dismissal is one line linking its round's comment; a round the city answered
+# one review at a time keeps one comment, every mark its copies carry, and
+# deletes the rest; and a finding filed with no round, or with another one,
+# carries its review's round from the next pass.
 #
 # The sections run in the parts declared below, each wrapped in an `if part`
 # block. tools/run-tests.sh runs each part as its own run under its own
@@ -6500,6 +6501,30 @@ has "$L15" "Review dismissed; your review is requested again." "…so it still s
 : > "$STUB_GH_LOG"
 out=$(run)
 eq "$(grep -c '^ICEDIT\|^ICDELETE\|^PRCOMMENT' "$STUB_GH_LOG")" "0" "a pass after it writes nothing"
+
+echo "# the next pass records the round on findings filed with none"
+# The round's findings are filed and watermarked. Two carry no
+# finding.review_round, and one carries the round of the commit its thread
+# began on. The intake never reads a watermarked comment again. The
+# write-back's read of the PR places each review by its author and commit,
+# except review 6164, whose commit it does not name.
+store "[$(anchor LA16 614 "$(lmeta rework:KL16 6614 6163)"), $(fixunit KL16 open),
+  $(lfind LQ1 LA16 6611 6161 must-fix open '**Free the buffer.**' '{"finding.fix_unit":"KL16"}'),
+  $(lfind LQ2 LA16 6612 6162 must-fix open '**Name the timeout.**' '{"finding.fix_unit":"KL16","finding.review_round":"johnzook@c614old"}'),
+  $(lfind LQ3 LA16 6163 6163 unvalidated open 'Requesting changes for the two inline points.' '{"finding.fix_unit":"KL16"}'),
+  $(lfind LQ4 LA16 6614 6164 must-fix open '**Log the retry.**' '{"finding.fix_unit":"KL16"}')]"
+printf '%s' "$(prview 614 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_614.json"
+threads 614 "$(lround 614 6161:COMMENTED:c614::6611 6162:COMMENTED:c614::6612 '6163:CHANGES_REQUESTED:c614:Requesting changes for the two inline points.:' 6164:COMMENTED:::6614)"
+"$SD/finding.sh" set-disposition --finding LQ3 --anchor LA16 --disposition restates >/dev/null 2>&1; rc=$?
+eq "$rc|$(meta LQ3 finding.disposition)" "1|unvalidated" "before the pass, the framing body cannot be ruled restates"
+out=$(run)
+eq "$(meta LQ1 finding.review_round)|$(meta LQ3 finding.review_round)" "johnzook@c614|johnzook@c614" "the next pass records the round on each finding filed without one"
+eq "$(meta LQ2 finding.review_round)" "johnzook@c614" "…corrects the one that names another round"
+eq "$(meta LQ4 finding.review_round)" "<absent>" "…and leaves alone the one whose review the read does not place"
+"$SD/finding.sh" set-disposition --finding LQ3 --anchor LA16 --disposition restates >/dev/null 2>&1; rc=$?
+eq "$rc|$(meta LQ3 finding.disposition)" "0|restates" "so the framing body is ruled restates"
+out=$(run)
+hasnt "$out" "recorded review round" "a pass after it records no round"
 
 fi # part living
 

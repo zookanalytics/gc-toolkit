@@ -89,12 +89,12 @@ REVIEW_OWED_REPLY_DEF='
     elif $disp == "deferred" then (if test("^\\s*defer"; "i") then . else "Deferred: " + . end)
     else . end;
 '
-# Which round a review belongs to is REVIEW_ROUND_DEF. pr-facts.sh stamps it on
-# each human finding as it files one (finding.review_round), which is how
-# finding.sh tells a review body that frames its round from one that is a whole
-# review, and the write-back reads it off the PR to group the living answers and
-# to hold a framing body review until its round is answered. REVIEW_ANSWER_DEF
-# carries these defs too.
+# Which round a review belongs to is REVIEW_ROUND_DEF. pr-facts.sh records it on
+# each human finding (finding.review_round), as it files one and again from each
+# write-back read of the PR, which is how finding.sh tells a review body that
+# frames its round from one that is a whole review. The write-back also reads it
+# off the PR to group the living answers and to hold a framing body review until
+# its round is answered. REVIEW_ANSWER_DEF carries these defs too.
 # shellcheck disable=SC2034  # read by the scripts that source this file
 REVIEW_ROUND_DEF='
   # The round of a review submitted by $login against commit $oid, named by

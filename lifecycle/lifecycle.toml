@@ -901,10 +901,13 @@ keys = [
   # finding.review_id names: `<login>@<commit oid>`, the reviewer and the commit
   # that review was submitted against. A client can submit one pass as one
   # review per comment, and the round is that pass. pr-facts.sh stamps it at
-  # file time beside finding.review_id. finding.sh reads it to rule restates on
-  # a review body that frames the inline comments of other reviews in its
-  # round. Absent when either half is unknown, and on a Conversation comment,
-  # which belongs to no review.
+  # file time beside finding.review_id. Its write-back records it again from
+  # each read of the PR that places the review, on a finding whose round is
+  # missing or differs, so a finding the intake stamped no round on carries one
+  # from the next such read. finding.sh reads it to rule restates on a review
+  # body that frames the inline comments of other reviews in its round. Absent
+  # when either half is unknown, and on a Conversation comment, which belongs to
+  # no review.
   "finding.review_round",
   # The rework child dispatched with the batch that raised a finding, recorded by
   # finding.sh upsert --fix-unit as pr-facts.sh files a human batch routed to

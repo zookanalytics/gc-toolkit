@@ -464,8 +464,8 @@ for d in ra_models ra_render ra_dismiss_note ra_dismiss_member ra_rounds; do
   has "$(cat "$PF")" "$d(" "(READERS) pr-facts.sh reads $d"
 done
 has "$(cat "$PF")" "| ra_review_rounds)" "(READERS) pr-facts.sh reads ra_review_rounds"
-eq "$(grep -c '"$CITY_OWN_DEF$REVIEW_ROUND_DEF"\|"$WB_OWED_REPLY_DEF$REVIEW_ROUND_DEF"' "$PF")" "2" \
-  "(READERS) the intake and the review dismissal place a review in its round through these defs"
+eq "$(grep -c '"$CITY_OWN_DEF$REVIEW_ROUND_DEF"\|"$WB_OWED_REPLY_DEF$REVIEW_ROUND_DEF"\|jq -rn "$REVIEW_ROUND_DEF"' "$PF")" "3" \
+  "(READERS) the intake, the write-back's round record and the review dismissal place a review in its round through these defs"
 has "$(cat "$PF")" 'WB_OWED_REPLY_DEF="$REVIEW_OWED_REPLY_DEF"' \
   "(READERS) the owed-reply set the reply arm and the dismissal read is built on these defs, so it cannot drift from the living answer's"
 has "$(cat "$PF")" 'ra_ruled_reply($disp)' "(READERS) …and a thread reply leads with its ruling through the same def"
