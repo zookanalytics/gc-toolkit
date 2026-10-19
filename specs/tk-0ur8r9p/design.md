@@ -659,15 +659,16 @@ waiters still folds onto one row. `applyFold` keeps its meanings:
 session. `classifyVisits` becomes the same classification over gates.
 
 **Accept answers the recommendation's question and nothing else.** A
-recommendation is `gc.recommended_formula` on the subject. Its only writer is
-first-reaction-dispose.sh's recommend exit (first-reaction-dispose.sh 822-841),
-which files the question that puts it to the operator through escalate.sh with
-the key `first-reaction` (section 2). So the recommendation's gate is the
-subject's open human gate with the await id `<subject>:first-reaction`, or both
-of them when a race filed two. The `--visit` option, which held a recommendation
-on a question the caller filed, retires (section 3), so no recommendation rides
-on another question. A subject whose recommendation has no open gate under that
-await id offers Discuss only, because nothing asks the operator to accept it.
+recommendation is `gc.recommended_formula` on the subject. Only
+first-reaction-dispose.sh's recommend exit sets it (first-reaction-dispose.sh
+822-841), and that exit files the question that puts it to the operator through
+escalate.sh with the key `first-reaction` (section 2). So the recommendation's
+gate is the subject's open human gate with the await id
+`<subject>:first-reaction`, or both of them when a race filed two. The `--visit`
+option, which held a recommendation on a question the caller filed, retires
+(section 3), so no recommendation rides on another question. A subject whose
+recommendation has no open gate under that await id offers Discuss only, because
+nothing asks the operator to accept it.
 
 Accept is offered while all three hold:
 
@@ -685,7 +686,7 @@ close releases a needs-you finding (section 4). Any close releases what waits on
 the gate, so a rework child waiting on its anchor's bring-current question would
 be re-slung without the decision it waits for. An Accept that resolved every gate
 on the subject would spend one click as several answers the operator never gave.
-Today's Accept already closes every question waiting on the subject. It resolves
+Today's Accept already closes every waiting question on the subject. It resolves
 every open, unassigned demand there (gc-helm.sh 2830-2849) and dismisses every
 visit (3151-3156). A dismissed visit carries no `gc.ruling`, so a needs-you
 finding whose visit Accept dismissed stays held with its question gone from the
@@ -719,9 +720,10 @@ Accept reopens the recommendation's gate, and nothing is dispatched. The resolve
 comes before the sling, today's order (gc-helm.sh 3110-3138), so the run never
 finds the recommendation's own gate open. The dispatch is recorded as today:
 `gc.recommended_formula_dispatched` lands in the write that strips
-`gc.recommended_formula`. A re-run that finds the marker finishes that record
-and never slings again. Accept no longer runs dismiss. The one gate it answers is
-one no sitting holds, so it has no sitting to end.
+`gc.recommended_formula`. A re-run that finds the marker skips the three
+conditions, since the run that wrote it already answered the gate. It finishes
+that record and never slings again. Accept no longer runs dismiss. The one gate
+it answers is one no sitting holds, so it has no sitting to end.
 
 **Ranking is unchanged.** `rankScore` (derive.go 734-741) and its inputs are
 untouched. Every input a visit supplied, held and the owed clock among them, now
@@ -777,7 +779,7 @@ record discipline. Only text that depends on the visit bead changes.
 | `skills/converse-continue` | It re-runs `gc hook --claim` and adopts any new question on its subject. |
 | `skills/waits` | One section on asking a person: escalate.sh files a human gate, and await-ruling.sh arms the re-sling. The demand-gate, visit and gate-visit-sweep sections go. |
 | `skills/prs` | A merge hold is a question on the anchor through escalate.sh. The not-needed successor names the gate. |
-| `skills/work` | Accept and the intake are described on gates. Taking a recommendation in a sitting answers the recommendation's gate alone, as Accept does (section 8). "Ask for a visit" becomes "ask the operator". |
+| `skills/work` | Accept and the intake are described on gates. Taking a recommendation in a sitting answers the recommendation's gate alone, as Accept does, and its sling waits until no other question blocks the bead (section 8). "Ask for a visit" becomes "ask the operator". |
 | `skills/handoff` | A converse session resolves or releases its gates before it drains. |
 | `skills/learning-distill` | The contention question goes through escalate.sh. |
 | `agents/_converse/prompt.template.md` | Its definitions of visit, subject, topic and demand become one definition of a question. The claim block becomes `gc hook --claim`. The BEGAN rules, the fold and the finish arm go. The ending says the thread ends when its questions are answered or dismissed. |
@@ -1062,7 +1064,10 @@ gc-helm-accept.test.sh and the board's derive tests pin each step:
 
 A second fixture makes the other question one the anchor only waits on. Its
 await id names another bead, and the anchor waits on it through a `blocks` edge
-of its own. Step 1 holds the same way.
+of its own. That question folds onto its own bead's row, and the anchor's row
+lists it among what it waits on. Accept is withheld the same way, with
+`acceptable` false and `accept_withheld` naming that question. A stale
+`gc-helm.sh accept <anchor>` refuses, names that question and slings nothing.
 
 ## 13. Sequencing with the siblings
 
