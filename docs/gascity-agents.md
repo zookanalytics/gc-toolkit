@@ -406,27 +406,34 @@ claiming session's bead id as their `assignee` and stay `open`. The session
 claims each one later, and `gc hook --claim` reports that claim as
 `ready_assignment`.
 
-**Claimed.** `gc hook --claim` sets the bead `in_progress` under the session's
-alias when it has one, as a named session, a namepool member or an explicit
-`gc hook <agent>` target does, and otherwise under its session bead id, which
-is how an unaliased pool session claims. It refuses a
-claim whose readback names anyone else. For a non-control bead claimed inside
-a session it then stamps `gc.session_id` with the session bead id and
-`gc.session_name` with the runtime session name, each only where it differs,
-and it stamps `gc.claimed_at` once, at the first claim. So a claimed graph
-step carries an `assignee`, `gc.session_id` and `gc.session_name`, while a
-control step claimed through the hook gets no session field. The claim also
-records the bead as `current_claim_bead_id` on the session's own bead. The
-controller stamps `gc.session_name` on every `in_progress` assigned bead whose
-`assignee` resolves to one session, from that session.
+**Claimed.** A fresh claim through `gc hook --claim` sets the bead
+`in_progress` under the session's alias when it has one, as a named session, a
+namepool member or an explicit `gc hook <agent>` target does, and otherwise
+under its session bead id, which is how an unaliased pool session claims. A
+claim of a bead already assigned to the session keeps the `assignee` the bead
+carries, so a pre-assigned sibling stays under the session bead id even for an
+aliased session. Either claim is refused when its readback names anyone else.
+For a non-control bead claimed inside a session it then stamps `gc.session_id`
+with the session bead id and `gc.session_name` with the runtime session name,
+each only where it differs, and it stamps `gc.claimed_at` once, at the first
+claim. So a claimed graph step carries an `assignee`, `gc.session_id` and
+`gc.session_name`, while a control step claimed through the hook gets no
+session field. The claim also records the bead as `current_claim_bead_id` on
+the session's own bead. The controller stamps `gc.session_name` on every
+`in_progress` assigned bead whose `assignee` resolves to one session, from that
+session.
 
 **Released.** A released bead is `open` with an empty `assignee`, and the
 release of an orphaned pool claim also clears the bead's continuation and
-affinity keys. Nothing but route-time decoration deletes `gc.session_id` or
-`gc.session_name`, so on a released bead both still name the last claimer.
-The controller's own check of whether a session still holds the bead it last
-claimed answers no when the bead is closed, when it is `open` with no
-`assignee`, or when its `gc.session_id` names another session.
+affinity keys. Route-time decoration deletes both session fields. Apart from
+it, only `gc doctor --fix` clears one, and only `gc.session_name` on an open
+bead: it clears a name that is neither the one the bead's `gc.routed_to` would
+mint nor the name of any session, open or closed, recorded for that route. So
+a released bead's `gc.session_id` still names the last claimer, and its
+`gc.session_name` does too unless that fix has cleared it. The controller's
+own check of whether a session still holds the bead it last claimed answers no
+when the bead is closed, when it is `open` with no `assignee`, or when its
+`gc.session_id` names another session.
 
 **The workflow root.** The hook's route match refuses a graph.v2 root that
 has expanded into steps (`gc.workflow_expanded=true`), so no worker claims
@@ -440,14 +447,16 @@ read that stamp as an owner; it takes the step's `assignee`.
 **How many sessions a field can name.** `gc.session_id` is always one
 session's bead id. An unaliased pool session's `assignee` is its bead id too,
 and its runtime name carries the bead id ([Variant B](#variant-b--pool-workers)).
-A named session's `assignee` is its alias and its runtime name encodes its
-identity, so the next session of the same agent carries both again. A
-`tmux_alias` pool's runtime name belongs to the slot, so each occupant of the
-slot carries the same `gc.session_name`. Two rows of `gc session list` can
-also share a key. A pool session's `agent_name` is its slot identity, which
+A named session's fresh claims are under its alias, and its runtime name
+encodes its identity, so the next session of the same agent carries both
+again. A `tmux_alias` pool's runtime name belongs to the slot, so each occupant
+of the slot carries the same `gc.session_name`. Two rows of `gc session list`
+can also share a key. A pool session's `agent_name` is its slot identity, which
 each occupant carries. A new session can take any identifier a failed-create
-row still carries, or the session name of a closed configured named session.
-`gc session list` lists the newest session first.
+row still carries, and the session name of a closed configured named session
+or of a closed `ephemeral` pool session. On the city's fork,
+`gc session release-name` also frees the session name and alias that any other
+closed session holds. `gc session list` lists the newest session first.
 
 *Evidence:* `claimFirstEligibleHookCandidate`,
 `claimFirstReadyHookAssignment`, `preassignHookContinuationGroup`,
@@ -462,15 +471,18 @@ row still carries, or the session name of a closed configured named session.
 backstop's root check (`cmd/gc/idle_nudge.go`);
 `releaseOrphanedPoolAssignment` (`cmd/gc/pool_session_name.go`) and
 `SessionAffinityMetadataKeys` (`internal/beadmeta/keys.go`);
+`staleSessionNameStamp` and `buildExecutorRouteIdentityIndex`
+(`cmd/gc/doctor_executor_identity_residue_check.go`);
 `claimedWorkStillHeldBy` (`cmd/gc/session_ownership.go`);
 `createPoolSessionBeadWithIdentifiers` (`cmd/gc/session_name_lookup.go`);
 `ensureSessionNameAvailableForSelfAndOwner` and
 `failedCreateIdentityReleased` (`internal/session/names.go`);
-`ReleaseSessionNameClaim` (`internal/session/name_release.go`);
 `sortSessionsCreatedDesc` (`cmd/gc/cmd_session.go`) and the `/sessions`
 route's declared order (`internal/api/supervisor_city_routes.go`); read at
-upstream `1e05ae624` and the fork `a319c2fd6` on 2026-10-19. The pack's rule
-on these fields is [pack-authoring.md](pack-authoring.md#a-scan-resolves-an-owner-before-it-calls-one-absent).
+upstream `1e05ae624` and the fork `a319c2fd6` on 2026-10-19.
+`ReleaseSessionNameClaim` (`internal/session/name_release.go`) is fork-only,
+read at `a319c2fd6` on 2026-10-19. The pack's rule on these fields is
+[pack-authoring.md](pack-authoring.md#a-scan-resolves-an-owner-before-it-calls-one-absent).
 
 ## Refresh procedure
 
