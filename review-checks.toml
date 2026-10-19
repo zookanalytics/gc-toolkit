@@ -53,7 +53,7 @@ phase = "open-as-draft"
 
 [checks.arch]
 method = "skills/review-arch/SKILL.md"
-purpose = "Does the change fit the architecture, and is any architecture change justified and documented in the same PR?"
+purpose = "Does the change fit the architecture without rebuilding what the platform ships, and is any architecture change justified and documented in the same PR?"
 phase = "pre-open"
 
 [checks.pm]

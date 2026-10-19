@@ -159,6 +159,10 @@ hasF "$TMP/pm.skill" 'product lens' "(METHOD) the pm skill carries the product l
 hasF "$TMP/pm.skill" '## The visual is the `demo` check' "(METHOD) …and leaves the visual decision to demo"
 hasF "$TMP/arch.skill" 'You are the Architect' "(METHOD) the arch skill names the Architect"
 hasF "$TMP/arch.skill" 'docs/architecture.md' "(METHOD) …and reads the architecture reference docs before judging"
+hasF "$TMP/arch.skill" "This lens holds new surface to the platform's own documentation instead." "(METHOD) …holds new surface to the platform's own docs, not the repo's account of the platform"
+hasF "$TMP/arch.skill" 'A converter is a finding on sight.' "(METHOD) …makes a converter between a repo noun and a platform noun a finding"
+hasF "$TMP/arch.skill" '## When triage adds it' "(METHOD) …says when triage adds the arch check"
+hasF "$TMP/arch.skill" 'The first two make the check mandatory' "(METHOD) …and makes new operational surface and a touched warrant mandatory triggers"
 # Run outside any repository, so no index declares the check.
 ( cd "$TMP" && env -u GC_RIG_ROOT bash "$SCRIPT" --check-name nonesuch ) > "$TMP/undeclared.out" 2>/dev/null
 hasF "$TMP/undeclared.out" '`nonesuch` check, so nothing says what it judges' "(CHECK) a check no index row declares gets the declared-nowhere note, never a guess"

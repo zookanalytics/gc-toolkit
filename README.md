@@ -96,6 +96,7 @@ render's byte and token counts.
 - [docs/worktree-reclaim.md](docs/worktree-reclaim.md) — reclaiming the per-bead worktrees of closed work, reversibly
 - [docs/review-workspace.md](docs/review-workspace.md) — the directory a review works in, and its removal when the review ends
 - [docs/review-correctness.md](docs/review-correctness.md) — what the gates run on each surface this repository ships and the defects a correctness review of it hunts there, appended to the review's dispatch note
+- [docs/review-arch.md](docs/review-arch.md) — what the arch check's divergence lens holds a change to on this rig: Gas City's own documentation as the evidence, the pack's operational surfaces and its warrants, appended to the review's dispatch note
 - [docs/bead-store-resolution.md](docs/bead-store-resolution.md) — which store answers for a bead id, and the proof a destructive gate owes before reading absence
 - [docs/outbound-sends.md](docs/outbound-sends.md) — a GitHub write to a repo the rig does not own is the operator's send; how an agent parks one
 
