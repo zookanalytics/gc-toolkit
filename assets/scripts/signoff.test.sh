@@ -91,7 +91,7 @@ case "${1:-}" in
     # STUB_CLOSE_DENY lists ids whose closing write is refused, nothing of it
     # written, while every other write to them lands.
     if [ -n "${STUB_CLOSE_DENY:-}" ] && grep -qx "$id" "$STUB_CLOSE_DENY" 2>/dev/null \
-       && printf '%s\n' "$@" | grep -qx -- '--status=closed'; then
+       && grep -qx -- '--status=closed' < <(printf '%s\n' "$@"); then
       echo "bd: close denied (stub)" >&2; exit 1
     fi
     # STUB_DROP_KEYS="id:key1,key2 id2:key" — apply the update but silently drop

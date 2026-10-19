@@ -267,6 +267,7 @@ case "$d" in
   *) bad "the description is the fixed paragraph on how to run a review held with no workflow (got: $d)" ;;
 esac
 has "$d" "review_formula" "…which sends its claimant to the formula the record names"
+has "$d" "gc formula show --json" "…read with --json, the form that prints each step's text"
 
 echo "# a review of an open PR carries the PR, in its record and on its sling"
 # The PR rides keys of its own: gc-helm.sh resolves a PR number to every live

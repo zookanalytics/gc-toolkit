@@ -234,8 +234,9 @@ review_var_args() {
 }
 
 # The review bead's description: one fixed paragraph, the same on every review.
-# The record and the formula carry everything else.
-REVIEW_DESCRIPTION="This is a signoff review. Its metadata is the review's record: the check, the anchor, the reviewed branch, base and commit, the PR once one is open, and the formula that runs it. If you hold this bead with no poured workflow, run \`gc formula show\` on the formula its \`review_formula\` names and follow its steps in order. In recovery there is no input convoy and there are no step beads to close. Read each \`{{<key>}}\` in the steps as this bead's value under that key, \`{{check}}\` as its \`check_name\` in lowercase, \`{{review_bead}}\` as this bead, and \`{{binding_prefix}}\` as the binding your skill catalog shows on the pack's skills. The steps say what a key the bead does not carry means, and when it means you review nothing."
+# The record and the formula carry everything else. It names `gc formula show
+# --json` because the plain command prints the steps' titles and not their text.
+REVIEW_DESCRIPTION="This is a signoff review. Its metadata is the review's record: the check, the anchor, the reviewed branch, base and commit, the PR once one is open, and the formula that runs it. If you hold this bead with no poured workflow, run \`gc formula show --json\` on the formula its \`review_formula\` names and follow its steps in order. In recovery there is no input convoy and there are no step beads to close. Read each \`{{<key>}}\` in the steps as this bead's value under that key, \`{{check}}\` as its \`check_name\` in lowercase, \`{{review_bead}}\` as this bead, and \`{{binding_prefix}}\` as the binding your skill catalog shows on the pack's skills. The steps say what a key the bead does not carry means, and when it means you review nothing."
 
 # The keys inflight_review selects a review by. A review short of one is a
 # review no pass can find, so a fresh dispatch hands them to bd_create as its
