@@ -1,6 +1,6 @@
 ---
 name: Findings — why a convoy's work landed as one PR per bead
-description: An input to this bead's design (design.md beside it). The 2026-10-18 investigation of how gc-toolkit came to open one PR per bead, with dated evidence, as mechanik wrote it. Copied verbatim below this header.
+description: An input to this bead's design (design.md beside it). The 2026-10-18 investigation of how gc-toolkit came to open one PR per bead, with dated evidence, as mechanik wrote it. Copied below this header, verbatim except that each reference to another repository names what it was instead (2026-10-19).
 ---
 
 # Why a convoy's work lands as one PR per bead instead of one PR
@@ -48,12 +48,12 @@ No kept record has the operator asking for a PR per bead.
 | 05-07 | tk-w7mjt, tk-jkesf, 6888c4119 | Owned convoys on `integration/<id>`: "the refinery merges polecat work back to the integration branch", then squashes to main "only when a complete unit of work is ready". |
 | 05-19/20 | smoke-tests convoy (tk-yhh5mi, tk-3qis4y) | Children were fast-forward pushed onto the integration branch with no PR. The convoy never graduated. |
 | 05-20 | #49 (tk-8de4p0 stamped `merge_strategy=pr`) | The first child PR into an integration branch. |
-| 05-25 | tk-sma1xw, #68 | The refinery had pushed straight to gascity main. The bead records "Operator's policy (2026-05-25): the entire loomington city defaults to `mr`". |
-| 06-05 | city commit e997f65, `default_merge_strategy = "mr"` | Every bead opens its own PR whatever its target, convoy children included. No record shows convoy branches were considered. |
+| 05-25 | tk-sma1xw, #68 | The refinery had pushed straight to another rig's main branch. The bead records "Operator's policy (2026-05-25): the entire loomington city defaults to `mr`". |
+| 06-05 | the city's config sets `default_merge_strategy = "mr"` | Every bead opens its own PR whatever its target, convoy children included. No record shows convoy branches were considered. |
 | 06-10 | #102 | A graduation PR carries to main the work its children had already merged through their own PRs. |
 | 06-28 | #163 (tk-6d0vb.1.1), 40ea2d7a0 | A doc writes down the operator's model: "Every PR is owned by a convoy bead… a convoy has one stable PR head… A child contributes to the branch however it needs… There is no one-bead-one-commit rule… No bead lands on `main` except a convoy." The polecat and refinery flow did not change. |
 | 07-21 | #197 (tk-4b9dr) | The formula's own default flips from `direct` to `mr`. |
-| 07-23 | city commit eb4bd94 | `default_merge_strategy` leaves city.toml. The refinery formula's `mr` default keeps every unstamped bead in PR mode. |
+| 07-23 | the city's config | `default_merge_strategy` leaves city.toml. The refinery formula's `mr` default keeps every unstamped bead in PR mode. |
 | 08-25 | #465, the rewrite (9a6b86aea) | Deletes #163's doc. PR ownership moves to each work bead, its anchor, under invariant I4 "Every PR has exactly one owning anchor". Keeps the heading "an owned convoy is the PR unit". |
 | 09-27 | #793 (tk-6bji7k.1) | The phase-checkpoint spec: "Each phase that needs a reviewed checkpoint… opens a child pull request". Also: "A bare commit with no pull request is still the right surface for scaffolding no one has to approve". |
 | 09-27 on | #851 (tk-6bji7k.9) | The `base: integration` label and the "Approving it mints this phase" banner go on every PR into an integration branch. |
@@ -73,7 +73,7 @@ Merged child PRs into integration branches:
 
 1. **The machinery never treated the convoy as the PR unit.**
    - Each bead has had its own branch since 05-05.
-   - Each bead has had its own PR since the 06-05 town-wide `mr` default. That default was set to stop direct pushes to gascity main, and nothing shows convoy branches were considered.
+   - Each bead has had its own PR since the 06-05 town-wide `mr` default. That default was set to stop direct pushes to another rig's main branch, and nothing shows convoy branches were considered.
 2. **The operator's model was written down but never built.**
    - #163 described the convoy owning one PR, but the flow never changed to match.
    - The rewrite (#465) then deleted that doc and made one PR per bead the formal model. Only the old heading survived.
