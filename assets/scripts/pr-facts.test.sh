@@ -2551,6 +2551,39 @@ out=$(run)
 for b in PRW PRV PCV PRT PST PVP; do eq "$(bprio "$b")" "1" "…so the next full pass finds PRF1 and $b is at P1"; done
 eq "$(meta PRF1 pr_finishing_settled)" "unapproved" "…and PRF1 records the unapproved rank"
 
+# PRF1 abandoned the way the full pass abandons it, then its route cleared, as a
+# person or a wait's release clears one, and with --no-takeaway its takeaway too.
+abandoned_unrouted() { # [--no-takeaway]
+  move_prf1 --to abandoned --expect pull_request --assignee "" \
+    --set blocked_reason="PR#710 closed out-of-band without merging" --takeaway "PR#710 was closed without merging"
+  gc bd update PRF1 --set-metadata gc.routed_to= >/dev/null 2>&1
+  [ "${1:-}" != --no-takeaway ] || gc bd update PRF1 --unset-metadata gc.takeaway --unset-metadata gc.takeaway_at \
+    --unset-metadata gc.takeaway_by --unset-metadata gc.takeaway_settled >/dev/null 2>&1
+}
+
+echo "# the record of an abandoned anchor with no route and no takeaway lands, and the route stays empty"
+# A human state's default route is the park, and the park guard refuses it on an
+# anchor that carries no takeaway. A record write that took the default would be
+# refused on every full pass, each settling all of PRF1's work again. The record
+# moves no route, so it lands, and the next full pass reads none of that work.
+prf1 approved approved 0
+abandoned_unrouted --no-takeaway
+eq "$(meta PRF1 merge_result)|$(meta PRF1 'gc.routed_to')|$(meta PRF1 gc.takeaway)" "abandoned||<absent>" "PRF1 rests abandoned with no route and no takeaway"
+out=$(run)
+for b in PRW PRV PCV PRT PST PVP; do eq "$(bprio "$b")" "1" "…the full pass brings $b to P1"; done
+eq "$(meta PRF1 pr_finishing_settled)" "unapproved" "…and the record lands"
+eq "$(meta PRF1 'gc.routed_to')" "" "…while the route stays empty"
+: > "$STUB_GC_LOG"
+out=$(run)
+hasnt "$(cat "$STUB_GC_LOG")" "anchor_bead=PRF1" "…so the next full pass reads none of PRF1's work"
+
+echo "# …and one that carries a takeaway is not re-parked by the record"
+prf1 approved approved 0
+abandoned_unrouted
+out=$(run)
+eq "$(meta PRF1 pr_finishing_settled)" "unapproved" "an abandoned anchor with a takeaway and no route records its rank"
+eq "$(meta PRF1 'gc.routed_to')" "" "…and its route stays empty rather than taking the park"
+
 fi # part posture
 
 # ==== part routing: a feedback batch's size, range and ledgers, the

@@ -10,7 +10,8 @@
 # must --close); the non-empty merged_sha that --to merged must carry;
 # --set-dated's compare-and-preserve rule for the @<since> component; the reopen
 # repair verb; the park-route takeaway guard and its --takeaway writer, capped
-# and mirrored from gc-helm.sh; the drift assertion against
+# and mirrored from gc-helm.sh; --keep-route, the self-transition that records
+# on an anchor and writes no route; the drift assertion against
 # lifecycle/lifecycle.toml; and the refusal when no gctk binary resolves.
 #
 # ONE IMPLEMENTATION, REACHED THROUGH THE SCRIPT. lifecycle.sh execs
@@ -744,6 +745,40 @@ eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and nothing reaches 
 store '[{"id":"p-11","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
 out="$("$SUT" transition p-11 --to retargeted --route rig/mechanik --takeaway " " 2>&1)"; rc=$?
 eq "$rc" 1 "an empty --takeaway is refused on a pool route too"
+
+# --- a record on an anchor staying in its state moves no route -------------------
+# pr-facts.sh records the rank an anchor's PR-finishing work settled at with a
+# self-transition. A human state's default would re-park an anchor whose route a
+# person cleared, or be refused by the park guard when it carries no takeaway,
+# and a detached state's clear would drop a route the write never looked at. So
+# --keep-route writes no route at all, on a self-transition only.
+echo "# --keep-route records without routing"
+store '[{"id":"k-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"abandoned","gc.routed_to":""}},
+        {"id":"k-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"abandoned","gc.routed_to":"","gc.takeaway":"PR#7 was closed without merging"}},
+        {"id":"k-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"retargeted","gc.routed_to":"rig/gc-toolkit.mechanik"}},
+        {"id":"k-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.routed_to":"rig/gc-toolkit.polecat"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition k-1 --to abandoned --expect abandoned --keep-route --set pr_finishing_settled=unapproved 2>&1)"; rc=$?
+eq "$rc" 0 "a self-transition on a human state with no route and no takeaway records under --keep-route"
+eq "$(meta k-1 pr_finishing_settled)|$(meta k-1 'gc.routed_to')" "unapproved|" "…and the route stays empty"
+hasnt "$(grep '^bd update k-1' "$STUB_GC_LOG")" "gc.routed_to" "…since the write names no route"
+"$SUT" transition k-2 --to abandoned --expect abandoned --keep-route --set pr_finishing_settled=unapproved >/dev/null 2>&1
+eq "$(meta k-2 pr_finishing_settled)|$(meta k-2 'gc.routed_to')" "unapproved|" "…one that carries a takeaway is not re-parked"
+"$SUT" transition k-3 --to retargeted --expect retargeted --keep-route --set pr_finishing_settled=unapproved >/dev/null 2>&1
+eq "$(meta k-3 'gc.routed_to')" "rig/gc-toolkit.mechanik" "…a route a person gave a human state is kept"
+"$SUT" transition k-4 --to pull_request --expect pull_request --keep-route --set pr_finishing_settled=approved >/dev/null 2>&1
+eq "$(meta k-4 pr_finishing_settled)|$(meta k-4 'gc.routed_to')" "approved|rig/gc-toolkit.polecat" "…and a detached state's clear does not run"
+store '[{"id":"k-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved"}},
+        {"id":"k-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"abandoned","gc.routed_to":"human"}}]'
+: > "$STUB_GC_LOG"
+out="$("$SUT" transition k-5 --to retargeted --expect pull_request --keep-route --takeaway "PR#7 sits on another base" 2>&1)"; rc=$?
+eq "$rc" 1 "--keep-route on an edge into another state exits 1"
+has "$out" "entering a state takes that state's routing" "…saying why"
+eq "$(meta k-5 merge_result)" "pull_request" "…and writes nothing"
+out="$("$SUT" transition k-6 --to abandoned --expect abandoned --keep-route --route human 2>&1)"; rc=$?
+eq "$rc" 1 "--keep-route with --route exits 1"
+has "$out" "opposite things" "…saying the two contradict"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and neither refusal reaches bd"
 
 # --- a takeaway that lands in part is not a transition ---------------------------
 # The verifier owes every written field, and a takeaway is three of them: the

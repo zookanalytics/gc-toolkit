@@ -132,6 +132,15 @@ not to overwrite; and bd refuses an assignee edit on a bead another actor holds
 `in_progress`, dropping the whole atomic update with it
 ([gascity-routing-model.md](gascity-routing-model.md) row 46).
 
+A write that records on an anchor staying in its state, rather than moving it,
+passes `--keep-route`: the transition writes no route, so neither a human
+state's park default and park guard nor a detached state's route clear applies,
+and the anchor keeps the `gc.routed_to` it carries, an empty one included.
+`lifecycle.sh` refuses it with `--route`, and on an edge into another state,
+which takes that state's routing. `pr-facts.sh` writes the rank of an anchor's
+PR-finishing work this way ([steering.md](steering.md#pr-finishing-work)), so
+recording it re-parks no anchor and drops no route a person gave one.
+
 A detached anchor that is nonetheless claimed or held into a non-open status —
 by a route stamped on it out of band, or a direct claim — is the residual this
 leaves open. Every anchor enumeration is `--status=open`, so it drops out of

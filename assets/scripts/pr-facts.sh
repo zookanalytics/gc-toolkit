@@ -949,7 +949,7 @@ finishing_rank() { # <merge_result> <pr_posture> — the rank an anchor's PR-fin
     | if prio_pr_approved then "approved" else "unapproved" end' 2>/dev/null
 }
 
-settle_finishing() { # <anchor> <state> <posture> <settled-rank> [<route>] — finish the re-rank of its PR-finishing work
+settle_finishing() { # <anchor> <state> <posture> <settled-rank> — finish the re-rank of its PR-finishing work
   # An approved PR's finishing work runs at P0 whatever its shift, and any other
   # PR's at its anchor's priority plus its shift (docs/steering.md). That work is
   # the anchor's open reviews, reworks and validation passes, the work a pool
@@ -964,13 +964,14 @@ settle_finishing() { # <anchor> <state> <posture> <settled-rank> [<route>] — f
   # or the state moves, until all of it settles. A record naming the other rank
   # turns unsettled before the first settle, so a pass that stops partway leaves
   # no record that a return to that rank would read as settled. Both writes are a
-  # transition onto the state the anchor rests in, carrying <route> back when one
-  # is given, so neither lands once the anchor has moved. Each settle waits for
-  # the store's priority lock a short while only, since the merge arm waits on
-  # the posture pass.
-  local a="$1" state="$2" posture="$3" rec="$4" route="${5:-}" mr="$2" want basis kids k settled=0 left=""
-  local onto=(--to "$state" --expect "$state")
-  [ -z "$route" ] || onto+=(--route "$route")
+  # transition onto the state the anchor rests in, so neither lands once the
+  # anchor has moved, and both are bookkeeping that moves no route
+  # (--keep-route): a human state keeps the route it carries, an empty one
+  # included, rather than taking the park route, and a detached state's route is
+  # left for the writes that route. Each settle waits for the store's priority
+  # lock a short while only, since the merge arm waits on the posture pass.
+  local a="$1" state="$2" posture="$3" rec="$4" mr="$2" want basis kids k settled=0 left=""
+  local onto=(--to "$state" --expect "$state" --keep-route)
   [ "$state" != unanchored ] || mr=""
   basis="posture ${posture%%@*}"
   [ -n "${posture%%@*}" ] || basis="posture unrecorded"
@@ -1439,20 +1440,20 @@ fi
 # through rejection-repool.sh, is settled here. So every full pass reads the live
 # anchors that carry a record, and settles the PR-finishing work of each one
 # resting elsewhere while its record names anything but the rank that work
-# follows, a settle an exit left short included. The record's write carries the
-# anchor's own route back, so a human state keeps a route a person gave it
-# rather than taking the park route by default. Like the sweeps above, this runs
-# before the no-anchors early-exit.
+# follows, a settle an exit left short included. The record's write moves no
+# route, so a human state keeps the route a person gave it, or none, and is
+# never re-parked. Like the sweeps above, this runs before the no-anchors
+# early-exit.
 if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
   if fs_rows=$(bd_list --status="$LIVE_STATUSES" --has-metadata-key=pr_finishing_settled); then
-    while IFS=$'\037' read -r fsid fsstate fsposture fsrec fsroute; do
+    while IFS=$'\037' read -r fsid fsstate fsposture fsrec; do
       [ -n "${fsid:-}" ] || continue
-      settle_finishing "$fsid" "$fsstate" "$fsposture" "$fsrec" "$fsroute" || true
+      settle_finishing "$fsid" "$fsstate" "$fsposture" "$fsrec" || true
     done <<FS_EOF
 $(printf '%s' "$fs_rows" | jq -r '.[]? | (.metadata // {}) as $m
     | ((($m.merge_result // "") | tostring) | if . == "" then "unanchored" else . end) as $s
     | select($s != "pull_request")
-    | [ (.id // ""), $s, ($m.pr_posture // ""), ($m.pr_finishing_settled // ""), ($m["gc.routed_to"] // "") ]
+    | [ (.id // ""), $s, ($m.pr_posture // ""), ($m.pr_finishing_settled // "") ]
     | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' 2>/dev/null)
 FS_EOF
   else

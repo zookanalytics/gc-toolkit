@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # lifecycle.sh — THE writer of anchor lifecycle transitions (lifecycle/lifecycle.toml).
 #   lifecycle.sh transition <bead-id> --to <state> [--expect <state>] [--set k=v]...
-#     [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <rig>/<agent>|human]
-#     [--takeaway <text>] [--close] [--append-notes <t>] [--json]
+#     [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>]
+#     [--route <rig>/<agent>|human | --keep-route] [--takeaway <text>] [--close]
+#     [--append-notes <t>] [--json]
 #   lifecycle.sh state <bead-id>
 #   lifecycle.sh reopen <bead-id>
 # transition: validate the edge against the declared machine, perform ONE atomic
@@ -26,7 +27,11 @@
 # not accept as a branch name, nothing is fetched and one WARN line names the
 # landing. A state's declared routing rides in the same call unless --route is
 # given: human states stamp gc.routed_to=human, and detached states clear it
-# unless the bead already rests on the park route.
+# unless the bead already rests on the park route. --keep-route writes no route
+# at all, for a write that records on a bead staying in its state: the bead
+# keeps the gc.routed_to it carries, with no default and no park guard. It is
+# refused with --route, and on an edge into another state, which takes that
+# state's routing.
 # A detached state also clears the assignee of a bead still at status=open,
 # unless --assignee is given; that is the unheld half of the same property. A
 # human state also refuses an EMPTY --route: a bead waiting on a person has to

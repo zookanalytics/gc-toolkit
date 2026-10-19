@@ -417,6 +417,7 @@ type transitionOpts struct {
 	expect      string
 	route       string
 	routeSet    bool
+	keepRoute   bool
 	assignee    string
 	assigneeSet bool
 	closeIt     bool
@@ -470,6 +471,9 @@ func parseTransition(args []string) (transitionOpts, error) {
 		case "--route":
 			o.route, i = next(i)
 			o.routeSet = true
+		case "--keep-route":
+			o.keepRoute = true
+			i++
 		case "--takeaway":
 			o.takeaway, i = next(i)
 			o.takeawaySet = true
@@ -543,10 +547,17 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
+	// --keep-route writes no route at all, so it cannot also name one.
+	if o.keepRoute && o.routeSet {
+		fmt.Fprintf(stderr, "%s: --keep-route and --route ask for opposite things: --keep-route leaves gc.routed_to as the bead carries it\n", prog)
+		return 1
+	}
 	// A human state is a bead waiting on a person, so it must name one. An
 	// omitted --route takes the default; an EMPTY one is the write that leaves a
 	// bead waiting on nobody — no queue holds it and no invariant can name it.
-	if lifecycle.IsHumanState(o.to) {
+	// --keep-route takes no default: it records on a bead already resting in the
+	// state, whose route that state's entry decided.
+	if lifecycle.IsHumanState(o.to) && !o.keepRoute {
 		if !o.routeSet {
 			o.route, o.routeSet = lifecycle.ParkRoute, true
 		}
@@ -629,13 +640,24 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s: illegal edge %s -> %s for %s (declared machine: lifecycle/lifecycle.toml)\n", prog, cur, o.to, id)
 		return 1
 	}
+	// A record a caller keeps on the anchor, such as the rank its PR-finishing
+	// work settled at, is bookkeeping, and a write of it should move no route.
+	// --keep-route is that write: the bead keeps the gc.routed_to it carries, and
+	// neither a state's default nor the park guard applies. It is refused on an
+	// edge into another state, because entering a state takes that state's
+	// routing.
+	if o.keepRoute && cur != o.to {
+		fmt.Fprintf(stderr, "%s: --keep-route is refused on %s -> %s for %s: it records on a bead staying in its state, and entering a state takes that state's routing\n", prog, cur, o.to, id)
+		return 1
+	}
 	// A bead already resting on the park route keeps it. No pool claims that
 	// value, and clearing it would retract a bead a person still owns. Setting
 	// routeSet also puts gc.routed_to under the post-write verification below,
 	// so a route that fails to clear surfaces as an unverified transition rather
-	// than as a silent pool offer. A human state never reaches here: the guard
-	// above set routeSet on arguments alone.
-	if !o.routeSet && lifecycle.IsDetachedState(o.to) {
+	// than as a silent pool offer. No human state is detached, so none takes this
+	// clear: the guard above set its routeSet on arguments alone, or --keep-route
+	// left its route as it was.
+	if !o.routeSet && !o.keepRoute && lifecycle.IsDetachedState(o.to) {
 		if bead.Meta("gc.routed_to") != lifecycle.ParkRoute {
 			o.route, o.routeSet = "", true
 		}
