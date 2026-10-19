@@ -58,9 +58,14 @@ board's ranking and the keys you press stay as they are.
    escalation from the board. It stays until a sitting answers it or its filer
    withdraws it.
 7. **The board reads open human gates directly and ranks them as today.** A gate
-   folds onto the bead it is about, and held, owed, engaged, Accept and the PR's
-   needs-attention status read the gate where they read the visit. Cost: the
-   board's default store reader gains a gate read that no test covers today.
+   folds onto the bead it is about, and held, owed, engaged and the PR's
+   needs-attention status read the gate where they read the visit. Accept
+   answers only the question that put a recommendation to you. While another
+   question still blocks the bead, the row offers Discuss and names that
+   question. Cost: the board's default store reader gains a gate read that no
+   test covers today. A recommendation beside another open question waits until
+   that question is answered, where today's Accept closed every waiting question
+   on the bead with one click.
 8. **Cutover is one migration run per store, right after the pack update.** Each
    open visit becomes a gate on its subject, or joins the gate already asking the
    same thing, with its notes carried over. Work that waited on the visit waits
@@ -197,7 +202,8 @@ await id is what tells the subject from a waiter. A reader that asks what a
 bead's questions are keeps the human gates whose await id names that bead, as
 the writer's dedup, engage, the board's fold and the migration do. A reader
 that asks whether a bead waits on a person counts every open human gate the
-bead depends on, as finalize-gate, gctk merge and the liveness classifier do.
+bead depends on, as finalize-gate, gctk merge, the liveness classifier and
+Accept do (section 8).
 
 **Its assignee** changes across a question's life:
 
@@ -447,8 +453,9 @@ cutover, so the gates the migration files mail nobody.
 
 **Re-asking is the board's ordering.** An open question stays on the board,
 owed and ordered by how long it has been owed, until a sitting answers it, its
-filer withdraws it, or Accept resolves it. Nothing re-mails. A question held by
-a sitting is in progress, and both core orders skip it anyway.
+filer withdraws it, or, for the question that put a recommendation to the
+operator, Accept answers it (section 8). Nothing re-mails. A question held by a
+sitting is in progress, and both core orders skip it anyway.
 
 **notification-wisp-reap keeps one pass.** Its gate-notice pass retires with the
 notify order. Its second pass collapses repeated `ESCALATION:` mails that core's
@@ -651,12 +658,70 @@ waiters still folds onto one row. `applyFold` keeps its meanings:
 **Engaged:** a subject is engaged when one of its open gates is held by a live
 session. `classifyVisits` becomes the same classification over gates.
 
-**Accept** is offered when the subject carries `gc.recommended_formula`, has an
-open, unassigned human gate, and has none engaged. gc-helm.sh accept resolves the
-subject's unassigned gates with `ruled: accepted <formula>` before it slings, and
-reopens them if the sling fails. That is today's order for the subject's demand
-gates (gc-helm.sh 3113-3131), which keeps load-context from cancelling the run it
-starts.
+**Accept answers the recommendation's question and nothing else.** A
+recommendation is `gc.recommended_formula` on the subject. Its only writer is
+first-reaction-dispose.sh's recommend exit (first-reaction-dispose.sh 822-841),
+which files the question that puts it to the operator through escalate.sh with
+the key `first-reaction` (section 2). So the recommendation's gate is the
+subject's open human gate with the await id `<subject>:first-reaction`, or both
+of them when a race filed two. The `--visit` option, which held a recommendation
+on a question the caller filed, retires (section 3), so no recommendation rides
+on another question. A subject whose recommendation has no open gate under that
+await id offers Discuss only, because nothing asks the operator to accept it.
+
+Accept is offered while all three hold:
+
+1. The subject carries `gc.recommended_formula`.
+2. The recommendation's gate is open and unassigned. A gate a sitting holds is
+   that sitting's to answer, even when the sitting has died, because only
+   engage's conditional reassign takes a gate from its holder (section 6).
+3. No other open human gate blocks the subject. That counts the subject's own
+   questions under any other key, the questions it waits on that name another
+   bead, a gate a sitting holds and a gate assigned to a person.
+
+**Why Accept answers one gate.** Separate situations on one bead stay separate
+gates (section 2), and each gate's close does something of its own. A `ruled:`
+close releases a needs-you finding (section 4). Any close releases what waits on
+the gate, so a rework child waiting on its anchor's bring-current question would
+be re-slung without the decision it waits for. An Accept that resolved every gate
+on the subject would spend one click as several answers the operator never gave.
+Today's Accept already closes every question waiting on the subject. It resolves
+every open, unassigned demand there (gc-helm.sh 2830-2849) and dismisses every
+visit (3151-3156). A dismissed visit carries no `gc.ruling`, so a needs-you
+finding whose visit Accept dismissed stays held with its question gone from the
+board. Carried over to gates, the same sweep would close the finding's gate with
+`ruled:` and release the finding on a ruling nobody gave.
+
+**Why it waits for the others.** Every gate blocks its subject, so the subject's
+next step waits for each answer (section 1). A formula sling reads no `blocks`
+edge (`docs/gascity-routing-model.md`, "A `blocks` dep between work beads does
+not hold a graph.v2 dispatch"). An Accept that resolved only its own gate while
+another stayed open would start the work before that question was answered.
+mol-polecat-work's load-context would cancel such a run, and a formula with no
+such check would run past the question. So Accept is offered only once the
+recommendation's question is the last question blocking the subject.
+
+While another question blocks the subject, the row offers Discuss, and the wire
+field `accept_withheld` names each open question that holds Accept back. Discuss
+engages the subject, and its sitting answers each of the subject's questions on
+its own terms. A question the subject only waits on is answered in its own
+bead's sitting. Once the others are answered or withdrawn, the row offers Accept
+again if the recommendation's gate is still open and unassigned.
+
+gc-helm.sh accept re-reads the three conditions live before it writes anything,
+because a board row can be stale and a command can be copied. When one fails, it
+refuses and writes nothing. When the third fails, the refusal names each open
+question by id and title, with Discuss as the way forward. Otherwise it resolves
+the recommendation's gate with `ruled: accepted <formula>`, reads back that no
+open human gate blocks the subject, and slings. A question filed between the
+read and the resolve shows in that read-back, and a sling can fail. Either way
+Accept reopens the recommendation's gate, and nothing is dispatched. The resolve
+comes before the sling, today's order (gc-helm.sh 3110-3138), so the run never
+finds the recommendation's own gate open. The dispatch is recorded as today:
+`gc.recommended_formula_dispatched` lands in the write that strips
+`gc.recommended_formula`. A re-run that finds the marker finishes that record
+and never slings again. Accept no longer runs dismiss. The one gate it answers is
+one no sitting holds, so it has no sitting to end.
 
 **Ranking is unchanged.** `rankScore` (derive.go 734-741) and its inputs are
 untouched. Every input a visit supplied, held and the owed clock among them, now
@@ -664,11 +729,16 @@ comes from the gate. A board test pins that a subject ranks the same with a gate
 as it did with a visit.
 
 **The wire model.** In `services/helm/internal/board/model.go` and
-`services/helm/web/src/contract.ts`, `held`, `acceptable`, `accept_formula` and
-`recommendation` keep their meaning. `visit_state` is renamed `sitting_state`.
-The web marker reads "in session" or "waiting" without the word visit. The
-sittings card reads gates. gctk pr-status's `OpenVisit` phase input reads an open
-human gate.
+`services/helm/web/src/contract.ts`, `held`, `accept_formula` and
+`recommendation` keep their meaning, and `acceptable` reads Accept's three
+conditions. `accept_withheld` is new. It is set on a row that meets Accept's
+first two conditions and fails the third, and it names the questions that fail
+it the way Needs names gates: the gate's title, or `N× — a · b` over several. It
+is null on every other row. The web and text boards print it beside Discuss as
+the reason Accept is not offered. `visit_state` is renamed `sitting_state`. The
+web marker reads "in session" or "waiting" without the word visit. The sittings
+card reads gates. gctk pr-status's `OpenVisit` phase input reads an open human
+gate.
 
 **The verbs** (gc-helm.sh, and helm-svc's POST routes that run it):
 
@@ -676,7 +746,7 @@ human gate.
 |---|---|
 | engage, `--new-subject` | Section 6. `--new-subject` still creates the subject first (gc.origin=operator), then engages it. A concern passed to engage with `--reason`, `--template` or `--skill` is filed the way open files it. |
 | open (POST /helm/open) | Files the conversation through escalate.sh without engaging. `parseOpenStdout` keeps its sentences. `--allow-duplicate`, which engage passes today to file a second visit, retires. A bead has one conversation question, so a second concern on a bead whose conversation question is open joins it: escalate.sh returns that gate, and open appends the new reason and body to the gate's notes. |
-| accept (POST /helm/accept) | As above. |
+| accept (POST /helm/accept) | Resolves only the recommendation's gate, then slings, as above. While another question blocks the subject, it refuses, writes nothing and names each open question. It runs no dismiss. |
 | dismiss (POST /helm/dismiss) | Ends the sitting (section 7). On a subject with no live sitting it does nothing and says so. |
 | park, takeaway | Unchanged. park's plain gate has no await type and is not a question, and takeaway writes the subject's headline. |
 | demand | Retires into escalate.sh (section 2). |
@@ -707,7 +777,7 @@ record discipline. Only text that depends on the visit bead changes.
 | `skills/converse-continue` | It re-runs `gc hook --claim` and adopts any new question on its subject. |
 | `skills/waits` | One section on asking a person: escalate.sh files a human gate, and await-ruling.sh arms the re-sling. The demand-gate, visit and gate-visit-sweep sections go. |
 | `skills/prs` | A merge hold is a question on the anchor through escalate.sh. The not-needed successor names the gate. |
-| `skills/work` | Accept and the intake are described on gates. "Ask for a visit" becomes "ask the operator". |
+| `skills/work` | Accept and the intake are described on gates. Taking a recommendation in a sitting answers the recommendation's gate alone, as Accept does (section 8). "Ask for a visit" becomes "ask the operator". |
 | `skills/handoff` | A converse session resolves or releases its gates before it drains. |
 | `skills/learning-distill` | The contention question goes through escalate.sh. |
 | `agents/_converse/prompt.template.md` | Its definitions of visit, subject, topic and demand become one definition of a question. The claim block becomes `gc hook --claim`. The BEGAN rules, the fold and the finish arm go. The ending says the thread ends when its questions are answered or dismissed. |
@@ -954,7 +1024,7 @@ brief allows when the design calls for a split:
 |---|---|
 | A. The writer and its callers | escalate.sh on gates, with the subject in the await id and the claimed retract. await-ruling.sh, with the waiter's edge. upstream-finding.sh's `--pool` and reconcile-rig-checkouts.sh's pool knob retired. first-reaction-dispose, mol-validate-close and mol-feedback-distiller on escalate.sh. gc-helm.sh demand retired. mol-visit and the formula copies of the gate-visit block retired. The polecat doctrine and pool-worker fragments, the ask-close fragment, and the deacon, refinery and witness prompts. The registry entries of the keys the writer stops writing. |
 | B. The readers | finalize-gate. gctk merge and pr-status. finding.sh and review-answer.sh. pr-facts.sh. branch-supersession.sh. The liveness scripts, hold-lib.sh, deferred-dispatch.sh, bead-context.sh and pre-open-rebase.sh. orphan-dispose.sh and the witness patrol. bead-rehome.sh, with the retry's withdrawal before the close. The doctor checks, `RETIRED_KEYS`, and the docs that teach these components (section 13). |
-| C. Converse and the board | The converse work query and prompt. The five converse skills and the shared skills. gc-helm.sh engage, open, accept and dismiss, with the copy of the gate-visit block in open. converse-signoff.sh rewritten, converse-reap re-keyed, and the converse scripts that retire. pr-sitting-comment.sh and operator-intake.sh. The tmux scripts. The board's source, derive, model, wire contract, web and text board. gate-visit-sweep's order and script. The human-engagement doc's converse sections and the board's README. |
+| C. Converse and the board | The converse work query and prompt. The five converse skills and the shared skills. gc-helm.sh engage, open, accept and dismiss, with the copy of the gate-visit block in open. Accept on the recommendation's gate alone, pinned by the acceptance case below. converse-signoff.sh rewritten, converse-reap re-keyed, and the converse scripts that retire. pr-sitting-comment.sh and operator-intake.sh. The tmux scripts. The board's source, derive, model, wire contract with `accept_withheld`, web and text board. gate-visit-sweep's order and script. The human-engagement doc's converse sections and the board's README. |
 | D. The cutover | The migration script, with its copy of the visit walk, and its test, which stops a run after each write. notification-wisp-reap's gate pass retired. The cutover runbook in its own spec. The remaining docs. |
 
 The order follows the dependency. B's readers read what A's writer files, and C's
@@ -963,6 +1033,36 @@ branch consistent for the suite, though not deployable before D. The branch is
 never deployed until it graduates as a whole. Each of the four PRs is about one
 subsystem. The single build is the alternative, at the cost of one PR across
 every file this design names.
+
+**Unit C's acceptance case: a recommendation beside a review question.** The
+fixture is one anchor with two open questions. A first reaction's recommend exit
+filed `<anchor>:first-reaction` and stamped `gc.recommended_formula`, and
+finding.sh filed a needs-you finding's question as
+`<anchor>:review-needs-you.<finding>` (finding.sh 918-924).
+gc-helm-accept.test.sh and the board's derive tests pin each step:
+
+1. **The board withholds Accept.** Both gates fold onto the anchor's row, and
+   Needs prints both titles. `acceptable` is false, and `accept_withheld` names
+   the review question.
+2. **A stale Accept refuses.** `gc-helm.sh accept <anchor>` exits non-zero and
+   names the review question. Both gates stay open, the finding stays held,
+   `gc.recommended_formula` stays, and nothing is slung.
+3. **Discuss answers the review question.** Engage assigns the sitting both
+   gates. The sitting rules the review question, and that `ruled:` close is what
+   releases the finding (section 4). The operator leaves the recommendation, so
+   the sign-off releases its gate unanswered.
+4. **Accept answers the recommendation alone.** With the recommendation's gate
+   the last one open and nobody holding it, the row offers Accept, and
+   `accept_withheld` is null. Accept resolves that gate with
+   `ruled: accepted <formula>`, slings the formula and records the dispatch. The
+   review question's close reason is still the sitting's ruling.
+5. **A late question stops the dispatch.** A question filed after Accept's live
+   read and before its resolve shows in the read-back. Accept reopens the
+   recommendation's gate, and nothing is slung.
+
+A second fixture makes the other question one the anchor only waits on. Its
+await id names another bead, and the anchor waits on it through a `blocks` edge
+of its own. Step 1 holds the same way.
 
 ## 13. Sequencing with the siblings
 
