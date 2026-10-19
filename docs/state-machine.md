@@ -182,9 +182,10 @@ recorded onto the integration branch, and no hold or branch vetoes.
 check names. `none` and `off` are sentinels that declare no check at all (`none`
 is the spelling the rest of this pack uses). `approval` is a third name a
 check_set may carry, but it is a universal merge rule, not a check (below). The
-one resolver, `review-checks.sh --resolve --check-set <cs> --through <phase>`,
-drops all three and returns the checks whose phase gates `<phase>`, so no reader
-re-derives that drop: `gate-ensure.sh`, `pr-open.sh`, `merge.sh`, `pr-facts.sh`,
+one resolver, `review-checks.sh --resolve --check-set <cs> --through <phase> --at <oid>`,
+reads the check index at the commit the reader judges, drops all three and
+returns the checks whose phase gates `<phase>`, so no reader re-derives that
+drop: `gate-ensure.sh`, `pr-open.sh`, `merge.sh`, `pr-facts.sh`,
 `review-outcome.sh`, `liveness-sweep.sh` and `bring-current-guard.sh` all ask it
 rather than tokenizing `check_set` themselves.
 
@@ -213,11 +214,13 @@ merges once every check, of every phase, derives green. An empty `check_set` is
 not the opt-out at any transition: it means never normalized, and gate-ensure
 stamps the default earlier in the same pass. A `check_set` whose checks are all
 `pre-open` (gc-toolkit today) opens its PR ready at once — the draft stage
-appears only when a check names a later phase. A name the index does not
-declare takes `pre-open`, and so does every name in a repo that keeps no index,
-so it gates every transition. A declared phase outside the four is an index
-error: every transition whose check_set names that check holds until the index
-is fixed.
+appears only when a check names a later phase. The index is the pack's
+`review-checks.toml`, which declares every check the pack ships, with the rows
+of the rig's own `review-checks.toml` at the commit being judged laid over it, so
+a rig that keeps none has the pack's checks. A name no layer declares takes
+`pre-open`, so it gates every transition. A declared phase outside the four is
+an index error: every transition whose check_set names that check holds until
+the index is fixed.
 
 Each check is a **lane**. A lane's state is derived from the anchor's beads and
 never stored on the anchor, and it is a state of the lane, never a claim about a

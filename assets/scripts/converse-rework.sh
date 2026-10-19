@@ -29,6 +29,8 @@
 #   The anchor must be an open PR: live in the store, at
 #   merge_result=pull_request, carrying no disposition (gc.pr_close_disposition_kind
 #   or gc.superseded_by), and naming its branch, its landing target and its PR.
+#   Its branch's head must read from origin, since the lanes the supersede
+#   returns to unreviewed are resolved at that commit.
 #   --ruling-bead is the visit the ruling was reached in. --pool defaults to
 #   rework-child.sh's default.
 # Output: rework-child.sh's result line, "<child> <route> <filed|adopted|in-flight>".
@@ -106,6 +108,12 @@ PR_URL=$(row_meta "$ANCHOR_ROW" existing_pr)
 [ -n "$PR_URL" ] || PR_URL=$(row_meta "$ANCHOR_ROW" pr_url)
 [ -n "$PR_URL" ] || die "anchor $ANCHOR names no PR (existing_pr and pr_url both empty), so it is not an open PR; nothing filed"
 PR_NUMBER=$(row_meta "$ANCHOR_ROW" pr_number)
+# The commit the ruling judged, which the supersede below resolves the anchor's
+# lanes at: the head of its branch on origin, read as signoff.sh reads one. Read
+# before anything is filed, so a head that does not read refuses with nothing
+# written rather than leave a dispatched child beside lanes still green.
+HEAD_OID=$(git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null | awk -v r="refs/heads/$BRANCH" '$2 == r { print $1; exit }')
+[ -n "$HEAD_OID" ] || die "the head of $ANCHOR's branch $BRANCH did not read from origin (git ls-remote), so no commit names the lanes the ruling returns to unreviewed; nothing filed"
 
 if [ -n "$PR_NUMBER" ]; then
   TITLE="Rework PR#$PR_NUMBER: apply operator ruling"
@@ -124,7 +132,7 @@ read -r CHILD _ <<< "$FILED"
 # Run on every filing, an adopted or in-flight child's included, so a re-run
 # finishes a supersede an earlier run did not. It is idempotent: a lane whose
 # reviews are already superseded has nothing left to retire.
-if ! RETIRED=$("$SCRIPT_DIR/review-outcome.sh" supersede-anchor --anchor "$ANCHOR" \
+if ! RETIRED=$("$SCRIPT_DIR/review-outcome.sh" supersede-anchor --anchor "$ANCHOR" --oid "$HEAD_OID" \
        --by "operator ruling (converse visit $RULING_BEAD)" \
        --reason "rework $CHILD changes what the branch must contain; every lane re-reviews it once it lands"); then
   die "rework $CHILD is dispatched, but the review lanes on $ANCHOR did not return to unreviewed (review-outcome.sh supersede-anchor failed), so its landing would read green on reviews of the branch before the ruling. Re-run: the writer adopts $CHILD and the supersede retries"

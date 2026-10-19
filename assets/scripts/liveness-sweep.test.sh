@@ -12,12 +12,13 @@ SCRIPT="$HERE/liveness-sweep.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-liveness-sweep-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-# The census phases its pre-open gates against review-checks.toml; the SUT runs
-# in place, so by default it would read the live pack's index and classify these
-# fixtures' synthetic lanes (codex, ci) as non-pre-open. Point the override at a
-# missing file so the census takes its pre-phase drop and these fixtures are
-# judged on their lane names alone, hermetically. The phase-aware path has its
-# own case at the end, with a controlled index.
+# The census phases its pre-open gates against the check index, which the
+# resolver reads at each anchor's head, laid over the pack's own, so by default
+# it would read the pack's index and whatever a fixture commit carries. Point
+# the override at a missing file so every token takes the pre-open default and
+# these fixtures are judged on their lane names alone, hermetically. The
+# phase-aware path has its own cases at the end, one with a controlled index and
+# one with a rig's committed index.
 export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 
 PASS=0; FAIL=0
@@ -167,6 +168,33 @@ echo "escalate: filed visit tk-visit1 on $subject [$key] -> gc-toolkit.converse"
 ESC
 chmod +x "$TMP/bin/escalate.sh"
 
+# --- git stub ------------------------------------------------------------------
+# The sweep reads each pre-open anchor's head with git ls-remote. The stub
+# answers that from fixtures and hands every other call to the real git, so the
+# resolver still reads real fixture repositories. A branch named in
+# LS_REMOTE_HEADS ("<branch> <sha>" lines) answers that sha, one named in
+# LS_REMOTE_MISS answers nothing (a ref origin does not carry), and any other
+# answers the sha1 of its name. LS_REMOTE_LOG records every ls-remote.
+REAL_GIT="$(command -v git)"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'REAL_GIT=%q\n' "$REAL_GIT"; cat; } > "$TMP/bin/git" <<'GIT'
+case " $* " in
+  *" ls-remote "*)
+    [ -n "${LS_REMOTE_LOG:-}" ] && printf '%s\n' "$*" >> "$LS_REMOTE_LOG"
+    for a in "$@"; do
+      case "$a" in refs/heads/*) ;; *) continue ;; esac
+      b="${a#refs/heads/}"
+      case " ${LS_REMOTE_MISS:-} " in *" $b "*) continue ;; esac
+      sha=""
+      [ -n "${LS_REMOTE_HEADS:-}" ] && [ -f "$LS_REMOTE_HEADS" ] && sha=$(awk -v b="$b" '$1 == b { print $2; exit }' "$LS_REMOTE_HEADS")
+      [ -n "$sha" ] || sha=$(printf '%s' "$b" | sha1sum | cut -d' ' -f1)
+      printf '%s\t%s\n' "$sha" "$a"
+    done
+    exit 0 ;;
+esac
+exec "$REAL_GIT" "$@"
+GIT
+chmod +x "$TMP/bin/git"
+
 export PATH="$TMP/bin:$PATH"
 export SHOW_DIR="$TMP/show" GC_CALLS="$TMP/gc-calls" ESC_CALLS="$TMP/esc-calls" ESC_BODIES="$TMP/esc-bodies"
 export GC_ESCALATE_TOOL="$TMP/bin/escalate.sh"
@@ -201,14 +229,14 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-pr-closed","title":"rejected — closed unmerged","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/zook/gc-toolkit/pull/999"}},
   {"id":"c-pr-otherrepo","title":"number 521 in another repository","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/someone/elsewhere/pull/521"}},
   {"id":"c-pr-nourl","title":"marker but no pr_url","issue_type":"task","metadata":{"merge_result":"pull_request"}},
-  {"id":"c-preopen-green","title":"pre-open, codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}},
-  {"id":"c-preopen-multigreen","title":"pre-open, two gates green (spaced)","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex, ci"}},
-  {"id":"c-preopen-approval","title":"pre-open, green + approval sentinel","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex,approval"}},
-  {"id":"c-preopen-fixable","title":"pre-open, changes requested — stalled","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}},
-  {"id":"c-preopen-partial","title":"pre-open, one of two lanes backed","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex,ci"}},
-  {"id":"c-preopen-nomarker","title":"pre-open, no review at all","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}},
-  {"id":"c-preopen-noset","title":"pre-open, a backed lane but check_set unset","issue_type":"task","metadata":{"merge_result":"pre_open_gate"}},
-  {"id":"c-preopen-none","title":"pre-open, check_set=none opt-out","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"none"}},
+  {"id":"c-preopen-green","title":"pre-open, codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/c-preopen-green"}},
+  {"id":"c-preopen-multigreen","title":"pre-open, two gates green (spaced)","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex, ci","branch":"polecat/c-preopen-multigreen"}},
+  {"id":"c-preopen-approval","title":"pre-open, green + approval sentinel","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex,approval","branch":"polecat/c-preopen-approval"}},
+  {"id":"c-preopen-fixable","title":"pre-open, changes requested — stalled","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/c-preopen-fixable"}},
+  {"id":"c-preopen-partial","title":"pre-open, one of two lanes backed","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex,ci","branch":"polecat/c-preopen-partial"}},
+  {"id":"c-preopen-nomarker","title":"pre-open, no review at all","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/c-preopen-nomarker"}},
+  {"id":"c-preopen-noset","title":"pre-open, a backed lane but check_set unset","issue_type":"task","metadata":{"merge_result":"pre_open_gate","branch":"polecat/c-preopen-noset"}},
+  {"id":"c-preopen-none","title":"pre-open, check_set=none opt-out","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"none","branch":"polecat/c-preopen-none"}},
   {"id":"c-hold","title":"operator decided this waits","issue_type":"task","metadata":{"triage.hold":"deferred; operator direction pending"}},
   {"id":"c-hold-bare","title":"held, no reason named","issue_type":"task","metadata":{"triage.hold":"true"}},
   {"id":"c-hold-empty","title":"hold was cleared","issue_type":"task","metadata":{"triage.hold":""}},
@@ -708,7 +736,7 @@ echo "── the pre-open derivation reads the sweep's own store under its --db 
 # lane-state.sh runs as its own process, so the sweep hands it the pin: a
 # pre-open anchor's lanes derive from the store the sweep reads, never from the
 # one the cwd resolves.
-printf '%s\n' '[{"id":"pin-preopen","title":"pre-open, backed, read under a pin","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}}]' > "$TMP/pin-ready.json"
+printf '%s\n' '[{"id":"pin-preopen","title":"pre-open, backed, read under a pin","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/pin-preopen"}}]' > "$TMP/pin-ready.json"
 backing pin-preopen codex
 : > "$TMP/reads.log"
 LIVENESS_SWEEP_DB="$TMP/pin.db" READ_LOG="$TMP/reads.log" FAKE_READY="$TMP/pin-ready.json" run_sweep ABSENT
@@ -745,10 +773,10 @@ echo "── the phase-aware census asks the resolver, with a controlled index �
 PH_IDX="$TMP/phase-index.toml"
 printf '[checks.correctness]\nmethod="m"\npurpose="p"\nphase="pre-open"\n[checks.demo]\nmethod="m"\npurpose="p"\nphase="open-as-draft"\n' > "$PH_IDX"
 printf '%s\n' '[
-  {"id":"ph-legacy-green","title":"pre-open, legacy codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}},
-  {"id":"ph-draft-pending","title":"pre-open green, open-as-draft demo pending","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo"}},
-  {"id":"ph-preopen-ungreen","title":"pre-open correctness ungreen","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo"}},
-  {"id":"ph-mixed-case-green","title":"pre-open, mixed-case lane green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch"}}
+  {"id":"ph-legacy-green","title":"pre-open, legacy codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/ph-legacy-green"}},
+  {"id":"ph-draft-pending","title":"pre-open green, open-as-draft demo pending","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","branch":"polecat/ph-draft-pending"}},
+  {"id":"ph-preopen-ungreen","title":"pre-open correctness ungreen","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","branch":"polecat/ph-preopen-ungreen"}},
+  {"id":"ph-mixed-case-green","title":"pre-open, mixed-case lane green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch","branch":"polecat/ph-mixed-case-green"}}
 ]' > "$TMP/ph-ready.json"
 backing ph-legacy-green codex
 backing ph-draft-pending correctness
@@ -763,6 +791,78 @@ eq "$RC" "0" "the phase-aware pass completes"
 # review carries, so it reads green rather than flagged.
 eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "ph-preopen-ungreen" \
    "the resolver classes the legacy-token, draft-pending and mixed-case anchors gated; only the pre-open-ungreen one is unnamed"
+
+echo "── the census reads the rig's index at the anchor's head, over the pack's ──"
+# The order runs the sweep in its rig's checkout, and the resolver lays the index
+# at the head of each anchor's branch over the pack's. The pack's index beside
+# the script phases demo open-as-draft. Rig A's commit phases it pre-open, so an
+# anchor whose demo lane is not green there is an unnamed wait. Rig B's commit
+# phases it open-as-draft, so the same anchor is gated. Each working tree says
+# the opposite of its commit, so a sweep that read the working tree would class
+# both the other way. No override is set, as in a real pass.
+RIG_A="$TMP/rig-a"; RIG_B="$TMP/rig-b"
+rig_index() { # rig_index <rig> <demo phase>
+    printf '[checks.correctness]\npurpose="p"\nphase="pre-open"\n[checks.demo]\npurpose="p"\nphase="%s"\n' "$2" > "$1/review-checks.toml"
+}
+rig_commit() { # rig_commit <rig> <committed demo phase> <working-tree demo phase>
+    mkdir -p "$1" && git -C "$1" init -q
+    rig_index "$1" "$2"
+    git -C "$1" add review-checks.toml
+    git -C "$1" -c user.email=t@t.test -c user.name=t -c commit.gpgsign=false commit -qm index >/dev/null 2>&1
+    printf 'polecat/ri-demo %s\n' "$(git -C "$1" rev-parse --verify -q HEAD)" > "$1.heads"
+    rig_index "$1" "$3"
+}
+rig_commit "$RIG_A" pre-open open-as-draft
+rig_commit "$RIG_B" open-as-draft pre-open
+printf '%s\n' '[{"id":"ri-demo","title":"pre-open, correctness green, demo pending","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","branch":"polecat/ri-demo"}}]' > "$TMP/ri-ready.json"
+backing ri-demo correctness
+in_rig() { # in_rig <rig> : run_sweep from the rig's checkout, with no index override
+    rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"
+    : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_BODIES"
+    RC=0
+    OUT="$(cd "$1" && env -u GC_REVIEW_CHECKS_INDEX LS_REMOTE_HEADS="$1.heads" FAKE_READY="$TMP/ri-ready.json" bash "$SCRIPT" 2>"$TMP/err")" || RC=$?
+}
+in_rig "$RIG_A"
+eq "$RC" "0" "the pass in a rig checkout completes"
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "ri-demo" \
+   "a rig whose commit phases demo pre-open holds the anchor on its demo lane, whatever the pack's index and the working tree say"
+in_rig "$RIG_B"
+eq "$RC" "0" "the pass in the second rig checkout completes"
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "" \
+   "a rig whose commit phases demo open-as-draft gates the same anchor, whatever its working tree says"
+
+echo "── an anchor whose head does not read stays a candidate ──"
+# Its gates are read only at the commit they judge, so with no head the sweep
+# resolves nothing for it, even under the index override this file sets, which
+# would let a call that names no commit resolve.
+printf '%s\n' '[{"id":"nh-green","title":"pre-open, backed, head unread","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/nh-green"}}]' > "$TMP/nh-ready.json"
+backing nh-green codex
+: > "$TMP/ls-remote.log"
+LS_REMOTE_LOG="$TMP/ls-remote.log" FAKE_READY="$TMP/nh-ready.json" run_sweep ABSENT
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "" "a backed anchor whose head reads is gated"
+grep -qF "ls-remote origin refs/heads/polecat/nh-green" "$TMP/ls-remote.log" \
+    && ok "…its head read from origin by its branch" \
+    || bad "…its head read from origin by its branch" "ls-remote calls: $(cat "$TMP/ls-remote.log")"
+LS_REMOTE_MISS="polecat/nh-green" FAKE_READY="$TMP/nh-ready.json" run_sweep ABSENT
+eq "$RC" "0" "a pass with an unread head completes"
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "nh-green" "the same anchor with no head to read is a candidate, not gated"
+
+echo "── every pre-open anchor's head comes from one ls-remote ──"
+# One call names every branch, so a slow origin costs the pass one bounded read,
+# and each anchor still finds its own head in it.
+printf '%s\n' '[{"id":"nh-green","title":"pre-open, backed","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/nh-green"}},{"id":"nh-two","title":"pre-open, backed too","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/nh-two"}}]' > "$TMP/nh2-ready.json"
+backing nh-two codex
+: > "$TMP/ls-remote.log"
+LS_REMOTE_LOG="$TMP/ls-remote.log" FAKE_READY="$TMP/nh2-ready.json" run_sweep ABSENT
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "" "two backed anchors whose heads read are both gated"
+eq "$(grep -c 'ls-remote' "$TMP/ls-remote.log")" "1" "…from one ls-remote"
+eq "$(cat "$TMP/ls-remote.log")" "ls-remote origin refs/heads/polecat/nh-green refs/heads/polecat/nh-two" "…that names both branches"
+LS_REMOTE_MISS="polecat/nh-two" FAKE_READY="$TMP/nh2-ready.json" run_sweep ABSENT
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "nh-two" "an anchor whose head the one call does not carry is a candidate, and the other stays gated"
+printf '%s\n' '[{"id":"np-plain","title":"no pre-open anchor","issue_type":"task","metadata":{}}]' > "$TMP/np-ready.json"
+: > "$TMP/ls-remote.log"
+LS_REMOTE_LOG="$TMP/ls-remote.log" FAKE_READY="$TMP/np-ready.json" run_sweep ABSENT
+eq "$(grep -c 'ls-remote' "$TMP/ls-remote.log")" "0" "a ready set with no pre-open anchor reads no head"
 
 echo "── holder liveness gates the conversing class (readable session list) ──"
 # Two visits track two ready subjects: one held by a live session (lx-live-1 is

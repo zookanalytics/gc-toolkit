@@ -9,7 +9,11 @@
 # review refuses nothing. request-changes always files exactly one rework child — convergence
 # is judged by the validator, not counted here — and is idempotent on
 # source_review_bead, so a re-pool adopts the child it already filed rather than
-# minting a twin.
+# minting a twin. Triage's --add-gates is validated against the effective index
+# at the reviewed commit (the pack's checks with the commit's rows), each flag is
+# refused from every check of the pack's index but its owner, and a correctness
+# approve on a change to its own review guidance is refused until --needs-you
+# names the edit.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -297,13 +301,14 @@ exit 0
 STUB
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/git" <<'STUB'
-# resolve_index resolves the repo root with `git rev-parse --show-toplevel`,
-# then reads the check index at the reviewed commit with
-# `git -C <root> show <oid>:review-checks.toml`. Serve a non-empty root
-# (STUB_TOPLEVEL) so the SUT resolves it inside the sandbox the way production
-# resolves it inside the worktree, instead of falling back to an ambient
-# GC_RIG_ROOT the CI runner never sets. When STUB_INDEX names a file, serve it
-# as the index; otherwise fall through (exit 0, empty) so the SUT sees no index.
+# The resolver beside signoff.sh finds the repo root with
+# `git rev-parse --show-toplevel`, then reads the rig's index at the reviewed
+# commit with `git -C <root> show <oid>:review-checks.toml`, and lays it over the
+# pack's index of the tree under test. Serve a non-empty root (STUB_TOPLEVEL) so
+# it resolves inside the sandbox the way production resolves it inside the
+# worktree, instead of falling back to an ambient GC_RIG_ROOT the CI runner
+# never sets. When STUB_INDEX names a file, serve it as the commit's index;
+# otherwise fall through (exit 0, empty) so the commit carries none.
 _g=("$@"); [ "${_g[0]:-}" = "-C" ] && _g=("${_g[@]:2}")
 if [ "${_g[0]:-}" = "rev-parse" ] && [ "${_g[1]:-}" = "--show-toplevel" ]; then
   printf '%s\n' "${STUB_TOPLEVEL:-$PWD}"; exit 0
@@ -311,8 +316,40 @@ fi
 if [ "${_g[0]:-}" = "show" ] && [ -n "${STUB_INDEX:-}" ]; then
   case "${_g[1]:-}" in *:review-checks.toml) cat "$STUB_INDEX"; exit 0 ;; esac
 fi
+# ls-remote matches its pattern against a ref's tail, so STUB_LSREMOTE_TAIL
+# serves a ref that ends in the branch's ref, sorted ahead of it as git sorts.
 if [ "${1:-}" = "ls-remote" ]; then
+  [ -n "${STUB_LSREMOTE_TAIL:-}" ] && printf '%s\trefs/heads/a/%s\n' "$STUB_LSREMOTE_TAIL" "$3"
   [ -n "${STUB_LSREMOTE:-}" ] && printf '%s\trefs/heads/%s\n' "$STUB_LSREMOTE" "${3#refs/heads/}"
+  exit 0
+fi
+# A reviewed commit this checkout has not fetched: `cat-file -e` on
+# STUB_UNFETCHED fails until a `fetch ... origin <that oid>` has asked origin for
+# it by id. Every fetch is logged to STUB_FETCH_LOG.
+if [ "${_g[0]:-}" = "fetch" ]; then
+  printf '%s\n' "${_g[*]}" >> "${STUB_FETCH_LOG:-/dev/null}"; exit 0
+fi
+if [ "${_g[0]:-}" = "cat-file" ] && [ -n "${STUB_UNFETCHED:-}" ]; then
+  case "${_g[2]:-}" in
+    "$STUB_UNFETCHED"*) grep -q -- " origin $STUB_UNFETCHED\$" "${STUB_FETCH_LOG:-/dev/null}" 2>/dev/null || exit 1 ;;
+  esac
+fi
+# The backstop's path list, which the resolver's --edits reads:
+# `-C <root> merge-base <base> <oid>` answers the fork point (STUB_FORK, set
+# empty for one that does not read), and `-C <root> diff --name-only` answers
+# STUB_DIFF_PATHS, one path per line. The path a rename left,
+# STUB_DIFF_RENAMED_FROM, is listed only beside --no-renames, as git lists it:
+# with rename detection on, the default, a renamed file is named by the path it
+# lands at alone.
+if [ "${_g[0]:-}" = "merge-base" ] && [ "${_g[1]:-}" != "--is-ancestor" ]; then
+  [ -n "${STUB_FORK-fork0}" ] && printf '%s\n' "${STUB_FORK-fork0}"
+  exit 0
+fi
+if [ "${_g[0]:-}" = "diff" ]; then
+  [ -n "${STUB_DIFF_PATHS:-}" ] && printf '%s\n' "$STUB_DIFF_PATHS"
+  case " ${_g[*]} " in
+    *" --no-renames "*) [ -n "${STUB_DIFF_RENAMED_FROM:-}" ] && printf '%s\n' "$STUB_DIFF_RENAMED_FROM" ;;
+  esac
   exit 0
 fi
 # merge-base --is-ancestor: 0 ancestor, 1 not, 128 a commit git cannot resolve.
@@ -446,6 +483,11 @@ eq "$(meta rv-1 reviewed_oid)" "$OID_HEAD" "pre-open records reviewed_oid on the
 has "$(notes rv-1)" "tk-anc" "pre-open verdict notes carry the anchor link"
 backed "pre-open closes the review bead as the lane's backing"
 no_lane_key "…and stores no lane state on the anchor"
+# A ref whose tail is the branch's ref answers the same ls-remote, listed first.
+reset "$ANCHOR_PRE"
+out=$(STUB_LSREMOTE_TAIL="$OID_OLD" "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "pre-open approve beside a ref that ends in the branch's ref exits 0"
+eq "$(meta rv-1 reviewed_oid)" "$OID_HEAD" "…and records the head of the branch's own ref"
 
 echo "# --reviewed-oid override"
 reset "$ANCHOR_PR"
@@ -1246,18 +1288,35 @@ eq "$rc" 0 "re-adding an already-declared check exits 0"
 eq "$(meta tk-anc check_set)" "correctness,triage" "check_set is unchanged when the check is already declared"
 hasnt "$(notes tk-anc)" "triage-add: triage @" "no triage-add note for a check already present"
 
-echo "# no readable index widens NOTHING — triage adds no check, correctness carries it"
-# The reviewed commit carries no review-checks.toml (STUB_INDEX unset), so there is
-# no declared menu to classify over. A widening would name an undeclared method, so
-# --add-gates is a no-op: the verdict still records, the forced baseline is intact,
-# and no triage-add note is written.
+echo "# a commit that carries no index of its own widens by the pack's checks"
+# The reviewed commit carries no review-checks.toml (STUB_INDEX unset), so its
+# effective index is the pack's, and every check the pack ships is on the menu.
 reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
 out=$("$SUT" --review-bead rv-tri --verdict approve --add-gates demo 2>&1); rc=$?
-eq "$rc" 0 "a triage approve with no index still records its verdict"
-eq "$(meta tk-anc check_set)" "correctness,triage" "no index means no widening — the forced baseline is unchanged"
-hasnt "$(meta tk-anc check_set)" "demo" "the undeclared check never reaches check_set"
-hasnt "$(notes tk-anc)" "triage-add: demo @" "no triage-add note is written when the widening is refused"
-has "$out" "widens nothing" "the no-op names the no-index rule"
+eq "$rc" 0 "a triage approve at a commit with no index records its verdict"
+has "$(meta tk-anc check_set)" "demo" "…and the pack's demo check reaches check_set"
+has "$(notes tk-anc)" "triage-add: demo @" "…recorded as a triage-add note"
+
+echo "# a pack check the commit's own index leaves out is still on the menu"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
+out=$(STUB_INDEX="$IDX" "$SUT" --review-bead rv-tri --verdict approve --add-gates arch 2>&1); rc=$?
+eq "$rc" 0 "adding arch, which the commit's index does not declare, exits 0"
+has "$(meta tk-anc check_set)" "arch" "…and arch reaches check_set from the pack's layer"
+
+echo "# every check the effective index declares but triage is refused --add-gates"
+# The pack's index of the tree under test, iterated: the owner of the widening is
+# the one check signoff.sh names for it, whatever the index declares.
+PACK_CHECKS=$("$HERE/review-checks.sh" --file "$HERE/../../review-checks.toml" 2>/dev/null | cut -f1)
+[ -n "$PACK_CHECKS" ] && ok "the pack's index lists its checks" || bad "the pack's index lists no checks"
+for c in $PACK_CHECKS; do
+  [ "$c" = triage ] && continue
+  rv=$(printf '%s' "$TRI" | sed "s/\"id\":\"rv-tri\"/\"id\":\"rv-$c\"/; s/\"check_name\":\"triage\"/\"check_name\":\"$c\"/")
+  reset "$ANCHOR_PR" ",$rv"; anchor_meta "check_set=correctness,triage"
+  out=$("$SUT" --review-bead "rv-$c" --verdict approve --add-gates triage 2>&1); rc=$?
+  eq "$rc" 1 "the $c check's approve may not widen"
+  has "$out" "only the 'triage' check may widen" "…the refusal names the widen rule ($c)"
+  eq "$(meta tk-anc check_set)" "correctness,triage" "…and nothing is written ($c)"
+done
 
 echo "# only a triage approve may widen"
 reset "$ANCHOR_PR"
@@ -1438,7 +1497,7 @@ has "$(meta tk-anc check_set)" "demo" "the declared check reaches check_set"
 reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
 out=$(STUB_INDEX="$IDX" "$SUT" --review-bead rv-tri --verdict approve --add-gates nonesuch 2>&1); rc=$?
 eq "$rc" 1 "a check the index does not declare is refused"
-has "$out" "not on the index" "the refusal names the closed index"
+has "$out" "not on the effective index" "the refusal names the closed index"
 hasnt "$(meta tk-anc check_set)" "nonesuch" "the undeclared check never reaches check_set"
 
 echo "# the widening is read back: a write that does not land leaves the review OPEN"
@@ -1623,6 +1682,72 @@ has "$out" "visual decision did not read back" "the failure names the read-back"
 eq "$(cat "$STUB_GH_BODY")" "" "nothing is posted"
 eq "$(meta rv-demo signoff_verdict)" "<absent>" "no verdict is recorded"
 eq "$(status rv-demo)" "in_progress" "the review bead stays open for a retry"
+
+echo "# every check the effective index declares but demo is refused --visual"
+for c in $PACK_CHECKS; do
+  [ "$c" = demo ] && continue
+  rv=$(printf '%s' "$REVIEW" | sed "s/\"id\":\"rv-1\"/\"id\":\"rv-v$c\"/; s/\"check_name\":\"correctness\"/\"check_name\":\"$c\"/")
+  reset "$ANCHOR_PR" ",$rv"
+  out=$("$SUT" --review-bead "rv-v$c" --verdict approve --visual none 2>&1); rc=$?
+  eq "$rc" 1 "the $c check's verdict carrying --visual is refused"
+  has "$out" "only the 'demo' check records a visual decision" "…the refusal names the owning check ($c)"
+  eq "$(meta "rv-v$c" visual)" "<absent>" "…and nothing is stamped ($c)"
+done
+
+echo "# a correctness approve on a change to its own review guidance names the edit"
+# The rig's guidance is read at the commit under review, so a branch that edits
+# review-checks.toml or a docs/review-*.md is reviewed under its own edit. The
+# approve is refused, with nothing written, until --needs-you names that edit
+# for the person who approves the merge.
+reset "$ANCHOR_PR"
+out=$(STUB_DIFF_PATHS=$'lib/x.sh\nreview-checks.toml\ndocs/review-correctness.md\ndocs/sub/review-x.md' "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 1 "a correctness approve on a guidance edit with no --needs-you is refused"
+has "$out" "edits its own review guidance (review-checks.toml docs/review-correctness.md)" "…naming the guidance files among the paths it touches"
+hasnt "$out" "docs/sub/review-x.md" "…and no file outside the guidance it names"
+has "$out" "re-run with --needs-you" "…and the flag that records it"
+eq "$(cat "$STUB_GH_BODY")" "" "…posting nothing"
+eq "$(status rv-1)" "in_progress" "…and leaving the review open"
+eq "$(meta rv-1 signoff_verdict)" "<absent>" "…with no verdict recorded"
+# A guidance file renamed away is an edit to the guidance, though rename
+# detection would name only the path it lands at.
+reset "$ANCHOR_PR"
+out=$(STUB_DIFF_PATHS=$'specs/x/old-correctness-guidance.md' STUB_DIFF_RENAMED_FROM=$'docs/review-correctness.md' "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 1 "a correctness approve on a change that renames a guidance file away is refused"
+has "$out" "edits its own review guidance (docs/review-correctness.md)" "…naming the path the rename left"
+# A head pushed after this checkout last fetched is in no repository here until
+# it is fetched by id, as the resolver fetches any commit it reads, so the edit
+# is still named rather than left unchecked.
+reset "$ANCHOR_PR"; : > "$TMP/fetch.log"
+out=$(STUB_UNFETCHED="$OID_HEAD" STUB_FETCH_LOG="$TMP/fetch.log" STUB_DIFF_PATHS=$'review-checks.toml' "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 1 "a correctness approve on a guidance edit at a head this checkout has not fetched is refused"
+has "$out" "edits its own review guidance (review-checks.toml)" "…naming the edit"
+has "$(cat "$TMP/fetch.log")" "origin $OID_HEAD" "…having fetched the reviewed commit by id"
+reset "$ANCHOR_PR"
+out=$(STUB_DIFF_PATHS=$'docs/review-demo.md' "$SUT" --review-bead rv-1 --verdict approve --needs-you "this change adds demo guidance, which its own demo review ran under" 2>&1); rc=$?
+eq "$rc" 0 "the same approve with --needs-you records"
+eq "$(head -1 "$STUB_GH_BODY")" "Correctness: approve. Needs you: this change adds demo guidance, which its own demo review ran under." "…its opening line naming the edit"
+reset "$ANCHOR_PR"
+out=$(STUB_DIFF_PATHS=$'lib/x.sh\ndocs/architecture.md' "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "a change that touches neither file records with no --needs-you"
+eq "$(head -1 "$STUB_GH_BODY")" "Correctness: approve. Nothing needs you." "…and nothing needs the operator"
+reset "$ANCHOR_PR"
+out=$(STUB_DIFF_PATHS=$'review-checks.toml' "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "a correctness request-changes on a guidance edit records"
+for c in $PACK_CHECKS; do
+  [ "$c" = correctness ] && continue
+  rv=$(printf '%s' "$REVIEW" | sed "s/\"id\":\"rv-1\"/\"id\":\"rv-g$c\"/; s/\"check_name\":\"correctness\"/\"check_name\":\"$c\"/")
+  reset "$ANCHOR_PR" ",$rv"
+  extra=(); [ "$c" = demo ] && extra=(--visual none)
+  out=$(STUB_DIFF_PATHS=$'review-checks.toml' "$SUT" --review-bead "rv-g$c" --verdict approve ${extra[@]+"${extra[@]}"} 2>&1); rc=$?
+  eq "$rc" 0 "the $c check's approve on a guidance edit is not held by the backstop"
+done
+# Paths that cannot be listed leave the edit unchecked, and the opening line says
+# so, rather than hold a review that can never answer.
+reset "$ANCHOR_PR"
+out=$(STUB_FORK="" STUB_DIFF_PATHS=$'review-checks.toml' "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "a correctness approve whose paths cannot be listed records"
+has "$(head -1 "$STUB_GH_BODY")" "Correctness: approve. Needs you: signoff could not list the paths this change touches" "…its opening line saying the guidance went unchecked"
+has "$(head -1 "$STUB_GH_BODY")" "read its diff for such an edit before you approve the merge." "…and what the approver does instead"
 
 echo "# metadata-key drift against lifecycle.toml"
 # A metadata key is state, and the registry is the exhaustive declaration

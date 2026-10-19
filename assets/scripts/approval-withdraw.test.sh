@@ -323,10 +323,10 @@ exit "\${${s//-/_}_rc:-0}"
 STUB
   chmod +x "$STUBS/$s.sh"
 done
-runblock() { # <lane> — prints "<rc>|<log>"
+runblock() { # <lane> — prints "<rc>|<log>"; reviewed_oid= runs it on a pass that records none
   : > "$TMP/block.log"
   local rc=0
-  BLOCK_LOG="$TMP/block.log" SCRIPTS="$STUBS" LANE="$1" ANCHOR=AN1 VALIDATION_PASS=VP1 \
+  BLOCK_LOG="$TMP/block.log" SCRIPTS="$STUBS" LANE="$1" ANCHOR=AN1 VALIDATION_PASS=VP1 REVIEWED_OID="${reviewed_oid-0123abc}" \
   review_outcome_rc="${review_outcome_rc:-0}" approval_withdraw_rc="${approval_withdraw_rc:-0}" \
     bash "$BLOCK" >/dev/null 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/block.log")"
@@ -335,15 +335,20 @@ eq "$(runblock correctness)" \
    "0|approval-withdraw --pass VP1 --reason the reason;review-outcome supersede-lane --anchor AN1 --lane correctness --reason the reason;" \
    "a reviewer's batch withdraws the approvals, then supersedes its lane with the same reason"
 eq "$(runblock human)" \
-   "0|approval-withdraw --pass VP1 --reason the reason;review-outcome supersede-anchor --anchor AN1 --reason the reason;" \
-   "a human batch withdraws the approvals, then supersedes every lane"
+   "0|approval-withdraw --pass VP1 --reason the reason;review-outcome supersede-anchor --anchor AN1 --oid 0123abc --reason the reason;" \
+   "a human batch withdraws the approvals, then supersedes every lane, resolved at the commit the pass judged"
 eq "$(approval_withdraw_rc=1 runblock correctness)" "1|approval-withdraw --pass VP1 --reason the reason;" \
    "a withdrawal that fails supersedes nothing and fails the block, so no lane reads green on the approval it left standing"
 eq "$(approval_withdraw_rc=1 runblock human)" "1|approval-withdraw --pass VP1 --reason the reason;" \
    "…on a human batch too"
 eq "$(review_outcome_rc=2 runblock human)" \
-   "2|approval-withdraw --pass VP1 --reason the reason;review-outcome supersede-anchor --anchor AN1 --reason the reason;" \
+   "2|approval-withdraw --pass VP1 --reason the reason;review-outcome supersede-anchor --anchor AN1 --oid 0123abc --reason the reason;" \
    "a supersede that fails after the withdrawal fails the block"
+eq "$(reviewed_oid='' runblock human)" "1|" \
+   "a human batch whose pass records no reviewed_oid fails the block before the withdrawal, so no approval is dismissed under lanes the supersede could not move"
+eq "$(reviewed_oid='' runblock correctness)" \
+   "0|approval-withdraw --pass VP1 --reason the reason;review-outcome supersede-lane --anchor AN1 --lane correctness --reason the reason;" \
+   "…while a reviewer's batch, whose supersede names no commit, still runs both"
 STEP=$(awk '/^id = "rule-convergence"$/ {f=1} f && /^\[\[steps\]\]$/ {exit} f' "$TOML")
 has "$STEP" '[ -x "$c/assets/scripts/approval-withdraw.sh" ]' "the step resolves its scripts only where the withdrawal is present"
 eq "$(grep -c 'approval-withdraw.sh" --pass' "$TOML")" "1" "the formula runs the withdrawal in one place"

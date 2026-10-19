@@ -11,8 +11,10 @@
 # unit answers holds the merge, not the dispatch; a closed validation pass holds
 # nothing; an unreadable probe holds the dispatch fail-closed); a declared lane's
 # exception@<oid> marker is read as nothing, so the lane derives from the graph;
-# the live-head read, which decides only the dispatch pin and the machine axis
-# (a deleted ref, a body without .sha, and a failed read are all unanswerable);
+# the live-head read, which decides the dispatch pin, the machine axis and the
+# commit the gates resolve at (a deleted ref, a body without .sha, and a failed
+# read are all unanswerable, and git ls-remote answers a head GitHub does not;
+# a head neither answers holds the anchor for the pass);
 # a stored marker's residue, which nothing reads or clears; a multi-check
 # check_set split per check rather than joined into one name; in-flight dedup
 # (routed, poured, claimed) + stranded repair
@@ -27,11 +29,13 @@
 # a lost create reply is re-slung as stranded and never twinned; then gc sling
 # --on mol-review with
 # gc.execution_routed_to read-back, never retried in-pass; no dispatch tally is
-# written, and there is no dispatch ceiling); merge_hold, which holds the
-# dispatch while the machine axis still reads the lanes; and the review-wedge
-# escalation, shared by both reach shapes (an exec-stamp-only poured review, and
-# a no-stamp review a tracking convoy's root drives) -> a spent workflow is one
-# deduped visit, held one pass first.
+# written, and there is no dispatch ceiling); the open PR a pull_request
+# anchor's review carries as review_pr_url and review_pr_number, fresh or
+# stranded, which mol-review's review-pr-pin block pins; merge_hold, which
+# holds the dispatch while the machine axis still reads the lanes; and the
+# review-wedge escalation, shared by both reach shapes (an exec-stamp-only
+# poured review, and a no-stamp review a tracking convoy's root drives) -> a
+# spent workflow is one deduped visit, held one pass first.
 #
 # The sections run in the parts declared below, each wrapped in an `if part`
 # block. tools/run-tests.sh runs each part as its own run under its own
@@ -230,6 +234,88 @@ hasnt "$(cat "$STUB_GC_LOG")" "--var" "the default mol-review path forwards no f
 eq "$(meta A1 dispatch_count)" "<absent>" "no dispatch tally is written on the anchor — the ceiling is retired"
 d=$(jq -r --arg id "$rid" '.[] | select(.id == $id) | .description' "$STUB_STORE")
 has "$d" "METHOD" "the dispatch body came from review-dispatch-body.sh"
+eq "$(meta "$rid" review_pr_url)|$(meta "$rid" review_pr_number)" "<absent>|<absent>" "a pre-open anchor's review carries no PR"
+
+echo "# a review of an open PR carries the PR, and mol-review pins its gh calls to it"
+# The PR rides keys of its own: gc-helm.sh resolves a PR number to every live
+# bead whose pr_number matches, so a review carrying pr_number would make its
+# anchor's PR resolve to two beads.
+store "[$(anchor P1 pull_request correctness "" polecat/p1 ',"pr_url":"https://github.com/zook/gc-toolkit/pull/77","pr_number":"77"')]"
+oid p1 > "$GH_DIR/head_polecat_p1"
+out=$(run)
+has "$out" "dispatched review" "the open PR's lane is dispatched a review"
+prid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$prid" review_pr_url)|$(meta "$prid" review_pr_number)" "https://github.com/zook/gc-toolkit/pull/77|77" \
+  "the review carries the anchor's PR as review_pr_url and review_pr_number"
+eq "$(meta "$prid" pr_url)|$(meta "$prid" pr_number)" "<absent>|<absent>" "…and not as pr_url or pr_number"
+# load-dispatch reads the PR through its review-pr-pin block, taken here from
+# the parsed formula (its TOML string escapes the backslashes in the block's
+# sed) and run on the metadata this dispatch wrote.
+python3 - "$HERE/../../formulas/mol-review.toml" > "$TMP/pr-pin.sh" <<'PY'
+import sys, tomllib
+for step in tomllib.load(open(sys.argv[1], 'rb'))['steps']:
+    if step['id'] != 'load-dispatch':
+        continue
+    on = False
+    for line in step['description'].splitlines():
+        if line == '# <<< review-pr-pin':
+            on = False
+        if on:
+            print(line)
+        if line == '# >>> review-pr-pin':
+            on = True
+PY
+[ -s "$TMP/pr-pin.sh" ] && ok "mol-review's review-pr-pin block extracts" || bad "no review-pr-pin block in mol-review's load-dispatch"
+printf '{"headRefName":"polecat/p1","baseRefName":"main"}' > "$GH_DIR/pr_view_77.json"
+pin() { # pin <review metadata json> : the pins the block sets, or its refusal
+  M="$1" bash -c '. "$1"; printf "%s|%s|%s|%s|%s|%s\n" "$PR" "$PR_REPO_Q" "$PR_HOST" "$PR_REPO" "$BRANCH" "$BASE"' _ "$TMP/pr-pin.sh" 2>&1
+}
+: > "$STUB_GH_LOG"
+eq "$(pin "$(jq -c --arg id "$prid" '.[] | select(.id == $id) | .metadata' "$STUB_STORE")")" \
+  "77|github.com/zook/gc-toolkit|github.com|zook/gc-toolkit|polecat/p1|main" \
+  "load-dispatch pins the PR the dispatch wrote: the repository from its URL, the branch and base from the PR"
+eq "$(grep -c '^pr view 77 ' "$STUB_GH_LOG")" "1" "…reading the head and base in one gh call"
+eq "$(pin '{"review_branch":"polecat/a1","review_base":"main"}')" "|||||" "…and a pre-open review pins no PR"
+has "$(pin '{"review_pr_number":"77","review_pr_url":"PR 77"}')" "no parseable review_pr_url" "…and refuses a PR whose URL names no repository"
+# A PR gh cannot read, or one whose head or base reads empty, pins nothing: the
+# block exits before load-dispatch's fetch and the review's diff use the refs.
+out=$(pin '{"review_branch":"polecat/p1","review_base":"main","review_pr_number":"91","review_pr_url":"https://github.com/zook/gc-toolkit/pull/91"}'); rc=$?
+[ "$rc" -ne 0 ] && ok "…and exits non-zero when gh cannot read the PR" || bad "…and exits non-zero when gh cannot read the PR (rc=$rc: $out)"
+has "$out" "refusing to review an unpinned diff" "…saying it refuses the unpinned diff"
+hasnt "$out" "91|" "…before any later command reads the refs"
+printf '{"headRefName":"","baseRefName":"main"}' > "$GH_DIR/pr_view_92.json"
+out=$(pin '{"review_pr_number":"92","review_pr_url":"https://github.com/zook/gc-toolkit/pull/92"}'); rc=$?
+[ "$rc" -ne 0 ] && ok "…and exits non-zero when the PR's head reads empty" || bad "…and exits non-zero when the PR's head reads empty (rc=$rc: $out)"
+has "$out" "resolved no head/base" "…saying the PR resolved no head"
+hasnt "$out" "92|" "…before any later command reads the refs"
+
+echo "# an open PR recorded by its URL alone gives the review its number"
+store "[$(anchor P2 pull_request correctness "" polecat/p2 ',"pr_url":"https://github.com/zook/gc-toolkit/pull/78"')]"
+oid p2 > "$GH_DIR/head_polecat_p2"
+out=$(run)
+prid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$prid" review_pr_url)|$(meta "$prid" review_pr_number)" "https://github.com/zook/gc-toolkit/pull/78|78" \
+  "the number is parsed from the URL, as signoff.sh parses it"
+
+echo "# an open PR whose URL names no number gives the review neither key"
+# Half a PR is no pin: mol-review refuses a number with no URL to pin its
+# repository, and reads a URL with no number as no PR at all.
+store "[$(anchor P2n pull_request correctness "" polecat/p2n ',"pr_url":"https://github.com/zook/gc-toolkit/pulls"')]"
+oid p2n > "$GH_DIR/head_polecat_p2n"
+out=$(run)
+has "$out" "dispatched review" "the lane of a PR whose URL names no number is still dispatched a review"
+prid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$prid" review_pr_url)|$(meta "$prid" review_pr_number)" "<absent>|<absent>" \
+  "…carrying neither PR key"
+
+echo "# a PR recorded on an anchor still at pre_open_gate is not the published page"
+# pr-open.sh has yet to adopt it, and adoption republishes its body from the
+# pending pr_summary, which a pre-open review reads.
+store "[$(anchor P3 pre_open_gate correctness "" polecat/p3 ',"pr_url":"https://github.com/zook/gc-toolkit/pull/79","pr_number":"79"')]"
+oid p3 > "$GH_DIR/head_polecat_p3"
+out=$(run)
+prid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$prid" review_pr_url)|$(meta "$prid" review_pr_number)" "<absent>|<absent>" "the review of a pre_open_gate anchor carries no PR"
 
 echo "# the forced baseline: an empty check_set stamps correctness,triage and dispatches both lanes"
 store "[$(anchor A1b pre_open_gate "" "" polecat/a1b)]"
@@ -520,20 +606,34 @@ out=$(run_val)
 has "$out" "DP2 carries a PR-close disposition (gc.pr_close_disposition_kind=duplicate)" "the disposed anchor is named as skipped"
 has "$out" "0 reviews dispatched" "…and no fresh review is dispatched onto it"
 
-echo "# an unreadable live head neither settles a lane nor stops a dispatch"
-# gh answers a deleted ref with a 422: error body on STDOUT, non-zero exit. The
-# derivation never consulted it, so the only thing the head decides now is the
-# dispatch pin and the machine axis.
+echo "# an unreadable live head holds the anchor for the pass"
+# gh answers a deleted ref with a 422: error body on STDOUT, non-zero exit, and
+# git ls-remote names no such ref. The gates resolve only at the commit they
+# judge, so the resolver refuses a call at none, and that refusal holds each
+# anchor: nothing settles, nothing dispatches, and the next pass reads again.
 store "[$(anchor C5 pre_open_gate correctness "" polecat/c5), $(backed rev-c5 C5),
         $(anchor C5b pull_request correctness "" polecat/c5b)]"
 : > "$STUB_GC_LOG"
 out=$(run); rc=$?
 eq "$rc" 0 "no-head pass exits 0"
-has "$out" "1 reviews dispatched" "the backed lane is settled and the unreviewed one still dispatches"
+has "$out" "C5 head of 'polecat/c5' unread" "the backed anchor is held, naming the head it could not read"
+has "$out" "C5b head of 'polecat/c5b' unread" "…and so is the unreviewed one"
+has "$out" "0 reviews dispatched" "…so no review goes out at no commit"
+has "$out" "2 held-for-retry" "…and both are retried next pass"
 hasnt "$out" "No commit found" "the gh error body never becomes a dispatch reason"
-eq "$(pinned C5b)" "<absent>" "an unreadable head records no machine axis"
-c5brid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
-eq "$(meta "$c5brid" reviewed_oid)" "<absent>" "…and the dispatch carries no pin it could not read"
+eq "$(pinned C5)" "<absent>" "an unreadable head records no machine axis"
+eq "$(pinned C5b)" "<absent>" "…on either anchor"
+
+echo "# a head GitHub does not answer is read through git ls-remote, and pins the review"
+# No head file stands for this branch, so the gh stub fails the API read.
+store "[$(anchor LR1 pull_request correctness "" polecat/lr1)]"
+printf 'polecat/lr1\n' > "$TMP/ls-remote-heads"
+: > "$STUB_GC_LOG"
+out=$(STUB_LS_REMOTE="$TMP/ls-remote-heads" run); rc=$?
+eq "$rc" 0 "ls-remote pass exits 0"
+has "$out" "1 reviews dispatched" "the head ls-remote read lets the dispatch go"
+lr1rid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$lr1rid" reviewed_oid)" "$(oid polecat/lr1)" "…pinned at the head ls-remote names"
 
 echo "# a head that is not a SHA is not a head"
 # gh exits 0 and prints 'null' when the body carries no .sha: the exit code
@@ -629,6 +729,16 @@ oid d3p > "$GH_DIR/head_polecat_d3p"
 out=$(run)
 has "$(cat "$STUB_GC_LOG")" "sling $POOL rev-3p --on mol-review" "a pinned stranded review is re-slung"
 eq "$(meta rev-3p reviewed_oid)" "1111111111111111111111111111111111111111" "…and its pin is never moved to the live head"
+
+echo "# a stranded review of an open PR is given the PR before it is re-slung"
+store "[$(anchor D3r pull_request correctness "" polecat/d3r ',"pr_url":"https://github.com/zook/gc-toolkit/pull/80","pr_number":"80"'),
+        $(stranded_review_row rev-3r D3r)]"
+oid d3r > "$GH_DIR/head_polecat_d3r"
+: > "$STUB_GC_LOG"
+out=$(run)
+has "$(cat "$STUB_GC_LOG")" "sling $POOL rev-3r --on mol-review" "the stranded review of an open PR is re-slung"
+eq "$(meta rev-3r review_pr_url)|$(meta rev-3r review_pr_number)" "https://github.com/zook/gc-toolkit/pull/80|80" \
+  "…carrying the anchor's PR, written with the rest of its work order"
 
 echo "# a stranded review whose work order will not take is not re-slung"
 # A create that read back short leaves exactly the stranded shape. Its pour

@@ -292,25 +292,41 @@ fi
 # lane-state.sh, the derivation pr-open.sh opens the PR on, pinned to this
 # sweep's store and bound by its per-call timeout. --no-remote: a pre_open_gate
 # anchor has no PR, so no GitHub approval backs a lane, as pr-open.sh reads it.
-# An anchor whose gates the resolver cannot name, or that has a lane that does
-# not derive green or cannot be read, stays out of the map and a candidate.
+# An anchor whose head does not read, whose gates the resolver cannot name, or
+# that has a lane that does not derive green or cannot be read, stays out of the
+# map and a candidate.
 _LS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-# The index the resolver reads; GC_REVIEW_CHECKS_INDEX overrides the default (the
-# rig's own review-checks.toml beside the pack) so a hermetic test can point it at
-# a fixture, or at a missing file for the no-index fallback (every non-sentinel
-# token gates). Passed as --file when readable; otherwise the resolver resolves it
-# itself (the inherited env override, then the working tree).
-_LS_IDX="${GC_REVIEW_CHECKS_INDEX-$_LS_DIR/../../review-checks.toml}"
+# The gates are resolved at the head of the anchor's branch on origin, the
+# commit pr-open.sh would open the PR at, read in the rig checkout the sweep
+# runs in (the order runs it there, and GC_RIG_ROOT names it). The resolver lays
+# that commit's own index over the pack's, so each rig's anchors are judged by
+# that rig's rows. GC_REVIEW_CHECKS_INDEX overrides the index the resolver
+# reads, so a hermetic test can point it at a fixture, or at a missing file for
+# the no-index fallback (every non-sentinel token gates). The fields are joined
+# on the unit separator, since tab is whitespace to read and an empty check_set
+# would shift the branch into its place.
 LANE_STATE="${GC_LANE_STATE_TOOL:-$_LS_DIR/lane-state.sh}"
-_ls_idx_arg=()
-[ -r "$_LS_IDX" ] && _ls_idx_arg=(--file "$_LS_IDX")
+_LS_PREOPEN=$(jq -r '.[] | select((.metadata.merge_result // "") == "pre_open_gate")
+         | [(.id // ""), (.metadata.check_set // ""), (.metadata.branch // "")]
+         | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' "$READY" 2>/dev/null)
+# Every branch's head comes from one ls-remote that names them all, so a slow
+# origin costs the sweep one bounded call, not one per anchor, and a ready set
+# with no such anchor costs none. ls-remote matches a pattern against a ref's
+# tail, so each head is taken from its exact ref.
+_ls_refs=()
+while IFS=$'\037' read -r _aid _acs _abr; do
+  [ -n "$_aid" ] && [ -n "$_abr" ] && _ls_refs+=("refs/heads/$_abr")
+done <<< "$_LS_PREOPEN"
+_LS_HEADS=""
+[ "${#_ls_refs[@]}" -eq 0 ] || _LS_HEADS=$(bounded git ls-remote origin "${_ls_refs[@]}" 2>/dev/null </dev/null)
 PREOPEN_GREEN_MAP=$(
-  jq -r '.[] | select((.metadata.merge_result // "") == "pre_open_gate")
-         | [(.id // ""), (.metadata.check_set // "")] | @tsv' "$READY" 2>/dev/null \
-  | while IFS=$'\t' read -r _aid _acs; do
-      [ -n "$_aid" ] || continue
-      _g=$("$_LS_DIR/review-checks.sh" --resolve --check-set "$_acs" --through pre-open \
-           ${_ls_idx_arg[@]+"${_ls_idx_arg[@]}"} 2>/dev/null </dev/null) || continue
+  printf '%s\n' "$_LS_PREOPEN" \
+  | while IFS=$'\037' read -r _aid _acs _abr; do
+      [ -n "$_aid" ] && [ -n "$_abr" ] || continue
+      _head=$(printf '%s\n' "$_LS_HEADS" | awk -v r="refs/heads/$_abr" '$2 == r { print $1; exit }')
+      [ -n "$_head" ] || continue
+      _g=$(bounded "$_LS_DIR/review-checks.sh" --resolve --check-set "$_acs" --through pre-open \
+           --at "$_head" 2>/dev/null </dev/null) || continue
       [ -n "$(printf '%s' "$_g" | tr -d '[:space:]')" ] || continue
       _green=1
       while IFS= read -r _l; do

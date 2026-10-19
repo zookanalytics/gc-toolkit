@@ -13,12 +13,13 @@ none.
 
 ## Inputs — three, in this order
 
-1. **The check index** — `review-checks.toml` at the commit under review. It
+1. **The check index** — the pack's checks, with the rows of the
+   `review-checks.toml` the commit under review carries laid over them. It
    declares the checks you may add. Read it first; it is the one place the
    available checks are declared.
 2. **The review bead** — `check_name`, `anchor_bead`, `review_branch` /
-   `review_base` or `pr_number`, and the dispatch-pinned `reviewed_oid`. The
-   anchor states what the change was for.
+   `review_base`, `review_pr_number` once the PR is open, and the
+   dispatch-pinned `reviewed_oid`. The anchor states what the change was for.
 3. **The diff, at the pinned commit** — `git diff --stat` first, then a skim of
    the files the stat names. A skim is the method here; reading every hunk is
    the specialist reviewer's job, not yours.
@@ -26,37 +27,40 @@ none.
 ## The index contract
 
 The check index is closed: you may add any check it declares and you may not
-invent one. Parse it rather than eyeballing it. The parser and the index come
-from different places and must be resolved separately: the parser is a pack
-script, the index is the reviewed repo's own. A pack rung on the index ladder
-would classify this rig against gc-toolkit's checks. The index comes out of the
-dispatch-pinned commit, `$REVIEWED_OID` from input 2, not off disk — the tree
-you stand in is your own worktree, not the commit you are classifying, and a
-branch may change the index it is judged against:
+invent one. Read it through the pack's resolver rather than eyeballing a file.
+It has two layers. The pack's own index declares every check the pack ships a
+skill for, so every rig has them. The reviewed repo's `review-checks.toml` at
+the commit under review, when it keeps one, adds checks of the rig's own and
+can change a pack check's purpose or phase for that rig. The resolver is the
+pack's own copy, which `gc <binding> scripts-dir` finds from any rig: it prints
+the directory holding the pack's scripts. `<binding>` is the name the city
+imports the pack under, which gc puts in front of this skill's name:
+`gc-toolkit` in `gc-toolkit.review-triage`. `gc skill list` prints it in this
+skill's FROM column. The rig's rows come out of the dispatch-pinned commit,
+`$REVIEWED_OID` from input 2, not off disk — the tree you stand in is your own
+worktree, not the commit you are classifying, and a branch may change the index
+it is judged against:
 
 ```bash
-PARSER=""
-for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}"; do
-  [ -n "$c" ] && [ -x "$c/assets/scripts/review-checks.sh" ] && { PARSER="$c/assets/scripts/review-checks.sh"; break; }
-done
-INDEX=$(mktemp); FOUND=""
-for c in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
-  [ -n "$c" ] || continue
-  git -C "$c" show "${REVIEWED_OID}:review-checks.toml" >"$INDEX" 2>/dev/null && { FOUND=1; break; }
-done
-[ -n "$FOUND" ] && [ -n "$PARSER" ] && "$PARSER" --file "$INDEX"
+# >>> triage-index-read
+"$(gc <binding> scripts-dir)/review-checks.sh" --show --at "$REVIEWED_OID"
+# <<< triage-index-read
 ```
 
-Each row gives you the check, its method, one line of purpose, and its phase —
-the stage transition by which it must read green. When a check applies is a
-judgment its method states, so read the method; the phase is fixed per check and
-not triage's to choose, and there is no applies-when column in the index.
+Each row gives you the check, one line of purpose, and its phase — the stage
+transition by which it must read green. When a check applies is a judgment its
+method states, so read the method: the skill `<binding>.review-<check>` in your
+catalog. A check of the rig's own has no skill, and its purpose is the whole of
+what it judges. The phase is fixed per check and not triage's to choose, and
+there is no applies-when column in the index.
 
-A commit that carries no index is the no-index case below, not a reason to reach
-for the pack's copy or the tree you happen to be in. `signoff.sh` resolves it the
-same way: it validates `--add-gates` against the reviewed commit's own index, and
-widens nothing when that commit carries none — the added checks are dropped and
-correctness carries the change.
+A commit that carries no index of its own still has the pack's checks, so
+every review has a menu. `signoff.sh` validates `--add-gates` against the same
+index at the reviewed commit. A non-zero exit is an index nobody read: a commit
+the checkout cannot read, a reviewed oid the shell lost, or a scripts dir gc
+cannot print. Stop and say so rather than classify with no menu. A row the
+resolver refuses, a phase outside the ordered set, is left off the menu and
+named on stderr. That row is the index gap below.
 
 ## Deciding
 
@@ -73,10 +77,6 @@ judgment:
   change — none earns a specialist review. Widening costs a cadence hop and a
   session per anchor, and the feedback distiller watches the add-rate for exactly
   that drift.
-
-When the repo has no readable index, there is no menu to classify over: widen
-nothing, let the standing `correctness` review carry the change, and file the
-index gap as an observation (below).
 
 ## Recording the decision
 
@@ -119,8 +119,11 @@ the ruling.
 Read the round first:
 
 ```bash
-bring-current-audit.sh render --anchor "$ANCHOR" --as comment   # the account
-bring-current-audit.sh show --anchor "$ANCHOR"                  # the raw record
+# >>> triage-round-read
+ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
+"$(gc <binding> scripts-dir)/bring-current-audit.sh" render --anchor "$ANCHOR" --as comment   # the account
+"$(gc <binding> scripts-dir)/bring-current-audit.sh" show --anchor "$ANCHOR"                  # the raw record
+# <<< triage-round-read
 ```
 
 The account gives a routine entry one line. The raw record keeps what that
@@ -178,19 +181,21 @@ was decided, and what reopened.
 
 ## The index gap
 
-An index that is missing, or that describes checks the repo no longer has, is
-your first finding — file it as an observation and carry on with the fallback
-above. Filing is recording, not proposing: the distiller judges it and a
-reviewed PR writes the index.
+A rig row the resolver refuses, which the index read named on stderr and left
+off the menu, is your first finding. File it as an observation and classify
+over the rows the menu shows. Filing is recording, not proposing: the distiller
+judges it and a reviewed PR writes the index.
 
 ```bash
+# >>> triage-index-gap
+ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
 OBS_META=$(jq -nc --arg scope "repo:${GC_RIG:-unknown}" --arg prov "bead:${ANCHOR}:turn:$(date -u +%Y-%m-%d)" \
   '{task_kind: "observation", "obs.category": "review-index-gap", "obs.scope": $scope,
     "obs.source": "self", "obs.directive": "standing", "obs.provenance": $prov,
     "gc.outcome": "recorded", "gc.work_outcome": "no-op"}')
-OBS_JSON=$(gc bd create "obs: check index is missing or stale for <repo> (bead:$ANCHOR)" \
+OBS_JSON=$(gc bd create "obs: check index row refused for <repo> (bead:$ANCHOR)" \
   -t task -l learning -l observation --metadata "$OBS_META" --status=closed -d "## Statement
-<what a reviewer could not classify the diff against>
+<the row the resolver refused, and why>
 
 ## Quote
 Triage on $ANCHOR at $REVIEWED_OID.
@@ -199,6 +204,7 @@ Triage on $ANCHOR at $REVIEWED_OID.
 <draft — explicitly non-binding>" --json)
 OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
+# <<< triage-index-gap
 ```
 
 ## What triage never does

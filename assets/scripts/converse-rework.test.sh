@@ -12,7 +12,9 @@
 # review's child never adopted for a ruling, the open-PR guards (a live anchor
 # at pull_request, carrying no disposition, naming its branch, target and PR),
 # the no-double-dispatch refusal on a partial pour, and every lane returned to
-# unreviewed (review-outcome.sh, run for real) once the child is dispatched.
+# unreviewed (review-outcome.sh, run for real) once the child is dispatched,
+# resolved at the head of the anchor's branch, whose failed read refuses before
+# anything is filed. A git stub answers that read.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -164,6 +166,26 @@ case "${1:-}" in
 esac
 STUB
 chmod +x "$BIN/gc"
+# A git stub for the one remote read the run makes, the anchor branch's head:
+# ls-remote answers the sha1 of each refs/heads/<branch> it is asked for, unless
+# STUB_LS_REMOTE_MISS names that branch, and logs the call to STUB_GIT_LOG.
+# Every other call is the real git.
+REAL_GIT="$(command -v git)"
+{ printf '#!/usr/bin/env bash\nREAL_GIT=%q\n' "$REAL_GIT"; cat; } > "$BIN/git" <<'GIT'
+case " $* " in
+  *" ls-remote "*)
+    printf '%s\n' "$*" >> "${STUB_GIT_LOG:?}"
+    for a in "$@"; do
+      case "$a" in refs/heads/*) ;; *) continue ;; esac
+      b="${a#refs/heads/}"
+      [ "${STUB_LS_REMOTE_MISS:-}" = "$b" ] && continue
+      printf '%s\t%s\n' "$(printf '%s' "$b" | sha1sum | cut -d' ' -f1)" "$a"
+    done
+    exit 0 ;;
+esac
+exec "$REAL_GIT" "$@"
+GIT
+chmod +x "$BIN/git"
 export PATH="$BIN:$PATH"
 export GC_RIG="gc-toolkit"
 
@@ -175,12 +197,13 @@ export STUB_DEPS="$TMP/deps"
 export STUB_GC_LOG="$TMP/gc.log"
 export STUB_SEQ="$TMP/seq"
 export STUB_CREATED="$TMP/created"
+export STUB_GIT_LOG="$TMP/git.log"
 
 # reset <anchor-json>: seed the store with one anchor and clear the logs.
 reset() {
   printf '%s\n' "$1" > "$STUB_STORE"
-  : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_CREATED"; printf '0' > "$STUB_SEQ"
-  unset STUB_SLING_NOPOUR STUB_UPD_FAIL STUB_CREATE_FAIL STUB_CREATE_NOID STUB_LIST_FAIL 2>/dev/null || true
+  : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_CREATED"; : > "$STUB_GIT_LOG"; printf '0' > "$STUB_SEQ"
+  unset STUB_SLING_NOPOUR STUB_UPD_FAIL STUB_CREATE_FAIL STUB_CREATE_NOID STUB_LIST_FAIL STUB_LS_REMOTE_MISS 2>/dev/null || true
 }
 meta()    { jq -r --arg id "$1" --arg k "$2" 'first(.[] | select(.id == $id) | .metadata[$k]) // ""' "$STUB_STORE"; }
 created() { wc -l < "$STUB_CREATED" | tr -d ' '; }
@@ -344,6 +367,24 @@ OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2
 eq "$RC" "0" "the re-run exits 0"
 has "$OUT" "0 standing review(s) superseded" "…with nothing left to supersede"
 eq "$(created)" "1" "…and no second child"
+
+echo "# --- the lanes are resolved at the head of the anchor's branch ---"
+reset "$WITH_LANES"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2>&1); RC=$?
+eq "$RC" "0" "exit 0"
+has "$(cat "$STUB_GIT_LOG")" "ls-remote origin refs/heads/polecat/anc-1" "the head of the anchor's branch is read from origin"
+eq "$(meta rv-c gc.outcome)" "superseded" "…and the supersede it names resolves the lanes"
+
+echo "# --- a head that does not read refuses with nothing written ---"
+reset "$WITH_LANES"
+export STUB_LS_REMOTE_MISS="polecat/anc-1"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2>&1); RC=$?
+unset STUB_LS_REMOTE_MISS
+eq "$RC" "2" "exit 2 when the branch's head does not read"
+has "$OUT" "did not read from origin" "…saying why"
+eq "$(created)" "0" "…no child filed"
+eq "$(meta rv-c gc.outcome)" "recorded" "…and the approves stand"
+eq "$(grep -c '^bd list' "$STUB_GC_LOG")" "0" "…before the writer's dedup read"
 
 echo "# --- a supersede that fails fails the run, and the re-run finishes it ---"
 reset "$(printf '%s' "$WITH_LANES" | jq -c '(.[] | select(.id == "anc-1") | .metadata) |= del(.check_set)')"

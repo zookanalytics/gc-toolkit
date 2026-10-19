@@ -39,6 +39,9 @@
 # stops seeing it and pours a fresh review at the live head next pass.
 # Both are refused on an already-closed review bead: signoff closes the bead
 # itself, last, so a closed one was recorded or retired before it was judged.
+# A correctness approve on a change that edits its own review guidance
+# (review-checks.toml, docs/review-*.md) is refused until --needs-you names the
+# edit for the person who approves the merge.
 # Callers: mol-review's verdict-and-drain step (the reviewing polecat).
 # Exit: 0 recorded, or refused-as-superseded with the review closed for a fresh
 #       dispatch · 1 refused, no verdict written · 2 a write did not read back
@@ -59,7 +62,7 @@ HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # still-unruled findings through it. Overridable so the hermetic test can stand
 # in for it without a live store.
 FINDING="${GC_FINDING_TOOL:-$HERE/finding.sh}"
-# The check-index parser (review-checks.sh) lives beside this script.
+# The check-index resolver (review-checks.sh) lives beside this script.
 SCRIPT_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
 # The one writer of a rework child. request-changes files its fix unit through it,
 # under this review's provenance, and the writer proves the pool route, the work
@@ -100,7 +103,10 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  it; absent, it says nothing needs them. A finding is not one,
                  because the city fixes it. Refused beside a ruling that lifts
                  the approval, on this call or recorded by this review's
-                 earlier attempt, whose round reason is the decision.
+                 earlier attempt, whose round reason is the decision. Required
+                 on a correctness approve whose change edits review-checks.toml
+                 or a docs/review-*.md, where it says what the edit changes
+                 about the review that ran under it.
   --findings-file
                  the structured finding set as a JSON array, one object per
                  blocking finding, each with a rebase-stable `locus` (a file and
@@ -118,8 +124,9 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  the commit this verdict judged.
   --add-gates    checks to union into the anchor's check_set (triage only, with
                  --verdict approve). A set union with read-back that can never
-                 remove a declared check, validated against the check index at
-                 the reviewed commit; each check added is recorded on the anchor
+                 remove a declared check, validated against the effective check
+                 index at the reviewed commit, the pack's checks with the rows
+                 that commit carries; each check added is recorded on the anchor
                  as a `triage-add:` note.
   --visual       the demo check's decision: none when the change needs no
                  visual, else the modality that conveys it (repo-artifact,
@@ -420,6 +427,13 @@ BRANCH=$(row_meta "$ANCHOR_ROW" branch)
 REVIEWED_OID="$OID_OVERRIDE"
 [ -n "$REVIEWED_OID" ] || REVIEWED_OID=$(row_meta "$REVIEW_ROW" reviewed_oid)
 
+# The head of the anchor's branch on origin. ls-remote matches its pattern
+# against a ref's tail, so only the line for the exact ref is taken.
+branch_head() {
+  git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null \
+    | awk -v r="refs/heads/$BRANCH" '$2 == r { print $1; exit }'
+}
+
 # The live head of the anchor's branch: the PR's own head post-open (what the
 # merge condition compares against), the remote ref pre-open. Empty is
 # "unanswerable", never "no head".
@@ -427,13 +441,13 @@ live_head() {
   if [ -n "$POST_OPEN" ]; then
     gh pr view "$PR_NUMBER" --repo "$PR_REPO_Q" --json headRefOid -q .headRefOid 2>/dev/null
   elif [ -n "$BRANCH" ]; then
-    git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null | awk 'NR == 1 {print $1}'
+    branch_head
   fi
 }
 
 if [ -z "$REVIEWED_OID" ]; then
   [ -n "$BRANCH" ] || { warn "anchor $ANCHOR names no branch and no --reviewed-oid was given; nothing names the commit this verdict read"; exit 1; }
-  REVIEWED_OID=$(git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null | awk 'NR == 1 {print $1}')
+  REVIEWED_OID=$(branch_head)
 fi
 # The artifact names the commit judged, and the pre-open record stamps it back
 # on the review bead, so a verdict still needs one. It is not held to a length:
@@ -525,7 +539,7 @@ fi
 # to the check it satisfied.
 BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff.XXXXXX") || { warn "mktemp failed"; exit 1; }
 TRAIL_FILE=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-trail.XXXXXX") || { rm -f "$BODY_FILE"; warn "mktemp failed"; exit 1; }
-trap 'rm -f "$BODY_FILE" "$TRAIL_FILE" "${INDEX_FILE:-}"' EXIT
+trap 'rm -f "$BODY_FILE" "$TRAIL_FILE"' EXIT
 if [ -n "$NOTES_FILE" ]; then
   cat "$NOTES_FILE" > "$TRAIL_FILE"
 else
@@ -856,28 +870,48 @@ if [ -n "$DISPOSED" ]; then
   exit 0
 fi
 
-# The check index at the reviewed commit — materialized once, removed on exit.
-# A branch is judged against the index it carries, never the working tree's.
-INDEX_FILE=""; INDEX_READ=""
-resolve_index() {
-  [ -z "$INDEX_READ" ] || return 0
-  INDEX_READ=1
-  [ -n "$REVIEWED_OID" ] || return 0
-  local root blob
-  blob=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-index.XXXXXX") || return 0
-  for root in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
-    [ -n "$root" ] || continue
-    if git -C "$root" show "$REVIEWED_OID:review-checks.toml" >"$blob" 2>/dev/null && [ -s "$blob" ]; then
-      INDEX_FILE="$blob"; return 0
-    fi
-  done
-  rm -f "$blob"
-}
-# rc: 0 declared · 1 index readable but check undeclared · 2 no index at the reviewed commit
+# Whether the effective check index at the reviewed commit declares <check>: the
+# pack's checks with the rows that commit carries laid over them, read through
+# the one resolver, never the working tree's. Non-zero for a check no layer
+# declares, one whose phase is outside the ordered set, and a commit the
+# resolver cannot read; INDEX_WHY then carries the resolver's reason.
+INDEX_WHY=""
 index_has_check() { # <check>
-  resolve_index
-  [ -n "$INDEX_FILE" ] && [ -x "$INDEX_PARSER" ] || return 2
-  "$INDEX_PARSER" --file "$INDEX_FILE" --check "$1" >/dev/null 2>&1
+  INDEX_WHY=""
+  [ -x "$INDEX_PARSER" ] || { INDEX_WHY="the check resolver is missing ($INDEX_PARSER)"; return 1; }
+  INDEX_WHY=$("$INDEX_PARSER" --check "$1" --at "$REVIEWED_OID" 2>&1 >/dev/null) && return 0
+  INDEX_WHY=$(printf '%s' "$INDEX_WHY" | tr '\n' ' ' | sed 's/^review-checks: //; s/ *$//')
+  return 1
+}
+
+# The review guidance a change edits, as the one resolver lists it:
+# review-checks.toml and the docs/review-*.md files among the paths it touches
+# from where its branch left its base to the reviewed commit. The resolver finds
+# the commit as it finds any commit it reads, fetching it by id when no
+# repository here holds it yet. Every reader takes that guidance at the commit
+# it judges, so a branch's edit to it governed the branch's own review. Sets
+# GUIDANCE_EDITS, space-separated, and returns 0 once the paths are listed;
+# non-zero, with GUIDANCE_WHY, when they cannot be: no base names where the
+# branch left, or the resolver could not list them and says why.
+GUIDANCE_EDITS=""; GUIDANCE_WHY=""
+guidance_edits() {
+  local base err out rc
+  base=$(row_meta "$REVIEW_ROW" review_base)
+  [ -n "$base" ] || base=$(row_meta "$ANCHOR_ROW" merged_target)
+  [ -n "$base" ] || base=$(row_meta "$ANCHOR_ROW" target)
+  [ -n "$base" ] || { GUIDANCE_WHY="neither the review nor its anchor names the base the branch left"; return 1; }
+  [ -x "$INDEX_PARSER" ] || { GUIDANCE_WHY="the check resolver is missing ($INDEX_PARSER)"; return 1; }
+  err=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-edits.XXXXXX") || { GUIDANCE_WHY="no scratch file for the resolver's reason"; return 1; }
+  out=$("$INDEX_PARSER" --edits --base "$base" --at "$REVIEWED_OID" 2>"$err"); rc=$?
+  if [ "$rc" -eq 0 ]; then
+    rm -f "$err"
+    GUIDANCE_EDITS=$(printf '%s\n' "$out" | sed '/^$/d' | paste -sd' ' -)
+    return 0
+  fi
+  GUIDANCE_WHY=$(tr '\n' ' ' < "$err" | sed 's/review-checks: //g; s/ *$//')
+  rm -f "$err"
+  [ -n "$GUIDANCE_WHY" ] || GUIDANCE_WHY="the check resolver exited $rc"
+  return 1
 }
 
 # Triage's classification: union the added checks into check_set and record one
@@ -888,7 +922,7 @@ index_has_check() { # <check>
 WIDEN_SUMMARY=""
 apply_triage_decision() {
   [ -n "$ADD_GATES" ] || return 0
-  local fresh cur canon union tok rc added newset got missing lines first
+  local fresh cur canon union tok added newset got missing lines first
   fresh=$(bd_json show "$ANCHOR")
   is_rows "$fresh" || { warn "anchor $ANCHOR did not resolve for the widening read; nothing written"; exit 2; }
   cur=$(row_meta "$fresh" check_set)
@@ -900,17 +934,8 @@ apply_triage_decision() {
   esac
   union=$(gate_tokens "$cur"); added=""; lines=""
   for tok in $(gate_tokens "$ADD_GATES"); do
-    index_has_check "$tok"; rc=$?
-    if [ "$rc" -eq 1 ]; then
-      warn "check '$tok' is not on the index at $REVIEWED_OID; the index is closed and triage classifies over it — nothing written"; exit 1
-    fi
-    if [ "$rc" -eq 2 ]; then
-      # No index at the reviewed commit: triage has no declared menu to classify
-      # over, so it widens nothing and the standing correctness review carries the
-      # change (the index gap is triage's finding). A check added here would name a
-      # method the repo does not declare, so skip it rather than accept it blind.
-      warn "no check index is readable at $REVIEWED_OID; triage widens nothing without an index — '$tok' not added, correctness carries the change"
-      continue
+    if ! index_has_check "$tok"; then
+      warn "check '$tok' is not on the effective index at $REVIEWED_OID (${INDEX_WHY:-the resolver gave no reason}); the index is closed and triage classifies over it — nothing written"; exit 1
     fi
     grep -qx -- "$tok" <<< "$union" && continue
     union="$union
@@ -967,6 +992,22 @@ apply_round_decision() {
   ROUND_ASK=$(tr '\000-\037' ' ' < "$round_ask" | sed 's/  */ /g; s/^ //; s/ $//')
   rm -f "$round_body" "$round_ask"
 }
+
+# A correctness approve on a change that edits its own review guidance names the
+# edit to the person who approves the merge, so it is refused, with nothing
+# written, until --needs-you says what the edit changes about the review. Paths
+# that cannot be listed leave the edit unchecked, which the opening line then
+# says, so the approver reads the diff for one instead.
+if [ "$CHECK" = correctness ] && [ "$VERDICT" = approve ] && [ -z "$NEEDS_YOU" ]; then
+  if guidance_edits; then
+    if [ -n "$GUIDANCE_EDITS" ]; then
+      warn "this change edits its own review guidance ($GUIDANCE_EDITS), and its review ran under that edit, since every reader takes the guidance at the commit it judges. A correctness approve names the edit to the person who approves the merge: re-run with --needs-you saying what the edit changes about the review. Nothing written"
+      exit 1
+    fi
+  else
+    NEEDS_YOU="signoff could not list the paths this change touches ($GUIDANCE_WHY), so whether it edits its own review guidance (review-checks.toml, docs/review-*.md) is unchecked; read its diff for such an edit before you approve the merge."
+  fi
+fi
 
 if [ "$VERDICT" = "approve" ]; then
   apply_triage_decision

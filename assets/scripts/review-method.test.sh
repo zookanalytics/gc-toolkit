@@ -83,8 +83,10 @@ dump "$QUORUM" "$TMP/quorum"
 [ -s "$TMP/quorum.review-lane-one.txt" ] && ok "(QUORUM) the quorum's lane text is read" || bad "(QUORUM) the quorum's lane text is empty"
 
 echo "# the correctness method is its own file, beside the other checks' methods"
-METHOD_REL=$("$CHECKS" --file "$INDEX" --check correctness | cut -f2)
-eq "$METHOD_REL" "skills/review-correctness/SKILL.md" "(METHOD) the correctness row points at its own method file"
+"$CHECKS" --file "$INDEX" --check correctness >/dev/null 2>&1 && ok "(METHOD) the index declares correctness" \
+  || bad "(METHOD) the index does not declare correctness"
+# A check's method is the skill named from the check.
+METHOD_REL="skills/review-correctness/SKILL.md"
 METHOD="$ROOT/$METHOD_REL"
 [ -r "$METHOD" ] && ok "(METHOD) the correctness method ships" || bad "(METHOD) $METHOD_REL is missing"
 eq "$(sed -n 's/^name: //p' "$METHOD" | head -1)" "review-correctness" "(METHOD) its skill name matches its directory"
@@ -136,14 +138,13 @@ grep -oE '^    --[a-z][a-z-]*\)' "$ROOT/assets/scripts/signoff.sh" | tr -d ' )' 
 grep -F '/signoff.sh" --review-bead' "$LIFE" | grep -oE -- '--[a-z][a-z-]*' | sort -u > "$TMP/call-flags"
 : > "$TMP/method-text"
 : > "$TMP/method-skills"
-"$CHECKS" --file "$INDEX" | while IFS="$(printf '\t')" read -r name method _; do
+# A check's method is the skill named from the check, skills/review-<check>.
+"$CHECKS" --file "$INDEX" | while IFS="$(printf '\t')" read -r name _; do
   bash "$BODY" --check-name "$name" >> "$TMP/method-text"
-  printf '%s\n' "$method" | awk '{n = split($0, m, / [+] /); for (i = 1; i <= n; i++) print m[i]}' \
-    | while IFS= read -r f; do
-        cat "$ROOT/$f" >> "$TMP/method-text"
-        # The skill a reviewer loads from its catalog: the method file's directory.
-        basename "$(dirname "$f")" >> "$TMP/method-skills"
-      done
+  f="skills/review-$name/SKILL.md"
+  cat "$ROOT/$f" >> "$TMP/method-text"
+  # The skill a reviewer loads from its catalog: the method file's directory.
+  basename "$(dirname "$f")" >> "$TMP/method-skills"
 done
 [ -s "$TMP/method-skills" ] && ok "(NEUTRAL) each declared check's method skill is read from the index" \
   || bad "(NEUTRAL) no method skill read from the index"
@@ -204,10 +205,10 @@ notF "$TMP/workspace-add.sh" 'CLAIMED_STEP_BEAD_ID' "(QUORUM) …and reads no cl
 
 echo "# no other check is asked for test results"
 : > "$TMP/specialists"
-"$CHECKS" --file "$INDEX" | while IFS="$(printf '\t')" read -r name method _; do
+"$CHECKS" --file "$INDEX" | while IFS="$(printf '\t')" read -r name _; do
   [ "$name" = correctness ] && continue
   printf '%s\n' "$name" >> "$TMP/specialists"
-  printf '%s\n' "$method" | awk '{n = split($0, m, / [+] /); for (i = 1; i <= n; i++) print m[i]}'
+  printf 'skills/review-%s/SKILL.md\n' "$name"
 done | sort -u > "$TMP/specialist-methods"
 [ -s "$TMP/specialist-methods" ] && ok "(SPECIALIST) the index declares other checks" || bad "(SPECIALIST) no other check is declared"
 # A specialist's method may name tests as part of what a diff carries, so its
