@@ -159,7 +159,7 @@ closed state writes none.
 | claimed → handed_off | `mol-polecat-work` submit step (ONE atomic `gc bd update`) | push verified on the remote |
 | handed_off → pre_open_gate | `mol-refinery-patrol` merge-push, via `lifecycle.sh` | checks armed, branch accepted |
 | handed_off → pull_request | `mol-refinery-patrol` merge-push (post-open path), via `lifecycle.sh` | a usable PR already exists |
-| handed_off → merged | `mol-refinery-patrol` merge-push (direct strategy), via `lifecycle.sh` | FF merge pushed and verified on the target; record + close in one call |
+| handed_off → merged | `mol-refinery-patrol` merge-push (direct strategy), via `lifecycle.sh` | FF merge pushed and verified on the target, or found there by a later patrol through the bead's `direct_landing_sha` stamp; record + close in one call |
 | pre_open_gate → pull_request | `pr-open.sh` (cadence arm 3) | every `pre-open` check in `check_set` derives `green`; the PR opens as a draft when `check_set` names an `open-as-draft` check, else ready |
 | pull_request draft → ready | `pr-open.sh` (cadence arm 3, draft-to-ready) | every `pre-open` and `open-as-draft` check derives `green`; `gh pr ready` surfaces it. GitHub `isDraft` flips; `merge_result` stays `pull_request` |
 | pull_request → merged | `merge.sh` (cadence arm 2) | full authorization set validated (incl. the universal approval rule; a draft PR is skipped); close + record in one call |
@@ -168,7 +168,7 @@ closed state writes none.
 | pull_request → closed (disposed) | `pr-facts.sh` → `bead-rehome.sh` | PR closed unmerged carrying a pre-recorded disposition (`pr-dispose.sh`); auto-disposed through the sanctioned terminal close, no visit |
 | pull_request → retargeted | `pr-facts.sh` | PR base moved externally; files a visit |
 | handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable |
-| handed_off → refused_false_completion | `mol-refinery-patrol` | no commits on the handed-off branch |
+| handed_off → refused_false_completion | `mol-refinery-patrol` | no commits on the handed-off branch, and no `direct_landing_sha` stamp the target carries |
 | handed_off / pull_request → poured | `mol-refinery-patrol` (rejection), through `assets/scripts/rejection-repool.sh` | `rejection_reason` written and the assignee and `gc.routed_to` cleared, then a fresh `mol-polecat-work` pour dispatches the rebuild and stamps `gc.execution_routed_to` |
 | poured → handed_off | the pour's `mol-polecat-work` submit step | push verified on the remote |
 | unanchored → held | `assets/scripts/converse-hold.sh`, a converse sitting's hold, via `lifecycle.sh` | a sitting is waiting on an operator decision; state + route in one write |
@@ -290,9 +290,9 @@ post is feedback, whoever wrote it. The city's own post is one that
 `assets/scripts/pr-post.sh` marked, which is every post the pack makes —
 `signoff.sh`'s verdicts, `pr-open.sh`'s verdict replay, the write-back's
 replies and its ruled-finding comments, the visit reminder, a demo delivery,
-`pr-dispose.sh`'s closing comment. A model review the operator runs under the
-city's GitHub account is unmarked, so it is feedback like a person's. Rework
-hand-backs post nothing.
+`pr-dispose.sh`'s closing comment. An unmarked post under the city's login
+after its PR's provenance cutover, described next, is feedback like a person's,
+whoever posted it. Rework hand-backs post nothing.
 
 A PR's posts from before the city marked anything carry no mark. Each anchor
 records the instant `pr-facts.sh` first read its open PR
@@ -315,8 +315,8 @@ verdicts as COMMENT reviews, and `pr-post.sh` has no change-request verb. A
 codex veto is therefore a marked COMMENT review, the city's own, and raises no
 batch; `signoff.sh`'s rework loop answers it. A `CHANGES_REQUESTED` under the
 city's login from before the cutover is the city's own the same way. Every
-other `CHANGES_REQUESTED` is feedback, including a model review run under the
-city's account after the cutover, and it routes on the same terms as any other
+other `CHANGES_REQUESTED` is feedback, including an unmarked one under the
+city's login after the cutover, and it routes on the same terms as any other
 feedback, to a rework child or a visit, and opens a validation pass. GitHub
 refuses a change request from a PR's author, so on a PR the city opened only
 another login can leave one.

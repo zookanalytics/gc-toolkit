@@ -55,8 +55,8 @@ On a repository the session does own, a post is held to one more rule, below.
 
 ## Posts carry the city's mark
 
-The city posts under the same GitHub login an operator's review tools can use,
-so `assets/scripts/pr-facts.sh` tells the city's own posts from feedback by the
+The city posts under the bot account that backs every agent's `gh` token, so
+`assets/scripts/pr-facts.sh` tells the city's own posts from feedback by the
 mark `assets/scripts/pr-post.sh` appends, not by the author
 ([state-machine.md](state-machine.md#operator-feedback)). An unmarked post under
 the city's login reads back as feedback, and the reconcile routes it into a
