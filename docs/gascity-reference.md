@@ -27,20 +27,30 @@ material lives in the sibling briefs, not here.
 
 ## The bar
 
-A doc lives under `docs/gascity-*.md` only when **all four** hold:
+A doc lives under `docs/gascity-*.md` only when **all** of these hold:
 
-1. **It serves gc-toolkit's work.** Lean on upstream Gas City
-   documentation where it exists. Capture content here when we've
-   learned something not yet documented upstream, or when reframing
-   it for our own use is materially more effective. Pure duplication
-   of upstream content doesn't earn its place.
-2. **The learning is durable, not bead-tied.** One-incident gotchas
+1. **It states Gas City behavior and nothing else.** A `gascity-*` page
+   says what the platform does: the `gc` and `bd` binaries and the packs
+   Gas City bundles, such as `core`. gc-toolkit's own conventions — its
+   agents, formulas, scripts, orders and skills, and this city's
+   configuration — belong to the page that owns that subsystem, never to
+   a `gascity-*` page, not even as an example of the behavior. A
+   `gascity-*` page may link to a pack page, labeled as gc-toolkit's.
+2. **Upstream's docs do not already say it.** Lean on upstream Gas City
+   documentation where it exists. A fact upstream documents is a link
+   here, not a restatement of it.
+3. **Each section carries its evidence and its date.** It names the
+   upstream doc it supplements, and, where no doc says it, the source it
+   was read from as a symbol and file at a named commit rather than a
+   line number. It says when it was verified, and a fact verified only on
+   this city's gascity fork says so.
+4. **The learning is durable, not bead-tied.** One-incident gotchas
    live in `specs/<bead-id>/` or working memory.
-3. **Someone owns keeping it current** as upstream Gas City evolves.
-4. **It's non-obvious** — a competent new contributor wouldn't infer
+5. **Someone owns keeping it current** as upstream Gas City evolves.
+6. **It's non-obvious** — a competent new contributor wouldn't infer
    it from upstream docs plus the code.
 
-If any of the four fail, the content does not belong here.
+If any of these fails, the content does not belong here.
 
 ## Getting started
 

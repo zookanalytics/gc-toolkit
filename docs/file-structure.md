@@ -86,6 +86,13 @@ Default layout is flat at `docs/<topic>.md`. Promote to
 - **Lineage is via git history.** `git blame` → commit → bead reference is the
   primary path; inline bead citation only where it helps the reader.
 
+A page's name says whose behavior it states. A page named
+`gascity-<topic>.md` states Gas City platform behavior only, under the bar in
+[gascity-reference.md](gascity-reference.md#the-bar). Every other page in
+`docs/` states gc-toolkit's own conventions. Where one of them relies on
+platform behavior, it links the `gascity-*` page or the upstream doc that
+states that behavior.
+
 ## Inside `specs/`
 
 ### Default: bead-keyed directories
