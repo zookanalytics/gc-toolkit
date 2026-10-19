@@ -2655,6 +2655,7 @@ eq "$(meta PRF1 pr_head_oid)" "sha-712" "the pass records the draft's head"
 eq "$(meta_pinned PRF1 pr_posture)" "approved@sha-710" "…and leaves its posture unread"
 for b in PRW PRV PCV PRT PST PVP PV4; do eq "$(bprio "$b")" "1" "…and settles $b at P1"; done
 eq "$(meta PRF1 pr_finishing_settled)" "unapproved" "…recording the unapproved rank"
+has "$out" "at the unapproved rank (posture approved at a head other than the PR's)" "…and the pass says why an approved posture ranks nothing at P0"
 
 echo "# …and on a draft PR still at the head its approval was read at, all of that work at P0"
 returned_on_draft sha-710

@@ -988,6 +988,11 @@ settle_finishing() { # <anchor> <state> <posture> <pr-head> <settled-rank> — f
     *) echo "$PROG: WARN $a — the rank its PR-finishing work follows could not be read ($basis), so none of that work was re-ranked (retry next pass)" >&2
        return 1 ;;
   esac
+  # An approval read at a head other than the PR's ranks nothing at P0, so the
+  # basis names that rather than the posture word alone.
+  if [ "$state" = pull_request ] && [ "${posture%%@*}" = approved ] && [ "$want" = unapproved ]; then
+    basis="posture approved at a head other than the PR's"
+  fi
   [ "$rec" != "$want" ] || return 0
   if [ -n "$rec" ] && [ "$rec" != unsettled ] && ! "$LIFECYCLE" transition "$a" "${onto[@]}" \
        --set pr_finishing_settled=unsettled >/dev/null; then
