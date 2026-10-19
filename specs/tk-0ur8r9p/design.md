@@ -9,10 +9,10 @@ description: The design for tk-0ur8r9p, the design child of convoy tk-iirrmiw un
 
 Today a question the city needs you to answer is a visit, a task bead of the
 pack's own. Some questions are filed first as native human gates, a sweep files
-a visit for each of them, and the rest of the pack reads the visit. After this
-change the gate is the question. Nothing converts it, and the board reads it
-directly. Your sitting with converse, the record it leaves, the board's ranking
-and the keys you press stay as they are.
+visits for them, and the rest of the pack reads the visits. After this change
+the gate is the question. Nothing converts it, and the board reads it directly.
+Your sitting with converse, the record it leaves, the board's ranking and the
+keys you press stay as they are.
 
 1. **A question is one native human gate on the bead it is about.** Its title is
    the question as the board shows it. Its description is the framing, its await
@@ -230,7 +230,7 @@ native field of the gate:
 | `gc.demand_for`, `gc.demand_topic`, `gc.gate_visit`, `gc.hold_demand` | the gate itself |
 | `gc.outcome`, `gc.outcome_reason`, `gc.ruling` | its close reason (section 7) |
 | `pr_number`, `pr_url` and `anchor_bead`, stamped on PR-comment visits so the merge held | its `blocks` edge on the anchor |
-| `visit.recheck` | its description |
+| `visit.recheck` | a command in its description, or in the notes a migrated visit left (section 11) |
 | `gc.pr_visit_summary`, `gc.pr_visit_actions` | arguments to the sign-off (section 7) |
 
 Molecule steps stamp `gc.continuation_group` for Gas City's own preassignment
@@ -774,7 +774,7 @@ record discipline. Only text that depends on the visit bead changes.
 | File | What changes |
 |---|---|
 | `skills/converse-recheck-premise` | The premise is read from the gate's title and framing. A moot or benign verdict is `gc bd gate resolve` with that headword, in place of converse-close-out.sh. |
-| `skills/converse-prep` | It reads the gate with its notes, and the subject's notes. A recheck command named in the framing is run, in place of the `visit.recheck` hook. |
+| `skills/converse-prep` | It reads the gate with its notes, and the subject's notes. A recheck command named in the framing, or in the notes a migrated visit left (section 11), is run, in place of the `visit.recheck` hook. |
 | `skills/converse-hold` | The hold of section 7, in place of converse-hold.sh, the visit demand and `--hold-merge`. The dismiss line at the foot of every framing stays. |
 | `skills/converse-settle` | converse-signoff.sh's new shape. The resolve replaces visit-close.sh and the guarded stamps, and the reminder update passes its text directly. A cross-store follow-up waits through escalate.sh. |
 | `skills/converse-continue` | It re-runs `gc hook --claim` and adopts any new question on its subject. |
@@ -817,8 +817,8 @@ main's visit machinery was added to it:
 
 **The keys.** A key goes only when its last reader moves. Each retired key joins
 `RETIRED_KEYS` in `doctor/check-state-space/run.sh`. The migration script reads
-some of these keys on the beads it converts: `escalation_key`,
-`gc.demand_for`, `gc.demand_topic`, `gc.ruling`, `gc.folded_into`,
+some of these keys on the beads it converts: `escalation_key`, `gc.demand_for`,
+`gc.demand_topic`, `gc.ruling`, `gc.folded_into`, `visit.recheck`,
 `finding.visit` and `finding.ruling_visit` (section 11). It removes
 `gc.gate_visit` with a gate's other pack keys and reads nothing from it. It is
 the last script to use them, so they stay registered until the follow-up that
@@ -831,7 +831,7 @@ deletes the script retires them (section 12).
 | `gc.ruling` | Goes. The migration reads it once, on closed visits, to carry a ruling given before the cutover onto its finding (section 11). | finding.sh close-answered, which reads the close reason or `finding.ruling_bead` |
 | `gc.folded_into` | Goes. The migration's walk reads it once, on closed visits (section 11). | finding.sh, visit-close.sh |
 | `gc.pr_visit_summary`, `gc.pr_visit_actions` | Go. | pr-visit-comment.sh |
-| `visit.recheck` | Goes. | converse-recheck-hook.sh. Its writer, liveness-sweep.sh, puts the command in the message. |
+| `visit.recheck` | Goes. The migration reads it once, on open visits, to carry the re-check onto the gate (section 11). | converse-recheck-hook.sh. Its writer, liveness-sweep.sh, puts the command in the message. |
 | `escalation_key` | Goes. The key in the await id carries it. | await-ruling.sh, branch-supersession.sh, pr-facts.sh, finding.sh, finalize-gate.sh `--except-key`, mol-witness-patrol's check-refinery, converse-hold.sh, converse-signoff.sh, converse-fold.sh, the formula copies |
 | `escalation_raised_by` | Goes. | None. It is never read. |
 | `escalation.recurrences`, `escalation.recurrence_last` | Go. | escalate.sh's tally |
@@ -925,10 +925,14 @@ stops part way leaves the visit open for the rerun to finish:
    here. Its subject is the visit's subject, and its await id is
    `<subject>:<topic>` from its own topic. Its title becomes its takeaway,
    through `bd update --title`. The await id is written last, after the title
-   and any edge move below, through `bd update --await-id`, so a gate whose
-   await id names a bead it blocks has its shape. Its pack keys stay until its
-   visit has closed, so a rerun takes the same demands from the same keys and
-   writes the same title and await id. The pass after the visits removes them.
+   and any edge move below, through `bd update --await-id`, because it is what
+   marks a gate as shaped. A gate is shaped when the part of its await id before
+   the first colon is a bead it blocks. A demand's own await id,
+   `gc-demand:<gated>[:<topic>]` (gc-helm.sh 1442), also names the bead it
+   blocks, but its first part is `gc-demand`, so it is not shaped until the
+   script rewrites it. Its pack keys stay until its visit has closed, so a rerun
+   takes the same demands from the same keys and writes the same title and await
+   id. The pass after the visits removes them.
 
    converse-hold's demands take the visit's `escalation_key` as their topic
    (converse-hold.sh 187-189), so a held visit and its demands ask one
@@ -966,6 +970,16 @@ stops part way leaves the visit open for the rerun to finish:
    gc-helm.sh 1491). A gate step 4's dedup returned has the framing of the
    visit it was filed for. Without the carry, the visit's question and
    evidence would leave with its close.
+
+   A visit that carries a `visit.recheck` stamp needs one thing more. The
+   stamp's one writer is liveness-sweep.sh. It stamps an absolute path to
+   liveness-recheck.sh, which takes the visit's id, and the framing it writes
+   tells the sitting to run that stamp (liveness-sweep.sh 467-471, 530 and 565).
+   A gate carries no stamp, so step 6 also appends the command
+   `liveness-recheck.sh <visit-id>` under the visit's line, with the script
+   named rather than the stamp's path, whether or not the framing is left out.
+   The command reads the census the closed visit keeps (liveness-recheck.sh
+   95-105).
 7. **It closes the visit** with the reason `migrated: gate <id>`, unforced. A
    visit bd still refuses, because something other than the moved demand blocks
    it, stays open and is reported. Nothing is forced.
@@ -975,17 +989,16 @@ visit for a gate assigned to a person, a gate whose gated bead has closed, or a
 gate stamped `gc.gate_visit=skip` (gate-visit-sweep.sh 17-28). A demand whose
 question no open visit asks, such as a first reaction's beside a review
 question, is taken by no visit in step 3. After the visits, the script shapes
-each open human gate whose await id does not yet name a bead it blocks, as step
-3 does, with the await id written last. Its subject is its `gc.demand_for`,
-else the one bead it blocks, and its await id becomes `<subject>:<topic>`. A
-gate that blocks several beads and names none of them is reported and left for
-a person. Last, the pass removes the pack keys from every open human gate whose
-await id names a bead it blocks: `gc.demand_for`, `gc.demand_topic`,
-`gc.gate_visit`, and the route and takeaway keys a demand carries. The pass
-leaves alone every gate that step 3 takes for a visit still open, because the
-next run's step 3 finishes it from those keys. The removal is a gate's last
-write, so a rerun after it finds the gate's title and await id in place, and
-leaves them as they are.
+each open human gate that is not yet shaped (step 3), the way step 3 does, with
+the await id written last. Its subject is its `gc.demand_for`, else the one bead
+it blocks, and its await id becomes `<subject>:<topic>`. A gate that blocks
+several beads and names none of them is reported and left for a person. Last,
+the pass removes the pack keys from every open human gate that is shaped:
+`gc.demand_for`, `gc.demand_topic`, `gc.gate_visit`, and the route and takeaway
+keys a demand carries. The pass leaves alone every gate that step 3 takes for a
+visit still open, because the next run's step 3 finishes it from those keys. The
+removal is a gate's last write, so a rerun after it finds the gate's title and
+await id in place, and leaves them as they are.
 
 **Every live reference to a visit is re-pointed, after the visits.** The records
 in the table below name a visit and are read after the cutover. A finding can
@@ -1022,7 +1035,7 @@ waited on the visit waits on that gate. A visit joins a gate only when the two
 ask one question, so no answer to one question closes another. A rerun finds
 each gate again. escalate.sh's dedup finds a gate step 4 filed by its await id
 on the subject, and step 3 matches the same demands from the pack keys they keep
-until their visit has closed. The rerun adds only the edges, notes and
+until their visit has closed. The rerun adds only the edges, framing, notes and
 references still missing, removes a visit's edge onto a moved demand if it is
 still there, and closes only the visits left over. It reports, per store, the
 visits it migrated, the ones it merged into a gate already there, and any it
@@ -1050,6 +1063,9 @@ names:
 - **A held visit with a substantial description and no notes**, whose demand's
   description is empty. The gate the visit closes into carries that description
   in its notes.
+- **A liveness sweep's visit with its `visit.recheck` stamp and census.** The
+  gate it becomes carries `liveness-recheck.sh <visit-id>` in its notes, and
+  that command prints the census after the visit has closed.
 
 ## 12. Cutover and the build
 
