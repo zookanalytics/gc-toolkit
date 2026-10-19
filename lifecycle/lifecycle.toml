@@ -643,7 +643,7 @@ keys = [
   "check_set", "signoff_dismissed", "approval_dismissed",
   "signoff_verdict", "visual", "visual_fallback_from",
   "check_name", "anchor_bead", "review_branch", "review_base", "reviewed_oid",
-  "review_pr_url", "review_pr_number",
+  "review_pr_url", "review_pr_number", "review_context", "review_formula",
   "review_pool", "source_review_bead", "source_ruling_bead", "source_review", "task_kind",
   "fix_target_pool", "wedge_seen_root",
 ]
@@ -724,13 +724,24 @@ keys = [
 #   arm adopts one. On a review bead signoff.sh falls back to the up `blocks`
 #   edge and refuses the verdict if none resolves. Never cleared. A bead id.
 # review_branch / review_base — the branch under review and its base, stamped on
-#   the review child by gate-ensure.sh; read by signoff.sh as the fallback when
-#   the anchor names no branch or no landing target. Never cleared. Branch names.
+#   the review child by gate-ensure.sh, which passes both to the review
+#   formulas as vars; read by signoff.sh as the fallback when the anchor names
+#   no branch or no landing target. Never cleared. Branch names.
 # review_pr_url / review_pr_number — the anchor's open PR, stamped on the review
-#   child by gate-ensure.sh when the anchor is a pull_request, both or neither;
-#   mol-review pins its gh calls to them. They are not pr_url / pr_number, which
-#   gc-helm.sh resolves a PR number by, so a live review does not make its PR
-#   ambiguous. Never cleared. A PR URL and its number.
+#   child by gate-ensure.sh when the anchor is a pull_request, both or neither,
+#   and passed to the review formulas as vars, empty before a PR opens. They
+#   are not pr_url / pr_number, which gc-helm.sh resolves a PR number by, so a
+#   live review does not make its PR ambiguous. Never cleared. A PR URL and its
+#   number.
+# review_context — why gate-ensure.sh dispatched the review: the lane it found
+#   short of green, or the bring-current round a triage review rules on.
+#   Stamped on the review child and passed to the review formulas as a var,
+#   whose step text names it in prose. Rewritten when the stranded arm slings
+#   the review again. Free text.
+# review_formula — the formula gate-ensure.sh pours onto the review child,
+#   mol-review or the quorum. A review held with no poured workflow follows its
+#   steps, as the review's fixed description says. Never cleared. A formula
+#   name.
 # reviewed_oid — the head a review pinned, and the head a green backing vouches
 #   for. Written once on a review by the dispatch: gate-ensure.sh pours a
 #   review only once it has read the branch's head, and its stranded arm writes

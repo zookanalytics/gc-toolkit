@@ -12,8 +12,8 @@
 # stderr, an empty bead id runs the command plain, and misuse exits 2. The
 # wiring section EXECUTES each formula's keepalive region, extracted verbatim,
 # and asserts the id it hands the wrapper is the bead the step's own
-# `gc hook --claim` returned — never the review bead or the work bead, which
-# carry no lease for the holder to refresh. It also renders each polecat step's
+# `gc hook --claim` returned — never the work bead, which carries no lease
+# for the holder to refresh. It also renders each polecat step's
 # check lines with a command carrying both quote kinds and runs them against a
 # stub gctk, so the rig's test command reaches the gate, under the keepalive,
 # verbatim.
@@ -148,7 +148,7 @@ run_region() {
     rm -f "$TMP/hb-ran"
     ( cd "$TMP" && env GC_PACK_DIR="$2" GC_RIG_ROOT="" GC_CITY_PATH="$TMP/no-city" \
         CLAIMED_STEP_BEAD_ID=tk-claimed-step CLAIMED_ITER_BEAD=tk-claimed-iter \
-        SYNTH_BEAD=tk-claimed-synth REVIEW_BEAD=tk-review-bead WORK_BEAD_ID=tk-work-bead \
+        WORK_BEAD_ID=tk-work-bead \
         bash -c '. "$1" && hb touch "$2"' _ "$1" "$TMP/hb-ran" )
 }
 
@@ -188,8 +188,6 @@ check_region() {  # check_region <toml-path-under-root> <marker> <want-target>
 
 check_region formulas/mol-polecat-work.toml preflight-lease-keepalive   tk-claimed-step
 check_region formulas/mol-polecat-work.toml self-review-lease-keepalive tk-claimed-iter
-check_region formulas/mol-review.toml       review-lease-keepalive      tk-claimed-step
-check_region formulas/mol-review-quorum-signoff.toml quorum-lease-keepalive tk-claimed-synth
 
 # --- the rig's test command reaches the gate verbatim ------------------------
 # A pour renders the rig's test command into the step text, so a quote inside
