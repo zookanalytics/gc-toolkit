@@ -52,12 +52,13 @@
 # carrying the PR-finishing shift and no parent, and settled at its priority by
 # queue-priority.sh settle before its route, which is written with no priority
 # in it. An approved PR's finishing work runs at P0, and a PR is approved for
-# that rank only while its anchor rests in pull_request. So a posture recorded
-# into or out of approved re-ranks the anchor's open reviews, reworks and
-# validation passes in the pass that records it, and so does a move of the
-# anchor out of pull_request that this script writes. The anchor's
-# pr_finishing_settled records the rank that work was last settled at in full,
-# or unsettled while a re-rank is owed, and the work is settled again while the
+# that rank only while its anchor rests in pull_request under a posture read
+# approved at the PR head this script records beside it (pr_head_oid). So a
+# posture or a head recorded into or out of that approval re-ranks the anchor's
+# open reviews, reworks and validation passes in the pass that records it, and
+# so does a move of the anchor out of pull_request that this script writes. The
+# anchor's pr_finishing_settled records the rank that work was last settled at in
+# full, or unsettled while a re-rank is owed, and the work is settled again while the
 # record names anything but the rank it follows: by every pass for the anchors
 # it reads in pull_request, and by every full pass for the live anchors resting
 # elsewhere. So a re-rank a failed settle left short is finished on a later
@@ -940,22 +941,27 @@ mint_rework_verify() { # <bead> <anchor> <branch> <target> <reason> <mode> <pr-u
        and (($m.pr_number // "") | tostring) == $pn) | tostring' 2>/dev/null
 }
 
-finishing_rank() { # <merge_result> <pr_posture> — the rank an anchor's PR-finishing work follows
+finishing_rank() { # <merge_result> <pr_posture> <pr_head_oid> — the rank an anchor's PR-finishing work follows
   # approved or unapproved, as the priority function reads the approval
-  # (prio_pr_approved in priority-lib.sh) from the two fields it reads. Prints
+  # (prio_pr_approved in priority-lib.sh) from the three fields it reads. Prints
   # nothing when jq does not answer.
-  jq -nr --arg mr "$1" --arg p "$2" "$PRIORITY_JQ"'
-    {metadata: {merge_result: $mr, pr_posture: $p}}
+  jq -nr --arg mr "$1" --arg p "$2" --arg h "$3" "$PRIORITY_JQ"'
+    {metadata: {merge_result: $mr, pr_posture: $p, pr_head_oid: $h}}
     | if prio_pr_approved then "approved" else "unapproved" end' 2>/dev/null
 }
 
-settle_finishing() { # <anchor> <state> <posture> <settled-rank> — finish the re-rank of its PR-finishing work
+rank_moves() { # <posture> <pr-head> <posture'> <pr-head'> — 0 when a write taking an anchor in pull_request from the first pair to the second moves its PR-finishing rank
+  [ "$(finishing_rank pull_request "$1" "$2")" != "$(finishing_rank pull_request "$3" "$4")" ]
+}
+
+settle_finishing() { # <anchor> <state> <posture> <pr-head> <settled-rank> — finish the re-rank of its PR-finishing work
   # An approved PR's finishing work runs at P0 whatever its shift, and any other
   # PR's at its anchor's priority plus its shift (docs/steering.md). That work is
   # the anchor's open reviews, reworks and validation passes, the work a pool
   # claims, with their live workflows. The rank it follows is finishing_rank's,
-  # read from the state the anchor rests in and its recorded posture: approved
-  # only in pull_request under an approved posture. The anchor's
+  # read from the state the anchor rests in, its recorded posture and the PR
+  # head recorded beside it: approved only in pull_request under a posture read
+  # approved at that head. The anchor's
   # pr_finishing_settled names the rank all of that work was last settled at,
   # approved or unapproved, and reads unsettled while a re-rank is owed. When it
   # names anything but the rank the work follows, the work is settled, and that
@@ -970,13 +976,13 @@ settle_finishing() { # <anchor> <state> <posture> <settled-rank> — finish the 
   # included, rather than taking the park route, and a detached state's route is
   # left for the writes that route. Each settle waits for the store's priority
   # lock a short while only, since the merge arm waits on the posture pass.
-  local a="$1" state="$2" posture="$3" rec="$4" mr="$2" want basis kids k settled=0 left=""
+  local a="$1" state="$2" posture="$3" head="$4" rec="$5" mr="$2" want basis kids k settled=0 left=""
   local onto=(--to "$state" --expect "$state" --keep-route)
   [ "$state" != unanchored ] || mr=""
   basis="posture ${posture%%@*}"
   [ -n "${posture%%@*}" ] || basis="posture unrecorded"
   [ "$state" = pull_request ] || basis="resting in $state"
-  want=$(finishing_rank "$mr" "$posture")
+  want=$(finishing_rank "$mr" "$posture" "$head")
   case "$want" in
     approved|unapproved) ;;
     *) echo "$PROG: WARN $a — the rank its PR-finishing work follows could not be read ($basis), so none of that work was re-ranked (retry next pass)" >&2
@@ -1446,14 +1452,14 @@ fi
 # early-exit.
 if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
   if fs_rows=$(bd_list --status="$LIVE_STATUSES" --has-metadata-key=pr_finishing_settled); then
-    while IFS=$'\037' read -r fsid fsstate fsposture fsrec; do
+    while IFS=$'\037' read -r fsid fsstate fsposture fshead fsrec; do
       [ -n "${fsid:-}" ] || continue
-      settle_finishing "$fsid" "$fsstate" "$fsposture" "$fsrec" || true
+      settle_finishing "$fsid" "$fsstate" "$fsposture" "$fshead" "$fsrec" || true
     done <<FS_EOF
 $(printf '%s' "$fs_rows" | jq -r '.[]? | (.metadata // {}) as $m
     | ((($m.merge_result // "") | tostring) | if . == "" then "unanchored" else . end) as $s
     | select($s != "pull_request")
-    | [ (.id // ""), $s, ($m.pr_posture // ""), ($m.pr_finishing_settled // "") ]
+    | [ (.id // ""), $s, ($m.pr_posture // ""), ($m.pr_head_oid // ""), ($m.pr_finishing_settled // "") ]
     | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' 2>/dev/null)
 FS_EOF
   else
@@ -1945,7 +1951,7 @@ MP_EOF
       # work settled at unsettled (lifecycle.toml exit_sets). This pass settles
       # that work, and the full pass's sweep of anchors outside pull_request
       # retries a settle that does not finish.
-      settle_finishing "$id" abandoned "" unsettled || true
+      settle_finishing "$id" abandoned "" "" unsettled || true
     else
       echo "$PROG: $id abandoned transition failed; retry next pass" >&2
       skipped=$((skipped + 1))
@@ -2007,7 +2013,7 @@ MP_EOF
   # separator (never valid inside these values) and split on the same, so an
   # empty field keeps its slot instead of collapsing the way a tab or
   # default-IFS split would.
-  IFS=$'\037' read -r cwm rwm iwm have_c adisp obatch orbatch oibatch have_p have_m lifted have_fs < <(
+  IFS=$'\037' read -r cwm rwm iwm have_c adisp obatch orbatch oibatch have_p have_m lifted have_fs have_head < <(
     printf '%s' "$row" | jq -r '[
         (.metadata.pr_comment_watermark // ""),
         (.metadata.pr_review_watermark // ""),
@@ -2020,7 +2026,8 @@ MP_EOF
         (.metadata.pr_posture // ""),
         (.metadata.pr_merge_state // ""),
         (.metadata.bring_current_lifted_at // ""),
-        (.metadata.pr_finishing_settled // "")
+        (.metadata.pr_finishing_settled // ""),
+        (.metadata.pr_head_oid // "")
       ] | map(tostring) | join("\u001f")')
   # The recorded conversation parsed once: have_cvh is <value>@<head> (the dated
   # key minus its instant), have_cv just the value. The derivation reads the
@@ -2287,21 +2294,34 @@ MP_EOF
   if [ "$POSTURE_ONLY" != 1 ] && [ -n "$conv" ] && [ "$have_cvh" != "$conv@$head_oid" ]; then
     PC_SETS+=(--set-dated "pr.conversation=$conv@$head_oid"); wrote_c="$conv@$head_oid"
   fi
-  # A posture moving into or out of approved moves the rank of the anchor's
-  # PR-finishing work, so the same write turns a record of the rank that work
-  # settled at unsettled. No pass then reads the work as settled under a posture
-  # it was not settled under, whether or not the settle below finishes.
+  # The PR head this pass read rides the same write (pr_head_oid). The priority
+  # function counts an approved posture only at that head, so a posture read at
+  # an earlier head, which a pass that cannot derive one leaves standing, ranks
+  # nothing at P0.
+  wrote_h=""
+  if [ -n "$head_oid" ] && [ "$have_head" != "$head_oid" ]; then
+    PC_SETS+=(--set "pr_head_oid=$head_oid"); wrote_h="$head_oid"
+  fi
+  # A posture or a head moving the anchor into or out of the approved rank moves
+  # the rank of its PR-finishing work, so the same write turns a record of the
+  # rank that work settled at unsettled. No pass then reads the work as settled
+  # under a posture it was not settled under, whether or not the settle below
+  # finishes.
+  new_p="$have_p"; [ -z "$wrote_p" ] || new_p="$want_p"
+  new_h="$have_head"; [ -z "$wrote_h" ] || new_h="$wrote_h"
   fs_marked=""
-  if [ -n "$wrote_p" ] && [ -n "$have_fs" ] && [ "$have_fs" != unsettled ] \
-     && [ "$(finishing_rank pull_request "$have_p")" != "$(finishing_rank pull_request "$want_p")" ]; then
+  if { [ -n "$wrote_p" ] || [ -n "$wrote_h" ]; } && [ -n "$have_fs" ] && [ "$have_fs" != unsettled ] \
+     && rank_moves "$have_p" "$have_head" "$new_p" "$new_h"; then
     PC_SETS+=(--set pr_finishing_settled=unsettled); fs_marked=1
   fi
-  stored_p="${have_p%%@*}"
+  stored_p="$have_p"; stored_h="$have_head"
   if [ ${#PC_SETS[@]} -gt 0 ]; then
     if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request "${PC_SETS[@]}" >/dev/null; then
-      [ -n "$wrote_p" ] && { pinned=1; postured=$((postured + 1)); stored_p="$posture"; }
+      [ -n "$wrote_p" ] && { pinned=1; postured=$((postured + 1)); stored_p="$want_p"; }
+      stored_h="$new_h"
       [ -z "$fs_marked" ] || have_fs=unsettled
-      echo "$PROG: $id — PR#$num recorded${wrote_p:+ posture $wrote_p, merge state $want_m}${wrote_c:+ conversation $wrote_c}"
+      hnote=""; [ -n "$wrote_p" ] || hnote="${wrote_h:+ PR head $wrote_h}"
+      echo "$PROG: $id — PR#$num recorded${wrote_p:+ posture $wrote_p, merge state $want_m}${wrote_c:+ conversation $wrote_c}$hnote"
       # The posture value is where a review on the PR lands: an approval, a
       # comment, a change request, or a dismissal. A pass that changes it
       # re-derives the status: label now rather than leaving it for the full
@@ -2317,13 +2337,14 @@ MP_EOF
     fi
   fi
   # The priority function ranks the anchor's PR-finishing work from the state it
-  # rests in, pull_request here, and the posture the store holds: the one this
-  # pass recorded, or the one it found standing. settle_finishing brings that
-  # work to the rank the two give whenever the anchor's record says it is not
-  # there yet, so a posture moving into or out of approved re-ranks it in the
-  # pass that records it, and a re-rank that pass left short is finished by a
-  # later one, whether or not the posture moves again.
-  settle_finishing "$id" pull_request "$stored_p" "$have_fs" || true
+  # rests in, pull_request here, and the posture and PR head the store holds:
+  # the ones this pass recorded, or the ones it found standing.
+  # settle_finishing brings that work to the rank they give whenever the
+  # anchor's record says it is not there yet, so a posture or head moving into
+  # or out of approved re-ranks it in the pass that records it, and a re-rank
+  # that pass left short is finished by a later one, whether or not anything
+  # moves again.
+  settle_finishing "$id" pull_request "$stored_p" "$stored_h" "$have_fs" || true
   # merge.sh validates the posture recorded here and never asks GitHub, so an
   # anchor this pass could not make current is one it would clear against a
   # fact from an earlier tick. A standing `commented@` is already holding that
@@ -2389,7 +2410,7 @@ MP_EOF
       echo "$PROG: $id — PR#$num retargeted (base '$base' != '$rec_target'); routed to human, escalated"
       # Its PR-finishing work now follows the unapproved rank, as an abandoned
       # anchor's does, and this pass settles it the same way.
-      settle_finishing "$id" retargeted "" unsettled || true
+      settle_finishing "$id" retargeted "" "" unsettled || true
     else
       echo "$PROG: $id retargeted transition failed; retry next pass" >&2
       skipped=$((skipped + 1))

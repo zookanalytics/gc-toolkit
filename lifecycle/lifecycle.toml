@@ -62,8 +62,10 @@ closed_states = ["merged"]
 # The rank of an anchor's PR-finishing work is approved only while the anchor
 # rests in pull_request (assets/scripts/priority-lib.sh), so leaving it marks
 # pr_finishing_settled unsettled, and pr-facts.sh settles that work at the rank
-# it then follows ([metadata.pr_posture]).
-exit_sets = ["pull_request:pr_finishing_settled=unsettled"]
+# it then follows ([metadata.pr_posture]). Leaving it also clears pr_head_oid,
+# the PR head pr-facts.sh last read, so an anchor that returns counts no
+# approval until pr-facts.sh has read its PR again.
+exit_sets = ["pull_request:pr_finishing_settled=unsettled", "pull_request:pr_head_oid="]
 
 # Legal status x merge_result combinations.
 [states.unanchored]
@@ -1082,8 +1084,8 @@ keys = [
 [metadata.pr_posture]
 # pr_posture, pr_merge_state, the two watermarks and pr_comment_disposition
 # carry their mechanics in [posture] above (pr_posture is also a [dated_keys]
-# key). pr-facts.sh is the sole writer of this group, apart from the
-# pr_finishing_settled write [machine] exit_sets makes on leaving pull_request.
+# key). pr-facts.sh is the sole writer of this group, apart from the writes
+# [machine] exit_sets makes on leaving pull_request.
 keys = [
   "pr_posture", "pr_merge_state", "pr_comment_watermark",
   "pr_review_watermark", "pr_issue_comment_watermark", "pr_comment_disposition",
@@ -1133,6 +1135,15 @@ keys = [
   # recorded a rank, which a pass in pull_request settles and a full pass leaves
   # alone elsewhere. A present value is approved, unapproved or unsettled.
   "pr_finishing_settled",
+  # The head of the anchor's PR that pr-facts.sh last read, a commit oid. A pass
+  # writes it in the posture's write whenever it reads a head other than the one
+  # recorded. The priority function counts an approved posture only when the
+  # posture's oid is this head (prio_pr_approved in priority-lib.sh), so an
+  # approval read at an earlier head ranks no PR-finishing work at P0. Leaving
+  # pull_request clears it to empty ([machine] exit_sets), so an anchor that
+  # returns counts no approval until a pass has read its PR. Absent or empty
+  # means no pass has read the PR since the anchor entered pull_request.
+  "pr_head_oid",
 ]
 
 [metadata.pr_round_trip]

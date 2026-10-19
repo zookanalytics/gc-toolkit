@@ -168,12 +168,13 @@ eq "$(meta obj-2 blocked_reason)" "merge_hold: still blocked" "blocked_reason su
 # caller names no such key, so a writer that forgot it would still leave no
 # record a return to pull_request could read as settled.
 echo "# leaving pull_request marks the PR-finishing rank unsettled"
-store '[{"id":"ex-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved"}}]'
+store '[{"id":"ex-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved","pr_head_oid":"sha-7"}}]'
 : > "$STUB_GC_LOG"
 out="$("$SUT" transition ex-1 --to retargeted --expect pull_request --assignee "" \
   --set blocked_reason="PR#7 retargeted" --takeaway "PR#7 sits on another base" 2>&1)"; rc=$?
 eq "$rc" 0 "a retarget out of pull_request exits 0"
 eq "$(meta ex-1 pr_finishing_settled)" "unsettled" "…and an approved record reads unsettled"
+eq "$(meta ex-1 pr_head_oid)" "" "…and the PR head pr-facts.sh read is cleared, so a return counts no approval until it is read again"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "…written in the transition's one update"
 store '[{"id":"ex-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"unapproved"}},
         {"id":"ex-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
@@ -183,13 +184,13 @@ eq "$(meta ex-2 pr_finishing_settled)" "unsettled" "a repool out of pull_request
 "$SUT" transition ex-3 --to abandoned --set blocked_reason="PR#8 closed" --takeaway "PR#8 was closed without merging" >/dev/null 2>&1
 eq "$(meta ex-3 pr_finishing_settled)" "unsettled" "…and an anchor that carried no record leaves with one"
 store '[{"id":"ex-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved"}},
-        {"id":"ex-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved"}},
+        {"id":"ex-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved","pr_head_oid":"sha-5"}},
         {"id":"ex-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"retargeted","pr_finishing_settled":"unapproved","gc.routed_to":"human","gc.takeaway":"t"}},
         {"id":"ex-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate","pr_finishing_settled":"unapproved"}}]'
 "$SUT" transition ex-4 --to merged --expect pull_request --close --set merged_sha=abc123 >/dev/null 2>&1
 eq "$(meta ex-4 pr_finishing_settled)" "approved" "a landing into the closed merged state writes no exit set"
 "$SUT" transition ex-5 --to pull_request --expect pull_request --set pr_merge_state=CLEAN@sha >/dev/null 2>&1
-eq "$(meta ex-5 pr_finishing_settled)" "approved" "a self-edge on pull_request leaves nothing"
+eq "$(meta ex-5 pr_finishing_settled)|$(meta ex-5 pr_head_oid)" "approved|sha-5" "a self-edge on pull_request leaves nothing"
 "$SUT" transition ex-6 --to pull_request --expect retargeted >/dev/null 2>&1
 eq "$(meta ex-6 merge_result)|$(meta ex-6 pr_finishing_settled)" "pull_request|unapproved" "a return into pull_request writes none"
 "$SUT" transition ex-7 --to unanchored --route "" >/dev/null 2>&1

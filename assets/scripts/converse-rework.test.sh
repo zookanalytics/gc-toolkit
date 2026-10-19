@@ -250,9 +250,9 @@ echo "# --- PR-finishing work: the shift, no parent, and the priority it is slun
 # than its anchor, at P1, and of an approved PR at P0. A rank that compared the
 # whole stored posture with approved would sling the second at P1.
 OID=0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901
-under_epic() { # <posture>: ANCHOR_PR moved under a P2 epic, with that posture
+under_epic() { # <posture>: ANCHOR_PR moved under a P2 epic, with that posture read at the PR's head
   printf '%s' "$ANCHOR_PR" | jq -c --arg p "$1" '
-    (.[0] | .metadata.pr_posture = $p | .priority = 4
+    (.[0] | .metadata.pr_posture = $p | .metadata.pr_head_oid = ($p | split("@")[1]) | .priority = 4
        | .dependencies = [{issue_id: "anc-1", depends_on_id: "ep-2", type: "parent-child"}]) as $a
     | [$a, {id: "ep-2", status: "open", assignee: "", notes: "", issue_type: "epic", priority: 2, metadata: {}}]'
 }

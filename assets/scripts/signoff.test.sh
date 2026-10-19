@@ -858,8 +858,9 @@ echo "# a review rework is slung at its rank: P1 under a P2 epic, P0 once the PR
 # rank that compared the whole stored posture with approved would sling the
 # second at P1.
 EPIC2=',{"id":"ep-2","status":"open","assignee":"","issue_type":"epic","priority":2,"metadata":{},"notes":""}'
-anchor_under_epic() { # <posture>
+anchor_under_epic() { # <posture>, read at the PR's head
   printf '%s' "$ANCHOR_PR" | jq -c --arg p "$1" '.metadata.merge_result = "pull_request" | .metadata.pr_posture = $p
+    | .metadata.pr_head_oid = ($p | split("@")[1])
     | .priority = 0 | .dependencies = [{issue_id: "tk-anc", depends_on_id: "ep-2", type: "parent-child"}]'
 }
 reset "$(anchor_under_epic "commented@$OID_HEAD@2026-10-11T00:00:00Z")" "$EPIC2"

@@ -422,11 +422,15 @@ set.
 
 **Reading the approval.** For the rank, a PR is approved when its anchor rests
 in `pull_request` and the posture `pr-facts.sh` records there, `pr_posture`,
-reads `approved`. The posture is a dated key stored as
-`<posture>@<oid>@<since>` ([state-machine.md](state-machine.md#posture)), so the
-priority function reads the part before the first `@`. An anchor that rests
-anywhere else has no open PR to be approved, whatever posture an earlier PR left
-on it. The posture is not the approval rule `merge.sh` lands on
+reads `approved` at the PR head `pr-facts.sh` last read, `pr_head_oid`. The
+posture is a dated key stored as `<posture>@<oid>@<since>`
+([state-machine.md](state-machine.md#posture)), so the priority function reads
+the part before the first `@` and compares the `<oid>` after it with
+`pr_head_oid`. An approval recorded at any other head is for code the PR no
+longer carries, so it ranks nothing at P0. An anchor that rests anywhere else
+has no open PR to be approved, whatever posture an earlier PR left on it, and
+leaving `pull_request` clears `pr_head_oid`, so an anchor that returns counts no
+approval until `pr-facts.sh` has read its PR again. The posture is not the approval rule `merge.sh` lands on
 (`review-verdict.sh`): an unanswered review comment outranks an approval in the
 posture, and a PR whose base requires no approving review reports no review
 decision, so either ranks as not approved.
@@ -439,15 +443,16 @@ that carries no priority. A child whose priority does not settle is neither
 slung nor routed, and the creator's retry settles it: the next pass of the
 cadence arm, or the caller of `rework-child.sh` running it again.
 
-**Re-ranked when its rank moves.** The rank moves when the posture `pr-facts.sh`
-records moves into or out of `approved`, and when the anchor leaves
-`pull_request`. Either way the anchor's open reviews, reworks and validation
-passes are settled again, with their live workflows. The anchor's
+**Re-ranked when its rank moves.** The rank moves when the posture or the PR
+head `pr-facts.sh` records moves the anchor into or out of an approval at that
+head, and when the anchor leaves `pull_request`. Either way the anchor's open
+reviews, reworks and validation passes are settled again, with their live
+workflows. The anchor's
 `pr_finishing_settled` records the rank all of that work last settled at,
 `approved` or `unapproved`, and reads `unsettled` while a re-rank is owed. The
 write that moves the rank marks the record `unsettled` in the same update: the
-posture write in `pr-facts.sh`, and every transition out of `pull_request`,
-through the lifecycle writer's `exit_sets`
+posture and head write in `pr-facts.sh`, and every transition out of
+`pull_request`, through the lifecycle writer's `exit_sets`
 ([state-machine.md](state-machine.md#the-machine)). Every pass of `pr-facts.sh`
 compares the record of each anchor it reads in `pull_request` with the rank the
 priority function gives that anchor. Every full pass does the same for each live

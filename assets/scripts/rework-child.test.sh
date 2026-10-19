@@ -346,9 +346,9 @@ echo "# --- PR-finishing work: born with the shift, no parent, slung at its prio
 # anc-ap's rework at P1, and one that read no shift would sling anc-cm's at P2.
 EPIC='{"id":"ep-2","status":"open","assignee":"","notes":"","issue_type":"epic","priority":2,"metadata":{}}'
 OID=0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901
-anchor_under() { # <id> <posture>: a PR anchor under ep-2, its own stored priority stale
+anchor_under() { # <id> <posture>: a PR anchor under ep-2, its own stored priority stale, the posture read at the PR's head
   jq -nc --arg id "$1" --arg p "$2" '{id: $id, status: "open", assignee: "", notes: "", priority: 4,
-    metadata: {merge_result: "pull_request", branch: ("polecat/" + $id), target: "main", pr_posture: $p},
+    metadata: {merge_result: "pull_request", branch: ("polecat/" + $id), target: "main", pr_posture: $p, pr_head_oid: ($p | split("@")[1])},
     dependencies: [{issue_id: $id, depends_on_id: "ep-2", type: "parent-child"}]}'
 }
 reset "$EPIC" "$(anchor_under anc-ap "approved@$OID@2026-10-11T00:00:00Z")" "$(anchor_under anc-cm "commented@$OID@2026-10-11T00:00:00Z")"

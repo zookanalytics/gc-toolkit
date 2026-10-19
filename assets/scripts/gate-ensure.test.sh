@@ -244,8 +244,8 @@ echo "# a review and a validation pass are slung at their rank: P1 under a P2 ep
 # pass of an approved PR at P0. A rank that compared the whole stored posture
 # with approved would sling the approved PR's work at P1.
 EP2='{"id":"EP2","status":"open","assignee":"","notes":"","issue_type":"epic","priority":2,"metadata":{}}'
-under_ep2() { # <anchor-json> <posture>
-  printf '%s' "$1" | jq -c --arg p "$2" '.metadata.pr_posture = $p | .priority = 0
+under_ep2() { # <anchor-json> <posture>, read at the PR's head
+  printf '%s' "$1" | jq -c --arg p "$2" '.metadata.pr_posture = $p | .metadata.pr_head_oid = ($p | split("@")[1]) | .priority = 0
     | .dependencies = [{issue_id: .id, depends_on_id: "EP2", type: "parent-child"}]'
 }
 store "[$EP2, $(under_ep2 "$(anchor RK1 pull_request correctness "" polecat/rk1)" "commented@$(oid rk1)@2026-10-11T00:00:00Z"),

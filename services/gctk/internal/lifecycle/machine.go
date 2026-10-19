@@ -67,6 +67,10 @@ var (
 		// anchor rests in pull_request, so the record of the rank that work
 		// settled at goes unsettled when the anchor leaves it.
 		{State: "pull_request", Key: "pr_finishing_settled", Value: "unsettled"},
+		// The approval the rank reads counts only at the PR head pr-facts.sh
+		// last read, so that head is cleared when the anchor leaves, and an
+		// anchor that returns counts no approval until its PR is read again.
+		{State: "pull_request", Key: "pr_head_oid", Value: ""},
 	}
 
 	Transitions = []Edge{

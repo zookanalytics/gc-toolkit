@@ -13,9 +13,13 @@
 #     the anchor's PR is approved, it runs at P0 whatever its shift. A PR is
 #     approved when its anchor rests in pull_request (merge_result) and the
 #     posture pr-facts.sh records there (pr_posture, stored as
-#     <posture>@<oid>@<since>) reads approved before its first @. An anchor
-#     that rests anywhere else has no open PR to be approved, whatever posture
-#     an earlier PR left on it.
+#     <posture>@<oid>@<since>) reads approved before its first @, at the head
+#     pr-facts.sh last read for the PR (pr_head_oid, the posture's <oid>). An
+#     approval recorded at any other head is for code the PR no longer
+#     carries. An anchor that rests anywhere else has no open PR to be
+#     approved, whatever posture an earlier PR left on it, and leaving
+#     pull_request clears pr_head_oid (lifecycle.toml exit_sets), so an anchor
+#     that returns reads no approval until pr-facts.sh has read its PR again.
 #   * A member follows its parent, and the most urgent one, the lowest
 #     P-number, when it has several.
 #   * A bead that follows nothing has its priority set directly: its bd
@@ -96,10 +100,14 @@ PRIORITY_JQ='
           else {ok: false, raw: $s} end end;
   # Whether the PR of this anchor is approved, which ranks its PR-finishing work
   # at P0: it rests in pull_request, and the dated posture pr-facts.sh records
-  # on it reads approved before its first @.
+  # on it reads approved before its first @, at the oid after it, which is the
+  # head pr-facts.sh last read for the PR (pr_head_oid).
   def prio_pr_approved:
-    prio_str("merge_result") == "pull_request"
-    and ((prio_str("pr_posture") | split("@") | .[0]) // "") == "approved";
+    (prio_str("pr_posture") | split("@")) as $p
+    | prio_str("merge_result") == "pull_request"
+      and ($p[0] // "") == "approved"
+      and ($p[1] // "") != ""
+      and ($p[1] // "") == prio_str("pr_head_oid");
 
   # What this bead can follow: {kind, on}, where kind is workflow, anchor,
   # parent or none, and on lists the beads it could follow. priority_of

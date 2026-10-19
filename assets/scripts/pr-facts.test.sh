@@ -1940,6 +1940,7 @@ out=$(run)
 has "$out" "posture review_required@sha-50" "the pass names what it recorded"
 eq "$(meta_pinned S1 pr_posture)" "review_required@sha-50" "the anchor carries the posture, pinned to the head"
 eq "$(meta S1 pr_merge_state)" "BLOCKED@sha-50" "…and GitHub's mergeStateStatus verbatim beside it"
+eq "$(meta S1 pr_head_oid)" "sha-50" "…and the PR head it read, which an approval counts only at"
 eq "$(meta S1 merge_result)" "pull_request" "recording a posture is not a state change"
 
 echo "# …an unchanged posture is not re-written"
@@ -1954,6 +1955,7 @@ printf '%s' "$(prview 50 OPEN CLEAN MERGEABLE)" \
 out=$(run)
 eq "$(meta_pinned S1 pr_posture)" "approved@sha-NEW" "the posture follows the head it was read at"
 eq "$(meta S1 pr_merge_state)" "CLEAN@sha-NEW" "…so does the merge state"
+eq "$(meta S1 pr_head_oid)" "sha-NEW" "…and the PR head beside them"
 
 echo "# …an approval the anchor's lift line set aside is owed again, by the rule the merge lands on"
 # GitHub refused its dismissal, so the PR still reads APPROVED. The merge counts
@@ -2336,7 +2338,7 @@ eq "$(meta PRF1 pr_finishing_settled)" "unapproved" "…and the record stands"
 # The same PR-finishing work, rebuilt at <priority> with <posture> recorded on
 # PRF1 and, unless it is empty, <rank> as the rank that work was settled at.
 prf1() { # <posture> <rank> <priority>
-  local extra=",\"pr_posture\":\"$1@sha-710@2026-10-11T00:00:00Z\",\"pr_merge_state\":\"BLOCKED@sha-710\""
+  local extra=",\"pr_posture\":\"$1@sha-710@2026-10-11T00:00:00Z\",\"pr_merge_state\":\"BLOCKED@sha-710\",\"pr_head_oid\":\"sha-710\""
   [ -z "$2" ] || extra="$extra,\"pr_finishing_settled\":\"$2\""
   store "[$EP2, $(anchor PRF1 710 "$extra" | under_ep2),
           $(finishing PRW rework ',"gc.routed_to":"rig/gc-toolkit.polecat","branch":"polecat/x710"'),
@@ -2583,6 +2585,30 @@ abandoned_unrouted
 out=$(run)
 eq "$(meta PRF1 pr_finishing_settled)" "unapproved" "an abandoned anchor with a takeaway and no route records its rank"
 eq "$(meta PRF1 'gc.routed_to')" "" "…and its route stays empty rather than taking the park"
+
+echo "# an anchor back in pull_request counts no approval until its PR is read again, and then only at the PR's head"
+# PRF1 rests approved at sha-710 with its work at P0. A repool takes it out of
+# pull_request, and the rebuild brings it back on the same PR, its posture still
+# approved@sha-710. New work filed before any pass reads the PR, settled the way
+# each creator settles a child before it slings or routes it, ranks at P1: no
+# head is known for that approval to count at. The pass that reads the PR finds
+# a new head, sha-711, with GitHub asking for a review, and all of the work
+# stays at P1. Had the approval counted at any head, the new work would be at P0
+# under an unapproved PR.
+prf1 approved approved 0
+move_prf1 --to unanchored --assignee "" --route "" --unset gc.execution_routed_to --set rejection_reason="base moved; resume by merge"
+eq "$(meta PRF1 pr_head_oid)" "" "the repool clears the PR head pr-facts.sh read"
+out=$(run)
+move_prf1 --to pre_open_gate --expect unanchored
+move_prf1 --to pull_request --expect pre_open_gate
+store_add "$(finishing PV3 validation ',"check_name":"demo"' | jq -c '.priority = 2')"
+"$GC_QUEUE_PRIORITY_TOOL" settle PV3 >/dev/null 2>&1
+eq "$(bprio PV3)" "1" "work filed on the returned anchor settles at P1, not at P0 on the approval its posture still reads"
+printf '%s' "$(prview 710 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED" | .headRefOid = "sha-711"' > "$GH_DIR/pr_view_710.json"
+echo '[]' > "$GH_DIR/reviews_710.json"; echo '[]' > "$GH_DIR/comments_710.json"
+out=$(run_posture)
+eq "$(meta_pinned PRF1 pr_posture)|$(meta PRF1 pr_head_oid)" "review_required@sha-711|sha-711" "the next posture pass reads the PR at its new head"
+for b in PRW PRV PCV PRT PST PVP PV3; do eq "$(bprio "$b")" "1" "…and $b is at P1"; done
 
 fi # part posture
 

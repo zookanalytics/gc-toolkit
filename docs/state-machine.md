@@ -151,12 +151,14 @@ route, one carrying an assignee, and one that has left `status=open`.
 
 Leaving a state can owe a write of its own, declared in `exit_sets`. A
 transition out of `pull_request` into another open state sets
-`pr_finishing_settled` to `unsettled` in the same update, because the rank of an
-anchor's PR-finishing work is approved only while the anchor rests there
-([steering.md](steering.md#pr-finishing-work)). So whichever writer makes such a
-transition leaves a record that no return to `pull_request` reads as settled. A
-caller that writes the key itself keeps its own value, and a transition into a
-closed state writes none.
+`pr_finishing_settled` to `unsettled` and clears `pr_head_oid` in the same
+update, because the rank of an anchor's PR-finishing work is approved only while
+the anchor rests there, under a posture read at the PR head `pr-facts.sh` last
+recorded ([steering.md](steering.md#pr-finishing-work)). So whichever writer
+makes such a transition leaves a record that no return to `pull_request` reads
+as settled, and an approval that no return counts until `pr-facts.sh` has read
+the PR again. A caller that writes the key itself keeps its own value, and a
+transition into a closed state writes none.
 
 ## Transition table
 
@@ -430,6 +432,7 @@ non-draft anchor and read off the bead by everything downstream. Declared in
 | `pr_comment_disposition` | `rework:<id>` / `visit:<id>` | what the last outstanding batch was routed to |
 | `pr_provenance_since` | `<UTC instant>` | when `pr-facts.sh` first read the open PR; an unmarked post under the city's login from before it is the city's own |
 | `pr_finishing_settled` | `approved` / `unapproved` / `unsettled` | the rank all of the anchor's PR-finishing work was last settled at, or `unsettled` while a re-rank is owed; absent while no pass has recorded one |
+| `pr_head_oid` | `<oid>` | the PR head `pr-facts.sh` last read; empty once the anchor leaves `pull_request`, until a pass reads the PR again |
 
 The postures, in the precedence the derivation applies:
 
@@ -442,13 +445,14 @@ The postures, in the precedence the derivation applies:
 | `none` | no `reviewDecision` applies | none |
 
 The priority function reads the posture too. An `approved` posture on an anchor
-that rests in `pull_request` ranks the anchor's PR-finishing work at P0, so the
-pass of `pr-facts.sh` that records a posture moving into or out of `approved`
-re-ranks that work, and so does an anchor leaving `pull_request`.
-`pr_finishing_settled` records the rank all of it settled at, and the write that
-moves the rank marks it `unsettled`: the posture write, or the transition out of
-`pull_request` (`exit_sets`, above). The work is settled again while that record
-differs from the rank the anchor's state and posture give, by every pass for an
+that rests in `pull_request`, read at the head `pr_head_oid` records, ranks the
+anchor's PR-finishing work at P0, so the pass of `pr-facts.sh` that records a
+posture or a head moving into or out of that rank re-ranks that work, and so
+does an anchor leaving `pull_request`. `pr_finishing_settled` records the rank
+all of it settled at, and the write that moves the rank marks it `unsettled`:
+the posture write, or the transition out of `pull_request` (`exit_sets`, above).
+The work is settled again while that record differs from the rank the anchor's
+state, posture and head give, by every pass for an
 anchor in `pull_request` and by every full pass for one resting elsewhere, so a
 re-rank a failed settle left short is finished on a later pass
 ([steering.md](steering.md#pr-finishing-work)).
