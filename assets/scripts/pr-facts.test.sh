@@ -3182,6 +3182,20 @@ out=$(run)
 eq "$(meta vp-83 reviewed_oid)" "sha-OLD" "the in-flight pass keeps its head; the batch does not move the validator's pin"
 has "$(meta Vh pr_comment_disposition)" "rework:" "…and the batch still watermarks behind the open pass"
 
+echo "# a PR view that gives no head routes no batch, so no human-lane pass is opened unpinned"
+# The batch is read inside the posture derivation, which pins to a head or says
+# nothing. With no head nothing is routed: no pass opens that a ruling could not
+# resolve the anchor's lanes for, and the batch is not watermarked, so it
+# retries once a head reads.
+store "[$(anchor Vz 84)]"
+printf '%s' "$(prview 84 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED" | .headRefOid = ""' > "$GH_DIR/pr_view_84.json"
+echo '[]' > "$GH_DIR/reviews_84.json"
+printf '[{"id":8840,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_84.json"
+out=$(run)
+has "$out" "PR#84 live head unresolved; posture not recorded" "a PR view with no head records no posture"
+eq "$(jq '[.[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == "Vz")] | length' "$STUB_STORE")" "0" "…opens no validation pass"
+eq "$(meta Vz pr_comment_disposition)" "<absent>" "…and leaves the batch unwatermarked, so it retries"
+
 echo "# a pass whose task_kind write half-lands is invisible to the validator path, so the shape gate holds it"
 # task_kind=validation is the key gate-ensure's open_validation_pass selects a
 # pass by; a bead carrying anchor_bead and check_name but no task_kind still
