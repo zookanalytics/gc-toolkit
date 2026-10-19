@@ -17,5 +17,3 @@ nudge = ""
 idle_timeout = "0"
 min_active_sessions = 0
 max_active_sessions = 8
-max_session_age = "5h"
-max_session_age_jitter = "15m"

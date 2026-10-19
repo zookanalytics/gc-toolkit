@@ -70,8 +70,3 @@ idle_timeout = "0"
 # count, and the pool's scale-down drop paths skip a manual session.
 min_active_sessions = 0
 max_active_sessions = 8
-# A bounded lifetime refreshes the provider's cached credential before it can
-# wedge on token expiry; with wake_mode=resume that restart resumes the sitting
-# rather than losing its history.
-max_session_age = "5h"
-max_session_age_jitter = "15m"
