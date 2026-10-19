@@ -2535,6 +2535,23 @@ out=$(run_posture)
 for b in PRW PRV PCV PRT PST PVP PMI; do eq "$(bprio "$b")" "0" "…and once PRF1 rests in pull_request under the approved PR, $b reaches P0"; done
 eq "$(meta PRF1 pr_finishing_settled)" "approved" "…and PRF1 records the approved rank"
 
+echo "# an approved record outside pull_request that no exit marked turns unsettled before the first settle"
+# A caller that writes the key itself keeps its own value on the way out, and a
+# lifecycle writer from before exit_sets marks nothing, so PRF1 can rest outside
+# pull_request still recording the approved rank. The full pass settles its work
+# all the same. When the settle stops partway, PRW and PVP at P1 and PRV still at
+# P0, the record reads unsettled rather than absent, so the next full pass finds
+# PRF1 again and finishes the re-rank.
+prf1 approved approved 0
+move_prf1 --to unanchored --route "" --set pr_finishing_settled=approved
+eq "$(meta PRF1 pr_finishing_settled)" "approved" "PRF1 rests outside pull_request recording the approved rank"
+out=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-prv-down" run)
+eq "$(bprio PRW)|$(bprio PVP)|$(bprio PRV)" "1|1|0" "the full pass settles PRW and PVP at P1, and not PRV"
+eq "$(meta PRF1 pr_finishing_settled)" "unsettled" "…and leaves the record unsettled, not absent"
+out=$(run)
+for b in PRW PRV PCV PRT PST PVP; do eq "$(bprio "$b")" "1" "…so the next full pass finds PRF1 and $b is at P1"; done
+eq "$(meta PRF1 pr_finishing_settled)" "unapproved" "…and PRF1 records the unapproved rank"
+
 fi # part posture
 
 # ==== part routing: a feedback batch's size, range and ledgers, the
