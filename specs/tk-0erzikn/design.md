@@ -14,15 +14,18 @@ approval. Under this design the convoy's PR is the only one. Each member lands
 on the convoy's branch once its own molecule has reviewed it, and the operator
 reviews the whole body of work once.
 
-1. **The convoy decides how its members land.** A member with no landing mode of
-   its own lands the way its convoy says, in Gas City's own convoy field. A
-   convoy that says nothing lands its members on its integration branch with no
-   PR. A member that is a stage the operator should review on its own is slung
-   with `--merge mr`. The refinery reads this where it already decides how a
-   bead lands, and a member whose gate fails there keeps its branch for the
-   rework. Cost: six convoys open today, two in gc-toolkit and four in
-   signal-loom, have ten members not yet landed, and those land with no PR
-   instead of opening one each.
+1. **An owned convoy decides how its members land.** A member with no landing
+   mode of its own lands the way its convoy says, in Gas City's own convoy
+   field. An owned convoy that says nothing lands its members on its
+   integration branch with no PR. Only an owned convoy graduates into a PR, so
+   the refinery does not read a convoy without the `owned` label, and a bead
+   linked to such a convoy lands as it does today. A member that is a stage
+   the operator should review on its own is slung with `--merge mr`. The
+   refinery reads this where it already decides how a bead lands, and a member
+   whose gate fails there keeps its branch for the rework. Cost: six convoys
+   open today, two in gc-toolkit and four in signal-loom, have ten members not
+   yet landed, and those land with no PR instead of opening one each. All six
+   are owned.
 2. **A member takes its convoy's branch with no stamp of its own.** Gas City
    finds a member's branch through the one parent bd reports, so a member that
    also sits under an epic can be poured from main. The check at the start of
@@ -164,6 +167,13 @@ These were read at gc-toolkit `35cf7c70f` and gascity `2e9a6f0a6`. The installed
   its `pr_summary` from the landed members' summaries. `pr-stack.sh` lists
   those members in the PR body, because it reads every bead whose
   `merged_target` is the PR's branch.
+- **A convoy without the `owned` label never graduates.** `convoy-graduate.sh`
+  lists only the rig's open convoys labelled `owned`. Gas City closes any other
+  convoy once all of its children are closed (`closeCompletedConvoy`,
+  `cmd/gc/cmd_convoy.go`). The last child's close fires that autoclose, and
+  `orders/convoy-check.toml` runs `gc convoy check` hourly for a convoy the
+  event missed. Neither closes a convoy labelled `owned`, so an owned convoy is
+  still open when its last member closes, and graduation can take it.
 - **Rework already returns to the PR bead.** `rework-child.sh` files a child
   that resumes the anchor's own branch. The refinery's one-anchor-per-PR arm
   closes that child landed-on-branch rather than letting it open a second PR.
@@ -202,11 +212,15 @@ A bead's landing mode resolves in this order:
 1. The bead's own `merge_strategy`, which a sling's `--merge` or a writer's
    stamp sets.
 2. Otherwise, the mode of the convoy it lands through. That applies when the
-   bead is a member of an open convoy whose `target` is an `integration/`
-   branch, its own `target` is that same branch, and it records no PR of its
-   own. The mode is the convoy's `convoy.merge`, and a convoy that names none
-   lands its members `direct`.
+   bead is a member of an open convoy that carries the `owned` label and whose
+   `target` is an `integration/` branch, its own `target` is that same branch,
+   and it records no PR of its own. The mode is the convoy's `convoy.merge`,
+   and a convoy that names none lands its members `direct`.
 3. Otherwise the refinery's default, `mr`.
+
+A convoy without the `owned` label sits outside step 2 entirely, its
+`convoy.merge` included, in the same way as a convoy whose target is not an
+`integration/` branch, so a bead linked to it lands by step 1 or step 3.
 
 The fold-in for `polecat/*` targets stays as it is, and so does the rule that an
 `existing_pr` forces `mr`.
@@ -231,9 +245,12 @@ and by the repository's delete-on-merge after a PR.
 - The brief's other option, resolving every `integration/*` target to `direct`,
   keys on a branch-name convention instead of on the convoy. It would land that
   convoy's members against the mode the convoy declares.
-- The rule reaches only a convoy whose target is an `integration/` branch,
-  because that is the convoy `convoy-graduate.sh` graduates into a PR. A member
-  landed with no PR onto any other branch would reach no PR at all.
+- The rule reaches only an owned convoy whose target is an `integration/`
+  branch, because that is the convoy `convoy-graduate.sh` graduates into a PR.
+  Gas City closes an unowned convoy once its children are closed, and nothing
+  graduates it, so a bead landed with no PR through one would reach no PR at
+  all. Graduation takes no convoy whose target is another branch either, and
+  the rule leaves that convoy out for the same reason.
 - The fold-in's design kept `integration/*` targets on `mr` so that convoy work
   would not fast-forward past its review gate. Under the model the gate for a
   convoy's work is its PR bead, and every member's work passes through it before
@@ -242,12 +259,15 @@ and by the repository's delete-on-merge after a PR.
   stamp written by gascity's sling would be fixed when the bead was dispatched,
   and changing sling would be a gascity PR, a second PR in another repository.
 - The read costs no new store call. The `gc bd show --json` the block already
-  holds lists each parent-child parent with its metadata, the convoy's `target`
-  and `convoy.merge` among them.
-- The default lives in one reader, so it holds however the convoy was made. A
-  rule that every convoy's creator must set a field is the discipline that
-  failed when every sling had to pass `--merge direct`. So `convoy-seed.sh` does
-  not change, and a convoy it seeds lands its members `direct` by the default.
+  holds lists each parent-child parent with its labels and its metadata, so the
+  convoy's `owned` label, its `target` and its `convoy.merge` are all there.
+- The default lives in one reader, so it holds for every owned convoy however
+  it was made. A rule that every convoy's creator must set a field is the
+  discipline that failed when every sling had to pass `--merge direct`. The
+  `owned` label is not such a rule, because a convoy without it never graduates,
+  whatever its members do. So `convoy-seed.sh`, which creates each convoy with
+  `--owned`, does not change, and a convoy it seeds lands its members `direct`
+  by the default.
 
 ### Why a rejected branch is kept
 
@@ -262,9 +282,11 @@ Dropping the delete also fixes the rebuild of a direct bead outside any convoy.
 
 - `merge-strategy-resolve`, at both call sites and byte-identical: when the bead
   carries no `merge_strategy` key and no PR of its own, find its open
-  parent-child convoy whose trimmed `target` starts with `integration/` and
-  equals the bead's `target`. Take that convoy's `convoy.merge`, normalized the
-  way the block already normalizes `pr` to `mr`, or `direct` when it names none.
+  parent-child convoy that carries the `owned` label and whose trimmed `target`
+  starts with `integration/` and equals the bead's `target`. The label must be
+  an exact entry of the convoy's `labels`, the test `convoy-graduate.sh`
+  applies. Take that convoy's `convoy.merge`, normalized the way the block
+  already normalizes `pr` to `mr`, or `direct` when it names none.
   Gas City also accepts `local` for a convoy, which the refinery has no landing
   for, so any value other than `direct`, `mr` or `pr` resolves to `mr` and the
   work still reaches a review. This is about a dozen lines.
@@ -275,7 +297,11 @@ Dropping the delete also fixes the rebuild of a direct bead outside any convoy.
   answer, since its bead belongs to no convoy, and its comment says so. New
   cases pin a member that lands `direct`, a convoy that says `mr`, a convoy
   that says `local`, a member with its own stamp, a member with its own PR, a
-  member whose target is not its convoy's, and a closed convoy. Cases (9),
+  member whose target is not its convoy's, and a closed convoy. A paired case
+  pins the `owned` rule. Its two convoys share one `integration/` target and
+  differ only in the label. The owned convoy's member resolves `direct`, and
+  the unowned convoy's child resolves `mr`, even when that convoy says
+  `direct`. Cases (9),
   (13d) and (14) change from a deleted branch to a kept one, and case (18),
   which tests a refused delete, goes with the delete.
 - `lifecycle/lifecycle.toml`: the `merge_strategy` entry states the order.
@@ -283,10 +309,13 @@ Dropping the delete also fixes the rebuild of a direct bead outside any convoy.
 ### What the gctk port carries
 
 The landing mode is one question with one answer, owned by the domain that owns
-convoys: a bead's own mode, else the mode of the convoy it lands through, else
-the default. The port reads membership both ways the store records it, as a
-parent-child child and as a `tracks` target, the two forms `convoy-graduate.sh`
-already counts. The bash bridge reads only the parent-child form, because every
+convoys: a bead's own mode, else the mode of the convoy labelled `owned` that it
+lands through, else the default. The port reads membership both ways the store
+records it, as a parent-child child and as a `tracks` target, the two forms
+`convoy-graduate.sh` already counts. The port's predicate needs the `owned`
+label as much as the bridge's does, because `gc convoy create <name> <ids>`
+links its beads by `tracks` and makes an unowned convoy unless it is passed
+`--owned`. The bash bridge reads only the parent-child form, because every
 gc-toolkit recipe links members that way. Until the port, a member linked only
 by `tracks` lands by its own stamp or by the refinery's default.
 
@@ -294,7 +323,9 @@ by `tracks` lands by its own stamp or by the refinery's default.
 
 A member that already has a PR, or sits at `pre_open_gate` or `pull_request`, is
 past the refinery's queue and keeps its PR. The change reaches only members the
-refinery has not yet taken.
+refinery has not yet taken. The table lists every open convoy in the city's
+stores that targets an `integration/` branch, and each carries the `owned`
+label, so the `owned` rule changes no row.
 
 | Convoy | Members not yet landed | Today | After the change |
 |---|---|---|---|
@@ -499,7 +530,7 @@ The unit that changes it is in the last column (section 8).
 | File | Says today | Says under the model | Unit |
 |---|---|---|---|
 | `agents/mechanik/prompt.template.md`, the dispatch doctrine | "an owned convoy is the PR unit", a lone bead is the one-child convoy, and a child slung without the stamp "is held at workspace-setup before any branch is cut" | A PR bead is the unit. A lone bead is its own PR bead and needs no convoy. Several beads that reach the operator as one PR are an owned convoy, whose members land on its branch with no PR of their own. A member that is a stage is slung `--merge mr`. The seed-and-link recipe stays, and its sling passes no merge flag. A convoy is seeded when its first member can start, and a member that builds on work from outside the convoy waits on a hand-off that brings the branch current. A member slung without the stamp is poured again from the convoy's branch. | C |
-| `docs/component-model.md`, §1 | the Anchor row, "the single open bead that owns a PR", and the Convoy row, "tracked set with one landing target" | The anchor is the PR bead, and the beads that build its branch own no PR. A convoy is a tracked set with one landing target and one landing mode its members inherit. I4 keeps its words. | C |
+| `docs/component-model.md`, §1 | the Anchor row, "the single open bead that owns a PR", and the Convoy row, "tracked set with one landing target" | The anchor is the PR bead, and the beads that build its branch own no PR. A convoy is a tracked set with one landing target, and an owned convoy also has one landing mode its members inherit. I4 keeps its words. | C |
 | `skills/prs/SKILL.md`, supplements | a supplement's `target` "for a PR under an owned convoy is `integration/<convoy-id>`" | That holds for a stage's PR. A convoy's graduation PR targets main. | C |
 | `docs/design-convoy.md` | "The default PR unit is an owned convoy", "each child's PR onto the integration branch", and in all-in-one "Each child's PR still needs the operator's approval" | Design-gated: the design child is a stage PR into the branch, the implementation lands with no PR, and graduation is the second PR. All-in-one: one PR, at graduation. | B |
 | `formulas/mol-design-convoy.toml`, arm-design | slings the design child with no merge flag | Slings it `--merge mr` when design-gated, because its PR is the design gate. All-in-one passes no flag, and neither does arm-implementation. `assets/scripts/mol-design-convoy-arm.test.sh` pins both. | B |
