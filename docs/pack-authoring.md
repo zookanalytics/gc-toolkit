@@ -194,6 +194,271 @@ gc bd show <iteration-N+1-bead> --json | jq -r '.[0].assignee'
 its file-a-rework-bead-and-re-pour loop with a native one, for the crash-safe
 loop state the runtime keeps.
 
+## A rig-scoped agent runs in a worktree of its rig
+
+An agent's `work_dir` is its session's working directory, and cwd is where
+`gh` and `git` resolve the repo. A directory under the city `.gc` tree
+resolves to the **city** repo, so an agent that inspects a rig's PRs or
+branches from such a cwd gets answers about the wrong repo.
+
+A **rig-scoped** agent therefore runs in a git worktree of the rig it serves:
+`work_dir = ".gc/worktrees/{{.Rig}}/<role>/{{.AgentBase}}"`, with a `pre_start`
+hook running `assets/scripts/worktree-setup.sh` to cut that worktree from the
+rig root before the session starts. This holds for the worker pools (polecat,
+proactive, refinery) and for the coordination roles that shell `gh`/`git`
+(the `converse-<model>` sitting templates, witness). The worktree is not the
+rig's main checkout (`rigs/<rig>`), so it does not collide with the refinery's
+home; `worktree-reap.sh` protects it as an agent home. The template variables
+`work_dir` and `pre_start` accept are upstream's
+([config reference](https://docs.gascity.com/reference/config), `Agent`).
+
+A **city-scoped** agent (mechanik, deacon, dog) spans rigs and has no single
+`{{.Rig}}`, so it stays under `.gc/agents/` and passes the repo explicitly on
+each call (`gh --repo <owner>/<rig>`, `git -C <rig-root>`). A rig-scoped agent
+that legitimately targets a fixed repo the same way (the gascity-keeper
+`keeper`, which drives the upstream repo) declares a `# worktree-exempt:`
+marker instead of taking a worktree. `assets/scripts/agent-worktree-wiring.test.sh`
+holds this wiring.
+
+## Patrol agents run a patrol-wisp cycle
+
+A patrol agent is not a distinct Gas City variant. It is a named singleton
+([gascity-agents.md](gascity-agents.md#variant-a--named-singletons-named_session))
+whose prompt adds a patrol-wisp cycle on top of the standard lifecycle. The
+deacon, witness and refinery are this pack's patrol agents, as they are in
+upstream's gastown pack: each `[[named_session]]` declares them like any other
+singleton, and their prompts implement the patrol contract below.
+
+It is called out on its own because the contract has substantial mechanics
+that pool workers and ad-hoc sessions do not have, and because regressions in
+it show up as missed-MERGE_READY and stale-patrol incidents (`tk-fyzvk`,
+`tk-6hm32`, `tk-yvtiv`).
+
+### Patrol wisps
+
+Each patrol cycle is a single bead — a **patrol wisp** — owned by
+the agent. The wisp is created at cycle start, status flips through
+`in_progress` while the agent works, and it is closed when the
+cycle completes. The next cycle pours a fresh wisp before burning
+the old one (**pour-before-burn**), so the agent always has a
+discoverable hook.
+
+Patrol wisps are **root-level**: they are not sub-beads of a
+parent workflow molecule. Each cycle is its own root.
+
+### Startup discovery (4-tier)
+
+When a patrol agent starts (boot, restart, or recovery), it walks
+four tiers before pouring a fresh wisp. The first tier that returns
+work wins:
+
+1. **In-progress wisp** — `bd list --status=in_progress
+   --assignee=$GC_AGENT`. Crash recovery: pick up where you left
+   off mid-cycle.
+2. **Routed work bead** — `bd ready --has-metadata-key=branch
+   --assignee=...`. Catches work that arrived during a
+   cycle-recycle window (e.g., operator `/clear`).
+3. **Open patrol wisp** — adopt the newest OPEN patrol wisp owned
+   by this agent; close older duplicates as
+   `orphaned cross-rotation`. Covers wisps that survived a
+   rotation without being claimed.
+4. **Fresh pour** — only when 1-3 are empty. Create a new patrol
+   wisp and claim it `in_progress`.
+
+In this pack the shape lives in each patrol prompt's own
+startup-adopt section (wisp queries with `--include-infra`,
+title-keyed adopt-before-pour) — the native agent prompts under
+`agents/` carry it directly; there is no shared
+startup-discovery fragment. If an agent's startup-discovery block is
+missing tier 2 or 3, expect missed-MERGE_READY-style stalls.
+
+Only refinery and deacon are held to the full walk. The other two
+consumers share the fragment for its ephemeral-awareness rules
+rather than for tier coverage:
+
+- **witness** — reconcile-only by design. It monitors other agents'
+  work rather than receiving branch-bearing work beads of its own,
+  so tiers 2 and 3 are deliberately not asserted against it. What
+  is asserted instead: every `--type=molecule` query carries
+  `--include-infra`, and every one is scoped to `mol-witness-patrol`
+  roots — its reconcile *burns* surplus wisps, so an unscoped query
+  could adopt or destroy an unrelated molecule root.
+- **boot** — reads the *deacon's* wisp as a freshness signal rather
+  than reconciling one of its own, so the tiers do not apply. Its
+  block is held to a positive assertion that the patrol-wisp read
+  still exists at both call sites the fragment supersedes, carrying
+  `--include-infra`, `--limit=0`, `--json`, the deacon `--assignee`
+  and the `mol-deacon-patrol` title — and to the *absence* of any
+  `--status` filter, since a just-poured wisp sits at `open` through
+  the deacon's burn-then-claim window and any status filter
+  false-empties the read against a healthy deacon.
+
+### Lifecycle
+
+Beyond what the underlying named singleton provides:
+
+- **Restart-friendly.** A patrol agent can be killed mid-cycle
+  without losing work — tier-1 recovers via the `in_progress`
+  wisp. Use `gc runtime request-restart` (preferred) or
+  `gc session reset` when a refresh is needed; `gc session kill`
+  also works for patrols because the reconciler will respawn and
+  the new instance will adopt the in-flight wisp via tier 1.
+- **Handoff.** Patrols do not need explicit operator-driven
+  handoff — the next cycle is the handoff. Closing the current
+  wisp and the cycle-recycle behavior in the prompt template
+  together carry the cadence.
+- **Health.** Patrol freshness is checked by deacon's own patrol
+  (`mol-deacon-patrol.toml`): a stale patrol wisp on witness or
+  refinery surfaces as a deacon warning. The reconciler also
+  surfaces patrol agents that are alive-but-stuck via
+  `gc doctor` checks.
+
+### Addressing
+
+Same as the underlying named singleton — patrols use the same
+QualifiedName (`<rig>/<binding>.<template>` for the rig-scoped
+witness/refinery, `<binding>.<template>` for the city-scoped
+deacon). See [gascity-agents.md, Variant A](gascity-agents.md#variant-a--named-singletons-named_session).
+
+### Work routing visibility
+
+Patrol wisps are *produced* by the patrol cycle itself and recovered through
+the assignee tiers, not consumed from a routed pool. Outside work that needs a
+specific patrol agent to act is assigned to it — `bd update <bead> --assignee
+<patrol-qualified-name>` — with the notice every named-agent assignment owes
+([deferred-dispatch.md](deferred-dispatch.md#work-assigned-to-a-named-agent-owes-a-notice)),
+the same convention the pack follows for any named agent.
+
+### Examples in the wild
+
+- **Deacon** (`gc-toolkit.deacon`, city-scoped, `mode = "always"`):
+  cross-rig gate checks, convoy dispatch, stuck-agent escalation.
+  Patrol cycle: `mol-deacon-patrol.toml`.
+- **Witness** (`<rig>/gc-toolkit.witness`, rig-scoped,
+  `mode = "always"`): per-rig orphan worktree salvage, stuck polecat
+  detection, missing-bead-owner surfacing.
+- **Refinery** (`<rig>/gc-toolkit.refinery`, rig-scoped,
+  `mode = "on_demand"`): merge queue processor; patrol cycle pours
+  per merge-queue iteration.
+
+## A scan resolves an owner before it calls one absent
+
+Gas City writes a city-scoped identity bare and a rig-bound one
+rig-qualified ([session model, "Canonical persisted identity
+forms"](https://github.com/gastownhall/gascity/blob/main/engdocs/design/session-model-unification.md)),
+so a city-scoped session's alias is bare (`gc-toolkit.gc-z0vi2`) even when
+the bead it works belongs to a rig, while a pool instance or rig-scoped
+singleton is rig-qualified (`gc-toolkit/gc-toolkit.nux`). Both directions
+are live in one city, and which fields name a bead's holder is
+[gascity-agents.md](gascity-agents.md#which-fields-name-a-beads-holder).
+
+It costs any scan that resolves a bead's owner by exact lookup into a
+session map keyed on `id, name, session_name, alias, agent_name`. When
+the bead's `assignee` was written rig-qualified, no key in that map
+matches and a live owner resolves to **absent**:
+
+```
+assignee "gascity/gc-toolkit.gc-z0vi2" -> absent
+alias    "gc-toolkit.gc-z0vi2"         -> active  (session s-lx-wisp-q5qbl)
+```
+
+Nothing downstream catches it: "absent after exact lookup" classifies as
+orphaned for pool/ephemeral identities, and the skip rule exempts only
+*configured infra* identities (refinery, witness). An ephemeral work
+identity falls through to source-delete + reopen —
+yanking a bead out from under a live owner mid-work.
+
+The scan resolves `gc.session_id` first, then `assignee`, then
+`gc.session_name`, because only the id names a session that will never come
+back; the other two are labels a successor inherits
+([gascity-agents.md](gascity-agents.md#which-fields-name-a-beads-holder)).
+Resolve a pinned bead against its slot and you read the successor's life as
+the dead owner's, leaving the bead `in_progress` under an owner that never
+returns.
+
+**Rule: an `absent` owner is a lead, not a verdict.** Before
+classifying one as orphaned, resolve it the way the shipped witness
+recipe does — *exact first, then last segment, live wins*:
+
+1. **The exact lookup stays authoritative.** A literal map-key hit
+   stands even when a normalized retry would answer differently. That
+   is how a genuinely dead session still gets recovered.
+2. **On a miss, retry once on the last `/`-separated segment of *both*
+   sides** — `${OWNER##*/}` as shell shorthand (`##`, not `#`: the
+   part to drop runs to the **last** slash, not the first), compared as
+   a whole segment and never as a suffix, so `toolkit.furiosa` does not
+   alias onto `gc-toolkit.furiosa`. Both sides, because both directions
+   are live in one city at once: a city-scoped session's bare alias
+   against a rig-qualified assignee, and a pool worker's rig-qualified
+   alias against a bare assignee.
+3. **A collision resolves toward life.** Baring the prefixes can collapse
+   two cities' sessions onto one identity, so any candidate outside the
+   dead states (`archived`, `closed`, `failed-create`) wins; only when
+   *every* candidate is dead does the retry report a dead state. The retry
+   can therefore turn `absent` into a live state but can never manufacture
+   an orphan.
+
+The map the lookup reads holds to the same rule. Two listed sessions can
+carry one key, and `gc session list` lists the newest session first
+([gascity-agents.md](gascity-agents.md#which-fields-name-a-beads-holder)), so
+a map that let the later entry win would give such a key to its dead
+predecessor. In the map a dead state never replaces a live one, so a shared
+key reads as its live holder's state.
+
+A step-2 hit means a live session, not an orphan. The lookup ships in
+`formulas/mol-witness-patrol.toml` between the `liveness-lookup` markers,
+and `assets/scripts/liveness-lookup.test.sh` executes that snippet
+extracted verbatim from the formula rather than a transcription of it —
+so the rule above and the running code cannot drift apart silently.
+
+One thing narrows the exposure without closing it: **bare does not imply
+a mismatch.** City-scoped singletons
+(`gc-toolkit.mechanik`, `gc-toolkit.deacon`) carry bare aliases too — but
+*their* assignees are written bare as well, so the exact lookup hits.
+The hazard is the mismatch between the two sides, not bareness.
+
+## A route or assignee is resolved, never spelled
+
+The owner lookup above is the read side, where a normalizing retry recovers a
+mismatch after the fact. The write side has no retry. A pool offer and an
+assignment poll both compare raw strings
+([gascity-routing-model.md](gascity-routing-model.md)), so a `gc.routed_to`
+or an `assignee` that is merely well-formed is claimed by nobody, reports
+success, and reads back clean.
+
+Which form is correct is a property of the target's `scope`, not of its name,
+and both scopes ship in one pack:
+
+| Agents | `scope` | Identity to stamp |
+| --- | --- | --- |
+| dog, deacon, mechanik | `city` | `gc-toolkit.<role>` — no rig segment, so the deacon is `gc-toolkit.deacon` |
+| converse-opus, converse-fable, converse-codex, polecat, polecat-codex, proactive, refinery, witness | `rig` | `gc-toolkit/gc-toolkit.<role>`, so the refinery is `gc-toolkit/gc-toolkit.refinery` |
+
+Each agent declares its own `scope` in `agents/<role>/agent.toml`, and the
+`[[named_session]]` stanzas in `pack.toml` restate it for the singletons. Read
+that field for an agent the table does not name.
+
+An author who copies a qualifier from the recipe beside the one being written
+is right only when the two agents happen to share a scope. Over-qualifying a
+city-scoped agent and under-qualifying a rig-scoped one produce the same
+outcome: an address that matches nothing.
+
+**Rule: resolve the identity, do not spell it.**
+`assets/scripts/resolve-route.sh <name>` takes any form of a name and prints
+the identity that is live. It reads `gc agent list`, keeps only the
+candidates a bead in this store can be offered to (the city-scoped ones plus
+`$GC_RIG`'s), and refuses an ambiguous name rather than picking one. An
+unreadable roster is the absence of proof rather than proof of an empty city,
+so there the name comes back unchanged on exit 3 and the caller files
+unverified rather than not at all.
+
+The witness addresses both scopes and resolves at both sites: it files a
+warrant to the city-scoped dog and reads the rig-scoped refinery's queue. Its
+recipes are the `warrant-file` and `refinery-stuck-escalate` blocks in
+`formulas/mol-witness-patrol.toml`, which `assets/scripts/witness-route.test.sh`
+and `assets/scripts/refinery-stuck-escalate.test.sh` execute as extracted from
+the formula.
+
 ## Refresh procedure
 
 This page states the pack's own conventions, so it changes with the pack's
