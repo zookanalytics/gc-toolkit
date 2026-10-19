@@ -163,7 +163,7 @@ Entries here are gc-toolkit-authored prose, not upstream pointers.
 - [Gas City agent types](gascity-agents.md) — the agent variants (named singletons, pool workers, conversation visits, patrol overlay, deterministic workers), with their identity, lifecycle, addressing, and work-routing contracts.
 - [Gas City routing model: sling vs assignee vs `--reassign` vs `--on`](gascity-routing-model.md) — four-lane routing model: Lanes 1–3 per the PR #1736 ruling, plus the `--on <formula>` attach the ruling did not address.
 - [Gas City graph.v2 dispatch containment](gascity-dispatch-containment.md) — the recovery procedure for a formula dispatch poured before it should have been: finding every record the pour created and taking delivery away from all of them.
-- [Gas City pack & formula authoring](gascity-packs.md) — non-obvious pack/formula authoring rules for building gc-toolkit on the base packs: choosing a contract, the v2 opt-in, and the `pack.toml` / layering traps.
+- [Gas City pack & formula authoring](gascity-packs.md) — what Gas City does with a pack and a formula that its specs leave unsaid: how a v2 step advances and a run is cancelled, what processes `workflow-finalize`, when a check loop gets a fresh context, how a directory import goes live, how builtin pins resolve, and what a formula body can expand.
 
 ## Refresh procedure
 

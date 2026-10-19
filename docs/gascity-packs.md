@@ -1,580 +1,326 @@
 ---
-name: Gas City pack & formula authoring (gc-toolkit supplement)
-description: The non-obvious decisions and traps when authoring gc-toolkit's own pack and formulas on the base Gas City packs — read before adding or changing a formula or pack.toml construct.
+name: Gas City pack & formula authoring (platform facts)
+description: What Gas City does with a pack and a formula that its own specs and guides leave unsaid — how a v2 step advances and a run ends, what processes workflow-finalize, when a check loop gets a fresh context, how a directory import goes live, how builtin pins resolve, and what a formula body can expand — each cited and dated. gc-toolkit's own authoring conventions on these are pack-authoring.md.
 ---
 
 # Gas City pack & formula authoring
 
-A curated, **non-obvious** supplement for building gc-toolkit's own pack and
-formulas on top of the base Gas City packs. It does **not** restate the
-upstream specs — it links them and captures only what bites. The canonical,
-authoritative sources are:
-
-- Formula contracts — [understanding-formulas](https://docs.gascity.com/guides/understanding-formulas) (guide), [formula-spec-v1](https://docs.gascity.com/reference/specs/formula-spec-v1), [formula-spec-v2](https://docs.gascity.com/reference/specs/formula-spec-v2), [specs index](https://docs.gascity.com/reference/specs)
-- Packs — [understanding-packs](https://docs.gascity.com/guides/understanding-packs) (guide), [pack-spec](https://docs.gascity.com/reference/specs/pack-spec)
-
-Read this in ~5 minutes, avoid every trap below, then follow the links for depth.
+This page states Gas City behavior only: what the runtime does when it loads
+a pack and runs a formula, where upstream's specs and guides do not already
+say it. Each section names its evidence and the date it was read. The
+upstream specs stay authoritative for the formats themselves, and
+gc-toolkit's own conventions for writing its formulas, scripts and skills on
+top of these facts are [pack-authoring.md](pack-authoring.md).
 
 ## Scope
 
-**Mandate.** The non-obvious rules for authoring gc-toolkit's own pack and
-formulas against the base Gas City packs — how to choose a formula contract,
-how to opt into v2, and the `pack.toml` and pack-layering traps that bite —
-synthesized from the canonical Gas City specs so a gc-toolkit builder is
-guided to the right call.
+**Mandate.** Gas City's behavior when it loads a pack and runs a formula, as
+far as upstream's specs and guides do not state it: how a graph.v2 step
+advances and how a run ends, what processes a workflow's finalize bead, when
+a check loop gets a fresh context, how a pack imported from a directory goes
+live, how builtin pack pins resolve, and what a formula body can expand.
 
-**Boundaries.** Curated synthesis, not a copy of the specs: those are linked
-and remain authoritative for the full format. This brief does not carry local
-fixes against `gascity` *source* — that lifecycle is
-[fork-patching.md](fork-patching.md) — and it does not index
-the canonical documentation, which is
-[gascity-reference.md](gascity-reference.md). It governs *how we author*, not
-what any individual formula or pack *does*.
+**Boundaries.** The full formats are upstream's specs, linked below and
+indexed by [gascity-reference.md](gascity-reference.md). gc-toolkit's own
+authoring conventions are [pack-authoring.md](pack-authoring.md). Carrying
+local fixes against `gascity` source is [fork-patching.md](fork-patching.md).
+Agent variants and session lifecycle are [gascity-agents.md](gascity-agents.md).
 
-## 1. v1 and v2 are peers, not a ladder
+## What upstream's docs already say
 
-This is the misconception to unlearn first, because it has already produced a
-real mis-build here: treating formula **v2** as "newer / better / where we must
-head" and **v1** as "legacy." It is not a version ladder. Upstream is explicit:
-"v1 and v2 are peer contracts; both are supported. v1 is the **default**"
-(formula-spec-v1, intro) and "they are peers, not a version ladder — each makes
-a different thing the engine" (understanding-formulas, *Choosing a Compiler
-Contract*).
+Read these first; this page does not restate them. Coverage checked
+2026-10-19 against `gastownhall/gascity` at `1e05ae624`.
 
-Choose by **what the formula does**, not by version number:
+- **Choosing a contract.** v1 and v2 are peer contracts, v1 is the default,
+  and upstream recommends v2 for new work —
+  [understanding formulas](https://docs.gascity.com/guides/understanding-formulas),
+  "Choosing a Compiler Contract", and
+  [formula spec v1](https://docs.gascity.com/reference/specs/formula-spec-v1).
+  `gc converge` accepts only v1 formulas, and v1's container-dependency
+  semantics have a v2 gap
+  ([gascity#3451](https://github.com/gastownhall/gascity/issues/3451)): under
+  v2, enumerate the children a step depends on in `needs`.
+- **The v2 opt-in** is `[requires] formula_compiler = ">=2.0.0"`;
+  `contract = "graph.v2"` is deprecated —
+  [formula spec v2](https://docs.gascity.com/reference/specs/formula-spec-v2),
+  "Opt-in surface" and "Deprecated surfaces".
+- **`phase` and root-only recipes** are legacy v1 materialization mechanics,
+  not a v2 authoring choice — formula spec v2, "Top-Level Keys". A root-only
+  recipe materializes no step beads and no `workflow-finalize` bead, so a
+  formula that declares the v2 compiler and keeps `phase = "vapor"` has no
+  graph for the engine to run and no finalize to close its root.
+- **Step outcomes** (`gc.outcome`, `gc.failure_class`, `gc.failure_reason`)
+  and the check, retry and drain controls — formula spec v2, §3. A `check`
+  step cannot carry an `assignee` — §3.1.
+- **`until` runs once**, and the rest of the parsed-but-inert surface (gate
+  `type` vocabulary, `waits_for` modes, `vars.<name>.type`) — formula spec v2,
+  §4 "Accepted But Inert".
+- **Layering and names.** A same-named formula, prompt or asset in a
+  higher-priority layer shadows the lower one, two agents resolving to one
+  qualified name fail loading, and fragment `define` names resolve across the
+  loaded packs — formula spec v2 §1.1, and the
+  [pack spec](https://docs.gascity.com/reference/specs/pack-spec) §1.3.2 and
+  §2.5 "Naming And Collisions".
+- **`pack.toml` authoring.** `[pack] schema = 2`, imports by `source` plus
+  `version` and never `path`/`ref`/`commit`/`hash`, private files under
+  `assets/`, no top-level `scripts/`, the city-only tables, and which legacy
+  constructs the loader still accepts for compatibility — pack spec §1.1,
+  §1.2 and "Authoring Summary".
+- **Patches.** `[[patches.agent]]` modifies an existing agent and fails
+  loading when the target is missing; list fields append through `_append`
+  variants — pack spec §1.2.10 and §2.6. How a `[[patches.named_session]]`
+  target matches is [gascity-agents.md](gascity-agents.md#variant-a--named-singletons-named_session).
+- **Builtin packs.** Pinning a bundled source at any commit other than the
+  binary's canonical pin makes it an ordinary remote import, and
+  `gc doctor --fix` re-pins superseded bundled pins —
+  [system packs](https://docs.gascity.com/reference/system-packs).
+- **Formula variables** substitute as `{{key}}` into descriptions, titles,
+  notes, assignee and metadata values — formula spec v2, §1.4.
+- **Pack commands** register as `gc <binding> <command>` under the binding
+  the city imports the pack as, and run with `GC_PACK_DIR` set to the root of
+  the pack that defines them — pack spec §1.2.12, and
+  [multi-agent engineering environment](https://docs.gascity.com/guides/multi-agent-engineering-environment),
+  "Turn repeated operations into pack commands".
 
-- **v1** — the molecule is *data an agent works through* in its own session;
-  the engine is the agent you sling to. Steps resolve at apply and then go
-  inert; there is no runtime control flow. This is the right shape for
-  prompt-driven coordination and patrol loops where one agent reads the steps
-  and self-pours the next cycle.
-- **v2** — a runtime-orchestrated **graph of independently-routable step beads**;
-  the engine is the orchestrator. It buys `check` / `retry` / `drain` /
-  `on_complete` / `timeout`, scope checks, a `workflow-finalize` sink, and
-  per-step routing (`gc.run_target`) to many agents and scale-from-zero pools.
+## A v2 step advances by closing its own step bead, not by `drain-ack`
 
-**For new orchestration work — default v2** (understanding-formulas, *Choosing a
-Compiler Contract*): fan-out over a runtime-discovered set, multi-lane review
-loops, orchestrator-driven check-until-pass, cross-agent step routing. For a
-self-poured patrol loop, v1 is correct and v2's engine buys it nothing — which
-is what gc-toolkit's patrol-style formulas are. The trap is reaching for v2
-because it sounds more advanced; if no step ever needs to be independently
-routed or re-checked by the engine, v2 is the wrong tool.
+Materialized step beads are ordinary beads wired together by `blocks` edges,
+so closing one is what makes its dependents Ready. Nothing else advances the
+graph, and the close carries the outcome
+(`--set-metadata gc.outcome=pass --status=closed`; a failure adds
+`gc.failure_class` and `gc.failure_reason`). The core pack's
+`assets/prompts/graph-worker.md` carries the full outcome set, and
+`formulas/mol-do-work.toml` the pass closure and the terminal
+close-then-drain-ack ordering.
 
-Two v1-only edges remain (neither a reason to *start* on v1): `gc converge`
-accepts only v1 formulas, and v1 container-dependency semantics have a v2 gap
-([gascity#3451](https://github.com/gastownhall/gascity/issues/3451)) — under v2,
-enumerate the children you depend on explicitly in `needs`.
-
-## 2. The v2 opt-in is `[requires] formula_compiler = ">=2.0.0"`
-
-The canonical v2 declaration is exactly:
-
-```toml
-[requires]
-formula_compiler = ">=2.0.0"
-```
-
-The older `contract = "graph.v2"` still parses but is **deprecated** — `gc
-doctor` warns and tells you to switch (formula-spec-v2, *Conformance →
-Opt-in surface* / *Deprecated surfaces*). No `[requires]` table at all means
-**v1** (the default).
-
-Graph-only constructs — `check`, `retry`, `drain`, `on_complete`, `timeout`, and
-reserved `gc.*` step metadata — require the v2 declaration; a formula that uses
-them without it fails to compile. `formula_compiler` is the only `[requires]`
-axis; an unknown axis is a hard error.
-
-## 3. `phase = "vapor"` / root-only is legacy v1 — never pair it with v2
-
-`phase` is "**legacy v1 materialization mechanics, not a v2 authoring
-choice** … accepted for compatibility and **must not be used to design new
-formulas**" (formula-spec-v2, *Top-Level Keys*). `phase = "vapor"` without a
-pour compiles a **root-only** recipe: the step beads are never materialized.
-
-So `[requires] formula_compiler = ">=2.0.0"` **on a `phase = "vapor"` /
-root-only formula is self-contradictory** — you opt into the orchestrator and
-then tell it to materialize only the root, so there are no step beads and no
-`workflow-finalize` bead for the engine to run, and the workflow root never
-self-closes through the engine's native path. (gc-toolkit hit exactly this: an
-audit formula that declared the v2 compiler while keeping `phase = "vapor"`
-re-hooked a polecat every cycle, because its root-only recipe had no
-`workflow-finalize` bead for the engine to close. The fix is to drop the vapor
-line and keep the v2 compiler — not the reverse.)
-
-The reason the legacy hack existed: routing to a scale-from-zero pool needs a
-**Ready-visible** surface, and a v1 molecule-container root is not Ready-visible
-(`gc sling` rejects it), so `phase="vapor"`/root-only was the v1 workaround. A
-**v2 workflow instead materializes independently routable, Ready-visible *step*
-beads** that wake the pool without vapor; the workflow root itself depends on
-`workflow-finalize` and stays blocked — **not** Ready-visible — while the
-workflow runs.
-Migrating to v2 is upstream's recommended remedy; the `phase="vapor"` alternative
-named in the same error text is the legacy path, not a v2 option
-(formula-spec-v2, *Conformance → Differences from v1*).
-
-## 4. A v2 step advances by **closing its own step bead**, not by `drain-ack`
-
-§3 gets you onto the v2 compiler; it does not say what the resulting step
-*bodies* must then do. That is where a v1 author's habits break, because the
-correct v1 ending is the incorrect v2 ending.
-
-**Every step body closes its own step bead on its way out.** Materialized step
-beads are ordinary beads wired together by `blocks` edges, so closing one is
-precisely what makes its dependents Ready. Nothing else advances the graph. The
-close carries the outcome:
-
-```bash
---set-metadata gc.outcome=pass --status=closed
-# failure: gc.outcome=fail + gc.failure_class=transient|hard + gc.failure_reason
-```
-
-The base `core` pack's canonical bodies split that idiom across two files:
-`assets/prompts/graph-worker.md` carries the full outcome set verbatim — pass,
-plus `gc.outcome=fail` with `gc.failure_class=transient|hard` and a
-`gc.failure_reason`; `formulas/mol-do-work.toml` carries only the
-`gc.outcome=pass` + `--status=closed` closure and the terminal
-close-then-drain-ack ordering below (its `drain` step), and never names a
-failure class at all.
-
-**Mirror the outcome set, not the target: neither upstream body's `$GC_BEAD_ID`
-nor `$GC_TRIGGER_BEAD_ID` names the bead your step is executing.** This is the
-one place to deviate from the canonical bodies, because both spellings have been
-observed writing to the wrong bead — or to none:
-
-| spelling | what happens | how it fails |
-|---|---|---|
-| `$GC_BEAD_ID` | unset in the step-execution environment (tk-7w69a) | CLOSED — a guarded close short-circuits, the bead is never closed, and the graph re-offers the step forever at exit 0 |
-| `$GC_TRIGGER_BEAD_ID` | not refreshed by `gc hook --claim` (tk-niu2f), so it still names the session's spawn bead | OPEN — the close succeeds against *another live session's* in-progress step |
-
-Close through
-`assets/scripts/step-close.sh --step <formula>.<step-id> --convoy {{convoy_id}}`
-instead. It resolves the target from the store by (`metadata."gc.root_bead_id"`,
-`metadata."gc.step_ref"`) — the molecule and the step. A pool agent wears one
-assignee across every run it makes, so only that pair names exactly one bead;
-the assignee corroborates the match and never identifies it alone. `--convoy`
-names the molecule as the live workflow root poured over the formula's input
-convoy. A formula with no input convoy leaves it off, and the script derives
-the molecule, first from the `gc.session_id` stamp a claim leaves on the step.
-It refuses to write at all when it cannot prove which bead is yours. The pack's
-hardened detector `tools/lint-learned.d/step-close-env-id.sh` holds the
-line, flagging any step that closes a bead on an id read from the
-environment.
+Neither environment variable those bodies use names the step a session is
+executing. `$GC_BEAD_ID` is unset in the step-execution environment, so a
+guarded close short-circuits and the step is never closed. `$GC_TRIGGER_BEAD_ID`
+is not refreshed by `gc hook --claim`, so it still names the session's spawn
+bead, and a close through it lands on another live session's step.
+*Evidence:* observed on this city's fork, 2026-08-13.
 
 **`gc runtime drain-ack` is a session verb, not a step verb.** It tells the
-reconciler this session is finished; it closes no bead. So a step body that
-drain-acks while still holding its open, assigned step bead is *stranding work*,
-and the reconciler reads it exactly that way: it emits
+reconciler this session is finished; it closes no bead. A session that
+drain-acks while still holding an open, assigned step bead is stranding work,
+and the reconciler reads it that way: it emits
 `session.drain_acked_with_assigned_work`, and once the episode ages past the
-confirmation grace it **unassigns and reopens the stranded bead** so the pool can
-reclaim it (`recordDrainAckAssignedWorkEvent` in
-`cmd/gc/session_reconciler.go`, `repairStrandedPoolWorkerBead` in
-`cmd/gc/session_beads.go`). The step returns to the pool, a fresh worker
-claims it, and the workflow respawn-loops at its entry step indefinitely. It
-presents as a routing or pool bug; it is a missing `--status=closed`.
+confirmation grace it unassigns and reopens the stranded bead so the pool can
+reclaim it. The step returns to the pool, a fresh worker claims it, and the
+workflow respawn-loops at its entry step. It presents as a routing or pool bug;
+it is a missing `--status=closed`. Terminal steps close, then drain-ack.
 
-**Terminal steps close, then drain-ack** — in that order.
+Leaving a step `open` instead is the same loop by another door, because an
+open step is claimable. Clearing `gc.routed_to` alone does not hold it either:
+when a session drains, the runtime releases the `open` and `in_progress` work
+assigned to it and stamps a `gc.run_target` fallback route only when the bead
+is otherwise unrouted.
 
-**A step that must not advance ends its run instead.** Some refusal arms
-cannot close their step, because closing advances the graph and the next step is
-destructive — `mol-polecat-work`'s duplicate-dispatch gate is the case, where
-`workspace-setup` would recreate the branch over a live worker's commits. The
-tempting reading is that not-closed means `open`, and that is the respawn loop
-above by another door: `open` is claimable, so the pool re-offers the same step
-every cycle and each fresh worker re-derives the same refusal. Clearing
-`gc.routed_to` alone does not fix it either.
-`unclaimWorkAssignedToRetiredSessionInfo` (`cmd/gc/session_beads.go`) sweeps
-`{open, in_progress}` assigned to a drained session and calls
-`ReleaseWorkBead`, which stamps a `run_target` fallback route "only when
-otherwise unrouted".
+A root-only in-session wisp is the asymmetry that sets the trap. It runs every
+formula step in one session, materializes no step beads and no
+`workflow-finalize` bead, and so correctly drain-acks without closing anything;
+its root is reaped off the work issue's closure instead, by walking
+`gc.input_convoy_id` back to the tracking convoy. A materialized graph has no
+such backstop — each step bead is a gate only its own body opens.
 
-A molecule's lifecycle is gascity's, so the refusal ends the run through
-gascity's run cancel, `POST /v0/city/<city>/runs/<root>/cancel` on the
-supervisor API (`humaHandleRunCancel`, `internal/api/huma_handlers_runs.go`). The
-cancel closes the root and every member that is not closed, a `blocked` one
-included, with `gc.outcome=canceled`, blockers first, and runs none of them. A
-session mid-step finishes that step and idles. `assets/scripts/run-cancel.sh`
-sends it, after resolving the run from the step this session holds, and the
-pack writes no member of the molecule. Nothing resumes a cancelled run, so a
-wait for a person sits on the work bead: `assets/scripts/await-ruling.sh` makes
-the work bead wait on the visit with a `blocks` edge and arms its re-sling, and
-closing the visit pours a fresh run. The re-sling fires only for an open,
-unassigned bead, so the script first releases a claim on the work bead that no
-live worker holds. The visit is filed with `escalate.sh`'s verdict window off,
-because a wait needs an open visit and the window files none for a situation a
-person already closed `moot` or `benign`.
+*Evidence:* `recordDrainAckAssignedWorkEvent` (`cmd/gc/session_reconciler.go`),
+`repairStrandedPoolWorkerBead` and `unclaimWorkAssignedToRetiredSessionInfo`
+(`cmd/gc/session_beads.go`), `collectInputConvoyWorkflowRoots`
+(`cmd/gc/wisp_autoclose.go`), read at fork `c0571088c` on 2026-07-29. The
+drain-ack event is in upstream's OpenAPI schema; the reopen is undocumented.
 
-The refusal drains only after the cancel lands. A cancel that does not land
-leaves the step claimed by this session, and the step goes back to the pool
-only once the session ends, so the next worker retries it.
+## A run is cancelled through the supervisor API
 
-A molecule keeps the step text it was poured with, while the scripts that text
-calls are read from the rig checkout when the step runs. So a pack script that
-open step text names stays callable under that name until no open step bead
-names it. Step text from an earlier version of these formulas requires
-`assets/scripts/molecule-hold.sh` to exist before it resolves the pack's
-scripts, and calls it to decline. That script hands the call to
-`run-cancel.sh --step` unchanged, so such a run ends through gascity's run
-cancel like any other.
+`POST /v0/city/{city}/runs/{run_id}/cancel` ends a molecule's run. It closes
+the workflow root and every member that is not closed, a `blocked` one
+included, with `gc.outcome=canceled`, blockers first, and runs none of them;
+members with `gc.scope_role=teardown` are left alone. A session mid-step
+finishes that step and idles. The call needs an `X-GC-Request: true` header
+and answers 202 with the count it closed, 404 for an unknown run, and 409
+when every root it matched is already closed. Nothing resumes a cancelled run.
+Upstream ships no `gc` verb for it; `gc wait cancel` cancels a wait, not a run.
 
-**The v1 asymmetry is what sets the trap.** Root-only v1 wisps *correctly*
-drain-ack without closing anything, so the habit transfers and silently breaks.
-A root-only in-session wisp runs every formula step in one worker session and
-therefore materializes no step beads and no `workflow-finalize` bead at all; its
-root is reaped off the *work issue's* closure instead, by walking
-`gc.input_convoy_id` back to the tracking convoy
-(`collectInputConvoyWorkflowRoots`, `cmd/gc/wisp_autoclose.go`). A materialized
-graph has no such backstop — each step bead is a gate only its own body opens.
+Two CLI verbs close workflow beads by other routes. `gc convoy delete <id>`
+closes a root and every bead carrying its `gc.root_bead_id` with
+`gc.outcome=skipped` (`--delete` removes them). `gc convoy delete-source
+<bead>` finds roots by `gc.source_bead_id`, which a convoy-first graph.v2
+root does not carry, so it reports nothing to close for one.
 
-**`workflow-finalize` is dispatcher-processed, not self-firing.** The
-`gc.kind = workflow-finalize` bead is a control bead: it sits inert until a `gc
-convoy control --serve` loop picks it up and runs `processWorkflowFinalize`,
-which closes the workflow root first and the finalize bead second
-(`internal/dispatch/runtime.go`). No serve loop ticking → the root never closes,
-however correct the graph is. **A Ready finalize bead with no dispatcher running
-is an operational hold, not a wiring bug** — diagnose it as such before editing
-the formula. Do not take `gc agent list` as evidence either way: it derives
-status purely from config, so `active` means *configured and not suspended*
-(`cmd/gc/cmd_agent.go`), never *serving*.
+*Evidence:* `humaHandleRunCancel` (`internal/api/huma_handlers_runs.go`);
+live probe of this city's supervisor, `gc` 1.4.3, 2026-10-13, and a
+`delete-source` probe that matched no convoy-first root, 2026-10-07; upstream
+documents the endpoint only in its
+[OpenAPI schema](https://docs.gascity.com/reference/schema/openapi.json), and
+the two convoy verbs in the [CLI reference](https://docs.gascity.com/reference/cli).
 
-The evidence that settles it is a ready-query. `gc sling` creates the finalize
-bead **unassigned**, routed by `gc.routed_to = control-dispatcher` (the bare
-`config.ControlDispatcherAgentName`), so an assignee-only query misses it — the
-serve loop's own ready query tries both arms:
+## `workflow-finalize` is dispatcher-processed, not self-firing
+
+The `gc.kind = workflow-finalize` bead is a control bead. It sits inert until a
+`gc convoy control --serve` loop picks it up and runs `processWorkflowFinalize`,
+which closes the workflow root first and the finalize bead second. With no
+serve loop ticking the root never closes, however correct the graph is, so a
+Ready finalize bead with no dispatcher running is an operational hold, not a
+wiring bug. `gc agent list` derives status purely from config, so `active`
+means *configured and not suspended*, never *serving*.
+
+`gc sling` creates the finalize bead unassigned and routed to the dispatcher
+of the store the graph lives in — `gc.routed_to = <rig>/core.control-dispatcher`
+for a rig graph, `core.control-dispatcher` for a city one — so an
+assignee-only query misses it. The serve loop reads that route unassigned,
+and separately reads control beads assigned to it:
 
 ```bash
-# routed arm — how a sling-created finalize bead is actually picked up
-bd ready --metadata-field "gc.routed_to=control-dispatcher" --unassigned --json
-# assignee arm — only for a control bead carrying an explicit assignee
-bd ready --assignee=<rig>--control-dispatcher --json
+# how a sling-created finalize bead in a rig graph is picked up
+bd ready --metadata-field "gc.routed_to=<rig>/core.control-dispatcher" --unassigned --json
 ```
 
 If the finalize bead comes back in that Ready set, the wiring is fine and the
 workflow is purely dispatcher-gated: start the loop.
 
-The mechanics above are source- and pack-level contracts rather than
-spec-documented ones, so re-check them against the fork tip before relying on
-the details (same caveat as §6). Verified against fork `origin/main` at
-`c0571088c`.
+*Evidence:* `processWorkflowFinalize` (`internal/dispatch/runtime.go`), read
+at fork `c0571088c` on 2026-07-29; present at upstream `1e05ae624` on
+2026-10-19. The dispatcher itself is
+[gascity-agents.md](gascity-agents.md#variant-e--deterministic-workers-no-prompt-loop).
 
-## 5. `until` loops (and friends) do not re-execute — "Accepted But Inert"
+## `[steps.check]` is fresh-context per iteration only if pool-routed
 
-An `until` loop **runs exactly one iteration**. The compiler validates the
-condition and writes a `loop:` label on the first body step, but **nothing in
-the current runtime consumes it** — neither the v1 cook path nor the v2 control
-dispatcher (formula-spec-v2, *Loops* and *Accepted But Inert*). For
-orchestrator-driven re-execution, use a v2 `check` step (*Runtime → Check*) —
-and route its iterations to a pool (§6). gc-toolkit's patrols re-run by
-**self-pouring the next cycle**, not by `until`.
-
-Treat the whole *Accepted But Inert* section as "parses, but no behavior" — do
-not design around it:
-
-- **gate `type` vocabulary** (`gh:run`, `gh:pr`, `timer`, `human`, `mail`) is
-  doc-comment vocabulary only; no bundled watcher acts on it.
-- **`waits_for` gate modes** — the `all-children` / `any-children` distinction
-  is recorded but not interpreted by any dispatcher.
-- **`vars.<name>.type`** (`string` / `int` / `bool`) is parsed but never
-  enforced; only `required`, `enum`, and `pattern` are validated.
-
-(Also note `until` does not use the `{{var}} == value` step-condition syntax —
-it uses the runtime condition grammar, e.g. `probe.status == 'complete'`.)
-
-## 6. `[steps.check]` is fresh-context per iteration **only if pool-routed**
-
-The reason to reach for a check step over an in-session loop is that each
-iteration starts in a **fresh context**. That property is **conditional on how
-the iterations are routed** — a requirement the spec never states
-(formula-spec-v2, *Runtime → Check* documents the run/check machinery only) and
-one that **fails silently** when unmet. So: **route a check loop's iterations to
-a pool** — sling the formula at a pool target, or set the step's
-`gc.run_target` to one. A `check` step cannot carry its own `assignee` (the
-compiler forbids combining the two), so routing is the only lever you have.
-
-The mechanism is a source-level contract, not a documented one — re-check it
-against the fork tip before relying on the details:
+A check step's point over an in-session loop is that each iteration starts in
+a fresh context, and that holds only when the iterations are routed to a pool.
+The spec documents the run/check machinery without this condition, and nothing
+errors, warns or validates when it is unmet. Routing is the only lever: a
+check step cannot carry its own `assignee`, so sling the formula at a pool
+target or set the step's `gc.run_target` to one.
 
 - The predicate is `beadUsesMetadataPoolRouteWithConfig`
   (`internal/dispatch/control.go`): true when the attempt's routed target
-  (`gc.execution_routed_to`, else `gc.routed_to`) resolves to a **multi-session**
-  agent — one whose config supports instance expansion, i.e. a pool — or the bead
-  still carries a legacy `pool:` label.
-- A check loop's control bead is `gc.kind = ralph` (upstream display text
-  externalizes "ralph" as **check loop**). On a failed iteration the control
-  handler clones the next one through `retryPreservedAssigneeWithConfig`
-  (`internal/dispatch/ralph.go`): **pool-routed → assignee `""`**, session
-  affinity cleared and pool labels stripped, so a *different* pooled worker
-  claims it; **otherwise → the prior assignee is preserved** and the same session
+  (`gc.execution_routed_to`, else `gc.routed_to`) resolves to a
+  multi-session agent — a pool — or the bead still carries a legacy `pool:`
+  label.
+- A check loop's control bead is `gc.kind = ralph` (upstream's display text
+  calls it a **check loop**). On a failed iteration the control handler clones
+  the next one through `retryPreservedAssigneeWithConfig`
+  (`internal/dispatch/ralph.go`): pool-routed, the assignee is cleared, session
+  affinity cleared and pool labels stripped, so a different pooled worker
+  claims it; otherwise the prior assignee is preserved and the same session
   takes iteration N+1 with iteration N still in its context window.
-- **Nothing errors or warns on the named-agent path**, and nothing validates it
-  at compile time — the misconfiguration is invisible both when you author the
-  formula and when it runs. It surfaces only as a loop that gets slower and less
-  coherent each iteration.
-
-Because the failure is silent, make pool routing an **acceptance criterion** of
-any check-loop formula rather than a preference, and verify it on the first
-failed iteration:
-
-```bash
-# Iteration beads carry ref <step>.iteration.N. Compare consecutive ones:
-# iteration N+1 must NOT come back with iteration N's assignee.
-gc bd show <iteration-N-bead> --json   | jq -r '.[0].assignee'
-gc bd show <iteration-N+1-bead> --json | jq -r '.[0].assignee'
-```
-
-Two adjacent facts worth keeping straight:
-
-- **`[steps.retry]` is a different path with a different failure mode.** Its
-  `retry-eval` control (`internal/dispatch/retry.go`) gates an explicit *session
-  recycle* on the same predicate, and there the pooled path fails **loudly** — a
+- `[steps.retry]` is a different path with a different failure mode. Its
+  `retry-eval` control (`internal/dispatch/retry.go`) gates an explicit session
+  recycle on the same predicate, and there the pooled path fails loudly — a
   missing `RecycleSession` callback or a pooled subject with an empty assignee
-  are hard errors — recording `gc.retry_session_recycled = true` on success. Do
-  not look for that marker on a check loop: the ralph path never sets it, and
-  each clone strips it.
-- **Loop state is crash-safe either way.** A dispatcher restart mid-append
-  re-attaches to the iteration beads already created instead of cloning a second
-  set (ralph resolves an existing partial attempt first; `[steps.retry]` walks an
-  explicit `gc.retry_state` of `spawning` → `spawned`). That is the durable
-  property this pack's hand-rolled re-pour loops never had, and why
-  `mol-upstream-gc-rebase` — gc-toolkit's first check-loop adoption — replaced
-  its file-a-rework-bead-and-re-pour loop with a native one.
+  are hard errors — recording `gc.retry_session_recycled = true` on success.
+  The ralph path never sets that marker, and each clone strips it.
+- Loop state is crash-safe either way. A dispatcher restart mid-append
+  re-attaches to the iteration beads already created instead of cloning a
+  second set: ralph resolves an existing partial attempt first, and
+  `[steps.retry]` walks an explicit `gc.retry_state` of `spawning` → `spawned`.
 
-## 7. Don't shadow base-pack artifact names
+*Evidence:* read at fork on 2026-07-22; `retryPreservedAssigneeWithConfig`
+present at upstream `1e05ae624` and the fork on 2026-10-19.
 
-Pack artifacts resolve by **layer**: a higher-priority layer (your pack) with a
-formula, prompt fragment, or asset of the **same name** as one in a base pack
-**shadows** it (pack-spec, *Per-Directory Breakdown → `formulas/`* describes the
-asset/formula layer resolution; *Loader → Naming And Collisions* covers agents).
-The cost is silent: a shadowing copy **freezes the base pack's version of that
-artifact**, so future upstream fixes to it are masked.
+## A directory-imported pack is live from the working tree, not from a merge
 
-- **Audit by basename collision across layers**, not by reading `pack.toml` —
-  an accidental same-name override does not appear in the manifest.
-- **Agents are stricter than a shadow:** two agents that resolve to the same
-  qualified name on the same surface **fail loading** outright — there is no
-  fallback (pack-spec, *Naming And Collisions*). Imported agents are addressed
-  by their binding-qualified name (`gastown.mayor`), not the bare local name.
-- Most gc-toolkit formulas are authored under pack-distinct `mol-*` names and
-  shadow nothing. Preserve that: check the basename against the base packs
-  before adding any formula, fragment, or script. Five artifacts are the
-  deliberate exception, listed below.
-
-### 7a. Mirrors of base artifacts (historical)
-
-Under the pre-rewrite gastown import, five gc-toolkit artifacts deliberately
-shadowed a gastown base artifact of the same name, each carrying a local
-delta that had to be re-reconciled by hand whenever base advanced. The
-native roster ended that: gc-toolkit imports no base pack, every agent,
-formula, and script here is authored in this pack under its own name, and
-there is nothing left to reconcile. The rule of §7 still stands — check a
-new artifact's basename against any pack the importing city composes with
-before adding it — and one residue survives as doctrine: the template
-engine resolves `{{ define "name" }}` blocks by name, not by file, so a
-fragment define whose name exists in another imported pack silently
-replaces that pack's block at render time. Never reuse a define name you
-did not coin.
-
-## 8. A directory-imported pack is live from the **working tree**, not from a merge
-
-Section 7 is shadowing between pack *layers*. This is the other shadowing —
-between the *committed* and the *working* copy of the same path — and it is the
-one that makes a green PR a lie. `city.toml` can import a pack by directory:
+A pack imported by a plain directory path in `city.toml` is read from that
+directory's working tree:
 
 ```toml
 [rigs.imports.gc-toolkit]
 source = "rigs/gc-toolkit"   # a path: no ref, no version
 ```
 
-A URL import can be pinned to a commit with `version = "sha:…"`. A directory
-import has no such knob at all: the pack's orders, formulas, prompts and
-scripts are read from that rig checkout's **working tree**. No git ref is
-consulted, so nothing about a merge to `origin/main` changes what is live.
-Two silent failure modes follow, and a landing pack-content PR usually trips
-both at once:
+A URL import can be pinned with `version = "sha:…"`; this form has no such
+knob, and no git ref is consulted, so nothing about a merge to `origin/main`
+changes what is live until the working tree changes. (`gc import add` writes a
+different form for a local path inside a git worktree: a `file://` repo source
+locked to the current commit — [CLI reference](https://docs.gascity.com/reference/cli),
+`gc import add`.)
 
-- **The rig root is behind `origin/main`** — the merged content simply is not
-  there. Every git-side check reports success while the live pack is older:
-  `git ls-tree origin/main`, the anchor's `merge_result` / `merged_sha`, the PR
-  state. `reconcile-rig-checkouts` ff-s each checkout forward on a 15m cooldown
-  ([refinery-merge-cadence.md](refinery-merge-cadence.md), *Adjacent order*), so the window is
-  usually minutes — but it is open exactly when you go to confirm the landing.
-- **An untracked draft shadows the committed artifact** — a file authored in
-  place at the destination path and never committed is still sitting there
-  after the merge, and it is what the pack reads. It also blocks its own
-  repair: `git merge --ff-only` refuses to clobber untracked files, so the
-  reconciler cannot advance the checkout and files an escalation visit instead,
-  leaving the rig behind *and* holding the stale draft. The general form is
-  worth stating plainly — because the working tree is the deployment, an
-  untracked file **is** a deployed artifact, committed or not.
+The pack's convention directories — `agents`, `commands`, `doctor`,
+`formulas`, `orders`, `template-fragments`, `skills` and `mcp` — are watched.
+A file event pokes a rescan that diffs the order set by signature and logs
+`orders reloaded: added|changed|removed <name>`. A reload that lands mid-sync
+observes the intermediate state, so an in-place edit there is live surgery.
+`gc order list` and `gc config show` re-parse disk, so they prove a file is on
+disk and parses, not that the live supervisor picked it up; the supervisor log
+line is that proof.
 
-**So verify the DEPLOYED artifact, not the merged one.** In the rig root:
+*Evidence:* `conventionDiscoveryDirNames` (`internal/config/revision.go`),
+`rescanOrderDispatcher` and `orderSetChangeSummary` (`cmd/gc/city_runtime.go`),
+read on 2026-08-10; the directory list and the log line are present at
+upstream `1e05ae624` and the fork on 2026-10-19.
 
-```bash
-git rev-list --count origin/main..HEAD   # 0 = nothing local at risk
-git status --short                       # ?? at a landed path = a shadowing draft
-# remove superseded drafts (back them up first), then:
-git merge --ff-only origin/main
-diff <(git show origin/main:<path>) <path>   # deployed copy == merged copy
-```
+## Builtin pins track the `gc` binary
 
-Then confirm the executable bit survived and that the artifact registered.
-`gc order list` and `gc config show` re-parse **disk**, so they prove the file
-is on disk and parses — not that the live supervisor picked it up.
+Builtin packs are never materialized into the city. They compose through the
+same `[imports.<binding>]` declarations, but resolve from a user-global repo
+cache that the running `gc` pre-seeds with its own embedded copy of each pack
+at that pack's canonical pin — which is why they resolve offline, and why an
+empty `.gc/system/` is correct rather than a broken install. The cache marker is
+a content hash bound to the running binary, and every production config load
+routes through `ensureBuiltinPacksForConfigLoad`, so a cold or evicted cache
+self-heals on the next command after an upgrade.
 
-**The convention directories are hot-watched, so an in-place edit is live
-surgery.** A config watcher covers the pack's `agents`, `commands`, `doctor`,
-`formulas`, `orders`, `template-fragments`, `skills` and `mcp` directories
-(`internal/config/revision.go`, `conventionDiscoveryDirNames`); a file event
-pokes a rescan that diffs the order set by signature and logs `orders
-reloaded: added|changed|removed <name>` (`cmd/gc/city_runtime.go`,
-`rescanOrderDispatcher` / `orderSetChangeSummary`). A reload that lands
-mid-sync observes the intermediate state, not your intent: deleting a draft
-before the ff-merge logs `removed <name>` and leaves the order absent from the
-live supervisor while HEAD is already correct and every git check reads clean.
-Sequence the change so **one** reload observes the final state, then confirm
-re-registration in the supervisor log (`added <name>`) rather than on disk.
+- **A builtin pin advances only when a newer `gc` is installed**, so a builtin
+  pin behind upstream HEAD is expected, not drift.
+- **`gc doctor --fix` re-pins; `gc import install` does not.** The doctor's
+  `packv2-import-state` check rewrites superseded bundled pins
+  (`rewriteSupersededBundledPinsFS`). `gc import install` collects the declared
+  imports, syncs `packs.lock` and installs what is locked, leaving the declared
+  pin untouched; against a superseded pin it fetches that exact commit over
+  the network.
+- **`core` and `gastown` are different packs from different repos.** `core`
+  is the bundled builtin — `gc-*` skills, default prompts, core formulas,
+  orders, doctor checks, provider overlays — and ships no crew agents, but it
+  is not agentless: it contributes the scope-local `control-dispatcher` lane
+  (`core.control-dispatcher`). Upstream's system-packs page says `core` ships
+  no agents; the core pack's own `agents/control-dispatcher/agent.toml` says
+  otherwise. The crew (`mayor`, `deacon`, `polecat`, `refinery`, `witness`,
+  `dog`, `boot`) is the `gastown` pack.
+- `gc pack list`'s "No remote packs configured" describes the legacy
+  remote-registry mechanism, is orthogonal to `[imports]`, and does not mean
+  no packs are loaded.
 
-## 9. `pack.toml` authoring traps
+*Evidence:* `cmd/gc/embed_builtin_packs.go`; `internal/builtinpacks/registry.go`
+(`MaterializeSyntheticRepo`, `publicSubpathForPack`);
+`cmd/gc/import_state_doctor_check.go`; the `core` pack under
+`internal/bootstrap/packs/core/`. Verified against `gc` 1.4.1, built from fork
+`3983cc049`, on 2026-08-13; `packv2-import-state` and the control-dispatcher
+`agent.toml` present at upstream `1e05ae624` on 2026-10-19.
 
-Use the constructs in pack-spec's *Authoring Summary*; the ones that bite:
+## A formula body gets no template pass
 
-- **`schema = 2`, exact.** `[pack].schema` must be `2` for this pack format
-  (pack-spec, *`[pack]`*).
-- **Durable imports use `source` + `version`.** Declare dependencies as
-  `[imports.<binding>]` with a `source` (required) and an optional `version`
-  constraint/pin; durable identity is `source` + `version`. **Never** use
-  `path`, `ref`, `commit`, or `hash` inside a public import table (invalid
-  durable import TOML), and never persist a registry handle like `main:gascity`
-  as `source` — handles are command-time lookups only (pack-spec,
-  *`[imports.<binding>]`* / *Authoring Summary*).
-- **Builtin imports resolve from a binary-seeded cache — so a builtin `version`
-  pin is not yours to bump.** Builtin packs are never materialized into the
-  city. They compose through the same explicit `[imports.<binding>]`
-  declarations, but their sources resolve from a **user-global repo cache** that
-  the running `gc` pre-seeds with its own **embedded** copy of each pack at that
-  pack's **canonical pin** — which is why they resolve offline, and why the
-  retired per-city `.gc/system/packs` tree is pruned on sight rather than
-  repopulated (an empty `.gc/system/` is correct, not a broken install). Three
-  consequences bite:
-  - **Builtin pins track the gc binary's build revision, not upstream HEAD.**
-    They advance only when a newer `gc` is installed, so a builtin pin sitting
-    behind upstream is expected — not drift to chase.
-  - **Hand-bumping a builtin pin silently demotes it to a remote import.**
-    `config.IsBundledSourceAtCanonicalPin` gates every synthetic-cache call
-    site, so a bundled source pinned at *any* other commit "is an ordinary
-    remote import and is fetched for real" — trading offline resolution for a
-    network fetch of a tree the binary cannot supply. Advance builtin packs by
-    installing a newer `gc` and letting **`gc doctor --fix`** re-pin: its
-    `packv2-import-state` check rewrites superseded bundled pins for you
-    (`rewriteSupersededBundledPinsFS`). **`gc import install` does not re-pin** —
-    it collects the declared imports, syncs `packs.lock` and installs what is
-    locked, leaving the declared pin untouched; against a superseded pin it
-    fetches that exact superseded commit over the network. That is why the
-    not-cached remediation leads with the doctor and keeps `gc import install`
-    only as the fallback. The cache marker is a content hash bound to
-    the running binary and every production config load routes through
-    `ensureBuiltinPacksForConfigLoad`, so a cold or evicted cache self-heals on
-    the next command after an upgrade.
-  - **`core` and `gastown` are different packs from different repos.** `core` is
-    the bundled builtin — `gc-*` skills, default prompts, core formulas, orders,
-    doctor checks, provider overlays — and **ships no crew agents**, but it is
-    not agentless: it also contributes the scope-local `control-dispatcher`
-    lane (qualified `core.control-dispatcher`), a deterministic
-    `prompt_mode = "none"` worker that runs `gc convoy control --serve` over
-    formula-v2 control beads. So don't go looking in `gastown` for the
-    formula-v2 dispatcher: the **crew** (`mayor`, `deacon`, `polecat`,
-    `refinery`, `witness`, `dog`, `boot`) is the `gastown` pack, while the
-    control lane ships with `core`. `core`, `bd` and `dolt` address subpaths
-    of the gascity main repo; `gastown` also publishes from the gascity-packs
-    registry.
+Gas City expands `{{...}}` through two different engines:
 
-  Don't read `gc pack list` as evidence here: "No remote packs configured"
-  describes the legacy remote-registry mechanism, is orthogonal to `[imports]`,
-  and does not mean no packs are loaded. (`cmd/gc/embed_builtin_packs.go`;
-  `internal/builtinpacks/registry.go`, `MaterializeSyntheticRepo` /
-  `publicSubpathForPack`; `cmd/gc/import_state_doctor_check.go`. Pack contents
-  from `internal/bootstrap/packs/core/` — its `pack.toml`, the `all:agents`
-  embed in `embed.go`, and `agents/control-dispatcher/agent.toml` — and the
-  `gastown` roster from the `gascity-packs` module the binary embeds. Verified
-  against `gc 1.4.1`, built from fork `origin/main` at `3983cc049`, 2026-08-13.)
-- **`[[patches.agent]]` modifies, never creates.** A patch targets an existing
-  agent by its bare local `name` (`dir = ""` in `pack.toml` matches by name
-  before rig stamping) and **fails loading if the target doesn't exist**. That
-  bare-name tolerance is specific to *agent* patches:
-  `[[patches.named_session]]` has no such fallback and matches only
-  import-qualified identities (`gc-toolkit.boot`), so reusing this block's
-  targeting style there hits nothing and hard-fails the whole `city.toml` load —
-  see [gascity-agents.md](gascity-agents.md), Variant A → Lifecycle. Append
-  to list fields with the `_append` variants — `inject_fragments_append`,
-  `session_setup_append`, `pre_start_append`, etc. — never by re-declaring the
-  agent (pack-spec, *`[[patches.agent]]`* / *Loader → Patches*).
-- **Private files live under `assets/`.** Scripts, prompt fragments, and overlay
-  trees referenced by a definition go under `assets/` (the loader resolves them
-  only when referenced). There is **no top-level `scripts/`** directory — `gc
-  doctor`'s `v2-scripts-layout` check flags one (pack-spec, *`assets/`*).
-- **Banned / replaced in `pack.toml`** (the loader or `gc doctor` rejects these
-  — see pack-spec, *Authoring Summary*):
+- **Prompts and template fragments** (`*.template.md`, plus `session_setup`
+  and `pre_start` commands) render through Go `text/template` with a populated
+  context, so dotted tokens resolve: `{{.ConfigDir}}`, `{{.RigRoot}}`,
+  `{{.WorkDir}}`.
+- **Formula and molecule step bodies** (`description`, and a step's `title`,
+  `condition` and metadata) are expanded by plain string substitution over a
+  strict `{{name}}` pattern — `[a-zA-Z_][a-zA-Z0-9_]*`, no leading dot, no
+  spaces — with no `text/template` pass at all. A step's `id` is not
+  substituted: it is used verbatim as the bead's `Ref` and `gc.step_ref`, so
+  it must be a literal.
 
-  | Don't write | Use instead |
-  |---|---|
-  | `[[agent]]` (inline table) | `agents/<name>/agent.toml` + colocated prompt files |
-  | `[formulas].dir` | the well-known `formulas/` directory |
-  | `[pack].includes` | `[imports.<binding>]` |
-  | `[agents]`, `[defaults.rig.imports]`, `[[patches.rigs]]`, `[[patches.providers]]` | city-level only (`city.toml`), not `pack.toml` |
+So a dotted `{{ .ConfigDir }}` in a formula body never matches the variable
+pattern: it survives literally and silently no-ops, and a guard like
+`[ -x "{{ .ConfigDir }}/assets/scripts/foo.sh" ]` written in a formula is
+always false.
 
-## 10. `{{ .ConfigDir }}` resolves in prompts but is inert in formula bodies
+`GC_PACK_DIR` is set for order and pack-command execution and is not exported
+to agent or worker sessions, so a formula body that references it resolves an
+empty path. `GC_RIG_ROOT` (the agent's own rig checkout) and `GC_CITY_PATH`
+(the city root) are in the session environment.
 
-Gas City expands `{{...}}` through **two different engines**, and writing the
-prompt form in a formula silently no-ops the formula. Know which surface you
-are authoring:
+*Evidence:* read on 2026-06-28; on 2026-10-19 neither `internal/formula` nor
+`internal/molecule` imports `text/template` at upstream `1e05ae624` or the
+fork. Upstream documents the order and command variables (formula spec v2
+§1.4; [orders tutorial](https://docs.gascity.com/tutorials/07-orders); pack
+spec §1.2.12) but not the session environment.
 
-- **Prompts and template-fragments** (`*.template.md`, plus `session_setup` /
-  `pre_start` commands) render through Go `text/template` with a populated
-  context, so **dotted tokens resolve**: `{{.ConfigDir}}`, `{{.RigRoot}}`,
-  `{{.WorkDir}}`. The `pre_start` example in
-  [gascity-agents.md](gascity-agents.md)
-  (`{{.ConfigDir}}/assets/scripts/worktree-setup.sh …`) relies on exactly this.
-- **Formula / molecule step bodies** (`formulas/*.toml` `description`, and a
-  step's `title` / `condition` / metadata) are expanded by **plain string
-  substitution over a strict `{{name}}` pattern** — `[a-zA-Z_][a-zA-Z0-9_]*`,
-  **no leading dot, no spaces** — with **no `text/template` pass at all**.
-  Formula vars are that no-dot form (`{{base_branch}}`, `{{binding_prefix}}`,
-  `{{event_timeout}}`). A step's `id` is **not** substituted — it is used
-  verbatim as the bead's `Ref` / `gc.step_ref`, so it must be a literal.
+## Refresh procedure
 
-So a dotted `{{ .ConfigDir }}` in a formula body never matches the var pattern:
-it **survives literally and silently no-ops**. An
-`[ -x "{{ .ConfigDir }}/assets/scripts/foo.sh" ]` guard written in a formula is
-always false, and the script never runs.
-
-**To call a pack script from a formula body, resolve at shell runtime via
-exported env — never the token:**
-
-```bash
-"$GC_RIG_ROOT/assets/scripts/foo.sh"               # owning rig only (repo == pack)
-"$GC_CITY_PATH/rigs/<pack>/assets/scripts/foo.sh"  # also resolves for importer rigs
-```
-
-`$GC_RIG_ROOT` points at the agent's own rig checkout, so it finds the script
-only for the **owning** rig; the `$GC_CITY_PATH/rigs/<pack>/…` form is the
-portable one, because every agent shares `$GC_CITY_PATH` (the city root) and the
-script lives in the owning pack's tree under it. Do **not** reach for
-`$GC_PACK_DIR` or `$GC_CONFIG_DIR` — they are populated only for order/command
-execution and are **not exported to agent or worker sessions**, so a formula
-that references them resolves an empty path.
-
-An agent's own shell, where a skill's examples run, has no template pass
-either, and no variable set in one tool call survives into the next. It asks
-gc for the pack instead: `commands/scripts-dir/run.sh` is the pack command
-`scripts-dir`, and gc runs a pack command with `$GC_PACK_DIR` set to the root
-of the pack it loaded. gc registers a pack command under its import binding
-and under no other name, so a city that imports the pack as
-`[imports.gc-toolkit]` runs `gc gc-toolkit scripts-dir`, and one that imports
-it as `[imports.kit]` runs `gc kit scripts-dir`. A skill is not rendered, so its
-text cannot carry the binding. Its examples write
-`"$(gc <binding> scripts-dir)/foo.sh"`, and the agent fills in the binding gc
-puts in front of the skill's own name (`gc-toolkit.work`), which `gc skill list`
-prints as the skill's FROM. The call then runs the pack's own copy wherever the
-city imports the pack from, and never a checkout the agent is standing in. The
-ask-for-work skills (`work`, `waits`, `records`, `prs`) call every writer this
-way.
+Each section's evidence line names what it was read from and when. Before
+building on a section, re-read its symbols at current upstream main and in
+this city's fork, and update the date with the reading. When upstream's
+specs or guides come to state a section's fact, replace the section with a
+line in "What upstream's docs already say".

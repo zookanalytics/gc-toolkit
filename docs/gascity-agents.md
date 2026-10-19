@@ -335,9 +335,9 @@ rather than a silent partial patch.
 **The asymmetry that misleads.** `[[patches.agent]]` *does* accept a
 bare local name — it carries a V1 `Dir`+`Name` fallback
 (`patch.go:424`) that fires even for an imported V2 agent, and that
-is the documented way to write one (see
-[gascity-packs.md](gascity-packs.md) §8, "`[[patches.agent]]`
-modifies, never creates"). Named-session patches have no such
+is how this pack writes one (the
+[pack spec](https://docs.gascity.com/reference/specs/pack-spec), §2.6,
+covers what an agent patch may change). Named-session patches have no such
 fallback. The two blocks look interchangeable and are not — copying
 the agent block's targeting style produces a target that matches
 nothing.
