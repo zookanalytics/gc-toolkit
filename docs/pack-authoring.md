@@ -368,12 +368,12 @@ identity falls through to source-delete + reopen —
 yanking a bead out from under a live owner mid-work.
 
 The scan resolves `gc.session_id` first, then `assignee`, then
-`gc.session_name`, because only the id names a session that will never come
-back; the other two are labels a successor inherits
+`gc.session_name`, because only the id always names one session; the other
+two can name an identity that a later session carries too
 ([gascity-agents.md](gascity-agents.md#which-fields-name-a-beads-holder)).
-Resolve a pinned bead against its slot and you read the successor's life as
-the dead owner's, leaving the bead `in_progress` under an owner that never
-returns.
+Resolve a bead against an identity its successor shares and you read the
+successor's life as the dead owner's, leaving the bead `in_progress` under an
+owner that never returns.
 
 **Rule: an `absent` owner is a lead, not a verdict.** Before
 classifying one as orphaned, resolve it the way the shipped witness
