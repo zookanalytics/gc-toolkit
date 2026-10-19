@@ -130,7 +130,7 @@ one there is spent the moment the anchor is gated. The clear stops at
 `status=open` for two reasons that agree. A live claim is a hold to escalate,
 not to overwrite; and bd refuses an assignee edit on a bead another actor holds
 `in_progress`, dropping the whole atomic update with it
-([gascity-routing-model.md](gascity-routing-model.md) row 46).
+([gascity/routing-model.md](gascity/routing-model.md#clearing-an-assignee-can-be-refused-and-the-refusal-drops-the-whole-update)).
 
 A detached anchor that is nonetheless claimed or held into a non-open status —
 by a route stamped on it out of band, or a direct claim — is the residual this

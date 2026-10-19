@@ -1,3 +1,8 @@
+---
+name: Local patching of a gascity fork (gc-toolkit process)
+description: gc-toolkit's own process for a city that runs a fork of gascity — when to carry a local patch, how to land and drop one, how the keeper rebases the fork, and how the operator reaches the keeper. A pack convention, not Gas City behavior.
+---
+
 # Local Patching of gascity
 
 > The recommended process for cities that need to carry local fixes against
@@ -16,11 +21,13 @@
 **Mandate.** The recommended process for a city running a *fork* of
 `gascity` that must carry local fixes ahead of — or instead of —
 upstream: the full lifecycle of a local patch, from the decision to
-carry one through retiring it once upstream lands a fix.
+carry one through retiring it once upstream lands a fix, and how the
+operator reaches the keeper that runs it. This is gc-toolkit's process,
+carried by the opt-in `packs/gascity-keeper/` sub-pack.
 
 **Boundaries.** This is a workflow doc about *carrying* patches, not a
 reference for `gascity`'s own internals or behavior — that lives in
-[gascity-reference.md](gascity-reference.md) and upstream docs. Nor does it
+[gascity/README.md](gascity/README.md) and upstream docs. Nor does it
 cover constructing gc-toolkit's own pack *overlay* — layering pack artifacts
 over the base packs is a different layer from patching gascity *source*, and is
 out of this doc's mandate. It is deliberately temporary, and exists to make
@@ -375,6 +382,60 @@ that may not exist on the landed `origin/main`.
 has active worktrees.** Polecats and other agents may be working there.
 Use `git worktree add` for isolation, or coordinate via the city's
 agents before rebasing.
+
+---
+
+## Reaching the keeper
+
+The **gascity-keeper** (`gascity/gascity-keeper.keeper`) is the
+operator's single front-door for the forked upstream repos
+(`gastownhall/gascity`). It runs `on_demand` **on purpose**:
+whether it is up is itself the signal — keeper **up** means you are
+in upstream-engagement mode (a rebase or sync is hot), keeper
+**down** means you are not thinking about upstream. Presence *is*
+state; there is no separate dashboard to check.
+
+**Bring it up / dismiss it — from the `S` picker.** A drained
+on_demand session has no pane, so you cannot reach it by switching
+to a pane. The `S` session picker therefore carries a fixed entry,
+next to `[ show all ]`, that pins or unpins the keeper:
+
+- keeper unpinned → `[ ⚡ pin keeper ]` → pins it; it materializes
+  (if it was down) and, on the next picker open, shows up as a
+  navigable pane you switch to like any other agent.
+- keeper pinned → `[ ✕ unpin keeper ]` → unpins it; it drains once
+  idle.
+- `[ keeper… ]` → the pin state could not be read in time (beads
+  slow or unreachable). The entry still toggles — it re-checks on
+  selection and refuses only if the state is still unknown.
+
+The label tracks the **pin**, not mere liveness: a keeper that is up
+only because work sits on its hook is unpinned and still shows
+`[ ⚡ pin keeper ]` — pinning it then keeps it up once that work
+finishes. That entry is the surface — you do not run `gc session`
+verbs by hand. It is wired to
+`assets/scripts/tmux-keeper-toggle.sh`, which owns the pin/unpin
+call and the pin-state detection (it reads the keeper session
+bead's `metadata.pin_awake`; tmux liveness cannot distinguish
+pinned from merely-working).
+
+**Talk to it, or give it work.** Pin only when you want to
+*converse* — surface a rebase summary, refine a PR draft, ask an
+upstream question. If you only need a *job done* (rebase, sync,
+PR-prep), don't pin — hand it the work, which is itself a wake
+reason; it materializes, runs, surfaces any questions back to you,
+and drains on its own:
+
+```bash
+bd update <bead> --assignee gascity/gascity-keeper.keeper   # assigned work is a wake reason
+```
+
+Why a pin keeps the keeper up and `gc session wake` does not is Gas
+City behavior:
+[gascity/agent-types.md](gascity/agent-types.md#what-keeps-a-named-session-up).
+So is why reaching for `gc session new` instead spawns a second
+session beside the canonical one:
+[gascity/agent-types.md](gascity/agent-types.md#gc-session-new-and-the-canonical-session).
 
 ---
 

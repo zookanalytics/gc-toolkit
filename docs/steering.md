@@ -30,7 +30,7 @@ alternatives it rejected and the units that build it, is
 this page states what runs. What an epic is, what it carries, and when it
 closes, is [epics.md](epics.md). How a pool claims routed work, and how bd's
 blocked flag cascades and a pool reads it, is
-[gascity-routing-model.md](gascity-routing-model.md). The hold, the demand and
+[gascity/routing-model.md](gascity/routing-model.md). The hold, the demand and
 the shape law a park follows are invariant I1 in
 [component-model.md](component-model.md#i1-in-full-the-hold-the-demand-and-the-shape-law).
 The first reaction's method is `agents/proactive/prompt.template.md`, and who
@@ -285,7 +285,7 @@ that part. This is I1's shape law in
 ## Priority
 
 A pool claims the ready bead with the most urgent priority first, and within a
-level the oldest ([gascity-routing-model.md](gascity-routing-model.md#the-read-side-the-claim-predicate)).
+level the oldest ([gascity/routing-model.md](gascity/routing-model.md#the-read-side-the-claim-predicate)).
 So a bead's priority decides where it queues.
 
 ### The rule

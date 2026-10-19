@@ -185,7 +185,7 @@ SUP=$(gc bd --rig <rig> create "<what the PR still needs>" -t task -d "<what to 
 For a bug in upstream `gascity`, three options, in order
 of preference: **ignore** (wait for upstream — usually right), **local
 patch** (carry the fix on the fork's main; mechanics in
-`docs/gascity-local-patching.md`), **engage upstream** (only with something
+`docs/fork-patching.md`), **engage upstream** (only with something
 materially new, and only through the operator). A design gap takes none of
 these. A pack feature that needs something Gas City cannot express is
 reshaped to fit what Gas City ships, under the boundaries in
@@ -212,12 +212,12 @@ reshaped to fit what Gas City ships, under the boundaries in
 
 Reference docs under `{{ .ConfigDir }}/docs/`:
 
-- **gascity-reference.md** — index of canonical Gas City documentation.
+- **gascity/README.md** — index of canonical Gas City documentation.
   Consult before guessing at config syntax or CLI flags.
-- **gascity-agents.md** — agent variants, identity, session lifecycle,
+- **gascity/agent-types.md** — agent variants, identity, session lifecycle,
   and addressing. Consult before reasoning about session lifecycle or
   titling. (`assets/scripts/tmux-pick-session.sh` is the picker tool.)
-- **gascity-local-patching.md** — the process for carrying local fixes
+- **fork-patching.md** — the process for carrying local fixes
   against `gascity` ahead of upstream.
 
 Gascity-rig-specific doctrine (rebase conventions, refinery rebase

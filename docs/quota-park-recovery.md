@@ -27,7 +27,7 @@ state rules.
 **Boundaries.** Nudging is the order's only action. Killing a wedged session is
 the dog pool's, on a warrant, per [authority-map.md](authority-map.md), and each
 patrol's warrant path is its own formula's. How an escalation visit reaches a
-person is [gascity-human-engagement.md](gascity-human-engagement.md).
+person is [human-engagement.md](human-engagement.md).
 
 ## Mechanism
 

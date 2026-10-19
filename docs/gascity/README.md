@@ -1,46 +1,82 @@
 ---
-name: gascity reference index
-description: Index of canonical Gas City documentation at https://docs.gascity.com/, plus the bar gc-toolkit applies before adding new gascity-* docs.
+name: Gas City platform facts and reference index
+description: What the pages in docs/gascity/ are and what each covers, the bar a page meets to be one, and the index of canonical Gas City documentation at https://docs.gascity.com/ that they supplement.
 ---
 
-# gascity reference index
+# Gas City
 
-This file is an **index**, not a summary. Every link below points at
-upstream documentation; gc-toolkit does not paraphrase or mirror it. If
-a topic feels like it needs prose explanation here, that is a signal
-the prose belongs in an upstream PR to `gastownhall/gascity`, not in
-this index.
+The pages in this directory are about Gas City itself, the platform
+gc-toolkit runs on, and never about the pack. Each states what Gas City
+does where upstream's docs leave it unsaid or state it wrongly, under
+[the bar](#the-bar), with the source it was read from and the date.
+gc-toolkit's own conventions are the pages in `docs/` outside this
+directory, such as [human-engagement.md](../human-engagement.md),
+[pack-authoring.md](../pack-authoring.md),
+[deferred-dispatch.md](../deferred-dispatch.md) and
+[fork-patching.md](../fork-patching.md).
+
+Upstream's documentation stays the authority on Gas City, and the index
+after the bar points at it. Every link in the index is upstream
+documentation; gc-toolkit does not paraphrase or mirror it. If a topic
+feels like it needs prose explanation in the index, that is a signal the
+prose belongs in an upstream PR to `gastownhall/gascity`.
 
 ## Scope
 
-**Mandate.** The grounding in canonical Gas City documentation that the
-rest of gc-toolkit's Gas City material is built on — the reference point
-that ties this toolkit back to the upstream source of truth at
-https://docs.gascity.com/. In that role it also holds
-[the bar](#the-bar) gc-toolkit applies before standing up a Gas City
-brief of its own, and marks where upstream coverage falls short.
+**Mandate.** What the pages in this directory are: the bar a page meets to
+be one, and what each covers. It is also the grounding in canonical Gas
+City documentation that the rest of gc-toolkit's Gas City material is
+built on — the reference point that ties this toolkit back to the upstream
+source of truth at https://docs.gascity.com/ — and it marks where upstream
+coverage falls short.
 
-**Boundaries.** This file is an *index*, not a summary: it links to
-upstream docs and does not paraphrase or mirror them. Prose that
-explains rather than indexes belongs upstream; substantive local
-material lives in the sibling briefs, not here.
+**Boundaries.** The index links to upstream docs and does not paraphrase
+or mirror them. Prose that explains rather than indexes belongs upstream,
+and the Gas City facts upstream leaves unsaid are on the pages listed
+below, not here. gc-toolkit's own conventions are the pages outside this
+directory.
+
+## The pages here
+
+Each page here is a local supplement: a topic gc-toolkit has captured
+where upstream coverage is missing, partial, or contradicted by a more
+recent maintainer ruling. It is gc-toolkit-authored prose that states Gas
+City behavior only, under [the bar](#the-bar).
+
+- [Gas City and human engagement](human-engagement.md) — the Gas City primitives a human conversation can ride and how a session and its pane end: human gates and the core orders that surface them, where a question surfaces, the idle ladder, max age, manual sessions, the stop and the backstops.
+- [Gas City agent types](agent-types.md) — the agent variants where upstream's docs leave them unsaid: scope expansion, named-session demand and patches, wake reasons and turns, pool slots and names, kill and close, the control-dispatcher, `gc session new`, nudge fences, and which fields name a bead's holder.
+- [Gas City routing model](routing-model.md) — how Gas City delivers a bead to the session that acts on it: what the sling router writes, the claim predicate, how a graph.v2 pour routes its records, what holds a bead, the bd guard that can refuse a detach, and the route the controller restores.
+- [Gas City pack & formula authoring](packs.md) — what Gas City does with a pack and a formula that its specs leave unsaid: how a v2 step advances and a run is cancelled, what processes `workflow-finalize`, when a check loop gets a fresh context, how a directory import goes live, how builtin pins resolve, and what a formula body can expand.
+
+[dispatch-containment.md](dispatch-containment.md) is retired, and points
+to where its topic is documented now.
 
 ## The bar
 
-A doc lives under `docs/gascity-*.md` only when **all four** hold:
+A page lives in `docs/gascity/` only when **all** of these hold:
 
-1. **It serves gc-toolkit's work.** Lean on upstream Gas City
-   documentation where it exists. Capture content here when we've
-   learned something not yet documented upstream, or when reframing
-   it for our own use is materially more effective. Pure duplication
-   of upstream content doesn't earn its place.
-2. **The learning is durable, not bead-tied.** One-incident gotchas
+1. **It states Gas City behavior and nothing else.** A page here says
+   what the platform does: the `gc` and `bd` binaries and the packs
+   Gas City bundles, such as `core`. gc-toolkit's own conventions — its
+   agents, formulas, scripts, orders and skills, and this city's
+   configuration — belong to the page that owns that subsystem, never to
+   a page here, not even as an example of the behavior. A page here may
+   link to a pack page, labeled as gc-toolkit's.
+2. **Upstream's docs do not already say it.** Lean on upstream Gas City
+   documentation where it exists. A fact upstream documents is a link
+   here, not a restatement of it.
+3. **Each section carries its evidence and its date.** It names the
+   upstream doc it supplements, and, where no doc says it, the source it
+   was read from as a symbol and file at a named commit rather than a
+   line number. It says when it was verified, and a fact verified only on
+   this city's gascity fork says so.
+4. **The learning is durable, not bead-tied.** One-incident gotchas
    live in `specs/<bead-id>/` or working memory.
-3. **Someone owns keeping it current** as upstream Gas City evolves.
-4. **It's non-obvious** — a competent new contributor wouldn't infer
+5. **Someone owns keeping it current** as upstream Gas City evolves.
+6. **It's non-obvious** — a competent new contributor wouldn't infer
    it from upstream docs plus the code.
 
-If any of the four fail, the content does not belong here.
+If any of these fails, the content does not belong here.
 
 ## Getting started
 
@@ -143,18 +179,6 @@ in this index.
 - *(none recorded yet — when you find a gap, file the bead and add a
   pointer here)*
 
-## Local supplements
-
-Topics gc-toolkit has captured locally, where upstream coverage is
-missing, partial, or contradicted by a more recent maintainer ruling.
-Entries here are gc-toolkit-authored prose, not upstream pointers.
-
-- [Gas City and human engagement](gascity-human-engagement.md) — how upstream supports human engagement (extmsg, gates, pending interactions, the dashboard's attention surfaces) and the pack's subject/visit vocabulary and seams, every claim dated.
-- [Gas City agent types](gascity-agents.md) — the agent variants (named singletons, pool workers, conversation visits, patrol overlay, deterministic workers), with their identity, lifecycle, addressing, and work-routing contracts.
-- [Gas City routing model: sling vs assignee vs `--reassign` vs `--on`](gascity-routing-model.md) — four-lane routing model: Lanes 1–3 per the PR #1736 ruling, plus the `--on <formula>` attach the ruling did not address.
-- [Gas City graph.v2 dispatch containment](gascity-dispatch-containment.md) — the recovery procedure for a formula dispatch poured before it should have been: finding every record the pour created and taking delivery away from all of them.
-- [Gas City pack & formula authoring](gascity-packs.md) — non-obvious pack/formula authoring rules for building gc-toolkit on the base packs: choosing a contract, the v2 opt-in, and the `pack.toml` / layering traps.
-
 ## Refresh procedure
 
 This index is **manually maintained**. Upstream movement does not
@@ -166,7 +190,7 @@ To detect drift:
    returns 200:
 
    ```bash
-   grep -oE 'https://[^ )]+' docs/gascity-reference.md \
+   grep -oE 'https://[^ )]+' docs/gascity/README.md \
      | sort -u \
      | while read u; do
          code=$(curl -sIfL -o /dev/null -w '%{http_code}' "$u" 2>/dev/null)
