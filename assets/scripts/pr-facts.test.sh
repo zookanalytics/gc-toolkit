@@ -46,8 +46,8 @@
 # feedback still becomes a routed rework child, the fix unit a must-fix ruling
 # attaches to; a verdict the city posted itself and a rework hand-back are not
 # feedback and open no pass. Each human finding a batch files is stamped with
-# its review round, so a body review that frames its round can be ruled
-# restates.
+# the round of the review carrying it, a reply in an older thread included, so
+# a body review that frames its round can be ruled restates.
 # Write-back: EYES on a routed comment; a question-mark answer naming the visit
 # while a comment's batch waits on an open one, or its finding on a needs-you
 # ruling; once the batch's bead closes and the comment's finding has closed, one
@@ -2983,8 +2983,8 @@ grep -qxF "$VFC|blocks|$FIDF" "$STUB_DEPS" && ok "…beside the first batch's ch
 echo "# each finding is stamped with its review round, so a body review that frames its round can be ruled restates"
 # The reviewer's client submitted the pass as two reviews against one commit:
 # one carrying an inline comment, then a changes-requested review whose body
-# frames it. An inline comment's commit is the one it was first made on, since
-# GitHub moves commit_id as the PR moves.
+# frames it. GitHub moves an inline comment's commit_id as the PR moves, and the
+# comment's round is still the round of the review carrying it.
 store "[$(anchor Vr 616)]"
 printf '%s' "$(prview 616 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_616.json"
 printf '[{"id":9601,"user":{"login":"human1"},"state":"COMMENTED","body":"","commit_id":"c616"},
@@ -2997,6 +2997,28 @@ eq "$(meta "$FRB" finding.review_id)|$(meta "$FRB" finding.review_round)" "9602|
 eq "$(meta "$FRI" finding.review_id)|$(meta "$FRI" finding.review_round)" "9601|human1@c616" "…and the inline comment's names its own review and the same round"
 "$SD/finding.sh" set-disposition --finding "$FRB" --anchor Vr --disposition restates >/dev/null 2>&1; rc=$?
 eq "$rc|$(meta "$FRB" finding.disposition)" "0|restates" "so the body is ruled restates though its own review carries no inline comment"
+
+echo "# a reply in an older thread takes the round of the review carrying it, not the commit its thread began on"
+# The first pass left an inline comment against c617a. The second pass, against
+# c617b, replies in that thread and frames the reply in a changes-requested
+# review of its own. GitHub keeps the thread's c617a as the reply's
+# original_commit_id, while the review carrying the reply names c617b.
+store "[$(anchor Vt 617)]"
+printf '%s' "$(prview 617 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_617.json"
+printf '[{"id":9701,"user":{"login":"human1"},"state":"COMMENTED","body":"","commit_id":"c617a"},
+  {"id":9702,"user":{"login":"human1"},"state":"COMMENTED","body":"","commit_id":"c617b"},
+  {"id":9703,"user":{"login":"human1"},"state":"CHANGES_REQUESTED","body":"Requesting changes for the reply in the old thread.","commit_id":"c617b"}]' > "$GH_DIR/reviews_617.json"
+printf '[{"id":9711,"user":{"login":"human1"},"body":"handle the empty list","path":"a.sh","line":3,"pull_request_review_id":9701,"commit_id":"c617b","original_commit_id":"c617a"},
+  {"id":9712,"user":{"login":"human1"},"body":"the empty list is still not handled","path":"a.sh","line":3,"in_reply_to_id":9711,"pull_request_review_id":9702,"commit_id":"c617b","original_commit_id":"c617a"}]' > "$GH_DIR/comments_617.json"
+out=$(run)
+# The finding on anchor <a> that comment <c> raised.
+comment_finding() { # a c
+  jq -r --arg a "$1" --arg c "$2" '[ .[] | select((.metadata.anchor_bead // "") == $a) | select(((.metadata["finding.comment_id"] // "") | tostring) == $c) | .id ] | .[0] // "<none>"' "$STUB_STORE"; }
+FTB=$(comment_finding Vt 9703); FTR=$(comment_finding Vt 9712); FTO=$(comment_finding Vt 9711)
+eq "$(meta "$FTR" finding.review_id)|$(meta "$FTR" finding.review_round)" "9702|human1@c617b" "the reply's finding takes the round of the review carrying it"
+eq "$(meta "$FTO" finding.review_round)" "human1@c617a" "…while the comment that began the thread keeps the first pass's round"
+"$SD/finding.sh" set-disposition --finding "$FTB" --anchor Vt --disposition restates >/dev/null 2>&1; rc=$?
+eq "$rc|$(meta "$FTB" finding.disposition)" "0|restates" "so the body that frames the reply is ruled restates"
 
 echo "# a multi-lane anchor opens ONE human-lane pass, not a synthetic correctness,arch lane"
 # check_name is the lane the validator rules; mol-validate matches findings by

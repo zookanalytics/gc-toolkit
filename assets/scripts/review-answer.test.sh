@@ -16,8 +16,10 @@
 #             by its key, its digest and dismissed mark read back, what keeps it
 #             live, the review body answers it delivers, the marks it keeps, and
 #             each fix unit's landing read from its close
-#   (ROUND)   the round a review belongs to: many single-comment reviews against
-#             one commit answered by one comment, one review rendering as main
+#   (ROUND)   the round a review belongs to, placed alike by the REST reviews
+#             the intake reads and the GraphQL nodes the write-back reads: many
+#             single-comment reviews against one commit answered by one comment,
+#             one review rendering as main
 #             renders it, a framing body adding no point, a later commit or
 #             another reviewer starting a round of their own, each review of a
 #             round dismissed on its own, and the copies of one round folded
@@ -307,6 +309,9 @@ eq "$(jq -nc "$REVIEW_ROUND_DEF"'[ ra_round_key("op"; "c1"), ra_round_key("op"; 
   "(ROUND) a review round is named by its reviewer and its commit, and by nothing when either is unknown"
 eq "$(jq -nc "$REVIEW_ROUND_DEF"'{reviews:[{databaseId:5,author:{login:"op"},commit:{oid:"c1"}},{databaseId:6,author:{login:"op"},commit:null}]} | ra_rounds(.)')" \
   '{"5":"op@c1","6":"r6"}' "(ROUND) a review the read cannot place by author and commit is a round of its own"
+eq "$(jq -nc "$REVIEW_ROUND_DEF"'[ ([{id:5,user:{login:"op"},commit_id:"c1"},{id:6,user:{login:"op"},commit_id:null}] | ra_review_rounds),
+      ([{id:"PRR_5",databaseId:5,author:{login:"op"},commit:{oid:"c1"}},{id:"PRR_6",databaseId:6,author:{login:"op"},commit:null}] | ra_review_rounds) ]')" \
+  '[{"5":"op@c1"},{"5":"op@c1"}]' "(ROUND) the REST reviews the intake reads and the GraphQL nodes the write-back reads place a review in one round, and leave out one they cannot place"
 case "$REVIEW_ANSWER_DEF" in *"$REVIEW_ROUND_DEF"*) ok "(ROUND) the living answer reads the same round defs the intake stamps" ;;
   *) bad "(ROUND) the living answer reads the same round defs the intake stamps" ;; esac
 # A human finding on review <rid>, raised by its comment <cid> (a body when the
@@ -455,9 +460,10 @@ has "$(printf '%s' "$MODEL" | jq -r "$REVIEW_ANSWER_DEF"'.self = true | ra_dismi
 echo "# (READERS)"
 PF="$HERE/pr-facts.sh"
 has "$(cat "$PF")" '. "$_bd_lib_dir/review-answer.sh"' "(READERS) pr-facts.sh sources this file"
-for d in ra_models ra_render ra_dismiss_note ra_dismiss_member ra_rounds ra_round_key; do
+for d in ra_models ra_render ra_dismiss_note ra_dismiss_member ra_rounds; do
   has "$(cat "$PF")" "$d(" "(READERS) pr-facts.sh reads $d"
 done
+has "$(cat "$PF")" "| ra_review_rounds)" "(READERS) pr-facts.sh reads ra_review_rounds"
 eq "$(grep -c '"$CITY_OWN_DEF$REVIEW_ROUND_DEF"\|"$WB_OWED_REPLY_DEF$REVIEW_ROUND_DEF"' "$PF")" "2" \
   "(READERS) the intake and the review dismissal place a review in its round through these defs"
 has "$(cat "$PF")" 'WB_OWED_REPLY_DEF="$REVIEW_OWED_REPLY_DEF"' \

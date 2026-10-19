@@ -102,13 +102,21 @@ REVIEW_ROUND_DEF='
   def ra_round_key($login; $oid):
     (($login // "") | tostring) as $l | (($oid // "") | tostring) as $o
     | if $l != "" and $o != "" then $l + "@" + $o else "" end;
+  # The round of each review on input that its author and commit place, by
+  # review id. Input is either read of the reviews on the PR: the REST list the
+  # intake reads (id, user.login, commit_id) or the GraphQL nodes the write-back
+  # reads (databaseId, author.login, commit.oid).
+  def ra_review_rounds:
+    reduce (.[]?) as $r ({};
+      ra_round_key($r.author.login // $r.user.login; $r.commit.oid // $r.commit_id) as $k
+      | if $k == "" then . else .[(($r.databaseId // $r.id // 0) | tostring)] = $k end);
   # The round of every review the read of the PR holds ($view.reviews), by
   # review id. A review the read cannot place by author and commit is a round
   # of its own, r<id>.
   def ra_rounds($view):
-    reduce ($view.reviews[]?) as $r ({};
-      (($r.databaseId // 0) | tostring) as $id
-      | .[$id] = (ra_round_key($r.author.login; $r.commit.oid) | if . != "" then . else "r" + $id end));
+    ($view.reviews | ra_review_rounds) as $placed
+    | reduce ($view.reviews[]?) as $r ({};
+        (($r.databaseId // 0) | tostring) as $id | .[$id] = ($placed[$id] // ("r" + $id)));
 '
 # shellcheck disable=SC2034  # read by the scripts that source this file
 REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'

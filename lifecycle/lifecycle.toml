@@ -897,14 +897,14 @@ keys = [
   # (finding.reply_posted), the write-back dismisses THAT review and re-requests
   # its author — per-review, independent of other reviews on the same PR.
   "finding.review_id",
-  # The review round of the review that raised a human finding, stamped by
-  # pr-facts.sh at file time beside finding.review_id: `<login>@<commit oid>`,
-  # the reviewer and the commit the review was submitted against, which for an
-  # inline comment is the commit the comment was first made on. A client can
-  # submit one pass as one review per comment, and the round is that pass.
-  # finding.sh reads it to rule restates on a review body that frames the inline
-  # comments of other reviews in its round. Absent when either half is unknown,
-  # and on a Conversation comment, which belongs to no review.
+  # The review round of the review that raised a human finding, the one
+  # finding.review_id names: `<login>@<commit oid>`, the reviewer and the commit
+  # that review was submitted against. A client can submit one pass as one
+  # review per comment, and the round is that pass. pr-facts.sh stamps it at
+  # file time beside finding.review_id. finding.sh reads it to rule restates on
+  # a review body that frames the inline comments of other reviews in its
+  # round. Absent when either half is unknown, and on a Conversation comment,
+  # which belongs to no review.
   "finding.review_round",
   # The rework child dispatched with the batch that raised a finding, recorded by
   # finding.sh upsert --fix-unit as pr-facts.sh files a human batch routed to

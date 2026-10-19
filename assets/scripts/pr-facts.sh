@@ -978,17 +978,20 @@ feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue
   # its id matches none and the write-back answers those on the PR itself.
   # review_id is the databaseId of the PR review the objection belongs to — its
   # own id for a review body, the parent review's for an inline comment — so the
-  # write-back dismisses one review when all of its findings clear. round names
-  # the reviewer's round the review belongs to (ra_round_key, review-answer.sh):
-  # its author and the commit it was submitted against, which for an inline
-  # comment is the commit the comment was first made on. A Conversation comment
+  # write-back dismisses one review when all of its findings clear. round is the
+  # round of that review (ra_review_rounds, review-answer.sh): its author and the
+  # commit it was submitted against, read off the review in <reviews>, the same
+  # derivation the write-back groups living answers by. An inline comment
+  # carries the commit its thread began on, which for a reply in an older thread
+  # is not the commit its review was submitted against. A review <reviews> does
+  # not place leaves round empty, so none is stamped. A Conversation comment
   # belongs to no review, so it carries neither and holds no review's dismissal.
   { printf '%s\n' "$1"; printf '%s\n' "$2"; printf '%s\n' "$5"; } | \
   jq -nc --argjson rmark "$3" --argjson cmark "$4" --argjson imark "$6" \
          --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF$REVIEW_ROUND_DEF"'
     def body: ((.body // "") | tostring);
     def has_body: ((body | gsub("[[:space:]]"; "")) != "");
-    (input) as $revs | (input) as $cmts | (input) as $icmts |
+    (input) as $revs | (input) as $cmts | (input) as $icmts | ($revs | ra_review_rounds) as $round |
     ([ $revs[] | select(gc_city_own($self; $since) | not)
               | (((.state // "") | tostring)) as $st
               | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
@@ -996,7 +999,7 @@ feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue
               | select(((.id // 0) | tonumber) > $rmark)
               | { login: ((.user.login // "?") | tostring), locus: "PR review", message: body,
                   comment_id: ((.id // 0) | tostring), review_id: ((.id // 0) | tostring),
-                  round: ra_round_key(.user.login; .commit_id) } ])
+                  round: ($round[(.id // 0) | tostring] // "") } ])
   + ([ $cmts[] | select(gc_city_own($self; $since) | not)
               | select(has_body)
               | select(((.id // 0) | tonumber) > $cmark)
@@ -1005,7 +1008,7 @@ feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue
                           + (if ((.line // .original_line) != null) then ":" + ((.line // .original_line) | tostring) else "" end)),
                   message: body, comment_id: ((.id // 0) | tostring),
                   review_id: ((.pull_request_review_id // "") | tostring),
-                  round: ra_round_key(.user.login; .original_commit_id) } ])
+                  round: ($round[(.pull_request_review_id // "") | tostring] // "") } ])
   + ([ $icmts[] | select(gc_city_own($self; $since) | not)
               | select(has_body)
               | select(((.id // 0) | tonumber) > $imark)
