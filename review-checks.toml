@@ -27,24 +27,22 @@
 # `approval` is not a check here: it is a universal merge rule (merge.sh)
 # requiring a standing non-city APPROVED review.
 #
-# The other review file a rig may keep is a check's extension,
+# The other review file a rig may keep is a check's guidance,
 # docs/review-<check>.md, which holds that one check's guidance and nothing
-# else. The dispatch body appends it to the review's note from the commit under
-# review, so it adds to the check's method and never replaces it; absent is the
-# common case. A rig keeps one to add guidance of its own, or to say where it
-# keeps a reference doc the method reads when that doc is not where the method
-# looks.
+# else. The review formula prints it from the commit under review, so it adds
+# to the check's method and never replaces it; absent is the common case. A rig
+# keeps one to add guidance of its own, or to say where it keeps a reference
+# doc the method reads when that doc is not where the method looks.
 #
 # Adding a check. Declare it here as a [checks.<name>] row, and ship its method
 # as skills/review-<name>/SKILL.md, the skill that carries its whole generic
 # method, the boundary lines that keep it in its lane included (what belongs to
-# `correctness`, what to `demo`). Add its name to the checks with a skill in
-# assets/scripts/review-dispatch-body.sh, whose note then names that skill and
-# repeats none of it. The shared specialist stance — enforce through findings,
-# never edit, leave another check's concern to that check — is emitted once by
-# the dispatch body ahead of every specialist check's section, so no skill
-# restates it. The skill stays rig-agnostic: what one rig needs goes in that
-# rig's extension.
+# `correctness`, what to `demo`). The review formulas load the skill named from
+# the check, so nothing else lists it. A specialist check's skill loads the
+# shared specialist stance, skills/specialist-stance, rather than restating it:
+# enforce through findings, never edit, leave another check's concern to that
+# check. The skill stays rig-agnostic: what one rig needs goes in that rig's
+# docs/review-<name>.md.
 
 [checks.correctness]
 purpose = "Is the change correct and safe as merged?"

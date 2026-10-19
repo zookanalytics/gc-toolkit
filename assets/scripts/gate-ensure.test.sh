@@ -1764,7 +1764,7 @@ echo "# the cursor is written as each anchor finishes, so a pass killed mid-anch
 # can be killed inside its second anchor; every other call answers "none".
 KSD="$TMP/kill-scripts"
 mk_sut_dir "$KSD" "$HERE/gate-ensure.sh" "$HERE/lifecycle.sh" "$HERE/lane-state.sh" "$HERE/review-checks.sh"
-cp "$SD/review-dispatch-body.sh" "$SD/escalate.sh" "$KSD/"
+cp "$SD/escalate.sh" "$KSD/"
 export KILL_STARTED="$TMP/kill-started" KILL_RELEASE="$TMP/kill-release"
 cat > "$KSD/finding.sh" <<'FS'
 #!/usr/bin/env bash

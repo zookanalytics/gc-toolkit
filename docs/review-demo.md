@@ -1,6 +1,6 @@
 ---
 name: The demo check on gc-toolkit
-description: The method extension the demo check appends on gc-toolkit reviews. It names this rig's visual surfaces, one per kind of screenshot, and how to capture each from the reviewed commit without writing to the live city.
+description: The guidance the demo check reads on gc-toolkit reviews, which the review formula prints from the reviewed commit. It names this rig's visual surfaces, one per kind of screenshot, and how to capture each from the reviewed commit without writing to the live city.
 ---
 
 # The demo check on gc-toolkit
@@ -23,12 +23,10 @@ particular to this rig.
 
 The board is the app the helm service embeds. The service's `helm-fixture`
 command serves the reviewed commit's board on fixture data, with no city behind
-it (`services/helm/README.md`). Capture it from the review workspace, as every
-capture runs:
-
-```bash
-hb "$SCRIPTS/demo-screenshot.sh" page --script board.md --serve "go run ./cmd/helm-fixture" --port 0 --cwd "$REVIEW_WT/services/helm" --output board.png
-```
+it (`services/helm/README.md`). Capture it from the review workspace under the
+keepalive, as every capture runs, with the pack's `demo-screenshot.sh`:
+`demo-screenshot.sh page --script board.md --serve "go run ./cmd/helm-fixture"
+--port 0 --cwd <worktree>/services/helm --output board.png`.
 
 The board shows `services/helm/web/src/board.fixture.json`, the contract sample,
 which carries every key of the board contract. To show another board, write it
@@ -57,7 +55,7 @@ The verdict says that the board shows fixture data.
 ## Reports a command prints
 
 Run the reviewed commit's script from the reviewed worktree, for example
-`terminal --command "assets/scripts/gc-helm.sh unplaced" --cwd "$REVIEW_WT"`.
+`terminal --command "assets/scripts/gc-helm.sh unplaced" --cwd <worktree>`.
 These scripts read the live city, so capture only a verb that only reads, such
 as `gc-helm.sh unplaced` or `deferred-dispatch.sh list`.
 
