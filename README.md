@@ -90,7 +90,9 @@ render's byte and token counts.
 - [docs/epic-stewardship.md](docs/epic-stewardship.md) — how an epic is held open until its hypothesis is ruled closed, and the Epic Checkpoint layer that is direction
 - [docs/steering.md](docs/steering.md) — how the operator steers the city's work: the intake rule that holds new work for placement, and the park, which holds work under a bead that has not started while work in flight finishes
 - [docs/install.md](docs/install.md) — wiring gc-toolkit into a city
-- [docs/gascity-reference.md](docs/gascity-reference.md) — index of canonical Gas City documentation and the pack's local supplements
+- [docs/human-engagement.md](docs/human-engagement.md) — how the pack engages a person: the subject and visit model, converse sittings, demands and the helm boards
+- [docs/pack-authoring.md](docs/pack-authoring.md) — the pack's own conventions for its formulas, scripts, skills and agents on top of Gas City
+- [docs/gascity-reference.md](docs/gascity-reference.md) — index of canonical Gas City documentation and the pack's local supplements, the `gascity-*` pages that state Gas City behavior only
 - [docs/scratch-reclaim.md](docs/scratch-reclaim.md) — bounding agent scratch retention under the per-uid tmpfs quota
 - [docs/worktree-reclaim.md](docs/worktree-reclaim.md) — reclaiming the per-bead worktrees of closed work, reversibly
 - [docs/review-workspace.md](docs/review-workspace.md) — the directory a review works in, and its removal when the review ends

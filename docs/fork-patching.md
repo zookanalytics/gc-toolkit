@@ -423,7 +423,7 @@ reason; it materializes, runs, surfaces any questions back to you,
 and drains on its own:
 
 ```bash
-bd update <bead> --assignee gascity/gascity-keeper.keeper   # Lane 2
+bd update <bead> --assignee gascity/gascity-keeper.keeper   # assigned work is a wake reason
 ```
 
 Why a pin keeps the keeper up and `gc session wake` does not, and why
