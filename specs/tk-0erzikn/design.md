@@ -35,9 +35,11 @@ review a stage on its own.
    convoy's branch, for the operator to review on its own.
 5. **Merge strategies mean what Gas City says they mean.** The refinery reads
    only the bead's own `merge_strategy`, and nothing reads a convoy's
-   `convoy.merge`. `local` stays work left on its branch for its consumer,
-   whatever its target: the rule for main does not turn it into `mr`, and the
-   refinery refuses it as unsupported, as it does today.
+   `convoy.merge`. The rule for main in decision 3 is the one exception this
+   design adds. `local` stays work left on its branch for its consumer,
+   whatever its target. Nothing turns it into another strategy, nothing turns
+   another strategy into it, and the refinery refuses it as unsupported, as it
+   does today.
 6. **A member is reviewed in its own molecule, and the convoy's PR gets the
    overall review.** A member passes its self-review loop and the refinery's
    gate before it lands. The city's checks and the operator's review run once,
