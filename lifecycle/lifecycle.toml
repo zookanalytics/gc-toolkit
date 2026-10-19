@@ -732,11 +732,14 @@ keys = [
 #   gc-helm.sh resolves a PR number by, so a live review does not make its PR
 #   ambiguous. Never cleared. A PR URL and its number.
 # reviewed_oid — the head a review pinned, and the head a green backing vouches
-#   for. Written by gate-ensure.sh (only when the head resolves), signoff.sh and
-#   review-outcome.sh. signoff.sh reads it as the dispatch pin; lane-state.sh and
-#   the provenance check treat a backing with no reviewed_oid as greening
-#   nothing. Cleared with `--unset` only on signoff.sh's gone-pin path. A
-#   lowercased git oid.
+#   for. Written once on a review by the dispatch: gate-ensure.sh pours a
+#   review only once it has read the branch's head, and its stranded arm writes
+#   one only where the record has none. Nothing moves or clears it afterwards.
+#   signoff.sh refuses a verdict naming another commit, and writes back the
+#   commit it records, which on a review with no pin is the one the verdict
+#   names. review-outcome.sh writes it on the backing outcome it files closed.
+#   lane-state.sh and the provenance check treat a backing with no
+#   reviewed_oid as greening nothing. A lowercased git oid.
 # review_pool — the pool a lane's review dispatches to, written on the review
 #   child by gate-ensure.sh, which reads it back (falling back to
 #   gc.execution_routed_to) to repair a wedged lane. Never cleared. A pool name.

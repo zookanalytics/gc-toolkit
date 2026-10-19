@@ -248,11 +248,10 @@ inflight_review() { # <anchor-id> <check>
 # close_review), so the instant a review leaves inflight_review's live set it
 # enters this closed set: the two hand off on one atomic write, with no window a
 # fresh pour can slip through. A superseded review is excluded (gc.outcome is
-# then superseded, not recorded, and signoff clears its pin on a moved head): that
-# is exactly the head-move or validator-ordered re-review this bar must let
-# through, the same exclusion lane-state.sh's green backing makes. Non-zero rc =
-# the ledger could not answer; the caller holds the dispatch, like every probe
-# here.
+# then superseded, not recorded): that is exactly the head-move or
+# validator-ordered re-review this bar must let through, the same exclusion
+# lane-state.sh's green backing makes. Non-zero rc = the ledger could not
+# answer; the caller holds the dispatch, like every probe here.
 reviewed_at_head() { # <anchor-id> <check> <head>
   local raw
   raw=$(bd_anchor_children "$1" "$ALL_STATUSES") || return 1
