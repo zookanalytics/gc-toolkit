@@ -676,6 +676,48 @@ out=$(pr_finishing_birth ''); rc=$?
 [ "$rc" -ne 0 ] && [ -z "$out" ] && ok "…and so does an empty work order" \
   || bad "…and so does an empty work order (rc=$rc out='$out')"
 
+# --- pr_finishing_settle and route_finishing: settle under a short lock wait, then route ---
+# A writer that logs its call and the lock wait it was handed into the stub
+# gc's own log, so the order of the settle and the route write reads off one log.
+# It refuses to settle tk-stuck, as a lock it cannot take leaves it.
+cat > "$TMP/qp-log" <<'QP'
+#!/usr/bin/env bash
+printf 'qp %s wait=%s\n' "$*" "${QUEUE_PRIORITY_LOCK_WAIT_SECS:-unset}" >> "$STUB_GC_LOG"
+[ "$2" != tk-stuck ] || { echo "queue-priority: settle: could not take the priority lock" >&2; exit 1; }
+echo "queue-priority: settled $2 at P1"
+QP
+chmod +x "$TMP/qp-log"
+store '[{"id":"tk-c1","status":"open","assignee":"","title":"c1","notes":"","metadata":{"anchor_bead":"tk-anc"}},
+        {"id":"tk-stuck","status":"open","assignee":"","title":"stuck","notes":"","metadata":{"anchor_bead":"tk-anc"}}]'
+reset_log
+out=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-log" pr_finishing_settle tk-c1); rc=$?
+eq "$rc|$out" "0|queue-priority: settled tk-c1 at P1" "pr_finishing_settle: the writer's settle, its narrative on stdout"
+eq "$(grep '^qp ' "$STUB_GC_LOG")" "qp settle tk-c1 wait=$PR_FINISHING_LOCK_WAIT_SECS" "…waiting PR_FINISHING_LOCK_WAIT_SECS for the lock"
+eq "$PR_FINISHING_LOCK_WAIT_SECS" "30" "…which is 30 seconds"
+reset_log
+GC_QUEUE_PRIORITY_TOOL="$TMP/qp-log" route_finishing tk-c1 rig/gc-toolkit.polecat >/dev/null; rc=$?
+eq "$rc" "0" "route_finishing: a child that settles is routed"
+eq "$(meta tk-c1 gc.routed_to)" "rig/gc-toolkit.polecat" "…to the pool named"
+SL=$(grep -n '^qp settle tk-c1 wait=30$' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+RL=$(grep -n '^bd update tk-c1 --set-metadata gc.routed_to=rig/gc-toolkit.polecat$' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+if [ -n "$SL" ] && [ -n "$RL" ] && [ "$SL" -lt "$RL" ]; then
+  ok "…settled under the short lock wait before the route is written"
+else
+  bad "route_finishing did not settle before it routed (settle at log line '${SL:-none}', route at '${RL:-none}')"
+fi
+hasnt "$(grep '^bd update tk-c1' "$STUB_GC_LOG")" "--priority" "…and the route carries no priority"
+reset_log
+GC_QUEUE_PRIORITY_TOOL="$TMP/qp-log" route_finishing tk-stuck rig/gc-toolkit.polecat 2>/dev/null; rc=$?
+eq "$rc" "1" "route_finishing: a child that does not settle returns 1"
+eq "$(meta tk-stuck gc.routed_to)" "<absent>" "…and is not routed"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update tk-stuck" "…by any write"
+
+# One copy of the settle-then-route and of the cadence's lock wait: a creator
+# that routed a child itself, or set the wait itself, would let the two drift.
+copies=$(grep -l -E '^[[:space:]]*route_finishing[[:space:]]*\(\)|QUEUE_PRIORITY_LOCK_WAIT_SECS=' "$HERE"/*.sh \
+  | grep -v -e '\.test\.sh$' -e '/bd-lib\.sh$' | sed "s|^$HERE/||" | paste -sd' ' -)
+eq "$copies" "" "(NO-COPY) only bd-lib.sh defines route_finishing or sets the cadence's lock wait"
+
 # --- validation_work_order: the shape mol-validate reads ----------------------
 eq "$(validation_work_order tk-anc correctness abc123)" \
   '{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"correctness","reviewed_oid":"abc123","priority_shift":-1}' \

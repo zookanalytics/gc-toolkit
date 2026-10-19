@@ -940,19 +940,6 @@ mint_rework_verify() { # <bead> <anchor> <branch> <target> <reason> <mode> <pr-u
        and (($m.pr_number // "") | tostring) == $pn) | tostring' 2>/dev/null
 }
 
-route_finishing() { # <child> — route a PR-finishing child to the fix pool at its priority
-  # The route makes the child claimable, so the child is settled first: the
-  # priority writer computes and writes its priority under the store's priority
-  # lock and reads it back (docs/steering.md#settle). The route is then written
-  # alone. No pool can claim the child before the route lands, and a move that
-  # runs between the two writes rewrites the child itself. The settle is the
-  # cadence's (pr_finishing_settle), whose wait for the lock is short, and a
-  # child left unrouted is routed by a later pass. Returns 1, having routed
-  # nothing, when the child does not settle. The caller reads the route back.
-  pr_finishing_settle "$1" >/dev/null || return 1
-  gc bd update "$1" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
-}
-
 finishing_rank() { # <merge_result> <pr_posture> — the rank an anchor's PR-finishing work follows
   # approved or unapproved, as the priority function reads the approval
   # (prio_pr_approved in priority-lib.sh) from the two fields it reads. Prints
@@ -2753,7 +2740,7 @@ REAP_EOF
         echo "$PROG: $id could not form the rework child for PR#$num; retry next pass" >&2
         skipped=$((skipped + 1)); continue
       fi
-      if ! route_finishing "$FIX"; then
+      if ! route_finishing "$FIX" "$FIX_POOL"; then
         echo "$PROG: WARN rework $FIX formed but did not settle at its priority; left unrouted, the stranded arm re-routes it next pass" >&2
         skipped=$((skipped + 1)); continue
       fi
@@ -2973,7 +2960,7 @@ $CBODY"
           rgot=$(printf '%s' "$crow" | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
         fi
         if [ "$rgot" != "$FIX_POOL" ]; then
-          if ! route_finishing "$CFIX"; then
+          if ! route_finishing "$CFIX" "$FIX_POOL"; then
             echo "$PROG: WARN comment rework $CFIX did not settle at its priority; NOT routed and NOT watermarking (retry next pass)" >&2
             skipped=$((skipped + 1)); continue
           fi
@@ -3681,7 +3668,7 @@ $CBODY"
               echo "$PROG: $id could not form the red-check rework for PR#$num; retry next pass" >&2
               skipped=$((skipped + 1)); continue
             fi
-            if ! route_finishing "$RCFIX"; then
+            if ! route_finishing "$RCFIX" "$FIX_POOL"; then
               echo "$PROG: WARN red-check rework $RCFIX formed but did not settle at its priority; left unrouted, the stranded arm re-routes it next pass" >&2
               skipped=$((skipped + 1)); continue
             fi

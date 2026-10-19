@@ -416,21 +416,15 @@ while IFS= read -r row; do
     echo "$PROG: WARN rework $FIX did not record its whole work order; left unrouted (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   fi
-  # The route makes the child claimable, so the child is settled first: the
-  # priority writer computes and writes its priority under the store's priority
-  # lock and reads it back (docs/steering.md#settle). The route is then written
-  # alone. No pool can claim the child before the route lands, and a move that
-  # runs between the two writes rewrites the child itself. The settle is the
-  # cadence's (pr_finishing_settle), whose wait for the lock is short. A child
-  # that does not settle is left unrouted.
-  if ! pr_finishing_settle "$FIX" >/dev/null; then
+  # The child is settled at its priority and then routed (bd-lib.sh's
+  # route_finishing). A child that does not settle is left unrouted.
+  if ! route_finishing "$FIX" "$FIX_POOL"; then
     echo "$PROG: WARN rework $FIX did not settle at its priority; left unrouted (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   fi
   # `gc bd update` returns 0 without having written (the claim guard is one such
-  # path), so the exit code does not establish the route, and an unrouted child
+  # path), so the route's exit code does not establish it, and an unrouted child
   # reported as dispatched is a rework nothing can reach.
-  gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
   frow=$(gc bd show "$FIX" --json 2>/dev/null | scrub)
   rgot=$(printf '%s' "$frow" | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
   if [ "$rgot" != "$FIX_POOL" ]; then
