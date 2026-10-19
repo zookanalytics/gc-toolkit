@@ -225,10 +225,10 @@ A convoy without the `owned` label sits outside step 2 entirely, its
 The fold-in for `polecat/*` targets stays as it is, and so does the rule that an
 `existing_pr` forces `mr`.
 
-So a convoy's members land on its branch with no PR unless told otherwise, and
-"told otherwise" takes one of two forms. A member slung with `--merge mr` is a
-stage the operator reviews on its own. A convoy carrying `convoy.merge=mr` makes
-every member such a stage.
+So an owned convoy's members land on its branch with no PR unless told
+otherwise, and "told otherwise" takes one of two forms. A member slung with
+`--merge mr` is a stage the operator reviews on its own. A convoy carrying
+`convoy.merge=mr` makes every member such a stage.
 
 A member whose gate fails at the refinery keeps its branch. The refinery's
 rejection arms repool the bead with its `metadata.branch` kept, and the rebuild
@@ -301,9 +301,8 @@ Dropping the delete also fixes the rebuild of a direct bead outside any convoy.
   pins the `owned` rule. Its two convoys share one `integration/` target and
   differ only in the label. The owned convoy's member resolves `direct`, and
   the unowned convoy's child resolves `mr`, even when that convoy says
-  `direct`. Cases (9),
-  (13d) and (14) change from a deleted branch to a kept one, and case (18),
-  which tests a refused delete, goes with the delete.
+  `direct`. Cases (9), (13d) and (14) change from a deleted branch to a kept
+  one, and case (18), which tests a refused delete, goes with the delete.
 - `lifecycle/lifecycle.toml`: the `merge_strategy` entry states the order.
 
 ### What the gctk port carries
@@ -335,9 +334,9 @@ label, so the `owned` rule changes no row.
 | tk-x4oc74, review engagement (gc-toolkit) | tk-icggxv | a PR, since the convoy says `mr` | a PR |
 | sl-oudm5, sl-kkn25, sl-63wpu, sl-ffjfk (signal-loom) | eight members, none dispatched | a PR each into the convoy's branch | land with no PR |
 
-In both design convoys the design stage already merged through its own PR. The
-review-path redesign's unit A (tk-nuctjl8) keeps its open PR, #1292. After
-that, each convoy's next PR is its graduation. A convoy that should keep a PR
+In both design convoys the design stage already merged through its own PR. So
+did the review-path redesign's unit A (tk-nuctjl8), through #1292. After the
+change, each convoy's next PR is its graduation. A convoy that should keep a PR
 per member is told so before the change reaches main:
 `gc bd update <convoy> --set-metadata convoy.merge=mr`.
 
