@@ -33,9 +33,9 @@ yet" in this city's dispatch path.
 **Boundaries.** *Why* a dependency edge does not gate a formula dispatch,
 and which record each delivery lane routes, belong to the routing
 contract and live in
-[gascity-routing-model.md](gascity-routing-model.md). Recovering a pour
-that already happened is
-[gascity-dispatch-containment.md](gascity-dispatch-containment.md). This
+[gascity-routing-model.md](gascity-routing-model.md). A pour that already
+happened is ended through Gas City's run cancel, as the pack's decline does
+([pack-authoring.md](pack-authoring.md#a-run-that-must-not-advance-is-cancelled-after-its-wait-is-recorded)). This
 doc does not cover slinging in general, and it does not speak for what a
 dep edge means to `bd` — it defers to `bd`'s own readiness predicate
 rather than restating it. What holds an armed bead is defined once, in

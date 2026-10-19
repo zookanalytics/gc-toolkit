@@ -157,12 +157,17 @@ in this index.
 
 Topics gc-toolkit has captured locally, where upstream coverage is
 missing, partial, or contradicted by a more recent maintainer ruling.
-Entries here are gc-toolkit-authored prose, not upstream pointers.
+Entries here are gc-toolkit-authored prose, not upstream pointers, and each
+states Gas City behavior only, under [the bar](#the-bar). The pack's own
+conventions built on them are its own pages, such as
+[human-engagement.md](human-engagement.md),
+[pack-authoring.md](pack-authoring.md),
+[deferred-dispatch.md](deferred-dispatch.md) and
+[fork-patching.md](fork-patching.md).
 
 - [Gas City and human engagement](gascity-human-engagement.md) — the Gas City primitives a human conversation can ride and how a session and its pane end: human gates and the core orders that surface them, where a question surfaces, the idle ladder, max age, manual sessions, the stop and the backstops.
-- [Gas City agent types](gascity-agents.md) — the agent variants (named singletons, pool workers, conversation visits, patrol overlay, deterministic workers), with their identity, lifecycle, addressing, and work-routing contracts.
-- [Gas City routing model: sling vs assignee vs `--reassign` vs `--on`](gascity-routing-model.md) — four-lane routing model: Lanes 1–3 per the PR #1736 ruling, plus the `--on <formula>` attach the ruling did not address.
-- [Gas City graph.v2 dispatch containment](gascity-dispatch-containment.md) — the recovery procedure for a formula dispatch poured before it should have been: finding every record the pour created and taking delivery away from all of them.
+- [Gas City agent types](gascity-agents.md) — the agent variants where upstream's docs leave them unsaid: scope expansion, named-session demand and patches, wake reasons and turns, pool slots and names, kill and close, the control-dispatcher, `gc session new`, nudge fences, and which fields name a bead's holder.
+- [Gas City routing model](gascity-routing-model.md) — how Gas City delivers a bead to the session that acts on it: what the sling router writes, the claim predicate, how a graph.v2 pour routes its records, what holds a bead, the bd guard that can refuse a detach, and the route the controller restores.
 - [Gas City pack & formula authoring](gascity-packs.md) — what Gas City does with a pack and a formula that its specs leave unsaid: how a v2 step advances and a run is cancelled, what processes `workflow-finalize`, when a check loop gets a fresh context, how a directory import goes live, how builtin pins resolve, and what a formula body can expand.
 
 ## Refresh procedure
