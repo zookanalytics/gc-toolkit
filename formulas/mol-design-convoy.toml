@@ -424,11 +424,15 @@ and the sling left two marks of a pour on the subject: the stamp
 counts whatever that convoy's status. The input convoy was only this pour's
 handle on the subject, and nothing else removes either mark while the subject
 is open, so the hand-off releases both, then closes the input convoy, which
-tracks nothing once its edge is gone and so would never close by itself. It
-refuses to release a subject whose `until` edge does not read back, which would
-leave nothing to close it. A re-run finds the subject through the edge it
-removes last, so one that finds the input convoy tracking nothing only closes
-the convoy:
+tracks nothing once its edge is gone and so would never close by itself. An
+earlier pour over the subject can leave its own input convoy tracking it: a
+sling that failed closes that convoy and leaves the edge, and a cancelled run
+leaves both. The hand-off releases each earlier input convoy that no open
+workflow root names, closing it first when the subject is all it tracks, and
+leaves one that a live run may still use. It refuses to release a subject whose
+`until` edge does not read back, which would leave nothing to close it. A re-run
+finds the subject through this run's own edge, which goes last, so one that
+finds the input convoy tracking nothing only closes the convoy:
 ```bash
 # >>> drain-hand-off
 INPUT_CONVOY="{{convoy_id}}"
@@ -444,9 +448,26 @@ if [ -n "$SUBJECT" ]; then
   RESOLVED_BY=$(gc bd dep list "$SUBJECT" --direction=down -t until --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg c "$CONVOY_ID" '[.[]? | select(.id == $c)] | length' 2>/dev/null)
   [ -n "$CONVOY_ID" ] && [ "${RESOLVED_BY:-0}" -ge 1 ] 2>/dev/null || { echo "$SUBJECT reads no until edge onto its owned convoy '$CONVOY_ID', so nothing would close it; not handing it off" >&2; exit 1; }
   gc bd update "$SUBJECT" --unset-metadata gc.execution_routed_to || { echo "could not clear gc.execution_routed_to on $SUBJECT; not handing it off" >&2; exit 1; }
-  gc bd dep remove "$INPUT_CONVOY" "$SUBJECT" || echo "dep remove of the tracks edge from $INPUT_CONVOY to $SUBJECT returned non-zero (already gone?); reading the edge back" >&2
-  TRACKED=$(gc bd dep list "$SUBJECT" --direction=up -t tracks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg c "$INPUT_CONVOY" 'if type == "array" then ([.[] | select(.id == $c)] | length) else "unreadable" end' 2>/dev/null)
-  [ "$TRACKED" = "0" ] || { echo "input convoy $INPUT_CONVOY still reads as tracking $SUBJECT (${TRACKED:-unreadable}); not closing it" >&2; exit 1; }
+  EARLIER=$(gc bd dep list "$SUBJECT" --direction=up -t tracks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r -s --arg c "$INPUT_CONVOY" 'if length == 1 and (.[0] | type) == "array" then (.[0][] | select(.id != $c and .issue_type == "convoy" and ((.metadata["gc.synthetic"] // "") | tostring) == "true") | .id) else error("unreadable") end' 2>/dev/null) || { echo "cannot read the convoys tracking $SUBJECT; not handing it off" >&2; exit 1; }
+  for C in $(printf '%s' "$EARLIER") "$INPUT_CONVOY"; do
+    if [ "$C" != "$INPUT_CONVOY" ]; then
+      LIVE=$(gc bd list --metadata-field "gc.input_convoy_id=$C" --include-ephemeral --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r -s 'if length == 1 and (.[0] | type) == "array" then ([.[0][] | select(.status != "closed")] | length) else "unreadable" end' 2>/dev/null)
+      case "$LIVE" in
+        0) ;;
+        [1-9]*) echo "earlier input convoy $C is named by an open workflow root, so a run may still use it; leaving its edge, which keeps $SUBJECT open until that edge goes" >&2; continue ;;
+        *) echo "cannot read the workflow roots over earlier input convoy $C; not handing $SUBJECT off" >&2; exit 1 ;;
+      esac
+      ONLY=$(gc convoy status "$C" --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg s "$SUBJECT" 'if (.children | type) == "array" then (.convoy.status != "closed" and ([.children[].id] == [$s])) else "unreadable" end' 2>/dev/null)
+      case "$ONLY" in
+        true) gc convoy close "$C" || { echo "could not close earlier input convoy $C" >&2; exit 1; } ;;
+        false) ;;
+        *) echo "cannot read earlier input convoy $C; not handing $SUBJECT off" >&2; exit 1 ;;
+      esac
+    fi
+    gc bd dep remove "$C" "$SUBJECT" || echo "dep remove of the tracks edge from $C to $SUBJECT returned non-zero (already gone?); reading the edge back" >&2
+    TRACKED=$(gc bd dep list "$SUBJECT" --direction=up -t tracks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg c "$C" 'if type == "array" then ([.[] | select(.id == $c)] | length) else "unreadable" end' 2>/dev/null)
+    [ "$TRACKED" = "0" ] || { echo "convoy $C still reads as tracking $SUBJECT (${TRACKED:-unreadable}); not handing it off" >&2; exit 1; }
+  done
 fi
 CONVOY_STATE=$(gc bd show "$INPUT_CONVOY" --json | tr -d '[:cntrl:]' | jq -r '.[0].status // empty')
 [ "$CONVOY_STATE" = "closed" ] || gc convoy close "$INPUT_CONVOY" || { echo "could not close input convoy $INPUT_CONVOY" >&2; exit 1; }
@@ -465,8 +486,8 @@ done
 gc runtime drain-ack
 ```
 
-**Exit criteria:** the subject carries no `gc.execution_routed_to`, the input
-convoy tracks nothing and is closed, this step is closed, and the session is
-drained.
+**Exit criteria:** the subject carries no `gc.execution_routed_to`, no input
+convoy tracks it unless an open workflow root names that convoy, this run's input
+convoy is closed, this step is closed, and the session is drained.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }

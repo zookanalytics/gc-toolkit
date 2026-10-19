@@ -58,7 +58,7 @@ Its steps:
 | `seed-convoy` | Run `convoy-seed.sh`: create the owned convoy, set `target = integration/<convoy-id>`, cut and push the branch. Record the convoy id on the subject, and write the subject's `until` edge onto the convoy and read it back. |
 | `arm-design` | File the design child, link it parent-child to the convoy, read the link back, and sling `mol-polecat-work`. |
 | `arm-implementation` | File one implementation child that builds the initiative per the design. `design_gated=true`: a `blocks` edge from the design child plus a `deferred-dispatch.sh arm`, so the design's closure dispatches it. `design_gated=false`: sling it now, in parallel. Each edge is read back before anything dispatches. |
-| `drain` | Hand the subject to the convoy: clear the pour's stamp on it, remove the input convoy's `tracks` edge to it, and close the input convoy. Then close the step chain and drain. |
+| `drain` | Hand the subject to the convoy: clear the pour's stamp on it, remove the `tracks` edges to it from this run's input convoy and from any earlier pour's input convoy that no open run names, and close the input convoys left tracking nothing. Then close the step chain and drain. |
 
 Every step re-derives the subject from the input convoy in its own shell and
 records its result on the subject (`gc.design_convoy_id`, `gc.design_child`,
@@ -154,6 +154,13 @@ the input convoy, which then tracks nothing. It refuses to do so while the
 `until` edge does not read back, which would leave nothing to close the subject.
 The run's other records on the subject (`gc.design_convoy_id`, the child ids and
 the `*_armed` markers) are not live work.
+
+An earlier pour over the subject leaves the same kind of edge from its own input
+convoy. A sling that failed closes that convoy and keeps the edge, and a
+cancelled run keeps both. `drain` releases each such convoy that no open
+workflow root names, before it releases its own, and closes it first when the
+subject is all it tracks. A convoy that an open workflow root still names is
+left alone, and its edge keeps the subject open.
 
 The edge says the convoy resolves the subject, however the convoy closes. A
 convoy closed without landing closes its subject too. To keep the subject open,

@@ -10,6 +10,9 @@
 # and the input convoy's `tracks` edge. drain-hand-off, the run's last step,
 # releases both and closes the input convoy, and refuses while the `until` edge
 # does not read back, so a subject is never released with nothing to close it.
+# An earlier pour's input convoy, left tracking the subject by a sling that
+# failed or a run that was cancelled, is released too, before this run's own
+# edge, unless an open workflow root still names it.
 #
 # As in the arm steps, the read-back decides whether an edge landed or went, not
 # the add's or the remove's exit status. A resume re-runs every write over what
@@ -107,9 +110,14 @@ fi
 #   DEP_ADD_RC, DEP_REMOVE_RC, UPDATE_RC, CLOSE_RC, STATUS_RC   exit of that call
 #   LIST_UNTIL    JSON `gc bd dep list <subject> --direction=down -t until` prints
 #   LIST_TRACKS   JSON `gc bd dep list <subject> --direction=up -t tracks` prints
+#                 when a run starts. `gc bd dep remove <convoy> sub-1` drops that
+#                 convoy's rows from it, unless DEP_REMOVE_HOLDS is set, and with
+#                 TRACKS_BREAK_ON_REMOVE set every read after a remove fails
+#   LIST_ROOTS    JSON `gc bd list --metadata-field gc.input_convoy_id=<id>` prints
 #   SHOW_SUBJECT  JSON `gc bd show sub-1` prints
 #   SHOW_INPUT    JSON `gc bd show ic-1` prints
 #   MEMBERS       JSON `gc convoy status ic-1 --json` prints
+#   EARLIER_STATUS JSON `gc convoy status <any other convoy> --json` prints
 # The writes and the reads answer independently, so a non-zero write over a
 # store that reads back as wanted is bd refusing a repeat, and a zero write over
 # a store that does not is a write that reported success and changed nothing.
@@ -118,17 +126,24 @@ mkdir -p "$TMP/bin"
 printf '%s\n' "$*" >> "$GC_LOG"
 case "${1:-} ${2:-} ${3:-}" in
   "bd dep add")    exit "${DEP_ADD_RC:-0}" ;;
-  "bd dep remove") exit "${DEP_REMOVE_RC:-0}" ;;
+  "bd dep remove")
+    if [ -n "${TRACKS_BREAK_ON_REMOVE:-}" ]; then
+      printf '{"error":"simulated"}\n' > "$TRACKS_FILE"
+    elif [ -z "${DEP_REMOVE_HOLDS:-}" ] && jq -e 'type == "array"' "$TRACKS_FILE" >/dev/null 2>&1; then
+      jq -c --arg c "${4:-}" 'map(select(.id != $c))' "$TRACKS_FILE" > "$TRACKS_FILE.new" && mv "$TRACKS_FILE.new" "$TRACKS_FILE"
+    fi
+    exit "${DEP_REMOVE_RC:-0}" ;;
   "bd dep list")
     case " $* " in
       *" -t until "*)  printf '%s\n' "${LIST_UNTIL:-[]}" ;;
-      *" -t tracks "*) printf '%s\n' "${LIST_TRACKS:-[]}" ;;
+      *" -t tracks "*) cat "$TRACKS_FILE" ;;
       *)               printf '[]\n' ;;
     esac
     exit 0 ;;
 esac
 case "${1:-} ${2:-}" in
   "bd update")    exit "${UPDATE_RC:-0}" ;;
+  "bd list")      printf '%s\n' "${LIST_ROOTS:-[]}"; exit 0 ;;
   "bd show")
     case "${3:-}" in
       sub-1) printf '%s\n' "${SHOW_SUBJECT:-[]}" ;;
@@ -136,7 +151,10 @@ case "${1:-} ${2:-}" in
       *)     printf '{"error":"no issue found"}\n' ;;
     esac
     exit 0 ;;
-  "convoy status") [ "${STATUS_RC:-0}" = 0 ] || exit "$STATUS_RC"; printf '%s\n' "${MEMBERS:-}"; exit 0 ;;
+  "convoy status")
+    [ "${STATUS_RC:-0}" = 0 ] || exit "$STATUS_RC"
+    if [ "${3:-}" = ic-1 ]; then printf '%s\n' "${MEMBERS:-}"; else printf '%s\n' "${EARLIER_STATUS:-}"; fi
+    exit 0 ;;
   "convoy close")  exit "${CLOSE_RC:-0}" ;;
 esac
 exit 0
@@ -153,8 +171,9 @@ run_block() {
   block="$(extract "$m")"
   { printf '%s\n' "${block//\{\{convoy_id\}\}/ic-1}"; printf 'printf "past\\n" > "%s"\n' "$TMP/past.flag"; } > "$TMP/block.sh"
   : > "$TMP/gc.log"; rm -f "$TMP/past.flag"
+  printf '%s\n' "${LIST_TRACKS:-[]}" > "$TMP/tracks.json"
   RC=0
-  PATH="$TMP/bin:$PATH" GC_LOG="$TMP/gc.log" SUBJECT="sub-1" CONVOY_ID="cv-1" \
+  PATH="$TMP/bin:$PATH" GC_LOG="$TMP/gc.log" TRACKS_FILE="$TMP/tracks.json" SUBJECT="sub-1" CONVOY_ID="cv-1" \
     "$sh" "$TMP/block.sh" >/dev/null 2>"$TMP/block.err" || RC=$?
 }
 logged()     { grep -qxF -- "$1" "$TMP/gc.log"; }
@@ -173,6 +192,18 @@ INPUT_OPEN='[{"id":"ic-1","status":"open","issue_type":"convoy"}]'
 INPUT_CLOSED='[{"id":"ic-1","status":"closed","issue_type":"convoy"}]'
 TRACKED_BY_INPUT='[{"id":"ic-1","dependency_type":"tracks","issue_type":"convoy","status":"open"}]'
 TRACKED_BY_OTHER='[{"id":"ic-0","dependency_type":"tracks","issue_type":"convoy","status":"open"}]'
+# Earlier pours' input convoys, as Gas City leaves them on the subject: a sling
+# that failed closes its convoy and leaves the edge, and a cancelled run leaves
+# both. ic-1, this run's own, tracks the subject beside them.
+OWN_ROW='{"id":"ic-1","dependency_type":"tracks","issue_type":"convoy","status":"open","metadata":{"gc.synthetic":"true"}}'
+FAILED_SLING='[{"id":"ic-0","dependency_type":"tracks","issue_type":"convoy","status":"closed","metadata":{"gc.synthetic":"true"}},'"$OWN_ROW"']'
+CANCELLED_RUN='[{"id":"ic-0","dependency_type":"tracks","issue_type":"convoy","status":"open","metadata":{"gc.synthetic":"true"}},'"$OWN_ROW"']'
+TRACKED_BY_VISIT='[{"id":"v-1","dependency_type":"tracks","issue_type":"task","status":"open","metadata":{"task_kind":"visit"}},'"$OWN_ROW"']'
+EARLIER_CLOSED='{"convoy":{"id":"ic-0","status":"closed"},"children":[{"id":"sub-1","status":"open"}]}'
+EARLIER_OPEN='{"convoy":{"id":"ic-0","status":"open"},"children":[{"id":"sub-1","status":"open"}]}'
+EARLIER_SHARED='{"convoy":{"id":"ic-0","status":"open"},"children":[{"id":"sub-1","status":"open"},{"id":"sub-2","status":"open"}]}'
+ROOT_CLOSED='[{"id":"r-0","status":"closed"}]'
+ROOT_OPEN='[{"id":"r-0","status":"in_progress"}]'
 
 STAMP_CLEAR="bd update sub-1 --unset-metadata gc.execution_routed_to"
 EDGE_REMOVE="bd dep remove ic-1 sub-1"
@@ -212,7 +243,8 @@ for sh in "${SHELLS[@]}"; do
 
   # --- drain-hand-off ---
   export MEMBERS="$ONE_MEMBER" STATUS_RC=0 SHOW_SUBJECT="$SUBJECT_OK" LIST_UNTIL="$UNTIL_OK" \
-    UPDATE_RC=0 DEP_REMOVE_RC=0 LIST_TRACKS='[]' SHOW_INPUT="$INPUT_OPEN" CLOSE_RC=0
+    UPDATE_RC=0 DEP_REMOVE_RC=0 LIST_TRACKS='[]' SHOW_INPUT="$INPUT_OPEN" CLOSE_RC=0 \
+    LIST_ROOTS='[]' EARLIER_STATUS="$EARLIER_CLOSED"
   run_block drain-hand-off "$sh"
   eq "$RC" "0" "[$sh] hand-off: a subject with a verified until edge is handed off"
   logged "$STAMP_CLEAR" && ok "[$sh] hand-off: the pour's stamp is cleared" \
@@ -248,25 +280,100 @@ for sh in "${SHELLS[@]}"; do
     || bad "[$sh] hand-off: went on past a failed stamp clear (rc=$RC)"
   export UPDATE_RC=0
 
-  export DEP_REMOVE_RC=0 LIST_TRACKS="$TRACKED_BY_INPUT"
+  export DEP_REMOVE_RC=0 DEP_REMOVE_HOLDS=1 LIST_TRACKS="$TRACKED_BY_INPUT"
   run_block drain-hand-off "$sh"
   stopped && not_logged "convoy close" \
     && ok "[$sh] hand-off: a remove that exits 0 but still reads back stops before the convoy closes" \
     || bad "[$sh] hand-off: closed an input convoy that still tracks the subject (rc=$RC)"
+  unset DEP_REMOVE_HOLDS
 
   export LIST_TRACKS='{"error":"simulated"}'
   run_block drain-hand-off "$sh"
-  stopped && not_logged "convoy close" \
-    && ok "[$sh] hand-off: an unreadable tracks read stops before the convoy closes" \
-    || bad "[$sh] hand-off: an unreadable tracks read was taken for a removed edge (rc=$RC)"
+  stopped && not_logged "bd dep remove" && not_logged "convoy close" \
+    && ok "[$sh] hand-off: an unreadable tracks read stops it before any edge goes" \
+    || bad "[$sh] hand-off: an unreadable tracks read was taken for no earlier convoy (rc=$RC)"
 
-  # A convoy other than this run's own tracking the subject is not this run's to
-  # release; its own edge is all the hand-off reads back.
+  export LIST_TRACKS='[]' TRACKS_BREAK_ON_REMOVE=1
+  run_block drain-hand-off "$sh"
+  stopped && not_logged "convoy close" \
+    && ok "[$sh] hand-off: an unreadable read-back stops before the convoy closes" \
+    || bad "[$sh] hand-off: an unreadable read-back was taken for a removed edge (rc=$RC)"
+  unset TRACKS_BREAK_ON_REMOVE
+
+  # A convoy tracking the subject that is no synthetic input convoy, a planned
+  # batch say, is not this run's to release, and neither is a tracks edge from a
+  # bead that is no convoy, such as a visit's.
   export LIST_TRACKS="$TRACKED_BY_OTHER"
   run_block drain-hand-off "$sh"
   eq "$RC" "0" "[$sh] hand-off: another convoy's edge does not stop this run's release"
-  not_logged "bd dep remove ic-0" && ok "[$sh] hand-off: another convoy's edge is left alone" \
-    || bad "[$sh] hand-off: removed another convoy's edge"
+  not_logged "bd dep remove ic-0" && not_logged "convoy status ic-0" \
+    && ok "[$sh] hand-off: a convoy that is no input convoy is left alone" \
+    || bad "[$sh] hand-off: released a convoy that is no input convoy"
+
+  export LIST_TRACKS="$TRACKED_BY_VISIT"
+  run_block drain-hand-off "$sh"
+  eq "$RC" "0" "[$sh] hand-off: a visit's tracks edge does not stop this run's release"
+  not_logged "bd dep remove v-1" && ok "[$sh] hand-off: a visit's tracks edge is left alone" \
+    || bad "[$sh] hand-off: removed a visit's tracks edge"
+
+  # Earlier pours' input convoys. Each one no open workflow root names is
+  # released before this run's own edge goes, so a step that stops on one still
+  # finds the subject when it re-runs. A failed sling's convoy is already closed
+  # and only loses its edge. A cancelled run's convoy is still open, and it is
+  # closed first while the subject is all it tracks.
+  export LIST_TRACKS="$FAILED_SLING" LIST_ROOTS='[]' EARLIER_STATUS="$EARLIER_CLOSED"
+  run_block drain-hand-off "$sh"
+  eq "$RC" "0" "[$sh] earlier: a failed sling's input convoy does not stop the hand-off"
+  logged "bd dep remove ic-0 sub-1" && ok "[$sh] earlier: a failed sling's edge is removed" \
+    || bad "[$sh] earlier: a failed sling's edge is left on the subject"
+  not_logged "convoy close ic-0" && ok "[$sh] earlier: a convoy already closed is not closed again" \
+    || bad "[$sh] earlier: closed a convoy that was already closed"
+  logged "$EDGE_REMOVE" && [ "$(line_of "bd dep remove ic-0 sub-1")" -lt "$(line_of "$EDGE_REMOVE")" ] \
+    && ok "[$sh] earlier: an earlier edge goes before this run's own" \
+    || bad "[$sh] earlier: this run's own edge went first, or not at all"
+  logged "$INPUT_CLOSE" && ok "[$sh] earlier: this run's input convoy is closed" \
+    || bad "[$sh] earlier: this run's input convoy is left open"
+
+  export LIST_TRACKS="$CANCELLED_RUN" LIST_ROOTS="$ROOT_CLOSED" EARLIER_STATUS="$EARLIER_OPEN"
+  run_block drain-hand-off "$sh"
+  eq "$RC" "0" "[$sh] earlier: a cancelled run's input convoy does not stop the hand-off"
+  logged "convoy close ic-0" && logged "bd dep remove ic-0 sub-1" \
+    && [ "$(line_of "convoy close ic-0")" -lt "$(line_of "bd dep remove ic-0 sub-1")" ] \
+    && ok "[$sh] earlier: a cancelled run's convoy is closed, then its edge removed" \
+    || bad "[$sh] earlier: a cancelled run's convoy was not closed before its edge went"
+
+  export EARLIER_STATUS="$EARLIER_SHARED"
+  run_block drain-hand-off "$sh"
+  eq "$RC" "0" "[$sh] earlier: a convoy that tracks another bead does not stop the hand-off"
+  not_logged "convoy close ic-0" && logged "bd dep remove ic-0 sub-1" \
+    && ok "[$sh] earlier: a convoy that tracks another bead loses the subject's edge and stays open" \
+    || bad "[$sh] earlier: closed a convoy that tracks another bead, or kept the subject's edge"
+
+  export EARLIER_STATUS="$EARLIER_OPEN" LIST_ROOTS="$ROOT_OPEN"
+  run_block drain-hand-off "$sh"
+  eq "$RC" "0" "[$sh] earlier: a convoy an open root names does not stop this run's release"
+  not_logged "bd dep remove ic-0" && not_logged "convoy close ic-0" \
+    && ok "[$sh] earlier: a convoy an open root names is left alone" \
+    || bad "[$sh] earlier: released a convoy a live run may still use"
+  logged "$EDGE_REMOVE" && ok "[$sh] earlier: this run's own edge still goes" \
+    || bad "[$sh] earlier: this run's own edge was left"
+  grep -q 'open workflow root' "$TMP/block.err" \
+    && ok "[$sh] earlier: leaving it is reported" || bad "[$sh] earlier: the convoy was left silently"
+
+  # A read or write about an earlier convoy that fails stops the step before
+  # this run's own edge goes, so a re-run finds the subject and tries again.
+  for c in 'an unreadable root read:LIST_ROOTS={"error":"simulated"}' 'an unreadable earlier convoy:EARLIER_STATUS=' \
+           'a close that fails:CLOSE_RC=1' 'an edge that will not go:DEP_REMOVE_HOLDS=1'; do
+    what="${c%%:*}"; set_env="${c#*:}"
+    export LIST_TRACKS="$CANCELLED_RUN" LIST_ROOTS='[]' EARLIER_STATUS="$EARLIER_OPEN" CLOSE_RC=0
+    export "${set_env?}"
+    run_block drain-hand-off "$sh"
+    stopped && not_logged "$EDGE_REMOVE" && not_logged "$INPUT_CLOSE" \
+      && ok "[$sh] earlier: $what stops it before this run's own edge goes" \
+      || bad "[$sh] earlier: $what still released this run's own edge (rc=$RC)"
+  done
+  unset DEP_REMOVE_HOLDS
+  export LIST_TRACKS='[]' LIST_ROOTS='[]' EARLIER_STATUS="$EARLIER_CLOSED" CLOSE_RC=0
 
   # resume: the edge went in the failed first pass, bd refuses the repeat
   export DEP_REMOVE_RC=1 LIST_TRACKS='[]'
