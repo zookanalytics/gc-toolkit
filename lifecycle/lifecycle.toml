@@ -1129,7 +1129,7 @@ keys = [
   # and writes the rank once every bead of it has settled, turning a record of
   # the other rank unsettled before the first settle. Absent means no pass
   # recorded a rank, which a pass in pull_request settles and a full pass leaves
-  # alone elsewhere. One of the three words.
+  # alone elsewhere. A present value is approved, unapproved or unsettled.
   "pr_finishing_settled",
 ]
 
