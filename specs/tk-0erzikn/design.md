@@ -36,7 +36,7 @@ review a stage on its own.
 5. **Merge strategies mean what Gas City says they mean.** The refinery reads
    only the bead's own `merge_strategy`, and nothing reads a convoy's
    `convoy.merge`. `local` stays work left on its branch for its consumer,
-   whatever its target: the main rule does not turn it into `mr`, and the
+   whatever its target: the rule for main does not turn it into `mr`, and the
    refinery refuses it as unsupported, as it does today.
 6. **A member is reviewed in its own molecule, and the convoy's PR gets the
    overall review.** A member passes its self-review loop and the refinery's
@@ -275,9 +275,7 @@ Two lines change in `formulas/mol-refinery-patrol.toml`:
 2. The `merge-strategy-resolve` block, at both of its call sites, resolves a
    bead that would land `direct` on the rig's default branch to `mr`, whether
    the bead names `direct` or names no strategy. A bead with no `target` lands
-   on the default branch, so it resolves the same way. An `mr` bead already
-   reaches the default branch through a PR, and a `local` bead passes through
-   unchanged.
+   on the default branch, so it resolves the same way.
 
 So:
 
@@ -323,13 +321,13 @@ delete-on-merge after a PR.
 ### `local`
 
 `local` leaves the work on its branch with no merge and no request, so it lands
-nothing on main and the main rule does not apply to it. The resolver passes it
-through unchanged, whether its target is the default branch, another branch or
-absent. gc-toolkit's refinery has no landing for `local`, so its `merge-push`
-step refuses it as unsupported, as it does today: it transitions nothing and
-escalates the bead for a person to choose a strategy. Gas Town's refinery stops
-on `local` and escalates it the same way. This design neither slings `local`
-nor maps it onto another strategy.
+nothing on main and the rule for main does not apply to it. The resolver passes
+it through unchanged, whether its target is the default branch, another branch
+or absent. gc-toolkit's refinery has no landing for `local`, so its
+`merge-push` step refuses it as unsupported, as it does today: it transitions
+nothing and escalates the bead for a person to choose a strategy. Gas Town's
+refinery stops on `local` and escalates it the same way. This design neither
+slings `local` nor maps it onto another strategy.
 
 ## 3. When a convoy's branch is cut
 
