@@ -847,6 +847,23 @@ LS_REMOTE_MISS="polecat/nh-green" FAKE_READY="$TMP/nh-ready.json" run_sweep ABSE
 eq "$RC" "0" "a pass with an unread head completes"
 eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "nh-green" "the same anchor with no head to read is a candidate, not gated"
 
+echo "── every pre-open anchor's head comes from one ls-remote ──"
+# One call names every branch, so a slow origin costs the pass one bounded read,
+# and each anchor still finds its own head in it.
+printf '%s\n' '[{"id":"nh-green","title":"pre-open, backed","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/nh-green"}},{"id":"nh-two","title":"pre-open, backed too","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/nh-two"}}]' > "$TMP/nh2-ready.json"
+backing nh-two codex
+: > "$TMP/ls-remote.log"
+LS_REMOTE_LOG="$TMP/ls-remote.log" FAKE_READY="$TMP/nh2-ready.json" run_sweep ABSENT
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "" "two backed anchors whose heads read are both gated"
+eq "$(grep -c 'ls-remote' "$TMP/ls-remote.log")" "1" "…from one ls-remote"
+eq "$(cat "$TMP/ls-remote.log")" "ls-remote origin refs/heads/polecat/nh-green refs/heads/polecat/nh-two" "…that names both branches"
+LS_REMOTE_MISS="polecat/nh-two" FAKE_READY="$TMP/nh2-ready.json" run_sweep ABSENT
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "nh-two" "an anchor whose head the one call does not carry is a candidate, and the other stays gated"
+printf '%s\n' '[{"id":"np-plain","title":"no pre-open anchor","issue_type":"task","metadata":{}}]' > "$TMP/np-ready.json"
+: > "$TMP/ls-remote.log"
+LS_REMOTE_LOG="$TMP/ls-remote.log" FAKE_READY="$TMP/np-ready.json" run_sweep ABSENT
+eq "$(grep -c 'ls-remote' "$TMP/ls-remote.log")" "0" "a ready set with no pre-open anchor reads no head"
+
 echo "── holder liveness gates the conversing class (readable session list) ──"
 # Two visits track two ready subjects: one held by a live session (lx-live-1 is
 # in FAKE_SESSIONS), one by a gone session (lx-dead-9 is not). A third subject is

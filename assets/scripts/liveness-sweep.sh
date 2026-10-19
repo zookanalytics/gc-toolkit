@@ -306,14 +306,24 @@ _LS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # on the unit separator, since tab is whitespace to read and an empty check_set
 # would shift the branch into its place.
 LANE_STATE="${GC_LANE_STATE_TOOL:-$_LS_DIR/lane-state.sh}"
-PREOPEN_GREEN_MAP=$(
-  jq -r '.[] | select((.metadata.merge_result // "") == "pre_open_gate")
+_LS_PREOPEN=$(jq -r '.[] | select((.metadata.merge_result // "") == "pre_open_gate")
          | [(.id // ""), (.metadata.check_set // ""), (.metadata.branch // "")]
-         | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' "$READY" 2>/dev/null \
+         | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' "$READY" 2>/dev/null)
+# Every branch's head comes from one ls-remote that names them all, so a slow
+# origin costs the sweep one bounded call, not one per anchor, and a ready set
+# with no such anchor costs none. ls-remote matches a pattern against a ref's
+# tail, so each head is taken from its exact ref.
+_ls_refs=()
+while IFS=$'\037' read -r _aid _acs _abr; do
+  [ -n "$_aid" ] && [ -n "$_abr" ] && _ls_refs+=("refs/heads/$_abr")
+done <<< "$_LS_PREOPEN"
+_LS_HEADS=""
+[ "${#_ls_refs[@]}" -eq 0 ] || _LS_HEADS=$(bounded git ls-remote origin "${_ls_refs[@]}" 2>/dev/null </dev/null)
+PREOPEN_GREEN_MAP=$(
+  printf '%s\n' "$_LS_PREOPEN" \
   | while IFS=$'\037' read -r _aid _acs _abr; do
       [ -n "$_aid" ] && [ -n "$_abr" ] || continue
-      _head=$(bounded git ls-remote origin "refs/heads/$_abr" 2>/dev/null </dev/null \
-              | awk -v r="refs/heads/$_abr" '$2 == r { print $1; exit }')
+      _head=$(printf '%s\n' "$_LS_HEADS" | awk -v r="refs/heads/$_abr" '$2 == r { print $1; exit }')
       [ -n "$_head" ] || continue
       _g=$(bounded "$_LS_DIR/review-checks.sh" --resolve --check-set "$_acs" --through pre-open \
            --at "$_head" 2>/dev/null </dev/null) || continue
