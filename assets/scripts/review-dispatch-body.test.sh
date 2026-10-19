@@ -163,6 +163,7 @@ hasF "$TMP/arch.skill" "This lens holds new surface to the platform's own docume
 hasF "$TMP/arch.skill" 'A converter is a finding on sight.' "(METHOD) …makes a converter between a repo noun and a platform noun a finding"
 hasF "$TMP/arch.skill" '## When triage adds it' "(METHOD) …says when triage adds the arch check"
 hasF "$TMP/arch.skill" 'The first two make the check mandatory' "(METHOD) …and makes new operational surface and a touched warrant mandatory triggers"
+hasF "$TMP/arch.skill" 'neither are tests or the fixtures they use' "(METHOD) …and leaves tests out of operational surface, so a test addition does not force the check"
 # Run outside any repository, so no index declares the check.
 ( cd "$TMP" && env -u GC_RIG_ROOT bash "$SCRIPT" --check-name nonesuch ) > "$TMP/undeclared.out" 2>/dev/null
 hasF "$TMP/undeclared.out" '`nonesuch` check, so nothing says what it judges' "(CHECK) a check no index row declares gets the declared-nowhere note, never a guess"

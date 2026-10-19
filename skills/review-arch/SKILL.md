@@ -65,7 +65,7 @@ warrant covers. Operational surface is:
 - a bead kind or a lifecycle state.
 
 Prompts, skills, checklists, a formula's prose and work queries are not
-operational surface.
+operational surface, and neither are tests or the fixtures they use.
 
 1. **The search came up empty, and the change shows it.** For each piece of new
    surface, the change names the platform primitive it looked for and says why

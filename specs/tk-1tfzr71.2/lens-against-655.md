@@ -33,8 +33,9 @@ nothing else, and to report a verdict without posting it.
   or session", names #655's own shape, so B's copy read "for each object of one
   kind" instead. B's copies are this branch's first commit of the lens. The
   skill's "When triage adds it" section, which tells triage when to add the
-  check and does not bear on the arch verdict, came later, as did wording
-  edits to the extension.
+  check and does not bear on the arch verdict, came later. So did the
+  sentence that leaves tests out of operational surface, and wording edits to
+  the extension.
 
 Both had the same inputs otherwise:
 

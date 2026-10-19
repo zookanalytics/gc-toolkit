@@ -33,9 +33,10 @@ named commit:
   `docs/` in `gastownhall/gascity`, and the engineering docs under that repo's
   `engdocs/`. [gascity-reference.md](gascity-reference.md) indexes them.
 - The packs Gas City bundles. `core` is under `internal/bootstrap/packs/` in
-  the same repo, where its README lists its orders and its `orders/` and
-  `formulas/` directories hold them. `gastown` is published in
-  `gastownhall/gascity-packs`.
+  the same repo. Its orders and formulas are the files in its `orders/` and
+  `formulas/` directories. Its README describes the orders, but the README's
+  table can lag the directory, so list the directory. `gastown` is published
+  in `gastownhall/gascity-packs`.
 - Gas City's source in `gastownhall/gascity`, at upstream `main`.
 - bd's documentation and source in `gastownhall/beads`.
 

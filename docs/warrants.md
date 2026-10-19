@@ -60,7 +60,8 @@ shares only the word ([authority-map.md](authority-map.md)).
     (`engdocs/contributors/dolt-maintenance.md`).
   - Scheduled `gc dolt compact` skips a store below the commit-count threshold
     (`docs/runbooks/dolt-compact.md`). A store stranded below it is reclaimed
-    only by the operator-invoked `gc dolt compact --gc-only`
+    only by an operator, either with `gc dolt compact --gc-only --only-db`
+    against the live server or with the offline `dolt gc` procedure
     (`docs/troubleshooting/dolt-bloat-recovery.md`).
 - **Verified.** 2026-10-19, at `gastownhall/gascity` main 1e05ae624.
 - **Retires when.** The supervisor wires `DOLT_GC`, and the maintenance doc
@@ -74,10 +75,12 @@ shares only the word ([authority-map.md](authority-map.md)).
   [steering.md](steering.md#priority).
 - **Stands in for.** A claim priority derived from the bead a bead follows, such
   as its epic.
-- **Evidence.** Gas City offers ready work in canonical ready order, by the
-  bead's own priority, then `created_at`, then id (`gc ready` in
-  `docs/reference/cli.md`). bd's `ready` sorts by the bead's own priority by
-  default. Neither one's documentation derives a priority from another bead.
+- **Evidence.** Gas City offers ready work in canonical ready order: priority,
+  then `created_at`, then id (`gc ready` in `docs/reference/cli.md`, and the
+  routed-queue policy in `engdocs/architecture/dispatch.md`). The priority is
+  the bead's own field (`readySortPriority` in `internal/beads/query.go`). bd's
+  `ready` sorts by the bead's own priority by default. Neither one's
+  documentation derives a priority from another bead.
 - **Verified.** 2026-10-19, at `gastownhall/gascity` main 1e05ae624 and bd 1.3.1
   (c1c4b642a).
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,
