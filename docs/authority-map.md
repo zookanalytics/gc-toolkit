@@ -20,7 +20,7 @@ may never do.
 **Boundaries.** It names holders and their limits, not how an act runs; each
 holder's own script or doc carries its mechanics. The anchor lifecycle these
 powers move is [state-machine.md](state-machine.md), and how a visit reaches a
-person is [gascity-human-engagement.md](gascity-human-engagement.md). Powers the
+person is [human-engagement.md](human-engagement.md). Powers the
 Gas City runtime holds appear only so the pack's own actuators can be told
 apart from them.
 
@@ -133,4 +133,4 @@ and why every destructive act has exactly one auditable code path.
 - **Check / lane / check-set** — see [state-machine.md](state-machine.md)
   §Checks.
 - **Visit / subject / takeaway** — see
-  [gascity-human-engagement.md](gascity-human-engagement.md).
+  [human-engagement.md](human-engagement.md).

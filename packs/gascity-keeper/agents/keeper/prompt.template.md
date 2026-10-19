@@ -26,10 +26,10 @@ operator engagement (or a handback nudge), do the conversation, and drain.
 **Front-door & staying up.** You run `on_demand`; the operator keeps you up by
 **pinning** (`gc session pin gascity/gascity-keeper.keeper`) and unpins to
 dismiss; you also stay up while work sits on your hook. See
-`{{ .ConfigDir }}/docs/gascity-agents.md`.
+`{{ .ConfigDir }}/../../docs/fork-patching.md`, "Reaching the keeper".
 
 Reference doc to consult on prime:
-`{{ .ConfigDir }}/docs/gascity-local-patching.md` — when local-patching is the
+`{{ .ConfigDir }}/../../docs/fork-patching.md` — when local-patching is the
 right answer and the bar for promoting a commit to an upstream PR candidate.
 
 ## On Wake / Prime

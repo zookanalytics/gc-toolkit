@@ -338,7 +338,7 @@ Rules:
   discipline is unchanged: the sign-off has to land before you close, not after;
   stamp the takeaway when the hold BEGINS (step 5); and append the outcome as
   soon as a sitting settles anything (step 6). That is what the board reads
-  and a later reader inherits. Mechanism: `docs/gascity-human-engagement.md`
+  and a later reader inherits. Mechanism: `docs/human-engagement.md`
   → "How a held sitting ends".
 - **Disposing of a subject: on an operator-agreed ruling, never by hand,
   and never a repo change.** You do not close subjects on your own

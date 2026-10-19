@@ -154,7 +154,7 @@ after the fact.
 ## How humans engage
 
 The human surface is subject / visit / takeaway on native primitives
-([gascity-human-engagement.md](gascity-human-engagement.md) is the reference).
+([human-engagement.md](human-engagement.md) is the reference).
 
 - **A subject bead is the conversation.** Its id is the conversation's
   identity; turns are small child beads that park on the helm board

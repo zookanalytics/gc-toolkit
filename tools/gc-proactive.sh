@@ -595,10 +595,10 @@ cmd_deliverable() {
 # will its own hook ever offer it?" The first reaction's actionable and blocked
 # exits ask it before they address a bead to a named agent (--assign,
 # --then-assign). A named session's hook matches the bead's assignee
-# (docs/gascity-routing-model.md, Lane 2), so an assignment vanishes when no
-# agent is registered under that exact name, when the agent is a pool rather
-# than a named session (a pool's instances match their own identities, never
-# the pool's name), or when its hook reads no store the bead lives in. A
+# (docs/gascity/routing-model.md, "The read side"), so an assignment vanishes
+# when no agent is registered under that exact name, when the agent is a pool
+# rather than a named session (a pool's instances match their own identities,
+# never the pool's name), or when its hook reads no store the bead lives in. A
 # city-scoped agent's hook reads every rig's store; a rig-scoped one reads its
 # own rig's store and the city's. A suspended agent leaves the bead sitting
 # until it resumes.
