@@ -12,10 +12,16 @@
 #   (URL)     a label links only to a comment the read of the PR holds
 #   (RENDER)  the visit callout on top, the count line, the sections in order,
 #             the entries, the folded notes and the trailing mark lines
-#   (MODEL)   one model per review: the comment already on the PR found by its
-#             key, its digest and dismissed mark read back, what keeps it live,
-#             the review body answers it delivers, the marks it keeps, and each
-#             fix unit's landing read from its close
+#   (MODEL)   one model per review round: the comment already on the PR found
+#             by its key, its digest and dismissed mark read back, what keeps it
+#             live, the review body answers it delivers, the marks it keeps, and
+#             each fix unit's landing read from its close
+#   (ROUND)   the round a review belongs to: many single-comment reviews against
+#             one commit answered by one comment, one review rendering as main
+#             renders it, a framing body adding no point, a later commit or
+#             another reviewer starting a round of their own, each review of a
+#             round dismissed on its own, and the copies of one round folded
+#             into one comment losing no mark
 #   (DISMISS) the one-line dismissal note
 #   (READERS) pr-facts.sh is the one writer and sources this file
 # Reads the repo only; no gc, no city, no network.
@@ -140,7 +146,7 @@ eq "$(url '{"cid":"10","body":true}')" "$PRURL#pullrequestreview-10" "(URL) a re
 eq "$(url '{"cid":"99"}')" "" "(URL) a comment the read does not hold gets no link"
 
 echo "# (RENDER)"
-MODEL='{"rid":"10","self":false,"dismissed":"requeued",
+MODEL='{"rid":"10","rids":["10"],"self":false,"members":[{"rid":"10","state":"CHANGES_REQUESTED","dismissed":"requeued"}],
   "points":[
     {"id":"a","section":"worth","label":"Guard rewrites the opt-out","url":"U1","sentence":"You asked for a decision, and the fix chose your second option.","ref":"","answered":true,"ruled":true,"extra":""},
     {"id":"b","section":"done","label":"A refused dismissal tells nobody.","url":"","sentence":"Fixed with your option (a).","ref":"{{gc-commits:k|3}}","answered":true,"ruled":true,"extra":""},
@@ -172,28 +178,28 @@ has "$R" "$MARKER
 <!-- gc-review-answer:r10 -->
 <!-- gc-review-answer:r10:dismissed -->" "(RENDER) it ends with the marker, its mark lines, its review key and the dismissed mark"
 hasnt "$R" "in its thread" "(RENDER) no sentence points at a reply or thread"
-R2=$(printf '%s' "$MODEL" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'.visits = [] | .dismissed = "" | .notes = [] | .points[0].sentence = "Guard rewrites the opt-out" | ra_render($m)')
+R2=$(printf '%s' "$MODEL" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'.visits = [] | .members[0].dismissed = "" | .notes = [] | .points[0].sentence = "Guard rewrites the opt-out" | ra_render($m)')
 case "$R2" in "### Your review"*) ok "(RENDER) with no open visit the count line leads" ;; *) bad "(RENDER) with no open visit the count line leads (got: $R2)" ;; esac
 has "$R2" "- **[Guard rewrites the opt-out.](U1)**
 " "(RENDER) a sentence that only repeats the label is left out"
 hasnt "$R2" "Review dismissed" "(RENDER) an undismissed review says nothing of a dismissal"
 hasnt "$R2" ":dismissed -->" "(RENDER) …and carries no dismissed mark"
-P=$(printf '%s' "$MODEL" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'.visits = [] | .dismissed = "" | .points = [ .points[] | .ruled = false | .answered = false | .section = "progress" | .sentence = "" ] | ra_render($m)')
+P=$(printf '%s' "$MODEL" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'.visits = [] | .members[0].dismissed = "" | .points = [ .points[] | .ruled = false | .answered = false | .section = "progress" | .sentence = "" ] | ra_render($m)')
 has "$P" "### Your review: 3 points, picked up; the ruling is in progress" "(RENDER) at pickup the count line says the ruling is in progress"
 hasnt "$P" "Not ruled yet" "(RENDER) …and no entry repeats it"
 hasnt "$P" "in progress." "(RENDER) …nor adds a count line"
 
-BIG=$(jq -n --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'{rid:"1",self:false,dismissed:"",
+BIG=$(jq -n --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'{rid:"1",self:false,
   points:[{id:"a",section:"done",label:"L",url:"",sentence:("word " * 600),ref:"",answered:true,ruled:true,extra:""}],
   visits:[],notes:[{by:"k",text:("n " * 9000)}],marks:[]} | ra_render($m) | length')
 [ "$BIG" -lt 15000 ] && ok "(RENDER) a long sentence and long notes are clipped, so the comment stays postable ($BIG characters)" \
   || bad "(RENDER) a long sentence and long notes are clipped, so the comment stays postable (got $BIG characters)"
-CLIPPED=$(jq -rn --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'{rid:"1",self:false,dismissed:"",
+CLIPPED=$(jq -rn --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'{rid:"1",self:false,
   points:[{id:"tk-f1",section:"done",label:"L",url:"",sentence:("word " * 600),ref:"",answered:true,ruled:true,extra:""}],
   visits:[],notes:[{by:"tk-k",text:("n " * 9000)}],marks:[]} | ra_render($m)')
 has "$CLIPPED" "… (the full text is on tk-f1)" "(RENDER) a clipped sentence names the finding that holds it whole"
 has "$CLIPPED" "… (the full text is on tk-k)" "(RENDER) …and clipped notes name the fix unit that holds them"
-FENCE=$(jq -rn --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'{rid:"1",self:false,dismissed:"",points:[],visits:[],
+FENCE=$(jq -rn --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'{rid:"1",self:false,points:[],visits:[],
   notes:[{by:"tk-k",text:("Before.\n\n```\n" + ("line\n" * 4000) + "```\n\nAfter.")}],marks:[]} | ra_render($m)')
 eq "$(printf '%s' "$FENCE" | grep -c '^```$')" "2" "(RENDER) notes cut inside a code block get the block closed, so the cut swallows nothing after it"
 has "$FENCE" "</details>" "(RENDER) …and the notes block still closes"
@@ -204,7 +210,7 @@ eq "$(jq -rn "$REVIEW_ANSWER_DEF"'"{{gc-commits:tk-k|11}}" | ra_size')" "102" \
 eq "$(jq -rn "$REVIEW_ANSWER_DEF"'"✅" | ra_size')" "3" "(BUDGET) the size is UTF-8 bytes, never fewer than characters"
 # A review too long for one comment at the loosest caps: forty points, each
 # with a long sentence and a long quoted reply, and long notes from two fix units.
-HUGE=$(jq -cn '{rid:"9",self:false,dismissed:"requeued",
+HUGE=$(jq -cn '{rid:"9",self:false,members:[{rid:"9",state:"DISMISSED",dismissed:"requeued"}],
   points:[ range(40) as $i | {id:("tk-p" + ($i|tostring)),section:(if $i < 5 then "worth" else "done" end),label:("Point " + ($i|tostring)),
            url:"",sentence:("said " * 400),ref:"{{gc-commits:tk-k|1}}",answered:true,ruled:true,extra:("quoted " * 700)} ],
   visits:[{id:"tk-v9",question:"Ship it now?"}],
@@ -224,7 +230,7 @@ case "$HR" in *"$MARKER
 <!-- gc-review-answer:r9 -->
 <!-- gc-review-answer:r9:dismissed -->") ok "(BUDGET) the trailing lines stay whole" ;; *) bad "(BUDGET) the trailing lines stay whole" ;; esac
 # Past the tightest caps, the points are listed from the top until they fit.
-MANY=$(jq -cn '{rid:"8",self:false,dismissed:"",
+MANY=$(jq -cn '{rid:"8",self:false,
   points:[ range(400) as $i | {id:("tk-q" + ($i|tostring)),section:(if $i == 0 then "worth" else "done" end),label:("A point whose label runs long enough to matter " + ($i|tostring)),
            url:"https://github.com/o/r/pull/7#discussion_r1234567890",sentence:("said " * 400),ref:"{{gc-commits:tk-k|1}}",answered:true,ruled:true,extra:""} ],
   visits:[],notes:[],marks:[]}')
@@ -257,7 +263,7 @@ M=$(models "$VIEW2" '{}')
 eq "$(printf '%s' "$M" | jq 'length')" "1" "(MODEL) one model per review: a machine finding and a Conversation comment belong to none"
 eq "$(printf '%s' "$M" | jq -r '.[0].existing.db + " " + .[0].existing.digest')" "900 12345" "(MODEL) the comment on the PR is ours carrying the review key, with its digest read back"
 eq "$(printf '%s' "$M" | jq -r '.[0].existing.url')" "$PRURL#issuecomment-900" "(MODEL) …and its link"
-eq "$(printf '%s' "$M" | jq -r '.[0].dismissed')" "requeued" "(MODEL) a dismissed mark on it reads as the dismissal the writer made"
+eq "$(printf '%s' "$M" | jq -r "$REVIEW_ANSWER_DEF"'.[0] | ra_dismissal')" "requeued" "(MODEL) a dismissed mark on it reads as the dismissal the writer made"
 eq "$(printf '%s' "$M" | jq -r '.[0].marks | join(",")')" "resolved r10" "(MODEL) the marks it carries stand while the plan names none"
 eq "$(models "$VIEW2" '{"10":{"marks":["awaiting:tk-v r10"],"visits":["tk-v"],"swaps":"-"}}' | jq -r '.[0].marks | join(",")')" "awaiting:tk-v r10" "(MODEL) …and give way to the ones it names"
 eq "$(printf '%s' "$M" | jq -r '.[0].live')" "true" "(MODEL) an open finding keeps the review live"
@@ -266,10 +272,10 @@ eq "$(printf '%s' "$M" | jq -r '.[0].notes[0].text')" "notes from K" "(MODEL) th
 eq "$(printf '%s' "$M" | jq -r '[ .[0].points[].id ] | join(",")')" "B,I" "(MODEL) the body leads its inline comments"
 DONE_ROWS=$(printf '%s' "$ROWS" | jq -c 'map(if .id == "I" then .status = "closed" else . end | if .id == "B" then .metadata["finding.reply_posted"] = "1" else . end)')
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "DISMISSED"')" \
-  --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m) | .[0] | [ .live, .dismissed ]')" '[false,"plain"]' \
+  --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m) | .[0] | [ .live, ra_dismissal ]')" '[false,"plain"]' \
   "(MODEL) a dismissed review with every finding closed and nothing owed is not live, and reads dismissed without a re-request claim"
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "DISMISSED" | .requested = ["op"]')" \
-  --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m) | .[0].dismissed')" '"requeued"' \
+  --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m) | .[0] | ra_dismissal')" '"requeued"' \
   "(MODEL) …and reads re-requested when its author has a pending review request, though no comment carries the dismissed mark"
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "COMMENTED"')" \
   --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {"10":{"marks":["resolved r10"],"visits":[],"swaps":"-"}}; {}; $m) | .[0].live')" "true" \
@@ -296,6 +302,149 @@ eq "$(printf '%s' "$DLM" | jq -c '.unstamped')" '["D2"]' "(MODEL) a flagged revi
 has "$(printf '%s' "$DLM" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')" "  > Declined: We keep Y because Z" \
   "(MODEL) …and the rendering it is stamped against carries it"
 
+echo "# (ROUND)"
+eq "$(jq -nc "$REVIEW_ROUND_DEF"'[ ra_round_key("op"; "c1"), ra_round_key("op"; null), ra_round_key(""; "c1") ]')" '["op@c1","",""]' \
+  "(ROUND) a review round is named by its reviewer and its commit, and by nothing when either is unknown"
+eq "$(jq -nc "$REVIEW_ROUND_DEF"'{reviews:[{databaseId:5,author:{login:"op"},commit:{oid:"c1"}},{databaseId:6,author:{login:"op"},commit:null}]} | ra_rounds(.)')" \
+  '{"5":"op@c1","6":"r6"}' "(ROUND) a review the read cannot place by author and commit is a round of its own"
+case "$REVIEW_ANSWER_DEF" in *"$REVIEW_ROUND_DEF"*) ok "(ROUND) the living answer reads the same round defs the intake stamps" ;;
+  *) bad "(ROUND) the living answer reads the same round defs the intake stamps" ;; esac
+# A human finding on review <rid>, raised by its comment <cid> (a body when the
+# two are one id), and the read of a PR whose reviews are <id>:<login>:<commit>:<state>.
+rrow() { # id rid cid disposition status [extra-metadata-object]
+  local x="${6:-}"; [ -n "$x" ] || x='{}'
+  jq -cn --arg id "$1" --arg r "$2" --arg c "$3" --arg d "$4" --arg st "$5" --argjson x "$x" '
+    { id: $id, status: $st, title: ("finding[human]: " + $id),
+      description: ("Locus: " + (if $c == $r then "PR review" else "a.sh:" + $c end) + "\n\n**Point " + $id + ".**\n\nRaised by human:op reviewing anchor A."),
+      metadata: ({ task_kind: "finding", "finding.lane": "human", "finding.disposition": $d,
+                   "finding.comment_id": $c, "finding.review_id": $r } + $x) }'
+}
+rview() { # issue-comments-json review-spec...
+  local ics="$1"; shift
+  jq -cn --argjson ics "$ics" '{ reviews: [ $ARGS.positional[] | split(":") as $p
+      | { databaseId: ($p[0] | tonumber), author: { login: $p[1] }, commit: (if $p[2] == "" then null else { oid: $p[2] } end),
+          state: $p[3], url: "" } ], threads: [], issue_comments: $ics }' --args "$@"
+}
+rmodels() { # rows-json view-json [plan-marks-json] [beads-json]
+  printf '%s' "$1" | jq -c --argjson v "$2" --argjson vl "${3:-"{}"}" --argjson b "${4:-"{}"}" --arg m "$MARKER" \
+    "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; $vl; $b; $m)'
+}
+KB='{"K":{"title":"rework","fix_notes":"Notes from K.","closed":false}}'
+RROWS="[$(rrow F1 501 51 must-fix open '{"finding.fix_unit":"K"}'),$(rrow F2 502 52 must-fix open '{"finding.fix_unit":"K"}'),$(rrow F3 503 53 must-fix open '{"finding.fix_unit":"K"}')]"
+RV=$(rview '[]' 501:op:c1:COMMENTED 502:op:c1:COMMENTED 503:op:c1:COMMENTED)
+RM=$(rmodels "$RROWS" "$RV" '{}' "$KB")
+eq "$(printf '%s' "$RM" | jq -c '[ length, .[0].rid, .[0].rids, (.[0].points | length) ]')" '[1,"501",["501","502","503"],3]' \
+  "(ROUND) three single-comment reviews against one commit are one round: one model, keyed by its lowest review, with three points"
+RR=$(printf '%s' "$RM" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'.[0] | ra_render($m)')
+has "$RR" "### Your review: 3 points" "(ROUND) …one comment counting every point of the round"
+eq "$(printf '%s' "$RR" | grep -c '<summary>Notes from the fix</summary>')" "1" "(ROUND) …with the notes from the fix once"
+eq "$(printf '%s' "$RR" | grep -c '<!-- gc-review-answer:r[0-9]* -->')|$(printf '%s' "$RR" | grep -c 'gc-review-answer:r501 -->')" "1|1" \
+  "(ROUND) …and one key, the lowest review's"
+# One review with a body and inline comments renders as main renders it: the
+# golden below is main's ra_render over this input, byte for byte.
+GROWS='[
+ {"id":"B","status":"closed","title":"finding[human]: s","description":"Locus: PR review\n\nRename the flag before this lands.\n\nRaised by human:op reviewing anchor A.",
+  "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"declined","finding.comment_id":"10","finding.review_id":"10","finding.reply":"the name matches the other scripts"}},
+ {"id":"I","status":"closed","title":"finding[human]: i","description":"Locus: a.sh:1\n\n**Fix the cap.**\n\nRaised by human:op reviewing anchor A.",
+  "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"must-fix","finding.comment_id":"11","finding.review_id":"10","finding.fix_unit":"K","finding.fix_answer":"Fixed as you suggested."}},
+ {"id":"J","status":"open","title":"finding[human]: j","description":"Locus: b.sh:2\n\nShould the retry back off?\n\nRaised by human:op reviewing anchor A.",
+  "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"needs-you","finding.comment_id":"12","finding.review_id":"10","finding.visit":"tk-v","finding.answer":"Should the retry back off?"}}]'
+GVIEW='{"reviews":[{"databaseId":10,"state":"CHANGES_REQUESTED","author":{"login":"op"},"commit":{"oid":"c1"},"url":""}],
+  "threads":[{"comments":{"nodes":[{"databaseId":11,"url":"https://github.com/o/r/pull/7#discussion_r11"}]}},{"comments":{"nodes":[{"databaseId":12,"url":"https://github.com/o/r/pull/7#discussion_r12"}]}}],
+  "issue_comments":[{"databaseId":900,"author":{"login":"bot"},"body":"old\n<!-- gc-writeback -->\n<!-- gc-writeback-mark:resolved r10 -->\n<!-- gc-review-answer:r10 -->\n<!-- gc-review-answer:r10:digest:1 -->"}]}'
+GOLDEN='> [!IMPORTANT]
+> **Needs you: visit tk-v.** Should the retry back off?
+
+### Your review: 3 points, 2 answered so far
+
+1 needs you, 1 worth a look, 1 done.
+
+**Needs you**
+- **[Should the retry back off?](https://github.com/o/r/pull/7#discussion_r12)** (tk-v)
+
+**Worth a look**
+- **[Rename the flag before this lands.](https://github.com/o/r/pull/7#pullrequestreview-10)** Declined: the name matches the other scripts
+
+**Done**
+- **[Fix the cap.](https://github.com/o/r/pull/7#discussion_r11)** Fixed as you suggested.{{gc-commits:K|11}}
+
+<details>
+<summary>Notes from the fix</summary>
+
+Notes from K.
+
+</details>
+
+<!-- gc-writeback -->
+<!-- gc-writeback-mark:resolved r10 -->
+<!-- gc-review-answer:r10 -->'
+GM=$(rmodels "$GROWS" "$GVIEW" '{"10":{"marks":["resolved r10"],"visits":[],"swaps":"-"}}' '{"K":{"title":"rework","fix_notes":"Notes from K.","closed":true}}')
+eq "$(printf '%s' "$GM" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'.[0] | ra_render($m)')" "$GOLDEN" \
+  "(ROUND) one review with a body and inline comments renders as it did before rounds"
+eq "$(printf '%s' "$GM" | jq -c '.[0] | [ .existing.db, .existing.digest, .strays ]')" '["900","1",[]]' "(ROUND) …finding its one comment, with no copy to fold"
+# A body review that only frames the round: ruled restates, it is no point.
+FROWS="[$(rrow F1 501 51 must-fix open),$(rrow F2 502 52 must-fix open),$(rrow F4 504 504 restates closed)]"
+FRM=$(rmodels "$FROWS" "$(rview '[]' 501:op:c1:COMMENTED 502:op:c1:COMMENTED 504:op:c1:CHANGES_REQUESTED)")
+eq "$(printf '%s' "$FRM" | jq -c '[ length, .[0].rids, [ .[0].points[].id ] ]')" '[1,["501","502","504"],["F1","F2"]]' \
+  "(ROUND) a body review framing the round is in the round and adds no point"
+has "$(printf '%s' "$FRM" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'.[0] | ra_render($m)')" "### Your review: 2 points" "(ROUND) …and no count"
+# A later commit, or another reviewer, starts a round of its own.
+NRM=$(rmodels "[$(rrow F1 501 51 must-fix open),$(rrow F2 502 52 must-fix open),$(rrow F6 601 61 must-fix open),$(rrow F7 701 71 must-fix open)]" \
+  "$(rview '[]' 501:op:c1:COMMENTED 502:op:c1:COMMENTED 601:op:c2:COMMENTED 701:op2:c1:COMMENTED)")
+eq "$(printf '%s' "$NRM" | jq -c '[ .[].rids ] | sort')" '[["501","502"],["601"],["701"]]' \
+  "(ROUND) a review against a new commit, and another reviewer on the same commit, each get a model of their own"
+# Each review of a round is dismissed on its own; the round reads dismissed once
+# no review of it stands changes-requested.
+DROWS="[$(rrow F1 501 51 must-fix closed),$(rrow F4 504 504 must-fix closed),$(rrow F5 505 505 must-fix open)]"
+DM=$(rmodels "$DROWS" "$(rview '[]' 501:op:c1:COMMENTED 504:op:c1:CHANGES_REQUESTED 505:op:c1:CHANGES_REQUESTED)" | jq -c '.[0]')
+eq "$(printf '%s' "$DM" | jq -r "$REVIEW_ANSWER_DEF"'ra_dismissal')" "" "(ROUND) a round whose changes-requested reviews stand reads undismissed"
+D1=$(printf '%s' "$DM" | jq -c "$REVIEW_ANSWER_DEF"'ra_dismiss_member("504")')
+eq "$(printf '%s' "$D1" | jq -c '[ .members[] | [ .rid, .dismissed ] ]')" '[["501",""],["504","requeued"],["505",""]]' \
+  "(ROUND) dismissing one review marks that review alone"
+eq "$(printf '%s' "$D1" | jq -r "$REVIEW_ANSWER_DEF"'ra_dismissal')" "" "(ROUND) …and the round still reads undismissed while another review of it stands"
+DR1=$(printf '%s' "$D1" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')
+has "$DR1" "<!-- gc-review-answer:r501 -->
+<!-- gc-review-answer:r504:dismissed -->" "(ROUND) …though the comment carries that review's dismissed mark under the round's key"
+hasnt "$DR1" "Review dismissed" "(ROUND) …and says nothing of a dismissal yet"
+D2=$(printf '%s' "$D1" | jq -c "$REVIEW_ANSWER_DEF"'ra_dismiss_member("505")')
+has "$(printf '%s' "$D2" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')" "Review dismissed; your review is requested again." \
+  "(ROUND) once every changes-requested review of it is dismissed, the round says so"
+eq "$(printf '%s' "$D1" | jq -r "$REVIEW_ANSWER_DEF"'ra_dismiss_note("U")')" \
+  "Your review: 3 points, 2 answered so far (U). Dismissal is not approval; the merge still gates on an explicit approving review." \
+  "(ROUND) a review's dismissal note carries the count line of its round and the round's comment"
+# The copies of one round: the city answered each review on its own. The round
+# keeps the copy a dismissal note names, takes every mark the copies carry, and
+# names the others to delete. A comment keyed to another round, or quoting a key
+# above its own trailer, is no copy.
+HROWS="[$(rrow F1 501 51 must-fix closed),$(rrow B2 502 502 declined closed '{"finding.reply":"kept as is","finding.reply_posted":"1"}'),$(rrow F2 502 52 must-fix closed),$(rrow B3 503 503 must-fix closed),$(rrow G1 777 77 must-fix open)]"
+HICS='[{"databaseId":900,"author":{"login":"bot"},"body":"a\n<!-- gc-writeback -->\n<!-- gc-review-answer:r501 -->\n<!-- gc-review-answer:r501:digest:1 -->"},
+  {"databaseId":901,"author":{"login":"bot"},"body":"b\n<!-- gc-writeback -->\n<!-- gc-writeback-mark:resolved r502 -->\n<!-- gc-review-answer:r502 -->\n<!-- gc-review-answer:r502:digest:2 -->"},
+  {"databaseId":902,"author":{"login":"bot"},"body":"c\n<!-- gc-writeback -->\n<!-- gc-writeback-mark:resolved r503 -->\n<!-- gc-review-answer:r503 -->\n<!-- gc-review-answer:r503:dismissed -->\n<!-- gc-review-answer:r503:digest:3 -->"},
+  {"databaseId":903,"author":{"login":"bot"},"body":"d\n<!-- gc-writeback -->\n<!-- gc-review-answer:r777 -->\n<!-- gc-review-answer:r777:digest:4 -->"},
+  {"databaseId":904,"author":{"login":"bot"},"body":"quoting <!-- gc-review-answer:r501 --> in a note\n<!-- gc-writeback -->\n<!-- gc-writeback-mark:resolved i5 -->"}]'
+HV=$(rview "$HICS" 501:op:c1:COMMENTED 502:op:c1:COMMENTED 503:op:c1:DISMISSED 777:op2:c1:COMMENTED)
+HM=$(rmodels "$HROWS" "$HV" | jq -c '.[] | select(.rid == "501")')
+eq "$(printf '%s' "$HM" | jq -c '[ .rids, .existing.db, .existing.digest, .strays ]')" '[["501","502","503"],"902","3",["900","901"]]' \
+  "(ROUND) the round keeps the copy its dismissal note names, its digest read back, and names the others to delete"
+eq "$(printf '%s' "$HM" | jq -c '.marks')" '["resolved r502","resolved r503"]' "(ROUND) …every mark its copies carry"
+eq "$(printf '%s' "$HM" | jq -c '[ .members[] | [ .rid, .dismissed ] ]')" '[["501",""],["502",""],["503","requeued"]]' "(ROUND) …and every dismissed mark"
+has "$(printf '%s' "$HM" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')" "$MARKER
+<!-- gc-writeback-mark:resolved r502 -->
+<!-- gc-writeback-mark:resolved r503 -->
+<!-- gc-review-answer:r501 -->
+<!-- gc-review-answer:r503:dismissed -->" "(ROUND) …all of which the comment it keeps carries, under the round's key"
+eq "$(rmodels "$HROWS" "$HV" | jq -c '[ .[] | select(.rid == "777") | .existing.db, .strays ]')" '["903",[]]' \
+  "(ROUND) a comment keyed to another round stays that round's"
+eq "$(rmodels "$HROWS" "$(printf '%s' "$HV" | jq -c '.issue_comments |= map(select(.databaseId != 902))')" | jq -c '.[] | select(.rid == "501") | [ .existing.db, .strays ]')" \
+  '["900",["901"]]' "(ROUND) with no copy a dismissal note names, the round keeps the earliest"
+# Once the copy it keeps has been edited, it carries the round's key; a pass
+# whose deletes failed finds it again by its dismissed mark.
+HEDIT='{"databaseId":902,"author":{"login":"bot"},"body":"c\n<!-- gc-writeback -->\n<!-- gc-writeback-mark:resolved r503 -->\n<!-- gc-review-answer:r501 -->\n<!-- gc-review-answer:r503:dismissed -->\n<!-- gc-review-answer:r501:digest:9 -->"}'
+eq "$(rmodels "$HROWS" "$(printf '%s' "$HV" | jq -c --argjson e "$HEDIT" '.issue_comments |= map(if .databaseId == 902 then $e else . end)')" | jq -c '.[] | select(.rid == "501") | [ .existing.db, .existing.digest, .strays ]')" \
+  '["902","9",["900","901"]]' "(ROUND) a copy keyed to the round and carrying a dismissed mark is still the one the round keeps"
+eq "$(rmodels "$HROWS" "$HV" '{"502":{"marks":["awaiting:tk-v r502"],"visits":["tk-v"],"swaps":"-"}}' | jq -c '.[] | select(.rid == "501") | .marks')" \
+  '["awaiting:tk-v r502","resolved r503"]' "(ROUND) a mark the plan names for a review replaces that review's marks alone"
+
 echo "# (DISMISS)"
 N=$(printf '%s' "$MODEL" | jq -r "$REVIEW_ANSWER_DEF"'ra_dismiss_note("U")')
 eq "$N" "Your review: 3 points, all answered (U). Dismissal is not approval; the merge still gates on an explicit approving review." \
@@ -306,9 +455,11 @@ has "$(printf '%s' "$MODEL" | jq -r "$REVIEW_ANSWER_DEF"'.self = true | ra_dismi
 echo "# (READERS)"
 PF="$HERE/pr-facts.sh"
 has "$(cat "$PF")" '. "$_bd_lib_dir/review-answer.sh"' "(READERS) pr-facts.sh sources this file"
-for d in ra_models ra_render ra_dismiss_note; do
+for d in ra_models ra_render ra_dismiss_note ra_dismiss_member ra_rounds ra_round_key; do
   has "$(cat "$PF")" "$d(" "(READERS) pr-facts.sh reads $d"
 done
+eq "$(grep -c '"$CITY_OWN_DEF$REVIEW_ROUND_DEF"\|"$WB_OWED_REPLY_DEF$REVIEW_ROUND_DEF"' "$PF")" "2" \
+  "(READERS) the intake and the review dismissal place a review in its round through these defs"
 has "$(cat "$PF")" 'WB_OWED_REPLY_DEF="$REVIEW_OWED_REPLY_DEF"' \
   "(READERS) the owed-reply set the reply arm and the dismissal read is built on these defs, so it cannot drift from the living answer's"
 has "$(cat "$PF")" 'ra_ruled_reply($disp)' "(READERS) …and a thread reply leads with its ruling through the same def"

@@ -1217,9 +1217,10 @@ eq "$(bstatus "visS")" "open" "…and leaves its visit to the operator"
 eq "$(bstatus "$FT")" "open" "…and leaves one on an open anchor waiting on its visit"
 
 # ---------------------------------------------------------------------------
-# restates: a human review body that only frames its review's own inline
-# comments closes as no point of its own, with no edge and no answer owed. It
-# takes only a review body whose review raised another finding.
+# restates: a human review body that only frames the inline comments of its
+# review round closes as no point of its own, with no edge and no answer owed.
+# It takes only a review body whose review, or review round, raised another
+# finding.
 # ---------------------------------------------------------------------------
 : > "$STUB_DEPS"
 store '[{"id":"tk-ancR","status":"open","assignee":"","title":"ancR","notes":"","metadata":{"merge_result":"pull_request","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
@@ -1238,7 +1239,7 @@ eq "$(meta "$FRB" 'finding.disposition')" "restates" "…recording restates"
 eq "$(bstatus "$FRB")" "closed" "…closing the finding"
 eq "$(meta "$FRB" 'finding.reply')" "<absent>" "…owing no answer"
 hasnt "$(deps)" "$FRB|blocks|" "…and holding nothing"
-has "$(notes "$FRB")" "restates its review's inline comments: it lists the inline finding" "…with its reason in the notes"
+has "$(notes "$FRB")" "restates the inline comments of its review round: it lists the inline finding" "…with its reason in the notes"
 eq "$(meta "$FRB" 'finding.label')" "Summary of the inline points" "…and the label the ruling gave it"
 # A body ruled must-fix, then restates, gives up that hold only once its close
 # has landed: a refused close leaves it must-fix, open and still blocking the
@@ -1256,6 +1257,24 @@ gc bd dep fuRb --blocks "$FRM" >/dev/null
 STUB_ENFORCE_BLOCKS=1 "$SUT" set-disposition --finding "$FRM" --anchor tk-ancR --disposition restates; rc=$?
 eq "$rc|$(meta "$FRM" 'finding.disposition')|$(bstatus "$FRM")" "0|restates|closed" "the clean re-run commits restates"
 hasnt "$(deps)" "$FRM|blocks|tk-ancR" "…and releases the hold once it has"
+# A client can submit one pass as one review per comment, so a body review can
+# frame inline comments that other reviews of its round carry. The intake names
+# the round on each finding (finding.review_round).
+round_finding() { # <locus> <message> <comment-id> <review-id> <round>
+  local f
+  f=$(human_finding tk-ancR "$1" "$2" "$3" "$4")
+  gc bd update "$f" --set-metadata "finding.review_round=$5" >/dev/null
+  printf '%s' "$f"
+}
+FRR=$(round_finding "PR review" "Requesting changes for the two inline points of this pass." 9400 9400 johnzook@c94)
+round_finding "d.sh:4" "The lock is never released." 9411 9401 johnzook@c94 >/dev/null
+FRU=$(round_finding "PR review" "A body review whose round raised nothing beside it." 9500 9500 johnzook@c95)
+round_finding "e.sh:5" "An inline point the reviewer left against another commit." 9511 9501 johnzook@c96 >/dev/null
+"$SUT" set-disposition --finding "$FRU" --anchor tk-ancR --disposition restates 2>/dev/null; rc=$?
+eq "$rc|$(bstatus "$FRU")" "1|open" "restates refuses a body review whose round raised nothing beside it, whatever its reviewer raised in another round"
+"$SUT" set-disposition --finding "$FRR" --anchor tk-ancR --disposition restates --reason "it lists the inline points of the pass"; rc=$?
+eq "$rc|$(meta "$FRR" 'finding.disposition')|$(bstatus "$FRR")" "0|restates|closed" \
+  "restates rules a body review that frames inline comments other reviews of its round carry"
 
 # The words a review's living answer shows ride the ruling's own write.
 "$SUT" set-disposition --finding "$FRI" --anchor tk-ancR --disposition declined --reason "already handled" \

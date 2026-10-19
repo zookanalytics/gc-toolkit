@@ -814,9 +814,9 @@ keys = [
   # fix unit lands. deferred files a claimable follow-up bead (gated behind the
   # anchor, its provenance edge --discovered-from the finding) and closes the
   # finding; declined closes it with the reason, no edge. restates closes a human
-  # review body that only frames the review's own inline comments, each a finding
-  # of its own, with no edge and no answer owed: the review's living answer gives
-  # it no entry and no count.
+  # review body that only frames the inline comments of its review round, each a
+  # finding of its own, with no edge and no answer owed: the round's living
+  # answer gives it no entry and no count.
   # needs-you files a visit for the operator, or names one already open on the
   # anchor's feedback, and leaves the finding OPEN — an open finding holds its
   # human review changes-requested until the operator rules the visit holding
@@ -897,6 +897,15 @@ keys = [
   # (finding.reply_posted), the write-back dismisses THAT review and re-requests
   # its author — per-review, independent of other reviews on the same PR.
   "finding.review_id",
+  # The review round of the review that raised a human finding, stamped by
+  # pr-facts.sh at file time beside finding.review_id: `<login>@<commit oid>`,
+  # the reviewer and the commit the review was submitted against, which for an
+  # inline comment is the commit the comment was first made on. A client can
+  # submit one pass as one review per comment, and the round is that pass.
+  # finding.sh reads it to rule restates on a review body that frames the inline
+  # comments of other reviews in its round. Absent when either half is unknown,
+  # and on a Conversation comment, which belongs to no review.
+  "finding.review_round",
   # The rework child dispatched with the batch that raised a finding, recorded by
   # finding.sh upsert --fix-unit as pr-facts.sh files a human batch routed to
   # work. A must-fix ruling hangs its close-ordering edge from this child, never
