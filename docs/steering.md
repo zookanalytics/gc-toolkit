@@ -455,7 +455,8 @@ posture and head write in `pr-facts.sh`, and every transition out of
 `pull_request`, through the lifecycle writer's `exit_sets`
 ([state-machine.md](state-machine.md#the-machine)). Every pass of `pr-facts.sh`
 compares the record of each anchor it reads in `pull_request` with the rank the
-priority function gives that anchor. Every full pass does the same for each live
+priority function gives that anchor, one on a draft PR included: it records a
+draft's head though it reads no posture for it. Every full pass does the same for each live
 anchor that carries a record and rests anywhere else, whichever writer moved it
 there. While the two differ, the pass settles the work, and it records the rank
 only once every bead of it has settled. A record naming the other rank turns

@@ -1999,7 +1999,32 @@ MP_EOF
     reconcile_status_label "$id" "$num"
   fi
 
-  [ "$is_draft" != "true" ] || { skipped=$((skipped + 1)); continue; }
+  # A draft PR's posture is not read, and nothing below runs for it. Its head
+  # is recorded all the same (pr_head_oid), so an approval the posture holds
+  # from another head stops counting, and the anchor's PR-finishing work is
+  # settled at the rank the stored posture and that head give, as the posture
+  # arm below settles a ready PR's. An anchor back in pull_request on a draft
+  # would otherwise keep its work at the rank an earlier stint left, beside new
+  # work born at the rank it follows now, until the PR is ready.
+  if [ "$is_draft" = "true" ]; then
+    IFS=$'\037' read -r dr_p dr_head dr_fs < <(printf '%s' "$row" | jq -r '[
+        (.metadata.pr_posture // ""), (.metadata.pr_head_oid // ""), (.metadata.pr_finishing_settled // "")
+      ] | map(tostring) | join("\u001f")')
+    if [ -n "$head_oid" ] && [ "$dr_head" != "$head_oid" ]; then
+      DR_SETS=(--set "pr_head_oid=$head_oid"); dr_marked=""
+      if [ -n "$dr_fs" ] && [ "$dr_fs" != unsettled ] && rank_moves "$dr_p" "$dr_head" "$dr_p" "$head_oid"; then
+        DR_SETS+=(--set pr_finishing_settled=unsettled); dr_marked=1
+      fi
+      if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request "${DR_SETS[@]}" >/dev/null; then
+        dr_head="$head_oid"; [ -z "$dr_marked" ] || dr_fs=unsettled
+        echo "$PROG: $id — PR#$num is a draft; recorded PR head $head_oid"
+      else
+        echo "$PROG: $id — PR#$num draft head record failed; retry next pass" >&2
+      fi
+    fi
+    settle_finishing "$id" pull_request "$dr_p" "$dr_head" "$dr_fs" || true
+    skipped=$((skipped + 1)); continue
+  fi
 
   # --- posture: record what the PR is doing (a record, never a dispatch) --------
   # Placed ahead of every dispatch arm below so an anchor one of them claims

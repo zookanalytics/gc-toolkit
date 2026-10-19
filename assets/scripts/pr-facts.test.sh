@@ -2624,6 +2624,42 @@ eq "$(meta PRF1 pr_head_oid)" "sha-710" "the posture pass records the PR head"
 for b in PRW PRV PCV PRT PST PVP; do eq "$(bprio "$b")" "0" "…and $b reaches P0 in that pass"; done
 eq "$(meta PRF1 pr_finishing_settled)" "approved" "…and the anchor records the approved rank"
 
+# PRF1 approved at sha-710 with its work at P0, repooled, and back in
+# pull_request before any full pass, with a validation pass filed on the way at
+# the rank it then followed. PR#710 now reads as a draft at <head>.
+returned_on_draft() { # <head>
+  prf1 approved approved 0
+  move_prf1 --to unanchored --assignee "" --route "" --unset gc.execution_routed_to --set rejection_reason="base moved; resume by merge"
+  move_prf1 --to pre_open_gate --expect unanchored
+  move_prf1 --to pull_request --expect pre_open_gate
+  store_add "$(finishing PV4 validation ',"check_name":"demo"' | jq -c '.priority = 2')"
+  "$GC_QUEUE_PRIORITY_TOOL" settle PV4 >/dev/null 2>&1
+  printf '%s' "$(prview 710 OPEN BLOCKED MERGEABLE)" | jq -c --arg h "$1" '.isDraft = true | .headRefOid = $h | .reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_710.json"
+  approve 710; echo '[]' > "$GH_DIR/comments_710.json"
+}
+
+echo "# an anchor back in pull_request on a draft PR has its work settled, the old and the new at one rank"
+# The draft's posture is not read, so it still reads approved@sha-710, and the
+# repool left the record unsettled and no PR head. The PR now sits at sha-712.
+# The pass records that head, under which the approval does not count, and
+# settles every bead at P1: the work from before the repool, still at P0, and
+# the validation pass filed since. A pass that skipped the draft whole would
+# leave the old work at P0 beside the new at P1 until the PR is ready.
+returned_on_draft sha-712
+eq "$(bprio PRW)|$(bprio PV4)" "0|1" "the returned anchor's old work is at P0 and its new work at P1"
+out=$(run_posture)
+eq "$(meta PRF1 pr_head_oid)" "sha-712" "the pass records the draft's head"
+eq "$(meta_pinned PRF1 pr_posture)" "approved@sha-710" "…and leaves its posture unread"
+for b in PRW PRV PCV PRT PST PVP PV4; do eq "$(bprio "$b")" "1" "…and settles $b at P1"; done
+eq "$(meta PRF1 pr_finishing_settled)" "unapproved" "…recording the unapproved rank"
+
+echo "# …and on a draft PR still at the head its approval was read at, all of that work at P0"
+returned_on_draft sha-710
+out=$(run_posture)
+eq "$(meta PRF1 pr_head_oid)" "sha-710" "the pass records the draft's head, the one the approval was read at"
+for b in PRW PRV PCV PRT PST PVP PV4; do eq "$(bprio "$b")" "0" "…so $b is at P0"; done
+eq "$(meta PRF1 pr_finishing_settled)" "approved" "…recording the approved rank"
+
 fi # part posture
 
 # ==== part routing: a feedback batch's size, range and ledgers, the

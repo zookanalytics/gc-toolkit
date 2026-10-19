@@ -1136,8 +1136,9 @@ keys = [
   # alone elsewhere. A present value is approved, unapproved or unsettled.
   "pr_finishing_settled",
   # The head of the anchor's PR that pr-facts.sh last read, a commit oid. A pass
-  # writes it in the posture's write whenever it reads a head other than the one
-  # recorded. The priority function counts an approved posture only when the
+  # writes it whenever it reads a head other than the one recorded: in the
+  # posture's write, or in a write of its own for a draft PR, whose posture it
+  # does not read. The priority function counts an approved posture only when the
   # posture's oid is this head (prio_pr_approved in priority-lib.sh), so an
   # approval read at an earlier head ranks no PR-finishing work at P0. Leaving
   # pull_request clears it to empty ([machine] exit_sets), so an anchor that

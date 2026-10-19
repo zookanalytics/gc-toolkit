@@ -432,7 +432,7 @@ non-draft anchor and read off the bead by everything downstream. Declared in
 | `pr_comment_disposition` | `rework:<id>` / `visit:<id>` | what the last outstanding batch was routed to |
 | `pr_provenance_since` | `<UTC instant>` | when `pr-facts.sh` first read the open PR; an unmarked post under the city's login from before it is the city's own |
 | `pr_finishing_settled` | `approved` / `unapproved` / `unsettled` | the rank all of the anchor's PR-finishing work was last settled at, or `unsettled` while a re-rank is owed; absent while no pass has recorded one |
-| `pr_head_oid` | `<oid>` | the PR head `pr-facts.sh` last read; empty once the anchor leaves `pull_request`, until a pass reads the PR again |
+| `pr_head_oid` | `<oid>` | the PR head `pr-facts.sh` last read, a draft's included; empty once the anchor leaves `pull_request`, until a pass reads the PR again |
 
 The postures, in the precedence the derivation applies:
 
