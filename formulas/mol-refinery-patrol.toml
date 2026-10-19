@@ -848,6 +848,7 @@ if [ -z "$LC" ]; then
   gc runtime drain-ack
   exit 1
 fi
+# >>> branch-has-real-change
 branch_has_real_change() {
   # 0-diff/0-commit guard: does <branch-ref> introduce a real change vs its
   # merge-base with <target-ref>? 0 = yes; 1 = empty (REFUSE close-as-merged);
@@ -858,43 +859,60 @@ branch_has_real_change() {
   [ "$(git rev-list --count "$bhrc_base..$2" 2>/dev/null || echo 0)" -ge 1 ] || return 1
   return 0
 }
+# <<< branch-has-real-change
 ```
 
 **0. Refuse a 0-diff branch (both modes).** A close-as-merged or a PR for a
 branch that merges to a no-op is a false completion. Never silently retry. The
 prepared head is the detached prep worktree's HEAD (the rebase step staged it
-there), so resolve that path and read its commit rather than a `temp` branch:
+there), so resolve that path and read its commit rather than a `temp` branch.
+A branch with no change is not always a false completion. `direct-merge-push.sh`
+stamps `direct_landing_sha` on the bead before it pushes, so a target that
+carries the stamped commit holds a direct landing an earlier patrol pushed and
+did not record. The block sends that bead down the direct path, which records
+it:
 ```bash
+# >>> zero-diff-guard
 RIG_ROOT="${GC_RIG_ROOT:-}"
 [ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
 PREP_SHA=$(git -C "$PREP_WT" rev-parse HEAD)
 if ! branch_has_real_change "origin/$TARGET" "$PREP_SHA"; then
-  "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close" --takeaway "the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
-  SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-  done
-  [ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-false-completion --message "Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
-  gc runtime drain-ack
-  exit 1
+  LANDED_SHA=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.direct_landing_sha // empty')
+  if [ -n "$LANDED_SHA" ] && git -C "$RIG_ROOT" merge-base --is-ancestor "$LANDED_SHA" "origin/$TARGET" 2>/dev/null; then
+    echo "origin/$TARGET carries $LANDED_SHA, which a direct landing of $WORK pushed without recording; taking the direct path to record it"
+    MERGE_STRATEGY=direct
+  else
+    "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close" --takeaway "the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
+    SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+      [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+    done
+    [ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-false-completion --message "Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
+    gc runtime drain-ack
+    exit 1
+  fi
 fi
+# <<< zero-diff-guard
 ```
 
 **If MERGE_STRATEGY = "direct":** `direct-merge-push.sh` lands the prepared
 head on `$TARGET` as a fast-forward pushed by its commit id, so nothing is
-checked out for the merge and nothing is left to remove. It verifies the remote
-ref, then records and closes the bead through ONE lifecycle call, handed the
-rig root as `GC_RIG_ROOT`: the writer checks the landing in that checkout. Exit
-3 means a push rejected for branch protection (GH006/GH013/"protected
-branch"/"Changes must be made through a pull request"/"approving
-review"/"Cannot update this protected ref") promoted the bead to
-`merge_strategy=pr`, and the block falls through to the mr block — the prep
-worktree is untouched and still holds the prepared head for the PR push. Any
+checked out for the merge and nothing is left to remove. It stamps the commit
+on the bead as `direct_landing_sha` before the push, verifies the remote ref,
+then records and closes the bead through ONE lifecycle call, handed the rig
+root as `GC_RIG_ROOT`: the writer checks the landing in that checkout. A
+landing it cannot record keeps the stamp, and step 0 sends the bead back here
+on the next patrol. Exit 3 means a push rejected for branch protection
+(GH006/GH013/"protected branch"/"Changes must be made through a pull
+request"/"approving review"/"Cannot update this protected ref") promoted the
+bead to `merge_strategy=pr`, and the block falls through to the mr block — the
+prep worktree is untouched and still holds the prepared head for the PR push.
+Exit 4 means origin/$TARGET moved past the prepared head after the prepare, so
+nothing landed. That is routine, not a fault: the block
+stops without draining, and the next patrol prepares the branch again. Any
 other non-zero exit stops the wisp, and the block leaves the work with the
-refinery; the script's output says what landed, if anything. A prepared head
-that origin/$TARGET moved past while the gate ran lands nothing, and the next
-patrol prepares the branch again.
+refinery; the script's output says what landed, if anything.
 ```bash
 # >>> direct-merge-push
 DMP=""
@@ -907,14 +925,15 @@ DIRECT_RC=0
 case "$DIRECT_RC" in
   0) ;;
   3) MERGE_STRATEGY=mr ;;
+  4) echo "origin/$TARGET moved after $WORK was prepared, so nothing landed; tear down the prep worktree, then jump to next-iteration, and the next patrol prepares $WORK again"; exit 4 ;;
   *) echo "direct-merge-push.sh exited $DIRECT_RC; leaving the work with the refinery"; gc runtime drain-ack; exit 1 ;;
 esac
 # <<< direct-merge-push
 ```
-After a successful direct merge, tear down the prep worktree with
-`refinery-workspace.sh teardown`. It is detached and holds no branch, and the
-rig root's HEAD was never moved, so nothing is restored; a teardown that does
-not complete is cleared by the next rebase step:
+After a successful direct merge, or the block's exit 4, tear down the prep
+worktree with `refinery-workspace.sh teardown`. It is detached and holds no
+branch, and the rig root's HEAD was never moved, so nothing is restored; a
+teardown that does not complete is cleared by the next rebase step:
 ```bash
 # >>> prep-teardown
 WS=""
@@ -926,7 +945,8 @@ if [ -z "$WS" ] || ! "$WS" teardown; then
 fi
 # <<< prep-teardown
 ```
-Then, if delete_merged_branches = "true",
+After exit 4, jump to next-iteration (pour before burn) and delete no branch:
+nothing landed. After a merge, if delete_merged_branches = "true",
 `git -C "$RIG_ROOT" push origin --delete "$BRANCH"`; and if auto_ff_rig_main =
 "true", best-effort ff the rig canonical checkout (`$RIG_ROOT`) when it is on
 `$TARGET` with a clean tree — never abort on its failure.
