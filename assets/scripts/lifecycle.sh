@@ -42,9 +42,10 @@
 # same writer in-process.
 # Exits: 0 ok; 1 illegal edge / --expect mismatch / bd refusal / usage, or no
 # gctk binary to run; 2 post-write verification mismatch (or unreadable bead).
-# CAVEAT (docs/gascity-routing-model.md row 46): clearing an assignee on a bead
-# another actor holds in_progress is refused by bd, and the refusal drops the
-# WHOLE atomic update — a caller that passes --assignee "" must hold the claim.
+# CAVEAT (docs/gascity-routing-model.md, "Clearing an assignee can be refused"):
+# clearing an assignee on a bead another actor holds in_progress is refused by
+# bd, and the refusal drops the WHOLE atomic update — a caller that passes
+# --assignee "" must hold the claim.
 # The detached-state clear reads the status for that reason and stops at open.
 #
 # `gctk lifecycle` (services/gctk/internal/cli/lifecycle.go) implements every
