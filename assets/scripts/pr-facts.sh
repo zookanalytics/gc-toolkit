@@ -58,7 +58,8 @@
 # conversation comment that is not the city's own post (pr-post.sh's
 # gc_city_own: marked by pr-post.sh, or under the city's login before the
 # anchor's provenance cutover, pr_provenance_since) is feedback, whoever posted
-# it, so a model review run under the city's own account routes like a person's.
+# it, so an unmarked review under the city's own login after the cutover routes
+# like a person's.
 # This runs even while the anchor still conflicts: the rework child is
 # prepare_mode=merge, so it brings the branch current as it answers, and the
 # CONFLICTING arm above stands down when feedback is owed rather than file a
@@ -1016,13 +1017,13 @@ foreign_ids() { # <rows-json>
 # The ids of the reviews in <reviews-json> whose body counts as feedback, as a
 # JSON array: not the city's own post (gc_city_own), COMMENTED or
 # CHANGES_REQUESTED, and carrying a body. An unmarked review under our own login
-# after the provenance cutover is a model or operator review run on the city's
-# account, and is feedback like any other. A review with an empty body carries
-# only its inline comments, which the comment space already sees; counting it
-# would leave a posture no comment id can ever answer. CHANGES_REQUESTED counts
-# beside COMMENTED: an operator uses it to mean "change this", and it is the
-# feedback the loop most has to answer. A dismissed review is in neither state,
-# so a dismissal takes its ids out of the batch.
+# after the provenance cutover is not the city's own, so it is feedback like any
+# other. A review with an empty body carries only its inline comments, which the
+# comment space already sees; counting it would leave a posture no comment id
+# can ever answer. CHANGES_REQUESTED counts beside COMMENTED: an operator uses
+# it to mean "change this", and it is the feedback the loop most has to answer.
+# A dismissed review is in neither state, so a dismissal takes its ids out of
+# the batch.
 counted_review_ids() { # <reviews-json>
   printf '%s' "$1" | jq -c --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
     [ .[] | select(gc_city_own($self; $since) | not)
@@ -1123,8 +1124,7 @@ feedback_reviews() { # <reviews-json> <review-mark> — comma-joined review ids
 # >>> unengaged-threads-body
 # The gap the provenance cutover leaves open. arm 7 reads an unmarked post under
 # our own login from before the anchor's cutover as the city's own
-# (unanswered-feedback-body), so a review posted that way — an outside review
-# agent, an operator-run review, a reviewer using the automation's credential —
+# (unanswered-feedback-body), so a review posted that way, whoever posted it,
 # sets no `unanswered` and routes nowhere, and the check stays green across it
 # (lane-state reads the finding and review-outcome beads, never a thread), so
 # nothing re-reviews it. This reads the review THREADS instead. A thread counts
@@ -1218,7 +1218,7 @@ unengaged_holds() { # <id> <num> <head-oid> <row-json> <live-comments-json>
 # whichever path posted the reply and whoever resolved the thread. A reply of
 # ours is a post that is the city's own (gc_city_own): marked by pr-post.sh, or
 # under our login from before the provenance cutover. An unmarked post under our
-# login after it is feedback, an operator's or a model's, and answers nothing.
+# login after it is feedback, whoever posted it, and answers nothing.
 # A thread is answered through the last reply of ours in it, and only once it is
 # resolved. A bare reply is not enough: unengaged_holds counts exactly the
 # unresolved threads a reply of ours left open, so reading a reply here would only
@@ -3211,7 +3211,7 @@ $CBODY"
   if [ -n "$UT_COUNT" ] && [ "$UT_COUNT" -gt 0 ]; then
     UTKEY="pr-unengaged-threads.$num.$head_oid"
     escalate "$id" "$UTKEY" \
-      "PR#$num ($live_url) carries $UT_COUNT unresolved review-thread finding(s) that nothing picked up. They were posted under the automation's own login with no city mark, before this PR's provenance cutover (an outside review agent, or an operator-run review), so the comment-routing arm read them as the city's own and the green check triggered no re-review. Answer each on the PR, file rework, or resolve the threads — the merge is held until this visit closes."
+      "PR#$num ($live_url) carries $UT_COUNT unresolved review-thread finding(s) that nothing picked up. They were posted under the automation's own login with no city mark, before this PR's provenance cutover, so the comment-routing arm read them as the city's own and the green check triggered no re-review. Answer each on the PR, file rework, or resolve the threads — the merge is held until this visit closes."
     UTVID=$(visit_for "$id" "$UTKEY") || UTVID=""
     if [ -z "$UTVID" ]; then
       echo "$PROG: $id — PR#$num carries $UT_COUNT unengaged review thread(s); posture holds the merge but no visit could be filed (retry next pass)" >&2
@@ -4820,12 +4820,11 @@ WB_REVIEW_ANSWERS
           echo "$PROG: $wid — PR#$wnum review $wrid is answered, but its living answer is not on the PR yet; NOT dismissing (retry next pass)" >&2
           continue
         fi
-        # A review under our own login that is feedback (a model review run on the
-        # city's account, unmarked, after the cutover) has no reviewer to re-queue:
-        # the account it would re-request is the one making the request, and
-        # GitHub refuses a re-request of the PR's author. That review is dismissed
-        # without one, so a re-request that can never land does not hold its
-        # dismissal on every pass.
+        # A review under our own login that is feedback (unmarked, posted after the
+        # cutover) has no reviewer to re-queue: the account it would re-request is
+        # the one making the request, and GitHub refuses a re-request of the PR's
+        # author. That review is dismissed without one, so a re-request that can
+        # never land does not hold its dismissal on every pass.
         wrrequeue=1
         [ "$wrlogin" = "$SELF_LOGIN" ] && wrrequeue=0
         wrmsg=$(printf '%s' "$wrm" | jq -r --arg url "$wrurl" "$REVIEW_ANSWER_DEF"'ra_dismiss_note($url)' 2>/dev/null)

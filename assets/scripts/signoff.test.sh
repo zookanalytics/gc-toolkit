@@ -1125,9 +1125,9 @@ hasnt "$(cat "$STUB_GH_LOG")" "reviews/333/dismissals" "a block at the reviewed 
 eq "$(meta tk-anc signoff_dismissed)" "111@$OID_HEAD" "signoff_dismissed pairs the retraction"
 
 echo "# supersede: past the anchor's provenance cutover, only the city's own review is ours to dismiss"
-# The same login runs model reviews (an operator's /code-review) and posts the
-# city's verdicts. Past pr_provenance_since an unmarked review under it is
-# feedback; a marked one, or an unmarked one from before the cutover, is ours.
+# Past pr_provenance_since an unmarked review under the city's login is
+# feedback, whoever posted it; a marked one, or an unmarked one from before the
+# cutover, is ours.
 reset "$(printf '%s' "$ANCHOR_PR" | jq -c '.metadata.pr_provenance_since = "2026-10-07T00:00:00Z"')"
 export STUB_REVIEWS='{"id":444,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'","submitted_at":"2026-10-07T01:00:00Z","body":"model review: fix the race"}
 {"id":555,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'","submitted_at":"2026-10-07T02:00:00Z","body":"verdict\n\n<!-- gc:city -->"}

@@ -1856,7 +1856,7 @@ printf '%s' "$(prview 164 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "C
 printf '[{"id":905,"user":{"login":"gc-city-bot"},"state":"CHANGES_REQUESTED","commit_id":"sha-OLD","submitted_at":"2026-10-07T02:00:00Z"}]' > "$GH_DIR/reviews_164.json"
 : > "$STUB_GH_LOG"
 out=$(run)
-hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "a model review's block is left standing"
+hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "the unmarked review's block is left standing"
 eq "$(meta D5 signoff_dismissed)" "<absent>" "…and no marker is recorded"
 
 echo "# …and a marked CHANGES_REQUESTED past the cutover is ours: dismissed"
@@ -2071,9 +2071,8 @@ eq "$(meta AE7 pr_comment_watermark)" "5601" "…and its comment routes"
 
 echo "# an unmarked reply under our login after the provenance cutover answers nothing"
 # A reply of ours is a post that is the city's own. An unmarked one under our own
-# login after the cutover is feedback, an operator's or a model's run on the
-# city's account, so it answers nothing in the thread it sits in: both comments
-# route.
+# login after the cutover is not, so it is feedback, whoever posted it, and it
+# answers nothing in the thread it sits in: both comments route.
 store "[$(anchor AE10 485 ',"pr_provenance_since":"2026-10-07T00:00:00Z"')]"
 printf '%s' "$(prview 485 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_485.json"
 echo '[]' > "$GH_DIR/reviews_485.json"
@@ -2326,10 +2325,10 @@ eq "$(meta CU pr.conversation)" "<absent>" "a caught-up anchor with no prior pos
 echo "# conversation axis — an unmarked review under our login past the cutover is an utterance, never quiet"
 # gc_city_own reads a post under the city's login as the city's own only when it
 # carries a mark or predates the provenance cutover. An unmarked review after the
-# cutover is a model or operator review run on the city's account, so someone
-# spoke and the PR is not quiet. An empty-bodied approval is not feedback, so
-# nothing sits above a watermark and nothing was routed: the position stays
-# unrecorded, which the board renders as unknown.
+# cutover is not the city's own, so someone spoke and the PR is not quiet. An
+# empty-bodied approval is not feedback, so nothing sits above a watermark and
+# nothing was routed: the position stays unrecorded, which the board renders as
+# unknown.
 store "[$(anchor CK 77 ',"pr_provenance_since":"2026-10-07T00:00:00Z"')]"
 printf '%s' "$(prview 77 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_77.json"
 printf '[{"id":7700,"user":{"login":"gc-city-bot"},"state":"APPROVED","body":"","commit_id":"sha-77","submitted_at":"2026-10-07T02:00:00Z"}]' > "$GH_DIR/reviews_77.json"
@@ -3364,10 +3363,11 @@ hasnt "$out" "routed to rework" "…and this arm files nothing against the city'
 eq "$(meta P9 pr_comment_watermark)" "<absent>" "…nor watermarks it"
 
 echo "# provenance: an unmarked review under the city's own login after the cutover is feedback"
-# The operator runs model reviews (/code-review, codex, gemini) under the city's
-# GitHub account. Past the anchor's pr_provenance_since an unmarked review there
-# routes like a person's: its body and its inline comments go to a rework child,
-# and each becomes a finding sourced to the account that posted it.
+# Past the anchor's pr_provenance_since, a post under the city's login is the
+# city's own only when it carries the mark, so an unmarked review there is
+# feedback, whoever posted it. It routes like a person's: its body and its
+# inline comments go to a rework child, and each becomes a finding sourced to
+# the account that posted it.
 CUT=',"pr_provenance_since":"2026-10-07T00:00:00Z"'
 store "[$(anchor PV1 156 "$CUT")]"
 printf '%s' "$(prview 156 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_156.json"
@@ -4053,9 +4053,9 @@ eq "$(meta QF1 finding.pr_comment)" "$(jq -r '[ .issue_comments[] | select((.bod
 hasnt "$(gh_since "$mark")" "PRCOMMENT" "…and posts nothing again"
 
 echo "# an unmarked post under our login in a finding's thread is someone writing there"
-# After the cutover such a post is a model or operator review run on the city's
-# account, feedback like a person's, so the finding's answer leaves the thread
-# open for it the way it does for a human reply.
+# After the cutover such a post is not the city's own, so it is feedback like a
+# person's, and the finding's answer leaves the thread open for it the way it
+# does for a human reply.
 store "[$(anchor MR 212 "$UTCUT"), $(mfind RF1 MR must-fix open 'assets/scripts/x.sh: parse_name'), $(child RU1 open)]"
 printf 'RU1|blocks|RF1\n' >> "$STUB_DEPS"
 printf '%s' "$(prview 212 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_212.json"
@@ -4875,10 +4875,10 @@ has "$(treply 326 T-326a)" "✅ Fixed on this PR (KTG)." "the routed comment is 
 eq "$(thumbed 326 NC-326a)" "true" "…and marked resolved"
 
 echo "# an unmarked review under our OWN login from before the cutover leaves threads arm 7 never routes"
-# The gap: an outside review agent (or an operator-run review) posted findings on
-# a green PR under the automation's own login before the city marked its posts.
-# arm 7 reads such a post as the city's own, so it routes nothing; the check
-# stays green, and until this backstop nothing flagged it.
+# The gap: a review posted findings on a green PR under the automation's own
+# login before the city marked its posts. arm 7 reads such a post as the city's
+# own, so it routes nothing; the check stays green, and until this backstop
+# nothing flagged it.
 store "[$(anchor UT1 60 "$UTCUT")]"
 printf '%s' "$(prview 60 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_60.json"
 printf '%s\n' '[{"id":100,"user":{"login":"gc-city-bot"},"body":"**Review finding 1/1** fix this","pull_request_review_id":null,"created_at":"2026-10-06T12:00:00Z"}]' > "$GH_DIR/comments_60.json"
@@ -5667,10 +5667,10 @@ has "$(cat "$STUB_GH_LOG")" "REREQUEST repos/zook/gc-toolkit/pulls/143/requested
 hasnt "$(cat "$STUB_GH_LOG")" "DISMISS" "…and a re-request that fails holds the dismissal"
 
 echo "# a review under our own login that is feedback is dismissed with no re-request"
-# A model review run on the city's account after the cutover is feedback, so its
-# findings route and clear like a person's. Its author is the acting login, and
-# GitHub refuses a re-request of the PR's author, so the refused re-request here
-# would hold the dismissal on every pass if the arm made it.
+# An unmarked review under the city's login after the cutover is feedback, so
+# its findings route and clear like a person's. Its author is the acting login,
+# and GitHub refuses a re-request of the PR's author, so the refused re-request
+# here would hold the dismissal on every pass if the arm made it.
 store "[$(anchor HR9 149 "$(wb_meta rework:HRC9)"',"pr_provenance_since":"2026-10-07T00:00:00Z"'), $(child HRC9 closed), $(rfind HF11 HR9 564 must-fix)]"
 printf '%s' "$(prview 149 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_149.json"
 threads 149 '{"reviews":[{"id":"R564","databaseId":564,"state":"CHANGES_REQUESTED","author":{"login":"gc-city-bot"},"body":"model review: fix the race","submittedAt":"2026-10-07T03:00:00Z"}],"threads":[]}'
