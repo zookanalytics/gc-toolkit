@@ -2610,6 +2610,20 @@ out=$(run_posture)
 eq "$(meta_pinned PRF1 pr_posture)|$(meta PRF1 pr_head_oid)" "review_required@sha-711|sha-711" "the next posture pass reads the PR at its new head"
 for b in PRW PRV PCV PRT PST PVP PV3; do eq "$(bprio "$b")" "1" "…and $b is at P1"; done
 
+echo "# an approved anchor with no PR head recorded gets one, and its work is settled again in the same pass"
+# PRF1 records the approved rank and an approved posture, but no PR head, as an
+# anchor carries the moment the head is first recorded. A settle in that state
+# counts no approval, so its work sits at P1 under an approved PR while the
+# record names approved. The pass that records the head moves the rank, so the
+# same write marks the record unsettled and the pass brings the work to P0.
+prf1 approved approved 1
+jq -c 'map(if .id == "PRF1" then .metadata |= del(.pr_head_oid) else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+approved_710
+out=$(run_posture)
+eq "$(meta PRF1 pr_head_oid)" "sha-710" "the posture pass records the PR head"
+for b in PRW PRV PCV PRT PST PVP; do eq "$(bprio "$b")" "0" "…and $b reaches P0 in that pass"; done
+eq "$(meta PRF1 pr_finishing_settled)" "approved" "…and the anchor records the approved rank"
+
 fi # part posture
 
 # ==== part routing: a feedback batch's size, range and ledgers, the
