@@ -254,11 +254,6 @@ VISIT_CLOSE="$SCRIPTS_DIR/visit-close.sh"
 # method. The human-feedback arm opens such a pass below; a validator that
 # claims the bead reads this note to know the pass is a mol-validate pour.
 VALIDATE_BODY="$SCRIPTS_DIR/validate-dispatch-body.sh"
-# The priority writer (docs/steering.md). Every child this script routes is
-# PR-finishing work, settled at its priority before it is routed. A posture that
-# turns approved or stops being approved, and an anchor that leaves
-# pull_request, re-rank the anchor's open PR-finishing work through its settle.
-QUEUE_PRIORITY="${GC_QUEUE_PRIORITY_TOOL:-$SCRIPTS_DIR/queue-priority.sh}"
 # The finding primitive. The human-feedback arm files each unanswered item as a
 # task_kind=finding bead through it, so the validation pass it opens has a finding
 # set to rule (specs/tk-ztapg/review-cycle-architecture.md, "Findings").
@@ -950,12 +945,11 @@ route_finishing() { # <child> — route a PR-finishing child to the fix pool at 
   # priority writer computes and writes its priority under the store's priority
   # lock and reads it back (docs/steering.md#settle). The route is then written
   # alone. No pool can claim the child before the route lands, and a move that
-  # runs between the two writes rewrites the child itself. The settle waits for
-  # the lock 30 seconds at most, as settle_finishing's does: the cadence runs its
-  # arms one after another, so a long wait here holds every arm after it, and a
+  # runs between the two writes rewrites the child itself. The settle is the
+  # cadence's (pr_finishing_settle), whose wait for the lock is short, and a
   # child left unrouted is routed by a later pass. Returns 1, having routed
   # nothing, when the child does not settle. The caller reads the route back.
-  QUEUE_PRIORITY_LOCK_WAIT_SECS=30 "$QUEUE_PRIORITY" settle "$1" >/dev/null || return 1
+  pr_finishing_settle "$1" >/dev/null || return 1
   gc bd update "$1" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
 }
 
@@ -1013,7 +1007,7 @@ settle_finishing() { # <anchor> <state> <posture> <settled-rank> [<route>] — f
   for k in $(printf '%s' "$kids" | jq -r '.[]
       | select(((.metadata.task_kind // "") | tostring) as $t | ["review", "rework", "validation"] | index($t))
       | .id' 2>/dev/null); do
-    if QUEUE_PRIORITY_LOCK_WAIT_SECS=30 "$QUEUE_PRIORITY" settle "$k" >/dev/null; then
+    if pr_finishing_settle "$k" >/dev/null; then
       settled=$((settled + 1))
     else
       left="${left:+$left }$k"

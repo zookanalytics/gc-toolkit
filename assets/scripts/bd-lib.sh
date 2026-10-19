@@ -2,10 +2,10 @@
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
 # queries it, the one-write create every script files a stamped bead through,
 # the metadata read-back that gates handing such a bead on, the close that
-# unmakes a bead no reader can find, the validation pass's work order, the
-# gating-PR read's field set, the per-rig key an order's state lives under, and
-# the pass lock that lets an order run one pass at a time. Sourced, never
-# executed.
+# unmakes a bead no reader can find, the birth and settle of PR-finishing work,
+# the validation pass's work order, the gating-PR read's field set, the
+# per-rig key an order's state lives under, and the pass lock that lets an order
+# run one pass at a time. Sourced, never executed.
 #
 # A caller resolves this file beside itself and sources it, the way
 # visit-identity.sh is sourced:
@@ -654,6 +654,27 @@ PR_FINISHING_SHIFT=-1
 pr_finishing_birth() {
   printf '%s' "${1:-}" | jq -ce --argjson s "$PR_FINISHING_SHIFT" \
     'if type == "object" then . + {priority_shift: $s} else error("not an object") end' 2>/dev/null
+}
+
+# The longest a settle of PR-finishing work waits for the store's priority lock
+# when a script of the merge cadence runs it: gate-ensure.sh, pr-facts.sh and
+# pre-open-rebase.sh. The cadence runs its arms one after another, so a longer
+# wait holds every arm after it, and a bead whose settle times out is settled by
+# a later pass. queue-priority.sh's own default wait is longer, and
+# rework-child.sh, which runs in a review or converse session rather than in the
+# cadence, keeps it.
+PR_FINISHING_LOCK_WAIT_SECS=30
+
+# pr_finishing_settle <bead> — the cadence's settle of a bead of PR-finishing
+# work: queue-priority.sh settle, which computes the bead's priority, writes it
+# to the bead and to every live workflow poured for it, and reads it back
+# (docs/steering.md#settle), waiting for the lock PR_FINISHING_LOCK_WAIT_SECS
+# at most. The writer's narrative goes to stdout and its refusal to stderr, for
+# the caller to keep or drop. GC_QUEUE_PRIORITY_TOOL names another writer, as
+# each suite's harness does. Non-zero when the bead did not settle.
+pr_finishing_settle() {
+  QUEUE_PRIORITY_LOCK_WAIT_SECS="$PR_FINISHING_LOCK_WAIT_SECS" \
+    "${GC_QUEUE_PRIORITY_TOOL:-$(dirname -- "${BASH_SOURCE[0]}")/queue-priority.sh}" settle "${1:-}" </dev/null
 }
 
 # The keys a validation pass is found by: signoff.sh's machine-lane probe and

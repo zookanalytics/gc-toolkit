@@ -71,9 +71,6 @@ done
 GATE_REF="refs/gc-toolkit/pre-open-rebase"
 # Tells a branch a landed change made moot from one that only drifted.
 SUPERSESSION="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/branch-supersession.sh"
-# The priority writer, which settles a merge-in child at its priority before the
-# child is routed.
-QUEUE_PRIORITY="${GC_QUEUE_PRIORITY_TOOL:-$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/queue-priority.sh}"
 
 # The target an anchor that records none lands on, derived per rig from
 # origin/HEAD so a rig whose default branch is not `main` gets its own.
@@ -423,11 +420,10 @@ while IFS= read -r row; do
   # priority writer computes and writes its priority under the store's priority
   # lock and reads it back (docs/steering.md#settle). The route is then written
   # alone. No pool can claim the child before the route lands, and a move that
-  # runs between the two writes rewrites the child itself. The settle waits for
-  # the lock 30 seconds at most, because the cadence runs its arms one after
-  # another, so a long wait here holds every arm after it. A child that does not
-  # settle is left unrouted.
-  if ! QUEUE_PRIORITY_LOCK_WAIT_SECS=30 "$QUEUE_PRIORITY" settle "$FIX" >/dev/null; then
+  # runs between the two writes rewrites the child itself. The settle is the
+  # cadence's (pr_finishing_settle), whose wait for the lock is short. A child
+  # that does not settle is left unrouted.
+  if ! pr_finishing_settle "$FIX" >/dev/null; then
     echo "$PROG: WARN rework $FIX did not settle at its priority; left unrouted (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   fi

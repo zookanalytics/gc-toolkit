@@ -284,6 +284,34 @@ has "$out" "STRANDED review $sf2" "once the settle lands, the stranded arm takes
 eq "$(bpoured "$sf2")" "1" "…and slings it at its priority"
 eq "$(jq -r '[ .[] | select((.metadata.anchor_bead // "") == "SF2") ] | length' "$STUB_STORE")" "1" "…with no twin filed beside it"
 
+echo "# every settle gate-ensure runs waits for the priority lock 30 seconds at most"
+# The cadence runs its arms one after another, so a settle that waits out the
+# priority writer's own default holds every arm after this one. A wrapper around
+# the harness's writer records the wait each settle is handed: a fresh review and
+# a validation pass in one pass, and a review the stranded arm slings once its
+# settle lands.
+cat > "$TMP/qp-wait" <<QP
+#!/usr/bin/env bash
+printf '%s %s\n' "\${QUEUE_PRIORITY_LOCK_WAIT_SECS:-unset}" "\$2" >> "$TMP/qp-wait.log"
+exec "$GC_QUEUE_PRIORITY_TOOL" "\$@"
+QP
+chmod +x "$TMP/qp-wait"
+: > "$TMP/qp-wait.log"
+store "[$(anchor LW1 pre_open_gate correctness "" polecat/lw1), $(anchor LW2 pre_open_gate correctness "" polecat/lw2), $(validation vp-lw2 LW2 | jq -c '.metadata.priority_shift = -1')]"
+oid lw1 > "$GH_DIR/head_polecat_lw1"; oid lw2 > "$GH_DIR/head_polecat_lw2"
+GC_QUEUE_PRIORITY_TOOL="$TMP/qp-wait" run_val >/dev/null
+lw1=$(jq -r '.[] | select((.metadata.anchor_bead // "") == "LW1" and (.metadata.task_kind // "") == "review") | .id' "$STUB_STORE")
+eq "$(bpoured "$lw1")|$(bpoured vp-lw2)" "1|1" "a fresh review and a validation pass are each slung"
+store "[$(anchor LW3 pre_open_gate correctness "" polecat/lw3)]"
+oid lw3 > "$GH_DIR/head_polecat_lw3"
+GC_QUEUE_PRIORITY_TOOL="$TMP/qp-fail" run >/dev/null
+lw3=$(jq -r '.[] | select((.metadata.anchor_bead // "") == "LW3") | .id' "$STUB_STORE")
+GC_QUEUE_PRIORITY_TOOL="$TMP/qp-wait" run >/dev/null
+eq "$(bpoured "$lw3")" "1" "…and so is a review the stranded arm takes once its settle lands"
+eq "$(awk '{ print $2 }' "$TMP/qp-wait.log" | sort | paste -sd' ' -)" "$(printf '%s\n' "$lw1" vp-lw2 "$lw3" | sort | paste -sd' ' -)" \
+  "…each after one settle"
+eq "$(awk '$1 != 30' "$TMP/qp-wait.log")" "" "…and every settle waits for the priority lock 30 seconds at most"
+
 echo "# a review of an open PR carries the PR, and mol-review pins its gh calls to it"
 # The PR rides keys of its own: gc-helm.sh resolves a PR number to every live
 # bead whose pr_number matches, so a review carrying pr_number would make its

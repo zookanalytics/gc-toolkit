@@ -34,8 +34,10 @@
 # in-pass (a re-pour mints a second workflow root). A review is PR-finishing
 # work, born carrying the PR-finishing shift and no parent, and every sling here,
 # of a review or a validation pass, also waits until the bead settles at its
-# priority (queue-priority.sh settle), because the pour copies that priority once
-# (docs/steering.md). An open review a two-write
+# priority, because the pour copies that priority once (docs/steering.md). The
+# settle is bd-lib.sh's pr_finishing_settle, whose wait for the priority lock is
+# short, since every arm of the cadence after this one waits on it. An open
+# review a two-write
 # create left with its title but short of the keys inflight_review reads is
 # closed before a fresh one is filed (bd_unmake_orphans), since its blocks edge
 # would hold the anchor beside it. Reach carried by the pour ALONE is qualified before it counts: a review
@@ -136,10 +138,6 @@ FINDING="$SCRIPTS_DIR/finding.sh"
 # approval merge rule in one place instead of this loop re-deriving it.
 REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
 [ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); cannot gate" >&2; exit 1; }
-# The priority writer (docs/steering.md). A review or a validation pass is
-# PR-finishing work, and a pour copies its priority into the workflow once, so
-# each sling below waits until the bead settles at its rank.
-QUEUE_PRIORITY="${GC_QUEUE_PRIORITY_TOOL:-$SCRIPTS_DIR/queue-priority.sh}"
 WEDGE_KEY="review-wedge"
 
 # Origin pin for the live-head read; optional. An unresolvable origin or a
@@ -748,7 +746,7 @@ while IFS= read -r tagged; do
       elif [ -z "$VALIDATE_POOL" ]; then
         echo "$PROG: $id has an open validation pass $VPASS_D but no --validate-pool was given; no dispatch (the pass holds the merge until one is)" >&2
         skipped=$((skipped + 1))
-      elif ! "$QUEUE_PRIORITY" settle "$VPASS_D"; then
+      elif ! pr_finishing_settle "$VPASS_D"; then
         echo "$PROG: WARN $id validation pass $VPASS_D did not settle at its priority; not dispatched, merge stays held, retry next pass" >&2
         skipped=$((skipped + 1))
       else
@@ -982,7 +980,7 @@ while IFS= read -r tagged; do
             echo "$PROG: WARN $id stranded review $rid did not record its whole work order (short: $rshort); not re-slung, merge stays held, retry next pass" >&2
             skipped=$((skipped + 1)); continue
           fi
-          if ! "$QUEUE_PRIORITY" settle "$rid"; then
+          if ! pr_finishing_settle "$rid"; then
             echo "$PROG: WARN $id stranded review $rid did not settle at its priority; not re-slung, merge stays held, retry next pass" >&2
             skipped=$((skipped + 1)); continue
           fi
@@ -1102,7 +1100,7 @@ while IFS= read -r tagged; do
     ge_mark_child "$id" "$RID"
     # A review that does not settle at its priority is not slung: the stranded
     # arm settles and slings it next pass.
-    if ! "$QUEUE_PRIORITY" settle "$RID"; then
+    if ! pr_finishing_settle "$RID"; then
       echo "$PROG: WARN review $RID did not settle at its priority; not slung, merge stays held, the stranded arm re-slings it next pass" >&2
       skipped=$((skipped + 1)); continue
     fi
