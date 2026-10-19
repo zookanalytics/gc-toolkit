@@ -26,7 +26,7 @@ guided to the right call.
 **Boundaries.** Curated synthesis, not a copy of the specs: those are linked
 and remain authoritative for the full format. This brief does not carry local
 fixes against `gascity` *source* — that lifecycle is
-[gascity-local-patching.md](gascity-local-patching.md) — and it does not index
+[fork-patching.md](fork-patching.md) — and it does not index
 the canonical documentation, which is
 [gascity-reference.md](gascity-reference.md). It governs *how we author*, not
 what any individual formula or pack *does*.
