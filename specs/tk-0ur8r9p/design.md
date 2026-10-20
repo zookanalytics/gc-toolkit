@@ -39,16 +39,22 @@ of sitting tk-4t0uev0 set this model, and these decisions build it.
    an epic, reaches you as a conversation, without Accept, because nothing on
    it waits.
 3. **escalate.sh is the one writer of questions.** It reads the bead's
-   questions before it files, so each situation is asked once. It keeps the
-   one-day quiet period after you call a situation moot or benign, and a filer
-   can still withdraw its own question. gc-helm.sh demand, mol-visit and every
-   copy of the visit-filing block go. Cost: two situations on one bead are two
-   gates. They fold into one board row and one sitting.
+   questions before it files, so each situation is asked once. The quiet
+   period after you call a situation moot or benign becomes an option each
+   recurring detector declares at its own call site, off by default, so a new
+   occurrence of an event is never muted by an answer to an earlier one. A
+   filer can still withdraw its own question. gc-helm.sh demand, mol-visit and
+   every copy of the visit-filing block go. Cost: two situations on one bead
+   are two gates. They fold into one board row and one sitting. A detector
+   that should declare a window and does not asks again after your moot or
+   benign answer, until its call site is fixed.
 4. **Every caller keeps its call.** The polecat decline stays escalate.sh, then
    await-ruling.sh, then run-cancel.sh, and await-ruling.sh still makes the
    work bead wait on the question, releases the claim and arms the re-sling.
-   Only `--pool` retires. Cost: the callers whose subject can have open
-   children say what they do there, and every reader that looked for a visit
+   Only `--pool` retires, and a caller that re-detects one condition every
+   pass adds its quiet window. Cost: the callers whose subject can have open
+   children say what they do there, each recurring detector's call site says
+   whether it wants a window and why, and every reader that looked for a visit
    reads the bead's gates.
 5. **No session claims a question.** A gate is unassigned while it is owed, or
    assigned to the one person who owes the answer. The answer is one
@@ -157,7 +163,7 @@ at 1e05ae624, and bd paths to bd's v1.3.1 source.
 | The pool execution backstop nudges, then drains, a pool session that holds in-progress work and is quiet for 90 seconds, with no attachment exemption. It governs only a session marked `pool_managed`, and Gas City marks one so only when the controller created it for a pool's demand, with the origin `ephemeral`. `gc session new` with an alias gives a session the origin `manual` | Why a sitting is not a pool session, and why engage's `gc session new` keeps it out of the backstop's reach (section 6). | Gas City `cmd/gc/execution_backstop.go` 321-322, 405-421; `cmd/gc/cmd_session.go` 289, 418, 698-704; `cmd/gc/session_origin.go` 172-181; `cmd/gc/reconcile_arms_metadata.go` 103, 131-133; `cmd/gc/session_beads.go` 1918, 2205-2206 |
 | A template's `min_active_sessions` defaults to 0, so a template that leaves it out or writes 0 keeps no session running for its own sake. A template with a `scale_check` gets a demand pass of its own | Why the converse templates' declared pool starts no sitting, and what pool-demand-wiring.test.sh guards (section 6). | Gas City `internal/config/session_capacity.go` 27-33; `cmd/gc/allocator_scalecheck_lane.go` 107-124 |
 | Core notify-on-human-gate-creation and renudge-stale-human-gates | Turned off in this city (section 5). Both act only on an open human gate, and mail its assignee, then `gc.deferred_assignee`, then `$GC_ESCALATION_RECIPIENT` (default `human`). | Gas City `internal/bootstrap/packs/core/assets/scripts/notify-on-human-gate-creation.sh` 1-80, 173-181; the town's city.toml 304-311 |
-| Core escalate.sh hook and its incident reminder | Prior art for the writer's quiet period. It is a mail hook for maintenance scripts, and it is not this pack's writer. | Gas City `internal/bootstrap/packs/core/assets/scripts/escalate.sh` 1-22; `docs/getting-started/troubleshooting.md` 877-905 |
+| Core escalate.sh hook and its incident reminder. It suppresses a repeat only for a call that names an `--incident-key`, for `GC_ESCALATE_REMINDER_SECONDS` (default 86400) | Prior art for the writer's quiet period, and for making it an option each call declares (section 2). It is a mail hook for maintenance scripts, and it is not this pack's writer. | Gas City `internal/bootstrap/packs/core/assets/scripts/escalate.sh` 1-22; `docs/getting-started/troubleshooting.md` 877-905 |
 | A city's order override can set an exec order's environment | The alternative section 5 rejects. | Gas City `internal/config/config.go` 2383-2385; `internal/orders/override.go` 162-166; `cmd/gc/order_store.go` 229-235 |
 | bd stores the actor that creates a bead as its `created_by`. Gas City runs each exec order as the actor `order:<name>`, and `gc bd` runs bd in its caller's environment | The migration tells a visit gate-visit-sweep filed from every other visit (section 11). | bd `cmd/bd/create.go` 531 and `cmd/bd/main.go` 813-822; Gas City `cmd/gc/order_store.go` 197, and `cmd/gc/cmd_bd.go` 165-193 and 686-702 |
 
@@ -413,7 +419,8 @@ routed, and so do the routes that forward it: upstream-finding.sh's own `--pool`
 (upstream-finding.sh 57, 411), and reconcile-rig-checkouts.sh's
 `RECONCILE_ESCALATION_POOL` knob, which tries a pool before the board
 (reconcile-rig-checkouts.sh 166-169, 184-195). `--blocks <bead>` joins them. It
-names what waits when that is another bead than the subject.
+names what waits when that is another bead than the subject. So does
+`--quiet-window <seconds>`, the quiet period a call declares (step 4).
 
 It files in six steps:
 
@@ -434,11 +441,23 @@ It files in six steps:
    idempotency the initiative's ruling asks for. bd has none at create, so two writers racing
    in the same instant can both file. The board folds both, and the sitting
    answers both with one reason.
-4. **It keeps the quiet period.** If the newest closed human gate with the same
-   await id closed with a reason headed `moot:` or `benign:` less than
-   `GC_ESCALATE_VERDICT_WINDOW` seconds ago (default 86400), it files nothing and
-   says so. A caller whose question carries a wait passes 0, as today, because a
-   wait needs an open gate to sit on.
+4. **It keeps a quiet period the call declares.** With `--quiet-window`, the
+   writer files nothing, and says so, while the newest closed human gate with
+   the same await id closed with a reason headed `moot:` or `benign:` less than
+   that many seconds ago. It reads that gate in step 3's listing. Without the
+   option there is no window. The window is the filer's policy, because only
+   the filer knows the shape of what it files. The writer cannot tell a
+   re-detection of one persisting condition, such as a patrol re-reporting a
+   red check after a benign answer, from a new occurrence of an event, such as
+   a second outage two hours after the first was answered benign under the
+   same key. So each recurring detector declares its window at its own call
+   site, with a one-line why. An event-shaped filer declares none, and keys
+   each occurrence apart where several share a subject. Off is the default
+   because it fails loud: a detector that forgot its window asks again on the
+   board until its call site is fixed, where a default window would mute a
+   real event without a trace. `GC_ESCALATE_VERDICT_WINDOW` stops being a
+   global default. Converse owns no window: a sitting only writes close
+   reasons.
 5. **It settles what waits.** The waiter is the `--blocks` bead, else the
    subject. A bead with an open `parent-child` child is never the waiter by
    default, because blocking it pauses every unstarted part of it, whatever its
@@ -469,15 +488,15 @@ one open ask per subject, and the operator still sees exactly that: every questi
 folds into the bead's one board row, and one sitting answers all of them. In the
 store, two situations on one bead stay two gates, such as two PR comments, or a
 review question beside a merge failure. Keeping them apart lets each filer
-withdraw its own question when its situation clears, and keeps the quiet period
-per situation.
+withdraw its own question when its situation clears, and keeps a declared quiet
+period per situation.
 
 What becomes of escalate.sh's other behavior:
 
 | Today | After |
 |---|---|
 | Dedup on `escalation_key` and `gc.continuation_group` (escalate.sh 393-461) | Step 3: the await id `<subject>:<key>`, among the gates `bd gate list <subject>` returns |
-| The verdict window over closed visits' `gc.outcome` (463-531) | Step 4: the closed gate's reason |
+| The verdict window over closed visits' `gc.outcome` (463-531), on for every call unless the caller passes `GC_ESCALATE_VERDICT_WINDOW=0` | Step 4: the closed gate's reason, inside a window only a call that declares `--quiet-window` gets |
 | The `escalation.recurrences` tally on the closed visit | Retires. `escalation.recurrence_last` has no reader, and only the tally reads `recurrences`. |
 | `--retract` leaves an engaged visit alone and closes the rest through visit-close.sh (257-337) | Resolves every open gate under the key |
 | The ephemeral-subject triage bucket (536-605) | Kept. The bucket is a standing subject the gate blocks, and it is not visit machinery. |
@@ -485,10 +504,12 @@ What becomes of escalate.sh's other behavior:
 | Its copy of the gate-visit block (383-650) | Replaced by steps 3 to 6 |
 
 The quiet period is the one behavior the writer adds to native calls, and it has
-upstream prior art. Core's own escalate.sh does not re-send an unchanged incident
-for a day (`GC_ESCALATE_REMINDER_SECONDS`, default 86400). The pack's period
-answers the same need, a detector that re-fires a condition a person already
-looked at, and keys it on the person's verdict.
+upstream prior art in the same shape. Core's own escalate.sh does not re-send an
+unchanged incident for a day (`GC_ESCALATE_REMINDER_SECONDS`, default 86400),
+and only for a call that names an `--incident-key` (see the platform section).
+The pack's period answers the same need, a detector that re-fires a condition a
+person already looked at, keys it on the person's verdict, and is likewise on
+only where the call asks for it.
 
 **The other minters fold into it:**
 
@@ -524,12 +545,16 @@ waits (section 7).
 
 The list was re-derived from main at 35cf7c70f. Every call keeps escalate.sh's
 flags, except the `--pool` that upstream-finding.sh and
-reconcile-rig-checkouts.sh forward. The column on the right is what changes
-around the call.
+reconcile-rig-checkouts.sh forward. A caller that re-detects one condition
+every pass gains `--quiet-window` at its call site, with a one-line why, and a
+caller that files an event declares none (section 2). Unit A decides each call
+site, because today every call gets the day-long window unless it passes
+`GC_ESCALATE_VERDICT_WINDOW=0`. The column on the right is what changes around
+the call.
 
 | Caller | Its move |
 |---|---|
-| mol-polecat-work's decline arms: load-context's unreadable, parked and duplicate refusals; the blocked-work fallback; the unclear-requirements instruction; workspace-setup's malformed convoy, target guard, branch divergence and missing branch; the bring-current question through bring-current-audit.sh; submit's branch-shape, landing-target and hand-off refusals | The call is unchanged. The gate blocks the work bead, except in two arms. The malformed-convoy refusal files on the input convoy (`formulas/mol-polecat-work.toml` 430), which pauses nothing when blocked and so is its own waiter (section 1), and it cancels the run without a wait. The bring-current question is filed on the anchor (bring-current-audit.sh 339), so the merge waits too, and await-ruling.sh adds its wait as the work bead's own edge onto the gate (`formulas/mol-polecat-work.toml` 726, section 4). await-ruling.sh then releases the claim and arms the re-sling, and run-cancel.sh ends the run. The verdict window stays off where a wait follows. |
+| mol-polecat-work's decline arms: load-context's unreadable, parked and duplicate refusals; the blocked-work fallback; the unclear-requirements instruction; workspace-setup's malformed convoy, target guard, branch divergence and missing branch; the bring-current question through bring-current-audit.sh; submit's branch-shape, landing-target and hand-off refusals | The call is unchanged. The gate blocks the work bead, except in two arms. The malformed-convoy refusal files on the input convoy (`formulas/mol-polecat-work.toml` 430), which pauses nothing when blocked and so is its own waiter (section 1), and it cancels the run without a wait. The bring-current question is filed on the anchor (bring-current-audit.sh 339), so the merge waits too, and await-ruling.sh adds its wait as the work bead's own edge onto the gate (`formulas/mol-polecat-work.toml` 726, section 4). await-ruling.sh then releases the claim and arms the re-sling, and run-cancel.sh ends the run. Each decline is an event of its run and declares no quiet window, so the `GC_ESCALATE_VERDICT_WINDOW=0` the waiting arms pass today goes. |
 | `template-fragments/polecat-doctrine.template.md` (Escalation and the decline protocol) and `template-fragments/pool-worker-no-consent-ui.template.md` | The same three calls in the same order. The text says "the human gate escalate.sh files" where it said "the visit escalate.sh opens". A work bead with open children meets step 5's refusal, and the doctrine says to name the work bead with `--blocks`, because the work is what waits. Every polecat does what it does today. |
 | mol-validate, mol-rig-demo, mol-refinery-patrol, mol-witness-patrol, mol-dog-shutdown-dance | Unchanged calls. The malformed-convoy refusals of mol-validate and mol-rig-demo file on the input convoy, as mol-polecat-work's does (`formulas/mol-validate.toml` 90, `formulas/mol-rig-demo.toml` 111). A refinery or witness patrol call whose subject is a graduating integration convoy blocks it as it blocks any other bead (section 1). mol-witness-patrol's check-refinery finds its open `witness-refinery-queue` questions with `bd gate list` and retracts them as today. |
 | mol-deacon-patrol | It names escalate.sh in prose only. Its "becomes a visit" wording says the call files a question. |
@@ -580,8 +605,9 @@ anchor, and bd refuses an unforced close while it is open (bead-rehome.sh
    closes nothing, and the bead stays open with its successor pointer recorded,
    as a held close leaves it today.
 2. **It resolves each excepted question** with a reason that names the retry and
-   carries no outcome word. The retry has not shown the premise gone yet, so the
-   quiet period does not start. A sitting discussing one of them does not hold
+   carries no outcome word. The retry has not shown the premise gone yet, so no
+   quiet period starts, even for a filer that declares one. A sitting
+   discussing one of them does not hold
    the close: the retry answers first, and the sitting learns it at its
    sign-off (section 7).
 3. **It closes the bead**, unforced, as today.
@@ -597,8 +623,8 @@ The doctor checks:
 
 - **check-visit-outcome-recorded retires.** A question's answer is its close
   reason, written by the close itself. A gate a person closes by hand with no
-  headed reason fails safe both ways: its finding stays held, and the quiet
-  period does not start.
+  headed reason fails safe both ways: its finding stays held, and no quiet
+  period starts.
 - **check-hq-marooned-work** drops its visit exemption and adds none. Gates are
   already exempt as infrastructure. A conversation is always assigned, to
   `human` in the queue or to its sitting's alias, because every hand-off
@@ -868,8 +894,12 @@ The outcome is one of three words:
 
 - `ruled`: the operator decided. It releases a needs-you finding.
 - `moot`: the premise no longer holds. A filer's retract writes this. It starts
-  the quiet period.
-- `benign`: the premise holds, but it needs nobody. It starts the quiet period.
+  the quiet period of a filer that declares one (section 2).
+- `benign`: the premise holds, but it needs nobody. It starts the quiet period
+  of a filer that declares one.
+
+The sitting owns no window. It writes the reason, and the filer's call decides
+what the reason mutes.
 
 One bd call writes the close and its reason together. visit-close.sh stamped
 `gc.outcome` and `gc.outcome_reason` before it closed, and read them back,
@@ -1403,7 +1433,8 @@ stops part way leaves the visit open for the rerun to finish:
    `bd dep remove`, and read back as gone. The anchor's merge waits on the
    moved demand, as it waited on the open visit through finalize-gate.
 4. **Otherwise, when something waits on the visit, it files the question
-   through escalate.sh**, with the quiet period off. The title is the visit's
+   through escalate.sh**, declaring no quiet window, so a recent moot or
+   benign answer under the same key does not stop it. The title is the visit's
    headline, the framing is the visit's description, and the await id is
    `<subject>:<key>`. The question blocks the subject, unless the subject has
    an open `parent-child` child, the shape the writer refuses as a default
@@ -1602,7 +1633,7 @@ brief allows when the design calls for a split:
 
 | Unit | What it carries |
 |---|---|
-| A. The writer and its callers | escalate.sh on gates, with the subject in the await id, `--blocks` and the refusal for a bead with open children, the subject's `tracks` edge, and the retract by resolve. await-ruling.sh, with the waiter's edge. upstream-finding.sh's `--pool` and reconcile-rig-checkouts.sh's pool knob retired. first-reaction-dispose, mol-validate-close, deferred-dispatch.sh and mol-feedback-distiller on escalate.sh, with the conversation they open on a bead with open children. mol-visit and the formula copies of the gate-visit block retired. The polecat doctrine and pool-worker fragments, the ask-close fragment, and the deacon, refinery and witness prompts. The registry entries of the keys the writer stops writing. |
+| A. The writer and its callers | escalate.sh on gates, with the subject in the await id, `--blocks` and the refusal for a bead with open children, the subject's `tracks` edge, the retract by resolve, and `--quiet-window` as the only quiet period: each caller that re-detects one condition declares its window at its call site with its why, the others declare none, and the `GC_ESCALATE_VERDICT_WINDOW=0` prefixes go. await-ruling.sh, with the waiter's edge. upstream-finding.sh's `--pool` and reconcile-rig-checkouts.sh's pool knob retired. first-reaction-dispose, mol-validate-close, deferred-dispatch.sh and mol-feedback-distiller on escalate.sh, with the conversation they open on a bead with open children. mol-visit and the formula copies of the gate-visit block retired. The polecat doctrine and pool-worker fragments, the ask-close fragment, and the deacon, refinery and witness prompts. The registry entries of the keys the writer stops writing. |
 | B. The readers | finalize-gate. gctk merge and pr-status, with `OpenQuestion`. finding.sh and review-answer.sh. pr-facts.sh. branch-supersession.sh. The liveness scripts, with conversing read from conversations, the census in the re-check command and the re-file check on closed questions, hold-lib.sh, deferred-dispatch.sh, bead-context.sh and pre-open-rebase.sh. orphan-dispose.sh and the witness patrol. bead-rehome.sh, with the retry's withdrawal before the close. The doctor checks, `RETIRED_KEYS`, and the docs that teach these components (section 13). |
 | C. Converse and the board | The conversation task, and gc-helm.sh engage, open, accept and dismiss on it, with engage's guarded bind and `c-` fallback, the hand-off, and Accept's read-back. The converse prompt and agent headers, the five converse skills and the shared skills. Accept on the recommendation's gate alone, pinned by the acceptance case below. converse-signoff.sh rewritten, converse-reap re-keyed with its warrant in `docs/warrants.md`, and the converse scripts that retire. gc-helm.sh demand retired here, with its last callers: converse-hold.sh, converse-signoff.sh, and the waits, prs and converse-settle skills. pr-sitting-comment.sh with its new marker, and operator-intake.sh. The tmux scripts, tmux-intake-prompt.sh among them. The board's source, derive, model, wire contract with `accept_withheld`, web and text board. gate-visit-sweep's order and script. The human-engagement docs and the board's README. |
 | D. The cutover | The migration script, with its copy of the visit walk, and its test, which stops a run after each write and holds section 11's fixtures. notification-wisp-reap's gate pass retired. The cutover runbook in its own spec. The remaining docs. |
@@ -1738,9 +1769,11 @@ each carried by a native field, a flag or a name:
   Accept answers;
 - the headwords `ruled:`, `moot:` and `benign:` at the head of a gate's close
   reason. `ruled:` releases a needs-you finding, and `moot:` or `benign:`
-  starts the one-day quiet period under the gate's await id;
-- escalate.sh's `--blocks`, and its exit 3 when the waiter would be a bead with
-  open children;
+  starts the quiet period under the gate's await id for a filer that declares
+  one;
+- escalate.sh's `--blocks`, its `--quiet-window`, which a recurring detector
+  declares at its call site and nothing turns on by default, and its exit 3
+  when the waiter would be a bead with open children;
 - a conversation's shape: a task that tracks its bead and is assigned to
   `human` or to the alias that names its own id, with the `c-` alias fallback;
 - the board's wire fields `acceptable`, `accept_withheld` and `sitting_state`,
@@ -1755,8 +1788,8 @@ each carried by a native field, a flag or a name:
 or stands in for a missing primitive under a warrant:
 
 - escalate.sh's read of a bead's questions before it files, its shape refusal,
-  and the quiet period, which mirrors core escalate's incident reminder
-  (section 2);
+  and the quiet period as an option each call declares, off by default, which
+  mirrors core escalate's opt-in incident reminder (section 2);
 - await-ruling.sh's waiter edge, its release of the claim and its re-sling arm
   (section 4);
 - finalize-gate's clause on questions, and bead-rehome.sh's withdrawal before a
