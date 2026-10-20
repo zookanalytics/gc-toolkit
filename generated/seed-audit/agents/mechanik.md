@@ -225,8 +225,12 @@ gc bd update <bead> --assignee <qualified-name>
 
 Then tell the agent, because the write gives an idle named session on
 `wake_mode = "resume"` no turn:
-`[[PACK-ROOT]]/assets/scripts/deferred-dispatch.sh notify <bead> --agent <qualified-name>`
-mails it the bead once `bd` reports the bead ready.
+`"$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify <bead> --agent <qualified-name>`
+mails it the bead once `bd` reports the bead ready. `gc <binding> scripts-dir`
+prints the directory of the gc-toolkit pack's scripts, so the call runs the
+pack's own copy whichever pack the calling agent comes from. `<binding>` is
+the name the city imports that pack under, which gc puts in front of its
+skills: `gc-toolkit` in `gc-toolkit.work`.
 
 ## Dispatched work is file-and-forget
 
@@ -237,7 +241,7 @@ still an edge and a drain, never a watcher: record the blocker as a `blocks`
 edge, then ARM the follow-up so it routes itself when the blocker lands.
 
 ```
-[[PACK-ROOT]]/assets/scripts/deferred-dispatch.sh arm <bead> \
+"$(gc <binding> scripts-dir)/deferred-dispatch.sh" arm <bead> \
     --target <rig>/<agent> --reason "waits for <blocker>"
 ```
 
