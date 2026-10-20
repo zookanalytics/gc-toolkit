@@ -3,19 +3,18 @@
 #
 # THE GUARDRAIL: mol-witness-patrol's recover-orphaned-beads must not run its
 # liveness loop over a graph.v2 topology ROOT. A root carries gc.kind in the
-# topology set (workflow, scope, spec) and names its owner only in
-# gc.session_name — the pool SLOT, which a successor session keeps alive. So the
-# host-bead-skip owner filter resolves that slot label and the liveness loop
-# reads a dead run's root as ACTIVE, which routes it to the live-but-wedged
-# warrant path and files a warrant against the successor now holding the slot,
-# killing unrelated live work (the successor-inherited-slot-label bug). Resolved
-# the other way, absent, a root only churns a witness-salvage-refused notice: it
-# has no worktree, and orphan-dispose.sh already refuses it as root_not_schedulable.
-# A topology root is not recoverable work — its STEP beads carry the work and the
-# gc.session_id, and its close is the control-dispatcher's workflow-finalize — so
-# it is dropped from the candidate set before the loop, the same kind set the hook
-# (hookCandidateClaimable) and pool demand (demandRowServable) refuse and
-# liveness-sweep.sh's topology_kind mirrors.
+# topology set (workflow, scope, spec) and names a session only in
+# gc.session_name, a stamp the controller copies from its worked steps. The
+# host-bead-skip owner filter still stamps that name as the root's owner.
+# Resolved ACTIVE, the root reaches the live-but-wedged warrant path, and a
+# warrant against that session can kill unrelated live work. Resolved the other
+# way, absent, a root only churns a witness-salvage-refused notice: it has no
+# worktree, and orphan-dispose.sh already refuses it as root_not_schedulable. A
+# topology root is not recoverable work — its STEP beads carry the work and
+# their own holder fields, and its close is the control-dispatcher's
+# workflow-finalize — so it is dropped from the candidate set before the loop,
+# the same kind set the hook (hookCandidateClaimable) and pool demand
+# (demandRowServable) refuse and liveness-sweep.sh's topology_kind mirrors.
 #
 # It is a KIND exclusion, the sibling of the state exclusion downstream-court-skip:
 # host-bead-skip keeps every owned bead (a root included, so its owner is stamped),
@@ -141,9 +140,9 @@ eq "$(printf '%s' '[{"id":"f1","owner":"lx-9","metadata":{"gc.session_id":"lx-9"
 
 # --- The composed pipeline: host-bead-skip then topology-root-skip. -----------
 # The exact shape the finding reported: an OWNED workflow ROOT — no
-# assignee, no gc.session_id, only a gc.session_name naming a pool SLOT a live
-# successor now holds. host-bead-skip KEEPS it (it names an owner), so
-# topology-root-skip is what must drop it, leaving the loop nothing to warrant.
+# assignee, no gc.session_id, only a gc.session_name naming a live session.
+# host-bead-skip KEEPS it (it names an owner), so topology-root-skip is what
+# must drop it, leaving the loop nothing to warrant.
 # The genuine step orphan beside it (a dead gc.session_id, no topology kind)
 # survives to be recovered.
 FIX4='[

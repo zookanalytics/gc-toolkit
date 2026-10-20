@@ -182,10 +182,10 @@ has "$(cat "$STUB_GC_LOG")" "--if-assignee=lx-dead" "assignee clear is guarded o
 hasnt "$(cat "$STUB_GC_LOG")" "--if-assignee lx-dead" "guard uses the attached =form, not the mis-scoping spaced form"
 
 echo "--- the owner is not the assignee guard ---"
-# The shape orphan recovery most often hands over: the dead owner is the step's
-# gc.session_id, while the assignee still names the pool SLOT, which is live and
-# inherited by the next occupant. The two are different strings, so guarding the
-# clear on --owner would mismatch and refuse every release of this shape.
+# The dead owner orphan recovery hands over is the step's gc.session_id, while a
+# session that claimed under an alias left that alias as the assignee. The two
+# are different strings, so guarding the clear on --owner would mismatch and
+# refuse every release of this shape.
 store '[{"id":"tk-slot","status":"in_progress","assignee":"gc-toolkit/gc-toolkit.polecat","title":"step",
          "metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"tk-root",
                      "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead"}},
@@ -194,7 +194,7 @@ store '[{"id":"tk-slot","status":"in_progress","assignee":"gc-toolkit/gc-toolkit
 : > "$STUB_GC_LOG"
 OUT=$("$SCRIPT" tk-slot --owner lx-dead --apply 2>&1); rc=$?
 eq "$rc" "0" "a step whose owner differs from its assignee still releases"
-eq "$(bassignee tk-slot)" "" "the slot assignee is cleared"
+eq "$(bassignee tk-slot)" "" "the alias assignee is cleared"
 eq "$(meta tk-slot gc.session_id)" "<absent>" "the dead session id is cleared"
 has "$(cat "$STUB_GC_LOG")" "--if-assignee=gc-toolkit/gc-toolkit.polecat" \
   "the guard is the ASSIGNEE, not the --owner"

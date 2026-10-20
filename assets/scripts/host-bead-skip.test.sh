@@ -13,21 +13,16 @@
 # (respawn-and-reconstitute-from-the-record is the cold continuity path;
 # specs/2026-08-fresh-start/spine-port.md, D4).
 #
-# A bead names its owner in one of three places. `assignee` is the direct form
-# and the only one a `gc bd list --json` row shows on its own: the key is
-# omitted when empty, which is the shape every workflow STEP bead has. A step
-# names its owner in metadata.gc.session_id, which is what
-# gc.session_affinity=require pins it to, and a workflow ROOT names only
-# metadata.gc.session_name. A filter reading `assignee` alone therefore cannot
-# see graph.v2 machinery at all, and orphan recovery cannot reach the beads it
-# exists to recover.
+# A bead names its holder in up to three fields: `assignee`,
+# metadata.gc.session_id and metadata.gc.session_name. It can carry a session
+# field with no assignee beside it, as a workflow ROOT does, so a filter reading
+# `assignee` alone would miss it (docs/gascity/agent-types.md, "Which fields
+# name a bead's holder").
 #
-# Precedence runs session id, then assignee, then session name. A session id is
-# re-stamped on every claim and names the session actually holding the bead; the
-# other two are labels a successor inherits, because pool work is assigned to the
-# SLOT and the slot stays live under its next occupant. The order is what decides
-# a crashed pool session's step bead, which keeps a live slot assignee beside its
-# dead id.
+# Precedence runs session id, then assignee, then session name, because only
+# the id always names one session. The assignee and the session name can be an
+# identity a later session carries too, so the order is what decides a bead
+# whose id names a dead session while its other fields name a live one.
 #
 # This test EXECUTES the real filter extracted verbatim from the formula (between
 # the `host-bead-skip` markers), so it cannot drift from the shipped instruction.
@@ -132,7 +127,7 @@ eq "$(ids "$FIX2")" "a,b" \
 eq "$(ids '[]')" "" "empty listing yields empty result"
 
 # --- Owner signals that are not an assignee. ---------------------------------
-# s1  workflow STEP bead: no assignee key at all, owner in gc.session_id
+# s1  workflow STEP bead with no assignee, owner in gc.session_id
 # s2  workflow ROOT bead: no assignee, owner in gc.session_name only
 # s3  workflow machinery naming no session at all -> DROP (nothing to resolve)
 FIX3='[
@@ -141,7 +136,7 @@ FIX3='[
   {"id":"s3","metadata":{"gc.kind":"workflow","gc.root_bead_id":"tk-root"}}
 ]'
 eq "$(assignee_only_ids "$FIX3")" "" \
-   "(premise) an assignee-only predicate sees no workflow step or root at all"
+   "(premise) an assignee-only predicate sees neither the step nor the root here"
 eq "$(ids "$FIX3")" "s1,s2" \
    "keeps a step owned via gc.session_id and a root owned via gc.session_name; drops the ownerless s3"
 eq "$(owners "$FIX3")" "s1=lx-7xcse,s2=gc-toolkit--gc-toolkit__polecat-1-pool" \
@@ -149,17 +144,18 @@ eq "$(owners "$FIX3")" "s1=lx-7xcse,s2=gc-toolkit--gc-toolkit__polecat-1-pool" \
 
 # The composed candidate set the loop actually reads: host-bead-skip resolves the
 # root's owner (s2 above), then topology-root-skip removes it, so only the step
-# (s1) survives. This is what stops the loop from ever reading a root's inherited
-# slot label as its liveness.
+# (s1) survives. This is what stops the loop from ever reading a root's
+# gc.session_name as its liveness.
 eq "$(candidate_ids "$FIX3")" "s1" \
    "host-bead-skip | topology-root-skip drops the workflow root (s2), keeps the step (s1)"
 
 # Precedence, most specific first: gc.session_id, then assignee, then
-# gc.session_name. The whole order is load-bearing. Both labels are handed on to
-# a slot's next occupant, so a bead pinned to a dead id must resolve against that
-# id and not against the live session now holding the slot. a1 is the shape a
-# crashed pool session leaves behind: assignee and session name both name the
-# still-live slot, and only the id remembers who actually died.
+# gc.session_name. The whole order is load-bearing. An alias or an
+# identity-derived session name is carried again by a later session, so a bead
+# whose id names a dead session must resolve against that id and not against the
+# live session that now carries the label. a1 is that shape: its assignee and
+# session name both name a live identity, and only the id remembers who actually
+# died.
 FIX4='[
   {"id":"a1","assignee":"gc-toolkit--gc-toolkit__polecat-1-pool","metadata":{"gc.session_id":"lx-dead","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}},
   {"id":"a2","assignee":"","metadata":{"gc.session_id":"lx-dead","gc.session_name":"slot-1"}},
