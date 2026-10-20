@@ -21,14 +21,14 @@ of sitting tk-4t0uev0 set this model, and these decisions build it.
 1. **A question is one native human gate, and it blocks what waits for your
    answer.** The filer names what waits: the work bead that declined, the
    anchor when the merge must wait, one member of an epic. The gate names the
-   bead it is about in its await id, and that bead tracks the gate when it does
-   not wait itself, so the question is still found on it. An epic or a convoy
+   bead it is about in its await id, so the question is found on that bead
+   even when it does not wait itself. An epic, or a convoy with open children,
    is blocked only when the filer names it, because blocking one pauses every
    part of it that has not started. A question carries no pack metadata, and
-   the visit bead kind goes. Cost: a filer whose subject is an epic or a convoy
-   must say what waits, or the writer files nothing. Routed work that waits
-   leaves the pool's offer until you answer, and a question that blocks a PR's
-   anchor holds its merge.
+   the visit bead kind goes. Cost: a filer whose subject is one of those must
+   say what waits, or the writer files nothing. Routed work that waits leaves
+   the pool's offer until you answer, and a question that blocks a PR's anchor
+   holds its merge.
 2. **A question nothing waits on is not a gate.** A conversation you open is
    only its task, and it holds nothing. Work a person owes is an ordinary bead
    assigned to them, and news nothing waits on is mail. Cost: an open
@@ -115,21 +115,22 @@ at 1e05ae624, and bd paths to bd's v1.3.1 source.
 |---|---|---|
 | `bd gate create --type=human --blocks <bead> --title --reason --await-id` | Files a question. It adds one `blocks` dependency from the bead it names onto the gate, so that bead waits. The reason is appended to the description, after a line naming that bead. No assignee, metadata or label can be set at create, and nothing dedups. No field names the blocked bead, so a `blocks` edge another bead adds onto the gate looks like the first. | bd `cmd/bd/gate.go` (flags 1282-1288, edge 352-368, description 411-437); `bd gate create --help` |
 | `await_type` is written only when a bead is created, and `bd create` has no flag for it | Why every question is filed through `bd gate create`. `bd create -t gate` is accepted but leaves the await type empty, which declares nothing to a reader. `bd update --type` changes a type in either direction, leaves the await fields where they were, and no upstream test covers it, so no reader is built on re-typing a bead. | bd `internal/storage/issueops/update.go` 28 and `internal/storage/issueops/helpers.go` 152; `cmd/bd/create.go` 917-967; `cmd/bd/update.go` 251-252 and `internal/storage/issueops/aggregate.go` 125 |
-| `bd dep add <a> <b> --type=tracks`, and `bd create --deps "tracks:<b>"` | A subject that does not wait tracks its question, and a conversation task tracks what it is about. `tracks` is a well-known type that never blocks, cascades nothing and is outside the cycle check. The first bead tracks the second. | bd `internal/types/types.go` 1271, 1313-1320, 1335-1336; `internal/storage/issueops/blocked_state.go` 213-219; `cmd/bd/dep.go` 370, 410; `cmd/bd/create_deps.go` 145-153 |
+| `bd dep add <a> <b> --type=tracks`, and `bd create --deps "tracks:<b>"` | A subject that does not wait tracks its question, unless it is a convoy, and a conversation task tracks what it is about. `tracks` is a well-known type that never blocks, cascades nothing and is outside the cycle check. The first bead tracks the second. | bd `internal/types/types.go` 1271, 1313-1320, 1335-1336; `internal/storage/issueops/blocked_state.go` 213-219; `cmd/bd/dep.go` 370, 410; `cmd/bd/create_deps.go` 145-153 |
 | One dependency type per ordered pair | Why a subject that waits carries only its `blocks` edge onto its question. A second type on the same pair is refused until the first is removed with `bd dep remove`. | bd `internal/storage/issueops/dependencies.go` 263-284; `issueops/errors.go` 206-208 |
 | `bd gate list <bead> --json` | Lists a bead's questions for the writer's dedup and for every reader. It returns the bead's outgoing dependencies of any type that are gates, `blocks` and `tracks` alike, with `await_type` and `await_id`. It lists every gate that is not closed unless `--all`, and at most 50 unless `--limit 0`. With no gates it prints `null`. | bd `cmd/bd/gate.go` 79-98 and `filterIssueGates` 129-144; `internal/storage/issueops/dependencies.go` 1318-1319; `cmd/bd/gate_proxied_server.go` 450-488; `cmd/bd/output.go` 68-87 |
 | `bd dep list <bead> --direction=up --type tracks --json` | Lists the conversations that track a bead or a question. Each row carries the tracking bead's id, title, status, type and assignee. | bd `cmd/bd/dep.go` 917, 1011-1012, 1557-1558; `internal/storage/issueops/relations.go` 60-61, 106-130 |
 | A `blocks` edge blocks whatever its blocker's type | An open task blocks exactly like a gate. Work a person owes is an ordinary bead the waiting bead blocks on, and re-typing a gate releases nothing. | bd `internal/storage/issueops/blocked_state.go` 213-219 |
 | `bd gate resolve <id> --reason` | The answer. It closes the gate with that close reason and recomputes `is_blocked` for the beads it blocked. It skips the close checks, the assignee check among them, so anyone may answer. On a gate already closed it changes nothing, keeps the first reason and still reports `Gate resolved` with exit 0, so a resolver learns it lost a race only by reading the gate back. | bd `cmd/bd/gate.go` 559-574; `cmd/bd/gate_proxied_server.go` 409-446; `internal/storage/issueops/close.go` 339-384 |
 | `bd close` refuses a blocked bead, a bead with open children, and a bead assigned to another actor, each without `--force`, and a close removes none of the bead's dependency rows | A question holds the close of what it blocks, and a `tracks` edge holds nothing. A bead a gate blocks closes only once the gate closes or the edge is removed with `bd dep remove` (section 11). A dismiss falls back to `--force` past the assignee check (section 7). | bd `internal/storage/issueops/close.go` 150-160, 203-205, 339-384; `cmd/bd/close_direct.go` 84 |
-| A blocked parent's state cascades to its `parent-child` descendants | Why an epic or a convoy is blocked only when the filer names it. | bd `internal/storage/issueops/blocked_state.go` 227-240; `docs/component-model.md`, I1's shape law |
+| A blocked parent's state cascades to its `parent-child` descendants, and through no other edge | Why an epic, or a convoy with open children, is blocked only when the filer names it, and why a convoy with none, such as an input convoy, can wait. | bd `internal/storage/issueops/blocked_state.go` 227-240; `docs/component-model.md`, I1's shape law |
+| A convoy's members are every bead it tracks, whatever their type. `gc convoy land` refuses a convoy while a member is open, autoclose waits for every member, and gc-toolkit's graduation counts every tracked bead | Why a convoy that does not wait carries no edge onto its question (section 1). | Gas City `internal/convoy/membership.go` 151-164; `cmd/gc/cmd_convoy.go` 2160-2173, 2393-2417; gc-toolkit `assets/scripts/convoy-graduate.sh` 123-130 |
 | `bd ready` excludes gates, and a plain `bd list` hides them (`--include-gates` or `--type gate` shows them) | Why no pool's demand reaches a question, and why the board reads questions by type. | bd `internal/storage/sqlbuild/ready.go` 16-22; `internal/workapi/list.go` 433-434 |
 | `bd update --claim` is a compare-and-swap | The sitting's claim on its conversation task. It succeeds on an open bead whose assignee is empty, the claiming actor, or one of the store's claim pools. It sets `in_progress`, the assignee and a lease, and is idempotent for its holder. It refuses a bead another actor holds. | bd `internal/storage/issueops/claim.go` 91, 114-118, 147-148, 341-352 |
 | Agent `work_query`, and its three-tier default | The default finds the conversation task assigned to the session, so converse needs no work query of its own. Its second tier, `bd ready --assignee`, finds the task open, and its first tier finds it in progress after a restart. Its third tier offers routed work and is closed to a manual session whose alias is not its template's name, so a sitting is offered nothing but its task. The current runtime takes no wake demand from a work query. | Gas City `internal/config/workquery.go` 528-536, 605-613, 780-793, 957, 972-977; `internal/config/config.go` 3626-3643; `cmd/gc/city_runtime.go` 3349-3352, 4625 |
 | `gc hook --claim` claims an open bead already assigned to the session, of any type but `message`, and returns one it already holds in progress. In a manual session it claims under the session's alias, which is also the session's bd actor | The sitting's first step (section 6). | Gas City `cmd/gc/cmd_hook_claim.go` 797-910, 1267-1288; `cmd/gc/cmd_hook.go` 291-299, 460-473, 522, 540-547; `internal/session/lifecycle.go` 76-79 |
 | Assigned work wakes the session whose identity it carries, and an unassigned, unrouted bead wakes nothing | Why a conversation in the operator's queue, assigned to `human`, which no session carries, starts no session. | Gas City `cmd/gc/build_desired_state.go` 1938-1950, 3215; `cmd/gc/assigned_work_scope.go` 382-431; `cmd/gc/compute_awake_set.go` 454-495 |
-| Gas City's releases of a dead holder's claims. An agent's default on_death runs for pool instances only. Core's orphan-sweep resets an in-progress bead only when it can show the holder dead, and it counts a bead whose `gc.session_name` it cannot resolve as unverifiable and leaves it, which is every bead `gc hook --claim` claimed in a manual session. Both list with a plain `gc bd list`, so neither sees a gate | Why a sitting's recovery runs through its alias, and why engage needs no reclaim (section 6). | Gas City `cmd/gc/cmd_start.go` 159-176; `internal/config/workquery.go` 1351-1378; `internal/bootstrap/packs/core/assets/scripts/orphan-sweep.sh` 89, 106, 277, 335, 345, 632-634; `cmd/gc/cmd_hook_claim.go` 2073-2075 |
-| A manual session does not end when its work closes. It stays until it is closed or drained, and a wait hold or an idle-sleep setting only puts it to sleep. An attached session is woken even when drained, unless a wait hold is set. `gc session attach` wakes a dormant session, and `wake_mode = "resume"` resumes the session's own transcript by its session key. A closed session does not reserve its alias: a new session under it starts a fresh transcript and takes the in-progress work still assigned to the alias. `gc session close` releases no claim held under the alias. Every closer the controller runs on its own skips a manual session, and the core reaper prunes one only once it has drained | Why converse-reap stays, and how a sitting resumes (section 6). | Gas City `cmd/gc/compute_awake_set.go` 432-440, 583-594, 668-693; `internal/session/manager.go` 1264-1271, 1344-1362; `internal/session/names.go` 639-641; `cmd/gc/cmd_session.go` 1894-1897, 1946; `cmd/gc/city_runtime.go` 3915; `cmd/gc/session_reconciler.go` 1057-1060; `cmd/gc/session_beads.go` 3500; `internal/bootstrap/packs/core/assets/scripts/reaper.sh` 69, 1402-1404 |
+| Gas City's releases of a dead holder's claims. An agent's default on_death runs for pool instances only. Core's orphan-sweep resets an in-progress bead only when it can show the holder dead, and it counts a bead whose `gc.session_name` it cannot resolve as unverifiable and leaves it, which is every bead `gc hook --claim` claimed in a manual session. Both list without `--include-gates`, so neither sees a gate | Why a sitting's recovery runs through its alias, and why engage needs no reclaim (section 6). | Gas City `cmd/gc/cmd_start.go` 159-176; `internal/config/workquery.go` 1351-1378; `internal/bootstrap/packs/core/assets/scripts/orphan-sweep.sh` 89, 106, 277, 335, 345, 632-634; `cmd/gc/cmd_hook_claim.go` 2073-2075 |
+| A manual session does not end when its work closes. It stays until it is closed or drained, and a wait hold or an idle-sleep setting only puts it to sleep. An attached session is woken even when drained, unless a wait hold is set. `gc session attach` wakes a dormant session, and `wake_mode = "resume"` resumes the session's own transcript by its session key. A closed session does not reserve its alias: a new session under it starts a fresh transcript and takes the in-progress work still assigned to the alias. `gc session close` releases no claim held under the alias. No closer the controller runs on its own ends a manual session because its work closed: the stale-session closers exempt one that has started its conversation, and the core reaper prunes one only once it has drained. `gc session list` leaves a closed session out, whatever state it is asked for | Why converse-reap stays, how a sitting resumes, and why a held conversation is found by its assignee rather than by its session (section 6). | Gas City `cmd/gc/compute_awake_set.go` 432-440, 583-594, 668-693; `internal/session/manager.go` 1264-1271, 1344-1362; `internal/session/names.go` 639-641; `cmd/gc/cmd_session.go` 1894-1897, 1946; `cmd/gc/city_runtime.go` 3915; `cmd/gc/session_reconciler.go` 1057-1060; `cmd/gc/session_beads.go` 3500; `internal/bootstrap/packs/core/assets/scripts/reaper.sh` 69, 1402-1404; a live `gc session list --state closed`, which returned no row on 2026-10-20, as `formulas/mol-witness-patrol.toml` 424 records |
 | The pool execution backstop nudges, then drains, a pool session that holds in-progress work and is quiet for 90 seconds, with no attachment exemption | Why a sitting is not a pool session. | Gas City `cmd/gc/execution_backstop.go` 321-322, 405-421 |
 | Core notify-on-human-gate-creation and renudge-stale-human-gates | Turned off in this city (section 5). Both act only on an open human gate, and mail its assignee, then `gc.deferred_assignee`, then `$GC_ESCALATION_RECIPIENT` (default `human`). | Gas City `internal/bootstrap/packs/core/assets/scripts/notify-on-human-gate-creation.sh` 1-80, 173-181; the town's city.toml 304-311 |
 | Core escalate.sh hook and its incident reminder | Prior art for the writer's quiet period. It is a mail hook for maintenance scripts, and it is not this pack's writer. | Gas City `internal/bootstrap/packs/core/assets/scripts/escalate.sh` 1-22; `docs/getting-started/troubleshooting.md` 877-905 |
@@ -148,8 +149,8 @@ under [Gap records](#gap-records).
   6659-6664). A gate has no workflow root, so same-subject continuity comes from
   the conversation task, which names its bead (section 6).
 - **Nothing native releases a gate a dead session claimed.** Core's orphan-sweep
-  and an agent's default on_death release list with a plain `gc bd list`,
-  which hides gates, and Gas City's dead-assignee release covers pool-routed
+  and an agent's default on_death release list without `--include-gates`, so
+  their listings hide gates, and Gas City's dead-assignee release covers pool-routed
   work (`cmd/gc/pool_session_name.go` 196-404). bd frees an expired lease only
   when something runs `bd reclaim`, and nothing in Gas City does: the hook
   claim's `auto_reclaim_stale_claims` setting would, but it is not wired at
@@ -199,7 +200,7 @@ gc bd gate create --type=human --blocks <waiter> --await-id <subject>:<key> \
 ```
 
 When the waiter is another bead than the subject, the subject also tracks the
-gate:
+gate, unless the subject is a convoy (below):
 
 ```
 gc bd dep add <subject> <gate> --type=tracks
@@ -224,14 +225,21 @@ decision asks the operator to accept them.
   that blocks only a rework child holds the merge through that child, because
   an anchor carries a `blocks` edge onto each rework child it has. A
   conversation about the PR holds nothing (below).
-- **An epic or a convoy is blocked only when the filer names it.** A blocked
-  epic, or an owned convoy whose members are `parent-child` children, cascades
-  its blocked state to every descendant (I1's shape law,
-  `docs/component-model.md`). bd cascades from any parent, and an epic and a
-  convoy are the parents the pack files work under, so the writer never blocks
-  either one unless the call names it as what waits (section 2). A filer that
-  names it states that pausing the unstarted parts is the point. A question
-  about one part blocks that part, and the epic tracks the question when it is
+- **An epic, or a convoy with open children, is blocked only when the filer
+  names it.** A blocked epic, or an owned convoy whose members are
+  `parent-child` children, cascades its blocked state to every descendant
+  (I1's shape law, `docs/component-model.md`). bd cascades only through
+  `parent-child` edges, and an epic and an owned convoy are the parents the
+  pack files work under. So the writer never blocks an epic, or a convoy with
+  an open `parent-child` child, unless the call names it as what waits
+  (section 2). Any other convoy pauses nothing when it is blocked, and it waits
+  as any subject does. An input convoy tracks its one work bead rather than
+  parenting it, and the malformed-convoy refusals file on one (section 3). An
+  integration convoy whose branch is graduating has closed its members, and it
+  anchors the graduation PR, so the merge-path questions on that PR hold it as
+  they hold any other. A filer that names an epic or a convoy with open
+  children states that pausing the unstarted parts is the point. A question
+  about one part blocks that part, and an epic tracks the question when it is
   the subject. Work already in flight is not stopped, because a blocker gates
   claims, not running sessions.
 
@@ -248,10 +256,17 @@ anchor. A sitting that wants the merge to wait asks a question on the anchor
 id. The board shows the question on the subject's row. When the subject is the
 waiter, the `blocks` edge is the subject's own edge onto the gate. When it is
 not, the writer adds the subject's `tracks` edge, because `bd gate list
-<subject>` reads only the edges that leave the subject, of any type. bd keeps
-one dependency type per ordered pair, so a subject carries one of the two edges,
-never both. Other beads can wait on the same question through `blocks` edges of
-their own, as a rework child waits on the question its bring-current conflict
+<subject>` reads only the edges that leave the subject, of any type. A convoy is
+the exception. Gas City counts every bead a convoy tracks as one of its members,
+so a tracked question would hold the convoy's landing, its autoclose and its
+graduation, and would be listed among its work (see the platform section). A
+convoy that does not wait carries no edge onto its question, and its questions
+are found by their await id among the store's gates, which
+`bd gate list --json --limit 0` returns when it is given no bead, the closed
+ones too with `--all`. Questions on a convoy are rare, so the wider read costs
+little. bd keeps one dependency type per ordered pair, so a subject carries one
+of the two edges, never both. Other beads can wait on the same question through
+`blocks` edges of their own, as a rework child waits on the question its bring-current conflict
 filed on its anchor (section 4). bd records what a gate blocks only as those
 edges, so the await id is what tells the subject from a waiter. A reader that
 asks what a bead's questions are keeps the human gates whose await id names that
@@ -282,9 +297,11 @@ platform. gc-helm.sh demand already names its gated bead in its await id
 
 **Its assignee** is empty while the question is owed, or the one person who owes
 the answer. No session claims a question: a sitting holds a conversation task
-instead (below). Unassigned is the state Gas City's addressee chain and its
-renudge order act on, so in a city that keeps those orders on, a question stays
-loud until it is answered, whether or not a sitting is discussing it. In this
+instead (below). Gas City's notify and renudge orders act on a human gate while
+it is open, and mail its assignee, or the escalation recipient when it has none.
+A claim would move the gate to in progress, which both skip, and nothing claims
+a question, so in a city that keeps those orders on, a question stays loud until
+it is answered, whether or not a sitting is discussing it. In this
 city both orders are off, and the board is the reach (section 5). Nothing in the
 pack asks a question of a named person today, and the writer gains no flag for
 one. Work a person must do is not a question. It is an ordinary bead assigned to
@@ -335,7 +352,10 @@ task tracks that gate.
   waits in the operator's queue, which is where a conversation the operator
   opens without engaging it sits. It is the sitting's alias while a sitting
   holds it: the session claims it, which sets `in_progress`, the assignee and
-  a lease. That alias is what a recovery resumes (section 6).
+  a lease. The alias names the task's own id (section 6), so a held
+  conversation is known by its assignee alone, even once its sitting's session
+  has closed and left the session list. That alias is what a recovery resumes
+  (section 6).
 - **Its title** is what the conversation is about, and the board shows it where
   a question's title would be. **Its description** is the seed: the operator's
   concern, or the question engage started from.
@@ -367,12 +387,13 @@ It files in six steps:
    placeable bead) to the rig's standing triage subject, as today. The original
    id goes in the framing, so `escalation_raised_by` retires.
 3. **It reads the subject's gates** with `bd gate list <subject> --all --limit 0
-   --json`. A human gate with the same await id that is not closed means the
+   --json`, or the store's gates with the same flags when the subject is a
+   convoy that does not wait (section 1). A human gate with the same await id that is not closed means the
    situation is already asked, so the writer prints that gate's id and exits 0.
    When the call names a waiter the gate does not block yet, the writer first
    adds that waiter's `blocks` edge and reads it back. A gate the subject only
    waits on names another bead in its await id, so it never matches. This is the
-   idempotency the ruling asks for. bd has none at create, so two writers racing
+   idempotency the initiative's ruling asks for. bd has none at create, so two writers racing
    in the same instant can both file. The board folds both, and the sitting
    answers both with one reason.
 4. **It keeps the quiet period.** If the newest closed human gate with the same
@@ -381,13 +402,15 @@ It files in six steps:
    says so. A caller whose question carries a wait passes 0, as today, because a
    wait needs an open gate to sit on.
 5. **It settles what waits.** The waiter is the `--blocks` bead, else the
-   subject. An epic or a convoy is never the waiter by default, because blocking
-   one pauses every unstarted part of it. Without `--blocks`, the writer files
-   nothing on one, says why, and exits 3. The caller then names what waits, or
-   opens a conversation instead (section 3).
+   subject. An epic, or a convoy with an open `parent-child` child, is never the
+   waiter by default, because blocking one pauses every unstarted part of it
+   (section 1). Without `--blocks`, the writer files nothing on one, says why,
+   and exits 3, a code escalate.sh does not use today. The caller then names
+   what waits, or opens a conversation instead (section 3). Any other convoy is
+   an ordinary waiter.
 6. **It files the gate** (section 1), blocking the waiter. When the waiter is
-   another bead, it adds the subject's `tracks` edge. It reads the gate and its
-   edges back.
+   another bead, it adds the subject's `tracks` edge, unless the subject is a
+   convoy (section 1). It reads the gate and its edges back.
 
 `--retract` withdraws the filer's own question. It resolves each human gate on
 the subject with that await id that is not closed, with the reason
@@ -398,8 +421,8 @@ learns it at its sign-off, which reads each gate back (section 7). A retract
 interrupted part way leaves gates the next retract for the situation finds and
 resolves, and resolving a gate already closed changes nothing.
 
-**One open question per subject and situation.** The ruling says one open ask
-per subject, and the operator still sees exactly that: every question on a bead
+**One open question per subject and situation.** The initiative's ruling says
+one open ask per subject, and the operator still sees exactly that: every question on a bead
 folds into the bead's one board row, and one sitting answers all of them. In the
 store, two situations on one bead stay two gates, such as two PR comments, or a
 review question beside a merge failure. Keeping them apart lets each filer
@@ -426,8 +449,8 @@ looked at, and keys it on the person's verdict.
 
 **The other minters fold into it:**
 
-- **`gc-helm.sh demand`**, the pack's only native gate minter (gc-helm.sh
-  1460-1669), retires. first-reaction-dispose.sh files its ruling and recommend
+- **`gc-helm.sh demand`**, the pack's only human-gate minter (gc-helm.sh
+  1460-1669), retires. park's plain gate is not a question (section 8). first-reaction-dispose.sh files its ruling and recommend
   question through escalate.sh with the key `first-reaction`, and the waits, prs
   and converse-settle skills call escalate.sh. A task only a named person can
   perform, which the waits skill teaches through `demand --assignee` and no
@@ -463,21 +486,21 @@ around the call.
 
 | Caller | Its move |
 |---|---|
-| mol-polecat-work's decline arms: load-context's unreadable, parked and duplicate refusals; the blocked-work fallback; the unclear-requirements instruction; workspace-setup's malformed convoy, target guard, branch divergence and missing branch; the bring-current question through bring-current-audit.sh; submit's branch-shape, landing-target and hand-off refusals | The call is unchanged. The gate blocks the work bead, except for the bring-current question, which bring-current-audit.sh files on the anchor (bring-current-audit.sh 339), so the merge waits too, and whose wait await-ruling.sh adds as the work bead's own edge onto the gate (`formulas/mol-polecat-work.toml` 726, section 4). await-ruling.sh then releases the claim and arms the re-sling, and run-cancel.sh ends the run. The verdict window stays off where a wait follows. |
-| `template-fragments/polecat-doctrine.template.md` (Escalation and the decline protocol) and `template-fragments/pool-worker-no-consent-ui.template.md` | The same three calls in the same order. The text says "the human gate escalate.sh files" where it said "the visit escalate.sh opens". A work bead that is an epic or a convoy meets step 5's refusal, and the doctrine says to name the work bead with `--blocks`, because the work is what waits. Every polecat does what it does today. |
-| mol-validate, mol-rig-demo, mol-refinery-patrol, mol-witness-patrol, mol-dog-shutdown-dance | Unchanged calls. mol-witness-patrol's check-refinery finds its open `witness-refinery-queue` questions with `bd gate list` and retracts them as today. |
+| mol-polecat-work's decline arms: load-context's unreadable, parked and duplicate refusals; the blocked-work fallback; the unclear-requirements instruction; workspace-setup's malformed convoy, target guard, branch divergence and missing branch; the bring-current question through bring-current-audit.sh; submit's branch-shape, landing-target and hand-off refusals | The call is unchanged. The gate blocks the work bead, except in two arms. The malformed-convoy refusal files on the input convoy (`formulas/mol-polecat-work.toml` 430), which pauses nothing when blocked and so is its own waiter (section 1), and it cancels the run without a wait. The bring-current question is filed on the anchor (bring-current-audit.sh 339), so the merge waits too, and await-ruling.sh adds its wait as the work bead's own edge onto the gate (`formulas/mol-polecat-work.toml` 726, section 4). await-ruling.sh then releases the claim and arms the re-sling, and run-cancel.sh ends the run. The verdict window stays off where a wait follows. |
+| `template-fragments/polecat-doctrine.template.md` (Escalation and the decline protocol) and `template-fragments/pool-worker-no-consent-ui.template.md` | The same three calls in the same order. The text says "the human gate escalate.sh files" where it said "the visit escalate.sh opens". A work bead that is an epic, or a convoy with open children, meets step 5's refusal, and the doctrine says to name the work bead with `--blocks`, because the work is what waits. Every polecat does what it does today. |
+| mol-validate, mol-rig-demo, mol-refinery-patrol, mol-witness-patrol, mol-dog-shutdown-dance | Unchanged calls. The malformed-convoy refusals of mol-validate and mol-rig-demo file on the input convoy, as mol-polecat-work's does (`formulas/mol-validate.toml` 90, `formulas/mol-rig-demo.toml` 111). A refinery or witness patrol call whose subject is a graduating integration convoy blocks it as it blocks any other bead (section 1). mol-witness-patrol's check-refinery finds its open `witness-refinery-queue` questions with `bd gate list` and retracts them as today. |
 | mol-deacon-patrol | It names escalate.sh in prose only. Its "becomes a visit" wording says the call files a question. |
 | The deacon, refinery and witness prompts | Unchanged calls. The deacon prompt's stale "converse pool" default goes. |
 | `template-fragments/visit-close.template.md`, which the deacon, mechanik, proactive, refinery and witness prompts include | Its `--retract` call is unchanged. The fragment is renamed (section 9). |
 | pr-facts.sh, the merge-path families | Unchanged calls. Each question blocks the anchor, so it holds the merge as the visit did. pr-facts.sh stops stamping `pr_url`, `pr_number` and `anchor_bead` on the comment and unengaged-thread questions. `visit_for`, the dispose refresh, the merge-blocked-approval retire, the retire on a disposed anchor and the write-back's awaiting and resolved replies read the anchor's gates by await id. The dispose retract after a landed close (`retract_dispose_visits`) goes, both its call at pr-facts.sh 1779 and the full-pass sweep that retries it (1298-1335). bead-rehome.sh withdraws the retry's own question before the close (section 4), so a landed close leaves none open. |
 | gctk merge (one-anchor-per-pr, seed-audit-merge-gate) and record-failure-cap.sh | Unchanged calls. gctk merge reads a human gate on the anchor as a person's hold (section 4). |
 | gate-ensure.sh, branch-supersession.sh, reconcile-rig-checkouts.sh, rejection-repool.sh | Unchanged calls. branch-supersession.sh's lookup reads gates. reconcile-rig-checkouts.sh's pool knob, `RECONCILE_ESCALATION_POOL` or its prior name `RECONCILE_MAYOR_ADDR`, retires with `--pool`, and so does its pool attempt that falls back to the board call (reconcile-rig-checkouts.sh 166-169, 184-195). Nothing sets the knob, so its call stays the board call it makes today. |
-| deferred-dispatch.sh | Unchanged call. Its sling-failed question blocks the armed bead, so the re-sling waits for the answer as well as for the cleared cap (deferred-dispatch.sh 1608-1614). On an epic or a convoy nothing else waits on the answer, because the cap already holds the arm, so it opens a conversation on the bead instead. |
+| deferred-dispatch.sh | Unchanged call. Its sling-failed question blocks the armed bead, so the re-sling waits for the answer as well as for the cleared cap (deferred-dispatch.sh 1608-1614). On an epic, or a convoy with open children, nothing else waits on the answer, because the cap already holds the arm, so it opens a conversation on the bead instead. |
 | liveness-sweep.sh, finding.sh | Unchanged calls. Their subjects are an anchor, a standing triage subject or the finding's anchor, none of them an epic, so each question blocks its subject. liveness-sweep.sh puts its recheck command in the message instead of stamping `visit.recheck`, and its disposition text names escalate.sh where it named `gc-helm.sh demand`. finding.sh records the gate's id (section 4). |
-| upstream-finding.sh | Its own `--pool` option and the forwarding of it (upstream-finding.sh 57, 411) retire with escalate.sh's, and so do the cases in upstream-finding.test.sh that pin the forwarding. No caller passes the option, so every call is unchanged. Its question blocks its own send task, which a person closes to answer it. |
+| upstream-finding.sh | Its own `--pool` option and the forwarding of it (upstream-finding.sh 57, 411) retire with escalate.sh's, and so do the cases in upstream-finding.test.sh that pin the forwarding. No caller passes the option, so every call is unchanged. Its question blocks its own send task, so the operator answers the question, sent or declined, before the task can close: bd refuses to close a bead an open gate blocks, where today the send task closes as the answer (`docs/outbound-sends.md`). |
 | The gascity-keeper sub-pack's refinery fragment | Its call passes flags escalate.sh rejects, behind `\|\| true`. tk-vfgmu8k fixes it to escalate.sh's flags, and this design keeps those flags. |
-| first-reaction-dispose.sh | escalate.sh with the key `first-reaction`, blocking the subject, so the subject waits for the operator as it does today. Its `--visit` option, which blocked the subject on a visit, retires. A first reaction on an epic or a convoy, which only the operator's own react reaches, finds nothing on it that waits for the answer, so it opens a conversation carrying its takeaway and reason instead (decision 2). |
-| mol-validate-close, mol-feedback-distiller | escalate.sh with their own keys (section 2). mol-validate-close escalates on doubt, which an open child that is real work raises, so on an epic or a convoy it opens a conversation instead of pausing that work. |
+| first-reaction-dispose.sh | escalate.sh with the key `first-reaction`, blocking the subject, so the subject waits for the operator as it does today. Its `--visit` option, which blocked the subject on a visit, retires. A first reaction on an epic, or a convoy with open children, which only the operator's own react reaches, finds nothing on it that waits for the answer, so it opens a conversation carrying its takeaway and reason instead (decision 2). |
+| mol-validate-close, mol-feedback-distiller | escalate.sh with their own keys (section 2). mol-validate-close escalates on doubt, which an open child that is real work raises, so on an epic, or a convoy with open children, it opens a conversation instead of pausing that work. |
 | gc-helm.sh engage and open, the operator's intake, helm-svc POST /helm/open | No escalate.sh call. They file and take conversations (sections 6 and 8). |
 | The waits, prs and converse-settle skills | escalate.sh where they called `gc-helm.sh demand` (section 9). The waits skill's own escalate.sh call is unchanged. |
 
@@ -487,12 +510,12 @@ around the call.
 |---|---|---|
 | **An open visit refuses its subject's finalization** | finalize-gate.sh `clause_no_open_visit`, run by gctk merge before approval and before the merge, and by bead-rehome.sh | The question holds natively: gctk merge holds on a live blocker, and `bd close` refuses a blocked bead. The clause stays as an explicit precondition, re-expressed as "no open human gate blocks this bead", because a close path that passes `--force` skips bd's refusal. A question the bead only tracks holds nothing, and neither does a conversation. `--except-key` keeps its meaning: the caller's own questions under that key, assigned to no person, do not hold the act they ask to retry. bd still refuses the close while they block the bead, so the retry withdraws them first (below). |
 | **Any live bead carrying the PR's `pr_number` holds the merge**, which is how a PR-comment visit held its PR | gctk merge `inflightHolder` (merge.go 1509-1554) | No longer stamped on questions. The question blocks the anchor. The probe stays for its other holders. |
-| **The merge's machine state** | gctk merge's blocker classification (merge.go 553-567, `stuckHolder` 1582-1592) | It records a pool-routed blocker as progressing, an unrouted one as "an unrouted blocker no automated actor will clear", and nothing for a blocker routed to `human`, which is how a demand gate reads today (merge.test.sh 1307-1309). A gate carries no route, so gctk merge reads a gate whose await type is `human` as that person's hold and records no machine state. |
+| **The merge's machine state** | gctk merge's blocker classification (merge.go 553-567, `stuckHolder` 1582-1592) | It records a pool-routed blocker as progressing, an unrouted one as "an unrouted blocker no automated actor will clear", and nothing for a blocker routed to `human`, which is how a demand gate reads today (merge.test.sh 1307-1309). A gate carries no route, so gctk merge reads a gate whose await type is `human` as that person's hold and records no machine state. Its bead reader decodes no issue type or await type today, so a gate without a route would read as unrouted (merge.go 1582-1592), and the reader learns the await type. |
 | **An open visit sets the PR's needs-attention status** | gctk pr-status `anchorOpenVisit` (`services/gctk/internal/cli/prstatus.go` 107-192) and `services/gctk/prstatus/prstatus.go` 121-123 | An open human gate whose await id names the anchor. A conversation about the anchor does not set it. |
 | **The proceed ruling:** await-ruling.sh blocks the work bead on the visit and arms its re-sling | `assets/scripts/await-ruling.sh` | The wait is a `blocks` edge from the work bead onto the gate. await-ruling.sh finds the gate by its await id on the subject, which is `--subject` as today, else the work bead. When the work bead is the waiter the writer filed for, the gate's own edge is the wait. When it is not, as for the bring-current question a rework child files on its anchor, await-ruling.sh adds the work bead's edge, because the child's `related` edge to its anchor holds nothing (`assets/scripts/bd-lib.sh` 195). Either way it reads the edge back before it releases the claim, clears the route and arms the re-sling, in today's order, so the re-sling cannot fire before the answer. It survives because a formula-slung bead needs the arm. Closing the gate makes the work bead ready, and only the arm re-slings it on its formula. |
 | **Review release:** a needs-you finding is released only by a closed visit carrying `gc.ruling`, following `gc.folded_into` and `gc.superseded_by` | finding.sh close-answered, run by gate-ensure.sh; review-answer.sh; pr-facts.sh's review dismissal | finding.sh stamps the gate's id as `finding.gate`. A needs-you finding is ruled once that gate has closed with a reason headed `ruled:`, or once the finding records its ruling as `finding.ruling_bead`, which the migration writes for a finding whose visit was ruled before the cutover (section 11). Its release then waits, as today, until no fix unit on its lane and no ruling's rework child is live, and the close records the ruling's bead as `finding.ruling_bead`. It still follows `gc.superseded_by`. Questions do not fold (section 7), so the `gc.folded_into` hop retires. `finding.ruling_visit` becomes `finding.ruling_bead`, named like `source_ruling_bead` because it names a gate for a ruling given after the cutover and a visit for one given before. pr-facts.sh's review dismissal and review-answer.sh read it there. |
-| **Liveness:** a subject covered by a live visit is conversing, and one named by `gc.demand_for` is held by design | liveness-classify.sh 113-149, liveness-sweep.sh, liveness-sweep-precheck.sh, liveness-recheck.sh | A bead whose `blocks` edge reaches an open human gate is held by design. A bead tracked by a conversation that a live session holds, directly or through one of its questions, is conversing. The sweep's live-visit guards read the bead's gates and conversations. A conversation task is itself a named wait while what it tracks is open, through the classifier's existing `tracks` arm (liveness-classify.sh 155). |
-| **Orphan disposal** | orphan-dispose.sh's visit arm; the witness patrol's recovery steps | The visit arm retires. A conversation whose session was closed stays in progress under the sitting's alias until a session under that alias takes it back (section 6). If the witness's recovery reaches it first, orphan-dispose.sh's source arm reopens it unassigned, and engage still finds it through the closed session's alias. Routed-human beads never reached the disposal anyway (mol-witness-patrol.toml 245-250). salvage-scope-gate keeps treating a gate as not work. |
+| **Liveness:** a subject covered by a live visit is conversing, and one named by `gc.demand_for` is held by design | liveness-classify.sh 113-149, liveness-sweep.sh, liveness-sweep-precheck.sh, liveness-recheck.sh | A bead whose `blocks` edge reaches an open human gate is held by design. A bead tracked by a conversation that a live session holds, directly or through one of its questions, is conversing. The sweep's live-visit guards read the bead's gates and conversations. A conversation task is itself a named wait while what it tracks is open, through the classifier's existing `tracks` arm (liveness-classify.sh 155). The same arm reads a subject that tracks an open question as a named wait, because it reads every outgoing `tracks` edge to a live bead and the sweep's live set includes gates. |
+| **Orphan disposal** | orphan-dispose.sh's visit arm; the witness patrol's recovery steps | The visit arm retires. The recovery reads a bead as orphaned when no live session carries its owner, and it skips a bead routed to `human` (mol-witness-patrol.toml 245-250, orphan-dispose.sh 433). A conversation is assigned, not routed, and no session carries either of its owners: `human`, which Gas City reserves from session aliases (Gas City `internal/session/names.go` 159-160), or the alias of a sitting whose session has closed. So both skips also drop a task assigned to `human` or to an alias that names the task's own id. A conversation whose session was closed then stays in progress under the sitting's alias until a session under that alias takes it back (section 6). salvage-scope-gate loses its visit arm with orphan-dispose.sh's, and its test keeps the two classifiers in step. It does not reach a question, because no session claims one. |
 | **A ruling's rework child** | `source_ruling_bead` (rework-child.sh, gate-ensure.sh, duplicate-sweep.sh, liveness-sweep.sh, live-work.sh) | Readers unchanged. The value is the ruling sitting's conversation task from now on, so one sign-off's rework is found again whichever questions it answered. |
 | **A PR comment's disposition** | `pr_comment_disposition=visit:<id>` (pr-facts.sh; doctor check-feedback-routing-owed) | `question:<id>`. pr-facts.sh reads the kind and the named bead's status (`conversation_fix_landed`, pr-facts.sh 186, and the write-back at 4332-4333). The migration rewrites every `visit:<id>` (section 11), naming the gate for a visit it migrated and the visit itself for one closed before the cutover, so the prefix names a question rather than a gate. |
 | **Others** | bd-lib.sh's anchor children; bead-rehome.sh's outcome stamp on a visit it rehomes; pr-post.sh's recognition of the reminder's `gc:visit` marker, which pr-visit-comment.sh writes | The anchor children lose the visit. The stamp retires, because a gate is never rehomed, only its subject. pr-post.sh recognizes the reminder's new marker (section 7). |
@@ -535,10 +558,10 @@ The doctor checks:
   period does not start.
 - **check-hq-marooned-work** drops its visit exemption. Gates are already exempt
   as infrastructure. A conversation is assigned, to `human` in the queue or to
-  its sitting's alias, and the check passes an assigned bead. One the witness's
-  recovery reopened unassigned tracks an open bead, and the check exempts a
-  task that tracks a bead that is not closed, as the liveness classifier's
-  `tracks` arm does.
+  its sitting's alias, and the check passes an assigned bead. One a person
+  released with `gc bd release-if-current` is unassigned until it is bound
+  again, and it tracks an open bead, so the check exempts a task that tracks a
+  bead that is not closed, as the liveness classifier's `tracks` arm does.
 - **check-wait-is-an-edge** keeps its terminal-wait exemption and keys it on the
   gate type. `terminal_wait_key = "gc.demand_for"` in `lifecycle/lifecycle.toml`
   `[holds]` becomes a type rule.
@@ -609,14 +632,17 @@ only sleeps it, and attaching wakes it.
 **Engage** (gc-helm.sh engage, the tmux picker, and helm-svc's engage route)
 takes these steps:
 
-1. **It reads the bead's conversations:** the open tasks that track the bead or
-   one of its open human gates (`bd dep list --direction=up --type tracks` on
-   each), kept when a converse session is named for the task or the task is
-   assigned to `human`. A converse session is one whose template contains
-   `converse`, as converse-reap reads it today (converse-reap.sh 72-79).
-2. **A conversation whose session is not closed is a live sitting,** and engage
-   attaches the operator to it. That is the dedup the ruling calls a convention:
-   engage never starts a second sitting beside a live one.
+1. **It reads the bead's conversations:** the tasks that are not closed and
+   track the bead or one of its open human gates (`bd dep list --direction=up
+   --type tracks` on each), kept when the task is assigned to `human` or to an
+   alias that names the task's own id (section 1). The session list says which
+   of those sittings are live. A converse session is one whose template
+   contains `converse`, as converse-reap reads it today (converse-reap.sh
+   72-79). A closed session is not in the list (see the platform section), so a
+   conversation whose sitting's session has closed is found by its assignee.
+2. **A conversation held by a session in the list is a live sitting,** and
+   engage attaches the operator to it. That is the dedup the ruling calls a
+   convention: engage never starts a second sitting beside a live one.
 3. **Otherwise engage takes a conversation** in the operator's queue, or one
    whose session has closed, or files a new one (section 1). A concern passed
    with `--reason`, `--template` or `--skill` seeds the new task, or joins the
@@ -625,10 +651,14 @@ takes these steps:
    --no-attach`, as today with the visit's id. The `v-` fallback for an id the
    runtime refuses as an alias stays. Engage still starts the session before it
    binds the task, because the alias is the reservation, and a bind that loses
-   its race closes the session it started (gc-helm.sh 4145-4150, 4295-4323).
-5. **It binds the task to the session** with a conditional update, which
-   accepts an assignee of `human`, empty, or the session's own name, so a
-   racing engage loses cleanly. Then it attaches the operator, as today.
+   its race closes the session it started (gc-helm.sh 4145-4150, 4295-4323). A
+   session still in the list under that alias that no longer holds the task,
+   as a sitting cut short leaves it (section 7), is closed first, because a
+   session that is not closed keeps its alias.
+5. **It binds the task to the session's alias** with a conditional update from
+   the assignee step 1 read, `human`, empty or that alias, so a racing engage
+   loses cleanly, and the task is known as held from the bind on. Then it
+   attaches the operator, as today.
 
 **The sitting claims its task with a plain `gc hook --claim`.** The default work
 query finds the task assigned to the session, open through its second tier and
@@ -672,7 +702,8 @@ A session under any other alias is refused, because the claim is bd's
 compare-and-swap. Nothing in Gas City releases a sitting's claim on its own:
 on_death runs only for pool instances, orphan-sweep leaves a bead it cannot show
 orphaned, and `gc session close` releases nothing held under the alias (see the
-platform section). The alias is the way back in. A person who means to move a
+platform section). The pack's witness recovery skips the task too (section 4).
+The alias is the way back in. A person who means to move a
 task to another session releases it with `gc bd release-if-current`, which
 reopens a bead only while the named holder still holds it (Gas City
 `internal/beads/bdstore_conditional_release.go` 78-91). No question needs a
@@ -693,12 +724,15 @@ is found at the sitting's next read of the bead's gates (converse-continue).
 
 **converse-reap stays, keyed on conversation tasks.** Gas City does not end a
 manual session when its work closes. It stays until it is closed or drained, and
-every closer the controller runs on its own skips a manual session. The nearest
-native one, the core reaper, prunes a session only after it has drained. A
-sitting cannot drain itself at its sign-off: an attached operator's pane would
-be destroyed, and the attached override would wake the session straight back
-up. So converse-reap closes an unattached converse session whose task has
-closed, is gone, or is no longer assigned to it. It reads the task's id from the
+no closer the controller runs on its own ends one because its work closed (see
+the platform section). The nearest native one, the core reaper, prunes a session
+only after it has drained. A sitting cannot drain itself at its sign-off: an
+attached operator's pane would be destroyed, and the attached override would
+wake the session straight back up. So converse-reap closes an unattached
+converse session whose task has closed or is gone, and one whose task is back in
+the operator's queue, as a sitting cut short leaves it (section 7), once the
+session is older than the reap's own interval. The age keeps the reap off a
+session engage has started and not yet bound. It reads the task's id from the
 session's alias, and it strips the `v-` prefix, which today leaves those
 sessions unreaped (converse-reap.sh 110-112). Its retirement trigger: Gas City
 ends a manual session once its claimed work has closed and nobody is attached.
@@ -768,9 +802,11 @@ that answer to the operator instead of claiming its own. Each of those answers
 is legal, nothing prevents it, and the one that loses is told.
 
 **Leaving a question open** needs nothing, because the sitting never claimed it.
-A sitting cut short writes its record, leaves its questions open and owed, and
-returns its task to the operator's queue, assigned to `human`, so the next
-engagement starts a fresh session on the same conversation. The ruled-no
+A sitting cut short writes its record, leaves its questions open and owed,
+returns its task to the operator's queue, assigned to `human`, and drains, as a
+cut-short sitting drains today. converse-reap closes the session once nobody is
+attached, or the next engagement closes it first, and that engagement starts a
+fresh session on the same conversation (section 6). The ruled-no
 sign-off's second demand on the anchor retires, because a question that holds
 the anchor already blocks it.
 
@@ -779,7 +815,7 @@ names the dismissal, and it answers nothing. converse-reap then closes the
 session once nobody is attached, as it closes a dismissed sitting's session
 today, so the pane is never taken from under the operator who pressed the key.
 The close falls back to `--force` when bd refuses an operator closing a task its
-sitting holds, as dismiss does for a visit today (gc-helm.sh 2623-2629). Today
+sitting holds, as dismiss does for a visit today (gc-helm.sh 2682-2687). Today
 dismiss closes the visit, which for an escalation removes the question until its
 detector re-files it. After this, the question stays on the board. That is the
 cost the seventh decision names.
@@ -819,10 +855,11 @@ and those closed inside the sittings window (default 24 hours), with a
 gate-typed search, because a plain listing hides gates and a gate carries no
 pack marker. The supervisor backend already unions a `type=gate` page into its
 scan (`services/helm/internal/source/supervisor.go` 554-585). It reads the
-conversations two ways: the converse sessions in the session list it already
-reads for owner liveness (`services/helm/internal/source/gccli.go` 155-166),
-each with the task its alias names, and the open tasks assigned to `human` that
-track a bead. A question's subject is the bead its await id names (section 1).
+conversations from their tasks: the tasks that are not closed, track a bead, and
+are assigned to `human` or to an alias that names the task's own id (section 1).
+The session list it already reads for owner liveness
+(`services/helm/internal/source/gccli.go` 155-166) says which of those sittings
+are live, and it leaves a closed session out. A question's subject is the bead its await id names (section 1).
 Any other bead it blocks is a waiter, whose row lists the question among what it
 waits on, as a bead blocked by a demand lists the demand today (`waitingSplit`,
 `services/helm/internal/board/derive.go` 317). A conversation's bead is the bead
@@ -841,10 +878,10 @@ meanings:
   subject is in flight, which is the visit's rule today. A demand alone yields to
   live work (derive.go 2666), but gate-visit-sweep gives every unassigned demand
   a visit, so a demand already follows the visit's rule in effect. One rule keeps
-  that behavior. A conversation in the operator's queue makes its bead owed, as
-  an open visit does. A conversation in session does not, because the operator
-  is in it.
-- **Owed since:** the earliest open gate's or queued conversation's
+  that behavior. A conversation not in session makes its bead owed, as an open
+  visit does: one in the operator's queue, or one whose sitting's session has
+  closed. A conversation in session does not, because the operator is in it.
+- **Owed since:** the earliest open gate's or owed conversation's
   `updated_at`, which is what the visit's clock was.
 - **Needs:** the question's title, or `N× — a · b` over several. A held row with
   no open question shows its conversation's title, or reads "in conversation"
@@ -852,9 +889,9 @@ meanings:
 
 **In session:** a bead is in session when one of its conversations is held by a
 session that is not closed, read against the session list the way the board
-reads every owner's liveness (derive.go 79-83). Today `engagedVisit` reads only
-whether a visit carries a session or an assignee (derive.go 432-442), so a dead
-sitting still reads engaged. `classifyVisits` becomes the same classification
+reads every owner's liveness (derive.go 79-83). Today `engagedVisit` reads a
+visit's status, session and assignee, never whether the session lives
+(derive.go 432-442), so a dead sitting still reads engaged. `classifyVisits` becomes the same classification
 over conversations, read against liveness.
 
 **Accept answers the recommendation's question and nothing else.** A
@@ -868,7 +905,8 @@ option, which held a recommendation on a question the caller filed, retires
 (section 3), so no recommendation rides on another question. A subject whose
 recommendation has no open gate under that await id offers Discuss only, because
 nothing asks the operator to accept it. That is the case of a first reaction on
-an epic or a convoy, which opens a conversation instead (section 3).
+an epic, or a convoy with open children, which opens a conversation instead
+(section 3).
 
 Accept is offered while all three hold:
 
@@ -944,7 +982,7 @@ it the way Needs names gates: the gate's title, or `N× — a · b` over several
 is null on every other row. The web and text boards print it beside Discuss as
 the reason Accept is not offered. `visit_state` is renamed `sitting_state`. The
 web marker reads "in session" or "waiting" without the word visit. The sittings
-card lists the conversations, from the session list and the queue. gctk
+card lists the conversations, from their tasks and the session list. gctk
 pr-status's `OpenVisit` phase input reads an open human gate whose await id
 names the anchor.
 
@@ -991,7 +1029,7 @@ record discipline. Only text that depends on the visit bead changes.
 | `agents/_converse/prompt.template.md` | Its definitions of visit, subject, topic and demand become two: a question and a conversation. The claim block becomes `gc hook --claim`. The BEGAN rules, the fold and the finish arm go. The cut-short path returns the task to the queue. The ending says the thread ends when its conversation closes. |
 | `agents/converse-{opus,fable,codex}/agent.toml` | Their header comments say the alias is the conversation task's id. They gain no work query. |
 | `template-fragments/visit-close.template.md` | Renamed `ask-close.template.md`, and its `define` with it, so the include line in each prompt that includes it changes: the deacon, mechanik, proactive, refinery and witness prompts. A role never resolves another role's question, and withdraws its own with `--retract`. |
-| `template-fragments/polecat-doctrine.template.md`, `template-fragments/pool-worker-no-consent-ui.template.md` | The decline wording of section 3, with the `--blocks` sentence for a work bead that is an epic or a convoy. The calls are unchanged. |
+| `template-fragments/polecat-doctrine.template.md`, `template-fragments/pool-worker-no-consent-ui.template.md` | The decline wording of section 3, with the `--blocks` sentence for a work bead that is an epic, or a convoy with open children. The calls are unchanged. |
 
 Every prompt change re-renders `generated/seed-audit/agents/*.md` in the same
 commit, because gctk merge holds a merge whose renders are stale.
@@ -1147,7 +1185,8 @@ stops part way leaves the visit open for the rerun to finish:
    through `bd update --title`. The await id is written last, after the title
    and any edge move below, through `bd update --await-id`, because it is what
    marks a gate as shaped. A gate is shaped when the part of its await id before
-   the first colon is a bead it blocks or one that tracks it. A demand's own
+   the first colon is a bead it blocks, one that tracks it, or a convoy, which
+   tracks no question (section 1). A demand's own
    await id, `gc-demand:<gated>[:<topic>]` (gc-helm.sh 1442), also names the
    bead it blocks, but its first part is `gc-demand`, so it is not shaped until
    the script rewrites it. Its pack keys stay until its visit has closed, so a
@@ -1171,12 +1210,13 @@ stops part way leaves the visit open for the rerun to finish:
    through escalate.sh**, with the quiet period off. The title is the visit's
    headline, the framing is the visit's description, and the await id is
    `<subject>:<key>`. The question blocks the subject, unless the subject is an
-   epic or a convoy. Then it blocks the first bead that waited on the visit
-   through a `blocks` edge, the epic tracks it, and the waits step 5 moves cover
-   the rest. escalate.sh's dedup merges a visit into a gate already asking the
+   epic, or a convoy with open children. Then it blocks the first bead that
+   waited on the visit through a `blocks` edge, an epic tracks it and a convoy
+   does not (section 1), and the waits step 5 moves cover the rest. escalate.sh's dedup merges a visit into a gate already asking the
    same situation, so nothing is asked twice. It returns that gate without the
    merged visit's framing (section 2), which step 6 carries. An escalation on an
-   epic or a convoy that nothing else waits on becomes a conversation, as below.
+   epic, or a convoy with open children, that nothing else waits on becomes a
+   conversation, as below.
 5. **It moves the waits.** Every bead that waits on the visit through a `blocks`
    edge gets the same edge onto the gate, and so does every bead whose `until`
    edge names the visit. Each is read back. That covers await-ruling.sh's work
@@ -1211,7 +1251,8 @@ stops part way leaves the visit open for the rerun to finish:
    carried under a line naming the visit. A rerun finds that task by the line
    and files no second one. This covers the operator's own conversation visits,
    the keyless visits mol-validate-close and mol-feedback-distiller filed, and
-   an escalation on an epic or a convoy that nothing else waits on.
+   an escalation on an epic, or a convoy with open children, that nothing else
+   waits on.
 8. **It closes the visit** with the reason `migrated: gate <id>` or
    `migrated: conversation <id>`, unforced. A visit bd still refuses, because
    something other than the moved demand blocks it, stays open and is reported.
@@ -1352,9 +1393,9 @@ brief allows when the design calls for a split:
 
 | Unit | What it carries |
 |---|---|
-| A. The writer and its callers | escalate.sh on gates, with the subject in the await id, `--blocks` and the epic and convoy refusal, the subject's `tracks` edge, and the retract by resolve. await-ruling.sh, with the waiter's edge. upstream-finding.sh's `--pool` and reconcile-rig-checkouts.sh's pool knob retired. first-reaction-dispose, mol-validate-close, deferred-dispatch.sh and mol-feedback-distiller on escalate.sh, with the conversation their epic case opens. gc-helm.sh demand retired. mol-visit and the formula copies of the gate-visit block retired. The polecat doctrine and pool-worker fragments, the ask-close fragment, and the deacon, refinery and witness prompts. The registry entries of the keys the writer stops writing. |
+| A. The writer and its callers | escalate.sh on gates, with the subject in the await id, `--blocks` and the refusal for an epic or a convoy with open children, the subject's `tracks` edge, and the retract by resolve. await-ruling.sh, with the waiter's edge. upstream-finding.sh's `--pool` and reconcile-rig-checkouts.sh's pool knob retired. first-reaction-dispose, mol-validate-close, deferred-dispatch.sh and mol-feedback-distiller on escalate.sh, with the conversation their epic case opens. mol-visit and the formula copies of the gate-visit block retired. The polecat doctrine and pool-worker fragments, the ask-close fragment, and the deacon, refinery and witness prompts. The registry entries of the keys the writer stops writing. |
 | B. The readers | finalize-gate. gctk merge and pr-status. finding.sh and review-answer.sh. pr-facts.sh. branch-supersession.sh. The liveness scripts, with conversing read from conversations, hold-lib.sh, deferred-dispatch.sh, bead-context.sh and pre-open-rebase.sh. orphan-dispose.sh and the witness patrol. bead-rehome.sh, with the retry's withdrawal before the close. The doctor checks, `RETIRED_KEYS`, and the docs that teach these components (section 13). |
-| C. Converse and the board | The conversation task, and gc-helm.sh engage, open, accept and dismiss on it. The converse prompt and agent headers, the five converse skills and the shared skills. Accept on the recommendation's gate alone, pinned by the acceptance case below. converse-signoff.sh rewritten, converse-reap re-keyed with its warrant in `docs/warrants.md`, and the converse scripts that retire. pr-sitting-comment.sh and operator-intake.sh. The tmux scripts. The board's source, derive, model, wire contract with `accept_withheld`, web and text board. gate-visit-sweep's order and script. The human-engagement docs and the board's README. |
+| C. Converse and the board | The conversation task, and gc-helm.sh engage, open, accept and dismiss on it. The converse prompt and agent headers, the five converse skills and the shared skills. Accept on the recommendation's gate alone, pinned by the acceptance case below. converse-signoff.sh rewritten, converse-reap re-keyed with its warrant in `docs/warrants.md`, and the converse scripts that retire. gc-helm.sh demand retired here, with its last callers: converse-hold.sh, converse-signoff.sh, and the waits, prs and converse-settle skills. pr-sitting-comment.sh and operator-intake.sh. The tmux scripts. The board's source, derive, model, wire contract with `accept_withheld`, web and text board. gate-visit-sweep's order and script. The human-engagement docs and the board's README. |
 | D. The cutover | The migration script, with its copy of the visit walk, and its test, which stops a run after each write and holds section 11's fixtures. notification-wisp-reap's gate pass retired. The cutover runbook in its own spec. The remaining docs. |
 
 The order follows the dependency. B's readers read what A's writer files, and C's
@@ -1461,17 +1502,18 @@ the feature, not by a wrapper.
 | Date | Claim | How it is answered |
 |---|---|---|
 | 2026-10-19 | `bd gate create` has no idempotency. | The writer reads `bd gate list` before it creates (section 2). |
-| 2026-10-19 | A gate records what it blocks only as `blocks` edges. No field names the bead it was filed for, and a bead that waits on the question adds an edge just like the first. | The await id names the subject, as `<subject>:<key>`, and a subject that does not wait tracks the gate (section 1). |
+| 2026-10-19 | A gate records what it blocks only as `blocks` edges. No field names the bead it was filed for, and a bead that waits on the question adds an edge just like the first. | The await id names the subject, as `<subject>:<key>`, and a subject that does not wait tracks the gate, unless it is a convoy (section 1). |
 | 2026-10-19 | Continuation preassignment applies only within one workflow root, so it never reaches a gate. | A sitting holds one conversation task, which names its bead (section 6). |
 | 2026-10-19 | Nothing native releases a gate claimed by a session that died. The listings of orphan-sweep and the on_death release hide gates, the dead-assignee release covers pool-routed work, and lease reclaim, which nothing in Gas City runs at this commit, would rob a live held sitting. | No session claims a gate (section 1). |
-| 2026-10-20 | Nothing native releases a task a manual session claimed through `gc hook --claim` once the session is gone. on_death runs only for pool instances, orphan-sweep counts such a bead unverifiable, and `gc session close` releases nothing held under the alias. | A sitting's alias is its task's id, and a new session under a closed session's alias takes the task back, so engage restarts a sitting under the same alias. A person moves a task with `gc bd release-if-current` (section 6). Nothing is kept for this gap. |
+| 2026-10-20 | Nothing native releases a task a manual session claimed through `gc hook --claim` once the session is gone. on_death runs only for pool instances, orphan-sweep counts such a bead unverifiable, and `gc session close` releases nothing held under the alias. | A sitting's alias names its task's id, so engage finds the task by its assignee, and a new session under a closed session's alias takes the task back, so engage restarts a sitting under the same alias. The witness's recovery skips such a task. A person moves a task with `gc bd release-if-current` (sections 4 and 6). Nothing is kept for this gap. |
 | 2026-10-19 | A manual session is not ended when its work closes, and a pool sitting would be drained by the execution backstop while the operator reads. | converse-reap, keyed on conversation tasks. Its trigger is in section 6, and its warrant goes in `docs/warrants.md`. |
 | 2026-10-19 | Core's human-gate orders reach a person only by mail and nudge, and an override can only point them at another mailbox or session. This city's operator has no session and reads the board, not a mailbox. | The board is the reach, and core's two orders are off (section 5). |
 
 This design adds no pack noun. Its conventions live in native fields: the
 outcome word at the head of a gate's close reason, which finding release and the
 quiet period read; the subject at the head of its await id, which tells a
-question's subject from the beads that wait on it; and a sitting's session named
-for its conversation task, which tells the board and converse-reap which task a
-converse session holds. The glue it keeps is the quiet period, which mirrors
-core escalate's incident reminder, and converse-reap.
+question's subject from the beads that wait on it; and a sitting's alias, named
+for its conversation task, which tells the board, engage and converse-reap which
+task a sitting holds, from its session or, once that has closed, from the task's
+assignee. The glue it keeps is the quiet period, which mirrors core escalate's
+incident reminder, converse-signoff.sh's one ordered call, and converse-reap.
