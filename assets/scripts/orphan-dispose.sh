@@ -66,8 +66,7 @@
 #   orphan-dispose.sh <bead-id> [--owner <owner>] [--apply] [--json]
 # Without --apply this previews: it classifies and prints, and writes nothing.
 #   --owner <owner>  the dead owner orphan recovery resolved, for the report.
-#                    It is not the assignee guard: on a step the owner is
-#                    usually gc.session_id and the assignee a live pool slot.
+#                    It is not the assignee guard.
 #   --json           emit the result as one JSON object instead of key=value.
 # Exit: 0 disposed or previewed · 1 unreadable bead or failed write ·
 #       2 usage · 3 PARTIAL write (some fields landed, some did not).
@@ -191,11 +190,13 @@ fi
 
 # The assignee guard is the assignee read a moment ago, never --owner. Orphan
 # recovery resolves an owner by precedence over gc.session_id, assignee and
-# gc.session_name, so on the shape this script most needs to release — a step
-# whose dead owner is its gc.session_id beside a live pool-slot assignee — the
-# two are different strings. Guarding on the owner would mismatch and refuse
-# every such release. --owner records who was proved dead and is reported; the
-# guard's job is the narrower one of catching a re-claim since the read.
+# gc.session_name, so a claimed step's owner is its gc.session_id. A session
+# that claims under an alias, as a named session, a namepool member or an
+# explicit `gc hook <agent>` target does, leaves that alias as the assignee, and
+# the two are then different strings. Guarding on the owner would mismatch and
+# refuse every such release. --owner records who was proved dead and is
+# reported; the guard's job is the narrower one of catching a re-claim since the
+# read.
 GUARD="$ASSIGNEE"
 REPORT_OWNER="$ASSIGNEE"
 [ "$OWNER_SET" = "1" ] && REPORT_OWNER="$OWNER"

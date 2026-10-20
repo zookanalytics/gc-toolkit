@@ -1648,9 +1648,10 @@ keys = [
 #   and the review graph. gc.routed_to and gc.execution_routed_to are
 #   the route stamps (see the ROUTE rule in the preamble). The rest — assignee,
 #   the session and claim stamps, the step and root linkage, the poured vars and
-#   gc.formula_source, gc.session_affinity (the runtime pins it to gc.session_id)
-#   and pin_awake (settable only by `gc session pin`) — are written by the
-#   runtime; the pack reads them and does not write them.
+#   gc.formula_source, gc.session_affinity (the continuation backstop acts only
+#   on a step marked `require`) and pin_awake (settable only by
+#   `gc session pin`) — are written by the runtime; the pack reads them and does
+#   not write them.
 # gc.run_target — a third route stamp beside gc.routed_to and
 #   gc.execution_routed_to, written by the runtime: gascity's
 #   ReleaseWorkBead re-stamps it as a fallback route on a drained session's work
