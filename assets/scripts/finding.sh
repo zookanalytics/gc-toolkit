@@ -67,9 +67,10 @@
 #              --discovered-from finding  merges; the finding closes holding nothing
 #   declined   closed, no edge            not an objection: closed with the reason
 #   restates   closed, no edge            a human review body that only frames the
-#                                         review's own inline comments, each a finding
-#                                         of its own: no point of its own, no answer
-#                                         owed, and no entry in the living answer
+#                                         inline comments of its review round, each a
+#                                         finding of its own: no point of its own, no
+#                                         answer owed, and no entry in the living
+#                                         answer
 #   needs-you  stays open, no edge        only the operator can judge it — a visit
 #                                         carries the decision and the open finding
 #                                         holds the review until the operator rules
@@ -83,9 +84,10 @@
 # any other type would leave the PR free to land with the objection still open.
 # Every ruling ends the finding closed or converts it to a visit: a deferred,
 # declined or restates finding closes, so the human review it belongs to
-# auto-dismisses once every finding clears (pr-facts.sh); a needs-you finding
-# stays open, which is what holds that review until the operator rules its visit
-# and the work their ruling calls for lands. The discovered-from edge is the
+# auto-dismisses once every finding clears (pr-facts.sh), every finding of its
+# review round for a body ruled restates; a needs-you finding stays open, which
+# is what holds that review until the operator rules its visit and the work
+# their ruling calls for lands. The discovered-from edge is the
 # follow-up's own — a dispatchable bead — and points at the finding it carries
 # forward. bd keeps one edge per (issue, depends_on) pair, and the
 # follow-up/anchor pair is the gate's.
@@ -607,24 +609,31 @@ cmd_set_disposition() {
   local words=()
   if [ -n "$label" ]; then words+=(--set-metadata "finding.label=$label"); else words+=(--unset-metadata finding.label); fi
   if [ -n "$answer" ]; then words+=(--set-metadata "finding.answer=$answer"); else words+=(--unset-metadata finding.answer); fi
-  # restates is a review body that only frames its own inline comments, so it
-  # takes a human finding raised by a review body (its comment is the review
-  # itself) whose review raised at least one other finding on the anchor.
+  # restates is a review body that only frames the inline comments of its
+  # review round, the reviews its reviewer submitted against one commit, which a
+  # client can split into one review per comment. So it takes a human finding
+  # raised by a review body (its comment is the review itself) whose review, or
+  # whose review round (finding.review_round, which pr-facts.sh records), raised
+  # at least one inline comment filed as a finding on the anchor. The body of
+  # another review in the round is not an inline comment, so it does not count.
   if [ "$disp" = restates ]; then
-    local rrow rrid rcid rsib
+    local rrow rrid rcid rrnd rsib
     rrow=$(bd_json show "$finding")
     rrid=$(printf '%s' "$rrow" | jq -r '(.[0].metadata["finding.review_id"] // "") | tostring' 2>/dev/null)
     rcid=$(printf '%s' "$rrow" | jq -r '(.[0].metadata["finding.comment_id"] // "") | tostring' 2>/dev/null)
+    rrnd=$(printf '%s' "$rrow" | jq -r '(.[0].metadata["finding.review_round"] // "") | tostring' 2>/dev/null)
     [ -n "$rrid" ] && [ "$rrid" = "$rcid" ] \
       || { warn "restates rules a review body, and $finding is not one (finding.review_id '$rrid', finding.comment_id '$rcid'); nothing ruled"; exit 1; }
     rsib=$(bd_list --metadata-field anchor_bead="$anchor" --status="$ALL_STATUSES" \
-      | jq -r --arg r "$rrid" --arg f "$finding" '[ .[]? | select(.id != $f)
+      | jq -r --arg r "$rrid" --arg rd "$rrnd" --arg f "$finding" '[ .[]? | select(.id != $f)
           | select(((.metadata.task_kind // "") | tostring) == "finding")
-          | select(((.metadata["finding.review_id"] // "") | tostring) == $r) ] | length' 2>/dev/null) \
+          | ((.metadata["finding.review_id"] // "") | tostring) as $sr
+          | select(((.metadata["finding.comment_id"] // "") | tostring) != $sr)
+          | select($sr == $r or ($rd != "" and (((.metadata["finding.review_round"] // "") | tostring) == $rd))) ] | length' 2>/dev/null) \
       || { warn "could not read the findings on anchor $anchor to check $finding's review; nothing ruled"; exit 2; }
     case "$rsib" in ''|*[!0-9]*) warn "could not count the findings review $rrid raised on anchor $anchor; nothing ruled"; exit 2 ;; esac
     [ "$rsib" -gt 0 ] \
-      || { warn "review $rrid raised no inline comment beside its body, so its body is the whole review and is ruled on its points; nothing ruled"; exit 1; }
+      || { warn "review $rrid and its review round raised no inline comment beside its body, so its body is the whole review and is ruled on its points; nothing ruled"; exit 1; }
   fi
   # Every ruling of a human finding but needs-you --visit first meets the visits
   # already carrying its question: an open visit on a rework child minted for the
@@ -876,7 +885,7 @@ cmd_set_disposition() {
       # decline, every blocker wired INTO it goes just before the close, and its
       # own must-fix hold on the anchor once the close lands.
       strip_inbound_blocks "$finding"
-      local rnote="restates its review's inline comments"
+      local rnote="restates the inline comments of its review round"
       [ -n "$reason" ] && rnote="$rnote: $reason"
       gc bd update "$finding" --set-metadata finding.disposition=restates ${words[@]+"${words[@]}"} --unset-metadata finding.reply --status=closed --append-notes "$rnote" >/dev/null 2>&1 \
         || { warn "could not close restates finding $finding"; exit 2; }
