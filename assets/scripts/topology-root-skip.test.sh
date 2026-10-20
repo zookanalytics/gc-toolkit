@@ -12,9 +12,8 @@
 # worktree, and orphan-dispose.sh already refuses it as root_not_schedulable. A
 # topology root is not recoverable work — its STEP beads carry the work and
 # their own holder fields, and its close is the control-dispatcher's
-# workflow-finalize — so it is dropped from the candidate set before the loop,
-# the same kind set the hook (hookCandidateClaimable) and pool demand
-# (demandRowServable) refuse and liveness-sweep.sh's topology_kind mirrors.
+# workflow-finalize — so it is dropped from the candidate set before the loop.
+# The filter matches gc.kind alone, like topology_kind in liveness-classify.sh.
 #
 # It is a KIND exclusion, the sibling of the state exclusion downstream-court-skip:
 # host-bead-skip keeps every owned bead (a root included, so its owner is stamped),
