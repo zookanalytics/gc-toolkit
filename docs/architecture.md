@@ -137,13 +137,11 @@ performer; the full transition table with writers is
    waiting parties key on ([lifecycle-composition.md](lifecycle-composition.md)).
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
-session dying, a pool slot the runtime does not free, a provider quota park —
-are handled by these reactive paths: `pr-facts.sh` (an arm of the cadence)
-records PR events and files a visit, the witness patrol recovers work orphaned
-by dead sessions, the `dog` pool is warrant executor for due-process recovery
-of wedged sessions (demand-scaled 0-2), `pool-slot-reap.sh` closes a pool
-session bead the runtime left holding its slot with no runtime and no work,
-`quota-park-nudge.sh` nudges a session parked behind a provider limit,
+session dying, a provider quota park — are handled by these reactive paths:
+`pr-facts.sh` (an arm of the cadence) records PR events and files a visit, the
+witness patrol recovers work orphaned by dead sessions, the `dog` pool is
+warrant executor for due-process recovery of wedged sessions (demand-scaled
+0-2), `quota-park-nudge.sh` nudges a session parked behind a provider limit,
 `boot-health.sh` detects a wedged deacon (report-only by design), and
 `queue-priority.sh reconcile` settles queued work after a raw priority or parent
 edit no writer saw. See
