@@ -1131,6 +1131,29 @@ case "$sub" in
         out="{\"id\":$cid}"
         if [ -n "$jqexpr" ]; then printf '%s' "$out" | jq -r "$jqexpr"; else printf '%s\n' "$out"; fi
         exit 0 ;;
+      DELETE:*/issues/comments/*)
+        # A Conversation comment deleted: it leaves the PR fixture holding it,
+        # and issue_comments_<n>.json beside it, so the next read no longer
+        # serves it. STUB_ICDELETE_RC models a delete the API refuses.
+        [ "${STUB_ICDELETE_RC:-0}" = "0" ] || exit "${STUB_ICDELETE_RC:-0}"
+        cid="${path##*/issues/comments/}"
+        hit=""
+        for cand in "$G"/threads_*.json; do
+          [ -s "$cand" ] || continue
+          jq -e --arg c "$cid" '[ .issue_comments[]? | select(((.databaseId // 0) | tostring) == $c) ] | length > 0' "$cand" >/dev/null 2>&1 \
+            && { hit="$cand"; break; }
+        done
+        [ -n "$hit" ] || { echo "gh api stub: no fixture holds issue comment $cid" >&2; exit 1; }
+        t=$(mktemp "${hit%/*}/.gc-stub.XXXXXX")
+        jq --arg c "$cid" '.issue_comments = [ (.issue_comments // [])[] | select(((.databaseId // 0) | tostring) != $c) ]' \
+          "$hit" > "$t" && mv "$t" "$hit"
+        n="${hit##*/threads_}"; n="${n%.json}"
+        r="$G/issue_comments_$n.json"
+        if [ -s "$r" ]; then
+          jq -c --arg c "$cid" 'map(select(((.id // 0) | tostring) != $c))' "$r" > "$r.tmp" && mv "$r.tmp" "$r"
+        fi
+        printf 'ICDELETE %s\n' "$cid" >> "${STUB_GH_LOG:?}"
+        exit 0 ;;
     esac
     out=""
     case "$path" in

@@ -45,7 +45,9 @@
 # holds the batch unwatermarked to retry. A held anchor keeps its hold and its
 # feedback still becomes a routed rework child, the fix unit a must-fix ruling
 # attaches to; a verdict the city posted itself and a rework hand-back are not
-# feedback and open no pass.
+# feedback and open no pass. Each human finding a batch files is stamped with
+# the round of the review carrying it, a reply in an older thread included, so
+# a body review that frames its round can be ruled restates.
 # Write-back: EYES on a routed comment; a question-mark answer naming the visit
 # while a comment's batch waits on an open one, or its finding on a needs-you
 # ruling; once the batch's bead closes and the comment's finding has closed, one
@@ -64,15 +66,21 @@
 # resolved. One the identity cannot resolve, answered for a batch or a ruled
 # machine finding, stays owed: each pass tries the resolve again and files the
 # situation as one finding for the repository.
-# The living answer: one Conversation comment per human review, posted at pickup
-# once the pickup reactions land and edited in place, never posted again, when
-# its rendering changes; a summary body ruled restates is no point and no
-# count; a decision made for the operator and a wider fix are worth a look; a
-# decline its fix unit flagged cites the fix's commits once that fix unit lands;
-# an open visit leads it; a hand-written comment is labelled by its first
-# sentence; a label links only to a comment the PR holds; a review body's
-# decline is delivered in it, not in a post of its own; no check-mark ack is
-# posted for a review body; and the review's dismissal is one line linking it.
+# The living answer: one Conversation comment per human review round, posted at
+# pickup once the pickup reactions land and edited in place, never posted
+# again, when its rendering changes; a round submitted as one GitHub review per
+# comment is answered by one comment, and a later commit starts a round of its
+# own; a summary body ruled restates is no point and no count, and its review
+# waits for its round before it is dismissed; a decision made for the operator
+# and a wider fix are worth a look; a decline its fix unit flagged cites the
+# fix's commits once that fix unit lands; an open visit leads it; a
+# hand-written comment is labelled by its first sentence; a label links only to
+# a comment the PR holds; a review body's decline is delivered in it, not in a
+# post of its own; no check-mark ack is posted for a review body; each review's
+# dismissal is one line linking its round's comment; a round the city answered
+# one review at a time keeps one comment, every mark its copies carry, and
+# deletes the rest; and a finding filed with no round, or with another one,
+# carries its review's round from the next pass.
 #
 # The sections run in the parts declared below, each wrapped in an `if part`
 # block. tools/run-tests.sh runs each part as its own run under its own
@@ -2972,6 +2980,46 @@ eq "$(jq '[.[] | select((.metadata.task_kind // "") == "finding") | select((.met
 eq "$(meta "$FIDF" 'finding.fix_unit')" "$VFC2" "…which records the later child"
 grep -qxF "$VFC2|blocks|$FIDF" "$STUB_DEPS" && ok "…and that child blocks the already-ruled finding, so it closes only once the later child lands" || bad "the later child does not block the re-raised must-fix finding"
 grep -qxF "$VFC|blocks|$FIDF" "$STUB_DEPS" && ok "…beside the first batch's child, which stays" || bad "the first batch's edge was dropped"
+
+echo "# each finding is stamped with its review round, so a body review that frames its round can be ruled restates"
+# The reviewer's client submitted the pass as two reviews against one commit:
+# one carrying an inline comment, then a changes-requested review whose body
+# frames it. GitHub moves an inline comment's commit_id as the PR moves, and the
+# comment's round is still the round of the review carrying it.
+store "[$(anchor Vr 616)]"
+printf '%s' "$(prview 616 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_616.json"
+printf '[{"id":9601,"user":{"login":"human1"},"state":"COMMENTED","body":"","commit_id":"c616"},
+  {"id":9602,"user":{"login":"human1"},"state":"CHANGES_REQUESTED","body":"Requesting changes for the inline point.","commit_id":"c616"}]' > "$GH_DIR/reviews_616.json"
+printf '[{"id":9611,"user":{"login":"human1"},"body":"handle the empty list","path":"a.sh","line":3,"pull_request_review_id":9601,"commit_id":"c616b","original_commit_id":"c616"}]' > "$GH_DIR/comments_616.json"
+out=$(run)
+FRB=$(jq -r '[ .[] | select((.metadata.anchor_bead // "") == "Vr") | select(((.metadata["finding.comment_id"] // "") | tostring) == "9602") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+FRI=$(jq -r '[ .[] | select((.metadata.anchor_bead // "") == "Vr") | select(((.metadata["finding.comment_id"] // "") | tostring) == "9611") | .id ] | .[0] // "<none>"' "$STUB_STORE")
+eq "$(meta "$FRB" finding.review_id)|$(meta "$FRB" finding.review_round)" "9602|human1@c616" "the body's finding names its review and its review round"
+eq "$(meta "$FRI" finding.review_id)|$(meta "$FRI" finding.review_round)" "9601|human1@c616" "…and the inline comment's names its own review and the same round"
+"$SD/finding.sh" set-disposition --finding "$FRB" --anchor Vr --disposition restates >/dev/null 2>&1; rc=$?
+eq "$rc|$(meta "$FRB" finding.disposition)" "0|restates" "so the body is ruled restates though its own review carries no inline comment"
+
+echo "# a reply in an older thread takes the round of the review carrying it, not the commit its thread began on"
+# The first pass left an inline comment against c617a. The second pass, against
+# c617b, replies in that thread and frames the reply in a changes-requested
+# review of its own. GitHub keeps the thread's c617a as the reply's
+# original_commit_id, while the review carrying the reply names c617b.
+store "[$(anchor Vt 617)]"
+printf '%s' "$(prview 617 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_617.json"
+printf '[{"id":9701,"user":{"login":"human1"},"state":"COMMENTED","body":"","commit_id":"c617a"},
+  {"id":9702,"user":{"login":"human1"},"state":"COMMENTED","body":"","commit_id":"c617b"},
+  {"id":9703,"user":{"login":"human1"},"state":"CHANGES_REQUESTED","body":"Requesting changes for the reply in the old thread.","commit_id":"c617b"}]' > "$GH_DIR/reviews_617.json"
+printf '[{"id":9711,"user":{"login":"human1"},"body":"handle the empty list","path":"a.sh","line":3,"pull_request_review_id":9701,"commit_id":"c617b","original_commit_id":"c617a"},
+  {"id":9712,"user":{"login":"human1"},"body":"the empty list is still not handled","path":"a.sh","line":3,"in_reply_to_id":9711,"pull_request_review_id":9702,"commit_id":"c617b","original_commit_id":"c617a"}]' > "$GH_DIR/comments_617.json"
+out=$(run)
+# The finding on anchor <a> that comment <c> raised.
+comment_finding() { # a c
+  jq -r --arg a "$1" --arg c "$2" '[ .[] | select((.metadata.anchor_bead // "") == $a) | select(((.metadata["finding.comment_id"] // "") | tostring) == $c) | .id ] | .[0] // "<none>"' "$STUB_STORE"; }
+FTB=$(comment_finding Vt 9703); FTR=$(comment_finding Vt 9712); FTO=$(comment_finding Vt 9711)
+eq "$(meta "$FTR" finding.review_id)|$(meta "$FTR" finding.review_round)" "9702|human1@c617b" "the reply's finding takes the round of the review carrying it"
+eq "$(meta "$FTO" finding.review_round)" "human1@c617a" "…while the comment that began the thread keeps the first pass's round"
+"$SD/finding.sh" set-disposition --finding "$FTB" --anchor Vt --disposition restates >/dev/null 2>&1; rc=$?
+eq "$rc|$(meta "$FTB" finding.disposition)" "0|restates" "so the body that frames the reply is ruled restates"
 
 echo "# a multi-lane anchor opens ONE human-lane pass, not a synthetic correctness,arch lane"
 # check_name is the lane the validator rules; mol-validate matches findings by
@@ -6330,6 +6378,153 @@ has "$L9" "### Your review: 40 points, all answered" "…counting every point"
 has "$L9" "The notes from the fix are on KL9, left out here to fit the size GitHub allows a comment." "…its notes named rather than carried"
 has "$L9" "(the full text is on LJ1)" "…and each shortened answer naming the finding that holds it whole"
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/608/reviews/6009/dismissals" "…so the answered review is dismissed"
+
+# A review round is the reviews one reviewer submitted against one commit. A
+# client can submit a pass as one GitHub review per comment, the shape of
+# gascity PRs 193, 195 and 196. These fixtures state such rounds: each review is
+# <id>:<state>:<commit>:<body>:<inline comment ids>, all by the operator.
+lround() { # num review-spec...
+  local n="$1"; shift
+  jq -cn --arg n "$n" '
+    [ $ARGS.positional[] | split(":") | { r: (.[0] | tonumber), st: .[1], oid: .[2], b: .[3],
+        cs: (.[4] | split(",") | map(select(length > 0) | tonumber)) } ] as $rs
+    | { reviews: [ $rs[] | { id: ("RV-" + $n + "-" + (.r | tostring)), databaseId: .r, state: .st, body: .b,
+                             author: { login: "johnzook" }, commit: { oid: .oid },
+                             url: ("https://github.com/zook/gc-toolkit/pull/" + $n + "#pullrequestreview-" + (.r | tostring)),
+                             reactionGroups: [] } ],
+        threads: [ $rs[] | .r as $r | .cs[] | . as $c
+                   | { id: ("T-" + $n + "-" + ($c | tostring)), isResolved: false, viewerCanResolve: true,
+                       comments: { nodes: [ { id: ("NC-" + $n + "-" + ($c | tostring)), databaseId: $c,
+                                              author: { login: "johnzook" }, body: "see the review",
+                                              pullRequestReview: { databaseId: $r }, reactionGroups: [] } ] } } ],
+        issue_comments: [] }' --args "$@"
+}
+# How many comments on PR <num> carry a living answer key.
+lanswers() { jq -r '[ .issue_comments[]? | select((.body // "") | test("<!-- gc-review-answer:r[0-9]+ -->")) ] | length' "$GH_DIR/threads_$1.json"; }
+
+echo "# a review submitted as one GitHub review per comment gets one living answer"
+store "[$(anchor LA12 611 "$(lmeta rework:KL12 6213 6123)"), $(fixunit KL12 open 'One commit answers all three.'),
+  $(lfind LM1 LA12 6211 6121 must-fix open '**The cap reads the wrong budget.**' '{"finding.fix_unit":"KL12"}'),
+  $(lfind LM2 LA12 6212 6122 must-fix open '**The retry never backs off.**' '{"finding.fix_unit":"KL12"}'),
+  $(lfind LM3 LA12 6213 6123 must-fix open '**The log line names the wrong PR.**' '{"finding.fix_unit":"KL12"}')]"
+printf '%s' "$(prview 611 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_611.json"
+threads 611 "$(lround 611 6121:COMMENTED:c611a::6211 6122:COMMENTED:c611a::6212 6123:COMMENTED:c611a::6213)"
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(lanswers 611)|$(lcount 611 6121)" "1|1" "the three reviews of the round get one living answer, keyed by the lowest of them"
+eq "$(grep -c '^PRCOMMENT 611' "$STUB_GH_LOG")" "1" "…in one post"
+L12=$(lanswer 611 6121)
+has "$L12" "### Your review: 3 points, none answered yet" "…counting the points of every review of the round"
+eq "$(printf '%s' "$L12" | grep -c '<summary>Notes from the fix</summary>')" "1" "…with the notes from the fix once"
+echo "# …and a later review against a new commit starts a round of its own"
+bmut LA12 '.metadata.pr_comment_watermark = "6214" | .metadata.pr_review_watermark = "6124"'
+store "$(jq -c '. + [ $f ]' --argjson f "$(lfind LM4 LA12 6214 6124 must-fix open '**One more thing.**' '{"finding.fix_unit":"KL12"}')" "$STUB_STORE")"
+jq -c --argjson more "$(lround 611 6124:COMMENTED:c611b::6214)" '.reviews += $more.reviews | .threads += $more.threads' \
+  "$GH_DIR/threads_611.json" > "$TMP/t611.json" && mv "$TMP/t611.json" "$GH_DIR/threads_611.json"
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(lanswers 611)|$(lcount 611 6124)" "2|1" "the new round gets a living answer of its own"
+eq "$(lanswer 611 6121)" "$L12" "…and the first round's answer stands as it was"
+
+echo "# each review of a round is dismissed on its own, its note naming the round's comment"
+store "[$(anchor LA13 612 "$(lmeta rework:KL13 6311 6132)"), $(fixunit KL13 closed),
+  $(lfind LN1 LA13 6311 6131 must-fix closed '**Quote the expansion.**' '{"finding.fix_unit":"KL13","finding.fix_answer":"Fixed as you suggested."}'),
+  $(lfind LN2 LA13 6132 6132 must-fix closed 'Please also add a test for the empty list.' '{"finding.fix_unit":"KL13","finding.fix_answer":"Added the test."}')]"
+printf '%s' "$(prview 612 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_612.json"
+threads 612 "$(lround 612 6131:COMMENTED:c612::6311 '6132:CHANGES_REQUESTED:c612:Please also add a test for the empty list.:')"
+commits 612 '[{"oid":"7b7b7b7bbbbb","message":"fix: quote the expansion and test the empty list (KL13)"}]'
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(lanswers 612)" "1" "the round's two reviews get one living answer"
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/612/reviews/6132/dismissals" "the changes-requested review is dismissed once its own findings clear"
+hasnt "$(cat "$STUB_GH_LOG")" "reviews/6131/dismissals" "…and the commented review, which blocks nothing, is not"
+L13DB=$(jq -r '[ .issue_comments[]? | select((.body // "") | contains("<!-- gc-review-answer:r6131 -->")) | .databaseId ] | .[0]' "$GH_DIR/threads_612.json")
+eq "$(grep -c "message=Your review: 2 points, all answered (https://github.com/zook/gc-toolkit/pull/612#issuecomment-$L13DB)\. Dismissal is not approval" "$STUB_GH_LOG")" "1" \
+  "…with a note counting the round's points and linking the round's comment"
+has "$(lanswer 612 6131)" "<!-- gc-review-answer:r6132:dismissed -->" "the round's comment carries the dismissed review's mark"
+has "$(lanswer 612 6131)" "Review dismissed; your review is requested again." "…and says so, since no review of the round stands"
+
+echo "# a body review that only frames its round adds no point and waits for the round"
+store "[$(anchor LA14 613 "$(lmeta rework:KL14 6412 6142)"), $(fixunit KL14 closed),
+  $(lfind LO1 LA14 6411 6141 must-fix closed '**Close the file.**' '{"finding.fix_unit":"KL14","finding.fix_answer":"Fixed as you suggested."}'),
+  $(lfind LO2 LA14 6412 6143 must-fix open '**Name the lock.**' '{"finding.fix_unit":"KL14"}'),
+  $(lfind LO3 LA14 6142 6142 restates closed 'Requesting changes for the two inline points.' '{"finding.fix_unit":"KL14"}')]"
+printf '%s' "$(prview 613 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_613.json"
+threads 613 "$(lround 613 6141:COMMENTED:c613::6411 6143:COMMENTED:c613::6412 '6142:CHANGES_REQUESTED:c613:Requesting changes for the two inline points.:')"
+commits 613 '[{"oid":"8c8c8c8ccccc","message":"fix: close the file (KL14)"}]'
+: > "$STUB_GH_LOG"
+out=$(run)
+L14=$(lanswer 613 6141)
+has "$L14" "### Your review: 2 points" "the framing body is no point of the round's answer"
+hasnt "$L14" "Requesting changes for the two inline points" "…and has no entry"
+hasnt "$(cat "$STUB_GH_LOG")" "reviews/6142/dismissals" "its review is not dismissed while a finding of its round is open"
+bmut LO2 '.status = "closed" | .metadata["finding.fix_answer"] = "Fixed as you suggested."'
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/613/reviews/6142/dismissals" "…and is dismissed once the round is answered"
+
+echo "# a round the city answered one review at a time keeps one comment, and every mark"
+# The PR carries a living answer per review of one round, as the city wrote them
+# before it read reviews by round. The copy for the dismissed review is the one
+# its dismissal note names, so the round keeps it.
+L15C() { # db rid [extra trailer lines]
+  jq -cn --argjson db "$1" --arg r "$2" --arg x "${3:-}" '{ id: ("IC-615-\($db)"), databaseId: $db, author: { login: "gc-city-bot" },
+    url: ("https://github.com/zook/gc-toolkit/pull/615#issuecomment-\($db)"), reactionGroups: [],
+    body: ("### Your review: 1 point, all answered\n\n<!-- gc-writeback -->" + $x + "\n<!-- gc-review-answer:r" + $r + " -->\n<!-- gc-review-answer:r" + $r + ":digest:1 -->\n\n<!-- gc:city -->") }'
+}
+store "[$(anchor LA15 615 "$(lmeta rework:KL15 6512 6153)"), $(fixunit KL15 closed),
+  $(lfind LP1 LA15 6511 6151 must-fix closed '**Trim the path.**' '{"finding.fix_unit":"KL15","finding.fix_answer":"Fixed as you suggested."}'),
+  $(lfind LP2 LA15 6512 6152 must-fix closed '**Check the exit code.**' '{"finding.fix_unit":"KL15","finding.fix_answer":"Fixed as you suggested."}'),
+  $(lfind LP3 LA15 6153 6153 must-fix closed 'Please also log the retry.' '{"finding.fix_unit":"KL15","finding.fix_answer":"The retry is logged."}')]"
+printf '%s' "$(prview 615 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_615.json"
+threads 615 "$(lround 615 6151:COMMENTED:c615::6511 6152:COMMENTED:c615::6512 '6153:DISMISSED:c615:Please also log the retry.:')"
+jq -c --argjson a "$(L15C 8101 6151)" --argjson b "$(L15C 8102 6152)" \
+  --argjson c "$(L15C 8103 6153 $'\n<!-- gc-writeback-mark:resolved r6153 -->\n<!-- gc-review-answer:r6153:dismissed -->')" \
+  '.issue_comments = [ $a, $b, $c ]' "$GH_DIR/threads_615.json" > "$TMP/t615.json" && mv "$TMP/t615.json" "$GH_DIR/threads_615.json"
+commits 615 '[{"oid":"9d9d9d9ddddd","message":"fix: the round (KL15)"}]'
+: > "$STUB_GH_LOG"
+out=$(STUB_ICDELETE_RC=1 run)
+has "$out" "could not delete comment 8101" "a delete the API refuses is reported"
+eq "$(lanswers 615)" "3" "…and its copy stays for the next pass"
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(lanswers 615)" "1" "the next pass leaves one comment for the round"
+eq "$(jq -r '[ .issue_comments[]? | .databaseId ] | join(",")' "$GH_DIR/threads_615.json")" "8103" "…the copy the dismissal note names"
+has "$(cat "$STUB_GH_LOG")" "ICDELETE 8101" "…deleting the copy for the first review"
+has "$(cat "$STUB_GH_LOG")" "ICDELETE 8102" "…and for the second"
+hasnt "$(cat "$STUB_GH_LOG")" "PRCOMMENT" "…posting nothing new"
+L15=$(lanswer 615 6151)
+has "$L15" "### Your review: 3 points, all answered" "the comment it keeps answers the whole round"
+has "$L15" "<!-- gc-writeback-mark:resolved r6153 -->" "…keeping the mark its copy carried"
+has "$L15" "<!-- gc-review-answer:r6153:dismissed -->" "…and the dismissed mark"
+has "$L15" "Review dismissed; your review is requested again." "…so it still says the review was dismissed"
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(grep -c '^ICEDIT\|^ICDELETE\|^PRCOMMENT' "$STUB_GH_LOG")" "0" "a pass after it writes nothing"
+
+echo "# the next pass records the round on findings filed with none"
+# The round's findings are filed and watermarked. Two carry no
+# finding.review_round, and one carries the round of the commit its thread
+# began on. The intake never reads a watermarked comment again. The
+# write-back's read of the PR places each review by its author and commit,
+# except review 6164, whose commit it does not name.
+store "[$(anchor LA16 614 "$(lmeta rework:KL16 6614 6163)"), $(fixunit KL16 open),
+  $(lfind LQ1 LA16 6611 6161 must-fix open '**Free the buffer.**' '{"finding.fix_unit":"KL16"}'),
+  $(lfind LQ2 LA16 6612 6162 must-fix open '**Name the timeout.**' '{"finding.fix_unit":"KL16","finding.review_round":"johnzook@c614old"}'),
+  $(lfind LQ3 LA16 6163 6163 unvalidated open 'Requesting changes for the two inline points.' '{"finding.fix_unit":"KL16"}'),
+  $(lfind LQ4 LA16 6614 6164 must-fix open '**Log the retry.**' '{"finding.fix_unit":"KL16"}')]"
+printf '%s' "$(prview 614 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_614.json"
+threads 614 "$(lround 614 6161:COMMENTED:c614::6611 6162:COMMENTED:c614::6612 '6163:CHANGES_REQUESTED:c614:Requesting changes for the two inline points.:' 6164:COMMENTED:::6614)"
+"$SD/finding.sh" set-disposition --finding LQ3 --anchor LA16 --disposition restates >/dev/null 2>&1; rc=$?
+eq "$rc|$(meta LQ3 finding.disposition)" "1|unvalidated" "before the pass, the framing body cannot be ruled restates"
+out=$(run)
+eq "$(meta LQ1 finding.review_round)|$(meta LQ3 finding.review_round)" "johnzook@c614|johnzook@c614" "the next pass records the round on each finding filed without one"
+eq "$(meta LQ2 finding.review_round)" "johnzook@c614" "…corrects the one that names another round"
+eq "$(meta LQ4 finding.review_round)" "<absent>" "…and leaves alone the one whose review the read does not place"
+"$SD/finding.sh" set-disposition --finding LQ3 --anchor LA16 --disposition restates >/dev/null 2>&1; rc=$?
+eq "$rc|$(meta LQ3 finding.disposition)" "0|restates" "so the framing body is ruled restates"
+out=$(run)
+hasnt "$out" "recorded review round" "a pass after it records no round"
 
 fi # part living
 
