@@ -1197,9 +1197,10 @@ cmd_takeaway() {
             fi
         fi
     fi
-    # An --assign is read back on the same terms. The assignee is the one field a
-    # named agent's hook matches, so one that did not land leaves the bead open,
-    # unassigned and unrouted, offered to nobody.
+    # An --assign is read back on the same terms. The release writes the
+    # assignee as the bead's only address, beside an empty route, so one that
+    # did not land leaves the bead open, unassigned and unrouted, offered to
+    # nobody.
     assign_missed=""
     if [ -n "$assign" ] && [ -n "$release_park" ]; then
         assign_got=$(assignee_now "$bead")
