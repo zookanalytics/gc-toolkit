@@ -256,11 +256,11 @@ jq -c '[ .[]
 # so that session's liveness says nothing about the run. Resolved live, the root
 # can draw a warrant against a session doing other work, and resolved dead, it
 # churns a witness-salvage-refused notice on a bead with no worktree. The kind
-# set is beadmeta.WorkflowTopologyKinds (workflow, scope, spec) — the same set
-# the hook (hookCandidateClaimable) and pool demand (demandRowServable) refuse,
-# mirrored by liveness-sweep.sh's topology_kind. Reads the candidate array on
-# stdin (the downstream-court-skip result), writes the survivors on stdout, and
-# touches no field a survivor arrived with.
+# set is beadmeta.WorkflowTopologyKinds (workflow, scope, spec), matched on
+# gc.kind alone, the same match topology_kind in liveness-classify.sh makes. The
+# comment there names Gas City's own check and where the two differ. Reads the
+# candidate array on stdin (the downstream-court-skip result), writes the
+# survivors on stdout, and touches no field a survivor arrived with.
 jq -c '[ .[]
   | (.metadata // {}) as $m
   | ($m["gc.kind"] // "") as $kind
