@@ -122,3 +122,20 @@ Two limits:
   live review would meet #655's shape spelled out.
 - This is one run per method on one diff. It shows the lens can catch this
   converter, not how reliably every reviewer will.
+
+## Where the lens landed
+
+The operator's review of PR#1303 (review 5579051395) ruled the arch skill and
+the check index core: every rig's arch review loads the skill, so neither may
+carry a rule only gc-toolkit holds. The lens moved out of
+`skills/review-arch/SKILL.md`, which is main's again, into gc-toolkit's arch
+extension, `docs/review-arch.md`. The dispatch note appends that file to every
+arch review of a gc-toolkit commit. The trigger that makes triage add the arch
+check moved into gc-toolkit's triage extension, `docs/review-triage.md`.
+
+A gc-toolkit arch reviewer now reads main's skill, which was A's whole method,
+and then the extension, which carries the lens's checks and its evidence rules.
+Those are the checks B judged with, plus the later changes the Method section
+names. What changed here is their arrangement, and the lens's wording, which
+names Gas City and the pack where it named a platform in general. B was not
+re-run on the new arrangement.

@@ -33,6 +33,10 @@
 #   (BOTH)      the formula and check axes coexist in one note.
 #   (EXT)       a rig's docs/review-<check>.md at the reviewed commit is
 #               appended; absent (or no --reviewed-oid) degrades silently.
+#   (OWN)       this repo's own docs/review-arch.md and docs/review-triage.md
+#               reach the arch and triage notes, carrying the divergence lens
+#               and the changes that make arch mandatory, and the pack's arch
+#               skill carries none of that lens.
 #   (EVIDENCE)  no check's section carries a test run: the correctness
 #               method file does (review-method.test.sh), and the frame
 #               presumes none.
@@ -159,11 +163,6 @@ hasF "$TMP/pm.skill" 'product lens' "(METHOD) the pm skill carries the product l
 hasF "$TMP/pm.skill" '## The visual is the `demo` check' "(METHOD) …and leaves the visual decision to demo"
 hasF "$TMP/arch.skill" 'You are the Architect' "(METHOD) the arch skill names the Architect"
 hasF "$TMP/arch.skill" 'docs/architecture.md' "(METHOD) …and reads the architecture reference docs before judging"
-hasF "$TMP/arch.skill" "This lens holds new surface to the platform's own documentation instead." "(METHOD) …holds new surface to the platform's own docs, not the repo's account of the platform"
-hasF "$TMP/arch.skill" 'A converter is a finding on sight.' "(METHOD) …makes a converter between a repo noun and a platform noun a finding"
-hasF "$TMP/arch.skill" '## When triage adds it' "(METHOD) …says when triage adds the arch check"
-hasF "$TMP/arch.skill" 'The first two make the check mandatory' "(METHOD) …and makes new operational surface and a touched warrant mandatory triggers"
-hasF "$TMP/arch.skill" 'neither are tests or the fixtures they use' "(METHOD) …and leaves tests out of operational surface, so a test addition does not force the check"
 # Run outside any repository, so no index declares the check.
 ( cd "$TMP" && env -u GC_RIG_ROOT bash "$SCRIPT" --check-name nonesuch ) > "$TMP/undeclared.out" 2>/dev/null
 hasF "$TMP/undeclared.out" '`nonesuch` check, so nothing says what it judges' "(CHECK) a check no index row declares gets the declared-nowhere note, never a guess"
@@ -221,6 +220,28 @@ hasF "$TMP/ext.out" 'RIG-EXT-MARK: the Architect reads architecture.md first.' "
 ( cd "$REPO" && bash "$SCRIPT" --check-name demo --reviewed-oid "$SHA" ) > "$TMP/noext.out" 2>/dev/null
 notF "$TMP/noext.out" 'Rig extension' "(EXT) a check with no extension file degrades — no extension section"
 notF "$OUT" 'Rig extension' "(EXT) no --reviewed-oid means no extension read at all"
+
+echo "# this repo's own extensions: its arch and triage notes carry the divergence lens and its trigger"
+# Copies of this checkout's arch and triage extensions, committed in a scratch
+# repo, so the working tree's text reaches each note through the append a
+# review uses.
+OWN="$TMP/own"; mkdir -p "$OWN/docs"
+git -C "$OWN" init -q
+git -C "$OWN" config user.email t@t; git -C "$OWN" config user.name t
+cp "$ROOT/docs/review-arch.md" "$ROOT/docs/review-triage.md" "$OWN/docs/"
+git -C "$OWN" add docs
+git -C "$OWN" commit -qm own
+OWN_SHA=$(git -C "$OWN" rev-parse HEAD)
+for c in arch triage; do
+  ( cd "$OWN" && env -u GC_RIG_ROOT bash "$SCRIPT" --check-name "$c" --reviewed-oid "$OWN_SHA" ) > "$TMP/own.$c.out" 2>/dev/null
+  flat "$TMP/own.$c.out" > "$TMP/own.$c.flat"
+done
+hasF "$TMP/own.arch.flat" "The lens holds new surface to Gas City's own documentation instead." "(OWN) gc-toolkit's arch note holds new surface to Gas City's own docs, not the pack's account of Gas City"
+hasF "$TMP/own.arch.flat" 'A converter is a finding on sight.' "(OWN) …makes a converter between a pack noun and a Gas City noun a finding"
+hasF "$TMP/own.arch.flat" 'neither are tests or the fixtures they use' "(OWN) …and leaves tests out of operational surface"
+hasF "$TMP/own.triage.flat" '## When `arch` is mandatory' "(OWN) gc-toolkit's triage note says when the arch check is mandatory"
+hasF "$TMP/own.triage.flat" 'does not make `arch` mandatory' "(OWN) …and that a diff of tests alone does not make it so"
+notF "$TMP/arch.skill" 'divergence lens' "(OWN) the pack's arch skill, which every rig's arch review loads, carries none of gc-toolkit's lens"
 
 echo "# a check the reviewed repo's index declares and this pack ships no method for"
 # The working tree's row differs from the reviewed commit's: the commit's is read.
