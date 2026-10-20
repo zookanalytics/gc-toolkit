@@ -478,24 +478,29 @@ the cadence — the arms run whether or not any refinery session is awake.
    benign, dismissed or cut short carries no ruling and releases nothing. A
    Conversation comment has no thread, so a Conversation comment of the city's
    links to the comments one bead answers and carries their answer. A review
-   body has no thread either, and its review's living answer carries its answer
-   and the mark that trades its reaction. Each human review that raised
-   findings has one living answer, a Conversation comment posted once the
-   review's pickup reactions land and edited in place whenever its rendering
-   changes (`assets/scripts/review-answer.sh` states what it shows): any visit
-   waiting on the operator first, a count line, then one point per finding,
-   sorted into Needs you, Worth a look, In progress and Done, each a label
-   linked to the comment, a sentence in the words of whoever answered it, and
-   the commit, follow-up or visit carrying it. It carries a digest of its own
-   rendering, so a pass that changes nothing writes nothing. It is rendered to
-   fit the size GitHub takes in one comment: a long review shortens its notes
-   from the fix, then its quoted replies, then its sentences, each cut naming
-   the bead that holds the whole text, and past that lists the points that fit
-   and names the rest. Once every finding
-   a human CHANGES_REQUESTED review raised has closed and every answer one of
-   them owes is on the PR, the sweep re-requests the reviewer and dismisses the
-   review with a one-line note linking the living answer, which then says the
-   review was dismissed. A dismissal is not an approval. The routing arm leaves
+   body has no thread either, and its review round's living answer carries its
+   answer and the mark that trades its reaction. Each review round that raised
+   findings has one living answer. A round is the reviews one reviewer
+   submitted against one commit, however many GitHub reviews their client split
+   that pass into. The answer is a Conversation comment posted once the round's
+   pickup reactions land and edited in place whenever its rendering changes
+   (`assets/scripts/review-answer.sh` states what it shows): any visit waiting
+   on the operator first, a count line, then one point per finding, sorted into
+   Needs you, Worth a look, In progress and Done, each a label linked to the
+   comment, a sentence in the words of whoever answered it, and the commit,
+   follow-up or visit carrying it. It carries a digest of its own rendering, so
+   a pass that changes nothing writes nothing. When the city holds more than
+   one comment for a round, each keyed to one of its reviews, the pass keeps
+   one, moves every mark the others carry into it, and deletes the others. It
+   is rendered to fit the size GitHub takes in one comment: a long review
+   shortens its notes from the fix, then its quoted replies, then its
+   sentences, each cut naming the bead that holds the whole text, and past that
+   lists the points that fit and names the rest. Once every finding a human
+   CHANGES_REQUESTED review raised has closed and every answer one of them owes
+   is on the PR, the sweep re-requests the reviewer and dismisses that review
+   with a one-line note linking its round's living answer, which then says the
+   review was dismissed. A review whose body was ruled restates waits for every
+   finding of its round. A dismissal is not an approval. The routing arm leaves
    out of a batch the feedback the review threads already answered: an inline
    comment in a resolved thread with a later post of the city's, or a review
    body whose every inline comment is one. Such feedback sits inside the

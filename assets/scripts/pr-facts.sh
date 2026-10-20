@@ -118,19 +118,22 @@
 # batch's record until it is resolved. One the city's identity cannot resolve
 # stays owed: every pass tries the resolve again, and the situation is filed as
 # one finding for the repository.
-# Each human review that raised findings gets one living answer: a Conversation
-# comment posted when the review is picked up and edited in place as its points
-# are ruled, fixed and settled (review-answer.sh says what it shows). It is the
-# only top-level comment the city writes about a review, and the one place the
-# operator reads what became of every point.
+# Each review round that raised findings, the reviews one reviewer submitted
+# against one commit however many GitHub reviews their client split it into,
+# gets one living answer: a Conversation comment posted when the round is
+# picked up and edited in place as its points are ruled, fixed and settled
+# (review-answer.sh says what it shows). It is the only top-level comment the
+# city writes about a review, and the one place the operator reads what became
+# of every point.
 # The sweep also closes the human review loop. A human CHANGES_REQUESTED stands
 # as GitHub's own blocking signal until someone clears it; once every finding a
 # particular human review raised has closed — a must-fix fixed and landed, a
 # decline replied and resolved, or a deferral's follow-up filed and its id
 # replied — that review is answered in full, so the sweep dismisses it (clearing
 # the block) and re-requests its author, per-review via finding.review_id so one
-# reviewer clears independently of another. The dismissal note is one line
-# linking the living answer. A needs-you finding is the exception that holds the
+# reviewer clears independently of another. A review whose body only frames its
+# round waits for the whole round. The dismissal note is one line linking the
+# round's living answer. A needs-you finding is the exception that holds the
 # review open on purpose: it stays open until the operator rules the visit
 # holding its question and no fix unit on its lane, nor a ruling's rework child,
 # is still in flight (finding.sh close-answered), so the review it belongs to is
@@ -967,7 +970,7 @@ feedback_body() { # <reviews-json> <comments-json> <review-mark> <comment-mark> 
 # finding.sh normalizes it out of the key, so a rebase that renumbers the file
 # does not re-raise the finding. An empty body is no objection and is dropped, so
 # a bodyless CHANGES_REQUESTED contributes only through its inline comments.
-feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue-comments> <issue-mark> — JSON array of {login,locus,message,comment_id,review_id}
+feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue-comments> <issue-mark> — JSON array of {login,locus,message,comment_id,review_id,round}
   # comment_id is the GitHub databaseId of the row that raised the objection.
   # For an INLINE review comment it is also the databaseId the reviewThread
   # carries, so the write-back can find the thread and post a declined finding's
@@ -975,22 +978,28 @@ feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue
   # its id matches none and the write-back answers those on the PR itself.
   # review_id is the databaseId of the PR review the objection belongs to — its
   # own id for a review body, the parent review's for an inline comment — so the
-  # write-back groups an anchor's human findings by review and dismisses one when
-  # all of its findings clear. A Conversation comment belongs to no review, so it
-  # carries none and holds no review's dismissal.
+  # write-back dismisses one review when all of its findings clear. round is the
+  # round of that review (ra_review_rounds, review-answer.sh): its author and the
+  # commit it was submitted against, read off the review in <reviews>, the same
+  # derivation the write-back groups living answers by. An inline comment
+  # carries the commit its thread began on, which for a reply in an older thread
+  # is not the commit its review was submitted against. A review <reviews> does
+  # not place leaves round empty, so none is stamped. A Conversation comment
+  # belongs to no review, so it carries neither and holds no review's dismissal.
   { printf '%s\n' "$1"; printf '%s\n' "$2"; printf '%s\n' "$5"; } | \
   jq -nc --argjson rmark "$3" --argjson cmark "$4" --argjson imark "$6" \
-         --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF"'
+         --arg self "$SELF_LOGIN" --arg since "$PSINCE" "$CITY_OWN_DEF$REVIEW_ROUND_DEF"'
     def body: ((.body // "") | tostring);
     def has_body: ((body | gsub("[[:space:]]"; "")) != "");
-    (input) as $revs | (input) as $cmts | (input) as $icmts |
+    (input) as $revs | (input) as $cmts | (input) as $icmts | ($revs | ra_review_rounds) as $round |
     ([ $revs[] | select(gc_city_own($self; $since) | not)
               | (((.state // "") | tostring)) as $st
               | select((["COMMENTED", "CHANGES_REQUESTED"] | index($st)) != null)
               | select(has_body)
               | select(((.id // 0) | tonumber) > $rmark)
               | { login: ((.user.login // "?") | tostring), locus: "PR review", message: body,
-                  comment_id: ((.id // 0) | tostring), review_id: ((.id // 0) | tostring) } ])
+                  comment_id: ((.id // 0) | tostring), review_id: ((.id // 0) | tostring),
+                  round: ($round[(.id // 0) | tostring] // "") } ])
   + ([ $cmts[] | select(gc_city_own($self; $since) | not)
               | select(has_body)
               | select(((.id // 0) | tonumber) > $cmark)
@@ -998,12 +1007,13 @@ feedback_findings() { # <reviews> <comments> <review-mark> <comment-mark> <issue
                   locus: (((.path // "PR conversation") | tostring)
                           + (if ((.line // .original_line) != null) then ":" + ((.line // .original_line) | tostring) else "" end)),
                   message: body, comment_id: ((.id // 0) | tostring),
-                  review_id: ((.pull_request_review_id // "") | tostring) } ])
+                  review_id: ((.pull_request_review_id // "") | tostring),
+                  round: ($round[(.pull_request_review_id // "") | tostring] // "") } ])
   + ([ $icmts[] | select(gc_city_own($self; $since) | not)
               | select(has_body)
               | select(((.id // 0) | tonumber) > $imark)
               | { login: ((.user.login // "?") | tostring), locus: "PR conversation", message: body,
-                  comment_id: ((.id // 0) | tostring), review_id: "" } ])' 2>/dev/null
+                  comment_id: ((.id // 0) | tostring), review_id: "", round: "" } ])' 2>/dev/null
 }
 # The ids in <rows-json> that are feedback, as a JSON array: every row that is
 # not the city's own post (gc_city_own), whoever wrote it. The comment and
@@ -3036,17 +3046,24 @@ $CBODY"
       fmsg=$(printf '%s' "$frec" | jq -r '.message // empty')
       fcid=$(printf '%s' "$frec" | jq -r '(.comment_id // "") | tostring')
       frid=$(printf '%s' "$frec" | jq -r '(.review_id // "") | tostring')
+      frnd=$(printf '%s' "$frec" | jq -r '(.round // "") | tostring')
       [ -n "$flocus" ] && [ -n "$fmsg" ] || continue
       if fid=$("$FINDING" upsert --anchor "$id" --lane human --source "human:$flogin" --locus "$flocus" --message "$fmsg" ${FFU[@]+"${FFU[@]}"} 2>/dev/null) && [ -n "$fid" ]; then
         # Record which GitHub row and review raised it. finding.comment_id lets the
         # write-back post a declined finding's owed reply into that thread;
         # finding.review_id groups the finding under its review, so the write-back
-        # dismisses that review once all of its findings clear. Best-effort: a
-        # missing comment id drops the decline reply back to a PR-level answer and a
-        # missing review id drops only this review's auto-dismissal, never the merge
-        # hold, so neither gates the batch the way the finding filing above does.
+        # dismisses that review once all of its findings clear; and
+        # finding.review_round names the reviewer's review round, which finding.sh
+        # reads to tell a review body that frames its round from one that is a
+        # whole review. Best-effort: a missing comment id drops the decline reply
+        # back to a PR-level answer, a missing review id drops only this review's
+        # auto-dismissal, never the merge hold, and a missing round leaves a body
+        # review only its own review's comments to frame until the write-back's
+        # next read of the PR records it, so none gates the batch the way the
+        # finding filing above does.
         case "$fcid" in ''|0) : ;; *) gc bd update "$fid" --set-metadata finding.comment_id="$fcid" >/dev/null 2>&1 || true ;; esac
         case "$frid" in ''|0) : ;; *) gc bd update "$fid" --set-metadata finding.review_id="$frid" >/dev/null 2>&1 || true ;; esac
+        [ -z "$frnd" ] || gc bd update "$fid" --set-metadata finding.review_round="$frnd" >/dev/null 2>&1 || true
       else
         ffail=1; break
       fi
@@ -3557,7 +3574,9 @@ fi
 # Every node carries its author, body and creation instant, and a thread comment
 # its review's submission: the facts gc_city_own reads to tell the city's own
 # post from feedback. A thread comment also names its review, which ties a review
-# body to the inline comments it carries. The reviews read also carries the
+# body to the inline comments it carries. A review also names the commit it was
+# submitted against, which with its author places it in its round, the unit of
+# a living answer (review-answer.sh). The reviews read also carries the
 # reviewers the PR has pending review requests from, its first 100 on every page
 # and never paginated, since the read follows the reviews' cursor: a living
 # answer reads them to say a dismissed review's author is requested again.
@@ -3573,7 +3592,7 @@ WB_REVIEWS_QUERY='query($owner:String!,$repo:String!,$num:Int!,$endCursor:String
       reviewRequests(first:100){nodes{requestedReviewer{... on User{login}}}}
       reviews(first:100,after:$endCursor){
         pageInfo{hasNextPage endCursor}
-        nodes{id databaseId state body url author{login} submittedAt createdAt
+        nodes{id databaseId state body url author{login} commit{oid} submittedAt createdAt
           reactionGroups{content viewerHasReacted}}}}}}'
 # The Conversation tab is a third top-level connection, the same single-cursor
 # shape as the reviews read. Its comments carry no thread to resolve, so a review
@@ -3853,22 +3872,36 @@ finding_answer() { # <owed-record-json>
   [ -n "$ans" ] && wb_expand "$ans" || return 1
   WB_ANSWER="$WB_BODY"
 }
-# Puts one review's living answer (a ra_models model, review-answer.sh) on the
-# PR: posts it when the review has none and is live, or edits it in place when
+# Records a round's model, and the comment carrying it once there is one, under
+# each review of the round, the ids the review dismissal looks them up by.
+wr_record() { # <model-json> [<comment-url>]
+  local wrr
+  while IFS= read -r wrr; do
+    [ -n "$wrr" ] || continue
+    WRMODEL["$wrr"]="$1"
+    [ -z "${2:-}" ] || WRURL["$wrr"]="$2"
+  done <<WR_MEMBERS
+$(printf '%s' "$1" | jq -r '.rids[]?' 2>/dev/null)
+WR_MEMBERS
+}
+# Puts one round's living answer (a ra_models model, review-answer.sh) on the
+# PR: posts it when the round has none and is live, or edits it in place when
 # its rendering no longer matches the digest the comment carries. Once the
 # comment carries this rendering, it delivers what the rendering holds: each
 # review body answer it owes is stamped finding.reply_posted, and a review body
 # it marks resolved trades its reaction, the one place that body's trade is
-# made. Records the comment in WRURL and the model, with the comment as it now
-# stands and its trade already dealt with, in WRMODEL. Returns 1 when the PR
+# made. It also carries every mark the city's other copies of the round's
+# answer carry, so those copies are deleted then. Records the comment in WRURL
+# and the model, with the comment as it now stands and its trade already dealt
+# with, in WRMODEL, both under every review of the round. Returns 1 when the PR
 # holds no comment carrying this rendering. Like wb_expand, it runs in the
 # caller's shell, never in a command substitution.
-rposted=0; redited=0; wrstamped=0
+rposted=0; redited=0; rdeleted=0; wrstamped=0
 wr_write() { # <model-json>
-  local m="$1" rid body digest full hdb hurl hdig out wrf_id wrsw
+  local m="$1" rid body digest full hdb hurl hdig out wrf_id wrsw wrs
   rid=$(printf '%s' "$m" | jq -r '.rid // empty' 2>/dev/null)
   [ -n "$rid" ] || return 1
-  WRMODEL["$rid"]="$m"
+  wr_record "$m"
   body=$(printf '%s' "$m" | jq -r --arg marker "$WB_MARKER" "$REVIEW_ANSWER_DEF"'ra_render($marker)' 2>/dev/null)
   [ -n "$body" ] || { echo "$PROG: $wid — PR#$wnum could not render the answer to review $rid; nothing written for it (retry next pass)" >&2; return 1; }
   digest=$(printf '%s' "$body" | cksum | cut -d' ' -f1)
@@ -3908,10 +3941,19 @@ wr_write() { # <model-json>
     fi
     redited=$((redited + 1))
   fi
-  [ -z "$hurl" ] || WRURL["$rid"]="$hurl"
-  WRMODEL["$rid"]=$(printf '%s' "$m" | jq -c --arg db "$hdb" --arg url "$hurl" --arg d "$digest" \
-    '.existing = { db: $db, url: $url, digest: $d, dismissed: (.dismissed == "requeued" or .dismissed == "self") }
-     | .swaps = "-"' 2>/dev/null)
+  wr_record "$(printf '%s' "$m" | jq -c --arg db "$hdb" --arg url "$hurl" --arg d "$digest" \
+    '.existing = { db: $db, url: $url, digest: $d } | .swaps = "-" | .strays = []' 2>/dev/null)" "$hurl"
+  while IFS= read -r wrs; do
+    [ -n "$wrs" ] || continue
+    if gh_api_origin -X DELETE "repos/$ORIGIN_REPO/issues/comments/$wrs" >/dev/null 2>&1; then
+      rdeleted=$((rdeleted + 1))
+      echo "$PROG: $wid — PR#$wnum deleted comment $wrs, another copy of the answer to review $rid"
+    else
+      echo "$PROG: $wid — PR#$wnum could not delete comment $wrs, another copy of the answer to review $rid; retry next pass" >&2
+    fi
+  done <<WR_STRAYS
+$(printf '%s' "$m" | jq -r '.strays[]?' 2>/dev/null)
+WR_STRAYS
   while IFS= read -r wrf_id; do
     [ -n "$wrf_id" ] || continue
     if gc bd update "$wrf_id" --set-metadata finding.reply_posted=1 >/dev/null 2>&1; then
@@ -4232,6 +4274,36 @@ WB_LONG_THREADS
   if [ "$wtop_ok" != 1 ]; then
     echo "$PROG: $wid — PR#$wnum has a review thread that could not be read to its end; nothing written back (retry next pass)" >&2
     continue
+  fi
+
+  # A human finding names the round of the review that raised it
+  # (finding.review_round), which finding.sh reads to rule restates. The intake
+  # stamps it once, as it files the finding, and never reads a watermarked
+  # comment again, so a stamp it missed stays missing unless something derives
+  # it again. This read places every review on the PR by the derivation the
+  # living answers are grouped by, so each pass records the round on a finding
+  # whose round is missing or differs. A review this read does not place leaves
+  # the finding as it is. A write that fails is tried again on the next pass.
+  if [ -n "$disp" ] && wrnd_rows=$(bd_anchor_children "$wid" "$ALL_STATUSES"); then
+    wrnd_n=0
+    while IFS=$'\t' read -r wrnd_f wrnd_k; do
+      [ -n "$wrnd_f" ] && [ -n "$wrnd_k" ] || continue
+      if gc bd update "$wrnd_f" --set-metadata finding.review_round="$wrnd_k" >/dev/null 2>&1; then
+        wrnd_n=$((wrnd_n + 1))
+        echo "$PROG: $wid — PR#$wnum recorded review round $wrnd_k on finding $wrnd_f"
+      else
+        echo "$PROG: $wid — PR#$wnum could not record review round $wrnd_k on finding $wrnd_f; retry next pass" >&2
+      fi
+    done <<WB_ROUNDS
+$({ printf '%s\n' "$wview"; printf '%s\n' "$wrnd_rows"; } | jq -rn "$REVIEW_ROUND_DEF"'
+    (input | .reviews | ra_review_rounds) as $round | input
+    | .[]? | select(((.metadata.task_kind // "") | tostring) == "finding")
+    | select(((.metadata["finding.lane"] // "") | tostring) == "human")
+    | ($round[(.metadata["finding.review_id"] // "") | tostring] // "") as $k
+    | select($k != "" and $k != ((.metadata["finding.review_round"] // "") | tostring))
+    | [ .id, $k ] | @tsv' 2>/dev/null)
+WB_ROUNDS
+    [ "$wrnd_n" = 0 ] || bd_cache_clear
   fi
 
   # One jq pass decides everything, so the shell below only performs writes.
@@ -4709,25 +4781,28 @@ WB_DECLINES
     [ "$wdwrote" = 0 ] || bd_cache_clear
   fi
 
-  # --- the living answer to each human review, and its dismissal ---------------
-  # Every human review that raised findings on this anchor gets one Conversation
+  # --- the living answer to each human review round, and its dismissal ---------
+  # Every round of a human review that raised findings on this anchor, the
+  # reviews one reviewer submitted against one commit, gets one Conversation
   # comment, its living answer (review-answer.sh says what it shows). It is
-  # posted once the review is picked up, its findings filed and their pickup
+  # posted once the round is picked up, its findings filed and their pickup
   # reactions on the PR, and edited in place whenever its rendering changes
-  # after that: a ruling, a fix's result, a fix landing, a visit ruled, the
+  # after that: a ruling, a fix's result, a fix landing, a visit ruled, a
   # dismissal. GitHub sends no notification for an edit, so the post is the one
   # that notifies, and nothing waits for a ruling or a fix. The rendering is
   # rebuilt from bead state on every pass and carries a digest of itself, so a
   # pass whose rendering is unchanged writes nothing, and a pass that missed a
-  # change catches it up. The comment is found again by its review key, and a
-  # review never gets a second one. A review that predates the living answer,
-  # with every finding closed, nothing owed and no block standing, keeps the
-  # answers it had and gets none. A review body sits in no thread, so its living
-  # answer is what delivers a decline's, a deferral's or a needs-you finding's
-  # answer to it (finding.reply_posted, stamped once the comment carrying it is
-  # on the PR) and the resolved mark its reaction trade waits for. Only a pass
-  # that read the threads and the batch history cleanly acts, and nothing is
-  # posted or edited while a pickup reaction is still owed.
+  # change catches it up. The comment is found again by the key of a review of
+  # its round, and a round never keeps a second one: when the city holds a copy
+  # keyed to each of its reviews, the one it keeps takes their marks and the
+  # others are deleted. A review that predates the living answer, with every
+  # finding closed, nothing owed and no block standing, keeps the answers it had
+  # and gets none. A review body sits in no thread, so its living answer is what
+  # delivers a decline's, a deferral's or a needs-you finding's answer to it
+  # (finding.reply_posted, stamped once the comment carrying it is on the PR)
+  # and the resolved mark its reaction trade waits for. Only a pass that read
+  # the threads and the batch history cleanly acts, and nothing is posted or
+  # edited while a pickup reaction is still owed.
   #
   # A human CHANGES_REQUESTED holds the merge and is GitHub's own blocking
   # signal, so a review answered in full but left standing tells the reader the
@@ -4737,10 +4812,13 @@ WB_DECLINES
   # the same way — the review is answered: it is dismissed, clearing the block,
   # and its author is re-requested, putting the reviewer back in their queue to
   # judge the result, including the declined and deferred threads left open for
-  # them. The dismissal note is one line: the count line and a link to the
+  # them. A review whose body was ruled restates frames the inline comments of
+  # its review round, so it is answered only once every finding of that round
+  # is. The dismissal note is one line: the count line and a link to the round's
   # living answer, which then says the review was dismissed. Per review, keyed
-  # on finding.review_id, so one reviewer clears independently of another. A
-  # closed finding is not yet answered while the answer it owes its raiser is
+  # on finding.review_id, because GitHub dismisses review objects, so one review
+  # clears independently of another, in its round or out of it. A closed
+  # finding is not yet answered while the answer it owes its raiser is
   # undelivered, and a needs-you finding counts as answered only when it records
   # the visit whose ruling released it (finding.ruling_visit, stamped by
   # finding.sh close-answered); one closed without it was settled by no ruling,
@@ -4783,21 +4861,27 @@ WB_REVIEW_ANSWERS
     # pass's cached read of the findings.
     [ "$wrstamped" = 0 ] || bd_cache_clear
     if wrf=$(bd_anchor_children "$wid" "$ALL_STATUSES"); then
-      wrev_ready=$(printf '%s' "$wrf" | jq -r "$WB_OWED_REPLY_DEF"'
-          [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
-                | select(((.metadata["finding.review_id"] // "") | tostring) != "")
-                | { rid: ((.metadata["finding.review_id"]) | tostring),
-                    open: (((.status // "") | tostring) != "closed"),
-                    disp: ((.metadata["finding.disposition"] // "") | tostring),
-                    owed: owes_reply,
-                    reply_posted: ((.metadata["finding.reply_posted"] // "") | tostring),
-                    ruling: ((.metadata["finding.ruling_visit"] // "") | tostring) } ]
-          | group_by(.rid)
-          | .[] | select(all(.[];
-                             (.open == false)
-                             and (( .owed and .reply_posted != "1" ) | not)
-                             and (( .disp == "needs-you" and .ruling == "" ) | not)))
-          | .[0].rid' 2>/dev/null)
+      wrev_ready=$({ printf '%s\n' "$wview"; printf '%s\n' "$wrf"; } | jq -rn "$WB_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
+          input as $view | input
+          | ra_rounds($view) as $rounds
+          | [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
+                  | select(((.metadata["finding.review_id"] // "") | tostring) != "")
+                  | ((.metadata["finding.review_id"]) | tostring) as $r
+                  | { rid: $r, round: ($rounds[$r] // ("r" + $r)),
+                      body: (((.metadata["finding.comment_id"] // "") | tostring) == $r),
+                      open: (((.status // "") | tostring) != "closed"),
+                      disp: ((.metadata["finding.disposition"] // "") | tostring),
+                      owed: owes_reply,
+                      reply_posted: ((.metadata["finding.reply_posted"] // "") | tostring),
+                      ruling: ((.metadata["finding.ruling_visit"] // "") | tostring) } ] as $fs
+          | def answered: (.open == false)
+              and (( .owed and .reply_posted != "1" ) | not)
+              and (( .disp == "needs-you" and .ruling == "" ) | not);
+            $fs | group_by(.rid) | .[]
+          | . as $own
+          | (if any($own[]; .body and .disp == "restates") then [ $fs[] | select(.round == $own[0].round) ] else $own end)
+          | select(all(.[]; answered))
+          | $own[0].rid' 2>/dev/null)
       while IFS= read -r wrid; do
         [ -n "$wrid" ] || continue
         # The live review this id names. Only a feedback CHANGES_REQUESTED is this
@@ -4846,9 +4930,9 @@ WB_REVIEW_ANSWERS
           else
             echo "$PROG: $wid — PR#$wnum dismissed review $wrid, posted under our own login, with no re-request (its findings all cleared)"
           fi
-          # The living answer says so in the same pass, and its mark line keeps
-          # saying so on every later one.
-          wr_write "$(printf '%s' "$wrm" | jq -c '.dismissed = (if .self then "self" else "requeued" end)' 2>/dev/null)" || true
+          # The round's living answer says so in the same pass, and the review's
+          # dismissed mark keeps saying so on every later one.
+          wr_write "$(printf '%s' "$wrm" | jq -c --arg r "$wrid" "$REVIEW_ANSWER_DEF"'ra_dismiss_member($r)' 2>/dev/null)" || true
         elif [ "$wrrequeue" = 1 ]; then
           echo "$PROG: $wid — PR#$wnum re-requested $wrlogin but could not dismiss review $wrid; retry next pass" >&2
         else
@@ -5108,6 +5192,6 @@ elif [ "$ROUTE_ONLY" = 1 ]; then
   # refinery-reconcile reports a non-zero but never holds merge on it.
   echo "$PROG: route-comments-only — $postured postures recorded, $answered comment batches routed, $skipped skipped"
 else
-  echo "$PROG: $recorded recorded, $postured postures recorded ($unpostured not current), $flagged flagged-to-human, $disposed_n auto-disposed, $reworked reworks filed, $reaped moot reworks reaped, $answered comment batches routed, $dismissed_n reviews dismissed, $acked comments acknowledged, $replied threads replied, $resolved threads resolved, $posted conversation answers posted, $swapped comments marked resolved, $fposted findings posted, $fanswered findings answered, $rposted review answers posted, $redited review answers edited, $skipped skipped"
+  echo "$PROG: $recorded recorded, $postured postures recorded ($unpostured not current), $flagged flagged-to-human, $disposed_n auto-disposed, $reworked reworks filed, $reaped moot reworks reaped, $answered comment batches routed, $dismissed_n reviews dismissed, $acked comments acknowledged, $replied threads replied, $resolved threads resolved, $posted conversation answers posted, $swapped comments marked resolved, $fposted findings posted, $fanswered findings answered, $rposted review answers posted, $redited review answers edited, $rdeleted review answer copies deleted, $skipped skipped"
 fi
 exit 0
