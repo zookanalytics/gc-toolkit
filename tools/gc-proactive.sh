@@ -425,14 +425,14 @@ board_rank() {
 
 # exclude_graph_structural — drop graph.v2 STRUCTURAL beads from a demand array
 # on stdin: topology ROOTS (gc.kind in workflow/scope/spec) AND formula STEP
-# beads (gc.step_ref / gc.step_id / gc.root_bead_id). A root is routed only to
-# name its run and a step advances its own molecule; gc hook --claim offers
-# neither as a subject, so a query that counts one spawns a worker that claims
-# nothing (a root) or reacts to a formula step as if it were an input (a step).
-# The gc binary's default pool query applies the roots clause on its worker and
-# count forms; this broadens it to steps for the proactive custom queries, which
-# inline the same predicate in agents/proactive/agent.toml's work_query +
-# scale_check — keep all three in sync.
+# beads (gc.step_ref / gc.step_id / gc.root_bead_id). Neither is a reaction for
+# this pool to take. gc hook --claim refuses some topology roots, so a query
+# that counts one spawns a worker that claims nothing. It offers a routed step,
+# and a root it does not refuse, like any other work, so a worker would react
+# to one as if it were an input. The roots clause matches gc.kind alone, like
+# topology_kind in assets/scripts/liveness-classify.sh, whose comment names Gas
+# City's own check and where the two differ. agents/proactive/agent.toml's
+# work_query and scale_check inline the same predicate; keep all three in sync.
 exclude_graph_structural() {
     jq 'map(select((
             ((.metadata["gc.kind"] // "") | (. == "workflow" or . == "scope" or . == "spec"))
@@ -729,8 +729,7 @@ cmd_demand() {
                 --exclude-type=epic --json --limit 0 2>/dev/null || true)"
         [ -n "$r" ] || r='[]'
     fi
-    # Drop never-claimable graph-structural beads (see exclude_graph_structural)
-    # so the demand mirror matches what gc hook --claim would offer, then rank by
+    # Drop graph-structural beads (see exclude_graph_structural), then rank by
     # board weight and slice to the worker page. The full routed set is read
     # (--limit 0) and structural beads dropped BEFORE the slice, so — like the
     # agent.toml work_query this mirrors — a page filled by structural beads
