@@ -2225,7 +2225,7 @@ cmd_open() {
     # data-plane outage apart from a genuine not-found.
     # >>> open-subject-exists
     verify_subject "$bead" open "No visit filed." || exit $?
-    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+    subject_clean="$VS_PAYLOAD"
     # <<< open-subject-exists
 
     # A DONE-band row is a finished item, not open work. Minting a fresh
@@ -2532,7 +2532,7 @@ cmd_dismiss() {
     # a data-plane outage, not a missing bead. Dismissing an unverified id would
     # stamp a marker nothing ever clears.
     verify_subject "$bead" dismiss "Nothing was written." || exit $?
-    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+    subject_clean="$VS_PAYLOAD"
 
     # A VISIT id names its own sitting. The board lists a parked visit as a row
     # of its own, and engage accepts the visit id straight off that row, so
@@ -2983,7 +2983,7 @@ cmd_accept() {
     # outage, not a missing bead. The alternative is a sling on a bead that may
     # not exist.
     verify_subject "$bead" accept "Nothing dispatched." || exit $?
-    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+    subject_clean="$VS_PAYLOAD"
 
     # A VISIT id names the recommendation's subject. The board renders Accept on
     # the folded subject tile, so the common input is the subject id; a visit id
@@ -3024,7 +3024,7 @@ cmd_accept() {
         # the subject "discuss-only" (exit 2) on a state it could not read, where the
         # contract is to fail closed (exit 4).
         verify_subject "$bead" accept "Nothing dispatched." "the subject '$bead' this visit names" || exit $?
-        subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+        subject_clean="$VS_PAYLOAD"
     fi
 
     # gc.recommended_formula is the live recommendation; gc.recommended_formula_dispatched
@@ -3366,7 +3366,7 @@ EOF
     while IFS="$TAB" read -r _eps_key _eps_label _eps_letter; do
         [ -n "$_eps_key" ] && [ -n "$_eps_letter" ] || continue
         [ -n "$_epv_smenu" ] && _epv_smenu="$_epv_smenu · "
-        _epv_smenu="$_epv_smenu[$_eps_letter] $_eps_label"
+        _epv_smenu="${_epv_smenu}[$_eps_letter] $_eps_label"
         _epv_smap="$_epv_smap$_eps_letter $_eps_key
 "
     done <<EOF
@@ -3413,7 +3413,7 @@ engage_prompt_model() {
         _epm_lbl=$(engage_model_label "$_epm_m")
         [ "$_epm_m" = opus ] && _epm_lbl="$_epm_lbl (default)"
         [ -n "$_epm_menu" ] && _epm_menu="$_epm_menu · "
-        _epm_menu="$_epm_menu[$_epm_i] $_epm_lbl"
+        _epm_menu="${_epm_menu}[$_epm_i] $_epm_lbl"
         _epm_map="$_epm_map$_epm_i $_epm_m
 "
     done
@@ -3485,7 +3485,7 @@ engage_prompt_rig() {
         _epr_map="$_epr_map$_epr_i $_epr_name
 "
         [ -n "$_epr_menu" ] && _epr_menu="$_epr_menu · "
-        _epr_menu="$_epr_menu[$_epr_i] $_epr_name"
+        _epr_menu="${_epr_menu}[$_epr_i] $_epr_name"
     done <<EOF
 $(printf '%s' "$RIGS" | jq -r '.[] | [.name, .path] | @tsv' 2>/dev/null)
 EOF
