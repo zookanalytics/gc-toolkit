@@ -125,18 +125,19 @@ back to the human, in the same write, and is refused on a closed anchor and on
 a bead blocked by anything but its own demand, since the work is then on the
 blocker and a pool has nothing to perform here; --assign <named-agent> releases
 it TO a named agent instead, in the same write, as its assignee and with no
-route, because a named agent's hook matches its assignee and never reads
-gc.routed_to. --assign is refused beside --route and on a closed anchor, and
-without --waiting-on also on a bead blocked by anything but its own demand;
-with --waiting-on the named waits gate the hand-off, since the agent's hook
-offers the bead only once bd reports it ready; --waiting-on (repeatable)
-records the wait as a `blocks` edge beside the prose so the board can re-ask
-whether it landed. --no-wait is the other answer to the same question: this
-sitting settled the subject and nothing is waiting on it. It stamps
-gc.takeaway_settled, which lifecycle.toml [holds] reads to tell a settled
-headline from one parking a bead on prose, and it contradicts --waiting-on.
-Say neither and the headline is a hold that doctor/check-wait-is-an-edge
-reports, which is the honest reading of a park nothing re-asks.
+route, because the assignee is what the controller and the pack's notice read
+to give a named agent a turn (docs/deferred-dispatch.md). --assign is refused
+beside --route and on a closed anchor, and without --waiting-on also on a bead
+blocked by anything but its own demand; with --waiting-on the named waits gate
+the hand-off, since the agent's hook offers the bead only once bd reports it
+ready; --waiting-on (repeatable) records the wait as a `blocks` edge beside the
+prose so the board can re-ask whether it landed. --no-wait is the other answer
+to the same question: this sitting settled the subject and nothing is waiting
+on it. It stamps gc.takeaway_settled, which lifecycle.toml [holds] reads to
+tell a settled headline from one parking a bead on prose, and it contradicts
+--waiting-on. Say neither and the headline is a hold that
+doctor/check-wait-is-an-edge reports, which is the honest reading of a park
+nothing re-asks.
 
 demand files what a person owes as its own bead, a SIBLING of the work, and
 blocks that work on it with a `blocks` edge; it prints `demand <id> blocks
@@ -824,13 +825,12 @@ ROOTS
 # also names a bead that is itself the work, so a bead blocked by anything but
 # its own demand is refused.
 # --assign names a NAMED agent to release TO, written as the assignee with no
-# route: a named session's hook matches its assignee and skips the routed tier,
-# so a route alone never reaches it (docs/gascity-routing-model.md, Lane 2). A
-# bead is addressed one way or the other, never both. --assign is refused on a
-# closed anchor like --route. Without --waiting-on it also takes the --route
-# blocker guard. With --waiting-on the guard is skipped: the caller has named
-# the waits, and the hook offers the bead only once bd reports it ready, so
-# every open blocker gates the hand-off, named or not.
+# route (the usage says why). A bead is addressed one way or the other, never
+# both. --assign is refused on a closed anchor like --route. Without
+# --waiting-on it also takes the --route blocker guard. With --waiting-on the
+# guard is skipped: the caller has named the waits, and the hook offers the
+# bead only once bd reports it ready, so every open blocker gates the hand-off,
+# named or not.
 # --waiting-on records each wait as a `blocks` edge, best-effort: the stamp is
 # what the sitting owes the operator, so a rejected edge only warns and never
 # fails the verb. One wait is written as no edge: a LANDED rider — a bead that
@@ -915,9 +915,9 @@ cmd_takeaway() {
             *) echo "$PROG: takeaway: --route '$route' is not rig-qualified; gc.routed_to is matched as an exact string, so a bare agent name routes to nobody and the bead sits forever. Use <rig>/<agent>." >&2; exit 2 ;;
         esac
     fi
-    # --assign rides --release for the same reason, and it excludes --route: an
-    # assignee drops the bead out of a pool's unassigned claim filter, and a
-    # named agent's hook never reads the route.
+    # --assign rides --release for the same reason, and it excludes --route: the
+    # routed tier offers only unassigned beads, so a route beside an assignee
+    # reaches nobody.
     if [ -n "$assign" ]; then
         [ -n "$release" ] || { echo "$PROG: takeaway: --assign needs --release (it names who the bead is released TO)" >&2; exit 2; }
         [ -z "$route" ] || { echo "$PROG: takeaway: --assign and --route both name where $bead goes. A bead is addressed to a named agent by its assignee or to a pool by gc.routed_to, never both. Pass one. Nothing was written." >&2; exit 2; }
@@ -1059,7 +1059,7 @@ cmd_takeaway() {
     # Partition --waiting-on into the waits a pool still owes and the LANDED
     # riders. A landed rider both rode <bead>'s OWN branch and has already put
     # its work there, so <bead>'s own merge is what carries it
-    # (docs/gascity-human-engagement.md, "a settled sitting"): an edge would
+    # (docs/human-engagement.md, "How a held sitting ends"): an edge would
     # gate <bead>'s merge on work that merges WITH it — the deadlock merge.sh's
     # dep-edge lane holds on with no release — while asserting a pending wait
     # that does not exist. Both halves are required. metadata.branch is set at
@@ -4040,10 +4040,11 @@ cmd_engage() {
     visit_owner=$(printf '%s' "$visit_row" | jq -r '.assignee // ""' 2>/dev/null || true)
 
     # The spawned sitting adopts the visit only through its own hook claim, whose
-    # Tier-2 query is `bd ready --assignee=<name>` (docs/gascity-agents.md), and
-    # `bd ready` yields a bead only while it is open and unblocked. A closed or
-    # blocked visit assigned to the sitting never becomes its claim, so the
-    # sitting would wake holding nothing while this command reports success.
+    # Tier-2 query is `bd ready --assignee=<name>` (docs/gascity/routing-model.md,
+    # "The read side"), and `bd ready` yields a bead only while it is open and
+    # unblocked. A closed or blocked visit assigned to the sitting never becomes
+    # its claim, so the sitting would wake holding nothing while this command
+    # reports success.
     #
     # A visit with an assignee is already engaged, or pending engagement:
     # engage binds the visit to a spawned sitting's runtime name (below) while

@@ -82,9 +82,12 @@ the target's `default_sling_formula`, which for a polecat pool is
   blocker closes, and it ends the run on a bead that carries a `merge_result`,
   `held` included, as finished. Release the wait (the waits skill), then send.
 - **A named agent takes an assignee.** The mechanik, deacon, witness,
-  refinery and keeper never claim a pool's route. Send one of them a bead with
+  refinery and keeper are named agents, and the assignee is what the
+  controller and the pack's notice read to give one a turn
+  (docs/deferred-dispatch.md). Send one of them a bead with
   `gc bd update <bead> --assignee <qualified-name>`, the name `gc agent list`
-  prints.
+  prints, then tell it with
+  `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify <bead> --agent <qualified-name>`.
 
 In a sitting, the sign-off's `--route` says where the subject itself goes once
 its wait is released (the converse-settle step), so first decide which bead

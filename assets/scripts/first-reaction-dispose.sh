@@ -283,8 +283,8 @@ case "$DISPOSITION" in
         [ -z "$WAITING$BLOCKER_TITLE$VISIT$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$RECOMMENDED_FORMULA" ] \
             || usage_die "actionable takes --route or --assign only (--waiting-on/--blocker/--then-route/--then-assign/--visit/--after-workflow/--recommended-formula belong to the other exits)"
         # A bead goes to a pool by gc.routed_to or to a named agent by assignee,
-        # never both: the assignee drops it out of the pool's unassigned claim
-        # filter, and a named agent's hook never reads the route.
+        # never both: the routed tier offers only unassigned beads, so a route
+        # beside an assignee reaches nobody.
         if [ -n "$ASSIGN" ]; then
             [ -z "$ROUTE" ] || usage_die "--route and --assign both name where $BEAD goes; pass --route for a pool or --assign for a named agent, not both"
             [ -z "$EMERGENCY" ] || usage_die "--emergency admits a bead to a pool at P0, and --assign hands it to a named agent instead, which intake does not hold. Pass --route for the pool an emergency goes to, or drop --emergency."

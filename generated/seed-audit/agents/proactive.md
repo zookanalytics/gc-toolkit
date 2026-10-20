@@ -214,8 +214,8 @@ esac
    # routes at P0 only when the check it names is failing.
    "$DISPOSE" "$SUBJECT" --disposition actionable --reaction-bead <R> --by proactive --reason "<what is red on main, and why this bead fixes it>" --takeaway "<headline>" --emergency "<the failing check on main>"
    # Work that is a named agent's own goes TO that agent: --assign makes it the
-   # subject's assignee, the address the agent's own hook matches, since a named
-   # agent never reads gc.routed_to, and the exit mails the agent the bead id.
+   # subject's assignee, the address the pack gives a named agent, and the exit
+   # mails the agent the bead id.
    # A town-repo edit takes gc-toolkit.mechanik.
    "$DISPOSE" "$SUBJECT" --disposition actionable --reaction-bead <R> --by proactive --reason "<why this is work, and why it is mechanik's>" --takeaway "<headline>" --assign gc-toolkit.mechanik
 
