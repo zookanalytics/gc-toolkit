@@ -172,10 +172,11 @@ Machine-readable artifacts. Each link is the canonical download.
 
 Topics gc-toolkit has hit in practice that upstream's documentation
 does not cover yet. Entries here are a TBD list. Each is resolved by a
-local supplement that meets [the bar](#the-bar), and a fix sent
-upstream is the operator's send ([outbound-sends.md](outbound-sends.md)).
-A capability Gas City does not ship is not a documentation gap: it is a
-warrant, recorded in [warrants.md](warrants.md).
+local supplement that meets [the bar](#the-bar). A fix sent upstream is
+the operator's send, as gc-toolkit's
+[outbound-sends.md](../outbound-sends.md) describes. A capability Gas
+City does not ship is not a documentation gap: it is a warrant, recorded
+in gc-toolkit's [warrants.md](../warrants.md).
 
 - *(none recorded yet — when you find a gap, file the bead and add a
   pointer here)*

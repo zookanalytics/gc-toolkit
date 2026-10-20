@@ -31,7 +31,7 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Stands in for.** The primitive Gas City does not ship.
 - **Evidence.** Where upstream shows the primitive missing: a page of Gas City's
   or bd's documentation, or a symbol and file at a named upstream commit. Never
-  one of this pack's `docs/gascity-*.md` pages, and never a fork.
+  one of this pack's pages in `docs/gascity/`, and never a fork.
 - **Verified.** The date of the last verification and the upstream commits it
   read.
 - **Retires when.** The trigger. When it fires, moving the pack onto the
