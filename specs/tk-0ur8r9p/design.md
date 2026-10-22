@@ -152,8 +152,8 @@ these decisions build it.
 6. **A sitting runs in a manual converse session that holds one
    conversation.** Engage works on a bead: pointed at a gate, it takes the bead
    the gate blocks, because a conversation always tracks a bead, never a gate.
-   A concern you bring opens a fresh conversation, even when the bead has one,
-   because a distinct concern is a distinct dialogue. Without one, engage
+   A concern you bring to engage opens a fresh conversation, even when the bead
+   has one, because a distinct concern is a distinct dialogue. Without one, engage
    attaches you to a live sitting on the bead, or adopts a conversation the
    bead has in your queue, or files one. It starts a session named for the
    conversation, binds the conversation to that session and attaches you. Two
@@ -183,7 +183,7 @@ these decisions build it.
    today's behavior.
 9. **The board reads gates and conversations directly and ranks them as
    today.** A gate shows on the row of each bead it blocks, and a conversation
-   on the bead its task tracks. A row is in session while a live sitting holds
+   on the bead it tracks. A row is in session while a live sitting holds
    its conversation. A first reaction that needs you files a human gate on its
    bead under the key `first-reaction`. Its title and framing state the
    recommendation, and its edge says what it holds, so the beads alone say
@@ -271,7 +271,7 @@ bd paths to bd's v1.3.1 source.
 | Gas City's releases of a dead holder's claims. An agent's default on_death runs for pool instances only. Core's orphan-sweep resets an in-progress bead only when it can show the holder dead, and it counts a bead whose `gc.session_name` it cannot resolve as unverifiable and leaves it, which is every bead `gc hook --claim` claimed in a manual session. Both list without `--include-gates`, so neither sees a gate | Why a sitting's recovery runs through its alias, and why engage needs no reclaim (section 6). | Gas City `cmd/gc/cmd_start.go` 159-176; `internal/config/workquery.go` 1351-1378; `internal/bootstrap/packs/core/assets/scripts/orphan-sweep.sh` 89, 106, 277, 335, 345, 632-634; `cmd/gc/cmd_hook_claim.go` 2073-2075 |
 | `gc bd release-if-current <id> <holder>` runs `bd update <id> --if-assignee <holder> --if-status in_progress --status open --assignee ""`, so it leaves the bead open and unassigned | Not used. A conversation released this way would be assigned to nobody, which neither the board nor engage reads as a conversation, so a hand-off reassigns the task to `human` with the same guard instead (section 6). | Gas City `internal/beads/bdstore_conditional_release.go` 78-99; `cmd/gc/cmd_bd.go` 124-137 |
 | A manual session does not end when its work closes. It stays until it is closed or drained, and a wait hold or an idle-sleep setting only puts it to sleep. An attached session is woken even when drained, unless a wait hold is set. `gc session attach` wakes a dormant session, and `wake_mode = "resume"` resumes the session's own transcript by its session key. A closed session does not reserve its alias: a new session under it starts a fresh transcript and takes the in-progress work still assigned to the alias. `gc session close` releases no claim held under the alias. No closer the controller runs on its own ends a manual session because its work closed: the stale-session closers exempt one that has started its conversation, and the core reaper prunes one only once it has drained. `gc session list` leaves a closed session out, whatever state it is asked for | Why converse-reap stays, how a sitting resumes, and why a held conversation is found by its assignee rather than by its session (section 6). | Gas City `cmd/gc/compute_awake_set.go` 432-440, 583-594, 668-693; `internal/session/manager.go` 1264-1271, 1344-1362; `internal/session/names.go` 639-641; `cmd/gc/cmd_session.go` 1894-1897, 1946; `cmd/gc/city_runtime.go` 3915; `cmd/gc/session_reconciler.go` 1057-1060; `cmd/gc/session_beads.go` 3500; `internal/bootstrap/packs/core/assets/scripts/reaper.sh` 69, 1402-1404; a live `gc session list --state closed`, which returned no row on 2026-10-20, as `formulas/mol-witness-patrol.toml` 424 records |
-| The pool execution backstop nudges, then drains, a pool session that holds in-progress work and is quiet for 90 seconds, with no attachment exemption. It governs only a session marked `pool_managed`, and Gas City marks one so only when the controller started it as neither a named nor a manual session, which is the origin `ephemeral`. `gc session new` with an alias gives a session the origin `manual` | Why a sitting is not a pool session, and why engage's `gc session new` keeps it out of the backstop's reach (section 6). | Gas City `cmd/gc/idle_nudge.go` 57-59; `cmd/gc/execution_backstop.go` 321-322, 405-421, 691; `cmd/gc/cmd_session.go` 289, 418, 698-704; `cmd/gc/session_origin.go` 172-181; `cmd/gc/reconcile_arms_metadata.go` 103, 131-133; `cmd/gc/session_beads.go` 1918, 2205-2206 |
+| The pool execution backstop nudges, then drains, a pool session that holds in-progress work and is quiet for 90 seconds, with no attachment exemption. It governs only a session marked `pool_managed`, and Gas City marks one so only when the controller started it as neither a named nor a manual session, which is the origin `ephemeral`. `gc session new` with an alias gives a session the origin `manual` | Why a sitting's session is not a pool session, and why engage's `gc session new` keeps it out of the backstop's reach (section 6). | Gas City `cmd/gc/idle_nudge.go` 57-59; `cmd/gc/execution_backstop.go` 321-322, 405-421, 691; `cmd/gc/cmd_session.go` 289, 418, 698-704; `cmd/gc/session_origin.go` 172-181; `cmd/gc/reconcile_arms_metadata.go` 103, 131-133; `cmd/gc/session_beads.go` 1918, 2205-2206 |
 | A template's `min_active_sessions` defaults to 0, so a template that leaves it out or writes 0 keeps no session running for its own sake. A template with a `scale_check` gets a demand pass of its own | Why the converse templates' declared pool starts no sitting, and what pool-demand-wiring.test.sh guards (section 6). | Gas City `internal/config/session_capacity.go` 27-33; `cmd/gc/allocator_scalecheck_lane.go` 107-124 |
 | Core notify-on-human-gate-creation and renudge-stale-human-gates | Gas City's native reach for a human gate. The town turns the second off today, and turns the first off before the cutover (section 5). The first mails a gate's addressee once, when the gate is created, and nudges it as well when the addressee is a session rather than `human`. The second mails it again once the gate has been open an hour, and at most once an hour after that. Both act only on an open human gate, never read its await id, and address its assignee, then `gc.deferred_assignee`, then `$GC_ESCALATION_RECIPIENT` (default `human`). | Gas City `internal/bootstrap/packs/core/orders/notify-on-human-gate-creation.toml` 1-30 and `renudge-stale-human-gates.toml` 1-37; `internal/bootstrap/packs/core/assets/scripts/notify-on-human-gate-creation.sh` 1-80, 173-181, and `renudge-stale-human-gates.sh` 68-74; the town's city.toml 304-311 |
 | Core escalate.sh hook and its incident reminder. It suppresses a repeat only for a call that names an `--incident-key`, and only while the incident's fingerprint, by default its subject and message, is unchanged since its last delivered notice, for `GC_ESCALATE_REMINDER_SECONDS` (default 86400). Core's maintenance scripts run the script `GC_ESCALATE_SCRIPT` names, else `assets/scripts/escalate.sh` in the first system pack `GC_ESCALATE_SEARCH_PACKS` names (default `gastown maintenance bd core`), so that path is where a pack overrides the hook, and an override must accept core's flags | Prior art for the helper's quiet period, and for making it an option each call declares (section 2). It is a mail hook for maintenance scripts, and it is not this pack's helper, which today sits at the override's path with flags of its own. That is one reason the helper is renamed (section 2). | Gas City `internal/bootstrap/packs/core/assets/scripts/escalate.sh` 1-22 and `reaper.sh` 34-51; `docs/getting-started/troubleshooting.md` 877-905 |
@@ -306,7 +306,8 @@ One premise of the first sitting ruling (tk-4t0uev0) did not hold either. The
 ruling read Gas City's on_death and orphan-sweep as releasing a dead sitting's
 task. Both list tasks and miss gates, as the ruling found, but neither releases
 a sitting's task. An agent's default on_death runs only for pool instances,
-keyed by the instance's qualified name, and a sitting is a manual session.
+keyed by the instance's qualified name, and a sitting's session is a manual
+session.
 Core's orphan-sweep counts a bead claimed through `gc hook --claim` in a manual
 session as unverifiable and leaves it (see the platform section; the sweep was
 read, not run). The ruling's conclusion holds on another fact. The task's
@@ -702,7 +703,10 @@ ruling of sitting tk-tdt71ue left it the helper's name:
   escalate.sh, a mail hook for maintenance scripts that is not this helper,
   and `assets/scripts/escalate.sh` is the path at which a pack overrides that
   hook with core's flags, where this helper sits today with flags of its own
-  (see the platform section). The new name says what the helper files, as
+  (see the platform section). That clash is latent: core's default search
+  list does not name gc-toolkit, and the town's city.toml sets no list, so no
+  maintenance script calls this helper today. The new name says what the
+  helper files, as
   patrol-finding.sh and upstream-finding.sh do. Unit A already decides every
   call site (section 3), so the new name is one more word in each call it
   reads, and the tests named for the helper are renamed with it (section 10).
@@ -804,7 +808,7 @@ changes around the call.
 | deferred-dispatch.sh | The call is unchanged on a bead with no open children. Its sling-failed gate blocks the armed bead, so the re-sling waits for the answer as well as for the cleared cap (deferred-dispatch.sh 1626-1632). On a bead with open children, which it tests with the one call section 11 uses (step 4), it opens a conversation on the bead instead, because nothing else waits on the answer: the cap already holds the arm, and blocking the parent would pause its parts over a failed sling. |
 | liveness-sweep.sh, finding.sh | Unchanged calls. Their beads are an anchor, a standing triage bucket, or the finding's anchor, and each gate blocks that bead. liveness-sweep.sh puts its census in the message as its re-check command, instead of stamping it and `visit.recheck` on a visit (section 4), and its disposition text names human-gate.sh where it named `gc-helm.sh demand`. finding.sh records the gate's id (section 4). |
 | upstream-finding.sh | Its own `--pool` option and the forwarding of it (upstream-finding.sh 57, 411) retire with the helper's, and so do the cases in upstream-finding.test.sh that pin the forwarding. No caller passes the option, so every call is unchanged. Its gate is the operator's action, the send itself: it blocks the send bead that carries the command, so the operator clears the gate, sent or declined, before the bead can close. bd refuses to close a bead an open gate blocks, where today the send bead closes as the answer (`docs/outbound-sends.md`). |
-| The gascity-keeper sub-pack's refinery fragment and its polecat-patterns fragment | The refinery fragment's call passes flags escalate.sh rejects, behind `\|\| true`. tk-vfgmu8k fixes it to escalate.sh's flags, and this design keeps those flags. The polecat-patterns fragment tells a worker to file an escalation visit with escalate.sh, and it says to file a human gate with human-gate.sh (`packs/gascity-keeper/template-fragments/polecat-patterns.template.md` 55-56). |
+| The gascity-keeper sub-pack's refinery fragment and its polecat-patterns fragment | The refinery fragment's call passes flags escalate.sh rejects, behind `\|\| true`. tk-vfgmu8k fixes it to escalate.sh's flags, and this design keeps those flags. Where the polecat-patterns fragment says "File an escalation visit (`escalate.sh`)", it says to file a human gate with human-gate.sh (`packs/gascity-keeper/template-fragments/polecat-patterns.template.md` 55-56). |
 | first-reaction-dispose.sh | The helper with the key `first-reaction`, blocking the bead the reaction is about, so the bead waits for the operator as it does today. On a bead with open children it blocks the parent too, because the reaction's ruling or recommendation decides how the whole bead proceeds, so its unstarted parts wait with it, and Accept works there as on any bead (section 8). Its `--visit` option, which blocked the subject on a visit, retires. |
 | mol-validate-close, mol-feedback-distiller | The helper with their own keys (section 2). mol-validate-close files a gate on doubt, which an open child that is real work raises, so on a bead with open children, tested with the same call, it opens a conversation instead, because blocking the parent would pause the very work its doubt is about. The distiller's gate blocks the contested pattern, whose rule waits on the ruling. |
 | gc-helm.sh engage and open, the operator's intake, helm-svc POST /helm/open | No helper call. They file and take conversations (sections 6 and 8). |
@@ -955,8 +959,8 @@ manual session has no such clock: its work closing does not end it, idleness
 only sleeps it, and attaching wakes it. Engage starts every sitting with
 `gc session new`, which gives the session the origin `manual`. Gas City marks a
 session `pool_managed` only when the controller started it as neither a named
-nor a manual session, and the backstop governs only those, so a sitting is
-never a pool session.
+nor a manual session, and the backstop governs only those, so a sitting's
+session is never a pool session.
 
 **Engage** (gc-helm.sh engage, the tmux picker, and helm-svc's engage route)
 takes these steps:
@@ -1024,8 +1028,8 @@ bead another actor holds, `human` among them. converse-claim.sh retires.
 
 **One sitting per bead is a convention, not a guarantee.** The board always
 shows a bead's conversations on its one row, and engage's attach-first default
-keeps them to one sitting in the normal path. Three things still give two live
-sittings where the default gives one. A concern the operator opens as its own
+keeps the bead to one sitting in the normal path. Some paths still give two
+live sittings where the default gives one. A concern the operator opens as its own
 conversation (step 3) and two engages racing on a bead with no conversation,
 which each file one, put two sittings on one bead. A gate that blocks two beads
 is served by each bead's sitting. The alias and the bind keep a second sitting
@@ -1266,8 +1270,8 @@ are the beads it blocks, and a conversation's subject is the one bead it tracks
 retire.
 
 **How they fold.** `wrapperTarget` (derive.go 2571-2595) treats a human gate as
-a wrapper on each bead it blocks, and a conversation task as a wrapper on its
-conversation's bead, so a gate and a conversation each fold onto the rows of the
+a wrapper on each bead it blocks, and a conversation as a wrapper on the bead
+it tracks, so a gate and a conversation each fold onto the rows of the
 beads they concern. A gate that blocks two beads folds onto both their rows, and
 each row lists it among what it waits on, as a bead blocked by a demand lists
 the demand today (`waitingSplit`, derive.go 317). A gate none of whose beads has
