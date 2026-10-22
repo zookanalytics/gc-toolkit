@@ -236,8 +236,11 @@ cited here. The cited behavior is unchanged at upstream b941bd330. The facts the
 helper's rename rests on, how a step's text is poured into its bead and where
 core's maintenance scripts look for core's escalate.sh hook, were read on
 2026-10-21 at 1e05ae624, and their code is the same at 2aeead4e2 and
-b941bd330. How the upstream packs ask a person was read at their main,
-820c7ca0d5. The gc-toolkit
+b941bd330. The facts the migration's release of a held visit rests on were read
+on 2026-10-22: bd's assignee check at a close, and in Gas City the identities
+`gc session close` releases work under and what release-if-current prints, which
+behave the same at b941bd330. How the upstream packs ask a person was read at
+their main, 820c7ca0d5. The gc-toolkit
 facts were read at 35cf7c70f, and a doc read on main instead, because it
 landed there after 35cf7c70f, is cited as main's. The installed gc is
 built from a local commit that upstream does not contain. Where a fact matters,
@@ -256,21 +259,21 @@ bd paths to bd's v1.3.1 source.
 | A `blocks` edge blocks whatever its blocker's type | What the one reader rule rests on. An open blocker of any type holds a bead the same way, so only a gate's `await_type` says that a person must clear the wait, and a reader keeps the human gates among a bead's `blocks` blockers. Re-typing a gate releases nothing. | bd `internal/storage/issueops/blocked_state.go` 213-219 |
 | `bd gate resolve <id> --reason` | Clearing a human gate. It closes the gate with that close reason and recomputes `is_blocked` for the beads it blocked. It skips the close checks, the assignee check among them, so anyone may clear it. On a gate already closed it changes nothing, keeps the first reason and still reports `Gate resolved` with exit 0, so a resolver learns it lost a race only by reading the gate back. | bd `cmd/bd/gate.go` 559-574; `cmd/bd/gate_proxied_server.go` 409-446; `internal/storage/issueops/close.go` 339-384 |
 | `bd reopen <id> --reason` reopens a closed bead of any type, a gate included. It sets `open`, clears `closed_at` and the close reason, drops the lease, records the reason as a comment, and recomputes `is_blocked` for the beads that wait on the bead, so what a reopened gate blocked is blocked again. On a bead that is not closed it changes nothing | Accept's way back from its own accepted close, when a gate filed after its live read shows or its sling fails (section 8). Today's Accept reopens a demand the same way after a failed sling (gc-toolkit `assets/scripts/gc-helm.sh` 2901-2921). | bd `cmd/bd/reopen.go` 15-20, 64-67, 91-99; `internal/storage/issueops/reopen.go` 48-50, 63-68, 100-117; `internal/storage/issueops/blocked_state.go` 455-475; `internal/storage/domain/db/issue.go` 1113-1114 |
-| `bd close` refuses a blocked bead, a bead with open children, and a bead assigned to another actor, each without `--force`, and a close removes none of the bead's dependency rows | A human gate holds the close of what it blocks, and a conversation's `tracks` edge holds nothing. A bead a gate blocks closes only once the gate closes or the edge is removed with `bd dep remove` (section 11). A dismiss falls back to `--force` past the assignee check (section 7). | bd `internal/storage/issueops/close.go` 150-160, 203-205, 339-384; `cmd/bd/close_direct.go` 84 |
+| `bd close` refuses a blocked bead, a bead with open children, and a bead assigned to any actor but the one closing it, whatever its status, each without `--force`, and a close removes none of the bead's dependency rows | A human gate holds the close of what it blocks, and a conversation's `tracks` edge holds nothing. A bead a gate blocks closes only once the gate closes or the edge is removed with `bd dep remove` (section 11). A dismiss falls back to `--force` past the assignee check (section 7). The migration releases a visit from its holder before it closes it, so that close stays unforced and still meets the blocker and child checks (section 11). | bd `internal/storage/issueops/close.go` 150-160, 203-205, 339-384; `cmd/bd/close_direct.go` 84; `cmd/bd/show_unit_helpers.go` 27-35; `internal/validation/issue.go` 165-174 |
 | A blocked bead's state cascades to its `parent-child` children and their descendants, whatever their types and the bead's, and through no other edge. A child added under a blocked bead is blocked as it is added. `bd list --parent <bead>` lists the bead's children, and also any bead with no parent whose id is the bead's id followed by a dot. Without `--all` or `--status` it leaves out the closed and pinned children, which are the ones the cascade never blocks. By default it also hides gate, infra, template and wisp children, which the cascade does block, and `--include-gates`, `--include-infra`, which admits the wisp plane too, and `--include-templates` list them. It hides a bead flagged pinned, which bd defines as a context marker rather than a work item | What a gate on a parent pauses, which is why each caller that can land on a parent states what its gate blocks (sections 1 and 3), and how the migration tests a bead for an open child in one call (section 11). | bd `internal/storage/issueops/blocked_state.go` 206-240 and 499-511; `internal/storage/issueops/create.go` 321-325 and 507-523; `internal/storage/issueops/dependencies.go` 324-331; `internal/storage/sqlbuild/filter.go` 174-178; `internal/workapi/list.go` 242-250, 351-357 and 428-452; `cmd/bd/list.go` 465-479; `internal/types/types.go` 158; `docs/component-model.md`, I1's shape law |
 | `bd dep add <a> <b> --type=until` says that <b> resolves <a>. `until` is a well-known reference type outside bd's ready calculation, and bd only displays it: nothing in bd acts when <b> closes. The pack's deferred-dispatch reconcile pass closes <a> as resolved once <a> is open and unassigned, every `until` target of it has closed, no `blocks` blocker of its own is open, and <a> carries no live work | Why the migration moves a visit's `until` waits onto its gate, as it moves its `blocks` waits (section 11). | bd `internal/types/types.go` 1273-1274, 1333-1337; `cmd/bd/dep_relation.go` 47; gc-toolkit `assets/scripts/until-resolved.sh` 1-25 and `assets/scripts/deferred-dispatch.sh` 1301-1414 |
 | A convoy's members are every bead it tracks, whatever their type, beside its legacy `parent-child` children. A `blocks` dependency of the convoy is no member. `gc convoy land` refuses a convoy while a member is open, autoclose waits for every member, and gc-toolkit's graduation counts every tracked bead | Why a convoy needs no exception. A gate it waits on is reached through the convoy's own `blocks` edge, and a conversation about it tracks it from the conversation's side, so neither becomes a member (section 1). | Gas City `internal/convoy/membership.go` 121-164; `cmd/gc/cmd_convoy.go` 2160-2173, 2393-2417; gc-toolkit `assets/scripts/convoy-graduate.sh` 123-130 |
 | `bd ready` excludes gates, and a plain `bd list` hides them (`--include-gates` or `--type gate` shows them) | Why no pool's demand reaches a human gate, and why the board reads gates by type. | bd `internal/storage/sqlbuild/ready.go` 16-22; `internal/workapi/list.go` 433-434 |
 | `gc bd` runs each call against the store that owns the bead it names, ahead of `GC_RIG` and the working directory. A by-id read or write, `show`, `dep list`, `dep tree`, `update`, `close`, `reopen` or `delete`, routes by the id's prefix. Any other call, `gate create` and `gate resolve` among them, routes to the store of the first argument whose prefix names a store and that exists there, city-prefixed ids first. That scan reads each word that does not start with `-`, so a value joined to its flag by `=` is not seen. An explicit `--rig` or `--city` outranks the bead, and a `--db` reaches bd unread, so bd uses the store it names whatever the routing chose | Why the helper picks no store of its own. `gate create --blocks <bead>` names the bead, so a gate lands beside the bead it blocks whoever files it, and a bead that exists nowhere fails the create (section 2). The helper passes the bead as its own word after `--blocks`, and passes no `--rig`, `--city` or `--db`. | Gas City `cmd/gc/bd_subject_route.go` 10-43; `cmd/gc/cmd_bd.go` 688, 807-815, 1027, 1032-1077 and 1094-1125; `cmd/gc/cmd_bd_by_id.go` 958-972 |
 | `bd update --claim` is a compare-and-swap | The sitting's claim on its conversation task. It succeeds on an open bead whose assignee is empty, the claiming actor, or one of the store's claim pools. It sets `in_progress`, the assignee and a lease, and is idempotent for its holder. It refuses a bead another actor holds. | bd `internal/storage/issueops/claim.go` 91, 114-118, 147-148, 341-352 |
-| `bd update --if-assignee <x>` applies the update only while the assignee still reads `<x>`, checked inside the update's transaction, and `''` means unassigned. A mismatch writes nothing and exits 13. It needs a field change and cannot combine with `--claim`. An assignee change on an in-progress bead another actor holds is refused unless it names that holder this way or passes `--force`. An update that changes the holder, or moves the bead out of `in_progress`, drops the claim's lease | Half of what keeps a second sitting off a conversation: engage's bind. Also the hand-off that returns a conversation to the operator's queue (section 6). | bd `cmd/bd/update.go` 488-505, 824, 930-975, 997-1004; `internal/storage/issueops/execution.go` 160-170; `internal/storage/issueops/update_cas.go` 34-59; `internal/storage/issueops/aggregate.go` 160-174; `internal/storage/issueops/update.go` 189-209, 492-497 |
+| `bd update --if-assignee <x>` applies the update only while the assignee still reads `<x>`, checked inside the update's transaction, and `''` means unassigned. A mismatch writes nothing and exits 13. It needs a field change and cannot combine with `--claim`. An assignee change on an in-progress bead another actor holds is refused unless it names that holder this way or passes `--force`. An update that changes the holder, or moves the bead out of `in_progress`, drops the claim's lease | Half of what keeps a second sitting off a conversation: engage's bind. Also the hand-off that returns a conversation to the operator's queue (section 6), and the migration's release of an open visit bound to a sitting (section 11). | bd `cmd/bd/update.go` 488-505, 824, 930-975, 997-1004; `internal/storage/issueops/execution.go` 160-170; `internal/storage/issueops/update_cas.go` 34-59; `internal/storage/issueops/aggregate.go` 160-174; `internal/storage/issueops/update.go` 189-209, 492-497 |
 | Agent `work_query`, and its three-tier default | The default finds the conversation task assigned to the session, so converse needs no work query of its own. Its second tier, `bd ready --assignee`, finds the task open, and its first tier finds it in progress after a restart. Its third tier offers routed work and is closed to a manual session whose alias is not its template's name, so a sitting is offered nothing but its task. The current runtime takes no wake demand from a work query. | Gas City `internal/config/workquery.go` 528-536, 605-613, 780-793, 957, 972-977; `internal/config/config.go` 3626-3643; `cmd/gc/city_runtime.go` 3349-3352, 4625 |
 | `gc hook --claim` claims an open bead its work query offers that is already assigned to the session, of any type but `message`, and returns one it already holds in progress. The default query's assigned tiers read `bd list` and `bd ready`, which leave gates out, so it never offers a session a gate, even one assigned to the session's alias. In a manual session it claims under the session's alias, which is also the session's bd actor | The sitting's first step (section 6). | Gas City `cmd/gc/cmd_hook_claim.go` 502-512, 797-910, 1267-1288; `internal/config/workquery.go` 605-613, 780-785; `cmd/gc/cmd_hook.go` 291-299, 460-473, 522, 540-547; `internal/session/lifecycle.go` 76-79 |
 | `gc session new --alias <a>` reserves the alias under a city-wide lock, and refuses it while another session that is not closed holds it as its alias, its session name or its identity | The other half of what keeps a second sitting off a conversation: engage starts the sitting under the task's id before it binds the task (section 6). | Gas City `cmd/gc/cmd_session.go` 336-351 and 465-480; `internal/session/names.go` 288-327, 630-702 |
 | Assigned work wakes the session whose identity it carries, and an unassigned, unrouted bead wakes nothing | Why a conversation in the operator's queue, assigned to `human`, which no session carries, starts no session. | Gas City `cmd/gc/build_desired_state.go` 1938-1950, 3215; `cmd/gc/assigned_work_scope.go` 382-431; `cmd/gc/compute_awake_set.go` 454-495 |
 | Gas City's releases of a dead holder's claims. An agent's default on_death runs for pool instances only. Core's orphan-sweep resets an in-progress bead only when it can show the holder dead, and it counts a bead whose `gc.session_name` it cannot resolve as unverifiable and leaves it, which is every bead `gc hook --claim` claimed in a manual session. Both list without `--include-gates`, so neither sees a gate | Why a sitting's recovery runs through its alias, and why engage needs no reclaim (section 6). | Gas City `cmd/gc/cmd_start.go` 159-176; `internal/config/workquery.go` 1351-1378; `internal/bootstrap/packs/core/assets/scripts/orphan-sweep.sh` 89, 106, 277, 335, 345, 632-634; `cmd/gc/cmd_hook_claim.go` 2073-2075 |
-| `gc bd release-if-current <id> <holder>` runs `bd update <id> --if-assignee <holder> --if-status in_progress --status open --assignee ""`, so it leaves the bead open and unassigned | Not used. A conversation released this way would be assigned to nobody, which neither the board nor engage reads as a conversation, so a hand-off reassigns the task to `human` with the same guard instead (section 6). | Gas City `internal/beads/bdstore_conditional_release.go` 78-99; `cmd/gc/cmd_bd.go` 124-137 |
-| A manual session does not end when its work closes. It stays until it is closed or drained, and a wait hold or an idle-sleep setting only puts it to sleep. An attached session is woken even when drained, unless a wait hold is set. `gc session attach` wakes a dormant session, and `wake_mode = "resume"` resumes the session's own transcript by its session key. A closed session does not reserve its alias: a new session under it starts a fresh transcript and takes the in-progress work still assigned to the alias. `gc session close` releases no claim held under the alias. No closer the controller runs on its own ends a manual session because its work closed: the stale-session closers exempt one that has started its conversation, and the core reaper prunes one only once it has drained. `gc session list` leaves a closed session out, whatever state it is asked for | Why converse-reap stays, how a sitting resumes, and why a held conversation is found by its assignee rather than by its session (section 6). | Gas City `cmd/gc/compute_awake_set.go` 432-440, 583-594, 668-693; `internal/session/manager.go` 1264-1271, 1344-1362; `internal/session/names.go` 639-641; `cmd/gc/cmd_session.go` 1894-1897, 1946; `cmd/gc/city_runtime.go` 3915; `cmd/gc/session_reconciler.go` 1057-1060; `cmd/gc/session_beads.go` 3500; `internal/bootstrap/packs/core/assets/scripts/reaper.sh` 69, 1402-1404; a live `gc session list --state closed`, which returned no row on 2026-10-20, as `formulas/mol-witness-patrol.toml` 424 records |
+| `gc bd release-if-current <id> <holder>` runs `bd update <id> --if-assignee <holder> --if-status in_progress --status open --assignee ""`, so it leaves the bead open and unassigned. When the bead is no longer in progress under that holder, bd writes nothing. The command prints `released` or `skipped` and exits 0 either way, so only its output or a read-back tells the two apart | The migration's release of a visit in progress before it closes the visit, because bd refuses to close a bead another actor holds (section 11). Released, the visit is open and unassigned, as a visit no sitting holds is today, until the migration closes it. A conversation is never released this way: assigned to nobody, it would be a state neither the board nor engage reads as a conversation, so a conversation's hand-off reassigns the task to `human` with the same guard instead (section 6). | Gas City `internal/beads/bdstore_conditional_release.go` 78-99; `cmd/gc/cmd_bd.go` 124-137 and 919-946 |
+| A manual session does not end when its work closes. It stays until it is closed or drained, and a wait hold or an idle-sleep setting only puts it to sleep. An attached session is woken even when drained, unless a wait hold is set. `gc session attach` wakes a dormant session, and `wake_mode = "resume"` resumes the session's own transcript by its session key. A closed session does not reserve its alias: a new session under it starts a fresh transcript and takes the in-progress work still assigned to the alias. `gc session close` releases no claim held under the alias. No closer the controller runs on its own ends a manual session because its work closed: the stale-session closers exempt one that has started its conversation, and the core reaper prunes one only once it has drained. `gc session list` leaves a closed session out, whatever state it is asked for | Why converse-reap stays, how a sitting resumes, and why a held conversation is found by its assignee rather than by its session (section 6). Also why the migration releases a visit whose sitting it has ended (section 11). | Gas City `cmd/gc/compute_awake_set.go` 432-440, 583-594, 668-693; `internal/session/manager.go` 1264-1271, 1344-1362; `internal/session/names.go` 639-641; `cmd/gc/cmd_session.go` 1894-1897, 1946; `cmd/gc/session_beads.go` 969-975; `cmd/gc/work_location.go` 220-225; `cmd/gc/city_runtime.go` 3915; `cmd/gc/session_reconciler.go` 1057-1060; `cmd/gc/session_beads.go` 3500; `internal/bootstrap/packs/core/assets/scripts/reaper.sh` 69, 1402-1404; a live `gc session list --state closed`, which returned no row on 2026-10-20, as `formulas/mol-witness-patrol.toml` 424 records |
 | The pool execution backstop nudges, then drains, a pool session that holds in-progress work and is quiet for 90 seconds, with no attachment exemption. It governs only a session marked `pool_managed`, and Gas City marks one so only when the controller started it as neither a named nor a manual session, which is the origin `ephemeral`. `gc session new` with an alias gives a session the origin `manual` | Why a sitting's session is not a pool session, and why engage's `gc session new` keeps it out of the backstop's reach (section 6). | Gas City `cmd/gc/idle_nudge.go` 57-59; `cmd/gc/execution_backstop.go` 321-322, 405-421, 691; `cmd/gc/cmd_session.go` 289, 418, 698-704; `cmd/gc/session_origin.go` 172-181; `cmd/gc/reconcile_arms_metadata.go` 103, 131-133; `cmd/gc/session_beads.go` 1918, 2205-2206 |
 | A template's `min_active_sessions` defaults to 0, so a template that leaves it out or writes 0 keeps no session running for its own sake. A template with a `scale_check` gets a demand pass of its own | Why the converse templates' declared pool starts no sitting, and what pool-demand-wiring.test.sh guards (section 6). | Gas City `internal/config/session_capacity.go` 27-33; `cmd/gc/allocator_scalecheck_lane.go` 107-124 |
 | Core notify-on-human-gate-creation and renudge-stale-human-gates | Gas City's native reach for a human gate. The town turns the second off today, and turns the first off before the cutover (section 5). The first mails a gate's addressee once, when the gate is created, and nudges it as well when the addressee is a session rather than `human`. The second mails it again once the gate has been open an hour, and at most once an hour after that. Both act only on an open human gate, never read its await id, and address its assignee, then `gc.deferred_assignee`, then `$GC_ESCALATION_RECIPIENT` (default `human`). | Gas City `internal/bootstrap/packs/core/orders/notify-on-human-gate-creation.toml` 1-30 and `renudge-stale-human-gates.toml` 1-37; `internal/bootstrap/packs/core/assets/scripts/notify-on-human-gate-creation.sh` 1-80, 173-181, and `renudge-stale-human-gates.sh` 68-74; the town's city.toml 304-311 |
@@ -1088,8 +1091,9 @@ the open, queued conversation it was before any sitting took it, so the board
 shows it owed and engage takes it again. A sitting cut short returns its task
 this way (section 7). Gas City's `gc bd release-if-current` would leave the
 task open and assigned to nobody, a state neither the board nor engage reads as
-a conversation, so the design never uses it (see the platform section). The
-board gains no read for an unassigned bead that tracks an open bead either,
+a conversation, so no conversation is released with it (see the platform
+section). Only the migration uses it, on a visit it is about to close
+(section 11). The board gains no read for an unassigned bead that tracks an open bead either,
 because a patrol finding is one and would be shown as a conversation
 (section 4). No gate needs a reclaim, because no session claims one, so
 engage's reclaim from a gone sitting retires (gc-helm.sh 4057-4108).
@@ -1679,9 +1683,21 @@ reach it, three by default, the point at which record-failure-cap.sh holds that
 the retry will not converge (`assets/scripts/record-failure-cap.sh` 5-14), so
 the gate stops a retry that was not healing.
 
-For each open or in-progress visit, it does the following, in this order. Each
-write is read back before the next, and the visit closes last, so a run that
-stops part way leaves the visit open for the rerun to finish:
+**A sitting on a visit ends before the visit moves.** A live sitting can write
+to the visit it holds at any moment: it appends notes, files demands when it
+holds, or closes the visit. So before the run reads a visit, it closes every converse session that is
+not closed and whose alias names the visit, under the bare id or the `v-`
+prefix, and reads each back as gone from `gc session list`. From then on nothing
+writes to the visit but the run, so step 6 carries the last note the sitting
+wrote. When a session does not read back as gone, the run reports the visit and
+leaves it as it is, for a rerun. A visit the sitting claimed still names the
+sitting's alias, because closing a session releases nothing held under its
+alias (see the platform section), so step 8 releases it before the close.
+
+For each open or in-progress visit, once any sitting on it has ended, it does
+the following, in this order. Each write is read back before the next, and the
+visit closes last, so a run that stops part way leaves the visit open for the
+rerun to finish:
 
 1. **It reads the subject and the key.** The subject is the visit's `tracks`
    target, else its `gc.continuation_group`. The key is its `escalation_key`,
@@ -1809,10 +1825,24 @@ stops part way leaves the visit open for the rerun to finish:
    visit escalate.sh filed on a bead with open children that nothing else
    waits on, and a visit on a closed subject that nothing else waits on
    (step 2).
-8. **It closes the visit** with the reason `migrated: gate <id>` or
-   `migrated: conversation <id>`, unforced. A visit bd still refuses, because
-   something other than the moved demand blocks it, stays open and is reported.
-   Nothing is forced.
+8. **It releases the visit from its holder, then closes it.** bd refuses an
+   unforced close of an assigned bead by any actor but its assignee, and a
+   visit a sitting claimed still names the sitting's alias after its session
+   has closed (see the platform section). So the run reads the visit's holder
+   and status, and releases a visit that names a holder with one write guarded
+   on both: `gc bd release-if-current <visit> <holder>` for a visit in
+   progress, and
+   `gc bd update <visit> --if-assignee <holder> --if-status open --assignee ""`
+   for an open one, such as a visit today's engage bound to a sitting's session
+   that never claimed it (gc-helm.sh 4060-4067, 4278-4287 and 4301). It reads
+   the visit back open and unassigned. A release that finds the visit changed
+   since its read writes nothing, and the run reports the visit and leaves it
+   open, for a rerun to release from the holder it reads then. A visit that
+   names no holder, as a rerun finds one an earlier run released, goes straight
+   to the close. The run closes the visit with the reason `migrated: gate <id>`
+   or `migrated: conversation <id>`, unforced, so bd still refuses a visit that
+   something other than the moved demand blocks, or that has an open child.
+   Such a visit stays open and unassigned, and is reported. Nothing is forced.
 
 **A human gate no visit covers is shaped too.** gate-visit-sweep files no visit
 for a gate assigned to a person, a gate whose gated bead has closed, or a gate
@@ -1856,19 +1886,20 @@ Until the script has run on a store, the new readers find none of them, so they
 release nothing early. For those minutes a needs-you finding stays held and a
 routed comment reads as unanswered.
 
-A visit held by a live sitting is migrated like any other, and its gate is
-filed unassigned. Then the script closes that sitting's session, so the operator
-re-engages the subject on the new path. It closes every other converse session
-whose alias names a visit, under the bare id or the `v-` prefix, such as a
-settled sitting today's reap skips (section 6), so no session runs the old
-prompt past the cutover. Last, it closes the "Human gate awaiting you" notices
+A visit held by a live sitting is migrated like any other once that sitting has
+ended (above), and its gate is filed unassigned, so the operator re-engages the
+subject on the new path. After the visits, the script closes every other
+converse session whose alias names a visit, under the bare id or the `v-`
+prefix, such as a settled sitting today's reap skips (section 6), so no session
+runs the old prompt past the cutover. Last, it closes the "Human gate awaiting you" notices
 still open in the city store, which nothing else will close once the notify
 order is off.
 
 **Nothing lost, nothing doubled.** Every open visit ends as an open human gate
 that asks what the visit asked, or as a conversation in the operator's queue,
 unless step 2 or step 4 leaves it open for a person. Each carries the visit's
-framing and notes, and every bead that waited on the visit waits on its gate. A
+framing and every note on it, since a sitting that held it ended before the
+carry, and every bead that waited on the visit waits on its gate. A
 merge an open visit held stays held, and the subject of a visit escalate.sh
 filed waits, the one wait the cutover adds (above). A visit joins a gate only
 when the two cover one situation on one bead, so no answer to one situation
@@ -1878,13 +1909,17 @@ among the gates of the bead it blocks, step 3 matches the same demands from the
 pack keys they keep until their visit has closed, and step 7 finds its task by
 the visit's line. The rerun adds only the edges, framing, notes and references
 still missing, removes a visit's edge onto a moved demand if it is still there,
-and closes only the visits left over. It reports, per store, the visits it
-migrated into gates, those it merged into a gate already there, those it turned
-into conversations, and any it left open or could not close, and the human
-gates it shaped that block no bead.
+and closes only the visits left over. A sitting an earlier run ended is gone
+from `gc session list`, so the rerun closes no session twice. It releases a
+visit that still names a holder from the holder it reads, and a visit an
+earlier run released goes straight to the close. It reports, per store, the
+visits it migrated into gates, those it merged into a gate already there, those
+it turned into conversations, and any it left open, could not release or could
+not close, and the human gates it shaped that block no bead.
 
-Its test stops a run after each write and reruns it, the write that removes a
-gate's pack keys among them. After every rerun, each open visit has become one
+Its test stops a run after each write and reruns it, among them the write that
+removes a gate's pack keys, the close of a sitting's session and the release of
+its visit. After every rerun, each open visit has become one
 gate or one conversation with its framing, notes, waits and references
 moved, each gate has the title and await id an uninterrupted run gives it, and
 every visit but the ones the report names is closed. The fixture store holds the
@@ -1930,6 +1965,22 @@ states this section names:
 - **A visit escalate.sh filed on a plain bead with no waiter.** The run leaves
   a gate that blocks the bead, so the bead leaves `bd ready`, the wait the
   cutover adds.
+- **A visit a live sitting holds, one held under the alias of a sitting whose
+  session has closed, and an open visit bound to a sitting's session that does
+  not exist.** For the first, the run closes the sitting's session before
+  it reads the visit, and the note the sitting appended last is carried with
+  the visit's other notes. For each, the run releases the visit from the holder
+  it reads, reads it back open and unassigned, and closes it unforced with its
+  `migrated:` reason.
+- **A run stopped after it ended a sitting, and one stopped after it released
+  the visit.** The rerun of the first releases the visit from the alias it
+  still names, and the rerun of the second reads the visit unassigned and
+  closes it. Neither rerun closes a session.
+- **A visit whose holder changes between the run's read and its release, and a
+  released visit with an open child.** The release of the first writes
+  nothing, and the run reports the visit and leaves it open, for a rerun to
+  release from its new holder. bd refuses the second's unforced close, and the
+  run reports it and leaves it open and unassigned.
 
 ## 12. Cutover and the build
 
@@ -1954,7 +2005,9 @@ states this section names:
    Until it finishes, open visits are not on the board, a ruled finding and a
    routed comment that name a visit wait for it, and a sitting that was live at
    step 3 is running an old prompt against new scripts. The migration ends that
-   sitting after carrying its visit over.
+   sitting before it carries the visit over, so the carry takes the sitting's
+   last note, then releases the visit from the sitting and closes it
+   (section 11).
 5. **The operator checks** that no store has an open visit and that the board
    shows every human gate and every queued conversation. A follow-up commit on
    main then deletes the migration script and its test, and retires the keys
@@ -2099,7 +2152,7 @@ the feature, not by a wrapper.
 | 2026-10-19 | A gate records what it blocks only as `blocks` edges. No structured field names the bead it was filed for, only the first line of its description, and a bead that waits on the gate adds an edge just like the first. | Nothing needs to name one. A human gate is about every bead it blocks, every reader reads it through those edges, and its await id carries only the situation key (section 1). The answer was revised on 2026-10-21 by the ruling of sitting tk-yf4nt2d, and the claim was re-read then. |
 | 2026-10-19 | Continuation preassignment applies only within one workflow root, so it never reaches a gate. | A sitting holds one conversation task, which names its bead (section 6). |
 | 2026-10-19 | Nothing native releases a gate claimed by a session that died. The listings of orphan-sweep and the on_death release hide gates, the dead-assignee release covers pool-routed work, and lease reclaim, which nothing in Gas City runs at this commit, would rob a live held sitting. | No session claims a gate (section 1). |
-| 2026-10-20 | Nothing native releases a task a manual session claimed through `gc hook --claim` once the session is gone. on_death runs only for pool instances, orphan-sweep counts such a bead unverifiable, and `gc session close` releases nothing held under the alias. | A sitting's alias names its task's id, so engage finds the task by its assignee, and a new session under a closed session's alias takes the task back, so engage restarts a sitting under the same alias. The witness's recovery skips such a task. A hand-off returns a task to the operator's queue with a guarded update that names its holder (sections 4 and 6). Nothing is kept for this gap. |
+| 2026-10-20 | Nothing native releases a task a manual session claimed through `gc hook --claim` once the session is gone. on_death runs only for pool instances, orphan-sweep counts such a bead unverifiable, and `gc session close` releases nothing held under the alias. | A sitting's alias names its task's id, so engage finds the task by its assignee, and a new session under a closed session's alias takes the task back, so engage restarts a sitting under the same alias. The witness's recovery skips such a task. A hand-off returns a task to the operator's queue with a guarded update that names its holder (sections 4 and 6). Before the migration closes a visit whose sitting it ended, it releases the visit with Gas City's release-if-current, which names the holder too (section 11). Nothing is kept for this gap. |
 | 2026-10-19 | A manual session is not ended when its work closes, and a pool sitting would be drained by the execution backstop while the operator reads. | converse-reap, keyed on conversation tasks. Its trigger is in section 6, and its warrant goes in `docs/warrants.md`. |
 | 2026-10-19 | Core's human-gate orders, Gas City's native reach for a human gate, reach a person only by mail and nudge, and an override can only point them at another mailbox or session. This city's operator has no session and reads the board, not a mailbox. | The board is the reach, and core's two orders are off in this city (section 5). The orders were re-read on 2026-10-21. |
 
