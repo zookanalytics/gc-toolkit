@@ -216,7 +216,8 @@ these decisions build it.
     For the few minutes until the migration has run and the board has been
     rebuilt, the board can miss an open visit or a new gate, a ruled finding
     is not yet released, and a sitting live at cutover is ended and has to be
-    engaged again.
+    engaged again. A sitting whose session will not stop holds the migration
+    in every store until a person stops it and the migration runs again.
 11. **The build is four beads onto this branch, in order:** the helper and its
     callers, the readers, converse and the board, then the cutover. Cost: four
     PRs to review here instead of one.
@@ -247,11 +248,12 @@ b941bd330. The facts the migration's release of a held visit rests on were read
 on 2026-10-22: bd's assignee check at a close, and in Gas City the identities
 `gc session close` releases work under, and how release-if-current picks its
 store and what it prints, which behave the same at b941bd330. The facts
-Accept's finish rests on were read on 2026-10-22. In Gas City they are a
-graph.v2 sling's launch lock and the root title it sets, read at 1e05ae624,
-which behave the same at 2aeead4e2 and b941bd330. In bd it is the close reason
-a bead's `blocks` listing carries for a closed gate. How the upstream packs ask
-a person was read at their main, 820c7ca0d5. The gc-toolkit
+Accept's finish and the migration's wait for every sitting rest on were read on
+2026-10-22. In Gas City they are a graph.v2 sling's launch lock and the root
+title it sets, and `gc session close`'s stop before its close, read at
+1e05ae624, which behave the same at 2aeead4e2 and b941bd330. In bd it is the
+close reason a bead's `blocks` listing carries for a closed gate. How the
+upstream packs ask a person was read at their main, 820c7ca0d5. The gc-toolkit
 facts were read at 35cf7c70f, and a doc read on main instead, because it
 landed there after 35cf7c70f, is cited as main's. The installed gc is
 built from a local commit that upstream does not contain. Where a fact matters,
@@ -286,6 +288,7 @@ bd paths to bd's v1.3.1 source.
 | Gas City's releases of a dead holder's claims. An agent's default on_death runs for pool instances only. Core's orphan-sweep resets an in-progress bead only when it can show the holder dead, and it counts a bead whose `gc.session_name` it cannot resolve as unverifiable and leaves it, which is every bead `gc hook --claim` claimed in a manual session. Both list without `--include-gates`, so neither sees a gate | Why a sitting's recovery runs through its alias, and why engage needs no reclaim (section 6). | Gas City `cmd/gc/cmd_start.go` 159-176; `internal/config/workquery.go` 1351-1378; `internal/bootstrap/packs/core/assets/scripts/orphan-sweep.sh` 89, 106, 277, 335, 345, 632-634; `cmd/gc/cmd_hook_claim.go` 2073-2075 |
 | `gc bd release-if-current <id> <holder>` runs `bd update <id> --if-assignee <holder> --if-status in_progress --status open --assignee ""`, so it leaves the bead open and unassigned. When the bead is no longer in progress under that holder, bd writes nothing. It is not a by-id call, so the holder is one of the words gc routes by, and city-prefixed words are tried first: when the holder is a bead in the city store, such as a pool session's id, the release of a rig's bead goes to the city store. The command prints `released` or `skipped` and exits 0 either way, and it prints `skipped` as well when the store it chose has no such bead | Not used. A conversation released this way would be assigned to nobody, a state neither the board nor engage reads as a conversation, so a conversation's hand-off reassigns the task to `human` with the same guard instead (section 6). The migration sends the same write to a visit through `gc bd update`, which routes by the visit's id (section 11). | Gas City `internal/beads/bdstore_conditional_release.go` 78-110; `cmd/gc/cmd_bd.go` 124-137, 550-556, 813, 919-946, 1068-1077 and 1094-1123 |
 | A manual session does not end when its work closes. It stays until it is closed or drained, and a wait hold or an idle-sleep setting only puts it to sleep. An attached session is woken even when drained, unless a wait hold is set. `gc session attach` wakes a dormant session, and `wake_mode = "resume"` resumes the session's own transcript by its session key. A closed session does not reserve its alias: a new session under it starts a fresh transcript and takes the in-progress work still assigned to the alias. `gc session close` releases no claim held under the alias. No closer the controller runs on its own ends a manual session because its work closed: the stale-session closers exempt one that has started its conversation, and the core reaper prunes one only once it has drained. `gc session list` leaves a closed session out, whatever state it is asked for | Why converse-reap stays, how a sitting resumes, and why a held conversation is found by its assignee rather than by its session (section 6). Also why the migration releases a visit whose sitting it has ended (section 11). | Gas City `cmd/gc/compute_awake_set.go` 432-440, 583-594, 668-693; `internal/session/manager.go` 1264-1271, 1344-1362; `internal/session/names.go` 639-641; `cmd/gc/cmd_session.go` 1894-1897, 1946; `cmd/gc/session_beads.go` 969-975; `cmd/gc/work_location.go` 220-225; `cmd/gc/city_runtime.go` 3915; `cmd/gc/session_reconciler.go` 1057-1060; `cmd/gc/session_beads.go` 3500; `internal/bootstrap/packs/core/assets/scripts/reaper.sh` 69, 1402-1404; a live `gc session list --state closed`, which returned no row on 2026-10-20, as `formulas/mol-witness-patrol.toml` 424 records |
+| `gc session close` stops the session's runtime before it closes the session's bead, and a missing session or server counts as stopped. A stop that fails returns its error, the command exits 1, and the bead stays open, so `gc session list` still lists the session | Why the migration counts an old sitting as ended only once its session reads back gone, and moves nothing while one has not (section 11). | Gas City `internal/session/manager.go` 1715-1790 (the stop at 1756-1758, before the close at 1775) and its test `TestCloseDetailed_StopErrorLeavesBeadOpen`, `internal/session/manager_test.go` 5731-5755; `cmd/gc/cmd_session.go` 1914-1918 |
 | The pool execution backstop nudges, then drains, a pool session that holds in-progress work and is quiet for 90 seconds, with no attachment exemption. It governs only a session marked `pool_managed`, and Gas City marks one so only when the controller started it as neither a named nor a manual session, which is the origin `ephemeral`. `gc session new` with an alias gives a session the origin `manual` | Why a sitting's session is not a pool session, and why engage's `gc session new` keeps it out of the backstop's reach (section 6). | Gas City `cmd/gc/idle_nudge.go` 57-59; `cmd/gc/execution_backstop.go` 321-322, 405-421, 691; `cmd/gc/cmd_session.go` 289, 418, 698-704; `cmd/gc/session_origin.go` 172-181; `cmd/gc/reconcile_arms_metadata.go` 103, 131-133; `cmd/gc/session_beads.go` 1918, 2205-2206 |
 | A template's `min_active_sessions` defaults to 0, so a template that leaves it out or writes 0 keeps no session running for its own sake. A template with a `scale_check` gets a demand pass of its own | Why the converse templates' declared pool starts no sitting, and what pool-demand-wiring.test.sh guards (section 6). | Gas City `internal/config/session_capacity.go` 27-33; `cmd/gc/allocator_scalecheck_lane.go` 107-124 |
 | Core notify-on-human-gate-creation and renudge-stale-human-gates | Gas City's native reach for a human gate. The town turns the second off today, and turns the first off before the cutover (section 5). The first mails a gate's addressee once, when the gate is created, and nudges it as well when the addressee is a session rather than `human`. The second mails it again once the gate has been open an hour, and at most once an hour after that. Both act only on an open human gate, never read its await id, and address its assignee, then `gc.deferred_assignee`, then `$GC_ESCALATION_RECIPIENT` (default `human`). | Gas City `internal/bootstrap/packs/core/orders/notify-on-human-gate-creation.toml` 1-30 and `renudge-stale-human-gates.toml` 1-37; `internal/bootstrap/packs/core/assets/scripts/notify-on-human-gate-creation.sh` 1-80, 173-181, and `renudge-stale-human-gates.sh` 68-74; the town's city.toml 304-311 |
@@ -1778,28 +1781,42 @@ reach it, three by default, the point at which record-failure-cap.sh holds that
 the retry will not converge (`assets/scripts/record-failure-cap.sh` 5-14), so
 the gate stops a retry that was not healing.
 
-**Every sitting on a visit ends before any visit moves.** A live sitting can
+**Every sitting on a visit ends before anything moves.** A live sitting can
 write to the visit it holds at any moment: it appends notes, files demands when
 it holds, or closes the visit. It can write to another visit too. A sitting
 that folds its fresh visit into a live visit on the same topic moves
 `pr_number`, `pr_url` and `anchor_bead` onto that visit (section 7;
 `agents/_converse/prompt.template.md` 222-240, visit-close.sh 26-33). A write
-that lands on a visit after the run has read it is never carried. So before
-the run reads any visit, it closes every converse session that is not closed
-and whose alias names a visit of the store, open or closed, under the bare id
-or the `v-` prefix, and reads each back as gone from `gc session list`. That
-takes in a settled sitting today's reap skips (section 6), so no session runs
-the old prompt past the cutover. When a session does not read back as gone,
-the run reports the visit its alias names and leaves it as it is, for a rerun.
-Once the sessions are gone, nothing writes to a visit but the run, so step 6
-carries the last note each sitting wrote. A visit a sitting claimed still names
-the sitting's alias, because closing a session releases nothing held under its
-alias (see the platform section), so step 8 releases it before the close.
+that lands on a visit after the run has read it is never carried, and once the
+run has closed that visit, no rerun reads it again, because a rerun takes only
+the visits still open. A sitting's writes are not bounded by its own store
+either, because `gc bd` sends each write to the store its bead's id names (see
+the platform section).
 
-Then, for each open or in-progress visit that no live session's alias names,
-it does the following, in this order. Each write is read back before the next,
-and the visit closes last, so a run that stops part way leaves the visit open
-for the rerun to finish:
+So the run's first pass ends every old sitting in the city, whichever store the
+run is for. It closes every converse session that is not closed and whose alias
+names a visit in any store, open or closed, under the bare id or the `v-`
+prefix, and reads each back as gone from `gc session list`. Gas City stops a
+session's runtime before it closes the session, and a stop that fails leaves
+the session open and listed (see the platform section), so a session that reads
+back as gone has stopped. That takes in a settled sitting today's reap skips
+(section 6), so no session runs the old prompt past the cutover.
+
+When a session does not read back as gone, or the session list does not answer,
+the run reports each such session and the visit its alias names, and writes
+nothing else. No visit, gate, conversation or reference in its store moves, and
+every store's run makes the same check, so nothing moves in any store while an
+old sitting survives. A write that sitting makes meanwhile lands on a visit that
+is still open. Once a person has stopped the session, the rerun reads it gone
+and carries that write with the rest. With the sessions gone, nothing writes to
+a visit but the run, so step 6 carries the last note each sitting wrote. A visit
+a sitting claimed still names the sitting's alias, because closing a session
+releases nothing held under its alias (see the platform section), so step 8
+releases it before the close.
+
+Then, for each open or in-progress visit, it does the following, in this order.
+Each write is read back before the next, and the visit closes last, so a run
+that stops part way leaves the visit open for the rerun to finish:
 
 1. **It reads the subject and the key.** The subject is the visit's `tracks`
    target, else its `gc.continuation_group`. The key is its `escalation_key`,
@@ -2010,10 +2027,10 @@ notify order is off.
 **Nothing lost, nothing doubled.** Every open visit ends as an open human gate
 that asks what the visit asked, or as a conversation in the operator's queue,
 unless step 1, 2 or 4 leaves it open for a person. Each carries the visit's
-framing and every note on it, since a sitting that held it ended before the
-carry, and every bead that waited on the visit waits on its gate. A merge an
-open visit held stays held, and the subject of a visit escalate.sh filed waits,
-the one wait the cutover adds (above). A visit joins a gate only
+framing and every note on it, since every old sitting had stopped before the
+run moved anything, and every bead that waited on the visit waits on its gate.
+A merge an open visit held stays held, and the subject of a visit escalate.sh
+filed waits, the one wait the cutover adds (above). A visit joins a gate only
 when the two cover one situation on one bead, so no answer to one situation
 closes another. A rerun finds each gate and each conversation again. The
 helper's dedup finds a gate step 4 filed by its key
@@ -2022,9 +2039,12 @@ pack keys they keep until their visit has closed, and step 7 finds its task by
 the visit's line. The rerun adds only the edges, framing, notes and references
 still missing, removes a visit's edge onto a moved demand if it is still there,
 and closes only the visits left over. A sitting an earlier run ended is gone
-from `gc session list`, so the rerun closes no session twice. It releases a
-visit that still names a holder from the holder it reads, and a visit an
-earlier run released goes straight to the close. It reports, per store, the
+from `gc session list`, so the rerun closes no session twice, and a sitting an
+earlier run could not stop is closed again by the rerun's first pass. It
+releases a visit that still names a holder from the holder it reads, and a
+visit an earlier run released goes straight to the close. A run that found an
+old sitting it could not stop reports that sitting and the visit its alias
+names, and that it moved nothing. Any other run reports, per store, the
 visits it migrated into gates, those it merged into a gate already there, those
 it turned into conversations, and any it left open, could not release or could
 not close, and the human gates it shaped that block no bead.
@@ -2085,14 +2105,21 @@ states this section names:
   session has closed, and an open visit bound to a sitting's session that does
   not exist.** For the first, the run closes the sitting's session before
   it reads any visit, and the note the sitting appended last is carried with
-  the visit's other notes. For each, the run releases the visit from the holder
-  it reads, reads it back open and unassigned, and closes it unforced with its
-  `migrated:` reason.
-- **A live sitting on one visit beside a second open visit on the same subject,
-  and a sitting whose session does not close.** The run closes the first
-  sitting's session before it reads either visit. It reports the visit the
-  other sitting's alias names, leaves that visit as it is, and migrates the
-  rest.
+  the visit's other notes. A live sitting on a visit in another store is closed
+  by this store's first pass too. For each, the run releases the visit from the
+  holder it reads, reads it back open and unassigned, and closes it unforced
+  with its `migrated:` reason.
+- **A sitting whose session does not stop, and that writes to a second visit
+  after the run's first pass.** The fixture fails that session's close on the
+  first run, as a failed runtime stop does, so the session stays listed, beside
+  a second open visit on the same subject. After the run's first pass, the
+  surviving sitting appends a note to the second visit. The run reports the
+  session and the visit its alias names, and writes nothing else: both visits
+  stay open, no gate or conversation is filed, no demand is shaped and no
+  reference moves, so the late note lands on an open visit. A run for a second
+  store while the sitting survives moves nothing either. The rerun's close then
+  stops the session, and the rerun migrates both visits, so the second visit's
+  gate or conversation carries the late note.
 - **A run stopped after it ended a sitting, and one stopped after it released
   the visit.** The rerun of the first releases the visit from the alias it
   still names, and the rerun of the second reads the visit unassigned and
@@ -2128,10 +2155,11 @@ states this section names:
 4. **The migration runs on every store, city first, once the new board is up.**
    Until it finishes, open visits are not on the board, a ruled finding and a
    routed comment that name a visit wait for it, and a sitting that was live at
-   step 3 is running an old prompt against new scripts. The migration ends that
-   sitting before it carries the visit over, so the carry takes the sitting's
-   last note, then releases the visit from the sitting and closes it
-   (section 11).
+   step 3 is running an old prompt against new scripts. The migration ends every
+   such sitting before it moves anything, so the carry takes each sitting's last
+   note, then releases each visit from its sitting and closes it. While a
+   sitting's session will not stop, the migration names it and moves nothing in
+   any store, so a person stops it and runs the migration again (section 11).
 5. **The operator checks** that no store has an open visit and that the board
    shows every human gate and every queued conversation. A follow-up commit on
    main then deletes the migration script and its test, and retires the keys
