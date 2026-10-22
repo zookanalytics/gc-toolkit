@@ -529,9 +529,11 @@ gc bd create -t task --title "<what the conversation is about>" \
 
 `--deps "tracks:<bead>"` makes the new task track the bead (see the platform
 section), and that bead is the conversation's one subject. It is always a bead,
-never a gate: engage pointed at a gate takes one bead the gate blocks, read from
-the gate's `blocks` dependents (above), and files or finds the conversation on
-that bead (section 6). The `tracks` edge alone names the subject, so a bead that
+never a gate: engage pointed at a gate takes the one bead still waiting on it,
+read from the gate's `blocks` dependents (above), and files or finds the
+conversation on that bead. When several beads still wait on the gate, engage
+names them and starts nothing, so the operator engages the one they mean
+(section 6). The `tracks` edge alone names the subject, so a bead that
 starts waiting on one of the subject's gates later does not join the
 conversation. The sitting serves every human gate on its subject, the gates the
 subject's `blocks` edges reach, and its record and headline go on the subject
@@ -978,10 +980,10 @@ session is never a pool session.
 takes these steps:
 
 1. **It takes the bead.** Given a bead, engage works on that bead. Given a
-   gate, it works on the one bead the gate blocks, because a conversation
-   always tracks a bead, never a gate (Terms). It reads the gate's `blocks`
-   dependents (section 1) and keeps those that are not closed, because a closed
-   bead no longer waits. When one is left, engage takes it. When more than one
+   gate, it works on the one bead still waiting on the gate, because a
+   conversation always tracks a bead, never a gate (Terms). It reads the gate's
+   `blocks` dependents (section 1) and keeps those that are not closed, because
+   a closed bead no longer waits. When one is left, engage takes it. When more than one
    is left, as when an anchor and its rework child both wait on the anchor's
    bring-current gate, engage names them and starts nothing, so the operator
    engages the one they mean. When none is left, because the gate's beads have
