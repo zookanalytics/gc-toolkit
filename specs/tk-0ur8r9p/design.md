@@ -14,10 +14,11 @@ prompt, skill, doc and message the build writes.
 - **Subject.** The bead a human gate or a conversation is about. A human gate's
   subject is the bead that waits on it through a `blocks` edge. A gate usually
   has one, and a gate that a second bead also waits on is about both. A
-  conversation's subject is the one bead it tracks. Any bead can be a subject,
-  such as a work bead, an epic or a PR's anchor. Its notes carry the durable
-  outcome of every answer and conversation about it, so whoever works it next
-  inherits what was decided.
+  conversation's subject is the one bead it tracks, even when a gate it answers
+  is about a second bead too. Any bead can be a subject, such as a work bead,
+  an epic or a PR's anchor. Its notes carry the durable outcome of every
+  conversation about it, and the resolve reasons of the gates it waits on carry
+  their answers, so whoever works it next inherits what was decided.
 - **Human gate.** Gas City's native bead for a wait a person must clear before
   work moves (`issue_type=gate`, `await_type=human`). The wait can be for an
   answer, an approval or an action. Its title and description say what the
@@ -150,26 +151,28 @@ these decisions build it.
    withdrawal can clear a gate while a sitting discusses it, and the sitting
    learns it at its sign-off.
 6. **A sitting runs in a manual converse session that holds one
-   conversation.** Engage works on a bead: pointed at a gate, it takes the bead
-   the gate blocks, because a conversation always tracks a bead, never a gate.
-   A concern you bring to engage opens a fresh conversation, even when the bead
-   has one, because a distinct concern is a distinct dialogue. Without one, engage
-   attaches you to a live sitting on the bead, or adopts a conversation the
-   bead has in your queue, or files one. It starts a session named for the
-   conversation, binds the conversation to that session and attaches you. Two
-   things keep a second sitting off one conversation: only one open session
-   can hold the name, and the bind lands only while the conversation's holder
-   is still the one engage read. A second live sitting on one bead or one gate
-   is warned about, never refused. A sitting handed off goes back to your
-   queue, assigned to you, through the same guarded update. Recovery resumes
-   the sitting first: attaching wakes it and replays its transcript, and a
-   sitting whose session was closed comes back as a new session under the same
-   name, which takes its conversation back. converse-claim, the put-back, the
-   fold, the restart forensics and engage's reclaim go, and converse needs no
-   work query. Cost: a gate discussed in a sitting is two beads, the gate and
-   the conversation. A sitting whose session was closed comes back with its
-   record, not its transcript. converse-reap stays, because Gas City does not
-   end a manual session when its work closes.
+   conversation.** Engage works on a bead, because a conversation always tracks
+   a bead, never a gate. Pointed at a gate, it takes the one bead the gate
+   blocks, and when the gate blocks several it names them and starts nothing,
+   so you engage the one you mean. A concern you bring to engage opens a fresh
+   conversation, even when the bead has one, because a distinct concern is a
+   distinct dialogue. Without one, engage attaches you to a live sitting on the
+   bead, or adopts a conversation the bead has in your queue, or files one. It
+   starts a session named for the conversation, binds the conversation to that
+   session and attaches you. Two things keep a second sitting off one
+   conversation: only one open session can hold the name, and the bind lands
+   only while the conversation's holder is still the one engage read. A second
+   live sitting on one bead, or on two beads that wait on one gate, is warned
+   about, never refused. A sitting handed off goes back to your queue, assigned
+   to you, through the same guarded update. Recovery resumes the sitting first:
+   attaching wakes it and replays its transcript, and a sitting whose session
+   was closed comes back as a new session under the same name, which takes its
+   conversation back. converse-claim, the put-back, the fold, the restart
+   forensics and engage's reclaim go, and converse needs no work query. Cost: a
+   gate discussed in a sitting is two beads, the gate and the conversation. A
+   sitting whose session was closed comes back with its record, not its
+   transcript. converse-reap stays, because Gas City does not end a manual
+   session when its work closes.
 7. **A sitting ends by answering, holding or dismissing.** A hold keeps the
    conversation and the session. Dismiss closes the conversation and answers
    nothing. Cost: dismissing a sitting no longer takes a human gate off the
@@ -525,12 +528,16 @@ gc bd create -t task --title "<what the conversation is about>" \
 
 `--deps "tracks:<bead>"` makes the new task track the bead (see the platform
 section), and that bead is the conversation's one subject. It is always a bead,
-never a gate: engage pointed at a gate takes the bead the gate blocks, read from
+never a gate: engage pointed at a gate takes one bead the gate blocks, read from
 the gate's `blocks` dependents (above), and files or finds the conversation on
-that bead (section 6). The sitting serves every human gate on its subject, the
-gates the subject's `blocks` edges reach, and its record and headline go on the
-subject. A gate whose beads have all closed still has them as its subjects, and
-the board gives it a row of its own (section 8).
+that bead (section 6). The `tracks` edge alone names the subject, so a bead that
+starts waiting on one of the subject's gates later does not join the
+conversation. The sitting serves every human gate on its subject, the gates the
+subject's `blocks` edges reach, and its record and headline go on the subject
+alone (section 7). A gate whose beads have all closed still has them as its
+subjects, and the board gives it a row of its own (section 8). Nothing waits on
+such a gate, so engage pointed at it starts no conversation: it names those
+beads, and the operator clears the gate (section 6).
 
 A conversation and work a person owes that nothing waits on are both assigned
 tasks, and their shape tells them apart. A conversation tracks the bead it is
@@ -970,12 +977,18 @@ session is never a pool session.
 takes these steps:
 
 1. **It takes the bead.** Given a bead, engage works on that bead. Given a
-   gate, it works on the bead the gate blocks, read from the gate's `blocks`
-   dependents (section 1), because a conversation always tracks a bead, never
-   a gate (Terms). When the gate blocks more than one bead, engage names them
-   and starts nothing, so the operator engages the one they mean. When it
-   blocks none, engage says so and starts nothing: the gate holds nothing, and
-   the operator clears it.
+   gate, it works on the one bead the gate blocks, because a conversation
+   always tracks a bead, never a gate (Terms). It reads the gate's `blocks`
+   dependents (section 1) and keeps those that are not closed, because a closed
+   bead no longer waits. When one is left, engage takes it. When more than one
+   is left, as when an anchor and its rework child both wait on the anchor's
+   bring-current gate, engage names them and starts nothing, so the operator
+   engages the one they mean. When none is left, because the gate's beads have
+   all closed or it blocks none, nothing waits on the gate. Engage says so,
+   names any closed bead the gate was about, and starts nothing, and the
+   operator clears the gate (section 7). A sitting there would answer an ask
+   that holds nothing, and open already refuses a closed bead as settled work
+   (gc-helm.sh 2236-2246).
 2. **It reads the bead's conversations:** the tasks that are not closed and
    track the bead (`bd dep list <bead> --direction=up --type tracks`), kept
    when the task is assigned to `human` or to an alias that names the task's
@@ -1131,7 +1144,13 @@ attached. Unit C records it in `docs/warrants.md` with that trigger.
 ## 7. Hold, record and close
 
 **The record** is unchanged doctrine: the sitting appends to the subject's
-notes, and it writes the subject's headline with gc-helm.sh takeaway.
+notes, and it writes the subject's headline with gc-helm.sh takeaway. The
+subject is the one bead the conversation tracks, so the record has that one
+destination. A gate the sitting answers can also block another bead, such as a
+rework child that waits on its anchor's bring-current gate. That bead reads the
+answer in the gate's resolve reason, through its own `blocks` edge, and the
+sitting's record and headline do not go on it. A bead that starts waiting on
+one of the gates while the sitting runs does not change where the record goes.
 
 **A hold** is the operator owing an answer later. The sitting keeps its task
 claimed, and the session stays, because the converse agents keep
@@ -1590,10 +1609,12 @@ tests, which add the gate on a bead with open children,
 upstream-finding.test.sh, whose `--pool` cases go,
 reconcile-rig-checkouts.test.sh, whose unroutable-pool run goes,
 review-answer.test.sh, merge.test.sh, the prstatus tests, pr-facts.test.sh,
-gc-helm-engage.test.sh, which adds the bind that misses, gc-helm-accept.test.sh,
+gc-helm-engage.test.sh, which adds the bind that misses and the gate about two
+beads (section 12), gc-helm-accept.test.sh,
 which adds the read-back that stops Accept, gc-helm-open.test.sh,
 gc-helm.test.sh's dismiss cases, converse-signoff.test.sh, which adds the
-read-back that reports an earlier answer, converse-reap.test.sh, which adds the
+read-back that reports an earlier answer and the record of a gate about two
+beads (section 12), converse-reap.test.sh, which adds the
 `c-` alias, pr-visit-comment.test.sh and its wiring test, renamed with their
 script, tmux-visit-prompt.test.sh, renamed with its script,
 liveness-recheck.test.sh, which adds `--carried` and `--pass-at`,
@@ -1714,7 +1735,13 @@ for the rerun to finish:
    `gc.demand_topic` or else `conversation`, so step 3 takes the demand as the
    visit's gate. The sweep's visit is one whose creator is the sweep's
    order (see the platform section) and whose framing names the demand
-   (gate-visit-sweep.sh 156-160).
+   (gate-visit-sweep.sh 156-160). A subject that is a gate gives way to the
+   one bead the gate blocks, taken as engage takes it (section 6), because a
+   conversation always tracks a bead, never a gate. A visit has such a
+   subject when today's engage or open was pointed at a gate, because both
+   file a visit on any bead that is not a visit and not closed (gc-helm.sh
+   2227-2246, 3961-4004). When the gate leaves engage more than one bead, or
+   none, the run reports the visit and leaves it open for a person.
 2. **A visit whose subject has closed waits on nothing through it**, because a
    closed bead does not move. Its gate blocks the beads that waited on the
    visit (step 4), and with none it becomes a conversation that tracks the
@@ -1908,7 +1935,7 @@ notify order is off.
 
 **Nothing lost, nothing doubled.** Every open visit ends as an open human gate
 that asks what the visit asked, or as a conversation in the operator's queue,
-unless step 2 or step 4 leaves it open for a person. Each carries the visit's
+unless step 1, 2 or 4 leaves it open for a person. Each carries the visit's
 framing and every note on it, since a sitting that held it ended before the
 carry, and every bead that waited on the visit waits on its gate. A merge an
 open visit held stays held, and the subject of a visit escalate.sh filed waits,
@@ -1976,6 +2003,10 @@ states this section names:
 - **A visit escalate.sh filed on a plain bead with no waiter.** The run leaves
   a gate that blocks the bead, so the bead leaves `bd ready`, the wait the
   cutover adds.
+- **A visit the operator opened on a demand under another topic, which blocks
+  one open bead, and one opened on a gate that blocks two.** The run leaves a
+  conversation in the queue that tracks the open bead, not the demand, and it
+  reports the second visit and leaves it open.
 - **A visit a live sitting holds, one held under the alias of a sitting whose
   session has closed, and an open visit bound to a sitting's session that does
   not exist.** For the first, the run closes the sitting's session before
@@ -2049,7 +2080,7 @@ brief allows when the design calls for a split:
 |---|---|
 | A. The helper and its callers | The helper on gates, renamed human-gate.sh with a hand-off at escalate.sh and every call renamed with it, with the key as the await id, the dedup and the quiet window read through the bead's `blocks` edges, the retract by resolve, the refusal of a wisp, and `--quiet-window` as the only quiet period: each caller that re-detects one condition declares its window at its call site with its why, the others declare none, and the `GC_ESCALATE_VERDICT_WINDOW=0` prefixes go. Its store derivation and its triage redirect retired, with the deacon prompt's and mol-dog-shutdown-dance's derivations and escalation-rig.sh. The calls that named a wisp, a session or a bead they could not read, and the reports that nothing waits on, on patrol-finding.sh (section 3). await-ruling.sh, with the work bead's edge onto a gate filed on another bead. upstream-finding.sh's `--pool` and reconcile-rig-checkouts.sh's pool knob retired. first-reaction-dispose, mol-validate-close, deferred-dispatch.sh and mol-feedback-distiller on the helper, each with its call-site policy on a bead with open children (section 3). mol-visit and the formula copies of the gate-visit block retired. The polecat doctrine and pool-worker fragments, the human-gate-withdraw fragment, and the deacon, refinery and witness prompts. The tests named for the helper, renamed with it (section 10). The registry entries of the keys the helper stops writing. |
 | B. The readers | finalize-gate. gctk merge and pr-status, with `OpenHumanGate`. finding.sh and review-answer.sh. pr-facts.sh. branch-supersession.sh. The liveness scripts, with conversing read from conversations, the census in the re-check command and the re-file check on closed gates, hold-lib.sh, deferred-dispatch.sh, bead-context.sh and pre-open-rebase.sh. orphan-dispose.sh and the witness patrol. bead-rehome.sh, with the retry's withdrawal before the close. The doctor checks, `RETIRED_KEYS`, and the docs that teach these components (section 13). |
-| C. Converse and the board | The conversation task, and gc-helm.sh engage, open, accept and dismiss on it, with engage's guarded bind and `c-` fallback, the hand-off, and Accept's read-back. The converse prompt and agent headers, the five converse skills and the shared skills. Accept on the recommendation's gate alone, pinned by the acceptance case below. converse-signoff.sh rewritten, converse-reap re-keyed with its warrant in `docs/warrants.md`, and the converse scripts that retire. gc-helm.sh demand retired here, with its last callers: converse-hold.sh, converse-signoff.sh, and the waits, prs and converse-settle skills. pr-sitting-comment.sh with its new marker, and operator-intake.sh. The tmux scripts, tmux-intake-prompt.sh among them. The board's source, with each gate's `blocks` dependents in its batched read, its derive, with a gate folded onto each bead it blocks, its model, its wire contract with `accept_withheld`, and its web and text boards. gate-visit-sweep's order and script. The human-engagement docs and the board's README. |
+| C. Converse and the board | The conversation task, which tracks one bead, and gc-helm.sh engage, open, accept and dismiss on it, with engage's choice of one bead for a gate, pinned by the shared-gate case below, its guarded bind and `c-` fallback, the hand-off, and Accept's read-back. The converse prompt and agent headers, the five converse skills and the shared skills. Accept on the recommendation's gate alone, pinned by the acceptance case below. converse-signoff.sh rewritten, converse-reap re-keyed with its warrant in `docs/warrants.md`, and the converse scripts that retire. gc-helm.sh demand retired here, with its last callers: converse-hold.sh, converse-signoff.sh, and the waits, prs and converse-settle skills. pr-sitting-comment.sh with its new marker, and operator-intake.sh. The tmux scripts, tmux-intake-prompt.sh among them. The board's source, with each gate's `blocks` dependents in its batched read, its derive, with a gate folded onto each bead it blocks and a conversation onto the one bead it tracks, its model, its wire contract with `accept_withheld`, and its web and text boards. gate-visit-sweep's order and script. The human-engagement docs and the board's README. |
 | D. The cutover | The migration script, with its copy of the visit walk, and its test, which stops a run after each write and holds section 11's fixtures. notification-wisp-reap's gate pass retired. The cutover runbook in its own spec. The remaining docs. |
 
 The order follows the dependency. B's readers read what A's helper files, and
@@ -2111,6 +2142,28 @@ sitting's sign-off then reports that the gate was already cleared.
 A fourth fixture puts the recommendation on a bead with an open child. The
 first reaction's gate blocks the parent, the child leaves `bd ready` until the
 gate is cleared, and the row offers Accept as on any bead.
+
+**Unit C's shared-gate case: a gate about two beads, a conversation about
+one.** The fixture is an anchor and its rework child that both wait on the
+anchor's bring-current gate (section 4). gc-helm-engage.test.sh,
+converse-signoff.test.sh and the board's derive tests pin each step:
+
+1. **The gate is on both rows.** It folds onto the anchor's row and the
+   child's, and each row lists it among what its bead waits on.
+2. **Engage pointed at the gate starts nothing.** It names both beads, files no
+   conversation and starts no session. With the child closed, it takes the
+   anchor, and with both closed, it says that nothing waits on the gate and
+   starts nothing.
+3. **Engage on the anchor files a conversation that tracks the anchor alone.**
+   Its sitting serves the gate through the anchor's `blocks` edge. The
+   anchor's row is in session, and the child's is not.
+4. **The record has one destination.** The sitting resolves the gate and signs
+   off. Its record and headline are on the anchor, the child's notes and
+   headline are unchanged, and both beads leave the wait.
+
+A variant engages the child while the anchor's sitting is live. Engage warns
+that a live sitting serves a gate the child waits on, and files the child's own
+conversation, which tracks the child alone.
 
 ## 13. Sequencing with the siblings
 
