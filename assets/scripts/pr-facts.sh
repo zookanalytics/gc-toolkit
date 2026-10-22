@@ -128,9 +128,9 @@
 # The sweep also closes the human review loop. A human CHANGES_REQUESTED stands
 # as GitHub's own blocking signal until someone clears it; once every finding a
 # particular human review raised has closed — a must-fix fixed and landed, a
-# decline replied and resolved, or a deferral's follow-up filed and its id
-# replied — that review is answered in full, so the sweep dismisses it (clearing
-# the block) and re-requests its author, per-review via finding.review_id so one
+# decline replied, or a deferral's follow-up filed and its id replied — that
+# review is answered in full, so the sweep dismisses it (clearing the block)
+# and re-requests its author, per-review via finding.review_id so one
 # reviewer clears independently of another. A review whose body only frames its
 # round waits for the whole round. The dismissal note is one line linking the
 # round's living answer. A needs-you finding is the exception that holds the
@@ -482,10 +482,12 @@ PR_CONVERSATIONS="quiet outstanding answered"
 # for resolved, a question mark for awaiting a person. A fix names the commits
 # its fix unit made, so a merge of the base sitting at the PR head is never
 # cited as the fix. A declined or deferred finding's answer leads with its
-# ruling and carries no glyph. A thread is resolved behind its answer only when
-# nothing in it waits for the operator: a declined or deferred finding's thread
-# stays open for them to accept or overrule, and a needs-you finding's for their
-# ruling.
+# ruling. A thread is resolved behind its answer only when nothing in it waits
+# for the operator: a declined or deferred finding's thread stays open for them
+# to accept or overrule, and a needs-you finding's for their ruling. So a
+# declined or deferred finding's answer in a thread awaits a person too: it
+# leads with the question mark, and ends with a line saying that resolving the
+# thread accepts the ruling.
 # The marker identifies our own reply, so a later pass can tell one it already
 # posted from a human's, and every reply carries it. A state reply also carries
 # a mark line naming its state (resolved, or awaiting:<visit>) and, on the
@@ -4687,11 +4689,13 @@ WB_SWAPS
   # The answer leads with the ruling, so a reader scanning the PR tells it from a
   # fix: "Declined:" or "Deferred:" unless the reply already opens with that
   # word, and the question mark on a needs-you answer. None of them resolves its
-  # thread. A declined or deferred finding waits there for the operator to accept
-  # or overrule it, and a needs-you finding for their ruling, which the open
-  # finding holds the review on. The operator overrules a decline by
-  # re-reviewing: the content key re-adopts the closed finding as a fresh one and
-  # pr-facts re-opens the human validation pass.
+  # thread. A needs-you finding waits there for the operator's ruling, which the
+  # open finding holds the review on. A declined or deferred finding waits there
+  # for the operator to accept or overrule it, so its answer in a thread leads
+  # with the question mark too, and ends with ra_open_ask's line, the one its
+  # point under Needs you in the living answer ends with. The operator overrules
+  # a decline by re-reviewing: the content key re-adopts the closed finding as a
+  # fresh one and pr-facts re-opens the human validation pass.
   # Whether the answer is on the PR is read back off GitHub every pass. A post of
   # ours holds it when it carries this ruling's own text and names no other
   # finding. Another reply in the thread is not it, and neither is this finding's
@@ -4739,7 +4743,9 @@ WB_SWAPS
                        and (((.body // "") | contains($line)) or (((.body // "") | test("<!-- gc-writeback-finding:")) | not)))) as $posted
         | select(if $stamp != "" then ($here and ($posted | not)) else true end)
         | { id: $id, thread: (if $t != null then $t.id else "" end), posted: $posted, stamped: ($stamp != ""),
-            body: ((if $disp == "needs-you" then $gwait + " " + $reply else ($reply | ra_ruled_reply($disp)) end)
+            body: ((if $disp == "needs-you" then $gwait + " " + $reply
+                    elif $t != null then $gwait + " " + ($reply | ra_ruled_reply($disp)) + "\n\n" + ra_open_ask($disp)
+                    else ($reply | ra_ruled_reply($disp)) end)
                    + (if $ref != "" then " In reply to " + $ref + "." else "" end)
                    + "\n" + $m + "\n" + $line) }
         | @base64' 2>/dev/null)

@@ -8,22 +8,26 @@
 #             first sentence cut at a word boundary; brackets escaped
 #   (SECTION) each ruling's section and sentence, a flagged fix worth a look, the
 #             reference each carries, its fix's commits only once the fix has
-#             landed, and no point for a body ruled restates
-#   (URL)     a label links only to a comment the read of the PR holds
-#   (RENDER)  the visit callout on top, the count line, the sections in order,
-#             the entries, the folded notes and the trailing mark lines
+#             landed, no point for a body ruled restates, and a decline or a
+#             deferral whose thread is open needing the reviewer, asking them to
+#             act, until they resolve it
+#   (URL)     a label links only to a comment the read of the PR holds, and the
+#             thread a comment sits in is read open or resolved
+#   (RENDER)  the visit callout on top, the count line counting the points that
+#             need the reviewer, the sections in order, the entries, the folded
+#             notes and the trailing mark lines
 #   (MODEL)   one model per review round: the comment already on the PR found
 #             by its key, its digest and dismissed mark read back, what keeps it
-#             live, the review body answers it delivers, the marks it keeps, and
-#             each fix unit's landing read from its close
+#             live, the review body answers it delivers, the marks it keeps, each
+#             fix unit's landing read from its close, and each point's thread
+#             read from the PR
 #   (ROUND)   the round a review belongs to, placed alike by the REST reviews
 #             the intake reads and the GraphQL nodes the write-back reads: many
 #             single-comment reviews against one commit answered by one comment,
-#             one review rendering as main
-#             renders it, a framing body adding no point, a later commit or
-#             another reviewer starting a round of their own, each review of a
-#             round dismissed on its own, and the copies of one round folded
-#             into one comment losing no mark
+#             one review rendered whole, a framing body adding no point, a later
+#             commit or another reviewer starting a round of their own, each
+#             review of a round dismissed on its own, and the copies of one round
+#             folded into one comment losing no mark
 #   (DISMISS) the one-line dismissal note
 #   (READERS) pr-facts.sh is the one writer and sources this file
 # Reads the repo only; no gc, no city, no network.
@@ -59,13 +63,17 @@ eq "$(ruled "next release" deferred)|$(ruled "Deferred — tracked as follow-up 
   "(DEF) …and a deferral reply the same way"
 eq "$(jq -cn "$REVIEW_OWED_REPLY_DEF"'[ "declined", "deferred", "needs-you", "must-fix", "restates", "unvalidated" ] | map(ra_owes_disp)')" \
   '[true,true,true,false,false,false]' "(DEF) a decline, a deferral and a question for the operator owe their raiser an answer"
+eq "$(jq -rn "$REVIEW_OWED_REPLY_DEF"'ra_open_ask("declined"), ra_open_ask("deferred")')" \
+  "Resolving the thread accepts the decline. A reply in the thread overrules it.
+Resolving the thread accepts the deferral. A reply in the thread overrules it." \
+  "(DEF) a decline or a deferral answered in a thread says what resolving the thread and replying in it do"
 
 MARKER='<!-- gc-writeback -->'
 PRURL="https://github.com/o/r/pull/7"
 # A finding record as ra_record builds it, from a few overrides.
 rec() { jq -cn --argjson o "${1:-}" '{ id: "F", open: false, disp: "must-fix", message: "", title: "", label: "",
     answer: "", fix_answer: "", fix_flag: "", reply: "", posted: false, follow_up: "", visit: "",
-    ruling_visit: "", fix_unit: "", cid: "11", rid: "10", body: false, url: "", fix_landed: false } + $o'; }
+    ruling_visit: "", fix_unit: "", cid: "11", rid: "10", body: false, url: "", thread: "", fix_landed: false } + $o'; }
 label() { rec "$1" | jq -r "$REVIEW_ANSWER_DEF"'ra_label'; }
 point() { rec "$1" | jq -c "$REVIEW_ANSWER_DEF"'[ ra_point ] | .[0] // "none"'; }
 pfield() { point "$1" | jq -r --arg k "$2" 'if type == "object" then (if has($k) then (.[$k] | tostring) else "" end) else . end'; }
@@ -139,6 +147,26 @@ eq "$(pfield '{'"$BODY"',"disp":"needs-you","open":true,"visit":"tk-v","answer":
 eq "$(pfield '{"disp":"needs-you","ruling_visit":"tk-v"}' sentence)" "Settled by your ruling on visit tk-v." "(SECTION) a needs-you finding the ruling settled is done"
 eq "$(pfield '{"disp":"unvalidated","open":true}' section),$(pfield '{"disp":"unvalidated","open":true}' ruled)" "progress,false" "(SECTION) an unruled point is in progress"
 eq "$(point '{"disp":"restates","body":true,"cid":"10"}')" '"none"' "(SECTION) a body ruled restates is no point"
+# The write-back never resolves a thread holding a decline or a deferral it
+# answered there, so the point needs the reviewer while the read of the PR finds
+# that thread open, and is worth a look once they resolve it.
+WAIT='"thread":"open","reply":"the guard already holds"'
+eq "$(pfield '{"disp":"declined",'"$WAIT"'}' section)" "needs" "(SECTION) a decline whose thread is open needs the reviewer"
+eq "$(pfield '{"disp":"declined",'"$WAIT"'}' sentence)" "Declined: the guard already holds" "(SECTION) …in the words it is answered with"
+eq "$(pfield '{"disp":"declined",'"$WAIT"'}' ask)" "Resolving the thread accepts the decline. A reply in the thread overrules it." \
+  "(SECTION) …asking them to accept it by resolving the thread, or overrule it by replying there"
+WAITD='"disp":"deferred","follow_up":"tk-fu","thread":"open","reply":"Deferred — tracked as follow-up tk-fu: later."'
+eq "$(pfield '{'"$WAITD"'}' section)|$(pfield '{'"$WAITD"'}' ask)" \
+  "needs|Resolving the thread accepts the deferral. A reply in the thread overrules it." "(SECTION) …and so does a deferral whose thread is open"
+eq "$(pfield '{"disp":"declined","thread":"resolved","reply":"the guard already holds"}' section)|$(pfield '{"disp":"declined","thread":"resolved","reply":"the guard already holds"}' ask)" \
+  "worth|" "(SECTION) once the reviewer resolves the thread, the decline is worth a look and asks nothing"
+eq "$(pfield '{"disp":"declined","reply":"the guard already holds"}' section)" "worth" "(SECTION) a decline whose thread the read does not hold waits on nobody"
+eq "$(pfield '{"disp":"declined","thread":"open"}' section)" "done" "(SECTION) a comment that asked for nothing is done, though its thread is open"
+WAITF='"disp":"declined","thread":"open","reply":"kept as is","fix_unit":"tk-k","fix_answer":"Renamed anyway, though the ruling declined it.","fix_flag":"1"'
+eq "$(pfield '{'"$WAITF"'}' section)|$(pfield '{'"$WAITF"'}' sentence)" "needs|Renamed anyway, though the ruling declined it." \
+  "(SECTION) a flagged decline whose thread is open needs the reviewer, in the fix unit's words"
+eq "$(pfield '{"disp":"must-fix","thread":"open","fix_unit":"tk-k","fix_answer":"Fixed."}' section)" "done" \
+  "(SECTION) a landed must-fix whose thread is still open waits on nobody, since the write-back resolves it"
 
 echo "# (URL)"
 VIEW='{"reviews":[{"databaseId":10,"url":""}],"threads":[{"comments":{"nodes":[{"databaseId":11,"url":"https://github.com/o/r/pull/7#discussion_r11"}]}}],"issue_comments":[]}'
@@ -146,6 +174,11 @@ url() { rec "$1" | jq -r --argjson v "$VIEW" --arg p "$PRURL" "$REVIEW_ANSWER_DE
 eq "$(url '{"cid":"11"}')" "https://github.com/o/r/pull/7#discussion_r11" "(URL) an inline comment links to its thread as GitHub names it"
 eq "$(url '{"cid":"10","body":true}')" "$PRURL#pullrequestreview-10" "(URL) a review body links to its review"
 eq "$(url '{"cid":"99"}')" "" "(URL) a comment the read does not hold gets no link"
+TVIEW='{"reviews":[{"databaseId":10}],"issue_comments":[],
+  "threads":[{"isResolved":false,"comments":{"nodes":[{"databaseId":11}]}},{"isResolved":true,"comments":{"nodes":[{"databaseId":12},{"databaseId":13}]}}]}'
+tstate() { rec "$1" | jq -r --argjson v "$TVIEW" "$REVIEW_ANSWER_DEF"'ra_thread($v)'; }
+eq "$(tstate '{"cid":"11"}')|$(tstate '{"cid":"13"}')" "open|resolved" "(URL) the thread an inline comment sits in reads open or resolved, wherever in it the comment sits"
+eq "$(tstate '{"cid":"10","body":true}')|$(tstate '{"cid":"99"}')" "|" "(URL) …and a review body, or a comment the read does not hold, has none"
 
 echo "# (RENDER)"
 MODEL='{"rid":"10","rids":["10"],"self":false,"members":[{"rid":"10","state":"CHANGES_REQUESTED","dismissed":"requeued"}],
@@ -190,6 +223,13 @@ P=$(printf '%s' "$MODEL" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'.visits 
 has "$P" "### Your review: 3 points, picked up; the ruling is in progress" "(RENDER) at pickup the count line says the ruling is in progress"
 hasnt "$P" "Not ruled yet" "(RENDER) …and no entry repeats it"
 hasnt "$P" "in progress." "(RENDER) …nor adds a count line"
+heading() { jq -rn --argjson ps "$1" "$REVIEW_ANSWER_DEF"'{ points: $ps } | ra_heading'; }
+eq "$(heading '[{"section":"needs","answered":true,"ruled":true},{"section":"needs","answered":false,"ruled":true}]')" \
+  "Your review: 2 points, 2 need you" "(RENDER) the count line counts the points that need the reviewer, answered or not"
+eq "$(heading '[{"section":"needs","answered":true,"ruled":true},{"section":"done","answered":true,"ruled":true}]')" \
+  "Your review: 2 points, 1 needs you, 1 answered" "(RENDER) …and never reads all answered while one does"
+eq "$(heading '[{"section":"needs","answered":true,"ruled":true},{"section":"done","answered":true,"ruled":true},{"section":"progress","answered":false,"ruled":true}]')" \
+  "Your review: 3 points, 1 needs you, 1 answered so far" "(RENDER) …and says how far the rest are"
 
 BIG=$(jq -n --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'{rid:"1",self:false,
   points:[{id:"a",section:"done",label:"L",url:"",sentence:("word " * 600),ref:"",answered:true,ruled:true,extra:""}],
@@ -303,6 +343,40 @@ DLM=$(printf '%s' "$DL_ROWS" | jq -c --argjson v "$VIEW2" --arg m "$MARKER" "$RE
 eq "$(printf '%s' "$DLM" | jq -c '.unstamped')" '["D2"]' "(MODEL) a flagged review body decline is an answer the comment delivers"
 has "$(printf '%s' "$DLM" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')" "  > Declined: We keep Y because Z" \
   "(MODEL) …and the rendering it is stamped against carries it"
+# A decline answered in its thread, beside a landed fix, as the read of the PR
+# finds the decline's thread: open while it waits on the reviewer, resolved once
+# they accept it.
+WROWS='[{"id":"W1","status":"closed","title":"finding[human]: w1","description":"Locus: a.sh:1\n\n**The barrier now runs once per page.**\n\nRaised by human:op reviewing anchor A.",
+  "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"declined","finding.comment_id":"11","finding.review_id":"10","finding.reply":"the count query is paged, so the barrier runs per page.","finding.reply_posted":"1"}},
+ {"id":"W2","status":"closed","title":"finding[human]: w2","description":"Locus: a.sh:2\n\n**Fix the cap.**\n\nRaised by human:op reviewing anchor A.",
+  "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"must-fix","finding.comment_id":"12","finding.review_id":"10","finding.fix_unit":"K","finding.fix_answer":"Fixed as you suggested."}}]'
+wview() { # whether the read finds the decline thread resolved
+  jq -cn --argjson r "$1" '{ reviews: [{databaseId:10,state:"COMMENTED",author:{login:"op"},commit:{oid:"c1"},url:""}],
+    threads: [{isResolved:$r,comments:{nodes:[{databaseId:11,url:"https://github.com/o/r/pull/7#discussion_r11"}]}},
+              {isResolved:true,comments:{nodes:[{databaseId:12,url:"https://github.com/o/r/pull/7#discussion_r12"}]}}],
+    issue_comments: [] }'
+}
+wmodel() { printf '%s' "$WROWS" | jq -c --argjson v "$(wview "$1")" --arg m "$MARKER" \
+  "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {"K":{"closed":true}}; $m) | .[0]'; }
+WOPEN=$(wmodel false | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')
+has "$WOPEN" "### Your review: 2 points, 1 needs you, 1 answered
+" "(MODEL) a decline whose thread the read finds open is counted as needing the reviewer"
+hasnt "$WOPEN" "all answered" "(MODEL) …so the count line does not read all answered while it waits"
+has "$WOPEN" "**Needs you**
+- **[The barrier now runs once per page.](https://github.com/o/r/pull/7#discussion_r11)** Declined: the count query is paged, so the barrier runs per page.
+  Resolving the thread accepts the decline. A reply in the thread overrules it.
+
+**Done**" "(MODEL) …and listed under Needs you, what it asks on a line of its own"
+hasnt "$WOPEN" "[!IMPORTANT]" "(MODEL) …with no visit callout, since no visit carries it"
+WDONE=$(wmodel true | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')
+has "$WDONE" "### Your review: 2 points, all answered
+" "(MODEL) once the reviewer resolves the thread, the count line reads all answered"
+has "$WDONE" "**Worth a look**
+- **[The barrier now runs once per page.](https://github.com/o/r/pull/7#discussion_r11)** Declined: the count query is paged, so the barrier runs per page.
+
+**Done**" "(MODEL) …and the decline is worth a look"
+hasnt "$WDONE" "Needs you" "(MODEL) …with nothing shown as needing the reviewer"
+hasnt "$WDONE" "Resolving the thread" "(MODEL) …and nothing asked of them"
 
 echo "# (ROUND)"
 eq "$(jq -nc "$REVIEW_ROUND_DEF"'[ ra_round_key("op"; "c1"), ra_round_key("op"; null), ra_round_key(""; "c1") ]')" '["op@c1","",""]' \
@@ -345,8 +419,8 @@ has "$RR" "### Your review: 3 points" "(ROUND) …one comment counting every poi
 eq "$(printf '%s' "$RR" | grep -c '<summary>Notes from the fix</summary>')" "1" "(ROUND) …with the notes from the fix once"
 eq "$(printf '%s' "$RR" | grep -c '<!-- gc-review-answer:r[0-9]* -->')|$(printf '%s' "$RR" | grep -c 'gc-review-answer:r501 -->')" "1|1" \
   "(ROUND) …and one key, the lowest review's"
-# One review with a body and inline comments renders as main renders it: the
-# golden below is main's ra_render over this input, byte for byte.
+# One review with a body and inline comments is one round, rendered whole: the
+# golden below is ra_render over this input, byte for byte.
 GROWS='[
  {"id":"B","status":"closed","title":"finding[human]: s","description":"Locus: PR review\n\nRename the flag before this lands.\n\nRaised by human:op reviewing anchor A.",
   "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"declined","finding.comment_id":"10","finding.review_id":"10","finding.reply":"the name matches the other scripts"}},
@@ -360,7 +434,7 @@ GVIEW='{"reviews":[{"databaseId":10,"state":"CHANGES_REQUESTED","author":{"login
 GOLDEN='> [!IMPORTANT]
 > **Needs you: visit tk-v.** Should the retry back off?
 
-### Your review: 3 points, 2 answered so far
+### Your review: 3 points, 1 needs you, 2 answered
 
 1 needs you, 1 worth a look, 1 done.
 
@@ -385,7 +459,7 @@ Notes from K.
 <!-- gc-review-answer:r10 -->'
 GM=$(rmodels "$GROWS" "$GVIEW" '{"10":{"marks":["resolved r10"],"visits":[],"swaps":"-"}}' '{"K":{"title":"rework","fix_notes":"Notes from K.","closed":true}}')
 eq "$(printf '%s' "$GM" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'.[0] | ra_render($m)')" "$GOLDEN" \
-  "(ROUND) one review with a body and inline comments renders as it did before rounds"
+  "(ROUND) one review with a body and inline comments renders whole, as one round"
 eq "$(printf '%s' "$GM" | jq -c '.[0] | [ .existing.db, .existing.digest, .strays ]')" '["900","1",[]]' "(ROUND) …finding its one comment, with no copy to fold"
 # A body review that only frames the round: ruled restates, it is no point.
 FROWS="[$(rrow F1 501 51 must-fix open),$(rrow F2 502 52 must-fix open),$(rrow F4 504 504 restates closed)]"
@@ -456,6 +530,9 @@ eq "$N" "Your review: 3 points, all answered (U). Dismissal is not approval; the
   "(DISMISS) one line: the count line, the living answer, and that dismissal is not approval"
 has "$(printf '%s' "$MODEL" | jq -r "$REVIEW_ANSWER_DEF"'.self = true | ra_dismiss_note("U")')" "no fresh review is requested" \
   "(DISMISS) a review under the city's own account says no fresh review is requested"
+eq "$(wmodel false | jq -r "$REVIEW_ANSWER_DEF"'ra_dismiss_note("U")')" \
+  "Your review: 2 points, 1 needs you, 1 answered (U). Dismissal is not approval; the merge still gates on an explicit approving review." \
+  "(DISMISS) a note dismissing a review whose decline waits in an open thread says a point needs the reviewer"
 
 echo "# (READERS)"
 PF="$HERE/pr-facts.sh"
@@ -469,6 +546,7 @@ eq "$(grep -c '"$CITY_OWN_DEF$REVIEW_ROUND_DEF"\|"$WB_OWED_REPLY_DEF$REVIEW_ROUN
 has "$(cat "$PF")" 'WB_OWED_REPLY_DEF="$REVIEW_OWED_REPLY_DEF"' \
   "(READERS) the owed-reply set the reply arm and the dismissal read is built on these defs, so it cannot drift from the living answer's"
 has "$(cat "$PF")" 'ra_ruled_reply($disp)' "(READERS) …and a thread reply leads with its ruling through the same def"
+has "$(cat "$PF")" 'ra_open_ask($disp)' "(READERS) …and says what resolving its thread does through the def the living answer reads"
 OTHERS=$(cd "$ROOT" && git grep -l -F 'gc-review-answer:' -- . ':!assets/scripts/review-answer.sh' ':!assets/scripts/pr-facts.sh' ':!*.test.sh' ':!docs/**' ':!specs/**' ':!lifecycle/**' 2>/dev/null)
 eq "$OTHERS" "" "(READERS) no other file writes a living answer's review key"
 

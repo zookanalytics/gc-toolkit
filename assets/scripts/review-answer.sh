@@ -22,17 +22,28 @@
 # the others once it carries them.
 #
 # One point per finding, in four sections that appear only when non-empty:
-#   Needs you     a needs-you finding whose visit is still open
-#   Worth a look  a declined or deferred finding, and any point whose fix
-#                 flagged it (finding.fix_flag): the fix chose among options
-#                 the reviewer left open, departed from their suggestion, or
-#                 changed code the ruling declined
+#   Needs you     a needs-you finding whose visit is still open, and a declined
+#                 or deferred finding whose reply waits in an open thread
+#   Worth a look  any other declined or deferred finding that owes its raiser
+#                 a reply, and any other point whose fix flagged it
+#                 (finding.fix_flag): the fix chose among options the reviewer
+#                 left open, departed from their suggestion, or changed code
+#                 the ruling declined
 #   In progress   a point not yet ruled, or a must-fix whose fix has not landed
 #   Done          a must-fix whose fix landed, a needs-you finding the
 #                 operator's ruling settled, and a comment that asked for
 #                 nothing (declined with no reply)
 # A review body ruled restates frames the inline comments of its round and is
 # no point of its own, so it has no entry and no count.
+#
+# The write-back never resolves a thread that holds a decline or a deferral it
+# answered there. The thread waits for the reviewer, who accepts the ruling by
+# resolving it or overrules the ruling by replying in it. So such a point needs
+# the reviewer while the read of the PR finds its thread open, says what each
+# act does (ra_open_ask), and is worth a look once they resolve the thread. A
+# review body sits in no thread, so nothing of its own waits on them. The count
+# line counts the points that need the reviewer, and never reads all answered
+# while one does.
 #
 # Each point is a label linked to the comment it answers, one sentence, and the
 # commit, follow-up or visit that carries it. The label is the comment's own
@@ -42,14 +53,14 @@
 # unit's result (finding.fix_answer), or the validator's ruling-side answer
 # (finding.answer, falling back to the owed reply it recorded). A point not yet
 # answered says which stage it is at. A link goes only to a comment the read of
-# the PR found, and no sentence points at a reply or thread: the answer is in
-# the entry itself. A review body has no thread to carry a decline's or a
-# deferral's reply, so its entry carries that reply, quoted under the entry
-# whenever the sentence is not the reply itself, and the comment is what
-# delivers it, as it delivers the mark that records the body answered. A
-# round stays live, and gets its comment, while a finding is open, a
-# changes-requested block of one of its reviews stands, or the comment owes it
-# an answer or a mark.
+# the PR found, and no sentence sends the reader to a reply or thread for the
+# answer, which is in the entry itself. A review body has no thread to carry a
+# decline's or a deferral's reply, so its entry carries that reply, quoted
+# under the entry whenever the sentence is not the reply itself, and the
+# comment is what delivers it, as it delivers the mark that records the body
+# answered. A round stays live, and gets its comment, while a finding is open,
+# a changes-requested block of one of its reviews stands, or the comment owes
+# it an answer or a mark.
 #
 # The comment always fits the size GitHub takes in one comment, because the
 # dismissal waits on it (ra_render). A long review shortens its notes from the
@@ -88,6 +99,12 @@ REVIEW_OWED_REPLY_DEF='
     if $disp == "declined" then (if test("^\\s*declin"; "i") then . else "Declined: " + . end)
     elif $disp == "deferred" then (if test("^\\s*defer"; "i") then . else "Deferred: " + . end)
     else . end;
+  # What a decline or a deferral answered in a thread asks of the reviewer,
+  # since that thread waits for them: the reply in the thread and the point in
+  # the living answer both end with it.
+  def ra_open_ask($disp):
+    "Resolving the thread accepts the " + (if $disp == "deferred" then "deferral" else "decline" end)
+    + ". A reply in the thread overrules it.";
 '
 # Which round a review belongs to is REVIEW_ROUND_DEF. pr-facts.sh records it on
 # each human finding (finding.review_round), as it files one and again from each
@@ -188,6 +205,16 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
         (first($view.threads[]? | (.comments.nodes // [])[] | select(((.databaseId // 0) | tostring) == $c)
           | (if ((.url // "") | tostring) != "" then .url else $prurl + "#discussion_r" + $c end)) // "")
       end;
+  # The thread an inline finding comment sits in, as the read of the PR found
+  # it: open or resolved. Empty for a review body, which sits in no thread, and
+  # for a comment the read does not hold.
+  def ra_thread($view):
+    .cid as $c
+    | if $c == "" or .body then ""
+      else
+        (first($view.threads[]? | select(any((.comments.nodes // [])[]; ((.databaseId // 0) | tostring) == $c))
+          | if (.isResolved // false) then "resolved" else "open" end) // "")
+      end;
   # A human finding bead row as the record the points are made from. $beads
   # maps a bead id to what was read of it (ra_models). A rework child closes
   # when its branch lands, so a fix unit read closed has its commits on the PR.
@@ -213,7 +240,7 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
         cid: (($m["finding.comment_id"] // "") | tostring),
         rid: (($m["finding.review_id"] // "") | tostring) }
     | . + { body: (.rid != "" and .rid == .cid) }
-    | . + { url: ra_url($view; $prurl), fix_landed: (($beads[.fix_unit] // {}).closed == true) };
+    | . + { url: ra_url($view; $prurl), thread: ra_thread($view), fix_landed: (($beads[.fix_unit] // {}).closed == true) };
   # A review body finding whose ruling owes its raiser an answer, which the
   # living comment delivers, since the comment sits in no thread.
   def ra_owes_reply: .body and .reply != "" and (.disp | ra_owes_disp);
@@ -221,7 +248,9 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
   # review body owed a decline or a deferral gets that reply whole in its entry:
   # as the sentence when the sentence is the reply and fits in one, and quoted
   # under the entry otherwise. A needs-you body answer is its visit, which the
-  # entry names and the callout on top carries.
+  # entry names and the callout on top carries. A decline or a deferral whose
+  # reply sits in a thread still open waits on the reviewer: it needs them, in
+  # the words it would be worth a look in, and asks them to act.
   def ra_point:
     . as $f
     | .disp as $d
@@ -232,6 +261,7 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
     | ($f.body and ($d == "declined" or $d == "deferred") and $rp != "") as $carries
     | (if $carries and ($ruled | length) > ra_tiers[0].sentence then "" else $ruled end) as $said
     | (((.fix_flag // "") | tostring) == "1" and $fa != "") as $flag
+    | ((.thread // "") == "open" and (.open | not) and ($d == "declined" or $d == "deferred") and $rp != "") as $waits
     | (if .fix_unit != "" and .cid != "" then "{{gc-commits:" + .fix_unit + "|" + .cid + "}}" else "" end) as $commits
     | if $d == "restates" then empty
       elif $d == "needs-you" and .open then
@@ -269,6 +299,7 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
       else
         { section: "progress", sentence: $fa, ref: "", answered: false }
       end
+    | (if $waits then . + { section: "needs", ask: ra_open_ask($d) } else . end)
     | . + { id: $f.id, label: ($f | ra_label), url: $f.url, ruled: ($d != "unvalidated"),
             extra: (if $carries and .sentence != $ruled then $ruled else "" end) };
   # What follows the last write-back marker in a comment of ours: on a living
@@ -374,14 +405,19 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
     .self as $s
     | .members = [ (.members // [])[] | if .rid == $rid then .dismissed = (if $s then "self" else "requeued" end) else . end ];
   def ra_count($n; $word): "\($n) \($word)" + (if $n == 1 then "" else "s" end);
-  # The count line: how many points the review raised and how far they are. It
-  # names no commit, so a push leaves a settled review comment as it stands;
+  # The count line: how many points the review raised, how many of them need
+  # the reviewer, and how far the rest are. A point that needs the reviewer is
+  # not counted answered, so the line never reads all answered while one does.
+  # It names no commit, so a push leaves a settled review comment as it stands;
   # each point cites the commits that answered it.
   def ra_heading:
     (.points // []) as $ps | ($ps | length) as $n
-    | ([ $ps[] | select(.answered) ] | length) as $k
+    | ([ $ps[] | select(.section == "needs") ] | length) as $w
+    | ([ $ps[] | select(.answered and .section != "needs") ] | length) as $k
     | "Your review: " + ra_count($n; "point")
-      + (if $n > 0 and $k == $n then ", all answered"
+      + (if $w > 0 then ", \($w) " + (if $w == 1 then "needs" else "need" end) + " you"
+           + (if $k > 0 then ", \($k) answered" + (if $w + $k < $n then " so far" else "" end) else "" end)
+         elif $n > 0 and $k == $n then ", all answered"
          elif $k > 0 then ", \($k) answered so far"
          elif any($ps[]; .ruled | not) then ", picked up; the ruling is in progress"
          else ", none answered yet" end);
@@ -394,6 +430,7 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
   # repeats the label is left out, and so is a reference the sentence already
   # names; a sentence several times the label length is never only a repeat of
   # it. A clipped sentence or quoted reply names the finding holding it whole.
+  # What a point waiting on the reviewer asks of them is a line of its own.
   def ra_entry($c):
     (.label | if test("[.?!…]$") then . else . + "." end) as $l
     | ((.id // "") | tostring) as $id
@@ -405,6 +442,7 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
       + (if $ref == "" or (($say | contains($ref)) and ($ref | startswith("{{") | not)) then ""
          elif ($ref | startswith("{{")) then $ref
          else " (" + $ref + ")" end)
+      + (if (.ask // "") != "" then "\n  " + .ask else "" end)
       + (if (.extra // "") != "" then "\n" + ([ .extra | ra_clip($c.quote; $id) | split("\n")[] | "  > " + . ] | join("\n")) else "" end);
   # Text cut inside a fenced code block gets the fence closed, so the cut does
   # not swallow the markup after it.
