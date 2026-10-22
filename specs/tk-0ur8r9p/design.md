@@ -249,11 +249,12 @@ on 2026-10-22: bd's assignee check at a close, and in Gas City the identities
 `gc session close` releases work under, and how release-if-current picks its
 store and what it prints, which behave the same at b941bd330. The facts
 Accept's finish and the migration's wait for every sitting rest on were read on
-2026-10-22. In Gas City they are a graph.v2 sling's launch lock and the root
-title it sets, and `gc session close`'s stop before its close, read at
-1e05ae624, which behave the same at 2aeead4e2 and b941bd330. In bd it is the
-close reason a bead's `blocks` listing carries for a closed gate. How the
-upstream packs ask a person was read at their main, 820c7ca0d5. The gc-toolkit
+2026-10-22. In Gas City they are a graph.v2 sling's launch lock, the root title
+it sets and what a launch that fails leaves, and `gc session close`'s stop
+before its close, read at 1e05ae624, which behave the same at 2aeead4e2 and
+b941bd330. In bd it is the close reason a bead's `blocks` listing carries for a
+closed gate. How the upstream packs ask a person was read at their main,
+820c7ca0d5. The gc-toolkit
 facts were read at 35cf7c70f, and a doc read on main instead, because it
 landed there after 35cf7c70f, is cited as main's. The installed gc is
 built from a local commit that upstream does not contain. Where a fact matters,
@@ -272,7 +273,7 @@ bd paths to bd's v1.3.1 source.
 | A `blocks` edge blocks whatever its blocker's type | What the one reader rule rests on. An open blocker of any type holds a bead the same way, so only a gate's `await_type` says that a person must clear the wait, and a reader keeps the human gates among a bead's `blocks` blockers. Re-typing a gate releases nothing. | bd `internal/storage/issueops/blocked_state.go` 213-219 |
 | `bd gate resolve <id> --reason` | Clearing a human gate. It closes the gate with that close reason and recomputes `is_blocked` for the beads it blocked. It skips the close checks, the assignee check among them, so anyone may clear it. On a gate already closed it changes nothing, keeps the first reason and still reports `Gate resolved` with exit 0, so a resolver learns it lost a race only by reading the gate back. | bd `cmd/bd/gate.go` 559-574; `cmd/bd/gate_proxied_server.go` 409-446; `internal/storage/issueops/close.go` 339-384 |
 | `bd reopen <id> --reason` reopens a closed bead of any type, a gate included. It sets `open`, clears `closed_at` and the close reason, drops the lease, records the reason as a comment, and recomputes `is_blocked` for the beads that wait on the bead, so what a reopened gate blocked is blocked again. On a bead that is not closed it changes nothing | Accept's way back from its own accepted close, when a gate filed after its live read shows or its sling fails (section 8). Today's Accept reopens a demand the same way after a failed sling (gc-toolkit `assets/scripts/gc-helm.sh` 2901-2921). | bd `cmd/bd/reopen.go` 15-20, 64-67, 91-99; `internal/storage/issueops/reopen.go` 48-50, 63-68, 100-117; `internal/storage/issueops/blocked_state.go` 455-475; `internal/storage/domain/db/issue.go` 1113-1114 |
-| A graph.v2 `gc sling <bead> --on <formula>` launches under a per-bead lock that holds across processes. Under that lock it refuses the launch, exiting 3, while a root of the same formula that an earlier launch at the bead poured is live, and otherwise it pours and starts the root. Each launch mints a synthetic input convoy that tracks the bead, and the root carries the convoy's id as `gc.input_convoy_id` and the formula's name as `gc.formula_name`. `--title` sets the root's title. A classic formula takes another path, which runs without the lock | Why runs that finish one acceptance pour once, and how a run finds the root of a dispatch that another run sent, by the token in its title (section 8). Every work formula the city carries is graph.v2. Its classic formulas are the deacon and witness patrols, the two dog formulas and mol-visit, which retires. | Gas City `internal/sling/sling_core.go` 544-641 (the lock at 563, the check at 589, the classic path at 720-721) and 1763-1808; `internal/sling/sling_attachment.go` 97-194; `internal/sourceworkflow/sourceworkflow.go` 34-41 and 335-373; `cmd/gc/cmd_sling.go` 148, 944-947 and 997-1000; `internal/graphv2/invocation.go` 418-457; `internal/sling/sling.go` 1616-1628; `internal/formula/compile.go` 366; `internal/molecule/graph_apply.go` 192-199; the `[requires]` tables of gc-toolkit's `formulas/` and of the other formulas `gc formula list --rig gc-toolkit` named on 2026-10-22 |
+| A graph.v2 `gc sling <bead> --on <formula>` launches under a per-bead lock that holds across processes. Under that lock it refuses the launch, exiting 3, while a root of the same formula that an earlier launch at the bead poured is live, and otherwise it pours and starts the root. Each launch mints a synthetic input convoy that tracks the bead, and the root carries the convoy's id as `gc.input_convoy_id` and the formula's name as `gc.formula_name`. `--title` sets the root's title. A pour that fails part way marks each bead it made `molecule_failed` and closes them, and Gas City's own readers skip a root so marked. A launch can also fail after its pour has committed, because starting the root is a later write, and Gas City rolls back only a launch that replaced a root under `--force`. That pour's steps were routed for workers to claim as it committed, and a workflow runs until its root closes, so the root it leaves runs. A classic formula takes another path, which runs without the lock | Why runs that finish one acceptance pour once, and how a run finds the root of a dispatch that another run sent, by the token in its title (section 8). Also why Accept reads that root after a sling that fails, and why a root marked `molecule_failed` is no dispatch (section 8). Every work formula the city carries is graph.v2. Its classic formulas are the deacon and witness patrols, the two dog formulas and mol-visit, which retires. | Gas City `internal/sling/sling_core.go` 544-641 (the lock at 563, the check at 589, the start and its rollback at 612-622, the classic path at 720-721), 975 and 1763-1808; `internal/sling/sling_attachment.go` 97-194; `internal/sourceworkflow/sourceworkflow.go` 34-41 and 335-373; `cmd/gc/cmd_sling.go` 148, 944-947 and 997-1000; `internal/graphv2/invocation.go` 418-457; `internal/sling/sling.go` 1433, 1463-1482, 1534-1537, 1572-1575, 1589-1612 and 1616-1628; `internal/formula/compile.go` 366; `internal/molecule/graph_apply.go` 192-199 and 238-241; `internal/molecule/molecule.go` 514, 798 and 1821-1831; `internal/dispatch/runtime.go` 343-350; the `[requires]` tables of gc-toolkit's `formulas/` and of the other formulas `gc formula list --rig gc-toolkit` named on 2026-10-22 |
 | `bd close` refuses a blocked bead, a bead with open children, and a bead assigned to any actor but the one closing it, whatever its status, each without `--force`, and a close removes none of the bead's dependency rows | A human gate holds the close of what it blocks, and a conversation's `tracks` edge holds nothing. A bead a gate blocks closes only once the gate closes or the edge is removed with `bd dep remove` (section 11). A dismiss falls back to `--force` past the assignee check (section 7). The migration releases a visit from its holder before it closes it, so that close stays unforced and still meets the blocker and child checks (section 11). | bd `internal/storage/issueops/close.go` 150-160, 203-205, 339-384; `cmd/bd/close_direct.go` 84; `cmd/bd/show_unit_helpers.go` 27-35; `internal/validation/issue.go` 165-174 |
 | A blocked bead's state cascades to its `parent-child` children and their descendants, whatever their types and the bead's, and through no other edge. A child added under a blocked bead is blocked as it is added. `bd list --parent <bead>` lists the bead's children, and also any bead with no parent whose id is the bead's id followed by a dot. Without `--all` or `--status` it leaves out the closed and pinned children, which are the ones the cascade never blocks. By default it also hides gate, infra, template and wisp children, which the cascade does block, and `--include-gates`, `--include-infra`, which admits the wisp plane too, and `--include-templates` list them. It hides a bead flagged pinned, which bd defines as a context marker rather than a work item | What a gate on a parent pauses, which is why each caller that can land on a parent states what its gate blocks (sections 1 and 3), and how the migration tests a bead for an open child in one call (section 11). | bd `internal/storage/issueops/blocked_state.go` 206-240 and 499-511; `internal/storage/issueops/create.go` 321-325 and 507-523; `internal/storage/issueops/dependencies.go` 324-331; `internal/storage/sqlbuild/filter.go` 174-178; `internal/workapi/list.go` 242-250, 351-357 and 428-452; `cmd/bd/list.go` 465-479; `internal/types/types.go` 158; `docs/component-model.md`, I1's shape law |
 | `bd dep add <a> <b> --type=until` says that <b> resolves <a>. `until` is a well-known reference type outside bd's ready calculation, and bd only displays it: nothing in bd acts when <b> closes. The pack's deferred-dispatch reconcile pass closes <a> as resolved once <a> is open and unassigned, every `until` target of it has closed, no `blocks` blocker of its own is open, and <a> carries no live work | Why the migration moves a visit's `until` waits onto its gate, as it moves its `blocks` waits (section 11). | bd `internal/types/types.go` 1273-1274, 1333-1337; `cmd/bd/dep_relation.go` 47; gc-toolkit `assets/scripts/until-resolved.sh` 1-25 and `assets/scripts/deferred-dispatch.sh` 1301-1414 |
@@ -288,7 +289,7 @@ bd paths to bd's v1.3.1 source.
 | Gas City's releases of a dead holder's claims. An agent's default on_death runs for pool instances only. Core's orphan-sweep resets an in-progress bead only when it can show the holder dead, and it counts a bead whose `gc.session_name` it cannot resolve as unverifiable and leaves it, which is every bead `gc hook --claim` claimed in a manual session. Both list without `--include-gates`, so neither sees a gate | Why a sitting's recovery runs through its alias, and why engage needs no reclaim (section 6). | Gas City `cmd/gc/cmd_start.go` 159-176; `internal/config/workquery.go` 1351-1378; `internal/bootstrap/packs/core/assets/scripts/orphan-sweep.sh` 89, 106, 277, 335, 345, 632-634; `cmd/gc/cmd_hook_claim.go` 2073-2075 |
 | `gc bd release-if-current <id> <holder>` runs `bd update <id> --if-assignee <holder> --if-status in_progress --status open --assignee ""`, so it leaves the bead open and unassigned. When the bead is no longer in progress under that holder, bd writes nothing. It is not a by-id call, so the holder is one of the words gc routes by, and city-prefixed words are tried first: when the holder is a bead in the city store, such as a pool session's id, the release of a rig's bead goes to the city store. The command prints `released` or `skipped` and exits 0 either way, and it prints `skipped` as well when the store it chose has no such bead | Not used. A conversation released this way would be assigned to nobody, a state neither the board nor engage reads as a conversation, so a conversation's hand-off reassigns the task to `human` with the same guard instead (section 6). The migration sends the same write to a visit through `gc bd update`, which routes by the visit's id (section 11). | Gas City `internal/beads/bdstore_conditional_release.go` 78-110; `cmd/gc/cmd_bd.go` 124-137, 550-556, 813, 919-946, 1068-1077 and 1094-1123 |
 | A manual session does not end when its work closes. It stays until it is closed or drained, and a wait hold or an idle-sleep setting only puts it to sleep. An attached session is woken even when drained, unless a wait hold is set. `gc session attach` wakes a dormant session, and `wake_mode = "resume"` resumes the session's own transcript by its session key. A closed session does not reserve its alias: a new session under it starts a fresh transcript and takes the in-progress work still assigned to the alias. `gc session close` releases no claim held under the alias. No closer the controller runs on its own ends a manual session because its work closed: the stale-session closers exempt one that has started its conversation, and the core reaper prunes one only once it has drained. `gc session list` leaves a closed session out, whatever state it is asked for | Why converse-reap stays, how a sitting resumes, and why a held conversation is found by its assignee rather than by its session (section 6). Also why the migration releases a visit whose sitting it has ended (section 11). | Gas City `cmd/gc/compute_awake_set.go` 432-440, 583-594, 668-693; `internal/session/manager.go` 1264-1271, 1344-1362; `internal/session/names.go` 639-641; `cmd/gc/cmd_session.go` 1894-1897, 1946; `cmd/gc/session_beads.go` 969-975; `cmd/gc/work_location.go` 220-225; `cmd/gc/city_runtime.go` 3915; `cmd/gc/session_reconciler.go` 1057-1060; `cmd/gc/session_beads.go` 3500; `internal/bootstrap/packs/core/assets/scripts/reaper.sh` 69, 1402-1404; a live `gc session list --state closed`, which returned no row on 2026-10-20, as `formulas/mol-witness-patrol.toml` 424 records |
-| `gc session close` stops the session's runtime before it closes the session's bead, and a missing session or server counts as stopped. A stop that fails returns its error, the command exits 1, and the bead stays open, so `gc session list` still lists the session | Why the migration counts an old sitting as ended only once its session reads back gone, and moves nothing while one has not (section 11). | Gas City `internal/session/manager.go` 1715-1790 (the stop at 1756-1758, before the close at 1775) and its test `TestCloseDetailed_StopErrorLeavesBeadOpen`, `internal/session/manager_test.go` 5731-5755; `cmd/gc/cmd_session.go` 1914-1918 |
+| `gc session close` stops the session's runtime before it closes the session's bead. A session already gone counts as stopped, and so does a missing tmux server once Gas City can confirm the server dead. A stop that fails returns its error, the command exits 1, and the bead stays open, so `gc session list` still lists the session | Why the migration counts an old sitting as ended only once its session reads back gone, and moves nothing while one has not (section 11). | Gas City `internal/session/manager.go` 1715-1790 (the stop at 1756-1758, before the close at 1775) and its test `TestCloseDetailed_StopErrorLeavesBeadOpen`, `internal/session/manager_test.go` 5731-5755; `internal/runtime/runtime.go` 345-351; `cmd/gc/cmd_session.go` 1914-1918 |
 | The pool execution backstop nudges, then drains, a pool session that holds in-progress work and is quiet for 90 seconds, with no attachment exemption. It governs only a session marked `pool_managed`, and Gas City marks one so only when the controller started it as neither a named nor a manual session, which is the origin `ephemeral`. `gc session new` with an alias gives a session the origin `manual` | Why a sitting's session is not a pool session, and why engage's `gc session new` keeps it out of the backstop's reach (section 6). | Gas City `cmd/gc/idle_nudge.go` 57-59; `cmd/gc/execution_backstop.go` 321-322, 405-421, 691; `cmd/gc/cmd_session.go` 289, 418, 698-704; `cmd/gc/session_origin.go` 172-181; `cmd/gc/reconcile_arms_metadata.go` 103, 131-133; `cmd/gc/session_beads.go` 1918, 2205-2206 |
 | A template's `min_active_sessions` defaults to 0, so a template that leaves it out or writes 0 keeps no session running for its own sake. A template with a `scale_check` gets a demand pass of its own | Why the converse templates' declared pool starts no sitting, and what pool-demand-wiring.test.sh guards (section 6). | Gas City `internal/config/session_capacity.go` 27-33; `cmd/gc/allocator_scalecheck_lane.go` 107-124 |
 | Core notify-on-human-gate-creation and renudge-stale-human-gates | Gas City's native reach for a human gate. The town turns the second off today, and turns the first off before the cutover (section 5). The first mails a gate's addressee once, when the gate is created, and nudges it as well when the addressee is a session rather than `human`. The second mails it again once the gate has been open an hour, and at most once an hour after that. Both act only on an open human gate, never read its await id, and address its assignee, then `gc.deferred_assignee`, then `$GC_ESCALATION_RECIPIENT` (default `human`). | Gas City `internal/bootstrap/packs/core/orders/notify-on-human-gate-creation.toml` 1-30 and `renudge-stale-human-gates.toml` 1-37; `internal/bootstrap/packs/core/assets/scripts/notify-on-human-gate-creation.sh` 1-80, 173-181, and `renudge-stale-human-gates.sh` 68-74; the town's city.toml 304-311 |
@@ -833,7 +834,7 @@ changes around the call.
 | liveness-sweep.sh, finding.sh | Unchanged calls. Their beads are an anchor, a standing triage bucket, or the finding's anchor, and each gate blocks that bead. liveness-sweep.sh puts its census in the message as its re-check command, instead of stamping it and `visit.recheck` on a visit (section 4), and its disposition text names human-gate.sh where it named `gc-helm.sh demand`. finding.sh records the gate's id (section 4). |
 | upstream-finding.sh | Its own `--pool` option and the forwarding of it (upstream-finding.sh 57, 411) retire with the helper's, and so do the cases in upstream-finding.test.sh that pin the forwarding. No caller passes the option, so every call is unchanged. Its gate is the operator's action, the send itself: it blocks the send bead that carries the command, so the operator clears the gate, sent or declined, before the bead can close. bd refuses to close a bead an open gate blocks, where today the send bead closes as the answer (`docs/outbound-sends.md`). |
 | The gascity-keeper sub-pack's refinery fragment and its polecat-patterns fragment | The refinery fragment's call passes flags escalate.sh rejects, behind `\|\| true`. tk-vfgmu8k fixes it to escalate.sh's flags, and this design keeps those flags. Where the polecat-patterns fragment says "File an escalation visit (`escalate.sh`)", it says to file a human gate with human-gate.sh (`packs/gascity-keeper/template-fragments/polecat-patterns.template.md` 55-56). |
-| first-reaction-dispose.sh | The helper with the key `first-reaction`, blocking the bead the reaction is about, so the bead waits for the operator as it does today. On a bead with open children it blocks the parent too, because the reaction's ruling or recommendation decides how the whole bead proceeds, so its unstarted parts wait with it, and Accept works there as on any bead (section 8). The recommend exit files that gate first and sets `gc.recommended_formula` after it, where today it sets the recommendation first, for the visit the sweep files from that gate (first-reaction-dispose.sh 822-841, 1005-1029). So no recommendation is older than the newest gate under the key, which is how Accept finds the recommendation's gate once that gate is closed (section 8). Its `--visit` option, which blocked the subject on a visit, retires. |
+| first-reaction-dispose.sh | The helper with the key `first-reaction`, blocking the bead the reaction is about, so the bead waits for the operator as it does today. On a bead with open children it blocks the parent too, because the reaction's ruling or recommendation decides how the whole bead proceeds, so its unstarted parts wait with it, and Accept works there as on any bead (section 8). The ruling and recommend exits each clear a recommendation already on the bead before they file their gate, and the recommend exit sets `gc.recommended_formula` only once its gate is filed. Today the ruling exit already clears first, and the recommend exit sets its recommendation before the gate, for the visit the sweep files from that gate (first-reaction-dispose.sh 822-841, 1005-1029). So no recommendation is older than the newest gate under the key, which is how Accept finds the recommendation's gate once that gate is closed (section 8). An exit that stops part way never leaves its gate beside an older recommendation, which Accept would sling in place of the one the gate asks about. Its `--visit` option, which blocked the subject on a visit, retires. |
 | mol-validate-close, mol-feedback-distiller | The helper with their own keys (section 2). mol-validate-close files a gate on doubt, which an open child that is real work raises, so on a bead with open children, tested with the same call, it opens a conversation instead, because blocking the parent would pause the very work its doubt is about. The distiller's gate blocks the contested pattern, whose rule waits on the ruling. |
 | gc-helm.sh engage and open, the operator's intake, helm-svc POST /helm/open | No helper call. They file and take conversations (sections 6 and 8). |
 | The waits, prs and converse-settle skills | The helper, or the native call, where they called `gc-helm.sh demand` (section 9). The waits skill's own call to the helper is unchanged. |
@@ -1443,17 +1444,23 @@ gate, it answers in these steps:
 5. **It records the dispatch** as today: `gc.recommended_formula_dispatched`
    lands in the write that strips `gc.recommended_formula`.
 
-When step 3 finds a gate, or the sling fails, Accept reopens the
-recommendation's gate with `bd reopen`, reads it back as open, and dispatches
-nothing. That path starts only from an Accept's accepted close, so it never
-undoes another answer. A reopen clears the close and its reason, and blocks
-again what the gate blocked (see the platform section), as today's Accept puts
-a demand back after a failed sling (gc-helm.sh 2901-2921). An answer that met
-Accept's close in that window read Accept's answer and reported it. The
-reopened gate is back on the board, owed, and that answer can be given again.
-The resolve comes before the sling, today's order (gc-helm.sh 3110-3138), so the
-run never finds the recommendation's own gate open. Accept no longer runs
-dismiss. A sitting on the bead is the operator's to end.
+When step 3 finds a gate, Accept reopens the recommendation's gate with
+`bd reopen`, reads it back as open, and dispatches nothing. When the sling
+fails, Accept first reads the token's root, as a finishing run does (below),
+because a sling can fail after its pour has committed, and that pour runs (see
+the platform section). When the token's root exists, the dispatch landed, and
+Accept records it. When the search finds none, Accept reopens the gate the same
+way. When the search does not answer, Accept writes nothing more, which leaves
+the acceptance for the next Accept to finish. The reopen starts only from an
+Accept's accepted close, so it never undoes another answer. A reopen clears the
+close and its reason, and blocks again what the gate blocked (see the platform
+section), as today's Accept puts a demand back after a failed sling (gc-helm.sh
+2901-2921). An answer that met Accept's close in that window read Accept's
+answer and reported it. The reopened gate is back on the board, owed, and that
+answer can be given again. The resolve comes before the sling, today's order
+(gc-helm.sh 3110-3138), so the run never finds the recommendation's own gate
+open. Accept no longer runs dismiss. A sitting on the bead is the operator's to
+end.
 
 **An Accept that stops part way is finished by the next one.** The resolve is
 the acceptance. Once an Accept's answer reads back on the gate, no other answer
@@ -1470,10 +1477,13 @@ answer, in place of steps 1 and 2:
   that acceptance pours a root whose title carries its token, so one search
   finds the root, live or finished:
   `gc bd list --all --include-ephemeral --title-contains accept:<token> --json`,
-  run in the bead's store. When the root exists, the stopped run's sling landed.
-  This run then takes step 5 alone: it records the dispatch and slings nothing.
-  A search that does not answer proves nothing, so the run says so and writes
-  nothing.
+  run in the bead's store. A root marked `molecule_failed` is a pour that
+  failed part way, which Gas City closes, so it is no dispatch. Any other is the
+  token's root: its pour committed, so the stopped run's dispatch landed, even
+  when its sling then failed (see the platform section). When the token's root
+  exists, this run takes step 5 alone: it records the dispatch and slings
+  nothing. A search that does not answer proves nothing, so the run says so and
+  writes nothing.
 - **Otherwise it takes steps 3, 4 and 5 under that token.** When step 3 finds
   another gate, it reopens the recommendation's gate, which puts the question
   back on the board, owed, as it does for a run that did not stop.
@@ -1494,13 +1504,13 @@ Two runs that finish one acceptance at once pour once, and so do a finishing run
 and a stopped run that was only slow. Gas City launches a graph.v2 formula at a
 bead under a per-bead lock that holds across processes. Under that lock it
 refuses a second launch of the same formula at the bead, exiting 3, while a root
-that an earlier launch there poured is live (see the platform section). A run
-whose sling is refused that way reads the token's root, as a finishing run does
-first. When the root exists, the run records the dispatch. When it does not,
+that an earlier launch there poured is live (see the platform section). A
+refused sling is a failed one, so the refused run reads the token's root, finds
+the root the other run poured, and records the dispatch. With no token's root,
 the formula already runs at the bead from another dispatch, so Accept reopens
-the recommendation's gate and names that run's root, as for any failed sling.
-Gas City takes that lock for a graph.v2 formula, and every work formula the city
-carries is one (see the platform section).
+the recommendation's gate and names that run's root. Gas City takes that lock
+for a graph.v2 formula, and every work formula the city carries is one (see the
+platform section).
 
 **Ranking is unchanged.** `rankScore` (derive.go 734-741) and its inputs are
 untouched. Every input a visit supplied, held and the owed clock among them, now
@@ -1527,7 +1537,7 @@ input gctk pr-status and the board share, `OpenVisit`, is renamed
 |---|---|
 | engage, `--new-subject` | Section 6. `--new-subject` still creates the subject first (gc.origin=operator), then engages it. |
 | open (POST /helm/open) | Files a conversation in the operator's queue without engaging it. `parseOpenStdout` keeps its sentences. `--allow-duplicate` keeps its meaning, a fresh conversation even when the bead has one, which engage passes for a concern (section 6). Without it, a second concern on a bead whose conversation waits in the queue joins that conversation: open appends the new reason and body to that task's notes. |
-| accept (POST /helm/accept) | Resolves only the recommendation's gate, reads it back, and slings only when the gate records Accept's own answer, as above. On an acceptance an earlier Accept left unfinished, it resolves nothing and finishes that acceptance under its token, slinging only when no root carries the token. While another human gate blocks the bead, it refuses, writes nothing and names each open gate. It runs no dismiss. |
+| accept (POST /helm/accept) | Resolves only the recommendation's gate, reads it back, and slings only when the gate records Accept's own answer, as above. On an acceptance an earlier Accept left unfinished, it resolves nothing and finishes that acceptance under its token, slinging only when it finds no token's root, a root under the token that is not a failed pour. While another human gate blocks the bead, it refuses, writes nothing and names each open gate. It runs no dismiss. |
 | dismiss (POST /helm/dismiss) | Ends the sitting (section 7). On a subject with no live sitting it does nothing and says so. |
 | park, takeaway | Unchanged. park files its gate with `bd create --type=gate` (gc-helm.sh 1939), so the gate carries no await type, by design: it is a plain blocker that pauses the parked bead, not a human gate, and a reader takes an empty await type as declaring nothing (see the platform section). takeaway writes the subject's headline. |
 | demand | Retires. Its callers move to the helper or to the native call (section 2). |
@@ -1680,8 +1690,8 @@ another bead and drops its escalation-rig.sh stub, decline-wiring.test.sh,
 visit-close-wiring.test.sh (as the human-gate-withdraw wiring), finding.test.sh,
 finalize-gate.test.sh, bead-rehome.test.sh,
 which adds the retry's withdrawal before the close, first-reaction-dispose's
-tests, which add the gate on a bead with open children and the gate filed before
-the recommendation,
+tests, which add the gate on a bead with open children and the gate filed after
+an older recommendation is cleared and before the new one is set,
 upstream-finding.test.sh, whose `--pool` cases go,
 reconcile-rig-checkouts.test.sh, whose unroutable-pool run goes,
 review-answer.test.sh, merge.test.sh, the prstatus tests, pr-facts.test.sh,
@@ -2155,7 +2165,14 @@ states this section names:
 4. **The migration runs on every store, city first, once the new board is up.**
    Until it finishes, open visits are not on the board, a ruled finding and a
    routed comment that name a visit wait for it, and a sitting that was live at
-   step 3 is running an old prompt against new scripts. The migration ends every
+   step 3 still runs its old prompt against the old scripts in its own worktree,
+   so it still writes to visits the old way. Its session's `pre_start` syncs
+   that worktree only as the session starts, and reconcile-rig-checkouts.sh
+   moves only the rig checkout (`agents/converse-*/agent.toml`,
+   `assets/scripts/worktree-setup.sh` 6-13,
+   `assets/scripts/reconcile-rig-checkouts.sh` 2-7). Once the rig checkout has
+   no converse-claim.sh, the prompt finds its scripts in that worktree
+   (`agents/_converse/prompt.template.md` 122-125). The migration ends every
    such sitting before it moves anything, so the carry takes each sitting's last
    note, then releases each visit from its sitting and closes it. While a
    sitting's session will not stop, the migration names it and moves nothing in
@@ -2180,7 +2197,7 @@ brief allows when the design calls for a split:
 
 | Unit | What it carries |
 |---|---|
-| A. The helper and its callers | The helper on gates, renamed human-gate.sh with a hand-off at escalate.sh and every call renamed with it, with the key as the await id, the dedup and the quiet window read through the bead's `blocks` edges, the retract by resolve, the refusal of a wisp, and `--quiet-window` as the only quiet period: each caller that re-detects one condition declares its window at its call site with its why, the others declare none, and the `GC_ESCALATE_VERDICT_WINDOW=0` prefixes go. Its store derivation and its triage redirect retired, with the deacon prompt's and mol-dog-shutdown-dance's derivations and escalation-rig.sh. The calls that named a wisp, a session or a bead they could not read, and the reports that nothing waits on, on patrol-finding.sh (section 3). await-ruling.sh, with the work bead's edge onto a gate filed on another bead. upstream-finding.sh's `--pool` and reconcile-rig-checkouts.sh's pool knob retired. first-reaction-dispose, mol-validate-close, deferred-dispatch.sh and mol-feedback-distiller on the helper, each with its call-site policy on a bead with open children, and the recommend exit's gate filed before its recommendation (section 3). mol-visit and the formula copies of the gate-visit block retired. The polecat doctrine and pool-worker fragments, the human-gate-withdraw fragment, and the deacon, refinery and witness prompts. The tests named for the helper, renamed with it (section 10). The registry entries of the keys the helper stops writing. |
+| A. The helper and its callers | The helper on gates, renamed human-gate.sh with a hand-off at escalate.sh and every call renamed with it, with the key as the await id, the dedup and the quiet window read through the bead's `blocks` edges, the retract by resolve, the refusal of a wisp, and `--quiet-window` as the only quiet period: each caller that re-detects one condition declares its window at its call site with its why, the others declare none, and the `GC_ESCALATE_VERDICT_WINDOW=0` prefixes go. Its store derivation and its triage redirect retired, with the deacon prompt's and mol-dog-shutdown-dance's derivations and escalation-rig.sh. The calls that named a wisp, a session or a bead they could not read, and the reports that nothing waits on, on patrol-finding.sh (section 3). await-ruling.sh, with the work bead's edge onto a gate filed on another bead. upstream-finding.sh's `--pool` and reconcile-rig-checkouts.sh's pool knob retired. first-reaction-dispose, mol-validate-close, deferred-dispatch.sh and mol-feedback-distiller on the helper, each with its call-site policy on a bead with open children, and the recommend exit's gate filed after an older recommendation is cleared and before its own (section 3). mol-visit and the formula copies of the gate-visit block retired. The polecat doctrine and pool-worker fragments, the human-gate-withdraw fragment, and the deacon, refinery and witness prompts. The tests named for the helper, renamed with it (section 10). The registry entries of the keys the helper stops writing. |
 | B. The readers | finalize-gate. gctk merge and pr-status, with `OpenHumanGate`. finding.sh and review-answer.sh. pr-facts.sh. branch-supersession.sh. The liveness scripts, with conversing read from conversations, the census in the re-check command and the re-file check on closed gates, hold-lib.sh, deferred-dispatch.sh, bead-context.sh and pre-open-rebase.sh. orphan-dispose.sh and the witness patrol. bead-rehome.sh, with the retry's withdrawal before the close. The doctor checks, `RETIRED_KEYS`, and the docs that teach these components (section 13). |
 | C. Converse and the board | The conversation task, which tracks one bead, and gc-helm.sh engage, open, accept and dismiss on it, with engage's choice of one bead for a gate, pinned by the shared-gate case below, its guarded bind and `c-` fallback, the hand-off, and Accept's read-back and its finish of an acceptance an earlier run left unfinished. The converse prompt and agent headers, the five converse skills and the shared skills. Accept on the recommendation's gate alone, pinned by the acceptance case below. converse-signoff.sh rewritten, converse-reap re-keyed with its warrant in `docs/warrants.md`, and the converse scripts that retire. gc-helm.sh demand retired here, with its last callers: converse-hold.sh, converse-signoff.sh, and the waits, prs and converse-settle skills. pr-sitting-comment.sh with its new marker, and operator-intake.sh. The tmux scripts, tmux-intake-prompt.sh among them. The board's source, with each gate's `blocks` dependents in its batched read, its derive, with a gate folded onto each bead it blocks and a conversation onto the one bead it tracks, its model, its wire contract with `accept_withheld`, and its web and text boards. gate-visit-sweep's order and script. The human-engagement docs and the board's README. |
 | D. The cutover | The migration script, with its copy of the visit walk, and its test, which stops a run after each write and holds section 11's fixtures. notification-wisp-reap's gate pass retired. The cutover runbook in its own spec. The remaining docs. |
@@ -2252,7 +2269,7 @@ closed with the stopped run's answer, the bead still carries
 `gc.recommended_formula`, and the board's row is owed and offers Accept. Every
 stop ends with the dispatch made once and recorded, or with the
 recommendation's gate open and owed again, and never with a second root of the
-formula at the bead:
+formula at the bead that is not a failed pour:
 
 - **The next Accept finishes the stop.** After the first two stops it slings
   once, with the stopped run's token in the root's title, and records the
@@ -2268,6 +2285,14 @@ formula at the bead:
   refuses a second launch of the formula at the bead while the first root is
   live, exiting 3, as Gas City does, and the refused run finds the root by the
   token and records the dispatch.
+- **A failed sling is judged by the token's root.** The test's sling fails as
+  Gas City's can: after its pour has committed, which leaves a live root under
+  the token, or part way through its pour, which leaves a root under the token
+  marked `molecule_failed` and closed. After a committed pour, Accept records
+  the dispatch and reopens nothing, and so does the next Accept when the run
+  stops right after that sling. After a failed pour, Accept reopens the
+  recommendation's gate and slings nothing, and when the run stops right after
+  that sling, the next Accept slings once and records the dispatch.
 
 A sitting's `ruled: declined` on the recommendation's gate is not an Accept's
 answer, so it leaves nothing to finish: the row offers Discuss only, and Accept
