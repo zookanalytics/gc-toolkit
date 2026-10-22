@@ -152,9 +152,10 @@ these decisions build it.
    learns it at its sign-off.
 6. **A sitting runs in a manual converse session that holds one
    conversation.** Engage works on a bead, because a conversation always tracks
-   a bead, never a gate. Pointed at a gate, it takes the one bead the gate
-   blocks, and when the gate blocks several it names them and starts nothing,
-   so you engage the one you mean. A concern you bring to engage opens a fresh
+   a bead, never a gate. Pointed at a gate, it takes the one bead still
+   waiting on the gate. When several still wait, it names them and starts
+   nothing, so you engage the one you mean. When none does, it starts nothing,
+   and you clear the gate. A concern you bring to engage opens a fresh
    conversation, even when the bead has one, because a distinct concern is a
    distinct dialogue. Without one, engage attaches you to a live sitting on the
    bead, or adopts a conversation the bead has in your queue, or files one. It
