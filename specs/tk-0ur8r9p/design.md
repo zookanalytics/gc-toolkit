@@ -310,7 +310,7 @@ bd paths to bd's v1.3.1 source.
 | A `blocks` edge blocks whatever its blocker's type | What the one reader rule rests on. An open blocker of any type holds a bead the same way, so only a gate's `await_type` says that a person must clear the wait, and a reader keeps the human gates among a bead's `blocks` blockers. Re-typing a gate releases nothing. | bd `internal/storage/issueops/blocked_state.go` 213-219 |
 | `bd gate resolve <id> --reason` | Clearing a human gate. It closes the gate with that close reason and recomputes `is_blocked` for the beads it blocked. It skips the close checks, the assignee check among them, so anyone may clear it. On a gate already closed it changes nothing, keeps the first reason and still reports `Gate resolved` with exit 0, so a resolver learns it lost a race only by reading the gate back. | bd `cmd/bd/gate.go` 559-574; `cmd/bd/gate_proxied_server.go` 409-446; `internal/storage/issueops/close.go` 339-384 |
 | `bd reopen <id> --reason` reopens a closed bead of any type, a gate included. It sets `open`, clears `closed_at` and the close reason, drops the lease, records the reason as a comment, and recomputes `is_blocked` for the beads that wait on the bead, so what a reopened gate blocked is blocked again. On a bead that is not closed it changes nothing | Accept's way back from its own accepted close, when a gate filed after its live read shows or its sling fails (section 8). Today's Accept reopens a demand the same way after a failed sling (gc-toolkit `assets/scripts/gc-helm.sh` 2901-2921). | bd `cmd/bd/reopen.go` 15-20, 64-67, 91-99; `internal/storage/issueops/reopen.go` 48-50, 63-68, 100-117; `internal/storage/issueops/blocked_state.go` 455-475; `internal/storage/domain/db/issue.go` 1113-1114 |
-| A graph.v2 `gc sling <bead> --on <formula>` launches under a per-bead lock that holds across processes. Under that lock it refuses the launch, exiting 3, while a root of the same formula that an earlier launch at the bead poured is live, and otherwise it pours and starts the root. Its check counts only a root that is not terminal, so once the earlier root has closed the next launch pours again, as Gas City's own test of the check expects. No `gc sling` flag checks an earlier root by its title or by a key. Each launch mints a synthetic input convoy that tracks the bead, and the root carries the convoy's id as `gc.input_convoy_id` and the formula's name as `gc.formula_name`. `--title` sets the root's title. A pour that fails part way marks each bead it made `molecule_failed` and closes them, and Gas City's own readers skip a root so marked. A launch can also fail after its pour has committed, because starting the root is a later write, and Gas City rolls back only a launch that replaced a root under `--force`. That pour's steps were routed for workers to claim as it committed, and a workflow runs until its root closes, so the root it leaves runs. A classic formula takes another path, which runs without the lock | Why Accept holds a lock of its own across its search for the token's root and its sling, and how a run finds the root of a dispatch that another run sent, by the token in its title (section 8). Also why Accept reads that root after a sling that fails, why a root marked `molecule_failed` is no dispatch, and why a sling that outlives its Accept is refused while the finishing run's root is live (section 8). Every work formula the city carries is graph.v2. Its classic formulas are the deacon and witness patrols, the two dog formulas and mol-visit, which retires. | Gas City `internal/sling/sling_core.go` 544-641 (the lock at 563, the check at 589, the start and its rollback at 612-622, the classic path at 720-721), 975, 1070 and 1763-1808; `internal/sling/sling_attachment.go` 97-194 (the terminal-root skip at 177); `internal/sling/sling_test.go` 3639-3691 (`TestLiveConvoyTrackedWorkflowRootsSkipsTerminalRoots`); `internal/sourceworkflow/sourceworkflow.go` 34-41 and 335-373; `cmd/gc/cmd_sling.go` 145-160 (the flags, `--title` at 148), 944-947 and 997-1000; `internal/graphv2/invocation.go` 418-457; `internal/sling/sling.go` 1433, 1463-1482, 1534-1537, 1572-1575, 1589-1612 and 1616-1628; `internal/formula/compile.go` 366; `internal/molecule/graph_apply.go` 192-199 and 238-241; `internal/molecule/molecule.go` 514, 798 and 1821-1831; `internal/dispatch/runtime.go` 343-350; the `[requires]` tables of gc-toolkit's `formulas/` and of the other formulas `gc formula list --rig gc-toolkit` named on 2026-10-22 |
+| A graph.v2 `gc sling <bead> --on <formula>` launches under a per-bead lock that holds across processes. Under that lock it refuses the launch, exiting 3, while a root of the same formula that an earlier launch at the bead poured is live, and otherwise it pours and starts the root. Its check counts only a root that is not terminal, so once the earlier root has closed the next launch pours again, as Gas City's own test of the check expects. No `gc sling` flag checks an earlier root by its title or by a key. Each launch mints a synthetic input convoy that tracks the bead, and the root carries the convoy's id as `gc.input_convoy_id` and the formula's name as `gc.formula_name`. `--title` sets the root's title. A pour that fails part way marks each bead it made `molecule_failed` and closes them, and Gas City's own readers skip a root so marked. A launch can also fail after its pour has committed, because starting the root is a later write, and Gas City rolls back only a launch that replaced a root under `--force`. That pour's steps were routed for workers to claim as it committed, and a workflow runs until its root closes, so the root it leaves runs. A classic formula takes another path, which runs without the lock | Why Accept holds a lock of its own across its search for the token's root and its sling, and how a run finds the root of a dispatch that another run sent, by the token in its title (section 8). Also why Accept reads that root after a sling that fails, why a root marked `molecule_failed` is no dispatch, and why a sling that outlives Accept's lock is refused while the finishing run's root is live (section 8). Every work formula the city carries is graph.v2. Its classic formulas are the deacon and witness patrols, the two dog formulas and mol-visit, which retires. | Gas City `internal/sling/sling_core.go` 544-641 (the lock at 563, the check at 589, the start and its rollback at 612-622, the classic path at 720-721), 975, 1070 and 1763-1808; `internal/sling/sling_attachment.go` 97-194 (the terminal-root skip at 177); `internal/sling/sling_test.go` 3639-3691 (`TestLiveConvoyTrackedWorkflowRootsSkipsTerminalRoots`); `internal/sourceworkflow/sourceworkflow.go` 34-41 and 335-373; `cmd/gc/cmd_sling.go` 145-160 (the flags, `--title` at 148), 944-947 and 997-1000; `internal/graphv2/invocation.go` 418-457; `internal/sling/sling.go` 1433, 1463-1482, 1534-1537, 1572-1575, 1589-1612 and 1616-1628; `internal/formula/compile.go` 366; `internal/molecule/graph_apply.go` 192-199 and 238-241; `internal/molecule/molecule.go` 514, 798 and 1821-1831; `internal/dispatch/runtime.go` 343-350; the `[requires]` tables of gc-toolkit's `formulas/` and of the other formulas `gc formula list --rig gc-toolkit` named on 2026-10-22 |
 | Gas City sets aside `.gc/runtime/packs/<pack>` under the city root for a pack's own runtime state, and hands it to a pack's orders as `GC_PACK_STATE_DIR`. A run that is not an order gets no such variable. Gas City's launch lock keeps one file per store scope and bead under `.gc/runtime`, and leaves each in place after the launch | Where Accept's lock keeps its file, one per bead, and why Accept names that directory from the city root rather than from a variable: neither helm-svc's run nor a command line is an order (section 8). | Gas City `internal/citylayout/runtime.go` 12-27 and 207-214; `cmd/gc/order_store.go` 209-218; `internal/sourceworkflow/sourceworkflow.go` 335-373 and 440-457 |
 | `bd close` refuses a blocked bead, a bead with open children, and a bead assigned to any actor but the one closing it, whatever its status, each without `--force`, and a close removes none of the bead's dependency rows and leaves its assignee as it was | A human gate holds the close of what it blocks, and a conversation's `tracks` edge holds nothing. A closed conversation keeps its assignee and its `tracks` edge, so the sittings card finds it by the shape it had while open (section 8). A bead a gate blocks closes only once the gate closes or the edge is removed with `bd dep remove` (section 11). A dismiss falls back to `--force` past the assignee check (section 7). The migration releases a visit from its holder before it closes it, so that close stays unforced and still meets the blocker and child checks (section 11). | bd `internal/storage/issueops/close.go` 150-160, 203-205, 339-384; `cmd/bd/close_direct.go` 84; `cmd/bd/show_unit_helpers.go` 27-35; `internal/validation/issue.go` 165-174 |
 | A blocked bead's state cascades to its `parent-child` children and their descendants, whatever their types and the bead's, and through no other edge. A child added under a blocked bead is blocked as it is added. `bd list --parent <bead>` lists the bead's children, and also any bead with no parent whose id is the bead's id followed by a dot. Without `--all` or `--status` it leaves out the closed and pinned children, which are the ones the cascade never blocks. By default it also hides gate, infra, template and wisp children, which the cascade does block, and `--include-gates`, `--include-infra`, which admits the wisp plane too, and `--include-templates` list them. It hides a bead flagged pinned, which bd defines as a context marker rather than a work item | What a gate on a parent pauses, which is why each caller that can land on a parent states what its gate blocks (sections 1 and 3), and how the migration tests a bead for an open child in one call (section 11). | bd `internal/storage/issueops/blocked_state.go` 206-240 and 499-511; `internal/storage/issueops/create.go` 321-325 and 507-523; `internal/storage/issueops/dependencies.go` 324-331; `internal/storage/sqlbuild/filter.go` 174-178; `internal/workapi/list.go` 242-250, 351-357 and 428-452; `cmd/bd/list.go` 465-479; `internal/types/types.go` 158; `docs/component-model.md`, I1's shape law |
@@ -1669,12 +1669,15 @@ with another's:
   and so does a run that finds no `flock` on its path. The file stays in place
   after the run, as Gas City's own lock files do, because a file removed while
   one run holds it lets the next run lock a new one.
-- **The kernel frees the lock when the run exits,** however it stops, so a
-  stopped Accept leaves no lock behind. Every program the run starts, its sling
-  among them, runs with the lock's descriptor closed, as the pack's pass lock
-  runs its children (`assets/scripts/bd-lib.sh` 706-759), because a process
-  `gc` leaves running, such as a Dolt server, would otherwise hold the lock
-  against every later Accept.
+- **The kernel frees the lock once the run and the program it waits on have
+  exited,** however they stop, so a stopped Accept leaves no lock behind. The
+  run starts each program, its sling among them, as the pack's pass lock starts
+  its children (`assets/scripts/bd-lib.sh` 706-759). The program runs with the
+  lock's descriptor closed, because a process `gc` leaves running, such as a
+  Dolt server, would otherwise hold the lock against every later Accept. A
+  subshell that keeps the descriptor waits on the program, so the lock stays
+  held while the program runs, even when something kills the run's own process
+  by itself.
 - **An Accept takes the lock without waiting.** When another Accept holds it,
   Accept refuses, writes nothing, and names the holder's process and how long it
   has held the lock, as helm-svc refuses a second write verb on a bead it is
@@ -1684,9 +1687,9 @@ with another's:
   started it. The lock covers each.
 
 Under the lock, a run that finds an unfinished acceptance knows that the run
-which wrote the answer has stopped. So, unless that run's sling outlived it
-(below), the search sees every root that sling poured, live or finished, and no
-other Accept can sling before this run records. Two runs that finish one
+which wrote the answer has stopped. So, unless that run's sling outlived the
+lock (below), the search sees every root that sling poured, live or finished,
+and no other Accept can sling before this run records. Two runs that finish one
 acceptance at once pour one root: the one that takes the lock finishes it, and
 the other refuses. A finishing run held up until the first one's root has
 closed then takes the lock, finds that root by the token, records the dispatch
@@ -1696,19 +1699,23 @@ refuses, or finishes the acceptance when the slow run stopped short of its
 record.
 
 helm-svc's deadline kills the run's whole process group, its sling included
-(`services/helm/internal/visit/actuate.go` 180-203). A sling outlives its run
-only when something kills the run's own process alone, and such a sling still
-takes Gas City's launch lock. While it pours under that lock, a finishing run's
-sling waits for the lock. Once it has poured, its root is live, so the
-finishing run's search finds that root, or the finishing run's sling is
-refused. A sling Gas City refuses is a failed one, so a run whose sling exits 3
-reads the token's root and records the dispatch when it finds one. With no
-token's root, the formula already runs at the bead from another dispatch, so
-Accept reopens the recommendation's gate and names that run's root. The
-outliving sling pours a second root only when it reaches Gas City's lock after
-the finishing run's root has closed. Gas City takes its launch lock for a
-graph.v2 formula, and every work formula the city carries is one (see the
-platform section).
+(`services/helm/internal/visit/actuate.go` 180-203). When something kills the
+run's own process alone, the subshell that waits on its sling keeps the lock
+until the sling exits. A finishing run refuses until then, and its refusal
+names the stopped run, whose process is gone. Once the sling exits, the next
+run's search sees every root it poured. A sling outlives the lock only when
+something kills the run's own process and that subshell one by one and leaves
+the sling running, and such a sling still takes Gas City's launch lock. While
+it pours under that lock, a finishing run's sling waits for the lock. Once it
+has poured, its root is live, so the finishing run's search finds that root, or
+the finishing run's sling is refused. A sling Gas City refuses is a failed one,
+so a run whose sling exits 3 reads the token's root and records the dispatch
+when it finds one. With no token's root, the formula already runs at the bead
+from another dispatch, so Accept reopens the recommendation's gate and names
+that run's root. The outliving sling pours a second root only when it reaches
+Gas City's lock after the finishing run's root has closed. Gas City takes its
+launch lock for a graph.v2 formula, and every work formula the city carries is
+one (see the platform section).
 
 **Ranking is unchanged.** `rankScore` (derive.go 734-741) and its inputs are
 untouched. Every input a visit supplied, held and the owed clock among them, now
@@ -2516,10 +2523,16 @@ not a failed pour:
 - **The lock outlives no run.** The test's sling leaves a process running after
   the run exits, and the next Accept still takes the lock. An Accept that
   cannot name the city root, or finds no `flock`, refuses and writes nothing.
-- **A sling that outlives its run meets Gas City's lock.** The test kills a
-  run's own process while its sling pours. A finishing run's sling is refused
-  while that root is live, exiting 3, and the finishing run finds the root by
-  the token and records the dispatch.
+- **A run killed by itself keeps the lock until its sling exits.** The test
+  kills a run's own process while its sling pours. A finishing run started
+  while that sling runs refuses at the lock and writes nothing. Once the sling
+  exits, the next Accept takes the lock, finds the root by the token, slings
+  nothing and records the dispatch.
+- **A sling that outlives the lock meets Gas City's lock.** The test kills a
+  run's own process and the subshell that waits on its sling, and leaves the
+  sling to pour. A finishing run's sling is refused while that root is live,
+  exiting 3, and the finishing run finds the root by the token and records the
+  dispatch.
 - **A failed sling is judged by the token's root.** The test's sling fails as
   Gas City's can: after its pour has committed, which leaves a live root under
   the token, or part way through its pour, which leaves a root under the token
