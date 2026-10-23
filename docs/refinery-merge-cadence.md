@@ -462,17 +462,21 @@ the cadence — the arms run whether or not any refinery session is awake.
    open, and its owed reply is the answer, leading with the question mark. A
    declined or deferred finding's owed reply is its comment's answer too. That
    reply leads with the ruling ("Declined" or "Deferred"), so a reader scanning
-   the PR tells a fix from a pushback. In a thread, which it leaves open for the
-   operator, the reply also leads with the question mark, and its last line
-   says that resolving the thread accepts the ruling and a reply in it
-   overrules the ruling. The comment trades EYES for THUMBS_UP once the reply
-   is on the PR. Whether an owed reply is on the PR is read back off GitHub on
-   every pass, by its own text, so another reply in the thread never stands in
-   for it. An inline comment is answered in its thread.
+   the PR tells a fix from a pushback. The write-back leaves the thread
+   holding that reply open for the operator. While nobody has resolved it, the
+   reply also leads with the question mark, and its last line says that
+   resolving the thread accepts the ruling and that a reply in it is ruled as
+   new feedback. Such a reply is filed as a finding of its own, and the
+   declined or deferred finding stays closed. A thread the operator resolved
+   before the reply reached it gets the ruling alone. The
+   comment trades EYES for THUMBS_UP once the reply is on the PR. Whether an
+   owed reply is on the PR is read back off GitHub on every pass, by its own
+   text, so another reply in the thread never stands in for it. An inline
+   comment is answered in its thread.
    The thread is answered once every routed comment in it is resolved, by one
    reply naming each bead. It is resolved behind that reply unless it holds a
    declined or deferred finding, whose thread stays open for the operator to
-   accept or overrule, as a needs-you finding's does until they rule. A
+   accept or push back on, as a needs-you finding's does until they rule. A
    needs-you finding closes once the visit holding its question, followed
    through any fold, has closed carrying the operator's ruling and no fix unit
    on its lane, nor a ruling's rework child, is in flight, and its comment then
@@ -490,11 +494,16 @@ the cadence — the arms run whether or not any refinery session is awake.
    on the operator first, a count line, then one point per finding, sorted into
    Needs you, Worth a look, In progress and Done, each a label linked to the
    comment, a sentence in the words of whoever answered it, and the commit,
-   follow-up or visit carrying it. A declined or deferred point whose reply
-   waits in an open thread is under Needs you, ending with the same line as
-   that reply, until the reviewer resolves the thread, and is worth a look
-   after that. The count line counts the points under Needs you, so it never
-   reads all answered while one waits. It carries a digest of its own
+   follow-up or visit carrying it. A declined or deferred point is under Needs
+   you while its thread waits on the reviewer: the thread is open, holds the
+   city's reply to that point, and ends with a post that is the city's own.
+   The point ends with the same line as that reply. Once the reviewer resolves
+   the thread, the point is worth a look. A reply of theirs in the thread is a
+   point of its own, and the point it answers is worth a look until the city
+   answers that reply. The thread is still open then, so it waits on the
+   reviewer again. The count line counts the points under Needs you, so it
+   never reads all answered while one waits, and it still says where the other
+   points stand. It carries a digest of its own
    rendering, so a pass that changes nothing writes nothing. When the city
    holds more than one comment for a round, each keyed to one of its reviews,
    the pass keeps one, moves every mark the others carry into it, and deletes

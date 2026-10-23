@@ -484,10 +484,11 @@ PR_CONVERSATIONS="quiet outstanding answered"
 # cited as the fix. A declined or deferred finding's answer leads with its
 # ruling. A thread is resolved behind its answer only when nothing in it waits
 # for the operator: a declined or deferred finding's thread stays open for them
-# to accept or overrule, and a needs-you finding's for their ruling. So a
-# declined or deferred finding's answer in a thread awaits a person too: it
-# leads with the question mark, and ends with a line saying that resolving the
-# thread accepts the ruling.
+# to accept or push back on, and a needs-you finding's for their ruling. So a
+# declined or deferred finding's answer in a thread still open awaits a person
+# too: it leads with the question mark, and ends with a line saying that
+# resolving the thread accepts the ruling and that a reply in it is ruled as
+# new feedback.
 # The marker identifies our own reply, so a later pass can tell one it already
 # posted from a human's, and every reply carries it. A state reply also carries
 # a mark line naming its state (resolved, or awaiting:<visit>) and, on the
@@ -3651,8 +3652,24 @@ acked=0; replied=0; resolved=0; posted=0; swapped=0; fposted=0; fanswered=0; wfw
 # reads one back as feedback. The ruled-finding arm below also calls pr-post.sh
 # directly, for the two posts whose new comment id it reads back (file-comment,
 # comment) and for the edit that answers a Conversation post in place.
+# A reply posted into a thread also joins this pass's read of the PR ($wview),
+# as the post of ours it now is, so a reader later in the pass sees the thread
+# as GitHub holds it. The living answer reads a point as waiting on the reviewer
+# only once its thread holds the answer and ends with a post of the city, so
+# the reply arm's answer, and the fix answered under a reply of theirs, count in
+# the pass that posts them, as does the dismissal note carrying the count line.
+# A read that does not take the post leaves it to the next pass, which reads it
+# off GitHub.
 wb_thread_reply() { # <thread-id> <body>
-  "$PR_POST" reply --host "$ORIGIN_HOST" --thread "$1" --body "$2" >/dev/null 2>&1
+  "$PR_POST" reply --host "$ORIGIN_HOST" --thread "$1" --body "$2" >/dev/null 2>&1 || return 1
+  local v
+  [ -n "${wview:-}" ] || return 0
+  v=$(printf '%s' "$wview" | jq -c --arg t "$1" --arg b "$2" --arg self "$SELF_LOGIN" \
+      --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+    .threads = [ .threads[] | if .id == $t
+      then .comments.nodes = ((.comments.nodes // []) + [ { author: { login: $self }, body: $b, createdAt: $at } ])
+      else . end ]' 2>/dev/null) && [ -n "$v" ] && wview="$v"
+  return 0
 }
 wb_pr_comment() { # <pr-number> <body>
   "$PR_POST" comment --repo "$ORIGIN_REPO_Q" --pr "$1" --body "$2" >/dev/null 2>&1
@@ -4691,14 +4708,20 @@ WB_SWAPS
   # word, and the question mark on a needs-you answer. None of them resolves its
   # thread. A needs-you finding waits there for the operator's ruling, which the
   # open finding holds the review on. A declined or deferred finding waits there
-  # for the operator to accept or overrule it, so its answer in a thread leads
-  # with the question mark too, and ends with ra_open_ask's line, the one its
-  # point under Needs you in the living answer ends with. The operator overrules
-  # a decline by re-reviewing: the content key re-adopts the closed finding as a
-  # fresh one and pr-facts re-opens the human validation pass.
+  # for the operator to accept it or push back, so its answer in a thread still
+  # open leads with the question mark too, and ends with ra_open_ask's line, the
+  # one its point under Needs you in the living answer ends with. A thread the
+  # operator resolved before the answer reached it has accepted the ruling
+  # already, so the answer there is the ruling alone. The operator pushes back by
+  # replying in the thread or by reviewing again. Either is feedback like any
+  # other, which the routing arm files as a finding of its own for a human
+  # validation pass to rule. It is a fresh finding even when it repeats the
+  # objection word for word, since finding.sh dedups only against open
+  # findings. The declined finding stays closed and declined.
   # Whether the answer is on the PR is read back off GitHub every pass. A post of
   # ours holds it when it carries this ruling's own text and names no other
-  # finding. Another reply in the thread is not it, and neither is this finding's
+  # finding (ra_answer_post, which the living answer reads the thread by too).
+  # Another reply in the thread is not it, and neither is this finding's
   # answer to a ruling since replaced, so a needs-you finding the operator has
   # ruled is owed the new ruling's answer. finding.reply_posted records the read
   # for the review dismissal below: stamped once the answer is seen or posted,
@@ -4712,7 +4735,6 @@ WB_SWAPS
   # it closes until the answer is delivered.
   if [ -n "$disp" ] && [ "$wplan_ok" = 1 ] && wdf=$(bd_anchor_children "$wid" "$ALL_STATUSES"); then
     wdrows=$(printf '%s\n%s' "$wview" "$wdf" | jq -rsc --arg self "$SELF_LOGIN" --arg m "$WB_MARKER" --arg gwait "$WB_GLYPH_AWAITING" "$WB_OWED_REPLY_DEF"'
-        def norm: gsub("[[:space:]]+"; " ") | sub("^ "; "") | sub(" $"; "");
         .[0] as $v
         | .[1][]?
         | select(owes_reply)
@@ -4725,29 +4747,26 @@ WB_SWAPS
         # its answer (review-answer.sh), so it is not posted here.
         | select(($rid != "" and $rid == $cid) | not)
         | ((.metadata["finding.reply_posted"] // "") | tostring) as $stamp
-        | ("<!-- gc-writeback-finding:" + $id + " -->") as $line
-        | ($reply | norm) as $said
-        # The thread holding the comment this finding answers. A review body or a
-        # Conversation objection sits in no thread and is answered on the PR
-        # itself, linking the review (a review body finding carries its own id as
-        # finding.review_id) or the Conversation comment.
-        | ([ $v.threads[] | select((.comments.nodes // []) | any(((.databaseId // 0) | tostring) == $cid)) ] | .[0]) as $t
+        # The thread holding the comment this finding answers, found the way the
+        # living answer finds it. A review body or a Conversation objection sits
+        # in no thread and is answered on the PR itself, linking the review (a
+        # review body finding carries its own id as finding.review_id) or the
+        # Conversation comment.
+        | ra_comment_thread($v; $cid) as $t
         | (if $t != null then ""
            else (if $rid != "" and $rid == $cid then $v.reviews else $v.issue_comments end)
                 | [ .[]? | select(((.databaseId // 0) | tostring) == $cid) | (.url // "") | select(. != "") ] | .[0] // "" end) as $ref
         | ([ ($v.threads[] | (.comments.nodes // [])[]), $v.reviews[]?, $v.issue_comments[]? ]
            | any(((.databaseId // 0) | tostring) == $cid)) as $here
         | ((if $t != null then ($t.comments.nodes // []) else $v.issue_comments end)
-           | any(.[]?; ((.author.login // "") == $self) and ((.body // "") | contains($m))
-                       and ((.body // "") | norm | contains($said))
-                       and (((.body // "") | contains($line)) or (((.body // "") | test("<!-- gc-writeback-finding:")) | not)))) as $posted
+           | any(.[]?; ra_answer_post($self; $m; $id; $reply))) as $posted
         | select(if $stamp != "" then ($here and ($posted | not)) else true end)
         | { id: $id, thread: (if $t != null then $t.id else "" end), posted: $posted, stamped: ($stamp != ""),
             body: ((if $disp == "needs-you" then $gwait + " " + $reply
-                    elif $t != null then $gwait + " " + ($reply | ra_ruled_reply($disp)) + "\n\n" + ra_open_ask($disp)
+                    elif ($t | ra_thread_open) then $gwait + " " + ($reply | ra_ruled_reply($disp)) + "\n\n" + ra_open_ask($disp)
                     else ($reply | ra_ruled_reply($disp)) end)
                    + (if $ref != "" then " In reply to " + $ref + "." else "" end)
-                   + "\n" + $m + "\n" + $line) }
+                   + "\n" + $m + "\n" + ra_finding_line($id)) }
         | @base64' 2>/dev/null)
     wdwrote=0
     while IFS= read -r wdrow; do
@@ -4853,9 +4872,9 @@ WB_FIX_UNITS
     wbx=$(printf '%s' "$wbxl" | jq -sc 'add // {}' 2>/dev/null) || wbx='{}'
     [ -n "$wbx" ] || wbx='{}'
     wmodels=$({ printf '%s\n' "$wview"; printf '%s\n' "$wbx"; printf '%s\n' "$wvl"; printf '%s\n' "$wrf"; } \
-      | jq -cn --arg prurl "$wurl" --arg self "$SELF_LOGIN" --arg marker "$WB_MARKER" "$REVIEW_ANSWER_DEF"'
+      | jq -cn --arg prurl "$wurl" --arg self "$SELF_LOGIN" --arg since "$wsince" --arg marker "$WB_MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'
         input as $view | input as $beads | input as $vl | input
-        | ra_models($view; $prurl; $self; $vl; $beads; $marker) | .[]' 2>/dev/null) || wmodels=""
+        | ra_models($view; $prurl; $self; $vl; $beads; $marker; gc_city_own($self; $since)) | .[]' 2>/dev/null) || wmodels=""
     wrstamped=0
     while IFS= read -r wm; do
       [ -n "$wm" ] || continue

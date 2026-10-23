@@ -9,13 +9,17 @@
 #   (SECTION) each ruling's section and sentence, a flagged fix worth a look, the
 #             reference each carries, its fix's commits only once the fix has
 #             landed, no point for a body ruled restates, and a decline or a
-#             deferral whose thread is open needing the reviewer, asking them to
-#             act, until they resolve it
+#             deferral whose thread waits on the reviewer needing them, asking
+#             them to act
 #   (URL)     a label links only to a comment the read of the PR holds, and the
-#             thread a comment sits in is read open or resolved
+#             thread a comment sits in is found open or resolved
+#   (WAITS)   a thread waits on the reviewer while it is open, holds the answer
+#             posted for the finding, and ends with a post of the city, as
+#             gc_city_own tells one; a reply of theirs ends the wait until the
+#             city answers it
 #   (RENDER)  the visit callout on top, the count line counting the points that
-#             need the reviewer, the sections in order, the entries, the folded
-#             notes and the trailing mark lines
+#             need the reviewer and saying where the rest stand, the sections in
+#             order, the entries, the folded notes and the trailing mark lines
 #   (MODEL)   one model per review round: the comment already on the PR found
 #             by its key, its digest and dismissed mark read back, what keeps it
 #             live, the review body answers it delivers, the marks it keeps, each
@@ -50,6 +54,8 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit
 
 # shellcheck source=review-answer.sh
 . "$LIB" || { echo "FAIL - cannot source $LIB" >&2; exit 1; }
+# The city-own rule the writer passes to ra_models, as pr-post.sh states it.
+CITY_OWN_DEF=$("$HERE/pr-post.sh" own-def) || { echo "FAIL - pr-post.sh own-def did not print" >&2; exit 1; }
 [ -n "${REVIEW_ANSWER_DEF:-}" ] && ok "(DEF) sourcing the file exposes \$REVIEW_ANSWER_DEF" \
   || bad "(DEF) sourcing the file exposes \$REVIEW_ANSWER_DEF"
 eq "$(jq -n "$REVIEW_ANSWER_DEF"'"compiled"' 2>&1)" '"compiled"' "(DEF) the defs compile"
@@ -64,8 +70,8 @@ eq "$(ruled "next release" deferred)|$(ruled "Deferred — tracked as follow-up 
 eq "$(jq -cn "$REVIEW_OWED_REPLY_DEF"'[ "declined", "deferred", "needs-you", "must-fix", "restates", "unvalidated" ] | map(ra_owes_disp)')" \
   '[true,true,true,false,false,false]' "(DEF) a decline, a deferral and a question for the operator owe their raiser an answer"
 eq "$(jq -rn "$REVIEW_OWED_REPLY_DEF"'ra_open_ask("declined"), ra_open_ask("deferred")')" \
-  "Resolving the thread accepts the decline. A reply in the thread overrules it.
-Resolving the thread accepts the deferral. A reply in the thread overrules it." \
+  "Resolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback.
+Resolving the thread accepts the deferral. To push back, reply in the thread; your reply is ruled as new feedback." \
   "(DEF) a decline or a deferral answered in a thread says what resolving the thread and replying in it do"
 
 MARKER='<!-- gc-writeback -->'
@@ -73,7 +79,7 @@ PRURL="https://github.com/o/r/pull/7"
 # A finding record as ra_record builds it, from a few overrides.
 rec() { jq -cn --argjson o "${1:-}" '{ id: "F", open: false, disp: "must-fix", message: "", title: "", label: "",
     answer: "", fix_answer: "", fix_flag: "", reply: "", posted: false, follow_up: "", visit: "",
-    ruling_visit: "", fix_unit: "", cid: "11", rid: "10", body: false, url: "", thread: "", fix_landed: false } + $o'; }
+    ruling_visit: "", fix_unit: "", cid: "11", rid: "10", body: false, url: "", waits: false, fix_landed: false } + $o'; }
 label() { rec "$1" | jq -r "$REVIEW_ANSWER_DEF"'ra_label'; }
 point() { rec "$1" | jq -c "$REVIEW_ANSWER_DEF"'[ ra_point ] | .[0] // "none"'; }
 pfield() { point "$1" | jq -r --arg k "$2" 'if type == "object" then (if has($k) then (.[$k] | tostring) else "" end) else . end'; }
@@ -148,25 +154,25 @@ eq "$(pfield '{"disp":"needs-you","ruling_visit":"tk-v"}' sentence)" "Settled by
 eq "$(pfield '{"disp":"unvalidated","open":true}' section),$(pfield '{"disp":"unvalidated","open":true}' ruled)" "progress,false" "(SECTION) an unruled point is in progress"
 eq "$(point '{"disp":"restates","body":true,"cid":"10"}')" '"none"' "(SECTION) a body ruled restates is no point"
 # The write-back never resolves a thread holding a decline or a deferral it
-# answered there, so the point needs the reviewer while the read of the PR finds
-# that thread open, and is worth a look once they resolve it.
-WAIT='"thread":"open","reply":"the guard already holds"'
-eq "$(pfield '{"disp":"declined",'"$WAIT"'}' section)" "needs" "(SECTION) a decline whose thread is open needs the reviewer"
+# answered there, so the point needs the reviewer while that thread waits on
+# them (the record's waits, read off the thread by ra_thread_waits below), and
+# is worth a look once it does not.
+WAIT='"waits":true,"reply":"the guard already holds"'
+eq "$(pfield '{"disp":"declined",'"$WAIT"'}' section)" "needs" "(SECTION) a decline whose thread waits on the reviewer needs them"
 eq "$(pfield '{"disp":"declined",'"$WAIT"'}' sentence)" "Declined: the guard already holds" "(SECTION) …in the words it is answered with"
-eq "$(pfield '{"disp":"declined",'"$WAIT"'}' ask)" "Resolving the thread accepts the decline. A reply in the thread overrules it." \
-  "(SECTION) …asking them to accept it by resolving the thread, or overrule it by replying there"
-WAITD='"disp":"deferred","follow_up":"tk-fu","thread":"open","reply":"Deferred — tracked as follow-up tk-fu: later."'
+eq "$(pfield '{"disp":"declined",'"$WAIT"'}' ask)" "Resolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback." \
+  "(SECTION) …asking them to accept it by resolving the thread, or to push back by replying there, which is ruled as new feedback"
+WAITD='"disp":"deferred","follow_up":"tk-fu","waits":true,"reply":"Deferred — tracked as follow-up tk-fu: later."'
 eq "$(pfield '{'"$WAITD"'}' section)|$(pfield '{'"$WAITD"'}' ask)" \
-  "needs|Resolving the thread accepts the deferral. A reply in the thread overrules it." "(SECTION) …and so does a deferral whose thread is open"
-eq "$(pfield '{"disp":"declined","thread":"resolved","reply":"the guard already holds"}' section)|$(pfield '{"disp":"declined","thread":"resolved","reply":"the guard already holds"}' ask)" \
-  "worth|" "(SECTION) once the reviewer resolves the thread, the decline is worth a look and asks nothing"
-eq "$(pfield '{"disp":"declined","reply":"the guard already holds"}' section)" "worth" "(SECTION) a decline whose thread the read does not hold waits on nobody"
-eq "$(pfield '{"disp":"declined","thread":"open"}' section)" "done" "(SECTION) a comment that asked for nothing is done, though its thread is open"
-WAITF='"disp":"declined","thread":"open","reply":"kept as is","fix_unit":"tk-k","fix_answer":"Renamed anyway, though the ruling declined it.","fix_flag":"1"'
+  "needs|Resolving the thread accepts the deferral. To push back, reply in the thread; your reply is ruled as new feedback." "(SECTION) …and so does a deferral whose thread waits on them"
+eq "$(pfield '{"disp":"declined","reply":"the guard already holds"}' section)|$(pfield '{"disp":"declined","reply":"the guard already holds"}' ask)" \
+  "worth|" "(SECTION) a decline whose thread does not wait on the reviewer is worth a look and asks nothing"
+eq "$(pfield '{"disp":"declined","waits":true}' section)" "done" "(SECTION) a comment that asked for nothing is done, whatever its thread"
+WAITF='"disp":"declined","waits":true,"reply":"kept as is","fix_unit":"tk-k","fix_answer":"Renamed anyway, though the ruling declined it.","fix_flag":"1"'
 eq "$(pfield '{'"$WAITF"'}' section)|$(pfield '{'"$WAITF"'}' sentence)" "needs|Renamed anyway, though the ruling declined it." \
-  "(SECTION) a flagged decline whose thread is open needs the reviewer, in the fix unit's words"
-eq "$(pfield '{"disp":"must-fix","thread":"open","fix_unit":"tk-k","fix_answer":"Fixed."}' section)" "done" \
-  "(SECTION) a landed must-fix whose thread is still open waits on nobody, since the write-back resolves it"
+  "(SECTION) a flagged decline whose thread waits on the reviewer needs them, in the fix unit's words"
+eq "$(pfield '{"disp":"must-fix","waits":true,"fix_unit":"tk-k","fix_answer":"Fixed."}' section)" "done" \
+  "(SECTION) a landed must-fix waits on nobody, since the write-back resolves its thread"
 
 echo "# (URL)"
 VIEW='{"reviews":[{"databaseId":10,"url":""}],"threads":[{"comments":{"nodes":[{"databaseId":11,"url":"https://github.com/o/r/pull/7#discussion_r11"}]}}],"issue_comments":[]}'
@@ -175,10 +181,45 @@ eq "$(url '{"cid":"11"}')" "https://github.com/o/r/pull/7#discussion_r11" "(URL)
 eq "$(url '{"cid":"10","body":true}')" "$PRURL#pullrequestreview-10" "(URL) a review body links to its review"
 eq "$(url '{"cid":"99"}')" "" "(URL) a comment the read does not hold gets no link"
 TVIEW='{"reviews":[{"databaseId":10}],"issue_comments":[],
-  "threads":[{"isResolved":false,"comments":{"nodes":[{"databaseId":11}]}},{"isResolved":true,"comments":{"nodes":[{"databaseId":12},{"databaseId":13}]}}]}'
-tstate() { rec "$1" | jq -r --argjson v "$TVIEW" "$REVIEW_ANSWER_DEF"'ra_thread($v)'; }
-eq "$(tstate '{"cid":"11"}')|$(tstate '{"cid":"13"}')" "open|resolved" "(URL) the thread an inline comment sits in reads open or resolved, wherever in it the comment sits"
-eq "$(tstate '{"cid":"10","body":true}')|$(tstate '{"cid":"99"}')" "|" "(URL) …and a review body, or a comment the read does not hold, has none"
+  "threads":[{"id":"T1","isResolved":false,"comments":{"nodes":[{"databaseId":11}]}},{"id":"T2","isResolved":true,"comments":{"nodes":[{"databaseId":12},{"databaseId":13}]}}]}'
+tfind() { jq -rn --argjson v "$TVIEW" --arg c "$1" "$REVIEW_OWED_REPLY_DEF"'ra_comment_thread($v; $c) | if . == null then "none" else .id + ":" + (if ra_thread_open then "open" else "resolved" end) end'; }
+eq "$(tfind 11)|$(tfind 13)" "T1:open|T2:resolved" "(URL) the thread a comment sits in is found wherever in it the comment sits, open or resolved"
+eq "$(tfind 99)|$(tfind "")" "none|none" "(URL) …and a comment the read does not hold has none"
+eq "$(rec '{"cid":"13"}' | jq -r --argjson v "$TVIEW" --arg p "$PRURL" "$REVIEW_ANSWER_DEF"'ra_url($v; $p; ra_comment_thread($v; "13"))')" "$PRURL#discussion_r13" \
+  "(URL) the link reads a thread already found, which is how a record looks its thread up once"
+
+echo "# (WAITS)"
+# A point waits on the reviewer while its thread is open, holds the answer
+# posted for its finding, and ends with a post of the city. The writer passes
+# gc_city_own, the rule the routing arm tells feedback by.
+ANS='{"author":{"login":"bot"},"body":"❓ Declined: the guard already holds\n\nResolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback.\n<!-- gc-writeback -->\n<!-- gc-writeback-finding:F -->"}'
+REPLY='{"databaseId":20,"author":{"login":"op"},"body":"I still think the guard should go."}'
+FIXED='{"author":{"login":"bot"},"body":"✅ Fixed in 6c6c6c6c (tk-k2).\n<!-- gc-writeback -->\n<!-- gc-writeback-mark:resolved -->"}'
+thread() { # comments-after-the-raising-one [resolved]
+  jq -cn --argjson cs "$1" --argjson r "${2:-false}" \
+    '{id:"T1",isResolved:$r,comments:{nodes:([{databaseId:11,author:{login:"op"},body:"**Keep the guard?**"}] + $cs)}}'
+}
+waits() { # thread-json [cutover] — whether it waits on the reviewer for finding F
+  jq -rn --argjson t "$1" --arg since "${2:-}" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'
+    ra_thread_waits($t; "bot"; "<!-- gc-writeback -->"; "F"; "the guard already holds"; gc_city_own("bot"; $since))'
+}
+eq "$(waits "$(thread "[$ANS]")")" "true" "(WAITS) an open thread holding the answer, and ending with it, waits on the reviewer"
+eq "$(waits "$(thread "[$ANS]" true)")" "false" "(WAITS) …and once they resolve it, does not"
+eq "$(waits "$(thread "[$ANS,$REPLY]")")" "false" "(WAITS) a reply of theirs after the answer ends the wait, since the reply is a point of its own"
+eq "$(waits "$(thread "[$ANS,$REPLY,$FIXED]")")" "true" \
+  "(WAITS) …until the city answers the reply: the thread it leaves open, holding the decline, waits on them again"
+eq "$(waits "$(thread '[]')")|$(waits null)" "false|false" "(WAITS) a thread the answer never reached asks nothing, and nor does a comment in no thread"
+CITYPOST='{"author":{"login":"bot"},"body":"More on why the guard stays.\n<!-- gc:city -->","createdAt":"2026-02-01T00:00:00Z"}'
+UNMARKED='{"author":{"login":"bot"},"body":"Please drop the guard anyway.","createdAt":"2026-02-01T00:00:00Z"}'
+eq "$(waits "$(thread "[$ANS,$CITYPOST]")" 2026-01-01T00:00:00Z)" "true" "(WAITS) a post of the city after the answer leaves it waiting"
+eq "$(waits "$(thread "[$ANS,$UNMARKED]")" 2026-01-01T00:00:00Z)" "false" \
+  "(WAITS) …but an unmarked post under the city login after the cutover is feedback, as the routing arm reads it, and ends the wait"
+OTHER='{"author":{"login":"bot"},"body":"❓ Declined: the guard already holds\n<!-- gc-writeback -->\n<!-- gc-writeback-finding:G -->"}'
+OLDFORM='{"author":{"login":"bot"},"body":"Declined: the guard already holds\n<!-- gc-writeback -->"}'
+REPLACED='{"author":{"login":"bot"},"body":"❓ Declined: an older reason\n<!-- gc-writeback -->\n<!-- gc-writeback-finding:F -->"}'
+eq "$(waits "$(thread "[$OTHER]")")" "false" "(WAITS) an answer naming another finding is not this one"
+eq "$(waits "$(thread "[$OLDFORM]")")" "true" "(WAITS) an answer posted before answers named their finding is this one when it carries its text"
+eq "$(waits "$(thread "[$REPLACED]")")" "false" "(WAITS) …and the answer to a ruling since replaced, whose text differs, is not"
 
 echo "# (RENDER)"
 MODEL='{"rid":"10","rids":["10"],"self":false,"members":[{"rid":"10","state":"CHANGES_REQUESTED","dismissed":"requeued"}],
@@ -229,7 +270,15 @@ eq "$(heading '[{"section":"needs","answered":true,"ruled":true},{"section":"nee
 eq "$(heading '[{"section":"needs","answered":true,"ruled":true},{"section":"done","answered":true,"ruled":true}]')" \
   "Your review: 2 points, 1 needs you, 1 answered" "(RENDER) …and never reads all answered while one does"
 eq "$(heading '[{"section":"needs","answered":true,"ruled":true},{"section":"done","answered":true,"ruled":true},{"section":"progress","answered":false,"ruled":true}]')" \
-  "Your review: 3 points, 1 needs you, 1 answered so far" "(RENDER) …and says how far the rest are"
+  "Your review: 3 points, 1 needs you, 1 answered, the rest not answered yet" "(RENDER) …and says the rest are not answered yet, once every point is ruled"
+NEEDS1='{"section":"needs","answered":false,"ruled":true}'
+UNRULED='{"section":"progress","answered":false,"ruled":false}'
+eq "$(heading "[$NEEDS1,$UNRULED,$UNRULED]")" "Your review: 3 points, 1 needs you, the rest in progress" \
+  "(RENDER) a point that needs the reviewer beside two not yet ruled leaves the rest in progress, not unsaid"
+eq "$(heading "[$NEEDS1,{\"section\":\"done\",\"answered\":true,\"ruled\":true},$UNRULED]")" "Your review: 3 points, 1 needs you, 1 answered, the rest in progress" \
+  "(RENDER) …and so does one beside an answered point and an unruled one"
+eq "$(heading "[$NEEDS1,{\"section\":\"progress\",\"answered\":false,\"ruled\":true}]")" "Your review: 2 points, 1 needs you, the rest not answered yet" \
+  "(RENDER) …and a fix in progress beside it is the rest not answered yet"
 
 BIG=$(jq -n --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'{rid:"1",self:false,
   points:[{id:"a",section:"done",label:"L",url:"",sentence:("word " * 600),ref:"",answered:true,ruled:true,extra:""}],
@@ -300,7 +349,7 @@ VIEW2='{"reviews":[{"databaseId":10,"state":"COMMENTED","author":{"login":"op"},
     {"databaseId":900,"author":{"login":"bot"},"body":"x\n<!-- gc-writeback -->\n<!-- gc-writeback-mark:resolved r10 -->\n<!-- gc-review-answer:r10 -->\n<!-- gc-review-answer:r10:dismissed -->\n<!-- gc-review-answer:r10:digest:12345 -->"},
     {"databaseId":901,"author":{"login":"op"},"body":"<!-- gc-writeback -->\n<!-- gc-review-answer:r10 -->"}]}'
 models() { printf '%s' "$ROWS" | jq -c --argjson v "$1" --argjson vl "${2:-}" --argjson b '{"K":{"title":"rework","fix_notes":"notes from K"}}' \
-  --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; $vl; $b; $m)'; }
+  --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; $vl; $b; $m; gc_city_own("bot"; ""))'; }
 M=$(models "$VIEW2" '{}')
 eq "$(printf '%s' "$M" | jq 'length')" "1" "(MODEL) one model per review: a machine finding and a Conversation comment belong to none"
 eq "$(printf '%s' "$M" | jq -r '.[0].existing.db + " " + .[0].existing.digest')" "900 12345" "(MODEL) the comment on the PR is ours carrying the review key, with its digest read back"
@@ -314,22 +363,22 @@ eq "$(printf '%s' "$M" | jq -r '.[0].notes[0].text')" "notes from K" "(MODEL) th
 eq "$(printf '%s' "$M" | jq -r '[ .[0].points[].id ] | join(",")')" "B,I" "(MODEL) the body leads its inline comments"
 DONE_ROWS=$(printf '%s' "$ROWS" | jq -c 'map(if .id == "I" then .status = "closed" else . end | if .id == "B" then .metadata["finding.reply_posted"] = "1" else . end)')
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "DISMISSED"')" \
-  --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m) | .[0] | [ .live, ra_dismissal ]')" '[false,"plain"]' \
+  --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m; gc_city_own("bot"; "")) | .[0] | [ .live, ra_dismissal ]')" '[false,"plain"]' \
   "(MODEL) a dismissed review with every finding closed and nothing owed is not live, and reads dismissed without a re-request claim"
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "DISMISSED" | .requested = ["op"]')" \
-  --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m) | .[0] | ra_dismissal')" '"requeued"' \
+  --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m; gc_city_own("bot"; "")) | .[0] | ra_dismissal')" '"requeued"' \
   "(MODEL) …and reads re-requested when its author has a pending review request, though no comment carries the dismissed mark"
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "COMMENTED"')" \
-  --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {"10":{"marks":["resolved r10"],"visits":[],"swaps":"-"}}; {}; $m) | .[0].live')" "true" \
+  --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {"10":{"marks":["resolved r10"],"visits":[],"swaps":"-"}}; {}; $m; gc_city_own("bot"; "")) | .[0].live')" "true" \
   "(MODEL) a mark the plan asks of it keeps it live, so a body answered after its findings closed still gets its answer"
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "CHANGES_REQUESTED"')" \
-  --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m) | .[0].live')" "true" \
+  --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m; gc_city_own("bot"; "")) | .[0].live')" "true" \
   "(MODEL) a standing changes-requested block keeps it live"
 FL_ROWS='[{"id":"D","status":"closed","title":"finding[human]: d","description":"Locus: a.sh:2\n\n**Rename the cap.**\n\nRaised by human:op reviewing anchor A.",
   "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"declined","finding.comment_id":"11","finding.review_id":"10",
               "finding.fix_unit":"K","finding.fix_flag":"1","finding.fix_answer":"Renamed anyway, though the ruling declined it."}}]'
 flref() { printf '%s' "$FL_ROWS" | jq -r --argjson v "$VIEW2" --argjson b "$1" --arg m "$MARKER" \
-  "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; $b; $m) | .[0].points[0].ref'; }
+  "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; $b; $m; gc_city_own("bot"; "")) | .[0].points[0].ref'; }
 eq "$(flref '{"K":{"title":"rework","fix_notes":"","closed":true}}')" "{{gc-commits:K|11}}" \
   "(MODEL) a flagged decline reads its fix unit's landing from the close read for it"
 eq "$(flref '{"K":{"title":"rework","fix_notes":"","closed":false}}')" "" "(MODEL) …so a fix unit still open cites nothing"
@@ -339,44 +388,61 @@ eq "$(flref '{}')" "" "(MODEL) …and neither does one that did not read back"
 DL_ROWS='[{"id":"D2","status":"closed","title":"finding[human]: d2","description":"Locus: PR review\n\nA summary with a point of its own.\n\nRaised by human:op reviewing anchor A.",
   "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"declined","finding.comment_id":"10","finding.review_id":"10",
               "finding.reply":"We keep Y because Z","finding.fix_unit":"K","finding.fix_flag":"1","finding.fix_answer":"Changed it anyway."}}]'
-DLM=$(printf '%s' "$DL_ROWS" | jq -c --argjson v "$VIEW2" --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m) | .[0]')
+DLM=$(printf '%s' "$DL_ROWS" | jq -c --argjson v "$VIEW2" --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m; gc_city_own("bot"; "")) | .[0]')
 eq "$(printf '%s' "$DLM" | jq -c '.unstamped')" '["D2"]' "(MODEL) a flagged review body decline is an answer the comment delivers"
 has "$(printf '%s' "$DLM" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')" "  > Declined: We keep Y because Z" \
   "(MODEL) …and the rendering it is stamped against carries it"
 # A decline answered in its thread, beside a landed fix, as the read of the PR
-# finds the decline's thread: open while it waits on the reviewer, resolved once
-# they accept it.
+# finds the decline's thread: waiting on the reviewer while it is open, holds
+# the answer and ends with a post of the city, and not once they resolve it,
+# reply in it, or when the answer never reached it.
 WROWS='[{"id":"W1","status":"closed","title":"finding[human]: w1","description":"Locus: a.sh:1\n\n**The barrier now runs once per page.**\n\nRaised by human:op reviewing anchor A.",
   "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"declined","finding.comment_id":"11","finding.review_id":"10","finding.reply":"the count query is paged, so the barrier runs per page.","finding.reply_posted":"1"}},
  {"id":"W2","status":"closed","title":"finding[human]: w2","description":"Locus: a.sh:2\n\n**Fix the cap.**\n\nRaised by human:op reviewing anchor A.",
   "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"must-fix","finding.comment_id":"12","finding.review_id":"10","finding.fix_unit":"K","finding.fix_answer":"Fixed as you suggested."}}]'
-wview() { # whether the read finds the decline thread resolved
-  jq -cn --argjson r "$1" '{ reviews: [{databaseId:10,state:"COMMENTED",author:{login:"op"},commit:{oid:"c1"},url:""}],
-    threads: [{isResolved:$r,comments:{nodes:[{databaseId:11,url:"https://github.com/o/r/pull/7#discussion_r11"}]}},
+WANS='{"author":{"login":"bot"},"body":"❓ Declined: the count query is paged, so the barrier runs per page.\n\nResolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback.\n<!-- gc-writeback -->\n<!-- gc-writeback-finding:W1 -->"}'
+wview() { # whether the read finds the decline thread resolved, and the posts after its comment
+  jq -cn --argjson r "$1" --argjson cs "${2:-[]}" '{ reviews: [{databaseId:10,state:"COMMENTED",author:{login:"op"},commit:{oid:"c1"},url:""}],
+    threads: [{isResolved:$r,comments:{nodes:([{databaseId:11,author:{login:"op"},url:"https://github.com/o/r/pull/7#discussion_r11"}] + $cs)}},
               {isResolved:true,comments:{nodes:[{databaseId:12,url:"https://github.com/o/r/pull/7#discussion_r12"}]}}],
     issue_comments: [] }'
 }
-wmodel() { printf '%s' "$WROWS" | jq -c --argjson v "$(wview "$1")" --arg m "$MARKER" \
-  "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {"K":{"closed":true}}; $m) | .[0]'; }
+wmodel() { printf '%s' "$WROWS" | jq -c --argjson v "$(wview "$1" "${2:-[$WANS]}")" --arg m "$MARKER" \
+  "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {"K":{"closed":true}}; $m; gc_city_own("bot"; "")) | .[0]'; }
 WOPEN=$(wmodel false | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')
 has "$WOPEN" "### Your review: 2 points, 1 needs you, 1 answered
-" "(MODEL) a decline whose thread the read finds open is counted as needing the reviewer"
+" "(MODEL) a decline whose open thread holds its answer, and ends with it, is counted as needing the reviewer"
 hasnt "$WOPEN" "all answered" "(MODEL) …so the count line does not read all answered while it waits"
 has "$WOPEN" "**Needs you**
 - **[The barrier now runs once per page.](https://github.com/o/r/pull/7#discussion_r11)** Declined: the count query is paged, so the barrier runs per page.
-  Resolving the thread accepts the decline. A reply in the thread overrules it.
+  Resolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback.
 
 **Done**" "(MODEL) …and listed under Needs you, what it asks on a line of its own"
 hasnt "$WOPEN" "[!IMPORTANT]" "(MODEL) …with no visit callout, since no visit carries it"
 WDONE=$(wmodel true | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')
-has "$WDONE" "### Your review: 2 points, all answered
-" "(MODEL) once the reviewer resolves the thread, the count line reads all answered"
-has "$WDONE" "**Worth a look**
+WLOOK="**Worth a look**
 - **[The barrier now runs once per page.](https://github.com/o/r/pull/7#discussion_r11)** Declined: the count query is paged, so the barrier runs per page.
 
-**Done**" "(MODEL) …and the decline is worth a look"
+**Done**"
+has "$WDONE" "### Your review: 2 points, all answered
+" "(MODEL) once the reviewer resolves the thread, the count line reads all answered"
+has "$WDONE" "$WLOOK" "(MODEL) …and the decline is worth a look"
 hasnt "$WDONE" "Needs you" "(MODEL) …with nothing shown as needing the reviewer"
 hasnt "$WDONE" "Resolving the thread" "(MODEL) …and nothing asked of them"
+WREPLY='{"databaseId":13,"author":{"login":"op"},"body":"Paging is fine, but say so in a comment."}'
+WREPLIED=$(wmodel false "[$WANS,$WREPLY]" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')
+has "$WREPLIED" "$WLOOK" "(MODEL) a reply of the reviewer after the decline puts it under Worth a look, since the reply is a point of its own"
+hasnt "$WREPLIED" "Resolving the thread" "(MODEL) …asking them nothing more"
+WUNPOSTED=$(wmodel false '[]' | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')
+has "$WUNPOSTED" "$WLOOK" "(MODEL) an open thread the decline never reached leaves it worth a look"
+hasnt "$WUNPOSTED" "Resolving the thread" "(MODEL) …with no request, since the thread holds nothing to accept"
+WFIX='{"author":{"login":"bot"},"body":"✅ Fixed in 6c6c6c6c (tk-k2).\n<!-- gc-writeback -->\n<!-- gc-writeback-mark:resolved -->"}'
+WAGAIN=$(wmodel false "[$WANS,$WREPLY,$WFIX]" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')
+has "$WAGAIN" "### Your review: 2 points, 1 needs you, 1 answered
+" "(MODEL) once the city answers the reply, the thread it leaves open waits on the reviewer again"
+has "$WAGAIN" "**Needs you**
+- **[The barrier now runs once per page.](https://github.com/o/r/pull/7#discussion_r11)** Declined: the count query is paged, so the barrier runs per page.
+  Resolving the thread accepts the decline." "(MODEL) …and the decline needs them again, asking them to resolve it"
 
 echo "# (ROUND)"
 eq "$(jq -nc "$REVIEW_ROUND_DEF"'[ ra_round_key("op"; "c1"), ra_round_key("op"; null), ra_round_key(""; "c1") ]')" '["op@c1","",""]' \
@@ -406,7 +472,7 @@ rview() { # issue-comments-json review-spec...
 }
 rmodels() { # rows-json view-json [plan-marks-json] [beads-json]
   printf '%s' "$1" | jq -c --argjson v "$2" --argjson vl "${3:-"{}"}" --argjson b "${4:-"{}"}" --arg m "$MARKER" \
-    "$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; $vl; $b; $m)'
+    "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; $vl; $b; $m; gc_city_own("bot"; ""))'
 }
 KB='{"K":{"title":"rework","fix_notes":"Notes from K.","closed":false}}'
 RROWS="[$(rrow F1 501 51 must-fix open '{"finding.fix_unit":"K"}'),$(rrow F2 502 52 must-fix open '{"finding.fix_unit":"K"}'),$(rrow F3 503 53 must-fix open '{"finding.fix_unit":"K"}')]"
@@ -530,6 +596,9 @@ eq "$N" "Your review: 3 points, all answered (U). Dismissal is not approval; the
   "(DISMISS) one line: the count line, the living answer, and that dismissal is not approval"
 has "$(printf '%s' "$MODEL" | jq -r "$REVIEW_ANSWER_DEF"'.self = true | ra_dismiss_note("U")')" "no fresh review is requested" \
   "(DISMISS) a review under the city's own account says no fresh review is requested"
+eq "$(jq -rn --argjson n "$NEEDS1" --argjson u "$UNRULED" "$REVIEW_ANSWER_DEF"'{ self: false, points: [ $n, $u, $u ] } | ra_dismiss_note("U")')" \
+  "Your review: 3 points, 1 needs you, the rest in progress (U). Dismissal is not approval; the merge still gates on an explicit approving review." \
+  "(DISMISS) a note dismissing a review while other points of its round are unruled says the rest are in progress"
 eq "$(wmodel false | jq -r "$REVIEW_ANSWER_DEF"'ra_dismiss_note("U")')" \
   "Your review: 2 points, 1 needs you, 1 answered (U). Dismissal is not approval; the merge still gates on an explicit approving review." \
   "(DISMISS) a note dismissing a review whose decline waits in an open thread says a point needs the reviewer"
@@ -547,6 +616,11 @@ has "$(cat "$PF")" 'WB_OWED_REPLY_DEF="$REVIEW_OWED_REPLY_DEF"' \
   "(READERS) the owed-reply set the reply arm and the dismissal read is built on these defs, so it cannot drift from the living answer's"
 has "$(cat "$PF")" 'ra_ruled_reply($disp)' "(READERS) …and a thread reply leads with its ruling through the same def"
 has "$(cat "$PF")" 'ra_open_ask($disp)' "(READERS) …and says what resolving its thread does through the def the living answer reads"
+has "$(cat "$PF")" 'ra_comment_thread($v; $cid) as $t' "(READERS) …finding the thread through the lookup the living answer reads, so the two read one thread"
+has "$(cat "$PF")" '($t | ra_thread_open)' "(READERS) …asking for nothing in a thread already resolved, by the same reading of its state"
+has "$(cat "$PF")" 'ra_answer_post($self; $m; $id; $reply)' "(READERS) …and reading its answer back by the test the living answer tells a waiting thread by"
+has "$(cat "$PF")" 'ra_models($view; $prurl; $self; $vl; $beads; $marker; gc_city_own($self; $since))' \
+  "(READERS) the living answer tells a post of the city by gc_city_own, the rule the routing arm tells feedback by"
 OTHERS=$(cd "$ROOT" && git grep -l -F 'gc-review-answer:' -- . ':!assets/scripts/review-answer.sh' ':!assets/scripts/pr-facts.sh' ':!*.test.sh' ':!docs/**' ':!specs/**' ':!lifecycle/**' 2>/dev/null)
 eq "$OTHERS" "" "(READERS) no other file writes a living answer's review key"
 

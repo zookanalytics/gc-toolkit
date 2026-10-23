@@ -70,7 +70,7 @@ ruled on its merits, and `finding.sh` refuses any other ruling while that visit
 sits on the comment's own rework; a human review body that only frames the
 inline comments of its review round is `restates`, no point of its own; a human
 ruling also writes the label and sentence the round's living answer shows; a re-raise
-re-blocks because the closed finding re-adopts fresh on re-review),
+re-blocks because it is filed as a fresh finding, the closed one never re-adopted),
 and one convergence outcome via `review-outcome.sh` whose shape follows
 `check_name` (decision 3). A reviewer's lane batch backs its lane (`back-lane`)
 on convergence, or supersedes it (`supersede-lane`) when a fresh whole-diff
