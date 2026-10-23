@@ -5,7 +5,8 @@
 # deferred-dispatch.test.sh pattern: stubs log invocations and serve canned
 # JSON; tests assert on the logs, the store, and exit codes.
 # Contract: caller sets TMP (tempdir); harness_init installs stubs on PATH and
-# exports STUB_* env the stubs read. No live city, network, gc, bd or gh: the
+# exports STUB_* env the stubs read, and GC_QUEUE_PRIORITY_TOOL, this tree's
+# priority writer over the stub store. No live city, network, gc, bd or gh: the
 # test floor (tools/test-floor) sits beneath the stubs, so a call no stub
 # answers is refused rather than handed to the real binary.
 # Sourcing it only defines functions, except in a suite that declares run-tests
@@ -121,12 +122,35 @@ harness_init() {
     exit 2
   fi
   export PATH="$BIN:$floor/harness:$floor:$PATH"
+  # The priority writer a script under test reaches through
+  # GC_QUEUE_PRIORITY_TOOL: this tree's queue-priority.sh over the stub store.
+  # The writer finds a bead's store in the rig list, which the stub does not
+  # serve, so the wrapper names a store directory of the harness's own, where
+  # the writer keeps its lock.
+  local here
+  here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  mkdir -p "$TMP/qp-rig/.beads"
+  { _stub_shebang; printf 'exec %q "$@" --db %q\n' "$here/queue-priority.sh" "$TMP/qp-rig/.beads"; } > "$BIN/queue-priority"
+  chmod +x "$BIN/queue-priority"
+  export GC_QUEUE_PRIORITY_TOOL="$BIN/queue-priority"
 }
 
 store() { printf '%s' "$1" > "$STUB_STORE"; }
 meta()  { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k] // "<absent>") // "<absent>"' "$STUB_STORE"; }
 bstatus() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .status) // "<absent>"' "$STUB_STORE"; }
 bassignee() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .assignee) // "<absent>"' "$STUB_STORE"; }
+# A bead's priority, bd's default 2 when none was written, and the priority a
+# sling poured its workflow at, which the stub's sling records.
+bprio() { jq -r --arg id "$1" '(.[] | select(.id == $id) | (.priority // 2)) // "<absent>"' "$STUB_STORE"; }
+bpoured() { jq -r --arg id "$1" '(.[] | select(.id == $id) | (.poured_priority // "<unpoured>")) // "<absent>"' "$STUB_STORE"; }
+# Every parent a bead carries, comma-joined and empty for none: its parent-child
+# edges in the dep rows, and the parent field a create or update wrote.
+bparents() {
+  { awk -F'|' -v id="$1" '$1 == id && $2 == "parent-child" { print $3 }' "$STUB_DEPS"
+    jq -r --arg id "$1" '.[] | select(.id == $id) | (.parent // empty),
+      ((.dependencies // [])[]? | select((.type // .dependency_type // "") == "parent-child") | (.depends_on_id // .id // empty))' "$STUB_STORE"
+  } | sort -u | paste -sd, -
+}
 notes() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .notes) // ""' "$STUB_STORE"; }
 
 # Copy the SUT and the named siblings into a private scripts dir so $0-relative
@@ -153,13 +177,15 @@ mk_sut_dir() { # <dir> <file>...
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
   # review-verdict.sh, the approval rule, review-dismissal.sh, what a dismissal
-  # retires, review-answer.sh, what the living answer to a review shows, and
+  # retires, review-answer.sh, what the living answer to a review shows,
   # hold-lib.sh, the one definition of a hold, which deferred-dispatch.sh
-  # sources, are sourced by sibling path the same way.
+  # sources, and priority-lib.sh, the priority function, whose reading of a PR's
+  # approval pr-facts.sh sources, are sourced by sibling path the same way.
   [ -f "$here/review-verdict.sh" ] && cp "$here/review-verdict.sh" "$d/"
   [ -f "$here/review-dismissal.sh" ] && cp "$here/review-dismissal.sh" "$d/"
   [ -f "$here/review-answer.sh" ] && cp "$here/review-answer.sh" "$d/"
   [ -f "$here/hold-lib.sh" ] && cp "$here/hold-lib.sh" "$d/"
+  [ -f "$here/priority-lib.sh" ] && cp "$here/priority-lib.sh" "$d/"
   return 0
 }
 
@@ -234,7 +260,10 @@ case "$sub" in
     # Emulate the graph.v2 pour on the store: retire gc.routed_to and stamp
     # gc.execution_routed_to=<target>. STUB_SLING_FAIL exits 1 with no writes;
     # STUB_DROP_KEYS="<bead>:gc.execution_routed_to" models a pour whose exec
-    # stamp dropped. Invocations land in STUB_GC_LOG like every gc call.
+    # stamp dropped. Invocations land in STUB_GC_LOG like every gc call. A pour
+    # copies the bead's priority into its workflow once, so poured_priority
+    # records the priority the bead carried at the sling, bd's default 2 when
+    # none was written (bpoured).
     [ -n "${STUB_SLING_FAIL:-}" ] && { echo "gc: simulated sling failure" >&2; exit 1; }
     target=""; bead=""
     while [ $# -gt 0 ]; do
@@ -257,6 +286,7 @@ case "$sub" in
       map(if .id == $id then
             (.metadata |= del(.["gc.routed_to"]))
             | (if $stamp == 1 then .metadata["gc.execution_routed_to"] = $t else . end)
+            | .poured_priority = (.priority // 2)
           else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
     exit 0 ;;
   bd) : ;;
@@ -307,7 +337,9 @@ case "$verb" in
     if [ -n "${STUB_SHOW_NOT_FOUND_ERROR:-}" ] && ! jq -e --arg id "$id" 'any(.[]; .id == $id)' "$S" >/dev/null 2>&1; then
       printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1
     fi
-    jq -c --arg id "$id" '[ .[] | select(.id == $id) ]' "$S"
+    # Every bead bd prints carries a priority, P2 unless one was written, so a
+    # fixture row that names none reads at bd's default.
+    jq -c --arg id "$id" '[ .[] | select(.id == $id) | .priority //= 2 ]' "$S"
     ;;
   list)
     [ -n "${STUB_LIST_FAIL:-}" ] && { echo "gc: simulated list failure" >&2; exit 1; }
@@ -362,12 +394,22 @@ case "$verb" in
         | select($ex == "" or ((.issue_type // "task") != $ex))
         | select($tc == "" or (((.title // "") | ascii_downcase) | contains($tc | ascii_downcase)))
         | . as $row
-        | select(all($fields[]; ((($row.metadata // {})[.k]) // "" | tostring) == .v)) ]' \
+        | select(all($fields[]; ((($row.metadata // {})[.k]) // "" | tostring) == .v))
+        | .priority //= 2 ]' \
       "$S" --args ${fields[@]+"${fields[@]}"}
     [ -z "$ltrail" ] || echo 'gc: simulated trailing output'
     ;;
   update)
-    id="${1:-}"; shift || true
+    # bd writes every id named ahead of the flags; each is written here as an
+    # update of its own carrying the same flags, through this stub, which is
+    # the gc on the suite's PATH.
+    ids=()
+    while [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; do ids+=("$1"); shift; done
+    if [ "${#ids[@]}" -gt 1 ]; then
+      for id in "${ids[@]}"; do gc bd update "$id" "$@" >/dev/null || exit $?; echo "updated $id"; done
+      exit 0
+    fi
+    id="${ids[0]:-}"
     case " ${STUB_UPDATE_FAIL:-} " in *" $id "*) echo "gc: simulated update refusal for $id" >&2; exit 1 ;; esac
     # STUB_CLOSE_FAIL="id id2" — the same knob the `close` subcommand reads,
     # applied to the other spelling of a close: refuse only the writes carrying
@@ -380,7 +422,7 @@ case "$verb" in
       *" $id "*) case " $* " in *" --status=closed "*)
         echo "gc: simulated close refusal for $id" >&2; exit 1 ;; esac ;;
     esac
-    sets=(); unsets=(); note=""; note_set=0; asg=""; asg_set=0; newstatus=""; desc=""; desc_set=0
+    sets=(); unsets=(); note=""; note_set=0; asg=""; asg_set=0; newstatus=""; desc=""; desc_set=0; prio=""; uparent=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --description=*) desc="${1#--description=}"; desc_set=1 ;;
@@ -393,6 +435,10 @@ case "$verb" in
         --assignee) shift; asg="${1-}"; asg_set=1 ;;
         --status=*) newstatus="${1#--status=}" ;;
         --append-notes) shift; note="${1:-}"; note_set=1 ;;
+        --priority=*) prio="${1#--priority=}" ;;
+        --priority|-p) shift; prio="${1-}" ;;
+        --parent=*) uparent="${1#--parent=}" ;;
+        --parent) shift; uparent="${1-}" ;;
         *) : ;;
       esac
       shift || true
@@ -415,6 +461,10 @@ case "$verb" in
     for pair in ${STUB_DROP_KEYS:-}; do
       case "$pair" in "$id:"*) drops="${pair#*:}" ;; esac
     done
+    # A parent rides the update as bd writes it: a parent-child edge onto it.
+    if [ -n "$uparent" ]; then
+      case ",$drops," in *",parent,"*) : ;; *) dep_put "$id" parent-child "$uparent" || exit 1 ;; esac
+    fi
     # The whole update lands in ONE jq pass over the store, however many flags
     # it carries: a jq per --set-metadata, --unset-metadata, assignee, status,
     # notes and description, each with its own temp copy, made a five-flag
@@ -422,17 +472,19 @@ case "$verb" in
     # writes tens of thousands of updates. The sets ride the positional args
     # ahead of the unsets ($ns says where the split is), each `k=v` cut at its
     # first `=` as the shell cut it. A set or unset whose key STUB_DROP_KEYS
-    # names is skipped, as are the assignee, status and description it names;
-    # notes are never dropped.
+    # names is skipped, as are the assignee, status, priority, parent and
+    # description it names; notes are never dropped.
     # bd stores a value that parses as a JSON number, true, false or null as
     # that typed value, so `k=1` reads back as the number 1 and `k=true` as a
     # boolean. Every other value, a quoted JSON string included, is stored as
     # its raw text. The number grammar is JSON's, which is stricter than jq's
-    # parser, so `+1`, `00`, `.5` and `NaN` stay strings.
+    # parser, so `+1`, `00`, `.5` and `NaN` stay strings. bd takes a priority
+    # as 0-4 or P0-P4 and stores the number.
     tmp="${S%/*}/.gc-stub.$$"
     jq -c --arg id "$id" --arg dr "$drops" --argjson ns "${#sets[@]}" \
       --argjson asg_set "$asg_set" --arg asg "$asg" --arg st "$newstatus" \
       --argjson note_set "$note_set" --arg note "$note" \
+      --arg prio "$prio" --arg parent "$uparent" \
       --argjson desc_set "$desc_set" --arg desc "$desc" '
       ($dr | split(",")) as $drop
       | def kept($k): ($drop | index($k)) == null;
@@ -453,6 +505,8 @@ case "$verb" in
               | reduce $unsets[] as $k (.; .metadata |= del(.[$k]))
               | (if $asg_set == 1 and kept("assignee") then .assignee = $asg else . end)
               | (if $st != "" and kept("status") then .status = $st else . end)
+              | (if $prio != "" and kept("priority") then .priority = ($prio | ltrimstr("P") | ltrimstr("p") | tonumber) else . end)
+              | (if $parent != "" and kept("parent") then .parent = $parent else . end)
               | (if $note_set == 1 then
                    .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $note)
                  else . end)
@@ -476,9 +530,12 @@ case "$verb" in
     # and any other <type>:<id> makes the new bead depend on <id> with that type.
     # A target that does not resolve refuses the whole create with nothing
     # written. STUB_DEP_FAIL naming the minted id lands the bead without its
-    # edges, as it refuses a `dep` write from that id.
+    # edges, as it refuses a `dep` write from that id. --parent <id> rides the
+    # create as bd writes it, a parent-child edge onto <id> beside .parent, and
+    # -p/--priority sets the priority the row is born at; a create that names
+    # none is read at bd's default P2.
     title="${1:-}"; shift || true
-    body=""; cmeta="{}"; cstatus="open"; cnotes=""; cdeps=""
+    body=""; cmeta="{}"; cstatus="open"; cnotes=""; cdeps=""; cparent=""; cprio=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --body-file) shift; [ "${1:-}" = "-" ] && body="$(cat)" ;;
@@ -490,9 +547,14 @@ case "$verb" in
         --notes=*) cnotes="${1#--notes=}" ;;
         --deps) shift; cdeps="$cdeps,${1:-}" ;;
         --deps=*) cdeps="$cdeps,${1#--deps=}" ;;
+        --parent) shift; cparent="${1:-}" ;;
+        --parent=*) cparent="${1#--parent=}" ;;
+        -p|--priority) shift; cprio="${1:-}" ;;
+        --priority=*) cprio="${1#--priority=}" ;;
       esac
       shift || true
     done
+    [ -z "$cparent" ] || cdeps="$cdeps,parent-child:$cparent"
     [ -n "${STUB_CREATE_FAIL:-}" ] && { echo "gc: simulated create refusal" >&2; exit 1; }
     # One jq validates the metadata, mints the id and lands the row. An
     # unparseable --metadata fails --argjson before the program runs, which is
@@ -502,6 +564,7 @@ case "$verb" in
     # naming the id wins, as the shell loop it replaces let the last one win).
     [ -n "$cmeta" ] || { echo "Error: invalid JSON in --metadata: must be valid JSON" >&2; exit 1; }
     out=$(jq -rc --arg t "$title" --arg b "$body" --arg st "$cstatus" --arg nt "$cnotes" \
+      --arg par "$cparent" --arg pr "$cprio" \
       --argjson m "$cmeta" --arg dk "${STUB_DROP_KEYS:-}" '
       ("new-" + ((length + 1) | tostring)) as $id
       | ([$dk | splits("[ \t\n]+")] | map(select(startswith($id + ":")))
@@ -510,7 +573,9 @@ case "$verb" in
            then ($m | with_entries(select(.key as $k | $drop | index($k) | not)))
            else $m end) as $meta
       | (if ($drop | index("status")) then "open" else $st end) as $status
-      | (. + [{id: $id, status: $status, assignee: "", title: $t, description: $b, notes: $nt, issue_type: "task", metadata: $meta}]),
+      | (. + [{id: $id, status: $status, assignee: "", title: $t, description: $b, notes: $nt, issue_type: "task", metadata: $meta}
+              + (if $par == "" then {} else {parent: $par} end)
+              + (if $pr == "" then {} else {priority: ($pr | ltrimstr("P") | ltrimstr("p") | tonumber)} end)]),
         $id' "$S" 2>/dev/null) \
       || { echo "Error: invalid JSON in --metadata: must be valid JSON" >&2; exit 1; }
     for cdep in $(printf '%s' "$cdeps" | tr ',' ' '); do

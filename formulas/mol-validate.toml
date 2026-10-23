@@ -304,16 +304,18 @@ dependency edge by hand:
   decline they never hear is a silent overrule. Pass the answer with `--reply`;
   finding.sh records it and pr-facts.sh's write-back posts it into their PR
   thread after "Declined:", and leaves the thread open for them to accept or
-  overrule. Write it as the reason that follows that word:
+  push back on. Write it as the reason that follows that word:
   ```bash
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition declined \
     --reason "<why this is not an objection>" \
     --reply "<the reason, as it reads after 'Declined:': what you found, and why the objection does not hold>"
   ```
-  Declining closes the finding, which is what lets a re-raise re-block: if the
-  operator still disagrees they re-review, the content key re-adopts the closed
-  finding as a fresh one, and the next reconcile re-opens the human validation
-  pass on the anchor. A re-raise is theirs to make; nothing here forecloses it.
+  Declining closes the finding, which is what lets a re-raise re-block. If the
+  operator still disagrees, they reply in the thread or review again.
+  finding.sh dedups only against open findings, so their objection is filed as
+  a fresh finding, and the next reconcile re-opens the human validation pass on
+  the anchor. The declined finding stays closed and declined. A re-raise is
+  theirs to make; nothing here forecloses it.
 
   A human comment that states no objection at all — an acknowledgement, praise, or
   a question the diff already answers — is declined like a machine finding, with
