@@ -566,7 +566,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    any other locus becomes a Conversation comment. Once the finding closes, the
    comment is answered with how it closed: the fix units and the commits they
    made, the deferral's follow-up, or the decline. A fixed finding's
-   thread is then resolved unless a post that is feedback has come after it. A thread the identity cannot resolve leaves the finding owed its
+   thread is then resolved unless a post that is feedback has come after it.
+   A thread the identity cannot resolve leaves the finding owed its
    answer, as above. A declined or deferred finding's thread stays open for the
    operator to accept or overrule. A Conversation comment is edited to carry the
    answer. A finding that closed

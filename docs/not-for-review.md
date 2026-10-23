@@ -40,9 +40,9 @@ body adds it: a person, or a workflow or bot whose text the rig controls. It
 counts the same on a conversation comment, an inline comment and a review
 body, under any login.
 
-The city's own posts carry the city's mark instead, `<!-- gc:city -->`, which
-[`pr-post.sh`](../assets/scripts/pr-post.sh) appends to every post the pack
-makes. An agent never writes the no-review mark into a post of its own.
+The city's own posts are not feedback either. They carry the city's mark,
+`<!-- gc:city -->`, which [`pr-post.sh`](../assets/scripts/pr-post.sh) appends
+to every post the pack makes.
 
 ## Markers a rig declares
 
