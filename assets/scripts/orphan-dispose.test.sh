@@ -17,6 +17,11 @@
 #     gc.step_ref;
 #   * the ROOT arm writing NOTHING, and in particular never reaching the
 #     open+unassigned+routed shape a pool can claim;
+#   * the VISIT arm releasing the gone sitting and keeping the visit: the
+#     assignee and the session pins go, and the route, continuation group and
+#     task_kind stay, both for a visit bound to a sitting that never started and
+#     for one a sitting claimed before it went, with verify reporting partial
+#     when a pin reports cleared and rolls back;
 #   * the STEP arm releasing the dead session's pin while the chain survives:
 #     gc.routed_to, gc.step_ref, gc.root_bead_id and the dependency list are
 #     all still there afterwards, so the molecule resumes at the same step;
@@ -199,6 +204,75 @@ eq "$(meta tk-slot gc.session_id)" "<absent>" "the dead session id is cleared"
 has "$(cat "$STUB_GC_LOG")" "--if-assignee=gc-toolkit/gc-toolkit.polecat" \
   "the guard is the ASSIGNEE, not the --owner"
 hasnt "$(cat "$STUB_GC_LOG")" "--if-assignee=lx-dead" "the owner is never used as the guard"
+
+# The two shapes a visit has when its sitting is gone. engage binds a visit to
+# the sitting it spawns by that sitting's runtime name, while the visit is still
+# open and before the sitting starts, so a create that fails leaves the binding
+# with no pin beside it (gc-bound). A sitting that started claims the visit:
+# its claim sets in_progress, re-stamps the assignee to the sitting's alias and
+# pins gc.session_id and gc.session_name (gc-claimed).
+visit_fixture() {
+  store '[
+    {"id":"gc-bound","status":"open","assignee":"s-lx-wisp-tjt3y","title":"visit: gc-ycww6 — a question",
+     "metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-ycww6",
+                 "escalation_key":"polecat-blocked"}},
+    {"id":"gc-claimed","status":"in_progress","assignee":"gascity/gc-toolkit.gc-claimed","title":"visit: gc-2ddu7 — a question",
+     "metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-2ddu7",
+                 "gc.session_id":"lx-wisp-dead","gc.session_name":"s-lx-wisp-dead",
+                 "gc.claimed_at":"2026-10-22T02:06:00Z"}}
+  ]'
+  : > "$STUB_GC_LOG"
+}
+
+echo "--- visit arm: a sitting that never started ---"
+visit_fixture
+OUT=$("$SCRIPT" gc-bound --owner s-lx-wisp-tjt3y --apply 2>&1); rc=$?
+eq "$rc" "0" "the bound visit's release exits 0"
+has "$OUT" "class=visit" "it is classified visit"
+has "$OUT" "action=release-visit" "the visit arm runs"
+has "$OUT" "result=disposed" "the release reports disposed"
+eq "$(bstatus gc-bound)" "open" "the visit stays open"
+eq "$(bassignee gc-bound)" "" "the sitting that never started is no longer its assignee"
+eq "$(meta gc-bound gc.routed_to)" "human" "route PRESERVED, so it parks on the board again"
+eq "$(meta gc-bound gc.continuation_group)" "gc-ycww6" "continuation group PRESERVED"
+eq "$(meta gc-bound task_kind)" "visit" "task_kind PRESERVED"
+eq "$(meta gc-bound escalation_key)" "polecat-blocked" "escalation key PRESERVED"
+has "$(cat "$STUB_GC_LOG")" "--if-assignee=s-lx-wisp-tjt3y" "the assignee clear is guarded on the binding just read"
+hasnt "$(cat "$STUB_GC_LOG")" "--set-metadata" "the release sets no metadata"
+hasnt "$(cat "$STUB_GC_LOG")" "--status=" "an open visit takes no status write"
+hasnt "$(cat "$STUB_GC_LOG")" "delete-source" "the visit arm never calls delete-source"
+hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "the visit arm never calls reopen-source"
+
+echo "--- visit arm: a sitting that claimed it and is gone ---"
+# The assignee and both pins name the gone sitting to orphan recovery, and the
+# board reads a set gc.session_name as engaged, so all three go, in the order
+# that keeps the claim guard from rolling the release back.
+visit_fixture
+OUT=$("$SCRIPT" gc-claimed --owner lx-wisp-dead --apply 2>&1); rc=$?
+eq "$rc" "0" "the claimed visit's release exits 0"
+has "$OUT" "result=disposed" "the release reports disposed"
+eq "$(bstatus gc-claimed)" "open" "the visit is open again"
+eq "$(bassignee gc-claimed)" "" "the gone sitting's alias is cleared"
+eq "$(meta gc-claimed gc.session_id)" "<absent>" "the dead session id is cleared"
+eq "$(meta gc-claimed gc.session_name)" "<absent>" "the dead session name is cleared"
+eq "$(meta gc-claimed gc.routed_to)" "human" "route PRESERVED"
+eq "$(meta gc-claimed gc.continuation_group)" "gc-2ddu7" "continuation group PRESERVED"
+eq "$(meta gc-claimed task_kind)" "visit" "task_kind PRESERVED"
+ORDER=$(grep -- "update gc-claimed" "$STUB_GC_LOG" \
+  | sed -e 's/.*--unset-metadata.*/meta/' -e 's/.*--status.*/status/' -e 's/.*--assignee.*/assignee/' \
+  | tr '\n' ',')
+eq "$ORDER" "meta,status,assignee," "metadata first, status next, assignee last"
+has "$(cat "$STUB_GC_LOG")" "--if-assignee=gascity/gc-toolkit.gc-claimed" "the guard is the assignee, not the --owner"
+hasnt "$(cat "$STUB_GC_LOG")" "--unset-metadata gc.continuation_group" "the continuation group is never unset"
+
+echo "--- visit arm: a pin that reports cleared and rolls back ---"
+visit_fixture
+export STUB_DROP_KEYS="gc-claimed:gc.session_name"
+OUT=$("$SCRIPT" gc-claimed --owner lx-wisp-dead --apply 2>&1); rc=$?
+export STUB_DROP_KEYS=""
+eq "$rc" "3" "a surviving pin is a partial release, exit 3"
+has "$OUT" "result=partial" "partial is reported, not disposed"
+has "$OUT" "gc.session_name(still=s-lx-wisp-dead)" "the surviving pin is named"
 
 echo "--- step arm: a step with no route says so ---"
 store '[{"id":"tk-unrouted","status":"in_progress","assignee":"lx-dead","title":"step",

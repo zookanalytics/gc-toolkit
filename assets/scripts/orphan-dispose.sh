@@ -6,8 +6,12 @@
 # return a bead to a pool to be claimed again, and some of those return it only
 # when its work has not already reached a downstream court.
 #
-#   visit          release the assignee and NOTHING else. A visit's metadata
-#                  (route, continuation group, task_kind) is its identity.
+#   visit          release the sitting and keep the visit. The assignee and the
+#                  session pins (gc.session_id, gc.session_name) name the
+#                  sitting that is gone. The route, continuation group and
+#                  task_kind are the visit's identity and are never written.
+#                  Released, the visit names no owner, so orphan recovery does
+#                  not find it again, and the helm board reads it as parked.
 #   review         a review bead is the source bead of its own mol-review
 #                  molecule and carries no worktree of its own, so it disposes by
 #                  the source contract below (delete-source is a no-op on an
@@ -225,6 +229,22 @@ clear_pins() {
     fi
 }
 
+# clear_session_pins is clear_pins for a visit. It removes gc.session_id and
+# gc.session_name, the pins a sitting's claim stamps, and keeps
+# gc.continuation_group, which on a visit is its identity rather than a pin. The
+# helm board also reads a visit whose gc.session_name is set as engaged. A visit
+# that engage bound to a sitting that never claimed it carries neither pin, and
+# removing an absent key changes nothing.
+clear_session_pins() {
+    if gc bd update "$BEAD" \
+        --unset-metadata gc.session_id \
+        --unset-metadata gc.session_name >/dev/null 2>&1; then
+        note_landed pins
+    else
+        note_failed pins
+    fi
+}
+
 # restore_route puts gc.routed_to back on a source bead reopen-source returned
 # to the pool. reopen-source reopens the bead but preserves the route it finds,
 # and a bead reaches recovery with gc.routed_to already emptied by its own claim,
@@ -314,11 +334,11 @@ verify() {
     sname="$(printf '%s' "$after" | jq -r '.[0].metadata["gc.session_name"] // ""')"
     [ "$st"  = "open" ] || note_failed "status(still=$st)"
     [ -z "$asg" ]       || note_failed "assignee(still=$asg)"
-    # The arms that clear session pins — workflow-step, source and review — must
-    # land it: a surviving pin is exactly what makes orphan recovery re-detect the
-    # bead.
+    # The arms that clear session pins — visit, workflow-step, source and review —
+    # must land it: a surviving pin is exactly what makes orphan recovery
+    # re-detect the bead.
     case "$CLASS" in
-        workflow-step|source|review)
+        visit|workflow-step|source|review)
             [ -n "$sid" ]   && note_failed "gc.session_id(still=$sid)"
             [ -n "$sname" ] && note_failed "gc.session_name(still=$sname)"
             ;;
@@ -346,10 +366,12 @@ DETAIL=""
 
 case "$CLASS" in
     visit)
-        # Release the assignee and nothing else: no metadata is touched, so the
-        # route, continuation group and task_kind that ARE the visit survive.
-        ACTION="release-assignee"
+        # Release the sitting and keep the visit: the pins and the assignee go,
+        # and the route, continuation group and task_kind that ARE the visit are
+        # never written.
+        ACTION="release-visit"
         if [ "$APPLY" = "1" ]; then
+            clear_session_pins
             open_bead
             release_assignee
             verify
