@@ -915,9 +915,12 @@ cmd_takeaway() {
             *) echo "$PROG: takeaway: --route '$route' is not rig-qualified; gc.routed_to is matched as an exact string, so a bare agent name routes to nobody and the bead sits forever. Use <rig>/<agent>." >&2; exit 2 ;;
         esac
     fi
-    # --assign rides --release for the same reason, and it excludes --route: the
-    # routed tier offers only unassigned beads, so a route beside an assignee
-    # reaches nobody.
+    # --assign rides --release for the same reason, and it excludes --route. The
+    # agent's hook offers the bead by its assignee whatever the route, and a
+    # pool's claim and Gas City's pool demand count both skip an assigned bead,
+    # so a route beside the assignee offers the bead to no pool member until
+    # the assignee is cleared, and then hands it to the pool instead of the
+    # agent.
     if [ -n "$assign" ]; then
         [ -n "$release" ] || { echo "$PROG: takeaway: --assign needs --release (it names who the bead is released TO)" >&2; exit 2; }
         [ -z "$route" ] || { echo "$PROG: takeaway: --assign and --route both name where $bead goes. A bead is addressed to a named agent by its assignee or to a pool by gc.routed_to, never both. Pass one. Nothing was written." >&2; exit 2; }
