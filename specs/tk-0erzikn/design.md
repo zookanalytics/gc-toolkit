@@ -1,6 +1,6 @@
 ---
 name: A PR is one reviewable unit, built on Gas City's convoy — the design
-description: The design for the operator's PR model, rebuilt on Gas City's own convoy model by the operator's ruling of 2026-10-19 and measured by its four tests. A convoy tracks its members the way Gas City does, each member carries its convoy's branch as its own target and lands there with no PR, work landing on main or on any branch the pack does not cut for its own work goes through a PR, and a convoy's work reaches main as one PR. It settles the default, membership and a member's branch, when the convoy's branch is cut, where each review runs, how the convoy lands and rework returns, the nouns that have diverged from Gas City's, which living files change, and the implementation cut. Read it to review the model before it is codified, or to build one of its units. Its inputs are brief.md and findings.md beside it.
+description: The design for the operator's PR model, rebuilt on Gas City's own convoy model by the operator's ruling of 2026-10-19 and measured by its four tests. A convoy tracks its members the way Gas City does, each member carries its convoy's branch as its own target and lands there with no PR, work landing on main or on any branch the pack does not cut for its own work goes through a PR, and a convoy's work reaches main as one PR. It settles the default, membership and a member's branch, when the convoy's branch is cut and how it is brought current, where each review runs, how the convoy lands and rework returns, the nouns that have diverged from Gas City's, which living files change, and the implementation cut. Read it to review the model before it is codified, or to build one of its units. Its inputs are brief.md and findings.md beside it.
 ---
 
 # A PR is one reviewable unit, built on Gas City's convoy
@@ -62,6 +62,9 @@ What it costs:
   any branch is cut, and waits on a visit that asks for the target. The recipes
   write the target in the same step that adds the member, so only a skipped
   step costs that.
+- A member that builds on work reaching main after its convoy was seeded waits
+  for the mechanik to bring the convoy's branch current, one fast-forward or
+  merge (section 3).
 - Ranking or parking a convoy no longer ranks or parks its members, because
   Gas City's tracking changes no parent and blocks nothing. The members, or the
   epic they sit under, are ranked and parked instead (section 1).
@@ -443,18 +446,38 @@ So a reaction's code reaches main only through a PR. Unit A corrects the
 doctrine to say how, and removes the variable and the fixture check that
 asserts it, which is the change tk-aqytltn asks for.
 
-## 3. When a convoy's branch is cut
+## 3. When a convoy's branch is cut, and how it is brought current
 
 A convoy's branch is cut once, when `convoy-seed.sh` seeds the convoy, from the
 default branch as it stands then. So a convoy is seeded when its first member
 can start.
 
 A member that builds on work reaching main after the seed needs the convoy's
-branch brought current first, and bringing it current is a member like any
-other. It waits on the outside work by a `blocks` edge and is armed to dispatch
-when that work lands. Its change is a merge of main into the convoy's branch,
-which lands on the branch with no PR. The member that needs it waits on it by a
-`blocks` edge. No agent holds the wait.
+branch brought current first. That is a hand-off to the mechanik, not a member.
+The hand-off is a task assigned to the mechanik. It waits on the outside work by
+a `blocks` edge, and deferred dispatch's ready notice tells the mechanik when
+that work has landed. The member that needs the branch current waits on the
+hand-off by a `blocks` edge, and is armed to dispatch when the hand-off closes.
+
+Once notified, the mechanik brings the branch current from a disposable
+worktree, as `convoy-seed.sh` cuts it. When the branch holds nothing that main
+lacks, that is a fast-forward to main. When it does, such as a member's landing
+or a seeded artifact, it is a merge of main into the branch. The mechanik
+pushes the result and closes the hand-off, which releases the member.
+
+- **No review reads main's commits as new work.** No polecat builds the
+  hand-off, so no self-review and no refinery gate treats main's commits as its
+  change. They were reviewed on their way to main, and the convoy's PR into
+  main shows only the convoy's own work.
+- **The waiting member is held until the push**, not through a polecat's build
+  of a mechanical merge.
+- **A merge that conflicts is not mechanical.** The mechanik pushes nothing and
+  puts it to the operator with a visit, as a polecat does when bringing a
+  branch current needs a decision.
+- **It passes the four tests.** The hand-off is a plain task, each wait is a
+  `blocks` edge, the notice is the one deferred dispatch already sends a named
+  agent, and the act is the mechanik's recipe, which is prose. Nothing new is
+  built, and unit C's dispatch doctrine states it.
 
 ## 4. Where each review runs
 
@@ -543,7 +566,7 @@ The unit that changes it is in the last column (section 9).
 | `assets/scripts/pr-status-label.sh`, the `base:` label | "checkpoint into integration; approval mints a phase, not a merge to main" | the same, for a stage. `ensure_group` creates a missing label and never edits one, so the label already on GitHub changes by one `gh label edit`. | B |
 | `docs/state-machine.md`, the base label section | "approving the PR mints a phase into the integration branch", and the banner example | the same words as the banner and label | B |
 | `docs/epics.md`, "A checkpoint is always qualified" | a PR Checkpoint "lands a phase of work on a convoy's integration branch" | it lands a stage | B |
-| `agents/mechanik/prompt.template.md`, the dispatch doctrine | "an owned convoy is the PR unit", a lone bead is the one-child convoy, the recipe links each child with a parent-child edge and reads it back, and a child slung without the stamp "is held at workspace-setup" | A PR comes from one bead or one convoy, and a lone bead needs no convoy. Work that reaches the operator as one PR is an owned convoy. The recipe adds each member with `gc convoy add`, reads the convoy's `tracks` edge back, writes the convoy's target on the member, and slings it with no merge flag. A stage is slung `--merge mr`. A member added without its target is held at workspace-setup before any branch is cut, as a child slung without the stamp is today. Ranking or parking a convoy's work is done on its members or their epic. | C |
+| `agents/mechanik/prompt.template.md`, the dispatch doctrine | "an owned convoy is the PR unit", a lone bead is the one-child convoy, the recipe links each child with a parent-child edge and reads it back, and a child slung without the stamp "is held at workspace-setup" | A PR comes from one bead or one convoy, and a lone bead needs no convoy. Work that reaches the operator as one PR is an owned convoy. The recipe adds each member with `gc convoy add`, reads the convoy's `tracks` edge back, writes the convoy's target on the member, and slings it with no merge flag. A stage is slung `--merge mr`. A member added without its target is held at workspace-setup before any branch is cut, as a child slung without the stamp is today. A member that builds on work reaching main after the seed waits on a hand-off to the mechanik, which brings the convoy's branch current with a fast-forward, or a merge once the branch holds work main lacks, and asks the operator when the merge conflicts. Ranking or parking a convoy's work is done on its members or their epic. | C |
 | `template-fragments/polecat-doctrine.template.md`, integration branches | a child of an owned convoy carries the target "which the owned-convoy recipe stamps when it links the child", and without it workspace-setup "cancels that run ... and the work waits on a visit" | A member of an owned convoy carries the convoy's branch as its target, written when it is added. The convoy tracks the member and is not its parent, so sling finds the branch only through that target. Without it, workspace-setup cancels the run before it cuts a branch, and the work waits on a visit that asks for the target. The member's work lands on the branch with no PR unless it is a stage. | C |
 | `skills/prs/SKILL.md`, supplements | a supplement's target "for a PR under an owned convoy is `integration/<convoy-id>`" | that holds for a stage's PR, and a convoy's own PR targets main | C |
 | `formulas/mol-polecat-work.toml`, workspace-setup's convoy target guard | reads a bead's parent-child convoy parents only, and declines a convoy child poured from a branch that is not where its work lands | reads the convoys that track the bead as well, so a member poured without its target is declined before any branch is cut, with a visit that asks for the target | C |
