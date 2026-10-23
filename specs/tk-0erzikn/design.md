@@ -72,6 +72,9 @@ What it costs:
   for the mechanik to bring the convoy's branch current.
 - Ranking or parking a convoy no longer ranks or parks its members, because Gas
   City's tracking changes no parent and blocks nothing.
+- A hold on a finished convoy's bead stops its PR but no longer keeps the
+  refinery off its branch. The refinery merges main into the branch when it
+  takes the bead.
 - A PR into a convoy's branch is marked only by GitHub's own display of its base.
 
 Unchanged: every PR needs the operator's approval, and every PR has exactly one
@@ -131,12 +134,13 @@ and in the Gas Town and build packs it bundles.
   issue ... without changing the issue parent".
 - **A convoy's target reaches only its children.** `gc convoy create --target` and
   `gc convoy target` record the "target branch inherited by child work beads".
-  Sling branches a bead from its own `target`, else from the `target` of a convoy
-  on its parent chain, else from the rig's default branch
-  (`SlingFormulaTargetBranch` and `BeadMetadataTarget`, in Gas City's `sling`
-  package). The key is unprefixed "so work beads can read their own value
-  directly". A sling's `--var base_branch=` outranks that lookup for the one pour
-  it starts, and sling has no flag that writes a target.
+  For a feature-branch formula such as `mol-polecat-work`, sling branches a bead
+  from its own `target`, else from the `target` of a convoy on its parent chain,
+  else from the rig's default branch (`SlingFormulaTargetBranch` and
+  `BeadMetadataTarget`, in Gas City's `sling` package). The key is unprefixed "so
+  work beads can read their own value directly". A sling's `--var base_branch=`
+  outranks that lookup for the one pour it starts, and sling has no flag that
+  writes a target.
 - **No verb creates a branch.** The two verbs above record a branch's name. Gas
   Town's `mol-idea-to-plan` formula stands an initiative up with
   `gc convoy create --owned`, names its branch `integration/<convoy-id>` with
@@ -154,10 +158,10 @@ and in the Gas Town and build packs it bundles.
 - **An owned convoy has a manual lifecycle.** `--owned` marks a "manual
   lifecycle, no auto-close". `gc convoy land` "verifies all children are closed
   ..., closes the convoy bead, and records a ConvoyClosed event", and moves no
-  branch. A convoy that is not owned closes itself when its last member closes,
-  through the bead store's `on_close` hook. Gas City's core pack runs
-  `gc convoy check` hourly, in its `convoy-autoclose-backstop` order, for a close
-  the hook missed.
+  branch. A convoy that is not owned closes itself when its last member's close
+  reaches Gas City's controller. Gas City's core pack runs `gc convoy check`
+  hourly, in its `convoy-autoclose-backstop` order, for a close the controller
+  missed.
 - **Gas Town's refinery lands `direct` unless told otherwise.** It reads
   `merge_strategy` with `direct` as the default, turns `direct` into `mr` for a
   bead that carries an existing PR, and escalates `local`. It has no
@@ -182,10 +186,10 @@ and in the Gas Town and build packs it bundles.
   workflow driving it" (`ListLiveInputConvoyRootsForConvoys`, in its
   `sourceworkflow` package).
 - **The build pack drains a convoy and publishes once.** `build-from-convoy` runs
-  each member in its own worker session and worktree, reviews the whole result,
-  and can push and open one PR, with push and PR off by default. Its members
-  commit in detached worktrees and push nothing (the build pack's README and its
-  formulas).
+  each member in its own worker session and worktree by default, or all of them
+  in one session, reviews the whole result, and can push and open one PR, with
+  push and PR off by default. Its members commit in detached worktrees and push
+  nothing (the build pack's README, its formulas and their workflow steps).
 
 ## What gc-toolkit carries today
 
@@ -252,20 +256,22 @@ City's meaning of a strategy.
   that head instead of opening a nested PR
   ([specs/tk-sw5bu](../tk-sw5bu/merge-strategy-fold-in.md)). The beads it exists
   for come from dispatches that name no strategy, and under the `direct` default
-  they land on the head with no flip. The pack's scripts that stamp `mr` aim at
-  main (`convoy-graduate.sh`, which unit B deletes, and the feedback distiller)
-  or give a rework child its anchor's target (`rework-child.sh`, `pr-facts.sh`,
-  `pre-open-rebase.sh`), and a bead that folds onto a head anchors no PR, so no
-  child inherits that aim. An `mr` bead aimed at another PR's head then means a
-  PR into it, as Gas City defines `mr`. The flip's variables, `MS_FOLD_IN`,
-  `MS_BRANCH` and `MS_HAS_OWN_PR`, go with it.
+  they land on the head with no flip. The pack's writers of `mr` aim at main
+  (`convoy-graduate.sh`, which unit B deletes, the feedback distiller, and the
+  proactive prompt for a reaction's own code) or give a rework child its
+  anchor's target (`rework-child.sh`, `pr-facts.sh`, `pre-open-rebase.sh`), and a
+  bead that folds onto a head anchors no PR, so no child inherits that aim. An
+  `mr` bead aimed at another PR's head then means a PR into it, as Gas City
+  defines `mr`. The flip's variables, `MS_FOLD_IN`, `MS_BRANCH` and
+  `MS_HAS_OWN_PR`, go with it.
 - **The rejection arm's branch decision goes.** On a branch-caused rejection,
   `rejection-branch-keep` deletes the bead's branch when the bead resolves
-  `direct` and records no PR. Under the `direct` default every member is such a
-  bead, and the rebuild the same arm's repool starts resumes that branch, so the
-  delete would stop every member whose gate fails at workspace-setup's
-  missing-branch visit. Without the delete, every path through the decision keeps
-  the branch, so the decision goes whole, with its copy of the resolve block.
+  `direct`, records no PR and is not a fold-in. Under the `direct` default every
+  member is such a bead, and the rebuild the same arm's repool starts resumes
+  that branch, so the delete would stop every member whose gate fails at
+  workspace-setup's missing-branch visit. Without the delete, every path through
+  the decision keeps the branch, so the decision goes whole, with its copy of the
+  resolve block.
   merge-push's copy is then the one reading of the strategy. A branch is still
   deleted when its work lands, by `delete_merged_branches` after a direct landing
   and by the repository's delete-on-merge after a PR.
@@ -305,14 +311,15 @@ and the rejection arm's branch decision.
   its two exceptions go with it.
 - **The ruleset enforces while it is on, and the line holds when it is off.**
   gc-toolkit's main carries a GitHub ruleset that requires a PR with one
-  approval, squash merges only, and the checks `test` and `test-macos`, and it
-  refuses a direct push from any writer. When it refuses one, gc-toolkit's
-  `direct-merge-push.sh` promotes the bead to `merge_strategy=pr` and the
-  refinery opens a PR instead, as it has since 2026-05-10. That is gc-toolkit's
-  own fallback: Gas Town's refinery has none, and retries the refused push on
-  every patrol. With the ruleset off, nothing refuses the push, which is how the
-  city once pushed to main unintended. The line makes main behave as if its
-  ruleset were always on.
+  approval, squash merges only, and the checks `test` and `test-macos`, and the
+  city's account cannot bypass it. When it refuses a direct push, gc-toolkit's
+  refinery promotes the bead to `merge_strategy=pr` and opens a PR instead, as it
+  has since 2026-05-10, today in `direct-merge-push.sh`. That is gc-toolkit's own
+  fallback. Gas Town's refinery has none: a refused push stops its merge step
+  with the bead still assigned to it, and the next patrol takes the bead again.
+  With the ruleset off, nothing refuses the push, which is how the city once
+  pushed to main unintended. The line makes main behave as if its ruleset were
+  always on.
 - **Gas City cannot express it as config.** A rig's `default_merge_strategy` is
   stamped on every bead the rig slings, whatever its target, so `mr` there would
   open a PR for every member again. Gas City has no merge strategy per target
@@ -376,10 +383,11 @@ leave it out. workspace-setup's convoy target guard catches it before any branch
 is cut. Today the guard reads only a bead's parent-child convoy parents. Under
 this design it also reads the convoys that track the bead, with one read of the
 bead's incoming `tracks` edges, whose rows carry each convoy's metadata. A member
-poured from a branch that is not its convoy's target takes the guard's existing
-decline: its run is cancelled before any worktree exists, and the member waits on
-a visit that names the convoy and asks for the target. Stamping the target and
-closing the visit re-slings the member, which then pours from the convoy's branch.
+that names no target of its own and is poured from a branch that is not its
+convoy's target takes the guard's existing decline: its run is cancelled before
+any worktree exists, and the member waits on a visit that names the convoy and
+asks for the target. Stamping the target and closing the visit re-slings the
+member, which then pours from the convoy's branch.
 
 The guard counts only an open convoy that names a target, so the input convoy each
 pour makes, which names none, is not read as membership. It reads Gas City's own
@@ -431,7 +439,7 @@ The third step is warrant 3: the cut is the one act no Gas City verb performs.
 | convoy-seed.sh | Under this design |
 |---|---|
 | Creates the owned convoy and sets its target | the recipe calls the same two verbs |
-| Writes the convoy's id to a file before the steps that can fail, so a resumed run reuses the convoy | `mol-design-convoy` records the id on its subject as soon as the create returns, as it does today, and a resumed step reads it there. The mechanik reads the id the create printed |
+| Writes the convoy's id to a file before the steps that can fail, so a resumed run reuses the convoy | `mol-design-convoy` records the id on its subject as soon as the create returns, where today it records it once `convoy-seed.sh` returns, and a resumed step reads it there. The mechanik reads the id the create printed |
 | Cuts the branch in a throwaway worktree, so the rig root's checkout never moves | a ref push needs no worktree: it sends the fetched default-branch tip to the new branch's name |
 | Skips the cut when origin already has the branch | the recipe asks origin for the branch first |
 | Seeds a shared input artifact on the branch (`--artifact`), so the mechanik, which commits nothing else, can start the branch ahead of the default | goes. The artifact is the convoy's first member, which lands it on the branch like any member, and the members that need it wait on it with a `blocks` edge |
@@ -471,11 +479,11 @@ for it, in the next-iteration step:
 
 - On every patrol iteration, the step reads the rig's open convoys labelled
   `owned` whose `target` is an integration branch.
-- For each one whose members are all closed, as `gc convoy status` counts them,
-  and whose bead carries no `branch` yet, it assigns the convoy's bead to the
-  refinery, sets the bead's `branch` to the convoy's target and its `target` to
-  the rig's default branch, and writes the bead's `pr_summary` from the summaries
-  of the members that landed on the branch.
+- For each one that has members, all of them closed as `gc convoy status` counts
+  them, it assigns the convoy's bead to the refinery, sets the bead's `branch` to
+  the convoy's target and its `target` to the rig's default branch, and writes
+  the bead's `pr_summary`, when it carries none, from the summaries of the
+  members that landed on the branch.
 - Landing an integration branch any other way stays forbidden, as Gas Town's step
   forbids it.
 
@@ -490,6 +498,13 @@ merge cadence, which no patrol step sees, so the step runs on every iteration. A
 convoy whose last member lands through its own PR is then taken at the refinery's
 next iteration, not left for an unrelated landing.
 
+Running on every iteration, the step also meets a convoy that has just been
+stood up, before the recipe adds its first member. Such a convoy has no open
+member, just as a finished one has none, so the step takes only a convoy that
+has members. The step writes the default branch as the bead's `target`, as Gas
+Town's does, and that takes the convoy out of the step's own selection, so the
+step takes each convoy once.
+
 ### What graduation carries, and where each part goes
 
 | Graduation | Under this design |
@@ -497,11 +512,11 @@ next iteration, not left for an unrelated landing.
 | Takes an open owned convoy whose target is an integration branch | the same, as Gas Town's step takes one |
 | Counts members in both forms, and a `tracks` edge to a bead it cannot read holds the convoy | `gc convoy status` counts a convoy's members as Gas City defines them |
 | Requires a landing recorded on the branch, so a convoy whose members landed nothing does not graduate | the refinery's refusal of a branch that carries no change: it closes nothing, opens no PR, and asks a person, who ends the convoy with `gc convoy land` |
-| Skips a convoy, or a bead on its branch, that carries `merge_hold` or `rebase_hold` | the hold is honored where it is for every PR's owning bead: no review dispatch, no PR, no merge. The patrol only merges main into the branch, which rewrites nothing |
-| Skips a convoy whose branch a live bead already owns | the step takes only a bead that carries no `branch`, so it takes each convoy once |
+| Skips a convoy, or a bead on its branch, that carries `merge_hold` or `rebase_hold` | the hold is honored where the merge cadence honors it for every PR: on the convoy's bead, either hold keeps the PR from opening, and `merge_hold` also holds the review dispatch and the merge. The patrol reads no hold, so it still merges main into the branch and pushes it, which a hold keeps graduation from doing today |
+| Skips a convoy whose branch a live bead already owns, so that a second bead does not duplicate its PR | the step takes each convoy once, because its write of the default branch as the convoy's `target` takes the convoy out of its own selection, and the convoy's bead is the one path that lands its branch, as Gas Town's step makes it |
 | Stamps `merge_strategy=mr` | the one line for main resolves the bead to `mr` |
 | Stamps `graduation=true` | nothing reads it. The key stays registered, as retired |
-| Seeds the PR's summary from the landed members' summaries | the step writes `pr_summary` |
+| Seeds the PR's summary from the landed members' summaries, unless the convoy's bead carries one | the step writes `pr_summary` on the same terms |
 | Runs at most once per 15 minutes, with guards against a short read | the step runs once per patrol iteration, and a read that fails takes nothing, for the next iteration to retry |
 | `REFINERY_RECONCILE_INTEGRATION_AUTO_LAND=false` turns it off | Gas Town's `integration_branch_auto_land` variable |
 
@@ -516,8 +531,8 @@ next iteration, not left for an unrelated landing.
   moves no branch.
 - A convoy that only groups work, with no branch of its own, is not owned, and
   closes itself when its last member closes. Gas City's core pack sweeps hourly
-  for a close the hook missed, so gc-toolkit's `convoy-check` order, which runs
-  the same command on the same interval, goes.
+  for a close the controller missed, so gc-toolkit's `convoy-check` order, which
+  runs the same command on the same interval, goes.
 
 ### Rejected: a cadence arm that makes Gas Town's assignment
 
@@ -575,19 +590,23 @@ it:
 
 - `step-close.sh --convoy`, which names a step's molecule;
 - the cadence's review dispatch in `gate-ensure.sh`;
-- `liveness-sweep.sh`, `liveness-sweep-precheck.sh` and `liveness-classify.sh`;
+- `liveness-sweep.sh`, which walks to the beads workflows work, its classifier
+  `liveness-classify.sh`, which takes that set and tells a machine convoy by its
+  title or `gc.synthetic`, and `liveness-sweep-precheck.sh`, which runs the
+  classifier with the set empty;
 - `queue-priority.sh` and `priority-lib.sh`, where a workflow follows its subject's
   priority;
 - `gc-helm.sh` and the helm board's facts;
 - `tools/gc-proactive.sh`'s guard against a live workflow;
-- `live-work.sh`, `until-resolved.sh`, `duplicate-sweep.sh`, `work-tree-holder.sh`,
-  `self-review-check.sh` and `orphan-dispose.sh`;
+- `live-work.sh`, and `until-resolved.sh` with its callers, the until pass of
+  `deferred-dispatch.sh` and `doctor/check-until-resolved-owed`;
+- `duplicate-sweep.sh`, `work-tree-holder.sh` and `self-review-check.sh`;
 - `doctor/check-root-advancing` and `doctor/check-blocked-work-armed`;
 - `tools/gc-polecat-metrics.sh`, the work-context hook, and the gascity-keeper
   pack's `rebase-check.sh`;
-- `mol-design-convoy`'s drain, which releases the input convoy from a subject that
-  outlives its run, because `live-work.sh` counts a convoy that tracks a bead as
-  live work;
+- `mol-design-convoy`'s drain, which releases a subject that outlives its run
+  from the input convoys of its pours, because `live-work.sh` counts a convoy
+  that tracks a bead as live work;
 - and their tests.
 
 The derivation is Gas City's contract for a graph.v2 formula, which Gas Town's
@@ -611,7 +630,7 @@ Someone who knows only Gas City and Gas Town watches a convoy that gc-toolkit ru
 | Each member slung to a pool, wrapped by sling in a one-member input convoy | sling's own launch | yes |
 | A member's work landed on `integration/<id>` by the refinery, with no PR | Gas Town's refinery lands `direct` by default | yes |
 | A stage, slung `--merge mr`, opening a PR into the convoy's branch | `mr` as Gas City defines it | yes |
-| Once every member is closed, the convoy's bead assigned to the refinery with `branch=integration/<id>` and `target=main` | Gas Town's `integration_branch_auto_land` | yes. gc-toolkit's step runs on every iteration, Gas Town's after a landing on an integration branch |
+| Once every member is closed, the convoy's bead assigned to the refinery with `branch=integration/<id>` and `target=main` | Gas Town's `integration_branch_auto_land` | yes. gc-toolkit's step runs on every iteration, where Gas Town's runs after a landing on an integration branch, so it passes over a convoy with no members yet. It also writes the summary gc-toolkit's merge path puts in the PR (below) |
 | The convoy's bead landing on main through a PR | Gas Town would land it `direct`. Main's ruleset would refuse the push, and Gas Town's refinery would retry it on every patrol | added, warrant 1 |
 | The PR reviewed by the city's checks and the operator, merged, and the convoy's bead closed at the merge | not a convoy behavior: gc-toolkit's merge path does this for every PR | outside the convoy (below) |
 | An owned convoy that ends without a PR, ended with `gc convoy land` | Gas City's lifecycle termination | yes |
@@ -622,11 +641,11 @@ Someone who knows only Gas City and Gas Town watches a convoy that gc-toolkit ru
 So gc-toolkit uses Gas City's convoys as they are intended to be used. The
 observer sees three additions, each under a warrant: the cut of the convoy's
 branch, the `target` on each member, and the one line that keeps main behind a
-PR. What they see beyond the convoy (the PR's owning bead, the city's checks, the
-operator's approval, a bead closing when its PR merges) is gc-toolkit's merge
-path, the same for every PR. Moving that path onto Gas Town's refinery is the
-merge member of the migration epic (tk-1tfzr71.20), and this design adds nothing
-to it.
+PR. What they see beyond the convoy (the PR's owning bead and its summary, the
+city's checks, the operator's approval, a bead closing when its PR merges) is
+gc-toolkit's merge path, the same for every PR. Moving that path onto Gas Town's
+refinery is the merge member of the migration epic (tk-1tfzr71.20), and this
+design adds nothing to it.
 
 ## 8. What stays, and the warrant for each
 
@@ -681,7 +700,10 @@ that page's own format, which cites the upstream commits a verification read.
 
 ### Warrant 4: the readers of a workflow's input convoy
 
-- **Covers:** the tooling section 6 lists, and `mol-design-convoy`'s drain.
+- **Covers:** the tooling section 6 lists, and `mol-design-convoy`'s drain. Of
+  those, `queue-priority.sh` and `priority-lib.sh` also sit under the register's
+  priority-following entry, for the priority they derive. This warrant covers
+  their read of the input convoy.
 - **Why it exists:** Gas City launches a graph.v2 workflow on a bead through an
   input convoy that tracks the bead, and the root records the convoy and not the
   bead. Code that holds a root reaches the bead through the convoy, and code that
@@ -710,8 +732,9 @@ that page's own format, which cites the upstream commits a verification read.
   bead" (tk-vlg4ihb), and it tells a machine convoy by its title (tk-y4820m2).
 - **The parent readers** of section 2, which carry no convoy code.
 - **Two calls around Gas City's launch.** `deferred-dispatch.sh` caps the retries
-  of a sling that keeps failing, because each launch mints an input convoy, and
-  `run-cancel.sh` ends a run with Gas City's `gc convoy delete` on its root. Both
+  of a sling that keeps failing, because each launch mints an input convoy.
+  `run-cancel.sh` ends a run through Gas City's run cancel, and closes what a
+  root closed by hand left open with `gc convoy delete <root> --force`. Both
   compose native calls.
 - **Prose and fixtures.** Docs and prompts that describe Gas City's convoys are
   prose, which the four tests leave free, and the units correct each sentence
@@ -761,7 +784,7 @@ Each unit that edits a prompt or a formula regenerates its pages under
 | File | Says today | Says under the design | Unit |
 |---|---|---|---|
 | `formulas/mol-refinery-patrol.toml`, `default_merge_strategy` and merge-push's `merge-strategy-resolve` | the default is `mr`; an `mr` bead aimed at another PR's head with no PR of its own flips to `direct`, recorded in `MS_FOLD_IN`; the comment calls the block the one reading that the step keeping a branch and the step opening a PR share | the default is `direct`; a bead that would land `direct` on the default branch resolves to `mr`; `local` passes through; the flip and its variables go; the comment names merge-push as the block's one reader | A |
-| `formulas/mol-refinery-patrol.toml`, handle-failures' `rejection-branch-keep` | decides from its own copy of the resolve block whether a rejected bead's branch survives, and deletes it for a `direct` bead that records no PR | goes whole: a rejected branch is kept in every mode, because the repooled rebuild resumes it | A |
+| `formulas/mol-refinery-patrol.toml`, handle-failures' `rejection-branch-keep` | decides from its own copy of the resolve block whether a rejected bead's branch survives, and deletes it for a `direct` bead that records no PR and is not a fold-in | goes whole: a rejected branch is kept in every mode, because the repooled rebuild resumes it | A |
 | `lifecycle/lifecycle.toml`, `merge_strategy` | an absent key resolves to `mr`; a `polecat/` target with no PR of its own resolves from `mr` down to `direct` | an absent key resolves to `direct`; a bead that would land `direct` on the default branch resolves to `mr`; the fold-in sentence goes | A |
 | `assets/scripts/pr-stack.sh` header, and `docs/refinery-merge-cadence.md` | a `merged_target` row "landed its own PR into it" | it landed on the branch, with or without a PR of its own | A |
 | `agents/proactive/PROVENANCE.md` item 3, `prompt.template.md` "mr-only for Code", `agent.toml` `[env]`, the header of `tools/gc-proactive.sh`, `tools/proactive-first-reaction-fixture.sh` | the invariant rests on the city's `mr` default and on `GC_DEFAULT_MERGE_STRATEGY`, which nothing reads | code a reaction writes carries `merge_strategy=mr`, and work it routes lands by its target and reaches main only through a PR; the variable, its sentence and the fixture's check go | A |
@@ -772,8 +795,9 @@ Each unit that edits a prompt or a formula regenerates its pages under
 | `lifecycle/lifecycle.toml`, `graduation`, `target`, `merge_strategy` and `rebase_hold` | `convoy-graduate.sh` writes `graduation`, `target` and `mr`, and honors `rebase_hold` | `graduation` stays registered, as retired; the refinery's step writes `target` on a convoy's bead; the other mentions go | B |
 | `agents/refinery/prompt.template.md` | "a graduated convoy arrives as an ordinary mr-mode work bead"; the cadence runs convoy graduation | a finished convoy's bead is taken by the patrol's auto-land step; the cadence's list drops graduation | B |
 | `docs/refinery-merge-cadence.md`, `docs/state-machine.md`'s convoy graduation, `docs/component-model.md`'s Convoy row and its rows for `convoy-graduate.sh` and `convoy-check.toml`, `docs/review-correctness.md`'s example | graduation is cadence arm 8 and a transition on the convoy bead; without convoys "integration branches cannot graduate"; a pack order beside core's; the loop-input example cites `convoy-graduate.sh` | the patrol's auto-land step; "an integration branch cannot reach main"; the two rows go; the example cites another script | B |
-| `services/helm/internal/board/derive.go` and its test | a finished convoy's row reads "all N closed — graduate" | it reads that the refinery takes it at its next patrol | B |
-| the comment in `services/gctk/cmd/gctk/main.go` | lists convoy-graduate among the cadence's scripts | the list drops it | B |
+| `docs/authority-map.md`, the drain row | `merge.sh` closes the owned convoy "as the graduation PR's anchor" | it closes the convoy as its PR's owning bead | B |
+| `services/helm/internal/board/derive.go` and its test, and the web board's sample row in `services/helm/web/src/board.fixture.json` and `services/helm/web/contract_parity_test.go` | a finished convoy's row reads "all N closed — graduate" | it reads that the refinery takes it at its next patrol | B |
+| the comment in `services/gctk/cmd/gctk/main.go`, and `services/gctk/README.md` | each lists convoy-graduate among the cadence's scripts | the lists drop it | B |
 | graduation fixtures in `pr-facts.test.sh` and `pre-open-rebase.test.sh`, a comment in `deferred-dispatch.test.sh` | a graduation bead | a convoy's bead | B |
 | `assets/scripts/convoy-seed.sh`, its test, `mol-design-convoy-seed-invoke.test.sh` | the seed script and its tests | deleted | C |
 | `formulas/mol-design-convoy.toml` | seed-convoy runs `convoy-seed.sh`; arm-design and arm-implementation link each child with a parent-child edge, read it back and rely on it for the target; the design child is slung with no merge flag; graduation carries the convoy to main | seed-convoy calls the two verbs and pushes the branch; each child is added with `gc convoy add`, the `tracks` edge is read back, and the convoy's target is written on it; the design child is slung `--merge mr` when design-gated; the convoy's PR carries it to main | C |
@@ -830,10 +854,10 @@ worktree, or to clear `metadata.branch` so the rebuild starts again from the
 convoy's branch.
 
 When the convoy's PR merges, graduation leaves main in the same commit that brings
-the patrol's step. A convoy that graduation already took carries a `branch`, which
-the step skips. One it has not taken is taken by the step, whose member count
-reads both forms of membership, so a convoy in flight with parent-child members is
-carried too.
+the patrol's step. A convoy that graduation already took targets main, so the
+step does not select it. One it has not taken is taken by the step, whose member
+count reads both forms of membership, so a convoy in flight with parent-child
+members is carried too.
 
 The units are filed from this table as it reads on main, once this design merges
 (tk-zkft1ym), so a change made in this design's review leaves no filed bead
@@ -844,12 +868,13 @@ scope, the parent readers, carries no convoy code.
 ### Unit A's tests
 
 `assets/scripts/mr-aware-rejection-failclosed.test.sh` pins the merge strategy and
-the rejection arm. Its harness fills in the formula's default as `${2:-mr}`, so
-that default moves to `direct` with the formula's.
+the rejection arm. Its one fill of the formula's default, `${2:-mr}`, sits in the
+`arm` helper, which goes with the arm, so the resolve block's own cases below
+fill the default as `direct`, the formula's new value.
 
 - **The rejection arm goes, and so does the section that runs it:** the arm's
-  extraction, its `git` stub and its `arm` helper, and cases (6) to (21). One
-  check replaces them: the handle-failures step deletes no branch.
+  extraction, its `git` stub and its `arm` helper, and that section's cases (6)
+  to (21). One check replaces them: the handle-failures step deletes no branch.
 - **The resolve block, run on its own.** A bead aimed at `integration/cv-1`
   resolves to `direct` when it names no strategy or `direct`, and to `mr` when it
   names `mr`, a stage. A bead aimed at `polecat/tk-anchor` resolves to `direct`
@@ -861,6 +886,6 @@ that default moves to `direct` with the formula's.
   `polecat/tk-anchor` with its own `existing_pr` still resolves to `mr`, through
   merge-push's `existing_pr` rule, which that case runs after the block.
 - **One reading.** The resolve block has one call site left, merge-push's, so the
-  check that counts call sites expects one, and the check that two copies are
-  byte-identical goes. The check that no step reads `merge_strategy` outside the
-  block stays.
+  check that counts call sites expects one, and the check that the two resolve
+  blocks are byte-identical goes. The check that no step reads `merge_strategy`
+  outside the block stays.
