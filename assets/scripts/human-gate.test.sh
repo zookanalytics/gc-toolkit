@@ -121,6 +121,7 @@ unset GC_AGENT GC_RIG GC_ESCALATE_VERDICT_WINDOW 2>/dev/null || true
 # iso_ago <seconds> — an RFC-3339 UTC time that many seconds ago.
 iso_ago() { jq -nr --argjson s "$1" '(now - $s) | floor | todate'; }
 task()   { printf '{"id":"%s","title":"%s","status":"open","issue_type":"task"}' "$1" "$1"; }
+session() { printf '{"id":"%s","title":"%s","status":"open","issue_type":"session"}' "$1" "$1"; }
 # gate <id> <key> <status> [<close_reason> <closed_at>] [<await_type>]
 gate() {
   jq -nc --arg id "$1" --arg k "$2" --arg st "$3" --arg r "${4:-}" --arg at "${5:-}" --arg ty "${6:-human}" \
@@ -432,6 +433,55 @@ eq "$?" 1 "a finding that was not filed fails the call"
 "$HSUT/escalate.sh" --retract --subject lx-wisp-abc12 --key k --message m >/dev/null 2>&1
 eq "$?" 2 "a retract on a wisp goes to the helper, which refuses it"
 eq "$(cat "$STUB_PF_LOG")" "" "and files no finding"
+
+echo "# the old name files a call about a subject that names no bead as a patrol finding"
+# The copy's bead-store.sh records what it is asked and answers with STUB_BS_RC.
+cat > "$HSUT/bead-store.sh" <<'BSSTUB'
+#!/usr/bin/env bash
+{ printf 'bead-store'; for a in "$@"; do printf ' [%s]' "$a"; done; printf '\n'; } >> "${STUB_BS_LOG:?}"
+exit "${STUB_BS_RC:-0}"
+BSSTUB
+chmod +x "$HSUT/bead-store.sh"
+export STUB_BS_LOG="$TMP/bs.log"
+reset "$(task tk-w)"; : > "$STUB_PF_LOG"; : > "$STUB_BS_LOG"
+STUB_BS_RC=1 "$HSUT/escalate.sh" --subject refinery --key refinery-empty-identity --message m >/dev/null 2>"$TMP/err"; rc=$?
+eq "$rc" 0 "a subject bead-store.sh proves names no bead files a finding"
+eq "$(cat "$STUB_BS_LOG")" "bead-store [refinery]" "  ... asked in bead-store.sh's resolution form"
+eq "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [refinery-empty-identity] [--title] [m] [--message] [m]" "  ... under its key"
+eq "$(creates)" 0 "  ... and no gate is filed"
+has "$(cat "$TMP/err")" "'refinery' names no bead" "  ... and the translation says why on stderr"
+
+echo "# the old name files a call about a session as a patrol finding, whatever the shape of its id"
+reset "$(task tk-w),$(session lx-abc12)"; : > "$STUB_PF_LOG"
+"$HSUT/escalate.sh" --subject lx-abc12 --key witness-refinery-queue-unreadable --message m >/dev/null 2>"$TMP/err"; rc=$?
+eq "$rc" 0 "a subject that reads as a session bead files a finding"
+eq "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [witness-refinery-queue-unreadable] [--title] [m] [--message] [m]" "  ... under its key"
+eq "$(creates)" 0 "  ... and no gate blocks the session bead"
+has "$(cat "$TMP/err")" "'lx-abc12' names a session" "  ... and the translation says why on stderr"
+
+echo "# a subject the old name cannot prove is no bead goes to the helper"
+for bsrc in 0 3; do
+  reset "$(task tk-w)"; : > "$STUB_PF_LOG"
+  out=$(STUB_BS_RC=$bsrc "$HSUT/escalate.sh" --subject tk-w --key k --message m 2>/dev/null); rc=$?
+  eq "$rc" 0 "bead-store.sh exit $bsrc on a work bead: the helper files"
+  eq "$out" "gate-1" "  ... its gate on the bead"
+  eq "$(cat "$STUB_PF_LOG")" "" "  ... and no finding is filed"
+done
+reset "$(task tk-w)"; : > "$STUB_PF_LOG"
+"$HSUT/escalate.sh" --subject tk-gone --key k --message m >/dev/null 2>&1
+eq "$?" 1 "a subject that does not read goes to the helper, which reports the failed read"
+eq "$(cat "$STUB_PF_LOG")" "" "  ... and no finding is filed"
+
+echo "# the old name asks nothing about the subject of a retract or of a malformed call"
+reset "$(task tk-w)"; : > "$STUB_PF_LOG"; : > "$STUB_BS_LOG"
+STUB_BS_RC=1 "$HSUT/escalate.sh" --retract --subject refinery --key k --message m >/dev/null 2>&1
+eq "$?" 1 "a retract on a subject that names no bead goes to the helper, which cannot read it"
+STUB_BS_RC=1 "$HSUT/escalate.sh" --subject "{{convoy_id}}" --key k --message m >/dev/null 2>&1
+eq "$?" 2 "a subject outside the id charset goes to the helper, which refuses it as usage"
+STUB_BS_RC=1 "$HSUT/escalate.sh" --subject refinery --key k >/dev/null 2>&1
+eq "$?" 2 "a filing with no message goes to the helper, which refuses it as usage"
+eq "$(cat "$STUB_BS_LOG")" "" "  ... and bead-store.sh is asked about none of them"
+eq "$(cat "$STUB_PF_LOG")" "" "  ... and no finding is filed"
 
 echo "# the deacon's filed gates reach its incident ledger"
 # The helper calls the ledger by sibling path, so it runs from a private copy
