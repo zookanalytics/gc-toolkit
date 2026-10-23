@@ -22,15 +22,13 @@
 # visit-comment marker.
 #
 # A post that informs rather than asks is not for review, and is never feedback,
-# whoever posted it: its body carries the no-review mark below outside code,
-# which a person or a workflow writes into it, or begins with a prefix the rig
-# declares for a third-party integration in not-for-review.toml at the root of
-# its checkout (docs/not-for-review.md). A mark quoted in a code span or a code
-# block is text about the mark, so a comment discussing it stays feedback. The
-# checkout is GC_RIG_ROOT when it is set, and otherwise the repository the
-# caller runs in. With nothing declared, a third-party post is feedback. A
-# review's state is not its body: an approval or a change request counts
-# whatever its body carries.
+# whoever posted it. It says so at its start: its body opens with the no-review
+# mark below, which a person or a workflow writes into it, or begins with a
+# prefix the rig declares for a third-party integration in not-for-review.toml
+# at the root of its checkout (docs/not-for-review.md). The checkout is
+# GC_RIG_ROOT when it is set, and otherwise the repository the caller runs in.
+# With nothing declared, a third-party post is feedback. A review's state is not
+# its body: an approval or a change request counts whatever its body carries.
 #
 # Each verb keeps the gh call its callers make, with the marker appended:
 #   comment  a conversation comment (gh pr comment), with an optional inline
@@ -178,61 +176,46 @@ nfr_load() {
 # its body, so a reader that counts an approval or a change request asks
 # gc_city_own alone.
 #
-# The mark counts only outside code, where GitHub renders nothing for it. A
-# reviewer who quotes it in backticks or a code block is writing about the mark,
-# and that comment is still feedback. Markdown is read loosely, and where the
-# reading is unsure it leans toward code: text misread as code leaves an
-# informational comment counted as feedback, while code misread as text would
-# silence a reviewer. A fence opens at any indent and closes only on a fence of
-# its own character, at least as long, indented three spaces or less, at the
-# blockquote depth it opened at. A line indented four columns or more is code. A
-# code span is a run of backticks closed by the next run of the same length in
-# its block, and a blank line or a fence ends a block. gc_prose_blocks yields
-# each block of the body without its fenced and indented code, gc_code_spans the
-# [start, end) codepoint ranges of a block's code spans, and gc_outside_code
-# each run of a block outside them. They walk a block's codepoints rather than
-# collect regex matches, which in jq slows sharply as matches multiply, so a
-# body full of backticks stays cheap.
-NFR_DEF='def gc_prose_blocks:
-  [ foreach (split("\n")[] | sub("\r$"; "")) as $l ({ fence: null, blk: 0, prose: false };
-      ($l | capture("^(?<m>(?:[ \t]*>)*)(?<q>.*)$")) as $p
-      | ($p.m | gsub("[^>]"; "") | length) as $d
-      | ($p.q | sub("^[ \t]*"; "")) as $s
-      | if .fence != null then
-          (($p.q | capture("^ {0,3}(?<f>`{3,}|~{3,})[ \t]*$").f) // "") as $c
-          | (if $d == .fence.d and $c != "" and $c[0:1] == .fence.f[0:1] and ($c | length) >= (.fence.f | length)
-             then .fence = null else . end)
-          | .prose = false | .blk += 1
-        elif ($s | test("^(?:`{3,}[^`]*|~{3,}.*)$")) then
-          .fence = { f: ($s | capture("^(?<f>`{3,}|~{3,})").f), d: $d } | .prose = false | .blk += 1
-        elif $s == "" then .prose = false | .blk += 1
-        else .prose = ($p.q | test("^(?: {4}| {0,3}\t)") | not) end;
-      select(.prose) | { blk, l: $l }) ]
-  | group_by(.blk)[] | map(.l) | join("\n");
-def gc_code_spans:
-  . as $a | length as $len
-  | [ foreach range(0; $len + 1) as $i ({ at: -1, run: null };
-        if $i < $len and $a[$i] == 96 then .run = null | (if .at < 0 then .at = $i else . end)
-        elif .at >= 0 then .run = { o: .at, n: ($i - .at) } | .at = -1
-        else .run = null end;
-        .run | select(. != null)) ] as $r
-  | ($r | length) as $n
-  | (reduce range($n - 1; -1; -1) as $k ({ nx: [], last: {} };
-       ($r[$k].n | tostring) as $w | .nx[$k] = .last[$w] | .last[$w] = $k) | .nx) as $nx
-  | [ foreach range(0; $n) as $k ({ i: 0, span: null };
-        if $k < .i then .span = null
-        elif $nx[$k] == null then .i = $k + 1 | .span = null
-        else .span = [$r[$k].o, $r[$nx[$k]].o + $r[$nx[$k]].n] | .i = $nx[$k] + 1 end;
-        .span | select(. != null)) ];
-def gc_outside_code:
-  explode as $a
-  | foreach (($a | gc_code_spans)[], [($a | length), ($a | length)]) as $c ({ at: 0, seg: [] };
-      .seg = $a[.at:$c[0]] | .at = $c[1]; .seg | implode);
+# The mark counts only among the HTML comments a body opens with: the comments
+# from its start up to the first text that is neither a comment nor whitespace,
+# where a comment that begins a line is indented three spaces or less. Markdown
+# passes them through as raw HTML, so GitHub shows nothing for them. Anywhere
+# later, the markdown before the mark decides what it is. In code, such as a
+# fence in a list item or a suggested change, GitHub shows it as text, and only
+# a full markdown parser tells that code from prose. A partial one that misses a
+# form silences a reviewer with no trace. In a quote, it is the mark of the
+# comment quoted. So no later mark counts, and a comment that quotes or
+# discusses the mark stays feedback. A comment ends at its first --> or --!>, as
+# an HTML parser ends it, and <!--> and <!---> are whole comments. Markdown ends
+# the raw HTML at the end of a line holding -->, so a comment still open on such
+# a line ends the opening there. gc_opens_with_mark reads the body a line at a
+# time, with one regex match per comment and no string positions.
+NFR_DEF='def gc_opens_with_mark:
+  def comments($l):
+    (if .open then
+       ([$l | capture("^(?<c>.*?(?:-->|--!>))(?<r>.*)$")][0]) as $m
+       | if $m == null then .s = null
+         else .hit = (.hit or ($m.c | contains(gc_no_review_mark))) | .open = false | .s = $m.r end
+     else .s = $l end)
+    | if .s == null then del(.s)
+      else (.s | capture("^(?<run>(?:[ \t]*<!--(?:>|->|.*?(?:-->|--!>)))*)[ \t]*(?<rest>.*)$")) as $m
+        | .hit = (.hit or ($m.run | contains(gc_no_review_mark)))
+        | (if $m.rest == "" then .
+           elif ($m.rest | startswith("<!--")) then .open = true
+           else .stop = true end)
+        | del(.s)
+      end;
+  reduce (split("\n")[] | rtrimstr("\r")) as $l ({ open: false, hit: false, stop: false };
+    if .stop or .hit then .
+    elif .open or ($l | test("^ {0,3}<!--")) then
+      comments($l)
+      | if .open and ($l | contains("-->")) then .stop = true else . end
+    elif ($l | test("^[ \t]*$")) then .
+    else .stop = true end)
+  | .hit;
 def gc_not_for_review:
   ((.body // "") | tostring) as $b
-  | ($b | contains(gc_no_review_mark)
-      and any(gc_prose_blocks | select(contains(gc_no_review_mark)) | gc_outside_code;
-              contains(gc_no_review_mark)))
+  | ($b | contains(gc_no_review_mark) and gc_opens_with_mark)
     or any(gc_not_for_review_prefixes[]; . as $p | $b | startswith($p));
 def gc_feedback($self; $since):
   (gc_city_own($self; $since) | not) and (gc_not_for_review | not);

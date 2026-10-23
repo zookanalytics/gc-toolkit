@@ -1,6 +1,6 @@
 ---
 name: Comments not for review
-description: Which pull-request comments the city never reads as review feedback, for a rig whose workflows or integrations comment on its pull requests. The mark a comment carries, the third-party markers a rig declares in not-for-review.toml, and what the city does with a comment that matches.
+description: Which pull-request comments the city never reads as review feedback, for a rig whose workflows or integrations comment on its pull requests. The mark a comment opens with, the third-party markers a rig declares in not-for-review.toml, and what the city does with a comment that matches.
 ---
 
 # Comments not for review
@@ -17,7 +17,7 @@ review, and a comment not for review is never feedback, whoever posted it.
 ## Scope
 
 **Mandate.** What makes a pull-request comment not for review: the mark a
-comment carries, the third-party markers a rig declares and the file it
+comment opens with, the third-party markers a rig declares and the file it
 declares them in, and what the city does with a comment that matches either.
 
 **Boundaries.** How the city tells its own posts from feedback, and what it
@@ -29,7 +29,7 @@ the rig's own setting, outside this doc.
 
 ## The mark
 
-A comment whose body carries this text anywhere outside code is not for review:
+A comment whose body opens with this text is not for review:
 
 ```
 <!-- gc:no-review -->
@@ -38,15 +38,25 @@ A comment whose body carries this text anywhere outside code is not for review:
 It is an HTML comment, so GitHub renders nothing for it. Whoever writes the
 body adds it: a person, or a workflow or bot whose text the rig controls. It
 counts the same on a conversation comment, an inline comment and a review
-body, under any login. A workflow can put it on a line of its own at the top of
-the body, where nothing before it can be read as code.
+body, under any login.
 
-Inside code, the text quotes the mark and is not the mark, so a comment that
-discusses the mark stays feedback. Code is a code span in backticks, a fenced
-code block such as a suggested change, or a line indented four spaces or more.
-Where the markdown is ambiguous, the city reads it as code. Outside code, the
-mark takes a comment out of review wherever it sits, and GitHub shows nothing
-in its place.
+The mark opens the body when it is the first thing in it, or when only blank
+lines and other HTML comments come before it. Put it on a line of its own at
+the top, indented three spaces or less, as in this report a workflow posts:
+
+```
+<!-- growth-factor:schema-diff -->
+<!-- gc:no-review -->
+### Schema diff
+```
+
+The mark counts nowhere else in the body, even where GitHub hides it. Further
+down, the markdown before it decides whether it is a hidden comment or text
+inside code, such as a fence in a list item or a suggested change. Inside a
+quote, it is the mark of the comment quoted. So a reviewer who quotes the mark
+while discussing it, and a reply that quotes a marked comment, stay feedback. A
+workflow that writes the mark below its text keeps its comments feedback, so
+each one costs the round any feedback does.
 
 The city's own posts are not feedback either. They carry the city's mark,
 `<!-- gc:city -->`, which [`pr-post.sh`](../assets/scripts/pr-post.sh) appends

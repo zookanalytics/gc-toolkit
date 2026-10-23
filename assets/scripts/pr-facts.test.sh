@@ -3621,15 +3621,15 @@ eq "$(vpass_id R7)" "<none>" "…so no validation pass opens"
 eq "$(meta R7 merge_hold)" "true" "…and the operator's hold stands"
 eq "$(meta R7 'gc.routed_to')" "human" "…with the hold it belongs to"
 
-echo "# a comment carrying the no-review mark is not feedback, from a person or an app, in every space"
+echo "# a comment opening with the no-review mark is not feedback, from a person or an app, in every space"
 # A comment not for review informs rather than asks (docs/not-for-review.md). A
-# review body, an inline comment and a Conversation comment carrying the mark
-# raise nothing, whoever posted them, and the PR reads quiet.
+# review body, an inline comment and a Conversation comment opening with the
+# mark raise nothing, whoever posted them, and the PR reads quiet.
 store "[$(anchor NR1 371)]"
 printf '%s' "$(prview 371 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_371.json"
-printf '[{"id":37100,"user":{"login":"human1","type":"User"},"state":"COMMENTED","body":"FYI: the preview is up. <!-- gc:no-review -->","commit_id":"sha-371","submitted_at":"2026-10-08T01:00:00Z"}]' > "$GH_DIR/reviews_371.json"
-printf '[{"id":37101,"pull_request_review_id":37100,"user":{"login":"human1","type":"User"},"body":"Context only. <!-- gc:no-review -->","path":"a.sh","line":1}]' > "$GH_DIR/comments_371.json"
-printf '[{"id":37102,"user":{"login":"github-actions[bot]","type":"Bot"},"body":"<!-- growth-factor:schema-diff -->\\n### Schema diff\\n\\n<!-- gc:no-review -->"}]' > "$GH_DIR/issue_comments_371.json"
+printf '[{"id":37100,"user":{"login":"human1","type":"User"},"state":"COMMENTED","body":"<!-- gc:no-review -->\\nFYI: the preview is up.","commit_id":"sha-371","submitted_at":"2026-10-08T01:00:00Z"}]' > "$GH_DIR/reviews_371.json"
+printf '[{"id":37101,"pull_request_review_id":37100,"user":{"login":"human1","type":"User"},"body":"<!-- gc:no-review -->\\nContext only.","path":"a.sh","line":1}]' > "$GH_DIR/comments_371.json"
+printf '[{"id":37102,"user":{"login":"github-actions[bot]","type":"Bot"},"body":"<!-- growth-factor:schema-diff -->\\n<!-- gc:no-review -->\\n### Schema diff"}]' > "$GH_DIR/issue_comments_371.json"
 out=$(run)
 eq "$(meta_pinned NR1 pr_posture)" "review_required@sha-371" "nothing is outstanding, so the merge is not held as commented"
 eq "$(meta NR1 pr_review_watermark)|$(meta NR1 pr_comment_watermark)|$(meta NR1 pr_issue_comment_watermark)" "<absent>|<absent>|<absent>" "…no mark moves"
@@ -3668,7 +3668,7 @@ eq "$(meta_pinned NR4 pr_posture)" "commented@sha-374" "…holding the merge as 
 echo "# a review's state is not its body: a marked change request still holds the merge, and its body raises nothing"
 store "[$(anchor NR5 375)]"
 printf '%s' "$(prview 375 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_375.json"
-printf '[{"id":37500,"user":{"login":"human1","type":"User"},"state":"CHANGES_REQUESTED","body":"Hold until the preview is checked. <!-- gc:no-review -->","commit_id":"sha-375","submitted_at":"2026-10-08T01:00:00Z"}]' > "$GH_DIR/reviews_375.json"
+printf '[{"id":37500,"user":{"login":"human1","type":"User"},"state":"CHANGES_REQUESTED","body":"<!-- gc:no-review -->\\nHold until the preview is checked.","commit_id":"sha-375","submitted_at":"2026-10-08T01:00:00Z"}]' > "$GH_DIR/reviews_375.json"
 out=$(run)
 eq "$(meta_pinned NR5 pr_posture)" "changes_requested@sha-375" "the change request still holds the merge"
 eq "$(meta NR5 pr_review_watermark)" "<absent>" "…while its body routes nothing"
@@ -3677,22 +3677,30 @@ eq "$(jq '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.me
 echo "# …and a marked approval still counts as an approval"
 store "[$(anchor NR6 376)]"
 printf '%s' "$(prview 376 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_376.json"
-printf '[{"id":37600,"user":{"login":"human1","type":"User"},"state":"APPROVED","body":"Ship it. <!-- gc:no-review -->","commit_id":"sha-376","submitted_at":"2026-10-08T01:00:00Z"}]' > "$GH_DIR/reviews_376.json"
+printf '[{"id":37600,"user":{"login":"human1","type":"User"},"state":"APPROVED","body":"<!-- gc:no-review -->\\nShip it.","commit_id":"sha-376","submitted_at":"2026-10-08T01:00:00Z"}]' > "$GH_DIR/reviews_376.json"
 out=$(run)
 eq "$(meta_pinned NR6 pr_posture)" "approved@sha-376" "the approval counts"
 eq "$(meta NR6 pr.conversation)" "<absent>" "…and it is something said, so the PR does not read quiet"
 
-echo "# a comment that quotes the mark in code is feedback: the mark counts only outside code"
+echo "# a comment whose body the mark does not open is feedback, however markdown quotes the mark"
 store "[$(anchor NR7 378)]"
 printf '%s' "$(prview 378 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_378.json"
 printf '[{"id":37800,"user":{"login":"human1","type":"User"},"state":"COMMENTED","body":"","commit_id":"sha-378","submitted_at":"2026-10-08T01:00:00Z"}]' > "$GH_DIR/reviews_378.json"
 printf '[{"id":37801,"pull_request_review_id":37800,"user":{"login":"human1","type":"User"},"body":"```suggestion\\n<!-- gc:no-review -->\\n```","path":"a.sh","line":1}]' > "$GH_DIR/comments_378.json"
-printf '[{"id":37802,"user":{"login":"human1","type":"User"},"body":"Should the report carry `<!-- gc:no-review -->` on its first line?"}]' > "$GH_DIR/issue_comments_378.json"
+printf '[%s,%s,%s,%s]' \
+  '{"id":37802,"user":{"login":"human1","type":"User"},"body":"Should the report carry `<!-- gc:no-review -->` on its first line?"}' \
+  '{"id":37803,"user":{"login":"human1","type":"User"},"body":"- ```html\n\n  <!-- gc:no-review -->\n  ```\n\nPlease add this."}' \
+  '{"id":37804,"user":{"login":"human1","type":"User"},"body":"> <!-- gc:no-review -->\n> Preview deployed.\n\nThe preview never built."}' \
+  '{"id":37805,"user":{"login":"previewbot[bot]","type":"Bot"},"body":"Preview deployed.\n\n<!-- gc:no-review -->"}' > "$GH_DIR/issue_comments_378.json"
 out=$(run)
-eq "$(meta NR7 pr_comment_watermark)|$(meta NR7 pr_issue_comment_watermark)" "37801|37802" "both comments route and advance their marks"
+eq "$(meta NR7 pr_comment_watermark)|$(meta NR7 pr_issue_comment_watermark)" "37801|37805" "every comment routes and advances its mark"
 eq "$(meta_pinned NR7 pr_posture)" "commented@sha-378" "…holding the merge as commented"
 eq "$(jq '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "NR7")
-           | select((.metadata["finding.source"] // "") == "human:human1") ] | length' "$STUB_STORE")" "2" "…as one finding each"
+           | select((.metadata["finding.source"] // "") == "human:human1") ] | length' "$STUB_STORE")" "4" \
+  "…as one finding each: the mark in a suggested change, in a code span, in a fence in a list item, and in a quote"
+eq "$(jq '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "NR7")
+           | select((.metadata["finding.source"] // "") == "human:previewbot[bot]") ] | length' "$STUB_STORE")" "1" \
+  "…and an app's comment whose mark follows its text is one too"
 
 echo "# a validation pass whose anchor_bead neither lands nor repairs warns and holds the batch"
 # The shape rides the create and is read back. A pass that landed without its
@@ -4934,7 +4942,7 @@ eq "$(reacted 46 NC-46)" "false" "the city does not react to itself"
 echo "# …nor is a comment marked as not for review, whoever posted it: no batch routed it"
 store "[$(anchor W7N 377 "$(wb_meta rework:K7N)"), $(child K7N open)]"
 printf '%s' "$(prview 377 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_377.json"
-threads 377 "$(one_thread 377 'Preview deployed. <!-- gc:no-review -->')"
+threads 377 "$(one_thread 377 '<!-- gc:no-review -->\nPreview deployed.')"
 out=$(run)
 eq "$(reacted 377 NC-377)" "false" "a comment not for review under the watermark gets no EYES reaction"
 

@@ -89,11 +89,12 @@ eq "$(unrouted '[13]' '{"pr_provenance_since":"2026-10-01T00:00:00Z"}')" '[106]'
 eq "$(unrouted '[11,13]' '{"pr_provenance_since":"2026-10-01T00:00:00Z"}')" '[101,106]' \
    "(UNROUTED) every named review counts"
 # A comment marked as not for review is never routed, so it is no feedback a
-# dismissal could drop unread, whoever posted it.
-NFR_CMTS="[$(cm 107 11 'preview[bot]' 'Preview deployed. <!-- gc:no-review -->'),$(cm 108 11 human1 'Marked for <!-- gc:no-review --> me.'),$(cm 109 11 human1 'and rename this')]"
+# dismissal could drop unread, whoever posted it. A mark that does not open the
+# body leaves the comment feedback.
+NFR_CMTS="[$(cm 107 11 'preview[bot]' '<!-- gc:no-review -->\nPreview deployed.'),$(cm 108 11 human1 '<!-- gc:no-review -->\nMarked for me.'),$(cm 109 11 human1 'and rename this'),$(cm 110 11 human1 'Rename it too. <!-- gc:no-review -->')]"
 eq "$(printf '%s' "$NFR_CMTS" | jq -c --argjson revs "$REVS" --arg self "$SELF" \
-        "$CITY_OWN_DEF$REVIEW_DISMISSAL_DEF"'unrouted_comment_ids($revs; [11]; {}; $self)')" '[109]' \
-   "(UNROUTED) a comment marked as not for review, from an app or a person, is not feedback a dismissal would drop"
+        "$CITY_OWN_DEF$REVIEW_DISMISSAL_DEF"'unrouted_comment_ids($revs; [11]; {}; $self)')" '[109,110]' \
+   "(UNROUTED) a comment opening with the no-review mark, from an app or a person, is not feedback a dismissal would drop, and one whose mark follows its text is"
 
 echo "# the PR a url names"
 coords() { if pr_coords "$1" "$2"; then printf '0|%s|%s' "$PR_HOST" "$PR_REPO"; else printf '1|%s|%s' "$PR_HOST" "$PR_REPO"; fi; }

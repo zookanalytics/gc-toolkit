@@ -9,7 +9,7 @@
 #      `pr-post.sh own-def`, the one definition of the mark).
 #   2. Any other post that is not for review is a notice, not review feedback,
 #      whoever posted it (gc_not_for_review, from the same definition): it
-#      carries the no-review mark, or opens with a prefix the rig declares.
+#      opens with the no-review mark, or with a prefix the rig declares.
 #   3. An unmarked post from any login other than the one gh posts as is
 #      outside, except a GitHub App account's approval, which is a notice. Any
 #      other post an app makes, a conversation comment among them, is outside.

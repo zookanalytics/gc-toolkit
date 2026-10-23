@@ -74,10 +74,11 @@
 # conversation comment that is not the city's own post (pr-post.sh's
 # gc_city_own: marked by pr-post.sh, or under the city's login before the
 # anchor's provenance cutover, pr_provenance_since) and is not marked as not for
-# review (gc_not_for_review: the no-review mark, or a prefix the rig declares) is
-# feedback, whoever posted it (gc_feedback), so an unmarked review under the
-# city's own login after the cutover routes like a person's. A review's state is
-# not its body: an approval or a change request counts whatever its body says.
+# review (gc_not_for_review: it opens with the no-review mark or a declared
+# prefix) is feedback, whoever posted it (gc_feedback), so an unmarked review
+# under the city's own login after the cutover routes like a person's. A
+# review's state is not its body: an approval or a change request counts
+# whatever its body says.
 # This runs even while the anchor still conflicts: the rework child is
 # prepare_mode=merge, so it brings the branch current as it answers, and the
 # CONFLICTING arm above stands down when feedback is owed rather than file a

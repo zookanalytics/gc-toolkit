@@ -225,6 +225,9 @@ eq "$(waits "$(thread "[$ANS,$REPLY,$FIXED,$NOREVIEW]")" 2026-01-01T00:00:00Z)" 
 NRCITY='{"author":{"login":"bot"},"body":"<!-- gc:no-review -->\nDeploy log attached.","createdAt":"2026-02-01T00:00:00Z"}'
 eq "$(waits "$(thread "[$ANS,$REPLY,$NRCITY]")" 2026-01-01T00:00:00Z)|$(waits "$(thread "[$ANS,$NRCITY]")" 2026-01-01T00:00:00Z)" "false|true" \
   "(WAITS) a notice under the city login that the city did not post takes no turn either"
+NRLATE='{"author":{"login":"ci[bot]"},"body":"Preview deployed.\n<!-- gc:no-review -->","createdAt":"2026-02-01T00:00:00Z"}'
+eq "$(waits "$(thread "[$ANS,$NRLATE]")" 2026-01-01T00:00:00Z)" "false" \
+  "(WAITS) a post whose mark comes after its text is feedback, so it ends the wait"
 OTHER='{"author":{"login":"bot"},"body":"❓ Declined: the guard already holds\n<!-- gc-writeback -->\n<!-- gc-writeback-finding:G -->"}'
 OLDFORM='{"author":{"login":"bot"},"body":"Declined: the guard already holds\n<!-- gc-writeback -->"}'
 REPLACED='{"author":{"login":"bot"},"body":"❓ Declined: an older reason\n<!-- gc-writeback -->\n<!-- gc-writeback-finding:F -->"}'

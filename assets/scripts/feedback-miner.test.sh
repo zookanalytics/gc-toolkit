@@ -326,7 +326,8 @@ $MARK" "$(ago_h 4)"
   review 106 "autoapprove[bot]" Bot APPROVED "Auto-approved: dependency bump." "$(ago_h 3)"
   review 107 johnzook User APPROVED "" "$(ago_h 1)"
   review 108 johnzook User COMMENTED "$LONG" "$(ago_h 2)"
-  review 109 johnzook User COMMENTED "FYI: the preview is up, nothing to change. <!-- gc:no-review -->" "$(ago_h 2)"
+  review 109 johnzook User COMMENTED "<!-- gc:no-review -->
+FYI: the preview is up, nothing to change." "$(ago_h 2)"
 } | jq -s . > "$FIX/11.reviews.json"
 {
   inline 201 johnzook 101 "This loop never terminates on empty input." "$(ago_h 5)"
@@ -334,7 +335,8 @@ $MARK" "$(ago_h 4)"
 <!-- gc-writeback -->
 $MARK" "$(ago_h 4)" 201
   inline 203 city-bot 103 "**The guard reads the wrong variable.** It checks \$a where \$b is meant." "$(ago_h 3)"
-  inline 204 johnzook 101 "Context only, nothing to change. <!-- gc:no-review -->" "$(ago_h 5)"
+  inline 204 johnzook 101 "<!-- gc:no-review -->
+Context only, nothing to change." "$(ago_h 5)"
 } | jq -s . > "$FIX/11.inline.json"
 {
   issue 301 city-bot User "Pre-open signoff (comment-only — not an approval): VERDICT: approve" "$(ago 3)"
@@ -344,9 +346,8 @@ The latest updates on your projects." "$(ago_h 3)"
   issue 304 johnzook User "Could this use a demo video?" "$(ago_h 1)"
   issue 305 "reviewer[bot]" Bot "The query interpolates the user's input into its SQL; bind it as a parameter.
 [vc]: # is mentioned here, not at the top." "$(ago_h 2)"
-  issue 306 "previewbot[bot]" Bot "Schema diff: no changes.
-
-<!-- gc:no-review -->" "$(ago_h 2)"
+  issue 306 "previewbot[bot]" Bot "<!-- gc:no-review -->
+Schema diff: no changes." "$(ago_h 2)"
 } | jq -s . > "$FIX/11.issue.json"
 issue 401 johnzook User "Old feedback from last week." "$(ago 10)" 12 | jq -s . > "$FIX/12.issue.json"
 # PR 12's city post is a review body.
@@ -421,9 +422,9 @@ eq "$(class_of "$(key 11 review 105)")" "outside" "(20) an app account's comment
 eq "$(class_of "$(key 11 review 106)")" "notice" "(21) an app account's approval is a notice"
 eq "$(class_of "$(key 11 comment 302)")" "notice" "(22) a deploy notice opening with a prefix the rig declares is a notice"
 eq "$(class_of "$(key 11 comment 305)")" "outside" "(22a) an app account's conversation comment that only carries that prefix past its start is outside"
-eq "$(class_of "$(key 11 comment 306)")" "notice" "(22b) an app account's comment carrying the no-review mark is a notice"
-eq "$(class_of "$(key 11 review 109)")" "notice" "(22c) so is a person's review body carrying it"
-eq "$(class_of "$(key 11 comment 204)")" "notice" "(22d) and a person's inline comment carrying it"
+eq "$(class_of "$(key 11 comment 306)")" "notice" "(22b) an app account's comment opening with the no-review mark is a notice"
+eq "$(class_of "$(key 11 review 109)")" "notice" "(22c) so is a person's review body opening with it"
+eq "$(class_of "$(key 11 comment 204)")" "notice" "(22d) and a person's inline comment opening with it"
 eq "$(class_of "$(key 11 review 107)")" "" "(23) an approval with no body is not read"
 eq "$(class_of "$(key 11 comment 303)")" "" "(24) a whitespace-only comment is not read"
 eq "$(class_of "$(key 12 comment 401)")" "outside" "(25) a back-fill PR's outside comment is read"
@@ -1071,7 +1072,7 @@ fresh_dir nfr
 mkdir -p "$TMP/undeclared"
 GC_RIG_ROOT="$TMP/undeclared" "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
 eq "$(class_of "$(key 11 comment 302)")" "outside" "(109) on a rig that declares nothing, the same deploy notice is outside"
-eq "$(class_of "$(key 11 comment 306)")" "notice" "(110) while a comment carrying the no-review mark is a notice on any rig"
+eq "$(class_of "$(key 11 comment 306)")" "notice" "(110) while a comment opening with the no-review mark is a notice on any rig"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
