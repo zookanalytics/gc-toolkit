@@ -386,6 +386,35 @@ it transitions nothing and escalates the bead for a person to choose a
 strategy. Gas Town's refinery stops on `local` and escalates it the same way.
 This design neither slings `local` nor maps it onto another strategy.
 
+### The proactive pool's rule
+
+The proactive pool's doctrine says that code a reaction produces takes the
+correctness-gated `mr` path, never `direct`. It names two things that enforce
+it, the city's default and the pool's own `GC_DEFAULT_MERGE_STRATEGY`, and says
+that work a reaction routes goes to the polecat pool, "whose default is `mr`".
+Neither enforces it today. No rig's config sets `default_merge_strategy`, the
+key Gas City's sling reads, and nothing reads the variable, so the rule rests
+on the refinery's `mr` default, which this design changes.
+
+Under the design the rule holds in this form:
+
+- Code a reaction writes itself carries `merge_strategy=mr`, as the pool's
+  prompt already tells it to. It opens a PR wherever it lands, so it never
+  takes the `direct` path.
+- Work a reaction routes to the polecat pool is its subject's own work, and it
+  lands by the subject's target like any bead's. Aimed at main, or at any
+  branch but a convoy's or another PR's head, it goes through its own PR by the
+  PR rule. Aimed at a convoy's branch, it lands there as a member and reaches
+  main in the convoy's PR, which the city's checks review before it opens.
+  Aimed at another PR's head, it folds into that PR, as it does today. The
+  proactive scan skips routed, armed and in-flight beads, and the recipes sling
+  or arm a member in the step that adds it (section 1), so a subject the scan
+  reaches is not a member.
+
+So a reaction's code reaches main only through a PR. Unit A corrects the
+doctrine to say how, and removes the variable and the fixture check that
+asserts it, which is the change tk-aqytltn asks for.
+
 ## 3. When a convoy's branch is cut
 
 A convoy's branch is cut once, when `convoy-seed.sh` seeds the convoy, from the
@@ -475,6 +504,11 @@ The unit that changes it is in the last column (section 9).
 | `formulas/mol-refinery-patrol.toml`, `rejection-branch-keep` | decides from its own copy of the resolve block whether a bead's branch survives a branch-caused rejection: deletes it for a `direct` bead that records no PR, since nothing PR-shaped means no PR will want the branch "only in direct mode", and keeps it otherwise | goes whole, with its copy of the resolve block: a rejected branch is kept in every mode, because the repooled rebuild resumes it | A |
 | `lifecycle/lifecycle.toml`, `merge_strategy` | an absent key resolves to the formula default, `mr`, and a `polecat/` target with no PR of its own resolves from `mr` down to `direct` | an absent key resolves to `direct`, the PR rule resolves a bead that would land `direct` to `mr` unless its target is a convoy's branch or another PR's head, and the fold-in sentence goes | A |
 | `assets/scripts/pr-stack.sh` header comment, and `docs/refinery-merge-cadence.md` | a `merged_target` row "landed its own PR into it" | it landed on the branch, with or without a PR of its own | A |
+| `agents/proactive/PROVENANCE.md`, item 3 | the invariant "is enforced by the city default (`default_merge_strategy = "mr"`) and this agent's `GC_DEFAULT_MERGE_STRATEGY = "mr"`", and work a reaction routes "goes to the polecat pool, whose default is `mr`" | code a reaction writes carries `merge_strategy=mr`, so it never lands `direct`, and work a reaction routes lands by its target like any bead's; either way it reaches main only through a PR | A |
+| `agents/proactive/prompt.template.md`, "mr-only for Code" | "The pool already defaults `GC_DEFAULT_MERGE_STRATEGY=mr`; do not override it." | the sentence goes, and the hand-off with `merge_strategy=mr` stays | A |
+| `agents/proactive/agent.toml`, `[env]` | `GC_DEFAULT_MERGE_STRATEGY = "mr"`, under a comment that calls it the invariant's belt-and-suspenders | the line and its comment go, since nothing reads the variable | A |
+| `tools/gc-proactive.sh`, header comment | code a reaction routes "still takes the correctness-gated mr path", on the polecat pool "(its GC_DEFAULT_MERGE_STRATEGY=mr)" | code a reaction routes lands by its target and reaches main only through a PR | A |
+| `tools/proactive-first-reaction-fixture.sh` | its header says the pool "defaults to mr", its sling section that the invariant "now lives downstream, on the polecat pool", and a check asserts `agent.toml`'s `GC_DEFAULT_MERGE_STRATEGY = "mr"` | the comments say what `PROVENANCE.md` says, and the check goes | A |
 | `docs/design-convoy.md` | "The default PR unit is an owned convoy"; the design child is linked "parent-child to the convoy"; "each child's PR onto the integration branch"; in all-in-one, "Each child's PR still needs the operator's approval" | Each child is added to the convoy and carries its target. Design-gated: the design child is a stage, a PR into the convoy's branch, the implementation lands with no PR, and the convoy's PR is the second. All-in-one: one PR, the convoy's. | B |
 | `formulas/mol-design-convoy.toml`, arm-design and arm-implementation | links each child with a parent-child edge, reads that edge back, relies on it for the child's target, and slings with no merge flag | adds each child with `gc convoy add`, reads the convoy's `tracks` edge back, writes the convoy's target on the child, and slings the design child `--merge mr` when design-gated | B |
 | `assets/scripts/pr-summary-region.sh`, the integration banner | "Approving it mints this phase into the convoy integration branch" | "stage" for "phase". This file and `docs/state-machine.md` already use "phase" for a check's phase, so one word keeps one meaning. | B |
@@ -507,7 +541,7 @@ main as the one PR the operator reviews.
 
 | Unit | What it changes | Its tests |
 |---|---|---|
-| A. The default | `default_merge_strategy` and `merge-strategy-resolve` in `formulas/mol-refinery-patrol.toml`, whose `rejection-branch-keep` arm goes; the `merge_strategy` entry in `lifecycle/lifecycle.toml`; the `pr-stack.sh` comment; the line in `docs/refinery-merge-cadence.md`; and the formula's seed-audit page | `assets/scripts/mr-aware-rejection-failclosed.test.sh`, changed as [unit A's tests](#unit-as-tests) list |
+| A. The default | `default_merge_strategy` and `merge-strategy-resolve` in `formulas/mol-refinery-patrol.toml`, whose `rejection-branch-keep` arm goes; the `merge_strategy` entry in `lifecycle/lifecycle.toml`; the `pr-stack.sh` comment; the line in `docs/refinery-merge-cadence.md`; the proactive pool's `PROVENANCE.md`, prompt, `agent.toml` and the header of `tools/gc-proactive.sh`; and the seed-audit pages of the formula and the proactive prompt | `assets/scripts/mr-aware-rejection-failclosed.test.sh`, changed as [unit A's tests](#unit-as-tests) list; `tools/proactive-first-reaction-fixture.sh`; `assets/scripts/render-seed-audit.sh --check` |
 | B. Stages | arm-design and arm-implementation in `formulas/mol-design-convoy.toml`, `docs/design-convoy.md`, the banner in `assets/scripts/pr-summary-region.sh`, the label text in `assets/scripts/pr-status-label.sh` and the live label, the base label section of `docs/state-machine.md`, the PR Checkpoint sentence of `docs/epics.md`, and the formula's seed-audit page | `assets/scripts/mol-design-convoy-arm.test.sh`, `assets/scripts/pr-open.test.sh` |
 | C. Membership and doctrine | the dispatch doctrine in `agents/mechanik/prompt.template.md`, the integration-branch paragraph of `template-fragments/polecat-doctrine.template.md`, the supplement section of `skills/prs/SKILL.md`, and the seed-audit pages of the mechanik, polecat and polecat-codex prompts | `assets/scripts/skill-needs.test.sh`, `assets/scripts/render-seed-audit.sh --check` |
 
