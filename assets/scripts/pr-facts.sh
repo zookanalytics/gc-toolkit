@@ -797,6 +797,12 @@ refresh_dispose_gates() {
   while IFS= read -r v; do
     [ -n "$v" ] || continue
     old=$(bd_json show "$v" | jq -r '.[0].description // ""' 2>/dev/null)
+    # bd gate create writes the description as "Ad-hoc gate blocking <bead>", a
+    # blank line, and "Reason: " before the message human-gate.sh passes it, so
+    # a gate this pass just filed is compared by that message.
+    case "$old" in
+      "Ad-hoc gate blocking "*$'\n\n'"Reason: "*) old="${old#*$'\n\n'Reason: }" ;;
+    esac
     want="$msg$kids"
     if [ -z "$kids" ]; then
       case "$old" in *"$kids_lead"*) want="$msg$kids_lead${old#*"$kids_lead"}" ;; esac
