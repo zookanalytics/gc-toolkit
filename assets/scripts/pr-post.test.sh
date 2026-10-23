@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # pr-post.test.sh — hermetic coverage of the city's single PR posting helper:
 # each verb makes the gh call its callers made, with the provenance mark
-# appended; the own-def predicate tells the city's own post from feedback on
-# every shape the readers hand it; and no file in the pack posts to a pull
-# request any other way. A gh stub records each call's argv and the body it
-# would post; no network, no city.
+# appended; the own-def predicates tell the city's own post, and a post not for
+# review, from feedback on every shape the readers hand them; not-for-review
+# reads the rig's declaration from its checkout; no reader carries the no-review
+# rule of its own; and no file in the pack posts to a pull request any other
+# way. A gh stub records each call's argv and the body it would post; no
+# network, no city.
 #
 # run-tests-scope: tree
 set -u
@@ -216,6 +218,126 @@ eq "$(cutover "")" "" "gc_city_cutover of nothing is nothing"
 eq "$(marked '{"body":"plain"}')" false "an unmarked body carries no mark"
 eq "$(marked '{"body":null}')" false "a null body carries no mark"
 eq "$(marked "{\"body\":\"x $MARK\"}")" true "gc_city_marked reads the body alone"
+
+echo "# own-def: a post not for review is not feedback, whoever posted it"
+# def_in <checkout> — own-def as a reader in that rig's checkout prints it.
+def_in() { GC_RIG_ROOT="$1" "$SUT" own-def 2>/dev/null; }
+feedback() { # <def> <json> — prints gc_feedback for our login "bot" at $CUT
+  printf '%s' "$2" | jq -r --arg self bot --arg since "$CUT" "$1"'gc_feedback($self; $since)'
+}
+nfr() { printf '%s' "$2" | jq -r "$1"'gc_not_for_review'; } # <def> <json>
+RIG="$TMPD/rig"; mkdir -p "$RIG"
+printf '%s\n' '# Vercel' '[[marker]]' 'prefix = "[vc]: #"  # its deployment notice' >"$RIG/not-for-review.toml"
+VDEF="$(def_in "$RIG")"
+NDEF="$(def_in "$TMPD/no-declaration")"
+VERCEL='{"user":{"login":"vercel[bot]","type":"Bot"},"body":"[vc]: #DEIJgls1qh2Jz\nThe latest updates on your projects."}'
+eq "$(feedback "$VDEF" "$VERCEL")" false "a Vercel-shaped comment is not feedback on a rig that declares [vc]: #"
+eq "$(feedback "$NDEF" "$VERCEL")" true "…and is feedback on a rig that declares nothing"
+eq "$(feedback "$NDEF" '{"user":{"login":"preview[bot]","type":"Bot"},"body":"Schema diff\n\n<!-- gc:no-review -->"}')" false \
+  "a Bot comment carrying the mark is not feedback, on a rig that declares nothing"
+eq "$(feedback "$NDEF" '{"user":{"login":"johnzook","type":"User"},"body":"FYI only <!-- gc:no-review -->"}')" false \
+  "a person's comment carrying the mark is not feedback"
+eq "$(feedback "$NDEF" '{"user":{"login":"bot"},"body":"note <!-- gc:no-review -->","created_at":"2026-10-08T00:00:00Z"}')" false \
+  "a post under our login carrying the mark and not the city's is not feedback either"
+eq "$(feedback "$NDEF" '{"user":{"login":"preview[bot]","type":"Bot"},"body":"Schema diff: two tables changed."}')" true \
+  "an unmarked Bot comment is still feedback"
+eq "$(feedback "$VDEF" '{"user":{"login":"johnzook","type":"User"},"body":"Quoting the bot: [vc]: #abc"}')" true \
+  "a declared prefix past the start of the body leaves it feedback"
+eq "$(feedback "$VDEF" '{"user":{"login":"vercel[bot]","type":"Bot"},"body":" [vc]: #abc"}')" true \
+  "…and so does one after a leading space: the prefix is compared from the first character"
+eq "$(feedback "$NDEF" '{"user":{"login":"bot"},"body":"verdict\n\n<!-- gc:city -->","created_at":"2026-10-08T00:00:00Z"}')" false \
+  "the city's own post is not feedback"
+eq "$(feedback "$NDEF" '{"user":{"login":"bot"},"body":"model review: fix the race","created_at":"2026-10-08T00:00:00Z"}')" true \
+  "an unmarked post under our login after the cutover is still feedback"
+eq "$(feedback "$NDEF" '{"user":{"login":"op"},"state":"APPROVED","body":"Ship it. <!-- gc:no-review -->"}')" false \
+  "a review's body carrying the mark is not feedback: its state is for the reader that counts states"
+eq "$(nfr "$NDEF" '{"author":{"login":"x"},"body":"<!-- gc:no-review --> on a GraphQL node"}')" true \
+  "a GraphQL node reads the same way"
+eq "$(nfr "$NDEF" '{"body":null}')" false "a null body carries no mark"
+eq "$(printf '%s' "$VERCEL" | jq -r --arg self bot --arg since "$CUT" "$VDEF"'gc_city_own($self; $since)')" false \
+  "the city's own rule is unchanged by a declaration"
+
+echo "# not-for-review: what the rig declares, read from its checkout"
+# nfr_run <checkout> — sets RC, NOUT (stdout) and NERR (stderr).
+nfr_run() { NOUT="$(GC_RIG_ROOT="$1" "$SUT" not-for-review 2>"$TMPD/nfr.err")"; RC=$?; NERR="$(cat "$TMPD/nfr.err")"; }
+NO_REVIEW='<!-- gc:no-review -->'
+nfr_run "$RIG"
+eq "$RC" 0 "a declaration that reads whole exits 0"
+eq "$NOUT" "$(printf '%s\n%s' "$NO_REVIEW" '[vc]: #')" "it prints the mark, then each declared prefix"
+eq "$NERR" "" "…and names nothing refused"
+nfr_run "$TMPD/no-declaration"
+eq "$RC|$NOUT|$NERR" "0|$NO_REVIEW|" "a rig with no file declares nothing, and that is no fault"
+SHAPES="$TMPD/shapes"; mkdir -p "$SHAPES"
+cat >"$SHAPES/not-for-review.toml" <<'TOML'
+# Comments and blank lines are allowed.
+
+[[marker]]
+prefix = "a \"quoted\" \\ prefix"   # a basic string's two escapes
+[[ marker ]]
+prefix = 'C:\literal "as written"'
+[[marker]]
+prefix = "## Deploy Preview"   # a prefix may open with a hash
+TOML
+nfr_run "$SHAPES"
+eq "$RC|$NERR" "0|" "every string shape the doc names reads"
+eq "$NOUT" "$(printf '%s\n%s\n%s\n%s' "$NO_REVIEW" 'a "quoted" \ prefix' 'C:\literal "as written"' '## Deploy Preview')" \
+  "…a basic string unescaped, a literal one as written, and a hash inside the quotes kept"
+printf '[[marker]]\r\nprefix = "[vc]: #"\r\n' >"$SHAPES/not-for-review.toml"
+nfr_run "$SHAPES"
+eq "$RC|$NOUT" "0|$(printf '%s\n%s' "$NO_REVIEW" '[vc]: #')" "a file with CRLF line ends reads the same"
+FAULTS="$TMPD/faults"; mkdir -p "$FAULTS"
+cat >"$FAULTS/not-for-review.toml" <<'TOML'
+prefix = "outside any table"
+[[marker]]
+prefix = "  "
+[[marker]]
+prefix = "tab\there"
+[[marker]]
+name = "Vercel"
+prefix = "[vc]: #"
+[[marker]]
+# no prefix here
+[[marker]]
+prefix = "one"
+prefix = "two"
+[markers]
+[[marker]]
+prefix = "kept"
+TOML
+nfr_run "$FAULTS"
+eq "$RC" 1 "a declaration with a fault exits 1"
+eq "$NOUT" "$(printf '%s\n%s' "$NO_REVIEW" kept)" "…and declares only the table with none"
+has "$NERR" "not-for-review.toml: line 1: this file holds only [[marker]] tables" "a key outside a table is named"
+has "$NERR" "the [[marker]] at line 2 sets an empty prefix, which would take every comment out of review" "an empty prefix is refused"
+has "$NERR" "line 5: the prefix is not a one-line string" "an escape the parser does not take is refused, not guessed"
+has "$NERR" "line 7: a [[marker]] table sets its prefix and nothing else" "a stray key refuses its table"
+hasnt "$NOUT" "[vc]: #" "…prefix and all"
+has "$NERR" "the [[marker]] at line 9 sets no prefix" "a table with no prefix is named"
+has "$NERR" "the [[marker]] at line 11 sets its prefix twice" "a prefix set twice is refused"
+has "$NERR" "line 14: this file holds only [[marker]] tables" "another table is named"
+FDEF="$(GC_RIG_ROOT="$FAULTS" "$SUT" own-def 2>"$TMPD/fdef.err")"; FRC=$?
+eq "$FRC" 0 "own-def still prints its definitions over a faulty declaration"
+has "$FDEF" 'def gc_not_for_review_prefixes: ["kept"];' "…holding only the prefixes that read"
+has "$(cat "$TMPD/fdef.err")" "pr-post: $FAULTS/not-for-review.toml: line 1:" "…and names each refused part on stderr, with the file"
+TOP="$TMPD/toplevel"; git init -q "$TOP"
+printf '%s\n' '[[marker]]' 'prefix = "from the toplevel"' >"$TOP/not-for-review.toml"
+OUT="$(cd "$TOP" && env -u GC_RIG_ROOT "$SUT" not-for-review 2>&1)"
+has "$OUT" "from the toplevel" "with no GC_RIG_ROOT, the repository the caller runs in declares"
+OUT="$(cd "$TOP" && GC_RIG_ROOT="$RIG" "$SUT" not-for-review 2>&1)"
+hasnt "$OUT" "from the toplevel" "GC_RIG_ROOT, when set, names the rig's checkout whatever repository the caller runs in"
+has "$OUT" "[vc]: #" "…and its declaration is the one read"
+
+echo "# one definition: no reader carries the no-review rule of its own"
+if git -C "$REPO" rev-parse --show-toplevel >/dev/null 2>&1; then
+  eq "$(git -C "$REPO" grep -l -F -e 'gc:no-review' -- 'assets/' 'formulas/' 'services/' 'tools/' ':!assets/scripts/pr-post.sh' ':!*.test.sh' ':!*_test.go' 2>/dev/null)" "" \
+    "no file but pr-post.sh tests for the no-review mark"
+  eq "$(git -C "$REPO" grep -l -E -e 'def (gc_not_for_review|gc_feedback|gc_no_review_mark)[:(]' -- . ':!assets/scripts/pr-post.sh' 2>/dev/null)" "" \
+    "no file but pr-post.sh defines the rule"
+  eq "$(git -C "$REPO" grep -l -F -e '[vc]' -- 'assets/scripts/' ':!*.test.sh' 2>/dev/null)" "" \
+    "no script recognises a third-party marker of its own: a rig declares it"
+else
+  bad "one definition: no reader carries the no-review rule of its own" "$REPO is not a checkout"
+fi
 
 echo "# no file in the pack posts to a pull request outside pr-post.sh"
 if [ -x "$DETECTOR" ] && git -C "$REPO" rev-parse --show-toplevel >/dev/null 2>&1; then

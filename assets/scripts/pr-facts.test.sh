@@ -3621,6 +3621,67 @@ eq "$(vpass_id R7)" "<none>" "…so no validation pass opens"
 eq "$(meta R7 merge_hold)" "true" "…and the operator's hold stands"
 eq "$(meta R7 'gc.routed_to')" "human" "…with the hold it belongs to"
 
+echo "# a comment carrying the no-review mark is not feedback, from a person or an app, in every space"
+# A comment not for review informs rather than asks (docs/not-for-review.md). A
+# review body, an inline comment and a Conversation comment carrying the mark
+# raise nothing, whoever posted them, and the PR reads quiet.
+store "[$(anchor NR1 371)]"
+printf '%s' "$(prview 371 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_371.json"
+printf '[{"id":37100,"user":{"login":"human1","type":"User"},"state":"COMMENTED","body":"FYI: the preview is up. <!-- gc:no-review -->","commit_id":"sha-371","submitted_at":"2026-10-08T01:00:00Z"}]' > "$GH_DIR/reviews_371.json"
+printf '[{"id":37101,"pull_request_review_id":37100,"user":{"login":"human1","type":"User"},"body":"Context only. <!-- gc:no-review -->","path":"a.sh","line":1}]' > "$GH_DIR/comments_371.json"
+printf '[{"id":37102,"user":{"login":"github-actions[bot]","type":"Bot"},"body":"<!-- growth-factor:schema-diff -->\\n### Schema diff\\n\\n<!-- gc:no-review -->"}]' > "$GH_DIR/issue_comments_371.json"
+out=$(run)
+eq "$(meta_pinned NR1 pr_posture)" "review_required@sha-371" "nothing is outstanding, so the merge is not held as commented"
+eq "$(meta NR1 pr_review_watermark)|$(meta NR1 pr_comment_watermark)|$(meta NR1 pr_issue_comment_watermark)" "<absent>|<absent>|<absent>" "…no mark moves"
+eq "$(jq '[ .[] | select(.id | startswith("new-")) ] | length' "$STUB_STORE")" "0" "…no finding, rework child or validation pass is filed"
+eq "$(meta_pinned NR1 pr.conversation)" "quiet@sha-371" "…and the PR reads quiet"
+
+echo "# a Vercel-shaped comment is not feedback on a rig that declares its marker"
+mkdir -p "$TMP/rig-vercel" "$TMP/rig-undeclared"
+printf '%s\n' '# Vercel' '[[marker]]' 'prefix = "[vc]: #"' > "$TMP/rig-vercel/not-for-review.toml"
+store "[$(anchor NR2 372)]"
+printf '%s' "$(prview 372 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_372.json"
+printf '[{"id":37200,"user":{"login":"vercel[bot]","type":"Bot"},"body":"[vc]: #DEIJgls1qh2JzVu=:eyJpc01vbm9yZXBvIjp0cnVlfQ==\\nThe latest updates on your projects."}]' > "$GH_DIR/issue_comments_372.json"
+out=$(GC_RIG_ROOT="$TMP/rig-vercel" run)
+eq "$(meta NR2 pr_issue_comment_watermark)" "<absent>" "the deployment notice routes nothing and moves no mark"
+eq "$(meta_pinned NR2 pr_posture)" "review_required@sha-372" "…so the merge is not held as commented"
+eq "$(jq '[ .[] | select(.id | startswith("new-")) ] | length' "$STUB_STORE")" "0" "…and nothing is filed from it"
+
+echo "# …and the same comment is feedback on a rig that declares nothing"
+store "[$(anchor NR3 373)]"
+printf '%s' "$(prview 373 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_373.json"
+printf '[{"id":37300,"user":{"login":"vercel[bot]","type":"Bot"},"body":"[vc]: #DEIJgls1qh2JzVu=:eyJpc01vbm9yZXBvIjp0cnVlfQ==\\nThe latest updates on your projects."}]' > "$GH_DIR/issue_comments_373.json"
+out=$(GC_RIG_ROOT="$TMP/rig-undeclared" run)
+eq "$(meta NR3 pr_issue_comment_watermark)" "37300" "it routes and advances the conversation mark"
+eq "$(meta_pinned NR3 pr_posture)" "commented@sha-373" "…holding the merge as commented"
+eq "$(jq '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "NR3")
+           | select((.metadata["finding.source"] // "") == "human:vercel[bot]") ] | length' "$STUB_STORE")" "1" "…as one finding sourced to the app"
+
+echo "# an unmarked comment from an app is still feedback"
+store "[$(anchor NR4 374)]"
+printf '%s' "$(prview 374 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_374.json"
+printf '[{"id":37400,"user":{"login":"github-actions[bot]","type":"Bot"},"body":"### Schema diff\\n\\nTwo tables changed."}]' > "$GH_DIR/issue_comments_374.json"
+out=$(GC_RIG_ROOT="$TMP/rig-vercel" run)
+eq "$(meta NR4 pr_issue_comment_watermark)" "37400" "it routes and advances the conversation mark, whatever the rig declares"
+eq "$(meta_pinned NR4 pr_posture)" "commented@sha-374" "…holding the merge as commented"
+
+echo "# a review's state is not its body: a marked change request still holds the merge, and its body raises nothing"
+store "[$(anchor NR5 375)]"
+printf '%s' "$(prview 375 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_375.json"
+printf '[{"id":37500,"user":{"login":"human1","type":"User"},"state":"CHANGES_REQUESTED","body":"Hold until the preview is checked. <!-- gc:no-review -->","commit_id":"sha-375","submitted_at":"2026-10-08T01:00:00Z"}]' > "$GH_DIR/reviews_375.json"
+out=$(run)
+eq "$(meta_pinned NR5 pr_posture)" "changes_requested@sha-375" "the change request still holds the merge"
+eq "$(meta NR5 pr_review_watermark)" "<absent>" "…while its body routes nothing"
+eq "$(jq '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "NR5") ] | length' "$STUB_STORE")" "0" "…and raises no finding"
+
+echo "# …and a marked approval still counts as an approval"
+store "[$(anchor NR6 376)]"
+printf '%s' "$(prview 376 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_376.json"
+printf '[{"id":37600,"user":{"login":"human1","type":"User"},"state":"APPROVED","body":"Ship it. <!-- gc:no-review -->","commit_id":"sha-376","submitted_at":"2026-10-08T01:00:00Z"}]' > "$GH_DIR/reviews_376.json"
+out=$(run)
+eq "$(meta_pinned NR6 pr_posture)" "approved@sha-376" "the approval counts"
+eq "$(meta NR6 pr.conversation)" "<absent>" "…and it is something said, so the PR does not read quiet"
+
 echo "# a validation pass whose anchor_bead neither lands nor repairs warns and holds the batch"
 # The shape rides the create and is read back. A pass that landed without its
 # anchor_bead, and whose second write is refused, is one no probe can find, so
@@ -4857,6 +4918,13 @@ threads 46 "$(printf '%s' "$(one_thread 46)" | jq -c '.threads[0].comments.nodes
   | .threads[0].comments.nodes[0].body = "a city notice\n\n<!-- gc:city -->"')"
 out=$(run)
 eq "$(reacted 46 NC-46)" "false" "the city does not react to itself"
+
+echo "# …nor is a comment marked as not for review, whoever posted it: no batch routed it"
+store "[$(anchor W7N 377 "$(wb_meta rework:K7N)"), $(child K7N open)]"
+printf '%s' "$(prview 377 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_377.json"
+threads 377 "$(one_thread 377 'Preview deployed. <!-- gc:no-review -->')"
+out=$(run)
+eq "$(reacted 377 NC-377)" "false" "a comment not for review under the watermark gets no EYES reaction"
 
 echo "# …but an unmarked comment under our login past the cutover was feedback, so it is acknowledged"
 store "[$(anchor W7B 166 "$(wb_meta rework:K7B)"',"pr_provenance_since":"2026-10-07T00:00:00Z"'), $(child K7B open)]"

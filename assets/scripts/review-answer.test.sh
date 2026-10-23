@@ -14,9 +14,9 @@
 #   (URL)     a label links only to a comment the read of the PR holds, and the
 #             thread a comment sits in is found open or resolved
 #   (WAITS)   a thread waits on the reviewer while it is open, holds the answer
-#             posted for the finding, and ends with a post of the city, as
-#             gc_city_own tells one; a reply of theirs ends the wait until the
-#             city answers it
+#             posted for the finding, and ends with a post that is not
+#             feedback, as gc_feedback tells one: the city's, or one not for
+#             review; a reply of theirs ends the wait until the city answers it
 #   (RENDER)  the visit callout on top, the count line counting the points that
 #             need the reviewer and saying where the rest stand, the sections in
 #             order, the entries, the folded notes and the trailing mark lines
@@ -190,8 +190,8 @@ eq "$(rec '{"cid":"13"}' | jq -r --argjson v "$TVIEW" --arg p "$PRURL" "$REVIEW_
 
 echo "# (WAITS)"
 # A point waits on the reviewer while its thread is open, holds the answer
-# posted for its finding, and ends with a post of the city. The writer passes
-# gc_city_own, the rule the routing arm tells feedback by.
+# posted for its finding, and ends with a post that is not feedback. The writer
+# passes the negation of gc_feedback, the rule the routing arm tells feedback by.
 ANS='{"author":{"login":"bot"},"body":"❓ Declined: the guard already holds\n\nResolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback.\n<!-- gc-writeback -->\n<!-- gc-writeback-finding:F -->"}'
 REPLY='{"databaseId":20,"author":{"login":"op"},"body":"I still think the guard should go."}'
 FIXED='{"author":{"login":"bot"},"body":"✅ Fixed in 6c6c6c6c (tk-k2).\n<!-- gc-writeback -->\n<!-- gc-writeback-mark:resolved -->"}'
@@ -201,7 +201,7 @@ thread() { # comments-after-the-raising-one [resolved]
 }
 waits() { # thread-json [cutover] — whether it waits on the reviewer for finding F
   jq -rn --argjson t "$1" --arg since "${2:-}" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'
-    ra_thread_waits($t; "bot"; "<!-- gc-writeback -->"; "F"; "the guard already holds"; gc_city_own("bot"; $since))'
+    ra_thread_waits($t; "bot"; "<!-- gc-writeback -->"; "F"; "the guard already holds"; (gc_feedback("bot"; $since) | not))'
 }
 eq "$(waits "$(thread "[$ANS]")")" "true" "(WAITS) an open thread holding the answer, and ending with it, waits on the reviewer"
 eq "$(waits "$(thread "[$ANS]" true)")" "false" "(WAITS) …and once they resolve it, does not"
@@ -214,6 +214,9 @@ UNMARKED='{"author":{"login":"bot"},"body":"Please drop the guard anyway.","crea
 eq "$(waits "$(thread "[$ANS,$CITYPOST]")" 2026-01-01T00:00:00Z)" "true" "(WAITS) a post of the city after the answer leaves it waiting"
 eq "$(waits "$(thread "[$ANS,$UNMARKED]")" 2026-01-01T00:00:00Z)" "false" \
   "(WAITS) …but an unmarked post under the city login after the cutover is feedback, as the routing arm reads it, and ends the wait"
+NOREVIEW='{"author":{"login":"ci[bot]"},"body":"Preview deployed.\n<!-- gc:no-review -->","createdAt":"2026-02-01T00:00:00Z"}'
+eq "$(waits "$(thread "[$ANS,$NOREVIEW]")" 2026-01-01T00:00:00Z)" "true" \
+  "(WAITS) a post marked as not for review after the answer asks nothing, so it leaves the thread waiting"
 OTHER='{"author":{"login":"bot"},"body":"❓ Declined: the guard already holds\n<!-- gc-writeback -->\n<!-- gc-writeback-finding:G -->"}'
 OLDFORM='{"author":{"login":"bot"},"body":"Declined: the guard already holds\n<!-- gc-writeback -->"}'
 REPLACED='{"author":{"login":"bot"},"body":"❓ Declined: an older reason\n<!-- gc-writeback -->\n<!-- gc-writeback-finding:F -->"}'
@@ -619,8 +622,8 @@ has "$(cat "$PF")" 'ra_open_ask($disp)' "(READERS) …and says what resolving it
 has "$(cat "$PF")" 'ra_comment_thread($v; $cid) as $t' "(READERS) …finding the thread through the lookup the living answer reads, so the two read one thread"
 has "$(cat "$PF")" '($t | ra_thread_open)' "(READERS) …asking for nothing in a thread already resolved, by the same reading of its state"
 has "$(cat "$PF")" 'ra_answer_post($self; $m; $id; $reply)' "(READERS) …and reading its answer back by the test the living answer tells a waiting thread by"
-has "$(cat "$PF")" 'ra_models($view; $prurl; $self; $vl; $beads; $marker; gc_city_own($self; $since))' \
-  "(READERS) the living answer tells a post of the city by gc_city_own, the rule the routing arm tells feedback by"
+has "$(cat "$PF")" 'ra_models($view; $prurl; $self; $vl; $beads; $marker; (gc_feedback($self; $since) | not))' \
+  "(READERS) the living answer tells a post that asks nothing by the negation of gc_feedback, the rule the routing arm tells feedback by"
 OTHERS=$(cd "$ROOT" && git grep -l -F 'gc-review-answer:' -- . ':!assets/scripts/review-answer.sh' ':!assets/scripts/pr-facts.sh' ':!*.test.sh' ':!docs/**' ':!specs/**' ':!lifecycle/**' 2>/dev/null)
 eq "$OTHERS" "" "(READERS) no other file writes a living answer's review key"
 

@@ -237,9 +237,10 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
   def ra_url($view; $prurl): ra_url($view; $prurl; (if .body then null else ra_comment_thread($view; .cid) end));
   # Whether the thread $t of a finding comment waits on the reviewer for the
   # answer to finding $id, whose reply is $reply: open, holding that answer
-  # (ra_answer_post), and ending with a post of the city. own tells a post of
-  # the city, and the caller passes gc_city_own for it, so a reply of theirs is
-  # what the routing arm takes for feedback. A thread its answer never reached
+  # (ra_answer_post), and ending with a post that asks the city nothing. own
+  # tells such a post, and the caller passes the negation of gc_feedback for it:
+  # a post of the city, or one not for review. So a reply of theirs is what the
+  # routing arm takes for feedback. A thread its answer never reached
   # asks nothing of them. Nor does one whose last post is a reply of theirs,
   # which is a point of its own until the city answers it. Once the city has
   # answered it, the thread waits on them again, since the write-back still
@@ -360,8 +361,9 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
   # own closed reads as re-requested when a copy carries its dismissed mark, or
   # when the read of the PR lists its author among the pending review requests
   # ($view.requested). So a dismissal whose edit of the comment failed still
-  # says so on the next pass. own tells a post of the city from one that is
-  # not (ra_thread_waits), and the writer passes gc_city_own for it.
+  # says so on the next pass. own tells a post that asks the city nothing from
+  # one that is feedback (ra_thread_waits), and the writer passes the negation
+  # of gc_feedback for it.
   def ra_models($view; $prurl; $self; $vl; $beads; $marker; own):
     ra_rounds($view) as $rounds
     | [ $view.issue_comments[]?

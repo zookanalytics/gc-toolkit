@@ -31,6 +31,9 @@ CO="$TMP/checkout"
 git init -q -b main "$CO"
 git -C "$CO" remote add upstream git@github.com:them/repo.git
 git -C "$CO" remote add origin git@github.com:ours/repo.git
+# The rig declares Vercel's deployment notice not for review, by the prefix its
+# first line opens with.
+printf '%s\n' '# Vercel' '[[marker]]' 'prefix = "[vc]: #"' > "$CO/not-for-review.toml"
 
 # --- stub gh ---------------------------------------------------------------------
 # gh's own resolution order with no default set: a bare `gh repo view` answers
@@ -272,6 +275,8 @@ export STUB_LOG="$TMP" STUB_FIX="$FIX" STUB_STORE="$STORE"
 unset GC_PATROL_FINDING_TOOL GC_BD_LIB GC_FINDING_DEFAULT_RIG
 export GC_PROACTIVE_TOOL="$BIN/gc-proactive"
 export GC_RIG=fixture-rig
+# The rig's checkout, where pr-post.sh reads what the rig declares not for review.
+export GC_RIG_ROOT="$CO"
 
 MARK='<!-- gc:city -->'
 CUT=$(ago 2)
@@ -321,6 +326,7 @@ $MARK" "$(ago_h 4)"
   review 106 "autoapprove[bot]" Bot APPROVED "Auto-approved: dependency bump." "$(ago_h 3)"
   review 107 johnzook User APPROVED "" "$(ago_h 1)"
   review 108 johnzook User COMMENTED "$LONG" "$(ago_h 2)"
+  review 109 johnzook User COMMENTED "FYI: the preview is up, nothing to change. <!-- gc:no-review -->" "$(ago_h 2)"
 } | jq -s . > "$FIX/11.reviews.json"
 {
   inline 201 johnzook 101 "This loop never terminates on empty input." "$(ago_h 5)"
@@ -328,14 +334,19 @@ $MARK" "$(ago_h 4)"
 <!-- gc-writeback -->
 $MARK" "$(ago_h 4)" 201
   inline 203 city-bot 103 "**The guard reads the wrong variable.** It checks \$a where \$b is meant." "$(ago_h 3)"
+  inline 204 johnzook 101 "Context only, nothing to change. <!-- gc:no-review -->" "$(ago_h 5)"
 } | jq -s . > "$FIX/11.inline.json"
 {
   issue 301 city-bot User "Pre-open signoff (comment-only — not an approval): VERDICT: approve" "$(ago 3)"
-  issue 302 "vercel[bot]" Bot "[vc]: deployment preview ready" "$(ago_h 3)"
+  issue 302 "vercel[bot]" Bot "[vc]: #dkbu2MRiHxbtC
+The latest updates on your projects." "$(ago_h 3)"
   issue 303 johnzook User "   " "$(ago_h 2)"
   issue 304 johnzook User "Could this use a demo video?" "$(ago_h 1)"
   issue 305 "reviewer[bot]" Bot "The query interpolates the user's input into its SQL; bind it as a parameter.
-[vc]: is mentioned here, not at the top." "$(ago_h 2)"
+[vc]: # is mentioned here, not at the top." "$(ago_h 2)"
+  issue 306 "previewbot[bot]" Bot "Schema diff: no changes.
+
+<!-- gc:no-review -->" "$(ago_h 2)"
 } | jq -s . > "$FIX/11.issue.json"
 issue 401 johnzook User "Old feedback from last week." "$(ago 10)" 12 | jq -s . > "$FIX/12.issue.json"
 # PR 12's city post is a review body.
@@ -408,8 +419,11 @@ eq "$(class_of "$(key 11 comment 301)")" "city" "(18) an unmarked city post from
 eq "$(field_of "$(key 11 comment 301)" flag)" "false" "(19) it is not flagged"
 eq "$(class_of "$(key 11 review 105)")" "outside" "(20) an app account's commenting review is outside"
 eq "$(class_of "$(key 11 review 106)")" "notice" "(21) an app account's approval is a notice"
-eq "$(class_of "$(key 11 comment 302)")" "notice" "(22) an app account's deploy notice is a notice"
-eq "$(class_of "$(key 11 comment 305)")" "outside" "(22a) an app account's conversation comment that is not a deploy notice is outside"
+eq "$(class_of "$(key 11 comment 302)")" "notice" "(22) a deploy notice opening with a prefix the rig declares is a notice"
+eq "$(class_of "$(key 11 comment 305)")" "outside" "(22a) an app account's conversation comment that only carries that prefix past its start is outside"
+eq "$(class_of "$(key 11 comment 306)")" "notice" "(22b) an app account's comment carrying the no-review mark is a notice"
+eq "$(class_of "$(key 11 review 109)")" "notice" "(22c) so is a person's review body carrying it"
+eq "$(class_of "$(key 11 comment 204)")" "notice" "(22d) and a person's inline comment carrying it"
 eq "$(class_of "$(key 11 review 107)")" "" "(23) an approval with no body is not read"
 eq "$(class_of "$(key 11 comment 303)")" "" "(24) a whitespace-only comment is not read"
 eq "$(class_of "$(key 12 comment 401)")" "outside" "(25) a back-fill PR's outside comment is read"
@@ -426,7 +440,7 @@ eq "$("$SUT" show --dir "$W" --outside --limit 2 | grep -c '^--- ')" "2" "(34) -
 OUT=$("$SUT" show --dir "$W" --outside --limit 50)
 has "$OUT" "== 9 of 9 unrecorded outside post(s) not yet shown whole ==" "(30) show --outside counts the unrecorded outside posts"
 hasnt "$OUT" "$(key 11 review 102)" "(31) show --outside leaves the city's posts out"
-hasnt "$OUT" "$(key 11 comment 302)" "(32) show --outside leaves app notices out"
+hasnt "$OUT" "$(key 11 comment 302)" "(32) show --outside leaves notices out"
 has "$OUT" "--- $(key 11 comment 305)" "(32a) and shows an app account's conversation comment that is not a deploy notice"
 eq "$(printf '%s\n' "$OUT" | grep '^--- ' | head -1)" "--- $(key 11 comment 304)" "(33) the newest outside post is shown first"
 OUT=$("$SUT" show --dir "$W" --city)
@@ -516,7 +530,7 @@ ROWS_EOF
 ); RC=$?
 eq "$RC" "1" "(58) a call with refused rows exits 1"
 has "$OUT" "no swept post has this key" "(59) an unknown key is refused"
-has "$OUT" "an app account notice is not review feedback" "(60) an app notice is refused"
+has "$OUT" "a notice is not review feedback" "(60) a notice is refused"
 has "$OUT" "the row has no statement" "(61) an empty statement is refused"
 has "$OUT" "directive must be standing or diff" "(62) a bad directive is refused"
 has "$OUT" "row is not a JSON object" "(63) a line that is not JSON is refused"
@@ -1051,6 +1065,13 @@ NAMED="== corrections outside posts already name, to reuse when one fits: guard-
 has "$("$SUT" show --dir "$W" --outside)" "$NAMED" "(107) show counts this run's corrections, most used first"
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
 has "$("$SUT" show --dir "$W" --outside)" "$NAMED" "(108) and a sweep re-run into the run's dir, which reads them from the store too, counts each once"
+
+echo "── what is not for review follows the rig's declaration ──"
+fresh_dir nfr
+mkdir -p "$TMP/undeclared"
+GC_RIG_ROOT="$TMP/undeclared" "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
+eq "$(class_of "$(key 11 comment 302)")" "outside" "(109) on a rig that declares nothing, the same deploy notice is outside"
+eq "$(class_of "$(key 11 comment 306)")" "notice" "(110) while a comment carrying the no-review mark is a notice on any rig"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

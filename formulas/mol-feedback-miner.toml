@@ -163,9 +163,9 @@ the outside capture still owes earlier ones. A post updates its PR, so one made
 long after its PR closed is read. A rig's first run records that day
 {{outside_backfill_days}} days back, and §4 moves it to the oldest last update
 among the PRs the run still owes. It classes each post by the rules that head
-`feedback-miner.sh`: the city's, outside, or an app's approval or deploy
-notice, which is skipped. An unmarked city post is flagged when it was posted
-after its PR's provenance cutover (§4).
+`feedback-miner.sh`: the city's, outside, or a notice, which is skipped. A
+notice is a post not for review or an app's approval. An unmarked city post is
+flagged when it was posted after its PR's provenance cutover (§4).
 
 A back-filling sweep reads hundreds of PRs and takes minutes, so give its call
 a long timeout. If a time limit cuts it short, run the same sweep command again
