@@ -6,9 +6,11 @@
 # is working) and gating anchors (the cadence's own, carrying merge_result) are
 # never gated, because a false gate here is the defect the block guards against.
 # The counterpart withdraws a gate only when the handoff's own row shows it left
-# the refinery; absence from the queue listing alone withdraws nothing. A
-# monitor that cannot see the queue is a condition with no bead of its own, and
-# the patrol's run is a wisp, so it is reported as a patrol finding.
+# the refinery; absence from the queue listing alone withdraws nothing. A gate
+# that blocks several handoffs is withdrawn only once every one of them has left,
+# which a section at the end proves through the real helper. A monitor that
+# cannot see the queue is a condition with no bead of its own, and the patrol's
+# run is a wisp, so it is reported as a patrol finding.
 #
 # The queue is read at the refinery's live identity, resolved by the real
 # resolve-route.sh against a stubbed roster. The store stub answers only that
@@ -102,6 +104,10 @@ case "$1 $2" in
     # wait on the gate, an empty array for a gate nothing waits on.
     case "$* " in *" --direction=up "*) ;; *) echo "dep list read from the wrong end: $*" >&2; exit 64 ;; esac
     case "$* " in *" --type blocks "*) ;; *) echo "dep list read without --type blocks: $*" >&2; exit 64 ;; esac
+    # A gate mapped to a string is one whose read fails, with nothing on stdout.
+    if [ "$(jq -r --arg g "$4" '.[$g] | type' "$DEPS_FIXTURE")" = string ]; then
+      echo "gc bd dep list: store unavailable" >&2; exit 1
+    fi
     jq -c --arg g "$4" '.[$g] // []' "$DEPS_FIXTURE"
     ;;
   "bd list")
@@ -168,14 +174,16 @@ AGENTS_DEFAULT='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.refinery"},
 
 # What each gate the fixtures name blocks, as bd dep list --direction=up prints
 # it. A gate the store's listing does not carry is never read, so one map serves
-# every case and the listing decides which gates exist.
+# every case and the listing decides which gates exist. tk-g-dark's read fails.
 DEPS_DEFAULT='{
   "tk-g-gone":  [{"id":"tk-gone","dependency_type":"blocks"}],
   "tk-g-gone2": [{"id":"tk-gone","dependency_type":"blocks"}],
   "tk-g-lost":  [{"id":"tk-lost","dependency_type":"blocks"}],
   "tk-g-stuck": [{"id":"tk-stuck","dependency_type":"blocks"}],
   "tk-g-both":  [{"id":"tk-gone","dependency_type":"blocks"},{"id":"tk-still","dependency_type":"blocks"}],
-  "tk-g-bad":   [{"id":"tk-gone 2026-10-03T12:57:12Z","dependency_type":"blocks"}]
+  "tk-g-bad":   [{"id":"tk-gone 2026-10-03T12:57:12Z","dependency_type":"blocks"}],
+  "tk-g-half":  [{"id":"tk-gone","dependency_type":"blocks"},{"id":"tk-gone 2026-10-03T12:57:12Z","dependency_type":"blocks"}],
+  "tk-g-dark":  "fails"
 }'
 
 # run <fixture-json> [stderr-noise] [list-rc] [shell-prelude] [gates-json] [handoff-json]
@@ -346,10 +354,11 @@ esac
 # --- Withdrawal: a departed handoff's gate is resolved moot --------------------
 # A handoff that an open witness-refinery-queue human gate blocks and that the
 # readable queue no longer carries is only a candidate. The block reads each
-# candidate by id and withdraws its gate through human-gate.sh --retract only
+# candidate by id and withdraws its gates through human-gate.sh --retract only
 # when that row shows the handoff left: closed, carrying a merge_result,
-# unassigned, or assigned to something other than a refinery. The store's gate
-# listing is the 5th run() argument and the by-id rows the 6th.
+# unassigned, or assigned to something other than a refinery. Every other bead
+# those gates block must have left the same way. The store's gate listing is the
+# 5th run() argument and the by-id rows the 6th.
 # gate <id> [await-id] [status] [await-type] -> one row as bd gate list prints it.
 gate() {
   printf '{"id":"%s","issue_type":"gate","await_type":"%s","await_id":"%s","status":"%s","title":"stuck handoff"}' \
@@ -386,12 +395,50 @@ RET2="$(run "$QUEUE_SUBJ" "" "" "" "$G_GONE" "$H_CLOSED")"
 hasnt "$RET2" "--retract" "a handoff still in the queue keeps its gate open"
 hasnt "$(cat "$TMP/lists")" "--id=" "a handoff still in the queue is not read by id"
 
-# A gate that blocks two handoffs makes a candidate only of the one the queue no
-# longer carries.
+# A gate that blocks two handoffs is about both, and --retract on either one
+# resolves it for both. So it stays open while one of them is still in the queue,
+# and the line that reports the kept gate names the handoff that keeps it.
 RBOTH="$(run "$QUEUE_OTHER" "" "" "" "[$(gate tk-g-both)]" "$H_CLOSED")"
-has "$RBOTH" "--retract --subject tk-gone" "a gate on two handoffs is withdrawn for the one that left"
-hasnt "$RBOTH" "--subject tk-still" "and not for the one still in the queue"
+hasnt "$RBOTH" "--retract" "a gate on two handoffs is not withdrawn while one of them is still in the queue"
+has "$(out)" "tk-gone is closed, but its gate tk-g-both also blocks tk-still, which is still in the queue; every gate on tk-gone stays open" \
+   "the kept gate is reported with the handoff that keeps it open"
 has "$(grep -e '--id=' "$TMP/lists" || true)" "--id=tk-gone " "only the departed handoff is read by id"
+# Once both have left, the gate is withdrawn.
+H_BOTH_LEFT='[{"id":"tk-gone","status":"closed","assignee":null,"title":"handoff","metadata":{"merge_result":"merged"}},
+  {"id":"tk-still","status":"open","assignee":null,"title":"handoff","metadata":{"merge_result":"pull_request"}}]'
+RBOTH2="$(run '[]' "" "" "" "[$(gate tk-g-both)]" "$H_BOTH_LEFT")"
+has "$RBOTH2" "--retract --subject tk-gone" "a gate on two handoffs is withdrawn once both have left"
+has "$RBOTH2" "--retract --subject tk-still" "and each departed handoff withdraws its own gates"
+hasnt "$(out)" "stays open" "and nothing is reported kept"
+has "$(grep -e '--id=' "$TMP/lists" || true)" "--id=tk-gone,tk-still" "both handoffs ride the one by-id read"
+# Missing from the listing proves nothing about the other handoff either: a row
+# that shows it still with the refinery keeps the shared gate, and so does no
+# row at all.
+H_GONE_STILL_HELD='[{"id":"tk-gone","status":"closed","assignee":null,"title":"handoff","metadata":{}},
+  {"id":"tk-still","status":"open","assignee":"'"$REF"'","title":"handoff","metadata":{"branch":"polecat/tk-still"}}]'
+RBOTH3="$(run '[]' "" "" "" "[$(gate tk-g-both)]" "$H_GONE_STILL_HELD")"
+hasnt "$RBOTH3" "--retract" "a gate shared with a handoff still assigned to the refinery stays open"
+has "$(out)" "its gate tk-g-both also blocks tk-still, which stays assigned to $REF (status open)" \
+   "the kept gate names what the other handoff's row showed"
+has "$(out)" "tk-still is missing from the queue listing but is still unprepared" "the other handoff gets its own line"
+RBOTH4="$(run '[]' "" "" "" "[$(gate tk-g-both)]" "$H_CLOSED")"
+hasnt "$RBOTH4" "--retract" "a gate shared with a handoff the by-id read returned no row for stays open"
+has "$(out)" "its gate tk-g-both also blocks tk-still, which could not be read" "the kept gate says the other handoff could not be read"
+# --retract resolves every open gate under the key on its subject, so a gate of
+# the departed handoff's own is not withdrawn beside one it shares with a
+# handoff still in the queue.
+RSOLO="$(run "$QUEUE_OTHER" "" "" "" "[$(gate tk-g-gone),$(gate tk-g-both)]" "$H_CLOSED")"
+hasnt "$RSOLO" "--retract" "a departed handoff's own gate stays open while it shares another with a handoff still in the queue"
+# A waiting bead whose id is not one bead id is never read, so it keeps a gate
+# it shares with a departed handoff.
+RHALF="$(run '[]' "" "" "" "[$(gate tk-g-half)]" "$H_CLOSED")"
+hasnt "$RHALF" "--retract" "a gate that also blocks a bead whose id is not one bead id stays open"
+# A gate whose waiting beads did not read may block a departed handoff beside a
+# bead still in the queue, so while it stays unread no departed handoff is
+# withdrawn.
+RDARK="$(run '[]' "" "" "" "[$(gate tk-g-gone),$(gate tk-g-dark)]" "$H_CLOSED")"
+hasnt "$RDARK" "--retract" "a gate whose waiting beads did not read keeps every departed handoff's gates open"
+has "$(out)" "tk-gone is closed, but the beads gate tk-g-dark blocks could not be read" "the line names the gate that did not read"
 
 # Two gates under the key on one handoff make one candidate. The helper's
 # withdrawal resolves every open gate under the key among the bead's gates, so
@@ -505,6 +552,13 @@ for PRELUDE in 'set -e' 'set -euo pipefail'; do
   has "$(out)" "could not read handoff tk-gone" "$PRELUDE: a failed by-id read still reaches the diagnostic"
   hasnt "$(GATES_RC_OVERRIDE=1 run '[]' "" "" "$PRELUDE" "$G_GONE" "$H_CLOSED")" "--retract" \
      "$PRELUDE: a failed gate listing withdraws nothing"
+  hasnt "$(run "$QUEUE_OTHER" "" "" "$PRELUDE" "[$(gate tk-g-both)]" "$H_CLOSED")" "--retract" \
+     "$PRELUDE: a gate shared with a handoff still in the queue stays open"
+  has "$(out)" "also blocks tk-still, which is still in the queue" "$PRELUDE: the kept gate still reaches the diagnostic"
+  has "$(run '[]' "" "" "$PRELUDE" "[$(gate tk-g-both)]" "$H_BOTH_LEFT")" "--retract --subject tk-gone" \
+     "$PRELUDE: a shared gate is still withdrawn once both handoffs have left"
+  hasnt "$(run '[]' "" "" "$PRELUDE" "[$(gate tk-g-gone),$(gate tk-g-dark)]" "$H_CLOSED")" "--retract" \
+     "$PRELUDE: a gate whose waiting beads did not read still withdraws nothing"
 done
 
 # --- The queue is read at a resolved address, never an assembled one ---------
@@ -565,6 +619,122 @@ NDCALLS="$(AGENTS_FAIL=1 BLOCK_FILE_OVERRIDE="$TMP/block-nodot.sh" run "$STUCK_O
 has "$(cat "$TMP/lists")" "--assignee=gc-toolkit/gc-toolkitrefinery " \
    "unreadable roster and a dotless prefix: the unverified address is read"
 hasnt "$NDCALLS" "--retract" "unreadable roster and a dotless prefix: a held handoff's gate is not withdrawn"
+
+# --- A shared gate through the real helper ------------------------------------
+# The cases above stub human-gate.sh, so they see the calls the block makes and
+# not what a call does to a gate. Here the block runs the real human-gate.sh and
+# bd-lib.sh against a store stub that keeps the beads, the gates and the
+# `blocks` edges (`<waiter>|blocks|<gate>` lines), and serves each read from
+# that state the way bd does: a gate's waiting beads from the gate's end, a
+# bead's gates from the bead's end. One gate blocks two handoffs. While one of
+# them still sits stuck in the queue, the gate stays open and that handoff stays
+# blocked; once it has left too, the gate is resolved moot.
+mkdir -p "$TMP/sbin" "$TMP/srig/assets/scripts" "$TMP/s"
+for S in human-gate.sh bd-lib.sh resolve-route.sh; do cp "$ROOT/assets/scripts/$S" "$TMP/srig/assets/scripts/"; done
+chmod +x "$TMP/srig/assets/scripts/human-gate.sh" "$TMP/srig/assets/scripts/resolve-route.sh"
+cp "$TMP/rig/assets/scripts/patrol-finding.sh" "$TMP/srig/assets/scripts/"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/sbin/gc" <<'STUB'
+set -u
+STORE="${STUB_STORE:?}"; EDGES="${STUB_EDGES:?}"
+save() { local t; t=$(mktemp "${STUB_TMP:?}/store.XXXXXX"); cat > "$t" && mv "$t" "$STORE"; }
+# rows <newline-separated ids> -> those beads' rows, as a dep list prints them.
+rows() { jq -c --arg ids "$1" '($ids | split("\n") | map(select(. != ""))) as $w
+  | [ .[] | select(.id as $i | $w | index($i)) | . + {dependency_type: "blocks"} ]' "$STORE"; }
+if [ "${1:-} ${2:-}" = "agent list" ]; then printf '%s\n' "$STUB_AGENTS"; exit 0; fi
+[ "${1:-}" = bd ] || { echo "stub gc: unexpected call: $*" >&2; exit 99; }
+shift
+case "${1:-} ${2:-}" in
+  "gate list")
+    # bd lists the gates that are not closed, and prints null when there are none.
+    jq -c '[ .[] | select(.issue_type == "gate" and .status != "closed") ] | if length == 0 then null else . end' "$STORE"
+    exit 0 ;;
+  "dep list")
+    bead="${3:-}"
+    jq -e --arg id "$bead" 'any(.[]; .id == $id)' "$STORE" >/dev/null \
+      || { printf '{"error":"no issue found matching %s"}\n' "$bead"; exit 1; }
+    case "$* " in
+      *" --direction=up "*) rows "$(awk -F'|' -v b="$bead" '$3 == b && $2 == "blocks" { print $1 }' "$EDGES")" ;;
+      *) rows "$(awk -F'|' -v b="$bead" '$1 == b && $2 == "blocks" { print $3 }' "$EDGES")" ;;
+    esac
+    exit 0 ;;
+  "gate resolve")
+    id="${3:-}"; shift 3; reason=""
+    while [ $# -gt 0 ]; do case "$1" in --reason) shift; reason="${1:-}" ;; esac; shift || true; done
+    printf '%s|%s\n' "$id" "$reason" >> "$STUB_RESOLVES"
+    jq -c --arg id "$id" --arg r "$reason" --arg at "$(jq -nr 'now | todate')" 'map(if .id == $id and .status != "closed"
+      then .status = "closed" | .close_reason = $r | .closed_at = $at else . end)' "$STORE" | save
+    echo "Gate resolved: $id"
+    exit 0 ;;
+  "gate create")
+    printf '%s\n' "$*" >> "$STUB_CREATES"
+    echo '{"error":"this store files no gate"}'
+    exit 1 ;;
+esac
+case "${1:-}" in
+  show) jq -c --arg id "${2:-}" '[ .[] | select(.id == $id) ]' "$STORE"; exit 0 ;;
+  list)
+    ids=""; who=""; all=false
+    for a in "$@"; do
+      case "$a" in --id=*) ids="${a#--id=}" ;; --assignee=*) who="${a#--assignee=}" ;; --all) all=true ;; esac
+    done
+    if [ -n "$ids" ]; then
+      jq -c --arg ids "$ids" --argjson all "$all" '($ids | split(",")) as $w
+        | [ .[] | select(.id as $i | $w | index($i)) | select($all or .status != "closed") ]' "$STORE"
+    else
+      jq -c --arg w "$who" '[ .[] | select((.assignee // "") == $w and .status == "open"
+        and .issue_type != "epic" and (.metadata.branch // "") != "") ]' "$STORE"
+    fi
+    exit 0 ;;
+esac
+echo "stub gc: unexpected bd call: $*" >&2; exit 99
+STUB
+chmod +x "$TMP/sbin/gc"
+export STUB_STORE="$TMP/s/store.json" STUB_EDGES="$TMP/s/edges" STUB_TMP="$TMP/s" \
+  STUB_RESOLVES="$TMP/s/resolves" STUB_CREATES="$TMP/s/creates" STUB_AGENTS="$AGENTS_DEFAULT"
+# run_real -> one pass of the block against the store as it stands.
+run_real() {
+  : > "$TMP/calls"
+  ( cd "$TMP"; unset GC_AGENT GC_BD_LIB
+    PATH="$TMP/sbin:$PATH" CALLS_LOG="$TMP/calls" GC_RIG=gc-toolkit GC_RIG_ROOT="$TMP/srig" GC_CITY_PATH="$TMP/nocity" \
+      bash "$TMP/block.sh" > "$TMP/out" 2>&1 || true )
+}
+# The stuck-handoff gate's state, and the open human gates its own `blocks`
+# edges reach, which is how the helper and every other reader finds them.
+gate_status() { jq -r '.[] | select(.id == "tk-g-both") | .status' "$STUB_STORE"; }
+open_gates_on() { PATH="$TMP/sbin:$PATH" gc bd dep list "$1" --type blocks --json \
+  | jq -r '[ .[] | select(.issue_type == "gate" and .status != "closed") | .id ] | join(",")'; }
+
+printf '[%s,%s,%s]' \
+  '{"id":"tk-gone","issue_type":"task","title":"handoff","status":"closed","assignee":null,"updated_at":"'"$OLD1"'","metadata":{"branch":"polecat/tk-gone","merge_result":"merged"}}' \
+  '{"id":"tk-still","issue_type":"task","title":"handoff","status":"open","assignee":"'"$REF"'","updated_at":"'"$OLD1"'","metadata":{"branch":"polecat/tk-still"}}' \
+  '{"id":"tk-g-both","issue_type":"gate","await_type":"human","await_id":"witness-refinery-queue","status":"open","title":"stuck handoff","created_at":"2020-01-01T00:00:00Z"}' \
+  > "$STUB_STORE"
+printf 'tk-gone|blocks|tk-g-both\ntk-still|blocks|tk-g-both\n' > "$STUB_EDGES"
+: > "$STUB_RESOLVES"; : > "$STUB_CREATES"
+
+# Pass one: tk-gone has left, tk-still still sits stuck in the queue.
+run_real
+eq "$(cat "$STUB_RESOLVES")" "" "real helper: the shared gate is not resolved while tk-still is still in the queue"
+eq "$(gate_status)" "open" "real helper: the shared gate stays open"
+eq "$(open_gates_on tk-still)" "tk-g-both" "real helper: tk-still stays blocked by the gate"
+eq "$(cat "$STUB_CREATES")" "" "real helper: tk-still's filing finds the gate it waits on and files no other"
+eq "$(cat "$TMP/calls")" "" "real helper: no patrol finding is filed"
+has "$(out)" "tk-gone is closed, but its gate tk-g-both also blocks tk-still, which is still in the queue" \
+   "real helper: the kept gate is reported"
+# A second pass with nothing changed changes nothing.
+run_real
+eq "$(cat "$STUB_RESOLVES")" "" "real helper: a second pass still leaves the shared gate open"
+
+# Pass two: tk-still has merged too, so every bead the gate blocks has left.
+jq -c 'map(if .id == "tk-still" then .status = "closed" | .assignee = null | .metadata.merge_result = "merged" else . end)' \
+  "$STUB_STORE" > "$TMP/s/next.json" && mv "$TMP/s/next.json" "$STUB_STORE"
+run_real
+eq "$(grep -c . "$STUB_RESOLVES" || true)" "1" "real helper: the shared gate is resolved once both handoffs have left"
+has "$(cat "$STUB_RESOLVES")" "tk-g-both|moot: Refinery handoff tk-gone is closed," \
+   "real helper: it is resolved moot, with the departed handoff's reading"
+eq "$(gate_status)" "closed" "real helper: the shared gate is closed"
+eq "$(open_gates_on tk-still)" "" "real helper: tk-still is released once it has left"
+eq "$(cat "$STUB_CREATES")" "" "real helper: the withdrawal files no gate"
 
 echo
 echo "refinery-stuck-handoff: $PASS passed, $FAIL failed"
