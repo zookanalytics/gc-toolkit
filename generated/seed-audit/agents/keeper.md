@@ -328,10 +328,12 @@ rig-scoped otherwise (`gc-toolkit/gc-toolkit.witness`), the form
 gc bd update <bead> --assignee <qualified-name>
 ```
 
-Then tell the agent, because the write gives an idle named session on
-`wake_mode = "resume"` no turn:
+Then tell the agent, since the write alone may give it no turn. The controller
+restarts a live `fresh` session onto a newly assigned bead, though not while
+the session still holds its previous one open, and it restarts no `resume`
+session, such as the mechanik's.
 `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify <bead> --agent <qualified-name>`
-mails it the bead once `bd` reports the bead ready. `gc <binding> scripts-dir`
+mails the agent the bead once `bd` reports the bead ready. `gc <binding> scripts-dir`
 prints the directory of the gc-toolkit pack's scripts, so a script called
 through it is the pack's own copy, whichever pack the calling agent comes from.
 `<binding>` is the name the city imports that pack under, which gc puts in
