@@ -163,11 +163,6 @@ hasF "$TMP/pm.skill" 'product lens' "(METHOD) the pm skill carries the product l
 hasF "$TMP/pm.skill" '## The visual is the `demo` check' "(METHOD) …and leaves the visual decision to demo"
 hasF "$TMP/arch.skill" 'You are the Architect' "(METHOD) the arch skill names the Architect"
 hasF "$TMP/arch.skill" 'docs/architecture.md' "(METHOD) …and reads the architecture reference docs before judging"
-hasF "$TMP/arch.skill" "a view of the repo's core model in \`docs/architecture.md\`" "(METHOD) …and stewards the repo's core-model view there"
-hasF "$TMP/arch.skill" 'The reviewed commit has no `docs/architecture.md`, or has one with no core-model view. The finding asks for the view.' "(METHOD) …so a commit without the view draws a finding asking for it"
-hasF "$TMP/arch.skill" '`docs/architecture.md: core-model view missing`' "(METHOD) …filed under one token, so the repo carries one bead asking for the view"
-hasF "$TMP/arch.skill" 'the change earns `request-changes` under the first shape below' "(METHOD) …and a change that moves the core model without the view earns request-changes"
-hasF "$TMP/arch.skill" 'A change that moves the core model makes this check mandatory' "(METHOD) …and makes the arch check mandatory"
 # Run outside any repository, so no index declares the check.
 ( cd "$TMP" && env -u GC_RIG_ROOT bash "$SCRIPT" --check-name nonesuch ) > "$TMP/undeclared.out" 2>/dev/null
 hasF "$TMP/undeclared.out" '`nonesuch` check, so nothing says what it judges' "(CHECK) a check no index row declares gets the declared-nowhere note, never a guess"

@@ -18,40 +18,8 @@ and the `docs/architecture/` directory it anchors. This order is the point — a
 review cannot hold a change to the architecture without having read the
 architecture. `docs/architecture.md` links the deeper references; follow the ones
 the diff touches. A reference missing at the reviewed commit is a gap you note,
-not a reason to pass or fail the change. The core-model view below is the
-exception, because its absence is a finding. Read the diff at the pinned commit,
-not your worktree.
-
-## The core-model view
-
-The architecture you steward includes a view of the repo's core model in
-`docs/architecture.md`. The view is a short section or a mermaid diagram that
-names the repo's core entities and shows how they relate. For an application,
-the core entities are its identity and tenancy model, meaning who a user is and
-which tenant their data belongs to, and its main domain entities. For any other
-repo, they are the main types it defines.
-
-The view draws a finding in each of these cases:
-
-- **The view is missing.** The reviewed commit has no `docs/architecture.md`, or
-  has one with no core-model view. The finding asks for the view. A change that
-  leaves the core model alone did not cause it, so file it as its own bead, the
-  way `mol-review` files a finding the change did not cause, and name the bead
-  in your verdict body. Its token is
-  `docs/architecture.md: core-model view missing`, so the probe before filing
-  finds the bead an earlier review filed, and the repo carries one bead asking
-  for the view.
-- **The change moves the core model and the view does not follow.** A change
-  that adds or alters a core entity, or a relationship between core entities,
-  moves the architecture. A new table does, and so does a change to identity or
-  tenancy or to the main domain types. When the view at the reviewed commit does
-  not show the move, the change earns `request-changes` under the first shape
-  below. The doc update it asks for is the view itself. Where the repo has no
-  view, the change adds one, so the missing view is this PR's finding rather
-  than a bead of its own.
-
-A change that moves the core model makes this check mandatory, and triage adds
-`arch` for it.
+not a reason to pass or fail the change. Read the diff at the pinned commit, not
+your worktree.
 
 ## Judge two questions
 
