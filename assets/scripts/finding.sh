@@ -25,7 +25,7 @@
 #                        comment's thread, the review's living answer for a review
 #                        body, or a Conversation comment linking a Conversation
 #                        comment. A declined finding's overrule, a deferred
-#                        finding's follow-up id, or a needs-you finding's visit id.
+#                        finding's follow-up id, or a needs-you finding's gate id.
 #                        A machine or no-objection finding owes none and sets it not,
 #                        and a ruling that owes none clears one an earlier ruling set
 #   finding.label        a few words naming the point, which the validator writes as
@@ -43,12 +43,14 @@
 #                        suggestion, or changed code the ruling declined
 #   finding.follow_up    the deferred finding's later-work bead, armed to its fix
 #                        pool (deferred-dispatch) to dispatch once the anchor merges
-#   finding.visit        the open visit that carries a needs-you finding's decision:
-#                        one the ruling filed, or one already open on the anchor's
-#                        feedback that the ruling named
-#   finding.ruling_visit the visit whose recorded ruling released a needs-you
-#                        finding: its finding.visit, or the visit a fold handed
-#                        the question on to (close-answered)
+#   finding.gate         the open human gate that carries a needs-you finding's
+#                        decision: one the ruling filed on the anchor, or one
+#                        already open on the anchor's feedback that the ruling
+#                        named
+#   finding.ruling_bead  the bead whose ruling released a needs-you finding: its
+#                        finding.gate, cleared with a reason headed `ruled:`, or
+#                        the gate a re-home handed the question on to
+#                        (close-answered)
 #   finding.fix_unit     the rework child dispatched with the batch that raised it
 #                        (`upsert --fix-unit`, from pr-facts.sh for a human batch);
 #                        a later batch re-raising the finding records its own child
@@ -71,23 +73,23 @@
 #                                         finding of its own: no point of its own, no
 #                                         answer owed, and no entry in the living
 #                                         answer
-#   needs-you  stays open, no edge        only the operator can judge it — a visit
-#                                         carries the decision and the open finding
-#                                         holds the review until the operator rules
-#                                         that visit, or the one a fold handed it to,
-#                                         and no fix unit on its lane, nor a ruling's
-#                                         rework child, is in flight; then closed
-#                                         (close-answered)
+#   needs-you  stays open, no edge        only the operator can judge it — a human
+#                                         gate on the anchor carries the decision,
+#                                         and the open finding holds the review
+#                                         until a person clears that gate `ruled:`
+#                                         and no fix unit on its lane, nor a
+#                                         ruling's rework child, is in flight; then
+#                                         closed (close-answered)
 #
 # `blocks` is the type must-fix uses, and not because it is the only edge that
 # blocks a close: merge.sh reads exactly `blocks` downward, so a finding held by
 # any other type would leave the PR free to land with the objection still open.
-# Every ruling ends the finding closed or converts it to a visit: a deferred,
-# declined or restates finding closes, so the human review it belongs to
-# auto-dismisses once every finding clears (pr-facts.sh), every finding of its
-# review round for a body ruled restates; a needs-you finding stays open, which
-# is what holds that review until the operator rules its visit and the work
-# their ruling calls for lands. The discovered-from edge is the
+# Every ruling ends the finding closed or puts its question to the operator in a
+# human gate: a deferred, declined or restates finding closes, so the human
+# review it belongs to auto-dismisses once every finding clears (pr-facts.sh),
+# every finding of its review round for a body ruled restates; a needs-you
+# finding stays open, which is what holds that review until the operator rules
+# on its gate and the work their ruling calls for lands. The discovered-from edge is the
 # follow-up's own — a dispatchable bead — and points at the finding it carries
 # forward. bd keeps one edge per (issue, depends_on) pair, and the
 # follow-up/anchor pair is the gate's.
@@ -118,22 +120,22 @@
 # filed without one.
 #
 # A human finding's question can reach the operator before this ruling does: the
-# rework minted for its feedback batch put it to them in a visit, which tracks the
-# rework or holds it through a blocks edge. A merits ruling then answers a
-# decision the operator holds. A decline or a deferral overrules it, and restates
-# rules it no point of its own; each closes the finding, which lets pr-facts.sh
-# dismiss their review while they are still deciding. must-fix settles it as
-# "keep the change and fix it", and a fresh needs-you visit asks them the same
-# question twice. So set-disposition refuses each of those while such a visit is
-# open (exit 3), naming it. needs-you --visit <that
-# visit> is the ruling that defers to it, and --unrelated-visit names a visit that
-# asks something else, so the ruling proceeds past it with that judgment on record.
+# rework minted for its feedback batch put it to them in a human gate, which
+# blocks that rework. A merits ruling then answers a decision the operator
+# holds. A decline or a deferral overrules it, and restates rules it no point of
+# its own; each closes the finding, which lets pr-facts.sh dismiss their review
+# while they are still deciding. must-fix settles it as "keep the change and fix
+# it", and a fresh needs-you gate asks them the same question twice. So
+# set-disposition refuses each of those while such a gate is open (exit 3),
+# naming it. needs-you --visit <that gate> is the ruling that defers to it, and
+# --unrelated-visit names a gate that asks something else, so the ruling
+# proceeds past it with that judgment on record. Both options name human gates.
 #
 # Verbs:
 #   finding.sh key           --lane L --locus LOC --message MSG
 #   finding.sh upsert        --anchor A --lane L --locus LOC --message MSG [--source S] [--fix-unit FU]
 #   finding.sh set-disposition --finding F --anchor A --disposition D [--reason R] [--reply TEXT] [--fix-pool POOL]
-#                              [--visit V] [--unrelated-visit V1,V2,...] [--label L] [--answer TEXT]
+#                              [--visit G] [--unrelated-visit G1,G2,...] [--label L] [--answer TEXT]
 #   finding.sh answer        --finding F --answer TEXT [--flag]
 #   finding.sh fix-notes     --fix-unit FU (--notes TEXT | --notes-file PATH)
 #   finding.sh open-visits   --anchor A
@@ -154,13 +156,14 @@
 # pr-open.sh (open-must-fix holds a publish while the city has ruled the diff must
 # change), and gate-ensure, the sole owner of stage-3 resolution (fix-in-flight
 # names the fix unit quiescence holds on; close-answered releases a must-fix
-# finding once that fix unit lands, and a needs-you finding once the operator has
-# ruled the visit holding its question, with none in flight; close-unvalidated
+# finding once that fix unit lands, and a needs-you finding once a person has
+# cleared the gate holding its question `ruled:`, with none in flight; close-unvalidated
 # resolves a green lane's still-unvalidated findings as moot; shed-orphaned
 # resolves them when the anchor closes before a pass revisits it).
 # Exit 0 on success; a read verb exits 1 when its predicate is false, 2 when the
 # store would not read. set-disposition exits 1 on a usage error, 2 when a read or
-# write fails, and 3 when an open visit already carries the finding's question.
+# write fails, and 3 when an open human gate already carries the finding's
+# question.
 set -uo pipefail
 
 # >>> control-char-scrub
@@ -173,8 +176,6 @@ scrub() { tr -d '\000-\037'; }
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
-# shellcheck source=visit-identity.sh
-. "${GC_VISIT_IDENTITY_LIB:-$_bd_lib_dir/visit-identity.sh}" || { echo "cannot source visit-identity.sh beside this script" >&2; exit 1; }
 warn() { echo "finding: $*" >&2; }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
@@ -186,7 +187,7 @@ usage:
   finding.sh key --lane <lane> --locus <locus> --message <msg>
   finding.sh upsert --anchor <id> --lane <lane> --locus <locus> --message <msg> [--source <src>] [--fix-unit <id>]
   finding.sh set-disposition --finding <id> --anchor <id> --disposition must-fix|deferred|declined|needs-you|restates [--reason <r>] [--reply <text>] [--fix-pool <pool>]
-                             [--visit <visit-id>] [--unrelated-visit <visit-id,...>] [--label <label>] [--answer <sentence>]
+                             [--visit <gate-id>] [--unrelated-visit <gate-id,...>] [--label <label>] [--answer <sentence>]
   finding.sh answer --finding <id> --answer <sentence> [--flag]
   finding.sh fix-notes --fix-unit <id> (--notes <text> | --notes-file <path>)
   finding.sh open-visits --anchor <id>
@@ -365,15 +366,15 @@ deferred_follow_up() { # <finding>
     | sort | .[0] // empty' 2>/dev/null
 }
 
-# The open visits already on <anchor>'s feedback, as one JSON array of
-# {id, key, title, on: [{bead, kind, how}]}. A visit is on the feedback when it
-# covers the anchor or one of its rework children by the shared visit identity
-# (visit-identity.sh: its tracks edge, or its gc.continuation_group stamp when it
-# has none), or when it holds a rework child through a blocks edge, the way a bare
-# rework parks itself on the question it put to the operator. kind is anchor or
-# rework, and how is tracks or holds.
+# The open human gates already on <anchor>'s feedback, as one JSON array of
+# {id, key, title, on: [{bead, kind, how}]}. A gate is on the feedback when the
+# `blocks` edges of the anchor or of one of its live rework children reach it,
+# by the one reader rule (bd_human_gates in bd-lib.sh), the way a bare rework
+# parks itself on the question it put to the operator. kind is anchor or rework,
+# how is blocks, and a gate about several of them lists each. key is the gate's
+# await id, its situation key.
 #
-# Given a human finding's row (`gc bd show --json`), it keeps only the visits on
+# Given a human finding's row (`gc bd show --json`), it keeps only the gates on
 # the rework children minted for that finding's own feedback batch, the case
 # set-disposition refuses on. The anchor's batch ledger names the bead each routed
 # comment's batch went to (pr-facts.sh, comment-batch-ledger: one
@@ -382,27 +383,25 @@ deferred_follow_up() { # <finding>
 # space), and a comment rework's source_review names the reviews its batch
 # carried. The ledger reaches a Conversation comment, which names no review, and
 # source_review still names the batch after the ledger retires the record of an
-# answered one. A visit on the anchor itself is left to the validator's judgment,
-# because an anchor gathers visits about anything: a merge gate, a red check, a
+# answered one. A gate on the anchor itself is left to the validator's judgment,
+# because an anchor gathers gates about anything: a merge gate, a red check, a
 # stuck dispatch.
 #
-# Reads the anchor's children of every status (bd_anchor_children) and every live
-# visit in the store, plus, given a finding, the anchor's own row for its ledger.
-# Exits 2 with nothing printed when any read fails, so no caller takes an unread
-# store for an empty one.
-_FEEDBACK_VISITS_JQ='
-  def blockers: [ (.dependencies // [])[]
-                  | select(((.dependency_type // .type) // "") == "blocks")
-                  | ((.id // .depends_on_id) // "") | select(. != "") ];
+# Reads the anchor's children of every status (bd_anchor_children), the human
+# gates of the anchor and of each live rework child in scope, plus, given a
+# finding, the anchor's own row for its ledger. Exits 2 with nothing printed when
+# any read fails, so no caller takes an unread store for an empty one.
+_FEEDBACK_SCOPE_JQ='
   def ledger($l): [ ($l // "" | tostring) | split(";")[] | select(length > 0)
                     | split("|") | select(length == 3)
                     | { disp: .[0], lo: (.[1] | tonumber? // null), hi: (.[2] | tonumber? // null) }
                     | select(.lo != null and .hi != null) ];
   def among($xs): . as $x | any($xs[]; . == $x);
-  .[0] as $beads | .[1] as $visits | (.[2][0] // null) as $fd | (.[3][0] // null) as $an
+  .[0] as $beads | (.[1][0] // null) as $fd | (.[2][0] // null) as $an
   | [ $beads[] | select(((.metadata.task_kind // "") | tostring) == "rework")
-               | { id: ((.id // "") | tostring), held: blockers } ] as $rw
-  | (if $f == "" then [ $rw[].id ]
+               | select(((.status // "open") | tostring | ascii_downcase) != "closed")
+               | ((.id // "") | tostring) ] as $rw
+  | (if $f == "" then $rw
      else
        (($fd.metadata["finding.comment_id"] // "") | tostring) as $c
        | (($fd.metadata["finding.review_id"] // "") | tostring) as $r
@@ -419,37 +418,39 @@ _FEEDBACK_VISITS_JQ='
                       | select($r != "" and ($r | among($sr)))
                       | ((.id // "") | tostring) ] )
        | unique
-     end) as $mine
-  | [ $visits[]
-      | select(((.metadata.task_kind // "") | tostring) == "visit")
-      | select(((.status // "open") | tostring | ascii_downcase) != "closed")
-      | ((.id // "") | tostring) as $v
-      | visit_identity_subjects as $subj
-      | ( (if $f == "" then [ $subj[] | select(. == $a) | { bead: ., kind: "anchor", how: "tracks" } ] else [] end)
-        + [ $rw[] | select(.id | among($mine)) | .held as $held
-                  | (if (.id | among($subj)) then { bead: .id, kind: "rework", how: "tracks" } else empty end),
-                    (if ($v | among($held)) then { bead: .id, kind: "rework", how: "holds" } else empty end) ] ) as $on
-      | select(($on | length) > 0)
-      | { id: $v, key: ((.metadata.escalation_key // "") | tostring),
-          title: ((.title // "") | tostring), on: $on } ]'
+       | map(select(among($rw)))
+     end)
+  | map("rework\t" + .)
+  | (if $f == "" then ["anchor\t" + $a] else [] end) + .
+  | .[]'
 feedback_visits() { # <anchor-id> [<finding-row-json>]
-  local beads visits frow="${2:-[]}" arow='[]'
+  local beads frow="${2:-[]}" arow='[]' scope kind bead gates found='[]'
   printf '%s' "$frow" | jq -e 'type == "array"' >/dev/null 2>&1 || return 2
   beads=$(bd_anchor_children "$1" "$ALL_STATUSES") || return 2
-  visits=$(bd_list --metadata-field task_kind=visit --status="$LIVE_STATUSES") || return 2
   if [ -n "${2:-}" ]; then
     arow=$(bd_json show "$1")
     printf '%s' "$arow" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 || return 2
   fi
   # The reads reach jq on stdin, not as arguments: an anchor's beads can outgrow
   # the OS limit on one argument.
-  printf '%s\n%s\n%s\n%s\n' "$beads" "$visits" "$frow" "$arow" \
-    | jq -cs --arg a "$1" --arg f "${2:+finding}" "$VISIT_IDENTITY_JQ$_FEEDBACK_VISITS_JQ" 2>/dev/null \
-    || return 2
+  scope=$(printf '%s\n%s\n%s\n' "$beads" "$frow" "$arow" \
+    | jq -rs --arg a "$1" --arg f "${2:+finding}" "$_FEEDBACK_SCOPE_JQ" 2>/dev/null) || return 2
+  while IFS=$'\t' read -r kind bead; do
+    [ -n "$bead" ] || continue
+    gates=$(bd_human_gates "$bead") || return 2
+    found=$(printf '%s\n%s\n' "$found" "$gates" | jq -cs --arg b "$bead" --arg k "$kind" '
+      .[0] + [ .[1][] | select(((.status // "open") | tostring | ascii_downcase) != "closed")
+               | { id: ((.id // "") | tostring), key: ((.await_id // "") | tostring),
+                   title: ((.title // "") | tostring), on: [ { bead: $b, kind: $k, how: "blocks" } ] } ]' 2>/dev/null) \
+      || return 2
+  done <<SCOPE_EOF
+$scope
+SCOPE_EOF
+  printf '%s' "$found" | jq -c 'group_by(.id) | map(.[0] + { on: (map(.on[]) | unique) })' 2>/dev/null || return 2
 }
 
-# One line per visit in a feedback_visits array: the visit, how it sits on the
-# anchor's feedback, its escalation_key ("-" for none), and its title.
+# One line per gate in a feedback_visits array: the gate, how it sits on the
+# anchor's feedback, its situation key ("-" for none), and its title.
 visit_lines() { jq -r '.[] | [ .id, ([ .on[] | "\(.how) \(.kind) \(.bead)" ] | join(", ")),
                                 (if .key == "" then "-" else .key end), .title ] | @tsv'; }
 
@@ -597,7 +598,7 @@ cmd_set_disposition() {
   [ -n "$finding" ] && [ -n "$anchor" ] && [ -n "$disp" ] \
     || { warn "set-disposition needs --finding, --anchor, --disposition"; exit 1; }
   if [ -n "$visit" ] && [ "$disp" != needs-you ]; then
-    warn "--visit names the open visit a needs-you ruling defers to; it does not apply to --disposition $disp"; exit 1
+    warn "--visit names the open human gate a needs-you ruling defers to; it does not apply to --disposition $disp"; exit 1
   fi
   # The words the review's living answer shows for this point ride the write
   # that commits the ruling, and that write clears each one the ruling does not
@@ -635,17 +636,17 @@ cmd_set_disposition() {
     [ "$rsib" -gt 0 ] \
       || { warn "review $rrid and its review round raised no inline comment beside its body, so its body is the whole review and is ruled on its points; nothing ruled"; exit 1; }
   fi
-  # Every ruling of a human finding but needs-you --visit first meets the visits
-  # already carrying its question: an open visit on a rework child minted for the
-  # finding's own feedback batch (feedback_visits). Each one the caller has not
-  # named --unrelated-visit refuses the ruling, exit 3, before any write, so the
+  # Every ruling of a human finding but needs-you --visit first meets the gates
+  # already carrying its question: an open human gate on a rework child minted for
+  # the finding's own feedback batch (feedback_visits). Each one the caller has
+  # not named --unrelated-visit refuses the ruling, exit 3, before any write, so the
   # finding keeps its current disposition and the validator re-rules it. A merits
   # ruling would answer the operator's pending decision for them: a decline or a
   # deferral overrules it, restates rules it no point of its own, and must-fix
   # settles it as "keep the change and fix it". A decline, a deferral and a
   # restates ruling also close the finding, which lets the review dismiss while
   # the operator is still deciding. needs-you --visit is the deferral, so it skips
-  # the check. A machine finding passes: no human raised it, so no visit holds its
+  # the check. A machine finding passes: no human raised it, so no gate holds its
   # question.
   local past=""
   case "$disp" in
@@ -659,14 +660,14 @@ cmd_set_disposition() {
              | ((($m["finding.lane"] // "") | tostring) == "human")
                or ((($m["finding.source"] // "") | tostring) | startswith("human:"))' >/dev/null 2>&1; then
           held=$(feedback_visits "$anchor" "$frow") \
-            || { warn "could not read the open visits on anchor $anchor's feedback; refusing to rule $finding $disp past them unread"; exit 2; }
+            || { warn "could not read the open human gates on anchor $anchor's feedback; refusing to rule $finding $disp past them unread"; exit 2; }
           standing=$(printf '%s' "$held" | jq -c --arg u "$unrelated" \
             '($u | split(",") | map(select(. != ""))) as $un | [ .[] | select(.id as $v | any($un[]; . == $v) | not) ]' 2>/dev/null) \
-            || { warn "could not filter the open visits on anchor $anchor's feedback"; exit 2; }
+            || { warn "could not filter the open human gates on anchor $anchor's feedback"; exit 2; }
           if printf '%s' "$standing" | jq -e 'length > 0' >/dev/null 2>&1; then
-            warn "$finding is a human comment whose question is already with the operator, in the open visit(s) below; nothing ruled."
+            warn "$finding is a human comment whose question is already with the operator, in the open human gate(s) below; nothing ruled."
             printf '%s' "$standing" | visit_lines | sed 's/^/  /' >&2
-            warn "Rule it needs-you --visit <visit>: the finding stays open and its review changes-requested until that visit is ruled. A visit that asks something else is named with --unrelated-visit <visit>, and the ruling then proceeds past it."
+            warn "Rule it needs-you --visit <gate>: the finding stays open and its review changes-requested until a person rules on that gate. A gate that asks something else is named with --unrelated-visit <gate>, and the ruling then proceeds past it."
             exit 3
           fi
           past=$(printf '%s' "$held" | jq -r '[ .[].id ] | join(", ")' 2>/dev/null)
@@ -674,7 +675,7 @@ cmd_set_disposition() {
       fi ;;
   esac
   # finding.disposition is the committing write of each arm, stamped last — never
-  # up front. A disposition recorded before the ruling's follow-up, visit, or edge
+  # up front. A disposition recorded before the ruling's follow-up, gate, or edge
   # exists outlives a fail-closed exit as a validated value, and the validator
   # retries only findings still `unvalidated` (formulas/mol-validate.toml), so the
   # half-done ruling is off the retry set and silently dropped — the orphan this
@@ -894,37 +895,39 @@ cmd_set_disposition() {
       ;;
     needs-you)
       # The objection turns on a call only the operator can make, so this ruling
-      # does not close the finding — it converts it to a visit, records the visit's
-      # id as the reply the raiser's thread receives, and leaves the finding OPEN.
-      # An open finding keeps pr-facts.sh from auto-dismissing the human review, so
-      # the review holds the merge changes-requested until the operator rules the
-      # visit; close-answered then closes the finding once no fix unit on its lane,
+      # does not close the finding — it puts the question to the operator in a
+      # human gate, records the gate's id as the reply the raiser's thread
+      # receives, and leaves the finding OPEN. An open finding keeps pr-facts.sh
+      # from auto-dismissing the human review, so the review holds the merge
+      # changes-requested until a person clears the gate `ruled:`; close-answered
+      # then closes the finding once no fix unit on its lane,
       # nor a ruling's rework child, is still in flight, which is when the work the
       # ruling calls for has landed. needs-you holds nothing of its own, so once the
       # ruling is committed it releases the hold a prior must-fix ruling hung and
       # strips inbound blocks: the hold is the review, carried by this finding
       # staying open.
       #
-      # The visit is resolved before anything is written. --visit names one already
+      # The gate is resolved before anything is written. --visit names one already
       # open on the anchor's feedback, which this ruling defers to rather than ask
-      # the operator the same question twice; it must be on the anchor or one of
-      # its rework children, so a mistyped or closed id cannot leave the finding
-      # waiting on a visit nobody will rule. Without --visit, human-gate.sh files
-      # one human gate per finding on the anchor, keyed on the finding's id; it
-      # files nothing while an open gate under that key blocks the anchor, so a
-      # re-ruled finding reuses its open gate rather than filing a second. Each
-      # finding is an event of its own, so the call declares no quiet window. The
-      # helper's path is overridable for the hermetic test.
+      # the operator the same question twice; it must block the anchor or one of
+      # its live rework children, so a mistyped or closed id cannot leave the
+      # finding waiting on a gate nobody will clear. Without --visit, human-gate.sh
+      # files one human gate per finding on the anchor, keyed on the finding's id,
+      # and prints the id of the open gate that asks; it files nothing while an
+      # open gate under that key blocks the anchor, so a re-ruled finding reuses
+      # its open gate rather than filing a second. Each finding is an event of its
+      # own, so the call declares no quiet window. The helper's path is
+      # overridable for the hermetic test.
       local vid vreply nnote
       if [ -n "$visit" ]; then
         local onfb
         onfb=$(feedback_visits "$anchor") \
-          || { warn "could not read the open visits on anchor $anchor's feedback, so --visit $visit cannot be verified; nothing ruled"; exit 2; }
+          || { warn "could not read the open human gates on anchor $anchor's feedback, so --visit $visit cannot be verified; nothing ruled"; exit 2; }
         printf '%s' "$onfb" | jq -e --arg v "$visit" 'any(.[]; .id == $v)' >/dev/null 2>&1 \
-          || { warn "--visit $visit is not an open visit on anchor $anchor or one of its rework children; nothing ruled"; exit 1; }
+          || { warn "--visit $visit is not an open human gate on anchor $anchor or one of its rework children; nothing ruled"; exit 1; }
         vid="$visit"
-        vreply="This comment needs your decision, and visit $vid already asks you for it. The review stays changes-requested until you rule that visit and the work your ruling calls for lands."
-        nnote="needs-you: deferred to open visit $vid, which already carries this question"
+        vreply="This comment needs your decision, and human gate $vid already asks you for it. The review stays changes-requested until you clear that gate with your ruling and the work it calls for lands."
+        nnote="needs-you: deferred to open human gate $vid, which already carries this question"
       else
         local vkey="review-needs-you.$finding" vmsg human_gate
         vmsg="A review comment on anchor $anchor needs your decision; the review pass cannot judge it."
@@ -932,22 +935,22 @@ cmd_set_disposition() {
         human_gate="${GC_HUMAN_GATE_TOOL:-$_bd_lib_dir/human-gate.sh}"
         [ -x "$human_gate" ] \
           || { warn "human-gate.sh not found beside this script; cannot file the needs-you gate for $finding"; exit 2; }
-        "$human_gate" --subject "$anchor" --key "$vkey" --message "$vmsg" >/dev/null 2>&1 \
+        # human-gate.sh prints the id of the open gate under our key, the one it
+        # filed or the one already open, after reading it back from the anchor's
+        # side. That id is the answer the raiser is owed on the PR.
+        vid=$("$human_gate" --subject "$anchor" --key "$vkey" --message "$vmsg" 2>/dev/null | tail -n 1) \
           || { warn "could not file the needs-you gate for $finding (human-gate.sh failed)"; exit 2; }
-        # The open visit on this subject carrying our key. Its id is the answer
-        # the raiser is owed on the PR.
-        vid=$(bd_list --metadata-field escalation_key="$vkey" --status="$LIVE_STATUSES" 2>/dev/null \
-          | jq -r --arg a "$anchor" '[ .[]? | select(((.metadata["gc.continuation_group"] // "") | tostring) == $a) ] | .[0].id // empty' 2>/dev/null)
-        [ -n "$vid" ] \
-          || { warn "needs-you visit filed for $finding but its id did not read back; NOT recording a reply"; exit 2; }
-        vreply="This comment needs your decision — opened visit $vid. The review stays changes-requested until you rule it and the work your ruling calls for lands."
-        nnote="needs-you: opened visit $vid"
+        case "$vid" in
+          ''|*[!A-Za-z0-9._-]*) warn "needs-you gate filed for $finding but human-gate.sh named no gate id ('$vid'); NOT recording a reply"; exit 2 ;;
+        esac
+        vreply="This comment needs your decision — filed human gate $vid. The review stays changes-requested until you clear it with your ruling and the work it calls for lands."
+        nnote="needs-you: filed human gate $vid"
       fi
       gc bd update "$finding" \
         --set-metadata finding.disposition=needs-you \
-        --set-metadata finding.visit="$vid" \
+        --set-metadata finding.gate="$vid" \
         --set-metadata finding.reply="$vreply" ${words[@]+"${words[@]}"} >/dev/null 2>&1 \
-        || { warn "could not stamp finding.disposition/finding.visit/finding.reply on $finding"; exit 2; }
+        || { warn "could not stamp finding.disposition/finding.gate/finding.reply on $finding"; exit 2; }
       release_hold "$finding" "$anchor" \
         || warn "needs-you $finding still blocks $anchor; that edge holds the merge until the finding closes"
       strip_inbound_blocks "$finding"
@@ -957,11 +960,11 @@ cmd_set_disposition() {
       ;;
     *) warn "--disposition must be must-fix, deferred, declined, needs-you or restates (got '$disp')"; exit 1 ;;
   esac
-  # A ruling that went past open visits the caller judged to ask something else
+  # A ruling that went past open gates the caller judged to ask something else
   # records that judgment on the finding, so a reader of the finding can weigh it.
   if [ -n "$past" ]; then
-    gc bd update "$finding" --append-notes "ruled $disp past open visit(s) $past, judged by the validator not to carry this question" >/dev/null 2>&1 \
-      || warn "could not record on $finding the open visits this ruling went past"
+    gc bd update "$finding" --append-notes "ruled $disp past open human gate(s) $past, judged by the validator not to carry this question" >/dev/null 2>&1 \
+      || warn "could not record on $finding the open human gates this ruling went past"
   fi
 }
 
@@ -1028,11 +1031,12 @@ cmd_fix_notes() {
     || { warn "could not record the notes on $fu"; exit 2; }
 }
 
-# The open visits already on <anchor>'s feedback (feedback_visits), one per line:
-#   <visit> TAB <how it sits there, e.g. "holds rework tk-r"> TAB <escalation_key or -> TAB <title>
+# The open human gates already on <anchor>'s feedback (feedback_visits), one per
+# line:
+#   <gate> TAB <how it sits there, e.g. "blocks rework tk-r"> TAB <situation key or -> TAB <title>
 # mol-validate prints this beside the batch it rules, so the validator sees the
 # questions the operator already holds before it rules a human finding. It lists
-# the anchor's own visits too, which set-disposition leaves to that judgment.
+# the anchor's own gates too, which set-disposition leaves to that judgment.
 # Exit 0 when one or more is open, 1 when none is, 2 when the store would not read.
 cmd_open_visits() {
   local anchor="" rows
@@ -1042,7 +1046,7 @@ cmd_open_visits() {
   esac; done
   [ -n "$anchor" ] || { warn "open-visits needs --anchor"; exit 1; }
   rows=$(feedback_visits "$anchor") \
-    || { warn "could not read the open visits on anchor $anchor's feedback"; return 2; }
+    || { warn "could not read the open human gates on anchor $anchor's feedback"; return 2; }
   printf '%s' "$rows" | jq -e 'length > 0' >/dev/null 2>&1 || return 1
   printf '%s' "$rows" | visit_lines
 }
@@ -1104,7 +1108,7 @@ cmd_open_must_fix() {
 # is a demand on the anchor, not an actor on it: the fix unit answering it is what
 # changes the diff. A needs-you finding waits on the operator's ruling, and the fix
 # unit on its lane is the work that ruling releases, often parked on that very
-# visit, so a review poured meanwhile would read a diff the ruling may yet change.
+# gate, so a review poured meanwhile would read a diff the ruling may yet change.
 # A finding's blocks-blockers are its fix units (wire-fix-unit, set-disposition),
 # so a live one is the fix in flight. A finding with NO blocker edge is matched by
 # lane, through the same census close-answered disambiguates it with. A finding
@@ -1212,9 +1216,9 @@ cmd_close_unvalidated() {
 # anchor closes: no validator will ever run on closed work. This sheds them, the
 # close-transition counterpart to the green-lane moot close above. A needs-you
 # finding is shed the same way: an anchor that merged on an approval, or was
-# disposed, while the finding waited on its visit leaves nothing for its review to
+# disposed, while the finding waited on its gate leaves nothing for its review to
 # hold, and close-answered, which reads open anchors only, never reaches it. Its
-# visit is the operator's conversation and is left standing. It keys on the
+# gate is the operator's to clear and is left standing. It keys on the
 # anchor being gone, NOT on any approve signal, so it rebuilds no re-approval
 # proxy: a human GitHub approval does not close a finding here either — the anchor
 # leaving the open set does.
@@ -1245,7 +1249,7 @@ cmd_shed_orphaned() {
       astatus=$(bd_json show "$anchor" | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null) || continue
       [ "$astatus" = closed ] || continue
       if [ "$disp" = needs-you ]; then
-        note="resolved: anchor $anchor closed while this finding waited on its visit — moot (the diff it objected to no longer awaits a merge)"
+        note="resolved: anchor $anchor closed while this finding waited on its human gate — moot (the diff it objected to no longer awaits a merge)"
       else
         note="resolved: anchor $anchor closed before this finding was validated — moot (no validator runs on closed work)"
       fi
@@ -1257,36 +1261,32 @@ cmd_shed_orphaned() {
   bd_cache_clear
 }
 
-# The visit whose recorded ruling answers the question <visit> carried, printed,
-# or nothing (exit 1) while no ruling answers it. Only the operator's ruling
-# answers a needs-you finding's question, and converse-signoff.sh records it on
-# the visit as gc.ruling when a sitting signs off --ruled yes. A visit also closes
-# without one: moot, benign, dismissed by the operator, or a sitting cut short,
-# and none of those answers the question. A fold hands the question on to the
-# visit that now holds it: visit-close.sh records that holder on the folded visit
-# as gc.folded_into, and bead-rehome.sh records a re-homed visit's successor as
-# gc.superseded_by. The question is followed through each hand-off to the visit
-# holding it now, which answers only once it has closed carrying a ruling of its
-# own. An open visit, a close with no ruling and no successor, a successor that is
-# not a visit, a row that will not read, and a hand-off back to a visit already
-# passed all answer nothing, so the finding keeps holding its review.
-ruled_visit() { # <visit-id>
-  local v="$1" seen=" " row
-  while [ -n "$v" ]; do
-    case "$seen" in *" $v "*) return 1 ;; esac
-    seen="$seen$v "
-    row=$(bd_json show "$v")
-    printf '%s' "$row" | jq -e --arg v "$v" '
-      type == "array" and ((.[0].id // "") == $v)
-      and (((.[0].metadata.task_kind // "") | tostring) == "visit")
+# The human gate whose answer rules the question <gate> carried, printed, or
+# nothing (exit 1) while no ruling answers it. A person rules a needs-you
+# finding's question by clearing its gate with a reason headed `ruled:` (bd gate
+# resolve). A gate also clears without a ruling: `moot:` when its premise went,
+# `benign:` when it needs nobody, or a reason with no head, and none of those
+# answers the question. A gate re-homed onto another (bead-rehome.sh records
+# gc.superseded_by) hands the question to that gate, which answers only once it
+# has closed `ruled:` itself. An open gate, a close that rules nothing and names
+# no successor, a successor that is not a human gate, a row that will not read,
+# and a hand-off back to a gate already passed all answer nothing, so the
+# finding keeps holding its review.
+ruled_gate() { # <gate-id>
+  local g="$1" seen=" " row
+  while [ -n "$g" ]; do
+    case "$seen" in *" $g "*) return 1 ;; esac
+    seen="$seen$g "
+    row=$(bd_json show "$g")
+    printf '%s' "$row" | jq -e --arg g "$g" '
+      type == "array" and ((.[0].id // "") == $g)
+      and ((.[0].issue_type // "") == "gate") and ((.[0].await_type // "") == "human")
       and (((.[0].status // "") | tostring | ascii_downcase) == "closed")' >/dev/null 2>&1 || return 1
-    if printf '%s' "$row" | jq -e '((.[0].metadata["gc.ruling"] // "") | tostring | test("[^[:space:]]"))' >/dev/null 2>&1; then
-      printf '%s\n' "$v"
+    if printf '%s' "$row" | jq -e '((.[0].close_reason // "") | tostring | test("^[[:space:]]*ruled:"))' >/dev/null 2>&1; then
+      printf '%s\n' "$g"
       return 0
     fi
-    v=$(printf '%s' "$row" | jq -r '.[0].metadata as $m
-      | [ ($m["gc.folded_into"] // ""), ($m["gc.superseded_by"] // "") ]
-      | map(tostring | select(. != "")) | .[0] // empty' 2>/dev/null)
+    g=$(printf '%s' "$row" | jq -r '(.[0].metadata["gc.superseded_by"] // "") | tostring' 2>/dev/null)
   done
   return 1
 }
@@ -1308,24 +1308,23 @@ ruled_visit() { # <visit-id>
 # the lane's fix unit census shows one landed and none still live, the same fact
 # the edge would have carried.
 #
-# A needs-you finding is closed once the operator has ruled the visit holding its
-# question (ruled_visit: its finding.visit, followed through every fold) and no
-# fix unit answers it any more: nothing blocks it, none on its lane is live, and
-# no ruling's rework child is live on the anchor. A ruling's child
+# A needs-you finding is closed once a person has ruled on the gate holding its
+# question (ruled_gate: its finding.gate cleared `ruled:`, followed through a
+# re-home), or once it records its ruling as finding.ruling_bead, and no fix unit
+# answers it any more: nothing blocks it, none on its lane is live, and no
+# ruling's rework child is live on the anchor. A ruling's child
 # (converse-rework.sh, source_ruling_bead) answers no lane, but it is the work an
 # operator's ruling calls for, and a ruling rules the whole diff, so a needs-you
 # finding on any lane waits for it. The operator has then ruled, and the work
 # their ruling calls for is on the branch, or the ruling called for none. The
-# close records the ruled visit as finding.ruling_visit, which pr-facts.sh's
+# close records the ruling's bead as finding.ruling_bead, which pr-facts.sh's
 # review dismissal names. Until then the finding holds its review
-# changes-requested, and a visit that closed without a ruling (moot, benign,
-# dismissed, cut short) never releases it; the operator's own approval is then
-# what replaces the review. A sitting cut short moves its wait to the subject,
-# and the later sitting that rules on it closes a visit of its own, which this
-# does not follow. Review dispatch is held meanwhile too: by fix-in-flight while
-# a fix unit on its lane is live, and by gate-ensure's open_rework_child while a
-# ruling's child is. A visit, blocker list, census or rework read that will not
-# answer leaves it open.
+# changes-requested, and a gate that cleared without a ruling (moot, benign, or
+# a reason with no head) never releases it; the operator's own approval is then
+# what replaces the review. Review dispatch is held meanwhile too: by
+# fix-in-flight while a fix unit on its lane is live, and by gate-ensure's
+# open_rework_child while a ruling's child is. A gate, blocker list, census or
+# rework read that will not answer leaves it open.
 cmd_close_answered() {
   local anchor="" reason=""
   while [ $# -gt 0 ]; do case "$1" in
@@ -1334,7 +1333,7 @@ cmd_close_answered() {
     *) warn "unknown arg '$1'"; usage; exit 1 ;;
   esac; done
   [ -n "$anchor" ] || { warn "close-answered needs --anchor"; exit 1; }
-  local rows ids nyids id note cnote blk n_all n_live flane census c_live c_landed nyvisit ruled
+  local rows ids nyids id note cnote blk n_all n_live flane census c_live c_landed nygate ruled recorded
   rows=$(bd_anchor_children "$anchor" "$LIVE_STATUSES") || { warn "could not read findings on $anchor"; return 2; }
   ids=$(printf '%s' "$rows" | jq -r '
     [ .[] | select(((.metadata.task_kind // "") | tostring) == "finding")
@@ -1381,9 +1380,14 @@ cmd_close_answered() {
       || warn "could not close answered finding $id"
   done
   for id in $nyids; do
-    nyvisit=$(printf '%s' "$rows" | jq -r --arg id "$id" '.[] | select(.id == $id) | (.metadata["finding.visit"] // "") | tostring' 2>/dev/null)
-    [ -n "$nyvisit" ] || continue
-    ruled=$(ruled_visit "$nyvisit") || continue
+    recorded=$(printf '%s' "$rows" | jq -r --arg id "$id" '.[] | select(.id == $id) | (.metadata["finding.ruling_bead"] // "") | tostring' 2>/dev/null)
+    nygate=$(printf '%s' "$rows" | jq -r --arg id "$id" '.[] | select(.id == $id) | (.metadata["finding.gate"] // "") | tostring' 2>/dev/null)
+    if [ -n "$recorded" ]; then
+      ruled="$recorded"
+    else
+      [ -n "$nygate" ] || continue
+      ruled=$(ruled_gate "$nygate") || continue
+    fi
     blk=$(bd_json dep list "$id" --direction=down -t blocks)
     printf '%s' "$blk" | jq -e 'type == "array"' >/dev/null 2>&1 \
       || { warn "could not read blockers of finding $id; leaving it open"; continue; }
@@ -1396,14 +1400,16 @@ cmd_close_answered() {
     printf '%s' "$rows" | jq -e 'all(.[]; ((.metadata.task_kind // "") | tostring) != "rework"
                                          or ((.metadata.source_ruling_bead // "") | tostring) == "")' >/dev/null 2>&1 \
       || continue
-    if [ "$ruled" = "$nyvisit" ]; then
-      cnote="resolved: the operator ruled its visit $nyvisit, and no fix unit on lane $flane, nor a ruling's rework child, is still in flight"
+    if [ -n "$recorded" ]; then
+      cnote="resolved: its ruling is recorded on $ruled, and no fix unit on lane $flane, nor a ruling's rework child, is still in flight"
+    elif [ "$ruled" = "$nygate" ]; then
+      cnote="resolved: a person ruled on its human gate $nygate, and no fix unit on lane $flane, nor a ruling's rework child, is still in flight"
     else
-      cnote="resolved: its question moved from visit $nyvisit to visit $ruled, the operator ruled that visit, and no fix unit on lane $flane, nor a ruling's rework child, is still in flight"
+      cnote="resolved: its question moved from human gate $nygate to $ruled, a person ruled on that gate, and no fix unit on lane $flane, nor a ruling's rework child, is still in flight"
     fi
     [ -n "$reason" ] && cnote="$cnote ($reason)"
-    gc bd update "$id" --status=closed --set-metadata "finding.ruling_visit=$ruled" --append-notes "$cnote" >/dev/null 2>&1 \
-      || warn "could not close needs-you finding $id after the operator ruled visit $ruled"
+    gc bd update "$id" --status=closed --set-metadata "finding.ruling_bead=$ruled" --append-notes "$cnote" >/dev/null 2>&1 \
+      || warn "could not close needs-you finding $id after its ruling on $ruled"
   done
   # Closed findings leave the LIVE set; drop the per-pass bd_list cache so the
   # same-pass re-read (gate-ensure recomputes quiescence right after) does not
