@@ -1,6 +1,6 @@
 ---
 name: finalize-gate
-description: The precondition set that decides whether a bead may be finalized — its PR merged or the bead closed — with the open-visit clause that holds finalization while a conversation is owed on that bead, and the epic-ruling clause that holds an epic until its hypothesis is ruled closed.
+description: The precondition set that decides whether a bead may be finalized — its PR merged or the bead closed — with the human-gate clause that holds finalization while an open human gate blocks that bead, and the epic-ruling clause that holds an epic until its hypothesis is ruled closed.
 ---
 
 # The finalize gate
@@ -16,12 +16,12 @@ names why.
 **Mandate.** The finalize-gate precondition set: the clauses it checks, how a
 caller invokes it, its fail-closed contract, and the finalize paths that call it.
 
-**Boundaries.** The demand bead and its `blocks` edge — the separate record of
-what a person owes a converse sitting — belong to `docs/human-engagement.md`
-and `assets/scripts/gc-helm.sh`. What subject a visit covers is defined once in
-`assets/scripts/visit-identity.sh` and the mol-visit formula. The merge cadence's
-other arms live in `docs/refinery-merge-cadence.md`, and the lifecycle state
-machine in `docs/state-machine.md`.
+**Boundaries.** What a human gate is, who files one and how a person clears it
+belong to `docs/human-engagement.md` and `assets/scripts/human-gate.sh`. The
+read of a bead's human gates is defined once, as `bd_human_gates` in
+`assets/scripts/bd-lib.sh`. The merge cadence's other arms live in
+`docs/refinery-merge-cadence.md`, and the lifecycle state machine in
+`docs/state-machine.md`.
 
 ## What it checks
 
@@ -31,53 +31,41 @@ machine in `docs/state-machine.md`.
 - exit 1 — a clause refuses; the one-line reason is on stdout for the caller to log.
 - exit 2 — usage error.
 
-### Clause: no open visit
+### Clause: no open human gate
 
-An open visit whose subject is this bead refuses the bead's finalization. A visit
-is a subject-scoped conversation a person owes an answer to (the mol-visit
-formula). A visit covers its subject by the shared visit identity
-(`assets/scripts/visit-identity.sh`): its outgoing `tracks` edge, or — the
-fallback for a visit whose edge has not landed — its `gc.continuation_group`
-stamp. The gate reads both from the subject's end and holds finalization while
-any open `task_kind=visit` covers the bead:
+An open human gate that blocks this bead refuses the bead's finalization. A human
+gate is Gas City's native bead for a wait a person must clear (`issue_type=gate`,
+`await_type=human`). A bead's human gates are the open human gates its `blocks`
+edges reach, the one reader rule every reader of them follows:
 
-- the subject's incoming `tracks` edges —
-  `gc bd dep list <bead> --direction=up -t tracks` returns exactly the beads
-  whose tracks edge points at it;
-- the visits stamped with this subject —
-  `gc bd list --metadata-field gc.continuation_group=<bead>` returns the ones
-  covering it by the fallback. `escalate.sh` stamps a visit at creation and adds
-  its tracks edge in a later write, so a stamped visit with no edge yet is open
-  and owed here; one that already carries a tracks edge is covered by the edge,
-  not the fallback, and is not counted twice.
+- `gc bd dep list <bead> --type blocks --json` returns each bead the given bead
+  depends on through a `blocks` edge, with its type, status, await type, await
+  id and assignee;
+- the gate keeps the rows whose `issue_type` is `gate` and whose `await_type` is
+  `human`, and holds while any of them is in a status other than closed.
 
-A `tracks` edge is non-blocking. So the gate holds only this bead's finalization:
-it never consults the bead's readiness, and it never reaches the bead's children.
-A visit on an epic holds the epic's own close and leaves every child free to move.
+bd already refuses an unforced close of a bead an open gate blocks, and the merge
+holds on a live blocker of the anchor. The clause states the same hold as an
+explicit precondition, because a close path that passes `--force` skips bd's
+refusal. A gate blocks only the beads whose edges reach it, so the clause holds
+this bead alone and never reads its children. A conversation tracks the bead it
+is about and blocks nothing, so it holds nothing here, and neither does any
+other `tracks` edge.
 
-### The caller's own escalation
+### The caller's own report
 
-`finalize-gate.sh check <bead-id> --except-key <escalation-key>` names the
-situation key under which the caller files, through `escalate.sh`, its report of
-a refused finalization of this bead. That report asks for the retry, so holding
-the retry on it would keep the bead from ever finalizing once the obstruction it
-reported had cleared. A visit is excepted only when all of these hold:
+`finalize-gate.sh check <bead-id> --except-key <situation-key>` names the
+situation key under which the caller files, through `human-gate.sh`, its report
+of a refused finalization of this bead. That report asks for the retry, so
+holding the retry on it would keep the bead from ever finalizing once the
+obstruction it reported had cleared. A gate is excepted only when its await id is
+that key and no person is assigned it. Every gate under the key is excepted
+alike, twins included. A gate assigned to a person holds like any other, and so
+does every gate under another key.
 
-- it carries that `escalation_key`;
-- it is stamped for this bead (`gc.continuation_group`);
-- nobody is engaged in it. It is open, with no assignee and no bound session
-  (`gc.session_name`).
-
-That last test is the helm board's engagement test (`engagedVisit` in
-`services/helm/internal/board/derive.go`). Engage binds a visit's assignee while
-the visit is still open, so an open visit with an assignee is already engaged.
-Every visit filed under the key for this bead is excepted alike, twins included.
-A visit a person has engaged holds like any other, and so does every visit under
-another key.
-
-The gate reads each visit once. A person who engages an excepted visit after that
-read, while the finalization it allowed is under way, finds the bead finalized.
-The caller leaves that visit for them to conclude.
+bd still refuses the close while an excepted gate blocks the bead. So the caller
+that closes resolves those gates first, once nothing else would refuse the close
+(below).
 
 ### Clause: epic ruling recorded
 
@@ -89,7 +77,7 @@ with no hypothesis predates the model, and a disposed epic (`gc.superseded_by`)
 carries a recorded terminal reason, so both pass. A non-epic bead is untouched
 ([epic-stewardship.md](epic-stewardship.md)). The clause reads the bead itself
 (`gc bd show`), so that read runs for every finalize, epic or not. The
-`--except-key` exception excepts a visit, so it never releases an epic this
+`--except-key` exception excepts a human gate, so it never releases an epic this
 clause holds.
 
 Neither finalize path wired today reaches an undisposed epic: `merge.sh`
@@ -107,23 +95,35 @@ squash-merge, a close — cannot be taken back.
 Every probe reads the store as it stands. A refinery pass memoizes its
 `bd_list` reads (`GC_RECONCILE_BD_CACHE`, `assets/scripts/bd-lib.sh`), and the
 gate turns that cache off for its own reads, because the terminal re-assert
-below exists to see a visit filed after the first check.
+below exists to see a gate filed after the first check.
 
 ## Where it is wired
 
 - **Merge** — `assets/scripts/merge.sh`. The merge arm runs the gate as an ordered
   validation before the squash-merge, and re-asserts it at the terminal re-read
-  immediately before the merge. A visit is filed without moving the PR head, so
+  immediately before the merge. A gate is filed without moving the PR head, so
   `--match-head-commit` does not catch one raised between validation and the
   merge; the terminal re-assert does.
 - **Close** — `assets/scripts/bead-rehome.sh`. The sanctioned close-with-successor
   path runs the gate before the close. The successor pointer is already stamped,
   so a hold leaves an open, pointed, findable bead — the same shape a refused
-  close leaves. The release is to conclude the open visit, then re-run.
-  `bead-rehome.sh --except-key <escalation-key>` hands the key to the gate's
-  exception. `pr-facts.sh` names its own `pr-dispose-failed.<num>` key when it
-  retries a pre-recorded PR-close disposition, and retracts the visits filed
-  under it as moot once the close lands.
+  close leaves. The release is to clear the gate, then re-run.
+  `bead-rehome.sh --except-key <situation-key>` hands the key to the gate's
+  exception, and `pr-facts.sh` names its own `pr-dispose-failed.<num>` key when
+  it retries a pre-recorded PR-close disposition. The retry then closes in three
+  steps:
+  1. It reads what would hold the close: the gate, and the bead's live blockers
+     and open children, which an unforced `bd close` refuses on. Anything but
+     the bead's own gates under the key that no person is assigned holds the
+     close, and then nothing is resolved or closed.
+  2. It resolves each of those gates with a reason that names the retry and
+     carries no outcome word, so no quiet period starts.
+  3. It closes the bead, unforced.
+
+  Only a blocker or an open child that appeared after step 1 can refuse step 3.
+  The bead then stays open with its gate withdrawn, and `pr-facts.sh` files its
+  report again under the same key. A run that stops between steps leaves a
+  state the next run completes, because a resolved gate stays resolved.
 
 `assets/scripts/lifecycle.sh` closes only into `merged`, and on the merge path
 that close is the bookkeeping that runs after the irreversible merge — so the
