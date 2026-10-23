@@ -305,10 +305,10 @@ in bd, the `replies-to` type, what it holds, how bd stores and shows it, and
 its graph-links doc, and in Gas City, at 1e05ae624 and at cc0a776b1, that
 nothing outside its tests reads or writes the type. The facts the migration's
 count of poured steps and its filing of a legacy demand as a gate rest on were
-read on 2026-10-22: in Gas City at 1e05ae624 and cc0a776b1, that a run cancel
-lets a session finish the step it is executing, and in bd, that `bd gate
-resolve` refuses a bead that is not a gate and `bd gate list` lists only
-gates. How the upstream packs ask
+read on 2026-10-22: in Gas City at 1e05ae624 and cc0a776b1, that neither a run
+cancel nor a `gc sling --force` that replaces a run stops a session executing
+one of its steps, and in bd, that `bd gate resolve` refuses a bead that is not
+a gate and `bd gate list` lists only gates. How the upstream packs ask
 a person was read at their main, 820c7ca0d5. The gc-toolkit
 facts were read at 35cf7c70f, and a doc read on main instead, because it
 landed there after 35cf7c70f, is cited as main's. The installed gc is
@@ -353,8 +353,8 @@ bd paths to bd's v1.3.1 source.
 | Core escalate.sh hook and its incident reminder. It suppresses a repeat only for a call that names an `--incident-key`, and only while the incident's fingerprint, by default its subject and message, is unchanged since its last delivered notice, for `GC_ESCALATE_REMINDER_SECONDS` (default 86400). Core's maintenance scripts run the script `GC_ESCALATE_SCRIPT` names, else `assets/scripts/escalate.sh` in the first system pack `GC_ESCALATE_SEARCH_PACKS` names (default `gastown maintenance bd core`), so that path is where a pack overrides the hook, and an override must accept core's flags | Prior art for the helper's quiet period, and for making it an option each call declares (section 2). It is a mail hook for maintenance scripts, and it is not this pack's helper, which today sits at the override's path with flags of its own. That is one reason the helper is renamed (section 2). | Gas City `internal/bootstrap/packs/core/assets/scripts/escalate.sh` 1-22 and `reaper.sh` 34-51; `docs/getting-started/troubleshooting.md` 877-905 |
 | A city's order override can set an exec order's environment | The alternative section 5 rejects. | Gas City `internal/config/config.go` 2383-2385; `internal/orders/override.go` 162-166; `cmd/gc/order_store.go` 229-235 |
 | bd stores the actor that creates a bead as its `created_by`. Gas City runs each exec order as the actor `order:<name>`, and `gc bd` runs bd in its caller's environment | The migration tells a visit gate-visit-sweep filed from every other visit (section 11). | bd `cmd/bd/create.go` 531 and `cmd/bd/main.go` 813-822; Gas City `cmd/gc/order_store.go` 197, and `cmd/gc/cmd_bd.go` 165-193 and 686-702 |
-| A formula's step is poured into a bead whose description is the step's text as the formula read at the pour, with its variables substituted | Why escalate.sh's old name stays as a hand-off to human-gate.sh: a run poured before the cutover keeps its steps' text, and mol-polecat-work's load-context looks for escalate.sh on every run, so without the old name every such run would stop at its first step (section 10). It is also why a step poured with the gate-visit block before the cutover still files a visit when it runs after it, through no script a hand-off could catch, and why the migration counts such steps until the last has closed (section 11). | Gas City `internal/molecule/molecule.go` 1460-1468; gc-toolkit `formulas/mol-polecat-work.toml` 177-181, `formulas/mol-validate-close.toml` 128-185 and `formulas/mol-feedback-distiller.toml` 543-600 |
-| A run cancel closes the run's root and every member that is not closed, with `gc.outcome=canceled`, through `bd close --force`, which leaves each member's assignee as it was. A session already executing a step finishes that step before it idles, so a cancel does not stop what the step does | Why the migration cancels no run poured with the gate-visit block, and why its count of such steps keeps one a cancel closed while the session it is assigned to is still listed (section 11). | Gas City `internal/api/huma_handlers_runs.go` 315-321 and 367-405, `internal/sourceworkflow/sourceworkflow.go` 558-607, `internal/beads/bdstore.go` 2571-2641 and 2700-2706; gc-toolkit `assets/scripts/run-cancel.sh` 7-12 |
+| A formula's step is poured into a bead whose description is the step's text as the formula read at the pour, with its variables substituted | Why escalate.sh's old name stays as a hand-off to human-gate.sh: a run poured before the cutover keeps its steps' text, and mol-polecat-work's load-context looks for escalate.sh on every run, so without the old name every such run would stop at its first step (section 10). It is also why a step poured with the gate-visit block before the cutover still files a visit when it runs after it, through no script a hand-off could catch, and why the migration counts such steps until none is left that can still run (section 11). | Gas City `internal/molecule/molecule.go` 1460-1468; gc-toolkit `formulas/mol-polecat-work.toml` 177-181, `formulas/mol-validate-close.toml` 128-185 and `formulas/mol-feedback-distiller.toml` 543-600 |
+| A run cancel closes the run's root and every member that is not closed but the run's teardown tail, with `gc.outcome=canceled`, through `bd close --force`, which leaves each member's assignee as it was. A `gc sling --force` that replaces a live root closes each member of the replaced run that is not closed the same way, with `gc.outcome=skipped`. Neither stops a session already executing a step. That session finishes the step before it idles, so neither stops what the step does | Why the migration cancels no run poured with the gate-visit block, and why its count of such steps keeps one a cancel or a replacement closed while the session it is assigned to is still listed (section 11). | Gas City `internal/api/huma_handlers_runs.go` 315-321 and 367-405, `internal/sourceworkflow/sourceworkflow.go` 523-530 and 558-607, `internal/sling/sling_core.go` 1498-1510, `internal/beads/bdstore.go` 2571-2641 and 2700-2706; gc-toolkit `assets/scripts/run-cancel.sh` 7-12 |
 
 Two premises of the initiative's ruling (tk-xexv7bo, turn 3) did not hold when
 they were re-verified, and the design is reshaped around both. Each is recorded
@@ -2097,20 +2097,21 @@ the sync, and the ones left only close.
 
 So every run also counts the step beads in its store that hold the block's
 opening line, `# >>> gate-visit`, and either are not closed, or were closed with
-`gc.outcome=canceled` while the session each is assigned to is still listed,
-because a session executing a step finishes it after a run cancel (see the
-platform section). It counts only beads that carry a `gc.step_ref`, since a
-work bead's description can quote the block. It reads the line, not a formula's
-name, so a step of mol-visit, which carries the block and which nothing pours
-(section 2), counts too, as does a step poured from an older version of any
-formula that carried the block. The run reports each such step with its run's
-root and the session it is assigned to. It neither waits for one nor cancels
-it: a cancel would not stop a worker already in the step, and a later run
-converts whatever the step files. The visit such a step files is keyless, and
-nothing waits on it as filed, so a later run makes it a conversation (step 7),
-as it does the visits these formulas filed before the cutover. Once no store
-holds such a step, the cutover runs the script again on every store, and the
-script goes only after that (section 12).
+`gc.outcome=canceled` or `skipped` while the session each is assigned to is
+still listed. Those are the outcomes a run cancel and a `gc sling --force` that
+replaces a run write on the steps they close, and a session executing a step
+finishes it after either (see the platform section). It counts only beads that
+carry a `gc.step_ref`, since a work bead's description can quote the block. It
+reads the line, not a formula's name, so a step of mol-visit, which carries the
+block and which nothing pours (section 2), counts too, as does a step poured
+from an older version of any formula that carried the block. The run reports
+each such step with its run's root and the session it is assigned to. It neither
+waits for one nor cancels it: a cancel would not stop a worker already in the
+step, and a later run converts whatever the step files. The visit such a step
+files is keyless, and nothing waits on it as filed, so a later run makes it a
+conversation (step 7), as it does the visits these formulas filed before the
+cutover. Once no store holds such a step, the cutover runs the script again on
+every store, and the script goes only after that (section 12).
 
 **Next, every legacy demand is filed again as a human gate.** An older
 gc-helm.sh filed a demand as a plain `decision` or `task` bead that carries
@@ -2210,14 +2211,17 @@ that stops part way leaves the visit open for the rerun to finish:
    after the visits shapes it. Only a human gate is taken here. A legacy demand
    that the pass above has not yet closed is that pass's to finish, and the gate
    it filed for the demand carries the demand's keys, so that gate covers the
-   visit in its place. When more than one demand covers the visit's
-   situation, the oldest is the visit's gate and the others carry the same
-   await id. converse-hold leaves such a pair, its demand on the visit and the
-   second one its `--hold-merge` files on the subject (converse-hold.sh
-   286-308). The pair stays the duplicate a race can also leave, which the
-   board folds and one ruling answers (section 2). A demand keeps blocking what
-   it blocks, because its filer chose that, so the migration adds no wait on a
-   bead with open children that is not there today.
+   visit in its place. When that pass filed no gate, because no bead waits on
+   the demand through a `blocks` edge, the sweep's visit for that demand is
+   reported and left open beside it, because a gate step 4 filed for the visit
+   would add a wait the demand never held. When more than one demand covers the
+   visit's situation, the oldest is the visit's gate and the others carry the
+   same await id. converse-hold leaves such a pair, its demand on the visit and
+   the second one its `--hold-merge` files on the subject (converse-hold.sh
+   286-308). The pair stays the duplicate a race can also leave, which the board
+   folds and one ruling answers (section 2). A demand keeps blocking what it
+   blocks, because its filer chose that, so the migration adds no wait on a bead
+   with open children that is not there today.
 
    Step 3 takes each demand that covers the visit's situation, and every
    demand filed on the visit itself, whatever it asks. A demand it takes is shaped
@@ -2389,7 +2393,7 @@ notify order is off.
 
 **Nothing lost, nothing doubled.** Every open visit ends as an open human gate
 that asks what the visit asked, or as a conversation in the operator's queue,
-unless step 1, 2 or 4 leaves it open for a person. Each carries the visit's
+unless step 1, 2, 3 or 4 leaves it open for a person. Each carries the visit's
 framing and every note on it, since every old sitting had stopped before the
 run moved anything, and every bead that waited on the visit waits on its gate.
 A visit that a step poured with the gate-visit block files after a run is taken
@@ -2507,13 +2511,14 @@ states this section names:
   closes with its `migrated:` reason.
 - **Steps poured with the gate-visit block before the sync.** A
   mol-validate-close step and a distiller step are open through the store's
-  first run, and a third step, which a run cancel closed, is still assigned to
-  a listed session. The first run reports all three and converts the rest.
-  Each of the three then files a visit with visit-identity.sh absent. The check
-  refuses and names them while either step is open or that session is listed.
-  Once both steps have closed and the session is gone, the rerun turns each
-  visit into a conversation that tracks its subject, and the check passes. A
-  work bead whose description quotes the block is not counted.
+  first run. A third step, which a run cancel closed, and a fourth, whose run a
+  `gc sling --force` replaced, are each still assigned to a listed session of
+  its own. The first run reports each of them and converts the rest. Each then
+  files a visit with visit-identity.sh absent. The check refuses and names them
+  while either of the first two is open or either session is listed. Once both
+  have closed and both sessions are gone, the rerun turns each visit into a
+  conversation that tracks its subject, and the check passes. A work bead whose
+  description quotes the block is not counted.
 - **A legacy `decision` demand under a topic of its own, covered by the sweep's
   visit.** The run files it again as a human gate that blocks its subject, with
   its takeaway as the title and its framing and notes carried, and closes the
@@ -2527,8 +2532,9 @@ states this section names:
   gate on both rows.
 - **A legacy `task` demand assigned to a person.** The gate is assigned to that
   person before the legacy demand is released and closed.
-- **A legacy demand that no bead waits on through a `blocks` edge.** The run
-  reports it and leaves it open.
+- **A legacy demand that no bead waits on through a `blocks` edge, with the
+  sweep's visit for it.** The run reports both and leaves both open, files no
+  gate, and adds no wait on the demand's subject.
 - **A visit that carries `gc.demand_for` naming its own subject, under an
   `escalation_key`.** It migrates as a visit through steps 1 to 8, and neither
   the legacy pass nor step 3 takes it as a demand.
@@ -2901,4 +2907,4 @@ or stands in for a missing primitive under a warrant:
   unfinished acceptance, and the unchanged ranking (section 8);
 - the one-shot migration script, which the cutover's follow-up deletes once its
   check finds no open visit, no open legacy demand and no step poured with the
-  gate-visit block in any store (sections 11 and 12).
+  gate-visit block that a run counts, in any store (sections 11 and 12).
