@@ -20,7 +20,8 @@
 # mol-polecat-work's refusals of a work bead it cannot read, the refinery
 # reconcile's assets/scripts/merge-tail-report.sh and
 # assets/scripts/pr-facts.sh, assets/scripts/rejection-repool.sh for a handoff
-# it cannot read, and the feedback miner's assets/scripts/feedback-miner.sh.
+# it cannot read, the hand-off at assets/scripts/escalate.sh for a call that
+# names a wisp, and the feedback miner's assets/scripts/feedback-miner.sh.
 # Filing a finding asks no person anything. A finding needing the operator's
 # judgment gets there through the reaction's `ruling` or `recommend`
 # disposition, which files a human gate on the finding through

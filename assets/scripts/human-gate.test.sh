@@ -385,7 +385,7 @@ reset "$(task tk-a)"
 STUB_DEP_FAIL=1 "$SUT" --retract --subject tk-a --key k --message m >/dev/null 2>&1; rc=$?
 eq "$rc" 1 "an unread gate list is not proof that nothing is open"
 
-echo "# the old name hands every call to human-gate.sh"
+echo "# the old name hands a call to human-gate.sh"
 reset "$(task tk-w)"
 out=$("$OLD_NAME" --subject tk-w --key k --message "via the old name" 2>/dev/null); rc=$?
 eq "$rc" 0 "escalate.sh files through the helper"
@@ -394,8 +394,44 @@ eq "$(field gate-1 await_id)" "k" "the gate carries the key"
 out=$("$OLD_NAME" --retract --subject tk-w --key k --message gone 2>/dev/null); rc=$?
 eq "$rc" 0 "a retract through the old name works too"
 eq "$(field gate-1 close_reason)" "moot: gone" "and resolves the gate"
-"$OLD_NAME" --subject lx-wisp-x --key k --message m >/dev/null 2>&1
+"$OLD_NAME" --subject tk-w --key "bad key" --message m >/dev/null 2>&1
 eq "$?" 2 "the helper's own refusals come back through the old name"
+
+echo "# the old name drops the retired --pool, so an old call still files"
+reset "$(task tk-w)"
+out=$("$OLD_NAME" --subject tk-w --key k --message m --pool gc-toolkit/gc-toolkit.converse 2>"$TMP/err"); rc=$?
+eq "$rc" 0 "a call that carries --pool exits 0"
+eq "$out" "gate-1" "and files its gate through the helper"
+has "$(cat "$TMP/err")" "--pool gc-toolkit/gc-toolkit.converse dropped" "the dropped flag is reported on stderr"
+
+echo "# the old name files a call on a wisp as a patrol finding"
+# The hand-off runs from a private copy whose patrol-finding.sh records what
+# reached it.
+HSUT="$TMP/handoff-sut"; mkdir -p "$HSUT"
+cp "$OLD_NAME" "$SUT" "$HERE/bd-lib.sh" "$HSUT/"
+cat > "$HSUT/patrol-finding.sh" <<'PFSTUB'
+#!/usr/bin/env bash
+{ printf 'patrol-finding'; for a in "$@"; do printf ' [%s]' "$a"; done; printf '\n'; } >> "${STUB_PF_LOG:?}"
+exit "${STUB_PF_RC:-0}"
+PFSTUB
+chmod +x "$HSUT"/*.sh
+export STUB_PF_LOG="$TMP/pf.log"
+reset "$(task tk-w)"; : > "$STUB_PF_LOG"
+"$HSUT/escalate.sh" --subject lx-wisp-abc12 --key refinery-empty-identity --message "Refinery session started with empty GC_AGENT
+Investigate the session harness." >/dev/null 2>"$TMP/err"; rc=$?
+eq "$rc" 0 "the call exits with the finding's exit"
+has "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [refinery-empty-identity] [--title] [Refinery session started with empty GC_AGENT] [--message] [Refinery session started with empty GC_AGENT" \
+  "the finding takes the key, the message's first line as its title, and the whole message"
+has "$(cat "$STUB_PF_LOG")" "Investigate the session harness.]" "the message keeps its later lines"
+eq "$(calls)" "" "no gate is filed on the wisp, and no bd call is made"
+has "$(cat "$TMP/err")" "filing the call as a patrol finding under [refinery-empty-identity]" "the translation is reported on stderr"
+: > "$STUB_PF_LOG"
+STUB_PF_RC=1 "$HSUT/escalate.sh" --subject lx-wisp-abc12 --key k --message m >/dev/null 2>&1
+eq "$?" 1 "a finding that was not filed fails the call"
+: > "$STUB_PF_LOG"
+"$HSUT/escalate.sh" --retract --subject lx-wisp-abc12 --key k --message m >/dev/null 2>&1
+eq "$?" 2 "a retract on a wisp goes to the helper, which refuses it"
+eq "$(cat "$STUB_PF_LOG")" "" "and files no finding"
 
 echo "# the deacon's filed gates reach its incident ledger"
 # The helper calls the ledger by sibling path, so it runs from a private copy

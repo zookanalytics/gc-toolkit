@@ -177,8 +177,9 @@ The human surface is subject / visit / takeaway on native primitives
   person resolves the gate with the answer as its reason. A quiet period applies
   only where a call declares `--quiet-window`, and `--retract` resolves the
   filer's own gate as moot once its situation has gone. `escalate.sh` is the
-  name that step text from an earlier version of a formula calls, and it hands
-  the call to `human-gate.sh` unchanged. There is no mayor; a situation that
+  name that step text from an earlier version of a formula calls. It hands the
+  call to `human-gate.sh` without the retired `--pool`, and a call that names a
+  wisp to `patrol-finding.sh`. There is no mayor; a situation that
   needs a human is a human gate, same as any other. A patrol files a human gate
   on the bead a situation is about, or a finding (`patrol-finding.sh`), rather
   than mail, because a patrol sits at the top of the agent tier and has no peer
