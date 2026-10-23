@@ -2,26 +2,55 @@
 # review-answer.sh — the city's one living answer to a human pull request
 # review: what it says, built from bead state. Sourced, never executed.
 #
-# Every human review gets one Conversation comment, created when the city picks
-# the review up and edited in place on every change after that. pr-facts.sh's
-# write-back is its only writer: it builds a model per review from the review's
-# findings and the PR it read (ra_models), renders the comment from it
-# (ra_render), and edits the comment only when the rendering changed. The
-# dismissal note that clears a review once its findings close is one line
-# naming the comment (ra_dismiss_note).
+# The answer's unit is the reviewer's round: the reviews one reviewer submitted
+# against one commit (ra_round_key). A client can submit one pass as one GitHub
+# review or as many, one per comment, and the round is that pass however many
+# reviews carry it. A review submitted against a later commit starts a round of
+# its own. Every round of a human review gets one Conversation comment, created
+# when the city picks the round up and edited in place on every change after
+# that. pr-facts.sh's write-back is its only writer: it builds a model per round
+# from the round's findings and the PR it read (ra_models), renders the comment
+# from it (ra_render), and edits the comment only when the rendering changed.
+# GitHub dismisses review objects, so each review of a round is dismissed on its
+# own, and the note that clears it is one line naming the round's comment
+# (ra_dismiss_note).
+#
+# A comment belongs to the round of the review its key names. When the city
+# holds more than one comment for a round, each keyed to one of its reviews, the
+# round keeps one: the copy a dismissal note names, if one does, else the
+# earliest. That copy takes every mark the others carry, and the writer deletes
+# the others once it carries them.
 #
 # One point per finding, in four sections that appear only when non-empty:
-#   Needs you     a needs-you finding whose visit is still open
-#   Worth a look  a declined or deferred finding, and any point whose fix
-#                 flagged it (finding.fix_flag): the fix chose among options
-#                 the reviewer left open, departed from their suggestion, or
-#                 changed code the ruling declined
+#   Needs you     a needs-you finding whose visit is still open, and a declined
+#                 or deferred finding whose thread waits on the reviewer
+#   Worth a look  any other declined or deferred finding that owes its raiser
+#                 a reply, and any other point whose fix flagged it
+#                 (finding.fix_flag): the fix chose among options the reviewer
+#                 left open, departed from their suggestion, or changed code
+#                 the ruling declined
 #   In progress   a point not yet ruled, or a must-fix whose fix has not landed
 #   Done          a must-fix whose fix landed, a needs-you finding the
 #                 operator's ruling settled, and a comment that asked for
 #                 nothing (declined with no reply)
-# A review body ruled restates frames the review's inline comments and is no
-# point of its own, so it has no entry and no count.
+# A review body ruled restates frames the inline comments of its round and is
+# no point of its own, so it has no entry and no count.
+#
+# The write-back never resolves a thread that holds a decline or a deferral it
+# answered there, so the thread waits for the reviewer. Resolving it accepts
+# the ruling. A reply in it is feedback like any other: the reply is ruled as a
+# finding of its own, and the declined or deferred finding stays closed. So
+# such a point needs the reviewer while the read of the PR finds its thread
+# open, holding the answer, and ending with a post of the city
+# (ra_thread_waits). It ends with what resolving and replying do
+# (ra_open_ask). Once they resolve the thread, the point is worth a look. A
+# reply of theirs is a point of its own, and the point it answers is worth a
+# look until the city answers the reply. The thread is still open then, so it
+# waits on them again. A thread the answer has not reached, because its post
+# failed, asks nothing of them. A review body sits in no thread, so nothing of
+# its own waits on them. The count line counts the points that need the
+# reviewer, never reads all answered while one does, and says where the rest
+# stand.
 #
 # Each point is a label linked to the comment it answers, one sentence, and the
 # commit, follow-up or visit that carries it. The label is the comment's own
@@ -31,13 +60,14 @@
 # unit's result (finding.fix_answer), or the validator's ruling-side answer
 # (finding.answer, falling back to the owed reply it recorded). A point not yet
 # answered says which stage it is at. A link goes only to a comment the read of
-# the PR found, and no sentence points at a reply or thread: the answer is in
-# the entry itself. A review body has no thread to carry a decline's or a
-# deferral's reply, so its entry carries that reply, quoted under the entry
-# whenever the sentence is not the reply itself, and the comment is what
-# delivers it, as it delivers the mark that records the body answered. A
-# review stays live, and gets its comment, while a finding is open, its
-# changes-requested block stands, or the comment owes it an answer or a mark.
+# the PR found, and no sentence sends the reader to a reply or thread for the
+# answer, which is in the entry itself. A review body has no thread to carry a
+# decline's or a deferral's reply, so its entry carries that reply, quoted
+# under the entry whenever the sentence is not the reply itself, and the
+# comment is what delivers it, as it delivers the mark that records the body
+# answered. A round stays live, and gets its comment, while a finding is open,
+# a changes-requested block of one of its reviews stands, or the comment owes
+# it an answer or a mark.
 #
 # The comment always fits the size GitHub takes in one comment, because the
 # dismissal waits on it (ra_render). A long review shortens its notes from the
@@ -76,10 +106,66 @@ REVIEW_OWED_REPLY_DEF='
     if $disp == "declined" then (if test("^\\s*declin"; "i") then . else "Declined: " + . end)
     elif $disp == "deferred" then (if test("^\\s*defer"; "i") then . else "Deferred: " + . end)
     else . end;
+  # What a decline or a deferral answered in a thread asks of the reviewer,
+  # since that thread waits for them: the reply in the thread and the point in
+  # the living answer both end with it. A reply in the thread is feedback like
+  # any other, ruled as a finding of its own, and the declined or deferred
+  # finding stays closed.
+  def ra_open_ask($disp):
+    "Resolving the thread accepts the " + (if $disp == "deferred" then "deferral" else "decline" end)
+    + ". To push back, reply in the thread; your reply is ruled as new feedback.";
+  # The review thread holding the comment $cid, with every comment in it, as
+  # the read of the PR ($view) found it, or null. A review body and a
+  # Conversation comment sit in no thread.
+  def ra_comment_thread($view; $cid):
+    first($view.threads[]? | select(any((.comments.nodes // [])[]; ((.databaseId // 0) | tostring) == $cid))) // null;
+  # A thread the read found that nobody has resolved.
+  def ra_thread_open: . != null and ((.isResolved // false) | not);
+  def ra_squash: gsub("\\s+"; " ") | sub("^ "; "") | sub(" $"; "");
+  # The line naming finding $id in the answer posted for it.
+  def ra_finding_line($id): "<!-- gc-writeback-finding:" + $id + " -->";
+  # Whether a comment on input is the answer posted for finding $id, whose
+  # reply is $reply: a post under $self carrying the write-back $marker and the
+  # reply text, naming this finding, or naming none as the answers posted
+  # before they named one do. Another reply of ours is not it, and neither is
+  # the answer to a ruling since replaced, whose text differs.
+  def ra_answer_post($self; $marker; $id; $reply):
+    ((.body // "") | tostring) as $b
+    | ((.author.login // "") == $self) and ($b | contains($marker))
+      and ($b | ra_squash | contains($reply | ra_squash))
+      and (($b | contains(ra_finding_line($id))) or (($b | test("<!-- gc-writeback-finding:")) | not));
+'
+# Which round a review belongs to is REVIEW_ROUND_DEF. pr-facts.sh records it on
+# each human finding (finding.review_round), as it files one and again from each
+# write-back read of the PR, which is how finding.sh tells a review body that
+# frames its round from one that is a whole review. The write-back also reads it
+# off the PR to group the living answers and to hold a framing body review until
+# its round is answered. REVIEW_ANSWER_DEF carries these defs too.
+# shellcheck disable=SC2034  # read by the scripts that source this file
+REVIEW_ROUND_DEF='
+  # The round of a review submitted by $login against commit $oid, named by
+  # both, or empty when either is unknown.
+  def ra_round_key($login; $oid):
+    (($login // "") | tostring) as $l | (($oid // "") | tostring) as $o
+    | if $l != "" and $o != "" then $l + "@" + $o else "" end;
+  # The round of each review on input that its author and commit place, by
+  # review id. Input is either read of the reviews on the PR: the REST list the
+  # intake reads (id, user.login, commit_id) or the GraphQL nodes the write-back
+  # reads (databaseId, author.login, commit.oid).
+  def ra_review_rounds:
+    reduce (.[]?) as $r ({};
+      ra_round_key($r.author.login // $r.user.login; $r.commit.oid // $r.commit_id) as $k
+      | if $k == "" then . else .[(($r.databaseId // $r.id // 0) | tostring)] = $k end);
+  # The round of every review the read of the PR holds ($view.reviews), by
+  # review id. A review the read cannot place by author and commit is a round
+  # of its own, r<id>.
+  def ra_rounds($view):
+    ($view.reviews | ra_review_rounds) as $placed
+    | reduce ($view.reviews[]?) as $r ({};
+        (($r.databaseId // 0) | tostring) as $id | .[$id] = ($placed[$id] // ("r" + $id)));
 '
 # shellcheck disable=SC2034  # read by the scripts that source this file
-REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
-  def ra_squash: gsub("\\s+"; " ") | sub("^ "; "") | sub(" $"; "");
+REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
   # At most $n characters, cut at a word boundary when one falls in the second
   # half, with an ellipsis marking the cut.
   def ra_cut($n):
@@ -135,22 +221,39 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
     | gsub("\\*"; "") | ra_squash | ra_cut(120)
     | gsub("\\["; "\\[") | gsub("\\]"; "\\]");
   # Where a finding comment sits, from the read of the PR: the review for a
-  # review body, the inline comment (its thread) otherwise. Empty when the read
-  # does not hold it, so no link names a comment that is not there.
-  def ra_url($view; $prurl):
+  # review body, and the inline comment in its thread $t (ra_comment_thread)
+  # otherwise. Empty when the read does not hold it, so no link names a
+  # comment that is not there. Without $t, the thread is looked up.
+  def ra_url($view; $prurl; $t):
     .cid as $c
     | if $c == "" then ""
       elif .body then
         (first($view.reviews[]? | select(((.databaseId // 0) | tostring) == $c)
           | (if ((.url // "") | tostring) != "" then .url else $prurl + "#pullrequestreview-" + $c end)) // "")
       else
-        (first($view.threads[]? | (.comments.nodes // [])[] | select(((.databaseId // 0) | tostring) == $c)
+        (first(($t.comments.nodes // [])[] | select(((.databaseId // 0) | tostring) == $c)
           | (if ((.url // "") | tostring) != "" then .url else $prurl + "#discussion_r" + $c end)) // "")
       end;
+  def ra_url($view; $prurl): ra_url($view; $prurl; (if .body then null else ra_comment_thread($view; .cid) end));
+  # Whether the thread $t of a finding comment waits on the reviewer for the
+  # answer to finding $id, whose reply is $reply: open, holding that answer
+  # (ra_answer_post), and ending with a post of the city. own tells a post of
+  # the city, and the caller passes gc_city_own for it, so a reply of theirs is
+  # what the routing arm takes for feedback. A thread its answer never reached
+  # asks nothing of them. Nor does one whose last post is a reply of theirs,
+  # which is a point of its own until the city answers it. Once the city has
+  # answered it, the thread waits on them again, since the write-back still
+  # leaves open a thread holding a decline or a deferral.
+  def ra_thread_waits($t; $self; $marker; $id; $reply; own):
+    ($t | ra_thread_open)
+    and (($t.comments.nodes // []) as $cs
+         | any($cs[]; ra_answer_post($self; $marker; $id; $reply)) and ($cs[-1] | own));
   # A human finding bead row as the record the points are made from. $beads
   # maps a bead id to what was read of it (ra_models). A rework child closes
   # when its branch lands, so a fix unit read closed has its commits on the PR.
-  def ra_record($view; $prurl; $beads):
+  # An inline comment thread is looked up once, for both its link and whether
+  # it waits on the reviewer; $self, $marker and own are what that reads.
+  def ra_record($view; $prurl; $beads; $self; $marker; own):
     (.metadata // {}) as $m
     | ((.description // "") | tostring) as $desc
     | { id: ((.id // "") | tostring),
@@ -172,7 +275,9 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
         cid: (($m["finding.comment_id"] // "") | tostring),
         rid: (($m["finding.review_id"] // "") | tostring) }
     | . + { body: (.rid != "" and .rid == .cid) }
-    | . + { url: ra_url($view; $prurl), fix_landed: (($beads[.fix_unit] // {}).closed == true) };
+    | (if .body then null else ra_comment_thread($view; .cid) end) as $t
+    | . + { url: ra_url($view; $prurl; $t), waits: ra_thread_waits($t; $self; $marker; .id; .reply; own),
+            fix_landed: (($beads[.fix_unit] // {}).closed == true) };
   # A review body finding whose ruling owes its raiser an answer, which the
   # living comment delivers, since the comment sits in no thread.
   def ra_owes_reply: .body and .reply != "" and (.disp | ra_owes_disp);
@@ -180,7 +285,9 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
   # review body owed a decline or a deferral gets that reply whole in its entry:
   # as the sentence when the sentence is the reply and fits in one, and quoted
   # under the entry otherwise. A needs-you body answer is its visit, which the
-  # entry names and the callout on top carries.
+  # entry names and the callout on top carries. A decline or a deferral whose
+  # thread waits on the reviewer (ra_thread_waits) needs them, in the words it
+  # would be worth a look in, and asks them to act.
   def ra_point:
     . as $f
     | .disp as $d
@@ -191,6 +298,7 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
     | ($f.body and ($d == "declined" or $d == "deferred") and $rp != "") as $carries
     | (if $carries and ($ruled | length) > ra_tiers[0].sentence then "" else $ruled end) as $said
     | (((.fix_flag // "") | tostring) == "1" and $fa != "") as $flag
+    | (.waits == true and (.open | not) and ($d == "declined" or $d == "deferred") and $rp != "") as $waits
     | (if .fix_unit != "" and .cid != "" then "{{gc-commits:" + .fix_unit + "|" + .cid + "}}" else "" end) as $commits
     | if $d == "restates" then empty
       elif $d == "needs-you" and .open then
@@ -228,76 +336,131 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
       else
         { section: "progress", sentence: $fa, ref: "", answered: false }
       end
+    | (if $waits then . + { section: "needs", ask: ra_open_ask($d) } else . end)
     | . + { id: $f.id, label: ($f | ra_label), url: $f.url, ruled: ($d != "unvalidated"),
             extra: (if $carries and .sentence != $ruled then $ruled else "" end) };
-  # One model per human review the findings on input name: its points, the
-  # visits waiting on the operator, the fix notes, the mark lines the plan owes
-  # it, and the comment already on the PR. $vl maps a review id to the mark lines
-  # and batch visits the write-back plan asks of it ({marks, visits, swaps}),
-  # and $beads maps a bead id to the title, fix notes and close read for it. A
-  # review dismissed with every finding closed reads as re-requested when its
-  # comment carries the dismissed mark, or when the read of the PR lists its
-  # author among the pending review requests ($view.requested). So a dismissal
-  # whose edit of the comment failed still says so on the next pass.
-  def ra_models($view; $prurl; $self; $vl; $beads; $marker):
-    [ .[]? | select(((.metadata.task_kind // "") | tostring) == "finding")
-           | select(((.metadata["finding.lane"] // "") | tostring) == "human")
-           | ra_record($view; $prurl; $beads) | select(.rid != "") ]
-    | group_by(.rid)
+  # What follows the last write-back marker in a comment of ours: on a living
+  # answer, the lines ra_trailer writes and the digest line after them. Its key
+  # and its marks are read there alone, because the text above quotes what
+  # reviewers and fix units wrote.
+  def ra_tail($marker): (.body // "") | tostring | split($marker) | if length > 1 then .[-1] else "" end;
+  # The review ids a mark line names.
+  def ra_mark_rids: [ split(" ")[1:][] | select(startswith("r")) | .[1:] ];
+  # Each value once, in the order it first comes.
+  def ra_once: reduce .[] as $x ([]; if any(.[]; . == $x) then . else . + [ $x ] end);
+  # One model per round the human findings on input name. rid is its lowest
+  # review id, the one its comment is keyed by, rids every review of it with a
+  # finding, and members the same reviews, each with the state GitHub reads and
+  # how it reads dismissed. Then its points, the visits waiting on the operator,
+  # the fix notes, the mark lines the plan owes it, the comment it keeps
+  # (existing) and the ids of the other copies the city holds (strays). $vl maps
+  # a review id to the mark lines and batch visits the write-back plan asks of
+  # it ({marks, visits, swaps}), and $beads maps a bead id to the title, fix
+  # notes and close read for it. A review dismissed with every finding of its
+  # own closed reads as re-requested when a copy carries its dismissed mark, or
+  # when the read of the PR lists its author among the pending review requests
+  # ($view.requested). So a dismissal whose edit of the comment failed still
+  # says so on the next pass. own tells a post of the city from one that is
+  # not (ra_thread_waits), and the writer passes gc_city_own for it.
+  def ra_models($view; $prurl; $self; $vl; $beads; $marker; own):
+    ra_rounds($view) as $rounds
+    | [ $view.issue_comments[]?
+        | select(((.author.login // "") == $self) and ((.body // "") | contains($marker)))
+        | ra_tail($marker) as $t
+        | (($t | capture("<!-- gc-review-answer:r(?<k>[0-9]+) -->") | .k) // "") as $k
+        | select($k != "")
+        | { dbn: (.databaseId // 0), db: ((.databaseId // 0) | tostring), key: $k, tail: $t,
+            url: (if ((.url // "") | tostring) != "" then .url else $prurl + "#issuecomment-" + ((.databaseId // 0) | tostring) end),
+            round: ($rounds[$k] // ("r" + $k)) } ] as $answers
+    | [ .[]? | select(((.metadata.task_kind // "") | tostring) == "finding")
+             | select(((.metadata["finding.lane"] // "") | tostring) == "human")
+             | ra_record($view; $prurl; $beads; $self; $marker; own) | select(.rid != "")
+             | . + { round: ($rounds[.rid] // ("r" + .rid)) } ]
+    | group_by(.round)
     | map(
-        .[0].rid as $rid
+        .[0].round as $round
         | . as $fs
+        | ([ $fs[].rid ] | unique | sort_by(tonumber? // 0)) as $rids
+        | $rids[0] as $rid
         | (first($view.reviews[]? | select(((.databaseId // 0) | tostring) == $rid)) // {}) as $rv
         | ((($rv.author.login // "") | tostring)) as $login
         | ($login != "" and $login == $self) as $selfrev
-        | ("<!-- gc-review-answer:r" + $rid + " -->") as $key
-        | ([ $view.issue_comments[]?
-             | select(((.author.login // "") == $self) and ((.body // "") | contains($marker)) and ((.body // "") | contains($key))) ]
-           | sort_by(.databaseId // 0) | .[0] // null) as $ex
-        # The mark lines the comment already carries stand until the plan names
-        # new ones: a review body leaves the plan once its review is dismissed,
-        # and dropping its mark then would only rewrite the comment.
-        | ([ ($ex.body // "") | scan("<!-- gc-writeback-mark:([^ >]+(?: [ri][0-9]+)*) -->") | .[0] ]) as $exmarks
+        | ([ $answers[] | select(.round == $round) ] | sort_by(.dbn)) as $copies
+        | [ $rids[] as $r
+            | (((first($view.reviews[]? | select(((.databaseId // 0) | tostring) == $r)) // {}).state // "") | tostring) as $st
+            | { rid: $r, state: $st,
+                dismissed: (if any($copies[]; .tail | contains("<!-- gc-review-answer:r" + $r + ":dismissed -->"))
+                              then (if $selfrev then "self" else "requeued" end)
+                            elif $st == "DISMISSED" and all($fs[] | select(.rid == $r); .open | not)
+                              then (if $login != "" and any(($view.requested // [])[]; . == $login) then "requeued" else "plain" end)
+                            else "" end) } ] as $members
+        # The copy the round keeps is the one a dismissal note names: it carries
+        # a dismissed mark, or the key of a review GitHub reads dismissed. Else
+        # it is the earliest.
+        | (first($copies[] | select(.tail | test("<!-- gc-review-answer:r[0-9]+:dismissed -->")))
+           // first($copies[] | . as $c | select(any($members[]; .rid == $c.key and .state == "DISMISSED")))
+           // $copies[0]) as $ex
         | (if $ex == null then null
-           else { db: (($ex.databaseId // 0) | tostring),
-                  url: (if (($ex.url // "") | tostring) != "" then $ex.url else $prurl + "#issuecomment-" + (($ex.databaseId // 0) | tostring) end),
-                  digest: ((($ex.body // "") | capture("<!-- gc-review-answer:r[0-9]+:digest:(?<d>[0-9]+) -->") | .d) // ""),
-                  dismissed: (($ex.body // "") | contains("<!-- gc-review-answer:r" + $rid + ":dismissed -->")) } end) as $have
-        | ($vl[$rid] // { marks: [], visits: [], swaps: "-" }) as $v
+           else { db: $ex.db, url: $ex.url,
+                  digest: (($ex.tail | capture("<!-- gc-review-answer:r[0-9]+:digest:(?<d>[0-9]+) -->") | .d) // "") } end) as $have
+        # The mark lines its copies carry stand until the plan names new ones for
+        # the review they mark: a review body leaves the plan once its review is
+        # dismissed, and dropping its mark then would only rewrite the comment.
+        | ([ ($ex // empty), ($copies[] | select(.db != $ex.db)) | .tail
+             | scan("<!-- gc-writeback-mark:([^ >]+(?: [ri][0-9]+)*) -->") | .[0] ] | ra_once) as $exmarks
+        | ([ $rids[] as $r | ((($vl[$r] // {}).marks // [])) as $w
+             | if ($w | length) > 0 then $w[] else ($exmarks[] | select(ra_mark_rids | any(.[]; . == $r))) end ]
+           + [ $exmarks[] | select(ra_mark_rids | all(.[]; . as $x | all($rids[]; . != $x))) ]
+           | ra_once) as $marks
         | ($fs | sort_by([ (if .body then 0 else 1 end), ((.cid | tonumber?) // 0) ])) as $sorted
         | [ $sorted[] | ra_point ] as $ps
         | ([ $fs[] | select(.disp == "needs-you" and .open and .visit != "")
              | { id: .visit, question: (if (.answer | ra_squash) != "" then (.answer | ra_squash) else "This comment needs your decision." end) } ]
-           + [ ($v.visits // [])[] | { id: ., question: ((($beads[.] // {}).title // "") | tostring | ra_squash) } ]
+           + [ $rids[] as $r | ((($vl[$r] // {}).visits // []))[] | { id: ., question: ((($beads[.] // {}).title // "") | tostring | ra_squash) } ]
            | reduce .[] as $x ([]; if any(.[]; .id == $x.id) then . else . + [ $x ] end)) as $visits
         | ([ $fs[] | .fix_unit | select(. != "") ] | unique
            | map({ by: ., text: ((($beads[.] // {}).fix_notes // "") | tostring) }) | map(select(.text | test("\\S")))) as $notes
         | ([ $fs[] | select(ra_owes_reply) | .id ]) as $replied
-        | { rid: $rid, self: $selfrev, author: $login,
-            state: ((($rv.state // "") | tostring)),
-            points: $ps, visits: $visits, notes: $notes,
-            marks: (if (($v.marks // []) | length) > 0 then $v.marks else $exmarks end), swaps: ($v.swaps // "-"),
+        | { rid: $rid, rids: $rids, members: $members, self: $selfrev, author: $login,
+            points: $ps, visits: $visits, notes: $notes, marks: $marks,
+            swaps: ([ $rids[] as $r | ((($vl[$r] // {}).swaps // "-")) | select(. != "-") ] | if length > 0 then join(",") else "-" end),
             replied: $replied,
             unstamped: [ $fs[] | select(ra_owes_reply and (.posted | not)) | .id ],
             existing: $have,
-            dismissed: (if $have != null and $have.dismissed then (if $selfrev then "self" else "requeued" end)
-                        elif ((($rv.state // "") | tostring) == "DISMISSED") and all($fs[]; .open | not) then
-                          (if $login != "" and any(($view.requested // [])[]; . == $login) then "requeued" else "plain" end)
-                        else "" end),
-            live: (any($fs[]; .open) or ((($rv.state // "") | tostring) == "CHANGES_REQUESTED")
+            strays: [ $copies[] | select(.db != ($have.db // "")) | .db ],
+            live: (any($fs[]; .open) or any($members[]; .state == "CHANGES_REQUESTED")
                    or any($fs[]; ra_owes_reply and (.posted | not))
-                   or ((($v.marks // []) | length) > 0)) });
+                   or any($rids[]; ((($vl[.] // {}).marks // []) | length) > 0)) });
+  # How the round reads dismissed: not at all while a review of it still stands
+  # changes-requested, and otherwise the most any review of it reads, a
+  # re-request first.
+  def ra_dismissal:
+    (.members // []) as $ms
+    | if any($ms[]; .state == "CHANGES_REQUESTED" and (.dismissed // "") == "") then ""
+      else (first(("requeued", "self", "plain") as $d | select(any($ms[]; .dismissed == $d)) | $d) // "") end;
+  # The model once the writer has dismissed its review $rid.
+  def ra_dismiss_member($rid):
+    .self as $s
+    | .members = [ (.members // [])[] | if .rid == $rid then .dismissed = (if $s then "self" else "requeued" end) else . end ];
   def ra_count($n; $word): "\($n) \($word)" + (if $n == 1 then "" else "s" end);
-  # The count line: how many points the review raised and how far they are. It
+  # The count line: how many points the review raised, how many of them need
+  # the reviewer, and how far the rest are. A point that needs the reviewer is
+  # not counted answered, so the line never reads all answered while one does,
+  # and a line that counts them still says where any other point stands. It
   # names no commit, so a push leaves a settled review comment as it stands;
   # each point cites the commits that answered it.
   def ra_heading:
     (.points // []) as $ps | ($ps | length) as $n
-    | ([ $ps[] | select(.answered) ] | length) as $k
+    | ([ $ps[] | select(.section == "needs") ] | length) as $w
+    | ([ $ps[] | select(.answered and .section != "needs") ] | length) as $k
+    | any($ps[]; .ruled | not) as $unruled
     | "Your review: " + ra_count($n; "point")
-      + (if $n > 0 and $k == $n then ", all answered"
+      + (if $w > 0 then ", \($w) " + (if $w == 1 then "needs" else "need" end) + " you"
+           + (if $k > 0 then ", \($k) answered" else "" end)
+           + (if $w + $k == $n then "" elif $unruled then ", the rest in progress" else ", the rest not answered yet" end)
+         elif $n > 0 and $k == $n then ", all answered"
          elif $k > 0 then ", \($k) answered so far"
-         elif any($ps[]; .ruled | not) then ", picked up; the ruling is in progress"
+         elif $unruled then ", picked up; the ruling is in progress"
          else ", none answered yet" end);
   def ra_sections: [ { key: "needs", title: "Needs you", one: "needs you", many: "need you" },
                      { key: "worth", title: "Worth a look", one: "worth a look", many: "worth a look" },
@@ -308,6 +471,7 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
   # repeats the label is left out, and so is a reference the sentence already
   # names; a sentence several times the label length is never only a repeat of
   # it. A clipped sentence or quoted reply names the finding holding it whole.
+  # What a point waiting on the reviewer asks of them is a line of its own.
   def ra_entry($c):
     (.label | if test("[.?!…]$") then . else . + "." end) as $l
     | ((.id // "") | tostring) as $id
@@ -319,6 +483,7 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
       + (if $ref == "" or (($say | contains($ref)) and ($ref | startswith("{{") | not)) then ""
          elif ($ref | startswith("{{")) then $ref
          else " (" + $ref + ")" end)
+      + (if (.ask // "") != "" then "\n  " + .ask else "" end)
       + (if (.extra // "") != "" then "\n" + ([ .extra | ra_clip($c.quote; $id) | split("\n")[] | "  > " + . ] | join("\n")) else "" end);
   # Text cut inside a fenced code block gets the fence closed, so the cut does
   # not swallow the markup after it.
@@ -347,6 +512,7 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
     . as $m
     | ($m.points // []) as $ps
     | any($ps[]; .ruled) as $anyruled
+    | ($m | ra_dismissal) as $dm
     | (($ps | map(.id)) - ($shown | map(.id))) as $out
     | [ if ($m.visits | length) > 0 and ($c.bare | not) then
           "> [!IMPORTANT]\n" + ([ $m.visits[] | . as $v | "> **Needs you: visit " + $v.id + ".**"
@@ -354,8 +520,8 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
                                 | join("\n>\n"))
         else empty end,
         "### " + ($m | ra_heading),
-        ([ (if $m.dismissed == "requeued" then "Review dismissed; your review is requested again."
-            elif $m.dismissed != "" then "Review dismissed." else empty end),
+        ([ (if $dm == "requeued" then "Review dismissed; your review is requested again."
+            elif $dm != "" then "Review dismissed." else empty end),
            (if $anyruled then
               ([ ra_sections[] | . as $s | ([ $ps[] | select(.section == $s.key) ] | length) as $nc
                  | select($nc > 0) | "\($nc) " + (if $nc == 1 then $s.one else $s.many end) ] | join(", ")) + "."
@@ -372,12 +538,15 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF"'
         (if $c.bare then empty else $m | ra_notes($c) end) ]
     | join("\n\n");
   # The lines the comment ends with: the write-back marker, the mark lines the
-  # plan owes it, the review key it is found again by, and the dismissed mark.
+  # plan owes it, the key of the lowest review of the round, which it is found
+  # again by, and a dismissed mark for each review of the round the writer
+  # dismissed.
   def ra_trailer($marker):
     $marker
     + ([ (.marks // [])[] | "\n<!-- gc-writeback-mark:" + . + " -->" ] | join(""))
     + "\n<!-- gc-review-answer:r" + .rid + " -->"
-    + (if .dismissed == "requeued" or .dismissed == "self" then "\n<!-- gc-review-answer:r" + .rid + ":dismissed -->" else "" end);
+    + ([ (.members // [])[] | select(.dismissed == "requeued" or .dismissed == "self")
+         | "\n<!-- gc-review-answer:r" + .rid + ":dismissed -->" ] | join(""));
   # GitHub refuses a comment over 65,536 characters, and the dismissal waits on
   # the comment, so a comment that outgrew it would hold its review forever. The
   # comment stays under ra_budget, counted in UTF-8 bytes, never fewer than its

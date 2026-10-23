@@ -304,27 +304,32 @@ dependency edge by hand:
   decline they never hear is a silent overrule. Pass the answer with `--reply`;
   finding.sh records it and pr-facts.sh's write-back posts it into their PR
   thread after "Declined:", and leaves the thread open for them to accept or
-  overrule. Write it as the reason that follows that word:
+  push back on. Write it as the reason that follows that word:
   ```bash
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition declined \
     --reason "<why this is not an objection>" \
     --reply "<the reason, as it reads after 'Declined:': what you found, and why the objection does not hold>"
   ```
-  Declining closes the finding, which is what lets a re-raise re-block: if the
-  operator still disagrees they re-review, the content key re-adopts the closed
-  finding as a fresh one, and the next reconcile re-opens the human validation
-  pass on the anchor. A re-raise is theirs to make; nothing here forecloses it.
+  Declining closes the finding, which is what lets a re-raise re-block. If the
+  operator still disagrees, they reply in the thread or review again.
+  finding.sh dedups only against open findings, so their objection is filed as
+  a fresh finding, and the next reconcile re-opens the human validation pass on
+  the anchor. The declined finding stays closed and declined. A re-raise is
+  theirs to make; nothing here forecloses it.
 
   A human comment that states no objection at all — an acknowledgement, praise, or
   a question the diff already answers — is declined like a machine finding, with
   no `--reply`: there is no objection to overrule, so none is owed an answer.
 
-- **restates** — a HUMAN review body that only frames the review's own inline
-  comments, each a finding of its own. A decline would read as a refusal and
-  must-fix would hold the same fix twice; this closes it holding nothing, owing
-  no answer, with no entry in the review's living answer. A body raising a point
-  of its own is ruled on that point. `finding.sh` refuses it on anything but a
-  review body whose review raised another finding.
+- **restates** — a HUMAN review body that only frames the inline comments of
+  its review round, each a finding of its own. The round is every review its
+  reviewer submitted against one commit, which a client can post as one review
+  per comment, and its findings share `finding.review_round`. A decline would
+  read as a refusal and must-fix would hold the same fix twice; this closes it
+  holding nothing, owing no answer, with no entry in the round's living answer.
+  A body raising a point of its own is ruled on that point. `finding.sh`
+  refuses it on anything but a review body whose review or review round raised
+  an inline comment.
   ```bash
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition restates
   ```
@@ -348,7 +353,7 @@ dependency edge by hand:
   ```
 
 **The words the operator reads.** The PR keeps one living answer per human
-review: a label and a sentence per point. With any human ruling, pass
+review round: a label and a sentence per point. With any human ruling, pass
 `--label "<a few words>"` when the comment has no bold headline, and with a
 decline, a deferral or needs-you pass `--answer "<one sentence>"` that starts by
 saying, in your own words, how you answered compared with what was asked

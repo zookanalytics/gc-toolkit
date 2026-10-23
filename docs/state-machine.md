@@ -130,7 +130,16 @@ one there is spent the moment the anchor is gated. The clear stops at
 `status=open` for two reasons that agree. A live claim is a hold to escalate,
 not to overwrite; and bd refuses an assignee edit on a bead another actor holds
 `in_progress`, dropping the whole atomic update with it
-([gascity-routing-model.md](gascity-routing-model.md) row 46).
+([gascity/routing-model.md](gascity/routing-model.md#clearing-an-assignee-can-be-refused-and-the-refusal-drops-the-whole-update)).
+
+A write that records on an anchor staying in its state, rather than moving it,
+passes `--keep-route`: the transition writes no route, so neither a human
+state's park default and park guard nor a detached state's route clear applies,
+and the anchor keeps the `gc.routed_to` it carries, an empty one included.
+`lifecycle.sh` refuses it with `--route`, and on an edge into another state,
+which takes that state's routing. `pr-facts.sh` writes the rank of an anchor's
+PR-finishing work this way ([steering.md](steering.md#pr-finishing-work)), so
+recording it re-parks no anchor and drops no route a person gave one.
 
 A detached anchor that is nonetheless claimed or held into a non-open status —
 by a route stamped on it out of band, or a direct claim — is the residual this
@@ -139,6 +148,17 @@ leaves open. Every anchor enumeration is `--status=open`, so it drops out of
 the claim resolves. `doctor/check-state-space` also reads the non-open live
 statuses, so it reports all three violations: a detached anchor carrying a
 route, one carrying an assignee, and one that has left `status=open`.
+
+Leaving a state can owe a write of its own, declared in `exit_sets`. A
+transition out of `pull_request` into another open state sets
+`pr_finishing_settled` to `unsettled` and clears `pr_head_oid` in the same
+update, because the rank of an anchor's PR-finishing work is approved only while
+the anchor rests there, under a posture read at the PR head `pr-facts.sh` last
+recorded ([steering.md](steering.md#pr-finishing-work)). So whichever writer
+makes such a transition leaves a record that no return to `pull_request` reads
+as settled, and an approval that no return counts until `pr-facts.sh` has read
+the PR again. A caller that writes the key itself keeps its own value, and a
+transition into a closed state writes none.
 
 ## Transition table
 
@@ -411,6 +431,8 @@ non-draft anchor and read off the bead by everything downstream. Declared in
 | `pr_review_answered` | `<id>` | every counted review body above `pr_review_watermark`, through this id, was answered by its threads at the last read |
 | `pr_comment_disposition` | `rework:<id>` / `visit:<id>` | what the last outstanding batch was routed to |
 | `pr_provenance_since` | `<UTC instant>` | when `pr-facts.sh` first read the open PR; an unmarked post under the city's login from before it is the city's own |
+| `pr_finishing_settled` | `approved` / `unapproved` / `unsettled` | the rank all of the anchor's PR-finishing work was last settled at, or `unsettled` while a re-rank is owed; absent while no pass has recorded one |
+| `pr_head_oid` | `<oid>` | the PR head `pr-facts.sh` last read, a draft's included; empty once the anchor leaves `pull_request`, until a pass reads the PR again |
 
 The postures, in the precedence the derivation applies:
 
@@ -421,6 +443,19 @@ The postures, in the precedence the derivation applies:
 | `approved` | GitHub reports `APPROVED`, and an approval stands that the anchor's `bring_current_lifted_at` did not set aside | none |
 | `review_required` | GitHub reports `REVIEW_REQUIRED`, or reports `APPROVED` while every standing approval was given at or before `bring_current_lifted_at` | none; the anchor is waiting on a human approval and now says so |
 | `none` | no `reviewDecision` applies | none |
+
+The priority function reads the posture too. An `approved` posture on an anchor
+that rests in `pull_request`, read at the head `pr_head_oid` records, ranks the
+anchor's PR-finishing work at P0, so the pass of `pr-facts.sh` that records a
+posture or a head moving into or out of that rank re-ranks that work, and so
+does an anchor leaving `pull_request`. `pr_finishing_settled` records the rank
+all of it settled at, and the write that moves the rank marks it `unsettled`:
+the posture write, or the transition out of `pull_request` (`exit_sets`, above).
+The work is settled again while that record differs from the rank the anchor's
+state, posture and head give, by every pass for an
+anchor in `pull_request` and by every full pass for one resting elsewhere, so a
+re-rank a failed settle left short is finished on a later pass
+([steering.md](steering.md#pr-finishing-work)).
 
 A comment outranks an approval on purpose: one reviewer's approval does not
 answer another reviewer's question. `merge.sh` holds on a recorded `commented`

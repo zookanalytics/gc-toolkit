@@ -76,13 +76,18 @@ LIVENESS_CLASSIFY_JQ='
     [ ((. // "") | tostring | ascii_downcase)
       | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
     | .[0] | if . == null then "" else (.h + "/" + .o + "/pull/" + .n) end;
-  # A workflow root, a scope latch and a step-spec sidecar carry a route and no
-  # executable body. The route names the run, it is not an offer. Both readers
-  # that serve or count pool work refuse them on gc.kind: the hook at
-  # hookCandidateClaimable, the controller demand loop at demandRowServable.
-  # No worker can ever take one. Mirrors beadmeta.WorkflowTopologyKinds, which
-  # no command reads out; a kind added there and not here falls through to the
-  # route arm.
+  # A workflow root that has expanded into steps, a scope latch and a step-spec
+  # sidecar are the structure of a run, not its work, so a route on such a root
+  # names the run and is not an offer. Gas City checks for them in
+  # workflowTopologyIsNonExecutable (cmd/gc/cmd_hook_claim.go), which the route
+  # match in the hook (hookClaimMatchesRoute) and the demand count in the
+  # controller (controllerDemandRouteCandidates, cmd/gc/build_desired_state.go)
+  # both apply. It tells an expanded root by gc.workflow_expanded="true", which
+  # the pour stamps on every root it expands into steps. This predicate reads
+  # gc.kind alone, so it also takes in a workflow root without the stamp, which
+  # Gas City offers and counts as work: the root of a root-only run is the work
+  # itself. The list mirrors beadmeta.WorkflowTopologyKinds, which no command
+  # reads out; a kind added there and not here falls through to the route arm.
   def topology_kind:
     (.metadata["gc.kind"] // "") as $k
     | ["workflow", "scope", "spec"] | index($k) != null;

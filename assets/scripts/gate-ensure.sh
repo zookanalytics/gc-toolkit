@@ -31,7 +31,13 @@
 # arm re-slings it rather than filing a twin. Either sling waits until the
 # review's whole work order reads back (bd_create for a fresh review,
 # bd_meta_ensure for a stranded one), and a failed sling is never retried
-# in-pass (a re-pour mints a second workflow root). An open review a two-write
+# in-pass (a re-pour mints a second workflow root). A review is PR-finishing
+# work, born carrying the PR-finishing shift and no parent, and every sling here,
+# of a review or a validation pass, also waits until the bead settles at its
+# priority, because the pour copies that priority once (docs/steering.md). The
+# settle is bd-lib.sh's pr_finishing_settle, whose wait for the priority lock is
+# short, since every arm of the cadence after this one waits on it. An open
+# review a two-write
 # create left with its title but short of the keys inflight_review reads is
 # closed before a fresh one is filed (bd_unmake_orphans), since its blocks edge
 # would hold the anchor beside it. Reach carried by the pour ALONE is qualified before it counts: a review
@@ -748,6 +754,9 @@ while IFS= read -r tagged; do
       elif [ -z "$VALIDATE_POOL" ]; then
         echo "$PROG: $id has an open validation pass $VPASS_D but no --validate-pool was given; no dispatch (the pass holds the merge until one is)" >&2
         skipped=$((skipped + 1))
+      elif ! pr_finishing_settle "$VPASS_D"; then
+        echo "$PROG: WARN $id validation pass $VPASS_D did not settle at its priority; not dispatched, merge stays held, retry next pass" >&2
+        skipped=$((skipped + 1))
       else
         gc sling ${GC_RIG:+--rig "$GC_RIG"} "$VALIDATE_POOL" "$VPASS_D" --on "$VALIDATE_FORMULA" >/dev/null 2>&1
         if pour_ok "$VPASS_D" "$VALIDATE_POOL"; then
@@ -979,6 +988,10 @@ while IFS= read -r tagged; do
             echo "$PROG: WARN $id stranded review $rid did not record its whole work order (short: $rshort); not re-slung, merge stays held, retry next pass" >&2
             skipped=$((skipped + 1)); continue
           fi
+          if ! pr_finishing_settle "$rid"; then
+            echo "$PROG: WARN $id stranded review $rid did not settle at its priority; not re-slung, merge stays held, retry next pass" >&2
+            skipped=$((skipped + 1)); continue
+          fi
           # Zero roots: a tracking convoy exists but carries no workflow root, so
           # nothing drives the review. Re-sling — this mints the FIRST root; the
           # empty convoy is left in place, contributing none to a later pass's
@@ -1071,7 +1084,10 @@ while IFS= read -r tagged; do
     # (rc 1). One short of any other key (rc 2) is not slung, because a pour
     # onto it could run against a work order the bead does not carry; the
     # stranded arm above finds it next pass and slings it once it is whole.
-    RID_META=$(review_work_order "$g" "$id" "$branch" "$target" "$head" "$pr_url" "$pr_number")
+    # A review is PR-finishing work, so it is born carrying the PR-finishing
+    # shift and no parent. The stranded arm's work order leaves the shift out:
+    # after its birth the shift is the review's own input.
+    RID_META=$(pr_finishing_birth "$(review_work_order "$g" "$id" "$branch" "$target" "$head" "$pr_url" "$pr_number")")
     RID_TITLE="Review branch $branch -> $target ($g): $title"
     body=""
     [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --formula "$REVIEW_FORMULA" --check-name "$g" --reviewed-oid "$head" --note "$why" 2>/dev/null) || body=""
@@ -1090,6 +1106,12 @@ while IFS= read -r tagged; do
       skipped=$((skipped + 1)); continue
     fi
     ge_mark_child "$id" "$RID"
+    # A review that does not settle at its priority is not slung: the stranded
+    # arm settles and slings it next pass.
+    if ! pr_finishing_settle "$RID"; then
+      echo "$PROG: WARN review $RID did not settle at its priority; not slung, merge stays held, the stranded arm re-slings it next pass" >&2
+      skipped=$((skipped + 1)); continue
+    fi
     # One sling, no retry: a re-pour mints a second workflow root. A pour that
     # does not read back is held; the next pass's stranded arm probes for its
     # tracking convoy before deciding to re-sling.

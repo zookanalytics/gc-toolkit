@@ -11,7 +11,7 @@ bead.
 Before this existed, it lived in an agent's head. `gc sling` pours its
 formula immediately and takes no notice of the bead's `blocks`
 dependencies — the mechanism is in
-[gascity-routing-model.md](gascity-routing-model.md#a-blocks-dep-between-work-beads-does-not-hold-a-graphv2-dispatch),
+[gascity/routing-model.md](gascity/routing-model.md#a-blocks-dep-between-work-beads-does-not-hold-a-graphv2-dispatch),
 and the short version is that none of the records the pour creates
 carries an edge to the work bead, so a `blocks` edge between two work
 beads is not on any path a readiness query walks. Sling a blocked bead
@@ -33,9 +33,9 @@ yet" in this city's dispatch path.
 **Boundaries.** *Why* a dependency edge does not gate a formula dispatch,
 and which record each delivery lane routes, belong to the routing
 contract and live in
-[gascity-routing-model.md](gascity-routing-model.md). Recovering a pour
-that already happened is
-[gascity-dispatch-containment.md](gascity-dispatch-containment.md). This
+[gascity/routing-model.md](gascity/routing-model.md). A pour that already
+happened is ended through Gas City's run cancel, as the pack's decline does
+([pack-authoring.md](pack-authoring.md#a-run-that-must-not-advance-is-cancelled-after-its-wait-is-recorded)). This
 doc does not cover slinging in general, and it does not speak for what a
 dep edge means to `bd` — it defers to `bd`'s own readiness predicate
 rather than restating it. What holds an armed bead is defined once, in
@@ -109,15 +109,16 @@ deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 
 ## Work assigned to a named agent owes a notice
 
-A named session takes its work by assignee, never by route
-([gascity-routing-model.md](gascity-routing-model.md#lane-2--bd-update-bead---assignee-named-session-direct-named-session-delivery)).
-Its hook offers it a bead assigned to it once `bd` reports the bead ready,
+gc-toolkit hands work to a named agent by assignee, never by route. The
+agent's hook offers it a bead assigned to it once `bd` reports the bead ready
+([gascity/routing-model.md](gascity/routing-model.md#the-read-side-the-claim-predicate)),
 and under `wake_mode = "resume"` nothing else wakes an idle named session
 when that happens. The controller's claim, continuation and execution
 backstops govern pool sessions only, the agent's `nudge` text is typed at
 launch, and the controller restarts an alive named session onto a new
-assignment only under `"fresh"`. So the dispatch an assignment owes is a
-notice to the agent:
+assignment only under `"fresh"`
+([gascity/agent-types.md](gascity/agent-types.md#an-assignment-gives-a-named-session-no-turn)).
+So the dispatch an assignment owes is a notice to the agent:
 
 ```bash
 "$PACK_DIR/assets/scripts/deferred-dispatch.sh" notify <bead> \

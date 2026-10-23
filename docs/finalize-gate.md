@@ -17,7 +17,7 @@ names why.
 caller invokes it, its fail-closed contract, and the finalize paths that call it.
 
 **Boundaries.** The demand bead and its `blocks` edge — the separate record of
-what a person owes a converse sitting — belong to `docs/gascity-human-engagement.md`
+what a person owes a converse sitting — belong to `docs/human-engagement.md`
 and `assets/scripts/gc-helm.sh`. What subject a visit covers is defined once in
 `assets/scripts/visit-identity.sh` and the mol-visit formula. The merge cadence's
 other arms live in `docs/refinery-merge-cadence.md`, and the lifecycle state

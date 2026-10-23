@@ -25,7 +25,7 @@ Covered here:
 4. [The helm board service](#4-the-helm-board-service)
 5. [Verification](#5-verification)
 
-For Gas City background, see [`gascity-reference.md`](gascity-reference.md).
+For Gas City background, see [`gascity/README.md`](gascity/README.md).
 
 ## Scope
 
@@ -35,7 +35,7 @@ opts into, and verifying the result.
 
 **Boundaries.** It assumes a working Gas City and a created city. Gas City
 itself is documented upstream, indexed by
-[gascity-reference.md](gascity-reference.md). What each imported agent, order,
+[gascity/README.md](gascity/README.md). What each imported agent, order,
 and check does is its own doc's, starting from
 [architecture.md](architecture.md). The sub-pack's complete wiring lives in
 `packs/gascity-keeper/pack.toml`, and the board's in `services/helm/README.md`.

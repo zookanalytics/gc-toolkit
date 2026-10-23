@@ -171,7 +171,6 @@ for f in "$@"; do
         */template-fragments/*.template.md | template-fragments/*.template.md) ;;
         */agents/*/prompt.template.md | agents/*/prompt.template.md) ;;
         */skills/*/SKILL.md | skills/*/SKILL.md) ;;
-        */docs/gascity-dispatch-containment.md | docs/gascity-dispatch-containment.md) ;;
         *) continue ;;
     esac
     toml=0

@@ -6,8 +6,10 @@
 #   settle <bead> [--print] [--db <path>]
 #       compute the bead's priority and write it to the bead and to every live
 #       workflow poured for it (the input convoy, the root and each open step),
-#       then read it back. --print computes the same priority and writes
-#       nothing, for a writer that puts it in the same `bd update` as a route.
+#       then read it back. A writer that routes or slings a bead settles it
+#       first and writes no priority of its own. --print computes the same
+#       priority and writes nothing. It takes no lock, so no writer writes the
+#       number it prints.
 #   move <bead> (<P0-P4> | --shift <±n>) [--dry-run] [--db <path>]
 #       the writer `gc-helm.sh priority` runs: set the bead's own input, then
 #       write every bead that follows it, directly or through others (members,
@@ -50,7 +52,14 @@
 # record was left by one that was killed, so the pass skips its tick.
 #
 # Callers: gc-helm.sh priority (move), orders/queue-priority.toml (reconcile),
-# and the writers that route, sling or release a bead (settle).
+# and the writers that route, sling or release a bead (settle). Those writers
+# are the creators of PR-finishing work, and each settles a child before it
+# makes the child claimable: rework-child.sh and gate-ensure.sh before they
+# sling it, and pr-facts.sh and pre-open-rebase.sh before they write its route,
+# which carries no priority. pr-facts.sh also settles an anchor's PR-finishing
+# work when the posture it records turns approved or stops being approved, and
+# when the anchor leaves pull_request, and on each later pass until all of that
+# work has settled at the rank the anchor's state and posture give.
 # Exit codes: 0 ok; 1 a read, a write, a read-back or the lock failed; 2 usage,
 # a move refused before anything was written, or a pass that finds no one
 # polecat pool to read.
@@ -110,7 +119,10 @@ trap cleanup EXIT
 # a command substitution's copy of it.
 mktemp_tracked() { REPLY="$(mktemp "${TMPDIR:-/tmp}/gctk-queue-priority.XXXXXX")" || return 1; TMPFILES+=("$REPLY"); }
 
-bd_() { gc bd --db "$BD_DB" "$@" 9>&-; }
+# The pin trails the verb, the form lane-state.sh takes too: bd reads a flag
+# wherever it stands, and a stub gc that answers by the verb after `bd` reads
+# the same call.
+bd_() { gc bd "$@" --db "$BD_DB" 9>&-; }
 now_epoch() { date -u +%s; }
 
 usage() {
@@ -126,6 +138,8 @@ Verbs:
              cannot be computed or does not read back. A bead that follows
              nothing keeps its own priority, and its workflows take it. --print
              computes the same priority, prints the number and writes nothing.
+             It takes no lock, so no writer writes the number it prints: a
+             writer settles the bead, then routes or slings it.
   move       The writer gc-helm.sh priority runs. A P-value sets a bead that
              follows nothing; --shift sets the shift of a bead that follows a
              parent or an anchor. It then writes every bead that follows the
@@ -229,6 +243,7 @@ DERIVATION_JQ='
   if has("error") then "unreadable: \(.error)"
   elif .kind == "none" then "P\(.priority), set directly"
   elif .kind == "workflow" then "P\(.priority), the priority of \(.via)"
+  elif .approved == true then "P\(.priority): anchor \(.via) has an approved PR, shift \(.shift | sgn) aside"
   else "P\(.priority): \(.kind) \(.via) P\(.base), shift \(.shift | sgn)" end'
 
 # A bead the writers may rewrite: live and unclaimed, or a workflow root.
@@ -425,7 +440,8 @@ MOVE_JQ='
       ($was | if has("error") then {refusal: "\($b) follows \(.via // "a bead") and its priority cannot be computed: \(.error)"}
        else ($level - .base) as $n
          | (if $n > 0 then "+\($n)" else "\($n)" end) as $sh
-         | {refusal: "\($b) follows \(.kind) \(.via), at P\(.base), so its priority is that plus its own shift. P\($level) is --shift \($sh): gc-helm.sh priority \($b) --shift \($sh)."} end)
+         | (if .approved == true then " While the PR of \(.via) is approved, it runs at P0 whatever its shift." else "" end) as $ap
+         | {refusal: "\($b) follows \(.kind) \(.via), at P\(.base), so its priority is that plus its own shift. P\($level) is --shift \($sh): gc-helm.sh priority \($b) --shift \($sh).\($ap)"} end)
     elif $shift != null and ($follows | not) then
       {refusal: "\($b) follows nothing, so it has no shift. Set its priority directly: gc-helm.sh priority \($b) P<0-4>."}
     else
