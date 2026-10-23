@@ -1002,7 +1002,7 @@ fi
 
 # ── The ruling and recommend exits' human gate ───────────────────────
 # The next move is the operator's, and what a person owes is a native human gate
-# that blocks the subject (gc-helm.sh demand; docs/gascity-human-engagement.md).
+# that blocks the subject (gc-helm.sh demand; docs/human-engagement.md).
 # The takeaway is its question, the same sentence the board shows on the
 # subject. demand keeps one open gate per gated bead and topic, and this gate is
 # filed under the topic first-reaction. So a re-run after a partial refreshes

@@ -154,7 +154,7 @@ after the fact.
 ## How humans engage
 
 The human surface is subject / visit / takeaway on native primitives
-([gascity-human-engagement.md](gascity-human-engagement.md) is the reference).
+([human-engagement.md](human-engagement.md) is the reference).
 
 - **A subject bead is the conversation.** Its id is the conversation's
   identity; turns are small child beads that park on the helm board
@@ -233,6 +233,12 @@ existing component sits. Concretely
   writer, or it does not exist.
 - **Adding a metadata key** — it is state; register it in `lifecycle.toml`.
 - **Adding an invariant** — name its doctor check in the same PR.
+
+Before any of these, a capability that adds operational surface shows that Gas
+City does not already ship it. It names the Gas City primitive it looked for
+and why none covers the need, citing Gas City's own documentation, and a pack
+noun has its warrant in [warrants.md](warrants.md). The arch check's divergence
+lens holds a change to this ([review-arch.md](review-arch.md)).
 
 If a capability fits none of the workflows, that is the signal, and it points
 one of two ways: the capability is miscast and should be recast onto the

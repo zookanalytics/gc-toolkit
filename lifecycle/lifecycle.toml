@@ -36,7 +36,7 @@ human_states = ["abandoned", "retargeted", "blocked", "refused_false_completion"
 # hold to escalate rather than one to overwrite.
 detached_states = ["pre_open_gate", "pull_request"]
 # The one route value that is not a queue. No pool claims it, so it parks the
-# bead for a person (docs/gascity-human-engagement.md). A detached state may
+# bead for a person (docs/human-engagement.md). A detached state may
 # rest on it, and a transition that finds it leaves it alone. Every other route
 # is a pool offer.
 # A park must NAME what it waits for: writing this route without a gc.takeaway
@@ -814,9 +814,9 @@ keys = [
   # fix unit lands. deferred files a claimable follow-up bead (gated behind the
   # anchor, its provenance edge --discovered-from the finding) and closes the
   # finding; declined closes it with the reason, no edge. restates closes a human
-  # review body that only frames the review's own inline comments, each a finding
-  # of its own, with no edge and no answer owed: the review's living answer gives
-  # it no entry and no count.
+  # review body that only frames the inline comments of its review round, each a
+  # finding of its own, with no edge and no answer owed: the round's living
+  # answer gives it no entry and no count.
   # needs-you files a visit for the operator, or names one already open on the
   # anchor's feedback, and leaves the finding OPEN — an open finding holds its
   # human review changes-requested until the operator rules the visit holding
@@ -897,6 +897,18 @@ keys = [
   # (finding.reply_posted), the write-back dismisses THAT review and re-requests
   # its author — per-review, independent of other reviews on the same PR.
   "finding.review_id",
+  # The review round of the review that raised a human finding, the one
+  # finding.review_id names: `<login>@<commit oid>`, the reviewer and the commit
+  # that review was submitted against. A client can submit one pass as one
+  # review per comment, and the round is that pass. pr-facts.sh stamps it at
+  # file time beside finding.review_id. Its write-back records it again from
+  # each read of the PR that places the review, on a finding whose round is
+  # missing or differs, so a finding the intake stamped no round on carries one
+  # from the next such read. finding.sh reads it to rule restates on a review
+  # body that frames the inline comments of other reviews in its round. Absent
+  # when either half is unknown, and on a Conversation comment, which belongs to
+  # no review.
+  "finding.review_round",
   # The rework child dispatched with the batch that raised a finding, recorded by
   # finding.sh upsert --fix-unit as pr-facts.sh files a human batch routed to
   # work. A must-fix ruling hangs its close-ordering edge from this child, never
@@ -1648,9 +1660,10 @@ keys = [
 #   and the review graph. gc.routed_to and gc.execution_routed_to are
 #   the route stamps (see the ROUTE rule in the preamble). The rest — assignee,
 #   the session and claim stamps, the step and root linkage, the poured vars and
-#   gc.formula_source, gc.session_affinity (the runtime pins it to gc.session_id)
-#   and pin_awake (settable only by `gc session pin`) — are written by the
-#   runtime; the pack reads them and does not write them.
+#   gc.formula_source, gc.session_affinity (the continuation backstop acts only
+#   on a step marked `require`) and pin_awake (settable only by
+#   `gc session pin`) — are written by the runtime; the pack reads them and does
+#   not write them.
 # gc.run_target — a third route stamp beside gc.routed_to and
 #   gc.execution_routed_to, written by the runtime: gascity's
 #   ReleaseWorkBead re-stamps it as a fallback route on a drained session's work

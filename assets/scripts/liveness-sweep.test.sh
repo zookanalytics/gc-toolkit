@@ -334,12 +334,11 @@ grep -q 'visit.recheck=.*liveness-recheck.sh' "$GC_CALLS" \
     || bad "visit.recheck stamp" "$(cat "$GC_CALLS")"
 
 echo "── a routed workflow ROOT is topology, never routed-and-claimable ──"
-# gc.routed_to on a root names the run; it is not an offer. The hook refuses a
-# workflow-topology candidate (hookCandidateClaimable) and the controller's
-# demand loop refuses to count one (demandRowServable), both keyed on gc.kind,
-# so no worker can ever take the row. Calling it claimable published a count of
-# pool demand that nothing could serve. c-routed is the discriminator: an
-# ordinary routed bead keeps the claimable class.
+# The comment on topology_kind in liveness-classify.sh names the Gas City check
+# it mirrors and where the two differ. topology_kind reads gc.kind alone, so
+# root-landed and root-live classify as topology though neither carries a
+# gc.workflow_expanded stamp. c-routed is the discriminator: an ordinary routed
+# bead keeps the claimable class.
 FUNNEL="$(printf '%s' "$OUT" | grep 'funnel:' || true)"
 # Exact count per class: a substring match would accept "topology 20" too.
 funnel_count() { printf '%s' "$FUNNEL" | sed 's/.*funnel: //; s/ \xc2\xb7 /\n/g' \

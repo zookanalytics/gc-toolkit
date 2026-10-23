@@ -56,7 +56,10 @@ PROMPT="$REPO/agents/_converse/prompt.template.md"
 ATOML="$REPO/agents/converse-opus/agent.toml"
 SITTINGS=("$REPO"/agents/converse-*/agent.toml)
 HELM="$REPO/assets/scripts/gc-helm.sh"
-ENGAGE="$REPO/docs/gascity-human-engagement.md"
+# The pack's conversation model and the Gas City facts it rides are two
+# pages: each pin below reads the one that carries the text it guards.
+ENGAGE="$REPO/docs/human-engagement.md"
+ENGAGE_GC="$REPO/docs/gascity/human-engagement.md"
 # Steps 2–8 are carried by on-demand skills; step 1 and the routing table stay
 # in the prompt. Each pin below reads the file that carries the text it guards:
 # the prompt for step 1, the routing table and the shared Definitions/Rules, and
@@ -97,7 +100,7 @@ eq() {
     if [ "$1" = "$2" ]; then ok "$3"; else bad "$3" "got '$1' want '$2'"; fi
 }
 
-for f in "$PROMPT" "$ATOML" "${SITTINGS[@]}" "$HELM" "$ENGAGE" \
+for f in "$PROMPT" "$ATOML" "${SITTINGS[@]}" "$HELM" "$ENGAGE" "$ENGAGE_GC" \
     "$SK_RECHECK" "$SK_PREP" "$SK_HOLD" "$SK_SETTLE" "$SK_CONTINUE"; do
     [ -r "$f" ] || {
         printf 'converse-signoff: cannot read %s\n' "$f" >&2
@@ -393,7 +396,7 @@ echo "── the agent config no longer claims timeouts do not end a sitting ─
 lacks "no 'visit boundaries, not timeouts' claim" \
     'visit boundaries, not' "$ATOML" \
     "the claim is false: idle_timeout + the assigned-work defer cap do end a held sitting"
-have "config points at the verified mechanism" 'gascity-human-engagement.md' "$ATOML"
+have "config points at the verified mechanism" 'docs/human-engagement.md' "$ATOML"
 # The config header is the role's definition in its third copy, and it
 # opened with the same equation the prompt did. Fixing one copy of a
 # definition and leaving its siblings stale is how the corrected model
@@ -454,11 +457,11 @@ done
 
 echo "── the verified mechanism is recorded centrally ──"
 have "engagement doc has the ending section" 'How a held sitting ends' "$ENGAGE"
-have "doc corrects the wisp_ttl misreading" 'wisp_ttl' "$ENGAGE"
-have "doc names the tmux activity source" 'window_activity' "$ENGAGE"
-have "doc names the defer cap" 'assigned_work_defer_limit' "$ENGAGE"
-have "doc records the scrollback erasure" 'ClearScrollback' "$ENGAGE"
-have "doc names the unbuilt core seam" 'IsAttached' "$ENGAGE"
+have "doc corrects the wisp_ttl misreading" 'wisp_ttl' "$ENGAGE_GC"
+have "doc names the tmux activity source" 'window_activity' "$ENGAGE_GC"
+have "doc names the defer cap" 'assigned_work_defer_limit' "$ENGAGE_GC"
+have "doc records the scrollback erasure" 'ClearScrollback' "$ENGAGE_GC"
+have "doc names the unbuilt core seam" 'IsAttached' "$ENGAGE_GC"
 
 # Page one outranks a rule further down here too: the doc opens with the
 # pack's vocabulary, and a definition reading "a visit IS a sitting, held
