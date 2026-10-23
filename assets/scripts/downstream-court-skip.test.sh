@@ -10,13 +10,17 @@
 # would false-orphan it.
 # Returning it to the pool re-dispatches finished work AND stamps a recovery, and
 # the downstream crash-loop signal reads that stamp as a RATE off
-# recovered_at/recovered_count, so a bead that keeps arriving here escalates a
-# moot visit every cycle. Dropping such beads from the candidate set before the
-# liveness loop is what stops both the re-dispatch and the escalation.
+# recovered_at/recovered_count, so a bead that keeps arriving here puts a
+# moot question to a person every cycle. Dropping such beads from the candidate
+# set before the liveness loop is what stops both the re-dispatch and the question.
 #
-# Two states name work that is not the pool's to recover:
+# Three states name work that is not the pool's to recover:
 #   * an in-flight PR      — merge_result is pre_open_gate or pull_request;
-#   * a human gate         — gc.routed_to=human.
+#   * a human route        — gc.routed_to=human;
+#   * a conversation       — a task assigned to `human` or to the alias of its
+#                            sitting, which names the task's own id
+#                            (assets/scripts/conversation.sh, whose shell rule
+#                            this test holds the filter's copy to).
 # pr.machine is NOT one of them: a progressing stamp is written only alongside an
 # anchor merge_result, and unanchoring back to the pool clears merge_result while
 # leaving pr.machine behind, so on a repooled bead it is stale — reading it strands
@@ -135,6 +139,41 @@ FIX3='[
 ]'
 eq "$(keep "$FIX3")" "e2,e4" \
    "exact match: drops pull_request and human; keeps pull_request_draft and human-review"
+
+# --- A conversation. ----------------------------------------------------------
+# A task assigned to `human`, or to the alias of its sitting, which names the
+# task's own id, bare or qualified, or its c- fallback. No session carries
+# either owner, so the liveness loop would orphan it. The filter carries its own
+# copy of conversation.sh's rule, since a formula block sources nothing, so each
+# assignee below runs through both and they must agree.
+# shellcheck source=conversation.sh
+. "$ROOT/assets/scripts/conversation.sh"
+NDROP=0; NKEEP=0
+while IFS= read -r a; do
+  [ -n "$a" ] || continue
+  want=kept; conversation_assignee "$a" tk-c1 && want=dropped
+  got=$(keep "$(jq -nc --arg a "$a" '[{id: "tk-c1", issue_type: "task", assignee: $a}]')")
+  if [ -n "$got" ]; then got=kept; else got=dropped; fi
+  [ "$got" = dropped ] && NDROP=$((NDROP + 1)) || NKEEP=$((NKEEP + 1))
+  eq "$got" "$want" "the filter and conversation.sh agree on a task assigned to '$a'"
+done <<'ASSIGNEES'
+human
+tk-c1
+c-tk-c1
+gc-toolkit/gc-toolkit.tk-c1
+gc-toolkit/gc-toolkit.c-tk-c1
+gc-toolkit/tk-c1
+gc-toolkit/gc-toolkit.tk-c2
+rig/gc-toolkit.polecat
+alice
+xtk-c1
+ASSIGNEES
+[ "$NDROP" -gt 0 ] && [ "$NKEEP" -gt 0 ] \
+  && ok "the agreement is not vacuous: $NDROP dropped, $NKEEP kept" \
+  || bad "the agreement is not vacuous" "dropped $NDROP, kept $NKEEP"
+# Only a task is a conversation: a gate or an epic under such an assignee is kept.
+FIX7='[{"id":"g1","issue_type":"gate","assignee":"human"},{"id":"tk-e1","issue_type":"epic","assignee":"gc-toolkit/gc-toolkit.tk-e1"}]'
+eq "$(keep "$FIX7")" "g1,tk-e1" "only a task is a conversation; another type under such an assignee is kept"
 
 # Empty listing -> empty result (never errors).
 eq "$(keep '[]')" "" "empty listing yields empty result"

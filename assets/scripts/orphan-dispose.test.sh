@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/orphan-dispose.sh.
 #
-# THE BUG the script fixes: witness orphan recovery disposed of every non-visit
-# bead with `gc workflow delete-source --apply && gc workflow reopen-source`.
+# THE BUG the script fixes: witness orphan recovery disposed of every bead it
+# did not release by `gc workflow delete-source --apply && gc workflow reopen-source`.
 # delete-source matches workflow roots on gc.source_bead_id and a root poured
 # from an input convoy never carries it, so the close half is a no-op for
 # graph.v2 chains and reopen-source runs alone. Run against a workflow STEP
@@ -11,8 +11,8 @@
 #
 # What is exercised here:
 #   * CLASSIFICATION of the shapes that reach the disposal, including the
-#     order dependencies: a visit and a review are each the source bead of their
-#     own molecule and must be recognised by task_kind before the source arm,
+#     order dependencies: a review is the source bead of its own molecule and
+#     must be recognised by task_kind before the source arm,
 #     and a root carries gc.kind/gc.formula_contract where a step carries
 #     gc.step_ref;
 #   * the ROOT arm writing NOTHING, and in particular never reaching the
@@ -85,9 +85,6 @@ fixture() {
      "metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2",
                  "gc.input_convoy_id":"tk-convoy","gc.routed_to":"gc-toolkit/gc-toolkit.polecat",
                  "gc.session_name":"polecat-2-pool"}},
-    {"id":"tk-visit","status":"in_progress","assignee":"lx-dead","title":"visit",
-     "metadata":{"task_kind":"visit","gc.routed_to":"gc-toolkit/gc-toolkit.converse",
-                 "gc.continuation_group":"cg-visit","gc.session_id":"lx-dead"}},
     {"id":"tk-work","status":"in_progress","assignee":"lx-dead","title":"a work bead",
      "metadata":{"branch":"polecat/tk-work","gc.routed_to":"gc-toolkit/gc-toolkit.polecat",
                  "workflow_id":"tk-root","gc.session_id":"lx-dead","gc.session_name":"polecat-3-pool"}}
@@ -99,19 +96,10 @@ echo "--- classification ---"
 fixture
 OUT=$("$SCRIPT" tk-step 2>&1);  has "$OUT" "class=workflow-step"  "step classified as workflow-step"
 OUT=$("$SCRIPT" tk-root 2>&1);  has "$OUT" "class=workflow-root"  "root classified as workflow-root"
-OUT=$("$SCRIPT" tk-visit 2>&1); has "$OUT" "class=visit"          "visit classified as visit"
 OUT=$("$SCRIPT" tk-work 2>&1);  has "$OUT" "class=source"         "plain work bead classified as source"
 
-# A visit that also carried step metadata must still read as a visit: it is the
-# source bead of its own mol-visit molecule, and the visit arm is the narrower
-# contract (release the assignee and touch no metadata).
-store '[{"id":"tk-v2","status":"in_progress","assignee":"lx-dead","title":"visit",
-         "metadata":{"task_kind":"visit","gc.step_ref":"mol-visit.converse",
-                     "gc.routed_to":"r","gc.session_id":"lx-dead"}}]'
-OUT=$("$SCRIPT" tk-v2 2>&1); has "$OUT" "class=visit" "task_kind=visit outranks a step_ref"
-
-# A review bead is the source bead of its own mol-review molecule, so like a visit
-# it is classified by task_kind before the source arm — and before the step/root
+# A review bead is the source bead of its own mol-review molecule, so it is
+# classified by task_kind before the source arm — and before the step/root
 # checks, so a review that also carried a step_ref still reads review.
 store '[{"id":"tk-rv","status":"in_progress","assignee":"lx-dead","title":"Review branch polecat/tk-anc -> main: a finding",
          "metadata":{"task_kind":"review","gc.step_ref":"mol-review.review","check_name":"codex",
@@ -445,16 +433,16 @@ has "$OUT" "action=delegate-source-workflow" "a stale progressing stamp (no anch
 has "$(cat "$STUB_GC_LOG")" "delete-source" "stale-progressing source calls delete-source"
 has "$OUT" "result=disposed" "stale-progressing source is recovered"
 
-echo "--- source arm: a human-gate source bead is NOT returned to the pool ---"
-# A work bead a person owns clearing — routed to the human gate (gc.routed_to=human:
-# a merge gate, an operator approval) — is not lost work, even with no
+echo "--- source arm: a human-routed source bead is NOT returned to the pool ---"
+# A work bead a person owns clearing — routed to a human (gc.routed_to=human: a
+# merge gate, an operator approval) — is not lost work, even with no
 # merge_result and no progressing machine. It still names its dead session, so orphan
 # recovery classes it source and would delete-source + reopen-source it back to the
 # pool. mol-witness-patrol's downstream-court-skip filter drops it upstream, but a bead
-# that moves onto a human gate after that filter, or reaches this script by recovery or
+# that moves onto a human route after that filter, or reaches this script by recovery or
 # manual replay, must still be skipped here. The tk-work and tk-settled cases above
 # (routed to a pool address, no in-flight state) still delegate, so the guard is scoped
-# to the human gate, not to any route.
+# to the human route, not to any route.
 store '[{"id":"tk-human","status":"open","assignee":"","title":"human-gate work bead",
          "metadata":{"branch":"polecat/tk-human","gc.routed_to":"human","gc.session_name":"polecat-9-pool"}}]'
 : > "$STUB_GC_LOG"
@@ -463,10 +451,35 @@ eq "$rc" "0" "human-gate source disposal exits 0"
 has "$OUT" "class=source"      "human-gate bead is still classed source"
 has "$OUT" "action=skip"       "human-gate source is skipped, not delegated"
 has "$OUT" "result=skipped"    "human-gate source reports skipped"
-has "$OUT" "detail=human_gate" "human-gate skip states why"
+has "$OUT" "detail=human_route" "human-route skip states why"
 hasnt "$(cat "$STUB_GC_LOG")" "delete-source" "human-gate source never calls delete-source"
 hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "human-gate source never reopens"
 eq "$(bstatus tk-human)" "open" "human-gate bead left as-is"
+
+echo "--- source arm: a conversation is NOT returned to the pool ---"
+# A conversation is a task assigned to `human` in the operator's queue, or to
+# the alias of its sitting, which names the task's own id (conversation.sh). No
+# session carries either owner: Gas City reserves `human`, and a sitting whose
+# session closed keeps its alias as the assignee until a session under that
+# alias takes the conversation back. Orphan recovery resolves both as dead and
+# would reopen the conversation to a pool. A task whose alias names another id
+# is not a conversation, so the guard is scoped to the shape.
+for conv in "tk-conv:in_progress:gc-toolkit/gc-toolkit.tk-conv" "tk-convq:open:human" "tk-convc:in_progress:gc-toolkit/gc-toolkit.c-tk-convc"; do
+    cid="${conv%%:*}"; rest="${conv#*:}"; cst="${rest%%:*}"; cas="${rest#*:}"
+    store "[{\"id\":\"$cid\",\"status\":\"$cst\",\"issue_type\":\"task\",\"assignee\":\"$cas\",\"title\":\"about tk-subj\",
+             \"dependencies\":[{\"id\":\"tk-subj\",\"dependency_type\":\"tracks\",\"status\":\"open\"}],\"metadata\":{}}]"
+    : > "$STUB_GC_LOG"
+    OUT=$("$SCRIPT" "$cid" --owner "$cas" --apply 2>&1); rc=$?
+    eq "$rc" "0" "a conversation's disposal exits 0 ($cas)"
+    has "$OUT" "action=skip" "a conversation is skipped, not delegated ($cas)"
+    has "$OUT" "detail=conversation(assignee=$cas)" "…and the skip names it ($cas)"
+    hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "…and it is never reopened ($cas)"
+    eq "$(bstatus "$cid")" "$cst" "…and it is left as it was ($cas)"
+done
+store '[{"id":"tk-notconv","status":"in_progress","issue_type":"task","assignee":"gc-toolkit/gc-toolkit.tk-other","title":"a task under an alias naming another bead",
+         "metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead"}}]'
+OUT=$("$SCRIPT" tk-notconv 2>&1)
+has "$OUT" "action=delegate-source-workflow" "a task whose alias names another id is no conversation, and delegates"
 
 echo "--- source arm: a progressing pr.machine WITH an anchor still skips (on merge_result) ---"
 # The in-flight skip is the merge_result arm's alone now. A bead genuinely in the
