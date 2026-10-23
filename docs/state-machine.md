@@ -345,23 +345,27 @@ the PR therefore always matches what is still owed.
 The review bead carries the `mol-review` formula (attached at dispatch via
 `gc sling --on`); the reviewing polecat follows its steps. The dispatch pins
 `reviewed_oid=<live head>` on the review bead, naming the commit the reviewer
-read — it binds no lane state, and a push that only adds commits on top (the
-branch growing) leaves the pin `on` the branch and is not this check's
-business. What the pin still guards against is a rewrite: `signoff.sh` asks
+read, and nothing moves or clears it afterwards: `signoff.sh` refuses a
+verdict that names another commit. The pin binds no lane state, and a push
+that only adds commits on top (the branch growing) leaves the pin `on` the
+branch and is not this check's business. What the pin still guards against is
+a rewrite: `signoff.sh` asks
 whether `reviewed_oid` is still an ancestor of the live head
 (`git merge-base --is-ancestor`, with a GitHub compare consulted first when a
 PR is open); a rebase, amend, or force-push that takes the pinned commit off
 the branch answers `gone`, and **both verdicts are refused** — findings about
 a diff the branch no longer carries would mint a rework child with nothing to
 implement. The refusal is not a dead end an operator must clear by hand: it
-clears the dead `reviewed_oid` pin itself, then closes the review bead
-`gc.outcome=superseded`, so gate-ensure's in-flight probe stops seeing it and
-pours a fresh review at the live head on its next pass. No verdict is
-recorded either way.
+closes the review bead `gc.outcome=superseded` with its pin in place, so
+gate-ensure's in-flight probe stops seeing it and pours a fresh review at the
+live head on its next pass. No verdict is recorded either way. A close the
+store does not take exits 2, and the next claimant reviews the same departed
+commit once more before its verdict meets the same refusal.
 
-Whichever source wins, `signoff.sh` writes that commit back to the review bead
-as `reviewed_oid` before it posts anything, on both verdicts and whether or
-not the PR is open. The lane state itself names no commit, so that record is
+`signoff.sh` writes the commit the verdict names back to the review bead as
+`reviewed_oid` before it posts anything, on both verdicts and whether or not
+the PR is open: the pin, or on a review whose record carries none, the commit
+the call names or else the live head. The lane state itself names no commit, so that record is
 the whole of what a city verdict leaves behind: the city posts no APPROVED
 GitHub review, and `lane-state.sh` derives a lane's green only against a
 review bead carrying it. A store that will not take the record costs a

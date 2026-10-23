@@ -188,11 +188,10 @@ exit 1
 SUPS
 chmod +x "$SD/branch-supersession.sh"
 export STUB_SUPERSESSION_LOG="$TMP/supersession.log" STUB_SUPERSESSION_HOLD=""; : > "$STUB_SUPERSESSION_LOG"
-printf '#!/usr/bin/env bash\necho "METHOD${2:+ note: $2}"\n' > "$SD/review-dispatch-body.sh"
 # validate-dispatch-body.sh's real output is prose the validator reads; the test
 # only needs a non-empty note so the validation-pass open takes its body path.
 printf '#!/usr/bin/env bash\necho "VALIDATE-METHOD${2:+ note: $2}"\n' > "$SD/validate-dispatch-body.sh"
-chmod +x "$SD/escalate.sh" "$SD/review-dispatch-body.sh" "$SD/validate-dispatch-body.sh"
+chmod +x "$SD/escalate.sh" "$SD/validate-dispatch-body.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
 # patrol-finding.sh, one durable bead per situation key: the write-back files a
 # review thread it cannot resolve through it. Each call is logged one argument
@@ -877,7 +876,7 @@ echo "# the sweep's retract runs through the real escalate.sh and visit-close.sh
 # GC_RIG names the store, since no rig set is served here to derive it from.
 SD2="$TMP/scripts-real-escalate"
 mk_sut_dir "$SD2" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/visit-close.sh" "$HERE/finalize-gate.sh" "$HERE/escalate.sh"
-cp "$SD/bead-rehome.sh" "$SD/review-dispatch-body.sh" "$SD/validate-dispatch-body.sh" "$SD/lane-state.sh" "$SD2/"
+cp "$SD/bead-rehome.sh" "$SD/validate-dispatch-body.sh" "$SD/lane-state.sh" "$SD2/"
 : > "$STUB_DEPS"
 store "[$(anchor F2w 127 ',"gc.superseded_by":"tk-w"' | jq -c '.status = "closed"'), $(dvisit VW F2w pr-dispose-failed.127)]"
 printf 'VW|tracks|F2w\n' > "$STUB_DEPS"

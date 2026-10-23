@@ -71,9 +71,10 @@
 #
 # The index declares mechanical facts only. When a check applies to a given diff
 # is a judgment its method states in prose, not a column here.
-# Callers: signoff.sh, skills/review-triage, pr-open.sh, gctk merge, gate-ensure.sh,
+# Callers: signoff.sh, skills/review-triage, formulas/mol-review.toml and
+# mol-review-quorum-signoff.toml, pr-open.sh, gctk merge, gate-ensure.sh,
 # pr-facts.sh, review-outcome.sh, pr-summary-region.sh, liveness-sweep.sh,
-# review-dispatch-body.sh, review-checks.test.sh.
+# review-checks.test.sh.
 # Exit: 0 ok · 1 a commit --at names cannot be read, an extension at a readable
 # commit cannot be read, the paths --edits lists cannot be listed, --check names
 # a check no layer declares or one whose phase is outside the ordered set, a

@@ -114,14 +114,17 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  approve. request-changes files each as a first-class finding bead
                  beside the rework child, deduped on locus and message. Default:
                  none filed, and the findings live only in the verdict prose.
-  --reviewed-oid the commit the review read; default: the review bead's own
-                 reviewed_oid (stamped at dispatch), else the live head of the
-                 anchor's branch (git ls-remote origin <branch>). It names the
+  --reviewed-oid the commit the review read. A review bead whose reviewed_oid
+                 the dispatch pinned takes that commit: this flag may name it,
+                 in full or abbreviated, and a value naming any other commit
+                 is refused with nothing written. On a review bead with no pin
+                 it names the commit; absent, the live head of the anchor's
+                 branch (git ls-remote origin <branch>) does. It names the
                  commit in the posted artifact and binds the verdict to no
-                 head, except that a pin the branch no longer carries
-                 (rewritten out from under it) is refused, not recorded.
-                 Whichever source wins is written back to the review bead as
-                 the commit this verdict judged.
+                 head, except that a commit the branch no longer carries
+                 (rewritten out from under it) is refused, not recorded. The
+                 commit is written back to the review bead as the one this
+                 verdict judged.
   --add-gates    checks to union into the anchor's check_set (triage only, with
                  --verdict approve). A set union with read-back that can never
                  remove a declared check, validated against the effective check
@@ -418,14 +421,25 @@ fi
 
 BRANCH=$(row_meta "$ANCHOR_ROW" branch)
 [ -n "$BRANCH" ] || BRANCH=$(row_meta "$REVIEW_ROW" review_branch)
-# The commit this verdict READ, in order: the caller's --reviewed-oid; the
-# reviewed_oid the DISPATCH pinned on the review bead (gate-ensure/pr-facts
-# stamp the live head at dispatch time); only then the live head. It names the
-# commit in the posted artifact and in the pre-open record, so a dispatch pin
-# wins over a live head read after the fact. The verdict is about the lane and
-# is not bound to it, and the merge compares no verdict to a head.
-REVIEWED_OID="$OID_OVERRIDE"
-[ -n "$REVIEWED_OID" ] || REVIEWED_OID=$(row_meta "$REVIEW_ROW" reviewed_oid)
+# The commit this verdict READ. A review's record pins the commit its dispatch
+# read, and nothing moves it, so a verdict names that commit or is not
+# recorded: a --reviewed-oid naming any other is refused before anything is
+# written, and an abbreviation of the pinned commit names the pinned commit. A
+# record with no pin, a review made by hand or before the dispatch wrote one,
+# takes the caller's --reviewed-oid, else the live head. The posted artifact
+# and the record name this commit. The verdict is about the lane and is not
+# bound to it, and the merge compares no verdict to a head.
+PINNED_OID=$(row_meta "$REVIEW_ROW" reviewed_oid | tr '[:upper:]' '[:lower:]')
+OID_OVERRIDE=$(printf '%s' "$OID_OVERRIDE" | tr '[:upper:]' '[:lower:]')
+REVIEWED_OID="$PINNED_OID"
+if [ -n "$OID_OVERRIDE" ]; then
+  if [ -z "$PINNED_OID" ]; then
+    REVIEWED_OID="$OID_OVERRIDE"
+  elif [ "$OID_OVERRIDE" != "$PINNED_OID" ] && { [ "${#OID_OVERRIDE}" -lt 7 ] || [ "${PINNED_OID#"$OID_OVERRIDE"}" = "$PINNED_OID" ]; }; then
+    warn "--reviewed-oid $OID_OVERRIDE is not the commit $REVIEW_BEAD was dispatched to review ($PINNED_OID), and a review's commit is never moved; re-run naming $PINNED_OID. Nothing written"
+    exit 1
+  fi
+fi
 
 # The head of the anchor's branch on origin. ls-remote matches its pattern
 # against a ref's tail, so only the line for the exact ref is taken.
@@ -485,35 +499,15 @@ oid_on_branch() { # <oid> <live-head>
 
 LIVE_HEAD=$(live_head)
 if [ "$(oid_on_branch "$REVIEWED_OID" "$LIVE_HEAD")" = "gone" ]; then
-  # A dispatch pin that no longer names real content: gate-ensure/pr-facts
-  # stamped it at a head the branch has since been rewritten out from under
-  # (rebase, amend, force-push), so what mol-review read and tested is not
-  # mergeable content. This is not "moved" — commits added on top stay 'on'
-  # and are not this check's business — and it is not a failure to retry: the
-  # review bead is closed superseded so gate-ensure's in-flight probe stops
-  # seeing it and pours a fresh review at the live head next pass. Neither
-  # verdict is recorded.
-  #
-  # mol-review re-reads the dispatch pin on the next claim, so a dead one left
-  # in place would re-review the same departed commit — clear only the bead's
-  # own pin: a caller who overrode a live one has not staled the dispatch.
-  # Best-effort — the refusal proceeds either way.
-  if [ "$(row_meta "$REVIEW_ROW" reviewed_oid)" = "$REVIEWED_OID" ]; then
-    gc bd update "$REVIEW_BEAD" --unset-metadata reviewed_oid >/dev/null 2>&1 || true
-    # A denied or raced delete does not always fail the call, and the note and
-    # warning below both state the pin as cleared. Read it back. row_meta
-    # answers '' for a key that is gone and for a row it could not read, so
-    # absence is proof only from a row that resolved.
-    AFTER_ROW=$(bd_json show "$REVIEW_BEAD")
-    if ! is_rows "$AFTER_ROW"; then
-      warn "head moved to ${LIVE_HEAD:-unknown}, but $REVIEW_BEAD would not resolve on the read-back after clearing the dead dispatch pin, so whether reviewed_oid=$REVIEWED_OID is gone is unproven. Nothing was written, no round was spent, and the review bead is left OPEN rather than closed superseded on an unproven clear. If the pin survived, the next mol-review claim re-reviews $REVIEWED_OID instead of the live head. Check it by hand: gc bd show $REVIEW_BEAD --json, then gc bd update $REVIEW_BEAD --unset-metadata reviewed_oid"
-      exit 2
-    fi
-    if [ "$(row_meta "$AFTER_ROW" reviewed_oid)" = "$REVIEWED_OID" ]; then
-      warn "head moved to ${LIVE_HEAD:-unknown}, but clearing the dead dispatch pin did not read back on $REVIEW_BEAD: reviewed_oid is still $REVIEWED_OID. Nothing was written, no round was spent, and the review bead is left OPEN rather than closed superseded while the pin still stands. Clear it by hand: gc bd update $REVIEW_BEAD --unset-metadata reviewed_oid"
-      exit 2
-    fi
-  fi
+  # A dispatch pin that no longer names real content: gate-ensure stamped it at
+  # a head the branch has since been rewritten out from under (rebase, amend,
+  # force-push), so what the review read and tested is not mergeable content.
+  # This is not "moved": commits added on top stay 'on' and are not this
+  # check's business. Neither verdict is recorded. The review bead is closed
+  # superseded so gate-ensure's in-flight probe stops seeing it and pours a
+  # fresh review at the live head next pass. The pin stays as the dispatch
+  # wrote it, so a retry after a close that did not land reviews this same
+  # commit once more and meets this same refusal.
   gc bd update "$REVIEW_BEAD" --append-notes \
     "signoff refused a verdict at $REVIEWED_OID: that commit has left branch '${BRANCH:-?}', now at ${LIVE_HEAD:-unknown}. No verdict recorded; closing this review as superseded so gate-ensure pours a fresh one at the live head." \
     >/dev/null 2>&1 || true
@@ -522,7 +516,7 @@ if [ "$(oid_on_branch "$REVIEWED_OID" "$LIVE_HEAD")" = "gone" ]; then
   SUPERSEDED_ST=$(printf '%s' "$SUPERSEDED_ROW" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null)
   SUPERSEDED_OC=$(row_meta "$SUPERSEDED_ROW" gc.outcome)
   if [ "$SUPERSEDED_ST" != "closed" ] || [ "$SUPERSEDED_OC" != "superseded" ]; then
-    warn "head moved to ${LIVE_HEAD:-unknown} and the pin was cleared, but closing $REVIEW_BEAD as superseded did not read back (status='$SUPERSEDED_ST' gc.outcome='$SUPERSEDED_OC'); review left open for a retry"
+    warn "head moved to ${LIVE_HEAD:-unknown}, but closing $REVIEW_BEAD as superseded did not read back (status='$SUPERSEDED_ST' gc.outcome='$SUPERSEDED_OC'); no verdict recorded, review left open for a retry"
     exit 2
   fi
   warn "head moved: reviewed oid $REVIEWED_OID has left branch '${BRANCH:-?}', now at $LIVE_HEAD. No verdict written — review $REVIEW_BEAD closed as superseded; gate-ensure pours a fresh review at the live head."
