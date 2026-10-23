@@ -6,7 +6,8 @@
 # merges dispatching nothing; every branch shape brought current by merge (no
 # shape rebases or force-pushes, polecat/* and a graduation included) and this
 # site's agreement with pr-facts.sh's copy; the vetoes (merge_hold, rebase_hold, a
-# rebase_hold on a bead naming the branch, a live demand, no fix pool); a branch
+# rebase_hold on a bead naming the branch, a live human gate on the anchor, no
+# fix pool); a branch
 # whose edited code main deleted getting the operator's supersession decision
 # instead of a child, a pending decision holding without asking again, and
 # a decision that cannot be recorded falling through to the ordinary child; dedup on
@@ -87,13 +88,12 @@ git clone -q "$SRC" "$WORK"
 C1_HEAD=$(git -C "$SRC" rev-parse polecat/tk-c1)
 
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/pre-open-rebase.sh" "$HERE/branch-supersession.sh" "$HERE/pool-route.sh"
+mk_sut_dir "$SD" "$HERE/pre-open-rebase.sh" "$HERE/branch-supersession.sh"
 SUT="$SD/pre-open-rebase.sh"
 POOL="loomington/gc-toolkit.polecat"
-# human-gate.sh as the supersession guard reads it back: one decision per
-# subject+key, which the guard's lookup finds as an open bead stamped with the
-# key and the subject and routed at the board, so it counts as asking somebody.
-# STUB_GATE_RC models a refusal.
+# human-gate.sh as the supersession guard reads it back: one open human gate
+# per subject and key, blocking the subject, which the guard's lookup finds
+# through the subject's blocks edges. STUB_GATE_RC models a refusal.
 cat > "$SD/human-gate.sh" <<'GATE'
 #!/usr/bin/env bash
 set -u
@@ -108,11 +108,13 @@ while [ $# -gt 0 ]; do
   shift || true
 done
 [ -n "$subj" ] && [ -n "$key" ] || exit 2
-vid=$(gc bd create "visit: $subj — $key" -t task --json | jq -r '.id // empty')
-[ -n "$vid" ] || exit 1
-gc bd update "$vid" --set-metadata "escalation_key=$key" \
-  --set-metadata "gc.continuation_group=$subj" --set-metadata "task_kind=visit" \
-  --set-metadata "gc.routed_to=human" >/dev/null
+gid="gate-$(jq 'length' "$STUB_STORE")"
+tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-preopen-gate.XXXXXX")
+jq -c --arg id "$gid" --arg k "$key" --arg s "$subj" \
+  '. + [{id: $id, status: "open", assignee: "", notes: "", title: ("decide " + $s), issue_type: "gate", await_type: "human", await_id: $k, metadata: {}}]' \
+  "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
+printf '%s|blocks|%s\n' "$gid" "$subj" >> "$STUB_DEPS"
+printf '%s\n' "$gid"
 GATE
 chmod +x "$SD/human-gate.sh"
 export STUB_GATE_LOG="$TMP/gate.log" STUB_GATE_RC=""; : > "$STUB_GATE_LOG"
@@ -130,7 +132,7 @@ reset() { # <row-json>...
 }
 newborn() { jq -r '[ .[] | select(.id | startswith("new-")) ][0].id // "<none>"' "$STUB_STORE"; }
 newcount() { jq '[ .[] | select(.id | startswith("new-")) ] | length' "$STUB_STORE"; }
-kidcount() { jq '[ .[] | select(.id | startswith("new-")) | select((.title // "") | startswith("visit:") | not) ] | length' "$STUB_STORE"; }
+kidcount() { jq '[ .[] | select(.id | startswith("new-")) | select((.issue_type // "") != "gate") ] | length' "$STUB_STORE"; }
 
 echo "# the premise the ref guard rests on"
 ( cd "$WORK" && git merge-tree --write-tree main nosuchref >/dev/null 2>&1 ); rc=$?
@@ -221,11 +223,12 @@ has "$OUT" "held=1" "and the anchor is counted held, not skipped or reworked"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $POOL" "the fix pool is not woken"
 
 echo "# a pending supersession decision holds without asking again"
-reset "$(pre AN polecat/tk-moot)" '{"id":"VN","status":"open","assignee":"","title":"visit","notes":"","metadata":{"escalation_key":"rework-base-supersession","gc.continuation_group":"AN","task_kind":"visit","gc.routed_to":"human"}}'
+reset "$(pre AN polecat/tk-moot)" '{"id":"VN","status":"open","assignee":"","title":"decide AN","notes":"","issue_type":"gate","await_type":"human","await_id":"rework-base-supersession","metadata":{}}'
+printf 'VN|blocks|AN\n' > "$STUB_DEPS"
 OUT=$(run --fix-pool "$POOL")
 eq "$(kidcount)" "0" "an open decision on the anchor files no child"
 eq "$(cat "$STUB_GATE_LOG")" "" "and the decision is not asked again"
-has "$OUT" "VN is still open" "the pending decision is named"
+has "$OUT" "open human gate VN holds it" "the pending decision is named"
 
 echo "# a supersession that cannot be recorded falls through to the ordinary child"
 reset "$(pre AO polecat/tk-moot)"
@@ -264,10 +267,19 @@ has "$OUT" "a hold is set (operator gate)" "and says which gate held it"
 reset "$(pre A6 polecat/tk-hold ',"rebase_hold":"true"')"
 eq "$(run --fix-pool "$POOL" >/dev/null; newcount)" "0" "rebase_hold dispatches nothing"
 
-reset "$(pre A7 polecat/tk-c1)" '{"id":"D1","status":"open","assignee":"","title":"demand","metadata":{"gc.demand_for":"A7"}}'
+reset "$(pre A7 polecat/tk-c1)" '{"id":"D1","status":"open","assignee":"","title":"keep or drop A7?","issue_type":"gate","await_type":"human","await_id":"conversation","metadata":{}}'
+printf 'D1|blocks|A7\n' > "$STUB_DEPS"
 OUT=$(run --fix-pool "$POOL")
-eq "$(newcount)" "0" "a live demand dispatches nothing — the rebase is one horn of what it asks"
-has "$OUT" "an open demand holds it" "and says so"
+eq "$(newcount)" "0" "a live human gate on the anchor dispatches nothing — the rebase is one horn of what it asks"
+has "$OUT" "open human gate D1 holds it" "and names the gate"
+reset "$(pre A7c polecat/tk-c1)" '{"id":"D2","status":"closed","assignee":"","title":"keep or drop A7c?","issue_type":"gate","await_type":"human","await_id":"conversation","close_reason":"ruled: keep it","metadata":{}}'
+printf 'D2|blocks|A7c\n' > "$STUB_DEPS"
+OUT=$(run --fix-pool "$POOL")
+eq "$(newcount)" "1" "a cleared gate holds nothing: the merge-in child is filed"
+reset "$(pre A7u polecat/tk-c1)"
+OUT=$(STUB_DEP_GARBAGE=1 run --fix-pool "$POOL")
+eq "$(newcount)" "0" "gates that will not read hold the dispatch: the read fails closed"
+has "$OUT" "(gates unreadable)" "…and the log says the gates did not read"
 
 reset "$(pre A8 polecat/tk-c1)"
 OUT=$(run)
@@ -547,7 +559,7 @@ TA=$(fence takeaway-hold-discriminator "$HERE/pr-facts.sh")
 TB=$(fence takeaway-hold-discriminator "$HERE/pre-open-rebase.sh")
 if [ -n "$TA" ] && [ -n "$TB" ]; then ok "both takeaway-hold-discriminator fences are present and non-empty"
 else bad "a takeaway-hold-discriminator fence is missing"; fi
-eq "$TB" "$TA" "the demand discriminator is a byte-identical copy of pr-facts.sh's"
+eq "$TB" "$TA" "the human-gate discriminator is a byte-identical copy of pr-facts.sh's"
 
 echo "# pacing: --deadline stops the walk after one anchor and --cursor resumes after it"
 # Three anchors on a branch that still merges, enumerated out of id order. A

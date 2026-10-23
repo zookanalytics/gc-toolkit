@@ -774,6 +774,41 @@ case "$verb" in
         mv "$K.tmp" "$K" ;;
       *) echo "gc bd stub: unsupported 'kv $kverb'" >&2; exit 2 ;;
     esac ;;
+  gate)
+    # gc bd gate list --json [--all]: the store's beads of type gate, the closed
+    # ones only with --all, and null when there are none, as bd prints.
+    # STUB_GATE_LIST_FAIL fails the listing.
+    # gc bd gate resolve <id> --reason <r>: closes a gate with that close reason.
+    # On a gate already closed it changes nothing, keeps the first reason and
+    # still reports success, as bd does, and it refuses a bead that is not a
+    # gate. STUB_GATE_RESOLVE_FAIL="id ..." fails the resolve for those ids,
+    # writing nothing; STUB_GATE_RESOLVE_NOOP="id ..." reports success and writes
+    # nothing.
+    gverb="${1:-}"; shift || true
+    case "$gverb" in
+      list)
+        [ -n "${STUB_GATE_LIST_FAIL:-}" ] && { echo "gc: simulated gate list failure" >&2; exit 1; }
+        gall=0; for _a in "$@"; do [ "$_a" = "--all" ] && gall=1; done
+        jq -c --argjson all "$gall" '[ .[] | select((.issue_type // "") == "gate")
+            | select($all == 1 or ((.status // "open") != "closed")) ] | if length == 0 then null else . end' "$S" ;;
+      resolve)
+        gid="${1:-}"; shift || true
+        greason=""
+        while [ $# -gt 0 ]; do
+          case "$1" in --reason) shift; greason="${1:-}" ;; --reason=*) greason="${1#--reason=}" ;; esac
+          shift || true
+        done
+        case " ${STUB_GATE_RESOLVE_FAIL:-} " in *" $gid "*) echo "gc: simulated gate resolve failure" >&2; exit 1 ;; esac
+        gtype=$(jq -r --arg id "$gid" '(.[] | select(.id == $id) | (.issue_type // "")) // "<absent>"' "$S")
+        [ "$gtype" = "gate" ] || { echo "Error: $gid is not a gate" >&2; exit 1; }
+        case " ${STUB_GATE_RESOLVE_NOOP:-} " in *" $gid "*) echo "✓ Gate resolved: $gid"; exit 0 ;; esac
+        tmp="$(mktemp "${S%/*}/.gc-stub.XXXXXX")"
+        jq -c --arg id "$gid" --arg r "$greason" \
+          'map(if .id == $id and ((.status // "open") != "closed") then .status = "closed" | .close_reason = $r else . end)' \
+          "$S" > "$tmp" && mv "$tmp" "$S"
+        echo "✓ Gate resolved: $gid" ;;
+      *) echo "gc bd stub: unsupported 'gate $gverb'" >&2; exit 2 ;;
+    esac ;;
   *) echo "gc bd stub: unsupported '$verb'" >&2; exit 2 ;;
 esac
 STUB

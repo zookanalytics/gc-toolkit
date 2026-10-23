@@ -8,7 +8,7 @@
 # CLOSED-unmerged -> if the anchor carries a pre-recorded disposition
 # (gc.pr_close_disposition_*, stamped by pr-dispose.sh), auto-dispose it through
 # bead-rehome.sh once its parked children, its machine review scaffolding
-# (scaffolding-sweep.sh) and any stale rework-or-close visit are retired;
+# (scaffolding-sweep.sh) and any stale rework-or-close gate are retired;
 # otherwise abandoned + a human gate on the anchor; base moved -> retargeted +
 # a human gate (the lanes' reviews stand: a person restores the base or accepts
 # the new one); CONFLICTING with no feedback owed, on an APPROVED
@@ -22,8 +22,9 @@
 # round and does not stand the dispatch down, so a still-dirty branch with
 # nothing in flight re-dispatches, not only on the PR's first head; an unstamped
 # orphan is adopted by title and an unrouted one re-routed, never twinned; an
-# operator's hold, rebase_hold, or a live demand dispatches nothing this pass,
-# since rebasing is one horn of what a demand asks; a branch whose conflict is a
+# operator's hold, rebase_hold, or a live human gate on the anchor dispatches
+# nothing this pass, since rebasing is one horn of what a person may be asked; a
+# branch whose conflict is a
 # landed change deleting or rewriting the code it edits gets the operator's
 # supersession decision instead of a child (branch-supersession.sh);
 # dismissal of our OWN superseded CHANGES_REQUESTED (the city's own by
@@ -65,10 +66,10 @@
 # pass, and an anchor another writer moved out of pull_request is re-ranked by
 # the next full pass.
 # Unanswered review feedback routes to something — a fix-pool rework child
-# carrying the review bodies and inline comments verbatim, or a visit when the
-# city has nowhere to route work (no head branch or no fix pool) — with the
-# watermarks advancing only once that routing reads back. A hold on the anchor
-# does not choose the visit: the child is the fix unit a must-fix finding of the
+# carrying the review bodies and inline comments verbatim, or a human gate on the
+# anchor when the city has nowhere to route work (no head branch or no fix pool)
+# — with the watermarks advancing only once that routing reads back. A hold on the
+# anchor does not choose the gate: the child is the fix unit a must-fix finding of the
 # batch attaches to, so it is filed whatever holds the anchor. Feedback is
 # decided by provenance, not by author: every review, inline comment and
 # conversation comment that is not the city's own post (pr-post.sh's
@@ -87,7 +88,7 @@
 # login before the cutover is read as the city's own, so its unresolved finding
 # threads are never counted by that arm. The posture pass folds such an unengaged
 # thread into `commented` — the merge-hold has to be recorded before merge.sh
-# runs — and the full pass files the one visit it stands for.
+# runs — and the full pass files the one human gate it stands for.
 # A required check that has terminally FAILED, on a PR every arm above waved
 # through (no conflict, feedback answered, no unresolved-thread block), files ONE
 # rework child per head the same way — dedup keyed on anchor_bead, so an
@@ -113,9 +114,9 @@
 # reaction. The mark is cumulative, so each id space keeps a ledger of the batches
 # routed under it (pr_comment_batch, pr_review_batch, pr_issue_comment_batch), and
 # a comment's batch names the bead that answers it. A comment whose batch went to
-# a visit that is still open gets a reply leading with a question mark that names
-# the visit. Once the batch's bead closes (the rework child landed, or the visit
-# closed) and the comment's own finding, if it has one, has closed, the comment is
+# a human gate that is still open gets a reply leading with a question mark that
+# names the gate. Once the batch's bead closes (the rework child landed, or a
+# person cleared the gate) and the comment's own finding, if it has one, has closed, the comment is
 # resolved: a reply leading with a check mark says what resolved it, and its EYES
 # reaction is traded for THUMBS_UP. An inline comment is answered in its thread,
 # which is then resolved. A Conversation comment has no thread, so a PR comment
@@ -150,7 +151,7 @@
 # reviewer clears independently of another. A review whose body only frames its
 # round waits for the whole round. The dismissal note is one line linking the
 # round's living answer. A needs-you finding is the exception that holds the
-# review open on purpose: it stays open until the operator rules the visit
+# review open on purpose: it stays open until a person rules on the human gate
 # holding its question and no fix unit on its lane, nor a ruling's rework child,
 # is still in flight (finding.sh close-answered), so the review it belongs to is
 # never auto-dismissed meanwhile. Like a decline's or a deferral's, its
@@ -196,7 +197,7 @@ PROG="pr-facts"
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
 # True when the fix unit a feedback batch was routed to has CLOSED: a rework
-# child closes when its branch lands, a visit when a person resolves it. That
+# child closes when its branch lands, a human gate when a person clears it. That
 # close is the city's exchange with the operator moving off `outstanding` — the
 # reply is there to look at. A bare head move is NOT it: a merge-in of the base
 # branch or an operator's own push leaves the routed child open, and reading the
@@ -204,7 +205,7 @@ scrub() { tr -d '\000-\037'; }
 # own landed test, which reads the same close off the same disposition.
 conversation_fix_landed() {
   case "$1" in
-    rework:?* | visit:?*) : ;;
+    rework:?* | human:?*) : ;;
     *) return 1 ;;
   esac
   local _st
@@ -240,20 +241,13 @@ LANE_STATE="$SCRIPTS_DIR/lane-state.sh"
 RECORD_CAP="$SCRIPTS_DIR/record-failure-cap.sh"
 # The sanctioned terminal close for a disposed (non-landed) anchor. A close arm
 # below consummates a pre-recorded PR-close disposition through it rather than
-# abandoning + filing a rework-or-close visit; it stamps gc.superseded_by, the
+# abandoning + filing a rework-or-close gate; it stamps gc.superseded_by, the
 # explicit terminal state doctor/check-closed-implies-landed accepts.
 REHOME="$SCRIPTS_DIR/bead-rehome.sh"
 # The retirement of a disposed anchor's machine review scaffolding, the same
 # sweep the cadence runs as arm 10. The close arm runs it for its one anchor
 # before that close, so the scaffolding's blocks edges do not refuse it.
 SCAFFOLDING_SWEEP="$SCRIPTS_DIR/scaffolding-sweep.sh"
-# The guarded visit close. Both visit retires below go through it, so a retired
-# visit carries gc.outcome and gc.outcome_reason, the board's outcome and headline
-# for a sitting that left no takeaway, and both stamps read back before the close.
-# pr-facts holds none of the visits it retires, and bd's close verb refuses a bead
-# assigned to another actor, so both pass --force. visit-close.sh still tries the
-# plain close first, so an unassigned visit closes without the override.
-VISIT_CLOSE="$SCRIPTS_DIR/visit-close.sh"
 # The dispatch note a validation-pass bead carries, naming mol-validate as its
 # method. The human-feedback arm opens such a pass below; a validator that
 # claims the bead reads this note to know the pass is a mol-validate pour.
@@ -350,38 +344,42 @@ is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 
 # last sitting instead of naming a live wait. Read as a hold, it parks an
 # anchor from its first conversation onward.
 #
-# The wait itself is a human gate. `gc-helm.sh demand` files what a person
-# owes as a native gate (issue_type=gate, await_type=human) stamped
-# gc.demand_for=<anchor> and blocking the anchor on it, and a sitting resolves
-# that gate (gc bd gate resolve) with the ruling that answers it. A live
-# demand is a live hold; none, and the takeaway records a sitting that ended.
+# The wait itself is a human gate: Gas City's native bead for a wait a person
+# must clear (issue_type=gate, await_type=human). It blocks the bead that waits,
+# and a person clears it with `gc bd gate resolve`, whose reason is the answer. A
+# live human gate that blocks the anchor is a live hold, read by the one reader
+# rule (bd_human_gates); none, and the takeaway records a sitting that ended.
+# Such a gate holds the anchor's merge as well, so a dispatch that brings the
+# branch current under it spends work on a merge that waits on a person, and can
+# answer one horn of what the person is asked by fait accompli.
 #
-# Only demands count. Rework children and `--waiting-on` edges are work in
+# Only human gates count. Rework children and `--waiting-on` edges are work in
 # flight, which the merge already holds on, and reading `blocks` at large would
 # restore the same permanence one indirection out. The `held` lifecycle state
 # is not read either: it is entered only from `unanchored`.
 #
-# demand_gate_state reads the demand ledger for an anchor in three:
-#   0  a live demand holds the anchor
-#   1  the ledger read cleanly and no demand holds
-#   2  the ledger would not read — the list failed or returned a non-array
-# gc.demand_for names the demand's anchor.
-demand_gate_state() { # <anchor-id>
-  local rows
-  # --include-gates: the demand is a human gate (issue_type=gate), which
-  # `bd list` hides by default; without it a held anchor reads released.
-  rows=$(bd_list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --include-gates --metadata-field "gc.demand_for=${1:-}") || return 2
-  printf '%s' "$rows" | jq -e --arg a "${1:-}" \
-    '[ .[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a) ] | length > 0' \
-    >/dev/null 2>&1 && return 0
-  return 1
+# human_gate_state reads an anchor's human gates in three, and prints the id of
+# the first open one when one holds:
+#   0  a live human gate holds the anchor
+#   1  the gates read cleanly and none holds
+#   2  the gates would not read
+human_gate_state() { # <anchor-id>
+  local gates open
+  gates=$(bd_human_gates "${1:-}") || return 2
+  open=$(printf '%s' "$gates" | jq -r '[ .[]
+      | select(((.status // "open") | tostring | ascii_downcase) != "closed") | .id ] | .[0] // empty' 2>/dev/null) \
+    || return 2
+  [ -n "$open" ] || return 1
+  printf '%s' "$open"
 }
-# Fails CLOSED — a ledger that will not read answers "held", because releasing an
-# anchor a person is holding hands their decision back to a pool.
+# Fails CLOSED — gates that will not read answer "held", because releasing an
+# anchor a person is holding hands their decision back to a pool. Prints the
+# holding gate's id, nothing when the gates would not read.
 takeaway_is_holding() { # <anchor-id>; 0 = a person owes an answer here
-  local st; demand_gate_state "${1:-}"; st=$?
-  [ "$st" -ne 1 ]
+  local st out
+  out=$(human_gate_state "${1:-}"); st=$?
+  [ "$st" -ne 1 ] || return 1
+  printf '%s' "$out"
 }
 # <<< takeaway-hold-discriminator
 
@@ -389,12 +387,12 @@ takeaway_is_holding() { # <anchor-id>; 0 = a person owes an answer here
 # The stale-base rework dispatch brings a conflicted branch current, which is
 # routine hygiene only when the anchor is otherwise heading to merge. An anchor a
 # live blocker holds is not: a plain depends-on edge on another PR, an in-flight
-# review, a demand a person owes. Rebasing under one performs work the merge is
-# already held on (gctk merge holds on any dep-edge blocker), one horn of a
+# review, a human gate a person owes. Rebasing under one performs work the merge
+# is already held on (gctk merge holds on any dep-edge blocker), one horn of a
 # decision the operator has not made, or a head moved out from under a live
-# review. takeaway_is_holding catches the demand; a closed demand on an anchor
-# still blocked by an ordinary prerequisite does not read there, and this reads
-# that gap — every blocker merge.sh would hold the merge on.
+# review. takeaway_is_holding catches the human gate; an anchor whose gates have
+# all cleared but which an ordinary prerequisite still blocks does not read
+# there, and this reads that gap — every blocker merge.sh would hold the merge on.
 #
 # The arm's OWN children are the mechanism, not a hold: each blocks its anchor so
 # the merge waits for the fix, and the dedup below re-routes a stranded one or
@@ -427,25 +425,26 @@ anchor_foreign_blocker() { # <anchor-id> <own-branch> <own-title>; prints foreig
 
 # >>> anchor-decision-guard
 # A dispatch arm stands down when a person owes a decision on this anchor's
-# reconciliation. takeaway_is_holding answers that for a demand filed on the
-# anchor, but a base-supersession or reconcile decision is filed on the in-flight
-# rework it concerns instead (gc.demand_for=<child>), and anchor_foreign_blocker
-# excludes those children as the arm's own mechanism — so a demand on one reaches
-# no arm without this. The anchor and its live rework children share one branch,
-# so a demand a converse sitting owns on either holds the merge: bringing the
+# reconciliation. takeaway_is_holding answers that for a human gate that blocks
+# the anchor, but a decision about an in-flight rework can be filed on that
+# rework instead, as a worker's decline files its gate on the bead it declined,
+# and anchor_foreign_blocker excludes those children as the arm's own mechanism —
+# so a gate on one reaches no arm without this. The anchor and its live rework
+# children share one branch, so a gate on either holds the merge: bringing the
 # branch current under it performs one horn of the pending question by fait
-# accompli, the same reason a demand on the anchor holds it. Reads the demand
-# ledger for the anchor and for each live rework child (task_kind=rework,
-# anchor_bead=<anchor>) through the shared discriminator, which excludes the cap's
-# own demand and fails closed; an unreadable child list holds too, the safe side
-# for a branch rewrite. 0 = a person owes a decision here.
+# accompli, the same reason a gate on the anchor holds it. Reads the human gates
+# of the anchor and of each live rework child (task_kind=rework,
+# anchor_bead=<anchor>) through the shared discriminator, which fails closed; an
+# unreadable child list holds too, the safe side for a branch rewrite. 0 = a
+# person owes a decision here, and the holding gate's id is printed (nothing
+# when a read did not answer).
 anchor_decision_held() { # <anchor-id>
-  local kids kid
-  takeaway_is_holding "${1:-}" && return 0
+  local kids kid gate
+  gate=$(takeaway_is_holding "${1:-}") && { printf '%s' "$gate"; return 0; }
   kids=$(bd_anchor_children "${1:-}" open,in_progress,blocked,deferred,hooked,pinned) || return 0
   for kid in $(printf '%s' "$kids" | jq -r '.[] | select(((.metadata.task_kind // "") | tostring) == "rework") | .id' 2>/dev/null); do
     [ -n "$kid" ] || continue
-    takeaway_is_holding "$kid" && return 0
+    gate=$(takeaway_is_holding "$kid") && { printf '%s' "$gate"; return 0; }
   done
   return 1
 }
@@ -453,8 +452,8 @@ anchor_decision_held() { # <anchor-id>
 
 # Whether a conflict is a landed change superseding this branch rather than drift,
 # in which case bringing it current is the operator's decision and no merge-in
-# child goes. branch-supersession.sh owns the classification and the decision
-# visit; this only puts both tips where git can read them. Its own ref namespace,
+# child goes. branch-supersession.sh owns the classification and the decision's
+# human gate; this only puts both tips where git can read them. Its own ref namespace,
 # overwritten per anchor, so nothing here moves a branch or a remote-tracking ref.
 # A tip that will not fetch, or a head that moved since GitHub reported it,
 # answers "proceed": the guard only ever withholds a dispatch it has put to a
@@ -480,8 +479,8 @@ PR_POSTURES="changes_requested commented approved review_required none"
 # <<< pr-posture-vocabulary
 # >>> pr-conversation-vocabulary
 # Mirrors lifecycle/lifecycle.toml [conversation]; pr-facts.test.sh fails on drift.
-# The values this script records against the watermarks. asking is the demand
-# edge and carries no key; covered waits on a comment-to-bead link nothing
+# The values this script records against the watermarks. asking is a human
+# gate's blocks edge and carries no key; covered waits on a comment-to-bead link nothing
 # writes yet — neither is recorded here. conv is set only from these literals,
 # so the derivation needs no runtime membership guard; this list exists for the
 # drift check, which eval's the block and compares it to lifecycle.toml.
@@ -507,7 +506,7 @@ PR_CONVERSATIONS="quiet outstanding answered"
 # new feedback.
 # The marker identifies our own reply, so a later pass can tell one it already
 # posted from a human's, and every reply carries it. A state reply also carries
-# a mark line naming its state (resolved, or awaiting:<visit>) and, on the
+# a mark line naming its state (resolved, or awaiting:<gate>) and, on the
 # Conversation tab where no thread holds the comments it answers, their tokens
 # (r<review id>, i<issue comment id>). A finding's owed reply carries a line
 # naming the finding. Idempotence is read back off GitHub (viewerHasReacted,
@@ -639,7 +638,7 @@ review_threads_load() { # <pr-number>
 # The comment cut does not touch the count: the city writes at most a finding's
 # post and its answer into a thread, so a thread cut at 100 comments holds
 # someone else's. Non-zero without output on a projection that does not yield
-# one, and the BLOCKED arm below must not escalate a guessed cause.
+# one, and the BLOCKED arm below must not put a guessed cause to a person.
 unresolved_threads() {
   local n
   n=$(printf '%s' "$RT_NODES" | jq --arg self "$SELF_LOGIN" --arg since "$PSINCE" --arg fm "$WB_FINDING_MARKER" "$CITY_OWN_DEF"'
@@ -656,8 +655,8 @@ unresolved_threads() {
 # unresolved review thread blocks a merge (required_review_thread_resolution)
 # and how many approving reviews are required. Sets PROT_STATE=known|unknown;
 # when known, PROT_THREAD_REQ=true|false and PROT_APPROVALS to the required
-# count. An unreadable read is `unknown`, never a zero requirement — escalating
-# a BLOCKED cause named off `unknown` would be a guess.
+# count. An unreadable read is `unknown`, never a zero requirement — a gate on a
+# BLOCKED cause named off `unknown` would ask a person about a guess.
 review_gates_for() { # <branch>
   local b="$1" rules rrc
   PROT_STATE=""; PROT_THREAD_REQ="false"; PROT_APPROVALS="0"
@@ -757,95 +756,62 @@ reconcile_status_label() { # <anchor> <pr-number>
     >/dev/null 2>&1 || true
   cur_labels=""
 }
-# The escalation keys this script files on an anchor to hold its PR's merge
+# The situation keys this script files human gates under on an anchor to hold its PR's merge
 # until a person answers, for PR number $n: rework or close (pr-abandoned), a
 # moved base (pr-retargeted), feedback nothing routed (pr-comments), review
 # threads nobody engaged (pr-unengaged-threads), threads branch protection
 # requires resolved (merge-blocked-threads), and red checks parked to a person
 # (pr-fix-noncode, pr-fix-capped, pr-fix-unmoved). A PR closed with a
 # pre-recorded disposition has no merge left to hold, so the disposition arm
-# retires these visits. An arm that files a new merge-holding visit adds its key
+# withdraws these gates. An arm that files a new merge-holding gate adds its key
 # here.
 MERGE_PATH_KEYS_JQ='
   def merge_path_key($n):
     test("^pr-(abandoned|retargeted|fix-noncode|fix-capped|fix-unmoved)\\." + $n + "$")
     or test("^pr-(comments|unengaged-threads)\\." + $n + "\\.")
     or . == "merge-blocked-threads";'
-visit_for() { # <subject> <key> — the LIVE visit escalate.sh keeps for this situation
-  # Both stamps are re-checked here as well as queried: this id gets pr_number
-  # written onto it, so a row that came back for another subject would stamp a
-  # stranger's bead and hold the wrong merge.
-  local rows
-  rows=$(bd_list --status="$LIVE_STATUSES" --metadata-field "escalation_key=$2" \
-           --metadata-field "gc.continuation_group=$1") || return 1
-  printf '%s' "$rows" | jq -r --arg s "$1" --arg k "$2" '
-    [ .[] | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
-          | select(((.metadata.escalation_key // "") | tostring) == $k)
+# gate_for <subject> <key> — the open human gate under <key> that blocks
+# <subject>, by the one reader rule (bd_human_gates): its id on stdout, nothing
+# when none is open. Non-zero when the gates would not read.
+gate_for() {
+  local gates
+  gates=$(bd_human_gates "$1") || return 1
+  printf '%s' "$gates" | jq -r --arg k "$2" '
+    [ .[] | select(((.await_id // "") | tostring) == $k)
+          | select(((.status // "open") | tostring | ascii_downcase) != "closed")
           | .id ] | .[0] // empty' 2>/dev/null
 }
-# retract_dispose_visits <anchor> <num> <reading> — conclude the disposition
-# arm's refused-close report once the close it asked for has landed. Every visit
-# filed under pr-dispose-failed.<num> for the anchor is retracted moot through
-# escalate.sh's retract verb, which leaves one a person is engaged in to them.
-# Each visit is read back and reported. A visit still open and unengaged is
-# retried by the next full pass's sweep below.
-retract_dispose_visits() {
-  local a="$1" key="pr-dispose-failed.$2" reading="$3" vids v row st who
-  vids=$(gc bd list --status="$LIVE_STATUSES" --metadata-field "escalation_key=$key" \
-           --metadata-field "gc.continuation_group=$a" --limit=0 --json 2>/dev/null | scrub \
-         | jq -r --arg k "$key" --arg s "$a" '.[]
-             | select(((.metadata.escalation_key // "") | tostring) == $k)
-             | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s) | .id' 2>/dev/null) || vids=""
-  [ -n "$vids" ] || return 0
-  [ -x "$HUMAN_GATE" ] && "$HUMAN_GATE" --retract --subject "$a" --key "$key" --message "$reading" >/dev/null 2>&1 </dev/null
-  for v in $vids; do
-    row=$(gc bd show "$v" --json 2>/dev/null | scrub)
-    st=$(printf '%s' "$row" | jq -r '.[0].status // ""' 2>/dev/null)
-    who=$(printf '%s' "$row" | jq -r '.[0] | ((.assignee // "") | tostring) as $w
-      | ((.metadata["gc.session_name"] // "") | tostring) as $n
-      | if $w != "" then $w elif $n != "" then "session " + $n else "" end' 2>/dev/null)
-    if [ "$st" = "closed" ]; then
-      echo "$PROG: $a — retracted its own pr-dispose-failed visit $v as moot (the close landed)"
-    elif [ "$st" = "in_progress" ] || [ -n "$who" ]; then
-      echo "$PROG: $a — closed, but its own pr-dispose-failed visit $v is engaged (${who:-$st}); it is theirs to conclude" >&2
-    else
-      echo "$PROG: $a — closed, but its own pr-dispose-failed visit $v is still ${st:-unreadable}; a full pass retracts it while it is open and unengaged" >&2
-    fi
-  done
-}
-# refresh_dispose_visits <anchor> <num> <message> <kids-note> — keep the
-# disposition arm's refused-close report current. escalate.sh files the visit
-# once and dedups every later refusal onto it, so a close refused for a new
-# reason would leave the visit naming an obstruction that has already cleared.
-# Each open visit under pr-dispose-failed.<num> for the anchor that nobody is
-# engaged in takes this pass's message as its description when that differs.
-# The note naming the parked children an earlier pass disposed is carried
-# forward: they are closed by now, so this pass names none, and the note is how
-# an operator who reverses the disposition knows what to restore.
-refresh_dispose_visits() {
-  local a="$1" key="pr-dispose-failed.$2" msg="$3" kids="$4" rows v old want
+# refresh_dispose_gates <anchor> <num> <message> <kids-note> — keep the
+# disposition arm's refused-close report current. human-gate.sh files the gate
+# once and files nothing while it is open, so a close refused for a new reason
+# would leave the gate naming an obstruction that has already cleared. Each open
+# human gate under pr-dispose-failed.<num> that blocks the anchor and that no
+# person is assigned takes this pass's message as its description when that
+# differs. The note naming the parked children an earlier pass disposed is
+# carried forward: they are closed by now, so this pass names none, and the note
+# is how an operator who reverses the disposition knows what to restore.
+refresh_dispose_gates() {
+  local a="$1" key="pr-dispose-failed.$2" msg="$3" kids="$4" gates v old want
   local kids_lead=" The branch's parked rework/rebase children ("
-  rows=$(gc bd list --status=open --metadata-field "escalation_key=$key" \
-           --metadata-field "gc.continuation_group=$a" --limit=0 --json 2>/dev/null | scrub)
-  printf '%s' "$rows" | jq -e 'type == "array"' >/dev/null 2>&1 || return 0
+  gates=$(bd_human_gates "$a") || return 0
   while IFS= read -r v; do
     [ -n "$v" ] || continue
-    old=$(printf '%s' "$rows" | jq -r --arg v "$v" '.[] | select(.id == $v) | (.description // "")' 2>/dev/null)
+    old=$(bd_json show "$v" | jq -r '.[0].description // ""' 2>/dev/null)
     want="$msg$kids"
     if [ -z "$kids" ]; then
       case "$old" in *"$kids_lead"*) want="$msg$kids_lead${old#*"$kids_lead"}" ;; esac
     fi
     [ "$old" = "$want" ] && continue
     if gc bd update "$v" --description "$want" >/dev/null 2>&1; then
-      echo "$PROG: $a — refreshed its pr-dispose-failed visit $v with this pass's refusal"
+      echo "$PROG: $a — refreshed its pr-dispose-failed gate $v with this pass's refusal"
     else
-      echo "$PROG: $a — could not refresh its pr-dispose-failed visit $v; it still names an earlier refusal" >&2
+      echo "$PROG: $a — could not refresh its pr-dispose-failed gate $v; it still names an earlier refusal" >&2
     fi
   done <<REFRESH_EOF
-$(printf '%s' "$rows" | jq -r --arg k "$key" --arg s "$a" '.[]
-    | select(((.metadata.escalation_key // "") | tostring) == $k)
-    | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
-    | select(((.assignee // "") | tostring) == "" and ((.metadata["gc.session_name"] // "") | tostring) == "")
+$(printf '%s' "$gates" | jq -r --arg k "$key" '.[]
+    | select(((.await_id // "") | tostring) == $k)
+    | select(((.status // "open") | tostring | ascii_downcase) != "closed")
+    | select(((.assignee // "") | tostring) == "")
     | .id' 2>/dev/null)
 REFRESH_EOF
 }
@@ -1264,7 +1230,7 @@ feedback_reviews() { # <reviews-json> <review-mark> — comma-joined review ids
 # posts holds no finding, and a resolved one is done.
 # The thread read caps a thread at its first 100 comments, so a thread longer
 # than that whose only marked reply sits past the cap reads as unengaged — a
-# dismissable visit, never a dropped finding.
+# human gate a person can clear, never a dropped finding.
 unengaged_thread_count() { # count over RT_NODES on stdout; non-zero = could not tell
   printf '%s' "$RT_NODES" | jq "$CITY_OWN_DEF"'
     [ .[]
@@ -1276,18 +1242,18 @@ unengaged_thread_count() { # count over RT_NODES on stdout; non-zero = could not
 }
 # Does an unengaged thread hold this PR's merge right now? merge.sh
 # reads posture off the bead and never reads threads, so this is decided in the
-# pre-merge posture pass and folded into `commented`; the visit it warrants is
-# the full pass's. Answers in three, because a read that will not run is not
+# pre-merge posture pass and folded into `commented`; the human gate it warrants
+# is the full pass's. Answers in three, because a read that will not run is not
 # proof of zero unengaged threads — the caller keeps the posture uncurrent on the
 # third so the merge holds for the pass rather than reading a stale one:
 #   0  an unengaged thread holds the merge (caller folds into `commented`)
 #   1  the reads ran and none holds
 #   2  a read would not run — the in-flight ledger or the thread API did not answer
 # On the FIRST pass that reads the threads it sets UT_COUNT so the full pass files
-# the one visit without a second read; a later pass holds off the standing visit
-# and leaves UT_COUNT empty.
+# the one human gate without a second read; a later pass holds off the standing
+# gate and leaves UT_COUNT empty.
 # UH_CANDIDATE is 1 once the cheap pre-gate below finds such a post. Past it the
-# answer also turns on bead state (the lanes' derived state, the standing visit,
+# answer also turns on bead state (the lanes' derived state, the standing gate,
 # the children in flight), which the PR's own facts do not show, so the posture
 # arm keeps no basis for that anchor and reads it whole every pass.
 UT_COUNT=""
@@ -1313,10 +1279,13 @@ unengaged_holds() { # <id> <num> <head-oid> <row-json> <live-comments-json>
   lanes_green "$id" "$checkset" || return 1
   stamp=$(printf '%s' "$row" | jq -r '(.metadata.pr_unengaged_threads // "") | tostring')
   if [ "$stamp" = "$head" ]; then
-    # This head was flagged already. The hold stands while its visit is open, and
-    # the operator's close of it releases the merge; a new commit re-runs the
-    # detection below. Cheap and self-clearing — no thread read.
-    [ -n "$(visit_for "$id" "pr-unengaged-threads.$num.$head")" ] && return 0
+    # This head was flagged already. The hold stands while its gate is open, and
+    # the operator's clearing of it releases the merge; a new commit re-runs the
+    # detection below. Cheap and self-clearing — no thread read. Gates that will
+    # not read hold the merge for the pass rather than release it on no read.
+    local ut_gate
+    ut_gate=$(gate_for "$id" "pr-unengaged-threads.$num.$head") || return 2
+    [ -n "$ut_gate" ] && return 0
     return 1
   fi
   # First detection. A review or rework child already open on this anchor owns the
@@ -1342,8 +1311,8 @@ unengaged_holds() { # <id> <num> <head-oid> <row-json> <live-comments-json>
 # and that watermark advances only when arm 7 routes (the lifecycle transition
 # below). A comment answered by any other path, such as a sitting that replies
 # in-thread and resolves the thread, never moves the watermark, so it reads
-# unanswered on every pass and files a visit carrying pr_number that holds the
-# merge. A resolved review thread holding a reply of ours is the answered signal,
+# unanswered on every pass and files a human gate that holds the merge. A
+# resolved review thread holding a reply of ours is the answered signal,
 # whichever path posted the reply and whoever resolved the thread. A reply of
 # ours is a post that is the city's own (gc_city_own): marked by pr-post.sh, or
 # under our login from before the provenance cutover. An unmarked post under our
@@ -1357,7 +1326,7 @@ unengaged_holds() { # <id> <num> <head-oid> <row-json> <live-comments-json>
 # write-back likewise reads a post after its own as a live conversation.
 # A thread resolved with no reply of ours answers nothing here, so a hand
 # resolution alone still routes. The write-back's awaiting answer (its mark line
-# names awaiting:<visit>) says only that the comments before it wait on a
+# names awaiting:<gate>) says only that the comments before it wait on a
 # person, so it is not a reply here either. Only inline comments sit on a
 # thread; a review body and a Conversation comment carry none and stay on the
 # mark.
@@ -1386,80 +1355,43 @@ ANCHORS=$(bd_list --status=open --metadata-field merge_result=pull_request) || {
   exit 1
 }
 
-# --- retire the merge-blocked-approval visit category (a required review is state) --
+# --- retire the merge-blocked-approval gate category (a required review is state) --
 # An open PR awaiting its required approving review is a notification in itself.
 # It sits in the operator's review queue, the state the board's review section
 # surfaces, so the city does no proactive work to flag it: this cadence files no
-# merge-blocked-approval visit, and the category holds no actionable escalation.
-# Retire any that are open, closing each moot through the same close the
-# pre-recorded-disposition arm uses. The board keeps the PR as state regardless.
-# This runs before the no-anchors early-exit so a rig whose PRs have all merged
-# still clears its visits, and in every rig's cadence so each store cleans its own.
-# Fail closed on an unreadable subject: a visit whose anchor cannot be read this
-# pass is left for the next, never retired on a read that did not land.
+# merge-blocked-approval gate, and the category holds no actionable question.
+# Withdraw any that are open, resolving each moot. The board keeps the PR as
+# state regardless. The sweep starts from the store's open human gates under the
+# key, because a gate names its beads only through its edges, and reaches the
+# beads each one blocks from the gate's end. It runs before the no-anchors
+# early-exit so a rig whose PRs have all merged still clears its gates, and in
+# every rig's cadence so each store cleans its own. Fail closed on an unreadable
+# gate: one whose beads cannot be read this pass is left for the next, never
+# withdrawn on a read that did not land.
 # The early arms (--posture-only, --route-comments-only) write nothing here.
 if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
-  if av_visits=$(bd_list --status=open --metadata-field "escalation_key=merge-blocked-approval"); then
-    while IFS="$(printf '\t')" read -r avid avsubj; do
+  if av_gates=$(gc bd gate list --json --limit 0 2>/dev/null | grep -a -vE '^gc bd:' | scrub) \
+     && printf '%s' "$av_gates" | jq -e 'type == "array" or . == null' >/dev/null 2>&1; then
+    while IFS= read -r avid; do
       [ -n "${avid:-}" ] || continue
-      avstate=""
-      if [ -n "$avsubj" ]; then
-        avstate=$(gc bd show "$avsubj" --json 2>/dev/null | scrub | jq -r '.[0].status // empty' 2>/dev/null)
-        if [ -z "$avstate" ]; then
-          echo "$PROG: visit $avid — subject $avsubj unreadable this pass; left for the next" >&2
-          continue
-        fi
-      fi
-      if "$VISIT_CLOSE" --visit "$avid" --outcome moot --force \
-           --reason "Retired by pr-facts: a required approving review is state (the board's review section), not an escalation; this cadence files no merge-blocked-approval visits. Subject ${avsubj:-<none>} is ${avstate:-none-recorded}." >/dev/null; then
-        echo "$PROG: retired stale merge-blocked-approval visit $avid (subject ${avsubj:-<none>} ${avstate:-none-recorded})"
-      else
-        echo "$PROG: could not retire stale merge-blocked-approval visit $avid; leaving it for the operator" >&2
-      fi
-    done <<AV_EOF
-$(printf '%s' "$av_visits" | jq -r '.[]? | [.id, ((.metadata["gc.continuation_group"]) // "")] | @tsv' 2>/dev/null)
-AV_EOF
-  else
-    echo "$PROG: merge-blocked-approval visit sweep skipped — could not list visits (retry next pass)" >&2
-  fi
-fi
-
-# --- retract the disposition arm's refused-close reports whose close landed ------
-# The disposition arm files a pr-dispose-failed.<num> visit when bead-rehome
-# refuses an anchor's close, and retracts it once a later pass's close lands. A
-# retract that does not land then is not retried by the arm, because the closed
-# anchor leaves the enumeration. So every full pass also reads the open visits
-# filed under that key family and retracts each whose subject now reads closed
-# with its disposition pointer (gc.superseded_by) recorded: the close the visit
-# asked for has landed. A subject closed without the pointer is left alone, since
-# its disposition is not on record. A visit someone is engaged in is theirs to
-# conclude, and a subject that does not read this pass leaves its visit for the
-# next. Like the sweep above, this runs before the no-anchors early-exit.
-if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
-  if df_visits=$(bd_list --status=open --has-metadata-key=escalation_key); then
-    while IFS="$(printf '\t')" read -r dfsubj dfnum; do
-      [ -n "${dfsubj:-}" ] || continue
-      dfrow=$(gc bd show "$dfsubj" --json 2>/dev/null | scrub)
-      dfst=$(printf '%s' "$dfrow" | jq -r '.[0].status // empty' 2>/dev/null)
-      if [ -z "$dfst" ]; then
-        echo "$PROG: pr-dispose-failed.$dfnum — subject $dfsubj unreadable this pass; its visit is left for the next" >&2
+      if ! avsubj=$(gc bd dep list "$avid" --direction=up --type blocks --json 2>/dev/null | grep -a -vE '^gc bd:' | scrub \
+             | jq -er 'if type == "array" then ([ .[] | "\(.id) \((.status // "") | tostring)" ] | join(", ")) else error("unread") end' 2>/dev/null); then
+        echo "$PROG: gate $avid — the beads it blocks are unreadable this pass; left for the next" >&2
         continue
       fi
-      dfsucc=$(printf '%s' "$dfrow" | jq -r '.[0].metadata["gc.superseded_by"] // empty' 2>/dev/null)
-      [ "$dfst" = "closed" ] && [ -n "$dfsucc" ] || continue
-      retract_dispose_visits "$dfsubj" "$dfnum" \
-        "PR#$dfnum's pre-recorded disposition is consummated: $dfsubj closed (-> $dfsucc) once the obstruction this visit reported cleared."
-    done <<DF_EOF
-$(printf '%s' "$df_visits" | jq -r '[ .[]? | select((.metadata.task_kind // "") == "visit")
-    | ((.metadata.escalation_key // "") | tostring) as $k
-    | select($k | test("^pr-dispose-failed\\.[0-9]+$"))
-    | ((.metadata["gc.continuation_group"] // "") | tostring) as $g
-    | select($g | test("^[A-Za-z0-9._-]+$"))
-    | select(((.assignee // "") | tostring) == "" and ((.metadata["gc.session_name"] // "") | tostring) == "")
-    | [$g, ($k | ltrimstr("pr-dispose-failed."))] ] | unique | .[] | @tsv' 2>/dev/null)
-DF_EOF
+      gc bd gate resolve "$avid" --reason "moot: retired by pr-facts: a required approving review is state (the board's review section), not a question for a person; this cadence files no merge-blocked-approval gates. It blocked ${avsubj:-nothing}." >/dev/null 2>&1
+      avst=$(bd_json show "$avid" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null)
+      if [ "$avst" = closed ]; then
+        echo "$PROG: retired stale merge-blocked-approval gate $avid (it blocked ${avsubj:-nothing})"
+      else
+        echo "$PROG: could not retire stale merge-blocked-approval gate $avid; leaving it for the operator" >&2
+      fi
+    done <<AV_EOF
+$(printf '%s' "$av_gates" | jq -r '.[]? | select((.await_type // "") == "human" and (.await_id // "") == "merge-blocked-approval")
+    | select(((.status // "open") | tostring | ascii_downcase) != "closed") | .id' 2>/dev/null)
+AV_EOF
   else
-    echo "$PROG: pr-dispose-failed visit sweep skipped — could not list visits (retry next pass)" >&2
+    echo "$PROG: merge-blocked-approval gate sweep skipped — could not list the store's gates (retry next pass)" >&2
   fi
 fi
 
@@ -1558,8 +1490,8 @@ pace_start "$CURSOR" "$DEADLINE"
 # them, and --seen keeps it beside the posture it produced. An anchor whose
 # basis reads the same this pass, and whose bead still carries that posture at
 # the read's head, keeps the posture without the per-PR reads. A posture of
-# `commented` keeps no basis, because a routing or a visit can release it with
-# nothing on the PR moving. A visit that keeps or earns no basis records "-",
+# `commented` keeps no basis, because a routing or a cleared gate can release it
+# with nothing on the PR moving. A visit that keeps or earns no basis records "-",
 # which matches nothing, so the next pass reads that anchor whole.
 # The batched read and the per-PR reads are separate requests, and GitHub can
 # answer one of them from a moment ahead of the other, so one derivation can
@@ -1676,7 +1608,7 @@ while IFS= read -r tagged; do
   # when the reconcile pass slings it. While set, the anchor is deliberately
   # parked and this PR's branch is superseded by the pending re-dispatch, so the
   # stale-base and red-check arms below stand down on it as they do for a
-  # merge_hold or a live demand: a rework minted against a branch about to re-pour
+  # merge_hold or a live human gate: a rework minted against a branch about to re-pour
   # is non-hand-offable, so a polecat can only refuse it and the pool re-offers
   # the refusal until a human clears it. Review feedback is the exception, and
   # the feedback arm says why.
@@ -1778,7 +1710,7 @@ while IFS= read -r tagged; do
     # sanctioned terminal close that stamps gc.superseded_by, the explicit
     # terminal state doctor/check-closed-implies-landed accepts — rather than
     # re-asking the decision the closer already made as a rework-or-close
-    # visit. A missing or malformed marker falls through to the default.
+    # gate. A missing or malformed marker falls through to the default.
     #
     # Read the marker from a FRESH anchor read, not from $row: pr-dispose.sh
     # stamps it immediately before it closes the PR, which can fall AFTER this
@@ -1816,7 +1748,7 @@ while IFS= read -r tagged; do
         # a held child is reported, never closed out from under them.
         # Track the children disposed below. They are closed BEFORE the anchor's
         # own close (to clear their blocks-hold), so a refused anchor close past
-        # this point leaves them already gone — the pr-dispose-failed escalation
+        # this point leaves them already gone — the pr-dispose-failed gate
         # names them, or an operator who reverses the disposition finds them
         # disposed with nothing saying so.
         disposed_kids=""
@@ -1851,7 +1783,7 @@ CHILDREN_EOF
         # Retire the anchor's machine review scaffolding BEFORE its close, for
         # the reason the children above go first. A fix unit, an open must-fix
         # finding and a validation pass each hold a `blocks` edge on the anchor,
-        # so while one is open the close below is refused and escalated, for
+        # so while one is open the close below is refused and put to a person, for
         # scaffolding that arm 10 retires later in this same pass. The sweep it
         # runs here is arm 10's, scoped to this anchor, so both retire the same
         # set: a finding about this diff is mooted, and one that can cite code
@@ -1869,65 +1801,56 @@ CHILDREN_EOF
             skipped=$((skipped + 1)); continue
           fi
         fi
-        # Retire this script's merge-path visits on the anchor BEFORE its close,
+        # Withdraw this script's merge-path gates on the anchor BEFORE its close,
         # not after. Each was filed to hold PR#$num's merge until a person
         # answered it (MERGE_PATH_KEYS_JQ), possibly before the disposition marker
-        # was set, and each tracks the anchor, so bead-rehome's finalize gate would
-        # otherwise hold the close on a merge that no longer exists. The marker on
-        # the anchor, not the visit, is what drives a retry, so retiring them here
-        # is safe even if the close below does not land this pass. What a visit
-        # raised stays on the PR. A visit someone is engaged in is theirs to
-        # conclude and keeps holding the close, with one exception: the
-        # rework-or-close visit, whose question the pre-recorded disposition
-        # itself answers. The sitting that recorded the disposition can still
-        # hold it, so that one is retired over the claim. This arm's own
-        # pr-dispose-failed visit asks whether this close lands, so it is not
-        # retired here: the retry below excepts it at the gate.
-        mp_rows=$(gc bd list --status="$LIVE_STATUSES" --metadata-field "gc.continuation_group=$id" \
-                    --limit=0 --json 2>/dev/null | scrub)
-        if printf '%s' "$mp_rows" | jq -e 'type == "array"' >/dev/null 2>&1; then
-          while IFS=$'\t' read -r mpvid mpkey mpheld; do
-            [ -n "$mpvid" ] || continue
-            mpforce=()
+        # was set, and each blocks the anchor, so bd would refuse the close below
+        # on a merge that no longer exists. The marker on the anchor, not the gate,
+        # is what drives a retry, so withdrawing them here is safe even if the
+        # close below does not land this pass. What a gate raised stays on the PR.
+        # A gate assigned to a person is theirs to clear and keeps holding the
+        # close, with one exception: the rework-or-close gate, whose question the
+        # pre-recorded disposition itself answers. This arm's own
+        # pr-dispose-failed gate asks whether this close lands, so it is not
+        # withdrawn here: the retry below names its key to bead-rehome.sh, which
+        # withdraws it just before the close.
+        if mp_gates=$(bd_human_gates "$id"); then
+          while IFS=$'\t' read -r mpgate mpkey mpwho; do
+            [ -n "$mpgate" ] || continue
             if [ "$mpkey" = "pr-abandoned.$num" ]; then
-              mpforce=(--force)
               mpwhy="the rework-or-close decision is made."
-            elif [ -n "$mpheld" ]; then
-              echo "$PROG: $id — visit $mpvid ($mpkey) is engaged ($mpheld); it holds the close until its holder concludes it" >&2
+            elif [ -n "$mpwho" ]; then
+              echo "$PROG: $id — gate $mpgate ($mpkey) is assigned to $mpwho; it holds the close until they clear it" >&2
               continue
             else
-              mpwhy="PR#$num is closed, so the merge this visit held is gone; what it raised stays on the PR."
+              mpwhy="PR#$num is closed, so the merge this gate held is gone; what it raised stays on the PR."
             fi
-            if "$VISIT_CLOSE" --visit "$mpvid" --outcome moot ${mpforce[@]+"${mpforce[@]}"} \
-                 --reason "Auto-resolved: $id disposed ($disp_kind -> $disp_succ) via its pre-recorded PR-close disposition; $mpwhy" >/dev/null; then
-              echo "$PROG: $id — retired stale visit $mpvid ($mpkey; disposition was pre-recorded)"
+            gc bd gate resolve "$mpgate" --reason "moot: $id disposed ($disp_kind -> $disp_succ) via its pre-recorded PR-close disposition; $mpwhy" >/dev/null 2>&1
+            mpst=$(bd_json show "$mpgate" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null)
+            if [ "$mpst" = closed ]; then
+              echo "$PROG: $id — withdrew stale gate $mpgate ($mpkey; disposition was pre-recorded)"
             else
-              echo "$PROG: $id — could not retire stale visit $mpvid; leaving it for the operator" >&2
+              echo "$PROG: $id — could not withdraw stale gate $mpgate; leaving it for the operator" >&2
             fi
           done <<MP_EOF
-$(printf '%s' "$mp_rows" | jq -r --arg s "$id" --arg n "$num" "$MERGE_PATH_KEYS_JQ"'
-    .[] | select((.metadata.task_kind // "") == "visit")
-        | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s)
-        | ((.metadata.escalation_key // "") | tostring) as $k
+$(printf '%s' "$mp_gates" | jq -r --arg n "$num" "$MERGE_PATH_KEYS_JQ"'
+    .[] | select(((.status // "open") | tostring | ascii_downcase) != "closed")
+        | ((.await_id // "") | tostring) as $k
         | select($k | merge_path_key($n))
-        | ((.assignee // "") | tostring) as $who
-        | ((.metadata["gc.session_name"] // "") | tostring) as $sess
-        | [.id, $k, (if $who != "" then $who elif $sess != "" then "session " + $sess
-                     elif (.status // "") == "in_progress" then "claimed" else "" end)] | @tsv' 2>/dev/null)
+        | [.id, $k, ((.assignee // "") | tostring)] | @tsv' 2>/dev/null)
 MP_EOF
         else
-          echo "$PROG: $id — could not list the visits on the anchor; any merge-path visit is left for the operator" >&2
+          echo "$PROG: $id — could not read the human gates of the anchor; any merge-path gate is left for the operator" >&2
         fi
-        # This arm's own escalation from an earlier refused close tracks the
-        # anchor too, and it asks for exactly this retry: "clear the obstruction
-        # and the next refinery pass retries". If the finalize gate held the
-        # retry on it, the anchor could not close even after that obstruction
-        # cleared. So the retry names the arm's key to the gate, which excepts
-        # every visit filed under it for this anchor that nobody is engaged in,
-        # and those visits are retracted moot once the close lands. A visit a
-        # person has engaged still holds the close and is theirs to conclude. A
-        # refused close leaves the visit open, so a standing obstruction keeps
-        # its one visit and nothing is re-filed.
+        # This arm's own report of an earlier refused close is a human gate on the
+        # anchor, and it asks for exactly this retry: "clear the obstruction and
+        # the next refinery pass retries". bd refuses the close while that gate
+        # blocks the anchor, so the retry names the arm's key to bead-rehome.sh,
+        # which excepts the gates filed under it that no person is assigned and
+        # withdraws them just before the close, once nothing else would hold it. A
+        # gate a person is assigned still holds the close and is theirs to clear.
+        # A refused close leaves the gate open, so a standing obstruction keeps its
+        # one gate and nothing is re-filed.
         EXCEPT_ARG=(--except-key "pr-dispose-failed.$num")
         if [ -x "$REHOME" ]; then
           rout=$("$REHOME" --origin "$id" --successor "$disp_succ" --kind "$disp_kind" \
@@ -1938,9 +1861,7 @@ MP_EOF
         fi
         if [ "$rrc" -eq 0 ]; then
           disposed_n=$((disposed_n + 1))
-          echo "$PROG: $id — PR#$num closed out-of-band; auto-disposed ($disp_kind -> $disp_succ), no visit filed"
-          retract_dispose_visits "$id" "$num" \
-            "PR#$num's pre-recorded disposition is consummated: $id closed ($disp_kind -> $disp_succ) once the obstruction this visit reported cleared."
+          echo "$PROG: $id — PR#$num closed out-of-band; auto-disposed ($disp_kind -> $disp_succ), no gate filed"
           continue
         elif [ "$rrc" -eq 4 ]; then
           # Pointer would not stick — transient. Keep merge_result=pull_request
@@ -1950,24 +1871,24 @@ MP_EOF
         else
           # Close refused, a conflicting successor, or a bad invocation — a human
           # is needed. Surface THAT, under its own key, and leave the anchor open
-          # carrying the marker; still never the generic rework-or-close visit.
+          # carrying the marker; still never the generic rework-or-close gate.
           # The parked children were disposed above, before this close — so a
           # refusal here has already closed them. Say which, so an operator who
           # reverses the disposition knows what to restore rather than finding
           # them gone.
-          echo "$PROG: $id — PR#$num disposition recorded but bead-rehome refused (rc=$rrc); escalating, anchor left open" >&2
+          echo "$PROG: $id — PR#$num disposition recorded but bead-rehome refused (rc=$rrc); put to a person, anchor left open" >&2
           printf '%s\n' "$rout" >&2
           kids_disposed_note=""
           [ -n "$disposed_kids" ] && kids_disposed_note=" The branch's parked rework/rebase children ($disposed_kids) were ALREADY disposed (closed not-needed -> $disp_succ) before this close, to clear their blocks-hold on the anchor; if the disposition is wrong, restore them by hand."
           dmsg="PR#$num ($live_url) was closed with a pre-recorded disposition ($disp_kind -> $disp_succ), but bead-rehome.sh could not consummate it (rc=$rrc): $(printf '%s' "$rout" | tr '\n' ' ' | cut -c1-300). The anchor is left OPEN carrying the marker; clear the obstruction and the next refinery pass retries, or dispose it by hand."
           human_gate "$id" "pr-dispose-failed.$num" "$dmsg$kids_disposed_note"
-          refresh_dispose_visits "$id" "$num" "$dmsg" "$kids_disposed_note"
+          refresh_dispose_gates "$id" "$num" "$dmsg" "$kids_disposed_note"
           skipped=$((skipped + 1)); continue
         fi
       fi ;;
     esac
     # Default: an out-of-band close with no recorded disposition -> abandoned,
-    # routed to human, and a rework-or-close visit.
+    # routed to human, and a rework-or-close gate.
     if "$LIFECYCLE" transition "$id" --to abandoned --expect pull_request \
          --assignee "" \
          --set "blocked_reason=PR#$num closed out-of-band without merging" \
@@ -1975,7 +1896,7 @@ MP_EOF
       flagged=$((flagged + 1))
       human_gate "$id" "pr-abandoned.$num" \
         "PR#$num ($live_url) was closed out-of-band without merging. The anchor is left OPEN, routed to human (merge_result=abandoned). Decide: rework it, or close it as not-planned."
-      echo "$PROG: $id — PR#$num closed out-of-band; abandoned, routed to human, escalated"
+      echo "$PROG: $id — PR#$num closed out-of-band; abandoned, routed to human, gate filed"
       # The anchor left pull_request, so its PR-finishing work now follows the
       # unapproved rank, and the transition marked the record of the rank that
       # work settled at unsettled (lifecycle.toml exit_sets). This pass settles
@@ -2235,10 +2156,10 @@ MP_EOF
       # own — so `unanswered` stays 0 while the check stays green, and the posture
       # would read review_required/none. merge.sh
       # reads posture off the bead and never reads threads, and the full pass that
-      # would file the visit runs after merge, so the hold has to be recorded HERE,
+      # would file the gate runs after merge, so the hold has to be recorded HERE,
       # in the pre-merge pass. Fold a confirmed hold into `commented`; a read that
       # would not run (rc 2) is not proof of zero, so it leaves the posture
-      # uncurrent below and the merge holds for the pass. The visit is dispatched
+      # uncurrent below and the merge holds for the pass. The gate is filed
       # below.
       if [ "$rd" != "CHANGES_REQUESTED" ] && [ "$unanswered" != 1 ]; then
         unengaged_holds "$id" "$num" "$head_oid" "$row" "$cmts_live"; uh_rc=$?
@@ -2281,7 +2202,7 @@ MP_EOF
       # above its space's watermark, or a batch routed to a fix unit that has not
       # closed yet — the city still working it, held outstanding rather than
       # collapsed to quiet. answered is that fix unit CLOSED
-      # (conversation_fix_landed): a rework child lands, or a visit is resolved,
+      # (conversation_fix_landed): a rework child lands, or a person clears the gate,
       # so the reply is there to look at. A bare head move is NOT answered — a
       # merge-in of the base or an operator push leaves the child open.
       # The disposition lands in the SAME transition as the watermark it routes
@@ -2443,7 +2364,7 @@ MP_EOF
   # full pass's.
   [ "$POSTURE_ONLY" != 1 ] || continue
 
-  # --- base moved: retargeted + visit -------------------------------------------
+  # --- base moved: retargeted + a human gate --------------------------------------
   # The anchor parks for a person, who restores the base or accepts the new one.
   # The lanes' reviews stand either way: a retarget is not one of the two things
   # that move a lane backwards, a human feedback batch and the validator's
@@ -2462,7 +2383,7 @@ MP_EOF
       flagged=$((flagged + 1))
       human_gate "$id" "pr-retargeted.$num" \
         "PR#$num ($live_url) was retargeted: base '$base' != expected '$rec_target'. Retarget it back and reset merge_result=pull_request to re-engage, or update merged_target if the new base is intentional."
-      echo "$PROG: $id — PR#$num retargeted (base '$base' != '$rec_target'); routed to human, escalated"
+      echo "$PROG: $id — PR#$num retargeted (base '$base' != '$rec_target'); routed to human, gate filed"
       # Its PR-finishing work now follows the unapproved rank, as an abandoned
       # anchor's does, and this pass settles it the same way.
       settle_finishing "$id" retargeted "" "" unsettled || true
@@ -2477,8 +2398,7 @@ MP_EOF
   # A rework child filed against a past head is moot once the branch has moved on
   # and the current head is clean and green: the fix it asked for is no longer
   # owed, yet nothing retracts it. It sits open, holding the anchor through its
-  # blocks-dep, until a person clears it — the merge-lane analogue of the
-  # self-heal the reconcile lane already does for its own orphaned visits. Reap
+  # blocks-dep, until a person clears it. Reap
   # ONLY a provably-dead premise: fire on the CONJUNCTION of head-moved-past-the-cited-head AND a
   # current head that is mergeable with every required check green; leave anything
   # unprovable OPEN (fail closed); never touch a child a worker holds
@@ -2562,7 +2482,7 @@ REAP_EOF
   # aside for it: a merge-in child here would twin that child on the branch, and
   # a skip guard here would leave the feedback unanswered behind a hold. With no
   # feedback owed, this arm files the one merge-in child, after the skip guards
-  # below: a hold, a live demand, an armed re-dispatch or a foreign blocker
+  # below: a hold, a live human gate, an armed re-dispatch or a foreign blocker
   # defers the merge-in, and a missing head branch or fix pool leaves nowhere to
   # dispatch it. Past them, the child is filed once the PR is approved, by the
   # approval gate just above the dedup.
@@ -2575,20 +2495,19 @@ REAP_EOF
       echo "$PROG: $id — PR#$num conflicts but a hold is set (operator gate); no rework dispatched"
       skipped=$((skipped + 1)); continue
     fi
-    # A live demand is the same freeze. `gc-helm.sh demand` files what a person
-    # owes as a human gate on this anchor, and "rebase it onto the base" is
-    # routinely one horn of the question being asked. A child dispatched under
-    # one performs that horn as routine branch hygiene, which answers the
-    # decision by fait accompli and leaves the person ruling on work already
-    # done. The demand may sit on the anchor or on the live rework child that is
-    # reconciling its branch; anchor_decision_held reads both, because a decision
-    # on the child gates the one branch they share. The anchor's own gc.routed_to
-    # is not read here: the human route sits on the demand gate, not on what it
-    # gates, and a freeze on the anchor's route would hold the merge with nothing
-    # defined to lift it. Resolving the demand gate lifts this one, which is what
-    # the demand's own text asks for.
-    if anchor_decision_held "$id"; then
-      echo "$PROG: $id — PR#$num conflicts but an open demand holds it for a person's decision; no rework dispatched"
+    # A live human gate is the same freeze. A gate on this anchor asks a person
+    # something, and "rebase it onto the base" is routinely one horn of what is
+    # asked; it holds the merge as well, so a merge-in waits on that person
+    # anyway. A child dispatched under one performs that horn as routine branch
+    # hygiene, which answers the decision by fait accompli and leaves the person
+    # ruling on work already done. The gate may block the anchor or the live
+    # rework child that is reconciling its branch; anchor_decision_held reads
+    # both, because a decision on the child gates the one branch they share. The
+    # anchor's own gc.routed_to is not read here: a freeze on the anchor's route
+    # would hold the merge with nothing defined to lift it. Clearing the gate
+    # lifts this hold.
+    if dgate=$(anchor_decision_held "$id"); then
+      echo "$PROG: $id — PR#$num conflicts but open human gate ${dgate:-(gates unreadable)} holds it for a person's decision; no rework dispatched"
       skipped=$((skipped + 1)); continue
     fi
     if [ -n "$armed" ]; then
@@ -2626,8 +2545,8 @@ REAP_EOF
     # the anchor and excludes this arm's own children (this branch, this anchor's
     # rework marker, or the dispatch title the orphan adoption below matches), so
     # a covering child still dedups and a stranded or orphaned one is still
-    # re-routed — while a sibling PR it depends on, a live review, or a demand a
-    # closed one left standing holds the dispatch.
+    # re-routed — while a sibling PR it depends on, a live review, or any other
+    # blocker of the anchor holds the dispatch.
     fblockers=$(anchor_foreign_blocker "$id" "$fix_branch" "$FIX_TITLE"); fbrc=$?
     if [ "$fbrc" -eq 0 ]; then
       echo "$PROG: $id — PR#$num conflicts but the anchor is held by ${fblockers:-an unreadable blocker} (a merge is held on it); no rework dispatched"
@@ -2854,11 +2773,11 @@ REAP_EOF
     # a pool to route it to, whatever holds the anchor. The child is the batch's
     # fix unit: a must-fix ruling on a finding filed below hangs its
     # close-ordering edge on the anchor's human-lane rework child (finding.sh
-    # set-disposition). A batch sent to a visit has no child of its own, so a
+    # set-disposition). A batch sent to a person has no child of its own, so a
     # finding ruled must-fix either holds the merge with nothing acting on it or
     # attaches to an earlier batch's landed child and closes as answered by work
     # that never saw it. merge_hold, rebase_hold, a route to a human, a live
-    # demand and an armed re-dispatch therefore choose nothing here. Each still
+    # human gate and an armed re-dispatch therefore choose nothing here. Each still
     # gates what it gates elsewhere, the merge or the stale-base and red-check
     # dispatches. The child brings the branch current by merge as it answers, as
     # every rework child does. On an armed anchor its blocks edge keeps the
@@ -2868,7 +2787,7 @@ REAP_EOF
     why=""
     [ -n "$fix_branch" ] || why="the PR head branch is unresolved"
     [ -n "$FIX_POOL" ]   || why="no fix pool is configured"
-    if [ -n "$why" ]; then choice="visit"; else choice="rework"; fi
+    if [ -n "$why" ]; then choice="human"; else choice="rework"; fi
     CSRC=$(feedback_reviews "$revs_open" "$rwm")
     DISP=""
     if [ "$choice" = "rework" ]; then
@@ -2921,7 +2840,7 @@ thread may carry detail the sentence leaves out: post it through $PR_POST
 \`reply\`, which marks it as the city's own, since a reply posted any other way
 reads as new feedback on the PR. A Conversation comment that belongs to no review
 is answered with $PR_POST \`comment\`. One that asks for a decision you cannot
-make is an escalation, never a silent close.
+make is a question for a person, filed as a human gate, never a silent close.
 
 $CBODY"
       if ! ckids=$(bd_list --status="$ALL_STATUSES" --title-contains "$CTITLE"); then
@@ -2937,7 +2856,7 @@ $CBODY"
       # child by. A fresh child is filed with this order, and a child the probe
       # finds is held to it as well.
       CMETA=$(jq -nc --arg a "$id" --arg b "$fix_branch" --arg t "$base" \
-        --arg r "Review feedback on PR#$num is unanswered at head $head_oid. This bead's description carries it verbatim; $live_url is the live copy. Answer every item with a fix or the reason you made none, and record each answer on its finding with $FINDING answer, as the description says, then push to '$fix_branch'. Post no comment of your own that answers the review: the living comment the city keeps for it shows your answers. Do NOT open a new PR: this reworks PR#$num. A comment asking for a decision you cannot make is an escalation, never a silent close." \
+        --arg r "Review feedback on PR#$num is unanswered at head $head_oid. This bead's description carries it verbatim; $live_url is the live copy. Answer every item with a fix or the reason you made none, and record each answer on its finding with $FINDING answer, as the description says, then push to '$fix_branch'. Post no comment of your own that answers the review: the living comment the city keeps for it shows your answers. Do NOT open a new PR: this reworks PR#$num. A comment asking for a decision you cannot make is a question for a person, filed as a human gate, never a silent close." \
         --arg sr "$CSRC" --arg m "$prepare_mode" --arg u "$live_url" --arg n "$num" \
         '{task_kind: "rework", anchor_bead: $a, branch: $b, target: $t, rejection_reason: $r}
          + (if $sr == "" then {} else {source_review: $sr} end)
@@ -3052,44 +2971,28 @@ $CBODY"
       DISP="rework:$CFIX"
     else
       # Same conditional coordinate as the child's title: a batch with no issue
-      # comment keeps the key an open visit was filed under.
+      # comment keeps the key an open gate was filed under.
       VKEY="pr-comments.$num.$max_r.$max_c"
       [ "$max_i" -gt 0 ] && VKEY="pr-comments.$num.$max_r.$max_c.$max_i"
       # The same unanswered batch is detected again on every pass until a
       # disposition lands, so the call declares the standing quiet window.
       human_gate "$id" "$VKEY" \
-        "PR#$num ($live_url) carries review feedback nothing has answered (highest: review $max_r, comment $max_c, issue $max_i; answered through review $rwm, comment $cwm, issue $iwm${CSRC:+; reviews $CSRC}), and the city cannot route work for it because $why. Answer it on the PR, file the rework by hand, or close this visit once it is addressed — the merge is held until then." \
+        "PR#$num ($live_url) carries review feedback nothing has answered (highest: review $max_r, comment $max_c, issue $max_i; answered through review $rwm, comment $cwm, issue $iwm${CSRC:+; reviews $CSRC}), and the city cannot route work for it because $why. Answer it on the PR, or file the rework by hand, then clear this gate — the merge is held until then." \
         "$PR_STANDING_QUIET_WINDOW"
-      VID=$(visit_for "$id" "$VKEY") || VID=""
+      # The gate blocks the anchor, which holds the merge until a person clears
+      # it, and gate_for reads it back from the anchor's own edges, so the
+      # disposition names a gate that holds. Gates that will not read, or none
+      # open under the key, disposition nothing this pass.
+      VID=$(gate_for "$id" "$VKEY") || VID=""
       if [ -z "$VID" ]; then
-        echo "$PROG: $id — PR#$num has unanswered comments but no visit could be filed or found; NOTHING dispositioned (retry next pass)" >&2
+        echo "$PROG: $id — PR#$num has unanswered comments but no human gate could be filed or found; NOTHING dispositioned (retry next pass)" >&2
         skipped=$((skipped + 1)); continue
       fi
-      # The visit holds the merge through pr_number: merge.sh's in-flight-holder
-      # probe holds the merge while a live bead carries the PR's number, and a
-      # fold moves the stamp to its holder (visit-close.sh). anchor_bead makes
-      # the visit one of the anchor's children, so it lands only once the visit
-      # is joined to the anchor: escalate.sh's tracks edge usually joins it
-      # already, and bd_anchor_link joins it when that edge did not land. A
-      # failed join leaves anchor_bead off, and pr_number still holds the merge.
-      vstamp=(--set-metadata pr_url="$live_url" --set-metadata pr_number="$num")
-      if bd_anchor_link "$id" "$VID"; then
-        vstamp+=(--set-metadata anchor_bead="$id")
-      else
-        echo "$PROG: WARN visit $VID could not be joined to anchor $id; anchor_bead is left off it, and pr_number still holds the merge" >&2
-      fi
-      gc bd update "$VID" "${vstamp[@]}" >/dev/null 2>&1 \
-        || echo "$PROG: WARN visit $VID not stamped with PR#$num; it will NOT hold the merge — stamp it by hand" >&2
-      vgot=$(gc bd show "$VID" --json 2>/dev/null | scrub | jq -r '.[0].metadata.pr_number // empty')
-      if [ "$vgot" != "$num" ]; then
-        echo "$PROG: WARN visit $VID did not record pr_number=$num; NOT watermarking (a mark past an unheld comment is the silence this arm exists to stop)" >&2
-        skipped=$((skipped + 1)); continue
-      fi
-      DISP="visit:$VID"
+      DISP="human:$VID"
     fi
 
     # --- operator feedback ensures a validation pass on the anchor ---------------
-    # The batch just routed to a fix or a visit above; it also ensures a live
+    # The batch just routed to a fix or a person above; it also ensures a live
     # check_name=human validation pass on the anchor. A human feedback batch is
     # review the branch has never been answered against, so it enters the graph
     # the way a reviewer's findings do: gate-ensure.sh's quiescence reads the open
@@ -3314,8 +3217,8 @@ $CBODY"
     # set-disposition, from the finding.fix_unit recorded above), so the fix unit
     # blocks only the findings it must answer. A re-raised finding already ruled
     # must-fix is not ruled again, so upsert hangs this batch's child onto it as
-    # it re-adopts it. A visit-routed batch has no fix unit and a human answers
-    # it. The child's own blocks edge onto the anchor, wired at dispatch, is what
+    # it re-adopts it. A batch routed to a person has no fix unit, and a human
+    # answers it. The child's own blocks edge onto the anchor, wired at dispatch, is what
     # holds the merge in the meantime
     # (specs/tk-ztapg/review-cycle-architecture.md, "The fix unit").
 
@@ -3352,7 +3255,7 @@ $CBODY"
       answered=$((answered + 1))
       echo "$PROG: $id — PR#$num review comments routed to $DISP (watermark: review $max_r, comment $max_c, issue $max_i)"
       # The batch now stands on the anchor as live work: its rework child or
-      # visit, its findings, and its validation pass. The label derives from that
+      # human gate, its findings, and its validation pass. The label derives from that
       # work, so it is re-derived in the pass that routed the batch.
       reconcile_status_label "$id" "$num"
     else
@@ -3368,16 +3271,16 @@ $CBODY"
   # sweep are the full pass's, which runs after merge.
   [ "$ROUTE_ONLY" != 1 ] || continue
 
-  # --- BLOCKED: escalate an unresolved-thread block; a pending approval is not one ----
+  # --- BLOCKED: put an unresolved-thread block to a person; a pending approval is not one ----
   # A PR whose city-side feedback is all routed can still sit on branch
-  # protection. The one cause this cadence escalates is an unresolved review
+  # protection. The one cause this cadence puts to a person is an unresolved review
   # thread where thread resolution is required (required_review_thread_resolution),
-  # read from the branch's own rules. A missing approving review is NOT escalated:
+  # read from the branch's own rules. A missing approving review is NOT put to one:
   # a PR waiting on a required approving review is the operator's own review queue,
   # state the board's review section already surfaces from the posture recorded
-  # above (pr_posture), not a conversation a visit should open. Anything else — a
+  # above (pr_posture), not a question a gate should ask. Anything else — a
   # rule this cadence does not model, unreadable rules, or a thread count that
-  # could not be read — escalates nothing rather than a guess; the next reconcile
+  # could not be read — files nothing rather than a guess; the next reconcile
   # retries. CHANGES_REQUESTED is active feedback the arms above and the dismissal
   # below own; an operator merge_hold is their own gate; leave both.
   if [ "$merge_state" = "BLOCKED" ] && ! is_held "$hold" && [ "$rd" != "CHANGES_REQUESTED" ]; then
@@ -3397,12 +3300,12 @@ $CBODY"
         human_gate "$id" "merge-blocked-threads" \
           "PR#$num ($live_url) is BLOCKED by branch protection: $bthreads unresolved review thread(s) must be resolved before it can merge (required_review_thread_resolution is on). Resolve the thread(s), or say why the block should lift." \
           "$PR_STANDING_QUIET_WINDOW"
-        echo "$PROG: $id — PR#$num BLOCKED on $bthreads unresolved review thread(s); escalated (merge-blocked-threads)"
+        echo "$PROG: $id — PR#$num BLOCKED on $bthreads unresolved review thread(s); gate filed (merge-blocked-threads)"
         flagged=$((flagged + 1)); continue ;;
     esac
-    # bcause=unnameable: the cause is not one this cadence escalates — an unmodeled
-    # rule, unreadable rules, or a pending approving review (state, not a visit) —
-    # so escalate nothing; merge.sh logs it and the next reconcile retries. Fall
+    # bcause=unnameable: the cause is not one this cadence puts to a person — an
+    # unmodeled rule, unreadable rules, or a pending approving review (state, not a
+    # question) — so file nothing; merge.sh logs it and the next reconcile retries. Fall
     # through, leaving the dismissal arm below to act if it applies.
   fi
 
@@ -3452,46 +3355,31 @@ $CBODY"
     fi
   fi
 
-  # --- unengaged review-thread findings: the visit the posture hold stands for --
+  # --- unengaged review-thread findings: the gate the posture hold stands for ---
   # The merge-hold itself is the `commented` posture the section above records in
   # the pre-merge pass — merge.sh reads posture off the bead and never reads
   # threads, and this full pass runs after merge. This is the dispatch that hold
   # is for: when the posture pass first read the threads it set UT_COUNT, so file
-  # ONE visit and watermark the head. The hold then stands off that open visit
-  # until it closes; the watermark keeps a closed visit from re-raising until a
-  # new commit. It files a visit, not rework — telling a finding from our own
-  # answer well enough to drive an auto-fix loop is arm 7's watermark machinery,
-  # and running that off a raw thread read would loop on our own replies.
+  # ONE human gate on the anchor and watermark the head. The hold then stands off
+  # that open gate until a person clears it; the watermark keeps a cleared gate
+  # from re-raising until a new commit. It files a gate, not rework — telling a
+  # finding from our own answer well enough to drive an auto-fix loop is arm 7's
+  # watermark machinery, and running that off a raw thread read would loop on our
+  # own replies. The gate blocks the anchor, which holds the merge by itself.
   if [ -n "$UT_COUNT" ] && [ "$UT_COUNT" -gt 0 ]; then
     UTKEY="pr-unengaged-threads.$num.$head_oid"
     human_gate "$id" "$UTKEY" \
-      "PR#$num ($live_url) carries $UT_COUNT unresolved review-thread finding(s) that nothing picked up. They were posted under the automation's own login with no city mark, before this PR's provenance cutover, so the comment-routing arm read them as the city's own and the green check triggered no re-review. Answer each on the PR, file rework, or resolve the threads — the merge is held until this visit closes."
-    UTVID=$(visit_for "$id" "$UTKEY") || UTVID=""
+      "PR#$num ($live_url) carries $UT_COUNT unresolved review-thread finding(s) that nothing picked up. They were posted under the automation's own login with no city mark, before this PR's provenance cutover, so the comment-routing arm read them as the city's own and the green check triggered no re-review. Answer each on the PR, file rework, or resolve the threads, then clear this gate — the merge is held until it is cleared."
+    UTVID=$(gate_for "$id" "$UTKEY") || UTVID=""
     if [ -z "$UTVID" ]; then
-      echo "$PROG: $id — PR#$num carries $UT_COUNT unengaged review thread(s); posture holds the merge but no visit could be filed (retry next pass)" >&2
+      echo "$PROG: $id — PR#$num carries $UT_COUNT unengaged review thread(s); posture holds the merge but no human gate could be filed (retry next pass)" >&2
       skipped=$((skipped + 1))
+    elif "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
+           --set "pr_unengaged_threads=$head_oid" >/dev/null; then
+      flagged=$((flagged + 1))
+      echo "$PROG: $id — PR#$num has $UT_COUNT unengaged review-thread finding(s); filed human gate $UTVID (merge held)"
     else
-      # Stamped the way the comment-batch visit is: joined before anchor_bead
-      # lands, and pr_number holding the merge either way.
-      utvstamp=(--set-metadata pr_url="$live_url" --set-metadata pr_number="$num")
-      if bd_anchor_link "$id" "$UTVID"; then
-        utvstamp+=(--set-metadata anchor_bead="$id")
-      else
-        echo "$PROG: WARN visit $UTVID could not be joined to anchor $id; anchor_bead is left off it, and pr_number still holds the merge" >&2
-      fi
-      gc bd update "$UTVID" "${utvstamp[@]}" >/dev/null 2>&1 \
-        || echo "$PROG: WARN visit $UTVID not stamped with PR#$num — stamp it by hand" >&2
-      utvgot=$(gc bd show "$UTVID" --json 2>/dev/null | scrub | jq -r '.[0].metadata.pr_number // empty')
-      if [ "$utvgot" != "$num" ]; then
-        echo "$PROG: WARN $id — PR#$num visit $UTVID did not record pr_number; NOT watermarking the head (it re-raises next pass, deduped on the same visit)" >&2
-        skipped=$((skipped + 1))
-      elif "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
-             --set "pr_unengaged_threads=$head_oid" >/dev/null; then
-        flagged=$((flagged + 1))
-        echo "$PROG: $id — PR#$num has $UT_COUNT unengaged review-thread finding(s); filed visit $UTVID (merge held)"
-      else
-        echo "$PROG: WARN $id — PR#$num visit $UTVID filed and stamped, but the head watermark did not record; it re-raises next pass (deduped on the same visit)" >&2
-      fi
+      echo "$PROG: WARN $id — PR#$num human gate $UTVID filed, but the head watermark did not record; it re-raises next pass (deduped on the same gate)" >&2
     fi
   fi
 
@@ -3536,7 +3424,7 @@ $CBODY"
       is_held "$hold"           && rc_why="merge_hold is set"
       [ "$(printf '%s' "$row" | jq -r '(.metadata["gc.routed_to"] // "") | tostring')" = "human" ] \
         && rc_why="the anchor is already routed to a human"
-      anchor_decision_held "$id" && rc_why="a sitting holds it for an operator ruling"
+      if rc_gate=$(anchor_decision_held "$id"); then rc_why="human gate ${rc_gate:-(gates unreadable)} holds it for a person's answer"; fi
       [ -n "$armed" ]           && rc_why="the anchor is armed to re-dispatch when ready"
       # A held or human-steered anchor is theirs; file nothing under it, as the
       # stale-base arm files no merge-in under a hold. Review feedback is the one
@@ -4019,8 +3907,8 @@ wb_swaps() {
 # logs the thread. GitHub withholds that right from the identity rather than
 # from one PR, so each pass files the situation once, as one finding for the
 # repository. A person learns of it without reading the log, and the finding
-# names no anchor, so it holds no merge the way an escalate.sh visit on the
-# anchor would.
+# names no anchor, so it holds no merge the way a human gate on the anchor
+# would.
 wb_unres_filed=0
 wb_unresolvable() { # <thread-id>
   echo "$PROG: $wid — PR#$wnum thread $1 is not resolvable by this identity; left unresolved (retry next pass)" >&2
@@ -4249,8 +4137,10 @@ pace_start "$WB_CURSOR" "$DEADLINE"
 pace_seen_start "${WB_CURSOR:+$WB_CURSOR.seen}"
 # --- write-back visit order: an anchor with something new to answer first --------
 # The sweep owes a write when a batch is routed (the disposition or a watermark
-# moves) or when work answering one closes (a rework child, a visit, a finding,
-# a validation pass leaves the anchor's live children). Its mark joins the
+# moves) or when work answering one closes (a rework child, a finding, a
+# validation pass leaves the anchor's live children). A human gate a batch was
+# routed to is no child of the anchor, so its clearing moves no mark, and that
+# batch is answered when the rotation reaches the anchor. Its mark joins the
 # disposition, the three watermarks and the live child ids, so an anchor whose
 # mark moved since the sweep last visited it goes first, on
 # <cursor>.writeback.first, and the rest rotate on <cursor>.writeback.
@@ -4411,13 +4301,13 @@ while IFS= read -r wtagged; do
   # demo-deliver closed on attach) carries its delivery evidence and lands no
   # commit, so that evidence is what the answer cites; a commit fix unit lands at
   # the PR head. The artifact flag keeps the answer from truncating a URL or
-  # claiming a commit the fix never made. A visit answers once the person closes
-  # it, and while it is open its comments wait on that person. A bead that does
+  # claiming a commit the fix never made. A human gate answers once a person
+  # clears it, and while it is open its comments wait on that person. A bead that does
   # not read back is neither open nor closed, so its comments are acknowledged
   # and nothing more. Answering on the filing rather than the landing would mark
   # a comment resolved while its fix is still unwritten.
   # The same read also keeps each bead's title, fix notes and close (wbxl, one
-  # object a line), which the living answers below show: a visit's title as the
+  # object a line), which the living answers below show: a gate's title as the
   # question it holds, a fix unit's notes under "Notes from the fix", and its
   # close as the landing a flagged decline's commits wait on. They stay out of
   # the plan's arguments, which carry no free text.
@@ -4428,7 +4318,7 @@ while IFS= read -r wtagged; do
     while IFS= read -r wd; do
       [ -n "$wd" ] || continue
       wbk="${wd%%:*}"; wbid="${wd#*:}"; wbst="unknown"; wbland=""; wbart=""; wbout=""
-      case "$wbk" in rework|visit) : ;; *) wbk="" ;; esac
+      case "$wbk" in rework|human) : ;; *) wbk="" ;; esac
       if [ -n "$wbk" ] && [ -n "$wbid" ] && wbj=$(gc bd show "$wbid" --json 2>/dev/null | scrub) && [ -n "$wbj" ]; then
         wbxl="$wbxl$(printf '%s' "$wbj" | jq -c --arg b "$wbid" "$WB_BEAD_EXTRA_JQ" 2>/dev/null)"$'\n'
         wbst=$(printf '%s' "$wbj" | jq -r --arg live "$LIVE_STATUSES" '
@@ -4438,7 +4328,10 @@ while IFS= read -r wtagged; do
           wbland=$(printf '%s' "$wbj" | jq -r '.[0].metadata.artifact_url // ""' 2>/dev/null)
           if [ -n "$wbland" ]; then wbart="1"; else wbland="$whead"; fi
         elif [ "$wbst" = "closed" ]; then
-          wbout=$(printf '%s' "$wbj" | jq -r '(.[0].metadata["gc.outcome"] // "") | tostring' 2>/dev/null)
+          # A cleared gate's outcome is the head of its close reason, ruled, moot
+          # or benign; a reason with no head names none.
+          wbout=$(printf '%s' "$wbj" | jq -r '(.[0].close_reason // "") | tostring
+            | (capture("^[[:space:]]*(?<w>ruled|moot|benign):") | .w) // ""' 2>/dev/null)
         fi
       fi
       wbnew=$(printf '%s' "$wbeads" | jq -c --arg d "$wd" --arg k "$wbk" --arg b "$wbid" --arg s "$wbst" \
@@ -4566,7 +4459,7 @@ WB_ROUNDS
   # Every comment the city routed (a foreign comment at or below its space's mark)
   # is in one of three states, read from its own finding first and then from its
   # batch:
-  #   awaiting  its batch went to a visit that is still open, or its finding was
+  #   awaiting  its batch went to a human gate that is still open, or its finding was
   #             ruled needs-you and is still open
   #   resolved  its batch's bead closed and its finding, if it has one, closed;
   #             or its finding was declined or deferred, which the finding's own
@@ -4593,16 +4486,16 @@ WB_ROUNDS
   #                                     answered), or pushback (a declined or
   #                                     deferred finding in it waits for the
   #                                     operator, so only answered).
-  #   Q <thread> <visit> <body>         the awaiting answer for one open visit
+  #   Q <thread> <gate> <body>          the awaiting answer for one open gate
   #   P <mark> <tokens> <swaps> <body>  a Conversation-tab answer for the review
   #                                     bodies and Conversation comments one bead
-  #                                     answers, or one open visit holds. A review
+  #                                     answers, or one open gate holds. A review
   #                                     body whose review raised findings is left
   #                                     to that review's living answer.
   #   W <json>                          per review id, what its living answer
   #                                     owes the review body it covers: the mark
   #                                     lines no other answer of ours carries, the
-  #                                     visits a batch waits on, and the swaps a
+  #                                     gates a batch waits on, and the swaps a
   #                                     resolved body takes once its mark is posted
   #   S <swap>                          a resolved comment whose answer is posted
   #   K <comment> <review> <issue>      per ledger, the records still owing a write
@@ -4657,28 +4550,28 @@ WB_ROUNDS
         elif $f != null and ($f.open | not) and ($f.disp == "declined" or $f.disp == "deferred")
           then { st: "resolved", by: "finding", back: $f.reply, posted: (($f.reply | not) or $f.posted == "1"), ri: $ri }
         elif $r == null or ($f == null and $off) then { st: "looked", ri: null }
-        elif $r.kind == "visit" and $r.state == "open" then { st: "awaiting", by: "batch", visit: $r.bead, ri: $ri }
-        elif $r.state == "closed" and ($r.kind == "visit" or $r.landed != "") and ($f == null or ($f.open | not))
+        elif $r.kind == "human" and $r.state == "open" then { st: "awaiting", by: "batch", gate: $r.bead, ri: $ri }
+        elif $r.state == "closed" and ($r.kind == "human" or $r.landed != "") and ($f == null or ($f.open | not))
           then { st: "resolved", by: "batch", disp: $r.disp, fixed: ($f != null and $f.disp == "must-fix"), ri: $ri }
         else { st: "looked", ri: $ri } end;
     # One clause per form and landing, naming the beads that answered: a commit fix
     # unit by the commits it made (a token wb_expand cites, keyed by the comments
-    # it answers), an artifact fix unit by its delivered URL, and a visit by its
-    # close. A mixed-form answer thus never claims a commit a demo made, nor a demo
+    # it answers), an artifact fix unit by its delivered URL, and a human gate by
+    # its clearing. A mixed-form answer thus never claims a commit a demo made, nor a demo
     # a commit made. The clause of a fix unit says Fixed for the comments whose
     # must-fix finding it closed, and Resolved for any other.
     def resolved_text($rs):
-      [ $rs | group_by([ .kind, .artifact, .landed, (.kind != "visit" and .artifact != "1" and .fixed == true) ])[]
+      [ $rs | group_by([ .kind, .artifact, .landed, (.kind != "human" and .artifact != "1" and .fixed == true) ])[]
         | ([ .[].bead ] | unique) as $bs | ($bs | join(", ")) as $who | .[0] as $h
-        | if $h.kind == "visit"
-          then "Resolved: " + ([ unique_by(.bead)[] | "visit " + .bead + " closed"
+        | if $h.kind == "human"
+          then "Resolved: " + ([ unique_by(.bead)[] | "human gate " + .bead + " cleared"
                  + (if .outcome != "" then " (" + .outcome + ")" else "" end) ] | join(", ")) + "."
           elif $h.artifact == "1" then "Resolved by the demo delivered on this PR: " + $h.landed + " (" + $who + ")."
           else (if $h.fixed == true then "Fixed " else "Resolved " end)
             + "{{gc-fixed-in:" + ($bs | join(",")) + "|" + ([ .[].key | select(. != null) ] | unique | join(",")) + "}}"
             + " (" + $who + ")." end ]
       | $gres + " " + join(" ");
-    def awaiting_text($v): $gwait + " Awaiting a person — visit " + $v + ".";
+    def awaiting_text($v): $gwait + " Awaiting a person — human gate " + $v + ".";
     def ref: if .url != "" then .url elif .s == "r" then "review " + (.d | tostring) else "comment " + (.d | tostring) end;
     # Add THUMBS_UP unless it is there; remove EYES when it is there, or when an R
     # line adds it this pass (a comment carrying neither reaction).
@@ -4754,7 +4647,7 @@ WB_ROUNDS
           | [ $x.held[] | select(.st == "resolved" and .by == "batch") ] as $bres
           | (($x.held | length) > 0 and all($x.held[]; .st == "resolved") and ($bres | length) > 0) as $ready
           | (($x.res | not) and ($x.held | length) == 0 and $x.mres != null and ($led.c | length) > 0
-             and ($led.c[-1] | .state == "closed" and (.kind == "visit" or .landed != ""))) as $claimed
+             and ($led.c[-1] | .state == "closed" and (.kind == "human" or .landed != ""))) as $claimed
           | select($ready or $claimed)
           | [ $bres[] | select($x.mres == null or .k > $x.mres) ] as $pend
           | (if ($pend | length) > 0 then 1 else 0 end) as $reply
@@ -4772,29 +4665,29 @@ WB_ROUNDS
             + "\t" + (if $reply == 1 then resolved_text([ $pend[] | $led.c[.ri] + { fixed, key: (.d | tostring) } ]) else "-" end)
             + "\t" + ($pend | swaps) ]
       + [ $T[] | . as $x
-          | [ $x.held[] | select(.st == "awaiting" and .by == "batch") | .visit ] | unique[]
+          | [ $x.held[] | select(.st == "awaiting" and .by == "batch") | .gate ] | unique[]
           | select(("awaiting:" + .) as $m | ($x.sts | index($m)) == null)
           | "Q\t" + $x.id + "\t" + . + "\t" + awaiting_text(.) ]
-      + [ [ $tops[] | select(.st == "awaiting" and .by == "batch") | select(covered | not) | select(tmarked("awaiting:" + .visit; .tok) | not) ]
-          | group_by(.visit)[]
-          | "P\tawaiting:" + .[0].visit + "\t" + ([ .[].tok ] | join(" ")) + "\t-\t"
-            + awaiting_text(.[0].visit) + " In reply to " + ([ .[] | ref ] | join(", ")) + "." ]
+      + [ [ $tops[] | select(.st == "awaiting" and .by == "batch") | select(covered | not) | select(tmarked("awaiting:" + .gate; .tok) | not) ]
+          | group_by(.gate)[]
+          | "P\tawaiting:" + .[0].gate + "\t" + ([ .[].tok ] | join(" ")) + "\t-\t"
+            + awaiting_text(.[0].gate) + " In reply to " + ([ .[] | ref ] | join(", ")) + "." ]
       + [ [ $tops[] | select(.st == "resolved" and .by == "batch") | select(covered | not) | select(tmarked("resolved"; .tok) | not) ]
           | group_by(.disp)[]
           | "P\tresolved\t" + ([ .[].tok ] | join(" ")) + "\t" + swaps + "\t"
             + resolved_text([ .[] | $led[.s][.ri] + { fixed, key: (.d | tostring) } ]) + " In reply to " + ([ .[] | ref ] | join(", ")) + "." ]
       # What each living answer owes the review body it covers: the mark line
-      # that records the body answered or awaiting a visit, the visit, and the
+      # that records the body answered or awaiting a gate, the gate, and the
       # reaction trade a resolved body takes once the mark is on the PR.
       + [ "W\t" + ([ $tops[] | select(covered) | select(.by == "batch" and (.st == "resolved" or .st == "awaiting"))
-            | (if .st == "resolved" then "resolved" else "awaiting:" + .visit end) as $mk
+            | (if .st == "resolved" then "resolved" else "awaiting:" + .gate end) as $mk
             | .tok as $tk
             | select(any($tmo[]; .st == $mk and ((.toks | index($tk)) != null)) | not)
             | { rid: (.d | tostring), mark: ($mk + " " + .tok),
-                visit: (if .st == "awaiting" then .visit else null end),
+                gate: (if .st == "awaiting" then .gate else null end),
                 swap: (if .st == "resolved" then swap else null end) } ]
           | group_by(.rid)
-          | map({ key: .[0].rid, value: { marks: [ .[].mark ], visits: [ .[].visit | select(. != null) ],
+          | map({ key: .[0].rid, value: { marks: [ .[].mark ], gates: [ .[].gate | select(. != null) ],
                                           swaps: ([ .[].swap | select(. != null) | select(endswith(":0:0") | not) ]
                                                   | if length > 0 then join(",") else "-" end) } })
           | from_entries | tojson) ]
@@ -4885,7 +4778,7 @@ $wplan
 WB_PLAN
   # An awaiting answer leaves its thread open: the person it names still owes
   # the ruling.
-  while IFS="$(printf '\t')" read -r act a1 a2 a3; do  # a1: thread; a2: visit; a3: body
+  while IFS="$(printf '\t')" read -r act a1 a2 a3; do  # a1: thread; a2: gate; a3: body
     [ "${act:-}" = "Q" ] || continue
     [ "$wack_ok" = 1 ] || continue
     if wb_thread_reply "$a1" "$a3
@@ -4936,7 +4829,7 @@ WB_SWAPS
   # Every ruling a human finding takes, bar a must-fix the fix unit answers in
   # code, owes its raiser a visible answer stamped as finding.reply against the
   # row it answers (finding.comment_id): a declined finding's reason, a deferred
-  # finding's follow-up id, or a needs-you finding's visit id. This posts that
+  # finding's follow-up id, or a needs-you finding's gate id. This posts that
   # answer into the raiser's thread, or, for a Conversation comment, onto the
   # Conversation tab with a link to the comment it answers. A review body sits in
   # no thread, and the living answer to its review carries its answer below.
@@ -5049,7 +4942,7 @@ WB_DECLINES
   # comment, its living answer (review-answer.sh says what it shows). It is
   # posted once the round is picked up, its findings filed and their pickup
   # reactions on the PR, and edited in place whenever its rendering changes
-  # after that: a ruling, a fix's result, a fix landing, a visit ruled, a
+  # after that: a ruling, a fix's result, a fix landing, a gate ruled on, a
   # dismissal. GitHub sends no notification for an edit, so the post is the one
   # that notifies, and nothing waits for a ruling or a fix. The rendering is
   # rebuilt from bead state on every pass and carries a digest of itself, so a
@@ -5082,7 +4975,7 @@ WB_DECLINES
   # clears independently of another, in its round or out of it. A closed
   # finding is not yet answered while the answer it owes its raiser is
   # undelivered, and a needs-you finding counts as answered only when it records
-  # the visit whose ruling released it (finding.ruling_visit, stamped by
+  # the bead whose ruling released it (finding.ruling_bead, stamped by
   # finding.sh close-answered); one closed without it was settled by no ruling,
   # so its review stands. The confidence is the validator's, carried by the
   # findings' closure, never a commit oid, so a later push does not reopen it.
@@ -5135,7 +5028,7 @@ WB_REVIEW_ANSWERS
                       disp: ((.metadata["finding.disposition"] // "") | tostring),
                       owed: owes_reply,
                       reply_posted: ((.metadata["finding.reply_posted"] // "") | tostring),
-                      ruling: ((.metadata["finding.ruling_visit"] // "") | tostring) } ] as $fs
+                      ruling: ((.metadata["finding.ruling_bead"] // "") | tostring) } ] as $fs
           | def answered: (.open == false)
               and (( .owed and .reply_posted != "1" ) | not)
               and (( .disp == "needs-you" and .ruling == "" ) | not);

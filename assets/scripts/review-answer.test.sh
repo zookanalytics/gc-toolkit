@@ -17,7 +17,7 @@
 #             posted for the finding, and ends with a post of the city, as
 #             gc_city_own tells one; a reply of theirs ends the wait until the
 #             city answers it
-#   (RENDER)  the visit callout on top, the count line counting the points that
+#   (RENDER)  the human-gate callout on top, the count line counting the points that
 #             need the reviewer and saying where the rest stand, the sections in
 #             order, the entries, the folded notes and the trailing mark lines
 #   (MODEL)   one model per review round: the comment already on the PR found
@@ -78,8 +78,8 @@ MARKER='<!-- gc-writeback -->'
 PRURL="https://github.com/o/r/pull/7"
 # A finding record as ra_record builds it, from a few overrides.
 rec() { jq -cn --argjson o "${1:-}" '{ id: "F", open: false, disp: "must-fix", message: "", title: "", label: "",
-    answer: "", fix_answer: "", fix_flag: "", reply: "", posted: false, follow_up: "", visit: "",
-    ruling_visit: "", fix_unit: "", cid: "11", rid: "10", body: false, url: "", waits: false, fix_landed: false } + $o'; }
+    answer: "", fix_answer: "", fix_flag: "", reply: "", posted: false, follow_up: "", gate: "",
+    ruling_bead: "", fix_unit: "", cid: "11", rid: "10", body: false, url: "", waits: false, fix_landed: false } + $o'; }
 label() { rec "$1" | jq -r "$REVIEW_ANSWER_DEF"'ra_label'; }
 point() { rec "$1" | jq -c "$REVIEW_ANSWER_DEF"'[ ra_point ] | .[0] // "none"'; }
 pfield() { point "$1" | jq -r --arg k "$2" 'if type == "object" then (if has($k) then (.[$k] | tostring) else "" end) else . end'; }
@@ -105,8 +105,8 @@ eq "$(label '{"message":"**Rename [a] to [b].**"}')" 'Rename \[a\] to \[b\].' "(
 eq "$(label '{"message":"","title":"finding[human]: The retry loop could back off"}')" "The retry loop could back off" "(LABEL) no message: the finding's title"
 
 echo "# (SECTION)"
-eq "$(pfield '{"disp":"needs-you","open":true,"visit":"tk-v","answer":"Ship it now?"}' section)" "needs" "(SECTION) an open needs-you finding needs the operator"
-eq "$(pfield '{"disp":"needs-you","open":true,"visit":"tk-v","answer":"Ship it now?"}' ref)" "tk-v" "(SECTION) …naming its visit"
+eq "$(pfield '{"disp":"needs-you","open":true,"gate":"tk-v","answer":"Ship it now?"}' section)" "needs" "(SECTION) an open needs-you finding needs the operator"
+eq "$(pfield '{"disp":"needs-you","open":true,"gate":"tk-v","answer":"Ship it now?"}' ref)" "tk-v" "(SECTION) …naming its gate"
 eq "$(pfield '{"disp":"declined","reply":"the guard already holds"}' section)" "worth" "(SECTION) a declined objection is worth a look"
 eq "$(pfield '{"disp":"declined","reply":"the guard already holds"}' sentence)" "Declined: the guard already holds" "(SECTION) …answered by its reply, the ruling first"
 eq "$(pfield '{"disp":"declined","reply":"Declined: kept as is"}' sentence)" "Declined: kept as is" "(SECTION) …never with the ruling twice"
@@ -148,9 +148,9 @@ LONGQUOTE=$(pfield "$LONGREPLY" extra)
 eq "${#LONGQUOTE}" "3209" "(SECTION) …and quotes its reply whole, never cut at the sentence cap"
 eq "$(pfield '{"disp":"declined","reply":"We keep Y","fix_answer":"Changed anyway.","fix_flag":"1"}' extra)" "" \
   "(SECTION) an inline comment's decline quotes nothing: its thread carries the reply"
-eq "$(pfield '{'"$BODY"',"disp":"needs-you","open":true,"visit":"tk-v","answer":"Ship it now?","reply":"This comment needs your decision — opened visit tk-v."}' extra)" "" \
-  "(SECTION) a body question for the operator quotes nothing: the entry names its visit"
-eq "$(pfield '{"disp":"needs-you","ruling_visit":"tk-v"}' sentence)" "Settled by your ruling on visit tk-v." "(SECTION) a needs-you finding the ruling settled is done"
+eq "$(pfield '{'"$BODY"',"disp":"needs-you","open":true,"gate":"tk-v","answer":"Ship it now?","reply":"This comment needs your decision — filed human gate tk-v."}' extra)" "" \
+  "(SECTION) a body question for the operator quotes nothing: the entry names its gate"
+eq "$(pfield '{"disp":"needs-you","ruling_bead":"tk-v"}' sentence)" "Settled by your ruling on tk-v." "(SECTION) a needs-you finding the ruling settled is done"
 eq "$(pfield '{"disp":"unvalidated","open":true}' section),$(pfield '{"disp":"unvalidated","open":true}' ruled)" "progress,false" "(SECTION) an unruled point is in progress"
 eq "$(point '{"disp":"restates","body":true,"cid":"10"}')" '"none"' "(SECTION) a body ruled restates is no point"
 # The write-back never resolves a thread holding a decline or a deferral it
@@ -227,12 +227,12 @@ MODEL='{"rid":"10","rids":["10"],"self":false,"members":[{"rid":"10","state":"CH
     {"id":"a","section":"worth","label":"Guard rewrites the opt-out","url":"U1","sentence":"You asked for a decision, and the fix chose your second option.","ref":"","answered":true,"ruled":true,"extra":""},
     {"id":"b","section":"done","label":"A refused dismissal tells nobody.","url":"","sentence":"Fixed with your option (a).","ref":"{{gc-commits:k|3}}","answered":true,"ruled":true,"extra":""},
     {"id":"c","section":"worth","label":"Retry loop","url":"","sentence":"Deferred to tk-fu: later.","ref":"tk-fu","answered":true,"ruled":true,"extra":""}],
-  "visits":[{"id":"tk-v1","question":"Should enforcement turn on now?"}],
+  "gates":[{"id":"tk-v1","question":"Should enforcement turn on now?"}],
   "notes":[{"by":"k","text":"Notes here."}],
   "marks":["resolved r10"]}'
 R=$(printf '%s' "$MODEL" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')
-case "$R" in "> [!IMPORTANT]"*) ok "(RENDER) an open visit leads the comment" ;; *) bad "(RENDER) an open visit leads the comment (got: $R)" ;; esac
-has "$R" "> **Needs you: visit tk-v1.** Should enforcement turn on now?" "(RENDER) …naming the visit and its question"
+case "$R" in "> [!IMPORTANT]"*) ok "(RENDER) an open human gate leads the comment" ;; *) bad "(RENDER) an open human gate leads the comment (got: $R)" ;; esac
+has "$R" "> **Needs you: human gate tk-v1.** Should enforcement turn on now?" "(RENDER) …naming the gate and its question"
 has "$R" "### Your review: 3 points, all answered
 " "(RENDER) the count line says every point is answered"
 hasnt "$R" "answered at" "(RENDER) …naming no commit, so a push leaves a settled review comment as it stands"
@@ -254,13 +254,13 @@ has "$R" "$MARKER
 <!-- gc-review-answer:r10 -->
 <!-- gc-review-answer:r10:dismissed -->" "(RENDER) it ends with the marker, its mark lines, its review key and the dismissed mark"
 hasnt "$R" "in its thread" "(RENDER) no sentence points at a reply or thread"
-R2=$(printf '%s' "$MODEL" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'.visits = [] | .members[0].dismissed = "" | .notes = [] | .points[0].sentence = "Guard rewrites the opt-out" | ra_render($m)')
-case "$R2" in "### Your review"*) ok "(RENDER) with no open visit the count line leads" ;; *) bad "(RENDER) with no open visit the count line leads (got: $R2)" ;; esac
+R2=$(printf '%s' "$MODEL" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'.gates = [] | .members[0].dismissed = "" | .notes = [] | .points[0].sentence = "Guard rewrites the opt-out" | ra_render($m)')
+case "$R2" in "### Your review"*) ok "(RENDER) with no open human gate the count line leads" ;; *) bad "(RENDER) with no open human gate the count line leads (got: $R2)" ;; esac
 has "$R2" "- **[Guard rewrites the opt-out.](U1)**
 " "(RENDER) a sentence that only repeats the label is left out"
 hasnt "$R2" "Review dismissed" "(RENDER) an undismissed review says nothing of a dismissal"
 hasnt "$R2" ":dismissed -->" "(RENDER) …and carries no dismissed mark"
-P=$(printf '%s' "$MODEL" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'.visits = [] | .members[0].dismissed = "" | .points = [ .points[] | .ruled = false | .answered = false | .section = "progress" | .sentence = "" ] | ra_render($m)')
+P=$(printf '%s' "$MODEL" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'.gates = [] | .members[0].dismissed = "" | .points = [ .points[] | .ruled = false | .answered = false | .section = "progress" | .sentence = "" ] | ra_render($m)')
 has "$P" "### Your review: 3 points, picked up; the ruling is in progress" "(RENDER) at pickup the count line says the ruling is in progress"
 hasnt "$P" "Not ruled yet" "(RENDER) …and no entry repeats it"
 hasnt "$P" "in progress." "(RENDER) …nor adds a count line"
@@ -282,15 +282,15 @@ eq "$(heading "[$NEEDS1,{\"section\":\"progress\",\"answered\":false,\"ruled\":t
 
 BIG=$(jq -n --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'{rid:"1",self:false,
   points:[{id:"a",section:"done",label:"L",url:"",sentence:("word " * 600),ref:"",answered:true,ruled:true,extra:""}],
-  visits:[],notes:[{by:"k",text:("n " * 9000)}],marks:[]} | ra_render($m) | length')
+  gates:[],notes:[{by:"k",text:("n " * 9000)}],marks:[]} | ra_render($m) | length')
 [ "$BIG" -lt 15000 ] && ok "(RENDER) a long sentence and long notes are clipped, so the comment stays postable ($BIG characters)" \
   || bad "(RENDER) a long sentence and long notes are clipped, so the comment stays postable (got $BIG characters)"
 CLIPPED=$(jq -rn --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'{rid:"1",self:false,
   points:[{id:"tk-f1",section:"done",label:"L",url:"",sentence:("word " * 600),ref:"",answered:true,ruled:true,extra:""}],
-  visits:[],notes:[{by:"tk-k",text:("n " * 9000)}],marks:[]} | ra_render($m)')
+  gates:[],notes:[{by:"tk-k",text:("n " * 9000)}],marks:[]} | ra_render($m)')
 has "$CLIPPED" "… (the full text is on tk-f1)" "(RENDER) a clipped sentence names the finding that holds it whole"
 has "$CLIPPED" "… (the full text is on tk-k)" "(RENDER) …and clipped notes name the fix unit that holds them"
-FENCE=$(jq -rn --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'{rid:"1",self:false,points:[],visits:[],
+FENCE=$(jq -rn --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'{rid:"1",self:false,points:[],gates:[],
   notes:[{by:"tk-k",text:("Before.\n\n```\n" + ("line\n" * 4000) + "```\n\nAfter.")}],marks:[]} | ra_render($m)')
 eq "$(printf '%s' "$FENCE" | grep -c '^```$')" "2" "(RENDER) notes cut inside a code block get the block closed, so the cut swallows nothing after it"
 has "$FENCE" "</details>" "(RENDER) …and the notes block still closes"
@@ -304,7 +304,7 @@ eq "$(jq -rn "$REVIEW_ANSWER_DEF"'"✅" | ra_size')" "3" "(BUDGET) the size is U
 HUGE=$(jq -cn '{rid:"9",self:false,members:[{rid:"9",state:"DISMISSED",dismissed:"requeued"}],
   points:[ range(40) as $i | {id:("tk-p" + ($i|tostring)),section:(if $i < 5 then "worth" else "done" end),label:("Point " + ($i|tostring)),
            url:"",sentence:("said " * 400),ref:"{{gc-commits:tk-k|1}}",answered:true,ruled:true,extra:("quoted " * 700)} ],
-  visits:[{id:"tk-v9",question:"Ship it now?"}],
+  gates:[{id:"tk-v9",question:"Ship it now?"}],
   notes:[{by:"tk-k",text:("n " * 9000)},{by:"tk-k2",text:("m " * 9000)}],marks:["resolved r9"]}')
 HR=$(printf '%s' "$HUGE" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')
 HS=$(printf '%s' "$HR" | jq -Rs "$REVIEW_ANSWER_DEF"'ra_size')
@@ -315,7 +315,7 @@ has "$HR" "The notes from the fix are on tk-k, tk-k2, left out here to fit the s
 has "$HR" "(the full text is on tk-p0)" "(BUDGET) …then quotes and sentences are cut harder, each cut naming its finding"
 has "$HR" "- **Point 39.**" "(BUDGET) …and every point still has its entry"
 has "$HR" "### Your review: 40 points, all answered" "(BUDGET) the count line still covers every point"
-has "$HR" "> **Needs you: visit tk-v9.** Ship it now?" "(BUDGET) …and the callout still leads"
+has "$HR" "> **Needs you: human gate tk-v9.** Ship it now?" "(BUDGET) …and the callout still leads"
 case "$HR" in *"$MARKER
 <!-- gc-writeback-mark:resolved r9 -->
 <!-- gc-review-answer:r9 -->
@@ -324,7 +324,7 @@ case "$HR" in *"$MARKER
 MANY=$(jq -cn '{rid:"8",self:false,
   points:[ range(400) as $i | {id:("tk-q" + ($i|tostring)),section:(if $i == 0 then "worth" else "done" end),label:("A point whose label runs long enough to matter " + ($i|tostring)),
            url:"https://github.com/o/r/pull/7#discussion_r1234567890",sentence:("said " * 400),ref:"{{gc-commits:tk-k|1}}",answered:true,ruled:true,extra:""} ],
-  visits:[],notes:[],marks:[]}')
+  gates:[],notes:[],marks:[]}')
 MR=$(printf '%s' "$MANY" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')
 MS=$(printf '%s' "$MR" | jq -Rs "$REVIEW_ANSWER_DEF"'ra_size')
 [ "$MS" -le 60000 ] && ok "(BUDGET) four hundred points render within the budget ($MS bytes)" \
@@ -356,7 +356,7 @@ eq "$(printf '%s' "$M" | jq -r '.[0].existing.db + " " + .[0].existing.digest')"
 eq "$(printf '%s' "$M" | jq -r '.[0].existing.url')" "$PRURL#issuecomment-900" "(MODEL) …and its link"
 eq "$(printf '%s' "$M" | jq -r "$REVIEW_ANSWER_DEF"'.[0] | ra_dismissal')" "requeued" "(MODEL) a dismissed mark on it reads as the dismissal the writer made"
 eq "$(printf '%s' "$M" | jq -r '.[0].marks | join(",")')" "resolved r10" "(MODEL) the marks it carries stand while the plan names none"
-eq "$(models "$VIEW2" '{"10":{"marks":["awaiting:tk-v r10"],"visits":["tk-v"],"swaps":"-"}}' | jq -r '.[0].marks | join(",")')" "awaiting:tk-v r10" "(MODEL) …and give way to the ones it names"
+eq "$(models "$VIEW2" '{"10":{"marks":["awaiting:tk-v r10"],"gates":["tk-v"],"swaps":"-"}}' | jq -r '.[0].marks | join(",")')" "awaiting:tk-v r10" "(MODEL) …and give way to the ones it names"
 eq "$(printf '%s' "$M" | jq -r '.[0].live')" "true" "(MODEL) an open finding keeps the review live"
 eq "$(printf '%s' "$M" | jq -c '[ .[0].replied, .[0].unstamped ]')" '[["B"],["B"]]' "(MODEL) the review body's decline is an answer it delivers, not yet stamped"
 eq "$(printf '%s' "$M" | jq -r '.[0].notes[0].text')" "notes from K" "(MODEL) the fix unit's notes come with it"
@@ -369,7 +369,7 @@ eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq 
   --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m; gc_city_own("bot"; "")) | .[0] | ra_dismissal')" '"requeued"' \
   "(MODEL) …and reads re-requested when its author has a pending review request, though no comment carries the dismissed mark"
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "COMMENTED"')" \
-  --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {"10":{"marks":["resolved r10"],"visits":[],"swaps":"-"}}; {}; $m; gc_city_own("bot"; "")) | .[0].live')" "true" \
+  --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {"10":{"marks":["resolved r10"],"gates":[],"swaps":"-"}}; {}; $m; gc_city_own("bot"; "")) | .[0].live')" "true" \
   "(MODEL) a mark the plan asks of it keeps it live, so a body answered after its findings closed still gets its answer"
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "CHANGES_REQUESTED"')" \
   --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m; gc_city_own("bot"; "")) | .[0].live')" "true" \
@@ -418,7 +418,7 @@ has "$WOPEN" "**Needs you**
   Resolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback.
 
 **Done**" "(MODEL) …and listed under Needs you, what it asks on a line of its own"
-hasnt "$WOPEN" "[!IMPORTANT]" "(MODEL) …with no visit callout, since no visit carries it"
+hasnt "$WOPEN" "[!IMPORTANT]" "(MODEL) …with no gate callout, since no gate carries it"
 WDONE=$(wmodel true | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')
 WLOOK="**Worth a look**
 - **[The barrier now runs once per page.](https://github.com/o/r/pull/7#discussion_r11)** Declined: the count query is paged, so the barrier runs per page.
@@ -493,12 +493,12 @@ GROWS='[
  {"id":"I","status":"closed","title":"finding[human]: i","description":"Locus: a.sh:1\n\n**Fix the cap.**\n\nRaised by human:op reviewing anchor A.",
   "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"must-fix","finding.comment_id":"11","finding.review_id":"10","finding.fix_unit":"K","finding.fix_answer":"Fixed as you suggested."}},
  {"id":"J","status":"open","title":"finding[human]: j","description":"Locus: b.sh:2\n\nShould the retry back off?\n\nRaised by human:op reviewing anchor A.",
-  "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"needs-you","finding.comment_id":"12","finding.review_id":"10","finding.visit":"tk-v","finding.answer":"Should the retry back off?"}}]'
+  "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"needs-you","finding.comment_id":"12","finding.review_id":"10","finding.gate":"tk-v","finding.answer":"Should the retry back off?"}}]'
 GVIEW='{"reviews":[{"databaseId":10,"state":"CHANGES_REQUESTED","author":{"login":"op"},"commit":{"oid":"c1"},"url":""}],
   "threads":[{"comments":{"nodes":[{"databaseId":11,"url":"https://github.com/o/r/pull/7#discussion_r11"}]}},{"comments":{"nodes":[{"databaseId":12,"url":"https://github.com/o/r/pull/7#discussion_r12"}]}}],
   "issue_comments":[{"databaseId":900,"author":{"login":"bot"},"body":"old\n<!-- gc-writeback -->\n<!-- gc-writeback-mark:resolved r10 -->\n<!-- gc-review-answer:r10 -->\n<!-- gc-review-answer:r10:digest:1 -->"}]}'
 GOLDEN='> [!IMPORTANT]
-> **Needs you: visit tk-v.** Should the retry back off?
+> **Needs you: human gate tk-v.** Should the retry back off?
 
 ### Your review: 3 points, 1 needs you, 2 answered
 
@@ -523,7 +523,7 @@ Notes from K.
 <!-- gc-writeback -->
 <!-- gc-writeback-mark:resolved r10 -->
 <!-- gc-review-answer:r10 -->'
-GM=$(rmodels "$GROWS" "$GVIEW" '{"10":{"marks":["resolved r10"],"visits":[],"swaps":"-"}}' '{"K":{"title":"rework","fix_notes":"Notes from K.","closed":true}}')
+GM=$(rmodels "$GROWS" "$GVIEW" '{"10":{"marks":["resolved r10"],"gates":[],"swaps":"-"}}' '{"K":{"title":"rework","fix_notes":"Notes from K.","closed":true}}')
 eq "$(printf '%s' "$GM" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'.[0] | ra_render($m)')" "$GOLDEN" \
   "(ROUND) one review with a body and inline comments renders whole, as one round"
 eq "$(printf '%s' "$GM" | jq -c '.[0] | [ .existing.db, .existing.digest, .strays ]')" '["900","1",[]]' "(ROUND) …finding its one comment, with no copy to fold"
@@ -587,7 +587,7 @@ eq "$(rmodels "$HROWS" "$(printf '%s' "$HV" | jq -c '.issue_comments |= map(sele
 HEDIT='{"databaseId":902,"author":{"login":"bot"},"body":"c\n<!-- gc-writeback -->\n<!-- gc-writeback-mark:resolved r503 -->\n<!-- gc-review-answer:r501 -->\n<!-- gc-review-answer:r503:dismissed -->\n<!-- gc-review-answer:r501:digest:9 -->"}'
 eq "$(rmodels "$HROWS" "$(printf '%s' "$HV" | jq -c --argjson e "$HEDIT" '.issue_comments |= map(if .databaseId == 902 then $e else . end)')" | jq -c '.[] | select(.rid == "501") | [ .existing.db, .existing.digest, .strays ]')" \
   '["902","9",["900","901"]]' "(ROUND) a copy keyed to the round and carrying a dismissed mark is still the one the round keeps"
-eq "$(rmodels "$HROWS" "$HV" '{"502":{"marks":["awaiting:tk-v r502"],"visits":["tk-v"],"swaps":"-"}}' | jq -c '.[] | select(.rid == "501") | .marks')" \
+eq "$(rmodels "$HROWS" "$HV" '{"502":{"marks":["awaiting:tk-v r502"],"gates":["tk-v"],"swaps":"-"}}' | jq -c '.[] | select(.rid == "501") | .marks')" \
   '["awaiting:tk-v r502","resolved r503"]' "(ROUND) a mark the plan names for a review replaces that review's marks alone"
 
 echo "# (DISMISS)"

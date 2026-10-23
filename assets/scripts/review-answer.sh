@@ -22,7 +22,7 @@
 # the others once it carries them.
 #
 # One point per finding, in four sections that appear only when non-empty:
-#   Needs you     a needs-you finding whose visit is still open, and a declined
+#   Needs you     a needs-you finding still open, waiting on its human gate, and a declined
 #                 or deferred finding whose thread waits on the reviewer
 #   Worth a look  any other declined or deferred finding that owes its raiser
 #                 a reply, and any other point whose fix flagged it
@@ -53,7 +53,7 @@
 # stand.
 #
 # Each point is a label linked to the comment it answers, one sentence, and the
-# commit, follow-up or visit that carries it. The label is the comment's own
+# commit, follow-up or human gate that carries it. The label is the comment's own
 # bold lead with its severity marks and "Please fix on this PR:" stripped, else
 # the label the validator wrote (finding.label), else the comment's first
 # sentence. The sentence is whoever answered, in their own words: the fix
@@ -269,8 +269,8 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
         reply: (($m["finding.reply"] // "") | tostring),
         posted: ((($m["finding.reply_posted"] // "") | tostring) == "1"),
         follow_up: (($m["finding.follow_up"] // "") | tostring),
-        visit: (($m["finding.visit"] // "") | tostring),
-        ruling_visit: (($m["finding.ruling_visit"] // "") | tostring),
+        gate: (($m["finding.gate"] // "") | tostring),
+        ruling_bead: (($m["finding.ruling_bead"] // "") | tostring),
         fix_unit: (($m["finding.fix_unit"] // "") | tostring),
         cid: (($m["finding.comment_id"] // "") | tostring),
         rid: (($m["finding.review_id"] // "") | tostring) }
@@ -284,7 +284,7 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
   # A finding record as its point, or nothing for a body ruled restates. A
   # review body owed a decline or a deferral gets that reply whole in its entry:
   # as the sentence when the sentence is the reply and fits in one, and quoted
-  # under the entry otherwise. A needs-you body answer is its visit, which the
+  # under the entry otherwise. A needs-you body answer is its gate, which the
   # entry names and the callout on top carries. A decline or a deferral whose
   # thread waits on the reviewer (ra_thread_waits) needs them, in the words it
   # would be worth a look in, and asks them to act.
@@ -303,7 +303,7 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
     | if $d == "restates" then empty
       elif $d == "needs-you" and .open then
         { section: "needs", sentence: (if $an != "" then $an else "This comment needs your decision." end),
-          ref: .visit, answered: false }
+          ref: .gate, answered: false }
       elif $flag then
         { section: "worth", sentence: $fa,
           ref: (if $d == "must-fix" then (if .open then "" else $commits end)
@@ -330,7 +330,7 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
       elif $d == "needs-you" then
         { section: "done",
           sentence: (if $fa != "" then $fa
-                     elif .ruling_visit != "" then "Settled by your ruling on visit " + .ruling_visit + "."
+                     elif .ruling_bead != "" then "Settled by your ruling on " + .ruling_bead + "."
                      else "Closed with no ruling recorded." end),
           ref: "", answered: true }
       else
@@ -351,11 +351,11 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
   # One model per round the human findings on input name. rid is its lowest
   # review id, the one its comment is keyed by, rids every review of it with a
   # finding, and members the same reviews, each with the state GitHub reads and
-  # how it reads dismissed. Then its points, the visits waiting on the operator,
-  # the fix notes, the mark lines the plan owes it, the comment it keeps
+  # how it reads dismissed. Then its points, the human gates waiting on the
+  # operator, the fix notes, the mark lines the plan owes it, the comment it keeps
   # (existing) and the ids of the other copies the city holds (strays). $vl maps
-  # a review id to the mark lines and batch visits the write-back plan asks of
-  # it ({marks, visits, swaps}), and $beads maps a bead id to the title, fix
+  # a review id to the mark lines and batch gates the write-back plan asks of
+  # it ({marks, gates, swaps}), and $beads maps a bead id to the title, fix
   # notes and close read for it. A review dismissed with every finding of its
   # own closed reads as re-requested when a copy carries its dismissed mark, or
   # when the read of the PR lists its author among the pending review requests
@@ -414,15 +414,15 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
            | ra_once) as $marks
         | ($fs | sort_by([ (if .body then 0 else 1 end), ((.cid | tonumber?) // 0) ])) as $sorted
         | [ $sorted[] | ra_point ] as $ps
-        | ([ $fs[] | select(.disp == "needs-you" and .open and .visit != "")
-             | { id: .visit, question: (if (.answer | ra_squash) != "" then (.answer | ra_squash) else "This comment needs your decision." end) } ]
-           + [ $rids[] as $r | ((($vl[$r] // {}).visits // []))[] | { id: ., question: ((($beads[.] // {}).title // "") | tostring | ra_squash) } ]
-           | reduce .[] as $x ([]; if any(.[]; .id == $x.id) then . else . + [ $x ] end)) as $visits
+        | ([ $fs[] | select(.disp == "needs-you" and .open and .gate != "")
+             | { id: .gate, question: (if (.answer | ra_squash) != "" then (.answer | ra_squash) else "This comment needs your decision." end) } ]
+           + [ $rids[] as $r | ((($vl[$r] // {}).gates // []))[] | { id: ., question: ((($beads[.] // {}).title // "") | tostring | ra_squash) } ]
+           | reduce .[] as $x ([]; if any(.[]; .id == $x.id) then . else . + [ $x ] end)) as $gates
         | ([ $fs[] | .fix_unit | select(. != "") ] | unique
            | map({ by: ., text: ((($beads[.] // {}).fix_notes // "") | tostring) }) | map(select(.text | test("\\S")))) as $notes
         | ([ $fs[] | select(ra_owes_reply) | .id ]) as $replied
         | { rid: $rid, rids: $rids, members: $members, self: $selfrev, author: $login,
-            points: $ps, visits: $visits, notes: $notes, marks: $marks,
+            points: $ps, gates: $gates, notes: $notes, marks: $marks,
             swaps: ([ $rids[] as $r | ((($vl[$r] // {}).swaps // "-")) | select(. != "-") ] | if length > 0 then join(",") else "-" end),
             replied: $replied,
             unstamped: [ $fs[] | select(ra_owes_reply and (.posted | not)) | .id ],
@@ -514,8 +514,8 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
     | any($ps[]; .ruled) as $anyruled
     | ($m | ra_dismissal) as $dm
     | (($ps | map(.id)) - ($shown | map(.id))) as $out
-    | [ if ($m.visits | length) > 0 and ($c.bare | not) then
-          "> [!IMPORTANT]\n" + ([ $m.visits[] | . as $v | "> **Needs you: visit " + $v.id + ".**"
+    | [ if (($m.gates // []) | length) > 0 and ($c.bare | not) then
+          "> [!IMPORTANT]\n" + ([ $m.gates[] | . as $v | "> **Needs you: human gate " + $v.id + ".**"
                                   + (if ($v.question // "") != "" then " " + ($v.question | ra_clip($c.sentence; $v.id)) else "" end) ]
                                 | join("\n>\n"))
         else empty end,

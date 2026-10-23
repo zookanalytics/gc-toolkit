@@ -26,9 +26,9 @@
 # its route, which is written with no priority in it.
 #
 # Same vetoes as pr-facts.sh: an operator merge_hold or rebase_hold on the
-# anchor, a rebase_hold on any bead naming the branch, and a live demand
-# (rebasing is one horn of what a demand asks, so performing it answers the
-# person's question by fait accompli). And the same supersession guard: a
+# anchor, a rebase_hold on any bead naming the branch, and a live human gate on
+# the anchor (rebasing is one horn of what a person may be asked, so performing
+# it answers their question by fait accompli). And the same supersession guard: a
 # branch whose conflict is a landed change deleting or rewriting the code it
 # edits gets the operator's decision instead of a child (branch-supersession.sh).
 #
@@ -99,38 +99,42 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # last sitting instead of naming a live wait. Read as a hold, it parks an
 # anchor from its first conversation onward.
 #
-# The wait itself is a human gate. `gc-helm.sh demand` files what a person
-# owes as a native gate (issue_type=gate, await_type=human) stamped
-# gc.demand_for=<anchor> and blocking the anchor on it, and a sitting resolves
-# that gate (gc bd gate resolve) with the ruling that answers it. A live
-# demand is a live hold; none, and the takeaway records a sitting that ended.
+# The wait itself is a human gate: Gas City's native bead for a wait a person
+# must clear (issue_type=gate, await_type=human). It blocks the bead that waits,
+# and a person clears it with `gc bd gate resolve`, whose reason is the answer. A
+# live human gate that blocks the anchor is a live hold, read by the one reader
+# rule (bd_human_gates); none, and the takeaway records a sitting that ended.
+# Such a gate holds the anchor's merge as well, so a dispatch that brings the
+# branch current under it spends work on a merge that waits on a person, and can
+# answer one horn of what the person is asked by fait accompli.
 #
-# Only demands count. Rework children and `--waiting-on` edges are work in
+# Only human gates count. Rework children and `--waiting-on` edges are work in
 # flight, which the merge already holds on, and reading `blocks` at large would
 # restore the same permanence one indirection out. The `held` lifecycle state
 # is not read either: it is entered only from `unanchored`.
 #
-# demand_gate_state reads the demand ledger for an anchor in three:
-#   0  a live demand holds the anchor
-#   1  the ledger read cleanly and no demand holds
-#   2  the ledger would not read — the list failed or returned a non-array
-# gc.demand_for names the demand's anchor.
-demand_gate_state() { # <anchor-id>
-  local rows
-  # --include-gates: the demand is a human gate (issue_type=gate), which
-  # `bd list` hides by default; without it a held anchor reads released.
-  rows=$(bd_list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --include-gates --metadata-field "gc.demand_for=${1:-}") || return 2
-  printf '%s' "$rows" | jq -e --arg a "${1:-}" \
-    '[ .[] | select(((.metadata["gc.demand_for"] // "") | tostring) == $a) ] | length > 0' \
-    >/dev/null 2>&1 && return 0
-  return 1
+# human_gate_state reads an anchor's human gates in three, and prints the id of
+# the first open one when one holds:
+#   0  a live human gate holds the anchor
+#   1  the gates read cleanly and none holds
+#   2  the gates would not read
+human_gate_state() { # <anchor-id>
+  local gates open
+  gates=$(bd_human_gates "${1:-}") || return 2
+  open=$(printf '%s' "$gates" | jq -r '[ .[]
+      | select(((.status // "open") | tostring | ascii_downcase) != "closed") | .id ] | .[0] // empty' 2>/dev/null) \
+    || return 2
+  [ -n "$open" ] || return 1
+  printf '%s' "$open"
 }
-# Fails CLOSED — a ledger that will not read answers "held", because releasing an
-# anchor a person is holding hands their decision back to a pool.
+# Fails CLOSED — gates that will not read answer "held", because releasing an
+# anchor a person is holding hands their decision back to a pool. Prints the
+# holding gate's id, nothing when the gates would not read.
 takeaway_is_holding() { # <anchor-id>; 0 = a person owes an answer here
-  local st; demand_gate_state "${1:-}"; st=$?
-  [ "$st" -ne 1 ]
+  local st out
+  out=$(human_gate_state "${1:-}"); st=$?
+  [ "$st" -ne 1 ] || return 1
+  printf '%s' "$out"
 }
 # <<< takeaway-hold-discriminator
 
@@ -204,8 +208,8 @@ while IFS= read -r row; do
     echo "$PROG: $id — '$branch' conflicts with '$target' but a hold is set (operator gate); no rework dispatched"
     held=$((held + 1)); continue
   fi
-  if takeaway_is_holding "$id"; then
-    echo "$PROG: $id — '$branch' conflicts with '$target' but an open demand holds it for a person's decision; no rework dispatched"
+  if hgate=$(takeaway_is_holding "$id"); then
+    echo "$PROG: $id — '$branch' conflicts with '$target' but open human gate ${hgate:-(gates unreadable)} holds it for a person's decision; no rework dispatched"
     held=$((held + 1)); continue
   fi
   if [ -z "$FIX_POOL" ]; then
@@ -330,7 +334,7 @@ while IFS= read -r row; do
   # or rewrote the code this branch edits, bringing it current decides whether
   # the branch still has work to do, and a child sent to merge it would stop and
   # ask. branch-supersession.sh tells the two apart and puts that decision to the
-  # operator; it holds only behind an open decision visit, so anything it cannot
+  # operator; it holds only behind an open human gate that asks it, so anything it cannot
   # classify or record falls through to the ordinary child. Read after the dedup
   # above, so a live child stands the arm down first, and before the strand
   # re-route below, so a superseded branch's strand is not routed either.
