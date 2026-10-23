@@ -11,13 +11,30 @@ work_dir = ".gc/worktrees/{{.Rig}}/polecat-codex/{{.AgentBase}}"
 # obeyed literally: the session runs the claim, reports the JSON, and stops, and
 # nothing re-offers a held claim. Both pools wake into the same startup and
 # claim contract, so the text is identical in both.
+#
+# The hand-back is one guarded write. It reopens the bead and clears the
+# assignee together with the session pins that name the holder, because an
+# assignee cleared alone leaves the bead in_progress, which no pool's work query
+# serves: bd ready lists only open beads, and the in_progress tier serves only
+# the session the bead is assigned to. The guards let the write land only while
+# the worker still holds the bead, so it cannot reopen a bead another session
+# took or one already closed. It is not gc bd release-if-current, which leaves
+# the pins and takes its store from whichever argument names an existing bead,
+# city ids first: with a pool session's id as the holder, a rig bead's release
+# goes to the city store, finds no bead there, and prints "skipped" with exit 0.
 nudge = """
 Claim and complete one work item: gc hook --claim --json returns assigned work \
 first and routed pool work second, and the bead it names is yours to carry \
 through its formula to the terminal step. Claiming is not completing. A reason \
 of existing_assignment means you already hold the work, so execute it instead \
-of reporting it. If you cannot proceed, record why on the bead and clear your \
-assignee so the work is re-offered.\
+of reporting it. If you cannot proceed, record why on the bead, then hand it \
+back with one write that reopens it and releases your claim, so a pool can \
+offer the work again: `gc bd update <bead> \
+--if-assignee=<the assignee it shows> --if-status=in_progress --status=open \
+--assignee="" --unset-metadata gc.session_id --unset-metadata gc.session_name`. \
+The write lands only while you still hold the bead. If it exits non-zero, \
+leave your assignee as it is and say so on the bead, and orphan recovery \
+returns the bead once your session ends.\
 """
 # Codex reads no .claude overlay, so the gh origin guard is registered in the
 # Codex home before the session starts (docs/gh-origin-guard.md, "Codex").
