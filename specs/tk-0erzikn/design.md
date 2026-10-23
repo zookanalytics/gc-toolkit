@@ -512,7 +512,7 @@ Gas Town runs the step in its refinery's patrol, after the refinery lands a bead
 on an integration branch, so the step runs when the refinery lands a convoy's
 last member. A gc-toolkit member can also close where no patrol iteration runs.
 The cadence lands a stage's PR, which closes the stage, and a member can close
-with nothing to land.
+with nothing to land, or be closed by hand.
 
 An idle refinery runs no iteration at all. Its find-work step ends the turn when
 nothing is assigned to it. The refinery is an `on_demand` named session, and a
@@ -525,15 +525,18 @@ and nudges it.
 
 So a step in the patrol, wherever it sat, would wait for unrelated work to reach
 the refinery. Ahead of find-work's exit it would run on every turn and still add
-no turn. A convoy whose last member is a stage, or closes with nothing to land,
-could wait indefinitely.
+no turn. A convoy whose last member closes outside a refinery landing could wait
+indefinitely.
 
 The merge cadence runs every minute on every rig, with no session, and its arm 8
 is where graduation runs today. Run there, the step hands a finished convoy to
 the refinery within a pass of its last member's close, whatever closed it and
-whether or not other work reaches the refinery, and the wake and the nudge start
-the refinery's turn. Running a pack script for a step Gas Town ships is warrant 5
-in section 8.
+whether or not other work reaches the refinery. The assignment wakes nothing by
+itself. Gas City counts an open bead assigned to a named session as that
+session's demand only when the bead is ready (`computeNamedSessionDemandOn`), and
+its readiness query leaves convoy beads out (`readyExcludeTypes`). So the step
+wakes and nudges the refinery, which starts its turn. Running a pack script for a
+step Gas Town ships is warrant 5 in section 8.
 
 Running on every pass, the step also meets a convoy that has just been stood up,
 before the recipe adds its first member. Such a convoy has no open member, just
@@ -669,7 +672,7 @@ Someone who knows only Gas City and Gas Town watches a convoy that gc-toolkit ru
 | Each member slung to a pool, wrapped by sling in a one-member input convoy | sling's own launch | yes |
 | A member's work landed on `integration/<id>` by the refinery, with no PR | Gas Town's refinery lands `direct` by default | yes |
 | A stage, slung `--merge mr`, opening a PR into the convoy's branch | `mr` as Gas City defines it | yes |
-| Once every member is closed, the convoy's bead assigned to the refinery with `branch=integration/<id>` and `target=main` | Gas Town's `integration_branch_auto_land` | yes, the same assignment. gc-toolkit's merge cadence makes it on every pass, where Gas Town's refinery makes it after a landing on an integration branch (warrant 5), so it passes over a convoy with no members yet, and it wakes the refinery as a handoff does. It also writes the summary gc-toolkit's merge path puts in the PR (below) |
+| Once every member is closed, the convoy's bead assigned to the refinery with `branch=integration/<id>` and `target=main` | Gas Town's `integration_branch_auto_land` | added, warrant 5. The assignment is Gas Town's, but gc-toolkit's merge cadence makes it on every pass, where Gas Town's refinery makes it in its patrol after a landing on an integration branch. So it passes over a convoy with no members yet, and it wakes and nudges the refinery as a handoff does. It also writes the summary gc-toolkit's merge path puts in the PR (below) |
 | The convoy's bead landing on main through a PR | Gas Town would land it `direct`. Main's ruleset would refuse the push, and Gas Town's refinery would retry it on every patrol | added, warrant 1 |
 | The PR reviewed by the city's checks and the operator, merged, and the convoy's bead closed at the merge | not a convoy behavior: gc-toolkit's merge path does this for every PR | outside the convoy (below) |
 | An owned convoy that ends without a PR, ended with `gc convoy land` | Gas City's lifecycle termination | yes |
@@ -678,14 +681,14 @@ Someone who knows only Gas City and Gas Town watches a convoy that gc-toolkit ru
 | The helm board listing a convoy with its tracked members | a surface rendering Gas City's objects | yes, apart from two misreadings filed apart (section 8) |
 
 So gc-toolkit uses Gas City's convoys as they are intended to be used. The
-observer sees three additions, each under a warrant: the cut of the convoy's
-branch, the `target` on each member, and the one line that keeps main behind a
-PR. The assignment that carries a finished convoy to main is Gas Town's own, made
-from the merge cadence under warrant 5. What they see beyond the convoy (the PR's owning bead and its summary, the
-city's checks, the operator's approval, a bead closing when its PR merges) is
-gc-toolkit's merge path, the same for every PR. Moving that path onto Gas Town's
-refinery is the merge member of the migration epic (tk-1tfzr71.20), and this
-design adds nothing to it.
+observer sees four additions, each under a warrant: the cut of the convoy's
+branch, the `target` on each member, the one line that keeps main behind a PR,
+and Gas Town's assignment of a finished convoy made from the merge cadence
+instead of the refinery's patrol. What they see beyond the convoy (the PR's
+owning bead and its summary, the city's checks, the operator's approval, a bead
+closing when its PR merges) is gc-toolkit's merge path, the same for every PR.
+Moving that path onto Gas Town's refinery is the merge member of the migration
+epic (tk-1tfzr71.20), and this design adds nothing to it.
 
 ## 8. What stays, and the warrant for each
 
@@ -916,9 +919,9 @@ convoy's branch.
 
 When the convoy's PR merges, graduation leaves main in the same commit that brings
 Gas Town's step to arm 8. A convoy that graduation already took targets main, so
-the step does not select it. One it has not taken is taken by the step, whose member
-count reads both forms of membership, so a convoy in flight with parent-child
-members is carried too.
+the step does not select it. One it has not taken is taken by the step, whose
+member count reads both forms of membership, so a convoy in flight with
+parent-child members is carried too.
 
 The units are filed from this table as it reads on main, once this design merges
 (tk-zkft1ym), so a change made in this design's review leaves no filed bead
