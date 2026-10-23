@@ -23,9 +23,9 @@ formula never runs those passes: docs/refinery-merge-cadence.md.
 
 State writes: every merge_result transition goes through
 assets/scripts/lifecycle.sh (one atomic validated write per transition);
-every escalation goes through assets/scripts/escalate.sh (one open visit
-per situation key). Resolve both at shell runtime — formula bodies get no
-{{.ConfigDir}}:
+every human gate goes through assets/scripts/human-gate.sh (one open gate
+per bead and situation key). Resolve both at shell runtime — formula bodies
+get no {{.ConfigDir}}:
 
     LC=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
       [ -x "$c/assets/scripts/lifecycle.sh" ] && { LC="$c/assets/scripts/lifecycle.sh"; break; }
@@ -44,7 +44,7 @@ formula_compiler = ">=2.0.0"
 
 [vars]
 [vars.binding_prefix]
-description = "Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol hands a rejected bead back to the polecat pool, and an empty prefix renders <rig>/polecat instead of <rig>/gc-toolkit.polecat. No pool holds that address, so the rejected bead never reaches a polecat: pool-route.sh refuses the route, and rejection-repool.sh files a visit in place of the pour."
+description = "Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol hands a rejected bead back to the polecat pool, and an empty prefix renders <rig>/polecat instead of <rig>/gc-toolkit.polecat. No pool holds that address, so the rejected bead never reaches a polecat: pool-route.sh refuses the route, and rejection-repool.sh files a human gate in place of the pour."
 default = "gc-toolkit."
 
 [vars.rig_name]
@@ -106,10 +106,12 @@ healthy):
 ```bash
 if [ -z "${GC_AGENT:-}" ]; then
     echo "GC_AGENT is empty — refusing to self-poll with an empty filter."
+    # The condition has no bead of its own: the session id names a session,
+    # not work that can wait, so it is a patrol finding, not a human gate.
     SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-      [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+      [ -x "$c/assets/scripts/patrol-finding.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
     done
-    [ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "${GC_SESSION_ID:-refinery}" --key refinery-empty-identity --message "Refinery session started with empty GC_AGENT; investigate the session harness."
+    [ -n "$SCRIPTS" ] && "$SCRIPTS/patrol-finding.sh" --scope refinery-findings --key refinery-empty-identity --title "Refinery session started with an empty GC_AGENT" --message "Refinery session ${GC_SESSION_ID:-<unknown>} started with empty GC_AGENT, so it cannot self-poll and idles while looking healthy; investigate the session harness."
     gc runtime drain-ack
     exit 1
 fi
@@ -293,7 +295,7 @@ and `existing_pr` carries the anchor's PR over so the rework reuses it instead
 of minting a duplicate. A fresh `mol-polecat-work` pour then dispatches the
 rebuild, which no hold on the bead's epic reaches. reopen-source has already
 taken the bead out of this queue, so a repool that stops short arms a retry
-or files a visit:
+or files a human gate:
 
 ```bash
 gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
@@ -570,17 +572,17 @@ Read the result off the report and the job's log (`$GATE/log`):
   summary, so the work goes back to its author.
 - `state=running` from a wait that exits 1: the gate ran past the limit and
   its process group survived TERM and KILL, so it still runs in the prep
-  worktree. Never start another gate beside it. Escalate with key
-  `refinery-gate-unstoppable`, naming the bead and the gate's pid, and leave
-  the work with the refinery: `gc runtime drain-ack` and end the cycle
-  without a rejection.
+  worktree. Never start another gate beside it. File a human gate on the bead
+  with `human-gate.sh` under the key `refinery-gate-unstoppable`, naming the
+  gate's pid, and leave the work with the refinery: `gc runtime drain-ack` and
+  end the cycle without a rejection.
 - anything else (`state=died`, `state=exceeded`, or any other `rc`): the gate
   stopped short of a verdict, ended by a signal, a restart, the limit, or a
   missing prep worktree, which says nothing about the branch. Start it once
-  more. If the second run stops short too, escalate with key
-  `refinery-gate-cut-short`, naming the bead and the cause, and leave the work
-  with the refinery: `gc runtime drain-ack` and end the cycle without a
-  rejection.
+  more. If the second run stops short too, file a human gate on the bead with
+  `human-gate.sh` under the key `refinery-gate-cut-short`, naming the cause,
+  and leave the work with the refinery: `gc runtime drain-ack` and end the
+  cycle without a rejection.
 
 Close this step once the gate has finished, pass or fail."""
 
@@ -657,7 +659,7 @@ BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
 # lands inside it.
 PR_SHAPED=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata | [(.pr_url // ""), (.pr_number // "" | tostring), (.existing_pr // "")] | map(select(. != "")) | length')
 if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-  echo "keeping whatever branch $WORK names — rejection-repool.sh could not read the bead, and the visit it filed carries it"
+  echo "keeping whatever branch $WORK names — rejection-repool.sh could not read the bead, and the patrol finding it filed names it"
 elif [ -z "$BRANCH" ]; then
   echo "no metadata.branch on $WORK — no branch to delete"
 elif [ "$MERGE_STRATEGY" != "direct" ]; then
@@ -886,9 +888,9 @@ if ! branch_has_real_change "origin/$TARGET" "$PREP_SHA"; then
   else
     "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close" --takeaway "the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
     SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-      [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+      [ -x "$c/assets/scripts/human-gate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
     done
-    [ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-false-completion --message "Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
+    [ -n "$SCRIPTS" ] && "$SCRIPTS/human-gate.sh" --subject "$WORK" --key refinery-false-completion --message "Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
     gc runtime drain-ack
     exit 1
   fi
@@ -993,9 +995,9 @@ needs, capped at 140 characters.
 ```bash
 "$LC" transition "$WORK" --to blocked --assignee "" --route human --set blocked_reason="<what is wrong with existing_pr>" --takeaway "existing_pr failed validation: <what is wrong> — supply a valid PR or clear existing_pr"
 SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  [ -x "$c/assets/scripts/human-gate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-[ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-invalid-existing-pr --message "existing_pr on $WORK failed validation: <reason>. Bead blocked and routed to human."
+[ -n "$SCRIPTS" ] && "$SCRIPTS/human-gate.sh" --subject "$WORK" --key refinery-invalid-existing-pr --message "existing_pr on $WORK failed validation: <reason>. Bead blocked and routed to human."
 ```
 Then jump to next-iteration (pour before burn).
 
@@ -1176,9 +1178,9 @@ fi
 Never delete `$BRANCH` in mr mode — the PR needs it. The rig root's HEAD was
 never moved, so nothing has to be restored here.
 
-**Unsupported strategies (e.g. `local`):** transition nothing; escalate
-via escalate.sh (`--subject $WORK --key refinery-unsupported-strategy`) and
-leave the bead for a human to re-strategize.
+**Unsupported strategies (e.g. `local`):** transition nothing; file a human
+gate with human-gate.sh (`--subject $WORK --key refinery-unsupported-strategy`)
+and leave the bead for a human to re-strategize.
 
 **GATE**: direct requires a verified target push then one merged+close
 transition; mr requires a verified branch push then one gating transition
@@ -1193,8 +1195,8 @@ needs = ["merge-push"]
 description = """
 Summarize the cycle for handoff context (it lives in the wisp's closing
 reason): branch handled and disposition (merged / gated / rejected /
-blocked), check results, bugs filed, escalations sent — and holds observed
-that did NOT escalate; suppression removes the mail, never the record. If
+blocked), check results, bugs filed, human gates filed — and holds observed
+that filed none; suppression removes the mail, never the record. If
 the cycle ended early, note why and what state was left."""
 
 [[steps]]

@@ -171,8 +171,8 @@ hasnt " $(probe_blockers tk-anc) " " $FH " "…and it holds nothing once decline
 # stays OPEN (holding its review changes-requested), a visit is filed for the
 # operator, and the visit id is stamped as the reply the raiser's thread receives.
 # ---------------------------------------------------------------------------
-# A stub escalate.sh files a visit-shaped bead the needs-you arm looks up by key.
-cat > "$TMP/escalate-stub.sh" <<'STUB'
+# A stub human-gate.sh files a visit-shaped bead the needs-you arm looks up by key.
+cat > "$TMP/human-gate-stub.sh" <<'STUB'
 #!/usr/bin/env bash
 set -uo pipefail
 subj=""; key=""; msg=""
@@ -191,8 +191,8 @@ gc bd update "$vid" --set-metadata task_kind=visit --set-metadata escalation_key
   --set-metadata gc.continuation_group="$subj" --set-metadata gc.routed_to=human >/dev/null
 gc bd dep add "$vid" "$subj" --type=tracks >/dev/null 2>&1 || true
 STUB
-chmod +x "$TMP/escalate-stub.sh"
-export GC_ESCALATE_SH="$TMP/escalate-stub.sh"
+chmod +x "$TMP/human-gate-stub.sh"
+export GC_HUMAN_GATE_TOOL="$TMP/human-gate-stub.sh"
 
 FNU=$("$SUT" upsert --anchor tk-anc --lane human --source "human:johnzook" --locus "specs/x.md" --message "does this match the product intent?")
 gc bd update "$FNU" --set-metadata finding.comment_id=778899 >/dev/null
@@ -204,7 +204,7 @@ if [ -n "$FNUV" ] && [ "$FNUV" != "<absent>" ]; then ok "needs-you files a visit
 eq "$(meta "$FNUV" task_kind)" "visit" "the filed bead is a visit"
 has "$(meta "$FNU" 'finding.reply')" "$FNUV" "the visit id is stamped as the reply the raiser's thread receives"
 hasnt " $(probe_blockers tk-anc) " " $FNU " "needs-you holds nothing via blocks — the open finding and the review are the hold"
-# Idempotent: re-ruling needs-you reuses the one open visit (escalate dedups on key).
+# Idempotent: re-ruling needs-you reuses the one open visit (the helper dedups on key).
 BEFORE_V=$(jq 'length' "$STUB_STORE")
 "$SUT" set-disposition --finding "$FNU" --anchor tk-anc --disposition needs-you --reason "still the operator's call"
 eq "$(meta "$FNU" 'finding.visit')" "$FNUV" "re-ruling needs-you reuses the same visit"
@@ -947,19 +947,19 @@ STUB_ENFORCE_BLOCKS=1 "$SUT" set-disposition --finding "$HD" --anchor tk-ancH --
 eq "$rc|$(meta "$HD" 'finding.disposition')|$(bstatus "$HD")" "0|declined|closed" "the clean re-run commits the decline"
 hasnt "$(deps)" "$HD|blocks|tk-ancH" "…and releases the hold once it has"
 
-cat > "$TMP/escalate-fail.sh" <<'STUB'
+cat > "$TMP/human-gate-fail.sh" <<'STUB'
 #!/usr/bin/env bash
-echo "escalate: simulated failure" >&2
+echo "human-gate: simulated failure" >&2
 exit 1
 STUB
-chmod +x "$TMP/escalate-fail.sh"
+chmod +x "$TMP/human-gate-fail.sh"
 HN=$(must_fix_h needs-you "escalate past an unfiled visit")
-GC_ESCALATE_SH="$TMP/escalate-fail.sh" "$SUT" set-disposition --finding "$HN" --anchor tk-ancH --disposition needs-you --reason "the operator's call" 2>/dev/null; rc=$?
+GC_HUMAN_GATE_TOOL="$TMP/human-gate-fail.sh" "$SUT" set-disposition --finding "$HN" --anchor tk-ancH --disposition needs-you --reason "the operator's call" 2>/dev/null; rc=$?
 still_holds "$HN" "$rc" "a needs-you ruling whose visit cannot be filed"
 HNC=$(must_fix_h needs-you-commit "escalate past a refused commit")
-STUB_UPDATE_FAIL="$HNC" GC_ESCALATE_SH="$TMP/escalate-stub.sh" "$SUT" set-disposition --finding "$HNC" --anchor tk-ancH --disposition needs-you --reason "the operator's call" 2>/dev/null; rc=$?
+STUB_UPDATE_FAIL="$HNC" GC_HUMAN_GATE_TOOL="$TMP/human-gate-stub.sh" "$SUT" set-disposition --finding "$HNC" --anchor tk-ancH --disposition needs-you --reason "the operator's call" 2>/dev/null; rc=$?
 still_holds "$HNC" "$rc" "a needs-you ruling whose commit is refused"
-GC_ESCALATE_SH="$TMP/escalate-stub.sh" "$SUT" set-disposition --finding "$HNC" --anchor tk-ancH --disposition needs-you --reason "the operator's call"; rc=$?
+GC_HUMAN_GATE_TOOL="$TMP/human-gate-stub.sh" "$SUT" set-disposition --finding "$HNC" --anchor tk-ancH --disposition needs-you --reason "the operator's call"; rc=$?
 eq "$rc|$(meta "$HNC" 'finding.disposition')|$(bstatus "$HNC")" "0|needs-you|open" "the clean re-run commits needs-you"
 hasnt " $(probe_blockers tk-ancH) " " $HNC " "…and releases the hold once it has"
 

@@ -4,7 +4,7 @@
 # held-by-design / awaiting placement / routed-and-claimable / topology /
 # machine residue.
 # Anything left is an UNNAMED WAIT. Then file/refresh ONE batch triage visit
-# (delta only) on the standing per-rig unnamed-waits subject via escalate.sh.
+# (delta only) on the standing per-rig unnamed-waits subject via human-gate.sh.
 # Also owns the standing-subject recurrence: each task_kind=triage-subject
 # bead gets a visit iff its scope set CHANGED and no visit is live.
 # A PR-gated anchor whose PR is open is a named wait whatever the PR's age: the
@@ -49,7 +49,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # below to carry this sweep's --db pin and per-call bound.
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh from $HERE" >&2; exit 1; }
-ESCALATE="${GC_ESCALATE_TOOL:-$HERE/escalate.sh}"
+HUMAN_GATE="${GC_HUMAN_GATE_TOOL:-$HERE/human-gate.sh}"
 CALL_TIMEOUT="${LIVENESS_SWEEP_CALL_TIMEOUT:-45}"
 KILL_AFTER="${LIVENESS_SWEEP_KILL_AFTER:-5}"
 LIST_CAP="${LIVENESS_SWEEP_LIST_CAP:-20}"
@@ -351,11 +351,13 @@ echo "$PROG: liveness: pr=$PR_LIVENESS convoy=$CONVOY_LIVENESS husk=$HUSK_LIVENE
 # the lane's fix-unit census. Both must be caught, or the edge-less wedge is
 # skipped here exactly as it is by close-answered. The anchor is blocked by its
 # own finding, so it is absent from `bd ready` and from the classify census
-# above; this scans ALIVE. A wedge here means the auto-close is not running, so
-# escalate.sh's one-open-visit-per-subject dedup is the whole bound: re-raising
-# each pass until it clears is correct, not noise.
+# above; this scans ALIVE. A wedge here means the auto-close is not running, and
+# it stays until its finding closes, so every pass detects it again. While its
+# gate is open human-gate.sh files nothing more, and the call declares a quiet
+# window so a moot or benign answer stands for a day before the next pass asks
+# again.
 WEDGE_BLK="$TMP/wedge-blk.json"; WEDGE_FU="$TMP/wedge-fu.json"
-wedged_fix_escalations() {
+wedged_fix_gates() {
     local rows row fid anchor lane amr n_all n_live census c_live c_landed edgeless body out filed=0
     rows=$(jq -c '[ .[] | select((.metadata.task_kind // "") == "finding")
                         | select((.metadata["finding.disposition"] // "") == "must-fix")
@@ -412,20 +414,20 @@ gate-ensure closes such a finding each pass so the publish proceeds; this one is
 Disposition: close $fid to release the publish (its fix landed), then find why gate-ensure's 'finding.sh close-answered --anchor $anchor' did not fire."
         fi
         if [ "$DRY_RUN" -eq 1 ]; then
-            echo "$PROG: dry-run: would escalate $anchor [landed-fix-wedge] (finding $fid)"
+            echo "$PROG: dry-run: would file a human gate on $anchor [landed-fix-wedge] (finding $fid)"
             filed=$((filed + 1)); continue
         fi
-        if out=$("$ESCALATE" --subject "$anchor" --key landed-fix-wedge --message "$body"); then
+        if out=$("$HUMAN_GATE" --subject "$anchor" --key landed-fix-wedge --quiet-window 86400 --message "$body"); then
             printf '%s\n' "$out"; filed=$((filed + 1))
         else
-            echo "$PROG: WARN: escalate.sh failed for $anchor [landed-fix-wedge] — next pass retries" >&2
+            echo "$PROG: WARN: human-gate.sh failed for $anchor [landed-fix-wedge] — next pass retries" >&2
         fi
     done <<EOF
 $rows
 EOF
-    echo "$PROG: landed-fix wedge: $filed escalated"
+    echo "$PROG: landed-fix wedge: $filed filed"
 }
-wedged_fix_escalations
+wedged_fix_gates
 
 # --- the standing unnamed-waits subject (create on first run) -----------------
 SWEEP_SUBJECT=$(jq -r '[.[] | select((.metadata.task_kind // "") == "triage-subject")
@@ -539,15 +541,17 @@ sweep_visit() {
           "Carried (still unnamed from earlier passes, not re-litigated): \($carried | length)",
           (if ($carried | length) > 0 then "  \($carried | map(.id) | join(", "))" else empty end),
           "",
-          "Dispositions: route (gc sling <pool> <id>; never --on here) · gate (file a visit/gate) · kill (gc bd close <id> --reason, for an ordinary orphan only; an anchor carrying a merge_result or a bead that is a visit subject is dispositioned through its own visit and bead-rehome.sh, never bare-closed here) · park (gc bd dep add <bead> <scope> — the edge IS the park; prose parks nothing) · demand (gc-helm.sh demand <id> \"<what a person owes>\" — files that as a SIBLING bead and blocks <id> on it; a hold written as prose is not a disposition, it is a field someone has to come back and clear)"
+          "Dispositions: route (gc sling <pool> <id>; never --on here) · gate (file a human gate on the bead that waits) · kill (gc bd close <id> --reason, for an ordinary orphan only; an anchor carrying a merge_result or a bead that is a visit subject is dispositioned through its own visit and bead-rehome.sh, never bare-closed here) · park (gc bd dep add <bead> <scope> — the edge IS the park; prose parks nothing) · ask (human-gate.sh --subject <id> --key <situation-key> --message \"<what a person owes>\" — files a human gate that blocks <id> until a person clears it; a hold written as prose is not a disposition, it is a field someone has to come back and clear)"
         ] | join("\n")')
     if [ "$DRY_RUN" -eq 1 ]; then
         echo "$PROG: dry-run: would file batch visit on $SWEEP_SUBJECT [liveness-sweep]"
         return 0
     fi
     local out visit
-    if ! out=$("$ESCALATE" --subject "$SWEEP_SUBJECT" --key liveness-sweep --message "$body"); then
-        echo "$PROG: escalate.sh failed — baseline NOT advanced; the next pass re-reports" >&2
+    # Each batch is the new set of one pass, an event of its own, so the call
+    # declares no quiet window: an answer about an earlier set mutes nothing.
+    if ! out=$("$HUMAN_GATE" --subject "$SWEEP_SUBJECT" --key liveness-sweep --message "$body"); then
+        echo "$PROG: human-gate.sh failed — baseline NOT advanced; the next pass re-reports" >&2
         return 1
     fi
     printf '%s\n' "$out"
@@ -651,7 +655,9 @@ recurrence() {
             echo "$PROG: $sid: dry-run: would file recurrence visit ($n in scope)"
             continue
         fi
-        if "$ESCALATE" --subject "$sid" --key triage-recurrence \
+        # A recurrence is filed only when the scope set changed, so each is an
+        # event of its own and the call declares no quiet window.
+        if "$HUMAN_GATE" --subject "$sid" --key triage-recurrence \
                 --message "triage recurrence: $n candidates in scope
 $delta
 Current set: $now"; then
@@ -661,7 +667,7 @@ Current set: $now"; then
                 || echo "$PROG: WARN: could not stamp triage.last_seen on $sid" >&2
             echo "$PROG: $sid: filed recurrence visit ($n in scope)"
         else
-            echo "$PROG: $sid: escalate.sh failed — last_seen not advanced; re-files next pass" >&2
+            echo "$PROG: $sid: human-gate.sh failed — last_seen not advanced; re-files next pass" >&2
         fi
     done < "$TMP/subjects"
 }

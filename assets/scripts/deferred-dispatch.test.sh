@@ -94,9 +94,11 @@
 #   * the CONVOY-LEAK guards — gc sling mints an input convoy per call, so an arm
 #     that never finalizes must not be re-slung forever: an arm whose work
 #     another path already delivered (a merge_result stamp) RETIRES without
-#     slinging, and a sling that keeps failing is COUNTED, CAPPED, and escalated
-#     once (keeping the arm, never a silent retire) instead of leaking one convoy
-#     per pass; a proven dispatch clears the count so the budget resets;
+#     slinging, and a sling that keeps failing is COUNTED, CAPPED, and put to a
+#     person once, as a human gate or, on a bead with an open child, a
+#     conversation (keeping the arm, never a silent retire) instead of leaking
+#     one convoy per pass; a proven dispatch clears the count so the budget
+#     resets;
 #   * the FALSE-EMPTY-QUEUE guard — an unreadable listing exits non-zero
 #     instead of printing a summary byte-identical to a healthy empty queue.
 #     That fail-open is the exact class this script must not have: it is a
@@ -111,11 +113,11 @@
 #   * the PASS LOCK — a pass that overlaps one in flight exits 0 having read and
 #     slung nothing, so two overlapping passes make one sling; a holder past the
 #     stall bound fails the pass, and a lock that cannot be taken refuses it;
-#     no gc, escalate.sh or bead-rehome.sh call is handed its descriptor, so no
+#     no gc, human-gate.sh or bead-rehome.sh call is handed its descriptor, so no
 #     process one leaves running carries it past the pass, while a call still
 #     running holds it after a pass killed by itself; with no GC_RIG it is keyed
 #     by the rig root;
-#   * the PASS BUDGET — a pass starts a sling or an escalation only while a full
+#   * the PASS BUDGET — a pass starts a sling or an ask only while a full
 #     allowance is left, on a clock the test controls, and reports the beads it
 #     left armed and untouched; a pass that fails declares nothing; a dry run
 #     takes no lock and spends no budget;
@@ -209,10 +211,11 @@ fi
 case "${1:-}" in
   list)
     shift
-    key=""; ready=0; all=0; gates=0; id=""; who="-"; st=""
+    key=""; ready=0; all=0; gates=0; id=""; who="-"; st=""; parent=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --has-metadata-key) shift; key="${1:-}" ;;
+        --parent) shift; parent="${1:-}" ;;
         --id) shift; id="${1:-}" ;;
         --ready) ready=1 ;;
         --all) all=1 ;;
@@ -276,8 +279,10 @@ case "${1:-}" in
     # it, so a fixture bead with issue_type "gate" is hidden the same way.
     # --status names the statuses listed, a comma list, closed included when it
     # is named; --assignee names the one assignee.
+    # --parent names the parent a listed bead carries in the fixture's `parent`
+    # field; a fixture with none is no bead's child.
     jq -c --arg k "$key" --arg id "$id" --argjson ready "$ready" --argjson all "$all" --argjson gates "$gates" \
-          --arg who "$who" --arg st "$st" '
+          --arg who "$who" --arg st "$st" --arg parent "$parent" '
       ($id | if . == "" then [] else split(",") end) as $ids
       | ($st | if . == "" then [] else split(",") end) as $sts
       | [ .[]
@@ -287,6 +292,7 @@ case "${1:-}" in
         | select($who == "-" or (.assignee // "") == $who)
         | select($ready == 0 or (._ready == true))
         | select($gates == 1 or (.issue_type // "") != "gate")
+        | select($parent == "" or (.parent // "") == $parent)
         | . as $b
         | .dependencies = [ ($b._deps // [])[] | {issue_id: $b.id, depends_on_id: .id, type: .dependency_type} ]
         | del(._ready) | del(._deps) ]' "$src"
@@ -595,29 +601,41 @@ if [ "${1:-}" = "session" ] && [ "${2:-}" = "nudge" ]; then
 fi
 echo "gc stub: unsupported '${1:-}'" >&2; exit 2
 STUB
-# escalate.sh stub: records each call (subject + key) so the retry-cap test can
-# prove reconcile hands a stuck dispatch to a person exactly once, and answers
-# like the real tool. Resolved by the SUT through GC_ESCALATE_TOOL.
-cat > "$BIN/escalate.sh" <<'ESC'
+# human-gate.sh stub: records each call (subject, key, quiet window) so the
+# retry-cap test can prove reconcile hands a stuck dispatch to a person exactly
+# once, and answers like the real tool, with the gate id on stdout. Resolved by
+# the SUT through GC_HUMAN_GATE_TOOL.
+cat > "$BIN/human-gate.sh" <<'ESC'
 #!/usr/bin/env bash
 set -u
 if [ -n "${STUB_FD9_LOG:-}" ]; then
     if { : >&9; } 2>/dev/null; then fd9=open; else fd9=closed; fi
-    printf 'escalate fd9=%s\n' "$fd9" >> "$STUB_FD9_LOG"
+    printf 'human-gate fd9=%s\n' "$fd9" >> "$STUB_FD9_LOG"
 fi
-subject=""; key=""
+subject=""; key=""; window=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --subject) shift; subject="${1:-}" ;;
     --key) shift; key="${1:-}" ;;
+    --quiet-window) shift; window="${1:-}" ;;
     --message) shift ;;
     *) : ;;
   esac
   shift || true
 done
-printf '%s\t%s\n' "$subject" "$key" >> "${ESC_CALLS:?}"
-echo "escalate: filed visit tk-visit1 on $subject [$key]"
+printf '%s\t%s\t%s\n' "$subject" "$key" "$window" >> "${ESC_CALLS:?}"
+echo "tk-gate1"
 ESC
+# gc-helm.sh stub: records each `open` (the bead and its reason), the
+# conversation a capped bead with an open child gets in place of a gate.
+cat > "$BIN/gc-helm.sh" <<'HELM'
+#!/usr/bin/env bash
+set -u
+[ "${1:-}" = open ] || { echo "gc-helm stub: unsupported '$*'" >&2; exit 2; }
+shift; bead="${1:-}"; shift || true; reason=""
+while [ $# -gt 0 ]; do case "$1" in --reason) shift; reason="${1:-}" ;; esac; shift || true; done
+printf '%s\t%s\n' "$bead" "$reason" >> "${HELM_CALLS:?}"
+HELM
 # bead-rehome.sh stub: the resolved-by consumer's disposer. Records each call
 # (origin + successor + kind, then the two stores it was told, "-" for one it
 # was left to derive) so a test can prove reconcile disposed the right bead
@@ -677,7 +695,7 @@ RR
 # date stub: the epoch form the pass budget reads comes from $STUB_CLOCK when a
 # test sets it; every other form reaches the real date. The pass reads the clock
 # from its own shell, so under STUB_FD9_LOG the stub also records that the pass
-# holds fd 9: the positive control for the gc, escalate.sh and bead-rehome.sh
+# holds fd 9: the positive control for the gc, human-gate.sh and bead-rehome.sh
 # records above.
 export STUB_REAL_DATE; STUB_REAL_DATE="$(command -v date)"
 cat > "$BIN/date" <<'DATE'
@@ -689,7 +707,7 @@ fi
 if [ -n "${STUB_CLOCK:-}" ] && [ "$*" = "-u +%s" ]; then cat "$STUB_CLOCK"; exit 0; fi
 exec "${STUB_REAL_DATE:?}" "$@"
 DATE
-chmod +x "$BIN/bd" "$BIN/gc" "$BIN/escalate.sh" "$BIN/bead-rehome.sh" "$BIN/rehome-race.sh" "$BIN/date"
+chmod +x "$BIN/bd" "$BIN/gc" "$BIN/human-gate.sh" "$BIN/gc-helm.sh" "$BIN/bead-rehome.sh" "$BIN/rehome-race.sh" "$BIN/date"
 # A jq that counts its runs, put on PATH only by the case that counts them.
 export STUB_REAL_JQ; STUB_REAL_JQ="$(command -v jq)"
 mkdir -p "$TMP/jqbin"
@@ -706,10 +724,12 @@ export STUB_SLING_LOG="$TMP/sling.log"
 export STUB_MAIL_LOG="$TMP/mail.log"
 export STUB_MAILBOX="$TMP/mailbox"
 export STUB_NUDGE_LOG="$TMP/nudge.log"
-export ESC_CALLS="$TMP/escalate.log"
+export ESC_CALLS="$TMP/human-gate.log"
+export HELM_CALLS="$TMP/helm.log"
 export REHOME_CALLS="$TMP/rehome.log"
 export STUB_RACE_FIRED="$TMP/race.fired"
-export GC_ESCALATE_TOOL="$BIN/escalate.sh"
+export GC_HUMAN_GATE_TOOL="$BIN/human-gate.sh"
+export GC_HELM_TOOL="$BIN/gc-helm.sh"
 export GC_REHOME_TOOL="$BIN/bead-rehome.sh"
 export BEADS_ACTOR="test-actor"
 unset GC_AGENT GC_RIG GC_RIG_ROOT 2>/dev/null || true
@@ -725,7 +745,7 @@ unset GC_PACK_STATE_DIR GC_ORDER_OUTCOME_FILE STUB_RIGS_JSON \
 
 store() {
     printf '%s' "$1" > "$STUB_STORE"
-    : > "$STUB_SLING_LOG"; : > "$STUB_MAIL_LOG"; : > "$STUB_MAILBOX"; : > "$STUB_NUDGE_LOG"; : > "$ESC_CALLS"; : > "$REHOME_CALLS"
+    : > "$STUB_SLING_LOG"; : > "$STUB_MAIL_LOG"; : > "$STUB_MAILBOX"; : > "$STUB_NUDGE_LOG"; : > "$ESC_CALLS"; : > "$HELM_CALLS"; : > "$REHOME_CALLS"
     rm -f "$STUB_RACE_FIRED"
 }
 # The store as the fresh read finds it, for STUB_FRESH_STORE, with the switch
@@ -743,6 +763,7 @@ nudges() { wc -l < "$STUB_NUDGE_LOG" | tr -d ' '; }
 arm_list_reads() { grep '^list' "$STUB_BD_LOG" | grep -c -v -F -e 'gc.notify_when_ready'; }
 notice_list_reads() { grep '^list' "$STUB_BD_LOG" | grep -c -F -e 'gc.notify_when_ready'; }
 escalations() { wc -l < "$ESC_CALLS" | tr -d ' '; }
+conversations() { wc -l < "$HELM_CALLS" | tr -d ' '; }
 rehomes() { wc -l < "$REHOME_CALLS" | tr -d ' '; }
 rehome_call() { sed -n "${1}p" "$REHOME_CALLS" | cut -f1-3; }   # tab-separated: origin<TAB>successor<TAB>kind
 rehome_stores() { sed -n "${1}p" "$REHOME_CALLS" | cut -f4; }   # <origin-store>|<successor-store>, "-" for one not passed
@@ -1325,7 +1346,8 @@ has "$out" "sling of b-1 -> rig/pool failed" "the failure names the bead and tar
 # Each gc sling mints an input convoy, so an arm that never finalizes must not be
 # re-slung forever. Two guards stop it: an arm whose work another path already
 # delivered (a merge_result stamp) retires without slinging, and a sling that
-# keeps failing is capped and escalated rather than leaking a convoy per pass.
+# keeps failing is capped and put to a person rather than leaking a convoy per
+# pass.
 
 echo "# reconcile retires an arm whose work another path already delivered"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]","merge_result":"pull_request"},"notes":"","_ready":true}]'
@@ -1337,7 +1359,7 @@ has "$(notes b-1)" "work already delivered (merge_result=pull_request)" "the ret
 has "$out" "already-delivered b-1" "the retire is reported, not silent"
 has "$out" "1 retired" "summary counts the delivered retire"
 
-echo "# repeated non-finalizing slings are capped and escalated, not leaked one convoy per pass"
+echo "# repeated non-finalizing slings are capped and put to a person, not leaked one convoy per pass"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true}]'
 STUB_SLING_RC=7 "$SUT" reconcile >/dev/null 2>&1
 eq "$(meta b-1 gc.dispatch_when_ready_fail_count)" "1" "failing pass 1 counts one attempt"
@@ -1345,15 +1367,29 @@ STUB_SLING_RC=7 "$SUT" reconcile >/dev/null 2>&1
 eq "$(meta b-1 gc.dispatch_when_ready_fail_count)" "2" "failing pass 2 counts a second attempt"
 STUB_SLING_RC=7 "$SUT" reconcile >/dev/null 2>&1
 eq "$(meta b-1 gc.dispatch_when_ready_fail_count)" "3" "failing pass 3 reaches the cap"
-eq "$(escalations)" "0" "no escalation while still under the cap"
+eq "$(escalations)" "0" "no gate while still under the cap"
 before=$(slings)
 : > "$ESC_CALLS"
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "$before" "a capped bead is NOT re-slung — the convoy-per-pass leak stops"
 eq "$(escalations)" "1" "a capped bead is handed to a person exactly once"
-eq "$(head -1 "$ESC_CALLS" | cut -f2)" "deferred-dispatch-sling-failed.b-1" "the escalation is keyed per bead, so repeated passes dedup to one visit"
+eq "$(head -1 "$ESC_CALLS" | cut -f2)" "deferred-dispatch-sling-failed.b-1" "the gate is keyed per bead, so repeated passes dedup to one gate"
+eq "$(head -1 "$ESC_CALLS" | cut -f3)" "86400" "the call declares a day-long quiet window, since every pass that finds the bead unheld detects the cap again"
+eq "$(conversations)" "0" "a bead with no open child gets a gate, not a conversation"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "a capped bead keeps its arm for the person, never a silent retire"
 has "$out" "CAPPED b-1" "the cap is reported"
+
+echo "# a capped bead with an open child is asked about in a conversation, not a gate"
+# A gate on the parent would pause its unstarted parts over a failed sling, and
+# the cap already holds the arm.
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_fail_count":"3"},"notes":"","_ready":true},
+ {"id":"b-1.1","status":"open","assignee":"","parent":"b-1","metadata":{},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "0" "the capped parent is NOT re-slung"
+eq "$(escalations)" "0" "no gate is filed on a bead with an open child"
+eq "$(conversations)" "1" "a conversation is opened on it instead"
+eq "$(head -1 "$HELM_CALLS" | cut -f1)" "b-1" "on the capped bead itself"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the bead keeps its arm"
 
 echo "# a proven dispatch clears the accumulated fail count, resetting the budget"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_fail_count":"2"},"notes":"","_ready":true}]'
@@ -2940,10 +2976,10 @@ eq "$(wc -l < "$STUB_BD_LOG" | tr -d ' ')" "0" "before any read of the store"
 eq "$(slings)" "0" "and slings nothing"
 unset STUB_BD_LOG
 
-# No gc or escalate.sh call is handed the lock's descriptor. A process a gc call
+# No gc or human-gate.sh call is handed the lock's descriptor. A process a gc call
 # starts can outlive the pass, and one that kept fd 9 would hold the lock against
 # every later pass, with nothing dispatching on the rig until someone killed it.
-echo "# every gc and escalate.sh call a pass makes runs without the lock's descriptor"
+echo "# every gc and human-gate.sh call a pass makes runs without the lock's descriptor"
 store '[
  {"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true},
  {"id":"b-cap","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_fail_count":"3"},"notes":"","_ready":true},
@@ -2952,14 +2988,14 @@ FD9="$TMP/fd9.log"; : > "$FD9"
 out="$(STUB_FD9_LOG="$FD9" "$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 0 "the pass completes"
 eq "$(slings)" "1" "it slings the ready bead"
-eq "$(escalations)" "1" "it escalates the capped bead"
+eq "$(escalations)" "1" "it files a gate on the capped bead"
 has "$out" "retired arm on closed b-done" "it retires the closed bead's arm"
-for call in "gc bd" "gc sling" "escalate"; do
+for call in "gc bd" "gc sling" "human-gate"; do
     n="$(grep -c -F "$call fd9=" "$FD9")"
     if [ "$n" -gt 0 ]; then ok "the pass made $n '$call' call(s)"; else bad "the pass made no '$call' call, so nothing about it was proven"; fi
 done
 leaked="$(grep -F 'fd9=open' "$FD9" | grep -v -F 'date fd9=' || true)"
-eq "$leaked" "" "no gc or escalate.sh call was handed fd 9"
+eq "$leaked" "" "no gc or human-gate.sh call was handed fd 9"
 n="$(grep -c -F 'date fd9=open' "$FD9")"
 if [ "$n" -gt 0 ]; then ok "while the pass itself held it (its clock reads saw fd 9 open $n time(s))"; else bad "the pass never held fd 9, so the closed records prove nothing"; fi
 
@@ -3148,8 +3184,8 @@ eq "$(slings)" "1" "the pass slings its ready bead"
 [ -s "$TMP/outcome-full.json" ] && bad "a complete pass wrote an outcome declaration: $(cat "$TMP/outcome-full.json")" \
     || ok "a complete pass leaves the controller's outcome file empty"
 
-echo "# past the budget, a capped bead's escalation waits for the next pass"
-# The escalation runs escalate.sh against the store, which the timeout can cut
+echo "# past the budget, a capped bead's ask waits for the next pass"
+# The ask runs human-gate.sh against the store, which the timeout can cut
 # short like a sling. The bead stays capped and armed, so the next pass files it.
 CAP_AFTER_READY='[
  {"id":"b-1","status":"open","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":true},
@@ -3161,18 +3197,18 @@ out="$(STUB_CLOCK="$CLOCK" STUB_SLING_SECS=40 DEFERRED_DISPATCH_PASS_BUDGET_SECS
     GC_ORDER_OUTCOME_FILE="$TMP/outcome-esc.json" "$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 0 "the pass exits 0"
 eq "$(slings)" "1" "a 60s budget with a 30s allowance starts one 40s sling"
-eq "$(escalations)" "0" "and files no escalation once less than an allowance is left"
+eq "$(escalations)" "0" "and files no gate once less than an allowance is left"
 has "$out" "CAPPED b-cap" "it still reports the capped bead"
-has "$out" "its escalation waits for the next pass" "and says the escalation waits"
-has "$out" "left the escalation of 1 capped bead(s) for the next pass: b-cap" "naming the bead"
+has "$out" "asking a person waits for the next pass" "and says the ask waits"
+has "$out" "left the ask about 1 capped bead(s) for the next pass: b-cap" "naming the bead"
 has "$out" "1 capped" "the summary counts it as capped"
 eq "$(meta b-cap gc.dispatch_when_ready)" "rig/pool" "the capped bead keeps its arm"
 eq "$(jq -r '.outcome' "$TMP/outcome-esc.json" 2>/dev/null)" "partial" "the pass declares itself partial"
-eq "$(jq -r '[.scopes[] | "\(.scope): \(.reason)"] | join(",")' "$TMP/outcome-esc.json" 2>/dev/null)" "b-cap: escalation left for the next pass" \
-    "naming the bead and the escalation left on it"
+eq "$(jq -r '[.scopes[] | "\(.scope): \(.reason)"] | join(",")' "$TMP/outcome-esc.json" 2>/dev/null)" "b-cap: ask left for the next pass" \
+    "naming the bead and the ask left on it"
 printf '1000\n' > "$CLOCK"
 out="$(STUB_CLOCK="$CLOCK" STUB_SLING_SECS=40 DEFERRED_DISPATCH_PASS_BUDGET_SECS=60 DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS=30 "$SUT" reconcile 2>&1)"; rc=$?
-eq "$(escalations)" "1" "the next pass, with its budget unspent, files the escalation"
+eq "$(escalations)" "1" "the next pass, with its budget unspent, files the gate"
 eq "$(cut -f1 "$ESC_CALLS")" "b-cap" "on the capped bead"
 
 echo "# a pass that fails declares nothing, and its output names what it left"

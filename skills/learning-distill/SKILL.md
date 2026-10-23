@@ -88,12 +88,13 @@ and the pattern-bead set, then pick exactly one:
 Duplicated near-rules are this system's own version of the pasted
 boilerplate comment it exists to eliminate. Do not become the disease.
 
-### 4. Contradiction is a conversation, never a flip
+### 4. Contradiction is a human gate, never a flip
 
 Evidence against an adopted rule **never silently retires, weakens, or
-rewrites it**. File the contention visit on the pattern bead with both
-evidence lists framed; scope-narrowing, retirement, or dismissal is the
-operator's pick, not yours. The exception: an operator-endorsed
+rewrites it**. File the contention as a human gate on the pattern bead,
+through human-gate.sh under the key `distiller-contention`, with both evidence
+lists framed; scope-narrowing, retirement, or dismissal is the operator's pick,
+not yours. The exception: an operator-endorsed
 contradiction (`obs.endorsed=operator`) *is* the operator picking — file
 the UPDATE/SUPERSEDE proposal under judgment 1 instead.
 

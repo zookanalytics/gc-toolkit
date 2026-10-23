@@ -9,8 +9,8 @@
 # (gc.pr_close_disposition_*, stamped by pr-dispose.sh), auto-dispose it through
 # bead-rehome.sh once its parked children, its machine review scaffolding
 # (scaffolding-sweep.sh) and any stale rework-or-close visit are retired;
-# otherwise abandoned + escalate.sh visit; base moved -> retargeted +
-# escalate (the lanes' reviews stand: a person restores the base or accepts
+# otherwise abandoned + a human gate on the anchor; base moved -> retargeted +
+# a human gate (the lanes' reviews stand: a person restores the base or accepts
 # the new one); CONFLICTING with no feedback owed, on an APPROVED
 # PR (review-verdict.sh, the rule merge.sh lands on; an unapproved one records
 # its posture and files nothing) -> file ONE
@@ -202,7 +202,7 @@ SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # records it rather than waiting for the full pass.
 PR_STATUS_LABEL="$SCRIPTS_DIR/pr-status-label.sh"
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
-ESCALATE="$SCRIPTS_DIR/escalate.sh"
+HUMAN_GATE="$SCRIPTS_DIR/human-gate.sh"
 # One durable bead per situation key, each recurrence tallied on it. The
 # write-back reports a review thread it cannot resolve through it
 # (wb_unresolvable).
@@ -706,9 +706,17 @@ WB_OWED_REPLY_DEF="$REVIEW_OWED_REPLY_DEF"'
       and (((.metadata["finding.lane"] // "") | tostring) == "human")
       and ($d | ra_owes_disp)
       and (((.metadata["finding.reply"] // "") | tostring) != "");'
-escalate() { # <subject> <key> <message> — best-effort; escalate.sh dedups the situation
-  [ -x "$ESCALATE" ] || return 0
-  "$ESCALATE" --subject "$1" --key "$2" --message "$3" >/dev/null 2>&1 || true
+# A day: the quiet window of a call site that detects one standing condition
+# again on every pass, so a person's moot or benign answer stands that long.
+PR_STANDING_QUIET_WINDOW=86400
+# human_gate <subject> <key> <message> [<quiet-window>] — best-effort; human-gate.sh
+# files one open gate per bead and key. A call site that detects one standing
+# condition again on every pass passes a quiet window, so a person's moot or
+# benign answer stands for that long; a call site that files an event passes
+# none.
+human_gate() {
+  [ -x "$HUMAN_GATE" ] || return 0
+  "$HUMAN_GATE" --subject "$1" --key "$2" ${4:+--quiet-window "$4"} --message "$3" >/dev/null 2>&1 || true
 }
 # Re-derive one anchor's status: label through its single writer. cur_labels is
 # the anchor's label list from this pass's pinned PR read, which spares the writer
@@ -761,7 +769,7 @@ retract_dispose_visits() {
              | select(((.metadata.escalation_key // "") | tostring) == $k)
              | select(((.metadata["gc.continuation_group"] // "") | tostring) == $s) | .id' 2>/dev/null) || vids=""
   [ -n "$vids" ] || return 0
-  [ -x "$ESCALATE" ] && "$ESCALATE" --retract --subject "$a" --key "$key" --message "$reading" >/dev/null 2>&1 </dev/null
+  [ -x "$HUMAN_GATE" ] && "$HUMAN_GATE" --retract --subject "$a" --key "$key" --message "$reading" >/dev/null 2>&1 </dev/null
   for v in $vids; do
     row=$(gc bd show "$v" --json 2>/dev/null | scrub)
     st=$(printf '%s' "$row" | jq -r '.[0].status // ""' 2>/dev/null)
@@ -1797,7 +1805,7 @@ MP_EOF
           kids_disposed_note=""
           [ -n "$disposed_kids" ] && kids_disposed_note=" The branch's parked rework/rebase children ($disposed_kids) were ALREADY disposed (closed not-needed -> $disp_succ) before this close, to clear their blocks-hold on the anchor; if the disposition is wrong, restore them by hand."
           dmsg="PR#$num ($live_url) was closed with a pre-recorded disposition ($disp_kind -> $disp_succ), but bead-rehome.sh could not consummate it (rc=$rrc): $(printf '%s' "$rout" | tr '\n' ' ' | cut -c1-300). The anchor is left OPEN carrying the marker; clear the obstruction and the next refinery pass retries, or dispose it by hand."
-          escalate "$id" "pr-dispose-failed.$num" "$dmsg$kids_disposed_note"
+          human_gate "$id" "pr-dispose-failed.$num" "$dmsg$kids_disposed_note"
           refresh_dispose_visits "$id" "$num" "$dmsg" "$kids_disposed_note"
           skipped=$((skipped + 1)); continue
         fi
@@ -1810,7 +1818,7 @@ MP_EOF
          --set "blocked_reason=PR#$num closed out-of-band without merging" \
          --takeaway "PR#$num was closed without merging — rework the branch, or close this bead as not-planned"; then
       flagged=$((flagged + 1))
-      escalate "$id" "pr-abandoned.$num" \
+      human_gate "$id" "pr-abandoned.$num" \
         "PR#$num ($live_url) was closed out-of-band without merging. The anchor is left OPEN, routed to human (merge_result=abandoned). Decide: rework it, or close it as not-planned."
       echo "$PROG: $id — PR#$num closed out-of-band; abandoned, routed to human, escalated"
     else
@@ -2231,7 +2239,7 @@ MP_EOF
          --set "blocked_reason=PR#$num retargeted: base '$base' != expected target '$rec_target'" \
          --takeaway "PR#$num sits on a base other than its expected target — retarget it back, or update merged_target"; then
       flagged=$((flagged + 1))
-      escalate "$id" "pr-retargeted.$num" \
+      human_gate "$id" "pr-retargeted.$num" \
         "PR#$num ($live_url) was retargeted: base '$base' != expected '$rec_target'. Retarget it back and reset merge_result=pull_request to re-engage, or update merged_target if the new base is intentional."
       echo "$PROG: $id — PR#$num retargeted (base '$base' != '$rec_target'); routed to human, escalated"
     else
@@ -2814,8 +2822,11 @@ $CBODY"
       # comment keeps the key an open visit was filed under.
       VKEY="pr-comments.$num.$max_r.$max_c"
       [ "$max_i" -gt 0 ] && VKEY="pr-comments.$num.$max_r.$max_c.$max_i"
-      escalate "$id" "$VKEY" \
-        "PR#$num ($live_url) carries review feedback nothing has answered (highest: review $max_r, comment $max_c, issue $max_i; answered through review $rwm, comment $cwm, issue $iwm${CSRC:+; reviews $CSRC}), and the city cannot route work for it because $why. Answer it on the PR, file the rework by hand, or close this visit once it is addressed — the merge is held until then."
+      # The same unanswered batch is detected again on every pass until a
+      # disposition lands, so the call declares the standing quiet window.
+      human_gate "$id" "$VKEY" \
+        "PR#$num ($live_url) carries review feedback nothing has answered (highest: review $max_r, comment $max_c, issue $max_i; answered through review $rwm, comment $cwm, issue $iwm${CSRC:+; reviews $CSRC}), and the city cannot route work for it because $why. Answer it on the PR, file the rework by hand, or close this visit once it is addressed — the merge is held until then." \
+        "$PR_STANDING_QUIET_WINDOW"
       VID=$(visit_for "$id" "$VKEY") || VID=""
       if [ -z "$VID" ]; then
         echo "$PROG: $id — PR#$num has unanswered comments but no visit could be filed or found; NOTHING dispositioned (retry next pass)" >&2
@@ -3141,8 +3152,11 @@ $CBODY"
     fi
     case "$bcause" in
       threads)
-        escalate "$id" "merge-blocked-threads" \
-          "PR#$num ($live_url) is BLOCKED by branch protection: $bthreads unresolved review thread(s) must be resolved before it can merge (required_review_thread_resolution is on). Resolve the thread(s), or say why the block should lift."
+        # A blocked merge stays blocked until its threads are resolved, and every
+        # pass detects it again, so the call declares the standing quiet window.
+        human_gate "$id" "merge-blocked-threads" \
+          "PR#$num ($live_url) is BLOCKED by branch protection: $bthreads unresolved review thread(s) must be resolved before it can merge (required_review_thread_resolution is on). Resolve the thread(s), or say why the block should lift." \
+          "$PR_STANDING_QUIET_WINDOW"
         echo "$PROG: $id — PR#$num BLOCKED on $bthreads unresolved review thread(s); escalated (merge-blocked-threads)"
         flagged=$((flagged + 1)); continue ;;
     esac
@@ -3210,7 +3224,7 @@ $CBODY"
   # and running that off a raw thread read would loop on our own replies.
   if [ -n "$UT_COUNT" ] && [ "$UT_COUNT" -gt 0 ]; then
     UTKEY="pr-unengaged-threads.$num.$head_oid"
-    escalate "$id" "$UTKEY" \
+    human_gate "$id" "$UTKEY" \
       "PR#$num ($live_url) carries $UT_COUNT unresolved review-thread finding(s) that nothing picked up. They were posted under the automation's own login with no city mark, before this PR's provenance cutover, so the comment-routing arm read them as the city's own and the green check triggered no re-review. Answer each on the PR, file rework, or resolve the threads — the merge is held until this visit closes."
     UTVID=$(visit_for "$id" "$UTKEY") || UTVID=""
     if [ -z "$UTVID" ]; then
@@ -3347,7 +3361,7 @@ $CBODY"
               if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
                    --route human \
                    --takeaway "PR#$num has a required check failing for a non-code cause — re-run it or fix the infrastructure, then clear gc.routed_to" >/dev/null; then
-                escalate "$id" "pr-fix-noncode.$num" \
+                human_gate "$id" "pr-fix-noncode.$num" \
                   "PR#$num ($live_url) has failing required check(s) ($rc_allnames) that are non-code causes — a timeout, cancellation, startup failure, or a deploy-type check — which no code change can fix. Parked to a human: re-run the check or fix the infrastructure, then clear gc.routed_to to re-engage the auto-fixer, or merge once it is green."
                 flagged=$((flagged + 1))
                 echo "$PROG: $id — PR#$num required check(s) failing ($rc_allnames) for a non-code cause; parked to human (no fixer dispatched)"
@@ -3439,7 +3453,7 @@ $CBODY"
               if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
                    --route human \
                    --takeaway "PR#$num is still red at the head an auto-fixer was already sent to. Fix the failing check by hand or re-run it." >/dev/null; then
-                escalate "$id" "pr-fix-unmoved.$num" \
+                human_gate "$id" "pr-fix-unmoved.$num" \
                   "PR#$num ($live_url) is red on required check(s) ($rc_names) at head $head_oid, and red-check child $rc_tried was already sent to that head and closed without moving it. Another fixer would only repeat that attempt, so the anchor is parked to a human. Read $rc_tried's notes for why it closed, then fix the check(s) by hand or re-run them. Clearing gc.routed_to at this head parks it again. Once a push moves the head, clearing gc.routed_to lets the auto-fixer try the new head, up to the attempt cap ($RC_FIX_ATTEMPT_CAP)."
                 flagged=$((flagged + 1))
                 echo "$PROG: $id — PR#$num required check(s) failing ($rc_names) at head $head_oid, which red-check child $rc_tried was already sent to fix; parked to human (no new fixer dispatched)"
@@ -3465,7 +3479,7 @@ $CBODY"
               if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
                    --route human \
                    --takeaway "PR#$num is still red after $rc_attempts auto-fix attempts — fix the failing check by hand; no more fixers will be sent" >/dev/null; then
-                escalate "$id" "pr-fix-capped.$num" \
+                human_gate "$id" "pr-fix-capped.$num" \
                   "PR#$num ($live_url) has drawn $rc_attempts auto-fix attempts across successive red heads without reaching green on required check(s) ($rc_names); the attempt cap ($RC_FIX_ATTEMPT_CAP) is reached. Parked to a human rather than dispatch another fixer: take it over and fix the check(s) by hand, or merge once it is green. No further fixer is dispatched for this PR, so clearing gc.routed_to while it is still red parks it again."
                 flagged=$((flagged + 1))
                 echo "$PROG: $id — PR#$num red-check fix attempts ($rc_attempts) reached the cap ($RC_FIX_ATTEMPT_CAP); parked to human (no new fixer dispatched)"

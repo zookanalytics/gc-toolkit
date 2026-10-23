@@ -42,14 +42,12 @@
 #                               --base <commit> --head <commit> [--pr <n>]
 #     The conflict arm's question: should the merge-in dispatch wait for a
 #     person's decision? It waits while a rework-base-supersession visit is open
-#     on the anchor and its route addresses somebody, judged the way escalate.sh
-#     judges the route of an open visit it finds. Otherwise it classifies <head>
-#     against <base>, and on a supersession files that visit through
-#     escalate.sh, with the evidence and the ways out, then waits behind it. An
-#     open visit whose route addresses nobody is repointed there rather than
-#     filed again. A visit a sitting closes `benign` (the overlap was
-#     incidental) lets the next pass dispatch the ordinary child, through
-#     escalate.sh's verdict window.
+#     on the anchor and its route addresses somebody, by pool-route.sh's
+#     verdict. Otherwise it classifies <head> against <base>, and on a
+#     supersession asks through human-gate.sh, with the evidence and the ways
+#     out, then waits behind the ask. A `benign` answer (the overlap was
+#     incidental) lets the next pass dispatch the ordinary child, through the
+#     quiet window the call declares.
 #     Exit: 0 hold: a supersession decision is open on the anchor and routed to
 #             somebody, so dispatch nothing.
 #           1 proceed: dispatch the ordinary merge-in child. This is also the
@@ -66,9 +64,13 @@ set -uo pipefail
 PROG="branch-supersession"
 
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-ESCALATE="$SCRIPTS_DIR/escalate.sh"
-# The route reading escalate.sh applies to an open visit it finds.
+HUMAN_GATE="$SCRIPTS_DIR/human-gate.sh"
+# The route reading applied to an open visit found on the anchor.
 POOL_ROUTE="$SCRIPTS_DIR/pool-route.sh"
+# A benign answer is this ask's release, so the call declares a quiet window: the
+# next pass detects the same supersession again, and inside the window it files
+# nothing and dispatches the ordinary merge-in child.
+QUIET_WINDOW=86400
 # The situation key a polecat files by hand when it finds this mid-rework, so
 # both routes land the same question on one key.
 KEY="rework-base-supersession"
@@ -379,9 +381,9 @@ $where
 Your options:
 - Retire it, if what landed covers this work. $retire, and nothing more is spent.
 - Re-scope it, if part of the work still stands. Send a rework child that rebuilds the branch on top of what landed. That costs one polecat session.
-- Bring it current anyway, if the overlap is incidental. Close this visit benign, and the next reconcile pass sends the ordinary merge-in child. That costs one polecat session.
+- Bring it current anyway, if the overlap is incidental. Clear this gate with a benign: answer, and the next reconcile pass sends the ordinary merge-in child. That costs one polecat session.
 
-No merge-in rework is sent for this branch while this visit is open. (anchor $anchor, branch $branch at ${head:0:8}, $target at ${base:0:8})
+No merge-in rework is sent for this branch while this gate is open. (anchor $anchor, branch $branch at ${head:0:8}, $target at ${base:0:8})
 BRIEF
 }
 
@@ -395,9 +397,8 @@ open_visits() { # <anchor>; prints "<id>\t<route>" per open supersession visit; 
         | [.id, ((.metadata["gc.routed_to"] // "") | tostring)] | @tsv' 2>/dev/null
 }
 
-# The first of open_visits' rows whose route addresses somebody, by the verdict
-# escalate.sh reads for an open visit it finds: `ok`, or `unknown` when the live
-# agent set could not be read. No route, a pool no live agent carries, another
+# The first of open_visits' rows whose route addresses somebody, by pool-route.sh's
+# verdict: `ok`, or `unknown` when the live agent set could not be read. No route, a pool no live agent carries, another
 # rig's pool, and a rig-qualified route with no GC_RIG to check it against
 # address nobody. Prints the visit id, or nothing.
 asking_visit() { # <rows>
@@ -435,9 +436,8 @@ hold() {
   # while working the visit sits on the visit, not the anchor, so the open visit
   # is what holds here. It holds only while its route addresses somebody. A visit
   # routed nowhere has asked nobody, so the branch is classified as though no
-  # visit were open. On a supersession escalate.sh finds that visit and repoints
-  # it, or refuses and the arm proceeds. On drift the arm proceeds. An unreadable
-  # store answers nothing and falls through.
+  # visit were open. On drift the arm proceeds. An unreadable store answers
+  # nothing and falls through.
   rows=$(open_visits "$anchor") || rows=""
   vid=$(asking_visit "$rows")
   if [ -n "$vid" ]; then
@@ -459,23 +459,23 @@ hold() {
 
   title=$(bd_json show "$anchor" | jq -r '.[0].title // empty' 2>/dev/null)
   msg=$(brief "$label" "$branch" "$target" "$anchor" "$title" "$head" "$base" "$pr" "$evidence")
-  if ! "$ESCALATE" --subject "$anchor" --key "$KEY" --message "$msg" >/dev/null 2>&1; then
-    echo "$PROG: WARN $anchor — $label looks superseded, but the decision visit could not be filed or repointed at somebody; dispatching the ordinary merge-in child rather than holding with no record" >&2
+  if ! "$HUMAN_GATE" --subject "$anchor" --key "$KEY" --quiet-window "$QUIET_WINDOW" --message "$msg" >/dev/null 2>&1; then
+    echo "$PROG: WARN $anchor — $label looks superseded, but the decision could not be asked; dispatching the ordinary merge-in child rather than holding with no record" >&2
     return 1
   fi
-  # escalate.sh wrote to the store, so the pass's cached reads are stale.
+  # human-gate.sh wrote to the store, so the pass's cached reads are stale.
   bd_cache_clear
-  # The hold stands only behind an open visit that addresses somebody. escalate.sh
-  # also exits 0 without filing when a sitting recently closed this situation moot
-  # or benign, and that ruling is the release.
+  # The hold stands only behind an open ask that addresses somebody. human-gate.sh
+  # also exits 0 without filing inside the declared quiet window after a moot or
+  # benign answer, and that answer is the release.
   rows=$(open_visits "$anchor") || rows=""
   vid=$(asking_visit "$rows")
   if [ -z "$vid" ]; then
     echo "$PROG: $anchor — $label looks superseded, but no supersession visit is open and routed to somebody (a recent moot or benign ruling answers it); dispatching the ordinary merge-in child"
     return 1
   fi
-  # A visit that was open before escalate.sh ran, and addresses somebody only
-  # now, is one it repointed.
+  # A visit that was open before human-gate.sh ran, and addresses somebody only
+  # now, is one that was repointed.
   if grep -qxF -- "$vid" < <(cut -f1 <<< "$prior"); then
     echo "$PROG: $anchor — $label conflicts with '$target' because a landed change deleted or rewrote code it edits; repointed decision $vid at somebody, no rework dispatched"
   else

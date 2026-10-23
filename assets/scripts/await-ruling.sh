@@ -1,31 +1,32 @@
 #!/usr/bin/env bash
-# await-ruling — make a work bead wait on the visit that asks for a ruling on it,
-# and re-sling it when the ruling is "proceed".
+# await-ruling — make a work bead wait on the human gate that asks a person for
+# a ruling on it, and re-sling it when the ruling is "proceed".
 #
 #   await-ruling.sh <work-bead> --key <situation-key> --formula <formula>
 #                   [--subject <bead>] [--target <pool>] [--dry-run]
 #
 # A worker that declines work it cannot finish without a person files the
-# question with escalate.sh, then cancels its run (run-cancel.sh). Nothing
+# question with human-gate.sh, then cancels its run (run-cancel.sh). Nothing
 # resumes a cancelled run, so the wait sits on the WORK bead, where every reader
 # of the work looks:
-#   * a `blocks` edge from the work bead onto the open visit escalate.sh filed
-#     for (subject, situation key), which keeps the work out of `bd ready` until
-#     the visit closes. The subject is the work bead unless --subject names the
-#     bead the visit was filed on, such as the anchor a rework child's question
-#     goes to. bd's cycle check walks blocks, conditional-blocks and
-#     parent-child only, so this edge beside the visit's `tracks` edge onto its
-#     subject is not a cycle;
+#   * a `blocks` edge from the work bead onto the open human gate under the
+#     situation key, which keeps the work out of `bd ready` until the gate is
+#     cleared. The gate is found among the human gates of the subject, the bead
+#     it was filed on, which is the work bead unless --subject names another,
+#     such as the anchor a rework child's bring-current question goes to; and
+#     else among the work bead's own. A gate filed on the work bead already
+#     blocks it, and that edge is the wait. A gate filed on another bead gets
+#     the work bead's own edge here, because a rework child's `related` edge to
+#     its anchor holds nothing, and the gate is then about both beads;
 #   * a deferred-dispatch arm that re-slings the work through <formula> once bd
-#     reports it ready. Closing the visit is the "proceed" ruling: the edge
+#     reports it ready. Clearing the gate is the "proceed" ruling: the edge
 #     clears and the next reconcile pass pours a fresh molecule. A ruling not to
 #     proceed closes the work bead first, and a closed bead's arm retires
 #     without a sling.
-# The visit has to be open. Once a person has closed a visit moot or benign,
-# escalate.sh answers a repeat of that situation inside its verdict window from
-# the closed visit and files nothing, and the re-slung run can meet the same
-# situation again. So a caller runs the escalate.sh this waits behind with
-# GC_ESCALATE_VERDICT_WINDOW=0.
+# The gate has to be open. A caller files it through human-gate.sh with no
+# --quiet-window, so a situation a person answered moot or benign before is
+# asked again rather than answered from the closed gate, which would leave the
+# re-slung run nothing to wait on.
 # The pool is --target, else the work bead's gc.execution_routed_to (the pool
 # its last pour ran on), else its gc.routed_to, else the target of an arm
 # already recorded, else resling_target. The arm refuses a routed bead, so the
@@ -61,7 +62,7 @@
 # run recorded.
 #
 # Callers: the decline arms of mol-polecat-work that wait for a person.
-# exit: 0 the work bead waits on the visit and is armed, or is closed and needs
+# exit: 0 the work bead waits on the gate and is armed, or is closed and needs
 #       neither · 1 the wait did not land · 2 usage
 set -uo pipefail
 
@@ -81,10 +82,10 @@ usage: await-ruling.sh <work-bead> --key <situation-key> --formula <formula>
                        [--subject <bead>] [--target <pool>] [--dry-run]
 
   <work-bead>     the bead the declined run was poured for
-  --key           the situation key escalate.sh filed the visit under (required)
+  --key           the situation key human-gate.sh filed the gate under (required)
   --formula       the formula the re-sling pours, e.g. mol-polecat-work
                   (required)
-  --subject       the bead the visit was filed on; default the work bead
+  --subject       the bead the gate was filed on; default the work bead
   --target        the pool to re-sling to; default the bead's
                   gc.execution_routed_to, else its gc.routed_to, else the pool
                   an earlier run armed or recorded as resling_target
@@ -206,18 +207,28 @@ elif [ "$STATUS" = in_progress ]; then
   RELEASE=reopen
 fi
 
-# The visit escalate.sh files for a durable subject, matched the way its own
-# dedup matches: the situation key and the subject's continuation group.
-if ! VISITS=$(bd_json_array list --status=open,in_progress --metadata-field "escalation_key=$KEY" \
-    --metadata-field "gc.continuation_group=$SUBJECT" --limit=20); then
-  echo "$PROG: could not list the visits on $SUBJECT; no wait was recorded" >&2
+# The open human gate under the key, read by the one reader rule: among the
+# subject's gates first, then among the work bead's own. The oldest is taken
+# when a race filed two, as the board folds both and one answer clears both.
+open_gate_under_key() { # <bead> -> the id, or nothing; non-zero on a failed read
+  local gates
+  gates=$(bd_human_gates "$1") || return 1
+  printf '%s' "$gates" | jq -r --arg k "$KEY" '
+    [ .[] | select((.await_id // "") == $k and (.status // "") != "closed") ]
+    | sort_by(.created_at // "", .id) | .[0].id // empty' 2>/dev/null
+}
+if ! GATE=$(open_gate_under_key "$SUBJECT"); then
+  echo "$PROG: could not read the human gates of $SUBJECT; no wait was recorded" >&2
   exit 1
 fi
-VISIT=$(printf '%s' "$VISITS" | jq -r --arg k "$KEY" --arg s "$SUBJECT" '
-  [ .[] | select((.metadata.escalation_key // "") == $k and (.metadata["gc.continuation_group"] // "") == $s) | .id ]
-  | sort | .[0] // empty' 2>/dev/null)
-if [ -z "$VISIT" ]; then
-  echo "$PROG: no open visit on $SUBJECT under $KEY; file it with escalate.sh first. No wait was recorded." >&2
+if [ -z "$GATE" ] && [ "$SUBJECT" != "$WORK" ]; then
+  if ! GATE=$(open_gate_under_key "$WORK"); then
+    echo "$PROG: could not read the human gates of $WORK; no wait was recorded" >&2
+    exit 1
+  fi
+fi
+if [ -z "$GATE" ]; then
+  echo "$PROG: no open human gate under $KEY blocks $SUBJECT; file it with human-gate.sh first. No wait was recorded." >&2
   exit 1
 fi
 
@@ -235,20 +246,21 @@ case "$TARGET" in
 esac
 
 if [ "$DRY_RUN" = 1 ]; then
-  echo "$PROG: DRY RUN: $WORK would wait on visit $VISIT, armed to re-sling to $TARGET --on $FORMULA${RELEASE:+, after releasing its claim (status $STATUS${ASSIGNEE:+, assignee $ASSIGNEE})}"
+  echo "$PROG: DRY RUN: $WORK would wait on gate $GATE, armed to re-sling to $TARGET --on $FORMULA${RELEASE:+, after releasing its claim (status $STATUS${ASSIGNEE:+, assignee $ASSIGNEE})}"
   exit 0
 fi
 
-# `dep add <bead> <blocker>` reads "<bead> is blocked by <blocker>".
-blocks_on_visit() {
-  bd_json dep list "$WORK" | jq -e --arg v "$VISIT" '
-    type == "array" and any(.[]; (.id // .depends_on_id // "") == $v
-                               and ((.dependency_type // .type // "") == "blocks"))' >/dev/null 2>&1
+# `dep add <bead> <blocker>` reads "<bead> is blocked by <blocker>". The edge is
+# read back from the work bead's side, the read every reader of its gates makes.
+blocks_on_gate() {
+  local gates
+  gates=$(bd_human_gates "$WORK") || return 1
+  printf '%s' "$gates" | jq -e --arg g "$GATE" 'any(.[]; .id == $g)' >/dev/null 2>&1
 }
-if ! blocks_on_visit; then
-  gc bd dep add "$WORK" "$VISIT" --type=blocks </dev/null >/dev/null 2>&1 || true
-  if ! blocks_on_visit; then
-    echo "$PROG: the blocks edge from $WORK onto visit $VISIT did not land; no wait was recorded" >&2
+if ! blocks_on_gate; then
+  gc bd dep add "$WORK" "$GATE" --type=blocks </dev/null >/dev/null 2>&1 || true
+  if ! blocks_on_gate; then
+    echo "$PROG: the blocks edge from $WORK onto gate $GATE did not land; no wait was recorded" >&2
     exit 1
   fi
 fi
@@ -259,12 +271,12 @@ fi
 case "$RELEASE" in
   unclaim)
     if ! gc bd unclaim "$WORK" --if-assignee "$ASSIGNEE" </dev/null >/dev/null 2>&1; then
-      echo "$PROG: the claim of $ASSIGNEE on $WORK was not released (bd refused it, or the claim changed hands); it waits on visit $VISIT unarmed" >&2
+      echo "$PROG: the claim of $ASSIGNEE on $WORK was not released (bd refused it, or the claim changed hands); it waits on gate $GATE unarmed" >&2
       exit 1
     fi ;;
   reopen)
     if ! gc bd update "$WORK" --status=open </dev/null >/dev/null 2>&1; then
-      echo "$PROG: $WORK is in_progress with no assignee and was not reopened; it waits on visit $VISIT unarmed" >&2
+      echo "$PROG: $WORK is in_progress with no assignee and was not reopened; it waits on gate $GATE unarmed" >&2
       exit 1
     fi ;;
 esac
@@ -278,12 +290,12 @@ if ! gc bd update "$WORK" --set-metadata gc.routed_to="" --set-metadata gc.defer
     --set-metadata gc.execution_routed_to="" --set-metadata gc.deferred_execution_routed_to="" \
     --set-metadata gc.deferred_assignee="" --set-metadata resling_target="$TARGET" \
     --unset-metadata gc.session_id --unset-metadata gc.session_name </dev/null >/dev/null 2>&1; then
-  echo "$PROG: could not clear the route keys on $WORK, so the re-sling cannot be armed; it waits on visit $VISIT unarmed" >&2
+  echo "$PROG: could not clear the route keys on $WORK, so the re-sling cannot be armed; it waits on gate $GATE unarmed" >&2
   exit 1
 fi
 if ! ARM_OUT=$("$DEFERRED" arm "$WORK" --target "$TARGET" --sling-arg --on --sling-arg "$FORMULA" \
-    --reason "waits on the ruling in visit $VISIT ($KEY)" 2>&1); then
-  echo "$PROG: the re-sling was not armed on $WORK: $ARM_OUT; it waits on visit $VISIT unarmed, and a re-run arms it to $TARGET, recorded as resling_target" >&2
+    --reason "waits on the ruling asked by gate $GATE ($KEY)" 2>&1); then
+  echo "$PROG: the re-sling was not armed on $WORK: $ARM_OUT; it waits on gate $GATE unarmed, and a re-run arms it to $TARGET, recorded as resling_target" >&2
   exit 1
 fi
 BACK=$(bd_json show "$WORK")
@@ -294,5 +306,5 @@ if [ "$ARMED" != "$TARGET" ] || [ "$BACK_STATUS" != open ] || [ -n "$BACK_ASSIGN
   echo "$PROG: $WORK reads back armed to '${ARMED}', status '${BACK_STATUS}', assignee '${BACK_ASSIGNEE}'; the re-sling fires only for an open, unassigned bead armed to $TARGET" >&2
   exit 1
 fi
-echo "$PROG: $WORK waits on visit $VISIT ($KEY); closing the visit re-slings it to $TARGET --on $FORMULA"
+echo "$PROG: $WORK waits on gate $GATE ($KEY); clearing the gate re-slings it to $TARGET --on $FORMULA"
 exit 0

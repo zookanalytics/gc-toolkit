@@ -253,7 +253,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     while IFS=$'\037' read -r kind id val extra; do
         [ -n "$kind" ] || continue
         case "$kind" in
-            badmr)      errors+=("$label bead $id: merge_result=\"$val\" is not a declared state ($enum_str) — an unknown state has no handler and every reader defaults differently on it; surface it via escalate.sh, never invent a reading") ;;
+            badmr)      errors+=("$label bead $id: merge_result=\"$val\" is not a declared state ($enum_str) — an unknown state has no handler and every reader defaults differently on it; surface it with human-gate.sh, never invent a reading") ;;
             openclosed) errors+=("$label bead $id: OPEN with merge_result=$val — a closed-only state on an open bead means the close half of the transition was lost or a landed anchor was reopened") ;;
             detachedroute)    errors+=("$label bead $id: merge_result=$val carries gc.routed_to=\"$extra\" — $val is a detached state (lifecycle/lifecycle.toml detached_states), driven by the merge cadence and offered to no pool, so any route but the \"$park_route\" park is demand for work already in the merge queue; the claim it invites moves the anchor out of \`--status=open\`, where merge.sh and pr-facts.sh both stop seeing it") ;;
             detachedassignee) errors+=("$label bead $id: merge_result=$val carries assignee=\"$extra\" — $val is a detached state (lifecycle/lifecycle.toml detached_states) and rests unheld; a holder here is a second driver racing the cadence on one anchor") ;;

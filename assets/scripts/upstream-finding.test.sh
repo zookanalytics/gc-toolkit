@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/upstream-finding.sh — the prepare-only path.
-# Stubbed gc and escalate.sh over a JSON store, a real throwaway git repo for
+# Stubbed gc and human-gate.sh over a JSON store, a real throwaway git repo for
 # the origin read, and a `gh` on PATH that fails loudly: this script must never
 # reach GitHub, and the log proves it did not.
 set -uo pipefail
@@ -89,7 +89,41 @@ case "${1:-}" in
     done
     mv "$tmp" "$STORE"; echo "updated $id" ;;
   dep)
-    [ "${2:-}" = "add" ] && printf '%s|%s|%s\n' "${3:-}" "${4:-}" "${5#--type=}" >> "${STUB_DEPS:?}" ;;
+    case "${2:-}" in
+      add) printf '%s|%s|%s\n' "${3:-}" "${4:-}" "${5#--type=}" >> "${STUB_DEPS:?}" ;;
+      list)
+        # Every bead the given bead waits on through a `blocks` edge, as the
+        # far bead's row with dependency_type added; an unknown bead is an
+        # error object, as bd answers it.
+        bead="${3:-}"
+        jq -e --arg id "$bead" 'any(.[]; .id == $id)' "$STORE" >/dev/null 2>&1 \
+          || { printf '{"error":"not found: issue %s"}\n' "$bead"; exit 1; }
+        ids=$(awk -F'|' -v b="$bead" '$1 == b && $3 == "blocks" { print $2 }' "${STUB_DEPS:?}")
+        jq -c --arg ids "$ids" '($ids | split("\n") | map(select(. != ""))) as $w
+          | [ .[] | select(.id as $i | $w | index($i)) | . + {dependency_type: "blocks"} ]' "$STORE" ;;
+    esac ;;
+  gate)
+    [ "${2:-}" = "create" ] || { echo "gc bd stub: unsupported 'gate ${2:-}'" >&2; exit 2; }
+    shift 2
+    blocks=""; key=""; title=""; reason=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --blocks) shift; blocks="${1:-}" ;;
+        --await-id) shift; key="${1:-}" ;;
+        --title) shift; title="${1:-}" ;;
+        --reason) shift; reason="${1:-}" ;;
+      esac
+      shift || true
+    done
+    n=$(cat "$STUB_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$STUB_SEQ"
+    tmp=$(mktemp)
+    jq -c --arg id "gate-$n" --arg t "$title" --arg k "$key" --arg d "Ad-hoc gate blocking $blocks
+
+Reason: $reason" \
+      '. + [{"id":$id,"status":"open","assignee":"","title":$t,"description":$d,"issue_type":"gate","await_type":"human","await_id":$k,"metadata":{},"notes":""}]' \
+      "$STORE" > "$tmp" && mv "$tmp" "$STORE"
+    printf '%s|%s|blocks\n' "$blocks" "gate-$n" >> "${STUB_DEPS:?}"
+    printf '{"id":"gate-%s"}\n' "$n" ;;
   *) echo "gc bd stub: unsupported '${1:-}'" >&2; exit 2 ;;
 esac
 STUB
@@ -100,19 +134,17 @@ echo "gh stub: upstream-finding must never invoke gh" >&2
 exit 99
 STUB
 
-ESC="$TMP/escalate.sh"
+ESC="$TMP/human-gate.sh"
 cat > "$ESC" <<'STUB'
 #!/usr/bin/env bash
 set -u
 printf '%s\n' "$*" >> "${STUB_ESC_LOG:?}"
-[ -n "${STUB_ESC_RC:-}" ] && { echo "escalate: simulated failure" >&2; exit "$STUB_ESC_RC"; }
-subject=""
-while [ $# -gt 0 ]; do case "$1" in --subject) shift; subject="${1:-}" ;; esac; shift || true; done
-echo "escalate: filed visit vis-1 on $subject"
+[ -n "${STUB_ESC_RC:-}" ] && { echo "human-gate: simulated failure" >&2; exit "$STUB_ESC_RC"; }
+echo "gate-1"
 STUB
 chmod +x "$BIN/gc" "$BIN/gh" "$ESC"
 export PATH="$BIN:$PATH"
-export GC_ESCALATE_TOOL="$ESC"
+export GC_HUMAN_GATE_TOOL="$ESC"
 export STUB_STORE="$TMP/beads.json" STUB_SEQ="$TMP/seq" STUB_DEPS="$TMP/deps.txt"
 export STUB_GC_LOG="$TMP/gc.log" STUB_GH_LOG="$TMP/gh.log" STUB_ESC_LOG="$TMP/esc.log"
 # A rig inherited from the ambient shell would point the stubs at a live city.
@@ -170,9 +202,10 @@ has "$DESC" "Hit while working sl-kg9z6" "the description carries the operator's
 
 # The ask reaches a human, on this bead.
 ESC=$(cat "$STUB_ESC_LOG")
-has "$ESC" "--subject up-1" "escalate.sh is called on the new bead"
-has "$ESC" "--key upstream-send-" "the visit carries the situation key"
-has "$OUT" "filed visit vis-1" "the visit line is passed through to the caller"
+has "$ESC" "--subject up-1" "human-gate.sh is called on the new bead"
+has "$ESC" "--key upstream-send-" "the gate carries the situation key"
+hasnt "$ESC" "--quiet-window" "a send is an event, so the call declares no quiet window"
+has "$OUT" "gate gate-1 on up-1 asks the operator for the send" "the run names the gate that asks"
 
 # ── dedup ─────────────────────────────────────────────────────────────────
 : > "$STUB_ESC_LOG"
@@ -191,7 +224,7 @@ OUT=$("$SUT" --message "third pass, after the operator answered" \
 eq "$?" "0" "a run against a closed ask exits 0"
 eq "$(count)" "1" "a closed ask is not re-filed"
 has "$OUT" "a human has answered it" "it says the ask was already answered"
-eq "$(< "$STUB_ESC_LOG" wc -l | tr -d ' ')" "0" "no visit is filed for an answered ask"
+eq "$(< "$STUB_ESC_LOG" wc -l | tr -d ' ')" "0" "no gate is filed for an answered ask"
 
 # ── a reused key with a different command is a divergence ─────────────────
 reset_state
@@ -442,19 +475,20 @@ eq "$?" "0" "-R is recognised as --repo"
 eq "$(meta up-1 gh_target_repo)" "get-convex/agent" "the -R value is the target"
 eq "$(meta up-1 gh_verb)" "issue comment" "a comment verb is labelled as itself"
 
-# ── the pool passthrough ──────────────────────────────────────────────────
+# ── --pool is retired ─────────────────────────────────────────────────────
 reset_state
 "$SUT" --message "why" --pool "loomington/gc-toolkit.converse" \
   -- gh issue create --repo a/b --title T --body B >/dev/null 2>&1
-has "$(cat "$STUB_ESC_LOG")" "--pool loomington/gc-toolkit.converse" "--pool reaches escalate.sh"
+eq "$?" "2" "--pool is refused: a gate is not routed"
+eq "$(count)" "0" "and nothing is parked"
 
 # ── failures that must not report a parked send ───────────────────────────
 reset_state
 export STUB_ESC_RC=1
 OUT=$("$SUT" --message "why" -- gh issue create --repo a/b --title T --body B 2>&1)
-eq "$?" "1" "a visit that could not be filed fails the run"
+eq "$?" "1" "a gate that could not be filed fails the run"
 has "$OUT" "NO ONE HAS BEEN ASKED" "the failure says the ask never reached a human"
-eq "$(count)" "1" "the bead survives the failed escalation, so a re-run reuses it"
+eq "$(count)" "1" "the bead survives the failed filing, so a re-run reuses it"
 unset STUB_ESC_RC
 
 reset_state
@@ -466,9 +500,9 @@ eq "$(< "$STUB_ESC_LOG" wc -l | tr -d ' ')" "0" "no human is asked to paste a co
 unset STUB_DROP_KEYS
 
 reset_state
-OUT=$(GC_ESCALATE_TOOL="$TMP/nope.sh" "$SUT" --message "why" -- gh issue create --repo a/b --title T --body B 2>&1)
-eq "$?" "1" "a missing escalate.sh fails the run"
-has "$OUT" "NO ONE HAS BEEN ASKED" "a missing escalate.sh says the ask never reached a human"
+OUT=$(GC_HUMAN_GATE_TOOL="$TMP/nope.sh" "$SUT" --message "why" -- gh issue create --repo a/b --title T --body B 2>&1)
+eq "$?" "1" "a missing human-gate.sh fails the run"
+has "$OUT" "NO ONE HAS BEEN ASKED" "a missing human-gate.sh says the ask never reached a human"
 
 # ── an unreadable store is not an empty one ───────────────────────────────
 reset_state
@@ -487,22 +521,23 @@ has "$OUT" "not a divergence" "the failure separates a failed read from a change
 hasnt "$OUT" "DIFFERENT command" "a failed read is not reported as a changed command"
 eq "$(count)" "1" "the unreadable bead is not duplicated under its own key"
 
-# ── against the real escalate.sh ──────────────────────────────────────────
+# ── against the real human-gate.sh ────────────────────────────────────────
 # The stub above proves this script's own behaviour; it cannot catch the two
-# scripts disagreeing about flags. This case runs the REAL escalate.sh over the
-# same stub store, so a drift in either argv contract fails here.
+# scripts disagreeing about flags. This case runs the REAL human-gate.sh over
+# the same stub store, so a drift in either argv contract fails here.
 reset_state
-OUT=$(GC_ESCALATE_TOOL="$HERE/escalate.sh" GC_RIG=testrig \
-  "$SUT" --message "found while working a bead" --pool "testrig/gc-toolkit.converse" \
+OUT=$(GC_HUMAN_GATE_TOOL="$HERE/human-gate.sh" \
+  "$SUT" --message "found while working a bead" \
   -- gh issue create --repo get-convex/agent --title "T" --body "B" 2>&1)
-eq "$?" "0" "the real escalate.sh accepts what this script passes it"
-VISIT=$(jq -r '[.[] | select((.metadata.task_kind // "") == "visit")] | .[0].id // ""' "$STUB_STORE")
-[ -n "$VISIT" ] && ok "the real escalate.sh filed a visit" || bad "the real escalate.sh filed a visit"
-eq "$(meta "$VISIT" "gc.continuation_group")" "up-1" "the visit tracks the parked bead"
-eq "$(meta "$VISIT" "gc.routed_to")" "testrig/gc-toolkit.converse" "the pool this script passed is the route the visit carries"
-has "$(cat "$STUB_DEPS")" "$VISIT|up-1|tracks" "the visit tracks the bead by edge, not only by metadata"
-has "$(jq -r --arg id "$VISIT" '.[] | select(.id == $id) | .description' "$STUB_STORE")" \
-  "$(meta up-1 gh_command)" "the visit a human reads carries the pasteable command"
+eq "$?" "0" "the real human-gate.sh accepts what this script passes it"
+GATE=$(jq -r '[.[] | select((.issue_type // "") == "gate")] | .[0].id // ""' "$STUB_STORE")
+[ -n "$GATE" ] && ok "the real human-gate.sh filed a gate" || bad "the real human-gate.sh filed a gate"
+has "$(cat "$STUB_DEPS")" "up-1|$GATE|blocks" "the gate blocks the parked bead, so the send bead waits for the operator"
+eq "$(jq -r --arg id "$GATE" '.[] | select(.id == $id) | .await_id' "$STUB_STORE")" "upstream-send-$(meta up-1 upstream_send_key)" \
+  "the gate's await id is the send's situation key"
+has "$(jq -r --arg id "$GATE" '.[] | select(.id == $id) | .description' "$STUB_STORE")" \
+  "$(meta up-1 gh_command)" "the gate a human reads carries the pasteable command"
+has "$OUT" "gate $GATE on up-1 asks the operator for the send" "the run names the gate the real helper filed"
 
 eq "$(< "$STUB_GH_LOG" wc -l | tr -d ' ')" "0" "gh was never invoked by any case"
 

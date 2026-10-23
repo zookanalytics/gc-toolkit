@@ -2,7 +2,7 @@
 # work-outcome.sh — the one gc.work_outcome stamp a converse visit gets before
 # it closes. Sourced, never executed, by every script that closes a visit:
 # visit-close.sh (the guarded close behind the sitting's own close,
-# converse-close-out.sh, escalate.sh --retract and pr-facts.sh's visit retires),
+# converse-close-out.sh and pr-facts.sh's visit retires),
 # gc-helm.sh (dismiss), bead-rehome.sh (a visit origin) and converse-claim.sh
 # (the stranded close it finishes). A rule about this key changes here, once.
 #

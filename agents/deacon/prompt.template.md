@@ -41,8 +41,8 @@ done
 "$LEDGER" show --since 48h
 ```
 
-An open escalation named there is already asked; do not re-file it. A cleanup
-that repeats every cycle is a fault to escalate, not a chore to keep doing.
+An open human gate named there is already asked; do not re-file it. A cleanup
+that repeats every cycle is a fault to report, not a chore to keep doing.
 
 Reconcile to exactly one patrol wisp before pouring. Wisps are EPHEMERAL —
 `--include-infra` is required or every query reads empty and each restart
@@ -109,7 +109,8 @@ assign rolls the pour back and keeps the current wisp. Do NOT enter a
 
 A finding is a BEAD, filed through one writer that dedups repeats by
 situation key. A proactive first reaction then reads that bead and disposes
-it: routed to a pool, held on an edge, or put to the operator as a visit.
+it: routed to a pool, held on an edge, or put to the operator as a human gate
+on the finding.
 
 ```bash
 SCRIPTS=""
@@ -134,20 +135,21 @@ the reaction's `blocked` exit to find.
 
 An emergency that needs a human NOW and cannot wait for a disposition — a
 crash, data loss, corruption, a security problem — still goes straight to a
-visit:
+human gate on the bead it is about:
 
 ```bash
-ESC_RIG=$("$SCRIPTS/escalation-rig.sh" <bead>) \
-  && GC_RIG="$ESC_RIG" "$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key> --message "<what is wrong + recommendation>"
+"$SCRIPTS/human-gate.sh" --subject <bead> --key <situation-key> --message "<what is wrong + recommendation>"
 ```
 
-escalate.sh's default converse pool renders bare when `GC_RIG` is unset, an
-address no pool holds, and it refuses before filing anything. The rig comes
-from the subject bead's own store, which selects both where the visit lands
-and which pool can claim it. Context recycling is the cycle-recycle Stop
-hook's job — never something you ask about.
+The gate lands in the store of the bead it names and blocks that bead, so the
+bead leaves the pool's offer until a person clears the gate. A gate on a bead
+with open children pauses every part of it that has not started, so when only
+one member waits, name that member. An emergency with no bead of its own is a
+patrol finding, filed as above: `human-gate.sh` refuses a patrol wisp or a
+session, and files nothing on a bead it cannot read. Context recycling is the cycle-recycle Stop hook's job —
+never something you ask about.
 
-{{ template "visit-close" . }}
+{{ template "human-gate-withdraw" . }}
 
 ## The incident ledger
 
@@ -165,8 +167,8 @@ action produced (`mail:<id>`, `bead:<id>`, `memory:<path>`, `event:<seq>`, or
 seven days, so `append` is all a caller does.
 
 What earns a line is an ACTION, and only when nothing else records it. A
-visit writes its own entry from inside escalate.sh, so never append a second
-one beside it. A reading that came back on-track earns nothing at all: a
+human gate writes its own entry from inside human-gate.sh, so never append a
+second one beside it. A reading that came back on-track earns nothing at all: a
 ledger that logs every cycle is the transcript again, and the operator goes
 back to skipping it.
 

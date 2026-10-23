@@ -62,17 +62,17 @@ SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/gate-ensure.sh" "$HERE/lifecycle.sh" "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/review-checks.sh"
 printf '#!/usr/bin/env bash\necho "METHOD${2:+ note: $2}"\n' > "$SD/review-dispatch-body.sh"
 chmod +x "$SD/review-dispatch-body.sh"
-# escalate.sh stub: records subject/key/message so the wedge arm's one-visit
-# contract can be asserted without a live converse pool.
+# human-gate.sh stub: records subject/key/message so the wedge arm's one-gate
+# contract can be asserted without a live store.
 export STUB_ESCALATE_LOG="$TMP/escalate.log"
-cat > "$SD/escalate.sh" <<'ESC'
+cat > "$SD/human-gate.sh" <<'ESC'
 #!/usr/bin/env bash
 set -u
 { printf 'CALL'; for a in "$@"; do printf ' %s' "$a"; done; printf '\n'; } >> "${STUB_ESCALATE_LOG:?}"
 [ -n "${STUB_ESCALATE_FAIL:-}" ] && exit 1
 exit 0
 ESC
-chmod +x "$SD/escalate.sh"
+chmod +x "$SD/human-gate.sh"
 SUT="$SD/gate-ensure.sh"
 # The SUT forwards GC_RIG into every sling; an ambient value would rewrite the
 # assertions below. Lane state is DERIVED (there is no dispatch ceiling and no
@@ -1266,10 +1266,12 @@ has "$out" "0 reviews dispatched" "a wedged review is never twinned by a fresh d
 
 out=$(run)
 has "$out" "is WEDGED" "the second sighting confirms it"
-has "$out" "escalated [review-wedge]" "…and escalates"
+has "$out" "filed a human gate [review-wedge]" "…and files a human gate"
 esc=$(cat "$STUB_ESCALATE_LOG")
-has "$esc" "--subject rev-w1" "the visit is filed on the wedged review bead"
+has "$esc" "--subject rev-w1" "the gate is filed on the wedged review bead"
 has "$esc" "--key review-wedge" "…under one situation key, so repeats dedup"
+has "$esc" "--quiet-window 86400" "…declaring a day-long quiet window, since every pass detects a standing wedge again"
+has "$esc" "clear the gate as part of either repair" "…and saying the gate must be cleared for either repair to take"
 has "$esc" "check 'correctness' on W1 is held" "…naming the anchor and check that are stuck"
 has "$esc" "gc bd update rev-w1 --set-metadata gc.routed_to=$POOL" "…and the route-restore repair"
 has "$esc" "root-w1" "…and the spent workflow"
@@ -1357,7 +1359,7 @@ out=$(STUB_ESCALATE_FAIL=1 run); rc=$?
 eq "$rc" 0 "a failed escalation does not fail the pass"
 has "$out" "the escalation did not file" "…it is reported"
 out=$(run)
-has "$out" "escalated [review-wedge]" "…and the next pass files it (the sighting stamp persists)"
+has "$out" "filed a human gate [review-wedge]" "…and the next pass files it (the sighting stamp persists)"
 
 # Both of the next two carry a SPENT chain on purpose: without it the
 # unreadable-linkage guard would decline the escalation on its own and the
@@ -1714,7 +1716,7 @@ echo "# the cursor is written as each anchor finishes, so a pass killed mid-anch
 # can be killed inside its second anchor; every other call answers "none".
 KSD="$TMP/kill-scripts"
 mk_sut_dir "$KSD" "$HERE/gate-ensure.sh" "$HERE/lifecycle.sh" "$HERE/lane-state.sh" "$HERE/review-checks.sh"
-cp "$SD/review-dispatch-body.sh" "$SD/escalate.sh" "$KSD/"
+cp "$SD/review-dispatch-body.sh" "$SD/human-gate.sh" "$KSD/"
 export KILL_STARTED="$TMP/kill-started" KILL_RELEASE="$TMP/kill-release"
 cat > "$KSD/finding.sh" <<'FS'
 #!/usr/bin/env bash

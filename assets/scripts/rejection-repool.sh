@@ -41,14 +41,17 @@
 # A pour that does not read back may still have started, so the writer never
 # stamps a bare route: a partial pour plus a pool claim double-dispatches the
 # work. When gc sling itself failed, the writer arms a deferred dispatch, whose
-# reconcile pass retries the pour and files a visit once the retries reach their
+# reconcile pass retries the pour and asks a person once the retries reach their
 # cap. When gc sling exited 0, the pour launched and only its stamp, or the read
 # of it, is missing. That reconcile keys its retry on its own marker and on
 # merge_result, never on gc.execution_routed_to, so a retry would pour the work
-# a second time. That stop files a visit instead, like every other way the
-# repool stops short, and each visit names what finishes the repool.
+# a second time. That stop files a human gate on the handoff instead, like every
+# other way the repool stops short, and each gate names what finishes the
+# repool. A handoff that could not be read cannot be blocked, so that stop files
+# a patrol finding that names it.
 # Exit: 0 the pour is proved · 1 usage, nothing done · 2 the repool stopped
-#   short, and an armed dispatch or a visit carries the bead · 3 the repool
+#   short, and an armed dispatch, a human gate or a patrol finding carries the
+#   bead · 3 the repool
 #   stopped short and nothing could be recorded
 set -uo pipefail
 
@@ -58,9 +61,10 @@ SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 POOL_ROUTE="$SCRIPTS_DIR/pool-route.sh"
 DEFERRED="$SCRIPTS_DIR/deferred-dispatch.sh"
-ESCALATE="$SCRIPTS_DIR/escalate.sh"
+HUMAN_GATE="$SCRIPTS_DIR/human-gate.sh"
+PATROL_FINDING="$SCRIPTS_DIR/patrol-finding.sh"
 WORK_FORMULA="mol-polecat-work"
-ESCALATE_KEY="rejection-repool-failed"
+GATE_KEY="rejection-repool-failed"
 
 warn()  { echo "rejection-repool: $*" >&2; }
 usage() { warn "$1"; exit 1; }
@@ -84,23 +88,39 @@ command -v jq >/dev/null 2>&1 || { warn "jq is required; $WORK not repooled"; ex
 
 REASON_HEAD=$(printf '%s' "$REASON" | head -n 1 | cut -c1-200)
 
-# stop_short <why> <what finishes it> — the visit that carries a repool this run
-# could not finish. The bead is out of the refinery's queue, so a run that ends
-# without one leaves nothing that dispatches it or asks a person to.
+# stop_short <why> <what finishes it> — the human gate on the handoff that
+# carries a repool this run could not finish. The bead is out of the refinery's
+# queue, so a run that ends without one leaves nothing that dispatches it or
+# asks a person to. Each stop is an event of this run, so the gate's call
+# declares no quiet window.
 stop_short() {
-  if "$ESCALATE" --subject "$WORK" --key "$ESCALATE_KEY" \
-       --message "A rejected handoff may never be rebuilt: the refinery sent it back to the polecats, but $1. To finish the hand-back, $2. (Work bead $WORK; rejection reason: $REASON_HEAD)" >&2; then
-    warn "$WORK not repooled: $1; filed a visit ($ESCALATE_KEY) to finish it"
+  if "$HUMAN_GATE" --subject "$WORK" --key "$GATE_KEY" \
+       --message "A rejected handoff may never be rebuilt: the refinery sent it back to the polecats, but $1. To finish the hand-back, $2, then clear this gate. (Work bead $WORK; rejection reason: $REASON_HEAD)" >&2; then
+    warn "$WORK not repooled: $1; filed a human gate ($GATE_KEY) to finish it"
     exit 2
   fi
-  warn "$WORK not repooled: $1, and the visit did not land either, so NOTHING dispatches $WORK. To finish it by hand, $2."
+  warn "$WORK not repooled: $1, and the gate did not land either, so NOTHING dispatches $WORK. To finish it by hand, $2."
+  exit 3
+}
+
+# stop_unread <why> <what finishes it> — a handoff no read reaches cannot be
+# blocked by a gate, so the stop files a patrol finding that names it, in the
+# refinery's own store.
+stop_unread() {
+  if "$PATROL_FINDING" --scope refinery-findings --key "rejection-repool-unread.$WORK" \
+       --title "Rejected handoff $WORK could not be read, so its rebuild was not dispatched" \
+       --message "A rejected handoff may never be rebuilt: the refinery sent $WORK back to the polecats, but $1. To finish the hand-back, $2. (Rejection reason: $REASON_HEAD)" >&2; then
+    warn "$WORK not repooled: $1; filed a patrol finding to finish it"
+    exit 2
+  fi
+  warn "$WORK not repooled: $1, and the finding did not land either, so NOTHING dispatches $WORK. To finish it by hand, $2."
   exit 3
 }
 
 ROW=$(bd_json show "$WORK")
 printf '%s' "$ROW" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
-  || stop_short "it could not be read (gc bd show returned no bead)" \
-       "re-run assets/scripts/rejection-repool.sh on it with the rejection reason this visit names once its store answers"
+  || stop_unread "it could not be read (gc bd show returned no bead)" \
+       "re-run assets/scripts/rejection-repool.sh on it with the rejection reason this finding names once its store answers"
 printf '%s\n' "$ROW"
 PR_URL=$(row_meta "$ROW" pr_url)
 SETS=(--set "rejection_reason=$REASON")
@@ -115,7 +135,7 @@ SETS=(--set "rejection_reason=$REASON")
 LC_RC=$?
 [ "$LC_RC" = 0 ] \
   || stop_short "its lifecycle transition did not land or did not verify (lifecycle.sh exit $LC_RC)" \
-       "read the bead, then re-run assets/scripts/rejection-repool.sh on it with the rejection reason this visit names"
+       "read the bead, then re-run assets/scripts/rejection-repool.sh on it with the rejection reason this gate names"
 
 ROUTE=$("$POOL_ROUTE" "$POOL_NAME") \
   || stop_short "no live pool claims '$POOL_NAME'" \

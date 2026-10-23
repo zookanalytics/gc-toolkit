@@ -66,10 +66,10 @@
 # must never read as an empty one.
 #
 # A reconcile pass holds a per-rig pass lock for its whole life, so two passes
-# never sling the same bead. It starts a sling or an escalation only while its
-# pass budget can still cover a sling, so the order's timeout does not kill it
-# mid-sling. The ready beads past the budget wait, still armed, for the next
-# pass, and so do the escalations.
+# never sling the same bead. It starts a sling or an ask for a person only while
+# its pass budget can still cover a sling, so the order's timeout does not kill
+# it mid-sling. The ready beads past the budget wait, still armed, for the next
+# pass, and so do the asks.
 set -u
 
 # >>> control-char-scrub
@@ -158,7 +158,8 @@ DISPOSE_ALLOWANCE_SECS=$((10#$DISPOSE_ALLOWANCE_SECS))
 # order-tracking-sweep order at its stale-after, and the controller watchdog 2m
 # after dispatch on a gc build that does not extend that window to the order's
 # timeout. So a pass takes bd-lib.sh's pass lock before it reads anything and
-# holds it for its whole life, and every gc, escalate.sh and bead-rehome.sh call
+# holds it for its whole life, and every gc, human-gate.sh, gc-helm.sh and
+# bead-rehome.sh call
 # the pass makes runs through pass_child, so nothing a call leaves running holds
 # the lock after it. The order's timeout kills the pass's whole process group,
 # its gc sling with it, and the next pass re-attempts the unconfirmed sling
@@ -178,11 +179,19 @@ LOCK_STALL_SECS=$((10#$LOCK_STALL_SECS))
 BD_DB="${GC_RIG_ROOT:+$GC_RIG_ROOT/.beads}"
 DRY_RUN=0
 
-# The retry cap hands a stuck dispatch to a person through escalate.sh (one open
-# visit per bead, deduped on the key). Resolve it beside this script; the env
-# override lets the hermetic test point it at a stub.
+# The retry cap hands a stuck dispatch to a person: a human gate on the bead
+# through human-gate.sh (one open gate per bead and key), or a conversation on
+# it through gc-helm.sh open when the bead has open children. Both resolve
+# beside this script; the env overrides let the hermetic test point them at
+# stubs.
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-ESCALATE="${GC_ESCALATE_TOOL:-$SCRIPTS_DIR/escalate.sh}"
+HUMAN_GATE="${GC_HUMAN_GATE_TOOL:-$SCRIPTS_DIR/human-gate.sh}"
+HELM="${GC_HELM_TOOL:-$SCRIPTS_DIR/gc-helm.sh}"
+# A capped bead stays capped from one pass to the next until a person disarms
+# it or clears its count, so every pass that finds it unheld detects the cap
+# again. The gate's call declares a quiet window, so a moot or benign answer
+# stands for a day.
+CAP_QUIET_WINDOW=86400
 
 # The resolved-by consumer disposes a bead whose `until` dep has closed, through
 # bead-rehome so the close carries a successor pointer rather than a bare close.
@@ -280,8 +289,9 @@ Verbs:
              path already delivered (a merge_result stamp), keeping it on a
              bead closed under the claim whose close no pass has checked.
              Because each sling mints an input convoy, it stops re-slinging
-             and escalates a bead whose dispatch has failed to finalize
-             MAX_SLING_FAILURES times rather than leak a convoy per pass.
+             and asks a person about a bead whose dispatch has failed to
+             finalize MAX_SLING_FAILURES times rather than leak a convoy per
+             pass.
              The same pass disposes every open bead whose `until`
              dependency ("X resolves me") has closed, through bead-rehome, so a
              resolved wait is closed with a successor pointer not re-triaged.
@@ -293,7 +303,7 @@ Verbs:
              Driven by orders/deferred-dispatch.toml (cooldown, scope="rig").
              A pass holds the rig's pass lock for its whole life; one that
              finds it held exits 0 without reading the store. It starts a
-             notice, a sling or an escalation only while
+             notice, a sling or an ask for a person only while
              DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS
              (90) of its DEFERRED_DISPATCH_PASS_BUDGET_SECS (420, 0 = unpaced)
              are left, and a disposal only while
@@ -869,7 +879,7 @@ cmd_list() {
                 "$SLUNG_TRYING"*) state="dispatch in flight (attempt not yet confirmed)" ;;
                 *)                state="dispatched (arm pending retirement)" ;;
             esac
-        elif [ "$fails" -ge "$MAX_SLING_FAILURES" ]; then state="CAPPED — $fails sling failures, escalated; disarm or clear $K_FAILS"
+        elif [ "$fails" -ge "$MAX_SLING_FAILURES" ]; then state="CAPPED — $fails sling failures, a person asked; disarm or clear $K_FAILS"
         elif [ "$ready" = "1" ]; then state="DISPATCHABLE NOW"
         elif [ "$status" != "open" ]; then state="STRANDED — status=$status is never --ready"
         elif [ -n "$hold" ]; then state="HELD by $hold"
@@ -1608,27 +1618,41 @@ reconcile_dispatch() {
         # The retry has a budget. Each sling attempt mints an input convoy, so a
         # dispatch that never finalizes must stop re-slinging before it leaks one
         # convoy per pass. The counter (bumped in the stamp write below) is the
-        # memory a bare rollback erases. At the cap, escalate once (escalate.sh
-        # dedups on the key) and leave the arm — never retire an unproven
-        # dispatch — so a person decides rather than reconcile looping forever.
-        # Past the pass budget the escalation waits too: the bead stays capped
-        # and armed, so the next pass files it.
+        # memory a bare rollback erases. At the cap, ask a person once
+        # (human-gate.sh dedups on the key) and leave the arm — never retire an
+        # unproven dispatch — so a person decides rather than reconcile looping
+        # forever. The gate blocks the bead, so the re-sling waits for the
+        # answer as well as for the cleared cap. A bead with an open child is
+        # asked about in a conversation instead: the cap already holds the arm,
+        # and a gate on a parent would pause its unstarted parts over a failed
+        # sling. One read tells, any child that is not closed or pinned, and a
+        # read that fails files the gate. Past the pass budget the ask waits
+        # too: the bead stays capped and armed, so the next pass files it.
         fails="$(meta_of "$json" "$K_FAILS")"
         case "$fails" in ''|*[!0-9]*) fails=0 ;; esac
         if [ "$fails" -ge "$MAX_SLING_FAILURES" ]; then
             if [ "$DRY_RUN" = 1 ]; then
-                echo "$PROG: DRY-RUN would escalate capped $id ($fails failed attempts, cap $MAX_SLING_FAILURES) instead of re-slinging"
+                echo "$PROG: DRY-RUN would ask a person about capped $id ($fails failed attempts, cap $MAX_SLING_FAILURES) instead of re-slinging"
             elif ! sling_fits_budget; then
-                [ "$budget_noted" = 1 ] || { budget_noted=1; echo "$PROG: pass budget spent ($(( $(now_epoch) - PASS_T0 ))s of ${PASS_BUDGET_SECS}s gone, a sling needs ${SLING_ALLOWANCE_SECS}s) — starting no further slings or escalations this pass"; }
-                echo "$PROG: CAPPED $id has failed to dispatch $fails times (cap $MAX_SLING_FAILURES) — not re-slinging; its escalation waits for the next pass" >&2
+                [ "$budget_noted" = 1 ] || { budget_noted=1; echo "$PROG: pass budget spent ($(( $(now_epoch) - PASS_T0 ))s of ${PASS_BUDGET_SECS}s gone, a sling needs ${SLING_ALLOWANCE_SECS}s) — starting no further slings or asks this pass"; }
+                echo "$PROG: CAPPED $id has failed to dispatch $fails times (cap $MAX_SLING_FAILURES) — not re-slinging; asking a person waits for the next pass" >&2
                 esc_left_ids+=("$id")
             else
-                echo "$PROG: CAPPED $id has failed to dispatch $fails times (cap $MAX_SLING_FAILURES) — not re-slinging; escalating and leaving the arm for a person" >&2
-                if [ -x "$ESCALATE" ]; then
-                    pass_child "$ESCALATE" --subject "$id" --key "deferred-dispatch-sling-failed.$id" \
-                      --message "deferred-dispatch reconcile has failed to sling armed bead $id to '$target' $fails times (cap $MAX_SLING_FAILURES), minting an input convoy on each attempt. The retry is not converging on its own — a common cause is work already delivered by another path after the arm was recorded, or a target that refuses the pour. Investigate, then disarm the bead ($SCRIPTS_DIR/deferred-dispatch.sh disarm $id), or clear gc.dispatch_when_ready_fail_count on $id to re-arm the retry." >/dev/null 2>&1 || true
+                echo "$PROG: CAPPED $id has failed to dispatch $fails times (cap $MAX_SLING_FAILURES) — not re-slinging; asking a person and leaving the arm" >&2
+                cap_msg="deferred-dispatch reconcile has failed to sling armed bead $id to '$target' $fails times (cap $MAX_SLING_FAILURES), minting an input convoy on each attempt. The retry is not converging on its own — a common cause is work already delivered by another path after the arm was recorded, or a target that refuses the pour. Investigate, then disarm the bead ($SCRIPTS_DIR/deferred-dispatch.sh disarm $id), or clear gc.dispatch_when_ready_fail_count on $id to re-arm the retry."
+                children="$(bd_ list --parent "$id" --include-gates --include-infra --include-templates --json --limit 1 2>/dev/null | grep -a -vE '^gc bd:' | scrub)"
+                if printf '%s' "$children" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+                    if [ -x "$HELM" ]; then
+                        pass_child "$HELM" open "$id" --reason "deferred dispatch has failed $fails times: disarm or re-arm" \
+                          --body "$cap_msg" >/dev/null 2>&1 || true
+                    else
+                        echo "$PROG: WARN gc-helm.sh '$HELM' not executable — capped $id has no conversation; disarm or clear its fail count by hand" >&2
+                    fi
+                elif [ -x "$HUMAN_GATE" ]; then
+                    pass_child "$HUMAN_GATE" --subject "$id" --key "deferred-dispatch-sling-failed.$id" \
+                      --quiet-window "$CAP_QUIET_WINDOW" --message "$cap_msg" >/dev/null 2>&1 || true
                 else
-                    echo "$PROG: WARN escalate tool '$ESCALATE' not executable — capped $id has no visit; disarm or clear its fail count by hand" >&2
+                    echo "$PROG: WARN human-gate.sh '$HUMAN_GATE' not executable — capped $id has no gate; disarm or clear its fail count by hand" >&2
                 fi
             fi
             capped=$((capped + 1)); continue
@@ -1642,7 +1666,7 @@ reconcile_dispatch() {
         # run: each retire is one write, and a retire the timeout cuts short is
         # made again by the next pass.
         if [ "$DRY_RUN" != 1 ] && ! sling_fits_budget; then
-            [ "$budget_noted" = 1 ] || { budget_noted=1; echo "$PROG: pass budget spent ($(( $(now_epoch) - PASS_T0 ))s of ${PASS_BUDGET_SECS}s gone, a sling needs ${SLING_ALLOWANCE_SECS}s) — starting no further slings or escalations this pass"; }
+            [ "$budget_noted" = 1 ] || { budget_noted=1; echo "$PROG: pass budget spent ($(( $(now_epoch) - PASS_T0 ))s of ${PASS_BUDGET_SECS}s gone, a sling needs ${SLING_ALLOWANCE_SECS}s) — starting no further slings or asks this pass"; }
             left=$((left + 1)); left_ids+=("$id"); continue
         fi
 
@@ -1723,9 +1747,9 @@ reconcile_dispatch() {
         for id in "${left_ids[@]}"; do LEFT_SCOPES+=("$id" "sling left for the next pass"); done
     fi
     if [ "$esc_left" -gt 0 ]; then
-        echo "$PROG: left the escalation of $esc_left capped bead(s) for the next pass: ${esc_left_ids[*]}"
-        LEFT_REASON="${LEFT_REASON:+$LEFT_REASON, }$esc_left capped bead(s) left for the next pass to escalate"
-        for id in "${esc_left_ids[@]}"; do LEFT_SCOPES+=("$id" "escalation left for the next pass"); done
+        echo "$PROG: left the ask about $esc_left capped bead(s) for the next pass: ${esc_left_ids[*]}"
+        LEFT_REASON="${LEFT_REASON:+$LEFT_REASON, }$esc_left capped bead(s) left for the next pass to ask about"
+        for id in "${esc_left_ids[@]}"; do LEFT_SCOPES+=("$id" "ask left for the next pass"); done
     fi
     echo "$PROG: $dispatched dispatched, $retired retired, $held held, $stranded stranded, $assigned assigned, $capped capped, $left left for the next pass, $failed failed (of $expected armed)"
     [ "$failed" = 0 ]

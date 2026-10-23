@@ -37,17 +37,18 @@ GITW
 chmod +x "$BIN/git"
 
 SD="$TMP/scripts"
-# The real pool-route.sh: hold reads an open visit's route with it, as escalate.sh
-# does, and it answers from the stubbed `gc agent list`.
+# The real pool-route.sh: hold reads an open visit's route with it, and it
+# answers from the stubbed `gc agent list`.
 mk_sut_dir "$SD" "$HERE/branch-supersession.sh" "$HERE/pool-route.sh"
 SUT="$SD/branch-supersession.sh"
-# escalate.sh's contract, not just its call log: one visit per subject+key,
+# The helper's contract as the hold reads it back, not just its call log: one
+# visit per subject+key,
 # stamped and routed at the board so the caller can find it again. An open or
 # claimed visit it finds counts while pool-route.sh reads its route as addressing
 # somebody, and is repointed at the board when it does not. STUB_ESC_RC models a
 # refusal; STUB_ESC_NOFILE models the exit 0 that files nothing (a recent moot or
 # benign verdict on the situation answers it).
-cat > "$SD/escalate.sh" <<'ESC'
+cat > "$SD/human-gate.sh" <<'ESC'
 #!/usr/bin/env bash
 set -u
 printf '%s\n' "$*" >> "${STUB_ESC_LOG:?}"
@@ -83,7 +84,7 @@ gc bd update "$vid" --set-metadata "escalation_key=$key" \
   --set-metadata "gc.continuation_group=$subj" --set-metadata "task_kind=visit" \
   --set-metadata "gc.routed_to=human" >/dev/null
 ESC
-chmod +x "$SD/escalate.sh"
+chmod +x "$SD/human-gate.sh"
 export STUB_ESC_LOG="$TMP/esc.log" STUB_ESC_MSG="$TMP/esc.msg" STUB_ESC_RC="" STUB_ESC_NOFILE=""
 
 # --- fixture repository ---------------------------------------------------------
@@ -358,21 +359,22 @@ reset "$(anchor A1)"
 OUT=$(hold A1 "$SUP_BASE" "$SUP_HEAD"); rc=$?
 eq "$rc" "0" "a superseded branch holds the dispatch"
 has "$(cat "$STUB_ESC_LOG")" "--subject A1 --key rework-base-supersession" "the decision is filed on the anchor under the key polecats file by hand"
+has "$(cat "$STUB_ESC_LOG")" "--quiet-window 86400" "the call declares a quiet window, so a benign answer releases the next pass"
 eq "$(visits A1)" "1" "exactly one open decision visit stands behind the hold"
 eq "$(jq -r '[ .[] | select((.metadata["gc.continuation_group"] // "") == "A1") ][0].metadata["gc.routed_to"] // "<absent>"' "$STUB_STORE")" "human" \
-  "routed at the board, where escalate.sh parks a decision for the operator"
+  "routed at the board, where the stub parks a decision for the operator"
 has "$OUT" "filed decision" "and the arm's log says the decision was filed"
 MSG=$(cat "$STUB_ESC_MSG")
 FIRST=$(printf '%s\n' "$MSG" | head -n 1)
 eq "$FIRST" "Branch polecat/tk-pin may be moot: a change already on main deleted or rewrote code it edits" "the headline states the stake in plain language"
-[ "${#FIRST}" -le 100 ] && ok "the headline fits escalate.sh's 100-character title" || bad "headline is ${#FIRST} characters"
+[ "${#FIRST}" -le 140 ] && ok "the headline fits a gate's 140-character title" || bad "headline is ${#FIRST} characters"
 has "$MSG" "(tighten the stale-pin check)" "the anchor's title says what the work is"
 has "$MSG" "remove the commit pin" "the brief names what landed"
 has "$MSG" "lib/gate.sh: main deleted a" "and where it collides"
 has "$MSG" "Retire it, if what landed covers this work" "it offers retiring the work"
 has "$MSG" "bead-rehome.sh disposes of the anchor" "naming the pre-open disposal verb"
 has "$MSG" "Re-scope it" "it offers re-scoping"
-has "$MSG" "Close this visit benign, and the next reconcile pass sends the ordinary merge-in child" "and says how an incidental overlap releases the dispatch"
+has "$MSG" "Clear this gate with a benign: answer, and the next reconcile pass sends the ordinary merge-in child" "and says how an incidental overlap releases the dispatch"
 has "$MSG" "(anchor A1, branch polecat/tk-pin at ${SUP_HEAD:0:8}, main at ${SUP_BASE:0:8})" "identifiers ride in one closing parenthetical"
 
 reset "$(anchor A2)"
@@ -385,7 +387,7 @@ echo "# hold: an open decision holds without asking again"
 reset "$(anchor A3)" "$(visit V3 A3 human)"
 OUT=$(hold A3 "$ORD_BASE" "$ORD_HEAD"); rc=$?
 eq "$rc" "0" "an open decision on the anchor holds, even where the branch now reads as drift"
-eq "$(cat "$STUB_ESC_LOG")" "" "and nothing is escalated a second time"
+eq "$(cat "$STUB_ESC_LOG")" "" "and nothing is asked a second time"
 has "$OUT" "V3 is still open" "the arm's log names the pending decision"
 reset "$(anchor A3c)" "$(visit V3c A3c human | jq -c '.status = "in_progress" | .assignee = "s-sitting"')"
 hold A3c "$ORD_BASE" "$ORD_HEAD" >/dev/null; rc=$?
@@ -395,7 +397,7 @@ echo "# hold: an open decision holds only while its route addresses somebody"
 reset "$(anchor R1)" "$(visit VR1 R1)"
 OUT=$(hold R1 "$SUP_BASE" "$SUP_HEAD"); rc=$?
 has "$OUT" "VR1 is open, but its route '' addresses nobody, so it holds nothing" "an open decision with no route is not counted as asking anybody"
-has "$(cat "$STUB_ESC_LOG")" "--subject R1 --key rework-base-supersession" "the decision goes back through escalate.sh"
+has "$(cat "$STUB_ESC_LOG")" "--subject R1 --key rework-base-supersession" "the decision goes back through human-gate.sh"
 eq "$(meta VR1 gc.routed_to)" "human" "which repoints the open visit at the board"
 eq "$(visits R1)" "1" "rather than filing a second"
 eq "$rc" "0" "and the hold stands behind the repointed visit"
@@ -404,13 +406,13 @@ has "$OUT" "repointed decision VR1" "the arm's log names the repair"
 reset "$(anchor R2)" "$(visit VR2 R2)"
 OUT=$(hold R2 "$ORD_BASE" "$ORD_HEAD"); rc=$?
 eq "$rc" "1" "an open decision that asks nobody does not hold a branch that now reads as drift"
-eq "$(cat "$STUB_ESC_LOG")" "" "and nothing is escalated"
+eq "$(cat "$STUB_ESC_LOG")" "" "and nothing is asked"
 
 printf '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}\n' > "$TMP/agents.json"
 export GC_RIG=gc-toolkit STUB_AGENTS="$TMP/agents.json"
 reset "$(anchor R3)" "$(visit VR3 R3 gc-toolkit/gc-toolkit.retired)"
 OUT=$(hold R3 "$SUP_BASE" "$SUP_HEAD"); rc=$?
-eq "$rc" "0" "a decision routed to a pool no live agent carries holds only once escalate.sh repoints it"
+eq "$rc" "0" "a decision routed to a pool no live agent carries holds only once it is repointed"
 eq "$(meta VR3 gc.routed_to)" "human" "it is repointed at the board"
 eq "$(visits R3)" "1" "with no second visit"
 
@@ -427,7 +429,7 @@ eq "$(cat "$STUB_ESC_LOG")" "" "without asking again"
 export STUB_AGENTS="$TMP/no-such-agents.json"
 reset "$(anchor R6)" "$(visit VR6 R6 gc-toolkit/gc-toolkit.retired)"
 hold R6 "$ORD_BASE" "$ORD_HEAD" >/dev/null; rc=$?
-eq "$rc" "0" "an agent set that cannot be read counts the visit, as escalate.sh does, rather than reading an outage as nobody"
+eq "$rc" "0" "an agent set that cannot be read counts the visit rather than reading an outage as nobody"
 
 unset GC_RIG STUB_AGENTS
 reset "$(anchor R7)" "$(visit VR7 R7 gc-toolkit/gc-toolkit.polecat)"
@@ -437,15 +439,15 @@ eq "$rc" "1" "a rig-qualified route with no GC_RIG to check it against holds not
 reset "$(anchor R8)" "$(visit VR8 R8)"
 export STUB_ESC_RC=1
 OUT=$(hold R8 "$SUP_BASE" "$SUP_HEAD"); rc=$?
-eq "$rc" "1" "an open decision escalate.sh can neither count nor repoint proceeds rather than holding behind it"
-has "$OUT" "could not be filed or repointed" "and says so"
+eq "$rc" "1" "an open decision the helper can neither count nor repoint proceeds rather than holding behind it"
+has "$OUT" "the decision could not be asked" "and says so"
 
-# A deferred visit is live to this guard but outside escalate.sh's open-visit
-# dedup, so escalate.sh can answer without touching it.
+# A deferred visit is live to this guard but outside the helper's open dedup,
+# so the helper can answer without touching it.
 reset "$(anchor R9)" "$(visit VR9 R9 | jq -c '.status = "deferred"')"
 export STUB_ESC_NOFILE=1
 OUT=$(hold R9 "$SUP_BASE" "$SUP_HEAD"); rc=$?
-eq "$rc" "1" "after escalate.sh answers, a live visit that still asks nobody does not hold"
+eq "$rc" "1" "after the helper answers, a live visit that still asks nobody does not hold"
 has "$OUT" "no supersession visit is open and routed to somebody" "and the arm's log says no visit stands behind the hold"
 
 reset "$(anchor A4)" '{"id":"V4","status":"open","assignee":"","title":"visit","notes":"","metadata":{"escalation_key":"some-other-key","gc.continuation_group":"A4","task_kind":"visit"}}' \
@@ -465,11 +467,11 @@ reset "$(anchor A6)"
 export STUB_ESC_RC=1
 OUT=$(hold A6 "$SUP_BASE" "$SUP_HEAD"); rc=$?
 eq "$rc" "1" "a decision that could not be filed proceeds rather than holding with no record"
-has "$OUT" "could not be filed" "and says so"
+has "$OUT" "the decision could not be asked" "and says so"
 reset "$(anchor A7)"
 export STUB_ESC_NOFILE=1
 OUT=$(hold A7 "$SUP_BASE" "$SUP_HEAD"); rc=$?
-eq "$rc" "1" "escalate.sh answering with no open visit (a recent moot or benign ruling) proceeds"
+eq "$rc" "1" "the helper answering with nothing open (a moot or benign answer inside the window) proceeds"
 has "$OUT" "no supersession visit is open" "and says why"
 reset "$(anchor A8)"
 OUT=$(hold A8 nosuchref "$SUP_HEAD"); rc=$?

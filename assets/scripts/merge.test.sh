@@ -3,7 +3,7 @@
 # assets/scripts/merge.sh and the `gctk merge` it execs.
 # Covers: the happy path (pinned read, --squash --match-head-commit, ONE
 # lifecycle transition closing with merged_sha); every validate hold in order
-# (merge_hold, duplicate anchor + escalate, retarget, non-green check, unclosed
+# (merge_hold, duplicate anchor + human gate, retarget, non-green check, unclosed
 # child via metadata AND dep edge, tracking_only opt-out, the universal approval
 # rule + veto and the lift line a bring-current ruling draws on it, which the
 # visit order and the terminal re-read read too, CLEAN/UNSTABLE handling,
@@ -56,8 +56,8 @@ fi
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/merge.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" \
   "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/finalize-gate.sh" "$HERE/review-checks.sh"
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "${STUB_ESC_LOG:?}"\n' > "$SD/escalate.sh"
-chmod +x "$SD/escalate.sh"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "${STUB_ESC_LOG:?}"\n' > "$SD/human-gate.sh"
+chmod +x "$SD/human-gate.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
 SUT="$SD/merge.sh"
 # A pass reads an UNKNOWN merge state again on gctk merge's default budget and
@@ -213,7 +213,7 @@ out=$("$SUT" 2>&1)
 has "$out" "merge_hold set (operator gate); merge held" "merge_hold holds"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
 
-echo "# one-anchor-per-PR holds + escalates once"
+echo "# one-anchor-per-PR holds + files one human gate"
 store "[$(anchor M3 12), $(anchor M3b 12)]"
 printf '%s' "$(prview 12 OPEN CLEAN)" > "$GH_DIR/pr_view_12.json"
 approved 12
@@ -221,7 +221,8 @@ approved 12
 out=$("$SUT" 2>&1)
 has "$out" "claimed by more than one open anchor" "the duplicate holds every anchor"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "no merge under a duplicate claim"
-has "$(cat "$STUB_ESC_LOG")" "--subject M3 --key one-anchor-per-pr.12" "escalate.sh got the situation key"
+has "$(cat "$STUB_ESC_LOG")" "--subject M3 --key one-anchor-per-pr.12" "human-gate.sh got the situation key"
+has "$(cat "$STUB_ESC_LOG")" "--key one-anchor-per-pr.12 --quiet-window 86400" "…declaring a day-long quiet window, since every pass detects the duplicate again"
 
 # The duplicate guard is repo-qualified the same way the in-flight holder
 # filter is (REPO_Q_DEF): a second anchor of this number is a duplicate unless
@@ -797,8 +798,8 @@ eq "$(bstatus S3)" "open" "…leaving the anchor for the next pass"
 # Both record arms retry every pass with no memory of the last one. That is right
 # for a store busy for a tick and useless for a cause the next pass meets
 # unchanged, and the difference between the two is only visible in a count.
-# record-failure-cap.sh keeps it on the anchor; escalate.sh spends it on one
-# visit. STUB_CLOSE_FAIL is what makes this the real shape rather than a total
+# record-failure-cap.sh keeps it on the anchor; human-gate.sh spends it on one
+# gate. STUB_CLOSE_FAIL is what makes this the real shape rather than a total
 # outage: the close is refused, and the counter beside it still writes — which is
 # bd's own asymmetry, its ownership check being a property of the close.
 echo "# the record retry is bounded"
@@ -809,10 +810,10 @@ out=$(STUB_CLOSE_FAIL="C1" "$SUT" 2>&1); rc=$?
 eq "$rc" 1 "a refused close still fails the pass loudly"
 eq "$(bstatus C1)" "open" "…and leaves the anchor open"
 eq "$(meta C1 merge_record_failures)" "1" "the first failure is counted on the anchor"
-eq "$(cat "$STUB_ESC_LOG")" "" "…and one failure escalates nothing — the retry is still the answer"
+eq "$(cat "$STUB_ESC_LOG")" "" "…and one failure files nothing — the retry is still the answer"
 
 # Under the cap, the count climbs and nothing is filed. The mirror below is what
-# makes this assertion mean something: an escalation that never fires would
+# makes this assertion mean something: a gate that never fires would
 # satisfy it just as well.
 out=$(STUB_CLOSE_FAIL="C1" "$SUT" 2>&1)
 eq "$(meta C1 merge_record_failures)" "2" "a second failure counts again"
@@ -822,13 +823,15 @@ out=$(STUB_CLOSE_FAIL="C1" "$SUT" 2>&1)
 eq "$(meta C1 merge_record_failures)" "3" "the third failure reaches the cap"
 has "$out" "failed to record merged PR#80 3 times" "…the pass says the retry is not converging"
 esc=$(cat "$STUB_ESC_LOG")
-has "$esc" "--subject C1" "…and the anchor is escalated as the subject"
-has "$esc" "--key merge-record-failed.80" "…keyed on the PR, so one visit covers every pass"
+has "$esc" "--subject C1" "…and the anchor is the gate's subject"
+has "$esc" "--key merge-record-failed.80" "…keyed on the PR, so one gate covers every pass"
+has "$esc" "clear this gate first" "…telling the person to clear the gate before the record, which closes the anchor"
+hasnt "$esc" "--quiet-window" "…declaring no quiet window, so a gate cleared without the repair is filed again"
 has "$esc" "still records merge_result=pull_request" "…naming the false-durable record a person has to repair"
 
-# Past the cap the call stays unconditional: escalate.sh holds it to one open
-# visit, and a visit closed without repairing the anchor is re-filed rather than
-# lost to a crossing that already happened.
+# Past the cap the call stays unconditional: human-gate.sh holds it to one open
+# gate, and a gate cleared without repairing the anchor is filed again rather
+# than lost to a crossing that already happened.
 : > "$STUB_ESC_LOG"
 out=$(STUB_CLOSE_FAIL="C1" "$SUT" 2>&1)
 eq "$(meta C1 merge_record_failures)" "4" "the count keeps climbing past the cap"
@@ -1168,9 +1171,10 @@ out=$("$SUT" 2>&1)
 has "$out" "would land a stale generated/seed-audit; merge held" "a stale merge result holds"
 has "$out" "seed audit would be STALE at the merge" "…quoting what the renderer found"
 hasnt "$(cat "$STUB_GH_LOG")" "pr merge" "…and nothing merged"
-has "$(cat "$STUB_ESC_LOG")" "--key seed-audit-merge-gate.82" "…and one visit carries the situation to a human"
+has "$(cat "$STUB_ESC_LOG")" "--key seed-audit-merge-gate.82" "…and one human gate carries the situation to a person"
+has "$(cat "$STUB_ESC_LOG")" "--key seed-audit-merge-gate.82 --quiet-window 86400" "…declaring a day-long quiet window, since every pass detects the stale render again"
 has "$(cat "$STUB_ESC_LOG")" "PR#82 would land a stale generated/seed-audit; the merge is held." \
-  "…whose first line is a headline, since escalate.sh titles the visit from it"
+  "…whose first line is a headline, since human-gate.sh titles the gate from it"
 has "$(cat "$STUB_ESC_LOG")" "seed audit would be STALE at the merge" "…carrying the renderer's own diagnosis"
 eq "$(bstatus S2)" "open" "the anchor stays open"
 

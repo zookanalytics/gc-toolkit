@@ -51,7 +51,7 @@
 #
 # The exec exports GCTK_SCRIPTS_DIR as this file's directory, which is the
 # sibling scripts' directory: a subcommand that shells out to them (merge runs
-# lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh,
+# lane-state.sh, finalize-gate.sh, review-checks.sh, human-gate.sh,
 # record-failure-cap.sh and render-seed-audit.sh) finds them there.
 
 _gctk_resolve_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
