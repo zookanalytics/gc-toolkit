@@ -795,6 +795,9 @@ unset FAKE_AGENT_GONE FAKE_DEPS_JSON
 #   (RULEDGE)  a hold that did not land fails the exit
 #   (RULSUPER) an open first-reaction gate a superseded reaction filed is
 #              withdrawn before the new one, and this reaction's own is kept
+#   (RULTITLE) the gate's title line is the takeaway on one line, as the
+#              board shows it, so a re-run of a takeaway that spans lines
+#              keeps its gate
 #   (RULKIDS)  a subject with open children is gated like any other bead
 #   (RULCAP)   a takeaway over the 140-character cap is refused first
 # The exit files no visit. The FAKE dep list answers with the gate so the hold
@@ -859,6 +862,15 @@ export FAKE_DEPS_JSON='[{"id":"tk-gate1","issue_type":"gate","await_type":"human
 run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling: which default" --reaction-bead "$R"
 eq "$RC" "0" "(RULSUPER) a re-run of the same reaction succeeds"
 hasnt "--retract" "$LOG" "(RULSUPER) …and withdraws nothing: the open gate asks this reaction's question"
+# The helper titles a gate with its message's first line. A takeaway that spans
+# lines is stored on the board as one line, and the gate's title has to be that
+# same line, or each re-run reads its own gate as a superseded reaction's.
+run tk-sub --disposition ruling --reason "r" --takeaway "needs a ruling:
+which default" --reaction-bead "$R"
+eq "$RC" "0" "(RULTITLE) a takeaway that spans lines takes the ruling exit"
+has "GATE --subject tk-sub --key first-reaction --message needs a ruling: which default" "$LOG" \
+   "(RULTITLE) …and the gate's title line is the takeaway on one line, as the board shows it"
+hasnt "--retract" "$LOG" "(RULTITLE) …so a re-run finds the gate it filed and withdraws nothing"
 export FAKE_DEPS_JSON='[{"id":"tk-gate1"}]'
 export FAKE_SHOW_JSON='[{"id":"tk-sub",'"$MEMBER"',"metadata":{}},{"id":"tk-sub.1","parent":"tk-sub","status":"open"}]'
 run tk-sub --disposition ruling --reason "r" --takeaway "t" --reaction-bead "$R"

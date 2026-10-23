@@ -397,10 +397,11 @@ open_visits() { # <anchor>; prints "<id>\t<route>" per open supersession visit; 
         | [.id, ((.metadata["gc.routed_to"] // "") | tostring)] | @tsv' 2>/dev/null
 }
 
-# The first of open_visits' rows whose route addresses somebody, by pool-route.sh's
-# verdict: `ok`, or `unknown` when the live agent set could not be read. No route, a pool no live agent carries, another
-# rig's pool, and a rig-qualified route with no GC_RIG to check it against
-# address nobody. Prints the visit id, or nothing.
+# The first of open_visits' rows whose route addresses somebody, by
+# pool-route.sh's verdict: `ok`, or `unknown` when the live agent set could not
+# be read. No route, a pool no live agent carries, another rig's pool, and a
+# rig-qualified route with no GC_RIG to check it against address nobody. Prints
+# the visit id, or nothing.
 asking_visit() { # <rows>
   local vid route
   while IFS=$'\t' read -r vid route; do

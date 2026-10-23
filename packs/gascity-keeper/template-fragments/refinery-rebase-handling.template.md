@@ -217,9 +217,9 @@ If step 1 reports `main-ahead > 0`, OR step 3's push is rejected with
 work is no longer landable as-is. Do NOT attempt to retry the
 force-push. Hand the bead back THROUGH the keeper as a durable,
 un-missable handback (the keeper is the operator's contact point for
-this decision), and file a human gate on the bead via `human-gate.sh` as a
-secondary signal.
-The operator (via the gascity-keeper) decides whether to:
+this decision), and file a human gate on the bead via `human-gate.sh` as
+a secondary signal. The operator (via the gascity-keeper) decides
+whether to:
 
 - Re-pour the rebase formula to redo the work atop the new
   `origin/main`, or
@@ -231,10 +231,11 @@ Route the race loss THROUGH the keeper as a durable, un-missable
 handback. The keeper's prime sweep keys on `metadata.aborted_at`, so set
 it (in addition to `rejection_reason`) and reassign the bead to the
 requesting keeper, record the context in the bead notes, then **nudge the
-keeper**. Lock that durable handback in FIRST; the human gate follows as a
-secondary signal. The gate blocks the bead, so a re-poured rebase waits until
-the operator clears it with their decision. The operator decision surfaces durably through the
-keeper, not via a best-effort side channel alone.
+keeper**. Lock that durable handback in FIRST; the human gate follows as
+a secondary signal. The gate blocks the bead, so a re-poured rebase
+waits until the operator clears it with their decision. The operator
+decision surfaces durably through the keeper, not via a best-effort side
+channel alone.
 
 ```bash
 # Prefer the keeper stamped at dispatch; fall back to the rig-scoped keeper.
@@ -276,8 +277,8 @@ gc session nudge "$KEEPER_TARGET" "rebase race loss on $WORK: origin/main advanc
 This rebase-handling overlay is opt-in per rig (only rigs that import
 the `gascity-keeper` sub-pack). A refinery in a rig that does NOT
 import the sub-pack will not carry these instructions; a rebase-shaped
-bead that ends up at such a refinery is a routing leak. File a human gate on
-the bead with `human-gate.sh` instead of force-pushing. PR #17's "reject as routing leak"
-intent survives in the unintended-target case; the legitimate path is
-the overlay above.
+bead that ends up at such a refinery is a routing leak. File a human
+gate on the bead with `human-gate.sh` instead of force-pushing. PR #17's
+"reject as routing leak" intent survives in the unintended-target case;
+the legitimate path is the overlay above.
 {{ end }}

@@ -142,15 +142,15 @@ gate-ensure.sh use, so a pass dispatched without one rules the correctness lane.
 
 A malformed dispatch cannot be ruled and never will be on a retry. Its convoy has
 no single tracked member, or that member carries no `anchor_bead`. So each refusal
-above files a human gate through `human-gate.sh` and, only if that gate landed, cancels
-the run through `run-cancel.sh`, which closes every step through gascity, then
-drains. A bare `exit 1` would leave the step claimed, and the pool would re-offer
-the same unrulable pass to a fresh validator once this session ended. A pass
-closed before its run reached this step was withdrawn, so its run is cancelled
-with no gate. The store-read guards further down are the opposite case: an
-unreadable or non-array finding ledger is transient, so those DO fail closed to
-a plain `exit 1` and a later claim retries once the store recovers. Do not
-convert them to a cancel.
+above files a human gate through `human-gate.sh` and, only if that gate landed,
+cancels the run through `run-cancel.sh`, which closes every step through
+gascity, then drains. A bare `exit 1` would leave the step claimed, and the pool
+would re-offer the same unrulable pass to a fresh validator once this session
+ended. A pass closed before its run reached this step was withdrawn, so its run
+is cancelled with no gate. The store-read guards further down are the opposite
+case: an unreadable or non-array finding ledger is transient, so those DO fail
+closed to a plain `exit 1` and a later claim retries once the store recovers. Do
+not convert them to a cancel.
 
 **3. Read the batch.** The findings to rule are the LIVE `task_kind=finding`
 beads on this anchor for this lane that no earlier pass has ruled — disposition

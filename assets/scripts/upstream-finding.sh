@@ -369,7 +369,9 @@ $PASTE
 
 Nothing has been sent. A write to a repo the rig does not own is the operator's
 to make, so an agent prepares the command and stops (docs/outbound-sends.md).
-Closing this bead answers the ask either way: sent, or declined."
+A human gate on this bead asks for the send, and it blocks the bead's close.
+Clear the gate with the answer, ruled: sent or ruled: declined, then close this
+bead."
 
   # The command IS the deliverable and the key is what keeps one ask from
   # becoming three, so both ride the create with the rest of the send, and the

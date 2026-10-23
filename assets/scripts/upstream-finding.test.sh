@@ -199,6 +199,10 @@ case "$PARKED" in *$'\n'*) bad "the parked command is one pasteable line" ;; *) 
 DESC=$(jq -r '.[] | select(.id == "up-1") | .description' "$STUB_STORE")
 has "$DESC" "$PARKED" "the description carries the pasteable command"
 has "$DESC" "Hit while working sl-kg9z6" "the description carries the operator's rationale"
+# The gate on the bead blocks its close, so the bead sends the operator to the
+# gate for the answer, and never says that closing the bead gives it.
+has "$DESC" "Clear the gate with the answer" "the description says the answer clears the gate"
+hasnt "$DESC" "Closing this bead answers the ask" "…and never that a close answers it, which the gate refuses"
 
 # The ask reaches a human, on this bead.
 ESC=$(cat "$STUB_ESC_LOG")

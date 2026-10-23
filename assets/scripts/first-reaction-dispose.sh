@@ -25,11 +25,11 @@
 #               tells the agent then.
 #   close       there is nothing to do -> hand the bead to a validating-closer
 #               pool (mol-validate-close), which re-checks the call and closes
-#               the bead or asks the operator. A first reaction never closes a bead. Run
-#               from inside a live reaction workflow (--after-workflow), the
-#               closer is deferred until that workflow closes, so it is the
-#               bead's sole dispatch surface rather than a second one stacked on
-#               the reaction.
+#               the bead or asks the operator. A first reaction never closes a
+#               bead. Run from inside a live reaction workflow
+#               (--after-workflow), the closer is deferred until that workflow
+#               closes, so it is the bead's sole dispatch surface rather than a
+#               second one stacked on the reaction.
 #   ruling      only the operator can answer, and the reaction has no action to
 #               recommend -> a human gate on the subject, Discuss-only. A gate
 #               that carries a determinable action is the recommend exit.
@@ -983,14 +983,16 @@ fi
 # ── The ruling and recommend exits' human gate ───────────────────────
 # The next move is the operator's, and what a person owes is a native human gate
 # that blocks the subject, filed through human-gate.sh under the key
-# first-reaction. The takeaway is its title, the same sentence the board shows
-# on the subject. The helper files nothing while an open gate under the key
-# blocks the subject, so a re-run of this reaction after a partial finds the
-# gate it filed. An open first-reaction gate whose title is not this takeaway
-# asks a superseded reaction's question, so it is withdrawn first, and the new
-# gate carries this reaction's. A reaction is an event of its own, so the call
-# declares no quiet window. On a subject with open children the gate blocks the
-# parent, and its unstarted parts wait with it.
+# first-reaction. Its title is the takeaway with its whitespace collapsed onto
+# one line, as gc-helm.sh takeaway stores it, so the gate says the sentence the
+# board shows on the subject. The helper titles a gate with its message's first
+# line, so that one line leads the message. The helper files nothing while an
+# open gate under the key blocks the subject, so a re-run of this reaction after
+# a partial finds the gate it filed. An open first-reaction gate whose title is
+# not this takeaway asks a superseded reaction's question, so it is withdrawn
+# first, and the new gate carries this reaction's. A reaction is an event of its
+# own, so the call declares no quiet window. On a subject with open children the
+# gate blocks the parent, and its unstarted parts wait with it.
 GATE=""
 if [ "$DISPOSITION" = "ruling" ] || [ "$DISPOSITION" = "recommend" ]; then
     [ -x "$HUMAN_GATE" ] \
@@ -1006,7 +1008,7 @@ if [ "$DISPOSITION" = "ruling" ] || [ "$DISPOSITION" = "recommend" ]; then
             --message "superseded by a newer first reaction on $BEAD, which asks: $TITLE_WANT" >/dev/null \
             || die "could not withdraw the superseded first-reaction gate on $BEAD; nothing new was filed. Clear the cause and re-run this command."
     fi
-    GATE=$("$HUMAN_GATE" --subject "$BEAD" --key first-reaction --message "$TAKEAWAY
+    GATE=$("$HUMAN_GATE" --subject "$BEAD" --key first-reaction --message "$TITLE_WANT
 Filed by a first reaction on $BEAD ($DISPOSITION), which waits on it.
 
 $REASON

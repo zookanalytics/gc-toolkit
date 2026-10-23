@@ -16,9 +16,11 @@
 #                     [--priority <n>] [--rig <rig>] [--distinct]
 #                     [--no-react] [--dry-run]
 # Callers: formulas/mol-deacon-patrol.toml, formulas/mol-witness-patrol.toml,
-# the refinery reconcile's assets/scripts/merge-tail-report.sh and
-# assets/scripts/pr-facts.sh, and the feedback miner's
-# assets/scripts/feedback-miner.sh.
+# formulas/mol-refinery-patrol.toml, formulas/mol-dog-shutdown-dance.toml,
+# mol-polecat-work's refusals of a work bead it cannot read, the refinery
+# reconcile's assets/scripts/merge-tail-report.sh and
+# assets/scripts/pr-facts.sh, assets/scripts/rejection-repool.sh for a handoff
+# it cannot read, and the feedback miner's assets/scripts/feedback-miner.sh.
 # The visit is not this path's exit. A finding needing the operator's judgment
 # gets there through the reaction's `ruling` or `recommend` disposition, which
 # files a human gate on it, and orders/gate-visit-sweep files that gate's visit.

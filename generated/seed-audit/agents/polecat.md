@@ -405,10 +405,9 @@ resolved above:
 
 That files one bead carrying the exact command, ready to paste, and a human
 gate on it that the operator clears once the send is made or declined. Name
-the target with `--repo` and inline the
-body — the operator pastes it later, from their own shell
-(docs/outbound-sends.md). Then carry on with your bead: the send is not
-yours to wait on.
+the target with `--repo` and inline the body — the operator pastes it later,
+from their own shell (docs/outbound-sends.md). Then carry on with your bead:
+the send is not yours to wait on.
 
 ## Communication
 
