@@ -2382,7 +2382,7 @@ MP_EOF
          --takeaway "PR#$num sits on a base other than its expected target — retarget it back, or update merged_target"; then
       flagged=$((flagged + 1))
       human_gate "$id" "pr-retargeted.$num" \
-        "PR#$num ($live_url) was retargeted: base '$base' != expected '$rec_target'. Retarget it back and reset merge_result=pull_request to re-engage, or update merged_target if the new base is intentional."
+        "PR#$num ($live_url) was retargeted: base '$base' != expected '$rec_target'. Retarget it back, reset merge_result=pull_request and clear this gate to re-engage, or update merged_target if the new base is intentional."
       echo "$PROG: $id — PR#$num retargeted (base '$base' != '$rec_target'); routed to human, gate filed"
       # Its PR-finishing work now follows the unapproved rank, as an abandoned
       # anchor's does, and this pass settles it the same way.
@@ -3488,9 +3488,9 @@ $CBODY"
               rc_allnames=$(printf '%s' "$rc_fail_json" | jq -r 'map(.name) | join(" ")' 2>/dev/null)
               if "$LIFECYCLE" transition "$id" --to pull_request --expect pull_request \
                    --route human \
-                   --takeaway "PR#$num has a required check failing for a non-code cause — re-run it or fix the infrastructure, then clear gc.routed_to" >/dev/null; then
+                   --takeaway "PR#$num has a required check failing for a non-code cause — re-run it or fix the infrastructure, then clear its gate and gc.routed_to" >/dev/null; then
                 human_gate "$id" "pr-fix-noncode.$num" \
-                  "PR#$num ($live_url) has failing required check(s) ($rc_allnames) that are non-code causes — a timeout, cancellation, startup failure, or a deploy-type check — which no code change can fix. Parked to a human: re-run the check or fix the infrastructure, then clear gc.routed_to to re-engage the auto-fixer, or merge once it is green."
+                  "PR#$num ($live_url) has failing required check(s) ($rc_allnames) that are non-code causes — a timeout, cancellation, startup failure, or a deploy-type check — which no code change can fix. Parked to a human: re-run the check or fix the infrastructure, then clear this gate and gc.routed_to to re-engage the auto-fixer, or merge once it is green."
                 flagged=$((flagged + 1))
                 echo "$PROG: $id — PR#$num required check(s) failing ($rc_allnames) for a non-code cause; parked to human (no fixer dispatched)"
               else
@@ -3582,7 +3582,7 @@ $CBODY"
                    --route human \
                    --takeaway "PR#$num is still red at the head an auto-fixer was already sent to. Fix the failing check by hand or re-run it." >/dev/null; then
                 human_gate "$id" "pr-fix-unmoved.$num" \
-                  "PR#$num ($live_url) is red on required check(s) ($rc_names) at head $head_oid, and red-check child $rc_tried was already sent to that head and closed without moving it. Another fixer would only repeat that attempt, so the anchor is parked to a human. Read $rc_tried's notes for why it closed, then fix the check(s) by hand or re-run them. Clearing gc.routed_to at this head parks it again. Once a push moves the head, clearing gc.routed_to lets the auto-fixer try the new head, up to the attempt cap ($RC_FIX_ATTEMPT_CAP)."
+                  "PR#$num ($live_url) is red on required check(s) ($rc_names) at head $head_oid, and red-check child $rc_tried was already sent to that head and closed without moving it. Another fixer would only repeat that attempt, so the anchor is parked to a human. Read $rc_tried's notes for why it closed, then fix the check(s) by hand or re-run them. Clearing this gate and gc.routed_to at this head parks it again. Once a push moves the head, clearing both lets the auto-fixer try the new head, up to the attempt cap ($RC_FIX_ATTEMPT_CAP)."
                 flagged=$((flagged + 1))
                 echo "$PROG: $id — PR#$num required check(s) failing ($rc_names) at head $head_oid, which red-check child $rc_tried was already sent to fix; parked to human (no new fixer dispatched)"
               else
@@ -3598,7 +3598,7 @@ $CBODY"
             # failed to land, not a new one, so it is never capped. Nothing lowers
             # the count, so once an anchor reaches the cap every later red head
             # parks it again, including the first pass after a person clears the
-            # route.
+            # route and the park's gate.
             rc_attempts=$(printf '%s' "$rc_kids" | jq -r --arg id "$id" --arg h "$head_oid" --arg t "$RC_TITLE" "$RC_HEADS_DEF"'
               [ .[] | select(.id != $id) | rc_heads($t) ]
               | unique | map(select(. != ($h | ascii_downcase))) | length' 2>/dev/null)
@@ -3608,7 +3608,7 @@ $CBODY"
                    --route human \
                    --takeaway "PR#$num is still red after $rc_attempts auto-fix attempts — fix the failing check by hand; no more fixers will be sent" >/dev/null; then
                 human_gate "$id" "pr-fix-capped.$num" \
-                  "PR#$num ($live_url) has drawn $rc_attempts auto-fix attempts across successive red heads without reaching green on required check(s) ($rc_names); the attempt cap ($RC_FIX_ATTEMPT_CAP) is reached. Parked to a human rather than dispatch another fixer: take it over and fix the check(s) by hand, or merge once it is green. No further fixer is dispatched for this PR, so clearing gc.routed_to while it is still red parks it again."
+                  "PR#$num ($live_url) has drawn $rc_attempts auto-fix attempts across successive red heads without reaching green on required check(s) ($rc_names); the attempt cap ($RC_FIX_ATTEMPT_CAP) is reached. Parked to a human rather than dispatch another fixer: take it over and fix the check(s) by hand, or merge once it is green. No further fixer is dispatched for this PR, so clearing this gate and gc.routed_to while it is still red parks it again."
                 flagged=$((flagged + 1))
                 echo "$PROG: $id — PR#$num red-check fix attempts ($rc_attempts) reached the cap ($RC_FIX_ATTEMPT_CAP); parked to human (no new fixer dispatched)"
               else

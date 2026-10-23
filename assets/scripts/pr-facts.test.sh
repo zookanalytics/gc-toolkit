@@ -910,6 +910,10 @@ eq "$(meta F3 'gc.routed_to')" "human" "routed to human"
 eq "$(meta rv-f3 gc.outcome)" "recorded" "the lane's backing review is not superseded"
 eq "$(bstatus rv-f3)" "closed" "…and stays the closed record its green derives from"
 has "$(cat "$STUB_ESC_LOG")" "--key pr-retargeted.12" "escalated once per situation key"
+# The gate blocks the anchor, and an open human gate holds the merge-in and
+# red-check arms, so resetting merge_result alone re-engages neither.
+has "$(jq -r '[ .[] | select((.await_id // "") == "pr-retargeted.12") | .description ] | .[0] // ""' "$STUB_STORE")" \
+  "reset merge_result=pull_request and clear this gate to re-engage" "…and its message names the gate in the release"
 
 echo "# CONFLICTING -> one rework child per head"
 store "[$(anchor F4 13)]"
@@ -5856,6 +5860,11 @@ eq "$(meta NC1 'gc.takeaway_settled')" "" "…left unsettled, because a person s
 eq "$(grep '^bd update NC1 ' "$STUB_GC_LOG" | grep -F 'gc.routed_to=human' | grep -cF 'gc.takeaway=PR#110' || true)" "1" "…written in the same update as the route"
 eq "$(no_rework)" "0" "no fixer is dispatched at a non-code failure"
 has "$(cat "$STUB_ESC_LOG")" "--subject NC1 --key pr-fix-noncode.110" "a non-code park files its gate"
+# An open human gate on the anchor holds this arm, so the release the person is
+# told names the gate beside the route.
+has "$(meta NC1 'gc.takeaway')" "then clear its gate and gc.routed_to" "…and the takeaway's release names the gate as well as the route"
+has "$(jq -r '[ .[] | select((.await_id // "") == "pr-fix-noncode.110") | .description ] | .[0] // ""' "$STUB_STORE")" \
+  "clear this gate and gc.routed_to to re-engage the auto-fixer" "…as the gate's message does"
 eq "$(meta NC1 merge_result)" "pull_request" "the anchor keeps gating (the merge still waits)"
 
 echo "# …a park whose route does not read back files no gate and retries next pass"
@@ -5938,6 +5947,8 @@ has "$(meta CAP2 'gc.takeaway')" "PR#121 is still red after 3 auto-fix attempts"
 eq "$(grep '^bd update CAP2 ' "$STUB_GC_LOG" | grep -F 'gc.routed_to=human' | grep -cF 'gc.takeaway=PR#121' || true)" "1" "…written in the same update as the route"
 eq "$(no_rework)" "0" "…and no fourth fixer is dispatched"
 has "$(cat "$STUB_ESC_LOG")" "--subject CAP2 --key pr-fix-capped.121" "…and the cap park files its gate"
+has "$(jq -r '[ .[] | select((.await_id // "") == "pr-fix-capped.121") | .description ] | .[0] // ""' "$STUB_STORE")" \
+  "clearing this gate and gc.routed_to while it is still red parks it again" "…whose message names the gate in the release, since an open gate holds the arm"
 eq "$(meta CAP2 merge_result)" "pull_request" "…while the anchor keeps gating"
 
 echo "# …nothing lowers the count: a person clearing the route on a still-red PR is held by the gate, then parked again"
@@ -6018,6 +6029,8 @@ has "$(meta UM1 'gc.takeaway')" "PR#175 is still red at the head an auto-fixer w
 eq "$(grep '^bd update UM1 ' "$STUB_GC_LOG" | grep -F 'gc.routed_to=human' | grep -cF 'gc.takeaway=PR#175' || true)" "1" "…written in the same update as the route"
 eq "$(no_rework)" "0" "…and no second fixer is sent to the unmoved head"
 has "$(cat "$STUB_ESC_LOG")" "--subject UM1 --key pr-fix-unmoved.175" "…and the park files its gate"
+has "$(jq -r '[ .[] | select((.await_id // "") == "pr-fix-unmoved.175") | .description ] | .[0] // ""' "$STUB_STORE")" \
+  "Clearing this gate and gc.routed_to at this head parks it again" "…whose message names the gate in the release, since an open gate holds the arm"
 eq "$(meta UM1 merge_result)" "pull_request" "…while the anchor keeps gating"
 
 echo "# …a person clearing the route and the gate at the same head sees it parked again"
