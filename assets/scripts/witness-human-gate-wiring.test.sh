@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Thin wiring check: the witness patrol's findings go through
 # assets/scripts/patrol-finding.sh (one durable bead per situation key, which a
-# proactive first reaction then disposes), and escalate.sh stays available for
-# the emergency that needs a human now. A bare `gc mail send` in the formula is
-# the escalation-storm surface coming back — there is no mayor mailbox to
-# absorb it, and mail dedups nothing.
+# proactive first reaction then disposes), and assets/scripts/human-gate.sh
+# stays available for the emergency that needs a person now, as a human gate on
+# the bead it is about. A report with no bead that can wait is a finding. A bare
+# `gc mail send` in the formula dedups nothing, and there is no mayor mailbox to
+# absorb it.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE/../.."
@@ -44,21 +45,50 @@ for k in witness-salvage-refused witness-partial-release \
 done
 
 # witness-refinery-queue is the deliberate exception. check-refinery's
-# refinery-stuck-escalate block files it through escalate.sh, not
+# refinery-stuck-handoff block files it through human-gate.sh, not
 # patrol-finding.sh: a handoff still assigned and unprepared past the stuck
-# bound is a session a human must look at now — the escalate.sh emergency, not a
-# routine observation the reaction triages. escalate.sh dedups per --subject, so
-# two stuck handoffs are still two visits.
-if grep -Eq 'escalate\.sh.*--key witness-refinery-queue' "$TOML"; then
-  ok "witness-refinery-queue is an escalate.sh stuck-handoff visit, not a finding"
+# bound is a bead a person must look at now, not a routine observation the
+# reaction triages. The gate blocks the handoff, and human-gate.sh keeps one open
+# gate per bead and key, so two stuck handoffs are still two gates.
+if grep -Eq 'human-gate\.sh" --subject "\$SID" --key witness-refinery-queue ' "$TOML"; then
+  ok "witness-refinery-queue is a human gate on the stuck handoff, not a finding"
 else
-  bad "witness-refinery-queue is no longer wired to escalate.sh"
+  bad "witness-refinery-queue is no longer a human-gate.sh gate on the stuck handoff"
 fi
 
 # The emergency exit stays: a crash or a data loss is not a disposition.
-grep -q 'escalate\.sh' "$TOML" \
-  && ok "escalate.sh is still reachable for an emergency" \
-  || bad "the emergency escalation path is gone"
+grep -q 'human-gate\.sh' "$TOML" \
+  && ok "human-gate.sh is still reachable for an emergency" \
+  || bad "the emergency path to a person is gone"
+
+for F in "$TOML" "$PROMPT"; do
+  if grep -n 'escalate\.sh' "$F"; then
+    bad "${F#"$ROOT"/} still names escalate.sh; the helper is human-gate.sh"
+  else
+    ok "${F#"$ROOT"/} names the helper by its name, human-gate.sh"
+  fi
+done
+
+# A report nothing waits on, or about a bead the witness cannot block, is a
+# patrol finding: the check-refinery monitor that cannot see its queue (the
+# patrol's run is a wisp, which human-gate.sh refuses), an orphan whose work
+# landed (the witness closes that bead next, and a gate on it would refuse the
+# close), and an owner whose store cannot be named (a gate lands in its bead's
+# store). None of them is filed as a human gate.
+for k in witness-refinery-queue-unroutable witness-refinery-queue-unreadable \
+         witness-orphan-work-landed witness-unplaceable-owner; do
+  if grep -A1 -- 'patrol-finding\.sh.*--scope witness-findings --key *$' "$TOML" | grep -q -- "^$k " \
+     || grep -q -- "patrol-finding\.sh\"* --scope witness-findings --key $k" "$TOML"; then
+    ok "$k is filed as a patrol finding"
+  else
+    bad "$k is no longer filed through patrol-finding.sh"
+  fi
+  if grep -q -- "human-gate\.sh.*--key $k" "$TOML"; then
+    bad "$k is filed as a human gate; nothing it names can wait on one"
+  else
+    ok "$k files no human gate"
+  fi
+done
 
 # Mail that reports shared state or asks for an act the witness may not take is
 # a request with no other record. Archived as chatter, it is lost. The
@@ -98,5 +128,5 @@ else
 fi
 
 echo
-echo "witness-escalation-wiring: $PASS passed, $FAIL failed"
+echo "witness-human-gate-wiring: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

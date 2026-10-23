@@ -4,7 +4,7 @@
 # network. Covers find-or-create idempotence, the entry format, the closed
 # category and artifact-ref sets, one-line normalisation, rotation on both
 # bounds, the continues: walk `show --since` makes across a rotation, and the
-# store pinning that keeps an escalation's entry out of a rig ledger.
+# store pinning that keeps a human gate's entry out of a rig ledger.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -93,8 +93,9 @@ chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/store.json" STUB_GC_LOG="$TMP/gc.log"
 export GC_CITY_PATH="$TMP"
-# A caller that has bound a rig — escalate.sh exports one before it files. The
-# ledger must ignore it; the assertions at the end prove it does.
+# A caller that has bound a rig — the patrol formula binds one so a finding
+# lands in its rig's store. The ledger must ignore it; the assertions at the end
+# prove it does.
 export GC_RIG=gc-toolkit
 unset STUB_CREATE_EMPTY_ID STUB_COMMENT_FAIL 2>/dev/null || true
 

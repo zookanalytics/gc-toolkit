@@ -11,22 +11,24 @@
 #
 # What it holds:
 #   1. THE CASE — a child of an epic AND an open convoy targeting a branch other
-#      than base_branch, with no target or branch of its own: notes, escalates,
-#      makes the work bead wait on the visit (await-ruling.sh), cancels the run
-#      of workspace-setup (run-cancel.sh), drain-acks, exits 1. The visit names
-#      the stake and the release: stamp the target, then close the visit, which
-#      re-slings the work from its own target.
+#      than base_branch, with no target or branch of its own: notes, files a
+#      human gate on the work bead, makes the work bead wait on it
+#      (await-ruling.sh), cancels the run of workspace-setup (run-cancel.sh),
+#      drain-acks, exits 1. The gate names the stake and the release: stamp the
+#      target, then clear the gate, which re-slings the work from its own
+#      target.
 #   2. DISCRIMINATION — passes (no writes) when the bead names a branch to
 #      resume, when its own target equals base_branch, when its convoys target
 #      base_branch itself, when the convoy has no target or is closed, and when
 #      only a non-convoy parent carries a target. Targets compare trimmed, the
 #      way sling reads them.
-#   3. FAIL CLOSED — no visit recorded means no wait, no cancel and no drain; a
+#   3. FAIL CLOSED — no gate recorded means no wait, no cancel and no drain; a
 #      wait that did not land means no cancel and no drain; a cancel that did
 #      not land means no drain; a note the store refuses still cancels.
-#   4. UNREADABLE BEAD — escalates under load-context's unreadable-work key and
-#      cancels, with no wait (an unreadable bead carries none), and neither
-#      cancels nor drains when the escalation cannot be recorded either.
+#   4. UNREADABLE BEAD — files a patrol finding under load-context's
+#      unreadable-work key and cancels, with no wait (a bead no read reaches
+#      cannot be blocked), and neither cancels nor drains when the finding
+#      cannot be recorded either.
 #   5. ORDER — the guard runs before the worktree is poured from base_branch.
 #   6. THE GUARD WRITES NO MOLECULE MEMBER — it names no convoy delete and no
 #      delete-source, and looks up no root: gascity's run cancel ends the run.
@@ -34,7 +36,7 @@
 #      differs from base_branch is declined: the target was stamped after the
 #      pour or a --var override chose the base.
 #   8. CONFLICTING CONVOYS — a child of convoys that target different branches
-#      is declined with a visit that names every convoy, even when base_branch
+#      is declined with a gate that names every convoy, even when base_branch
 #      is one of them, and passes once its own target names the base.
 #
 # EXECUTES the real snippet extracted verbatim from the formula against fake
@@ -124,8 +126,8 @@ GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 
-# run-cancel.sh, await-ruling.sh and escalate.sh resolved out of $GC_PACK_DIR
-# exactly as the arm resolves them. Each records its verb into the ordered trace
+# run-cancel.sh, await-ruling.sh, human-gate.sh and patrol-finding.sh resolved
+# out of $GC_PACK_DIR exactly as the arm resolves them. Each records its verb into the ordered trace
 # and its argv where the reason assertions can read it, and returns a code the
 # assertions control.
 mkdir -p "$TMP/pack/assets/scripts"
@@ -141,30 +143,37 @@ printf 'AWAIT\n' >> "$FAKE_LOG"
 printf '%s\n' "$*" >> "${FAKE_AWAIT:-/dev/null}"
 exit "${FAKE_AWAIT_RC:-0}"
 AWAIT
-cat > "$TMP/pack/assets/scripts/escalate.sh" <<'ESC'
+cat > "$TMP/pack/assets/scripts/human-gate.sh" <<'GATE'
 #!/usr/bin/env bash
-printf 'ESCALATE\n' >> "$FAKE_LOG"
-printf '%s\n' "$*" >> "${FAKE_ESC:-/dev/null}"
-exit "${FAKE_ESC_RC:-0}"
-ESC
-chmod +x "$TMP/pack/assets/scripts/run-cancel.sh" "$TMP/pack/assets/scripts/await-ruling.sh" "$TMP/pack/assets/scripts/escalate.sh"
+printf 'GATE\n' >> "$FAKE_LOG"
+printf '%s\n' "$*" >> "${FAKE_GATE:-/dev/null}"
+exit "${FAKE_GATE_RC:-0}"
+GATE
+cat > "$TMP/pack/assets/scripts/patrol-finding.sh" <<'FINDING'
+#!/usr/bin/env bash
+printf 'FINDING\n' >> "$FAKE_LOG"
+printf '%s\n' "$*" >> "${FAKE_FINDING:-/dev/null}"
+exit "${FAKE_FINDING_RC:-0}"
+FINDING
+chmod +x "$TMP/pack/assets/scripts/run-cancel.sh" "$TMP/pack/assets/scripts/await-ruling.sh" \
+         "$TMP/pack/assets/scripts/human-gate.sh" "$TMP/pack/assets/scripts/patrol-finding.sh"
 export GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH=""
 
 # run <base_branch> <work-bead-json> -> prints "<rc>|<ordered verb log>"
 #   `{{base_branch}}` and `{{convoy_id}}` are formula placeholders, substituted
 #   here the way the pour renders them. FAKE_*_RC control each stub's exit;
-#   FAKE_UPDATE/CANCEL/AWAIT/ESC/LISTARGS capture argv and $TMP/err the block's
+#   FAKE_UPDATE/CANCEL/AWAIT/GATE/FINDING/LISTARGS capture argv and $TMP/err the block's
 #   stderr.
 run() {
-  : > "$TMP/log"; : > "$TMP/update"; : > "$TMP/cancel"; : > "$TMP/await"; : > "$TMP/esc"; : > "$TMP/listargs"
+  : > "$TMP/log"; : > "$TMP/update"; : > "$TMP/cancel"; : > "$TMP/await"; : > "$TMP/gate"; : > "$TMP/finding"; : > "$TMP/listargs"
   sed -e "s|{{base_branch}}|$1|g" -e "s|{{convoy_id}}|tk-input|g" "$TMP/guard.raw" > "$TMP/guard.sh"
   local rc=0
   WORK_BEAD_ID=tk-work \
   CLAIMED_STEP_BEAD_ID=st-setup \
   FAKE_SHOW="$2" FAKE_SHOW_RC="${FAKE_SHOW_RC:-0}" \
   FAKE_LIST="${FAKE_LIST-[]}" FAKE_LIST_RC="${FAKE_LIST_RC:-0}" FAKE_LISTARGS="$TMP/listargs" \
-  FAKE_LOG="$TMP/log" FAKE_UPDATE="$TMP/update" FAKE_CANCEL="$TMP/cancel" FAKE_AWAIT="$TMP/await" FAKE_ESC="$TMP/esc" \
-  FAKE_CANCEL_RC="${FAKE_CANCEL_RC:-0}" FAKE_AWAIT_RC="${FAKE_AWAIT_RC:-0}" FAKE_ESC_RC="${FAKE_ESC_RC:-0}" FAKE_UPDATE_RC="${FAKE_UPDATE_RC:-0}" \
+  FAKE_LOG="$TMP/log" FAKE_UPDATE="$TMP/update" FAKE_CANCEL="$TMP/cancel" FAKE_AWAIT="$TMP/await" FAKE_GATE="$TMP/gate" FAKE_FINDING="$TMP/finding" \
+  FAKE_CANCEL_RC="${FAKE_CANCEL_RC:-0}" FAKE_AWAIT_RC="${FAKE_AWAIT_RC:-0}" FAKE_GATE_RC="${FAKE_GATE_RC:-0}" FAKE_FINDING_RC="${FAKE_FINDING_RC:-0}" FAKE_UPDATE_RC="${FAKE_UPDATE_RC:-0}" \
     bash "$TMP/guard.sh" > "$TMP/out" 2> "$TMP/err" || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
@@ -185,19 +194,19 @@ ROUTED='{"gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}'
 # reports the epic, and sling poured the molecule from main.
 TWO_PARENTS="$(bead "$ROUTED" "[$EPIC,$CONVOY_INT]")"
 eq "$(run main "$TWO_PARENTS")" \
-   "1|UPDATE;ESCALATE;AWAIT;CANCEL;DRAIN;" \
-   "epic + integration convoy, no own target: notes, escalates, waits on the visit, cancels, drain-acks, exits 1"
+   "1|UPDATE;GATE;AWAIT;CANCEL;DRAIN;" \
+   "epic + integration convoy, no own target: notes, files a gate, waits on it, cancels, drain-acks, exits 1"
 
 run main "$TWO_PARENTS" >/dev/null
-has "$(cat "$TMP/esc")" "--key polecat-convoy-target-mismatch" "escalates under its own situation key"
-has "$(cat "$TMP/esc")" "--subject tk-work" "the visit's subject is the work bead"
-has "$(cat "$TMP/esc")" "integration/tk-cnv (convoy tk-cnv)" "the visit names the convoy and its branch"
-has "$(cat "$TMP/esc")" "--message This work would branch from main and land there" "the visit opens with the stake, not an identifier"
-has "$(cat "$TMP/esc")" "--set-metadata target=" "the visit names the target stamp that releases it"
-has "$(cat "$TMP/esc")" "then close this visit: tk-work waits on it, and closing it re-slings tk-work, which pours from its own target" "the visit says closing it re-slings the work from its own target"
-has "$(cat "$TMP/esc")" "To stand down instead, close tk-work first" "the visit says how to stand down"
-has "$(cat "$TMP/update")" "then close this visit" "the work bead's note names the same release"
-eq  "$(cat "$TMP/await")" "tk-work --key polecat-convoy-target-mismatch --formula mol-polecat-work" "the work bead waits on the visit under its key, re-slung through mol-polecat-work"
+has "$(cat "$TMP/gate")" "--key polecat-convoy-target-mismatch" "the gate uses its own situation key"
+has "$(cat "$TMP/gate")" "--subject tk-work" "the gate blocks the work bead"
+has "$(cat "$TMP/gate")" "integration/tk-cnv (convoy tk-cnv)" "the gate names the convoy and its branch"
+has "$(cat "$TMP/gate")" "--message This work would branch from main and land there" "the gate opens with the stake, not an identifier"
+has "$(cat "$TMP/gate")" "--set-metadata target=" "the gate names the target stamp that releases it"
+has "$(cat "$TMP/gate")" "then clear this gate: tk-work waits on it, and clearing it re-slings tk-work, which pours from its own target" "the gate says clearing it re-slings the work from its own target"
+has "$(cat "$TMP/gate")" "To stand down instead, close tk-work first" "the gate says how to stand down"
+has "$(cat "$TMP/update")" "then clear this gate" "the work bead's note names the same release"
+eq  "$(cat "$TMP/await")" "tk-work --key polecat-convoy-target-mismatch --formula mol-polecat-work" "the work bead waits on the gate under its key, re-slung through mol-polecat-work"
 has "$(cat "$TMP/cancel")" "--step mol-polecat-work.workspace-setup" "cancels the run of THIS step"
 has "$(cat "$TMP/cancel")" "--bead st-setup" "passes the claimed step bead as the cancel's hint"
 has "$(cat "$TMP/cancel")" "integration/tk-cnv" "the cancel reason names the convoy branch"
@@ -206,15 +215,15 @@ no  "$(cat "$TMP/update")" "--notes " "never REPLACES the work bead's notes"
 
 # Only the convoy edge decides; the order the edges render in does not.
 eq "$(run main "$(bead "$ROUTED" "[$CONVOY_INT,$EPIC]")")" \
-   "1|UPDATE;ESCALATE;AWAIT;CANCEL;DRAIN;" \
+   "1|UPDATE;GATE;AWAIT;CANCEL;DRAIN;" \
    "convoy edge listed first: declined the same way"
 
-# Two convoys with different branches: the visit names both, so the reader
+# Two convoys with different branches: the gate names both, so the reader
 # picks the owner.
 CONVOY_B='{"id":"tk-cnb","status":"open","issue_type":"convoy","dependency_type":"parent-child","metadata":{"target":"integration/tk-cnb"}}'
 run main "$(bead "$ROUTED" "[$CONVOY_INT,$CONVOY_B]")" >/dev/null
-has "$(cat "$TMP/esc")" "integration/tk-cnv (convoy tk-cnv)" "two convoys: names the first"
-has "$(cat "$TMP/esc")" "integration/tk-cnb (convoy tk-cnb)" "two convoys: names the second"
+has "$(cat "$TMP/gate")" "integration/tk-cnv (convoy tk-cnv)" "two convoys: names the first"
+has "$(cat "$TMP/gate")" "integration/tk-cnb (convoy tk-cnb)" "two convoys: names the second"
 
 # --- 2. Discrimination: no writes unless the base really is wrong. -------------
 
@@ -248,14 +257,14 @@ eq "$(run polecat/tk-anchor "$(bead '{"branch":"polecat/tk-anchor","target":"mai
    "a branch to resume and a target that differs from base_branch: passes (a rework child branches from the branch under review)"
 
 eq "$(run main "$(bead '{"target":""}' "[$EPIC,$CONVOY_INT]")")" \
-   "1|UPDATE;ESCALATE;AWAIT;CANCEL;DRAIN;" \
+   "1|UPDATE;GATE;AWAIT;CANCEL;DRAIN;" \
    "an EMPTY own target is no target: declined"
 
 # Sling trims the targets it reads, so the guard compares them trimmed too.
 eq "$(run main "$(bead '{"target":"  "}' "[$EPIC,$CONVOY_INT]")")" \
-   "1|UPDATE;ESCALATE;AWAIT;CANCEL;DRAIN;" \
+   "1|UPDATE;GATE;AWAIT;CANCEL;DRAIN;" \
    "a whitespace-only own target is no target: declined"
-has "$(cat "$TMP/esc")" "--message This work would branch from main and land there" "a whitespace-only own target: the no-target visit"
+has "$(cat "$TMP/gate")" "--message This work would branch from main and land there" "a whitespace-only own target: the no-target gate"
 
 eq "$(run integration/tk-cnv "$(bead '{"target":" integration/tk-cnv "}' "[$EPIC,$CONVOY_INT]")")" \
    "0|" \
@@ -299,62 +308,63 @@ eq "$(run main "$(bead "$ROUTED" "[$BLOCKS_CONVOY]")")" \
 # (The RC override must reach the `run` function itself — an env prefix on `eq`
 # would apply after the command substitution has already expanded.)
 
-out="$(FAKE_ESC_RC=1 run main "$TWO_PARENTS")"
-eq "$out" "1|UPDATE;ESCALATE;" \
-   "no visit recorded: no wait, no cancel, no drain"
+out="$(FAKE_GATE_RC=1 run main "$TWO_PARENTS")"
+eq "$out" "1|UPDATE;GATE;" \
+   "no gate recorded: no wait, no cancel, no drain"
 
 out="$(FAKE_AWAIT_RC=1 run main "$TWO_PARENTS")"
-eq "$out" "1|UPDATE;ESCALATE;AWAIT;" \
+eq "$out" "1|UPDATE;GATE;AWAIT;" \
    "the wait did not land: no cancel, no drain"
 
 out="$(FAKE_CANCEL_RC=1 run main "$TWO_PARENTS")"
-eq "$out" "1|UPDATE;ESCALATE;AWAIT;CANCEL;" \
+eq "$out" "1|UPDATE;GATE;AWAIT;CANCEL;" \
    "the cancel did not land: does not drain"
 
 # The note is the bead's own record; the cancel reason carries the same facts, so
 # a note the store refuses does not stop the cancel.
 out="$(FAKE_UPDATE_RC=1 run main "$TWO_PARENTS")"
-eq "$out" "1|UPDATE;ESCALATE;AWAIT;CANCEL;DRAIN;" \
-   "the note is refused: still escalates, waits, cancels, drain-acks"
+eq "$out" "1|UPDATE;GATE;AWAIT;CANCEL;DRAIN;" \
+   "the note is refused: still files a gate, waits, cancels, drain-acks"
 has "$(cat "$TMP/err")" "the cancel reason on this step still records it" "the note is refused: says where the record still lives"
 
 # --- 4. Unreadable bead: decline the way load-context does. --------------------
-# Nothing proves the base of a bead nobody can read. The visit shares
-# load-context's situation key, so one outage files one visit per bead, and an
-# unreadable bead carries no wait, so its visit asks for the re-sling.
+# Nothing proves the base of a bead nobody can read, and a bead no read reaches
+# cannot be blocked. The finding shares load-context's situation key, so one
+# outage files one finding per bead, and it asks for the re-sling.
 
 out="$(FAKE_SHOW_RC=1 run main "")"
-eq "$out" "1|UPDATE;ESCALATE;CANCEL;DRAIN;" "bd show fails: notes, escalates, cancels, drain-acks, exits 1"
-has "$(cat "$TMP/esc")" "--key polecat-unreadable-work" "bd show fails: escalates under load-context's unreadable-work key"
-has "$(cat "$TMP/esc")" "--subject tk-work" "bd show fails: the visit's subject is the work bead"
-has "$(cat "$TMP/esc")" "--message Could not read work bead tk-work at workspace-setup" "bd show fails: the visit opens with the stake"
-has "$(cat "$TMP/esc")" "then re-sling it" "bd show fails: the visit names the release"
-eq  "$(cat "$TMP/await")" "" "bd show fails: no wait, since an unreadable bead carries none"
+eq "$out" "1|UPDATE;FINDING;CANCEL;DRAIN;" "bd show fails: notes, files a finding, cancels, drain-acks, exits 1"
+has "$(cat "$TMP/finding")" "--scope polecat-findings --key polecat-unreadable-work.tk-work" "bd show fails: the finding uses load-context's unreadable-work key, per bead"
+has "$(cat "$TMP/finding")" "--title Work bead tk-work could not be read at workspace-setup" "bd show fails: the finding names the work bead"
+has "$(cat "$TMP/finding")" "--message Could not read work bead tk-work at workspace-setup" "bd show fails: the finding opens with the stake"
+has "$(cat "$TMP/finding")" "then re-sling it" "bd show fails: the finding names the release"
+eq  "$(cat "$TMP/gate")" "" "bd show fails: no gate, since a bead no read reaches cannot be blocked"
+eq  "$(cat "$TMP/await")" "" "bd show fails: no wait"
 has "$(cat "$TMP/cancel")" "--step mol-polecat-work.workspace-setup" "bd show fails: cancels the run of THIS step"
 has "$(cat "$TMP/cancel")" "unreadable work bead" "bd show fails: the cancel reason says why"
 eq "$(cat "$TMP/listargs")" "" "bd show fails: no store listing"
 
 out="$(run main '{"error":"store unavailable"}')"
-eq "$out" "1|UPDATE;ESCALATE;CANCEL;DRAIN;" "error object instead of a bead row: declined"
-has "$(cat "$TMP/esc")" "--key polecat-unreadable-work" "error object: escalates under the unreadable-work key"
+eq "$out" "1|UPDATE;FINDING;CANCEL;DRAIN;" "error object instead of a bead row: declined"
+has "$(cat "$TMP/finding")" "--key polecat-unreadable-work.tk-work" "error object: the finding uses the unreadable-work key"
 
-eq "$(run main '[]')" "1|UPDATE;ESCALATE;CANCEL;DRAIN;" "an empty array: declined"
-eq "$(run main '[null]')" "1|UPDATE;ESCALATE;CANCEL;DRAIN;" "a row that is not an object: declined"
-eq "$(run main 'not json')" "1|UPDATE;ESCALATE;CANCEL;DRAIN;" "output that is not JSON: declined"
+eq "$(run main '[]')" "1|UPDATE;FINDING;CANCEL;DRAIN;" "an empty array: declined"
+eq "$(run main '[null]')" "1|UPDATE;FINDING;CANCEL;DRAIN;" "a row that is not an object: declined"
+eq "$(run main 'not json')" "1|UPDATE;FINDING;CANCEL;DRAIN;" "output that is not JSON: declined"
 
-out="$(FAKE_SHOW_RC=1 FAKE_ESC_RC=1 run main "")"
-eq "$out" "1|UPDATE;ESCALATE;" "unreadable, no visit recorded: does not cancel, does not drain"
+out="$(FAKE_SHOW_RC=1 FAKE_FINDING_RC=1 run main "")"
+eq "$out" "1|UPDATE;FINDING;" "unreadable, no finding recorded: does not cancel, does not drain"
 
 out="$(FAKE_SHOW_RC=1 FAKE_CANCEL_RC=1 run main "")"
-eq "$out" "1|UPDATE;ESCALATE;CANCEL;" "unreadable, cancel did not land: does not drain"
+eq "$out" "1|UPDATE;FINDING;CANCEL;" "unreadable, cancel did not land: does not drain"
 
 # --- 6. The guard writes no molecule member. -----------------------------------
 # A molecule's lifecycle is gascity's: the guard ends the run through
 # run-cancel.sh and the release re-slings the work, so it names no convoy delete
 # or delete-source for a person to run and looks up no root.
 run main "$TWO_PARENTS" >/dev/null
-no "$(cat "$TMP/esc")" "convoy delete" "the visit names no convoy delete"
-no "$(cat "$TMP/esc")" "delete-source" "the visit names no delete-source"
+no "$(cat "$TMP/gate")" "convoy delete" "the gate names no convoy delete"
+no "$(cat "$TMP/gate")" "delete-source" "the gate names no delete-source"
 no "$(cat "$TMP/update")" "convoy delete" "the note names no convoy delete"
 eq "$(cat "$TMP/listargs")" "" "the guard reads no root: gascity's cancel resolves the run from the step"
 no "$GUARD" "convoy delete" "the guard block itself runs no convoy delete"
@@ -363,43 +373,43 @@ no "$GUARD" "convoy delete" "the guard block itself runs no convoy delete"
 # Sling pours from a bead's own target, so a convoy child whose target differs
 # from base_branch was stamped after the pour, or a --var override chose the
 # base. Its run is cancelled before a branch is cut from main, and the re-sling
-# the visit releases pours from the bead's own target.
+# the gate releases pours from the bead's own target.
 STAMPED="$(bead '{"target":"integration/tk-cnv","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}' "[$EPIC,$CONVOY_INT]")"
 eq "$(run main "$STAMPED")" \
-   "1|UPDATE;ESCALATE;AWAIT;CANCEL;DRAIN;" \
+   "1|UPDATE;GATE;AWAIT;CANCEL;DRAIN;" \
    "own target stamped after a pour from main: declined"
-has "$(cat "$TMP/esc")" "--key polecat-convoy-target-mismatch" "stale own target: escalates under the convoy guard's key"
-has "$(cat "$TMP/esc")" "--message This work would branch from main but land on integration/tk-cnv" "stale own target: the visit opens with the stake"
-has "$(cat "$TMP/esc")" "closing it re-slings tk-work, which pours from its own target" "stale own target: the visit names the re-sling"
+has "$(cat "$TMP/gate")" "--key polecat-convoy-target-mismatch" "stale own target: the gate uses the convoy guard's key"
+has "$(cat "$TMP/gate")" "--message This work would branch from main but land on integration/tk-cnv" "stale own target: the gate opens with the stake"
+has "$(cat "$TMP/gate")" "clearing it re-slings tk-work, which pours from its own target" "stale own target: the gate names the re-sling"
 has "$(cat "$TMP/cancel")" "own target integration/tk-cnv differs from base_branch main" "stale own target: the cancel reason says why"
 
 # The other direction: poured from the convoy's branch, but the bead names main,
 # so main would receive the integration branch's unlanded history.
 eq "$(run integration/tk-cnv "$(bead '{"target":"main"}' "[$EPIC,$CONVOY_INT]")")" \
-   "1|UPDATE;ESCALATE;AWAIT;CANCEL;DRAIN;" \
+   "1|UPDATE;GATE;AWAIT;CANCEL;DRAIN;" \
    "own target main on a run poured from the convoy's branch: declined"
-has "$(cat "$TMP/esc")" "--message This work would branch from integration/tk-cnv but land on main" "own target main: the visit opens with the stake"
+has "$(cat "$TMP/gate")" "--message This work would branch from integration/tk-cnv but land on main" "own target main: the gate opens with the stake"
 
 # --- 8. Conflicting convoys. ---------------------------------------------------
 # The work can land on only one of two convoy branches, and nothing on the bead
 # says which. A base_branch that matches one of them is the parent bd happened
-# to report, not a choice, so the child is still declined, and the visit does not
+# to report, not a choice, so the child is still declined, and the gate does not
 # call that base wrong.
 CONFLICT="$(bead "$ROUTED" "[$CONVOY_INT,$CONVOY_B]")"
 eq "$(run integration/tk-cnv "$CONFLICT")" \
-   "1|UPDATE;ESCALATE;AWAIT;CANCEL;DRAIN;" \
+   "1|UPDATE;GATE;AWAIT;CANCEL;DRAIN;" \
    "two convoys on different branches, base_branch is one of them: declined"
-has "$(cat "$TMP/esc")" "--message This work belongs to convoys that land on different branches: integration/tk-cnb (convoy tk-cnb), integration/tk-cnv (convoy tk-cnv)." "conflict: the visit opens with the stake and names every convoy"
-has "$(cat "$TMP/esc")" "This run was poured from integration/tk-cnv" "conflict: the visit names the poured base"
-no  "$(cat "$TMP/esc")" "and land there" "conflict: the visit does not call the poured base wrong"
-has "$(cat "$TMP/esc")" "naming the convoy branch that should receive it" "conflict: the release asks which convoy receives it"
-has "$(cat "$TMP/esc")" "closing it re-slings tk-work" "conflict: the visit names the re-sling"
+has "$(cat "$TMP/gate")" "--message This work belongs to convoys that land on different branches: integration/tk-cnb (convoy tk-cnb), integration/tk-cnv (convoy tk-cnv)." "conflict: the gate opens with the stake and names every convoy"
+has "$(cat "$TMP/gate")" "This run was poured from integration/tk-cnv" "conflict: the gate names the poured base"
+no  "$(cat "$TMP/gate")" "and land there" "conflict: the gate does not call the poured base wrong"
+has "$(cat "$TMP/gate")" "naming the convoy branch that should receive it" "conflict: the release asks which convoy receives it"
+has "$(cat "$TMP/gate")" "clearing it re-slings tk-work" "conflict: the gate names the re-sling"
 has "$(cat "$TMP/cancel")" "convoys target different branches" "conflict: the cancel reason says why"
 
 eq "$(run main "$CONFLICT")" \
-   "1|UPDATE;ESCALATE;AWAIT;CANCEL;DRAIN;" \
+   "1|UPDATE;GATE;AWAIT;CANCEL;DRAIN;" \
    "two convoys on different branches, base_branch is neither: declined"
-has "$(cat "$TMP/esc")" "land on different branches" "base_branch is neither: the conflict visit"
+has "$(cat "$TMP/gate")" "land on different branches" "base_branch is neither: the conflict gate"
 
 eq "$(run integration/tk-cnv "$(bead '{"target":"integration/tk-cnv"}' "[$CONVOY_INT,$CONVOY_B]")")" \
    "0|" \
@@ -410,9 +420,9 @@ eq "$(run integration/tk-cnv "$(bead "$ROUTED" "[$CONVOY_INT,$CONVOY_SAME]")")" 
    "0|" \
    "two convoys on the same branch, which is base_branch: passes"
 eq "$(run main "$(bead "$ROUTED" "[$CONVOY_INT,$CONVOY_SAME]")")" \
-   "1|UPDATE;ESCALATE;AWAIT;CANCEL;DRAIN;" \
+   "1|UPDATE;GATE;AWAIT;CANCEL;DRAIN;" \
    "two convoys on the same branch, base_branch differs: declined"
-has "$(cat "$TMP/esc")" "--message This work would branch from main and land there" "two convoys on the same branch: the one-branch visit, not the conflict one"
+has "$(cat "$TMP/gate")" "--message This work would branch from main and land there" "two convoys on the same branch: the one-branch gate, not the conflict one"
 
 CONVOY_B_CLOSED='{"id":"tk-cnb","status":"closed","issue_type":"convoy","dependency_type":"parent-child","metadata":{"target":"integration/tk-cnb"}}'
 eq "$(run integration/tk-cnv "$(bead "$ROUTED" "[$CONVOY_INT,$CONVOY_B_CLOSED]")")" \

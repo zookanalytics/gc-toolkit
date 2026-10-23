@@ -4,9 +4,10 @@
 # accepts, and the path they call resolves for a city-scoped agent.
 #
 # The coupling is what needs a test. A category the script does not know is
-# refused at runtime, so the entry is simply lost — and an append beside an
-# escalation double-records the same incident, because escalate.sh already
-# wrote that entry. Neither shows up as a failure anywhere.
+# refused at runtime, so the entry is simply lost — and an append beside a
+# human gate the deacon filed double-records the same incident, because
+# human-gate.sh already wrote that entry. Neither shows up as a failure
+# anywhere.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,7 +16,7 @@ TOML="$ROOT/formulas/mol-deacon-patrol.toml"
 PROMPT="$ROOT/agents/deacon/prompt.template.md"
 AGENT="$ROOT/agents/deacon/agent.toml"
 LEDGER="$HERE/gc-deacon-ledger.sh"
-ESCALATE="$HERE/escalate.sh"
+GATE="$HERE/human-gate.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-deacon-ledger-wiring-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -24,7 +25,7 @@ ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi; }
 
-for f in "$TOML" "$PROMPT" "$AGENT" "$LEDGER" "$ESCALATE"; do
+for f in "$TOML" "$PROMPT" "$AGENT" "$LEDGER" "$GATE"; do
   [ -s "$f" ] || { echo "missing $f" >&2; exit 1; }
 done
 
@@ -64,7 +65,7 @@ fi
 
 echo
 echo "# the callers speak the vocabulary the script accepts"
-for src in "$TOML" "$PROMPT" "$ESCALATE"; do
+for src in "$TOML" "$PROMPT" "$GATE"; do
   name="${src##*/}"
   used=$(appends_in "$src" | sort -u)
   if [ -z "$used" ]; then
@@ -83,23 +84,25 @@ for src in "$TOML" "$PROMPT" "$ESCALATE"; do
 done
 
 echo
-echo "# escalate.sh owns the escalation entry, and owns it alone"
-grep -q 'append escalation' "$ESCALATE" \
-  && ok "escalate.sh writes the escalation entry itself" \
-  || bad "escalate.sh no longer appends an escalation entry — every escalation is now unrecorded"
-grep -q 'bead:\$VISIT' "$ESCALATE" \
-  && ok "and points the entry at the visit it filed" \
-  || bad "the escalation entry no longer carries the visit id, which is the only pointer to it"
-if grep -q 'append escalation' "$TOML"; then
-  bad "the formula appends an escalation entry too — escalate.sh already wrote one, so the incident is recorded twice"
-else
-  ok "the formula appends no escalation entry beside escalate.sh's"
-fi
-# The gate is what keeps every other agent's escalations out of the deacon's
+echo "# human-gate.sh owns the entry for a gate the deacon files, and owns it alone"
+grep -q 'append escalation' "$GATE" \
+  && ok "human-gate.sh writes the gate's ledger entry itself" \
+  || bad "human-gate.sh no longer appends a ledger entry — every gate the deacon files is now unrecorded"
+grep -q 'bead:\$GATE' "$GATE" \
+  && ok "and points the entry at the gate it filed" \
+  || bad "the ledger entry no longer carries the gate id, which is the only pointer to it"
+for src in "$TOML" "$PROMPT"; do
+  if grep -qE '"\$LEDGER(_SH)?" append escalation' "$src"; then
+    bad "${src##*/} appends a gate's entry too — human-gate.sh already wrote one, so the incident is recorded twice"
+  else
+    ok "${src##*/} appends no gate entry beside human-gate.sh's"
+  fi
+done
+# The role check is what keeps every other agent's gates out of the deacon's
 # ledger. Its premise is that the deacon is a distinct role in $GC_AGENT.
-grep -q 'LEDGER_ROLE" = deacon' "$ESCALATE" \
-  && ok "the escalate.sh append is gated to the deacon" \
-  || bad "escalate.sh appends for every caller — a polecat's escalation is not a deacon shift record"
+grep -q 'LEDGER_ROLE" = deacon' "$GATE" \
+  && ok "the human-gate.sh append is limited to the deacon" \
+  || bad "human-gate.sh appends for every caller — a polecat's gate is not a deacon shift record"
 
 echo
 echo "# the path a city-scoped agent calls actually resolves"

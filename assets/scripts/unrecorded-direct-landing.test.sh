@@ -18,17 +18,18 @@
 # two steps judges the prepared head and decides nothing here, so it is left
 # out. The blocks run against real git repositories, the real
 # direct-merge-push.sh, refinery-workspace.sh, detached-job.sh and bd-lib.sh, a
-# stub gc that keeps the bead in a file, and stub lifecycle.sh and escalate.sh
+# stub gc that keeps the bead in a file, and stub lifecycle.sh and human-gate.sh
 # that log. They run from inside the rig's checkout, because
 # branch_has_real_change's git calls take their repository from the cwd.
 # Proves:
 #   - an attempt that pushes and then cannot record leaves the landing on
 #     origin and the stamp on the bead, and the next attempt records the
-#     landing at the stamped commit without parking, escalating or draining,
+#     landing at the stamped commit without parking, filing a gate or draining,
 #     whether origin/main stayed at the landing or moved on past it, and
 #     whatever strategy the bead reads by then;
-#   - a branch that never introduced work is still refused, parked and
-#     escalated, with no stamp and with a stamp its target does not carry.
+#   - a branch that never introduced work is still refused, parked and put to a
+#     person as a human gate, with no stamp and with a stamp its target does not
+#     carry.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -94,10 +95,10 @@ echo "$*" >> "$FAKE_LC_LOG"
 [ -z "${LC_FAIL:-}" ] || { echo "lifecycle: refused" >&2; exit 1; }
 exit 0
 LC
-cat > "$PACK/escalate.sh" <<'ESC'
+cat > "$PACK/human-gate.sh" <<'GATE'
 #!/usr/bin/env bash
-echo "escalate $*" >> "$FAKE_LOG"
-ESC
+echo "human-gate $*" >> "$FAKE_LOG"
+GATE
 chmod +x "$PACK"/*.sh
 # gc answers the roster for `rig list` and the bead file for `bd show`, applies
 # each --set-metadata and --unset-metadata of a `bd update` to that file, and
@@ -180,9 +181,9 @@ recorded_at() { # <label> <sha>: one transition, recording and closing at <sha>
     *) bad "$1: recorded and closed at ${2:0:9} through one lifecycle transition" "$(cat "$D/lc.log")" ;;
   esac
 }
-not_parked() { # <label>: no refusal, no escalation, no drain
+not_parked() { # <label>: no refusal, no gate, no drain
   hasnt "$(cat "$D/lc.log")" "refused_false_completion" "$1: the bead is not parked as a false completion"
-  hasnt "$(cat "$D/gc.log")" "escalate " "$1: nothing is escalated"
+  hasnt "$(cat "$D/gc.log")" "human-gate " "$1: no gate is filed"
   hasnt "$(cat "$D/gc.log")" "runtime drain-ack" "$1: the session does not drain"
 }
 # unrecorded_landing <label>: the first attempt, whose record never lands.
@@ -236,7 +237,7 @@ attempt
 eq "$PREP_RC" 0 "nowork: the prepare stages the branch"
 eq "$RC" 1 "nowork: merge-push stops"
 has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "nowork: the bead is parked as a false completion"
-has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-false-completion" "nowork: the refusal is escalated"
+has "$(cat "$D/gc.log")" "human-gate --subject wb --key refinery-false-completion" "nowork: the refusal files a gate on the bead"
 has "$(cat "$D/gc.log")" "runtime drain-ack" "nowork: the session drains"
 eq "$(merged_tries)" 0 "nowork: nothing is recorded as merged"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "nowork: nothing is pushed"
@@ -250,7 +251,7 @@ jq --arg s "$SIDE" '.[0].metadata.direct_landing_sha = $s' "$D/bead.json" > "$D/
 attempt
 eq "$RC" 1 "stale: merge-push stops"
 has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "stale: the bead is parked as a false completion"
-has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-false-completion" "stale: the refusal is escalated"
+has "$(cat "$D/gc.log")" "human-gate --subject wb --key refinery-false-completion" "stale: the refusal files a gate on the bead"
 eq "$(merged_tries)" 0 "stale: nothing is recorded as merged"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "stale: nothing is pushed"
 

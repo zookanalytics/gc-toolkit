@@ -324,9 +324,9 @@ approved 18
 out=$("$SUT" 2>&1)
 has "$out" "merged + recorded M8" "a tracking_only pr_number reference does not hold"
 
-# The comment arm's visit path holds the merge through this probe and nothing
-# else: escalate.sh files the visit DEPENDING on its subject, so a blocks edge
-# back would be a cycle, and pr_number is what is left to hold on.
+# A visit holds the merge through this probe and nothing else: a visit depends
+# on its subject, so a blocks edge back would be a cycle, and pr_number is what
+# is left to hold on.
 store "[$(anchor M9 19), $(rev M9), {\"id\":\"vis-1\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"pr_number\":\"19\",\"task_kind\":\"visit\",\"anchor_bead\":\"M9\"}}]"
 printf '%s' "$(prview 19 OPEN CLEAN)" > "$GH_DIR/pr_view_19.json"
 approved 19

@@ -454,7 +454,7 @@ Also run every cycle, whatever the sweep is doing:
   case $? in
     0) "$SCRIPTS/gc-deacon-ledger.sh" append warrant "<session> filed for the dog: <what is stale and for how long>" "${FILED:+bead:$FILED}" ;;
     3) : ;;  # a warrant already stood; it was ledgered when it opened
-    *) echo "file-warrant.sh refused to file for <session> (it resolved to no live session id); report this wedged session as a finding (patrol-finding.sh --scope deacon-findings) instead." >&2 ;;
+    *) echo "file-warrant.sh refused to file for <session> (it resolved to no live session id); report this wedged session as a deacon finding through patrol-finding.sh instead." >&2 ;;
   esac
   # <<< warrant-file
   ```
