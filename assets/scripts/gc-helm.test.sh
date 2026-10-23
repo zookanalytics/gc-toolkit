@@ -1542,7 +1542,7 @@ grep -q -- '--root root-FOLD' "$FAKE_CANCELS" \
   || bad "(DELEGFOLD) the run's end was lost: $(cat "$FAKE_CANCELS")"
 
 # ── takeaway --release --assign: release the bead TO a named agent ────────────
-# A named agent's hook matches the bead's assignee and never reads gc.routed_to,
+# The pack addresses a named agent by its assignee (docs/deferred-dispatch.md),
 # so work that is its own (a town-repo edit is mechanik's) is released to it as
 # its assignee, with no route. The stub reads a bead's assignee from the
 # assignees fixture, so a row there models an assignee that landed and its
