@@ -261,7 +261,7 @@ if ! STOP_OUT=$(DETACHED_JOB_STOP_GRACE=20 "$JOB" stop "$GATE"); then
 fi
 # refinery-workspace.sh clears the leftover and stages the branch, so this block
 # removes nothing itself. It is found the way the launcher is. The stage records
-# that the prep worktree holds $BRANCH for $WORK.
+# that the prep worktree holds $BRANCH for $WORK, which merge-push checks.
 WS=""
 for c in "$RIG_ROOT" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
@@ -863,6 +863,14 @@ branch_has_real_change() {
 # <<< branch-has-real-change
 ```
 
+**The prepared head is one bead's.** The rebase step recorded in the prep
+worktree which bead and branch it staged there, and this step takes `WORK` and
+`BRANCH` from the shell that runs it. So each block below that pushes the
+prepared head or records it opens with the same check, `prep-holds-work`, and
+`direct-merge-push.sh` makes it for itself. When the prep worktree does not
+hold `$BRANCH` for `$WORK`, or records nothing, the block pushes and records
+nothing, and drains.
+
 **0. Refuse a 0-diff branch (both modes).** A close-as-merged or a PR for a
 branch that merges to a no-op is a false completion. Never silently retry. The
 prepared head is the detached prep worktree's HEAD (the rebase step staged it
@@ -878,6 +886,19 @@ RIG_ROOT="${GC_RIG_ROOT:-}"
 [ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
+# >>> prep-holds-work
+# Go on only while the prep worktree holds BRANCH for WORK.
+WS=""
+for c in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
+done
+[ -n "$WS" ] || { echo "refinery-workspace.sh not found, so nothing shows which bead the prep worktree holds. NOT pushing or recording the prepared head; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+if ! "$WS" verify --work "$WORK" --branch "$BRANCH"; then
+  echo "NOT pushing or recording the prepared head for $WORK; the next patrol prepares the work again"
+  gc runtime drain-ack
+  exit 1
+fi
+# <<< prep-holds-work
 PREP_SHA=$(git -C "$PREP_WT" rev-parse HEAD)
 if ! branch_has_real_change "origin/$TARGET" "$PREP_SHA"; then
   LANDED_SHA=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.direct_landing_sha // empty')
@@ -968,6 +989,19 @@ RIG_ROOT="${GC_RIG_ROOT:-}"
 [ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
+# >>> prep-holds-work
+# Go on only while the prep worktree holds BRANCH for WORK.
+WS=""
+for c in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
+done
+[ -n "$WS" ] || { echo "refinery-workspace.sh not found, so nothing shows which bead the prep worktree holds. NOT pushing or recording the prepared head; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+if ! "$WS" verify --work "$WORK" --branch "$BRANCH"; then
+  echo "NOT pushing or recording the prepared head for $WORK; the next patrol prepares the work again"
+  gc runtime drain-ack
+  exit 1
+fi
+# <<< prep-holds-work
 # Deliberately NO fetch here. `--force-with-lease` with no explicit expected
 # value compares against the LOCAL remote-tracking ref, so a fetch immediately
 # before the push refreshes the very ref the lease is checked against and
@@ -1110,6 +1144,19 @@ fi
 GATING_ANCHOR="${EXISTING_ANCHOR:-$WORK}"
 # <<< one-anchor-per-pr-resolve
 # >>> one-anchor-per-pr-terminal
+# >>> prep-holds-work
+# Go on only while the prep worktree holds BRANCH for WORK.
+WS=""
+for c in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
+done
+[ -n "$WS" ] || { echo "refinery-workspace.sh not found, so nothing shows which bead the prep worktree holds. NOT pushing or recording the prepared head; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+if ! "$WS" verify --work "$WORK" --branch "$BRANCH"; then
+  echo "NOT pushing or recording the prepared head for $WORK; the next patrol prepares the work again"
+  gc runtime drain-ack
+  exit 1
+fi
+# <<< prep-holds-work
 if [ -n "$EXISTING_ANCHOR" ]; then
   # This arm closes the rework landed-on-branch, so the landing must be provable
   # against origin: the mr push above can be rejected or skipped and leave

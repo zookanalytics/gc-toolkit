@@ -29,7 +29,11 @@
 #     patrol's blocks hand theirs to this script;
 #   - each point a cycle ends carries the same teardown block, which finds
 #     this script without the cwd, tears the prep worktree down, and when it
-#     cannot, says so and carries on without draining.
+#     cannot, says so and carries on without draining;
+#   - each merge-push block that reads, pushes or records the prepared head
+#     opens with the same prep-holds-work block, which goes on only when the
+#     prep worktree holds BRANCH for WORK, and otherwise, or with no script
+#     reachable, drains having done nothing.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -420,6 +424,72 @@ has "$OUT" "carry on" "teardown block, no script reachable: it says to carry on"
 eq "$(registered "$D/rig" "$PREP")" yes "teardown block, no script reachable: the prep worktree is left for the next stage"
 ws teardown --rig-root "$D/rig" >/dev/null
 eq "$(grep -c 'drain-ack' "$GC_LOG")" 0 "teardown block: no run drains the session"
+
+# --- The prep-holds-work block. ----------------------------------------------------
+# merge-push pushes the prepared head in one block and records it in two, and
+# each opens with one check that the prep worktree holds BRANCH for WORK, ahead
+# of everything it does with the prepared head.
+echo "── the prep-holds-work block ──"
+eq "$(awk '/^id = "/ { id = $3; gsub(/"/, "", id) } /^# >>> prep-holds-work$/ { printf "%s ", id }' "$PATROL_TOML")" \
+  "merge-push merge-push merge-push " \
+  "only merge-push carries the prep-holds-work block"
+for f in zero-diff-guard shared-branch-push-mode one-anchor-per-pr-terminal; do
+  awk -v m="$f" '$0 ~ ("^# >>> " m "$") {f=1; next} $0 ~ ("^# <<< " m "$") {f=0} f' "$PATROL_TOML" > "$TMP/fence-$f.sh"
+  CHECK_AT=$(grep -n '^# >>> prep-holds-work$' "$TMP/fence-$f.sh" | head -1 | cut -d: -f1)
+  ACT_AT=$(grep -nE 'PREP_SHA=|push origin|fetch origin|"\$LC" transition|gc bd update|escalate\.sh' "$TMP/fence-$f.sh" | head -1 | cut -d: -f1)
+  if [ -n "$CHECK_AT" ] && [ -n "$ACT_AT" ] && [ "$CHECK_AT" -lt "$ACT_AT" ]; then
+    ok "$f: the check comes before the block reads, pushes or records the prepared head"
+  else
+    bad "$f: the check comes before the block reads, pushes or records the prepared head" "check at ${CHECK_AT:-none}, first act at ${ACT_AT:-none}"
+  fi
+done
+NHOLDS=$(awk -v out="$TMP/holds-" '
+  /^# >>> prep-holds-work$/ { n++; f=1; next }
+  /^# <<< prep-holds-work$/ { f=0; next }
+  f { print > (out n ".sh") }
+  END { print n + 0 }' "$PATROL_TOML")
+eq "$NHOLDS" 3 "three prep-holds-work blocks are extracted"
+SAME=yes
+for i in 2 3; do cmp -s "$TMP/holds-1.sh" "$TMP/holds-$i.sh" || SAME=no; done
+eq "$SAME" yes "every prep-holds-work block is the same block"
+case "$(cat "$TMP/holds-1.sh")" in
+  *\\*) bad "the prep-holds-work block is backslash-free (TOML would eat it)" ;;
+  *)    ok  "the prep-holds-work block is backslash-free (TOML would eat it)" ;;
+esac
+bash -n "$TMP/holds-1.sh" && ok "the prep-holds-work block is valid bash" || bad "the prep-holds-work block is valid bash"
+
+# The block runs from a cwd in another repository, with the script reachable
+# only through the city's gc-toolkit rig. What follows it in its fence is
+# stood for by one line, so a pass shows the block going on. Sets RC and OUT.
+{ cat "$TMP/holds-1.sh"; echo 'echo "PAST THE CHECK"'; } > "$TMP/holds-run.sh"
+holds_block() { # <city> <work> <branch>
+  : > "$GC_LOG"
+  OUT=$(cd "$D/cwd" && GC_RIG_ROOT="$D/rig" GC_CITY_PATH="$1" WORK="$2" BRANCH="$3" bash "$TMP/holds-run.sh" 2>&1); RC=$?
+}
+refused() { # <label>: the block stopped, drained and went no further
+  eq "$RC" 1 "$1: exits 1"
+  case "$OUT" in *"PAST THE CHECK"*) bad "$1: nothing after the check runs" ;; *) ok "$1: nothing after the check runs" ;; esac
+  eq "$(grep -c 'drain-ack' "$GC_LOG")" 1 "$1: the session drains, leaving the work to retry"
+}
+ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
+holds_block "$TMP/city" wb polecat/wb
+eq "$RC" 0 "prep-holds-work, the bead and branch staged: exits 0"
+has "$OUT" "PAST THE CHECK" "prep-holds-work, the bead and branch staged: the block goes on"
+eq "$(grep -c 'drain-ack' "$GC_LOG")" 0 "prep-holds-work, the bead and branch staged: the session does not drain"
+holds_block "$TMP/city" wa polecat/wa
+refused "prep-holds-work, another bead's WORK and BRANCH"
+has "$OUT" "holds polecat/wb for wb, not polecat/wa for wa" "prep-holds-work, another bead's WORK and BRANCH: the script's reason is shown"
+has "$OUT" "NOT pushing or recording the prepared head for wa" "prep-holds-work, another bead's WORK and BRANCH: it says the prepared head is neither pushed nor recorded"
+holds_block "$TMP/city" wa polecat/wb
+refused "prep-holds-work, another bead's WORK on the staged branch"
+holds_block "$TMP/city" wb polecat/wa
+refused "prep-holds-work, the staged bead with another BRANCH"
+holds_block "$TMP/no-pack-city" wb polecat/wb
+refused "prep-holds-work, no script reachable"
+has "$OUT" "refinery-workspace.sh not found" "prep-holds-work, no script reachable: it says why"
+ws teardown --rig-root "$D/rig" >/dev/null
+holds_block "$TMP/city" wb polecat/wb
+refused "prep-holds-work, no prep worktree"
 
 echo "-----"
 echo "refinery-workspace: $PASS passed, $FAIL failed"

@@ -56,9 +56,12 @@
 #       found another bead or branch, no record, or no worktree at the prep
 #       path, teardown left it behind, or checks could not empty the directory ·
 #       2 usage, or no rig root git can read
-# Callers: formulas/mol-refinery-patrol.toml. Its rebase step stages, its
-# run-tests step empties the checks, and its rebase conflict arm,
-# handle-failures' branch-caused arm and both merge-push paths tear down.
+# Callers: formulas/mol-refinery-patrol.toml and direct-merge-push.sh. The
+# patrol's rebase step stages; its merge-push step verifies in the zero-diff
+# guard, before the push and before the records that follow it, and
+# direct-merge-push.sh verifies before it lands; its run-tests step empties the
+# checks; and its rebase conflict arm, handle-failures' branch-caused arm and
+# both merge-push paths tear down.
 set -uo pipefail
 
 PROG="${0##*/}"
