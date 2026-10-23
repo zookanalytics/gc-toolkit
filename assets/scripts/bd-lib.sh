@@ -186,6 +186,24 @@ bd_human_gates() {
     else error("not an array") end' 2>/dev/null
 }
 
+# $HUMAN_GATE_JQ — the same rule over a listing that includes gates (`gc bd
+# list --include-gates`), for a reader that classifies many beads from one read
+# rather than making one call per bead. Its defs, prepended to a jq program in
+# the in-variable convention standing-kinds.sh describes:
+#   open_human_gates       on the listing array: the ids of its human gates that
+#                          are not closed
+#   blocked_by_any($ids)   on one row: whether its own blocks edges reach one of
+#                          those ids, a gate blocking the bead that waits on it
+# shellcheck disable=SC2034  # read by the scripts that source this file
+HUMAN_GATE_JQ='
+  def open_human_gates:
+    [ .[] | select((.issue_type // "") == "gate" and (.await_type // "") == "human")
+          | select(((.status // "open") | tostring) != "closed") | .id ];
+  def blocked_by_any($ids):
+    any(.dependencies[]?; (.type // "") == "blocks"
+        and ((.depends_on_id // "") as $d | ($ids | index($d)) != null));
+'
+
 # The anchor graph. A bead that hangs off a PR anchor (a review, a rework
 # child, a finding, a validation pass, a visit) names the anchor in
 # anchor_bead, and that key is what makes it a child. Each child also has an

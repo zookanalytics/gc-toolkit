@@ -3,10 +3,11 @@
 # Job: classify every open bead in this rig as worked / gated / conversing /
 # held-by-design / awaiting placement / routed-and-claimable / topology /
 # machine residue.
-# Anything left is an UNNAMED WAIT. Then file/refresh ONE batch triage visit
-# (delta only) on the standing per-rig unnamed-waits subject via human-gate.sh.
-# Also owns the standing-subject recurrence: each task_kind=triage-subject
-# bead gets a visit iff its scope set CHANGED and no visit is live.
+# Anything left is an UNNAMED WAIT. Then file ONE batch human gate (delta only)
+# on the standing per-rig unnamed-waits subject via human-gate.sh, its census in
+# the re-check command its message carries. Also owns the standing-subject
+# recurrence: each task_kind=triage-subject bead gets a human gate iff its scope
+# set CHANGED and no human gate or conversation already waits on it.
 # A PR-gated anchor whose PR is open is a named wait whatever the PR's age: the
 # open PR names the wait, and the operator's review of it has no deadline.
 # Replaces formulas/mol-liveness-sweep.toml + mol-triage-recurrence.toml.
@@ -24,10 +25,11 @@ set -uo pipefail
 
 PROG="liveness-sweep"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# The one definition of what subject a visit covers, shared with gc-helm.sh,
-# converse-fold.sh and gate-visit-sweep.sh. Exposes $VISIT_IDENTITY_JQ.
-# shellcheck source=visit-identity.sh
-. "$HERE/visit-identity.sh" || { echo "$PROG: cannot source visit-identity.sh from $HERE" >&2; exit 1; }
+# The one definition of a conversation's shape, shared with this sweep's
+# precheck and orphan-dispose.sh. Exposes $CONVERSATION_JQ, which the classify
+# block and the guards below splice in.
+# shellcheck source=conversation.sh
+. "$HERE/conversation.sh" || { echo "$PROG: cannot source conversation.sh from $HERE" >&2; exit 1; }
 # The one definition of the standing kinds, shared with this sweep's precheck,
 # liveness-recheck.sh, the proactive scan and the doctor checks. Exposes
 # $STANDING_KINDS_JQ, which the classify block splices in.
@@ -45,8 +47,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=liveness-classify.sh
 . "$HERE/liveness-classify.sh" || { echo "$PROG: cannot source liveness-classify.sh from $HERE" >&2; exit 1; }
 # The one definition of an anchor's children (bd-lib.sh's anchor graph), which
-# the landed-fix wedge census reads. Its reads go through _bd_call, redefined
-# below to carry this sweep's --db pin and per-call bound.
+# the landed-fix wedge census reads, and of a bead's human gates: the one reader
+# rule (bd_human_gates), which the re-file guard reads, and the same rule over a
+# listing ($HUMAN_GATE_JQ), which the classify block and the guards splice in.
+# Its reads go through _bd_call, redefined below to carry this sweep's --db pin
+# and per-call bound.
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh from $HERE" >&2; exit 1; }
 HUMAN_GATE="${GC_HUMAN_GATE_TOOL:-$HERE/human-gate.sh}"
@@ -142,9 +147,10 @@ unset GC_RECONCILE_BD_CACHE
 READY="$TMP/ready.json"; LIVE="$TMP/live.json"; WIDEN="$TMP/widen.json"; ALIVE="$TMP/alive.json"
 bd_read "$READY" ready --unassigned --limit=0 --json \
     || { echo "$PROG: FAIL-SAFE: ready listing unreadable — sweep aborts, nothing filed" >&2; exit 1; }
-# --include-gates: a demand is a human gate (issue_type=gate), which `bd list`
-# hides by default. The census must carry it so $demanded names the wait it
-# holds; the gate itself is never classified (it is excluded from `bd ready`).
+# --include-gates: a human gate is a bead of type gate, which `bd list` hides by
+# default. The census must carry the open ones, so that a bead one blocks reads
+# held by design and the guards below see a gate already waiting on a subject;
+# the gate itself is never classified (it is excluded from `bd ready`).
 bd_read "$LIVE" list --status=open,in_progress --include-gates --limit=0 --json \
     || { echo "$PROG: FAIL-SAFE: live listing unreadable — sweep aborts, nothing filed" >&2; exit 1; }
 # WIDEN carries every non-closed status LIVE omits: "is that target still
@@ -159,7 +165,7 @@ PASS_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 # --- open PRs, read ONCE per pass, repo-qualified from the beads' own pr_url --
 # Three-valued liveness (none/verified/unverified): a failed read hides
 # nothing — an unread repository contributes no open PRs, so its beads are
-# reported — but the visit body owes the word.
+# reported — but the gate's message owes the word.
 PRURLS="$TMP/prurls"; : > "$PRURLS"
 PR_LIVENESS=none
 jq -r '[ .[] | select((.metadata.merge_result // "") == "pull_request")
@@ -250,19 +256,19 @@ HUSK_STEPS=$(jq -R . < "$HUSK_TMP" | jq -sc 'map(select(length > 0)) | unique')
 HUSK_ROOTS=$(jq -R . < "$HUSK_ROOTS_TMP" | jq -sc 'map(select(length > 0)) | unique')
 
 # --- live sitting identities: "conversing" requires a live holder -------------
-# A visit covers its subject (and is itself conversing) only while the sitting
-# holding it is live. This pass is mechanical but reads sessions here — the one
+# A conversation covers its subject only while the sitting holding it is live.
+# This pass is mechanical but reads sessions here — the one
 # liveness source the pack trusts (mol-witness-patrol):
 # a holder GONE from the session list is dead, and so is one still listed in a
 # terminal state — archived or closed, the dead states helm's ownerLive keys on
 # (services/helm/internal/board/derive.go); a holder listed in any other state
 # is live. $LIVE_SESSIONS_JSON is every name a LIVE listed session carries
-# (id, session_name, alias, name, agent_name); a claim writes one of assignee /
-# gc.session_id / gc.session_name. An UNCLAIMED visit names no holder and always
-# covers — it is a pending escalation, not a dead sitting. On an unreadable list
-# $LIVENESS_KNOWN stays false and the sweep has the classifier keep every visit
-# covering (unreadable_liveness_covers): an unprovable death is not a death,
-# and the subject is still named by its open visit meanwhile.
+# (id, session_name, alias, name, agent_name); a conversation a sitting holds is
+# assigned to that sitting's alias. A conversation in the queue of the operator
+# (assigned to `human`) is held by no sitting, so it covers nothing. On an
+# unreadable list $LIVENESS_KNOWN stays false and the sweep has the classifier
+# keep every held conversation covering (unreadable_liveness_covers): an
+# unprovable death is not a death.
 LIVE_SESSIONS_JSON="[]"
 LIVENESS_KNOWN=false
 SESS_RAW=$(bounded gc session list --state=all --json 2>/dev/null | scrub)
@@ -332,7 +338,7 @@ CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfi
       --argjson preopen_green "$PREOPEN_GREEN_MAP" \
       --argjson livesessions "${LIVE_SESSIONS_JSON:-[]}" --argjson livenessknown "${LIVENESS_KNOWN:-false}" \
       --argjson unreadable_liveness_covers true \
-      "$VISIT_IDENTITY_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ$LIVENESS_CLASSIFY_JQ"'liveness_classify')
+      "$HUMAN_GATE_JQ$CONVERSATION_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ$LIVENESS_CLASSIFY_JQ"'liveness_classify')
 printf '%s' "$CLASSIFIED" | jq -e 'type == "array"' >/dev/null 2>&1 \
     || { echo "$PROG: FAIL-SAFE: classification did not produce an array — nothing filed" >&2; exit 1; }
 CANDIDATES=$(printf '%s' "$CLASSIFIED" | jq -c 'map(select(.class == "unnamed") | {id, title, type})')
@@ -434,7 +440,7 @@ SWEEP_SUBJECT=$(jq -r '[.[] | select((.metadata.task_kind // "") == "triage-subj
   | select((.metadata["triage.scope"] // "") == "unnamed-waits")] | (.[0].id // "")' "$LIVE")
 if [ -z "$SWEEP_SUBJECT" ] && [ "$DRY_RUN" -eq 0 ]; then
     SWEEP_SUBJECT=$(bd_write create -t task --title "triage: unnamed waits (this rig)" \
-        -d "Standing triage scope: open beads with no worker, route, structure-wait, gate, or visit. Each visit lists the unnamed waits NEW since the previous pass. Dispositions: route / gate (a human gate that blocks the bead until a person clears it) / kill (gc bd close, for an ordinary orphan only; an anchor carrying a merge_result or a bead that is a visit subject is dispositioned through its own visit and bead-rehome.sh, never bare-closed here) / park (a real dep edge onto a scope bead)." \
+        -d "Standing triage scope: open beads with no worker, route, structure-wait, human gate, or sitting on it. Each human gate filed here lists the unnamed waits NEW since the previous pass. Dispositions: route / gate (a human gate that blocks the bead until a person clears it) / kill (gc bd close, for an ordinary orphan only; an anchor carrying a merge_result or a bead a conversation is about is dispositioned in that conversation and through bead-rehome.sh, never bare-closed here) / park (a real dep edge onto a scope bead)." \
         --json 2>/dev/null | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
     [ -n "$SWEEP_SUBJECT" ] && [ "$SWEEP_SUBJECT" != "null" ] \
         || { echo "$PROG: could not create the standing subject — nothing filed" >&2; exit 1; }
@@ -472,15 +478,14 @@ for cand in "$HERE/.." "${GC_RIG_ROOT:+$GC_RIG_ROOT/assets}" "${GC_CITY_PATH:+$G
         && { RECHECK_SH="$(cd "$cand/scripts" && pwd)/liveness-recheck.sh"; break; }
 done
 
-sweep_visit() {
-    # Live-visit guard: a sitting already live on the subject self-limits the
-    # backlog to one conversation. Do NOT advance the baseline here — these
-    # new candidates were never put in front of anyone.
-    local live_visit
-    live_visit=$(jq -r --arg s "$SWEEP_SUBJECT" "$VISIT_IDENTITY_JQ"'[.[] | select((.metadata.task_kind // "") == "visit")
-        | visit_identity_subjects[]] | (index($s) // "") | tostring' "$LIVE")
-    if [ -n "$live_visit" ]; then
-        echo "$PROG: batch visit already live on $SWEEP_SUBJECT; $CARRIED_COUNT carried, $NEW_COUNT new await it (baseline not advanced)"
+sweep_batch() {
+    # Live guard: an open human gate on the subject, or a conversation about it,
+    # self-limits the backlog to one question. Do NOT advance the baseline here —
+    # these new candidates were never put in front of anyone.
+    local live_wait
+    live_wait=$(jq -r --arg s "$SWEEP_SUBJECT" "$HUMAN_GATE_JQ$CONVERSATION_JQ$LIVENESS_WAIT_JQ"'human_side_on($s)' "$LIVE")
+    if [ -n "$live_wait" ]; then
+        echo "$PROG: $live_wait already waits on $SWEEP_SUBJECT; $CARRIED_COUNT carried, $NEW_COUNT new await it (baseline not advanced)"
         return 0
     fi
     if [ "$NEW_COUNT" = "0" ]; then
@@ -488,48 +493,50 @@ sweep_visit() {
         advance_baseline
         return 0
     fi
-    # Re-file guard: an agenda a sitting already closed out `dispositioned` is
-    # not news. The test is the id SET; a cut-short or unreadable prior files.
-    # Fail-open on a non-zero read even when it printed a matching array.
-    #
-    # Resolve the prior visit's subject by the shared visit identity
-    # (visit_covers: the tracks edge, else the gc.continuation_group stamp), the
-    # same union the live-visit guard above uses — never the stamp alone. A visit
-    # whose stamp landed empty still carries the tracks edge, so a stamp-keyed
-    # server query cannot see it and re-files an agenda already settled. The
-    # listing narrows to visits by task_kind (a field independent of the stamp)
-    # and applies visit_covers client-side, because the edge is not a
-    # metadata-field the server can match on.
-    local new_key prior_rc prior refile=""
+    # Re-file guard: a new set a person already ruled on is not news. Each gate
+    # this sweep files carries its census in the re-check command its message
+    # names, so the subject's closed gates under the sweep's key say which new
+    # set each one asked about. One cleared with a reason headed `ruled:` that
+    # names this pass's new set means a person dispositioned it: file nothing and
+    # advance the baseline. The test is the id SET. A gate cleared moot or benign,
+    # a set that differs, or gates that do not read file again. The read is the
+    # one reader rule (bd_human_gates), closed gates included.
+    local new_key gates refile=""
     new_key=$(printf '%s' "$NEW" | jq -r '[.[].id] | sort | join(",")')
-    prior_rc=0
-    prior=$( { if [ -n "$DB" ]; then gc bd list --db "$DB" --status=closed --metadata-field task_kind=visit --limit=0 --json; else gc bd list --status=closed --metadata-field task_kind=visit --limit=0 --json; fi; } 2>/dev/null) || prior_rc=$?
-    if [ "$prior_rc" -eq 0 ]; then
-        refile=$(printf '%s' "$prior" | scrub | jq -r --arg key "$new_key" --arg s "$SWEEP_SUBJECT" "$VISIT_IDENTITY_JQ"'
-            if type == "array" then
-              [ .[]
-                | select(((.metadata // {}).task_kind // "") == "visit")
-                | select(visit_covers($s))
-                | select((((.metadata // {})["gc.outcome"] // "") | tostring) == "dispositioned")
-                | select(((((.metadata // {})["sweep.new_ids"] // "") | tostring)
-                          | split(",") | map(select(length > 0)) | sort | join(",")) == $key)
-                | .id ] | (.[0] // "")
-            else "" end' 2>/dev/null)
+    if gates=$(bd_human_gates "$SWEEP_SUBJECT"); then
+        refile=$(printf '%s' "$gates" | jq -r --arg key "$new_key" '
+            [ .[] | select(((.await_id // "") | tostring) == "liveness-sweep")
+                  | select(((.status // "") | tostring) == "closed")
+                  | select(((.close_reason // "") | tostring) | test("^[[:space:]]*ruled:"))
+                  | select((((.description // "") | tostring)
+                            | [ capture("liveness-recheck[.]sh --ids (?<ids>[^[:space:]]+)")? | .ids ] | .[0] // ""
+                            | split(",") | map(select(length > 0)) | sort | join(",")) == $key)
+                  | .id ] | (.[0] // "")' 2>/dev/null)
     fi
     if [ -n "$refile" ] && [ -n "$new_key" ]; then
-        echo "$PROG: same NEW set as dispositioned visit $refile; not re-filed (baseline advanced)"
+        echo "$PROG: same NEW set as gate $refile, which a person ruled on; not re-filed (baseline advanced)"
         advance_baseline
         return 0
     fi
 
+    # The census rides the gate's message as the command that re-reads it: the
+    # new and carried ids and the time the pass cut it. A sitting runs it before
+    # acting, and the re-file guard above reads the new set back from it.
+    local recheck
+    recheck="${RECHECK_SH:-liveness-recheck.sh} --ids $(printf '%s' "$NEW" | jq -r 'map(.id) | join(",")')"
+    [ "$CARRIED_COUNT" = "0" ] || recheck="$recheck --carried $(printf '%s' "$CARRIED" | jq -r 'map(.id) | join(",")')"
+    recheck="$recheck --pass-at $PASS_AT"
+    [ -n "$RECHECK_SH" ] || echo "$PROG: WARN: no liveness-recheck.sh found beside the pack — the gate names the command by its script name alone" >&2
+
     # Build the body: new candidates enumerated (capped), carried as bare ids.
     local body
     body=$(jq -nr --argjson new "$NEW" --argjson carried "$CARRIED" \
-        --arg pass_at "$PASS_AT" --arg cap "$LIST_CAP" \
+        --arg pass_at "$PASS_AT" --arg cap "$LIST_CAP" --arg recheck "$recheck" \
         --arg pr "$PR_LIVENESS" --arg convoy "$CONVOY_LIVENESS" --arg husk "$HUSK_LIVENESS" '
       ($cap | tonumber) as $c
       | [ "unnamed waits: \($new | length) new, \($carried | length) carried",
-          "Census cut \($pass_at) — a snapshot, not the board. Run the visit.recheck stamp on this visit before acting.",
+          "Census cut \($pass_at) — a snapshot, not the board. Before acting, re-check it:",
+          "  \($recheck)",
           (if $pr == "unverified" then "WARNING: the open-PR read failed for at least one repository — PR-parked beads may be listed." else empty end),
           (if $convoy == "unverified" then "WARNING: a convoy read failed — a molecule-driven work bead may be listed." else empty end),
           (if $husk == "unverified" then "WARNING: a root/convoy/anchor read failed — a landed workflow step may be listed." else empty end),
@@ -541,51 +548,38 @@ sweep_visit() {
           "Carried (still unnamed from earlier passes, not re-litigated): \($carried | length)",
           (if ($carried | length) > 0 then "  \($carried | map(.id) | join(", "))" else empty end),
           "",
-          "Dispositions: route (gc sling <pool> <id>; never --on here) · gate (human-gate.sh --subject <id> --key <situation-key> --message \"<what a person owes>\" — files a human gate that blocks <id> until a person clears it; a hold written as prose is not a disposition, it is a field someone has to come back and clear) · kill (gc bd close <id> --reason, for an ordinary orphan only; an anchor carrying a merge_result or a bead that is a visit subject is dispositioned through its own visit and bead-rehome.sh, never bare-closed here) · park (gc bd dep add <bead> <scope> — the edge IS the park; prose parks nothing)"
+          "Dispositions: route (gc sling <pool> <id>; never --on here) · gate (human-gate.sh --subject <id> --key <situation-key> --message \"<what a person owes>\" — files a human gate that blocks <id> until a person clears it; a hold written as prose is not a disposition, it is a field someone has to come back and clear) · kill (gc bd close <id> --reason, for an ordinary orphan only; an anchor carrying a merge_result or a bead a conversation is about is dispositioned in that conversation and through bead-rehome.sh, never bare-closed here) · park (gc bd dep add <bead> <scope> — the edge IS the park; prose parks nothing). When every item is dispositioned, clear this gate with a reason headed ruled:, and the same new set is not filed again."
         ] | join("\n")')
     if [ "$DRY_RUN" -eq 1 ]; then
-        echo "$PROG: dry-run: would file batch visit on $SWEEP_SUBJECT [liveness-sweep]"
+        echo "$PROG: dry-run: would file batch gate on $SWEEP_SUBJECT [liveness-sweep]"
         return 0
     fi
-    local out visit
+    local out
     # Each batch is the new set of one pass, an event of its own, so the call
     # declares no quiet window: an answer about an earlier set mutes nothing.
+    # The gate is filed before the baseline advances: a failed filing must leave
+    # the baseline for the next pass to re-report.
     if ! out=$("$HUMAN_GATE" --subject "$SWEEP_SUBJECT" --key liveness-sweep --message "$body"); then
         echo "$PROG: human-gate.sh failed — baseline NOT advanced; the next pass re-reports" >&2
         return 1
     fi
-    printf '%s\n' "$out"
-    # Stamp the census as machine state on the visit so a claim-time re-check
-    # is one command, then advance the baseline (visit first, stamp second: a
-    # failed create must leave the baseline for the next pass to re-report).
-    visit=$(printf '%s' "$out" | grep -oE 'visit [A-Za-z0-9._-]+' | head -n1 | cut -d' ' -f2)
-    if [ -n "$visit" ]; then
-        bd_write update "$visit" \
-            --set-metadata "sweep.new_ids=$(printf '%s' "$NEW" | jq -r 'map(.id) | join(",")')" \
-            --set-metadata "sweep.carried_ids=$(printf '%s' "$CARRIED" | jq -r 'map(.id) | join(",")')" \
-            --set-metadata "sweep.pass_at=$PASS_AT" >/dev/null 2>&1 \
-            || echo "$PROG: WARN: could not stamp the census on visit $visit" >&2
-        if [ -n "$RECHECK_SH" ]; then
-            bd_write update "$visit" --set-metadata "visit.recheck=$RECHECK_SH" >/dev/null 2>&1 \
-                || echo "$PROG: WARN: could not stamp visit.recheck on $visit" >&2
-        else
-            echo "$PROG: WARN: no liveness-recheck.sh found — the visit carries id lists but no runnable re-check" >&2
-        fi
-    fi
+    echo "$PROG: filed batch gate ${out:-(no id printed)} on $SWEEP_SUBJECT [liveness-sweep]"
     advance_baseline
 }
 if [ -n "$SWEEP_SUBJECT" ]; then
-    sweep_visit || exit 1
+    sweep_batch || exit 1
 else
     echo "$PROG: dry-run: no standing subject yet ($NEW_COUNT would be new)"
 fi
 
 # --- triage recurrence (absorbs mol-triage-recurrence) -------------------------
-# Each standing triage subject gets ONE visit iff its scope set CHANGED since
-# triage.last_seen AND no visit is live. Scope tokens: p<=N · label:X ·
-# kind:X · unrouted. last_seen is a TRI-STATE: absent = never evaluated
-# (file when non-empty), "" = last saw an empty scope. An emptied scope is a
-# change — the visit names what left, then the subject goes quiet.
+# Each standing triage subject gets ONE human gate iff its scope set CHANGED
+# since triage.last_seen AND no human gate is open on it and no conversation is
+# about it. Scope tokens: p<=N · label:X · kind:X · unrouted. A scope set never
+# holds a human gate or a conversation: they are the human side, not work.
+# last_seen is a TRI-STATE: absent = never evaluated (file when non-empty), "" =
+# last saw an empty scope. An emptied scope is a change — the gate names what
+# left, then the subject goes quiet.
 recurrence() {
     local subjects
     subjects=$(jq -c '[.[] | select((.metadata.task_kind // "") == "triage-subject")
@@ -594,9 +588,6 @@ recurrence() {
            last_seen: (if ((.metadata // {}) | has("triage.last_seen"))
                        then (.metadata["triage.last_seen"] // "") else null end)}] | .[]' "$LIVE")
     [ -n "$subjects" ] || return 0
-    local convgroups
-    convgroups=$(jq -c "$VISIT_IDENTITY_JQ"'[.[] | select((.metadata.task_kind // "") == "visit")
-        | visit_identity_subjects[]]' "$LIVE")
     printf '%s\n' "$subjects" > "$TMP/subjects"
     while IFS= read -r row; do
         local sid scope was now n delta
@@ -607,16 +598,18 @@ recurrence() {
             unnamed-waits) echo "$PROG: $sid: skipped-owned-by-sweep"; continue ;;
             "") echo "$PROG: $sid: skipped-no-machine-scope"; continue ;;
         esac
-        if printf '%s' "$convgroups" | jq -e --arg s "$sid" 'index($s) != null' >/dev/null 2>&1; then
-            # Stamp nothing here: a bead entering the scope mid-sitting must
-            # still surface on the first run after that visit closes.
-            echo "$PROG: $sid: skipped-live-visit"; continue
+        if [ -n "$(jq -r --arg s "$sid" "$HUMAN_GATE_JQ$CONVERSATION_JQ$LIVENESS_WAIT_JQ"'human_side_on($s)' "$LIVE" 2>/dev/null)" ]; then
+            # Stamp nothing here: a bead entering the scope while a person is on
+            # the subject must still surface on the first run after they are done.
+            echo "$PROG: $sid: skipped-person-waiting"; continue
         fi
         # Evaluate the scope tokens over the OPEN beads; a token outside the
         # schema is ignored (logged); no recognized token means no guessing.
-        now=$(jq -r --arg scope "$scope" '
+        now=$(jq -r --arg scope "$scope" "$CONVERSATION_JQ"'
             ($scope | split(" ") | map(select(. != ""))) as $tokens
             | [ .[] | select((.status // "open") == "open")
+                | select((.issue_type // "") != "gate")
+                | select(conversation | not)
                 | select((.metadata.task_kind // "") != "visit")
                 | select((.metadata.task_kind // "") != "triage-subject")
                 | . as $b
@@ -648,11 +641,11 @@ recurrence() {
             | if $w == null then
                 "First evaluation of this subject: all \($n | length) are simply what is in scope now."
               else
-                "Entered since the last visit: " + (($n - $w) | if length == 0 then "(none)" else join(", ") end)
+                "Entered since the last recurrence: " + (($n - $w) | if length == 0 then "(none)" else join(", ") end)
                 + ". Left: " + (($w - $n) | if length == 0 then "(none)" else join(", ") end) + "."
               end')
         if [ "$DRY_RUN" -eq 1 ]; then
-            echo "$PROG: $sid: dry-run: would file recurrence visit ($n in scope)"
+            echo "$PROG: $sid: dry-run: would file recurrence gate ($n in scope)"
             continue
         fi
         # A recurrence is filed only when the scope set changed, so each is an
@@ -661,11 +654,11 @@ recurrence() {
                 --message "triage recurrence: $n candidates in scope
 $delta
 Current set: $now"; then
-            # Stamp only AFTER the visit exists: an unfiled delta is never
+            # Stamp only AFTER the gate exists: an unfiled delta is never
             # recorded as seen, so the next run re-files it.
             bd_write update "$sid" --set-metadata "triage.last_seen=$now" >/dev/null 2>&1 \
                 || echo "$PROG: WARN: could not stamp triage.last_seen on $sid" >&2
-            echo "$PROG: $sid: filed recurrence visit ($n in scope)"
+            echo "$PROG: $sid: filed recurrence gate ($n in scope)"
         else
             echo "$PROG: $sid: human-gate.sh failed — last_seen not advanced; re-files next pass" >&2
         fi
