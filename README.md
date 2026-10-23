@@ -84,6 +84,7 @@ render's byte and token counts.
 
 - [docs/foundation.md](docs/foundation.md) — beliefs and operating discipline (the charter)
 - [docs/architecture.md](docs/architecture.md) — how the workflows compose Gas City's primitives, and the consistency test for new work
+- [docs/warrants.md](docs/warrants.md) — the warrants in force: what the pack keeps because Gas City lacks the primitive, the upstream evidence and when it was verified, and the trigger that retires each
 - [docs/state-machine.md](docs/state-machine.md) — the anchor state machine: every state, every transition, every writer
 - [docs/component-model.md](docs/component-model.md) — the primitives, and every invariant bound to its doctor check
 - [docs/epics.md](docs/epics.md) — what an epic is, the contract it carries, and when it closes
@@ -97,6 +98,8 @@ render's byte and token counts.
 - [docs/worktree-reclaim.md](docs/worktree-reclaim.md) — reclaiming the per-bead worktrees of closed work, reversibly
 - [docs/review-workspace.md](docs/review-workspace.md) — the directory a review works in, and its removal when the review ends
 - [docs/review-correctness.md](docs/review-correctness.md) — what the gates run on each surface this repository ships and the defects a correctness review of it hunts there, appended to the review's dispatch note
+- [docs/review-arch.md](docs/review-arch.md) — the divergence lens the arch check applies on this rig: when it applies, its checks, Gas City's own documentation as the evidence, and where the pack's warrants live, appended to the review's dispatch note
+- [docs/review-triage.md](docs/review-triage.md) — the changes that make the arch check mandatory on this rig, appended to the triage review's dispatch note
 - [docs/bead-store-resolution.md](docs/bead-store-resolution.md) — which store answers for a bead id, and the proof a destructive gate owes before reading absence
 - [docs/outbound-sends.md](docs/outbound-sends.md) — a GitHub write to a repo the rig does not own is the operator's send; how an agent parks one
 
