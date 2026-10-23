@@ -189,7 +189,8 @@ nfr_load() {
 # an HTML parser ends it, and <!--> and <!---> are whole comments. Markdown ends
 # the raw HTML at the end of a line holding -->, so a comment still open on such
 # a line ends the opening there. gc_opens_with_mark reads the body a line at a
-# time, with one regex match per comment and no string positions.
+# time and takes a line's run of comments in one regex match, with no string
+# positions, so a line packed with comments stays cheap.
 NFR_DEF='def gc_opens_with_mark:
   def comments($l):
     (if .open then
