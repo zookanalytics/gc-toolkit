@@ -172,7 +172,7 @@ done
 echo "# no private copies"
 # A copy is a jq def of one of the predicate's names. Specs and generated
 # renders are history and output, not readers.
-DEF_RE='def[[:space:]]+(hold_edges|hold_parent_ids|hold_blocker_ids|hold_done|hold_is_demand_gate|hold_flight_why|hold_in_flight|hold_absent|hold_chain|hold_holds|hold_held|hold_released_at)[^[:alnum:]_]'
+DEF_RE='def[[:space:]]+(hold_edges|hold_parent_ids|hold_blocker_ids|hold_done|hold_is_human_gate|hold_flight_why|hold_in_flight|hold_absent|hold_chain|hold_holds|hold_held|hold_released_at)[^[:alnum:]_]'
 COPIES=""
 for d in agents assets doctor formulas lifecycle orders overlays packs services skills template-fragments tools; do
     [ -d "$ROOT/$d" ] || continue
