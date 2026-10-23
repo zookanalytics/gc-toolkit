@@ -2,16 +2,16 @@
 # Hermetic test for reconcile-rig-checkouts.sh.
 #
 # Uses real temp git repos as stand-in rigs, a fake `gc` (a text-file bead
-# ledger) and a fake escalate.sh (a call recorder) on PATH. No dependency on
+# ledger) and a fake human-gate.sh (a call recorder) on PATH. No dependency on
 # the live city, Dolt, an agent, or the network. Covers: (a) a clean-behind rig
 # advances; (b) a diverged rig is NOT mutated and files exactly one reconcile
 # bead; (c) a re-run does not duplicate that bead; (d) the bead auto-closes once
-# the rig ff-s cleanly, and its board-visible tracking visit is retracted as moot
-# through escalate.sh --retract in the same pass (a still-diverged rig retracts
-# nothing); (e) the HQ root is excluded; (f) a divergence is raised
-# through escalate.sh, an advanced/HQ rig is not, and a recovered rig is not
-# re-escalated; (g) a configured pool that does not route falls back to the
-# human board; (h) an already-upstream divergence (SHA churn) auto-heals via
+# the rig ff-s cleanly, and its human gate is withdrawn as moot through
+# human-gate.sh --retract in the same pass (a still-diverged rig withdraws
+# nothing); (e) the HQ root is excluded; (f) a divergence is put to a person
+# through human-gate.sh with a declared quiet window, an advanced/HQ rig is not,
+# and a recovered rig is not asked about again; (g) a rig that blocks again
+# after a clean sync files on a new subject bead; (h) an already-upstream divergence (SHA churn) auto-heals via
 # a reset while a genuine divergence still escalates, RECONCILE_NO_AUTOHEAL
 # disables the heal, and a dirty tracked file blocks it only when its content is
 # not yet upstream; (i) a unique local merge commit (invisible to git cherry)
@@ -102,11 +102,12 @@ bead_for()   { awk -F'|' -v k="$1" '$2==k && $3=="open"{print $1; exit}' "$TMP/l
 body_for()   { local id; id="$(bead_for "$1")"; [ -n "$id" ] && cat "$TMP/ledger.$id.body" 2>/dev/null; }
 # title of the OPEN reconcile bead for a rig key (empty if none).
 title_for()  { local id; id="$(bead_for "$1")"; [ -n "$id" ] && cat "$TMP/ledger.$id.title" 2>/dev/null; }
-# escalate.sh calls recorded for a rig key, and the subject/pool of the first/last.
+# human-gate.sh filings recorded for a rig key, the subject of the first, and the
+# quiet window the last one declared.
 esc_count()   { awk -F'|' -v k="reconcile-diverged-$1" '$1==k' "$TMP/escalations" 2>/dev/null | wc -l | tr -d ' '; }
 esc_subject() { awk -F'|' -v k="reconcile-diverged-$1" '$1==k{print $2; exit}' "$TMP/escalations" 2>/dev/null; }
-esc_last_pool() { awk -F'|' -v k="reconcile-diverged-$1" '$1==k{p=$3} END{print p}' "$TMP/escalations" 2>/dev/null; }
-# the message of the last escalate.sh call for a rig key.
+esc_last_window() { awk -F'|' -v k="reconcile-diverged-$1" '$1==k{p=$3} END{print p}' "$TMP/escalations" 2>/dev/null; }
+# the message of the last human-gate.sh filing for a rig key.
 msg_for()     { cat "$TMP/escalations.reconcile-diverged-$1.msg" 2>/dev/null; }
 # the checkout a diverged rig's subject bead hands a person on a line of its own.
 remedy_for()  { sed -n 's/^ *\(git -C [^ ]* checkout .*\)$/\1/p' <<< "$(body_for "$1")"; }
@@ -114,7 +115,7 @@ remedy_for()  { sed -n 's/^ *\(git -C [^ ]* checkout .*\)$/\1/p' <<< "$(body_for
 remedy_rc()   { if ${REMEDY[@]+"${REMEDY[@]}"} >/dev/null 2>&1; then echo 0; else echo 1; fi; }
 # 0 when the open reconcile bead for a rig key has a line matching an ERE.
 body_has()    { grep -q -E -- "$2" <<< "$(body_for "$1")"; }
-# escalate.sh --retract calls recorded for a rig key, and the subject of the first.
+# human-gate.sh --retract calls recorded for a rig key, and the subject of the first.
 retract_count()   { awk -F'|' -v k="reconcile-diverged-$1" '$1==k' "$TMP/retractions" 2>/dev/null | wc -l | tr -d ' '; }
 retract_subject() { awk -F'|' -v k="reconcile-diverged-$1" '$1==k{print $2; exit}' "$TMP/retractions" 2>/dev/null; }
 
@@ -177,46 +178,42 @@ exit 0
 GC
 chmod +x "$TMP/bin/gc"
 
-# Fake escalate.sh: record each call as `<key>|<subject>|<pool>` and, so the
-# pool->human fallback can be exercised, exit non-zero for a pool named in
-# FAKE_BAD_POOL — exactly as the real escalate.sh exits non-zero on a route no
-# live agent claims.
-cat > "$TMP/bin/escalate.sh" <<'ESC'
+# Fake human-gate.sh: record each filing as `<key>|<subject>|<quiet-window>`.
+cat > "$TMP/bin/human-gate.sh" <<'ESC'
 #!/usr/bin/env bash
-subject=""; key=""; pool=""; message=""; retract=0
+subject=""; key=""; window=""; message=""; retract=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --retract) retract=1; shift;;
     --subject) subject="${2:-}"; shift 2;;
     --key)     key="${2:-}";     shift 2;;
     --message) message="${2:-}"; shift 2;;
-    --pool)    pool="${2:-}";    shift 2;;
+    --quiet-window) window="${2:-}"; shift 2;;
     *) shift;;
   esac
 done
-# The moot-retract counterpart records apart from filings so the file counts
-# stay exact; the real one closes the tracked visit through visit-close.sh
-# (proven in escalate.test.sh), and is a no-op success when none is open. It
-# exits non-zero under FAKE_RETRACT_FAIL, as the real one does on an unreadable
-# lookup or a close that did not land, so the caller's skip-close gate is testable.
+# The withdrawal records apart from filings so the file counts stay exact; the
+# real one resolves the open gate with a moot: reason (proven in
+# human-gate.test.sh), and is a no-op success when none is open. It exits
+# non-zero under FAKE_RETRACT_FAIL, as the real one does on an unreadable bead or
+# a gate that did not resolve, so the caller's skip-close gate is testable.
 if [ "$retract" = 1 ]; then
   printf '%s|%s\n' "$key" "$subject" >> "$FAKE_RETRACTIONS"
   [ -n "${FAKE_RETRACT_FAIL:-}" ] && exit 1
   exit 0
 fi
-printf '%s|%s|%s\n' "$key" "$subject" "$pool" >> "$FAKE_ESCALATIONS"
+printf '%s|%s|%s\n' "$key" "$subject" "$window" >> "$FAKE_ESCALATIONS"
 printf '%s\n' "$message" > "$FAKE_ESCALATIONS.$key.msg"
-[ -n "$pool" ] && [ "$pool" = "${FAKE_BAD_POOL:-}" ] && exit 1
 exit 0
 ESC
-chmod +x "$TMP/bin/escalate.sh"
+chmod +x "$TMP/bin/human-gate.sh"
 
 export PATH="$TMP/bin:$PATH" FAKE_RIGS_JSON="$TMP/rigs.json" FAKE_LEDGER="$TMP/ledger"
-export GC_RECONCILE_ESCALATE_TOOL="$TMP/bin/escalate.sh" FAKE_ESCALATIONS="$TMP/escalations"
+export GC_RECONCILE_HUMAN_GATE_TOOL="$TMP/bin/human-gate.sh" FAKE_ESCALATIONS="$TMP/escalations"
 export FAKE_RETRACTIONS="$TMP/retractions"
 : > "$TMP/escalations"; : > "$TMP/retractions"
 
-# --- Run 1: alpha advances, beta escalates, hq is skipped. -------------------
+# --- Run 1: alpha advances, beta files a gate, hq is skipped. ----------------
 bash "$SCRIPT" >/dev/null
 eq "$(git -C "$TMP/alpha" rev-parse HEAD)" "$REMOTE_HEAD" "clean-behind rig advances to origin"
 eq "$(git -C "$TMP/beta"  rev-parse HEAD)" "$BETA_DIVERGED" "diverged rig is not mutated"
@@ -225,45 +222,48 @@ eq "$(open_count beta)"  "1" "diverged rig files exactly one reconcile bead"
 eq "$(open_count alpha)" "0" "advanced rig files no reconcile bead"
 eq "$(open_count loomington)" "0" "HQ root is excluded (not reconciled)"
 
-# The divergence is raised through escalate.sh, on the reconcile bead as subject;
-# an advanced or HQ rig raises nothing.
-eq "$(esc_count beta)"  "1" "diverged rig is escalated through escalate.sh"
-eq "$(esc_subject beta)" "$(bead_for beta)" "escalation subject is the reconcile bead"
-eq "$(esc_last_pool beta)" "" "default escalation names no pool (human helm board)"
-eq "$(esc_count alpha)" "0" "advanced rig is not escalated"
-eq "$(esc_count loomington)" "0" "HQ root is not escalated"
-# A still-diverged rig's visit must stay claimable: nothing is retracted while
-# the subject is unresolved.
-eq "$(retract_count beta)" "0" "a still-diverged rig retracts no visit"
+# The divergence is put to a person through human-gate.sh, on the reconcile bead
+# as subject; an advanced or HQ rig files nothing.
+eq "$(esc_count beta)"  "1" "diverged rig files a human gate through human-gate.sh"
+eq "$(esc_subject beta)" "$(bead_for beta)" "the gate's subject is the reconcile bead"
+eq "$(esc_last_window beta)" "86400" "the call declares a day-long quiet window, since every pass detects the blocked rig again"
+eq "$(esc_count alpha)" "0" "advanced rig files no gate"
+eq "$(esc_count loomington)" "0" "HQ root files no gate"
+# A still-diverged rig's gate stays open: nothing is withdrawn while the
+# subject is unresolved.
+eq "$(retract_count beta)" "0" "a still-diverged rig withdraws no gate"
 body_has beta '^local commit not upstream: [0-9a-f]+ c3-local$' \
   && ok "the diverged escalation names the local commit that is not upstream" \
   || bad "the diverged escalation names the local commit that is not upstream (got '$(body_for beta)')"
 
 # --- Run 2: idempotent — no duplicate reconcile bead. ------------------------
-# escalate.sh is called again (it dedups the visit on its own side, proven in
+# human-gate.sh is called again (it dedups the gate on its own side, proven in
 # its own test); the reconcile bead must not be duplicated.
 bash "$SCRIPT" >/dev/null
 eq "$(open_count beta)" "1" "re-run does not duplicate the reconcile bead"
 
-# --- Run 3: rig resolved -> bead auto-closes, its moot tracking visit is
-# retracted, and no fresh escalation is raised. ------------------------------
+# --- Run 3: rig resolved -> bead auto-closes, its moot gate is withdrawn, and
+# no fresh gate is filed. -----------------------------------------------------
 BETA_ESC_BEFORE="$(esc_count beta)"
 BETA_BEAD="$(bead_for beta)"
 : > "$TMP/retractions"
 git -C "$TMP/beta" reset --hard -q origin/main
 bash "$SCRIPT" >/dev/null
 eq "$(open_count beta)" "0" "reconcile bead auto-closes after a clean fast-forward"
-eq "$(esc_count beta)" "$BETA_ESC_BEFORE" "a recovered rig is not re-escalated"
-eq "$(retract_count beta)" "1" "the recovered rig's tracking visit is retracted as moot"
-eq "$(retract_subject beta)" "$BETA_BEAD" "the retract names the reconcile bead as its subject"
+eq "$(esc_count beta)" "$BETA_ESC_BEFORE" "a recovered rig files no fresh gate"
+eq "$(retract_count beta)" "1" "the recovered rig's gate is withdrawn as moot"
+eq "$(retract_subject beta)" "$BETA_BEAD" "the withdrawal names the reconcile bead as its subject"
 
-# --- Run 4: a configured pool that does not route falls back to human. -------
+# --- Run 4: a rig that blocks again files on a new subject bead. ------------
+# The old subject closed on the clean sync, so a new divergence is a new bead,
+# and no answer given about the old one mutes its gate.
 git -C "$TMP/beta" reset --hard -q "$BETA_DIVERGED"    # re-diverge beta
 : > "$TMP/escalations"
-RECONCILE_ESCALATION_POOL="rig/absent.pool" FAKE_BAD_POOL="rig/absent.pool" \
-  bash "$SCRIPT" >/dev/null
-eq "$(esc_count beta)" "2" "an unroutable pool triggers a second, fallback escalate call"
-eq "$(esc_last_pool beta)" "" "the fallback escalation carries no pool (human helm board)"
+bash "$SCRIPT" >/dev/null
+eq "$(esc_count beta)" "1" "the re-diverged rig files one gate"
+[ "$(esc_subject beta)" != "$BETA_BEAD" ] && [ -n "$(esc_subject beta)" ] \
+  && ok "the gate is filed on a new subject bead, not the closed one" \
+  || bad "the gate is filed on a new subject bead (got '$(esc_subject beta)', old '$BETA_BEAD')"
 
 # ===========================================================================
 # Auto-heal an already-upstream divergence (SHA churn from a rebase/squash/

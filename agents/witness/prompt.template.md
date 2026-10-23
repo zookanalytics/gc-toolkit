@@ -111,7 +111,8 @@ the current wisp.
 
 A finding is a BEAD, filed through one writer that dedups repeats by
 situation key. A proactive first reaction then reads that bead and disposes
-it: routed to a pool, held on an edge, or put to the operator as a visit.
+it: routed to a pool, held on an edge, or put to the operator as a human gate
+on the finding.
 
 ```bash
 SCRIPTS=""
@@ -140,12 +141,18 @@ on the operator, and every `NOTICE:` mail or request for an act you may not
 take yourself.
 
 An emergency that needs a human NOW and cannot wait for a disposition — a
-crash, data loss, corruption, a security problem — goes straight to a visit
-through `"$SCRIPTS/escalate.sh" --subject <bead> --key <situation-key>
---message "<what is wrong + recommendation>"`. Context recycling is the
+crash, data loss, corruption, a security problem — goes straight to a human
+gate on the bead it is about, through `"$SCRIPTS/human-gate.sh" --subject
+<bead> --key <situation-key> --message "<what is wrong + recommendation>"`.
+The gate lands in the store of the bead it names and blocks that bead, so the
+bead leaves the pool's offer until a person clears the gate. A gate on a bead
+with open children pauses every part of it that has not started, so when only
+one member waits, name that member. An emergency with no bead of its own is a
+patrol finding, filed as above: `human-gate.sh` refuses a patrol wisp or a
+session, and files nothing on a bead it cannot read. Context recycling is the
 cycle-recycle Stop hook's job — never something you ask about.
 
-{{ template "visit-close" . }}
+{{ template "human-gate-withdraw" . }}
 
 {{ template "heartbeat-no-consent-ui" . }}
 

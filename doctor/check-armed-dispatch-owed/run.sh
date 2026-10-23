@@ -81,8 +81,9 @@ K_FAILS="gc.dispatch_when_ready_fail_count"
 
 # The retry cap, read exactly as deferred-dispatch.sh reads it (same env
 # override, same non-numeric fallback): once an arm's sling failures reach it,
-# the reconcile pass files a visit through escalate.sh and stops re-slinging, so
-# a capped arm is already surfaced to a person — not a silent stall to re-report.
+# the reconcile pass asks a person, with a human gate through human-gate.sh or a
+# conversation on a bead with open children, and stops re-slinging, so a capped
+# arm is already surfaced to a person — not a silent stall to re-report.
 MAX_SLING_FAILURES="${GC_MAX_DISPATCH_SLING_FAILURES:-3}"
 case "$MAX_SLING_FAILURES" in ''|*[!0-9]*) MAX_SLING_FAILURES=3 ;; esac
 

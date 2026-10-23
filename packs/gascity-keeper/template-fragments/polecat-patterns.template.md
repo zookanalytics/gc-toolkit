@@ -52,8 +52,8 @@ Two-rule policy:
   OR the bead is not on the critical path. Accept loss. Leave the
   worktree on disk. Note it on the bead; do not push anywhere.
 - **High-cost rotation** — predecessor thought more than ~2 hours
-  AND the bead is on the critical path. File an escalation visit
-  (`escalate.sh`) with that specific context before acting; the
+  AND the bead is on the critical path. File a human gate on the bead
+  (`human-gate.sh`) with that specific context before acting; the
   operator may authorize salvage to a preservation branch.
 
 **Never** silently push to the original polecat branch when a

@@ -129,14 +129,15 @@ exit 0
 LANE
 chmod +x "$SD/lane-state.sh"
 export STUB_LANE_LOG="$TMP/lane.log"; : > "$STUB_LANE_LOG"
-# escalate.sh's contract, not just its call log: ONE visit per subject+key,
-# stamped so the caller can find it again. pr-facts reads the visit back to
-# block the anchor on it, so a stub that only logged would test nothing.
+# The helper's contract as pr-facts reads it back, not just its call log: ONE
+# visit per subject+key, stamped so the caller can find it again. pr-facts reads
+# the visit back to block the anchor on it, so a stub that only logged would
+# test nothing.
 # --retract is the counterpart: it closes every OPEN visit for the situation
 # that nobody is engaged in as moot, leaves an engaged one (claimed, or bound by
 # assignee or session) to its holder, and is a no-op success when none matches.
 # STUB_RETRACT_FAIL makes a retract fail having closed nothing.
-cat > "$SD/escalate.sh" <<'ESC'
+cat > "$SD/human-gate.sh" <<'ESC'
 #!/usr/bin/env bash
 set -u
 printf '%s\n' "$*" >> "${STUB_ESC_LOG:?}"
@@ -192,7 +193,7 @@ printf '#!/usr/bin/env bash\necho "METHOD${2:+ note: $2}"\n' > "$SD/review-dispa
 # validate-dispatch-body.sh's real output is prose the validator reads; the test
 # only needs a non-empty note so the validation-pass open takes its body path.
 printf '#!/usr/bin/env bash\necho "VALIDATE-METHOD${2:+ note: $2}"\n' > "$SD/validate-dispatch-body.sh"
-chmod +x "$SD/escalate.sh" "$SD/review-dispatch-body.sh" "$SD/validate-dispatch-body.sh"
+chmod +x "$SD/human-gate.sh" "$SD/review-dispatch-body.sh" "$SD/validate-dispatch-body.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
 # patrol-finding.sh, one durable bead per situation key: the write-back files a
 # review thread it cannot resolve through it. Each call is logged one argument
@@ -403,7 +404,8 @@ eq "$(meta F2 merge_result)" "abandoned" "merge_result=abandoned"
 eq "$(bstatus F2)" "open" "the anchor stays OPEN (work did not land)"
 eq "$(meta F2 'gc.routed_to')" "human" "routed to human"
 eq "$(bassignee F2)" "" "assignee cleared"
-has "$(cat "$STUB_ESC_LOG")" "--subject F2 --key pr-abandoned.11" "escalate.sh got the situation key"
+has "$(cat "$STUB_ESC_LOG")" "--subject F2 --key pr-abandoned.11" "human-gate.sh got the situation key"
+hasnt "$(cat "$STUB_ESC_LOG")" "--key pr-abandoned.11 --quiet-window" "an out-of-band close is an event, so its call declares no quiet window"
 
 # The default above is preserved: an out-of-band close with no recorded
 # disposition still abandons and files the visit. The cases below cover a close
@@ -711,7 +713,7 @@ eq "$(meta F2n 'gc.superseded_by')" "tk-n" "…through the sanctioned terminal c
 has "$(cat "$STUB_REHOME_LOG")" "--origin F2n --successor tk-n --kind re-homed --except-key pr-dispose-failed.120" "bead-rehome is told the arm's own visits do not hold this retry"
 eq "$(bstatus VN)" "closed" "the arm's own visit is retracted once the close lands"
 eq "$(meta VN 'gc.outcome')" "moot" "…closed moot: the obstruction it reported is gone"
-has "$(cat "$STUB_ESC_LOG")" "--retract --subject F2n --key pr-dispose-failed.120" "…through escalate.sh's retract verb"
+has "$(cat "$STUB_ESC_LOG")" "--retract --subject F2n --key pr-dispose-failed.120" "…through human-gate.sh's retract verb"
 eq "$(filings F2n pr-dispose-failed.120)" "0" "…and nothing is re-filed"
 has "$out" "retracted its own pr-dispose-failed visit VN" "the retraction is reported"
 
@@ -868,25 +870,6 @@ eq "$(bstatus VV)" "open" "a visit someone is engaged in is left"
 eq "$(bstatus VG)" "open" "a visit whose subject does not read is left"
 has "$out" "subject GHOST unreadable this pass" "…and the unreadable subject is reported"
 hasnt "$(cat "$STUB_ESC_LOG")" "--retract" "…and none of them is retracted"
-
-echo "# the sweep's retract runs through the real escalate.sh and visit-close.sh"
-# Every other case drives escalate.sh's contract through the stub above. This
-# one runs the real verb against a subject already closed, the shape the sweep
-# meets: escalate.sh reads the open visits for the situation, and visit-close.sh
-# folds the reading onto the subject, stamps the outcome, and closes the visit.
-# GC_RIG names the store, since no rig set is served here to derive it from.
-SD2="$TMP/scripts-real-escalate"
-mk_sut_dir "$SD2" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/visit-close.sh" "$HERE/finalize-gate.sh" "$HERE/escalate.sh"
-cp "$SD/bead-rehome.sh" "$SD/review-dispatch-body.sh" "$SD/validate-dispatch-body.sh" "$SD/lane-state.sh" "$SD2/"
-: > "$STUB_DEPS"
-store "[$(anchor F2w 127 ',"gc.superseded_by":"tk-w"' | jq -c '.status = "closed"'), $(dvisit VW F2w pr-dispose-failed.127)]"
-printf 'VW|tracks|F2w\n' > "$STUB_DEPS"
-out=$(GC_RIG=gc-toolkit "$SD2/pr-facts.sh" --fix-pool "$FIX" --review-pool "$REV" 2>&1)
-eq "$(bstatus VW)" "closed" "the real retract closes the visit on the closed anchor"
-eq "$(meta VW 'gc.outcome')" "moot" "…moot, stamped by visit-close.sh"
-has "$(meta VW 'gc.outcome_reason')" "PR#127's pre-recorded disposition is consummated" "…with the sweep's reading as its reason"
-has "$(notes F2w)" "visit VW closed moot" "…and the reading folded onto the closed subject's notes"
-has "$out" "retracted its own pr-dispose-failed visit VW" "the retraction is reported"
 
 echo "# a pre-recorded disposition retires the PR's other merge-path visits before the close"
 # Each was filed to hold the PR's merge until a person answered it. The PR is
@@ -1293,6 +1276,7 @@ hasnt "$out" "branch/fix-pool unavailable" "the no-pool conflict is NOT skipped 
 DISP="$(meta CF2 pr_comment_disposition)"
 has "$DISP" "visit:" "…its feedback routes to a human visit, the no-fix-pool fallback"
 has "$(cat "$STUB_ESC_LOG")" "--subject CF2 --key pr-comments.161.0.16100" "…filed under the batch's comment key"
+has "$(cat "$STUB_ESC_LOG")" "--key pr-comments.161.0.16100 --quiet-window 86400" "…declaring the standing quiet window, since every pass detects the same batch until it is answered"
 has "$(cat "$STUB_ESC_LOG")" "no fix pool is configured" "…naming why the city cannot route the work itself"
 eq "$(jq '[.[] | select((.metadata.task_kind // "") == "rework") | select((.metadata.anchor_bead // "") == "CF2")] | length' "$STUB_STORE")" "0" "…and no rework child is minted with no pool to route it to"
 hasnt "$(vpass_id CF2)" "<none>" "…a human-lane validation pass is still opened on the anchor"
@@ -1667,6 +1651,7 @@ printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution
 out=$(run)
 has "$out" "PR#35 BLOCKED on 1 unresolved review thread(s)" "the arm names the unresolved-thread cause and counts only the open ones"
 has "$(cat "$STUB_ESC_LOG")" "--subject B1 --key merge-blocked-threads" "escalated under the thread-cause key"
+has "$(cat "$STUB_ESC_LOG")" "--key merge-blocked-threads --quiet-window 86400" "…declaring the standing quiet window, since every pass detects the blocked merge again"
 
 echo "# BLOCKED with thread resolution OFF escalates nothing — the open thread is not the gate, and a pending approval is state"
 store "[$(anchor B5 41)]"

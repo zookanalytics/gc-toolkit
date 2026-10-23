@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # liveness-sweep.test.sh — hermetic tests for liveness-sweep.sh (stubbed
-# gc/gh/escalate.sh; no city, Dolt, or network). Ports the delta and
+# gc/gh/human-gate.sh; no city, Dolt, or network). Ports the delta and
 # classification assertions from the retired liveness-sweep-delta.test.sh
 # (which extracted blocks from formulas/mol-liveness-sweep.toml) and adds the
-# exec-order surface: state-file baseline, escalate.sh filing, the census
+# exec-order surface: state-file baseline, human-gate.sh filing, the census
 # stamp, and the absorbed triage recurrence.
 set -u
 
@@ -149,27 +149,30 @@ gh_prs() { # gh_prs <days-since-update:521> <days-since-update:522>
 gh_prs 0 0
 export GH_PRS="$TMP/gh-prs.json"
 
-# escalate.sh stub: records the call, answers like the real tool.
-cat > "$TMP/bin/escalate.sh" <<'ESC'
+# human-gate.sh stub: records the call and the quiet window it declares. It
+# answers with the visit line the sweep's census stamp still parses.
+cat > "$TMP/bin/human-gate.sh" <<'ESC'
 #!/usr/bin/env bash
-[ -n "${ESC_FAIL:-}" ] && { echo "escalate: down" >&2; exit 1; }
-subject=""; key=""
+[ -n "${ESC_FAIL:-}" ] && { echo "human-gate: down" >&2; exit 1; }
+subject=""; key=""; window="-"
 while [ $# -gt 0 ]; do
   case "$1" in
     --subject) subject="$2"; shift 2 ;;
     --key)     key="$2"; shift 2 ;;
+    --quiet-window) window="$2"; shift 2 ;;
     --message) printf '%s\n---\n' "$2" >> "$ESC_BODIES"; shift 2 ;;
     *) shift ;;
   esac
 done
 printf '%s %s\n' "$subject" "$key" >> "$ESC_CALLS"
-echo "escalate: filed visit tk-visit1 on $subject [$key] -> gc-toolkit.converse"
+printf '%s %s %s\n' "$subject" "$key" "$window" >> "$ESC_CALLS.windows"
+echo "filed visit tk-visit1 on $subject [$key]"
 ESC
-chmod +x "$TMP/bin/escalate.sh"
+chmod +x "$TMP/bin/human-gate.sh"
 
 export PATH="$TMP/bin:$PATH"
 export SHOW_DIR="$TMP/show" GC_CALLS="$TMP/gc-calls" ESC_CALLS="$TMP/esc-calls" ESC_BODIES="$TMP/esc-bodies"
-export GC_ESCALATE_TOOL="$TMP/bin/escalate.sh"
+export GC_HUMAN_GATE_TOOL="$TMP/bin/human-gate.sh"
 export GC_RIG=testrig
 export LIVENESS_SWEEP_STATE_DIR="$TMP/state"
 # The stubs answer instantly, so the per-call timeout only ever adds a fork.
@@ -304,7 +307,7 @@ printf '%s\n' '[{"id":"rv-fix","status":"closed","metadata":{"task_kind":"review
 run_sweep() { # run_sweep [baseline-csv|ABSENT] -> RC/OUT
     rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"
     [ "${1:-ABSENT}" = "ABSENT" ] || printf '%s\n' "$1" > "$BASELINE_FILE"
-    : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_BODIES"
+    : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_CALLS.windows"; : > "$ESC_BODIES"
     RC=0
     OUT="$(bash "$SCRIPT" 2>"$TMP/err")" || RC=$?
 }
@@ -321,7 +324,10 @@ eq "$RC" "0" "the pass completes"
 eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "$EXPECT_SURVIVORS" \
    "the baseline advances to exactly the unnamed set (classification pinned)"
 eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" \
-   "ONE batch visit via escalate.sh, on the standing subject, key liveness-sweep"
+   "ONE batch filing via human-gate.sh, on the standing subject, key liveness-sweep"
+grep -q '^tk-subject liveness-sweep -$' "$ESC_CALLS.windows" \
+    && ok "a batch is an event, so its call declares no quiet window" \
+    || bad "the batch call declares no quiet window" "$(cat "$ESC_CALLS.windows" 2>/dev/null)"
 grep -q "New this pass:" "$ESC_BODIES" && ok "the body lists the new candidates" \
     || bad "the body lists the new candidates" "$(cat "$ESC_BODIES")"
 grep -q "c-plain — an ordinary idle bug" "$ESC_BODIES" \
@@ -634,7 +640,10 @@ grep -q '^w-anchor landed-fix-wedge$' "$ESC_CALLS" \
     && ok "a must-fix finding whose fix unit closed escalates its wedged anchor" \
     || bad "landed-fix wedge escalated" "esc-calls: $(cat "$ESC_CALLS")"
 grep -q 'the fix is on the branch' "$ESC_BODIES" \
-    && ok "…and the visit body names the landed-fix wedge" || bad "wedge body" "$(cat "$ESC_BODIES")"
+    && ok "…and the gate's message names the landed-fix wedge" || bad "wedge body" "$(cat "$ESC_BODIES")"
+grep -q '^w-anchor landed-fix-wedge 86400$' "$ESC_CALLS.windows" \
+    && ok "…and the call declares a day-long quiet window, since every pass detects a standing wedge again" \
+    || bad "the wedge call declares its quiet window" "$(cat "$ESC_CALLS.windows" 2>/dev/null)"
 
 echo "── …but a fix unit still IN FLIGHT is not a wedge — nothing escalated ──"
 printf '%s\n' '[{"id":"w-fix","status":"open","metadata":{"task_kind":"rework"}}]' > "$TMP/show/dep-w-find.json"
@@ -782,7 +791,7 @@ printf '%s\n' '[{"id":"ri-demo","title":"pre-open, correctness green, demo pendi
 backing ri-demo correctness
 in_rig() { # in_rig <rig> : run_sweep from the rig's checkout, with no index override
     rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"
-    : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_BODIES"
+    : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_CALLS.windows"; : > "$ESC_BODIES"
     RC=0
     OUT="$(cd "$1" && env -u GC_REVIEW_CHECKS_INDEX FAKE_READY="$TMP/ri-ready.json" bash "$SCRIPT" 2>"$TMP/err")" || RC=$?
 }

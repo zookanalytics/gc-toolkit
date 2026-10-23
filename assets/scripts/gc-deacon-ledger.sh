@@ -22,10 +22,10 @@
 #
 # STORE. Every read and write here runs against the city store, from the city
 # path with GC_RIG unset. `gc bd` selects a store from GC_RIG first and the
-# working directory second, and callers arrive holding both: escalate.sh
-# exports GC_RIG so its visit lands in the subject bead's rig, and the patrol
-# formula binds one for the same reason. Taking the ambient store would file
-# an escalation's entry in a rig ledger while the deacon reads the city one.
+# working directory second, and callers arrive holding both: the patrol
+# formula binds one so a finding lands in its rig's store. Taking the ambient
+# store would file a human gate's entry in a rig ledger while the deacon reads
+# the city one.
 #
 # ROTATION keeps each ledger skimmable: past the entry or age bound, the
 # current bead gets a final `rotated -> <new-id>` entry and is closed, and a

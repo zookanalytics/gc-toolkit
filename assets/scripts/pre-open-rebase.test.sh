@@ -8,7 +8,7 @@
 # site's agreement with pr-facts.sh's copy; the vetoes (merge_hold, rebase_hold, a
 # rebase_hold on a bead naming the branch, a live demand, no fix pool); a branch
 # whose edited code main deleted getting the operator's supersession decision
-# instead of a child, a pending decision holding without a second escalation, and
+# instead of a child, a pending decision holding without asking again, and
 # a decision that cannot be recorded falling through to the ordinary child; dedup on
 # branch and head against a live child, a stranded child joined to its anchor
 # and re-routed rather than buried, and a child filed with its work order, its
@@ -90,14 +90,15 @@ SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/pre-open-rebase.sh" "$HERE/branch-supersession.sh" "$HERE/pool-route.sh"
 SUT="$SD/pre-open-rebase.sh"
 POOL="loomington/gc-toolkit.polecat"
-# escalate.sh's contract for the supersession guard: one visit per subject+key,
-# stamped and routed at the board so the guard can find the visit it filed and
-# count it as asking somebody. STUB_ESC_RC models a refusal.
-cat > "$SD/escalate.sh" <<'ESC'
+# human-gate.sh as the supersession guard reads it back: one decision per
+# subject+key, which the guard's lookup finds as an open bead stamped with the
+# key and the subject and routed at the board, so it counts as asking somebody.
+# STUB_GATE_RC models a refusal.
+cat > "$SD/human-gate.sh" <<'GATE'
 #!/usr/bin/env bash
 set -u
-printf '%s\n' "$*" >> "${STUB_ESC_LOG:?}"
-[ -n "${STUB_ESC_RC:-}" ] && exit "$STUB_ESC_RC"
+printf '%s\n' "$*" >> "${STUB_GATE_LOG:?}"
+[ -n "${STUB_GATE_RC:-}" ] && exit "$STUB_GATE_RC"
 subj=""; key=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -112,9 +113,9 @@ vid=$(gc bd create "visit: $subj — $key" -t task --json | jq -r '.id // empty'
 gc bd update "$vid" --set-metadata "escalation_key=$key" \
   --set-metadata "gc.continuation_group=$subj" --set-metadata "task_kind=visit" \
   --set-metadata "gc.routed_to=human" >/dev/null
-ESC
-chmod +x "$SD/escalate.sh"
-export STUB_ESC_LOG="$TMP/esc.log" STUB_ESC_RC=""; : > "$STUB_ESC_LOG"
+GATE
+chmod +x "$SD/human-gate.sh"
+export STUB_GATE_LOG="$TMP/gate.log" STUB_GATE_RC=""; : > "$STUB_GATE_LOG"
 
 run() { ( cd "$WORK" && "$SUT" "$@" 2>&1 ); }
 
@@ -124,8 +125,8 @@ pre() { # id branch [extra-metadata-json]
 }
 reset() { # <row-json>...
   local IFS=,; store "[$*]"
-  : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_SESSION_LOG"; : > "$STUB_ESC_LOG"
-  export STUB_DROP_KEYS="" STUB_LIST_FAIL="" STUB_ESC_RC=""
+  : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_SESSION_LOG"; : > "$STUB_GATE_LOG"
+  export STUB_DROP_KEYS="" STUB_LIST_FAIL="" STUB_GATE_RC=""
 }
 newborn() { jq -r '[ .[] | select(.id | startswith("new-")) ][0].id // "<none>"' "$STUB_STORE"; }
 newcount() { jq '[ .[] | select(.id | startswith("new-")) ] | length' "$STUB_STORE"; }
@@ -173,7 +174,7 @@ eq "$rc" "1" "the superseded branch really conflicts (premise of the next checks
 reset "$(pre AM polecat/tk-moot)"
 OUT=$(run --fix-pool "$POOL")
 eq "$(kidcount)" "0" "no merge-in child is filed for a branch whose edited code main deleted"
-has "$(cat "$STUB_ESC_LOG")" "--subject AM --key rework-base-supersession" "the supersession decision is filed on the anchor instead"
+has "$(cat "$STUB_GATE_LOG")" "--subject AM --key rework-base-supersession" "the supersession decision is filed on the anchor instead"
 has "$OUT" "filed decision" "the guard's answer is in the pass log"
 has "$OUT" "held=1" "and the anchor is counted held, not skipped or reworked"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $POOL" "the fix pool is not woken"
@@ -182,16 +183,16 @@ echo "# a pending supersession decision holds without asking again"
 reset "$(pre AN polecat/tk-moot)" '{"id":"VN","status":"open","assignee":"","title":"visit","notes":"","metadata":{"escalation_key":"rework-base-supersession","gc.continuation_group":"AN","task_kind":"visit","gc.routed_to":"human"}}'
 OUT=$(run --fix-pool "$POOL")
 eq "$(kidcount)" "0" "an open decision on the anchor files no child"
-eq "$(cat "$STUB_ESC_LOG")" "" "and no second escalation"
+eq "$(cat "$STUB_GATE_LOG")" "" "and the decision is not asked again"
 has "$OUT" "VN is still open" "the pending decision is named"
 
 echo "# a supersession that cannot be recorded falls through to the ordinary child"
 reset "$(pre AO polecat/tk-moot)"
-export STUB_ESC_RC=1
+export STUB_GATE_RC=1
 OUT=$(run --fix-pool "$POOL")
-eq "$(kidcount)" "1" "with no visit behind it, the guard holds nothing and the child is filed as before"
-has "$OUT" "could not be filed" "and the pass log says why"
-export STUB_ESC_RC=""
+eq "$(kidcount)" "1" "with no decision behind it, the guard holds nothing and the child is filed as before"
+has "$OUT" "could not be asked" "and the pass log says why"
+export STUB_GATE_RC=""
 
 echo "# a branch that still merges is left alone"
 reset "$(pre A2 polecat/tk-ok)"

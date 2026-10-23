@@ -139,7 +139,7 @@ performer; the full transition table with writers is
 External facts the pack does not write — GitHub closing or retargeting a PR, a
 session dying, a pool slot the runtime does not free, a provider quota park —
 are handled by these reactive paths: `pr-facts.sh` (an arm of the cadence)
-records PR events and files a visit, the witness patrol recovers work orphaned
+records PR events and files a human gate, the witness patrol recovers work orphaned
 by dead sessions, the `dog` pool is warrant executor for due-process recovery
 of wedged sessions (demand-scaled 0-2), `pool-slot-reap.sh` closes a pool
 session bead the runtime left holding its slot with no runtime and no work,
@@ -162,15 +162,36 @@ The human surface is subject / visit / takeaway on native primitives
   vacuums onto the live sitting through the continuation group; cold,
   `gc-helm engage` spawns a fresh `converse-<model>` sitting that reconstitutes
   from the record. The record is the durable thing; sessions are disposable.
-- **A visit is a filed turn** — `mol-visit` and `gc-visit-open.sh` are the
-  canonical entry point. Two channels carry a signal, and which applies
-  depends on who can answer it. Mail is the agent-to-agent pathway: a worker
-  mails the witness, which unblocks what it can and promotes what needs a
-  person. A visit is the human engagement: `escalate.sh` files or refreshes
-  **exactly one open visit per situation key**, parked on the helm board
-  (`gc.routed_to=human`), where the operator engages it. There is no mayor; a
-  situation that needs a human is a visit, same as any other. Patrol formulas escalate rather than mail, because a patrol sits at
-  the top of the agent tier and has no peer to mail.
+- **A visit is a filed turn**, and the board and the converse sittings work on
+  visits. `gc-helm.sh open` files every visit, parked on the helm board
+  (`gc.routed_to=human`) until the operator engages it. The operator's intake,
+  `gc-visit-open.sh`, files its visits through it, and so does a caller asking
+  about a bead with open children, which a gate on the bead would pause.
+- **A human gate is a wait for a person.** Two channels carry a signal, and
+  which applies depends on who can answer it. Mail is the agent-to-agent
+  pathway: a worker mails the witness, which unblocks what it can and promotes
+  what needs a person. A human gate is the human engagement: `human-gate.sh`
+  files Gas City's native human gate on the bead that waits, **exactly one open
+  gate per bead and situation key**. The gate blocks that bead, so the bead
+  leaves `bd ready` and the pool's offer, and bd refuses its close, until a
+  person resolves the gate with the answer as its reason. A quiet period applies
+  only where a call declares `--quiet-window`, and `--retract` resolves the
+  filer's own gate as moot once its situation has gone. `escalate.sh` is the
+  name that step text from an earlier version of a formula calls, and it hands
+  the call to `human-gate.sh` unchanged. There is no mayor; a situation that
+  needs a human is a human gate, same as any other. A patrol files a human gate
+  on the bead a situation is about, or a finding (`patrol-finding.sh`), rather
+  than mail, because a patrol sits at the top of the agent tier and has no peer
+  to mail. A gate `human-gate.sh` files reaches the operator through no visit
+  and no board row of its own. `gate-visit-sweep` files a visit only for a gate
+  that carries `gc.demand_for`, which `gc-helm.sh demand` writes and
+  `human-gate.sh` does not, and the board reads an open blocker as something a
+  person owes only when it is a `decision` or routed to `human`. Some callers
+  look a gate they filed back up as a visit and find none. `finding.sh` then
+  records no needs-you ruling, `liveness-sweep.sh` no census and `pr-facts.sh`
+  no comment disposition, and the rest of `pr-facts.sh`'s arms that look for
+  the visit find nothing to act on. `branch-supersession.sh` dispatches the
+  merge-in child its hold would stop.
 - **A takeaway records what a sitting concluded**, and its `--waiting-on` edge
   is what makes the wait machine-answerable
   ([lifecycle-composition.md](lifecycle-composition.md)).

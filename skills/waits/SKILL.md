@@ -108,11 +108,12 @@ Writer: `"$(gc <binding> scripts-dir)/gc-helm.sh" open <bead> --reason "<what th
 nothing and your brief goes nowhere, so append what you need to the bead's
 notes (the records skill), where the sitting reads it.
 
-For a blocker only a person can answer, escalate instead. It keeps one open
-visit per bead and situation key, however often you hit it:
-`"$(gc <binding> scripts-dir)/escalate.sh" --subject <bead> --key <situation-key> --message "<what you hit, what you tried, what unblocks it>"`.
-When the situation clears by itself, the same call with `--retract` closes
-that visit, unless someone has already engaged it.
+For a blocker only a person can answer, file a human gate on the bead that
+waits instead. It keeps one open gate per bead and situation key, however often
+you hit it, and the bead waits until a person clears the gate:
+`"$(gc <binding> scripts-dir)/human-gate.sh" --subject <bead> --key <situation-key> --message "<what you hit, what you tried, what unblocks it>"`.
+When the situation clears by itself, the same call with `--retract` resolves
+that gate as moot.
 
 A visit keeps nothing out of `bd ready`. While it is open it holds only its
 own subject's finalization: the subject's PR does not merge and the subject

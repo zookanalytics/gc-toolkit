@@ -2,22 +2,25 @@
 # Thin wiring check: the deacon patrol's two sweeps — the doctor sweep and the
 # Dolt backup sweep — file findings through assets/scripts/patrol-finding.sh
 # (one durable bead per situation key, which a proactive first reaction then
-# disposes). A bare `gc mail send` in the formula is the escalation-storm
-# surface coming back — there is no mayor mailbox to absorb it, and mail dedups
-# nothing.
+# disposes), and the deacon's emergency is a human gate filed with
+# assets/scripts/human-gate.sh on the bead it is about. A bare `gc mail send`
+# in the formula dedups nothing, and there is no mayor mailbox to absorb it.
 #
-# The measured failure this guards: escalate.sh's dedup window is one OPEN
-# visit, and a converse sitting closes each visit before the next sweep runs,
-# so `doctor-sweep-failed` filed 14 visits in one day under an identical key.
+# A sweep re-detects its failure every cycle. A finding stays one bead per key
+# while it lives and counts each recurrence, where a human gate is one per key
+# only while it is open, so a sweep filed as a gate would ask again every cycle
+# once a person answered the last one.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE/../.."
 TOML="$ROOT/formulas/mol-deacon-patrol.toml"
+PROMPT="$ROOT/agents/deacon/prompt.template.md"
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 
 [ -s "$TOML" ] || { echo "missing $TOML" >&2; exit 1; }
+[ -s "$PROMPT" ] || { echo "missing $PROMPT" >&2; exit 1; }
 
 grep -q 'patrol-finding\.sh' "$TOML" \
   && ok "deacon patrol files findings through patrol-finding.sh" \
@@ -46,32 +49,50 @@ grep -qF -- '--scope deacon-findings --check "$CHECK"' "$TOML" \
 
 # The doctor sweep's FAILED path — failed, exceeded, blocked, an unnamed state,
 # or a non-zero runner RC — carries no payload to filter, so it never reaches
-# the per-check filer above. It is the doctor-sweep-failed key the header
-# describes: routed through escalate.sh it filed a fresh visit every cycle. It
-# must file ONE deduped finding instead.
+# the per-check filer above. It files ONE deduped finding under its own key.
 grep -q -- 'patrol-finding\.sh" --scope deacon-findings --key doctor-sweep-failed' "$TOML" \
   && ok "the failed doctor-sweep path files a finding under --key doctor-sweep-failed" \
-  || bad "the failed doctor-sweep path must file a finding (--key doctor-sweep-failed), not escalate a visit"
+  || bad "the failed doctor-sweep path must file a finding (--key doctor-sweep-failed), not a human gate"
 
 grep -q -- '--key dolt-backup-<db>' "$TOML" \
   && ok "the backup sweep keys each finding by its database" \
   || bad "the backup sweep must key per database, not once for the whole sweep"
 
-# The standing triage subject existed only to give escalate.sh a durable
-# subject for its visit. The finding bead is its own subject now, and keeping
-# the old creation block would file a bead nothing writes to.
+# The finding bead is its own subject, so the patrol creates no standing triage
+# subject: one would be a bead nothing writes to.
 if grep -q 'triage.scope=deacon-findings' "$TOML"; then
-  bad "the standing deacon-findings triage subject is still created; the finding bead is the subject now"
+  bad "the standing deacon-findings triage subject is still created; the finding bead is the subject"
 else
   ok "no standing triage subject — the finding bead is its own durable subject"
 fi
 
 if grep -n 'gc mail send' "$TOML"; then
-  bad "formula still contains a bare 'gc mail send' — findings are beads now"
+  bad "formula still contains a bare 'gc mail send' — findings are beads"
 else
   ok "no bare 'gc mail send' anywhere in the formula"
 fi
 
+# The patrol and the prompt name the helper by its name. The prompt's emergency
+# calls it directly on the bead it is about: `gc bd` files the gate in that
+# bead's store, so no store is derived first and no pool is named.
+for F in "$TOML" "$PROMPT"; do
+  if grep -n 'escalate\.sh' "$F"; then
+    bad "${F#"$ROOT"/} still names escalate.sh; the helper is human-gate.sh"
+  else
+    ok "${F#"$ROOT"/} names the helper by its name, human-gate.sh"
+  fi
+done
+EMERGENCY=$(grep -n '"\$SCRIPTS/human-gate\.sh"' "$PROMPT")
+case "$EMERGENCY" in
+  *'--subject <bead> --key <situation-key>'*) ok "the deacon's emergency files a human gate on the bead it is about" ;;
+  *) bad "the deacon prompt's emergency no longer calls human-gate.sh --subject <bead> --key <situation-key>" ;;
+esac
+if grep -n -e 'escalation-rig' -e 'ESC_RIG' -e '--pool' "$PROMPT"; then
+  bad "the deacon prompt derives a store or names a pool for its human gate; gc bd files the gate beside the bead it blocks"
+else
+  ok "the deacon prompt derives no store and names no pool for its human gate"
+fi
+
 echo
-echo "deacon-escalation-wiring: $PASS passed, $FAIL failed"
+echo "deacon-human-gate-wiring: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

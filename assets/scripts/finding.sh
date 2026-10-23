@@ -900,10 +900,12 @@ cmd_set_disposition() {
       # open on the anchor's feedback, which this ruling defers to rather than ask
       # the operator the same question twice; it must be on the anchor or one of
       # its rework children, so a mistyped or closed id cannot leave the finding
-      # waiting on a visit nobody will rule. Without --visit, escalate.sh files one
-      # visit per finding, keyed on its id; it dedups on the (escalation_key,
-      # subject) pair, so a re-ruled finding reuses its open visit rather than
-      # filing a second. The escalate path is overridable for the hermetic test.
+      # waiting on a visit nobody will rule. Without --visit, human-gate.sh files
+      # one human gate per finding on the anchor, keyed on the finding's id; it
+      # files nothing while an open gate under that key blocks the anchor, so a
+      # re-ruled finding reuses its open gate rather than filing a second. Each
+      # finding is an event of its own, so the call declares no quiet window. The
+      # helper's path is overridable for the hermetic test.
       local vid vreply nnote
       if [ -n "$visit" ]; then
         local onfb
@@ -915,16 +917,16 @@ cmd_set_disposition() {
         vreply="This comment needs your decision, and visit $vid already asks you for it. The review stays changes-requested until you rule that visit and the work your ruling calls for lands."
         nnote="needs-you: deferred to open visit $vid, which already carries this question"
       else
-        local vkey="review-needs-you.$finding" vmsg escalate
+        local vkey="review-needs-you.$finding" vmsg human_gate
         vmsg="A review comment on anchor $anchor needs your decision; the review pass cannot judge it."
         [ -n "$reason" ] && vmsg="$vmsg $reason"
-        escalate="${GC_ESCALATE_SH:-$_bd_lib_dir/escalate.sh}"
-        [ -x "$escalate" ] \
-          || { warn "escalate.sh not found beside this script; cannot file the needs-you visit for $finding"; exit 2; }
-        "$escalate" --subject "$anchor" --key "$vkey" --message "$vmsg" >/dev/null 2>&1 \
-          || { warn "could not file the needs-you visit for $finding (escalate.sh failed)"; exit 2; }
-        # The open visit on this subject carrying our key — escalate.sh filed or
-        # found exactly one. Its id is the answer the raiser is owed on the PR.
+        human_gate="${GC_HUMAN_GATE_TOOL:-$_bd_lib_dir/human-gate.sh}"
+        [ -x "$human_gate" ] \
+          || { warn "human-gate.sh not found beside this script; cannot file the needs-you gate for $finding"; exit 2; }
+        "$human_gate" --subject "$anchor" --key "$vkey" --message "$vmsg" >/dev/null 2>&1 \
+          || { warn "could not file the needs-you gate for $finding (human-gate.sh failed)"; exit 2; }
+        # The open visit on this subject carrying our key. Its id is the answer
+        # the raiser is owed on the PR.
         vid=$(bd_list --metadata-field escalation_key="$vkey" --status="$LIVE_STATUSES" 2>/dev/null \
           | jq -r --arg a "$anchor" '[ .[]? | select(((.metadata["gc.continuation_group"] // "") | tostring) == $a) ] | .[0].id // empty' 2>/dev/null)
         [ -n "$vid" ] \

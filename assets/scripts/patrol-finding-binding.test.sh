@@ -1,21 +1,13 @@
 #!/usr/bin/env bash
-# Every shipped escalate.sh or patrol-finding.sh call site owned by a
-# CITY-scoped agent must name the rig it files into. Both writers read GC_RIG,
-# and a city-scoped agent runs with it unset:
+# Every shipped patrol-finding.sh call site owned by a CITY-scoped agent must
+# name the rig it files into. patrol-finding.sh files into the store GC_RIG
+# selects and rig-qualifies the proactive pool from it, and a city-scoped agent
+# runs with GC_RIG unset. Unbound it falls back to the gc-toolkit store, so a
+# finding about another rig lands where nobody working that rig will read it,
+# and its dedup key never meets the earlier occurrences.
 #
-#   escalate.sh defaults to gc.routed_to=human — the helm board, which is
-#   always routable and rig-agnostic — so a bare call is not refused. It files
-#   the visit in the store its subject's id prefix names. Where the subject
-#   names no store, GC_RIG is the only thing that names one: a pool never does,
-#   and without GC_RIG the visit lands in whatever store the ambient
-#   environment resolves, on some other rig's board than the one that owns the
-#   situation. So an unbound call site promises a visit on a specific board and
-#   can land it on the wrong one.
-#
-#   patrol-finding.sh files into the store GC_RIG selects and rig-qualifies the
-#   proactive pool from it. Unbound it falls back to the gc-toolkit store, so a
-#   finding about another rig lands where nobody working that rig will read it,
-#   and its dedup key never meets the earlier occurrences.
+# human-gate.sh needs no binding: `gc bd` files a gate in the store of the bead
+# it blocks, whatever GC_RIG says, so its call sites are not examined here.
 #
 # A prompt is a durable control channel, so a runnable recipe in one counts
 # exactly as much as a formula step.
@@ -46,11 +38,10 @@ scope_of() { # agent name -> declared scope, empty when the agent is not shipped
 }
 
 # Only runnable invocations: a call through $SCRIPTS, or the bare name with
-# its flags. A path test (`[ -x .../escalate.sh ]`) and a prose mention that
-# names no flags are neither.
-WRITERS='escalate|patrol-finding'
-invocations() { grep -n -E "\\\$SCRIPTS/($WRITERS)\\.sh|(^|[^-/[:alnum:]])($WRITERS)\\.sh[[:space:]]+--" "$1"; }
-# GC_RIG= binds either writer, and --rig binds patrol-finding.sh.
+# its flags. A path test (`[ -x .../patrol-finding.sh ]`) and a prose mention
+# that names no flags are neither.
+invocations() { grep -n -E "\\\$SCRIPTS/patrol-finding\\.sh|(^|[^-/[:alnum:]])patrol-finding\\.sh[[:space:]]+--" "$1"; }
+# GC_RIG= or --rig binds the writer.
 bound() { printf '%s' "$1" | grep -qE 'GC_RIG=|--rig[[:space:]]+[A-Za-z0-9._-]'; }
 
 EXAMINED=0
@@ -80,5 +71,5 @@ done
   || bad "the scan reached only $EXAMINED city-scoped filing surface(s) — the filter stopped matching, it did not get clean"
 
 echo
-echo "escalation-binding: $PASS passed, $FAIL failed"
+echo "patrol-finding-binding: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

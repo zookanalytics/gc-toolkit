@@ -289,10 +289,10 @@ cat > "$TMP/guardpack/assets/scripts/deferred-dispatch.sh" <<'ARM'
 #!/usr/bin/env bash
 printf 'ARM %s\n' "$*" >> "$FAKE_GUARD_LOG"
 ARM
-cat > "$TMP/guardpack/assets/scripts/escalate.sh" <<'ESC'
+cat > "$TMP/guardpack/assets/scripts/human-gate.sh" <<'GATE'
 #!/usr/bin/env bash
-printf 'ESCALATE %s\n' "$*" >> "$FAKE_GUARD_LOG"
-ESC
+printf 'GATE %s\n' "$*" >> "$FAKE_GUARD_LOG"
+GATE
 chmod +x "$TMP/guardpack/assets/scripts/"*.sh
 export FAKE_GUARD_LOG="$TMP/guard.log" FAKE_GUARD_PACK="$TMP/guardpack" FAKE_GUARD_CWD="$TMP/guardcwd"
 
@@ -307,12 +307,12 @@ export GC_VISIT_COMMENT_TOOL="$TMP/bin/rec-pvc" REC_PVC_LOG="$TMP/pvc.log"
 unset GC_HELM_FIXTURE GC_RIG || true
 export TMPDIR="$TMP"
 
-# run_accept <arg...> -> sets RC/OUT/ERR/CALLS/GUARD from the per-case FAKE_* env.
+# run_accept <arg...> -> sets RC/ERR/CALLS/GUARD from the per-case FAKE_* env.
 run_accept() {
     : > "$FAKE_CALLS"; : > "$FAKE_GUARD_LOG"
     rm -f "$FAKE_OUTCOME_DIR"/* 2>/dev/null || true
     set +e
-    OUT="$(sh "$SCRIPT" accept "$@" 2>"$TMP/err")"; RC=$?
+    sh "$SCRIPT" accept "$@" >/dev/null 2>"$TMP/err"; RC=$?
     set -e
     ERR="$(cat "$TMP/err")"
     CALLS="$(cat "$FAKE_CALLS")"
@@ -502,8 +502,8 @@ grep -q '^GUARD rc=0$' <<< "$GUARD" \
 grep -q '^CANCEL ' <<< "$GUARD" \
   && bad "(GUARD) the run Accept started must not be cancelled (guard: $GUARD)" \
   || ok "(GUARD) the run Accept started is not cancelled"
-grep -qE '^(ARM|ESCALATE) ' <<< "$GUARD" \
-  && bad "(GUARD) nothing is re-armed or escalated (guard: $GUARD)" || ok "(GUARD) nothing is re-armed or escalated"
+grep -qE '^(ARM|GATE) ' <<< "$GUARD" \
+  && bad "(GUARD) nothing is re-armed or put to a person (guard: $GUARD)" || ok "(GUARD) nothing is re-armed or put to a person"
 grep -q "bd close $VIS" <<< "$CALLS" \
   && ok "(GUARD) dismisses the visit" || bad "(GUARD) visit dismissed (calls: $CALLS; err: $ERR)"
 

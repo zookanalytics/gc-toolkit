@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
-# queries it, the one-write create every script files a stamped bead through,
+# queries it, the read of a bead's human gates every reader of them makes, the
+# one-write create every script files a stamped bead through,
 # the metadata read-back that gates handing such a bead on, the close that
 # unmakes a bead no reader can find, the validation pass's work order, the
 # gating-PR read's field set, the per-rig key an order's state lives under, and
@@ -164,6 +165,25 @@ bd_list() {
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   _bd_cache_put "$cache_file" "$raw"
   printf '%s' "$raw"
+}
+
+# bd_human_gates <bead> — the bead's human gates: each bead its `blocks` edges
+# reach whose issue_type is `gate` and whose await_type is `human`, open and
+# closed alike. This is the one read every reader of a bead's human gates
+# makes. It prints the rows `gc bd dep list <bead> --type blocks` returns, as
+# one JSON array, and each row carries the gate's id, status, await_id, title,
+# created_at, close_reason and closed_at, with an empty field left out. A read
+# that exits non-zero, or answers anything but an array, as bd answers a bead it
+# cannot find, prints nothing and returns 1, so "no gate" and "could not read"
+# stay apart. `bd gate list <bead>` is not this read: it returns the gates a
+# bead reaches through an edge of any type, without saying which edge.
+bd_human_gates() {
+  local raw
+  raw=$(_bd_call dep list "$1" --type blocks --json </dev/null 2>/dev/null) || return 1
+  raw=$(printf '%s' "$raw" | grep -a -vE '^gc bd:' | scrub)
+  printf '%s' "$raw" | jq -ce 'if type == "array"
+    then [ .[] | select((.issue_type // "") == "gate" and (.await_type // "") == "human") ]
+    else error("not an array") end' 2>/dev/null
 }
 
 # The anchor graph. A bead that hangs off a PR anchor (a review, a rework

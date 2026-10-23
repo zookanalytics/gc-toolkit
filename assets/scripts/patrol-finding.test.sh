@@ -3,11 +3,11 @@
 # distinct patrol finding, and a recurrence that lands on it instead of filing
 # another. Stubbed gc and gc-proactive.sh; no live city, Dolt, or network.
 #
-# The load-bearing case is RECURRENCE. escalate.sh's visit dedup held only
-# while its visit was open, and a converse sitting closed each visit before the
-# next patrol sweep ran, so one situation filed 14 visits in a day under an
-# identical key. The bead this files stays open across the recurrence, so the
-# same 14 ticks have to come back as one bead.
+# The load-bearing case is RECURRENCE. A human gate dedups only while it is
+# open, and a person answers each one before the next patrol sweep runs, so a
+# sweep filed as gates would ask again on every pass under an identical key. The
+# bead this files stays open across the recurrence, so fourteen ticks of one
+# situation have to come back as one bead.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -229,7 +229,7 @@ has "$(cat "$STUB_PROACTIVE_LOG")" "deliverable" "(first) asks whether the pool 
 has "$(cat "$STUB_PROACTIVE_LOG")" "sling fnd-1" "(first) slings the first reaction at the bead"
 hasnt "$(cat "$STUB_GC_LOG")" "visit:" "(first) no visit is filed on this path"
 
-# ── 2. the same finding, again — the case escalate.sh could not hold ─
+# ── 2. the same finding, again — the case a human gate's dedup cannot hold ─
 OUT=$("$SUT" --key doctor-sweep-failed --scope deacon-findings \
         --title "doctor sweep failed" --message "state=failed elapsed=612 check=cadence" 2>&1)
 eq "$(beads)" "1" "(recur/same) still exactly one bead — no duplicate"

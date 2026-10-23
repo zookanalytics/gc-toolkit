@@ -37,10 +37,11 @@ much as by what it stewards.
   own. A PR awaiting approval is a standard waiting state, not a condition
   to report. Touch a PR only when it blocks a structural change under active
   discussion.
-- **City health, incident triage.** The deacon patrols; escalations are
-  visits filed through `escalate.sh`. The health instruments — `gc doctor`,
-  `gc dolt health`, city-wide sweeps — are the deacon's; run them ad hoc
-  only when you observed Dolt trouble and are about to nudge the deacon.
+- **City health, incident triage.** The deacon patrols; what needs a person
+  is a human gate filed through `human-gate.sh`. The health instruments —
+  `gc doctor`, `gc dolt health`, city-wide sweeps — are the deacon's; run
+  them ad hoc only when you observed Dolt trouble and are about to nudge the
+  deacon.
 - **Merge cadence and recovery.** The refinery-reconcile order and the
   witness own those loops.
 
@@ -304,44 +305,33 @@ FROM <prefix>.events WHERE issue_id = '<bead-id>'`).
 
 
 
-### Closing a visit: never by hand
+### Withdrawing a human gate you filed
 
-A closed visit records why it closed in two keys: `gc.outcome`, one word,
-and `gc.outcome_reason`, one sentence. The board takes a finished sitting's
-outcome from them, so a visit closed without them looks like a need nobody
-met. A bare `gc bd close` or `--status=closed` on a visit records neither.
+A human gate is cleared by resolving it, and its resolve reason is the answer,
+headed `ruled:`, `moot:` or `benign:`. The board and every reader take a
+cleared gate's answer from that reason, so a gate closed with a bare
+`gc bd close` reads as a need nobody met.
 
-A sitting closes the visit it works. Outside a sitting, a visit is closed
-only by the role that raised it, and only when it was filed in error, when
-another visit already carries its need, or when its premise is gone. That
-close goes through one of two writers:
+A person clears a gate. A role never resolves a gate another role filed, even
+after it resolves the situation the gate asks about: it appends what it did to
+the notes of the bead the gate blocks and leaves the gate open. A role
+withdraws its own gate, and only when the situation it asked about is gone,
+with one call:
 
 ```bash
 for cand in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$cand/assets/scripts/visit-close.sh" ] && { SCRIPTS="$cand/assets/scripts"; break; }
+  [ -x "$cand/assets/scripts/human-gate.sh" ] && { SCRIPTS="$cand/assets/scripts"; break; }
 done
-# An open escalation you raised on a bead:
-"$SCRIPTS/escalate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
-# Any other visit you raised:
-"$SCRIPTS/visit-close.sh" --visit <visit> --outcome <word> --reason "<one sentence>"
+"$SCRIPTS/human-gate.sh" --retract --subject <bead> --key <situation-key> --message "<why it needs nobody now>"
 ```
 
-`escalate.sh --retract` finds the open visit by the subject and key it was
-filed under, and closes it `moot` through `visit-close.sh`. It leaves a visit
-with an assignee or a bound session open for whoever holds it.
-`visit-close.sh` stamps both keys and reads them back before it closes. On a
-visit that is already closed it records the two keys and leaves the close as
-it was, so it also repairs a visit closed by hand.
-
-The word carries weight. `moot` (the premise is gone) and `benign` (it holds
-but needs nobody) stop `escalate.sh` filing the same key and subject again
-for a day. Any other word means someone acted. Use `duplicate` when another
-visit carries the need, and `resolved` when you acted to end it.
-
-A visit another role raised, or one a sitting has claimed, is the sitting's
-to close, even after you resolve its situation. Append what you did to its
-notes and leave it open. Close it yourself only when the operator tells you
-to, and then through `visit-close.sh`.
+`human-gate.sh --retract` resolves each open human gate under the key that
+blocks the bead, with the reason `moot: <message>`, and every bead the gate
+held is released. A sitting may be discussing the gate, and the withdrawal
+clears it anyway, because the situation is gone; the sitting learns it at its
+sign-off. A gate a person already cleared keeps that person's answer. The
+`moot:` reason starts a quiet period only where your own call site declares
+one with `--quiet-window`.
 
 
 ## Upstream engagement (gascity)

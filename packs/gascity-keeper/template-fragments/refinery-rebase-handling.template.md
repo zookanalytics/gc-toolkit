@@ -71,7 +71,7 @@ When `IS_REBASE=1`:
      | jq -r '.[0].metadata.pre_rebase_tip // .[0].metadata.backup_ref // empty')
    if [ -z "$PRE_REBASE_TIP" ]; then
      echo "ERROR: rebase bead $WORK missing metadata.pre_rebase_tip/backup_ref — cannot verify race-loss safely" >&2
-     # Refuse to push; escalate via the same race-loss path below.
+     # Refuse to push; take the same race-loss path below.
      exit 1
    fi
 
@@ -217,8 +217,9 @@ If step 1 reports `main-ahead > 0`, OR step 3's push is rejected with
 work is no longer landable as-is. Do NOT attempt to retry the
 force-push. Hand the bead back THROUGH the keeper as a durable,
 un-missable handback (the keeper is the operator's contact point for
-this decision), and file a secondary escalation visit via `escalate.sh`.
-The operator (via the gascity-keeper) decides whether to:
+this decision), and file a human gate on the bead via `human-gate.sh` as
+a secondary signal. The operator (via the gascity-keeper) decides
+whether to:
 
 - Re-pour the rebase formula to redo the work atop the new
   `origin/main`, or
@@ -230,9 +231,11 @@ Route the race loss THROUGH the keeper as a durable, un-missable
 handback. The keeper's prime sweep keys on `metadata.aborted_at`, so set
 it (in addition to `rejection_reason`) and reassign the bead to the
 requesting keeper, record the context in the bead notes, then **nudge the
-keeper**. Lock that durable handback in FIRST; the escalation visit follows
-as a secondary signal. The operator decision surfaces durably through the
-keeper, not via a best-effort side channel alone.
+keeper**. Lock that durable handback in FIRST; the human gate follows as
+a secondary signal. The gate blocks the bead, so a re-poured rebase
+waits until the operator clears it with their decision. The operator
+decision surfaces durably through the keeper, not via a best-effort side
+channel alone.
 
 ```bash
 # Prefer the keeper stamped at dispatch; fall back to the rig-scoped keeper.
@@ -263,10 +266,10 @@ EOF
 # is the real guarantee).
 gc session nudge "$KEEPER_TARGET" "rebase race loss on $WORK: origin/main advanced — operator decision needed (metadata.aborted_at=refinery-race-loss)" || true
 
-# Secondary escalation signal: one open visit per situation key.
-"$PACK_DIR/assets/scripts/escalate.sh" --situation "rebase-race-loss:$WORK" \
-  --subject "$WORK" \
-  --summary "Rebase race loss on $WORK: origin/main advanced after the rebase polecat finished ($BRANCH no longer landable as-is). Routed to the keeper (assignee=$KEEPER_TARGET, aborted_at=refinery-race-loss) for the operator decision. Backup ref: $BACKUP_REF" || true
+# Secondary signal: one open human gate per bead and situation key. The race
+# loss is an event of this run, so the call declares no quiet window.
+"$PACK_DIR/assets/scripts/human-gate.sh" --subject "$WORK" --key rebase-race-loss \
+  --message "Rebase race loss on $WORK: origin/main advanced after the rebase polecat finished ($BRANCH no longer landable as-is). Routed to the keeper (assignee=$KEEPER_TARGET, aborted_at=refinery-race-loss) for the operator decision; clear this gate with it. Backup ref: $BACKUP_REF" || true
 ```
 
 ### Refinery overlay scope
@@ -274,8 +277,8 @@ gc session nudge "$KEEPER_TARGET" "rebase race loss on $WORK: origin/main advanc
 This rebase-handling overlay is opt-in per rig (only rigs that import
 the `gascity-keeper` sub-pack). A refinery in a rig that does NOT
 import the sub-pack will not carry these instructions; a rebase-shaped
-bead that ends up at such a refinery is a routing leak. Escalate via
-`escalate.sh` instead of force-pushing. PR #17's "reject as routing leak"
-intent survives in the unintended-target case; the legitimate path is
-the overlay above.
+bead that ends up at such a refinery is a routing leak. File a human
+gate on the bead with `human-gate.sh` instead of force-pushing. PR #17's
+"reject as routing leak" intent survives in the unintended-target case;
+the legitimate path is the overlay above.
 {{ end }}
