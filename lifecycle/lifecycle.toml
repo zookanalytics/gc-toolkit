@@ -20,13 +20,15 @@ states = [
   "held",
 ]
 # States that also route the bead to a human (lifecycle.sh stamps
-# gc.routed_to=human in the same atomic update).
+# gc.routed_to=human in the same atomic update). A self-transition that passes
+# --keep-route records on the bead and writes no route, so it keeps the route
+# the bead carries.
 human_states = ["abandoned", "retargeted", "blocked", "refused_false_completion", "held"]
 # States the merge cadence drives and no queue offers, so an anchor in one rests
 # both unrouted and unheld. lifecycle.sh writes the two halves in the same
-# atomic update: it clears gc.routed_to unless --route is given or the bead
-# already rests on park_route, and it clears the assignee unless --assignee is
-# given, at status=open only. A pool route on one of these is demand for work
+# atomic update: it clears gc.routed_to unless --route or --keep-route is given
+# or the bead already rests on park_route, and it clears the assignee unless
+# --assignee is given, at status=open only. A pool route on one of these is demand for work
 # already in the merge queue, and the claim it invites moves the anchor out of
 # `--status=open`, where merge.sh and pr-facts.sh both stop seeing it. An
 # assignee is the same anchor still sitting in the refinery's own find-work
@@ -52,6 +54,18 @@ park_route = "human"
 # gives (gc.work_outcome, gc.work_commit, gc.work_branch; see
 # [metadata.runtime_owned]).
 closed_states = ["merged"]
+# What leaving a state writes, as <state>:<key>=<value>. A transition from that
+# state into another open state sets the key to the value in the same atomic
+# update, unless the caller writes the key itself, so no writer of such a
+# transition can leave the key behind. A transition into a closed state writes
+# none of them: the anchor's life ends there.
+# The rank of an anchor's PR-finishing work is approved only while the anchor
+# rests in pull_request (assets/scripts/priority-lib.sh), so leaving it marks
+# pr_finishing_settled unsettled, and pr-facts.sh settles that work at the rank
+# it then follows ([metadata.pr_posture]). Leaving it also clears pr_head_oid,
+# the PR head pr-facts.sh last read, so an anchor that returns counts no
+# approval until pr-facts.sh has read its PR again.
+exit_sets = ["pull_request:pr_finishing_settled=unsettled", "pull_request:pr_head_oid="]
 
 # Legal status x merge_result combinations.
 [states.unanchored]
@@ -1082,7 +1096,8 @@ keys = [
 [metadata.pr_posture]
 # pr_posture, pr_merge_state, the two watermarks and pr_comment_disposition
 # carry their mechanics in [posture] above (pr_posture is also a [dated_keys]
-# key). pr-facts.sh is the sole writer of this group.
+# key). pr-facts.sh is the sole writer of this group, apart from the writes
+# [machine] exit_sets makes on leaving pull_request.
 keys = [
   "pr_posture", "pr_merge_state", "pr_comment_watermark",
   "pr_review_watermark", "pr_issue_comment_watermark", "pr_comment_disposition",
@@ -1114,6 +1129,34 @@ keys = [
   # watermark is not re-read on every pass. They never stand in for the
   # watermarks: a routing writes those, and the write-back reads only those.
   "pr_comment_answered", "pr_review_answered",
+  # The rank all of the anchor's PR-finishing work, its open reviews, reworks
+  # and validation passes with their live workflows, was last settled at:
+  # approved, the P0 an approved PR's finishing work runs at, or unapproved, the
+  # anchor's priority plus each bead's shift (docs/steering.md#pr-finishing-work).
+  # unsettled says a re-rank is owed: the rank that work follows moved, or a
+  # settle began and did not finish. The rank is the priority function's: approved
+  # while the anchor rests in pull_request with an approved posture, unapproved
+  # anywhere else. A posture write that moves the rank and every transition out
+  # of pull_request ([machine] exit_sets) mark the record unsettled in the same
+  # write, so no reader takes the work for settled at a rank it has left. Every
+  # pass of pr-facts.sh compares the record of each anchor it reads in
+  # pull_request with that rank, and every full pass compares the record of each
+  # live anchor resting elsewhere. While the two differ, it settles that work
+  # and writes the rank once every bead of it has settled, turning a record of
+  # the other rank unsettled before the first settle. Absent means no pass
+  # recorded a rank, which a pass in pull_request settles and a full pass leaves
+  # alone elsewhere. A present value is approved, unapproved or unsettled.
+  "pr_finishing_settled",
+  # The head of the anchor's PR that pr-facts.sh last read, a commit oid. A pass
+  # writes it whenever it reads a head other than the one recorded: in the
+  # posture's write, or in a write of its own for a draft PR, whose posture it
+  # does not read. The priority function counts an approved posture only when the
+  # posture's oid is this head (prio_pr_approved in priority-lib.sh), so an
+  # approval read at an earlier head ranks no PR-finishing work at P0. Leaving
+  # pull_request clears it to empty ([machine] exit_sets), so an anchor that
+  # returns counts no approval until a pass has read its PR. Absent or empty
+  # means no pass has read the PR since the anchor entered pull_request.
+  "pr_head_oid",
 ]
 
 [metadata.pr_round_trip]
@@ -1283,8 +1326,12 @@ keys = ["priority_shift"]
 # priority_shift — the bead's shift from the bead it follows: +1 is one level
 #   later and -1 one level sooner, and each level stops at P0 and P4. Written by
 #   queue-priority.sh move, which `gc-helm.sh priority --shift` runs, and read
-#   back there. Read by priority-lib.sh wherever a priority is computed:
-#   queue-priority.sh settle, its move and its reconcile pass. Read only on a
+#   back there. Each script that files PR-finishing work (gate-ensure.sh,
+#   pr-facts.sh, pre-open-rebase.sh, rework-child.sh and signoff.sh) also
+#   writes it, -1, in the create that files a child, through bd-lib.sh's
+#   pr_finishing_birth, and never rewrites it on a child it adopts or re-routes.
+#   Read by priority-lib.sh wherever a priority is computed: queue-priority.sh
+#   settle, its move and its reconcile pass. Read only on a
 #   bead that follows a parent or an anchor: a workflow's convoy, root and steps
 #   carry no shift, and a bead that follows nothing has nothing to shift from.
 #   Absent or empty reads as 0. A value that is not a signed integer makes the

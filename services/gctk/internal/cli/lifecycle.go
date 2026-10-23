@@ -75,6 +75,11 @@ func dumpMachine(stdout io.Writer) int {
 	fmt.Fprintf(stdout, "detached_states %s\n", strings.Join(lifecycle.DetachedStates, " "))
 	fmt.Fprintf(stdout, "park_route %s\n", lifecycle.ParkRoute)
 	fmt.Fprintf(stdout, "closed_states %s\n", strings.Join(lifecycle.ClosedStates, " "))
+	exits := make([]string, 0, len(lifecycle.ExitSets))
+	for _, e := range lifecycle.ExitSets {
+		exits = append(exits, e.State+":"+e.Key+"="+e.Value)
+	}
+	fmt.Fprintf(stdout, "exit_sets %s\n", strings.Join(exits, " "))
 	fmt.Fprintf(stdout, "takeaway_max %d\n", lifecycle.TakeawayMax)
 	for _, e := range lifecycle.Transitions {
 		fmt.Fprintf(stdout, "transition %s>%s\n", e.From, e.To)
@@ -162,6 +167,25 @@ func callerWrite(sets, unsets []string, key string) (value string, ok bool) {
 		}
 	}
 	return "", slices.Contains(unsets, key)
+}
+
+// exitWrites returns the key=value writes a transition from cur to to owes to
+// lifecycle.ExitSets: those of cur, when to is another state and an open one,
+// less any key the caller sets or clears itself.
+func exitWrites(cur, to string, sets, unsets []string) []string {
+	if cur == to || lifecycle.IsClosedState(to) {
+		return nil
+	}
+	var out []string
+	for _, e := range lifecycle.ExitSets {
+		if e.State != cur {
+			continue
+		}
+		if _, own := callerWrite(sets, unsets, e.Key); !own {
+			out = append(out, e.Key+"="+e.Value)
+		}
+	}
+	return out
 }
 
 // landingFetchTimeout bounds each git call fetchLanding makes, so a remote that
@@ -394,6 +418,7 @@ type transitionOpts struct {
 	expect      string
 	route       string
 	routeSet    bool
+	keepRoute   bool
 	assignee    string
 	assigneeSet bool
 	closeIt     bool
@@ -447,6 +472,9 @@ func parseTransition(args []string) (transitionOpts, error) {
 		case "--route":
 			o.route, i = next(i)
 			o.routeSet = true
+		case "--keep-route":
+			o.keepRoute = true
+			i++
 		case "--takeaway":
 			o.takeaway, i = next(i)
 			o.takeawaySet = true
@@ -520,10 +548,17 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
+	// --keep-route writes no route at all, so it cannot also name one.
+	if o.keepRoute && o.routeSet {
+		fmt.Fprintf(stderr, "%s: --keep-route and --route ask for opposite things: --keep-route leaves gc.routed_to as the bead carries it\n", prog)
+		return 1
+	}
 	// A human state is a bead waiting on a person, so it must name one. An
 	// omitted --route takes the default; an EMPTY one is the write that leaves a
 	// bead waiting on nobody — no queue holds it and no invariant can name it.
-	if lifecycle.IsHumanState(o.to) {
+	// --keep-route takes no default: it records on a bead already resting in the
+	// state, whose route that state's entry decided.
+	if lifecycle.IsHumanState(o.to) && !o.keepRoute {
 		if !o.routeSet {
 			o.route, o.routeSet = lifecycle.ParkRoute, true
 		}
@@ -606,13 +641,24 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s: illegal edge %s -> %s for %s (declared machine: lifecycle/lifecycle.toml)\n", prog, cur, o.to, id)
 		return 1
 	}
+	// A record a caller keeps on the anchor, such as the rank its PR-finishing
+	// work settled at, is bookkeeping, and a write of it should move no route.
+	// --keep-route is that write: the bead keeps the gc.routed_to it carries, and
+	// neither a state's default nor the park guard applies. It is refused on an
+	// edge into another state, because entering a state takes that state's
+	// routing.
+	if o.keepRoute && cur != o.to {
+		fmt.Fprintf(stderr, "%s: --keep-route is refused on %s -> %s for %s: it records on a bead staying in its state, and entering a state takes that state's routing\n", prog, cur, o.to, id)
+		return 1
+	}
 	// A bead already resting on the park route keeps it. No pool claims that
 	// value, and clearing it would retract a bead a person still owns. Setting
 	// routeSet also puts gc.routed_to under the post-write verification below,
 	// so a route that fails to clear surfaces as an unverified transition rather
-	// than as a silent pool offer. A human state never reaches here: the guard
-	// above set routeSet on arguments alone.
-	if !o.routeSet && lifecycle.IsDetachedState(o.to) {
+	// than as a silent pool offer. No human state is detached, so none takes this
+	// clear: the guard above set its routeSet on arguments alone, or --keep-route
+	// left its route as it was.
+	if !o.routeSet && !o.keepRoute && lifecycle.IsDetachedState(o.to) {
 		if bead.Meta("gc.routed_to") != lifecycle.ParkRoute {
 			o.route, o.routeSet = "", true
 		}
@@ -730,6 +776,12 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 			return reportTransition(stdout, stderr, o.asJSON, id, cur, o.to)
 		}
 	}
+
+	// Leaving a state writes what lifecycle.toml's exit_sets declares for it, in
+	// this same write, so no writer of a transition out of that state can leave
+	// the key behind. Into a closed state it writes none: the anchor's life ends
+	// there. The read-back below verifies each one like any other --set.
+	o.sets = append(o.sets, exitWrites(cur, o.to, o.sets, o.unsets)...)
 
 	// A transition into a closed state is a terminal land, and a landed bead
 	// carries no live objection: a rejection or a hold reason still on it now

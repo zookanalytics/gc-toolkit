@@ -166,6 +166,47 @@ has "$(grep '^bd create' "$STUB_GC_LOG")" "--deps related:A1" "…which rides th
 has "$(grep '^bd create' "$STUB_GC_LOG")" '"prepare_mode":"merge"' "…and with its work order on the create"
 hasnt "$(grep "^bd update $K" "$STUB_GC_LOG")" "--set-metadata task_kind" "…so no second write stamps the work order"
 has "$(cat "$STUB_SESSION_LOG")" "wake $POOL" "the fix pool is woken"
+eq "$(meta "$K" priority_shift)" "-1" "the child is born carrying the PR-finishing shift"
+eq "$(bparents "$K")" "" "…with no parent, so no hold on an epic reaches it"
+eq "$(bprio "$K")" "1" "…and routed at its anchor's priority less one (A1 reads at bd's default P2)"
+# The priority writer's own write is the one pinned to its store (--db), so a
+# route that carried a priority, or a priority the arm wrote itself, fails.
+PL=$(grep -n "^bd update $K --priority 1 --db " "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+RL=$(grep -n "^bd update $K --set-metadata gc.routed_to=$POOL" "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+if [ -n "$PL" ] && [ -n "$RL" ] && [ "$PL" -lt "$RL" ]; then
+  ok "…its priority written by the priority writer before the route"
+else
+  bad "the merge-in's priority was not written by the priority writer before its route (priority write at log line '${PL:-none}', route at '${RL:-none}')"
+fi
+hasnt "$(grep "^bd update $K --set-metadata gc.routed_to" "$STUB_GC_LOG")" "--priority" "…and the route written with no priority in it"
+
+echo "# a merge-in child is routed at its rank, and an earlier PR's approval does not raise it"
+# The anchor sits under a P2 epic, its own stored priority stale. It carries the
+# approved posture an earlier PR left, in the shape pr-facts.sh stores it, but
+# rests at pre_open_gate with no open PR, so its merge-in runs one level sooner
+# than its anchor, at P1, not at the P0 of an approved PR's work.
+EP2='{"id":"EP2","status":"open","assignee":"","notes":"","title":"epic","description":"d","issue_type":"epic","priority":2,"metadata":{}}'
+reset "$EP2" "$(pre A1e polecat/tk-c1 ',"pr_posture":"approved@'"$C1_HEAD"'@2026-10-11T00:00:00Z"' \
+  | jq -c '.priority = 0 | .dependencies = [{issue_id: "A1e", depends_on_id: "EP2", type: "parent-child"}]')"
+OUT=$(run --fix-pool "$POOL")
+K=$(newborn)
+eq "$(meta "$K" "gc.routed_to")" "$POOL" "the merge-in child of an anchor under a P2 epic is routed"
+eq "$(bprio "$K")" "1" "…at P1, the approval an earlier PR left on the anchor aside"
+has "$OUT" "routed to $POOL at P1" "…and the pass log names the priority"
+
+echo "# a merge-in child whose priority does not settle is left unrouted"
+printf '#!/usr/bin/env bash\necho "queue-priority: settle: cannot compute the priority of $2" >&2\nexit 1\n' > "$TMP/qp-fail"
+chmod +x "$TMP/qp-fail"
+reset "$(pre A1f polecat/tk-c1)"
+OUT=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-fail" run --fix-pool "$POOL")
+K=$(newborn)
+has "$OUT" "rework $K did not settle at its priority; left unrouted" "the child is held, named"
+eq "$(meta "$K" "gc.routed_to")" "<absent>" "…carrying no route, so no pool claims it at a priority it was never ranked at"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $POOL" "…and the fix pool is not woken"
+OUT=$(run --fix-pool "$POOL")
+eq "$(meta "$K" "gc.routed_to")" "$POOL" "the next pass re-routes it once its priority settles"
+eq "$(bprio "$K")" "1" "…at its priority"
+eq "$(newcount)" "1" "…with no twin filed beside it"
 
 echo "# a branch a landed change superseded gets the operator's decision, not a child"
 ( cd "$WORK" && git merge-tree --write-tree --quiet origin/main origin/polecat/tk-moot >/dev/null 2>&1 ); rc=$?

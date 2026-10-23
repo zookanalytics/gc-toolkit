@@ -1,6 +1,6 @@
 ---
 name: Steering — how the operator steers the city's work
-description: How the operator steers the city's work, deciding which work runs and when. It states the intake rule for which beads may be routed or armed to a work pool, the placement=pending marker that holds every other bead and the writers that set it, the emergency check, the placement sitting's queue (gc-helm.sh unplaced) and how the sitting places a bead. It states the park, an ordinary blocker on a bead that holds work under the bead that has not started while work in flight finishes, with the moves that make and release a park and what a park holds and leaves running. It states priority flow: a bead's priority is the priority of the bead it follows plus its own shift, the move that sets either, settle, the pass that catches raw writes, and the lock the three share. Read it before writing anything that files, routes or arms new work, before parking or releasing work, before writing a bead's priority, or before changing a reader that must see a park.
+description: How the operator steers the city's work, deciding which work runs and when. It states the intake rule for which beads may be routed or armed to a work pool, the placement=pending marker that holds every other bead and the writers that set it, the emergency check, the placement sitting's queue (gc-helm.sh unplaced) and how the sitting places a bead. It states the park, an ordinary blocker on a bead that holds work under the bead that has not started while work in flight finishes, with the moves that make and release a park and what a park holds and leaves running. It states priority flow: a bead's priority is the priority of the bead it follows plus its own shift, the move that sets either, settle, where PR-finishing work ranks and why it never has a parent, the pass that catches raw writes, and the lock the three share. Read it before writing anything that files, routes or arms new work or PR-finishing work, before parking or releasing work, before writing a bead's priority, or before changing a reader that must see a park.
 ---
 
 # Steering
@@ -22,7 +22,8 @@ emergency check, the placement sitting's queue, and how a bead is placed. How
 the operator decides when work runs: the steering moves, the state each move
 writes, what that state holds and what it leaves running, and how each move is
 released. The order work queues in: how a bead's priority is derived, where it
-is written, and the writers that keep it there.
+is written, and the writers that keep it there, the creators of PR-finishing
+work among them.
 
 **Boundaries.** The design that decides how work is steered by epic, with the
 alternatives it rejected and the units that build it, is
@@ -295,7 +296,9 @@ kept within P0 to P4 at each level.
 
 - A member follows its parent. A member with several parents follows the most
   urgent one, the parent with the lowest P-number.
-- PR-finishing work, a bead carrying `anchor_bead`, follows its anchor.
+- PR-finishing work, a bead carrying `anchor_bead`, follows its anchor. Once
+  the anchor's PR is approved, it runs at P0 whatever its shift
+  ([PR-finishing work](#pr-finishing-work)).
 - A workflow's input convoy, root and steps follow the bead the workflow was
   poured for, at shift 0. They carry no shift of their own. An input convoy
   follows the bead it tracks only when it tracks exactly one; a convoy that
@@ -372,9 +375,98 @@ writer is `assets/scripts/queue-priority.sh move`.
 bead and to every live workflow poured for it, and reads it back. It exits
 non-zero when the priority cannot be computed or does not read back. A bead
 that follows nothing keeps its own priority, and its workflows take it.
+
+Every writer that settles a bead before making it claimable does so in one
+order. It runs settle first and goes on only once settle exits zero. A sling
+then pours a workflow, which copies the bead's priority. A route is then
+written on its own, with no priority in it. Until then no pool can claim the
+bead, and a move that runs after the settle rewrites the bead itself. Such a
+writer computes and writes no priority of its own.
+
 `queue-priority.sh settle <bead-id> --print` computes the same priority, prints
-the number and writes nothing, for a writer that puts the priority in the same
-`bd update` as a route, which bd writes as one row.
+the number and writes nothing. It takes no lock, so no writer writes the number
+it prints. A move that ran between that computation and a write would be undone
+by the write.
+
+### PR-finishing work
+
+PR-finishing work carries an anchor's built branch to its merge. Its creators
+are the scripts that make it claimable:
+
+- `gate-ensure.sh` slings the reviews it files, and the validation passes that
+  `pr-facts.sh` and `signoff.sh` file.
+- `pr-facts.sh` routes the merge-in of an approved PR that conflicts, the fix
+  for a red required check, and the comment rework.
+- `pre-open-rebase.sh` routes the merge-in before a PR exists.
+- `rework-child.sh` slings the rework that a review verdict or an operator
+  ruling asks for.
+
+Each child carries `anchor_bead` and follows its anchor.
+
+**It never has a parent.** Each child is joined to its anchor with a `blocks`
+edge and a membership edge, never a parent-child edge, so no cascade reaches
+it: a park or a decision hold on the anchor's epic leaves the PR's finishing
+work running. The suite of each script that files a child asserts that the
+child has no parent.
+
+**Its rank.** Each child is filed with `priority_shift=-1` in its create, so it
+is born one level sooner than its anchor. Its priority is:
+
+- P0 once the anchor's PR is approved, whatever its shift;
+- otherwise its anchor's priority plus its shift: at -1, P1 for an anchor at P2,
+  and P0 for an anchor at P1 or P0.
+
+A child adopted or re-routed later keeps the shift it carries, because after its
+birth the shift is its own input, which `gc-helm.sh priority --shift` may have
+set.
+
+**Reading the approval.** For the rank, a PR is approved when its anchor rests
+in `pull_request` and the posture `pr-facts.sh` records there, `pr_posture`,
+reads `approved` at the PR head `pr-facts.sh` last read, `pr_head_oid`. The
+posture is a dated key stored as `<posture>@<oid>@<since>`
+([state-machine.md](state-machine.md#posture)), so the priority function reads
+the part before the first `@` and compares the `<oid>` after it with
+`pr_head_oid`. An approval recorded at any other head is for code the PR no
+longer carries, so it ranks nothing at P0. An anchor that rests anywhere else
+has no open PR to be approved, whatever posture an earlier PR left on it, and
+leaving `pull_request` clears `pr_head_oid`, so an anchor that returns counts no
+approval until `pr-facts.sh` has read its PR again. The posture is not the approval rule `merge.sh` lands on
+(`review-verdict.sh`): an unanswered review comment outranks an approval in the
+posture, and a PR whose base requires no approving review reports no review
+decision, so either ranks as not approved.
+
+**Where it is written.** Each creator runs `queue-priority.sh settle` on a child
+before it makes the child claimable, in the order [Settle](#settle) gives.
+`rework-child.sh` and `gate-ensure.sh` then sling the child, and the pour copies
+its priority. `pr-facts.sh` and `pre-open-rebase.sh` then route it, in a write
+that carries no priority. A child whose priority does not settle is neither
+slung nor routed, and the creator's retry settles it: the next pass of the
+cadence arm, or the caller of `rework-child.sh` running it again.
+
+**Re-ranked when its rank moves.** The rank moves when the posture or the PR
+head `pr-facts.sh` records moves the anchor into or out of an approval at that
+head, and when the anchor leaves `pull_request`. Either way the anchor's open
+reviews, reworks and validation passes are settled again, with their live
+workflows. The anchor's
+`pr_finishing_settled` records the rank all of that work last settled at,
+`approved` or `unapproved`, and reads `unsettled` while a re-rank is owed. The
+write that moves the rank marks the record `unsettled` in the same update: the
+posture and head write in `pr-facts.sh`, and every transition out of
+`pull_request`, through the lifecycle writer's `exit_sets`
+([state-machine.md](state-machine.md#the-machine)). Every pass of `pr-facts.sh`
+compares the record of each anchor it reads in `pull_request` with the rank the
+priority function gives that anchor, one on a draft PR included: it records a
+draft's head though it reads no posture for it. Every full pass does the same
+for each live anchor that carries a record and rests anywhere else, whichever
+writer moved it there. While the two differ, the pass settles the work, and it
+records the rank only once every bead of it has settled. A record naming the
+other rank turns `unsettled` before the first settle. So a settle that fails, or a pass that
+stops partway, leaves a record that a later pass settles again and that no
+return to the other rank reads as settled. `pr-facts.sh` settles the work of an
+anchor it moves out of `pull_request` in the pass that moves it, and the next
+full pass settles an anchor that another writer moved, such as a repool through
+`rejection-repool.sh`. A finding or a visit carries `anchor_bead` too, but no
+pool claims it, so that settle leaves it as it is.
 
 ### The pass
 

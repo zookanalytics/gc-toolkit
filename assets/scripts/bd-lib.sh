@@ -2,10 +2,10 @@
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
 # queries it, the one-write create every script files a stamped bead through,
 # the metadata read-back that gates handing such a bead on, the close that
-# unmakes a bead no reader can find, the validation pass's work order, the
-# gating-PR read's field set, the per-rig key an order's state lives under, and
-# the pass lock that lets an order run one pass at a time. Sourced, never
-# executed.
+# unmakes a bead no reader can find, the birth, settle and route of PR-finishing
+# work, the validation pass's work order, the gating-PR read's field set, the
+# per-rig key an order's state lives under, and the pass lock that lets an order
+# run one pass at a time. Sourced, never executed.
 #
 # A caller resolves this file beside itself and sources it, the way
 # visit-identity.sh is sourced:
@@ -637,6 +637,60 @@ bd_unmake_orphans() {
   return 0
 }
 
+# PR-finishing work, the reviews, validation passes, merge-ins, red-check fixes
+# and review reworks that carry an anchor's branch to its merge, is filed one
+# level sooner than its anchor (docs/steering.md, "PR-finishing work"). Each
+# creator files its child carrying this shift in the create, so the child is
+# born with it, and each creator's suite asserts it. A child adopted or re-routed
+# later keeps the shift it carries: after its birth the shift is the child's own
+# input, which a priority move may have set.
+# shellcheck disable=SC2034  # read by the scripts that source this file
+PR_FINISHING_SHIFT=-1
+
+# pr_finishing_birth <metadata-json> — the create payload of a PR-finishing
+# child: its work order with priority_shift added. Prints nothing and returns
+# non-zero for a work order that is not a JSON object, an empty one included, so
+# the create that would carry it files nothing.
+pr_finishing_birth() {
+  printf '%s' "${1:-}" | jq -ce --argjson s "$PR_FINISHING_SHIFT" \
+    'if type == "object" then . + {priority_shift: $s} else error("not an object") end' 2>/dev/null
+}
+
+# The longest a settle of PR-finishing work waits for the store's priority lock
+# when a script of the merge cadence runs it: gate-ensure.sh, pr-facts.sh and
+# pre-open-rebase.sh. The cadence runs its arms one after another, so a longer
+# wait holds every arm after it, and a bead whose settle times out is settled by
+# a later pass. queue-priority.sh's own default wait is longer, and
+# rework-child.sh, which runs in a review or converse session rather than in the
+# cadence, keeps it.
+PR_FINISHING_LOCK_WAIT_SECS=30
+
+# pr_finishing_settle <bead> — the cadence's settle of a bead of PR-finishing
+# work: queue-priority.sh settle, which computes the bead's priority, writes it
+# to the bead and to every live workflow poured for it, and reads it back
+# (docs/steering.md#settle), waiting for the lock PR_FINISHING_LOCK_WAIT_SECS
+# at most. The writer's narrative goes to stdout and its refusal to stderr, for
+# the caller to keep or drop. GC_QUEUE_PRIORITY_TOOL names another writer, as
+# each suite's harness does. Non-zero when the bead did not settle.
+pr_finishing_settle() {
+  QUEUE_PRIORITY_LOCK_WAIT_SECS="$PR_FINISHING_LOCK_WAIT_SECS" \
+    "${GC_QUEUE_PRIORITY_TOOL:-$(dirname -- "${BASH_SOURCE[0]}")/queue-priority.sh}" settle "${1:-}" </dev/null
+}
+
+# route_finishing <child> <pool> — route a PR-finishing child to <pool> at its
+# priority, for the creators that route a child rather than sling it
+# (pr-facts.sh, pre-open-rebase.sh). The route makes the child claimable, so the
+# child is settled first (pr_finishing_settle), and the route is then written
+# alone, with no priority in it. No pool can claim the child before the route
+# lands, and a priority move that runs between the two writes rewrites the child
+# itself. Returns 1, having routed nothing, when the child does not settle; it
+# is left unrouted for a later pass. A route write bd refuses can still exit 0,
+# so the caller reads the route back.
+route_finishing() {
+  pr_finishing_settle "${1:-}" >/dev/null || return 1
+  gc bd update "$1" --set-metadata gc.routed_to="${2:-}" </dev/null >/dev/null 2>&1 || true
+}
+
 # The keys a validation pass is found by: signoff.sh's machine-lane probe and
 # pr-facts.sh's human-lane probe both select a pass by its task_kind, its anchor
 # and its lane, so a pass short of one of them is one neither can find.
@@ -644,15 +698,16 @@ bd_unmake_orphans() {
 VALIDATION_SELECT="task_kind,anchor_bead,check_name"
 
 # validation_work_order <anchor> <lane> <reviewed-oid> — the metadata a
-# validation pass carries, the shape mol-validate reads. task_kind, anchor_bead
-# and check_name are VALIDATION_SELECT. check_name is the lane: mol-validate
-# rules the findings whose finding.lane matches it. reviewed_oid pins the head
-# the batch was produced at, which mol-validate needs to back a machine lane; an
-# empty <reviewed-oid> leaves the pin out.
+# validation pass is filed with, the shape mol-validate reads, born carrying the
+# PR-finishing shift. task_kind, anchor_bead and check_name are
+# VALIDATION_SELECT. check_name is the lane: mol-validate rules the findings
+# whose finding.lane matches it. reviewed_oid pins the head the batch was
+# produced at, which mol-validate needs to back a machine lane; an empty
+# <reviewed-oid> leaves the pin out.
 validation_work_order() {
-  jq -nc --arg a "${1:-}" --arg l "${2:-}" --arg o "${3:-}" \
+  pr_finishing_birth "$(jq -nc --arg a "${1:-}" --arg l "${2:-}" --arg o "${3:-}" \
     '{task_kind: "validation", anchor_bead: $a, check_name: $l}
-     + (if $o == "" then {} else {reviewed_oid: $o} end)' 2>/dev/null
+     + (if $o == "" then {} else {reviewed_oid: $o} end)' 2>/dev/null)"
 }
 
 # The gating-PR read. The pr-facts arm (pr-facts.sh) and the merge arm
