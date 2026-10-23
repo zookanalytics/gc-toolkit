@@ -11,6 +11,14 @@
 #     was, replaces a leftover from an earlier iteration, a locked one
 #     included, and fails over a directory git does not know as a worktree,
 #     leaving it as it was;
+#   - stage records which bead and branch it staged in a file in the prep
+#     worktree's own git dir, which the worktree's status does not list and a
+#     worktree added later at the path does not inherit, and fails when that
+#     record does not land;
+#   - verify passes only for the bead, and the branch when given, that the
+#     record names, and fails for another bead or branch, a worktree with no
+#     record, a directory git does not know as a worktree, and no prep
+#     worktree at all;
 #   - teardown removes it, a locked one included, succeeds when there is none,
 #     and says so when git leaves a directory behind;
 #   - checks leaves the gate's checks directory empty, creating it when
@@ -102,7 +110,7 @@ ws() { OUT=$(cd "$D/cwd" && "$SUT" "$@" 2>&1); RC=$?; }
 
 echo "── stage ──"
 RIG_HEAD=$(git -C "$D/rig" rev-parse HEAD)
-ws stage --rig-root "$D/rig" --branch polecat/wb
+ws stage --rig-root "$D/rig" --branch polecat/wb --work wb
 eq "$RC" 0 "stage: exits 0"
 eq "$(registered "$D/rig" "$PREP")" yes "stage: the prep worktree is registered in the RIG"
 eq "$(wt_paths "$D/cwd" | wc -l | tr -d ' ')" 1 "stage: nothing is registered in the cwd's repository"
@@ -116,19 +124,19 @@ echo "── stage over a leftover replaces it ──"
 NEXT=$(commit "$D/seed" "feature follow-up")
 git -C "$D/seed" push -q "$D/origin.git" polecat/wb
 git -C "$D/rig" fetch -q origin
-ws stage --rig-root "$D/rig" --branch polecat/wb
+ws stage --rig-root "$D/rig" --branch polecat/wb --work wb
 eq "$RC" 0 "leftover: exits 0"
 eq "$(git -C "$PREP" rev-parse HEAD 2>/dev/null)" "$NEXT" "leftover: the prep worktree is at the branch's new tip"
 [ ! -e "$PREP/left-by-the-last-gate" ] && ok "leftover: the old worktree's files are gone" || bad "leftover: the old worktree's files are gone"
 eq "$(wt_paths "$D/rig" | wc -l | tr -d ' ')" 2 "leftover: one prep worktree is registered beside the rig"
 
 echo "── stage of a branch origin does not carry fails ──"
-ws stage --rig-root "$D/rig" --branch polecat/no-such
+ws stage --rig-root "$D/rig" --branch polecat/no-such --work wb
 eq "$RC" 1 "missing branch: exits 1"
 has "$OUT" "could not add the prep worktree" "missing branch: it says what failed"
 
 echo "── teardown ──"
-ws stage --rig-root "$D/rig" --branch polecat/wb >/dev/null
+ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
 ws teardown --rig-root "$D/rig"
 eq "$RC" 0 "teardown: exits 0"
 [ ! -e "$PREP" ] && ok "teardown: the directory is gone" || bad "teardown: the directory is gone"
@@ -140,7 +148,7 @@ ws teardown --rig-root "$D/rig"
 eq "$RC" 1 "teardown of a directory git does not know: exits 1"
 has "$OUT" "is still there" "teardown of a directory git does not know: it says so"
 [ -e "$PREP/not-a-worktree" ] && ok "teardown removes only what git knows as the worktree" || bad "teardown removes only what git knows as the worktree"
-ws stage --rig-root "$D/rig" --branch polecat/wb
+ws stage --rig-root "$D/rig" --branch polecat/wb --work wb
 eq "$RC" 1 "stage over a directory git does not know: exits 1"
 has "$OUT" "could not add the prep worktree" "stage over a directory git does not know: it says what failed"
 [ -e "$PREP/not-a-worktree" ] && ok "stage over a directory git does not know: the directory is left as it was" \
@@ -151,7 +159,7 @@ chmod -R u+w "$PREP"; ( cd "$TMP" && rm -rf -- "${PREP:?}" )
 # git refuses a locked worktree a single --force. Each case locks the prep
 # worktree the way such an add leaves it.
 echo "── a locked leftover ──"
-ws stage --rig-root "$D/rig" --branch polecat/wb >/dev/null
+ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
 git -C "$D/rig" worktree lock --reason initializing "$PREP"
 eq "$(locked "$D/rig" "$PREP")" yes "locked: precondition, git lists the prep worktree as locked"
 ws teardown --rig-root "$D/rig"
@@ -159,10 +167,10 @@ eq "$RC" 0 "locked, teardown: exits 0"
 [ ! -e "$PREP" ] && ok "locked, teardown: the directory is gone" || bad "locked, teardown: the directory is gone"
 eq "$(registered "$D/rig" "$PREP")" no "locked, teardown: the worktree is unregistered"
 
-ws stage --rig-root "$D/rig" --branch polecat/wb >/dev/null
+ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
 : > "$PREP/left-by-a-killed-add"
 git -C "$D/rig" worktree lock --reason initializing "$PREP"
-ws stage --rig-root "$D/rig" --branch polecat/wb
+ws stage --rig-root "$D/rig" --branch polecat/wb --work wb
 eq "$RC" 0 "locked, stage: exits 0"
 eq "$(git -C "$PREP" rev-parse HEAD 2>/dev/null)" "$NEXT" "locked, stage: the prep worktree is at the branch tip"
 [ ! -e "$PREP/left-by-a-killed-add" ] && ok "locked, stage: the old worktree's files are gone" || bad "locked, stage: the old worktree's files are gone"
@@ -176,10 +184,10 @@ ws teardown --rig-root "$D/rig"
 eq "$RC" 0 "locked and moved away, teardown: exits 0"
 eq "$(registered "$D/rig" "$PREP")" no "locked and moved away, teardown: the registration is cleared"
 ( cd "$TMP" && rm -rf -- moved-away )
-ws stage --rig-root "$D/rig" --branch polecat/wb >/dev/null
+ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
 git -C "$D/rig" worktree lock "$PREP"
 mv "$PREP" "$TMP/moved-away"
-ws stage --rig-root "$D/rig" --branch polecat/wb
+ws stage --rig-root "$D/rig" --branch polecat/wb --work wa
 eq "$RC" 0 "locked and moved away, stage: exits 0"
 eq "$(git -C "$PREP" rev-parse HEAD 2>/dev/null)" "$NEXT" "locked and moved away, stage: the prep worktree is added again at the branch tip"
 eq "$(locked "$D/rig" "$PREP")" no "locked and moved away, stage: the new prep worktree is not locked"
@@ -192,11 +200,84 @@ git -C "$D/rig" worktree lock --reason initializing "$PREP"
 ws teardown --rig-root "$D/rig"
 eq "$RC" 1 "locked with no .git file, teardown: exits 1"
 has "$OUT" "is still there" "locked with no .git file, teardown: it says the directory is still there"
-ws stage --rig-root "$D/rig" --branch polecat/wb
+ws stage --rig-root "$D/rig" --branch polecat/wb --work wb
 eq "$RC" 0 "locked with no .git file, stage: exits 0"
 eq "$(git -C "$PREP" rev-parse HEAD 2>/dev/null)" "$NEXT" "locked with no .git file, stage: the prep worktree is at the branch tip"
 eq "$(locked "$D/rig" "$PREP")" no "locked with no .git file, stage: the new prep worktree is not locked"
+# The leftover was staged for wa, so only the new record can name wb.
+ws verify --rig-root "$D/rig" --work wb --branch polecat/wb
+eq "$RC" 0 "locked with no .git file, stage: the worktree records the new staging"
+ws verify --rig-root "$D/rig" --work wa
+eq "$RC" 1 "locked with no .git file, stage: nothing of the leftover's record survives"
 eq "$(wt_paths "$D/rig" | wc -l | tr -d ' ')" 2 "a locked leftover: one prep worktree is registered beside the rig"
+ws teardown --rig-root "$D/rig" >/dev/null
+
+echo "── stage records which bead and branch the prep worktree holds ──"
+ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
+REC="$(git -C "$PREP" rev-parse --path-format=absolute --git-dir 2>/dev/null)/gc-refinery-staged"
+case "$REC" in
+  "$COMMON/worktrees/"*) ok "record: it is a file in the prep worktree's own git dir" ;;
+  *) bad "record: it is a file in the prep worktree's own git dir" "$REC" ;;
+esac
+eq "$(git config --file "$REC" --get staged.work 2>/dev/null) $(git config --file "$REC" --get staged.branch 2>/dev/null)" \
+  "wb polecat/wb" "record: it names the bead and the branch staged"
+eq "$(git -C "$PREP" status --porcelain | wc -l | tr -d ' ')" 0 "record: the prep worktree's status lists nothing new"
+ws verify --rig-root "$D/rig" --work wb --branch polecat/wb
+eq "$RC/$OUT" "0/" "verify, the bead and branch staged: exits 0 and prints nothing"
+ws verify --rig-root "$D/rig" --work wb
+eq "$RC" 0 "verify, the bead staged with no branch given: exits 0"
+OUT=$(cd "$D/cwd" && GC_RIG_ROOT="$D/rig" "$SUT" verify --work wb --branch polecat/wb 2>&1); RC=$?
+eq "$RC" 0 "verify: GC_RIG_ROOT names the rig"
+ws verify --rig-root "$D/rig" --work wa --branch polecat/wa
+eq "$RC" 1 "verify, another bead and branch: exits 1"
+has "$OUT" "holds polecat/wb for wb, not polecat/wa for wa" "verify, another bead and branch: it names what the worktree holds and what was asked"
+ws verify --rig-root "$D/rig" --work wa --branch polecat/wb
+eq "$RC" 1 "verify, another bead on the staged branch: exits 1"
+ws verify --rig-root "$D/rig" --work wb --branch polecat/wa
+eq "$RC" 1 "verify, the staged bead with another branch: exits 1"
+ws verify --rig-root "$D/rig" --work wa
+eq "$RC" 1 "verify, another bead with no branch given: exits 1"
+
+ws stage --rig-root "$D/rig" --branch polecat/wb --work wa >/dev/null
+ws verify --rig-root "$D/rig" --work wa --branch polecat/wb
+eq "$RC" 0 "a stage for the next bead: verify passes for that bead"
+ws verify --rig-root "$D/rig" --work wb --branch polecat/wb
+eq "$RC" 1 "a stage for the next bead: verify refuses the bead staged before it"
+
+ws teardown --rig-root "$D/rig" >/dev/null
+ws verify --rig-root "$D/rig" --work wa --branch polecat/wb
+eq "$RC" 1 "verify with no prep worktree: exits 1"
+has "$OUT" "no prep worktree is staged" "verify with no prep worktree: it says so"
+# git removed the record with the worktree, so a worktree added at the same
+# path by anything but stage holds none.
+git -C "$D/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+ws verify --rig-root "$D/rig" --work wa --branch polecat/wb
+eq "$RC" 1 "verify, a worktree added at the prep path after a teardown: exits 1"
+has "$OUT" "records no bead and branch" "verify, a worktree added at the prep path after a teardown: it inherited no record"
+ws teardown --rig-root "$D/rig" >/dev/null
+mkdir -p "$PREP" && : > "$PREP/not-a-worktree"
+ws verify --rig-root "$D/rig" --work wb --branch polecat/wb
+eq "$RC" 1 "verify, a directory git does not know as a worktree: exits 1"
+has "$OUT" "no prep worktree is staged" "verify, a directory git does not know as a worktree: it reads no record from the rig's own git dir"
+chmod -R u+w "$PREP"; ( cd "$TMP" && rm -rf -- "${PREP:?}" )
+
+# A git that refuses every config write, so the add succeeds and the record
+# does not land.
+REAL_GIT=$(command -v git)
+mkdir -p "$TMP/gitshim"
+{ printf '#!/usr/bin/env bash\n'; printf 'REAL_GIT=%q\n' "$REAL_GIT"; cat; } > "$TMP/gitshim/git" <<'SHIM'
+case " $* " in
+  *" config --file "*" --get "*) ;;
+  *" config --file "*) echo "error: could not lock config file" >&2; exit 255 ;;
+esac
+exec "$REAL_GIT" "$@"
+SHIM
+chmod +x "$TMP/gitshim/git"
+OUT=$(cd "$D/cwd" && PATH="$TMP/gitshim:$PATH" "$SUT" stage --rig-root "$D/rig" --branch polecat/wb --work wb 2>&1); RC=$?
+eq "$RC" 1 "a stage whose record does not land: exits 1"
+has "$OUT" "could not record that it holds polecat/wb for wb" "a stage whose record does not land: it says so"
+ws verify --rig-root "$D/rig" --work wb --branch polecat/wb
+eq "$RC" 1 "a stage whose record does not land: verify refuses the worktree it added"
 ws teardown --rig-root "$D/rig" >/dev/null
 
 echo "── checks ──"
@@ -239,7 +320,9 @@ ws checks --rig-root "$TMP/not-a-repo"
 eq "$RC" 2 "a rig root that is no repository: exits 2"
 
 echo "── usage ──"
-for args in "" "nope" "stage --rig-root $D/rig" "teardown --rig-root $D/rig --branch polecat/wb" "checks --frob" "checks --rig-root"; do
+for args in "" "nope" "stage --rig-root $D/rig" "stage --rig-root $D/rig --branch polecat/wb" "stage --rig-root $D/rig --work wb" \
+  "verify --rig-root $D/rig" "verify --rig-root $D/rig --branch polecat/wb" "verify --work" \
+  "teardown --rig-root $D/rig --branch polecat/wb" "teardown --rig-root $D/rig --work wb" "checks --work wb" "checks --frob" "checks --rig-root"; do
   # shellcheck disable=SC2086 # each case is a word list
   ( cd "$D/cwd" && "$SUT" $args ) >/dev/null 2>&1
   eq "$?" 2 "usage: '$args' exits 2"
@@ -274,9 +357,9 @@ eq "$(removals "$TMP/removal-free" | wc -l | tr -d ' ')" 0 "detector: passes a r
 eq "$(removals "$PATROL_TOML" "$REFINERY_PROMPT" || true)" "" "no line of the patrol's formula or the refinery's prompt removes anything"
 
 # The removals the patrol needs are this script's, called from the blocks.
-grep -qF '"$WS" stage --rig-root "$RIG_ROOT" --branch "$BRANCH"' "$PATROL_TOML" \
-  && ok "the rebase block stages the prep worktree through refinery-workspace.sh" \
-  || bad "the rebase block stages the prep worktree through refinery-workspace.sh"
+grep -qF '"$WS" stage --rig-root "$RIG_ROOT" --branch "$BRANCH" --work "$WORK"' "$PATROL_TOML" \
+  && ok "the rebase block stages the prep worktree through refinery-workspace.sh, recording the bead it stages" \
+  || bad "the rebase block stages the prep worktree through refinery-workspace.sh, recording the bead it stages"
 grep -qF '"$WS" checks --rig-root "$RIG_ROOT"' "$PATROL_TOML" \
   && ok "the gate start empties its checks through refinery-workspace.sh" \
   || bad "the gate start empties its checks through refinery-workspace.sh"
@@ -313,7 +396,7 @@ mkdir -p "$TMP/city/rigs/gc-toolkit/assets/scripts" "$TMP/no-pack-city"
 cp "$SUT" "$TMP/city/rigs/gc-toolkit/assets/scripts/"
 teardown_block() { OUT=$(cd "$D/cwd" && GC_RIG_ROOT="$D/rig" GC_CITY_PATH="$1" bash "$TEARDOWN" 2>&1); RC=$?; }
 : > "$GC_LOG"
-ws stage --rig-root "$D/rig" --branch polecat/wb >/dev/null
+ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
 teardown_block "$TMP/city"
 eq "$RC" 0 "teardown block: exits 0"
 [ ! -e "$PREP" ] && ok "teardown block: the prep worktree is gone" || bad "teardown block: the prep worktree is gone"
@@ -330,7 +413,7 @@ has "$OUT" "carry on" "teardown block, the teardown fails: it says to carry on"
 [ -e "$PREP/not-a-worktree" ] && ok "teardown block, the teardown fails: the leftover is left for the next stage" \
   || bad "teardown block, the teardown fails: the leftover is left for the next stage"
 chmod -R u+w "$PREP"; ( cd "$TMP" && rm -rf -- "${PREP:?}" )
-ws stage --rig-root "$D/rig" --branch polecat/wb >/dev/null
+ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
 teardown_block "$TMP/no-pack-city"
 eq "$RC" 0 "teardown block, no script reachable: exits 0"
 has "$OUT" "carry on" "teardown block, no script reachable: it says to carry on"

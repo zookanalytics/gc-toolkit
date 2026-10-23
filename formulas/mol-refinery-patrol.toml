@@ -260,7 +260,8 @@ if ! STOP_OUT=$(DETACHED_JOB_STOP_GRACE=20 "$JOB" stop "$GATE"); then
   exit 1
 fi
 # refinery-workspace.sh clears the leftover and stages the branch, so this block
-# removes nothing itself. It is found the way the launcher is.
+# removes nothing itself. It is found the way the launcher is. The stage records
+# that the prep worktree holds $BRANCH for $WORK.
 WS=""
 for c in "$RIG_ROOT" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
@@ -269,7 +270,7 @@ done
 # Check the staging result before any conflict path can run: a failed staging is
 # prep-setup infrastructure, not an origin/$TARGET conflict, so it leaves the
 # work with the refinery to retry instead of repooling it with a false rejection.
-if ! "$WS" stage --rig-root "$RIG_ROOT" --branch "$BRANCH"; then
+if ! "$WS" stage --rig-root "$RIG_ROOT" --branch "$BRANCH" --work "$WORK"; then
   echo "could not stage the prep worktree at $PREP_WT — NOT preparing the branch; leaving it with the refinery to retry (prep-setup failure, not an origin/$TARGET conflict)"
   gc runtime drain-ack
   exit 1
