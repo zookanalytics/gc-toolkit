@@ -25,6 +25,8 @@ hasnt() { if hasin "$1" "$2"; then bad "$3 (found '$2')"; else ok "$3"; fi; }
 #   gate create --type=human --blocks <bead> --await-id <k> --title <t>
 #     --reason <r> --json — a gate bead blocking <bead>, its description a line
 #     naming <bead> and then the reason; a missing <bead> is an error, exit 1.
+#     STUB_CREATE_RACE=<id>|<created_at> files a second writer's gate under the
+#     same key on the same bead in the same call, as a writer racing it would.
 #   gate resolve <id> --reason <r> — closes an open gate with that reason; on a
 #     gate already closed it keeps the first reason and still reports success.
 #   show <id> --json.
@@ -71,6 +73,12 @@ Reason: $reason" \
       '. + [{id: $id, title: $t, description: $d, status: "open", issue_type: "gate",
              await_type: $ty, await_id: $k, created_at: "2026-10-22T00:00:00Z"}]' "$STORE" | save
     [ -n "${STUB_CREATE_NOEDGE:-}" ] || printf '%s|blocks|%s\n' "$blocks" "$id" >> "$EDGES"
+    if [ -n "${STUB_CREATE_RACE:-}" ]; then
+      jq -c --arg id "${STUB_CREATE_RACE%%|*}" --arg at "${STUB_CREATE_RACE#*|}" --arg k "$key" --arg ty "$typ" \
+        '. + [{id: $id, title: "the racing writer", status: "open", issue_type: "gate",
+               await_type: $ty, await_id: $k, created_at: $at}]' "$STORE" | save
+      printf '%s|blocks|%s\n' "$blocks" "${STUB_CREATE_RACE%%|*}" >> "$EDGES"
+    fi
     jq -c --arg id "$id" '.[] | select(.id == $id)' "$STORE"
     exit 0 ;;
   "gate resolve")
@@ -81,6 +89,7 @@ Reason: $reason" \
     [ "$(jq -r --arg id "$id" '.[] | select(.id == $id) | .issue_type' "$STORE")" = gate ] \
       || { echo "Error: $id is not a gate issue" >&2; exit 1; }
     [ -n "${STUB_RESOLVE_NOOP:-}" ] && { echo "✓ Gate resolved: $id"; exit 0; }
+    [ -n "${STUB_RESOLVE_FAIL:-}" ] && { echo "Error: simulated refusal" >&2; exit 1; }
     # Another resolver closes the gate first, as a sitting's sign-off can.
     if [ -n "${STUB_RESOLVE_RACE:-}" ]; then
       jq -c --arg id "$id" 'map(if .id == $id and .status != "closed"
@@ -124,7 +133,7 @@ reset() {
   printf '[%s]' "$beads" > "$STUB_STORE"
   printf '%s' "${2:-}" > "$STUB_EDGES"
   : > "$STUB_GC_LOG"; printf '0' > "$STUB_SEQ"
-  unset STUB_DEP_FAIL STUB_CREATE_FAIL STUB_CREATE_NOEDGE STUB_RESOLVE_NOOP STUB_RESOLVE_RACE 2>/dev/null || true
+  unset STUB_DEP_FAIL STUB_CREATE_FAIL STUB_CREATE_NOEDGE STUB_CREATE_RACE STUB_RESOLVE_NOOP STUB_RESOLVE_FAIL STUB_RESOLVE_RACE 2>/dev/null || true
 }
 field()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .[$k]) // "<absent>"' "$STUB_STORE"; }
 creates() { cat "$STUB_SEQ"; }
@@ -198,6 +207,43 @@ reset "$(task tk-w),$(task tk-x),$(gate g-x polecat-blocked open)" "tk-x|blocks|
 "
 "$SUT" --subject tk-w --key polecat-blocked --message m >/dev/null 2>&1
 eq "$(creates)" 1 "a gate on another bead does not dedup this bead's situation"
+
+echo "# of two open gates under the key, the first by created_at, then id, asks"
+# bd lists g-b ahead of g-a here; both were created in the same second.
+reset "$(task tk-w),$(gate g-b k open),$(gate g-a k open)" "tk-w|blocks|g-b
+tk-w|blocks|g-a
+"
+out=$("$SUT" --subject tk-w --key k --message m 2>/dev/null)
+eq "$out" "g-a" "the dedup names the gate whose id sorts first, not bd's listing order"
+
+echo "# a writer that raced another resolves its own gate when the other's comes first"
+reset "$(task tk-w)"
+out=$(STUB_CREATE_RACE="g-early|2026-10-21T23:59:59Z" "$SUT" --subject tk-w --key k --message m 2>"$TMP/err"); rc=$?
+eq "$rc" 0 "exits 0"
+eq "$out" "g-early" "stdout names the racing writer's gate, which came first"
+eq "$(field gate-1 status)" "closed" "this call's own gate is resolved"
+has "$(field gate-1 close_reason)" "moot: a duplicate of gate g-early" "as a duplicate of the first, headed moot:"
+eq "$(field g-early status)" "open" "the first gate stands, so one answer clears the bead"
+has "$(cat "$TMP/err")" "resolved this call's duplicate, gate gate-1" "it reports the duplicate it resolved"
+reset "$(task tk-w)"
+out=$(STUB_CREATE_RACE="g-0|2026-10-22T00:00:00Z" "$SUT" --subject tk-w --key k --message m 2>/dev/null)
+eq "$out" "g-0" "in the same second, the gate whose id sorts first is the first"
+eq "$(field gate-1 status)" "closed" "and the other writer's call resolves its own"
+
+echo "# a writer whose gate comes first keeps it and leaves the other's alone"
+reset "$(task tk-w)"
+out=$(STUB_CREATE_RACE="g-late|2026-10-22T00:00:01Z" "$SUT" --subject tk-w --key k --message m 2>/dev/null); rc=$?
+eq "$rc" 0 "exits 0"
+eq "$out" "gate-1" "stdout names its own gate"
+eq "$(field gate-1 status)" "open" "its own gate stands"
+eq "$(field g-late status)" "open" "the other writer's gate is that writer's to resolve"
+
+echo "# a duplicate that does not resolve is reported with its repair"
+reset "$(task tk-w)"
+out=$(STUB_CREATE_RACE="g-early|2026-10-21T23:59:59Z" STUB_RESOLVE_FAIL=1 "$SUT" --subject tk-w --key k --message m 2>"$TMP/err"); rc=$?
+eq "$rc" 0 "exits 0: the first gate still asks"
+eq "$out" "g-early" "stdout names the gate that asks"
+has "$(cat "$TMP/err")" "repair: gc bd gate resolve gate-1" "the repair names the duplicate"
 
 echo "# no quiet period unless the call declares one"
 recent_moot="$(gate g-moot k closed "moot: the branch came back" "$(iso_ago 600)")"

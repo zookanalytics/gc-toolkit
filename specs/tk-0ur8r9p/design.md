@@ -707,8 +707,12 @@ It files in four steps:
    bead that this one already waits on: a rework child whose wait on its
    anchor's bring-current gate is in place files nothing more under that key.
    This is the idempotency the initiative's ruling asks for. bd has none at
-   create, so two writers racing in the same instant can both file. The board
-   folds both, and a sitting answers both with one reason.
+   create, so two writers racing in the same instant can both file. Each reads
+   the bead's gates back after its create, and a writer whose gate is not the
+   first open one under the key, by created_at and then id, resolves its own
+   as a duplicate. Two gates stand only when one create lands after the other
+   writer read back. The board folds those two, and a sitting answers both with
+   one reason.
 3. **It keeps a quiet period the call declares.** With `--quiet-window`, the
    helper files nothing, and says so, while the newest closed human gate under
    the key among the bead's gates closed with a reason headed `moot:` or
