@@ -48,14 +48,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # lifecycle.sh execs gctk and has no other implementation, so every
       # suite whose scripts reach it builds services/gctk from source, and so
       # does pr-status-label.test.sh; the rest of the suite is shell-only.
       # go.mod names the toolchain version. gctk is stdlib-only (no go.sum), so
       # module caching has nothing to cache.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: services/gctk/go.mod
           cache: false
@@ -96,10 +96,10 @@ jobs:
     # ubuntu's, so its limit is higher.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The same gctk toolchain as test.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: services/gctk/go.mod
           cache: false
