@@ -332,10 +332,10 @@ Then tell the agent, because the write gives an idle named session on
 `wake_mode = "resume"` no turn:
 `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify <bead> --agent <qualified-name>`
 mails it the bead once `bd` reports the bead ready. `gc <binding> scripts-dir`
-prints the directory of the gc-toolkit pack's scripts, so the call runs the
-pack's own copy whichever pack the calling agent comes from. `<binding>` is
-the name the city imports that pack under, which gc puts in front of its
-skills: `gc-toolkit` in `gc-toolkit.work`.
+prints the directory of the gc-toolkit pack's scripts, so a script called
+through it is the pack's own copy, whichever pack the calling agent comes from.
+`<binding>` is the name the city imports that pack under, which gc puts in
+front of its skills: `gc-toolkit` in `gc-toolkit.work`.
 
 ## Dispatched work is file-and-forget
 
@@ -364,7 +364,7 @@ product:
 
 ```
 Monitor(
-  command: "[[PACK-ROOT]]/packs/gascity-keeper/assets/scripts/gc-bd-watch.sh <bead>",
+  command: '"$(gc <binding> scripts-dir)/gc-bd-watch.sh" <bead>',
   description: "watching <bead>",
   persistent: true,
 )
