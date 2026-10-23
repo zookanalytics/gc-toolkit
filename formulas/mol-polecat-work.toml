@@ -404,9 +404,9 @@ gc mail inbox
 
 If blocked or unclear, mail the witness first, as your prompt's "Blocked work
 and human gates" section says: it answers what another agent can. When no
-agent can answer, because the decision is the operator's to make, file a human
-gate. `human-gate.sh` files one open gate per bead and situation key, which
-blocks the work bead until a person clears it:
+agent can answer, as with a decision that is the operator's to make, file a
+human gate. `human-gate.sh` files one open gate per bead and situation key,
+which blocks the work bead until a person clears it:
 ```bash
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/human-gate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
 "${SCRIPTS:?human-gate.sh not found in the pack}/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-unclear-requirements --message "Unclear requirements on $WORK_BEAD_ID. Question: <what you need clarified>. Tried: <where you already looked>."

@@ -11,7 +11,8 @@
 #     the bead, and resolves its own gate as a duplicate when a racing
 #     writer's gate comes first;
 #   - it files nothing inside a quiet period the call declares;
-#   - it refuses a patrol wisp or a session as the subject;
+#   - it refuses a `*-wisp-*` id as the subject, a patrol wisp's or a
+#     session's;
 #   - it titles the gate with the message's first line, capped;
 #   - it reads the gate back from the bead's side;
 #   - it records a gate the deacon files in the deacon's incident ledger
