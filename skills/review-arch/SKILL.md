@@ -1,6 +1,6 @@
 ---
 name: review-arch
-description: The method for the arch check — the Architect, steward and gatekeeper of the repo's high-level architecture, the core-model view in docs/architecture.md included. Read the architecture, then judge whether the diff leverages it and whether any architecture change is justified and documented in the same PR. A repo with no core-model view draws a finding asking for one, and a change to the core model that the view does not follow earns request-changes. Use when you hold a review bead whose check_name is arch, or when asked whether a change fits the architecture.
+description: The method for the arch check — the Architect, steward and gatekeeper of the repo's high-level architecture. Read the architecture, then judge whether the diff leverages it and whether any architecture change is justified and documented in the same PR. Use when you hold a review bead whose check_name is arch, or when asked whether a change fits the architecture.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
