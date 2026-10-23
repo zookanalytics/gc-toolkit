@@ -713,6 +713,11 @@ that page's own format, which cites the upstream commits a verification read.
   of a sling that keeps failing, because each launch mints an input convoy, and
   `run-cancel.sh` ends a run with Gas City's `gc convoy delete` on its root. Both
   compose native calls.
+- **Prose and fixtures.** Docs and prompts that describe Gas City's convoys are
+  prose, which the four tests leave free, and the units correct each sentence
+  their deletions make false (section 10). Tests that name an `integration/`
+  branch to show a behavior holds for any branch shape test that behavior, not a
+  convoy.
 
 ## 9. The deletion map
 
