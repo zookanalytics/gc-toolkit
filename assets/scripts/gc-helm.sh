@@ -2142,17 +2142,16 @@ EOF
 # distinguishable from an error object, and the id is compared for EQUALITY so a
 # row for a different bead is not taken as a resolution.
 #
-# On a resolved subject: sets VS_PAYLOAD (the scrubbed `gc bd show` array),
-# VS_ROW (the matched object), VS_ID (its id), and returns 0. Otherwise prints
-# the classified message to stderr — "$PROG: <verb>: …" suffixed with
-# <nothing-clause> (e.g. "Nothing spawned.") — and returns 4, the fail-closed
-# exit code every caller already uses. <subject-ref> overrides how the id is
-# named in that message (accept names a subject a visit pointed at); empty uses
-# the bare quoted id.
+# On a resolved subject: sets VS_PAYLOAD (the scrubbed `gc bd show` array) and
+# VS_ROW (the matched object), and returns 0. Otherwise prints the classified
+# message to stderr — "$PROG: <verb>: …" suffixed with <nothing-clause> (e.g.
+# "Nothing spawned.") — and returns 4, the fail-closed exit code every caller
+# already uses. <subject-ref> overrides how the id is named in that message
+# (accept names a subject a visit pointed at); empty uses the bare quoted id.
 verify_subject() {
     _vs_bead="$1"; _vs_verb="$2"; _vs_nothing="$3"
     _vs_ref="${4:-}"; [ -n "$_vs_ref" ] || _vs_ref="'$_vs_bead'"
-    VS_PAYLOAD=""; VS_ROW=""; VS_ID=""
+    VS_PAYLOAD=""; VS_ROW=""; _vs_id=""
     _vs_raw=$(gc bd show "$_vs_bead" --json 2>/dev/null || true)
     VS_PAYLOAD=$(printf '%s' "$_vs_raw" | scrub)
     VS_ROW=$(printf '%s' "$VS_PAYLOAD" \
@@ -2162,9 +2161,9 @@ verify_subject() {
              else empty end' 2>/dev/null || true)
     case "$VS_ROW" in ""|null) VS_ROW="" ;; esac
     if [ -n "$VS_ROW" ]; then
-        VS_ID=$(printf '%s' "$VS_ROW" | jq -r '.id // empty' 2>/dev/null || true)
+        _vs_id=$(printf '%s' "$VS_ROW" | jq -r '.id // empty' 2>/dev/null || true)
     fi
-    [ -n "$VS_ID" ] && return 0
+    [ -n "$_vs_id" ] && return 0
 
     # No matching row. Not-found is the specific "no issues found" error; any
     # OTHER error means the read FAILED and existence is unknown — reporting an
