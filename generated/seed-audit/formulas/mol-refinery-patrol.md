@@ -23,9 +23,9 @@ formula never runs those passes: docs/refinery-merge-cadence.md.
 
 State writes: every merge_result transition goes through
 assets/scripts/lifecycle.sh (one atomic validated write per transition);
-every escalation goes through assets/scripts/escalate.sh (one open visit
-per situation key). Resolve both at shell runtime — formula bodies get no
-{{.ConfigDir}}:
+every human gate goes through assets/scripts/human-gate.sh (one open gate
+per bead and situation key). Resolve both at shell runtime — formula bodies
+get no {{.ConfigDir}}:
 
     LC=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
       [ -x "$c/assets/scripts/lifecycle.sh" ] && { LC="$c/assets/scripts/lifecycle.sh"; break; }
@@ -40,7 +40,7 @@ backslashes).
 
 Variables:
   {{auto_ff_rig_main}}: After a direct merge, best-effort fast-forward the rig's canonical checkout when it is on the target branch with a clean tree. Never blocks the merge. (default=true)
-  {{binding_prefix}}: Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol hands a rejected bead back to the polecat pool, and an empty prefix renders <rig>/polecat instead of <rig>/gc-toolkit.polecat. No pool holds that address, so the rejected bead never reaches a polecat: pool-route.sh refuses the route, and rejection-repool.sh files a visit in place of the pour. (default=gc-toolkit.)
+  {{binding_prefix}}: Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol hands a rejected bead back to the polecat pool, and an empty prefix renders <rig>/polecat instead of <rig>/gc-toolkit.polecat. No pool holds that address, so the rejected bead never reaches a polecat: pool-route.sh refuses the route, and rejection-repool.sh files a human gate in place of the pour. (default=gc-toolkit.)
   {{build_command}}: Build command. Empty = skip. (default=)
   {{check_set}}: Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of check names, each a lane that must derive green (lane-state.sh) before merge.sh lands the PR. 'correctness' = a review dispatched by the cadence's gate-ensure, the check that also holds the PR `## Summary` to the whole branch diff, so 'none' forgoes that summary check along with the rest of the review; 'triage' = a review that reads the check index at the reviewed commit and widens `check_set` through `signoff.sh --add-gates` with the specialist checks the diff warrants, adding only and never removing. Approval is not a check_set token — it is a universal merge rule (merge.sh requires every PR to carry a standing non-city APPROVED review), armed for every anchor and named by no token here. The 'none' sentinel is stamped (never collapsed to empty) so checkless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured, and a changed default reaches the next wisp. (default=correctness,triage)
   {{default_merge_strategy}}: Default when metadata.merge_strategy is unset: 'direct' = FF + push to target; 'mr'/'pr' = gated PR pipeline. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured. (default=mr)

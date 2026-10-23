@@ -203,8 +203,9 @@ Hit: <what you hit>. Tried: <what you tried>. Need: <what unblocks it>."
 ```
 
 The witness triages its inbox every patrol cycle. It unblocks what it can and
-files a human gate for what needs a person, so mailing it is not a slower route
-to a human. It is the route that spends a human only when one is required.
+files the rest as a finding, whose first reaction puts it to a person when one
+is needed, so mailing it is not a slower route to a human. It is the route that
+spends a human only when one is required.
 
 File a human gate yourself when no agent can answer: missing credentials,
 external access, or a decision that is the operator's to make. File it before

@@ -302,9 +302,8 @@ provenance_since_key = "pr_provenance_since"
 # child, whatever holds the anchor) or "visit:<bead-id>" (nowhere to route work:
 # no fix pool, or the PR head branch unresolved). Either holds the merge until it
 # closes — the child through a blocks edge, the visit through the pr_number stamp
-# merge.sh's in-flight-holder probe reads. A visit takes no blocks edge:
-# escalate.sh files it depending on its subject, so an edge back would be a
-# cycle.
+# merge.sh's in-flight-holder probe reads. A visit takes no blocks edge: a
+# visit depends on its subject, so an edge back would be a cycle.
 disposition_key = "pr_comment_disposition"
 
 [machine_axis]
@@ -391,9 +390,8 @@ since_format = "RFC 3339 UTC"
 # --set of the key is refused there, so a transition-coupled route cannot bypass
 # it. Routes on beads outside that state machine — a bead with no --to edge for
 # --route to carry — are stamped directly with gc bd update --set-metadata by
-# whichever script or formula owns that bead's dispatch. The recurring shapes: an
-# escalation or visit routed to its handler pool or parked to `human`
-# (escalate.sh, gc-helm.sh, mol-visit.toml, mol-feedback-distiller.toml); a
+# whichever script or formula owns that bead's dispatch. The recurring shapes: a
+# visit parked to `human` (gc-helm.sh); a
 # reaction bead routed to the proactive pool (gc-proactive.sh); a rework child
 # routed to its fix pool (pr-facts.sh, pre-open-rebase.sh); a review
 # bead's pool route restored after an abandoned round (mol-review.toml). A route
@@ -426,9 +424,10 @@ since_format = "RFC 3339 UTC"
 # so the pack attaches a visit, a demand or a finding with `tracks` — which
 # carries the structure without making the child unclaimable — and reserves
 # parent-child for decomposition that should inherit the block. A `*_key` value
-# (finding.key, escalation_key, gc.blocker_key, upstream_send_key) is a dedup
-# identity for finding the one existing bead per cause, not a wait; any wait it
-# carries is a separate blocks edge.
+# (finding.key, gc.blocker_key, upstream_send_key) is a dedup identity for
+# finding the one existing bead per cause, not a wait; any wait it carries is a
+# separate blocks edge. A human gate carries its situation key as its await id,
+# and that gate is itself the wait.
 
 [metadata.merge_identity]
 keys = [
@@ -719,7 +718,7 @@ keys = [
 #   onto the anchor, its membership edge, of any type. bd keeps one edge per
 #   ordered pair, so an edge the pair already carries is the membership edge.
 #   A visit whose subject is the anchor is usually joined by the `tracks` edge
-#   escalate.sh puts from the visit onto its subject. A pair with no edge is
+#   gc-helm.sh puts from the visit onto its subject. A pair with no edge is
 #   joined with `related`. A reader enumerates the live children by
 #   `--metadata-field anchor_bead=<id>`, and the closed ones through that edge
 #   (every dependent of the anchor, whatever the edge's type)
@@ -729,8 +728,8 @@ keys = [
 #   the anchor no later than the stamp. A review, rework, finding or validation
 #   child carries it from the create that files it
 #   (tools/lint-learned.d/create-then-stamp.sh holds that); pr-facts.sh stamps it
-#   onto the visits escalate.sh files for a feedback batch it cannot route and
-#   for unengaged review threads. Empty on an open child of a producer's own
+#   onto the visit it finds for a feedback batch it cannot route and for
+#   unengaged review threads. Empty on an open child of a producer's own
 #   title, it marks one an earlier two-write create left behind: gate-ensure.sh,
 #   signoff.sh and pr-facts.sh close such a child before they file its
 #   replacement (bd_unmake_orphans in bd-lib.sh), and pr-facts.sh's red-check
@@ -1387,10 +1386,14 @@ keys = [
 # gc.gate_visit — on a gate bead, the visit gate-visit-sweep.sh filed for it (a
 #   bead id, or `filed`); its presence is how the sweep skips a gate already
 #   escalated, and `--unset` re-offers the visit.
-# gc.continuation_group — the subject a visit is scoped to, converse's
-#   group-scoped re-claim fence. Written on the visit by gc-helm.sh and
-#   escalate.sh, and repaired toward the subject id when a read-back finds it
-#   empty (an empty group disables the fence). Never cleared. A bead id.
+# gc.continuation_group — Gas City's continuation group: the hook claim
+#   preassigns a claimed bead's open, unassigned siblings in the same group to
+#   the claiming session. The pack's formulas stamp `main` on their step beads,
+#   beside gc.session_affinity, so one session runs a molecule's inline steps
+#   in turn. On a visit it is the subject the visit is scoped to, converse's
+#   group-scoped re-claim fence: gc-helm.sh writes it there and repairs it
+#   toward the subject id when a read-back finds it empty (an empty group
+#   disables the fence). Never cleared.
 # gc.origin — `operator` marks a topic a human commissioned. gc-visit-open.sh
 #   stamps it on its subject when the key is absent, and gc-helm.sh `engage
 #   --new-subject` writes it in the create payload of the subject it files.
@@ -1409,15 +1412,20 @@ keys = [
 #   (services/helm/internal/source/facts.go) shows it as the sitting's headline
 #   when the sitting left no takeaway. Absent, the headline falls back to the
 #   subject's title. Never cleared. Freeform text.
-# escalation_key / escalation_raised_by — escalate.sh files one open visit per
-#   situation, keyed on escalation_key (the caller's dedup handle, read back and
-#   read by pr-facts.sh); escalation_raised_by records the ephemeral wisp id that
-#   raised a redirected visit. Neither is cleared.
-# escalation.recurrences / escalation.recurrence_last — the suppression tally
-#   escalate.sh keeps on the CLOSED verdict-bearing visit: how many times the
-#   situation recurred while a verdict stood (an integer string, absent reads as
-#   0, read to decide whether to re-raise) and when it last did (RFC-3339 UTC).
-#   Overwritten each recurrence, never cleared.
+# escalation_key — on a visit, the situation key it was filed under. Nothing
+#   writes it: a human gate carries its situation key as its await id
+#   (human-gate.sh). pr-facts.sh, finding.sh, branch-supersession.sh,
+#   finalize-gate.sh and converse's scripts still look a visit up by it. Never
+#   cleared.
+# escalation_raised_by — RETIRED. It named the patrol wisp that raised a visit
+#   redirected onto a standing triage bucket. human-gate.sh refuses a wisp
+#   rather than redirecting it, and nothing ever read this key. Registered so
+#   that residue on a pre-retirement bead reads as known, not as a stray.
+# escalation.recurrences / escalation.recurrence_last — RETIRED. They were the
+#   recurrence tally kept on a closed visit inside its verdict window.
+#   human-gate.sh keeps no tally: a quiet window a call declares files nothing
+#   and counts nothing. Registered so that residue on a pre-retirement bead
+#   reads as known, not as a stray.
 # stale_escalated_at / stale_escalated_to — RETIRED. Nothing writes or reads
 #   these: an anchor whose PR is open is a named wait however long the PR sits,
 #   so no pass escalates it for its age. Registered so that residue on a
@@ -1428,11 +1436,13 @@ keys = [
 # sweep.* — liveness-sweep.sh's bookkeeping on its summary bead: sweep.new_ids
 #   and sweep.carried_ids (comma-joined id lists, this pass and carried) and
 #   sweep.pass_at (the pass timestamp). Overwritten each pass.
-# triage.* — the triage-subject surface: triage.scope is the bucket
-#   (`unnamed-waits` from liveness-sweep.sh, `ephemeral-subject-findings` from
-#   escalate.sh), triage.last_seen the last pass a subject was seen (set to the
-#   time when present, cleared to empty when gone), and triage.hold a
-#   held-by-design marker ([holds] marker_keys).
+# triage.* — the standing triage subjects liveness-sweep.sh keeps: triage.scope
+#   names what a subject covers (`unnamed-waits` on the sweep's bucket, or the
+#   scope tokens its recurrence pass evaluates: p<=N, label:X, kind:X,
+#   unrouted), triage.last_seen the comma-joined ids in scope when the last
+#   recurrence was filed (absent until the subject is first evaluated, empty
+#   for an empty scope), and triage.hold a held-by-design marker ([holds]
+#   marker_keys).
 # gc.pr_visit_summary / gc.pr_visit_actions — the closing text of a visit's PR
 #   reminder, stamped on the VISIT by converse-signoff.sh before the visit
 #   closes, so the post-close writer can mark the reminder closed without
@@ -1543,9 +1553,10 @@ keys = [
 #   an input convoy every pass. reconcile bumps it in the write that stamps
 #   `slinging@`, so a failed sling and a death both leave it raised. At the cap
 #   (GC_MAX_DISPATCH_SLING_FAILURES, default 3) reconcile stops re-slinging,
-#   escalates the bead through escalate.sh and leaves it armed. `list` reports
-#   such an arm CAPPED, and doctor/check-armed-dispatch-owed skips it because
-#   the escalation already surfaced it. An integer string; absent or non-numeric
+#   asks a person, with a human gate on the bead through human-gate.sh or a
+#   conversation on a bead with open children, and leaves it armed. `list`
+#   reports such an arm CAPPED, and doctor/check-armed-dispatch-owed skips it
+#   because the ask already surfaced it. An integer string; absent or non-numeric
 #   reads as 0. Cleared with the rest of the family by disarm, which ends a
 #   proven dispatch. Clearing it by hand restarts a capped retry.
 # gc.notify_when_ready — a notice owed to the named agent the bead is assigned

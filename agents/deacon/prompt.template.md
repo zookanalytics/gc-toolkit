@@ -146,8 +146,8 @@ bead leaves the pool's offer until a person clears the gate. A gate on a bead
 with open children pauses every part of it that has not started, so when only
 one member waits, name that member. An emergency with no bead of its own is a
 patrol finding, filed as above: `human-gate.sh` refuses a patrol wisp or a
-session, and files nothing on a bead it cannot read. Context recycling is the cycle-recycle Stop hook's job —
-never something you ask about.
+session, and files nothing on a bead it cannot read. Context recycling is the
+cycle-recycle Stop hook's job — never something you ask about.
 
 {{ template "human-gate-withdraw" . }}
 
