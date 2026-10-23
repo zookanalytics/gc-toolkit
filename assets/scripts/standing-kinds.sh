@@ -20,6 +20,7 @@
 #   jq "$STANDING_KINDS_JQ"' map(select(is_standing_kind | not)) '
 # A program whose defs sit mid-body splices the variable in at that point
 # instead, closing and reopening its single quotes around it.
+# shellcheck disable=SC2034  # read by the scripts that source this file
 STANDING_KINDS_JQ='
   # The task_kind values of a standing record.
   def standing_kinds: [

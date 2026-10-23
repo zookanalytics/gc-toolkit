@@ -31,9 +31,9 @@
 # anchor's review carries as review_pr_url and review_pr_number, fresh or
 # stranded, which mol-review's review-pr-pin block pins; merge_hold, which
 # holds the dispatch while the machine axis still reads the lanes; and the
-# review-wedge escalation, shared by both reach shapes (an exec-stamp-only
+# review-wedge human gate, shared by both reach shapes (an exec-stamp-only
 # poured review, and a no-stamp review a tracking convoy's root drives) -> a
-# spent workflow is one deduped visit, held one pass first.
+# spent workflow is one deduped human gate, held one pass first.
 #
 # The sections run in the parts declared below, each wrapped in an `if part`
 # block. tools/run-tests.sh runs each part as its own run under its own
@@ -64,14 +64,14 @@ printf '#!/usr/bin/env bash\necho "METHOD${2:+ note: $2}"\n' > "$SD/review-dispa
 chmod +x "$SD/review-dispatch-body.sh"
 # human-gate.sh stub: records subject/key/message so the wedge arm's one-gate
 # contract can be asserted without a live store.
-export STUB_ESCALATE_LOG="$TMP/escalate.log"
-cat > "$SD/human-gate.sh" <<'ESC'
+export STUB_GATE_LOG="$TMP/gate.log"
+cat > "$SD/human-gate.sh" <<'GATE'
 #!/usr/bin/env bash
 set -u
-{ printf 'CALL'; for a in "$@"; do printf ' %s' "$a"; done; printf '\n'; } >> "${STUB_ESCALATE_LOG:?}"
-[ -n "${STUB_ESCALATE_FAIL:-}" ] && exit 1
+{ printf 'CALL'; for a in "$@"; do printf ' %s' "$a"; done; printf '\n'; } >> "${STUB_GATE_LOG:?}"
+[ -n "${STUB_GATE_FAIL:-}" ] && exit 1
 exit 0
-ESC
+GATE
 chmod +x "$SD/human-gate.sh"
 SUT="$SD/gate-ensure.sh"
 # The SUT forwards GC_RIG into every sling; an ambient value would rewrite the
@@ -744,12 +744,12 @@ store "[$(anchor D4 pull_request correctness "" polecat/d4),
         $(live_steps root-1 s4)]"
 printf 'conv-1|tracks|rev-4\n' >> "$STUB_DEPS"
 oid d4 > "$GH_DIR/head_polecat_d4"
-: > "$STUB_GC_LOG"; : > "$STUB_ESCALATE_LOG"
+: > "$STUB_GC_LOG"; : > "$STUB_GATE_LOG"
 out=$(run)
 has "$out" "live poured workflow" "a tracked root whose non-final steps are still open is a live pour"
 hasnt "$(cat "$STUB_GC_LOG")" "sling" "…and never re-poured (a re-pour mints a second workflow root)"
 eq "$(meta rev-4 'gc.routed_to')" "<absent>" "…and gc.routed_to is not restored beside the live workflow"
-eq "$(cat "$STUB_ESCALATE_LOG")" "" "…and a live chain is never escalated as wedged"
+eq "$(cat "$STUB_GATE_LOG")" "" "…and a live chain is never gated as wedged"
 hasnt "$out" "dispatched review new-" "…and no twin was minted"
 
 echo "# stranded review (no exec stamp) whose tracked root is SPENT is wedged, not counted in flight forever"
@@ -760,15 +760,15 @@ store "[$(anchor D4s pull_request correctness "" polecat/d4s),
         $(spent_steps root-1s s4s)]"
 printf 'conv-1s|tracks|rev-4s\n' >> "$STUB_DEPS"
 oid d4s > "$GH_DIR/head_polecat_d4s"
-: > "$STUB_GC_LOG"; : > "$STUB_ESCALATE_LOG"
+: > "$STUB_GC_LOG"; : > "$STUB_GATE_LOG"
 out=$(run)
 has "$out" "looks WEDGED" "a stranded review whose tracked root is spent is seen as wedged, not in flight"
 hasnt "$(cat "$STUB_GC_LOG")" "sling" "…and not re-slung (a root exists; a re-pour would mint a second)"
-eq "$(cat "$STUB_ESCALATE_LOG")" "" "…nothing escalates on the first sighting"
+eq "$(cat "$STUB_GATE_LOG")" "" "…no gate is filed on the first sighting"
 out=$(run)
 has "$out" "is WEDGED" "the second sighting confirms it"
-esc=$(cat "$STUB_ESCALATE_LOG")
-has "$esc" "--subject rev-4s" "the visit is filed on the wedged stranded review"
+esc=$(cat "$STUB_GATE_LOG")
+has "$esc" "--subject rev-4s" "the gate is filed on the wedged stranded review"
 has "$esc" "--key review-wedge" "…under the same wedge key the poured arm uses"
 has "$esc" "root-1s" "…naming the spent workflow"
 
@@ -779,12 +779,12 @@ store "[$(anchor D4u pull_request correctness "" polecat/d4u),
         $(root_row root-1u conv-1u)]"
 printf 'conv-1u|tracks|rev-4u\n' >> "$STUB_DEPS"
 oid d4u > "$GH_DIR/head_polecat_d4u"
-: > "$STUB_GC_LOG"; : > "$STUB_ESCALATE_LOG"
+: > "$STUB_GC_LOG"; : > "$STUB_GATE_LOG"
 out=$(run); out="$out$(run)"
 has "$out" "pour-liveness probe unreadable" "a root that does not enumerate its steps proves nothing about the pour"
 hasnt "$out" "live poured workflow" "…so it is never claimed to be a live pour"
 hasnt "$(cat "$STUB_GC_LOG")" "sling" "…and never re-poured behind an unreadable root"
-eq "$(cat "$STUB_ESCALATE_LOG")" "" "…and nothing is escalated on an unanswerable probe"
+eq "$(cat "$STUB_GATE_LOG")" "" "…and no gate is filed on an unanswerable probe"
 
 echo "# stranded review tracked by an EMPTY live convoy (pour minted the convoy but died before the root) is re-slung, not held in flight forever"
 store "[$(anchor D4e pull_request correctness "" polecat/d4e),
@@ -1241,14 +1241,14 @@ eq "$(jq '[.[] | select(.id | startswith("new-"))] | length' "$STUB_STORE")" "1"
 
 fi # part inflight
 
-# ==== part wedge: the review-wedge escalation ====
+# ==== part wedge: the review-wedge gate ====
 if part wedge; then
 
-# --- review-wedge escalation -------------------------------------------------
+# --- review-wedge gate -------------------------------------------------------
 # A poured review reaches the check through its workflow alone. Once that
 # workflow is spent no verdict can still be coming; the fixture builders at the
 # top of the file distinguish that from a review still legitimately running.
-echo "# a spent pour is held one pass, then escalated once"
+echo "# a spent pour is held one pass, then gated once"
 store "[$(anchor W1 pull_request correctness "" polecat/w1),
         $(review_row rev-w1 W1),
         $(convoy_row conv-w1),
@@ -1256,18 +1256,18 @@ store "[$(anchor W1 pull_request correctness "" polecat/w1),
         $(spent_steps root-w1 sw1)]"
 printf 'conv-w1|tracks|rev-w1\n' >> "$STUB_DEPS"
 oid w1 > "$GH_DIR/head_polecat_w1"
-: > "$STUB_ESCALATE_LOG"
+: > "$STUB_GATE_LOG"
 out=$(run)
 has "$out" "looks WEDGED" "the first sighting names the wedge"
 has "$out" "holding one pass" "…and holds, because the route restore lands AFTER the chain close"
-eq "$(cat "$STUB_ESCALATE_LOG")" "" "nothing is escalated on a single sighting"
+eq "$(cat "$STUB_GATE_LOG")" "" "no gate is filed on a single sighting"
 eq "$(meta rev-w1 wedge_seen_root)" "root-w1" "the sighting is stamped against the root it saw"
 has "$out" "0 reviews dispatched" "a wedged review is never twinned by a fresh dispatch"
 
 out=$(run)
 has "$out" "is WEDGED" "the second sighting confirms it"
 has "$out" "filed a human gate [review-wedge]" "…and files a human gate"
-esc=$(cat "$STUB_ESCALATE_LOG")
+esc=$(cat "$STUB_GATE_LOG")
 has "$esc" "--subject rev-w1" "the gate is filed on the wedged review bead"
 has "$esc" "--key review-wedge" "…under one situation key, so repeats dedup"
 has "$esc" "--quiet-window 86400" "…declaring a day-long quiet window, since every pass detects a standing wedge again"
@@ -1276,9 +1276,9 @@ has "$esc" "check 'correctness' on W1 is held" "…naming the anchor and check t
 has "$esc" "gc bd update rev-w1 --set-metadata gc.routed_to=$POOL" "…and the route-restore repair"
 has "$esc" "root-w1" "…and the spent workflow"
 has "$esc" "correctness, which does not derive green until a review records a verdict" "…and the lane it holds, not the dispatch arm's rationale"
-has "$out" "0 reviews dispatched" "escalating still dispatches nothing"
+has "$out" "0 reviews dispatched" "filing the gate still dispatches nothing"
 
-echo "# a pour still running its chain is never escalated"
+echo "# a pour still running its chain is never gated"
 store "[$(anchor W2 pull_request correctness "" polecat/w2),
         $(review_row rev-w2 W2),
         $(convoy_row conv-w2),
@@ -1286,9 +1286,9 @@ store "[$(anchor W2 pull_request correctness "" polecat/w2),
         $(live_steps root-w2 sw2)]"
 printf 'conv-w2|tracks|rev-w2\n' >> "$STUB_DEPS"
 oid w2 > "$GH_DIR/head_polecat_w2"
-: > "$STUB_ESCALATE_LOG"
+: > "$STUB_GATE_LOG"
 out=$(run); out="$out$(run)"
-eq "$(cat "$STUB_ESCALATE_LOG")" "" "a live step chain escalates nothing, however many passes run"
+eq "$(cat "$STUB_GATE_LOG")" "" "a live step chain files no gate, however many passes run"
 eq "$(meta rev-w2 wedge_seen_root)" "<absent>" "…and is never even stamped as a sighting"
 hasnt "$out" "WEDGED" "…and is never called wedged"
 
@@ -1303,9 +1303,9 @@ store "[$(anchor W3 pull_request correctness "" polecat/w3),
         $(step_row sw3-d root-w3 workflow-finalize in_progress)]"
 printf 'conv-w3|tracks|rev-w3\n' >> "$STUB_DEPS"
 oid w3 > "$GH_DIR/head_polecat_w3"
-: > "$STUB_ESCALATE_LOG"
+: > "$STUB_GATE_LOG"
 out=$(run); out=$(run)
-has "$(cat "$STUB_ESCALATE_LOG")" "--subject rev-w3" "a chain whose only live step is workflow-finalize is spent"
+has "$(cat "$STUB_GATE_LOG")" "--subject rev-w3" "a chain whose only live step is workflow-finalize is spent"
 
 echo "# a re-pour: one spent root beside a live one is NOT spent"
 store "[$(anchor W4 pull_request correctness "" polecat/w4),
@@ -1318,19 +1318,19 @@ store "[$(anchor W4 pull_request correctness "" polecat/w4),
         $(live_steps root-w4b sw4b)]"
 printf 'conv-w4|tracks|rev-w4\nconv-w4b|tracks|rev-w4\n' >> "$STUB_DEPS"
 oid w4 > "$GH_DIR/head_polecat_w4"
-: > "$STUB_ESCALATE_LOG"
+: > "$STUB_GATE_LOG"
 out=$(run); out="$out$(run)"
-eq "$(cat "$STUB_ESCALATE_LOG")" "" "a second live workflow keeps the review in flight"
+eq "$(cat "$STUB_GATE_LOG")" "" "a second live workflow keeps the review in flight"
 eq "$(meta rev-w4 wedge_seen_root)" "<absent>" "…and no sighting is recorded"
 
-echo "# an unreadable pour linkage escalates nothing"
+echo "# an unreadable pour linkage files no gate"
 store "[$(anchor W5 pull_request correctness "" polecat/w5),
         $(review_row rev-w5 W5)]"
 oid w5 > "$GH_DIR/head_polecat_w5"
-: > "$STUB_ESCALATE_LOG"
+: > "$STUB_GATE_LOG"
 out=$(run); out="$out$(run)"
 has "$out" "pour-liveness probe unreadable" "a review with no traceable workflow is reported, not judged"
-eq "$(cat "$STUB_ESCALATE_LOG")" "" "…and nothing is escalated on an unanswerable probe"
+eq "$(cat "$STUB_GATE_LOG")" "" "…and no gate is filed on an unanswerable probe"
 has "$out" "0 reviews dispatched" "…and no twin is dispatched either"
 
 echo "# a root whose steps do not enumerate is unanswerable, not spent"
@@ -1340,12 +1340,12 @@ store "[$(anchor W6 pull_request correctness "" polecat/w6),
         $(root_row root-w6 conv-w6)]"
 printf 'conv-w6|tracks|rev-w6\n' >> "$STUB_DEPS"
 oid w6 > "$GH_DIR/head_polecat_w6"
-: > "$STUB_ESCALATE_LOG"
+: > "$STUB_GATE_LOG"
 out=$(run); out="$out$(run)"
 has "$out" "pour-liveness probe unreadable" "an empty step enumeration proves nothing about the pour"
-eq "$(cat "$STUB_ESCALATE_LOG")" "" "…and escalates nothing"
+eq "$(cat "$STUB_GATE_LOG")" "" "…and files no gate"
 
-echo "# a failed escalation is reported, and retried next pass"
+echo "# a gate that did not file is reported, and retried next pass"
 store "[$(anchor W7 pull_request correctness "" polecat/w7),
         $(review_row rev-w7 W7),
         $(convoy_row conv-w7),
@@ -1353,16 +1353,16 @@ store "[$(anchor W7 pull_request correctness "" polecat/w7),
         $(spent_steps root-w7 sw7)]"
 printf 'conv-w7|tracks|rev-w7\n' >> "$STUB_DEPS"
 oid w7 > "$GH_DIR/head_polecat_w7"
-: > "$STUB_ESCALATE_LOG"
+: > "$STUB_GATE_LOG"
 out=$(run)
-out=$(STUB_ESCALATE_FAIL=1 run); rc=$?
-eq "$rc" 0 "a failed escalation does not fail the pass"
-has "$out" "the escalation did not file" "…it is reported"
+out=$(STUB_GATE_FAIL=1 run); rc=$?
+eq "$rc" 0 "a gate that did not file does not fail the pass"
+has "$out" "the gate did not file" "…it is reported"
 out=$(run)
 has "$out" "filed a human gate [review-wedge]" "…and the next pass files it (the sighting stamp persists)"
 
 # Both of the next two carry a SPENT chain on purpose: without it the
-# unreadable-linkage guard would decline the escalation on its own and the
+# unreadable-linkage guard would decline the gate on its own and the
 # exec-only qualification would never be the reason the arm stayed quiet.
 echo "# a review the pool can still re-claim is not the wedge arm's business"
 store "[$(anchor W8 pull_request correctness "" polecat/w8),
@@ -1372,9 +1372,9 @@ store "[$(anchor W8 pull_request correctness "" polecat/w8),
         $(spent_steps root-w8 sw8)]"
 printf 'conv-w8|tracks|rev-w8\n' >> "$STUB_DEPS"
 oid w8 > "$GH_DIR/head_polecat_w8"
-: > "$STUB_ESCALATE_LOG"
+: > "$STUB_GATE_LOG"
 out=$(run); out="$out$(run)"
-eq "$(cat "$STUB_ESCALATE_LOG")" "" "a restored route means the pool can re-claim it — spent chain or not"
+eq "$(cat "$STUB_GATE_LOG")" "" "a restored route means the pool can re-claim it — spent chain or not"
 eq "$(meta rev-w8 wedge_seen_root)" "<absent>" "…and no sighting is recorded"
 hasnt "$out" "WEDGED" "…and it is never called wedged"
 
@@ -1386,9 +1386,9 @@ store "[$(anchor W9 pull_request correctness "" polecat/w9),
         $(spent_steps root-w9 sw9)]"
 printf 'conv-w9|tracks|rev-w9\n' >> "$STUB_DEPS"
 oid w9 > "$GH_DIR/head_polecat_w9"
-: > "$STUB_ESCALATE_LOG"
+: > "$STUB_GATE_LOG"
 out=$(run); out="$out$(run)"
-eq "$(cat "$STUB_ESCALATE_LOG")" "" "an agent still holding the bead is finishing the round, not wedged"
+eq "$(cat "$STUB_GATE_LOG")" "" "an agent still holding the bead is finishing the round, not wedged"
 eq "$(meta rev-w9 wedge_seen_root)" "<absent>" "…and no sighting is recorded"
 hasnt "$out" "WEDGED" "…and it is never called wedged"
 

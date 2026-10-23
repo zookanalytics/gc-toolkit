@@ -1505,8 +1505,8 @@ else
     bad "no agent, formula, or script in this pack writes a triage.hold" \
         "prose hold written by:$holdwriters — a demand bead plus a blocks edge is the disposition now"
 fi
-have "the sweep's disposition menu offers demand in its place" \
-     'demand (gc-helm.sh demand' "$REPO/assets/scripts/liveness-sweep.sh"
+have "the sweep's disposition menu offers a human gate in its place" \
+     'gate (human-gate.sh --subject' "$REPO/assets/scripts/liveness-sweep.sh"
 
 echo "── a sitting is a conversation, not a unit of work ──"
 # The role knew what it must not do and not what it IS, so every prohibition

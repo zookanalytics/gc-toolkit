@@ -434,7 +434,7 @@ SWEEP_SUBJECT=$(jq -r '[.[] | select((.metadata.task_kind // "") == "triage-subj
   | select((.metadata["triage.scope"] // "") == "unnamed-waits")] | (.[0].id // "")' "$LIVE")
 if [ -z "$SWEEP_SUBJECT" ] && [ "$DRY_RUN" -eq 0 ]; then
     SWEEP_SUBJECT=$(bd_write create -t task --title "triage: unnamed waits (this rig)" \
-        -d "Standing triage scope: open beads with no worker, route, structure-wait, gate, or visit. Each visit lists the unnamed waits NEW since the previous pass. Dispositions: route / gate / kill (gc bd close, for an ordinary orphan only; an anchor carrying a merge_result or a bead that is a visit subject is dispositioned through its own visit and bead-rehome.sh, never bare-closed here) / park (a real dep edge onto a scope bead) / demand (a sibling bead naming what a person owes, plus a blocks edge)." \
+        -d "Standing triage scope: open beads with no worker, route, structure-wait, gate, or visit. Each visit lists the unnamed waits NEW since the previous pass. Dispositions: route / gate (a human gate that blocks the bead until a person clears it) / kill (gc bd close, for an ordinary orphan only; an anchor carrying a merge_result or a bead that is a visit subject is dispositioned through its own visit and bead-rehome.sh, never bare-closed here) / park (a real dep edge onto a scope bead)." \
         --json 2>/dev/null | scrub | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null || true)
     [ -n "$SWEEP_SUBJECT" ] && [ "$SWEEP_SUBJECT" != "null" ] \
         || { echo "$PROG: could not create the standing subject — nothing filed" >&2; exit 1; }
@@ -541,7 +541,7 @@ sweep_visit() {
           "Carried (still unnamed from earlier passes, not re-litigated): \($carried | length)",
           (if ($carried | length) > 0 then "  \($carried | map(.id) | join(", "))" else empty end),
           "",
-          "Dispositions: route (gc sling <pool> <id>; never --on here) · gate (file a human gate on the bead that waits) · kill (gc bd close <id> --reason, for an ordinary orphan only; an anchor carrying a merge_result or a bead that is a visit subject is dispositioned through its own visit and bead-rehome.sh, never bare-closed here) · park (gc bd dep add <bead> <scope> — the edge IS the park; prose parks nothing) · ask (human-gate.sh --subject <id> --key <situation-key> --message \"<what a person owes>\" — files a human gate that blocks <id> until a person clears it; a hold written as prose is not a disposition, it is a field someone has to come back and clear)"
+          "Dispositions: route (gc sling <pool> <id>; never --on here) · gate (human-gate.sh --subject <id> --key <situation-key> --message \"<what a person owes>\" — files a human gate that blocks <id> until a person clears it; a hold written as prose is not a disposition, it is a field someone has to come back and clear) · kill (gc bd close <id> --reason, for an ordinary orphan only; an anchor carrying a merge_result or a bead that is a visit subject is dispositioned through its own visit and bead-rehome.sh, never bare-closed here) · park (gc bd dep add <bead> <scope> — the edge IS the park; prose parks nothing)"
         ] | join("\n")')
     if [ "$DRY_RUN" -eq 1 ]; then
         echo "$PROG: dry-run: would file batch visit on $SWEEP_SUBJECT [liveness-sweep]"

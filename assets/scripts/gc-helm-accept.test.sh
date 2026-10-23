@@ -307,12 +307,12 @@ export GC_VISIT_COMMENT_TOOL="$TMP/bin/rec-pvc" REC_PVC_LOG="$TMP/pvc.log"
 unset GC_HELM_FIXTURE GC_RIG || true
 export TMPDIR="$TMP"
 
-# run_accept <arg...> -> sets RC/OUT/ERR/CALLS/GUARD from the per-case FAKE_* env.
+# run_accept <arg...> -> sets RC/ERR/CALLS/GUARD from the per-case FAKE_* env.
 run_accept() {
     : > "$FAKE_CALLS"; : > "$FAKE_GUARD_LOG"
     rm -f "$FAKE_OUTCOME_DIR"/* 2>/dev/null || true
     set +e
-    OUT="$(sh "$SCRIPT" accept "$@" 2>"$TMP/err")"; RC=$?
+    sh "$SCRIPT" accept "$@" >/dev/null 2>"$TMP/err"; RC=$?
     set -e
     ERR="$(cat "$TMP/err")"
     CALLS="$(cat "$FAKE_CALLS")"

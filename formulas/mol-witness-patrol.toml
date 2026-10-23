@@ -992,9 +992,10 @@ if [ "$ROUTE_RC" -eq 0 ] && [ "$QUEUE_RC" -eq 0 ] && [ -n "$STUCK_N" ]; then
   [ -n "$QUEUE_IDS_JSON" ] || QUEUE_IDS_JSON="[]"
   # bd gate list prints null with no gates, and [] through a proxied server.
   GATES=$(gc bd gate list --json --limit 0 2>/dev/null | tr -d '[:cntrl:]' | jq -r 'if type == "array" then .[] | select((.await_type // "") == "human" and (.await_id // "") == "witness-refinery-queue" and (.status // "") != "closed") | .id else empty end' 2>/dev/null) || GATES=""
-  CANDIDATES=$(for G in $GATES; do
+  CANDIDATES=$(while IFS= read -r G; do
+      [ -n "$G" ] || continue
       gc bd dep list "$G" --direction=up --type blocks --json 2>/dev/null | tr -d '[:cntrl:]'
-    done | jq -sc --argjson q "$QUEUE_IDS_JSON" '[ .[] | if type == "array" then .[] else empty end
+    done <<< "$GATES" | jq -sc --argjson q "$QUEUE_IDS_JSON" '[ .[] | if type == "array" then .[] else empty end
       | (.id // "") as $h | select($h | test("^[A-Za-z0-9._-]+$")) | select(($q | index($h)) == null) | $h ] | unique' 2>/dev/null) || CANDIDATES=""
   CANDIDATE_IDS=$(printf '%s' "$CANDIDATES" | jq -r 'if type == "array" then join(",") else empty end' 2>/dev/null) || CANDIDATE_IDS=""
   if [ -n "$CANDIDATE_IDS" ]; then
