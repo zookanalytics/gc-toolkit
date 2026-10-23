@@ -257,6 +257,48 @@ eq "$(nfr "$NDEF" '{"body":null}')" false "a null body carries no mark"
 eq "$(printf '%s' "$VERCEL" | jq -r --arg self bot --arg since "$CUT" "$VDEF"'gc_city_own($self; $since)')" false \
   "the city's own rule is unchanged by a declaration"
 
+echo "# own-def: the mark counts only outside code, so a comment that quotes it is feedback"
+row() { jq -nc --arg l "$1" --arg t "$2" --arg b "$3" '{user: {login: $l, type: $t}, body: $b}'; } # <login> <type> <body>
+NR='<!-- gc:no-review -->'
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf 'Should the report carry `%s` on its first line?' "$NR")")")" true \
+  "a person who quotes the mark in a code span is giving feedback"
+eq "$(feedback "$NDEF" "$(row 'reviewer[bot]' Bot "$(printf '`%s` is missing from the template.' "$NR")")")" true \
+  "…and so is a review app"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf 'Use `` %s `` here.' "$NR")")")" true \
+  "…in a code span of two backticks"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf 'Like this:\n```html\n%s\n```' "$NR")")")" true \
+  "…in a fenced code block"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf '```suggestion\n%s\n```' "$NR")")")" true \
+  "…in a suggested change"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf 'Like this:\n~~~\n%s' "$NR")")")" true \
+  "…in a fence never closed, which runs to the end of the body"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf 'Like this:\n\n    %s' "$NR")")")" true \
+  "…in an indented code block"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf '> ```\n> %s\n> ```' "$NR")")")" true \
+  "…and in a fenced block inside a quote"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf '```\n> ```\n%s\n```' "$NR")")")" true \
+  "a fence closes only at the quote depth it opened at"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf '````\n```\n%s' "$NR")")")" true \
+  "…and only on a fence at least as long"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf '`start\n%s\nend`' "$NR")")")" true \
+  "a code span reaches across the lines of its block"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf 'one ` here\n\n%s\n\n` there' "$NR")")")" false \
+  "…but not across a blank line, so a mark between two stray backticks counts"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf 'Report:\n```\nok\n```\n%s' "$NR")")")" false \
+  "a mark written after a closed fence counts"
+GF_REPORT=$(printf '%s\n' '<!-- growth-factor:schema-diff -->' "$NR" '### Schema diff' '' '| table | change |' '|---|---|' \
+  '| `app.practices` | added |' '' '```sql' 'ALTER TABLE app.practices ADD tz text;' '```')
+eq "$(feedback "$NDEF" "$(row 'github-actions[bot]' Bot "$GF_REPORT")")" false \
+  "a workflow's report with the mark on a line of its own is not for review, whatever code follows it"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf 'Report\r\n%s\r\n' "$NR")")")" false \
+  "a body with CRLF line ends reads the same"
+eq "$(nfr "$NDEF" "$(jq -nc --arg b "$(printf 'Déjà vu — 😀 `code` %s' "$NR")" '{body: $b}')")" true \
+  "characters past ASCII before a code span leave the mark outside it"
+eq "$(nfr "$NDEF" "$(jq -nc --arg b "$(printf 'Déjà vu — 😀 `%s`' "$NR")" '{body: $b}')")" false \
+  "…and leave a quoted mark inside it"
+eq "$(nfr "$NDEF" "$(jq -nc --arg b "$(printf '`%s` is not <!-- gc:`x`no-review -->' "$NR")" '{body: $b}')")" false \
+  "a code span taken out of a body does not join what is left into a mark"
+
 echo "# not-for-review: what the rig declares, read from its checkout"
 # nfr_run <checkout> — sets RC, NOUT (stdout) and NERR (stderr).
 nfr_run() { NOUT="$(GC_RIG_ROOT="$1" "$SUT" not-for-review 2>"$TMPD/nfr.err")"; RC=$?; NERR="$(cat "$TMPD/nfr.err")"; }
@@ -331,7 +373,7 @@ echo "# one definition: no reader carries the no-review rule of its own"
 if git -C "$REPO" rev-parse --show-toplevel >/dev/null 2>&1; then
   eq "$(git -C "$REPO" grep -l -F -e 'gc:no-review' -- 'assets/' 'formulas/' 'services/' 'tools/' ':!assets/scripts/pr-post.sh' ':!*.test.sh' ':!*_test.go' 2>/dev/null)" "" \
     "no file but pr-post.sh tests for the no-review mark"
-  eq "$(git -C "$REPO" grep -l -E -e 'def (gc_not_for_review|gc_feedback|gc_no_review_mark)[:(]' -- . ':!assets/scripts/pr-post.sh' 2>/dev/null)" "" \
+  eq "$(git -C "$REPO" grep -l -E -e 'def (gc_not_for_review|gc_feedback|gc_no_review_mark|gc_prose_blocks|gc_code_spans|gc_outside_code)[:(]' -- . ':!assets/scripts/pr-post.sh' 2>/dev/null)" "" \
     "no file but pr-post.sh defines the rule"
   eq "$(git -C "$REPO" grep -l -F -e '[vc]' -- 'assets/scripts/' ':!*.test.sh' 2>/dev/null)" "" \
     "no script recognises a third-party marker of its own: a rig declares it"

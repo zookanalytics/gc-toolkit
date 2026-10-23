@@ -3682,6 +3682,18 @@ out=$(run)
 eq "$(meta_pinned NR6 pr_posture)" "approved@sha-376" "the approval counts"
 eq "$(meta NR6 pr.conversation)" "<absent>" "…and it is something said, so the PR does not read quiet"
 
+echo "# a comment that quotes the mark in code is feedback: the mark counts only outside code"
+store "[$(anchor NR7 378)]"
+printf '%s' "$(prview 378 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_378.json"
+printf '[{"id":37800,"user":{"login":"human1","type":"User"},"state":"COMMENTED","body":"","commit_id":"sha-378","submitted_at":"2026-10-08T01:00:00Z"}]' > "$GH_DIR/reviews_378.json"
+printf '[{"id":37801,"pull_request_review_id":37800,"user":{"login":"human1","type":"User"},"body":"```suggestion\\n<!-- gc:no-review -->\\n```","path":"a.sh","line":1}]' > "$GH_DIR/comments_378.json"
+printf '[{"id":37802,"user":{"login":"human1","type":"User"},"body":"Should the report carry `<!-- gc:no-review -->` on its first line?"}]' > "$GH_DIR/issue_comments_378.json"
+out=$(run)
+eq "$(meta NR7 pr_comment_watermark)|$(meta NR7 pr_issue_comment_watermark)" "37801|37802" "both comments route and advance their marks"
+eq "$(meta_pinned NR7 pr_posture)" "commented@sha-378" "…holding the merge as commented"
+eq "$(jq '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.metadata.anchor_bead // "") == "NR7")
+           | select((.metadata["finding.source"] // "") == "human:human1") ] | length' "$STUB_STORE")" "2" "…as one finding each"
+
 echo "# a validation pass whose anchor_bead neither lands nor repairs warns and holds the batch"
 # The shape rides the create and is read back. A pass that landed without its
 # anchor_bead, and whose second write is refused, is one no probe can find, so

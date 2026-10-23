@@ -29,7 +29,7 @@ the rig's own setting, outside this doc.
 
 ## The mark
 
-A comment whose body carries this text anywhere is not for review:
+A comment whose body carries this text anywhere outside code is not for review:
 
 ```
 <!-- gc:no-review -->
@@ -38,7 +38,15 @@ A comment whose body carries this text anywhere is not for review:
 It is an HTML comment, so GitHub renders nothing for it. Whoever writes the
 body adds it: a person, or a workflow or bot whose text the rig controls. It
 counts the same on a conversation comment, an inline comment and a review
-body, under any login.
+body, under any login. A workflow can put it on a line of its own at the top of
+the body, where nothing before it can be read as code.
+
+Inside code, the text quotes the mark and is not the mark, so a comment that
+discusses the mark stays feedback. Code is a code span in backticks, a fenced
+code block such as a suggested change, or a line indented four spaces or more.
+Where the markdown is ambiguous, the city reads it as code. Outside code, the
+mark takes a comment out of review wherever it sits, and GitHub shows nothing
+in its place.
 
 The city's own posts are not feedback either. They carry the city's mark,
 `<!-- gc:city -->`, which [`pr-post.sh`](../assets/scripts/pr-post.sh) appends
