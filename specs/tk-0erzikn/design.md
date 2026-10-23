@@ -68,9 +68,11 @@ root's work bead.
 What it costs:
 
 - A finished convoy is handed to the refinery at the merge cadence's next pass on
-  its rig, about a minute after its last member closes, whatever closed it and
-  whether or not other work reaches the refinery. Nothing hands it over while that
-  rig's cadence is not running, which holds every merge too.
+  its rig, whatever closed its last member and whether or not other work reaches
+  the refinery. A pass on a busy rig runs for minutes, and the next starts soon
+  after it ends: on gc-toolkit, passes on 2026-10-23 started 6 to 25 minutes
+  apart, 9 at the median. Nothing hands a convoy over while that rig's cadence is
+  not running, which holds every merge too.
 - A member added without its `target` is declined at workspace-setup before any
   branch is cut, and waits on a visit that asks for the target.
 - A member that builds on work reaching main after its convoy was seeded waits
@@ -479,9 +481,8 @@ main into it, as it does every branch it prepares.
 ### Decision
 
 Graduation goes. Arm 8 of the merge cadence, which runs graduation today, runs
-Gas Town's `integration_branch_auto_land` step in its place, as Gas Town writes
-it, and hands the convoy's bead to the refinery the way a polecat hands over its
-work:
+Gas Town's `integration_branch_auto_land` step in its place, and hands the
+convoy's bead to the refinery the way a polecat hands over its work:
 
 - On every pass, the step reads the rig's open convoys labelled `owned` whose
   `target` is an integration branch.
@@ -504,7 +505,8 @@ convoy's bead.
 
 The step is a script, `integration-branch-auto-land.sh`, named for Gas Town's
 variable. The arm's switch, `REFINERY_RECONCILE_INTEGRATION_AUTO_LAND`, stays on
-by default and turns the step off, as Gas Town's variable turns its own off.
+by default, and set to `false` it turns the step off, as Gas Town's variable
+turns its own off.
 
 ### Where the step runs
 
@@ -518,19 +520,19 @@ An idle refinery runs no iteration at all. Its find-work step ends the turn when
 nothing is assigned to it. The refinery is an `on_demand` named session, and a
 session gets a turn at launch, when someone types, or when a nudge arrives
 ([docs/gascity/agent-types.md](../../docs/gascity/agent-types.md)). Gas City's
-pool-claim, continuation and execution backstops govern only pool sessions, the
-city sets no sleep policy, and no order of the pack nudges the refinery. Outside a
-restart, its turns come with the work handed to it, because each handoff wakes
-and nudges it.
+pool-claim, continuation and execution backstops govern only pool sessions, and
+the city sets no sleep policy. Outside a restart, an idle refinery's turns come
+with the work handed to it: each handoff wakes and nudges it, and no order of the
+pack nudges it for anything else.
 
 So a step in the patrol, wherever it sat, would wait for unrelated work to reach
 the refinery. Ahead of find-work's exit it would run on every turn and still add
 no turn. A convoy whose last member closes outside a refinery landing could wait
 indefinitely.
 
-The merge cadence runs every minute on every rig, with no session, and its arm 8
-is where graduation runs today. Run there, the step hands a finished convoy to
-the refinery within a pass of its last member's close, whatever closed it and
+The merge cadence runs on every rig with no session, one pass at a time, and its
+arm 8 is where graduation runs today. Run there, the step hands a finished convoy
+to the refinery within a pass of its last member's close, whatever closed it and
 whether or not other work reaches the refinery. The assignment wakes nothing by
 itself. Gas City counts an open bead assigned to a named session as that
 session's demand only when the bead is ready (`computeNamedSessionDemandOn`), and
@@ -582,8 +584,8 @@ patrol, in the next-iteration step or ahead of find-work's exit. Either placemen
 runs the step only on a turn the refinery already has, so a finished convoy would
 wait for unrelated work to reach the refinery, as the section above shows.
 Giving the refinery a turn on a timer instead would start a model session on
-every rig at every interval, to find nothing on almost every one, where the
-cadence already runs every minute with no session.
+every rig at every interval, to find nothing on almost every one, while the
+cadence already runs with no session.
 
 ## 5. Reviews, the convoy's PR, stages and rework
 
@@ -770,8 +772,8 @@ in that page's own format, which cites the upstream commits a verification read.
   landing on an integration branch, so the step reaches a convoy only when the
   refinery lands its last member. A gc-toolkit member can also close where no
   patrol runs: the cadence lands a stage's PR, and a member can close with nothing
-  to land. And an idle refinery runs no patrol, because nothing gives it a turn
-  while no work is handed to it (section 4).
+  to land, or be closed by hand. And an idle refinery runs no patrol, because
+  nothing gives it a turn while no work is handed to it (section 4).
 - **Feature:** a finished convoy is handed to the refinery within a cadence pass
   of its last member's close, and reaches its PR without waiting for other work.
 - **Retires when:** Gas City or Gas Town hands a finished owned convoy to the
