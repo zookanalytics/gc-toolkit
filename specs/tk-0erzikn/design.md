@@ -636,18 +636,18 @@ below pins the path it names under the new default.
 - **What goes with the arm's decision.** The cases that pin its reasons for
   keeping or deleting a branch go with it: (7), (8), (10) to (13c), (13e), (15)
   to (17b), the refused delete (18) to (18c), and (19b)'s check that a branch
-  was kept "for the fold reason".
+  was kept "for the fold reason", which the resolve case below replaces.
 - **The resolve block.** Run on its own, the block resolves a bead aimed at
   `integration/cv-1` to `direct` when it names no strategy (20b), and to `mr`
   when it names `mr`, a stage. It resolves a bead aimed at `polecat/tk-anchor`
-  to `direct` when it names no strategy (19), and to `mr` when it names `mr`
-  and records no PR of its own (19b), since the flip is gone. `pr` resolves to
-  `mr` (8b). A bead aimed at `main`, at no target, or at `release/x` resolves
-  to `mr` whether it names `direct` or no strategy. A `local` bead stays
-  `local` aimed at `main`, at no target, and at `integration/cv-1`. A bead
-  aimed at `polecat/tk-anchor` with its own `existing_pr` still resolves to
-  `mr` (21b), through merge-push's `existing_pr` rule, which that case runs
-  after the block.
+  to `direct` when it names no strategy (19), and to `mr` when it names `mr` and
+  records no PR of its own, since the flip is gone, which (19b) now pins. `pr`
+  resolves to `mr` (8b). A bead aimed at `main`, at no target, or at `release/x`
+  resolves to `mr` whether it names `direct` or no strategy. A `local` bead
+  stays `local` aimed at `main`, at no target, and at `integration/cv-1`. A bead
+  aimed at `polecat/tk-anchor` with its own `existing_pr` still resolves to `mr`
+  (21b), through merge-push's `existing_pr` rule, which that case runs after the
+  block.
 - **One reading.** The resolve block has one call site left, merge-push's, so
   the check that counts call sites expects one, and the check that two copies
   are byte-identical goes. The check that no step reads `merge_strategy` outside
