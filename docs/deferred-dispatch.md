@@ -194,7 +194,7 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
   [Work assigned to a named agent owes a notice](#work-assigned-to-a-named-agent-owes-a-notice));
 - **dispatches** every armed open bead nothing holds — the ones `bd` reports
   ready, and also the ones bd keeps unready only through an ancestor that
-  waits on a demand gate, or through any held ancestor of a bead in flight
+  waits on a human gate, or through any held ancestor of a bead in flight
   (see below) — stamping its own
   `gc.dispatch_when_ready_slung` marker in its unproven `slinging@` state,
   running the recorded sling, promoting the marker to `slung@` on success,
@@ -229,10 +229,11 @@ The arm waits on what holds the bead, as `assets/scripts/hold-lib.sh`
 defines it: an open `blocks` blocker on the bead or on one of its
 parent-child ancestors. A park and a prerequisite hold alike, so an armed
 member of a parked epic, or of an epic that waits on a task, is held at any
-depth under it, and so is a bead whose own blocker is still open. A demand
-gate on an ancestor does not count: it is the operator's pending decision
-(`gc.demand_for`), and waiting on that decision is not a hold. A demand gate
-on the bead itself does count. Where `bd` decides the same question, the
+depth under it, and so is a bead whose own blocker is still open. A human
+gate on an ancestor does not count: it is the operator's pending decision, a
+gate whose await type is human, and waiting on that decision is not a hold. A
+human gate on the bead itself does count, and a park, a plain gate, holds at
+any depth. Where `bd` decides the same question, the
 definition follows it: a closed or pinned blocker holds nothing, and a closed
 or pinned ancestor ends the walk.
 

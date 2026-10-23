@@ -186,12 +186,11 @@ The human surface is subject / visit / takeaway on native primitives
   and no board row of its own. `gate-visit-sweep` files a visit only for a gate
   that carries `gc.demand_for`, which `gc-helm.sh demand` writes and
   `human-gate.sh` does not, and the board reads an open blocker as something a
-  person owes only when it is a `decision` or routed to `human`. Some callers
-  look a gate they filed back up as a visit and find none. `finding.sh` then
-  records no needs-you ruling, `liveness-sweep.sh` no census and `pr-facts.sh`
-  no comment disposition, and the rest of `pr-facts.sh`'s arms that look for
-  the visit find nothing to act on. `branch-supersession.sh` dispatches the
-  merge-in child its hold would stop.
+  person owes only when it is a `decision` or routed to `human`. Every other
+  reader finds a bead's human gates the one way, through the bead's `blocks`
+  edges (`bd_human_gates` in `assets/scripts/bd-lib.sh`), and takes a cleared
+  gate's answer from its resolve reason, so a gate holds what it blocks
+  whoever filed it.
 - **A takeaway records what a sitting concluded**, and its `--waiting-on` edge
   is what makes the wait machine-answerable
   ([lifecycle-composition.md](lifecycle-composition.md)).
