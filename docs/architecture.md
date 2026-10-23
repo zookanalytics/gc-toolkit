@@ -182,14 +182,16 @@ The human surface is subject / visit / takeaway on native primitives
   needs a human is a human gate, same as any other. A patrol files a human gate
   on the bead a situation is about, or a finding (`patrol-finding.sh`), rather
   than mail, because a patrol sits at the top of the agent tier and has no peer
-  to mail. A gate reaches the operator through a visit on the bead it blocks:
-  `gate-visit-sweep` files one, briefed to settle the question and resolve the
-  gate, unless a visit there is already open. Some callers look a gate they
-  filed back up as a visit and find none. `finding.sh` then records no needs-you
-  ruling, `liveness-sweep.sh` no census and `pr-facts.sh` no comment
-  disposition, and the rest of `pr-facts.sh`'s arms that look for the visit find
-  nothing to act on. `branch-supersession.sh` dispatches the merge-in child its
-  hold would stop.
+  to mail. A gate `human-gate.sh` files reaches the operator through no visit
+  and no board row of its own. `gate-visit-sweep` files a visit only for a gate
+  that carries `gc.demand_for`, which `gc-helm.sh demand` writes and
+  `human-gate.sh` does not, and the board reads an open blocker as something a
+  person owes only when it is a `decision` or routed to `human`. Some callers
+  look a gate they filed back up as a visit and find none. `finding.sh` then
+  records no needs-you ruling, `liveness-sweep.sh` no census and `pr-facts.sh`
+  no comment disposition, and the rest of `pr-facts.sh`'s arms that look for
+  the visit find nothing to act on. `branch-supersession.sh` dispatches the
+  merge-in child its hold would stop.
 - **A takeaway records what a sitting concluded**, and its `--waiting-on` edge
   is what makes the wait machine-answerable
   ([lifecycle-composition.md](lifecycle-composition.md)).
