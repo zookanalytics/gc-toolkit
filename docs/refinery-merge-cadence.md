@@ -131,15 +131,18 @@ the cadence — the arms run whether or not any refinery session is awake.
    (same repo, not a fork), re-read the anchor and check it still gates this
    PR — open, still `pull_request`, same number, url and head branch. Then
    either the record for a PR already merged, or, for an OPEN non-draft one,
-   validate holds/posture/checks/children/open-visit/approval/base/CLEAN, check
+   validate holds/posture/checks/children/human-gate/approval/base/CLEAN, check
    that the merge makes no `generated/seed-audit` render stale, re-read the full
    authorization set immediately before merging, `gh pr merge --squash
    --match-head-commit <validated oid>`, then close + record in one lifecycle
    transition, which `gctk merge` runs in-process. The posture it validates is
    the value **pr-facts recorded on the anchor**, never a fresh read of GitHub.
-   The open-visit clause is the finalize gate: an open visit tracking the anchor
-   holds its merge (`docs/finalize-gate.md`), re-asserted in the terminal re-read
-   because a visit filed mid-pass does not move the head.
+   A human gate that blocks the anchor holds its merge twice. The children probe
+   reads the anchor's `blocks` blockers and holds on an open one, and a human
+   gate among them is a person's hold, so it records no machine state where an
+   unrouted blocker records `blocked`. The finalize gate holds on the same open
+   human gates (`docs/finalize-gate.md`), and it is re-asserted in the terminal
+   re-read, because a gate filed mid-pass does not move the head.
 
    GitHub computes a PR's mergeability lazily. The first read after the PR's
    base moves answers `UNKNOWN` and starts the computation, which finishes in a
@@ -176,8 +179,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    for the common cause and no repair at all for a cause the next pass meets
    unchanged. `record-failure-cap.sh` is what tells the two apart: it counts
    consecutive failures in `merge_record_failures` on the anchor and, past
-   `GC_MAX_RECORD_FAILURES` (3), files one visit naming the PR, the anchor and
-   the by-hand record. The record that lands clears the count. This arm, the
+   `GC_MAX_RECORD_FAILURES` (3), files one human gate on the anchor naming the
+   PR and the by-hand record. The record that lands clears the count. This arm, the
    merge's own record below it, and pr-facts's out-of-band record all call it,
    so the same repair attempted by three writers spends one budget rather than
    three. The count is metadata-only because every refusal it bounds is a
@@ -203,7 +206,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    test needs a render of the base too, which runs only when some file fails
    the first, so a check costs one render or two, and needs `gc` on the
    refinery's host. Any other file, or a probe that cannot answer, holds the
-   merge and files one visit per PR under `seed-audit-merge-gate.<n>`, naming
+   merge and files one human gate per PR under `seed-audit-merge-gate.<n>`, naming
    each file and why it failed. Nothing is routed from here: the way out is to
    bring the head branch current with its base, re-render, and push.
 
