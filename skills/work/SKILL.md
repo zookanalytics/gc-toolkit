@@ -169,7 +169,8 @@ The message is that work already sent should stop, or go somewhere else.
 - **Send it elsewhere.** The same release names where it goes, in one write:
   `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<where it goes now, and why>" --release --no-wait --route <rig>/<pool>`.
   For a named agent, pass `--assign <named-agent>` in place of
-  `--route <rig>/<pool>`.
+  `--route <rig>/<pool>`, then tell it with
+  `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify <bead> --agent <named-agent>`.
 - **Withdraw a recommendation** the bead should not take, while the bead stays
   open for discussion:
   `SUBJECT=<bead> VISIT=<visit> "$(gc <binding> scripts-dir)/converse-invalidate-recommendation.sh" "<why it no longer holds>"`.
