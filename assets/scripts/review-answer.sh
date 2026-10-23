@@ -237,24 +237,26 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
   def ra_url($view; $prurl): ra_url($view; $prurl; (if .body then null else ra_comment_thread($view; .cid) end));
   # Whether the thread $t of a finding comment waits on the reviewer for the
   # answer to finding $id, whose reply is $reply: open, holding that answer
-  # (ra_answer_post), and ending with a post that asks the city nothing. own
-  # tells such a post, and the caller passes the negation of gc_feedback for it:
-  # a post of the city, or one not for review. So a reply of theirs is what the
-  # routing arm takes for feedback. A thread its answer never reached
-  # asks nothing of them. Nor does one whose last post is a reply of theirs,
+  # (ra_answer_post), and with a post of the city as its last turn. own tells a
+  # post of the city and notice a post not for review, and the caller passes
+  # gc_city_own and gc_not_for_review for them, so a reply of theirs is what the
+  # routing arm takes for feedback. A notice of anyone but the city says
+  # nothing, so it takes no turn. A thread its answer never reached
+  # asks nothing of them. Nor does one whose last turn is a reply of theirs,
   # which is a point of its own until the city answers it. Once the city has
   # answered it, the thread waits on them again, since the write-back still
   # leaves open a thread holding a decline or a deferral.
-  def ra_thread_waits($t; $self; $marker; $id; $reply; own):
+  def ra_thread_waits($t; $self; $marker; $id; $reply; own; notice):
     ($t | ra_thread_open)
     and (($t.comments.nodes // []) as $cs
-         | any($cs[]; ra_answer_post($self; $marker; $id; $reply)) and ($cs[-1] | own));
+         | any($cs[]; ra_answer_post($self; $marker; $id; $reply))
+           and ([$cs[] | select(own or (notice | not))] | length > 0 and (.[-1] | own)));
   # A human finding bead row as the record the points are made from. $beads
   # maps a bead id to what was read of it (ra_models). A rework child closes
   # when its branch lands, so a fix unit read closed has its commits on the PR.
   # An inline comment thread is looked up once, for both its link and whether
-  # it waits on the reviewer; $self, $marker and own are what that reads.
-  def ra_record($view; $prurl; $beads; $self; $marker; own):
+  # it waits on the reviewer; $self, $marker, own and notice are what that reads.
+  def ra_record($view; $prurl; $beads; $self; $marker; own; notice):
     (.metadata // {}) as $m
     | ((.description // "") | tostring) as $desc
     | { id: ((.id // "") | tostring),
@@ -277,7 +279,7 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
         rid: (($m["finding.review_id"] // "") | tostring) }
     | . + { body: (.rid != "" and .rid == .cid) }
     | (if .body then null else ra_comment_thread($view; .cid) end) as $t
-    | . + { url: ra_url($view; $prurl; $t), waits: ra_thread_waits($t; $self; $marker; .id; .reply; own),
+    | . + { url: ra_url($view; $prurl; $t), waits: ra_thread_waits($t; $self; $marker; .id; .reply; own; notice),
             fix_landed: (($beads[.fix_unit] // {}).closed == true) };
   # A review body finding whose ruling owes its raiser an answer, which the
   # living comment delivers, since the comment sits in no thread.
@@ -361,10 +363,10 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
   # own closed reads as re-requested when a copy carries its dismissed mark, or
   # when the read of the PR lists its author among the pending review requests
   # ($view.requested). So a dismissal whose edit of the comment failed still
-  # says so on the next pass. own tells a post that asks the city nothing from
-  # one that is feedback (ra_thread_waits), and the writer passes the negation
-  # of gc_feedback for it.
-  def ra_models($view; $prurl; $self; $vl; $beads; $marker; own):
+  # says so on the next pass. own tells a post of the city and notice a post not
+  # for review (ra_thread_waits), and the writer passes gc_city_own and
+  # gc_not_for_review for them.
+  def ra_models($view; $prurl; $self; $vl; $beads; $marker; own; notice):
     ra_rounds($view) as $rounds
     | [ $view.issue_comments[]?
         | select(((.author.login // "") == $self) and ((.body // "") | contains($marker)))
@@ -376,7 +378,7 @@ REVIEW_ANSWER_DEF="$REVIEW_OWED_REPLY_DEF$REVIEW_ROUND_DEF"'
             round: ($rounds[$k] // ("r" + $k)) } ] as $answers
     | [ .[]? | select(((.metadata.task_kind // "") | tostring) == "finding")
              | select(((.metadata["finding.lane"] // "") | tostring) == "human")
-             | ra_record($view; $prurl; $beads; $self; $marker; own) | select(.rid != "")
+             | ra_record($view; $prurl; $beads; $self; $marker; own; notice) | select(.rid != "")
              | . + { round: ($rounds[.rid] // ("r" + .rid)) } ]
     | group_by(.round)
     | map(

@@ -5112,7 +5112,7 @@ WB_FIX_UNITS
     wmodels=$({ printf '%s\n' "$wview"; printf '%s\n' "$wbx"; printf '%s\n' "$wvl"; printf '%s\n' "$wrf"; } \
       | jq -cn --arg prurl "$wurl" --arg self "$SELF_LOGIN" --arg since "$wsince" --arg marker "$WB_MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'
         input as $view | input as $beads | input as $vl | input
-        | ra_models($view; $prurl; $self; $vl; $beads; $marker; (gc_feedback($self; $since) | not)) | .[]' 2>/dev/null) || wmodels=""
+        | ra_models($view; $prurl; $self; $vl; $beads; $marker; gc_city_own($self; $since); gc_not_for_review) | .[]' 2>/dev/null) || wmodels=""
     wrstamped=0
     while IFS= read -r wm; do
       [ -n "$wm" ] || continue
