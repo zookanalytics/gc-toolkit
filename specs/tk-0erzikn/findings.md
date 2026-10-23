@@ -1,6 +1,6 @@
 ---
 name: Findings — why a convoy's work landed as one PR per bead
-description: An input to this bead's design (design.md beside it). The 2026-10-18 investigation of how gc-toolkit came to open one PR per bead, with dated evidence, as mechanik wrote it. Copied below this header, verbatim except that each reference to another repository names what it was instead (2026-10-19).
+description: An input to this bead's design (design.md beside it). The 2026-10-18 investigation of how gc-toolkit came to open one PR per bead, with dated evidence, as mechanik wrote it. Copied below this header, verbatim except that each reference to another repository names what it was instead (2026-10-19), and that the line on how the refinery keeps `integration/*` targets on `mr` is corrected (2026-10-23).
 ---
 
 # Why a convoy's work lands as one PR per bead instead of one PR
@@ -91,7 +91,7 @@ work. It multiplies reviews only because the system's PR is a bead.
 **The per-bead path:**
 - Branch: `polecat/<bead>` (formulas/mol-polecat-work.toml:750-758). The submit gate at :1474-1498 checks for it.
 - PR: assets/scripts/pr-open.sh opens one with `--base "$target"` (`gh pr create` at :639).
-- The refinery keeps `integration/*` targets on `mr` (formulas/mol-refinery-patrol.toml:625-655).
+- The refinery's `mr` default keeps `integration/*` targets on `mr`. Its merge-strategy block flips only `polecat/*` targets to `direct` (formulas/mol-refinery-patrol.toml:625-655).
 - docs/component-model.md:189 asserts I4.
 
 **Ways several beads share one PR today:**

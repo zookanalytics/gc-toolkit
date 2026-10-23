@@ -167,9 +167,11 @@ So the model is reachable today by hand. The fix makes it the default.
 - **Each work bead owns its own PR.** The anchor model (#465):
   docs/component-model.md I4, "Every PR has exactly one owning anchor", with the
   anchor being the work bead.
-- **Convoy members open their own PR on purpose.** #994 (tk-sw5bu) keeps
-  `integration/*` members on `mr`, and the refinery's merge-strategy block does
-  the same.
+- **Convoy members open their own PR on purpose.** #994 (tk-sw5bu) left
+  `integration/*` members on `mr` on purpose. The refinery's merge-strategy
+  block has no rule of its own for them: it flips only a bead aimed at a
+  `polecat/*` head to `direct`, so a member that names no strategy takes the
+  `mr` default.
 - **A polecat takes one bead at a time.** mol-polecat-work refuses an input
   convoy with more than one member.
 - **The city's checks run on a PR's owning bead.** gate-ensure.sh dispatches the
