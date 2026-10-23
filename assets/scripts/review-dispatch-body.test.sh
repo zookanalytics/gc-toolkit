@@ -163,6 +163,12 @@ hasF "$TMP/pm.skill" 'product lens' "(METHOD) the pm skill carries the product l
 hasF "$TMP/pm.skill" '## The visual is the `demo` check' "(METHOD) …and leaves the visual decision to demo"
 hasF "$TMP/arch.skill" 'You are the Architect' "(METHOD) the arch skill names the Architect"
 hasF "$TMP/arch.skill" 'docs/architecture.md' "(METHOD) …and reads the architecture reference docs before judging"
+hasF "$TMP/arch.skill" 'A `docs/architecture.md` at the reviewed commit is a precondition of approval' "(METHOD) …and approves no commit without docs/architecture.md"
+hasF "$TMP/arch.skill" 'a passable account of the architecture the change covers' "(METHOD) …whose change adds one covering the architecture it covers"
+hasF "$TMP/arch.skill" '`docs/architecture.md: incomplete`' "(METHOD) …and files the rest of the architecture as one follow-up under one token"
+hasF "$TMP/arch.skill" 'File it the same way, and do not hold the change for it.' "(METHOD) …files a gap the change does not touch without holding the change for it"
+hasF "$TMP/arch.skill" 'A gap in the architecture the change does touch is no reason to pass the change' "(METHOD) …and passes no change on a gap in the architecture it touches"
+notF "$TMP/arch.skill" 'not a reason to pass or fail the change' "(METHOD) …so no missing reference lets a change through unjudged"
 # Run outside any repository, so no index declares the check.
 ( cd "$TMP" && env -u GC_RIG_ROOT bash "$SCRIPT" --check-name nonesuch ) > "$TMP/undeclared.out" 2>/dev/null
 hasF "$TMP/undeclared.out" '`nonesuch` check, so nothing says what it judges' "(CHECK) a check no index row declares gets the declared-nowhere note, never a guess"
