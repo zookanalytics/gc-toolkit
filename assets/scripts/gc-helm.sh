@@ -125,18 +125,19 @@ back to the human, in the same write, and is refused on a closed anchor and on
 a bead blocked by anything but its own demand, since the work is then on the
 blocker and a pool has nothing to perform here; --assign <named-agent> releases
 it TO a named agent instead, in the same write, as its assignee and with no
-route, because a named agent's hook matches its assignee and never reads
-gc.routed_to. --assign is refused beside --route and on a closed anchor, and
-without --waiting-on also on a bead blocked by anything but its own demand;
-with --waiting-on the named waits gate the hand-off, since the agent's hook
-offers the bead only once bd reports it ready; --waiting-on (repeatable)
-records the wait as a `blocks` edge beside the prose so the board can re-ask
-whether it landed. --no-wait is the other answer to the same question: this
-sitting settled the subject and nothing is waiting on it. It stamps
-gc.takeaway_settled, which lifecycle.toml [holds] reads to tell a settled
-headline from one parking a bead on prose, and it contradicts --waiting-on.
-Say neither and the headline is a hold that doctor/check-wait-is-an-edge
-reports, which is the honest reading of a park nothing re-asks.
+route, because the assignee is what the controller and the pack's notice read
+to give a named agent a turn (docs/deferred-dispatch.md). --assign is refused
+beside --route and on a closed anchor, and without --waiting-on also on a bead
+blocked by anything but its own demand; with --waiting-on the named waits gate
+the hand-off, since the agent's hook offers the bead only once bd reports it
+ready; --waiting-on (repeatable) records the wait as a `blocks` edge beside the
+prose so the board can re-ask whether it landed. --no-wait is the other answer
+to the same question: this sitting settled the subject and nothing is waiting
+on it. It stamps gc.takeaway_settled, which lifecycle.toml [holds] reads to
+tell a settled headline from one parking a bead on prose, and it contradicts
+--waiting-on. Say neither and the headline is a hold that
+doctor/check-wait-is-an-edge reports, which is the honest reading of a park
+nothing re-asks.
 
 demand files what a person owes as its own bead, a SIBLING of the work, and
 blocks that work on it with a `blocks` edge; it prints `demand <id> blocks
@@ -824,13 +825,12 @@ ROOTS
 # also names a bead that is itself the work, so a bead blocked by anything but
 # its own demand is refused.
 # --assign names a NAMED agent to release TO, written as the assignee with no
-# route: a named session's hook matches its assignee and skips the routed tier,
-# so a route alone never reaches it (docs/gascity-routing-model.md, Lane 2). A
-# bead is addressed one way or the other, never both. --assign is refused on a
-# closed anchor like --route. Without --waiting-on it also takes the --route
-# blocker guard. With --waiting-on the guard is skipped: the caller has named
-# the waits, and the hook offers the bead only once bd reports it ready, so
-# every open blocker gates the hand-off, named or not.
+# route (the usage says why). A bead is addressed one way or the other, never
+# both. --assign is refused on a closed anchor like --route. Without
+# --waiting-on it also takes the --route blocker guard. With --waiting-on the
+# guard is skipped: the caller has named the waits, and the hook offers the
+# bead only once bd reports it ready, so every open blocker gates the hand-off,
+# named or not.
 # --waiting-on records each wait as a `blocks` edge, best-effort: the stamp is
 # what the sitting owes the operator, so a rejected edge only warns and never
 # fails the verb. One wait is written as no edge: a LANDED rider — a bead that
@@ -915,9 +915,12 @@ cmd_takeaway() {
             *) echo "$PROG: takeaway: --route '$route' is not rig-qualified; gc.routed_to is matched as an exact string, so a bare agent name routes to nobody and the bead sits forever. Use <rig>/<agent>." >&2; exit 2 ;;
         esac
     fi
-    # --assign rides --release for the same reason, and it excludes --route: an
-    # assignee drops the bead out of a pool's unassigned claim filter, and a
-    # named agent's hook never reads the route.
+    # --assign rides --release for the same reason, and it excludes --route. The
+    # agent's hook offers the bead by its assignee whatever the route, and a
+    # pool's claim and Gas City's pool demand count both skip an assigned bead,
+    # so a route beside the assignee offers the bead to no pool member until
+    # the assignee is cleared, and then hands it to the pool instead of the
+    # agent.
     if [ -n "$assign" ]; then
         [ -n "$release" ] || { echo "$PROG: takeaway: --assign needs --release (it names who the bead is released TO)" >&2; exit 2; }
         [ -z "$route" ] || { echo "$PROG: takeaway: --assign and --route both name where $bead goes. A bead is addressed to a named agent by its assignee or to a pool by gc.routed_to, never both. Pass one. Nothing was written." >&2; exit 2; }
@@ -1059,7 +1062,7 @@ cmd_takeaway() {
     # Partition --waiting-on into the waits a pool still owes and the LANDED
     # riders. A landed rider both rode <bead>'s OWN branch and has already put
     # its work there, so <bead>'s own merge is what carries it
-    # (docs/gascity-human-engagement.md, "a settled sitting"): an edge would
+    # (docs/human-engagement.md, "How a held sitting ends"): an edge would
     # gate <bead>'s merge on work that merges WITH it — the deadlock merge.sh's
     # dep-edge lane holds on with no release — while asserting a pending wait
     # that does not exist. Both halves are required. metadata.branch is set at
@@ -1197,9 +1200,10 @@ cmd_takeaway() {
             fi
         fi
     fi
-    # An --assign is read back on the same terms. The assignee is the one field a
-    # named agent's hook matches, so one that did not land leaves the bead open,
-    # unassigned and unrouted, offered to nobody.
+    # An --assign is read back on the same terms. The release writes the
+    # assignee as the bead's only address, beside an empty route, so one that
+    # did not land leaves the bead open, unassigned and unrouted, offered to
+    # nobody.
     assign_missed=""
     if [ -n "$assign" ] && [ -n "$release_park" ]; then
         assign_got=$(assignee_now "$bead")
@@ -2138,17 +2142,16 @@ EOF
 # distinguishable from an error object, and the id is compared for EQUALITY so a
 # row for a different bead is not taken as a resolution.
 #
-# On a resolved subject: sets VS_PAYLOAD (the scrubbed `gc bd show` array),
-# VS_ROW (the matched object), VS_ID (its id), and returns 0. Otherwise prints
-# the classified message to stderr — "$PROG: <verb>: …" suffixed with
-# <nothing-clause> (e.g. "Nothing spawned.") — and returns 4, the fail-closed
-# exit code every caller already uses. <subject-ref> overrides how the id is
-# named in that message (accept names a subject a visit pointed at); empty uses
-# the bare quoted id.
+# On a resolved subject: sets VS_PAYLOAD (the scrubbed `gc bd show` array) and
+# VS_ROW (the matched object), and returns 0. Otherwise prints the classified
+# message to stderr — "$PROG: <verb>: …" suffixed with <nothing-clause> (e.g.
+# "Nothing spawned.") — and returns 4, the fail-closed exit code every caller
+# already uses. <subject-ref> overrides how the id is named in that message
+# (accept names a subject a visit pointed at); empty uses the bare quoted id.
 verify_subject() {
     _vs_bead="$1"; _vs_verb="$2"; _vs_nothing="$3"
     _vs_ref="${4:-}"; [ -n "$_vs_ref" ] || _vs_ref="'$_vs_bead'"
-    VS_PAYLOAD=""; VS_ROW=""; VS_ID=""
+    VS_PAYLOAD=""; VS_ROW=""; _vs_id=""
     _vs_raw=$(gc bd show "$_vs_bead" --json 2>/dev/null || true)
     VS_PAYLOAD=$(printf '%s' "$_vs_raw" | scrub)
     VS_ROW=$(printf '%s' "$VS_PAYLOAD" \
@@ -2158,9 +2161,9 @@ verify_subject() {
              else empty end' 2>/dev/null || true)
     case "$VS_ROW" in ""|null) VS_ROW="" ;; esac
     if [ -n "$VS_ROW" ]; then
-        VS_ID=$(printf '%s' "$VS_ROW" | jq -r '.id // empty' 2>/dev/null || true)
+        _vs_id=$(printf '%s' "$VS_ROW" | jq -r '.id // empty' 2>/dev/null || true)
     fi
-    [ -n "$VS_ID" ] && return 0
+    [ -n "$_vs_id" ] && return 0
 
     # No matching row. Not-found is the specific "no issues found" error; any
     # OTHER error means the read FAILED and existence is unknown — reporting an
@@ -2225,7 +2228,7 @@ cmd_open() {
     # data-plane outage apart from a genuine not-found.
     # >>> open-subject-exists
     verify_subject "$bead" open "No visit filed." || exit $?
-    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+    subject_clean="$VS_PAYLOAD"
     # <<< open-subject-exists
 
     # A DONE-band row is a finished item, not open work. Minting a fresh
@@ -2532,7 +2535,7 @@ cmd_dismiss() {
     # a data-plane outage, not a missing bead. Dismissing an unverified id would
     # stamp a marker nothing ever clears.
     verify_subject "$bead" dismiss "Nothing was written." || exit $?
-    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+    subject_clean="$VS_PAYLOAD"
 
     # A VISIT id names its own sitting. The board lists a parked visit as a row
     # of its own, and engage accepts the visit id straight off that row, so
@@ -2983,7 +2986,7 @@ cmd_accept() {
     # outage, not a missing bead. The alternative is a sling on a bead that may
     # not exist.
     verify_subject "$bead" accept "Nothing dispatched." || exit $?
-    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+    subject_clean="$VS_PAYLOAD"
 
     # A VISIT id names the recommendation's subject. The board renders Accept on
     # the folded subject tile, so the common input is the subject id; a visit id
@@ -3024,7 +3027,7 @@ cmd_accept() {
         # the subject "discuss-only" (exit 2) on a state it could not read, where the
         # contract is to fail closed (exit 4).
         verify_subject "$bead" accept "Nothing dispatched." "the subject '$bead' this visit names" || exit $?
-        subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+        subject_clean="$VS_PAYLOAD"
     fi
 
     # gc.recommended_formula is the live recommendation; gc.recommended_formula_dispatched
@@ -3366,7 +3369,7 @@ EOF
     while IFS="$TAB" read -r _eps_key _eps_label _eps_letter; do
         [ -n "$_eps_key" ] && [ -n "$_eps_letter" ] || continue
         [ -n "$_epv_smenu" ] && _epv_smenu="$_epv_smenu · "
-        _epv_smenu="$_epv_smenu[$_eps_letter] $_eps_label"
+        _epv_smenu="${_epv_smenu}[$_eps_letter] $_eps_label"
         _epv_smap="$_epv_smap$_eps_letter $_eps_key
 "
     done <<EOF
@@ -3413,7 +3416,7 @@ engage_prompt_model() {
         _epm_lbl=$(engage_model_label "$_epm_m")
         [ "$_epm_m" = opus ] && _epm_lbl="$_epm_lbl (default)"
         [ -n "$_epm_menu" ] && _epm_menu="$_epm_menu · "
-        _epm_menu="$_epm_menu[$_epm_i] $_epm_lbl"
+        _epm_menu="${_epm_menu}[$_epm_i] $_epm_lbl"
         _epm_map="$_epm_map$_epm_i $_epm_m
 "
     done
@@ -3485,7 +3488,7 @@ engage_prompt_rig() {
         _epr_map="$_epr_map$_epr_i $_epr_name
 "
         [ -n "$_epr_menu" ] && _epr_menu="$_epr_menu · "
-        _epr_menu="$_epr_menu[$_epr_i] $_epr_name"
+        _epr_menu="${_epr_menu}[$_epr_i] $_epr_name"
     done <<EOF
 $(printf '%s' "$RIGS" | jq -r '.[] | [.name, .path] | @tsv' 2>/dev/null)
 EOF
@@ -4040,10 +4043,11 @@ cmd_engage() {
     visit_owner=$(printf '%s' "$visit_row" | jq -r '.assignee // ""' 2>/dev/null || true)
 
     # The spawned sitting adopts the visit only through its own hook claim, whose
-    # Tier-2 query is `bd ready --assignee=<name>` (docs/gascity-agents.md), and
-    # `bd ready` yields a bead only while it is open and unblocked. A closed or
-    # blocked visit assigned to the sitting never becomes its claim, so the
-    # sitting would wake holding nothing while this command reports success.
+    # Tier-2 query is `bd ready --assignee=<name>` (docs/gascity/routing-model.md,
+    # "The read side"), and `bd ready` yields a bead only while it is open and
+    # unblocked. A closed or blocked visit assigned to the sitting never becomes
+    # its claim, so the sitting would wake holding nothing while this command
+    # reports success.
     #
     # A visit with an assignee is already engaged, or pending engagement:
     # engage binds the visit to a spawned sitting's runtime name (below) while

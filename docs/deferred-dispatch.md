@@ -109,16 +109,26 @@ deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 
 ## Work assigned to a named agent owes a notice
 
-gc-toolkit hands work to a named agent by assignee, never by route. The
-agent's hook offers it a bead assigned to it once `bd` reports the bead ready
+gc-toolkit hands work to a named agent by assignee, never by route. That is
+the form Gas City documents for direct delivery to a named session: an
+assignee with no route, which the controller does not count as pool demand,
+where a route on an unassigned bead is demand for its target's pool
+([dispatch architecture](https://github.com/gastownhall/gascity/blob/main/engdocs/architecture/dispatch.md),
+"scale_check ↔ work_query correspondence"). The hook of a plain named
+session, which each of the pack's named agents is, offers it a bead assigned
+to it and a bead routed to its own name alike, once `bd` reports the bead
+ready
 ([gascity/routing-model.md](gascity/routing-model.md#the-read-side-the-claim-predicate)),
-and under `wake_mode = "resume"` nothing else wakes an idle named session
-when that happens. The controller's claim, continuation and execution
-backstops govern pool sessions only, the agent's `nudge` text is typed at
-launch, and the controller restarts an alive named session onto a new
-assignment only under `"fresh"`
+so a route would reach the agent too. What a route does not reach is the
+controller's handling of assigned work, which under `wake_mode = "fresh"`
+restarts a live named session onto a newly assigned bead. Under `"resume"`,
+nothing gives an idle named session a turn when its bead becomes ready: the
+controller's claim, continuation and execution backstops govern pool
+sessions only, the agent's `nudge` text is typed at launch, and the
+fresh-mode restart does not apply
 ([gascity/agent-types.md](gascity/agent-types.md#an-assignment-gives-a-named-session-no-turn)).
-So the dispatch an assignment owes is a notice to the agent:
+So the dispatch an assignment owes is a notice to the agent, keyed on the
+assignee:
 
 ```bash
 "$PACK_DIR/assets/scripts/deferred-dispatch.sh" notify <bead> \
@@ -150,8 +160,8 @@ the same bead gives way to the new one. A notice that gets no turn requested
 either way keeps its record, and the log keeps what `gc mail send` and
 `gc session nudge` printed about the failure.
 
-`notify` refuses a bead that is not assigned to the agent, since that
-agent's hook would never offer it, so assign the bead first. A closed bead,
+`notify` refuses a bead that is not assigned to the agent, because the
+notice is owed for an assignment, so assign the bead first. A closed bead,
 or one the agent already claimed, owes no notice, and `notify` writes
 nothing and exits 0. Once the record is down the notice is owed: a readiness
 read that fails, or a notice that gets no turn requested, leaves the record

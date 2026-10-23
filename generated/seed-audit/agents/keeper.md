@@ -315,23 +315,29 @@ the helm board (`gc.routed_to=human`), and `gc-helm engage` spawns the
 sitting when the operator draws it off the board.
 
 A **named agent** is addressed by `assignee` instead: mechanik, deacon,
-witness, refinery, keeper. Their sessions skip the routed tier, so a
-bead carrying only `gc.routed_to=<name>` is never offered to the
-identity it names. Give them the assignee write, in place of the sling
-or straight after it, using the agent's exact QualifiedName — city-scoped
-for a city singleton (`gc-toolkit.mechanik`), rig-scoped otherwise
-(`gc-toolkit/gc-toolkit.witness`), the form `gc agent list` prints:
+witness, refinery, keeper. Its hook would also claim a bead routed to
+its own name, but the assignee is what the controller and the pack's
+notice read to give the agent a turn (docs/deferred-dispatch.md, "Work
+assigned to a named agent owes a notice"). Give them the assignee write,
+in place of the sling or straight after it, using the agent's exact
+QualifiedName — city-scoped for a city singleton (`gc-toolkit.mechanik`),
+rig-scoped otherwise (`gc-toolkit/gc-toolkit.witness`), the form
+`gc agent list` prints:
 
 ```
 gc bd update <bead> --assignee <qualified-name>
 ```
 
-Nothing reports the mistake. The controller counts routed demand and
-can wake the target on it, and the woken session's own `gc hook` then
-shows nothing, so the work sits. To check a dispatch you already sent,
-read both views: `gc hook <qualified-name>` with the name as an argument
-is the controller's, a bare `gc hook` inside the target's session is
-the agent's, and a bead only the first can see is stranded.
+Then tell the agent, since the write alone may give it no turn. The controller
+restarts a live `fresh` session onto a newly assigned bead, though not while
+the session still holds its previous one open, and it restarts no `resume`
+session, such as the mechanik's.
+`"$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify <bead> --agent <qualified-name>`
+mails the agent the bead once `bd` reports the bead ready. `gc <binding> scripts-dir`
+prints the directory of the gc-toolkit pack's scripts, so a script called
+through it is the pack's own copy, whichever pack the calling agent comes from.
+`<binding>` is the name the city imports that pack under, which gc puts in
+front of its skills: `gc-toolkit` in `gc-toolkit.work`.
 
 ## Dispatched work is file-and-forget
 
@@ -342,7 +348,7 @@ still an edge and a drain, never a watcher: record the blocker as a `blocks`
 edge, then ARM the follow-up so it routes itself when the blocker lands.
 
 ```
-[[PACK-ROOT]]/packs/gascity-keeper/assets/scripts/deferred-dispatch.sh arm <bead> \
+"$(gc <binding> scripts-dir)/deferred-dispatch.sh" arm <bead> \
     --target <rig>/<agent> --reason "waits for <blocker>"
 ```
 
@@ -360,7 +366,7 @@ product:
 
 ```
 Monitor(
-  command: "[[PACK-ROOT]]/packs/gascity-keeper/assets/scripts/gc-bd-watch.sh <bead>",
+  command: '"$(gc <binding> scripts-dir)/gc-bd-watch.sh" <bead>',
   description: "watching <bead>",
   persistent: true,
 )
