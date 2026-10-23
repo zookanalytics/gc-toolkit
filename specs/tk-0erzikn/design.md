@@ -72,9 +72,8 @@ What it costs:
 What it rules out: reading `convoy.merge` at the refinery and mapping `local`
 onto `mr`, a converter the four tests ban; a workspace-setup step that discards
 a run and pours it again as its normal path, which is a recovery layer; reading
-the convoy that
-tracks a bead at the refinery, to tell a convoy's branch from any other, which
-is plumbing; and any change to Gas City.
+the convoy that tracks a bead at the refinery, to tell a convoy's branch from
+any other, which is plumbing; and any change to Gas City.
 
 Unchanged: every PR still needs the operator's approval, and every PR still has
 exactly one owning bead (invariant I4), the issue or the convoy it came from.
@@ -118,28 +117,26 @@ Read on 2026-10-19 in Gas City's documentation and code, as installed (`gc`
 1.4.3), and in the Gas Town and build packs it bundles.
 
 - **A convoy groups work and tracks it.** "A convoy is a container bead that
-  groups related work so you track a batch as a unit"
-  (its "How Gas City Works" page). Its membership is `tracks`
-  edges from it to each member. "Tracking is pure grouping: it changes no parent
-  and blocks nothing", and members "are not children of the convoy"
-  (its beads tutorial). `gc convoy add` adds "a tracks dependency from
-  the convoy to the issue ... without changing the issue parent". Gas City still
-  reads parent-child membership, which it calls legacy
+  groups related work so you track a batch as a unit" (its "How Gas City Works"
+  page). Its membership is `tracks` edges from it to each member. "Tracking is
+  pure grouping: it changes no parent and blocks nothing", and members "are not
+  children of the convoy" (its beads tutorial). `gc convoy add` adds "a tracks
+  dependency from the convoy to the issue ... without changing the issue
+  parent". Gas City still reads parent-child membership, which it calls legacy
   (its `convoy` package).
 - **A convoy's target reaches only its children.** `gc convoy create --target`
-  names the "target branch inherited by child work beads". Sling branches a
-  bead from its own `target`, else from the `target` of a convoy it finds by
-  walking the bead's parent chain, else from the rig's default branch
-  (`SlingFormulaTargetBranch` and `BeadMetadataTarget`,
-  in its `sling` package). A member that its convoy only tracks inherits
-  nothing.
+  names the "target branch inherited by child work beads". Sling branches a bead
+  from its own `target`, else from the `target` of a convoy it finds by walking
+  the bead's parent chain, else from the rig's default branch
+  (`SlingFormulaTargetBranch` and `BeadMetadataTarget`, in its `sling` package).
+  A member that its convoy only tracks inherits nothing.
 - **A merge strategy is the bead's own `merge_strategy`.** `direct` merges the
   work branch into its target, `mr` delivers it through a merge or pull request,
   and `local` leaves it on its branch with no merge and no request, so that the
-  consumer decides (its `beadmeta` package). An absent key is unset, and
-  each consumer reads unset as its own default. `gc sling --merge` stamps the
-  key, and so does a rig's `default_merge_strategy` in `city.toml`, which no rig
-  in this city sets. A convoy's `convoy.merge` is written by
+  consumer decides (its `beadmeta` package). An absent key is unset, and each
+  consumer reads unset as its own default. `gc sling --merge` stamps the key,
+  and so does a rig's `default_merge_strategy` in `city.toml`, which no rig in
+  this city sets. A convoy's `convoy.merge` is written by
   `gc convoy create --merge` and printed by `gc convoy status`, and nothing in
   Gas City or its bundled packs reads it.
 - **An owned convoy ends when it is landed.** `--owned` marks a "manual
@@ -153,8 +150,8 @@ Read on 2026-10-19 in Gas City's documentation and code, as installed (`gc`
   `integration_branch_auto_land` on, which is off by default, it takes an owned
   convoy whose children are all closed by assigning the convoy's bead to itself
   with the integration branch as its `branch` and the default branch as its
-  `target`, and lands it like any work bead
-  (Gas Town's `mol-refinery-patrol` formula).
+  `target`, and lands it like any work bead (Gas Town's `mol-refinery-patrol`
+  formula).
 - **The build pack drains a convoy and publishes once.** `build-from-convoy`
   runs each member in its own worker session and worktree, in parallel, then
   reviews the whole result, repairs it, and can push and open one PR. Push and
@@ -262,7 +259,9 @@ cancelled before any worktree exists, and the member waits on a visit that
 names the convoy and asks for the target. Stamping the target and closing the
 visit re-slings the member, which then pours from the convoy's branch. The
 guard counts only a convoy that names a target, so the input convoy each pour
-makes is not read as membership.
+makes is not read as membership. The guard asks which convoys a bead belongs
+to, which is what a `tracks` edge records, so it reads the edge for its own
+meaning. The readers below ask about a bead's parent, and stay as they are.
 
 The decline ends a run only for a member whose add skipped the write. The
 recipes write the target in the same step that adds the member, and the guard
@@ -532,14 +531,15 @@ so that shape is not built, and this design does not build it.
 ## 7. Nouns that have diverged from Gas City's
 
 Under the operator's ruling, this design builds on Gas City's version of each
-noun and adds nothing to gc-toolkit's. Whether a diverged noun is retired, and
-when, is a conversation for the epic that moves gc-toolkit onto Gas City as
-shipped (tk-1tfzr71).
+noun and adds nothing to gc-toolkit's, beyond the PR rule the operator asked
+for on the merge strategy. Whether a diverged noun is retired, and when, is a
+conversation for the epic that moves gc-toolkit onto Gas City as shipped
+(tk-1tfzr71).
 
 | Noun | Gas City's | gc-toolkit's | This design |
 |---|---|---|---|
 | Convoy membership | `tracks` edges | a parent-child edge, in the mechanik's recipe and `mol-design-convoy` | moves to `tracks` |
-| Merge strategy | `direct`, `mr` and `local`, with unset left to the consumer | the lifecycle registry lists `mr`, `pr` and `direct`, and the refinery's default is `mr` | reads Gas City's key and values, and changes only the default |
+| Merge strategy | `direct`, `mr` and `local`, with unset left to the consumer | the lifecycle registry lists `mr`, `pr` and `direct`, and the refinery's default is `mr` | reads Gas City's key and values, moves the default to Gas Town's, keeps the operator's PR rule, and drops the fold-in flip |
 | A finished owned convoy's landing | Gas Town's auto-land takes the convoy's bead as a work bead, and `gc convoy land` ends the convoy | graduation, `convoy-graduate.sh`, with conditions of its own, and the bead closes through the PR's merge | unchanged |
 | A PR's owning bead | Gas City core does not open PRs; the build pack publishes one PR for the convoy or issue its workflow ran on | the anchor (`docs/component-model.md`) | unchanged: the anchor is that issue or convoy |
 | A convoy's work as one PR | the build pack's drain, review and publish | members land on an integration branch, then graduation | unchanged |
@@ -579,9 +579,8 @@ What stays as it is: `docs/component-model.md`, whose Convoy row already reads
 "tracked set with one landing target" and whose anchor is the bead that owns a
 PR; the approval rule in `merge.sh`; I4 and its check,
 `doctor/check-one-anchor-per-pr`, since a member never owns a PR; the one-bead
-input convoy of `mol-polecat-work`; the parent
-readers that section 1 lists; the rule that `existing_pr` forces `mr`;
-`convoy-seed.sh`; and graduation.
+input convoy of `mol-polecat-work`; the parent readers that section 1 lists;
+the rule that `existing_pr` forces `mr`; `convoy-seed.sh`; and graduation.
 
 ## 9. The implementation cut
 
