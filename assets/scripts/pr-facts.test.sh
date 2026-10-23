@@ -50,8 +50,12 @@
 # a body review that frames its round can be ruled restates.
 # Write-back: EYES on a routed comment; a question-mark answer naming the visit
 # while a comment's batch waits on an open one, or its finding on a needs-you
-# ruling; once the batch's bead closes and the comment's finding has closed, one
-# check-mark answer naming what resolved it and EYES traded for THUMBS_UP, in the
+# ruling; a question-mark answer in the thread of a declined or deferred
+# finding, which is left open for the operator, saying that resolving it accepts
+# the ruling and a reply in it is ruled as new feedback, and the ruling alone in
+# a thread the operator already resolved; once the batch's bead closes and the
+# comment's finding has closed,
+# one check-mark answer naming what resolved it and EYES traded for THUMBS_UP, in the
 # thread (resolved behind it) for an inline comment and on the Conversation tab,
 # linking to the comment, for a review body or a Conversation comment; each
 # space's batch read from its own ledger, which the routing transition writes;
@@ -72,8 +76,12 @@
 # comment is answered by one comment, and a later commit starts a round of its
 # own; a summary body ruled restates is no point and no count, and its review
 # waits for its round before it is dismissed; a decision made for the operator
-# and a wider fix are worth a look; a decline its fix unit flagged cites the
-# fix's commits once that fix unit lands; an open visit leads it; a
+# and a wider fix are worth a look; a decline whose open thread holds its answer
+# and ends with a post of the city needs the operator, and its count line and
+# dismissal note say so, in the pass that posts the answer; it is worth a look
+# while the answer is missing and once they resolve the thread; a decline its
+# fix unit flagged cites the fix's commits once that fix
+# unit lands; an open visit leads it; a
 # hand-written comment is labelled by its first sentence; a label links only to
 # a comment the PR holds; a review body's decline is delivered in it, not in a
 # post of its own; no check-mark ack is posted for a review body; each review's
@@ -4329,8 +4337,9 @@ hasnt "$(gh_since "$mark")" "REACT" "…and no reaction"
 # The validator may overrule a human on the merits (finding declined), but it
 # owes them the reason on their PR: it stamps the answer (finding.reply) and the
 # row it answers (finding.comment_id), and the write-back posts that answer into
-# the thread, leading with the ruling, and leaves the thread open for the
-# operator to accept or overrule. A closed declined human finding carrying both.
+# the thread, leading with the question mark and the ruling, and leaves the
+# thread open for the operator to accept it or push back, which the answer's
+# last line says how to do. A closed declined human finding carrying both.
 dfind() { # id anchor comment_id [reply]
   printf '{"id":"%s","status":"closed","assignee":"","notes":"declined: not an objection","title":"finding[human]: x","metadata":{"task_kind":"finding","anchor_bead":"%s","finding.lane":"human","finding.disposition":"declined","finding.source":"human:johnzook","finding.comment_id":"%s"%s}}' \
     "$1" "$2" "$3" "${4:+,\"finding.reply\":\"$4\"}"
@@ -4343,6 +4352,10 @@ threads 47 "$(one_thread 47)"
 out=$(run)
 has "$(treply 47 T-47)" "Declined: The diff already asserts X in helper; no change needed." "the validator's decline reason is posted into the raiser's thread, leading with the ruling"
 hasnt "$(treply 47 T-47)" "✅" "…never with the check mark a fix carries"
+has "$(treply 47 T-47)" "❓ Declined: The diff already asserts X" "…but with the question mark, since the thread awaits the operator"
+has "$(treply 47 T-47)" "no change needed.
+
+Resolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback." "…and a line of its own saying that resolving the thread accepts the decline"
 has "$(treply 47 T-47)" "<!-- gc-writeback -->" "…carrying the write-back marker"
 eq "$(tresolved 47 T-47)" "false" "…and the thread is left open for the operator to accept or overrule"
 eq "$(meta DF1 finding.reply_posted)" "1" "…and the finding is marked answered"
@@ -4350,6 +4363,25 @@ echo "# …and a second pass answers the same thread nothing"
 mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
 out=$(run)
 hasnt "$(gh_since "$mark")" "addPullRequestReviewThreadReply" "the answered decline is never replied to twice"
+
+echo "# a decline posted into a thread the operator already resolved is the ruling alone"
+# Resolving the thread accepted the ruling before its answer arrived, so the
+# answer asks for nothing more: no question mark and no line about resolving it.
+store "[$(anchor WDS 353 "$(wb_meta visit:VDS)"), $(dfind DFS WDS 100 'The diff already asserts X in helper; no change needed.')]"
+printf '%s' "$(prview 353 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_353.json"
+threads 353 "$(one_thread 353 | jq -c '.threads[0].isResolved = true')"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+eq "$(gh_since "$mark" | grep -c '^REPLY T-353$')" "1" "the decline is posted into the resolved thread"
+has "$(treply 353 T-353)" "Declined: The diff already asserts X in helper; no change needed." "…leading with the ruling"
+hasnt "$(treply 353 T-353)" "❓" "…with no question mark, since nothing in the thread awaits the operator"
+hasnt "$(treply 353 T-353)" "Resolving the thread" "…and no line asking them to resolve a thread they already resolved"
+eq "$(meta DFS finding.reply_posted)" "1" "…and the finding is marked answered"
+echo "# …and a later pass reads it back by its text, so a reopened thread gets no second answer"
+jq -c '.threads[0].isResolved = false' "$GH_DIR/threads_353.json" > "$TMP/t353.json" && mv "$TMP/t353.json" "$GH_DIR/threads_353.json"
+mark=$(( $(wc -l < "$STUB_GH_LOG") + 1 ))
+out=$(run)
+hasnt "$(gh_since "$mark")" "REPLY T-353" "the plain decline is not posted again once the thread reopens"
 
 echo "# the no-objection carve-out declines silently — no owed reply, no thread write"
 # A comment that raises no objection (a question the diff answers, praise) is
@@ -4381,7 +4413,10 @@ threads 51 "$(one_thread 51)"
 out=$(run)
 has "$(treply 51 T-51)" "tracked as follow-up tk-fup1" "the deferred finding's follow-up id is posted into the raiser's thread"
 has "$(treply 51 T-51)" "<!-- gc-writeback -->" "…carrying the write-back marker"
-has "$(treply 51 T-51)" "Deferred — tracked as follow-up tk-fup1" "…leading with the ruling, which the reply already opens with"
+has "$(treply 51 T-51)" "❓ Deferred — tracked as follow-up tk-fup1" "…leading with the question mark and the ruling, which the reply already opens with"
+has "$(treply 51 T-51)" "after this merges.
+
+Resolving the thread accepts the deferral. To push back, reply in the thread; your reply is ruled as new feedback." "…and a line of its own saying that resolving the thread accepts the deferral"
 eq "$(tresolved 51 T-51)" "false" "…and the thread is left open for the operator to accept or overrule"
 eq "$(meta DFF1 finding.reply_posted)" "1" "…and the finding is marked answered"
 
@@ -5162,6 +5197,20 @@ hasnt "$(gh_since "$mark")" "PRCOMMENT" "the next pass finds the living answer b
 eq "$(meta FT7 finding.reply_posted)" "1" "…and records the finding answered"
 out=$(run)
 eq "$(thumbed 316 RV-316),$(reacted 316 RV-316)" "true,false" "…and the review body trades EYES for THUMBS_UP"
+
+echo "# a declined Conversation comment is answered on the Conversation tab, with no thread to resolve"
+# A Conversation comment sits in no thread, so nothing is left open for the
+# operator to resolve: the answer leads with its ruling alone and links to the
+# comment it answers.
+store "[$(anchor WT9 341 "$(wb_tmeta rework:KT9 0 50 '' 'rework:KT9|0|50')"), $(child KT9 open), $(hfind FT9 WT9 50 '' declined closed 'the name matches the other scripts.')]"
+printf '%s' "$(prview 341 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_341.json"
+threads 341 "$(top_fixture 341 | jq -c '.reviews = []')"
+out=$(run)
+has "$(pcomments 341)" "Declined: the name matches the other scripts. In reply to https://github.com/zook/gc-toolkit/pull/341#issuecomment-50." \
+  "the decline is posted on the Conversation tab, linking the comment it answers"
+hasnt "$(pcomments 341)" "❓" "…with no question mark"
+hasnt "$(pcomments 341)" "Resolving the thread" "…and no line about a thread it does not have"
+eq "$(meta FT9 finding.reply_posted)" "1" "…and the finding is marked answered"
 
 # ---- an owed reply is read back by its own text, never by another reply -------
 # A finding's answer is on the PR only when a reply of ours carries its own text
@@ -6681,7 +6730,8 @@ hasnt "$(cat "$STUB_GH_LOG")" "PRCOMMENT 602" "…edited, never posted again"
 eq "$(grep -c '^ICEDIT' "$STUB_GH_LOG")" "1" "…in one edit"
 has "$L3" "> [!IMPORTANT]
 > **Needs you: visit tk-v602.** Should enforcement turn on now, or wait for the next release?" "the open visit and its question lead the comment"
-has "$L3" "### Your review: 2 points, 1 answered so far" "the count drops the summary the ruling found restating the inline comments"
+has "$L3" "### Your review: 2 points, 1 needs you, 1 answered
+" "the count drops the summary the ruling found restating the inline comments, and counts the point that needs the operator"
 has "$L3" "- **[Should enforcement turn on now?](https://github.com/zook/gc-toolkit/pull/602#discussion_r6302)** Should enforcement turn on now, or wait for the next release? (tk-v602)" "the point needing the operator names its visit"
 has "$L3" "- **[A demo video for this change.](https://github.com/zook/gc-toolkit/pull/602#discussion_r6301)** Noted; no change asked." "a comment that asked for nothing is done, labelled by the validator"
 showcase open-visit 602 6003
@@ -6797,10 +6847,10 @@ printf '%s' "$(prview 607 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_607.json"
 threads 607 "$(lreview 607 6008 COMMENTED '' 6801 6802)"
 : > "$STUB_GH_LOG"
 out=$(run)
-has "$(lanswer 607 6008)" "**Worth a look**
+has "$(lanswer 607 6008)" "**Needs you**
 - **[Rename the cap to budget.](https://github.com/zook/gc-toolkit/pull/607#discussion_r6801)** Renamed anyway, though the ruling declined it: the config key was renamed in the same change.
-
-<!-- gc-writeback -->" "the decline its fix unit flagged is worth a look in the fix unit's words, citing no commit while that fix unit is in flight"
+  Resolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback." \
+  "the decline its fix unit flagged needs the operator while its thread is open, in the fix unit's words, citing no commit while that fix unit is in flight"
 bmut KL8 '.status = "closed"'
 commits 607 '[{"oid":"7a7a7a7aaaaa","message":"fix: rename the cap to budget (KL8)\n\nReview comment 6801."}]'
 : > "$STUB_GH_LOG"
@@ -6808,6 +6858,141 @@ out=$(run)
 eq "$(grep -c '^ICEDIT' "$STUB_GH_LOG")" "1" "the fix unit landing edits the living answer in place"
 has "$(lanswer 607 6008)" "the config key was renamed in the same change. (7a7a7a7a)" "…to cite the commit that made the change"
 eq "$(lcount 607 6008)" "1" "…still in the one living answer"
+
+echo "# a decline whose thread waits on the reviewer needs them, in its thread and in the living answer, until they resolve it"
+# The shape of growth-factor PR #15: one point fixed and its thread resolved,
+# one declined and its thread left open for the reviewer to accept or push back on.
+store "[$(anchor LA17 618 "$(lmeta rework:KL17 6182 6018)"), $(fixunit KL17 closed),
+  $(lfind LR1 LA17 6181 6018 must-fix closed '**Count each page once.**' '{"finding.fix_unit":"KL17","finding.fix_answer":"Fixed as you suggested."}'),
+  $(lfind LR2 LA17 6182 6018 declined closed '**The barrier now runs once per page, not once per count.**' '{"finding.fix_unit":"KL17","finding.reply":"the count query is paged, so the barrier has to run once per page."}')]"
+printf '%s' "$(prview 618 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_618.json"
+threads 618 "$(lreview 618 6018 CHANGES_REQUESTED '' 6181 6182)"
+commits 618 '[{"oid":"6c6c6c6ccccc","message":"fix: count each page once (KL17)\n\nReview comment 6181."}]'
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(treply 618 T-618-6182)" "❓ Declined: the count query is paged, so the barrier has to run once per page.
+
+Resolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback." \
+  "the decline in the thread leads with the question mark and says that resolving the thread accepts it"
+eq "$(tresolved 618 T-618-6181)|$(tresolved 618 T-618-6182)" "true|false" "…and its thread is left open, while the fixed point's thread is resolved"
+L17=$(lanswer 618 6018)
+has "$L17" "### Your review: 2 points, 1 needs you, 1 answered
+" "the count line counts the decline as needing the reviewer"
+hasnt "$L17" "all answered" "…and does not read all answered while its thread is open"
+has "$L17" "**Needs you**
+- **[The barrier now runs once per page, not once per count.](https://github.com/zook/gc-toolkit/pull/618#discussion_r6182)** Declined: the count query is paged, so the barrier has to run once per page.
+  Resolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback." \
+  "the decline is under Needs you, saying what resolving its thread and replying in it do"
+eq "$(grep -c 'message=Your review: 2 points, 1 needs you, 1 answered (https://github.com/zook/gc-toolkit/pull/618#issuecomment-[0-9]*)\. Dismissal is not approval' "$STUB_GH_LOG")" "1" \
+  "the answered review is dismissed with a note saying a point needs the reviewer"
+showcase decline-waits-on-reviewer 618 6018
+echo "# …and once the reviewer resolves the thread, the next pass shows the decline as accepted"
+rdismissed 618 6018
+jq -c '.threads |= map(if .id == "T-618-6182" then .isResolved = true else . end)' "$GH_DIR/threads_618.json" > "$TMP/t618.json" \
+  && mv "$TMP/t618.json" "$GH_DIR/threads_618.json"
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(grep -c '^ICEDIT' "$STUB_GH_LOG")" "1" "the living answer is edited in place"
+L17=$(lanswer 618 6018)
+has "$L17" "### Your review: 2 points, all answered
+" "…its count line reading all answered"
+has "$L17" "**Worth a look**
+- **[The barrier now runs once per page, not once per count.](https://github.com/zook/gc-toolkit/pull/618#discussion_r6182)** Declined: the count query is paged, so the barrier has to run once per page.
+
+**Done**" "…and the decline worth a look"
+hasnt "$L17" "Needs you" "…with nothing shown as needing the reviewer"
+hasnt "$L17" "Resolving the thread" "…and nothing asked of them"
+hasnt "$(cat "$STUB_GH_LOG")" "REPLY" "…while the thread is answered nothing more"
+eq "$(tresolved 618 T-618-6182)" "true" "…and stays resolved"
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(grep -c '^ICEDIT\|^PRCOMMENT\|^REPLY' "$STUB_GH_LOG")" "0" "a pass after it writes nothing"
+
+echo "# a decline whose post failed asks the reviewer nothing until its answer is in the thread"
+# The living answer reads the thread off the PR, so a decline the write-back
+# could not post leaves its point worth a look, and the pass that does post it
+# shows the point as needing the reviewer, in the living answer and in the
+# dismissal note, since the post joins that pass's read of the PR.
+store "[$(anchor LA21 621 "$(lmeta rework:KL21 6212 6021)"), $(fixunit KL21 closed),
+  $(lfind LT1 LA21 6211 6021 must-fix closed '**Count each page once.**' '{"finding.fix_unit":"KL21","finding.fix_answer":"Fixed as you suggested."}'),
+  $(lfind LT2 LA21 6212 6021 declined closed '**The barrier now runs once per page, not once per count.**' '{"finding.fix_unit":"KL21","finding.reply":"the count query is paged, so the barrier has to run once per page."}')]"
+printf '%s' "$(prview 621 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_621.json"
+threads 621 "$(lreview 621 6021 CHANGES_REQUESTED '' 6211 6212)"
+commits 621 '[{"oid":"6e6e6e6eeeee","message":"fix: count each page once (KL21)\n\nReview comment 6211."}]'
+: > "$STUB_GH_LOG"
+out=$(STUB_REPLY_RC=1 run)
+has "$out" "could not post the owed reply for LT2" "the decline's post fails"
+eq "$(treply 621 T-621-6212)" "" "…so its thread holds no answer"
+L21=$(lanswer 621 6021)
+has "$L21" "**Worth a look**
+- **[The barrier now runs once per page, not once per count.](https://github.com/zook/gc-toolkit/pull/621#discussion_r6212)** Declined: the count query is paged, so the barrier has to run once per page.
+" "the living answer leaves the decline worth a look"
+hasnt "$L21" "Needs you" "…with nothing shown as needing the reviewer"
+hasnt "$L21" "Resolving the thread" "…and no request, since the thread holds nothing to accept"
+hasnt "$(cat "$STUB_GH_LOG")" "dismissals" "…and the review is not dismissed while the decline it owes is undelivered"
+echo "# …and the pass that posts the decline shows it as needing the reviewer"
+: > "$STUB_GH_LOG"
+out=$(run)
+has "$(treply 621 T-621-6212)" "❓ Declined: the count query is paged" "the decline is posted, awaiting the reviewer"
+L21=$(lanswer 621 6021)
+has "$L21" "### Your review: 2 points, 1 needs you, 1 answered
+" "the living answer counts it as needing them in the pass that posts it"
+has "$L21" "**Needs you**
+- **[The barrier now runs once per page, not once per count.](https://github.com/zook/gc-toolkit/pull/621#discussion_r6212)** Declined: the count query is paged, so the barrier has to run once per page.
+  Resolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback." \
+  "…under Needs you, asking them to resolve the thread"
+eq "$(grep -c 'message=Your review: 2 points, 1 needs you, 1 answered (https://github.com/zook/gc-toolkit/pull/621#issuecomment-[0-9]*)\. Dismissal is not approval' "$STUB_GH_LOG")" "1" \
+  "…and the review is dismissed with a note saying a point needs them"
+
+echo "# a reply under a decline is a point of its own, and once the city answers it the thread waits on the reviewer again"
+# The reply is ruled as new feedback and the decline stays closed. While the
+# reply waits on the city, the decline asks the reviewer nothing. The thread
+# still holds the decline, so the write-back answers the reply there and leaves
+# the thread open, and that answer puts the decline back under Needs you in the
+# pass that posts it.
+store "[$(anchor LA22 622 "$(lmeta rework:KL22 6222 6022)"), $(fixunit KL22 closed),
+  $(lfind LU1 LA22 6221 6022 must-fix closed '**Count each page once.**' '{"finding.fix_unit":"KL22","finding.fix_answer":"Fixed as you suggested."}'),
+  $(lfind LU2 LA22 6222 6022 declined closed '**The barrier now runs once per page, not once per count.**' '{"finding.fix_unit":"KL22","finding.reply":"the count query is paged, so the barrier has to run once per page."}')]"
+printf '%s' "$(prview 622 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_622.json"
+threads 622 "$(lreview 622 6022 CHANGES_REQUESTED '' 6221 6222)"
+commits 622 '[{"oid":"6f6f6f6fffff","message":"fix: count each page once (KL22)\n\nReview comment 6221."}]'
+out=$(run)
+has "$(lanswer 622 6022)" "**Needs you**" "the decline needs the reviewer once its answer is in the thread"
+rdismissed 622 6022
+jq -c '.reviews += [ { id: "RV-622b", databaseId: 6023, state: "COMMENTED", body: "", author: { login: "johnzook" },
+                       url: "https://github.com/zook/gc-toolkit/pull/622#pullrequestreview-6023", reactionGroups: [] } ]
+  | .threads |= map(if .id == "T-622-6222" then .comments.nodes += [ { id: "NC-622-6223", databaseId: 6223,
+      author: { login: "johnzook" }, body: "Paging is fine, but say why in a comment.",
+      pullRequestReview: { databaseId: 6023 }, reactionGroups: [] } ] else . end)' \
+  "$GH_DIR/threads_622.json" > "$TMP/t622.json" && mv "$TMP/t622.json" "$GH_DIR/threads_622.json"
+bmut LA22 '.metadata.pr_comment_watermark = "6223"'
+jq -c --argjson b "$(lfind LU3 LA22 6223 6023 unvalidated open 'Paging is fine, but say why in a comment.' '{"finding.fix_unit":"KL22"}')" '. + [ $b ]' \
+  "$STUB_STORE" > "$TMP/s622.json" && mv "$TMP/s622.json" "$STUB_STORE"
+: > "$STUB_GH_LOG"
+out=$(run)
+L22=$(lanswer 622 6022)
+has "$L22" "**Worth a look**
+- **[The barrier now runs once per page, not once per count.](https://github.com/zook/gc-toolkit/pull/622#discussion_r6222)** Declined: the count query is paged, so the barrier has to run once per page.
+" "a reply of the reviewer after the decline puts the decline under Worth a look"
+hasnt "$L22" "Resolving the thread" "…asking them nothing while their reply waits on the city"
+hasnt "$(cat "$STUB_GH_LOG")" "REPLY T-622-6222" "…and nothing is posted into the thread before the reply is answered"
+eq "$(meta LU2 finding.disposition)|$(bstatus LU2)" "declined|closed" "…while the decline stays closed and declined"
+echo "# …and once the reply's fix lands, its answer leaves the thread open and the decline needs the reviewer again"
+bmut LU3 '.status = "closed" | .metadata["finding.disposition"] = "must-fix" | .metadata["finding.fix_answer"] = "Fixed as you suggested."'
+commits 622 '[{"oid":"6f6f6f6fffff","message":"fix: count each page once (KL22)\n\nReview comment 6221."},
+  {"oid":"6a6a6a6aaaaa","message":"fix: say why the barrier runs once per page (KL22)\n\nReview comment 6223."}]'
+: > "$STUB_GH_LOG"
+out=$(run)
+eq "$(grep -c '^REPLY T-622-6222$' "$STUB_GH_LOG")" "1" "the reply's fix is answered in the thread"
+has "$(treply 622 T-622-6222)" "Fixed in 6a6a6a6a (KL22)." "…naming the commit that made it"
+eq "$(tresolved 622 T-622-6222)" "false" "…and the thread, still holding the decline, is left open for the reviewer"
+L22=$(lanswer 622 6022)
+has "$L22" "### Your review: 2 points, 1 needs you, 1 answered
+" "the decline counts as needing the reviewer again, in the pass that answers the reply"
+has "$L22" "**Needs you**
+- **[The barrier now runs once per page, not once per count.](https://github.com/zook/gc-toolkit/pull/622#discussion_r6222)** Declined: the count query is paged, so the barrier has to run once per page.
+  Resolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback." \
+  "…under Needs you, asking them to resolve the thread the city left open"
 
 echo "# a dismissal whose edit of the living answer is refused still reads as re-requested on the next pass"
 store "[$(anchor LA11 610 "$(lmeta rework:KL11 7101 6011)"), $(fixunit KL11 closed),

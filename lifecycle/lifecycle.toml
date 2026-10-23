@@ -953,8 +953,10 @@ keys = [
   # finding.fix_flag — `1` when the fix unit flags the point for the reviewer's
   #   look (`finding.sh answer --flag`): it chose among options they left open,
   #   departed from their suggestion, or changed code the ruling declined. A
-  #   flagged point sits under Worth a look. Absent means unflagged, and an
-  #   answer given without --flag removes it.
+  #   flagged point sits under Worth a look unless it needs the reviewer: a
+  #   needs-you finding whose visit is open, or a decline or a deferral whose
+  #   thread waits on them, sits under Needs you. Absent means unflagged, and
+  #   an answer given without --flag removes it.
   #   A later batch's child taking the finding over (`finding.sh upsert
   #   --fix-unit`) clears finding.fix_answer and finding.fix_flag in the write
   #   that records it, so neither outlives the fix unit that wrote it.
