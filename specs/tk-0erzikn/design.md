@@ -1,6 +1,6 @@
 ---
 name: A PR is one reviewable unit, built on Gas City's convoy — the design
-description: The design for the operator's PR model, rebuilt on Gas City's own convoy model by the operator's ruling of 2026-10-19 and measured by its four tests. A convoy tracks its members the way Gas City does, each member carries its convoy's branch as its own target and lands there with no PR, work landing on main always goes through a PR, and a convoy's work reaches main as one PR. It settles the default, membership and a member's branch, when the convoy's branch is cut, where each review runs, how the convoy lands and rework returns, the nouns that have diverged from Gas City's, which living files change, and the implementation cut. Read it to review the model before it is codified, or to build one of its units. Its inputs are brief.md and findings.md beside it.
+description: The design for the operator's PR model, rebuilt on Gas City's own convoy model by the operator's ruling of 2026-10-19 and measured by its four tests. A convoy tracks its members the way Gas City does, each member carries its convoy's branch as its own target and lands there with no PR, work landing on main or on any branch the pack does not cut for its own work goes through a PR, and a convoy's work reaches main as one PR. It settles the default, membership and a member's branch, when the convoy's branch is cut, where each review runs, how the convoy lands and rework returns, the nouns that have diverged from Gas City's, which living files change, and the implementation cut. Read it to review the model before it is codified, or to build one of its units. Its inputs are brief.md and findings.md beside it.
 ---
 
 # A PR is one reviewable unit, built on Gas City's convoy
@@ -24,19 +24,26 @@ review a stage on its own.
    that sling and the refinery already read first. This is the design's one
    platform gap, recorded in section 1 with its date and the trigger that
    retires the write.
-3. **The refinery's default becomes Gas Town's, with one invariant.** A bead
-   that names no merge strategy lands `direct`, as Gas Town's refinery lands it.
-   A `direct` landing on the rig's default branch goes through a PR instead,
-   even where that branch is unprotected, so every change to main goes through
-   a PR. Two lines change. A member then lands on its convoy's branch with no
-   PR, while a lone bead's work and a convoy's own landing still reach main
-   through a PR.
+3. **The refinery's default becomes Gas Town's, and every branch but a
+   convoy's keeps its PR.** A bead that names no merge strategy lands `direct`,
+   as Gas Town's refinery lands it. A `direct` landing goes through a PR
+   instead unless it lands on a convoy's branch or on another PR's head, even
+   where the branch it lands on is unprotected. So a member lands on its
+   convoy's branch with no PR, while a lone bead's work, a convoy's own landing
+   and work aimed at any other branch go through a PR. The decision is the
+   default's value and one rule in the refinery's resolve block, the PR rule.
+   The rule takes the place of the block's fold-in flip, and the rejection
+   arm's branch decision goes, since without its delete it has nothing left to
+   decide, so the refinery formula ends up shorter. Section 2 lists all that
+   unit A changes and measures it against the operator's "about 1-2 lines"
+   bar.
 4. **A stage is a member slung `--merge mr`.** It opens its own PR into the
    convoy's branch, for the operator to review on its own.
 5. **Merge strategies mean what Gas City says they mean.** The refinery reads
    only the bead's own `merge_strategy`, and nothing reads a convoy's
-   `convoy.merge`. The rule for main in decision 3 is the one exception this
-   design adds. `local` stays work left on its branch for its consumer,
+   `convoy.merge`. The PR rule in decision 3 is the one exception this design
+   adds, and the fold-in flip, which turns an `mr` aimed at another PR's head
+   into `direct`, goes. `local` stays work left on its branch for its consumer,
    whatever its target. Nothing turns it into another strategy, nothing turns
    another strategy into it, and the refinery refuses it as unsupported, as it
    does today.
@@ -61,9 +68,9 @@ What it costs:
 
 What it rules out: reading `convoy.merge` at the refinery and mapping `local`
 onto `mr`, a converter the four tests ban; a workspace-setup step that discards
-a run and pours it again, which is a recovery layer; resolving every
-`integration/*` target to `direct`, which keys on a branch name; and any change
-to Gas City.
+a run and pours it again, which is a recovery layer; reading the convoy that
+tracks a bead at the refinery, to tell a convoy's branch from any other, which
+is plumbing; and any change to Gas City.
 
 Unchanged: every PR still needs the operator's approval, and every PR still has
 exactly one owning bead (invariant I4), the issue or the convoy it came from.
@@ -267,17 +274,18 @@ its members' parent: tracking "changes no parent and blocks nothing". Making
 these readers treat a `tracks` edge as a parent would add semantics to a native
 relation, which the four tests rule out.
 
-## 2. The default: `direct`, and main through a PR
+## 2. The default: `direct`, and a PR for every branch but a convoy's
 
 ### Decision
 
-Two lines change in `formulas/mol-refinery-patrol.toml`:
+The decision is two changes to `formulas/mol-refinery-patrol.toml`:
 
 1. `vars.default_merge_strategy` becomes `direct`.
-2. The `merge-strategy-resolve` block, at both of its call sites, resolves a
-   bead that would land `direct` on the rig's default branch to `mr`, whether
-   the bead names `direct` or names no strategy. A bead with no `target` lands
-   on the default branch, so it resolves the same way.
+2. The `merge-strategy-resolve` block gains the PR rule: a bead that would land
+   `direct` resolves to `mr` unless its target is a convoy's branch,
+   `integration/*`, or another PR's head, `polecat/*`. It applies whether the
+   bead names `direct` or names no strategy. A bead with no `target` lands on
+   the default branch, so it resolves to `mr`.
 
 So:
 
@@ -285,51 +293,98 @@ So:
 - A lone bead's work, a graduated convoy, a rework of a PR into main and a
   supplement to such a PR all go to main, so each goes through a PR, as each
   does today.
+- A bead aimed at any other branch, such as a named or long-lived one, goes
+  through a PR, as it does today when it names no strategy. One that names
+  `direct` goes through a PR too, as one aimed at main does.
 - A member slung `--merge mr` is a stage and opens a PR into its convoy's
   branch.
+- A bead aimed at another PR's head that names no strategy lands on that head
+  and folds into its PR, as it does today.
 - A `local` bead stays `local` whatever its target, and the refinery refuses it
   as unsupported (below).
-- Any other target lands `direct` unless the bead names another strategy, as in
-  Gas Town.
-- The fold-in for `polecat/*` targets, and the rule that `existing_pr` forces
-  `mr`, stay as they are.
+- The rule that `existing_pr` forces `mr` stays as it is.
 
-One arm goes with the default. `rejection-branch-keep` stops deleting a direct
-bead's branch, because the rebuild that the same arm's repool starts resumes
-that branch. Without this, every member whose gate fails would stop at the
-missing-branch visit. A branch is still deleted when its work lands: by
-`delete_merged_branches` after a direct landing, and by the repository's
-delete-on-merge after a PR.
+### What unit A changes, measured against the operator's bar
+
+The operator asked for "about 1-2 lines, to change the default. Not a bunch of
+plumbing." The decision is the default's value and the PR rule. Everything else
+unit A changes follows from them, and none of it adds plumbing:
+
+- **The PR rule takes the place of the fold-in flip.** Today the resolve block
+  turns an `mr` bead aimed at another PR's head, with no PR of its own, into
+  `direct`, so its work folds onto that head instead of opening a nested PR
+  ([specs/tk-sw5bu](../tk-sw5bu/merge-strategy-fold-in.md)). The beads it
+  exists for come from a dispatch that names no strategy, and under the
+  `direct` default they land on the head with no flip. The pack's scripts that
+  stamp `mr` are `convoy-graduate.sh` and the feedback distiller, which aim at
+  main, and `rework-child.sh`, `pr-facts.sh` and `pre-open-rebase.sh`, which
+  give a child its anchor's target. A bead aimed at a PR's head lands there as
+  a fold and anchors no PR, so no child inherits that aim. So the flip goes,
+  and an `mr` aimed at a PR's head means a PR into it, as Gas City defines
+  `mr`. The flip's variables, `MS_FOLD_IN`, `MS_BRANCH` and `MS_HAS_OWN_PR`,
+  go with it, and the block reads only the strategy and the target.
+- **The rejection arm's branch decision goes.** On a branch-caused rejection,
+  `rejection-branch-keep` decides whether the bead's branch survives, and it
+  deletes the branch only for a `direct` bead that records no PR. Under the
+  `direct` default every member is such a bead, and the rebuild that the same
+  arm's repool starts resumes that branch, so a delete would stop every member
+  whose gate fails at workspace-setup's missing-branch visit. Without the
+  delete, every path through the decision keeps the branch, so the decision
+  goes whole: its copy of the resolve block, and `MS_FOLD_IN`, whose only
+  reader it is. merge-push's copy of the block is then the one reading of the
+  strategy. A branch is still deleted when its work lands, by
+  `delete_merged_branches` after a direct landing and by the repository's
+  delete-on-merge after a PR.
+- **Words and tests.** The `merge_strategy` entry in `lifecycle/lifecycle.toml`,
+  the resolve block's own comment, the `pr-stack.sh` comment, a line of
+  `docs/refinery-merge-cadence.md`, the proactive pool's doctrine (section 8),
+  and the tests in `mr-aware-rejection-failclosed.test.sh` (section 9) change to
+  match.
+
+So the formula gains a default's value and one rule, and loses the fold-in
+flip and the rejection arm's branch decision.
 
 ### Why
 
 - Gas City leaves an unset strategy to its consumer, and Gas Town's refinery
   reads it as `direct`. gc-toolkit's `mr` default is the reason a convoy's
   member opens a PR at all.
-- The one thing the `mr` default protects is the operator's invariant: a change
-  to main goes through a PR even where main is unprotected. The second line
-  keeps exactly that, as a rule about main rather than a default for every
-  branch. It applies to `direct` alone, because `direct` is the only strategy
-  that changes main without a PR: `mr` changes it through one, and `local`
-  lands nothing. Turning `local` into `mr` would open a PR for work that asked
-  for no merge and no request.
+- What the `mr` default protects is a branch that work would otherwise reach
+  with no review. The operator's invariant names main: a change to main goes
+  through a PR even where main is unprotected. A named or long-lived branch is
+  protected the same way today, by the same default. The PR rule keeps both, as
+  a rule about where work lands rather than a default for every branch. It
+  applies to `direct` alone, because `direct` is the only strategy that changes
+  a branch without a PR: `mr` changes it through one, and `local` lands
+  nothing. Turning `local` into `mr` would open a PR for work that asked for no
+  merge and no request.
+- The rule keys on the names of two branches. A convoy's branch and another
+  PR's head are the two places where work lands with no PR of its own and
+  reaches main later through one, the convoy's or the PR whose head it is. The
+  bead alone does not say whether its target is a convoy's branch, and reading
+  the convoy that tracks it would add a lookup to the resolve block, the
+  plumbing the operator's bar rules out. The pack names both branches itself:
+  `convoy-seed.sh` cuts every convoy's branch as `integration/<convoy-id>`, and
+  workspace-setup cuts every bead's branch as `polecat/<bead-id>`. Graduation,
+  the PR banner and the `base:` label already key on `integration/*`. A branch
+  of any other shape gets a PR, so a branch the pack did not name errs toward a
+  review, never away from one.
 - Reading the convoy instead, the first design's predicate over `convoy.merge`,
   reads a field Gas City writes for display and needed a converter for `local`.
-  Resolving every `integration/*` target to `direct` keys on a branch-name
-  convention instead of on the bead. The default needs neither.
-- Gas City's own flags keep working: `--merge mr` makes a stage, and
-  `--merge direct` stays a direct landing anywhere but main.
+  The PR rule needs neither.
+- Gas City's own flags keep working where work lands with no PR of its own:
+  `--merge mr` makes a stage, and `--merge direct` lands directly on a convoy's
+  branch or another PR's head.
 
 ### `local`
 
 `local` leaves the work on its branch with no merge and no request, so it lands
-nothing on main and the rule for main does not apply to it. The resolver passes
-it through unchanged, whether its target is the default branch, another branch
-or absent. gc-toolkit's refinery has no landing for `local`, so its
-`merge-push` step refuses it as unsupported, as it does today: it transitions
-nothing and escalates the bead for a person to choose a strategy. Gas Town's
-refinery stops on `local` and escalates it the same way. This design neither
-slings `local` nor maps it onto another strategy.
+nothing and the PR rule does not apply to it. The resolver passes it through
+unchanged, whatever its target. gc-toolkit's refinery has no landing for
+`local`, so its `merge-push` step refuses it as unsupported, as it does today:
+it transitions nothing and escalates the bead for a person to choose a
+strategy. Gas Town's refinery stops on `local` and escalates it the same way.
+This design neither slings `local` nor maps it onto another strategy.
 
 ## 3. When a convoy's branch is cut
 
@@ -416,9 +471,9 @@ The unit that changes it is in the last column (section 9).
 
 | File | Says today | Says under the model | Unit |
 |---|---|---|---|
-| `formulas/mol-refinery-patrol.toml`, `default_merge_strategy` and `merge-strategy-resolve` | the default is `mr` | the default is `direct`, a bead that would land `direct` on the default branch resolves to `mr`, and a `local` bead passes through unchanged | A |
-| `formulas/mol-refinery-patrol.toml`, `rejection-branch-keep` | deletes a direct bead's branch on a branch-caused rejection, and its comment says nothing PR-shaped means no PR will want the branch "only in direct mode" | keeps a rejected branch in every mode, because the repooled rebuild resumes it | A |
-| `lifecycle/lifecycle.toml`, `merge_strategy` | an absent key resolves to the formula default, `mr` | an absent key resolves to `direct`, and a bead that would land `direct` on the default branch resolves to `mr` | A |
+| `formulas/mol-refinery-patrol.toml`, `default_merge_strategy` and `merge-strategy-resolve` | the default is `mr`; an `mr` bead aimed at another PR's head with no PR of its own flips to `direct`, recorded in `MS_FOLD_IN`; and the block's comment calls it the one reading that the step keeping a branch and the step opening a PR share | the default is `direct`; the PR rule resolves a bead that would land `direct` to `mr` unless its target is `integration/*` or `polecat/*`; a `local` bead passes through unchanged; the flip and its variables go; and the comment names merge-push as the block's one reader | A |
+| `formulas/mol-refinery-patrol.toml`, `rejection-branch-keep` | decides from its own copy of the resolve block whether a bead's branch survives a branch-caused rejection: deletes it for a `direct` bead that records no PR, since nothing PR-shaped means no PR will want the branch "only in direct mode", and keeps it otherwise | goes whole, with its copy of the resolve block: a rejected branch is kept in every mode, because the repooled rebuild resumes it | A |
+| `lifecycle/lifecycle.toml`, `merge_strategy` | an absent key resolves to the formula default, `mr`, and a `polecat/` target with no PR of its own resolves from `mr` down to `direct` | an absent key resolves to `direct`, the PR rule resolves a bead that would land `direct` to `mr` unless its target is a convoy's branch or another PR's head, and the fold-in sentence goes | A |
 | `assets/scripts/pr-stack.sh` header comment, and `docs/refinery-merge-cadence.md` | a `merged_target` row "landed its own PR into it" | it landed on the branch, with or without a PR of its own | A |
 | `docs/design-convoy.md` | "The default PR unit is an owned convoy"; the design child is linked "parent-child to the convoy"; "each child's PR onto the integration branch"; in all-in-one, "Each child's PR still needs the operator's approval" | Each child is added to the convoy and carries its target. Design-gated: the design child is a stage, a PR into the convoy's branch, the implementation lands with no PR, and the convoy's PR is the second. All-in-one: one PR, the convoy's. | B |
 | `formulas/mol-design-convoy.toml`, arm-design and arm-implementation | links each child with a parent-child edge, reads that edge back, relies on it for the child's target, and slings with no merge flag | adds each child with `gc convoy add`, reads the convoy's `tracks` edge back, writes the convoy's target on the child, and slings the design child `--merge mr` when design-gated | B |
@@ -438,8 +493,8 @@ What stays as it is: `docs/component-model.md`, whose Convoy row already reads
 PR; the approval rule in `merge.sh`; I4 and its check,
 `doctor/check-one-anchor-per-pr`, since a member never owns a PR; the one-bead
 input convoy of `mol-polecat-work`; the workspace-setup guard; the parent
-readers that section 1 lists; the fold-in; the rule that `existing_pr` forces
-`mr`; `convoy-seed.sh`; and graduation.
+readers that section 1 lists; the rule that `existing_pr` forces `mr`;
+`convoy-seed.sh`; and graduation.
 
 ## 9. The implementation cut
 
@@ -452,7 +507,7 @@ main as the one PR the operator reviews.
 
 | Unit | What it changes | Its tests |
 |---|---|---|
-| A. The default | `default_merge_strategy`, `merge-strategy-resolve` at both call sites and `rejection-branch-keep` in `formulas/mol-refinery-patrol.toml`, the `merge_strategy` entry in `lifecycle/lifecycle.toml`, the `pr-stack.sh` comment, the line in `docs/refinery-merge-cadence.md`, and the formula's seed-audit page | `assets/scripts/mr-aware-rejection-failclosed.test.sh`: cases (6) and (20b), which pin `mr` as the default and for an `integration/*` target, change with the default; the delete cases (9), (13d) and (14) change to a kept branch; (18), a refused delete, goes with the delete. New cases pin a bead whose target is the default branch resolving to `mr` whether it names `direct` or no strategy, the same for a bead with no target, a `local` bead staying `local` both when its target is the default branch and when it has none, and an unstamped `integration/*` bead resolving to `direct`. |
+| A. The default | `default_merge_strategy` and `merge-strategy-resolve` in `formulas/mol-refinery-patrol.toml`, whose `rejection-branch-keep` arm goes; the `merge_strategy` entry in `lifecycle/lifecycle.toml`; the `pr-stack.sh` comment; the line in `docs/refinery-merge-cadence.md`; and the formula's seed-audit page | `assets/scripts/mr-aware-rejection-failclosed.test.sh`, changed as [unit A's tests](#unit-as-tests) list |
 | B. Stages | arm-design and arm-implementation in `formulas/mol-design-convoy.toml`, `docs/design-convoy.md`, the banner in `assets/scripts/pr-summary-region.sh`, the label text in `assets/scripts/pr-status-label.sh` and the live label, the base label section of `docs/state-machine.md`, the PR Checkpoint sentence of `docs/epics.md`, and the formula's seed-audit page | `assets/scripts/mol-design-convoy-arm.test.sh`, `assets/scripts/pr-open.test.sh` |
 | C. Membership and doctrine | the dispatch doctrine in `agents/mechanik/prompt.template.md`, the integration-branch paragraph of `template-fragments/polecat-doctrine.template.md`, the supplement section of `skills/prs/SKILL.md`, and the seed-audit pages of the mechanik, polecat and polecat-codex prompts | `assets/scripts/skill-needs.test.sh`, `assets/scripts/render-seed-audit.sh --check` |
 
@@ -474,3 +529,40 @@ convoy's branch.
 The units are filed from this table as it reads on main, once this design
 merges, so a change made in this design's review leaves no filed bead
 describing an older cut.
+
+### Unit A's tests
+
+`assets/scripts/mr-aware-rejection-failclosed.test.sh` pins the merge strategy
+and the rejection arm. Its harness fills in the formula's default as
+`${2:-mr}`, so that default moves to `direct` with the formula's. Each case
+below pins the path it names under the new default.
+
+- **A rejected `direct` bead keeps its branch.** In the branch-decision
+  section, (6), (9), (13d) and (14) move onto `target: integration/cv-1`, so
+  each is a bead that resolves `direct`: one that names no strategy, one that
+  names `direct`, one behind a repool that stopped short, and one under the
+  formula's default. Each keeps its branch. With no target, each would resolve
+  to `mr` by the PR rule and keep its branch for that reason, which pins
+  nothing about a `direct` bead. (19) keeps the branch of a bead aimed at
+  `polecat/tk-anchor` that names no strategy, now `direct` by the default rather
+  than by the flip. (20) and (21) keep theirs, as they do today. A check that
+  the handle-failures step deletes no branch pins the decision's removal.
+- **What goes with the arm's decision.** The cases that pin its reasons for
+  keeping or deleting a branch go with it: (7), (8), (10) to (13c), (13e), (15)
+  to (17b), the refused delete (18) to (18c), and (19b)'s check that a branch
+  was kept "for the fold reason".
+- **The resolve block.** Run on its own, the block resolves a bead aimed at
+  `integration/cv-1` to `direct` when it names no strategy (20b), and to `mr`
+  when it names `mr`, a stage. It resolves a bead aimed at `polecat/tk-anchor`
+  to `direct` when it names no strategy (19), and to `mr` when it names `mr`
+  and records no PR of its own (19b), since the flip is gone. `pr` resolves to
+  `mr` (8b). A bead aimed at `main`, at no target, or at `release/x` resolves
+  to `mr` whether it names `direct` or no strategy. A `local` bead stays
+  `local` aimed at `main`, at no target, and at `integration/cv-1`. A bead
+  aimed at `polecat/tk-anchor` with its own `existing_pr` still resolves to
+  `mr` (21b), through merge-push's `existing_pr` rule, which that case runs
+  after the block.
+- **One reading.** The resolve block has one call site left, merge-push's, so
+  the check that counts call sites expects one, and the check that two copies
+  are byte-identical goes. The check that no step reads `merge_strategy` outside
+  the block stays.
