@@ -1,9 +1,16 @@
 ---
 name: Close the asleep pool session beads that hold a slot with no runtime and no work — tk-kwhll1p
-description: Why a pool session killed out of band holds its pool slot forever, what the pack can see of it, and the pool-slot-reap order that closes such beads. The design record for the pool-slot-reap order.
+description: Why a pool session killed out of band held its pool slot forever, what the pack could see of it, and the pool-slot-reap order that closed such beads. The design record for the pool-slot-reap order, which tk-1tfzr71.7 retired.
 ---
 
 # Close the asleep pool session beads that hold a slot with no runtime and no work
+
+> **RETIRED (tk-1tfzr71.7).** The order, script and test this record designed
+> are deleted, because Gas City's controller now frees a killed pool seat
+> itself.
+> [specs/tk-1tfzr71.7/pool-slot-reap-rederived.md](../tk-1tfzr71.7/pool-slot-reap-rederived.md)
+> re-derives the gap against Gas City as it is now, and records what the
+> order's own record showed and the shapes it leaves to Gas City.
 
 Bead: `tk-kwhll1p`. Deliverable: `orders/pool-slot-reap.toml` +
 `assets/scripts/pool-slot-reap.sh` (+ its co-located test), the component-index
