@@ -96,9 +96,10 @@ WORK_MERGE_RESULT=$(printf '%s' "$WORK_BEAD_JSON" | jq -r '.[0].metadata.merge_r
 # A refusal sets WHY, and every refusal cancels this run. A finished bead and a
 # live duplicate set no GATE_KEY, because nobody has a decision to make. A
 # parked bead and a possible duplicate name the human gate a person must clear,
-# and AWAIT makes the work bead wait on that gate so clearing it re-slings the
-# work. An unreadable bead cannot be blocked, so it files a patrol finding
-# naming the bead (FINDING_KEY) instead of a gate.
+# and the gate blocks the work bead. For a possible duplicate, AWAIT has
+# await-ruling.sh read that wait back and arm the re-sling, so clearing the
+# gate re-slings the work. An unreadable bead cannot be blocked, so it files a
+# patrol finding naming the bead (FINDING_KEY) instead of a gate.
 WHY=""
 NOTE_LABEL="Duplicate dispatch refused (work finished; run cancelled with nothing asked)"
 CANCEL_LABEL="duplicate dispatch (work finished)"
@@ -401,9 +402,11 @@ gc mail inbox
 - What does "done" look like?
 - If rejected: what specifically needs fixing?
 
-If blocked or unclear, file a human gate. Your mail budget is zero, and
-`human-gate.sh` files one open gate per bead and situation key, which blocks
-the work bead until a person clears it:
+If blocked or unclear, mail the witness first, as your prompt's "Blocked work
+and human gates" section says: it answers what another agent can. When no
+agent can answer, because the decision is the operator's to make, file a human
+gate. `human-gate.sh` files one open gate per bead and situation key, which
+blocks the work bead until a person clears it:
 ```bash
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/human-gate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
 "${SCRIPTS:?human-gate.sh not found in the pack}/human-gate.sh" --subject "$WORK_BEAD_ID" --key polecat-unclear-requirements --message "Unclear requirements on $WORK_BEAD_ID. Question: <what you need clarified>. Tried: <where you already looked>."
