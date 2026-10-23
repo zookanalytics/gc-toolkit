@@ -108,24 +108,24 @@ Read on 2026-10-19 in Gas City's documentation and code, as installed (`gc`
 
 - **A convoy groups work and tracks it.** "A convoy is a container bead that
   groups related work so you track a batch as a unit"
-  (`docs/getting-started/how-gas-city-works.md`). Its membership is `tracks`
+  (its "How Gas City Works" page). Its membership is `tracks`
   edges from it to each member. "Tracking is pure grouping: it changes no parent
   and blocks nothing", and members "are not children of the convoy"
-  (`docs/tutorials/06-beads.md`). `gc convoy add` adds "a tracks dependency from
+  (its beads tutorial). `gc convoy add` adds "a tracks dependency from
   the convoy to the issue ... without changing the issue parent". Gas City still
   reads parent-child membership, which it calls legacy
-  (`internal/convoy/membership.go`).
+  (its `convoy` package).
 - **A convoy's target reaches only its children.** `gc convoy create --target`
   names the "target branch inherited by child work beads". Sling branches a
   bead from its own `target`, else from the `target` of a convoy it finds by
   walking the bead's parent chain, else from the rig's default branch
   (`SlingFormulaTargetBranch` and `BeadMetadataTarget`,
-  `internal/sling/sling.go`). A member that its convoy only tracks inherits
+  in its `sling` package). A member that its convoy only tracks inherits
   nothing.
 - **A merge strategy is the bead's own `merge_strategy`.** `direct` merges the
   work branch into its target, `mr` delivers it through a merge or pull request,
   and `local` leaves it on its branch with no merge and no request, so that the
-  consumer decides (`internal/beadmeta/keys.go`). An absent key is unset, and
+  consumer decides (its `beadmeta` package). An absent key is unset, and
   each consumer reads unset as its own default. `gc sling --merge` stamps the
   key, and so does a rig's `default_merge_strategy` in `city.toml`, which no rig
   in this city sets. A convoy's `convoy.merge` is written by
@@ -143,12 +143,12 @@ Read on 2026-10-19 in Gas City's documentation and code, as installed (`gc`
   convoy whose children are all closed by assigning the convoy's bead to itself
   with the integration branch as its `branch` and the default branch as its
   `target`, and lands it like any work bead
-  (`gastown/formulas/mol-refinery-patrol.toml`).
+  (Gas Town's `mol-refinery-patrol` formula).
 - **The build pack drains a convoy and publishes once.** `build-from-convoy`
   runs each member in its own worker session and worktree, in parallel, then
   reviews the whole result, repairs it, and can push and open one PR. Push and
   PR are off by default. It reads no merge strategy and uses no integration
-  branch (`gascity/README.md` and its formulas).
+  branch (the build pack's README and its formulas).
 
 ## What gc-toolkit does today
 
@@ -214,7 +214,7 @@ convoy.
 ### The gap, with its warrant
 
 - **Recorded:** 2026-10-19, against Gas City as installed (`gc` 1.4.3): the help
-  of `gc convoy add` and `gc convoy target`, `docs/tutorials/06-beads.md`, and
+  of `gc convoy add` and `gc convoy target`, Gas City's beads tutorial, and
   sling's target lookup.
 - **What Gas City cannot express:** a convoy's `target` for a bead the convoy
   tracks. Sling finds a convoy's target only through a bead's parent chain, and

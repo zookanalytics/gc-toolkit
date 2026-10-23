@@ -1,6 +1,6 @@
 ---
 name: Findings — why a convoy's work landed as one PR per bead
-description: An input to this bead's design (design.md beside it). The 2026-10-18 investigation of how gc-toolkit came to open one PR per bead, with dated evidence, as mechanik wrote it. Copied below this header, verbatim except that each reference to another repository names what it was instead (2026-10-19), and that the line on how the refinery keeps `integration/*` targets on `mr` is corrected (2026-10-23).
+description: An input to this bead's design (design.md beside it). The 2026-10-18 investigation of how gc-toolkit came to open one PR per bead, with dated evidence, as mechanik wrote it. Copied below this header, verbatim except that each reference to another repository, or to the city by name, names what it is instead (2026-10-19 and 2026-10-23), and that the line on how the refinery keeps `integration/*` targets on `mr` is corrected (2026-10-23).
 ---
 
 # Why a convoy's work lands as one PR per bead instead of one PR
@@ -48,7 +48,7 @@ No kept record has the operator asking for a PR per bead.
 | 05-07 | tk-w7mjt, tk-jkesf, 6888c4119 | Owned convoys on `integration/<id>`: "the refinery merges polecat work back to the integration branch", then squashes to main "only when a complete unit of work is ready". |
 | 05-19/20 | smoke-tests convoy (tk-yhh5mi, tk-3qis4y) | Children were fast-forward pushed onto the integration branch with no PR. The convoy never graduated. |
 | 05-20 | #49 (tk-8de4p0 stamped `merge_strategy=pr`) | The first child PR into an integration branch. |
-| 05-25 | tk-sma1xw, #68 | The refinery had pushed straight to another rig's main branch. The bead records "Operator's policy (2026-05-25): the entire loomington city defaults to `mr`". |
+| 05-25 | tk-sma1xw, #68 | The refinery had pushed straight to another rig's main branch. The bead records "Operator's policy (2026-05-25): the entire city defaults to `mr`". |
 | 06-05 | the city's config sets `default_merge_strategy = "mr"` | Every bead opens its own PR whatever its target, convoy children included. No record shows convoy branches were considered. |
 | 06-10 | #102 | A graduation PR carries to main the work its children had already merged through their own PRs. |
 | 06-28 | #163 (tk-6d0vb.1.1), 40ea2d7a0 | A doc writes down the operator's model: "Every PR is owned by a convoy bead… a convoy has one stable PR head… A child contributes to the branch however it needs… There is no one-bead-one-commit rule… No bead lands on `main` except a convoy." The polecat and refinery flow did not change. |
@@ -73,7 +73,7 @@ Merged child PRs into integration branches:
 
 1. **The machinery never treated the convoy as the PR unit.**
    - Each bead has had its own branch since 05-05.
-   - Each bead has had its own PR since the 06-05 town-wide `mr` default. That default was set to stop direct pushes to another rig's main branch, and nothing shows convoy branches were considered.
+   - Each bead has had its own PR since the 06-05 city-wide `mr` default. That default was set to stop direct pushes to another rig's main branch, and nothing shows convoy branches were considered.
 2. **The operator's model was written down but never built.**
    - #163 described the convoy owning one PR, but the flow never changed to match.
    - The rewrite (#465) then deleted that doc and made one PR per bead the formal model. Only the old heading survived.
@@ -103,9 +103,9 @@ work. It multiplies reviews only because the system's PR is a bead.
 None of these lets several sibling beads build one branch and open one PR at the end.
 
 **Other relevant facts:**
-- mol-polecat-work.toml:424-432 refuses an input convoy with more than one member. gascity core can hand a whole convoy to a formula as one input (internal/sling/sling_core.go:1975-1985).
+- mol-polecat-work.toml:424-432 refuses an input convoy with more than one member. Gas City's sling can hand a whole convoy to a formula as one input.
 - A child stamped `merge_strategy=direct` would probably be pushed onto the integration branch with no PR. This is inferred and undocumented; tk-sw5bu calls it a fast-forward "past the review gate".
-- In gascity core, a convoy is a container bead with a merge setting (`direct`, `mr` or `local`) and a target its children inherit (internal/convoy/convoy_fields.go:12-18). The merge queue is pack behaviour.
+- In Gas City, a convoy is a container bead with a merge setting (`direct`, `mr` or `local`) and a target its children inherit. The merge queue is pack behaviour.
 - GasTown's refinery merged children with no PRs, then merged the convoy's branch to main as one unit.
 
 ## Open design questions for the fix

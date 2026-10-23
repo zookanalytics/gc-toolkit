@@ -191,7 +191,8 @@ So the model is reachable today by hand. The fix makes it the default.
 - **This fix cannot use itself.** Until it lands, the machinery still opens one PR
   per bead, so the fix's own implementation goes out in as few PRs as possible.
 - **The spec names no other repository, no other rig's beads and no live bead
-  data.**
+  data.** It names each Gas City source for what it is: a page of its
+  documentation, a symbol in its code, or one of the packs it bundles.
 
 ## What the design settles
 
