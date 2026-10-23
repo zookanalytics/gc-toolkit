@@ -20,7 +20,10 @@
 # CLEAN records nothing; CONFLICT files or re-routes one child that brings the
 # branch current by MERGE — no branch shape is rebased or force-pushed — filed
 # with its work order (prepare_mode=merge) on the create, and counted as
-# dispatched only once that work order AND the route read back.
+# dispatched only once that work order AND the route read back. The child is
+# PR-finishing work (docs/steering.md): it is born carrying the PR-finishing
+# shift and no parent, and queue-priority.sh settle writes its priority before
+# its route, which is written with no priority in it.
 #
 # Same vetoes as pr-facts.sh: an operator merge_hold or rebase_hold on the
 # anchor, a rebase_hold on any bead naming the branch, and a live demand
@@ -397,7 +400,9 @@ while IFS= read -r row; do
     # still short of a FIX_SELECT key, since no later pass could find it while
     # its blocks edge held the anchor (rc 1, no id), and prints the id of one
     # short of any other key (rc 2), which the strand probe finds next pass.
-    FIX=$(bd_create --select "$FIX_SELECT" --child-of "$id" "$FIX_META" "$FIX_TITLE base moved, the branch no longer merges" -t task --deps "blocks:$id"); fix_rc=$?
+    # The create alone carries the PR-finishing shift: a stranded child keeps
+    # the shift it carries, since after its birth the shift is its own input.
+    FIX=$(bd_create --select "$FIX_SELECT" --child-of "$id" "$(pr_finishing_birth "$FIX_META")" "$FIX_TITLE base moved, the branch no longer merges" -t task --deps "blocks:$id"); fix_rc=$?
   fi
   if [ -z "$FIX" ]; then
     echo "$PROG: $id could not file the rework child for '$branch'; retry next pass" >&2
@@ -411,18 +416,25 @@ while IFS= read -r row; do
     echo "$PROG: WARN rework $FIX did not record its whole work order; left unrouted (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   fi
+  # The child is settled at its priority and then routed (bd-lib.sh's
+  # route_finishing). A child that does not settle is left unrouted.
+  if ! route_finishing "$FIX" "$FIX_POOL"; then
+    echo "$PROG: WARN rework $FIX did not settle at its priority; left unrouted (retry next pass)" >&2
+    skipped=$((skipped + 1)); continue
+  fi
   # `gc bd update` returns 0 without having written (the claim guard is one such
-  # path), so the exit code does not establish the route, and an unrouted child
+  # path), so the route's exit code does not establish it, and an unrouted child
   # reported as dispatched is a rework nothing can reach.
-  gc bd update "$FIX" --set-metadata gc.routed_to="$FIX_POOL" >/dev/null 2>&1 || true
-  rgot=$(gc bd show "$FIX" --json 2>/dev/null | scrub | jq -r '.[0].metadata["gc.routed_to"] // empty')
+  frow=$(gc bd show "$FIX" --json 2>/dev/null | scrub)
+  rgot=$(printf '%s' "$frow" | jq -r '.[0].metadata["gc.routed_to"] // empty' 2>/dev/null)
   if [ "$rgot" != "$FIX_POOL" ]; then
     echo "$PROG: WARN rework $FIX did not record gc.routed_to=$FIX_POOL; left unrouted (retry next pass)" >&2
     skipped=$((skipped + 1)); continue
   fi
+  FIX_PRIO=$(printf '%s' "$frow" | jq -r '.[0].priority // "?"' 2>/dev/null)
   gc session wake "$FIX_POOL" >/dev/null 2>&1 || true
   reworked=$((reworked + 1))
-  echo "$PROG: $id — '$branch' conflicts with '$target'; filed $prepare_mode-mode rework $FIX routed to $FIX_POOL"
+  echo "$PROG: $id — '$branch' conflicts with '$target'; filed $prepare_mode-mode rework $FIX routed to $FIX_POOL at P$FIX_PRIO"
 done <<ANCHORS_EOF
 $(printf '%s' "$ANCHORS" | jq -c '.[]' 2>/dev/null | pace_order "$CURSOR")
 ANCHORS_EOF
