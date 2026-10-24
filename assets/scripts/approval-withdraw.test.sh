@@ -26,7 +26,9 @@
 #   either shape first withdraws the approvals, then with the same reason
 #   supersedes its lane (a reviewer's batch) or every lane (a human batch); a
 #   withdrawal that fails supersedes nothing, and a supersede that fails fails
-#   the block; no other place in the formula runs the withdrawal, so a
+#   the block; a human batch whose pass records no reviewed_oid supersedes at
+#   the head of the anchor's branch on origin, and withdraws nothing when that
+#   head does not read; no other place in the formula runs the withdrawal, so a
 #   converged batch keeps its approval.
 set -uo pipefail
 
@@ -344,13 +346,26 @@ eq "$(approval_withdraw_rc=1 runblock human)" "1|approval-withdraw --pass VP1 --
 eq "$(review_outcome_rc=2 runblock human)" \
    "2|approval-withdraw --pass VP1 --reason the reason;review-outcome supersede-anchor --anchor AN1 --oid 0123abc --reason the reason;" \
    "a supersede that fails after the withdrawal fails the block"
+# A human pass that records no reviewed_oid supersedes at the head of the
+# anchor's branch on origin, which the block reads through git-lib.sh.
+cp "$HERE/git-lib.sh" "$STUBS/"
+printf '[{"id":"AN1","status":"open","assignee":"","metadata":{"branch":"polecat/an1"}}]\n' > "$STUB_STORE"
+printf 'polecat/an1\n' > "$TMP/an1-heads"
+AN1_HEAD=$(printf '%s' polecat/an1 | sha1sum | cut -d' ' -f1)
+export STUB_LS_REMOTE="$TMP/an1-heads"
+eq "$(reviewed_oid='' runblock human)" \
+   "0|approval-withdraw --pass VP1 --reason the reason;review-outcome supersede-anchor --anchor AN1 --oid $AN1_HEAD --reason the reason;" \
+   "a human batch whose pass records no reviewed_oid supersedes every lane at the head of the anchor's branch on origin"
+export STUB_LS_REMOTE_RC=1
 eq "$(reviewed_oid='' runblock human)" "1|" \
-   "a human batch whose pass records no reviewed_oid fails the block before the withdrawal, so no approval is dismissed under lanes the supersede could not move"
+   "…and when that head does not read, fails the block before the withdrawal, so no approval is dismissed under lanes the supersede could not move"
+unset STUB_LS_REMOTE STUB_LS_REMOTE_RC
 eq "$(reviewed_oid='' runblock correctness)" \
    "0|approval-withdraw --pass VP1 --reason the reason;review-outcome supersede-lane --anchor AN1 --lane correctness --reason the reason;" \
    "…while a reviewer's batch, whose supersede names no commit, still runs both"
 STEP=$(awk '/^id = "rule-convergence"$/ {f=1} f && /^\[\[steps\]\]$/ {exit} f' "$TOML")
 has "$STEP" '[ -x "$c/assets/scripts/approval-withdraw.sh" ]' "the step resolves its scripts only where the withdrawal is present"
+has "$STEP" '[ -r "$c/assets/scripts/git-lib.sh" ]' "…and git-lib.sh, which reads the head a pass with no reviewed_oid is superseded at"
 eq "$(grep -c 'approval-withdraw.sh" --pass' "$TOML")" "1" "the formula runs the withdrawal in one place"
 eq "$(grep -c 'approval-withdraw.sh" --pass' "$BLOCK")" "1" "…the not-converged block, so a converged batch keeps its approval"
 
