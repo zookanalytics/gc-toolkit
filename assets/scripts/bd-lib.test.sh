@@ -36,6 +36,15 @@ open_ids() { bd_gates_open_under_key "$1" | jq -r '[.[].id] | join(" ")'; }
 GATES_IN="[$(gate_row g-late k open 2026-10-22T00:00:02Z),$(gate_row g-b k open 2026-10-22T00:00:01Z),$(gate_row g-a k open 2026-10-22T00:00:01Z),$(gate_row g-shut k closed 2026-10-21T00:00:00Z),$(gate_row g-other other open 2026-10-21T00:00:00Z)]"
 eq "$(printf '%s' "$GATES_IN" | open_ids k)" "g-a g-b g-late" "bd_gates_open_under_key keeps the open gates under the key, by created_at, then id"
 eq "$(printf '%s' "$GATES_IN" | open_ids none)" "" "…and is an empty array when none is open under the key"
+# created_at is read as a time. As text, '.' sorts before 'Z', so a fraction
+# would sort ahead of the whole second it follows, and an offset would sort by
+# its local clock.
+GATES_IN="[$(gate_row g-whole k open 2026-10-22T00:00:01Z),$(gate_row g-frac k open 2026-10-22T00:00:00.900Z),$(gate_row g-zero k open 2026-10-22T00:00:00Z)]"
+eq "$(printf '%s' "$GATES_IN" | open_ids k)" "g-zero g-frac g-whole" "…a fractional second sorts after the whole second it follows"
+GATES_IN="[$(gate_row g-utc k open 2026-10-22T00:00:00Z),$(gate_row g-east k open 2026-10-22T01:59:59+02:00),$(gate_row g-west k open 2026-10-21T17:59:58-06:00)]"
+eq "$(printf '%s' "$GATES_IN" | open_ids k)" "g-west g-east g-utc" "…an offset is read as the instant it names"
+GATES_IN="[$(gate_row g-none k open ""),$(gate_row g-word k open yesterday),$(gate_row g-late k open 2026-10-22T00:00:02Z),$(gate_row g-early k open 2026-10-22T00:00:01Z)]"
+eq "$(printf '%s' "$GATES_IN" | open_ids k)" "g-early g-late g-none g-word" "…a created_at that is absent or not a time sorts after every one that is, then by id"
 for bad_in in '{"error":"not found"}' ''; do
   out=$(printf '%s' "$bad_in" | bd_gates_open_under_key k); rc=$?
   eq "$rc" 1 "…returns 1 on input that is not an array ('$bad_in')"

@@ -188,15 +188,35 @@ bd_human_gates() {
 
 # bd_gates_open_under_key <key> — the open gates under a situation key, read
 # from a bd_human_gates array on stdin and printed as one JSON array, first to
-# last by created_at, then id. The first is the gate that asks: human-gate.sh
-# keeps it and resolves its own gate when another comes first, and
-# await-ruling.sh makes the work bead wait on it, so every writer and reader of
-# one situation orders the gates here. Input that is not an array prints
-# nothing and returns 1.
+# last by when each was created, then id. The first is the gate that asks:
+# human-gate.sh keeps it and resolves its own gate when another comes first,
+# and await-ruling.sh makes the work bead wait on it, so every writer and
+# reader of one situation orders the gates here. created_at is read as a time,
+# its fractional seconds and its offset included, because as text a time with
+# a fraction sorts ahead of the whole second it follows, and one with an offset
+# sorts by its local clock. A gate whose created_at is absent or does not read
+# as an RFC 3339 time sorts after every gate whose does. Input that is not an
+# array prints nothing and returns 1.
 bd_gates_open_under_key() {
-  jq -ce --arg k "$1" 'if type == "array"
+  jq -ce --arg k "$1" '
+    def created_order:
+      ([ (.created_at // "") | tostring
+         | capture("^(?<d>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:?[0-9]{2})$") ]
+       | .[0]) as $m
+      | (if $m == null then null
+         else try (
+           (($m.d + "Z") | fromdateiso8601)
+           - (if $m.z == "Z" then 0
+              else ($m.z | capture("^(?<s>[+-])(?<h>[0-9]{2}):?(?<mi>[0-9]{2})$")) as $o
+                | (($o.h | tonumber) * 3600 + ($o.mi | tonumber) * 60)
+                | if $o.s == "-" then -. else . end
+              end)
+         ) catch null end) as $sec
+      | if $sec == null then [1, 0, 0]
+        else [0, $sec, (("0" + ($m.f // "")) | tonumber)] end;
+    if type == "array"
     then [ .[] | select((.await_id // "") == $k and (.status // "") != "closed") ]
-         | sort_by(.created_at // "", .id)
+         | sort_by(created_order, (.id // "" | tostring))
     else error("not an array") end' 2>/dev/null || return 1
 }
 
