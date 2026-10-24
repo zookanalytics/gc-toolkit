@@ -1181,6 +1181,8 @@ has "$CALLED" "gc.routed_to=human" "(RECLAIM) …and re-parks it on the board"
 RECLAIM_WRITE="$(printf '%s\n' "$CALLED" | grep -- '--if-assignee gc-toolkit__converse-dead')"
 has "$RECLAIM_WRITE" "--unset-metadata gc.session_id --unset-metadata gc.session_name" \
     "(RECLAIM-PINS) …dropping the gone sitting's session pins in the same write"
+has "$RECLAIM_WRITE" "gc.takeaway=Reclaimed from a gone sitting; re-parked for re-engagement." \
+    "(RECLAIM-HEADLINE) …under the headline the witness's release of such a visit writes too"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(RECLAIM) …then spawns a fresh sitting"
 eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-1" "(RECLAIM) …bound to the fresh sitting's runtime name"
 unset LIVE_SITTINGS

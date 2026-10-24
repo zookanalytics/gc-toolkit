@@ -15,9 +15,12 @@
 # candidate-pipeline, liveness-map-guard and liveness-lookup blocks extracted
 # verbatim from mol-witness-patrol.toml, the classification by the dead states
 # the step names, and the real orphan-dispose.sh for each orphan. It asserts:
-#   * both gone sittings' visits are released, with the route, continuation
-#     group and task_kind kept, and the board's engagedVisit rule then reads
-#     each as parked;
+#   * every gone sitting's visit is released, with the route, continuation
+#     group and task_kind kept and the gone-sitting headline written, and the
+#     board's engagedVisit rule then reads each as parked;
+#   * a visit whose binding carries a byte the listing's control-character
+#     strip removes is released all the same, so its dead claim is not skipped
+#     every cycle as a changed one;
 #   * a visit whose sitting is still starting, and one a live sitting holds,
 #     are left alone;
 #   * a human-gated work bead naming a dead session is never a candidate;
@@ -60,6 +63,7 @@ done
 # gc-bound       bound to a sitting whose failed create closed its row
 # gc-bound-open  bound to a sitting whose failed create is still an open row
 # gc-claimed     claimed by a sitting whose session has since closed
+# gc-del         bound to a gone sitting under a name that carries a DEL
 # gc-starting    bound to a sitting the reconciler has not started yet
 # gc-live        claimed by a live sitting
 # gc-parked      parked on the board, held by nobody
@@ -68,6 +72,8 @@ fixture() {
   store '[
     {"id":"gc-bound","status":"open","assignee":"s-lx-wisp-tjt3y","title":"visit: gc-ycww6 — a question",
      "metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-ycww6"}},
+    {"id":"gc-del","status":"open","assignee":"s-lx-wisp-de\u007fl","title":"visit: gc-7del — a question",
+     "metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-7del"}},
     {"id":"gc-bound-open","status":"open","assignee":"s-lx-wisp-12neh","title":"visit: gc-2ddu7 — a question",
      "metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-2ddu7"}},
     {"id":"gc-claimed","status":"in_progress","assignee":"gascity/gc-toolkit.gc-claimed","title":"visit: gc-3abc — a question",
@@ -97,30 +103,46 @@ cat > "$TMP/sessions.json" <<'JSON'
 JSON
 export STUB_SESSIONS="$TMP/sessions.json"
 
+# bd writes JSON with Go's encoder, which emits DEL raw where the stub's jq
+# escapes it. A gc in front of the harness's puts the raw byte back in what bd
+# reads print, so the listing's strip meets it the way it does in a city.
+DEL="$(printf '\177')"
+mkdir -p "$TMP/raw-del-bin"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'NEXT=%q\nDEL=%q\n' "$TMP/bin/gc" "$DEL"; cat; } > "$TMP/raw-del-bin/gc" <<'STUB'
+case "${1:-} ${2:-}" in
+  "bd list"|"bd show")
+    out=$("$NEXT" "$@"); rc=$?
+    printf '%s\n' "$out" | sed "s/\\\\u007f/$DEL/g"
+    exit "$rc" ;;
+esac
+exec "$NEXT" "$@"
+STUB
+chmod +x "$TMP/raw-del-bin/gc"
+export PATH="$TMP/raw-del-bin:$PATH"
+
 # patrol_pass [<jq>] — one recover-orphaned-beads pass over the stub store.
 # Prints one `<bead> <state> <result>` line per candidate, sorted: the state the
 # lookup resolved for its owner, and orphan-dispose.sh's result for an orphan,
 # or `owned` for a bead whose owner is not dead. The dead states are the ones
 # the step's classification names; the lookup's own `dead` definition names the
-# same set except `absent`. Each orphan is handed over with the owner and the
-# listed claim from its row, as part 5's call hands them. A <jq> is another
-# writer's change, landed on the store after the listing and before the first
-# disposal.
+# same set except `absent`. Each orphan is handed over with the claim from its
+# row, as part 5's call hands it. A <jq> is another writer's change, landed on
+# the store after the listing and before the first disposal.
 patrol_pass() {
-  local map rows bead owner listed state result
+  local map rows bead owner claim state result
   map=$(bash -c 'source "$0"; [ -z "$MAP_TRIP" ] || exit 1; printf "%s" "$LIVENESS_MAP"' \
     "$TMP/liveness-map-guard.sh" 2>/dev/null) || { echo "MAP_TRIP"; return; }
   rows=$(bash "$TMP/candidate-pipeline.sh" 2>/dev/null)
   if [ -n "${1:-}" ]; then
     jq -c "$1" "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
   fi
-  while read -r bead owner listed; do
+  while read -r bead owner claim; do
     [ -n "$bead" ] || continue
     state=$(LIVENESS_MAP="$map" OWNER="$owner" bash -c 'source "$0"; printf "%s" "$STATE"' \
       "$TMP/liveness-lookup.sh" 2>/dev/null)
     case "$state" in
       archived|closed|failed-create|absent)
-        result=$("$SCRIPT" "$bead" --owner "$owner" --listed "$listed" --apply --json 2>/dev/null \
+        result=$("$SCRIPT" "$bead" --claim "$claim" --apply --json 2>/dev/null \
           | jq -r '.result // "unread"') ;;
       *) result=owned ;;
     esac
@@ -128,10 +150,13 @@ patrol_pass() {
   done <<< "$rows"
 }
 
-# The call part 5 makes is the one patrol_pass makes: the owner and the listed
-# claim from the row.
-has "$(grep -F 'DISPOSE_JSON=$("$OD" <bead>' "$TOML")" '--owner "$OWNER" --listed "$LISTED" --apply --json' \
-  "part 5's disposal call hands over the owner and the listed claim"
+# The call part 5 makes is the one patrol_pass makes: the claim from the row.
+has "$(grep -F 'DISPOSE_JSON=$("$OD" <bead>' "$TOML")" '--claim "$CLAIM" --apply --json' \
+  "part 5's disposal call hands over the claim from the row"
+
+# The headline a released visit parks under, read from the disposal's fence.
+GONE_TAKEAWAY="$(awk '/^# >>> gone-sitting-takeaway$/ {f = 1; next} /^# <<< gone-sitting-takeaway$/ {f = 0} f' "$SCRIPT" \
+  | sed -n 's/^GONE_SITTING_TAKEAWAY="\(.*\)"$/\1/p')"
 
 # board_reads <bead> — what the helm board's engagedVisit rule
 # (services/helm/internal/board/derive.go) makes of a visit: engaged when it is
@@ -146,25 +171,29 @@ board_reads() {
 }
 
 fixture
-for id in gc-bound gc-bound-open gc-claimed; do
+for id in gc-bound gc-bound-open gc-claimed gc-del; do
   eq "$(board_reads "$id")" "engaged" "(premise) before the patrol the board reads $id as engaged"
 done
+eq "$(bash "$TMP/candidate-pipeline.sh" 2>/dev/null | awk '$1 == "gc-del" {print $2 " " $3}')" \
+   "s-lx-wisp-del s-lx-wisp-del:open:s-lx-wisp-del" \
+   "(premise) the listing reads gc-del's binding without the DEL the store holds"
 
 echo "--- one patrol cycle ---"
 eq "$(patrol_pass | sort | paste -sd ',' -)" \
-   "gc-bound absent disposed,gc-bound-open failed-create disposed,gc-claimed absent disposed,gc-live active owned,gc-starting start-pending owned" \
-   "the cycle releases the three visits whose sitting is gone, and leaves the starting and the live sitting's visits"
+   "gc-bound absent disposed,gc-bound-open failed-create disposed,gc-claimed absent disposed,gc-del absent disposed,gc-live active owned,gc-starting start-pending owned" \
+   "the cycle releases the four visits whose sitting is gone, and leaves the starting and the live sitting's visits"
 hasnt "$(cat "$STUB_GC_LOG")" "update tk-gated" "the human-gated work bead is never written"
 hasnt "$(cat "$STUB_GC_LOG")" "update gc-parked" "the parked visit is never written"
 hasnt "$(cat "$STUB_GC_LOG")" "update gc-live" "the live sitting's visit is never written"
 hasnt "$(cat "$STUB_GC_LOG")" "update gc-starting" "the starting sitting's visit is never written"
 
-for id in gc-bound gc-bound-open gc-claimed; do
+for id in gc-bound gc-bound-open gc-claimed gc-del; do
   eq "$(board_reads "$id")" "parked" "after one cycle the board reads $id as parked"
   eq "$(bassignee "$id")" "" "$id names no assignee"
   eq "$(meta "$id" gc.session_id)$(meta "$id" gc.session_name)" "<absent><absent>" "$id carries no session pin"
   eq "$(meta "$id" gc.routed_to)" "human" "$id keeps its route to the board"
   eq "$(meta "$id" task_kind)" "visit" "$id is still a visit"
+  eq "$(meta "$id" gc.takeaway)" "$GONE_TAKEAWAY" "$id parks under the gone-sitting headline"
 done
 eq "$(meta gc-bound gc.continuation_group)" "gc-ycww6" "the bound visit keeps its continuation group"
 eq "$(meta gc-claimed gc.continuation_group)" "gc-3abc" "the claimed visit keeps its continuation group"
@@ -185,10 +214,11 @@ echo "--- a visit engage re-binds after the listing ---"
 # alone and reports a skip, which the patrol records as no recovery.
 fixture
 eq "$(patrol_pass 'map(if .id == "gc-bound" then .assignee = "s-lx-wisp-fresh" else . end)' | sort | paste -sd ',' -)" \
-   "gc-bound absent skipped,gc-bound-open failed-create disposed,gc-claimed absent disposed,gc-live active owned,gc-starting start-pending owned" \
+   "gc-bound absent skipped,gc-bound-open failed-create disposed,gc-claimed absent disposed,gc-del absent disposed,gc-live active owned,gc-starting start-pending owned" \
    "the visit re-bound after the listing is skipped, and the cycle releases the others"
 eq "$(bassignee gc-bound)" "s-lx-wisp-fresh" "the fresh binding survives the cycle"
 eq "$(grep -c -E '^bd update gc-bound ' "$STUB_GC_LOG")" "0" "the re-bound visit takes no write"
+eq "$(meta gc-bound gc.takeaway)" "<absent>" "and no headline is written over it"
 
 echo
 echo "witness-visit-recovery: $PASS passed, $FAIL failed"

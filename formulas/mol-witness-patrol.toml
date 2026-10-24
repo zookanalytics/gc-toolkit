@@ -274,19 +274,19 @@ jq -c '[ .[]
 # A file that is not a JSON array is a failed listing, not a rig with no
 # candidates.
 if jq -e 'type == "array"' "$CANDIDATES" >/dev/null 2>&1; then
-  jq -r '.[] | .id + " " + .owner + " " + (.status // "") + ":" + (.assignee // "")' "$CANDIDATES"
+  jq -r '.[] | .id + " " + .owner + " " + .owner + ":" + (.status // "") + ":" + (.assignee // "")' "$CANDIDATES"
 else
   echo "witness: the candidate listing did not parse; no orphan recovery this cycle" >&2
 fi
 rm -f "$CANDIDATES"
 # <<< candidate-pipeline
 ```
-The block prints one row per candidate, `<bead> <owner> <listed>`. The bead id
+The block prints one row per candidate, `<bead> <owner> <claim>`. The bead id
 is the `<bead>` the parts below act on, and the owner is the loop's `OWNER`.
-`<listed>` is the loop's `LISTED`: the status and assignee the listing read,
-joined by a colon, with nothing after the colon for a bead that has no
-assignee. Part 5 hands `OWNER` and `LISTED` to the disposal as the claim this
-cycle judged. No rows means no candidates. A `did not parse` line means the listing itself failed,
+`<claim>` is the loop's `CLAIM`: the owner, status and assignee the listing
+read, joined by colons, with nothing after the last colon for a bead that has
+no assignee. Part 5 hands `CLAIM` to the disposal as the claim this cycle
+judged. No rows means no candidates. A `did not parse` line means the listing itself failed,
 which is not a rig with nothing to recover: no candidate set exists this cycle,
 and orphan recovery stays blind until the listing reads again. Skip the rest of
 this step and file it
@@ -733,10 +733,10 @@ still runs either way: a bead whose store cannot be named is exactly the bead a
 person needs to see, and leaving it owned hides it.
 
 Then hand the bead to `orphan-dispose.sh`, which picks the disposal from what
-the bead IS. Hand it the claim this cycle judged as well, the `OWNER` and
-`LISTED` from the bead's row. The disposal releases only that claim. A bead
-that names another owner, status or assignee when the disposal reads it, or
-that another writer takes or settles while the release writes, is skipped as
+the bead IS. Hand it the claim this cycle judged as well, the `CLAIM` from the
+bead's row, as the row printed it. The disposal releases only that claim. A
+bead that names another owner, status or assignee when the disposal reads it,
+or that another writer takes or settles before the release lands, is skipped as
 that writer left it, and the next cycle judges it again:
 
 ```bash
@@ -753,7 +753,7 @@ else
   # listing). `|| DISPOSE_RC=$?` keeps a non-zero exit (3 partial, 1 failed) from
   # killing the step under set -e; the JSON is printed before either exit, so
   # DISPOSE_RESULT still reads.
-  DISPOSE_JSON=$("$OD" <bead> --owner "$OWNER" --listed "$LISTED" --apply --json) || DISPOSE_RC=$?
+  DISPOSE_JSON=$("$OD" <bead> --claim "$CLAIM" --apply --json) || DISPOSE_RC=$?
   printf '%s\n' "$DISPOSE_JSON"
   DISPOSE_RESULT=$(printf '%s' "$DISPOSE_JSON" | jq -r '.result // ""')
 fi
@@ -765,7 +765,8 @@ reached a downstream court. A **visit** gives up its assignee and the session
 pins its sitting's claim stamped, `gc.session_id` and `gc.session_name`, and
 keeps its route, continuation group and task_kind, because they are its
 identity. It then names no owner, so the next cycle does not find it again,
-and the board reads it as parked. A
+and the board reads it as parked, under the headline `gc-helm engage` writes
+when it reclaims a visit from a gone sitting. A
 **review** is the source bead of its own mol-review molecule and carries no
 worktree of its own, so it disposes by the source contract below — recognised by
 task_kind before the source arm the way a visit is, and reopened to its review

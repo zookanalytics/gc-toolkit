@@ -380,6 +380,13 @@ session_identities() {
     printf '%s\n%s\n%s\n' "${GC_SESSION_NAME:-}" "${GC_SESSION_ID:-}" "${GC_ALIAS:-}" | grep -v '^$' || true
 }
 
+# The headline a visit re-parks under when engage reclaims it from a gone
+# sitting. The witness's orphan recovery (orphan-dispose.sh) writes the same one
+# when it releases such a visit, so the board reads the two the same.
+# >>> gone-sitting-takeaway
+GONE_SITTING_TAKEAWAY="Reclaimed from a gone sitting; re-parked for re-engagement."
+# <<< gone-sitting-takeaway
+
 # sitting_is_gone <session-name> — 0 (true) iff the named sitting is PROVABLY
 # absent from `gc session list`: no session there carries the name, under any of
 # the spellings a bind writes (the runtime session_name, its short name, the id,
@@ -4095,7 +4102,7 @@ cmd_engage() {
                     # one.
                     gc bd update "$VISIT" --if-assignee "$visit_owner" --if-status open --assignee "" \
                         --set-metadata gc.routed_to=human \
-                        --set-metadata "gc.takeaway=Reclaimed from a gone sitting; re-parked for re-engagement." \
+                        --set-metadata "gc.takeaway=$GONE_SITTING_TAKEAWAY" \
                         --set-metadata "gc.takeaway_at=$(iso_now)" \
                         --set-metadata gc.takeaway_by=host \
                         --set-metadata gc.takeaway_settled= \

@@ -690,12 +690,16 @@ claim routed to `human`
 ([gascity/human-engagement.md](gascity/human-engagement.md#no-release-frees-a-claim-routed-to-human)).
 The witness's orphan recovery frees it instead. It resolves the visit's holder
 against `gc session list`, and once that sitting is gone it clears the visit's
-assignee and session pins and keeps its route, continuation group and
-task_kind (`assets/scripts/orphan-dispose.sh`). It releases only the claim it
-found gone. A visit that `gc-helm engage` binds to a fresh sitting after the
+assignee and session pins, keeps its route, continuation group and task_kind,
+and writes the headline `gc-helm engage` writes when it reclaims a visit from a
+gone sitting (`assets/scripts/orphan-dispose.sh`). It releases only the claim
+it found gone. A visit that `gc-helm engage` binds to a fresh sitting after the
 patrol listed it, or that is settled meanwhile, keeps what that writer left.
-Within one patrol the board reads the visit as parked, and the operator can
-engage it again.
+engage's reclaim and its bind drop every session pin the visit still carries.
+The patrol resolves a visit's holder from `gc.session_id` ahead of its
+assignee, so a gone sitting's pin beside a fresh binding would read the fresh
+sitting's visit as orphaned. Within one patrol the board reads the visit as
+parked, and the operator can engage it again.
 
 Two endings the idle setting does not own:
 
