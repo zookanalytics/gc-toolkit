@@ -175,8 +175,9 @@ description, which is how the detail of a park is corrected.
 
 `--waiting-on` parks the bead behind a bead that already exists and files no
 gate. Naming another park's gate parks one more bead for the same reason.
-Naming a task parks the bead until the task closes. A park takes one form or the
-other, never both.
+Naming a task parks the bead until the task closes, and naming a human gate
+parks it until a person clears the gate. A park takes one form or the other,
+never both.
 
 Either form reads the edge back off the bead before it reports success, and then
 prints what the park holds and what it leaves running.
@@ -185,10 +186,6 @@ prints what the park holds and what it leaves running.
 
 - a bead in flight, because its own edge would hold its merge and its close
   (next section);
-- a demand gate as the bead to wait on. A demand gate is a wait on the
-  operator's decision, and the operator ruled that such a wait does not hold
-  armed work. The refusal names the text form, whose gate can name the decision
-  the park waits for;
 - a closed bead to park or to wait on, a bead in another store to wait on, and
   one of the bead's own parts to wait on, since each edge would hold nothing or
   bd refuses it.

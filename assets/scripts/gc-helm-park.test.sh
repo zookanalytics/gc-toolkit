@@ -21,9 +21,9 @@
 #   - refused with nothing written: text over the 140-character cap, both forms
 #     at once, neither form, --body beside --waiting-on, a bead in flight
 #     (claimed, in_progress or hooked; branch, merge_result, rejection_reason;
-#     or a workflow past load-context), a closed bead, and a demand gate,
-#     closed bead, another store's bead, the bead itself or one of its own parts
-#     as the bead to wait on. The demand gate's refusal names the text form.
+#     or a workflow past load-context), a closed bead, and, as the bead to wait
+#     on, a closed bead, another store's bead, the bead itself or one of its own
+#     parts. A demand gate is a bead to wait on like any other.
 #   - a workflow still at load-context is not in flight, so its bead parks. A
 #     claimed bead is in flight even when a workflow poured for it still waits
 #     at load-context: a pour never claims its bead, so the claim is a run.
@@ -555,13 +555,15 @@ run_park tk-lc "Parked for a reason"
 eq "$RC" "0" "(FLIGHT) a bead whose workflow waits at load-context is not in flight, and parks"
 [ -n "$(edges_of tk-lc)" ] && ok "(FLIGHT) its edge landed" || bad "(FLIGHT) no edge on tk-lc"
 
-# --- (DEMAND) a demand gate is refused as the bead to wait on ------------------
+# --- (DEMAND) a demand gate is a bead to wait on like any other ----------------
+# A demand gate holds like any blocker, armed members included, since deferred
+# dispatch reads every open blocker on a bead's ancestors (hold-lib.sh).
 reset_store
 run_park tk-solo --waiting-on tk-dg
-eq "$RC" "2" "(DEMAND) a demand gate named by --waiting-on is refused (exit 2)"
-has "$ERR" "is a demand gate (gc.demand_for=tk-solo)" "(DEMAND) the refusal names the demand gate"
-has "$ERR" "park tk-solo \"<why it is parked and what releases it>\"" "(DEMAND) the refusal names the text form"
-nothing_written "(DEMAND)"
+eq "$RC" "0" "(DEMAND) parking behind a demand gate exits 0"
+eq "$(edges_of tk-solo)" "tk-dg" "(DEMAND) the bead's blocks edge lands on the demand gate"
+eq "$(gate_count)" "2" "(DEMAND) no gate is filed"
+has "$OUT" "park tk-dg holds tk-solo: Rule on the loose task's scope" "(DEMAND) prints park <wait> holds <bead> with the gate's title"
 
 # --- (WAITS) a bead to wait on that would hold nothing ------------------------
 reset_store
