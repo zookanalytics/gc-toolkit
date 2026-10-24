@@ -527,15 +527,29 @@ reset "$(task tk-w),$(session lx-abc12)"; : > "$STUB_PF_LOG"; : > "$STUB_BS_LOG"
 "$HSUT/escalate.sh" --subject lx-abc12 --key witness-refinery-queue-unreadable --message m >/dev/null 2>"$TMP/err"; rc=$?
 eq "$rc" 0 "a subject that reads as a session bead files a finding"
 eq "$(cat "$STUB_BS_LOG")" "" "  ... and bead-store.sh is not asked, because the session's row answered"
-eq "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [witness-refinery-queue-unreadable] [--title] [m] [--message] [m]" "  ... under its key"
+eq "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [witness-refinery-queue-unreadable] [--title] [m] [--message] [m] [--about] [lx-abc12] [--distinct]" "  ... under its key, about the session"
 eq "$(creates)" 0 "  ... and no gate blocks the session bead"
 has "$(cat "$TMP/err")" "'lx-abc12' names a session" "  ... and the translation says why on stderr"
 reset "$(task tk-w),$(session lx-abc12)"; : > "$STUB_PF_LOG"
 STUB_SHOW_RAW="$(printf 'gc bd: answering from the city store\n[{"id":"lx-abc12","title":"a\001b","status":"open","issue_type":"session"}]')" \
   "$HSUT/escalate.sh" --subject lx-abc12 --key k --message m >/dev/null 2>&1; rc=$?
 eq "$rc" 0 "a session row behind the store's notice line, carrying a raw control byte, still reads as a session"
-eq "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [k] [--title] [m] [--message] [m]" "  ... and the call files its finding"
+eq "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [k] [--title] [m] [--message] [m] [--about] [lx-abc12] [--distinct]" "  ... and the call files its finding"
 eq "$(creates)" 0 "  ... with no gate on the session bead"
+
+echo "# two sessions reported under one key file a finding about each"
+# The old script's visit tracked a subject it could read and deduped on it, so
+# the finding is about the session, and --distinct keeps patrol-finding.sh from
+# refusing the second session's report as a sibling of the first.
+reset "$(task tk-w),$(session lx-s1),$(session lx-s2)"; : > "$STUB_PF_LOG"
+"$HSUT/escalate.sh" --subject lx-s1 --key session-stuck --message m >/dev/null 2>&1
+"$HSUT/escalate.sh" --subject lx-s2 --key session-stuck --message m >/dev/null 2>&1
+eq "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [session-stuck] [--title] [m] [--message] [m] [--about] [lx-s1] [--distinct]
+patrol-finding [--key] [session-stuck] [--title] [m] [--message] [m] [--about] [lx-s2] [--distinct]" "each call names its own session"
+: > "$STUB_PF_LOG"
+"$HSUT/escalate.sh" --subject lx-wisp-abc12 --key k --message m >/dev/null 2>&1
+STUB_BS_RC=1 "$HSUT/escalate.sh" --subject refinery --key k --message m >/dev/null 2>&1
+hasnt "$(cat "$STUB_PF_LOG")" "[--about]" "a wisp or a subject that names no bead is filed on the key alone"
 
 echo "# a subject whose own row does not read fails the call before the helper"
 # The helper's reads of the subject's edges and its create stay available in
@@ -578,7 +592,7 @@ eq "$(cat "$STUB_PF_LOG")" "" "  ... and no finding is filed"
 reset "$(task tk-w),{\"id\":\"lx-broken\",\"title\":\"s\",\"status\":\"open\",\"labels\":[\"agent:rig/rig.witness\",\"gc:session\"]}"; : > "$STUB_PF_LOG"
 "$HSUT/escalate.sh" --subject lx-broken --key k --message m >/dev/null 2>"$TMP/err"; rc=$?
 eq "$rc" 0 "a row with no type and the gc:session label files a finding"
-eq "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [k] [--title] [m] [--message] [m]" "  ... under its key"
+eq "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [k] [--title] [m] [--message] [m] [--about] [lx-broken] [--distinct]" "  ... under its key, about the session"
 eq "$(creates)" 0 "  ... and no gate blocks the damaged session bead"
 has "$(cat "$TMP/err")" "'lx-broken' names a session" "  ... and the translation says why"
 reset "$(task tk-w),{\"id\":\"tk-typed\",\"title\":\"t\",\"status\":\"open\",\"issue_type\":\"task\",\"labels\":[\"gc:session\"]}"; : > "$STUB_PF_LOG"

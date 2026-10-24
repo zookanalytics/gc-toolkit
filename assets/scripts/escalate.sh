@@ -13,7 +13,9 @@
 #     and cannot read the second, so a filing about either is filed as a patrol
 #     finding under its key instead, the route the helper's refusal names. So is
 #     a filing about a subject that reads as a session bead, whatever the shape
-#     of its id, because a session names no work that can wait.
+#     of its id, because a session names no work that can wait. That finding is
+#     about the session (--about), as the old visit was about a subject it could
+#     read.
 #   A --retract goes to the helper whatever its subject.
 # Any other filing goes to the helper only once its subject's own row reads,
 # because only the row tells a session from a bead that can wait. A filing
@@ -50,21 +52,21 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# no_wait_why <subject> -> what the subject names when it is no bead that can
-# wait for a person, or nothing when it is a bead that can. The `*-wisp-*` shape
-# answers without a read. Otherwise the subject's own row decides, and only a
-# row carrying this exact id is an answer, because bd also answers an id that
-# is a prefix of another bead's. The row names a session when its type is
-# `session`, or when it has no type and carries the `gc:session` label, the
-# damaged session bead Gas City still counts as one
-# (session.IsSessionBeadOrRepairable). Any other row is a bead that can wait,
-# one with no type included: bd leaves an empty issue_type out of its JSON.
-# Only when no such row reads is bead-store.sh asked, so a call about a bead
-# costs the one read, and only bead-store.sh's exit 1 proves that no bead is
-# named. Anything else returns 1.
+# no_wait_why <subject> -> the word for what the subject names when it is no
+# bead that can wait for a person (wisp, session or no-bead), or nothing when
+# it is a bead that can. The `*-wisp-*` shape answers without a read.
+# Otherwise the subject's own row decides, and only a row carrying this exact
+# id is an answer, because bd also answers an id that is a prefix of another
+# bead's. The row names a session when its type is `session`, or when it has
+# no type and carries the `gc:session` label, the damaged session bead Gas City
+# still counts as one (session.IsSessionBeadOrRepairable). Any other row is a
+# bead that can wait, one with no type included: bd leaves an empty issue_type
+# out of its JSON. Only when no such row reads is bead-store.sh asked, so a
+# call about a bead costs the one read, and only bead-store.sh's exit 1 proves
+# that no bead is named. Anything else returns 1.
 no_wait_why() {
   local rc=0 row="" kind=""
-  case "$1" in *-wisp-*) echo "names a patrol wisp or a session"; return 0 ;; esac
+  case "$1" in *-wisp-*) echo wisp; return 0 ;; esac
   if row=$(bd_json show "$1") && kind=$(printf '%s' "$row" | jq -er --arg id "$1" '
       if type == "array" then [ .[] | objects | select(.id == $id) ][0] else null end
       | if type == "object" then
@@ -72,11 +74,11 @@ no_wait_why() {
           | if $t == "session" or ($t == "" and any((.labels // [])[]?; . == "gc:session"))
             then "session" else "bead" end
         else null end' 2>/dev/null); then
-    if [ "$kind" = session ]; then echo "names a session"; fi
+    if [ "$kind" = session ]; then echo session; fi
     return 0
   fi
   "$HERE/bead-store.sh" "$1" >/dev/null 2>&1 || rc=$?
-  if [ "$rc" -eq 1 ]; then echo "names no bead"; return 0; fi
+  if [ "$rc" -eq 1 ]; then echo no-bead; return 0; fi
   return 1
 }
 
@@ -93,8 +95,23 @@ case "$SUBJECT" in
       if [ -n "$WHY" ]; then
         TITLE="${MESSAGE%%$'\n'*}"
         [ -n "$TITLE" ] || TITLE="$KEY"
-        echo "escalate: '$SUBJECT' $WHY, not a bead a human gate can hold; filing the call as a patrol finding under [$KEY]" >&2
-        exec "$HERE/patrol-finding.sh" --key "$KEY" --title "$TITLE" --message "$MESSAGE"
+        FINDING=(--key "$KEY" --title "$TITLE" --message "$MESSAGE")
+        WHAT="$WHY"
+        case "$WHY" in
+          wisp)    WHAT="names a patrol wisp or a session" ;;
+          no-bead) WHAT="names no bead" ;;
+          session)
+            # A session bead is a bead, which the old script's visit tracked
+            # and deduped on. So the finding tracks it, and its dedup narrows
+            # to it. A report about another session under the same key is
+            # another situation, and --distinct files it, where
+            # patrol-finding.sh would refuse it as a sibling with an exit no
+            # old caller knows.
+            WHAT="names a session"
+            FINDING+=(--about "$SUBJECT" --distinct) ;;
+        esac
+        echo "escalate: '$SUBJECT' $WHAT, not a bead a human gate can hold; filing the call as a patrol finding under [$KEY]" >&2
+        exec "$HERE/patrol-finding.sh" "${FINDING[@]}"
       fi
     fi ;;
 esac

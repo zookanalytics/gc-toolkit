@@ -843,11 +843,13 @@ ruling of sitting tk-tdt71ue left it the helper's name:
   proves names no bead, went to the redirect, and the hand-off files it as a
   patrol finding under its key, the route the helper's refusal names. So does
   a call about a subject that reads as a session bead, whatever the shape of
-  its id, because a session names no work that can wait. A call whose subject
-  does not read as one bead files nothing and fails, so its caller retries,
-  because the helper reads only the subject's edges, and those can answer where
-  the row did not. So an old call the old script filed still
-  files. The hand-off retires under a dated debt (section 10).
+  its id, because a session names no work that can wait, and its finding is
+  about that session (`--about`), so each session's report is its own finding,
+  as each was its own visit. A call whose subject does not read as one bead
+  files nothing and fails, so its caller retries, because the helper reads
+  only the subject's edges, and those can answer where the row did not. So an
+  old call the old script filed still files. The hand-off retires under a dated
+  debt (section 10).
   Keeping the old name would cost nothing to build, and it would leave the
   retired word in the call most filers make.
 
