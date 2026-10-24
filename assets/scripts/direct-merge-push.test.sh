@@ -35,6 +35,8 @@
 #     other refused push, or a push origin does not read back, exits 1;
 #   - a pause with a leading zero is read in base 10;
 #   - an unresolvable rig and a missing prepared head land nothing;
+#   - a prep worktree that records another bead's staging, or no staging,
+#     lands, stamps and records nothing, before any store call;
 #   - the script never drains the session.
 set -uo pipefail
 
@@ -58,7 +60,8 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR 2
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
-# The script under test and the bd-lib.sh it sources, beside a stub
+# The script under test, the bd-lib.sh it sources and the
+# refinery-workspace.sh it checks the prep worktree's record with, beside a stub
 # lifecycle.sh that logs each transition and the GC_RIG_ROOT it was handed. The
 # stub refuses every call when LC_FAIL is set, and the first LC_FAIL_TIMES calls
 # when that is set. With LC_WRITE_RC set, a call it does not refuse writes the
@@ -67,7 +70,7 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 # what it wrote.
 SUT="$TMP/sut"
 mkdir -p "$SUT" "$TMP/bin" "$TMP/gitshim" "$TMP/sleepshim"
-cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$SUT/"
+cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$HERE/refinery-workspace.sh" "$SUT/"
 chmod +x "$SUT/direct-merge-push.sh"
 cat > "$SUT/lifecycle.sh" <<'LC'
 #!/usr/bin/env bash
@@ -171,8 +174,8 @@ stamp() { jq -r '.[0].metadata.direct_landing_sha // "none"' "$D/bead.json"; }
 transitions() { if [ -s "$D/lc.log" ]; then wc -l < "$D/lc.log" | tr -d ' '; else echo 0; fi; }
 
 # setup <dir>: origin with main and polecat/wb one commit ahead, the rig
-# cloned from it, the prep worktree staged at polecat/wb, and the bead. Sets D,
-# BASE, FEATURE and PREP.
+# cloned from it, the prep worktree staged for wb at polecat/wb, and the bead.
+# Sets D, BASE, FEATURE and PREP.
 setup() {
   D="$1"
   mkdir -p "$D/tmp"
@@ -186,7 +189,7 @@ setup() {
   git -C "$D/seed" checkout -q main
   git clone -q "$D/origin.git" "$D/rig"
   PREP="$(git -C "$D/rig" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
-  git -C "$D/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+  "$SUT/refinery-workspace.sh" stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null 2>&1
   printf '{"rigs":[{"name":"myrig","path":"%s"}]}\n' "$D/rig" > "$D/roster.json"
   printf '%s\n' '[{"id":"wb","status":"in_progress","metadata":{"branch":"polecat/wb","target":"main"}}]' > "$D/bead.json"
   : > "$D/gc.log"; : > "$D/lc.log"
@@ -206,8 +209,7 @@ run() {
 # The logs start over, so each attempt's assertions read only its own calls.
 next_patrol() {
   git -C "$D/rig" fetch -q origin
-  git -C "$D/rig" worktree remove --force --force "$PREP"
-  git -C "$D/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+  "$SUT/refinery-workspace.sh" stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null 2>&1
   git -C "$PREP" merge -q --no-edit origin/main
   : > "$D/gc.log"; : > "$D/lc.log"; : > "$D/lc.log.root"
 }
@@ -541,9 +543,32 @@ setup "$TMP/noprep"
 git -C "$D/rig" worktree remove --force "$PREP"
 run
 eq "$RC" 1 "noprep: exits 1"
-has "$OUT" "no prepared head in $PREP" "noprep: it says why"
+has "$OUT" "no prep worktree is staged at $PREP" "noprep: it says why"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "noprep: nothing pushed"
 no_transition noprep
+
+echo "── a prep worktree staged for another bead lands nothing ──"
+setup "$TMP/otherbead"
+"$SUT/refinery-workspace.sh" stage --rig-root "$D/rig" --branch polecat/wb --work other >/dev/null 2>&1
+run
+eq "$RC" 1 "otherbead: exits 1"
+has "$OUT" "holds polecat/wb for other, not wb; nothing landed" "otherbead: it names the bead the prep worktree holds, and says nothing landed"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "otherbead: nothing pushed"
+eq "$(stamp)" none "otherbead: no stamp is written"
+eq "$(wc -l < "$D/gc.log" | tr -d ' ')" 0 "otherbead: the check comes before any store call"
+no_transition otherbead
+no_drain otherbead
+
+echo "── a prep worktree that records nothing lands nothing ──"
+setup "$TMP/norecord"
+git -C "$D/rig" worktree remove --force --force "$PREP"
+git -C "$D/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+run
+eq "$RC" 1 "norecord: exits 1"
+has "$OUT" "records no bead and branch" "norecord: it says why"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "norecord: nothing pushed"
+eq "$(stamp)" none "norecord: no stamp is written"
+no_transition norecord
 
 echo "── usage ──"
 for args in "" "--work wb" "--target main" "--work wb --target main --extra" "--work"; do

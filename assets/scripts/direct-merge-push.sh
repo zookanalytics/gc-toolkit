@@ -6,14 +6,17 @@
 #   direct-merge-push.sh --work <bead> --target <target-branch>
 #
 # The prepared head is the HEAD of the detached prep worktree the rebase step
-# staged at <rig git dir>/gc-refinery-prep. It lands by commit id: the push
-# names that commit as the new value of refs/heads/<target>, so nothing is
-# checked out for the merge, no local branch moves, and nothing is left on disk
-# to remove. git accepts a push without --force only as a fast-forward of the
-# remote's own value, so the push is a fast-forward or nothing. Every git call
-# names its repository with -C, and the rig root resolves from GC_RIG_ROOT or
-# the roster entry for GC_RIG, never from the cwd, so a caller whose cwd sits in
-# another repository cannot steer the push there.
+# staged at <rig git dir>/gc-refinery-prep, and it lands only for the bead that
+# step staged: refinery-workspace.sh verify reads the record the stage left in
+# the worktree, and a <bead> it does not name lands and records nothing, before
+# any fetch or stamp. It lands by commit id: the push names that commit as the
+# new value of refs/heads/<target>, so nothing is checked out for the merge, no
+# local branch moves, and nothing is left on disk to remove. git accepts a push
+# without --force only as a fast-forward of the remote's own value, so the push
+# is a fast-forward or nothing. Every git call names its repository with -C, and
+# the rig root resolves from GC_RIG_ROOT or the roster entry for GC_RIG, never
+# from the cwd, so a caller whose cwd sits in another repository cannot steer
+# the push there.
 #
 # The fast-forward is checked against origin/<target> fetched first. A prepared
 # head that is neither behind nor ahead of it was prepared on a target that has
@@ -115,6 +118,9 @@ RIG_ROOT="${GC_RIG_ROOT:-}"
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='${GC_RIG:-}' matched no rig in the roster); nothing landed"; exit 1; }
 COMMON=$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir) || { echo "no repository at $RIG_ROOT; nothing landed"; exit 1; }
 PREP_WT="$COMMON/gc-refinery-prep"
+# Land only for the bead the prep worktree records it holds.
+HOLDS=$("$SCRIPTS_DIR/refinery-workspace.sh" verify --rig-root "$RIG_ROOT" --work "$WORK" 2>&1) \
+  || { echo "${HOLDS:-refinery-workspace.sh could not read what the prep worktree holds}; nothing landed"; exit 1; }
 
 fetch_target() { git -C "$RIG_ROOT" fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"; }
 carries() { git -C "$RIG_ROOT" merge-base --is-ancestor "$2" "$1" 2>/dev/null; }

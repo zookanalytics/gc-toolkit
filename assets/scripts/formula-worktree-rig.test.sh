@@ -384,8 +384,8 @@ merge_case() { # <mode>; sets RC, D (and patrol_rig's globals)
   mkdir -p "$d/tmp"
   patrol_rig "$d" "merge $1"
   bead_file "$d"
-  # The rebase step leaves the prepared head staged here, detached.
-  git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+  # The rebase step leaves the prepared head staged here for wb, detached.
+  "$PACK_CITY/rigs/gc-toolkit/assets/scripts/refinery-workspace.sh" stage --rig-root "$d/rig" --branch polecat/wb --work wb >/dev/null 2>&1
   pick "$1" "$d/rig"
   ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET=main BRANCH=polecat/wb \
       GC_CITY_PATH="$PACK_CITY" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$TMP/merge.sh" ) >"$d/out" 2>&1 || rc=$?
@@ -432,7 +432,7 @@ protected_case() {
   mkdir -p "$d/tmp"
   patrol_rig "$d" "merge protected"
   bead_file "$d"
-  git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+  "$PACK_CITY/rigs/gc-toolkit/assets/scripts/refinery-workspace.sh" stage --rig-root "$d/rig" --branch polecat/wb --work wb >/dev/null 2>&1
   printf '%s\n' '#!/usr/bin/env bash' 'echo "GH006: Protected branch update failed for refs/heads/main." >&2' 'exit 1' \
     > "$d/origin.git/hooks/pre-receive"
   chmod +x "$d/origin.git/hooks/pre-receive"
@@ -468,7 +468,7 @@ moved_case() {
   mkdir -p "$d/tmp"
   patrol_rig "$d" "merge moved"
   bead_file "$d"
-  git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+  "$PACK_CITY/rigs/gc-toolkit/assets/scripts/refinery-workspace.sh" stage --rig-root "$d/rig" --branch polecat/wb --work wb >/dev/null 2>&1
   git -C "$d/seed" checkout -q main
   MOVED=$(commit "$d/seed" "landed while the gate ran")
   git -C "$d/seed" push -q "$d/origin.git" main
