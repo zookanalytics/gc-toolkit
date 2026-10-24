@@ -134,10 +134,13 @@ integration branch to the default branch. The same universal rule holds that PR
 until an operator's approval stands on it, so the operator reviews the whole
 unit, design and implementation together, before the default branch moves.
 When the refinery sends the graduation back, for a conflict with the default
-branch or a failure the branch caused, a polecat rebuilds it on the convoy
-bead. That run is poured through an input convoy that tracks the convoy bead
-alone (`work-sling.sh`), because a pour onto the convoy itself would work on
-the members it landed.
+branch or a failure the branch caused, `rejection-repool.sh` files the
+graduation's rebuild child: an ordinary task that resumes the integration
+branch, lands on the default branch and blocks the convoy. A polecat rebuilds
+the branch on that child, because a run poured onto the convoy itself would
+work on the members the convoy landed. Once the child's work lands on the
+integration branch, the refinery's merge-push anchors the convoy, which gates
+the graduation PR from then on.
 
 ## When the subject closes
 

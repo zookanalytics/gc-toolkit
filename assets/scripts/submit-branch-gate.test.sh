@@ -668,6 +668,25 @@ eq "$(run_anchor_resolve polecat/su-uzy9.5 \
    "0|" \
    "a sibling carrying no merge_result is not an anchor"
 
+# A convoy's rebuild child names the convoy as its anchor_bead before the convoy
+# carries a merge_result: the refinery anchors it once the child's work lands.
+# With no anchor on the branch, the bead the claimed bead names is the anchor,
+# and the summary belongs on it.
+CHILD_ROW='{"id":"tk-work","created_at":"2026-07-02T00:00:00Z","metadata":{"branch":"integration/tk-cv","task_kind":"rework","anchor_bead":"tk-cv"}}'
+CONVOY_ROW='{"id":"tk-cv","created_at":"2026-07-01T00:00:00Z","issue_type":"convoy","metadata":{"branch":"integration/tk-cv","graduation":true}}'
+eq "$(run_anchor_resolve integration/tk-cv "[$CHILD_ROW,$CONVOY_ROW]")" "0|tk-cv" \
+   "a rebuild child's convoy, open on the branch and not yet anchored, is the anchor it names"
+eq "$(run_anchor_resolve integration/tk-cv \
+      "[$CHILD_ROW,$CONVOY_ROW,{\"id\":\"tk-anchor\",\"created_at\":\"2026-07-03T00:00:00Z\",\"metadata\":{\"merge_result\":\"pre_open_gate\",\"branch\":\"integration/tk-cv\"}}]")" \
+   "0|tk-anchor" \
+   "a merge_result-carrying anchor on the branch still wins over the bead the child names"
+eq "$(run_anchor_resolve integration/tk-cv "[$CHILD_ROW]")" "0|" \
+   "a named anchor that is not open on the branch is not elected"
+eq "$(run_anchor_resolve integration/tk-cv \
+      '[{"id":"tk-work","created_at":"2026-07-02T00:00:00Z","metadata":{"branch":"integration/tk-cv"}},'"$CONVOY_ROW"']')" \
+   "0|" \
+   "a bead the claimed bead does not name is not elected, whatever it carries"
+
 # Every anchor state counts, not just the two gating ones: an anchor parked for
 # a person still owns the PR, and the summary still belongs on it.
 eq "$(run_anchor_resolve polecat/su-uzy9.5 \

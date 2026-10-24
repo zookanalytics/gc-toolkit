@@ -1725,9 +1725,12 @@ GATING_ANCHOR=""
 if [ -n "${CURRENT_BRANCH:-}" ]; then
     ANCHOR_ROWS=$(gc bd list --status=open --metadata-field branch="$CURRENT_BRANCH" --limit=0 --json 2>/dev/null) || ANCHOR_ROWS=""
     GATING_ANCHOR=$(printf '%s' "$ANCHOR_ROWS" | jq -r --arg self "$WORK_BEAD_ID" '
-        [ .[]? | select(.id != $self)
-          | select((((.metadata // {}).merge_result // "") | tostring) != "") ]
-        | sort_by(.created_at // .created // .id) | .[0].id // empty' 2>/dev/null) || GATING_ANCHOR=""
+        ([ .[]? | select(.id == $self) | (((.metadata // {}).anchor_bead // "") | tostring) ] | .[0] // "") as $named
+        | [ .[]? | select(.id != $self) ] as $others
+        | ([ $others[] | select((((.metadata // {}).merge_result // "") | tostring) != "") ]
+           | sort_by(.created_at // .created // .id) | .[0].id)
+          // ([ $others[] | select(.id == $named) ] | .[0].id)
+          // empty' 2>/dev/null) || GATING_ANCHOR=""
 fi
 if [ -n "$GATING_ANCHOR" ]; then
     echo "gating anchor: $GATING_ANCHOR (this bead is a child; the summary goes there)"
@@ -1738,9 +1741,11 @@ fi
 ```
 
 The query asks the branch, not the state name: every state that carries a
-`merge_result` is an anchor state, so a new one needs no edit here. An
-unreadable probe resolves to empty and the step behaves as it did before this
-block existed — degraded to the dispatch-text fallback, never stranded.
+`merge_result` is an anchor state, so a new one needs no edit here. With none on
+the branch, the bead the claimed bead names as its `anchor_bead`, open on the
+same branch, is the anchor: a convoy's rebuild child names the convoy, which the
+refinery anchors once the child's work lands. An unreadable probe resolves to
+empty, so the summary falls back to the dispatch text and nothing is stranded.
 
 **4c. Check the anchor's title.** The PR's title is composed from the anchor's
 title: `pr-open.sh` writes it at create, `pr-stack.sh` keeps an open PR's title

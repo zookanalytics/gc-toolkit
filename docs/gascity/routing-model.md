@@ -186,15 +186,6 @@ differently from a plain sling:
   workflow. The city's fork clears it, on the attach bead and on every member
   of the root's input convoy, so a workflow is the bead's one live dispatch
   surface.
-- **A convoy target is its own input convoy.** The pour mints the one-item
-  synthetic input convoy only for a target that is not a convoy. A convoy
-  target is named on the root as `gc.input_convoy_id` as it stands, so the
-  run's work is the beads that convoy tracks, the convoy-first shape whose
-  members the fork's route clear covers. A formula that works one bead, such
-  as `mol-polecat-work`, takes the one bead its input convoy tracks as its work
-  bead and refuses any other count. So the pack pours onto a convoy that is
-  its own work bead, a graduation's anchor, through an input convoy that tracks
-  it alone (`assets/scripts/work-sling.sh`).
 - **A classic (non-graph) attach routes the work bead instead**, with the
   plain sling's contract, and leaves the wisp root unrouted, because the work
   bead is the claimable unit. A standalone launch (`gc sling <target>
@@ -205,11 +196,16 @@ differently from a plain sling:
   roots with the same `gc.formula_name`, so a different graph.v2 formula over
   the same bead is not refused. `--force` skips that lookup (the legacy
   `gc.source_bead_id` check still refuses), and over a bare bead it mints a
-  fresh convoy and root, so the second workflow runs beside the first. The
-  lookup and the pour run under a launch lock keyed by the bead the sling is
-  handed, so two pours onto one bead are serialized, while two pours onto two
-  convoys that track the same bead are not. `assets/scripts/work-sling.sh`
-  holds a lock of its own on the convoy anchor it pours for.
+  fresh convoy and root, so the second workflow runs beside the first.
+- **A convoy target is the run's own input convoy.** The pour mints the
+  one-item synthetic input convoy only for a target that is not a convoy, so a
+  run poured onto a convoy works on the beads the convoy tracks. The refusal
+  above never covers a convoy target, because nothing tracks one, while the
+  launch lock the lookup and the pour run under is keyed by the convoy. A
+  formula that works one bead, such as `mol-polecat-work`, takes the one bead
+  its input convoy tracks and refuses any other count. So the refinery's
+  rejection pours no convoy: it rebuilds a rejected graduation on the
+  graduation's rebuild child (`assets/scripts/rejection-repool.sh`).
 - **A poured node withholds delivery** in `gc.deferred_routed_to`,
   `gc.deferred_execution_routed_to` and, for a node with an assignee,
   `gc.deferred_assignee`, each promoted into its live key when the node
@@ -237,11 +233,10 @@ activation in `internal/molecule/molecule.go`; `slingJSONFromResult`
 2026-10-19. The fork's route clear is `retireClaimRoute` and
 `retireInputConvoyClaimRoutes`, which upstream does not have. A convoy
 target's input convoy is `NormalizeInputConvoy` and
-`CreateSingleItemInputConvoy` (`internal/graphv2/invocation.go`), read at the
-fork `cc0a776b1` on 2026-10-23. The launch lock is
-`withGraphV2SourceWorkflowLock` (`internal/sling/sling_core.go`) over
-`WithLock` (`internal/sourceworkflow/sourceworkflow.go`), read at the fork
-`099e8ea15` on 2026-10-24.
+`CreateSingleItemInputConvoy` (`internal/graphv2/invocation.go`), and the
+launch lock is `withGraphV2SourceWorkflowLock`
+(`internal/sling/sling_core.go`), read at upstream `6e35bd5ea` on 2026-10-24
+(specs/tk-rl8gz4b.26/gas-city-search.md).
 
 ## A `blocks` dep between work beads does not hold a graph.v2 dispatch
 
