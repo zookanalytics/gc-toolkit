@@ -322,6 +322,15 @@ fi
 if [ "${_g[0]:-}" = "show" ] && [ -n "${STUB_INDEX:-}" ]; then
   case "${_g[1]:-}" in *:review-checks.toml) cat "$STUB_INDEX"; exit 0 ;; esac
 fi
+# `rev-parse --verify -q <oid>^{commit}` expands an abbreviation STUB_EXPAND
+# names ("<abbrev>=<full>" lines), and fails on any other, as git fails on a
+# commit this checkout does not hold.
+if [ "${_g[0]:-}" = "rev-parse" ] && [ "${_g[1]:-}" = "--verify" ]; then
+  _want="${_g[${#_g[@]}-1]}"; _want="${_want%^\{commit\}}"
+  _full=$(printf '%s\n' "${STUB_EXPAND:-}" | awk -F= -v a="$_want" '$1 == a { print $2; exit }')
+  [ -n "$_full" ] || exit 1
+  printf '%s\n' "$_full"; exit 0
+fi
 # ls-remote matches its pattern against a ref's tail, so STUB_LSREMOTE_TAIL
 # serves a ref that ends in the branch's ref, sorted ahead of it as git sorts.
 if [ "${_g[0]:-}" = "ls-remote" ]; then
@@ -804,12 +813,20 @@ hasnt "$out" "superseded" "…and closes nothing superseded"
 eq "$(status rv-1)" "in_progress" "…leaving the review open"
 eq "$(meta rv-1 reviewed_oid)" "$OID_LIVEPIN" "…with the dispatch pin as it was"
 
-echo "# an abbreviated pin is accepted: nothing compares it to a head length-wise"
+echo "# on a review with no pin, an abbreviated --reviewed-oid is taken in full"
+# The record and every reader at the commit take a full id, and the resolver
+# fetches an unfetched commit only by its full id.
+reset "$ANCHOR_PR"
+out=$(STUB_EXPAND="${OID_OVR1:0:9}=$OID_OVR1" "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid "${OID_OVR1:0:9}" 2>&1); rc=$?
+eq "$rc" 0 "an abbreviation of a commit this checkout holds is accepted"
+eq "$(meta rv-1 reviewed_oid)" "$OID_OVR1" "…and recorded as the full id"
+has "$(cat "$STUB_GH_BODY")" "$OID_OVR1" "…which the artifact names"
+backed "…and the review backs the lane"
 reset "$ANCHOR_PR"
 out=$("$SUT" --review-bead rv-1 --verdict approve --reviewed-oid 8d7f0cf3c 2>&1); rc=$?
-eq "$rc" 0 "an abbreviated sha is no longer refused"
-backed "…and the review backs the lane"
-has "$(cat "$STUB_GH_BODY")" "8d7f0cf3c" "…with the artifact naming what it was given"
+eq "$rc" 1 "an abbreviation this checkout cannot expand, a commit it has not fetched, is refused"
+has "$out" "re-run naming the full commit id" "…asking for the full id"
+hasnt "$(cat "$STUB_GC_LOG")" "update" "…and nothing was written"
 
 echo "# a non-hex oid still names no commit, and is refused"
 reset "$ANCHOR_PR"
@@ -1582,6 +1599,19 @@ out=$(STUB_INDEX="$IDX" "$SUT" --review-bead rv-tri --verdict approve --add-gate
 eq "$rc" 1 "a check the index does not declare is refused"
 has "$out" "not on the effective index" "the refusal names the closed index"
 hasnt "$(meta tk-anc check_set)" "nonesuch" "the undeclared check never reaches check_set"
+
+echo "# a widening at an abbreviated commit is checked at that commit's full id"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
+out=$(STUB_INDEX="$IDX" STUB_EXPAND="${OID_OVR1:0:9}=$OID_OVR1" "$SUT" --review-bead rv-tri --verdict approve --add-gates demo --reviewed-oid "${OID_OVR1:0:9}" 2>&1); rc=$?
+eq "$rc" 0 "a triage review with no pin widens at an abbreviation this checkout expands"
+has "$(meta tk-anc check_set)" "demo" "…the check reaching check_set"
+has "$(notes tk-anc)" "triage-add: demo @$OID_OVR1" "…and its note naming the full id"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
+out=$(STUB_INDEX="$IDX" "$SUT" --review-bead rv-tri --verdict approve --add-gates demo --reviewed-oid "${OID_OVR1:0:9}" 2>&1); rc=$?
+eq "$rc" 1 "an abbreviation of a commit this checkout has not fetched is refused"
+hasnt "$out" "not on the effective index" "…for its commit, not as a check the index lacks"
+has "$out" "re-run naming the full commit id" "…asking for the full id"
+hasnt "$(meta tk-anc check_set)" "demo" "…and widening nothing"
 
 echo "# the widening is read back: a write that does not land leaves the review OPEN"
 reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"

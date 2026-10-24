@@ -118,10 +118,13 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  the dispatch pinned takes that commit: this flag may name it,
                  in full or abbreviated, and a value naming any other commit
                  is refused with nothing written. On a review bead with no pin
-                 it names the commit; absent, the live head of the anchor's
-                 branch (git ls-remote origin <branch>) does. It names the
-                 commit in the posted artifact and binds the verdict to no
-                 head, except that a commit the branch no longer carries
+                 it names the commit, in full or abbreviated to a commit this
+                 checkout holds, and the commit is taken in full; an
+                 abbreviation this checkout cannot expand is refused. With
+                 neither a pin nor this flag, the live head of the anchor's
+                 branch (git ls-remote origin <branch>) is the commit. The
+                 posted artifact names the commit, and the verdict is bound to
+                 no head, except that a commit the branch no longer carries
                  (rewritten out from under it) is refused, not recorded. The
                  commit is written back to the review bead as the one this
                  verdict judged.
@@ -428,15 +431,35 @@ BRANCH=$(row_meta "$ANCHOR_ROW" branch)
 # recorded: a --reviewed-oid naming any other is refused before anything is
 # written, and an abbreviation of the pinned commit names the pinned commit. A
 # record with no pin, a review made by hand or before the dispatch wrote one,
-# takes the caller's --reviewed-oid, else the live head. The posted artifact
-# and the record name this commit. The verdict is about the lane and is not
-# bound to it, and the merge compares no verdict to a head.
+# takes the caller's --reviewed-oid in full, else the live head. The posted
+# artifact and the record name this commit. The verdict is about the lane and
+# is not bound to it, and the merge compares no verdict to a head.
 PINNED_OID=$(row_meta "$REVIEW_ROW" reviewed_oid | tr '[:upper:]' '[:lower:]')
 OID_OVERRIDE=$(printf '%s' "$OID_OVERRIDE" | tr '[:upper:]' '[:lower:]')
+# The full id <oid> names. The record and every reader at the commit take a full
+# id, and the resolver fetches a commit no repository here holds only by its
+# full id. A full id is taken as given. An abbreviation is expanded in this
+# checkout or GC_RIG_ROOT's, and is non-zero where neither holds one commit it
+# names, which is so for a commit this checkout has not fetched.
+full_oid() { # <oid>
+  local r full
+  case "$1" in ''|*[!0-9a-f]*) return 1 ;; esac
+  if [ "${#1}" -eq 40 ] || [ "${#1}" -eq 64 ]; then printf '%s\n' "$1"; return 0; fi
+  for r in . "${GC_RIG_ROOT:-}"; do
+    [ -n "$r" ] || continue
+    full=$(git -C "$r" rev-parse --verify -q "$1^{commit}" 2>/dev/null) || continue
+    case "$full" in ''|*[!0-9a-f]*) continue ;; esac
+    printf '%s\n' "$full"; return 0
+  done
+  return 1
+}
 REVIEWED_OID="$PINNED_OID"
 if [ -n "$OID_OVERRIDE" ]; then
   if [ -z "$PINNED_OID" ]; then
-    REVIEWED_OID="$OID_OVERRIDE"
+    REVIEWED_OID=$(full_oid "$OID_OVERRIDE") || {
+      warn "--reviewed-oid $OID_OVERRIDE names no commit this checkout can expand to its full id, and $REVIEW_BEAD pins none to take its place; re-run naming the full commit id. Nothing written"
+      exit 1
+    }
   elif [ "$OID_OVERRIDE" != "$PINNED_OID" ] && { [ "${#OID_OVERRIDE}" -lt 7 ] || [ "${PINNED_OID#"$OID_OVERRIDE"}" = "$PINNED_OID" ]; }; then
     warn "--reviewed-oid $OID_OVERRIDE is not the commit $REVIEW_BEAD was dispatched to review ($PINNED_OID), and a review's commit is never moved; re-run naming $PINNED_OID. Nothing written"
     exit 1
@@ -462,9 +485,8 @@ if [ -z "$REVIEWED_OID" ]; then
   REVIEWED_OID=$(branch_head)
 fi
 # The artifact names the commit judged, and the pre-open record stamps it back
-# on the review bead, so a verdict still needs one. It is not held to a length:
-# nothing compares it to a head any more, and an abbreviated sha still names the
-# commit a reader would look up.
+# on the review bead, so a verdict still needs one: the record's pin, the
+# caller's commit expanded above, or the live head.
 REVIEWED_OID=$(printf '%s' "$REVIEWED_OID" | tr '[:upper:]' '[:lower:]')
 case "$REVIEWED_OID" in
   ''|*[!0-9a-f]*) warn "no usable reviewed oid for branch '${BRANCH:-?}' (got '${REVIEWED_OID:-}'); nothing written"; exit 1 ;;
