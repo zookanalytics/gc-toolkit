@@ -657,10 +657,12 @@ pr_finishing_birth() {
 }
 
 # The longest a settle of PR-finishing work waits for the store's priority lock
-# when a script of the merge cadence runs it: gate-ensure.sh, pr-facts.sh and
-# pre-open-rebase.sh. The cadence runs its arms one after another, so a longer
-# wait holds every arm after it, and a bead whose settle times out is settled by
-# a later pass. queue-priority.sh's own default wait is longer, and
+# when a script of the merge cadence or the refinery patrol runs it:
+# gate-ensure.sh, pr-facts.sh, pre-open-rebase.sh and rejection-repool.sh. The
+# cadence and the patrol each run their arms one after another, so a longer wait
+# holds every arm after it. A bead whose settle times out in the cadence is
+# settled by a later pass, and rejection-repool.sh files a visit that asks for
+# its re-run. queue-priority.sh's own default wait is longer, and
 # rework-child.sh, which runs in a review or converse session rather than in the
 # cadence, keeps it.
 PR_FINISHING_LOCK_WAIT_SECS=30

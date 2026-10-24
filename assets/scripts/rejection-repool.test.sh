@@ -131,28 +131,35 @@ eq "$(meta tk-w existing_pr)" "https://github.com/o/r/pull/7" "pr_url carried ov
 # the harness stub, and `convoy status <id> --json` answers the beads a convoy
 # tracks as its children. mol-polecat-work takes the one bead its input convoy
 # tracks as its work bead, and the derivation is read from the formula itself.
+# Each pour also mints its run's workflow root, open until a case ends the run
+# (end_runs): gc.input_convoy_id names the input convoy and gc.formula_name the
+# formula, as Gas City stamps a graph.v2 root.
 POUR="$TMP/bin-pour"; mkdir -p "$POUR"
 cat > "$POUR/gc" <<EOF
 #!/usr/bin/env bash
 if [ "\${1:-}" = sling ] && [ -z "\${STUB_SLING_FAIL:-}" ]; then
-  target=""; bead=""; skip=""
+  target=""; bead=""; skip=""; formula=""
   for a in "\${@:2}"; do
-    if [ -n "\$skip" ]; then skip=""; continue; fi
+    if [ -n "\$skip" ]; then [ "\$skip" = --on ] && formula="\$a"; skip=""; continue; fi
     case "\$a" in
-      --rig|--on) skip=1 ;;
+      --rig|--on) skip="\$a" ;;
       --*) : ;;
       *) if [ -z "\$target" ]; then target="\$a"; elif [ -z "\$bead" ]; then bead="\$a"; fi ;;
     esac
   done
+  n=\$(( \$(cat "$TMP/pours" 2>/dev/null || echo 0) + 1 )); printf '%s\n' "\$n" > "$TMP/pours"
   if [ "\$(jq -r --arg id "\$bead" '[.[] | select(.id == \$id)][0].issue_type // ""' "\$STUB_STORE")" = convoy ]; then
     input="\$bead"
   else
-    input="icv-\$bead"
+    input="icv-\$bead-\$n"
     jq -c --arg id "\$input" --arg t "input convoy for \$bead" \
       '. + [{id: \$id, status: "open", assignee: "", title: \$t, issue_type: "convoy", metadata: {"gc.synthetic": "true"}}]' \
       "\$STUB_STORE" > "\$STUB_STORE.pour" && mv "\$STUB_STORE.pour" "\$STUB_STORE"
     printf '%s|tracks|%s\n' "\$input" "\$bead" >> "\$STUB_DEPS"
   fi
+  jq -c --arg id "wf-\$n" --arg c "\$input" --arg f "\$formula" \
+    '. + [{id: \$id, status: "open", assignee: "", title: \$f, issue_type: "task", metadata: {"gc.input_convoy_id": \$c, "gc.formula_name": \$f, "gc.kind": "workflow"}}]' \
+    "\$STUB_STORE" > "\$STUB_STORE.pour" && mv "\$STUB_STORE.pour" "\$STUB_STORE"
   printf '%s\n' "\$input" > "$TMP/input-convoy"
 fi
 if [ "\${1:-} \${2:-}" = "convoy status" ]; then
@@ -188,6 +195,25 @@ works_on() {
   else bad "$2 (input convoy '${icv:-none}' works on '${got:-no one bead}', want '${1:-a rebuild child}')"; fi
 }
 slung() { awk '$1 == "sling" { print $(NF - 2) }' "$STUB_GC_LOG" | paste -sd' ' -; }
+# end_runs <bead> [gc.outcome] — every run poured onto <bead> ends: the roots
+# over the input convoys that track it close, with the outcome when one is given.
+end_runs() {
+  local cvs
+  cvs=$(awk -F'|' -v b="$1" '$2 == "tracks" && $3 == b { print $1 }' "$STUB_DEPS" | jq -Rsc 'split("\n") | map(select(. != ""))')
+  store "$(jq -c --argjson c "$cvs" --arg o "${2:-}" '
+    map(if ((((.metadata // {})["gc.input_convoy_id"] // "") | tostring) as $i | any($c[]; . == $i))
+        then .status = "closed" | (if $o == "" then . else .metadata["gc.outcome"] = $o end)
+        else . end)' "$STUB_STORE")"
+}
+# live_run_on <bead> — a run of mol-polecat-work live on <bead>, poured before
+# this case began: its input convoy tracks the bead, and its root is open.
+live_run_on() {
+  store "$(jq -c --arg b "$1" '. + [
+    {id: ("icv-" + $b + "-0"), status: "open", assignee: "", title: ("input convoy for " + $b), issue_type: "convoy", metadata: {"gc.synthetic": "true"}},
+    {id: ("wf-" + $b + "-0"), status: "open", assignee: "", title: "mol-polecat-work", issue_type: "task",
+     metadata: {"gc.input_convoy_id": ("icv-" + $b + "-0"), "gc.formula_name": "mol-polecat-work", "gc.kind": "workflow"}}]' "$STUB_STORE")"
+  printf 'icv-%s-0|tracks|%s\n' "$1" "$1" >> "$STUB_DEPS"
+}
 
 echo "# a graduation's anchor is never poured: its rebuild is poured onto a child that resumes its branch"
 grad
@@ -226,6 +252,34 @@ eq "$rc" 0 "the repool is proved"
 eq "$(meta "$(kids_of tk-g)" existing_pr)" "https://github.com/o/r/pull/8" "the child carries the convoy's PR as existing_pr"
 eq "$(meta tk-g existing_pr)" "<absent>" "the convoy keeps only its own pr_url"
 
+echo "# a convoy whose row names its kind as type, not issue_type, is never poured"
+# The pack's other convoy checks read .issue_type // .type (gate-ensure.sh,
+# duplicate-sweep.sh), and so does this one.
+grad
+store "$(jq -c 'map(if .id == "tk-g" then (del(.issue_type) | .type = "convoy") else . end)' "$STUB_STORE")"
+run_pour tk-g --reason "$REASON"
+eq "$rc" 0 "the repool is proved"
+CHILD=$(kids_of tk-g)
+[ -n "$CHILD" ] && ok "a rebuild child is filed" || bad "a rebuild child is filed (none)"
+eq "$(slung)" "$CHILD" "the pour is onto the rebuild child, never the convoy"
+
+echo "# the rebuild child is settled within the merge cadence's lock wait"
+# The refinery patrol runs this script, so its settle waits for the priority
+# lock no longer than bd-lib's bound for the cadence's scripts.
+QP_LOG="$TMP/queue-priority.log"
+cat > "$TMP/queue-priority-wrap" <<EOF
+#!/usr/bin/env bash
+printf '%s %s\n' "\${QUEUE_PRIORITY_LOCK_WAIT_SECS:-<unset>}" "\$*" >> "$QP_LOG"
+exec "$GC_QUEUE_PRIORITY_TOOL" "\$@"
+EOF
+chmod +x "$TMP/queue-priority-wrap"
+CADENCE_WAIT=$(sed -n 's/^PR_FINISHING_LOCK_WAIT_SECS=//p' "$HERE/bd-lib.sh")
+grad; : > "$QP_LOG"
+GC_QUEUE_PRIORITY_TOOL="$TMP/queue-priority-wrap" run_pour tk-g --reason "$REASON"
+eq "$rc" 0 "the repool is proved"
+eq "$(cat "$QP_LOG")" "${CADENCE_WAIT:-<no bound in bd-lib.sh>} settle $(kids_of tk-g)" \
+  "the one settle waits no longer than PR_FINISHING_LOCK_WAIT_SECS"
+
 echo "# the arm a failed sling leaves is on the rebuild child, and its replay works on it"
 grad
 export STUB_SLING_FAIL=1
@@ -247,15 +301,18 @@ PATH="$POUR:$PATH" gc sling --rig "$GC_RIG" "${REPLAY[@]}" >/dev/null 2>&1
 works_on "$CHILD" "the run the replayed arm pours works on the rebuild child"
 
 echo "# a repool that finds the convoy's rebuild child adopts it"
+REASON2="Conflicts with main at def456; resume in prepare_mode=merge"
 grad
 run_pour tk-g --reason "$REASON"
 CHILD=$(kids_of tk-g)
 [ -n "$CHILD" ] && ok "the first repool filed the rebuild child" || bad "the first repool filed the rebuild child (none)"
 : > "$STUB_GC_LOG"
-run_pour tk-g --reason "$REASON"
-eq "$rc" 0 "a child already dispatched stands as the rebuild"
+run_pour tk-g --reason "$REASON2"
+eq "$rc" 0 "a child a live run works on stands as the rebuild"
 eq "$(kids_of tk-g)" "$CHILD" "no second child is filed"
 eq "$(slings)" "0" "and nothing is poured again"
+eq "$(meta "$CHILD" rejection_reason)" "$REASON" "the live run's work order is left as it is"
+has "$out" "is live on its rebuild child $CHILD" "the run names the live run that carries the rebuild"
 grad
 export STUB_SLING_FAIL=1
 run_pour tk-g --reason "$REASON"
@@ -274,16 +331,74 @@ eq "$(slung)" "tk-c0" "the pour is onto the adopted child"
 eq "$(meta tk-c0 rejection_reason)" "$REASON" "the adopted child's work order is completed before the pour"
 eq "$(meta tk-c0 target)" "main" "including the target it lands on"
 
-echo "# whether the found child is dispatched or armed is read from the listing that found it"
-# A gc whose show of $STUB_SHOW_FAIL_ID fails while every listing answers.
+echo "# a rebuild child whose run is over is released and poured with the new rejection"
+# merge-push anchors the convoy when the child's work lands, then closes the
+# child. A close that is refused leaves the child open, still carrying its
+# run's stamp and the refinery as its assignee, and the convoy can be rejected
+# again before the next pass retries the close.
+grad
+run_pour tk-g --reason "$REASON"
+CHILD=$(kids_of tk-g)
+end_runs "$CHILD"
+store "$(jq -c --arg id "$CHILD" 'map(if .id == $id then .assignee = "gc-toolkit/gc-toolkit.refinery" else . end)' "$STUB_STORE")"
+: > "$STUB_GC_LOG"
+run_pour tk-g --reason "$REASON2"
+eq "$rc" 0 "the repool is proved"
+eq "$(kids_of tk-g)" "$CHILD" "no second child is filed"
+eq "$(slings)" "1" "the child is poured again"
+eq "$(slung)" "$CHILD" "the pour is onto the same child"
+eq "$(meta "$CHILD" rejection_reason)" "$REASON2" "the child carries the new rejection"
+eq "$(bassignee "$CHILD")" "" "the refinery's assignment is released, so load-context does not read the child as handed off"
+works_on "$CHILD" "the run the repool pours works on the child"
+release=$(grep "^bd update $CHILD" "$STUB_GC_LOG" | head -n 1)
+has "$release" "--unset-metadata gc.execution_routed_to" "the release clears the last run's stamp, so only this pour can prove itself"
+has "$release" "--assignee=" "the release clears the assignee"
+first_update=$(grep -n "^bd update $CHILD" "$STUB_GC_LOG" | head -n 1 | cut -d: -f1)
+first_sling=$(grep -n '^sling ' "$STUB_GC_LOG" | head -n 1 | cut -d: -f1)
+if [ -n "$first_update" ] && [ -n "$first_sling" ] && [ "$first_update" -lt "$first_sling" ]; then
+  ok "the release lands before the pour"
+else
+  bad "the release lands before the pour (update line '$first_update', sling line '$first_sling')"
+fi
+grad
+run_pour tk-g --reason "$REASON"
+CHILD=$(kids_of tk-g)
+end_runs "$CHILD" canceled
+: > "$STUB_GC_LOG"
+run_pour tk-g --reason "$REASON2"
+eq "$rc" 0 "a child whose run was cancelled is poured again"
+eq "$(slung)" "$CHILD" "onto the same child"
+eq "$(meta "$CHILD" rejection_reason)" "$REASON2" "carrying the new rejection"
+
+echo "# runs on the rebuild child that cannot be read pour nothing"
+for knob in "STUB_DEP_PARTIAL=-t tracks" "STUB_LIST_FAIL_ON=gc.input_convoy_id"; do
+  grad
+  run_pour tk-g --reason "$REASON"
+  CHILD=$(kids_of tk-g)
+  end_runs "$CHILD"
+  : > "$STUB_GC_LOG"; : > "$STUB_ESC_LOG"
+  export "${knob%%=*}=${knob#*=}"
+  run_pour tk-g --reason "$REASON2"
+  unset "${knob%%=*}"
+  eq "$rc" 2 "an unreadable run read ($knob) -> visit, exit 2"
+  eq "$(slings)" "0" "nothing is poured ($knob)"
+  eq "$(meta "$CHILD" rejection_reason)" "$REASON" "nothing is written to the child ($knob)"
+  has "$(cat "$STUB_ESC_LOG")" "a live rebuild cannot be told from a finished one" "the visit names the unreadable runs ($knob)"
+done
+
+echo "# whether the found child is armed or live is never read from a show of the child"
+# A gc whose show of $STUB_SHOW_FAIL_ID fails while every listing answers. The
+# arm is read from the listing that found the child, and a live run from the
+# edges and the roots over it.
 SHOWFAIL="$TMP/bin-showfail"; mkdir -p "$SHOWFAIL"
 printf '#!/usr/bin/env bash\n[ "${1:-} ${2:-} ${3:-}" = "bd show ${STUB_SHOW_FAIL_ID:-}" ] && exit 1\nexec "%s/gc" "$@"\n' "$POUR" > "$SHOWFAIL/gc"
 chmod +x "$SHOWFAIL/gc"
 run_showfail() { STUB_SHOW_FAIL_ID=tk-c1 PATH="$SHOWFAIL:$POUR:$PATH" _run "$SD/rejection-repool.sh" "$@"; }
 grad
 store "$(jq -c --arg r "$ROUTE" '. + [{"id":"tk-c1","status":"open","assignee":"","title":"rebuild","issue_type":"task","priority":1,"metadata":{"task_kind":"rework","anchor_bead":"tk-g","branch":"integration/tk-g","target":"main","priority_shift":-1,"gc.execution_routed_to":$r}}]' "$STUB_STORE")"
+live_run_on tk-c1
 run_showfail tk-g --reason "$REASON"
-eq "$rc" 0 "a dispatched child whose own read fails still stands as the rebuild"
+eq "$rc" 0 "a child a live run works on stands as the rebuild when its own read fails"
 eq "$(slings)" "0" "nothing is poured again"
 eq "$(meta tk-c1 rejection_reason)" "<absent>" "its work order is not rewritten"
 eq "$(visits)" "0" "no visit is filed"

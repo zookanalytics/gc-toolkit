@@ -53,17 +53,27 @@
 #   3. For a convoy, its rebuild child is found among its live children: a
 #      task_kind=rework child on the convoy's branch that carries no review or
 #      ruling source key, which only rework-child.sh's children carry. One
-#      already dispatched is reported and left alone, and one armed is left to
-#      the deferred dispatch that pours it. With none, the child is filed
-#      whole: its work order (task_kind, anchor_bead, branch, target,
-#      rejection_reason, merge_strategy=mr, and existing_pr from a live pr_url)
-#      and the PR-finishing shift ride the create, with its blocks edge and its
-#      anchor edge onto the convoy. The child is then settled at its priority,
-#      because the pour copies the priority it finds.
+#      armed is left to the deferred dispatch that pours it, and one a run of
+#      mol-polecat-work is live on is reported and left alone. A run is live
+#      while its workflow root is not closed, the test gc sling applies before
+#      it pours the formula onto the child again. Any other child gets the
+#      release step 1 gives a plain bead, because its stamp and its assignee
+#      can outlive the run that wrote them: a cancelled run leaves its stamp,
+#      and a landing whose close was refused leaves the refinery as assignee.
+#      Its work order is then completed, with the new rejection_reason. With no
+#      child, one is filed whole: its work order (task_kind, anchor_bead,
+#      branch, target, rejection_reason, merge_strategy=mr, and existing_pr
+#      from a live pr_url) and the PR-finishing shift ride the create, with its
+#      blocks edge and its anchor edge onto the convoy. The child is then
+#      settled at its priority, because the pour copies the priority it finds.
+#      The settle waits for the priority lock no longer than the merge cadence
+#      allows its scripts (pr_finishing_settle), since the refinery patrol runs
+#      this script.
 #   4. `gc sling <route> <bead> --on mol-polecat-work` for the bead poured,
 #      proved by gc.execution_routed_to reading back on it as the route. Step 1
-#      cleared it on the work bead, and a rebuild child is poured only while it
-#      carries none, so only this pour can have written it.
+#      cleared it on the work bead, and a rebuild child is poured only once its
+#      own release has cleared it or while it carries none, so only this pour
+#      can have written it.
 # A pour that does not read back may still have started, so the writer never
 # stamps a bare route: a partial pour plus a pool claim double-dispatches the
 # work. When gc sling itself failed, the writer arms a deferred dispatch, whose
@@ -85,13 +95,20 @@ LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 POOL_ROUTE="$SCRIPTS_DIR/pool-route.sh"
 DEFERRED="$SCRIPTS_DIR/deferred-dispatch.sh"
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
-QUEUE_PRIORITY="${GC_QUEUE_PRIORITY_TOOL:-$SCRIPTS_DIR/queue-priority.sh}"
 WORK_FORMULA="mol-polecat-work"
 ESCALATE_KEY="rejection-repool-failed"
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
 warn()  { echo "rejection-repool: $*" >&2; }
 usage() { warn "$1"; exit 1; }
+
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
+# <<< control-char-scrub
 
 WORK=""; REASON=""; POOL_NAME="gc-toolkit.polecat"
 need() { [ "$2" -gt 1 ] || usage "$1 needs a value"; }
@@ -125,6 +142,27 @@ stop_short() {
   exit 3
 }
 
+# live_runs <bead> — the roots of the $WORK_FORMULA runs live on <bead>, one per
+# line, empty when none is. A run's root names its input convoy
+# (gc.input_convoy_id), the convoy that tracks the bead, and the run is live
+# while its root is not closed. Non-zero when the convoys or their roots could
+# not be read: gc's own exit is kept, since a failed read can still print [].
+live_runs() {
+  local edges convoys c roots out=""
+  edges=$(gc bd dep list "$1" --direction=up -t tracks --json </dev/null 2>/dev/null) || return 1
+  edges=$(printf '%s' "$edges" | grep -a -vE '^gc bd:' | scrub)
+  printf '%s' "$edges" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
+  convoys=$(printf '%s' "$edges" | jq -r '.[] | select(((.issue_type // .type // "") | tostring) == "convoy") | .id' 2>/dev/null) || return 1
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    roots=$(bd_list --metadata-field "gc.input_convoy_id=$c" --status="$LIVE_STATUSES") || return 1
+    out="$out$(printf '%s' "$roots" | jq -r --arg f "$WORK_FORMULA" \
+      '.[] | select(((.metadata["gc.formula_name"] // "") | tostring) == $f) | .id' 2>/dev/null)
+"
+  done <<< "$convoys"
+  printf '%s' "$out" | sed '/^$/d'
+}
+
 ROW=$(bd_json show "$WORK")
 printf '%s' "$ROW" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
   || stop_short "it could not be read (gc bd show returned no bead)" \
@@ -132,7 +170,7 @@ printf '%s' "$ROW" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
 printf '%s\n' "$ROW"
 PR_URL=$(row_meta "$ROW" pr_url)
 IS_CONVOY=""
-[ "$(printf '%s' "$ROW" | jq -r '.[0].issue_type // empty' 2>/dev/null)" = convoy ] && IS_CONVOY=1
+[ "$(printf '%s' "$ROW" | jq -r '.[0] | (.issue_type // .type // empty)' 2>/dev/null)" = convoy ] && IS_CONVOY=1
 # What a person runs to dispatch the rebuild to <pool> by hand: the work bead's
 # sling, or for a convoy a re-run of this script, which pours its rebuild child.
 by_hand() { # <pool>
@@ -206,27 +244,34 @@ if [ -n "$IS_CONVOY" ]; then
            "$RERUN, which adopts $POUR and completes its work order"
     warn "$WORK is a convoy, so its rebuild is poured onto the rebuild child $POUR filed for it"
   else
-    # Whether the child is dispatched or armed is read from the row the listing
-    # above returned: a second read that failed would pass it as neither.
+    # Whether the child is armed is read from the row the listing above
+    # returned: a second read that failed would pass it as not armed. The
+    # reconcile retires an arm only by its own sling, so a child poured here
+    # while armed would be poured again once its arm fires.
     ADOPT_ROW=$(printf '%s' "$KIDS" | jq -c --arg id "$POUR" '[ .[]? | select(.id == $id) ]' 2>/dev/null)
-    ADOPT_ROUTE=$(row_meta "$ADOPT_ROW" gc.execution_routed_to)
-    if [ -n "$ADOPT_ROUTE" ]; then
-      warn "repooled $WORK: its rebuild child $POUR is already dispatched to $ADOPT_ROUTE, and a second pour would double its rebuild"
-      exit 0
-    fi
-    # The reconcile retires an arm only by its own sling, so a child poured
-    # here while armed would be poured again once its arm fires.
     ADOPT_ARM=$(row_meta "$ADOPT_ROW" gc.dispatch_when_ready)
     if [ -n "$ADOPT_ARM" ]; then
       warn "$WORK: its rebuild child $POUR is armed for $ADOPT_ARM, and the deferred-dispatch reconcile pass pours it; nothing poured here"
       exit 2
     fi
+    LIVE=$(live_runs "$POUR") \
+      || stop_short "the runs on its rebuild child $POUR could not be read, so a live rebuild cannot be told from a finished one" \
+           "$RERUN once its store answers"
+    if [ -n "$LIVE" ]; then
+      warn "repooled $WORK: run ${LIVE%%$'\n'*} of $WORK_FORMULA is live on its rebuild child $POUR, and a second pour would double its rebuild"
+      exit 0
+    fi
+    "$LIFECYCLE" transition "$POUR" --to unanchored --assignee "" --route "" --unset gc.execution_routed_to >&2
+    LC_RC=$?
+    [ "$LC_RC" = 0 ] \
+      || stop_short "its rebuild child $POUR was not released from its last run (lifecycle.sh exit $LC_RC)" \
+           "$RERUN, which adopts $POUR"
     bd_meta_ensure "$POUR" "$ORDER" >/dev/null \
       || stop_short "its rebuild child $POUR did not read back carrying its whole work order" \
            "$RERUN, which adopts $POUR and completes its work order"
     warn "$WORK is a convoy, so its rebuild is poured onto its rebuild child $POUR, which a prior repool filed"
   fi
-  "$QUEUE_PRIORITY" settle "$POUR" >&2 \
+  pr_finishing_settle "$POUR" >&2 \
     || stop_short "its rebuild child $POUR did not settle at its priority, and a pour copies the priority it finds" \
          "$RERUN, which adopts $POUR"
 fi
