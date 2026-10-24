@@ -72,7 +72,9 @@ What it costs:
   through a convoy.
 - No recipe makes a convoy, so an effort has no convoy row on the helm board.
 - Each open convoy that carries a branch today is moved to a landing bead once
-  (section 10).
+  (section 10). An operator's `merge_hold` or `rebase_hold` on one becomes a
+  gate the landing bead waits on, which the operator closes to release the
+  effort.
 
 Unchanged: every PR needs the operator's approval, and every PR has exactly one
 owning bead (invariant I4), the bead it came from. For an effort that is its
@@ -581,7 +583,7 @@ a finished convoy today.
 | Takes an open owned convoy whose target is an integration branch | the landing bead names its branch, so nothing is selected |
 | Counts members in both forms, and a `tracks` edge to a bead it cannot read holds the convoy | the landing bead's `blocks` edges, which the recipe reads back before it hands the bead over. bd holds nothing on an edge to a bead in another store, so each bead of an effort is filed in the rig's store |
 | Requires a landing recorded on the branch, so a convoy whose members landed nothing does not graduate | the refinery refuses a branch with no change: it closes nothing, opens no PR, and parks the bead for a person |
-| Skips a convoy, or a bead on its branch, that carries `merge_hold` or `rebase_hold` | a park on the landing bead holds it before the refinery takes it. Once it is an anchor, either hold keeps its PR from opening, and `merge_hold` also holds its review dispatch and its merge, as for every PR |
+| Skips a convoy, or a bead on its branch, that carries `merge_hold` or `rebase_hold` | a `blocks` edge of its own, such as one onto a gate, holds the landing bead before the refinery takes it. Nothing reads either marker until the bead is an anchor, by which point the refinery has brought its branch current. `gc-helm.sh park` refuses a bead that carries a branch, so the edge is written with `gc bd dep add`, and section 10 carries an open convoy's hold over as one. Once the landing bead is an anchor, either marker keeps its PR from opening, and `merge_hold` also holds its review dispatch and its merge, as for every PR |
 | Skips a convoy whose branch a live bead already owns | one landing bead per branch, which the recipe names once |
 | Stamps `merge_strategy=mr` | the line for main resolves the landing bead to `mr` |
 | Stamps `graduation=true` | nothing reads it. The key stays registered, as retired |
@@ -789,12 +791,12 @@ exactly, a block counts its lines as they stand, and an addition is estimated.
 | Unit | Deletes | Adds | Net |
 |---|---|---|---|
 | A. The default and the one line | `rejection-branch-keep` (52), the fold-in flip (19), `GC_DEFAULT_MERGE_STRATEGY` with its prompt sentence and fixture check (7), the test's branch-decision section (about 145) | the one line (about 4), the resolve block's test cases (about 35), warrant 1 (about 12) | about -170 |
-| B. The landing bead reaches the refinery | `convoy-graduate.sh` (321), its test (305), `orders/convoy-check.toml` (31), arm 8 with its switch and target lookup (20), its cases (12), graduation's paragraphs and rows in the docs (about 20) | find-work's read of a hold (about 20) and its cases (about 45), `check-refinery`'s (about 15) and its cases (about 35), `check-refinery-patrol-live`'s (about 30) and its cases (about 35), the architecture page's sentence (about 5) | about -520 |
+| B. The landing bead reaches the refinery | `convoy-graduate.sh` (321), its test (305), `orders/convoy-check.toml` (31), arm 8 with its switch and target lookup (20), its cases (12), graduation's paragraphs and rows in the docs (about 20) | find-work's read of a hold (about 20) and its cases (about 55), `check-refinery`'s (about 15) and its cases (about 35), `check-refinery-patrol-live`'s (about 30) and its cases (about 35), the architecture page's sentence (about 5) | about -510 |
 | C. Recipes on the landing bead | `convoy-seed.sh` (158), its test (180), `mol-design-convoy-seed-invoke.test.sh` (142), `mol-design-convoy-subject-close.test.sh` (427), the seed-convoy step (88), the drain step (84), the arm steps' parent-child links (about 6), the mechanik's seed recipe and graduation prose (about 45), `docs/design-convoy.md`'s seed, graduation and subject-close text (about 60), the polecat doctrine's paragraph (about 15) | the seed step (about 40), each bead's two writes and the hand-off (about 18), the arm test's cases (about 30), the mechanik's recipe (about 30), `docs/design-convoy.md` (about 20), the doctrine's paragraph (about 12) | about -1,060 |
 | D. The guard | step 1b of workspace-setup (116), its test (425) | nothing | -541 |
 | E. The banner and label | `pr-status-label.sh`'s `base:` group (about 55) and its test section (about 45), the banner (about 17), `pr-open.sh`'s calls (8) and its banner cases (about 52), `docs/state-machine.md`'s base label section (47) | nothing | about -225 |
 | F. One shared reader | the 19 copies in shell and formulas that stay in use (672), the lookup fixtures in their tests (about 150) | the reader (about 150), its suite and shared fixture (about 260), 19 calls (about 95), the Go copy's fixture test (about 20) | about -300 |
-| **All** | **about 3,720** | **about 910** | **about -2,810** |
+| **All** | **about 3,720** | **about 920** | **about -2,800** |
 
 What stays, and why, is section 8. Section 11 lists every living file the units
 change.
@@ -812,6 +814,22 @@ spec names no live bead: the hand-off lists each rig's open convoys
 whose `target` names an integration branch and that carries no `branch` of its
 own.
 
+The landing bead must be held wherever the convoy was held. Graduation takes no
+convoy that carries `merge_hold` or `rebase_hold`, or whose branch a live bead
+holds with either. Once graduation makes a convoy an anchor, its merge waits on
+every open blocker of its own, and the beads that wait on it are released when
+it closes, at its PR's merge. A landing bead handed over without those holds is
+taken by the refinery as soon as its effort's beads have closed. The refinery
+brings its branch current, and the cadence reviews it and opens its PR, because
+`gate-ensure.sh` and `pr-open.sh` read holds off the PR's anchor alone. So the
+move carries each hold onto the landing bead as a `blocks` edge before it hands
+the bead over, and moves each wait off the convoy before it closes the convoy.
+A marker would not keep the refinery from taking the landing bead. No step of
+the refinery's patrol from find-work through merge-push reads either marker, and
+bd decides from edges, not markers, when the bead is ready. That is when Gas
+City counts it as the refinery's demand and the deferred-dispatch pass sends its
+notice.
+
 For each such convoy, in this order:
 
 1. **Name its landing bead.** A `mol-design-convoy` subject that records the
@@ -822,18 +840,72 @@ For each such convoy, in this order:
 3. **Move each open bead the convoy tracks or parents.** Write the convoy's
    target as the bead's own `target` when it names none, add the landing bead's
    `blocks` edge on it, and read both back.
-4. **Move a subject's close.** A subject that is the landing bead loses its
-   `until` edge onto the convoy, which would close it when the convoy closes.
-5. **Hand the landing bead to the refinery,** with its notice. A convoy whose
-   beads have all closed has a landing bead that is ready at once.
-6. **Close the convoy** with `gc convoy close`, Gas City's verb for closing a
-   convoy whatever its beads' status. Nothing reads its target after step 3.
+4. **Carry the convoy's holds.**
+   - **An operator's hold.** When the convoy carries `merge_hold` or
+     `rebase_hold`, or a live bead besides the landing bead carries either and
+     names the convoy's target as its `branch`, file a gate in the rig's store
+     with no await type, the shape of a park's gate, so no sweep closes or
+     visits it. Its title says what was held and that closing it releases the
+     effort to the refinery. Its description names the bead that carried the
+     hold and the markers it stands for, with any `hold_reason` beside them. Add
+     the landing bead's `blocks` edge onto the gate and read it back.
+     `gc-helm.sh park` refuses a bead that carries a branch, so the edge is
+     written with `gc bd dep add`, as every wait of the landing bead is. The
+     markers stay where they are and are not copied to the landing bead.
+     Closing the gate is the release for the effort, and a marker on the
+     landing bead would keep its PR from opening after the operator had
+     released it.
+   - **A prerequisite.** For each open bead the convoy waits on by a `blocks`
+     edge, such as a park's gate, add the same edge from the landing bead and
+     read it back.
+5. **Move what waits on the convoy.** A subject that is the landing bead loses
+   its `until` edge onto the convoy, which would close it when the convoy
+   closes. Each other open bead that waits on the convoy, by a `blocks` or an
+   `until` edge, gets the same edge onto the landing bead, read back, and then
+   loses its edge onto the convoy. The landing bead closes when its PR merges,
+   as a graduated convoy does, so each of those waits still ends when the effort
+   reaches main.
+6. **Hand the landing bead to the refinery,** with its notice. A convoy whose
+   beads have all closed and that nothing held has a landing bead that is ready
+   at once. A held one stays out of bd's ready work until its gate and every
+   blocker step 4 carried have closed, so until then the refinery neither
+   prepares its branch nor opens its PR.
+7. **Close the convoy.** Append a note to it naming its landing bead and any
+   gate step 4 filed, then close it with `gc convoy close`, Gas City's verb for
+   closing a convoy whatever its beads' status. Nothing reads its target after
+   step 3, and nothing waits on it after step 5.
+
+A write that does not read back stops the move before step 6: the landing bead
+is not handed over, the convoy stays open, and the hand-off records which write
+failed. A bead in another store is the usual cause, since bd holds nothing on an
+edge across two stores.
 
 A convoy that graduation already handed to the refinery carries a branch and a
 target of main, so the hand-off passes over it: it finishes as any anchor does.
 Between the implementation's merge and the hand-off, a finished convoy waits for
 its landing bead, and its open beads still reach its branch through their own
 target or their parent link, so nothing lands on main by mistake.
+
+### What the hand-off checks
+
+The hand-off closes once each convoy it moved reads back this way:
+
+- **A held convoy whose beads have all closed**, the case the move exists to
+  keep held: its landing bead is assigned to the refinery and waits on the gate
+  filed for the hold, bd's ready work leaves it out, and its notice
+  (`gc.notify_when_ready`) is still recorded on it, since bd has not reported it
+  ready.
+- **A convoy that waited on an open bead:** its landing bead waits on the same
+  bead.
+- **A bead that waited on the convoy:** it waits on the landing bead by the same
+  kind of edge, and its edge onto the convoy is gone.
+- **A convoy with open beads:** its landing bead waits on each of them.
+- **A finished convoy that nothing held:** its landing bead is ready.
+- **Every convoy it moved** is closed, with the note that names its landing
+  bead.
+
+Unit B's tests pin the refinery's side of the first case: a landing bead held
+only by such a gate is not taken until the gate closes (section 12).
 
 ## 11. What to correct
 
@@ -968,6 +1040,10 @@ Unit B is accepted on its first case, the one the change exists for.
   block selects the landing bead. Unit A's case for a bead aimed at main resolves
   it to `mr`, and from there it takes the path to its PR that every bead bound
   for main takes.
+- **A carried hold waits.** A landing bead whose effort beads have all closed,
+  and whose one open blocker is a gate with no await type, the gate section 10
+  files for an open convoy's hold, is not selected. Once the gate closes, the
+  block selects it.
 - **A handoff waits only on a blocker of its own.** A polecat's handoff with no
   blocker is selected, and so is a handoff whose epic is parked, since a hold on
   an ancestor leaves work in flight running. A handoff with an open blocker of its
