@@ -17,11 +17,17 @@
 #      at ALL THREE terminal exits (handoff, the auto_push=false halt, and the
 #      store-only exit), and workflow-finalize is never touched.
 #   5. STORE-ONLY EXIT — a run that produced no commit releases the bead the
-#      way the halt arm does, in three writes the claim guard accepts, and
+#      way the halt arm does, a metadata write and then the hand-back, and
 #      refuses the arm outright when the run has a diff to land.
 #   6. SESSION PINS — every terminal exit that lets go of the bead removes the
 #      claim's gc.session_id and gc.session_name in its first write, the same
 #      pair at all three.
+#   7. HAND-BACK — the halt and store-only arms, and the bring-current arm of
+#      workspace-setup, hand the bead back in one write that reopens it and
+#      clears its assignee together, guarded on the status and holder the bead
+#      shows, in one block copied byte for byte into all three. A bead that
+#      shows closed is never reopened, and a refused write clears nothing and
+#      says so on the bead.
 #
 # This EXECUTES the real snippets extracted verbatim from the formula (between
 # the markers) against a fake `git`/`gc`, so the test cannot drift from the
@@ -129,12 +135,22 @@ BP_DEFAULT="$(awk '
 # gc    : `gc bd show <id> --json` returns $FAKE_META as the metadata object,
 #         `gc bd update ...` and `gc runtime drain-ack` are recorded so the
 #         assertions can prove WHAT was written and WHETHER the arm halted.
-#         `gc bd update` ENFORCES bd's claim guard: an assignee change on an
-#         in_progress bead is refused and rolled back (records nothing, exits 1),
-#         so a one-shot handoff fails exactly as it does against real bd and only
-#         the metadata -> status=open -> assignee split lands. Current state is
-#         reconstructed from this scenario's own log (reset per scenario), so a
-#         fresh bead is in_progress and held — what the polecat holds at handoff.
+#         `gc bd update` ENFORCES bd's claim guard: an unguarded assignee
+#         change on an in_progress bead is refused and rolled back (records
+#         nothing, exits 1), so a one-shot handoff fails exactly as it does
+#         against real bd and only the metadata -> status=open -> assignee split
+#         lands. It also enforces the --if-status and --if-assignee guards as bd
+#         does: a mismatch refuses the whole write (records nothing, exits 13),
+#         and a write guarded on the assignee skips the claim guard.
+#         $FAKE_REFUSE_REOPEN refuses every write that carries --status=open,
+#         the way a store failing the reopen looks to the arm, and
+#         $FAKE_ACTOR_HOLDS makes the writer the holder, whose unguarded
+#         assignee change the claim guard lets through. Current
+#         state is reconstructed from this scenario's own log (reset per
+#         scenario), starting from $FAKE_STATUS (in_progress) and $FAKE_HOLDER
+#         (lx-holder, empty for an unassigned bead), so a fresh bead is
+#         in_progress and held — what the polecat holds at handoff — and
+#         `gc bd show` serves the same status and assignee beside $FAKE_META.
 #         `gc agent list --json` answers $FAKE_AGENTS; the value UNREADABLE
 #         makes the call fail, which reaches the guard as a different cause
 #         than an empty roster but must take the same arm.
@@ -155,16 +171,29 @@ exit 0
 GIT
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
+# state <id>: the bead's status and assignee as this scenario's writes left them.
+state() {
+  cur_status="${FAKE_STATUS:-in_progress}"; cur_assignee="${FAKE_HOLDER-lx-holder}"
+  if [ -s "${FAKE_LOG:-/dev/null}" ]; then
+    beadlines=$(grep -F "UPDATE|$1 " "$FAKE_LOG" 2>/dev/null || true)
+    s=$(printf '%s\n' "$beadlines" | grep -oE -- '--status=[^ ]*' | tail -1 | sed 's/^--status=//')
+    [ -n "$s" ] && cur_status="$s"
+    if grep -qE -- '--assignee=' <<< "$beadlines"; then
+      cur_assignee=$(printf '%s\n' "$beadlines" | grep -oE -- '--assignee=[^ ]*' | tail -1 | sed 's/^--assignee=//')
+    fi
+  fi
+}
 case "$1 $2" in
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
-  "bd show")           printf '[{"metadata":%s}]\n' "${FAKE_META:-{\}}"; exit 0 ;;
+  "bd show")           state "$3"
+                       printf '[{"status":"%s","assignee":"%s","metadata":%s}]\n' "$cur_status" "$cur_assignee" "${FAKE_META:-{\}}"; exit 0 ;;
   "bd update")
     # Model bd's claim guard (validation.AssigneeNotStolen): reassigning an
     # in_progress bead held by someone the caller is not is refused, and the
-    # refusal rolls the WHOLE call back. The polecat's actor is its session NAME
-    # (BEADS_ACTOR) while the hook-claim holder is its session ID, so the two
-    # never match; we model that as always mismatched and refuse any assignee
-    # CHANGE while the bead is in_progress. Once --status=open lands, the bead is
+    # refusal rolls the WHOLE call back. The polecat's actor (BEADS_ACTOR) need
+    # not be spelled the way the hook claim recorded the holder, so we model the
+    # two as always mismatched and refuse any unguarded assignee CHANGE while
+    # the bead is in_progress. Once --status=open lands, the bead is
     # no longer in_progress and the assignee write is accepted. Current state is
     # reconstructed from this scenario's own log, so a fresh bead is in_progress
     # and held.
@@ -173,21 +202,24 @@ case "$1 $2" in
     # $FAKE_TITLE_REFUSE refuses any title write, as bd refuses a title it will
     # not store, so the handoff can be shown to survive a refused retitle.
     case " $argv " in *' --title '*) [ -n "${FAKE_TITLE_REFUSE:-}" ] && { printf 'Error: title refused\n' >&2; exit 1; } ;; esac
-    cur_status=in_progress; cur_assignee=lx-holder
-    if [ -s "${FAKE_LOG:-/dev/null}" ]; then
-      beadlines=$(grep -F "UPDATE|$id " "$FAKE_LOG" 2>/dev/null || true)
-      s=$(printf '%s\n' "$beadlines" | grep -oE -- '--status=[^ ]*' | tail -1 | sed 's/^--status=//')
-      [ -n "$s" ] && cur_status="$s"
-      if grep -qE -- '--assignee=' <<< "$beadlines"; then
-        cur_assignee=$(printf '%s\n' "$beadlines" | grep -oE -- '--assignee=[^ ]*' | tail -1 | sed 's/^--assignee=//')
-      fi
+    state "$id"
+    # bd's --if-status and --if-assignee: the write lands only while the bead
+    # shows that status and that assignee, an empty --if-assignee naming an
+    # unassigned bead, and a mismatch refuses all of it with exit 13.
+    if_status=""; guarded=0; if_assignee=""
+    case " $argv " in *' --if-status='*) if_status=$(printf '%s\n' "$argv" | grep -oE -- '--if-status=[^ ]*' | head -1 | sed 's/^--if-status=//') ;; esac
+    case " $argv " in *' --if-assignee='*) guarded=1; if_assignee=$(printf '%s\n' "$argv" | grep -oE -- '--if-assignee=[^ ]*' | head -1 | sed 's/^--if-assignee=//') ;; esac
+    case " $argv " in *' --status=open '*) [ -n "${FAKE_REFUSE_REOPEN:-}" ] && { printf 'Error updating %s: the store refused the write\n' "$id" >&2; exit 1; } ;; esac
+    if { [ -n "$if_status" ] && [ "$if_status" != "$cur_status" ]; } || { [ "$guarded" = 1 ] && [ "$if_assignee" != "$cur_assignee" ]; }; then
+      printf 'Error updating %s: precondition failed: it shows status "%s" and assignee "%s"\n' "$id" "$cur_status" "$cur_assignee" >&2; exit 13
     fi
     has_assignee=0; new_assignee=""
     case " $argv " in *' --assignee='*) has_assignee=1; new_assignee=$(printf '%s\n' "$argv" | grep -oE -- '--assignee=[^ ]*' | head -1 | sed 's/^--assignee=//') ;; esac
     # $FAKE_FORCE_GUARD forces the refusal on any assignee change regardless of
     # status, to exercise the handoff's fail-closed arm on a write that is
     # refused even after the split (a shape the real guard should never take).
-    if [ "$has_assignee" = 1 ] && [ -n "$cur_assignee" ] && [ "$new_assignee" != "$cur_assignee" ] && { [ "$cur_status" = in_progress ] || [ -n "${FAKE_FORCE_GUARD:-}" ]; }; then
+    # A write guarded on the assignee skips the claim guard, as bd skips it.
+    if [ "$guarded" = 0 ] && [ -z "${FAKE_ACTOR_HOLDS:-}" ] && [ "$has_assignee" = 1 ] && [ -n "$cur_assignee" ] && [ "$new_assignee" != "$cur_assignee" ] && { [ "$cur_status" = in_progress ] || [ -n "${FAKE_FORCE_GUARD:-}" ]; }; then
       printf 'cannot reassign %s: held by "%s" (in_progress); coordinate with the holder — pass --force only if their claim is abandoned\n' "$id" "$cur_assignee" >&2
       printf 'Error: 1 of 1 issues failed to update\n' >&2
       exit 1
@@ -1029,14 +1061,16 @@ eq "$(sed 's/^mol-polecat-work\.//' "$TMP/closed" | tr '\n' ',' | sed 's/,$//')"
 # stranded exactly the husk the change exists to stop, and nothing here ran the
 # arm to notice. This section runs it.
 
-# run_halt <script> -> "<rc>"; the ordered trace is left in $TMP/log.
+# run_halt <script> [env assignments...] -> "<rc>"; the ordered trace is left
+# in $TMP/log.
 run_halt() {
   : > "$TMP/log"; : > "$TMP/closed"; : > "$TMP/attempted"; : > "$TMP/hold"
+  local script="$1"; shift
   local rc=0
-  FAKE_BRANCH=polecat/tk-work FAKE_META='{"auto_push":false}' LANDING_TARGET=main \
+  env "$@" FAKE_BRANCH=polecat/tk-work FAKE_META='{"auto_push":false}' LANDING_TARGET=main \
     GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
     FAKE_LOG="$TMP/log" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" FAKE_ENGINE_CLOSED="$TMP/engine-closed" \
-    bash "$1" > "$TMP/out" 2>&1 || rc=$?
+    bash "$script" > "$TMP/out" 2>&1 || rc=$?
   printf '%s' "$rc"
 }
 # The sequence of things the arm DID, one token per event — the only view that
@@ -1052,8 +1086,8 @@ bash -n "$TMP/halt.sh" \
 # bead is parked and before the session drains.
 HALT_RC="$(run_halt "$TMP/halt.sh")"
 eq "$HALT_RC" "0" "halt arm exits 0"
-eq "$(trace)" "UPDATE,UPDATE,UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN" \
-   "halt arm parks the bead in three writes, closes five steps, THEN drains"
+eq "$(trace)" "UPDATE,UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN" \
+   "halt arm parks the bead in two writes, closes five steps, THEN drains"
 eq "$(sed -n 's/^CLOSE|mol-polecat-work\.//p' "$TMP/log" | tr '\n' ',' | sed 's/,$//')" \
    "$LOOP_STEPS" \
    "halt arm closes the same five steps, forward order"
@@ -1061,16 +1095,13 @@ eq "$(sed -n 's/^CLOSE|mol-polecat-work\.//p' "$TMP/log" | tr '\n' ',' | sed 's/
 # The bead write is the halt's whole point: branch and target recorded,
 # branch_ready + halt_reason set so the caller can tell an opt-out halt from a
 # failure, and --append-notes rather than the --notes that erases the dispatch
-# note. It is three writes for the same reason the store-only arm is:
-# clearing the assignee while in_progress is refused by the claim guard, so the
-# metadata clears the route first, --status=open lands next, and --assignee last.
+# note. The metadata clears the route first, and then the hand-back reopens the
+# bead and clears its assignee in one write, guarded on what the bead shows.
 eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 1p)" \
    "tk-work --set-metadata branch=polecat/tk-work --set-metadata target=main --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Branch ready: auto_push=false (no push, no refinery handoff)" \
    "halt arm first write: branch + target + branch_ready + halt_reason + cleared route + session pins removed, --append-notes"
-eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)" "tk-work --status=open" \
-   "halt arm second write: --status=open alone, while the bead is still assigned"
-eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 3p)" "tk-work --assignee=" \
-   "halt arm third write: --assignee cleared, after the status is open"
+eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)" "tk-work --if-status=in_progress --if-assignee=lx-holder --status=open --assignee=" \
+   "halt arm second write: the hand-back reopens the bead and clears its assignee together, guarded on the status and holder it shows"
 eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 1p | grep -c -- '--assignee')" "0" \
    "the assignee is NOT batched with the metadata (that call is refused whole)"
 
@@ -1104,7 +1135,7 @@ printf '%s\n' "$HALT" \
   | awk '/# >>> submit-halt-chain-close$/{f=1} /# <<< submit-halt-chain-close$/{f=0; next} !f' \
   > "$TMP/halt-nochain.sh"
 CTRL_RC="$(run_halt "$TMP/halt-nochain.sh")"
-eq "$CTRL_RC|$(trace)" "0|UPDATE,UPDATE,UPDATE,DRAIN" \
+eq "$CTRL_RC|$(trace)" "0|UPDATE,UPDATE,DRAIN" \
    "control: comment-only halt arm drains with the chain open (the defect is real)"
 
 # --- 6b. The store-only exit. -------------------------------------------------
@@ -1146,29 +1177,24 @@ bash -n "$TMP/store.sh" \
 eq "$(run_store "$TMP/store.sh")|$(trace)" "0|" \
    "empty STORE_ONLY_RECORD: falls through, writes nothing, does not drain"
 
-# THE ARM. Three writes, then the five closes, then the drain — the order is the
-# contract, not an accident: metadata bypasses the claim guard, --status=open is
-# accepted from the holder, and only then does the plain --assignee write land.
+# THE ARM. Two writes, then the five closes, then the drain — the order is the
+# contract, not an accident: the metadata clears the route before the hand-back
+# opens the bead.
 eq "$(run_store "$TMP/store-armed.sh")" "0" "store-only arm exits 0"
-eq "$(trace)" "UPDATE,UPDATE,UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN" \
-   "store-only arm releases in three writes, closes five steps, THEN drains"
+eq "$(trace)" "UPDATE,UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN" \
+   "store-only arm releases in two writes, closes five steps, THEN drains"
 eq "$(sed -n 's/^CLOSE|mol-polecat-work\.//p' "$TMP/log" | tr '\n' ',' | sed 's/,$//')" \
    "$LOOP_STEPS" \
    "store-only arm closes the same five steps, forward order"
 
-# The writes themselves, and their ORDER, which is the whole reason there are
-# three. A gc bd update that moves the assignee while this session still holds
-# the bead is refused by bd's claim guard, and the refusal rolls back the
-# metadata and the notes batched into the same call. Metadata first (it bypasses
-# the guard), then --status=open from the holder, then the plain --assignee. The
-# intermediate — open, still assigned, unrouted — no pool query can see.
+# The writes themselves, and their ORDER. Metadata first, clearing the route
+# while the bead is still held, then the hand-back: one write that reopens the
+# bead and clears its assignee, guarded on the status and holder it shows.
 eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 1p)" \
    "tk-work --set-metadata halt_reason=store_only --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Store-only exit: filed tk-filed,gc-filed. <what closes this bead, or the bead-rehome.sh invocation that disposes of it>" \
    "first write: halt_reason + cleared route + session pins removed + the filed record, --append-notes not --notes"
-eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)" "tk-work --status=open" \
-   "second write: --status=open alone, while the bead is still assigned"
-eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 3p)" "tk-work --assignee=" \
-   "third write: --assignee alone, after the status is open"
+eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)" "tk-work --if-status=in_progress --if-assignee=lx-holder --status=open --assignee=" \
+   "second write: the hand-back reopens the bead and clears its assignee together, guarded on the status and holder it shows"
 eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 1p | grep -c -- '--assignee')" "0" \
    "the assignee is NOT batched with the metadata (that call is refused whole)"
 
@@ -1233,8 +1259,61 @@ fi
 # leaves five step beads open to be re-offered as new work.
 awk '/# >>> submit-store-only-chain-close$/{f=1} /# <<< submit-store-only-chain-close$/{f=0; next} !f' \
   "$TMP/store-armed.sh" > "$TMP/store-nochain.sh"
-eq "$(run_store "$TMP/store-nochain.sh")|$(trace)" "0|UPDATE,UPDATE,UPDATE,DRAIN" \
+eq "$(run_store "$TMP/store-nochain.sh")|$(trace)" "0|UPDATE,UPDATE,DRAIN" \
    "control: chain-less store-only arm drains with the chain open (the defect is real)"
+
+# --- 6d. The hand-back. -------------------------------------------------------
+# Three arms let go of a bead they may hold: the halt and store-only exits here,
+# and workspace-setup's stop to ask a person about a bead with no molecule. Each
+# hands it back in one write that reopens it and clears its assignee together,
+# guarded on the status and holder the bead shows. Split into a reopen and then
+# a clear, a store that fails the reopen and takes the clear leaves the bead
+# in_progress with no assignee, which no pool's work query serves. The block
+# is one shell copied into each arm, because each fenced block is its own
+# shell, so the copies are held identical here.
+HB_HALT="$(extract submit-halt-hand-back)"
+HB_STORE="$(extract submit-store-only-hand-back)"
+HB_BRING="$(extract bring-current-hand-back)"
+[ -n "$HB_HALT" ] && [ -n "$HB_STORE" ] && [ -n "$HB_BRING" ] \
+  && ok "the hand-back is extracted from all three arms" \
+  || bad "a hand-back extraction is EMPTY — markers missing from $TOML"
+[ "$HB_HALT" = "$HB_STORE" ] && [ "$HB_HALT" = "$HB_BRING" ] \
+  && ok "the three hand-back copies are identical, byte for byte" \
+  || bad "the hand-back copies have DRIFTED"
+case "$HALT" in *"$HB_HALT"*) ok "the halt arm runs its hand-back" ;; *) bad "the halt arm does not carry its hand-back" ;; esac
+case "$STORE" in *"$HB_STORE"*) ok "the store-only arm runs its hand-back" ;; *) bad "the store-only arm does not carry its hand-back" ;; esac
+case "$HB_HALT" in *\\*) bad "the hand-back contains a backslash" ;; *) ok "the hand-back is backslash-free" ;; esac
+
+# bead_state [env assignments...] -> "<status>|<assignee>" as the scenario's
+# writes left the bead, from the starting state the same assignments name.
+bead_state() { env "$@" FAKE_LOG="$TMP/log" gc bd show tk-work --json | jq -r '.[0] | "\(.status)|\(.assignee)"'; }
+# Every write that clears the assignee also reopens the bead.
+split_clears() { sed -n 's/^UPDATE|//p' "$TMP/log" | grep -E -- '--assignee=( |$)' | grep -cv -- '--status=open' || true; }
+NOTE_HELD="tk-work --append-notes Hand-back refused: the bead showed status in_progress and assignee lx-holder, and the claim is left as it was."
+for arm in halt store; do
+  if [ "$arm" = halt ]; then run=run_halt; script="$TMP/halt.sh"; else run=run_store; script="$TMP/store-armed.sh"; fi
+  eq "$($run "$script")|$(bead_state)|$(split_clears)" "0|open||0" \
+     "$arm: a bead held in_progress is handed back open and unassigned, by a write that reopens it as it clears it"
+  eq "$($run "$script" FAKE_STATUS=open FAKE_HOLDER=)|$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)|$(bead_state FAKE_STATUS=open FAKE_HOLDER=)" \
+     "0|tk-work --if-status=open --if-assignee= --status=open --assignee=|open|" \
+     "$arm: a bead already open and unassigned takes the same write, guarded on what it shows"
+  eq "$($run "$script" FAKE_STATUS=closed)|$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)|$(bead_state FAKE_STATUS=closed)" \
+     "0|tk-work --append-notes Hand-back refused: the bead showed status closed and assignee lx-holder, and the claim is left as it was.|closed|lx-holder" \
+     "$arm: a bead that shows closed is not reopened, and the notes say so"
+  eq "$($run "$script" FAKE_REFUSE_REOPEN=1 FAKE_ACTOR_HOLDS=1)|$(trace)|$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)|$(bead_state)" \
+     "0|UPDATE,UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN|$NOTE_HELD|in_progress|lx-holder" \
+     "$arm: a store that fails the reopen leaves the claim held and noted, and the run still ends"
+done
+
+# CONTROL: the release the hand-back replaced, a reopen and then a clear, run
+# against the same store fault with the writer holding the bead. The clear lands
+# without the reopen and leaves the bead in_progress with no assignee, the
+# stranded state the hand-back cannot reach.
+: > "$TMP/log"
+printf '%s\n' 'gc bd update "$WORK_BEAD_ID" --status=open' 'gc bd update "$WORK_BEAD_ID" --assignee=""' > "$TMP/split-release.sh"
+FAKE_LOG="$TMP/log" FAKE_REFUSE_REOPEN=1 FAKE_ACTOR_HOLDS=1 bash "$TMP/split-release.sh" >/dev/null 2>&1 || true
+eq "$(bead_state)" "in_progress|" \
+   "control: the split release strands the bead in_progress with no assignee (the defect is real)"
 
 # --- 6c. The bring-current guard. ---------------------------------------------
 # A round that brought the branch current must not reach the handoff before the
