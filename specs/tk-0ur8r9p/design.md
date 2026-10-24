@@ -844,9 +844,9 @@ ruling of sitting tk-tdt71ue left it the helper's name:
   patrol finding under its key, the route the helper's refusal names. So does
   a call about a subject that reads as a session bead, whatever the shape of
   its id, because a session names no work that can wait. A call whose subject
-  does not read as one bead with a type files nothing and fails, so its caller
-  retries, because the helper reads only the subject's edges, and those can
-  answer where the row did not. So an old call the old script filed still
+  does not read as one bead files nothing and fails, so its caller retries,
+  because the helper reads only the subject's edges, and those can answer where
+  the row did not. So an old call the old script filed still
   files. The hand-off retires under a dated debt (section 10).
   Keeping the old name would cost nothing to build, and it would leave the
   retired word in the call most filers make.

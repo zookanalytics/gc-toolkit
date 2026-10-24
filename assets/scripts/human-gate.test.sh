@@ -558,13 +558,33 @@ unread_case "a read that exits 1 after the session's row" STUB_SHOW_RC=1
 unread_case "a payload cut short" 'STUB_SHOW_RAW=[{"id":"lx-abc12","status":"open","issue_type":"sess'
 unread_case "an error object" 'STUB_SHOW_RAW={"error":"no issue found matching lx-abc12"}'
 unread_case "a row for a longer id" 'STUB_SHOW_RAW=[{"id":"lx-abc123","status":"open","issue_type":"session"}]'
-unread_case "a row with no type" 'STUB_SHOW_RAW=[{"id":"lx-abc12","status":"open"}]'
 reset "$(task tk-w)"; : > "$STUB_PF_LOG"
 out=$("$HSUT/escalate.sh" --subject tk-gone --key k --message m 2>/dev/null); rc=$?
 eq "$rc" 1 "a subject its store does not hold fails the call the same way"
 eq "$out$(creates)" "0" "  ... with no gate filed or named"
 eq "$(cat "$STUB_PF_LOG")" "" "  ... and no finding"
 hasnt "$(calls)" "[dep] [list]" "  ... before the helper runs"
+
+echo "# a row with no type is a bead that can wait, unless it carries the session label"
+# bd leaves an empty issue_type out of its JSON. Gas City counts a bead with no
+# type and the gc:session label as a damaged session bead, and nothing else
+# with no type as a session.
+reset "$(task tk-w),{\"id\":\"tk-legacy\",\"title\":\"legacy\",\"status\":\"open\"}"; : > "$STUB_PF_LOG"
+out=$("$HSUT/escalate.sh" --subject tk-legacy --key k --message m 2>/dev/null); rc=$?
+eq "$rc" 0 "a bead whose row carries no type: the helper files"
+eq "$out" "gate-1" "  ... its gate on the bead"
+has "$(cat "$STUB_EDGES")" "tk-legacy|blocks|gate-1" "  ... which blocks the bead"
+eq "$(cat "$STUB_PF_LOG")" "" "  ... and no finding is filed"
+reset "$(task tk-w),{\"id\":\"lx-broken\",\"title\":\"s\",\"status\":\"open\",\"labels\":[\"agent:rig/rig.witness\",\"gc:session\"]}"; : > "$STUB_PF_LOG"
+"$HSUT/escalate.sh" --subject lx-broken --key k --message m >/dev/null 2>"$TMP/err"; rc=$?
+eq "$rc" 0 "a row with no type and the gc:session label files a finding"
+eq "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [k] [--title] [m] [--message] [m]" "  ... under its key"
+eq "$(creates)" 0 "  ... and no gate blocks the damaged session bead"
+has "$(cat "$TMP/err")" "'lx-broken' names a session" "  ... and the translation says why"
+reset "$(task tk-w),{\"id\":\"tk-typed\",\"title\":\"t\",\"status\":\"open\",\"issue_type\":\"task\",\"labels\":[\"gc:session\"]}"; : > "$STUB_PF_LOG"
+out=$("$HSUT/escalate.sh" --subject tk-typed --key k --message m 2>/dev/null); rc=$?
+eq "$rc$out" "0gate-1" "a row whose type is not session is a bead that can wait, label or not"
+eq "$(cat "$STUB_PF_LOG")" "" "  ... and no finding is filed"
 
 echo "# a subject the old name cannot prove is no bead goes to the helper"
 for bsrc in 0 3; do
