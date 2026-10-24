@@ -93,7 +93,7 @@ block() {
   ok "$2: block extracted between markers"
   printf '%s\n' "$body" | sed -e 's|{{issue}}|tk-iss|g' -e 's|{{origin_remote}}|origin|g' \
     -e 's|{{upstream_remote}}|upstream|g' -e 's|{{upstream_branch}}|main|g' \
-    -e 's|{{notify_recipient}}|mayor/|g' > "$3"
+    -e 's|{{notify_recipient}}|mayor/|g' -e 's|{{requesting_keeper}}|keeper/from-var|g' > "$3"
   case "$(cat "$3")" in
     *'{{'*) bad "$2: no unrendered formula placeholder left" ;;
     *)      ok "$2: no unrendered formula placeholder left" ;;
@@ -416,7 +416,7 @@ prprep_case() { # <gascity|other> <label> [<bd-update-rc>]; sets RC, D, WT, SHA
   mkdir -p "$d/tmp"
   keeper_repos "$d"
   keeper_roster "$d" "$1"
-  printf '%s\n' "$KEEPER_META" > "$d/meta.json"
+  printf '%s\n' "${PRPREP_META:-$KEEPER_META}" > "$d/meta.json"
   SHA=$(ref "$d/rig" origin/main)
   # The worktree goes under the session's home, which is the cwd.
   WT="$d/cwd/worktrees/tk-iss"
@@ -446,6 +446,11 @@ has "$(cat "$D/gc.log")" "mail send human -s pr-prep: no gascity rig for tk-iss"
 has "$(cat "$D/gc.log")" "bd update tk-iss --set-metadata aborted_at=workspace-setup --status=open --assignee=gascity/gascity-keeper.keeper --set-metadata gc.routed_to=gascity/gascity-keeper.keeper" \
   "pr-prep/unregistered: the bead goes back open, assigned and routed to the keeper"
 has "$(cat "$D/gc.log")" "runtime drain-ack" "pr-prep/unregistered: the session drains"
+PRPREP_META='[{"metadata":{}}]' prprep_case other unstamped
+has "$(cat "$D/gc.log")" "bd update tk-iss --set-metadata aborted_at=workspace-setup --status=open --assignee=keeper/from-var --set-metadata gc.routed_to=keeper/from-var" \
+  "pr-prep/unstamped: with no requesting_keeper on the bead, it goes back to the keeper the run was slung with"
+has "$(cat "$D/gc.log")" "mail send keeper/from-var -s pr-prep: no gascity rig for tk-iss" "pr-prep/unstamped: that keeper is mailed"
+hasnt "$(cat "$D/gc.log")" "null" "pr-prep/unstamped: no write or mail names an agent called null"
 prprep_case other refused 1
 eq "$RC" 1 "pr-prep/refused: a hand-back the store refuses fails the block"
 eq "$(grep -c '^bd update ' "$D/gc.log" || true)" 1 "pr-prep/refused: the refused hand-back is the only write attempted"

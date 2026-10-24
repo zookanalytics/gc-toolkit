@@ -81,7 +81,10 @@ The session drains only after that hand-back is written:
 # >>> upstream-pr-prep-worktree-setup
 RIG_ROOT=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
 if [ -z "$RIG_ROOT" ]; then
-  REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper')
+  # An absent key reads as empty, never as the literal "null", and the keeper
+  # the run was slung with stands in for one the bead does not name.
+  REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper // empty')
+  [ -n "$REQUESTING_KEEPER" ] || REQUESTING_KEEPER="{{requesting_keeper}}"
   gc mail send "$REQUESTING_KEEPER" -s "pr-prep: no gascity rig for {{issue}}" -m "$(cat <<EOF
 gc rig list --json names no rig called gascity, so no path names the
 repository to branch from. Nothing was fetched, created or pushed.
