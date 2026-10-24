@@ -274,6 +274,26 @@ eq "$(slung)" "tk-c0" "the pour is onto the adopted child"
 eq "$(meta tk-c0 rejection_reason)" "$REASON" "the adopted child's work order is completed before the pour"
 eq "$(meta tk-c0 target)" "main" "including the target it lands on"
 
+echo "# whether the found child is dispatched or armed is read from the listing that found it"
+# A gc whose show of $STUB_SHOW_FAIL_ID fails while every listing answers.
+SHOWFAIL="$TMP/bin-showfail"; mkdir -p "$SHOWFAIL"
+printf '#!/usr/bin/env bash\n[ "${1:-} ${2:-} ${3:-}" = "bd show ${STUB_SHOW_FAIL_ID:-}" ] && exit 1\nexec "%s/gc" "$@"\n' "$POUR" > "$SHOWFAIL/gc"
+chmod +x "$SHOWFAIL/gc"
+run_showfail() { STUB_SHOW_FAIL_ID=tk-c1 PATH="$SHOWFAIL:$POUR:$PATH" _run "$SD/rejection-repool.sh" "$@"; }
+grad
+store "$(jq -c --arg r "$ROUTE" '. + [{"id":"tk-c1","status":"open","assignee":"","title":"rebuild","issue_type":"task","priority":1,"metadata":{"task_kind":"rework","anchor_bead":"tk-g","branch":"integration/tk-g","target":"main","priority_shift":-1,"gc.execution_routed_to":$r}}]' "$STUB_STORE")"
+run_showfail tk-g --reason "$REASON"
+eq "$rc" 0 "a dispatched child whose own read fails still stands as the rebuild"
+eq "$(slings)" "0" "nothing is poured again"
+eq "$(meta tk-c1 rejection_reason)" "<absent>" "its work order is not rewritten"
+eq "$(visits)" "0" "no visit is filed"
+grad
+store "$(jq -c --arg r "$ROUTE" '. + [{"id":"tk-c1","status":"open","assignee":"","title":"rebuild","issue_type":"task","priority":1,"metadata":{"task_kind":"rework","anchor_bead":"tk-g","branch":"integration/tk-g","target":"main","priority_shift":-1,"gc.dispatch_when_ready":$r}}]' "$STUB_STORE")"
+run_showfail tk-g --reason "$REASON"
+eq "$rc" 2 "an armed child whose own read fails is still left to its arm: exit 2"
+eq "$(slings)" "0" "the repool pours nothing beside the arm"
+eq "$(visits)" "0" "the arm carries it, so no visit is filed"
+
 echo "# a convoy's review or ruling rework is not its rebuild child"
 grad
 store "$(jq -c '. + [{"id":"tk-rv","status":"open","assignee":"","title":"review rework","issue_type":"task","priority":1,"metadata":{"task_kind":"rework","anchor_bead":"tk-g","branch":"integration/tk-g","source_review_bead":"tk-review"}}]' "$STUB_STORE")"

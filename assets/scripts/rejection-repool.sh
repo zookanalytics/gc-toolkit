@@ -206,7 +206,9 @@ if [ -n "$IS_CONVOY" ]; then
            "$RERUN, which adopts $POUR and completes its work order"
     warn "$WORK is a convoy, so its rebuild is poured onto the rebuild child $POUR filed for it"
   else
-    ADOPT_ROW=$(bd_json show "$POUR")
+    # Whether the child is dispatched or armed is read from the row the listing
+    # above returned: a second read that failed would pass it as neither.
+    ADOPT_ROW=$(printf '%s' "$KIDS" | jq -c --arg id "$POUR" '[ .[]? | select(.id == $id) ]' 2>/dev/null)
     ADOPT_ROUTE=$(row_meta "$ADOPT_ROW" gc.execution_routed_to)
     if [ -n "$ADOPT_ROUTE" ]; then
       warn "repooled $WORK: its rebuild child $POUR is already dispatched to $ADOPT_ROUTE, and a second pour would double its rebuild"
