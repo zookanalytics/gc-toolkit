@@ -583,13 +583,13 @@ a finished convoy today.
 | Takes an open owned convoy whose target is an integration branch | the landing bead names its branch, so nothing is selected |
 | Counts members in both forms, and a `tracks` edge to a bead it cannot read holds the convoy | the landing bead's `blocks` edges, which the recipe reads back before it hands the bead over. bd holds nothing on an edge to a bead in another store, so each bead of an effort is filed in the rig's store |
 | Requires a landing recorded on the branch, so a convoy whose members landed nothing does not graduate | the refinery refuses a branch with no change: it closes nothing, opens no PR, and parks the bead for a person |
-| Skips a convoy, or a bead on its branch, that carries `merge_hold` or `rebase_hold` | a `blocks` edge of its own, such as one onto a gate, holds the landing bead before the refinery takes it. Nothing reads either marker until the bead is an anchor, by which point the refinery has brought its branch current. `gc-helm.sh park` refuses a bead that carries a branch, so the edge is written with `gc bd dep add`, and section 10 carries an open convoy's hold over as one. Once the landing bead is an anchor, either marker keeps its PR from opening, and `merge_hold` also holds its review dispatch and its merge, as for every PR |
+| Skips a convoy, or a bead on its branch, that carries `merge_hold` or `rebase_hold` | a `blocks` edge of its own, such as one onto a gate, holds the landing bead before the refinery takes it. No refinery step reads either marker until the bead is an anchor, by which point the refinery has brought its branch current. `gc-helm.sh park` refuses a bead that carries a branch, so the edge is written with `gc bd dep add`, and section 10 carries an open convoy's hold over as one. Once the landing bead is an anchor, either marker keeps its PR from opening, and `merge_hold` also holds its review dispatch and its merge, as for every PR |
 | Skips a convoy whose branch a live bead already owns | one landing bead per branch, which the recipe names once |
 | Stamps `merge_strategy=mr` | the line for main resolves the landing bead to `mr` |
 | Stamps `graduation=true` | nothing reads it. The key stays registered, as retired |
 | Seeds the PR's summary from the landed members' summaries | the landing bead's description is the summary, and the PR body's bead list (`pr-stack.sh`) names each bead that landed on the branch |
 | Runs at most once per 15 minutes | the notice goes on the deferred-dispatch pass after bd reports the landing bead ready, on that order's 5-minute cooldown, and Gas City starts a stopped refinery at once |
-| `REFINERY_RECONCILE_INTEGRATION_AUTO_LAND=false` turns it off | nothing to turn off. A park holds one landing bead |
+| `REFINERY_RECONCILE_INTEGRATION_AUTO_LAND=false` turns it off | nothing to turn off. A `blocks` edge onto a gate holds one landing bead |
 
 ### Gas City's lifecycle verbs
 
@@ -844,17 +844,16 @@ For each such convoy, in this order:
    - **An operator's hold.** When the convoy carries `merge_hold` or
      `rebase_hold`, or a live bead besides the landing bead carries either and
      names the convoy's target as its `branch`, file a gate in the rig's store
-     with no await type, the shape of a park's gate, so no sweep closes or
-     visits it. Its title says what was held and that closing it releases the
-     effort to the refinery. Its description names the bead that carried the
-     hold and the markers it stands for, with any `hold_reason` beside them. Add
-     the landing bead's `blocks` edge onto the gate and read it back.
-     `gc-helm.sh park` refuses a bead that carries a branch, so the edge is
-     written with `gc bd dep add`, as every wait of the landing bead is. The
-     markers stay where they are and are not copied to the landing bead.
-     Closing the gate is the release for the effort, and a marker on the
-     landing bead would keep its PR from opening after the operator had
-     released it.
+     with no await type and no `gc.demand_for`, the shape of a park's gate, so
+     no sweep closes or visits it. Its title says what was held and that closing
+     it releases the effort to the refinery. Its description names the bead that
+     carried the hold and the markers it stands for, with any `hold_reason`
+     beside them. Add the landing bead's `blocks` edge onto the gate and read it
+     back. `gc-helm.sh park` refuses a bead that carries a branch, so the edge
+     is written with `gc bd dep add`, as every wait of the landing bead is. The
+     markers stay where they are and are not copied to the landing bead. Closing
+     the gate is the release for the effort, and a marker on the landing bead
+     would keep its PR from opening after the operator had released it.
    - **A prerequisite.** For each open bead the convoy waits on by a `blocks`
      edge, such as a park's gate, add the same edge from the landing bead and
      read it back.
