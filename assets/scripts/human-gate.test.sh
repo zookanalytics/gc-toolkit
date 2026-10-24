@@ -253,6 +253,20 @@ eq "$rc" 0 "exits 0: the first gate still asks"
 eq "$out" "g-early" "stdout names the gate that asks"
 has "$(cat "$TMP/err")" "repair: gc bd gate resolve gate-1" "the repair names the duplicate"
 
+echo "# the duplicate is read back, because bd reports success on a resolve that closed nothing"
+reset "$(task tk-w)"
+out=$(STUB_CREATE_RACE="g-early|2026-10-21T23:59:59Z" STUB_RESOLVE_NOOP=1 "$SUT" --subject tk-w --key k --message m 2>"$TMP/err"); rc=$?
+eq "$rc" 0 "exits 0: the first gate still asks"
+eq "$out" "g-early" "stdout names the gate that asks"
+eq "$(field gate-1 status)" "open" "the duplicate is still open"
+has "$(cat "$TMP/err")" "did not resolve (its status reads 'open')" "the read-back reports that it stayed open"
+has "$(cat "$TMP/err")" "repair: gc bd gate resolve gate-1" "  ... with the repair"
+hasnt "$(cat "$TMP/err")" "resolved this call's duplicate" "  ... and never claims it resolved"
+reset "$(task tk-w)"
+STUB_CREATE_RACE="g-early|2026-10-21T23:59:59Z" STUB_RESOLVE_RACE=1 "$SUT" --subject tk-w --key k --message m >/dev/null 2>"$TMP/err"; rc=$?
+eq "$rc" 0 "a duplicate another resolver cleared first is no failure"
+has "$(cat "$TMP/err")" "was already cleared, and its answer stands: ruled: answered in the sitting" "  ... and the answer that stood is reported"
+
 echo "# no quiet period unless the call declares one"
 recent_moot="$(gate g-moot k closed "moot: the branch came back" "$(iso_ago 600)")"
 reset "$(task tk-w),$recent_moot" "tk-w|blocks|g-moot

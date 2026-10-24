@@ -269,10 +269,19 @@ fi
 FIRST_GATE=$(printf '%s' "$GOT" | bd_gates_open_under_key "$KEY" | jq -r '.[0].id // empty' 2>/dev/null)
 if [ -n "$FIRST_GATE" ] && [ "$FIRST_GATE" != "$GATE" ]; then
   DUP_REASON="moot: a duplicate of gate $FIRST_GATE, filed for the same situation in the same instant"
-  if gc bd gate resolve "$GATE" --reason "$DUP_REASON" </dev/null >/dev/null 2>&1; then
+  gc bd gate resolve "$GATE" --reason "$DUP_REASON" </dev/null >/dev/null 2>&1
+  # bd's exit says nothing about whether the duplicate closed: it reports
+  # success on a resolve that closed nothing and on a gate another resolver
+  # closed first, as the retract above finds. So the duplicate is read back.
+  DUP_ROW=$(bd_json show "$GATE")
+  DUP_STATUS=$(printf '%s' "$DUP_ROW" | jq -r 'if type == "array" then (.[0].status // "") else "" end' 2>/dev/null)
+  DUP_GOT=$(printf '%s' "$DUP_ROW" | jq -r 'if type == "array" then (.[0].close_reason // "") else "" end' 2>/dev/null)
+  if [ "$DUP_STATUS" != closed ]; then
+    warn "gate $FIRST_GATE already asks for $SUBJECT [$KEY], and this call's duplicate, gate $GATE, did not resolve (its status reads '${DUP_STATUS:-unreadable}'), so $SUBJECT stays blocked until both are cleared. repair: gc bd gate resolve $GATE --reason \"$DUP_REASON\""
+  elif [ "$DUP_GOT" = "$DUP_REASON" ]; then
     warn "gate $FIRST_GATE already asks for $SUBJECT [$KEY]; resolved this call's duplicate, gate $GATE"
   else
-    warn "gate $FIRST_GATE already asks for $SUBJECT [$KEY], and this call's duplicate, gate $GATE, did not resolve, so $SUBJECT stays blocked until both are cleared. repair: gc bd gate resolve $GATE --reason \"$DUP_REASON\""
+    warn "gate $FIRST_GATE already asks for $SUBJECT [$KEY]; this call's duplicate, gate $GATE, was already cleared, and its answer stands: $DUP_GOT"
   fi
   printf '%s\n' "$FIRST_GATE"
   exit 0
