@@ -94,24 +94,38 @@ REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1
 [ -n "$REVIEW_BEAD" ] || { echo "mol-review-quorum-signoff needs an input convoy with exactly one tracked member" >&2; exit 1; }
 M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
 # >>> quorum-lane-repo
-# The diff in step 2 reads origin/<base> from the rig's repository, named by
-# path: another checkout's origin/<base> can be stale, and a diff against it
-# shows changes the base made as changes the branch made. An unresolvable rig
-# fails closed, because `git -C ""` runs in the cwd. Step 2's diff runs in a
-# later shell, where REPO is unset, so the block prints the path for that diff
-# to name.
+# The diff in step 2 reads origin/<base> and the reviewed commit from the rig's
+# repository, named by path: another checkout's origin/<base> can be stale, and
+# a diff against it shows changes the base made as changes the branch made. An
+# unresolvable rig fails closed, because `git -C ""` runs in the cwd. The rig's
+# own refs can be as stale, and the reviewed commit may not be in its objects,
+# so the base and the branch are fetched into it first, as mol-review's pin
+# does. Step 2's diff runs in a later shell, where these variables are unset,
+# so the block prints the repository, the base and the commit for that diff to
+# name.
 REPO="${GC_RIG_ROOT:-}"
 [ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$REPO" ] || { echo "review lane: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+LANE_BASE=$(printf '%s' "$M" | jq -r '.review_base // empty')
+[ -n "$LANE_BASE" ] || LANE_BASE="{{base_ref}}"
+LANE_BASE="${LANE_BASE#origin/}"
+LANE_BRANCH=$(printf '%s' "$M" | jq -r '.review_branch // empty')
+git -C "$REPO" fetch origin "$LANE_BASE" ${LANE_BRANCH:+"$LANE_BRANCH"} || { echo "review lane: fetching $LANE_BASE ${LANE_BRANCH:+and $LANE_BRANCH }into $REPO failed; refusing to diff against refs that may be stale" >&2; exit 1; }
+LANE_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
+[ -n "$LANE_OID" ] || [ -z "$LANE_BRANCH" ] || LANE_OID=$(git -C "$REPO" rev-parse -q --verify "origin/$LANE_BRANCH")
+git -C "$REPO" cat-file -e "$LANE_OID^{commit}" 2>/dev/null || { echo "review lane: the reviewed commit '${LANE_OID}' is not in $REPO after the fetch" >&2; exit 1; }
 echo "rig repository: $REPO"
+echo "base: origin/$LANE_BASE"
+echo "reviewed commit: $LANE_OID"
 # <<< quorum-lane-repo
 ```
 
 **2. Apply the check's method to the diff, read-only.** The method is the skill
 the check section of the review bead's dispatch note names, loaded from your
 skill catalog. A lane has the pins from step 1 and the diff,
-`git -C <repo> diff origin/<base>...<reviewed_oid>` with `<repo>` the rig
-repository step 1 printed, and none of the rest of the frame
+`git -C <repo> diff origin/<base>...<reviewed_oid>` with `<repo>`, `<base>` and
+`<reviewed_oid>` the rig repository, base and commit step 1 printed, and none
+of the rest of the frame
 the method's blocks assume: no review workspace and no keepalive. So a lane
 reads what the method reads and judges as the method does, and runs nothing the
 method runs, anywhere: not at the reviewed commit and not against the
@@ -175,24 +189,38 @@ REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1
 [ -n "$REVIEW_BEAD" ] || { echo "mol-review-quorum-signoff needs an input convoy with exactly one tracked member" >&2; exit 1; }
 M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
 # >>> quorum-lane-repo
-# The diff in step 2 reads origin/<base> from the rig's repository, named by
-# path: another checkout's origin/<base> can be stale, and a diff against it
-# shows changes the base made as changes the branch made. An unresolvable rig
-# fails closed, because `git -C ""` runs in the cwd. Step 2's diff runs in a
-# later shell, where REPO is unset, so the block prints the path for that diff
-# to name.
+# The diff in step 2 reads origin/<base> and the reviewed commit from the rig's
+# repository, named by path: another checkout's origin/<base> can be stale, and
+# a diff against it shows changes the base made as changes the branch made. An
+# unresolvable rig fails closed, because `git -C ""` runs in the cwd. The rig's
+# own refs can be as stale, and the reviewed commit may not be in its objects,
+# so the base and the branch are fetched into it first, as mol-review's pin
+# does. Step 2's diff runs in a later shell, where these variables are unset,
+# so the block prints the repository, the base and the commit for that diff to
+# name.
 REPO="${GC_RIG_ROOT:-}"
 [ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$REPO" ] || { echo "review lane: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+LANE_BASE=$(printf '%s' "$M" | jq -r '.review_base // empty')
+[ -n "$LANE_BASE" ] || LANE_BASE="{{base_ref}}"
+LANE_BASE="${LANE_BASE#origin/}"
+LANE_BRANCH=$(printf '%s' "$M" | jq -r '.review_branch // empty')
+git -C "$REPO" fetch origin "$LANE_BASE" ${LANE_BRANCH:+"$LANE_BRANCH"} || { echo "review lane: fetching $LANE_BASE ${LANE_BRANCH:+and $LANE_BRANCH }into $REPO failed; refusing to diff against refs that may be stale" >&2; exit 1; }
+LANE_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
+[ -n "$LANE_OID" ] || [ -z "$LANE_BRANCH" ] || LANE_OID=$(git -C "$REPO" rev-parse -q --verify "origin/$LANE_BRANCH")
+git -C "$REPO" cat-file -e "$LANE_OID^{commit}" 2>/dev/null || { echo "review lane: the reviewed commit '${LANE_OID}' is not in $REPO after the fetch" >&2; exit 1; }
 echo "rig repository: $REPO"
+echo "base: origin/$LANE_BASE"
+echo "reviewed commit: $LANE_OID"
 # <<< quorum-lane-repo
 ```
 
 **2. Apply the check's method to the diff, read-only.** The method is the skill
 the check section of the review bead's dispatch note names, loaded from your
 skill catalog. A lane has the pins from step 1 and the diff,
-`git -C <repo> diff origin/<base>...<reviewed_oid>` with `<repo>` the rig
-repository step 1 printed, and none of the rest of the frame
+`git -C <repo> diff origin/<base>...<reviewed_oid>` with `<repo>`, `<base>` and
+`<reviewed_oid>` the rig repository, base and commit step 1 printed, and none
+of the rest of the frame
 the method's blocks assume: no review workspace and no keepalive. So a lane
 reads what the method reads and judges as the method does, and runs nothing the
 method runs, anywhere: not at the reviewed commit and not against the

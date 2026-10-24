@@ -93,7 +93,8 @@ block() {
   ok "$2: block extracted between markers"
   printf '%s\n' "$body" | sed -e 's|{{issue}}|tk-iss|g' -e 's|{{origin_remote}}|origin|g' \
     -e 's|{{upstream_remote}}|upstream|g' -e 's|{{upstream_branch}}|main|g' \
-    -e 's|{{notify_recipient}}|mayor/|g' -e 's|{{requesting_keeper}}|keeper/from-var|g' > "$3"
+    -e 's|{{notify_recipient}}|mayor/|g' -e 's|{{requesting_keeper}}|keeper/from-var|g' \
+    -e 's|{{base_ref}}|origin/main|g' > "$3"
   case "$(cat "$3")" in
     *'{{'*) bad "$2: no unrendered formula placeholder left" ;;
     *)      ok "$2: no unrendered formula placeholder left" ;;
@@ -264,10 +265,11 @@ block "$QUORUM_TOML" quorum-lane-repo "$TMP/lane-1.sh" 1
 block "$QUORUM_TOML" quorum-lane-repo "$TMP/lane-2.sh" 2
 cmp -s "$TMP/lane-1.sh" "$TMP/lane-2.sh" && ok "lane: the two lanes carry the same block" \
   || bad "lane: the two lanes carry the same block"
-# Step 2's diff runs in a later shell than the block, so it names the path the
-# block prints, never the REPO the block's shell took with it.
-eq "$(grep -c 'git -C <repo> diff origin/<base>\.\.\.<reviewed_oid>` with `<repo>` the rig' "$QUORUM_TOML" || true)" 2 \
-  "lane: each lane reads its diff in the repository the block prints"
+# Step 2's diff runs in a later shell than the block, so it names the path, the
+# base and the commit the block prints, never the variables the block's shell
+# took with it.
+eq "$(grep -c 'git -C <repo> diff origin/<base>\.\.\.<reviewed_oid>` with `<repo>`, `<base>` and' "$QUORUM_TOML" || true)" 2 \
+  "lane: each lane reads its diff in the repository, against the base and at the commit the block prints"
 eq "$(grep -c 'git -C "\$REPO" diff' "$QUORUM_TOML" || true)" 0 \
   "lane: no lane's diff names REPO, which step 2's shell does not have"
 eq "$(grep -c '`git diff origin/' "$QUORUM_TOML" || true)" 0 "lane: no lane reads a diff from its cwd"
@@ -276,24 +278,67 @@ eq "$(grep -c '`git diff origin/' "$QUORUM_TOML" || true)" 0 "lane: no lane read
 eq "$(grep -c 'mutation baseline with `git -C <repo> status --porcelain=v1 -z`' "$QUORUM_TOML" || true)" 2 \
   "lane: each lane takes its mutation baseline in the repository its diff reads"
 eq "$(grep -c '`git status --porcelain' "$QUORUM_TOML" || true)" 0 "lane: no lane takes its mutation baseline in its cwd"
-L="$TMP/lane"
-mkdir -p "$L"
-git init -q -b main "$L/rig"; commit "$L/rig" "lane rig" >/dev/null
-git init -q -b main "$L/cwd"; commit "$L/cwd" "lane cwd" >/dev/null
-for mode in env roster nomatch; do
-  FAKE_ROSTER="$L/roster-$mode.json"; pick "$mode" "$L/rig"
-  rc=0
-  OUT=$(cd "$L/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_ROSTER="$L/roster-$mode.json" FAKE_LOG="$L/gc.log" \
-          bash "$TMP/lane-1.sh" 2>&1) || rc=$?
-  case "$mode" in
-    nomatch)
-      [ "$rc" -ne 0 ] && ok "lane/nomatch: an unresolvable rig fails closed" || bad "lane/nomatch: an unresolvable rig fails closed"
-      hasnt "$OUT" "rig repository:" "lane/nomatch: no repository is printed" ;;
-    *)
-      eq "$rc" 0 "lane/$mode: the block runs from a foreign cwd"
-      eq "$OUT" "rig repository: $L/rig" "lane/$mode: the block prints the rig as the lane's repository, not the cwd repo" ;;
-  esac
+# lane_case <mode> <meta-json> <label>: an origin with main and feature, and a
+# rig and a cwd repo both cloned from it before either branch moved on, so only
+# the block's own fetch brings the new heads, and the reviewed commit, into a
+# repository. In the meta, @OID@ is the reviewed commit and @UNPUSHED@ a commit
+# no remote has. LANE_UNREACHABLE points the rig's origin at nothing. Sets RC,
+# OUT (the block's stdout), ERR (its stderr), D, OID, BASE_OLD and BASE_NEW.
+lane_case() {
+  local d="$TMP/lane-$3" rc=0 unpushed meta
+  mkdir -p "$d"
+  git init -q --bare -b main "$d/origin.git"
+  git init -q -b main "$d/seed"
+  BASE_OLD=$(commit "$d/seed" "lane base ($3)")
+  git -C "$d/seed" push -q "$d/origin.git" main
+  git -C "$d/seed" checkout -q -b feature
+  commit "$d/seed" "lane feature ($3)" >/dev/null
+  git -C "$d/seed" push -q "$d/origin.git" feature
+  git clone -q "$d/origin.git" "$d/rig"
+  git clone -q "$d/origin.git" "$d/cwd"
+  OID=$(commit "$d/seed" "lane reviewed ($3)")
+  git -C "$d/seed" push -q "$d/origin.git" feature
+  git -C "$d/seed" checkout -q -b local-only
+  unpushed=$(commit "$d/seed" "lane never pushed ($3)")
+  git -C "$d/seed" checkout -q main
+  BASE_NEW=$(commit "$d/seed" "lane base moved ($3)")
+  git -C "$d/seed" push -q "$d/origin.git" main
+  [ -z "${LANE_UNREACHABLE:-}" ] || git -C "$d/rig" remote set-url origin "$d/gone.git"
+  meta=$(printf '%s' "$2" | sed -e "s/@OID@/$OID/" -e "s/@UNPUSHED@/$unpushed/")
+  FAKE_ROSTER="$d/roster.json"; pick "$1" "$d/rig"
+  OUT=$(cd "$d/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_ROSTER="$d/roster.json" FAKE_LOG="$d/gc.log" \
+          M="$meta" bash "$TMP/lane-1.sh" 2>"$d/err") || rc=$?
+  ERR=$(cat "$d/err")
+  RC=$rc; D=$d
+}
+LANE_META='{"review_base":"main","review_branch":"feature","reviewed_oid":"@OID@"}'
+for mode in env roster; do
+  lane_case "$mode" "$LANE_META" "$mode"
+  eq "$RC" 0 "lane/$mode: the block runs from a foreign cwd"
+  eq "$OUT" "$(printf 'rig repository: %s\nbase: origin/main\nreviewed commit: %s' "$D/rig" "$OID")" \
+    "lane/$mode: the block prints the rig, the base and the reviewed commit, not the cwd repo"
+  eq "$(ref "$D/rig" origin/main)" "$BASE_NEW" "lane/$mode: the fetch brought the base's new head into the rig"
+  eq "$(ref "$D/rig" origin/feature)" "$OID" "lane/$mode: the fetch brought the reviewed commit into the rig"
+  eq "$(ref "$D/cwd" origin/main)" "$BASE_OLD" "lane/$mode: the cwd repo was not fetched"
 done
+lane_case env '{"review_branch":"feature","reviewed_oid":"@OID@"}' nobase
+eq "$RC" 0 "lane/nobase: the block runs with no review_base"
+has "$OUT" "base: origin/main" "lane/nobase: the base falls back to base_ref"
+lane_case env '{"review_base":"main","review_branch":"feature"}' nooid
+eq "$RC" 0 "lane/nooid: the block runs with no reviewed_oid"
+has "$OUT" "reviewed commit: $OID" "lane/nooid: the commit is the branch's head in the rig after the fetch"
+lane_case nomatch "$LANE_META" nomatch
+[ "$RC" -ne 0 ] && ok "lane/nomatch: an unresolvable rig fails closed" || bad "lane/nomatch: an unresolvable rig fails closed"
+hasnt "$OUT" "rig repository:" "lane/nomatch: no repository is printed"
+LANE_UNREACHABLE=1 lane_case env "$LANE_META" unreachable
+[ "$RC" -ne 0 ] && ok "lane/unreachable: a fetch that fails stops the lane" || bad "lane/unreachable: a fetch that fails stops the lane"
+has "$ERR" "review lane: fetching main and feature into $D/rig failed" "lane/unreachable: the block says the fetch failed"
+hasnt "$OUT" "rig repository:" "lane/unreachable: nothing is printed for the diff to name"
+lane_case env '{"review_base":"main","review_branch":"feature","reviewed_oid":"@UNPUSHED@"}' missing
+[ "$RC" -ne 0 ] && ok "lane/missing: a reviewed commit the rig does not hold stops the lane" \
+  || bad "lane/missing: a reviewed commit the rig does not hold stops the lane"
+has "$ERR" "is not in $D/rig after the fetch" "lane/missing: the block says the commit is missing"
+hasnt "$OUT" "rig repository:" "lane/missing: nothing is printed for the diff to name"
 
 # --- 5. mol-refinery-patrol: the conflict reason. -------------------------------
 echo "── mol-refinery-patrol: rejection-conflict-reason ──"
