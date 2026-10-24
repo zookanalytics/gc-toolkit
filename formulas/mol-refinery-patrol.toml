@@ -872,32 +872,31 @@ branch_has_real_change() {
   # closed — a tool error is a suspect), with BHRC_ERROR naming the git call
   # that failed and what git said. Every call names <repo>: git otherwise reads
   # the cwd, which may be another checkout or no checkout at all. Each call runs
-  # once with its error kept in a file, so the error reported is the one the
-  # failed call wrote, never a rerun's.
+  # once, its stderr captured with its stdout, so the error reported is the one
+  # the failed call wrote, never a rerun's. A call that succeeds answers on its
+  # last line, below any warning git wrote.
   BHRC_ERROR=""
-  bhrc_err=$(mktemp "${TMPDIR:-/tmp}/gctk-zero-diff.XXXXXX") || { BHRC_ERROR="could not create a file to hold git's error"; return 2; }
-  if ! bhrc_base=$(git -C "$1" merge-base "$2" "$3" 2>"$bhrc_err"); then
-    bhrc_call="merge-base $2 $3"; bhrc_none="no common ancestor"
-  else
-    git -C "$1" diff --quiet "$bhrc_base" "$3" 2>"$bhrc_err"
-    bhrc_rc=$?
-    if [ "$bhrc_rc" = 0 ]; then
-      rm -f "$bhrc_err"
-      return 1
-    elif [ "$bhrc_rc" != 1 ]; then
-      bhrc_call="diff $bhrc_base $3"; bhrc_none="exit $bhrc_rc"
-    elif ! bhrc_count=$(git -C "$1" rev-list --count "$bhrc_base..$3" 2>"$bhrc_err"); then
-      bhrc_call="rev-list $bhrc_base..$3"; bhrc_none="no output"
-    else
-      rm -f "$bhrc_err"
-      [ "$bhrc_count" -ge 1 ] || return 1
-      return 0
-    fi
+  if ! bhrc_out=$(git -C "$1" merge-base "$2" "$3" 2>&1); then
+    bhrc_said=$(printf '%s' "$bhrc_out" | tr -s '[:space:]' ' ' | sed 's/ $//')
+    BHRC_ERROR="merge-base $2 $3 failed: ${bhrc_said:-no common ancestor}"
+    return 2
   fi
-  bhrc_said=$(tr -s '[:space:]' ' ' < "$bhrc_err" | sed 's/ $//')
-  rm -f "$bhrc_err"
-  BHRC_ERROR="$bhrc_call failed: ${bhrc_said:-$bhrc_none}"
-  return 2
+  bhrc_base=$(printf '%s' "$bhrc_out" | tail -n 1)
+  bhrc_out=$(git -C "$1" diff --quiet "$bhrc_base" "$3" 2>&1)
+  bhrc_rc=$?
+  [ "$bhrc_rc" != 0 ] || return 1
+  if [ "$bhrc_rc" != 1 ]; then
+    bhrc_said=$(printf '%s' "$bhrc_out" | tr -s '[:space:]' ' ' | sed 's/ $//')
+    BHRC_ERROR="diff $bhrc_base $3 failed: ${bhrc_said:-exit $bhrc_rc}"
+    return 2
+  fi
+  if ! bhrc_out=$(git -C "$1" rev-list --count "$bhrc_base..$3" 2>&1); then
+    bhrc_said=$(printf '%s' "$bhrc_out" | tr -s '[:space:]' ' ' | sed 's/ $//')
+    BHRC_ERROR="rev-list $bhrc_base..$3 failed: ${bhrc_said:-no output}"
+    return 2
+  fi
+  [ "$(printf '%s' "$bhrc_out" | tail -n 1)" -ge 1 ] || return 1
+  return 0
 }
 # <<< branch-has-real-change
 ```

@@ -433,6 +433,21 @@ echo "rc=$? error=$BHRC_ERROR"' _ "$D/rig" "$FEATURE" 2>&1)
   eq "$(grep -cx -- "$sub" "$TMP/flaky.log" || true)" 1 "flaky/$sub: the failed call ran once"
 done
 
+echo "── a warning git writes ahead of its answer does not cost the check ──"
+# Each call's stderr is captured with its stdout, so the answer is read from the
+# last line. A git that warns before every answer, as it does for an ambiguous
+# refname, still yields a branch with a change.
+mkdir -p "$TMP/warn-bin"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'REAL_GIT=%q\n' "$REAL_GIT"; cat; } > "$TMP/warn-bin/git" <<'GITW'
+echo "warning: refname 'origin/main' is ambiguous." >&2
+exec "$REAL_GIT" "$@"
+GITW
+chmod +x "$TMP/warn-bin/git"
+OUT=$(cd "$ELSEWHERE" && PATH="$TMP/warn-bin:$PATH" bash -c "$(cat "$TMP/bhrc.sh")"'
+branch_has_real_change "$1" origin/main "$2"
+echo "rc=$? error=$BHRC_ERROR"' _ "$D/rig" "$FEATURE" 2>&1)
+eq "$OUT" "rc=0 error=" "warning: a branch with a change still reads as one"
+
 echo "-----"
 echo "unrecorded-direct-landing: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
