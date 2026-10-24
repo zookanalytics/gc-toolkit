@@ -71,7 +71,7 @@ fence shared-branch-merge-mode > "$TMP/prep.sh"
 {
   echo 'BEAD_JSON=$(gc bd show $WORK --json)'
   echo 'MERGE_STRATEGY="$STRATEGY"'
-  echo 'LC="$GC_CITY_PATH/rigs/gc-toolkit/assets/scripts/lifecycle.sh"'
+  echo 'LC="${TEST_LC:-$GC_CITY_PATH/rigs/gc-toolkit/assets/scripts/lifecycle.sh}"'
   fence branch-has-real-change
   fence zero-diff-guard
   echo 'if [ "$MERGE_STRATEGY" = direct ]; then'
@@ -296,6 +296,36 @@ has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "stale: t
 has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-false-completion" "stale: the refusal is escalated"
 eq "$(merged_tries)" 0 "stale: nothing is recorded as merged"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "stale: nothing is pushed"
+
+echo "── a refusal files its visit through the pack lifecycle.sh came from ──"
+# The refinery sits in a scratch directory, GC_RIG_ROOT is unset so the rig
+# comes from the roster, and GC_CITY_PATH names no pack, so the only place that
+# names the pack is the lifecycle.sh the step found.
+fixture "$TMP/nopack" nowork
+: > "$D/gc.log"; : > "$D/lc.log"
+( cd "$ELSEWHERE" && env GC_RIG_ROOT="$D/rig" GC_RIG=myrig GC_CITY_PATH="$CITY" WORK=wb BRANCH=polecat/wb TARGET=main \
+    TARGET_BRANCH_DEFAULT=main FAKE_ROSTER="$D/roster.json" FAKE_META="$D/bead.json" FAKE_LOG="$D/gc.log" \
+    FAKE_LC_LOG="$D/lc.log" bash "$TMP/prep.sh" ) >"$D/prep.out" 2>&1; PREP_RC=$?
+eq "$PREP_RC" 0 "nopack: the prepare stages the branch"
+nopack_merge_push() { # <lifecycle.sh>
+  : > "$D/gc.log"; : > "$D/lc.log"
+  OUT=$(cd "$ELSEWHERE" && env GC_RIG_ROOT="" GC_RIG=myrig GC_CITY_PATH="" TEST_LC="$1" WORK=wb BRANCH=polecat/wb \
+    TARGET=main FAKE_ROSTER="$D/roster.json" FAKE_META="$D/bead.json" FAKE_LOG="$D/gc.log" FAKE_LC_LOG="$D/lc.log" \
+    STRATEGY=direct bash "$TMP/merge-push.sh" 2>&1); RC=$?
+}
+nopack_merge_push "$PACK/lifecycle.sh"
+eq "$RC" 1 "nopack: merge-push stops"
+has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "nopack: the bead is parked as a false completion"
+has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-false-completion" "nopack: the refusal files its visit"
+# A lifecycle.sh with no escalate.sh beside it, and no other pack location:
+# the park stands, and the block says no visit was filed.
+mkdir -p "$TMP/lc-only/assets/scripts"
+cp "$PACK/lifecycle.sh" "$TMP/lc-only/assets/scripts/lifecycle.sh"
+nopack_merge_push "$TMP/lc-only/assets/scripts/lifecycle.sh"
+eq "$RC" 1 "nopack/no escalate.sh: merge-push stops"
+has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "nopack/no escalate.sh: the bead is parked as a false completion"
+hasnt "$(cat "$D/gc.log")" "escalate " "nopack/no escalate.sh: no visit is filed"
+has "$OUT" "is parked for a human with no refinery-false-completion visit" "nopack/no escalate.sh: the block says the park has no visit"
 
 echo "── a branch whose commits net to no change is refused ──"
 fixture "$TMP/netzero" netzero

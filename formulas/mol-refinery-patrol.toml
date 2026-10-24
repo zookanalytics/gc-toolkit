@@ -942,10 +942,16 @@ elif [ "$BHRC_RC" != 0 ]; then
 fi
 if [ -n "$REFUSE_KEY" ]; then
   "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="$REFUSE_WHY" --takeaway "$REFUSE_TAKEAWAY"
-  SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  # escalate.sh is looked for first in the pack lifecycle.sh came from, so a
+  # bead this block parks gets its visit wherever that pack was found.
+  SCRIPTS=""; for c in "${LC%/assets/scripts/lifecycle.sh}" "$RIG_ROOT" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
     [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
   done
-  [ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "$WORK" --key "$REFUSE_KEY" --message "$REFUSE_MESSAGE"
+  if [ -n "$SCRIPTS" ]; then
+    "$SCRIPTS/escalate.sh" --subject "$WORK" --key "$REFUSE_KEY" --message "$REFUSE_MESSAGE"
+  else
+    echo "escalate.sh not found beside $LC or in any pack location; $WORK is parked for a human with no $REFUSE_KEY visit"
+  fi
   gc runtime drain-ack
   exit 1
 fi
