@@ -119,8 +119,7 @@ gone() { [ ! -e "$1" ] && [ ! -L "$1" ]; }
 record_file() {
   local dirs gitdir common
   dirs=$(git -C "$PREP" rev-parse --path-format=absolute --git-dir --git-common-dir 2>/dev/null) || return 1
-  gitdir=$(printf '%s\n' "$dirs" | sed -n 1p)
-  common=$(printf '%s\n' "$dirs" | sed -n 2p)
+  { IFS= read -r gitdir; IFS= read -r common; } <<<"$dirs"
   [ -n "$gitdir" ] && [ "$gitdir" != "$common" ] || return 1
   REC="$gitdir/gc-refinery-staged"
 }
