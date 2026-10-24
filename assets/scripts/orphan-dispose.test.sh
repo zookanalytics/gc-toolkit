@@ -34,8 +34,15 @@
 #     like it worked. No single update may carry both --status and --assignee,
 #     and the order must be metadata, then status, then assignee;
 #   * the assignee guard: --if-assignee carries the assignee read a moment
-#     earlier and never the --owner, so a bead re-claimed in between is left
-#     alone and a step whose owner is not its assignee still releases;
+#     earlier and never the --owner, so a step whose owner is not its assignee
+#     still releases;
+#   * the CLAIM recovery judged: a bead whose owner, status or assignee differs
+#     from the --owner and --listed it was handed is skipped with nothing
+#     written, a visit engage re-bound over a session id an earlier sitting left
+#     among them, and every write of a visit or step release carries
+#     --if-assignee and --if-status, so a re-engagement or a close that lands
+#     between the writes stops the release at the first write it refuses. A gc
+#     in front of the harness's enforces the two guards the way bd does;
 #   * a HALF-LANDED write (the store drops one key while reporting success),
 #     which must exit 3 and name the field, not report a clean release;
 #   * the source arm delegating to the two commands it was built for, then
@@ -69,6 +76,66 @@ printf 'bd %s\n' "$*" >> "${STUB_GC_LOG:?}"
 exit 1
 STUB
 chmod +x "$TMP/bin/bd"
+
+# A gc in front of the harness's, for the cases where another writer moves the
+# bead. It enforces bd's --if-assignee and --if-status guards on `gc bd
+# update`: the update lands only while the bead still has that status and that
+# assignee, and a stale guard lands nothing, logs the refused update and exits
+# 13. Before the first update whose arguments contain STUB_RACE_AT, it lands
+# STUB_RACE_JQ on the store: the write another writer makes just ahead of it.
+GUARD_BIN="$TMP/guard-bin"
+mkdir -p "$GUARD_BIN"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'NEXT=%q\n' "$TMP/bin/gc"; cat; } > "$GUARD_BIN/gc" <<'STUB'
+set -u
+S="${STUB_STORE:?}"
+if [ "${1:-}" = "bd" ] && [ "${2:-}" = "update" ]; then
+  id="${3:-}"
+  if [ -n "${STUB_RACE_AT:-}" ] && [ ! -e "${STUB_RACE_DONE:?}" ]; then
+    case " $* " in
+      *"$STUB_RACE_AT"*)
+        jq -c "${STUB_RACE_JQ:?}" "$S" > "$S.race" && mv "$S.race" "$S"
+        : > "$STUB_RACE_DONE" ;;
+    esac
+  fi
+  if_st="-"; if_who="-"
+  for a in "$@"; do
+    case "$a" in
+      --if-status=*) if_st="${a#--if-status=}" ;;
+      --if-assignee=*) if_who="${a#--if-assignee=}" ;;
+    esac
+  done
+  if [ "$if_st" != "-" ] || [ "$if_who" != "-" ]; then
+    cur="$(jq -r --arg id "$id" '(.[] | select(.id == $id) | [(.status // ""), (.assignee // "")] | @tsv) // empty' "$S")"
+    if { [ "$if_st" != "-" ] && [ "${cur%%$'\t'*}" != "$if_st" ]; } \
+       || { [ "$if_who" != "-" ] && [ "${cur#*$'\t'}" != "$if_who" ]; }; then
+      printf 'refused %s\n' "$*" >> "${STUB_GC_LOG:?}"
+      echo "Error: precondition failed for $id: status/assignee changed" >&2
+      exit 13
+    fi
+  fi
+fi
+exec "$NEXT" "$@"
+STUB
+chmod +x "$GUARD_BIN/gc"
+export STUB_RACE_DONE="$TMP/race.done"
+
+# land <jq>: another writer's change to the store, landed before the script runs.
+land() { jq -c "$1" "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"; }
+
+# dispose_guarded <bead> <owner> <listed> [<at> <jq>]: dispose of <bead> under
+# the guarding gc, handing it the claim recovery listed. With <at> and <jq>,
+# another writer lands <jq> just ahead of the first update that carries <at>.
+# Sets OUT and rc.
+dispose_guarded() {
+  rm -f "$STUB_RACE_DONE"
+  OUT=$(PATH="$GUARD_BIN:$PATH" STUB_RACE_AT="${4:-}" STUB_RACE_JQ="${5:-}" \
+    "$SCRIPT" "$1" --owner "$2" --listed "$3" --apply 2>&1); rc=$?
+}
+
+# writes <bead>: the updates of <bead> that reached the store, one per line.
+# refused <bead>: the updates of <bead> a stale guard refused.
+writes()  { grep -E "^bd update $1 " "$STUB_GC_LOG" || true; }
+refused() { grep -E "^refused bd update $1 " "$STUB_GC_LOG" || true; }
 
 # The four shapes, as they appear in a rig store. The step's assignee and its
 # metadata.gc.session_id both name the dead session, which is what a step
@@ -226,7 +293,7 @@ visit_fixture() {
 
 echo "--- visit arm: a sitting that never started ---"
 visit_fixture
-OUT=$("$SCRIPT" gc-bound --owner s-lx-wisp-tjt3y --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" gc-bound --owner s-lx-wisp-tjt3y --listed open:s-lx-wisp-tjt3y --apply 2>&1); rc=$?
 eq "$rc" "0" "the bound visit's release exits 0"
 has "$OUT" "class=visit" "it is classified visit"
 has "$OUT" "action=release-visit" "the visit arm runs"
@@ -248,7 +315,7 @@ echo "--- visit arm: a sitting that claimed it and is gone ---"
 # board reads a set gc.session_name as engaged, so all three go, in the order
 # that keeps the claim guard from rolling the release back.
 visit_fixture
-OUT=$("$SCRIPT" gc-claimed --owner lx-wisp-dead --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" gc-claimed --owner lx-wisp-dead --listed in_progress:gascity/gc-toolkit.gc-claimed --apply 2>&1); rc=$?
 eq "$rc" "0" "the claimed visit's release exits 0"
 has "$OUT" "result=disposed" "the release reports disposed"
 eq "$(bstatus gc-claimed)" "open" "the visit is open again"
@@ -273,6 +340,163 @@ export STUB_DROP_KEYS=""
 eq "$rc" "3" "a surviving pin is a partial release, exit 3"
 has "$OUT" "result=partial" "partial is reported, not disposed"
 has "$OUT" "gc.session_name(still=s-lx-wisp-dead)" "the surviving pin is named"
+
+# Orphan recovery lists a bead, proves its owner's session gone, and hands the
+# disposal that owner and the status and assignee it listed. engage can reclaim
+# a visit bound to a gone sitting and bind a fresh one at any moment after the
+# listing, and a person can settle the visit. Each fixture below lands the other
+# writer's change on the store: the fresh binding, the fresh sitting's claim of
+# it, or the close.
+FRESH_BIND='map(if .id == "gc-bound" then .assignee = "s-lx-wisp-fresh" else . end)'
+FRESH_CLAIM='map(if .id == "gc-bound" then .status = "in_progress" | .assignee = "gascity/gc-toolkit.gc-bound"
+  | .metadata["gc.session_id"] = "lx-wisp-fresh" | .metadata["gc.session_name"] = "s-lx-wisp-fresh" else . end)'
+
+echo "--- the claim recovery judged: changed before the disposal reads the bead ---"
+visit_fixture
+land "$FRESH_BIND"
+OUT=$("$SCRIPT" gc-bound --owner s-lx-wisp-tjt3y --listed open:s-lx-wisp-tjt3y --apply 2>&1); rc=$?
+eq "$rc" "0" "a visit engage re-bound after the listing exits 0"
+has "$OUT" "result=skipped" "a visit engage re-bound after the listing is skipped"
+has "$OUT" "detail=claim_changed(owner=s-lx-wisp-fresh,status=open,assignee=s-lx-wisp-fresh)" \
+  "the skip names the claim the read found"
+eq "$(writes gc-bound)" "" "a re-bound visit takes no write"
+eq "$(bassignee gc-bound)" "s-lx-wisp-fresh" "the fresh binding survives"
+
+visit_fixture
+land "$FRESH_CLAIM"
+OUT=$("$SCRIPT" gc-bound --owner s-lx-wisp-tjt3y --listed open:s-lx-wisp-tjt3y --apply 2>&1); rc=$?
+has "$OUT" "result=skipped" "a visit its fresh sitting claimed after the listing is skipped"
+eq "$(writes gc-bound)" "" "the fresh claim takes no write"
+eq "$(bstatus gc-bound)" "in_progress" "the fresh claim stays in progress"
+eq "$(bassignee gc-bound)" "gascity/gc-toolkit.gc-bound" "the fresh sitting stays its assignee"
+eq "$(meta gc-bound gc.session_id)" "lx-wisp-fresh" "the fresh session id survives"
+eq "$(meta gc-bound gc.session_name)" "s-lx-wisp-fresh" "the fresh session name survives"
+
+# engage's reclaim clears the assignee and nothing else, so a visit that still
+# carries a gc.session_id from an earlier sitting resolves that same dead owner
+# after a fresh binding. Only the listed assignee tells the two claims apart.
+store '[{"id":"gc-stale","status":"open","assignee":"s-lx-wisp-old","title":"visit: gc-7abc — a question",
+         "metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-7abc",
+                     "gc.session_id":"lx-wisp-earlier"}}]'
+: > "$STUB_GC_LOG"
+land 'map(if .id == "gc-stale" then .assignee = "s-lx-wisp-fresh" else . end)'
+eq "$(jq -r '.[] | select(.id == "gc-stale")
+      | [(.metadata["gc.session_id"] // ""), (.assignee // ""), (.metadata["gc.session_name"] // "")]
+      | map(select(. != "")) | first' "$STUB_STORE")" "lx-wisp-earlier" \
+  "(premise) the re-bound visit resolves the owner recovery listed"
+OUT=$("$SCRIPT" gc-stale --owner lx-wisp-earlier --listed open:s-lx-wisp-old --apply 2>&1); rc=$?
+has "$OUT" "result=skipped" "a re-bound visit whose owner reads unchanged is skipped on its listed assignee"
+eq "$(writes gc-stale)" "" "it takes no write"
+eq "$(bassignee gc-stale)" "s-lx-wisp-fresh" "its fresh binding survives"
+
+visit_fixture
+land 'map(if .id == "gc-claimed" then .status = "closed" else . end)'
+OUT=$("$SCRIPT" gc-claimed --owner lx-wisp-dead --listed in_progress:gascity/gc-toolkit.gc-claimed --apply 2>&1); rc=$?
+eq "$rc" "0" "a visit settled after the listing exits 0"
+has "$OUT" "result=skipped" "a visit settled after the listing is skipped"
+has "$OUT" "status=closed" "the skip names the status the read found"
+eq "$(writes gc-claimed)" "" "a settled visit takes no write"
+eq "$(bassignee gc-claimed)" "gascity/gc-toolkit.gc-claimed" "it keeps the assignee it was settled with"
+eq "$(meta gc-claimed gc.session_id)" "lx-wisp-dead" "and its pins"
+OUT=$("$SCRIPT" gc-claimed --owner lx-wisp-dead --apply 2>&1)
+has "$OUT" "result=skipped" "with the owner alone, a settled visit is still skipped"
+eq "$(writes gc-claimed)" "" "and still takes no write"
+
+# A step another holder took before the read is skipped the same way.
+fixture
+land 'map(if .id == "tk-step" then .assignee = "lx-live" | .metadata["gc.session_id"] = "lx-live" else . end)'
+OUT=$("$SCRIPT" tk-step --owner lx-dead --listed in_progress:lx-dead --apply 2>&1); rc=$?
+has "$OUT" "result=skipped" "a step a live session claimed after the listing is skipped"
+eq "$(writes tk-step)" "" "it takes no write"
+eq "$(meta tk-step gc.session_id)" "lx-live" "the live claim keeps its pin"
+
+# A session that claims under the pool's alias leaves the same assignee and
+# status behind it, so a live session's claim of the step reads as listed in
+# both. Only its owner, the gc.session_id the claim stamps, tells it apart.
+store '[{"id":"tk-slot","status":"in_progress","assignee":"gc-toolkit/gc-toolkit.polecat","title":"step",
+         "metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"tk-root",
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-live"}},
+        {"id":"tk-root","status":"in_progress","assignee":"","title":"mol-polecat-work",
+         "metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2"}}]'
+: > "$STUB_GC_LOG"
+OUT=$("$SCRIPT" tk-slot --owner lx-dead --listed in_progress:gc-toolkit/gc-toolkit.polecat --apply 2>&1); rc=$?
+has "$OUT" "result=skipped" "a step re-claimed under its listed alias is skipped on its owner"
+has "$OUT" "owner=lx-live" "the skip names the owner the read found"
+eq "$(writes tk-slot)" "" "it takes no write"
+eq "$(meta tk-slot gc.session_id)" "lx-live" "the live claim keeps its pin"
+
+echo "--- the conditional guards follow the release ---"
+# The guarding gc enforces --if-assignee and --if-status the way bd does. An
+# unraced release still lands every write under it, so each write is guarded on
+# the state the writes before it left.
+visit_fixture
+dispose_guarded gc-claimed lx-wisp-dead in_progress:gascity/gc-toolkit.gc-claimed
+eq "$rc" "0" "an unraced release under enforced guards exits 0"
+has "$OUT" "result=disposed" "an unraced release under enforced guards lands"
+eq "$(refused gc-claimed)" "" "no write of it is refused"
+eq "$(writes gc-claimed | wc -l | tr -d ' ')" "3" "the release is three writes"
+eq "$(writes gc-claimed | grep -c -v -e '--if-status=')" "0" "every write carries --if-status"
+eq "$(writes gc-claimed | grep -c -v -e '--if-assignee=')" "0" "every write carries --if-assignee"
+eq "$(writes gc-claimed | grep -c -e '--unset-metadata .*--if-assignee=gascity/gc-toolkit.gc-claimed --if-status=in_progress')" "1" \
+  "the pin write is guarded on the listed claim"
+eq "$(writes gc-claimed | grep -c -e '--status=open --if-assignee=gascity/gc-toolkit.gc-claimed --if-status=in_progress')" "1" \
+  "the status write is guarded on the listed claim"
+eq "$(writes gc-claimed | grep -c -e '--assignee  --if-assignee=gascity/gc-toolkit.gc-claimed --if-status=open')" "1" \
+  "the assignee write is guarded on the status the release left"
+fixture
+dispose_guarded tk-step lx-dead in_progress:lx-dead
+has "$OUT" "result=disposed" "an unraced step release under enforced guards lands"
+eq "$(refused tk-step)" "" "no write of the step is refused"
+
+echo "--- the claim recovery judged: changed between the release's writes ---"
+# Another writer lands its change just ahead of one of the release's writes.
+# That write's guard refuses it, nothing after it runs, and the bead is left as
+# that writer left it.
+visit_fixture
+dispose_guarded gc-bound s-lx-wisp-tjt3y open:s-lx-wisp-tjt3y "--unset-metadata" "$FRESH_BIND"
+eq "$rc" "0" "a visit re-bound ahead of the first write exits 0"
+has "$OUT" "result=skipped" "a visit re-bound ahead of the first write is skipped"
+has "$OUT" "detail=claim_changed(write=pins)" "the skip names the write that was refused"
+hasnt "$OUT" "landed=" "nothing of the release landed"
+eq "$(writes gc-bound)" "" "no write reached the store"
+eq "$(bassignee gc-bound)" "s-lx-wisp-fresh" "the fresh binding survives"
+
+visit_fixture
+dispose_guarded gc-bound s-lx-wisp-tjt3y open:s-lx-wisp-tjt3y "--assignee" "$FRESH_BIND"
+has "$OUT" "result=skipped" "a visit re-bound ahead of the assignee clear is skipped"
+has "$OUT" "detail=claim_changed(write=assignee)" "the refused assignee clear is named"
+eq "$(bassignee gc-bound)" "s-lx-wisp-fresh" "the fresh binding survives the release"
+eq "$(bstatus gc-bound)" "open" "the visit stays open for the fresh sitting's claim"
+
+visit_fixture
+dispose_guarded gc-claimed lx-wisp-dead in_progress:gascity/gc-toolkit.gc-claimed \
+  "--status=open" 'map(if .id == "gc-claimed" then .status = "closed" else . end)'
+has "$OUT" "result=skipped" "a visit settled ahead of the status write is skipped"
+has "$OUT" "detail=claim_changed(write=status)" "the refused status write is named"
+has "$OUT" "landed=pins" "the pins the gone sitting stamped were already cleared"
+eq "$(bstatus gc-claimed)" "closed" "the visit stays as it was settled"
+eq "$(grep -c -E '^(refused )?bd update gc-claimed --assignee' "$STUB_GC_LOG")" "0" \
+  "no assignee write follows the refused status write"
+eq "$(bassignee gc-claimed)" "gascity/gc-toolkit.gc-claimed" "the settled visit keeps its assignee"
+
+# Once the status write opens the visit, engage can reclaim it from the gone
+# sitting and bind a fresh one ahead of the assignee clear.
+visit_fixture
+dispose_guarded gc-claimed lx-wisp-dead in_progress:gascity/gc-toolkit.gc-claimed \
+  "--assignee" 'map(if .id == "gc-claimed" then .assignee = "s-lx-wisp-fresh" else . end)'
+has "$OUT" "result=skipped" "a visit re-bound once the release opened it is skipped"
+has "$OUT" "landed=pins,status" "the release's first two writes landed"
+has "$OUT" "detail=claim_changed(write=assignee)" "the refused assignee clear is named"
+eq "$(bassignee gc-claimed)" "s-lx-wisp-fresh" "the fresh binding survives"
+
+fixture
+dispose_guarded tk-step lx-dead in_progress:lx-dead \
+  "--status=open" 'map(if .id == "tk-step" then .assignee = "lx-live" | .metadata["gc.session_id"] = "lx-live" else . end)'
+has "$OUT" "result=skipped" "a step a live session claims mid-release is skipped"
+has "$OUT" "detail=claim_changed(write=status)" "the refused write is named"
+eq "$(bstatus tk-step)" "in_progress" "the live claim stays in progress"
+eq "$(bassignee tk-step)" "lx-live" "the live session stays its assignee"
+eq "$(meta tk-step gc.session_id)" "lx-live" "the live claim keeps its pin"
 
 echo "--- step arm: a step with no route says so ---"
 store '[{"id":"tk-unrouted","status":"in_progress","assignee":"lx-dead","title":"step",
@@ -532,8 +756,9 @@ echo "--- source arm: a human-gate source bead is NOT returned to the pool ---"
 store '[{"id":"tk-human","status":"open","assignee":"","title":"human-gate work bead",
          "metadata":{"branch":"polecat/tk-human","gc.routed_to":"human","gc.session_name":"polecat-9-pool"}}]'
 : > "$STUB_GC_LOG"
-OUT=$("$SCRIPT" tk-human --owner polecat-9-pool --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" tk-human --owner polecat-9-pool --listed open: --apply 2>&1); rc=$?
 eq "$rc" "0" "human-gate source disposal exits 0"
+hasnt "$OUT" "claim_changed" "an empty listed assignee matches an unassigned bead"
 has "$OUT" "class=source"      "human-gate bead is still classed source"
 has "$OUT" "action=skip"       "human-gate source is skipped, not delegated"
 has "$OUT" "result=skipped"    "human-gate source reports skipped"
@@ -659,6 +884,10 @@ hasnt "$(cat "$STUB_GC_LOG")" "bd update" "an unknown bead is never written to"
 OUT=$("$SCRIPT" 2>&1); eq "$?" "2" "no bead id exits 2"
 OUT=$("$SCRIPT" tk-step --bogus 2>&1); eq "$?" "2" "an unknown flag exits 2"
 OUT=$("$SCRIPT" tk-step --owner 2>&1); eq "$?" "2" "a value-taking flag at end of argv exits 2"
+OUT=$("$SCRIPT" tk-step --listed 2>&1); eq "$?" "2" "--listed at end of argv exits 2"
+OUT=$("$SCRIPT" tk-step --listed in_progress --apply 2>&1); eq "$?" "2" "a --listed value with no colon exits 2"
+OUT=$("$SCRIPT" tk-step --listed :lx-dead --apply 2>&1); eq "$?" "2" "a --listed value with no status exits 2"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update" "a malformed --listed writes nothing"
 
 echo "--- json output ---"
 fixture

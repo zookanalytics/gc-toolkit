@@ -4,7 +4,8 @@
 # THE GUARDRAIL: mol-witness-patrol's recover-orphaned-beads builds its candidate
 # set as ONE pipeline: a single `gc bd list` of both live statuses, a control-byte
 # strip, then host-bead-skip, downstream-court-skip and topology-root-skip on
-# stdin. It prints one `<bead> <owner>` row per candidate, and the listing never
+# stdin. It prints one `<bead> <owner> <listed>` row per candidate, the listed
+# claim being the status and assignee joined by a colon, and the listing never
 # sits in a shell variable. A step that leaves the agent to combine two listings
 # and chain the filters gets the JSON held in a variable and re-fed with
 # `echo "$X" | jq`. The agent's shell is zsh, whose builtin echo expands the
@@ -95,8 +96,8 @@ chmod +x "$TMP/bin/gc"
 #
 # w1's description is the shape zsh's echo corrupts: a \n escape, an escaped
 # backslash ahead of $ and (, a \t escape and a \u001f escape.
-W1='  {"id":"w1","assignee":"gc-toolkit/gc-toolkit.furiosa","description":"line one\nline two \\$HOME \\(x) a\ttab a\u001fsep a \"quote\"","metadata":{}}'
-S1='  {"id":"s1","metadata":{"gc.session_id":"lx-dead","gc.session_name":"slot-1","gc.step_ref":"mol-polecat-work.implement"}}'
+W1='  {"id":"w1","status":"in_progress","assignee":"gc-toolkit/gc-toolkit.furiosa","description":"line one\nline two \\$HOME \\(x) a\ttab a\u001fsep a \"quote\"","metadata":{}}'
+S1='  {"id":"s1","status":"in_progress","metadata":{"gc.session_id":"lx-dead","gc.session_name":"slot-1","gc.step_ref":"mol-polecat-work.implement"}}'
 U1='  {"id":"u1","assignee":"","metadata":{}}'
 D1='  {"id":"d1","assignee":"gc-toolkit/gc-toolkit.refinery","metadata":{"merge_result":"pull_request"}}'
 H1='  {"id":"h1","assignee":"gc-toolkit/gc-toolkit.refinery","metadata":{"gc.routed_to":"human"}}'
@@ -110,7 +111,7 @@ listing() {
     printf '[\n'
     printf '%s,\n' "$W1" "$S1" "$U1" "$D1" "$H1" "$V1"
     if [ "${2:-}" = raw ]; then
-      printf '  {"id":"c1","assignee":"gc-toolkit/gc-toolkit.rictus","description":"a raw%bbyte and a raw%btab","metadata":{}},\n' '\001' '\t'
+      printf '  {"id":"c1","status":"in_progress","assignee":"gc-toolkit/gc-toolkit.rictus","description":"a raw%bbyte and a raw%btab","metadata":{}},\n' '\001' '\t'
     fi
     printf '%s\n' "$R1"
     printf ']\n'
@@ -176,12 +177,12 @@ rows() { sort "$TMP/out" | paste -sd ',' -; }
 said_unreadable() { grep -q 'did not parse' "$TMP/err"; }
 leftovers() { find "$TMP/runtmp" -mindepth 1 | wc -l | tr -d ' '; }
 
-WANT="c1 gc-toolkit/gc-toolkit.rictus,s1 lx-dead,v1 s-lx-wisp-tjt3y,w1 gc-toolkit/gc-toolkit.furiosa"
+WANT="c1 gc-toolkit/gc-toolkit.rictus in_progress:gc-toolkit/gc-toolkit.rictus,s1 lx-dead in_progress:,v1 s-lx-wisp-tjt3y open:s-lx-wisp-tjt3y,w1 gc-toolkit/gc-toolkit.furiosa in_progress:gc-toolkit/gc-toolkit.furiosa"
 
 for SH in "${SHELLS[@]}"; do
   if run "$SH" "$TMP/raw.json"; then ok "[$SH] the block exits 0"; else bad "[$SH] the block exited non-zero"; fi
   eq "$(rows)" "$WANT" \
-     "[$SH] prints one <bead> <owner> row per candidate: drops unowned, downstream and root beads; keeps the bound visit, and c1 through its raw byte"
+     "[$SH] prints one <bead> <owner> <listed> row per candidate: drops unowned, downstream and root beads; keeps the bound visit, and c1 through its raw byte"
   if said_unreadable; then bad "[$SH] a readable listing reported 'did not parse'"; else ok "[$SH] a readable listing reports no parse failure"; fi
   eq "$(cat "$TMP/calls")" "bd list --status=in_progress,open --json --limit=0" \
      "[$SH] makes exactly one listing, of both live statuses"

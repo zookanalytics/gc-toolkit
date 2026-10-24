@@ -22,7 +22,10 @@
 #     are left alone;
 #   * a human-gated work bead naming a dead session is never a candidate;
 #   * the next cycle finds none of the released visits, so none is recovered
-#     twice.
+#     twice;
+#   * a visit engage re-binds to a fresh sitting after the listing keeps that
+#     binding, because each orphan is handed over with the claim its row
+#     listed.
 #
 # No live city, Dolt, network, or sessions — stubs from test-harness.sh only.
 set -uo pipefail
@@ -94,29 +97,41 @@ cat > "$TMP/sessions.json" <<'JSON'
 JSON
 export STUB_SESSIONS="$TMP/sessions.json"
 
-# patrol_pass — one recover-orphaned-beads pass over the stub store. Prints one
-# `<bead> <state> <result>` line per candidate, sorted: the state the lookup
-# resolved for its owner, and orphan-dispose.sh's result for an orphan, or
-# `owned` for a bead whose owner is not dead. The dead states are the ones the
-# step's classification names; the lookup's own `dead` definition names the
-# same set except `absent`.
+# patrol_pass [<jq>] — one recover-orphaned-beads pass over the stub store.
+# Prints one `<bead> <state> <result>` line per candidate, sorted: the state the
+# lookup resolved for its owner, and orphan-dispose.sh's result for an orphan,
+# or `owned` for a bead whose owner is not dead. The dead states are the ones
+# the step's classification names; the lookup's own `dead` definition names the
+# same set except `absent`. Each orphan is handed over with the owner and the
+# listed claim from its row, as part 5's call hands them. A <jq> is another
+# writer's change, landed on the store after the listing and before the first
+# disposal.
 patrol_pass() {
-  local map rows bead owner state result
+  local map rows bead owner listed state result
   map=$(bash -c 'source "$0"; [ -z "$MAP_TRIP" ] || exit 1; printf "%s" "$LIVENESS_MAP"' \
     "$TMP/liveness-map-guard.sh" 2>/dev/null) || { echo "MAP_TRIP"; return; }
   rows=$(bash "$TMP/candidate-pipeline.sh" 2>/dev/null)
-  while read -r bead owner; do
+  if [ -n "${1:-}" ]; then
+    jq -c "$1" "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+  fi
+  while read -r bead owner listed; do
     [ -n "$bead" ] || continue
     state=$(LIVENESS_MAP="$map" OWNER="$owner" bash -c 'source "$0"; printf "%s" "$STATE"' \
       "$TMP/liveness-lookup.sh" 2>/dev/null)
     case "$state" in
       archived|closed|failed-create|absent)
-        result=$("$SCRIPT" "$bead" --owner "$owner" --apply --json 2>/dev/null | jq -r '.result // "unread"') ;;
+        result=$("$SCRIPT" "$bead" --owner "$owner" --listed "$listed" --apply --json 2>/dev/null \
+          | jq -r '.result // "unread"') ;;
       *) result=owned ;;
     esac
     printf '%s %s %s\n' "$bead" "$state" "$result"
   done <<< "$rows"
 }
+
+# The call part 5 makes is the one patrol_pass makes: the owner and the listed
+# claim from the row.
+has "$(grep -F 'DISPOSE_JSON=$("$OD" <bead>' "$TOML")" '--owner "$OWNER" --listed "$LISTED" --apply --json' \
+  "part 5's disposal call hands over the owner and the listed claim"
 
 # board_reads <bead> — what the helm board's engagedVisit rule
 # (services/helm/internal/board/derive.go) makes of a visit: engaged when it is
@@ -162,6 +177,18 @@ eq "$(patrol_pass | sort | paste -sd ',' -)" \
    "gc-live active owned,gc-starting start-pending owned" \
    "the next cycle finds none of the released visits"
 hasnt "$(cat "$STUB_GC_LOG")" "bd update" "the next cycle writes nothing"
+
+echo "--- a visit engage re-binds after the listing ---"
+# engage reclaims a visit bound to a gone sitting and binds a fresh one, and it
+# can do that after this cycle listed the visit and found its sitting gone. The
+# disposal is handed the claim the row listed, so it leaves the fresh binding
+# alone and reports a skip, which the patrol records as no recovery.
+fixture
+eq "$(patrol_pass 'map(if .id == "gc-bound" then .assignee = "s-lx-wisp-fresh" else . end)' | sort | paste -sd ',' -)" \
+   "gc-bound absent skipped,gc-bound-open failed-create disposed,gc-claimed absent disposed,gc-live active owned,gc-starting start-pending owned" \
+   "the visit re-bound after the listing is skipped, and the cycle releases the others"
+eq "$(bassignee gc-bound)" "s-lx-wisp-fresh" "the fresh binding survives the cycle"
+eq "$(grep -c -E '^bd update gc-bound ' "$STUB_GC_LOG")" "0" "the re-bound visit takes no write"
 
 echo
 echo "witness-visit-recovery: $PASS passed, $FAIL failed"

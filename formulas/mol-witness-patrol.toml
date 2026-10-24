@@ -274,16 +274,19 @@ jq -c '[ .[]
 # A file that is not a JSON array is a failed listing, not a rig with no
 # candidates.
 if jq -e 'type == "array"' "$CANDIDATES" >/dev/null 2>&1; then
-  jq -r '.[] | .id + " " + .owner' "$CANDIDATES"
+  jq -r '.[] | .id + " " + .owner + " " + (.status // "") + ":" + (.assignee // "")' "$CANDIDATES"
 else
   echo "witness: the candidate listing did not parse; no orphan recovery this cycle" >&2
 fi
 rm -f "$CANDIDATES"
 # <<< candidate-pipeline
 ```
-The block prints one row per candidate, `<bead> <owner>`. The bead id is the
-`<bead>` the parts below act on, and the owner is the loop's `OWNER`. No rows
-means no candidates. A `did not parse` line means the listing itself failed,
+The block prints one row per candidate, `<bead> <owner> <listed>`. The bead id
+is the `<bead>` the parts below act on, and the owner is the loop's `OWNER`.
+`<listed>` is the loop's `LISTED`: the status and assignee the listing read,
+joined by a colon, with nothing after the colon for a bead that has no
+assignee. Part 5 hands `OWNER` and `LISTED` to the disposal as the claim this
+cycle judged. No rows means no candidates. A `did not parse` line means the listing itself failed,
 which is not a rig with nothing to recover: no candidate set exists this cycle,
 and orphan recovery stays blind until the listing reads again. Skip the rest of
 this step and file it
@@ -730,7 +733,11 @@ still runs either way: a bead whose store cannot be named is exactly the bead a
 person needs to see, and leaving it owned hides it.
 
 Then hand the bead to `orphan-dispose.sh`, which picks the disposal from what
-the bead IS:
+the bead IS. Hand it the claim this cycle judged as well, the `OWNER` and
+`LISTED` from the bead's row. The disposal releases only that claim. A bead
+that names another owner, status or assignee when the disposal reads it, or
+that another writer takes or settles while the release writes, is skipped as
+that writer left it, and the next cycle judges it again:
 
 ```bash
 OD=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
@@ -741,11 +748,12 @@ if [ -z "$OD" ]; then
   echo "orphan-dispose.sh not found — NOT disposing of <bead>; it stays owned and returns next cycle" >&2
 else
   # Capture the disposal's own verdict: it decides whether this bead was RETURNED
-  # to the pool (result=disposed) or left untouched (result=skipped — a root, or a
-  # source already in a downstream court). `|| DISPOSE_RC=$?` keeps a non-zero exit
-  # (3 partial, 1 failed) from killing the step under set -e; the JSON is printed
-  # before either exit, so DISPOSE_RESULT still reads.
-  DISPOSE_JSON=$("$OD" <bead> --owner "$OWNER" --apply --json) || DISPOSE_RC=$?
+  # to the pool (result=disposed) or not (result=skipped — a root, a source
+  # already in a downstream court, or a bead whose claim changed after the
+  # listing). `|| DISPOSE_RC=$?` keeps a non-zero exit (3 partial, 1 failed) from
+  # killing the step under set -e; the JSON is printed before either exit, so
+  # DISPOSE_RESULT still reads.
+  DISPOSE_JSON=$("$OD" <bead> --owner "$OWNER" --listed "$LISTED" --apply --json) || DISPOSE_RC=$?
   printf '%s\n' "$DISPOSE_JSON"
   DISPOSE_RESULT=$(printf '%s' "$DISPOSE_JSON" | jq -r '.result // ""')
 fi
@@ -792,18 +800,19 @@ half-released, and it needs a finding
 **PRESERVE `metadata.branch` on every recovery** — it is where the next
 polecat resumes from; a recovery that strips it re-does the work.
 
-A disposal that SKIPPED changed nothing — a workflow root, or a source whose work
-already reached a downstream court — so it is not a recovery and must not be
-recorded: stamping `recovered=`/`recovered_count` on it feeds the crash-loop
+A disposal that SKIPPED returned nothing to the pool — a workflow root, a source
+whose work already reached a downstream court, or a bead whose claim changed
+after the listing — so it is not a recovery and must not be recorded: stamping `recovered=`/`recovered_count` on it feeds the crash-loop
 signal a RATE for work that was never re-dispatched, the moot escalation this
 whole filter exists to stop. Gate the record on the disposal's own verdict:
 ```bash
 # >>> recovery-stamp-gate
 # STAMP_RECOVERY is 1 only for a bead orphan-dispose RETURNED to the pool
 # (result=disposed: a released visit or step, or a delegated source or review). Every other
-# verdict — skipped (a root, or a source already in a downstream court), partial,
-# failed, or an unread empty — returned nothing to the pool, so no recovery is
-# stamped and no crash-loop rate is read.
+# verdict — skipped (a root, a source already in a downstream court, or a bead
+# whose claim changed after the listing), partial, failed, or an unread empty —
+# returned nothing to the pool, so no recovery is stamped and no crash-loop rate
+# is read.
 case "${DISPOSE_RESULT:-}" in
   disposed) STAMP_RECOVERY=1 ;;
   *)        STAMP_RECOVERY=0 ;;
