@@ -534,7 +534,8 @@ a finished convoy today.
 
 - **What the operator loses without it:** the effort's one PR opening by itself
   once its work is done. Without the hold, find-work would take a landing bead
-  while its effort is still being built, and land a partial branch.
+  while its effort is still being built, and open the effort's PR on a partial
+  branch.
 - **What gc-toolkit does differently:** nothing in Gas Town hands its refinery
   work before the work is done, so its refinery never meets a bead that waits.
   gc-toolkit hands the landing bead over when the effort is stood up, so that
@@ -544,8 +545,9 @@ a finished convoy today.
   notice a wait owes ([deferred-dispatch.md](../../docs/deferred-dispatch.md),
   "Work assigned to a named agent owes a notice"). It is the form Gas City
   documents for direct delivery to a named session, and Gas City's own claim
-  offers assigned work only once it is ready. find-work is the one reader that
-  ignores a wait.
+  offers assigned work only once it is ready. find-work takes the refinery's
+  work without asking whether it waits, and the witness's check counts that
+  queue the same way, so those two are what change.
 - **A handoff waits only on a blocker of its own.** `hold-lib.sh` holds work in
   flight only by its own blockers, so a handoff under a parked epic still lands.
   A bead an arm dispatched had no open blocker when it was slung, so its handoff
