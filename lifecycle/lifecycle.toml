@@ -94,11 +94,11 @@ meaning = "PR base moved externally; routed to human"
 
 [states.blocked]
 status = "open"
-meaning = "recorded existing_pr unusable; routed to human"
+meaning = "recorded existing_pr unusable, or the zero-diff check could not run three patrols in a row; routed to human"
 
 [states.refused_false_completion]
 status = "open"
-meaning = "no verified change on branch: none found, or the check could not run; routed to human"
+meaning = "the zero-diff check found no change on the branch; routed to human"
 
 [states.held]
 status = "open"
@@ -125,12 +125,12 @@ writer = "formulas/mol-refinery-patrol.toml merge-push, direct strategy (via lif
 [[transition]]
 from = "unanchored"
 to = "blocked"
-writer = "formulas/mol-refinery-patrol.toml (existing_pr unusable; via lifecycle.sh)"
+writer = "formulas/mol-refinery-patrol.toml (existing_pr unusable, or the zero-diff check could not run three patrols in a row; via lifecycle.sh)"
 
 [[transition]]
 from = "unanchored"
 to = "refused_false_completion"
-writer = "formulas/mol-refinery-patrol.toml (no verified change on branch: none found, or the zero-diff check could not run; via lifecycle.sh)"
+writer = "formulas/mol-refinery-patrol.toml (the zero-diff check found no change on the branch; via lifecycle.sh)"
 
 # `held` is entered only from `unanchored`. merge.sh, gate-ensure.sh and
 # pr-facts.sh each enumerate anchors by their gating state, so moving one here
@@ -450,7 +450,7 @@ keys = [
   "existing_pr", "merge_strategy", "merge_result", "prepare_mode",
   "rejection_reason", "graduation", "blocked_reason", "work_dir",
   "false_completion_suspected", "branch_ready", "halt_reason", "auto_push",
-  "pr_summary", "merge_record_failures", "fold_target", "artifact_url",
+  "pr_summary", "merge_record_failures", "zero_diff_check_failures", "fold_target", "artifact_url",
   "opened_as_draft", "draft_readied",
   "bring_current_from", "bring_current_scope", "conflict_audit", "conflict_question",
   "bring_current_record", "bring_current_reopened", "bring_current_round_at",
@@ -540,9 +540,10 @@ keys = [
 #   for every branch shape, so this flag does not change how the branch is
 #   brought current. Never cleared.
 # blocked_reason — the human-readable reason an anchor sits in a human state
-#   (existing_pr unusable, a PR closed or retargeted out of band). Written by
-#   pr-facts.sh; it is also a [holds] marker, so a live bead carrying it owes a
-#   blocks edge. Freeform.
+#   (existing_pr unusable, a PR closed or retargeted out of band, a zero-diff
+#   check that could not run). Written by pr-facts.sh and
+#   mol-refinery-patrol.toml; it is also a [holds] marker, so a live bead
+#   carrying it owes a blocks edge. Freeform.
 # work_dir — the polecat's per-bead git worktree, an absolute path, written by
 #   workspace-setup so a restart or witness recovery can find the work in flight.
 #   Absent means no worktree is recorded yet. Never cleared. Absolute path.
@@ -550,6 +551,11 @@ keys = [
 #   close a branch as merged when it carried no verified change against its
 #   target; written on the `refused_false_completion` transition for a person to
 #   read. Freeform reason.
+# zero_diff_check_failures — consecutive patrols whose zero-diff check could not
+#   run on this bead. mol-refinery-patrol.toml leaves the work with the refinery
+#   to retry until the count reaches three, then parks the bead `blocked`. An
+#   integer (absent reads as 0), cleared with `--unset` by a check that runs and
+#   by that park.
 # branch_ready / halt_reason / auto_push — the auto_push=false halt. auto_push is
 #   a caller input the submit step reads; when it is false the polecat records
 #   branch_ready=true and halt_reason=auto_push_false and stops without pushing or

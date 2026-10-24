@@ -64,8 +64,8 @@ stateDiagram-v2
 
   handed_off --> poured: rejection-repool.sh — rejection_reason, then a fresh mol-polecat-work pour
 
-  handed_off --> blocked: mol-refinery-patrol — existing_pr unusable
-  handed_off --> refused_false_completion: mol-refinery-patrol — no verified change
+  handed_off --> blocked: mol-refinery-patrol — existing_pr unusable, or the zero-diff check could not run
+  handed_off --> refused_false_completion: mol-refinery-patrol — no change found
   pull_request --> abandoned: pr-facts.sh — closed unmerged, no recorded disposition
   pull_request --> [*]: pr-facts.sh — closed unmerged, disposition pre-recorded (bead-rehome.sh)
   pull_request --> retargeted: pr-facts.sh — PR base moved
@@ -178,8 +178,8 @@ transition into a closed state writes none.
 | pull_request → abandoned | `pr-facts.sh` | PR closed unmerged externally with no recorded disposition; files a rework-or-close visit |
 | pull_request → closed (disposed) | `pr-facts.sh` → `bead-rehome.sh` | PR closed unmerged carrying a pre-recorded disposition (`pr-dispose.sh`); auto-disposed through the sanctioned terminal close, no visit |
 | pull_request → retargeted | `pr-facts.sh` | PR base moved externally; files a visit |
-| handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable |
-| handed_off → refused_false_completion | `mol-refinery-patrol` | no verified change on the handed-off branch: the zero-diff check found none and the target carries no `direct_landing_sha` stamp, or the check could not run |
+| handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable, or the zero-diff check could not run three patrols in a row |
+| handed_off → refused_false_completion | `mol-refinery-patrol` | the zero-diff check found no change on the handed-off branch, and the target carries no `direct_landing_sha` stamp |
 | handed_off / pull_request → poured | `mol-refinery-patrol` (rejection), through `assets/scripts/rejection-repool.sh` | `rejection_reason` written and the assignee and `gc.routed_to` cleared, then a fresh `mol-polecat-work` pour dispatches the rebuild and stamps `gc.execution_routed_to` |
 | poured → handed_off | the pour's `mol-polecat-work` submit step | push verified on the remote |
 | unanchored → held | `assets/scripts/converse-hold.sh`, a converse sitting's hold, via `lifecycle.sh` | a sitting is waiting on an operator decision; state + route in one write |

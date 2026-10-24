@@ -30,9 +30,11 @@
 #   - a branch that never introduced work is still refused, parked and
 #     escalated, with no stamp and with a stamp its target does not carry, and
 #     so is a branch whose commits net to no change;
-#   - a check that cannot run is refused as one: its park and its visit say the
-#     check could not run, and name git's error and the directory, never that
-#     the branch has no change.
+#   - a check that cannot run leaves the work with the refinery to retry,
+#     counting the failures in a row on the bead, and the third parks it
+#     blocked: its park and its visit say the check could not run, and name
+#     git's error and the directory, never that the branch has no change. A
+#     check that runs clears the count.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -338,10 +340,10 @@ has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-false-completion"
 eq "$(merged_tries)" 0 "netzero: nothing is recorded as merged"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "netzero: nothing is pushed"
 
-echo "── a check that cannot run is refused as one, not as a branch without work ──"
+echo "── a check that cannot run is retried, then parked as a failed check, not as a branch without work ──"
 fixture "$TMP/nocheck" work
 # The prepare alone stages the branch; then the rig loses origin/main, so the
-# check cannot find the merge-base it needs.
+# check cannot find the merge-base it needs, on every patrol until it returns.
 : > "$D/gc.log"; : > "$D/lc.log"
 NOCHECK_ENV=(env GC_RIG_ROOT="$D/rig" GC_RIG=myrig GC_CITY_PATH="$CITY" WORK=wb BRANCH=polecat/wb TARGET=main
   TARGET_BRANCH_DEFAULT=main FAKE_ROSTER="$D/roster.json" FAKE_META="$D/bead.json" FAKE_LOG="$D/gc.log"
@@ -349,22 +351,58 @@ NOCHECK_ENV=(env GC_RIG_ROOT="$D/rig" GC_RIG=myrig GC_CITY_PATH="$CITY" WORK=wb 
 ( cd "$ELSEWHERE" && "${NOCHECK_ENV[@]}" bash "$TMP/prep.sh" ) >"$D/prep.out" 2>&1; PREP_RC=$?
 eq "$PREP_RC" 0 "nocheck: the prepare stages the branch"
 git -C "$D/rig" update-ref -d refs/remotes/origin/main
-OUT=$(cd "$ELSEWHERE" && "${NOCHECK_ENV[@]}" bash "$TMP/merge-push.sh" 2>&1); RC=$?
-eq "$RC" 1 "nocheck: merge-push stops"
-has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion --assignee  --route human --set false_completion_suspected=the zero-diff check could not run in $D/rig: merge-base origin/main " \
-  "nocheck: the park records that the check could not run, in the rig, and the failed git call"
-has "$(cat "$D/lc.log")" "Not a valid object name origin/main; no change verified" \
-  "nocheck: the park carries git's own error, its trailing newline not left as a space before the rest"
-has "$(cat "$D/lc.log")" "--takeaway the zero-diff check could not run, so no change was verified" "nocheck: the board's takeaway says the check could not run"
-hasnt "$(cat "$D/lc.log")" "no verified change vs origin/main" "nocheck: the park does not say the branch has no change"
-has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-zero-diff-check-failed --message The zero-diff check of branch polecat/wb against origin/main could not run in $D/rig: merge-base origin/main " \
-  "nocheck: the visit is a failed-check situation, naming the directory and the failed git call"
+fails() { jq -r '.[0].metadata.zero_diff_check_failures // "none"' "$D/bead.json"; }
+nocheck_merge_push() {
+  : > "$D/gc.log"; : > "$D/lc.log"
+  OUT=$(cd "$ELSEWHERE" && "${NOCHECK_ENV[@]}" bash "$TMP/merge-push.sh" 2>&1); RC=$?
+}
+for n in 1 2; do
+  nocheck_merge_push
+  eq "$RC" 1 "nocheck, patrol $n: merge-push stops"
+  has "$OUT" "the zero-diff check could not run in $D/rig: merge-base origin/main " \
+    "nocheck, patrol $n: it says the check could not run, in the rig, and names the failed git call"
+  has "$OUT" "Not a valid object name origin/main (failure $n of 3 in a row); leaving the work with the refinery to retry" \
+    "nocheck, patrol $n: it carries git's own error and leaves the work with the refinery"
+  eq "$(cat "$D/lc.log")" "" "nocheck, patrol $n: the bead is not parked"
+  hasnt "$(cat "$D/gc.log")" "escalate " "nocheck, patrol $n: nothing is escalated"
+  has "$(cat "$D/gc.log")" "runtime drain-ack" "nocheck, patrol $n: the session drains"
+  eq "$(fails)" "$n" "nocheck, patrol $n: the bead counts $n failed check(s) in a row"
+done
+nocheck_merge_push
+eq "$RC" 1 "nocheck, patrol 3: merge-push stops"
+has "$(cat "$D/lc.log")" "transition wb --to blocked --assignee  --route human --set blocked_reason=the zero-diff check could not run in $D/rig, 3 patrols in a row: merge-base origin/main " \
+  "nocheck, patrol 3: the bead is parked blocked, its reason naming the rig, the count and the failed git call"
+has "$(cat "$D/lc.log")" "Not a valid object name origin/main; no change verified, refused merge-close --unset zero_diff_check_failures" \
+  "nocheck, patrol 3: the park carries git's own error and clears the count"
+has "$(cat "$D/lc.log")" "--takeaway the zero-diff check could not run 3 patrols in a row, so no change was verified" "nocheck, patrol 3: the board's takeaway says the check could not run"
+hasnt "$(cat "$D/lc.log")" "refused_false_completion" "nocheck, patrol 3: the bead is not parked as a false completion"
+hasnt "$(cat "$D/lc.log")" "false_completion_suspected" "nocheck, patrol 3: no false completion is recorded as suspected"
+has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-zero-diff-check-failed --message The zero-diff check of branch polecat/wb against origin/main could not run in $D/rig, 3 patrols in a row. The last error: merge-base origin/main " \
+  "nocheck, patrol 3: the visit is a failed-check situation, naming the directory, the count and the failed git call"
 has "$(cat "$D/gc.log")" "Not a valid object name origin/main. It verified nothing either way" \
-  "nocheck: the visit carries git's own error, its trailing newline not left as a space before the rest"
-hasnt "$(cat "$D/gc.log")" "refinery-false-completion" "nocheck: the visit is not a no-change situation"
-has "$(cat "$D/gc.log")" "runtime drain-ack" "nocheck: the session drains"
+  "nocheck, patrol 3: the visit carries git's own error, its trailing newline not left as a space before the rest"
+hasnt "$(cat "$D/gc.log")" "refinery-false-completion" "nocheck, patrol 3: the visit is not a no-change situation"
+has "$(cat "$D/gc.log")" "runtime drain-ack" "nocheck, patrol 3: the session drains"
 eq "$(merged_tries)" 0 "nocheck: nothing is recorded as merged"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "nocheck: nothing is pushed"
+
+echo "── a check that runs again clears the count, and the landing goes on ──"
+fixture "$TMP/recheck" work
+: > "$D/gc.log"; : > "$D/lc.log"
+NOCHECK_ENV=(env GC_RIG_ROOT="$D/rig" GC_RIG=myrig GC_CITY_PATH="$CITY" WORK=wb BRANCH=polecat/wb TARGET=main
+  TARGET_BRANCH_DEFAULT=main FAKE_ROSTER="$D/roster.json" FAKE_META="$D/bead.json" FAKE_LOG="$D/gc.log"
+  FAKE_LC_LOG="$D/lc.log" DIRECT_MERGE_PUSH_BACKOFF=0 STRATEGY=direct)
+( cd "$ELSEWHERE" && "${NOCHECK_ENV[@]}" bash "$TMP/prep.sh" ) >"$D/prep.out" 2>&1; PREP_RC=$?
+eq "$PREP_RC" 0 "recheck: the prepare stages the branch"
+git -C "$D/rig" update-ref -d refs/remotes/origin/main
+nocheck_merge_push
+eq "$(fails)" 1 "recheck: a failed check is counted"
+git -C "$D/rig" update-ref refs/remotes/origin/main "$BASE"
+nocheck_merge_push
+eq "$RC" 0 "recheck: once the check runs, merge-push goes on"
+eq "$(fails)" none "recheck: the check that ran cleared the count"
+recorded_at "recheck" "$FEATURE"
+not_parked "recheck"
 
 echo "── a failed git call runs once, and its own error is the one reported ──"
 # A git that fails the first call of FLAKY_SUB as a held index.lock does, and

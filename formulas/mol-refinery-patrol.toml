@@ -910,9 +910,12 @@ A branch with no change is not always a false completion. `direct-merge-push.sh`
 stamps `direct_landing_sha` on the bead before it pushes, so a target that
 carries the stamped commit holds a direct landing an earlier patrol pushed and
 did not record. The block sends that bead down the direct path, which records
-it. A check that cannot run verifies nothing either way, so the block refuses
-that bead too, and its refusal says the check failed and names git's error and
-the directory it ran in, so nobody reads it as a branch with no change:
+it. A check that cannot run verifies nothing either way, and its cause is often
+gone by the next patrol, so the block leaves that bead with the refinery to
+retry, as this step's other infrastructure failures do. It counts the failures
+in a row on the bead, and the third parks the bead `blocked` for a person, with
+git's error and the directory the check ran in, so nobody reads it as a branch
+with no change. A check that runs clears the count:
 ```bash
 # >>> zero-diff-guard
 RIG_ROOT="${GC_RIG_ROOT:-}"
@@ -922,26 +925,41 @@ PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)
 PREP_SHA=$(git -C "$PREP_WT" rev-parse HEAD)
 BHRC_RC=0
 branch_has_real_change "$RIG_ROOT" "origin/$TARGET" "$PREP_SHA" || BHRC_RC=$?
+CHECK_FAIL_CAP=3
+CHECK_FAILS=$(printf '%s' "$BEAD_JSON" | jq -r '(.[0].metadata.zero_diff_check_failures // "0") | tostring' 2>/dev/null)
+case "$CHECK_FAILS" in ''|*[!0-9]*) CHECK_FAILS=0 ;; esac
 REFUSE_KEY=""
-if [ "$BHRC_RC" = 1 ]; then
-  LANDED_SHA=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.direct_landing_sha // empty')
-  if [ -n "$LANDED_SHA" ] && git -C "$RIG_ROOT" merge-base --is-ancestor "$LANDED_SHA" "origin/$TARGET" 2>/dev/null; then
-    echo "origin/$TARGET carries $LANDED_SHA, which a direct landing of $WORK pushed without recording; taking the direct path to record it"
-    MERGE_STRATEGY=direct
-  else
-    REFUSE_KEY=refinery-false-completion
-    REFUSE_WHY="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close"
-    REFUSE_TAKEAWAY="the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
-    REFUSE_MESSAGE="Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
+if [ "$BHRC_RC" != 0 ] && [ "$BHRC_RC" != 1 ]; then
+  CHECK_FAILS=$((CHECK_FAILS + 1))
+  if [ "$CHECK_FAILS" -lt "$CHECK_FAIL_CAP" ]; then
+    gc bd update "$WORK" --set-metadata zero_diff_check_failures="$CHECK_FAILS" >/dev/null 2>&1 || echo "could not count this failed check on $WORK, so the park after $CHECK_FAIL_CAP in a row may come later"
+    echo "the zero-diff check could not run in $RIG_ROOT: $BHRC_ERROR (failure $CHECK_FAILS of $CHECK_FAIL_CAP in a row); leaving the work with the refinery to retry"
+    gc runtime drain-ack
+    exit 1
   fi
-elif [ "$BHRC_RC" != 0 ]; then
   REFUSE_KEY=refinery-zero-diff-check-failed
-  REFUSE_WHY="the zero-diff check could not run in $RIG_ROOT: $BHRC_ERROR; no change verified, refused merge-close"
-  REFUSE_TAKEAWAY="the zero-diff check could not run, so no change was verified; refused close-as-merged. Fix the error its visit names, then re-route"
-  REFUSE_MESSAGE="The zero-diff check of branch $BRANCH against origin/$TARGET could not run in $RIG_ROOT: $BHRC_ERROR. It verified nothing either way, so close-as-merged was refused and the bead is parked for a human. This is a failed check, not a branch without work: fix that error, then hand the bead back to the refinery."
+  REFUSE_STATE=blocked
+  REFUSE_SET="blocked_reason=the zero-diff check could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row: $BHRC_ERROR; no change verified, refused merge-close"
+  REFUSE_TAKEAWAY="the zero-diff check could not run $CHECK_FAILS patrols in a row, so no change was verified; fix the error its visit names, then re-route"
+  REFUSE_MESSAGE="The zero-diff check of branch $BRANCH against origin/$TARGET could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row. The last error: $BHRC_ERROR. It verified nothing either way, so close-as-merged was refused and the bead is parked for a human. This is a failed check, not a branch without work: fix that error, then hand the bead back to the refinery."
+else
+  [ "$CHECK_FAILS" = 0 ] || gc bd update "$WORK" --unset-metadata zero_diff_check_failures >/dev/null 2>&1 || true
+  if [ "$BHRC_RC" = 1 ]; then
+    LANDED_SHA=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.direct_landing_sha // empty')
+    if [ -n "$LANDED_SHA" ] && git -C "$RIG_ROOT" merge-base --is-ancestor "$LANDED_SHA" "origin/$TARGET" 2>/dev/null; then
+      echo "origin/$TARGET carries $LANDED_SHA, which a direct landing of $WORK pushed without recording; taking the direct path to record it"
+      MERGE_STRATEGY=direct
+    else
+      REFUSE_KEY=refinery-false-completion
+      REFUSE_STATE=refused_false_completion
+      REFUSE_SET="false_completion_suspected=branch $BRANCH no verified change vs origin/$TARGET; refused merge-close"
+      REFUSE_TAKEAWAY="the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
+      REFUSE_MESSAGE="Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
+    fi
+  fi
 fi
 if [ -n "$REFUSE_KEY" ]; then
-  "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="$REFUSE_WHY" --takeaway "$REFUSE_TAKEAWAY"
+  "$LC" transition "$WORK" --to "$REFUSE_STATE" --assignee "" --route human --set "$REFUSE_SET" --unset zero_diff_check_failures --takeaway "$REFUSE_TAKEAWAY"
   # escalate.sh is looked for first in the pack lifecycle.sh came from, so a
   # bead this block parks gets its visit wherever that pack was found.
   SCRIPTS=""; for c in "${LC%/assets/scripts/lifecycle.sh}" "$RIG_ROOT" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
