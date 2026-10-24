@@ -400,16 +400,17 @@ case "$CLASS" in
         ;;
     source|review)
         # A review bead shares this arm: it is the source of its own mol-review
-        # molecule, carries no merge_result of its own and is routed to a review
-        # pool rather than a human gate, so neither skip below fires and it is
-        # always reopened to that pool. It reaches here as class=review only so
-        # the witness salvage scope gate can skip its worktree salvage and
-        # merge-verify; the disposal it needs is exactly the source contract.
+        # molecule, carries no merge_result of its own, is routed to a review pool
+        # rather than to `human`, and is held by a review session, not by `human`
+        # or a sitting, so no skip below fires and it is reopened to that pool. It
+        # reaches here as class=review only so the witness salvage scope gate can
+        # skip its worktree salvage and merge-verify; the disposal it needs is
+        # exactly the source contract.
         # A source work bead whose work already reached a downstream court is not
         # lost, so delete-source + reopen-source must not return it to the pool
         # (every cycle would re-detect and re-recover it, stamping a recovery the
         # crash-loop signal reads as a RATE, putting a moot question to a person).
-        # Three states name a downstream court, the same set mol-witness-patrol's
+        # These states name a downstream court, the same set mol-witness-patrol's
         # downstream-court-skip filter drops upstream: an in-flight PR (merge_result
         # pre_open_gate/pull_request) the refinery owns landing, a human route
         # (gc.routed_to=human) a person owns clearing, or a conversation. A

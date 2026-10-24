@@ -14,7 +14,7 @@
 # moot question to a person every cycle. Dropping such beads from the candidate
 # set before the liveness loop is what stops both the re-dispatch and the question.
 #
-# Three states name work that is not the pool's to recover:
+# Work in any of these states is not the pool's to recover:
 #   * an in-flight PR      — merge_result is pre_open_gate or pull_request;
 #   * a human route        — gc.routed_to=human;
 #   * a conversation       — a task assigned to `human` or to the alias of its
@@ -28,7 +28,7 @@
 # the first exclusion drops.
 # It is a state exclusion, not a kind exclusion: host-bead-skip keeps every owned
 # bead (no class exempt), and this runs on its result to remove the ones already
-# downstream. A bead carrying neither state is still the pool's to recover.
+# downstream. A bead in none of these states is still the pool's to recover.
 #
 # This test EXECUTES the real filters extracted verbatim from the formula
 # (between the `downstream-court-skip` and `host-bead-skip` markers), so it cannot

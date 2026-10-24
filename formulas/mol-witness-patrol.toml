@@ -232,8 +232,8 @@ jq -c '[ .[]
 # never returns finished work to the pool or marks it. The crash-loop signal is a
 # RATE off recovered_at/recovered_count, so a re-recovered in-flight bead
 # puts a moot question to a person each cycle; dropping it here is what stops
-# both the re-dispatch and the question. Three states name not-the-pool's work:
-# an in-flight PR (merge_result pre_open_gate/pull_request), a human route
+# both the re-dispatch and the question. Work in any of these states is not the
+# pool's: an in-flight PR (merge_result pre_open_gate/pull_request), a human route
 # (gc.routed_to=human), or a conversation: a task assigned to `human`, or to the
 # alias of its sitting, which names the task's own id, bare or qualified, or its
 # `c-` fallback (assets/scripts/conversation.sh, which downstream-court-skip.test.sh
@@ -241,8 +241,8 @@ jq -c '[ .[]
 # would orphan every conversation. pr.machine is not read: a progressing stamp is
 # written only with an anchor merge_result, which unanchoring clears while
 # leaving the stamp, so on a repooled bead it is stale — the in-flight-PR test
-# already covers a bead still in the machine. A bead carrying none of the three
-# is still the pool's to recover. Reads the candidate array on stdin (the
+# already covers a bead still in the machine. A bead in none of these states is
+# still the pool's to recover. Reads the candidate array on stdin (the
 # host-bead-skip result), writes the survivors on stdout, and touches no field a
 # survivor arrived with.
 jq -c '[ .[]
@@ -319,7 +319,7 @@ person it is parked on. Host-bead-skip drops only the beads that name no owner,
 so this one passes it, and in the liveness loop a drained owner would
 false-orphan it. Downstream-court-skip reads the state the bead already carries
 and drops it, so it never enters the liveness loop and is never marked.
-Three states name work that is not the pool's to recover:
+Work in any of these states is not the pool's to recover:
 - an in-flight PR — `merge_result` is `pre_open_gate` or `pull_request`;
 - a human route — `gc.routed_to=human`, the city's "no agent will take it"
   marker (a merge gate, an operator approval);

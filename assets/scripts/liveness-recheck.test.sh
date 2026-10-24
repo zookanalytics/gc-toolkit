@@ -71,7 +71,7 @@ bash -n "$SCRIPT" && ok "liveness-recheck.sh: valid bash" \
     || bad "liveness-recheck.sh: valid bash" "bash -n failed"
 
 # --- the gc stub -------------------------------------------------------------
-# Answers the three reads the script performs, each from a file so a case can
+# Answers each read the script performs from a file of its own, so a case can
 # inject a failure:
 #   gc bd list --id ... --all --json             <- $STUB_BEADS   ("FAIL" => exit 1)
 #   gc bd gate list --json --limit 0             <- $STUB_GATES   ("FAIL" => exit 1)
