@@ -15,6 +15,12 @@
 #     are the two no-skill cases the review formulas send a reviewer to.
 #   - Each region the review formulas repeat across steps, the method load, the
 #     record check and the gather, is the same text in every step carrying it.
+#   - The arch skill approves no commit without a docs/architecture.md, files a
+#     gap in architecture the change does not touch without holding the change,
+#     and passes no change on a gap in architecture it does touch. This repo's
+#     own docs/review-arch.md and docs/review-triage.md, read the way a review
+#     reads them at its commit, carry the divergence lens and the changes that
+#     make arch mandatory, and the pack's arch skill carries none of that lens.
 #
 # Hermetic: reads this checkout and a scratch git repository; no gc, store or
 # network.
@@ -117,6 +123,35 @@ ERR=$(cd "$RIG" && "$CHECKS" --check ux --at 00000000000000000000000000000000000
 eq "$rc" "1" "--check at a commit nothing can read exits 1 too"
 case "$ERR" in *"does not declare"*) bad "…but never as a check declared nowhere" "got '$ERR'" ;;
   *) ok "…but never as a check declared nowhere, which nothing approves on" ;; esac
+
+echo "# the arch skill's rules on docs/architecture.md, and this repo's own arch and triage guidance"
+# Text a reviewer reads, which no test of the mechanism that delivers it pins.
+# flat <file>: the file's prose on one line, so a pinned phrase may wrap.
+flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
+hasF() { if flat "$1" | grep -qF -- "$2"; then ok "$3"; else bad "$3" "missing: $2"; fi; }
+notF() { if flat "$1" | grep -qF -- "$2"; then bad "$3" "unexpected: $2"; else ok "$3"; fi; }
+ARCH_SKILL="$ROOT/skills/review-arch/SKILL.md"
+hasF "$ARCH_SKILL" 'A `docs/architecture.md` at the reviewed commit is a precondition of approval' "the arch skill approves no commit without docs/architecture.md"
+hasF "$ARCH_SKILL" 'a passable account of the architecture the change covers' "…whose change adds one covering the architecture it covers"
+hasF "$ARCH_SKILL" '`docs/architecture.md: incomplete`' "…and files the rest of the architecture as one follow-up under one token"
+hasF "$ARCH_SKILL" 'File it the same way, and do not hold the change for it.' "…files a gap the change does not touch without holding the change for it"
+hasF "$ARCH_SKILL" 'A gap in the architecture the change does touch is no reason to pass the change' "…and passes no change on a gap in the architecture it touches"
+notF "$ARCH_SKILL" 'not a reason to pass or fail the change' "…so no missing reference lets a change through unjudged"
+notF "$ARCH_SKILL" 'divergence lens' "the pack's arch skill, which every rig's arch review loads, carries none of gc-toolkit's lens"
+# This checkout's guidance, committed in a scratch repository and read back
+# through --extension at that commit, the read load-dispatch makes for a review.
+OWN="$TMP/own"; git init -q "$OWN"; mkdir -p "$OWN/docs"
+cp "$ROOT/docs/review-arch.md" "$ROOT/docs/review-triage.md" "$OWN/docs/"
+git -C "$OWN" add docs; git -C "$OWN" commit -q -m "this repo's arch and triage guidance"
+OWN_AT=$(git -C "$OWN" rev-parse HEAD)
+for c in arch triage; do
+  (cd "$OWN" && "$CHECKS" --extension "$c" --at "$OWN_AT" 2>/dev/null) > "$TMP/own.$c"
+done
+hasF "$TMP/own.arch" "The lens holds new surface to Gas City's own documentation instead." "this repo's arch guidance holds new surface to Gas City's own docs, not the pack's account of Gas City"
+hasF "$TMP/own.arch" 'A converter is a finding on sight.' "…makes a converter between a pack noun and a Gas City noun a finding"
+hasF "$TMP/own.arch" 'neither are tests or the fixtures they use' "…and leaves tests out of operational surface"
+hasF "$TMP/own.triage" '## When `arch` is mandatory' "this repo's triage guidance says when the arch check is mandatory"
+hasF "$TMP/own.triage" 'does not make `arch` mandatory' "…and that a diff of tests alone does not make it so"
 
 echo "# a region the review formulas repeat is one text in every step carrying it"
 python3 - "$ROOT/formulas/mol-review.toml" "$ROOT/formulas/mol-review-quorum-signoff.toml" > "$TMP/regions" <<'PY'
