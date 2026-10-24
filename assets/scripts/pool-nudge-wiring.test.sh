@@ -16,9 +16,11 @@
 #   2. The polecat and polecat-codex nudges are identical, as both agent files
 #      say they are, and they carry the hand-back.
 #   3. No tracked file under agents/, formulas/, template-fragments/, skills/ or
-#      packs/ tells its reader to clear its assignee in those words. The text is
-#      read with TOML line continuations and line wraps joined, so a phrase that
-#      a line break splits is still found.
+#      packs/ tells its reader to clear its assignee in those words, and no
+#      `bd update` command in one clears an assignee unless the same command
+#      reopens the bead (--status=open). The text is read with TOML line
+#      continuations joined, and the phrase with line wraps joined too, so a
+#      phrase or a command that a line break splits is still found.
 #
 # run-tests-scope: tree
 set -u
@@ -96,8 +98,12 @@ else:
     print("bad|the polecat and polecat-codex nudges are missing: agents/polecat or agents/polecat-codex has no agent.toml")
 
 # --- 3. No instruction to clear an assignee alone. ---
+# An empty assignee value: "" or '' or nothing before a space, a backtick or
+# the end of the command. --if-assignee= is a guard, not a write, and the
+# lookbehind keeps it out.
+CLEAR = re.compile(r"(?<![\w-])(--assignee|-a)(=(\"\"|''|(?=[\s`]|$))|\s+(\"\"|''))")
 texts = [t for t in os.environ.get("WIRING_TEXTS", "").splitlines() if t]
-hits = []
+hits, split = [], []
 for rel in texts:
     try:
         with open(os.path.join(root, rel), encoding="utf-8", errors="replace") as f:
@@ -105,13 +111,20 @@ for rel in texts:
     except OSError:
         continue
     text = re.sub(r"\\\n[ \t]*", "", text)
-    text = re.sub(r"\s+", " ", text)
-    if re.search(r"clear your (own )?assignee", text, re.IGNORECASE):
+    for line in text.splitlines():
+        for cmd in re.split(r";|&&|\|\||\|", line):
+            if re.search(r"\bbd update\b", cmd) and CLEAR.search(cmd) and "--status=open" not in cmd:
+                split.append("%s: %s" % (rel, cmd.strip()[:160]))
+    if re.search(r"clear your (own )?assignee", re.sub(r"\s+", " ", text), re.IGNORECASE):
         hits.append(rel)
 if hits:
     print("bad|an instruction tells its reader to clear its assignee: %s" % ", ".join(hits))
 else:
     print("ok|none of the %d tracked instruction files tells its reader to clear its assignee" % len(texts))
+if split:
+    print("bad|a bd update clears an assignee without reopening the bead in the same write: %s" % "; ".join(split))
+else:
+    print("ok|every bd update in them that clears an assignee reopens the bead in the same write")
 PY
 ); PY_RC=$?
 
@@ -124,6 +137,10 @@ esac
 case "$RESULTS" in
   *"tells its reader to clear its assignee"*) ;;
   *) bad "the reader reported nothing about instructions to clear an assignee" ;;
+esac
+case "$RESULTS" in
+  *"clears an assignee"*) ;;
+  *) bad "the reader reported nothing about bd update commands that clear an assignee" ;;
 esac
 while IFS='|' read -r verdict message; do
   case "$verdict" in
