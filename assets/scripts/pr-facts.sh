@@ -2219,7 +2219,9 @@ MP_EOF
       # apply, with each inline comment dated by its review's submission the way
       # live_comments dates it. A review's state is an utterance whatever its body
       # says, so a review that is not the city's own counts too when its state is
-      # anything but COMMENTED. The maxima drive only the watermark compare below.
+      # anything but COMMENTED. A COMMENTED review whose body holds no text says
+      # nothing itself: GitHub wraps inline comments in one, and they count on
+      # their own. The maxima drive only the watermark compare below.
       # A count that does not read leaves any_human empty, and the derivation then
       # records nothing rather than quiet.
       any_human=$({ printf '%s\n' "$revs_raw"; printf '%s\n' "$cmts_raw"; printf '%s\n' "$icmts_raw"; } \
@@ -2228,7 +2230,8 @@ MP_EOF
           | ([ $revs[] | select(((.submitted_at // "") | tostring) != "")
                | { key: ((.id // 0) | tostring), value: (.submitted_at | tostring) } ]
              | from_entries) as $submitted
-          | [ ($revs[] | select(gc_feedback($self; $since)
+          | [ ($revs[] | select((gc_feedback($self; $since)
+                                 and (((.body // "") | tostring | gsub("[[:space:]]"; "")) != ""))
                                 or ((gc_city_own($self; $since) | not)
                                     and (((.state // "") | tostring) != "COMMENTED")))),
               ($cmts[] | ($submitted[((.pull_request_review_id // "") | tostring)] // "") as $at

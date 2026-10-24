@@ -3702,6 +3702,23 @@ eq "$(jq '[ .[] | select((.metadata.task_kind // "") == "finding") | select((.me
            | select((.metadata["finding.source"] // "") == "human:previewbot[bot]") ] | length' "$STUB_STORE")" "1" \
   "…and an app's comment whose mark follows its text is one too"
 
+echo "# a review whose body is empty says nothing, so marked inline comments it carries leave the PR quiet"
+# Every inline comment arrives inside a review, usually COMMENTED with an empty
+# body. The inline comments are each counted on their own.
+store "[$(anchor NR8 379)]"
+printf '%s' "$(prview 379 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_379.json"
+printf '[%s,%s]' \
+  '{"id":37900,"user":{"login":"previewbot[bot]","type":"Bot"},"state":"COMMENTED","body":"","commit_id":"sha-379","submitted_at":"2026-10-08T01:00:00Z"}' \
+  '{"id":37902,"user":{"login":"human1","type":"User"},"state":"COMMENTED","body":" \n","commit_id":"sha-379","submitted_at":"2026-10-08T02:00:00Z"}' > "$GH_DIR/reviews_379.json"
+printf '[%s,%s]' \
+  '{"id":37901,"pull_request_review_id":37900,"user":{"login":"previewbot[bot]","type":"Bot"},"body":"<!-- gc:no-review -->\nctx","path":"a.sh","line":1}' \
+  '{"id":37903,"pull_request_review_id":37902,"user":{"login":"human1","type":"User"},"body":"<!-- gc:no-review -->\nFYI only.","path":"a.sh","line":2}' > "$GH_DIR/comments_379.json"
+out=$(run)
+eq "$(meta_pinned NR8 pr.conversation)" "quiet@sha-379" "the PR reads quiet, a whitespace-only body as much as an empty one"
+eq "$(meta_pinned NR8 pr_posture)" "review_required@sha-379" "…nothing is outstanding"
+eq "$(meta NR8 pr_review_watermark)|$(meta NR8 pr_comment_watermark)" "<absent>|<absent>" "…no mark moves"
+eq "$(jq '[ .[] | select(.id | startswith("new-")) ] | length' "$STUB_STORE")" "0" "…and nothing is filed"
+
 echo "# a validation pass whose anchor_bead neither lands nor repairs warns and holds the batch"
 # The shape rides the create and is read back. A pass that landed without its
 # anchor_bead, and whose second write is refused, is one no probe can find, so
