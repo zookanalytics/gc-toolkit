@@ -334,6 +334,24 @@ reset "$(task tk-w),$(gate g-ruled2 k closed "ruled: fix it" "$(iso_ago 300)")" 
 "$SUT" --subject tk-w --key k --message m --quiet-window 3600 >/dev/null 2>&1
 eq "$(creates)" 1 "a ruled answer opens no window"
 
+echo "# a duplicate a writer resolved is no person's answer, so the window skips it"
+# The duplicate's repair ran after the person answered the first gate, so the
+# duplicate is the newest closed gate under the key.
+dup_reason="moot: a duplicate of gate g-first, filed for the same situation in the same instant"
+reset "$(task tk-w),$(gate g-first k closed "ruled: fix it" "$(iso_ago 600)"),$(gate g-dup k closed "$dup_reason" "$(iso_ago 60)")" \
+"tk-w|blocks|g-first
+tk-w|blocks|g-dup
+"
+"$SUT" --subject tk-w --key k --message m --quiet-window 3600 >/dev/null 2>&1
+eq "$(creates)" 1 "the person ruled, so a re-detection files, though the duplicate closed moot after that"
+reset "$(task tk-w),$(gate g-first k closed "moot: it healed" "$(iso_ago 600)"),$(gate g-dup k closed "$dup_reason" "$(iso_ago 60)")" \
+"tk-w|blocks|g-first
+tk-w|blocks|g-dup
+"
+"$SUT" --subject tk-w --key k --message m --quiet-window 3600 >/dev/null 2>"$TMP/err"
+eq "$(creates)" 0 "the person answered moot, so the window holds"
+has "$(cat "$TMP/err")" "on gate g-first (moot: it healed)" "  ... and names the person's answer, not the duplicate"
+
 echo "# a bead with open children is filed on like any other"
 # What a gate on a parent pauses is the caller's call-site policy; the helper
 # refuses no bead for its shape and reads no children.

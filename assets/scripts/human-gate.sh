@@ -48,6 +48,12 @@ PROG="human-gate"
 # description, so an over-cap first line is cut with an ellipsis, not refused.
 TITLE_MAX=140
 
+# The head of the reason a writer that lost a create race resolves its own
+# gate with (below). It is headed `moot:`, because the duplicate needs nobody
+# once the first gate asks. The quiet window skips a gate closed with it,
+# because no person answered that gate.
+DUP_REASON_HEAD="moot: a duplicate of gate"
+
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
@@ -201,14 +207,18 @@ if [ -n "$OPEN_GATE" ]; then
 fi
 
 # The quiet period the call declares. The newest closed gate under the key
-# decides: a reason headed `moot:` or `benign:` says a person judged the
-# situation needs nobody, and a re-detection inside the window files nothing.
-# Any other answer means the person acted, so the next occurrence stands on new
-# ground. Without --quiet-window there is no window, because only the filer
-# knows whether a repeat is the same condition seen again or a new event.
+# that a person answered decides: a reason headed `moot:` or `benign:` says a
+# person judged the situation needs nobody, and a re-detection inside the
+# window files nothing. Any other answer means the person acted, so the next
+# occurrence stands on new ground. A gate a writer resolved as its own
+# duplicate is skipped, because nobody judged the situation by closing it, and
+# it can close after the person's answer, when its repair runs later. Without
+# --quiet-window there is no window, because only the filer knows whether a
+# repeat is the same condition seen again or a new event.
 if [ -n "$QUIET_WINDOW" ] && [ "$QUIET_WINDOW" -gt 0 ]; then
-  QUIET_ROW=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" '
+  QUIET_ROW=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" --arg dup "$DUP_REASON_HEAD " '
     [ .[] | select((.await_id // "") == $k and (.status // "") == "closed")
+          | select((.close_reason // "") | tostring | startswith($dup) | not)
           | { id: .id, reason: (.close_reason // ""),
               at: (((.closed_at // "") | sub("\\.[0-9]+"; "") | fromdateiso8601?) // 0) }
           | select(.at > 0) ]
@@ -269,7 +279,7 @@ fi
 # back, and then the bead moves once both are cleared.
 FIRST_GATE=$(printf '%s' "$GOT" | bd_gates_open_under_key "$KEY" | jq -r '.[0].id // empty' 2>/dev/null)
 if [ -n "$FIRST_GATE" ] && [ "$FIRST_GATE" != "$GATE" ]; then
-  DUP_REASON="moot: a duplicate of gate $FIRST_GATE, filed for the same situation in the same instant"
+  DUP_REASON="$DUP_REASON_HEAD $FIRST_GATE, filed for the same situation in the same instant"
   gc bd gate resolve "$GATE" --reason "$DUP_REASON" </dev/null >/dev/null 2>&1
   # bd's exit says nothing about whether the duplicate closed: it reports
   # success on a resolve that closed nothing and on a gate another resolver
