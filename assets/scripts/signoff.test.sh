@@ -393,7 +393,7 @@ mkdir -p "$TMP/qp-rig/.beads"
 printf '#!/usr/bin/env bash\nexec %q "$@" --db %q\n' "$HERE/queue-priority.sh" "$TMP/qp-rig/.beads" > "$BIN/queue-priority"
 chmod +x "$BIN/queue-priority"
 export GC_QUEUE_PRIORITY_TOOL="$BIN/queue-priority"
-# The git stub serves this as `rev-parse --show-toplevel`, giving resolve_index a
+# The git stub serves this as `rev-parse --show-toplevel`, giving the resolver a
 # repo root without leaning on an ambient GC_RIG_ROOT (unset on the CI runner).
 export STUB_TOPLEVEL="$TMP"
 # request-changes files findings and approve closes them through finding.sh;
