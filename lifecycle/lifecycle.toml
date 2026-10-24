@@ -98,7 +98,7 @@ meaning = "recorded existing_pr unusable; routed to human"
 
 [states.refused_false_completion]
 status = "open"
-meaning = "no commits on branch; routed to human"
+meaning = "no verified change on branch: none found, or the check could not run; routed to human"
 
 [states.held]
 status = "open"
@@ -130,7 +130,7 @@ writer = "formulas/mol-refinery-patrol.toml (existing_pr unusable; via lifecycle
 [[transition]]
 from = "unanchored"
 to = "refused_false_completion"
-writer = "formulas/mol-refinery-patrol.toml (no commits on branch; via lifecycle.sh)"
+writer = "formulas/mol-refinery-patrol.toml (no verified change on branch: none found, or the zero-diff check could not run; via lifecycle.sh)"
 
 # `held` is entered only from `unanchored`. merge.sh, gate-ensure.sh and
 # pr-facts.sh each enumerate anchors by their gating state, so moving one here

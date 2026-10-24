@@ -12,9 +12,10 @@ when to run the assembled `gh pr create` command.
 
 Extends `mol-polecat-base` for load-context but replaces the implement /
 self-review chain with cherry-pick / scrub / test / push / draft / handback.
-Every abort path (cherry-pick conflict, test failure, push race) mails the
-keeper + operator and hands the bead back open, assigned and routed to the
-keeper — never stranded `in_progress` on the drained session."""
+Every abort path (a roster with no gascity rig, cherry-pick conflict, test
+failure, push race) mails the keeper + operator and hands the bead back open,
+assigned and routed to the keeper — never stranded `in_progress` on the drained
+session."""
 formula = "mol-upstream-gc-pr-prep"
 extends = ["mol-polecat-base"]
 version = 3
@@ -70,10 +71,39 @@ escalate to the operator with subject `pr-prep: missing metadata` and exit.
 Do not invent defaults.
 
 **2. Reuse or create the worktree.** Check `metadata.work_dir` first; if it
-exists, `cd` there and skip to step 3. Otherwise:
+exists, `cd` there and skip to step 3. Otherwise locate the gascity rig by
+name in `gc rig list --json`. Every git call below names it as
+`git -C "$RIG_ROOT"`, and `git -C ""` runs in the session's cwd, so a roster
+with no gascity rig hands the bead back before anything is fetched or created.
+The session drains only after that hand-back is written:
 
 ```bash
+# >>> upstream-pr-prep-worktree-setup
 RIG_ROOT=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
+if [ -z "$RIG_ROOT" ]; then
+  REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper')
+  gc mail send "$REQUESTING_KEEPER" -s "pr-prep: no gascity rig for {{issue}}" -m "$(cat <<EOF
+gc rig list --json names no rig called gascity, so no path names the
+repository to branch from. Nothing was fetched, created or pushed.
+
+Bead: {{issue}}
+
+Next: register the gascity rig, then re-dispatch this prep.
+EOF
+)"
+  gc mail send human -s "pr-prep: no gascity rig for {{issue}}" -m "(see keeper mail)"
+
+  if ! gc bd update {{issue}} \
+    --set-metadata aborted_at=workspace-setup \
+    --status=open \
+    --assignee="$REQUESTING_KEEPER" \
+    --set-metadata gc.routed_to="$REQUESTING_KEEPER"; then
+    echo "pr-prep: the hand-back of {{issue}} to $REQUESTING_KEEPER did not land; NOT draining, so the next worker retries" >&2
+    exit 1
+  fi
+  gc runtime drain-ack
+  exit 0
+fi
 
 # Split the ordered SHA list explicitly with awk: zsh — the shell this block
 # is pasted into — performs NO word-splitting on an unquoted expansion, so
@@ -104,6 +134,7 @@ cd "$WORKTREE_PATH"
 gc bd update {{issue}} \
   --set-metadata work_dir="$WORKTREE_PATH" \
   --set-metadata branch="$BRANCH"
+# <<< upstream-pr-prep-worktree-setup
 ```
 
 If the branch name collides with an existing worktree branch, append

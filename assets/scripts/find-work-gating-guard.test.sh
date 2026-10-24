@@ -261,12 +261,15 @@ grep -q 'gc bd update' "$TMP/select.sh" \
 echo "── 3. PRE_OPEN reads every key a PR can be recorded under ──"
 
 # preopen <existing_pr> <pr_url> <pr_number> -> "PRE_OPEN|RECORDED_PR"
+# The block names the rig by GC_RIG_ROOT, which is PREOPEN_RIG when set and
+# otherwise a directory holding no repository, so origin names no --repo.
 { cat "$TMP/preopen.sh"; printf 'printf "%%s|%%s\\n" "$PRE_OPEN" "$RECORDED_PR"\n'; } > "$TMP/run-preopen.sh"
+mkdir -p "$TMP/no-repo"
 preopen() {
   BEAD_JSON=$(jq -nc --arg u "${2:-}" --arg n "${3:-}" \
     '[{metadata: ({} + (if $u != "" then {pr_url: $u} else {} end)
                     + (if $n != "" then {pr_number: ($n | tonumber)} else {} end))}]')
-  WORK="tk-w" EXISTING_PR="${1:-}" BEAD_JSON="$BEAD_JSON" CODEX_GATE=1 \
+  WORK="tk-w" EXISTING_PR="${1:-}" BEAD_JSON="$BEAD_JSON" CODEX_GATE=1 GC_RIG_ROOT="${PREOPEN_RIG-$TMP/no-repo}" \
     bash "$TMP/run-preopen.sh" 2>/dev/null | tail -1
 }
 # `gh` must be present for PRE_OPEN to be reachable at all (the resolver opens
@@ -286,7 +289,7 @@ eq "$(preopen '' '' '55')" "0|55" \
 # the post-open path.
 eq "$(preopen '' '' '' ; :)" "1|" "(16) no keys at all -> PRE_OPEN"
 BEAD_JSON='[{"metadata":{"pr_url":"","pr_number":55}}]'
-eq "$(WORK="tk-w" EXISTING_PR="" BEAD_JSON="$BEAD_JSON" CODEX_GATE=1 bash "$TMP/run-preopen.sh" 2>/dev/null | tail -1)" "0|55" \
+eq "$(WORK="tk-w" EXISTING_PR="" BEAD_JSON="$BEAD_JSON" CODEX_GATE=1 GC_RIG_ROOT="$TMP/no-repo" bash "$TMP/run-preopen.sh" 2>/dev/null | tail -1)" "0|55" \
    "(17) empty pr_url does not out-rank a real pr_number (jq // only skips null)"
 
 # existing_pr keeps its own strict validation path; a refinery-minted pr_url
@@ -296,11 +299,14 @@ grep -q 'EXISTING_PR=' "$TMP/preopen.sh" \
   && bad "(18) the guard must not overwrite EXISTING_PR" "found an EXISTING_PR assignment" \
   || ok "(18) EXISTING_PR left intact (its block-and-escalate contract is unchanged)"
 
-echo "── 4. a recorded PR is looked up in origin's repository ──"
+echo "── 4. a recorded PR is looked up in the rig's origin repository ──"
 
 # With no `gh repo set-default`, gh resolves a bare PR number against the first
 # remote in its own order, which puts upstream ahead of origin, so a bare
 # pr_number in a checkout with an upstream remote opened someone else's PR.
+# Origin is the rig's, read by path: every run below sits in a cwd checkout
+# whose own origin is another repository, so a block that read its cwd would
+# name that repository.
 GH_ARGV="$TMP/gh-argv.log"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'printf "%%s\\n" "$*" >> "%s"\nexit 0\n' "$GH_ARGV"; } > "$TMP/bin/gh"
 chmod +x "$TMP/bin/gh"
@@ -308,16 +314,32 @@ ORIGIN_CO="$TMP/origin-checkout"
 git init -q "$ORIGIN_CO"
 git -C "$ORIGIN_CO" remote add upstream git@github.com:them/repo.git
 git -C "$ORIGIN_CO" remote add origin git@github.com:ours/repo.git
+FOREIGN_CWD="$TMP/foreign-checkout"
+git init -q "$FOREIGN_CWD"
+git -C "$FOREIGN_CWD" remote add origin git@github.com:other/repo.git
 : > "$GH_ARGV"
-( cd "$ORIGIN_CO" && preopen '' '' '55' >/dev/null )
+( cd "$FOREIGN_CWD" && PREOPEN_RIG="$ORIGIN_CO" preopen '' '' '55' >/dev/null )
 eq "$(grep -c -- '^pr view 55 --repo git@github.com:ours/repo.git ' "$GH_ARGV" || true)" "1" \
-   "(19) a bare pr_number is viewed in origin's repository"
-NO_ORIGIN="$TMP/no-origin"; mkdir -p "$NO_ORIGIN"
+   "(19) a bare pr_number is viewed in the rig's origin repository"
+eq "$(grep -c -- 'other/repo' "$GH_ARGV" || true)" "0" "(19b) and never in the cwd checkout's origin"
+NO_ORIGIN="$TMP/no-origin"; git init -q "$NO_ORIGIN"
 : > "$GH_ARGV"
-( cd "$NO_ORIGIN" && preopen '' '' '55' >/dev/null )
+( cd "$FOREIGN_CWD" && PREOPEN_RIG="$NO_ORIGIN" preopen '' '' '55' >/dev/null )
 eq "$(grep -c -- '--repo' "$GH_ARGV" || true)" "0" \
-   "(20) with no origin to name, the view passes no --repo"
+   "(20) with no origin on the rig to name, the view passes no --repo, though the cwd checkout has one"
 eq "$(grep -c -- '^pr view 55 ' "$GH_ARGV" || true)" "1" "(21) and still looks the PR up"
+# An unresolvable rig leaves the work with the refinery to retry: nothing is
+# looked up, because no origin can be named.
+: > "$GH_ARGV"
+RC=0
+OUT=$(cd "$FOREIGN_CWD" && WORK="tk-w" EXISTING_PR="" BEAD_JSON='[{"metadata":{"pr_number":55}}]' CODEX_GATE=1 \
+  GC_RIG_ROOT="" GC_RIG=no-such-rig bash "$TMP/run-preopen.sh" 2>&1) || RC=$?
+eq "$RC" "1" "(22) an unresolvable rig fails closed"
+case "$OUT" in
+  *"cannot resolve the rig root"*) ok "(22b) and says it cannot resolve the rig root" ;;
+  *) bad "(22b) and says it cannot resolve the rig root" "$OUT" ;;
+esac
+eq "$(grep -c . "$GH_ARGV" || true)" "0" "(22c) no PR is looked up"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

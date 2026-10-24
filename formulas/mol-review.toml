@@ -117,10 +117,18 @@ reviewed for; that pin wins when present. The diff you read, every command the
 check's method runs, and the OID you hand off are all that one commit — a
 verdict recorded against a head you never read certifies unreviewed code:
 ```bash
-git fetch origin "$BASE" "$BRANCH"
+# >>> review-pin-commit
+# The fetch and the head read name the rig's repository by path, so the
+# session's cwd cannot pick it. An empty REPO would let it, because `git -C ""`
+# runs in the cwd, so an unresolvable rig fails closed.
+REPO="${GC_RIG_ROOT:-}"
+[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+git -C "$REPO" fetch origin "$BASE" "$BRANCH"
 REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
-[ -n "$REVIEWED_OID" ] || REVIEWED_OID=$(git rev-parse "origin/$BRANCH")
+[ -n "$REVIEWED_OID" ] || REVIEWED_OID=$(git -C "$REPO" rev-parse "origin/$BRANCH")
 echo "reviewing $BRANCH -> $BASE at $REVIEWED_OID"
+# <<< review-pin-commit
 ```
 
 **5. Read the intent and the method.** The anchor bead
@@ -167,8 +175,16 @@ REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
 
 **1. The diff under review:**
 ```bash
-git diff --stat "origin/$BASE...$REVIEWED_OID"
-git diff       "origin/$BASE...$REVIEWED_OID"
+# >>> review-diff
+# The diff reads origin/$BASE from the rig's repository, named by path as in
+# load-dispatch: another checkout's origin/$BASE can be stale, and a diff
+# against it shows changes the base made as changes the branch made.
+REPO="${GC_RIG_ROOT:-}"
+[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+git -C "$REPO" diff --stat "origin/$BASE...$REVIEWED_OID"
+git -C "$REPO" diff       "origin/$BASE...$REVIEWED_OID"
+# <<< review-diff
 ```
 Three dots — compare against the merge-base, so the diff is what the branch
 changed rather than what the base moved on underneath it.
