@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
 # queries it, the read of a bead's human gates every reader of them makes and
-# the order its open gates under one key are read in, the one-write create every script files a stamped bead through,
-# the metadata read-back that gates handing such a bead on, the close that
-# unmakes a bead no reader can find, the validation pass's work order, the
-# gating-PR read's field set, the per-rig key an order's state lives under, and
-# the pass lock that lets an order run one pass at a time. Sourced, never
-# executed.
+# the order its open gates under one key are read in, the one-write create every
+# script files a stamped bead through, the metadata read-back that gates handing
+# such a bead on, the close that unmakes a bead no reader can find, the
+# validation pass's work order, the gating-PR read's field set, the per-rig key
+# an order's state lives under, and the pass lock that lets an order run one
+# pass at a time. Sourced, never executed.
 #
 # A caller resolves this file beside itself and sources it, the way
 # visit-identity.sh is sourced:

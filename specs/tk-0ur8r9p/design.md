@@ -709,15 +709,17 @@ It files in four steps:
    This is the idempotency the initiative's ruling asks for. bd has none at
    create, so two writers racing in the same instant can both file. Each reads
    the bead's gates back after its create, and a writer whose gate is not the
-   first open one under the key, by created_at and then id, resolves its own
-   as a duplicate. Two gates stand only when one create lands after the other
+   first open one under the key, by created_at read as a time and then id,
+   resolves its own as a duplicate, reads it back, and names the first gate
+   still open. Two gates stand only when one create lands after the other
    writer read back. The board folds those two, and a sitting answers both with
    one reason.
 3. **It keeps a quiet period the call declares.** With `--quiet-window`, the
    helper files nothing, and says so, while the newest closed human gate under
-   the key among the bead's gates closed with a reason headed `moot:` or
-   `benign:` less than that many seconds ago. It reads that gate in step 2's
-   listing. Without the option there is no window. The window is the filer's
+   the key among the bead's gates that a person answered closed with a reason
+   headed `moot:` or `benign:` less than that many seconds ago. A gate a writer
+   resolved as its own duplicate is no person's answer, so it is skipped. It
+   reads that gate in step 2's listing. Without the option there is no window. The window is the filer's
    policy, because only the filer knows the shape of what it files. The helper
    cannot tell a re-detection of one persisting condition, such as a patrol
    re-reporting a red check after a benign answer, from a new occurrence of an
