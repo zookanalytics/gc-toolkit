@@ -1071,6 +1071,17 @@ the second anchor it was written to prevent. Multi-candidate tiebreak: the
 OLDEST anchor (the original predates any rework-minted duplicate);
 `created_at` is the real field, `.created`/`.id` only defensive fallbacks.
 
+A rework child can land on a bead that carries no `merge_result` yet. A
+convoy's rebuild child is one: `rejection-repool.sh` pours a rejected
+graduation's rebuild onto it, because a convoy cannot be its own run's work
+bead. With no anchor on the branch, the bead $WORK names as its `anchor_bead`,
+when it is open on the same branch, is the bead this landing anchors
+(`LANDS_ON`). Once the push reads back, it takes the gating transition this
+pass would have given $WORK, and $WORK then closes landed-on-branch. The
+anchoring comes first, so a close that fails leaves an anchor the next pass
+finds on the branch, and a refused anchoring closes nothing. A child never
+takes a gating state itself, and a bead it does not name is never anchored.
+
 The child leaves through `lifecycle.sh` because `merge_result` is the
 lifecycle's field and `lifecycle.sh` is its only writer; `unanchored` is the
 declared edge out of every gating state. A child closed still carrying one is
@@ -1098,6 +1109,7 @@ branch that head is on. The read-back fetch has just put that head on
 ```bash
 # >>> one-anchor-per-pr-resolve
 EXISTING_ANCHOR=""
+LANDS_ON=""
 if [ -n "${BRANCH:-}" ]; then
   ANCHOR_ROWS=$(gc bd list --status=open --metadata-field branch="$BRANCH" \
     --limit=0 --json 2>/dev/null) || ANCHOR_ROWS=""
@@ -1105,11 +1117,28 @@ if [ -n "${BRANCH:-}" ]; then
     '[ .[]? | select(.id != $self)
        | select((((.metadata // {}).merge_result // "") | tostring) != "") ]
      | sort_by(.created_at // .created // .id) | .[0].id // empty' 2>/dev/null) || EXISTING_ANCHOR=""
+  if [ -z "$EXISTING_ANCHOR" ]; then
+    LANDS_ON=$(printf '%s' "$ANCHOR_ROWS" | jq -r --arg self "$WORK" \
+      '([ .[]? | select(.id == $self) | (((.metadata // {}).anchor_bead // "") | tostring) ] | .[0] // "") as $named
+       | [ .[]? | select(.id != $self and .id == $named) ] | .[0].id // empty' 2>/dev/null) || LANDS_ON=""
+  fi
 fi
-GATING_ANCHOR="${EXISTING_ANCHOR:-$WORK}"
+GATING_ANCHOR="${EXISTING_ANCHOR:-${LANDS_ON:-$WORK}}"
 # <<< one-anchor-per-pr-resolve
 # >>> one-anchor-per-pr-terminal
-if [ -n "$EXISTING_ANCHOR" ]; then
+# The gating transition, onto the bead this landing anchors: pull_request once
+# both PR coordinates resolved, else pre_open_gate.
+anchor_at_gate() { # <bead>
+  if [ "$PRE_OPEN" = 1 ] || [ -z "${PR_URL:-}" ] || [ -z "${PR_NUMBER:-}" ]; then
+    if [ "$PRE_OPEN" != 1 ]; then
+      echo "merge-push: $WORK records a PR but url/number did not both resolve (url='${PR_URL:-}' number='${PR_NUMBER:-}'); parking $1 at pre_open_gate so pr-open.sh adopts the PR — an empty pr_number is unaddressable by merge.sh and pr-facts.sh forever." >&2
+    fi
+    "$LC" transition "$1" --to pre_open_gate --assignee "" --route "" --set merged_target="$TARGET" --set check_set="$CHECK_SET" --unset rejection_reason
+  else
+    "$LC" transition "$1" --to pull_request --assignee "" --route "" --set pr_url="$PR_URL" --set pr_number="$PR_NUMBER" --set merged_target="$TARGET" --set check_set="$CHECK_SET" --unset rejection_reason
+  fi
+}
+if [ -n "$EXISTING_ANCHOR" ] || [ -n "${LANDS_ON:-}" ]; then
   # This arm closes the rework landed-on-branch, so the landing must be provable
   # against origin: the mr push above can be rejected or skipped and leave
   # origin/$BRANCH at its pre-fix tip, and a sha read from the local prep
@@ -1132,6 +1161,14 @@ if [ -n "$EXISTING_ANCHOR" ]; then
     exit 1
   fi
   REWORK_SHA=$(git -C "$PREP_WT" rev-parse --short "origin/$BRANCH" 2>/dev/null || echo "")
+  if [ -n "${LANDS_ON:-}" ]; then
+    if ! anchor_at_gate "$LANDS_ON"; then
+      echo "merge-push: $LANDS_ON, the bead rework $WORK lands on, could not be anchored; closing nothing. $WORK stays routed for the next pass." >&2
+      gc runtime drain-ack
+      exit 1
+    fi
+    EXISTING_ANCHOR="$LANDS_ON"
+  fi
   gc bd update "$EXISTING_ANCHOR" --append-notes "Rework $WORK landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; re-gate belongs to the cadence (one-anchor-per-PR)." >/dev/null 2>&1 || true
   if "$LC" transition "$WORK" --to unanchored --unset rejection_reason; then
     if ! gc bd update "$WORK" --status=closed \
@@ -1142,13 +1179,8 @@ if [ -n "$EXISTING_ANCHOR" ]; then
   else
     echo "merge-push: $WORK could not be moved off its anchor state; left OPEN for the next pass rather than closed still carrying one (doctor/check-closed-implies-landed)" >&2
   fi
-elif [ "$PRE_OPEN" = 1 ] || [ -z "${PR_URL:-}" ] || [ -z "${PR_NUMBER:-}" ]; then
-  if [ "$PRE_OPEN" != 1 ]; then
-    echo "merge-push: $WORK records a PR but url/number did not both resolve (url='${PR_URL:-}' number='${PR_NUMBER:-}'); parking at pre_open_gate so pr-open.sh adopts the PR — an empty pr_number is unaddressable by merge.sh and pr-facts.sh forever." >&2
-  fi
-  "$LC" transition "$WORK" --to pre_open_gate --assignee "" --route "" --set merged_target="$TARGET" --set check_set="$CHECK_SET" --unset rejection_reason
 else
-  "$LC" transition "$WORK" --to pull_request --assignee "" --route "" --set pr_url="$PR_URL" --set pr_number="$PR_NUMBER" --set merged_target="$TARGET" --set check_set="$CHECK_SET" --unset rejection_reason
+  anchor_at_gate "$WORK"
 fi
 # <<< one-anchor-per-pr-terminal
 ```
@@ -1184,7 +1216,8 @@ leave the bead for a human to re-strategize.
 transition; mr requires a verified branch push then one gating transition
 (pre_open_gate, or pull_request with the PR recorded). The bead closes only
 on a verified merge — never at handoff — except a rework hand-back, which
-closes landed-on-branch with NO merge_result."""
+closes landed-on-branch with NO merge_result, after its gating transition
+lands on the bead it names when that bead carries none yet."""
 
 [[steps]]
 id = "patrol-summary"

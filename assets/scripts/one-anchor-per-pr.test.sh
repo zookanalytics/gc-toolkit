@@ -40,8 +40,9 @@ mkdir -p "$TMP/bin"
 # --- gc stub: the anchor lookup the resolve snippet performs. -----------------
 # `gc bd list --status=open --metadata-field branch=<b> --limit=0 --json`
 # filtered against a fixture of
-#   id|merge_result|branch|created_at
-# rows (open beads). `gc bd update` and `gc bd close` append to $GCLOG when it
+#   id|merge_result|branch|created_at[|anchor_bead]
+# rows (open beads). A non-empty anchor_bead column lands in the row's
+# metadata, the role marker a rework child carries. `gc bd update` and `gc bd close` append to $GCLOG when it
 # is set. Everything else exits 0 with no output.
 #
 # The stub honours EVERY --metadata-field it is given, the way bd does: the
@@ -75,7 +76,7 @@ for a in "$@"; do
   esac
 done
 out=""
-while IFS='|' read -r id rmr rbr created_at; do
+while IFS='|' read -r id rmr rbr created_at ranchor; do
   [ -n "$id" ] || continue
   [ "$rbr" = "$br" ] || continue
   [ "$mr_given" = 0 ] || [ "$rmr" = "$mr" ] || continue
@@ -85,9 +86,14 @@ while IFS='|' read -r id rmr rbr created_at; do
     ts=""
   fi
   if [ -n "$rmr" ]; then
-    meta=$(printf '{"merge_result":"%s","branch":"%s"}' "$rmr" "$rbr")
+    meta=$(printf '{"merge_result":"%s","branch":"%s"' "$rmr" "$rbr")
   else
-    meta=$(printf '{"branch":"%s"}' "$rbr")
+    meta=$(printf '{"branch":"%s"' "$rbr")
+  fi
+  if [ -n "$ranchor" ]; then
+    meta=$(printf '%s,"anchor_bead":"%s"}' "$meta" "$ranchor")
+  else
+    meta="$meta}"
   fi
   obj=$(printf '{"id":"%s",%s"metadata":%s}' "$id" "$ts" "$meta")
   if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
@@ -207,15 +213,56 @@ A
 eq "$(resolve rework-2 polecat/parent)" "tk-aaaa1|tk-aaaa1" \
    "(5b) no created_at on any row -> deterministic \$WORK-independent id tiebreak"
 
+# (5c) A rework child can land on a bead that carries no merge_result yet: a
+#      convoy's rebuild child names the convoy as its anchor_bead, and the
+#      convoy is open on the same branch. With no anchor there, that bead is the
+#      one this landing anchors (LANDS_ON), and it is the gating anchor.
+{ printf '%s\n' "$SNIPPET"; printf 'printf "%%s|%%s|%%s\\n" "$EXISTING_ANCHOR" "$GATING_ANCHOR" "$LANDS_ON"\n'; } > "$TMP/run3.sh"
+resolve3() { # <work> <branch> -> "EXISTING_ANCHOR|GATING_ANCHOR|LANDS_ON"
+  WORK="$1" BRANCH="$2" bash "$TMP/run3.sh" 2>/dev/null | tail -1
+}
+cat > "$FAKE_ANCHORS" <<'A'
+rebuild-1||integration/cv|2026-07-02T00:00:00Z|cv
+cv||integration/cv|2026-07-01T00:00:00Z|
+A
+eq "$(resolve3 rebuild-1 integration/cv)" "|cv|cv" \
+   "(5c) a child naming an unanchored bead on its branch lands on it: LANDS_ON=GATING_ANCHOR=cv"
+eq "$(resolve rebuild-1 integration/cv)" "|cv" \
+   "(5c) ...and the two-field reading names it the gating anchor"
+# (5d) An anchor that carries a merge_result still wins, and nothing is anchored.
+cat > "$FAKE_ANCHORS" <<'A'
+rebuild-1||integration/cv|2026-07-02T00:00:00Z|cv
+cv||integration/cv|2026-07-01T00:00:00Z|
+anchor-pre|pre_open_gate|integration/cv|2026-07-03T00:00:00Z|
+A
+eq "$(resolve3 rebuild-1 integration/cv)" "anchor-pre|anchor-pre|" \
+   "(5d) a merge_result-carrying anchor on the branch wins; LANDS_ON stays empty"
+# (5e) The named bead must be open on the same branch: one this lookup does not
+#      return is never anchored, and the child is its own gating anchor as before.
+cat > "$FAKE_ANCHORS" <<'A'
+rebuild-1||integration/cv|2026-07-02T00:00:00Z|cv
+cv||integration/other|2026-07-01T00:00:00Z|
+A
+eq "$(resolve3 rebuild-1 integration/cv)" "|rebuild-1|" \
+   "(5e) a named bead not open on the branch is not anchored"
+# (5f) A bead $WORK does not name is never elected, whatever it carries: a
+#      fresh handoff beside an unanchored sibling anchors itself, as in (3c).
+cat > "$FAKE_ANCHORS" <<'A'
+work-1||integration/cv|2026-07-02T00:00:00Z|
+cv||integration/cv|2026-07-01T00:00:00Z|
+A
+eq "$(resolve3 work-1 integration/cv)" "|work-1|" \
+   "(5f) a bead \$WORK does not name is never the bead its landing anchors"
+
 # --- Static guards: the terminal arm's shape in the formula. ------------------
-# Extract the rework arm: from the terminal marker's `if [ -n "$EXISTING_ANCHOR"`
-# up to its `elif` (the pre-open arm). It must close $WORK as landed-on-branch
-# and must NOT stamp merge_result (that is the whole point — a rework child
-# never enters the anchor class).
+# Extract the rework arm: from the terminal marker up to the top-level `else`
+# (the first handoff's gating transition). It must close $WORK as
+# landed-on-branch and must NOT stamp merge_result (that is the whole point — a
+# rework child never enters the anchor class).
 REWORK_ARM="$(awk '
   /# >>> one-anchor-per-pr-terminal/ {f=1}
   /# <<< one-anchor-per-pr-terminal/ {f=0}
-  f && /^elif / {f=0}
+  f && /^(elif|else)/ {f=0}
   f' "$TOML")"
 [ -n "$REWORK_ARM" ] \
   && ok "(6) terminal rework arm extracted between one-anchor-per-pr-terminal markers" \
@@ -431,6 +478,54 @@ case "$GATE_FETCH_FAIL" in
     bad "(10j) a failed fetch recorded a landing or closed the child off a stale ref (got: $GATE_FETCH_FAIL)" ;;
   1#*) ok "(10j) fetch failure -> no anchor note, no transition, no close; arm exits non-zero even when the stale origin ref equals HEAD" ;;
   *) bad "(10j) a failed fetch must fail closed non-zero, mutating nothing (got: $GATE_FETCH_FAIL)" ;;
+esac
+
+# --- A rework child landing on a bead that carries no merge_result yet. -------
+# The bead the child names (LANDS_ON) takes the gating transition this pass
+# would have given the child, once the push reads back, and only then does the
+# child leave the anchor class and close landed-on-branch. Anchoring first
+# means a close that fails leaves an anchor the next pass finds on the branch.
+run_lands() { # <lc-rc> <prepared-head> <remote-head> [pr_url pr_number] -> "<rc>#<lifecycle>#<gc>"
+  : > "$LCLOG"; : > "$TMP/gc.log"; local rc
+  if EXISTING_ANCHOR="" LANDS_ON=cv WORK=rebuild-1 BRANCH=integration/cv TARGET=main CHECK_SET=correctness \
+       LC="$TMP/bin/lc-stub" PRE_OPEN=0 PR_URL="${4:-}" PR_NUMBER="${5:-}" LCRC="$1" GCLOG="$TMP/gc.log" \
+       STUB_PREPARED_HEAD="$2" STUB_REMOTE_HEAD="$3" \
+       bash "$TMP/terminal.sh" >/dev/null 2>&1; then rc=0; else rc=$?; fi
+  printf '%s#%s#%s' "$rc" "$(tr '\n' ';' < "$LCLOG")" "$(tr '\n' ';' < "$TMP/gc.log")"
+}
+LANDS_OK="$(run_lands 0 cafef00d cafef00d)"
+case "$LANDS_OK" in
+  "0#transition cv --to pre_open_gate --assignee  --route  --set merged_target=main --set check_set=correctness --unset rejection_reason;transition rebuild-1 --to unanchored --unset rejection_reason;#"*)
+    ok "(12a) the named bead is anchored at pre_open_gate first, then the child leaves the anchor class" ;;
+  *) bad "(12a) expected cv anchored at pre_open_gate, then the child unanchored (got: $LANDS_OK)" ;;
+esac
+case "$LANDS_OK" in
+  *"#"*"update cv --append-notes Rework rebuild-1 landed on integration/cv at cafef00d"*"update rebuild-1 --status=closed"*"gating continues on anchor cv"*)
+    ok "(12b) the anchor is annotated, and the child closes landed-on-branch naming it" ;;
+  *) bad "(12b) expected the anchor note and the child's close naming cv (got: $LANDS_OK)" ;;
+esac
+case "$LANDS_OK" in
+  *"transition rebuild-1 --to pre_open_gate"*|*"transition rebuild-1 --to pull_request"*)
+    bad "(12c) the child must take no gating state of its own (got: $LANDS_OK)" ;;
+  *) ok "(12c) the child takes no gating state: the branch's one anchor is the bead it names" ;;
+esac
+LANDS_PR="$(run_lands 0 cafef00d cafef00d "https://github.com/o/r/pull/9" 9)"
+case "$LANDS_PR" in
+  "0#transition cv --to pull_request --assignee  --route  --set pr_url=https://github.com/o/r/pull/9 --set pr_number=9 "*)
+    ok "(12d) with both PR coordinates resolved, the named bead is anchored at pull_request" ;;
+  *) bad "(12d) expected cv anchored at pull_request (got: $LANDS_PR)" ;;
+esac
+LANDS_REFUSED="$(run_lands 1 cafef00d cafef00d)"
+case "$LANDS_REFUSED" in
+  *"transition rebuild-1"*|*"update rebuild-1 --status=closed"*|*"update cv --append-notes"*)
+    bad "(12e) a refused anchoring must close nothing and note nothing (got: $LANDS_REFUSED)" ;;
+  1#"transition cv --to pre_open_gate"*) ok "(12e) a refused anchoring closes nothing, and the arm exits non-zero" ;;
+  *) bad "(12e) a refused anchoring must exit non-zero after the one attempt (got: $LANDS_REFUSED)" ;;
+esac
+LANDS_UNPUSHED="$(run_lands 0 deadbeef feedface)"
+case "$LANDS_UNPUSHED" in
+  "1##") ok "(12f) a push that does not read back anchors nothing and closes nothing" ;;
+  *) bad "(12f) a push that does not read back must write nothing (got: $LANDS_UNPUSHED)" ;;
 esac
 
 # --- The landed-on-branch close carries the rework's work record. -------------

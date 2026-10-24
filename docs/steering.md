@@ -225,10 +225,11 @@ landing.
 
 A park leaves a rejected handoff running too. When the refinery rejects a
 handed-off bead, `rejection-repool.sh` records the `rejection_reason` on it and
-dispatches the rebuild as a fresh `mol-polecat-work` pour. The cascade does not
-reach a poured workflow, and load-context reads only the bead's own blockers,
-so the rebuild runs. When that sling fails, the script arms a retry, which
-deferred dispatch slings once the bead's own blockers close.
+dispatches the rebuild as a fresh `mol-polecat-work` pour. A rejected convoy's
+reason and pour go to its rebuild child, which is born with no parent. The
+cascade does not reach a poured workflow, and load-context reads only the
+bead's own blockers, so the rebuild runs. When that sling fails, the script
+arms a retry, which deferred dispatch slings once the bead's own blockers close.
 
 ### What a park holds
 
