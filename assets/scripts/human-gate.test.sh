@@ -500,10 +500,12 @@ has "$(cat "$TMP/err")" "filing the call as a patrol finding under [refinery-emp
 : > "$STUB_PF_LOG"
 STUB_PF_RC=1 "$HSUT/escalate.sh" --subject lx-wisp-abc12 --key k --message m >/dev/null 2>&1
 eq "$?" 1 "a finding that was not filed fails the call"
-: > "$STUB_PF_LOG"
-"$HSUT/escalate.sh" --retract --subject lx-wisp-abc12 --key k --message m >/dev/null 2>&1
-eq "$?" 2 "a retract on a wisp goes to the helper, which refuses it"
-eq "$(cat "$STUB_PF_LOG")" "" "and files no finding"
+: > "$STUB_PF_LOG"; : > "$STUB_GC_LOG"
+"$HSUT/escalate.sh" --retract --subject lx-wisp-abc12 --key k --message m >/dev/null 2>"$TMP/err"
+eq "$?" 2 "a retract on a wisp exits 2: its call was filed as a finding, which has no gate to resolve"
+eq "$(cat "$STUB_PF_LOG")" "" "  ... and files no finding"
+eq "$(calls)" "" "  ... and makes no bd call"
+has "$(cat "$TMP/err")" "a retract has no gate to resolve" "  ... and says why on stderr"
 
 echo "# the old name files a call about a subject that names no bead as a patrol finding"
 # The copy's bead-store.sh records what it is asked and answers with STUB_BS_RC.
@@ -621,10 +623,30 @@ reset "$(task tk-w)"; : > "$STUB_PF_LOG"; : > "$STUB_BS_LOG"
 "$HSUT/escalate.sh" --subject tk-gone --key k --message m >/dev/null 2>&1
 eq "$(cat "$STUB_BS_LOG")" "bead-store [tk-gone]" "a subject whose row does not read is put to bead-store.sh"
 
-echo "# the old name asks nothing about the subject of a retract or of a malformed call"
+echo "# a retract reads its subject the way a filing does"
+# A call about a session or a subject that names no bead is filed as a patrol
+# finding, so a retract about one has no gate to resolve, and the helper, which
+# would read that subject's edges, is never run for it.
+reset "$(task tk-w),$(session lx-abc12)"; : > "$STUB_PF_LOG"
+"$HSUT/escalate.sh" --retract --subject lx-abc12 --key k --message gone >/dev/null 2>"$TMP/err"; rc=$?
+eq "$rc" 2 "a retract on a session bead exits 2"
+hasnt "$(calls)" "[dep] [list]" "  ... and never runs the helper"
+hasnt "$(calls)" "[gate] [resolve]" "  ... so it resolves nothing"
+has "$(cat "$TMP/err")" "'lx-abc12' names a session, so a call about it is filed as a patrol finding under [k]" "  ... and names the finding's route on stderr"
 reset "$(task tk-w)"; : > "$STUB_PF_LOG"; : > "$STUB_BS_LOG"
-STUB_BS_RC=1 "$HSUT/escalate.sh" --retract --subject refinery --key k --message m >/dev/null 2>&1
-eq "$?" 1 "a retract on a subject that names no bead goes to the helper, which cannot read it"
+STUB_BS_RC=1 "$HSUT/escalate.sh" --retract --subject refinery --key k --message m >/dev/null 2>"$TMP/err"; rc=$?
+eq "$rc" 2 "a retract on a subject bead-store.sh proves names no bead exits 2, as the old script's did"
+eq "$(cat "$STUB_BS_LOG")" "bead-store [refinery]" "  ... once bead-store.sh has proved it"
+has "$(cat "$TMP/err")" "'refinery' names no bead" "  ... and says so on stderr"
+eq "$(cat "$STUB_PF_LOG")" "" "  ... and files no finding"
+reset "$(task tk-w)"; : > "$STUB_PF_LOG"
+"$HSUT/escalate.sh" --retract --subject tk-gone --key k --message m >/dev/null 2>"$TMP/err"; rc=$?
+eq "$rc" 1 "a retract whose subject does not read exits 1, so its caller retries"
+has "$(cat "$TMP/err")" "Nothing was resolved." "  ... and says nothing was resolved"
+hasnt "$(calls)" "[dep] [list]" "  ... before the helper runs"
+
+echo "# the old name asks nothing about the subject of a malformed call"
+reset "$(task tk-w)"; : > "$STUB_PF_LOG"; : > "$STUB_BS_LOG"
 STUB_BS_RC=1 "$HSUT/escalate.sh" --subject "{{convoy_id}}" --key k --message m >/dev/null 2>&1
 eq "$?" 2 "a subject outside the id charset goes to the helper, which refuses it as usage"
 STUB_BS_RC=1 "$HSUT/escalate.sh" --subject refinery --key k >/dev/null 2>&1

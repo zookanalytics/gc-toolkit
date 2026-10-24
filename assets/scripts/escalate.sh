@@ -16,10 +16,14 @@
 #     of its id, because a session names no work that can wait. That finding is
 #     about the session (--about), as the old visit was about a subject it could
 #     read.
-#   A --retract goes to the helper whatever its subject.
-# Any other filing goes to the helper only once its subject's own row reads,
-# because only the row tells a session from a bead that can wait. A filing
-# whose subject does not read files nothing and exits 1, so its caller
+#   A --retract reads its subject the same way. A call about any of those
+#     subjects is filed as a patrol finding, not a gate, so a retract about
+#     one has no gate to resolve, and it exits 2, as the old script's retract
+#     of a subject it filed on its standing triage bead did. A retract does
+#     not withdraw the finding: its first reaction disposes of it.
+# Any other call goes to the helper only once its subject's own row reads,
+# because only the row tells a session from a bead that can wait. A call whose
+# subject does not read files or resolves nothing and exits 1, so its caller
 # retries. The helper reads only the subject's edges, and those can answer
 # where the row did not, so a session let through would get a gate in place
 # of its finding.
@@ -87,9 +91,10 @@ no_wait_why() {
 case "$SUBJECT" in
   ''|*[!A-Za-z0-9._-]*) ;;
   *)
-    if [ "$RETRACT" = 0 ] && [ -n "$KEY" ] && [ -n "$MESSAGE" ]; then
+    if [ -n "$KEY" ] && [ -n "$MESSAGE" ]; then
+      DONE=filed; [ "$RETRACT" = 0 ] || DONE=resolved
       WHY=$(no_wait_why "$SUBJECT") || {
-        echo "escalate: '$SUBJECT' did not read as one bead through gc bd show (no such bead, or its store did not answer), so nothing shows whether a human gate can hold it. Nothing was filed." >&2
+        echo "escalate: '$SUBJECT' did not read as one bead through gc bd show (no such bead, or its store did not answer), so nothing shows whether a human gate can hold it. Nothing was $DONE." >&2
         exit 1
       }
       if [ -n "$WHY" ]; then
@@ -110,6 +115,10 @@ case "$SUBJECT" in
             WHAT="names a session"
             FINDING+=(--about "$SUBJECT" --distinct) ;;
         esac
+        if [ "$RETRACT" = 1 ]; then
+          echo "escalate: '$SUBJECT' $WHAT, so a call about it is filed as a patrol finding under [$KEY], not as a gate, and a retract has no gate to resolve. The finding's first reaction disposes of it. Nothing was resolved." >&2
+          exit 2
+        fi
         echo "escalate: '$SUBJECT' $WHAT, not a bead a human gate can hold; filing the call as a patrol finding under [$KEY]" >&2
         exec "$HERE/patrol-finding.sh" "${FINDING[@]}"
       fi
