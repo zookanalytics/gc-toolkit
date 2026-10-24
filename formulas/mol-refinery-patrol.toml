@@ -634,9 +634,10 @@ esac
 # decision costs no read of its own. It is empty only when the script could not
 # read the bead, and then the branch it names is kept: a wrongly kept branch is
 # swept later, and a wrongly deleted one strands a PR. The delete names the
-# rig's repository by path through RIG_ROOT, which the arm resolved before the
-# repool: a bare push from another checkout deletes a same-named branch on that
-# checkout's origin, so with no RIG_ROOT the branch is kept.
+# rig's repository by path through RIG_ROOT, because a bare push from another
+# checkout deletes a same-named branch on that checkout's origin. The arm
+# resolves RIG_ROOT before the repool and stops when it cannot, so RIG_ROOT is
+# set by the time this block runs.
 # >>> merge-strategy-resolve
 # The one reading of the merge strategy. Every step that branches on it reads
 # it through this block, so the step that keeps a branch and the step that
@@ -680,8 +681,6 @@ elif [ "${PR_SHAPED:-1}" != "0" ]; then
   echo "keeping origin/$BRANCH — the bead already records a PR"
 elif [ -n "$MS_FOLD_IN" ]; then
   echo "keeping origin/$BRANCH — it folds into the PR at $MS_TARGET and carries the rework"
-elif [ -z "${RIG_ROOT:-}" ]; then
-  echo "keeping origin/$BRANCH — RIG_ROOT is unset, so no path names the origin to delete it from; a kept branch is swept later"
 else
   git -C "$RIG_ROOT" push origin --delete "$BRANCH" || echo "could not delete origin/$BRANCH — a kept branch is swept later; the repool already stands, so this does not fail the cycle"
 fi

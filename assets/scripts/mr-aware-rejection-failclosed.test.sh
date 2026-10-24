@@ -24,9 +24,10 @@
 #      disagree about which mode the bead is in.
 #   7. The delete is cleanup behind a repool that already stands, so a push
 #      that cannot delete is reported and the cycle continues.
-#   8. The delete names the rig's repository by path, through the RIG_ROOT the
-#      arm resolves before the repool. With no RIG_ROOT the branch is kept,
-#      because a bare push deletes from whatever repository the cwd is in.
+#   8. The delete names the rig's repository by path, through the RIG_ROOT
+#      every arm that runs it resolves before the repool, and an arm stops
+#      when it cannot resolve one, because a bare push deletes from whatever
+#      repository the cwd is in.
 #
 # Executes the real blocks extracted verbatim from the formula against stub
 # `gc` + `rejection-repool.sh`. No live city, Dolt, network, or worktrees.
@@ -226,8 +227,7 @@ chmod +x "$TMP/bin/git"
 
 # The decision reads $BEAD_JSON, the row the repool block above it captured in
 # the same shell, so the whole arm is what gets executed here, not the tail
-# alone. RIG_ROOT stands in for the lookup the arm runs before the repool, and
-# is $TMP/rig unless ARM_RIG_ROOT says otherwise.
+# alone. RIG_ROOT stands in for the lookup the arm runs before the repool.
 # arm <meta-json|-> [default_merge_strategy] [repool-rc] -> "<rc>|<deletes>"
 # A meta of "-" is a repool that read no row.
 arm() {
@@ -239,7 +239,7 @@ arm() {
           -e "s|{{default_merge_strategy}}|${2:-mr}|g" > "$TMP/run-arm.sh"
   ( cd "$TMP" && \
     WORK=tk-work REJECT_REASON="section 15e fixture clock" GC_RIG="" \
-    GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" RIG_ROOT="${ARM_RIG_ROOT-$TMP/rig}" \
+    GC_RIG_ROOT="$TMP/rig" GC_CITY_PATH="" RIG_ROOT="$TMP/rig" \
     FAKE_META="$meta" FAKE_NO_ROW="$norow" FAKE_REPOOL_RC="${3:-0}" FAKE_LOG="$TMP/log" \
     bash "$TMP/run-arm.sh" > "$TMP/out" 2>&1 ) || rc=$?
   printf '%s|%s' "$rc" "$(grep '^DELETE|' "$TMP/log" | tr '\n' ';')"
@@ -337,30 +337,21 @@ grep -q 'the PR pipeline needs the branch' "$TMP/out" \
   && ok "(21b) own existing_pr keeps mr, not flipped to a fold-in direct" \
   || bad "(21b) own existing_pr keeps mr, not flipped to a fold-in direct"
 
-# (22) With no RIG_ROOT, a delete would run in whatever repository the cwd is
-#      in and remove a same-named branch from that repository's origin.
-eq "$(ARM_RIG_ROOT="" arm "{$BR,\"merge_strategy\":\"direct\"}")" "0|" \
-   "(22) direct with nothing PR-shaped, but no RIG_ROOT -> branch kept"
-grep -q '^DELETE-IN|' "$TMP/log" \
-  && bad "(22b) no push is attempted without a rig root to name" \
-  || ok "(22b) no push is attempted without a rig root to name"
-grep -q 'keeping origin/polecat/tk-work — RIG_ROOT is unset' "$TMP/out" \
-  && ok "(22c) the kept branch names the missing rig root as its reason" \
-  || bad "(22c) the kept branch names the missing rig root as its reason"
-
-# (23) The arm resolves the rig root before it retires the workflow: a rig it
-#      cannot resolve stops the cycle before anything is written, and the
-#      delete gets a root to name.
-LEADIN=$(awk '
-  /^```bash$/ { buf = ""; f = 1; next }
-  f { buf = buf $0 "\n" }
-  /^REJECT_REASON="<failure summary>"$/ { printf "%s", buf; exit }' "$TOML")
-case "$LEADIN" in
-  *'RIG_ROOT="${GC_RIG_ROOT:-}"'*'gc workflow delete-source $WORK'*)
-    ok "(23) the branch-caused arm resolves RIG_ROOT before it retires the workflow" ;;
-  *) bad "(23) the branch-caused arm resolves RIG_ROOT before it retires the workflow" "$LEADIN" ;;
-esac
-
+# (22) Every arm that runs the block resolves the rig root before it retires
+#      the workflow, and stops when none resolves, so the delete always has a
+#      root to name and a rig it cannot resolve stops the cycle before anything
+#      is written. Each fence holding the block is read up to its delete-source.
+ARMS=$(awk '
+  /^```bash$/ { lead = ""; f = 1; seen = 0; held = 0; guarded = 0; next }
+  /^```$/ { if (held) print (guarded ? "guarded" : "unguarded"); f = 0; next }
+  !f { next }
+  /gc workflow delete-source \$WORK/ { if (!seen) guarded = (lead ~ /RIG_ROOT="\$\{GC_RIG_ROOT:-\}"/ && lead ~ /\[ -n "\$RIG_ROOT" \] \|\| \{[^}]*gc runtime drain-ack; exit 1; \}/); seen = 1 }
+  /^# >>> rejection-branch-keep$/ { held = 1 }
+  !seen { lead = lead $0 "\n" }' "$TOML")
+eq "$(printf '%s\n' "$ARMS" | grep -c . || true)" "$(grep -c '^# >>> rejection-branch-keep$' "$TOML" || true)" \
+   "(22) every copy of rejection-branch-keep sits in an arm the check reads"
+eq "$(printf '%s\n' "$ARMS" | grep -c '^unguarded$' || true)" 0 \
+   "(22b) each of those arms resolves RIG_ROOT, stopping when none resolves, before it retires the workflow"
 echo "---"
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
