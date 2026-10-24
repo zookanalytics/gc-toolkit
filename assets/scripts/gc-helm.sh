@@ -4086,13 +4086,20 @@ cmd_engage() {
                     # A human-routed bead with no gc.takeaway renders as "no
                     # question recorded" on the board, so the re-park co-writes
                     # the headline the human-route-takeaway guard requires of
-                    # every raw park writer, in the same guarded update.
+                    # every raw park writer, in the same guarded update. The
+                    # update also drops the session pins, which name the
+                    # sitting that is gone. Orphan recovery resolves a visit's
+                    # owner from gc.session_id ahead of its assignee, so a pin
+                    # left beside the fresh binding below would have it find
+                    # the gone sitting dead and take the visit from the fresh
+                    # one.
                     gc bd update "$VISIT" --if-assignee "$visit_owner" --if-status open --assignee "" \
                         --set-metadata gc.routed_to=human \
                         --set-metadata "gc.takeaway=Reclaimed from a gone sitting; re-parked for re-engagement." \
                         --set-metadata "gc.takeaway_at=$(iso_now)" \
                         --set-metadata gc.takeaway_by=host \
                         --set-metadata gc.takeaway_settled= \
+                        --unset-metadata gc.session_id --unset-metadata gc.session_name \
                         >/dev/null 2>&1 || reclaim_rc=$?
                     if [ "$reclaim_rc" -eq 13 ]; then
                         winner=$(gc bd show "$VISIT" --json 2>/dev/null | scrub | jq -r 'if type=="array" then (.[0].assignee // "") else "" end' 2>/dev/null || true)
@@ -4290,6 +4297,12 @@ cmd_engage() {
     # one the guards saw; a mismatch writes nothing and exits 13, and this
     # engage must not overwrite whoever holds the visit now.
     #
+    # The bind also drops any session pin the visit still carries from an
+    # earlier sitting. The fresh sitting's claim stamps its own, and until it
+    # does, orphan recovery, which resolves a visit's owner from gc.session_id
+    # ahead of its assignee, would find the earlier sitting dead and take the
+    # visit from the fresh one.
+    #
     # Every post-spawn failure CLOSES the sitting it just spawned before it
     # exits: a converse slot sets nudge="" and idle_timeout=0, so a sitting that
     # never binds a visit has no idle-claim rescue and would linger holding
@@ -4302,7 +4315,8 @@ cmd_engage() {
         exit 4
     }
     bind_rc=0
-    gc bd update "$VISIT" --if-assignee "" --if-status open --assignee "$sname" >/dev/null 2>&1 || bind_rc=$?
+    gc bd update "$VISIT" --if-assignee "" --if-status open \
+        --unset-metadata gc.session_id --unset-metadata gc.session_name --assignee "$sname" >/dev/null 2>&1 || bind_rc=$?
     if [ "$bind_rc" -eq 13 ]; then
         taken_row=$(gc bd show "$VISIT" --json 2>/dev/null | scrub | jq -c 'if type=="array" then (.[0] // {}) else {} end' 2>/dev/null || true)
         winner=$(printf '%s' "$taken_row" | jq -r '.assignee // ""' 2>/dev/null || true)
