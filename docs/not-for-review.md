@@ -85,9 +85,10 @@ prefix = "[vc]: #"
   body.
 - A prefix is one line. In double quotes, `\"` and `\\` are its only escapes.
   In single quotes, it is taken as written.
-- An empty prefix would take every comment out of review, so it is refused. A
-  table with any other fault is refused too, and the rest of the file still
-  counts.
+- An empty prefix would take every comment out of review, so it is refused.
+  So is a prefix with no letter in it, such as `#`, `-`, `> ` or `1. `: markup
+  alone opens a person's headings, lists and quotes as well. A table with any
+  other fault is refused too, and the rest of the file still counts.
 - A prefix matches any comment that opens with it, a person's included, so
   declare text that only the integration writes.
 

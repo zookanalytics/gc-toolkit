@@ -123,7 +123,9 @@ NFR_FILE=not-for-review.toml
 # prefix as a one-line TOML string. Prints {prefixes, refused}, where refused
 # names each part read no prefix from. A table with any fault declares nothing,
 # and neither does an empty prefix, which would take every comment out of
-# review. A basic string may escape only a double quote and a backslash. A
+# review, or a prefix with no letter in it: markup alone, such as #, - or > ,
+# opens a person's headings, lists and quotes as well as any integration's
+# text. A basic string may escape only a double quote and a backslash. A
 # prefix loses its leading whitespace, since a body is compared without its own.
 NFR_PARSE='([39] | implode) as $sq
 | def tstring:
@@ -151,12 +153,13 @@ NFR_PARSE='([39] | implode) as $sq
         .c.bad += [ "line \($x.n): a [[marker]] table sets its prefix and nothing else" ]
       end)
   | (.t + [ .c | select(. != null) ]) as $tables
-  | { prefixes: [ $tables[] | select((.bad | length) == 0 and (.p | length) == 1 and (.p[0] | test("\\S"))) | .p[0] | sub("^\\s+"; "") ],
+  | { prefixes: [ $tables[] | select((.bad | length) == 0 and (.p | length) == 1 and (.p[0] | test("\\p{L}"))) | .p[0] | sub("^\\s+"; "") ],
       refused: (.bad + [ $tables[]
         | if (.bad | length) > 0 then .bad[]
           elif (.p | length) == 0 then "the [[marker]] at line \(.n) sets no prefix"
           elif (.p | length) > 1 then "the [[marker]] at line \(.n) sets its prefix twice"
           elif (.p[0] | test("\\S") | not) then "the [[marker]] at line \(.n) sets an empty prefix, which would take every comment out of review"
+          elif (.p[0] | test("\\p{L}") | not) then "the [[marker]] at line \(.n) sets a prefix with no letter in it, which would take out of review every comment a person opens with the same markup, such as a heading, a list, a quote or an HTML comment"
           else empty end ]) }'
 
 # NFR_PREFIXES, the prefixes the rig declares as a JSON array, and NFR_REFUSED,

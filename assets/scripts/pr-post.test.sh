@@ -445,6 +445,12 @@ prefix = "two"
 [markers]
 [[marker]]
 prefix = "kept"
+[[marker]]
+prefix = "#"
+[[marker]]
+prefix = "1. "
+[[marker]]
+prefix = "<!--"
 TOML
 nfr_run "$FAULTS"
 eq "$RC" 1 "a declaration with a fault exits 1"
@@ -457,6 +463,9 @@ hasnt "$NOUT" "[vc]: #" "…prefix and all"
 has "$NERR" "the [[marker]] at line 9 sets no prefix" "a table with no prefix is named"
 has "$NERR" "the [[marker]] at line 11 sets its prefix twice" "a prefix set twice is refused"
 has "$NERR" "line 14: this file holds only [[marker]] tables" "another table is named"
+has "$NERR" "the [[marker]] at line 17 sets a prefix with no letter in it" "a prefix of markup alone is refused: a heading"
+has "$NERR" "the [[marker]] at line 19 sets a prefix with no letter in it" "…an ordered list"
+has "$NERR" "the [[marker]] at line 21 sets a prefix with no letter in it" "…and an HTML comment"
 FDEF="$(cd "$FAULTS" && "$SUT" feedback-def 2>"$TMPD/fdef.err")"; FRC=$?
 eq "$FRC" 0 "feedback-def still prints its definitions over a faulty declaration"
 has "$FDEF" 'def gc_not_for_review_prefixes: ["kept"];' "…holding only the prefixes that read"
