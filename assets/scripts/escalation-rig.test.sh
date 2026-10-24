@@ -19,8 +19,16 @@ eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi
 has() { if grep -qF -- "$2" <<< "$1"; then ok "$3"; else bad "$3 (missing '$2')"; fi; }
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
+# The stub answers `gc rig list --json` from STUB_RIGS, and `gc bd show <id>
+# --json` with a task row for the id, as a warrant or a work bead reads, because
+# the hand-off at escalate.sh reads its subject's row. Any other call prints
+# nothing and exits 0.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 set -u
+if [ "${1:-} ${2:-}" = "bd show" ]; then
+  printf '[{"id":"%s","status":"open","issue_type":"task"}]\n' "${3:-}"
+  exit 0
+fi
 [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ] || exit 0
 [ -n "${STUB_RIGS_FAIL:-}" ] && { echo "gc: rig list unavailable" >&2; exit 1; }
 printf '%s\n' "${STUB_RIGS:-}"
@@ -60,7 +68,7 @@ eq "$RC" "2" "no argument is a usage error"
 # Each caller, as it was poured, runs from a private copy of the pack's scripts
 # whose human-gate.sh records what reached it.
 PACK="$TMP/pack"; mkdir -p "$PACK"
-cp "$SUT" "$HERE/bead-store.sh" "$HERE/escalate.sh" "$PACK/"
+cp "$SUT" "$HERE/bead-store.sh" "$HERE/escalate.sh" "$HERE/bd-lib.sh" "$PACK/"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$PACK/human-gate.sh" <<'STUB'
 { printf 'GC_RIG=%s' "${GC_RIG:-}"; for a in "$@"; do printf ' [%s]' "$a"; done; printf '\n'; } >> "${STUB_HG_LOG:?}"
 echo "gate-1"

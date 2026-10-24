@@ -843,9 +843,11 @@ ruling of sitting tk-tdt71ue left it the helper's name:
   proves names no bead, went to the redirect, and the hand-off files it as a
   patrol finding under its key, the route the helper's refusal names. So does
   a call about a subject that reads as a session bead, whatever the shape of
-  its id, because a session names no work that can wait. So an old call the
-  old script filed still files. The hand-off retires under a dated debt
-  (section 10).
+  its id, because a session names no work that can wait. A call whose subject
+  does not read as one bead with a type files nothing and fails, so its caller
+  retries, because the helper reads only the subject's edges, and those can
+  answer where the row did not. So an old call the old script filed still
+  files. The hand-off retires under a dated debt (section 10).
   Keeping the old name would cost nothing to build, and it would leave the
   retired word in the call most filers make.
 
@@ -1865,7 +1867,7 @@ debt with the trigger that retires it:
 | engage's `v-` alias fallback | Renamed `c-` (section 6). The cutover closes every converse session whose alias names a visit (section 11), so no reader keeps `v-`. |
 | `visit_state` on the board's wire | Renamed `sitting_state` (section 8). |
 | the PR reminder's marker `<!-- gc:visit:<id> -->` | Renamed `<!-- gc:sitting:<task> -->` (section 7). pr-post.sh keeps counting a post that carries the old marker as the city's own. Debt, dated 2026-10-20: the old marker is recognized while an open PR carries a reminder posted before the cutover, so that reminder never reads as an unanswered human comment. Trigger: no open PR carries one. The cutover's follow-up (section 12) checks, and drops the old marker or files its removal for when the last such PR closes. |
-| escalate.sh, the helper | Renamed human-gate.sh (section 2). The old name stays as a hand-off that runs human-gate.sh with a call's arguments, except that it drops the retired `--pool` with a notice, and files a call about a wisp, a session or a subject that names no bead as a patrol finding under its key (section 2). Debt, dated 2026-10-21: the hand-off stays while an open step bead's description names escalate.sh, because a run keeps the text its steps were poured with (see the platform section), or while a session that read the old name in its prompt before the cutover still runs. Trigger: neither remains. The cutover's follow-up (section 12) checks, and deletes the hand-off or files its deletion for when the last such run closes. |
+| escalate.sh, the helper | Renamed human-gate.sh (section 2). The old name stays as a hand-off that runs human-gate.sh with a call's arguments, except that it drops the retired `--pool` with a notice, files a call about a wisp, a session or a subject that names no bead as a patrol finding under its key, and fails a call whose subject does not read (section 2). Debt, dated 2026-10-21: the hand-off stays while an open step bead's description names escalate.sh, because a run keeps the text its steps were poured with (see the platform section), or while a session that read the old name in its prompt before the cutover still runs. Trigger: neither remains. The cutover's follow-up (section 12) checks, and deletes the hand-off or files its deletion for when the last such run closes. |
 | escalation-rig.sh | Stays as a hand-off that runs bead-store.sh with the same arguments and does nothing of its own. mol-dog-shutdown-dance's receive-warrant, in a run poured before the cutover, and the deacon's emergency recipe, in a session that read its prompt before the cutover, derive `GC_RIG` through it and file through escalate.sh only once it answers. human-gate.sh files in the subject's own store whatever `GC_RIG` says. Debt, dated 2026-10-23: the hand-off stays while an open step bead's description names escalation-rig.sh, or while a session that read the old name in its prompt before the cutover still runs. Trigger: neither remains. The cutover's follow-up (section 12) checks, and deletes the hand-off and escalation-rig.test.sh or files their deletion for when the last such run closes. |
 | escalate.test.sh, escalation-binding.test.sh, refinery-stuck-escalate.test.sh and the `*-escalation-wiring.test.sh` set | Renamed in unit A beside the change to what each pins (below): escalate.test.sh becomes human-gate.test.sh, and the others take names in the Terms' words. |
 

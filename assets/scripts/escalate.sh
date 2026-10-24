@@ -15,6 +15,12 @@
 #     a filing about a subject that reads as a session bead, whatever the shape
 #     of its id, because a session names no work that can wait.
 #   A --retract goes to the helper whatever its subject.
+# Any other filing goes to the helper only once its subject's own row reads as
+# a bead with a type, because only the row tells a session from a bead that can
+# wait. A filing whose subject does not read files nothing and exits 1, so its
+# caller retries. The helper reads only the subject's edges, and those can
+# answer where the row did not, so a session let through would get a gate in
+# place of its finding.
 # GC_ESCALATE_VERDICT_WINDOW is read by nothing, so an old call declares no
 # quiet window. The hand-off goes once no open step bead's description names
 # escalate.sh and no session that read the old name in its prompt still runs
@@ -22,6 +28,8 @@
 set -uo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "escalate: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 ARGS=(); SUBJECT=""; KEY=""; MESSAGE=""; RETRACT=0
 while [ $# -gt 0 ]; do
@@ -43,18 +51,22 @@ while [ $# -gt 0 ]; do
 done
 
 # no_wait_why <subject> -> what the subject names when it is no bead that can
-# wait for a person, or nothing when it may be one. Only bead-store.sh's exit 1
-# is a proof that no bead is named. A subject this cannot read goes to the
-# helper, which reports what it could not read.
+# wait for a person, or nothing when it is a bead that can. Only bead-store.sh's
+# exit 1 proves that no bead is named. Otherwise the subject's own row decides,
+# and only a row carrying this exact id and a type is an answer, because bd also
+# answers an id that is a prefix of another bead's. A read that fails, or any
+# other payload, returns 1.
 no_wait_why() {
-  local rc=0
+  local rc=0 row="" type=""
   case "$1" in *-wisp-*) echo "names a patrol wisp or a session"; return 0 ;; esac
   "$HERE/bead-store.sh" "$1" >/dev/null 2>&1 || rc=$?
   if [ "$rc" -eq 1 ]; then echo "names no bead"; return 0; fi
-  if [ "$(gc bd show "$1" --json </dev/null 2>/dev/null | grep -a -v '^gc bd:' \
-         | jq -r 'if type == "array" then (.[0].issue_type // "") else "" end' 2>/dev/null)" = session ]; then
-    echo "names a session"
-  fi
+  row=$(bd_json show "$1") || return 1
+  type=$(printf '%s' "$row" | jq -er --arg id "$1" '
+    if type == "array" then [ .[] | objects | select(.id == $id) ][0].issue_type else null end
+    | strings | select(length > 0)' 2>/dev/null) || return 1
+  if [ "$type" = session ]; then echo "names a session"; fi
+  return 0
 }
 
 # A subject outside the helper's id charset goes to the helper, which refuses it
@@ -63,7 +75,10 @@ case "$SUBJECT" in
   ''|*[!A-Za-z0-9._-]*) ;;
   *)
     if [ "$RETRACT" = 0 ] && [ -n "$KEY" ] && [ -n "$MESSAGE" ]; then
-      WHY=$(no_wait_why "$SUBJECT")
+      WHY=$(no_wait_why "$SUBJECT") || {
+        echo "escalate: '$SUBJECT' did not read as one bead with a type through gc bd show (no such bead, or its store did not answer), so nothing shows whether a human gate can hold it. Nothing was filed." >&2
+        exit 1
+      }
       if [ -n "$WHY" ]; then
         TITLE="${MESSAGE%%$'\n'*}"
         [ -n "$TITLE" ] || TITLE="$KEY"

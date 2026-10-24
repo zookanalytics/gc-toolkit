@@ -29,7 +29,11 @@ hasnt() { if hasin "$1" "$2"; then bad "$3 (found '$2')"; else ok "$3"; fi; }
 #     same key on the same bead in the same call, as a writer racing it would.
 #   gate resolve <id> --reason <r> — closes an open gate with that reason; on a
 #     gate already closed it keeps the first reason and still reports success.
-#   show <id> --json.
+#   show <id> --json — the bead's row; a bead it cannot find is an error object,
+#     exit 1. STUB_SHOW_FAIL=1 fails it with nothing on stdout, as a store that
+#     did not answer does, STUB_SHOW_RAW=<payload> answers it with that payload
+#     verbatim, and STUB_SHOW_RC=<n> exits n after the answer. None touches the
+#     other calls.
 # The store is a JSON array of beads; EDGES holds `<waiter>|blocks|<gate>` lines.
 BIN="$TMP/bin"; mkdir -p "$BIN"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
@@ -104,11 +108,14 @@ Reason: $reason" \
 esac
 case "${1:-}" in
   show)
+    [ -n "${STUB_SHOW_FAIL:-}" ] && { echo "bd: store unreachable" >&2; exit 1; }
+    [ -n "${STUB_SHOW_RAW:-}" ] && { printf '%s\n' "$STUB_SHOW_RAW"; exit 0; }
     out=$(jq -c --arg id "${2:-}" '[.[] | select(.id == $id)]' "$STORE")
     if [ "$(printf '%s' "$out" | jq 'length')" = 0 ]; then
       printf '{"error":"no issue found matching %s"}\n' "${2:-}"; exit 1
     fi
-    printf '%s\n' "$out" ;;
+    printf '%s\n' "$out"
+    exit "${STUB_SHOW_RC:-0}" ;;
   *) echo "stub gc: unexpected bd call: $*" >&2; exit 1 ;;
 esac
 STUB
@@ -134,7 +141,7 @@ reset() {
   printf '[%s]' "$beads" > "$STUB_STORE"
   printf '%s' "${2:-}" > "$STUB_EDGES"
   : > "$STUB_GC_LOG"; printf '0' > "$STUB_SEQ"
-  unset STUB_DEP_FAIL STUB_CREATE_FAIL STUB_CREATE_NOEDGE STUB_CREATE_RACE STUB_RESOLVE_NOOP STUB_RESOLVE_FAIL STUB_RESOLVE_RACE 2>/dev/null || true
+  unset STUB_DEP_FAIL STUB_CREATE_FAIL STUB_CREATE_NOEDGE STUB_CREATE_RACE STUB_RESOLVE_NOOP STUB_RESOLVE_FAIL STUB_RESOLVE_RACE STUB_SHOW_FAIL STUB_SHOW_RAW STUB_SHOW_RC 2>/dev/null || true
 }
 field()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .[$k]) // "<absent>"' "$STUB_STORE"; }
 creates() { cat "$STUB_SEQ"; }
@@ -458,6 +465,41 @@ eq "$rc" 0 "a subject that reads as a session bead files a finding"
 eq "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [witness-refinery-queue-unreadable] [--title] [m] [--message] [m]" "  ... under its key"
 eq "$(creates)" 0 "  ... and no gate blocks the session bead"
 has "$(cat "$TMP/err")" "'lx-abc12' names a session" "  ... and the translation says why on stderr"
+reset "$(task tk-w),$(session lx-abc12)"; : > "$STUB_PF_LOG"
+STUB_SHOW_RAW="$(printf 'gc bd: answering from the city store\n[{"id":"lx-abc12","title":"a\001b","status":"open","issue_type":"session"}]')" \
+  "$HSUT/escalate.sh" --subject lx-abc12 --key k --message m >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "a session row behind the store's notice line, carrying a raw control byte, still reads as a session"
+eq "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [k] [--title] [m] [--message] [m]" "  ... and the call files its finding"
+eq "$(creates)" 0 "  ... with no gate on the session bead"
+
+echo "# a subject whose own row does not read fails the call before the helper"
+# The helper's reads of the subject's edges and its create stay available in
+# every case, so a call let through to the helper would file a gate on the
+# session in place of its finding.
+# unread_case <label> <stub-knob> — a call about session lx-abc12 whose row
+# reads wrong under the knob.
+unread_case() {
+  reset "$(task tk-w),$(session lx-abc12)"; : > "$STUB_PF_LOG"
+  out=$(env "$2" "$HSUT/escalate.sh" --subject lx-abc12 --key k --message m 2>"$TMP/err"); rc=$?
+  eq "$rc" 1 "$1: the call exits 1, so its caller retries"
+  eq "$out" "" "  ... names no gate"
+  eq "$(creates)" 0 "  ... files no gate on the session bead"
+  eq "$(cat "$STUB_PF_LOG")" "" "  ... files no finding"
+  hasnt "$(calls)" "[dep] [list]" "  ... never runs the helper"
+  has "$(cat "$TMP/err")" "'lx-abc12' did not read" "  ... and says on stderr that the subject did not read"
+}
+unread_case "a read that fails" STUB_SHOW_FAIL=1
+unread_case "a read that exits 1 after the session's row" STUB_SHOW_RC=1
+unread_case "a payload cut short" 'STUB_SHOW_RAW=[{"id":"lx-abc12","status":"open","issue_type":"sess'
+unread_case "an error object" 'STUB_SHOW_RAW={"error":"no issue found matching lx-abc12"}'
+unread_case "a row for a longer id" 'STUB_SHOW_RAW=[{"id":"lx-abc123","status":"open","issue_type":"session"}]'
+unread_case "a row with no type" 'STUB_SHOW_RAW=[{"id":"lx-abc12","status":"open"}]'
+reset "$(task tk-w)"; : > "$STUB_PF_LOG"
+out=$("$HSUT/escalate.sh" --subject tk-gone --key k --message m 2>/dev/null); rc=$?
+eq "$rc" 1 "a subject its store does not hold fails the call the same way"
+eq "$out$(creates)" "0" "  ... with no gate filed or named"
+eq "$(cat "$STUB_PF_LOG")" "" "  ... and no finding"
+hasnt "$(calls)" "[dep] [list]" "  ... before the helper runs"
 
 echo "# a subject the old name cannot prove is no bead goes to the helper"
 for bsrc in 0 3; do
@@ -467,10 +509,6 @@ for bsrc in 0 3; do
   eq "$out" "gate-1" "  ... its gate on the bead"
   eq "$(cat "$STUB_PF_LOG")" "" "  ... and no finding is filed"
 done
-reset "$(task tk-w)"; : > "$STUB_PF_LOG"
-"$HSUT/escalate.sh" --subject tk-gone --key k --message m >/dev/null 2>&1
-eq "$?" 1 "a subject that does not read goes to the helper, which reports the failed read"
-eq "$(cat "$STUB_PF_LOG")" "" "  ... and no finding is filed"
 
 echo "# the old name asks nothing about the subject of a retract or of a malformed call"
 reset "$(task tk-w)"; : > "$STUB_PF_LOG"; : > "$STUB_BS_LOG"
