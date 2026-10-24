@@ -433,8 +433,8 @@ eq "$(cat "$FAKE_LOG")" "" "(ACTRIG) …and writes nothing"
 has "routes to nobody" "$ERR" "(ACTRIG) …and names what a bare target would cost"
 
 # ── actionable --assign: work that is a named agent's own ────────────────────
-# A town-repo edit is mechanik's direct edit, and mechanik is a named agent: its
-# hook matches the bead's assignee and never reads gc.routed_to, so the exit
+# A town-repo edit is mechanik's direct edit, and mechanik is a named agent,
+# which the pack addresses by assignee (docs/deferred-dispatch.md), so the exit
 # releases the bead TO it as its assignee instead of routing it to a pool.
 #   (ACTASSIGN)  the release carries --assign, not --route, and still says
 #                nothing waits; the run names the agent, and the reaction
