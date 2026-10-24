@@ -7,9 +7,9 @@
 # author does not say whether a comment is a city notice or feedback for the
 # city to answer. The mark says it. Every body this script posts carries the
 # marker below, and a review, inline comment, or conversation comment without
-# one is feedback, whoever wrote it, unless it is not for review (below). The
-# readers ask that question through `own-def`, which prints the one definition
-# of "the city's own post" and of feedback;
+# one is feedback, whoever wrote it, unless it is not for review (below). A
+# reader asks whether a post is the city's own through `own-def`, and whether
+# it is feedback through `feedback-def`, which print the one definition of each;
 # tools/lint-learned.d/pr-post-bypass.sh fails a post anywhere in the pack that
 # does not come through here.
 #
@@ -54,19 +54,24 @@
 #   pr-post.sh edit    --repo <host/owner/name> --comment <id> (--body <text> | --body-file <path>)
 #   pr-post.sh file-comment --repo <host/owner/name> --pr <n> --commit <oid> --path <file> (--body <text> | --body-file <path>)
 #   pr-post.sh mark      print the provenance marker
+#   pr-post.sh own-def   print the jq definitions gc_city_marked,
+#                        gc_city_cutover($since), gc_city_posted_at and
+#                        gc_city_own($self; $since), for a reader to prepend to
+#                        its program. They read nothing, so a caller that asks
+#                        only whether a post is the city's own pays for no read.
+#   pr-post.sh feedback-def
+#                        print the own-def definitions, gc_not_for_review and
+#                        gc_feedback($self; $since), for a reader of feedback to
+#                        prepend to its program. It reads the rig's declaration
+#                        and embeds its prefixes.
 #   pr-post.sh not-for-review
 #                        print the no-review mark and each prefix the rig
 #                        declares, one per line
-#   pr-post.sh own-def   print the jq definitions gc_city_marked,
-#                        gc_city_cutover($since), gc_city_posted_at,
-#                        gc_city_own($self; $since), gc_not_for_review and
-#                        gc_feedback($self; $since), for a reader to prepend to
-#                        its program
 #
 # gh's own output passes through on stdout, so a caller that reads the posted
 # comment back still gets it: its URL from comment, the created comment's JSON
-# from file-comment. not-for-review and own-def name on stderr each part of the
-# rig's declaration they refuse, and a default branch they cannot read. A
+# from file-comment. not-for-review and feedback-def name on stderr each part of
+# the rig's declaration they refuse, and a default branch they cannot read. A
 # refused part declares nothing, and so does a branch that cannot be read.
 #
 # Exit: 0 posted (or printed); 1 the post failed, with gh's error on stderr, or
@@ -173,9 +178,12 @@ nfr_load() {
       || NFR_REFUSED="$NFR_SRC: the repository has no such branch, so nothing is declared"
     return 0
   fi
-  if parsed=$(printf '%s' "$text" | jq -Rsc "$NFR_PARSE" 2>/dev/null) && [ -n "$parsed" ]; then
-    NFR_PREFIXES=$(printf '%s' "$parsed" | jq -c '.prefixes')
-    NFR_REFUSED=$(printf '%s' "$parsed" | jq -r --arg f "$NFR_SRC" '.refused[] | "\($f): \(.)"')
+  # One jq pass: the prefixes as a JSON array on the first line, then one line
+  # per refused part.
+  if parsed=$(printf '%s' "$text" | jq -Rsr --arg f "$NFR_SRC" "$NFR_PARSE"' | (.prefixes | tojson), (.refused[] | "\($f): \(.)")' 2>/dev/null) \
+     && [ -n "$parsed" ]; then
+    NFR_PREFIXES=${parsed%%$'\n'*}
+    case "$parsed" in *$'\n'*) NFR_REFUSED=${parsed#*$'\n'} ;; esac
   else
     NFR_REFUSED="$NFR_SRC: it could not be read, so it declares nothing"
   fi
@@ -233,8 +241,9 @@ def gc_not_for_review:
 def gc_feedback($self; $since):
   (gc_city_own($self; $since) | not) and (gc_not_for_review | not);
 '
+# The mark holds no character a JSON string escapes, so it is quoted as it is.
 nfr_defs() {
-  printf 'def gc_no_review_mark: %s;\n' "$(jq -cn --arg m "$NO_REVIEW_MARK" '$m')"
+  printf 'def gc_no_review_mark: "%s";\n' "$NO_REVIEW_MARK"
   printf 'def gc_not_for_review_prefixes: %s;\n' "$NFR_PREFIXES"
   printf '%s' "$NFR_DEF"
 }
@@ -245,19 +254,20 @@ die_usage() { echo "$PROG: $1" >&2; usage >&2; exit 2; }
 VERB="${1:-}"
 case "$VERB" in
   mark)    printf '%s\n' "$MARK"; exit 0 ;;
+  own-def) printf '%s\n' "$OWN_DEF"; exit 0 ;;
   not-for-review)
     nfr_load
     [ -z "$NFR_REFUSED" ] || printf '%s\n' "$NFR_REFUSED" | sed "s/^/$PROG: /" >&2
     printf '%s\n' "$NO_REVIEW_MARK"
     printf '%s' "$NFR_PREFIXES" | jq -r '.[]'
     [ -z "$NFR_REFUSED" ]; exit $? ;;
-  own-def)
+  feedback-def)
     nfr_load
     [ -z "$NFR_REFUSED" ] || printf '%s\n' "$NFR_REFUSED" | sed "s/^/$PROG: /" >&2
     printf '%s\n' "$OWN_DEF"; nfr_defs; exit 0 ;;
   comment|review|reply|edit|file-comment) shift ;;
   -h|--help) usage; exit 0 ;;
-  *) die_usage "first argument must be comment, review, reply, edit, file-comment, mark, not-for-review or own-def" ;;
+  *) die_usage "first argument must be comment, review, reply, edit, file-comment, mark, own-def, feedback-def or not-for-review" ;;
 esac
 
 REPO_Q=""; HOST=""; PR=""; THREAD=""; COMMENT=""; BODY=""; BODY_FILE=""; ATTACH=""

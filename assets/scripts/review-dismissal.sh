@@ -19,8 +19,8 @@
 #
 # Usage follows the in-variable jq convention (review-verdict.sh): prepend the
 # defs to a jq program. unrouted_comment_ids reads gc_feedback, the feedback
-# rule pr-post.sh prints with `pr-post.sh own-def`, so a program prepends that
-# definition first:
+# rule pr-post.sh prints with `pr-post.sh feedback-def`, so a program prepends
+# that definition first:
 #   jq -n "$CITY_OWN_DEF$REVIEW_DISMISSAL_DEF"'... live_comments($revs) ...'
 # No comment inside the program may carry an apostrophe: the program is one
 # single-quoted shell word.

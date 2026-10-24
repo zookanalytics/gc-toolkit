@@ -6,9 +6,9 @@
 #
 # Where a post comes from is decided in this order:
 #   1. A post carrying the city's mark is the city's (gc_city_marked, from
-#      `pr-post.sh own-def`, the one definition of the mark).
+#      `pr-post.sh feedback-def`, which carries the one definition of the mark).
 #   2. Any other post that is not for review is a notice, not review feedback,
-#      whoever posted it (gc_not_for_review, from the same definition): it
+#      whoever posted it (gc_not_for_review, from the same definitions): it
 #      opens with the no-review mark, or with a prefix the rig declares.
 #   3. An unmarked post from any login other than the one gh posts as is
 #      outside, except a GitHub App account's approval, which is a notice. Any
@@ -264,7 +264,7 @@ if [ "$VERB" = fetch-pr ]; then
     : > "$base.failed"
     exit 0
   fi
-  OWN_DEF=$(cat "$DIR/own-def.jq") || { : > "$base.failed"; exit 0; }
+  OWN_DEF=$(cat "$DIR/feedback-def.jq") || { : > "$base.failed"; exit 0; }
   if ! jq -nc --arg self "$SELF" --arg repo "$SLUG" --argjson pr "$N" \
        --slurpfile prs "$DIR/prs.json" --slurpfile seen "$DIR/obs.json" \
        --slurpfile reviews "$part.reviews" --slurpfile inline "$part.inline" --slurpfile issue "$part.issue" \
@@ -327,7 +327,7 @@ if [ "$VERB" = sweep ]; then
   # then keeps the outside capture's day.
   rm -f "$DIR/read.txt" || { err "cannot remove an earlier sweep's $DIR/read.txt"; exit 1; }
   cd "$CHECKOUT" || { err "cannot enter $CHECKOUT"; exit 1; }
-  "$PR_POST" own-def > "$DIR/own-def.jq" && [ -s "$DIR/own-def.jq" ] \
+  "$PR_POST" feedback-def > "$DIR/feedback-def.jq" && [ -s "$DIR/feedback-def.jq" ] \
     || { err "the PR posting helper did not print its provenance definition; cannot tell the city's posts from feedback"; exit 1; }
   ID=$(identity) || exit 1
   SLUG=${ID%%$'\t'*}; SELF=${ID#*$'\t'}
@@ -422,7 +422,7 @@ if [ "$VERB" = sweep ]; then
       jq '[ .[] | {pr: ((.metadata.pr_number // "") | tostring), since: ((.metadata.pr_provenance_since // "") | tostring)}
             | select(.pr != "" and .since != "") ]
           | group_by(.pr) | map({key: .[0].pr, value: (map(.since) | min)}) | from_entries' "$CUT_RAW" > "$DIR/cutover.json"
-      jq -c --arg self "$SELF" --slurpfile cut "$DIR/cutover.json" "$(cat "$DIR/own-def.jq")"'
+      jq -c --arg self "$SELF" --slurpfile cut "$DIR/cutover.json" "$(cat "$DIR/feedback-def.jq")"'
         if .class == "city" and (.marked | not)
         then ($cut[0][.pr | tostring] // "") as $since
              | . + {flag: ({body, user: {login}, created_at: .at} | gc_city_own($self; $since) | not)}

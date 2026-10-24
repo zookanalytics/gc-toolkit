@@ -22,7 +22,7 @@ declares them in, and what the city does with a comment that matches either.
 
 **Boundaries.** How the city tells its own posts from feedback, and what it
 does with feedback, is [state-machine.md](state-machine.md#operator-feedback).
-The definitions themselves are `own-def` in
+The definitions themselves are `feedback-def` in
 [`assets/scripts/pr-post.sh`](../assets/scripts/pr-post.sh), which every reader
 of feedback prepends to its program. Whether an integration comments at all is
 the rig's own setting, outside this doc.

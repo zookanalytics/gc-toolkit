@@ -16,7 +16,8 @@ feedback, the one its readers already share.
 
 ## The surface and the need
 
-- `own-def` in [`pr-post.sh`](../../assets/scripts/pr-post.sh) also prints
+- `feedback-def` in [`pr-post.sh`](../../assets/scripts/pr-post.sh) prints the
+  definitions of the city's own post that `own-def` prints, with
   `gc_not_for_review` and `gc_feedback`. Every reader that asks whether a post
   is feedback asks `gc_feedback`.
 - `pr-post.sh not-for-review` prints the no-review mark and each prefix the rig
@@ -101,10 +102,10 @@ formula steps, `mol-validate`'s and `mol-feedback-miner`'s, in the sessions of
 the agents that claim them. A declaration in the city's configuration would be
 written for each kind of caller and kept equal by hand. A caller without it
 would read the rig as declaring nothing, and no error would say so. That is the
-drift a single definition in `own-def` exists to prevent. These values also
+drift a single definition in `pr-post.sh` exists to prevent. These values also
 belong to the city's configuration, while the integration belongs to the rig's
 repository. pr-post.sh reads not-for-review.toml itself whenever a reader asks
-for `own-def`, so no caller has to carry the prefixes.
+for `feedback-def`, so no caller has to carry the prefixes.
 
 ### The packs Gas City publishes
 
@@ -173,7 +174,7 @@ which of a pull request's comments are feedback. The two packs that weigh
 comments do it by a model's judgment inside a review of their own. None of
 them offers a mark that takes a comment out of feedback, or a place for a rig to
 declare one. The pack's feedback readers are its own, and this change extends
-the one definition they share in `own-def` rather than adding a second. The
+the one definition they share in `pr-post.sh` rather than adding a second. The
 change adds no pack noun and no converter. If Gas City ships a reader of
 pull-request feedback, the rule belongs in that reader, and the pack's
 definition moves onto it.

@@ -54,8 +54,9 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit
 
 # shellcheck source=review-answer.sh
 . "$LIB" || { echo "FAIL - cannot source $LIB" >&2; exit 1; }
-# The city-own rule the writer passes to ra_models, as pr-post.sh states it.
-CITY_OWN_DEF=$("$HERE/pr-post.sh" own-def) || { echo "FAIL - pr-post.sh own-def did not print" >&2; exit 1; }
+# The city-own and not-for-review rules the writer passes to ra_models, as
+# pr-post.sh states them.
+CITY_OWN_DEF=$("$HERE/pr-post.sh" feedback-def) || { echo "FAIL - pr-post.sh feedback-def did not print" >&2; exit 1; }
 [ -n "${REVIEW_ANSWER_DEF:-}" ] && ok "(DEF) sourcing the file exposes \$REVIEW_ANSWER_DEF" \
   || bad "(DEF) sourcing the file exposes \$REVIEW_ANSWER_DEF"
 eq "$(jq -n "$REVIEW_ANSWER_DEF"'"compiled"' 2>&1)" '"compiled"' "(DEF) the defs compile"

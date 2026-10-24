@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # pr-post.test.sh — hermetic coverage of the city's single PR posting helper:
 # each verb makes the gh call its callers made, with the provenance mark
-# appended; the own-def predicates tell the city's own post, and a post not for
-# review, from feedback on every shape the readers hand them; not-for-review
-# reads the rig's declaration from its checkout; no reader carries the no-review
+# appended; own-def tells the city's own post from any other, reading nothing,
+# and the feedback-def predicates tell a post not for review, and feedback, on
+# every shape the readers hand them; not-for-review and feedback-def read the
+# rig's declaration from its default branch; no reader carries the no-review
 # rule of its own; and no file in the pack posts to a pull request any other
 # way. A gh stub records each call's argv and the body it would post; no
 # network, no city.
@@ -161,7 +162,7 @@ usage_case "a file-comment with no commit" file-comment --repo github.com/o/r --
 usage_case "a file-comment with no path"   file-comment --repo github.com/o/r --pr 1 --commit abc --body x
 usage_case "--path on a comment"           comment --repo github.com/o/r --pr 1 --body x --path x.sh
 
-echo "# own-def: the city's own post, and everything else is feedback"
+echo "# own-def: the city's own post"
 DEF="$("$SUT" own-def)"
 own() { # <self> <since> <json> — prints true/false
   printf '%s' "$3" | jq -r --arg self "$1" --arg since "$2" "$DEF"'gc_city_own($self; $since)'
@@ -222,7 +223,19 @@ eq "$(marked '{"body":"plain"}')" false "an unmarked body carries no mark"
 eq "$(marked '{"body":null}')" false "a null body carries no mark"
 eq "$(marked "{\"body\":\"x $MARK\"}")" true "gc_city_marked reads the body alone"
 
-echo "# own-def: a post not for review is not feedback, whoever posted it"
+echo "# own-def reads nothing, and feedback-def carries its definitions"
+# An empty PATH leaves pr-post.sh no git and no jq to run.
+mkdir -p "$TMPD/empty-path"
+OWN_ONLY="$(cd "$TMPD" && env PATH="$TMPD/empty-path" "$BASH" "$SUT" own-def 2>&1)"; ORC=$?
+eq "$ORC|$OWN_ONLY" "0|$DEF" "own-def prints the same definitions with no git and no jq to run"
+hasnt "$OWN_ONLY" "gc_feedback" "…and they are the city's own rule alone"
+FB="$("$SUT" feedback-def 2>/dev/null)"
+case "$FB" in "$DEF"*) ok "feedback-def opens with the own-def definitions" ;;
+  *) bad "feedback-def opens with the own-def definitions" "got: ${FB:0:200}" ;; esac
+eq "$(printf '%s' '{"user":{"login":"x"},"body":"Please rename this."}' | jq -r "$FB"'gc_feedback("bot"; "")' 2>&1)" true \
+  "…and goes on to the feedback rule"
+
+echo "# feedback-def: a post not for review is not feedback, whoever posted it"
 # gitq <dir> <git args...> — git in a fixture repository, unsigned, with no
 # hooks and no line-end conversion.
 gitq() {
@@ -245,8 +258,9 @@ rig_declares() {
   else rm -f "$d/not-for-review.toml"; gitq "$d" rm -q --cached --ignore-unmatch not-for-review.toml; fi
   gitq "$d" commit -q --allow-empty -m declaration && gitq "$d" update-ref refs/remotes/origin/main HEAD
 }
-# def_in <repo> — own-def as a reader running in that rig's repository prints it.
-def_in() { (cd "$1" && "$SUT" own-def 2>/dev/null); }
+# def_in <repo> — feedback-def as a reader running in that rig's repository
+# prints it.
+def_in() { (cd "$1" && "$SUT" feedback-def 2>/dev/null); }
 feedback() { # <def> <json> — prints gc_feedback for our login "bot" at $CUT
   printf '%s' "$2" | jq -r --arg self bot --arg since "$CUT" "$1"'gc_feedback($self; $since)'
 }
@@ -283,7 +297,7 @@ eq "$(nfr "$NDEF" '{"body":null}')" false "a null body carries no mark"
 eq "$(printf '%s' "$VERCEL" | jq -r --arg self bot --arg since "$CUT" "$VDEF"'gc_city_own($self; $since)')" false \
   "the city's own rule is unchanged by a declaration"
 
-echo "# own-def: the mark counts only among the HTML comments a body opens with"
+echo "# feedback-def: the mark counts only among the HTML comments a body opens with"
 row() { jq -nc --arg l "$1" --arg t "$2" --arg b "$3" '{user: {login: $l, type: $t}, body: $b}'; } # <login> <type> <body>
 NR='<!-- gc:no-review -->'
 GF_REPORT=$(printf '%s\n' '<!-- growth-factor:schema-diff -->' "$NR" '### Schema diff' '' '| table | change |' '|---|---|' \
@@ -313,7 +327,7 @@ eq "$(nfr "$NDEF" "$(jq -nc --arg b "$(printf '<!-- Déjà vu — 😀 -->\n%s' 
 eq "$(nfr "$NDEF" "$(jq -nc --arg b "$(printf '😀 %s' "$NR")" '{body: $b}')")" false \
   "…and before the mark, they are text, which ends the opening"
 
-echo "# own-def: a mark that does not open the body is feedback, whatever markdown carries it"
+echo "# feedback-def: a mark that does not open the body is feedback, whatever markdown carries it"
 eq "$(feedback "$NDEF" "$(row johnzook User "$(printf -- '- ```html\n\n  %s\n  ```\n\nPlease add this.' "$NR")")")" true \
   "a person who quotes the mark in a fence inside a list item is giving feedback"
 eq "$(feedback "$NDEF" "$(row 'reviewer[bot]' Bot "$(printf -- '- ```html\n\n  %s\n  ```\n\nPlease add this.' "$NR")")")" true \
@@ -430,8 +444,8 @@ hasnt "$NOUT" "[vc]: #" "…prefix and all"
 has "$NERR" "the [[marker]] at line 9 sets no prefix" "a table with no prefix is named"
 has "$NERR" "the [[marker]] at line 11 sets its prefix twice" "a prefix set twice is refused"
 has "$NERR" "line 14: this file holds only [[marker]] tables" "another table is named"
-FDEF="$(cd "$FAULTS" && "$SUT" own-def 2>"$TMPD/fdef.err")"; FRC=$?
-eq "$FRC" 0 "own-def still prints its definitions over a faulty declaration"
+FDEF="$(cd "$FAULTS" && "$SUT" feedback-def 2>"$TMPD/fdef.err")"; FRC=$?
+eq "$FRC" 0 "feedback-def still prints its definitions over a faulty declaration"
 has "$FDEF" 'def gc_not_for_review_prefixes: ["kept"];' "…holding only the prefixes that read"
 has "$(cat "$TMPD/fdef.err")" "pr-post: $FAULTS/not-for-review.toml on origin/main: line 1:" \
   "…and names each refused part on stderr, with the file and the branch it was read from"
@@ -442,8 +456,8 @@ printf '%s\n' '[[marker]]' 'prefix = "from GC_RIG_ROOT"' | rig_declares "$OTHER"
 OUT="$(cd "$RIG" && GC_RIG_ROOT="$OTHER" "$SUT" not-for-review 2>&1)"
 has "$OUT" "[vc]: #" "a caller in a rig's repository reads that rig's declaration, whatever GC_RIG_ROOT names"
 hasnt "$OUT" "from GC_RIG_ROOT" "…and not GC_RIG_ROOT's"
-VIA_ROOT="$(cd "$RIG" && GC_RIG_ROOT="$OTHER" "$SUT" own-def 2>/dev/null)"
-has "$VIA_ROOT" 'def gc_not_for_review_prefixes: ["[vc]: #"];' "…and own-def embeds the same"
+VIA_ROOT="$(cd "$RIG" && GC_RIG_ROOT="$OTHER" "$SUT" feedback-def 2>/dev/null)"
+has "$VIA_ROOT" 'def gc_not_for_review_prefixes: ["[vc]: #"];' "…and feedback-def embeds the same"
 # GIT_CEILING_DIRECTORIES keeps git from finding a repository above the test's
 # temp directory, so the caller runs in none.
 mkdir -p "$TMPD/outside"

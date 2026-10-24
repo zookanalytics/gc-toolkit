@@ -268,12 +268,13 @@ FINDING="$SCRIPTS_DIR/finding.sh"
 # The single writer of the city's PR posts, and the owner of the mark that tells
 # them from feedback. Every reply and comment this script posts goes through it,
 # and every read that separates feedback from the city's own output asks its
-# definitions (gc_feedback, gc_city_own), so the writer and the readers cannot
-# drift apart. A rework child names this absolute path to its fixer: the polecat
-# works in its own rig's checkout, where a pack-relative path names nothing.
+# definitions (gc_feedback, gc_city_own, from feedback-def), so the writer and
+# the readers cannot drift apart. A rework child names this absolute path to its
+# fixer: the polecat works in its own rig's checkout, where a pack-relative path
+# names nothing.
 PR_POST="$SCRIPTS_DIR/pr-post.sh"
 [ -x "$PR_POST" ] || { echo "$PROG: the PR posting helper is missing ($PR_POST); cannot tell the city's own posts from feedback" >&2; exit 1; }
-CITY_OWN_DEF=$("$PR_POST" own-def) && [ -n "$CITY_OWN_DEF" ] \
+CITY_OWN_DEF=$("$PR_POST" feedback-def) && [ -n "$CITY_OWN_DEF" ] \
   || { echo "$PROG: the PR posting helper did not print its provenance definition; cannot tell the city's own posts from feedback" >&2; exit 1; }
 
 FIX_POOL=""; POSTURE_ONLY=0; ROUTE_ONLY=0; DEADLINE=""; CURSOR=""; SEEN=""

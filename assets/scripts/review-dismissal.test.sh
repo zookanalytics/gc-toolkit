@@ -2,7 +2,7 @@
 # Hermetic test for assets/scripts/review-dismissal.sh, what dismissing a review
 # retires and what the approval dismissers share. Covers:
 #   (DEF)      sourcing the file exposes $REVIEW_DISMISSAL_DEF, pr_coords and
-#              approval_phrase, and the defs compile behind pr-post.sh's own-def
+#              approval_phrase, and the defs compile behind pr-post.sh's feedback-def
 #   (LIVE)     live_comments drops the comments of a dismissed review and keeps
 #              every other one, standalone comments included, each stamped
 #              with its review's submission instant
@@ -40,10 +40,10 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit
 for f in pr_coords approval_phrase; do
     [ "$(type -t "$f")" = "function" ] && ok "(DEF) sourcing the file defines $f" || bad "(DEF) sourcing the file defines $f"
 done
-CITY_OWN_DEF=$("$HERE/pr-post.sh" own-def) || { echo "FAIL - pr-post.sh own-def did not print" >&2; exit 1; }
+CITY_OWN_DEF=$("$HERE/pr-post.sh" feedback-def) || { echo "FAIL - pr-post.sh feedback-def did not print" >&2; exit 1; }
 jq -n "$CITY_OWN_DEF$REVIEW_DISMISSAL_DEF"'1' >/dev/null 2>&1 \
-    && ok "(DEF) the defs compile behind pr-post.sh's own-def" \
-    || bad "(DEF) the defs compile behind pr-post.sh's own-def"
+    && ok "(DEF) the defs compile behind pr-post.sh's feedback-def" \
+    || bad "(DEF) the defs compile behind pr-post.sh's feedback-def"
 
 SELF="gc-city-bot"
 rv() { # id login state submitted_at

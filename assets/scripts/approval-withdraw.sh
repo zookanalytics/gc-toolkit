@@ -81,7 +81,7 @@ SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 . "$SCRIPTS_DIR/review-dismissal.sh" || { echo "$PROG: cannot source review-dismissal.sh beside this script" >&2; exit 2; }
 # The feedback rule unrouted_comment_ids reads (gc_feedback), from the writer of
 # the city's PR posts.
-CITY_OWN_DEF=$("$SCRIPTS_DIR/pr-post.sh" own-def 2>/dev/null) && [ -n "$CITY_OWN_DEF" ] \
+CITY_OWN_DEF=$("$SCRIPTS_DIR/pr-post.sh" feedback-def 2>/dev/null) && [ -n "$CITY_OWN_DEF" ] \
   || { echo "$PROG: pr-post.sh beside this script did not print its provenance definition; cannot tell feedback from the city's own posts" >&2; exit 2; }
 
 usage() {
