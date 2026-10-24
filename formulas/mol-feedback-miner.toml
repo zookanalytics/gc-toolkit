@@ -150,12 +150,15 @@ SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-to
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
 FM="${SC%/*}/feedback-miner.sh"
-# The rig checkout load-context checked, by the same lookup. An empty one
-# fails the sweep below, which refuses an empty --checkout.
+# The rig checkout load-context checked, by the same lookup. When it no longer
+# resolves (a roster change, or a restart that lost GC_RIG_ROOT), the run ends
+# as load-context's no-op does and names the cause, which the message of a
+# sweep that did not complete would not.
 # >>> feedback-miner-repo
 REPO="${GC_RIG_ROOT:-}"
 [ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 # <<< feedback-miner-repo
+[ -n "$REPO" ] || { echo "feedback-miner: cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster) — nothing to mine this run."; "${SC:?step-close.sh not found in the pack}" --step mol-feedback-miner.mine-and-file --outcome pass; gc runtime drain-ack; exit 0; }
 MINER_DIR=$(mktemp -d "${TMPDIR:-/tmp}/feedback-miner.XXXXXX")
 echo "FM=$FM MINER_DIR=$MINER_DIR"
 if ! "$FM" sweep --checkout "$REPO" \\
