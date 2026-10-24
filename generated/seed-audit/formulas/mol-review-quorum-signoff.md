@@ -33,25 +33,25 @@ survives from one block to the next, so each block names the values it uses.
 
 
 Required vars:
-  {{anchor_bead}}: The work bead the verdict lands on, whose description says what the change is for.
-  {{check}}: The check this review applies: the review bead's check_name, in lowercase.
   {{lane_one_id}}: Durable ID for reviewer lane one
   {{lane_one_provider}}: Provider identifier for reviewer lane one
   {{lane_one_target}}: Gas City pool target for reviewer lane one
   {{lane_two_id}}: Durable ID for reviewer lane two
   {{lane_two_provider}}: Provider identifier for reviewer lane two
   {{lane_two_target}}: Gas City pool target for reviewer lane two
-  {{review_base}}: The branch the change lands on, where its diff starts.
-  {{review_bead}}: The review bead this run answers.
-  {{review_branch}}: The branch under review.
-  {{reviewed_oid}}: The commit under review: the branch's head when the review was dispatched, never moved or cleared.
   {{synthesis_target}}: Gas City pool target for the synthesis-and-signoff step
 
 Optional vars:
+  {{anchor_bead}}: The work bead the verdict lands on, whose description says what the change is for. (default=)
   {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot: the prefix of the pack's skill names in a session's catalog. Sling adds it to every pour. (default=gc-toolkit.)
+  {{check}}: The check this review applies: the review bead's check_name, in lowercase. (default=)
+  {{review_base}}: The branch the change lands on, where its diff starts. (default=)
+  {{review_bead}}: The review bead this run answers. (default=)
+  {{review_branch}}: The branch under review. (default=)
   {{review_context}}: Why this review went out, such as a bring-current round for triage to rule on, else empty. Free text, so the steps name it in prose and never inside a shell block. (default=)
   {{review_pr_number}}: That PR's number, empty with it. (default=)
   {{review_pr_url}}: The anchor's open PR, empty before one opens. (default=)
+  {{reviewed_oid}}: The commit under review: the branch's head when the review was dispatched, never moved or cleared. (default=)
 
 Steps (4):
   ├── mol-review-quorum-signoff.review-lane-one: Review lane one

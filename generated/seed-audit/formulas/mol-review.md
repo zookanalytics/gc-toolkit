@@ -45,19 +45,17 @@ names the values it uses. A review held with no poured workflow follows these
 steps as its description says.
 
 
-Required vars:
-  {{anchor_bead}}: The work bead the verdict lands on, whose description says what the change is for.
-  {{check}}: The check this review applies: the review bead's check_name, in lowercase.
-  {{review_base}}: The branch the change lands on, where its diff starts.
-  {{review_bead}}: The review bead this run answers.
-  {{review_branch}}: The branch under review.
-  {{reviewed_oid}}: The commit under review: the branch's head when the review was dispatched, never moved or cleared.
-
-Optional vars:
+Variables:
+  {{anchor_bead}}: The work bead the verdict lands on, whose description says what the change is for. (default=)
   {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot: the prefix of the pack's skill names in a session's catalog. Sling adds it to every pour. (default=gc-toolkit.)
+  {{check}}: The check this review applies: the review bead's check_name, in lowercase. (default=)
+  {{review_base}}: The branch the change lands on, where its diff starts. (default=)
+  {{review_bead}}: The review bead this run answers. (default=)
+  {{review_branch}}: The branch under review. (default=)
   {{review_context}}: Why this review went out, such as a bring-current round for triage to rule on, else empty. Free text, so the steps name it in prose and never inside a shell block. (default=)
   {{review_pr_number}}: That PR's number, empty with it. (default=)
   {{review_pr_url}}: The anchor's open PR, empty before one opens. (default=)
+  {{reviewed_oid}}: The commit under review: the branch's head when the review was dispatched, never moved or cleared. (default=)
 
 Steps (4):
   ├── mol-review.load-dispatch: Gather what the review reads, at the commit it was dispatched for

@@ -50,29 +50,33 @@ formula = "mol-review"
 formula_compiler = ">=2.0.0"
 
 [vars]
+# The record's vars default to empty rather than being required. A pour that
+# omits a required var fails before any step runs, so a review slung without
+# one would sit unpoured. Defaulted, it pours, and load-dispatch's record check
+# names the missing key on the review's notes and reviews nothing.
 [vars.review_bead]
 description = "The review bead this run answers."
-required = true
+default = ""
 
 [vars.check]
 description = "The check this review applies: the review bead's check_name, in lowercase."
-required = true
+default = ""
 
 [vars.anchor_bead]
 description = "The work bead the verdict lands on, whose description says what the change is for."
-required = true
+default = ""
 
 [vars.review_branch]
 description = "The branch under review."
-required = true
+default = ""
 
 [vars.review_base]
 description = "The branch the change lands on, where its diff starts."
-required = true
+default = ""
 
 [vars.reviewed_oid]
 description = "The commit under review: the branch's head when the review was dispatched, never moved or cleared."
-required = true
+default = ""
 
 [vars.review_pr_url]
 description = "The anchor's open PR, empty before one opens."

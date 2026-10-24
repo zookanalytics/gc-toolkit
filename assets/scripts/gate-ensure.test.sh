@@ -1939,7 +1939,6 @@ named = sorted({m for t in texts for m in re.findall(r'\{\{([a-zA-Z_][a-zA-Z0-9_
 blocks = [b for s in d.get('steps', []) for b in re.findall(r'```bash\n(.*?)```', s.get('description', ''), re.S)]
 vs = d.get('vars', {})
 json.dump({"named": named, "declared": sorted(vs),
-           "required": sorted(k for k, v in vs.items() if v.get('required')),
            "empty_default": sorted(k for k, v in vs.items() if not v.get('required') and v.get('default') == ''),
            "context_in_block": any('{{review_context}}' in b for b in blocks),
            "blocks": len(blocks)}, open(sys.argv[2], 'w'))
@@ -1949,9 +1948,12 @@ PY
     "$F: every {{name}} its text names is a var it declares, convoy_id aside"
   eq "$(jq -r '.declared[]' "$V" | grep -vxF -f "$TMP/passed.$F" | paste -sd' ' -)" "" \
     "$F: every var it declares is one the dispatch's sling passes or sling adds"
+  # A pour that omits a required var fails before any step runs, so a record
+  # var the formula required would keep load-dispatch's record check from ever
+  # naming the one a sling left out.
   for k in $ALWAYS; do
-    if jq -e --arg k "$k" '.required | index($k) != null' "$V" >/dev/null; then ok "$F: $k is required, so a sling without it pours nothing"
-    else bad "$F: $k is not declared required"; fi
+    if jq -e --arg k "$k" '.empty_default | index($k) != null' "$V" >/dev/null; then ok "$F: $k defaults to empty, so a sling without it pours and the record check names it"
+    else bad "$F: $k does not default to empty"; fi
   done
   for k in $MAYBE; do
     if jq -e --arg k "$k" '.empty_default | index($k) != null' "$V" >/dev/null; then ok "$F: $k defaults to empty"
