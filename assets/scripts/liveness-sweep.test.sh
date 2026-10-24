@@ -174,12 +174,14 @@ chmod +x "$TMP/bin/escalate.sh"
 # resolver still reads real fixture repositories. A branch named in
 # LS_REMOTE_HEADS ("<branch> <sha>" lines) answers that sha, one named in
 # LS_REMOTE_MISS answers nothing (a ref origin does not carry), and any other
-# answers the sha1 of its name. LS_REMOTE_LOG records every ls-remote.
+# answers the sha1 of its name. LS_REMOTE_FAIL makes origin not answer at all,
+# as an unreachable one does. LS_REMOTE_LOG records every ls-remote.
 REAL_GIT="$(command -v git)"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'REAL_GIT=%q\n' "$REAL_GIT"; cat; } > "$TMP/bin/git" <<'GIT'
 case " $* " in
   *" ls-remote "*)
     [ -n "${LS_REMOTE_LOG:-}" ] && printf '%s\n' "$*" >> "$LS_REMOTE_LOG"
+    [ -z "${LS_REMOTE_FAIL:-}" ] || exit 128
     for a in "$@"; do
       case "$a" in refs/heads/*) ;; *) continue ;; esac
       b="${a#refs/heads/}"
@@ -862,6 +864,20 @@ printf '%s\n' '[{"id":"np-plain","title":"no pre-open anchor","issue_type":"task
 : > "$TMP/ls-remote.log"
 LS_REMOTE_LOG="$TMP/ls-remote.log" FAKE_READY="$TMP/np-ready.json" run_sweep ABSENT
 eq "$(grep -c 'ls-remote' "$TMP/ls-remote.log")" "0" "a ready set with no pre-open anchor reads no head"
+
+echo "── an origin that does not answer holds each pre-open anchor's class ──"
+# No head reads, which says nothing about any one anchor, so the pass reports an
+# anchor again only when the last pass reported it, and reports no other new.
+LS_REMOTE_FAIL=1 FAKE_READY="$TMP/nh-ready.json" run_sweep ABSENT
+eq "$RC" "0" "a pass whose head read fails completes"
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "" "an anchor the last pass did not report is not reported new"
+case "$OUT" in *"unread 1"*) ok "…its class is unread" ;;
+  *) bad "…its class is unread" "funnel: $(printf '%s\n' "$OUT" | grep funnel)" ;; esac
+case "$(cat "$TMP/err")" in *"origin did not answer the head read"*) ok "…and the pass says why" ;;
+  *) bad "…and the pass says why" "stderr: $(head -3 "$TMP/err")" ;; esac
+LS_REMOTE_FAIL=1 FAKE_READY="$TMP/nh-ready.json" run_sweep "nh-green"
+eq "$RC" "0" "the same pass after one that reported the anchor completes"
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "nh-green" "…and reports it again"
 
 echo "── holder liveness gates the conversing class (readable session list) ──"
 # Two visits track two ready subjects: one held by a live session (lx-live-1 is

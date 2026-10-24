@@ -18,8 +18,11 @@
 # closes the window, and the precheck closes it too once it has proved there
 # is no pass to start.
 # Bias everywhere: an unreadable probe excludes nothing (re-report, never
-# hide). Exit: 0 pass completed (filed or nothing to file), 1 aborted on an
-# unreadable listing, 2 usage.
+# hide). One read is held instead: when origin does not answer the head read of
+# the pre-open anchors, each holds what the last pass made of it, so one it
+# reported is reported again and no other is reported new. Exit: 0 pass
+# completed (filed or nothing to file), 1 aborted on an unreadable listing, 2
+# usage.
 set -uo pipefail
 
 PROG="liveness-sweep"
@@ -298,9 +301,12 @@ fi
 # lane-state.sh, the derivation pr-open.sh opens the PR on, pinned to this
 # sweep's store and bound by its per-call timeout. --no-remote: a pre_open_gate
 # anchor has no PR, so no GitHub approval backs a lane, as pr-open.sh reads it.
-# An anchor whose head does not read, whose gates the resolver cannot name, or
-# that has a lane that does not derive green or cannot be read, stays out of the
-# map and a candidate.
+# An anchor whose head origin does not carry, whose gates the resolver cannot
+# name, or that has a lane that does not derive green or cannot be read, stays
+# out of the map and a candidate. When origin does not answer the head read at
+# all, no head reads, and that says nothing about any one anchor: each anchor
+# the last pass reported stays out of the map, a candidate again, and every
+# other is "unread", a class of its own, so a failed read reports no anchor new.
 _LS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 # The gates are resolved at the head of the anchor's branch on origin, the
 # commit pr-open.sh would open the PR at, read in the rig checkout the sweep
@@ -322,12 +328,23 @@ _ls_branches=()
 while IFS=$'\037' read -r _aid _acs _abr; do
   [ -n "$_aid" ] && [ -n "$_abr" ] && _ls_branches+=("$_abr")
 done <<< "$_LS_PREOPEN"
-_LS_HEADS=""
-[ "${#_ls_branches[@]}" -eq 0 ] || _LS_HEADS=$(remote_branch_heads . "${_ls_branches[@]}")
+_LS_HEADS=""; _LS_UNREAD=0
+if [ "${#_ls_branches[@]}" -gt 0 ] && ! _LS_HEADS=$(remote_branch_heads . "${_ls_branches[@]}"); then
+  _LS_UNREAD=1
+  echo "$PROG: WARN: origin did not answer the head read for ${#_ls_branches[@]} pre-open anchor branch(es); each holds what the last pass made of it" >&2
+fi
+_LS_REPORTED=$(cat "$BASELINE_FILE" 2>/dev/null || true)
 PREOPEN_GREEN_MAP=$(
   printf '%s\n' "$_LS_PREOPEN" \
   | while IFS=$'\037' read -r _aid _acs _abr; do
       [ -n "$_aid" ] && [ -n "$_abr" ] || continue
+      if [ "$_LS_UNREAD" = 1 ]; then
+        case ",$_LS_REPORTED," in
+          *",$_aid,"*) ;;
+          *) jq -nc --arg id "$_aid" '{($id): "unread"}' ;;
+        esac
+        continue
+      fi
       _head=$(printf '%s\n' "$_LS_HEADS" | awk -F'\t' -v b="$_abr" '$2 == b { print $1; exit }')
       [ -n "$_head" ] || continue
       _g=$(bounded "$_LS_DIR/review-checks.sh" --resolve --check-set "$_acs" --through pre-open \
