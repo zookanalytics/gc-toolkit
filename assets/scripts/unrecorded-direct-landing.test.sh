@@ -19,8 +19,8 @@
 # out. The blocks run against real git repositories, the real
 # direct-merge-push.sh, refinery-workspace.sh, detached-job.sh and bd-lib.sh, a
 # stub gc that keeps the bead in a file, and stub lifecycle.sh and escalate.sh
-# that log. They run from inside the rig's checkout, because
-# branch_has_real_change's git calls take their repository from the cwd.
+# that log. They run from a directory that is no git checkout, as a refinery's
+# scratch directory is, so every git call has to name the rig by path.
 # Proves:
 #   - an attempt that pushes and then cannot record leaves the landing on
 #     origin and the stamp on the bead, and the next attempt records the
@@ -28,7 +28,11 @@
 #     whether origin/main stayed at the landing or moved on past it, and
 #     whatever strategy the bead reads by then;
 #   - a branch that never introduced work is still refused, parked and
-#     escalated, with no stamp and with a stamp its target does not carry.
+#     escalated, with no stamp and with a stamp its target does not carry, and
+#     so is a branch whose commits net to no change;
+#   - a check that cannot run is refused as one: its park and its visit say the
+#     check could not run, and name git's error and the directory, never that
+#     the branch has no change.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -83,6 +87,25 @@ for f in prep merge-push; do
   if bash -n "$TMP/$f.sh" 2>/dev/null; then ok "$f: valid bash"; else bad "$f: valid bash"; fi
 done
 
+# bare_git <file>: the first argument of every git invocation that does not
+# start with -C, outside comment lines.
+bare_git() {
+  awk '
+    /^[[:space:]]*#/ { next }
+    {
+      line = $0
+      while (match(line, "(^|[^-.A-Za-z0-9_/])git[[:space:]]+[^[:space:]]+")) {
+        n = split(substr(line, RSTART, RLENGTH), w, "[[:space:]]+")
+        if (w[n] != "-C") print w[n]
+        line = substr(line, RSTART + RLENGTH)
+      }
+    }' "$1" | tr '\n' ' '
+}
+fence branch-has-real-change > "$TMP/bhrc.sh"
+fence zero-diff-guard > "$TMP/zdg.sh"
+eq "$(bare_git "$TMP/bhrc.sh")" "" "branch-has-real-change: every git call names its repo with -C"
+eq "$(bare_git "$TMP/zdg.sh")" "rev-parse " "zero-diff-guard: the only git call without -C is the pack-script locator's"
+
 # The pack the blocks find their scripts in, through GC_CITY_PATH.
 CITY="$TMP/city"
 PACK="$CITY/rigs/gc-toolkit/assets/scripts"
@@ -130,6 +153,16 @@ GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 
+# The cwd every block runs from: a directory git finds no repository in, as in
+# a scratch directory under the system temp dir.
+ELSEWHERE="$TMP/elsewhere"
+mkdir -p "$ELSEWHERE"
+if git -C "$ELSEWHERE" rev-parse --git-dir >/dev/null 2>&1; then
+  bad "precondition: the blocks' cwd is no git checkout" "$ELSEWHERE is inside one"
+else
+  ok "precondition: the blocks' cwd is no git checkout"
+fi
+
 # commit <repo> <message>: a commit that adds a file, since the guard judges a
 # branch by the change in its tree.
 commit() {
@@ -141,9 +174,10 @@ commit() {
 stamp() { jq -r '.[0].metadata.direct_landing_sha // "none"' "$D/bead.json"; }
 merged_tries() { grep -c '^transition wb --to merged ' "$D/lc.log"; }
 
-# fixture <dir> work|nowork: origin with main at BASE and polecat/wb one commit
-# ahead of it (work) or at BASE itself (nowork), the rig cloned from it, and a
-# direct-strategy bead. Sets D, BASE, FEATURE and PREP.
+# fixture <dir> work|nowork|netzero: origin with main at BASE and polecat/wb
+# one commit ahead of it (work), at BASE itself (nowork), or two commits ahead
+# whose second removes what the first added (netzero), the rig cloned from it,
+# and a direct-strategy bead. Sets D, BASE, FEATURE and PREP.
 fixture() {
   D="$1"
   mkdir -p "$D"
@@ -152,7 +186,15 @@ fixture() {
   BASE=$(commit "$D/seed" "base")
   git -C "$D/seed" push -q "$D/origin.git" main
   git -C "$D/seed" checkout -q -b polecat/wb
-  if [ "$2" = work ]; then FEATURE=$(commit "$D/seed" "feature"); else FEATURE="$BASE"; fi
+  case "$2" in
+    work) FEATURE=$(commit "$D/seed" "feature") ;;
+    netzero)
+      commit "$D/seed" "added then removed" >/dev/null
+      git -C "$D/seed" rm -q added-then-removed
+      git -C "$D/seed" commit -q -m "remove it again"
+      FEATURE=$(git -C "$D/seed" rev-parse HEAD) ;;
+    *) FEATURE="$BASE" ;;
+  esac
   git -C "$D/seed" push -q "$D/origin.git" polecat/wb
   git -C "$D/seed" checkout -q main
   git clone -q "$D/origin.git" "$D/rig"
@@ -161,8 +203,9 @@ fixture() {
   printf '%s\n' '[{"id":"wb","status":"in_progress","metadata":{"branch":"polecat/wb","target":"main","merge_strategy":"direct"}}]' > "$D/bead.json"
 }
 
-# attempt [<env>...]: one patrol's prepare, then its merge-push, both from
-# inside the rig, the bead read as a direct one unless STRATEGY says otherwise.
+# attempt [<env>...]: one patrol's prepare, then its merge-push, both from a
+# directory that is no checkout, the bead read as a direct one unless STRATEGY
+# says otherwise.
 # The logs start over, so each attempt's assertions read only its own calls.
 # Sets PREP_RC, RC and OUT.
 attempt() {
@@ -170,8 +213,8 @@ attempt() {
   local run=(env GC_RIG_ROOT="$D/rig" GC_RIG=myrig GC_CITY_PATH="$CITY" WORK=wb BRANCH=polecat/wb TARGET=main
     TARGET_BRANCH_DEFAULT=main FAKE_ROSTER="$D/roster.json" FAKE_META="$D/bead.json" FAKE_LOG="$D/gc.log"
     FAKE_LC_LOG="$D/lc.log" DIRECT_MERGE_PUSH_BACKOFF=0 STRATEGY=direct "$@")
-  ( cd "$D/rig" && "${run[@]}" bash "$TMP/prep.sh" ) >"$D/prep.out" 2>&1; PREP_RC=$?
-  OUT=$(cd "$D/rig" && "${run[@]}" bash "$TMP/merge-push.sh" 2>&1); RC=$?
+  ( cd "$ELSEWHERE" && "${run[@]}" bash "$TMP/prep.sh" ) >"$D/prep.out" 2>&1; PREP_RC=$?
+  OUT=$(cd "$ELSEWHERE" && "${run[@]}" bash "$TMP/merge-push.sh" 2>&1); RC=$?
 }
 recorded_at() { # <label> <sha>: one transition, recording and closing at <sha>
   case "$(cat "$D/lc.log")" in
@@ -253,6 +296,42 @@ has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "stale: t
 has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-false-completion" "stale: the refusal is escalated"
 eq "$(merged_tries)" 0 "stale: nothing is recorded as merged"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "stale: nothing is pushed"
+
+echo "── a branch whose commits net to no change is refused ──"
+fixture "$TMP/netzero" netzero
+attempt
+eq "$PREP_RC" 0 "netzero: the prepare stages the branch"
+eq "$(git -C "$PREP" rev-list --count "$BASE..HEAD" 2>/dev/null || echo 0)" 2 "netzero: precondition, the prepared head is two commits ahead of the target"
+eq "$RC" 1 "netzero: merge-push stops"
+has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "netzero: the bead is parked as a false completion"
+has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-false-completion" "netzero: the refusal is escalated"
+eq "$(merged_tries)" 0 "netzero: nothing is recorded as merged"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "netzero: nothing is pushed"
+
+echo "── a check that cannot run is refused as one, not as a branch without work ──"
+fixture "$TMP/nocheck" work
+# The prepare alone stages the branch; then the rig loses origin/main, so the
+# check cannot find the merge-base it needs.
+: > "$D/gc.log"; : > "$D/lc.log"
+NOCHECK_ENV=(env GC_RIG_ROOT="$D/rig" GC_RIG=myrig GC_CITY_PATH="$CITY" WORK=wb BRANCH=polecat/wb TARGET=main
+  TARGET_BRANCH_DEFAULT=main FAKE_ROSTER="$D/roster.json" FAKE_META="$D/bead.json" FAKE_LOG="$D/gc.log"
+  FAKE_LC_LOG="$D/lc.log" STRATEGY=direct)
+( cd "$ELSEWHERE" && "${NOCHECK_ENV[@]}" bash "$TMP/prep.sh" ) >"$D/prep.out" 2>&1; PREP_RC=$?
+eq "$PREP_RC" 0 "nocheck: the prepare stages the branch"
+git -C "$D/rig" update-ref -d refs/remotes/origin/main
+OUT=$(cd "$ELSEWHERE" && "${NOCHECK_ENV[@]}" bash "$TMP/merge-push.sh" 2>&1); RC=$?
+eq "$RC" 1 "nocheck: merge-push stops"
+has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion --assignee  --route human --set false_completion_suspected=the zero-diff check could not run in $D/rig: merge-base origin/main " \
+  "nocheck: the park records that the check could not run, in the rig, and the failed git call"
+has "$(cat "$D/lc.log")" "Not a valid object name origin/main" "nocheck: the park carries git's own error"
+has "$(cat "$D/lc.log")" "--takeaway the zero-diff check could not run, so no change was verified" "nocheck: the board's takeaway says the check could not run"
+hasnt "$(cat "$D/lc.log")" "no verified change vs origin/main" "nocheck: the park does not say the branch has no change"
+has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-zero-diff-check-failed --message The zero-diff check of branch polecat/wb against origin/main could not run in $D/rig: merge-base origin/main " \
+  "nocheck: the visit is a failed-check situation, naming the directory and the failed git call"
+hasnt "$(cat "$D/gc.log")" "refinery-false-completion" "nocheck: the visit is not a no-change situation"
+has "$(cat "$D/gc.log")" "runtime drain-ack" "nocheck: the session drains"
+eq "$(merged_tries)" 0 "nocheck: nothing is recorded as merged"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "nocheck: nothing is pushed"
 
 echo "-----"
 echo "unrecorded-direct-landing: $PASS passed, $FAIL failed"

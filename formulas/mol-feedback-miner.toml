@@ -87,8 +87,6 @@ FM="${SC%/*}/feedback-miner.sh"
 gc prime                    # role context
 gc bd prime                 # beads context
 
-REPO="$(git rev-parse --show-toplevel)"
-
 # Each missing prerequisite is a clean no-op, not an error.
 no_op() {
   echo "feedback-miner: $1 — nothing to mine this run."
@@ -98,6 +96,14 @@ no_op() {
   exit 0
 }
 
+# The repository mined is this rig's checkout, named by path: the session's
+# cwd may sit in any checkout, and a miner reading it would mine and file
+# another repository's PRs.
+# >>> feedback-miner-repo
+REPO="${GC_RIG_ROOT:-}"
+[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+# <<< feedback-miner-repo
+[ -n "$REPO" ] || no_op "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)"
 [ -x "$FM" ] || no_op "feedback-miner.sh not found in the pack"
 command -v gh >/dev/null 2>&1 || no_op "gh not installed"
 git -C "$REPO" remote get-url origin 2>/dev/null | grep -qi 'github' || no_op "origin is not a GitHub remote"
@@ -144,7 +150,12 @@ SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-to
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
 FM="${SC%/*}/feedback-miner.sh"
-REPO="$(git rev-parse --show-toplevel)"
+# The rig checkout load-context checked, by the same lookup. An empty one
+# fails the sweep below, which refuses an empty --checkout.
+# >>> feedback-miner-repo
+REPO="${GC_RIG_ROOT:-}"
+[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+# <<< feedback-miner-repo
 MINER_DIR=$(mktemp -d "${TMPDIR:-/tmp}/feedback-miner.XXXXXX")
 echo "FM=$FM MINER_DIR=$MINER_DIR"
 if ! "$FM" sweep --checkout "$REPO" \\

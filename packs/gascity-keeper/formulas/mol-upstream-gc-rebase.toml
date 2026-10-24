@@ -126,8 +126,11 @@ Establish a clean worktree on the gascity rig at
 `{{origin_remote}}/{{upstream_branch}}`, fetch upstream, and write a backup
 ref so the rebase is recoverable.
 
-**1. Locate the gascity rig** — `$GC_RIG_ROOT` when rig-scoped, else
-`gc rig list --json` (top-level `.rigs[]` with `.name`/`.path`).
+**1. Locate the gascity rig** by name in `gc rig list --json` (top-level
+`.rigs[]` with `.name`/`.path`), so the pool the run was slung to does not pick
+the repository. Every git call below names it as `git -C "$RIG_ROOT"`, and
+`git -C ""` runs in the session's cwd, so a roster with no gascity rig aborts
+the run before anything is fetched or created.
 
 **2. Reuse or create the worktree.** Check `metadata.work_dir` first; if it
 points at an existing directory, `cd` there and skip to step 3. Otherwise
@@ -136,7 +139,22 @@ create one anchored to `$GC_CITY_PATH` — the path must NOT derive from
 polecat could not resume). Single-segment name (`rebase-<bead>`) so gascity's
 worktree walkers discover and prune it:
 ```bash
+# >>> upstream-rebase-worktree-setup
 RIG_ROOT=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
+if [ -z "$RIG_ROOT" ]; then
+    echo "ERROR: gc rig list --json names no rig called gascity; refusing to set up the rebase worktree" >&2
+    # Keeper-routed abort (see the abort shape in the header).
+    REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper // empty')
+    [ -z "$REQUESTING_KEEPER" ] && REQUESTING_KEEPER="{{notify_recipient}}"
+    gc bd update {{issue}} \
+        --set-metadata aborted_at=workspace-setup \
+        --status=open \
+        --assignee="$REQUESTING_KEEPER" \
+        --append-notes "Refused to set up the rebase worktree: gc rig list --json names no rig called gascity, so no path names the repository to rebase. Nothing was fetched or created. Register the gascity rig, then re-dispatch."
+    gc session nudge "$REQUESTING_KEEPER" "rebase {{issue}}: aborted at workspace-setup (no gascity rig in the roster) — operator engagement needed (metadata.aborted_at=workspace-setup)" || true
+    gc runtime drain-ack
+    exit 1
+fi
 : "${GC_CITY_PATH:?GC_CITY_PATH must be set; refusing to derive worktree path from /}"
 WORKTREE_PATH="$GC_CITY_PATH/.gc/worktrees/gascity/rebase-{{issue}}"
 mkdir -p "$(dirname "$WORKTREE_PATH")"
@@ -151,6 +169,7 @@ else
 fi
 cd "$WORKTREE_PATH"
 gc bd update {{issue}} --set-metadata work_dir="$WORKTREE_PATH" --set-metadata branch="rebase/{{issue}}"
+# <<< upstream-rebase-worktree-setup
 ```
 
 The local branch lets us rebase without touching `{{upstream_branch}}`; the

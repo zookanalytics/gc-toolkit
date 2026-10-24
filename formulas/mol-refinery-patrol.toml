@@ -296,8 +296,16 @@ taken the bead out of this queue, so a repool that stops short arms a retry
 or files a visit:
 
 ```bash
+# >>> rejection-conflict-reason
+# The reason names origin/$TARGET's head in the rig's repository, read by path:
+# the session's cwd may sit in another checkout, whose origin/$TARGET belongs
+# to another repository.
+RIG_ROOT="${GC_RIG_ROOT:-}"
+[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+REJECT_REASON="Conflicts with $TARGET at $(git -C "$RIG_ROOT" rev-parse "origin/$TARGET"); resume in prepare_mode=$PREPARE_MODE (merge = bring the branch current by MERGE; do not rebase and do not force-push it)"
+# <<< rejection-conflict-reason
 gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
-REJECT_REASON="Conflicts with $TARGET at $(git rev-parse origin/$TARGET); resume in prepare_mode=$PREPARE_MODE (merge = bring the branch current by MERGE; do not rebase and do not force-push it)"
 # >>> mr-aware-rejection
 REPOOL=""
 for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
@@ -600,6 +608,9 @@ for it in the foreground as run-tests does.
 **Branch-caused:** retire the workflow and repool with the failure summary,
 the same repool as the rebase step:
 ```bash
+RIG_ROOT="${GC_RIG_ROOT:-}"
+[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 gc workflow delete-source $WORK --apply && gc workflow reopen-source $WORK
 REJECT_REASON="<failure summary>"
 # >>> mr-aware-rejection
@@ -622,7 +633,10 @@ esac
 # $BEAD_JSON is the row rejection-repool.sh read before its write, so this
 # decision costs no read of its own. It is empty only when the script could not
 # read the bead, and then the branch it names is kept: a wrongly kept branch is
-# swept later, and a wrongly deleted one strands a PR.
+# swept later, and a wrongly deleted one strands a PR. The delete names the
+# rig's repository by path through RIG_ROOT, which the arm resolved before the
+# repool: a bare push from another checkout deletes a same-named branch on that
+# checkout's origin, so with no RIG_ROOT the branch is kept.
 # >>> merge-strategy-resolve
 # The one reading of the merge strategy. Every step that branches on it reads
 # it through this block, so the step that keeps a branch and the step that
@@ -666,8 +680,10 @@ elif [ "${PR_SHAPED:-1}" != "0" ]; then
   echo "keeping origin/$BRANCH — the bead already records a PR"
 elif [ -n "$MS_FOLD_IN" ]; then
   echo "keeping origin/$BRANCH — it folds into the PR at $MS_TARGET and carries the rework"
+elif [ -z "${RIG_ROOT:-}" ]; then
+  echo "keeping origin/$BRANCH — RIG_ROOT is unset, so no path names the origin to delete it from; a kept branch is swept later"
 else
-  git push origin --delete "$BRANCH" || echo "could not delete origin/$BRANCH — a kept branch is swept later; the repool already stands, so this does not fail the cycle"
+  git -C "$RIG_ROOT" push origin --delete "$BRANCH" || echo "could not delete origin/$BRANCH — a kept branch is swept later; the repool already stands, so this does not fail the cycle"
 fi
 # <<< rejection-branch-keep
 ```
@@ -850,13 +866,33 @@ if [ -z "$LC" ]; then
 fi
 # >>> branch-has-real-change
 branch_has_real_change() {
-  # 0-diff/0-commit guard: does <branch-ref> introduce a real change vs its
-  # merge-base with <target-ref>? 0 = yes; 1 = empty (REFUSE close-as-merged);
-  # 2 = could not compute (fail closed — a tool error is a suspect).
-  bhrc_base=$(git merge-base "$1" "$2" 2>/dev/null) || return 2
-  git diff --quiet "$bhrc_base" "$2"
-  case "$?" in 0) return 1 ;; 1) : ;; *) return 2 ;; esac
-  [ "$(git rev-list --count "$bhrc_base..$2" 2>/dev/null || echo 0)" -ge 1 ] || return 1
+  # 0-diff/0-commit guard: in the repository at <repo>, does <branch-ref>
+  # introduce a real change vs its merge-base with <target-ref>?
+  #   branch_has_real_change <repo> <target-ref> <branch-ref>
+  # 0 = yes; 1 = empty (REFUSE close-as-merged); 2 = could not compute (fail
+  # closed — a tool error is a suspect), with BHRC_ERROR naming the git call
+  # that failed and what git said. Every call names <repo>: git otherwise reads
+  # the cwd, which may be another checkout or no checkout at all.
+  BHRC_ERROR=""
+  if ! bhrc_base=$(git -C "$1" merge-base "$2" "$3" 2>/dev/null); then
+    bhrc_said=$(git -C "$1" merge-base "$2" "$3" 2>&1 >/dev/null | tr -s '[:space:]' ' ')
+    BHRC_ERROR="merge-base $2 $3 failed: ${bhrc_said:-no common ancestor}"
+    return 2
+  fi
+  git -C "$1" diff --quiet "$bhrc_base" "$3" 2>/dev/null
+  bhrc_rc=$?
+  [ "$bhrc_rc" != 0 ] || return 1
+  if [ "$bhrc_rc" != 1 ]; then
+    bhrc_said=$(git -C "$1" diff --quiet "$bhrc_base" "$3" 2>&1 | tr -s '[:space:]' ' ')
+    BHRC_ERROR="diff $bhrc_base $3 failed: ${bhrc_said:-exit $bhrc_rc}"
+    return 2
+  fi
+  if ! bhrc_count=$(git -C "$1" rev-list --count "$bhrc_base..$3" 2>/dev/null); then
+    bhrc_said=$(git -C "$1" rev-list --count "$bhrc_base..$3" 2>&1 >/dev/null | tr -s '[:space:]' ' ')
+    BHRC_ERROR="rev-list $bhrc_base..$3 failed: ${bhrc_said:-no output}"
+    return 2
+  fi
+  [ "$bhrc_count" -ge 1 ] || return 1
   return 0
 }
 # <<< branch-has-real-change
@@ -870,7 +906,9 @@ A branch with no change is not always a false completion. `direct-merge-push.sh`
 stamps `direct_landing_sha` on the bead before it pushes, so a target that
 carries the stamped commit holds a direct landing an earlier patrol pushed and
 did not record. The block sends that bead down the direct path, which records
-it:
+it. A check that cannot run verifies nothing either way, so the block refuses
+that bead too, and its refusal says the check failed and names git's error and
+the directory it ran in, so nobody reads it as a branch with no change:
 ```bash
 # >>> zero-diff-guard
 RIG_ROOT="${GC_RIG_ROOT:-}"
@@ -878,20 +916,34 @@ RIG_ROOT="${GC_RIG_ROOT:-}"
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
 PREP_SHA=$(git -C "$PREP_WT" rev-parse HEAD)
-if ! branch_has_real_change "origin/$TARGET" "$PREP_SHA"; then
+BHRC_RC=0
+branch_has_real_change "$RIG_ROOT" "origin/$TARGET" "$PREP_SHA" || BHRC_RC=$?
+REFUSE_KEY=""
+if [ "$BHRC_RC" = 1 ]; then
   LANDED_SHA=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.direct_landing_sha // empty')
   if [ -n "$LANDED_SHA" ] && git -C "$RIG_ROOT" merge-base --is-ancestor "$LANDED_SHA" "origin/$TARGET" 2>/dev/null; then
     echo "origin/$TARGET carries $LANDED_SHA, which a direct landing of $WORK pushed without recording; taking the direct path to record it"
     MERGE_STRATEGY=direct
   else
-    "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close" --takeaway "the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
-    SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-      [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-    done
-    [ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-false-completion --message "Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
-    gc runtime drain-ack
-    exit 1
+    REFUSE_KEY=refinery-false-completion
+    REFUSE_WHY="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close"
+    REFUSE_TAKEAWAY="the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
+    REFUSE_MESSAGE="Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
   fi
+elif [ "$BHRC_RC" != 0 ]; then
+  REFUSE_KEY=refinery-zero-diff-check-failed
+  REFUSE_WHY="the zero-diff check could not run in $RIG_ROOT: $BHRC_ERROR; no change verified, refused merge-close"
+  REFUSE_TAKEAWAY="the zero-diff check could not run, so no change was verified; refused close-as-merged. Fix the error its visit names, then re-route"
+  REFUSE_MESSAGE="The zero-diff check of branch $BRANCH against origin/$TARGET could not run in $RIG_ROOT: $BHRC_ERROR. It verified nothing either way, so close-as-merged was refused and the bead is parked for a human. This is a failed check, not a branch without work: fix that error, then hand the bead back to the refinery."
+fi
+if [ -n "$REFUSE_KEY" ]; then
+  "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="$REFUSE_WHY" --takeaway "$REFUSE_TAKEAWAY"
+  SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  done
+  [ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "$WORK" --key "$REFUSE_KEY" --message "$REFUSE_MESSAGE"
+  gc runtime drain-ack
+  exit 1
 fi
 # <<< zero-diff-guard
 ```
@@ -985,8 +1037,8 @@ re-run the prepare block, retry. Never plain `--force`, and never force a
 branch the prepare block put in merge mode.
 
 2. Validate a caller-supplied `existing_pr` (must be OPEN, head==$BRANCH,
-base==$TARGET, in the origin repo — `gh pr view <ref> --repo "$(git remote
-get-url origin)" --json url,number,state,headRefName,baseRefName`). Any mismatch is a durable block,
+base==$TARGET, in the rig's origin repo — `gh pr view <ref> --repo "$(git -C
+"$RIG_ROOT" remote get-url origin)" --json url,number,state,headRefName,baseRefName`). Any mismatch is a durable block,
 not a retry. Fill BOTH placeholders: `blocked_reason` is the row's detail and
 `--takeaway` the one line the operator's board renders as what this bead
 needs, capped at 140 characters.
@@ -1005,6 +1057,9 @@ caller's `existing_pr`, so a post-open anchor reaching this step by any
 route converges on its PR instead of being re-parked:
 ```bash
 # >>> pre-open-recorded-pr
+RIG_ROOT="${GC_RIG_ROOT:-}"
+[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 RECORDED_PR="$EXISTING_PR"
 if [ -z "$RECORDED_PR" ]; then
   RECORDED_PR=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata | (.pr_url // "") as $u | (.pr_number // "" | tostring) as $n | if $u != "" then $u elif $n != "" then $n else empty end' 2>/dev/null)
@@ -1024,7 +1079,9 @@ if [ -n "$RECORDED_PR" ] && command -v gh >/dev/null 2>&1; then
   # A bare pr_number resolves against gh's default repository, which with no
   # `gh repo set-default` is the first remote in gh's own order, upstream ahead
   # of origin. Naming origin pins it; a recorded URL names its own repository.
-  PR_REPO=$(git remote get-url origin 2>/dev/null)
+  # Origin is read from the rig's repository by path, because the cwd may sit
+  # in another checkout, whose origin holds another repository's PRs.
+  PR_REPO=$(git -C "$RIG_ROOT" remote get-url origin 2>/dev/null)
   if [ -n "$PR_REPO" ]; then
     PR_VIEW=$(gh pr view "$RECORDED_PR" --repo "$PR_REPO" --json url,number,state,headRefName,baseRefName 2>/dev/null)
   else
