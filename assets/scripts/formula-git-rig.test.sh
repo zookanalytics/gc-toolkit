@@ -413,14 +413,14 @@ eq "$(bare_git "$TMP/prprep.sh")" "" "pr-prep: every git call in the block names
 
 prprep_case() { # <gascity|other> <label> [<bd-update-rc>]; sets RC, D, WT, SHA
   local d="$TMP/prprep-$2" rc=0
-  mkdir -p "$d/tmp"
+  mkdir -p "$d/tmp" "$d/city"
   keeper_repos "$d"
   keeper_roster "$d" "$1"
   printf '%s\n' "${PRPREP_META:-$KEEPER_META}" > "$d/meta.json"
   SHA=$(ref "$d/rig" origin/main)
-  # The worktree goes under the session's home, which is the cwd.
-  WT="$d/cwd/worktrees/tk-iss"
-  ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$d/cwd" GC_RIG=gascity FAKE_ROSTER="$d/roster.json" \
+  # The worktree is anchored to the city, whatever the cwd is.
+  WT="$d/city/.gc/worktrees/gascity/pr-prep-tk-iss"
+  ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$d/cwd" GC_RIG=gascity GC_CITY_PATH="${PRPREP_CITY-$d/city}" FAKE_ROSTER="$d/roster.json" \
       FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_UPDATE_RC="${3:-0}" COMMIT_SHA="$SHA" BRANCH_NAME="" bash "$TMP/prprep.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
@@ -430,11 +430,21 @@ SHORT=$(git -C "$D/rig" rev-parse --short "$SHA")
 eq "$RC" 0 "pr-prep/gascity: the block runs from a foreign cwd"
 eq "$(registered "$D/rig" "$WT")" yes "pr-prep/gascity: the worktree is registered in the gascity rig"
 eq "$(registered "$D/cwd" "$WT")" no "pr-prep/gascity: the worktree is NOT registered in the cwd repo, which GC_RIG_ROOT names"
+[ ! -e "$D/cwd/worktrees" ] && ok "pr-prep/gascity: nothing is created inside the cwd checkout" \
+  || bad "pr-prep/gascity: nothing is created inside the cwd checkout"
+eq "$(git -C "$D/cwd" status --porcelain 2>/dev/null)" "" "pr-prep/gascity: the cwd checkout is left clean"
 eq "$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || true)" "upstream-pr/$SHORT" "pr-prep/gascity: the branch is named for the commit's short sha in the gascity rig"
 eq "$(git -C "$WT" rev-parse HEAD 2>/dev/null || true)" "$(ref "$D/rig" upstream/main)" "pr-prep/gascity: cut from the gascity rig's freshly fetched upstream/main"
 eq "$(ref "$D/cwd" "refs/heads/upstream-pr/$SHORT")" none "pr-prep/gascity: no branch is created in the cwd repo"
 has "$(cat "$D/gc.log")" "bd update tk-iss --set-metadata work_dir=$WT --set-metadata branch=upstream-pr/$SHORT" "pr-prep/gascity: the worktree is recorded on the bead"
 hasnt "$(cat "$D/gc.log")" "runtime drain-ack" "pr-prep/gascity: the session does not drain"
+
+PRPREP_CITY="" prprep_case gascity nocity
+[ "$RC" -ne 0 ] && ok "pr-prep/nocity: with no GC_CITY_PATH the block refuses" || bad "pr-prep/nocity: with no GC_CITY_PATH the block refuses"
+eq "$(wt_paths "$D/rig" | count)" 1 "pr-prep/nocity: no worktree is added to the gascity rig"
+[ ! -e "$D/cwd/worktrees" ] && ok "pr-prep/nocity: nothing is created inside the cwd checkout" \
+  || bad "pr-prep/nocity: nothing is created inside the cwd checkout"
+hasnt "$(cat "$D/gc.log" 2>/dev/null)" "work_dir=" "pr-prep/nocity: no work_dir is recorded"
 
 prprep_case other unregistered
 eq "$RC" 0 "pr-prep/unregistered: the hand-back exits 0, as the formula's other aborts do"

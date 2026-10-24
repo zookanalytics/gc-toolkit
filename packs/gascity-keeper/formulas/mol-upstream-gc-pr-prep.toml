@@ -76,7 +76,10 @@ name in `gc rig list --json`. Every git call below names it as
 `git -C "$RIG_ROOT"`, and `git -C ""` runs in the session's cwd, so a roster
 with no gascity rig hands the bead back before anything is fetched or created.
 The mail goes out, and the session drains, only after that hand-back is
-written:
+written. The worktree is anchored to `$GC_CITY_PATH` beside the rebase
+formula's, never to `$(pwd)`: nothing pins a session's cwd between steps, and
+a worktree made inside another checkout's tree is nested in that checkout and
+dirties it:
 
 ```bash
 # >>> upstream-pr-prep-worktree-setup
@@ -132,7 +135,9 @@ elif [ "$N" -eq 1 ]; then
 else
   BRANCH="upstream-pr/{{issue}}"
 fi
-WORKTREE_PATH="$(pwd)/worktrees/{{issue}}"
+: "${GC_CITY_PATH:?GC_CITY_PATH must be set; refusing to derive the worktree path from the cwd}"
+WORKTREE_PATH="$GC_CITY_PATH/.gc/worktrees/gascity/pr-prep-{{issue}}"
+mkdir -p "$(dirname "$WORKTREE_PATH")"
 
 git -C "$RIG_ROOT" fetch --prune {{upstream_remote}}
 git -C "$RIG_ROOT" worktree add "$WORKTREE_PATH" -b "$BRANCH" "{{upstream_remote}}/{{upstream_branch}}"
