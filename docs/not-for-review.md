@@ -93,7 +93,11 @@ prefix = "[vc]: #"
   declare text that only the integration writes.
 
 A rig whose default branch carries no such file declares nothing, and every
-comment an integration posts on its pull requests is feedback.
+comment an integration posts on its pull requests is feedback. The feedback
+miner keeps one notice of its own for such a rig: Vercel's deployment notice,
+an app's conversation comment whose first non-blank line opens with `[vc]:`,
+files no observation, so the learning store takes in none of them before the
+rig declares its markers. A rig that declares any prefix decides for itself.
 
 The city reads the file as the rig's default branch carries it: at
 `origin/HEAD`, as the rig's repository last fetched it. A change to the file

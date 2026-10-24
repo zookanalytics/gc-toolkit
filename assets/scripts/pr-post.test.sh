@@ -523,8 +523,13 @@ if git -C "$REPO" rev-parse --show-toplevel >/dev/null 2>&1; then
     "no file but pr-post.sh tests for the no-review mark"
   eq "$(git -C "$REPO" grep -l -E -e 'def (gc_not_for_review|gc_feedback|gc_no_review_mark|gc_opens_with_mark)[:(]' -- . ':!assets/scripts/pr-post.sh' 2>/dev/null)" "" \
     "no file but pr-post.sh defines the rule"
-  eq "$(git -C "$REPO" grep -l -F -e '[vc]' -- 'assets/scripts/' ':!*.test.sh' 2>/dev/null)" "" \
-    "no script recognises a third-party marker of its own: a rig declares it"
+  # The miner's fallback for a rig that declares nothing is the one exception:
+  # it skips Vercel's deployment notice there until the rig declares a prefix.
+  # Searching for [vc finds the marker written plain and as an escaped regex.
+  eq "$(git -C "$REPO" grep -l -F -e '[vc' -- 'assets/scripts/' ':!*.test.sh' 2>/dev/null)" "assets/scripts/feedback-miner.sh" \
+    "no script but the miner recognises a third-party marker of its own: a rig declares it"
+  eq "$(git -C "$REPO" grep -h -c -F -e '\\[vc\\]' -- assets/scripts/feedback-miner.sh 2>/dev/null)" "1" \
+    "…and the miner tests for one only in its fallback for a rig that declares nothing"
 else
   bad "one definition: no reader carries the no-review rule of its own" "$REPO is not a checkout"
 fi

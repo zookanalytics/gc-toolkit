@@ -98,10 +98,12 @@ Four producers file the same bead contract:
      is the city's when it carries the city's mark
      (`assets/scripts/pr-post.sh`). A post that is not for review
      ([not-for-review.md](not-for-review.md)) and a GitHub App's approval
-     are notices, not review feedback, whoever posted them. Any other
-     unmarked post is outside when another login posted it, an app's
-     included, or when it is Claude Code's `/code-review` output posted
-     under the city's login. The rig's store records the day from
+     are notices, not review feedback, whoever posted them. On a rig that
+     declares no marker, so is Vercel's deployment notice, an app's
+     conversation comment whose first non-blank line opens with `[vc]:`.
+     Any other unmarked post is outside when another login posted it, an
+     app's included, or when it is Claude Code's `/code-review` output
+     posted under the city's login. The rig's store records the day from
      which the outside capture still owes a read of every merged or closed
      PR updated since, and every run reads the PRs updated since then. A
      post updates its PR, so a post made long after its PR closed is read

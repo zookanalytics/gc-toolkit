@@ -1089,8 +1089,20 @@ git init -q -b main "$UNDECLARED"
 git -C "$UNDECLARED" remote add origin git@github.com:ours/repo.git
 default_branch "$UNDECLARED"
 "$SUT" sweep --checkout "$UNDECLARED" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
-eq "$(class_of "$(key 11 comment 302)")" "outside" "(109) on a rig that declares nothing, the same deploy notice is outside"
-eq "$(class_of "$(key 11 comment 306)")" "notice" "(110) while a comment opening with the no-review mark is a notice on any rig"
+eq "$(class_of "$(key 11 comment 302)")" "notice" \
+  "(109) on a rig that declares nothing, Vercel's deploy notice is still a notice, by the miner's own fallback"
+eq "$(class_of "$(key 11 comment 305)")" "outside" "(109a) …while an app's comment that only mentions [vc]: past its first line is outside"
+eq "$(class_of "$(key 11 comment 306)")" "notice" "(110) and a comment opening with the no-review mark is a notice on any rig"
+fresh_dir nfr-other
+OTHERDECL="$TMP/other-declaration"
+git init -q -b main "$OTHERDECL"
+git -C "$OTHERDECL" remote add origin git@github.com:ours/repo.git
+printf '%s\n' '[[marker]]' 'prefix = "Schema diff:"' > "$OTHERDECL/not-for-review.toml"
+git -C "$OTHERDECL" add not-for-review.toml
+default_branch "$OTHERDECL"
+"$SUT" sweep --checkout "$OTHERDECL" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
+eq "$(class_of "$(key 11 comment 302)")" "outside" \
+  "(110a) a rig that declares any prefix decides for itself, so a deploy notice it has not declared is outside"
 fresh_dir nfr-root
 GC_RIG_ROOT="$UNDECLARED" "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
 eq "$(class_of "$(key 11 comment 302)")" "notice" \

@@ -11,8 +11,13 @@
 #      whoever posted it (gc_not_for_review, from the same definitions): it
 #      opens with the no-review mark, or with a prefix the rig declares.
 #   3. An unmarked post from any login other than the one gh posts as is
-#      outside, except a GitHub App account's approval, which is a notice. Any
-#      other post an app makes, a conversation comment among them, is outside.
+#      outside, except a GitHub App account's approval, which is a notice. On
+#      a rig that declares no prefix, Vercel's deployment notice is a notice
+#      too: an app's conversation comment whose first non-blank line opens
+#      with Vercel's hidden link reference, `[vc]:`. That keeps the learning
+#      store free of deployment notices until the rig declares its markers,
+#      and a rig that declares any prefix decides for itself. Any other post an
+#      app makes, a conversation comment among them, is outside.
 #   4. An unmarked post under the city's own login is outside when it is the
 #      output of Claude Code's /code-review, signed in its own body or, for an
 #      inline comment, in the body of the review that carries it. A body is
@@ -277,6 +282,10 @@ if [ "$VERB" = fetch-pr ]; then
       or (first_line | test("(?i)/code-review\\b|^[\\s#*_]*code review[\\s*_]*([:(]|$)"));
     def app_approval:
       ((.user.type // "") == "Bot") and .gc_stream == "review" and ((.state // "") == "APPROVED");
+    def undeclared_deploy_notice:
+      ((gc_not_for_review_prefixes | length) == 0)
+      and ((.user.type // "") == "Bot") and .gc_stream == "issue"
+      and (first_line | test("^\\s*\\[vc\\]:"));
     ($prs[0] | map(select(.number == $pr)) | .[0] // {}) as $p
     | ($seen[0] // {}) as $obs
     | ($reviews | map(select(((.user.login // "") == $self) and (gc_city_marked | not) and code_review_signed) | .id)) as $signed
@@ -293,7 +302,7 @@ if [ "$VERB" = fetch-pr ]; then
        or (.gc_stream == "inline" and (.pull_request_review_id as $r | any($signed[]; . == $r)))) as $is_signed
     | (if $marked then "city"
        elif gc_not_for_review then "notice"
-       elif $login != $self then (if app_approval then "notice" else "outside" end)
+       elif $login != $self then (if app_approval or undeclared_deploy_notice then "notice" else "outside" end)
        elif $is_signed then "outside"
        else "city" end) as $class
     | ("pr:" + $repo + "#" + ($pr | tostring) + ":" + .gc_kind + ":" + (.id | tostring)) as $key
