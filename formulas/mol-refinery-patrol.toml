@@ -1071,16 +1071,21 @@ the second anchor it was written to prevent. Multi-candidate tiebreak: the
 OLDEST anchor (the original predates any rework-minted duplicate);
 `created_at` is the real field, `.created`/`.id` only defensive fallbacks.
 
-A rework child can land on a bead that carries no `merge_result` yet. A
-convoy's rebuild child is one: `rejection-repool.sh` pours a rejected
-graduation's rebuild onto it, because a convoy cannot be its own run's work
-bead. With no anchor on the branch, the bead $WORK names as its `anchor_bead`,
-when it is open on the same branch, is the bead this landing anchors
-(`LANDS_ON`). Once the push reads back, it takes the gating transition this
-pass would have given $WORK, and $WORK then closes landed-on-branch. The
-anchoring comes first, so a close that fails leaves an anchor the next pass
-finds on the branch, and a refused anchoring closes nothing. A child never
-takes a gating state itself, and a bead it does not name is never anchored.
+A convoy's rebuild child lands on a bead that carries no `merge_result` yet.
+`rejection-repool.sh` pours a rejected graduation's rebuild onto that child,
+because a convoy cannot be its own run's work bead. With no anchor on the
+branch, and $WORK's own row ($BEAD_JSON) showing a rework that answers no
+review and no ruling, the convoy it names as its `anchor_bead`, open on the
+same branch, is the bead this landing anchors (`LANDS_ON`). Once the push reads
+back, that convoy takes the gating transition this pass would have given $WORK,
+and $WORK then closes landed-on-branch. The anchoring comes first, so a close
+that fails leaves an anchor the next pass finds on the branch, and a refused
+anchoring closes nothing. A child never takes a gating state itself, and no
+other bead is anchored this way. A review's or a ruling's rework names a bead
+whose own rebuild may still be queued, and anchoring that bead would make the
+rebuild's load-context read it as finished work. Step 4b of
+`mol-polecat-work`'s submit-and-exit runs the same `rebuild-child-lands-on`
+block, so the polecat stamps its summary on the bead this landing anchors.
 
 The child leaves through `lifecycle.sh` because `merge_result` is the
 lifecycle's field and `lifecycle.sh` is its only writer; `unanchored` is the
@@ -1109,7 +1114,7 @@ branch that head is on. The read-back fetch has just put that head on
 ```bash
 # >>> one-anchor-per-pr-resolve
 EXISTING_ANCHOR=""
-LANDS_ON=""
+ANCHOR_ROWS=""
 if [ -n "${BRANCH:-}" ]; then
   ANCHOR_ROWS=$(gc bd list --status=open --metadata-field branch="$BRANCH" \
     --limit=0 --json 2>/dev/null) || ANCHOR_ROWS=""
@@ -1117,12 +1122,20 @@ if [ -n "${BRANCH:-}" ]; then
     '[ .[]? | select(.id != $self)
        | select((((.metadata // {}).merge_result // "") | tostring) != "") ]
      | sort_by(.created_at // .created // .id) | .[0].id // empty' 2>/dev/null) || EXISTING_ANCHOR=""
-  if [ -z "$EXISTING_ANCHOR" ]; then
-    LANDS_ON=$(printf '%s' "$ANCHOR_ROWS" | jq -r --arg self "$WORK" \
-      '([ .[]? | select(.id == $self) | (((.metadata // {}).anchor_bead // "") | tostring) ] | .[0] // "") as $named
-       | [ .[]? | select(.id != $self and .id == $named) ] | .[0].id // empty' 2>/dev/null) || LANDS_ON=""
-  fi
 fi
+SELF_ROW=""
+[ -n "$EXISTING_ANCHOR" ] || SELF_ROW="${BEAD_JSON:-}"
+# >>> rebuild-child-lands-on
+LANDS_ON=""
+NAMED=$(printf '%s' "$SELF_ROW" | jq -r '(.[0].metadata // {}) as $m
+  | if (($m.task_kind // "") | tostring) == "rework"
+       and (($m.source_review_bead // "") | tostring) == ""
+       and (($m.source_ruling_bead // "") | tostring) == ""
+    then (($m.anchor_bead // "") | tostring) else "" end' 2>/dev/null) || NAMED=""
+[ -z "$NAMED" ] || LANDS_ON=$(printf '%s' "$ANCHOR_ROWS" | jq -r --arg n "$NAMED" '
+  [ .[]? | select(.id == $n) | select(((.issue_type // .type // "") | tostring) == "convoy") ]
+  | .[0].id // empty' 2>/dev/null) || LANDS_ON=""
+# <<< rebuild-child-lands-on
 GATING_ANCHOR="${EXISTING_ANCHOR:-${LANDS_ON:-$WORK}}"
 # <<< one-anchor-per-pr-resolve
 # >>> one-anchor-per-pr-terminal
@@ -1216,8 +1229,9 @@ leave the bead for a human to re-strategize.
 transition; mr requires a verified branch push then one gating transition
 (pre_open_gate, or pull_request with the PR recorded). The bead closes only
 on a verified merge — never at handoff — except a rework hand-back, which
-closes landed-on-branch with NO merge_result, after its gating transition
-lands on the bead it names when that bead carries none yet."""
+closes landed-on-branch with NO merge_result. A convoy's rebuild child gives
+the gating transition to the convoy it names first, when that convoy carries
+none yet."""
 
 [[steps]]
 id = "patrol-summary"

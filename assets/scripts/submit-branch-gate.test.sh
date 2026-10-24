@@ -621,17 +621,20 @@ eq "$(run_strict_consume main gc-toolkit '[{"qualified_name":"gc-toolkit/gc-tool
 # child is never published — the PR body silently falls back to the dispatch
 # text, which is the fallback the summary exists to remove.
 #
-# run_anchor_resolve <current-branch> <bd-list-rows-json> -> "<rc>|<GATING_ANCHOR>"
-#   Rows are the shape real `gc bd list --json` returns. The block runs under
+# run_anchor_resolve <current-branch> <bd-list-rows-json> [claimed-bead-metadata-json]
+#   -> "<rc>|<GATING_ANCHOR>"
+#   Rows are the shape real `gc bd list --json` returns, and the metadata is
+#   what `gc bd show` of the claimed bead answers. The block runs under
 #   `set -euo pipefail`: it sits between a push and a handoff, so a crash here
-#   costs the handoff, and both of its reads are pipefail traps.
+#   costs the handoff, and every one of its reads is a pipefail trap.
 run_anchor_resolve() {
   : > "$TMP/log"
   { printf 'set -euo pipefail\n'
     printf '%s\n' "$ANCHOR"
     printf 'printf "RESOLVED:%%s\\n" "$GATING_ANCHOR"\n'; } > "$TMP/anchor.sh"
-  local rc=0
-  CURRENT_BRANCH="$1" FAKE_ANCHOR_ROWS="$2" FAKE_LOG="$TMP/log" \
+  local rc=0 meta='{}'
+  [ -z "${3:-}" ] || meta="$3"
+  CURRENT_BRANCH="$1" FAKE_ANCHOR_ROWS="$2" FAKE_META="$meta" FAKE_LOG="$TMP/log" \
     bash "$TMP/anchor.sh" > "$TMP/out" 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(sed -n 's/^RESOLVED://p' "$TMP/out")"
 }
@@ -670,22 +673,42 @@ eq "$(run_anchor_resolve polecat/su-uzy9.5 \
 
 # A convoy's rebuild child names the convoy as its anchor_bead before the convoy
 # carries a merge_result: the refinery anchors it once the child's work lands.
-# With no anchor on the branch, the bead the claimed bead names is the anchor,
-# and the summary belongs on it.
-CHILD_ROW='{"id":"tk-work","created_at":"2026-07-02T00:00:00Z","metadata":{"branch":"integration/tk-cv","task_kind":"rework","anchor_bead":"tk-cv"}}'
+# With no anchor on the branch, that convoy is the anchor, and the summary
+# belongs on it. The child's role is read from its own row (the third argument,
+# what `gc bd show` answers), because the open listing leaves out a claimed bead.
+REBUILD_META='{"branch":"integration/tk-cv","task_kind":"rework","anchor_bead":"tk-cv"}'
+CHILD_ROW='{"id":"tk-work","created_at":"2026-07-02T00:00:00Z","metadata":'"$REBUILD_META"'}'
 CONVOY_ROW='{"id":"tk-cv","created_at":"2026-07-01T00:00:00Z","issue_type":"convoy","metadata":{"branch":"integration/tk-cv","graduation":true}}'
-eq "$(run_anchor_resolve integration/tk-cv "[$CHILD_ROW,$CONVOY_ROW]")" "0|tk-cv" \
+eq "$(run_anchor_resolve integration/tk-cv "[$CHILD_ROW,$CONVOY_ROW]" "$REBUILD_META")" "0|tk-cv" \
    "a rebuild child's convoy, open on the branch and not yet anchored, is the anchor it names"
+eq "$(run_anchor_resolve integration/tk-cv "[$CONVOY_ROW]" "$REBUILD_META")" "0|tk-cv" \
+   "a claimed rebuild child, which the open listing leaves out, still finds its convoy from its own row"
 eq "$(run_anchor_resolve integration/tk-cv \
-      "[$CHILD_ROW,$CONVOY_ROW,{\"id\":\"tk-anchor\",\"created_at\":\"2026-07-03T00:00:00Z\",\"metadata\":{\"merge_result\":\"pre_open_gate\",\"branch\":\"integration/tk-cv\"}}]")" \
+      "[$CHILD_ROW,$CONVOY_ROW,{\"id\":\"tk-anchor\",\"created_at\":\"2026-07-03T00:00:00Z\",\"metadata\":{\"merge_result\":\"pre_open_gate\",\"branch\":\"integration/tk-cv\"}}]" \
+      "$REBUILD_META")" \
    "0|tk-anchor" \
-   "a merge_result-carrying anchor on the branch still wins over the bead the child names"
-eq "$(run_anchor_resolve integration/tk-cv "[$CHILD_ROW]")" "0|" \
-   "a named anchor that is not open on the branch is not elected"
-eq "$(run_anchor_resolve integration/tk-cv \
-      '[{"id":"tk-work","created_at":"2026-07-02T00:00:00Z","metadata":{"branch":"integration/tk-cv"}},'"$CONVOY_ROW"']')" \
+   "a merge_result-carrying anchor on the branch still wins over the convoy the child names"
+eq "$(run_anchor_resolve integration/tk-cv "[$CHILD_ROW]" "$REBUILD_META")" "0|" \
+   "a named convoy that is not open on the branch is not elected"
+eq "$(run_anchor_resolve integration/tk-cv "[$CHILD_ROW,$CONVOY_ROW]" '{"branch":"integration/tk-cv"}')" \
    "0|" \
-   "a bead the claimed bead does not name is not elected, whatever it carries"
+   "a claimed bead that names no anchor elects nothing, whatever the branch carries"
+# Only a convoy's rebuild child lands on the bead it names. A review's or a
+# ruling's rework names a bead whose own rebuild may be queued, and merge-push
+# gates such a rework itself, so its summary stays on it.
+NAMED_ROW='{"id":"tk-a","created_at":"2026-07-01T00:00:00Z","issue_type":"task","metadata":{"branch":"polecat/tk-a"}}'
+REVIEW_META='{"branch":"polecat/tk-a","task_kind":"rework","anchor_bead":"tk-a","source_review_bead":"tk-review"}'
+eq "$(run_anchor_resolve polecat/tk-a "[{\"id\":\"tk-work\",\"metadata\":$REVIEW_META},$NAMED_ROW]" "$REVIEW_META")" \
+   "0|" \
+   "a review's rework naming an unanchored bead elects nothing"
+RULING_META='{"branch":"integration/tk-cv","task_kind":"rework","anchor_bead":"tk-cv","source_ruling_bead":"tk-visit"}'
+eq "$(run_anchor_resolve integration/tk-cv "[{\"id\":\"tk-work\",\"metadata\":$RULING_META},$CONVOY_ROW]" "$RULING_META")" \
+   "0|" \
+   "a ruling's rework naming the convoy elects nothing"
+PLAIN_META='{"branch":"polecat/tk-a","task_kind":"rework","anchor_bead":"tk-a"}'
+eq "$(run_anchor_resolve polecat/tk-a "[{\"id\":\"tk-work\",\"metadata\":$PLAIN_META},$NAMED_ROW]" "$PLAIN_META")" \
+   "0|" \
+   "a rework naming a bead that is not a convoy elects nothing"
 
 # Every anchor state counts, not just the two gating ones: an anchor parked for
 # a person still owns the PR, and the summary still belongs on it.

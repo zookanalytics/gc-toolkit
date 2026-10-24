@@ -40,10 +40,11 @@ mkdir -p "$TMP/bin"
 # --- gc stub: the anchor lookup the resolve snippet performs. -----------------
 # `gc bd list --status=open --metadata-field branch=<b> --limit=0 --json`
 # filtered against a fixture of
-#   id|merge_result|branch|created_at[|anchor_bead]
+#   id|merge_result|branch|created_at[|anchor_bead[|issue_type]]
 # rows (open beads). A non-empty anchor_bead column lands in the row's
-# metadata, the role marker a rework child carries. `gc bd update` and `gc bd close` append to $GCLOG when it
-# is set. Everything else exits 0 with no output.
+# metadata, and a non-empty issue_type column is the row's issue_type, as a
+# convoy's row carries it. `gc bd update` and `gc bd close` append to $GCLOG
+# when it is set. Everything else exits 0 with no output.
 #
 # The stub honours EVERY --metadata-field it is given, the way bd does: the
 # shipped lookup filters on branch alone and applies the anchor half in its own
@@ -76,7 +77,7 @@ for a in "$@"; do
   esac
 done
 out=""
-while IFS='|' read -r id rmr rbr created_at ranchor; do
+while IFS='|' read -r id rmr rbr created_at ranchor rtype; do
   [ -n "$id" ] || continue
   [ "$rbr" = "$br" ] || continue
   [ "$mr_given" = 0 ] || [ "$rmr" = "$mr" ] || continue
@@ -85,6 +86,7 @@ while IFS='|' read -r id rmr rbr created_at ranchor; do
   else
     ts=""
   fi
+  [ -z "$rtype" ] || ts=$(printf '%s"issue_type":"%s",' "$ts" "$rtype")
   if [ -n "$rmr" ]; then
     meta=$(printf '{"merge_result":"%s","branch":"%s"' "$rmr" "$rbr")
   else
@@ -118,9 +120,10 @@ SNIPPET="$(awk '
 
 { printf '%s\n' "$SNIPPET"; printf 'printf "%%s|%%s\\n" "$EXISTING_ANCHOR" "$GATING_ANCHOR"\n'; } > "$TMP/run.sh"
 
-# resolve <work> <branch> -> echo "EXISTING_ANCHOR|GATING_ANCHOR"
+# resolve <work> <branch> [bead-json] -> echo "EXISTING_ANCHOR|GATING_ANCHOR"
+#   <bead-json> is $WORK's own row, which merge-push reads into $BEAD_JSON.
 resolve() {
-  WORK="$1" BRANCH="$2" bash "$TMP/run.sh" 2>/dev/null | tail -1
+  WORK="$1" BRANCH="$2" BEAD_JSON="${3:-}" bash "$TMP/run.sh" 2>/dev/null | tail -1
 }
 
 # (1) First handoff: no other anchor on the branch -> no existing anchor, the
@@ -213,46 +216,95 @@ A
 eq "$(resolve rework-2 polecat/parent)" "tk-aaaa1|tk-aaaa1" \
    "(5b) no created_at on any row -> deterministic \$WORK-independent id tiebreak"
 
-# (5c) A rework child can land on a bead that carries no merge_result yet: a
-#      convoy's rebuild child names the convoy as its anchor_bead, and the
-#      convoy is open on the same branch. With no anchor there, that bead is the
-#      one this landing anchors (LANDS_ON), and it is the gating anchor.
+# (5c) A convoy's rebuild child lands on a bead that carries no merge_result
+#      yet: it names the convoy as its anchor_bead, and the convoy is open on
+#      the same branch. With no anchor there, the convoy is the bead this
+#      landing anchors (LANDS_ON), and it is the gating anchor. The child's role
+#      is read from its own row ($BEAD_JSON), never from the listing.
 { printf '%s\n' "$SNIPPET"; printf 'printf "%%s|%%s|%%s\\n" "$EXISTING_ANCHOR" "$GATING_ANCHOR" "$LANDS_ON"\n'; } > "$TMP/run3.sh"
-resolve3() { # <work> <branch> -> "EXISTING_ANCHOR|GATING_ANCHOR|LANDS_ON"
-  WORK="$1" BRANCH="$2" bash "$TMP/run3.sh" 2>/dev/null | tail -1
+resolve3() { # <work> <branch> [bead-json] -> "EXISTING_ANCHOR|GATING_ANCHOR|LANDS_ON"
+  WORK="$1" BRANCH="$2" BEAD_JSON="${3:-}" bash "$TMP/run3.sh" 2>/dev/null | tail -1
 }
+REBUILD_ROW='[{"id":"rebuild-1","metadata":{"task_kind":"rework","anchor_bead":"cv","branch":"integration/cv"}}]'
 cat > "$FAKE_ANCHORS" <<'A'
-rebuild-1||integration/cv|2026-07-02T00:00:00Z|cv
-cv||integration/cv|2026-07-01T00:00:00Z|
+rebuild-1||integration/cv|2026-07-02T00:00:00Z|cv|task
+cv||integration/cv|2026-07-01T00:00:00Z||convoy
 A
-eq "$(resolve3 rebuild-1 integration/cv)" "|cv|cv" \
-   "(5c) a child naming an unanchored bead on its branch lands on it: LANDS_ON=GATING_ANCHOR=cv"
-eq "$(resolve rebuild-1 integration/cv)" "|cv" \
+eq "$(resolve3 rebuild-1 integration/cv "$REBUILD_ROW")" "|cv|cv" \
+   "(5c) a rebuild child naming its unanchored convoy on its branch lands on it: LANDS_ON=GATING_ANCHOR=cv"
+eq "$(resolve rebuild-1 integration/cv "$REBUILD_ROW")" "|cv" \
    "(5c) ...and the two-field reading names it the gating anchor"
 # (5d) An anchor that carries a merge_result still wins, and nothing is anchored.
 cat > "$FAKE_ANCHORS" <<'A'
-rebuild-1||integration/cv|2026-07-02T00:00:00Z|cv
-cv||integration/cv|2026-07-01T00:00:00Z|
+rebuild-1||integration/cv|2026-07-02T00:00:00Z|cv|task
+cv||integration/cv|2026-07-01T00:00:00Z||convoy
 anchor-pre|pre_open_gate|integration/cv|2026-07-03T00:00:00Z|
 A
-eq "$(resolve3 rebuild-1 integration/cv)" "anchor-pre|anchor-pre|" \
+eq "$(resolve3 rebuild-1 integration/cv "$REBUILD_ROW")" "anchor-pre|anchor-pre|" \
    "(5d) a merge_result-carrying anchor on the branch wins; LANDS_ON stays empty"
-# (5e) The named bead must be open on the same branch: one this lookup does not
-#      return is never anchored, and the child is its own gating anchor as before.
+# (5e) The named convoy must be open on the same branch: one this lookup does
+#      not return is never anchored, and the child is its own gating anchor.
 cat > "$FAKE_ANCHORS" <<'A'
-rebuild-1||integration/cv|2026-07-02T00:00:00Z|cv
-cv||integration/other|2026-07-01T00:00:00Z|
+rebuild-1||integration/cv|2026-07-02T00:00:00Z|cv|task
+cv||integration/other|2026-07-01T00:00:00Z||convoy
 A
-eq "$(resolve3 rebuild-1 integration/cv)" "|rebuild-1|" \
-   "(5e) a named bead not open on the branch is not anchored"
+eq "$(resolve3 rebuild-1 integration/cv "$REBUILD_ROW")" "|rebuild-1|" \
+   "(5e) a named convoy not open on the branch is not anchored"
 # (5f) A bead $WORK does not name is never elected, whatever it carries: a
-#      fresh handoff beside an unanchored sibling anchors itself, as in (3c).
+#      fresh handoff beside an unanchored convoy anchors itself, as in (3c).
 cat > "$FAKE_ANCHORS" <<'A'
-work-1||integration/cv|2026-07-02T00:00:00Z|
-cv||integration/cv|2026-07-01T00:00:00Z|
+work-1||integration/cv|2026-07-02T00:00:00Z||task
+cv||integration/cv|2026-07-01T00:00:00Z||convoy
 A
-eq "$(resolve3 work-1 integration/cv)" "|work-1|" \
+eq "$(resolve3 work-1 integration/cv '[{"id":"work-1","metadata":{"branch":"integration/cv"}}]')" "|work-1|" \
    "(5f) a bead \$WORK does not name is never the bead its landing anchors"
+# (5g) The role is $WORK's own row's, not the listing's. A listing that leaves
+#      $WORK out still lands it, and a listing row naming a convoy does not
+#      make a bead whose own row names nothing a rebuild child.
+cat > "$FAKE_ANCHORS" <<'A'
+cv||integration/cv|2026-07-01T00:00:00Z||convoy
+A
+eq "$(resolve3 rebuild-1 integration/cv "$REBUILD_ROW")" "|cv|cv" \
+   "(5g) a rebuild child the listing leaves out lands on its convoy from its own row"
+cat > "$FAKE_ANCHORS" <<'A'
+rebuild-1||integration/cv|2026-07-02T00:00:00Z|cv|task
+cv||integration/cv|2026-07-01T00:00:00Z||convoy
+A
+eq "$(resolve3 rebuild-1 integration/cv '[{"id":"rebuild-1","metadata":{"branch":"integration/cv"}}]')" "|rebuild-1|" \
+   "(5g) a listing row's anchor_bead does not stand in for \$WORK's own row"
+# (5h) Only a convoy's rebuild child anchors the bead it names. A non-convoy
+#      anchor A that a rejection unanchored is open on its branch with its own
+#      rebuild queued; a review's rework of A landing now must not anchor A, or
+#      that rebuild's load-context reads A as finished and the rebuild is lost.
+cat > "$FAKE_ANCHORS" <<'A'
+rv-1||polecat/a|2026-07-02T00:00:00Z|a|task
+rb-1||polecat/a|2026-07-02T00:00:00Z|a|task
+a||polecat/a|2026-07-01T00:00:00Z||task
+A
+eq "$(resolve3 rv-1 polecat/a '[{"id":"rv-1","metadata":{"task_kind":"rework","anchor_bead":"a","source_review_bead":"tk-review"}}]')" "|rv-1|" \
+   "(5h) a review's rework never anchors the bead it names"
+eq "$(resolve3 rb-1 polecat/a '[{"id":"rb-1","metadata":{"task_kind":"rework","anchor_bead":"a"}}]')" "|rb-1|" \
+   "(5h) a rework naming a bead that is not a convoy never anchors it"
+cat > "$FAKE_ANCHORS" <<'A'
+rv-2||integration/cv|2026-07-02T00:00:00Z|cv|task
+ru-1||integration/cv|2026-07-02T00:00:00Z|cv|task
+cv||integration/cv|2026-07-01T00:00:00Z||convoy
+A
+eq "$(resolve3 rv-2 integration/cv '[{"id":"rv-2","metadata":{"task_kind":"rework","anchor_bead":"cv","source_review_bead":"tk-review"}}]')" "|rv-2|" \
+   "(5h) a review's rework of a convoy never anchors the convoy"
+eq "$(resolve3 ru-1 integration/cv '[{"id":"ru-1","metadata":{"task_kind":"rework","anchor_bead":"cv","source_ruling_bead":"tk-visit"}}]')" "|ru-1|" \
+   "(5h) a ruling's rework of a convoy never anchors the convoy"
+# (5i) Submit step 4b in mol-polecat-work resolves the summary's anchor with the
+#      same block, so a polecat stamps its summary on the bead this landing
+#      anchors. One text, held equal here.
+lands_block() { awk '/# >>> rebuild-child-lands-on$/ {f=1; next} /# <<< rebuild-child-lands-on$/ {f=0} f' "$1"; }
+LANDS_PATROL="$(lands_block "$TOML")"
+LANDS_POLECAT="$(lands_block "$ROOT/formulas/mol-polecat-work.toml")"
+if [ -n "$LANDS_PATROL" ] && [ "$LANDS_PATROL" = "$LANDS_POLECAT" ]; then
+  ok "(5i) merge-push and submit step 4b carry one rebuild-child-lands-on block"
+else
+  bad "(5i) the rebuild-child-lands-on block differs between the two formulas, or is missing"
+fi
 
 # --- Static guards: the terminal arm's shape in the formula. ------------------
 # Extract the rework arm: from the terminal marker up to the top-level `else`

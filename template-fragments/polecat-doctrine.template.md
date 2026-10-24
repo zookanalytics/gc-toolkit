@@ -135,9 +135,9 @@ for the merge — enumerates anchors by `merge_result` and reads that bead. A
 write aimed at the claimed bead lands, errors nowhere, and is never read.
 
 Submit step 4b resolves it: the open bead on this branch that carries a
-`merge_result`, or, while none does, the bead your claimed bead names as its
-`anchor_bead`. Write to the anchor what the anchor's readers read, and to
-your claimed bead everything else.
+`merge_result`. While none does, a convoy's rebuild child has the convoy it
+names as its `anchor_bead` for its anchor. Write to the anchor what the
+anchor's readers read, and to your claimed bead everything else.
 
 ## Beads: what you close and what you never close
 
