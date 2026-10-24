@@ -218,7 +218,7 @@ nfr_load() {
 #
 # A byte-order mark that opens a body is not text: GitHub's renderer drops it,
 # so both tests read the body without it. A declared prefix is compared with the
-# body's text after any leading whitespace, as the parser compares the prefix.
+# body's text after any leading whitespace, as the parser drops the prefix's own.
 NFR_DEF='def gc_opens_with_mark:
   def comments($l):
     (if .open then
