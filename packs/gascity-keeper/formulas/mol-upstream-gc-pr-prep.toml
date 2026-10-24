@@ -74,7 +74,8 @@ Do not invent defaults.
 exists, `cd` there and skip to step 3. Otherwise locate the gascity rig by
 name in `gc rig list --json`. Every git call below names it as
 `git -C "$RIG_ROOT"`, and `git -C ""` runs in the session's cwd, so a roster
-with no gascity rig hands the bead back before anything is fetched or created:
+with no gascity rig hands the bead back before anything is fetched or created.
+The session drains only after that hand-back is written:
 
 ```bash
 # >>> upstream-pr-prep-worktree-setup
@@ -92,11 +93,14 @@ EOF
 )"
   gc mail send human -s "pr-prep: no gascity rig for {{issue}}" -m "(see keeper mail)"
 
-  gc bd update {{issue}} \
+  if ! gc bd update {{issue}} \
     --set-metadata aborted_at=workspace-setup \
     --status=open \
     --assignee="$REQUESTING_KEEPER" \
-    --set-metadata gc.routed_to="$REQUESTING_KEEPER"
+    --set-metadata gc.routed_to="$REQUESTING_KEEPER"; then
+    echo "pr-prep: the hand-back of {{issue}} to $REQUESTING_KEEPER did not land; NOT draining, so the next worker retries" >&2
+    exit 1
+  fi
   gc runtime drain-ack
   exit 0
 fi

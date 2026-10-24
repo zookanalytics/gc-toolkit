@@ -130,7 +130,8 @@ ref so the rebase is recoverable.
 `.rigs[]` with `.name`/`.path`), so the pool the run was slung to does not pick
 the repository. Every git call below names it as `git -C "$RIG_ROOT"`, and
 `git -C ""` runs in the session's cwd, so a roster with no gascity rig aborts
-the run before anything is fetched or created.
+the run before anything is fetched or created. The abort nudges the keeper and
+drains only after its hand-back is written.
 
 **2. Reuse or create the worktree.** Check `metadata.work_dir` first; if it
 points at an existing directory, `cd` there and skip to step 3. Otherwise
@@ -146,11 +147,14 @@ if [ -z "$RIG_ROOT" ]; then
     # Keeper-routed abort (see the abort shape in the header).
     REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper // empty')
     [ -z "$REQUESTING_KEEPER" ] && REQUESTING_KEEPER="{{notify_recipient}}"
-    gc bd update {{issue}} \
+    if ! gc bd update {{issue}} \
         --set-metadata aborted_at=workspace-setup \
         --status=open \
         --assignee="$REQUESTING_KEEPER" \
-        --append-notes "Refused to set up the rebase worktree: gc rig list --json names no rig called gascity, so no path names the repository to rebase. Nothing was fetched or created. Register the gascity rig, then re-dispatch."
+        --append-notes "Refused to set up the rebase worktree: gc rig list --json names no rig called gascity, so no path names the repository to rebase. Nothing was fetched or created. Register the gascity rig, then re-dispatch."; then
+        echo "ERROR: the hand-back of {{issue}} to $REQUESTING_KEEPER did not land; NOT draining, so the next worker retries" >&2
+        exit 1
+    fi
     gc session nudge "$REQUESTING_KEEPER" "rebase {{issue}}: aborted at workspace-setup (no gascity rig in the roster) — operator engagement needed (metadata.aborted_at=workspace-setup)" || true
     gc runtime drain-ack
     exit 1

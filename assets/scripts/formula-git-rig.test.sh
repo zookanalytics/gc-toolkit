@@ -9,11 +9,12 @@
 # extracted verbatim and run from a WRONG cwd against real git repos. Each must
 # act on the rig GC_RIG_ROOT names, or the roster entry for GC_RIG (for the
 # keeper formulas, the roster entry named gascity), and refuse when none
-# resolves. The wrong cwd is a clone of the same origin wherever that makes a
-# cwd-steered call succeed, so "read the rig, not cwd" discriminates. Controls
-# prove that a bare git call and an empty `git -C ""` both follow cwd. The
-# refinery's zero-diff check, its rejection's branch delete and its recorded-PR
-# lookup are proven the same way in the suites that run those blocks
+# resolves. A keeper formula's refusal drains only once its hand-back to the
+# keeper is written. The wrong cwd is a clone of the same origin wherever that
+# makes a cwd-steered call succeed, so "read the rig, not cwd" discriminates.
+# Controls prove that a bare git call and an empty `git -C ""` both follow cwd.
+# The refinery's zero-diff check, its rejection's branch delete and its
+# recorded-PR lookup are proven the same way in the suites that run those blocks
 # (unrecorded-direct-landing, mr-aware-rejection-failclosed and
 # find-work-gating-guard). No live city, store, or network.
 set -euo pipefail
@@ -55,13 +56,15 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
 # gc answers `rig list` from the roster file and `bd show` from the bead file,
-# and logs every other call, one line each.
+# and logs every other call, one line each. A `bd update` then exits
+# FAKE_UPDATE_RC, so a case can have the store refuse the write.
 BIN="$TMP/bin"; mkdir -p "$BIN"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'GC'
 case "$1 $2" in
   "rig list") cat "$FAKE_ROSTER" ;;
   "bd show")  cat "$FAKE_META" ;;
-  *)          printf '%s\n' "$*" | tr '\n' ' ' >> "$FAKE_LOG"; echo >> "$FAKE_LOG" ;;
+  *)          printf '%s\n' "$*" | tr '\n' ' ' >> "$FAKE_LOG"; echo >> "$FAKE_LOG"
+              [ "$1 $2" != "bd update" ] || exit "${FAKE_UPDATE_RC:-0}" ;;
 esac
 exit 0
 GC
@@ -360,7 +363,7 @@ keeper_repos() {
 # keeper_roster <dir> gascity|other
 keeper_roster() { printf '{"rigs":[{"name":"%s","path":"%s"}]}\n' "$2" "$1/rig" > "$1/roster.json"; }
 
-rebase_case() { # <gascity|other> <meta-json> <label>; sets RC, D, WT
+rebase_case() { # <gascity|other> <meta-json> <label> [<bd-update-rc>]; sets RC, D, WT
   local d="$TMP/rebase-$3" rc=0
   mkdir -p "$d/city"
   keeper_repos "$d"
@@ -368,7 +371,7 @@ rebase_case() { # <gascity|other> <meta-json> <label>; sets RC, D, WT
   printf '%s\n' "$2" > "$d/meta.json"
   WT="$d/city/.gc/worktrees/gascity/rebase-tk-iss"
   ( cd "$d/cwd" && GC_RIG_ROOT="$d/cwd" GC_RIG=gascity GC_CITY_PATH="$d/city" FAKE_ROSTER="$d/roster.json" \
-      FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" bash "$TMP/rebase.sh" ) >"$d/out" 2>&1 || rc=$?
+      FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_UPDATE_RC="${4:-0}" bash "$TMP/rebase.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
 
@@ -396,14 +399,20 @@ has "$(cat "$D/gc.log")" "session nudge gascity/gascity-keeper.keeper rebase tk-
 has "$(cat "$D/gc.log")" "runtime drain-ack" "rebase/unregistered: the session drains"
 rebase_case other '[{"metadata":{}}]' unstamped
 has "$(cat "$D/gc.log")" "--assignee=mayor/" "rebase/unregistered: with no requesting_keeper stamped, the bead goes to notify_recipient"
+rebase_case other "$KEEPER_META" refused 1
+eq "$RC" 1 "rebase/refused: a hand-back the store refuses fails closed"
+eq "$(grep -c '^bd update ' "$D/gc.log" || true)" 1 "rebase/refused: the refused hand-back is the only write attempted"
+has "$(cat "$D/out")" "the hand-back of tk-iss to gascity/gascity-keeper.keeper did not land; NOT draining" "rebase/refused: the block says the hand-back did not land"
+hasnt "$(cat "$D/gc.log")" "session nudge" "rebase/refused: the keeper is not nudged about a hand-back the bead does not carry"
+hasnt "$(cat "$D/gc.log")" "runtime drain-ack" "rebase/refused: the session does not drain, so the step is retried"
 
 # --- 7. mol-upstream-gc-pr-prep: the gascity worktree. --------------------------
 echo "── mol-upstream-gc-pr-prep: upstream-pr-prep-worktree-setup ──"
 block "$PRPREP_TOML" upstream-pr-prep-worktree-setup "$TMP/prprep.sh"
 eq "$(bare_git "$TMP/prprep.sh")" "" "pr-prep: every git call in the block names its repo with -C"
 
-prprep_case() { # <gascity|other>; sets RC, D, WT, SHA
-  local d="$TMP/prprep-$1" rc=0
+prprep_case() { # <gascity|other> <label> [<bd-update-rc>]; sets RC, D, WT, SHA
+  local d="$TMP/prprep-$2" rc=0
   mkdir -p "$d/tmp"
   keeper_repos "$d"
   keeper_roster "$d" "$1"
@@ -412,11 +421,11 @@ prprep_case() { # <gascity|other>; sets RC, D, WT, SHA
   # The worktree goes under the session's home, which is the cwd.
   WT="$d/cwd/worktrees/tk-iss"
   ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$d/cwd" GC_RIG=gascity FAKE_ROSTER="$d/roster.json" \
-      FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" COMMIT_SHA="$SHA" BRANCH_NAME="" bash "$TMP/prprep.sh" ) >"$d/out" 2>&1 || rc=$?
+      FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_UPDATE_RC="${3:-0}" COMMIT_SHA="$SHA" BRANCH_NAME="" bash "$TMP/prprep.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
 
-prprep_case gascity
+prprep_case gascity gascity
 SHORT=$(git -C "$D/rig" rev-parse --short "$SHA")
 eq "$RC" 0 "pr-prep/gascity: the block runs from a foreign cwd"
 eq "$(registered "$D/rig" "$WT")" yes "pr-prep/gascity: the worktree is registered in the gascity rig"
@@ -427,7 +436,7 @@ eq "$(ref "$D/cwd" "refs/heads/upstream-pr/$SHORT")" none "pr-prep/gascity: no b
 has "$(cat "$D/gc.log")" "bd update tk-iss --set-metadata work_dir=$WT --set-metadata branch=upstream-pr/$SHORT" "pr-prep/gascity: the worktree is recorded on the bead"
 hasnt "$(cat "$D/gc.log")" "runtime drain-ack" "pr-prep/gascity: the session does not drain"
 
-prprep_case other
+prprep_case other unregistered
 eq "$RC" 0 "pr-prep/unregistered: the hand-back exits 0, as the formula's other aborts do"
 [ ! -e "$WT" ] && ok "pr-prep/unregistered: nothing created at the worktree path" || bad "pr-prep/unregistered: nothing created at the worktree path"
 eq "$(wt_paths "$D/cwd" | count)" 1 "pr-prep/unregistered: nothing registered in the cwd repo"
@@ -437,6 +446,11 @@ has "$(cat "$D/gc.log")" "mail send human -s pr-prep: no gascity rig for tk-iss"
 has "$(cat "$D/gc.log")" "bd update tk-iss --set-metadata aborted_at=workspace-setup --status=open --assignee=gascity/gascity-keeper.keeper --set-metadata gc.routed_to=gascity/gascity-keeper.keeper" \
   "pr-prep/unregistered: the bead goes back open, assigned and routed to the keeper"
 has "$(cat "$D/gc.log")" "runtime drain-ack" "pr-prep/unregistered: the session drains"
+prprep_case other refused 1
+eq "$RC" 1 "pr-prep/refused: a hand-back the store refuses fails the block"
+eq "$(grep -c '^bd update ' "$D/gc.log" || true)" 1 "pr-prep/refused: the refused hand-back is the only write attempted"
+has "$(cat "$D/out")" "the hand-back of tk-iss to gascity/gascity-keeper.keeper did not land; NOT draining" "pr-prep/refused: the block says the hand-back did not land"
+hasnt "$(cat "$D/gc.log")" "runtime drain-ack" "pr-prep/refused: the session does not drain, so the step is retried"
 
 # --- 8. mol-feedback-miner: the repository mined. ------------------------------
 echo "── mol-feedback-miner: feedback-miner-repo ──"
