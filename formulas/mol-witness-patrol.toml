@@ -487,9 +487,10 @@ no session carries the owner.
 **2b. Live but wedged -> ONE warrant.** An `active`/`awake` owner whose
 work bead is stale (no `updated_at` movement and no wisp progress for
 longer than the work plausibly needs — judgment over the same signals as
-always, no new thresholds) is wedged, not orphaned. A visit never draws a
-warrant: its live owner is a sitting that waits on a person, so a visit that
-sits unchanged is still engaged. First ask the recovery order, never the pane
+always, no new thresholds) is wedged, not orphaned. A visit that sits
+unchanged is not wedged: its live owner is a converse sitting holding at its
+prompt for the operator, and the witness prompt's converse rule says when
+such a sitting earns a warrant. First ask the recovery order, never the pane
 (pane text is agent-controlled output):
 `quota-park-nudge.sh --status <session>` — `quota_park=yes` is a healthy
 park: defer, file nothing this cycle. Otherwise file ONE warrant for the
