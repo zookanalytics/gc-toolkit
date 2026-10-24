@@ -460,17 +460,23 @@ the cadence — the arms run whether or not any refinery session is awake.
    head for being the head, since the head can be a merge of the base. A
    finding ruled needs-you keeps its comment awaiting a person while it is
    open, and its owed reply is the answer, leading with the question mark. A
-   declined or deferred
-   finding's owed reply is its comment's answer too. That reply leads with the
-   ruling ("Declined" or "Deferred") instead of a glyph, so a reader scanning
-   the PR tells a fix from a pushback, and the comment trades EYES for
-   THUMBS_UP once it is on the PR. Whether an owed reply is on the PR is read
-   back off GitHub on every pass, by its own text, so another reply in the
-   thread never stands in for it. An inline comment is answered in its thread.
+   declined or deferred finding's owed reply is its comment's answer too. That
+   reply leads with the ruling ("Declined" or "Deferred"), so a reader scanning
+   the PR tells a fix from a pushback. The write-back leaves the thread
+   holding that reply open for the operator. While nobody has resolved it, the
+   reply also leads with the question mark, and its last line says that
+   resolving the thread accepts the ruling and that a reply in it is ruled as
+   new feedback. Such a reply is filed as a finding of its own, and the
+   declined or deferred finding stays closed. A thread the operator resolved
+   before the reply reached it gets the ruling alone. The
+   comment trades EYES for THUMBS_UP once the reply is on the PR. Whether an
+   owed reply is on the PR is read back off GitHub on every pass, by its own
+   text, so another reply in the thread never stands in for it. An inline
+   comment is answered in its thread.
    The thread is answered once every routed comment in it is resolved, by one
    reply naming each bead. It is resolved behind that reply unless it holds a
    declined or deferred finding, whose thread stays open for the operator to
-   accept or overrule, as a needs-you finding's does until they rule. A
+   accept or push back on, as a needs-you finding's does until they rule. A
    needs-you finding closes once the visit holding its question, followed
    through any fold, has closed carrying the operator's ruling and no fix unit
    on its lane, nor a ruling's rework child, is in flight, and its comment then
@@ -478,24 +484,38 @@ the cadence — the arms run whether or not any refinery session is awake.
    benign, dismissed or cut short carries no ruling and releases nothing. A
    Conversation comment has no thread, so a Conversation comment of the city's
    links to the comments one bead answers and carries their answer. A review
-   body has no thread either, and its review's living answer carries its answer
-   and the mark that trades its reaction. Each human review that raised
-   findings has one living answer, a Conversation comment posted once the
-   review's pickup reactions land and edited in place whenever its rendering
-   changes (`assets/scripts/review-answer.sh` states what it shows): any visit
-   waiting on the operator first, a count line, then one point per finding,
-   sorted into Needs you, Worth a look, In progress and Done, each a label
-   linked to the comment, a sentence in the words of whoever answered it, and
-   the commit, follow-up or visit carrying it. It carries a digest of its own
-   rendering, so a pass that changes nothing writes nothing. It is rendered to
-   fit the size GitHub takes in one comment: a long review shortens its notes
-   from the fix, then its quoted replies, then its sentences, each cut naming
-   the bead that holds the whole text, and past that lists the points that fit
-   and names the rest. Once every finding
-   a human CHANGES_REQUESTED review raised has closed and every answer one of
-   them owes is on the PR, the sweep re-requests the reviewer and dismisses the
-   review with a one-line note linking the living answer, which then says the
-   review was dismissed. A dismissal is not an approval. The routing arm leaves
+   body has no thread either, and its review round's living answer carries its
+   answer and the mark that trades its reaction. Each review round that raised
+   findings has one living answer. A round is the reviews one reviewer
+   submitted against one commit, however many GitHub reviews their client split
+   that pass into. The answer is a Conversation comment posted once the round's
+   pickup reactions land and edited in place whenever its rendering changes
+   (`assets/scripts/review-answer.sh` states what it shows): any visit waiting
+   on the operator first, a count line, then one point per finding, sorted into
+   Needs you, Worth a look, In progress and Done, each a label linked to the
+   comment, a sentence in the words of whoever answered it, and the commit,
+   follow-up or visit carrying it. A declined or deferred point is under Needs
+   you while its thread waits on the reviewer: the thread is open, holds the
+   city's reply to that point, and ends with a post that is the city's own.
+   The point ends with the same line as that reply. Once the reviewer resolves
+   the thread, the point is worth a look. A reply of theirs in the thread is a
+   point of its own, and the point it answers is worth a look until the city
+   answers that reply. The thread is still open then, so it waits on the
+   reviewer again. The count line counts the points under Needs you, so it
+   never reads all answered while one waits, and it still says where the other
+   points stand. It carries a digest of its own
+   rendering, so a pass that changes nothing writes nothing. When the city
+   holds more than one comment for a round, each keyed to one of its reviews,
+   the pass keeps one, moves every mark the others carry into it, and deletes
+   the others. It is rendered to fit the size GitHub takes in one comment: a
+   long review shortens its notes from the fix, then its quoted replies, then its
+   sentences, each cut naming the bead that holds the whole text, and past that
+   lists the points that fit and names the rest. Once every finding a human
+   CHANGES_REQUESTED review raised has closed and every answer one of them owes
+   is on the PR, the sweep re-requests the reviewer and dismisses that review
+   with a one-line note linking its round's living answer, which then says the
+   review was dismissed. A review whose body was ruled restates waits for every
+   finding of its round. A dismissal is not an approval. The routing arm leaves
    out of a batch the feedback the review threads already answered: an inline
    comment in a resolved thread with a later post of the city's, or a review
    body whose every inline comment is one. Such feedback sits inside the
@@ -862,10 +882,17 @@ state first, under `refs/gc-toolkit/reconcile-set-aside/<UTC time>`, and leaves
 a dirty path the fast-forward does not rewrite, such as local bd config, as it
 is. Untracked content in the way of the fast-forward, an ignored file included,
 goes only when it is a file that already holds the incoming bytes on its own
-path. A diverged checkout resets to the remote when its content is provably
-upstream, with `git checkout --no-overwrite-ignore -B`, which refuses rather
-than overwrites or deletes untracked content in its way, ignored or not.
-Anything else files one idempotent visit per blocked rig (via `escalate.sh`,
-carrying what blocked it and `git status`), which auto-closes once the rig
-fast-forwards cleanly. The 15-minute window is also the exposure behind
+path. A file the incoming commits stop tracking while the remote's tree
+ignores it, such as bd config a repository stops tracking, stays in place
+untracked where the fast-forward would delete it: pinned first when it is
+modified, its working copy waits under `.git/gc-toolkit-reconcile-kept` while
+git fast-forwards and goes back on its path unchanged. A copy that cannot go
+back, because other content was written on its path meanwhile, waits there, and
+the rig stays escalated until none waits. A diverged checkout resets to the remote
+when its content is provably upstream, with
+`git checkout --no-overwrite-ignore -B`, which refuses rather than overwrites
+or deletes untracked content in its way, ignored or not. Anything else files
+one idempotent visit per blocked rig (via `escalate.sh`, carrying what blocked
+it and `git status`), which auto-closes once the rig fast-forwards cleanly with
+no kept copy waiting aside. The 15-minute window is also the exposure behind
 component-model I9, watched by `doctor/check-pour-text-current`.

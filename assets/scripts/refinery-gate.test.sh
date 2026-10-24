@@ -21,6 +21,8 @@
 #     starts, and its checks do not carry into the new one; one that will not
 #     stop keeps its checks and script, no new gate starts, and the cycle
 #     drains;
+#   - with no refinery-workspace.sh reachable, the last gate's checks stay as
+#     they were, nothing runs, and the cycle drains;
 #   - a rig with no check commands starts no gate until a quality gate from
 #     its CLAUDE.md is added, and an added one runs only for such a rig;
 #   - a wait that cannot find its launcher exits 1, leaves the gate running,
@@ -105,10 +107,11 @@ GATE="$REPO/.git/gc-refinery-gate"
 # checks run instead of answering from them.
 fresh() { rm -rf "${REPO:?}/.git/gc-rig-checks"; }
 
-# The pack, where the blocks find detached-job.sh: $GC_CITY_PATH/rigs/gc-toolkit.
+# The pack, where the blocks find detached-job.sh and refinery-workspace.sh:
+# $GC_CITY_PATH/rigs/gc-toolkit.
 CITY="$TMP/city"
 mkdir -p "$CITY/rigs/gc-toolkit/assets/scripts"
-cp "$HERE/detached-job.sh" "$CITY/rigs/gc-toolkit/assets/scripts/"
+cp "$HERE/detached-job.sh" "$HERE/refinery-workspace.sh" "$CITY/rigs/gc-toolkit/assets/scripts/"
 EMPTY_CITY="$TMP/empty-city"
 mkdir -p "$EMPTY_CITY"
 
@@ -303,6 +306,23 @@ has "$OUT" "did not stop, so its checks are not rewritten under it" "it says why
 has "$(cat "$STUB_GC_LOG")" "runtime drain-ack" "it drains"
 eq "$(tr '\n' ' ' < "$TMP/job.log")" "stop " "no new gate is started"
 eq "$(cat "$GATE/gate.sh" "$GATE"/checks/* | cksum)" "$GATE_SUM" "the old gate's script and checks are not rewritten"
+
+echo "── no refinery-workspace.sh: the old checks stay, nothing runs, and the cycle drains ──"
+NOWS_CITY="$TMP/nows-city"
+mkdir -p "$NOWS_CITY/rigs/gc-toolkit/assets/scripts"
+cp "$HERE/detached-job.sh" "$NOWS_CITY/rigs/gc-toolkit/assets/scripts/"
+: > "$GATE/checks/99-left-by-the-last-gate"
+checks 'touch "$RAN"' '' 'true' '' '' true
+: > "$STUB_GC_LOG"
+PID_BEFORE=$(cat "$GATE/pid" 2>/dev/null)
+OUT=$(RAN="$TMP/ran-nows" run_block "$TMP/start.raw" "$NOWS_CITY" 2>&1); RC=$?
+eq "$RC" 1 "the start block exits 1"
+has "$OUT" "refinery-workspace.sh not found" "it says why"
+has "$(cat "$STUB_GC_LOG")" "runtime drain-ack" "it drains"
+eq "$(cat "$GATE/pid" 2>/dev/null)" "$PID_BEFORE" "no gate started"
+[ -e "$GATE/checks/99-left-by-the-last-gate" ] && ok "the old checks are left as they were" || bad "the old checks are left as they were"
+sleep 1
+[ -e "$TMP/ran-nows" ] && bad "no check ran" "the setup command ran" || ok "no check ran"
 
 echo "── a wait that cannot find its launcher leaves the gate running ──"
 checks '' '' 'sleep 45' '' '' true

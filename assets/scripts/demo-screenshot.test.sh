@@ -571,6 +571,13 @@ HTML
 <p dir="auto"><code class="notranslate">&lt;math-renderer&gt;</code> and <code class="notranslate">js-render-needs-enrichment</code> as code.</p>
 <div class="highlight highlight-text-html-basic" dir="auto"><pre class="notranslate"><span class="pl-kos">&lt;</span><span class="pl-ent">section</span> <span class="pl-c1">class</span>="<span class="pl-s">js-render-needs-enrichment</span>"<span class="pl-kos">&gt;</span><span class="pl-kos">&lt;</span><span class="pl-ent">math-renderer</span><span class="pl-kos">&gt;</span>$x$<span class="pl-kos">&lt;/</span><span class="pl-ent">math-renderer</span><span class="pl-kos">&gt;</span><span class="pl-kos">&lt;/</span><span class="pl-ent">section</span><span class="pl-kos">&gt;</span></pre></div>
 HTML
+  # A horizontal rule, from a --- between two paragraphs. It comes back as a
+  # bare <hr>, so the comment's hr rule is what draws it.
+  cat >"$TMPD/rule.html" <<'HTML'
+<p dir="auto">Above the rule.</p>
+<hr>
+<p dir="auto">Below it.</p>
+HTML
   { printf '<details><summary>trail</summary>\n'; cat "$TMPD/mermaid.html"; printf '</details>\n'; } >"$TMPD/collapsed.html"
   r=$(js "m.unfinishedBlocks(read('$TMPD/mermaid.html', 'utf8'))")
   eq "$r" '["mermaid"]' "a mermaid fence, as GitHub's markdown API returns it, is a block github.com finishes"
@@ -591,6 +598,45 @@ HTML
   r=$(js "m.commentDocument({ fragment: read('$TMPD/drawn.html', 'utf8') })")
   has '<div class="markdown-body"><markdown-accessiblity-table><table role="table">' "$r" "a comment with no such block is drawn as GitHub returned it"
   has '<g-emoji class="g-emoji" alias="warning">' "$r" "an emoji in GitHub's wrapper is drawn as GitHub returned it"
+
+  # A footnote and a colour, as GitHub's markdown API returns them, kept
+  # verbatim. The footnotes come back as a section under a heading meant for
+  # screen readers only, and a colour in inline code comes back with a swatch,
+  # an empty span that only its utility classes draw.
+  cat >"$TMPD/notes.html" <<'HTML'
+<p dir="auto">The capture keeps a note<sup><a href="#user-content-fn-1-df0b4939deca19762732bd9900ea3186" id="user-content-fnref-1-df0b4939deca19762732bd9900ea3186" data-footnote-ref="" aria-describedby="footnote-label">1</a></sup> and a colour: <code class="notranslate">#0969DA<span class="ml-1 d-inline-block border circle color-border-subtle" style="background-color: #0969DA; height: 8px; width: 8px;"></span></code>.</p>
+<section data-footnotes="" class="footnotes"><h2 id="footnote-label" class="sr-only" dir="auto">Footnotes</h2>
+<ol dir="auto">
+<li id="user-content-fn-1-df0b4939deca19762732bd9900ea3186">
+<p dir="auto">The note, drawn small and muted under a rule. <a href="#user-content-fnref-1-df0b4939deca19762732bd9900ea3186" data-footnote-backref="" aria-label="Back to reference 1" class="data-footnote-backref">↩</a></p>
+</li>
+</ol>
+</section>
+HTML
+  r=$(js "m.unfinishedBlocks(read('$TMPD/notes.html', 'utf8'))")
+  eq "$r" '[]' "footnotes and a colour's swatch are drawn from their own markup"
+  r=$(js "m.commentDocument({ fragment: read('$TMPD/notes.html', 'utf8') })")
+  has '<section data-footnotes="" class="footnotes"><h2 id="footnote-label" class="sr-only" dir="auto">Footnotes</h2>' "$r" "the footnotes are drawn as GitHub returned them"
+  has '.markdown-body .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: rect(0 0 0 0); overflow-wrap: normal; border: 0; }' "$r" "the footnotes heading is hidden from view, as GitHub's sr-only hides it"
+  has '.markdown-body .footnotes { font-size: 12px; color: #59636e; border-top: 1px solid #d1d9e0; }' "$r" "the notes are small and muted under a rule"
+  has '.markdown-body .footnotes ol { padding-left: 16px; }' "$r" "the notes' list takes GitHub's indent"
+  has '.markdown-body .footnotes ol ul { display: inline-block; padding-left: 16px; margin-top: 16px; }' "$r" "a list inside a note takes GitHub's rule"
+  has '.markdown-body [data-footnote-ref]::before { content: "["; }' "$r" "a footnote reference opens with a bracket"
+  has '.markdown-body [data-footnote-ref]::after { content: "]"; }' "$r" "and closes with one"
+  has '.markdown-body sub, .markdown-body sup { position: relative; font-size: 75%; line-height: 0; vertical-align: baseline; }' "$r" "a reference's superscript is sized and placed as GitHub sets it"
+  has '.markdown-body sup { top: -.5em; }' "$r" "and raised as GitHub raises it"
+  # Every class GitHub writes on the swatch has GitHub's rule.
+  swatch=$(sed -n 's/.*<span class="\([^"]*\)" style="background-color: #0969DA;.*/\1/p' "$TMPD/notes.html")
+  eq "$swatch" 'ml-1 d-inline-block border circle color-border-subtle' "GitHub draws the swatch with utility classes alone"
+  for c in $swatch; do has ".markdown-body .$c {" "$r" "the swatch's $c class has a rule"; done
+  has '.markdown-body .d-inline-block { display: inline-block; }' "$r" "the swatch is an inline block, so its width and height apply"
+  has '.markdown-body * { box-sizing: border-box; }' "$r" "its 8px is its whole size, border included, as GitHub sizes every element"
+  has '.markdown-body .ml-1 { margin-left: 4px; }' "$r" "it sits 4px after the colour's text"
+  has '.markdown-body .border { border: 1px solid #d1d9e0; }' "$r" "it has GitHub's 1px border"
+  has '.markdown-body .color-border-subtle { border-color: #d1d9e0b3; }' "$r" "in GitHub's muted border colour"
+  has '.markdown-body .circle { border-radius: 9999px; }' "$r" "and it is round"
+  order=$(js "(() => { const p = m.commentDocument({ fragment: '' }); return p.indexOf('.markdown-body .color-border-subtle {') > p.indexOf('.markdown-body .border {'); })()")
+  eq "$order" 'true' "the muted colour follows the border rule it recolours, as in GitHub's stylesheet"
 
   # Run as a script, the renderer writes the page and nothing else.
   printf '\033[31mred\033[0m\n' >"$TMPD/real.txt"
@@ -644,6 +690,11 @@ HTML
   out="$(run REAL_NODE="$NODE_BIN" GH_HTML="$TMPD/drawn.html" -- markdown --file "$MD" --output "$OUT")"; rc=$?
   eq "$rc" 0 "markdown GitHub returns with no such block is drawn and captured"
   has '<markdown-accessiblity-table><table role="table">' "$(cat "$SERVED" 2>/dev/null)" "the page the engine serves is the real renderer's, drawn from GitHub's HTML"
+  out="$(run REAL_NODE="$NODE_BIN" GH_HTML="$TMPD/rule.html" -- markdown --file "$MD" --output "$OUT")"; rc=$?
+  eq "$rc" 0 "markdown GitHub returns with a horizontal rule is drawn and captured"
+  has '<div class="markdown-body"><p dir="auto">Above the rule.</p>
+<hr>' "$(cat "$SERVED" 2>/dev/null)" "the rule is drawn as GitHub returned it, inside the comment's styles"
+  has '.markdown-body hr { height: 1px; margin: 24px 0; background-color: #d1d9e0; border: 0; padding: 0; }' "$(cat "$SERVED" 2>/dev/null)" "and as GitHub's stylesheet draws it: a 1px line in GitHub's border colour, 24px from the text around it"
 
   echo "# a capture from a symlinked checkout, through the real renderer"
   out="$(SUT="$TMPD/linked-dir/demo-screenshot.sh" run REAL_NODE="$NODE_BIN" -- terminal --text "$TXT" --output "$OUT")"; rc=$?

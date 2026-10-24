@@ -53,17 +53,20 @@ if [ "${1:-}" = "sling" ]; then
     esac
     shift || true
   done
+  # A pour copies the bead's priority into its workflow once: poured_priority
+  # records it, bd's default 2 when none was written.
   if [ -z "${STUB_SLING_NOPOUR:-}" ] && [ -n "$bead" ]; then
     tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-test.XXXXXX")
     jq -c --arg id "$bead" --arg p "$pool" \
-      'map(if .id == $id then (.metadata["gc.execution_routed_to"] = $p | .metadata |= del(.["gc.routed_to"])) else . end)' \
+      'map(if .id == $id then (.metadata["gc.execution_routed_to"] = $p | .metadata |= del(.["gc.routed_to"]) | .poured_priority = (.priority // 2)) else . end)' \
       "$STORE" > "$tmp" && mv "$tmp" "$STORE"
   fi
   exit 0
 fi
 [ "${1:-}" = "bd" ] || exit 0
 shift
-bead_json() { jq -c --arg id "$1" '[.[] | select(.id == $id)]' "$STORE"; }
+# Every bead bd prints carries a priority, P2 unless one was written.
+bead_json() { jq -c --arg id "$1" '[.[] | select(.id == $id) | .priority //= 2]' "$STORE"; }
 case "${1:-}" in
   show)
     # A fresh re-read that fails after an earlier read of the same bead resolved:
@@ -133,6 +136,9 @@ case "${1:-}" in
         --status=*) st="${1#--status=}"
           jq -c --arg id "$id" --arg s "$st" \
             'map(if .id == $id then .status = $s else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
+        --priority|-p) shift
+          jq -c --arg id "$id" --arg p "${1#P}" \
+            'map(if .id == $id then .priority = ($p | tonumber) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
       esac
       shift || true
     done
@@ -146,12 +152,15 @@ case "${1:-}" in
     # --metadata-field query can match, so a caller that sends one fails here.
     # --deps <type:id> rides the insert too, as an edge row from the new bead,
     # except blocks:<id>, which bd turns around: <id> depends on the new bead.
-    cmeta='{}'; cdeps=""
+    # --parent <id> rides the insert as bd writes it: .parent and a
+    # parent-child edge row onto <id>.
+    cmeta='{}'; cdeps=""; cparent=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --metadata) shift; cmeta="${1:-}" ;;
         --metadata=*) cmeta="${1#--metadata=}" ;;
         --deps) shift; cdeps="$cdeps ${1:-}" ;;
+        --parent) shift; cparent="${1:-}"; cdeps="$cdeps parent-child:${1:-}" ;;
       esac
       shift || true
     done
@@ -167,7 +176,7 @@ case "${1:-}" in
     done
     printf '%s\n' "$title" >> "${STUB_CREATED:?}"
     tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-signoff-test.XXXXXX")
-    jq -c --arg id "fix-$n" --argjson m "$cmeta" '. + [{"id":$id,"status":"open","assignee":"","metadata":$m,"notes":""}]' "$STORE" > "$tmp" && mv "$tmp" "$STORE"
+    jq -c --arg id "fix-$n" --argjson m "$cmeta" --arg par "$cparent" '. + [{"id":$id,"status":"open","assignee":"","metadata":$m,"notes":""} + (if $par == "" then {} else {parent: $par} end)]' "$STORE" > "$tmp" && mv "$tmp" "$STORE"
     for d in $cdeps; do
       case "$d" in
         blocks:*) printf '%s|fix-%s|blocks\n' "${d#blocks:}" "$n" >> "$DEPS" ;;
@@ -246,7 +255,7 @@ case "${1:-}" in
       shift || true
     done
     out=$(jq -c --arg st "$statuses" '[ .[] | (.status // "open") as $b
-      | select($st == "" or (($st | split(",")) | index($b))) ]' "$STORE")
+      | select($st == "" or (($st | split(",")) | index($b))) | .priority //= 2 ]' "$STORE")
     for f in ${fields[@]+"${fields[@]}"}; do
       out=$(printf '%s' "$out" | jq -c --arg k "${f%%=*}" --arg v "${f#*=}" \
         '[ .[] | select(((((.metadata // {})[$k]) // "") | tostring) == $v) ]')
@@ -376,6 +385,14 @@ exit 0
 STUB
 chmod +x "$BIN/gc" "$BIN/gh" "$BIN/git" "$BIN/finding"
 export PATH="$BIN:$PATH"
+# The priority writer rework-child.sh settles the child with: this tree's
+# queue-priority.sh over the stub store, named by GC_QUEUE_PRIORITY_TOOL. The
+# writer finds a bead's store in the rig list, which the stub does not serve, so
+# the wrapper names a store directory of the suite's own for its lock.
+mkdir -p "$TMP/qp-rig/.beads"
+printf '#!/usr/bin/env bash\nexec %q "$@" --db %q\n' "$HERE/queue-priority.sh" "$TMP/qp-rig/.beads" > "$BIN/queue-priority"
+chmod +x "$BIN/queue-priority"
+export GC_QUEUE_PRIORITY_TOOL="$BIN/queue-priority"
 # The git stub serves this as `rev-parse --show-toplevel`, giving resolve_index a
 # repo root without leaning on an ambient GC_RIG_ROOT (unset on the CI runner).
 export STUB_TOPLEVEL="$TMP"
@@ -417,6 +434,13 @@ reset() { # $1 = anchor json, extra beads appended via $2
 }
 meta()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k]) // "<absent>"' "$STUB_STORE"; }
 status() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .status) // "<absent>"' "$STUB_STORE"; }
+# The priority the sling poured a bead's workflow at, and every parent it
+# carries: a parent-child edge row or the parent field a create wrote.
+poured() { jq -r --arg id "$1" 'first(.[] | select(.id == $id) | (.poured_priority // "<unpoured>")) // "<absent>"' "$STUB_STORE"; }
+parents() {
+  { awk -F'|' -v id="$1" '$1 == id && $3 == "parent-child" { print $2 }' "$STUB_DEPS"
+    jq -r --arg id "$1" '.[] | select(.id == $id) | (.parent // empty)' "$STUB_STORE"; } | sort -u | paste -sd, -
+}
 notes()  { jq -r --arg id "$1" '(.[] | select(.id == $id) | .notes) // ""' "$STUB_STORE"; }
 # The record lane-state.sh derives a lane's green from: the review closed with
 # gc.outcome=recorded, signoff_verdict=approve and a reviewed_oid. Nothing here
@@ -900,6 +924,29 @@ eq "$(meta fix-1 rejection_reason)" "signoff requested changes: Correctness: req
 eq "$(head -1 "$STUB_GH_BODY")" "Correctness: request-changes. Nothing needs you." "the posted verdict opens with the whole line"
 eq "$(status rv-1)" "closed" "review bead closed after the dispatch"
 eq "$(meta rv-1 signoff_verdict)" "request-changes" "…and signoff_verdict=request-changes rides in the same close"
+eq "$(meta fix-1 priority_shift)" "-1" "the rework is born carrying the PR-finishing shift"
+eq "$(parents fix-1)" "" "…with no parent, so no hold on an epic reaches it"
+
+echo "# a review rework is slung at its rank: P1 under a P2 epic, P0 once the PR is approved"
+# The anchor sits under a P2 epic, its own stored priority stale, and its posture
+# is in the shape pr-facts.sh stores it. A PR that is not approved has its
+# rework slung one level sooner than its anchor, and an approved one at P0. A
+# rank that compared the whole stored posture with approved would sling the
+# second at P1.
+EPIC2=',{"id":"ep-2","status":"open","assignee":"","issue_type":"epic","priority":2,"metadata":{},"notes":""}'
+anchor_under_epic() { # <posture>, read at the PR's head
+  printf '%s' "$ANCHOR_PR" | jq -c --arg p "$1" '.metadata.merge_result = "pull_request" | .metadata.pr_posture = $p
+    | .metadata.pr_head_oid = ($p | split("@")[1])
+    | .priority = 0 | .dependencies = [{issue_id: "tk-anc", depends_on_id: "ep-2", type: "parent-child"}]'
+}
+reset "$(anchor_under_epic "commented@$OID_HEAD@2026-10-11T00:00:00Z")" "$EPIC2"
+"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "request-changes on an anchor under a P2 epic exits 0"
+eq "$(poured fix-1)" "1" "the rework of a PR that is not approved is slung at P1"
+reset "$(anchor_under_epic "approved@$OID_HEAD@2026-10-11T00:00:00Z")" "$EPIC2"
+"$SUT" --review-bead rv-1 --verdict request-changes >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "request-changes on an approved PR exits 0"
+eq "$(poured fix-1)" "0" "the rework of an approved PR is slung at P0"
 
 echo "# request-changes files a child at any round count — GC_MAX_REVIEW_ROUNDS is inert, no park written"
 # The round cap is retired: no counter, no floor, no signoff_cap park. Even with
@@ -1110,6 +1157,8 @@ VP=$(jq -r 'first(.[] | select((.metadata.task_kind // "") == "validation") | .i
 eq "$(meta "$VP" check_name)" "correctness" "the pass names the machine lane the validator rules by"
 eq "$(meta "$VP" anchor_bead)" "tk-anc" "the pass is anchored to the review's anchor"
 eq "$(meta "$VP" reviewed_oid)" "$OID_HEAD" "the pass pins the head the batch was reviewed at"
+eq "$(meta "$VP" priority_shift)" "-1" "the pass is born carrying the PR-finishing shift"
+eq "$(parents "$VP")" "" "…with no parent, so no hold on an epic reaches it"
 has "$(cat "$STUB_CREATED")" "Validate PR#42 correctness review @ $OID_HEAD" "the pass is PR-titled for the lane and head"
 has "$(cat "$STUB_DEPS")" "tk-anc|$VP|blocks" "the pass blocks the anchor — the merge is held until the validator closes it"
 
@@ -1132,8 +1181,8 @@ out=$("$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
 eq "$rc" 0 "request-changes exits 0"
 VP=$(jq -r 'first(.[] | select((.metadata.task_kind // "") == "validation") | .id) // ""' "$STUB_STORE")
 VPC=$(grep "^bd create Validate PR#42" "$STUB_GC_LOG")
-has "$VPC" '--metadata {"task_kind":"validation","anchor_bead":"tk-anc","check_name":"correctness","reviewed_oid":"'"$OID_HEAD"'"}' \
-  "the pass's shape rides its create"
+has "$VPC" '--metadata {"task_kind":"validation","anchor_bead":"tk-anc","check_name":"correctness","reviewed_oid":"'"$OID_HEAD"'","priority_shift":-1}' \
+  "the pass's shape, and the shift it is born with, ride its create"
 has "$VPC" "--deps blocks:tk-anc" "…and so does the blocks edge onto the anchor"
 has "$VPC" "--deps related:tk-anc" "…and the membership edge onto it"
 eq "$(grep -c "^$VP|tk-anc|related\$" "$STUB_DEPS")|$(grep -c "^tk-anc|$VP|blocks\$" "$STUB_DEPS")|$(grep -c "^$VP|tk-anc|blocks\$" "$STUB_DEPS")" "1|1|0" \
@@ -1201,9 +1250,9 @@ hasnt "$(cat "$STUB_GH_LOG")" "reviews/333/dismissals" "a block at the reviewed 
 eq "$(meta tk-anc signoff_dismissed)" "111@$OID_HEAD" "signoff_dismissed pairs the retraction"
 
 echo "# supersede: past the anchor's provenance cutover, only the city's own review is ours to dismiss"
-# The same login runs model reviews (an operator's /code-review) and posts the
-# city's verdicts. Past pr_provenance_since an unmarked review under it is
-# feedback; a marked one, or an unmarked one from before the cutover, is ours.
+# Past pr_provenance_since an unmarked review under the city's login is
+# feedback, whoever posted it; a marked one, or an unmarked one from before the
+# cutover, is ours.
 reset "$(printf '%s' "$ANCHOR_PR" | jq -c '.metadata.pr_provenance_since = "2026-10-07T00:00:00Z"')"
 export STUB_REVIEWS='{"id":444,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'","submitted_at":"2026-10-07T01:00:00Z","body":"model review: fix the race"}
 {"id":555,"user":{"login":"city-bot"},"state":"CHANGES_REQUESTED","commit_id":"'"$OID_OLD"'","submitted_at":"2026-10-07T02:00:00Z","body":"verdict\n\n<!-- gc:city -->"}

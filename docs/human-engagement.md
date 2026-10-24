@@ -1,9 +1,16 @@
 ---
-name: Gas City and human engagement
-description: Local supplement tracking how Gas City is evolving to support human engagement — the shipping primitives, the live upstream investments, and the trajectory — with the seam gc-toolkit rides at each, and the pack's two-noun vocabulary (subject / visit). Companion to architecture.md's "How agents exist and converse"; every claim carries its verification date.
+name: Human engagement — gc-toolkit's subject and visit model
+description: gc-toolkit's own model for engaging a person — the subject and visit nouns, how a conversation starts, how a sitting holds and ends, what a person owes as a demand bead and an edge, the helm boards, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity/human-engagement.md.
 ---
 
-# Gas City and human engagement
+# Human engagement
+
+This page is gc-toolkit's model for engaging a person, not Gas City
+behavior. The Gas City primitives it rides — continuation groups, human
+gates and the core orders that surface them, extmsg, pending interactions,
+and how a session and its pane end — are stated, each with its date, in
+[gascity/human-engagement.md](gascity/human-engagement.md). Where a passage
+below relies on one of them, it links there.
 
 **Vocabulary.** The pack's model has two
 technical nouns. A **subject** is the durable thing a dialogue is about —
@@ -25,26 +32,25 @@ pack — it reverts to plain speech, which also leaves upstream's extmsg
 gc-toolkit's conversation model is a bet on Gas City's own momentum: the
 runtime is steadily growing the primitives a human conversation needs, and
 the pack composes those primitives rather than inventing beside them
-([architecture.md](architecture.md), "How agents exist and converse"). That
-bet only pays if the pack actually tracks where upstream is going — so this
-document is the ledger of Gas City's conversation-relevant direction: what
-ships today, what is moving, and the exact seam gc-toolkit rides at each.
+([architecture.md](architecture.md), "How agents exist and converse"). The
+bet pays only if the pack tracks where upstream is going, which is why the
+primitives, their verified status and their direction have a page of their
+own. This page is the model the pack builds on them.
 
 ## Scope
 
-**Mandate.** The single place gc-toolkit records how Gas City supports —
-and is evolving to support — human conversation: the primitives, their
-verified status, upstream's own investments in the space, and the boundary
-where gc-toolkit's model meets them. When upstream moves, this file is
-where the movement lands first, and the pack's machinery re-derives from
-it.
+**Mandate.** gc-toolkit's model for engaging a person: the subject and visit
+nouns, the producers that file a visit, how a sitting holds and ends, what a
+person owes as a demand bead and an edge, the helm boards, and the ground the
+pack builds itself.
 
-**Boundaries.** It records upstream facts and the seams we build on; it
-does not design gc-toolkit's conversation system (that is
-[architecture.md](architecture.md) and its design specs) and does not
-duplicate upstream reference material
-([gascity-reference.md](gascity-reference.md) indexes that). Facts here
-are dated; an undated claim is a bug.
+**Boundaries.** The Gas City primitives the model rides are
+[gascity/human-engagement.md](gascity/human-engagement.md), and the routing
+mechanics are [gascity/routing-model.md](gascity/routing-model.md). How the
+pack's lifecycles compose, and how completion propagates back to a waiting
+conversation, is [lifecycle-composition.md](lifecycle-composition.md). The
+converse prompt and its skills are the sitting's procedure as an agent runs
+it; this page is the model they implement.
 
 ## The principle
 
@@ -57,45 +63,34 @@ subject-visit binding for free, so the visit/converse spine
 Expect the same trade wherever upstream covers bespoke ground; that is
 what riding an ecosystem means.
 
-## Shipping primitives the conversation model rides
+## How the model rides the platform
 
-Each entry: the upstream fact, its verification status, and the seam.
+Each primitive below is stated, with its evidence and date, in
+[gascity/human-engagement.md](gascity/human-engagement.md). What follows is
+the seam the pack builds at each.
 
-- **Continuation groups — live core, the identity of a conversation.**
-  The hook-claim path reads `gc.continuation_group` and vacuums open,
-  unassigned sibling work onto the claiming session
-  (`internal/beadmeta/keys.go`; verified from source 2026-08-06, clone
-  `3e629ad`, and exercised live by this pack's own pool claims; live docs
-  2026-08-08 confirm — "the hook atomically claims one ready bead and
-  preassigns continuation siblings", tutorials/06-beads). *Seam:*
-  the subject bead's id **is** the group; visits filed into the group reach
-  a warm session automatically, and a cold session reconstitutes from the
+- **Continuation groups carry the identity of a conversation.** The
+  subject bead's id **is** the group; visits filed into the group reach a
+  warm session automatically, and a cold session reconstitutes from the
   record. No reverse links, no bespoke binding.
 
-- **Routing — `gc.routed_to` is the sole persisted key.** `gc.run_target`
-  is compile-time routing intent the router resolves into `gc.routed_to`
-  at dispatch (upstream #2779; verified 2026-08-06; live docs 2026-08-08
-  confirm both key roles verbatim, formula-spec-v2). The read side is **exact string match**, so
-  direct stamps must be rig-qualified; and under a `default_sling_formula`
-  a bare sling is a formula attach that stamps nothing — stamp-don't-sling
-  or `--no-formula` ([gascity-routing-model.md](gascity-routing-model.md)).
-  *Seam:* a visit parks on the helm board (`gc.routed_to=human`) and holds
-  no session; `gc-helm engage` spawns the conversation session when an
-  operator draws it off the board.
+- **A visit is routed to the board and holds no session.** A visit parks
+  on the helm board (`gc.routed_to=human`) and holds no session;
+  `gc-helm engage` spawns the conversation session when an operator draws
+  it off the board. The read side is exact string match, so a direct stamp
+  is rig-qualified, and under a `default_sling_formula` a bare sling is a
+  formula attach that leaves no claim route — stamp, don't sling, or sling
+  with `--no-formula` ([gascity/routing-model.md](gascity/routing-model.md)).
 
-- **The worker-role contract — upstream now owns the idiom.** The
-  `gc-roles` pack ships a shared `gc-role-worker` contract fragment used
-  by all ~12 roles (source-verified 2026-08-06, gascity-packs `0b95742`;
-  **source-only** — the roles pack is absent from the public docs and the
-  registry showcase as of 2026-08-08, so re-verify against the
-  gascity-packs source, not the docs site):
-  discovery is claim-only via the `gc gc claim` wrapper; **an empty
-  continuation group after close is a hard session boundary; a successful
-  claim is authoritative even across groups**. Per-role prompt citations
-  older than this are stale.
-
-  *Those two clauses are in tension for a conversation role, and the pack
-  read only the second one* (tk-msfmu, 2026-08-22). The converse prompt
+- **A conversation role is the upstream worker contract with its close
+  replaced by a hold.** The pack read upstream's `gc-role-worker` contract
+  (gascity-packs `0b95742`, 2026-08-06) as two clauses in tension for a
+  conversation role: an empty continuation group after close is a hard
+  session boundary, and a successful claim is authoritative even across
+  groups. The version the gascity refs pin today words the boundary as
+  continue only within the same group or root, otherwise drain
+  ([gascity/human-engagement.md](gascity/human-engagement.md#the-gc-roles-worker-contract)).
+  The pack once read only the second clause (tk-msfmu, 2026-08-22). The converse prompt
   carried "a claim is authoritative even when it names a different subject
   than your last one — work it the same way" and dropped the hard boundary,
   so a session whose group went dry claimed an unrelated subject and prepped
@@ -106,127 +101,57 @@ Each entry: the upstream fact, its verification status, and the seam.
   (it puts back every turn that claim assigned — the named one and any
   continuation-group siblings the claim vacuumed onto the session with it — and
   drains, per clause 1), and when a turn cannot be released it is worked rather
-  than stranded, because clause 2 says a claim in hand is authoritative. The scoping is pack-side only because
-  `gc hook --claim` has no group filter — its whole option set is `--claim`,
-  `--drain-ack`, `--inject`, `--json` (verified 2026-08-22) — which is the
-  upstream ask: a `--continuation-group` filter would make the claim/release
-  round trip unnecessary. The pack also now ships
-  `requirements-planner` and `task-decomposer` — planning roles adjacent
-  to decomposition work. *Seam:* a conversation role is `gc-role-worker`'s
-  contract with the execute/close clause replaced by hold-for-operator;
-  the delta is expressed against that fragment, not a bespoke prompt. The
-  planner roles are a standing adoption question wherever the pack plans
-  or decomposes (see the tripwire below).
+  than stranded, because clause 2 says a claim in hand is authoritative. The
+  scoping is pack-side only because `gc hook --claim` has no group filter,
+  which is the upstream ask: a `--continuation-group` filter would make the
+  claim/release round trip unnecessary. A conversation role is
+  `gc-role-worker`'s contract with the execute/close clause replaced by
+  hold-for-operator; the delta is expressed against that fragment, not a
+  bespoke prompt. The roles pack's planning roles (`requirements-planner`,
+  `task-decomposer`) are a standing adoption question wherever the pack
+  plans or decomposes (see the tripwire under Watch items below).
 
-- **Human waits — the `type=human` gate, with drivers.** Upstream's live
-  human-wait primitive is the `type=human` **gate** (`gc bd gate create`):
-  excluded from Ready, with core notify/renudge orders that mail the
-  escalation recipient (source-verified 2026-08-06; **source-only** — the
-  public docs do not cover the human-gate primitive, hold labels, or the
-  renudge orders as of 2026-08-08). By contrast
-  `gc.routed_to=human` is bare in upstream core — no core machinery claims
-  it, and the core nudge order fails silently on it (same verification). The
-  sanctioned upstream hold taxonomy is `hold:mayor` / `hold:external` only; a
-  bare `human` hold label has no sanctioned upstream meaning. *Seam:* the pack
-  supplies the attention channel core leaves out. A filed visit parks on the
-  helm board under `gc.routed_to=human` — the board's exact gather predicate —
-  and holds no session; the operator draws it off the board and `gc-helm
-  engage` spawns a `converse-<model>` sitting on demand. So `routed_to=human`
-  is the pack's deliberate board lane: a human question's canonical form is a
-  visit, the dialogue-carrying refinement of the human gate, never a
-  competitor to it, and an open human gate is a legitimate named wait.
+- **The pack supplies the attention channel core leaves out.** A filed
+  visit parks on the helm board under `gc.routed_to=human` — the board's
+  exact gather predicate — and holds no session; the operator draws it off
+  the board and `gc-helm engage` spawns a `converse-<model>` sitting on
+  demand. So `routed_to=human` is the pack's deliberate board lane: a human
+  question's canonical form is a visit, the dialogue-carrying refinement of
+  the human gate, never a competitor to it, and an open human gate is a
+  legitimate named wait.
 
-- **Questions gate work natively — blocking dependencies.**
-  `bd dep <blocker> --blocks <blocked>` creates a blocking edge, and
-  blocked work is invisible to work queries (verified 2026-08-06; live
-  docs 2026-08-08 confirm both, tutorials/06-beads — "blocked work is
-  invisible to work queries"). `bd dep remove` exists in source
-  (golden-tested; not covered in the public docs). *Seam:* a
-  decision-needed visit can block its dependents with core edges — "a
-  human approval is just a check nothing non-human can yet satisfy"
-  composes directly, no bespoke gate machinery.
+- **A human gate reaches the operator as a visit.** Gas City's durable tier
+  has the wait, the human gate, and a mail-and-renudge reach, but gives a
+  gate no surface identity of its own. The pack gives it one by filing a
+  visit for it: `orders/gate-visit-sweep.toml` files one converse visit for
+  every open human gate, the visit carries the framing, the conversation and
+  the owner, and the board ranks it. The core notify-on-human-gate-creation
+  and renudge-stale-human-gates orders still fire on every gate, and their
+  mail goes to the `human` mailbox, which the operator does not read, so it
+  is a durable record rather than the reach (see [How a sitting
+  ends](#how-a-sitting-ends-a-demand-bead-and-an-edge)). The sweep is
+  therefore a converter from the platform's gate to the pack's visit, and
+  the pack carries both objects for one question.
 
-## Upstream's own conversation investment: `extmsg`
+- **Questions gate work with core edges.** A decision-needed visit can
+  block its dependents with core `blocks` edges — "a human approval is just
+  a check nothing non-human can yet satisfy" composes directly, no bespoke
+  gate machinery.
 
-Gas City's active investment in human conversation is **`extmsg`** — and
-it is provider-generic, not a chat-platform integration: a conversation
-is a `(provider, account_id, conversation_id)` tuple, any client
-registers via `POST /v0/extmsg/clients` and speaks inbound-POST +
-SSE-reply, and upstream ships a `provider: "llm-client"` for direct LLM
-clients with no chat platform at all (verified 2026-08-08,
-guides/connected-clients). Slack and Discord are adapter packs over that
-same API. Bindings attach a conversation to a **session or a configured
-agent** — agent bindings survive restarts by cold-waking a session — and
-`gc extmsg handoff` rebinds a live conversation to another agent
-("pure transport"; the routing judgment lives in the agent's prompt). It is further along than a casual read suggests (live docs
-2026-08-08): CLI verbs `gc extmsg bind` / `handoff` / `unbind`; an API
-plane with client registration, `POST /v0/extmsg/inbound`, and a
-long-lived SSE reply stream per `(provider, account_id,
-conversation_id)`; and — the telling detail — **the first inbound turn
-implicitly creates the conversation binding**, durable and
-reconnect-safe via sequence-number replay (guides/connected-clients).
-Slack and Discord ship as first-party packs. The outbound path is
-already exercised by the oversight-rig pack's rollup delivery
-(`specs/tk-3s5uo/`).
+- **External channels meet the model at the subject bead.** Upstream's
+  `extmsg` is a different plane from gc-toolkit's beads-as-turns — extmsg
+  is channel-shaped and session-bound; ours is operator-internal and
+  record-durable — and the two are complementary, not competing. The
+  boundary, on the record: **when an external channel arrives, the subject
+  bead is the natural binding anchor — the two models meet at the subject
+  bead.** A Slack thread about a piece of work should bind where that
+  work's conversation already lives, not beside it.
 
-This is a **different plane** from gc-toolkit's beads-as-turns — extmsg
-is channel-shaped and session-bound; ours is operator-internal and
-record-durable — and the two are complementary, not competing. The
-boundary, on the record: **when an external channel arrives, the
-subject bead is the natural binding anchor — the two models meet at the
-subject bead.** A Slack thread about a piece of work should bind where
-that work's conversation already lives, not beside it.
-
-`gc.attention` has zero upstream meaning (verified 2026-08-06), and the
-pack does not use it either — there is no flag-for-attention concept.
-"An agent believes a human should look at this" has exactly one form —
-file a visit on the subject — so the board derives what is
-pressing from real state (open visits, human gates, stranded work) rather
-than from self-assertions with no lifecycle.
-
-## How questions reach a human today (source-verified 2026-08-08)
-
-Upstream surfaces "a human is needed" at two tiers with sharply different
-maturity — the split matters more than any single fact here:
-
-- **Live-session questions (ephemeral) get first-class treatment.** A
-  runtime-detected prompt becomes a **pending interaction**
-  (`request_id`, `kind`, optional prompt/options), emitted on the
-  per-session SSE stream, aggregated city-wide
-  (`GET /v0/city/{city}/pending`, concurrent probe with partial-failure
-  reporting), answerable via a respond endpoint — and the **dashboard
-  ranks it**: a home-view attention queue with closed alert kinds
-  (`pending-decision`, `run-needs-operator`, `run-thrashing`,
-  `operator-mail`), a single top-ranked "One Mark," and an agents-nav
-  "Needs you (N)" section with reasons (awaiting-input / errored /
-  rate-limited / stalled) and mapped actions (respond / reset / nudge).
-  Upstream is actively building a needs-me surface for *sessions*.
-- **Durable human-gate beads (the graph tier) are reachable but have no
-  surface identity.** Core's built-in gate watcher skips human gates,
-  and `await_type` never crosses the supervisor API — no dashboard or
-  API object represents a gate. What core's bundled bootstrap pack ships
-  instead is **mail + renudge**: an order that mails on human-gate
-  creation (addressee: assignee → `gc.deferred_assignee` →
-  `$GC_ESCALATION_RECIPIENT`, default `"human"`) and a sweep that
-  re-nudges stale open gates hourly. Plus `gc bd gate list` and an
-  indirect projection: a run blocked on a gate shows as "Blocked,
-  awaiting operator," and the gate's mail surfaces as an
-  `operator-mail` alert. Upstream's own notes call gates "beads with
-  metadata" — the primitive is theirs; the *presentation* is not built.
-- **Formula-level questions are prose.** The build-factory schemas make
-  artifact `status: questions|blocked` machine-readable and require an
-  Open Questions section, but individual questions carry no needs-human
-  flag; the worker contract forbids asking after a claim; and
-  `interaction_mode=interactive` names no mechanism for the ask to
-  travel. A question that must survive its session has exactly one
-  sound home today: a gate bead in the graph.
-
-*Seam:* gc-toolkit's conversation model is the missing top of this
-stack, not a competitor to it — a gate filed as a **visit** gives the
-durable tier what the session tier already has (framing, a
-conversation, an owner), and the board gives gates the first-class
-ranked identity `await_type` lacks. Ride the notify/renudge orders and
-the alert model rather than duplicating them.
+- **There is no flag-for-attention.** `gc.attention` has no upstream
+  meaning, and the pack does not use it either. "An agent believes a human
+  should look at this" has exactly one form — file a visit on the subject —
+  so the board derives what is pressing from real state (open visits, human
+  gates, stranded work) rather than from self-assertions with no lifecycle.
 
 ## How a conversation starts: operator-origin intake (2026-08-14)
 
@@ -330,22 +255,26 @@ bust are inherited. `assets/scripts/gate-visit.test.sh` now sweeps
 `assets/scripts/*.sh` as well as `formulas/*.toml`, so that copy is guarded on
 the same terms as the formula ones.
 
-**Why the fallback stays.** The react path is fire-and-forget: `gc sling`
-routes the subject and returns 0, and the visit appears only when a
-proactive session runs the formula. Proactive is always-on
+**Why the fallback stays.** The react path is fire-and-forget:
+`tools/gc-proactive.sh sling` files a reaction bead for the subject —
+`task_kind=reaction`, routed to the proactive pool, naming the subject in
+`gc.reaction_subject` and by a `tracks` edge — and returns 0. It pours
+nothing on the subject and leaves the subject's own route alone, and a visit
+appears only once a proactive session has claimed that reaction bead and put
+the subject to the operator. Proactive is always-on
 (`max_active_sessions = 2` bounds how many reactions run at once, and routed
-beads queue until a slot frees; what one `scan --sling` sweep hands out is
-bounded separately by `GC_PROACTIVE_SLING_CAP`), so a queued reaction is
-picked up rather than dropped — but the path is still chosen by asking
+reaction beads queue until a slot frees; what one `scan --sling` sweep hands
+out is bounded separately by `GC_PROACTIVE_SLING_CAP`), so a queued reaction
+is picked up rather than dropped — but the path is still chosen by asking
 `tools/gc-proactive.sh deliverable` first (exit 0/1 plus the reason, printed
 either way), and the fallback files the visit directly whenever the answer is
 no. That verb answers no on a positive
 finding in this city's agent roster: the pool is not registered, it is
 suspended, or it is capped at zero slots. A roster it cannot read answers yes,
 because absence of evidence is not evidence the pool is gone. The seam is
-fail-safe by design: a react path that could not tell would leave a routed bead
-nobody picks up and *no visit at all* — a topic that looks filed and is
-silently forgotten, the one outcome this channel exists to prevent.
+fail-safe by design: a react path that could not tell would leave a routed
+reaction bead nobody picks up and *no visit at all* — a topic that looks filed
+and is silently forgotten, the one outcome this channel exists to prevent.
 
 Note what is *not* here: there is no mail-to-visit bridge, and no seam for one.
 A mailbox whose endpoint spins up a visit per message was considered and
@@ -557,10 +486,16 @@ visit, so a gated subject can wait up to one pass, a 5-minute cooldown, with no
 visit. A sitting resolves the gate when the operator rules, through converse's
 discharge. On a recommend, Accept is the operator's answer: `gc-helm.sh accept`
 resolves every open, unassigned demand on the subject, the reaction's gate among
-them, after it dispatches the recommended mol and before it dismisses the
-subject's visits. Dismissing the visit without an answer leaves the gate open
-and the question owed, with no second visit offered unless `gc.gate_visit` is
-unset.
+them, before it dispatches the recommended mol. The order matters because the
+dispatch starts the run at once, and `mol-polecat-work`'s load-context cancels a
+run whose work bead still has an open blocker. A demand that will not resolve
+stops Accept before the dispatch. When the dispatch does not land, because a
+demand would not resolve or the sling failed, Accept reopens the demands it
+resolved, so the question stands. When a reopen does not land or cannot be read
+back, Accept exits 4 and names the demands to check and reopen by hand. Accept
+dismisses the subject's visits only after the dispatch lands. Dismissing the
+visit without an answer leaves the gate open and the question owed, with no
+second visit offered unless `gc.gate_visit` is unset.
 
 ### Two visit channels: keyless conversation, keyed escalation
 
@@ -729,10 +664,9 @@ because live holds predate this and keep working.
 ## How a held sitting ends
 
 Every `converse-<model>` template sets `idle_timeout = "0"`, which takes a
-sitting off the idle ladder entirely: a template whose idle timeout is at or
-below zero is never registered with the idle tracker (`buildIdleTracker`,
-`cmd/gc/cmd_start.go`), `checkIdle` answers false without consulting activity at
-all (`cmd/gc/idle_tracker.go`), and `DecideIdleTimeout` is never reached. A held
+sitting off the idle ladder entirely: Gas City never registers a template whose
+idle timeout is at or below zero with its idle tracker
+([gascity/human-engagement.md](gascity/human-engagement.md#the-idle-ladder)). A held
 converse sitting therefore ends when its VISIT closes: the agent's sign-off, or
 the operator's `gc-helm dismiss <subject>`. The sign-off is terminal — it stamps
 the outcome and closes the visit — so converse takes it only when nothing
@@ -752,25 +686,27 @@ walked away before any sign-off — is the harder, separate case, untouched here
 Two endings the idle setting does not own:
 
 - **A settled sitting is collected by the pack's reap, not by a runtime
-  clock.** A sitting is a manual session, which the awake set keeps for as
-  long as it is neither closed nor drained (`cmd/gc/compute_awake_set.go`), so
-  the `no-wake-reason` drain that collects an ended pool session in about a
+  clock.** A sitting is a manual session, which Gas City keeps desired for as
+  long as it is neither closed nor drained
+  ([gascity/human-engagement.md](gascity/human-engagement.md#a-manual-session-stays-up-until-it-is-closed)),
+  so the `no-wake-reason` drain that collects an ended pool session in about a
   minute never reaches it, and `converse-reap` above is what collects it. See
   *How a pane dies when no sitting is live*, below.
-- **`DecideMaxSessionAge` still fires regardless of who is holding**, so a
-  health restart can still take a held sitting out from under a reader. The
-  per-model converse templates run `wake_mode = "resume"`, so that restart
-  replays the thread and the sitting continues; the trace-before-you-wait
-  discipline holds because the demand is the durable gate the board reads
-  and the work blocks on, not because the thread is lost.
+- **No max-age restart reaches a sitting.** No `converse-<model>` template
+  sets `max_session_age`, and an unset age is off. Setting one would end
+  long sittings instead of refreshing them. Gas City's max-age restart defers
+  while the session holds open assigned work and has no attachment rung
+  ([gascity/human-engagement.md](gascity/human-engagement.md#max_session_age)),
+  and a sitting's visit is assigned to it, so the restart would fire on the
+  first tick after the visit closes and destroy the pane and its scrollback
+  under an attached operator. The restarted session would wake unattached
+  with its visit closed, and `converse-reap` would collect it.
 
 The cost is real: a held visit nobody answers keeps its sitting's session
 running indefinitely, where an idle clock would recycle it. Nothing rations
-sittings either. `max_active_sessions` does not cap a manual session:
-`gc session new` checks no session count (`cmd/gc/cmd_session.go`), and the
-pool's scale-down drop paths skip a manual session
-(`cmd/gc/build_desired_state.go`), so every unanswered hold is one more live
-provider process (verified 2026-10-05). `gc-helm dismiss` is the release
+sittings either. `max_active_sessions` does not cap a manual session
+([gascity/human-engagement.md](gascity/human-engagement.md#a-manual-session-stays-up-until-it-is-closed)),
+so every unanswered hold is one more live provider process. `gc-helm dismiss` is the release
 valve, and converse puts it at the foot of every framing it posts as a
 copyable line, so ending a sitting is a switch in the thread rather than an
 errand the operator has to remember.
@@ -792,57 +728,23 @@ converse's copyable line is on screen. After a y/n confirm,
 argument-free dismiss under that session's identity, so dismiss itself infers
 which subject the sitting is on. Nothing is typed into the pane.
 
-The ending the pack cannot reach from config at all is the pane itself:
-`Provider.Stop` destroys the tmux session, its pane and its scrollback on every
-stop path, so any stop takes the thread whole. Retiring the session rather than
+The ending the pack cannot reach from config at all is the pane itself: Gas
+City's stop destroys the tmux session, its pane and its scrollback on every
+stop path
+([gascity/human-engagement.md](gascity/human-engagement.md#stopping-a-session-destroys-its-pane)),
+so any stop takes the thread whole. Retiring the session rather than
 destroying it is upstream work, evaluated in
 `specs/tk-ghlg1e/layout-stability.md`.
 
-Read what follows as what the runtime does, not as what converse experiences. A
-hold has no timeout *in the pack's doctrine* and none in converse's config, but
-the runtime under it does end sittings, and it governs every role that still sets
-a timeout. It is also what converse gets back the moment someone puts a number in
-that field:
-
-- **`wisp_ttl` is not this, and never was.** `[daemon] wisp_ttl` is how
-  long a **closed** wisp — an ephemeral v1 formula-run bead — survives
-  before the GC deletes it (`internal/config/config.go`, `WispTTL`;
-  enabled only when `wisp_gc_interval` and `wisp_ttl` are both non-zero).
-  It reaps *records*, not sessions, and never touches a live held visit.
-  Reading the city's `wisp_ttl = "8h"` as the thing that collects
-  conversations is a coincidence of two unrelated 8h values.
-- **The clock that ends a sitting is the agent's own `idle_timeout`** —
-  pack-owned config (each `agents/converse-<model>/agent.toml`), not core
-  policy.
-- **"Idle" means the terminal produced no output.** The reconciler's
-  `checkIdle` reads the provider's last activity, which for tmux is the
-  most recent per-window `#{window_activity}` (`Tmux.rawSessionActivity`,
-  `internal/runtime/tmux/tmux.go`) — pane output and `send-keys`. **An
-  operator reading a held thread generates neither**, so activity alone
-  cannot tell sustained attention from abandonment. For a **detached**
-  reader — watching through the dashboard or scrollback, not connected to
-  the pane — that is the whole story, and reading a thread for 8h is what
-  gets it collected. (An *attached* terminal is now observed separately and
-  defers the reap — see *The core seam, now closed*, below.)
-- **Holding work defers the stop, but only briefly.**
-  `DecideIdleTimeout` (`internal/session/lifecycle_timers.go`) walks
-  blocker → pending interaction → attachment → assigned work → stop, and a
-  held visit is assigned work, so the stop defers on the assigned-work rung
-  (the attachment rung above it — landed since; see below — is a separate,
-  uncapped defer). The reconciler caps the assigned-work streak:
-  `assigned_work_defer_limit` (default 3 —
-  `defaultAssignedWorkDeferLimit`, `cmd/gc/assigned_work_defer_tracker.go`)
-  consecutive same-anchor defers, then `DecideAssignedWorkExhausted`
-  forces the stop under its own `assigned_work_exhausted` reason. At
-  `patrol_interval = "30s"` the defer buys ~90 seconds, not immortality.
-- **The kill clears the pane; a resume sitting replays past it.** The stop
-  path calls `ClearScrollback` (`cmd/gc/session_reconciler.go`), wiping the
-  pane's history. The per-model converse templates run `wake_mode =
-  "resume"`, which replays the provider transcript across gaps far longer
-  than the timeout (measured at ~15h, `specs/tk-oml75/spike-report.md` §1),
-  so a restarted sitting comes back with its thread. A resume that fails
-  comes back without it, and there the durable trace is what the respawn
-  reads instead.
+A hold has no timeout *in the pack's doctrine* and none in converse's config,
+but the runtime under it does end sittings for every role that still sets a
+timeout, and converse gets that back the moment someone puts a number in
+`idle_timeout`. What the runtime does there — what counts as idle, the rungs
+that defer a stop and the cap on the assigned-work defer, the attachment
+rung, the scrollback a stop clears, why `[daemon] wisp_ttl` is unrelated, and
+what a `wake_mode = "resume"` restart replays — is Gas City behavior, stated
+in [gascity/human-engagement.md](gascity/human-engagement.md#the-idle-ladder).
+Read it as what the runtime does, not as what converse experiences.
 
 *Seam:* **nothing pack-owned runs at kill time**, so there is no
 warn-before-reap. The converse contract stamps the subject's takeaway when
@@ -1010,51 +912,22 @@ which silently disables the out-of-group guard above on every wake.
 
 Every `converse-<model>` template holds that field empty, but emptiness is not
 what protects a held sitting. A sitting runs as a manual session, never
-pool_managed, and all three claim backstops gate `governs()` on
-`pool_managed` (`cmd/gc/idle_nudge.go`, `cmd/gc/execution_backstop.go`), so
-no backstop nudge and no drain reaches a converse sitting whatever this field
-holds. An empty field is not a uniform skip either, and for a pool_managed
-session the three backstops split on it. The execution backstop resolves its
-text to the empty field, so the shared empty-content path in
-`cmd/gc/nudge_backstop.go` runs that backstop's `exhausted`, the tracked drain
-that releases the claim. The pool-claim backstop substitutes a default claim
-nudge for an empty one and re-delivers instead. The continuation backstop's
-`exhausted` is a no-op. So only the execution backstop drains on an empty
-nudge. What the empty field does reach is the launch delivery, where the
-prompt is prepended to it and still arrives, so the second constraint above is
-what any text put here has to satisfy.
+pool_managed, and no claim backstop governs a session that is not
+pool_managed, so no backstop nudge and no drain reaches a converse sitting
+whatever this field holds
+([gascity/human-engagement.md](gascity/human-engagement.md#the-controllers-backstops-govern-pool-sessions-only)).
+What the empty field does reach is the launch delivery, where the prompt is
+prepended to it and still arrives, so the second constraint above is what any
+text put here has to satisfy.
 
-*The core seam, now closed (landed 2026-08-12):* attachment is observable —
-`runtime.Provider.IsAttached` — and the idle ladder now consults it.
-gascity merged `gc-rjtk1` (PR #126, commit `c8bff331d`; confirmed in
-gascity `origin/main` 809a97f47): the reconciler supplies
-`TimerFacts.Attached` from `sp.IsAttached(name)`
-(`cmd/gc/session_reconciler.go`), and `DecideIdleTimeout`
-(`internal/session/lifecycle_timers.go`) gained an **attachment rung**
-between pending interaction and assigned work —
-`if f.Attached { return deferDecision("attached", "deferred_attached") }`.
-So "an operator is attached to this pane" now defers the reap, and
-read-attention on a connected pane finally counts. The rung is
-deliberately narrow, so the mechanism above still holds:
-
-- **A defer, not an exemption.** It is re-evaluated every tick and the stop
-  resumes the moment the terminal detaches — a forgotten attached pane is
-  *not* immortal. Unlike the pending arm it cancels no drain and skips no
-  wake pass; it is a plain defer.
-- **The *attached* case only.** Idle is still measured from output
-  activity, so a **detached** reader (dashboard or scrollback) is still
-  indistinguishable from abandonment and still gets collected — attachment
-  is a separate signal, not a fix to activity measurement. The pack's
-  trace-at-hold-begin lever above therefore still earns its keep.
-- **Aligns two subsystems.** `ComputeAwakeSet` already re-wakes an attached
-  session via its "attached" wake override, so the old behavior killed a
-  watched pane only to bounce it straight back awake — the same
-  idle-kill/wake treadmill the assigned-work rung fixed (`ga-3ox7rk`).
-- **Idle-timeout only.** `DecideMaxSessionAge` (a health restart, e.g.
-  credential expiry) still fires regardless of who is attached.
-
-Design record: `specs/tk-bzm86/design-doc.md`; the cross-rig filing
-`gc-rjtk1` is now resolved upstream.
+Attachment is the one reading signal the runtime has, and only this city's
+gascity fork reads it: there an attached terminal defers the idle stop, a
+detached reader is still indistinguishable from abandonment, and the max-age
+restart ignores attachment altogether
+([gascity/human-engagement.md](gascity/human-engagement.md#the-idle-ladder)).
+That is why the trace is written when the hold begins rather than bought with
+a longer clock, and why no converse template sets `max_session_age` (*How a
+held sitting ends*, above). Design record: `specs/tk-bzm86/design-doc.md`.
 
 *This section is about a sitting that is still **held**.* A sitting that
 has **ended** leaves a live pane, and that pane dies on a different path: the
@@ -1074,11 +947,11 @@ while sittings ran in a pool and the runtime's drain took the pane).
 Once a sitting **ends** — the visit closed, the takeaway stamped, the
 sign-off posted — the session still has a live pane, and the thread the
 operator is reading is still on screen. No runtime clock takes that pane. A
-sitting is a manual session, and `ComputeAwakeSet` keeps a manual session in
-the desired set, under the reason `manual`, for as long as it is neither
-closed nor drained and its template is still configured
-(`cmd/gc/compute_awake_set.go`). So the `no-wake-reason` drain, which begins
-when a live session has no wake reason left, never begins for a sitting.
+sitting is a manual session, and Gas City keeps a manual session desired for
+as long as it is neither closed nor drained and its template is still
+configured, so the `no-wake-reason` drain, which begins when a live session
+has no wake reason left, never begins for a sitting
+([gascity/human-engagement.md](gascity/human-engagement.md#a-manual-session-stays-up-until-it-is-closed)).
 Nothing idle-sleeps one either: that takes a `[chat_sessions] idle_timeout`
 or a `[session_sleep]` policy, and this city sets neither (`gc config show`,
 2026-10-05).
@@ -1095,19 +968,13 @@ attention nor anything they have typed is an input to either.
 Three things about that path are worth knowing before trusting a pane:
 
 - **Nothing is typed into the pane; the pane is taken whole.** The reap's
-  close is `gc session close`, which stops the runtime before it marks the
-  session closed (`Manager.CloseDetailed`, `internal/session/manager.go`).
-  That stop is `Provider.Stop` (`internal/runtime/tmux/adapter.go`) →
-  `KillSessionWithProcessesExcluding` (`internal/runtime/tmux/tmux.go`):
-  SIGTERM to the pane's whole process tree with a grace window, SIGKILL to
-  whatever survives it, then `tmux kill-session`. `Provider.Interrupt` — the
-  one API that would put a `C-c` in the pane — is not on this path. It is
-  the same stop the runtime's own drain ends in, and the drain code says so in
-  as many words: the reconciler's Phase 1 drain-ack check "calls sp.Stop()
-  for a clean SIGTERM/SIGKILL — no Ctrl-C keystroke injection into the pane"
-  (`cmd/gc/session_wake.go`). So the composer is never cleared first. A draft
-  is still sitting in the pane, intact, until the pass that closes it, and
-  then the pane is gone.
+  close is `gc session close`, and Gas City's stop kills the tmux session
+  and then signals the pane's captured process tree
+  (`KillSessionWithProcessesExcluding`), with
+  no Ctrl-C keystroke injection into the pane first
+  ([gascity/human-engagement.md](gascity/human-engagement.md#stopping-a-session-destroys-its-pane)).
+  So the composer is never cleared first. A draft is still sitting in the
+  pane, intact, until the pass that closes it, and then the pane is gone.
 - **Attachment protects, but only the pane on screen.** The reap skips an
   attached session, because attachment is the only signal the pack has that
   someone is at a pane. This city runs **one tmux client** switched between
@@ -1117,15 +984,14 @@ Three things about that path are worth knowing before trusting a pane:
   not an input at any point: nothing in the reap or in the stop reads the
   pane's contents.
 - **A pool session ends differently, and a sitting is outside it.** A pool
-  session left with no wake reason is drained as `no-wake-reason`: the
-  reconciler records the drain, sets `GC_DRAIN_ACK=1` on the session a tick
-  later, and the drain-ack consumer stops it, measured at about 58 seconds
-  after the last wake reason went (2026-08-20). That stop event reads
+  session left with no wake reason is drained as `no-wake-reason` about a
+  minute after its last wake reason goes, and the reconciler acknowledges
+  that drain on the agent's behalf, so its stop event reads
   `"drain acknowledged by agent"` even when the agent never ran
-  `gc runtime drain-ack`, because the reconciler acks on its behalf
-  (`GC_DRAIN_ACK_SOURCE=reconciler`, `cmd/gc/session_wake.go`), so do not
-  read that event as an agent decision. A sitting's teardown is the reap's
-  `gc session close`, never this drain.
+  `gc runtime drain-ack`
+  ([gascity/human-engagement.md](gascity/human-engagement.md#a-pool-session-with-no-wake-reason-is-drained)).
+  Do not read that event as an agent decision. A sitting's teardown is the
+  reap's `gc session close`, never this drain.
 
 *Seam:* the decision to end a settled sitting is pack-owned — it is
 `converse-reap.sh` — but the pack cannot read a pane's typed input, so the
@@ -1152,43 +1018,6 @@ holds them they are not durable anywhere.
 
 ## Watch items — moving now, re-verify before building on them
 
-- **`gc.session_affinity`** — **this watch fired; re-derived 2026-08-14.**
-  The read side landed. Upstream #4845 (`b02df40bc`, 2026-08-02; reached
-  the fork on the 2026-08-14 rebase) makes `gc.session_affinity ==
-  "require"` a *necessary* conjunct of the controller's
-  stalled-continuation backstop — first in the candidate predicate
-  (`cmd/gc/build_desired_state.go:4703`,
-  `continuationRowCouldBeCandidate`), then again in the last-moment guard
-  before delivery (`cmd/gc/idle_nudge.go:233`,
-  `poolContinuationBackstop.revalidate`), where anything but `require`
-  resolves to *clear*: the pending nudge is dropped and its pacing marker
-  erased. The key therefore now helps decide whether a stalled graph-v2
-  continuation step is nudged back to the session already holding it. The
-  backstop is deliberately bounded (90-second grace, 3-minute backoff,
-  three attempts) and also demands exact
-  store/workflow-root/session-identity/session-generation provenance plus
-  a non-empty `gc.continuation_group`. The write side the 2026-08-06 pass
-  noted is still live and is what populates the readers: the value is
-  stamped at route time on pool-routed graph.v2 steps
-  (`internal/graphroute/graphroute.go:219`) and by drain on shared-drain
-  executable steps (`internal/dispatch/drain.go:1532`) — jointly the
-  population this backstop can reach. The separate
-  `gc.drain_continuation_group` key also still exists
-  (`internal/beadmeta/keys.go:81`), feeding drain's shared-group suffix
-  (`internal/dispatch/drain.go:1557`).
-
-  What survives narrowly: **no *routing* path reads it.** The hook vacuum
-  still routes on `gc.continuation_group` + `gc.root_bead_id`, and
-  affinity cannot send a bead anywhere. Upstream's own comments still say
-  exactly that (`internal/beadmeta/keys.go:476`, echoed at
-  `cmd/gc/pool_session_name.go:448`) and #4845 did not update them —
-  accurate about routing, stale as a description of consumption. **The
-  seam:** warm continuity is no longer carried by the group key alone.
-  Clearing or rewriting `gc.session_affinity` on a live step now silently
-  disables the one path that recovers a stalled continuation, so treat it
-  as load-bearing state cleared *only* together with the group
-  (`beadmeta.SessionAffinityMetadataKeys` is that list), not as hygiene on
-  an advisory field.
 - **The roles pack's growth** — every new upstream role is a standing
   question against a hand-authored one here. Recorded tripwire: when
   upstream ships a role covering something the pack hand-authors,
@@ -1338,15 +1167,9 @@ above — which is the point.
 
 ## Refresh procedure
 
-Claims here date from a source-level verification of 2026-08-06 (gascity
-clone `3e629ad`; gascity-packs `0b95742`), cross-checked against the live
-public docs on 2026-08-08 (site index: https://docs.gascity.com/llms.txt;
-the site publishes no changelog, so recency must be inferred or diffed
-against a docs-source clone). Re-verify before building on any
-load-bearing claim: upstream moves fast, and the public docs lag the
-source — claims marked **source-only** above are real but invisible to a
-docs-site check; "not in the docs" is not "false". Ownership follows
-[gascity-reference.md](gascity-reference.md)'s refresh procedure and bar;
-the doc-keeper drift audit covers this file like any other central doc.
-When a watch item fires or a claim goes stale, update the fact *and* the
-seam it carries, and date the change.
+This page states the pack's own model, so it changes with the pack's code:
+update it in the same PR as a change to a visit producer, the converse
+prompt or skills, `gc-helm.sh`, or the board. The Gas City facts it links are
+re-verified by the refresh procedure in
+[gascity/human-engagement.md](gascity/human-engagement.md#refresh-procedure);
+when one of them moves, re-derive the seam here that rests on it.

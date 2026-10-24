@@ -50,18 +50,21 @@ routed, never assigned, and never blocks anything.
 - **Body sections:** `## Statement` (the generalizable point),
   `## Quote` (verbatim feedback + link), `## Proposed norm` (draft rule
   text, explicitly non-binding), optionally `## Context` (what the diff
-  was doing).
+  was doing). An outside-review observation carries no proposed norm: its
+  statement condenses what the review post said, and its context names the
+  PR and where the post sits.
 - **Metadata:**
 
 | key | values |
 |---|---|
 | `task_kind` | `observation` |
-| `obs.category` | free slug; the distiller owns the vocabulary and merges near-duplicates. Also the finding half of the dedup key, so two observations from one event need different slugs |
+| `obs.category` | free slug; the distiller owns the vocabulary and merges near-duplicates. Also the finding half of the dedup key, so two observations from one event need different slugs. `outside-review` is reserved for the miner's outside capture, one observation per review post |
+| `obs.correction` | on an `outside-review` observation whose post makes a standing correction: the correction's slug, a category slug reused when one fits. The recurrence metric's M1 counts the post under it |
 | `obs.scope` | `repo:<rig>` \| `agent:<role>` \| `global` — guess narrow |
 | `obs.source` | `self` \| `miner` \| `operator` |
 | `obs.directive` | `standing` \| `diff` — capture-time guess; the distiller re-judges |
 | `obs.endorsed` | `operator` when filed via "learn this" |
-| `obs.provenance` | the event half of the dedup key: `pr:<owner/repo>#<n>:comment:<id>`, `pr:<owner/repo>#<n>:veto`, or `bead:<id>:turn:<date>` — `<owner/repo>` is the full slug (`gh repo view --json nameWithOwner -q .nameWithOwner`, or parse the origin URL) |
+| `obs.provenance` | the event half of the dedup key: `pr:<owner/repo>#<n>:comment:<id>`, `pr:<owner/repo>#<n>:review:<id>`, `pr:<owner/repo>#<n>:veto`, or `bead:<id>:turn:<date>` — `<owner/repo>` is origin's full slug (`gh repo view "$(git remote get-url origin)" --json nameWithOwner -q .nameWithOwner`, or parse the origin URL). A bare `gh repo view` names whichever remote gh picks, which is upstream in a checkout that has one and no `gh repo set-default` |
 | `gc.outcome` | `recorded`; `--status=closed` in the same update |
 | `gc.work_outcome` | `no-op` — an observation records feedback and ships no code, so this is the honest value for the work-record gate that fires on every close |
 
@@ -85,9 +88,42 @@ Four producers file the same bead contract:
    instance first, then files one observation bead with
    `obs.source=self`.
 2. **PR miner.** The `mol-feedback-miner` order sweeps each importing
-   rig's merged/closed PRs' review and conversation comments and files
-   what self-report missed, with `obs.source=miner`. It files
-   observations only — never patterns, never proposals.
+   rig's merged/closed PRs' review and conversation comments, with
+   `obs.source=miner`, in two captures:
+   - **The outside capture.** Every review post from outside the city
+     becomes one condensed observation, `obs.category=outside-review`,
+     whether or not it is about standing behavior. A post that makes a
+     standing correction also names the correction's slug in
+     `obs.correction`, so the recurrence metric counts its repeats. A post
+     is the city's when it carries the city's mark
+     (`assets/scripts/pr-post.sh`). An unmarked post is outside when another
+     login posted it, or when it is Claude Code's `/code-review` output
+     posted under the city's login. A GitHub App's approvals and deploy
+     notices are not review feedback. A deploy notice is told by what it
+     says: Vercel's opens with its `[vc]:` line. Any other conversation
+     comment an app posts is outside. The rig's store records the day from
+     which the outside capture still owes a read of every merged or closed
+     PR updated since, and every run reads the PRs updated since then. A
+     post updates its PR, so a post made long after its PR closed is read
+     too. A rig's first run records the day `outside_backfill_days` (30)
+     back, so the capture back-fills the month before it. After each run the
+     day moves to the oldest last update among the PRs the run still owes,
+     one that did not read or has an outside post not yet recorded, or to
+     the run's own day when it owes none. So a back-fill one run could not
+     finish is finished by the runs after it, however long after they come.
+     The distiller reads these observations as a set for what the city's
+     review missed, and a proposal from them is a `review-rubric` amendment
+     or a change to the correctness method, never a rule per observation
+     (`skills/learning-distill/SKILL.md`).
+   - **The standing-behavior capture.** The city's own posts are read for
+     corrective feedback about standing behavior that self-report missed, at
+     most `max_obs_per_run` a run. An outside post is never read here, so the
+     miner files one observation per outside post, not two of one point.
+
+   An unmarked post under the city's login that is not `/code-review` output,
+   posted after its PR's provenance cutover, means a writer skipped the mark;
+   the miner flags it in one patrol finding. The miner files observations and
+   that finding only — never patterns, never proposals.
 3. **Operator fast path.** "learn this: …" in any conversational session
    files the same bead with the operator's wording as `## Statement`,
    `obs.source=operator`, and `obs.endorsed=operator`. Endorsed
@@ -260,7 +296,9 @@ stops coming back. The report reads observation beads across every store and
 collapses duplicate captures — one correction read by both self-report and
 the miner. Two observations are the same correction when they share a
 provenance key AND an `obs.category`: a provenance key can name a whole
-turn, and a turn carries several distinct corrections. It gives two numbers:
+turn, and a turn carries several distinct corrections. An outside-review
+observation that names a correction counts under that slug as its category.
+It gives two numbers:
 
 - **M1, repeat feedback by category.** The share of events in the window
   whose `obs.category` was already seen on an earlier event. `obs.category`
@@ -269,6 +307,10 @@ turn, and a turn carries several distinct corrections. It gives two numbers:
   its own, the repeat count is pinned to (categorised minus distinct) and the
   share measures slug reuse rather than recurrence. The report withholds the
   rate when the key does not discriminate, and reports the spread instead.
+  The outside capture's `outside-review` names where feedback came from, not a
+  correction. M1 counts an outside post that names a correction under its
+  `obs.correction`, and leaves the rest out, counting them on a line of their
+  own.
 - **M2, recurrence after adoption.** Per adopted entry, the observations
   attributed to its pattern bead since its adoption date. Attribution runs
   through `obs.distilled`, which only the distiller stamps. An anchor records

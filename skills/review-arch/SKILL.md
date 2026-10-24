@@ -17,13 +17,31 @@ Read the architecture reference docs before you judge the diff: `docs/architectu
 and the `docs/architecture/` directory it anchors, in `<worktree>`, the reviewed
 commit. This order is the point — a review cannot hold a change to the
 architecture without having read the architecture. `docs/architecture.md` links
-the deeper references; follow the ones the diff touches. A reference missing at
-the reviewed commit is a gap you note, not a reason to pass or fail the change.
+the deeper references; follow the ones the diff touches.
 Then read the diff at `<reviewed_oid>`, `git diff origin/<review_base>...HEAD`
 in `<worktree>`, and the anchor `<anchor_bead>` for what the change is for. The
 rig's guidance for this check, the reviewed commit's `docs/review-arch.md`,
 which the review formula printed when the commit carries one, is where a rig
 says where it keeps its architecture when that is not where this method looks.
+
+A `docs/architecture.md` at the reviewed commit is a precondition of approval,
+because without one the review has no architecture to hold the change to. A
+commit without one earns `request-changes`, with a finding that asks the change
+to add the document with a passable account of the architecture the change
+covers. Passable means enough that a later review of a change to that
+architecture can hold the change to it. The rest of the repo's architecture is
+not this change's to write. File it as a follow-up under the token
+`docs/architecture.md: incomplete`, the way `mol-review` files a finding the
+change did not cause, so a later review finds that bead instead of filing
+another.
+
+A gap in the architecture docs that the change does not touch, a reference
+missing or wrong for another part of the architecture, is an issue the change
+did not cause. File it the same way, and do not hold the change for it. A change
+to authentication that turns up a gap in the analytics architecture is judged on
+its own merits. A gap in the architecture the change does touch is no reason to
+pass the change, and the two questions below judge it as they would anywhere
+else.
 
 ## What it judges
 

@@ -47,23 +47,26 @@ has push rights.
 
 ## mol-design-convoy — the molecule
 
-`formulas/mol-design-convoy.toml` is a dispatch molecule shaped like
-`mol-first-reaction`: slung `--on` a single subject (the initiative), it reads
-the input convoy's one tracked member, orchestrates, and drains. It writes no
-code and needs no worktree of its own. Its steps:
+`formulas/mol-design-convoy.toml` is a dispatch molecule: slung `--on` a single
+subject (the initiative), it reads the input convoy's one tracked member,
+orchestrates, and drains. It writes no code and needs no worktree of its own.
+Its steps:
 
 | Step | What it does |
 |---|---|
 | `load-context` | Read the subject and its recommendation card for the design topic and intended implementation. Resolve `design_gated` (var, default `true`). |
-| `seed-convoy` | Run `convoy-seed.sh`: create the owned convoy, set `target = integration/<convoy-id>`, cut and push the branch. Record the convoy id on the subject. |
+| `seed-convoy` | Run `convoy-seed.sh`: create the owned convoy, set `target = integration/<convoy-id>`, cut and push the branch. Record the convoy id on the subject, and write the subject's `until` edge onto the convoy and read it back. |
 | `arm-design` | File the design child, link it parent-child to the convoy, read the link back, and sling `mol-polecat-work`. |
 | `arm-implementation` | File one implementation child that builds the initiative per the design. `design_gated=true`: a `blocks` edge from the design child plus a `deferred-dispatch.sh arm`, so the design's closure dispatches it. `design_gated=false`: sling it now, in parallel. Each edge is read back before anything dispatches. |
-| `drain` | Close the step chain and drain. |
+| `drain` | Hand the subject to the convoy: clear the pour's stamp on it, remove the `tracks` edges to it from this run's input convoy and from any earlier pour's input convoy that no open run names, and close the input convoys left tracking nothing. Then close the step chain and drain. |
 
 Every step re-derives the subject from the input convoy in its own shell and
 records its result on the subject (`gc.design_convoy_id`, `gc.design_child`,
 `gc.impl_child`, and the `*_armed` markers), so a crashed run resumes without
-creating a second convoy, child, or workflow. An arm stamps its `*_armed` marker
+creating a second convoy, child, or workflow. `drain` removes the edge the
+others derive the subject from, and removes it last, so a re-run of `drain`
+that finds the input convoy tracking nothing has only that convoy left to
+close. An arm stamps its `*_armed` marker
 only after every setup write it made has landed and read back. A link or
 `blocks` edge that does not read back fails the step with the marker unstamped,
 so the resume re-runs that arm rather than skipping it. The read-back decides,
@@ -131,13 +134,51 @@ integration branch to the default branch. The same universal rule holds that PR
 until an operator's approval stands on it, so the operator reviews the whole
 unit, design and implementation together, before the default branch moves.
 
+## When the subject closes
+
+The subject is the initiative, and its work is the owned convoy's, so it closes
+when the convoy does. The graduation PR's merge closes the convoy. Work that
+waits on the subject through a `blocks` edge starts once the subject closes.
+
+`seed-convoy` writes an `until` edge from the subject onto the convoy. Once the
+convoy closes, the deferred-dispatch reconcile pass closes the subject through
+`bead-rehome.sh`, pointing `gc.superseded_by` at the convoy
+([deferred-dispatch.md](deferred-dispatch.md#the-resolved-by-consumer-until)).
+That pass closes only a bead that carries no live work, as
+`assets/scripts/live-work.sh` defines it, and the sling leaves two marks of a
+pour on the subject: the stamp `gc.execution_routed_to`, and the input convoy's
+`tracks` edge. Gas City removes neither while the subject is open, and it
+closes the input convoy only once the subject closes. So `drain`, the run's last
+step, hands the subject off: it clears the stamp, removes the edge, and closes
+the input convoy, which then tracks nothing. It refuses to do so while the
+`until` edge does not read back, which would leave nothing to close the subject.
+The run's other records on the subject (`gc.design_convoy_id`, the child ids and
+the `*_armed` markers) are not live work.
+
+An earlier pour over the subject leaves the same kind of edge from its own input
+convoy. A sling that failed closes that convoy and keeps the edge, and a
+cancelled run keeps both. `drain` releases each such convoy that no open
+workflow root names, before it releases its own, and closes it first when the
+subject is all it tracks. A convoy that an open workflow root still names is
+left alone, and its edge keeps the subject open.
+
+The edge says the convoy resolves the subject, however the convoy closes. A
+convoy closed without landing closes its subject too. To keep the subject open,
+remove the edge first: `gc bd dep remove <subject> <convoy>`.
+
 ## Design-gated versus all-in-one
 
-`design_gated` is a var, default `true`, settled per initiative at the
-recommend-to-Accept point or overridden with `--var design_gated=false`. It is
-read case-insensitively: `false`, `0`, `no`, or `off` selects all-in-one, and
-`true`, `1`, `yes`, or `on` selects design-gated. An empty or unrecognized value
-also selects design-gated, with a warning, so a typo never drops the design gate.
+`design_gated` is a var, default `true`. The operator settles it per initiative
+when acting on the recommendation. Accept's sling passes no var, so an Accept
+takes the design-gated default. For all-in-one, the operator takes the
+recommendation to a sitting (Discuss) instead. The sitting follows the `work`
+skill's steps for taking a recommendation and adds `--var design_gated=false`
+to the sling those steps run. The same steps release the gate that put the
+recommendation to the operator and record the dispatch, which a bare sling
+leaves undone. The var is read case-insensitively: `false`, `0`, `no`, or `off`
+selects all-in-one, and `true`, `1`, `yes`, or `on` selects design-gated. An
+empty or unrecognized value also selects design-gated, with a warning, so a typo
+never drops the design gate.
 
 - **Design-gated** (`true`): implementation waits behind gate 1, so it starts
   only after the operator approves the design. Use it when the design decision
@@ -157,14 +198,16 @@ implementation.
 ## How converse reaches it
 
 The recommend-to-Accept-to-sling path carries the pattern with no special
-handling. Converse stamps `gc.recommended_formula = mol-design-convoy` on the
-subject visit; the board offers Accept while that key is non-empty; and
-`gc-helm.sh accept` slings `gc sling <pool> <subject> --on mol-design-convoy
---var issue=<subject>`, the same single-formula, single-subject shape
-`mol-first-reaction` rides.
+handling. The recommendation is `gc.recommended_formula = mol-design-convoy` on
+the subject, and the board offers Accept while that key is non-empty. Accept
+(`gc-helm.sh accept`) runs
+`gc sling --rig <the subject's rig> <subject> --on mol-design-convoy`. The
+`--rig` pin resolves the subject in its own rig's store, whatever directory the
+sling runs from. The sling carries no `issue` var, because graph.v2 reserves
+`issue`, `convoy_id` and `bead_id`.
 
 Two convoys share the word. Accept's sling creates an **input convoy** whose
 one tracked member is the subject, which the formula reads as `{{convoy_id}}`.
 `seed-convoy` creates the durable **owned convoy** for the PR unit. The input
-convoy is only this pour's handle on the subject. The owned convoy lives on and
-graduates.
+convoy is only this pour's handle on the subject, and `drain` closes it. The
+owned convoy lives on and graduates.

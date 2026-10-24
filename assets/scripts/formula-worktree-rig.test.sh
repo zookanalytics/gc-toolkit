@@ -54,11 +54,28 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 BIN="$TMP/bin"; mkdir -p "$BIN"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'GC'
 # rig list answers the roster file and bd show the bead file; every other call
-# is logged and succeeds.
+# is logged and succeeds, and a bd update also writes its --set-metadata and
+# --unset-metadata to the bead file.
 case "$1 $2" in
   "rig list") cat "$FAKE_ROSTER" ;;
   "bd show")  cat "$FAKE_META" ;;
-  *)          echo "$*" >> "$FAKE_LOG" ;;
+  *)
+    echo "$*" >> "$FAKE_LOG"
+    if [ "$1 $2" = "bd update" ] && [ -n "${FAKE_META:-}" ]; then
+      shift 3
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --set-metadata)
+            jq --arg kv "$2" '.[0].metadata[($kv | sub("=.*$"; ""))] = ($kv | sub("^[^=]*="; ""))' "$FAKE_META" > "$FAKE_META.new" \
+              && mv "$FAKE_META.new" "$FAKE_META"
+            shift 2 ;;
+          --unset-metadata)
+            jq --arg k "$2" 'del(.[0].metadata[$k])' "$FAKE_META" > "$FAKE_META.new" && mv "$FAKE_META.new" "$FAKE_META"
+            shift 2 ;;
+          *) shift ;;
+        esac
+      done
+    fi ;;
 esac
 GC
 cat > "$BIN/lifecycle" <<'LC'
@@ -355,7 +372,7 @@ eq "$(git -C "$D/rig" rev-parse origin/main)" "$STALE" "sync/nomatch: refused be
 eq "$(wt_paths "$D/rig" | count)" 1 "sync/nomatch: nothing registered in the rig repo"
 eq "$(wt_paths "$D/cwd" | count)" 1 "sync/nomatch: nothing registered in the cwd repo"
 
-# --- 5. mol-refinery-patrol: the prep and direct-merge worktrees. ---------------
+# --- 5. mol-refinery-patrol: the prep worktree and the direct landing. ----------
 # patrol_rig <dir> <label>: an origin carrying main and polecat/wb one commit
 # ahead, the rig cloned from it, and a foreign cwd repo whose own origin also
 # carries a main. Sets BASE, FEATURE, FOREIGN and PREP (the rig's prep path).
@@ -385,10 +402,14 @@ eq "$(bare_git "$TMP/push.sh")" "" "push: every git call in the block names its 
 
 printf '%s\n' '[{"metadata":{"branch":"polecat/wb","target":"main"}}]' > "$TMP/meta.json"
 # The pack, where the prep block finds detached-job.sh to stop a gate left
-# running in the prep worktree. It is named by path, so the cwd plays no part.
+# running in the prep worktree and refinery-workspace.sh to stage it, and the
+# direct-merge block finds direct-merge-push.sh, beside the bd-lib.sh it
+# sources and a lifecycle.sh that logs. It is named by path, so the cwd plays
+# no part.
 PACK_CITY="$TMP/pack-city"
 mkdir -p "$PACK_CITY/rigs/gc-toolkit/assets/scripts"
-cp "$HERE/detached-job.sh" "$PACK_CITY/rigs/gc-toolkit/assets/scripts/"
+cp "$HERE/detached-job.sh" "$HERE/refinery-workspace.sh" "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$PACK_CITY/rigs/gc-toolkit/assets/scripts/"
+cp "$BIN/lifecycle" "$PACK_CITY/rigs/gc-toolkit/assets/scripts/lifecycle.sh"
 prep_case() { # <mode>; sets RC, D, NEWHEAD, STALE (and patrol_rig's globals)
   local d="$TMP/prep-$1" rc=0
   mkdir -p "$d"
@@ -424,17 +445,23 @@ grep -qxF 'runtime drain-ack' "$D/gc.log" 2>/dev/null \
 
 echo "── mol-refinery-patrol: direct-merge-push ──"
 block "$PATROL_TOML" direct-merge-push "$TMP/merge.sh"
-eq "$(bare_git "$TMP/merge.sh")" "" "direct-merge: every git call in the block names its repo with -C"
+# The block runs direct-merge-push.sh, which makes the landing's git calls.
+eq "$(bare_git "$TMP/merge.sh")" "rev-parse " "direct-merge: the only git call without -C is the pack-script locator's"
+eq "$(bare_git "$HERE/direct-merge-push.sh")" "" "direct-merge: every git call in direct-merge-push.sh names its repo with -C"
+
+# bead_file <dir>: the work bead direct-merge-push.sh stamps before its push.
+bead_file() { printf '%s\n' '[{"id":"wb","metadata":{"branch":"polecat/wb","target":"main"}}]' > "$1/meta.json"; }
 
 merge_case() { # <mode>; sets RC, D (and patrol_rig's globals)
   local d="$TMP/merge-$1" rc=0
   mkdir -p "$d/tmp"
   patrol_rig "$d" "merge $1"
+  bead_file "$d"
   # The rebase step leaves the prepared head staged here, detached.
   git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
   pick "$1" "$d/rig"
   ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET=main BRANCH=polecat/wb \
-      LC="$BIN/lifecycle" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$TMP/merge.sh" ) >"$d/out" 2>&1 || rc=$?
+      GC_CITY_PATH="$PACK_CITY" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$TMP/merge.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
 
@@ -444,6 +471,7 @@ for mode in env roster; do
   eq "$(git -C "$D/origin.git" rev-parse main)" "$FEATURE" "direct-merge/$mode: the merge landed on the RIG's origin"
   eq "$(git -C "$D/foreign.git" rev-parse main)" "$FOREIGN" "direct-merge/$mode: the cwd repo's origin is untouched"
   eq "$(git -C "$D/rig" rev-parse origin/main)" "$FEATURE" "direct-merge/$mode: the push is verified against the rig's refreshed origin/main"
+  eq "$(jq -r '.[0].metadata.direct_landing_sha // "none"' "$D/meta.json")" "$FEATURE" "direct-merge/$mode: the landing is stamped on the bead"
   case "$(cat "$D/lc.log" 2>/dev/null || true)" in
     "transition wb --to merged --close --set merged_sha=$FEATURE --set merged_target=main "*)
       ok "direct-merge/$mode: recorded and closed through one lifecycle transition" ;;
@@ -452,9 +480,9 @@ for mode in env roster; do
   # The transition checks the landing in the checkout GC_RIG_ROOT names, so it
   # gets the rig this block resolved, from the roster too.
   eq "$(cat "$D/lc.log.root" 2>/dev/null || true)" "$D/rig" "direct-merge/$mode: the transition runs with GC_RIG_ROOT naming the rig the block resolved"
-  eq "$(wt_paths "$D/rig" | count)" 2 "direct-merge/$mode: the merge worktree is unregistered on exit; the rig and its prep worktree remain"
+  eq "$(wt_paths "$D/rig" | count)" 2 "direct-merge/$mode: no worktree is added for the landing; the rig and its prep worktree remain"
   eq "$(wt_paths "$D/cwd" | count)" 1 "direct-merge/$mode: no worktree is left registered in the cwd repo"
-  eq "$(ls -A "$D/tmp" | count)" 0 "direct-merge/$mode: the scratch directory is removed on exit"
+  eq "$(ls -A "$D/tmp" | count)" 0 "direct-merge/$mode: nothing is left under TMPDIR"
 done
 
 merge_case nomatch
@@ -465,7 +493,82 @@ eq "$(git -C "$D/foreign.git" rev-parse main)" "$FOREIGN" "direct-merge/nomatch:
 grep -qxF 'runtime drain-ack' "$D/gc.log" 2>/dev/null \
   && ok "direct-merge/nomatch: the refinery drains, leaving the work to retry" \
   || bad "direct-merge/nomatch: the refinery drains, leaving the work to retry"
-eq "$(ls -A "$D/tmp" | count)" 0 "direct-merge/nomatch: refused before creating any scratch directory"
+eq "$(ls -A "$D/tmp" | count)" 0 "direct-merge/nomatch: nothing is left under TMPDIR"
+
+# protected_case <label> [<bash option>...]: the block against an origin that
+# refuses the push for branch protection, followed by the strategy the mr path
+# reads. Sets RC and D (and patrol_rig's globals).
+{ cat "$TMP/merge.sh"; echo 'echo "MERGE_STRATEGY=${MERGE_STRATEGY:-unset}"'; } > "$TMP/merge-then.sh"
+protected_case() {
+  local d="$TMP/merge-protected-$1" rc=0
+  shift
+  mkdir -p "$d/tmp"
+  patrol_rig "$d" "merge protected"
+  bead_file "$d"
+  git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "GH006: Protected branch update failed for refs/heads/main." >&2' 'exit 1' \
+    > "$d/origin.git/hooks/pre-receive"
+  chmod +x "$d/origin.git/hooks/pre-receive"
+  pick env "$d/rig"
+  ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET=main BRANCH=polecat/wb \
+      GC_CITY_PATH="$PACK_CITY" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$@" "$TMP/merge-then.sh" ) >"$d/out" 2>&1 || rc=$?
+  RC=$rc; D=$d
+}
+
+# The script's exit 3 sends the block on to the mr path, undrained, with errexit
+# off as in an agent's Bash tool and on as in a shell that keeps it.
+for errexit in off on; do
+  if [ "$errexit" = on ]; then protected_case "$errexit" -eu; else protected_case "$errexit"; fi
+  eq "$RC" 0 "direct-merge/protected, errexit $errexit: the block goes on past the promotion"
+  eq "$(grep '^MERGE_STRATEGY=' "$D/out" || true)" "MERGE_STRATEGY=mr" "direct-merge/protected, errexit $errexit: the block takes the mr path"
+  grep -qxF 'bd update wb --set-metadata merge_strategy=pr --unset-metadata direct_landing_sha' "$D/gc.log" 2>/dev/null \
+    && ok "direct-merge/protected, errexit $errexit: the bead is promoted to merge_strategy=pr and its stamp cleared" \
+    || bad "direct-merge/protected, errexit $errexit: the bead is promoted to merge_strategy=pr and its stamp cleared"
+  grep -qxF 'runtime drain-ack' "$D/gc.log" 2>/dev/null \
+    && bad "direct-merge/protected, errexit $errexit: the refinery does not drain" \
+    || ok "direct-merge/protected, errexit $errexit: the refinery does not drain"
+  eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "direct-merge/protected, errexit $errexit: nothing landed on the rig's origin"
+  [ ! -s "$D/lc.log" ] && ok "direct-merge/protected, errexit $errexit: no lifecycle transition" \
+    || bad "direct-merge/protected, errexit $errexit: no lifecycle transition"
+done
+
+# moved_case <label> [<bash option>...]: the block against an origin/main that
+# moved on after the branch was prepared, followed by the strategy the mr path
+# reads. Sets RC, D and MOVED (and patrol_rig's globals).
+moved_case() {
+  local d="$TMP/merge-moved-$1" rc=0
+  shift
+  mkdir -p "$d/tmp"
+  patrol_rig "$d" "merge moved"
+  bead_file "$d"
+  git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+  git -C "$d/seed" checkout -q main
+  MOVED=$(commit "$d/seed" "landed while the gate ran")
+  git -C "$d/seed" push -q "$d/origin.git" main
+  pick env "$d/rig"
+  ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET=main BRANCH=polecat/wb \
+      GC_CITY_PATH="$PACK_CITY" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$@" "$TMP/merge-then.sh" ) >"$d/out" 2>&1 || rc=$?
+  RC=$rc; D=$d
+}
+
+# The script's exit 4 ends the block undrained, and sends the cycle to
+# next-iteration instead of either landing path.
+for errexit in off on; do
+  if [ "$errexit" = on ]; then moved_case "$errexit" -eu; else moved_case "$errexit"; fi
+  eq "$RC" 4 "direct-merge/moved, errexit $errexit: the block exits 4"
+  grep -qF 'jump to next-iteration' "$D/out" \
+    && ok "direct-merge/moved, errexit $errexit: it says to jump to next-iteration" \
+    || bad "direct-merge/moved, errexit $errexit: it says to jump to next-iteration" "$(cat "$D/out")"
+  grep -q '^MERGE_STRATEGY=' "$D/out" \
+    && bad "direct-merge/moved, errexit $errexit: the block goes on to neither landing path" \
+    || ok "direct-merge/moved, errexit $errexit: the block goes on to neither landing path"
+  grep -qxF 'runtime drain-ack' "$D/gc.log" 2>/dev/null \
+    && bad "direct-merge/moved, errexit $errexit: the refinery does not drain" \
+    || ok "direct-merge/moved, errexit $errexit: the refinery does not drain"
+  eq "$(git -C "$D/origin.git" rev-parse main)" "$MOVED" "direct-merge/moved, errexit $errexit: origin/main is untouched"
+  [ ! -s "$D/lc.log" ] && ok "direct-merge/moved, errexit $errexit: no lifecycle transition" \
+    || bad "direct-merge/moved, errexit $errexit: no lifecycle transition"
+done
 
 # --- 6. mol-refinery-patrol resolves RIG_ROOT one way. -------------------------
 # Every refinery block derives the prep worktree's path from RIG_ROOT, so two

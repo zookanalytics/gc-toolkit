@@ -331,14 +331,14 @@ Rules:
   later pass, once its visit reads closed or gone; it reaps only an
   UNATTACHED pane, so a closed-visit sitting you are still attached to
   waits until it is no longer attended. The per-model sittings run
-  `wake_mode = "resume"` (`agents/converse-opus/agent.toml`), so a health
+  `wake_mode = "resume"` (`agents/converse-opus/agent.toml`), so a
   restart replays the thread and the sitting continues; the durable
   demand and the step-1 re-claim guard cover the rare respawn that comes
   up without it. The record never lives only in the thread, and the
   discipline is unchanged: the sign-off has to land before you close, not after;
   stamp the takeaway when the hold BEGINS (step 5); and append the outcome as
   soon as a sitting settles anything (step 6). That is what the board reads
-  and a later reader inherits. Mechanism: `docs/gascity-human-engagement.md`
+  and a later reader inherits. Mechanism: `docs/human-engagement.md`
   → "How a held sitting ends".
 - **Disposing of a subject: on an operator-agreed ruling, never by hand,
   and never a repo change.** You do not close subjects on your own

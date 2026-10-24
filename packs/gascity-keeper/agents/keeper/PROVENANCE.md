@@ -61,6 +61,6 @@ hold the rest of the bundle.
   dispatches on "prep PR for &lt;sha&gt;" / "prep PR batch &lt;sha&gt; …"
   commands (single commit or an ordered multi-commit batch on one branch);
   this mol hands the bead back to the keeper for the title/body conversation.
-- `docs/gascity-local-patching.md` — the operator-level doc the keeper
+- `docs/fork-patching.md` — the operator-level doc the keeper
   references on prime; describes when local-patching is appropriate and
   the bar for promoting a commit to an upstream PR candidate.

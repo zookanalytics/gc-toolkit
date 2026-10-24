@@ -56,7 +56,10 @@ PROMPT="$REPO/agents/_converse/prompt.template.md"
 ATOML="$REPO/agents/converse-opus/agent.toml"
 SITTINGS=("$REPO"/agents/converse-*/agent.toml)
 HELM="$REPO/assets/scripts/gc-helm.sh"
-ENGAGE="$REPO/docs/gascity-human-engagement.md"
+# The pack's conversation model and the Gas City facts it rides are two
+# pages: each pin below reads the one that carries the text it guards.
+ENGAGE="$REPO/docs/human-engagement.md"
+ENGAGE_GC="$REPO/docs/gascity/human-engagement.md"
 # Steps 2–8 are carried by on-demand skills; step 1 and the routing table stay
 # in the prompt. Each pin below reads the file that carries the text it guards:
 # the prompt for step 1, the routing table and the shared Definitions/Rules, and
@@ -97,7 +100,7 @@ eq() {
     if [ "$1" = "$2" ]; then ok "$3"; else bad "$3" "got '$1' want '$2'"; fi
 }
 
-for f in "$PROMPT" "$ATOML" "${SITTINGS[@]}" "$HELM" "$ENGAGE" \
+for f in "$PROMPT" "$ATOML" "${SITTINGS[@]}" "$HELM" "$ENGAGE" "$ENGAGE_GC" \
     "$SK_RECHECK" "$SK_PREP" "$SK_HOLD" "$SK_SETTLE" "$SK_CONTINUE"; do
     [ -r "$f" ] || {
         printf 'converse-signoff: cannot read %s\n' "$f" >&2
@@ -362,10 +365,8 @@ have "ending rule names the operator lever" 'gc-helm dismiss' "$PROMPT"
 # correcting the ending rule alone is not enough — the reason the stamp is
 # mandatory has to be right here too. That reason is the demand: the hold
 # files a gate the board reads and dependent work blocks on, and a hold
-# that files none parks a bead nothing re-asks. The idle clock being off
-# does not make the session immortal — DecideMaxSessionAge can still
-# restart it, and the running templates resume the thread — but the stamp
-# does not rest on that; it rests on the demand.
+# that files none parks a bead nothing re-asks. The stamp does not rest on
+# whether the session survives a restart; it rests on the demand.
 lacks "no 'a hold has no timeout' claim in the definition" \
     'A hold has no timeout' "$PROMPT" \
     "no idle clock is not no ending: a held sitting still ends when its visit closes (sign-off or dismiss)"
@@ -395,7 +396,7 @@ echo "── the agent config no longer claims timeouts do not end a sitting ─
 lacks "no 'visit boundaries, not timeouts' claim" \
     'visit boundaries, not' "$ATOML" \
     "the claim is false: idle_timeout + the assigned-work defer cap do end a held sitting"
-have "config points at the verified mechanism" 'gascity-human-engagement.md' "$ATOML"
+have "config points at the verified mechanism" 'docs/human-engagement.md' "$ATOML"
 # The config header is the role's definition in its third copy, and it
 # opened with the same equation the prompt did. Fixing one copy of a
 # definition and leaving its siblings stale is how the corrected model
@@ -435,13 +436,32 @@ have "gc-helm carries the operator's dismiss verb" 'cmd_dismiss()' "$HELM"
 have "dismiss ends the sitting by closing the visit" 'the sitting on $bead ends' "$HELM"
 have "the engagement doc records the switch-off" 'off the idle ladder' "$ENGAGE"
 
+echo "── no sitting template sets a max session age ──"
+# The runtime's max-age ladder defers while a session holds open assigned work,
+# and a sitting's visit is assigned to it, so a max age fires on the first tick
+# after the visit closes. The ladder has no attachment rung, so that stop takes
+# the pane and its scrollback from an attached operator, and converse-reap then
+# collects the restarted session. An absent max age is off. It is one config
+# line nothing else guards, and a credential refresh reads as a reason to add
+# one, so every template a sitting can run from is checked for the line itself.
+for SITTING in "${SITTINGS[@]}"; do
+    NAME="$(basename "$(dirname "$SITTING")")"
+    AGE_LINE="$(grep -E '^[[:space:]]*max_session_age[[:space:]]*=' "$SITTING" | tr '\n' ' ')"
+    if [ -z "$AGE_LINE" ]; then
+        ok "$NAME sets no max session age"
+    else
+        bad "$NAME sets no max session age" \
+            "found: ${AGE_LINE% }; the restart fires as the visit closes and destroys the pane under an attached operator"
+    fi
+done
+
 echo "── the verified mechanism is recorded centrally ──"
 have "engagement doc has the ending section" 'How a held sitting ends' "$ENGAGE"
-have "doc corrects the wisp_ttl misreading" 'wisp_ttl' "$ENGAGE"
-have "doc names the tmux activity source" 'window_activity' "$ENGAGE"
-have "doc names the defer cap" 'assigned_work_defer_limit' "$ENGAGE"
-have "doc records the scrollback erasure" 'ClearScrollback' "$ENGAGE"
-have "doc names the unbuilt core seam" 'IsAttached' "$ENGAGE"
+have "doc corrects the wisp_ttl misreading" 'wisp_ttl' "$ENGAGE_GC"
+have "doc names the tmux activity source" 'window_activity' "$ENGAGE_GC"
+have "doc names the defer cap" 'assigned_work_defer_limit' "$ENGAGE_GC"
+have "doc records the scrollback erasure" 'ClearScrollback' "$ENGAGE_GC"
+have "doc names the unbuilt core seam" 'IsAttached' "$ENGAGE_GC"
 
 # Page one outranks a rule further down here too: the doc opens with the
 # pack's vocabulary, and a definition reading "a visit IS a sitting, held

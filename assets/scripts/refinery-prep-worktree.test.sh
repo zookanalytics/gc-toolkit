@@ -13,11 +13,13 @@
 #
 # The merge block also stops a gate an interrupted run left running in the prep
 # worktree before it rebuilds the worktree, and drains without rebuilding it
-# when that gate will not stop or no detached-job.sh is reachable.
+# when that gate will not stop, or when no detached-job.sh or
+# refinery-workspace.sh is reachable.
 #
 # Runs the REAL blocks extracted verbatim from the formula against a real git
-# repo (worktrees need one), the real detached-job.sh, and a stub `gc`. cwd is
-# deliberately the rig root — the exact case that used to strand it.
+# repo (worktrees need one), the real detached-job.sh and refinery-workspace.sh,
+# and a stub `gc`. cwd is deliberately the rig root — the exact case that used
+# to strand it.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -95,10 +97,11 @@ export PATH="$TMP/bin:$PATH"
 export FAKE_LOG="$TMP/drain.log"
 
 # The pack, where the merge block finds detached-job.sh to stop a gate left
-# running in the prep worktree: $GC_CITY_PATH/rigs/gc-toolkit.
+# running in the prep worktree, and refinery-workspace.sh to stage it:
+# $GC_CITY_PATH/rigs/gc-toolkit.
 CITY="$TMP/city"
 mkdir -p "$CITY/rigs/gc-toolkit/assets/scripts"
-cp "$HERE/detached-job.sh" "$CITY/rigs/gc-toolkit/assets/scripts/"
+cp "$HERE/detached-job.sh" "$HERE/refinery-workspace.sh" "$CITY/rigs/gc-toolkit/assets/scripts/"
 export DETACHED_JOB_POLL=1 DETACHED_JOB_STOP_GRACE=2
 
 # --- Build a synthetic origin + rig, with the base advanced under the branch. --
@@ -202,6 +205,17 @@ RUN_CITY="$TMP/empty-city" run_block "$R/rig" "$TMP/merge.sh" && bad "no detache
   || bad "no detached-job.sh: the prep worktree is not rebuilt"
 grep -q DRAIN "$FAKE_LOG" && ok "no detached-job.sh: the refinery drains, leaving the work to retry" \
   || bad "no detached-job.sh: the refinery drains, leaving the work to retry"
+
+: > "$FAKE_LOG"
+NOWS="$TMP/nows-city"
+mkdir -p "$NOWS/rigs/gc-toolkit/assets/scripts"
+cp "$HERE/detached-job.sh" "$NOWS/rigs/gc-toolkit/assets/scripts/"
+RUN_CITY="$NOWS" run_block "$R/rig" "$TMP/merge.sh" && bad "no refinery-workspace.sh: the merge block exits non-zero" \
+  || ok "no refinery-workspace.sh: the merge block exits non-zero"
+[ -e "$PW/left-by-the-gate" ] && ok "no refinery-workspace.sh: the prep worktree is not rebuilt" \
+  || bad "no refinery-workspace.sh: the prep worktree is not rebuilt"
+grep -q DRAIN "$FAKE_LOG" && ok "no refinery-workspace.sh: the refinery drains, leaving the work to retry" \
+  || bad "no refinery-workspace.sh: the refinery drains, leaving the work to retry"
 
 # --- 5. merge mode (shared branch is brought current by merge, not rebase). ----
 M="$TMP/merge"; build_repo "$M" "integration/conv"

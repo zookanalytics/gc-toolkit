@@ -70,6 +70,11 @@ obs() { # id created_at provenance category pattern source
   jq -nc --arg id "$1" --arg c "$2" --arg p "$3" --arg cat "$4" --arg pat "$5" --arg s "$6" \
     '{id:$id, created_at:$c, metadata:{task_kind:"observation", "obs.provenance":$p, "obs.category":$cat, "obs.distilled":$pat, "obs.source":$s}}'
 }
+outside() { # id created_at provenance correction — the miner's outside capture
+  jq -nc --arg id "$1" --arg c "$2" --arg p "$3" --arg cor "$4" \
+    '{id:$id, created_at:$c, metadata:({task_kind:"observation", "obs.provenance":$p, "obs.category":"outside-review", "obs.source":"miner"}
+       + (if $cor == "" then {} else {"obs.correction":$cor} end))}'
+}
 mislabelled() { # id created_at category — carries the label, not the kind
   jq -nc --arg id "$1" --arg c "$2" --arg cat "$3" \
     '{id:$id, created_at:$c, metadata:{"obs.provenance":("prov-" + $id), "obs.category":$cat}}'
@@ -174,6 +179,55 @@ eq "$(jq -r '.corpus.observations' <<< "$K")" "1" \
    "a bead carrying the label but not task_kind=observation is not an observation"
 eq "$(jq -r '.m1_category_repeat.fragmentation.categorised' <<< "$K")" "1" \
    "and its obs.category never reaches the M1 accounting"
+
+# --- 2a2. the outside capture is not a correction category ---------------
+# The miner files every outside review post under outside-review, so a window
+# of them would read as one category repeating. M1 leaves them out; the
+# corpus and M2 still count them.
+mkdir -p "$TMP/stores2o"
+{
+  obs o1 "$(ago 6)" "pr:o/r#40:comment:40" real-slug    ""      self
+  obs o2 "$(ago 5)" "pr:o/r#41:comment:41" outside-review ""    miner
+  obs o3 "$(ago 4)" "pr:o/r#42:review:42"  outside-review tk-pat1 miner
+  obs o4 "$(ago 3)" "pr:o/r#43:comment:43" outside-review ""    miner
+} | jq -s . > "$TMP/stores2o/alpha.json"
+cat > "$TMP/rigs2o.json" <<JSON
+{"rigs":[{"name":"alpha","path":"$TMP/stores2o/alpha.json"}]}
+JSON
+O=$(STUB_RIGS="$TMP/rigs2o.json" "$SUT" --repo "$REPO" --window-days 30 --json 2>&1)
+eq "$(jq -r '.corpus.events_after_dedup' <<< "$O")" "4" "outside-review observations are in the corpus"
+eq "$(jq -r '.m1_category_repeat.window.categorised' <<< "$O")" "1" "M1 leaves the outside capture out of its denominator"
+eq "$(jq -r '.m1_category_repeat.window.repeats' <<< "$O")" "0" "and never counts an outside post as a repeat"
+eq "$(jq -r '.m1_category_repeat.outside_events.window' <<< "$O")" "3" "the report counts the outside posts beside M1"
+eq "$(jq -r '[.m2_post_adoption.rules[] | select(.pattern=="tk-pat1")] | .[0].since_adoption' <<< "$O")" "1" \
+   "an outside post the distiller stamped still counts in M2"
+has "$(STUB_RIGS="$TMP/rigs2o.json" "$SUT" --repo "$REPO" --window-days 30 2>&1)" \
+    "outside review posts that name no correction, not counted above: 3 this window" "the text report names them"
+
+# --- 2a3. an outside post that names a standing correction ----------------
+# The same correction posted on three PRs, each filed as an outside post that
+# names it, counts as one category repeating. An outside post that names none
+# stays out of M1. A self-report of one of those posts under the same slug is
+# the same event, read twice.
+mkdir -p "$TMP/stores2c"
+{
+  outside c1 "$(ago 9)" "pr:o/r#50:comment:50" redundant-comments
+  outside c2 "$(ago 7)" "pr:o/r#51:comment:51" redundant-comments
+  outside c3 "$(ago 5)" "pr:o/r#52:review:52"  redundant-comments
+  obs     c4 "$(ago 4)" "pr:o/r#52:review:52"  redundant-comments "" self
+  outside c5 "$(ago 3)" "pr:o/r#53:comment:53" ""
+  outside c6 "$(ago 2)" "pr:o/r#54:comment:54" ""
+} | jq -s . > "$TMP/stores2c/alpha.json"
+cat > "$TMP/rigs2c.json" <<JSON
+{"rigs":[{"name":"alpha","path":"$TMP/stores2c/alpha.json"}]}
+JSON
+C=$(STUB_RIGS="$TMP/rigs2c.json" "$SUT" --repo "$REPO" --window-days 30 --json 2>&1)
+eq "$(jq -r '.m1_category_repeat.window.categorised' <<< "$C")" "3" "M1 counts each outside post that names a correction under it"
+eq "$(jq -r '.m1_category_repeat.window.repeats' <<< "$C")" "2" "so the second and third posting of one correction are repeats"
+eq "$(jq -c '.m1_category_repeat.top_repeating' <<< "$C")" '[{"category":"redundant-comments","count":2}]' \
+   "and the repeating category is the correction's slug"
+eq "$(jq -r '.corpus.events_after_dedup' <<< "$C")" "5" "a self-report of a post under the slug its outside capture names is the same event"
+eq "$(jq -r '.m1_category_repeat.outside_events.window' <<< "$C")" "2" "the outside posts that name no correction stay out of M1, counted beside it"
 
 # --- 2b. one provenance key, several distinct corrections -----------------
 # A whole-turn provenance (bead:<id>:turn:<date>) covers every correction made

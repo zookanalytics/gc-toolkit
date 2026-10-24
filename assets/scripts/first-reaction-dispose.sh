@@ -283,8 +283,11 @@ case "$DISPOSITION" in
         [ -z "$WAITING$BLOCKER_TITLE$VISIT$THEN_ROUTE$THEN_ASSIGN$AFTER_WORKFLOW$RECOMMENDED_FORMULA" ] \
             || usage_die "actionable takes --route or --assign only (--waiting-on/--blocker/--then-route/--then-assign/--visit/--after-workflow/--recommended-formula belong to the other exits)"
         # A bead goes to a pool by gc.routed_to or to a named agent by assignee,
-        # never both: the assignee drops it out of the pool's unassigned claim
-        # filter, and a named agent's hook never reads the route.
+        # never both. The agent's hook offers the bead by its assignee whatever
+        # the route, and a pool's claim and Gas City's pool demand count both
+        # skip an assigned bead. So a route beside the assignee offers the bead
+        # to no pool member until the assignee is cleared, and then hands it to
+        # the pool instead of the agent.
         if [ -n "$ASSIGN" ]; then
             [ -z "$ROUTE" ] || usage_die "--route and --assign both name where $BEAD goes; pass --route for a pool or --assign for a named agent, not both"
             [ -z "$EMERGENCY" ] || usage_die "--emergency admits a bead to a pool at P0, and --assign hands it to a named agent instead, which intake does not hold. Pass --route for the pool an emergency goes to, or drop --emergency."
@@ -1002,7 +1005,7 @@ fi
 
 # ── The ruling and recommend exits' human gate ───────────────────────
 # The next move is the operator's, and what a person owes is a native human gate
-# that blocks the subject (gc-helm.sh demand; docs/gascity-human-engagement.md).
+# that blocks the subject (gc-helm.sh demand; docs/human-engagement.md).
 # The takeaway is its question, the same sentence the board shows on the
 # subject. demand keeps one open gate per gated bead and topic, and this gate is
 # filed under the topic first-reaction. So a re-run after a partial refreshes

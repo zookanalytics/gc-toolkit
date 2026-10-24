@@ -61,7 +61,7 @@ Usage:
   gc-helm priority <bead-id> <P0-P4> [--dry-run]  set the priority of a bead that follows nothing, and re-rank the work that follows it
   gc-helm priority <bead-id> --shift <±n> [--dry-run]  set the shift of a bead that follows a parent or an anchor: +1 is one level later, -1 one level sooner
   gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
-  gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: dispatch the subject's gc.recommended_formula at the subject (passed as gc.var.issue), resolve the human gate that put it to the operator, and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
+  gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: resolve the human gate that put it to the operator, dispatch the subject's gc.recommended_formula at the subject (a failed dispatch reopens the gate), and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
   gc-helm unplaced [--json]  list the placement sitting's queue: every live bead in the city's stores marked placement=pending that nothing has placed since (no parent, route, arm, assignee or live pour), priority then age; --json prints one object for a caller: the rows as beads, the suspended rigs it skipped, and the rigs whose store did not answer. Read-only, files nothing; exits 4 after the list when a store did not answer
 
@@ -125,18 +125,19 @@ back to the human, in the same write, and is refused on a closed anchor and on
 a bead blocked by anything but its own demand, since the work is then on the
 blocker and a pool has nothing to perform here; --assign <named-agent> releases
 it TO a named agent instead, in the same write, as its assignee and with no
-route, because a named agent's hook matches its assignee and never reads
-gc.routed_to. --assign is refused beside --route and on a closed anchor, and
-without --waiting-on also on a bead blocked by anything but its own demand;
-with --waiting-on the named waits gate the hand-off, since the agent's hook
-offers the bead only once bd reports it ready; --waiting-on (repeatable)
-records the wait as a `blocks` edge beside the prose so the board can re-ask
-whether it landed. --no-wait is the other answer to the same question: this
-sitting settled the subject and nothing is waiting on it. It stamps
-gc.takeaway_settled, which lifecycle.toml [holds] reads to tell a settled
-headline from one parking a bead on prose, and it contradicts --waiting-on.
-Say neither and the headline is a hold that doctor/check-wait-is-an-edge
-reports, which is the honest reading of a park nothing re-asks.
+route, because the assignee is what the controller and the pack's notice read
+to give a named agent a turn (docs/deferred-dispatch.md). --assign is refused
+beside --route and on a closed anchor, and without --waiting-on also on a bead
+blocked by anything but its own demand; with --waiting-on the named waits gate
+the hand-off, since the agent's hook offers the bead only once bd reports it
+ready; --waiting-on (repeatable) records the wait as a `blocks` edge beside the
+prose so the board can re-ask whether it landed. --no-wait is the other answer
+to the same question: this sitting settled the subject and nothing is waiting
+on it. It stamps gc.takeaway_settled, which lifecycle.toml [holds] reads to
+tell a settled headline from one parking a bead on prose, and it contradicts
+--waiting-on. Say neither and the headline is a hold that
+doctor/check-wait-is-an-edge reports, which is the honest reading of a park
+nothing re-asks.
 
 demand files what a person owes as its own bead, a SIBLING of the work, and
 blocks that work on it with a `blocks` edge; it prints `demand <id> blocks
@@ -824,13 +825,12 @@ ROOTS
 # also names a bead that is itself the work, so a bead blocked by anything but
 # its own demand is refused.
 # --assign names a NAMED agent to release TO, written as the assignee with no
-# route: a named session's hook matches its assignee and skips the routed tier,
-# so a route alone never reaches it (docs/gascity-routing-model.md, Lane 2). A
-# bead is addressed one way or the other, never both. --assign is refused on a
-# closed anchor like --route. Without --waiting-on it also takes the --route
-# blocker guard. With --waiting-on the guard is skipped: the caller has named
-# the waits, and the hook offers the bead only once bd reports it ready, so
-# every open blocker gates the hand-off, named or not.
+# route (the usage says why). A bead is addressed one way or the other, never
+# both. --assign is refused on a closed anchor like --route. Without
+# --waiting-on it also takes the --route blocker guard. With --waiting-on the
+# guard is skipped: the caller has named the waits, and the hook offers the
+# bead only once bd reports it ready, so every open blocker gates the hand-off,
+# named or not.
 # --waiting-on records each wait as a `blocks` edge, best-effort: the stamp is
 # what the sitting owes the operator, so a rejected edge only warns and never
 # fails the verb. One wait is written as no edge: a LANDED rider — a bead that
@@ -915,9 +915,12 @@ cmd_takeaway() {
             *) echo "$PROG: takeaway: --route '$route' is not rig-qualified; gc.routed_to is matched as an exact string, so a bare agent name routes to nobody and the bead sits forever. Use <rig>/<agent>." >&2; exit 2 ;;
         esac
     fi
-    # --assign rides --release for the same reason, and it excludes --route: an
-    # assignee drops the bead out of a pool's unassigned claim filter, and a
-    # named agent's hook never reads the route.
+    # --assign rides --release for the same reason, and it excludes --route. The
+    # agent's hook offers the bead by its assignee whatever the route, and a
+    # pool's claim and Gas City's pool demand count both skip an assigned bead,
+    # so a route beside the assignee offers the bead to no pool member until
+    # the assignee is cleared, and then hands it to the pool instead of the
+    # agent.
     if [ -n "$assign" ]; then
         [ -n "$release" ] || { echo "$PROG: takeaway: --assign needs --release (it names who the bead is released TO)" >&2; exit 2; }
         [ -z "$route" ] || { echo "$PROG: takeaway: --assign and --route both name where $bead goes. A bead is addressed to a named agent by its assignee or to a pool by gc.routed_to, never both. Pass one. Nothing was written." >&2; exit 2; }
@@ -1059,7 +1062,7 @@ cmd_takeaway() {
     # Partition --waiting-on into the waits a pool still owes and the LANDED
     # riders. A landed rider both rode <bead>'s OWN branch and has already put
     # its work there, so <bead>'s own merge is what carries it
-    # (docs/gascity-human-engagement.md, "a settled sitting"): an edge would
+    # (docs/human-engagement.md, "How a held sitting ends"): an edge would
     # gate <bead>'s merge on work that merges WITH it — the deadlock merge.sh's
     # dep-edge lane holds on with no release — while asserting a pending wait
     # that does not exist. Both halves are required. metadata.branch is set at
@@ -1197,9 +1200,10 @@ cmd_takeaway() {
             fi
         fi
     fi
-    # An --assign is read back on the same terms. The assignee is the one field a
-    # named agent's hook matches, so one that did not land leaves the bead open,
-    # unassigned and unrouted, offered to nobody.
+    # An --assign is read back on the same terms. The release writes the
+    # assignee as the bead's only address, beside an empty route, so one that
+    # did not land leaves the bead open, unassigned and unrouted, offered to
+    # nobody.
     assign_missed=""
     if [ -n "$assign" ] && [ -n "$release_park" ]; then
         assign_got=$(assignee_now "$bead")
@@ -2138,17 +2142,16 @@ EOF
 # distinguishable from an error object, and the id is compared for EQUALITY so a
 # row for a different bead is not taken as a resolution.
 #
-# On a resolved subject: sets VS_PAYLOAD (the scrubbed `gc bd show` array),
-# VS_ROW (the matched object), VS_ID (its id), and returns 0. Otherwise prints
-# the classified message to stderr — "$PROG: <verb>: …" suffixed with
-# <nothing-clause> (e.g. "Nothing spawned.") — and returns 4, the fail-closed
-# exit code every caller already uses. <subject-ref> overrides how the id is
-# named in that message (accept names a subject a visit pointed at); empty uses
-# the bare quoted id.
+# On a resolved subject: sets VS_PAYLOAD (the scrubbed `gc bd show` array) and
+# VS_ROW (the matched object), and returns 0. Otherwise prints the classified
+# message to stderr — "$PROG: <verb>: …" suffixed with <nothing-clause> (e.g.
+# "Nothing spawned.") — and returns 4, the fail-closed exit code every caller
+# already uses. <subject-ref> overrides how the id is named in that message
+# (accept names a subject a visit pointed at); empty uses the bare quoted id.
 verify_subject() {
     _vs_bead="$1"; _vs_verb="$2"; _vs_nothing="$3"
     _vs_ref="${4:-}"; [ -n "$_vs_ref" ] || _vs_ref="'$_vs_bead'"
-    VS_PAYLOAD=""; VS_ROW=""; VS_ID=""
+    VS_PAYLOAD=""; VS_ROW=""; _vs_id=""
     _vs_raw=$(gc bd show "$_vs_bead" --json 2>/dev/null || true)
     VS_PAYLOAD=$(printf '%s' "$_vs_raw" | scrub)
     VS_ROW=$(printf '%s' "$VS_PAYLOAD" \
@@ -2158,9 +2161,9 @@ verify_subject() {
              else empty end' 2>/dev/null || true)
     case "$VS_ROW" in ""|null) VS_ROW="" ;; esac
     if [ -n "$VS_ROW" ]; then
-        VS_ID=$(printf '%s' "$VS_ROW" | jq -r '.id // empty' 2>/dev/null || true)
+        _vs_id=$(printf '%s' "$VS_ROW" | jq -r '.id // empty' 2>/dev/null || true)
     fi
-    [ -n "$VS_ID" ] && return 0
+    [ -n "$_vs_id" ] && return 0
 
     # No matching row. Not-found is the specific "no issues found" error; any
     # OTHER error means the read FAILED and existence is unknown — reporting an
@@ -2225,7 +2228,7 @@ cmd_open() {
     # data-plane outage apart from a genuine not-found.
     # >>> open-subject-exists
     verify_subject "$bead" open "No visit filed." || exit $?
-    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+    subject_clean="$VS_PAYLOAD"
     # <<< open-subject-exists
 
     # A DONE-band row is a finished item, not open work. Minting a fresh
@@ -2532,7 +2535,7 @@ cmd_dismiss() {
     # a data-plane outage, not a missing bead. Dismissing an unverified id would
     # stamp a marker nothing ever clears.
     verify_subject "$bead" dismiss "Nothing was written." || exit $?
-    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+    subject_clean="$VS_PAYLOAD"
 
     # A VISIT id names its own sitting. The board lists a parked visit as a row
     # of its own, and engage accepts the visit id straight off that row, so
@@ -2855,14 +2858,17 @@ accept_open_demands() {
 # does. A resolve can report success without the gate closing, so the demands
 # are listed again after: returns 0 only when none is left open, and leaves the
 # survivors, or "unreadable", in ACCEPT_DEMANDS_LEFT for the caller's message.
-ACCEPT_DEMANDS_LEFT=""
+# Every demand it sent an answer to is kept in ACCEPT_DEMANDS_ANSWERED, which
+# accept_reopen_demands puts back when the dispatch does not land.
+ACCEPT_DEMANDS_LEFT=""; ACCEPT_DEMANDS_ANSWERED=""
 accept_resolve_demands() {
-    _ard_subj="$1"; _ard_why="$2"; ACCEPT_DEMANDS_LEFT=""
+    _ard_subj="$1"; _ard_why="$2"; ACCEPT_DEMANDS_LEFT=""; ACCEPT_DEMANDS_ANSWERED=""
     if ! _ard_ids=$(accept_open_demands "$_ard_subj"); then
         ACCEPT_DEMANDS_LEFT="unreadable"; return 1
     fi
     [ -n "$_ard_ids" ] || return 0
     for _ard_d in $_ard_ids; do
+        ACCEPT_DEMANDS_ANSWERED="${ACCEPT_DEMANDS_ANSWERED:+$ACCEPT_DEMANDS_ANSWERED }$_ard_d"
         gc bd gate resolve "$_ard_d" --reason "$_ard_why" >/dev/null 2>&1 \
             || gc bd close "$_ard_d" --reason "$_ard_why" >/dev/null 2>&1 \
             || true
@@ -2886,20 +2892,76 @@ accept_demand_refused() {
     exit 4
 }
 
+# accept_reopen_demands <subject> <reason> — put back the demands
+# accept_resolve_demands answered, when accept stops before a dispatch lands.
+# The operator's question stands until the work it releases is sent, so the
+# gate goes back to the state accept found it in, for a retry or Discuss.
+# `bd reopen` answers 0 on a demand that is already open, so a survivor of the
+# resolve is left as it was. The demands are listed again after, as the resolve
+# does: returns 0 only when every answered demand reads open, and leaves the
+# ones that do not, or "unreadable", in ACCEPT_REOPEN_LEFT.
+ACCEPT_REOPEN_LEFT=""
+accept_reopen_demands() {
+    _arp_subj="$1"; _arp_why="$2"; ACCEPT_REOPEN_LEFT=""
+    [ -n "$ACCEPT_DEMANDS_ANSWERED" ] || return 0
+    for _arp_d in $ACCEPT_DEMANDS_ANSWERED; do
+        gc bd reopen "$_arp_d" --reason "$_arp_why" >/dev/null 2>&1 || true
+    done
+    if ! _arp_open=$(accept_open_demands "$_arp_subj"); then
+        ACCEPT_REOPEN_LEFT="unreadable"; return 1
+    fi
+    _arp_open=" $(printf '%s' "$_arp_open" | tr '\n' ' ') "
+    for _arp_d in $ACCEPT_DEMANDS_ANSWERED; do
+        case "$_arp_open" in
+            *" $_arp_d "*) ;;
+            *) ACCEPT_REOPEN_LEFT="${ACCEPT_REOPEN_LEFT:+$ACCEPT_REOPEN_LEFT }$_arp_d" ;;
+        esac
+    done
+    [ -z "$ACCEPT_REOPEN_LEFT" ]
+}
+
+# accept_reopen_failed — the sentence a refusal ends with when
+# accept_reopen_demands could not put back what accept answered: the demands
+# that still read closed, or the read-back that did not answer.
+accept_reopen_failed() {
+    if [ "$ACCEPT_REOPEN_LEFT" = "unreadable" ]; then
+        printf '%s' " The demands could not be read back after accept reopened $ACCEPT_DEMANDS_ANSWERED, so check that each reads open (gc bd show <id>) and reopen any that does not (gc bd reopen <id>)."
+    else
+        printf '%s' " $ACCEPT_REOPEN_LEFT did not reopen, so it reads answered while nothing is dispatched. Reopen it by hand (gc bd reopen <id>)."
+    fi
+}
+
+# accept_dispatch_withheld <subject> <formula> — the refusal when the subject's
+# demand did not resolve before the dispatch. Nothing is slung, because the run
+# would start with its work still blocked: mol-polecat-work's load-context
+# cancels a run whose work bead has an open blocks blocker. The demands this run
+# did answer are reopened, so a re-run starts from the question as it stood.
+accept_dispatch_withheld() {
+    _adw_left="$ACCEPT_DEMANDS_LEFT"; _adw_back=""
+    accept_reopen_demands "$1" "Accept dispatched nothing: not every demand on $1 resolved, so the question stands" \
+        || _adw_back=$(accept_reopen_failed)
+    if [ "$_adw_left" = "unreadable" ]; then
+        echo "$PROG: accept: could not read its demands on $1 to resolve the human gate that put $2 to the operator, so nothing is dispatched: a run started while that gate is open would find its work blocked and cancel itself. Re-run accept once the store answers.$_adw_back" >&2
+    else
+        echo "$PROG: accept: $1's human gate $_adw_left is still open after its resolve, so nothing is dispatched: a run started now would find its work blocked and cancel itself. Re-run accept. If the gate still will not resolve, resolve it by hand (gc bd gate resolve <id> --reason \"accepted\") and re-run accept.$_adw_back" >&2
+    fi
+    exit 4
+}
+
 # ── Verb: accept ─────────────────────────────────────────────────────
-# Accept a recommendation straight off the board: dispatch the subject's
-# gc.recommended_formula at the subject, resolve the human gate that put it to
-# the operator, and dismiss its visit, in one procedural order with no sitting.
+# Accept a recommendation straight off the board: resolve the human gate that
+# put it to the operator, dispatch the subject's gc.recommended_formula at the
+# subject, and dismiss its visit, in one procedural order with no sitting.
 # It is the low-friction actuation of a ruling the human has made
 # (Accept/Discuss flow); the board renders the affordance on a subject whose
 # visit is un-engaged, and this verb performs it.
 # Discuss (engage) stays the path for a recommendation the operator wants to
 # weigh instead.
 #
-# The subject is passed as gc.var.issue so the worker reads its card; a slung
-# formula does not receive the subject's description. Sling FIRST: only a landed
-# dispatch dismisses the visit, so a sling that fails leaves the visit for the
-# operator to retry or Discuss.
+# The gate goes BEFORE the sling: the sling pours the work at once, and the run
+# it starts finds its work bead still blocked if the gate is open when it gets
+# there. Only a landed dispatch dismisses the visit, so a sling that fails
+# reopens the gate and leaves the visit for the operator to retry or Discuss.
 cmd_accept() {
     bead=""; accept_reason=""
     while [ $# -gt 0 ]; do
@@ -2924,7 +2986,7 @@ cmd_accept() {
     # outage, not a missing bead. The alternative is a sling on a bead that may
     # not exist.
     verify_subject "$bead" accept "Nothing dispatched." || exit $?
-    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+    subject_clean="$VS_PAYLOAD"
 
     # A VISIT id names the recommendation's subject. The board renders Accept on
     # the folded subject tile, so the common input is the subject id; a visit id
@@ -2965,7 +3027,7 @@ cmd_accept() {
         # the subject "discuss-only" (exit 2) on a state it could not read, where the
         # contract is to fail closed (exit 4).
         verify_subject "$bead" accept "Nothing dispatched." "the subject '$bead' this visit names" || exit $?
-        subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+        subject_clean="$VS_PAYLOAD"
     fi
 
     # gc.recommended_formula is the live recommendation; gc.recommended_formula_dispatched
@@ -3010,10 +3072,11 @@ cmd_accept() {
     # from a stale board row, a copied command, or the window after engage bound
     # the visit by assignee. Re-read the live visit state and require the same
     # un-engaged predicate the board derives Accept from, refusing BEFORE the
-    # sling — and before the dismiss below could force-close a held visit over
-    # its holder's claim. Fail closed: a state this cannot read is not proof the
-    # visit is un-engaged. On a resume the sling already ran, so an absent visit
-    # means the prior run's dismiss also landed and there is nothing left to do.
+    # gate resolve and the sling — and before the dismiss below could
+    # force-close a held visit over its holder's claim. Fail closed: a state this
+    # cannot read is not proof the visit is un-engaged. On a resume the sling
+    # already ran, so an absent visit means the prior run's dismiss also landed
+    # and there is nothing left to do.
     if ! subject_unengaged "$bead"; then
         case "$UNENGAGED_STATE" in
             engaged) echo "$PROG: accept: $bead has an engaged visit — $UNENGAGED_WHY. The board offers Accept only on an un-engaged visit; take it up in the sitting (Discuss) or dismiss it there. Nothing dispatched." >&2 ;;
@@ -3032,14 +3095,49 @@ cmd_accept() {
         exit 4
     fi
 
-    # Dispatch the recommendation AT the subject: the subject is the routed
-    # anchor (--on) and is also passed as gc.var.issue so a formula that reads its
-    # card by that var finds it. A resume skips the sling — it already ran — and
-    # only finishes the record and the dismiss.
+    # The recommendation reached the operator as a human gate on the subject,
+    # and Accept is the operator's answer to it, so the gate is resolved here,
+    # before the sling. The sling pours the work at once, and mol-polecat-work's
+    # load-context cancels a run whose work bead still has an open blocks
+    # blocker, so a gate resolved after the sling races the run it releases.
+    # Left open past the dismiss, the gate would hold the dispatched work out of
+    # `bd ready` with no sitting ever offered for it: the dismiss below closes
+    # the gate's visit, and gate-visit-sweep does not re-offer a gate it has
+    # stamped. A subject held on its visit alone carries no demand, and this
+    # resolves nothing. The board suppresses a closed demand's unanswered
+    # question, so no answer is stamped back onto the gate. A gate that will not
+    # resolve stops accept before the sling, with the gates it did resolve
+    # reopened. On a resume the sling already ran, so a gate a prior run left
+    # open is the write still owed, and a re-run after a refusal there resumes
+    # here without dispatching again.
+    if [ "$resume" = 1 ]; then
+        answer="${accept_reason:-accepted: dispatched $formula}"
+    else
+        answer="${accept_reason:-accepted: dispatching $formula}"
+    fi
+    if ! accept_resolve_demands "$bead" "$answer"; then
+        if [ "$resume" = 1 ]; then accept_demand_refused "$bead" "$formula"; fi
+        accept_dispatch_withheld "$bead" "$formula"
+    fi
+
+    # Dispatch the recommendation AT the subject, the routed anchor (--on). gc
+    # sling hands the formula its subject: a graph.v2 formula reads it as its
+    # input convoy's one tracked member, and a classic formula gets it as the
+    # issue var sling stamps. A graph.v2 formula refuses a caller-supplied issue,
+    # so the sling carries no var of its own. A resume skips the sling — it
+    # already ran — and only finishes the record and the dismiss. A sling that
+    # fails sent nothing, so the operator's question stands: the gate resolved
+    # above is reopened for the retry or Discuss, and the visit stays.
     if [ "$resume" = 1 ]; then
         echo "$PROG: accept: $bead already carries a dispatched recommendation ($formula); resuming its dismiss, not dispatching again" >&2
-    elif ! gc sling ${GC_RIG:+--rig "$GC_RIG"} "$bead" --on "$formula" --var "issue=$bead"; then
-        echo "$PROG: accept: 'gc sling ... --on $formula' failed for $bead — the visit is left open for retry or Discuss. Nothing dismissed." >&2
+    elif ! gc sling ${GC_RIG:+--rig "$GC_RIG"} "$bead" --on "$formula"; then
+        if ! accept_reopen_demands "$bead" "Accept's sling of $formula failed, so the question stands for a retry or Discuss"; then
+            echo "$PROG: accept: 'gc sling ... --on $formula' failed for $bead — the visit is left open for retry or Discuss. Nothing dismissed.$(accept_reopen_failed)" >&2
+            exit 4
+        fi
+        reopened=""
+        [ -z "$ACCEPT_DEMANDS_ANSWERED" ] || reopened=" The human gate it resolved for the dispatch is open again ($ACCEPT_DEMANDS_ANSWERED)."
+        echo "$PROG: accept: 'gc sling ... --on $formula' failed for $bead — the visit is left open for retry or Discuss. Nothing dismissed.$reopened" >&2
         exit 1
     else
         echo "$PROG: accept: dispatched $formula at $bead"
@@ -3052,18 +3150,6 @@ cmd_accept() {
         echo "$PROG: accept: dispatched $formula at $bead, but could not withdraw gc.recommended_formula (it still reads live). NOT dismissing: a later visit could re-offer Accept and dispatch $formula again. Clear gc.recommended_formula on $bead by hand, then dismiss its visit." >&2
         exit 4
     fi
-
-    # The recommendation reached the operator as a human gate on the subject,
-    # and Accept is the operator's answer to it, so the gate is resolved here.
-    # Left open, it would hold the dispatched work out of `bd ready` with no
-    # sitting ever offered for it: the dismiss below closes the gate's visit, and
-    # gate-visit-sweep does not re-offer a gate it has stamped. A subject held on
-    # its visit alone carries no demand, and this resolves nothing. The board
-    # suppresses a closed demand's unanswered question, so no answer is stamped
-    # back onto the gate. A gate that will not resolve refuses the dismiss, and a
-    # re-run resumes here, after the dispatch the marker above records.
-    accept_resolve_demands "$bead" "${accept_reason:-accepted: dispatched $formula}" \
-        || accept_demand_refused "$bead" "$formula"
 
     # The recommendation is dispatched, so the operator's decision is made: dismiss
     # the visit, reusing the listing subject_unengaged already read so cmd_dismiss
@@ -3283,7 +3369,7 @@ EOF
     while IFS="$TAB" read -r _eps_key _eps_label _eps_letter; do
         [ -n "$_eps_key" ] && [ -n "$_eps_letter" ] || continue
         [ -n "$_epv_smenu" ] && _epv_smenu="$_epv_smenu · "
-        _epv_smenu="$_epv_smenu[$_eps_letter] $_eps_label"
+        _epv_smenu="${_epv_smenu}[$_eps_letter] $_eps_label"
         _epv_smap="$_epv_smap$_eps_letter $_eps_key
 "
     done <<EOF
@@ -3330,7 +3416,7 @@ engage_prompt_model() {
         _epm_lbl=$(engage_model_label "$_epm_m")
         [ "$_epm_m" = opus ] && _epm_lbl="$_epm_lbl (default)"
         [ -n "$_epm_menu" ] && _epm_menu="$_epm_menu · "
-        _epm_menu="$_epm_menu[$_epm_i] $_epm_lbl"
+        _epm_menu="${_epm_menu}[$_epm_i] $_epm_lbl"
         _epm_map="$_epm_map$_epm_i $_epm_m
 "
     done
@@ -3402,7 +3488,7 @@ engage_prompt_rig() {
         _epr_map="$_epr_map$_epr_i $_epr_name
 "
         [ -n "$_epr_menu" ] && _epr_menu="$_epr_menu · "
-        _epr_menu="$_epr_menu[$_epr_i] $_epr_name"
+        _epr_menu="${_epr_menu}[$_epr_i] $_epr_name"
     done <<EOF
 $(printf '%s' "$RIGS" | jq -r '.[] | [.name, .path] | @tsv' 2>/dev/null)
 EOF
@@ -3957,10 +4043,11 @@ cmd_engage() {
     visit_owner=$(printf '%s' "$visit_row" | jq -r '.assignee // ""' 2>/dev/null || true)
 
     # The spawned sitting adopts the visit only through its own hook claim, whose
-    # Tier-2 query is `bd ready --assignee=<name>` (docs/gascity-agents.md), and
-    # `bd ready` yields a bead only while it is open and unblocked. A closed or
-    # blocked visit assigned to the sitting never becomes its claim, so the
-    # sitting would wake holding nothing while this command reports success.
+    # Tier-2 query is `bd ready --assignee=<name>` (docs/gascity/routing-model.md,
+    # "The read side"), and `bd ready` yields a bead only while it is open and
+    # unblocked. A closed or blocked visit assigned to the sitting never becomes
+    # its claim, so the sitting would wake holding nothing while this command
+    # reports success.
     #
     # A visit with an assignee is already engaged, or pending engagement:
     # engage binds the visit to a spawned sitting's runtime name (below) while

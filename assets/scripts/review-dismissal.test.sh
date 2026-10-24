@@ -55,7 +55,7 @@ cm() { # id review-id login body
 # comment, a comment naming a review the list does not carry, and the city's
 # own review carrying a marked post and an unmarked one.
 REVS="[$(rv 11 human1 APPROVED 2026-10-01T00:00:00Z),$(rv 12 human2 DISMISSED 2026-10-02T00:00:00Z),$(rv 13 $SELF COMMENTED 2026-10-03T00:00:00Z)]"
-CMTS="[$(cm 101 11 human1 'rename this'),$(cm 102 12 human2 'old point'),$(cm 103 null human3 'standalone'),$(cm 104 99 human4 'orphan'),$(cm 105 13 $SELF '<!-- gc:city --> reply'),$(cm 106 13 $SELF 'operator review on the city account')]"
+CMTS="[$(cm 101 11 human1 'rename this'),$(cm 102 12 human2 'old point'),$(cm 103 null human3 'standalone'),$(cm 104 99 human4 'orphan'),$(cm 105 13 $SELF '<!-- gc:city --> reply'),$(cm 106 13 $SELF 'unmarked reply')]"
 live() { printf '%s' "$CMTS" | jq -c --argjson revs "$REVS" "$CITY_OWN_DEF$REVIEW_DISMISSAL_DEF"'live_comments($revs) | '"$1"; }
 unrouted() { # <rids-json> <anchor-metadata-json>
     printf '%s' "$CMTS" | jq -c --argjson revs "$REVS" --argjson rids "$1" --argjson m "$2" --arg self "$SELF" \

@@ -20,13 +20,15 @@ states = [
   "held",
 ]
 # States that also route the bead to a human (lifecycle.sh stamps
-# gc.routed_to=human in the same atomic update).
+# gc.routed_to=human in the same atomic update). A self-transition that passes
+# --keep-route records on the bead and writes no route, so it keeps the route
+# the bead carries.
 human_states = ["abandoned", "retargeted", "blocked", "refused_false_completion", "held"]
 # States the merge cadence drives and no queue offers, so an anchor in one rests
 # both unrouted and unheld. lifecycle.sh writes the two halves in the same
-# atomic update: it clears gc.routed_to unless --route is given or the bead
-# already rests on park_route, and it clears the assignee unless --assignee is
-# given, at status=open only. A pool route on one of these is demand for work
+# atomic update: it clears gc.routed_to unless --route or --keep-route is given
+# or the bead already rests on park_route, and it clears the assignee unless
+# --assignee is given, at status=open only. A pool route on one of these is demand for work
 # already in the merge queue, and the claim it invites moves the anchor out of
 # `--status=open`, where merge.sh and pr-facts.sh both stop seeing it. An
 # assignee is the same anchor still sitting in the refinery's own find-work
@@ -36,7 +38,7 @@ human_states = ["abandoned", "retargeted", "blocked", "refused_false_completion"
 # hold to escalate rather than one to overwrite.
 detached_states = ["pre_open_gate", "pull_request"]
 # The one route value that is not a queue. No pool claims it, so it parks the
-# bead for a person (docs/gascity-human-engagement.md). A detached state may
+# bead for a person (docs/human-engagement.md). A detached state may
 # rest on it, and a transition that finds it leaves it alone. Every other route
 # is a pool offer.
 # A park must NAME what it waits for: writing this route without a gc.takeaway
@@ -52,6 +54,18 @@ park_route = "human"
 # gives (gc.work_outcome, gc.work_commit, gc.work_branch; see
 # [metadata.runtime_owned]).
 closed_states = ["merged"]
+# What leaving a state writes, as <state>:<key>=<value>. A transition from that
+# state into another open state sets the key to the value in the same atomic
+# update, unless the caller writes the key itself, so no writer of such a
+# transition can leave the key behind. A transition into a closed state writes
+# none of them: the anchor's life ends there.
+# The rank of an anchor's PR-finishing work is approved only while the anchor
+# rests in pull_request (assets/scripts/priority-lib.sh), so leaving it marks
+# pr_finishing_settled unsettled, and pr-facts.sh settles that work at the rank
+# it then follows ([metadata.pr_posture]). Leaving it also clears pr_head_oid,
+# the PR head pr-facts.sh last read, so an anchor that returns counts no
+# approval until pr-facts.sh has read its PR again.
+exit_sets = ["pull_request:pr_finishing_settled=unsettled", "pull_request:pr_head_oid="]
 
 # Legal status x merge_result combinations.
 [states.unanchored]
@@ -441,6 +455,7 @@ keys = [
   "bring_current_from", "bring_current_scope", "conflict_audit", "conflict_question",
   "bring_current_record", "bring_current_reopened", "bring_current_round_at",
   "bring_current_lifted_at",
+  "direct_landing_sha",
 ]
 # merge_result is the anchor state itself and is defined in [machine] / [states]
 # above: lifecycle.sh is its only writer (set on every transition, unset on
@@ -637,6 +652,18 @@ keys = [
 #   board shows the approval owed, and one submitted after it lands the PR.
 #   A later round whose ruling keeps the approval leaves it as it is. Absent
 #   means no ruling lifted the approval. Never cleared.
+# direct_landing_sha — the commit a direct landing pushes, stamped by
+#   direct-merge-push.sh and read back before the push, so a landing whose
+#   record fails stays provable to a later patrol. Read by
+#   mol-refinery-patrol.toml's zero-diff guard: a branch with no change against
+#   a target that carries the stamp goes down the direct path instead of being
+#   refused as a false completion, and direct-merge-push.sh records the landing
+#   at the stamp. A stamp whose push did not land names a commit the target does
+#   not carry, so the guard ignores it, and the next landing overwrites it.
+#   Absent means no direct push waits on its record. Cleared by the merged
+#   transition that records the landing, and by the write that promotes the
+#   bead to merge_strategy=pr after a push refused for branch protection. An
+#   oid.
 
 [metadata.gates]
 keys = [
@@ -815,9 +842,9 @@ keys = [
   # fix unit lands. deferred files a claimable follow-up bead (gated behind the
   # anchor, its provenance edge --discovered-from the finding) and closes the
   # finding; declined closes it with the reason, no edge. restates closes a human
-  # review body that only frames the review's own inline comments, each a finding
-  # of its own, with no edge and no answer owed: the review's living answer gives
-  # it no entry and no count.
+  # review body that only frames the inline comments of its review round, each a
+  # finding of its own, with no edge and no answer owed: the round's living
+  # answer gives it no entry and no count.
   # needs-you files a visit for the operator, or names one already open on the
   # anchor's feedback, and leaves the finding OPEN — an open finding holds its
   # human review changes-requested until the operator rules the visit holding
@@ -898,6 +925,18 @@ keys = [
   # (finding.reply_posted), the write-back dismisses THAT review and re-requests
   # its author — per-review, independent of other reviews on the same PR.
   "finding.review_id",
+  # The review round of the review that raised a human finding, the one
+  # finding.review_id names: `<login>@<commit oid>`, the reviewer and the commit
+  # that review was submitted against. A client can submit one pass as one
+  # review per comment, and the round is that pass. pr-facts.sh stamps it at
+  # file time beside finding.review_id. Its write-back records it again from
+  # each read of the PR that places the review, on a finding whose round is
+  # missing or differs, so a finding the intake stamped no round on carries one
+  # from the next such read. finding.sh reads it to rule restates on a review
+  # body that frames the inline comments of other reviews in its round. Absent
+  # when either half is unknown, and on a Conversation comment, which belongs to
+  # no review.
+  "finding.review_round",
   # The rework child dispatched with the batch that raised a finding, recorded by
   # finding.sh upsert --fix-unit as pr-facts.sh files a human batch routed to
   # work. A must-fix ruling hangs its close-ordering edge from this child, never
@@ -928,8 +967,10 @@ keys = [
   # finding.fix_flag — `1` when the fix unit flags the point for the reviewer's
   #   look (`finding.sh answer --flag`): it chose among options they left open,
   #   departed from their suggestion, or changed code the ruling declined. A
-  #   flagged point sits under Worth a look. Absent means unflagged, and an
-  #   answer given without --flag removes it.
+  #   flagged point sits under Worth a look unless it needs the reviewer: a
+  #   needs-you finding whose visit is open, or a decline or a deferral whose
+  #   thread waits on them, sits under Needs you. Absent means unflagged, and
+  #   an answer given without --flag removes it.
   #   A later batch's child taking the finding over (`finding.sh upsert
   #   --fix-unit`) clears finding.fix_answer and finding.fix_flag in the write
   #   that records it, so neither outlives the fix unit that wrote it.
@@ -1071,7 +1112,8 @@ keys = [
 [metadata.pr_posture]
 # pr_posture, pr_merge_state, the two watermarks and pr_comment_disposition
 # carry their mechanics in [posture] above (pr_posture is also a [dated_keys]
-# key). pr-facts.sh is the sole writer of this group.
+# key). pr-facts.sh is the sole writer of this group, apart from the writes
+# [machine] exit_sets makes on leaving pull_request.
 keys = [
   "pr_posture", "pr_merge_state", "pr_comment_watermark",
   "pr_review_watermark", "pr_issue_comment_watermark", "pr_comment_disposition",
@@ -1103,6 +1145,34 @@ keys = [
   # watermark is not re-read on every pass. They never stand in for the
   # watermarks: a routing writes those, and the write-back reads only those.
   "pr_comment_answered", "pr_review_answered",
+  # The rank all of the anchor's PR-finishing work, its open reviews, reworks
+  # and validation passes with their live workflows, was last settled at:
+  # approved, the P0 an approved PR's finishing work runs at, or unapproved, the
+  # anchor's priority plus each bead's shift (docs/steering.md#pr-finishing-work).
+  # unsettled says a re-rank is owed: the rank that work follows moved, or a
+  # settle began and did not finish. The rank is the priority function's: approved
+  # while the anchor rests in pull_request with an approved posture, unapproved
+  # anywhere else. A posture write that moves the rank and every transition out
+  # of pull_request ([machine] exit_sets) mark the record unsettled in the same
+  # write, so no reader takes the work for settled at a rank it has left. Every
+  # pass of pr-facts.sh compares the record of each anchor it reads in
+  # pull_request with that rank, and every full pass compares the record of each
+  # live anchor resting elsewhere. While the two differ, it settles that work
+  # and writes the rank once every bead of it has settled, turning a record of
+  # the other rank unsettled before the first settle. Absent means no pass
+  # recorded a rank, which a pass in pull_request settles and a full pass leaves
+  # alone elsewhere. A present value is approved, unapproved or unsettled.
+  "pr_finishing_settled",
+  # The head of the anchor's PR that pr-facts.sh last read, a commit oid. A pass
+  # writes it whenever it reads a head other than the one recorded: in the
+  # posture's write, or in a write of its own for a draft PR, whose posture it
+  # does not read. The priority function counts an approved posture only when the
+  # posture's oid is this head (prio_pr_approved in priority-lib.sh), so an
+  # approval read at an earlier head ranks no PR-finishing work at P0. Leaving
+  # pull_request clears it to empty ([machine] exit_sets), so an anchor that
+  # returns counts no approval until a pass has read its PR. Absent or empty
+  # means no pass has read the PR since the anchor entered pull_request.
+  "pr_head_oid",
 ]
 
 [metadata.pr_round_trip]
@@ -1272,8 +1342,12 @@ keys = ["priority_shift"]
 # priority_shift — the bead's shift from the bead it follows: +1 is one level
 #   later and -1 one level sooner, and each level stops at P0 and P4. Written by
 #   queue-priority.sh move, which `gc-helm.sh priority --shift` runs, and read
-#   back there. Read by priority-lib.sh wherever a priority is computed:
-#   queue-priority.sh settle, its move and its reconcile pass. Read only on a
+#   back there. Each script that files PR-finishing work (gate-ensure.sh,
+#   pr-facts.sh, pre-open-rebase.sh, rework-child.sh and signoff.sh) also
+#   writes it, -1, in the create that files a child, through bd-lib.sh's
+#   pr_finishing_birth, and never rewrites it on a child it adopts or re-routes.
+#   Read by priority-lib.sh wherever a priority is computed: queue-priority.sh
+#   settle, its move and its reconcile pass. Read only on a
 #   bead that follows a parent or an anchor: a workflow's convoy, root and steps
 #   carry no shift, and a bead that follows nothing has nothing to shift from.
 #   Absent or empty reads as 0. A value that is not a signed integer makes the
@@ -1294,11 +1368,20 @@ keys = [
 ]
 # gc.superseded_by / _store — on the ORIGIN bead, the successor it retired into
 #   and (only where the id prefix is ambiguous) that successor's store.
-#   bead-rehome.sh writes and reads them back and refuses to overwrite a
-#   DIFFERENT successor. Flat dotted keys read by bracket access; the non-dotted
-#   `superseded_by` and `superseded_by_store` are legacy fallbacks, read only —
-#   bead-rehome.sh and duplicate-sweep.sh fall back to them when the dotted form
-#   is absent, and no pack path writes them. Never cleared. Bead id / store.
+#   bead-rehome.sh writes them, in one write bd applies only while the origin
+#   still has the status and assignee its gates read, reads them back, and
+#   refuses to overwrite a DIFFERENT successor. Flat dotted keys read by bracket
+#   access; the non-dotted `superseded_by` and `superseded_by_store` are legacy
+#   fallbacks, read only — bead-rehome.sh and duplicate-sweep.sh fall back to
+#   them when the dotted form is absent, and no pack path writes them. Cleared
+#   only by deferred-dispatch.sh, and only a pointer it had bead-rehome.sh stamp
+#   under its claim: in the write that reopens a bead it has disposed when its
+#   read after the close finds something that landed on the bead or its edges
+#   after it claimed the bead, and in the write that gives back a claimed bead
+#   whose close bead-rehome.sh did not make (docs/authority-map.md, Withdraw a
+#   disposal). On an open bead the pointer is live work (live-work.sh), so the
+#   until consumer never disposes a bead another closer has pointed. Bead id /
+#   store.
 # gc.supersedes / _store — the reverse pointer on the SUCCESSOR bead, naming the
 #   origin it replaced; written best-effort by bead-rehome.sh, not read back.
 # duplicate_of — the survivor a duplicate names, the handle duplicate-sweep.sh
@@ -1510,13 +1593,14 @@ keys = ["warrant.target", "warrant.reason", "warrant.requester"]
 # A dispatch armed to fire when a bead re-enters bd ready, managed by
 # deferred-dispatch.sh: it enumerates armed beads by the presence of
 # gc.dispatch_when_ready and clears the whole family with --unset once it slings.
+# The same script's until consumer marks a bead it is disposing.
 keys = [
   "gc.dispatch_when_ready", "gc.dispatch_when_ready_args",
   "gc.dispatch_when_ready_armed_by", "gc.dispatch_when_ready_armed_at",
   "gc.dispatch_when_ready_reason", "gc.dispatch_when_ready_slung",
   "gc.dispatch_when_ready_fail_count", "gc.notify_when_ready",
   "gc.deferred_routed_to", "gc.deferred_execution_routed_to",
-  "gc.deferred_assignee", "resling_target",
+  "gc.deferred_assignee", "resling_target", "gc.until_disposal",
 ]
 # gc.dispatch_when_ready — the sling target (agent or pool); its PRESENCE means
 #   armed, and its value is what deferred-dispatch.sh slings to. Cleared with
@@ -1564,6 +1648,14 @@ keys = [
 #   still finds the pool with no --target. Absent means no ruling wait has
 #   cleared the bead's routes. Never cleared; the next wait overwrites it. A
 #   rig-qualified pool identity (<rig>/<agent>).
+# gc.until_disposal — the successor the until consumer is disposing a bead onto,
+#   written under its claim (the bead in progress under assignee
+#   deferred-dispatch) once its read under the claim finds the bead owed, just
+#   before bead-rehome.sh stamps gc.superseded_by. A pointer it names on a bead
+#   under the claim is the consumer's own, so a pass that stops after the stamp
+#   leaves the next one a pointer it can withdraw. Cleared by the claim itself
+#   and in every write that ends one: the give-back, the release from a close
+#   that stands, and the reopen. A bead id.
 
 [metadata.learning]
 # The feedback-learning loop's beads (docs/feedback-learning.md). obs.* is the
@@ -1631,9 +1723,10 @@ keys = [
 #   and the review graph. gc.routed_to and gc.execution_routed_to are
 #   the route stamps (see the ROUTE rule in the preamble). The rest — assignee,
 #   the session and claim stamps, the step and root linkage, the poured vars and
-#   gc.formula_source, gc.session_affinity (the runtime pins it to gc.session_id)
-#   and pin_awake (settable only by `gc session pin`) — are written by the
-#   runtime; the pack reads them and does not write them.
+#   gc.formula_source, gc.session_affinity (the continuation backstop acts only
+#   on a step marked `require`) and pin_awake (settable only by
+#   `gc session pin`) — are written by the runtime; the pack reads them and does
+#   not write them.
 # gc.run_target — a third route stamp beside gc.routed_to and
 #   gc.execution_routed_to, written by the runtime: gascity's
 #   ReleaseWorkBead re-stamps it as a fallback route on a drained session's work

@@ -130,7 +130,16 @@ one there is spent the moment the anchor is gated. The clear stops at
 `status=open` for two reasons that agree. A live claim is a hold to escalate,
 not to overwrite; and bd refuses an assignee edit on a bead another actor holds
 `in_progress`, dropping the whole atomic update with it
-([gascity-routing-model.md](gascity-routing-model.md) row 46).
+([gascity/routing-model.md](gascity/routing-model.md#clearing-an-assignee-can-be-refused-and-the-refusal-drops-the-whole-update)).
+
+A write that records on an anchor staying in its state, rather than moving it,
+passes `--keep-route`: the transition writes no route, so neither a human
+state's park default and park guard nor a detached state's route clear applies,
+and the anchor keeps the `gc.routed_to` it carries, an empty one included.
+`lifecycle.sh` refuses it with `--route`, and on an edge into another state,
+which takes that state's routing. `pr-facts.sh` writes the rank of an anchor's
+PR-finishing work this way ([steering.md](steering.md#pr-finishing-work)), so
+recording it re-parks no anchor and drops no route a person gave one.
 
 A detached anchor that is nonetheless claimed or held into a non-open status —
 by a route stamped on it out of band, or a direct claim — is the residual this
@@ -139,6 +148,17 @@ leaves open. Every anchor enumeration is `--status=open`, so it drops out of
 the claim resolves. `doctor/check-state-space` also reads the non-open live
 statuses, so it reports all three violations: a detached anchor carrying a
 route, one carrying an assignee, and one that has left `status=open`.
+
+Leaving a state can owe a write of its own, declared in `exit_sets`. A
+transition out of `pull_request` into another open state sets
+`pr_finishing_settled` to `unsettled` and clears `pr_head_oid` in the same
+update, because the rank of an anchor's PR-finishing work is approved only while
+the anchor rests there, under a posture read at the PR head `pr-facts.sh` last
+recorded ([steering.md](steering.md#pr-finishing-work)). So whichever writer
+makes such a transition leaves a record that no return to `pull_request` reads
+as settled, and an approval that no return counts until `pr-facts.sh` has read
+the PR again. A caller that writes the key itself keeps its own value, and a
+transition into a closed state writes none.
 
 ## Transition table
 
@@ -150,7 +170,7 @@ route, one carrying an assignee, and one that has left `status=open`.
 | claimed → handed_off | `mol-polecat-work` submit step (ONE atomic `gc bd update`) | push verified on the remote |
 | handed_off → pre_open_gate | `mol-refinery-patrol` merge-push, via `lifecycle.sh` | checks armed, branch accepted |
 | handed_off → pull_request | `mol-refinery-patrol` merge-push (post-open path), via `lifecycle.sh` | a usable PR already exists |
-| handed_off → merged | `mol-refinery-patrol` merge-push (direct strategy), via `lifecycle.sh` | FF merge pushed and verified on the target; record + close in one call |
+| handed_off → merged | `mol-refinery-patrol` merge-push (direct strategy), via `lifecycle.sh` | FF merge pushed and verified on the target, or found there by a later patrol through the bead's `direct_landing_sha` stamp; record + close in one call |
 | pre_open_gate → pull_request | `pr-open.sh` (cadence arm 3) | every `pre-open` check in `check_set` derives `green`; the PR opens as a draft when `check_set` names an `open-as-draft` check, else ready |
 | pull_request draft → ready | `pr-open.sh` (cadence arm 3, draft-to-ready) | every `pre-open` and `open-as-draft` check derives `green`; `gh pr ready` surfaces it. GitHub `isDraft` flips; `merge_result` stays `pull_request` |
 | pull_request → merged | `merge.sh` (cadence arm 2) | full authorization set validated (incl. the universal approval rule; a draft PR is skipped); close + record in one call |
@@ -159,7 +179,7 @@ route, one carrying an assignee, and one that has left `status=open`.
 | pull_request → closed (disposed) | `pr-facts.sh` → `bead-rehome.sh` | PR closed unmerged carrying a pre-recorded disposition (`pr-dispose.sh`); auto-disposed through the sanctioned terminal close, no visit |
 | pull_request → retargeted | `pr-facts.sh` | PR base moved externally; files a visit |
 | handed_off → blocked | `mol-refinery-patrol` | recorded `existing_pr` unusable |
-| handed_off → refused_false_completion | `mol-refinery-patrol` | no commits on the handed-off branch |
+| handed_off → refused_false_completion | `mol-refinery-patrol` | no commits on the handed-off branch, and no `direct_landing_sha` stamp the target carries |
 | handed_off / pull_request → poured | `mol-refinery-patrol` (rejection), through `assets/scripts/rejection-repool.sh` | `rejection_reason` written and the assignee and `gc.routed_to` cleared, then a fresh `mol-polecat-work` pour dispatches the rebuild and stamps `gc.execution_routed_to` |
 | poured → handed_off | the pour's `mol-polecat-work` submit step | push verified on the remote |
 | unanchored → held | `assets/scripts/converse-hold.sh`, a converse sitting's hold, via `lifecycle.sh` | a sitting is waiting on an operator decision; state + route in one write |
@@ -284,9 +304,9 @@ post is feedback, whoever wrote it. The city's own post is one that
 `assets/scripts/pr-post.sh` marked, which is every post the pack makes —
 `signoff.sh`'s verdicts, `pr-open.sh`'s verdict replay, the write-back's
 replies and its ruled-finding comments, the visit reminder, a demo delivery,
-`pr-dispose.sh`'s closing comment. A model review the operator runs under the
-city's GitHub account is unmarked, so it is feedback like a person's. Rework
-hand-backs post nothing.
+`pr-dispose.sh`'s closing comment. An unmarked post under the city's login
+after its PR's provenance cutover, described next, is feedback like a person's,
+whoever posted it. Rework hand-backs post nothing.
 
 A PR's posts from before the city marked anything carry no mark. Each anchor
 records the instant `pr-facts.sh` first read its open PR
@@ -309,8 +329,8 @@ verdicts as COMMENT reviews, and `pr-post.sh` has no change-request verb. A
 codex veto is therefore a marked COMMENT review, the city's own, and raises no
 batch; `signoff.sh`'s rework loop answers it. A `CHANGES_REQUESTED` under the
 city's login from before the cutover is the city's own the same way. Every
-other `CHANGES_REQUESTED` is feedback, including a model review run under the
-city's account after the cutover, and it routes on the same terms as any other
+other `CHANGES_REQUESTED` is feedback, including an unmarked one under the
+city's login after the cutover, and it routes on the same terms as any other
 feedback, to a rework child or a visit, and opens a validation pass. GitHub
 refuses a change request from a PR's author, so on a PR the city opened only
 another login can leave one.
@@ -418,6 +438,8 @@ non-draft anchor and read off the bead by everything downstream. Declared in
 | `pr_review_answered` | `<id>` | every counted review body above `pr_review_watermark`, through this id, was answered by its threads at the last read |
 | `pr_comment_disposition` | `rework:<id>` / `visit:<id>` | what the last outstanding batch was routed to |
 | `pr_provenance_since` | `<UTC instant>` | when `pr-facts.sh` first read the open PR; an unmarked post under the city's login from before it is the city's own |
+| `pr_finishing_settled` | `approved` / `unapproved` / `unsettled` | the rank all of the anchor's PR-finishing work was last settled at, or `unsettled` while a re-rank is owed; absent while no pass has recorded one |
+| `pr_head_oid` | `<oid>` | the PR head `pr-facts.sh` last read, a draft's included; empty once the anchor leaves `pull_request`, until a pass reads the PR again |
 
 The postures, in the precedence the derivation applies:
 
@@ -428,6 +450,19 @@ The postures, in the precedence the derivation applies:
 | `approved` | GitHub reports `APPROVED`, and an approval stands that the anchor's `bring_current_lifted_at` did not set aside | none |
 | `review_required` | GitHub reports `REVIEW_REQUIRED`, or reports `APPROVED` while every standing approval was given at or before `bring_current_lifted_at` | none; the anchor is waiting on a human approval and now says so |
 | `none` | no `reviewDecision` applies | none |
+
+The priority function reads the posture too. An `approved` posture on an anchor
+that rests in `pull_request`, read at the head `pr_head_oid` records, ranks the
+anchor's PR-finishing work at P0, so the pass of `pr-facts.sh` that records a
+posture or a head moving into or out of that rank re-ranks that work, and so
+does an anchor leaving `pull_request`. `pr_finishing_settled` records the rank
+all of it settled at, and the write that moves the rank marks it `unsettled`:
+the posture write, or the transition out of `pull_request` (`exit_sets`, above).
+The work is settled again while that record differs from the rank the anchor's
+state, posture and head give, by every pass for an
+anchor in `pull_request` and by every full pass for one resting elsewhere, so a
+re-rank a failed settle left short is finished on a later pass
+([steering.md](steering.md#pr-finishing-work)).
 
 A comment outranks an approval on purpose: one reviewer's approval does not
 answer another reviewer's question. `merge.sh` holds on a recorded `commented`
@@ -953,9 +988,49 @@ instead. The read side searches every store before concluding a close was
 false. Consumers: the mechanik/converse close paths
 (`template-fragments/bead-disposition.template.md`), `duplicate-sweep.sh` (the
 cadence's reader for `duplicate_of`, and the closer of never-dispatched rework
-twins), `preexisting-failure.sh` (a pre-existing-failure gate follows a closed
-tracker's pointer to the live bead that carries its failure, and a
-`not-needed` close ends that chain), and any patrol judging a closed bead.
+twins), the deferred-dispatch reconcile pass (`deferred-dispatch.sh`, the closer
+of a bead its `until` dependency resolved), `preexisting-failure.sh` (a
+pre-existing-failure gate follows a closed tracker's pointer to the live bead
+that carries its failure, and a `not-needed` close ends that chain), and any
+patrol judging a closed bead.
+
+`bead-rehome.sh` proves the evidence kinds itself. Under `fixed-upstream` and
+`duplicate` it re-establishes that the successor is closed or shipped in the
+same store and that the origin recorded no work, unless the origin carries the
+operator's pre-recorded PR-close disposition for that kind and successor.
+Under `re-homed`, `folded` and `not-needed` it applies only the checks every
+kind gets: the origin is not a review bead, a step bead or a workflow root, and
+no other session holds it in progress. The judgment that the bead should close
+is the caller's. A hand disposition, by the mechanik, converse or the operator,
+judges the bead itself. An automated caller proves its own case before it
+calls, and [authority-map.md](authority-map.md) records the power in its
+Close-with-successor row. The deferred-dispatch reconcile pass passes
+`folded` only for a pure wait: an open, unassigned bead whose own `until`
+targets have all closed, whose `until` edge to the successor still stands, that
+no open `blocks` blocker of its own holds, and that carries no live work as
+`assets/scripts/live-work.sh` defines it. The pass checks them on its
+pass-start listing and again on a fresh read of the bead and what depends on
+it, made just before the call under a claim the pass takes on the bead. Both
+reads take the bead's edges from its `bd list` row, because `bd show` leaves
+out an edge whose target has no row in this store, so an `until` target, a
+`blocks` blocker or a parent the store cannot read leaves its condition
+unproven. It leaves a bead that fails any of them, or that it cannot prove
+meets one, as it is and never calls `bead-rehome.sh` on it. It runs
+`bead-rehome.sh` as its claim, and reads the bead once more after the close:
+anything that landed on the bead or its edges while the pass held it makes the
+pass withdraw the disposal, reopening the bead and removing the pointer
+([deferred-dispatch.md](deferred-dispatch.md), "The resolved-by consumer").
+Whoever judges, `bead-rehome.sh` stays the one writer of the pointer and the
+close. It stamps the pointer in one write bd applies only while the bead still
+has the status and assignee its gates read, so a caller whose gates passed
+before another actor claimed the bead stamps nothing while that claim holds.
+The one other write to the pointer is the pass's withdrawal of a pointer it
+had `bead-rehome.sh` stamp under its claim: after a close its check finds
+raced, and when the close is held or fails, in the write that gives the bead
+back. Under its claim no other caller's stamp lands, and the pass marks the
+bead with the successor before `bead-rehome.sh` runs, so it removes only a
+pointer that is its own. A pointer on an open bead is live work to the pass,
+so it never disposes a bead another closer has pointed.
 
 A disposition ends the bead's branch, the way a merge ends a landed one
 through the repository's delete-on-merge setting. Once the close reads back,

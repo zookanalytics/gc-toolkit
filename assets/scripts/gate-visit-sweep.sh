@@ -14,7 +14,7 @@
 # already put to a person. The return trip for a cut-short hold is the liveness
 # sweep's, as today.
 #
-# Operator controls (docs/gascity-human-engagement.md):
+# Operator controls (docs/human-engagement.md):
 #   * stamp gc.gate_visit=skip on a gate BEFORE the sweep reaches it to suppress
 #     its visit (any non-empty value is honoured as "handled");
 #   * `gc bd update <gate> --unset-metadata gc.gate_visit` to re-offer a visit.
