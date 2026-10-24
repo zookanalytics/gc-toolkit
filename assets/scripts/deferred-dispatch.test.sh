@@ -28,13 +28,13 @@
 #     stamp is the unproven state so a crash there recovers as a re-sling;
 #   * every OTHER arm that must NOT sling: held by a blocker on it or on an
 #     ancestor (hold-lib.sh), assigned, sling failed;
-#   * the hold: an armed child of a parked epic, one two levels down and one
-#     whose epic waits on a task are held and named with the blocker's title in
-#     list, and the pass log names each such hold once with the arms it keeps;
-#     an arm its own blocker holds is counted there, not named. One whose epic
-#     waits only on a human gate is slung, and so is one in flight under a
-#     parked epic, which only an open blocker of its own holds. A held arm stays
-#     intact and fires once its hold releases. A blocker of its own the store
+#   * the hold: an armed child of a parked epic, one two levels down, one whose
+#     epic waits on a task and one whose epic waits on a human gate are held and
+#     named with the blocker's title in list, and the pass log names each such
+#     hold once with the arms it keeps; an arm its own blocker holds is counted
+#     there, not named. One in flight under a parked epic is slung, since only
+#     an open blocker of its own holds it. A held arm stays intact and fires
+#     once its hold releases. A blocker of its own the store
 #     does not return holds it, while an ancestor, or a blocker on an ancestor,
 #     the store does not return holds nothing. A backslash in a title prints
 #     as stored;
@@ -1107,36 +1107,40 @@ has "$out" "1 retired" "summary counts the retire"
 # bd's is_blocked flag cascades DOWN parent-child edges, so an armed child of a
 # blocked epic never enters `bd list --ready`. reconcile asks hold-lib.sh whether
 # anything holds such a bead: an open `blocks` blocker on it or on any ancestor
-# does, except a human gate on an ancestor, since waiting on the operator's
-# decision is not a hold. A held arm is left intact and named with its blocker.
+# does. A held arm is left intact and named with its blocker.
 A1='"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"'
 
-# The human-gate exception: an epic whose only open blocker is the operator's
-# pending decision holds nothing, so its armed child whose own blocker has closed
-# is slung though bd --ready excludes it.
-echo "# reconcile dispatches an arm whose epic waits only on a human gate"
+# A human gate on an epic is a wait of the whole. It holds the epic's armed work
+# as bd's cascade holds the rest of the epic's parts: the child whose own blocker
+# has closed is not slung while the gate is open, the pass log and list name the
+# gate, and the arm stays intact.
+echo "# reconcile holds an arm whose epic waits on a human gate"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"},{"id":"b-0","dependency_type":"blocks"}]},
  {"id":"b-0","status":"closed","assignee":"","metadata":{},"notes":""},
  {"id":"epic","status":"open","issue_type":"epic","assignee":"","metadata":{},"notes":"","_deps":[{"id":"dg","dependency_type":"blocks"}]},
  {"id":"dg","status":"open","issue_type":"gate","title":"Decide whether the epic goes on","assignee":"","await_type":"human","await_id":"epic-goes-on","metadata":{},"notes":""}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?
-eq "$rc" 0 "dispatching an arm under a human-gated epic is a clean pass"
-eq "$(slings)" "1" "an arm whose epic waits only on a human gate is slung though bd --ready excludes it"
-eq "$(head -1 "$STUB_SLING_LOG")" "rig/pool b-1" "the arm reaches sling with its recorded target"
-eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "the record is cleared after the dispatch"
-has "$out" "nothing holds b-1" "reconcile names why it dispatched a not-ready bead"
-has "$out" "1 dispatched" "summary counts the dispatch, not a hold"
-store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"},{"id":"b-0","dependency_type":"blocks"}]},
- {"id":"b-0","status":"closed","assignee":"","metadata":{},"notes":""},
- {"id":"epic","status":"open","issue_type":"epic","assignee":"","metadata":{},"notes":"","_deps":[{"id":"dg","dependency_type":"blocks"}]},
- {"id":"dg","status":"open","issue_type":"gate","title":"Decide whether the epic goes on","assignee":"","await_type":"human","await_id":"epic-goes-on","metadata":{},"notes":""}]'
+eq "$rc" 0 "holding an arm under a human-gated epic is a clean pass"
+eq "$(slings)" "0" "an arm whose epic waits on a human gate is NOT slung"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the held arm keeps its record"
+has "$out" 'HELD by dg "Decide whether the epic goes on" on ancestor epic: b-1' "the pass log names the gate, its title, the epic it sits on and the arm it keeps"
+has "$out" "1 held" "summary counts it as held"
+hasnt "$out" "nothing holds b-1" "the pass log claims nothing about a dispatch"
 out="$("$SUT" list 2>&1)"
-has "$out" "b-1 -> rig/pool [DISPATCHABLE NOW (nothing holds it" "list flags the human-gated epic's arm as dispatchable, not held"
+has "$out" 'b-1 -> rig/pool [HELD by dg "Decide whether the epic goes on" on ancestor epic]' "list names the human gate that holds the arm"
+
+# A person clears the gate by resolving it, which closes it. The same arm,
+# untouched since, dispatches on the next pass.
+echo "# the held arm dispatches once its epic's human gate is cleared"
+jq -c 'map(if .id == "dg" then .status = "closed" else . end)' "$STUB_STORE" > "$TMP/cleared.json" && mv "$TMP/cleared.json" "$STUB_STORE"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "1" "the arm fires on the first pass after the gate closes"
+eq "$(head -1 "$STUB_SLING_LOG")" "rig/pool b-1" "the arm reaches sling with its recorded target"
+eq "$(meta b-1 gc.dispatch_when_ready)" "<absent>" "and its record is cleared"
 
 # A park is an open blocker on the epic, and it holds the epic's armed work: the
 # child is not slung, the pass log and list name the park and its title, and the
-# arm stays intact. A park gate is a plain gate, of no await type, so the
-# human-gate exception does not reach it.
+# arm stays intact.
 PARKED='{"id":"epic","status":"open","issue_type":"epic","assignee":"","metadata":{},"notes":"","_deps":[{"id":"park","dependency_type":"blocks"}]},
  {"id":"park","status":"open","issue_type":"gate","title":"Parked until the operator unparks it","assignee":"","metadata":{},"notes":""}'
 echo "# reconcile holds an armed child of a parked epic"
@@ -1195,8 +1199,7 @@ out="$("$SUT" reconcile 2>&1)"
 has "$out" 'HELD by park "Parked: see C:\notes" on ancestor epic: b-2' "the pass log prints the backslash once"
 hasnt "$out" 'C:\\' "the pass log doubles no backslash"
 
-# The exception covers an ancestor only: a human gate on the bead itself is the
-# decision about that bead, and it holds.
+# A human gate on the bead itself holds it, as any blocker of its own does.
 echo "# reconcile holds an arm that waits on a human gate of its own"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"dg","dependency_type":"blocks"}]},
  {"id":"dg","status":"open","issue_type":"gate","title":"Decide b-1","assignee":"","await_type":"human","await_id":"decide-b-1","metadata":{},"notes":""}]'
@@ -1269,14 +1272,12 @@ has "$out" "b-1 -> rig/pool [HELD by b-0-missing (unreadable)]" "list says the b
 
 # An ancestor the store does not return, a parent in another store or one
 # deleted, holds nothing, as bd's cascade passes no hold through a row the store
-# does not hold. Here a second parent waits on a human gate, the wait that
-# keeps the arm out of bd --ready while nothing holds it.
-GATED_EPIC='{"id":"epic","status":"open","issue_type":"epic","assignee":"","metadata":{},"notes":"","_deps":[{"id":"dg","dependency_type":"blocks"}]},
- {"id":"dg","status":"open","issue_type":"gate","title":"Decide whether the epic goes on","assignee":"","await_type":"human","await_id":"epic-goes-on","metadata":{},"notes":""}'
+# does not hold. The stub reports the arm unready, so the pass asks the walk,
+# and the walk reads the parent with no row as bd does.
 echo "# an ancestor the store does not return holds nothing"
-store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic-missing","dependency_type":"parent-child"},{"id":"epic","dependency_type":"parent-child"}]},'"$GATED_EPIC"']'
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic-missing","dependency_type":"parent-child"}]}]'
 out="$("$SUT" list 2>&1)"
-has "$out" "b-1 -> rig/pool [DISPATCHABLE NOW (nothing holds it" "list shows an arm whose parent has no row as dispatchable"
+has "$out" "b-1 -> rig/pool [DISPATCHABLE NOW (no open blocks blocker sits on it" "list shows an arm whose parent has no row as dispatchable"
 hasnt "$out" "unreadable" "and names no unreadable ancestor"
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 0 "dispatching an arm whose parent has no row is a clean pass"
@@ -1286,10 +1287,9 @@ hasnt "$out" "HELD by" "the pass log names no hold for it"
 
 echo "# a blocker the store does not return on an ancestor holds nothing"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"}]},
- {"id":"epic","status":"open","issue_type":"epic","assignee":"","metadata":{},"notes":"","_deps":[{"id":"dg","dependency_type":"blocks"},{"id":"gate-missing","dependency_type":"blocks"}]},
- {"id":"dg","status":"open","issue_type":"gate","title":"Decide whether the epic goes on","assignee":"","await_type":"human","await_id":"epic-goes-on","metadata":{},"notes":""}]'
+ {"id":"epic","status":"open","issue_type":"epic","assignee":"","metadata":{},"notes":"","_deps":[{"id":"gate-missing","dependency_type":"blocks"}]}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?
-eq "$(slings)" "1" "an arm whose epic's only other blocker has no row is slung"
+eq "$(slings)" "1" "an arm whose epic's only blocker has no row is slung"
 hasnt "$out" "HELD by" "the blocker with no row is named as no hold"
 echo "# a hold walk that cannot read fails the pass"
 store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":false,"_deps":[{"id":"epic","dependency_type":"parent-child"}]},'"$PARKED"']'

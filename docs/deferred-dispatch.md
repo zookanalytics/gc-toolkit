@@ -193,9 +193,8 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
   ready, and retires the notices no longer owed (see
   [Work assigned to a named agent owes a notice](#work-assigned-to-a-named-agent-owes-a-notice));
 - **dispatches** every armed open bead nothing holds — the ones `bd` reports
-  ready, and also the ones bd keeps unready only through an ancestor that
-  waits on a human gate, or through any held ancestor of a bead in flight
-  (see below) — stamping its own
+  ready, and also a bead in flight that bd keeps unready only through a held
+  ancestor (see below) — stamping its own
   `gc.dispatch_when_ready_slung` marker in its unproven `slinging@` state,
   running the recorded sling, promoting the marker to `slung@` on success,
   then clearing the record;
@@ -227,15 +226,15 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
 
 The arm waits on what holds the bead, as `assets/scripts/hold-lib.sh`
 defines it: an open `blocks` blocker on the bead or on one of its
-parent-child ancestors. A park and a prerequisite hold alike, so an armed
-member of a parked epic, or of an epic that waits on a task, is held at any
-depth under it, and so is a bead whose own blocker is still open. A human
-gate on an ancestor does not count: it is the operator's pending decision, a
-gate whose await type is human, and waiting on that decision is not a hold. A
-human gate on the bead itself does count, and a park, a plain gate, holds at
-any depth. Where `bd` decides the same question, the
-definition follows it: a closed or pinned blocker holds nothing, and a closed
-or pinned ancestor ends the walk.
+parent-child ancestors. A park, a prerequisite and a human gate hold alike,
+so an armed member of a parked epic, of an epic that waits on a task, or of
+an epic that waits on a person's answer is held at any depth under it, and so
+is a bead whose own blocker is still open. A wait on an epic is a wait of the
+whole, which bd's cascade carries to every part that has not started, so a
+wait that belongs to one member goes on that member
+([component-model.md](component-model.md#i1-in-full-the-hold-the-demand-and-the-shape-law)).
+Where `bd` decides the same question, the definition follows it: a closed or
+pinned blocker holds nothing, and a closed or pinned ancestor ends the walk.
 
 A read that fails fails the pass, so an unread hold never passes for none. A
 read that answers without an id it was asked for says this store holds no
@@ -260,10 +259,9 @@ close, while the epic's members that have not started stay held, including
 the ones under a parent in flight.
 
 `bd list --ready` stays the fast path. bd's `is_blocked` flag cascades down
-parent-child edges, so an armed child of an epic that waits only on a demand
-gate never enters `--ready`, and neither does a bead in flight under a parked
-epic. The pass therefore asks hold-lib about every open armed bead bd keeps
-unready, and slings the ones nothing holds. The
+parent-child edges, so a bead in flight under a parked epic never enters
+`--ready`. The pass therefore asks hold-lib about every open armed bead bd
+keeps unready, and slings the ones nothing holds. The
 status gate still holds (a non-`open` bead is never dispatched), and an
 assignee still keeps the pass off the bead. The pass reads each generation
 of ancestors in one listing and their blockers in one more, so its cost does
