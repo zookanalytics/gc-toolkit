@@ -20,14 +20,15 @@
 #      way the halt arm does, a metadata write and then the hand-back, and
 #      refuses the arm outright when the run has a diff to land.
 #   6. SESSION PINS — every terminal exit that lets go of the bead removes the
-#      claim's gc.session_id and gc.session_name in its first write, the same
-#      pair at all three.
-#   7. HAND-BACK — the halt and store-only arms, and the bring-current arm of
-#      workspace-setup, hand the bead back in one write that reopens it and
-#      clears its assignee together, guarded on the status and holder the bead
-#      shows, in one block copied byte for byte into all three. A bead that
-#      shows closed is never reopened, and a refused write clears nothing and
-#      says so on the bead.
+#      claim's gc.session_id and gc.session_name, the same pair at all three:
+#      the refinery handoff in its first write, the halt and store-only exits
+#      in the hand-back's one write and nowhere ahead of it.
+#   7. HAND-BACK — the halt and store-only arms hand the bead back through
+#      assets/scripts/hand-back.sh, run for real: one write reopens it, clears
+#      its assignee and route, and removes the pins, guarded on the status and
+#      holder it shows, and only for this session's claim or none. A bead that
+#      shows closed, or is held or assigned by someone else, is not written,
+#      and a refused write leaves the claim whole and says so on the bead.
 #
 # This EXECUTES the real snippets extracted verbatim from the formula (between
 # the markers) against a fake `git`/`gc`, so the test cannot drift from the
@@ -264,6 +265,11 @@ printf '%s\n' "$*" >> "${FAKE_ESCALATE:-/dev/null}"
 exit "${FAKE_ESC_RC:-0}"
 ESC
 chmod +x "$TMP/pack/assets/scripts/run-cancel.sh" "$TMP/pack/assets/scripts/await-ruling.sh" "$TMP/pack/assets/scripts/escalate.sh"
+# hand-back.sh is the pack's own script, run for real: the halt and store-only
+# arms hand the bead back through it, and the fake gc answers its read and its
+# write.
+cp "$HERE/hand-back.sh" "$TMP/pack/assets/scripts/hand-back.sh"
+chmod +x "$TMP/pack/assets/scripts/hand-back.sh"
 export GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH=""
 export FAKE_CANCEL="$TMP/cancel" FAKE_CANCEL_RC=0 FAKE_AWAIT="$TMP/await" FAKE_AWAIT_RC=0 FAKE_ESCALATE="$TMP/escalate" FAKE_ESC_RC=0
 : > "$TMP/cancel"; : > "$TMP/await"; : > "$TMP/escalate"
@@ -1062,12 +1068,14 @@ eq "$(sed 's/^mol-polecat-work\.//' "$TMP/closed" | tr '\n' ',' | sed 's/,$//')"
 # arm to notice. This section runs it.
 
 # run_halt <script> [env assignments...] -> "<rc>"; the ordered trace is left
-# in $TMP/log.
+# in $TMP/log. The session runs as lx-holder, the fake bead's holder, and no
+# other identity variable from the shell running this suite reaches it.
 run_halt() {
   : > "$TMP/log"; : > "$TMP/closed"; : > "$TMP/attempted"; : > "$TMP/hold"
   local script="$1"; shift
   local rc=0
-  env "$@" FAKE_BRANCH=polecat/tk-work FAKE_META='{"auto_push":false}' LANDING_TARGET=main \
+  env -u GC_ALIAS -u GC_SESSION_NAME -u GC_AGENT GC_SESSION_ID=lx-holder \
+    "$@" FAKE_BRANCH=polecat/tk-work FAKE_META='{"auto_push":false}' LANDING_TARGET=main \
     GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
     FAKE_LOG="$TMP/log" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" FAKE_ENGINE_CLOSED="$TMP/engine-closed" \
     bash "$script" > "$TMP/out" 2>&1 || rc=$?
@@ -1076,6 +1084,8 @@ run_halt() {
 # The sequence of things the arm DID, one token per event — the only view that
 # can show the closes landing between the bead write and the drain.
 trace() { sed 's/|.*//' "$TMP/log" | tr '\n' ',' | sed 's/,$//'; }
+# The hand-back's one write on a bead this session holds, as the fake gc logs it.
+HB_HELD="tk-work --if-status=in_progress --if-assignee=lx-holder --status=open --assignee= --unset-metadata gc.session_id --unset-metadata gc.session_name --set-metadata gc.routed_to="
 
 printf '%s\n' "$HALT" > "$TMP/halt.sh"
 bash -n "$TMP/halt.sh" \
@@ -1095,13 +1105,14 @@ eq "$(sed -n 's/^CLOSE|mol-polecat-work\.//p' "$TMP/log" | tr '\n' ',' | sed 's/
 # The bead write is the halt's whole point: branch and target recorded,
 # branch_ready + halt_reason set so the caller can tell an opt-out halt from a
 # failure, and --append-notes rather than the --notes that erases the dispatch
-# note. The metadata clears the route first, and then the hand-back reopens the
-# bead and clears its assignee in one write, guarded on what the bead shows.
+# note. The metadata records the halt first, and then the hand-back reopens the
+# bead, clears its assignee and its route, and removes the session pins in one
+# write, guarded on what the bead shows.
 eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 1p)" \
-   "tk-work --set-metadata branch=polecat/tk-work --set-metadata target=main --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Branch ready: auto_push=false (no push, no refinery handoff)" \
-   "halt arm first write: branch + target + branch_ready + halt_reason + cleared route + session pins removed, --append-notes"
-eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)" "tk-work --if-status=in_progress --if-assignee=lx-holder --status=open --assignee=" \
-   "halt arm second write: the hand-back reopens the bead and clears its assignee together, guarded on the status and holder it shows"
+   "tk-work --set-metadata branch=polecat/tk-work --set-metadata target=main --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --append-notes Branch ready: auto_push=false (no push, no refinery handoff)" \
+   "halt arm first write: branch + target + branch_ready + halt_reason, --append-notes, and the claim left to the hand-back"
+eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)" "$HB_HELD" \
+   "halt arm second write: the hand-back reopens the bead, clears its assignee and route, and removes the pins together, guarded on the status and holder it shows"
 eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 1p | grep -c -- '--assignee')" "0" \
    "the assignee is NOT batched with the metadata (that call is refused whole)"
 
@@ -1150,11 +1161,13 @@ eq "$CTRL_RC|$(trace)" "0|UPDATE,UPDATE,DRAIN" \
 # means.
 
 # run_store <script> [env assignments...] -> "<rc>"; trace left in $TMP/log.
+# The session runs as lx-holder, as run_halt's does.
 run_store() {
   : > "$TMP/log"; : > "$TMP/closed"; : > "$TMP/attempted"
   local script="$1"; shift
   local rc=0
-  env "$@" FAKE_BRANCH=main GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
+  env -u GC_ALIAS -u GC_SESSION_NAME -u GC_AGENT GC_SESSION_ID=lx-holder \
+    "$@" FAKE_BRANCH=main GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
     FAKE_LOG="$TMP/log" FAKE_CLOSED="$TMP/closed" FAKE_ATTEMPTED="$TMP/attempted" FAKE_ENGINE_CLOSED="$TMP/engine-closed" \
     bash "$script" > "$TMP/out" 2>&1 || rc=$?
   printf '%s' "$rc"
@@ -1178,8 +1191,8 @@ eq "$(run_store "$TMP/store.sh")|$(trace)" "0|" \
    "empty STORE_ONLY_RECORD: falls through, writes nothing, does not drain"
 
 # THE ARM. Two writes, then the five closes, then the drain — the order is the
-# contract, not an accident: the metadata clears the route before the hand-back
-# opens the bead.
+# contract, not an accident: the record of what was filed lands before the
+# hand-back, so it stands whether or not the hand-back does.
 eq "$(run_store "$TMP/store-armed.sh")" "0" "store-only arm exits 0"
 eq "$(trace)" "UPDATE,UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN" \
    "store-only arm releases in two writes, closes five steps, THEN drains"
@@ -1187,14 +1200,14 @@ eq "$(sed -n 's/^CLOSE|mol-polecat-work\.//p' "$TMP/log" | tr '\n' ',' | sed 's/
    "$LOOP_STEPS" \
    "store-only arm closes the same five steps, forward order"
 
-# The writes themselves, and their ORDER. Metadata first, clearing the route
-# while the bead is still held, then the hand-back: one write that reopens the
-# bead and clears its assignee, guarded on the status and holder it shows.
+# The writes themselves, and their ORDER. The record first, then the hand-back:
+# one write that reopens the bead, clears its assignee and its route, and
+# removes the pins, guarded on the status and holder it shows.
 eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 1p)" \
-   "tk-work --set-metadata halt_reason=store_only --set-metadata gc.routed_to= --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes Store-only exit: filed tk-filed,gc-filed. <what closes this bead, or the bead-rehome.sh invocation that disposes of it>" \
-   "first write: halt_reason + cleared route + session pins removed + the filed record, --append-notes not --notes"
-eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)" "tk-work --if-status=in_progress --if-assignee=lx-holder --status=open --assignee=" \
-   "second write: the hand-back reopens the bead and clears its assignee together, guarded on the status and holder it shows"
+   "tk-work --set-metadata halt_reason=store_only --append-notes Store-only exit: filed tk-filed,gc-filed. <what closes this bead, or the bead-rehome.sh invocation that disposes of it>" \
+   "first write: halt_reason + the filed record, --append-notes not --notes, and the claim left to the hand-back"
+eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)" "$HB_HELD" \
+   "second write: the hand-back reopens the bead, clears its assignee and route, and removes the pins together, guarded on the status and holder it shows"
 eq "$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 1p | grep -c -- '--assignee')" "0" \
    "the assignee is NOT batched with the metadata (that call is refused whole)"
 
@@ -1207,14 +1220,16 @@ eq "$(printf '%s\n' "$STORE" | grep -o -- '--set-metadata gc.routed_to=[^ ]*' | 
 # The session pins go with the assignee at every exit that lets go of the bead.
 # The runtime's detached-handoff orphan sweep recovers a pool route from a pin
 # left on a released bead, and the witness's orphan scan resolves an owner from
-# it, so each exit must remove the same pair the refinery handoff removes.
+# it, so each exit must remove the same pair the refinery handoff removes. The
+# halt and store-only exits remove them in the hand-back's one write, never
+# ahead of it, so a refused hand-back leaves them on the claim it leaves.
 pin_unsets() { printf '%s\n' "$1" | grep -o -- '--unset-metadata gc\.session_[a-z]*' | sort -u | tr '\n' ' '; }
 eq "$(pin_unsets "$CONSUME")" "--unset-metadata gc.session_id --unset-metadata gc.session_name " \
    "the refinery handoff removes both session pins"
-eq "$(pin_unsets "$STORE")" "$(pin_unsets "$CONSUME")" \
-   "store-only arm removes the session pins exactly as the refinery handoff does"
-eq "$(pin_unsets "$HALT")" "$(pin_unsets "$CONSUME")" \
-   "halt arm removes the session pins exactly as the refinery handoff does"
+eq "$(pin_unsets "$(cat "$HERE/hand-back.sh")")" "$(pin_unsets "$CONSUME")" \
+   "hand-back.sh removes the session pins exactly as the refinery handoff does"
+eq "$(pin_unsets "$STORE")|$(pin_unsets "$HALT")" "|" \
+   "neither the store-only nor the halt arm removes the pins outside the hand-back"
 case "$STORE" in
   *'gc.routed_to=""'*) ok  "store-only arm clears gc.routed_to" ;;
   *)                   bad "store-only arm does not clear gc.routed_to — the pool re-offers the bead" ;;
@@ -1241,8 +1256,8 @@ case "$STORE" in
   *)             ok  "store-only arm never reaches git push" ;;
 esac
 eq "$(printf '%s\n' "$STORE" | grep -o -- '--assignee=[^ ]*' | sort -u | tr '\n' ',' | sed 's/,$//')" \
-   '--assignee=""' \
-   "the arm's only assignee write CLEARS it — a branchless bead handed to the refinery never merges"
+   '' \
+   "the arm writes no assignee of its own: hand-back.sh is its only release, and it CLEARS the assignee — a branchless bead handed to the refinery never merges"
 
 # Same drift guard the halt arm gets: the chain-close copy is step 7's block,
 # indented one level to sit inside the `if`.
@@ -1263,46 +1278,55 @@ eq "$(run_store "$TMP/store-nochain.sh")|$(trace)" "0|UPDATE,UPDATE,DRAIN" \
    "control: chain-less store-only arm drains with the chain open (the defect is real)"
 
 # --- 6d. The hand-back. -------------------------------------------------------
-# Three arms let go of a bead they may hold: the halt and store-only exits here,
-# and workspace-setup's stop to ask a person about a bead with no molecule. Each
-# hands it back in one write that reopens it and clears its assignee together,
-# guarded on the status and holder the bead shows. Split into a reopen and then
-# a clear, a store that fails the reopen and takes the clear leaves the bead
-# in_progress with no assignee, which no pool's work query serves. The block
-# is one shell copied into each arm, because each fenced block is its own
-# shell, so the copies are held identical here.
+# The halt and store-only exits let go of a bead this session may hold, and each
+# hands it back through hand-back.sh, the pack's script run here for real: one
+# write that reopens the bead, clears its assignee and its route, and removes
+# the pins, guarded on the status and holder the bead shows and made only for
+# this session's claim or none. Split into a reopen and then a clear, a store
+# that fails the reopen and takes the clear leaves the bead in_progress with no
+# assignee, which no pool's work query serves.
 HB_HALT="$(extract submit-halt-hand-back)"
 HB_STORE="$(extract submit-store-only-hand-back)"
-HB_BRING="$(extract bring-current-hand-back)"
-[ -n "$HB_HALT" ] && [ -n "$HB_STORE" ] && [ -n "$HB_BRING" ] \
-  && ok "the hand-back is extracted from all three arms" \
+[ -n "$HB_HALT" ] && [ -n "$HB_STORE" ] \
+  && ok "the hand-back is extracted from the halt and store-only arms" \
   || bad "a hand-back extraction is EMPTY — markers missing from $TOML"
-[ "$HB_HALT" = "$HB_STORE" ] && [ "$HB_HALT" = "$HB_BRING" ] \
-  && ok "the three hand-back copies are identical, byte for byte" \
-  || bad "the hand-back copies have DRIFTED"
-case "$HALT" in *"$HB_HALT"*) ok "the halt arm runs its hand-back" ;; *) bad "the halt arm does not carry its hand-back" ;; esac
-case "$STORE" in *"$HB_STORE"*) ok "the store-only arm runs its hand-back" ;; *) bad "the store-only arm does not carry its hand-back" ;; esac
-case "$HB_HALT" in *\\*) bad "the hand-back contains a backslash" ;; *) ok "the hand-back is backslash-free" ;; esac
+for arm in halt store; do
+  if [ "$arm" = halt ]; then hb="$HB_HALT" body="$HALT"; else hb="$HB_STORE" body="$STORE"; fi
+  case "$body" in *"$hb"*) ok "the $arm arm runs its hand-back" ;; *) bad "the $arm arm does not carry its hand-back" ;; esac
+  case "$hb" in
+    *'"$HB" "$WORK_BEAD_ID" --set-metadata gc.routed_to=""'*) ok "the $arm arm hands the bead back through hand-back.sh, its route cleared in the same write" ;;
+    *) bad "the $arm arm's hand-back is not hand-back.sh with the route cleared in its write" ;;
+  esac
+done
 
 # bead_state [env assignments...] -> "<status>|<assignee>" as the scenario's
 # writes left the bead, from the starting state the same assignments name.
 bead_state() { env "$@" FAKE_LOG="$TMP/log" gc bd show tk-work --json | jq -r '.[0] | "\(.status)|\(.assignee)"'; }
 # Every write that clears the assignee also reopens the bead.
 split_clears() { sed -n 's/^UPDATE|//p' "$TMP/log" | grep -E -- '--assignee=( |$)' | grep -cv -- '--status=open' || true; }
-NOTE_HELD="tk-work --append-notes Hand-back refused: the bead showed status in_progress and assignee lx-holder, and the claim is left as it was."
+# The landed writes that changed the claim or its route: a pin removed or the
+# route written.
+claim_writes() { sed -n 's/^UPDATE|//p' "$TMP/log" | grep -cE -- '--unset-metadata gc\.session_|gc\.routed_to=' || true; }
+NOTE_HELD="tk-work --append-notes Hand-back refused: the write that reopens tk-work and releases this session's claim exited 1 (the store refused it). It shows status in_progress and assignee lx-holder."
 for arm in halt store; do
   if [ "$arm" = halt ]; then run=run_halt; script="$TMP/halt.sh"; else run=run_store; script="$TMP/store-armed.sh"; fi
   eq "$($run "$script")|$(bead_state)|$(split_clears)" "0|open||0" \
      "$arm: a bead held in_progress is handed back open and unassigned, by a write that reopens it as it clears it"
   eq "$($run "$script" FAKE_STATUS=open FAKE_HOLDER=)|$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)|$(bead_state FAKE_STATUS=open FAKE_HOLDER=)" \
-     "0|tk-work --if-status=open --if-assignee= --status=open --assignee=|open|" \
+     "0|tk-work --if-status=open --if-assignee= --status=open --assignee= --unset-metadata gc.session_id --unset-metadata gc.session_name --set-metadata gc.routed_to=|open|" \
      "$arm: a bead already open and unassigned takes the same write, guarded on what it shows"
-  eq "$($run "$script" FAKE_STATUS=closed)|$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)|$(bead_state FAKE_STATUS=closed)" \
-     "0|tk-work --append-notes Hand-back refused: the bead showed status closed and assignee lx-holder, and the claim is left as it was.|closed|lx-holder" \
-     "$arm: a bead that shows closed is not reopened, and the notes say so"
-  eq "$($run "$script" FAKE_REFUSE_REOPEN=1 FAKE_ACTOR_HOLDS=1)|$(trace)|$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)|$(bead_state)" \
-     "0|UPDATE,UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN|$NOTE_HELD|in_progress|lx-holder" \
-     "$arm: a store that fails the reopen leaves the claim held and noted, and the run still ends"
+  eq "$($run "$script" FAKE_STATUS=closed)|$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)|$(bead_state FAKE_STATUS=closed)|$(claim_writes)" \
+     "0|tk-work --append-notes Hand-back refused: tk-work shows status closed and assignee lx-holder, which is not a claim this session can hand back, so nothing was released.|closed|lx-holder|0" \
+     "$arm: a bead that shows closed is not reopened, its pins and route are left on it, and the notes say so"
+  eq "$($run "$script" FAKE_HOLDER=lx-other)|$(bead_state FAKE_HOLDER=lx-other)|$(claim_writes)" \
+     "0|in_progress|lx-other|0" \
+     "$arm: a bead another session holds is not released, nor its pins or route touched"
+  eq "$($run "$script" FAKE_STATUS=open FAKE_HOLDER=gc-toolkit.refinery)|$(bead_state FAKE_STATUS=open FAKE_HOLDER=gc-toolkit.refinery)|$(claim_writes)" \
+     "0|open|gc-toolkit.refinery|0" \
+     "$arm: an open bead assigned to someone else keeps its assignee"
+  eq "$($run "$script" FAKE_REFUSE_REOPEN=1)|$(trace)|$(sed -n 's/^UPDATE|//p' "$TMP/log" | sed -n 2p)|$(bead_state)|$(claim_writes)" \
+     "0|UPDATE,UPDATE,CLOSE,CLOSE,CLOSE,CLOSE,CLOSE,DRAIN|$NOTE_HELD|in_progress|lx-holder|0" \
+     "$arm: a store that fails the reopen leaves the claim whole, its pins and route with it, notes it, and the run still ends"
 done
 
 # CONTROL: the release the hand-back replaced, a reopen and then a clear, run
