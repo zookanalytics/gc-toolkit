@@ -26,7 +26,7 @@ Under this design:
   operator asks to review one on its own.
 - A convoy may still track an effort for status. It carries no branch.
 
-**Deleted, about 2,900 lines net** (section 9 measures each unit): graduation
+**Deleted, about 2,800 lines net** (section 9 measures each unit): graduation
 and its cadence arm; the hourly `convoy-check` order, which duplicates one in
 Gas City's core pack; `convoy-seed.sh`; workspace-setup's convoy target guard;
 `mol-design-convoy`'s drain and the `until` edge it serves; the
@@ -35,10 +35,10 @@ rejection arm's branch delete; and 21 copies of one lookup, which become calls
 to one shared reader.
 
 **Changed.** The refinery's default becomes `direct`, as Gas Town's is, and one
-line keeps main behind a PR. The refinery takes, and the witness watches, only
-work that nothing holds, so a landing bead waits with the refinery until its
-effort is done. The recipes stand an effort up with one push, one landing bead
-and two writes per bead.
+line keeps main behind a PR. The refinery takes, and the witness and the doctor
+watch, only work that nothing holds, so a landing bead waits with the refinery
+until its effort is done. The recipes stand an effort up with one push, one
+landing bead and two writes per bead.
 
 **Kept under a warrant:** only the line for main (section 8).
 
@@ -501,14 +501,17 @@ is its own question (tk-fv1pkm6).
 ### Decision
 
 The landing bead is assigned to the refinery when its effort is stood up, and
-carries the notice that assignment owes (section 3, step 5). Two readers of the
+carries the notice that assignment owes (section 3, step 5). Three readers of the
 refinery's queue change, so that an assigned bead waits while something holds
 it:
 
 - the refinery's find-work leaves a bead that something holds, by `hold-lib.sh`'s
   definition;
 - the witness's `check-refinery` leaves the same bead out of its count of stuck
-  handoffs.
+  handoffs;
+- the doctor's `check-refinery-patrol-live` leaves the same bead out of the
+  queue it ages, so a refinery whose queue holds only a waiting landing bead
+  reads as idle, not as a stalled patrol.
 
 The landing bead carries a `branch`, so `hold-lib.sh` reads it as work in flight,
 which only its own blockers hold: the effort's beads. When the last of them
@@ -546,8 +549,9 @@ a finished convoy today.
   "Work assigned to a named agent owes a notice"). It is the form Gas City
   documents for direct delivery to a named session, and Gas City's own claim
   offers assigned work only once it is ready. find-work takes the refinery's
-  work without asking whether it waits, and the witness's check counts that
-  queue the same way, so those two are what change.
+  work without asking whether it waits, and the witness's check and the
+  doctor's patrol check read that queue the same way, so those three are what
+  change.
 - **A handoff waits only on a blocker of its own.** `hold-lib.sh` holds work in
   flight only by its own blockers, so a handoff under a parked epic still lands.
   A bead an arm dispatched had no open blocker when it was slung, so its handoff
@@ -756,10 +760,11 @@ answers what the operator would lose without it.
 - **The shared reader of a workflow's input convoy** (unit F): the stranded
   report, the doctor checks, the helm board's session column, priority
   following, park and disposal, as section 6 sets out.
-- **find-work's and `check-refinery`'s read of a hold** (unit B): without it the
-  refinery would land an effort's branch before its work is done, and the
-  witness would escalate a waiting landing bead as a stuck handoff. They read
-  `hold-lib.sh`, the pack's one definition of a hold.
+- **The read of a hold in find-work, `check-refinery` and
+  `check-refinery-patrol-live`** (unit B): without it the refinery would open an
+  effort's PR on a partial branch, the witness would escalate a waiting landing
+  bead as a stuck handoff, and the doctor would report an idle refinery's patrol
+  as stalled. They read `hold-lib.sh`, the pack's one definition of a hold.
 - **The recipes' push** (unit C): without it an effort's beads have no branch to
   land on, and every polecat stops at a missing base.
 - **`mol-design-convoy` and the mechanik's recipe**: a formula and a prompt.
@@ -784,12 +789,12 @@ exactly, a block counts its lines as they stand, and an addition is estimated.
 | Unit | Deletes | Adds | Net |
 |---|---|---|---|
 | A. The default and the one line | `rejection-branch-keep` (52), the fold-in flip (19), `GC_DEFAULT_MERGE_STRATEGY` with its prompt sentence and fixture check (7), the test's branch-decision section (about 145) | the one line (about 4), the resolve block's test cases (about 35), warrant 1 (about 12) | about -170 |
-| B. The landing bead reaches the refinery | `convoy-graduate.sh` (321), its test (305), `orders/convoy-check.toml` (31), arm 8 with its switch and target lookup (20), its cases (12), graduation's paragraphs and rows in the docs (about 20) | find-work's read of a hold (about 20) and its cases (about 45), `check-refinery`'s (about 15) and its cases (about 35), the architecture page's sentence (about 5) | about -590 |
+| B. The landing bead reaches the refinery | `convoy-graduate.sh` (321), its test (305), `orders/convoy-check.toml` (31), arm 8 with its switch and target lookup (20), its cases (12), graduation's paragraphs and rows in the docs (about 20) | find-work's read of a hold (about 20) and its cases (about 45), `check-refinery`'s (about 15) and its cases (about 35), `check-refinery-patrol-live`'s (about 30) and its cases (about 35), the architecture page's sentence (about 5) | about -520 |
 | C. Recipes on the landing bead | `convoy-seed.sh` (158), its test (180), `mol-design-convoy-seed-invoke.test.sh` (142), `mol-design-convoy-subject-close.test.sh` (427), the seed-convoy step (88), the drain step (84), the arm steps' parent-child links (about 6), the mechanik's seed recipe and graduation prose (about 45), `docs/design-convoy.md`'s seed, graduation and subject-close text (about 60), the polecat doctrine's paragraph (about 15) | the seed step (about 40), each bead's two writes and the hand-off (about 18), the arm test's cases (about 30), the mechanik's recipe (about 30), `docs/design-convoy.md` (about 20), the doctrine's paragraph (about 12) | about -1,060 |
 | D. The guard | step 1b of workspace-setup (116), its test (425) | nothing | -541 |
 | E. The banner and label | `pr-status-label.sh`'s `base:` group (about 55) and its test section (about 45), the banner (about 17), `pr-open.sh`'s calls (8) and its banner cases (about 52), `docs/state-machine.md`'s base label section (47) | nothing | about -225 |
 | F. One shared reader | the 19 copies in shell and formulas that stay in use (672), the lookup fixtures in their tests (about 150) | the reader (about 150), its suite and shared fixture (about 260), 19 calls (about 95), the Go copy's fixture test (about 20) | about -300 |
-| **All** | **about 3,720** | **about 850** | **about -2,880** |
+| **All** | **about 3,720** | **about 910** | **about -2,810** |
 
 What stays, and why, is section 8. Section 11 lists every living file the units
 change.
@@ -848,6 +853,7 @@ Each unit that edits a prompt or a formula regenerates its pages under
 | `assets/scripts/refinery-reconcile.sh` and its test, `orders/refinery-reconcile.toml` | arm 8 runs `convoy-graduate.sh` with an interval stamp, a target lookup and the `REFINERY_RECONCILE_INTEGRATION_AUTO_LAND` switch; the order's description says the cadence graduates convoys | arm 8 goes, with its stamp, lookup and switch; the arm lists and the order's description drop it | B |
 | `formulas/mol-refinery-patrol.toml`, header, find-work and prepare step | convoy graduation is the reconcile order's; find-work selects any open, assigned, branch-bearing bead; an idle turn ends with "The session_sleep policy restarts you on the idle interval"; "a graduation bead" is a branch shape | the header drops graduation; find-work leaves a bead `hold-lib.sh` says is held, and says why; an idle turn ends, and the next work handed over or a notice brings the next turn; the prepare step names a landing bead | B |
 | `formulas/mol-witness-patrol.toml`, `check-refinery` | every assigned, unprepared bead past the bound is a stuck handoff | a held bead is waiting, not stuck, and is left out of the count | B |
+| `doctor/check-refinery-patrol-live` and its test, and `docs/component-model.md`'s I14 row | the queue the check ages is every open, assigned, branch-bearing bead with no `merge_result`, the set find-work selects from | the check leaves a bead `hold-lib.sh` says is held, as find-work does, so a refinery whose queue holds only a waiting landing bead reads as idle, not stalled; the row's definition of the queue says the same | B |
 | `lifecycle/lifecycle.toml`, `graduation`, `target`, `merge_strategy` and `rebase_hold` | `convoy-graduate.sh` writes `graduation`, `target` and `mr`, and honors `rebase_hold` | `graduation` stays registered, as retired; the other mentions of graduation go | B |
 | `agents/refinery/prompt.template.md` | "a graduated convoy arrives as an ordinary mr-mode work bead"; the cadence runs convoy graduation | a landing bead arrives assigned when its effort is stood up, and is taken once nothing holds it; the cadence's list drops graduation | B |
 | `docs/architecture.md`, "How work moves" | one bead per PR, from file to merge | adds that an integration effort's beads land on its branch, and its landing bead carries the branch to main through the one PR | B |
@@ -897,7 +903,7 @@ makes the landing bead the way an effort lands.
 | Unit | What it changes | Its tests | Waits on |
 |---|---|---|---|
 | A. The default and the one line | `default_merge_strategy` and merge-push's `merge-strategy-resolve` in `formulas/mol-refinery-patrol.toml`, whose `rejection-branch-keep` goes; the `merge_strategy` entry of `lifecycle/lifecycle.toml`; the `pr-stack.sh` comment and the `docs/refinery-merge-cadence.md` line; the proactive pool's `PROVENANCE.md`, prompt, `agent.toml`, `tools/gc-proactive.sh` header and fixture; warrant 1 | `mr-aware-rejection-failclosed.test.sh`, as listed below; `tools/proactive-first-reaction-fixture.sh`; `render-seed-audit.sh --check` | nothing |
-| B. The landing bead reaches the refinery | deletes `convoy-graduate.sh`, its test, `orders/convoy-check.toml`, and arm 8 of `refinery-reconcile.sh` with its stamp, lookup and switch; find-work and `check-refinery` read a hold through `hold-lib.sh`; the header, find-work and prepare step of `mol-refinery-patrol.toml`; `graduation` registered as retired; the refinery's prompt; the docs, helm and gctk rows of section 11 | `find-work-gating-guard.test.sh` and `refinery-stuck-escalate.test.sh`, as listed below; `refinery-reconcile.test.sh` without arm 8; the helm board's tests; `render-seed-audit.sh --check` | A |
+| B. The landing bead reaches the refinery | deletes `convoy-graduate.sh`, its test, `orders/convoy-check.toml`, and arm 8 of `refinery-reconcile.sh` with its stamp, lookup and switch; find-work, `check-refinery` and `doctor/check-refinery-patrol-live` read a hold through `hold-lib.sh`; the header, find-work and prepare step of `mol-refinery-patrol.toml`; `graduation` registered as retired; the refinery's prompt; the docs, helm and gctk rows of section 11 | `find-work-gating-guard.test.sh`, `refinery-stuck-escalate.test.sh` and `doctor/check-refinery-patrol-live/run.test.sh`, as listed below; `refinery-reconcile.test.sh` without arm 8; the helm board's tests; `render-seed-audit.sh --check` | A |
 | C. Recipes on the landing bead | deletes `convoy-seed.sh` and its test, `mol-design-convoy-seed-invoke.test.sh` and `mol-design-convoy-subject-close.test.sh`; `mol-design-convoy`'s seed step, arm steps and drain; the mechanik's doctrine and recipe; the polecat doctrine's paragraph; the `prs` skill; the two formula sentences; `docs/design-convoy.md` and the checkpoint sentence of `docs/epics.md` | `mol-design-convoy-arm.test.sh`; `skill-needs.test.sh`; `render-seed-audit.sh --check` | nothing |
 | D. The guard | deletes workspace-setup's step 1b in `mol-polecat-work.toml` and `workspace-setup-convoy-target-guard.test.sh` | `decline-wiring.test.sh`, which scans every decline in the formula; `workspace-setup-worktree-rig.test.sh` and `workspace-setup-record-worktree-gate.test.sh` | nothing |
 | E. The banner and label | `pr-status-label.sh`, `pr-summary-region.sh`, `pr-open.sh`; the base label section of `docs/state-machine.md` | `pr-status-label.test.sh`; `pr-open.test.sh` | nothing |
@@ -972,6 +978,10 @@ Unit B is accepted on its first case, the one the change exists for.
 - **The witness waits too.** In `refinery-stuck-escalate.test.sh`, a held landing
   bead past the stuck bound files no visit, and an unheld handoff past the bound
   still does.
+- **The doctor waits too.** In `doctor/check-refinery-patrol-live/run.test.sh`, a
+  refinery whose queue holds only a held landing bead past the bound, beside a
+  patrol wisp that has rested past it, reads as idle, and an unheld handoff in the
+  same state still reads as stalled.
 
 The deferred-dispatch suite already pins the notice: sent once `bd` reports an
 assigned bead ready, kept while it waits.
