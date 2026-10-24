@@ -265,6 +265,11 @@ eq "$(grep -c 'git -C <repo> diff origin/<base>\.\.\.<reviewed_oid>` with `<repo
 eq "$(grep -c 'git -C "\$REPO" diff' "$QUORUM_TOML" || true)" 0 \
   "lane: no lane's diff names REPO, which step 2's shell does not have"
 eq "$(grep -c '`git diff origin/' "$QUORUM_TOML" || true)" 0 "lane: no lane reads a diff from its cwd"
+# The read-only check looks where the lane reads: a baseline taken in the cwd
+# misses a change to the rig's checkout, and errors where the cwd is no checkout.
+eq "$(grep -c 'mutation baseline with `git -C <repo> status --porcelain=v1 -z`' "$QUORUM_TOML" || true)" 2 \
+  "lane: each lane takes its mutation baseline in the repository its diff reads"
+eq "$(grep -c '`git status --porcelain' "$QUORUM_TOML" || true)" 0 "lane: no lane takes its mutation baseline in its cwd"
 L="$TMP/lane"
 mkdir -p "$L"
 git init -q -b main "$L/rig"; commit "$L/rig" "lane rig" >/dev/null

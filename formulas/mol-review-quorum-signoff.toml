@@ -117,8 +117,9 @@ reads what the method reads and judges as the method does, and runs nothing the
 method runs, anywhere: not at the reviewed commit and not against the
 pre-change code. The synthesis step runs all of that once for the quorum, and a
 finding that depends on its result is the synthesis's to confirm. Record a
-mutation baseline with `git status --porcelain=v1 -z` before and after and
-report any delta you introduced (there should be none).
+mutation baseline with `git -C <repo> status --porcelain=v1 -z` before and
+after, in the repository the diff reads, and report any delta you introduced
+(there should be none).
 
 **3. Write your durable lane output** to this step bead's `gc.output_json` as
 a `review-quorum.lane.v1` object, then close the step. The keys:
@@ -197,8 +198,9 @@ reads what the method reads and judges as the method does, and runs nothing the
 method runs, anywhere: not at the reviewed commit and not against the
 pre-change code. The synthesis step runs all of that once for the quorum, and a
 finding that depends on its result is the synthesis's to confirm. Record a
-mutation baseline with `git status --porcelain=v1 -z` before and after and
-report any delta you introduced (there should be none).
+mutation baseline with `git -C <repo> status --porcelain=v1 -z` before and
+after, in the repository the diff reads, and report any delta you introduced
+(there should be none).
 
 **3. Write your durable lane output** to this step bead's `gc.output_json` as
 a `review-quorum.lane.v1` object, then close the step. The keys:
