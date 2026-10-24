@@ -8,9 +8,11 @@ description: The search the arch check asks for before the pack adds surface of 
 This change adds pack surface that decides which pull-request comments are
 feedback, so the arch check asks what Gas City already ships for that need
 ([review-arch.md](../../docs/review-arch.md#the-checks), check 1). Nothing Gas
-City ships decides which of a pull request's comments are feedback, so nothing
-it ships can take an informational comment out of feedback. The rule stays in
-the pack's own definition of feedback, the one its readers already share.
+City ships gives a script a rule for which of a pull request's comments are
+feedback, and nothing lets a comment's author or a rig take an informational
+comment out of feedback. Two published packs have a model weigh comments, each
+inside a review of its own. The rule stays in the pack's own definition of
+feedback, the one its readers already share.
 
 ## The surface and the need
 
@@ -34,8 +36,8 @@ All three were read on 2026-10-23:
 
 - Gas City at main `ba3ed611de71`: its documentation, its engineering docs, the
   `core` pack it bundles, and its source.
-- The packs Gas City publishes, at `5a1c7004b250`: `gastown`, and the packs that
-  work with pull requests, `github`, `pr-review` and `pr-pipeline`.
+- Every pack Gas City publishes, at `5a1c7004b250`. Each was searched for the
+  terms below, and each part the search found was read.
 - bd at main `ce8554ffb1bb`.
 
 The search covered pull-request comments, reviews and review threads, comment
@@ -53,20 +55,21 @@ names a repository and the base branches to watch.
 reports the open pull requests that need repair: failed checks, merge
 conflicts, blocked mergeability, or a branch behind its base. The
 `githubmonitor` package's `pullRequestsQuery` reads each open pull request's
-number, title, author, draft flag, merge state, branches and the checks on its
-last commit. It reads no review and no comment. Its `authors` field is an
-allow-list of pull-request authors, not of comment authors. The monitor never
-sees feedback, so it has nothing to classify a comment with.
+number, title, URL, author, draft flag, merge state, branches, head commit and
+the checks on its last commit. It reads no review and no comment. Its `authors`
+field is an allow-list of pull-request authors, not of comment authors. The
+monitor never sees feedback, so it has nothing to classify a comment with.
 
 ### Inbound webhooks
 
 `[[webhook]]` and its rules
 ([configuration reference, WebhookRule](https://docs.gascity.com/reference/config#webhookrule))
 map one verified provider event to an order or a conversation. A rule's `match`
-compares dotted paths in the payload. The `webhookmatch` package's
-`valueMatches` takes `*` as presence, a trailing `*` as a literal prefix, and
-any other value as exact equality. So a rule can select an `issue_comment`
-delivery whose body begins with a given text.
+compares dotted paths in the payload. The configuration reference calls it an
+exact-equality predicate, and the source matches more: the `webhookmatch`
+package's `valueMatches` takes `*` as presence, a trailing `*` as a literal
+prefix, and any other value as exact equality. So a rule can select an
+`issue_comment` delivery whose body begins with a given text.
 
 That decides what one delivery dispatches. It is not an answer a reader can ask
 for. The pack reads a pull request's reviews, inline comments and conversation
@@ -123,8 +126,39 @@ for `own-def`, so no caller has to carry the prefixes.
 - `gastown` reads a pull request's state, branches and merge commit with
   `gh pr view`, in its refinery patrol and its merge reconcile, and reads no
   comment.
+- `gascity`, the base pack the methodology packs build on, carries GitHub
+  workflows that triage an issue, fix one and review a pull request. Its
+  snapshot (`pr_snapshot`) reads a pull request's own fields, such as its
+  title, body, author, head and base, and no comment. Each workflow posts one
+  comment of its own, opened by a hidden HTML comment that names the workflow,
+  such as `<!-- gc:github-pr-review head_sha=<sha> outcome=<outcome> -->`
+  (`render_pr_review_comment`). It keeps that comment's id in the workflow's
+  metadata to update it, and nothing in the pack reads such a marker back.
+- `compound-engineering`'s `compound-code-review` adds a previous-comments lane
+  when a pull request already has reviews or comments. Its persona,
+  `ce-previous-comments-reviewer`, fetches them, and a model judges which asked
+  for a change the diff has not made. It passes over questions and
+  acknowledgments, comments on code since removed, the author's notes to
+  themselves, and nits the author chose not to take. The pack's
+  `ce-pr-comment-resolver` judges each review thread it is handed on its
+  merits, whether a person or a review bot wrote it.
+- `gstack`'s `review` skill has a model classify the review comments of one
+  bot, Greptile, as actionable, already fixed, false positive or suppressed. It
+  follows a triage file that it expects among the installed Claude skills and
+  that the pack does not ship.
+- `superpowers`' `receiving-code-review` skill and `contributing-to-gascity`'s
+  `fine-tune` skill tell an agent how to weigh review feedback once it arrives.
+  Neither picks which comments are feedback. `bmad`'s code review resolves a
+  pull request to its branch and reads no comment.
 - The bundled `core` pack handles no pull-request comment. Its
   `mol-review-quorum` reviews a diff in read-only lanes.
+
+Two of these weigh a pull request's comments: compound-engineering's
+previous-comments lane and gstack's review skill. Each is a model's judgment,
+written as a prompt and made inside one review for that review's own findings.
+The pack's readers are scripts that need one answer they all share, and no
+script can ask a prompt for it. Neither pack offers a mark a comment's author
+writes or a prefix a rig declares.
 
 ### bd
 
@@ -134,10 +168,12 @@ Neither reads a pull request's comments.
 
 ## Result
 
-Nothing in Gas City, the packs it publishes or bd decides which of a pull
-request's comments are feedback, so none of them offers a rule for taking a
-comment out of feedback, or a place for a rig to declare one. The pack's
-feedback readers are its own, and this change extends the one definition they
-share in `own-def` rather than adding a second. The change adds no pack noun and
-no converter. If Gas City ships a reader of pull-request feedback, the rule
-belongs in that reader, and the pack's definition moves onto it.
+Nothing in Gas City, the packs it publishes or bd gives a script a rule for
+which of a pull request's comments are feedback. The two packs that weigh
+comments do it by a model's judgment inside a review of their own. None of
+them offers a mark that takes a comment out of feedback, or a place for a rig to
+declare one. The pack's feedback readers are its own, and this change extends
+the one definition they share in `own-def` rather than adding a second. The
+change adds no pack noun and no converter. If Gas City ships a reader of
+pull-request feedback, the rule belongs in that reader, and the pack's
+definition moves onto it.
