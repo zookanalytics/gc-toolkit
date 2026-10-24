@@ -213,10 +213,12 @@ case "$sub" in
   convoy)
     [ "${1:-}" = "list" ] && { cat "${STUB_CONVOYS:-/dev/null}" 2>/dev/null || echo '{"convoys":[]}'; exit 0; }
     # `convoy create <name> [ids...] [--target <branch>] [--json]` mints a convoy
-    # row, id new-<store length + 1> as a create mints, with a tracks edge onto
-    # each id, and answers {"convoy_id": <id>}; STUB_CONVOY_CREATE_FAIL refuses
-    # it with nothing written. `convoy add <convoy> <id>` adds the tracks edge,
-    # and STUB_CONVOY_ADD_FAIL refuses it. `convoy status <id> --json` answers the
+    # row, id <STUB_MINT_PREFIX, else new>-<store length + 1> as a create mints,
+    # with a tracks edge onto each id, and answers {"convoy_id": <id>};
+    # STUB_CONVOY_CREATE_FAIL refuses it with nothing written. `convoy add
+    # <convoy> <id>` adds the tracks edge when the store holds the convoy and the
+    # bead, since gc convoy add reads the bead from its convoy's store, and
+    # STUB_CONVOY_ADD_FAIL refuses it. `convoy status <id> --json` answers the
     # convoy and the beads it tracks as its children, in gascity's shape, and
     # `convoy close <id>` closes it. Every other convoy verb exits 0 and writes
     # nothing.
@@ -225,6 +227,8 @@ case "$sub" in
         [ -n "${STUB_CONVOY_ADD_FAIL:-}" ] && { echo "gc convoy add: simulated refusal" >&2; exit 1; }
         jq -e --arg c "${2:-}" 'any(.[]; .id == $c and (.issue_type // "") == "convoy")' "$S" >/dev/null 2>&1 \
           || { echo "gc convoy add: bead ${2:-} is not a convoy" >&2; exit 1; }
+        jq -e --arg m "${3:-}" 'any(.[]; .id == $m)' "$S" >/dev/null 2>&1 \
+          || { echo "gc convoy add: bead ${3:-} not found" >&2; exit 1; }
         printf '%s|tracks|%s\n' "${2:-}" "${3:-}" >> "$D"
         exit 0 ;;
       create)
@@ -242,7 +246,7 @@ case "$sub" in
           shift || true
         done
         [ -n "${STUB_CONVOY_CREATE_FAIL:-}" ] && { echo "gc convoy create: simulated refusal" >&2; exit 1; }
-        cid=$(jq -r '"new-" + ((length + 1) | tostring)' "$S")
+        cid=$(jq -r --arg p "${STUB_MINT_PREFIX:-new}" '$p + "-" + ((length + 1) | tostring)' "$S")
         tmp="${S%/*}/.gc-stub.$$"
         jq -c --arg id "$cid" --arg t "$cname" --arg tg "$ctarget" \
           '. + [{id: $id, status: "open", assignee: "", title: $t, issue_type: "convoy", priority: 2,
@@ -285,6 +289,11 @@ case "$sub" in
     fi
     exit 0 ;;
   mail) exit 0 ;;
+  rig)
+    # `rig list --json` answers the roster in the file STUB_RIGS_JSON names.
+    # With no such file, and for every other rig verb, the call is unsupported.
+    [ "${1:-}" = "list" ] && [ -n "${STUB_RIGS_JSON:-}" ] && { cat "$STUB_RIGS_JSON"; exit 0; }
+    echo "gc stub: unsupported 'rig ${1:-}'" >&2; exit 2 ;;
   workflow)
     # delete-source / reopen-source over the JSON store. delete-source matches
     # roots on gc.source_bead_id, so its default here is the already_clean a
@@ -353,6 +362,15 @@ case "$sub" in
   bd) : ;;
   *) echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
 esac
+# A store pin before the verb (--db <path>, --rig <name>) is consumed: the stub
+# serves one store, so a pinned call answers from it like any other.
+while :; do
+  case "${1:-}" in
+    --db|--rig) shift 2 || shift ;;
+    --db=*|--rig=*) shift ;;
+    *) break ;;
+  esac
+done
 verb="${1:-}"; shift || true
 # Edge rows are "A|TYPE|B" = "A <TYPE>-edges B" (A blocks B, A tracks B,
 # child A parent-childs parent B). Dependency orientation per type:

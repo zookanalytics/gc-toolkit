@@ -205,7 +205,11 @@ differently from a plain sling:
   roots with the same `gc.formula_name`, so a different graph.v2 formula over
   the same bead is not refused. `--force` skips that lookup (the legacy
   `gc.source_bead_id` check still refuses), and over a bare bead it mints a
-  fresh convoy and root, so the second workflow runs beside the first.
+  fresh convoy and root, so the second workflow runs beside the first. The
+  lookup and the pour run under a launch lock keyed by the bead the sling is
+  handed, so two pours onto one bead are serialized, while two pours onto two
+  convoys that track the same bead are not. `assets/scripts/work-sling.sh`
+  holds a lock of its own on the convoy anchor it pours for.
 - **A poured node withholds delivery** in `gc.deferred_routed_to`,
   `gc.deferred_execution_routed_to` and, for a node with an assignee,
   `gc.deferred_assignee`, each promoted into its live key when the node
@@ -234,7 +238,10 @@ activation in `internal/molecule/molecule.go`; `slingJSONFromResult`
 `retireInputConvoyClaimRoutes`, which upstream does not have. A convoy
 target's input convoy is `NormalizeInputConvoy` and
 `CreateSingleItemInputConvoy` (`internal/graphv2/invocation.go`), read at the
-fork `cc0a776b1` on 2026-10-23.
+fork `cc0a776b1` on 2026-10-23. The launch lock is
+`withGraphV2SourceWorkflowLock` (`internal/sling/sling_core.go`) over
+`WithLock` (`internal/sourceworkflow/sourceworkflow.go`), read at the fork
+`099e8ea15` on 2026-10-24.
 
 ## A `blocks` dep between work beads does not hold a graph.v2 dispatch
 

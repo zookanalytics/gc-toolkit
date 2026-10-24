@@ -66,7 +66,9 @@ arguments to `gc sling`. `gc sling` takes a convoy target as the run's input
 convoy, so the run works on the beads the convoy tracks. So a pour (`--on`)
 onto a convoy that is its own work bead, such as a graduation's anchor, goes
 through an input convoy that tracks that convoy alone, and the run works on
-the anchor.
+the anchor. One call at a time pours onto such an anchor. A call that finds a
+live run of the formula on it slings nothing and exits 3, as `gc sling` does
+for a bead, and the pass leaves the arm for its next pass.
 
 `arm` is fail-closed. It refuses a bead that is closed, one that is
 already dispatched (`in_progress`, or carrying `gc.routed_to`), one with

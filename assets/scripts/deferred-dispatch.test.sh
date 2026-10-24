@@ -796,6 +796,9 @@ export GC_ESCALATE_TOOL="$BIN/escalate.sh"
 export GC_REHOME_TOOL="$BIN/bead-rehome.sh"
 export BEADS_ACTOR="test-actor"
 unset GC_AGENT GC_RIG GC_RIG_ROOT 2>/dev/null || true
+# work-sling.sh keeps its lock on a graduation's anchor under the city root, so
+# the root is this run's tmpdir, never a live city's.
+export GC_CITY_PATH="$TMP/city"
 # The pass lock lives under this run's tmpdir, never the pack state dir a live
 # order holds, and the knobs a shell may carry do not settle any assertion. The
 # suite runs unpaced: on the real clock a loaded host can spend the default
@@ -1116,15 +1119,19 @@ has "$out" "1 dispatched" "summary counts the dispatch"
 # The arm replayed on it pours through an input convoy that tracks the anchor
 # alone, so the run works on the anchor. The derivation is read from the
 # formula, and the pass's store reaches work-sling.sh's reads as --db.
+# work-sling.sh names the rig that keeps that store from the rig roster, and
+# the sling of the input convoy carries it.
 DERIVE=$(grep -m 1 -o "jq -r 'if (.children | length) == 1 then [^']*'" "$ROOT/formulas/mol-polecat-work.toml" | sed "s/^jq -r '//; s/'\$//")
 has "$DERIVE" ".children[0].id" "mol-polecat-work's work-bead derivation was read from the formula"
 store '[{"id":"g-9","status":"open","assignee":"","issue_type":"convoy","priority":1,"metadata":{"branch":"integration/g-9","target":"main","graduation":"true","rejection_reason":"Conflicts with main at abc123","gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]"},"notes":"","_ready":true,"_deps":[{"id":"m-1","dependency_type":"tracks"},{"id":"m-2","dependency_type":"tracks"},{"id":"m-3","dependency_type":"tracks"}]},{"id":"m-1","status":"closed","metadata":{}},{"id":"m-2","status":"closed","metadata":{}},{"id":"m-3","status":"closed","metadata":{}}]'
 eq "$(gc convoy status g-9 --json | jq -r "$DERIVE")" "" "poured as it stands, the anchor's run would find no one work bead"
 mkdir -p "$TMP/rig-g/.beads"; : > "$TMP/bd-grad.log"
-out="$(STUB_BD_LOG="$TMP/bd-grad.log" "$SUT" reconcile --db "$TMP/rig-g/.beads" 2>&1)"; rc=$?
+printf '{"rigs":[{"name":"town","path":"%s","prefix":"ct","hq":true},{"name":"rig-g","path":"%s","prefix":"g","hq":false}]}\n' \
+    "$GC_CITY_PATH" "$TMP/rig-g" > "$TMP/rigs-g.json"
+out="$(STUB_RIGS_JSON="$TMP/rigs-g.json" STUB_BD_LOG="$TMP/bd-grad.log" "$SUT" reconcile --db "$TMP/rig-g/.beads" 2>&1)"; rc=$?
 eq "$(slings)" "1" "the armed graduation anchor is slung once"
-icv="$(head -1 "$STUB_SLING_LOG" | awk '{ print $2 }')"
-eq "$(head -1 "$STUB_SLING_LOG")" "rig/pool $icv --on mol-polecat-work" "the pour reaches gc sling with the recorded target and args"
+icv="$(head -1 "$STUB_SLING_LOG" | sed -E 's/^--rig [^ ]+ //' | awk '{ print $2 }')"
+eq "$(head -1 "$STUB_SLING_LOG")" "--rig rig-g rig/pool $icv --on mol-polecat-work" "the pour reaches gc sling with the anchor's rig and the recorded target and args"
 if [ -n "$icv" ] && [ "$icv" != "g-9" ]; then
     ok "the pour is onto an input convoy made for the anchor, not the anchor"
 else
@@ -1140,7 +1147,7 @@ has "$out" "1 dispatched" "summary counts the dispatch"
 # through an input convoy made for it, pours nothing, and the pass names the
 # live run rather than a malformed arg list.
 store '[{"id":"g-9","status":"open","assignee":"","issue_type":"convoy","priority":1,"metadata":{"branch":"integration/g-9","target":"main","graduation":"true","rejection_reason":"Conflicts with main at abc123","gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]"},"notes":"","_ready":true,"_deps":[{"id":"m-1","dependency_type":"tracks"}]},{"id":"m-1","status":"closed","metadata":{}},{"id":"icv-0","status":"open","issue_type":"convoy","title":"input convoy for g-9","metadata":{"gc.synthetic":"true"},"_deps":[{"id":"g-9","dependency_type":"tracks"}]},{"id":"r-0","status":"in_progress","title":"mol-polecat-work","metadata":{"gc.kind":"workflow","gc.formula_name":"mol-polecat-work","gc.input_convoy_id":"icv-0"}}]'
-out="$("$SUT" reconcile 2>&1)"; rc=$?
+out="$(STUB_RIGS_JSON="$TMP/rigs-g.json" "$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "0" "an anchor a live run already works on is not poured again"
 eq "$(meta g-9 gc.dispatch_when_ready)" "rig/pool" "its arm is left for the next pass"
 has "$out" "a live workflow of the formula it pours already drives it" "the pass names the live run"

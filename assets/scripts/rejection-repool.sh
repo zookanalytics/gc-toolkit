@@ -40,7 +40,10 @@
 #      graduation's anchor, an input convoy that tracks it alone, so the run
 #      works on the bead whatever its type. The pour is proved by
 #      gc.execution_routed_to reading back as the route. Step 1 cleared it, so
-#      only this pour can have written it.
+#      only a pour made since can have written it: this one, or one that
+#      work-sling.sh let another call make first while this call waited on the
+#      bead's lock. work-sling.sh then refuses this call (exit 3), and the
+#      stamp that pour left proves the rebuild all the same.
 # A pour that does not read back may still have started, so the writer never
 # stamps a bare route: a partial pour plus a pool claim double-dispatches the
 # work. When the sling failed, the writer arms a deferred dispatch, whose

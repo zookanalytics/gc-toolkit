@@ -8,10 +8,13 @@
 # or arm, whether --pool names the pool or the default does; the pour proved by
 # its own stamp and never by the one the last pour left; a failed sling armed
 # for a retry, an exit-0 pour that does not read back never armed, and neither
-# routed bare; and a visit on every other way the repool stops short. The real
-# lifecycle.sh (through a gctk built from this tree), pool-route.sh and
-# deferred-dispatch.sh run against the harness store, and escalate.sh is a stub
-# that records its argv.
+# routed bare; a visit on every other way the repool stops short; and a
+# graduation's anchor poured as its own work bead, and, when a live run already
+# works on it, the retry armed, or the rebuild proved by the stamp of a pour that
+# landed while the repool waited on the anchor's lock. The real lifecycle.sh
+# (through a gctk built from this tree), pool-route.sh, deferred-dispatch.sh,
+# work-sling.sh and bead-store.sh run against the harness store, and escalate.sh
+# is a stub that records its argv.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,12 +31,12 @@ printf "%s\n" "$*" >> "${STUB_ESC_LOG:?}"
 exit "${STUB_ESC_RC:-0}"'
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/rejection-repool.sh" "$HERE/lifecycle.sh" "$HERE/pool-route.sh" \
-  "$HERE/deferred-dispatch.sh" "$HERE/work-sling.sh"
+  "$HERE/deferred-dispatch.sh" "$HERE/work-sling.sh" "$HERE/bead-store.sh"
 printf '%s\n' "$ESC_STUB" > "$SD/escalate.sh"; chmod +x "$SD/escalate.sh"
 # The same SUT beside a deferred-dispatch.sh whose arm does not land.
 SD_NOARM="$TMP/scripts-noarm"
 mk_sut_dir "$SD_NOARM" "$HERE/rejection-repool.sh" "$HERE/lifecycle.sh" "$HERE/pool-route.sh" \
-  "$HERE/work-sling.sh"
+  "$HERE/work-sling.sh" "$HERE/bead-store.sh"
 printf '%s\n' "$ESC_STUB" > "$SD_NOARM/escalate.sh"; chmod +x "$SD_NOARM/escalate.sh"
 printf '#!/usr/bin/env bash\necho "deferred-dispatch: arm refused (stub)" >&2\nexit 1\n' > "$SD_NOARM/deferred-dispatch.sh"
 chmod +x "$SD_NOARM/deferred-dispatch.sh"
@@ -50,6 +53,12 @@ chmod +x "$READFAIL/gc"
 
 export STUB_ESC_LOG="$TMP/esc.log"
 export GC_RIG="gc-toolkit"
+# work-sling.sh names a graduation's store from the rig roster and keeps its
+# lock under the city root, both this run's own.
+mkdir -p "$TMP/city" "$TMP/rigs/gc-toolkit/.beads"
+printf '{"rigs":[{"name":"town","path":"%s","prefix":"ct","hq":true},{"name":"gc-toolkit","path":"%s","prefix":"tk","hq":false}]}\n' \
+  "$TMP/city" "$TMP/rigs/gc-toolkit" > "$TMP/rigs.json"
+export STUB_RIGS_JSON="$TMP/rigs.json" GC_CITY_PATH="$TMP/city"
 ROUTE="gc-toolkit/gc-toolkit.polecat"
 REASON="Conflicts with main at abc123; resume in prepare_mode=merge"
 
@@ -161,6 +170,49 @@ eq "$(meta tk-g gc.execution_routed_to)" "$ROUTE" "the anchor carries the stamp 
 eq "$(meta tk-g rejection_reason)" "$REASON" "the anchor records the rejection the rebuild starts from"
 eq "$(meta tk-g gc.dispatch_when_ready)" "<absent>" "a proved pour arms nothing"
 eq "$(visits)" "0" "a proved pour files no visit"
+
+echo "# a graduation another pour already works on: where the refused sling leads"
+# work-sling.sh lets one call at a time pour onto the anchor, and refuses with
+# exit 3 a call that finds a live run of the formula there. The repool then
+# reads its proof, the anchor's stamp, which its own release cleared. A run that
+# predates the release left nothing to read back, so the retry is armed, as after
+# any failed sling.
+grad
+store "$(jq -c '. + [{"id":"tk-icv9","status":"open","title":"input convoy for tk-g","issue_type":"convoy","metadata":{"gc.synthetic":"true"}},
+  {"id":"tk-r9","status":"in_progress","title":"mol-polecat-work","metadata":{"gc.kind":"workflow","gc.formula_name":"mol-polecat-work","gc.input_convoy_id":"tk-icv9"}}]' "$STUB_STORE")"
+printf 'tk-icv9|tracks|tk-g\n' >> "$STUB_DEPS"
+run tk-g --reason "$REASON"
+eq "$rc" 2 "a run that predates the release stops the repool short: exit 2"
+eq "$(slings)" "0" "nothing is poured a second time"
+has "$out" "mol-polecat-work already runs on tk-g (root tk-r9" "the refusal names the live run"
+eq "$(meta tk-g gc.dispatch_when_ready)" "$ROUTE" "the retry is armed"
+# A gc under which another call's pour of the anchor lands while this one waits
+# on the lock: at the first read of the convoys that track tk-g, the store gains
+# that pour's input convoy, its live root and the stamp it left on tk-g, after
+# the release cleared the stamp. Every call then reaches the harness stub.
+RACED="$TMP/bin-raced"; mkdir -p "$RACED"
+cat > "$RACED/gc" <<'EOF'
+#!/usr/bin/env bash
+case " $* " in
+  *" dep list tk-g "*" tracks "*)
+    if [ ! -e "$RACE_FLAG" ]; then
+      : > "$RACE_FLAG"
+      jq -c --arg r "$RACE_ROUTE" 'map(if .id == "tk-g" then .metadata["gc.execution_routed_to"] = $r else . end)
+        + [{"id":"tk-icv9","status":"open","title":"input convoy for tk-g","issue_type":"convoy","metadata":{"gc.synthetic":"true"}},
+           {"id":"tk-r9","status":"in_progress","title":"mol-polecat-work","metadata":{"gc.kind":"workflow","gc.formula_name":"mol-polecat-work","gc.input_convoy_id":"tk-icv9"}}]' \
+        "$STUB_STORE" > "$STUB_STORE.raced" && mv "$STUB_STORE.raced" "$STUB_STORE"
+      printf 'tk-icv9|tracks|tk-g\n' >> "$STUB_DEPS"
+    fi ;;
+esac
+exec "$RACE_BIN/gc" "$@"
+EOF
+chmod +x "$RACED/gc"
+grad; rm -f "$TMP/raced"
+RACE_FLAG="$TMP/raced" RACE_ROUTE="$ROUTE" RACE_BIN="$BIN" PATH="$RACED:$PATH" run tk-g --reason "$REASON"
+eq "$rc" 0 "a pour that landed while the repool waited proves the rebuild"
+eq "$(slings)" "0" "the repool pours nothing of its own"
+eq "$(meta tk-g gc.dispatch_when_ready)" "<absent>" "and arms nothing"
+eq "$(visits)" "0" "and files no visit"
 
 echo "# the stamp the last pour left proves nothing, and an exit-0 pour is not poured again"
 # The bead starts with gc.execution_routed_to naming this very pool. A pour that
