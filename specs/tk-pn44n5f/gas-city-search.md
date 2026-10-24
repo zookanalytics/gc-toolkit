@@ -35,14 +35,14 @@ of the push. Each block takes `WORK` and `BRANCH` from its own shell, while the
 prep worktree holds whichever bead the rebase step staged last.
 
 The prep worktree is one path that every iteration reuses,
-`<rig git dir>/gc-refinery-prep`, outside every working tree. The rebase step
-first removes whatever an earlier iteration left there, whichever bead staged
-it. It then adds the worktree detached at `origin/<branch>`, so staging creates
-and deletes no branch. A merge brings the head current, and a conflicted merge
-is aborted. The gate runs its checks in the worktree. The head is then pushed
-to the bead's branch, or onto the target by commit id, or it is given up. The
-worktree is removed in whatever state the iteration left it, at the end of the
-iteration or by the next stage.
+`<rig git dir>/gc-refinery-prep`, inside the rig's main checkout, in its git
+dir. The rebase step first removes whatever an earlier iteration left there,
+whichever bead staged it. It then adds the worktree detached at
+`origin/<branch>`, so staging creates and deletes no branch. A merge brings the
+head current, and a conflicted merge is aborted. The gate runs its checks in
+the worktree. The head is then pushed to the bead's branch, or onto the target
+by commit id, or it is given up. The worktree is removed in whatever state the
+iteration left it, at the end of the iteration or by the next stage.
 
 ## Where the search looked
 
@@ -135,12 +135,13 @@ No published pack calls `gc worktree`.
   a temporary detached worktree, which it removes with `--force`. Nothing
   records which bead `temp` holds, so its push takes the branch from the
   agent's shell, as this pack's push did before this change.
-- `gascity`'s `do-work` formula, which `gstack`, `compound-engineering` and
-  `bmad` extend, prepares each item's worktree at a path named for its source
-  anchor. It adds the worktree detached at the remote default branch with plain
-  git, and records the path in the anchor's `work_dir`. The path names the bead
-  and not a branch, and the refinery's push needs both, so naming the prep
-  worktree for its bead would not replace the record.
+- `gascity`'s `do-work` formula, which `gstack`, `compound-engineering`,
+  `bmad` and `superpowers` extend, prepares each item's worktree at a path
+  named for its source anchor. It adds the worktree detached at the remote
+  default branch with plain git, and records the path in the anchor's
+  `work_dir`. The path names the bead and not a branch, and the refinery's
+  push needs both, so naming the prep worktree for its bead would not replace
+  the record.
 - `pr-review`'s `mol-adopt-pr` stages each pull request in a worktree at a path
   named for it. A re-run trusts a worktree it finds there only when the tree is
   clean and its checked-out branch is the expected one. That identity is the
@@ -148,8 +149,15 @@ No published pack calls `gc worktree`.
 - `github`'s `mol-github-fix-issue` and `discord`'s `mol-discord-fix-issue` add
   a detached worktree for one issue bead with plain git, and record its path and
   its fix branch on that bead, in `work_dir` and `branch`.
-- The rest of the hits for a pushed head are `gstack`'s skills, which push the
-  branch of the agent's own checkout.
+- The rest of the hits push or fast-forward the branch checked out where they
+  run. `gastown`'s `mol-witness-patrol` salvages an orphaned worktree's work
+  onto the branch that worktree has checked out, and refuses a detached one as
+  an ambiguous push, so it too knows a worktree by its attached branch.
+  `pr-review`'s `mol-adopt-pr` and `mol-pr-merge-only` push a rebased or
+  squashed pull request branch with `--force-with-lease`. `gastown`'s
+  `mol-polecat-work` and `worktree-setup.sh` fast-forward a local branch, and
+  `gstack`'s skills fast-forward gstack's own checkout. gstack's `ship` skill
+  pushes the agent's branch with a plain `git push`, never a force push.
 
 ### bd
 
@@ -161,8 +169,9 @@ inside the repository, and records no bead. Its
 ## What the pack keeps
 
 The pack keeps its record and the verb that reads it. The record is one file
-beside the provenance `gc worktree` writes, in the worktree's private git dir,
-and it names only the bead and the branch. git deletes it with the worktree, so
-no record outlives the staging it describes. The warrant names the trigger that
-moves the check onto Gas City: an owner that binds a detached worktree to a
-bead and removes its own attempt in whatever state the iteration left it.
+in the worktree's private git dir, where `gc worktree` keeps the provenance of
+a worktree it owns, and it names only the bead and the branch. git deletes it
+with the worktree, so no record outlives the staging it describes. The warrant
+names the trigger that moves the check onto Gas City: an owner that binds a
+detached worktree to a bead and removes its own attempt in whatever state the
+iteration left it.
