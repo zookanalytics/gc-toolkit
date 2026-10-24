@@ -340,9 +340,11 @@ the operator can judge — files a human gate on the anchor and stays open. A
 comment whose question an open human gate on the anchor's feedback already
 carries is `needs-you` on that gate: the rework minted for its batch may have
 put the question to the operator before the validator ran, and `finding.sh`
-refuses every other ruling of the finding while such a gate holds the anchor or
-that rework. Only a fix's thread is
-resolved behind its answer: the thread of a declined or deferred finding stays
+refuses every other ruling of the finding while such a gate blocks that rework.
+A gate on the anchor itself refuses nothing, because an anchor gathers gates
+about anything, so the validator judges whether one carries the question. Only
+a fix's thread is resolved behind its answer: the thread of a declined or
+deferred finding stays
 open for the operator to accept or overrule. A `CHANGES_REQUESTED`
 that is feedback is auto-dismissed once every finding it raised has closed and
 every answer one of them owes its raiser (a decline's reason, a deferral's
