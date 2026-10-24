@@ -61,6 +61,13 @@ deferred-dispatch.sh arm tk-abc --target gc-toolkit/gc-toolkit.polecat \
     --sling-arg --on --sling-arg mol-pr-from-issue
 ```
 
+The pass slings through `work-sling.sh`, which hands the bead and those
+arguments to `gc sling`. `gc sling` takes a convoy target as the run's input
+convoy, so the run works on the beads the convoy tracks. So a pour (`--on`)
+onto a convoy that is its own work bead, such as a graduation's anchor, goes
+through an input convoy that tracks that convoy alone, and the run works on
+the anchor.
+
 `arm` is fail-closed. It refuses a bead that is closed, one that is
 already dispatched (`in_progress`, or carrying `gc.routed_to`), one with
 no `--target`, and one held at any status other than `open`.

@@ -35,14 +35,17 @@
 #      polecat pool is rig-scoped, so its pour stamps the rig-qualified
 #      identity, and a bare name, which pool-route.sh returns unverified when
 #      GC_RIG is unset and the live agent set cannot be read, never reads back.
-#   3. `gc sling <route> <bead> --on mol-polecat-work`, proved by
+#   3. The bead is slung to the route on mol-polecat-work through
+#      work-sling.sh, which gives a convoy that is its own work bead, such as a
+#      graduation's anchor, an input convoy that tracks it alone, so the run
+#      works on the bead whatever its type. The pour is proved by
 #      gc.execution_routed_to reading back as the route. Step 1 cleared it, so
 #      only this pour can have written it.
 # A pour that does not read back may still have started, so the writer never
 # stamps a bare route: a partial pour plus a pool claim double-dispatches the
-# work. When gc sling itself failed, the writer arms a deferred dispatch, whose
+# work. When the sling failed, the writer arms a deferred dispatch, whose
 # reconcile pass retries the pour and files a visit once the retries reach their
-# cap. When gc sling exited 0, the pour launched and only its stamp, or the read
+# cap. When the sling exited 0, the pour launched and only its stamp, or the read
 # of it, is missing. That reconcile keys its retry on its own marker and on
 # merge_result, never on gc.execution_routed_to, so a retry would pour the work
 # a second time. That stop files a visit instead, like every other way the
@@ -58,6 +61,7 @@ SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 POOL_ROUTE="$SCRIPTS_DIR/pool-route.sh"
 DEFERRED="$SCRIPTS_DIR/deferred-dispatch.sh"
+WORK_SLING="$SCRIPTS_DIR/work-sling.sh"
 ESCALATE="$SCRIPTS_DIR/escalate.sh"
 WORK_FORMULA="mol-polecat-work"
 ESCALATE_KEY="rejection-repool-failed"
@@ -119,14 +123,14 @@ LC_RC=$?
 
 ROUTE=$("$POOL_ROUTE" "$POOL_NAME") \
   || stop_short "no live pool claims '$POOL_NAME'" \
-       "dispatch the rebuild to a polecat pool that does: gc sling <pool> $WORK --on $WORK_FORMULA"
+       "dispatch the rebuild to a polecat pool that does: assets/scripts/work-sling.sh $WORK --target <pool> -- --on $WORK_FORMULA"
 case "$ROUTE" in
   */*) ;;
   *) stop_short "the only route pool-route.sh could name is the bare '$ROUTE', which addresses no rig's pool, so no pour to it could be proved" \
-       "dispatch the rebuild to the rig-qualified pool: gc sling <rig>/$POOL_NAME $WORK --on $WORK_FORMULA" ;;
+       "dispatch the rebuild to the rig-qualified pool: assets/scripts/work-sling.sh $WORK --target <rig>/$POOL_NAME -- --on $WORK_FORMULA" ;;
 esac
 
-gc sling ${GC_RIG:+--rig "$GC_RIG"} "$ROUTE" "$WORK" --on "$WORK_FORMULA" >&2
+"$WORK_SLING" "$WORK" --target "$ROUTE" -- --on "$WORK_FORMULA" >&2
 SLING_RC=$?
 if [ "$(row_meta "$(bd_json show "$WORK")" gc.execution_routed_to)" = "$ROUTE" ]; then
   warn "repooled $WORK: $WORK_FORMULA poured for $ROUTE"
@@ -134,11 +138,11 @@ if [ "$(row_meta "$(bd_json show "$WORK")" gc.execution_routed_to)" = "$ROUTE" ]
 fi
 [ "$SLING_RC" != 0 ] \
   || stop_short "gc.execution_routed_to did not read back as $ROUTE after gc sling exited 0, so the pour may be running, and no retry was armed because one could pour the work twice" \
-       "check that no $WORK_FORMULA workflow is live on it, then dispatch the rebuild: gc sling $ROUTE $WORK --on $WORK_FORMULA"
+       "check that no $WORK_FORMULA workflow is live on it, then dispatch the rebuild: assets/scripts/work-sling.sh $WORK --target $ROUTE -- --on $WORK_FORMULA"
 if "$DEFERRED" arm "$WORK" --target "$ROUTE" --sling-arg --on --sling-arg "$WORK_FORMULA" \
-     --reason "refinery rejection: the rebuild's gc sling failed (exit $SLING_RC)" >&2; then
-  warn "$WORK: gc sling exited $SLING_RC and its $WORK_FORMULA pour did not read back; armed a deferred dispatch, whose reconcile pass retries the pour"
+     --reason "refinery rejection: the rebuild's sling failed (exit $SLING_RC)" >&2; then
+  warn "$WORK: its sling exited $SLING_RC and its $WORK_FORMULA pour did not read back; armed a deferred dispatch, whose reconcile pass retries the pour"
   exit 2
 fi
-stop_short "its gc sling failed (exit $SLING_RC) and the deferred dispatch did not arm" \
-  "check that no $WORK_FORMULA workflow is live on it, then dispatch the rebuild: gc sling $ROUTE $WORK --on $WORK_FORMULA"
+stop_short "its sling failed (exit $SLING_RC) and the deferred dispatch did not arm" \
+  "check that no $WORK_FORMULA workflow is live on it, then dispatch the rebuild: assets/scripts/work-sling.sh $WORK --target $ROUTE -- --on $WORK_FORMULA"

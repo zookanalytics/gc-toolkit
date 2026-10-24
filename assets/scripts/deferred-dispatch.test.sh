@@ -621,6 +621,41 @@ if [ "${1:-}" = "session" ] && [ "${2:-}" = "nudge" ]; then
     fi
     exit 0
 fi
+# `gc convoy create <name> [ids...] [--target <branch>] --json` mints a convoy
+# tracking each id and answers {"convoy_id": <id>}, and `gc convoy add` below
+# tracks one more: the input convoy work-sling.sh makes for a convoy that is its
+# own work bead.
+if [ "${1:-}" = "convoy" ] && [ "${2:-}" = "create" ]; then
+    shift 2
+    cname="${1:-}"; shift || true
+    cids=(); ctarget=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --target) shift; ctarget="${1:-}" ;;
+            --rig) shift ;;
+            --*) : ;;
+            *) cids+=("$1") ;;
+        esac
+        shift || true
+    done
+    cid="cv-$(jq -r 'length' "${STUB_STORE:?}")"
+    tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-deferred-dispatch-test.XXXXXX")"
+    jq -c --arg id "$cid" --arg t "$cname" --arg tg "$ctarget" --args \
+        '. + [{id: $id, status: "open", assignee: "", title: $t, issue_type: "convoy", priority: 2,
+               metadata: (if $tg == "" then {} else {target: $tg} end),
+               _deps: [ $ARGS.positional[] | {id: ., dependency_type: "tracks"} ]}]' \
+        ${cids[@]+"${cids[@]}"} < "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
+    printf '{"convoy_id":"%s"}\n' "$cid"
+    exit 0
+fi
+# `gc convoy add <convoy> <id>` tracks the id from the convoy.
+if [ "${1:-}" = "convoy" ] && [ "${2:-}" = "add" ]; then
+    jq -e --arg c "${3:-}" 'any(.[]; .id == $c and .issue_type == "convoy")' "${STUB_STORE:?}" >/dev/null \
+        || { echo "gc convoy add: bead ${3:-} is not a convoy" >&2; exit 1; }
+    tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-deferred-dispatch-test.XXXXXX")"
+    jq -c --arg c "${3:-}" --arg m "${4:-}" 'map(if .id == $c then ._deps = ((._deps // []) + [{id: $m, dependency_type: "tracks"}]) else . end)' "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
+    exit 0
+fi
 # `gc convoy status <id> --json` names the convoy under `convoy` and the beads it
 # tracks as its children, and `gc convoy close <id>` closes the convoy whatever
 # its children are: the reads and the write of the design-convoy formula's
@@ -1075,6 +1110,41 @@ out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$(slings)" "1" "a fresh --on arm with no slung marker is slung, not retired"
 eq "$(head -1 "$STUB_SLING_LOG")" "rig/pool b-1 --on mol-polecat-work" "the not-yet-poured --on arm reaches sling with its recorded args"
 has "$out" "1 dispatched" "summary counts the dispatch"
+
+# A graduation's anchor is a convoy that tracks the members it landed, and
+# mol-polecat-work takes the one bead its input convoy tracks as its work bead.
+# The arm replayed on it pours through an input convoy that tracks the anchor
+# alone, so the run works on the anchor. The derivation is read from the
+# formula, and the pass's store reaches work-sling.sh's reads as --db.
+DERIVE=$(grep -m 1 -o "jq -r 'if (.children | length) == 1 then [^']*'" "$ROOT/formulas/mol-polecat-work.toml" | sed "s/^jq -r '//; s/'\$//")
+has "$DERIVE" ".children[0].id" "mol-polecat-work's work-bead derivation was read from the formula"
+store '[{"id":"g-9","status":"open","assignee":"","issue_type":"convoy","priority":1,"metadata":{"branch":"integration/g-9","target":"main","graduation":"true","rejection_reason":"Conflicts with main at abc123","gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]"},"notes":"","_ready":true,"_deps":[{"id":"m-1","dependency_type":"tracks"},{"id":"m-2","dependency_type":"tracks"},{"id":"m-3","dependency_type":"tracks"}]},{"id":"m-1","status":"closed","metadata":{}},{"id":"m-2","status":"closed","metadata":{}},{"id":"m-3","status":"closed","metadata":{}}]'
+eq "$(gc convoy status g-9 --json | jq -r "$DERIVE")" "" "poured as it stands, the anchor's run would find no one work bead"
+mkdir -p "$TMP/rig-g/.beads"; : > "$TMP/bd-grad.log"
+out="$(STUB_BD_LOG="$TMP/bd-grad.log" "$SUT" reconcile --db "$TMP/rig-g/.beads" 2>&1)"; rc=$?
+eq "$(slings)" "1" "the armed graduation anchor is slung once"
+icv="$(head -1 "$STUB_SLING_LOG" | awk '{ print $2 }')"
+eq "$(head -1 "$STUB_SLING_LOG")" "rig/pool $icv --on mol-polecat-work" "the pour reaches gc sling with the recorded target and args"
+if [ -n "$icv" ] && [ "$icv" != "g-9" ]; then
+    ok "the pour is onto an input convoy made for the anchor, not the anchor"
+else
+    bad "the pour is onto an input convoy made for the anchor, not the anchor (slung '$icv')"
+fi
+eq "$(gc convoy status "$icv" --json | jq -r "$DERIVE")" "g-9" "the run the replayed arm pours works on the graduation's anchor"
+eq "$(meta "$icv" gc.synthetic)" "true" "the input convoy is marked the way gc sling marks one"
+has "$(cat "$TMP/bd-grad.log")" "--db $TMP/rig-g/.beads show g-9" "work-sling.sh reads the anchor in the pass's store"
+eq "$(meta g-9 gc.dispatch_when_ready)" "<absent>" "the arm is retired after the dispatch"
+has "$out" "1 dispatched" "summary counts the dispatch"
+
+# A replay onto an anchor that a live run of the formula already works on,
+# through an input convoy made for it, pours nothing, and the pass names the
+# live run rather than a malformed arg list.
+store '[{"id":"g-9","status":"open","assignee":"","issue_type":"convoy","priority":1,"metadata":{"branch":"integration/g-9","target":"main","graduation":"true","rejection_reason":"Conflicts with main at abc123","gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]"},"notes":"","_ready":true,"_deps":[{"id":"m-1","dependency_type":"tracks"}]},{"id":"m-1","status":"closed","metadata":{}},{"id":"icv-0","status":"open","issue_type":"convoy","title":"input convoy for g-9","metadata":{"gc.synthetic":"true"},"_deps":[{"id":"g-9","dependency_type":"tracks"}]},{"id":"r-0","status":"in_progress","title":"mol-polecat-work","metadata":{"gc.kind":"workflow","gc.formula_name":"mol-polecat-work","gc.input_convoy_id":"icv-0"}}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "0" "an anchor a live run already works on is not poured again"
+eq "$(meta g-9 gc.dispatch_when_ready)" "rig/pool" "its arm is left for the next pass"
+has "$out" "a live workflow of the formula it pours already drives it" "the pass names the live run"
+hasnt "$out" "malformed" "and not a malformed arg list"
 
 store '[{"id":"b-1","status":"closed","assignee":"","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]"},"notes":"","_ready":false}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?

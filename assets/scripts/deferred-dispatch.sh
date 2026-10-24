@@ -184,6 +184,11 @@ DRY_RUN=0
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 ESCALATE="${GC_ESCALATE_TOOL:-$SCRIPTS_DIR/escalate.sh}"
 
+# An armed bead is slung through work-sling.sh, which hands it to gc sling and
+# gives a convoy that is its own work bead an input convoy that tracks it, so a
+# replayed pour onto a graduation's anchor works on that anchor.
+WORK_SLING="$SCRIPTS_DIR/work-sling.sh"
+
 # The resolved-by consumer disposes a bead whose `until` dep has closed, through
 # bead-rehome so the close carries a successor pointer rather than a bare close.
 # Resolved beside this script; the env override points the hermetic test at a stub.
@@ -922,24 +927,25 @@ declare_outcome() { # <skipped|partial> <reason> [<bead-id> <what-was-left>]...
         --args "$@" > "$GC_ORDER_OUTCOME_FILE" 2>/dev/null || true
 }
 
-sling_bead() { # id target args_json -> rc
+# sling_bead <id> <target> <args_json> -> the sling's exit code. An arg list it
+# cannot read slings nothing and sets SLING_ARGS_UNREAD. That is a flag and not
+# an exit code, because the sling exits 3 on its own when a live workflow of
+# the formula already drives the bead.
+sling_bead() {
     local id="$1" target="$2" args_json="$3" a
     local -a extra=()
+    SLING_ARGS_UNREAD=0
     if [ "$args_json" != "[]" ] && [ -n "$args_json" ]; then
-        printf '%s' "$args_json" | jq -e 'type == "array"' >/dev/null 2>&1 || return 3
-        local argf; mktemp_tracked || return 3; argf="$REPLY"
-        printf '%s' "$args_json" | jq -r '.[]' > "$argf" 2>/dev/null || return 3
+        printf '%s' "$args_json" | jq -e 'type == "array"' >/dev/null 2>&1 || { SLING_ARGS_UNREAD=1; return 1; }
+        local argf; mktemp_tracked || { SLING_ARGS_UNREAD=1; return 1; }; argf="$REPLY"
+        printf '%s' "$args_json" | jq -r '.[]' > "$argf" 2>/dev/null || { SLING_ARGS_UNREAD=1; return 1; }
         while IFS= read -r a; do [ -n "$a" ] && extra+=("$a"); done < "$argf"
     fi
     if [ "$DRY_RUN" = 1 ]; then
         echo "$PROG: DRY-RUN would sling: gc sling ${GC_RIG:+--rig $GC_RIG }$target $id ${extra[*]:-}"
         return 0
     fi
-    if [ -n "${GC_RIG:-}" ]; then
-        pass_child gc sling --rig "$GC_RIG" "$target" "$id" ${extra[@]+"${extra[@]}"} >/dev/null 2>&1
-    else
-        pass_child gc sling "$target" "$id" ${extra[@]+"${extra[@]}"} >/dev/null 2>&1
-    fi
+    pass_child "$WORK_SLING" "$id" --target "$target" ${BD_DB:+--db "$BD_DB"} -- ${extra[@]+"${extra[@]}"} >/dev/null 2>&1
 }
 
 # The notices half of a pass. A notice whose bead bd reports ready is sent, and
@@ -1675,8 +1681,10 @@ reconcile_dispatch() {
         sling_bead "$id" "$target" "$args_json"; rc=$?
         if [ "$rc" != 0 ]; then
             [ "$DRY_RUN" = 1 ] || bd_ update "$id" --unset-metadata "$K_SLUNG" >/dev/null 2>&1 || true
-            if [ "$rc" = 3 ]; then
+            if [ "$SLING_ARGS_UNREAD" = 1 ]; then
                 echo "$PROG: WARN $id has a malformed $K_ARGS ('$args_json') — leaving armed" >&2
+            elif [ "$rc" = 3 ]; then
+                echo "$PROG: WARN sling of $id -> $target refused: a live workflow of the formula it pours already drives it — leaving armed, retrying next pass" >&2
             else
                 echo "$PROG: WARN sling of $id -> $target failed (rc=$rc) — leaving armed, retrying next pass" >&2
             fi

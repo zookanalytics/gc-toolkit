@@ -133,6 +133,11 @@ rewrites the convoy into an mr work bead (`branch = integration/<id>`,
 integration branch to the default branch. The same universal rule holds that PR
 until an operator's approval stands on it, so the operator reviews the whole
 unit, design and implementation together, before the default branch moves.
+When the refinery sends the graduation back, for a conflict with the default
+branch or a failure the branch caused, a polecat rebuilds it on the convoy
+bead. That run is poured through an input convoy that tracks the convoy bead
+alone (`work-sling.sh`), because a pour onto the convoy itself would work on
+the members it landed.
 
 ## When the subject closes
 

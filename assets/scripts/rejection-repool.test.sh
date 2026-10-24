@@ -28,11 +28,12 @@ printf "%s\n" "$*" >> "${STUB_ESC_LOG:?}"
 exit "${STUB_ESC_RC:-0}"'
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/rejection-repool.sh" "$HERE/lifecycle.sh" "$HERE/pool-route.sh" \
-  "$HERE/deferred-dispatch.sh"
+  "$HERE/deferred-dispatch.sh" "$HERE/work-sling.sh"
 printf '%s\n' "$ESC_STUB" > "$SD/escalate.sh"; chmod +x "$SD/escalate.sh"
 # The same SUT beside a deferred-dispatch.sh whose arm does not land.
 SD_NOARM="$TMP/scripts-noarm"
-mk_sut_dir "$SD_NOARM" "$HERE/rejection-repool.sh" "$HERE/lifecycle.sh" "$HERE/pool-route.sh"
+mk_sut_dir "$SD_NOARM" "$HERE/rejection-repool.sh" "$HERE/lifecycle.sh" "$HERE/pool-route.sh" \
+  "$HERE/work-sling.sh"
 printf '%s\n' "$ESC_STUB" > "$SD_NOARM/escalate.sh"; chmod +x "$SD_NOARM/escalate.sh"
 printf '#!/usr/bin/env bash\necho "deferred-dispatch: arm refused (stub)" >&2\nexit 1\n' > "$SD_NOARM/deferred-dispatch.sh"
 chmod +x "$SD_NOARM/deferred-dispatch.sh"
@@ -122,6 +123,45 @@ run tk-w --reason "$REASON"
 eq "$rc" 0 "a bead with a PR pours"
 eq "$(meta tk-w existing_pr)" "https://github.com/o/r/pull/7" "pr_url carried over as existing_pr"
 
+echo "# a graduation's anchor, a convoy that tracks the members it landed, is poured as its own work bead"
+# convoy-graduate.sh makes the graduated convoy the anchor, so the rejection
+# repools a convoy. mol-polecat-work takes the one bead its input convoy tracks as
+# its work bead; the derivation is read from the formula itself, so this case
+# follows it.
+DERIVE=$(grep -m 1 -o "jq -r 'if (.children | length) == 1 then [^']*'" "$HERE/../../formulas/mol-polecat-work.toml" | sed "s/^jq -r '//; s/'\$//")
+has "$DERIVE" ".children[0].id" "mol-polecat-work's work-bead derivation was read from the formula"
+work_bead_of() { gc convoy status "$1" --json 2>/dev/null | jq -r "$DERIVE" 2>/dev/null; }
+grad() {
+  local m
+  store "[{\"id\":\"tk-g\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"g\",\"issue_type\":\"convoy\",\"priority\":1,\"metadata\":{\"branch\":\"integration/tk-g\",\"target\":\"main\",\"graduation\":true,\"merge_strategy\":\"mr\",\"gc.routed_to\":\"\"}},
+          {\"id\":\"tk-m1\",\"status\":\"closed\",\"title\":\"m1\",\"metadata\":{}},
+          {\"id\":\"tk-m2\",\"status\":\"closed\",\"title\":\"m2\",\"metadata\":{}},
+          {\"id\":\"tk-m3\",\"status\":\"closed\",\"title\":\"m3\",\"metadata\":{}}]"
+  : > "$STUB_DEPS"
+  for m in tk-m1 tk-m2 tk-m3; do printf 'tk-g|tracks|%s\n' "$m" >> "$STUB_DEPS"; done
+  : > "$STUB_GC_LOG"; : > "$STUB_ESC_LOG"
+  export STUB_SLING_FAIL="" STUB_UPDATE_FAIL="" STUB_SHOW_FAIL="" STUB_AGENTS="" STUB_ESC_RC=""
+}
+grad
+eq "$(work_bead_of tk-g)" "" "poured as it stands, the convoy's run would find no one work bead"
+run tk-g --reason "$REASON"
+eq "$rc" 0 "the repool of a graduation's anchor is proved"
+eq "$(slings)" "1" "one pour"
+icv=$(awk '$1 == "sling" { print $(NF - 2); exit }' "$STUB_GC_LOG")
+has "$(grep '^sling ' "$STUB_GC_LOG")" "sling --rig gc-toolkit $ROUTE $icv --on mol-polecat-work" "the pour goes to the proved route"
+if [ -n "$icv" ] && [ "$icv" != "tk-g" ]; then
+  ok "the pour is onto an input convoy made for the anchor, not the anchor"
+else
+  bad "the pour is onto an input convoy made for the anchor, not the anchor (slung '$icv')"
+fi
+eq "$(work_bead_of "$icv")" "tk-g" "the run the repool pours works on the graduation's anchor"
+eq "$(jq -r --arg id "$icv" '.[] | select(.id == $id) | [.issue_type, .title, .priority, .metadata["gc.synthetic"], .metadata.target] | map(tostring) | join(" | ")' "$STUB_STORE")" \
+  "convoy | input convoy for tk-g | 1 | true | main" "the input convoy is marked the way gc sling marks one, at the anchor's priority and target"
+eq "$(meta tk-g gc.execution_routed_to)" "$ROUTE" "the anchor carries the stamp the pour left, the proof the repool reads"
+eq "$(meta tk-g rejection_reason)" "$REASON" "the anchor records the rejection the rebuild starts from"
+eq "$(meta tk-g gc.dispatch_when_ready)" "<absent>" "a proved pour arms nothing"
+eq "$(visits)" "0" "a proved pour files no visit"
+
 echo "# the stamp the last pour left proves nothing, and an exit-0 pour is not poured again"
 # The bead starts with gc.execution_routed_to naming this very pool. A pour that
 # exits 0 without stamping it must not read back as proved off that stale value.
@@ -168,7 +208,7 @@ eq "$rc" 2 "a visit carries the bead: exit 2"
 eq "$(visits)" "1" "one visit"
 esc=$(cat "$STUB_ESC_LOG")
 has "$esc" "--subject tk-w --key rejection-repool-failed" "filed on the bead under its situation key"
-has "$esc" "gc sling $ROUTE tk-w --on mol-polecat-work" "the visit names the pour that finishes it"
+has "$esc" "assets/scripts/work-sling.sh tk-w --target $ROUTE -- --on mol-polecat-work" "the visit names the pour that finishes it"
 has "$esc" "rejection reason: $REASON)" "the visit carries the reason"
 has "$esc" "--message A rejected handoff may never be rebuilt:" "the visit leads with the stake"
 no_bare_route "no bare route behind the visit either"
@@ -229,7 +269,7 @@ eq "$(meta tk-w gc.dispatch_when_ready)" "<absent>" "nothing is armed to a bare 
 eq "$(meta tk-w rejection_reason)" "$REASON" "the release stands for whoever finishes it"
 no_bare_route "the bare name is not stamped as a route either"
 has "$(cat "$STUB_ESC_LOG")" "the bare 'gc-toolkit.polecat'" "the visit names the bare route"
-has "$(cat "$STUB_ESC_LOG")" "gc sling <rig>/gc-toolkit.polecat tk-w --on mol-polecat-work" "the visit names the rig-qualified pour that finishes it"
+has "$(cat "$STUB_ESC_LOG")" "assets/scripts/work-sling.sh tk-w --target <rig>/gc-toolkit.polecat -- --on mol-polecat-work" "the visit names the rig-qualified pour that finishes it"
 reset
 GC_RIG="" run tk-w --reason "$REASON" --pool gc-toolkit.polecat
 eq "$rc" 2 "a bare --pool with GC_RIG unset is refused the same way"

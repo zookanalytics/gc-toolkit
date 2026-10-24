@@ -212,6 +212,67 @@ case "$sub" in
     exit 0 ;;
   convoy)
     [ "${1:-}" = "list" ] && { cat "${STUB_CONVOYS:-/dev/null}" 2>/dev/null || echo '{"convoys":[]}'; exit 0; }
+    # `convoy create <name> [ids...] [--target <branch>] [--json]` mints a convoy
+    # row, id new-<store length + 1> as a create mints, with a tracks edge onto
+    # each id, and answers {"convoy_id": <id>}; STUB_CONVOY_CREATE_FAIL refuses
+    # it with nothing written. `convoy add <convoy> <id>` adds the tracks edge,
+    # and STUB_CONVOY_ADD_FAIL refuses it. `convoy status <id> --json` answers the
+    # convoy and the beads it tracks as its children, in gascity's shape, and
+    # `convoy close <id>` closes it. Every other convoy verb exits 0 and writes
+    # nothing.
+    case "${1:-}" in
+      add)
+        [ -n "${STUB_CONVOY_ADD_FAIL:-}" ] && { echo "gc convoy add: simulated refusal" >&2; exit 1; }
+        jq -e --arg c "${2:-}" 'any(.[]; .id == $c and (.issue_type // "") == "convoy")' "$S" >/dev/null 2>&1 \
+          || { echo "gc convoy add: bead ${2:-} is not a convoy" >&2; exit 1; }
+        printf '%s|tracks|%s\n' "${2:-}" "${3:-}" >> "$D"
+        exit 0 ;;
+      create)
+        shift
+        cname="${1:-}"; shift || true
+        cids=(); ctarget=""
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --target) shift; ctarget="${1:-}" ;;
+            --target=*) ctarget="${1#--target=}" ;;
+            --rig) shift ;;
+            --*) : ;;
+            *) cids+=("$1") ;;
+          esac
+          shift || true
+        done
+        [ -n "${STUB_CONVOY_CREATE_FAIL:-}" ] && { echo "gc convoy create: simulated refusal" >&2; exit 1; }
+        cid=$(jq -r '"new-" + ((length + 1) | tostring)' "$S")
+        tmp="${S%/*}/.gc-stub.$$"
+        jq -c --arg id "$cid" --arg t "$cname" --arg tg "$ctarget" \
+          '. + [{id: $id, status: "open", assignee: "", title: $t, issue_type: "convoy", priority: 2,
+                 metadata: (if $tg == "" then {} else {target: $tg} end)}]' "$S" > "$tmp" && mv "$tmp" "$S"
+        for m in ${cids[@]+"${cids[@]}"}; do printf '%s|tracks|%s\n' "$cid" "$m" >> "$D"; done
+        printf '{"convoy_id":"%s"}\n' "$cid"
+        exit 0 ;;
+      status)
+        cid="${2:-}"
+        members=$(awk -F'|' -v c="$cid" '$1 == c && $2 == "tracks" { print $3 }' "$D")
+        jq -ce --arg c "$cid" --arg m "$members" '. as $s
+          | ([ .[] | select(.id == $c and (.issue_type // "") == "convoy") ] | .[0]) as $cv
+          | if $cv == null then error("no convoy " + $c) else
+              ([ $m | split("\n")[] | select(. != "") as $id | $s[] | select(.id == $id)
+                 | {id, title: (.title // ""), status: (.status // "open"), type: (.issue_type // "task")} ]) as $kids
+              | {children: $kids,
+                 convoy: {id: $cv.id, title: ($cv.title // ""), status: ($cv.status // "open"), owned: false,
+                          fields: (if (($cv.metadata // {}).target // "") == "" then {} else {target: $cv.metadata.target} end)},
+                 ok: true,
+                 progress: {closed: ([ $kids[] | select(.status == "closed") ] | length), total: ($kids | length)},
+                 schema_version: "1"} end' "$S" 2>/dev/null || { echo "gc convoy status: no convoy $cid" >&2; exit 1; }
+        exit 0 ;;
+      close)
+        cid="${2:-}"
+        jq -e --arg c "$cid" 'any(.[]; .id == $c and (.issue_type // "") == "convoy")' "$S" >/dev/null 2>&1 \
+          || { echo "gc convoy close: bead $cid is not a convoy" >&2; exit 1; }
+        tmp="${S%/*}/.gc-stub.$$"
+        jq -c --arg c "$cid" 'map(if .id == $c then .status = "closed" else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
+        exit 0 ;;
+    esac
     exit 0 ;;
   session)
     printf '%s\n' "gc session $*" >> "${STUB_SESSION_LOG:?}"

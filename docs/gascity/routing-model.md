@@ -186,6 +186,15 @@ differently from a plain sling:
   workflow. The city's fork clears it, on the attach bead and on every member
   of the root's input convoy, so a workflow is the bead's one live dispatch
   surface.
+- **A convoy target is its own input convoy.** The pour mints the one-item
+  synthetic input convoy only for a target that is not a convoy. A convoy
+  target is named on the root as `gc.input_convoy_id` as it stands, so the
+  run's work is the beads that convoy tracks, the convoy-first shape whose
+  members the fork's route clear covers. A formula that works one bead, such
+  as `mol-polecat-work`, takes the one bead its input convoy tracks as its work
+  bead and refuses any other count. So the pack pours onto a convoy that is
+  its own work bead, a graduation's anchor, through an input convoy that tracks
+  it alone (`assets/scripts/work-sling.sh`).
 - **A classic (non-graph) attach routes the work bead instead**, with the
   plain sling's contract, and leaves the wisp root unrouted, because the work
   bead is the claimable unit. A standalone launch (`gc sling <target>
@@ -222,7 +231,10 @@ fork it also loses its route.
 activation in `internal/molecule/molecule.go`; `slingJSONFromResult`
 (`cmd/gc/cmd_sling.go`); read at upstream `1e05ae624` and the fork on
 2026-10-19. The fork's route clear is `retireClaimRoute` and
-`retireInputConvoyClaimRoutes`, which upstream does not have.
+`retireInputConvoyClaimRoutes`, which upstream does not have. A convoy
+target's input convoy is `NormalizeInputConvoy` and
+`CreateSingleItemInputConvoy` (`internal/graphv2/invocation.go`), read at the
+fork `cc0a776b1` on 2026-10-23.
 
 ## A `blocks` dep between work beads does not hold a graph.v2 dispatch
 
