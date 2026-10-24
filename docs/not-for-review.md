@@ -41,8 +41,10 @@ counts the same on a conversation comment, an inline comment and a review
 body, under any login.
 
 The mark opens the body when it is the first thing in it, or when only blank
-lines and other HTML comments come before it. Put it on a line of its own at
-the top, indented three spaces or less, as in this report a workflow posts:
+lines and other HTML comments come before it. A byte-order mark at the very
+start of the body counts for nothing, since GitHub's renderer drops it. Put
+the mark on a line of its own at the top, indented three spaces or less, as in
+this report a workflow posts:
 
 ```
 <!-- growth-factor:schema-diff -->
@@ -77,8 +79,10 @@ prefix = "[vc]: #"
 
 - Each `[[marker]]` table sets `prefix` and nothing else. The file holds nothing
   but those tables and comments.
-- A prefix is literal text, compared with the start of the body from its first
-  character, case included. It is not a pattern.
+- A prefix is literal text, compared with the start of the body, case
+  included. It is not a pattern. Leading whitespace counts for nothing, in the
+  prefix and in the body, and neither does a byte-order mark that opens the
+  body.
 - A prefix is one line. In double quotes, `\"` and `\\` are its only escapes.
   In single quotes, it is taken as written.
 - An empty prefix would take every comment out of review, so it is refused. A

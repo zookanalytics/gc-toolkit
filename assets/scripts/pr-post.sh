@@ -123,7 +123,8 @@ NFR_FILE=not-for-review.toml
 # prefix as a one-line TOML string. Prints {prefixes, refused}, where refused
 # names each part read no prefix from. A table with any fault declares nothing,
 # and neither does an empty prefix, which would take every comment out of
-# review. A basic string may escape only a double quote and a backslash.
+# review. A basic string may escape only a double quote and a backslash. A
+# prefix loses its leading whitespace, since a body is compared without its own.
 NFR_PARSE='([39] | implode) as $sq
 | def tstring:
     if test("^\"(?:[^\"\\\\]|\\\\[\"\\\\])*\"\\s*(?:#.*)?$")
@@ -150,7 +151,7 @@ NFR_PARSE='([39] | implode) as $sq
         .c.bad += [ "line \($x.n): a [[marker]] table sets its prefix and nothing else" ]
       end)
   | (.t + [ .c | select(. != null) ]) as $tables
-  | { prefixes: [ $tables[] | select((.bad | length) == 0 and (.p | length) == 1 and (.p[0] | test("\\S"))) | .p[0] ],
+  | { prefixes: [ $tables[] | select((.bad | length) == 0 and (.p | length) == 1 and (.p[0] | test("\\S"))) | .p[0] | sub("^\\s+"; "") ],
       refused: (.bad + [ $tables[]
         | if (.bad | length) > 0 then .bad[]
           elif (.p | length) == 0 then "the [[marker]] at line \(.n) sets no prefix"
@@ -211,6 +212,10 @@ nfr_load() {
 # a line ends the opening there. gc_opens_with_mark reads the body a line at a
 # time and takes a line's run of comments in one regex match, with no string
 # positions, so a line packed with comments stays cheap.
+#
+# A byte-order mark that opens a body is not text: GitHub's renderer drops it,
+# so both tests read the body without it. A declared prefix is compared with the
+# body's text after any leading whitespace, as the parser compares the prefix.
 NFR_DEF='def gc_opens_with_mark:
   def comments($l):
     (if .open then
@@ -235,9 +240,10 @@ NFR_DEF='def gc_opens_with_mark:
     else .stop = true end)
   | .hit;
 def gc_not_for_review:
-  ((.body // "") | tostring) as $b
+  ((.body // "") | tostring | ltrimstr("\ufeff")) as $b
+  | ($b | sub("^[[:space:]]+"; "")) as $t
   | ($b | contains(gc_no_review_mark) and gc_opens_with_mark)
-    or any(gc_not_for_review_prefixes[]; . as $p | $b | startswith($p));
+    or any(gc_not_for_review_prefixes[]; . as $p | $t | startswith($p));
 def gc_feedback($self; $since):
   (gc_city_own($self; $since) | not) and (gc_not_for_review | not);
 '

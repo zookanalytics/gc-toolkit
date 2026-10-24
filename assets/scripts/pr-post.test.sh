@@ -283,8 +283,12 @@ eq "$(feedback "$NDEF" '{"user":{"login":"preview[bot]","type":"Bot"},"body":"Sc
   "an unmarked Bot comment is still feedback"
 eq "$(feedback "$VDEF" '{"user":{"login":"johnzook","type":"User"},"body":"Quoting the bot: [vc]: #abc"}')" true \
   "a declared prefix past the start of the body leaves it feedback"
-eq "$(feedback "$VDEF" '{"user":{"login":"vercel[bot]","type":"Bot"},"body":" [vc]: #abc"}')" true \
-  "…and so does one after a leading space: the prefix is compared from the first character"
+eq "$(feedback "$VDEF" '{"user":{"login":"vercel[bot]","type":"Bot"},"body":" [vc]: #abc"}')" false \
+  "a declared prefix after a leading space still opens the body: leading whitespace is not compared"
+eq "$(feedback "$VDEF" '{"user":{"login":"vercel[bot]","type":"Bot"},"body":"\n\t[vc]: #abc"}')" false \
+  "…and neither are leading blank lines and tabs"
+eq "$(feedback "$VDEF" "$(jq -nc --arg b "$(printf '\xef\xbb\xbf[vc]: #abc\nThe latest updates.')" '{user: {login: "vercel[bot]", type: "Bot"}, body: $b}')")" false \
+  "…nor a byte-order mark that opens the body, which GitHub's renderer drops"
 eq "$(feedback "$NDEF" '{"user":{"login":"bot"},"body":"verdict\n\n<!-- gc:city -->","created_at":"2026-10-08T00:00:00Z"}')" false \
   "the city's own post is not feedback"
 eq "$(feedback "$NDEF" '{"user":{"login":"bot"},"body":"model review: fix the race","created_at":"2026-10-08T00:00:00Z"}')" true \
@@ -318,6 +322,12 @@ eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf '%s Deployment rea
   "the mark counts as the first thing on a line that goes on past it"
 eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf '   %s' "$NR")")")" false \
   "a mark indented three spaces still opens the body"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf ' %s\nctx' "$NR")")")" false \
+  "…and so does one after a single space"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf '\xef\xbb\xbf%s\nctx' "$NR")")")" false \
+  "…and one after a byte-order mark, which GitHub's renderer drops"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf '<!-- run 7 -->\n\xef\xbb\xbf%s' "$NR")")")" true \
+  "…while one after the body's start is text, which ends the opening"
 eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf '<!-->\n<!--->\n<!-- a --!>\n%s' "$NR")")")" false \
   "a comment ends where an HTML parser ends it, at --> or --!>, the empty forms included"
 eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf '<!-- run 7 -->\r\n%s\r\nReport\r\n' "$NR")")")" false \
@@ -414,6 +424,9 @@ eq "$NOUT" "$(printf '%s\n%s\n%s\n%s' "$NO_REVIEW" 'a "quoted" \ prefix' 'C:\lit
 printf '[[marker]]\r\nprefix = "[vc]: #"\r\n' | rig_declares "$SHAPES"
 nfr_run "$SHAPES"
 eq "$RC|$NOUT" "0|$(printf '%s\n%s' "$NO_REVIEW" '[vc]: #')" "a file with CRLF line ends reads the same"
+printf '%s\n' '[[marker]]' 'prefix = "  [vc]: #"' | rig_declares "$SHAPES"
+nfr_run "$SHAPES"
+eq "$RC|$NOUT" "0|$(printf '%s\n%s' "$NO_REVIEW" '[vc]: #')" "a prefix declared after leading spaces is compared without them"
 FAULTS="$TMPD/faults"
 rig_declares "$FAULTS" <<'TOML'
 prefix = "outside any table"
