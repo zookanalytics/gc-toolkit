@@ -102,6 +102,10 @@ Any per-rig `[rigs.imports.gc-toolkit]` overrides the default for that rig.
 - **Skills** — surfaced via `gc skill list` (`gc-toolkit.handoff`,
   `gc-toolkit.session-title`, …).
 - **Doctor checks** — the structural checks verified below.
+- **Comments not for review** — a comment a rig's workflow or integration
+  posts on a pull request stays out of review when it opens with gc-toolkit's
+  no-review mark or with a marker the rig declares in
+  `not-for-review.toml` ([not-for-review.md](not-for-review.md)).
 
 ---
 

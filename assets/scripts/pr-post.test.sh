@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # pr-post.test.sh — hermetic coverage of the city's single PR posting helper:
 # each verb makes the gh call its callers made, with the provenance mark
-# appended; the own-def predicate tells the city's own post from feedback on
-# every shape the readers hand it; and no file in the pack posts to a pull
-# request any other way. A gh stub records each call's argv and the body it
-# would post; no network, no city.
+# appended; the own-def predicates tell the city's own post, and a post not for
+# review, from feedback on every shape the readers hand them; not-for-review
+# reads the rig's declaration from its checkout; no reader carries the no-review
+# rule of its own; and no file in the pack posts to a pull request any other
+# way. A gh stub records each call's argv and the body it would post; no
+# network, no city.
 #
 # run-tests-scope: tree
 set -u
@@ -216,6 +218,214 @@ eq "$(cutover "")" "" "gc_city_cutover of nothing is nothing"
 eq "$(marked '{"body":"plain"}')" false "an unmarked body carries no mark"
 eq "$(marked '{"body":null}')" false "a null body carries no mark"
 eq "$(marked "{\"body\":\"x $MARK\"}")" true "gc_city_marked reads the body alone"
+
+echo "# own-def: a post not for review is not feedback, whoever posted it"
+# def_in <checkout> — own-def as a reader in that rig's checkout prints it.
+def_in() { GC_RIG_ROOT="$1" "$SUT" own-def 2>/dev/null; }
+feedback() { # <def> <json> — prints gc_feedback for our login "bot" at $CUT
+  printf '%s' "$2" | jq -r --arg self bot --arg since "$CUT" "$1"'gc_feedback($self; $since)'
+}
+nfr() { printf '%s' "$2" | jq -r "$1"'gc_not_for_review'; } # <def> <json>
+RIG="$TMPD/rig"; mkdir -p "$RIG"
+printf '%s\n' '# Vercel' '[[marker]]' 'prefix = "[vc]: #"  # its deployment notice' >"$RIG/not-for-review.toml"
+VDEF="$(def_in "$RIG")"
+NDEF="$(def_in "$TMPD/no-declaration")"
+VERCEL='{"user":{"login":"vercel[bot]","type":"Bot"},"body":"[vc]: #DEIJgls1qh2Jz\nThe latest updates on your projects."}'
+eq "$(feedback "$VDEF" "$VERCEL")" false "a Vercel-shaped comment is not feedback on a rig that declares [vc]: #"
+eq "$(feedback "$NDEF" "$VERCEL")" true "…and is feedback on a rig that declares nothing"
+eq "$(feedback "$NDEF" '{"user":{"login":"preview[bot]","type":"Bot"},"body":"<!-- gc:no-review -->\nSchema diff"}')" false \
+  "a Bot comment opening with the mark is not feedback, on a rig that declares nothing"
+eq "$(feedback "$NDEF" '{"user":{"login":"johnzook","type":"User"},"body":"<!-- gc:no-review -->\nFYI only"}')" false \
+  "a person's comment opening with the mark is not feedback"
+eq "$(feedback "$NDEF" '{"user":{"login":"bot"},"body":"<!-- gc:no-review -->\nnote","created_at":"2026-10-08T00:00:00Z"}')" false \
+  "a post under our login opening with the mark and not the city's is not feedback either"
+eq "$(feedback "$NDEF" '{"user":{"login":"preview[bot]","type":"Bot"},"body":"Schema diff: two tables changed."}')" true \
+  "an unmarked Bot comment is still feedback"
+eq "$(feedback "$VDEF" '{"user":{"login":"johnzook","type":"User"},"body":"Quoting the bot: [vc]: #abc"}')" true \
+  "a declared prefix past the start of the body leaves it feedback"
+eq "$(feedback "$VDEF" '{"user":{"login":"vercel[bot]","type":"Bot"},"body":" [vc]: #abc"}')" true \
+  "…and so does one after a leading space: the prefix is compared from the first character"
+eq "$(feedback "$NDEF" '{"user":{"login":"bot"},"body":"verdict\n\n<!-- gc:city -->","created_at":"2026-10-08T00:00:00Z"}')" false \
+  "the city's own post is not feedback"
+eq "$(feedback "$NDEF" '{"user":{"login":"bot"},"body":"model review: fix the race","created_at":"2026-10-08T00:00:00Z"}')" true \
+  "an unmarked post under our login after the cutover is still feedback"
+eq "$(feedback "$NDEF" '{"user":{"login":"op"},"state":"APPROVED","body":"<!-- gc:no-review -->\nShip it."}')" false \
+  "a review's body opening with the mark is not feedback: its state is for the reader that counts states"
+eq "$(nfr "$NDEF" '{"author":{"login":"x"},"body":"<!-- gc:no-review --> on a GraphQL node"}')" true \
+  "a GraphQL node reads the same way"
+eq "$(nfr "$NDEF" '{"body":null}')" false "a null body carries no mark"
+eq "$(printf '%s' "$VERCEL" | jq -r --arg self bot --arg since "$CUT" "$VDEF"'gc_city_own($self; $since)')" false \
+  "the city's own rule is unchanged by a declaration"
+
+echo "# own-def: the mark counts only among the HTML comments a body opens with"
+row() { jq -nc --arg l "$1" --arg t "$2" --arg b "$3" '{user: {login: $l, type: $t}, body: $b}'; } # <login> <type> <body>
+NR='<!-- gc:no-review -->'
+GF_REPORT=$(printf '%s\n' '<!-- growth-factor:schema-diff -->' "$NR" '### Schema diff' '' '| table | change |' '|---|---|' \
+  '| `app.practices` | added |' '' '```sql' 'ALTER TABLE app.practices ADD tz text;' '```')
+eq "$(feedback "$NDEF" "$(row 'github-actions[bot]' Bot "$GF_REPORT")")" false \
+  "a workflow's report whose mark follows its own marker line is not for review, whatever follows them"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf '\n\n%s\nPreview deployed.' "$NR")")")" false \
+  "blank lines before the mark leave it opening the body"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf '<!--\nbuilt by preview.yml\n-->\n%s\nPreview deployed.' "$NR")")")" false \
+  "…and so does a comment over several lines before it"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf '<!-- run 7 --> %s' "$NR")")")" false \
+  "…and one on the same line"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf '<!-- generated by preview.yml, %s\n-->' "$NR")")")" false \
+  "a mark inside an opening comment counts, since it is hidden with it"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf '<!-- run 7\n```\n%s' "$NR")")")" false \
+  "a fence inside an opening comment is the comment's text, so it does not hide the mark from the comment"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf '%s Deployment ready' "$NR")")")" false \
+  "the mark counts as the first thing on a line that goes on past it"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf '   %s' "$NR")")")" false \
+  "a mark indented three spaces still opens the body"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf '<!-->\n<!--->\n<!-- a --!>\n%s' "$NR")")")" false \
+  "a comment ends where an HTML parser ends it, at --> or --!>, the empty forms included"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf '<!-- run 7 -->\r\n%s\r\nReport\r\n' "$NR")")")" false \
+  "a body with CRLF line ends reads the same"
+eq "$(nfr "$NDEF" "$(jq -nc --arg b "$(printf '<!-- Déjà vu — 😀 -->\n%s' "$NR")" '{body: $b}')")" true \
+  "characters past ASCII in an opening comment read the same"
+eq "$(nfr "$NDEF" "$(jq -nc --arg b "$(printf '😀 %s' "$NR")" '{body: $b}')")" false \
+  "…and before the mark, they are text, which ends the opening"
+
+echo "# own-def: a mark that does not open the body is feedback, whatever markdown carries it"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf -- '- ```html\n\n  %s\n  ```\n\nPlease add this.' "$NR")")")" true \
+  "a person who quotes the mark in a fence inside a list item is giving feedback"
+eq "$(feedback "$NDEF" "$(row 'reviewer[bot]' Bot "$(printf -- '- ```html\n\n  %s\n  ```\n\nPlease add this.' "$NR")")")" true \
+  "…and so is a review app"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf -- '- ```html\n  %s\n  ```\n\nPlease add this.' "$NR")")")" true \
+  "…with no blank line opening the fence"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf -- '1. ```\n   %s\n   ```\n\nPlease add this.' "$NR")")")" true \
+  "…in an ordered list item"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf -- '* ~~~\n  %s\n  ~~~\n\nPlease add this.' "$NR")")")" true \
+  "…in a tilde fence"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf -- '- Add it:\n  ```\n```\n%s\n```\n\nPlease add this.' "$NR")")")" true \
+  "…and in the fence a column-0 line opens as it ends the list item and the item's fence"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf -- '> - ```\n>   %s\n>   ```' "$NR")")")" true \
+  "…in a fence in a list item in a quote"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf -- '1. Add it:\n\n   ```\n   %s\n   ```' "$NR")")")" true \
+  "…in a fence in an ordered list item, a blank line after its marker"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf -- '- > ```\n  > %s' "$NR")")")" true \
+  "…in a fence in a quote in a list item"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf 'Should the report carry `%s` on its first line?' "$NR")")")" true \
+  "…in a code span"
+eq "$(feedback "$NDEF" "$(row 'reviewer[bot]' Bot "$(printf '`%s` is missing from the template.' "$NR")")")" true \
+  "…in a code span that opens the body"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf 'Use `` %s `` here.' "$NR")")")" true \
+  "…in a code span of two backticks"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf 'Like this:\n```html\n%s\n```' "$NR")")")" true \
+  "…in a fenced code block"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf '```suggestion\n%s\n```' "$NR")")")" true \
+  "…in a suggested change"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf 'Like this:\n~~~\n%s' "$NR")")")" true \
+  "…in a fence never closed, which runs to the end of the body"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf 'Like this:\n\n    %s' "$NR")")")" true \
+  "…in an indented code block"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf '    %s' "$NR")")")" true \
+  "…indented four spaces at the top of the body, which is code"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf '\t%s' "$NR")")")" true \
+  "…or a tab, which reaches four columns"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf '> ```\n> %s\n> ```' "$NR")")")" true \
+  "…in a fenced block inside a quote"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf '`start\n%s\nend`' "$NR")")")" true \
+  "…in a code span across lines"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf '> %s\n> Preview deployed.\n\nThis notice is wrong: the preview never built.' "$NR")")")" true \
+  "a reply that quotes a marked comment is feedback, though GitHub hides the quoted mark"
+eq "$(feedback "$NDEF" "$(row johnzook User "$(printf -- '- %s' "$NR")")")" true \
+  "…and so is a mark in a list item"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf 'Schema diff\n\n%s' "$NR")")")" true \
+  "a mark after the body's text is feedback, though GitHub hides it there"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf 'Preview deployed. %s' "$NR")")")" true \
+  "…and so is one at the end of a line of text"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf 'Report:\n```\nok\n```\n%s' "$NR")")")" true \
+  "…and one after a closed fence"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf '<!-- run 7 -->Report\n%s' "$NR")")")" true \
+  "text after an opening comment on its line ends the opening"
+eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf '<!-- run 7 --> <!-- open\n%s' "$NR")")")" true \
+  "a comment left open on a line that holds --> ends the opening, as markdown ends the raw HTML there"
+eq "$(nfr "$NDEF" "$(jq -nc --arg b "$(printf '`%s` is not <!-- gc:`x`no-review -->' "$NR")" '{body: $b}')")" false \
+  "a code span cut out of a body does not join what is left into a mark"
+
+echo "# not-for-review: what the rig declares, read from its checkout"
+# nfr_run <checkout> — sets RC, NOUT (stdout) and NERR (stderr).
+nfr_run() { NOUT="$(GC_RIG_ROOT="$1" "$SUT" not-for-review 2>"$TMPD/nfr.err")"; RC=$?; NERR="$(cat "$TMPD/nfr.err")"; }
+NO_REVIEW='<!-- gc:no-review -->'
+nfr_run "$RIG"
+eq "$RC" 0 "a declaration that reads whole exits 0"
+eq "$NOUT" "$(printf '%s\n%s' "$NO_REVIEW" '[vc]: #')" "it prints the mark, then each declared prefix"
+eq "$NERR" "" "…and names nothing refused"
+nfr_run "$TMPD/no-declaration"
+eq "$RC|$NOUT|$NERR" "0|$NO_REVIEW|" "a rig with no file declares nothing, and that is no fault"
+SHAPES="$TMPD/shapes"; mkdir -p "$SHAPES"
+cat >"$SHAPES/not-for-review.toml" <<'TOML'
+# Comments and blank lines are allowed.
+
+[[marker]]
+prefix = "a \"quoted\" \\ prefix"   # a basic string's two escapes
+[[ marker ]]
+prefix = 'C:\literal "as written"'
+[[marker]]
+prefix = "## Deploy Preview"   # a prefix may open with a hash
+TOML
+nfr_run "$SHAPES"
+eq "$RC|$NERR" "0|" "every string shape the doc names reads"
+eq "$NOUT" "$(printf '%s\n%s\n%s\n%s' "$NO_REVIEW" 'a "quoted" \ prefix' 'C:\literal "as written"' '## Deploy Preview')" \
+  "…a basic string unescaped, a literal one as written, and a hash inside the quotes kept"
+printf '[[marker]]\r\nprefix = "[vc]: #"\r\n' >"$SHAPES/not-for-review.toml"
+nfr_run "$SHAPES"
+eq "$RC|$NOUT" "0|$(printf '%s\n%s' "$NO_REVIEW" '[vc]: #')" "a file with CRLF line ends reads the same"
+FAULTS="$TMPD/faults"; mkdir -p "$FAULTS"
+cat >"$FAULTS/not-for-review.toml" <<'TOML'
+prefix = "outside any table"
+[[marker]]
+prefix = "  "
+[[marker]]
+prefix = "tab\there"
+[[marker]]
+name = "Vercel"
+prefix = "[vc]: #"
+[[marker]]
+# no prefix here
+[[marker]]
+prefix = "one"
+prefix = "two"
+[markers]
+[[marker]]
+prefix = "kept"
+TOML
+nfr_run "$FAULTS"
+eq "$RC" 1 "a declaration with a fault exits 1"
+eq "$NOUT" "$(printf '%s\n%s' "$NO_REVIEW" kept)" "…and declares only the table with none"
+has "$NERR" "not-for-review.toml: line 1: this file holds only [[marker]] tables" "a key outside a table is named"
+has "$NERR" "the [[marker]] at line 2 sets an empty prefix, which would take every comment out of review" "an empty prefix is refused"
+has "$NERR" "line 5: the prefix is not a one-line string" "an escape the parser does not take is refused, not guessed"
+has "$NERR" "line 7: a [[marker]] table sets its prefix and nothing else" "a stray key refuses its table"
+hasnt "$NOUT" "[vc]: #" "…prefix and all"
+has "$NERR" "the [[marker]] at line 9 sets no prefix" "a table with no prefix is named"
+has "$NERR" "the [[marker]] at line 11 sets its prefix twice" "a prefix set twice is refused"
+has "$NERR" "line 14: this file holds only [[marker]] tables" "another table is named"
+FDEF="$(GC_RIG_ROOT="$FAULTS" "$SUT" own-def 2>"$TMPD/fdef.err")"; FRC=$?
+eq "$FRC" 0 "own-def still prints its definitions over a faulty declaration"
+has "$FDEF" 'def gc_not_for_review_prefixes: ["kept"];' "…holding only the prefixes that read"
+has "$(cat "$TMPD/fdef.err")" "pr-post: $FAULTS/not-for-review.toml: line 1:" "…and names each refused part on stderr, with the file"
+TOP="$TMPD/toplevel"; git init -q "$TOP"
+printf '%s\n' '[[marker]]' 'prefix = "from the toplevel"' >"$TOP/not-for-review.toml"
+OUT="$(cd "$TOP" && env -u GC_RIG_ROOT "$SUT" not-for-review 2>&1)"
+has "$OUT" "from the toplevel" "with no GC_RIG_ROOT, the repository the caller runs in declares"
+OUT="$(cd "$TOP" && GC_RIG_ROOT="$RIG" "$SUT" not-for-review 2>&1)"
+hasnt "$OUT" "from the toplevel" "GC_RIG_ROOT, when set, names the rig's checkout whatever repository the caller runs in"
+has "$OUT" "[vc]: #" "…and its declaration is the one read"
+
+echo "# one definition: no reader carries the no-review rule of its own"
+if git -C "$REPO" rev-parse --show-toplevel >/dev/null 2>&1; then
+  eq "$(git -C "$REPO" grep -l -F -e 'gc:no-review' -- 'assets/' 'formulas/' 'services/' 'tools/' ':!assets/scripts/pr-post.sh' ':!*.test.sh' ':!*_test.go' 2>/dev/null)" "" \
+    "no file but pr-post.sh tests for the no-review mark"
+  eq "$(git -C "$REPO" grep -l -E -e 'def (gc_not_for_review|gc_feedback|gc_no_review_mark|gc_opens_with_mark)[:(]' -- . ':!assets/scripts/pr-post.sh' 2>/dev/null)" "" \
+    "no file but pr-post.sh defines the rule"
+  eq "$(git -C "$REPO" grep -l -F -e '[vc]' -- 'assets/scripts/' ':!*.test.sh' 2>/dev/null)" "" \
+    "no script recognises a third-party marker of its own: a rig declares it"
+else
+  bad "one definition: no reader carries the no-review rule of its own" "$REPO is not a checkout"
+fi
 
 echo "# no file in the pack posts to a pull request outside pr-post.sh"
 if [ -x "$DETECTOR" ] && git -C "$REPO" rev-parse --show-toplevel >/dev/null 2>&1; then

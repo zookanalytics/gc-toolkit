@@ -18,7 +18,7 @@
 # they dismiss (approval_phrase).
 #
 # Usage follows the in-variable jq convention (review-verdict.sh): prepend the
-# defs to a jq program. unrouted_comment_ids reads gc_city_own, the city's-own
+# defs to a jq program. unrouted_comment_ids reads gc_feedback, the feedback
 # rule pr-post.sh prints with `pr-post.sh own-def`, so a program prepends that
 # definition first:
 #   jq -n "$CITY_OWN_DEF$REVIEW_DISMISSAL_DEF"'... live_comments($revs) ...'
@@ -56,16 +56,16 @@ REVIEW_DISMISSAL_DEF='
     | map(tostring | if test("^[0-9]+$") then tonumber else 0 end) | max;
   # The ids of the inline comments on input that dismissing the reviews $rids
   # would retire before the feedback loop routes them. Each is live, carried by
-  # one of $rids, feedback rather than the city own post (gc_city_own, dated by
-  # the anchor pr_provenance_since), and above comment_routed_through($m), where
-  # $m is the metadata of the anchor whose PR carries them.
+  # one of $rids, feedback (gc_feedback, dated by the anchor
+  # pr_provenance_since), and above comment_routed_through($m), where $m is the
+  # metadata of the anchor whose PR carries them.
   def unrouted_comment_ids($revs; $rids; $m; $self):
     comment_routed_through($m) as $mark
     | ((($m.pr_provenance_since // "") | tostring)) as $since
     | ([ $rids[] | tostring ]) as $want
     | [ live_comments($revs)[]
         | select(((.pull_request_review_id // "") | tostring) as $p | any($want[]; . == $p))
-        | select(gc_city_own($self; $since) | not)
+        | select(gc_feedback($self; $since))
         | select(((.id // 0) | tonumber) > $mark)
         | (.id // 0) ];
 '

@@ -7,12 +7,13 @@
 # Where a post comes from is decided in this order:
 #   1. A post carrying the city's mark is the city's (gc_city_marked, from
 #      `pr-post.sh own-def`, the one definition of the mark).
-#   2. An unmarked post from any login other than the one gh posts as is
-#      outside, except a GitHub App account's approval and its deploy notice,
-#      which are notices, not review feedback. A deploy notice is told by what
-#      it says: Vercel's opens with its "[vc]:" link-reference line. Any other
-#      post an app makes, a conversation comment among them, is outside.
-#   3. An unmarked post under the city's own login is outside when it is the
+#   2. Any other post that is not for review is a notice, not review feedback,
+#      whoever posted it (gc_not_for_review, from the same definition): it
+#      opens with the no-review mark, or with a prefix the rig declares.
+#   3. An unmarked post from any login other than the one gh posts as is
+#      outside, except a GitHub App account's approval, which is a notice. Any
+#      other post an app makes, a conversation comment among them, is outside.
+#   4. An unmarked post under the city's own login is outside when it is the
 #      output of Claude Code's /code-review, signed in its own body or, for an
 #      inline comment, in the body of the review that carries it. A body is
 #      signed by a line that is Claude Code's footer ("Generated with [Claude
@@ -20,7 +21,7 @@
 #      that opens as a code review ("Code review" and then a colon, a
 #      parenthesis or nothing more) or names the /code-review command. A city
 #      post that only mentions a code review or Claude Code is not signed.
-#   4. Any other unmarked post under the city's login is the city's. One posted
+#   5. Any other unmarked post under the city's login is the city's. One posted
 #      after its PR's provenance cutover is flagged, because a city writer
 #      posted it without the mark: the cutover is the anchor's
 #      pr_provenance_since, from which gc_city_own counts an unmarked post under
@@ -274,10 +275,8 @@ if [ "$VERB" = fetch-pr ]; then
       ((.body // "") | tostring | split("\n")
        | any(test("(?i)^[\\s_*]*(\\x{1F916}\\s*)?generated (with|by) \\[?claude code\\]?(\\([^)]*\\))?(\\s+via\\s.*)?[\\s_*.]*$")))
       or (first_line | test("(?i)/code-review\\b|^[\\s#*_]*code review[\\s*_]*([:(]|$)"));
-    def app_notice:
-      ((.user.type // "") == "Bot")
-      and ((.gc_stream == "review" and (.state // "") == "APPROVED")
-           or (.gc_stream == "issue" and (first_line | test("^\\s*\\[vc\\]:"))));
+    def app_approval:
+      ((.user.type // "") == "Bot") and .gc_stream == "review" and ((.state // "") == "APPROVED");
     ($prs[0] | map(select(.number == $pr)) | .[0] // {}) as $p
     | ($seen[0] // {}) as $obs
     | ($reviews | map(select(((.user.login // "") == $self) and (gc_city_marked | not) and code_review_signed) | .id)) as $signed
@@ -293,7 +292,8 @@ if [ "$VERB" = fetch-pr ]; then
     | (code_review_signed
        or (.gc_stream == "inline" and (.pull_request_review_id as $r | any($signed[]; . == $r)))) as $is_signed
     | (if $marked then "city"
-       elif $login != $self then (if app_notice then "notice" else "outside" end)
+       elif gc_not_for_review then "notice"
+       elif $login != $self then (if app_approval then "notice" else "outside" end)
        elif $is_signed then "outside"
        else "city" end) as $class
     | ("pr:" + $repo + "#" + ($pr | tostring) + ":" + .gc_kind + ":" + (.id | tostring)) as $key
@@ -438,7 +438,7 @@ if [ "$VERB" = sweep ]; then
     "\($slug): read \($listed) merged or closed PR(s) updated since \($since); the standing window starts \($ws)",
     "  outside: \(map(select(.class == "outside")) | length) post(s), \(map(select(.class == "outside" and (.captured | not))) | length) not yet recorded",
     "  city: \(map(select(.class == "city")) | length) post(s), \(map(select(.class == "city" and .in_window)) | length) in the standing window",
-    "  app notices skipped: \(map(select(.class == "notice")) | length); unmarked city posts flagged: \(map(select(.flag)) | length)"' "$DIR/sweep.jsonl"
+    "  notices skipped: \(map(select(.class == "notice")) | length); unmarked city posts flagged: \(map(select(.flag)) | length)"' "$DIR/sweep.jsonl"
   exit 0
 fi
 
@@ -555,7 +555,7 @@ if [ "$VERB" = file ]; then
     | if $it == null then {i: $i, key: $k, act: "error", why: "no swept post has this key"}
       elif ($r.statement // "" | trim) == "" then {i: $i, key: $k, act: "error", why: "the row has no statement"}
       elif (($r.directive // "diff") | IN("standing", "diff") | not) then {i: $i, key: $k, act: "error", why: "directive must be standing or diff"}
-      elif $it.class == "notice" then {i: $i, key: $k, act: "error", why: "an app account notice is not review feedback"}
+      elif $it.class == "notice" then {i: $i, key: $k, act: "error", why: "a notice is not review feedback"}
       else
         (if $it.class == "outside" then "outside" else "standing" end) as $kind
         | (if $kind == "outside" then $oc else ($r.category // "" | trim) end) as $cat

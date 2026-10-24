@@ -14,9 +14,9 @@
 #   (URL)     a label links only to a comment the read of the PR holds, and the
 #             thread a comment sits in is found open or resolved
 #   (WAITS)   a thread waits on the reviewer while it is open, holds the answer
-#             posted for the finding, and ends with a post of the city, as
-#             gc_city_own tells one; a reply of theirs ends the wait until the
-#             city answers it
+#             posted for the finding, and has a post of the city as its last
+#             turn, where a post not for review takes no turn; a reply of
+#             theirs ends the wait until the city answers it
 #   (RENDER)  the visit callout on top, the count line counting the points that
 #             need the reviewer and saying where the rest stand, the sections in
 #             order, the entries, the folded notes and the trailing mark lines
@@ -190,8 +190,9 @@ eq "$(rec '{"cid":"13"}' | jq -r --argjson v "$TVIEW" --arg p "$PRURL" "$REVIEW_
 
 echo "# (WAITS)"
 # A point waits on the reviewer while its thread is open, holds the answer
-# posted for its finding, and ends with a post of the city. The writer passes
-# gc_city_own, the rule the routing arm tells feedback by.
+# posted for its finding, and has a post of the city as its last turn. The writer
+# passes gc_city_own and gc_not_for_review, the rules the routing arm tells
+# feedback by, and a post not for review takes no turn.
 ANS='{"author":{"login":"bot"},"body":"❓ Declined: the guard already holds\n\nResolving the thread accepts the decline. To push back, reply in the thread; your reply is ruled as new feedback.\n<!-- gc-writeback -->\n<!-- gc-writeback-finding:F -->"}'
 REPLY='{"databaseId":20,"author":{"login":"op"},"body":"I still think the guard should go."}'
 FIXED='{"author":{"login":"bot"},"body":"✅ Fixed in 6c6c6c6c (tk-k2).\n<!-- gc-writeback -->\n<!-- gc-writeback-mark:resolved -->"}'
@@ -201,7 +202,7 @@ thread() { # comments-after-the-raising-one [resolved]
 }
 waits() { # thread-json [cutover] — whether it waits on the reviewer for finding F
   jq -rn --argjson t "$1" --arg since "${2:-}" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'
-    ra_thread_waits($t; "bot"; "<!-- gc-writeback -->"; "F"; "the guard already holds"; gc_city_own("bot"; $since))'
+    ra_thread_waits($t; "bot"; "<!-- gc-writeback -->"; "F"; "the guard already holds"; gc_city_own("bot"; $since); gc_not_for_review)'
 }
 eq "$(waits "$(thread "[$ANS]")")" "true" "(WAITS) an open thread holding the answer, and ending with it, waits on the reviewer"
 eq "$(waits "$(thread "[$ANS]" true)")" "false" "(WAITS) …and once they resolve it, does not"
@@ -214,6 +215,19 @@ UNMARKED='{"author":{"login":"bot"},"body":"Please drop the guard anyway.","crea
 eq "$(waits "$(thread "[$ANS,$CITYPOST]")" 2026-01-01T00:00:00Z)" "true" "(WAITS) a post of the city after the answer leaves it waiting"
 eq "$(waits "$(thread "[$ANS,$UNMARKED]")" 2026-01-01T00:00:00Z)" "false" \
   "(WAITS) …but an unmarked post under the city login after the cutover is feedback, as the routing arm reads it, and ends the wait"
+NOREVIEW='{"author":{"login":"ci[bot]"},"body":"<!-- gc:no-review -->\nPreview deployed.","createdAt":"2026-02-01T00:00:00Z"}'
+eq "$(waits "$(thread "[$ANS,$NOREVIEW]")" 2026-01-01T00:00:00Z)" "true" \
+  "(WAITS) a post marked as not for review after the answer asks nothing, so it leaves the thread waiting"
+eq "$(waits "$(thread "[$ANS,$REPLY,$NOREVIEW]")" 2026-01-01T00:00:00Z)" "false" \
+  "(WAITS) …and after a reply of theirs it takes no turn, so the reply still waits on the city"
+eq "$(waits "$(thread "[$ANS,$REPLY,$FIXED,$NOREVIEW]")" 2026-01-01T00:00:00Z)" "true" \
+  "(WAITS) …and once the city has answered the reply, a notice after that leaves the thread waiting on them"
+NRCITY='{"author":{"login":"bot"},"body":"<!-- gc:no-review -->\nDeploy log attached.","createdAt":"2026-02-01T00:00:00Z"}'
+eq "$(waits "$(thread "[$ANS,$REPLY,$NRCITY]")" 2026-01-01T00:00:00Z)|$(waits "$(thread "[$ANS,$NRCITY]")" 2026-01-01T00:00:00Z)" "false|true" \
+  "(WAITS) a notice under the city login that the city did not post takes no turn either"
+NRLATE='{"author":{"login":"ci[bot]"},"body":"Preview deployed.\n<!-- gc:no-review -->","createdAt":"2026-02-01T00:00:00Z"}'
+eq "$(waits "$(thread "[$ANS,$NRLATE]")" 2026-01-01T00:00:00Z)" "false" \
+  "(WAITS) a post whose mark comes after its text is feedback, so it ends the wait"
 OTHER='{"author":{"login":"bot"},"body":"❓ Declined: the guard already holds\n<!-- gc-writeback -->\n<!-- gc-writeback-finding:G -->"}'
 OLDFORM='{"author":{"login":"bot"},"body":"Declined: the guard already holds\n<!-- gc-writeback -->"}'
 REPLACED='{"author":{"login":"bot"},"body":"❓ Declined: an older reason\n<!-- gc-writeback -->\n<!-- gc-writeback-finding:F -->"}'
@@ -349,7 +363,7 @@ VIEW2='{"reviews":[{"databaseId":10,"state":"COMMENTED","author":{"login":"op"},
     {"databaseId":900,"author":{"login":"bot"},"body":"x\n<!-- gc-writeback -->\n<!-- gc-writeback-mark:resolved r10 -->\n<!-- gc-review-answer:r10 -->\n<!-- gc-review-answer:r10:dismissed -->\n<!-- gc-review-answer:r10:digest:12345 -->"},
     {"databaseId":901,"author":{"login":"op"},"body":"<!-- gc-writeback -->\n<!-- gc-review-answer:r10 -->"}]}'
 models() { printf '%s' "$ROWS" | jq -c --argjson v "$1" --argjson vl "${2:-}" --argjson b '{"K":{"title":"rework","fix_notes":"notes from K"}}' \
-  --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; $vl; $b; $m; gc_city_own("bot"; ""))'; }
+  --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; $vl; $b; $m; gc_city_own("bot"; ""); gc_not_for_review)'; }
 M=$(models "$VIEW2" '{}')
 eq "$(printf '%s' "$M" | jq 'length')" "1" "(MODEL) one model per review: a machine finding and a Conversation comment belong to none"
 eq "$(printf '%s' "$M" | jq -r '.[0].existing.db + " " + .[0].existing.digest')" "900 12345" "(MODEL) the comment on the PR is ours carrying the review key, with its digest read back"
@@ -363,22 +377,22 @@ eq "$(printf '%s' "$M" | jq -r '.[0].notes[0].text')" "notes from K" "(MODEL) th
 eq "$(printf '%s' "$M" | jq -r '[ .[0].points[].id ] | join(",")')" "B,I" "(MODEL) the body leads its inline comments"
 DONE_ROWS=$(printf '%s' "$ROWS" | jq -c 'map(if .id == "I" then .status = "closed" else . end | if .id == "B" then .metadata["finding.reply_posted"] = "1" else . end)')
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "DISMISSED"')" \
-  --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m; gc_city_own("bot"; "")) | .[0] | [ .live, ra_dismissal ]')" '[false,"plain"]' \
+  --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m; gc_city_own("bot"; ""); gc_not_for_review) | .[0] | [ .live, ra_dismissal ]')" '[false,"plain"]' \
   "(MODEL) a dismissed review with every finding closed and nothing owed is not live, and reads dismissed without a re-request claim"
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "DISMISSED" | .requested = ["op"]')" \
-  --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m; gc_city_own("bot"; "")) | .[0] | ra_dismissal')" '"requeued"' \
+  --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m; gc_city_own("bot"; ""); gc_not_for_review) | .[0] | ra_dismissal')" '"requeued"' \
   "(MODEL) …and reads re-requested when its author has a pending review request, though no comment carries the dismissed mark"
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "COMMENTED"')" \
-  --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {"10":{"marks":["resolved r10"],"visits":[],"swaps":"-"}}; {}; $m; gc_city_own("bot"; "")) | .[0].live')" "true" \
+  --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {"10":{"marks":["resolved r10"],"visits":[],"swaps":"-"}}; {}; $m; gc_city_own("bot"; ""); gc_not_for_review) | .[0].live')" "true" \
   "(MODEL) a mark the plan asks of it keeps it live, so a body answered after its findings closed still gets its answer"
 eq "$(printf '%s' "$DONE_ROWS" | jq -c --argjson v "$(printf '%s' "$VIEW2" | jq -c '.issue_comments = [] | .reviews[0].state = "CHANGES_REQUESTED"')" \
-  --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m; gc_city_own("bot"; "")) | .[0].live')" "true" \
+  --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m; gc_city_own("bot"; ""); gc_not_for_review) | .[0].live')" "true" \
   "(MODEL) a standing changes-requested block keeps it live"
 FL_ROWS='[{"id":"D","status":"closed","title":"finding[human]: d","description":"Locus: a.sh:2\n\n**Rename the cap.**\n\nRaised by human:op reviewing anchor A.",
   "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"declined","finding.comment_id":"11","finding.review_id":"10",
               "finding.fix_unit":"K","finding.fix_flag":"1","finding.fix_answer":"Renamed anyway, though the ruling declined it."}}]'
 flref() { printf '%s' "$FL_ROWS" | jq -r --argjson v "$VIEW2" --argjson b "$1" --arg m "$MARKER" \
-  "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; $b; $m; gc_city_own("bot"; "")) | .[0].points[0].ref'; }
+  "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; $b; $m; gc_city_own("bot"; ""); gc_not_for_review) | .[0].points[0].ref'; }
 eq "$(flref '{"K":{"title":"rework","fix_notes":"","closed":true}}')" "{{gc-commits:K|11}}" \
   "(MODEL) a flagged decline reads its fix unit's landing from the close read for it"
 eq "$(flref '{"K":{"title":"rework","fix_notes":"","closed":false}}')" "" "(MODEL) …so a fix unit still open cites nothing"
@@ -388,7 +402,7 @@ eq "$(flref '{}')" "" "(MODEL) …and neither does one that did not read back"
 DL_ROWS='[{"id":"D2","status":"closed","title":"finding[human]: d2","description":"Locus: PR review\n\nA summary with a point of its own.\n\nRaised by human:op reviewing anchor A.",
   "metadata":{"task_kind":"finding","finding.lane":"human","finding.disposition":"declined","finding.comment_id":"10","finding.review_id":"10",
               "finding.reply":"We keep Y because Z","finding.fix_unit":"K","finding.fix_flag":"1","finding.fix_answer":"Changed it anyway."}}]'
-DLM=$(printf '%s' "$DL_ROWS" | jq -c --argjson v "$VIEW2" --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m; gc_city_own("bot"; "")) | .[0]')
+DLM=$(printf '%s' "$DL_ROWS" | jq -c --argjson v "$VIEW2" --arg m "$MARKER" "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {}; $m; gc_city_own("bot"; ""); gc_not_for_review) | .[0]')
 eq "$(printf '%s' "$DLM" | jq -c '.unstamped')" '["D2"]' "(MODEL) a flagged review body decline is an answer the comment delivers"
 has "$(printf '%s' "$DLM" | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')" "  > Declined: We keep Y because Z" \
   "(MODEL) …and the rendering it is stamped against carries it"
@@ -408,7 +422,7 @@ wview() { # whether the read finds the decline thread resolved, and the posts af
     issue_comments: [] }'
 }
 wmodel() { printf '%s' "$WROWS" | jq -c --argjson v "$(wview "$1" "${2:-[$WANS]}")" --arg m "$MARKER" \
-  "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {"K":{"closed":true}}; $m; gc_city_own("bot"; "")) | .[0]'; }
+  "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; {}; {"K":{"closed":true}}; $m; gc_city_own("bot"; ""); gc_not_for_review) | .[0]'; }
 WOPEN=$(wmodel false | jq -r --arg m "$MARKER" "$REVIEW_ANSWER_DEF"'ra_render($m)')
 has "$WOPEN" "### Your review: 2 points, 1 needs you, 1 answered
 " "(MODEL) a decline whose open thread holds its answer, and ends with it, is counted as needing the reviewer"
@@ -472,7 +486,7 @@ rview() { # issue-comments-json review-spec...
 }
 rmodels() { # rows-json view-json [plan-marks-json] [beads-json]
   printf '%s' "$1" | jq -c --argjson v "$2" --argjson vl "${3:-"{}"}" --argjson b "${4:-"{}"}" --arg m "$MARKER" \
-    "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; $vl; $b; $m; gc_city_own("bot"; ""))'
+    "$CITY_OWN_DEF$REVIEW_ANSWER_DEF"'ra_models($v; "'"$PRURL"'"; "bot"; $vl; $b; $m; gc_city_own("bot"; ""); gc_not_for_review)'
 }
 KB='{"K":{"title":"rework","fix_notes":"Notes from K.","closed":false}}'
 RROWS="[$(rrow F1 501 51 must-fix open '{"finding.fix_unit":"K"}'),$(rrow F2 502 52 must-fix open '{"finding.fix_unit":"K"}'),$(rrow F3 503 53 must-fix open '{"finding.fix_unit":"K"}')]"
@@ -619,8 +633,8 @@ has "$(cat "$PF")" 'ra_open_ask($disp)' "(READERS) …and says what resolving it
 has "$(cat "$PF")" 'ra_comment_thread($v; $cid) as $t' "(READERS) …finding the thread through the lookup the living answer reads, so the two read one thread"
 has "$(cat "$PF")" '($t | ra_thread_open)' "(READERS) …asking for nothing in a thread already resolved, by the same reading of its state"
 has "$(cat "$PF")" 'ra_answer_post($self; $m; $id; $reply)' "(READERS) …and reading its answer back by the test the living answer tells a waiting thread by"
-has "$(cat "$PF")" 'ra_models($view; $prurl; $self; $vl; $beads; $marker; gc_city_own($self; $since))' \
-  "(READERS) the living answer tells a post of the city by gc_city_own, the rule the routing arm tells feedback by"
+has "$(cat "$PF")" 'ra_models($view; $prurl; $self; $vl; $beads; $marker; gc_city_own($self; $since); gc_not_for_review)' \
+  "(READERS) the living answer tells the city's post and a post not for review by the rules the routing arm tells feedback by"
 OTHERS=$(cd "$ROOT" && git grep -l -F 'gc-review-answer:' -- . ':!assets/scripts/review-answer.sh' ':!assets/scripts/pr-facts.sh' ':!*.test.sh' ':!docs/**' ':!specs/**' ':!lifecycle/**' 2>/dev/null)
 eq "$OTHERS" "" "(READERS) no other file writes a living answer's review key"
 

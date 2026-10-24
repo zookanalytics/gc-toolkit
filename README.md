@@ -102,6 +102,7 @@ render's byte and token counts.
 - [docs/review-triage.md](docs/review-triage.md) — the changes that make the arch check mandatory on this rig, appended to the triage review's dispatch note
 - [docs/bead-store-resolution.md](docs/bead-store-resolution.md) — which store answers for a bead id, and the proof a destructive gate owes before reading absence
 - [docs/outbound-sends.md](docs/outbound-sends.md) — a GitHub write to a repo the rig does not own is the operator's send; how an agent parks one
+- [docs/not-for-review.md](docs/not-for-review.md) — the pull-request comments the city never reads as review feedback: the no-review mark, and the third-party markers a rig declares
 
 ## Related
 

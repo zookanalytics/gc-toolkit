@@ -297,8 +297,13 @@ validation pass on the batch (see "Review cycle",
 holds a fresh whole-diff review off the anchor while the validator rules the
 batch. What makes an item feedback is its provenance, not its author: every
 review, inline comment, and conversation comment that is not the city's own
-post is feedback, whoever wrote it. The city's own post is one that
-`assets/scripts/pr-post.sh` marked, which is every post the pack makes —
+post is feedback, whoever wrote it, unless it is not for review. A comment is
+not for review when its body opens with gc-toolkit's no-review mark or with a
+prefix its rig declares for a third-party integration
+([not-for-review.md](not-for-review.md)). A review's state is not its body: an
+approval or a change request counts whatever its body carries. The city's own
+post is one that `assets/scripts/pr-post.sh` marked, which is every post the
+pack makes —
 `signoff.sh`'s verdicts, `pr-open.sh`'s verdict replay, the write-back's
 replies and its ruled-finding comments, the visit reminder, a demo delivery,
 `pr-dispose.sh`'s closing comment. An unmarked post under the city's login
