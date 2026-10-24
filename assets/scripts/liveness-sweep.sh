@@ -49,6 +49,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # below to carry this sweep's --db pin and per-call bound.
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh from $HERE" >&2; exit 1; }
+# The one read of a branch's head on origin, which the pre-open green map takes
+# each anchor's head from. Its git calls go through git_remote_run, redefined
+# below to carry this sweep's per-call bound.
+# shellcheck source=git-lib.sh
+. "$HERE/git-lib.sh" || { echo "$PROG: cannot source git-lib.sh from $HERE" >&2; exit 1; }
 ESCALATE="${GC_ESCALATE_TOOL:-$HERE/escalate.sh}"
 CALL_TIMEOUT="${LIVENESS_SWEEP_CALL_TIMEOUT:-45}"
 KILL_AFTER="${LIVENESS_SWEEP_KILL_AFTER:-5}"
@@ -111,6 +116,7 @@ elif timeout -k 1 1 true >/dev/null 2>&1; then
 else
     bounded() { timeout "$CALL_TIMEOUT" "$@"; }
 fi
+git_remote_run() { bounded "$@"; }
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
@@ -311,19 +317,18 @@ _LS_PREOPEN=$(jq -r '.[] | select((.metadata.merge_result // "") == "pre_open_ga
          | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' "$READY" 2>/dev/null)
 # Every branch's head comes from one ls-remote that names them all, so a slow
 # origin costs the sweep one bounded call, not one per anchor, and a ready set
-# with no such anchor costs none. ls-remote matches a pattern against a ref's
-# tail, so each head is taken from its exact ref.
-_ls_refs=()
+# with no such anchor costs none.
+_ls_branches=()
 while IFS=$'\037' read -r _aid _acs _abr; do
-  [ -n "$_aid" ] && [ -n "$_abr" ] && _ls_refs+=("refs/heads/$_abr")
+  [ -n "$_aid" ] && [ -n "$_abr" ] && _ls_branches+=("$_abr")
 done <<< "$_LS_PREOPEN"
 _LS_HEADS=""
-[ "${#_ls_refs[@]}" -eq 0 ] || _LS_HEADS=$(bounded git ls-remote origin "${_ls_refs[@]}" 2>/dev/null </dev/null)
+[ "${#_ls_branches[@]}" -eq 0 ] || _LS_HEADS=$(remote_branch_heads . "${_ls_branches[@]}")
 PREOPEN_GREEN_MAP=$(
   printf '%s\n' "$_LS_PREOPEN" \
   | while IFS=$'\037' read -r _aid _acs _abr; do
       [ -n "$_aid" ] && [ -n "$_abr" ] || continue
-      _head=$(printf '%s\n' "$_LS_HEADS" | awk -v r="refs/heads/$_abr" '$2 == r { print $1; exit }')
+      _head=$(printf '%s\n' "$_LS_HEADS" | awk -F'\t' -v b="$_abr" '$2 == b { print $1; exit }')
       [ -n "$_head" ] || continue
       _g=$(bounded "$_LS_DIR/review-checks.sh" --resolve --check-set "$_acs" --through pre-open \
            --at "$_head" 2>/dev/null </dev/null) || continue

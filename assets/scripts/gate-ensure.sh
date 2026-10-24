@@ -159,20 +159,18 @@ HAVE_GH=0; command -v gh >/dev/null 2>&1 && HAVE_GH=1
 live_head_for() { # <branch> -> sha, or nothing when unanswerable
   # gh writes its error body to STDOUT, and --jq on a body without .sha prints
   # "null" at rc=0, so neither the exit code nor the output alone separates a
-  # head from a failure. ls-remote is matched on the exact ref, since its
-  # pattern also matches a ref whose tail is the branch's name. The head becomes
-  # a review's reviewed_oid pin and the oid of the dated machine verdict, so it
-  # is held to the full 40-hex shape both carry. Empty means neither read
-  # answered, and the pass holds the anchor, dispatching and settling nothing,
-  # until a later pass reads it.
+  # head from a failure. The ls-remote read is git-lib.sh's, in this checkout.
+  # The head becomes a review's reviewed_oid pin and the oid of the dated
+  # machine verdict, so it is held to the full 40-hex shape both carry. Empty
+  # means neither read answered, and the pass holds the anchor, dispatching and
+  # settling nothing, until a later pass reads it.
   [ -n "${1:-}" ] || return 0
   local out=""
   if [ "$HAVE_GH" = 1 ] && [ -n "$ORIGIN_REPO" ]; then
     out=$(gh api --hostname "$ORIGIN_HOST" \
       "repos/$ORIGIN_REPO/commits/$1" --jq '.sha' 2>/dev/null) || out=""
   fi
-  is_oid "$out" || out=$(git ls-remote origin "refs/heads/$1" 2>/dev/null \
-    | awk -v r="refs/heads/$1" '$2 == r { print $1; exit }')
+  is_oid "$out" || out=$(remote_branch_head . "$1")
   is_oid "$out" || return 0
   printf '%s\n' "$out"
 }
@@ -183,6 +181,8 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=pace-lib.sh
 . "$_bd_lib_dir/pace-lib.sh" || { echo "cannot source pace-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=git-lib.sh
+. "$_bd_lib_dir/git-lib.sh" || { echo "cannot source git-lib.sh beside this script" >&2; exit 1; }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 # The step/root reads below must see closed rows too: a spent chain is

@@ -324,9 +324,9 @@ if [ "${_g[0]:-}" = "show" ] && [ -n "${STUB_INDEX:-}" ]; then
 fi
 # ls-remote matches its pattern against a ref's tail, so STUB_LSREMOTE_TAIL
 # serves a ref that ends in the branch's ref, sorted ahead of it as git sorts.
-if [ "${1:-}" = "ls-remote" ]; then
-  [ -n "${STUB_LSREMOTE_TAIL:-}" ] && printf '%s\trefs/heads/a/%s\n' "$STUB_LSREMOTE_TAIL" "$3"
-  [ -n "${STUB_LSREMOTE:-}" ] && printf '%s\trefs/heads/%s\n' "$STUB_LSREMOTE" "${3#refs/heads/}"
+if [ "${_g[0]:-}" = "ls-remote" ]; then
+  [ -n "${STUB_LSREMOTE_TAIL:-}" ] && printf '%s\trefs/heads/a/%s\n' "$STUB_LSREMOTE_TAIL" "${_g[2]:-}"
+  [ -n "${STUB_LSREMOTE:-}" ] && printf '%s\trefs/heads/%s\n' "$STUB_LSREMOTE" "${_g[2]#refs/heads/}"
   exit 0
 fi
 # A reviewed commit this checkout has not fetched: `cat-file -e` on

@@ -217,6 +217,8 @@ esac
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=git-lib.sh
+. "$_bd_lib_dir/git-lib.sh" || { echo "cannot source git-lib.sh beside this script" >&2; exit 1; }
 row_field() { printf '%s' "$1" | jq -r --arg k "$2" '(.[0][$k] // "") | tostring' 2>/dev/null; }
 is_rows()   { printf '%s' "$1" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; }
 
@@ -441,12 +443,8 @@ if [ -n "$OID_OVERRIDE" ]; then
   fi
 fi
 
-# The head of the anchor's branch on origin. ls-remote matches its pattern
-# against a ref's tail, so only the line for the exact ref is taken.
-branch_head() {
-  git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null \
-    | awk -v r="refs/heads/$BRANCH" '$2 == r { print $1; exit }'
-}
+# The head of the anchor's branch on origin, read in this checkout.
+branch_head() { remote_branch_head . "$BRANCH"; }
 
 # The live head of the anchor's branch: the PR's own head post-open (what the
 # merge condition compares against), the remote ref pre-open. Empty is

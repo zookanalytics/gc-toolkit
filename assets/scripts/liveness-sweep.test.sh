@@ -855,7 +855,7 @@ backing nh-two codex
 LS_REMOTE_LOG="$TMP/ls-remote.log" FAKE_READY="$TMP/nh2-ready.json" run_sweep ABSENT
 eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "" "two backed anchors whose heads read are both gated"
 eq "$(grep -c 'ls-remote' "$TMP/ls-remote.log")" "1" "…from one ls-remote"
-eq "$(cat "$TMP/ls-remote.log")" "ls-remote origin refs/heads/polecat/nh-green refs/heads/polecat/nh-two" "…that names both branches"
+eq "$(cat "$TMP/ls-remote.log")" "-C . ls-remote origin refs/heads/polecat/nh-green refs/heads/polecat/nh-two" "…that names both branches, in the rig checkout the sweep runs in"
 LS_REMOTE_MISS="polecat/nh-two" FAKE_READY="$TMP/nh2-ready.json" run_sweep ABSENT
 eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "nh-two" "an anchor whose head the one call does not carry is a candidate, and the other stays gated"
 printf '%s\n' '[{"id":"np-plain","title":"no pre-open anchor","issue_type":"task","metadata":{}}]' > "$TMP/np-ready.json"

@@ -43,6 +43,8 @@ set -u
 _lib_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 2; }
+# shellcheck source=git-lib.sh
+. "$_lib_dir/git-lib.sh" || { echo "cannot source git-lib.sh beside this script" >&2; exit 2; }
 SCRIPT_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
 
 die() { echo "converse-rework: $1" >&2; exit 2; }
@@ -109,10 +111,10 @@ PR_URL=$(row_meta "$ANCHOR_ROW" existing_pr)
 [ -n "$PR_URL" ] || die "anchor $ANCHOR names no PR (existing_pr and pr_url both empty), so it is not an open PR; nothing filed"
 PR_NUMBER=$(row_meta "$ANCHOR_ROW" pr_number)
 # The commit the ruling judged, which the supersede below resolves the anchor's
-# lanes at: the head of its branch on origin, read as signoff.sh reads one. Read
+# lanes at: the head of its branch on origin, read through git-lib.sh. Read
 # before anything is filed, so a head that does not read refuses with nothing
 # written rather than leave a dispatched child beside lanes still green.
-HEAD_OID=$(git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null | awk -v r="refs/heads/$BRANCH" '$2 == r { print $1; exit }')
+HEAD_OID=$(remote_branch_head . "$BRANCH")
 [ -n "$HEAD_OID" ] || die "the head of $ANCHOR's branch $BRANCH did not read from origin (git ls-remote), so no commit names the lanes the ruling returns to unreviewed; nothing filed"
 
 if [ -n "$PR_NUMBER" ]; then
