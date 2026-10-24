@@ -683,6 +683,20 @@ attached sitting whose visit already reads closed is left for a later pass, once
 it is no longer attended. A sitting whose visit is still OPEN — the operator
 walked away before any sign-off — is the harder, separate case, untouched here.
 
+A visit can also outlive its sitting: the sitting's create fails after
+`gc-helm engage` bound the visit to it, or its session is closed while the
+visit is still open. Gas City frees neither claim, because its releases keep a
+claim routed to `human`
+([gascity/human-engagement.md](gascity/human-engagement.md#no-release-frees-a-claim-routed-to-human)).
+The witness's orphan recovery frees it instead. It resolves the visit's holder
+against `gc session list`, and once that sitting is gone it clears the visit's
+assignee and session pins and keeps its route, continuation group and
+task_kind (`assets/scripts/orphan-dispose.sh`). It releases only the claim it
+found gone. A visit that `gc-helm engage` binds to a fresh sitting after the
+patrol listed it, or that is settled meanwhile, keeps what that writer left.
+Within one patrol the board reads the visit as parked, and the operator can
+engage it again.
+
 Two endings the idle setting does not own:
 
 - **A settled sitting is collected by the pack's reap, not by a runtime

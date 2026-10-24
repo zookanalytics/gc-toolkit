@@ -6,8 +6,12 @@
 # return a bead to a pool to be claimed again, and some of those return it only
 # when its work has not already reached a downstream court.
 #
-#   visit          release the assignee and NOTHING else. A visit's metadata
-#                  (route, continuation group, task_kind) is its identity.
+#   visit          release the sitting and keep the visit. The assignee and the
+#                  session pins (gc.session_id, gc.session_name) name the
+#                  sitting that is gone. The route, continuation group and
+#                  task_kind are the visit's identity and are never written.
+#                  Released, the visit names no owner, so orphan recovery does
+#                  not find it again, and the helm board reads it as parked.
 #   review         a review bead is the source bead of its own mol-review
 #                  molecule and carries no worktree of its own, so it disposes by
 #                  the source contract below (delete-source is a no-op on an
@@ -62,11 +66,25 @@
 # invisible to a pool: metadata (no claim needed), then status, then assignee
 # last. Every write is verified by re-reading the bead.
 #
+# A disposal acts only on the claim orphan recovery found dead: the owner whose
+# session it proved gone, and the status and assignee its listing showed beside
+# that owner. The bead must still carry all three when this script reads it, and
+# every write of a visit or step release is guarded on that status and assignee,
+# so a bead another holder takes before or during the release keeps that
+# holder's claim.
+#
 # Usage:
-#   orphan-dispose.sh <bead-id> [--owner <owner>] [--apply] [--json]
+#   orphan-dispose.sh <bead-id> [--owner <owner>] [--listed <status>:<assignee>] [--apply] [--json]
 # Without --apply this previews: it classifies and prints, and writes nothing.
-#   --owner <owner>  the dead owner orphan recovery resolved, for the report.
-#                    It is not the assignee guard.
+#   --owner <owner>  the owner orphan recovery found dead. A bead that no longer
+#                    resolves that owner, or is no longer open or in_progress,
+#                    is skipped with nothing written.
+#   --listed <status>:<assignee>
+#                    the status and assignee orphan recovery listed beside that
+#                    owner. The status ends at the first colon, and the
+#                    assignee may be empty. A bead whose status or assignee
+#                    differs is skipped with nothing written. Without --owner
+#                    or --listed nothing is compared.
 #   --json           emit the result as one JSON object instead of key=value.
 # Exit: 0 disposed or previewed · 1 unreadable bead or failed write ·
 #       2 usage · 3 PARTIAL write (some fields landed, some did not).
@@ -80,6 +98,8 @@ usage() {
 BEAD=""
 OWNER=""
 OWNER_SET=0
+LISTED=""
+LISTED_SET=0
 APPLY=0
 WANT_JSON=0
 
@@ -92,6 +112,11 @@ while [ $# -gt 0 ]; do
             shift; OWNER="$1"; OWNER_SET=1
             ;;
         --owner=*) OWNER="${1#--owner=}"; OWNER_SET=1 ;;
+        --listed)
+            if [ $# -lt 2 ]; then echo "orphan-dispose: --listed needs a value" >&2; exit 2; fi
+            shift; LISTED="$1"; LISTED_SET=1
+            ;;
+        --listed=*) LISTED="${1#--listed=}"; LISTED_SET=1 ;;
         -h|--help) usage; exit 0 ;;
         -*) echo "orphan-dispose: unknown flag: $1" >&2; usage >&2; exit 2 ;;
         *)
@@ -103,6 +128,12 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$BEAD" ] || { echo "orphan-dispose: a bead id is required" >&2; usage >&2; exit 2; }
+LISTED_STATUS="${LISTED%%:*}"
+LISTED_ASSIGNEE="${LISTED#*:}"
+if [ "$LISTED_SET" = "1" ] && { [ "$LISTED_STATUS" = "$LISTED" ] || [ -z "$LISTED_STATUS" ]; }; then
+    echo "orphan-dispose: --listed takes <status>:<assignee>, got '$LISTED'" >&2
+    exit 2
+fi
 command -v jq >/dev/null 2>&1 || { echo "orphan-dispose: jq is required" >&2; exit 1; }
 
 # >>> control-char-scrub
@@ -188,18 +219,57 @@ if [ "$CLASS" = "workflow-step" ] && [ -n "$ROOT_ID" ]; then
     fi
 fi
 
-# The assignee guard is the assignee read a moment ago, never --owner. Orphan
-# recovery resolves an owner by precedence over gc.session_id, assignee and
-# gc.session_name, so a claimed step's owner is its gc.session_id. A session
-# that claims under an alias, as a named session, a namepool member or an
-# explicit `gc hook <agent>` target does, leaves that alias as the assignee, and
-# the two are then different strings. Guarding on the owner would mismatch and
-# refuse every such release. --owner records who was proved dead and is
-# reported; the guard's job is the narrower one of catching a re-claim since the
-# read.
-GUARD="$ASSIGNEE"
+# The claim check. Orphan recovery resolves a bead's owner as the first
+# non-empty of gc.session_id, the assignee and gc.session_name, finds that
+# owner's session dead, and passes the owner as --owner and the status and
+# assignee it listed as --listed. It judged the bead from that listing, and a
+# holder can take the bead before this read: `gc-helm engage` reclaims a visit
+# bound to a gone sitting and binds a fresh one, and a pool claims a step whose
+# dead holder Gas City released. So this read resolves the owner the same way
+# and compares owner with owner, then status and assignee with the listed ones.
+# It never compares --owner with the assignee: a claimed step's owner is its
+# gc.session_id, while a session that claims under an alias, as a named
+# session, a namepool member or an explicit `gc hook <agent>` target does,
+# leaves that alias as the assignee. The owner alone does not settle it either.
+# engage's reclaim clears the assignee and no session pin, so a visit that still
+# carries a gc.session_id when it is re-bound after the listing resolves the
+# same owner, and only the listed assignee tells the fresh binding apart. A bead
+# whose owner, status or assignee differs from the listing, or that is no longer
+# open or in_progress, the statuses recovery lists, is not the claim recovery
+# judged, and it is skipped with nothing written.
+READ_OWNER="$(printf '%s' "$BEAD_JSON" | jq -r '.[0]
+    | [ (.metadata["gc.session_id"] // ""), (.assignee // ""), (.metadata["gc.session_name"] // "") ]
+    | map(select(. != "")) | first // ""')"
+CLAIM_CHANGED=""
+if [ "$OWNER_SET" = "1" ] || [ "$LISTED_SET" = "1" ]; then
+    if { [ "$OWNER_SET" = "1" ] && [ "$READ_OWNER" != "$OWNER" ]; } \
+        || { [ "$LISTED_SET" = "1" ] && { [ "$STATUS" != "$LISTED_STATUS" ] || [ "$ASSIGNEE" != "$LISTED_ASSIGNEE" ]; }; } \
+        || { [ "$STATUS" != "open" ] && [ "$STATUS" != "in_progress" ]; }; then
+        CLAIM_CHANGED="claim_changed(owner=${READ_OWNER:-none},status=${STATUS:-none},assignee=${ASSIGNEE:-none})"
+    fi
+fi
 REPORT_OWNER="$ASSIGNEE"
 [ "$OWNER_SET" = "1" ] && REPORT_OWNER="$OWNER"
+
+# The conditional guards. HELD_BY and HELD_STATUS are the assignee and status
+# this read found, which the claim check above has matched to --listed when it
+# was given. Every write of a visit or step release carries them as bd's
+# --if-assignee and --if-status, which bd checks in the same write: once the
+# bead's assignee or status has moved, the write lands nothing and exits 13.
+# Each write that lands moves them to what it wrote, so the next write is
+# guarded on the state this release left. A refused write means another writer
+# took or settled the bead mid-release, so LOST names it, no later write runs,
+# and the bead is skipped as that writer left it. bd compares no metadata, so a
+# holder that takes the bead without moving its assignee or status is caught
+# only by the claim check above.
+#
+# A guard's value is attached (--if-assignee=<v>), never a separate argument.
+# gc bd picks the store from the bead ids among a command's arguments, and a
+# session-id assignee names a real bead in the city store. An attached value is
+# never read as one of those ids, so only $BEAD selects the store.
+HELD_BY="$ASSIGNEE"
+HELD_STATUS="$STATUS"
+LOST=""
 
 FAILED=""
 LANDED=""
@@ -208,21 +278,58 @@ EXPECT_ROUTE=""
 note_failed() { FAILED="${FAILED:+$FAILED,}$1"; }
 note_landed() { LANDED="${LANDED:+$LANDED,}$1"; }
 
-# clear_pins removes every pin that names a session. Orphan recovery resolves a
-# bead's owner as the first non-empty of gc.session_id, the assignee, then
-# gc.session_name, so one pin left behind keeps resolving the dead session as
-# the owner once the bead is unassigned — and re-detects it every cycle. Metadata
-# writes do not go through the claim guard, so this half always lands.
+# held_update <field> <update args...> makes one write of a release under the
+# conditional guards, and answers 0 only when it landed.
+held_update() {
+    local field="$1" rc=0
+    shift
+    [ -z "$LOST" ] || return 1
+    gc bd update "$BEAD" "$@" --if-assignee="$HELD_BY" --if-status="$HELD_STATUS" >/dev/null 2>&1 || rc=$?
+    case "$rc" in
+        0)  note_landed "$field"; return 0 ;;
+        13) LOST="$field" ;;
+        *)  note_failed "$field" ;;
+    esac
+    return 1
+}
+
+# plain_update <field> <update args...> is the same write without the guards.
+# The source arm writes only after reopen-source has released the bead, so the
+# claim recovery judged is no longer there to guard on.
+plain_update() {
+    local field="$1"
+    shift
+    if gc bd update "$BEAD" "$@" >/dev/null 2>&1; then
+        note_landed "$field"
+    else
+        note_failed "$field"
+    fi
+}
+
+# clear_pins <writer> removes every pin that names a session, through
+# held_update in a step release and plain_update in the source arm. Orphan
+# recovery resolves a bead's owner as the first non-empty of gc.session_id, the
+# assignee, then gc.session_name, so one pin left behind keeps resolving the dead
+# session as the owner once the bead is unassigned — and re-detects it every
+# cycle. Metadata writes do not go through the claim guard.
 clear_pins() {
-    if gc bd update "$BEAD" \
+    "$1" pins \
         --unset-metadata gc.session_id \
         --unset-metadata gc.session_affinity \
         --unset-metadata gc.continuation_group \
-        --unset-metadata gc.session_name >/dev/null 2>&1; then
-        note_landed pins
-    else
-        note_failed pins
-    fi
+        --unset-metadata gc.session_name
+}
+
+# clear_session_pins is clear_pins for a visit. It removes gc.session_id and
+# gc.session_name, the pins a sitting's claim stamps, and keeps
+# gc.continuation_group, which on a visit is its identity rather than a pin. The
+# helm board also reads a visit whose gc.session_name is set as engaged. A visit
+# that engage bound to a sitting that never claimed it carries neither pin, and
+# removing an absent key changes nothing.
+clear_session_pins() {
+    held_update pins \
+        --unset-metadata gc.session_id \
+        --unset-metadata gc.session_name
 }
 
 # restore_route puts gc.routed_to back on a source bead reopen-source returned
@@ -262,45 +369,29 @@ restore_route() {
 # predicate, and it is what lets the assignee clear that follows run against an
 # open bead instead of a live in_progress claim.
 open_bead() {
-    [ "$STATUS" = "open" ] && return 0
-    if gc bd update "$BEAD" --status=open >/dev/null 2>&1; then
-        note_landed status
-    else
-        note_failed status
+    [ "$HELD_STATUS" = "open" ] && return 0
+    if held_update status --status=open; then
+        HELD_STATUS="open"
     fi
 }
 
-# release_assignee clears the assignee last. bd refuses this on an in_progress
-# bead held by a live actor, and `gc bd update --force` cannot carry the
-# override (the wrapper's bead-id pre-check allowlists no --force), so the
-# fallback goes through bare bd. The forced retry is legitimate only because
-# orphan recovery already established this owner is gone.
+# release_assignee clears the assignee last, under the conditional guards. bd
+# fences an assignee change on another actor's in_progress claim, except a
+# change whose --if-assignee names that actor, so the clear needs no --force.
+# bd refuses --force beside --if-assignee.
 release_assignee() {
-    [ -z "$ASSIGNEE" ] && return 0
-    # Attach the guard value (--if-assignee=$GUARD), never space-separate it. A
-    # spaced value is its own argv element, and the gc wrapper's store-scope
-    # scanner reads any element that does not begin with '-' as a candidate bead
-    # id; a session-id assignee resolves as a real session bead in the city
-    # store, so the whole command retargets there and $BEAD, which lives in the
-    # rig store, reports as not found. The =form keeps the value behind a leading
-    # '-' so only $BEAD selects the store. bare bd below parses flags directly
-    # and is unaffected, so its guard stays space-separated.
-    if gc bd update "$BEAD" --assignee "" --if-assignee="$GUARD" >/dev/null 2>&1; then
-        note_landed assignee
-        return 0
+    [ -z "$HELD_BY" ] && return 0
+    if held_update assignee --assignee ""; then
+        HELD_BY=""
     fi
-    # raw-bd: gc bd's bead-id pre-check allowlists no --force, so it exits 1
-    # before reaching bd and the override cannot be carried through the wrapper.
-    if bd update "$BEAD" --assignee "" --if-assignee "$GUARD" --force >/dev/null 2>&1; then
-        note_landed assignee
-        return 0
-    fi
-    note_failed assignee
 }
 
 # verify re-reads the bead and confirms the release actually landed. A write
-# that reports success and rolls back is the failure this exists to catch.
+# that reports success and rolls back is the failure this exists to catch. A
+# release a conditional guard stopped has left the bead to whoever took it, so
+# there is nothing of this release's to verify.
 verify() {
+    [ -z "$LOST" ] || return 0
     local after
     after="$(read_bead "$BEAD")"
     printf '%s' "$after" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 || {
@@ -314,11 +405,11 @@ verify() {
     sname="$(printf '%s' "$after" | jq -r '.[0].metadata["gc.session_name"] // ""')"
     [ "$st"  = "open" ] || note_failed "status(still=$st)"
     [ -z "$asg" ]       || note_failed "assignee(still=$asg)"
-    # The arms that clear session pins — workflow-step, source and review — must
-    # land it: a surviving pin is exactly what makes orphan recovery re-detect the
-    # bead.
+    # The arms that clear session pins — visit, workflow-step, source and review —
+    # must land it: a surviving pin is exactly what makes orphan recovery
+    # re-detect the bead.
     case "$CLASS" in
-        workflow-step|source|review)
+        visit|workflow-step|source|review)
             [ -n "$sid" ]   && note_failed "gc.session_id(still=$sid)"
             [ -n "$sname" ] && note_failed "gc.session_name(still=$sname)"
             ;;
@@ -344,12 +435,23 @@ released_on_reread() {
 ACTION=""
 DETAIL=""
 
-case "$CLASS" in
+# A bead that no longer carries the claim recovery judged takes no write,
+# whatever it is.
+DISPOSAL="$CLASS"
+[ -z "$CLAIM_CHANGED" ] || DISPOSAL="claim-changed"
+
+case "$DISPOSAL" in
+    claim-changed)
+        ACTION="skip"
+        DETAIL="$CLAIM_CHANGED"
+        ;;
     visit)
-        # Release the assignee and nothing else: no metadata is touched, so the
-        # route, continuation group and task_kind that ARE the visit survive.
-        ACTION="release-assignee"
+        # Release the sitting and keep the visit: the pins and the assignee go,
+        # and the route, continuation group and task_kind that ARE the visit are
+        # never written.
+        ACTION="release-visit"
         if [ "$APPLY" = "1" ]; then
+            clear_session_pins
             open_bead
             release_assignee
             verify
@@ -363,7 +465,7 @@ case "$CLASS" in
         ACTION="release-step"
         [ -z "$ROUTED" ] && DETAIL="routed=absent"
         if [ "$APPLY" = "1" ]; then
-            clear_pins
+            clear_pins held_update
             open_bead
             release_assignee
             verify
@@ -437,6 +539,8 @@ case "$CLASS" in
         else
             ACTION="delegate-source-workflow"
             if [ "$APPLY" = "1" ]; then
+                # delete-source and reopen-source take no conditional guard, so
+                # the claim check is the only one ahead of them.
                 # A delete-source cut off by its bound counts as failed whatever
                 # it finished: reopen-source does not run, so the bead stays owned
                 # and comes back next cycle, where delete-source is idempotent.
@@ -472,7 +576,7 @@ case "$CLASS" in
                         # bead keeps naming that dead session as its owner and
                         # orphan recovery re-detects it every cycle. verify catches a
                         # pin that reports cleared and rolled back.
-                        clear_pins
+                        clear_pins plain_update
                         # reopen-source also preserves the route it finds, and the
                         # dead session's own claim already emptied it, so the
                         # reopened bead is unrouted and unofferable until the route
@@ -490,8 +594,15 @@ case "$CLASS" in
         ;;
 esac
 
+if [ -n "$LOST" ]; then
+    ACTION="skip"
+    DETAIL="claim_changed(write=$LOST)"
+fi
+
 if [ "$APPLY" != "1" ]; then
     RESULT="preview"
+elif [ -n "$LOST" ]; then
+    RESULT="skipped"
 elif [ -n "$FAILED" ]; then
     RESULT=$([ -n "$LANDED" ] && echo partial || echo failed)
 elif [ "$ACTION" = "skip" ]; then
