@@ -186,6 +186,8 @@ pin_case() { # <mode> <meta-json> [<label>]; sets RC, D, OLD, NEW
   # can bring its new head into a repository.
   NEW=$(commit "$d/seed" "feature follow-up ($1)")
   git -C "$d/seed" push -q "$d/origin.git" feature
+  # PIN_UNREACHABLE points the rig's origin at nothing, so its fetch fails.
+  [ -z "${PIN_UNREACHABLE:-}" ] || git -C "$d/rig" remote set-url origin "$d/gone.git"
   FAKE_ROSTER="$d/roster.json"; pick "$1" "$d/rig"
   ( cd "$d/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_ROSTER="$d/roster.json" FAKE_LOG="$d/gc.log" \
       M="$2" BASE=main BRANCH=feature bash "$TMP/pin.sh" ) >"$d/out" 2>&1 || rc=$?
@@ -203,6 +205,10 @@ STAMP="$OLD"
 pin_case env "{\"reviewed_oid\":\"$STAMP\"}" stamped
 eq "$RC" 0 "pin/stamped: the block runs from a foreign cwd"
 has "$(cat "$D/out")" "reviewing feature -> main at $STAMP" "pin/stamped: the dispatch-stamped reviewed_oid still wins over the fetched head"
+PIN_UNREACHABLE=1 pin_case env '{}' unreachable
+[ "$RC" -ne 0 ] && ok "pin/unreachable: a fetch that fails stops the review" || bad "pin/unreachable: a fetch that fails stops the review"
+has "$(cat "$D/out")" "review: fetching main and feature into $D/rig failed" "pin/unreachable: the block says the fetch failed"
+hasnt "$(cat "$D/out")" "reviewing " "pin/unreachable: no commit is pinned from the rig's stale refs"
 pin_case nomatch '{}'
 [ "$RC" -ne 0 ] && ok "pin/nomatch: an unresolvable rig fails closed" || bad "pin/nomatch: an unresolvable rig fails closed"
 eq "$(ref "$D/rig" origin/feature)" "$OLD" "pin/nomatch: refused before fetching into the rig"

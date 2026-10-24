@@ -124,7 +124,7 @@ verdict recorded against a head you never read certifies unreviewed code:
 REPO="${GC_RIG_ROOT:-}"
 [ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
-git -C "$REPO" fetch origin "$BASE" "$BRANCH"
+git -C "$REPO" fetch origin "$BASE" "$BRANCH" || { echo "review: fetching $BASE and $BRANCH into $REPO failed; refusing to pin a commit from refs that may be stale" >&2; exit 1; }
 REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
 [ -n "$REVIEWED_OID" ] || REVIEWED_OID=$(git -C "$REPO" rev-parse "origin/$BRANCH")
 echo "reviewing $BRANCH -> $BASE at $REVIEWED_OID"
