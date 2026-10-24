@@ -16,10 +16,12 @@
 # when that gate will not stop, or when no detached-job.sh or
 # refinery-workspace.sh is reachable.
 #
-# The push block pushes only the head the prep worktree records it holds for
-# WORK and BRANCH: run with another bead's WORK or BRANCH it pushes nothing and
-# drains, leaving both beads' branches where they were, and with its check cut
-# out the same run force-pushes the prepared head over the other bead's branch.
+# merge-push's first block takes WORK and BRANCH from the record the stage left
+# in the prep worktree. Run ahead of the push block in a shell carrying another
+# bead's WORK or BRANCH, it sends the prepared head to the branch it was staged
+# from and leaves the other bead's branch where it was. The push block run
+# without it, with the same variables, force-pushes the prepared head over the
+# other bead's branch.
 #
 # Runs the REAL blocks extracted verbatim from the formula against a real git
 # repo (worktrees need one), the real detached-job.sh and refinery-workspace.sh,
@@ -166,10 +168,12 @@ git -C "$PW" merge-base --is-ancestor origin/polecat/wb HEAD \
 eq "$(head_of "$R/rig")" "main" "after push: rig root still on main"
 eq "$(git -C "$R/rig" rev-parse origin/polecat/wb)" "$(git -C "$PW" rev-parse HEAD)" "after push: origin/branch == the merged prepared head"
 
-# --- 3b. a push with another bead's WORK or BRANCH is refused. ------------------
-# The prep worktree holds one bead's prepared head, and the push block takes
-# WORK and BRANCH from the shell that runs it. Origin carries two beads'
-# branches, wb's head is staged, and the push runs with wa's variables.
+# --- 3b. a WORK or BRANCH the shell carries cannot steer the push. --------------
+# The prep worktree holds one bead's prepared head. merge-push opens with
+# prep-staged-work, which takes WORK and BRANCH from the record the stage left,
+# and every block after it runs in the same shell. Origin carries two beads'
+# branches, wb's head is staged, and the step's first block and its push block
+# run together in a shell carrying another bead's variables.
 # build_two <dir>: origin carries main, and polecat/wa and polecat/wb one commit
 # each ahead of the base, with the base advanced under both.
 build_two() {
@@ -193,43 +197,39 @@ push_as() {
   : > "$FAKE_LOG"
   ( cd "$1" && GC_RIG_ROOT="$1" GC_CITY_PATH="$CITY" WORK="$2" BRANCH="$3" bash "$4" ) >"$TMP/push.out" 2>&1 && RC=0 || RC=$?
 }
+fence prep-staged-work > "$TMP/staged.sh"
+[ -s "$TMP/staged.sh" ] && ok "prep-staged-work extracted" || bad "prep-staged-work extracted"
+cat "$TMP/staged.sh" "$TMP/push.sh" > "$TMP/staged-push.sh"
 T="$TMP/two"; build_two "$T"
 export FAKE_META='[{"metadata":{"branch":"polecat/wb","target":"main"}}]'
 run_block "$T/rig" "$TMP/merge.sh" && ok "two beads: wb's branch is prepared" || bad "two beads: wb's branch is prepared"
 PWT="$(prep_of "$T/rig")"
 WA_TIP=$(git -C "$T/origin.git" rev-parse polecat/wa)
-WB_TIP=$(git -C "$T/origin.git" rev-parse polecat/wb)
 git -C "$PWT" merge-base --is-ancestor origin/polecat/wa HEAD \
-  && bad "precondition: origin/polecat/wa is no ancestor of wb's prepared head, so its push takes the force arm" \
-  || ok "precondition: origin/polecat/wa is no ancestor of wb's prepared head, so its push takes the force arm"
+  && bad "precondition: origin/polecat/wa is no ancestor of wb's prepared head, so its push would take the force arm" \
+  || ok "precondition: origin/polecat/wa is no ancestor of wb's prepared head, so its push would take the force arm"
 for vars in "wa polecat/wa" "wa polecat/wb" "wb polecat/wa"; do
   read -r V_WORK V_BRANCH <<< "$vars"
-  push_as "$T/rig" "$V_WORK" "$V_BRANCH" "$TMP/push.sh"
-  [ "$RC" -ne 0 ] && ok "WORK=$V_WORK BRANCH=$V_BRANCH over wb's prepared head: the push block refuses" \
-    || bad "WORK=$V_WORK BRANCH=$V_BRANCH over wb's prepared head: the push block refuses"
+  push_as "$T/rig" "$V_WORK" "$V_BRANCH" "$TMP/staged-push.sh"
+  eq "$RC" 0 "WORK=$V_WORK BRANCH=$V_BRANCH over wb's prepared head: the first block and the push block exit 0"
+  eq "$(git -C "$T/origin.git" rev-parse polecat/wb)" "$(git -C "$PWT" rev-parse HEAD)" \
+    "WORK=$V_WORK BRANCH=$V_BRANCH: wb's prepared head goes to origin/polecat/wb, the branch it was staged from"
   eq "$(git -C "$T/origin.git" rev-parse polecat/wa)" "$WA_TIP" "WORK=$V_WORK BRANCH=$V_BRANCH: origin/polecat/wa is untouched"
-  eq "$(git -C "$T/origin.git" rev-parse polecat/wb)" "$WB_TIP" "WORK=$V_WORK BRANCH=$V_BRANCH: origin/polecat/wb is untouched"
-  grep -q DRAIN "$FAKE_LOG" && ok "WORK=$V_WORK BRANCH=$V_BRANCH: the refinery drains, leaving the work to retry" \
-    || bad "WORK=$V_WORK BRANCH=$V_BRANCH: the refinery drains, leaving the work to retry"
+  grep -q DRAIN "$FAKE_LOG" && bad "WORK=$V_WORK BRANCH=$V_BRANCH: the refinery does not drain" \
+    || ok "WORK=$V_WORK BRANCH=$V_BRANCH: the refinery does not drain"
+  [ "$V_WORK" = wa ] && { grep -qF "WORK was wa, but the prep worktree holds polecat/wb for wb, so this step acts for wb" "$TMP/push.out" \
+    && ok "WORK=$V_WORK BRANCH=$V_BRANCH: the step says it acts for wb" \
+    || bad "WORK=$V_WORK BRANCH=$V_BRANCH: the step says it acts for wb" "$(cat "$TMP/push.out")"; }
 done
-grep -qF "holds polecat/wb for wb, not polecat/wa for wb" "$TMP/push.out" \
-  && ok "a refused push names what the prep worktree holds and what it was asked to push" \
-  || bad "a refused push names what the prep worktree holds and what it was asked to push" "$(cat "$TMP/push.out")"
-push_as "$T/rig" wb polecat/wb "$TMP/push.sh"
-eq "$RC" 0 "WORK=wb BRANCH=polecat/wb: the push block exits 0"
-eq "$(git -C "$T/origin.git" rev-parse polecat/wb)" "$(git -C "$PWT" rev-parse HEAD)" "WORK=wb BRANCH=polecat/wb: origin/polecat/wb is wb's prepared head"
-eq "$(git -C "$T/origin.git" rev-parse polecat/wa)" "$WA_TIP" "WORK=wb BRANCH=polecat/wb: origin/polecat/wa is untouched"
 
-# Control: the same push block with its check cut out forces wb's prepared head
-# over polecat/wa when it runs with wa's variables, so the check is what
-# refuses it above.
-awk '/^# >>> prep-holds-work$/ {f=1; next} /^# <<< prep-holds-work$/ {f=0; next} !f' "$TMP/push.sh" > "$TMP/push-unchecked.sh"
-grep -q 'verify' "$TMP/push-unchecked.sh" && bad "control: the check is cut out of the push block" || ok "control: the check is cut out of the push block"
+# Control: the push block run without the first block, in a shell carrying wa's
+# variables, forces wb's prepared head over polecat/wa, so the first block's
+# read of the record is what keeps the push on wb's branch above.
 C="$TMP/two-control"; build_two "$C"
 run_block "$C/rig" "$TMP/merge.sh" && ok "control: wb's branch is prepared" || bad "control: wb's branch is prepared"
-push_as "$C/rig" wa polecat/wa "$TMP/push-unchecked.sh"
+push_as "$C/rig" wa polecat/wa "$TMP/push.sh"
 eq "$(git -C "$C/origin.git" rev-parse polecat/wa)" "$(git -C "$(prep_of "$C/rig")" rev-parse HEAD)" \
-  "control: without the check, wa's variables put wb's prepared head on origin/polecat/wa"
+  "control: without the first block, wa's variables put wb's prepared head on origin/polecat/wa"
 
 # --- 4. idempotency: a leftover prep worktree from an interrupted run. ---------
 run_block "$R/rig" "$TMP/merge.sh" && ok "merge block re-runs cleanly over a leftover prep worktree" || bad "merge block re-runs cleanly over a leftover prep worktree"

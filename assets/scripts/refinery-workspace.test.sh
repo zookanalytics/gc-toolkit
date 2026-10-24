@@ -15,6 +15,8 @@
 #     worktree's own git dir, which the worktree's status does not list and a
 #     worktree added later at the path does not inherit, and fails when that
 #     record does not land;
+#   - held prints the bead and then the branch the record names, and fails,
+#     printing nothing, for a worktree with no record and for no prep worktree;
 #   - verify passes only for the bead, and the branch when given, that the
 #     record names, and fails for another bead or branch, a worktree with no
 #     record, a directory git does not know as a worktree, and no prep
@@ -30,10 +32,12 @@
 #   - each point a cycle ends carries the same teardown block, which finds
 #     this script without the cwd, tears the prep worktree down, and when it
 #     cannot, says so and carries on without draining;
-#   - each merge-push block that reads, pushes or records the prepared head
-#     opens with the same prep-holds-work block, which goes on only when the
-#     prep worktree holds BRANCH for WORK, and otherwise, or with no script
-#     reachable, drains having done nothing.
+#   - merge-push opens with one prep-staged-work block, ahead of its first read
+#     of the bead, and no other line of the step sets WORK or BRANCH. The
+#     block takes WORK and BRANCH from the record, whatever the shell carried,
+#     and says so when the shell named another bead. With no record or no prep
+#     worktree it tears down what is there and exits 4 without draining, and
+#     with no script reachable it drains, both having done nothing else.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -241,23 +245,40 @@ ws verify --rig-root "$D/rig" --work wb --branch polecat/wa
 eq "$RC" 1 "verify, the staged bead with another branch: exits 1"
 ws verify --rig-root "$D/rig" --work wa
 eq "$RC" 1 "verify, another bead with no branch given: exits 1"
+# held_ws <args>...: held run from the foreign repository. Sets RC, HOUT (its
+# stdout) and HERR (its stderr).
+held_ws() { HOUT=$(cd "$D/cwd" && "$SUT" held "$@" 2>"$TMP/held.err"); RC=$?; HERR=$(cat "$TMP/held.err"); }
+held_ws --rig-root "$D/rig"
+eq "$RC" 0 "held: exits 0"
+eq "$HOUT" "wb
+polecat/wb" "held: prints the bead staged, then its branch, one per line"
+eq "$HERR" "" "held: says nothing else"
 
 ws stage --rig-root "$D/rig" --branch polecat/wb --work wa >/dev/null
 ws verify --rig-root "$D/rig" --work wa --branch polecat/wb
 eq "$RC" 0 "a stage for the next bead: verify passes for that bead"
 ws verify --rig-root "$D/rig" --work wb --branch polecat/wb
 eq "$RC" 1 "a stage for the next bead: verify refuses the bead staged before it"
+held_ws --rig-root "$D/rig"
+eq "$HOUT" "wa
+polecat/wb" "a stage for the next bead: held prints that bead"
 
 ws teardown --rig-root "$D/rig" >/dev/null
 ws verify --rig-root "$D/rig" --work wa --branch polecat/wb
 eq "$RC" 1 "verify with no prep worktree: exits 1"
 has "$OUT" "no prep worktree is staged" "verify with no prep worktree: it says so"
+held_ws --rig-root "$D/rig"
+eq "$RC/$HOUT" "1/" "held with no prep worktree: exits 1 and prints nothing"
+has "$HERR" "no prep worktree is staged" "held with no prep worktree: it says so"
 # git removed the record with the worktree, so a worktree added at the same
 # path by anything but stage holds none.
 git -C "$D/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
 ws verify --rig-root "$D/rig" --work wa --branch polecat/wb
 eq "$RC" 1 "verify, a worktree added at the prep path after a teardown: exits 1"
 has "$OUT" "records no bead and branch" "verify, a worktree added at the prep path after a teardown: it inherited no record"
+held_ws --rig-root "$D/rig"
+eq "$RC/$HOUT" "1/" "held, a worktree added at the prep path after a teardown: exits 1 and prints nothing"
+has "$HERR" "records no bead and branch" "held, a worktree added at the prep path after a teardown: it inherited no record"
 ws teardown --rig-root "$D/rig" >/dev/null
 mkdir -p "$PREP" && : > "$PREP/not-a-worktree"
 ws verify --rig-root "$D/rig" --work wb --branch polecat/wb
@@ -325,6 +346,7 @@ eq "$RC" 2 "a rig root that is no repository: exits 2"
 
 echo "── usage ──"
 for args in "" "nope" "stage --rig-root $D/rig" "stage --rig-root $D/rig --branch polecat/wb" "stage --rig-root $D/rig --work wb" \
+  "held --rig-root $D/rig --work wb" "held --rig-root $D/rig --branch polecat/wb" "held --rig-root" \
   "verify --rig-root $D/rig" "verify --rig-root $D/rig --branch polecat/wb" "verify --work" \
   "teardown --rig-root $D/rig --branch polecat/wb" "teardown --rig-root $D/rig --work wb" "checks --work wb" "checks --frob" "checks --rig-root"; do
   # shellcheck disable=SC2086 # each case is a word list
@@ -425,71 +447,101 @@ eq "$(registered "$D/rig" "$PREP")" yes "teardown block, no script reachable: th
 ws teardown --rig-root "$D/rig" >/dev/null
 eq "$(grep -c 'drain-ack' "$GC_LOG")" 0 "teardown block: no run drains the session"
 
-# --- The prep-holds-work block. ----------------------------------------------------
-# merge-push pushes the prepared head in one block and records it in two, and
-# each opens with one check that the prep worktree holds BRANCH for WORK, ahead
-# of everything it does with the prepared head.
-echo "── the prep-holds-work block ──"
-eq "$(awk '/^id = "/ { id = $3; gsub(/"/, "", id) } /^# >>> prep-holds-work$/ { printf "%s ", id }' "$PATROL_TOML")" \
-  "merge-push merge-push merge-push " \
-  "only merge-push carries the prep-holds-work block"
-for f in zero-diff-guard shared-branch-push-mode one-anchor-per-pr-terminal; do
-  awk -v m="$f" '$0 ~ ("^# >>> " m "$") {f=1; next} $0 ~ ("^# <<< " m "$") {f=0} f' "$PATROL_TOML" > "$TMP/fence-$f.sh"
-  CHECK_AT=$(grep -n '^# >>> prep-holds-work$' "$TMP/fence-$f.sh" | head -1 | cut -d: -f1)
-  ACT_AT=$(grep -nE 'PREP_SHA=|push origin|fetch origin|"\$LC" transition|gc bd update|escalate\.sh' "$TMP/fence-$f.sh" | head -1 | cut -d: -f1)
-  if [ -n "$CHECK_AT" ] && [ -n "$ACT_AT" ] && [ "$CHECK_AT" -lt "$ACT_AT" ]; then
-    ok "$f: the check comes before the block reads, pushes or records the prepared head"
-  else
-    bad "$f: the check comes before the block reads, pushes or records the prepared head" "check at ${CHECK_AT:-none}, first act at ${ACT_AT:-none}"
-  fi
-done
-NHOLDS=$(awk -v out="$TMP/holds-" '
-  /^# >>> prep-holds-work$/ { n++; f=1; next }
-  /^# <<< prep-holds-work$/ { f=0; next }
-  f { print > (out n ".sh") }
-  END { print n + 0 }' "$PATROL_TOML")
-eq "$NHOLDS" 3 "three prep-holds-work blocks are extracted"
-SAME=yes
-for i in 2 3; do cmp -s "$TMP/holds-1.sh" "$TMP/holds-$i.sh" || SAME=no; done
-eq "$SAME" yes "every prep-holds-work block is the same block"
-case "$(cat "$TMP/holds-1.sh")" in
-  *\\*) bad "the prep-holds-work block is backslash-free (TOML would eat it)" ;;
-  *)    ok  "the prep-holds-work block is backslash-free (TOML would eat it)" ;;
+# --- The prep-staged-work block. ---------------------------------------------------
+# merge-push takes the bead and branch it acts for from the record, once, at its
+# start, so every later block of the step pushes, lands and records for the
+# bead whose head the prep worktree holds, whatever the agent's shell carried.
+echo "── the prep-staged-work block ──"
+eq "$(awk '/^id = "/ { id = $3; gsub(/"/, "", id) } /^# >>> prep-staged-work$/ { printf "%s ", id }' "$PATROL_TOML")" \
+  "merge-push " \
+  "only merge-push carries the prep-staged-work block, once"
+awk '/^id = "merge-push"$/ {f=1} f && /^\[\[steps\]\]$/ {f=0} f' "$PATROL_TOML" > "$TMP/merge-push-step.txt"
+STAGED_AT=$(grep -n '^# >>> prep-staged-work$' "$TMP/merge-push-step.txt" | head -1 | cut -d: -f1)
+SHOW_AT=$(grep -n 'gc bd show \$WORK' "$TMP/merge-push-step.txt" | head -1 | cut -d: -f1)
+if [ -n "$STAGED_AT" ] && [ -n "$SHOW_AT" ] && [ "$STAGED_AT" -lt "$SHOW_AT" ]; then
+  ok "merge-push takes WORK from the record before it first reads the bead"
+else
+  bad "merge-push takes WORK from the record before it first reads the bead" "block at ${STAGED_AT:-none}, first read at ${SHOW_AT:-none}"
+fi
+eq "$(awk '/^# >>> prep-staged-work$/ {f=1} /^# <<< prep-staged-work$/ {f=0; next} !f' "$TMP/merge-push-step.txt" \
+      | grep -cE '(^|[^[:alnum:]_])(WORK|BRANCH)=|read -r (WORK|BRANCH)' || true)" 0 \
+  "no other line of merge-push sets WORK or BRANCH"
+awk '/^# >>> prep-staged-work$/ {f=1; next} /^# <<< prep-staged-work$/ {f=0; next} f' "$PATROL_TOML" > "$TMP/staged.sh"
+grep -qF '"$WS" held --rig-root "$RIG_ROOT"' "$TMP/staged.sh" \
+  && ok "the block hands the script the rig root it resolved" \
+  || bad "the block hands the script the rig root it resolved"
+case "$(cat "$TMP/staged.sh")" in
+  *\\*) bad "the prep-staged-work block is backslash-free (TOML would eat it)" ;;
+  *)    ok  "the prep-staged-work block is backslash-free (TOML would eat it)" ;;
 esac
-bash -n "$TMP/holds-1.sh" && ok "the prep-holds-work block is valid bash" || bad "the prep-holds-work block is valid bash"
+bash -n "$TMP/staged.sh" && ok "the prep-staged-work block is valid bash" || bad "the prep-staged-work block is valid bash"
 
-# The block runs from a cwd in another repository, with the script reachable
-# only through the city's gc-toolkit rig. What follows it in its fence is
-# stood for by one line, so a pass shows the block going on. Sets RC and OUT.
-{ cat "$TMP/holds-1.sh"; echo 'echo "PAST THE CHECK"'; } > "$TMP/holds-run.sh"
-holds_block() { # <city> <work> <branch>
+# The block runs from a cwd in another repository. What follows it in the step
+# is stood for by one line that shows the bead and branch it hands on.
+{ cat "$TMP/staged.sh"; echo 'echo "ACTS FOR $WORK ON $BRANCH"'; } > "$TMP/staged-run.sh"
+# staged_block <city> [<work> <branch>]: the block with the script reachable
+# through that city's gc-toolkit rig, GC_RIG_ROOT naming the rig, and the
+# shell's WORK and BRANCH when given. Sets RC and OUT.
+staged_block() {
+  local city="$1"; shift
   : > "$GC_LOG"
-  OUT=$(cd "$D/cwd" && GC_RIG_ROOT="$D/rig" GC_CITY_PATH="$1" WORK="$2" BRANCH="$3" bash "$TMP/holds-run.sh" 2>&1); RC=$?
+  if [ "$#" -eq 2 ]; then
+    OUT=$(cd "$D/cwd" && GC_RIG_ROOT="$D/rig" GC_CITY_PATH="$city" WORK="$1" BRANCH="$2" bash "$TMP/staged-run.sh" 2>&1); RC=$?
+  else
+    OUT=$(cd "$D/cwd" && env -u WORK -u BRANCH GC_RIG_ROOT="$D/rig" GC_CITY_PATH="$city" bash "$TMP/staged-run.sh" 2>&1); RC=$?
+  fi
 }
-refused() { # <label>: the block stopped, drained and went no further
-  eq "$RC" 1 "$1: exits 1"
-  case "$OUT" in *"PAST THE CHECK"*) bad "$1: nothing after the check runs" ;; *) ok "$1: nothing after the check runs" ;; esac
-  eq "$(grep -c 'drain-ack' "$GC_LOG")" 1 "$1: the session drains, leaving the work to retry"
-}
+drains() { grep -c 'drain-ack' "$GC_LOG"; }
+went_on() { case "$OUT" in *"ACTS FOR"*) echo yes ;; *) echo no ;; esac; }
+
 ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
-holds_block "$TMP/city" wb polecat/wb
-eq "$RC" 0 "prep-holds-work, the bead and branch staged: exits 0"
-has "$OUT" "PAST THE CHECK" "prep-holds-work, the bead and branch staged: the block goes on"
-eq "$(grep -c 'drain-ack' "$GC_LOG")" 0 "prep-holds-work, the bead and branch staged: the session does not drain"
-holds_block "$TMP/city" wa polecat/wa
-refused "prep-holds-work, another bead's WORK and BRANCH"
-has "$OUT" "holds polecat/wb for wb, not polecat/wa for wa" "prep-holds-work, another bead's WORK and BRANCH: the script's reason is shown"
-has "$OUT" "NOT pushing or recording the prepared head for wa" "prep-holds-work, another bead's WORK and BRANCH: it says the prepared head is neither pushed nor recorded"
-holds_block "$TMP/city" wa polecat/wb
-refused "prep-holds-work, another bead's WORK on the staged branch"
-holds_block "$TMP/city" wb polecat/wa
-refused "prep-holds-work, the staged bead with another BRANCH"
-holds_block "$TMP/no-pack-city" wb polecat/wb
-refused "prep-holds-work, no script reachable"
-has "$OUT" "refinery-workspace.sh not found" "prep-holds-work, no script reachable: it says why"
+staged_block "$TMP/city" wa polecat/wa
+eq "$RC" 0 "prep-staged-work, another bead's WORK and BRANCH in the shell: exits 0"
+has "$OUT" "ACTS FOR wb ON polecat/wb" "prep-staged-work, another bead's WORK and BRANCH in the shell: the step acts for the bead staged, on its branch"
+has "$OUT" "WORK was wa, but the prep worktree holds polecat/wb for wb, so this step acts for wb" \
+  "prep-staged-work, another bead's WORK and BRANCH in the shell: it says which bead it acts for"
+eq "$(drains)" 0 "prep-staged-work, another bead's WORK and BRANCH in the shell: the session does not drain"
+staged_block "$TMP/city" wb polecat/wa
+has "$OUT" "ACTS FOR wb ON polecat/wb" "prep-staged-work, the staged bead with another bead's BRANCH: the step acts on the staged branch"
+case "$OUT" in *"WORK was"*) bad "prep-staged-work, the staged bead's own WORK: no notice" ;; *) ok "prep-staged-work, the staged bead's own WORK: no notice" ;; esac
+staged_block "$TMP/city"
+eq "$RC" 0 "prep-staged-work, nothing in the shell: exits 0"
+has "$OUT" "ACTS FOR wb ON polecat/wb" "prep-staged-work, nothing in the shell: the step acts for the bead staged"
+case "$OUT" in *"WORK was"*) bad "prep-staged-work, nothing in the shell: no notice" ;; *) ok "prep-staged-work, nothing in the shell: no notice" ;; esac
+
+# GC_RIG_ROOT unset, so the rig comes from the roster, and the script sits only
+# in that rig's checkout, which is where the rebase step looks first.
+mkdir -p "$D/rig/assets/scripts"
+cp "$SUT" "$D/rig/assets/scripts/"
+: > "$GC_LOG"
+OUT=$(cd "$D/cwd" && env -u GC_RIG_ROOT GC_RIG=myrig GC_CITY_PATH="$TMP/no-pack-city" WORK=wa BRANCH=polecat/wa bash "$TMP/staged-run.sh" 2>&1); RC=$?
+eq "$RC" 0 "prep-staged-work, the rig from the roster and the script only in it: exits 0"
+has "$OUT" "ACTS FOR wb ON polecat/wb" "prep-staged-work, the rig from the roster and the script only in it: the block finds the script in the rig it resolved"
+eq "$(grep -c '^rig list' "$GC_LOG")" 1 "prep-staged-work, the rig from the roster: the roster is read once, by the block, not again by the script"
+( cd "$TMP" && rm -rf -- "${D:?}/rig/assets" )
+
+# A worktree at the prep path with no record, such as one any other path added.
 ws teardown --rig-root "$D/rig" >/dev/null
-holds_block "$TMP/city" wb polecat/wb
-refused "prep-holds-work, no prep worktree"
+git -C "$D/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+staged_block "$TMP/city" wb polecat/wb
+eq "$RC" 4 "prep-staged-work, a prep worktree with no record: exits 4"
+eq "$(went_on)" no "prep-staged-work, a prep worktree with no record: nothing after the block runs"
+has "$OUT" "nothing shows which bead the prep worktree holds" "prep-staged-work, a prep worktree with no record: it says why"
+has "$OUT" "jump to next-iteration" "prep-staged-work, a prep worktree with no record: it sends the cycle to next-iteration"
+eq "$(registered "$D/rig" "$PREP")" no "prep-staged-work, a prep worktree with no record: the block tears it down"
+eq "$(drains)" 0 "prep-staged-work, a prep worktree with no record: the session does not drain"
+staged_block "$TMP/city" wb polecat/wb
+eq "$RC" 4 "prep-staged-work, no prep worktree: exits 4"
+eq "$(went_on)" no "prep-staged-work, no prep worktree: nothing after the block runs"
+eq "$(drains)" 0 "prep-staged-work, no prep worktree: the session does not drain"
+ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
+staged_block "$TMP/no-pack-city" wb polecat/wb
+eq "$RC" 1 "prep-staged-work, no script reachable: exits 1"
+eq "$(went_on)" no "prep-staged-work, no script reachable: nothing after the block runs"
+has "$OUT" "refinery-workspace.sh not found" "prep-staged-work, no script reachable: it says why"
+eq "$(drains)" 1 "prep-staged-work, no script reachable: the session drains, leaving the work to retry"
+eq "$(registered "$D/rig" "$PREP")" yes "prep-staged-work, no script reachable: the prep worktree is left for the next stage"
+ws teardown --rig-root "$D/rig" >/dev/null
 
 echo "-----"
 echo "refinery-workspace: $PASS passed, $FAIL failed"

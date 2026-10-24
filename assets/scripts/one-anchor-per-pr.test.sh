@@ -41,8 +41,8 @@ mkdir -p "$TMP/bin"
 # `gc bd list --status=open --metadata-field branch=<b> --limit=0 --json`
 # filtered against a fixture of
 #   id|merge_result|branch|created_at
-# rows (open beads). `gc bd update`, `gc bd close` and `gc runtime drain-ack`
-# append to $GCLOG when it is set. Everything else exits 0 with no output.
+# rows (open beads). `gc bd update` and `gc bd close` append to $GCLOG when it
+# is set. Everything else exits 0 with no output.
 #
 # The stub honours EVERY --metadata-field it is given, the way bd does: the
 # shipped lookup filters on branch alone and applies the anchor half in its own
@@ -57,10 +57,6 @@ mkdir -p "$TMP/bin"
 # falling back to id order against live beads. An empty timestamp column omits
 # the key entirely (exercises the last-resort `.id` tiebreak).
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
-if [ "$1 $2" = "runtime drain-ack" ]; then
-  [ -n "${GCLOG:-}" ] && printf '%s\n' "$*" >> "$GCLOG"
-  exit 0
-fi
 if [ "$1" = "bd" ] && { [ "$2" = "update" ] || [ "$2" = "close" ]; }; then
   [ -n "${GCLOG:-}" ] && printf '%s\n' "$*" >> "$GCLOG"
   # GCUPDRC drives a refused write. The stub models NO ownership check of its
@@ -254,14 +250,18 @@ TERMINAL="$(awk '/# >>> one-anchor-per-pr-terminal/{f=1;next} /# <<< one-anchor-
 # exits $STUB_FETCH_RC (0 unless set) to model a read-back that fails; `rev-parse`
 # of HEAD echoes $STUB_PREPARED_HEAD and of any origin/* ref echoes
 # $STUB_REMOTE_HEAD, cut to its first 8 characters under --short — an empty env
-# var models an absent ref (empty output). -C <dir> is ignored: the arm's
-# PREP_WT is unset under test, so the stub answers from the environment, not a
-# real repository. Anything else exits 0 with no output, as the dumb stub did.
+# var models an absent ref (empty output). `rev-parse --git-common-dir` echoes
+# $STUB_COMMON, so the block finds the prep worktree at
+# $STUB_COMMON/gc-refinery-prep, and with $GITLOG set a `fetch` appends
+# `fetch <dir>` to it, naming the -C it was given. -C <dir> is otherwise
+# ignored, so the stub answers from the environment, not a real repository.
+# Anything else exits 0 with no output, as the dumb stub did.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/git" <<'GIT'
-op=""; short=0
+op=""; short=0; dir=""
+[ "${1:-}" = "-C" ] && dir="${2:-}"
 for a in "$@"; do
   case "$a" in
-    fetch)     exit "${STUB_FETCH_RC:-0}" ;;
+    fetch)     [ -n "${GITLOG:-}" ] && printf 'fetch %s\n' "$dir" >> "$GITLOG"; exit "${STUB_FETCH_RC:-0}" ;;
     rev-parse) op="rev-parse" ;;
     --short)   short=1 ;;
   esac
@@ -270,6 +270,7 @@ done
 for a in "$@"; do
   case "$a" in
     HEAD)     printf '%s\n' "${STUB_PREPARED_HEAD:-}"; exit 0 ;;
+    --git-common-dir) printf '%s\n' "${STUB_COMMON:-}"; exit 0 ;;
     origin/*)
       if [ "$short" = 1 ]; then printf '%.8s\n' "${STUB_REMOTE_HEAD:-}"; else printf '%s\n' "${STUB_REMOTE_HEAD:-}"; fi
       exit 0 ;;
@@ -285,20 +286,9 @@ printf '%s\n' "$*" >> "${LCLOG:?}"
 exit "${LCRC:-0}"
 L
 chmod +x "$TMP/bin/lc-stub"
-# The arm opens with prep-holds-work, which finds refinery-workspace.sh through
-# GC_RIG_ROOT before any other place. A stub stands in for it, so no run reads
-# a real prep worktree or whatever script the calling environment names: it
-# logs its arguments to $WSLOG and exits STUB_VERIFY_RC, 0 unless a case sets
-# it, so every run reads as one whose prep worktree holds BRANCH for WORK.
-mkdir -p "$TMP/rig/assets/scripts"
-cat > "$TMP/rig/assets/scripts/refinery-workspace.sh" <<'WS'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >> "${WSLOG:-/dev/null}"
-exit "${STUB_VERIFY_RC:-0}"
-WS
-chmod +x "$TMP/rig/assets/scripts/refinery-workspace.sh"
-export GC_RIG_ROOT="$TMP/rig" WSLOG="$TMP/ws.log"
-unset GC_CITY_PATH
+# The block resolves the prep worktree's path from the rig root, which
+# GC_RIG_ROOT names here, so no run reads the roster.
+export GC_RIG_ROOT="$TMP/rig"
 printf '%s\n' "$TERMINAL" > "$TMP/terminal.sh"
 run_terminal() { # <pre_open> <pr_url> <pr_number>
   : > "$LCLOG"
@@ -480,19 +470,13 @@ case "$CLOSE_LINE" in
   *) bad "(10n) the close note must carry the short sha (got: '$CLOSE_LINE')" ;;
 esac
 
-# --- Nothing is recorded for a bead the prep worktree does not hold. ----------
-# The arm's WORK and BRANCH are the shell's own, and the prepared head is
-# whatever the rebase step last staged. When the prep worktree does not hold
-# BRANCH for WORK, the arm records no landing, no gating state and no close.
-: > "$WSLOG"
-eq "$(STUB_VERIFY_RC=1 run_gate cafef00d cafef00d)" "1#;runtime drain-ack;" \
-  "(12a) prep worktree holds another bead: the rework arm notes, transitions and closes nothing, drains and exits non-zero"
-eq "$(head -1 "$WSLOG")" "verify --work w1 --branch polecat/parent" \
-  "(12b) the check asks whether the prep worktree holds BRANCH for WORK"
-eq "$(STUB_VERIFY_RC=1 run_terminal 0 "https://github.com/o/r/pull/7" 7)" "" \
-  "(12c) prep worktree holds another bead: no gating transition is written"
-eq "$(STUB_VERIFY_RC=1 run_terminal 1 "" "")" "" \
-  "(12d) prep worktree holds another bead: no pre-open transition is written"
+# --- The read-back names the prep worktree the rig root names. ---------------
+# The block resolves that path itself, so a PREP_WT the shell carries from
+# elsewhere does not move the read-back.
+: > "$TMP/git.log"
+GITLOG="$TMP/git.log" STUB_COMMON=/the-rig/.git PREP_WT=/elsewhere run_gate cafef00d cafef00d >/dev/null
+eq "$(head -1 "$TMP/git.log")" "fetch /the-rig/.git/gc-refinery-prep" \
+  "(12) the rework arm reads back in the prep worktree the rig root names, not a PREP_WT the shell carries"
 
 # Review dispatch moved to the cadence's gate-ensure; the formula's remaining
 # duty is that the transitions land on the right bead, checked below.

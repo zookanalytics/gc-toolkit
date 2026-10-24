@@ -104,10 +104,11 @@ shares only the word ([authority-map.md](authority-map.md)).
 
 ## Prep worktree staging record
 
-- **Covers.** The record that `stage --work` writes and `verify` reads in
-  `assets/scripts/refinery-workspace.sh`, a `gc-refinery-staged` file in the
-  prep worktree's private git dir, and the checks that run `verify`: the
-  `prep-holds-work` block of `formulas/mol-refinery-patrol.toml` and the prep
+- **Covers.** The record that `stage --work` writes and `held` and `verify`
+  read in `assets/scripts/refinery-workspace.sh`, a `gc-refinery-staged` file
+  in the prep worktree's private git dir, and its readers: the
+  `prep-staged-work` block of `formulas/mol-refinery-patrol.toml`, which takes
+  the bead and branch the merge-push step acts for from it, and the prep
   worktree check in `assets/scripts/direct-merge-push.sh`.
 - **Stands in for.** A worktree's ownership record, naming the bead and the
   branch that the refinery's detached prep worktree was staged for.
@@ -136,5 +137,5 @@ shares only the word ([authority-map.md](authority-map.md)).
   12c20a6e8170.
 - **Retires when.** Gas City can bind a detached worktree to a bead and remove
   the attempt that created it whatever state it is in, for example through
-  `gc worktree`. The check then moves onto that primitive's verify, and the
+  `gc worktree`. The record's readers then move onto that primitive, and the
   record goes.

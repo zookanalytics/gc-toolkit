@@ -6,9 +6,9 @@ description: The search the arch check asks for before the pack adds surface of 
 # Gas City search for which bead a prep worktree holds
 
 This change adds pack surface that records which bead and branch the
-refinery's prep worktree was staged for, and checks that record before the
-prepared head is pushed or recorded. So the arch check asks what Gas City
-already ships for that need
+refinery's prep worktree was staged for, and reads that record back for the
+steps that push or record the prepared head. So the arch check asks what Gas
+City already ships for that need
 ([review-arch.md](../../docs/review-arch.md#the-checks), checks 1 and 2).
 
 Gas City ships one owner that records which bead and branch a worktree belongs
@@ -23,16 +23,17 @@ pack keeps its own record, under the warrant this change adds to
 - `refinery-workspace.sh stage --work <bead>` records the bead and the branch
   it staged in a file in the prep worktree's private git dir,
   `gc-refinery-staged`.
-- `refinery-workspace.sh verify --work <bead> [--branch <branch>]` succeeds only
-  when that record names the bead, and the branch when one is given.
-- The `prep-holds-work` block in `mol-refinery-patrol`'s merge-push step, and
-  `direct-merge-push.sh`, run `verify` before they push the prepared head or
-  record it.
+- `refinery-workspace.sh held` prints the bead and the branch that record
+  names, and `refinery-workspace.sh verify --work <bead> [--branch <branch>]`
+  succeeds only when it names the bead, and the branch when one is given.
+- The `prep-staged-work` block that opens `mol-refinery-patrol`'s merge-push
+  step takes the bead and the branch the step acts for from `held`, and
+  `direct-merge-push.sh` runs `verify` before it lands the prepared head.
 
-The need is a check that the head in the prep worktree was staged for the bead
-and the branch a block acts for. It runs before the push and before each record
-of the push. Each block takes `WORK` and `BRANCH` from its own shell, while the
-prep worktree holds whichever bead the rebase step staged last.
+The need is a record of which bead and branch the head in the prep worktree was
+staged for, read by whatever pushes or records that head. The agent's shell
+carries a `WORK` and a `BRANCH` of its own, while the prep worktree holds
+whichever bead the rebase step staged last.
 
 The prep worktree is one path that every iteration reuses,
 `<rig git dir>/gc-refinery-prep`, inside the rig's main checkout, in its git
@@ -168,10 +169,10 @@ inside the repository, and records no bead. Its
 
 ## What the pack keeps
 
-The pack keeps its record and the verb that reads it. The record is one file
+The pack keeps its record and the verbs that read it. The record is one file
 in the worktree's private git dir, where `gc worktree` keeps the provenance of
 a worktree it owns, and it names only the bead and the branch. git deletes it
 with the worktree, so no record outlives the staging it describes. The warrant
-names the trigger that moves the check onto Gas City: an owner that binds a
-detached worktree to a bead and removes its own attempt in whatever state the
-iteration left it.
+names the trigger that moves the record's readers onto Gas City: an owner that
+binds a detached worktree to a bead and removes its own attempt in whatever
+state the iteration left it.
