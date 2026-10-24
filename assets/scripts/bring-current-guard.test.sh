@@ -1013,8 +1013,37 @@ eq "$(git -C "$R" rev-parse HEAD)" "$A" "the merge is aborted: HEAD is the head 
 [ -f "$R/.git/MERGE_HEAD" ] && bad "a merge is still in progress" || ok "…and no merge is left in progress"
 eq "$(meta MI20 gc.routed_to)" "human" "the bead parks to a person"
 has "$(meta MI20 gc.takeaway)" "Needs a decision before its branch can be brought current" "…naming what it waits for"
-eq "$(bassignee MI20)" "" "…its assignee cleared"
+eq "$(bstatus MI20) $(bassignee MI20)" "open " "…handed back open, its assignee cleared"
+has "$(cat "$STUB_GC_LOG")" "bd update MI20 --if-status=in_progress --if-assignee=polecat --status=open --assignee=" \
+  "…by one write that reopens it as it clears the assignee, guarded on the status and holder it showed"
+eq "$(grep -E -- '^bd update MI20 .*--assignee=( |$)' "$STUB_GC_LOG" | grep -cv -- '--status=open')" "0" \
+  "…and no write clears the assignee without reopening the bead"
 has "$(cat "$STUB_GC_LOG")" "runtime drain-ack" "…and the session drains"
+restart; bring
+store "[$(child MI25)]"
+jq -c 'map(if .id == "MI25" then .status = "closed" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+: > "$STUB_GC_LOG"; : > "$ASK_LOG"
+unres MI25; rc=$?
+eq "$rc" "0" "a bead with no molecule that shows closed: the block exits 0"
+eq "$(bstatus MI25) $(bassignee MI25)" "closed polecat" "…and the hand-back reopens nothing and clears nothing"
+has "$(jq -r '.[] | select(.id == "MI25") | .notes' "$STUB_STORE")" "Hand-back refused: the bead showed status closed and assignee polecat" "…and the notes say so"
+restart; bring
+store "[$(child MI26)]"
+: > "$STUB_GC_LOG"; : > "$ASK_LOG"
+# A store that fails the reopen: every write carrying --status=open is refused,
+# and every other call goes to the harness's gc.
+mkdir -p "$TMP/refuse-reopen"
+cat > "$TMP/refuse-reopen/gc" <<S
+#!/usr/bin/env bash
+case " \$* " in *" bd update "*" --status=open "*) printf 'bd update %s refused by the store\n' "\$3" >&2; exit 1 ;; esac
+exec "$BIN/gc" "\$@"
+S
+chmod +x "$TMP/refuse-reopen/gc"
+( cd "$R" && PATH="$TMP/refuse-reopen:$PATH" GC_PACK_DIR="$TMP/askpack" WORK_BEAD_ID=MI26 bash -c "$UNRES" ) >/dev/null 2>&1; rc=$?
+eq "$rc" "0" "a bead with no molecule whose reopen the store refuses: the block exits 0"
+eq "$(bstatus MI26) $(bassignee MI26)" "in_progress polecat" "…and the claim is left held, never in_progress with no assignee"
+has "$(jq -r '.[] | select(.id == "MI26") | .notes' "$STUB_STORE")" "Hand-back refused: the bead showed status in_progress and assignee polecat" "…and the notes say so"
+eq "$(meta MI26 gc.routed_to)" "human" "…beside the park to a person"
 restart; bring
 store "[$(child MI21)]"
 : > "$STUB_GC_LOG"; : > "$ASK_LOG"
