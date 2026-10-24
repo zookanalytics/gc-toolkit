@@ -75,8 +75,10 @@ What it costs:
   Graduation ran at most once every 15 minutes.
 - A handoff slung past an open blocker of its own now waits at the refinery
   until that blocker closes, which is what its edge says.
-- Ranking or parking an effort reaches its beads through their epic, not
-  through a convoy.
+- Ranking or parking an effort reaches its beads and its summary task through
+  their epic, not through a convoy. A park that stands when the effort's last
+  bead lands holds the summary task, so the effort reaches the refinery once the
+  park lifts. Graduation took a finished convoy even under a park.
 - No recipe makes a convoy, so an effort has no convoy row on the helm board.
 - Each open convoy that carries a branch today is moved to a landing bead once
   (section 10). An operator's `merge_hold` or `rebase_hold` on one becomes a
@@ -428,11 +430,15 @@ The mechanik's recipe and `mol-design-convoy` stand an effort up in this order:
    branch as a change with nothing in it.
 6. **File the summary task** once the effort's beads are filed: an ordinary task
    in the rig's store, titled for the landing bead's PR summary, whose
-   description names the landing bead. It lands nothing, so it carries no
-   `target`. Add its `blocks` edge on each bead of the effort and the landing
-   bead's `blocks` edge onto it, read them back, and only then arm it to
-   dispatch to the rig's polecat pool on Gas City's `mol-polecat-report`
-   (section 4). Armed with nothing to wait on, it would be dispatched at once.
+   description names the landing bead, under the effort's epic when it has one.
+   That puts it beside the landing bead, which waits on it. As a member of the
+   epic it may be armed to a pool, and the epic ranks and parks it as it does
+   the effort's beads ([steering.md](../../docs/steering.md)). It lands
+   nothing, so it carries no `target`. Add its `blocks` edge on each bead of the
+   effort and the landing bead's `blocks` edge onto it, read them back, and only
+   then arm it to dispatch to the rig's polecat pool on Gas City's
+   `mol-polecat-report` (section 4). Armed with nothing to wait on, it would be
+   dispatched at once.
 
 The branch is named for the bead that lands it, so an integration branch has one
 landing bead. None of these steps is a warrant: the push is the act the original
@@ -495,9 +501,10 @@ merging main into it, as it does every branch it prepares.
   PR is the design gate, and the implementation child is held behind it and
   armed, or slung with it for all-in-one. arm-design hands the subject to the
   refinery once the design child's wait reads back. A last step files the
-  summary task, with its `blocks` edge on each child and the subject's onto it,
-  reads them back, and arms it. The implementation child's brief tells it that a
-  bead it splits into takes the same writes, the summary task's edge among them.
+  summary task beside the subject, with its `blocks` edge on each child and the
+  subject's onto it, reads them back, and arms it. The implementation child's
+  brief tells it that a bead it splits into takes the same writes, the summary
+  task's edge among them.
 - **Its name stays.** A pattern's name is a word nothing in Gas City reads, and
   renaming it moves every caller for no behavior.
 
@@ -551,13 +558,16 @@ parks it for a person, and resolves the bead to `mr` by the line for main. The
 merge cadence's checks review the whole branch before the PR opens, and
 `merge.sh` lands the PR with the operator's approval and closes the bead.
 
-A park on the effort's epic holds the effort's beads that have not started. Once
-they have all closed and the summary task has run, bd still keeps the landing
-bead out of ready work while the park stands, so its notice waits for the park to
-lift. find-work reads
-`hold-lib.sh`, which leaves work in flight running under a parked ancestor, so it
-takes the landing bead on any earlier turn the refinery has, as graduation takes
-a finished convoy today.
+A park on the effort's epic holds what under it has not started: the effort's
+beads, and the summary task until it is dispatched, since deferred dispatch
+slings no armed bead that has not started while a park on one of its ancestors
+stands (`hold-lib.sh`). So an effort parked before its summary task is
+dispatched reaches the refinery once the park lifts. Once the summary task has
+run, bd still keeps the landing bead out of ready work while the park stands, so
+its notice waits for the park to lift. find-work reads `hold-lib.sh`, which
+leaves work in flight running under a parked ancestor, so it takes the landing
+bead on any earlier turn the refinery has, as graduation takes a finished convoy
+today.
 
 ### Why
 
@@ -959,10 +969,11 @@ For each such convoy, in this order:
    reaches main.
 6. **Hand the landing bead to the refinery,** with its notice, **and arm the
    summary task.** When the convoy's beads have all closed, the next pass
-   dispatches the summary task, and a landing bead that nothing else holds is
-   ready once that task closes. A held one stays out of bd's ready work until
-   its gate and every blocker step 4 carried have closed, so until then the
-   refinery neither prepares its branch nor opens its PR.
+   dispatches the summary task, unless a park on its epic holds it, and a
+   landing bead that nothing else holds is ready once that task closes. A held
+   one stays out of bd's ready work until its gate and every blocker step 4
+   carried have closed, so until then the refinery neither prepares its branch
+   nor opens its PR.
 7. **Close the convoy.** Append a note to it naming its landing bead and any
    gate step 4 filed, then close it with `gc convoy close`, Gas City's verb for
    closing a convoy whatever its beads' status. Nothing reads its target after
@@ -994,9 +1005,9 @@ The hand-off closes once each convoy it moved reads back this way:
   kind of edge, and its edge onto the convoy is gone.
 - **A convoy with open beads:** its landing bead and its summary task wait on
   each of them.
-- **A finished convoy that nothing held:** its summary task is armed with
-  nothing left to wait on, so the next pass dispatches it, and its landing bead
-  waits on that task alone.
+- **A finished convoy that nothing held:** its summary task is armed with no
+  open blocker of its own, so the next pass dispatches it once no park on its
+  epic holds it, and its landing bead waits on that task alone.
 - **Every convoy it moved** is closed, with the note that names its landing
   bead.
 
@@ -1030,7 +1041,7 @@ Each unit that edits a prompt or a formula regenerates its pages under
 | the comment in `services/gctk/cmd/gctk/main.go`, and `services/gctk/README.md` | each lists convoy-graduate among the cadence's scripts | the lists drop it | B |
 | graduation fixtures in `pr-facts.test.sh` and `pre-open-rebase.test.sh`, a comment in `deferred-dispatch.test.sh` | a graduation bead | a landing bead | B |
 | `assets/scripts/convoy-seed.sh`, its test, `mol-design-convoy-seed-invoke.test.sh`, `mol-design-convoy-subject-close.test.sh` | the seed script, its tests, and the subject's close through an `until` edge and the drain | deleted | C |
-| `formulas/mol-design-convoy.toml` | seed-convoy runs `convoy-seed.sh` and writes the subject's `until` edge onto the convoy; the arm steps link each child parent-child and rely on the link for the target; the design child is slung with no merge flag; the drain hands the subject to the convoy; graduation carries the convoy to main | the seed step cuts `integration/<subject-id>` and records the branch on the subject; each child is filed with its target and the subject's `blocks` edge, both read back; the design child is slung `--merge mr` when design-gated; arm-design hands the subject to the refinery; a summary step files the summary task with its `blocks` edge on each child and the subject's onto it, reads them back, and arms it on `mol-polecat-report`; the drain step goes; the subject's PR carries the effort to main, with the summary its summary task wrote | C |
+| `formulas/mol-design-convoy.toml` | seed-convoy runs `convoy-seed.sh` and writes the subject's `until` edge onto the convoy; the arm steps link each child parent-child and rely on the link for the target; the design child is slung with no merge flag; the drain hands the subject to the convoy; graduation carries the convoy to main | the seed step cuts `integration/<subject-id>` and records the branch on the subject; each child is filed with its target and the subject's `blocks` edge, both read back; the design child is slung `--merge mr` when design-gated; arm-design hands the subject to the refinery; a summary step files the summary task beside the subject, with its `blocks` edge on each child and the subject's onto it, reads them back, and arms it on `mol-polecat-report`; the drain step goes; the subject's PR carries the effort to main, with the summary its summary task wrote | C |
 | `assets/scripts/mol-design-convoy-arm.test.sh` | pins the parent-child link and its read-back | pins the target in each create, the subject's `blocks` edges and their read-back, the design child's `--merge mr`, the subject's hand-off after its first wait, and the summary step's writes and arm (section 12) | C |
 | `agents/mechanik/prompt.template.md`, the dispatch doctrine and its recipe | "an owned convoy is the PR unit"; a lone bead is the one-child convoy; `convoy-seed.sh` with `--artifact`; each child linked parent-child; graduation | a PR comes from one bead, and a lone bead needs nothing else; an effort is a landing bead, one push, three writes per bead and a summary task (section 3); a bead that joins once the summary task has been dispatched waits on a fresh one; a shared input artifact is the first bead; a bead that builds on work reaching main after the cut waits on the mechanik's hand-off; an effort is ranked and parked through its epic | C |
 | `template-fragments/polecat-doctrine.template.md`, integration branches | a child carries the target "which the owned-convoy recipe stamps when it links the child"; workspace-setup cancels a child poured from the wrong base; graduation | a bead filed for an integration effort carries the effort's branch as its own target from its create; its work lands there with no PR unless it is a stage; the landing bead carries the branch to main; a summary task writes its landing bead's `pr_summary` from the finished branch, and this paragraph is the one statement of how (section 4); the metadata table's `pr_summary` row names a summary task as that key's other writer | C |
@@ -1171,16 +1182,17 @@ finished scope differs from its setup description opens its PR with a summary of
 the finished work.
 
 - **The summary task waits for the finished scope.** In
-  `mol-design-convoy-arm.test.sh`, the summary step runs over a subject whose
-  description names the planned work. It files the summary task with no
-  `target` and a description that names the subject, writes the task's `blocks`
-  edge on the design child and on the implementation child and the subject's
-  edge onto the task, reads all three back, and only then arms the task on
-  `mol-polecat-report`. Each write that fails to read back, in a case of its
-  own, fails the step with nothing armed. A resume over edges that already read
-  back arms the task once.
+  `mol-design-convoy-arm.test.sh`, the summary step runs over a subject under an
+  epic, whose description names the planned work. It files the summary task
+  under that epic, with no `target` and a description that names the subject,
+  writes the task's `blocks` edge on the design child and on the implementation
+  child and the subject's edge onto the task, reads all three back, and only
+  then arms the task on `mol-polecat-report`. Each write that fails to read
+  back, in a case of its own, fails the step with nothing armed. A resume over
+  edges that already read back arms the task once.
 - **The rest of the path is pinned where it runs.** The deferred-dispatch suite
-  pins that an armed bead is slung only once bd reports it ready, so the
+  pins that an armed bead is not slung while a blocker of its own, or a park on
+  its epic, holds it, and that its arm fires once that hold releases. So the
   summary task runs after the effort's last bead lands, including a bead that
   joined after setup with the summary task's edge. Unit B's first case pins
   that the refinery takes the landing bead only after the summary task closes.
