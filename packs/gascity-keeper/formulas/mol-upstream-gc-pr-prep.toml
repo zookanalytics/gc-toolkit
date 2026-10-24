@@ -75,7 +75,8 @@ exists, `cd` there and skip to step 3. Otherwise locate the gascity rig by
 name in `gc rig list --json`. Every git call below names it as
 `git -C "$RIG_ROOT"`, and `git -C ""` runs in the session's cwd, so a roster
 with no gascity rig hands the bead back before anything is fetched or created.
-The session drains only after that hand-back is written:
+The mail goes out, and the session drains, only after that hand-back is
+written:
 
 ```bash
 # >>> upstream-pr-prep-worktree-setup
@@ -85,6 +86,17 @@ if [ -z "$RIG_ROOT" ]; then
   # the run was slung with stands in for one the bead does not name.
   REQUESTING_KEEPER=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.requesting_keeper // empty')
   [ -n "$REQUESTING_KEEPER" ] || REQUESTING_KEEPER="{{requesting_keeper}}"
+  # The hand-back is written before any mail: a refused write leaves the step
+  # to a retry, and each retry would otherwise mail about a hand-back the bead
+  # does not carry.
+  if ! gc bd update {{issue}} \
+    --set-metadata aborted_at=workspace-setup \
+    --status=open \
+    --assignee="$REQUESTING_KEEPER" \
+    --set-metadata gc.routed_to="$REQUESTING_KEEPER"; then
+    echo "pr-prep: the hand-back of {{issue}} to $REQUESTING_KEEPER did not land; NOT draining, so the next worker retries" >&2
+    exit 1
+  fi
   gc mail send "$REQUESTING_KEEPER" -s "pr-prep: no gascity rig for {{issue}}" -m "$(cat <<EOF
 gc rig list --json names no rig called gascity, so no path names the
 repository to branch from. Nothing was fetched, created or pushed.
@@ -95,15 +107,6 @@ Next: register the gascity rig, then re-dispatch this prep.
 EOF
 )"
   gc mail send human -s "pr-prep: no gascity rig for {{issue}}" -m "(see keeper mail)"
-
-  if ! gc bd update {{issue}} \
-    --set-metadata aborted_at=workspace-setup \
-    --status=open \
-    --assignee="$REQUESTING_KEEPER" \
-    --set-metadata gc.routed_to="$REQUESTING_KEEPER"; then
-    echo "pr-prep: the hand-back of {{issue}} to $REQUESTING_KEEPER did not land; NOT draining, so the next worker retries" >&2
-    exit 1
-  fi
   gc runtime drain-ack
   exit 0
 fi

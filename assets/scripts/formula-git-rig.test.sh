@@ -445,6 +445,7 @@ has "$(cat "$D/gc.log")" "mail send gascity/gascity-keeper.keeper -s pr-prep: no
 has "$(cat "$D/gc.log")" "mail send human -s pr-prep: no gascity rig for tk-iss" "pr-prep/unregistered: the operator is mailed"
 has "$(cat "$D/gc.log")" "bd update tk-iss --set-metadata aborted_at=workspace-setup --status=open --assignee=gascity/gascity-keeper.keeper --set-metadata gc.routed_to=gascity/gascity-keeper.keeper" \
   "pr-prep/unregistered: the bead goes back open, assigned and routed to the keeper"
+eq "$(head -n 1 "$D/gc.log" | cut -d' ' -f1-3)" "bd update tk-iss" "pr-prep/unregistered: the hand-back is written before any mail"
 has "$(cat "$D/gc.log")" "runtime drain-ack" "pr-prep/unregistered: the session drains"
 PRPREP_META='[{"metadata":{}}]' prprep_case other unstamped
 has "$(cat "$D/gc.log")" "bd update tk-iss --set-metadata aborted_at=workspace-setup --status=open --assignee=keeper/from-var --set-metadata gc.routed_to=keeper/from-var" \
@@ -455,6 +456,7 @@ prprep_case other refused 1
 eq "$RC" 1 "pr-prep/refused: a hand-back the store refuses fails the block"
 eq "$(grep -c '^bd update ' "$D/gc.log" || true)" 1 "pr-prep/refused: the refused hand-back is the only write attempted"
 has "$(cat "$D/out")" "the hand-back of tk-iss to gascity/gascity-keeper.keeper did not land; NOT draining" "pr-prep/refused: the block says the hand-back did not land"
+hasnt "$(cat "$D/gc.log")" "mail send" "pr-prep/refused: nobody is mailed about a hand-back the bead does not carry"
 hasnt "$(cat "$D/gc.log")" "runtime drain-ack" "pr-prep/refused: the session does not drain, so the step is retried"
 
 # --- 8. mol-feedback-miner: the repository mined. ------------------------------
