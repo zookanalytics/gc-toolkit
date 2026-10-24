@@ -7,11 +7,14 @@
 # guarded write that reopens the bead and releases the claim together:
 #
 #   1. Every agent nudge that tells a worker what to do with its assignee names
-#      that write as one backticked `gc bd update` command: the holder guard
-#      (--if-assignee=), the status guard (--if-status=in_progress), the reopen
-#      (--status=open), the cleared assignee (--assignee="") and both session
-#      pins unset. No nudge names gc bd release-if-current, which leaves the
-#      pins and, given a pool session's id as the holder, releases a rig bead
+#      that write as one backticked `gc bd update` command: the holder guard on
+#      the worker's own session id (--if-assignee="$GC_SESSION_ID"), the status
+#      guard (--if-status=in_progress), the reopen (--status=open), the cleared
+#      assignee (--assignee="") and both session pins unset. A guard on whatever
+#      assignee the bead shows would let the write unassign another session's
+#      claim, because a write guarded on the assignee skips bd's reassign
+#      fence. No nudge names gc bd release-if-current, which leaves the pins
+#      and, given a pool session's id as the holder, releases a rig bead
 #      against the city store, where it finds nothing and still exits 0.
 #   2. The polecat and polecat-codex nudges are identical, as both agent files
 #      say they are, and they carry the hand-back.
@@ -56,8 +59,11 @@ import os, re, sys, tomllib
 root, paths = sys.argv[1], sys.argv[2:]
 
 # --- 1. The hand-back each nudge names. ---
+# The holder guard names the worker's own session id, the identity gc hook
+# records a pool worker's claim under.
+OWN_GUARD = '--if-assignee="$GC_SESSION_ID"'
 PARTS = [
-    "--if-assignee=",
+    OWN_GUARD,
     "--if-status=in_progress",
     "--status=open",
     '--assignee=""',
@@ -92,7 +98,7 @@ pool = ["agents/polecat", "agents/polecat-codex"]
 if all(p in nudges for p in pool):
     a, b = (nudges[p] for p in pool)
     print(("ok|" if a == b else "bad|") + "the polecat and polecat-codex nudges are %s" % ("identical" if a == b else "different"))
-    carries = "--if-assignee=" in a
+    carries = OWN_GUARD in a
     print(("ok|" if carries else "bad|") + "the polecat nudge %s the hand-back" % ("carries" if carries else "does not carry"))
 else:
     print("bad|the polecat and polecat-codex nudges are missing: agents/polecat or agents/polecat-codex has no agent.toml")
