@@ -155,6 +155,11 @@ The pack is read at `9db3fea95`, which is main with PR #1262 landed and the
 commit integration/tk-gaklsnk was cut from. Line numbers in this document are at
 that commit. gascity is read at `11a09362a`.
 
+What Gas City, the packs it publishes and bd ship for the surface this design
+adds, the resolver's new modes and the record's new keys, and why none of it
+covers that surface, is in [gas-city-search.md](gas-city-search.md), read at
+the upstream commits it names.
+
 The sources are the operator's three reviews of PR #1262 (5536090671,
 5538944776, 5542707712), the review comments 4286312773 ("A repo does not need
 to include anything to get a great review") and 4290610037 ("the new process
