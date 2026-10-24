@@ -336,6 +336,35 @@ has "$(cat "$D/gc.log")" "runtime drain-ack" "nocheck: the session drains"
 eq "$(merged_tries)" 0 "nocheck: nothing is recorded as merged"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "nocheck: nothing is pushed"
 
+echo "── a failed git call runs once, and its own error is the one reported ──"
+# A git that fails the first call of FLAKY_SUB as a held index.lock does, and
+# runs every later call for real, so a rerun of the failed call succeeds. The
+# error reported must be the failed call's, and that call must run once.
+fixture "$TMP/flaky" work
+REAL_GIT=$(command -v git)
+mkdir -p "$TMP/flaky-bin"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'REAL_GIT=%q\n' "$REAL_GIT"; cat; } > "$TMP/flaky-bin/git" <<'GITW'
+if [ "$1" = -C ]; then sub="$3"; else sub="$1"; fi
+printf '%s\n' "$sub" >> "$FLAKY_LOG"
+if [ "$sub" = "$FLAKY_SUB" ] && [ ! -e "$FLAKY_LOG.tripped" ]; then
+  : > "$FLAKY_LOG.tripped"
+  echo "fatal: Unable to create '/held/index.lock': File exists." >&2
+  exit 128
+fi
+exec "$REAL_GIT" "$@"
+GITW
+chmod +x "$TMP/flaky-bin/git"
+for sub in merge-base diff rev-list; do
+  rm -f "$TMP/flaky.log" "$TMP/flaky.log.tripped"
+  OUT=$(cd "$ELSEWHERE" && PATH="$TMP/flaky-bin:$PATH" FLAKY_SUB="$sub" FLAKY_LOG="$TMP/flaky.log" \
+    bash -c "$(cat "$TMP/bhrc.sh")"'
+branch_has_real_change "$1" origin/main "$2"
+echo "rc=$? error=$BHRC_ERROR"' _ "$D/rig" "$FEATURE" 2>&1)
+  has "$OUT" "rc=2 error=$sub " "flaky/$sub: a failed $sub is a check that could not run"
+  has "$OUT" "failed: fatal: Unable to create '/held/index.lock': File exists." "flaky/$sub: the error reported is the one the failed call wrote"
+  eq "$(grep -cx -- "$sub" "$TMP/flaky.log" || true)" 1 "flaky/$sub: the failed call ran once"
+done
+
 echo "-----"
 echo "unrecorded-direct-landing: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
