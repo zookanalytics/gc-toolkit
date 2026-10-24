@@ -32,9 +32,10 @@
 # names no bead that can wait, so a situation with no bead of its own is a
 # patrol finding (patrol-finding.sh), which a first reaction puts to a person as
 # a human gate on the finding when it needs one.
-# stdout carries the id of the open gate that asks (the one filed, or the one
-# already open), and with --retract the id of each gate this call resolved.
-# Everything else goes to stderr.
+# stdout carries the id of the open gate that asks as of this call's last read
+# of the bead's gates (the one filed, the one already open, or the first one
+# still open after this call resolves its own duplicate), and with --retract the
+# id of each gate this call resolved. Everything else goes to stderr.
 # Exit: 0 filed, already open, inside a declared quiet window, or (--retract)
 # resolved or nothing open · 1 could not read the bead's gates, file, verify or
 # resolve · 2 usage, or a wisp named as the subject
@@ -262,10 +263,10 @@ fi
 # bd keeps no idempotency at create, so two writers racing in the same instant
 # can both pass the dedup above and file. Each reads the gates back after its
 # own create, and a writer whose gate is not the first resolves it as a
-# duplicate and names the first. A writer resolves only the gate it filed,
-# because the other writer's caller may already wait on its own gate by id. Two
-# gates stand only when one create landed after the other writer read back, and
-# then the bead moves once both are cleared.
+# duplicate and names the gate still open. A writer resolves only the gate it
+# filed, because the other writer's caller may already wait on its own gate by
+# id. Two gates stand only when one create landed after the other writer read
+# back, and then the bead moves once both are cleared.
 FIRST_GATE=$(printf '%s' "$GOT" | bd_gates_open_under_key "$KEY" | jq -r '.[0].id // empty' 2>/dev/null)
 if [ -n "$FIRST_GATE" ] && [ "$FIRST_GATE" != "$GATE" ]; then
   DUP_REASON="moot: a duplicate of gate $FIRST_GATE, filed for the same situation in the same instant"
@@ -277,13 +278,25 @@ if [ -n "$FIRST_GATE" ] && [ "$FIRST_GATE" != "$GATE" ]; then
   DUP_STATUS=$(printf '%s' "$DUP_ROW" | jq -r 'if type == "array" then (.[0].status // "") else "" end' 2>/dev/null)
   DUP_GOT=$(printf '%s' "$DUP_ROW" | jq -r 'if type == "array" then (.[0].close_reason // "") else "" end' 2>/dev/null)
   if [ "$DUP_STATUS" != closed ]; then
-    warn "gate $FIRST_GATE already asks for $SUBJECT [$KEY], and this call's duplicate, gate $GATE, did not resolve (its status reads '${DUP_STATUS:-unreadable}'), so $SUBJECT stays blocked until both are cleared. repair: gc bd gate resolve $GATE --reason \"$DUP_REASON\""
+    warn "this call's gate $GATE duplicates gate $FIRST_GATE and did not resolve (its status reads '${DUP_STATUS:-unreadable}'), so $SUBJECT stays blocked until both are cleared. repair: gc bd gate resolve $GATE --reason \"$DUP_REASON\""
   elif [ "$DUP_GOT" = "$DUP_REASON" ]; then
-    warn "gate $FIRST_GATE already asks for $SUBJECT [$KEY]; resolved this call's duplicate, gate $GATE"
+    warn "resolved this call's duplicate, gate $GATE, of gate $FIRST_GATE"
   else
-    warn "gate $FIRST_GATE already asks for $SUBJECT [$KEY]; this call's duplicate, gate $GATE, was already cleared, and its answer stands: $DUP_GOT"
+    warn "this call's duplicate, gate $GATE, was already cleared, and its answer stands: $DUP_GOT"
   fi
-  printf '%s\n' "$FIRST_GATE"
+  # The gate named is the one still open once this call's own is resolved.
+  # FIRST_GATE can itself be a duplicate: with three writers racing, a third
+  # gate that came first but was not yet in this call's read-back can be in
+  # FIRST_GATE's writer's, and that writer resolves FIRST_GATE in the same
+  # instant. So the gates are read again, and the first open one under the key
+  # is named. A read that fails, or finds none open, names FIRST_GATE. The name
+  # is the gate that asks as of that read, so a caller that waits later reads
+  # the gate again in the same order (bd_gates_open_under_key), as
+  # await-ruling.sh does.
+  ASKS=$(bd_human_gates "$SUBJECT" | bd_gates_open_under_key "$KEY" | jq -r '.[0].id // empty' 2>/dev/null)
+  [ -n "$ASKS" ] || ASKS="$FIRST_GATE"
+  warn "gate $ASKS already asks for $SUBJECT [$KEY]"
+  printf '%s\n' "$ASKS"
   exit 0
 fi
 
