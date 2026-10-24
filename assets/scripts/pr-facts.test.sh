@@ -3637,6 +3637,9 @@ eq "$(jq '[ .[] | select(.id | startswith("new-")) ] | length' "$STUB_STORE")" "
 eq "$(meta_pinned NR1 pr.conversation)" "quiet@sha-371" "…and the PR reads quiet"
 
 echo "# a Vercel-shaped comment is not feedback on a rig that declares its marker"
+# The stubbed git places the caller in no repository, so GC_RIG_ROOT names the
+# rig, and the stub serves the not-for-review.toml in that directory as the one
+# the rig's default branch carries.
 mkdir -p "$TMP/rig-vercel" "$TMP/rig-undeclared"
 printf '%s\n' '# Vercel' '[[marker]]' 'prefix = "[vc]: #"' > "$TMP/rig-vercel/not-for-review.toml"
 store "[$(anchor NR2 372)]"

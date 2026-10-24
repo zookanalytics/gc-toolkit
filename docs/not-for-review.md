@@ -87,12 +87,15 @@ prefix = "[vc]: #"
 - A prefix matches any comment that opens with it, a person's included, so
   declare text that only the integration writes.
 
-A rig with no such file declares nothing, and every comment an integration
-posts on its pull requests is feedback.
+A rig whose default branch carries no such file declares nothing, and every
+comment an integration posts on its pull requests is feedback.
 
-The city reads the file from the rig's checkout, which follows its default
-branch, so a change to the file counts once it merges. To see what a rig
-declares, run this in its checkout:
+The city reads the file as the rig's default branch carries it: at
+`origin/HEAD`, as the rig's repository last fetched it. A change to the file
+counts once it merges, and neither a pull request's own copy of the file nor
+an uncommitted edit to it changes which comments count. The rig's repository
+is the one the reader runs in, or the one `GC_RIG_ROOT` names when the reader
+runs in none. To see what a rig declares, run this in its checkout:
 
 ```bash
 "$(gc gc-toolkit scripts-dir)/pr-post.sh" not-for-review
@@ -100,7 +103,8 @@ declares, run this in its checkout:
 
 `gc-toolkit` there is the name the city imports the pack under. The command
 prints the mark and each declared prefix, one per line. When it refuses part of
-the file, it names that part on stderr and exits 1.
+the file, or finds no default branch to read it from, it says so on stderr and
+exits 1.
 
 ## What the city does with a comment not for review
 

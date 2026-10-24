@@ -25,10 +25,14 @@
 # whoever posted it. It says so at its start: its body opens with the no-review
 # mark below, which a person or a workflow writes into it, or begins with a
 # prefix the rig declares for a third-party integration in not-for-review.toml
-# at the root of its checkout (docs/not-for-review.md). The checkout is
-# GC_RIG_ROOT when it is set, and otherwise the repository the caller runs in.
-# With nothing declared, a third-party post is feedback. A review's state is not
-# its body: an approval or a change request counts whatever its body carries.
+# at the root of its repository (docs/not-for-review.md). The repository is the
+# one the caller runs in, whose origin pr-facts.sh and the feedback miner read
+# pull requests from, or GC_RIG_ROOT's when the caller runs in none. The file
+# counts as the repository's default branch carries it (origin/HEAD, as last
+# fetched), so a declaration counts once it merges, and no branch or
+# uncommitted edit changes which comments count. With nothing declared, a
+# third-party post is feedback. A review's state is not its body: an approval
+# or a change request counts whatever its body carries.
 #
 # Each verb keeps the gh call its callers make, with the marker appended:
 #   comment  a conversation comment (gh pr comment), with an optional inline
@@ -62,10 +66,12 @@
 # gh's own output passes through on stdout, so a caller that reads the posted
 # comment back still gets it: its URL from comment, the created comment's JSON
 # from file-comment. not-for-review and own-def name on stderr each part of the
-# rig's declaration they refuse, and a refused part declares nothing.
+# rig's declaration they refuse, and a default branch they cannot read. A
+# refused part declares nothing, and so does a branch that cannot be read.
 #
 # Exit: 0 posted (or printed); 1 the post failed, with gh's error on stderr, or
-#       not-for-review refused part of the declaration; 2 usage.
+#       not-for-review refused part of the declaration or could not read the
+#       default branch; 2 usage.
 set -u
 
 PROG=pr-post
@@ -149,23 +155,29 @@ NFR_PARSE='([39] | implode) as $sq
 
 # NFR_PREFIXES, the prefixes the rig declares as a JSON array, and NFR_REFUSED,
 # one line per part of its declaration that declares nothing, each naming
-# NFR_PATH. No file is a rig that declares nothing.
+# NFR_SRC, the file and the branch it was read from. A default branch with no
+# file is a rig that declares nothing. origin/HEAD names the default branch, and
+# origin/main stands in where a repository records none. When that branch is
+# missing, nothing is declared and NFR_REFUSED says so, because nothing shows
+# the rig declares nothing.
 nfr_load() {
-  local root parsed
-  NFR_PATH=""; NFR_PREFIXES='[]'; NFR_REFUSED=""
-  if [ -n "${GC_RIG_ROOT:-}" ]; then
-    root="$GC_RIG_ROOT"
-  else
-    root=$(git rev-parse --show-toplevel 2>/dev/null) || root=""
+  local repo ref text parsed
+  NFR_SRC=""; NFR_PREFIXES='[]'; NFR_REFUSED=""
+  repo=$(git rev-parse --show-toplevel 2>/dev/null) || repo=""
+  [ -n "$repo" ] || repo="${GC_RIG_ROOT:-}"
+  [ -n "$repo" ] || return 0
+  ref=$(git -C "$repo" symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) || ref=refs/remotes/origin/main
+  NFR_SRC="${repo%/}/$NFR_FILE on ${ref#refs/remotes/}"
+  if ! text=$(git -C "$repo" cat-file blob "$ref:$NFR_FILE" 2>/dev/null); then
+    git -C "$repo" rev-parse -q --verify "$ref^{commit}" >/dev/null 2>&1 \
+      || NFR_REFUSED="$NFR_SRC: the repository has no such branch, so nothing is declared"
+    return 0
   fi
-  [ -n "$root" ] || return 0
-  NFR_PATH="${root%/}/$NFR_FILE"
-  [ -e "$NFR_PATH" ] || return 0
-  if parsed=$(jq -Rsc "$NFR_PARSE" "$NFR_PATH" 2>/dev/null) && [ -n "$parsed" ]; then
+  if parsed=$(printf '%s' "$text" | jq -Rsc "$NFR_PARSE" 2>/dev/null) && [ -n "$parsed" ]; then
     NFR_PREFIXES=$(printf '%s' "$parsed" | jq -c '.prefixes')
-    NFR_REFUSED=$(printf '%s' "$parsed" | jq -r --arg f "$NFR_PATH" '.refused[] | "\($f): \(.)"')
+    NFR_REFUSED=$(printf '%s' "$parsed" | jq -r --arg f "$NFR_SRC" '.refused[] | "\($f): \(.)"')
   else
-    NFR_REFUSED="$NFR_PATH: it could not be read, so it declares nothing"
+    NFR_REFUSED="$NFR_SRC: it could not be read, so it declares nothing"
   fi
 }
 

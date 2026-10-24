@@ -31,9 +31,20 @@ CO="$TMP/checkout"
 git init -q -b main "$CO"
 git -C "$CO" remote add upstream git@github.com:them/repo.git
 git -C "$CO" remote add origin git@github.com:ours/repo.git
+# default_branch <checkout> — commits its index and makes that commit the
+# checkout's default branch, origin/main, which origin/HEAD names the way a
+# clone records it: what a merge and the fetch after it leave.
+default_branch() {
+  git -C "$1" -c commit.gpgsign=false -c user.name=fixture -c user.email=fixture@example.com \
+      -c core.hooksPath=/dev/null commit -q --allow-empty -m fixture \
+    && git -C "$1" update-ref refs/remotes/origin/main HEAD \
+    && git -C "$1" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+}
 # The rig declares Vercel's deployment notice not for review, by the prefix its
-# first line opens with.
+# first line opens with. A declaration counts as the default branch carries it.
 printf '%s\n' '# Vercel' '[[marker]]' 'prefix = "[vc]: #"' > "$CO/not-for-review.toml"
+git -C "$CO" add not-for-review.toml
+default_branch "$CO"
 
 # --- stub gh ---------------------------------------------------------------------
 # gh's own resolution order with no default set: a bare `gh repo view` answers
@@ -275,8 +286,10 @@ export STUB_LOG="$TMP" STUB_FIX="$FIX" STUB_STORE="$STORE"
 unset GC_PATROL_FINDING_TOOL GC_BD_LIB GC_FINDING_DEFAULT_RIG
 export GC_PROACTIVE_TOOL="$BIN/gc-proactive"
 export GC_RIG=fixture-rig
-# The rig's checkout, where pr-post.sh reads what the rig declares not for review.
-export GC_RIG_ROOT="$CO"
+# The swept checkout is the repository pr-post.sh reads the rig's declaration
+# from, whatever rig GC_RIG_ROOT names (case 111), so the session's own value
+# is cleared rather than set.
+unset GC_RIG_ROOT
 
 MARK='<!-- gc:city -->'
 CUT=$(ago 2)
@@ -392,6 +405,8 @@ eq "$OUT" "ours/repo	city-bot" "(1) identity resolves origin's repository and th
 git -C "$CO" remote remove origin
 "$SUT" identity --checkout "$CO" >/dev/null 2>&1; eq "$?" "1" "(2) a checkout with no origin resolves no identity"
 git -C "$CO" remote add origin git@github.com:ours/repo.git
+# Removing origin took its remote-tracking refs, the default branch among them.
+default_branch "$CO"
 
 echo "── sweep, first run: no outside capture day recorded yet, so it back-fills ──"
 fresh_dir a
@@ -1067,12 +1082,19 @@ has "$("$SUT" show --dir "$W" --outside)" "$NAMED" "(107) show counts this run's
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
 has "$("$SUT" show --dir "$W" --outside)" "$NAMED" "(108) and a sweep re-run into the run's dir, which reads them from the store too, counts each once"
 
-echo "── what is not for review follows the rig's declaration ──"
+echo "── what is not for review follows the swept rig's declaration ──"
 fresh_dir nfr
-mkdir -p "$TMP/undeclared"
-GC_RIG_ROOT="$TMP/undeclared" "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
+UNDECLARED="$TMP/undeclared"
+git init -q -b main "$UNDECLARED"
+git -C "$UNDECLARED" remote add origin git@github.com:ours/repo.git
+default_branch "$UNDECLARED"
+"$SUT" sweep --checkout "$UNDECLARED" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
 eq "$(class_of "$(key 11 comment 302)")" "outside" "(109) on a rig that declares nothing, the same deploy notice is outside"
 eq "$(class_of "$(key 11 comment 306)")" "notice" "(110) while a comment opening with the no-review mark is a notice on any rig"
+fresh_dir nfr-root
+GC_RIG_ROOT="$UNDECLARED" "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
+eq "$(class_of "$(key 11 comment 302)")" "notice" \
+  "(111) a session whose GC_RIG_ROOT names another rig still reads the swept checkout's declaration"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
