@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
-# queries it, the read of a bead's human gates every reader of them makes, the
-# one-write create every script files a stamped bead through,
+# queries it, the read of a bead's human gates every reader of them makes and
+# the order its open gates under one key are read in, the one-write create every script files a stamped bead through,
 # the metadata read-back that gates handing such a bead on, the close that
 # unmakes a bead no reader can find, the validation pass's work order, the
 # gating-PR read's field set, the per-rig key an order's state lives under, and
@@ -184,6 +184,20 @@ bd_human_gates() {
   printf '%s' "$raw" | jq -ce 'if type == "array"
     then [ .[] | select((.issue_type // "") == "gate" and (.await_type // "") == "human") ]
     else error("not an array") end' 2>/dev/null
+}
+
+# bd_gates_open_under_key <key> — the open gates under a situation key, read
+# from a bd_human_gates array on stdin and printed as one JSON array, first to
+# last by created_at, then id. The first is the gate that asks: human-gate.sh
+# keeps it and resolves its own gate when another comes first, and
+# await-ruling.sh makes the work bead wait on it, so every writer and reader of
+# one situation orders the gates here. Input that is not an array prints
+# nothing and returns 1.
+bd_gates_open_under_key() {
+  jq -ce --arg k "$1" 'if type == "array"
+    then [ .[] | select((.await_id // "") == $k and (.status // "") != "closed") ]
+         | sort_by(.created_at // "", .id)
+    else error("not an array") end' 2>/dev/null || return 1
 }
 
 # The anchor graph. A bead that hangs off a PR anchor (a review, a rework

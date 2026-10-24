@@ -142,10 +142,9 @@ if ! GATES=$(bd_human_gates "$SUBJECT"); then
   warn "could not read the human gates of '$SUBJECT' (no such bead, or its store did not answer). Nothing was filed or resolved."
   exit 1
 fi
-# The open human gates under the key, first to last by created_at, then id. Two
-# writers that read the same gates order them alike, so both name the same
-# first gate.
-OPEN_UNDER_KEY='[ .[] | select((.await_id // "") == $k and (.status // "") != "closed") ] | sort_by(.created_at // "", .id)'
+# The open human gates under the key are read in bd-lib.sh's one order
+# (bd_gates_open_under_key), so two writers that read the same gates name the
+# same first gate, and await-ruling.sh waits on that gate too.
 
 # >>> retract-moot
 # --retract withdraws the filer's own gate: it resolves every open human gate
@@ -160,7 +159,7 @@ OPEN_UNDER_KEY='[ .[] | select((.await_id // "") == $k and (.status // "") != "c
 # situation finds and resolves.
 if [ "$RETRACT" = 1 ]; then
   REASON="moot: $MESSAGE"
-  OPEN_IDS=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" "$OPEN_UNDER_KEY | .[].id" 2>/dev/null)
+  OPEN_IDS=$(printf '%s' "$GATES" | bd_gates_open_under_key "$KEY" | jq -r '.[].id' 2>/dev/null)
   if [ -z "$OPEN_IDS" ]; then
     warn "no open human gate under [$KEY] blocks $SUBJECT — nothing to withdraw"
     exit 0
@@ -193,7 +192,7 @@ fi
 # An open human gate under the key means the person is already asked. That
 # holds for a gate filed on another bead that this one already waits on, such
 # as the bring-current gate on an anchor that its rework child waits on too.
-OPEN_GATE=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" "$OPEN_UNDER_KEY | .[0].id // empty" 2>/dev/null)
+OPEN_GATE=$(printf '%s' "$GATES" | bd_gates_open_under_key "$KEY" | jq -r '.[0].id // empty' 2>/dev/null)
 if [ -n "$OPEN_GATE" ]; then
   warn "gate $OPEN_GATE already asks for $SUBJECT [$KEY] — not filing another"
   printf '%s\n' "$OPEN_GATE"
@@ -255,7 +254,7 @@ if ! GOT=$(bd_human_gates "$SUBJECT"); then
   warn "gate $GATE was filed, but the human gates of $SUBJECT did not read back; check that it blocks $SUBJECT under [$KEY]: gc bd dep list $SUBJECT --type blocks --json"
   exit 1
 fi
-if ! printf '%s' "$GOT" | jq -e --arg g "$GATE" --arg k "$KEY" "$OPEN_UNDER_KEY | any(.[]; .id == \$g)" >/dev/null 2>&1; then
+if ! printf '%s' "$GOT" | bd_gates_open_under_key "$KEY" | jq -e --arg g "$GATE" 'any(.[]; .id == $g)' >/dev/null 2>&1; then
   warn "gate $GATE was filed, but it does not read back as an open human gate under [$KEY] that blocks $SUBJECT; repair: gc bd dep add $SUBJECT $GATE --type=blocks, then check its await id with gc bd show $GATE"
   exit 1
 fi
@@ -267,7 +266,7 @@ fi
 # because the other writer's caller may already wait on its own gate by id. Two
 # gates stand only when one create landed after the other writer read back, and
 # then the bead moves once both are cleared.
-FIRST_GATE=$(printf '%s' "$GOT" | jq -r --arg k "$KEY" "$OPEN_UNDER_KEY | .[0].id // empty" 2>/dev/null)
+FIRST_GATE=$(printf '%s' "$GOT" | bd_gates_open_under_key "$KEY" | jq -r '.[0].id // empty' 2>/dev/null)
 if [ -n "$FIRST_GATE" ] && [ "$FIRST_GATE" != "$GATE" ]; then
   DUP_REASON="moot: a duplicate of gate $FIRST_GATE, filed for the same situation in the same instant"
   if gc bd gate resolve "$GATE" --reason "$DUP_REASON" </dev/null >/dev/null 2>&1; then

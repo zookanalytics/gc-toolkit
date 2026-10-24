@@ -209,14 +209,12 @@ fi
 
 # The open human gate under the key, read by the one reader rule: among the
 # subject's gates first, then among the work bead's own. Two stand when racing
-# writers both kept theirs, and the first by created_at, then id, is taken,
-# the order human-gate.sh's dedup reads them in.
+# writers both kept theirs, and the first is taken, in the order human-gate.sh's
+# dedup reads them in (bd-lib.sh's bd_gates_open_under_key).
 open_gate_under_key() { # <bead> -> the id, or nothing; non-zero on a failed read
   local gates
   gates=$(bd_human_gates "$1") || return 1
-  printf '%s' "$gates" | jq -r --arg k "$KEY" '
-    [ .[] | select((.await_id // "") == $k and (.status // "") != "closed") ]
-    | sort_by(.created_at // "", .id) | .[0].id // empty' 2>/dev/null
+  printf '%s' "$gates" | bd_gates_open_under_key "$KEY" | jq -r '.[0].id // empty' 2>/dev/null
 }
 if ! GATE=$(open_gate_under_key "$SUBJECT"); then
   echo "$PROG: could not read the human gates of $SUBJECT; no wait was recorded" >&2
