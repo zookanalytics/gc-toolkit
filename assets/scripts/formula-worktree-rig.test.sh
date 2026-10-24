@@ -88,6 +88,7 @@ extract() { awk -v m="$2" '$0 ~ ("# >>> " m "$") {f=1; next} $0 ~ ("# <<< " m "$
 
 # block <toml> <marker> <out>: the marked block, with formula placeholders
 # rendered as the materializer renders them, written to <out>.
+# delete_merged_branches takes the patrol's default, true.
 block() {
   local body
   body="$(extract "$1" "$2")"
@@ -97,7 +98,7 @@ block() {
     return 0
   fi
   ok "$2: block extracted between markers"
-  printf '%s\n' "$body" | sed 's|{{base_branch}}|main|g' > "$3"
+  printf '%s\n' "$body" | sed 's|{{base_branch}}|main|g; s|{{delete_merged_branches}}|true|g' > "$3"
   case "$(cat "$3")" in
     *'{{'*) bad "$2: no unrendered formula placeholder left" ;;
     *)      ok "$2: no unrendered formula placeholder left" ;;
@@ -407,6 +408,8 @@ for mode in env roster; do
   # The transition checks the landing in the checkout GC_RIG_ROOT names, so it
   # gets the rig this block resolved, from the roster too.
   eq "$(cat "$D/lc.log.root" 2>/dev/null || true)" "$D/rig" "direct-merge/$mode: the transition runs with GC_RIG_ROOT naming the rig the block resolved"
+  eq "$(git -C "$D/origin.git" rev-parse -q --verify refs/heads/polecat/wb || echo deleted)" deleted \
+    "direct-merge/$mode: the merged branch is deleted from the rig's origin"
   eq "$(wt_paths "$D/rig" | count)" 2 "direct-merge/$mode: no worktree is added for the landing; the rig and its prep worktree remain"
   eq "$(wt_paths "$D/cwd" | count)" 1 "direct-merge/$mode: no worktree is left registered in the cwd repo"
   eq "$(ls -A "$D/tmp" | count)" 0 "direct-merge/$mode: nothing is left under TMPDIR"
@@ -455,6 +458,9 @@ for errexit in off on; do
     && bad "direct-merge/protected, errexit $errexit: the refinery does not drain" \
     || ok "direct-merge/protected, errexit $errexit: the refinery does not drain"
   eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "direct-merge/protected, errexit $errexit: nothing landed on the rig's origin"
+  git -C "$D/origin.git" rev-parse -q --verify refs/heads/polecat/wb >/dev/null \
+    && ok "direct-merge/protected, errexit $errexit: the branch stays on origin for the PR" \
+    || bad "direct-merge/protected, errexit $errexit: the branch stays on origin for the PR"
   [ ! -s "$D/lc.log" ] && ok "direct-merge/protected, errexit $errexit: no lifecycle transition" \
     || bad "direct-merge/protected, errexit $errexit: no lifecycle transition"
 done
@@ -493,6 +499,9 @@ for errexit in off on; do
     && bad "direct-merge/moved, errexit $errexit: the refinery does not drain" \
     || ok "direct-merge/moved, errexit $errexit: the refinery does not drain"
   eq "$(git -C "$D/origin.git" rev-parse main)" "$MOVED" "direct-merge/moved, errexit $errexit: origin/main is untouched"
+  git -C "$D/origin.git" rev-parse -q --verify refs/heads/polecat/wb >/dev/null \
+    && ok "direct-merge/moved, errexit $errexit: the branch stays on origin for the next patrol" \
+    || bad "direct-merge/moved, errexit $errexit: the branch stays on origin for the next patrol"
   [ ! -s "$D/lc.log" ] && ok "direct-merge/moved, errexit $errexit: no lifecycle transition" \
     || bad "direct-merge/moved, errexit $errexit: no lifecycle transition"
 done

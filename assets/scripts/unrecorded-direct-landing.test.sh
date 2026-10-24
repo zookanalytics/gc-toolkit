@@ -23,10 +23,11 @@
 # branch_has_real_change's git calls take their repository from the cwd.
 # Proves:
 #   - an attempt that pushes and then cannot record leaves the landing on
-#     origin and the stamp on the bead, and the next attempt records the
-#     landing at the stamped commit without parking, escalating or draining,
-#     whether origin/main stayed at the landing or moved on past it, and
-#     whatever strategy the bead reads by then;
+#     origin, the stamp on the bead and the branch on origin, and the next
+#     attempt stages the branch again and records the landing at the stamped
+#     commit without parking, escalating or draining, whether origin/main
+#     stayed at the landing or moved on past it, and whatever strategy the
+#     bead reads by then; the branch is deleted once the landing is recorded;
 #   - a branch that never introduced work is still refused, parked and
 #     escalated, with no stamp and with a stamp its target does not carry.
 set -uo pipefail
@@ -64,6 +65,7 @@ for m in shared-branch-merge-mode branch-has-real-change zero-diff-guard direct-
   if [ -n "$(fence "$m")" ]; then ok "$m: extracted between its markers"; else bad "$m: extracted between its markers"; fi
 done
 fence shared-branch-merge-mode > "$TMP/prep.sh"
+# delete_merged_branches takes the patrol's default, true.
 {
   echo 'BEAD_JSON=$(gc bd show $WORK --json)'
   echo 'MERGE_STRATEGY="$STRATEGY"'
@@ -71,7 +73,7 @@ fence shared-branch-merge-mode > "$TMP/prep.sh"
   fence branch-has-real-change
   fence zero-diff-guard
   echo 'if [ "$MERGE_STRATEGY" = direct ]; then'
-  fence direct-merge-push
+  fence direct-merge-push | sed 's|{{delete_merged_branches}}|true|g'
   echo 'fi'
   echo 'echo "MERGE_STRATEGY=$MERGE_STRATEGY"'
 } > "$TMP/merge-push.sh"
@@ -139,6 +141,7 @@ commit() {
   git -C "$1" rev-parse HEAD
 }
 stamp() { jq -r '.[0].metadata.direct_landing_sha // "none"' "$D/bead.json"; }
+on_origin() { if git -C "$D/origin.git" rev-parse -q --verify "refs/heads/$1" >/dev/null; then echo yes; else echo no; fi; }
 merged_tries() { grep -c '^transition wb --to merged ' "$D/lc.log"; }
 
 # fixture <dir> work|nowork: origin with main at BASE and polecat/wb one commit
@@ -193,6 +196,7 @@ unrecorded_landing() {
   eq "$(git -C "$D/origin.git" rev-parse main)" "$FEATURE" "$1, first attempt: the push landed on origin/main"
   eq "$(merged_tries)" 3 "$1, first attempt: the record was tried three times"
   eq "$(stamp)" "$FEATURE" "$1, first attempt: the bead keeps the stamp"
+  eq "$(on_origin polecat/wb)" yes "$1, first attempt: the branch stays on origin for the next attempt to stage"
   hasnt "$(cat "$D/lc.log")" "refused_false_completion" "$1, first attempt: the bead is not parked as a false completion"
 }
 
@@ -207,6 +211,7 @@ has "$OUT" "pushed without recording; taking the direct path to record it" "same
 recorded_at "same, next attempt" "$FEATURE"
 not_parked "same, next attempt"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$FEATURE" "same, next attempt: origin/main is unchanged"
+eq "$(on_origin polecat/wb)" no "same, next attempt: the branch is deleted once the landing is recorded"
 
 echo "── the same, after origin/main moved on past the landing ──"
 fixture "$TMP/later" work

@@ -931,9 +931,12 @@ head on `$TARGET` as a fast-forward pushed by its commit id, so nothing is
 checked out for the merge and nothing is left to remove. It stamps the commit
 on the bead as `direct_landing_sha` before the push, verifies the remote ref,
 then records and closes the bead through ONE lifecycle call, handed the rig
-root as `GC_RIG_ROOT`: the writer checks the landing in that checkout. A
-landing it cannot record keeps the stamp, and step 0 sends the bead back here
-on the next patrol. Exit 3 means a push rejected for branch protection
+root as `GC_RIG_ROOT`: the writer checks the landing in that checkout. It
+lands only for the bead and branch the prep worktree records, and with
+delete_merged_branches = "true" it then deletes origin/$BRANCH, never the
+target, once the landing is recorded. A landing it cannot record keeps the
+stamp and the branch, and step 0 sends the bead back here on the next patrol.
+Exit 3 means a push rejected for branch protection
 (GH006/GH013/"protected branch"/"Changes must be made through a pull
 request"/"approving review"/"Cannot update this protected ref") promoted the
 bead to `merge_strategy=pr`, and the block falls through to the mr block — the
@@ -951,7 +954,9 @@ for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC
 done
 [ -n "$DMP" ] || { echo "direct-merge-push.sh not found; NOT landing $WORK, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 DIRECT_RC=0
-"$DMP" --work "$WORK" --target "$TARGET" || DIRECT_RC=$?
+DIRECT_ARGS=(--work "$WORK" --branch "$BRANCH" --target "$TARGET")
+[ "{{delete_merged_branches}}" != "true" ] || DIRECT_ARGS+=(--delete-branch)
+"$DMP" "${DIRECT_ARGS[@]}" || DIRECT_RC=$?
 case "$DIRECT_RC" in
   0) ;;
   3) MERGE_STRATEGY=mr ;;
@@ -975,11 +980,10 @@ if [ -z "$WS" ] || ! "$WS" teardown; then
 fi
 # <<< prep-teardown
 ```
-After exit 4, jump to next-iteration (pour before burn) and delete no branch:
-nothing landed. After a merge, if delete_merged_branches = "true",
-`git -C "$RIG_ROOT" push origin --delete "$BRANCH"`; and if auto_ff_rig_main =
-"true", best-effort ff the rig canonical checkout (`$RIG_ROOT`) when it is on
-`$TARGET` with a clean tree — never abort on its failure.
+After exit 4, jump to next-iteration (pour before burn). After a merge, if
+auto_ff_rig_main = "true", best-effort ff the rig canonical checkout
+(`$RIG_ROOT`) when it is on `$TARGET` with a clean tree — never abort on its
+failure.
 
 **If MERGE_STRATEGY = "mr":** the refinery does NOT land the branch. It
 pushes the prepared branch and transitions the anchor into the gated

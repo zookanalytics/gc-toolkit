@@ -3,20 +3,27 @@
 # target to the prepared head as a fast-forward, verify the remote ref, and
 # record and close the bead through one lifecycle transition.
 #
-#   direct-merge-push.sh --work <bead> --target <target-branch>
+#   direct-merge-push.sh --work <bead> --branch <branch> --target <target-branch>
+#                        [--delete-branch]
 #
 # The prepared head is the HEAD of the detached prep worktree the rebase step
-# staged at <rig git dir>/gc-refinery-prep, and it lands only for the bead that
-# step staged: refinery-workspace.sh verify reads the record the stage left in
-# the worktree, and a <bead> it does not name lands and records nothing, before
-# any fetch or stamp. It lands by commit id: the push names that commit as the
-# new value of refs/heads/<target>, so nothing is checked out for the merge, no
-# local branch moves, and nothing is left on disk to remove. git accepts a push
-# without --force only as a fast-forward of the remote's own value, so the push
-# is a fast-forward or nothing. Every git call names its repository with -C, and
-# the rig root resolves from GC_RIG_ROOT or the roster entry for GC_RIG, never
-# from the cwd, so a caller whose cwd sits in another repository cannot steer
-# the push there.
+# staged at <rig git dir>/gc-refinery-prep, and it lands only for the bead and
+# branch that step staged: refinery-workspace.sh verify reads the record the
+# stage left in the worktree, and a <bead> or <branch> it does not name lands
+# and records nothing, before any fetch or stamp. It lands by commit id: the
+# push names that commit as the new value of refs/heads/<target>, so nothing is
+# checked out for the merge, no local branch moves, and nothing is left on disk
+# to remove. git accepts a push without --force only as a fast-forward of the
+# remote's own value, so the push is a fast-forward or nothing. Every git call
+# names its repository with -C, and the rig root resolves from GC_RIG_ROOT or
+# the roster entry for GC_RIG, never from the cwd, so a caller whose cwd sits in
+# another repository cannot steer the push there.
+#
+# With --delete-branch, a landing recorded here deletes origin/<branch>, the
+# branch the record names and so the one the prepared head came from. That
+# happens only after the record lands, and never to <target>. A delete that
+# fails changes nothing else: the landing stands, the branch stays on origin,
+# and the exit is still 0.
 #
 # The fast-forward is checked against origin/<target> fetched first. A prepared
 # head that is neither behind nor ahead of it was prepared on a target that has
@@ -73,13 +80,14 @@
 #
 # Called by mol-refinery-patrol's merge-push step when the bead's merge strategy
 # is direct, or when its zero-diff guard finds a stamped landing to record.
-# exit: 0 landed, verified and closed · 1 nothing landed or recorded, or a
-#       landing that could not be verified or recorded (the output says which;
-#       the stamp lets a later patrol record it) · 2 usage · 3 promoted to
-#       merge_strategy=pr (take the mr path) · 4 origin/<target> moved after
-#       the branch was prepared; nothing landed or recorded, though the bead
-#       can keep its stamp, which names a commit the target does not carry,
-#       so the zero-diff guard ignores it and the next landing overwrites it
+# exit: 0 landed, verified and closed, whether or not a --delete-branch delete
+#       went through · 1 nothing landed or recorded, or a landing that could
+#       not be verified or recorded (the output says which; the stamp lets a
+#       later patrol record it) · 2 usage · 3 promoted to merge_strategy=pr
+#       (take the mr path) · 4 origin/<target> moved after the branch was
+#       prepared; nothing landed or recorded, though the bead can keep its
+#       stamp, which names a commit the target does not carry, so the
+#       zero-diff guard ignores it and the next landing overwrites it
 set -uo pipefail
 
 PROG="direct-merge-push"
@@ -88,20 +96,25 @@ LC="$SCRIPTS_DIR/lifecycle.sh"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script; nothing landed"; exit 1; }
 
-usage() { echo "usage: $PROG --work <bead> --target <target-branch>" >&2; exit 2; }
+usage() { echo "usage: $PROG --work <bead> --branch <branch> --target <target-branch> [--delete-branch]" >&2; exit 2; }
 
-WORK=""; TARGET=""
+WORK=""; BRANCH=""; TARGET=""; DELETE_BRANCH=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --work|--target)
+    --work|--branch|--target)
       [ "$#" -ge 2 ] || { echo "$PROG: $1 requires a value" >&2; usage; }
-      if [ "$1" = --work ]; then WORK="$2"; else TARGET="$2"; fi
+      case "$1" in
+        --work)   WORK="$2" ;;
+        --branch) BRANCH="$2" ;;
+        *)        TARGET="$2" ;;
+      esac
       shift 2 ;;
+    --delete-branch) DELETE_BRANCH=1; shift ;;
     -h|--help) usage ;;
     *) echo "$PROG: unknown argument '$1'" >&2; usage ;;
   esac
 done
-[ -n "$WORK" ] && [ -n "$TARGET" ] || { echo "$PROG: --work and --target are required" >&2; usage; }
+[ -n "$WORK" ] && [ -n "$BRANCH" ] && [ -n "$TARGET" ] || { echo "$PROG: --work, --branch and --target are required" >&2; usage; }
 
 # Each count is read in base 10, so a leading zero such as 08 does not make
 # bash's arithmetic read it as octal and refuse it.
@@ -118,8 +131,8 @@ RIG_ROOT="${GC_RIG_ROOT:-}"
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='${GC_RIG:-}' matched no rig in the roster); nothing landed"; exit 1; }
 COMMON=$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir) || { echo "no repository at $RIG_ROOT; nothing landed"; exit 1; }
 PREP_WT="$COMMON/gc-refinery-prep"
-# Land only for the bead the prep worktree records it holds.
-HOLDS=$("$SCRIPTS_DIR/refinery-workspace.sh" verify --rig-root "$RIG_ROOT" --work "$WORK" 2>&1) \
+# Land only for the bead and branch the prep worktree records it holds.
+HOLDS=$("$SCRIPTS_DIR/refinery-workspace.sh" verify --rig-root "$RIG_ROOT" --work "$WORK" --branch "$BRANCH" 2>&1) \
   || { echo "${HOLDS:-refinery-workspace.sh could not read what the prep worktree holds}; nothing landed"; exit 1; }
 
 fetch_target() { git -C "$RIG_ROOT" fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"; }
@@ -220,5 +233,12 @@ fi
 if ! retry record; then
   echo "origin/$TARGET carries $MERGED_SHA, so $WORK has landed, but the transition recording it as merged did not land (lifecycle.sh's output above says why)${STAMP:+; $WORK keeps direct_landing_sha=$STAMP, so the next patrol records the landing}"
   exit 1
+fi
+if [ -n "$DELETE_BRANCH" ]; then
+  if [ "$BRANCH" = "$TARGET" ]; then
+    echo "keeping origin/$BRANCH: it is the target $WORK landed on"
+  elif ! DELETE_OUT=$(git -C "$RIG_ROOT" push origin --delete "$BRANCH" 2>&1); then
+    echo "$WORK landed and is recorded, but origin/$BRANCH was not deleted, so it stays on origin. The push said: $DELETE_OUT"
+  fi
 fi
 exit 0
