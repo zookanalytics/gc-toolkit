@@ -264,11 +264,9 @@ REPORT_OWNER="$ASSIGNEE"
 # only by the claim check above.
 #
 # A guard's value is attached (--if-assignee=<v>), never a separate argument.
-# The gc wrapper's store-scope scanner reads any argument that does not begin
-# with '-' as a candidate bead id. A session-id assignee resolves as a real
-# session bead in the city store, so the whole command retargets there and
-# $BEAD, which lives in the rig store, reports as not found. The attached form
-# keeps the value behind a leading '-', so only $BEAD selects the store.
+# gc bd picks the store from the bead ids among a command's arguments, and a
+# session-id assignee names a real bead in the city store. An attached value is
+# never read as one of those ids, so only $BEAD selects the store.
 HELD_BY="$ASSIGNEE"
 HELD_STATUS="$STATUS"
 LOST=""
@@ -377,32 +375,15 @@ open_bead() {
     fi
 }
 
-# release_assignee clears the assignee last. bd refuses this on an in_progress
-# bead held by a live actor, and `gc bd update --force` cannot carry the
-# override (the wrapper's bead-id pre-check allowlists no --force), so the
-# fallback goes through bare bd. The forced retry is legitimate only because
-# orphan recovery already established this owner is gone, and it carries the
-# same conditional guards.
+# release_assignee clears the assignee last, under the conditional guards. bd
+# fences an assignee change on another actor's in_progress claim, except a
+# change whose --if-assignee names that actor, so the clear needs no --force.
+# bd refuses --force beside --if-assignee.
 release_assignee() {
-    local rc=0
     [ -z "$HELD_BY" ] && return 0
-    [ -z "$LOST" ] || return 0
-    gc bd update "$BEAD" --assignee "" --if-assignee="$HELD_BY" --if-status="$HELD_STATUS" >/dev/null 2>&1 || rc=$?
-    case "$rc" in
-        0)  note_landed assignee; HELD_BY=""; return 0 ;;
-        13) LOST=assignee; return 0 ;;
-    esac
-    # gc bd's bead-id pre-check allowlists no --force, so it exits 1 before
-    # reaching bd and the override cannot be carried through the wrapper. Bare
-    # bd parses its flags itself, so its guards stay space-separated.
-    rc=0
-    # raw-bd: the --force override, which the gc bd wrapper cannot carry
-    bd update "$BEAD" --assignee "" --if-assignee "$HELD_BY" --if-status "$HELD_STATUS" --force >/dev/null 2>&1 || rc=$?
-    case "$rc" in
-        0)  note_landed assignee; HELD_BY="" ;;
-        13) LOST=assignee ;;
-        *)  note_failed assignee ;;
-    esac
+    if held_update assignee --assignee ""; then
+        HELD_BY=""
+    fi
 }
 
 # verify re-reads the bead and confirms the release actually landed. A write

@@ -67,16 +67,6 @@ trap 'rm -rf "$TMP"' EXIT
 . "$HERE/test-harness.sh"
 harness_init
 
-# A `bd` stub beside the `gc` one: the forced assignee clear falls through to
-# bare bd, and a test box need not have the real binary. It logs to the same
-# place so ORDER assertions see one stream of writes.
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/bd" <<'STUB'
-set -u
-printf 'bd %s\n' "$*" >> "${STUB_GC_LOG:?}"
-exit 1
-STUB
-chmod +x "$TMP/bin/bd"
-
 # A gc in front of the harness's, for the cases where another writer moves the
 # bead. It enforces bd's --if-assignee and --if-status guards on `gc bd
 # update`: the update lands only while the bead still has that status and that
@@ -247,10 +237,8 @@ ORDER=$(grep -- "update tk-step" "$STUB_GC_LOG" \
   | tr '\n' ',')
 eq "$ORDER" "meta,status,assignee," "metadata first, status next, assignee last"
 has "$(cat "$STUB_GC_LOG")" "--if-assignee=lx-dead" "assignee clear is guarded on the assignee snapshot"
-# The guard value is attached (=form), never space-separated. A spaced session-id
-# value is read as a bead id by the gc wrapper's store-scope scanner and retargets
-# the command to the city store, where the rig bead is not found; the release then
-# silently falls through to the forced bare-bd retry instead of the sanctioned CAS.
+# The guard value is attached (=form), never space-separated, so the gc wrapper
+# never reads a session-id guard as the bead id that picks the store.
 hasnt "$(cat "$STUB_GC_LOG")" "--if-assignee lx-dead" "guard uses the attached =form, not the mis-scoping spaced form"
 
 echo "--- the owner is not the assignee guard ---"
