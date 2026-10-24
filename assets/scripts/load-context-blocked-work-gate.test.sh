@@ -3,7 +3,7 @@
 #
 # A v2 formula-sling pours immediately and reads no `blocks` deps, so a work
 # bead with an open blocker reaches a polecat as an offered claim (the routed
-# record is the workflow root, not the work bead — docs/gascity-routing-model.md).
+# record is the workflow root, not the work bead — docs/gascity/routing-model.md).
 # This guard is the pack-level safety net: at load-context, if the work bead
 # carries an open `blocks` blocker it refuses to build, contains the pour's
 # delivery keys, arms a re-dispatch so the work re-slings when the blocker

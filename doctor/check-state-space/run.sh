@@ -58,15 +58,20 @@ enum_str=$(printf '%s' "$states_json" | jq -r 'join(", ")')
 
 # Keys deleted from the metadata registry along with their healer writers.
 HEALER_RE='^(check_set_healed|merge_result_healed|reopened_not_landed|anchorless_flagged|close_failures|close_escalated|gate_verdict_condemned)$'
-# Keys retired from the metadata registry together with every reader, and what a
-# live bead still carrying one leaves undone. They are read on every live status,
-# because the bead most likely to carry one is a visit, which is in_progress
-# while a sitting holds it.
-RETIRED_KEYS=(stall_root)
+# Keys retired from the metadata registry together with every reader, what a
+# live bead still carrying one leaves undone, and what to do about it. They are
+# read on every live status, because the bead most likely to carry one is a
+# visit, which is in_progress while a sitting holds it. The escalation keys are
+# the visit-era helper's (specs/tk-0ur8r9p/design.md section 2): human-gate.sh
+# writes none of them, so a carrier holds nothing back and means a retired
+# writer is stamping again.
+RETIRED_KEYS=(stall_root escalation_raised_by escalation.recurrences escalation.recurrence_last)
 retired_consequence() { # <key> <value>
     case "$1" in
-        stall_root) printf '%s' "a sitting that read it may have filed its hold's demand (gc.demand_for=$2), takeaway and held state on $2, and no sign-off reads the key back to discharge them" ;;
-        *) printf '%s' "nothing reads it" ;;
+        stall_root) printf '%s' "a sitting that read it may have filed its hold's demand (gc.demand_for=$2), takeaway and held state on $2, and no sign-off reads the key back to discharge them. Discharge that by hand, then clear the key" ;;
+        escalation_raised_by|escalation.recurrences|escalation.recurrence_last)
+            printf '%s' "human-gate.sh neither redirects a wisp nor keeps a recurrence tally, so nothing writes or reads the key; it holds nothing back, and a live bead carrying it means a retired writer stamped it. Find that writer, then clear the key" ;;
+        *) printf '%s' "nothing reads it. Clear the key" ;;
     esac
 }
 
@@ -241,7 +246,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         fi
         while IFS=$'\037' read -r id st val; do
             [ -n "$id" ] || continue
-            errors+=("$label bead $id (status=$st): carries the retired key $rk=\"$val\" — lifecycle/lifecycle.toml retired it with every reader: $(retired_consequence "$rk" "$val"). Discharge that by hand, then clear the key: gc bd update $id --unset-metadata $rk")
+            errors+=("$label bead $id (status=$st): carries the retired key $rk=\"$val\" — lifecycle/lifecycle.toml retired it with every reader: $(retired_consequence "$rk" "$val"): gc bd update $id --unset-metadata $rk")
         done < "$ENUM_TMP/retired"
     done
 

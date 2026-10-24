@@ -2412,7 +2412,7 @@ func phaseFacts(a Anchor, f Facts, openReworkKids int) prstatus.Facts {
 	return prstatus.Facts{
 		MergeHold:     a.Metadata[mdMergeHold],
 		RebaseHold:    a.Metadata[mdRebaseHold],
-		OpenVisit:     f.Visits[a.ID],
+		OpenHumanGate: f.Visits[a.ID],
 		PRPosture:     a.Metadata[mdPRPosture],
 		PRMergeState:  a.Metadata[mdPRMergeState],
 		OpenedAsDraft: a.Metadata[mdOpenedAsDraft],

@@ -11,9 +11,9 @@
 # unreadable rig list, an unresolvable blocker of the arm's own, a scan that
 # cannot report, no scratch directory), the stderr each failed read reports,
 # the hold (hold-lib.sh: an arm a park holds, on its epic or two levels up, or
-# whose epic waits on a task, is not owed; a demand gate on the epic holds
-# nothing; a park released just now dates the window, and one released before
-# the arm was armed does not; an arm in flight is held by its own blockers
+# whose epic waits on a task or on a human gate, is not owed; a park or a human
+# gate released just now dates the window, and a park released before the arm
+# was armed does not; an arm in flight is held by its own blockers
 # alone; a pinned own blocker holds nothing, as a closed one does, while one in
 # progress, blocked, deferred or hooked still holds; an ancestor, or a blocker
 # on an ancestor, the store does not return holds nothing; a failed walk leaves
@@ -250,7 +250,7 @@ b_epic() {
                        + [ $b | split(",")[] | select(length > 0) | {issue_id: $id, depends_on_id: ., type: "blocks"} ] )}'
 }
 b_gate()   { printf '{"id":"%s","status":"open","issue_type":"gate","title":"Parked until the operator unparks it"}' "$1"; }
-b_demand() { printf '{"id":"%s","status":"open","issue_type":"gate","title":"Decide %s","metadata":{"gc.demand_for":"%s"}}' "$1" "$2" "$2"; }
+b_human_gate() { printf '{"id":"%s","status":"open","issue_type":"gate","await_type":"human","await_id":"decide-%s","title":"Decide %s"}' "$1" "$2" "$2"; }
 
 OLD="2020-01-01T00:00:00Z"
 RECENT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -480,14 +480,24 @@ eq "$RC" "0" "an arm whose epic waits on an open task is held, not owed (exit 0)
 hasnt "$OUT" "alpha bead h-3" "it is not reported"
 clear_stores
 
-# --- 17. OWED: a demand gate on the epic holds nothing, so reconcile owes the
-#          arm its dispatch, and one that has waited past the window is flagged
+# --- 17. HELD: a human gate on the epic holds its armed work, as a park does --
 armed_store alpha "$(aedged h-4 epic-1 b-0)"
 edges_store alpha "$(e_pc h-4 epic-1)" "$(e_blk h-4 b-0)"
-blockers_store alpha "$(b_closed b-0 "$OLD")" "$(b_epic epic-1 "" dg-1)" "$(b_demand dg-1 epic-1)"
+blockers_store alpha "$(b_closed b-0 "$OLD")" "$(b_epic epic-1 "" dg-1)" "$(b_human_gate dg-1 epic-1)"
 OUT=$(run_check); RC=$?
-eq "$RC" "1" "an arm whose epic waits only on a demand gate is owed (exit 1)"
-has "$OUT" "alpha bead h-4" "it is reported as owed"
+eq "$RC" "0" "an arm whose epic waits on a human gate is held, not owed (exit 0)"
+hasnt "$OUT" "alpha bead h-4" "it is not reported"
+clear_stores
+
+# --- 17b. RELEASED: the epic's human gate was cleared just now, so the owed
+#          window runs from its close, as it runs from a park's ---------------
+armed_store alpha "$(aedged h-4 epic-1 b-0)"
+edges_store alpha "$(e_pc h-4 epic-1)" "$(e_blk h-4 b-0)"
+blockers_store alpha "$(b_closed b-0 "$OLD")" "$(b_epic epic-1 "" dg-1)" \
+    "$(b_human_gate dg-1 epic-1 | jq -c --arg t "$RECENT" '.status = "closed" | .closed_at = $t')"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an arm whose epic's human gate was cleared just now is within cadence, not owed"
+hasnt "$OUT" "alpha bead h-4" "it is not reported"
 clear_stores
 
 # --- 18. RELEASED: the park closed just now, so the owed window runs from the

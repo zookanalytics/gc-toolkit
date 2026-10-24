@@ -154,7 +154,7 @@ after the fact.
 ## How humans engage
 
 The human surface is subject / visit / takeaway on native primitives
-([gascity-human-engagement.md](gascity-human-engagement.md) is the reference).
+([human-engagement.md](human-engagement.md) is the reference).
 
 - **A subject bead is the conversation.** Its id is the conversation's
   identity; turns are small child beads that park on the helm board
@@ -186,12 +186,11 @@ The human surface is subject / visit / takeaway on native primitives
   and no board row of its own. `gate-visit-sweep` files a visit only for a gate
   that carries `gc.demand_for`, which `gc-helm.sh demand` writes and
   `human-gate.sh` does not, and the board reads an open blocker as something a
-  person owes only when it is a `decision` or routed to `human`. Some callers
-  look a gate they filed back up as a visit and find none. `finding.sh` then
-  records no needs-you ruling, `liveness-sweep.sh` no census and `pr-facts.sh`
-  no comment disposition, and the rest of `pr-facts.sh`'s arms that look for
-  the visit find nothing to act on. `branch-supersession.sh` dispatches the
-  merge-in child its hold would stop.
+  person owes only when it is a `decision` or routed to `human`. Every other
+  reader finds a bead's human gates the one way, through the bead's `blocks`
+  edges (`bd_human_gates` in `assets/scripts/bd-lib.sh`), and takes a cleared
+  gate's answer from its resolve reason, so a gate holds what it blocks
+  whoever filed it.
 - **A takeaway records what a sitting concluded**, and its `--waiting-on` edge
   is what makes the wait machine-answerable
   ([lifecycle-composition.md](lifecycle-composition.md)).
@@ -202,9 +201,11 @@ The human surface is subject / visit / takeaway on native primitives
   park. [steering.md](steering.md) says what a park holds and what it does not.
 - **A priority decides the order work runs in.** A bead's priority is the
   priority of the bead it follows plus its own shift, so work under an epic
-  queues at the epic's priority. `gc-helm.sh priority` sets an epic's priority,
-  or a member's shift, and re-ranks the work that follows it, workflows already
-  poured included ([steering.md](steering.md#priority)).
+  queues at the epic's priority. A PR's finishing work, which never has a
+  parent, runs one level sooner than its anchor, and at P0 once the PR is
+  approved. `gc-helm.sh priority` sets an epic's priority, or a member's shift,
+  and re-ranks the work that follows it, workflows already poured included
+  ([steering.md](steering.md#priority)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
   per render from the ledger. `gc-helm.sh` carries the write verbs open,
   engage, react, takeaway, demand, dismiss, accept, park and priority, and the
@@ -254,6 +255,12 @@ existing component sits. Concretely
   writer, or it does not exist.
 - **Adding a metadata key** — it is state; register it in `lifecycle.toml`.
 - **Adding an invariant** — name its doctor check in the same PR.
+
+Before any of these, a capability that adds operational surface shows that Gas
+City does not already ship it. It names the Gas City primitive it looked for
+and why none covers the need, citing Gas City's own documentation, and a pack
+noun has its warrant in [warrants.md](warrants.md). The arch check's divergence
+lens holds a change to this ([review-arch.md](review-arch.md)).
 
 If a capability fits none of the workflows, that is the signal, and it points
 one of two ways: the capability is miscast and should be recast onto the

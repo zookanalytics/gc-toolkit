@@ -270,6 +270,19 @@ has "$OUT" "gc.demand_for=root-x" "it names the bead a hold under the key would 
 has "$OUT" "gc bd update a-r1 --unset-metadata stall_root" "it gives the clearing command"
 hasnt "$OUT" "a-r2" "a closed bead carrying it is history, not a finding"
 hasnt "$OUT" "a-r3" "an empty value is a cleared key, not a finding"
+has "$OUT" "Discharge that by hand, then clear the key" "a key whose residue leaves work undone says to discharge it first"
+# The visit-era helper's escalation keys have no writer and no reader. A live
+# bead carrying one holds nothing back: the finding says a retired writer is
+# back and asks for no discharge.
+store '[{"id":"a-r5","status":"open","metadata":{"escalation.recurrences":"3"}},
+        {"id":"a-r6","status":"in_progress","metadata":{"escalation_raised_by":"tk-wisp-x"}},
+        {"id":"a-r7","status":"closed","metadata":{"escalation.recurrence_last":"2026-10-01T00:00:00Z"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a live bead carrying a retired escalation key is an ERROR"
+has "$OUT" "gc bd update a-r5 --unset-metadata escalation.recurrences" "it names the open carrier and gives the clearing command"
+has "$OUT" "gc bd update a-r6 --unset-metadata escalation_raised_by" "…and the in_progress one"
+has "$OUT" "a retired writer stamped it" "…and says what its presence means"
+hasnt "$OUT" "a-r7" "a closed bead carrying one is history, not a finding"
 store '[{"id":"a-r4","status":"open","metadata":{}}]'
 OUT=$(BD_FAIL_KEY=stall_root run_check); RC=$?
 eq "$RC" "1" "an unreadable retired-key probe warns, never passes"

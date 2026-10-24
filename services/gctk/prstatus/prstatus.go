@@ -23,7 +23,7 @@
 // metadata instead. Derive itself does no I/O.
 //
 // Derive reads only state the city records: the anchor's holds
-// (merge_hold/rebase_hold), whether an open visit covers it, the pr-facts.sh
+// (merge_hold/rebase_hold), whether an open human gate blocks it, the pr-facts.sh
 // posture and merge state, the draft-stage markers pr-open.sh records
 // (opened_as_draft, draft_readied), and the anchor's in-flight set — any live
 // bead carrying anchor_bead, the same membership test pr-facts.sh applies in
@@ -52,9 +52,10 @@ const (
 	// verdict on its settled head.
 	NeedsReview State = "needs-review"
 	// NeedsAttention: something only a human can clear blocks the merge — a
-	// merge or rebase hold, an open visit on the anchor, or an approved PR wedged
-	// at merge state BLOCKED with no rework in flight. Any hold only a human can
-	// release is one of these inputs, whatever work is in flight beside it.
+	// merge or rebase hold, an open human gate that blocks the anchor, or an
+	// approved PR wedged at merge state BLOCKED with no rework in flight. Any hold
+	// only a human can release is one of these inputs, whatever work is in flight
+	// beside it.
 	NeedsAttention State = "needs-attention"
 
 	// Merged and Closed are terminal: the PR round-trip has ended, so nothing
@@ -76,16 +77,16 @@ type Facts struct {
 	MergeHold string
 	// RebaseHold is metadata.rebase_hold: any truthy value is a rebase hold.
 	RebaseHold string
-	// OpenVisit is whether an open visit covers the anchor: a task_kind=visit
-	// bead, open or in_progress, whose subject is the anchor by the shared visit
-	// identity (assets/scripts/visit-identity.sh). That subject is the bead the
-	// visit's tracks edge names, or its gc.continuation_group stamp when it has
-	// no tracks edge. Only a person closes a visit, and the merge pass refuses
-	// the merge while one covers the anchor: its finalize gate
-	// (assets/scripts/finalize-gate.sh) reads visits by the same identity. So it
-	// reads as a hold, as merge_hold and rebase_hold do, whatever work is in
-	// flight.
-	OpenVisit bool
+	// OpenHumanGate is whether an open human gate blocks the anchor: a bead the
+	// anchor's `blocks` edges reach whose issue_type is gate and whose
+	// await_type is human, in a status other than closed. That is the one reader
+	// rule bd_human_gates applies (assets/scripts/bd-lib.sh). Only a person
+	// clears a human gate, and the merge pass refuses the merge while one blocks
+	// the anchor, through its blocker probe and its finalize gate
+	// (assets/scripts/finalize-gate.sh). So it reads as a hold, as merge_hold and
+	// rebase_hold do, whatever work is in flight. A conversation about the anchor
+	// tracks it and blocks nothing, so it sets nothing here.
+	OpenHumanGate bool
 	// PRPosture is metadata.pr_posture, stored value@oid@instant; only the value
 	// before the first '@' is read.
 	PRPosture string
@@ -118,7 +119,7 @@ func Derive(f Facts) State {
 	mstate := before(f.PRMergeState, "@")
 
 	// needs-attention: something only a human can clear blocks the merge.
-	if isSet(f.MergeHold) || isSet(f.RebaseHold) || f.OpenVisit {
+	if isSet(f.MergeHold) || isSet(f.RebaseHold) || f.OpenHumanGate {
 		return NeedsAttention
 	}
 	if posture == "approved" && mstate == "BLOCKED" && f.InFlightCount == 0 {

@@ -16,8 +16,9 @@
 #      "do not run". That is the whole point: ~16 agent sessions/day across four
 #      rigs were being spent to conclude "nothing new".
 #
-#   2. THE NON-EMPTY PATH RUNS. One new candidate — or a live visit, or a
-#      missing subject, or an unreadable probe — returns "run", and the
+#   2. THE NON-EMPTY PATH RUNS. One new candidate — or a human gate or a
+#      conversation already on the subject, or a missing subject, or an
+#      unreadable probe — returns "run", and the
 #      framework then dispatches the same wisp on the same pool as before.
 #
 #   3. "EMPTY" IS REACHABLE ONLY FROM VERIFIED READS. Every read failure,
@@ -139,13 +140,12 @@ cat > "$FIX/ready.json" <<'JSON'
 [
   {"id":"f-plain","title":"an ordinary idle bug","issue_type":"bug"},
   {"id":"f-routed","title":"already dispatched","issue_type":"task","metadata":{"gc.routed_to":"rig/rig.polecat"}},
-  {"id":"f-visit","title":"visit: something","issue_type":"task","metadata":{"task_kind":"visit"}},
   {"id":"f-subject","title":"triage: unnamed waits (this rig)","issue_type":"task","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits","sweep.reported":"f-carried"}},
-  {"id":"f-ingroup","title":"subject of a live visit","issue_type":"task","metadata":{}},
+  {"id":"f-conv-held","title":"subject of a conversation a live sitting holds","issue_type":"task","metadata":{}},
   {"id":"f-takeaway","title":"a sitting ended here and left its takeaway","issue_type":"epic","metadata":{"gc.takeaway":"needs operator ratify"}},
   {"id":"f-takeaway-empty","title":"takeaway was cleared — NOT a hold","issue_type":"task","metadata":{"gc.takeaway":""}},
   {"id":"f-demand-live","title":"a person owes an answer here","issue_type":"task","metadata":{"gc.takeaway":"holding — which of the two?"}},
-  {"id":"f-demand-widen","title":"its demand is deferred, not closed","issue_type":"task","metadata":{"gc.takeaway":"holding — parked on a person"}},
+  {"id":"f-demand-widen","title":"its gate is deferred, not cleared","issue_type":"task","metadata":{"gc.takeaway":"holding — parked on a person"}},
   {"id":"f-hold","title":"operator decided this waits","issue_type":"task","metadata":{"triage.hold":"deferred; may take another direction"}},
   {"id":"f-hold-empty","title":"hold was cleared — NOT a hold","issue_type":"task","metadata":{"triage.hold":""}},
   {"id":"f-carried","title":"already reported by an earlier pass","issue_type":"bug","metadata":{}},
@@ -158,7 +158,7 @@ cat > "$FIX/ready.json" <<'JSON'
   {"id":"f-pr-open","title":"done, parked on an open PR awaiting approval","issue_type":"task","metadata":{"merge_result":"pull_request","pr_number":"521","pr_url":"https://github.com/zook/gc-toolkit/pull/521"}},
   {"id":"f-preopen-green","title":"pre-open, codex green — waits on pre-open-resolve","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}},
   {"id":"f-worked","title":"a work bead a live molecule is driving","issue_type":"bug","metadata":{}},
-  {"id":"f-trackedvisit","title":"subject of a live visit whose group stamp landed EMPTY","issue_type":"task","metadata":{}},
+  {"id":"f-conv-fallback","title":"subject of a held conversation under its c- alias","issue_type":"task","metadata":{}},
   {"id":"f-input-convoy","title":"input convoy for tk-xxxxx","issue_type":"convoy","metadata":{}},
   {"id":"f-sling-convoy","title":"sling-tk-xxxxx","issue_type":"convoy","metadata":{}},
   {"id":"f-synthetic-convoy","title":"a convoy a sling minted","issue_type":"convoy","metadata":{"gc.synthetic":"true"}},
@@ -169,24 +169,29 @@ cat > "$FIX/ready.json" <<'JSON'
   {"id":"f-spec-orphan","title":"a step-spec sidecar whose workflow root has closed","issue_type":"task","metadata":{"gc.kind":"spec"},"dependencies":[{"issue_id":"f-spec-orphan","depends_on_id":"f-root-closed","type":"tracks"}]},
   {"id":"f-root-unrouted","title":"a workflow root whose route was cleared","issue_type":"task","metadata":{"gc.kind":"workflow"}},
   {"id":"f-finalize-kind","title":"a gc.kind that names no topology","issue_type":"task","metadata":{"gc.kind":"workflow-finalize"}},
-  {"id":"f-step-sat","title":"a step whose workflow root a live visit covers","issue_type":"task","metadata":{"gc.root_bead_id":"f-root-sat"}},
-  {"id":"f-step-free","title":"a step whose workflow root no visit covers","issue_type":"task","metadata":{"gc.root_bead_id":"f-root-free"}}
+  {"id":"f-step-sat","title":"a step whose workflow root a held conversation tracks","issue_type":"task","metadata":{"gc.root_bead_id":"f-root-sat"}},
+  {"id":"f-step-free","title":"a step whose workflow root no conversation tracks","issue_type":"task","metadata":{"gc.root_bead_id":"f-root-free"}}
 ]
 JSON
 
-# LIVE is open+in_progress: the subject, a live visit naming f-ingroup, the
-# alive edge targets, and the molecule/convoy pair behind f-worked.
+# LIVE is open+in_progress: the subject, the conversations live sittings hold
+# (about f-conv-held, under the c- alias about f-conv-fallback, and about a
+# workflow root), the alive edge targets, the molecule/convoy pair behind
+# f-worked, and the open human gate on f-demand-live, with the two beads the
+# gates block as the open listing carries them, blocks edges and all.
 cat > "$FIX/live.json" <<'JSON'
 [
   {"id":"f-subject","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits","sweep.reported":"f-carried"}},
-  {"id":"v-1","title":"visit: f-ingroup — a live sitting","metadata":{"task_kind":"visit","gc.continuation_group":"f-ingroup"}},
-  {"id":"v-3","title":"visit: f-trackedvisit — live, but its group stamp landed EMPTY","metadata":{"task_kind":"visit","gc.continuation_group":""},"dependencies":[{"issue_id":"v-3","depends_on_id":"f-trackedvisit","type":"tracks"}]},
-  {"id":"v-5","title":"visit: f-root-sat — a sitting about a workflow root","metadata":{"task_kind":"visit","gc.continuation_group":"f-root-sat"}},
+  {"id":"fc-held","title":"about f-conv-held","issue_type":"task","status":"in_progress","assignee":"testrig/testrig.fc-held","dependencies":[{"issue_id":"fc-held","depends_on_id":"f-conv-held","type":"tracks"}]},
+  {"id":"fc-fb","title":"about f-conv-fallback","issue_type":"task","status":"in_progress","assignee":"testrig/testrig.c-fc-fb","dependencies":[{"issue_id":"fc-fb","depends_on_id":"f-conv-fallback","type":"tracks"}]},
+  {"id":"fc-root","title":"about f-root-sat — a sitting about a workflow root","issue_type":"task","status":"in_progress","assignee":"testrig/testrig.fc-root","dependencies":[{"issue_id":"fc-root","depends_on_id":"f-root-sat","type":"tracks"}]},
   {"id":"f-member","title":"the bead the convoy carries","metadata":{}},
   {"id":"f-root-live","title":"a routed root the spec bead hangs off","metadata":{}},
   {"id":"f-child","title":"a child whose parent is open","metadata":{},"dependencies":[{"issue_id":"f-child","depends_on_id":"f-epic-open","type":"parent-child"}]},
   {"id":"m-live","title":"a live molecule driving a work bead","metadata":{"gc.input_convoy_id":"conv-live"}},
-  {"id":"d-open","title":"Rule: which of the two?","metadata":{"gc.demand_for":"f-demand-live"}},
+  {"id":"g-open","title":"Rule: which of the two?","issue_type":"gate","await_type":"human","await_id":"which-of-two","status":"open"},
+  {"id":"f-demand-live","title":"a person owes an answer here","issue_type":"task","status":"open","metadata":{"gc.takeaway":"holding — which of the two?"},"dependencies":[{"issue_id":"f-demand-live","depends_on_id":"g-open","type":"blocks"}]},
+  {"id":"f-demand-widen","title":"its gate is deferred, not cleared","issue_type":"task","status":"open","metadata":{"gc.takeaway":"holding — parked on a person"},"dependencies":[{"issue_id":"f-demand-widen","depends_on_id":"g-deferred","type":"blocks"}]},
   {"id":"f-worked","title":"a work bead a live molecule is driving","metadata":{}}
 ]
 JSON
@@ -197,7 +202,7 @@ JSON
 # the parent as unnamed.
 cat > "$FIX/widen.json" <<'JSON'
 [
-  {"id":"d-deferred","title":"Rule: the other one?","status":"deferred","metadata":{"gc.demand_for":"f-demand-widen"}},
+  {"id":"g-deferred","title":"Rule: the other one?","issue_type":"gate","await_type":"human","await_id":"the-other-one","status":"deferred"},
   {"id":"f-blocked-child","title":"a BLOCKED child of f-epic-open","status":"blocked","metadata":{},"dependencies":[{"issue_id":"f-blocked-child","depends_on_id":"f-epic-open","type":"parent-child"}]}
 ]
 JSON
@@ -217,11 +222,22 @@ done
 # Every ready bead a local rule excludes. A board holding only these has
 # nothing to report, so the empty-board cases below keep exactly these.
 EXCLUDED_IDS="$(jq -nc --arg kinds "$STANDING_KINDS" '
-  ["f-routed","f-visit","f-subject","f-ingroup","f-trackedvisit","f-demand-live",
+  ["f-routed","f-subject","f-conv-held","f-conv-fallback","f-demand-live",
    "f-demand-widen","f-hold","f-epic-open","f-convoy","f-spec","f-input-convoy",
    "f-sling-convoy","f-synthetic-convoy","o-wisp-aaaaa","f-spec-orphan",
    "f-root-unrouted","f-step-sat"]
   + ($kinds | split("\n") | map(select(. != "") | "f-standing-" + .))')"
+
+# The live sittings: each listed session carries the alias of the
+# conversation it holds, qualified (agent_name) or bare (alias).
+cat > "$TMP/sessions.json" <<'JSON'
+{"sessions":[
+  {"id":"lx-live-1","state":"active","closed":false,"session_name":"s-lx-live-1","alias":"","name":"n","agent_name":"testrig/testrig.fc-held"},
+  {"id":"lx-live-2","state":"active","closed":false,"session_name":"s-lx-live-2","alias":"c-fc-fb","name":"","agent_name":""},
+  {"id":"lx-live-3","state":"active","closed":false,"session_name":"s-lx-live-3","alias":"fc-root","name":"","agent_name":""}
+]}
+JSON
+export FAKE_SESSIONS="$TMP/sessions.json"
 
 export FIXDIR="$FIX"
 export PATH="$TMP/bin:$PATH"
@@ -273,21 +289,18 @@ has ",$SURV," ",f-epic-done," "an epic whose children ALL closed survives (the w
 has ",$SURV," ",f-tracks-dead," "tracking a CLOSED bead names no wait — it survives"
 has ",$SURV," ",f-child," "a child with an open parent is workable, not a wait"
 hasnt ",$SURV," ",f-routed," "gc.routed_to non-empty is excluded (class 1)"
-hasnt ",$SURV," ",f-visit," "task_kind=visit is excluded (class 3)"
 hasnt ",$SURV," ",f-subject," "task_kind=triage-subject is excluded (class 4a)"
-hasnt ",$SURV," ",f-ingroup," "a subject with a live visit is excluded (class 3)"
-# the same class-3 exclusion, on a visit that named its subject
-# ONLY through the tracks edge because the gc.continuation_group stamp landed
-# empty (su-ab9je). Keyed on the stamp alone this bead is a survivor, the pass
-# runs, and the sweep files a SECOND visit on a subject converse still holds.
-hasnt ",$SURV," ",f-trackedvisit," "a subject whose live visit names it only by the tracks edge is excluded (class 3)"
+hasnt ",$SURV," ",f-conv-held," "a subject a live sitting holds a conversation about is excluded (class 3)"
+# the same class-3 exclusion, on a conversation held under the c- alias the
+# runtime falls back to when it refuses the bare id.
+hasnt ",$SURV," ",f-conv-fallback," "a subject whose conversation a sitting holds under its c- alias is excluded (class 3)"
 # A takeaway is one field a sitting stamps at the hold and REPLACES with its
 # outcome at sign-off, and nothing clears it, so it dates the last sitting
-# rather than naming a live wait. The wait is the demand bead, and only while
-# that bead is not closed.
-has ",$SURV," ",f-takeaway," "a takeaway with no live demand names no wait — it survives"
-hasnt ",$SURV," ",f-demand-live," "an OPEN demand on a bead excludes it (class 4c)"
-hasnt ",$SURV," ",f-demand-widen," "a DEFERRED demand still excludes — not closed is not answered"
+# rather than naming a live wait. The wait is the human gate, and only while
+# that gate is not closed.
+has ",$SURV," ",f-takeaway," "a takeaway with no open gate names no wait — it survives"
+hasnt ",$SURV," ",f-demand-live," "an OPEN human gate on a bead excludes it (class 4c)"
+hasnt ",$SURV," ",f-demand-widen," "a DEFERRED gate still excludes — not cleared is not answered"
 hasnt ",$SURV," ",f-hold," "triage.hold non-empty is excluded (class 4d)"
 hasnt ",$SURV," ",f-carried," "a bead already in the baseline is CARRIED, not new"
 hasnt ",$SURV," ",f-epic-open," "a parent with a non-closed child is excluded (class 2i-a)"
@@ -319,8 +332,8 @@ hasnt ",$SURV," ",f-spec-orphan," "a step-spec sidecar with no route is excluded
 hasnt ",$SURV," ",f-root-unrouted," "a workflow root with no route is excluded (topology)"
 has ",$SURV," ",f-finalize-kind," "a gc.kind outside the topology kinds survives"
 # A sitting about a workflow root covers the steps of that workflow.
-hasnt ",$SURV," ",f-step-sat," "a step whose workflow root a live visit covers is excluded (class 3)"
-has ",$SURV," ",f-step-free," "a step whose workflow root no visit covers survives"
+hasnt ",$SURV," ",f-step-sat," "a step whose workflow root a held conversation tracks is excluded (class 3)"
+has ",$SURV," ",f-step-free," "a step whose workflow root no conversation tracks survives"
 # The exclusions the precheck deliberately does NOT make. Each of these IS
 # dropped by the full classifier; the precheck reports them and runs the pass,
 # because the reads that decide them are non-local or non-monotone.
@@ -359,31 +372,29 @@ BASELINE_CSV="f-carried,f-plain" run_precheck
 eq "$RC" "1" "carried-only survivors are not new — no agent session"
 has "$OUT" "local survivors 2 -> new 0" "the funnel shows the census, not just the delta"
 
-echo "── a live visit on the SWEEP subject runs the pass even with nothing new ──"
-jq '. + [{"id":"v-2","title":"visit: the sweep subject","metadata":{"task_kind":"visit","gc.continuation_group":"f-subject"}}]' \
-   "$FIX/live.json" > "$TMP/live.visit" && cp "$TMP/live.visit" "$FIX/live.json"
+echo "── an open human gate on the SWEEP subject runs the pass even with nothing new ──"
+jq 'map(if .id == "f-subject" then .dependencies = [{"issue_id":"f-subject","depends_on_id":"g-sweep","type":"blocks"}] else . end)
+    + [{"id":"g-sweep","title":"unnamed waits","issue_type":"gate","await_type":"human","await_id":"liveness-sweep","status":"open"}]' \
+   "$FIX/live.json" > "$TMP/live.gate" && cp "$TMP/live.gate" "$FIX/live.json"
 run_precheck
-eq "$RC" "0" "a live visit on the subject runs the pass"
-has "$OUT" "a visit is already live" "and says which condition fired"
-# A live visit on some OTHER subject must not block the skip — the condition is
-# about this sweep's subject, not about visits in general.
+eq "$RC" "0" "an open human gate on the subject runs the pass"
+has "$OUT" "an open human gate already waits on f-subject" "and says which condition fired"
+# A gate on some OTHER bead must not block the skip — the condition is about
+# this sweep's subject, not about gates in general (f-demand-live's stands).
 cp "$TMP/live.bak" "$FIX/live.json"
 BASELINE_CSV="f-carried,f-plain" run_precheck
-eq "$RC" "1" "a visit live on a DIFFERENT subject does not block the skip"
+eq "$RC" "1" "a gate open on a DIFFERENT bead does not block the skip"
 
-# The su-ab9je shape at the SUBJECT level. The sitting is live
-# and held, but its gc.continuation_group stamp landed empty, so only the tracks
-# edge names f-subject. Read on the stamp alone this is "no visit", and the
-# precheck greenlights a pass that files a SECOND visit on a subject converse is
-# still holding — the mirror of mol-liveness-sweep's own step-3 guard, on the
-# same fixture shape, so the two cannot drift apart.
-echo "── a live visit named ONLY by its tracks edge still runs the pass ──"
+# A conversation about the subject is a person on it too, held or in the queue,
+# the guard liveness-sweep.sh asks the same way (human_side_on), so the two
+# cannot drift apart.
+echo "── a conversation about the SWEEP subject runs the pass ──"
 jq 'map(select(.id == "f-carried" or .id == "f-plain"))' "$TMP/ready.bak" > "$FIX/ready.json"
-jq '. + [{"id":"v-4","title":"visit: the sweep subject — stamp landed empty","metadata":{"task_kind":"visit","gc.continuation_group":""},"dependencies":[{"issue_id":"v-4","depends_on_id":"f-subject","type":"tracks"}]}]' \
-   "$TMP/live.bak" > "$TMP/live.visit2" && cp "$TMP/live.visit2" "$FIX/live.json"
+jq '. + [{"id":"fc-subj","title":"about the unnamed waits","issue_type":"task","status":"open","assignee":"human","dependencies":[{"issue_id":"fc-subj","depends_on_id":"f-subject","type":"tracks"}]}]' \
+   "$TMP/live.bak" > "$TMP/live.conv" && cp "$TMP/live.conv" "$FIX/live.json"
 BASELINE_CSV="f-carried,f-plain" run_precheck
-eq "$RC" "0" "a visit whose stamp is EMPTY still reads as live, via its tracks edge"
-has "$OUT" "a visit is already live" "and says which condition fired"
+eq "$RC" "0" "a conversation about the subject runs the pass"
+has "$OUT" "a conversation already waits on f-subject" "and says which condition fired"
 
 # --- 2c. a PR-gated anchor already reported forces no pass -------------------
 # An open PR names its anchor's wait however long the PR sits, so the pass owes
@@ -760,13 +771,15 @@ PREOPEN_GREEN_MAP='{"f-preopen-green":true}'
 # shellcheck disable=SC2090
 export OPEN_PRS WORKED HUSK_STEPS PREOPEN_GREEN_MAP
 # The classify block runs the shared classifier, and the classifier matches
-# visit coverage and standing records through more shared definitions.
-# liveness-sweep.sh sources every one of these libs before the block. Supply
-# the same defs ($VISIT_IDENTITY_JQ, $STANDING_KINDS_JQ, $DISPATCH_PATH_JQ,
-# $PLACEMENT_JQ, $LIVENESS_CLASSIFY_JQ)
+# human gates, conversations and standing records through more shared
+# definitions. liveness-sweep.sh sources every one of these libs before the
+# block. Supply the same defs ($HUMAN_GATE_JQ, $CONVERSATION_JQ,
+# $STANDING_KINDS_JQ, $DISPATCH_PATH_JQ, $PLACEMENT_JQ, $LIVENESS_CLASSIFY_JQ)
 # from the real libs so the extracted block resolves them and cannot drift.
 # shellcheck disable=SC1090,SC1091
-. "$(dirname "$SWEEP")/visit-identity.sh"
+. "$(dirname "$SWEEP")/bd-lib.sh"
+# shellcheck disable=SC1090,SC1091
+. "$(dirname "$SWEEP")/conversation.sh"
 # shellcheck disable=SC1090,SC1091
 . "$(dirname "$SWEEP")/standing-kinds.sh"
 # shellcheck disable=SC1090,SC1091
@@ -817,37 +830,39 @@ for id in $(printf '%s' "$PRE_IDS" | tr ',' ' '); do
 done
 eq "$UNEXPLAINED" "" "every bead only the precheck keeps was dropped on a non-local read (containment is tight)"
 
-echo "── holder liveness gates the visit exclusions (mirrors liveness-sweep.sh) ──"
-# A live-held visit excludes its subject (the pass can skip it); a dead-held
-# visit does not, so its subject survives and the pass runs. A visit bead left
-# ready by a dead session is likewise no longer dropped as a visit.
+echo "── holder liveness gates the conversation exclusions (mirrors liveness-sweep.sh) ──"
+# A conversation a live sitting holds excludes its subject (the pass can skip
+# it); one whose alias no listed session carries does not, so its subject
+# survives and the pass runs, and so does the subject of one in the queue,
+# which no sitting holds.
 HLFIX="$TMP/hlfix"; mkdir -p "$HLFIX"
 cat > "$HLFIX/ready.json" <<'JSON'
 [
   {"id":"f-subject","title":"triage: unnamed waits (this rig)","issue_type":"task","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
-  {"id":"hl-live-subj","title":"subject of a live-held visit","issue_type":"task","metadata":{}},
-  {"id":"hl-dead-subj","title":"subject of a dead-held visit","issue_type":"task","metadata":{}},
-  {"id":"hl-ready-deadvisit","title":"a visit stranded ready by a dead session","issue_type":"task","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"}}
+  {"id":"hl-live-subj","title":"subject of a live-held conversation","issue_type":"task","metadata":{}},
+  {"id":"hl-dead-subj","title":"subject of a dead-held conversation","issue_type":"task","metadata":{}},
+  {"id":"hl-queue-subj","title":"subject of a conversation in the queue","issue_type":"task","metadata":{}}
 ]
 JSON
 cat > "$HLFIX/live.json" <<'JSON'
 [
   {"id":"f-subject","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
-  {"id":"hl-v-live","title":"visit: hl-live-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-live-1"},"dependencies":[{"issue_id":"hl-v-live","depends_on_id":"hl-live-subj","type":"tracks"}]},
-  {"id":"hl-v-dead","title":"visit: hl-dead-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"},"dependencies":[{"issue_id":"hl-v-dead","depends_on_id":"hl-dead-subj","type":"tracks"}]}
+  {"id":"hl-c-live","title":"about hl-live-subj","issue_type":"task","status":"in_progress","assignee":"testrig/testrig.hl-c-live","dependencies":[{"issue_id":"hl-c-live","depends_on_id":"hl-live-subj","type":"tracks"}]},
+  {"id":"hl-c-dead","title":"about hl-dead-subj","issue_type":"task","status":"in_progress","assignee":"testrig/testrig.hl-c-dead","dependencies":[{"issue_id":"hl-c-dead","depends_on_id":"hl-dead-subj","type":"tracks"}]},
+  {"id":"hl-c-queue","title":"about hl-queue-subj","issue_type":"task","status":"open","assignee":"human","dependencies":[{"issue_id":"hl-c-queue","depends_on_id":"hl-queue-subj","type":"tracks"}]}
 ]
 JSON
 printf '[]\n' > "$HLFIX/widen.json"
 cat > "$TMP/hl-sessions.json" <<'JSON'
-{"sessions":[{"id":"lx-live-1","state":"active","closed":false,"session_name":"s-lx-live-1","alias":"","name":"n","agent_name":"testrig/testrig.tk-livevisit"}]}
+{"sessions":[{"id":"lx-live-1","state":"active","closed":false,"session_name":"s-lx-live-1","alias":"hl-c-live","name":"n","agent_name":""}]}
 JSON
 FIXDIR="$HLFIX"; export FIXDIR
 FAKE_SESSIONS="$TMP/hl-sessions.json"; export FAKE_SESSIONS
 BASELINE_CSV="" run_precheck
 SURV="$(survivors_of "$OUT")"
-hasnt ",$SURV," ",hl-live-subj," "a live-held visit's subject stays excluded (holder alive)"
-has   ",$SURV," ",hl-dead-subj," "a dead-held visit's subject survives → the pass runs"
-has   ",$SURV," ",hl-ready-deadvisit," "a visit stranded ready by a dead session survives (not dropped as a visit)"
+hasnt ",$SURV," ",hl-live-subj," "a live-held conversation's subject stays excluded (holder alive)"
+has   ",$SURV," ",hl-dead-subj," "a dead-held conversation's subject survives → the pass runs"
+has   ",$SURV," ",hl-queue-subj," "a conversation in the queue excludes nothing: no sitting holds it"
 
 echo "── precheck fails CLOSED on an unreadable session list (never under-excludes) ──"
 export GC_SESSION_FAIL=1
@@ -855,36 +870,37 @@ BASELINE_CSV="" run_precheck
 unset GC_SESSION_FAIL
 SURV="$(survivors_of "$OUT")"
 has ",$SURV," ",hl-dead-subj," "unreadable session list → the subject still survives (run the pass)"
-has ",$SURV," ",hl-ready-deadvisit," "unreadable session list → the stranded visit still survives"
+has ",$SURV," ",hl-live-subj," "unreadable session list → even a held conversation's subject survives (fail closed)"
 
 echo "── a holder listed in a TERMINAL state (archived/closed) is dead here too ──"
 # Mirrors liveness-sweep.sh: a closed/archived holder that lingers in the list
-# is dead, so its visit no longer excludes the subject — the subject survives and
-# the pass runs. An asleep (non-terminal) holder is live and still excludes, so
-# the gate drops the terminal states only, not everything that is not "active".
+# is dead, so its conversation no longer excludes the subject — the subject
+# survives and the pass runs. An asleep (non-terminal) holder is live and still
+# excludes, so the gate drops the terminal states only, not everything that is
+# not "active".
 HLTERM="$TMP/hlterm"; mkdir -p "$HLTERM"
 cat > "$HLTERM/ready.json" <<'JSON'
 [
   {"id":"f-subject","title":"triage: unnamed waits (this rig)","issue_type":"task","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
-  {"id":"hl-closed-subj","title":"subject of a visit held by a CLOSED session","issue_type":"task","metadata":{}},
-  {"id":"hl-arch-subj","title":"subject of a visit held by an ARCHIVED session","issue_type":"task","metadata":{}},
-  {"id":"hl-asleep-subj","title":"subject of a visit held by an ASLEEP (live) session","issue_type":"task","metadata":{}}
+  {"id":"hl-closed-subj","title":"subject of a conversation held by a CLOSED session","issue_type":"task","metadata":{}},
+  {"id":"hl-arch-subj","title":"subject of a conversation held by an ARCHIVED session","issue_type":"task","metadata":{}},
+  {"id":"hl-asleep-subj","title":"subject of a conversation held by an ASLEEP (live) session","issue_type":"task","metadata":{}}
 ]
 JSON
 cat > "$HLTERM/live.json" <<'JSON'
 [
   {"id":"f-subject","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
-  {"id":"hl-v-closed","title":"visit: hl-closed-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-closed-7"},"dependencies":[{"issue_id":"hl-v-closed","depends_on_id":"hl-closed-subj","type":"tracks"}]},
-  {"id":"hl-v-arch","title":"visit: hl-arch-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-arch-8"},"dependencies":[{"issue_id":"hl-v-arch","depends_on_id":"hl-arch-subj","type":"tracks"}]},
-  {"id":"hl-v-asleep","title":"visit: hl-asleep-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-asleep-2"},"dependencies":[{"issue_id":"hl-v-asleep","depends_on_id":"hl-asleep-subj","type":"tracks"}]}
+  {"id":"hl-c-closed","title":"about hl-closed-subj","issue_type":"task","status":"in_progress","assignee":"testrig/testrig.hl-c-closed","dependencies":[{"issue_id":"hl-c-closed","depends_on_id":"hl-closed-subj","type":"tracks"}]},
+  {"id":"hl-c-arch","title":"about hl-arch-subj","issue_type":"task","status":"in_progress","assignee":"testrig/testrig.hl-c-arch","dependencies":[{"issue_id":"hl-c-arch","depends_on_id":"hl-arch-subj","type":"tracks"}]},
+  {"id":"hl-c-asleep","title":"about hl-asleep-subj","issue_type":"task","status":"in_progress","assignee":"testrig/testrig.hl-c-asleep","dependencies":[{"issue_id":"hl-c-asleep","depends_on_id":"hl-asleep-subj","type":"tracks"}]}
 ]
 JSON
 printf '[]\n' > "$HLTERM/widen.json"
 cat > "$TMP/hlterm-sessions.json" <<'JSON'
 {"sessions":[
-  {"id":"lx-closed-7","state":"closed","closed":true,"session_name":"s-lx-closed-7","alias":"","name":"","agent_name":""},
-  {"id":"lx-arch-8","state":"archived","closed":true,"session_name":"s-lx-arch-8","alias":"","name":"","agent_name":""},
-  {"id":"lx-asleep-2","state":"asleep","closed":false,"session_name":"s-lx-asleep-2","alias":"","name":"","agent_name":""}
+  {"id":"lx-closed-7","state":"closed","closed":true,"session_name":"s-lx-closed-7","alias":"hl-c-closed","name":"","agent_name":""},
+  {"id":"lx-arch-8","state":"archived","closed":true,"session_name":"s-lx-arch-8","alias":"hl-c-arch","name":"","agent_name":""},
+  {"id":"lx-asleep-2","state":"asleep","closed":false,"session_name":"s-lx-asleep-2","alias":"hl-c-asleep","name":"","agent_name":""}
 ]}
 JSON
 FIXDIR="$HLTERM"; export FIXDIR

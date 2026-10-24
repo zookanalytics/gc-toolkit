@@ -6,8 +6,8 @@
 #               depth cap
 #   (CASES)     every case in priority-lib.fixture.json: the priority the
 #               function computes, what the bead follows and through which bead,
-#               its shift, or why it cannot be computed, and the reads the walk
-#               makes
+#               its shift and whether an approved PR put it at P0, or why it
+#               cannot be computed, and the reads the walk makes
 #   (SUBJECT)   a workflow bead leads to the bead it was poured for
 #   (FOLLOWERS) the index a writer walks down from a moved bead
 #   (FAIL)      a read that fails or does not parse fails the walk, and a chain
@@ -77,8 +77,8 @@ while IFS= read -r c; do
         eq "$(printf '%s' "$got" | jq -r 'has("priority") | tostring')" "false" "(CASES) $name: no priority is computed"
         has "$(printf '%s' "$got" | jq -r '.error // ""')" "$want_err" "(CASES) $name: the reason says why"
     else
-        eq "$(printf '%s' "$got" | jq -c '{priority, kind, via, shift}')" \
-           "$(printf '%s' "$c" | jq -c '{priority, kind, via, shift}')" "(CASES) $name"
+        eq "$(printf '%s' "$got" | jq -c '{priority, kind, via, shift, approved}')" \
+           "$(printf '%s' "$c" | jq -c '{priority, kind, via, shift, approved: (.approved // false)}')" "(CASES) $name"
     fi
     want_reads="$(printf '%s' "$c" | jq -r '.reads // empty')"
     [ -z "$want_reads" ] || eq "$(reads)" "$want_reads" "(CASES) $name: $want_reads read(s), one per generation of followed beads"
@@ -145,11 +145,18 @@ for r in "${READERS[@]}"; do
     grep -Fq '$PRIORITY_JQ' "$r" && ok "(READERS) $rel applies \$PRIORITY_JQ" || bad "(READERS) $rel applies \$PRIORITY_JQ"
     grep -Fq 'priority_graph ' "$r" && ok "(READERS) $rel builds its graph with priority_graph" || bad "(READERS) $rel builds its graph with priority_graph"
 done
+# pr-facts.sh reads the approval alone: the rank an anchor's PR-finishing work
+# follows, which it settles that work to and records.
+r="$HERE/pr-facts.sh"
+grep -Eq '^[[:space:]]*\.[[:space:]]+"[^"]*priority-lib\.sh"' "$r" && ok "(READERS) pr-facts.sh sources priority-lib.sh" || bad "(READERS) pr-facts.sh sources priority-lib.sh"
+grep -Fq 'prio_pr_approved' "$r" && grep -Fq '$PRIORITY_JQ' "$r" \
+    && ok "(READERS) pr-facts.sh reads the approval through \$PRIORITY_JQ's prio_pr_approved" \
+    || bad "(READERS) pr-facts.sh reads the approval through \$PRIORITY_JQ's prio_pr_approved"
 
 echo "# no other file defines the function"
-copies="$(git -C "$ROOT" grep -l -F -e 'def priority_of(' -e 'def prio_follows:' -e 'def prio_shift:' -- . 2>/dev/null \
+copies="$(git -C "$ROOT" grep -l -F -e 'def priority_of(' -e 'def prio_follows:' -e 'def prio_shift:' -e 'def prio_pr_approved:' -- . 2>/dev/null \
     | grep -v -e '^assets/scripts/priority-lib.sh$' -e '^assets/scripts/priority-lib.test.sh$' || true)"
-eq "$copies" "" "(NO-COPY) only priority-lib.sh defines the priority function"
+eq "$copies" "" "(NO-COPY) only priority-lib.sh defines the priority function and its reading of a PR's approval"
 
 echo
 echo "priority-lib: $PASS passed, $FAIL failed"

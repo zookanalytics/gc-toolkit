@@ -41,20 +41,19 @@
 #   branch-supersession.sh hold --anchor <id> --branch <name> --target <name>
 #                               --base <commit> --head <commit> [--pr <n>]
 #     The conflict arm's question: should the merge-in dispatch wait for a
-#     person's decision? It waits while a rework-base-supersession visit is open
-#     on the anchor and its route addresses somebody, by pool-route.sh's
-#     verdict. Otherwise it classifies <head> against <base>, and on a
-#     supersession asks through human-gate.sh, with the evidence and the ways
-#     out, then waits behind the ask. A `benign` answer (the overlap was
-#     incidental) lets the next pass dispatch the ordinary child, through the
-#     quiet window the call declares.
-#     Exit: 0 hold: a supersession decision is open on the anchor and routed to
-#             somebody, so dispatch nothing.
+#     person's decision? It waits while an open rework-base-supersession human
+#     gate blocks the anchor, read by the one reader rule (bd_human_gates).
+#     Otherwise it classifies <head> against <base>, and on a supersession asks
+#     through human-gate.sh, with the evidence and the ways out, then waits
+#     behind the ask. A `benign` answer (the overlap was incidental) lets the
+#     next pass dispatch the ordinary child, through the quiet window the call
+#     declares.
+#     Exit: 0 hold: a supersession decision is open on the anchor, so dispatch
+#             nothing.
 #           1 proceed: dispatch the ordinary merge-in child. This is also the
 #             answer when the tells are not met, the trial merge cannot be read,
-#             or no open visit that addresses somebody stands behind the hold, so
-#             this guard only ever removes a dispatch a person has been asked
-#             about.
+#             or no open gate stands behind the hold, so this guard only ever
+#             removes a dispatch a person has been asked about.
 #           2 usage.
 #
 # Callers: pre-open-rebase.sh and pr-facts.sh's CONFLICTING arm, after their own
@@ -65,8 +64,6 @@ PROG="branch-supersession"
 
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 HUMAN_GATE="$SCRIPTS_DIR/human-gate.sh"
-# The route reading applied to an open visit found on the anchor.
-POOL_ROUTE="$SCRIPTS_DIR/pool-route.sh"
 # A benign answer is this ask's release, so the call declares a quiet window: the
 # next pass detects the same supersession again, and inside the window it files
 # nothing and dispatches the ordinary merge-in child.
@@ -74,7 +71,6 @@ QUIET_WINDOW=86400
 # The situation key a polecat files by hand when it finds this mid-rework, so
 # both routes land the same question on one key.
 KEY="rework-base-supersession"
-LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
 # A block counts from about six lines of code. A smaller rewrite is drift that a
 # merge-in child re-applies routinely.
@@ -105,9 +101,8 @@ usage: branch-supersession.sh classify <base> <branch>
   classify  trial-merge <branch> into <base> and print the supersession
             evidence. Exit 0 superseded, 1 not superseded, 2 could not tell.
   hold      decide whether a conflict arm's merge-in dispatch waits for a
-            person. Exit 0 hold (a rework-base-supersession visit is open on
-            the anchor and routed to somebody), 1 proceed with the ordinary
-            child, 2 usage.
+            person. Exit 0 hold (a rework-base-supersession human gate is open
+            on the anchor), 1 proceed with the ordinary child, 2 usage.
 U
 }
 
@@ -387,34 +382,19 @@ No merge-in rework is sent for this branch while this gate is open. (anchor $anc
 BRIEF
 }
 
-open_visits() { # <anchor>; prints "<id>\t<route>" per open supersession visit; non-zero when the store would not read
-  local rows
-  rows=$(bd_list --status="$LIVE_STATUSES" --metadata-field "escalation_key=$KEY" \
-           --metadata-field "gc.continuation_group=$1") || return 1
-  printf '%s' "$rows" | jq -r --arg a "$1" --arg k "$KEY" '
-    .[] | select(((.metadata["gc.continuation_group"] // "") | tostring) == $a)
-        | select(((.metadata.escalation_key // "") | tostring) == $k)
-        | [.id, ((.metadata["gc.routed_to"] // "") | tostring)] | @tsv' 2>/dev/null
-}
-
-# The first of open_visits' rows whose route addresses somebody, by
-# pool-route.sh's verdict: `ok`, or `unknown` when the live agent set could not
-# be read. No route, a pool no live agent carries, another rig's pool, and a
-# rig-qualified route with no GC_RIG to check it against address nobody. Prints
-# the visit id, or nothing.
-asking_visit() { # <rows>
-  local vid route
-  while IFS=$'\t' read -r vid route; do
-    [ -n "$vid" ] || continue
-    case "$("$POOL_ROUTE" --verdict "$route" 2>/dev/null)" in
-      ok|unknown) printf '%s\n' "$vid"; return 0 ;;
-    esac
-  done <<< "$1"
-  return 0
+# The open rework-base-supersession human gates that block <anchor>, one id a
+# line, by the one reader rule. Non-zero when the anchor's gates would not read.
+open_gates() { # <anchor>
+  local gates
+  gates=$(bd_human_gates "$1") || return 1
+  printf '%s' "$gates" | jq -r --arg k "$KEY" '
+    .[] | select(((.await_id // "") | tostring) == $k)
+        | select(((.status // "open") | tostring | ascii_downcase) != "closed")
+        | .id' 2>/dev/null
 }
 
 hold() {
-  local anchor="" branch="" target="" base="" head="" pr="" label rows prior vid route evidence crc title msg
+  local anchor="" branch="" target="" base="" head="" pr="" label gates vid evidence crc title msg
   while [ $# -gt 0 ]; do
     case "$1" in
       --anchor) anchor="${2:-}"; shift 2 || { usage; return 2; } ;;
@@ -433,22 +413,15 @@ hold() {
 
   # A decision already open on this anchor holds the dispatch whatever the branch
   # looks like now: the person is ruling on this branch, and a merge-in child
-  # performs one of the answers before they give it. The demand a sitting files
-  # while working the visit sits on the visit, not the anchor, so the open visit
-  # is what holds here. It holds only while its route addresses somebody. A visit
-  # routed nowhere has asked nobody, so the branch is classified as though no
-  # visit were open. On drift the arm proceeds. An unreadable store answers
-  # nothing and falls through.
-  rows=$(open_visits "$anchor") || rows=""
-  vid=$(asking_visit "$rows")
+  # performs one of the answers before they give it. A human gate asks a person
+  # by being open, whoever is assigned it. On drift the arm proceeds. Gates that
+  # will not read answer nothing and fall through.
+  gates=$(open_gates "$anchor") || gates=""
+  vid=$(printf '%s\n' "$gates" | head -n 1)
   if [ -n "$vid" ]; then
     echo "$PROG: $anchor — $label conflicts with '$target'; supersession decision $vid is still open, no rework dispatched"
     return 0
   fi
-  while IFS=$'\t' read -r vid route; do
-    [ -n "$vid" ] && echo "$PROG: $anchor — supersession decision $vid is open, but its route '$route' addresses nobody, so it holds nothing" >&2
-  done <<< "$rows"
-  prior="$rows"
 
   evidence=$(classify "$base" "$head"); crc=$?
   case "$crc" in
@@ -466,22 +439,16 @@ hold() {
   fi
   # human-gate.sh wrote to the store, so the pass's cached reads are stale.
   bd_cache_clear
-  # The hold stands only behind an open ask that addresses somebody. human-gate.sh
-  # also exits 0 without filing inside the declared quiet window after a moot or
-  # benign answer, and that answer is the release.
-  rows=$(open_visits "$anchor") || rows=""
-  vid=$(asking_visit "$rows")
+  # The hold stands only behind an open gate. human-gate.sh also exits 0 without
+  # filing inside the declared quiet window after a moot or benign answer, and
+  # that answer is the release.
+  gates=$(open_gates "$anchor") || gates=""
+  vid=$(printf '%s\n' "$gates" | head -n 1)
   if [ -z "$vid" ]; then
-    echo "$PROG: $anchor — $label looks superseded, but no supersession visit is open and routed to somebody (a recent moot or benign ruling answers it); dispatching the ordinary merge-in child"
+    echo "$PROG: $anchor — $label looks superseded, but no supersession gate is open (a recent moot or benign ruling answers it); dispatching the ordinary merge-in child"
     return 1
   fi
-  # A visit that was open before human-gate.sh ran, and addresses somebody only
-  # now, is one that was repointed.
-  if grep -qxF -- "$vid" < <(cut -f1 <<< "$prior"); then
-    echo "$PROG: $anchor — $label conflicts with '$target' because a landed change deleted or rewrote code it edits; repointed decision $vid at somebody, no rework dispatched"
-  else
-    echo "$PROG: $anchor — $label conflicts with '$target' because a landed change deleted or rewrote code it edits; filed decision $vid, no rework dispatched"
-  fi
+  echo "$PROG: $anchor — $label conflicts with '$target' because a landed change deleted or rewrote code it edits; filed decision $vid, no rework dispatched"
   return 0
 }
 

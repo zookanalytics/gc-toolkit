@@ -560,14 +560,14 @@ func (m *merger) handle(row *gcbd.Bead) {
 		if ph := poolHolder(blockers); ph != "" {
 			m.recordMachine(id, "progressing", headOid, aroute)
 		} else if sh := stuckHolder(blockers); sh != "" {
-			m.recordBlocked(id, headOid, aroute, "held by "+inflight+" — an unrouted blocker no automated actor will clear")
+			m.recordBlocked(id, headOid, aroute, "held by "+sh+" — an unrouted blocker no automated actor will clear")
 		}
 		fmt.Fprintf(m.stdout, "%s: PR#%s held by %s; merge held (anchor %s)\n", mergeProg, num, inflight, id)
 		m.held++
 		return
 	}
 
-	// --- open visit on this anchor: a person owes a conversation before finalize ---
+	// --- the finalize gate: an open human gate, or an unruled epic, holds it ------
 	if reason, ok := m.finalizeGate(id); !ok {
 		if reason == "" {
 			reason = "finalize gate refused (fail-closed)"
@@ -768,7 +768,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 			if reason != "" {
 				freason = reason
 			} else {
-				freason = "open visit or unreadable visit probe (fail-closed)"
+				freason = "finalize gate refused (fail-closed)"
 			}
 		}
 	}
@@ -1514,10 +1514,10 @@ func duplicateAnchors(dups []gcbd.Bead, id, num, ourURL string) string {
 	return strings.Join(out, ",")
 }
 
-// inflightHolder is the first open rework/review/finding bead that holds the
-// merge: a pr_number holder qualified by repository, or any dep-edge blocker
-// (the edge is the claim, local by construction). The order is by_pr, then
-// children, then blockers.
+// inflightHolder is the first open rework/review/finding bead, or open human
+// gate, that holds the merge: a pr_number holder qualified by repository, or
+// any dep-edge blocker (the edge is the claim, local by construction). The
+// order is by_pr, then children, then blockers.
 func (m *merger) inflightHolder(id string, byPR, children, blockers []gcbd.Bead) string {
 	ours := strings.ToLower(m.originRepoQ)
 	type tagged struct {
@@ -1549,7 +1549,9 @@ func (m *merger) inflightHolder(id string, byPR, children, blockers []gcbd.Bead)
 			}
 		}
 		kind := "unclosed rework/review bead"
-		if b.Meta("task_kind") == "finding" {
+		if b.IsHumanGate() {
+			kind = "open human gate"
+		} else if b.Meta("task_kind") == "finding" {
 			if fd := b.Meta("finding.disposition"); fd != "" {
 				kind = fd + " finding"
 			} else {
@@ -1573,7 +1575,7 @@ func holderStatus(b *gcbd.Bead) string { return b.StatusLowerOr("open") }
 func isLive(b *gcbd.Bead) bool { return inSlice(mergeLive, holderStatus(b)) }
 
 // poolHolder is the first live blocker a pool will claim (routed to something
-// other than a human).
+// other than a human). A human gate carries no route, so it is never one.
 func poolHolder(blockers []gcbd.Bead) string {
 	for i := range blockers {
 		b := &blockers[i]
@@ -1588,11 +1590,13 @@ func poolHolder(blockers []gcbd.Bead) string {
 }
 
 // stuckHolder is the first live blocker carrying no route at all — one no
-// automated actor will claim and no `asking` edge names.
+// automated actor will claim and no person owes. A human gate carries no route
+// either, but it is the hold of the person who must clear it, as a blocker
+// routed to `human` is, so it is not stuck and records no machine state.
 func stuckHolder(blockers []gcbd.Bead) string {
 	for i := range blockers {
 		b := &blockers[i]
-		if isLive(b) && b.Meta("gc.routed_to") == "" {
+		if isLive(b) && b.Meta("gc.routed_to") == "" && !b.IsHumanGate() {
 			return b.ID
 		}
 	}

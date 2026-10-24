@@ -435,6 +435,16 @@ the route. bd writes a metadata patch in the same row write as the field edits
 visible before the priority. When either form fails, the writer stops and says
 so.
 
+> **Note (tk-rl8gz4b.9).** The `--print` form computes without the store's
+> priority lock, so a move that runs between that computation and the route's
+> write is undone by the write. A writer that routes a bead directly runs the
+> locked `queue-priority.sh settle <bead-id>` first and then writes the route on
+> its own, with no priority in it. The bead has no route until that write, so no
+> pool claims it before its priority is written, and a move that runs between
+> the two writes rewrites the bead itself. `--print` writes nothing, and no
+> writer writes the number it prints. The rule is stated in
+> [steering.md](../../docs/steering.md#settle).
+
 These writers settle:
 
 - `gc-helm.sh place` routes the item with its priority in the route's own update

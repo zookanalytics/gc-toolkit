@@ -31,17 +31,23 @@
 # status and assignee this run read before judging it. A caller that read the
 # bead before another actor claimed, assigned or moved it therefore stamps
 # nothing while that change stands, and exits 4, as it does for a pointer that
-# does not stick. When the origin is a task_kind=visit it also stamps the
-# outcome the board reads — gc.outcome = the kind, gc.outcome_reason = that
-# close reason — verified before the close, because a closed visit with no
-# gc.outcome is a sitting the board cannot report and no re-run reaches it
-# (doctor/check-visit-outcome-recorded).
-# A visit also gets gc.work_outcome=no-op, for the work-record gate the close
-# runs, from work-outcome.sh: a write of its own that never gates the close and
-# never replaces a work outcome the visit already records.
+# does not stick. When the origin is a task_kind=visit it also gets
+# gc.work_outcome=no-op, for the work-record gate the close runs, from
+# work-outcome.sh: a write of its own that never gates the close and never
+# replaces a work outcome the visit already records.
+# An open human gate that blocks the origin holds its close (finalize-gate.sh).
+# A caller that reports its own refusals of the close as human gates names their
+# key with --except-key, and the retry withdraws those gates before it closes,
+# in three steps: it reads what would hold the close (the finalize gate, and
+# the origin's live blockers and open children, which an unforced `bd close`
+# refuses on), and stops there when anything but its own unassigned gates under
+# the key would; it resolves each of those gates with a reason that names the
+# retry and carries no outcome word, so no quiet period starts; then it closes.
+# A run that stops between steps leaves a state the next run completes, because
+# a resolved gate stays resolved.
 # An already-closed origin is the REPAIR path: pointer + appended note, plus that
-# outcome and that work outcome when the visit lacks them, with the gates
-# skipped (the close they would guard already happened).
+# work outcome when the visit lacks it, with the gates skipped (the close they
+# would guard already happened).
 # Once the origin reads back closed, on either path, the branch it names in
 # metadata.branch is ended on the git remote through branch-end.sh, the way a
 # merge ends a landed branch. That remote write never gates the disposition:
@@ -78,9 +84,9 @@ scrub() { tr -d '\000-\037'; }
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BEAD_STORE="${GC_BEAD_STORE_TOOL:-$HERE/bead-store.sh}"
-# The composable "may this bead be finalized?" precondition set. An open visit
-# tracking the origin holds its close, the same subject-scoped precondition
-# merge.sh applies to a merge (docs/finalize-gate.md). Overridable for a test.
+# The composable "may this bead be finalized?" precondition set. An open human
+# gate that blocks the origin holds its close, the same precondition merge.sh
+# applies to a merge (docs/finalize-gate.md). Overridable for a test.
 FINALIZE_GATE="${GC_FINALIZE_GATE_TOOL:-$HERE/finalize-gate.sh}"
 # Ends the retired branch on the git remote once the close reads back.
 # Overridable for a test.
@@ -100,7 +106,7 @@ Usage:
                  --kind re-homed|folded|fixed-upstream|duplicate|not-needed \
                  [--note "<one sentence of why>"] \
                  [--origin-store rig:<name>] [--successor-store rig:<name>] \
-                 [--except-key <escalation-key>] [--check] [--dry-run]
+                 [--except-key <situation-key>] [--check] [--dry-run]
 
 Under every kind but not-needed the successor is the bead that carries the
 work now. Under not-needed nothing carries it, and the successor is the
@@ -122,13 +128,14 @@ pass --origin-store/--successor-store when a prefix is ambiguous.
 An already-closed origin gains the pointer and an appended note (repair path),
 with the evidence gates skipped.
 
-An open visit on the origin holds the close (finalize-gate.sh). --except-key
-is for the caller that reports its own refusals of this close through
-escalate.sh: it names the escalation key that caller files them under. A visit
-under that key, stamped for this origin, that nobody is engaged in does not hold
-the retry it asks for. A visit someone has claimed, or bound by assignee or
-session, still holds. So does every visit under any other key. The caller
-concludes its visits once the close lands.
+An open human gate that blocks the origin holds the close (finalize-gate.sh).
+--except-key is for the caller that reports its own refusals of this close as
+human gates through human-gate.sh: it names the situation key that caller files
+them under. A gate under that key that no person is assigned does not hold the
+retry it asks for, and the retry resolves it just before the close, because an
+open gate makes the close refuse the bead it blocks. A gate assigned to a
+person still holds, and so does every gate under any other key, every other
+live blocker and every open child: then nothing is resolved or closed.
 U
     exit "${1:-1}"
 }
@@ -402,21 +409,9 @@ if [ -n "$CHECK" ]; then
     exit 0
 fi
 
-# A closed task_kind=visit with no gc.outcome is a sitting the board cannot
-# report (doctor/check-visit-outcome-recorded projects gc.outcome as the OUTCOME
-# column and gc.outcome_reason as the headline), and once a visit closes no
-# re-run reaches it — the permanence visit-close.sh guards. So when the origin
-# is a visit the outcome is stamped beside the pointer below and gates the close
-# the same way. The --kind IS the disposition, so it is the outcome word, and
-# $REASON is its headline. An outcome the visit already records is the sitting's
-# own word and is left untouched (a visit closed through visit-close.sh, then
-# re-homed, already carries the word it signed off with). gc.work_outcome is not
-# part of that word: step 1a stamps it whether or not the outcome is stamped.
+# A visit's close runs the work-record gate, so step 1a stamps its work outcome.
 ORIGIN_KIND=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["task_kind"] // empty' 2>/dev/null || true)
-PRIOR_OUTCOME=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.outcome"] // empty' 2>/dev/null || true)
 PRIOR_WORK_OUTCOME=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.work_outcome"] // empty' 2>/dev/null || true)
-STAMP_OUTCOME=""
-if [ "$ORIGIN_KIND" = "visit" ] && [ -z "$PRIOR_OUTCOME" ]; then STAMP_OUTCOME=1; fi
 
 if [ -n "$DRY_RUN" ]; then
     if [ "$ORIGIN_STATUS" = "closed" ]; then
@@ -425,7 +420,6 @@ if [ -n "$DRY_RUN" ]; then
         CLOSE_PLAN="$REASON"
     fi
     STAMP_PLAN="gc.superseded_by=$SUCCESSOR gc.superseded_by_store=$SUCCESSOR_STORE"
-    [ -n "$STAMP_OUTCOME" ] && STAMP_PLAN="$STAMP_PLAN gc.outcome=$KIND gc.outcome_reason=<the close reason>"
     [ "$ORIGIN_KIND" = "visit" ] && [ -z "$PRIOR_WORK_OUTCOME" ] && STAMP_PLAN="$STAMP_PLAN gc.work_outcome=no-op"
     if [ "$(wait_edge_count "$ORIGIN_JSON")" -gt 0 ]; then
         EDGE_PLAN="drop the 'blocked by $SUCCESSOR' wait edge (it would refuse this close)"
@@ -439,31 +433,34 @@ if [ -n "$DRY_RUN" ]; then
     else
         BRANCH_PLAN="none ($ORIGIN names no metadata.branch)"
     fi
-    printf 'bead-rehome (dry run)\n  origin:    %s [%s] in %s\n  successor: %s in %s\n  stamp:     %s\n  edge:      %s\n  close:     %s\n  branch:    %s\n  actor:     %s\n' \
+    if [ "$ORIGIN_STATUS" = "closed" ]; then
+        GATE_PLAN="none (the close already happened)"
+    elif [ -n "$EXCEPT_KEY" ]; then
+        GATE_PLAN="resolve each open human gate under [$EXCEPT_KEY] that blocks $ORIGIN and no person is assigned, just before the close, once nothing else would hold it"
+    else
+        GATE_PLAN="none (no --except-key)"
+    fi
+    printf 'bead-rehome (dry run)\n  origin:    %s [%s] in %s\n  successor: %s in %s\n  stamp:     %s\n  edge:      %s\n  gates:     %s\n  close:     %s\n  branch:    %s\n  actor:     %s\n' \
         "$ORIGIN" "${ORIGIN_STATUS:-unknown}" "$ORIGIN_STORE" \
         "$SUCCESSOR" "$SUCCESSOR_STORE" "$STAMP_PLAN" \
-        "$EDGE_PLAN" "$CLOSE_PLAN" "$BRANCH_PLAN" "${ACTOR:-<bd default>}"
+        "$EDGE_PLAN" "$GATE_PLAN" "$CLOSE_PLAN" "$BRANCH_PLAN" "${ACTOR:-<bd default>}"
     exit 0
 fi
 
-# 1. Stamp the pointer — and, for a visit, the outcome the board reads — and
-# prove they landed: the close below is gated on the read-back, not on an exit
-# status. Both go in one update, which bd applies only while the origin still
-# has the status and assignee the gates above judged. bd holds a claimed bead
+# 1. Stamp the pointer and prove it landed: the close below is gated on the
+# read-back, not on an exit status. Both keys go in one update, which bd applies
+# only while the origin still has the status and assignee the gates above
+# judged. bd holds a claimed bead
 # against another actor's assignment and close, never against a metadata write,
 # so without that condition a caller whose gates passed before another actor
 # claimed the bead would point it under that claim. With it, a claim, an
 # assignment or a status change that lands after the gates' read makes bd write
 # nothing (exit 13), and the caller stamps nothing: while a bead is claimed,
 # only a caller the gates accept as its holder can point it. The stamp still
-# lands on a visit this actor cannot close under, because bd's close guard holds
+# lands on a bead this actor cannot close under, because bd's close guard holds
 # only the close.
 STAMP_META=(--set-metadata gc.superseded_by="$SUCCESSOR" \
             --set-metadata gc.superseded_by_store="$SUCCESSOR_STORE")
-if [ -n "$STAMP_OUTCOME" ]; then
-    STAMP_META+=(--set-metadata gc.outcome="$KIND" \
-                 --set-metadata gc.outcome_reason="$REASON")
-fi
 JUDGED=(--if-status="$JUDGED_STATUS" --if-assignee="$JUDGED_ASSIGNEE")
 STAMP_RC=0
 bd_at "$ORIGIN_PATH" update "$ORIGIN" "${JUDGED[@]}" "${STAMP_META[@]}" >/dev/null 2>&1 || STAMP_RC=$?
@@ -478,34 +475,10 @@ GOT_STORE=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.superseded_by_s
 if [ "$GOT_SUCC" != "$SUCCESSOR" ] || [ "$GOT_STORE" != "$SUCCESSOR_STORE" ]; then
     die "successor pointer did NOT stick on $ORIGIN (read back gc.superseded_by='${GOT_SUCC:-}' gc.superseded_by_store='${GOT_STORE:-}'); NOT closing it — an unpointed close is the defect this script exists to prevent. The bead is still open and visible; re-run once the store accepts the write" 4
 fi
-if [ -n "$STAMP_OUTCOME" ]; then
-    # Read back BOTH stamps and repair once before gating the close. The board
-    # shows gc.outcome_reason as the sitting's headline (comment above), so a
-    # close that lands gc.outcome but drops the reason still leaves an illegible
-    # row that no re-run repairs — PRIOR_OUTCOME is then nonempty and STAMP_OUTCOME
-    # never re-arms. One --set-metadata pair can read back empty while the update
-    # exits 0, so both are the precondition, the same guard visit-close.sh and
-    # gc-helm.sh's dismiss verb apply. The repair carries the stamp's condition,
-    # so it writes nothing to a visit somebody has taken since.
-    GOT_OUTCOME=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.outcome"] // empty' 2>/dev/null || true)
-    GOT_OUTCOME_REASON=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.outcome_reason"] // empty' 2>/dev/null || true)
-    if [ "$GOT_OUTCOME" != "$KIND" ] || [ "$GOT_OUTCOME_REASON" != "$REASON" ]; then
-        bd_at "$ORIGIN_PATH" update "$ORIGIN" "${JUDGED[@]}" \
-            --set-metadata gc.outcome="$KIND" \
-            --set-metadata gc.outcome_reason="$REASON" >/dev/null 2>&1 || true
-        CHECK_JSON=$(bead_json "$ORIGIN_PATH" "$ORIGIN")
-        GOT_OUTCOME=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.outcome"] // empty' 2>/dev/null || true)
-        GOT_OUTCOME_REASON=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.outcome_reason"] // empty' 2>/dev/null || true)
-    fi
-    if [ "$GOT_OUTCOME" != "$KIND" ] || [ "$GOT_OUTCOME_REASON" != "$REASON" ]; then
-        die "visit outcome did NOT stick on $ORIGIN (read back gc.outcome='${GOT_OUTCOME:-}' gc.outcome_reason='${GOT_OUTCOME_REASON:-}'); NOT closing it — a closed visit needs the outcome word the board groups by AND the reason headline it shows, and once it closes no re-run reaches it. The bead is still visible; re-run once the store accepts the write" 4
-    fi
-fi
-
 # 1a. A visit's work outcome, for the work-record gate the close runs. It goes
-# through work-outcome.sh as a write of its own, after the gated stamps above,
-# so it never decides whether the visit closes. It runs on the repair path too,
-# where it reaches a closed visit that records its outcome but lacks this key.
+# through work-outcome.sh as a write of its own, after the gated stamp above, so
+# it never decides whether the visit closes. It runs on the repair path too,
+# where it reaches a closed visit that lacks this key.
 if [ "$ORIGIN_KIND" = "visit" ]; then
     work_outcome_noop "$ORIGIN" bd_at "$ORIGIN_PATH"
 fi
@@ -545,17 +518,59 @@ if [ "$ORIGIN_STATUS" = "closed" ]; then
         "$ORIGIN" "$ORIGIN_STORE" "$SUCCESSOR" "$SUCCESSOR_STORE"
     printf 'bead-rehome: its close reason is unchanged and may still be bare; bd show renders the reason, not the pointer, so the appended note is what a reader sees.\n'
 else
-    # Finalize gate: an OPEN visit tracking this bead holds its close, the same
-    # subject-scoped precondition merge.sh applies to a merge (docs/finalize-gate.md).
+    # Finalize gate: an open human gate that blocks this bead holds its close,
+    # the same precondition merge.sh applies to a merge (docs/finalize-gate.md).
     # The successor pointer is already stamped, so a hold here leaves an OPEN,
     # pointed, findable bead — the shape a refused close below also leaves. The
-    # release is to conclude the open visit, then re-run this close.
+    # release is to clear the gate, then re-run this close.
     FG_ARGS=(check "$ORIGIN")
     if [ -n "$EXCEPT_KEY" ]; then FG_ARGS+=(--except-key "$EXCEPT_KEY"); fi
     if ! FG_REASON=$("$FINALIZE_GATE" "${FG_ARGS[@]}" 2>/dev/null); then
         echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but the close is held: ${FG_REASON:-finalize gate refused (fail-closed)}." >&2
-        echo "bead-rehome: the disposition is legible — the bead is open, pointed, and findable. Conclude the open visit, then re-run this close." >&2
+        echo "bead-rehome: the disposition is legible — the bead is open, pointed, and findable. Clear what holds it, then re-run this close." >&2
         exit 5
+    fi
+    # The retry's own gates. The finalize gate excepted the open human gates
+    # under the caller's key that no person is assigned, but bd still refuses to
+    # close a bead they block, so they are resolved just before the close. That
+    # happens only once nothing else would refuse it: every other live blocker
+    # and every open child holds the close, and with one standing the gates stay
+    # open and nothing closes, as a held close leaves it. A blocker that is closed
+    # or pinned holds nothing, as in bd. The reason names the retry and carries no
+    # outcome word, because the close has not landed yet: no quiet period starts.
+    if [ -n "$EXCEPT_KEY" ]; then
+        BLK_JSON=$(bd_at "$ORIGIN_PATH" dep list "$ORIGIN" --type blocks --json 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true)
+        printf '%s' "$BLK_JSON" | jq -e 'type == "array"' >/dev/null 2>&1 \
+            || die "pointer IS recorded on $ORIGIN, but its blockers did not read, so whether anything besides its own [$EXCEPT_KEY] gates holds the close is unknown; nothing was resolved or closed. Re-run this close." 5
+        OWN_GATES=$(printf '%s' "$BLK_JSON" | jq -r --arg k "$EXCEPT_KEY" '
+            .[] | select(((.status // "open") | tostring) as $st | $st != "closed" and $st != "pinned")
+                | select((.issue_type // "") == "gate" and (.await_type // "") == "human"
+                         and ((.await_id // "") | tostring) == $k and ((.assignee // "") | tostring) == "")
+                | .id' 2>/dev/null || true)
+        OTHER_BLOCKERS=$(printf '%s' "$BLK_JSON" | jq -r --arg k "$EXCEPT_KEY" '
+            [ .[] | select(((.status // "open") | tostring) as $st | $st != "closed" and $st != "pinned")
+                  | select(((.issue_type // "") == "gate" and (.await_type // "") == "human"
+                            and ((.await_id // "") | tostring) == $k and ((.assignee // "") | tostring) == "") | not)
+                  | .id ] | join(" ")' 2>/dev/null || true)
+        KIDS_JSON=$(bd_at "$ORIGIN_PATH" list --parent "$ORIGIN" --include-gates --include-infra --include-templates --json --limit 1 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true)
+        printf '%s' "$KIDS_JSON" | jq -e 'type == "array"' >/dev/null 2>&1 \
+            || die "pointer IS recorded on $ORIGIN, but its children did not read, so whether an open child holds the close is unknown; nothing was resolved or closed. Re-run this close." 5
+        OPEN_KID=$(printf '%s' "$KIDS_JSON" | jq -r '.[0].id // empty' 2>/dev/null || true)
+        if [ -n "$OTHER_BLOCKERS" ] || [ -n "$OPEN_KID" ]; then
+            HELD_BY="${OTHER_BLOCKERS:+blocker(s) $OTHER_BLOCKERS}"
+            [ -z "$OPEN_KID" ] || HELD_BY="${HELD_BY:+$HELD_BY and }open child $OPEN_KID"
+            echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but the close is held by $HELD_BY, so its own [$EXCEPT_KEY] gates stay open and nothing closes." >&2
+            echo "bead-rehome: the disposition is legible — the bead is open, pointed, and findable. Clear what holds it, then re-run this close." >&2
+            exit 5
+        fi
+        GATE_REASON="Withdrawn by bead-rehome.sh just before it retries the close this gate reported: $REASON"
+        for GATE in $OWN_GATES; do
+            bd_at "$ORIGIN_PATH" gate resolve "$GATE" --reason "$GATE_REASON" >/dev/null 2>&1 || true
+            GATE_STATUS=$(bead_json "$ORIGIN_PATH" "$GATE" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
+            [ "$GATE_STATUS" = "closed" ] \
+                || die "pointer IS recorded on $ORIGIN, but its gate $GATE [$EXCEPT_KEY] did not resolve (status reads '${GATE_STATUS:-unreadable}'), and while it is open bd refuses the close; nothing closed. Re-run this close." 5
+            printf 'bead-rehome: withdrew the gate %s [%s] on %s before the close it asked for\n' "$GATE" "$EXCEPT_KEY" "$ORIGIN"
+        done
     fi
     # Deliberately NOT --force: the same flag overrides a foreign assignee and
     # an open-children hold. A refusal leaves an OPEN, pointed, findable bead.

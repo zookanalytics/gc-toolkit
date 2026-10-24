@@ -6,15 +6,13 @@
 # records the intent as metadata; `reconcile` (orders/deferred-dispatch.toml,
 # cooldown, scope="rig") performs the sling once nothing holds the bead. A hold
 # is assets/scripts/hold-lib.sh's: an open `blocks` blocker on the bead or on
-# one of its parent-child ancestors, where a demand gate on an ancestor does not
-# count, because waiting on the operator's decision is not a hold, and where a
-# bead in flight (a branch, a merge_result or a rejection_reason) is held only
-# by its own blockers, because a hold holds work that has not started. The pass
-# reads `bd list --ready` as the fast path, and ALSO dispatches an open bead bd
-# holds unready that hold-lib finds not held: the is_blocked flag cascades DOWN
-# parent-child edges, so an armed epic child whose epic waits only on a demand
-# gate, or a re-dispatch of work in flight under a parked epic, never enters
-# `bd --ready`. A held arm stays intact and fires once its hold releases. Status
+# one of its parent-child ancestors, where a bead in flight (a branch, a
+# merge_result or a rejection_reason) is held only by its own blockers, because
+# a hold holds work that has not started. The pass reads `bd list --ready` as
+# the fast path, and ALSO dispatches an open bead bd holds unready that hold-lib
+# finds not held: the is_blocked flag cascades DOWN parent-child edges, so a
+# re-dispatch of work in flight under a parked epic never enters `bd --ready`.
+# A held arm stays intact and fires once its hold releases. Status
 # still gates: a non-open status is set deliberately, and a bead at one is never
 # dispatched. `list` answers "what dispatches are owed?", naming the blocker
 # that holds each held arm; `disarm` withdraws one.
@@ -865,11 +863,10 @@ cmd_list() {
         # arm: an OPEN bead a blocker holds (hold-lib.sh) waits on something that
         # can clear, and is shown with the blocker and its title, so a parked bead
         # says why it is parked and what releases it; an OPEN bead nothing holds is
-        # dispatchable now, though bd keeps it out of `--ready` (a demand gate on
-        # an ancestor does that, as does a hold on an ancestor of a bead in
-        # flight), and reconcile slings it anyway; any other live status is
-        # excluded by `--ready` on the status itself, so no blocker closing will
-        # make it dispatchable.
+        # dispatchable now, though bd keeps it out of `--ready` (a hold on an
+        # ancestor of a bead in flight does that), and reconcile slings it
+        # anyway; any other live status is excluded by `--ready` on the status
+        # itself, so no blocker closing will make it dispatchable.
         if [ "$status" = "closed" ] && [ "$claimed" = 1 ]; then state="CLOSED under the until consumer's claim, its close not yet checked (the arm stays until the next pass checks it, and fires if that check reopens the bead)"
         elif [ "$status" = "closed" ]; then state="CLOSED (dispatch no longer owed)"
         elif [ "$claimed" = 1 ]; then state="HELD by the until consumer's claim (the next pass gives it back, and the arm fires once it is open)"
@@ -886,7 +883,7 @@ cmd_list() {
         else
             flight="$(flight_of "$json")"
             if [ -n "$flight" ]; then state="DISPATCHABLE NOW (in flight, $flight: a hold on an ancestor leaves it running, and no blocker of its own is open)"
-            else state="DISPATCHABLE NOW (nothing holds it; bd keeps it out of --ready only for a wait the arm does not count, such as a demand gate on an ancestor)"; fi
+            else state="DISPATCHABLE NOW (no open blocks blocker sits on it or on its ancestors, though bd keeps it out of --ready)"; fi
         fi
         printf '%s -> %s [%s]%s\n' "$id" "${target:-?}" "$state" "${reason:+ — $reason}"
     done < "$rows"
@@ -1301,7 +1298,7 @@ until_recover() {
 # `blocks` blocker of its own, no edge naming a bead this store cannot read, and
 # no live-work mark. Anything else is an expected state, reported and left open,
 # never a pass failure, and so is a bead reopened because something landed on it
-# while the pass held it. A held close (an open visit on the bead; bead-rehome
+# while the pass held it. A held close (an open human gate on the bead; bead-rehome
 # refuses rather than force-closing) is reported, and the bead given back
 # without the pointer bead-rehome stamped, so a later pass retries it. An
 # already-recorded different successor is reported and left to its closer.
@@ -1435,9 +1432,9 @@ reconcile_until() {
                     *) ufailed=$((ufailed + 1)) ;;
                 esac ;;
             5) if fence_release "$id" withdraw; then
-                   echo "$PROG: HELD $id — until target $succ closed, but the close is held (commonly an open visit on it); the successor pointer bead-rehome stamped is withdrawn, and a later pass retries" >&2
+                   echo "$PROG: HELD $id — until target $succ closed, but the close is held (commonly an open human gate on it); the successor pointer bead-rehome stamped is withdrawn, and a later pass retries" >&2
                else
-                   echo "$PROG: HELD $id — until target $succ closed, but the close is held (commonly an open visit on it)" >&2
+                   echo "$PROG: HELD $id — until target $succ closed, but the close is held (commonly an open human gate on it)" >&2
                    ufailed=$((ufailed + 1))
                fi
                held=$((held + 1)) ;;
@@ -1670,16 +1667,15 @@ reconcile_dispatch() {
             left=$((left + 1)); left_ids+=("$id"); continue
         fi
 
-        # Nothing holds it, but bd keeps it unready through the parent-child
-        # cascade, as it does under an ancestor that waits only on a demand gate,
-        # and over a bead in flight under any held ancestor — say why a not-ready
-        # bead is being slung, so the pass log is legible.
+        # Nothing holds it, but bd keeps it unready, as its parent-child cascade
+        # does over a bead in flight under any held ancestor — say why a
+        # not-ready bead is being slung, so the pass log is legible.
         if [ "$ready" != "1" ]; then
             flight="$(flight_of "$json")"
             if [ -n "$flight" ]; then
                 echo "$PROG: nothing holds $id: it is in flight ($flight), so a hold on an ancestor leaves it running, and no blocker of its own is open. bd keeps it out of --ready all the same — dispatching"
             else
-                echo "$PROG: nothing holds $id: no open blocker sits on it, and any on its ancestors is a demand gate. bd keeps it out of --ready all the same — dispatching"
+                echo "$PROG: nothing holds $id: no open blocks blocker sits on it or on its ancestors. bd keeps it out of --ready all the same — dispatching"
             fi
         fi
 

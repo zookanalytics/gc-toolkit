@@ -11,7 +11,7 @@ bead.
 Before this existed, it lived in an agent's head. `gc sling` pours its
 formula immediately and takes no notice of the bead's `blocks`
 dependencies — the mechanism is in
-[gascity-routing-model.md](gascity-routing-model.md#a-blocks-dep-between-work-beads-does-not-hold-a-graphv2-dispatch),
+[gascity/routing-model.md](gascity/routing-model.md#a-blocks-dep-between-work-beads-does-not-hold-a-graphv2-dispatch),
 and the short version is that none of the records the pour creates
 carries an edge to the work bead, so a `blocks` edge between two work
 beads is not on any path a readiness query walks. Sling a blocked bead
@@ -33,9 +33,9 @@ yet" in this city's dispatch path.
 **Boundaries.** *Why* a dependency edge does not gate a formula dispatch,
 and which record each delivery lane routes, belong to the routing
 contract and live in
-[gascity-routing-model.md](gascity-routing-model.md). Recovering a pour
-that already happened is
-[gascity-dispatch-containment.md](gascity-dispatch-containment.md). This
+[gascity/routing-model.md](gascity/routing-model.md). A pour that already
+happened is ended through Gas City's run cancel, as the pack's decline does
+([pack-authoring.md](pack-authoring.md#a-run-that-must-not-advance-is-cancelled-after-its-wait-is-recorded)). This
 doc does not cover slinging in general, and it does not speak for what a
 dep edge means to `bd` — it defers to `bd`'s own readiness predicate
 rather than restating it. What holds an armed bead is defined once, in
@@ -109,15 +109,16 @@ deferred-dispatch.sh disarm <bead> --reason "superseded by <x>"
 
 ## Work assigned to a named agent owes a notice
 
-A named session takes its work by assignee, never by route
-([gascity-routing-model.md](gascity-routing-model.md#lane-2--bd-update-bead---assignee-named-session-direct-named-session-delivery)).
-Its hook offers it a bead assigned to it once `bd` reports the bead ready,
+gc-toolkit hands work to a named agent by assignee, never by route. The
+agent's hook offers it a bead assigned to it once `bd` reports the bead ready
+([gascity/routing-model.md](gascity/routing-model.md#the-read-side-the-claim-predicate)),
 and under `wake_mode = "resume"` nothing else wakes an idle named session
 when that happens. The controller's claim, continuation and execution
 backstops govern pool sessions only, the agent's `nudge` text is typed at
 launch, and the controller restarts an alive named session onto a new
-assignment only under `"fresh"`. So the dispatch an assignment owes is a
-notice to the agent:
+assignment only under `"fresh"`
+([gascity/agent-types.md](gascity/agent-types.md#an-assignment-gives-a-named-session-no-turn)).
+So the dispatch an assignment owes is a notice to the agent:
 
 ```bash
 "$PACK_DIR/assets/scripts/deferred-dispatch.sh" notify <bead> \
@@ -192,9 +193,8 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
   ready, and retires the notices no longer owed (see
   [Work assigned to a named agent owes a notice](#work-assigned-to-a-named-agent-owes-a-notice));
 - **dispatches** every armed open bead nothing holds — the ones `bd` reports
-  ready, and also the ones bd keeps unready only through an ancestor that
-  waits on a demand gate, or through any held ancestor of a bead in flight
-  (see below) — stamping its own
+  ready, and also a bead in flight that bd keeps unready only through a held
+  ancestor (see below) — stamping its own
   `gc.dispatch_when_ready_slung` marker in its unproven `slinging@` state,
   running the recorded sling, promoting the marker to `slung@` on success,
   then clearing the record;
@@ -226,14 +226,15 @@ Each pass runs `deferred-dispatch.sh reconcile`, which:
 
 The arm waits on what holds the bead, as `assets/scripts/hold-lib.sh`
 defines it: an open `blocks` blocker on the bead or on one of its
-parent-child ancestors. A park and a prerequisite hold alike, so an armed
-member of a parked epic, or of an epic that waits on a task, is held at any
-depth under it, and so is a bead whose own blocker is still open. A demand
-gate on an ancestor does not count: it is the operator's pending decision
-(`gc.demand_for`), and waiting on that decision is not a hold. A demand gate
-on the bead itself does count. Where `bd` decides the same question, the
-definition follows it: a closed or pinned blocker holds nothing, and a closed
-or pinned ancestor ends the walk.
+parent-child ancestors. A park, a prerequisite and a human gate hold alike,
+so an armed member of a parked epic, of an epic that waits on a task, or of
+an epic that waits on a person's answer is held at any depth under it, and so
+is a bead whose own blocker is still open. A wait on an epic is a wait of the
+whole, which bd's cascade carries to every part that has not started, so a
+wait that belongs to one member goes on that member
+([component-model.md](component-model.md#i1-in-full-the-hold-the-demand-and-the-shape-law)).
+Where `bd` decides the same question, the definition follows it: a closed or
+pinned blocker holds nothing, and a closed or pinned ancestor ends the walk.
 
 A read that fails fails the pass, so an unread hold never passes for none. A
 read that answers without an id it was asked for says this store holds no
@@ -258,10 +259,9 @@ close, while the epic's members that have not started stay held, including
 the ones under a parent in flight.
 
 `bd list --ready` stays the fast path. bd's `is_blocked` flag cascades down
-parent-child edges, so an armed child of an epic that waits only on a demand
-gate never enters `--ready`, and neither does a bead in flight under a parked
-epic. The pass therefore asks hold-lib about every open armed bead bd keeps
-unready, and slings the ones nothing holds. The
+parent-child edges, so a bead in flight under a parked epic never enters
+`--ready`. The pass therefore asks hold-lib about every open armed bead bd
+keeps unready, and slings the ones nothing holds. The
 status gate still holds (a non-`open` bead is never dispatched), and an
 assignee still keeps the pass off the bead. The pass reads each generation
 of ancestors in one listing and their blockers in one more, so its cost does

@@ -13,11 +13,11 @@
 #     Either the order is not running (check-cadence-live/I10 is the direct cause
 #     there, but a single owed arm makes the effect concrete) or the dispatch is
 #     stuck. A hold is the one reconcile slings on, assets/scripts/hold-lib.sh's:
-#     an open `blocks` blocker on the bead or on a parent-child ancestor, a
-#     demand gate on an ancestor aside. So an arm a park holds, by an edge of its
-#     own or its epic's, is not owed: a park leaves the arm intact and its status
-#     open, and the arm fires when the park releases. A bead in flight (a branch,
-#     a merge_result or a rejection_reason) is held by its own blockers alone, so
+#     an open `blocks` blocker on the bead or on a parent-child ancestor. So an
+#     arm a park or a human gate holds, by an edge of its own or its epic's, is
+#     not owed: the blocker leaves the arm intact and its status open, and the
+#     arm fires when the blocker closes. A bead in flight (a branch, a
+#     merge_result or a rejection_reason) is held by its own blockers alone, so
 #     its arm is owed under a parked epic, where reconcile slings it.
 #     check-blocked-work-armed asks blocked work for a dispatch path and nothing
 #     more, and an arm is one, so an arm that never fires is this check's to see.

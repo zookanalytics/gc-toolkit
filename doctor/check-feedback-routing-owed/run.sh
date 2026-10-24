@@ -7,7 +7,7 @@
 # a second arm (pr-facts.sh, and now --route-comments-only). The two are
 # separate metadata: `pr_posture` says a human is waiting (`commented` or
 # `changes_requested`), and `pr_comment_disposition` says what answered them (a
-# rework child or a visit). When the posture is stamped but the disposition is
+# rework child, `rework:<id>`, or a human gate, `human:<id>`). When the posture is stamped but the disposition is
 # never written, the anchor reads as handled while the operator's review sits
 # unrouted, and nothing else surfaces the gap — the operator only learns of it
 # by noticing their comment went unanswered.
@@ -19,7 +19,7 @@
 #
 # Two shapes are NOT the gap and are exempted:
 #   * a `pr_unengaged_threads` marker at the posture's head — the unengaged
-#     review-thread arm files a visit and stamps that head instead of a
+#     review-thread arm files a human gate and stamps that head instead of a
 #     disposition, so the hold is tracked, just not through a disposition.
 #   * a posture still carrying no `@<since>` instant (the pre-dated 2-component
 #     shape) — its age cannot be bounded, so it waits for the next sweep, when
@@ -142,7 +142,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     while IFS=$'\t' read -r id posture oid since has_disp unengaged; do
         [ -n "$id" ] || continue
         [ "$has_disp" = "true" ] && continue          # routed: a disposition names what answered it
-        # The unengaged review-thread arm records a visit and stamps the head in
+        # The unengaged review-thread arm files a human gate and stamps the head in
         # pr_unengaged_threads instead of a disposition, so a marker at this same
         # head is a routed hold, not a gap.
         [ -n "$oid" ] && [ "$unengaged" = "$oid" ] && continue

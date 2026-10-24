@@ -207,20 +207,17 @@ gc bd list --status=in_progress,open --json --limit=0 | tr -d '[:cntrl:]' | {
 # liveness loop. Reads the bead-list array on stdin, writes the surviving array
 # on stdout.
 #
-# A bead names its owner in up to three places and only one of them is an
-# assignee. A workflow STEP bead has no assignee at all: gc bd list --json omits
-# the key when it is empty, and the step names its owner in
-# metadata.gc.session_id, which is what gc.session_affinity=require pins it to.
-# A workflow ROOT bead names only metadata.gc.session_name.
+# A bead names its holder in its assignee, gc.session_id or gc.session_name,
+# and which of them it carries depends on how far it has got. A workflow ROOT,
+# for one, carries only gc.session_name (docs/gascity/agent-types.md, "Which
+# fields name a bead's holder").
 #
-# Precedence runs session id, then assignee, then session name. Only the id
-# names a session that will never come back. It is re-stamped on every claim, so
-# it always names the session actually holding the bead. The other two are labels
-# a successor inherits: pool work is assigned to the slot, and the slot stays
-# live under whoever holds it next. A crashed pool session leaves a bead whose
-# assignee and session name both name that still-live slot, so resolving it on
-# either label reports the successor's life as the dead owner's, and the bead
-# stays in_progress under an owner that never returns.
+# Precedence runs session id, then assignee, then session name, because only
+# the id always names one session. The other two can be an identity a later
+# session carries too, such as a named session's alias or a tmux_alias pool's
+# runtime name. Resolving a dead session's bead on that identity reads the
+# later session's life as the dead owner's, and the bead stays in_progress
+# under an owner that never returns.
 jq -c '[ .[]
   | . as $bead
   | (.metadata // {}) as $m
@@ -234,36 +231,49 @@ jq -c '[ .[]
 # Drop beads whose work already reached a downstream court, so orphan recovery
 # never returns finished work to the pool or marks it. The crash-loop signal is a
 # RATE off recovered_at/recovered_count, so a re-recovered in-flight bead
-# escalates a moot visit each cycle; dropping it here is what stops both the
-# re-dispatch and the escalation. Two states name not-the-pool's work: an
-# in-flight PR (merge_result pre_open_gate/pull_request) or a human gate
-# (gc.routed_to=human). pr.machine is not read: a progressing stamp is written
-# only with an anchor merge_result, which unanchoring clears while leaving the
-# stamp, so on a repooled bead it is stale — the in-flight-PR test already covers
-# a bead still in the machine. A bead carrying neither state is still the pool's
-# to recover. Reads the candidate array on stdin (the host-bead-skip result),
-# writes the survivors on stdout, and touches no field a survivor arrived with.
+# puts a moot question to a person each cycle; dropping it here is what stops
+# both the re-dispatch and the question. Work in any of these states is not the
+# pool's: an in-flight PR (merge_result pre_open_gate/pull_request), a human route
+# (gc.routed_to=human), or a conversation: a task assigned to `human`, or to the
+# alias of its sitting, which names the task's own id, bare or qualified, or its
+# `c-` fallback (assets/scripts/conversation.sh, which downstream-court-skip.test.sh
+# holds this copy to). No session carries either owner, so the liveness loop
+# would orphan every conversation. pr.machine is not read: a progressing stamp is
+# written only with an anchor merge_result, which unanchoring clears while
+# leaving the stamp, so on a repooled bead it is stale — the in-flight-PR test
+# already covers a bead still in the machine. A bead in none of these states is
+# still the pool's to recover. Reads the candidate array on stdin (the
+# host-bead-skip result), writes the survivors on stdout, and touches no field a
+# survivor arrived with.
 jq -c '[ .[]
   | (.metadata // {}) as $m
   | ($m.merge_result // "") as $mr
   | ($m["gc.routed_to"] // "") as $routed
+  | ((.assignee // "") | tostring) as $a
+  | ((.id // "") | tostring) as $id
   | select($mr != "pre_open_gate" and $mr != "pull_request"
-           and $routed != "human") ]'
+           and $routed != "human")
+  | select(((.issue_type // "") == "task"
+            and ($a == "human"
+                 or ($id != "" and any(($id, "c-" + $id); . as $n
+                      | $a == $n or ($a | endswith("/" + $n)) or ($a | endswith("." + $n))))))
+           | not) ]'
 # <<< downstream-court-skip
 } | {
 # >>> topology-root-skip
-# Drop graph.v2 topology ROOTS before the liveness loop. A root names its owner
-# only in gc.session_name — the pool SLOT, which a successor session keeps alive
-# — so resolving its liveness reads the successor's life as the dead run's and
-# warrants a live session; and a root has no worktree, so the salvage path only
-# churns a witness-salvage-refused notice. A root is not recoverable work: its
-# steps carry the work and the gc.session_id, and its close is the
-# control-dispatcher's workflow-finalize. The kind set is
-# beadmeta.WorkflowTopologyKinds (workflow, scope, spec) — the same set the hook
-# (hookCandidateClaimable) and pool demand (demandRowServable) refuse, mirrored
-# by liveness-sweep.sh's topology_kind. Reads the candidate array on stdin (the
-# downstream-court-skip result), writes the survivors on stdout, and touches no
-# field a survivor arrived with.
+# Drop graph.v2 topology ROOTS before the liveness loop. A root is not
+# recoverable work: its steps carry the work, its close is the
+# control-dispatcher's workflow-finalize, and orphan-dispose.sh refuses it as
+# root_not_schedulable. Left in, it misleads the loop. A root names a session
+# only in gc.session_name, a stamp the controller copies from its worked steps,
+# so that session's liveness says nothing about the run. Resolved live, the root
+# can draw a warrant against a session doing other work, and resolved dead, it
+# churns a witness-salvage-refused notice on a bead with no worktree. The kind
+# set is beadmeta.WorkflowTopologyKinds (workflow, scope, spec), matched on
+# gc.kind alone, the same match topology_kind in liveness-classify.sh makes. The
+# comment there names Gas City's own check and where the two differ. Reads the
+# candidate array on stdin (the downstream-court-skip result), writes the
+# survivors on stdout, and touches no field a survivor arrived with.
 jq -c '[ .[]
   | (.metadata // {}) as $m
   | ($m["gc.kind"] // "") as $kind
@@ -293,10 +303,9 @@ the same way lands on that finding as another occurrence.
 
 A bead naming no owner in any of the three places is already in the pool's
 court, and it is the only thing host-bead-skip drops. Every OTHER owned bead
-reaches the liveness loop regardless of kind — a visit whose session died
-SHOULD return to the pool (cold continuity is respawn-and-reconstitute) — save
-one class topology-root-skip drops by kind: the graph.v2 topology root, which
-is not recoverable work.
+reaches the liveness loop regardless of kind, save the states
+downstream-court-skip drops and one class topology-root-skip drops by kind: the
+graph.v2 topology root, which is not recoverable work.
 
 A bead whose work has ALREADY REACHED a downstream court is dropped next, by
 state not by kind. Orphan recovery returns LOST work to the pool, but a bead in
@@ -304,16 +313,22 @@ the refinery's landing pipeline or on a person's board is not lost: the refinery
 enumerates it by `merge_result` and owns landing it. Returning it to the pool
 re-dispatches finished work AND stamps a recovery on it, and the crash-loop
 signal downstream reads that stamp as a RATE off recovered_at/recovered_count —
-so a bead that keeps arriving here escalates a moot visit every cycle. Such a
-bead still names an owner: the refinery that will land it, or the person it is
-parked on. Host-bead-skip drops only the beads that name no owner, so this one
-passes it, and in the liveness loop a drained owner would false-orphan it.
-Downstream-court-skip reads the state the bead already carries and drops it, so
-it never enters the liveness loop and is never marked.
-Two states name work that is not the pool's to recover:
+so a bead that keeps arriving here puts a moot question to a person every
+cycle. Such a bead still names an owner: the refinery that will land it, or the
+person it is parked on. Host-bead-skip drops only the beads that name no owner,
+so this one passes it, and in the liveness loop a drained owner would
+false-orphan it. Downstream-court-skip reads the state the bead already carries
+and drops it, so it never enters the liveness loop and is never marked.
+Work in any of these states is not the pool's to recover:
 - an in-flight PR — `merge_result` is `pre_open_gate` or `pull_request`;
-- a human gate — `gc.routed_to=human`, the city's "no agent will take it" marker
-  (a merge gate, an operator approval).
+- a human route — `gc.routed_to=human`, the city's "no agent will take it"
+  marker (a merge gate, an operator approval);
+- a conversation — a task assigned to `human` while it waits in the operator's
+  queue, or to the alias of the sitting that holds it, which names the task's
+  own id (`assets/scripts/conversation.sh`). Gas City reserves `human` from
+  session aliases, and a sitting whose session closed keeps its alias as the
+  assignee until a session under that alias takes the conversation back, so no
+  live session ever carries either owner and the loop would orphan it.
 
 `pr.machine` is deliberately not read here. A `progressing` stamp is written only
 alongside an anchor `merge_result` (`merge.sh` and `gate-ensure.sh` gate the write
@@ -323,18 +338,10 @@ stale stamp, and a bead still in the machine carries the `merge_result` the firs
 bullet already drops.
 
 One owned class is dropped by kind rather than state: the graph.v2 topology
-root. A root carries `gc.kind` in the topology set — `workflow`, `scope`,
-`spec` — and only a `gc.session_name` slot label, never a `gc.session_id`. It
-is the anchor its STEP beads hang from, not a claimable unit of work; the steps
-carry the work and the `gc.session_id` that names the session actually holding
-them. The root's own close is the control-dispatcher's `workflow-finalize`, and
-`orphan-dispose.sh` already refuses a root as `root_not_schedulable`, so the
-loop has no recovery to offer it. Left in, a root does harm either way it
-resolves: live via the inherited slot label it is warranted against the
-successor that now holds the slot, absent it churns a `witness-salvage-refused`
-notice on a bead that never had a worktree. Topology-root-skip drops it before
-the loop, by the same kind set `hookCandidateClaimable` and the pool-demand
-`demandRowServable` refuse (`liveness-sweep.sh`'s `topology_kind` mirrors it).
+root, whose `gc.kind` is `workflow`, `scope` or `spec`. It is the anchor its
+STEP beads hang from, not a claimable unit of work. Topology-root-skip drops it
+before the loop, and the filter's comment says what a root left in would do
+there.
 
 Two more exclusions are structural, not kind-based:
 - **Infrastructure identities** (refinery, witness, deacon, mechanik,
@@ -538,21 +545,21 @@ and treat the branch's state as unknown rather than gone. The bead stays owned
 by its dead session, so every cycle detects it again; the window keeps a
 person's moot or benign answer standing for a day.
 
-Salvage and the verify below run only for a work bead; a visit, a review, or a
-graph.v2 step or root has no worktree to salvage and no branch of its own to
-verify. Classify first, the way part 5's `orphan-dispose.sh` does, and for
-anything but a `source` work bead skip straight to part 5:
+Salvage and the verify below run only for a work bead; a review, or a graph.v2
+step or root has no worktree to salvage and no branch of its own to verify.
+Classify first, the way part 5's `orphan-dispose.sh` does, and for anything but
+a `source` work bead skip straight to part 5:
 ```bash
 # >>> salvage-scope-gate
 # Salvage and part 4's merge-verify are WORK-BEAD operations: both read
 # metadata.work_dir and metadata.branch, which a polecat stamps on the work
-# (source) bead alone. A visit, a review, a graph.v2 step and a graph.v2 root
-# carry neither — a review's review_branch names the anchor under review, not
+# (source) bead alone. A review, a graph.v2 step and a graph.v2 root carry
+# neither — a review's review_branch names the anchor under review, not
 # work of its own — so salvaging one refuses on the husk guard and files a
 # no-signal witness-salvage-refused, and verifying one reads `unknown` off an
 # empty branch and files witness-branch-recovery-unknown. Classify the bead
-# as part 5's orphan-dispose.sh does — task_kind=visit, then task_kind=review,
-# then a root (gc.kind=workflow or gc.formula_contract=graph.v2), then a step
+# as part 5's orphan-dispose.sh does — task_kind=review, then a root
+# (gc.kind=workflow or gc.formula_contract=graph.v2), then a step
 # (gc.step_ref), else a source — and salvage only a source; anything else skips
 # to part 5, which releases or skips it by that same class.
 # salvage-scope-gate.test.sh runs this gate and orphan-dispose.sh over one set of
@@ -562,8 +569,7 @@ anything but a `source` work bead skip straight to part 5:
 # real orphan.
 IS_WORK_BEAD=$(printf '%s' "$BEAD_JSON" | jq -r '
   (.[0].metadata // {}) as $m
-  | if   ($m.task_kind // "") == "visit" then "0"
-    elif ($m.task_kind // "") == "review" then "0"
+  | if   ($m.task_kind // "") == "review" then "0"
     elif (($m["gc.kind"] // "") == "workflow") or (($m["gc.formula_contract"] // "") == "graph.v2") then "0"
     elif ($m["gc.step_ref"] // "") != "" then "0"
     else "1" end' 2>/dev/null)
@@ -614,7 +620,7 @@ A push of work that may already be on origin is idempotent and never loses
 commits, while `unknown` must never be read as gone:
 ```bash
 if [ "$IS_WORK_BEAD" != "1" ]; then
-  echo "not a work bead (a visit, a review, or a graph.v2 step or root) — no worktree by construction; skipping salvage, straight to disposal." >&2
+  echo "not a work bead (a review, or a graph.v2 step or root) — no worktree by construction; skipping salvage, straight to disposal." >&2
 elif [ "$NOTHING_TO_SALVAGE" = "1" ]; then
   echo "source work bead with no work_dir and no branch — never had a worktree; nothing to salvage, straight to disposal." >&2
 elif [ "$BRANCH_ON_ORIGIN" = "present" ]; then
@@ -638,7 +644,7 @@ origin (or a guard refused), the work may be lost: file the refusal best-effort
 --about <bead> --distinct ...`) and fall through — recovery is load-bearing, the notice
 advisory. A source bead with neither a work_dir nor a branch is not that case:
 it never had a worktree, so the nothing-to-salvage arm skips it with no refusal
-to file. A visit, a review, or a graph.v2 step or root never reaches this branch
+to file. A review, or a graph.v2 step or root never reaches this branch
 either; the scope gate has no worktree to lose for it and sent it to part 5.
 
 **4. Verify before reset (work beads only).** A bead the scope gate marked
@@ -700,7 +706,7 @@ fi
 
 Remove the worktree only under the guard, only when the bead recorded one, and
 from the rig root, and never let a failed removal abort the step. `git worktree
-remove` exits 128 for any path that names no registered worktree: a visit, a
+remove` exits 128 for any path that names no registered worktree: a review, a
 graph.v2 step and a graph.v2 root carry no `metadata.work_dir`, so `WORKTREE` is
 empty for them, while a husk work_dir (worktree removed, directory left behind)
 or an already-pruned path is nonempty but unregistered. Under `set -e` an
@@ -722,11 +728,12 @@ fi
 
 A refusal leaves the worktree standing and files a patrol finding that names the
 bead in its text (`patrol-finding.sh --scope witness-findings --key
-witness-unplaceable-owner --title <one line> --message <the bead, its worktree
-and the refusal>`), because a gate lands in its bead's store and this bead's
-store cannot be named. Disposal still runs either way: a bead whose store cannot
-be named is exactly the bead a person needs to see, and leaving it owned hides
-it.
+witness-unplaceable-owner.<bead> --title <one line> --message <the bead, its
+worktree and the refusal>`), because a gate lands in its bead's store and this
+bead's store cannot be named. The key carries the bead, so each such bead is a
+finding of its own rather than a recurrence on the first one filed. Disposal
+still runs either way: a bead whose store cannot be named is exactly the bead a
+person needs to see, and leaving it owned hides it.
 
 Then hand the bead to `orphan-dispose.sh`, which picks the disposal from what
 the bead IS:
@@ -752,12 +759,10 @@ fi
 
 Each kind is disposed by what it is. Some kinds return a bead to a pool to be
 claimed again, and some of those return it only when the work has not already
-reached a downstream court. A **visit** gives up its assignee and nothing else,
-because its route, continuation group and task_kind are its identity. A
-**review** is the source bead of its own mol-review molecule and carries no
-worktree of its own, so it disposes by the source contract below — recognised by
-task_kind before the source arm the way a visit is, and reopened to its review
-pool. A **workflow step under a live root** gives up the
+reached a downstream court. A **review** is the source bead of its own
+mol-review molecule and carries no worktree of its own, so it disposes by the
+source contract below — recognised by task_kind before the source arm, and
+reopened to its review pool. A **workflow step under a live root** gives up the
 dead session's pin and keeps the rest, so the molecule resumes at that same step
 under whoever claims it next. A **workflow root** is skipped: nothing claims a
 root, it closes when its workflow-finalize step closes, and setting it open,
@@ -796,7 +801,7 @@ whole filter exists to stop. Gate the record on the disposal's own verdict:
 ```bash
 # >>> recovery-stamp-gate
 # STAMP_RECOVERY is 1 only for a bead orphan-dispose RETURNED to the pool
-# (result=disposed: a released visit or step, or a delegated source or review). Every other
+# (result=disposed: a released step, or a delegated source or review). Every other
 # verdict — skipped (a root, or a source already in a downstream court), partial,
 # failed, or an unread empty — returned nothing to the pool, so no recovery is
 # stamped and no crash-loop rate is read.
