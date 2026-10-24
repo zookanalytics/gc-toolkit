@@ -22,9 +22,9 @@
 #   refinery-workspace.sh checks [--rig-root <dir>]
 #       leave the gate's checks directory empty, creating it when absent
 #
-# <dir> is the rig's checkout. Without --rig-root it is GC_RIG_ROOT, else the
-# roster entry for GC_RIG, the lookup the patrol's blocks make. Every git call
-# names the repository with -C, so the caller's cwd plays no part. The prep
+# <dir> is the rig's checkout. Without --rig-root it is the one rig-root.sh
+# beside this script resolves, the lookup the patrol's blocks make. Every git
+# call names the repository with -C, so the caller's cwd plays no part. The prep
 # worktree is detached, so staging and teardown create and delete no branch,
 # and the rig root's HEAD never moves.
 #
@@ -74,9 +74,9 @@ while [ $# -gt 0 ]; do
 done
 if [ "$SUB" = stage ]; then [ -n "$BRANCH" ] || usage; else [ -z "$BRANCH" ] || usage; fi
 
-[ -n "$RIG_ROOT" ] || RIG_ROOT="${GC_RIG_ROOT:-}"
-[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json 2>/dev/null | jq -r --arg r "${GC_RIG:-}" '.rigs[] | select(.name == $r) | .path' 2>/dev/null)
-[ -n "$RIG_ROOT" ] || { echo "$PROG: cannot resolve the rig root (no --rig-root, GC_RIG_ROOT unset, GC_RIG='${GC_RIG:-}' matched no rig in the roster)" >&2; exit 2; }
+SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+[ -n "$RIG_ROOT" ] || RIG_ROOT=$("$SCRIPTS_DIR/rig-root.sh")
+[ -n "$RIG_ROOT" ] || { echo "$PROG: cannot resolve the rig root (no --rig-root, and rig-root.sh resolved none)" >&2; exit 2; }
 COMMON=$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
 case "$COMMON" in
   /*) ;;

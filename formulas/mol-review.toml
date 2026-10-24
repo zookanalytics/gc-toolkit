@@ -121,9 +121,9 @@ verdict recorded against a head you never read certifies unreviewed code:
 # The fetch and the head read name the rig's repository by path, so the
 # session's cwd cannot pick it. An empty REPO would let it, because `git -C ""`
 # runs in the cwd, so an unresolvable rig fails closed.
-REPO="${GC_RIG_ROOT:-}"
-[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
+REPO=$("${RR:?rig-root.sh not found in the pack}")
+[ -n "$REPO" ] || { echo "review: cannot resolve the rig root" >&2; exit 1; }
 git -C "$REPO" fetch origin "$BASE" "$BRANCH" || { echo "review: fetching $BASE and $BRANCH into $REPO failed; refusing to pin a commit from refs that may be stale" >&2; exit 1; }
 REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
 [ -n "$REVIEWED_OID" ] || REVIEWED_OID=$(git -C "$REPO" rev-parse "origin/$BRANCH")
@@ -179,9 +179,9 @@ REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
 # The diff reads origin/$BASE from the rig's repository, named by path as in
 # load-dispatch: another checkout's origin/$BASE can be stale, and a diff
 # against it shows changes the base made as changes the branch made.
-REPO="${GC_RIG_ROOT:-}"
-[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
+REPO=$("${RR:?rig-root.sh not found in the pack}")
+[ -n "$REPO" ] || { echo "review: cannot resolve the rig root" >&2; exit 1; }
 git -C "$REPO" diff --stat "origin/$BASE...$REVIEWED_OID"
 git -C "$REPO" diff       "origin/$BASE...$REVIEWED_OID"
 # <<< review-diff
@@ -206,9 +206,9 @@ hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_STEP_BEAD_ID" -- "$@"; else "$@";
 # >>> review-workspace-add
 # --repo names the rig's repository by path, so the session's cwd cannot pick
 # it. An empty --repo would let it, so an unresolvable rig fails closed.
-REPO="${GC_RIG_ROOT:-}"
-[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
+REPO=$("${RR:?rig-root.sh not found in the pack}")
+[ -n "$REPO" ] || { echo "review: cannot resolve the rig root" >&2; exit 1; }
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done

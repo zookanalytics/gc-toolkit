@@ -112,7 +112,7 @@ eq "$(bare_git "$TMP/zdg.sh")" "rev-parse " "zero-diff-guard: the only git call 
 CITY="$TMP/city"
 PACK="$CITY/rigs/gc-toolkit/assets/scripts"
 mkdir -p "$PACK" "$TMP/bin"
-cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$HERE/refinery-workspace.sh" "$HERE/detached-job.sh" "$PACK/"
+cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$HERE/refinery-workspace.sh" "$HERE/detached-job.sh" "$HERE/rig-root.sh" "$PACK/"
 cat > "$PACK/lifecycle.sh" <<'LC'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE_LC_LOG"
@@ -301,17 +301,21 @@ eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "stale: nothing is pushed"
 
 echo "── a refusal files its visit through the pack lifecycle.sh came from ──"
 # The refinery sits in a scratch directory, GC_RIG_ROOT is unset so the rig
-# comes from the roster, and GC_CITY_PATH names no pack, so the only place that
-# names the pack is the lifecycle.sh the step found.
+# comes from the roster, and GC_CITY_PATH names no pack. GC_PACK_DIR holds
+# rig-root.sh alone, so the block resolves the rig, and the only place that
+# names the rest of the pack is the lifecycle.sh the step found.
+RR_ONLY="$TMP/rig-root-only"
+mkdir -p "$RR_ONLY/assets/scripts"
+cp "$HERE/rig-root.sh" "$RR_ONLY/assets/scripts/"
 fixture "$TMP/nopack" nowork
 : > "$D/gc.log"; : > "$D/lc.log"
 ( cd "$ELSEWHERE" && env GC_RIG_ROOT="$D/rig" GC_RIG=myrig GC_CITY_PATH="$CITY" WORK=wb BRANCH=polecat/wb TARGET=main \
     TARGET_BRANCH_DEFAULT=main FAKE_ROSTER="$D/roster.json" FAKE_META="$D/bead.json" FAKE_LOG="$D/gc.log" \
     FAKE_LC_LOG="$D/lc.log" bash "$TMP/prep.sh" ) >"$D/prep.out" 2>&1; PREP_RC=$?
 eq "$PREP_RC" 0 "nopack: the prepare stages the branch"
-nopack_merge_push() { # <lifecycle.sh>
+nopack_merge_push() { # <lifecycle.sh> [<GC_PACK_DIR>]
   : > "$D/gc.log"; : > "$D/lc.log"
-  OUT=$(cd "$ELSEWHERE" && env GC_RIG_ROOT="" GC_RIG=myrig GC_CITY_PATH="" TEST_LC="$1" WORK=wb BRANCH=polecat/wb \
+  OUT=$(cd "$ELSEWHERE" && env GC_PACK_DIR="${2-$RR_ONLY}" GC_RIG_ROOT="" GC_RIG=myrig GC_CITY_PATH="" TEST_LC="$1" WORK=wb BRANCH=polecat/wb \
     TARGET=main FAKE_ROSTER="$D/roster.json" FAKE_META="$D/bead.json" FAKE_LOG="$D/gc.log" FAKE_LC_LOG="$D/lc.log" \
     STRATEGY=direct bash "$TMP/merge-push.sh" 2>&1); RC=$?
 }
@@ -328,6 +332,15 @@ eq "$RC" 1 "nopack/no escalate.sh: merge-push stops"
 has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion" "nopack/no escalate.sh: the bead is parked as a false completion"
 hasnt "$(cat "$D/gc.log")" "escalate " "nopack/no escalate.sh: no visit is filed"
 has "$OUT" "is parked for a human with no refinery-false-completion visit" "nopack/no escalate.sh: the block says the park has no visit"
+# With no pack location at all, rig-root.sh is not found, so the rig does not
+# resolve: the block stops before the check, parks nothing and leaves the work
+# with the refinery to retry.
+nopack_merge_push "$PACK/lifecycle.sh" ""
+eq "$RC" 1 "nopack/no rig-root.sh: merge-push stops"
+has "$OUT" "cannot resolve the rig root; leaving the work with the refinery to retry" "nopack/no rig-root.sh: the block says the rig did not resolve"
+hasnt "$(cat "$D/lc.log")" "transition" "nopack/no rig-root.sh: nothing is parked"
+hasnt "$(cat "$D/gc.log")" "escalate " "nopack/no rig-root.sh: nothing is escalated"
+has "$(cat "$D/gc.log")" "runtime drain-ack" "nopack/no rig-root.sh: the session drains"
 
 echo "── a branch whose commits net to no change is refused ──"
 fixture "$TMP/netzero" netzero

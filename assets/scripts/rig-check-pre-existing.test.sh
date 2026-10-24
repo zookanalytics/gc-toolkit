@@ -198,9 +198,10 @@ block() {
   awk -v m="$2" '$0 ~ ("# >>> " m "$") {f = 1; next} $0 ~ ("# <<< " m "$") {f = 0} f' "$ROOT/formulas/$1" \
     | sed -e 's/^CHECK=".*"$/CHECK="lint"/' -e 's/^TRACKERS=".*"$/TRACKERS="tk-t1 tk-t2"/'
 }
-# The pack the callers find the writer in.
+# The pack the callers find the writer in, and the refinery's block finds
+# rig-root.sh in to resolve the rig.
 PACK="$TMP/pack"
-mk_sut_dir "$PACK/assets/scripts" "$HERE/rig-check-pre-existing.sh"
+mk_sut_dir "$PACK/assets/scripts" "$HERE/rig-check-pre-existing.sh" "$HERE/rig-root.sh"
 mkdir -p "$TMP/city/rigs"
 ln -s "$PACK" "$TMP/city/rigs/gc-toolkit"
 

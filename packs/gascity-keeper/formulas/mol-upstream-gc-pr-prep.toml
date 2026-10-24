@@ -72,9 +72,11 @@ Do not invent defaults.
 
 **2. Reuse or create the worktree.** Check `metadata.work_dir` first; if it
 exists, `cd` there and skip to step 3. Otherwise locate the gascity rig by
-name in `gc rig list --json`. Every git call below names it as
-`git -C "$RIG_ROOT"`, and `git -C ""` runs in the session's cwd, so a roster
-with no gascity rig hands the bead back before anything is fetched or created.
+name, with `assets/scripts/rig-root.sh --rig gascity`, which reads
+`gc rig list --json`. Every git call below names it as `git -C "$RIG_ROOT"`,
+and `git -C ""` runs in the session's cwd, so a roster in which no single rig
+called gascity resolves hands the bead back before anything is fetched or
+created.
 The mail goes out, and the session drains, only after that hand-back is
 written. The worktree is anchored to `$GC_CITY_PATH` beside the rebase
 formula's, never to `$(pwd)`: nothing pins a session's cwd between steps, and
@@ -83,7 +85,9 @@ dirties it:
 
 ```bash
 # >>> upstream-pr-prep-worktree-setup
-RIG_ROOT=$(gc rig list --json | jq -r '.rigs[] | select(.name=="gascity") | .path')
+: "${GC_CITY_PATH:?GC_CITY_PATH must be set; refusing to derive the worktree path from the cwd}"
+RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
+RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}" --rig gascity)
 if [ -z "$RIG_ROOT" ]; then
   # An absent key reads as empty, never as the literal "null", and the keeper
   # the run was slung with stands in for one the bead does not name.
@@ -101,8 +105,8 @@ if [ -z "$RIG_ROOT" ]; then
     exit 1
   fi
   gc mail send "$REQUESTING_KEEPER" -s "pr-prep: no gascity rig for {{issue}}" -m "$(cat <<EOF
-gc rig list --json names no rig called gascity, so no path names the
-repository to branch from. Nothing was fetched, created or pushed.
+No single rig called gascity resolves in gc rig list --json, so no path
+names the repository to branch from. Nothing was fetched, created or pushed.
 
 Bead: {{issue}}
 
@@ -135,7 +139,6 @@ elif [ "$N" -eq 1 ]; then
 else
   BRANCH="upstream-pr/{{issue}}"
 fi
-: "${GC_CITY_PATH:?GC_CITY_PATH must be set; refusing to derive the worktree path from the cwd}"
 WORKTREE_PATH="$GC_CITY_PATH/.gc/worktrees/gascity/pr-prep-{{issue}}"
 mkdir -p "$(dirname "$WORKTREE_PATH")"
 

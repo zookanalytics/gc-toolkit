@@ -11,9 +11,9 @@
 # checked out for the merge, no local branch moves, and nothing is left on disk
 # to remove. git accepts a push without --force only as a fast-forward of the
 # remote's own value, so the push is a fast-forward or nothing. Every git call
-# names its repository with -C, and the rig root resolves from GC_RIG_ROOT or
-# the roster entry for GC_RIG, never from the cwd, so a caller whose cwd sits in
-# another repository cannot steer the push there.
+# names its repository with -C, and the rig root is the one rig-root.sh beside
+# this script resolves, never the cwd, so a caller whose cwd sits in another
+# repository cannot steer the push there.
 #
 # The fast-forward is checked against origin/<target> fetched first. A prepared
 # head that is neither behind nor ahead of it was prepared on a target that has
@@ -108,11 +108,11 @@ case "$ATTEMPTS" in ''|*[!0-9]*) ATTEMPTS=3 ;; *) ATTEMPTS=$((10#$ATTEMPTS)) ;; 
 BACKOFF="${DIRECT_MERGE_PUSH_BACKOFF:-2}"
 case "$BACKOFF" in ''|*[!0-9]*) BACKOFF=2 ;; *) BACKOFF=$((10#$BACKOFF)) ;; esac
 
-# The rig root resolves as the patrol's blocks resolve it, so this script and
-# the block that staged the prepared head name one repository.
-RIG_ROOT="${GC_RIG_ROOT:-}"
-[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "${GC_RIG:-}" '.rigs[] | select(.name == $r) | .path')
-[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='${GC_RIG:-}' matched no rig in the roster); nothing landed"; exit 1; }
+# The rig root resolves through rig-root.sh, as the patrol's blocks resolve it,
+# so this script and the block that staged the prepared head name one
+# repository.
+RIG_ROOT=$("$SCRIPTS_DIR/rig-root.sh")
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root; nothing landed"; exit 1; }
 COMMON=$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir) || { echo "no repository at $RIG_ROOT; nothing landed"; exit 1; }
 PREP_WT="$COMMON/gc-refinery-prep"
 

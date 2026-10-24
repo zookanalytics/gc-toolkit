@@ -90,10 +90,12 @@ in_wt_list() {
 
 # --- Treatment: the extracted snippet, run from the WRONG cwd. ---------------
 # GC_RIG_ROOT names the rig; cwd is an unrelated repo. The worktree must land
-# in the rig, and at the absolute WORKTREE_PATH the caller chose.
+# in the rig, and at the absolute WORKTREE_PATH the caller chose. Every run
+# names this checkout as GC_PACK_DIR, so the snippet resolves the rig through
+# the rig-root.sh under test.
 WT_FIX="$TMP/wt-fix"
 ( cd "$CWD"
-  WORKTREE_PATH="$WT_FIX" GC_RIG_ROOT="$RIG" GC_RIG=ignored bash "$SNIPPET" ) >"$TMP/out.fix" 2>&1 \
+  WORKTREE_PATH="$WT_FIX" GC_PACK_DIR="$ROOT" GC_RIG_ROOT="$RIG" GC_RIG=ignored bash "$SNIPPET" ) >"$TMP/out.fix" 2>&1 \
   || { echo "snippet run failed:"; cat "$TMP/out.fix"; }
 eq "$(in_wt_list "$RIG" "$WT_FIX")" yes "fix: worktree registered in the RIG repo"
 eq "$(in_wt_list "$CWD" "$WT_FIX")" no  "fix: worktree NOT registered in the cwd repo"
@@ -112,7 +114,7 @@ eq "$(in_wt_list "$CWD" "$WT_BARE")" yes "control: bare add follows cwd (registe
 eq "$(in_wt_list "$RIG" "$WT_BARE")" no  "control: bare add never reaches the rig repo"
 
 # --- Fallback: GC_RIG_ROOT empty resolves the rig via `gc rig list --json`. --
-# The snippet's second arm. A fake `gc` answers the roster so the jq path runs
+# rig-root.sh's roster arm. A fake `gc` answers the roster so the lookup runs
 # without a live city.
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gc" <<EOF
@@ -126,7 +128,7 @@ EOF
 chmod +x "$TMP/bin/gc"
 WT_FB="$TMP/wt-fallback"
 ( cd "$CWD"
-  PATH="$TMP/bin:$PATH" WORKTREE_PATH="$WT_FB" GC_RIG_ROOT="" GC_RIG=myrig bash "$SNIPPET" ) >"$TMP/out.fb" 2>&1 \
+  PATH="$TMP/bin:$PATH" WORKTREE_PATH="$WT_FB" GC_PACK_DIR="$ROOT" GC_RIG_ROOT="" GC_RIG=myrig bash "$SNIPPET" ) >"$TMP/out.fb" 2>&1 \
   || { echo "fallback run failed:"; cat "$TMP/out.fb"; }
 eq "$(in_wt_list "$RIG" "$WT_FB")" yes "fallback: gc rig list resolves the rig by name, worktree lands in it"
 eq "$(in_wt_list "$CWD" "$WT_FB")" no  "fallback: worktree NOT registered in the cwd repo"
@@ -135,11 +137,11 @@ eq "$(in_wt_list "$CWD" "$WT_FB")" no  "fallback: worktree NOT registered in the
 # RIG_ROOT resolves to the empty string, so a bare `git -C ""` would follow cwd
 # — the exact coupling this block binds against. The snippet must fail closed
 # and register nothing, in the rig or in cwd. The same fake `gc` roster answers;
-# GC_RIG names a rig it does not carry, so the jq select yields nothing.
+# GC_RIG names a rig it does not carry, so rig-root.sh resolves nothing.
 WT_NOMATCH="$TMP/wt-nomatch"
 nomatch_rc=0
 ( cd "$CWD"
-  PATH="$TMP/bin:$PATH" WORKTREE_PATH="$WT_NOMATCH" GC_RIG_ROOT="" GC_RIG=definitely-not-a-rig bash "$SNIPPET" ) >"$TMP/out.nomatch" 2>&1 || nomatch_rc=$?
+  PATH="$TMP/bin:$PATH" WORKTREE_PATH="$WT_NOMATCH" GC_PACK_DIR="$ROOT" GC_RIG_ROOT="" GC_RIG=definitely-not-a-rig bash "$SNIPPET" ) >"$TMP/out.nomatch" 2>&1 || nomatch_rc=$?
 [ "$nomatch_rc" -ne 0 ] \
   && ok "no-match: unresolvable rig fails closed (snippet exits non-zero)" \
   || bad "no-match: snippet exited 0 with an unresolvable rig — git -C '' followed cwd"

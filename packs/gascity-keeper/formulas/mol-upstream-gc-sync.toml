@@ -58,9 +58,9 @@ WORKTREE_PATH="$(pwd)/worktrees/{{issue}}"
 # The worktree belongs to this rig's checkout (not the upstream rig step 2
 # fetches), named by path so the session's cwd cannot pick the repo. An empty
 # root would let `git -C ""` follow cwd, so an unresolvable rig fails closed.
-OWN_RIG_ROOT="${GC_RIG_ROOT:-}"
-[ -n "$OWN_RIG_ROOT" ] || OWN_RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$OWN_RIG_ROOT" ] || { echo "workspace-setup: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
+OWN_RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}")
+[ -n "$OWN_RIG_ROOT" ] || { echo "workspace-setup: cannot resolve the rig root" >&2; exit 1; }
 git -C "$OWN_RIG_ROOT" fetch --prune origin
 git -C "$OWN_RIG_ROOT" worktree add "$WORKTREE_PATH" --detach "origin/{{base_branch}}"
 # <<< upstream-sync-worktree-add
@@ -70,12 +70,13 @@ gc bd update {{issue}} --set-metadata work_dir="$WORKTREE_PATH"
 
 **2. Fetch upstream rig** (fresh, so the report reflects current upstream):
 ```bash
-RIG_ROOT=$(gc rig list --json | jq -r '.rigs[] | select(.name=="{{upstream_rig}}") | .path')
+RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
+RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}" --rig "{{upstream_rig}}")
 [ -n "$RIG_ROOT" ] && git -C "$RIG_ROOT" fetch --prune origin
 ```
 
-If `{{upstream_rig}}` is not registered in this city (the `select` prints
-empty, so the line exits non-zero instead of letting `git -C ""` fetch the
+If `{{upstream_rig}}` is not registered in this city (rig-root.sh prints
+nothing, so the line exits non-zero instead of letting `git -C ""` fetch the
 current directory's repository), record the failure and abort — the
 `--status=open` + reassign + `gc.routed_to` triplet keeps the bead from
 stranding `in_progress` on this drained session:
@@ -154,7 +155,8 @@ fi
 **2. Run the script and capture output:**
 
 ```bash
-RIG_ROOT=$(gc rig list --json | jq -r '.rigs[] | select(.name=="{{upstream_rig}}") | .path')
+RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
+RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}" --rig "{{upstream_rig}}")
 REPORT_DIR="$(pwd)/.gc/upstream-gc-sync"
 mkdir -p "$REPORT_DIR"
 REPORT_FILE="$REPORT_DIR/{{issue}}.md"

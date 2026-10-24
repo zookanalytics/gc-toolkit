@@ -96,11 +96,14 @@ chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export FAKE_LOG="$TMP/drain.log"
 
-# The pack, where the merge block finds detached-job.sh to stop a gate left
-# running in the prep worktree, and refinery-workspace.sh to stage it:
-# $GC_CITY_PATH/rigs/gc-toolkit.
+# The pack, where the merge block finds rig-root.sh to resolve the rig,
+# detached-job.sh to stop a gate left running in the prep worktree, and
+# refinery-workspace.sh to stage it: $GC_CITY_PATH/rigs/gc-toolkit. pack_city
+# <dir> makes one holding rig-root.sh alone, since the block resolves the rig
+# through it before it looks for anything else.
+pack_city() { mkdir -p "$1/rigs/gc-toolkit/assets/scripts"; cp "$HERE/rig-root.sh" "$1/rigs/gc-toolkit/assets/scripts/"; }
 CITY="$TMP/city"
-mkdir -p "$CITY/rigs/gc-toolkit/assets/scripts"
+pack_city "$CITY"
 cp "$HERE/detached-job.sh" "$HERE/refinery-workspace.sh" "$CITY/rigs/gc-toolkit/assets/scripts/"
 export DETACHED_JOB_POLL=1 DETACHED_JOB_STOP_GRACE=2
 
@@ -156,7 +159,7 @@ git -C "$PW" merge-base --is-ancestor origin/polecat/wb HEAD \
   || bad "polecat/* branch: origin/branch stays an ancestor of the prepared head (merged, not rewritten)"
 
 # push block: ships the prepared head -> origin/<branch> without a cwd checkout; root unmoved.
-( cd "$R/rig" && GC_RIG_ROOT="$R/rig" BRANCH=polecat/wb bash "$TMP/push.sh" ) >/dev/null 2>&1 \
+( cd "$R/rig" && GC_RIG_ROOT="$R/rig" GC_CITY_PATH="$CITY" BRANCH=polecat/wb bash "$TMP/push.sh" ) >/dev/null 2>&1 \
   && ok "push block exits 0" || bad "push block exits 0"
 eq "$(head_of "$R/rig")" "main" "after push: rig root still on main"
 eq "$(git -C "$R/rig" rev-parse origin/polecat/wb)" "$(git -C "$PW" rev-parse HEAD)" "after push: origin/branch == the merged prepared head"
@@ -180,7 +183,7 @@ git -C "$PW" cat-file -e HEAD:g 2>/dev/null && ok "the prep worktree is rebuilt"
 # A launcher whose stop reports the gate still running, as detached-job.sh does
 # when the gate's process group survives TERM and KILL.
 STUCK="$TMP/stuck-city"
-mkdir -p "$STUCK/rigs/gc-toolkit/assets/scripts"
+pack_city "$STUCK"
 cat > "$STUCK/rigs/gc-toolkit/assets/scripts/detached-job.sh" <<'STUB'
 #!/usr/bin/env bash
 [ "$1" = stop ] || exit 0
@@ -198,7 +201,7 @@ grep -q DRAIN "$FAKE_LOG" && ok "a gate that will not stop: the refinery drains,
   || bad "a gate that will not stop: the refinery drains, leaving the work to retry"
 
 : > "$FAKE_LOG"
-mkdir -p "$TMP/empty-city"
+pack_city "$TMP/empty-city"
 RUN_CITY="$TMP/empty-city" run_block "$R/rig" "$TMP/merge.sh" && bad "no detached-job.sh: the merge block exits non-zero" \
   || ok "no detached-job.sh: the merge block exits non-zero"
 [ -e "$PW/left-by-the-gate" ] && ok "no detached-job.sh: the prep worktree is not rebuilt" \
@@ -208,7 +211,7 @@ grep -q DRAIN "$FAKE_LOG" && ok "no detached-job.sh: the refinery drains, leavin
 
 : > "$FAKE_LOG"
 NOWS="$TMP/nows-city"
-mkdir -p "$NOWS/rigs/gc-toolkit/assets/scripts"
+pack_city "$NOWS"
 cp "$HERE/detached-job.sh" "$NOWS/rigs/gc-toolkit/assets/scripts/"
 RUN_CITY="$NOWS" run_block "$R/rig" "$TMP/merge.sh" && bad "no refinery-workspace.sh: the merge block exits non-zero" \
   || ok "no refinery-workspace.sh: the merge block exits non-zero"

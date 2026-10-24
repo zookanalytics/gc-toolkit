@@ -136,6 +136,11 @@ chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export FAKE_ROWS="$TMP/rows"
 export GC_RIG="testrig" GC_AGENT="testrig/gc-toolkit.refinery"
+# The PR lookup resolves its rig through rig-root.sh, which it finds in the pack
+# under GC_CITY_PATH, since GC_RIG_ROOT here names a checkout without the pack.
+mkdir -p "$TMP/pack-city/rigs/gc-toolkit/assets/scripts"
+cp "$HERE/rig-root.sh" "$TMP/pack-city/rigs/gc-toolkit/assets/scripts/"
+export GC_CITY_PATH="$TMP/pack-city"
 
 { cat "$TMP/select.sh"; printf 'printf "%%s\\n" "$WORK"\n'; } > "$TMP/run-select.sh"
 

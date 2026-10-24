@@ -16,7 +16,8 @@
 #   - checks leaves the gate's checks directory empty, creating it when
 #     absent, removes every entry the next gate could run, touches nothing else
 #     in the gate's record, and fails when it cannot empty it;
-#   - the rig root comes from --rig-root, then GC_RIG_ROOT, then the roster;
+#   - the rig root comes from --rig-root, else from the rig-root.sh beside the
+#     script: GC_RIG_ROOT, then the roster;
 #   - the patrol's formula and the refinery's prompt carry no removal, and the
 #     patrol's blocks hand theirs to this script;
 #   - each point a cycle ends carries the same teardown block, which finds
@@ -306,11 +307,12 @@ case "$(cat "$TEARDOWN")" in
 esac
 bash -n "$TEARDOWN" && ok "the teardown block is valid bash" || bad "the teardown block is valid bash"
 
-# The block runs from a cwd in another repository, with the script reachable
-# only through the city's gc-toolkit rig, the way a rig other than gc-toolkit
-# reaches it. Sets RC and OUT.
+# The block runs from a cwd in another repository, with the script, and the
+# rig-root.sh it resolves the rig through, reachable only through the city's
+# gc-toolkit rig, the way a rig other than gc-toolkit reaches them. Sets RC and
+# OUT.
 mkdir -p "$TMP/city/rigs/gc-toolkit/assets/scripts" "$TMP/no-pack-city"
-cp "$SUT" "$TMP/city/rigs/gc-toolkit/assets/scripts/"
+cp "$SUT" "$HERE/rig-root.sh" "$TMP/city/rigs/gc-toolkit/assets/scripts/"
 teardown_block() { OUT=$(cd "$D/cwd" && GC_RIG_ROOT="$D/rig" GC_CITY_PATH="$1" bash "$TEARDOWN" 2>&1); RC=$?; }
 : > "$GC_LOG"
 ws stage --rig-root "$D/rig" --branch polecat/wb >/dev/null

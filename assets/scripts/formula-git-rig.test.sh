@@ -27,6 +27,8 @@ PATROL_TOML="$ROOT/formulas/mol-refinery-patrol.toml"
 MINER_TOML="$ROOT/formulas/mol-feedback-miner.toml"
 REBASE_TOML="$ROOT/packs/gascity-keeper/formulas/mol-upstream-gc-rebase.toml"
 PRPREP_TOML="$ROOT/packs/gascity-keeper/formulas/mol-upstream-gc-pr-prep.toml"
+POLECAT_TOML="$ROOT/formulas/mol-polecat-work.toml"
+SYNC_TOML="$ROOT/packs/gascity-keeper/formulas/mol-upstream-gc-sync.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-formula-git-rig-test.XXXXXX")"
 # git lists a worktree by its resolved path, so every path is built on a
 # resolved root, a TMPDIR behind a symlink (as macOS's is) included.
@@ -42,7 +44,7 @@ hasnt() { case "$1" in *"$2"*) bad "$3" "found '$2' in: $1" ;; *) ok "$3" ;; esa
 
 command -v jq  >/dev/null 2>&1 || { echo "jq is required"  >&2; exit 1; }
 command -v git >/dev/null 2>&1 || { echo "git is required" >&2; exit 1; }
-for f in "$REVIEW_TOML" "$QUORUM_TOML" "$PATROL_TOML" "$MINER_TOML" "$REBASE_TOML" "$PRPREP_TOML"; do
+for f in "$REVIEW_TOML" "$QUORUM_TOML" "$PATROL_TOML" "$MINER_TOML" "$REBASE_TOML" "$PRPREP_TOML" "$POLECAT_TOML" "$SYNC_TOML"; do
   [ -s "$f" ] || { echo "formula not found: $f" >&2; exit 1; }
 done
 
@@ -70,6 +72,15 @@ exit 0
 GC
 chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
+
+# Each block resolves its rig through rig-root.sh, which it finds in the pack
+# under GC_CITY_PATH, since GC_RIG_ROOT here names a rig without the pack. Every
+# run reads this city unless it names its own, and pack_into gives a city of
+# its own the script.
+pack_into() { mkdir -p "$1/rigs/gc-toolkit/assets/scripts"; cp "$HERE/rig-root.sh" "$1/rigs/gc-toolkit/assets/scripts/"; }
+PACK_CITY="$TMP/pack-city"
+pack_into "$PACK_CITY"
+export GC_CITY_PATH="$PACK_CITY"
 
 # copy <toml> <marker> <n>: the n-th copy of a marked block.
 copy() {
@@ -422,6 +433,7 @@ keeper_roster() { printf '{"rigs":[{"name":"%s","path":"%s"}]}\n' "$2" "$1/rig" 
 rebase_case() { # <gascity|other> <meta-json> <label> [<bd-update-rc>]; sets RC, D, WT
   local d="$TMP/rebase-$3" rc=0
   mkdir -p "$d/city"
+  pack_into "$d/city"
   keeper_repos "$d"
   keeper_roster "$d" "$1"
   printf '%s\n' "$2" > "$d/meta.json"
@@ -470,6 +482,7 @@ eq "$(bare_git "$TMP/prprep.sh")" "" "pr-prep: every git call in the block names
 prprep_case() { # <gascity|other> <label> [<bd-update-rc>]; sets RC, D, WT, SHA
   local d="$TMP/prprep-$2" rc=0
   mkdir -p "$d/tmp" "$d/city"
+  pack_into "$d/city"
   keeper_repos "$d"
   keeper_roster "$d" "$1"
   printf '%s\n' "${PRPREP_META:-$KEEPER_META}" > "$d/meta.json"
@@ -534,7 +547,7 @@ cmp -s "$TMP/miner-1.sh" "$TMP/miner-2.sh" && ok "miner: the two steps resolve t
   || bad "miner: the two steps resolve the repository the same way"
 eq "$(grep -c 'show-toplevel)"$' "$MINER_TOML" || true)" 0 "miner: no step takes the repository from the cwd's toplevel"
 eq "$(awk '/# <<< feedback-miner-repo$/ { getline; print; exit }' "$MINER_TOML")" \
-  "[ -n \"\$REPO\" ] || no_op \"cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='\$GC_RIG' matched no rig in the roster)\"" \
+  "[ -n \"\$REPO\" ] || no_op \"cannot resolve the rig root\"" \
   "miner: load-context ends the run as a clean no-op when no rig resolves"
 MN="$TMP/miner"
 mkdir -p "$MN"
@@ -543,7 +556,7 @@ git init -q -b main "$MN/cwd"; commit "$MN/cwd" "miner cwd" >/dev/null
 for mode in env roster nomatch; do
   FAKE_ROSTER="$MN/roster-$mode.json"; pick "$mode" "$MN/rig"
   OUT=$(cd "$MN/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_ROSTER="$MN/roster-$mode.json" FAKE_LOG="$MN/gc.log" \
-          bash -c "$(cat "$TMP/miner-1.sh"; printf 'printf "REPO=%%s\\n" "$REPO"\n')" 2>&1 || true)
+          bash -c "$(cat "$TMP/miner-1.sh"; printf 'printf "REPO=%%s\\n" "$REPO"\n')" 2>/dev/null || true)
   case "$mode" in
     nomatch) eq "$OUT" "REPO=" "miner/nomatch: no repository is resolved, so the cwd repo is never mined" ;;
     *)       eq "$OUT" "REPO=$MN/rig" "miner/$mode: the repository mined is the rig, not the cwd repo" ;;
@@ -561,11 +574,41 @@ RC=0
 OUT=$(cd "$MN/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_ROSTER="$MN/roster-nomatch.json" FAKE_LOG="$MN/gc.log" \
         SC="$MN/step-close.sh" bash -c "$(cat "$TMP/miner-2.sh" "$TMP/miner-2-noop.sh"; echo 'echo "SWEEP STARTED"')" 2>&1) || RC=$?
 eq "$RC" 0 "miner/mine-and-file: an unresolvable rig ends the run cleanly"
-has "$OUT" "feedback-miner: cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='no-such-rig' matched no rig in the roster) — nothing to mine this run." \
+has "$OUT" "feedback-miner: cannot resolve the rig root — nothing to mine this run." \
   "miner/mine-and-file: the run says the rig did not resolve"
 hasnt "$OUT" "SWEEP STARTED" "miner/mine-and-file: the sweep never starts"
 has "$(cat "$MN/gc.log")" "step-close --step mol-feedback-miner.mine-and-file --outcome pass" "miner/mine-and-file: the step closes with outcome pass"
 has "$(cat "$MN/gc.log")" "runtime drain-ack" "miner/mine-and-file: the session drains"
+
+# --- 9. One rig-root lookup. -----------------------------------------------------
+# rig-root.sh holds the lookup, so a fix to it lands once. In the formulas whose
+# git calls name a rig by path no block reads the roster for a rig's path
+# itself, every block finds rig-root.sh by one locator line, and the line after
+# each locator calls it. The refinery scripts that resolve the rig themselves
+# run the rig-root.sh beside them. rig-root.test.sh proves the lookup.
+echo "── one rig-root lookup ──"
+LOCATOR='RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done'
+SITES=0
+for f in "$REVIEW_TOML" "$QUORUM_TOML" "$PATROL_TOML" "$MINER_TOML" "$REBASE_TOML" "$PRPREP_TOML" "$POLECAT_TOML" "$SYNC_TOML"; do
+  name="${f##*/}"
+  eq "$(grep -c 'rig list --json[[:space:]]*|' "$f" || true)" 0 "$name: no block reads the roster for a rig's path itself"
+  LINES=$(grep -F 'assets/scripts/rig-root.sh' "$f" | grep -vE '^[[:space:]]*#|`' | sed 's/^[[:space:]]*//' || true)
+  n=$(printf '%s\n' "$LINES" | awk 'NF { n++ } END { print n + 0 }')
+  [ "$n" -ge 1 ] && ok "$name: $n block(s) find rig-root.sh" || bad "$name: blocks find rig-root.sh" "none"
+  eq "$(printf '%s\n' "$LINES" | sort -u)" "$LOCATOR" "$name: every block finds rig-root.sh by the one locator line"
+  CALLS=$(awk 'f { sub(/^[[:space:]]*/, ""); print; f = 0 } index($0, "assets/scripts/rig-root.sh\" ] && { RR=") && $0 !~ /^[[:space:]]*#/ { f = 1 }' "$f")
+  eq "$(printf '%s\n' "$CALLS" | grep -cF '$("${RR:?rig-root.sh not found in the pack}"' || true)" "$n" "$name: the line after each locator calls rig-root.sh"
+  SITES=$((SITES + n))
+done
+for b in pin diff lane-1 lane-2 reason rebase prprep miner-1 miner-2; do
+  grep -qF '"${RR:?rig-root.sh not found in the pack}"' "$TMP/$b.sh" && ok "$b: the block resolves its rig through rig-root.sh" \
+    || bad "$b: the block resolves its rig through rig-root.sh"
+done
+echo "($SITES blocks in all)"
+for s in direct-merge-push.sh refinery-workspace.sh; do
+  eq "$(grep -c 'rig list --json' "$HERE/$s" || true)" 0 "$s: reads no roster itself"
+  eq "$(grep -c '"$SCRIPTS_DIR/rig-root.sh"' "$HERE/$s" || true)" 1 "$s: resolves the rig through the rig-root.sh beside it"
+done
 
 echo "-----"
 echo "formula-git-rig: $PASS passed, $FAIL failed"

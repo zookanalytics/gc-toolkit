@@ -179,10 +179,10 @@ QREMOVE="$(extract "$ROOT/formulas/mol-review-quorum-signoff.toml" quorum-review
 for v in ADD REMOVE QREMOVE; do
     if [ -n "${!v}" ]; then ok "the formula's $v lines extract"; else bad "the formula's $v lines extract (markers missing)"; fi
 done
-PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"; cp "$SUT" "$PACK/assets/scripts/"
+PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"; cp "$SUT" "$HERE/rig-root.sh" "$PACK/assets/scripts/"
 cd "$REPO" || exit 1
-# The add lines refuse to run without a rig root, so each run names this
-# repository as the rig.
+# The add lines resolve the rig through the pack's rig-root.sh and refuse to
+# run without a rig root, so each run names this repository as the rig.
 for n in 1 2; do
     GOT="$(GC_PACK_DIR="$PACK" GC_RIG_ROOT="$REPO" REVIEW_BEAD=tk-fx REVIEWED_OID="$C1" bash -c "$ADD
 pwd -P" 2>/dev/null)"

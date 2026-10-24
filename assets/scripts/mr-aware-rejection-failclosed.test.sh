@@ -345,7 +345,7 @@ ARMS=$(awk '
   /^```bash$/ { lead = ""; f = 1; seen = 0; held = 0; guarded = 0; next }
   /^```$/ { if (held) print (guarded ? "guarded" : "unguarded"); f = 0; next }
   !f { next }
-  /gc workflow delete-source \$WORK/ { if (!seen) guarded = (lead ~ /RIG_ROOT="\$\{GC_RIG_ROOT:-\}"/ && lead ~ /\[ -n "\$RIG_ROOT" \] \|\| \{[^}]*gc runtime drain-ack; exit 1; \}/); seen = 1 }
+  /gc workflow delete-source \$WORK/ { if (!seen) guarded = (lead ~ /RIG_ROOT=\$\("\$\{RR:\?rig-root\.sh not found in the pack\}"\)/ && lead ~ /\[ -n "\$RIG_ROOT" \] \|\| \{[^}]*gc runtime drain-ack; exit 1; \}/); seen = 1 }
   /^# >>> rejection-branch-keep$/ { held = 1 }
   !seen { lead = lead $0 "\n" }' "$TOML")
 eq "$(printf '%s\n' "$ARMS" | grep -c . || true)" "$(grep -c '^# >>> rejection-branch-keep$' "$TOML" || true)" \
