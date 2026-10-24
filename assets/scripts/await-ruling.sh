@@ -208,8 +208,9 @@ elif [ "$STATUS" = in_progress ]; then
 fi
 
 # The open human gate under the key, read by the one reader rule: among the
-# subject's gates first, then among the work bead's own. The oldest is taken
-# when a race filed two, as the board folds both and one answer clears both.
+# subject's gates first, then among the work bead's own. Two stand when racing
+# writers both kept theirs, and the first by created_at, then id, is taken,
+# the order human-gate.sh's dedup reads them in.
 open_gate_under_key() { # <bead> -> the id, or nothing; non-zero on a failed read
   local gates
   gates=$(bd_human_gates "$1") || return 1

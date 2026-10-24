@@ -21,12 +21,14 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$HERE/../.."
 DOCTRINE="$ROOT/template-fragments/polecat-doctrine.template.md"
 WITNESS="$ROOT/formulas/mol-witness-patrol.toml"
+FORMULA="$ROOT/formulas/mol-polecat-work.toml"
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 
 [ -s "$DOCTRINE" ] || { echo "missing $DOCTRINE" >&2; exit 1; }
 [ -s "$WITNESS" ]  || { echo "missing $WITNESS" >&2; exit 1; }
+[ -s "$FORMULA" ]  || { echo "missing $FORMULA" >&2; exit 1; }
 
 grep -qF 'gc mail send "${GC_RIG:+$GC_RIG/}{{ .BindingPrefix }}witness"' "$DOCTRINE" \
   && ok "doctrine mails the blocker to the binding-qualified witness address" \
@@ -36,10 +38,10 @@ grep -q 'HELP:' "$DOCTRINE" \
   && ok "doctrine names the HELP: subject prefix the witness triages on" \
   || bad "doctrine dropped the HELP: prefix; witness triage keys on it"
 
-if grep -qi 'mail budget is zero' "$DOCTRINE"; then
-  bad "doctrine bans mail again — that routes worker blockers to a human"
+if grep -qi 'mail budget is zero' "$DOCTRINE" "$FORMULA"; then
+  bad "the doctrine or mol-polecat-work bans mail again — that routes worker blockers to a human"
 else
-  ok "doctrine does not ban mail outright"
+  ok "neither the doctrine nor mol-polecat-work bans mail outright"
 fi
 
 CALLS=$(grep -n '"\$SCRIPTS/human-gate\.sh"' "$DOCTRINE")

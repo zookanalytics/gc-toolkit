@@ -25,9 +25,15 @@ hasnt() { if hasin "$1" "$2"; then bad "$3 (found '$2')"; else ok "$3"; fi; }
 #   gate create --type=human --blocks <bead> --await-id <k> --title <t>
 #     --reason <r> --json — a gate bead blocking <bead>, its description a line
 #     naming <bead> and then the reason; a missing <bead> is an error, exit 1.
+#     STUB_CREATE_RACE=<id>|<created_at> files a second writer's gate under the
+#     same key on the same bead in the same call, as a writer racing it would.
 #   gate resolve <id> --reason <r> — closes an open gate with that reason; on a
 #     gate already closed it keeps the first reason and still reports success.
-#   show <id> --json.
+#   show <id> --json — the bead's row; a bead it cannot find is an error object,
+#     exit 1. STUB_SHOW_FAIL=1 fails it with nothing on stdout, as a store that
+#     did not answer does, STUB_SHOW_RAW=<payload> answers it with that payload
+#     verbatim, and STUB_SHOW_RC=<n> exits n after the answer. None touches the
+#     other calls.
 # The store is a JSON array of beads; EDGES holds `<waiter>|blocks|<gate>` lines.
 BIN="$TMP/bin"; mkdir -p "$BIN"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
@@ -71,6 +77,12 @@ Reason: $reason" \
       '. + [{id: $id, title: $t, description: $d, status: "open", issue_type: "gate",
              await_type: $ty, await_id: $k, created_at: "2026-10-22T00:00:00Z"}]' "$STORE" | save
     [ -n "${STUB_CREATE_NOEDGE:-}" ] || printf '%s|blocks|%s\n' "$blocks" "$id" >> "$EDGES"
+    if [ -n "${STUB_CREATE_RACE:-}" ]; then
+      jq -c --arg id "${STUB_CREATE_RACE%%|*}" --arg at "${STUB_CREATE_RACE#*|}" --arg k "$key" --arg ty "$typ" \
+        '. + [{id: $id, title: "the racing writer", status: "open", issue_type: "gate",
+               await_type: $ty, await_id: $k, created_at: $at}]' "$STORE" | save
+      printf '%s|blocks|%s\n' "$blocks" "${STUB_CREATE_RACE%%|*}" >> "$EDGES"
+    fi
     jq -c --arg id "$id" '.[] | select(.id == $id)' "$STORE"
     exit 0 ;;
   "gate resolve")
@@ -81,6 +93,7 @@ Reason: $reason" \
     [ "$(jq -r --arg id "$id" '.[] | select(.id == $id) | .issue_type' "$STORE")" = gate ] \
       || { echo "Error: $id is not a gate issue" >&2; exit 1; }
     [ -n "${STUB_RESOLVE_NOOP:-}" ] && { echo "✓ Gate resolved: $id"; exit 0; }
+    [ -n "${STUB_RESOLVE_FAIL:-}" ] && { echo "Error: simulated refusal" >&2; exit 1; }
     # Another resolver closes the gate first, as a sitting's sign-off can.
     if [ -n "${STUB_RESOLVE_RACE:-}" ]; then
       jq -c --arg id "$id" 'map(if .id == $id and .status != "closed"
@@ -95,11 +108,14 @@ Reason: $reason" \
 esac
 case "${1:-}" in
   show)
+    [ -n "${STUB_SHOW_FAIL:-}" ] && { echo "bd: store unreachable" >&2; exit 1; }
+    [ -n "${STUB_SHOW_RAW:-}" ] && { printf '%s\n' "$STUB_SHOW_RAW"; exit 0; }
     out=$(jq -c --arg id "${2:-}" '[.[] | select(.id == $id)]' "$STORE")
     if [ "$(printf '%s' "$out" | jq 'length')" = 0 ]; then
       printf '{"error":"no issue found matching %s"}\n' "${2:-}"; exit 1
     fi
-    printf '%s\n' "$out" ;;
+    printf '%s\n' "$out"
+    exit "${STUB_SHOW_RC:-0}" ;;
   *) echo "stub gc: unexpected bd call: $*" >&2; exit 1 ;;
 esac
 STUB
@@ -112,6 +128,7 @@ unset GC_AGENT GC_RIG GC_ESCALATE_VERDICT_WINDOW 2>/dev/null || true
 # iso_ago <seconds> — an RFC-3339 UTC time that many seconds ago.
 iso_ago() { jq -nr --argjson s "$1" '(now - $s) | floor | todate'; }
 task()   { printf '{"id":"%s","title":"%s","status":"open","issue_type":"task"}' "$1" "$1"; }
+session() { printf '{"id":"%s","title":"%s","status":"open","issue_type":"session"}' "$1" "$1"; }
 # gate <id> <key> <status> [<close_reason> <closed_at>] [<await_type>]
 gate() {
   jq -nc --arg id "$1" --arg k "$2" --arg st "$3" --arg r "${4:-}" --arg at "${5:-}" --arg ty "${6:-human}" \
@@ -124,7 +141,7 @@ reset() {
   printf '[%s]' "$beads" > "$STUB_STORE"
   printf '%s' "${2:-}" > "$STUB_EDGES"
   : > "$STUB_GC_LOG"; printf '0' > "$STUB_SEQ"
-  unset STUB_DEP_FAIL STUB_CREATE_FAIL STUB_CREATE_NOEDGE STUB_RESOLVE_NOOP STUB_RESOLVE_RACE 2>/dev/null || true
+  unset STUB_DEP_FAIL STUB_CREATE_FAIL STUB_CREATE_NOEDGE STUB_CREATE_RACE STUB_RESOLVE_NOOP STUB_RESOLVE_FAIL STUB_RESOLVE_RACE STUB_SHOW_FAIL STUB_SHOW_RAW STUB_SHOW_RC 2>/dev/null || true
 }
 field()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .[$k]) // "<absent>"' "$STUB_STORE"; }
 creates() { cat "$STUB_SEQ"; }
@@ -198,6 +215,43 @@ reset "$(task tk-w),$(task tk-x),$(gate g-x polecat-blocked open)" "tk-x|blocks|
 "
 "$SUT" --subject tk-w --key polecat-blocked --message m >/dev/null 2>&1
 eq "$(creates)" 1 "a gate on another bead does not dedup this bead's situation"
+
+echo "# of two open gates under the key, the first by created_at, then id, asks"
+# bd lists g-b ahead of g-a here; both were created in the same second.
+reset "$(task tk-w),$(gate g-b k open),$(gate g-a k open)" "tk-w|blocks|g-b
+tk-w|blocks|g-a
+"
+out=$("$SUT" --subject tk-w --key k --message m 2>/dev/null)
+eq "$out" "g-a" "the dedup names the gate whose id sorts first, not bd's listing order"
+
+echo "# a writer that raced another resolves its own gate when the other's comes first"
+reset "$(task tk-w)"
+out=$(STUB_CREATE_RACE="g-early|2026-10-21T23:59:59Z" "$SUT" --subject tk-w --key k --message m 2>"$TMP/err"); rc=$?
+eq "$rc" 0 "exits 0"
+eq "$out" "g-early" "stdout names the racing writer's gate, which came first"
+eq "$(field gate-1 status)" "closed" "this call's own gate is resolved"
+has "$(field gate-1 close_reason)" "moot: a duplicate of gate g-early" "as a duplicate of the first, headed moot:"
+eq "$(field g-early status)" "open" "the first gate stands, so one answer clears the bead"
+has "$(cat "$TMP/err")" "resolved this call's duplicate, gate gate-1" "it reports the duplicate it resolved"
+reset "$(task tk-w)"
+out=$(STUB_CREATE_RACE="g-0|2026-10-22T00:00:00Z" "$SUT" --subject tk-w --key k --message m 2>/dev/null)
+eq "$out" "g-0" "in the same second, the gate whose id sorts first is the first"
+eq "$(field gate-1 status)" "closed" "and the other writer's call resolves its own"
+
+echo "# a writer whose gate comes first keeps it and leaves the other's alone"
+reset "$(task tk-w)"
+out=$(STUB_CREATE_RACE="g-late|2026-10-22T00:00:01Z" "$SUT" --subject tk-w --key k --message m 2>/dev/null); rc=$?
+eq "$rc" 0 "exits 0"
+eq "$out" "gate-1" "stdout names its own gate"
+eq "$(field gate-1 status)" "open" "its own gate stands"
+eq "$(field g-late status)" "open" "the other writer's gate is that writer's to resolve"
+
+echo "# a duplicate that does not resolve is reported with its repair"
+reset "$(task tk-w)"
+out=$(STUB_CREATE_RACE="g-early|2026-10-21T23:59:59Z" STUB_RESOLVE_FAIL=1 "$SUT" --subject tk-w --key k --message m 2>"$TMP/err"); rc=$?
+eq "$rc" 0 "exits 0: the first gate still asks"
+eq "$out" "g-early" "stdout names the gate that asks"
+has "$(cat "$TMP/err")" "repair: gc bd gate resolve gate-1" "the repair names the duplicate"
 
 echo "# no quiet period unless the call declares one"
 recent_moot="$(gate g-moot k closed "moot: the branch came back" "$(iso_ago 600)")"
@@ -339,7 +393,7 @@ reset "$(task tk-a)"
 STUB_DEP_FAIL=1 "$SUT" --retract --subject tk-a --key k --message m >/dev/null 2>&1; rc=$?
 eq "$rc" 1 "an unread gate list is not proof that nothing is open"
 
-echo "# the old name hands every call to human-gate.sh"
+echo "# the old name hands a call to human-gate.sh"
 reset "$(task tk-w)"
 out=$("$OLD_NAME" --subject tk-w --key k --message "via the old name" 2>/dev/null); rc=$?
 eq "$rc" 0 "escalate.sh files through the helper"
@@ -348,8 +402,124 @@ eq "$(field gate-1 await_id)" "k" "the gate carries the key"
 out=$("$OLD_NAME" --retract --subject tk-w --key k --message gone 2>/dev/null); rc=$?
 eq "$rc" 0 "a retract through the old name works too"
 eq "$(field gate-1 close_reason)" "moot: gone" "and resolves the gate"
-"$OLD_NAME" --subject lx-wisp-x --key k --message m >/dev/null 2>&1
+"$OLD_NAME" --subject tk-w --key "bad key" --message m >/dev/null 2>&1
 eq "$?" 2 "the helper's own refusals come back through the old name"
+
+echo "# the old name drops the retired --pool, so an old call still files"
+reset "$(task tk-w)"
+out=$("$OLD_NAME" --subject tk-w --key k --message m --pool gc-toolkit/gc-toolkit.converse 2>"$TMP/err"); rc=$?
+eq "$rc" 0 "a call that carries --pool exits 0"
+eq "$out" "gate-1" "and files its gate through the helper"
+has "$(cat "$TMP/err")" "--pool gc-toolkit/gc-toolkit.converse dropped" "the dropped flag is reported on stderr"
+
+echo "# the old name files a call on a wisp as a patrol finding"
+# The hand-off runs from a private copy whose patrol-finding.sh records what
+# reached it.
+HSUT="$TMP/handoff-sut"; mkdir -p "$HSUT"
+cp "$OLD_NAME" "$SUT" "$HERE/bd-lib.sh" "$HSUT/"
+cat > "$HSUT/patrol-finding.sh" <<'PFSTUB'
+#!/usr/bin/env bash
+{ printf 'patrol-finding'; for a in "$@"; do printf ' [%s]' "$a"; done; printf '\n'; } >> "${STUB_PF_LOG:?}"
+exit "${STUB_PF_RC:-0}"
+PFSTUB
+chmod +x "$HSUT"/*.sh
+export STUB_PF_LOG="$TMP/pf.log"
+reset "$(task tk-w)"; : > "$STUB_PF_LOG"
+"$HSUT/escalate.sh" --subject lx-wisp-abc12 --key refinery-empty-identity --message "Refinery session started with empty GC_AGENT
+Investigate the session harness." >/dev/null 2>"$TMP/err"; rc=$?
+eq "$rc" 0 "the call exits with the finding's exit"
+has "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [refinery-empty-identity] [--title] [Refinery session started with empty GC_AGENT] [--message] [Refinery session started with empty GC_AGENT" \
+  "the finding takes the key, the message's first line as its title, and the whole message"
+has "$(cat "$STUB_PF_LOG")" "Investigate the session harness.]" "the message keeps its later lines"
+eq "$(calls)" "" "no gate is filed on the wisp, and no bd call is made"
+has "$(cat "$TMP/err")" "filing the call as a patrol finding under [refinery-empty-identity]" "the translation is reported on stderr"
+: > "$STUB_PF_LOG"
+STUB_PF_RC=1 "$HSUT/escalate.sh" --subject lx-wisp-abc12 --key k --message m >/dev/null 2>&1
+eq "$?" 1 "a finding that was not filed fails the call"
+: > "$STUB_PF_LOG"
+"$HSUT/escalate.sh" --retract --subject lx-wisp-abc12 --key k --message m >/dev/null 2>&1
+eq "$?" 2 "a retract on a wisp goes to the helper, which refuses it"
+eq "$(cat "$STUB_PF_LOG")" "" "and files no finding"
+
+echo "# the old name files a call about a subject that names no bead as a patrol finding"
+# The copy's bead-store.sh records what it is asked and answers with STUB_BS_RC.
+cat > "$HSUT/bead-store.sh" <<'BSSTUB'
+#!/usr/bin/env bash
+{ printf 'bead-store'; for a in "$@"; do printf ' [%s]' "$a"; done; printf '\n'; } >> "${STUB_BS_LOG:?}"
+exit "${STUB_BS_RC:-0}"
+BSSTUB
+chmod +x "$HSUT/bead-store.sh"
+export STUB_BS_LOG="$TMP/bs.log"
+reset "$(task tk-w)"; : > "$STUB_PF_LOG"; : > "$STUB_BS_LOG"
+STUB_BS_RC=1 "$HSUT/escalate.sh" --subject refinery --key refinery-empty-identity --message m >/dev/null 2>"$TMP/err"; rc=$?
+eq "$rc" 0 "a subject bead-store.sh proves names no bead files a finding"
+eq "$(cat "$STUB_BS_LOG")" "bead-store [refinery]" "  ... asked in bead-store.sh's resolution form"
+eq "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [refinery-empty-identity] [--title] [m] [--message] [m]" "  ... under its key"
+eq "$(creates)" 0 "  ... and no gate is filed"
+has "$(cat "$TMP/err")" "'refinery' names no bead" "  ... and the translation says why on stderr"
+
+echo "# the old name files a call about a session as a patrol finding, whatever the shape of its id"
+reset "$(task tk-w),$(session lx-abc12)"; : > "$STUB_PF_LOG"
+"$HSUT/escalate.sh" --subject lx-abc12 --key witness-refinery-queue-unreadable --message m >/dev/null 2>"$TMP/err"; rc=$?
+eq "$rc" 0 "a subject that reads as a session bead files a finding"
+eq "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [witness-refinery-queue-unreadable] [--title] [m] [--message] [m]" "  ... under its key"
+eq "$(creates)" 0 "  ... and no gate blocks the session bead"
+has "$(cat "$TMP/err")" "'lx-abc12' names a session" "  ... and the translation says why on stderr"
+reset "$(task tk-w),$(session lx-abc12)"; : > "$STUB_PF_LOG"
+STUB_SHOW_RAW="$(printf 'gc bd: answering from the city store\n[{"id":"lx-abc12","title":"a\001b","status":"open","issue_type":"session"}]')" \
+  "$HSUT/escalate.sh" --subject lx-abc12 --key k --message m >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "a session row behind the store's notice line, carrying a raw control byte, still reads as a session"
+eq "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [k] [--title] [m] [--message] [m]" "  ... and the call files its finding"
+eq "$(creates)" 0 "  ... with no gate on the session bead"
+
+echo "# a subject whose own row does not read fails the call before the helper"
+# The helper's reads of the subject's edges and its create stay available in
+# every case, so a call let through to the helper would file a gate on the
+# session in place of its finding.
+# unread_case <label> <stub-knob> — a call about session lx-abc12 whose row
+# reads wrong under the knob.
+unread_case() {
+  reset "$(task tk-w),$(session lx-abc12)"; : > "$STUB_PF_LOG"
+  out=$(env "$2" "$HSUT/escalate.sh" --subject lx-abc12 --key k --message m 2>"$TMP/err"); rc=$?
+  eq "$rc" 1 "$1: the call exits 1, so its caller retries"
+  eq "$out" "" "  ... names no gate"
+  eq "$(creates)" 0 "  ... files no gate on the session bead"
+  eq "$(cat "$STUB_PF_LOG")" "" "  ... files no finding"
+  hasnt "$(calls)" "[dep] [list]" "  ... never runs the helper"
+  has "$(cat "$TMP/err")" "'lx-abc12' did not read" "  ... and says on stderr that the subject did not read"
+}
+unread_case "a read that fails" STUB_SHOW_FAIL=1
+unread_case "a read that exits 1 after the session's row" STUB_SHOW_RC=1
+unread_case "a payload cut short" 'STUB_SHOW_RAW=[{"id":"lx-abc12","status":"open","issue_type":"sess'
+unread_case "an error object" 'STUB_SHOW_RAW={"error":"no issue found matching lx-abc12"}'
+unread_case "a row for a longer id" 'STUB_SHOW_RAW=[{"id":"lx-abc123","status":"open","issue_type":"session"}]'
+unread_case "a row with no type" 'STUB_SHOW_RAW=[{"id":"lx-abc12","status":"open"}]'
+reset "$(task tk-w)"; : > "$STUB_PF_LOG"
+out=$("$HSUT/escalate.sh" --subject tk-gone --key k --message m 2>/dev/null); rc=$?
+eq "$rc" 1 "a subject its store does not hold fails the call the same way"
+eq "$out$(creates)" "0" "  ... with no gate filed or named"
+eq "$(cat "$STUB_PF_LOG")" "" "  ... and no finding"
+hasnt "$(calls)" "[dep] [list]" "  ... before the helper runs"
+
+echo "# a subject the old name cannot prove is no bead goes to the helper"
+for bsrc in 0 3; do
+  reset "$(task tk-w)"; : > "$STUB_PF_LOG"
+  out=$(STUB_BS_RC=$bsrc "$HSUT/escalate.sh" --subject tk-w --key k --message m 2>/dev/null); rc=$?
+  eq "$rc" 0 "bead-store.sh exit $bsrc on a work bead: the helper files"
+  eq "$out" "gate-1" "  ... its gate on the bead"
+  eq "$(cat "$STUB_PF_LOG")" "" "  ... and no finding is filed"
+done
+
+echo "# the old name asks nothing about the subject of a retract or of a malformed call"
+reset "$(task tk-w)"; : > "$STUB_PF_LOG"; : > "$STUB_BS_LOG"
+STUB_BS_RC=1 "$HSUT/escalate.sh" --retract --subject refinery --key k --message m >/dev/null 2>&1
+eq "$?" 1 "a retract on a subject that names no bead goes to the helper, which cannot read it"
+STUB_BS_RC=1 "$HSUT/escalate.sh" --subject "{{convoy_id}}" --key k --message m >/dev/null 2>&1
+eq "$?" 2 "a subject outside the id charset goes to the helper, which refuses it as usage"
+STUB_BS_RC=1 "$HSUT/escalate.sh" --subject refinery --key k >/dev/null 2>&1
+eq "$?" 2 "a filing with no message goes to the helper, which refuses it as usage"
+eq "$(cat "$STUB_BS_LOG")" "" "  ... and bead-store.sh is asked about none of them"
+eq "$(cat "$STUB_PF_LOG")" "" "  ... and no finding is filed"
 
 echo "# the deacon's filed gates reach its incident ledger"
 # The helper calls the ledger by sibling path, so it runs from a private copy
