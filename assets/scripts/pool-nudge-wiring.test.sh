@@ -18,10 +18,16 @@
 #      against the city store, where it finds nothing and still exits 0.
 #   2. The polecat and polecat-codex nudges are identical, as both agent files
 #      say they are, and they carry the hand-back.
-#   3. No tracked file under agents/, formulas/, template-fragments/, skills/ or
-#      packs/ tells its reader to clear its assignee in those words, and no
-#      `bd update` command in one clears an assignee unless the same command
-#      reopens the bead (--status=open). The text is read with TOML line
+#   3. No tracked file under agents/, formulas/, template-fragments/, skills/,
+#      packs/, assets/scripts/, doctor/, tools/ or overlays/, tests aside,
+#      tells its reader to clear its assignee in those words, and no `bd
+#      update` command in one clears an assignee unless the same command
+#      reopens the bead (--status=open) or is guarded to an open bead
+#      (--if-status open), which cannot leave an in_progress bead unassigned.
+#      orphan-dispose.sh, the witness's release of a dead owner's claim, still
+#      splits its reopen and its clear, and a fix of its own owns that. It is
+#      listed by name, and the check fails once it no longer splits, so the
+#      listing goes with the split. The text is read with shell and TOML line
 #      continuations joined, and the phrase with line wraps joined too, so a
 #      phrase or a command that a line break splits is still found.
 #
@@ -42,8 +48,11 @@ for T in "$ROOT"/agents/*/agent.toml "$ROOT"/packs/*/agents/*/agent.toml; do
 done
 [ "${#TOMLS[@]}" -gt 0 ] || { echo "no agent TOMLs under $ROOT" >&2; exit 1; }
 
-TEXTS=$(git -C "$ROOT" ls-files -- agents formulas template-fragments skills packs)
-[ -n "$TEXTS" ] || { echo "git ls-files lists nothing under agents/, formulas/, template-fragments/, skills/ or packs/ in $ROOT" >&2; exit 1; }
+# Tests and the shared harness spell out the very writes check 3 forbids, as the
+# fixtures and controls that prove it, so they are left out.
+TEXTS=$(git -C "$ROOT" ls-files -- agents formulas template-fragments skills packs assets/scripts doctor tools overlays \
+  | grep -vE '(\.test\.sh|_test\.go|/test-harness\.sh)$')
+[ -n "$TEXTS" ] || { echo "git ls-files lists nothing under agents/, formulas/, template-fragments/, skills/, packs/, assets/scripts/, doctor/, tools/ or overlays/ in $ROOT" >&2; exit 1; }
 
 if ! TOML_PY="$(tomllib_python)"; then
   echo "skip - every check: $TOML_PY"
@@ -106,10 +115,15 @@ else:
 # --- 3. No instruction to clear an assignee alone. ---
 # An empty assignee value: "" or '' or nothing before a space, a backtick or
 # the end of the command. --if-assignee= is a guard, not a write, and the
-# lookbehind keeps it out.
+# lookbehind keeps it out. A clear guarded to an open bead cannot leave an
+# in_progress bead unassigned, so it needs no reopen beside it.
 CLEAR = re.compile(r"(?<![\w-])(--assignee|-a)(=(\"\"|''|(?=[\s`]|$))|\s+(\"\"|''))")
+OPEN_GUARD = re.compile(r"--if-status(=|\s+)[\"']?open\b")
+# The witness's release of a dead owner's claim, which reopens it and clears its
+# assignee in two writes until a fix of its own makes them one.
+KNOWN_SPLIT = {"assets/scripts/orphan-dispose.sh"}
 texts = [t for t in os.environ.get("WIRING_TEXTS", "").splitlines() if t]
-hits, split = [], []
+hits, split, known = [], [], set()
 for rel in texts:
     try:
         with open(os.path.join(root, rel), encoding="utf-8", errors="replace") as f:
@@ -119,18 +133,26 @@ for rel in texts:
     text = re.sub(r"\\\n[ \t]*", "", text)
     for line in text.splitlines():
         for cmd in re.split(r";|&&|\|\||\|", line):
-            if re.search(r"\bbd update\b", cmd) and CLEAR.search(cmd) and "--status=open" not in cmd:
-                split.append("%s: %s" % (rel, cmd.strip()[:160]))
+            if re.search(r"\bbd update\b", cmd) and CLEAR.search(cmd) and "--status=open" not in cmd and not OPEN_GUARD.search(cmd):
+                if rel in KNOWN_SPLIT:
+                    known.add(rel)
+                else:
+                    split.append("%s: %s" % (rel, cmd.strip()[:160]))
     if re.search(r"clear your (own )?assignee", re.sub(r"\s+", " ", text), re.IGNORECASE):
         hits.append(rel)
 if hits:
     print("bad|an instruction tells its reader to clear its assignee: %s" % ", ".join(hits))
 else:
-    print("ok|none of the %d tracked instruction files tells its reader to clear its assignee" % len(texts))
+    print("ok|none of the %d tracked files tells its reader to clear its assignee" % len(texts))
 if split:
     print("bad|a bd update clears an assignee without reopening the bead in the same write: %s" % "; ".join(split))
 else:
-    print("ok|every bd update in them that clears an assignee reopens the bead in the same write")
+    print("ok|every bd update in them that clears an assignee reopens the bead in the same write, or is guarded to an open bead")
+for rel in sorted(KNOWN_SPLIT):
+    if rel in known:
+        print("ok|%s, the one release listed by name, still splits, so its listing stands" % rel)
+    else:
+        print("bad|%s no longer clears an assignee in a write of its own: take it out of KNOWN_SPLIT" % rel)
 PY
 ); PY_RC=$?
 
