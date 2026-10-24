@@ -262,14 +262,16 @@ echo "── 3. PRE_OPEN reads every key a PR can be recorded under ──"
 
 # preopen <existing_pr> <pr_url> <pr_number> -> "PRE_OPEN|RECORDED_PR"
 # The block names the rig by GC_RIG_ROOT, which is PREOPEN_RIG when set and
-# otherwise a directory holding no repository, so origin names no --repo.
+# otherwise a checkout whose origin is a GitHub repository.
 { cat "$TMP/preopen.sh"; printf 'printf "%%s|%%s\\n" "$PRE_OPEN" "$RECORDED_PR"\n'; } > "$TMP/run-preopen.sh"
-mkdir -p "$TMP/no-repo"
+RIG_CO="$TMP/rig-checkout"
+git init -q "$RIG_CO"
+git -C "$RIG_CO" remote add origin git@github.com:ours/repo.git
 preopen() {
   BEAD_JSON=$(jq -nc --arg u "${2:-}" --arg n "${3:-}" \
     '[{metadata: ({} + (if $u != "" then {pr_url: $u} else {} end)
                     + (if $n != "" then {pr_number: ($n | tonumber)} else {} end))}]')
-  WORK="tk-w" EXISTING_PR="${1:-}" BEAD_JSON="$BEAD_JSON" CODEX_GATE=1 GC_RIG_ROOT="${PREOPEN_RIG-$TMP/no-repo}" \
+  WORK="tk-w" EXISTING_PR="${1:-}" BEAD_JSON="$BEAD_JSON" CODEX_GATE=1 GC_RIG_ROOT="${PREOPEN_RIG-$RIG_CO}" \
     bash "$TMP/run-preopen.sh" 2>/dev/null | tail -1
 }
 # `gh` must be present for PRE_OPEN to be reachable at all (the resolver opens
@@ -289,7 +291,7 @@ eq "$(preopen '' '' '55')" "0|55" \
 # the post-open path.
 eq "$(preopen '' '' '' ; :)" "1|" "(16) no keys at all -> PRE_OPEN"
 BEAD_JSON='[{"metadata":{"pr_url":"","pr_number":55}}]'
-eq "$(WORK="tk-w" EXISTING_PR="" BEAD_JSON="$BEAD_JSON" CODEX_GATE=1 GC_RIG_ROOT="$TMP/no-repo" bash "$TMP/run-preopen.sh" 2>/dev/null | tail -1)" "0|55" \
+eq "$(WORK="tk-w" EXISTING_PR="" BEAD_JSON="$BEAD_JSON" CODEX_GATE=1 GC_RIG_ROOT="$RIG_CO" bash "$TMP/run-preopen.sh" 2>/dev/null | tail -1)" "0|55" \
    "(17) empty pr_url does not out-rank a real pr_number (jq // only skips null)"
 
 # existing_pr keeps its own strict validation path; a refinery-minted pr_url
@@ -322,24 +324,44 @@ git -C "$FOREIGN_CWD" remote add origin git@github.com:other/repo.git
 eq "$(grep -c -- '^pr view 55 --repo git@github.com:ours/repo.git ' "$GH_ARGV" || true)" "1" \
    "(19) a bare pr_number is viewed in the rig's origin repository"
 eq "$(grep -c -- 'other/repo' "$GH_ARGV" || true)" "0" "(19b) and never in the cwd checkout's origin"
+# run_preopen <gc-rig-root> <gc-rig> <bead-json>: the block from the foreign
+# cwd, with no EXISTING_PR. Sets RC and OUT, and empties GH_ARGV first.
+run_preopen() {
+  : > "$GH_ARGV"
+  RC=0
+  OUT=$(cd "$FOREIGN_CWD" && WORK="tk-w" EXISTING_PR="" BEAD_JSON="$3" CODEX_GATE=1 \
+    GC_RIG_ROOT="$1" GC_RIG="$2" bash "$TMP/run-preopen.sh" 2>&1) || RC=$?
+}
+# A rig with no origin cannot pin a bare number, and a view with no --repo
+# would read the cwd checkout's repository, so the work stays with the
+# refinery and nothing is looked up or stamped.
 NO_ORIGIN="$TMP/no-origin"; git init -q "$NO_ORIGIN"
-: > "$GH_ARGV"
-( cd "$FOREIGN_CWD" && PREOPEN_RIG="$NO_ORIGIN" preopen '' '' '55' >/dev/null )
-eq "$(grep -c -- '--repo' "$GH_ARGV" || true)" "0" \
-   "(20) with no origin on the rig to name, the view passes no --repo, though the cwd checkout has one"
-eq "$(grep -c -- '^pr view 55 ' "$GH_ARGV" || true)" "1" "(21) and still looks the PR up"
-# An unresolvable rig leaves the work with the refinery to retry: nothing is
-# looked up, because no origin can be named.
-: > "$GH_ARGV"
-RC=0
-OUT=$(cd "$FOREIGN_CWD" && WORK="tk-w" EXISTING_PR="" BEAD_JSON='[{"metadata":{"pr_number":55}}]' CODEX_GATE=1 \
-  GC_RIG_ROOT="" GC_RIG=no-such-rig bash "$TMP/run-preopen.sh" 2>&1) || RC=$?
-eq "$RC" "1" "(22) an unresolvable rig fails closed"
+run_preopen "$NO_ORIGIN" "" '[{"metadata":{"pr_number":55}}]'
+eq "$RC" "1" "(20) with no origin on the rig to name, a bare pr_number fails closed, though the cwd checkout has one"
 case "$OUT" in
-  *"cannot resolve the rig root"*) ok "(22b) and says it cannot resolve the rig root" ;;
-  *) bad "(22b) and says it cannot resolve the rig root" "$OUT" ;;
+  *"has no origin to look PR 55 up in; leaving the work with the refinery to retry"*) ok "(20b) and says the rig has no origin" ;;
+  *) bad "(20b) and says the rig has no origin" "$OUT" ;;
 esac
-eq "$(grep -c . "$GH_ARGV" || true)" "0" "(22c) no PR is looked up"
+eq "$(grep -c . "$GH_ARGV" || true)" "0" "(20c) no PR is looked up"
+# An unresolvable rig leaves a bare number with the refinery the same way.
+run_preopen "" no-such-rig '[{"metadata":{"pr_number":55}}]'
+eq "$RC" "1" "(21) an unresolvable rig fails closed for a bare pr_number"
+case "$OUT" in
+  *"cannot resolve the rig root"*) ok "(21b) and says it cannot resolve the rig root" ;;
+  *) bad "(21b) and says it cannot resolve the rig root" "$OUT" ;;
+esac
+eq "$(grep -c . "$GH_ARGV" || true)" "0" "(21c) no PR is looked up"
+# Only the bare-number lookup needs the rig. A recorded URL names its own
+# repository, and a bead with no PR takes the pre-open path, so neither stops
+# when the rig cannot be resolved.
+run_preopen "" no-such-rig '[{"metadata":{"pr_url":"https://github.com/o/r/pull/55"}}]'
+eq "$RC" "0" "(22) a recorded pr_url needs no rig"
+eq "$(grep -c -- '^pr view https://github.com/o/r/pull/55 --json ' "$GH_ARGV" || true)" "1" "(22b) and is viewed by its URL alone"
+eq "$(printf '%s' "$OUT" | tail -1)" "0|https://github.com/o/r/pull/55" "(22c) and takes the post-open path"
+run_preopen "" no-such-rig '[{"metadata":{}}]'
+eq "$RC" "0" "(23) a bead with no PR recorded needs no rig"
+eq "$(printf '%s' "$OUT" | tail -1)" "1|" "(23b) and takes the pre-open path"
+eq "$(grep -c . "$GH_ARGV" || true)" "0" "(23c) and looks nothing up"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

@@ -1067,9 +1067,6 @@ caller's `existing_pr`, so a post-open anchor reaching this step by any
 route converges on its PR instead of being re-parked:
 ```bash
 # >>> pre-open-recorded-pr
-RIG_ROOT="${GC_RIG_ROOT:-}"
-[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 RECORDED_PR="$EXISTING_PR"
 if [ -z "$RECORDED_PR" ]; then
   RECORDED_PR=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata | (.pr_url // "") as $u | (.pr_number // "" | tostring) as $n | if $u != "" then $u elif $n != "" then $n else empty end' 2>/dev/null)
@@ -1086,17 +1083,24 @@ fi
 # skipped by merge.sh and pr-facts.sh forever).
 PR_URL=""; PR_NUMBER=""
 if [ -n "$RECORDED_PR" ] && command -v gh >/dev/null 2>&1; then
-  # A bare pr_number resolves against gh's default repository, which with no
-  # `gh repo set-default` is the first remote in gh's own order, upstream ahead
-  # of origin. Naming origin pins it; a recorded URL names its own repository.
-  # Origin is read from the rig's repository by path, because the cwd may sit
-  # in another checkout, whose origin holds another repository's PRs.
-  PR_REPO=$(git -C "$RIG_ROOT" remote get-url origin 2>/dev/null)
-  if [ -n "$PR_REPO" ]; then
-    PR_VIEW=$(gh pr view "$RECORDED_PR" --repo "$PR_REPO" --json url,number,state,headRefName,baseRefName 2>/dev/null)
-  else
-    PR_VIEW=$(gh pr view "$RECORDED_PR" --json url,number,state,headRefName,baseRefName 2>/dev/null)
-  fi
+  case "$RECORDED_PR" in
+    http://*|https://*)
+      # A recorded URL names its own repository, so it needs no rig.
+      PR_VIEW=$(gh pr view "$RECORDED_PR" --json url,number,state,headRefName,baseRefName 2>/dev/null) ;;
+    *)
+      # Anything else, a bare pr_number included, resolves against a repository
+      # gh picks from the cwd's checkout: with no `gh repo set-default`, its
+      # first remote in gh's own order, upstream ahead of origin. Naming the
+      # rig's origin, read by path, pins it. Only this lookup needs the rig, and
+      # it stops when the rig or its origin cannot be named, because an unpinned
+      # view can stamp another repository's PR on the bead.
+      RIG_ROOT="${GC_RIG_ROOT:-}"
+      [ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+      [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster) to look PR $RECORDED_PR up in; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+      PR_REPO=$(git -C "$RIG_ROOT" remote get-url origin 2>/dev/null)
+      [ -n "$PR_REPO" ] || { echo "the rig at $RIG_ROOT has no origin to look PR $RECORDED_PR up in; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+      PR_VIEW=$(gh pr view "$RECORDED_PR" --repo "$PR_REPO" --json url,number,state,headRefName,baseRefName 2>/dev/null) ;;
+  esac
   PR_URL=$(printf '%s' "$PR_VIEW" | jq -r '.url // empty' 2>/dev/null)
   PR_NUMBER=$(printf '%s' "$PR_VIEW" | jq -r '.number // empty | tostring' 2>/dev/null)
 fi
