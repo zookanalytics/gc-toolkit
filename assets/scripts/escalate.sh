@@ -51,22 +51,24 @@ while [ $# -gt 0 ]; do
 done
 
 # no_wait_why <subject> -> what the subject names when it is no bead that can
-# wait for a person, or nothing when it is a bead that can. Only bead-store.sh's
-# exit 1 proves that no bead is named. Otherwise the subject's own row decides,
-# and only a row carrying this exact id and a type is an answer, because bd also
-# answers an id that is a prefix of another bead's. A read that fails, or any
-# other payload, returns 1.
+# wait for a person, or nothing when it is a bead that can. The `*-wisp-*` shape
+# answers without a read. Otherwise the subject's own row decides, and only a
+# row carrying this exact id and a type is an answer, because bd also answers an
+# id that is a prefix of another bead's. Only when no such row reads is
+# bead-store.sh asked, so a call about a bead costs the one read, and only
+# bead-store.sh's exit 1 proves that no bead is named. Anything else returns 1.
 no_wait_why() {
   local rc=0 row="" type=""
   case "$1" in *-wisp-*) echo "names a patrol wisp or a session"; return 0 ;; esac
+  if row=$(bd_json show "$1") && type=$(printf '%s' "$row" | jq -er --arg id "$1" '
+      if type == "array" then [ .[] | objects | select(.id == $id) ][0].issue_type else null end
+      | strings | select(length > 0)' 2>/dev/null); then
+    if [ "$type" = session ]; then echo "names a session"; fi
+    return 0
+  fi
   "$HERE/bead-store.sh" "$1" >/dev/null 2>&1 || rc=$?
   if [ "$rc" -eq 1 ]; then echo "names no bead"; return 0; fi
-  row=$(bd_json show "$1") || return 1
-  type=$(printf '%s' "$row" | jq -er --arg id "$1" '
-    if type == "array" then [ .[] | objects | select(.id == $id) ][0].issue_type else null end
-    | strings | select(length > 0)' 2>/dev/null) || return 1
-  if [ "$type" = session ]; then echo "names a session"; fi
-  return 0
+  return 1
 }
 
 # A subject outside the helper's id charset goes to the helper, which refuses it

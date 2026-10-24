@@ -523,9 +523,10 @@ eq "$(creates)" 0 "  ... and no gate is filed"
 has "$(cat "$TMP/err")" "'refinery' names no bead" "  ... and the translation says why on stderr"
 
 echo "# the old name files a call about a session as a patrol finding, whatever the shape of its id"
-reset "$(task tk-w),$(session lx-abc12)"; : > "$STUB_PF_LOG"
+reset "$(task tk-w),$(session lx-abc12)"; : > "$STUB_PF_LOG"; : > "$STUB_BS_LOG"
 "$HSUT/escalate.sh" --subject lx-abc12 --key witness-refinery-queue-unreadable --message m >/dev/null 2>"$TMP/err"; rc=$?
 eq "$rc" 0 "a subject that reads as a session bead files a finding"
+eq "$(cat "$STUB_BS_LOG")" "" "  ... and bead-store.sh is not asked, because the session's row answered"
 eq "$(cat "$STUB_PF_LOG")" "patrol-finding [--key] [witness-refinery-queue-unreadable] [--title] [m] [--message] [m]" "  ... under its key"
 eq "$(creates)" 0 "  ... and no gate blocks the session bead"
 has "$(cat "$TMP/err")" "'lx-abc12' names a session" "  ... and the translation says why on stderr"
@@ -573,6 +574,18 @@ for bsrc in 0 3; do
   eq "$out" "gate-1" "  ... its gate on the bead"
   eq "$(cat "$STUB_PF_LOG")" "" "  ... and no finding is filed"
 done
+
+echo "# a call about a bead costs the hand-off one read of its row"
+# bead-store.sh resolves the rig through gc rig list, bounded at 15s, so it is
+# asked only when the row does not read.
+reset "$(task tk-w)"; : > "$STUB_PF_LOG"; : > "$STUB_BS_LOG"
+out=$("$HSUT/escalate.sh" --subject tk-w --key k --message m 2>/dev/null); rc=$?
+eq "$rc$out" "0gate-1" "the helper files on the bead"
+eq "$(grep -c '\[show\] \[tk-w\]' "$STUB_GC_LOG")" "1" "  ... after one read of the bead's row"
+eq "$(cat "$STUB_BS_LOG")" "" "  ... and bead-store.sh is not asked"
+reset "$(task tk-w)"; : > "$STUB_PF_LOG"; : > "$STUB_BS_LOG"
+"$HSUT/escalate.sh" --subject tk-gone --key k --message m >/dev/null 2>&1
+eq "$(cat "$STUB_BS_LOG")" "bead-store [tk-gone]" "a subject whose row does not read is put to bead-store.sh"
 
 echo "# the old name asks nothing about the subject of a retract or of a malformed call"
 reset "$(task tk-w)"; : > "$STUB_PF_LOG"; : > "$STUB_BS_LOG"
