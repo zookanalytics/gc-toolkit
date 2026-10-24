@@ -875,7 +875,7 @@ branch_has_real_change() {
   # the cwd, which may be another checkout or no checkout at all.
   BHRC_ERROR=""
   if ! bhrc_base=$(git -C "$1" merge-base "$2" "$3" 2>/dev/null); then
-    bhrc_said=$(git -C "$1" merge-base "$2" "$3" 2>&1 >/dev/null | tr -s '[:space:]' ' ')
+    bhrc_said=$(git -C "$1" merge-base "$2" "$3" 2>&1 >/dev/null | tr -s '[:space:]' ' ' | sed 's/ $//')
     BHRC_ERROR="merge-base $2 $3 failed: ${bhrc_said:-no common ancestor}"
     return 2
   fi
@@ -883,12 +883,12 @@ branch_has_real_change() {
   bhrc_rc=$?
   [ "$bhrc_rc" != 0 ] || return 1
   if [ "$bhrc_rc" != 1 ]; then
-    bhrc_said=$(git -C "$1" diff --quiet "$bhrc_base" "$3" 2>&1 | tr -s '[:space:]' ' ')
+    bhrc_said=$(git -C "$1" diff --quiet "$bhrc_base" "$3" 2>&1 | tr -s '[:space:]' ' ' | sed 's/ $//')
     BHRC_ERROR="diff $bhrc_base $3 failed: ${bhrc_said:-exit $bhrc_rc}"
     return 2
   fi
   if ! bhrc_count=$(git -C "$1" rev-list --count "$bhrc_base..$3" 2>/dev/null); then
-    bhrc_said=$(git -C "$1" rev-list --count "$bhrc_base..$3" 2>&1 >/dev/null | tr -s '[:space:]' ' ')
+    bhrc_said=$(git -C "$1" rev-list --count "$bhrc_base..$3" 2>&1 >/dev/null | tr -s '[:space:]' ' ' | sed 's/ $//')
     BHRC_ERROR="rev-list $bhrc_base..$3 failed: ${bhrc_said:-no output}"
     return 2
   fi

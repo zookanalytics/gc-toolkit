@@ -323,11 +323,14 @@ OUT=$(cd "$ELSEWHERE" && "${NOCHECK_ENV[@]}" bash "$TMP/merge-push.sh" 2>&1); RC
 eq "$RC" 1 "nocheck: merge-push stops"
 has "$(cat "$D/lc.log")" "transition wb --to refused_false_completion --assignee  --route human --set false_completion_suspected=the zero-diff check could not run in $D/rig: merge-base origin/main " \
   "nocheck: the park records that the check could not run, in the rig, and the failed git call"
-has "$(cat "$D/lc.log")" "Not a valid object name origin/main" "nocheck: the park carries git's own error"
+has "$(cat "$D/lc.log")" "Not a valid object name origin/main; no change verified" \
+  "nocheck: the park carries git's own error, its trailing newline not left as a space before the rest"
 has "$(cat "$D/lc.log")" "--takeaway the zero-diff check could not run, so no change was verified" "nocheck: the board's takeaway says the check could not run"
 hasnt "$(cat "$D/lc.log")" "no verified change vs origin/main" "nocheck: the park does not say the branch has no change"
 has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-zero-diff-check-failed --message The zero-diff check of branch polecat/wb against origin/main could not run in $D/rig: merge-base origin/main " \
   "nocheck: the visit is a failed-check situation, naming the directory and the failed git call"
+has "$(cat "$D/gc.log")" "Not a valid object name origin/main. It verified nothing either way" \
+  "nocheck: the visit carries git's own error, its trailing newline not left as a space before the rest"
 hasnt "$(cat "$D/gc.log")" "refinery-false-completion" "nocheck: the visit is not a no-change situation"
 has "$(cat "$D/gc.log")" "runtime drain-ack" "nocheck: the session drains"
 eq "$(merged_tries)" 0 "nocheck: nothing is recorded as merged"

@@ -255,26 +255,29 @@ block "$QUORUM_TOML" quorum-lane-repo "$TMP/lane-1.sh" 1
 block "$QUORUM_TOML" quorum-lane-repo "$TMP/lane-2.sh" 2
 cmp -s "$TMP/lane-1.sh" "$TMP/lane-2.sh" && ok "lane: the two lanes carry the same block" \
   || bad "lane: the two lanes carry the same block"
-eq "$(grep -c 'git -C "\$REPO" diff origin/<base>\.\.\.<reviewed_oid>' "$QUORUM_TOML" || true)" 2 \
-  "lane: each lane reads its diff in the repository the block resolves"
+# Step 2's diff runs in a later shell than the block, so it names the path the
+# block prints, never the REPO the block's shell took with it.
+eq "$(grep -c 'git -C <repo> diff origin/<base>\.\.\.<reviewed_oid>` with `<repo>` the rig' "$QUORUM_TOML" || true)" 2 \
+  "lane: each lane reads its diff in the repository the block prints"
+eq "$(grep -c 'git -C "\$REPO" diff' "$QUORUM_TOML" || true)" 0 \
+  "lane: no lane's diff names REPO, which step 2's shell does not have"
 eq "$(grep -c '`git diff origin/' "$QUORUM_TOML" || true)" 0 "lane: no lane reads a diff from its cwd"
 L="$TMP/lane"
 mkdir -p "$L"
 git init -q -b main "$L/rig"; commit "$L/rig" "lane rig" >/dev/null
 git init -q -b main "$L/cwd"; commit "$L/cwd" "lane cwd" >/dev/null
-printf 'printf "REPO=%%s\\n" "$REPO"\n' > "$TMP/lane-probe.tail"
 for mode in env roster nomatch; do
   FAKE_ROSTER="$L/roster-$mode.json"; pick "$mode" "$L/rig"
   rc=0
   OUT=$(cd "$L/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_ROSTER="$L/roster-$mode.json" FAKE_LOG="$L/gc.log" \
-          bash -c "$(cat "$TMP/lane-1.sh" "$TMP/lane-probe.tail")" 2>&1) || rc=$?
+          bash "$TMP/lane-1.sh" 2>&1) || rc=$?
   case "$mode" in
     nomatch)
       [ "$rc" -ne 0 ] && ok "lane/nomatch: an unresolvable rig fails closed" || bad "lane/nomatch: an unresolvable rig fails closed"
-      hasnt "$OUT" "REPO=" "lane/nomatch: no repository is resolved" ;;
+      hasnt "$OUT" "rig repository:" "lane/nomatch: no repository is printed" ;;
     *)
       eq "$rc" 0 "lane/$mode: the block runs from a foreign cwd"
-      eq "$OUT" "REPO=$L/rig" "lane/$mode: the lane's repository is the rig, not the cwd repo" ;;
+      eq "$OUT" "rig repository: $L/rig" "lane/$mode: the block prints the rig as the lane's repository, not the cwd repo" ;;
   esac
 done
 

@@ -97,17 +97,21 @@ M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
 # The diff in step 2 reads origin/<base> from the rig's repository, named by
 # path: another checkout's origin/<base> can be stale, and a diff against it
 # shows changes the base made as changes the branch made. An unresolvable rig
-# fails closed, because `git -C ""` runs in the cwd.
+# fails closed, because `git -C ""` runs in the cwd. Step 2's diff runs in a
+# later shell, where REPO is unset, so the block prints the path for that diff
+# to name.
 REPO="${GC_RIG_ROOT:-}"
 [ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$REPO" ] || { echo "review lane: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+echo "rig repository: $REPO"
 # <<< quorum-lane-repo
 ```
 
 **2. Apply the check's method to the diff, read-only.** The method is the skill
 the check section of the review bead's dispatch note names, loaded from your
 skill catalog. A lane has the pins from step 1 and the diff,
-`git -C "$REPO" diff origin/<base>...<reviewed_oid>`, and none of the rest of the frame
+`git -C <repo> diff origin/<base>...<reviewed_oid>` with `<repo>` the rig
+repository step 1 printed, and none of the rest of the frame
 the method's blocks assume: no review workspace and no keepalive. So a lane
 reads what the method reads and judges as the method does, and runs nothing the
 method runs, anywhere: not at the reviewed commit and not against the
@@ -173,17 +177,21 @@ M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
 # The diff in step 2 reads origin/<base> from the rig's repository, named by
 # path: another checkout's origin/<base> can be stale, and a diff against it
 # shows changes the base made as changes the branch made. An unresolvable rig
-# fails closed, because `git -C ""` runs in the cwd.
+# fails closed, because `git -C ""` runs in the cwd. Step 2's diff runs in a
+# later shell, where REPO is unset, so the block prints the path for that diff
+# to name.
 REPO="${GC_RIG_ROOT:-}"
 [ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$REPO" ] || { echo "review lane: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+echo "rig repository: $REPO"
 # <<< quorum-lane-repo
 ```
 
 **2. Apply the check's method to the diff, read-only.** The method is the skill
 the check section of the review bead's dispatch note names, loaded from your
 skill catalog. A lane has the pins from step 1 and the diff,
-`git -C "$REPO" diff origin/<base>...<reviewed_oid>`, and none of the rest of the frame
+`git -C <repo> diff origin/<base>...<reviewed_oid>` with `<repo>` the rig
+repository step 1 printed, and none of the rest of the frame
 the method's blocks assume: no review workspace and no keepalive. So a lane
 reads what the method reads and judges as the method does, and runs nothing the
 method runs, anywhere: not at the reviewed commit and not against the
