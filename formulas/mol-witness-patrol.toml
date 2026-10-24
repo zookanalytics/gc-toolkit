@@ -472,8 +472,8 @@ session registered the bare alias resolves `absent` there while its owner
 is active. A `failed-create` session is a create that rolled back. The
 rollback closes its row in the same write and frees none of the work
 assigned to it, so its owner then reads `absent`. A row whose close did not
-land stays open in `failed-create`, and gascity does not close it while work
-is still assigned to it, so recovering that work is what lets the row close.
+land stays open in `failed-create`. Both are dead states, so the work
+assigned to either is recovered here, whatever becomes of the row.
 Every other state is owned, and its bead is not orphaned. `active` and
 `awake` are live, and a live owner whose
 bead shows no progress is the warrant path below, not a punt. The rest,
