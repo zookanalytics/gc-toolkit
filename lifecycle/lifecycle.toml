@@ -1474,7 +1474,7 @@ keys = [
 #   in turn. A visit filed before the cutover carries its subject here, and the
 #   cutover's migration reads the visit's tracks edge instead. A conversation
 #   carries no pack metadata. Never cleared.
-# gc.origin — `operator` marks a topic a human commissioned. gc-visit-open.sh
+# gc.origin — `operator` marks a topic a human commissioned. operator-intake.sh
 #   stamps it on its subject when the key is absent, and gc-helm.sh `engage
 #   --new-subject` writes it in the create payload of the subject it files.
 #   bead-context.sh returns it with a subject's context. It decides no

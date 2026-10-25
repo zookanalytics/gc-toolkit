@@ -50,8 +50,7 @@ gcmux bind-key b run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-p
 # same pick-a-row behavior, `--all` selects the wider set.
 gcmux bind-key B run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-path $(sq "$CITY_PATH") --all"
 
-# Operator-origin visit intake — type a message, get a durable, routed
-# conversation on it. Input handling (a `gum write` popup) lives in the
+# The operator's intake — type a message, get a durable conversation on it. Input handling (a `gum write` popup) lives in the
 # script; the key just runs it, which is the shape this binding had before
 # threads were retired. `command-prompt` held it for exactly one commit
 # and is SINGLE-LINE by construction, so the operator could file a
@@ -64,8 +63,8 @@ gcmux bind-key B run-shell "$CONFIGDIR/assets/scripts/tmux-pick-helm.sh --city-p
 # lost by backgrounding it now that the handler reads its message from a
 # per-press draft file instead of one shared paste buffer, so presses never
 # order against each other. That draft is also what
-# survives a failed intake. See tmux-visit-prompt.sh.
-gcmux bind-key a run-shell -b "$(sq "$CONFIGDIR/assets/scripts/tmux-visit-prompt.sh") $(sq "$CONFIGDIR")"
+# survives a failed intake. See tmux-intake-prompt.sh.
+gcmux bind-key a run-shell -b "$(sq "$CONFIGDIR/assets/scripts/tmux-intake-prompt.sh") $(sq "$CONFIGDIR")"
 
 # prefix+A — raise a brand-new topic and converse about it now. Capital A, the
 # sibling of prefix+a: where prefix+a files a bead for triage, this one opens a

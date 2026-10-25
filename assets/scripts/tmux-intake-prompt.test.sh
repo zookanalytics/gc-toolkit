@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Test for tmux-visit-prompt.sh — the `prefix + a` operator-origin visit
-# intake, and for the binding
+# Test for tmux-intake-prompt.sh — the `prefix + a` operator intake, and for
+# the binding
 # tmux-bindings.sh installs for it.
 #
 # Two halves, because the defect classes are different:
 #
 #   HERMETIC — the handler run directly with `tmux`, `gum` and
-#     `gc-visit-open.sh` stubbed on PATH / in a fake config dir. No tmux
+#     `operator-intake.sh` stubbed on PATH / in a fake config dir. No tmux
 #     server, no city. The tmux stub RUNS the popup body it is handed, with
 #     the gum stub on PATH, so the command string the handler assembles is
 #     executed rather than merely inspected.
@@ -25,8 +25,8 @@
 #   (MULTILINE) THE acceptance criterion. `command-prompt` is
 #               single-line by construction, so the operator could file a
 #               sentence and nothing longer. A message with embedded newlines
-#               must reach gc-visit-open's argv with every line intact — which
-#               is what reaches the bead, since gc-visit-open writes the topic
+#               must reach operator-intake's argv with every line intact — which
+#               is what reaches the bead, since operator-intake writes the topic
 #               verbatim into the subject bead's body as well as its title.
 #   (ROUNDTRIP) the OTHER acceptance criterion, and the reason this moved
 #               to a popup in the first place. `command-prompt` substitutes the
@@ -51,7 +51,7 @@
 #               handler used to arm `trap 'rm -f' EXIT` over the draft, so
 #               EVERY exit destroyed the only copy of what was typed. An
 #               operator lost a paragraph to it with zero trace — no subject,
-#               no visit, no bead in any ledger. A failed intake must now leave
+#               no conversation, no bead in any ledger. A failed intake must now leave
 #               the text on disk and NAME its path, because a draft that
 #               survives is a retry and a deleted one is the bug.
 #   (DRAFTOK)   the inverse, and what keeps DRAFTKEEP from being "never delete
@@ -59,7 +59,7 @@
 #               the thought is durable, and a draft left behind would train the
 #               operator to ignore the directory.
 #   (UNCONFIRM) rc=0 is not the confirmation — the id is. An intake that exits
-#               clean having named neither subject nor visit has said nothing
+#               clean having named neither subject nor conversation has said nothing
 #               about what survived, so the draft is kept.
 #   (MKTEMPFAIL) the draft file could not be created. This was unguarded under
 #               `set -eu`, so the handler died before the popup with no message
@@ -126,11 +126,11 @@
 #               differ across gum versions.
 #   (BLANK)     a blank submit files nothing — no bead with an empty title —
 #               and still says so.
-#   (DASH)      a message may begin with "-"; it must reach gc-visit-open
+#   (DASH)      a message may begin with "-"; it must reach operator-intake
 #               behind `--` rather than being read as a flag.
 #   (IDPASS)    a bare bead id is NOT forced to a topic (no --topic): opening a
 #               conversation on an existing bead is a real thing to want from
-#               this key, and gc-visit-open already fails loudly on an id no
+#               this key, and operator-intake already fails loudly on an id no
 #               ledger answers for.
 #   (SAYOK)     success names the ids. An intake whose result you cannot see is
 #               an intake you do not trust.
@@ -138,8 +138,8 @@
 #               already created — that id is the difference between retrying
 #               and losing the thought. `run-shell` output goes nowhere, so
 #               display-message is the only channel.
-#   (REACT)     the react path reports that the visit is still to come, rather
-#               than claiming one was filed.
+#   (REACT)     the react path reports that a first reaction was filed, rather
+#               than claiming a conversation was.
 #   (INDICATOR) the in-flight status-line slot is written while the intake
 #               runs and cleared when it ends — however it ends. (That the
 #               agent behind it is resolved in the FOREGROUND is not asserted
@@ -160,9 +160,9 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT="$HERE/tmux-visit-prompt.sh"
+SCRIPT="$HERE/tmux-intake-prompt.sh"
 BINDINGS="$HERE/tmux-bindings.sh"
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-tmux-visit-prompt-test.XXXXXX")"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-tmux-intake-prompt-test.XXXXXX")"
 SOCKET="gcvp-test-$$"
 PROBE_SOCKET="gcvp-probe-$$"
 cleanup() {
@@ -206,7 +206,7 @@ wait_for() {            # wait_for <predicate> [args…] — poll until it exits
 }
 # Predicates for wait_for; each re-reads its observable on every poll. A say is
 # a `display-message -d` (the handler's only operator channel); a call is one
-# gc-visit-open invocation the stub logs. msg_has reads the live server through
+# operator-intake invocation the stub logs. msg_has reads the live server through
 # process substitution, never a pipe into grep -q, so a match is not lost to
 # SIGPIPE under `set -o pipefail`.
 calls_ge() { local n; n=$(grep -c '=== call ===' "$2" 2>/dev/null); [ "${n:-0}" -ge "$1" ]; }         # calls_ge N FILE
@@ -216,8 +216,8 @@ has_file() { [ -f "$1" ]; }
 no_file()  { [ ! -f "$1" ]; }
 msg_has()  { grep -q "$1" < <(tmux -L "$SOCKET" show-messages 2>/dev/null); }
 
-[ -f "$SCRIPT" ] && ok "tmux-visit-prompt.sh present" || { bad "missing at $SCRIPT"; exit 1; }
-[ -x "$SCRIPT" ] && ok "tmux-visit-prompt.sh executable" || bad "tmux-visit-prompt.sh not executable"
+[ -f "$SCRIPT" ] && ok "tmux-intake-prompt.sh present" || { bad "missing at $SCRIPT"; exit 1; }
+[ -x "$SCRIPT" ] && ok "tmux-intake-prompt.sh executable" || bad "tmux-intake-prompt.sh not executable"
 
 # The hostile message. Every piece of it breaks a different layer if the
 # response is ever spliced into a command line: `'` the shell's single quotes,
@@ -235,34 +235,34 @@ MULTI="the refinery stalled again
 first: the anchor is unrouted; second: nobody re-gates it
 so it just sits there"
 
-# ── Fake config dir: the handler resolves gc-visit-open.sh under it ──────────
+# ── Fake config dir: the handler resolves operator-intake.sh under it ──────────
 # Passing the stub this way (rather than through the environment) matches how
 # the real binding wires the two together, and keeps the test honest about the
 # path the handler actually computes.
 mkcfg() {           # mkcfg <dir> <stub-body>
     mkdir -p "$1/assets/scripts"
-    printf '%s\n' "$2" > "$1/assets/scripts/gc-visit-open.sh"
-    chmod +x "$1/assets/scripts/gc-visit-open.sh"
+    printf '%s\n' "$2" > "$1/assets/scripts/operator-intake.sh"
+    chmod +x "$1/assets/scripts/operator-intake.sh"
     # tmux-bindings.sh derives the handler path from the config dir too, so
     # the live half reaches the REAL handler only if it is linked in here.
-    ln -sf "$SCRIPT" "$1/assets/scripts/tmux-visit-prompt.sh"
+    ln -sf "$SCRIPT" "$1/assets/scripts/tmux-intake-prompt.sh"
 }
 
 STUB_OK='#!/bin/sh
 { printf "=== call ===\n"; for a in "$@"; do printf "argv=[%s]\n" "$a"; done; } >> "$CALLS"
-echo "gc-visit-open: subject tk-sub01 created in rig gc-toolkit (task)" >&2
-echo "gc-helm: visit tk-vis01 filed on tk-sub01 (pool gc-toolkit/gc-toolkit.converse)"
-echo "gc-visit-open: subject tk-sub01 — visit filed (--no-react: filing the visit directly)."'
+echo "operator-intake: subject tk-sub01 created in rig gc-toolkit (task)" >&2
+echo "gc-helm: conversation tk-conv01 filed on tk-sub01 — waiting in the operator'"'"'s queue; no session spawned."
+echo "operator-intake: subject tk-sub01 — conversation filed (--no-react: filing the conversation directly)."'
 
 STUB_REACT='#!/bin/sh
 { printf "=== call ===\n"; for a in "$@"; do printf "argv=[%s]\n" "$a"; done; } >> "$CALLS"
-echo "gc-visit-open: subject tk-sub02 created in rig gc-toolkit (task)" >&2
-echo "gc-visit-open: subject tk-sub02 — first reaction slung (yes: proactive is deliverable)."'
+echo "operator-intake: subject tk-sub02 created in rig gc-toolkit (task)" >&2
+echo "operator-intake: subject tk-sub02 — first reaction filed (yes: proactive is deliverable)."'
 
 STUB_FAIL='#!/bin/sh
 { printf "=== call ===\n"; for a in "$@"; do printf "argv=[%s]\n" "$a"; done; } >> "$CALLS"
-echo "gc-visit-open: subject tk-sub03 created in rig gc-toolkit (task)" >&2
-echo "gc-visit-open: could not file the visit on tk-sub03 (the subject bead exists)" >&2
+echo "operator-intake: subject tk-sub03 created in rig gc-toolkit (task)" >&2
+echo "operator-intake: could not file the conversation on tk-sub03 (the subject bead exists)" >&2
 exit 4'
 
 ###############################################################################
@@ -366,7 +366,7 @@ chmod +x "$TMP/bin/gc"
 
 # run_handler <cfg-dir> <topic> — "type" the topic into the stubbed popup, run
 # the handler, wait for the backgrounded half to report. Returns the handler's
-# exit code; the tmux, gum and gc-visit-open call logs are left in
+# exit code; the tmux, gum and operator-intake call logs are left in
 # $TMUX_CALLS / $GUM_CALLS / $CALLS. Set EXPECT_SAY=0 for the paths that
 # deliberately say nothing, so the wait below does not burn its full budget; set
 # PREPOPUP_SAYS=N for a path that says N times in the foreground before the popup
@@ -412,7 +412,7 @@ has "$calls" "argv=[--]" "DASH: the topic is passed behind --, never read as a f
 has "$calls" "argv=[$HOSTILE]" "SAYOK: the handler forwards the message verbatim"
 hasnt "$calls" "argv=[--topic]" "IDPASS: --topic is not forced, so a bead id still resolves as one"
 tcalls=$(cat "$TMP/tmux.log")
-has "$tcalls" "gc visit: subject tk-sub01 — visit tk-vis01 filed" "SAYOK: success names both ids"
+has "$tcalls" "gc intake: subject tk-sub01 — conversation tk-conv01 waits in your queue" "SAYOK: success names both ids"
 
 # (SHAPE) — what the popup actually runs.
 gcalls=$(cat "$TMP/gum.log")
@@ -428,7 +428,7 @@ gh=$(sed -n 's/.*--height \([0-9][0-9]*\).*/\1/p' "$TMP/gum.log" | head -1)
     || bad "SHAPE: the textarea is not sized for multi-line input (--height '${gh:-unset}')"
 
 # (MULTILINE) — the acceptance criterion. Every line, and the blank line
-# between them, reaches gc-visit-open as ONE argument.
+# between them, reaches operator-intake as ONE argument.
 run_handler "$CFG_OK" "$MULTI"
 has "$(cat "$TMP/calls.log")" "argv=[$MULTI]" "MULTILINE: a multi-line message reaches the intake with every line intact"
 eq "$(grep -c '=== call ===' < "$TMP/calls.log")" "1" "MULTILINE: it arrives as one topic, not one per line"
@@ -541,7 +541,7 @@ else
 fi
 
 # A bead id typed at prefix+a is an existing-bead request, not a new report.
-# gc-visit-open.sh resolves it against the bead's own rig and REFUSES --rig for
+# operator-intake.sh resolves it against the bead's own rig and REFUSES --rig for
 # it (exit 2), so a rig must not reach the intake for one — otherwise a bead id
 # filed through this key fails whenever the city has live rigs. With the rig
 # chosen BEFORE the message, the picker cannot know the text is a bead id, so it
@@ -671,13 +671,13 @@ has "$(cat "$TMP/tmux.log")" "could not open the input popup: no current client"
 # (REACT)
 run_handler "$CFG_REACT" "why is dolt slow?"
 tcalls=$(cat "$TMP/tmux.log")
-has "$tcalls" "first reaction slung" "REACT: the react path is reported as such"
-hasnt "$tcalls" "visit tk-vis" "REACT: no visit id is claimed when none was filed"
+has "$tcalls" "first reaction filed" "REACT: the react path is reported as such"
+hasnt "$tcalls" "conversation tk-conv" "REACT: no conversation id is claimed when none was filed"
 
 # (SAYFAIL)
 run_handler "$CFG_FAIL" "something that will fail"
 tcalls=$(cat "$TMP/tmux.log")
-has "$tcalls" "gc visit FAILED (rc=4)" "SAYFAIL: failure is surfaced with its exit code"
+has "$tcalls" "gc intake FAILED (rc=4)" "SAYFAIL: failure is surfaced with its exit code"
 has "$tcalls" "subject tk-sub03 exists" "SAYFAIL: the surviving subject bead is named"
 
 # (DRAFTKEEP) — the bead. The same failing intake as SAYFAIL: the subject bead
@@ -691,18 +691,18 @@ kept=$(find "$TMP/drafts" -type f -name 'draft-*' 2>/dev/null | head -1)
     || bad "DRAFTKEEP: a failed intake destroyed the draft (kept='${kept:-none}')"
 has "$tcalls" "DRAFT KEPT" "DRAFTKEEP: ...and says so"
 has "$tcalls" "$(basename "${kept:-none}")" "DRAFTKEEP: ...naming the path it was kept at"
-case "$tcalls" in *"DRAFT KEPT"*"gc visit FAILED"*) ok "DRAFTKEEP: the path leads, so a truncated message still carries it" ;;
+case "$tcalls" in *"DRAFT KEPT"*"gc intake FAILED"*) ok "DRAFTKEEP: the path leads, so a truncated message still carries it" ;;
                   *) bad "DRAFTKEEP: the draft path is not first in the message" ;; esac
 rm -f "$TMP"/drafts/draft-*
 
 # (UNCONFIRM) — rc=0 is not the confirmation; the id is. An intake that exits
-# clean and names neither subject nor visit has said nothing about what
+# clean and names neither subject nor conversation has said nothing about what
 # survived, so the draft is kept rather than assumed durable.
 CFG_QUIET="$TMP/cfg-quiet"; mkcfg "$CFG_QUIET" '#!/bin/sh
-echo "gc-visit-open: done."'
+echo "operator-intake: done."'
 run_handler "$CFG_QUIET" "a topic whose fate nobody reported"
 tcalls=$(cat "$TMP/tmux.log")
-has "$tcalls" "named no subject or visit" "UNCONFIRM: a clean exit with no id is reported as unconfirmed"
+has "$tcalls" "named no subject or conversation" "UNCONFIRM: a clean exit with no id is reported as unconfirmed"
 kept=$(find "$TMP/drafts" -type f -name 'draft-*' 2>/dev/null | head -1)
 { [ -n "$kept" ] && grep -q 'a topic whose fate nobody reported' "$kept"; } \
     && ok "UNCONFIRM: ...and the draft is kept" \
@@ -743,7 +743,7 @@ fi
 # (BLANKDUR) — the blank branch is also where a truncated write lands, so a
 # paragraph can be lost behind it. Three seconds was too short for that.
 run_handler "$CFG_OK" ""
-blankdur=$(sed -n 's/.*-d \([0-9][0-9]*\) gc visit: nothing typed.*/\1/p' "$TMP/tmux.log" | head -1)
+blankdur=$(sed -n 's/.*-d \([0-9][0-9]*\) gc intake: nothing typed.*/\1/p' "$TMP/tmux.log" | head -1)
 { [ -n "$blankdur" ] && [ "$blankdur" -gt 3000 ]; } \
     && ok "BLANKDUR: the blank message holds longer than the old 3s flash (${blankdur}ms)" \
     || bad "BLANKDUR: the blank message is still a flash (-d '${blankdur:-unset}')"
@@ -815,7 +815,7 @@ fi
 # (BLANK) — blank and whitespace-only both file nothing.
 for blank in "" "   "; do
     run_handler "$CFG_OK" "$blank"
-    eq "$(cat "$TMP/calls.log")" "" "BLANK: '${blank}' invokes gc-visit-open not at all"
+    eq "$(cat "$TMP/calls.log")" "" "BLANK: '${blank}' invokes operator-intake not at all"
     has "$(cat "$TMP/tmux.log")" "nothing typed" "BLANK: '${blank}' still tells the operator"
 done
 
@@ -824,7 +824,7 @@ FAKE_AGENT_NAME="gcvp.test-$$"
 INDICATOR_PATH="/tmp/gc-status-gcvp-test-$$.indicator"
 CFG_SLOW="$TMP/cfg-slow"; mkcfg "$CFG_SLOW" '#!/bin/sh
 sleep 0.3
-echo "gc-visit-open: subject tk-sub04 — visit filed (x)."'
+echo "operator-intake: subject tk-sub04 — conversation filed (x)."'
 rm -f "$INDICATOR_PATH"
 (
     export CALLS="$TMP/calls.log" TMUX_CALLS="$TMP/tmux.log" GUM_CALLS="$TMP/gum.log"
@@ -845,7 +845,7 @@ CFG_HANG="$TMP/cfg-hang"; mkcfg "$CFG_HANG" '#!/bin/sh
 sleep 60'
 if command -v timeout >/dev/null 2>&1; then
     GC_VISIT_INTAKE_TIMEOUT=1 run_handler "$CFG_HANG" "a topic that wedges"
-    has "$(cat "$TMP/tmux.log")" "gc visit FAILED (rc=124)" "TIMEOUT: a wedged intake is reported, not left hanging"
+    has "$(cat "$TMP/tmux.log")" "gc intake FAILED (rc=124)" "TIMEOUT: a wedged intake is reported, not left hanging"
     has "$(cat "$TMP/tmux.log")" "timed out after 1s" "TIMEOUT: the message says what happened"
 else
     skip "TIMEOUT: timeout(1) not installed"
@@ -855,7 +855,7 @@ fi
 CFG_NONE="$TMP/cfg-none"; mkdir -p "$CFG_NONE/assets/scripts"
 run_handler "$CFG_NONE" "a topic" || true
 tcalls=$(cat "$TMP/tmux.log")
-has "$tcalls" "intake script missing" "PREFLIGHT: an absent gc-visit-open.sh is reported to the pane"
+has "$tcalls" "intake script missing" "PREFLIGHT: an absent operator-intake.sh is reported to the pane"
 hasnt "$tcalls" "display-popup" "PREFLIGHT: ...before the popup opens, so no typing is wasted"
 
 # (GUMMISS) — needs a PATH with the tmux stub and no gum of any kind.
@@ -876,7 +876,7 @@ if command -v tmux >/dev/null 2>&1; then
     GC_TMUX_SOCKET="$SOCKET" sh "$BINDINGS" "$CFG_OK" >/dev/null 2>&1
     bound=$(tmux -L "$SOCKET" list-keys -T prefix 2>/dev/null | grep -E '^bind-key +-T prefix +a ' || true)
     has "$bound" "run-shell -b" "BIND: prefix+a backgrounds the handler (a modal popup must not hold the command queue)"
-    has "$bound" "tmux-visit-prompt.sh" "BIND: run-shell invokes the visit handler"
+    has "$bound" "tmux-intake-prompt.sh" "BIND: run-shell invokes the intake handler"
     hasnt "$bound" "command-prompt" "BIND: the single-line command-prompt is gone"
     hasnt "$bound" "set-buffer" "BIND: and so is the shared paste buffer it needed"
     hasnt "$bound" "tmux-spawn-thread.sh" "BIND: the retired thread spawner is gone from the binding"
@@ -986,9 +986,9 @@ if [ -n "$LIVE_TERM" ]; then
     has "$live" "argv=[third one's here; yes]" "THREE: the third press lands"
     eq "$(grep -c '=== call ===' <<< "$live")" "3" "THREE: three presses, three independent invocations"
     # The outcome say lands after the calls-log write, so wait for it separately.
-    wait_for msg_has 'visit tk-vis01 filed'
+    wait_for msg_has 'conversation tk-conv01 waits in your queue'
     msgs=$(tmux -L "$SOCKET" show-messages 2>/dev/null || true)
-    has "$msgs" "visit tk-vis01 filed" "ROUNDTRIP: the outcome reaches the operator's client"
+    has "$msgs" "conversation tk-conv01 waits in your queue" "ROUNDTRIP: the outcome reaches the operator's client"
 
     # (CANCELPTY) THE CONTROL THIS SUITE WAS MISSING. Everything hermetic here
     # runs against a gum STUB, and a stub can be taught to do things the real
@@ -1110,7 +1110,7 @@ fi
 REPO="$(cd "$HERE/../.." && pwd)"
 if command -v git >/dev/null 2>&1 && git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
     dangling=$(git -C "$REPO" grep -ln 'tmux-spawn-thread' \
-        -- . ':(exclude)specs' ':(exclude)assets/scripts/tmux-visit-prompt.test.sh' 2>/dev/null || true)
+        -- . ':(exclude)specs' ':(exclude)assets/scripts/tmux-intake-prompt.test.sh' 2>/dev/null || true)
     eq "$dangling" "" "GONE: no live file still references tmux-spawn-thread.sh"
 else
     skip "GONE: not a git checkout, cannot sweep for references"

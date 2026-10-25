@@ -1052,7 +1052,7 @@ eq "$RC" "2" "(RECO) close refuses --recommended-formula"
 eq "$LOG" "" "(RECO) …and writes nothing"
 
 # ── Origin does not decide the exit ──────────────────────────────────────────
-# gc-visit-open stamps gc.origin=operator on a topic a human typed, but the
+# operator-intake stamps gc.origin=operator on a topic a human typed, but the
 # script does not force such a bead to the ruling exit: an operator capture is
 # triaged on its merits, so every exit is open to it. The guardrail that a fork
 # or an irreversible action still goes to a human lives in the reacting agent's

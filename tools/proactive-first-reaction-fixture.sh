@@ -158,8 +158,8 @@ eq "lower-priority bead ranks LAST despite being oldest"  "px-old-lo" \
    "$(printf '%s' "$RANK" | jq -r '.[2].id')"
 
 echo "── deliverable: will a slung reaction actually be PICKED UP? ──"
-# A real branch for its callers (assets/scripts/gc-visit-open.sh files a bare
-# visit on a no). The QUEUE is not what makes a sling vanish — a routed bead
+# A real branch for its callers (assets/scripts/operator-intake.sh files a
+# conversation on a no). The QUEUE is not what makes a sling vanish — a routed bead
 # waits at zero cost — so what the verb asks is whether this city's agent
 # roster carries a pool that can claim at all. NO is a positive finding: an
 # unreadable roster answers YES, because absence of evidence would otherwise
@@ -404,7 +404,7 @@ REACTED_OUT="$(P sling px-hasreaction --dry-run 2>&1 || true)"
 absent "a subject with an open reaction is NOT re-filed (no create emitted)" "gc bd create" "$REACTED_OUT"
 has    "…and the skip names the cause"                             "already has an open first reaction" "$REACTED_OUT"
 # The skip is a no-op, but the CLI verb exits RC_ALREADY_REACTED (3), not 0, so a
-# cross-process caller (gc-helm react, gc-visit-open) can tell it from a dispatch
+# cross-process caller (gc-helm react, operator-intake) can tell it from a dispatch
 # and file its own visit. In-process (cmd_scan --sling) the same skip stays a
 # return-0 no-op that does not spend the cap — proved by the sweep tests below.
 rec=0; P sling px-hasreaction --dry-run >/dev/null 2>&1 || rec=$?

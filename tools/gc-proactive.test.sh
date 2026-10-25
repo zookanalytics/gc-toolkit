@@ -31,7 +31,7 @@
 #   (BOTH-READS)    on the live read path, one sweep drops both a bead with a
 #                   dispatch path and a bead a live workflow drives (INFLIGHT-*)
 # The sling holds the same line for a bead named to it directly, as gc-helm
-# react and gc-visit-open name one, because filing a reaction leaves the
+# react and operator-intake name one, because filing a reaction leaves the
 # subject's route in place and the pool serving it could hand the subject to a
 # worker mid-reaction:
 #   (PATH-SKIP)  sling refuses a bead carrying any dispatch-path key, an arm,
@@ -229,7 +229,7 @@ done
 
 # --- the sling refuses a bead with a dispatch path --------------------------
 # The scan never offers a routed or armed bead, but gc-helm react and
-# gc-visit-open name a bead to the sling directly. Filing a reaction leaves the
+# operator-intake name a bead to the sling directly. Filing a reaction leaves the
 # subject's route in place, so a reaction to a routed bead races the pool that
 # serves it, and a reaction to an armed bead races the arm. The sling refuses
 # such a bead as a no-op with its own exit code. beads.json is the store: every
