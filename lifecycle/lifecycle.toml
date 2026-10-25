@@ -482,10 +482,11 @@ keys = [
 #   derived from the anchor (mol-review.toml), and signoff.sh verifying a rework
 #   child. Absent, the merged_target readers fall through to the default branch
 #   and submit falls back to base_branch. Never cleared. A branch name.
-# merged_target — where the PR actually lands, resolved onto the anchor when the
-#   PR opens (pr-open.sh) and read by merge.sh, pr-facts.sh and gate-ensure.sh to
-#   catch a base moved out from under a validated PR. Absent falls back to
-#   target then the default branch. Never cleared.
+# merged_target — where the work actually lands. pr-open.sh resolves it onto the
+#   anchor when the PR opens, and direct-merge-push.sh records it at a direct
+#   landing. Read by merge.sh, pr-facts.sh and gate-ensure.sh to catch a base
+#   moved out from under a validated PR. Absent falls back to target then the
+#   default branch. Never cleared.
 # merged_sha — the merge commit recorded at close, by merge.sh and pr-facts.sh
 #   (record-failure-cap.sh writes it by hand). I5 forbids an empty one, so a
 #   record that cannot read the oid writes the sentinel `unverified:PR#<n>`
