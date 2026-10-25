@@ -2,21 +2,21 @@
 # Hermetic test: a formula step whose git calls choose a repository names it by
 # path, so the session's cwd never chooses it.
 #
-# The marked blocks of mol-review (the commit pin and the diff),
-# mol-review-quorum-signoff (a lane's repository), mol-refinery-patrol (the
-# conflict reason), mol-upstream-gc-rebase and mol-upstream-gc-pr-prep (the
-# gascity worktree setup) and mol-feedback-miner (the repository mined) are
-# extracted verbatim and run from a WRONG cwd against real git repos. Each must
-# act on the rig GC_RIG_ROOT names, or the roster entry for GC_RIG (for the
-# keeper formulas, the roster entry named gascity), and refuse when none
-# resolves. A keeper formula's refusal drains only once its hand-back to the
-# keeper is written. The wrong cwd is a clone of the same origin wherever that
-# makes a cwd-steered call succeed, so "read the rig, not cwd" discriminates.
-# Controls prove that a bare git call and an empty `git -C ""` both follow cwd.
-# The refinery's zero-diff check, its rejection's branch delete and its
-# recorded-PR lookup are proven the same way in the suites that run those blocks
-# (unrecorded-direct-landing, mr-aware-rejection-failclosed and
-# find-work-gating-guard). No live city, store, or network.
+# The marked blocks of mol-review and mol-review-quorum-signoff (the review's
+# gather), mol-refinery-patrol (the conflict reason), mol-upstream-gc-rebase
+# and mol-upstream-gc-pr-prep (the gascity worktree setup) and
+# mol-feedback-miner (the repository mined) are extracted verbatim and run from
+# a WRONG cwd against real git repos. Each must act on the rig GC_RIG_ROOT
+# names, or the roster entry for GC_RIG (for the keeper formulas, the roster
+# entry named gascity), and refuse when none resolves. A keeper formula's
+# refusal drains only once its hand-back to the keeper is written. The wrong
+# cwd is a clone of the same origin wherever that makes a cwd-steered call
+# succeed, so "read the rig, not cwd" discriminates. Controls prove that a bare
+# git call and an empty `git -C ""` both follow cwd. The refinery's zero-diff
+# check, its rejection's branch delete and its recorded-PR lookup are proven
+# the same way in the suites that run those blocks (unrecorded-direct-landing,
+# mr-aware-rejection-failclosed and find-work-gating-guard). No live city,
+# store, or network.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -175,183 +175,98 @@ eq "$(ref "$C/cwd" origin/main)" "$MOVED" "control: a bare fetch updated the cwd
 eq "$(cd "$C/cwd" && git -C "" rev-parse --show-toplevel 2>/dev/null || true)" "$C/cwd" \
   "control: git -C \"\" runs in the cwd repo, so an empty root must refuse rather than run"
 
-# --- 2. mol-review: the commit pin. ---------------------------------------------
-echo "── mol-review: review-pin-commit ──"
-block "$REVIEW_TOML" review-pin-commit "$TMP/pin.sh"
-eq "$(bare_git "$TMP/pin.sh")" "" "pin: every git call in the block names its repo with -C"
-
-pin_case() { # <mode> <meta-json> [<label>]; sets RC, D, OLD, NEW
-  local d="$TMP/pin-${3:-$1}" rc=0
-  mkdir -p "$d"
-  git init -q --bare -b main "$d/origin.git"
-  git init -q -b main "$d/seed"
-  commit "$d/seed" "base ($1)" >/dev/null
-  git -C "$d/seed" push -q "$d/origin.git" main
-  git -C "$d/seed" checkout -q -b feature
-  OLD=$(commit "$d/seed" "feature ($1)")
-  git -C "$d/seed" push -q "$d/origin.git" feature
-  git clone -q "$d/origin.git" "$d/rig"
-  # The cwd repo is a clone of the same origin, so a fetch and a head read that
-  # follow cwd succeed there instead of failing for want of the refs.
-  git clone -q "$d/origin.git" "$d/cwd"
-  # The branch moves on after both last fetched, so only the block's own fetch
-  # can bring its new head into a repository.
-  NEW=$(commit "$d/seed" "feature follow-up ($1)")
-  git -C "$d/seed" push -q "$d/origin.git" feature
-  # PIN_UNREACHABLE points the rig's origin at nothing, so its fetch fails.
-  [ -z "${PIN_UNREACHABLE:-}" ] || git -C "$d/rig" remote set-url origin "$d/gone.git"
-  FAKE_ROSTER="$d/roster.json"; pick "$1" "$d/rig"
-  ( cd "$d/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_ROSTER="$d/roster.json" FAKE_LOG="$d/gc.log" \
-      M="$2" BASE=main BRANCH=feature bash "$TMP/pin.sh" ) >"$d/out" 2>&1 || rc=$?
-  RC=$rc; D=$d
+# --- 2. mol-review and mol-review-quorum-signoff: the review's gather. ---------
+# The gather fetches the review's base and branch into the rig, makes the
+# review's worktree there at the reviewed commit, and leaves the shell in it,
+# where the check's method reads the diff. review-methods.test.sh holds the
+# four steps that carry it to one text, so mol-review's copy runs for all four,
+# filled in as a pour fills it for a correctness review of feature onto main.
+# GC_PACK_DIR names this checkout, so the block runs the rig-root.sh,
+# review-workspace.sh and review-checks.sh under test.
+# formula-worktree-rig.test.sh proves where the worktree is registered, and
+# that the pack-script locator's call is the block's one git call without -C.
+echo "── mol-review: review-gather ──"
+GATHER="$(copy "$REVIEW_TOML" review-gather 1)"
+[ -n "$GATHER" ] && ok "review-gather: block extracted between markers" \
+  || bad "review-gather: block extracted between markers" "markers missing from ${REVIEW_TOML#"$ROOT"/}"
+gather_render() { # <reviewed oid>
+  printf '%s\n' "$GATHER" | sed -e 's|{{review_bead}}|rb|g' -e "s|{{reviewed_oid}}|$1|g" -e 's|{{review_base}}|main|g' \
+    -e 's|{{review_branch}}|feature|g' -e 's|{{anchor_bead}}|tk-anc|g' -e 's|{{check}}|correctness|g' -e 's|{{review_pr_url}}||g'
 }
+gather_render 0123456789abcdef0123456789abcdef01234567 > "$TMP/gather.sh"
+case "$(cat "$TMP/gather.sh")" in
+  *'{{'*) bad "review-gather: no unrendered formula placeholder left" ;;
+  *)      ok "review-gather: no unrendered formula placeholder left" ;;
+esac
+if bash -n "$TMP/gather.sh" 2>/dev/null; then ok "review-gather: block is valid bash"; else bad "review-gather: block is valid bash"; fi
+printf '[{"id":"tk-anc","title":"the change under review"}]\n' > "$TMP/anchor.json"
 
-for mode in env roster; do
-  pin_case "$mode" '{}'
-  eq "$RC" 0 "pin/$mode: the block runs from a foreign cwd"
-  eq "$(ref "$D/rig" origin/feature)" "$NEW" "pin/$mode: the fetch brought the branch's new head into the RIG"
-  eq "$(ref "$D/cwd" origin/feature)" "$OLD" "pin/$mode: the cwd repo was not fetched"
-  has "$(cat "$D/out")" "reviewing feature -> main at $NEW" "pin/$mode: with no reviewed_oid, the head is read from the rig's refreshed refs"
-done
-STAMP="$OLD"
-pin_case env "{\"reviewed_oid\":\"$STAMP\"}" stamped
-eq "$RC" 0 "pin/stamped: the block runs from a foreign cwd"
-has "$(cat "$D/out")" "reviewing feature -> main at $STAMP" "pin/stamped: the dispatch-stamped reviewed_oid still wins over the fetched head"
-PIN_UNREACHABLE=1 pin_case env '{}' unreachable
-[ "$RC" -ne 0 ] && ok "pin/unreachable: a fetch that fails stops the review" || bad "pin/unreachable: a fetch that fails stops the review"
-has "$(cat "$D/out")" "review: fetching main and feature into $D/rig failed" "pin/unreachable: the block says the fetch failed"
-hasnt "$(cat "$D/out")" "reviewing " "pin/unreachable: no commit is pinned from the rig's stale refs"
-pin_case nomatch '{}'
-[ "$RC" -ne 0 ] && ok "pin/nomatch: an unresolvable rig fails closed" || bad "pin/nomatch: an unresolvable rig fails closed"
-eq "$(ref "$D/rig" origin/feature)" "$OLD" "pin/nomatch: refused before fetching into the rig"
-eq "$(ref "$D/cwd" origin/feature)" "$OLD" "pin/nomatch: refused before fetching into the cwd repo"
-hasnt "$(cat "$D/out")" "reviewing " "pin/nomatch: no commit is pinned"
-
-# --- 3. mol-review: the diff under review. -------------------------------------
-echo "── mol-review: review-diff ──"
-block "$REVIEW_TOML" review-diff "$TMP/diff.sh"
-eq "$(bare_git "$TMP/diff.sh")" "" "diff: every git call in the block names its repo with -C"
-
-diff_case() { # <mode>; sets RC, D, OID
-  local d="$TMP/diff-$1" rc=0
-  mkdir -p "$d"
+# gather_case <mode> <label>: an origin whose base moves on after the rig and
+# the cwd repo cloned it, then a branch cut from the moved base, so only the
+# gather's own fetch brings either new head into the rig. The cwd repo fetches
+# the branch, so a fetch or a diff that followed cwd would find the reviewed
+# commit there, against its stale base. GATHER_UNREACHABLE points the rig's
+# origin at nothing. GATHER_UNPUSHED reviews a commit no remote has. Sets RC,
+# D, OID (the branch's head), BASE_OLD, BASE_NEW and WT, the worktree the block
+# printed.
+gather_case() {
+  local d="$TMP/gather-$2" rc=0 review
+  mkdir -p "$d/tmp"
   git init -q --bare -b main "$d/origin.git"
   git init -q -b main "$d/seed"
-  commit "$d/seed" "base ($1)" >/dev/null
+  BASE_OLD=$(commit "$d/seed" "gather base ($2)")
   git -C "$d/seed" push -q "$d/origin.git" main
-  # The cwd repo cloned before the base moved, so its origin/main is stale.
+  git clone -q "$d/origin.git" "$d/rig"
   git clone -q "$d/origin.git" "$d/cwd"
-  commit "$d/seed" "base moved on" >/dev/null
+  BASE_NEW=$(commit "$d/seed" "base moved on ($2)")
   git -C "$d/seed" push -q "$d/origin.git" main
   git -C "$d/seed" checkout -q -b feature
-  OID=$(commit "$d/seed" "branch work")
+  OID=$(commit "$d/seed" "branch work ($2)")
   git -C "$d/seed" push -q "$d/origin.git" feature
-  git clone -q "$d/origin.git" "$d/rig"
-  # It holds the reviewed commit, so a diff that follows cwd succeeds there,
-  # against the stale base.
   git -C "$d/cwd" fetch -q origin feature
+  review="$OID"
+  if [ -n "${GATHER_UNPUSHED:-}" ]; then
+    git -C "$d/seed" checkout -q -b local-only
+    review=$(commit "$d/seed" "never pushed ($2)")
+  fi
+  [ -z "${GATHER_UNREACHABLE:-}" ] || git -C "$d/rig" remote set-url origin "$d/gone.git"
   FAKE_ROSTER="$d/roster.json"; pick "$1" "$d/rig"
-  ( cd "$d/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_ROSTER="$d/roster.json" FAKE_LOG="$d/gc.log" \
-      BASE=main REVIEWED_OID="$OID" bash "$TMP/diff.sh" ) >"$d/out" 2>&1 || rc=$?
+  gather_render "$review" > "$d/gather.sh"
+  ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_PACK_DIR="$ROOT" GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_ROSTER="$d/roster.json" \
+      FAKE_META="$TMP/anchor.json" FAKE_LOG="$d/gc.log" bash "$d/gather.sh" ) >"$d/out" 2>&1 || rc=$?
+  WT=$(sed -n "s/^== The review's worktree: //p" "$d/out")
   RC=$rc; D=$d
 }
 
-diff_case env
-CONTROL=$(cd "$D/cwd" && git diff --stat "origin/main...$OID" 2>&1 || true)
-has "$CONTROL" "base-moved-on.txt" "control: a bare diff from the stale clone shows the base's change as the branch's"
 for mode in env roster; do
-  [ "$mode" = env ] || diff_case "$mode"
-  eq "$RC" 0 "diff/$mode: the block runs from a foreign cwd"
-  has "$(cat "$D/out")" "branch-work.txt" "diff/$mode: the diff shows the branch's change"
-  hasnt "$(cat "$D/out")" "base-moved-on.txt" "diff/$mode: the diff is taken against the rig's current base, not the cwd's stale one"
+  gather_case "$mode" "$mode"
+  eq "$RC" 0 "gather/$mode: the block runs from a foreign cwd"
+  eq "$(ref "$D/rig" origin/main)" "$BASE_NEW" "gather/$mode: the fetch brought the base's new head into the rig"
+  eq "$(ref "$D/rig" origin/feature)" "$OID" "gather/$mode: the fetch brought the branch's head into the rig"
+  eq "$(ref "$D/cwd" origin/main)" "$BASE_OLD" "gather/$mode: the cwd repo was not fetched"
+  eq "$(git -C "${WT:-$D/no-worktree}" rev-parse HEAD 2>/dev/null || echo none)" "$OID" \
+    "gather/$mode: the review's worktree is at the reviewed commit"
+  DIFF=$(git -C "${WT:-$D/no-worktree}" diff --name-only origin/main...HEAD 2>&1 || true)
+  has "$DIFF" "branch-work" "gather/$mode: the diff read in the worktree shows the branch's change"
+  hasnt "$DIFF" "base-moved-on" "gather/$mode: the diff is taken against the base the rig fetched, not a stale one"
 done
-diff_case nomatch
-[ "$RC" -ne 0 ] && ok "diff/nomatch: an unresolvable rig fails closed" || bad "diff/nomatch: an unresolvable rig fails closed"
-hasnt "$(cat "$D/out")" ".txt" "diff/nomatch: no diff is shown"
+CONTROL=$(git -C "$D/cwd" diff --name-only "origin/main...$OID" 2>&1 || true)
+has "$CONTROL" "base-moved-on" "control: the same diff in the cwd repo, whose base is stale, shows the base's change as the branch's"
+gather_case nomatch nomatch
+[ "$RC" -ne 0 ] && ok "gather/nomatch: an unresolvable rig fails closed" || bad "gather/nomatch: an unresolvable rig fails closed"
+has "$(cat "$D/out")" "review: cannot resolve the rig root" "gather/nomatch: the block says the rig did not resolve"
+eq "$(ref "$D/rig" origin/main)" "$BASE_OLD" "gather/nomatch: refused before fetching into the rig"
+eq "$(ref "$D/cwd" origin/main)" "$BASE_OLD" "gather/nomatch: refused before fetching into the cwd repo"
+eq "$WT" "" "gather/nomatch: no worktree is made"
+GATHER_UNREACHABLE=1 gather_case env unreachable
+[ "$RC" -ne 0 ] && ok "gather/unreachable: a fetch that fails stops the review" || bad "gather/unreachable: a fetch that fails stops the review"
+eq "$WT" "" "gather/unreachable: no worktree is made from the rig's stale refs"
+GATHER_UNPUSHED=1 gather_case env missing
+[ "$RC" -ne 0 ] && ok "gather/missing: a reviewed commit the rig cannot fetch stops the review" \
+  || bad "gather/missing: a reviewed commit the rig cannot fetch stops the review"
+eq "$WT" "" "gather/missing: no worktree is made"
 
-# --- 4. mol-review-quorum-signoff: a lane's repository. ------------------------
-echo "── mol-review-quorum-signoff: quorum-lane-repo ──"
-eq "$(copies "$QUORUM_TOML" quorum-lane-repo)" 2 "lane: both lanes carry the quorum-lane-repo block"
-block "$QUORUM_TOML" quorum-lane-repo "$TMP/lane-1.sh" 1
-block "$QUORUM_TOML" quorum-lane-repo "$TMP/lane-2.sh" 2
-cmp -s "$TMP/lane-1.sh" "$TMP/lane-2.sh" && ok "lane: the two lanes carry the same block" \
-  || bad "lane: the two lanes carry the same block"
-# Step 2's diff runs in a later shell than the block, so it names the path, the
-# base and the commit the block prints, never the variables the block's shell
-# took with it.
-eq "$(grep -c 'git -C <repo> diff origin/<base>\.\.\.<reviewed_oid>` with `<repo>`, `<base>` and' "$QUORUM_TOML" || true)" 2 \
-  "lane: each lane reads its diff in the repository, against the base and at the commit the block prints"
-eq "$(grep -c 'git -C "\$REPO" diff' "$QUORUM_TOML" || true)" 0 \
-  "lane: no lane's diff names REPO, which step 2's shell does not have"
-eq "$(grep -c '`git diff origin/' "$QUORUM_TOML" || true)" 0 "lane: no lane reads a diff from its cwd"
-# The read-only check looks where the lane reads: a baseline taken in the cwd
-# misses a change to the rig's checkout, and errors where the cwd is no checkout.
-eq "$(grep -c 'mutation baseline with `git -C <repo> status --porcelain=v1 -z`' "$QUORUM_TOML" || true)" 2 \
-  "lane: each lane takes its mutation baseline in the repository its diff reads"
-eq "$(grep -c '`git status --porcelain' "$QUORUM_TOML" || true)" 0 "lane: no lane takes its mutation baseline in its cwd"
-# lane_case <mode> <meta-json> <label>: an origin with main and feature, and a
-# rig and a cwd repo both cloned from it before either branch moved on, so only
-# the block's own fetch brings the new heads, and the reviewed commit, into a
-# repository. In the meta, @OID@ is the reviewed commit and @UNPUSHED@ a commit
-# no remote has. LANE_UNREACHABLE points the rig's origin at nothing. Sets RC,
-# OUT (the block's stdout), ERR (its stderr), D, OID, BASE_OLD and BASE_NEW.
-lane_case() {
-  local d="$TMP/lane-$3" rc=0 unpushed meta
-  mkdir -p "$d"
-  git init -q --bare -b main "$d/origin.git"
-  git init -q -b main "$d/seed"
-  BASE_OLD=$(commit "$d/seed" "lane base ($3)")
-  git -C "$d/seed" push -q "$d/origin.git" main
-  git -C "$d/seed" checkout -q -b feature
-  commit "$d/seed" "lane feature ($3)" >/dev/null
-  git -C "$d/seed" push -q "$d/origin.git" feature
-  git clone -q "$d/origin.git" "$d/rig"
-  git clone -q "$d/origin.git" "$d/cwd"
-  OID=$(commit "$d/seed" "lane reviewed ($3)")
-  git -C "$d/seed" push -q "$d/origin.git" feature
-  git -C "$d/seed" checkout -q -b local-only
-  unpushed=$(commit "$d/seed" "lane never pushed ($3)")
-  git -C "$d/seed" checkout -q main
-  BASE_NEW=$(commit "$d/seed" "lane base moved ($3)")
-  git -C "$d/seed" push -q "$d/origin.git" main
-  [ -z "${LANE_UNREACHABLE:-}" ] || git -C "$d/rig" remote set-url origin "$d/gone.git"
-  meta=$(printf '%s' "$2" | sed -e "s/@OID@/$OID/" -e "s/@UNPUSHED@/$unpushed/")
-  FAKE_ROSTER="$d/roster.json"; pick "$1" "$d/rig"
-  OUT=$(cd "$d/cwd" && GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_ROSTER="$d/roster.json" FAKE_LOG="$d/gc.log" \
-          M="$meta" bash "$TMP/lane-1.sh" 2>"$d/err") || rc=$?
-  ERR=$(cat "$d/err")
-  RC=$rc; D=$d
-}
-LANE_META='{"review_base":"main","review_branch":"feature","reviewed_oid":"@OID@"}'
-for mode in env roster; do
-  lane_case "$mode" "$LANE_META" "$mode"
-  eq "$RC" 0 "lane/$mode: the block runs from a foreign cwd"
-  eq "$OUT" "$(printf 'rig repository: %s\nbase: origin/main\nreviewed commit: %s' "$D/rig" "$OID")" \
-    "lane/$mode: the block prints the rig, the base and the reviewed commit, not the cwd repo"
-  eq "$(ref "$D/rig" origin/main)" "$BASE_NEW" "lane/$mode: the fetch brought the base's new head into the rig"
-  eq "$(ref "$D/rig" origin/feature)" "$OID" "lane/$mode: the fetch brought the reviewed commit into the rig"
-  eq "$(ref "$D/cwd" origin/main)" "$BASE_OLD" "lane/$mode: the cwd repo was not fetched"
-done
-lane_case env '{"review_branch":"feature","reviewed_oid":"@OID@"}' nobase
-eq "$RC" 0 "lane/nobase: the block runs with no review_base"
-has "$OUT" "base: origin/main" "lane/nobase: the base falls back to base_ref"
-lane_case env '{"review_base":"main","review_branch":"feature"}' nooid
-eq "$RC" 0 "lane/nooid: the block runs with no reviewed_oid"
-has "$OUT" "reviewed commit: $OID" "lane/nooid: the commit is the branch's head in the rig after the fetch"
-lane_case nomatch "$LANE_META" nomatch
-[ "$RC" -ne 0 ] && ok "lane/nomatch: an unresolvable rig fails closed" || bad "lane/nomatch: an unresolvable rig fails closed"
-hasnt "$OUT" "rig repository:" "lane/nomatch: no repository is printed"
-LANE_UNREACHABLE=1 lane_case env "$LANE_META" unreachable
-[ "$RC" -ne 0 ] && ok "lane/unreachable: a fetch that fails stops the lane" || bad "lane/unreachable: a fetch that fails stops the lane"
-has "$ERR" "review lane: fetching main and feature into $D/rig failed" "lane/unreachable: the block says the fetch failed"
-hasnt "$OUT" "rig repository:" "lane/unreachable: nothing is printed for the diff to name"
-lane_case env '{"review_base":"main","review_branch":"feature","reviewed_oid":"@UNPUSHED@"}' missing
-[ "$RC" -ne 0 ] && ok "lane/missing: a reviewed commit the rig does not hold stops the lane" \
-  || bad "lane/missing: a reviewed commit the rig does not hold stops the lane"
-has "$ERR" "is not in $D/rig after the fetch" "lane/missing: the block says the commit is missing"
-hasnt "$OUT" "rig repository:" "lane/missing: nothing is printed for the diff to name"
-
-# --- 5. mol-refinery-patrol: the conflict reason. -------------------------------
+# --- 3. mol-refinery-patrol: the conflict reason. -------------------------------
 echo "── mol-refinery-patrol: rejection-conflict-reason ──"
 block "$PATROL_TOML" rejection-conflict-reason "$TMP/reason.sh"
 eq "$(bare_git "$TMP/reason.sh")" "" "reason: every git call in the block names its repo with -C"
@@ -393,7 +308,7 @@ grep -qxF 'runtime drain-ack ' "$D/gc.log" 2>/dev/null \
   || bad "reason/nomatch: the refinery drains, leaving the work to retry before the workflow is retired"
 hasnt "$(cat "$D/out")" "REASON=" "reason/nomatch: no reason is composed"
 
-# --- 6. mol-upstream-gc-rebase: the gascity worktree. ---------------------------
+# --- 4. mol-upstream-gc-rebase: the gascity worktree. ---------------------------
 # The keeper formulas name the gascity rig by its roster entry, so the pool the
 # run was slung to never picks the repository: GC_RIG_ROOT here names the cwd
 # repo, the wrong one, in every case.
@@ -474,7 +389,7 @@ has "$(cat "$D/out")" "the hand-back of tk-iss to gascity/gascity-keeper.keeper 
 hasnt "$(cat "$D/gc.log")" "session nudge" "rebase/refused: the keeper is not nudged about a hand-back the bead does not carry"
 hasnt "$(cat "$D/gc.log")" "runtime drain-ack" "rebase/refused: the session does not drain, so the step is retried"
 
-# --- 7. mol-upstream-gc-pr-prep: the gascity worktree. --------------------------
+# --- 5. mol-upstream-gc-pr-prep: the gascity worktree. --------------------------
 echo "── mol-upstream-gc-pr-prep: upstream-pr-prep-worktree-setup ──"
 block "$PRPREP_TOML" upstream-pr-prep-worktree-setup "$TMP/prprep.sh"
 eq "$(bare_git "$TMP/prprep.sh")" "" "pr-prep: every git call in the block names its repo with -C"
@@ -538,7 +453,7 @@ has "$(cat "$D/out")" "the hand-back of tk-iss to gascity/gascity-keeper.keeper 
 hasnt "$(cat "$D/gc.log")" "mail send" "pr-prep/refused: nobody is mailed about a hand-back the bead does not carry"
 hasnt "$(cat "$D/gc.log")" "runtime drain-ack" "pr-prep/refused: the session does not drain, so the step is retried"
 
-# --- 8. mol-feedback-miner: the repository mined. ------------------------------
+# --- 6. mol-feedback-miner: the repository mined. ------------------------------
 echo "── mol-feedback-miner: feedback-miner-repo ──"
 eq "$(copies "$MINER_TOML" feedback-miner-repo)" 2 "miner: both steps carry the feedback-miner-repo block"
 block "$MINER_TOML" feedback-miner-repo "$TMP/miner-1.sh" 1
@@ -580,7 +495,7 @@ hasnt "$OUT" "SWEEP STARTED" "miner/mine-and-file: the sweep never starts"
 has "$(cat "$MN/gc.log")" "step-close --step mol-feedback-miner.mine-and-file --outcome pass" "miner/mine-and-file: the step closes with outcome pass"
 has "$(cat "$MN/gc.log")" "runtime drain-ack" "miner/mine-and-file: the session drains"
 
-# --- 9. One rig-root lookup. -----------------------------------------------------
+# --- 7. One rig-root lookup. -----------------------------------------------------
 # rig-root.sh holds the lookup, so a fix to it lands once. In the formulas whose
 # git calls name a rig by path no block reads the roster for a rig's path
 # itself, every block finds rig-root.sh by one locator line, and the line after
@@ -600,7 +515,7 @@ for f in "$REVIEW_TOML" "$QUORUM_TOML" "$PATROL_TOML" "$MINER_TOML" "$REBASE_TOM
   eq "$(printf '%s\n' "$CALLS" | grep -cF '$("${RR:?rig-root.sh not found in the pack}"' || true)" "$n" "$name: the line after each locator calls rig-root.sh"
   SITES=$((SITES + n))
 done
-for b in pin diff lane-1 lane-2 reason rebase prprep miner-1 miner-2; do
+for b in gather reason rebase prprep miner-1 miner-2; do
   grep -qF '"${RR:?rig-root.sh not found in the pack}"' "$TMP/$b.sh" && ok "$b: the block resolves its rig through rig-root.sh" \
     || bad "$b: the block resolves its rig through rig-root.sh"
 done

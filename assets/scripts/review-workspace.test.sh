@@ -187,7 +187,7 @@ QREMOVE="$(extract "$ROOT/formulas/mol-review-quorum-signoff.toml" quorum-review
 for v in GATHER REMOVE QREMOVE; do
     if [ -n "${!v}" ]; then ok "the formula's $v lines extract"; else bad "the formula's $v lines extract (markers missing)"; fi
 done
-PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"; cp "$SUT" "$HERE/review-checks.sh" "$PACK/assets/scripts/"
+PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"; cp "$SUT" "$HERE/review-checks.sh" "$HERE/rig-root.sh" "$PACK/assets/scripts/"
 # The gather fetches the base and the branch from origin before it makes the
 # worktree, and reads the anchor.
 ORIGIN="$TMP/origin.git"; git init -q --bare "$ORIGIN"
@@ -195,8 +195,8 @@ g push -q "$ORIGIN" "$C2:refs/heads/main" "$C1:refs/heads/polecat/x"
 g remote add origin "$ORIGIN"
 status tk-anc open
 cd "$REPO" || exit 1
-# The gather refuses to run without a rig root, so each run names this
-# repository as the rig.
+# The gather resolves the rig through the pack's rig-root.sh and refuses to
+# run without a rig root, so each run names this repository as the rig.
 for n in 1 2; do
     GOT="$(GC_PACK_DIR="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$GATHER" tk-fx "$C1")
 pwd -P" 2>/dev/null | tail -1)"

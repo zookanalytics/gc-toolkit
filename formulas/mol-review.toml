@@ -154,9 +154,9 @@ writes to disk goes in the workspace beside the worktree, never loose in
 printed into the steps that follow.
 ```bash
 # >>> review-gather
-REPO="${GC_RIG_ROOT:-}"
-[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
+REPO=$("${RR:?rig-root.sh not found in the pack}")
+[ -n "$REPO" ] || { echo "review: cannot resolve the rig root" >&2; exit 1; }
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
