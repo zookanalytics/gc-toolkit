@@ -16,15 +16,15 @@
 // of gc-helm.sh's `--json` contract rather than the spike subset. Everything
 // the bash board computes is computed here: the full rank weight (subtree size
 // + priority + a capped cross-rig-ref count), the takeaway-driven NEEDS
-// sentence, the stranded/empty/complete booleans, the `held`
-// visit fact, and the in-flight/dead-owner join that distinguishes a slung
-// bead being worked from one nobody has touched.
+// sentence, the stranded/empty/complete booleans, the `held` fact, and the
+// in-flight/dead-owner join that distinguishes a slung bead being worked from
+// one nobody has touched.
 //
-// Three of those are CROSS-ANCHOR joins rather than per-anchor facts, so they
-// arrive in [Facts] beside the anchors instead of on [Anchor]: visit presence,
-// the live-workflow map, and session liveness. gc-helm.sh passes the same three
-// into its render as --argjson visits/inflight/ownermap; [Facts] is that
-// argument list, typed.
+// Two of those are CROSS-ANCHOR joins rather than per-anchor facts, so they
+// arrive in [Facts] beside the anchors instead of on [Anchor]: the live-workflow
+// map and session liveness. `held` is read from the human gates and the
+// conversations the gather admits as anchors of their own ([KindGate],
+// [KindConversation]), which the board folds onto the beads they concern.
 //
 // The struct tags are an additive contract: the TypeScript frontend mirrors
 // them, so fields may be added but never renamed or removed.
@@ -72,7 +72,7 @@ func (s Severity) rank() int {
 // Child is a rolled-up member of an anchor (epic child or convoy dependent).
 // Only the status feeds the counts today; Assignee, UpdatedAt and Metadata are
 // carried for parity with the model and are what the consumer beads spend (a
-// dead-owner check, per-child staleness, the visit glyph). A source that cannot
+// dead-owner check, per-child staleness). A source that cannot
 // read a field leaves it zero rather than approximating it.
 type Child struct {
 	ID        string            `json:"id"`
@@ -97,7 +97,7 @@ type Child struct {
 type Anchor struct {
 	ID          string            `json:"id"`
 	Title       string            `json:"title"`
-	Kind        string            `json:"kind"`   // epic | decision | convoy | unowned | human | parked
+	Kind        string            `json:"kind"`   // epic | decision | convoy | unowned | human | parked | merge | review | rework | gate | conversation
 	Source      string            `json:"source"` // same string as Kind; drives derivation branches
 	Rig         string            `json:"rig"`
 	Prefix      string            `json:"prefix"`
@@ -153,11 +153,17 @@ type Anchor struct {
 	WaitingOnClosed []string `json:"waiting_on_closed,omitempty"`
 
 	// Blockers is the same `blocks` edge set as WaitingOn, carrying the fields
-	// the PR round-trip derivation discriminates on: the route, which separates
-	// a pool-routed rework or review child (machine `progressing`) from an
-	// ordinary prerequisite and from the demand bead that makes an anchor
-	// `asking`; the title, which is the demand's authored headline; and the
-	// creation instant, which is when an unanswered demand's turn began.
+	// the derivation discriminates on: the route, which separates a pool-routed
+	// rework or review child (machine `progressing`) from an ordinary
+	// prerequisite and from the human gate that makes an anchor `asking`; the
+	// title, which is the gate's question; the creation instant, which is when
+	// an unanswered gate's turn began; and a gate's await type, key and close
+	// reason, which Accept's conditions read ([readAcceptance]).
+	//
+	// The source reads them for the kinds whose waits the derivation spends
+	// ([source.needsWaitingEdges]), a recommendation's parked bead among them,
+	// open and closed alike, so a recommendation's closed gate is here with its
+	// answer.
 	//
 	// It is the SAME read as WaitingOn, not a second one —
 	// [source.waitingFromEdges] produces both from one dependency query — so an
@@ -213,6 +219,24 @@ type Anchor struct {
 	// metadata-keyed row it serves.
 	Reviews        []Child `json:"reviews,omitempty"`
 	ReviewsUnknown bool    `json:"reviews_unknown,omitempty"`
+
+	// Subjects is the beads a human gate or a conversation concerns, read off
+	// its own edges: for a gate ([KindGate]), each bead that waits on it
+	// through a `blocks` edge; for a conversation ([KindConversation]), the one
+	// bead its `tracks` edge names. The fold moves the row onto each subject
+	// that has a row of its own ([foldWrappers]). Empty on every other kind, and
+	// on a gate whose dependents could not be read, which keeps a row of its own
+	// so no open gate is off the board.
+	Subjects []string `json:"subjects,omitempty"`
+
+	// RepliesTo is the human gates a conversation's `replies-to` edges name:
+	// the gates its sitting answers. Empty on every other kind.
+	RepliesTo []string `json:"replies_to,omitempty"`
+
+	// Assignee is who holds a conversation: `human` while it waits in the
+	// operator's queue, and its sitting's alias while a sitting holds it. The
+	// gather sets it on a conversation only.
+	Assignee string `json:"assignee,omitempty"`
 }
 
 // Blocker is one `blocks` dependency of an anchor, as the gather read it.
@@ -228,16 +252,26 @@ type Blocker struct {
 	// actor will, and the two are not distinguished here because neither makes
 	// the anchor `progressing`.
 	RoutedTo string `json:"routed_to,omitempty"`
-	// IssueType is what the bead IS. A `decision` is a demand by construction,
-	// the way the board's own `decision` kind is.
+	// IssueType is what the bead IS. A `decision` asks a person by
+	// construction, the way the board's own `decision` kind does, and so does
+	// a `gate` whose AwaitType is `human`.
 	IssueType string `json:"issue_type,omitempty"`
 	// Assignee is who holds the child. It lets the derivation ask whether a
 	// pool-routed review or rework is actually being WORKED — claimed by a live
 	// session — rather than merely routed to a pool nothing is draining. Routed
 	// and live are different facts, and only the second makes a pre-open gate a
-	// healthy hold rather than a stall.
+	// healthy hold rather than a stall. On a human gate it is the person the
+	// gate is assigned to, whose it is to clear.
 	Assignee  string    `json:"assignee,omitempty"`
 	CreatedAt time.Time `json:"created_at,omitzero"`
+	UpdatedAt time.Time `json:"updated_at,omitzero"`
+	// AwaitType and AwaitID are a gate's await type and key. A gate whose
+	// await type is `human` is a human gate; its await id is the situation key
+	// it was filed under, `first-reaction` for a recommendation's gate.
+	AwaitType string `json:"await_type,omitempty"`
+	AwaitID   string `json:"await_id,omitempty"`
+	// CloseReason is the answer a closed gate was resolved with.
+	CloseReason string `json:"close_reason,omitempty"`
 }
 
 // Tile is one rendered row of the board — the additive contract mirrored by the
@@ -255,32 +289,29 @@ type Tile struct {
 	Severity Severity `json:"severity"`
 
 	// Owed marks a row whose next move is a PERSON'S: an unanswered human gate,
-	// or a parked conversation whose recorded waits have all landed. It is not
+	// a conversation waiting for the operator, or a parked subject whose
+	// recorded waits have all landed. It is not
 	// derivable from the band — severity is coarse and shared, so a one-bead
-	// demand (ELEVATED) sorts below a stranded container (HIGH) and rank alone
+	// question (ELEVATED) sorts below a stranded container (HIGH) and rank alone
 	// can never put the operator's queue first. [OperatorQueue] is the partition.
 	Owed bool `json:"owed"`
 
 	// Weight is the rank PROXY: subtree size + priority weight + a capped
 	// cross-rig-ref count. It is the middle lane of rank_score.
 	Weight int `json:"weight"`
-	// Held is visit presence: an open visit bead covers this anchor by the
-	// shared visit identity ([Facts.Visits]), so a conversation is holding it. A
-	// held anchor is never stranded — the conversation IS the attention it would
-	// be flagged for lacking.
+	// Held says the operator's side holds this bead: an open human gate blocks
+	// it, an acceptance an earlier Accept left unfinished keeps it, or an open
+	// conversation tracks it. A held anchor is never stranded, because the
+	// question or the conversation IS the attention it would be flagged for
+	// lacking.
 	Held bool `json:"held"`
-	// VisitState refines Held into the visit's engagement: VisitEngaged when a
-	// live sitting is in the conversation right now, VisitParked when the visit
-	// stands open and un-engaged — filed and waiting for a person to pick it up.
-	// Empty on a row no open visit holds (Held is false), the same
-	// not-applicable empty a closed row's Phase carries.
-	//
-	// It reads the same [unengagedVisit] rule Acceptable does, so the two never
-	// disagree: a parked visit is the one Accept is offered on, an engaged one
-	// suppresses it. It is derived here rather than in the browser because the
-	// rule reads the visit's assignee — the pending-engagement window — which
-	// [Sitting.Assignee] deliberately keeps off the wire.
-	VisitState string `json:"visit_state"`
+	// SittingState refines Held: SittingInSession when a conversation that
+	// tracks this bead is held by a live session right now, SittingWaiting on
+	// any other held row, which waits for the operator. Empty on a row nothing
+	// holds (Held is false), the same not-applicable empty a closed row's Phase
+	// carries. It is derived here rather than in the browser because it reads
+	// each conversation's holder against the session list.
+	SittingState string `json:"sitting_state"`
 
 	NClosed int `json:"n_closed"`
 	MTotal  int `json:"m_total"`
@@ -407,11 +438,11 @@ type Tile struct {
 	PRMachine string `json:"pr_machine"`
 
 	// PRConversation is where the exchange with the operator stands: quiet,
-	// outstanding, answered, asking, or unknown. asking is the demand edge;
-	// quiet, outstanding and answered are read off the position pr-facts.sh
-	// records against the acknowledgement watermarks and the routing disposition
-	// — answered once the routed fix unit closes (a rework child landing, a visit
-	// resolved), not on a bare head move. covered is not reachable yet — it waits
+	// outstanding, answered, asking, or unknown. asking is an open human gate
+	// on the anchor; quiet, outstanding and answered are read off the position
+	// pr-facts.sh records against the acknowledgement watermarks and the routing
+	// disposition — answered once the routed fix unit closes (a rework child
+	// landing, a gate resolved), not on a bare head move. covered is not reachable yet — it waits
 	// on a comment-to-bead link nothing records — so an utterance the city is
 	// working reads the coarser outstanding. `unknown` is a rendered value, not a
 	// fallback to the quiet end: an unread axis and a clear one are not
@@ -483,14 +514,15 @@ type Tile struct {
 	// GroupParent reports its first step.
 	GroupParent string `json:"group_parent"`
 
-	// Acceptable marks a recommendation row: the subject carries a
-	// gc.recommended_formula AND its visit is un-engaged, so a person can Accept
-	// it — dispatch that formula at the subject and dismiss the visit in one
-	// procedural order, no sitting required. A live sitting suppresses it (the
-	// operator is deciding by hand) and leaving without a ruling restores it;
-	// [unengagedVisit] is that derivation. It rides beside Held, which cannot
-	// carry it: Held is true for any visit, engaged or not. Discuss (engage) is
-	// always available; Accept is the extra move a recommendation row offers.
+	// Acceptable marks a recommendation row a person can Accept: resolve the
+	// recommendation's human gate and dispatch the formula at the bead, no
+	// sitting required. It holds while all three of Accept's conditions do
+	// ([readAcceptance]): the bead carries a gc.recommended_formula; the
+	// recommendation's gate, the human gate under the key first-reaction, is
+	// open and unassigned, or closed with an acceptance an earlier Accept did
+	// not finish; and no other open human gate blocks the bead. A live sitting
+	// does not withhold it. Discuss (engage) is always available; Accept is the
+	// extra move a recommendation row offers.
 	Acceptable bool `json:"acceptable"`
 
 	// AcceptFormula is the gc.recommended_formula Accept would dispatch, named on
@@ -519,7 +551,7 @@ type Tile struct {
 	// `working`, `needs-review`, or `needs-attention` — and the word the frontier
 	// leads with on every live row. It begins as the per-bead value
 	// [prstatus.Derive] names from the same inputs PRPhase reads: holds, an open
-	// visit, posture, the draft stage, and for a merge anchor its open
+	// human gate, posture, the draft stage, and for a merge anchor its open
 	// rework/review children, or for any other bead the live-workflow signal
 	// standing over it. A bead's board liveness and its GitHub `status:` label
 	// come from that one core. A row WITH child tiles then takes their rolled-up
@@ -546,92 +578,80 @@ type Tile struct {
 	// triple, and non-null exactly on an acceptable row (see computeTile): the
 	// accept affordance and the reasoning behind it ride the wire together.
 	Recommendation *string `json:"recommendation"`
+
+	// AcceptWithheld names the open human gates that hold Accept back, on a row
+	// that meets Accept's first two conditions and fails the third: each gate's
+	// title, or `N× — a · b` over several, the way Needs names gates. The bead's
+	// next step waits for every gate that blocks it, so Accept waits until the
+	// recommendation's gate is the last; Discuss answers the others. Null on
+	// every other row.
+	AcceptWithheld *string `json:"accept_withheld"`
+
+	// GatesInSession names the open human gates on this row that a live
+	// sitting's conversation replies to, the way Needs names gates: the gates
+	// being answered now. It is set on every row such a gate folds onto, so a
+	// bead whose gate an epic's sitting answers shows it though no conversation
+	// tracks the bead. Null on a row with none.
+	GatesInSession *string `json:"gates_in_session"`
 }
 
-// Sitting is one converse sitting — the visit bead a conversation runs inside —
+// Sitting is one converse sitting — the conversation task a sitting runs on —
 // as the board reports it. Sittings are NOT tiles: a tile is an anchor that
 // wants something, while a sitting is an event in the conversation record, so
 // they ride the envelope beside the ranked list rather than competing in it.
 //
-// The board carries every open sitting and those closed inside the recent
+// The board carries every open conversation and those closed inside the recent
 // window (source.sittingWindow). Both halves answer one question the ranked
 // table cannot: which conversations are running now, and what the ones that
-// just ended concluded.
+// just ended concluded. A closed conversation keeps the assignee and the edges
+// it had while open, so the gather finds it by the same shape.
 type Sitting struct {
 	ID  string `json:"id"`
 	Rig string `json:"rig"`
-	// Subject is the bead this conversation is about, by the shared visit
-	// identity (assets/scripts/visit-identity.sh): the first bead the visit's
-	// tracks edges name, or its gc.continuation_group stamp when it has no tracks
-	// edge.
+	// Subject is the bead this conversation is about: the one bead its
+	// `tracks` edge names.
 	Subject string `json:"subject"`
-	// Subjects is every bead the visit covers by the same identity: each bead its
-	// tracks edges name, or the stamp alone when it has no tracks edge. A
-	// running sitting holds each of them (Facts.Visits). It is a derivation
-	// input, not part of the record the web renders, so it carries no wire tag.
-	Subjects []string `json:"-"`
-	Title    string   `json:"title"`
-	// Status is the visit bead's own status. A sitting is finished when this
-	// reads "closed" and running under any other value: a CLAIMED visit is a
-	// held conversation, which is why liveStatuses admits in_progress.
+	Title   string `json:"title"`
+	// Status is the conversation task's own status. A sitting is finished when
+	// this reads "closed" and running under any other value: a conversation in
+	// the operator's queue is open, and one a sitting has claimed is
+	// in_progress.
 	Status string `json:"status"`
 
-	// Outcome is gc.outcome, the one-word justification stamped on a visit
-	// before it closes — by converse (folded, moot, benign, diagnosed,
-	// cut-short, or the word a held sitting signs off with), or by `gc-helm
-	// dismiss` ("dismissed") when the operator ends the sitting themselves.
-	// It is stamped per VISIT, which is what makes it attributable to this
-	// sitting alone. Normally empty on a running sitting, and on a closed one
-	// whose writer did not stamp it; a dismiss that stamped and then could not
-	// close leaves an open visit reading "dismissed" until it is closed or the
-	// sitting signs off over it.
-	Outcome string `json:"outcome"`
-	// OutcomeReason is gc.outcome_reason, the one-line human-readable sentence
-	// naming WHY this visit closed — "moot: premise died, subject already
-	// closed", "folded into <holder>", or what a held sitting signed off on.
-	// Outcome is the word a reader groups by; OutcomeReason is the sentence a
-	// reader reads. It is stamped per VISIT beside Outcome, which is what lets a
-	// dedup close read on the board as a decision rather than a dropped need.
-	// Empty on a running sitting and on a closed one whose writer stamped only
-	// the word.
+	// OutcomeReason is the conversation task's close reason, the one-line
+	// sentence its ending wrote: the headline a sign-off settled on, or the
+	// operator's dismissal. Empty on a running sitting.
 	OutcomeReason string `json:"outcome_reason"`
 	// Session is the converse session that ran the sitting (gc.session_name),
 	// which is what an operator attaches to while it is still open.
 	Session string `json:"session"`
 
-	// Assignee is the visit bead's assignee. engage binds the visit by assignee
-	// while it is still open, before the hook claim promotes it to in_progress
-	// and stamps Session; an open visit with an assignee is therefore a pending
-	// engagement a sitting is about to hold, which [unengagedVisit] treats as
-	// engaged so it suppresses Accept in that window. It is a derivation input,
-	// not part of the record the web renders, so it carries no wire tag.
-	Assignee string `json:"-"`
-
 	// OpenedAt is when the conversation STARTED — gc.claimed_at, falling back
-	// to the bead's creation time for a visit that was never claimed. ClosedAt
-	// is zero while the sitting runs. The pair is also the span the takeaway
-	// below is attributed by.
+	// to the task's creation time for a conversation no sitting has claimed.
+	// ClosedAt is zero while the sitting runs. The pair is also the span the
+	// takeaway below is attributed by.
 	OpenedAt time.Time `json:"opened_at,omitzero"`
 	ClosedAt time.Time `json:"closed_at,omitzero"`
 
 	// Takeaway is the headline THIS sitting left on its subject, or empty.
 	//
-	// The takeaway lives on the SUBJECT, not on the visit, and each sitting
-	// overwrites the last one's. So it is carried only when gc.takeaway_at
-	// falls inside this sitting's own span: a subject visited three times has
-	// one takeaway, and hanging it on all three rows would credit two sittings
-	// with a conclusion they did not reach. Sittings that overlap on one
-	// subject can both claim a stamp inside their span; the visit claim
-	// serializes them in practice, and the failure is a duplicated headline
-	// rather than a wrong one.
+	// The takeaway lives on the SUBJECT, not on the conversation, and each
+	// sitting overwrites the last one's. So it is carried only when
+	// gc.takeaway_at falls inside this sitting's own span: a subject discussed
+	// three times has one takeaway, and hanging it on all three rows would
+	// credit two sittings with a conclusion they did not reach. Sittings that
+	// overlap on one subject can both claim a stamp inside their span; the
+	// conversation's claim serializes them in practice, and the failure is a
+	// duplicated headline rather than a wrong one.
 	Takeaway string `json:"takeaway"`
 
 	// SubjectTitle is the title of the SUBJECT bead — the row's topic, what the
 	// conversation is about. It is read in the same batch as the takeaway
 	// (source.attributeTakeaways), so a row can say what it concerns even when
 	// nothing was concluded on it. Empty when the subject could not be read,
-	// which the [Topic] and [Headline] helpers fall back on the id or the visit
-	// title for. It carries the whole title; a renderer clips it to its column.
+	// which the [Topic] and [Headline] helpers fall back on the id or the
+	// conversation's title for. It carries the whole title; a renderer clips it
+	// to its column.
 	SubjectTitle string `json:"subject_title"`
 }
 
@@ -648,13 +668,11 @@ func (s Sitting) Topic() string {
 
 // Headline is what a sitting CONCLUDED, or failing that what it is ABOUT. The
 // takeaway is the conversation's own one-line conclusion and wins whenever one
-// was attributed. A closed sitting that left no takeaway — a moot, benign or
-// folded dedup close — shows its outcome reason next, the sentence naming why it
-// closed, so the row reads as a decision rather than a blank. Without either the
-// row shows the subject's title — the topic — rather than the visit bead's own
-// title, which on an old-path first reaction is the generic pool-offer line
-// "first reaction ready: accept or redirect" and says nothing. The visit title
-// is the last resort, for a subject the gather could not read at all.
+// was attributed. A closed sitting that left no takeaway shows its close reason
+// next, the sentence naming why it closed, such as the operator's dismissal, so
+// the row reads as a decision rather than a blank. Without either the row shows
+// the subject's title — the topic — and the conversation's own title is the
+// last resort, for a subject the gather could not read at all.
 func (s Sitting) Headline() string {
 	if s.Takeaway != "" {
 		return s.Takeaway
@@ -669,14 +687,10 @@ func (s Sitting) Headline() string {
 }
 
 // Facts are the CROSS-ANCHOR joins one gather pass produces alongside the
-// anchors — the typed form of the three --argjson maps gc-helm.sh hands its
-// render. A zero Facts is legal and means "the gather could not supply these":
-// every anchor then reads as unheld, with nothing in flight and no owner
-// liveness known.
+// anchors. A zero Facts is legal and means "the gather could not supply these":
+// nothing is then in flight, no owner liveness is known, and no conversation
+// reads as in session.
 type Facts struct {
-	// Visits holds the ids of the beads an open visit covers, by the shared
-	// visit identity [Sitting.Subjects] carries.
-	Visits map[string]bool
 	// Inflight maps a work-bead id to the session names of the live graph.v2
 	// workflows standing over it. The gather resolves each live workflow root
 	// through its input convoy, and the key is that convoy's single tracked
@@ -690,12 +704,13 @@ type Facts struct {
 	// time.
 	Inflight map[string][]string
 	// OwnerState maps a session name AND its alias to that session's state, so
-	// a child's assignee can be resolved whichever form it was written in.
+	// a child's assignee, or a conversation's holder, can be resolved whichever
+	// form it was written in.
 	OwnerState map[string]string
-	// Sittings are the converse sittings the same visit read produced — every
-	// open one, plus those closed inside the recent window. Visits above is the
-	// per-anchor boolean derived from them; this is the record itself, which
-	// [BuildBoard] orders and passes through to the envelope.
+	// Sittings are the converse sittings the gather read: every open
+	// conversation, plus those closed inside the recent window. [BuildBoard]
+	// orders them and passes them through to the envelope. The fold reads the
+	// open conversations from their anchors ([KindConversation]), not from here.
 	Sittings []Sitting
 	// Prefixes is every rig's issue prefix; RigNames is every rig's name. The
 	// cross-rig-ref scan looks for OTHER rigs' prefixes in an anchor's prose and
@@ -703,6 +718,10 @@ type Facts struct {
 	// as a "signal-" bead id).
 	Prefixes []string
 	RigNames []string
+
+	// human indexes the gates and conversations by the beads they concern.
+	// [BuildBoard] builds it from the anchors before it derives any tile.
+	human humanIndex
 }
 
 // Board is the envelope returned by the service. Tiles are deduplicated by id

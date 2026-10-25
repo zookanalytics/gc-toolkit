@@ -19,7 +19,7 @@ func doneBoard() (board.Board, []board.Tile) {
 		{
 			ID: "tk-live", Rig: "gc-toolkit", Kind: "epic", Title: "still open",
 			Severity: board.SevHigh, MTotal: 2, Open: 2, Section: board.SectionStalled,
-			Frontier: "2 open · 0 in flight (stranded)", Needs: "decomposed, idle — assign or visit",
+			Frontier: "2 open · 0 in flight (stranded)", Needs: "decomposed, idle — assign or discuss",
 			RankScore: 3_002_000,
 		},
 		{
@@ -207,7 +207,7 @@ func TestRenderTableShowsFamilyBlocks(t *testing.T) {
 			Needs: "green — waiting on the merge pass", GroupRoot: "tk-pr", RankScore: 2_000_000},
 		{ID: "tk-strand", Rig: "gc-toolkit", Kind: "epic", Title: "stranded", Severity: board.SevHigh,
 			Section: board.SectionStalled, MTotal: 2, Open: 2, Frontier: "2 open · 0 in flight (stranded)",
-			Needs: "decomposed, idle — assign or visit", GroupRoot: "tk-strand", RankScore: 3_000_000},
+			Needs: "decomposed, idle — assign or discuss", GroupRoot: "tk-strand", RankScore: 3_000_000},
 	}
 	b := board.Board{GeneratedAt: now, Total: len(tiles), Tiles: tiles}
 	var out strings.Builder
@@ -229,9 +229,35 @@ func TestRenderTableShowsFamilyBlocks(t *testing.T) {
 	}
 }
 
-// The overview's leading glyph encodes a visit as well as a person's move: ○ a
-// row an open visit holds, ◉ a row that is both held and wants a person, ● a
-// plain person's move. In this view ● means wants-a-person, so a held row takes
+// A recommendation Accept is withheld on names the gates that hold it back
+// beside its needs, and a row whose gate a live sitting is answering names that
+// gate, so the operator reads why Accept is missing and what is being answered
+// now without opening --json.
+func TestNeedsCellNamesWithheldAcceptAndGatesInSession(t *testing.T) {
+	withheld, answering := "Rule on it", "Rebase?"
+	tiles := []board.Tile{{
+		ID: "tk-rec", Rig: "gc-toolkit", Kind: "parked", Title: "a recommendation",
+		Severity: board.SevNormal, Section: board.SectionGate, Owed: true, Held: true,
+		Frontier: "owed", Needs: "2× — Accept? · Rule on it", RankScore: 2_000_000,
+		AcceptWithheld: &withheld, GatesInSession: &answering,
+	}}
+	b := board.Board{GeneratedAt: time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC), Total: 1, Tiles: tiles}
+	var out strings.Builder
+	renderTable(&out, b, tiles, b.GeneratedAt, 1)
+	got := out.String()
+
+	want := "2× — Accept? · Rule on it · in session: Rebase? · accept waits on: Rule on it"
+	if !strings.Contains(got, want) {
+		t.Errorf("the needs cell carries both notes:\nwant %q\ngot:\n%s", want, got)
+	}
+	if strings.Contains(got, "accept ▸ 2×") {
+		t.Errorf("a withheld row offers no Accept:\n%s", got)
+	}
+}
+
+// The overview's leading glyph encodes a held row as well as a person's move: ○
+// a row a human gate or a conversation holds, ◉ a row that is both held and
+// wants a person, ● a plain person's move. In this view ● means wants-a-person, so a held row takes
 // its own ○ rather than colliding with it.
 func TestRenderTableMarksHeldRowsInFamilies(t *testing.T) {
 	now := time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC)
@@ -279,7 +305,7 @@ func TestRenderTableMarksHeldRowsInFamilies(t *testing.T) {
 		}
 	}
 	// The legend teaches all three glyphs, not just ●.
-	for _, want := range []string{"○ an open visit holds the row", "◉ both"} {
+	for _, want := range []string{"○ a human gate or a conversation holds the row", "◉ both"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("family legend must explain %q; got:\n%s", want, got)
 		}
@@ -349,7 +375,7 @@ func TestRenderShowsWherePRConversationsStand(t *testing.T) {
 		pr("tk-ask", board.ConversationAsking, "asking: Which base should this land on?", 2_000_001),
 		{ID: "tk-epic", Rig: "gc-toolkit", Kind: "epic", Title: "not a pull request",
 			Severity: board.SevHigh, Section: board.SectionStalled, MTotal: 2, Open: 2,
-			Frontier: "2 open", Needs: "decomposed, idle — assign or visit", GroupRoot: "tk-epic",
+			Frontier: "2 open", Needs: "decomposed, idle — assign or discuss", GroupRoot: "tk-epic",
 			RankScore: 3_000_000},
 	}
 	shut := pr("tk-shut", board.ConversationAnswered, "closed — ages out", -999_000)

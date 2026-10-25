@@ -109,7 +109,6 @@ func emittedKeys(t *testing.T) []string {
 		},
 	}
 	f := board.Facts{
-		Visits:     map[string]bool{"tk-parity": true},
 		OwnerState: map[string]string{"polecat-live": "active"},
 		Prefixes:   []string{"tk", "sl"},
 		RigNames:   []string{"gc-toolkit", "signal-loom"},

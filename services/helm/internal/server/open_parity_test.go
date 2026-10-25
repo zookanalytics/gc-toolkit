@@ -27,17 +27,16 @@ import (
 const scriptPath = "../../../../assets/scripts/gc-helm.sh"
 
 // successEchoRE finds cmd_open's success sentences: the `echo` lines that
-// report a visit. Both live in cmd_open and both are exit-0 paths.
-var successEchoRE = regexp.MustCompile(`(?m)^\s*echo "\$PROG: visit .*"$`)
+// report a conversation. Both live in cmd_open and both are exit-0 paths.
+var successEchoRE = regexp.MustCompile(`(?m)^\s*echo "\$PROG: conversation .*"$`)
 
 // shellVars are the expansions in those sentences, with stand-in values chosen
 // to be distinguishable from one another.
 var shellVars = strings.NewReplacer(
 	"$PROG", "gc-helm",
 	"$existing", "tk-old99",
-	"$VISIT", "tk-new11",
+	"$CONV", "tk-new11",
 	"$bead", "tk-abc12",
-	"$POOL", "human",
 )
 
 func TestParseOpenStdoutMatchesTheScriptsRealSentences(t *testing.T) {
@@ -50,11 +49,11 @@ func TestParseOpenStdoutMatchesTheScriptsRealSentences(t *testing.T) {
 	if len(lines) != 2 {
 		// A third success sentence, or a renamed one, needs a parser branch and
 		// a decision about which outcome it is — not a silent fallthrough.
-		t.Fatalf("found %d visit-reporting echo lines in gc-helm.sh, want 2:\n%s",
+		t.Fatalf("found %d conversation-reporting echo lines in gc-helm.sh, want 2:\n%s",
 			len(lines), strings.Join(lines, "\n"))
 	}
 
-	got := map[string]string{} // outcome -> visit id
+	got := map[string]string{} // outcome -> conversation id
 	for _, raw := range lines {
 		line := strings.TrimSpace(raw)
 		line = strings.TrimPrefix(line, `echo "`)
@@ -63,22 +62,22 @@ func TestParseOpenStdoutMatchesTheScriptsRealSentences(t *testing.T) {
 		if strings.Contains(sentence, "$") {
 			t.Fatalf("unexpanded shell variable in %q — add it to shellVars", sentence)
 		}
-		outcome, visit := parseOpenStdout(sentence)
+		outcome, conv := parseOpenStdout(sentence)
 		if outcome == "opened" {
 			t.Errorf("the parser did not classify a real script sentence:\n  %s", sentence)
 			continue
 		}
 		if prev, dup := got[outcome]; dup {
-			t.Errorf("two sentences both classified as %q (%q and %q)", outcome, prev, visit)
+			t.Errorf("two sentences both classified as %q (%q and %q)", outcome, prev, conv)
 		}
-		got[outcome] = visit
+		got[outcome] = conv
 	}
 
 	if got["filed"] != "tk-new11" {
-		t.Errorf(`filed -> visit %q, want "tk-new11"`, got["filed"])
+		t.Errorf(`filed -> conversation %q, want "tk-new11"`, got["filed"])
 	}
 	if got["existing"] != "tk-old99" {
-		t.Errorf(`existing -> visit %q, want "tk-old99"`, got["existing"])
+		t.Errorf(`existing -> conversation %q, want "tk-old99"`, got["existing"])
 	}
 }
 

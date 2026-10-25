@@ -3,19 +3,21 @@ package server
 // The board's WRITE routes: POST /helm/{open,accept,engage,dismiss}.
 //
 // These are the ONLY writes in the operator dashboard; everything else helm-svc
-// serves is a read. open files a visit; accept slings the subject's recommended
-// formula and dismisses its visit; engage spawns a Discuss sitting on the visit;
-// dismiss closes it. The four share one HTTP shape, so the decisions a reader
-// would otherwise reconstruct are stated here once.
+// serves is a read. open files a conversation in the operator's queue; accept
+// clears a recommendation's human gate and slings the bead's recommended formula;
+// engage spawns a Discuss sitting on a conversation; dismiss ends the sitting.
+// The four share one HTTP shape, so the decisions a reader would otherwise
+// reconstruct are stated here once.
 //
 // ── THEY OWN NO VERB LOGIC ─────────────────────────────────────────────
-// Each verb lives ONCE, in gc-helm.sh (assets/scripts/gate-visit.test.sh and
+// Each verb lives ONCE, in gc-helm.sh (gc-helm-open.test.sh and
 // gc-helm-accept.test.sh guard those single copies). These handlers SHELL OUT
-// to that script through internal/visit, exactly as assets/scripts/
-// gc-visit-open.sh does. So subject resolution, the one-open-visit-per-subject
-// gate, rig resolution, the un-engaged re-check accept makes before it slings,
-// and the board cache bust are all INHERITED here, not reimplemented — and a fix
-// to any of them is a fix to these routes with no Go change at all.
+// to that script through internal/verbs, exactly as assets/scripts/
+// operator-intake.sh does. So subject resolution, open's join of a conversation
+// already waiting in the queue, rig resolution, Accept's lock and the live
+// re-read of its conditions before it slings, and the board cache bust are all
+// INHERITED here, not reimplemented — and a fix to any of them is a fix to these
+// routes with no Go change at all.
 //
 // Shelling to the gc CLI is an established pattern in this binary, not a new one:
 // internal/source/gccli.go already does it for the gather.
@@ -29,8 +31,8 @@ package server
 //     inert — but ARGUMENT injection is live: an id beginning with "-" would be
 //     parsed by a verb's flag loop as a flag. [validBeadID] is that boundary, and
 //     it is deliberately the ONLY validation here. Whether the bead EXISTS,
-//     carries a recommended formula, or has an un-engaged visit are the script's
-//     gates; duplicating them would create a second copy that drifts.
+//     carries a recommended formula, or meets Accept's conditions are the
+//     script's gates; duplicating them would create a second copy that drifts.
 //
 //  2. CSRF. A GET surface published on a reachable origin is not made riskier by
 //     being read from another page; a POST surface is. See [checkWriteOrigin].
@@ -38,10 +40,11 @@ package server
 //  3. DOUBLE-FIRE. The scripts' state checks are read-then-act, which is not
 //     atomic, and a button is double-clicked routinely. Concurrent writes on one
 //     subject race those checks whether they are the same verb (a double-clicked
-//     Accept filing a second visit or slinging twice) or two verbs the UI offers
-//     on one row at once (Accept slinging after Dismiss closed the visit it was
-//     about to dismiss). [actuationGate] serializes writes per subject (bead)
-//     in-process, so one subject's verbs never overlap.
+//     open filing a second conversation) or two verbs the UI offers on one row at
+//     once (an engage binding a conversation a dismiss is closing).
+//     [actuationGate] serializes writes per subject (bead) in-process, so one
+//     subject's verbs never overlap. Accept also takes the bead's acceptance lock
+//     in the script, which covers an Accept from anywhere else.
 
 import (
 	"context"
@@ -84,7 +87,8 @@ var (
 )
 
 // actuateRequest is the POST body shared by every write route: the bead to act
-// on. A visit id is accepted too — gc-helm.sh resolves it to its subject.
+// on. A conversation or a gate id is accepted too — gc-helm.sh resolves it to
+// the bead it concerns.
 type actuateRequest struct {
 	Bead string `json:"bead"`
 }
@@ -137,10 +141,10 @@ func validBeadID(s string) bool {
 
 // actuationGate serializes concurrent writes on ONE subject (bead). See the
 // double-fire note in the file header. Every write verb (open, accept, engage,
-// dismiss) mutates the subject's visit, so on one subject they are mutually
-// exclusive: a board-row Accept and a drill-panel Dismiss must not overlap, or
-// Accept can sling after Dismiss has closed the visit. Two different beads never
-// contend — they never share a key. inFlight maps a held bead to the verb
+// dismiss) acts on the subject's conversations or gates, so on one subject they
+// are mutually exclusive: a board-row engage and a drill-panel Dismiss must not
+// overlap, or the dismiss can close the conversation the engage is binding. Two
+// different beads never contend — they never share a key. inFlight maps a held bead to the verb
 // running on it, so a refusal can name what to wait for.
 type actuationGate struct {
 	mu       sync.Mutex
@@ -213,8 +217,8 @@ func (s *Server) runActuation(w http.ResponseWriter, r *http.Request, verb strin
 		return ToolResult{}, "", false
 	}
 
-	// Keyed on the subject (bead): every write verb mutates its visit, so a
-	// double-clicked Accept, and an Accept racing a Dismiss on one row, both
+	// Keyed on the subject (bead): every write verb acts on what it concerns, so
+	// a double-clicked Accept, and an engage racing a Dismiss on one row, both
 	// collapse to one in-flight write. The same verb on two different beads still
 	// runs concurrently. The refusal names the verb already holding the subject.
 	if ok, running := s.gate.enter(bead, verb); !ok {
@@ -230,8 +234,8 @@ func (s *Server) runActuation(w http.ResponseWriter, r *http.Request, verb strin
 	// browser: a refresh, a closed tab or a dropped proxy connection cancels it,
 	// the run is SIGKILLed mid-write, and the handler reports a timeout. That is
 	// unsafe for these verbs specifically, because none is atomic — open creates
-	// the visit bead before it stamps routing and adds the tracks edge; accept
-	// slings before it dismisses; engage spawns a session before it binds. A kill
+	// the conversation before it reads its edge back; accept resolves the gate
+	// before it slings and records; engage spawns a session before it binds. A kill
 	// inside any of those windows leaves partial state while the browser is told
 	// nothing happened, and the operator's retry then double-fires.
 	//
@@ -271,19 +275,19 @@ func (s *Server) runActuation(w http.ResponseWriter, r *http.Request, verb strin
 
 // handleOpen serves POST /helm/open. It has its own handler, rather than sharing
 // [Server.handleActuateVerb], because its success body is richer: the operator
-// must be able to tell a newly-filed visit from one that was already open, and
-// which visit that is.
+// must be able to tell a newly-filed conversation from one already waiting in
+// the queue, and which conversation that is.
 func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
 	res, bead, ok := s.runActuation(w, r, "open")
 	if !ok {
 		return
 	}
-	outcome, visit := parseOpenStdout(res.Stdout)
+	outcome, conversation := parseOpenStdout(res.Stdout)
 	writeJSON(w, http.StatusOK, openResponse{
-		Bead:    bead,
-		Outcome: outcome,
-		Visit:   visit,
-		Message: firstLine(res.Stdout),
+		Bead:         bead,
+		Outcome:      outcome,
+		Conversation: conversation,
+		Message:      firstLine(res.Stdout),
 	})
 }
 
@@ -326,23 +330,24 @@ func (s *Server) handleActuateVerb(w http.ResponseWriter, r *http.Request, verb 
 // stays cheap.
 type openResponse struct {
 	Bead string `json:"bead"`
-	// Outcome is "filed" (a new visit) or "existing" (one was already open).
-	// The operator needs these distinguished: clicking twice and being told
-	// "filed" both times would misrepresent what the city did.
+	// Outcome is "filed" (a new conversation) or "existing" (one was already
+	// waiting in the queue). The operator needs these distinguished: clicking
+	// twice and being told "filed" both times would misrepresent what the city
+	// did.
 	Outcome string `json:"outcome"`
-	// Visit is the visit bead's id when the script named one.
-	Visit string `json:"visit,omitempty"`
+	// Conversation is the conversation task's id when the script named one.
+	Conversation string `json:"conversation,omitempty"`
 	// Message is the script's own sentence, verbatim.
 	Message string `json:"message"`
 }
 
 // actuateResponse is the 200 body of the accept, engage and dismiss routes.
 //
-// One flat shape for all three, because — unlike open's filed/existing/visit
+// One flat shape for all three, because — unlike open's filed/existing
 // distinction, which the operator must see to not double-file — what these three
 // return that a surface acts on is the tool's own sentence. It names the ids each
-// verb produces in prose (accept: the slung formula and the closed visit; engage:
-// the spawned session to attach to; dismiss: the closed visit), and passing that
+// verb produces in prose (accept: the cleared gate and the slung formula; engage:
+// the spawned session to attach to; dismiss: the closed conversation), and passing that
 // through verbatim means these routes' messages IMPROVE when the script's do,
 // with no change here. Like [openResponse], it is DELIBERATELY NOT in
 // src/contract.ts; its mirror lives beside the fetch in web/src/actuate/client.ts.
@@ -351,7 +356,7 @@ type actuateResponse struct {
 	Verb string `json:"verb"`
 	// Message is the script's stdout, trimmed: its success sentence, and for
 	// engage the follow-on "attach: gc session attach <id>" line. Empty is
-	// possible and honest (dismiss on a subject with no open visit says so on
+	// possible and honest (dismiss on a subject with no live sitting says so on
 	// stdout, but a bare success is not invented into a claim).
 	Message string `json:"message"`
 }
@@ -381,9 +386,10 @@ func mapExit(verb string, code int) (status int, reason string) {
 	switch code {
 	case 1:
 		// accept's sling-failure path (gc-helm.sh cmd_accept) exits 1: the sling
-		// did not land and the visit is left open for retry or Discuss. A verb
-		// runtime failure, like exit 4 — the request's own content could not be
-		// actuated, nothing is wrong with the service. open never exits 1.
+		// poured no root, and Accept put the recommendation's gate back for retry
+		// or Discuss. A verb runtime failure, like exit 4 — the request's own
+		// content could not be actuated, nothing is wrong with the service. open
+		// never exits 1.
 		return http.StatusUnprocessableEntity, reasonVerbFailed
 	case 2:
 		if verb == "open" {
@@ -393,9 +399,10 @@ func mapExit(verb string, code int) (status int, reason string) {
 	case 3:
 		return http.StatusServiceUnavailable, reasonEnvironment
 	case 4:
-		// Bead not found / unverifiable / discuss-state refusal / filing failed.
-		// The subject is the request's own content, so this is a 422 rather than a
-		// 5xx: nothing is wrong with the service.
+		// Bead not found / unverifiable / Accept refused (another gate blocks the
+		// bead, or another Accept holds its lock) / filing failed. The subject is
+		// the request's own content, so this is a 422 rather than a 5xx: nothing is
+		// wrong with the service.
 		return http.StatusUnprocessableEntity, reasonVerbFailed
 	default:
 		return http.StatusBadGateway, reasonInternal
@@ -420,22 +427,22 @@ func mapActuateErr(err error) (status int, reason, msg string) {
 
 // filedRE and existingRE read cmd_open's two success sentences:
 //
-//	gc-helm: visit <id> filed on <bead> (pool <p>) — …
-//	gc-helm: visit <id> is already open for <bead> — …
+//	gc-helm: conversation <id> filed on <bead> — …
+//	gc-helm: conversation <id> is already open for <bead> — …
 //
 // Parsing prose is not ideal, and it is the honest option here: the script is the
-// single copy of the visit logic and it speaks in sentences, so the choice is
+// single copy of open's logic and it speaks in sentences, so the choice is
 // between reading them and duplicating the logic that produced them. A sentence
 // that stops matching degrades to outcome "opened" with the message still shown —
-// never to an error, because the visit really was filed. open_parity_test.go
-// pins these against the script's real echoes.
+// never to an error, because the conversation really was filed.
+// open_parity_test.go pins these against the script's real echoes.
 var (
-	filedRE    = regexp.MustCompile(`visit\s+(\S+)\s+filed\s+on`)
-	existingRE = regexp.MustCompile(`visit\s+(\S+)\s+is\s+already\s+open`)
+	filedRE    = regexp.MustCompile(`conversation\s+(\S+)\s+filed\s+on`)
+	existingRE = regexp.MustCompile(`conversation\s+(\S+)\s+is\s+already\s+open`)
 )
 
 // parseOpenStdout classifies a successful open run.
-func parseOpenStdout(out string) (outcome, visit string) {
+func parseOpenStdout(out string) (outcome, conversation string) {
 	if m := filedRE.FindStringSubmatch(out); m != nil {
 		return "filed", m[1]
 	}

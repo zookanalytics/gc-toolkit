@@ -57,29 +57,30 @@ export interface Tile {
   title: string;
   severity: Severity;
   /**
-   * The next move on this row is a PERSON'S: an unanswered human gate, or a
-   * parked conversation whose recorded waits have all landed. Not derivable
-   * from `severity`, which is coarse and shared — a one-bead demand bands
-   * ELEVATED while a stranded container bands HIGH, so rank alone always sorts
-   * the operator's own queue underneath the city's.
+   * The next move on this row is a PERSON'S: an unanswered human gate, a
+   * conversation waiting for the operator, or a parked subject whose recorded
+   * waits have all landed. Not derivable from `severity`, which is coarse and
+   * shared — a one-bead question bands ELEVATED while a stranded container bands
+   * HIGH, so rank alone always sorts the operator's own queue underneath the
+   * city's.
    */
   owed: boolean;
   /** Rank proxy: subtree size + priority weight + capped cross-rig refs. */
   weight: number;
-  /** An open visit bead names this anchor — a conversation is holding it. */
+  /**
+   * The operator's side holds this bead: an open human gate blocks it, an
+   * acceptance an earlier Accept left unfinished keeps it, or an open
+   * conversation tracks it.
+   */
   held: boolean;
   /**
-   * Refines `held` into the visit's engagement: `'engaged'` when a live sitting
-   * is in the conversation right now, `'parked'` when the visit stands open and
-   * un-engaged — filed and waiting for a person to pick it up. `''` on a row no
-   * open visit holds (`held` is false).
-   *
-   * Derived on the Go side from the same rule `acceptable` reads — a parked
-   * visit is the one Accept is offered on, an engaged one suppresses it — so the
-   * web reads this field rather than re-deriving it (the rule reads the visit's
-   * assignee, which the wire does not carry). Always present.
+   * Refines `held`: `'in_session'` when a conversation that tracks this bead is
+   * held by a live session right now, `'waiting'` on any other held row, which
+   * waits for the operator. `''` on a row nothing holds (`held` is false).
+   * Derived on the Go side, because it reads each conversation's holder against
+   * the session list, which the wire does not carry. Always present.
    */
-  visit_state: string;
+  sitting_state: string;
   n_closed: number;
   m_total: number;
   open: number;
@@ -100,8 +101,8 @@ export interface Tile {
   /** Convoys only: `false` marks the unowned-convoy orphan exception. `null` for every other kind. */
   owned: boolean | null;
   /**
-   * Open work with nothing live in it, no open visit, and no UNANSWERED human
-   * gate — the three ways a row's silence is already accounted for. A bead
+   * Open work with nothing live in it, nothing holding it, and no UNANSWERED
+   * human gate — the three ways a row's silence is already accounted for. A bead
    * routed to the operator is not stranded; once the ruling is recorded the
    * gate is discharged and open children under it are ordinary idle work again.
    */
@@ -194,11 +195,12 @@ export interface Tile {
   pr_machine: string;
   /**
    * Where the exchange with the operator stands: `'quiet'`, `'outstanding'`,
-   * `'answered'`, `'asking'`, or `'unknown'`. `'asking'` is the demand edge;
+   * `'answered'`, `'asking'`, or `'unknown'`. `'asking'` is an open human gate
+   * on the anchor;
    * `'quiet'`, `'outstanding'` and `'answered'` are read off the position the
    * merge cadence records against the acknowledgement watermarks and the routing
    * disposition — `'answered'` once the routed fix unit closes (a rework child
-   * landing, a visit resolved), not on a bare head move. `'covered'` is not
+   * landing, a gate resolved), not on a bare head move. `'covered'` is not
    * reachable yet — it waits on a comment-to-bead link nothing records — so an
    * utterance the city is working reads the coarser `'outstanding'`.
    * `'unknown'` is a RENDERED value, never a fallback to the quiet end.
@@ -265,12 +267,14 @@ export interface Tile {
    */
   group_parent: string;
   /**
-   * Set when this row can be ACCEPTED: the subject carries a recommended
-   * execution formula (`gc.recommended_formula`) and its visit is un-engaged, so
-   * a person can dispatch that formula at the subject and dismiss the visit in
-   * one procedural order — the extra move a recommendation row offers over a
-   * discuss-only gate. A live sitting suppresses it and leaving without a ruling
-   * restores it. Always present (Go bool); false on every non-recommendation row.
+   * Set when this row can be ACCEPTED: resolve the recommendation's human gate
+   * and dispatch the formula at the bead, no sitting — the extra move a
+   * recommendation row offers over a discuss-only gate. All three of Accept's
+   * conditions hold: the bead carries `gc.recommended_formula`; the gate under
+   * the key `first-reaction` is open and unassigned, or closed with an
+   * acceptance an earlier Accept did not finish; and no other open human gate
+   * blocks the bead. A live sitting does not withhold it. Always present (Go
+   * bool); false on every row those conditions do not hold on.
    */
   acceptable: boolean;
   /**
@@ -319,10 +323,27 @@ export interface Tile {
    * none; non-null exactly on an `acceptable` row.
    */
   recommendation: string | null;
+  /**
+   * The open human gates that hold Accept back, on a row that meets Accept's
+   * first two conditions and fails the third: each gate's title, or
+   * `N× — a · b` over several, the way `needs` names gates. The bead's next step
+   * waits for every gate that blocks it, so Accept waits until the
+   * recommendation's gate is the last; Discuss answers the others. `null` on
+   * every other row.
+   */
+  accept_withheld: string | null;
+  /**
+   * The open human gates on this row that a live sitting's conversation replies
+   * to — the gates being answered now — named the way `needs` names gates. Set
+   * on every row such a gate folds onto, so a bead whose gate an epic's sitting
+   * answers shows it though no conversation tracks the bead. `null` on a row
+   * with none.
+   */
+  gates_in_session: string | null;
 }
 
 /**
- * Sitting is one converse sitting — the visit bead a conversation runs inside.
+ * Sitting is one converse sitting — the conversation task a sitting runs on.
  *
  * Sittings are not tiles and are not ranked against them: a tile is an anchor
  * that wants something, a sitting is an event in the conversation record. The
@@ -332,27 +353,19 @@ export interface Tile {
 export interface Sitting {
   id: string;
   rig: string;
-  /** The anchor the conversation is about — the same id `held` keys on. */
+  /** The bead the conversation is about: the one bead its `tracks` edge names. */
   subject: string;
   title: string;
-  /** The visit bead's status. `'closed'` is finished; anything else is running. */
+  /**
+   * The conversation task's status. `'closed'` is finished; anything else is
+   * running — `'open'` while it waits in the operator's queue, `'in_progress'`
+   * once a sitting has claimed it.
+   */
   status: string;
   /**
-   * The one-word justification a sitting closed on (`gc.outcome`: folded,
-   * moot, benign, diagnosed, cut-short, the word a held sitting signs off with,
-   * or `dismissed` when the operator ends it from the board). Normally empty
-   * while a sitting is still running, with one exception: a board dismissal
-   * that stamped the outcome but could not close the visit leaves a running
-   * sitting reading `dismissed` until it is closed or signed off over.
-   */
-  outcome: string;
-  /**
-   * The one-line human-readable sentence naming WHY the visit closed
-   * (`gc.outcome_reason`): "moot: premise died, subject already closed",
-   * "folded into <holder>", or what a held sitting signed off on. `outcome` is
-   * the word to group by; this is the sentence to read, so a dedup close reads
-   * as a decision rather than a dropped need. `''` when the writer stamped only
-   * the word.
+   * The conversation's close reason: the headline a sign-off settled on, or the
+   * operator's dismissal. The sentence a closed sitting reads by when it left no
+   * takeaway. `''` while the sitting runs.
    */
   outcome_reason: string;
   /** The converse session that ran it — what an operator attaches to. */
@@ -365,14 +378,14 @@ export interface Sitting {
    * The headline THIS sitting left on its subject, or `''`. A takeaway lives on
    * the subject and each sitting overwrites the last one's, so the service
    * hands it only to the sitting that was running when it was stamped — a
-   * subject visited three times has two sittings that did not write it.
+   * subject discussed three times has two sittings that did not write it.
    */
   takeaway: string;
   /**
    * The subject bead's title — the row's topic, what the conversation is about.
    * Read in the same batch as the takeaway, so a row says what it concerns even
    * with nothing concluded on it. `''` when the subject could not be read, which
-   * the render falls back on the subject id (topic) or the visit title
+   * the render falls back on the subject id (topic) or the conversation's title
    * (headline) for.
    */
   subject_title: string;
@@ -428,7 +441,7 @@ export interface PackBuild {
  *
  * The partition is on the wire rather than left to each renderer because
  * `rank_score` cannot express it — severity is coarse and shared, so the term
- * that really orders the list is subtree size, and a demand owed by a person
+ * that really orders the list is subtree size, and a question owed by a person
  * has a subtree of one. Filter on `owed` to take just the queue.
  */
 export interface Board {
