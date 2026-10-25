@@ -168,9 +168,12 @@ The refinery's zero-diff check asks whether a handed-off branch carries any
 change against its target. It runs first in the refinery's merge-push step,
 before a direct landing or a pull request. When the check cannot run, the step
 adds one to `zero_diff_check_failures` on the work bead and leaves the work
-with the refinery. At the third failure in a row it parks the bead `blocked`,
-routed to a person, with a visit under the `refinery-zero-diff-check-failed`
-key. A check that runs clears the count, and so does the park.
+with the refinery. At the third failure in a row it files a visit under the
+`refinery-zero-diff-check-failed` key, and `await-ruling.sh` makes the work wait
+on it, off the refinery's queue, with a fresh `mol-polecat-work` pour armed for
+when the visit closes. A graduated convoy, which no pour rebuilds, is parked
+`blocked` on the visit instead. A check that runs clears the count, and so do
+the wait and the park.
 
 The need is a count of consecutive failures that outlives the refinery's turns.
 A check that fails ends the turn (`gc runtime drain-ack`) and leaves the bead
@@ -202,8 +205,8 @@ the whole step, and the
 guide warns that a retry attempt "re-runs the whole step with no record of
 irreversible side effects the failed attempt already landed". Merge-push lands
 merges and opens pull requests. When its budget ran out, the loop would close
-the step, where the refinery needs the work bead parked for a person while its
-patrol moves on.
+the step, where the refinery needs the work bead to wait for a person while
+its patrol moves on.
 
 **Restart and defer limits.** `[daemon] max_restarts` quarantines an agent that
 restarts more often than that within `restart_window`
@@ -254,13 +257,15 @@ integration, orchestrator, team workflow, or experimental automation".
 
 The count is one metadata key on the work bead, the object every attempt
 shares, which is where bd's charter puts per-issue orchestration data.
-`lifecycle/lifecycle.toml` registers it. The park writes the `blocked` state
-the pack already has, through its existing lifecycle writer, and files its
-visit through the existing escalation. So the change adds no bead kind and no
-lifecycle state, and needs no warrant. Until the third failure, the refinery
-does what `gastown`'s does when the check cannot compute: it leaves the work
-assigned to the refinery for a later turn, and writes nothing on the bead but
-the count. The count adds only the bound.
+`lifecycle/lifecycle.toml` registers it. The wait is the one the pack's
+declined runs already take: the visit goes through the existing escalation, and
+`await-ruling.sh` adds the `blocks` edge and arms the pour through
+`deferred-dispatch.sh`. A convoy's park writes the `blocked` state the pack
+already has, through its existing lifecycle writer. So the change adds no bead
+kind and no lifecycle state, and needs no warrant. Until the third failure, the
+refinery does what `gastown`'s does when the check cannot compute: it leaves
+the work assigned to the refinery for a later turn, and writes nothing on the
+bead but the count. The count adds only the bound.
 
 A failure budget that Gas City kept across runs, on the bead those runs act
 on, would replace the key.

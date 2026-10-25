@@ -942,9 +942,21 @@ did not record. The block sends that bead down the direct path, which records
 it. A check that cannot run verifies nothing either way, and its cause is often
 gone by the next patrol, so the block leaves that bead with the refinery to
 retry, as this step's other infrastructure failures do. It counts the failures
-in a row on the bead, and the third parks the bead `blocked` for a person, with
-git's error and the directory the check ran in, so nobody reads it as a branch
-with no change. A check that runs clears the count:
+in a row on the bead. At the third it files a visit, with `escalate.sh`'s
+verdict window off, that names git's error and the directory the check ran in,
+so nobody reads it as a branch with no change. Then `await-ruling.sh` makes the
+work wait on that visit. It adds a `blocks` edge from the work onto the visit,
+releases the refinery's assignment, which takes the work off the queue, and
+arms a fresh `mol-polecat-work` pour for when the visit closes. That run hands
+the branch back to the refinery. The work is not parked `blocked`: a park
+records a `merge_result`, the pour's load-context reads a bead carrying one as
+finished work, and on a rework child it would be a second anchor on the PR.
+A graduated convoy is the exception, because a run poured onto a convoy works
+on the beads the convoy tracks. The convoy is parked `blocked`, held by a
+`blocks` edge onto the visit, and a person hands it back.
+When the visit or the wait does not land, the work stays with the refinery,
+which takes back an assignment the wait released, and the count stays at the
+cap, so the next failed check asks again. A check that runs clears the count:
 ```bash
 # >>> zero-diff-guard
 RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
@@ -957,50 +969,74 @@ branch_has_real_change "$RIG_ROOT" "origin/$TARGET" "$PREP_SHA" || BHRC_RC=$?
 CHECK_FAIL_CAP=3
 CHECK_FAILS=$(printf '%s' "$BEAD_JSON" | jq -r '(.[0].metadata.zero_diff_check_failures // "0") | tostring' 2>/dev/null)
 case "$CHECK_FAILS" in ''|*[!0-9]*) CHECK_FAILS=0 ;; esac
-REFUSE_KEY=""
+# escalate.sh is looked for first in the pack lifecycle.sh came from, so a bead
+# this block refuses or makes wait gets its visit wherever that pack was found.
+SCRIPTS=""; for c in "${LC%/assets/scripts/lifecycle.sh}" "$RIG_ROOT" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
 if [ "$BHRC_RC" != 0 ] && [ "$BHRC_RC" != 1 ]; then
   CHECK_FAILS=$((CHECK_FAILS + 1))
   if [ "$CHECK_FAILS" -lt "$CHECK_FAIL_CAP" ]; then
-    gc bd update "$WORK" --set-metadata zero_diff_check_failures="$CHECK_FAILS" >/dev/null 2>&1 || echo "could not count this failed check on $WORK, so the park after $CHECK_FAIL_CAP in a row may come later"
+    gc bd update "$WORK" --set-metadata zero_diff_check_failures="$CHECK_FAILS" >/dev/null 2>&1 || echo "could not count this failed check on $WORK, so the visit after $CHECK_FAIL_CAP in a row may come later"
     echo "the zero-diff check could not run in $RIG_ROOT: $BHRC_ERROR (failure $CHECK_FAILS of $CHECK_FAIL_CAP in a row); leaving the work with the refinery to retry"
     gc runtime drain-ack
     exit 1
   fi
-  REFUSE_KEY=refinery-zero-diff-check-failed
-  REFUSE_STATE=blocked
-  REFUSE_SET="blocked_reason=the zero-diff check could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row: $BHRC_ERROR; no change verified, refused merge-close"
-  REFUSE_TAKEAWAY="the zero-diff check could not run $CHECK_FAILS patrols in a row, so no change was verified; fix the error its visit names, then re-route"
-  REFUSE_MESSAGE="The zero-diff check of branch $BRANCH against origin/$TARGET could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row. The last error: $BHRC_ERROR. It verified nothing either way, so close-as-merged was refused and the bead is parked for a human. This is a failed check, not a branch without work: fix that error, then hand the bead back to the refinery."
-else
-  [ "$CHECK_FAILS" = 0 ] || gc bd update "$WORK" --unset-metadata zero_diff_check_failures >/dev/null 2>&1 || true
-  if [ "$BHRC_RC" = 1 ]; then
-    LANDED_SHA=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.direct_landing_sha // empty')
-    if [ -n "$LANDED_SHA" ] && git -C "$RIG_ROOT" merge-base --is-ancestor "$LANDED_SHA" "origin/$TARGET" 2>/dev/null; then
-      echo "origin/$TARGET carries $LANDED_SHA, which a direct landing of $WORK pushed without recording; taking the direct path to record it"
-      MERGE_STRATEGY=direct
-    else
-      REFUSE_KEY=refinery-false-completion
-      REFUSE_STATE=refused_false_completion
-      REFUSE_SET="false_completion_suspected=branch $BRANCH no verified change vs origin/$TARGET; refused merge-close"
-      REFUSE_TAKEAWAY="the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
-      REFUSE_MESSAGE="Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
+  echo "the zero-diff check could not run in $RIG_ROOT: $BHRC_ERROR (failure $CHECK_FAILS in a row); asking a person, and taking $WORK off the refinery's queue until they answer"
+  # A run poured onto a convoy works on the beads the convoy tracks, so no pour
+  # rebuilds a graduated convoy. It is parked blocked instead, held by a blocks
+  # edge onto the visit, and a person hands it back.
+  WORK_KIND=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].issue_type // empty' 2>/dev/null)
+  HANDBACK="close this visit: closing it pours a fresh run on $WORK, and that run hands the branch back to the refinery"
+  [ "$WORK_KIND" != convoy ] || HANDBACK="hand $WORK back to the refinery and close this visit"
+  WAITS=""
+  if [ -z "$SCRIPTS" ] || [ ! -x "$SCRIPTS/await-ruling.sh" ]; then
+    echo "escalate.sh and await-ruling.sh were not found together beside $LC or in any pack location, so no visit asks about $WORK"
+  elif ! GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-zero-diff-check-failed --message "The zero-diff check of branch $BRANCH against origin/$TARGET could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row. The last error: $BHRC_ERROR. It verified nothing either way, so nothing was merged or closed: this is a failed check, not a branch without work. The refinery takes $WORK off its queue to wait on this visit. Fix that error, then $HANDBACK. To drop the work instead, close $WORK first, then this visit."; then
+    echo "escalate.sh recorded no visit for $WORK"
+  elif [ "$WORK_KIND" = convoy ]; then
+    VISIT=$(gc bd list --status=open,in_progress --metadata-field escalation_key=refinery-zero-diff-check-failed --metadata-field "gc.continuation_group=$WORK" --limit=20 --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r 'if type == "array" then ([ .[].id ] | sort | .[0] // empty) else empty end' 2>/dev/null)
+    [ -z "$VISIT" ] || gc bd dep add "$WORK" "$VISIT" --type=blocks >/dev/null 2>&1 || true
+    if [ -z "$VISIT" ] || ! gc bd dep list "$WORK" --json 2>/dev/null | tr -d '[:cntrl:]' | jq -e --arg v "$VISIT" 'any(.[]?; (.id // "") == $v and (.dependency_type // "") == "blocks")' >/dev/null 2>&1; then
+      echo "no blocks edge from $WORK onto its visit landed, so its park waits on nothing"
     fi
+    "$LC" transition "$WORK" --to blocked --assignee "" --route human --set "blocked_reason=the zero-diff check could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row: $BHRC_ERROR" --unset zero_diff_check_failures --takeaway "the zero-diff check could not run $CHECK_FAILS patrols in a row; fix the error its visit names, then hand the convoy back" && WAITS=1
+  elif "$SCRIPTS/await-ruling.sh" "$WORK" --key refinery-zero-diff-check-failed --formula mol-polecat-work; then
+    WAITS=1
+    gc bd update "$WORK" --unset-metadata zero_diff_check_failures --append-notes "Refinery: the zero-diff check of $BRANCH could not run in $RIG_ROOT, $CHECK_FAILS patrols in a row ($BHRC_ERROR), so the branch was not judged and nothing was merged. $WORK waits on its refinery-zero-diff-check-failed visit. Closing that visit pours a fresh run, and that run hands the branch back to the refinery." >/dev/null 2>&1 || echo "could not clear the failed-check count on $WORK, so its next failed check asks a person at once"
   fi
-fi
-if [ -n "$REFUSE_KEY" ]; then
-  "$LC" transition "$WORK" --to "$REFUSE_STATE" --assignee "" --route human --set "$REFUSE_SET" --unset zero_diff_check_failures --takeaway "$REFUSE_TAKEAWAY"
-  # escalate.sh is looked for first in the pack lifecycle.sh came from, so a
-  # bead this block parks gets its visit wherever that pack was found.
-  SCRIPTS=""; for c in "${LC%/assets/scripts/lifecycle.sh}" "$RIG_ROOT" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-  done
-  if [ -n "$SCRIPTS" ]; then
-    "$SCRIPTS/escalate.sh" --subject "$WORK" --key "$REFUSE_KEY" --message "$REFUSE_MESSAGE"
-  else
-    echo "escalate.sh not found beside $LC or in any pack location; $WORK is parked for a human with no $REFUSE_KEY visit"
+  if [ -z "$WAITS" ]; then
+    # A wait that did not land leaves the work with the refinery to retry.
+    # await-ruling.sh releases the assignment before it arms, so the refinery
+    # takes back a bead it finds open and unassigned.
+    gc bd update "$WORK" --if-assignee "" --if-status open --assignee "$GC_AGENT" >/dev/null 2>&1 || true
+    gc bd update "$WORK" --set-metadata zero_diff_check_failures="$CHECK_FAILS" >/dev/null 2>&1 || echo "could not count this failed check on $WORK"
+    HOLDER=$(gc bd show "$WORK" --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r 'if type == "array" and length > 0 then ((.[0].assignee // "") | if . == "" then "nobody" else . end) else empty end' 2>/dev/null)
+    if [ "$HOLDER" = "$GC_AGENT" ]; then
+      echo "the wait did not land, so $WORK stays with the refinery, and the next patrol checks it again"
+    else
+      echo "the wait did not land, and $WORK could not be left with the refinery (its assignee reads ${HOLDER:-unreadable}), so nothing takes it up again; assign it to $GC_AGENT once the check can run"
+    fi
   fi
   gc runtime drain-ack
   exit 1
+fi
+[ "$CHECK_FAILS" = 0 ] || gc bd update "$WORK" --unset-metadata zero_diff_check_failures >/dev/null 2>&1 || true
+if [ "$BHRC_RC" = 1 ]; then
+  LANDED_SHA=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.direct_landing_sha // empty')
+  if [ -n "$LANDED_SHA" ] && git -C "$RIG_ROOT" merge-base --is-ancestor "$LANDED_SHA" "origin/$TARGET" 2>/dev/null; then
+    echo "origin/$TARGET carries $LANDED_SHA, which a direct landing of $WORK pushed without recording; taking the direct path to record it"
+    MERGE_STRATEGY=direct
+  else
+    "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close" --takeaway "the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
+    if [ -n "$SCRIPTS" ]; then
+      "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-false-completion --message "Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
+    else
+      echo "escalate.sh not found beside $LC or in any pack location; $WORK is parked for a human with no refinery-false-completion visit"
+    fi
+    gc runtime drain-ack
+    exit 1
+  fi
 fi
 # <<< zero-diff-guard
 ```

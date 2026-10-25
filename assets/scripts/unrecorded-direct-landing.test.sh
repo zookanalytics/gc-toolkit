@@ -17,10 +17,12 @@
 # gives the guard the bead, the strategy and lifecycle.sh. The gate between the
 # two steps judges the prepared head and decides nothing here, so it is left
 # out. The blocks run against real git repositories, the real
-# direct-merge-push.sh, refinery-workspace.sh, detached-job.sh and bd-lib.sh, a
-# stub gc that keeps the bead in a file, and stub lifecycle.sh and escalate.sh
-# that log. They run from a directory that is no git checkout, as a refinery's
-# scratch directory is, so every git call has to name the rig by path.
+# direct-merge-push.sh, refinery-workspace.sh, detached-job.sh, bd-lib.sh,
+# await-ruling.sh and deferred-dispatch.sh, a stub gc that keeps the beads and
+# their edges in files, a stub lifecycle.sh that logs, and a stub escalate.sh
+# that logs and files its visit. They run from a directory that is no git
+# checkout, as a refinery's scratch directory is, so every git call has to name
+# the rig by path.
 # Proves:
 #   - an attempt that pushes and then cannot record leaves the landing on
 #     origin, the stamp on the bead and the branch on origin, and the next
@@ -32,10 +34,21 @@
 #     escalated, with no stamp and with a stamp its target does not carry, and
 #     so is a branch whose commits net to no change;
 #   - a check that cannot run leaves the work with the refinery to retry,
-#     counting the failures in a row on the bead, and the third parks it
-#     blocked: its park and its visit say the check could not run, and name
-#     git's error and the directory, never that the branch has no change. A
-#     check that runs clears the count.
+#     counting the failures in a row on the bead. The third files a visit with
+#     the verdict window off, which says the check could not run and names
+#     git's error and the directory, never that the branch has no change. The
+#     work then waits on that visit, with no lifecycle park and no
+#     merge_result: a blocks edge onto the visit, the refinery's assignment
+#     released and a fresh mol-polecat-work pour armed, which the
+#     deferred-dispatch pass holds while the visit is open and pours once it
+#     closes. A graduated convoy, which no pour rebuilds, is parked blocked
+#     instead, held by a blocks edge onto the visit, with no pour armed;
+#   - a visit that is not filed, a pack without await-ruling.sh, a wait whose
+#     edge or arm does not land, and a convoy park that lifecycle.sh refuses
+#     each leave the work assigned to the refinery and counted at the cap, the
+#     refinery taking back an assignment the wait released, and the next
+#     failed check's wait lands. A take-back that fails says the work is
+#     stranded. A check that runs clears the count.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -108,49 +121,180 @@ bare_git() {
 fence branch-has-real-change > "$TMP/bhrc.sh"
 fence zero-diff-guard > "$TMP/zdg.sh"
 eq "$(bare_git "$TMP/bhrc.sh")" "" "branch-has-real-change: every git call names its repo with -C"
-eq "$(bare_git "$TMP/zdg.sh")" "rev-parse " "zero-diff-guard: the only git call without -C is the pack-script locator's"
+eq "$(bare_git "$TMP/zdg.sh")" "" "zero-diff-guard: every git call names its repo with -C, and its script lookup reads no cwd checkout"
 
 # The pack the blocks find their scripts in, through GC_CITY_PATH.
 CITY="$TMP/city"
 PACK="$CITY/rigs/gc-toolkit/assets/scripts"
 mkdir -p "$PACK" "$TMP/bin"
-cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$HERE/refinery-workspace.sh" "$HERE/detached-job.sh" "$HERE/rig-root.sh" "$PACK/"
+cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$HERE/refinery-workspace.sh" "$HERE/detached-job.sh" "$HERE/rig-root.sh" \
+  "$HERE/await-ruling.sh" "$HERE/deferred-dispatch.sh" "$HERE/hold-lib.sh" "$PACK/"
 cat > "$PACK/lifecycle.sh" <<'LC'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE_LC_LOG"
 [ -z "${LC_FAIL:-}" ] || { echo "lifecycle: refused" >&2; exit 1; }
 exit 0
 LC
+# escalate logs its argv and the verdict window it ran under. With FAKE_STORE
+# set it files the visit as the real one does: an open visit routed to human,
+# keyed by the situation and the subject, with a tracks edge onto the subject,
+# and a call for a situation already open files nothing. ESC_FAIL refuses.
 cat > "$PACK/escalate.sh" <<'ESC'
 #!/usr/bin/env bash
 echo "escalate $*" >> "$FAKE_LOG"
+echo "escalate-window ${GC_ESCALATE_VERDICT_WINDOW-unset}" >> "$FAKE_LOG"
+[ -z "${ESC_FAIL:-}" ] || { echo "escalate: could not file the visit (stub)" >&2; exit 1; }
+[ -n "${FAKE_STORE:-}" ] || exit 0
+subject=""; key=""; message=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --subject) subject="$2"; shift 2 ;;
+    --key)     key="$2"; shift 2 ;;
+    --message) message="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+open=$(jq --arg k "$key" --arg s "$subject" '[ .[] | select(.status == "open" and .metadata.escalation_key == $k and .metadata["gc.continuation_group"] == $s) ] | length' "$FAKE_STORE")
+[ "$open" = 0 ] || exit 0
+id="visit$(( $(jq 'length' "$FAKE_STORE") + 1 ))"
+jq -c --arg id "$id" --arg k "$key" --arg s "$subject" --arg t "${message%%. *}" \
+  '. + [{id: $id, status: "open", assignee: "", title: $t, metadata: {task_kind: "visit", escalation_key: $k, "gc.continuation_group": $s, "gc.routed_to": "human"}}]' \
+  "$FAKE_STORE" > "$FAKE_STORE.new" && mv "$FAKE_STORE.new" "$FAKE_STORE"
+printf '%s|tracks|%s\n' "$id" "$subject" >> "$FAKE_DEPS"
 ESC
 chmod +x "$PACK"/*.sh
-# gc answers the roster for `rig list` and the bead file for `bd show`, applies
-# each --set-metadata and --unset-metadata of a `bd update` to that file, and
-# logs every other call.
+# gc answers the roster for `rig list`. The work bead is the one row of the
+# bead file; FAKE_STORE, when set, holds every other bead, and FAKE_DEPS the
+# edges, one "A|type|B" line for "A depends on B". `bd show` answers a row, or
+# bd's error object for an id it does not hold. `bd list` filters on --status,
+# --id, --has-metadata-key and each --metadata-field, answers with --ready only
+# an open bead whose every blocks edge names a closed bead, leaves closed beads
+# out unless --all or a status names them, and gives each row its edges in the
+# listing shape. `bd dep
+# list` answers a bead's edges in the show shape, and `bd dep add` records one
+# unless FAKE_DEP_FAIL is set. `bd unclaim --if-assignee` is bd's
+# compare-and-swap release. `bd update` refuses with exit 13 and writes nothing
+# when an --if-assignee or --if-status guard does not hold, refuses an arm's
+# write (one setting gc.dispatch_when_ready) when FAKE_ARM_WRITE_FAIL is set and
+# an assignment when FAKE_ASSIGN_FAIL is set, and otherwise applies --status,
+# --assignee, --set-metadata, --unset-metadata and --append-notes to the work
+# bead. Every call but a read is logged. A `--db <path>` pin is dropped.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
-case "$1 $2" in
+if [ "$1" = bd ] && [ "${2:-}" = --db ]; then set -- bd "${@:4}"; fi
+work_id() { jq -r '.[0].id' "$FAKE_META"; }
+rows() {
+  if [ -n "${FAKE_STORE:-}" ] && [ -s "$FAKE_STORE" ]; then jq -s -c '.[0] + .[1]' "$FAKE_META" "$FAKE_STORE"; else jq -c . "$FAKE_META"; fi
+}
+edges() {
+  { [ -n "${FAKE_DEPS:-}" ] && [ -f "$FAKE_DEPS" ] && cat "$FAKE_DEPS"; } | jq -R -s -c 'split("\n") | map(select(length > 0) | split("|") | {from: .[0], type: .[1], to: .[2]})'
+}
+case "$1 ${2:-}" in
   "rig list") cat "$FAKE_ROSTER" ;;
-  "bd show")  cat "$FAKE_META" ;;
-  *)
-    echo "$*" >> "$FAKE_LOG"
-    if [ "$1 $2" = "bd update" ]; then
-      shift 3
-      while [ $# -gt 0 ]; do
-        case "$1" in
-          --set-metadata)
-            jq --arg kv "$2" '.[0].metadata[($kv | sub("=.*$"; ""))] = ($kv | sub("^[^=]*="; ""))' "$FAKE_META" > "$FAKE_META.new" \
-              && mv "$FAKE_META.new" "$FAKE_META"
-            shift 2 ;;
-          --unset-metadata)
-            jq --arg k "$2" 'del(.[0].metadata[$k])' "$FAKE_META" > "$FAKE_META.new" && mv "$FAKE_META.new" "$FAKE_META"
-            shift 2 ;;
-          *) shift ;;
-        esac
-      done
+  "bd show")
+    if [ "${3:-}" = "$(work_id)" ]; then cat "$FAKE_META"
+    else
+      row=$(rows | jq -c --arg id "${3:-}" '[ .[] | select(.id == $id) ]')
+      if [ "$row" = "[]" ]; then printf '{"error":"no issue found matching %s"}\n' "${3:-}"; else printf '%s\n' "$row"; fi
     fi ;;
+  "bd list")
+    shift 2
+    st=""; ids=""; all=""; hk=""; ready=""; mfs="[]"
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --status=*) st="${1#--status=}" ;;
+        --id=*) ids="${1#--id=}" ;;
+        --id) shift; ids="${1:-}" ;;
+        --all) all=1 ;;
+        --ready) ready=1 ;;
+        --has-metadata-key) shift; hk="${1:-}" ;;
+        --metadata-field) shift; mfs=$(printf '%s' "$mfs" | jq -c --arg kv "${1:-}" '. + [{k: ($kv | sub("=.*$"; "")), v: ($kv | sub("^[^=]*="; ""))}]') ;;
+      esac
+      shift
+    done
+    # --ready answers an open bead whose every blocks edge names a closed bead.
+    rows | jq -c --argjson e "$(edges)" --argjson mf "$mfs" --arg st "$st" --arg ids "$ids" --arg all "$all" \
+        --arg hk "$hk" --arg ready "$ready" '
+      . as $rows
+      | [ .[] | . as $b
+        | .dependencies = [ $e[] | select(.from == $b.id) | {depends_on_id: .to, type: .type} ]
+        | select(if $st != "" then ((($st | split(",")) | index($b.status // "open")) != null)
+                 elif $all == "" then ($b.status // "open") != "closed" else true end)
+        | select($ids == "" or ((($ids | split(",")) | index($b.id)) != null))
+        | select($hk == "" or ((($b.metadata // {}) | type) == "object" and (($b.metadata // {}) | has($hk))))
+        | select($ready == "" or (($b.status // "open") == "open"
+            and ([ $e[] | select(.from == $b.id and .type == "blocks") | .to as $t
+                   | $rows[] | select(.id == $t and (.status // "open") != "closed") ] | length) == 0))
+        | select(all($mf[]; (($b.metadata[.k] // "") | tostring) == .v)) ]' ;;
+  "bd dep")
+    case "${3:-}" in
+      list)
+        rows | jq -c --argjson e "$(edges)" --arg id "${4:-}" '
+          . as $r | [ $e[] | select(.from == $id) | . as $x | ($r[] | select(.id == $x.to)) as $b
+            | {id: $x.to, dependency_type: $x.type, status: ($b.status // "open"), title: ($b.title // "")} ]' ;;
+      add)
+        echo "$*" >> "$FAKE_LOG"
+        [ -z "${FAKE_DEP_FAIL:-}" ] || { echo "bd: refused the edge (stub)" >&2; exit 1; }
+        t=blocks
+        for x in "$@"; do case "$x" in --type=*) t="${x#--type=}" ;; esac; done
+        printf '%s|%s|%s\n' "${4:-}" "$t" "${5:-}" >> "$FAKE_DEPS" ;;
+      *) echo "$*" >> "$FAKE_LOG" ;;
+    esac ;;
+  "bd unclaim")
+    echo "$*" >> "$FAKE_LOG"
+    id="${3:-}"; want=""
+    shift 3
+    while [ $# -gt 0 ]; do
+      case "$1" in --if-assignee) shift; want="${1:-}" ;; --if-assignee=*) want="${1#*=}" ;; esac
+      shift
+    done
+    held=$(jq -r '.[0].assignee // ""' "$FAKE_META")
+    if [ "$id" != "$(work_id)" ] || [ -z "$want" ] || [ "$held" != "$want" ]; then
+      echo "Error unclaiming $id: held by \"$held\", expected \"$want\" (stub)" >&2; exit 1
+    fi
+    jq -c '.[0].status = "open" | .[0].assignee = ""' "$FAKE_META" > "$FAKE_META.new" && mv "$FAKE_META.new" "$FAKE_META" ;;
+  "bd update")
+    echo "$*" >> "$FAKE_LOG"
+    [ "${3:-}" = "$(work_id)" ] || exit 0
+    shift 3
+    for x in "$@"; do
+      case "$x" in gc.dispatch_when_ready=*) [ -z "${FAKE_ARM_WRITE_FAIL:-}" ] || { echo "bd: store fault (stub)" >&2; exit 1; } ;; esac
+    done
+    args=("$@")
+    i=0
+    while [ "$i" -lt "${#args[@]}" ]; do
+      case "${args[$i]}" in
+        --if-assignee|--if-status)
+          f="${args[$i]#--if-}"; i=$((i + 1))
+          [ "$(jq -r --arg f "$f" '.[0][$f] // ""' "$FAKE_META")" = "${args[$i]:-}" ] || { echo "bd: the $f guard did not hold (stub)" >&2; exit 13; } ;;
+        --assignee) [ -z "${FAKE_ASSIGN_FAIL:-}" ] || [ -z "${args[$((i + 1))]:-}" ] || { echo "bd: refused the assignment (stub)" >&2; exit 1; } ;;
+      esac
+      i=$((i + 1))
+    done
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --status|--assignee)
+          jq -c --arg f "${1#--}" --arg v "${2:-}" '.[0][$f] = $v' "$FAKE_META" > "$FAKE_META.new" && mv "$FAKE_META.new" "$FAKE_META"
+          shift 2 ;;
+        --status=*|--assignee=*)
+          f="${1%%=*}"
+          jq -c --arg f "${f#--}" --arg v "${1#*=}" '.[0][$f] = $v' "$FAKE_META" > "$FAKE_META.new" && mv "$FAKE_META.new" "$FAKE_META"
+          shift ;;
+        --set-metadata)
+          jq --arg kv "$2" '.[0].metadata[($kv | sub("=.*$"; ""))] = ($kv | sub("^[^=]*="; ""))' "$FAKE_META" > "$FAKE_META.new" \
+            && mv "$FAKE_META.new" "$FAKE_META"
+          shift 2 ;;
+        --unset-metadata)
+          jq --arg k "$2" 'del(.[0].metadata[$k])' "$FAKE_META" > "$FAKE_META.new" && mv "$FAKE_META.new" "$FAKE_META"
+          shift 2 ;;
+        --append-notes)
+          jq --arg n "$2" '.[0].notes = ((.[0].notes // "") + $n)' "$FAKE_META" > "$FAKE_META.new" && mv "$FAKE_META.new" "$FAKE_META"
+          shift 2 ;;
+        --if-assignee|--if-status) shift 2 ;;
+        *) shift ;;
+      esac
+    done ;;
+  *) echo "$*" >> "$FAKE_LOG" ;;
 esac
 exit 0
 GC
@@ -358,22 +502,40 @@ has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-false-completion"
 eq "$(merged_tries)" 0 "netzero: nothing is recorded as merged"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "netzero: nothing is pushed"
 
-echo "── a check that cannot run is retried, then parked as a failed check, not as a branch without work ──"
-fixture "$TMP/nocheck" work
-# The prepare alone stages the branch; then the rig loses origin/main, so the
-# check cannot find the merge-base it needs, on every patrol until it returns.
-: > "$D/gc.log"; : > "$D/lc.log"
-NOCHECK_ENV=(env GC_RIG_ROOT="$D/rig" GC_RIG=myrig GC_CITY_PATH="$CITY" WORK=wb BRANCH=polecat/wb TARGET=main
-  TARGET_BRANCH_DEFAULT=main FAKE_ROSTER="$D/roster.json" FAKE_META="$D/bead.json" FAKE_LOG="$D/gc.log"
-  FAKE_LC_LOG="$D/lc.log" STRATEGY=direct)
-( cd "$ELSEWHERE" && "${NOCHECK_ENV[@]}" bash "$TMP/prep.sh" ) >"$D/prep.out" 2>&1; PREP_RC=$?
-eq "$PREP_RC" 0 "nocheck: the prepare stages the branch"
-git -C "$D/rig" update-ref -d refs/remotes/origin/main
+echo "── a check that cannot run is retried, then waits on a visit as a failed check, not as a branch without work ──"
+REFINERY=gc-toolkit/gc-toolkit.refinery
+POOL=gc-toolkit/gc-toolkit.polecat
+# nocheck_fixture <dir>: a branch with work, on a bead in the shape a polecat's
+# hand-off leaves it: open, assigned to the refinery, the pool its pour ran on
+# still recorded. The prepare stages the branch, then the rig loses
+# origin/main, so the check cannot find the merge-base it needs on any patrol
+# until it returns. The store of other beads and the edge file start empty.
+nocheck_fixture() {
+  fixture "$1" work
+  jq -c --arg a "$REFINERY" --arg p "$POOL" \
+    '.[0].status = "open" | .[0].assignee = $a | .[0].metadata["gc.execution_routed_to"] = $p' \
+    "$D/bead.json" > "$D/bead.json.new" && mv "$D/bead.json.new" "$D/bead.json"
+  printf '[]\n' > "$D/store.json"; : > "$D/deps.txt"; : > "$D/gc.log"; : > "$D/lc.log"
+  NOCHECK_ENV=(env GC_RIG_ROOT="$D/rig" GC_RIG=myrig GC_CITY_PATH="$CITY" GC_AGENT="$REFINERY" WORK=wb BRANCH=polecat/wb
+    TARGET=main TARGET_BRANCH_DEFAULT=main FAKE_ROSTER="$D/roster.json" FAKE_META="$D/bead.json"
+    FAKE_STORE="$D/store.json" FAKE_DEPS="$D/deps.txt" FAKE_LOG="$D/gc.log" FAKE_LC_LOG="$D/lc.log" STRATEGY=direct)
+  ( cd "$ELSEWHERE" && "${NOCHECK_ENV[@]}" bash "$TMP/prep.sh" ) >"$D/prep.out" 2>&1; PREP_RC=$?
+  git -C "$D/rig" update-ref -d refs/remotes/origin/main
+}
 fails() { jq -r '.[0].metadata.zero_diff_check_failures // "none"' "$D/bead.json"; }
+field() { jq -r --arg f "$1" '.[0][$f] // ""' "$D/bead.json"; }
+meta() { jq -r --arg k "$1" '.[0].metadata[$k] // "<absent>"' "$D/bead.json"; }
+visit_of() { jq -r '[ .[] | select(.metadata.escalation_key == "refinery-zero-diff-check-failed") | .id ] | .[0] // ""' "$D/store.json"; }
+# nocheck_merge_push [<env>...]: one patrol's merge-push, its logs started over.
 nocheck_merge_push() {
   : > "$D/gc.log"; : > "$D/lc.log"
-  OUT=$(cd "$ELSEWHERE" && "${NOCHECK_ENV[@]}" bash "$TMP/merge-push.sh" 2>&1); RC=$?
+  OUT=$(cd "$ELSEWHERE" && "${NOCHECK_ENV[@]}" "$@" bash "$TMP/merge-push.sh" 2>&1); RC=$?
 }
+# armed_state: the work's arm as the real deferred-dispatch.sh list reads it,
+# through the hold definition its reconcile pass slings by.
+armed_state() { (cd "$ELSEWHERE" && "${NOCHECK_ENV[@]}" bash "$PACK/deferred-dispatch.sh" list 2>&1) | grep '^wb -> ' || true; }
+nocheck_fixture "$TMP/nocheck"
+eq "$PREP_RC" 0 "nocheck: the prepare stages the branch"
 for n in 1 2; do
   nocheck_merge_push
   eq "$RC" 1 "nocheck, patrol $n: merge-push stops"
@@ -385,24 +547,141 @@ for n in 1 2; do
   hasnt "$(cat "$D/gc.log")" "escalate " "nocheck, patrol $n: nothing is escalated"
   has "$(cat "$D/gc.log")" "runtime drain-ack" "nocheck, patrol $n: the session drains"
   eq "$(fails)" "$n" "nocheck, patrol $n: the bead counts $n failed check(s) in a row"
+  eq "$(field assignee)" "$REFINERY" "nocheck, patrol $n: the work stays assigned to the refinery"
 done
 nocheck_merge_push
+VISIT=$(visit_of)
 eq "$RC" 1 "nocheck, patrol 3: merge-push stops"
-has "$(cat "$D/lc.log")" "transition wb --to blocked --assignee  --route human --set blocked_reason=the zero-diff check could not run in $D/rig, 3 patrols in a row: merge-base origin/main " \
-  "nocheck, patrol 3: the bead is parked blocked, its reason naming the rig, the count and the failed git call"
-has "$(cat "$D/lc.log")" "Not a valid object name origin/main; no change verified, refused merge-close --unset zero_diff_check_failures" \
-  "nocheck, patrol 3: the park carries git's own error and clears the count"
-has "$(cat "$D/lc.log")" "--takeaway the zero-diff check could not run 3 patrols in a row, so no change was verified" "nocheck, patrol 3: the board's takeaway says the check could not run"
-hasnt "$(cat "$D/lc.log")" "refused_false_completion" "nocheck, patrol 3: the bead is not parked as a false completion"
-hasnt "$(cat "$D/lc.log")" "false_completion_suspected" "nocheck, patrol 3: no false completion is recorded as suspected"
+eq "$(cat "$D/lc.log")" "" "nocheck, patrol 3: no lifecycle transition parks the bead"
 has "$(cat "$D/gc.log")" "escalate --subject wb --key refinery-zero-diff-check-failed --message The zero-diff check of branch polecat/wb against origin/main could not run in $D/rig, 3 patrols in a row. The last error: merge-base origin/main " \
   "nocheck, patrol 3: the visit is a failed-check situation, naming the directory, the count and the failed git call"
 has "$(cat "$D/gc.log")" "Not a valid object name origin/main. It verified nothing either way" \
   "nocheck, patrol 3: the visit carries git's own error, its trailing newline not left as a space before the rest"
+has "$(cat "$D/gc.log")" "escalate-window 0" "nocheck, patrol 3: the visit is filed with the verdict window off, so the wait has an open visit to sit on"
 hasnt "$(cat "$D/gc.log")" "refinery-false-completion" "nocheck, patrol 3: the visit is not a no-change situation"
+if [ -n "$VISIT" ]; then ok "nocheck, patrol 3: the visit is filed"; else bad "nocheck, patrol 3: the visit is filed" "$(cat "$D/store.json")"; fi
+eq "$(grep -cxF "wb|blocks|$VISIT" "$D/deps.txt")" 1 "nocheck, patrol 3: the work is blocked by its visit"
+eq "$(field status) $(field assignee)" "open " "nocheck, patrol 3: the refinery's assignment is released, so find-work no longer offers the work"
+eq "$(meta gc.dispatch_when_ready)" "$POOL" "nocheck, patrol 3: a fresh pour is armed to the pool the work's last pour ran on"
+eq "$(meta gc.dispatch_when_ready_args)" '["--on","mol-polecat-work"]' "nocheck, patrol 3: the pour is a mol-polecat-work run"
+eq "$(meta merge_result)" "<absent>" "nocheck, patrol 3: no merge_result, which the pour's load-context would read as finished work"
+eq "$(meta gc.routed_to)" "" "nocheck, patrol 3: the work is routed nowhere"
+eq "$(meta blocked_reason) $(meta gc.takeaway)" "<absent> <absent>" "nocheck, patrol 3: no hold marker is written beside the edge"
+eq "$(fails)" none "nocheck, patrol 3: the wait clears the count"
+has "$(field notes)" "Refinery: the zero-diff check of polecat/wb could not run in $D/rig, 3 patrols in a row (merge-base origin/main " \
+  "nocheck, patrol 3: a note on the work says why it waits and what closing the visit does"
+has "$OUT" "wb waits on visit $VISIT (refinery-zero-diff-check-failed); closing the visit re-slings it to $POOL --on mol-polecat-work" \
+  "nocheck, patrol 3: the patrol says what the work waits on and what releases it"
 has "$(cat "$D/gc.log")" "runtime drain-ack" "nocheck, patrol 3: the session drains"
 eq "$(merged_tries)" 0 "nocheck: nothing is recorded as merged"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "nocheck: nothing is pushed"
+
+echo "── closing the visit lets the armed pour take the work ──"
+has "$(armed_state)" "wb -> $POOL [HELD by $VISIT" "nocheck, visit open: the deferred-dispatch pass holds the pour on the visit"
+jq -c --arg v "$VISIT" 'map(if .id == $v then .status = "closed" else . end)' "$D/store.json" > "$D/store.json.new" \
+  && mv "$D/store.json.new" "$D/store.json"
+has "$(armed_state)" "wb -> $POOL [DISPATCHABLE NOW]" "nocheck, visit closed: the deferred-dispatch pass pours the work on its next pass"
+
+echo "── a visit or a wait that does not land leaves the work with the refinery ──"
+# third_failure <dir>: the nocheck fixture with two failed checks counted, so
+# the next patrol meets the third.
+third_failure() {
+  nocheck_fixture "$1"
+  jq -c '.[0].metadata.zero_diff_check_failures = "2"' "$D/bead.json" > "$D/bead.json.new" && mv "$D/bead.json.new" "$D/bead.json"
+}
+# kept <label>: the work is open and assigned to the refinery, counted at the
+# cap and armed nowhere, nothing parks it, and the session drains.
+kept() {
+  eq "$RC" 1 "$1: merge-push stops"
+  eq "$(field status) $(field assignee)" "open $REFINERY" "$1: the work stays assigned to the refinery, so the next patrol takes it up"
+  eq "$(fails)" 3 "$1: the count stays at the cap, so the next failed check asks again"
+  eq "$(meta gc.dispatch_when_ready)" "<absent>" "$1: no pour is armed"
+  eq "$(cat "$D/lc.log")" "" "$1: no lifecycle transition parks the bead"
+  has "$OUT" "the wait did not land, so wb stays with the refinery, and the next patrol checks it again" "$1: the patrol says the work stays with the refinery"
+  has "$(cat "$D/gc.log")" "runtime drain-ack" "$1: the session drains"
+}
+third_failure "$TMP/noesc"
+nocheck_merge_push ESC_FAIL=1
+kept "escalation refused"
+has "$OUT" "escalate.sh recorded no visit for wb" "escalation refused: the patrol says no visit was filed"
+eq "$(jq length "$D/store.json")" 0 "escalation refused: no visit exists"
+eq "$(grep -c . "$D/deps.txt" || true)" 0 "escalation refused: no edge is written"
+hasnt "$(cat "$D/gc.log")" "bd unclaim" "escalation refused: the assignment is never released"
+
+# A lifecycle.sh whose pack holds escalate.sh and no await-ruling.sh. The block
+# takes both from one pack, so it files no visit that no wait could follow.
+third_failure "$TMP/noawait"
+mkdir -p "$TMP/esc-only/assets/scripts"
+cp "$PACK/lifecycle.sh" "$PACK/escalate.sh" "$TMP/esc-only/assets/scripts/"
+nocheck_merge_push TEST_LC="$TMP/esc-only/assets/scripts/lifecycle.sh"
+kept "no await-ruling.sh"
+has "$OUT" "escalate.sh and await-ruling.sh were not found together beside $TMP/esc-only/assets/scripts/lifecycle.sh or in any pack location, so no visit asks about wb" \
+  "no await-ruling.sh: the patrol says no visit was filed"
+hasnt "$(cat "$D/gc.log")" "escalate " "no await-ruling.sh: no visit is filed"
+
+third_failure "$TMP/noedge"
+nocheck_merge_push FAKE_DEP_FAIL=1
+kept "edge refused"
+eq "$(jq length "$D/store.json")" 1 "edge refused: precondition, the visit is filed"
+hasnt "$(cat "$D/gc.log")" "bd unclaim" "edge refused: the wait stops before it releases the assignment"
+
+# The arm is refused after the wait has released the assignment, so the
+# refinery has to take the work back.
+third_failure "$TMP/noarm"
+nocheck_merge_push FAKE_ARM_WRITE_FAIL=1
+kept "arm refused"
+has "$(cat "$D/gc.log")" "bd unclaim wb --if-assignee $REFINERY" "arm refused: precondition, the wait released the assignment before the arm"
+has "$(cat "$D/gc.log")" "bd update wb --if-assignee  --if-status open --assignee $REFINERY" "arm refused: the refinery takes the released work back"
+# The next patrol fails the check again, and its wait lands.
+nocheck_merge_push
+eq "$(jq '[ .[] | select(.metadata.escalation_key == "refinery-zero-diff-check-failed") ] | length' "$D/store.json")" 1 \
+  "arm refused, next patrol: the open visit answers again, and no second one is filed"
+eq "$(grep -cF "wb|blocks|" "$D/deps.txt")" 1 "arm refused, next patrol: the edge already in place is not written again"
+eq "$(field status) $(field assignee)" "open " "arm refused, next patrol: the work is released to wait"
+eq "$(meta gc.dispatch_when_ready)" "$POOL" "arm refused, next patrol: the pour is armed to the pool the first wait recorded"
+eq "$(fails)" none "arm refused, next patrol: the wait clears the count"
+
+# The refinery cannot take the released work back either, so it says the work
+# is stranded and how to hand it back.
+third_failure "$TMP/notaken"
+nocheck_merge_push FAKE_ARM_WRITE_FAIL=1 FAKE_ASSIGN_FAIL=1
+eq "$RC" 1 "take-back refused: merge-push stops"
+eq "$(field assignee)" "" "take-back refused: precondition, the work is left unassigned"
+has "$OUT" "the wait did not land, and wb could not be left with the refinery (its assignee reads nobody), so nothing takes it up again; assign it to $REFINERY once the check can run" \
+  "take-back refused: the patrol names the stranded work and its hand-back"
+has "$(cat "$D/gc.log")" "runtime drain-ack" "take-back refused: the session drains"
+
+echo "── a graduated convoy is parked on its visit, since no pour rebuilds a convoy ──"
+# convoy_failure <dir>: the third failure, on a graduated convoy that carries the
+# pool its design pour ran on, as graduated convoys do.
+convoy_failure() {
+  third_failure "$1"
+  jq -c '.[0].issue_type = "convoy" | .[0].metadata.graduation = "true"' "$D/bead.json" > "$D/bead.json.new" \
+    && mv "$D/bead.json.new" "$D/bead.json"
+}
+convoy_failure "$TMP/convoy"
+nocheck_merge_push
+VISIT=$(visit_of)
+eq "$RC" 1 "convoy: merge-push stops"
+has "$(cat "$D/lc.log")" "transition wb --to blocked --assignee  --route human --set blocked_reason=the zero-diff check could not run in $D/rig, 3 patrols in a row: merge-base origin/main " \
+  "convoy: the convoy is parked blocked, its reason naming the rig, the count and the failed git call"
+has "$(cat "$D/lc.log")" "--unset zero_diff_check_failures --takeaway the zero-diff check could not run 3 patrols in a row; fix the error its visit names, then hand the convoy back" \
+  "convoy: the park clears the count, and its takeaway names the hand-back"
+eq "$(grep -cxF "wb|blocks|$VISIT" "$D/deps.txt")" 1 "convoy: the park is held by a blocks edge onto its visit"
+has "$(cat "$D/gc.log")" "escalate-window 0" "convoy: the visit is filed with the verdict window off"
+has "$(cat "$D/gc.log")" "Fix that error, then hand wb back to the refinery and close this visit." "convoy: the visit asks for the hand-back"
+hasnt "$(cat "$D/gc.log")" "bd unclaim" "convoy: the wait that pours a run is not taken"
+eq "$(meta gc.dispatch_when_ready)" "<absent>" "convoy: no pour is armed onto the convoy"
+hasnt "$OUT" "the wait did not land" "convoy: the park lands"
+has "$(cat "$D/gc.log")" "runtime drain-ack" "convoy: the session drains"
+# A park lifecycle.sh refuses leaves the convoy with the refinery to retry.
+convoy_failure "$TMP/convoy-refused"
+nocheck_merge_push LC_FAIL=1
+eq "$RC" 1 "convoy, park refused: merge-push stops"
+eq "$(field status) $(field assignee)" "open $REFINERY" "convoy, park refused: the convoy stays assigned to the refinery"
+eq "$(fails)" 3 "convoy, park refused: the count stays at the cap, so the next failed check asks again"
+has "$OUT" "the wait did not land, so wb stays with the refinery, and the next patrol checks it again" \
+  "convoy, park refused: the patrol says the convoy stays with the refinery"
 
 echo "── a check that runs again clears the count, and the landing goes on ──"
 fixture "$TMP/recheck" work

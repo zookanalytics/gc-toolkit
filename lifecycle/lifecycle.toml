@@ -94,7 +94,7 @@ meaning = "PR base moved externally; routed to human"
 
 [states.blocked]
 status = "open"
-meaning = "recorded existing_pr unusable, or the zero-diff check could not run three patrols in a row; routed to human"
+meaning = "recorded existing_pr unusable, or a graduated convoy's zero-diff check could not run three patrols in a row; routed to human"
 
 [states.refused_false_completion]
 status = "open"
@@ -125,7 +125,7 @@ writer = "formulas/mol-refinery-patrol.toml merge-push, direct strategy (via lif
 [[transition]]
 from = "unanchored"
 to = "blocked"
-writer = "formulas/mol-refinery-patrol.toml (existing_pr unusable, or the zero-diff check could not run three patrols in a row; via lifecycle.sh)"
+writer = "formulas/mol-refinery-patrol.toml (existing_pr unusable, or a graduated convoy's zero-diff check could not run three patrols in a row; via lifecycle.sh)"
 
 [[transition]]
 from = "unanchored"
@@ -540,8 +540,8 @@ keys = [
 #   for every branch shape, so this flag does not change how the branch is
 #   brought current. Never cleared.
 # blocked_reason — the human-readable reason an anchor sits in a human state
-#   (existing_pr unusable, a PR closed or retargeted out of band, a zero-diff
-#   check that could not run). Written by pr-facts.sh and
+#   (existing_pr unusable, a PR closed or retargeted out of band, a graduated
+#   convoy's zero-diff check that could not run). Written by pr-facts.sh and
 #   mol-refinery-patrol.toml; it is also a [holds] marker, so a live bead
 #   carrying it owes a blocks edge. Freeform.
 # work_dir — the polecat's per-bead git worktree, an absolute path, written by
@@ -553,9 +553,10 @@ keys = [
 #   read. Freeform reason.
 # zero_diff_check_failures — consecutive patrols whose zero-diff check could not
 #   run on this bead. mol-refinery-patrol.toml leaves the work with the refinery
-#   to retry until the count reaches three, then parks the bead `blocked`. An
-#   integer (absent reads as 0), cleared with `--unset` by a check that runs and
-#   by that park.
+#   to retry until the count reaches three, then files a visit and makes the
+#   work wait on it (await-ruling.sh), or parks a graduated convoy `blocked` on
+#   it. An integer (absent reads as 0), cleared with `--unset` by a check that
+#   runs and once that wait or park lands.
 # branch_ready / halt_reason / auto_push — the auto_push=false halt. auto_push is
 #   a caller input the submit step reads; when it is false the polecat records
 #   branch_ready=true and halt_reason=auto_push_false and stops without pushing or
