@@ -557,10 +557,12 @@ keys = [
 #   product was store work. Absent auto_push means the normal push-and-hand-off
 #   path. Not cleared — the halt is terminal for that run. auto_push and
 #   branch_ready are boolean-ish; halt_reason is `auto_push_false | store_only`.
-# pr_summary — the polecat's account of what the diff does, stamped on the anchor
-#   at submit and rendered as the PR's `## Summary` by pr-open.sh, which falls
-#   back to the dispatch text and then a generic line when it is absent or blank.
-#   Never cleared. Freeform markdown.
+# pr_summary — the account of what the diff does, rendered as the PR's
+#   `## Summary` by pr-open.sh, which falls back to the dispatch text and then a
+#   generic line when it is absent or blank. The polecat stamps it on the anchor
+#   at submit, and an integration effort's summary task stamps it on the effort's
+#   landing bead once the effort's work has landed. Never cleared. Freeform
+#   markdown.
 # merge_record_failures — consecutive failures to record a merged PR on this
 #   anchor. merge.sh and pr-facts.sh both perform that record and both retry
 #   every pass with no memory, so the count is the only thing that can tell a

@@ -100,8 +100,8 @@ Carry the pin on every later call: `--repo "$PR_REPO_Q"` for `gh pr`,
 A bare number resolves from ambient gh context, and every repository has a PR
 with the number you were handed.
 
-**3. Never fall back to main.** A convoy child lands on
-`integration/<convoy-id>`; diffing it against main reviews a diff the branch
+**3. Never fall back to main.** A bead of an integration effort lands on the
+effort's integration branch; diffing it against main reviews a diff the branch
 never made. Pre-open with no `review_base`: resolve the anchor's landing
 target, else escalate — never guess a base:
 ```bash

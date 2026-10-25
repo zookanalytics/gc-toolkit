@@ -254,10 +254,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    refinery's to flip only when the city opened it as a draft and nobody has
    re-drafted it since. Any other draft is adopted without that claim and stays
    with whoever parked it.
-   The body's `## Summary` is the polecat's `pr_summary`, written at handoff
-   by the only actor that has read the diff; the anchor's description is
-   dispatch text, demoted to a collapsed section and standing in as the
-   summary only when the handoff carried none. The region writes that heading
+   The body's `## Summary` is the anchor's `pr_summary`, written by an actor
+   that has read the diff: the polecat at its handoff, or, on a landing bead,
+   its effort's summary task once the effort's work has landed. The anchor's
+   description is dispatch text, demoted to a collapsed section and standing
+   in as the summary only when no summary was written. The region writes that heading
    itself, so a `pr_summary` opening with one of its own is de-duplicated. The
    composed body lives between `gc:pr-summary` markers, so adopting an OPEN PR
    re-splices it from the anchor's current `pr_summary` — a rework's restamp

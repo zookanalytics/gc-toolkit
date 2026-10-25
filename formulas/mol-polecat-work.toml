@@ -1547,9 +1547,10 @@ escalation, not something to ship past.
 
 **1b. Resolve the landing target (fails closed).** `{{base_branch}}` is what
 the worktree was poured FROM, not necessarily where the work LANDS. A
-caller-set `metadata.target` always wins (a signoff sets REVIEW_BASE, an
-owned convoy its integration branch); `base_branch` fills in only for fresh
-work; a bead that can name neither halts with nothing pushed. Both consumers
+caller-set `metadata.target` always wins (a signoff sets REVIEW_BASE, and a
+bead filed for an integration effort carries the effort's branch);
+`base_branch` fills in only for fresh work; a bead that can name neither halts
+with nothing pushed. Both consumers
 below read `$LANDING_TARGET`, so the halt arm and the handoff cannot
 disagree:
 
