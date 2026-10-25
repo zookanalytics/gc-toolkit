@@ -2109,9 +2109,9 @@ eq "$(assignee_of g-1)" "" "and unassigned"
 eq "$(meta g-1 gc.until_disposal)" "<absent>" "and unmarked"
 
 # The real disposer stamps its pointer before its finalize gate and its close,
-# so a close the gate holds leaves that pointer behind. A gate that refuses
-# stands in for an open visit on the bead.
-printf '#!/usr/bin/env bash\necho "an open visit holds the close"\nexit 1\n' > "$BIN/finalize-gate-hold.sh"; chmod +x "$BIN/finalize-gate-hold.sh"
+# so a close the gate holds leaves that pointer behind. A finalize gate that
+# refuses stands in for an open human gate on the bead.
+printf '#!/usr/bin/env bash\necho "an open human gate holds the close"\nexit 1\n' > "$BIN/finalize-gate-hold.sh"; chmod +x "$BIN/finalize-gate-hold.sh"
 held_rehome() { STUB_RIGS_JSON="$TMP/rigs-a.json" GC_FINALIZE_GATE_TOOL="$BIN/finalize-gate-hold.sh" "$@"; }
 
 echo "# until: through the real bead-rehome, a held close gives the bead back without the pointer it stamped"
