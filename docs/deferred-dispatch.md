@@ -236,8 +236,8 @@ wait that belongs to one member goes on that member
 Where `bd` decides the same question, the definition follows it: a closed or
 pinned blocker holds nothing, and a closed or pinned ancestor ends the walk.
 A human gate is the one blocker read otherwise. It holds until a person
-resolves it, pinned included, by the rule every reader of a human gate
-applies (`$HUMAN_GATE_JQ` in `assets/scripts/bd-lib.sh`).
+resolves it, pinned included, by the pack's rule of which human gates still
+hold (`$HUMAN_GATE_JQ` in `assets/scripts/bd-lib.sh`).
 
 A read that fails fails the pass, so an unread hold never passes for none. A
 read that answers without an id it was asked for says this store holds no

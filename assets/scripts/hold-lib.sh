@@ -14,10 +14,10 @@
 # pinned neither holds the bead nor passes on a hold from further up. A human
 # gate is the one blocker read otherwise. It is open in every status but closed,
 # pinned included, by bd-lib.sh's rule of which human gates still hold
-# ($HUMAN_GATE_JQ), the rule every reader of a human gate applies. bd counts a
-# pinned blocker as none, so bd can report a bead ready while a pinned human
-# gate holds it or one of its ancestors. A reader that takes bd's readiness for
-# a bead asks hold_holds_ready for the holds bd did not count.
+# ($HUMAN_GATE_JQ). bd counts a pinned blocker as none, so bd can report a bead
+# ready while a pinned human gate holds it or one of its ancestors. A reader
+# that takes bd's readiness for a bead asks hold_holds_ready for the holds bd
+# did not count.
 #
 # A hold holds work that has not started. A bead whose work has started is in
 # flight: it carries a branch, a merge_result or a rejection_reason. A hold on
