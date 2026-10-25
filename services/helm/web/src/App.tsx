@@ -33,23 +33,24 @@ const SECTION_ORDER = ['review', 'gate', 'stalled', 'active', 'cleanup', 'done']
 // information-complete default that hides nothing until the operator folds it.
 const COLLAPSE_STORAGE_KEY = 'helm.board.collapsed';
 
-// The one Tile.visit_state value the marker branches on (board.VisitEngaged).
-// A held row carries 'engaged' or 'parked'; anything that is not 'engaged' —
-// 'parked', or the '' a re-derivation slip could leave — reads as parked, the
-// state that invites the operator to look rather than telling them it is handled.
-const VISIT_ENGAGED = 'engaged';
+// The one Tile.sitting_state value the marker branches on
+// (board.SittingInSession). A held row carries 'in_session' or 'waiting';
+// anything that is not 'in_session' — 'waiting', or the '' a re-derivation slip
+// could leave — reads as waiting, the state that invites the operator to look
+// rather than telling them it is handled.
+const SITTING_IN_SESSION = 'in_session';
 
-// A sitting is finished when its visit bead closed; anything else is a
+// A sitting is finished when its conversation closed; anything else is a
 // conversation someone is still in. Reading the status rather than the presence
 // of closed_at keeps a sitting whose stamp could not be read on the running
 // side, which is the side that shows a row rather than hides one.
 const isRunning = (s: Sitting): boolean => s.status !== 'closed';
 
 // What a sitting CONCLUDED, or failing that what it is ABOUT: the takeaway wins,
-// then the outcome reason (why a decision-close closed), then the subject's title
-// (the topic), and the visit bead's own title only as a last resort. Mirrors the
-// board service's Sitting.Headline so the sittings table and the per-row visit
-// hover read one rule.
+// then the close reason (why the conversation closed), then the subject's title
+// (the topic), and the conversation's own title only as a last resort. Mirrors
+// the board service's Sitting.Headline so the sittings table and the per-row
+// marker read one rule.
 function sittingHeadline(s: Sitting): string {
   return s.takeaway || s.outcome_reason || s.subject_title || s.title;
 }
@@ -504,53 +505,54 @@ function FamilySummary({ descendants, collapsed }: { descendants: Tile[]; collap
   );
 }
 
-// The visit marker: a visible, self-evident chip on a row an open visit holds. It
-// says at a glance which of the two states the visit is in — PARKED (filed and
-// waiting for the operator) or ENGAGED (a live sitting is in it right now) — in a
-// word, a colour and an icon, read straight off tile.visit_state (derived once in
-// the Go layer, never re-derived here). The chip is a real button so it is
-// keyboard-reachable and announced as interactive; hovering or focusing it
-// reveals a details card naming the sittings on the bead — each one's headline,
-// its outcome or state, and the session to attach to. The details live in this
+// The sitting marker: a visible, self-evident chip on a held row — one a human
+// gate or a conversation holds. It says at a glance which of the two states the
+// row is in — WAITING for the operator, or IN SESSION (a live sitting is on it
+// right now) — in a word, a colour and an icon, read straight off
+// tile.sitting_state (derived once in the Go layer, never re-derived here). The
+// chip is a real button so it is keyboard-reachable and announced as
+// interactive; hovering or focusing it reveals a details card naming the
+// sittings on the bead — each one's headline, whether it runs, and the session
+// to attach to. The details live in this
 // card rather than a native `title` tooltip because a native tooltip has no
 // visible affordance and stays invisible until an exact hover lands on a
 // one-character glyph. The card is non-interactive text, so it needs no click
 // to open or dismiss.
-function VisitMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
-  const engaged = tile.visit_state === VISIT_ENGAGED;
-  const word = engaged ? 'in session' : 'waiting';
-  const heading = engaged ? 'In session — being worked right now' : 'Parked — waiting for you';
-  const label = engaged
-    ? 'visit in session — a live conversation is on this row now; hover or focus for details'
-    : 'visit parked — waiting for you; hover or focus for details';
-  const cardId = `visit-card-${tile.id}`;
+function SittingMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
+  const inSession = tile.sitting_state === SITTING_IN_SESSION;
+  const word = inSession ? 'in session' : 'waiting';
+  const heading = inSession ? 'In session — being worked right now' : 'Waiting for you';
+  const label = inSession
+    ? 'in session — a live sitting is on this row now; hover or focus for details'
+    : 'waiting for you; hover or focus for details';
+  const cardId = `sitting-card-${tile.id}`;
   return (
-    <span className={`visit-marker visit-marker--${engaged ? 'engaged' : 'parked'}`}>
-      <button type="button" className="visit-chip" aria-label={label} aria-describedby={cardId}>
-        <span className="visit-chip__icon" aria-hidden="true">
-          {engaged ? '◉' : '○'}
+    <span className={`sitting-marker sitting-marker--${inSession ? 'in-session' : 'waiting'}`}>
+      <button type="button" className="sitting-chip" aria-label={label} aria-describedby={cardId}>
+        <span className="sitting-chip__icon" aria-hidden="true">
+          {inSession ? '◉' : '○'}
         </span>
-        <span className="visit-chip__text">visit · {word}</span>
+        <span className="sitting-chip__text">{word}</span>
       </button>
       {/* Non-interactive detail, revealed on hover or focus of the chip (CSS).
           role=tooltip + aria-describedby hands the same text to a screen reader
           as the button's description, so the details are reachable without a
           pointer. */}
-      <span role="tooltip" id={cardId} className="visit-card">
-        <span className="visit-card__heading">{heading}</span>
+      <span role="tooltip" id={cardId} className="sitting-card">
+        <span className="sitting-card__heading">{heading}</span>
         {sittings.length > 0 ? (
           sittings.map((s) => (
-            <span key={s.id} className="visit-card__sitting">
+            <span key={s.id} className="sitting-card__sitting">
               {sittingHeadline(s)}
-              <span className="visit-card__meta">
+              <span className="sitting-card__meta">
                 {' · '}
-                {s.outcome || (isRunning(s) ? 'running' : 'closed')}
+                {isRunning(s) ? 'running' : 'closed'}
                 {s.session ? ` · ${s.session}` : ''}
               </span>
             </span>
           ))
         ) : (
-          <span className="visit-card__meta">an open visit holds this row</span>
+          <span className="sitting-card__meta">a human gate or a conversation holds this row</span>
         )}
       </span>
     </span>
@@ -559,10 +561,10 @@ function VisitMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
 
 // The leading markers on a row. wants-person is a person's next move (review or
 // gate); it is already spelled by the band word and the row tint, so its ● stays
-// a decorative echo. A visit is the other signal, and the two co-occur — a review
-// row a conversation is holding — so they render side by side rather than
-// collapsing into one glyph: the ● first, then the visit chip that carries the
-// state and the details.
+// a decorative echo. Held is the other signal, and the two co-occur — a review
+// row a gate is holding — so they render side by side rather than collapsing
+// into one glyph: the ● first, then the sitting chip that carries the state and
+// the details.
 function RowMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
   return (
     <>
@@ -571,7 +573,7 @@ function RowMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
           ●{' '}
         </span>
       )}
-      {tile.held && <VisitMarker tile={tile} sittings={sittings} />}
+      {tile.held && <SittingMarker tile={tile} sittings={sittings} />}
     </>
   );
 }
@@ -581,8 +583,8 @@ function RowMarker({ tile, sittings }: { tile: Tile; sittings: Sitting[] }) {
 // or a nested sub-epic — leads with a disclosure control, a header title, and a
 // summary of its subtree, and every row is indented by its depth in the family
 // tree) and the attention highlight rides the row in place: a ● and a tint where
-// a row's next move is the operator's (wantsPerson), a tint on a row an open
-// visit is holding (held).
+// a row's next move is the operator's (wantsPerson), a tint on a row a human gate
+// or a conversation is holding (held).
 function AnchorRow({
   row,
   drilled,
@@ -599,7 +601,7 @@ function AnchorRow({
   // Called after a board write lands, so the acted-on row re-gathers rather than
   // waiting out the poll interval. App passes its refresh.
   onActuated: () => void;
-  // The sittings on each bead, keyed by subject id, for the per-row visit hover.
+  // The sittings on each bead, keyed by subject id, for the per-row marker hover.
   sittingsBySubject: Map<string, Sitting[]>;
   // This row's subtree tiles (empty for a leaf), for the header summary.
   descendants: Tile[];
@@ -670,12 +672,15 @@ function AnchorRow({
       <td>{tile.frontier}</td>
       <td>
         {tile.needs}
+        {/* The gates a live sitting is answering now, beside the needs that
+            names them, as the CLI board prints "in session:". */}
+        {tile.gates_in_session && <span className="gates-in-session"> · in session: {tile.gates_in_session}</span>}
         {/* Accept is the one board-row actuation, mirroring the CLI board's
             "accept ▸" marker (cmd/helm-svc/board.go). It shows only when the wire
-            says the row is acceptable — a recommendation whose visit is un-engaged
-            — and dispatches accept_formula at the subject then dismisses the visit.
-            Discuss and Dismiss live in the drill panel, the way the CLI keeps them
-            as separate verbs off the marked row. */}
+            says the row is acceptable — the recommendation's gate is the last one
+            blocking the bead — and clears that gate and dispatches accept_formula
+            at the bead. Discuss and Dismiss live in the drill panel, the way the
+            CLI keeps them as separate verbs off the marked row. */}
         {tile.acceptable && (
           <>
             {' '}
@@ -687,6 +692,11 @@ function AnchorRow({
               onDone={onActuated}
             />
           </>
+        )}
+        {/* Where Accept would be, the reason it is not: the other gates that
+            block the bead, which Discuss answers first. */}
+        {tile.accept_withheld && (
+          <span className="accept-withheld"> · accept waits on: {tile.accept_withheld} — discuss them first</span>
         )}
         {/* The card behind the Accept — the Proposal and Decision-needed an
             operator weighs — folded into a disclosure so the row stays a
@@ -719,22 +729,22 @@ function Legend() {
         needs you
       </span>
       <span className="legend__item">
-        <span className="visit-marker--parked" aria-hidden="true">
+        <span className="sitting-marker--waiting" aria-hidden="true">
           ○
         </span>{' '}
-        visit waiting for you
+        waiting for you
       </span>
       <span className="legend__item">
-        <span className="visit-marker--engaged" aria-hidden="true">
+        <span className="sitting-marker--in-session" aria-hidden="true">
           ◉
         </span>{' '}
-        visit in session
+        a sitting in session
       </span>
       <span className="legend__item">
         <span className="legend__swatch legend__swatch--wants" aria-hidden="true" /> row needs you
       </span>
       <span className="legend__item">
-        <span className="legend__swatch legend__swatch--held" aria-hidden="true" /> a visit holds it
+        <span className="legend__swatch legend__swatch--held" aria-hidden="true" /> a gate or a conversation holds it
       </span>
       <span className="legend__item">
         <span aria-hidden="true">💬</span> PR conversation: outstanding = a comment waits on the city ·
@@ -845,9 +855,8 @@ function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number;
       <h2 id="sittings-heading">converse sittings</h2>
       <p className="sub">
         {running} running · {sittings.length - running} closed recently. A running sitting is a
-        conversation someone is still in; a closed one shows the outcome it closed on, and a
-        running one shows an outcome only when a board dismissal stamped it without closing the
-        visit. The takeaway shows on the sitting that wrote it.
+        conversation someone is still in or one waiting in your queue; a closed one shows what it
+        concluded, or why it closed. The takeaway shows on the sitting that wrote it.
       </p>
       <table>
         <thead>
@@ -857,7 +866,6 @@ function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number;
             <th>rig</th>
             <th>subject</th>
             <th>age</th>
-            <th>outcome</th>
             <th>headline</th>
           </tr>
         </thead>
@@ -876,17 +884,10 @@ function Sittings({ sittings, now, onOpen }: { sittings: Sitting[]; now: number;
                   <DrillOpen id={s.subject} label={s.subject_title || s.subject} onOpen={onOpen} />
                 </td>
                 <td>{shortAge(live ? s.opened_at : s.closed_at, now)}</td>
-                {/* A running sitting usually has no outcome, and the em dash is
-                    that absence rather than an empty string. The exception is a
-                    board dismissal that stamped gc.outcome but could not close
-                    the visit: it leaves a running row honestly reading
-                    "dismissed", the signal that the sitting is stuck open and
-                    needs a manual close. */}
-                <td>{s.outcome || '—'}</td>
                 {/* The takeaway is what the sitting concluded; with none, a
-                    dedup close shows its outcome reason (why it closed), then
-                    the subject's title (the topic) rather than the visit bead's
-                    own generic title, which says nothing. */}
+                    closed conversation shows its close reason (why it closed),
+                    then the subject's title (the topic) rather than the
+                    conversation's own title. */}
                 <td>{sittingHeadline(s)}</td>
               </tr>
             );
@@ -1045,7 +1046,7 @@ export function App() {
     [boardRows, collapsed],
   );
 
-  // Sittings keyed by the bead they are about, so each row shows the visit(s)
+  // Sittings keyed by the bead they are about, so each row shows the sittings
   // holding it without re-scanning the list per row. Keyed off the full sittings
   // list, not the rig-filtered one, so a shown row always finds its own.
   const sittingsBySubject = useMemo(() => {
