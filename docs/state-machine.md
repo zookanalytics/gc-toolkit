@@ -191,11 +191,6 @@ lane's validation pass beside it. The anchor stays `pull_request` (or
 `pre_open_gate`). The child's and the pass's `blocks` edges hold the merge, and
 so does the lane, since a request-changes close backs no lane.
 
-Convoy graduation is a separate transition on the convoy bead:
-`convoy-graduate.sh` (cadence arm 8) moves a convoy to refinery-assigned with
-`branch=integration/<id>` when all members are closed, at least one merge is
-recorded onto the integration branch, and no hold or branch vetoes.
-
 ## Checks
 
 **Vocabulary.** The anchor declares its checks in `check_set`, a comma list of

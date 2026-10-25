@@ -17,9 +17,9 @@ burn this one. Steps are not materialized; read each description as you
 reach it. On crash, re-derive position from git and bead state.
 
 Everything downstream of the gating handoff — check arming and review
-dispatch, PR opening, the merge itself, external PR facts, convoy
-graduation — is the refinery-reconcile ORDER's (60s, no session). This
-formula never runs those passes: docs/refinery-merge-cadence.md.
+dispatch, PR opening, the merge itself, external PR facts — is the
+refinery-reconcile ORDER's (60s, no session). This formula never runs those
+passes: docs/refinery-merge-cadence.md.
 
 State writes: every merge_result transition goes through
 assets/scripts/lifecycle.sh (one atomic validated write per transition);
@@ -225,12 +225,12 @@ description = """
 Read the bead ONCE and prepare it by bringing its branch current with the
 target — one fail-closed block, because `gc bd` fails open (errors to stderr,
 empty stdout) and an unreadable bead must not read as "unset". Every branch
-shape — per-bead `polecat/*`, shared `integration/*`, a graduation bead — is
-brought current by MERGING origin/$TARGET in, never by a rebase: a rebase
-rewrites history and forces a --force-with-lease push, which resets GitHub's
-"changes since last review" and drifts the PR's line-anchored review comments.
-main stays linear because merge.sh squashes at land, not because the branch was
-rewritten. prepare_mode=merge is stamped on the bead BEFORE touching the
+shape — per-bead `polecat/*`, and the shared `integration/*` a landing bead
+carries — is brought current by MERGING origin/$TARGET in, never by a rebase:
+a rebase rewrites history and forces a --force-with-lease push, which resets
+GitHub's "changes since last review" and drifts the PR's line-anchored review
+comments. main stays linear because merge.sh squashes at land, not because the
+branch was rewritten. prepare_mode=merge is stamped on the bead BEFORE touching the
 worktree, because the hand-back path (a rejection repool) reads it in a
 different shell to bring the branch current the same way.
 

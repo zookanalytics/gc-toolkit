@@ -20,8 +20,8 @@ supervisor's API (`internal/gcbd`).
 | `version` | the revision the binary was built from | `cmd/gctk` |
 
 Logic gctk does not hold runs as shell scripts. Among them are the rest of the
-merge cadence (`gate-ensure`, `pr-open`, `pr-facts`, `convoy-graduate`,
-`signoff`) and `refinery-reconcile.sh`, the driver that runs the cadence's arms.
+merge cadence (`gate-ensure`, `pr-open`, `pr-facts`, `signoff`) and
+`refinery-reconcile.sh`, the driver that runs the cadence's arms.
 `specs/2026-08-review-gates/gctk-promotion.md` records how the merge cadence
 moves into gctk.
 

@@ -41,7 +41,7 @@ in the discard list below it.
 | **Bead** | one durable row: id, status, assignee, metadata, notes | state lives in agent context and dies with the session |
 | **Graph edge** | typed relation between two beads (`blocks`, `parent-child`, `tracks`, …) | a wait becomes a sentence, and nothing can re-evaluate a sentence |
 | **Anchor** | the single open bead that owns a PR and carries its checks | N claimants on one PR ⇒ the weakest check-set decides the merge |
-| **Convoy** | tracked set with one landing target | no unit larger than a bead can land, and integration branches cannot graduate |
+| **Convoy** | Gas City's status grouping: a bead whose `tracks` edges name a batch, and the input every graph.v2 run is poured over. It carries no branch: an integration effort reaches main through its landing bead, an ordinary bead | a run's steps cannot derive the bead they work, and a batch cannot be followed as one unit |
 | **Formula + step bead** | a workflow materialised as beads | a crashed session resumes by reconstructing intent from prose |
 | **Check-set + check lane** | the merge preconditions an anchor declares in `check_set`, one lane per check. A lane's state is derived from its reviews and never stored on the anchor: `lane-state.sh` derives a lane's green from the closed review beads that back it, and the reviewed commit is recorded on the review bead as `reviewed_oid`, bound to no lane state. [state-machine.md](state-machine.md#checks) owns the vocabulary. | merges depend on whoever remembers to look |
 | **Pool + route** | demand addressed to a role, not to a session | dispatch names a mortal process |
@@ -431,7 +431,6 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/pr-open.sh` | merge | Arm 3: `pre_open_gate` to `pull_request`. |
 | `assets/scripts/pr-facts.sh` | merge | Arm 7: records external PR facts. No merge authority. Its write-back is the one writer of each human review round's living answer, the Conversation comment that says what became of every point the round raised. |
 | `assets/scripts/review-answer.sh` | merge | What a human review round's living answer shows, as jq definitions sourced by `pr-facts.sh`, its one writer: the round, the reviews one reviewer submitted against one commit however many GitHub reviews carry them, which one comment answers; a point per finding, labelled and answered in the words the validator and the fix unit recorded, sorted into Needs you, Worth a look, In progress and Done, with a declined or deferred point under Needs you while its thread waits on the reviewer; the line such a point and its reply in the thread both end with, and the lookup of a comment's thread and the test for the city's answer in it, which the reply arm reads the thread by too; and the one-line note the review's dismissal carries. |
-| `assets/scripts/convoy-graduate.sh` | merge | Arm 8: graduates a complete owned integration convoy. |
 | `assets/scripts/review-sweep.sh` | merge | Arm 9: closes a dispatched review with no reviewable surface left. No merge authority. |
 | `assets/scripts/scaffolding-sweep.sh` | merge | Arm 10: retires a disposed anchor's machine review scaffolding (`task_kind=validation\|finding\|rework`) so it can finalize, and carries a finding that can cite code the target branch already carries forward to a bug bead instead of mooting it. `pr-facts.sh` runs it for one anchor before consummating that anchor's PR-close disposition. Leaves reviews, human visits, operator freezes, and the anchor itself alone. No merge authority. |
 | `assets/scripts/duplicate-sweep.sh` | merge | Arm 11: disposes of verified no-op duplicate dispatches, and of never-dispatched rework twins whose sibling answering the same review or ruling landed, via `bead-rehome.sh`. No merge authority. |
@@ -474,7 +473,6 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `formulas/mol-deacon-patrol.toml` | patrol | City infrastructure health: Dolt, orphan processes, doctor sweep. |
 | `formulas/mol-dog-shutdown-dance.toml` | patrol | Due process for one wedged session, against a claimed warrant. |
 | `orders/boot-health.toml` | patrol | Fires the wedged-deacon detector. |
-| `orders/convoy-check.toml` | patrol | Fires the convoy sweep hourly, city-wide: closes the convoys the bead-close autoclose missed. |
 | `orders/liveness-sweep.toml` | patrol | Condition-triggered: runs the sweep once the precheck proves a delta. |
 | `orders/pin-keepalive.toml` | patrol | Condition-triggered, city-scoped: pins standing conversational named sessions (mechanik today) so config-drift restart keeps deferring on them. |
 | `orders/quota-park-nudge.toml` | patrol | Fires the quota-park nudge. |

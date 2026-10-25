@@ -1448,12 +1448,12 @@ has "$(meta new-2 rejection_reason)" "MERGING origin/main IN" "…it names the n
 has "$(meta new-2 rejection_reason)" "Do NOT rebase it and do NOT force-push it" "…and forbids the rewrite in words too"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "the merge-mode child is still dispatched, not stalled on a human"
 
-echo "# …a graduation on a polecat-shaped branch is brought current by merge, like every shape"
-store "[$(anchor GD 29 ',"graduation":"true"')]"
-printf '%s' "$(prview 29 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_29.json"
+echo "# …a landing bead's branch, named for the bead itself, is brought current by merge, like every shape"
+store "[$(anchor LB 29 ',"target":"main"' 'integration/LB')]"
+printf '%s' "$(prview 29 OPEN DIRTY CONFLICTING '' 'integration/LB')" > "$GH_DIR/pr_view_29.json"
 approve 29
 out=$(run)
-eq "$(meta new-2 prepare_mode)" "merge" "a graduation is brought current by merge, like every branch shape"
+eq "$(meta new-2 prepare_mode)" "merge" "a landing bead is brought current by merge, like every branch shape"
 hasnt "$(meta new-2 rejection_reason)" "force-push with --force-with-lease" "…and the work order names no force-push"
 
 echo "# …a prepare_mode stamp that does not persist leaves the child UNROUTED"

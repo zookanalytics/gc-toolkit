@@ -10,11 +10,10 @@
 # feedback ahead of the slow arms, so a pass killed before the full arm has
 # still picked it up; BEADS_ACTOR projected), pre-open-rebase (the conflict
 # observer for anchors that have no PR yet), gate-ensure, pr-facts (same
-# projection), convoy-graduate (GC_AGENT projected: graduation assigns the
-# convoy), review-sweep (cleanup over closed anchors; no projection, no merge
-# authority), scaffolding-sweep (retires validation/finding/rework on a disposed
-# anchor; BEADS_ACTOR projected: it closes a finding it carries forward through
-# bead-rehome; no merge authority), duplicate-sweep (BEADS_ACTOR
+# projection), review-sweep (cleanup over closed anchors; no projection, no
+# merge authority), scaffolding-sweep (retires validation/finding/rework on a
+# disposed anchor; BEADS_ACTOR projected: it closes a finding it carries forward
+# through bead-rehome; no merge authority), duplicate-sweep (BEADS_ACTOR
 # projected: it closes duplicate dispatches through bead-rehome; no merge
 # authority), pr-stack (PR bodies only — both managed regions; no projection,
 # no merge authority).
@@ -93,7 +92,6 @@ REVIEW_POOL="$RIG/${BINDING_PREFIX}polecat-codex"
 # A rig that staffs a dedicated validate pool points this there without an edit.
 VALIDATE_POOL="${REFINERY_RECONCILE_VALIDATE_POOL:-$FIX_POOL}"
 CHECK_SET_DEFAULT="${REFINERY_RECONCILE_CHECK_SET:-correctness,triage}"
-INTEGRATION_AUTO_LAND="${REFINERY_RECONCILE_INTEGRATION_AUTO_LAND:-true}"
 # The pass budget, in seconds (0 = unpaced). Every arm that walks a set growing
 # with the queue is paced: past its deadline it starts no new anchor, and the
 # next pass resumes after the last one it finished (a cursor in the state dir).
@@ -131,15 +129,6 @@ if [ "$REVIEW_FORMULA" != "mol-review" ]; then
     --sling-var "synthesis_target=${REFINERY_RECONCILE_SYNTHESIS_TARGET:-$FIX_POOL}"
   )
 fi
-
-# Graduation target = this rig's own origin/HEAD (one [order.env] serves every
-# rig, so a constant here would be per-rig drift).
-TARGET="${REFINERY_RECONCILE_TARGET:-}"
-if [ -z "$TARGET" ]; then
-  TARGET="$(git -C "$RIG_ROOT" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null)"
-  TARGET="${TARGET#origin/}"
-fi
-[ -n "$TARGET" ] || TARGET=main
 
 # Per-rig state (GC_PACK_STATE_DIR is city+pack scoped; this order runs per rig).
 # The key also names the pass lock below, so every version of this driver must
@@ -421,18 +410,6 @@ pace_args pr-facts
 ( export BEADS_ACTOR="$AGENT"
   run_pass "(7) pr-facts" pr-facts.sh --fix-pool "$FIX_POOL" "${PACE_ARGS[@]}" ) \
   || FAILED="${FAILED}pr-facts rc=$?; "
-
-# (8) convoy-graduate: GC_AGENT projected in a subshell (graduation assigns the
-# convoy to the refinery; the order env does not supply GC_AGENT). Its stamp in
-# the rig's state dir holds it to one complete pass per 15 minutes.
-if [ "$INTEGRATION_AUTO_LAND" = "false" ]; then
-  log "-- (8) convoy-graduate: DISABLED (integration_auto_land=false)"
-else
-  ( export GC_AGENT="$AGENT"
-    run_pass "(8) convoy-graduate" convoy-graduate.sh --target "$TARGET" \
-      --stamp "$STATE_DIR/convoy-graduate.stamp" ) \
-    || FAILED="${FAILED}convoy-graduate rc=$?; "
-fi
 
 # (9) review-sweep: close reviews whose anchor and branch are both gone. Late,
 # because it reads only closed anchors — nothing earlier in the pass can see
