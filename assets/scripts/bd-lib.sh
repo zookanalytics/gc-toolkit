@@ -171,12 +171,16 @@ bd_list() {
 # reach whose issue_type is `gate` and whose await_type is `human`, open and
 # closed alike. This is the one read every reader of a bead's human gates
 # makes. It prints the rows `gc bd dep list <bead> --type blocks` returns, as
-# one JSON array, and each row carries the gate's id, status, await_id, title,
-# created_at, close_reason and closed_at, with an empty field left out. A read
-# that exits non-zero, or answers anything but an array, as bd answers a bead it
-# cannot find, prints nothing and returns 1, so "no gate" and "could not read"
-# stay apart. `bd gate list <bead>` is not this read: it returns the gates a
-# bead reaches through an edge of any type, without saying which edge.
+# one JSON array. For one bead, bd answers each edge with the whole row of the
+# bead it reaches plus the edge's dependency_type, and these are the fields of
+# that row the readers rely on: id, issue_type, await_type, await_id, status,
+# assignee, title, description, created_at, close_reason and closed_at. bd
+# leaves an empty field out, so a gate no person is assigned carries no
+# assignee. A read that exits non-zero, or answers anything but an array, as bd
+# answers a bead it cannot find, prints nothing and returns 1, so "no gate" and
+# "could not read" stay apart. `bd gate list <bead>` is not this read: it
+# returns the gates a bead reaches through an edge of any type, without saying
+# which edge.
 bd_human_gates() {
   local raw
   raw=$(_bd_call dep list "$1" --type blocks --json </dev/null 2>/dev/null) || return 1

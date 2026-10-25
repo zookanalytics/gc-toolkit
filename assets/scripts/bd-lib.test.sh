@@ -858,6 +858,25 @@ unset STUB_DEP_PARTIAL
 [ "$rc" -ne 0 ] && [ -z "$got" ] && ok "…and the same for a gate read that fails after printing an array" \
   || bad "a failed gate read answered rc=$rc with '$got'"
 
+# The readers rely on these fields of each row, which the read hands on whole:
+# the assignee that says a person holds the gate, the description that carries
+# its message, and the type fields the rule reads.
+store '[{"id":"hf-bead","status":"open","title":"waits","metadata":{}},
+  {"id":"hf-gate","status":"open","issue_type":"gate","await_type":"human","await_id":"k1","title":"asks",
+   "assignee":"pat","description":"the whole message\nover two lines","created_at":"2026-10-24T00:00:00Z"},
+  {"id":"hf-closed","status":"closed","issue_type":"gate","await_type":"human","await_id":"k1","title":"done",
+   "close_reason":"ruled: yes","closed_at":"2026-10-24T01:00:00Z"}]'
+printf '%s\n' "hf-gate|blocks|hf-bead" "hf-closed|blocks|hf-bead" > "$STUB_DEPS"
+row=$(bd_human_gates hf-bead | jq -c '.[] | select(.id == "hf-gate")')
+eq "$(printf '%s' "$row" | jq -r '.assignee')" "pat" "bd_human_gates: a row carries the gate's assignee"
+eq "$(printf '%s' "$row" | jq -r '.description')" "the whole message
+over two lines" "…its description whole"
+eq "$(printf '%s' "$row" | jq -r '[.issue_type, .await_type, .await_id, .status, .title, .created_at] | join(" ")')" \
+  "gate human k1 open asks 2026-10-24T00:00:00Z" "…and the fields the open-gate rule and the dedup read"
+eq "$(bd_human_gates hf-bead | jq -r '.[] | select(.id == "hf-closed") | [.close_reason, .closed_at] | join(" ")')" \
+  "ruled: yes 2026-10-24T01:00:00Z" "…and a closed gate its answer and when it came"
+eq "$(bd_open_human_gates hf-bead k1 | jq -r '.[0].assignee')" "pat" "bd_open_human_gates hands the same rows on"
+
 # The listing form of the same rule, for a reader that reads many beads at once.
 LISTING='[{"id":"g1","issue_type":"gate","await_type":"human","status":"open"},
   {"id":"g2","issue_type":"gate","await_type":"human","status":"closed"},
