@@ -20,12 +20,9 @@
 #      update` command in one clears an assignee unless the same command
 #      reopens the bead (--status=open) or is guarded to an open bead
 #      (--if-status open), which cannot leave an in_progress bead unassigned.
-#      orphan-dispose.sh, the witness's release of a dead owner's claim, still
-#      splits its reopen and its clear, and a fix of its own owns that. It is
-#      listed by name, and the check fails once it no longer splits, so the
-#      listing goes with the split. The text is read with shell and TOML line
-#      continuations joined, and the phrase with line wraps joined too, so a
-#      phrase or a command that a line break splits is still found.
+#      The text is read with shell and TOML line continuations joined, and the
+#      phrase with line wraps joined too, so a phrase or a command that a line
+#      break splits is still found.
 #   4. Each nudge's hand-back command runs, in bash and in zsh where zsh is
 #      installed, against a stub store that enforces bd's --if-status and
 #      --if-assignee: a mismatch writes nothing and exits 13. gc hook records a
@@ -125,11 +122,8 @@ else:
 # in_progress bead unassigned, so it needs no reopen beside it.
 CLEAR = re.compile(r"(?<![\w-])(--assignee|-a)(=(\"\"|''|(?=[\s`]|$))|\s+(\"\"|''))")
 OPEN_GUARD = re.compile(r"--if-status(=|\s+)[\"']?open\b")
-# The witness's release of a dead owner's claim, which reopens it and clears its
-# assignee in two writes until a fix of its own makes them one.
-KNOWN_SPLIT = {"assets/scripts/orphan-dispose.sh"}
 texts = [t for t in os.environ.get("WIRING_TEXTS", "").splitlines() if t]
-hits, split, known = [], [], set()
+hits, split = [], []
 for rel in texts:
     try:
         with open(os.path.join(root, rel), encoding="utf-8", errors="replace") as f:
@@ -140,10 +134,7 @@ for rel in texts:
     for line in text.splitlines():
         for cmd in re.split(r";|&&|\|\||\|", line):
             if re.search(r"\bbd update\b", cmd) and CLEAR.search(cmd) and "--status=open" not in cmd and not OPEN_GUARD.search(cmd):
-                if rel in KNOWN_SPLIT:
-                    known.add(rel)
-                else:
-                    split.append("%s: %s" % (rel, cmd.strip()[:160]))
+                split.append("%s: %s" % (rel, cmd.strip()[:160]))
     if re.search(r"clear your (own )?assignee", re.sub(r"\s+", " ", text), re.IGNORECASE):
         hits.append(rel)
 if hits:
@@ -154,11 +145,6 @@ if split:
     print("bad|a bd update clears an assignee without reopening the bead in the same write: %s" % "; ".join(split))
 else:
     print("ok|every bd update in them that clears an assignee reopens the bead in the same write, or is guarded to an open bead")
-for rel in sorted(KNOWN_SPLIT):
-    if rel in known:
-        print("ok|%s, the one release listed by name, still splits, so its listing stands" % rel)
-    else:
-        print("bad|%s no longer clears an assignee in a write of its own: take it out of KNOWN_SPLIT" % rel)
 
 # --- 4. The commands the shell runs. ---
 for name in sorted(handbacks):

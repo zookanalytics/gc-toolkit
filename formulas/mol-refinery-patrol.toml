@@ -1231,6 +1231,40 @@ the second anchor it was written to prevent. Multi-candidate tiebreak: the
 OLDEST anchor (the original predates any rework-minted duplicate);
 `created_at` is the real field, `.created`/`.id` only defensive fallbacks.
 
+The listing is read whole or not at all. One that fails, or does not parse as a
+JSON array once the raw control bytes bd can emit inside a note are dropped,
+says nothing about the branch, and reading it as an empty one would make $WORK
+the PR's anchor. So the landing waits: nothing is recorded or closed, and $WORK
+stays routed for the next pass.
+
+A convoy's rebuild child lands on a bead that carries no `merge_result` yet.
+`rejection-repool.sh` pours a rejected graduation's rebuild onto that child,
+because a convoy cannot be its own run's work bead. With no anchor on the
+branch, and $WORK's own row ($BEAD_JSON) showing a rework that answers no
+review and no ruling, the convoy it names as its `anchor_bead`, open on the
+same branch, is the bead this landing anchors (`LANDS_ON`). Once the push reads
+back, that convoy takes the gating transition this pass would have given $WORK,
+and $WORK then closes landed-on-branch. The anchoring comes first, so a close
+that fails leaves an anchor the next pass finds on the branch, and a refused
+anchoring closes nothing. A child never takes a gating state itself. When the
+bead it names is not open on the branch, merge-push reads that bead by its id. A
+read that fails makes the landing wait the same way. A convoy there, or no such
+bead in the store, leaves a question only a person can answer: whether the
+graduation goes on. So merge-push files a visit on $WORK with `escalate.sh`'s
+verdict window off, and `await-ruling.sh` makes $WORK wait on it. The script
+adds a `blocks` edge from $WORK onto the visit, releases $WORK's assignment, which
+takes it off the refinery's queue, and arms a fresh `mol-polecat-work` pour of
+$WORK for when the visit closes. A held child is then never picked again ahead
+of the handoffs behind it, and it is held without a `merge_result`, which would
+make it the branch's anchor. When the wait does not land, $WORK stays routed and
+the next pass tries again. A named bead that is not a convoy leaves $WORK its own
+anchor, as a first handoff is. No other bead is anchored this way. A review's
+or a ruling's rework names a bead whose own rebuild may still be queued, and
+anchoring that bead would make the rebuild's load-context read it as finished
+work. Step 4b of
+`mol-polecat-work`'s submit-and-exit runs the same `rebuild-child-lands-on`
+block, so the polecat stamps its summary on the bead this landing anchors.
+
 The child leaves through `lifecycle.sh` because `merge_result` is the
 lifecycle's field and `lifecycle.sh` is its only writer; `unanchored` is the
 declared edge out of every gating state. A child closed still carrying one is
@@ -1258,15 +1292,65 @@ branch that head is on. The read-back fetch has just put that head on
 ```bash
 # >>> one-anchor-per-pr-resolve
 EXISTING_ANCHOR=""
+ANCHOR_ROWS=""
 if [ -n "${BRANCH:-}" ]; then
   ANCHOR_ROWS=$(gc bd list --status=open --metadata-field branch="$BRANCH" \
     --limit=0 --json 2>/dev/null) || ANCHOR_ROWS=""
+  ANCHOR_ROWS=$(printf '%s' "$ANCHOR_ROWS" | tr -d '[:cntrl:]')
+  if ! printf '%s' "$ANCHOR_ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    echo "merge-push: the open beads on $BRANCH could not be listed, so the bead this landing gates cannot be told; recording no landing and closing nothing. $WORK stays routed for the next pass." >&2
+    gc runtime drain-ack
+    exit 1
+  fi
   EXISTING_ANCHOR=$(printf '%s' "$ANCHOR_ROWS" | jq -r --arg self "$WORK" \
     '[ .[]? | select(.id != $self)
        | select((((.metadata // {}).merge_result // "") | tostring) != "") ]
      | sort_by(.created_at // .created // .id) | .[0].id // empty' 2>/dev/null) || EXISTING_ANCHOR=""
 fi
-GATING_ANCHOR="${EXISTING_ANCHOR:-$WORK}"
+SELF_ROW=""
+[ -n "$EXISTING_ANCHOR" ] || SELF_ROW="${BEAD_JSON:-}"
+# >>> rebuild-child-lands-on
+LANDS_ON=""
+NAMED=$(printf '%s' "$SELF_ROW" | jq -r '(.[0].metadata // {}) as $m
+  | if (($m.task_kind // "") | tostring) == "rework"
+       and (($m.source_review_bead // "") | tostring) == ""
+       and (($m.source_ruling_bead // "") | tostring) == ""
+    then (($m.anchor_bead // "") | tostring) else "" end' 2>/dev/null) || NAMED=""
+[ -z "$NAMED" ] || LANDS_ON=$(printf '%s' "$ANCHOR_ROWS" | jq -r --arg n "$NAMED" '
+  [ .[]? | select(.id == $n) | select(((.issue_type // .type // "") | tostring) == "convoy") ]
+  | .[0].id // empty' 2>/dev/null) || LANDS_ON=""
+# <<< rebuild-child-lands-on
+if [ -n "$NAMED" ] && [ -z "$LANDS_ON" ]; then
+  NAMED_ROWS=$(printf '%s' "$ANCHOR_ROWS" | jq -c --arg n "$NAMED" '[ .[]? | select(.id == $n) ]' 2>/dev/null)
+  case "$NAMED_ROWS" in ""|"[]") NAMED_ROWS=$(gc bd list --id "$NAMED" --all --limit=0 --json 2>/dev/null) || NAMED_ROWS="" ;; esac
+  NAMED_KIND=$(printf '%s' "$NAMED_ROWS" | tr -d '[:cntrl:]' | jq -r --arg n "$NAMED" '
+    if type != "array" then "unreadable"
+    else ([ .[] | objects | select(.id == $n) ][0]) as $r
+      | if $r == null then "absent" else "kind:" + (($r.issue_type // $r.type // "") | tostring) end
+    end' 2>/dev/null)
+  case "$NAMED_KIND" in
+    kind:convoy|absent)
+      if [ "$NAMED_KIND" = absent ]; then NAMED_STATE="not in this store"; else NAMED_STATE="not open on $BRANCH"; fi
+      echo "merge-push: $WORK rebuilds $NAMED, which is $NAMED_STATE, so its landing has no bead to anchor; recording no landing and closing nothing." >&2
+      LC_DIR="${LC%/*}"; WAITS=""
+      if GC_ESCALATE_VERDICT_WINDOW=0 "$LC_DIR/escalate.sh" --subject "$WORK" --key refinery-rebuild-convoy-not-open --message "$WORK, the rebuild of $NAMED, has landed on $BRANCH, but $NAMED is $NAMED_STATE, so no bead can carry the PR, and the refinery anchored and closed nothing. $WORK waits on this visit, off the refinery's queue. To go on with the graduation, make $NAMED open with branch $BRANCH, then close this visit: that pours a fresh run on $WORK, whose hand-back anchors $NAMED. To abandon the graduation, close $WORK, then this visit."; then
+        "$LC_DIR/await-ruling.sh" "$WORK" --key refinery-rebuild-convoy-not-open --formula mol-polecat-work && WAITS=1
+      fi
+      if [ -n "$WAITS" ]; then
+        echo "merge-push: $WORK waits on that visit, off the refinery's queue, and closing the visit pours a fresh run on it." >&2
+      else
+        echo "merge-push: the wait on a visit did not land, so $WORK stays routed for the next pass." >&2
+      fi
+      gc runtime drain-ack
+      exit 1 ;;
+    kind:*) ;;
+    *)
+      echo "merge-push: $NAMED, which $WORK names as its anchor_bead, could not be read, so whether $WORK rebuilds a convoy cannot be told; recording no landing and closing nothing. $WORK stays routed for the next pass." >&2
+      gc runtime drain-ack
+      exit 1 ;;
+  esac
+fi
+GATING_ANCHOR="${EXISTING_ANCHOR:-${LANDS_ON:-$WORK}}"
 # <<< one-anchor-per-pr-resolve
 # >>> one-anchor-per-pr-terminal
 # The rework arm reads the prepared head back from the prep worktree, so this
@@ -1275,7 +1359,19 @@ RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc
 RIG_ROOT=$("${RR:?rig-root.sh not found in the pack}")
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
-if [ -n "$EXISTING_ANCHOR" ]; then
+# The gating transition, onto the bead this landing anchors: pull_request once
+# both PR coordinates resolved, else pre_open_gate.
+anchor_at_gate() { # <bead>
+  if [ "$PRE_OPEN" = 1 ] || [ -z "${PR_URL:-}" ] || [ -z "${PR_NUMBER:-}" ]; then
+    if [ "$PRE_OPEN" != 1 ]; then
+      echo "merge-push: $WORK records a PR but url/number did not both resolve (url='${PR_URL:-}' number='${PR_NUMBER:-}'); parking $1 at pre_open_gate so pr-open.sh adopts the PR — an empty pr_number is unaddressable by merge.sh and pr-facts.sh forever." >&2
+    fi
+    "$LC" transition "$1" --to pre_open_gate --assignee "" --route "" --set merged_target="$TARGET" --set check_set="$CHECK_SET" --unset rejection_reason
+  else
+    "$LC" transition "$1" --to pull_request --assignee "" --route "" --set pr_url="$PR_URL" --set pr_number="$PR_NUMBER" --set merged_target="$TARGET" --set check_set="$CHECK_SET" --unset rejection_reason
+  fi
+}
+if [ -n "$EXISTING_ANCHOR" ] || [ -n "${LANDS_ON:-}" ]; then
   # This arm closes the rework landed-on-branch, so the landing must be provable
   # against origin: the mr push above can be rejected or skipped and leave
   # origin/$BRANCH at its pre-fix tip, and a sha read from the local prep
@@ -1298,6 +1394,14 @@ if [ -n "$EXISTING_ANCHOR" ]; then
     exit 1
   fi
   REWORK_SHA=$(git -C "$PREP_WT" rev-parse --short "origin/$BRANCH" 2>/dev/null || echo "")
+  if [ -n "${LANDS_ON:-}" ]; then
+    if ! anchor_at_gate "$LANDS_ON"; then
+      echo "merge-push: $LANDS_ON, the bead rework $WORK lands on, could not be anchored; closing nothing. $WORK stays routed for the next pass." >&2
+      gc runtime drain-ack
+      exit 1
+    fi
+    EXISTING_ANCHOR="$LANDS_ON"
+  fi
   gc bd update "$EXISTING_ANCHOR" --append-notes "Rework $WORK landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; re-gate belongs to the cadence (one-anchor-per-PR)." >/dev/null 2>&1 || true
   if "$LC" transition "$WORK" --to unanchored --unset rejection_reason; then
     if ! gc bd update "$WORK" --status=closed \
@@ -1308,13 +1412,8 @@ if [ -n "$EXISTING_ANCHOR" ]; then
   else
     echo "merge-push: $WORK could not be moved off its anchor state; left OPEN for the next pass rather than closed still carrying one (doctor/check-closed-implies-landed)" >&2
   fi
-elif [ "$PRE_OPEN" = 1 ] || [ -z "${PR_URL:-}" ] || [ -z "${PR_NUMBER:-}" ]; then
-  if [ "$PRE_OPEN" != 1 ]; then
-    echo "merge-push: $WORK records a PR but url/number did not both resolve (url='${PR_URL:-}' number='${PR_NUMBER:-}'); parking at pre_open_gate so pr-open.sh adopts the PR — an empty pr_number is unaddressable by merge.sh and pr-facts.sh forever." >&2
-  fi
-  "$LC" transition "$WORK" --to pre_open_gate --assignee "" --route "" --set merged_target="$TARGET" --set check_set="$CHECK_SET" --unset rejection_reason
 else
-  "$LC" transition "$WORK" --to pull_request --assignee "" --route "" --set pr_url="$PR_URL" --set pr_number="$PR_NUMBER" --set merged_target="$TARGET" --set check_set="$CHECK_SET" --unset rejection_reason
+  anchor_at_gate "$WORK"
 fi
 # <<< one-anchor-per-pr-terminal
 ```
@@ -1350,7 +1449,9 @@ leave the bead for a human to re-strategize.
 transition; mr requires a verified branch push then one gating transition
 (pre_open_gate, or pull_request with the PR recorded). The bead closes only
 on a verified merge — never at handoff — except a rework hand-back, which
-closes landed-on-branch with NO merge_result."""
+closes landed-on-branch with NO merge_result. A convoy's rebuild child gives
+the gating transition to the convoy it names first, when that convoy carries
+none yet."""
 
 [[steps]]
 id = "patrol-summary"
