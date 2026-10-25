@@ -12,9 +12,10 @@
 # unreadable rig list); the gate-target resolution (bd hides gates unless asked);
 # the suspended-rig skip; the quiet path; that a store's statuses are read in
 # ONE batch, not one call per candidate; and the live-work report (a bead the
-# pass never disposes because it carries live work, read from its row or from
-# its edges, is reported as a decision for a person, never as the order not
-# firing, and an unreadable edge read leaves it unchecked); and the owed window,
+# pass never disposes because it carries live work, read from its row, its
+# edges or a live run that works it, is reported as a decision for a person,
+# never as the order not firing, a bead a convoy tracks with no live run is
+# owed, and an unreadable edge read leaves it unchecked); and the owed window,
 # the deferred-dispatch order's cadence window from assets/scripts/order-cadence.sh,
 # with its minimum floor when the order registry does not read; the owed-since
 # moment, the latest of the until targets' closes, the until edges' creation and
@@ -151,6 +152,10 @@ esac
 BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
+# The runs that work a bead are run-lib.sh's reads, which run-lib.stub.sh answers
+# from runs.json, a run of each bead a case names.
+export GC_RUN_LIB="$HERE/../../assets/scripts/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json" RUN_LIB_STUB_FAIL=""
+printf '[]' > "$TMP/runs.json"
 
 # GC_CITY_PATH is pinned to a fixture city, so the dispatch budget the window is
 # derived from never comes from the AMBIENT city.toml.
@@ -363,14 +368,19 @@ has "$OUT" "issue_type=epic" "the epic is named as not plain work"
 hasnt "$OUT" "owed but not firing" "neither is reported as the order failing"
 clear_stores
 
-# --- 19. LIVE WORK on the edges: a clean row tracked by a convoy --------------
+# --- 19. LIVE WORK: a clean row a live run works, and one only a convoy tracks -
 open_store alpha "$(o_until l-4 x-0)"
 refs_store alpha "$(r_closed x-0 "$OLD")"
 printf '%s' '{"l-4":[{"id":"c-1","dependency_type":"tracks","issue_type":"convoy","status":"open"}]}' > "$TMP/stores/alpha.up.json"
+printf '%s' '[{"root":"r-1","convoy":"c-1","bead":"l-4","formula":"mol-polecat-work","live":true}]' > "$TMP/runs.json"
 OUT=$(run_check); RC=$?
-eq "$RC" "1" "a convoy-tracked resolved bead warns (exit 1)"
-has "$OUT" "tracked by convoy c-1 (open)" "the convoy is named"
+eq "$RC" "1" "a resolved bead a live run works warns (exit 1)"
+has "$OUT" "worked by live run r-1 (mol-polecat-work)" "the run is named"
 hasnt "$OUT" "owed but not firing" "a pour is not reported as the order failing"
+printf '[]' > "$TMP/runs.json"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a resolved bead a convoy tracks, with no live run, warns (exit 1)"
+has "$OUT" "owed but not firing" "…as owed: a convoy that tracks it is no live work"
 clear_stores
 
 # --- 20. LIVE WORK on the edges: an open child; a closed one is no mark ------

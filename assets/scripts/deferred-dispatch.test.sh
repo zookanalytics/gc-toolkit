@@ -702,6 +702,14 @@ chmod +x "$TMP/jqbin/jq"
 
 export PATH="$BIN:$PATH"
 export STUB_STORE="$TMP/beads.json"
+# The runs that work a bead are run-lib.sh's reads, which run-lib.stub.sh answers
+# from the runs the store's roots and convoys make, by run-lib.sh's own
+# run_rows, with each row's edges taken from its _deps.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf '. %q || exit 1\n' "$HERE/run-lib.sh"; cat; } > "$BIN/store-runs" <<'RUNS'
+jq -c "$RUN_JQ"'map(.dependencies = (._deps // [])) | run_rows' "$STUB_STORE"
+RUNS
+chmod +x "$BIN/store-runs"
+export GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_CMD="$BIN/store-runs" RUN_LIB_STUB_FAIL=""
 export STUB_SLING_LOG="$TMP/sling.log"
 export STUB_MAIL_LOG="$TMP/mail.log"
 export STUB_MAILBOX="$TMP/mailbox"
@@ -1509,17 +1517,28 @@ eq "$(rehomes)" "0" "the until half does not dispose the bead it just slung"
 eq "$(status_of g-1)" "open" "the slung bead stays open for its pool"
 has "$out" "gc.routed_to=rig/rig.polecat" "the report names the route the sling left"
 
-echo "# until: a convoy tracking the bead makes it live work, though its metadata is clean"
-# A pour mints a convoy that tracks the bead, and that edge outlives a route the
-# metadata no longer carries. Only the fresh read of the bead's dependents sees it.
+echo "# until: a live run working the bead makes it live work, though its metadata is clean"
+# A pour's run works the bead until its root closes, and the run outlives a route
+# the metadata no longer carries. Only the fresh read of its runs sees it.
 store '[
  {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
- {"id":"c-1","issue_type":"convoy","status":"closed","assignee":"","metadata":{},"notes":"","_deps":[{"id":"g-1","dependency_type":"tracks"}]},
+ {"id":"c-1","issue_type":"convoy","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"g-1","dependency_type":"tracks"}]},
+ {"id":"r-1","issue_type":"task","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.formula_name":"mol-polecat-work","gc.input_convoy_id":"c-1"},"notes":""},
  {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
 out="$("$SUT" reconcile 2>&1)"; rc=$?
 eq "$rc" 0 "the pass is clean"
-eq "$(rehomes)" "0" "a convoy-tracked bead is never disposed, even when that convoy has closed"
-has "$out" "tracked by convoy c-1 (closed)" "the report names the convoy"
+eq "$(rehomes)" "0" "a bead a live run works is never disposed"
+has "$out" "worked by live run r-1 (mol-polecat-work)" "the report names the run"
+
+echo "# until: a bead a closed convoy tracks, with no live run, is not live work"
+store '[
+ {"id":"g-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"x-1","dependency_type":"until"}]},
+ {"id":"c-1","issue_type":"convoy","status":"closed","assignee":"","metadata":{},"notes":"","_deps":[{"id":"g-1","dependency_type":"tracks"}]},
+ {"id":"r-1","issue_type":"task","status":"closed","assignee":"","metadata":{"gc.kind":"workflow","gc.formula_name":"mol-polecat-work","gc.input_convoy_id":"c-1"},"notes":""},
+ {"id":"x-1","status":"closed","assignee":"","metadata":{},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "the pass is clean"
+eq "$(rehomes)" "1" "a bead whose run has finished, its convoy closed, is disposed"
 
 echo "# until: an open child under the bead makes it live work; a closed one does not"
 store '[
