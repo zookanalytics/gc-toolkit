@@ -38,11 +38,13 @@
 # An open human gate that blocks the origin holds its close (finalize-gate.sh).
 # A caller that reports its own refusals of the close as human gates names their
 # key with --except-key, and the retry withdraws those gates before it closes,
-# in three steps: it reads what would hold the close (the finalize gate, and
-# the origin's live blockers and open children, which an unforced `bd close`
-# refuses on), and stops there when anything but its own unassigned gates under
-# the key would; it resolves each of those gates with a reason that names the
-# retry and carries no outcome word, so no quiet period starts; then it closes.
+# in three steps: it reads what would hold the close (the finalize gate; the
+# origin's live blockers and open children; and the template, the pin and the
+# assignee an unforced `bd close` refuses, which lets the close through only for
+# an origin no one is assigned or one assigned to exactly the actor it runs as),
+# and stops there when anything but its own unassigned gates under the key
+# would; it resolves each of those gates with a reason that names the retry and
+# carries no outcome word, so no quiet period starts; then it closes.
 # A run that stops between steps leaves a state the next run completes, because
 # a resolved gate stays resolved.
 # An already-closed origin is the REPAIR path: pointer + appended note, plus that
@@ -562,6 +564,28 @@ else
             HELD_BY="${OTHER_BLOCKERS:+blocker(s) $OTHER_BLOCKERS}"
             [ -z "$OPEN_KID" ] || HELD_BY="${HELD_BY:+$HELD_BY and }open child $OPEN_KID"
             echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but the close is held by $HELD_BY, so its own [$EXCEPT_KEY] gates stay open and nothing closes." >&2
+            echo "bead-rehome: the disposition is legible — the bead is open, pointed, and findable. Clear what holds it, then re-run this close." >&2
+            exit 5
+        fi
+        # bd's unforced close also refuses a template, a pinned bead, and a bead
+        # assigned to anyone but the actor the close runs as, whatever its
+        # status. Withdrawing the gates ahead of a close bd then refuses would
+        # take the question away from the person it asks, and the caller's next
+        # refused retry would file it again. So these are read off the origin's
+        # row before anything is resolved, and any of them holds the close with
+        # the gates open. bd compares the assignee with the --actor it is given
+        # and with no other name of this session, so only an origin no one is
+        # assigned, or one assigned to exactly $ACTOR, goes on to the close.
+        CLOSE_GUARD=$(printf '%s' "$CHECK_JSON" | jq -r --arg actor "$ACTOR" --arg who "${ACTOR:-the actor bd defaults to}" '.[0]
+            | ((.assignee // "") | tostring) as $as
+            | if (.is_template // false) == true then "it is a template, which bd never closes"
+              elif ((.status // "") | tostring | ascii_downcase) == "pinned" or (.pinned // false) == true
+                then "it is pinned, which bd closes only by force"
+              elif $as != "" and $as != $actor
+                then "it is assigned to \($as), and bd closes an assigned bead only for its assignee, while this close runs as \($who)"
+              else empty end' 2>/dev/null || true)
+        if [ -n "$CLOSE_GUARD" ]; then
+            echo "bead-rehome: pointer IS recorded on $ORIGIN (gc.superseded_by=$SUCCESSOR in $SUCCESSOR_STORE) but bd would refuse its close: $CLOSE_GUARD. Its own [$EXCEPT_KEY] gates stay open and nothing closes." >&2
             echo "bead-rehome: the disposition is legible — the bead is open, pointed, and findable. Clear what holds it, then re-run this close." >&2
             exit 5
         fi

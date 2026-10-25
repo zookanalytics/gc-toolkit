@@ -73,7 +73,12 @@
 #       any gate is resolved, and so does a blocker or child read that fails;
 #   (ao) a gate that does not resolve holds the close, and a run stopped after
 #       the withdrawal is completed by the next one;
-#   (ap) the dry run names the withdrawal it would make.
+#   (ap) the dry run names the withdrawal it would make;
+#   (aq) the template, the pin and the assignee an unforced close refuses hold
+#       the retry before any gate is resolved: an origin no one is assigned,
+#       or one assigned to exactly the actor the close runs as, goes ahead,
+#       and one assigned to anyone else, under any other name this session
+#       carries included, keeps its gates open and closes nothing.
 # The evidence gates this writer enforces for every caller:
 #   (gate-a) EVERY kind — no close over a review, step, or workflow bead;
 #   (gate-held) EVERY kind — no close over a bead another session holds
@@ -131,11 +136,11 @@ GC
 [ -n "${VIA_GC_BD:-}" ] || { echo "stub bd: called directly, not through gc bd" >&2; exit 127; }
 # Fake bd: --db <path>/.beads [--actor X] <show|update|close> <id> ...
 set -euo pipefail
-DB=""
+DB=""; ACTOR_ARG=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --db) DB="$2"; shift 2 ;;
-    --actor) echo "$2" >> "$FAKE_ACTOR_LOG"; shift 2 ;;
+    --actor) ACTOR_ARG="$2"; echo "$2" >> "$FAKE_ACTOR_LOG"; shift 2 ;;
     *) break ;;
   esac
 done
@@ -298,10 +303,12 @@ case "$sub" in
     as="$(sed -n 's/^assignee=//p' "$f" | tail -1)"
     jq -n --arg id "$id" --arg st "$(sed -n 's/^status=//p' "$f" | tail -1)" \
           --arg as "$as" \
+          --arg tpl "$(sed -n 's/^is_template=//p' "$f" | tail -1)" \
           --arg notes "$(sed -n 's/^notes=//p' "$f" | tr '\n' ' ')" \
           --argjson meta "$(meta_json)" \
           --argjson deps "$(deps_json)" \
-          '[{id: $id, status: $st, assignee: (if $as == "" then null else $as end), notes: $notes, metadata: $meta, dependencies: $deps}]'
+          '[{id: $id, status: $st, assignee: (if $as == "" then null else $as end), notes: $notes, metadata: $meta, dependencies: $deps}
+            | if $tpl == "true" then .is_template = true else . end]'
     ;;
   update)
     # FAKE_BD_REFUSE_WORK_OUTCOME refuses any update naming gc.work_outcome,
@@ -369,6 +376,18 @@ case "$sub" in
     fi
     # FAKE_BD_CLOSE_NOOP reports a close that never persisted.
     [ -z "${FAKE_BD_CLOSE_NOOP:-}" ] || exit 0
+    # FAKE_BD_ENFORCE_CLOSE_GUARDS: bd's own close guards, which refuse an
+    # unforced close of a template, of a pinned bead, and of a bead assigned to
+    # anyone but the --actor the close is given.
+    if [ -n "${FAKE_BD_ENFORCE_CLOSE_GUARDS:-}" ]; then
+      [ "$(sed -n 's/^is_template=//p' "$f" | tail -1)" != "true" ] \
+        || { echo "Error: cannot close template $id" >&2; exit 1; }
+      [ "$(sed -n 's/^status=//p' "$f" | tail -1)" != "pinned" ] \
+        || { echo "Error: cannot close pinned issue $id (use --force to override)" >&2; exit 1; }
+      cas="$(sed -n 's/^assignee=//p' "$f" | tail -1)"
+      [ -z "$cas" ] || [ "$cas" = "$ACTOR_ARG" ] \
+        || { echo "cannot close $id: assignee is \"$cas\", actor is \"$ACTOR_ARG\"; reclaim or use --force to override" >&2; exit 1; }
+    fi
     # A stub that closes a blocked bead would report a green suite for the bug
     # in case (n) below: the whole defect is that real bd refuses here.
     BLOCKED=$(open_blockers)
@@ -1270,6 +1289,68 @@ rc=0; run --origin al-retry9 --successor bt-retry9 --kind not-needed --except-ke
 has "$(cat "$TMP/out")" "gates:     resolve each open human gate under [pr-dispose-failed.9]" "the dry run names the gates it would withdraw"
 rc=0; run --origin al-retry9 --successor bt-retry9 --kind not-needed --dry-run || rc=$?
 has "$(cat "$TMP/out")" "gates:     none (no --except-key)" "…and none without --except-key"
+
+# --- (aq) the close's own guards hold the retry before anything is resolved --
+# bd refuses an unforced close of a template, of a pinned bead, and of a bead
+# assigned to anyone but the close's --actor, whatever its status. Gate (a) lets
+# an OPEN bead under another assignee through, so the retry reads these before
+# it withdraws a gate: withdrawn ahead of a refused close, the question would go
+# and the next refused retry would file it again. The store here refuses such a
+# close the way bd does.
+export FAKE_BD_ENFORCE_CLOSE_GUARDS=1
+mkbead alpha open al-guard1
+mkbead beta  open bt-guard1
+printf 'assignee=someone-else\n' >> "$TMP/rigs/alpha/.beads/al-guard1"
+hgate al-gg1 pr-dispose-failed.9
+printf 'dep.al-gg1=blocks\n' >> "$TMP/rigs/alpha/.beads/al-guard1"
+: > "$TMP/resolves.log"
+rc=0; FAKE_RESOLVE_LOG="$TMP/resolves.log" run --origin al-guard1 --successor bt-guard1 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
+eq "$rc" 5 "an open origin assigned to someone else holds the retry"
+eq "$(field alpha status al-gg1)" open "…its own gate stays open"
+eq "$(grep -c . "$TMP/resolves.log")" 0 "…with no resolve attempted"
+eq "$(field alpha status al-guard1)" open "…the origin stays open"
+eq "$(field alpha m.gc.superseded_by al-guard1)" bt-guard1 "…pointed"
+has "$(cat "$TMP/err")" "assigned to someone-else" "…and the refusal names the assignee"
+has "$(cat "$TMP/err")" "runs as $BEADS_ACTOR" "…and the actor the close runs as"
+# A bead this session holds under another of its names passes gate (a), which
+# accepts every name of the session, but bd compares the assignee with the
+# actor alone.
+mkbead alpha in_progress al-guard2
+mkbead beta  open bt-guard2
+printf 'assignee=test__rehome-session-name\n' >> "$TMP/rigs/alpha/.beads/al-guard2"
+hgate al-gg2 pr-dispose-failed.9
+printf 'dep.al-gg2=blocks\n' >> "$TMP/rigs/alpha/.beads/al-guard2"
+rc=0; GC_SESSION_NAME=test__rehome-session-name run --origin al-guard2 --successor bt-guard2 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
+eq "$rc" 5 "an origin this session holds under a name other than the actor holds the retry"
+eq "$(field alpha status al-gg2)/$(field alpha status al-guard2)" "open/in_progress" "…and resolves and closes nothing"
+# A pinned origin and a template hold it the same way.
+mkbead alpha pinned al-guard3
+mkbead beta  open bt-guard3
+hgate al-gg3 pr-dispose-failed.9
+printf 'dep.al-gg3=blocks\n' >> "$TMP/rigs/alpha/.beads/al-guard3"
+rc=0; run --origin al-guard3 --successor bt-guard3 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
+eq "$rc" 5 "a pinned origin holds the retry"
+eq "$(field alpha status al-gg3)" open "…its own gate stays open"
+has "$(cat "$TMP/err")" "pinned" "…and the refusal says why"
+mkbead alpha open al-guard4
+mkbead beta  open bt-guard4
+printf 'is_template=true\n' >> "$TMP/rigs/alpha/.beads/al-guard4"
+hgate al-gg4 pr-dispose-failed.9
+printf 'dep.al-gg4=blocks\n' >> "$TMP/rigs/alpha/.beads/al-guard4"
+rc=0; run --origin al-guard4 --successor bt-guard4 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
+eq "$rc" 5 "a template holds the retry"
+eq "$(field alpha status al-gg4)" open "…its own gate stays open"
+has "$(cat "$TMP/err")" "template" "…and the refusal says why"
+# An origin assigned to exactly the actor closes, its own gate withdrawn.
+mkbead alpha open al-guard5
+mkbead beta  open bt-guard5
+printf 'assignee=%s\n' "$BEADS_ACTOR" >> "$TMP/rigs/alpha/.beads/al-guard5"
+hgate al-gg5 pr-dispose-failed.9
+printf 'dep.al-gg5=blocks\n' >> "$TMP/rigs/alpha/.beads/al-guard5"
+rc=0; run --origin al-guard5 --successor bt-guard5 --kind not-needed --except-key pr-dispose-failed.9 || rc=$?
+eq "$rc" 0 "an origin assigned to exactly the actor closes"
+eq "$(field alpha status al-gg5)/$(field alpha status al-guard5)" "closed/closed" "…its own gate withdrawn first"
+unset FAKE_BD_ENFORCE_CLOSE_GUARDS
 
 echo "---"
 echo "bead-rehome.test: $PASS passed, $FAIL failed"
