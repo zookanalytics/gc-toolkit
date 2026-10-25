@@ -55,8 +55,3 @@ target="{{.Rig}}/gc-toolkit.proactive"
 n=$(gc bd ready --db {{.RigRoot}}/.beads --metadata-field "gc.routed_to=$target" --unassigned --exclude-type=epic --json --limit 0 2>/dev/null | jq '[ .[] | select(((((.metadata["gc.kind"] // "") | (. == "workflow" or . == "scope" or . == "spec")) or ((.metadata["gc.step_ref"] // "") != "") or ((.metadata["gc.step_id"] // "") != "") or ((.metadata["gc.root_bead_id"] // "") != ""))) | not) ] | length' 2>/dev/null)
 if [ -n "$n" ]; then printf '%s' "$n"; else printf '0'; fi
 '''
-
-# mr-invariant, belt-and-suspenders: code from a first reaction defaults to
-# the gated mr path, never direct.
-[env]
-GC_DEFAULT_MERGE_STRATEGY = "mr"

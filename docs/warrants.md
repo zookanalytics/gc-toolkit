@@ -101,3 +101,22 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Retires when.** Gas City ships per-agent write scoping. A fine-grained token
   limited to the owned repositories may cover the origin half on GitHub's side,
   and the next re-verification checks that first.
+
+## Main lands only through a PR
+
+- **Covers.** The rule in the `merge-strategy-resolve` block of
+  `formulas/mol-refinery-patrol.toml` that resolves a bead which would land
+  `direct` on the default branch to `mr`.
+- **Stands in for.** A merge strategy set per target branch. With one, the
+  default branch would take work only through a PR, whether or not its GitHub
+  ruleset is on, while an integration branch takes its work `direct`.
+- **Evidence.** In `gastownhall/gascity`, a rig carries one merge strategy,
+  `default_merge_strategy`, which `gc sling` stamps on a bead routed into the
+  rig when the caller passes no `--merge` (the `Rig` section of
+  `docs/reference/config.md`). Sling takes the explicit `--merge`, then the
+  bead's rig's default, then the agent's rig's, and reads no target branch
+  (`SlingMergeStrategy` in `internal/sling/sling.go`). Neither the reference
+  nor the code chooses a strategy by the branch a bead lands on.
+- **Verified.** 2026-10-24, at `gastownhall/gascity` main 7cff3a265.
+- **Retires when.** Gas City can set a merge strategy for a target branch, so the
+  rule becomes a line of the rig's config.

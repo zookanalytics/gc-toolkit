@@ -114,7 +114,7 @@ eq "$(visits)" "0" "a proved pour files no visit"
 eq "$(wc -l < "$TMP/stdout" | tr -d ' ')" "1" "stdout is one line"
 eq "$(jq -r '.[0].id' "$TMP/stdout" 2>/dev/null)" "tk-w" "stdout is the bead's row"
 eq "$(stdout_meta rejection_reason)" "<absent>" "the row is the read before the release: no rejection_reason yet"
-eq "$(stdout_meta branch)" "polecat/tk-w" "the row carries the branch decision's inputs"
+eq "$(stdout_meta branch)" "polecat/tk-w" "the row carries the bead's metadata"
 
 echo "# a live PR goes with the rework"
 reset ',"pr_url":"https://github.com/o/r/pull/7"'
