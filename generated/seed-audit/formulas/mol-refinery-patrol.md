@@ -17,9 +17,9 @@ burn this one. Steps are not materialized; read each description as you
 reach it. On crash, re-derive position from git and bead state.
 
 Everything downstream of the gating handoff — check arming and review
-dispatch, PR opening, the merge itself, external PR facts, convoy
-graduation — is the refinery-reconcile ORDER's (60s, no session). This
-formula never runs those passes: docs/refinery-merge-cadence.md.
+dispatch, PR opening, the merge itself, external PR facts — is the
+refinery-reconcile ORDER's (60s, no session). This formula never runs those
+passes: docs/refinery-merge-cadence.md.
 
 State writes: every merge_result transition goes through
 assets/scripts/lifecycle.sh (one atomic validated write per transition);

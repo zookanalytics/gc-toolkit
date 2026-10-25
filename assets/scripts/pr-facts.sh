@@ -244,7 +244,7 @@ RECORD_CAP="$SCRIPTS_DIR/record-failure-cap.sh"
 # explicit terminal state doctor/check-closed-implies-landed accepts.
 REHOME="$SCRIPTS_DIR/bead-rehome.sh"
 # The retirement of a disposed anchor's machine review scaffolding, the same
-# sweep the cadence runs as arm 10. The close arm runs it for its one anchor
+# sweep the cadence runs as arm 9. The close arm runs it for its one anchor
 # before that close, so the scaffolding's blocks edges do not refuse it.
 SCAFFOLDING_SWEEP="$SCRIPTS_DIR/scaffolding-sweep.sh"
 # The guarded visit close. Both visit retires below go through it, so a retired
@@ -1844,8 +1844,8 @@ CHILDREN_EOF
         # the reason the children above go first. A fix unit, an open must-fix
         # finding and a validation pass each hold a `blocks` edge on the anchor,
         # so while one is open the close below is refused and escalated, for
-        # scaffolding that arm 10 retires later in this same pass. The sweep it
-        # runs here is arm 10's, scoped to this anchor, so both retire the same
+        # scaffolding that arm 9 retires later in this same pass. The sweep it
+        # runs here is arm 9's, scoped to this anchor, so both retire the same
         # set: a finding about this diff is mooted, and one that can cite code
         # the target branch already carries is carried forward as a bug of its
         # own. When a finding's comment line does not read this pass (exit 3),

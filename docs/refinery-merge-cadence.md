@@ -273,7 +273,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    or a scratch failure — holds the anchor at `pre_open_gate` for the next pass
    rather than flip a managed body that may be stale. This adopt-time re-splice
    covers only the `pre_open_gate` window; once the anchor is `pull_request`,
-   republishing a rework's restamp is arm 12's job (`pr-stack.sh`), the anchor
+   republishing a rework's restamp is arm 11's job (`pr-stack.sh`), the anchor
    never returning to the state this arm scans (no `pull_request → pre_open_gate`
    lifecycle edge).
 4. **pr-facts.sh --route-comments-only** — the feedback routing of arm 7, run
@@ -586,15 +586,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    comments, unless its answer carries the `<!-- gc-finding:<id>:open -->` line
    a declined or deferred finding's answer adds, since that thread waits for a
    person.
-8. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
-   onto the integration branch AND no hold/branch veto → assignee=refinery,
-   `branch=integration/<id>`, `merge_strategy=mr`. Every read is of this rig's
-   store. The arm lists the rig's open owned convoys first, then reads each
-   candidate's parent-child children and `tracks` targets, so a rig with no
-   owned integration convoy costs one read. A pass that answers every
-   candidate writes `convoy-graduate.stamp` in the pass state dir, and the arm
-   reads nothing until that stamp is 15 minutes old.
-9. **review-sweep.sh** — cleanup over closed anchors, no merge authority. A
+8. **review-sweep.sh** — cleanup over closed anchors, no merge authority. A
    dispatched review whose anchor is closed and whose `review_branch` is gone
    from origin has no verdict left to give. Both `signoff.sh` verdicts bind a
    marker to a commit and there is no commit, and `request-changes` would
@@ -606,7 +598,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    per pass, and a listing that could not be read sweeps nothing. The release
    verb lives here rather than as a third `signoff.sh` verdict because the
    residue is filed by two dispatchers, arm 6 and arm 7.
-10. **scaffolding-sweep.sh** — cleanup over DISPOSED anchors, no merge authority.
+9. **scaffolding-sweep.sh** — cleanup over DISPOSED anchors, no merge authority.
    An anchor withdrawn won't-do or closed not-planned carries a disposition —
    `gc.superseded_by` (the pointer `bead-rehome.sh` stamps) or
    `gc.pr_close_disposition_kind` (the intent `pr-dispose.sh` records) — but its
@@ -633,7 +625,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    the one anchor whose PR-close disposition it is consummating, just before
    that close, so the close lands in the pass that reads the closed PR. A
    merged anchor is a landing, never a disposal, and is skipped.
-11. **duplicate-sweep.sh** — the reader for `duplicate_of`, no merge authority.
+10. **duplicate-sweep.sh** — the reader for `duplicate_of`, no merge authority.
    A polecat that diagnoses a duplicate dispatch stamps the marker and parks
    the bead, because polecats never close work beads; with no reader the bead
    waits for a human ruling, one bead at a time. This arm closes the ones that
@@ -672,7 +664,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    twin in this pass, and the next pass finishes it. Closing the twin releases
    its blocks edge. The arm runs after review-sweep so a twin that arm 2
    merged or arm 7 recorded on this pass is disposable on the same tick.
-12. **pr-stack.sh** — keeps an open PR current with its anchor, in both managed
+11. **pr-stack.sh** — keeps an open PR current with its anchor, in both managed
    body regions and in its title. No merge authority, and the only arm that
    writes no bead. A body is composed once, by arm 3, out of one anchor; then two
    things drift it, and this arm lands both fixes in one body edit.
@@ -819,7 +811,6 @@ how a pass ended:
 | `-- (<n>) <arm>: done in <s>s (rc=<rc>)` | that arm returned after `<s>` seconds. An arm with a start line and no done line is the one the pass was killed in |
 | `<arm>: visited <k> of <n> ...` | how much of its walk a paced arm covered; `the next pass resumes at <id>` follows when its share of the pass budget stopped it. gate-ensure's `<n>` is the size of the gating set every walking arm's cost grows with, and merge counts its landing-first PRs apart. gate-ensure and pr-facts add `(<f> needing action first)`, and `<m> needing action wait for the next pass` when the budget left some of that group |
 | `pr-facts: posture-only — ...; <k> unchanged since the basis they were derived from, <r> read per PR` | the posture arm's split between the anchors it kept from the batched read and the ones it read whole. `<r>` covers each PR that moved, on the pass that sees the move and on the pass after, which confirms its basis. It covers every PR on a pass whose batched read failed (a `WARN` line names it), and on the first two passes after the script changes or after `pr-posture.seen` is lost |
-| `convoy-graduate: last complete pass <s>s ago; next one after 900s` | arm 8 read nothing this pass: its last complete pass is younger than its 15-minute interval |
 | `END <ts> (<s>s)` | that pass finished after `<s>` seconds; a `FAILED:` line sits above it if any arm failed |
 | a `===` with no `END` under it | the pass was killed or hit its timeout — the arms logged above it are how far it got |
 | `--- <ts> rig=<rig> SKIPPED: ...` | the tick found a pass already in flight and did nothing |

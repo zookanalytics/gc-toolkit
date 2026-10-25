@@ -17,9 +17,9 @@ burn this one. Steps are not materialized; read each description as you
 reach it. On crash, re-derive position from git and bead state.
 
 Everything downstream of the gating handoff — check arming and review
-dispatch, PR opening, the merge itself, external PR facts, convoy
-graduation — is the refinery-reconcile ORDER's (60s, no session). This
-formula never runs those passes: docs/refinery-merge-cadence.md.
+dispatch, PR opening, the merge itself, external PR facts — is the
+refinery-reconcile ORDER's (60s, no session). This formula never runs those
+passes: docs/refinery-merge-cadence.md.
 
 State writes: every merge_result transition goes through
 assets/scripts/lifecycle.sh (one atomic validated write per transition);
@@ -132,11 +132,11 @@ id = "find-work"
 title = "Find next work bead assigned to me"
 needs = ["check-inbox"]
 description = """
-Select one assigned, open, branch-bearing work bead — excluding ANY bead
-that carries a `merge_result`: a bead with one is a gating anchor driven by
-the cadence's bead-keyed passes, never by this queue, and an assignee on one
-is an anomaly to flag, not work to take. Every path that legitimately
-returns a bead here clears the field first.
+Select one assigned, open, branch-bearing work bead that nothing holds —
+excluding ANY bead that carries a `merge_result`: a bead with one is a gating
+anchor driven by the cadence's bead-keyed passes, never by this queue, and an
+assignee on one is an anomaly to flag, not work to take. Every path that
+legitimately returns a bead here clears the field first.
 
 ```bash
 # >>> find-work-select
@@ -159,7 +159,30 @@ if ! printf '%s' "$WORK_ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
   gc runtime drain-ack
   exit 0
 fi
-WORK=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") == "")] | sort_by((.priority // 2), (.created_at // .created // .id)) | .[0].id // empty' 2>/dev/null)
+# A bead something holds waits here until its blockers close. The hold is
+# hold-lib.sh's, the pack's one definition: a bead carrying a branch is work in
+# flight, so only a blocker on the bead itself holds it, never a park on an
+# ancestor. A blocker the store does not return holds the bead too, and a walk
+# that cannot read ends the turn, since a hold nobody read is no release.
+SCRIPTS=""
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -f "$c/assets/scripts/hold-lib.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+fw_hold_read() { gc bd list ${GC_RIG:+--rig="$GC_RIG"} --id "$1" --all --include-gates --include-infra --include-templates --limit=0 --json; }
+WORK_JUDGED=""
+if [ -n "$SCRIPTS" ] && . "$SCRIPTS/hold-lib.sh"; then
+  WORK_JUDGED=$(printf '%s' "$WORK_ROWS" | jq -c '[.[] | select((.metadata.merge_result // "") == "")]' | hold_annotate fw_hold_read) || WORK_JUDGED=""
+fi
+if ! printf '%s' "$WORK_JUDGED" | jq -e 'type == "array"' >/dev/null 2>&1; then
+  echo "find-work: could not read what holds the assigned handoffs (hold-lib.sh not in the pack, or a store read failed) — ending the turn without claiming; the next patrol retries." >&2
+  gc runtime drain-ack
+  exit 0
+fi
+WORK=$(printf '%s' "$WORK_JUDGED" | jq -r '[.[] | select(.hold.state == "free")] | sort_by((.priority // 2), (.created_at // .created // .id)) | .[0].id // empty' 2>/dev/null)
+WORK_HELD=$(printf '%s' "$WORK_JUDGED" | jq -r '[.[] | select(.hold.state != "free") | (.id | tostring) + " waits on " + .hold.why] | join("; ")' 2>/dev/null)
+if [ -n "$WORK_HELD" ]; then
+  echo "find-work: leaving held handoff(s) until their blockers close: $WORK_HELD." >&2
+fi
 WORK_PARKED=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") != "") | .id + "(" + (.metadata.merge_result | tostring) + ")"] | join(" ")' 2>/dev/null)
 if [ -n "$WORK_PARKED" ]; then
   echo "find-work: NOT selecting parked gating anchor(s) that carry an assignee: $WORK_PARKED. A bead with merge_result is driven by the cadence, never by find-work; flag only — do not re-gate it, do not clear it here." >&2
@@ -175,14 +198,22 @@ parked anchor can never crowd real work out of it; the client-side filter drops
 the anchors and the sort takes the highest-priority, oldest-within-band
 handoff. Flag, never rewrite.
 
+A held bead is left in the queue, and the block's stderr names what holds it. A
+landing bead is assigned to you when its integration effort is stood up, and it
+waits on the effort's beads and its summary task by `blocks` edges, so it is
+taken once the last of them closes. A handoff with an open blocker of its own
+waits the same way, and a park on its epic holds none of them.
+
 If found: confirm `metadata.branch` exists (`gc bd show $WORK --json`),
 default `metadata.target` to {{target_branch}}, note the id, close this
 step.
 
 If NO work: this turn is over. End the turn — no sleeping, no watching, and
 do NOT run the cadence's passes inline (the refinery-reconcile order is the
-single writer; see docs/refinery-merge-cadence.md). The session_sleep policy
-restarts you on the idle interval."""
+single writer; see docs/refinery-merge-cadence.md). The next turn comes when
+work reaches you: a polecat's handoff wakes and nudges you, and deferred
+dispatch sends a notice once a bead assigned to you while it waited becomes
+ready."""
 
 [[steps]]
 id = "rebase"
@@ -194,12 +225,12 @@ description = """
 Read the bead ONCE and prepare it by bringing its branch current with the
 target — one fail-closed block, because `gc bd` fails open (errors to stderr,
 empty stdout) and an unreadable bead must not read as "unset". Every branch
-shape — per-bead `polecat/*`, shared `integration/*`, a graduation bead — is
-brought current by MERGING origin/$TARGET in, never by a rebase: a rebase
-rewrites history and forces a --force-with-lease push, which resets GitHub's
-"changes since last review" and drifts the PR's line-anchored review comments.
-main stays linear because merge.sh squashes at land, not because the branch was
-rewritten. prepare_mode=merge is stamped on the bead BEFORE touching the
+shape — per-bead `polecat/*`, and the shared `integration/*` a landing bead
+carries — is brought current by MERGING origin/$TARGET in, never by a rebase:
+a rebase rewrites history and forces a --force-with-lease push, which resets
+GitHub's "changes since last review" and drifts the PR's line-anchored review
+comments. main stays linear because merge.sh squashes at land, not because the
+branch was rewritten. prepare_mode=merge is stamped on the bead BEFORE touching the
 worktree, because the hand-back path (a rejection repool) reads it in a
 different shell to bring the branch current the same way.
 

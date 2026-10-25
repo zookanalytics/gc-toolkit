@@ -631,7 +631,7 @@ has "$(cat "$STUB_ESC_LOG")" "restore them by hand" "…and says to restore it i
 
 # The rest of the anchor's machine review scaffolding carries no branch, and each
 # piece holds a blocks edge on the anchor: a fix unit, the must-fix finding it
-# answers, a validation pass. Arm 10 retires them, but after this arm, so a close
+# answers, a validation pass. Arm 9 retires them, but after this arm, so a close
 # attempted first is refused and escalated for a condition no person has to
 # clear. The close runs that sweep for its own anchor first. scafb seeds one
 # piece, with no branch so it is never a parked child; the store enforces the
@@ -795,7 +795,7 @@ has "$out" "has an OPEN blocker" "…refused for the obstruction itself, not for
 eq "$(bstatus VS)" "open" "the visit stays open while the obstruction stands"
 hasnt "$(cat "$STUB_ESC_LOG")" "--retract" "…nothing retracts it"
 eq "$(nvisits pr-dispose-failed.122)" "1" "…and the escalation dedups onto it rather than filing a second"
-# The obstruction clears (arm 10 retires a disposed anchor's findings), and the
+# The obstruction clears (arm 9 retires a disposed anchor's findings), and the
 # next pass retries the close the visit asked for.
 jq -c 'map(if .id == "BS" then .status = "closed" else . end)' "$STUB_STORE" > "$TMP/store.next" && mv "$TMP/store.next" "$STUB_STORE"
 : > "$STUB_ESC_LOG"
@@ -1448,12 +1448,12 @@ has "$(meta new-2 rejection_reason)" "MERGING origin/main IN" "…it names the n
 has "$(meta new-2 rejection_reason)" "Do NOT rebase it and do NOT force-push it" "…and forbids the rewrite in words too"
 eq "$(meta new-2 'gc.routed_to')" "$FIX" "the merge-mode child is still dispatched, not stalled on a human"
 
-echo "# …a graduation on a polecat-shaped branch is brought current by merge, like every shape"
-store "[$(anchor GD 29 ',"graduation":"true"')]"
-printf '%s' "$(prview 29 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_29.json"
+echo "# …a landing bead's branch, named for the bead itself, is brought current by merge, like every shape"
+store "[$(anchor LB 29 ',"target":"main"' 'integration/LB')]"
+printf '%s' "$(prview 29 OPEN DIRTY CONFLICTING '' 'integration/LB')" > "$GH_DIR/pr_view_29.json"
 approve 29
 out=$(run)
-eq "$(meta new-2 prepare_mode)" "merge" "a graduation is brought current by merge, like every branch shape"
+eq "$(meta new-2 prepare_mode)" "merge" "a landing bead is brought current by merge, like every branch shape"
 hasnt "$(meta new-2 rejection_reason)" "force-push with --force-with-lease" "…and the work order names no force-push"
 
 echo "# …a prepare_mode stamp that does not persist leaves the child UNROUTED"
