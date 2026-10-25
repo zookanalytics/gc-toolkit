@@ -714,8 +714,8 @@ molecule's step the work bead waits on that visit, and closing it re-slings the
 work:
 ```bash
 # >>> bring-current-unresolvable
-BCA=""; SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/bring-current-audit.sh" ] && [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/await-ruling.sh" ] && { BCA="$c/assets/scripts/bring-current-audit.sh"; SCRIPTS="$c/assets/scripts"; break; }; done
-: "${BCA:?bring-current-audit.sh, run-cancel.sh and await-ruling.sh not found in the pack}"
+BCA=""; SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/bring-current-audit.sh" ] && [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/await-ruling.sh" ] && [ -x "$c/assets/scripts/hand-back.sh" ] && { BCA="$c/assets/scripts/bring-current-audit.sh"; SCRIPTS="$c/assets/scripts"; break; }; done
+: "${BCA:?bring-current-audit.sh, run-cancel.sh, await-ruling.sh and hand-back.sh not found in the pack}"
 "$BCA" ask --bead "$WORK_BEAD_ID" --path "<file>" \
   --collided "<the two intents that met>" --question "<the one decision you need>" \
   || { echo "the question reached no visit; NOT stopping, since nothing asks it yet. Re-run the ask." >&2; exit 1; }
@@ -729,16 +729,17 @@ if [ -n "${CLAIMED_STEP_BEAD_ID:-}" ] && [ "$CLAIMED_STEP_BEAD_ID" != "$WORK_BEA
     --reason "bringing the branch current needs a decision only a person can make; the bring-current-question visit on the anchor asks it" \
     || { echo "run-cancel.sh did not end the run; NOT draining, so the next worker retries." >&2; exit 1; }
 else
-  # A bead with no molecule parks to a person, naming what it waits for: the
-  # route and the takeaway first, then the assignee, which the claim guard
-  # accepts only once the bead is open.
-  gc bd update "$WORK_BEAD_ID" --status=open --set-metadata gc.routed_to=human \
+  # A bead with no molecule parks to a person, naming what it waits for. The
+  # note lands first, and the park rides the hand-back, one write that reopens
+  # the bead and releases this session's claim. A refused hand-back then leaves
+  # the claim on the route it had, which Gas City can release when the session
+  # ends. No agent serves the person route, so a claim parked there would stay
+  # held.
+  gc bd update "$WORK_BEAD_ID" --append-notes "Stopped bringing the branch current: a conflict needs a decision (the bring-current-question visit on the anchor asks it). Nothing was pushed."
+  "$SCRIPTS/hand-back.sh" "$WORK_BEAD_ID" --set-metadata gc.routed_to=human \
     --set-metadata "gc.takeaway=Needs a decision before its branch can be brought current; the visit on its anchor asks it" \
     --set-metadata "gc.takeaway_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" --set-metadata gc.takeaway_by=mol-polecat-work \
-    --set-metadata gc.takeaway_settled= \
-    --unset-metadata gc.session_id --unset-metadata gc.session_name \
-    --append-notes "Stopped bringing the branch current: a conflict needs a decision (the bring-current-question visit on the anchor asks it). Nothing was pushed."
-  gc bd update "$WORK_BEAD_ID" --assignee=""
+    --set-metadata gc.takeaway_settled=
 fi
 gc runtime drain-ack
 exit 0
@@ -1410,13 +1411,15 @@ A claim on a bead already stamped `halt_reason=store_only`, whose notes name
 what was filed, is this arm's own release offered again: re-take the arm, do
 not redo the work.
 
-The three writes are separate on purpose. A `gc bd update` that changes the
-assignee while you still hold the bead is refused by the claim guard, and the
-refusal rolls back the metadata and the notes in the same call. Metadata
-bypasses the guard, `--status=open` is accepted from the holder, and the plain
-`--assignee` write lands once the status is open. The intermediate state after
-the second write — open, still assigned, unrouted — is invisible to a pool's
-offer predicate, so no window here offers the bead to anyone:
+The release is two writes. The first records the exit: `halt_reason` and the
+notes that name what was filed. The second is `assets/scripts/hand-back.sh`,
+which reopens the bead, clears its assignee, removes the pins and clears the
+route in one write, and only while the bead shows this session's claim or
+none. One write keeps the parts together, so the assignee never clears without
+the reopen, and the pins and the route leave only with the claim. A refused
+hand-back writes nothing but a note, so the bead stays this session's claim on
+the route it had, for Gas City to release when the session ends. The released
+bead is open, unassigned and unrouted, so no pool is offered it:
 
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
@@ -1437,9 +1440,15 @@ if [ -n "$STORE_ONLY_RECORD" ]; then
     gc runtime drain-ack
     exit 1
   fi
-  gc bd update "$WORK_BEAD_ID" --set-metadata halt_reason=store_only --set-metadata gc.routed_to="" --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes "Store-only exit: filed $STORE_ONLY_RECORD. <what closes this bead, or the bead-rehome.sh invocation that disposes of it>"
-  gc bd update "$WORK_BEAD_ID" --status=open
-  gc bd update "$WORK_BEAD_ID" --assignee=""
+  gc bd update "$WORK_BEAD_ID" --set-metadata halt_reason=store_only --append-notes "Store-only exit: filed $STORE_ONLY_RECORD. <what closes this bead, or the bead-rehome.sh invocation that disposes of it>"
+  # >>> submit-store-only-hand-back
+  HB=""
+  for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/hand-back.sh" ] && { HB="$c/assets/scripts/hand-back.sh"; break; }
+  done
+  : "${HB:?hand-back.sh not found in the pack; the bead is not handed back, and this step stays claimed}"
+  "$HB" "$WORK_BEAD_ID" --set-metadata gc.routed_to=""
+  # <<< submit-store-only-hand-back
   # >>> submit-store-only-chain-close
   SC=""
   for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
@@ -1615,17 +1624,20 @@ if [ "$AUTO_PUSH" = "false" ]; then
     fi
     exit 1
   fi
-  # Three writes, not one: a gc bd update that clears the assignee while this
-  # session still holds the bead in_progress is refused by bd's claim guard,
-  # which rolls back the batched metadata and notes with it. Metadata and notes
-  # bypass the guard and clear the route first, --status=open is accepted from
-  # the holder, and the assignee write lands once the bead is open — the same
-  # order the store-only arm releases a bead in. The first write also removes
-  # the session pins, for the reason step 0 gives: the runtime's orphan sweep
-  # and the witness both act on a released bead that still carries them.
-  gc bd update "$WORK_BEAD_ID" --set-metadata branch="$BRANCH" --set-metadata target="$LANDING_TARGET" --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --set-metadata gc.routed_to="" --unset-metadata gc.session_id --unset-metadata gc.session_name --append-notes "Branch ready: auto_push=false (no push, no refinery handoff)"
-  gc bd update "$WORK_BEAD_ID" --status=open
-  gc bd update "$WORK_BEAD_ID" --assignee=""
+  # Two writes, the release step 0 describes for the store-only exit. The first
+  # records the branch and the halt. The second is the hand-back, which also
+  # clears the route and removes the session pins, for the reason step 0 gives:
+  # the runtime's orphan sweep and the witness both act on a released bead that
+  # still carries them.
+  gc bd update "$WORK_BEAD_ID" --set-metadata branch="$BRANCH" --set-metadata target="$LANDING_TARGET" --set-metadata branch_ready=true --set-metadata halt_reason=auto_push_false --append-notes "Branch ready: auto_push=false (no push, no refinery handoff)"
+  # >>> submit-halt-hand-back
+  HB=""
+  for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+    [ -x "$c/assets/scripts/hand-back.sh" ] && { HB="$c/assets/scripts/hand-back.sh"; break; }
+  done
+  : "${HB:?hand-back.sh not found in the pack; the bead is not handed back, and this step stays claimed}"
+  "$HB" "$WORK_BEAD_ID" --set-metadata gc.routed_to=""
+  # <<< submit-halt-hand-back
   # >>> submit-halt-chain-close
   SC=""
   for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do

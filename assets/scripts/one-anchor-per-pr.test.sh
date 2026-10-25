@@ -470,14 +470,18 @@ TERMINAL="$(awk '/# >>> one-anchor-per-pr-terminal/{f=1;next} /# <<< one-anchor-
 # exits $STUB_FETCH_RC (0 unless set) to model a read-back that fails; `rev-parse`
 # of HEAD echoes $STUB_PREPARED_HEAD and of any origin/* ref echoes
 # $STUB_REMOTE_HEAD, cut to its first 8 characters under --short — an empty env
-# var models an absent ref (empty output). -C <dir> is ignored: the arm's
-# PREP_WT is unset under test, so the stub answers from the environment, not a
-# real repository. Anything else exits 0 with no output, as the dumb stub did.
+# var models an absent ref (empty output). `rev-parse --git-common-dir` echoes
+# $STUB_COMMON, so the block finds the prep worktree at
+# $STUB_COMMON/gc-refinery-prep, and with $GITLOG set a `fetch` appends
+# `fetch <dir>` to it, naming the -C it was given. -C <dir> is otherwise
+# ignored, so the stub answers from the environment, not a real repository.
+# Anything else exits 0 with no output, as the dumb stub did.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/git" <<'GIT'
-op=""; short=0
+op=""; short=0; dir=""
+[ "${1:-}" = "-C" ] && dir="${2:-}"
 for a in "$@"; do
   case "$a" in
-    fetch)     exit "${STUB_FETCH_RC:-0}" ;;
+    fetch)     [ -n "${GITLOG:-}" ] && printf 'fetch %s\n' "$dir" >> "$GITLOG"; exit "${STUB_FETCH_RC:-0}" ;;
     rev-parse) op="rev-parse" ;;
     --short)   short=1 ;;
   esac
@@ -486,6 +490,7 @@ done
 for a in "$@"; do
   case "$a" in
     HEAD)     printf '%s\n' "${STUB_PREPARED_HEAD:-}"; exit 0 ;;
+    --git-common-dir) printf '%s\n' "${STUB_COMMON:-}"; exit 0 ;;
     origin/*)
       if [ "$short" = 1 ]; then printf '%.8s\n' "${STUB_REMOTE_HEAD:-}"; else printf '%s\n' "${STUB_REMOTE_HEAD:-}"; fi
       exit 0 ;;
@@ -501,6 +506,9 @@ printf '%s\n' "$*" >> "${LCLOG:?}"
 exit "${LCRC:-0}"
 L
 chmod +x "$TMP/bin/lc-stub"
+# The block resolves the prep worktree's path from the rig root, which
+# GC_RIG_ROOT names here, so no run reads the roster.
+export GC_RIG_ROOT="$TMP/rig"
 printf '%s\n' "$TERMINAL" > "$TMP/terminal.sh"
 run_terminal() { # <pre_open> <pr_url> <pr_number>
   : > "$LCLOG"
@@ -811,6 +819,14 @@ case "$CLOSE_LINE" in
   *"Rework landed on polecat/parent at cafef00d;"*) ok "(10n) the close note still carries the short sha" ;;
   *) bad "(10n) the close note must carry the short sha (got: '$CLOSE_LINE')" ;;
 esac
+
+# --- The read-back names the prep worktree the rig root names. ---------------
+# The block resolves that path itself, so a PREP_WT the shell carries from
+# elsewhere does not move the read-back.
+: > "$TMP/git.log"
+GITLOG="$TMP/git.log" STUB_COMMON=/the-rig/.git PREP_WT=/elsewhere run_gate cafef00d cafef00d >/dev/null
+eq "$(head -1 "$TMP/git.log")" "fetch /the-rig/.git/gc-refinery-prep" \
+  "(12) the rework arm reads back in the prep worktree the rig root names, not a PREP_WT the shell carries"
 
 # Review dispatch moved to the cadence's gate-ensure; the formula's remaining
 # duty is that the transitions land on the right bead, checked below.
