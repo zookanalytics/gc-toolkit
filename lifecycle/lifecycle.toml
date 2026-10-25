@@ -518,7 +518,7 @@ keys = [
 #   auto-promoting a bead whose direct push was rejected for branch protection
 #   into the PR pipeline. Read by mol-refinery-patrol.toml, and read back by
 #   pr-facts.sh, rework-child.sh and pre-open-rebase.sh on the rework child each
-#   stamps. Never cleared. Enum `mr | pr | direct`.
+#   stamps. Never cleared. Enum `mr | pr | direct | local`.
 # prepare_mode — how the refinery brings a rework branch current before it lands.
 #   Every branch shape (per-bead `polecat/*`, shared `integration/*`, a
 #   graduation) is stamped `merge`: the branch is brought current by merging
