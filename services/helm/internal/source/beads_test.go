@@ -1445,16 +1445,16 @@ func joinStore() *fakeStore {
 		issue("tk-visit1", "visit: tk-epic — operator pick", "task", 2, testNow,
 			`{"task_kind":"visit","gc.continuation_group":"tk-epic"}`),
 		issue("tk-root1", "mol-polecat-work", "task", 2, testNow,
-			`{"gc.input_convoy_id":"tk-icv1","gc.session_name":"gc-toolkit__polecat-lx-live"}`),
+			`{"gc.kind":"workflow","gc.input_convoy_id":"tk-icv1","gc.session_name":"gc-toolkit__polecat-lx-live"}`),
 		// A root with NO session of its own: the name has to come off its steps.
 		issue("tk-root2", "mol-polecat-work", "task", 2, testNow,
-			`{"gc.input_convoy_id":"tk-icv2"}`),
+			`{"gc.kind":"workflow","gc.input_convoy_id":"tk-icv2"}`),
 		issue("tk-step2", "implement", "task", 2, testNow,
 			`{"gc.root_bead_id":"tk-root2","gc.session_name":"gc-toolkit__polecat-lx-steps"}`),
 		// A HUSK: an open root whose session is long gone. Joining on root
 		// existence alone would flip it to "in flight".
 		issue("tk-root3", "mol-polecat-work", "task", 2, testNow,
-			`{"gc.input_convoy_id":"tk-icv3","gc.session_name":"gc-toolkit__polecat-lx-dead"}`),
+			`{"gc.kind":"workflow","gc.input_convoy_id":"tk-icv3","gc.session_name":"gc-toolkit__polecat-lx-dead"}`),
 	)
 	// Each input convoy tracks its one work bead. resolveInflight reads the
 	// member from this `tracks` edge in-process, so the fixture carries the
@@ -1523,7 +1523,7 @@ func TestGatherAnchorOwnWorkflowCountsOnItsTile(t *testing.T) {
 		issue("tk-slung", "Land the slung fix", "task", 2, testNow,
 			`{"merge_result":"pre_open_gate","branch":"polecat/tk-slung"}`),
 		issue("tk-root9", "mol-polecat-work", "task", 2, testNow,
-			`{"gc.input_convoy_id":"tk-icv9","gc.session_name":"gc-toolkit__polecat-lx-live"}`),
+			`{"gc.kind":"workflow","gc.input_convoy_id":"tk-icv9","gc.session_name":"gc-toolkit__polecat-lx-live"}`),
 	)
 	// An idle child, so a tile that missed the anchor's own molecule would band
 	// stranded rather than merely read zero.
