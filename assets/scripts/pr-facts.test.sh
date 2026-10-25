@@ -150,21 +150,32 @@ export STUB_LANE_LOG="$TMP/lane.log"; : > "$STUB_LANE_LOG"
 # it again through the subject's blocks edges; the gate's id on stdout. A stub
 # that only logged would test nothing. The description is the whole message, as
 # the helper sets it. STUB_GATE_NOFILE models the exit 0 that files nothing (a
-# moot or benign answer inside a declared quiet window).
+# moot or benign answer inside a declared quiet window). --retract resolves each
+# open gate under the key that blocks the subject, moot, and prints its id.
 cat > "$SD/human-gate.sh" <<'ESC'
 #!/usr/bin/env bash
 set -u
 printf '%s\n' "$*" >> "${STUB_ESC_LOG:?}"
-subj=""; key=""; msg=""
+subj=""; key=""; msg=""; retract=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --subject) shift; subj="${1:-}" ;;
     --key)     shift; key="${1:-}" ;;
     --message) shift; msg="${1:-}" ;;
+    --retract) retract=1 ;;
   esac
   shift || true
 done
 [ -n "$subj" ] && [ -n "$key" ] || exit 2
+if [ -n "$retract" ]; then
+  for g in $(gc bd dep list "$subj" --type blocks --json 2>/dev/null | jq -r --arg k "$key" '
+      .[]? | select((.issue_type // "") == "gate" and (.await_type // "") == "human")
+           | select((.await_id // "") == $k and (.status // "open") != "closed") | .id'); do
+    gc bd gate resolve "$g" --reason "moot: $msg" >/dev/null 2>&1 || exit 1
+    printf '%s\n' "$g"
+  done
+  exit 0
+fi
 open=$(gc bd dep list "$subj" --type blocks --json 2>/dev/null | jq -r --arg k "$key" '
   [ .[]? | select((.issue_type // "") == "gate" and (.await_type // "") == "human")
          | select((.await_id // "") == $k and (.status // "open") != "closed") ][0].id // empty')
@@ -2658,6 +2669,70 @@ chmod +x "$TMP/jqcount/jq"
 out=$(PATH="$TMP/jqcount:$PATH" run)
 eq "$(meta SW4 pr_finishing_settled)" "unapproved" "the anchor that owed a settle records its rank"
 eq "$(grep -c '^rank$' "$TMP/jqcount.log")" "1" "…and the pass read a rank for it alone, none for the three already settled"
+
+echo "# the full pass withdraws its own merge-path gates once their situation is gone"
+# Each merge-path gate holds the merge and the dispatch arms while it is open,
+# so one that outlived its situation would hold them on a question nobody needs
+# answered. PR#601 is open and BLOCKED, its head at sha-601, on its recorded
+# base, with one thread still unresolved under a rule that requires them
+# resolved.
+: > "$STUB_DEPS"
+store "[$(anchor SG1 601), $(hgate SGu1 SG1 pr-unengaged-threads.601.sha-OLD), $(hgate SGu2 SG1 pr-unengaged-threads.601.sha-601), $(hgate SGu3 SG1 pr-unengaged-threads.601.sha-PRIOR open lx-sitting), $(hgate SGb SG1 merge-blocked-threads), $(hgate SGc SG1 pr-comments.601.5.7), $(hgate SGk SG1 pr-fix-noncode.601), $(hgate SGr SG1 pr-retargeted.601), $(hgate SGa SG1 pr-abandoned.601), $(hgate SGq SG1 some-other-question)]"
+printf '%s' "$(prview 601 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_601.json"
+echo '{"threads":[{"id":"t601","isResolved":false}]}' > "$GH_DIR/threads_601.json"
+printf '[{"type":"pull_request","parameters":{"required_review_thread_resolution":true,"required_approving_review_count":1}}]' > "$GH_DIR/rules_main.json"
+: > "$STUB_ESC_LOG"
+out=$(run)
+eq "$(bstatus SGu1)" "closed" "an unengaged-threads gate filed at an older head is withdrawn"
+has "$(creason SGu1)" "moot: PR#601's head moved from sha-OLD to sha-601" "…moot, naming the head it moved from and to"
+has "$(cat "$STUB_ESC_LOG")" "--retract --subject SG1 --key pr-unengaged-threads.601.sha-OLD" "…through human-gate.sh --retract"
+has "$out" "withdrew its stale pr-unengaged-threads.601.sha-OLD gate" "…and the pass says so"
+eq "$(bstatus SGu2)" "open" "the one filed at the live head stays open"
+eq "$(bstatus SGu3)" "open" "an older head's gate a person is assigned stays open"
+has "$out" "its pr-unengaged-threads.601.sha-PRIOR gate is assigned to lx-sitting, who is left to clear it" "…left to them, and the pass says so"
+eq "$(bstatus SGb)" "open" "merge-blocked-threads stays open while a thread is still unresolved"
+eq "$(bstatus SGr)" "closed" "the retarget gate is withdrawn once the base is the recorded target again"
+has "$(creason SGr)" "moot: PR#601's base is main again" "…moot, naming the base"
+eq "$(bstatus SGa)" "closed" "the abandoned gate is withdrawn once the PR is open again"
+eq "$(bstatus SGk)" "open" "a red-check park's gate stays open while GitHub does not read the PR mergeable"
+eq "$(bstatus SGc)" "open" "a feedback gate stays open: nothing read says its feedback was answered"
+eq "$(bstatus SGq)" "open" "a gate under a key the script does not file is never its to withdraw"
+
+echo "# …merge-blocked-threads once no thread it counts is unresolved"
+: > "$STUB_DEPS"
+store "[$(anchor SG3 603), $(hgate SGb3 SG3 merge-blocked-threads)]"
+printf '%s' "$(prview 603 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_603.json"
+echo '{"threads":[{"id":"t603","isResolved":true}]}' > "$GH_DIR/threads_603.json"
+out=$(run)
+eq "$(bstatus SGb3)" "closed" "merge-blocked-threads is withdrawn once every thread is resolved"
+has "$(creason SGb3)" "none it counts is left unresolved" "…saying so"
+
+echo "# …and, once GitHub reads the PR mergeable, every thread and red-check gate"
+: > "$STUB_DEPS"
+store "[$(anchor SG2 602), $(hgate SGb2 SG2 merge-blocked-threads), $(hgate SGk2 SG2 pr-fix-capped.602), $(hgate SGn2 SG2 pr-fix-noncode.602), $(hgate SGm2 SG2 pr-fix-unmoved.602 open operator), $(hgate SGc2 SG2 pr-comments.602.1.2)]"
+printf '%s' "$(prview 602 OPEN CLEAN MERGEABLE)" > "$GH_DIR/pr_view_602.json"
+: > "$STUB_ESC_LOG"
+out=$(run)
+eq "$(bstatus SGb2)" "closed" "merge-blocked-threads is withdrawn once the PR reads mergeable"
+has "$(creason SGb2)" "GitHub reads it mergeable (CLEAN)" "…saying why"
+eq "$(bstatus SGk2)/$(bstatus SGn2)" "closed/closed" "…and so are the red-check parks' gates"
+has "$(creason SGk2)" "stays routed to human until a person clears gc.routed_to" "…which say the park's route stays"
+eq "$(bstatus SGm2)" "open" "…but not one a person is assigned"
+eq "$(bstatus SGc2)" "open" "…nor the feedback gate"
+
+echo "# …an early arm withdraws nothing, and an unread gate list withdraws nothing"
+: > "$STUB_DEPS"
+store "[$(anchor SG4 604), $(hgate SGu4 SG4 pr-unengaged-threads.604.sha-OLD)]"
+printf '%s' "$(prview 604 OPEN BLOCKED MERGEABLE)" > "$GH_DIR/pr_view_604.json"
+: > "$STUB_ESC_LOG"
+out=$(run_posture)
+eq "$(bstatus SGu4)" "open" "the posture-only pass leaves a stale gate for the full pass"
+hasnt "$(cat "$STUB_ESC_LOG")" "--retract" "…retracting nothing"
+out=$(STUB_DEP_GARBAGE="--type blocks" run)
+eq "$(bstatus SGu4)" "open" "a gate read that does not answer withdraws nothing"
+has "$out" "PR#604's human gates did not read; no stale gate is withdrawn this pass" "…and the pass says so"
+out=$(run)
+eq "$(bstatus SGu4)" "closed" "the next pass that reads the gates withdraws it"
 
 fi # part posture
 

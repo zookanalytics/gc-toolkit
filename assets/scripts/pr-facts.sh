@@ -762,8 +762,9 @@ reconcile_status_label() { # <anchor> <pr-number>
 # requires resolved (merge-blocked-threads), and red checks parked to a person
 # (pr-fix-noncode, pr-fix-capped, pr-fix-unmoved). A PR closed with a
 # pre-recorded disposition has no merge left to hold, so the disposition arm
-# withdraws these gates. An arm that files a new merge-holding gate adds its key
-# here.
+# withdraws these gates, and on an open PR withdraw_stale_gates withdraws each
+# one whose situation is gone. An arm that files a new merge-holding gate adds
+# its key here, and its reading of when that situation is gone there.
 MERGE_PATH_KEYS_JQ='
   def merge_path_key($n):
     test("^pr-(abandoned|retargeted|fix-noncode|fix-capped|fix-unmoved)\\." + $n + "$")
@@ -809,6 +810,97 @@ refresh_dispose_gates() {
   done <<REFRESH_EOF
 $(printf '%s' "$gates" | jq -r '.[] | select(((.assignee // "") | tostring) == "") | .id' 2>/dev/null)
 REFRESH_EOF
+}
+# no_thread_blocks <num> <base> <merge-state> — sets NTB_WHY to why no review
+# thread blocks PR#<num>'s merge, and leaves it empty when one still may, or
+# when a read does not show otherwise. GitHub reading the PR mergeable says so
+# at once. Otherwise the base's rules and the threads are read the way the
+# BLOCKED arm reads them, in this shell, so the arm reuses the thread read
+# later in the pass.
+NTB_WHY=""
+no_thread_blocks() {
+  local n
+  NTB_WHY=""
+  case "$3" in
+    CLEAN|HAS_HOOKS) NTB_WHY="No review thread blocks PR#$1's merge: GitHub reads it mergeable ($3)."; return 0 ;;
+  esac
+  review_gates_for "$2"
+  [ "$PROT_STATE" = known ] || return 0
+  if [ "$PROT_THREAD_REQ" != true ]; then
+    NTB_WHY="No review thread blocks PR#$1's merge: $2 does not require review threads resolved."; return 0
+  fi
+  review_threads_load "$1" || return 0
+  n=$(unresolved_threads) || return 0
+  [ "$n" = 0 ] && NTB_WHY="No review thread blocks PR#$1's merge: none it counts is left unresolved."
+  return 0
+}
+# withdraw_stale_gates <anchor> <num> <head-oid> <base> <recorded-target> <merge-state>
+# — withdraw this script's merge-path gates on an open PR's anchor once the
+# situation each asked about is gone. An open one holds the merge, and through
+# takeaway_is_holding the merge-in and red-check dispatch, so a gate that
+# outlived its situation would hold all three on a question nobody needs
+# answered. Each key MERGE_PATH_KEYS_JQ names reads as gone:
+#   pr-unengaged-threads.<num>.<head>    once the PR's head is past <head>; the
+#                                        threads are read again at the new head
+#   merge-blocked-threads                once no review thread blocks the merge
+#                                        (no_thread_blocks)
+#   pr-retargeted.<num>                  once the PR's base is its recorded
+#                                        target again
+#   pr-abandoned.<num>                   once the PR is open again, as this
+#                                        anchor back in pull_request reads it
+#   pr-fix-noncode|capped|unmoved.<num>  once GitHub reads the PR mergeable with
+#                                        its checks passing; the park's route
+#                                        to human stays for a person to clear
+#   pr-comments.<num>.*                  never: nothing this script reads says
+#                                        its feedback was answered, so its gate
+#                                        waits for the person who answers it
+# The withdrawal is human-gate.sh --retract, which resolves every open gate
+# under the key moot. A key with an open gate a person is assigned is left to
+# them. A gate read that does not answer withdraws nothing this pass.
+withdraw_stale_gates() {
+  local id="$1" num="$2" head="$3" base="$4" rtarget="$5" mstate="$6" gates keys key who why at
+  [ -x "$HUMAN_GATE" ] || return 0
+  if ! gates=$(bd_open_human_gates "$id"); then
+    echo "$PROG: $id — PR#$num's human gates did not read; no stale gate is withdrawn this pass" >&2
+    return 0
+  fi
+  keys=$(printf '%s' "$gates" | jq -r --arg n "$num" "$MERGE_PATH_KEYS_JQ"'
+      [ .[] | { k: ((.await_id // "") | tostring), a: ((.assignee // "") | tostring) }
+            | select(.k | merge_path_key($n)) ]
+      | group_by(.k)[] | [ .[0].k, ([ .[].a | select(. != "") ] | .[0] // "") ] | @tsv' 2>/dev/null) || return 0
+  while IFS=$'\t' read -r key who; do
+    [ -n "$key" ] || continue
+    why=""
+    case "$key" in
+      "pr-unengaged-threads.$num."*)
+        at="${key#"pr-unengaged-threads.$num."}"
+        [ -n "$head" ] && [ "$at" != "$head" ] \
+          && why="PR#$num's head moved from $at to $head, so the threads this gate counted as unengaged at $at are read again at $head." ;;
+      merge-blocked-threads)
+        no_thread_blocks "$num" "$base" "$mstate"; why="$NTB_WHY" ;;
+      "pr-retargeted.$num")
+        [ -n "$rtarget" ] && [ "$base" = "$rtarget" ] \
+          && why="PR#$num's base is $base again, its recorded target, and its anchor is back in pull_request." ;;
+      "pr-abandoned.$num")
+        why="PR#$num is open again and its anchor is back in pull_request, so the rework-or-close decision is made." ;;
+      "pr-fix-noncode.$num"|"pr-fix-capped.$num"|"pr-fix-unmoved.$num")
+        case "$mstate" in
+          CLEAN|HAS_HOOKS) why="GitHub reads PR#$num mergeable with its checks passing ($mstate), so the red check this gate parked is gone. Its anchor stays routed to human until a person clears gc.routed_to." ;;
+        esac ;;
+    esac
+    [ -n "$why" ] || continue
+    if [ -n "$who" ]; then
+      echo "$PROG: $id — its $key gate is assigned to $who, who is left to clear it: $why"
+      continue
+    fi
+    if "$HUMAN_GATE" --retract --subject "$id" --key "$key" --message "$why" >/dev/null 2>&1; then
+      echo "$PROG: $id — withdrew its stale $key gate: $why"
+    else
+      echo "$PROG: $id — could not withdraw its stale $key gate; it stays open for the next pass" >&2
+    fi
+  done <<WSG_EOF
+$keys
+WSG_EOF
 }
 mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason> <mode> <pr-url> <pr-number>
   # Atomic birth for a rework child: every identity key lands together, or the
@@ -1927,6 +2019,14 @@ MP_EOF
     fi
   elif [ -z "$(jq -rn --arg s "$PSINCE" "$CITY_OWN_DEF"'gc_city_cutover($s)' 2>/dev/null)" ]; then
     echo "$PROG: $id — PR#$num pr_provenance_since '$PSINCE' is not a UTC instant; every post under our login reads as the city's own" >&2
+  fi
+
+  # --- the merge-path gates of this open PR whose situation is gone -----------
+  # The full pass's alone, ahead of the label below and the dispatch arms after
+  # it, which read the anchor's open gates (withdraw_stale_gates).
+  if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ] && [ "$state" = OPEN ]; then
+    withdraw_stale_gates "$id" "$num" "$head_oid" "$base" \
+      "$(printf '%s' "$row" | jq -r '(.metadata.merged_target // "") | tostring')" "$merge_state"
   fi
 
   # --- status label: project the human-attention axis onto the PR list ----------

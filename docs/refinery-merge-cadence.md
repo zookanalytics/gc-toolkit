@@ -421,7 +421,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    rules or thread count — files nothing and the next reconcile retries.
    `reviewDecision` cannot name the cause alone, reading EMPTY while threads
    are unresolved, so the rules are read directly),
-   hold-resolved retraction. It re-reviews no moved head: a lane state is a
+   hold-resolved retraction, and the withdrawal of its own merge-path gates
+   once their situation is gone (an unengaged-threads gate once the head moves
+   past the one it counted, `merge-blocked-threads` once no thread blocks the
+   merge, the retarget and abandoned gates once the base or the PR is back, and
+   a red-check park's gate once GitHub reads the PR mergeable). A feedback gate
+   waits for its answer, and a gate a person is assigned is left to them. It re-reviews no moved head: a lane state is a
    state of the lane, and only gate-ensure dispatches on it. It also records every open
    non-draft anchor's **posture** — `pr_posture`, `pr_merge_state`, and the
    comment watermarks ([state-machine.md](state-machine.md#posture)) — before
