@@ -133,6 +133,24 @@ harness_init() {
   { _stub_shebang; printf 'exec %q "$@" --db %q\n' "$here/queue-priority.sh" "$TMP/qp-rig/.beads"; } > "$BIN/queue-priority"
   chmod +x "$BIN/queue-priority"
   export GC_QUEUE_PRIORITY_TOOL="$BIN/queue-priority"
+  # run-lib.sh's verbs, answered from this store. A script under test sources
+  # run-lib.sh through GC_RUN_LIB, so it gets run-lib.stub.sh, which serves the
+  # runs $BIN/harness-runs prints at each call: the runs the store's roots and
+  # convoys make, each row carrying its edges from the dep rows, by run-lib.sh's
+  # own run_rows. A case's roots and convoys are the runs it reads, and no stub
+  # here answers the reads behind them.
+  { _stub_shebang; printf '. %q || exit 1\n' "$here/run-lib.sh"; cat <<'RUNS'
+# A dep row is "A|TYPE|B": A <TYPE>-edges B, an edge that sits on A for every
+# type but blocks.
+jq -c --rawfile d "$STUB_DEPS" "$RUN_JQ"'
+  [ $d | split("\n")[] | select(length > 0) | split("|") | select(.[1] != "blocks")
+    | {issue_id: .[0], depends_on_id: .[2], type: .[1]} ] as $e
+  | map(. as $r | .dependencies = ((.dependencies // []) + [ $e[] | select(.issue_id == (($r.id // "") | tostring)) ]))
+  | run_rows' "$STUB_STORE"
+RUNS
+  } > "$BIN/harness-runs"
+  chmod +x "$BIN/harness-runs"
+  export GC_RUN_LIB="$here/run-lib.stub.sh" RUN_LIB_STUB_CMD="$BIN/harness-runs" RUN_LIB_STUB_FAIL="" RUN_LIB_STUB_LOG=""
 }
 
 store() { printf '%s' "$1" > "$STUB_STORE"; }
@@ -180,12 +198,14 @@ mk_sut_dir() { # <dir> <file>...
   # retires, review-answer.sh, what the living answer to a review shows,
   # hold-lib.sh, the one definition of a hold, which deferred-dispatch.sh
   # sources, and priority-lib.sh, the priority function, whose reading of a PR's
-  # approval pr-facts.sh sources, are sourced by sibling path the same way.
+  # approval pr-facts.sh sources, and run-lib.sh, the one reader of a run's link
+  # to its bead, are sourced by sibling path the same way.
   [ -f "$here/review-verdict.sh" ] && cp "$here/review-verdict.sh" "$d/"
   [ -f "$here/review-dismissal.sh" ] && cp "$here/review-dismissal.sh" "$d/"
   [ -f "$here/review-answer.sh" ] && cp "$here/review-answer.sh" "$d/"
   [ -f "$here/hold-lib.sh" ] && cp "$here/hold-lib.sh" "$d/"
   [ -f "$here/priority-lib.sh" ] && cp "$here/priority-lib.sh" "$d/"
+  [ -f "$here/run-lib.sh" ] && cp "$here/run-lib.sh" "$d/"
   return 0
 }
 

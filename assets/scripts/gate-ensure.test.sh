@@ -889,6 +889,15 @@ has "$out" "STRANDED review rev-5" "a closed convoy no longer counts as a live p
 has "$(cat "$STUB_GC_LOG")" "sling $POOL rev-5 --on mol-review" "…so the stranded review is re-slung, not suppressed forever"
 eq "$(meta rev-5 'gc.execution_routed_to')" "$POOL" "…and the pour read back"
 
+echo "# a stranded review whose runs cannot be read is held, not re-slung blind"
+store "[$(anchor D5u pull_request correctness "" polecat/d5u),
+        $(stranded_review_row rev-5u D5u)]"
+oid d5u > "$GH_DIR/head_polecat_d5u"
+: > "$STUB_GC_LOG"
+out=$(RUN_LIB_STUB_FAIL="runs:rev-5u" run)
+has "$out" "stranded review rev-5u pour probe unreadable; no re-pour" "a failed read of the review's runs is no answer"
+hasnt "$(cat "$STUB_GC_LOG")" "sling $POOL rev-5u" "…so nothing is poured onto it"
+
 echo "# merge_hold gates the re-dispatch"
 store "[$(anchor E1 pull_request correctness "" polecat/e1 ',"merge_hold":"true"')]"
 oid e1 > "$GH_DIR/head_polecat_e1"
@@ -1408,6 +1417,20 @@ out=$(run); out="$out$(run)"
 has "$out" "pour-liveness probe unreadable" "a review with no traceable workflow is reported, not judged"
 eq "$(cat "$STUB_ESCALATE_LOG")" "" "…and nothing is escalated on an unanswerable probe"
 has "$out" "0 reviews dispatched" "…and no twin is dispatched either"
+
+echo "# a poured review whose runs cannot be read escalates nothing"
+store "[$(anchor W5u pull_request correctness "" polecat/w5u),
+        $(review_row rev-w5u W5u),
+        $(convoy_row conv-w5u),
+        $(root_row root-w5u conv-w5u),
+        $(spent_steps root-w5u s5u)]"
+printf 'conv-w5u|tracks|rev-w5u\n' >> "$STUB_DEPS"
+oid w5u > "$GH_DIR/head_polecat_w5u"
+: > "$STUB_ESCALATE_LOG"
+out=$(RUN_LIB_STUB_FAIL="runs:rev-w5u" run); out="$out$(RUN_LIB_STUB_FAIL="runs:rev-w5u" run)"
+has "$out" "pour-liveness probe unreadable" "a spent chain whose runs cannot be read is not judged"
+eq "$(cat "$STUB_ESCALATE_LOG")" "" "…and nothing is escalated on a read that failed"
+eq "$(meta rev-w5u wedge_seen_root)" "<absent>" "…and no sighting is recorded"
 
 echo "# a root whose steps do not enumerate is unanswerable, not spent"
 store "[$(anchor W6 pull_request correctness "" polecat/w6),

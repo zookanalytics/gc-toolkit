@@ -48,7 +48,8 @@
 # run works, and self-review-check.sh and gascity-keeper's rebase-check.sh take
 # the bead their check loop's run works, which is the bead they certify.
 # work-tree-holder.sh takes the bead each claimed step's run works when it asks
-# whether a live session is working a tree.
+# whether a live session is working a tree. gate-ensure.sh takes the runs
+# poured over a review, live or not, to judge whether a pour still drives it.
 #
 # run-lib.test.sh runs every verb over run-lib.fixture.json, the cases a copy
 # of the rule in another language must agree with, as the Go copy in

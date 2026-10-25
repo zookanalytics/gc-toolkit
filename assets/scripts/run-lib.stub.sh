@@ -12,6 +12,10 @@
 #   subject <reader> <id>  the runs whose root or input convoy is <id>
 #   map <reader> [all]     the live runs, or every run with `all`
 # An unset name, or a file that does not exist, is a store with no runs.
+# RUN_LIB_STUB_CMD, when set, names a command that prints that array instead,
+# run at each call, for a suite whose store changes while a script runs
+# (test-harness.sh derives it from its store); a command that fails fails the
+# call.
 # RUN_LIB_STUB_FAIL lists the calls that fail as a failed read does, printing
 # nothing and returning 1: `all`, a verb, or a verb and its argument as
 # <verb>:<arg>, separated by spaces. Each call is appended to RUN_LIB_STUB_LOG,
@@ -47,7 +51,9 @@ run_lib() {
     for f in ${RUN_LIB_STUB_FAIL:-}; do
         case "$f" in all|"$verb"|"$verb:$arg") return 1 ;; esac
     done
-    if [ -n "${RUN_LIB_STUB_RUNS:-}" ] && [ -f "$RUN_LIB_STUB_RUNS" ]; then
+    if [ -n "${RUN_LIB_STUB_CMD:-}" ]; then
+        runs="$("$RUN_LIB_STUB_CMD")" || return 1
+    elif [ -n "${RUN_LIB_STUB_RUNS:-}" ] && [ -f "$RUN_LIB_STUB_RUNS" ]; then
         runs="$(cat "$RUN_LIB_STUB_RUNS")"
     fi
     printf '%s' "$runs" | jq -c --arg v "$verb" --arg a "$arg" '

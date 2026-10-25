@@ -15,7 +15,8 @@
 #             the same runs however they are batched
 #   (STUB)    run-lib.stub.sh, which its readers' suites source in its place,
 #             answers every case as this file does when given every run of the
-#             store, and fails, logs and refuses as it says
+#             store, from a file or from a command, and fails, logs and refuses
+#             as it says
 #   (READERS) every reader of the link sources this file and calls a verb or
 #             applies $RUN_JQ
 #   (NO-COPY) no other file defines the rule's defs
@@ -192,6 +193,12 @@ STUB_OUT="$(
     run_lib runs no_such_reader work-a >/dev/null 2>&1; printf 'no-reader\t%s\n' "$?"
     RUN_LIB_STUB_RUNS="$TMP/absent.json"
     printf 'no-file\t%s\n' "$(run_lib map fx_bd)"
+    printf '#!/bin/sh\ncat %s\n' "$TMP/every-run.json" > "$TMP/runs-cmd"; chmod +x "$TMP/runs-cmd"
+    RUN_LIB_STUB_CMD="$TMP/runs-cmd"
+    printf 'cmd\t%s\n' "$(run_lib runs fx_bd work-a | jq -r 'map(.root) | join(",")')"
+    printf '#!/bin/sh\nexit 1\n' > "$TMP/runs-cmd"
+    run_lib map fx_bd >/dev/null 2>&1; printf 'cmd-fails\t%s\n' "$?"
+    RUN_LIB_STUB_CMD=""
     printf 'logged\t%s\n' "$(head -n 1 "$TMP/stub.log")"
 )"
 while IFS=$'\t' read -r name verdict; do
@@ -201,6 +208,8 @@ while IFS=$'\t' read -r name verdict; do
         fail-verb) eq "$verdict" "1" "(STUB) a verb RUN_LIB_STUB_FAIL names fails" ;;
         no-reader) eq "$verdict" "2" "(STUB) a reader the caller never defined is a usage error" ;;
         no-file) eq "$verdict" "[]" "(STUB) a runs file that does not exist is a store with no runs" ;;
+        cmd) eq "$verdict" "root-a0,root-a1" "(STUB) RUN_LIB_STUB_CMD's output is the runs each call answers from" ;;
+        cmd-fails) eq "$verdict" "1" "(STUB) a RUN_LIB_STUB_CMD that fails fails the call" ;;
         logged) eq "$verdict" "runs fx_bd work-a" "(STUB) each call is logged with the reader it was given" ;;
         *) eq "$verdict" "same" "(STUB) the stub answers as the lib does: $name" ;;
     esac
@@ -215,7 +224,8 @@ READERS="assets/scripts/step-close.sh
 overlays/work-context/.claude/hooks/work-context.sh
 assets/scripts/self-review-check.sh
 packs/gascity-keeper/assets/scripts/rebase-check.sh
-assets/scripts/work-tree-holder.sh"
+assets/scripts/work-tree-holder.sh
+assets/scripts/gate-ensure.sh"
 while IFS= read -r r; do
     [ -n "$r" ] || continue
     f="$ROOT/$r"
