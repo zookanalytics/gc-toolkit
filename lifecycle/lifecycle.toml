@@ -1102,10 +1102,11 @@ keys = [
 #   reviews, and the refinery's handle-failures writes it on the anchor at the
 #   merged head. A write for the same record adds its trackers; one for another
 #   record replaces the value. self-review-check.sh reads the work bead's to
-#   pass a recorded fail at HEAD, and the correctness review reads the anchor's
-#   test value to run no suite for a recorded fail at the reviewed commit; each
-#   reads a value whose record is not the one --check reads now, such as one a
-#   run with another command or scope replaced, as no judgment. Only the
+#   pass a recorded fail at HEAD, and review-evidence.sh reads the anchor's at
+#   the reviewed commit, so a review's gather calls that fail pre-existing and
+#   the correctness method runs no suite for it. Both judge by rig-check-lib.sh,
+#   which reads a value whose record is not the one --check reads now, such as
+#   one a run with another command or scope replaced, as no judgment. Only the
 #   self-review writes and reads a setup or build value, against its note.
 #   Absent means no caller judged a fail pre-existing. Never cleared.
 

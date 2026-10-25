@@ -10,7 +10,8 @@
 # hand at that commit. A later run at the commit with another command or scope
 # replaces the record, and its fail needs a judgment of its own.
 #
-# Readers: self-review-check.sh, on the work bead at the HEAD it checks.
+# Readers: self-review-check.sh, on the work bead at the HEAD it checks, and
+# review-evidence.sh, on the anchor at the commit a review reads.
 # rig-check-lib.test.sh fails when a reader stops sourcing this file or defines
 # the judgment itself.
 #

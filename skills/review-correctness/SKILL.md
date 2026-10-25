@@ -13,11 +13,12 @@ and safe as merged. It is the concern, not a tool: no reviewer is presumed.
 
 The whole diff at `<reviewed_oid>`, in `<worktree>`:
 `git diff origin/<review_base>...HEAD`. A large diff gets read in chunks, not
-sampled. The anchor `<anchor_bead>`, for what the change was asked to do, and
-the PR as published, which the What to check list's last dimensions read. The
-test evidence recorded at `<reviewed_oid>`, below. The rig's guidance for this
-check, `docs/review-correctness.md` at the reviewed commit, which the review
-formula printed when the commit carries one.
+sampled. The review formula printed the rest. The anchor `<anchor_bead>` says
+what the change was asked to do. The PR as published is what the What to check
+list's last dimensions read. What `gctk rig` recorded at `<reviewed_oid>` is
+the test evidence, below. The rig's guidance for this check is
+`docs/review-correctness.md` at the reviewed commit, printed when the commit
+carries one.
 
 ## What it judges
 
@@ -25,54 +26,34 @@ formula printed when the commit carries one.
 
 Every run of the rig's tests through `gctk rig`, whether by a self-review, the
 refinery or an earlier review, is recorded against the commit it ran at, and
-every worktree of the rig's clone reads the records. `gctk rig test --check`
-reads the record at the reviewed commit and runs nothing. A test fail the
-refinery judged pre-existing carries a mark on the anchor holding the record it
-judged, which answers only while that record stands:
+every worktree of the rig's clone reads the records. The review formula printed
+a line for each check `gctk rig` records at `<reviewed_oid>`, and the gctk
+binary it read them with. That binary is the gate, and a suite you run through
+the gate calls it by that path. The `test` line is the test evidence:
 
-```bash
-# >>> review-test-evidence
-# >>> gctk-bin
-GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
-# <<< gctk-bin
-REC=""; RC=127
-if [ -x "${GCTK:-}" ]; then REC=$(cd "<worktree>" && "$GCTK" rig test --check 2>/dev/null); RC=$?; fi
-SCOPE=$(printf '%s' "$REC" | jq -r '.scope // empty' 2>/dev/null)
-PRE=""
-[ "$RC" = 1 ] && PRE=$(gc bd show "<anchor_bead>" --json 2>/dev/null | jq -r --arg c "<reviewed_oid>" --arg rec "$REC" '($rec | fromjson? // null) as $r | .[0].metadata["rig_check_pre_existing.test"] // empty | (if type == "string" then (fromjson? // empty) else . end) | select(type == "object" and .commit == $c and $r != null and .record == $r) | (.trackers // []) | join(", ")' 2>/dev/null)
-if [ ! -x "${GCTK:-}" ]; then
-  echo "no test evidence at <reviewed_oid>: no gctk binary at '${GCTK:-}' (GCTK_BIN, else the city's build, which its gctk-build order publishes); run the suites the diff touches plain, each under the keepalive"
-elif [ "$RC" = 0 ] && { [ "$SCOPE" = full ] || [ "$SCOPE" = affected ]; }; then
-  echo "test evidence: the rig's tests passed at <reviewed_oid> (scope $SCOPE); run no suite"
-elif [ "$RC" = 1 ] && [ -n "$PRE" ]; then
-  echo "test evidence: the tests fail at <reviewed_oid> as they do on the base, tracked by $PRE; do not run them again"
-elif [ "$RC" = 1 ]; then
-  echo "recorded fail at <reviewed_oid> ($(printf '%s' "$REC" | jq -r '"scope \(.scope // "none"), exit \(.exit_code), command: \(.command)"' 2>/dev/null)); run it again with --force to see what failed"
-else
-  echo "no test evidence at <reviewed_oid> (gctk rig test --check exit ${RC}${SCOPE:+, scope $SCOPE}); run the suites the diff touches through the gate"
-fi
-# <<< review-test-evidence
-```
+- A pass of the whole suite (scope `full`) or of the subset the commit's diff
+  selects (scope `affected`) is evidence. Run no suite.
+- A fail the line calls pre-existing fails on the base too, and the trackers it
+  names carry the failure. It goes in the verdict as context, with its
+  trackers, and is not run again.
+- Any other fail is the commit's. Run the record's command again through the
+  gate, `gctk rig test --scope <its scope> --command '<its command>' --force`,
+  to see what failed, and check whether it fails on the base too.
+- Nothing recorded, a pass that ran nothing (scope `none`, a rig that declares
+  no test command), or a record gctk could not read is no evidence. Run the
+  suites the diff touches in `<worktree>` through the gate, so that run is
+  recorded as well, `gctk rig test --scope affected --command '<the suites>'`,
+  and record the real pass and fail counts. With no gctk binary there is no
+  gate, so run them plain.
 
-With evidence, run no suite. A pass recorded for the subset the commit's diff
-selects (scope `affected`) counts as one for the whole suite. A fail marked
-pre-existing goes in the verdict as context, with its trackers. A recorded
-fail with no mark holding its record is the commit's: run the record's command
-again through the gate, `"$GCTK" rig test --scope <its scope> --command
-'<its command>' --force` with `GCTK` set as the block sets it, to see what
-failed, and check whether it fails on the base too.
-Without a record, or with a pass that ran nothing (scope `none`, a rig that
-declares no test command), run the suites the diff touches in `<worktree>`
-through the gate, so that run is recorded as well:
-`"$GCTK" rig test --scope affected --command '<the suites>'`, and record the
-real pass and fail counts. Either way you may run one targeted suite for a gap
-you suspect, and the run of each new case against the pre-change code that the
-Testing dimension asks for is yours. Run those plain, each as
-`bash -c '<suite>'`, because a gate call with another command replaces the
-reviewed commit's record. Every suite runs under the claim-lease keepalive the
-review formula names. A failing suite is not automatically a finding: check
-whether it fails on the base too. A pre-existing failure belongs in the verdict
-as context, not as this branch's defect.
+Either way you may run one targeted suite for a gap you suspect, and the run of
+each new case against the pre-change code that the Testing dimension asks for
+is yours. Run those plain, each as `bash -c '<suite>'`, because a gate call
+with another command replaces the reviewed commit's record. Every suite runs
+under the claim-lease keepalive the review formula names. A failing suite is
+not automatically a finding: check whether it fails on the base too. A
+pre-existing failure belongs in the verdict as context, not as this branch's
+defect.
 
 ### What to check
 
@@ -121,25 +102,21 @@ carries, not the first one that appears.
   placeholder, a restatement of the dispatch, and an account of other work
   each qualify — and so is a title that understates the scope. Where the
   summary lives depends on the state. Post-open, read the page the review
-  formula printed from `<review_pr_url>`, or read it again with
-  `gh pr view <review_pr_url> --json title,body`, which resolves the URL's own
-  repository, never a bare number against ambient gh context. Pre-open there is
-  no page, but `pr-open.sh` will publish the anchor's `metadata.pr_summary`
-  verbatim as `## Summary` once the check goes green, falling back to the
-  dispatch description and then a placeholder when it is absent
-  (`assets/scripts/pr-open.sh`); read that pending summary and hold it to the
-  same standard —
-  `gc bd show <anchor_bead> --json | jq -r '.[0].metadata.pr_summary // empty'`.
+  formula printed from `<review_pr_url>`. Pre-open there is no page, but
+  `pr-open.sh` will publish the anchor's `pr_summary` verbatim as `## Summary`
+  once the check goes green, falling back to the dispatch description and then
+  a placeholder when it is absent. Read that pending summary among the anchor's
+  metadata, which the review formula printed, and hold it to the same standard.
   An absent or empty pre-open summary ships the dispatch description in its
   place — what the work was asked to do, not what the diff did — so it is a
   finding unless that text already accounts for the whole diff; its locus is
   `anchor <id> / pr_summary`. When the published body looks wrong, read
-  `assets/scripts/pr-open.sh` for the shape this pack's opener emits, and
-  `assets/scripts/pr-stack.sh` for the delimited beads-on-this-branch section
-  the cadence keeps current below it. A section naming more than the anchor
-  means the branch carries work from more than one bead, and your verdict
-  covers every one of them. Pre-open, your verdict becomes the PR's opening
-  comment.
+  `pr-open.sh`, among the pack's scripts the review formula printed, for the
+  shape this pack's opener emits, and `pr-stack.sh` beside it for the
+  delimited beads-on-this-branch section the cadence keeps current below it. A
+  section naming more than the anchor means the branch carries work from more
+  than one bead, and your verdict covers every one of them. Pre-open, your
+  verdict becomes the PR's opening comment.
 - **Work-quality standards** — hold the diff's output (code, comments,
   docs) to the "Standards for what you produce" entries of the work-quality
   fragments, which this skill carries in its `references/` directory as

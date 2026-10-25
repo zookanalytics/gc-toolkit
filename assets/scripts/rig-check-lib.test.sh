@@ -14,7 +14,8 @@
 #             or formula reads one any other way.
 #   (NO-COPY) no other file defines pre_existing.
 # A reader with a private copy of the judgment drifts silently from this one.
-# The behavioral half lives beside its reader (self-review-check.test.sh).
+# The behavioral half lives beside each reader (self-review-check.test.sh,
+# review-evidence.test.sh).
 # Reads the repo only; no gc, no city, no network.
 #
 # run-tests-scope: tree
@@ -85,7 +86,8 @@ echo "# every reader applies the one definition"
 # Comment lines are left out, so a reader that names the library in prose but
 # no longer calls it still fails.
 code() { grep -vE '^[[:space:]]*#' "$1"; }
-READERS="assets/scripts/self-review-check.sh"
+READERS="assets/scripts/self-review-check.sh
+assets/scripts/review-evidence.sh"
 for r in $READERS; do
   f="$ROOT/$r"
   if [ ! -f "$f" ]; then bad "(READERS) $r exists"; continue; fi

@@ -143,8 +143,9 @@ It releases the bead and the route it claimed it by instead, then drains:
 `gc bd update <the review bead> --assignee="" --unset-metadata gc.routed_to`.
 
 **2. Gather what the review reads.** The block prints the anchor, the PR's
-page when one is open, the rig's guidance for this check, and the path of the
-review's worktree at `{{reviewed_oid}}`. The worktree is a detached checkout in
+page when one is open, the rig's guidance for this check, what `gctk rig`
+recorded at `{{reviewed_oid}}`, and the path of the review's worktree at that
+commit. The worktree is a detached checkout in
 a workspace named for this review, so running the block again in a later shell
 returns the same worktree. Read the change there with git. Its diff is
 `git diff origin/{{review_base}}...HEAD`, with three dots, so it shows what the
@@ -173,6 +174,8 @@ if [ -n "{{review_pr_url}}" ]; then
 fi
 echo "== The rig's guidance for {{check}}: docs/review-{{check}}.md at {{reviewed_oid}}, empty when it keeps none"
 "$SCRIPTS/review-checks.sh" --extension "{{check}}" --at "{{reviewed_oid}}" || exit 1
+echo "== What gctk rig recorded at {{reviewed_oid}}"
+"$SCRIPTS/review-evidence.sh" --anchor "{{anchor_bead}}" --commit "{{reviewed_oid}}" || exit 1
 echo "== The pack's scripts: $SCRIPTS"
 echo "== The review's worktree: $WT"
 # <<< review-gather
