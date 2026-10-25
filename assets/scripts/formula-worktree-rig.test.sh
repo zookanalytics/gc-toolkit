@@ -88,6 +88,7 @@ extract() { awk -v m="$2" '$0 ~ ("# >>> " m "$") {f=1; next} $0 ~ ("# <<< " m "$
 
 # block <toml> <marker> <out>: the marked block, with formula placeholders
 # rendered as the materializer renders them, written to <out>.
+# delete_merged_branches takes the patrol's default, true.
 block() {
   local body
   body="$(extract "$1" "$2")"
@@ -97,7 +98,7 @@ block() {
     return 0
   fi
   ok "$2: block extracted between markers"
-  printf '%s\n' "$body" | sed 's|{{base_branch}}|main|g' > "$3"
+  printf '%s\n' "$body" | sed 's|{{base_branch}}|main|g; s|{{delete_merged_branches}}|true|g' > "$3"
   case "$(cat "$3")" in
     *'{{'*) bad "$2: no unrendered formula placeholder left" ;;
     *)      ok "$2: no unrendered formula placeholder left" ;;
@@ -385,8 +386,8 @@ merge_case() { # <mode>; sets RC, D (and patrol_rig's globals)
   mkdir -p "$d/tmp"
   patrol_rig "$d" "merge $1"
   bead_file "$d"
-  # The rebase step leaves the prepared head staged here, detached.
-  git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+  # The rebase step leaves the prepared head staged here for wb, detached.
+  "$PACK_CITY/rigs/gc-toolkit/assets/scripts/refinery-workspace.sh" stage --rig-root "$d/rig" --branch polecat/wb --work wb >/dev/null 2>&1
   pick "$1" "$d/rig"
   ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" WORK=wb TARGET=main BRANCH=polecat/wb \
       GC_CITY_PATH="$PACK_CITY" FAKE_META="$d/meta.json" FAKE_LOG="$d/gc.log" FAKE_LC_LOG="$d/lc.log" bash "$TMP/merge.sh" ) >"$d/out" 2>&1 || rc=$?
@@ -408,6 +409,8 @@ for mode in env roster; do
   # The transition checks the landing in the checkout GC_RIG_ROOT names, so it
   # gets the rig this block resolved, from the roster too.
   eq "$(cat "$D/lc.log.root" 2>/dev/null || true)" "$D/rig" "direct-merge/$mode: the transition runs with GC_RIG_ROOT naming the rig the block resolved"
+  eq "$(git -C "$D/origin.git" rev-parse -q --verify refs/heads/polecat/wb || echo deleted)" deleted \
+    "direct-merge/$mode: the merged branch is deleted from the rig's origin"
   eq "$(wt_paths "$D/rig" | count)" 2 "direct-merge/$mode: no worktree is added for the landing; the rig and its prep worktree remain"
   eq "$(wt_paths "$D/cwd" | count)" 1 "direct-merge/$mode: no worktree is left registered in the cwd repo"
   eq "$(ls -A "$D/tmp" | count)" 0 "direct-merge/$mode: nothing is left under TMPDIR"
@@ -433,7 +436,7 @@ protected_case() {
   mkdir -p "$d/tmp"
   patrol_rig "$d" "merge protected"
   bead_file "$d"
-  git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+  "$PACK_CITY/rigs/gc-toolkit/assets/scripts/refinery-workspace.sh" stage --rig-root "$d/rig" --branch polecat/wb --work wb >/dev/null 2>&1
   printf '%s\n' '#!/usr/bin/env bash' 'echo "GH006: Protected branch update failed for refs/heads/main." >&2' 'exit 1' \
     > "$d/origin.git/hooks/pre-receive"
   chmod +x "$d/origin.git/hooks/pre-receive"
@@ -456,6 +459,9 @@ for errexit in off on; do
     && bad "direct-merge/protected, errexit $errexit: the refinery does not drain" \
     || ok "direct-merge/protected, errexit $errexit: the refinery does not drain"
   eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "direct-merge/protected, errexit $errexit: nothing landed on the rig's origin"
+  git -C "$D/origin.git" rev-parse -q --verify refs/heads/polecat/wb >/dev/null \
+    && ok "direct-merge/protected, errexit $errexit: the branch stays on origin for the PR" \
+    || bad "direct-merge/protected, errexit $errexit: the branch stays on origin for the PR"
   [ ! -s "$D/lc.log" ] && ok "direct-merge/protected, errexit $errexit: no lifecycle transition" \
     || bad "direct-merge/protected, errexit $errexit: no lifecycle transition"
 done
@@ -469,7 +475,7 @@ moved_case() {
   mkdir -p "$d/tmp"
   patrol_rig "$d" "merge moved"
   bead_file "$d"
-  git -C "$d/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+  "$PACK_CITY/rigs/gc-toolkit/assets/scripts/refinery-workspace.sh" stage --rig-root "$d/rig" --branch polecat/wb --work wb >/dev/null 2>&1
   git -C "$d/seed" checkout -q main
   MOVED=$(commit "$d/seed" "landed while the gate ran")
   git -C "$d/seed" push -q "$d/origin.git" main
@@ -494,6 +500,9 @@ for errexit in off on; do
     && bad "direct-merge/moved, errexit $errexit: the refinery does not drain" \
     || ok "direct-merge/moved, errexit $errexit: the refinery does not drain"
   eq "$(git -C "$D/origin.git" rev-parse main)" "$MOVED" "direct-merge/moved, errexit $errexit: origin/main is untouched"
+  git -C "$D/origin.git" rev-parse -q --verify refs/heads/polecat/wb >/dev/null \
+    && ok "direct-merge/moved, errexit $errexit: the branch stays on origin for the next patrol" \
+    || bad "direct-merge/moved, errexit $errexit: the branch stays on origin for the next patrol"
   [ ! -s "$D/lc.log" ] && ok "direct-merge/moved, errexit $errexit: no lifecycle transition" \
     || bad "direct-merge/moved, errexit $errexit: no lifecycle transition"
 done

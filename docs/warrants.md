@@ -101,3 +101,41 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Retires when.** Gas City ships per-agent write scoping. A fine-grained token
   limited to the owned repositories may cover the origin half on GitHub's side,
   and the next re-verification checks that first.
+
+## Prep worktree staging record
+
+- **Covers.** The record that `stage --work` writes and `held` and `verify`
+  read in `assets/scripts/refinery-workspace.sh`, a `gc-refinery-staged` file
+  in the prep worktree's private git dir, and its readers: the
+  `prep-staged-work` block of `formulas/mol-refinery-patrol.toml`, which takes
+  the bead and branch the merge-push step acts for from it, and the prep
+  worktree check in `assets/scripts/direct-merge-push.sh`.
+- **Stands in for.** A worktree's ownership record, naming the bead and the
+  branch that the refinery's detached prep worktree was staged for.
+- **Evidence.**
+  - In `gastownhall/gascity`, `gc worktree` records a worktree's bead and branch
+    in its private git dir, and `gc worktree verify` checks them, only for a
+    worktree with the bead's branch checked out on an attached HEAD, never
+    detached, at a direct child of a per-rig root (`gc worktree` in
+    `docs/reference/cli.md`). `Spec.validate` in `internal/worktree/worktree.go`
+    also refuses a path inside a registered worktree, and the prep worktree
+    lives in the rig checkout's git dir.
+  - `gc worktree cleanup` refuses a dirty worktree and a HEAD not merged into
+    its base, removes only the attempt whose id it is given, and has no force
+    mode (`gc worktree cleanup` in `docs/reference/cli.md`). The refinery
+    removes its prep worktree after a gate that can leave files in it and after
+    a landing on the target, and it clears a leftover of an interrupted
+    iteration without knowing which bead staged it.
+  - No formula or order in Gas City's bundled `core` pack calls `gc worktree`.
+    No pack in `gastownhall/gascity-packs` calls it either, and the gastown
+    pack's `mol-refinery-patrol` stages every bead on one local `temp` branch
+    and records nothing about which bead that branch holds.
+  - In `gastownhall/beads`, `bd worktree create` checks out a branch in the
+    worktree it adds and records no bead.
+- **Verified.** 2026-10-24, at `gastownhall/gascity` main 47b36c3a0f1b,
+  `gastownhall/gascity-packs` main 8a93f3d12d92 and `gastownhall/beads` main
+  12c20a6e8170.
+- **Retires when.** Gas City can bind a detached worktree to a bead and remove
+  the attempt that created it whatever state it is in, for example through
+  `gc worktree`. The record's readers then move onto that primitive, and the
+  record goes.

@@ -296,20 +296,18 @@ fi
 
 # Foreign group: put back everything this claim assigned, then drain.
 
-# release_turn <bead-id> — three ORDERED writes (bd's claim guard refuses
-# --assignee "" on an in_progress bead, and metadata writes bypass it, so:
-# unset session pointers, --status=open, then --assignee=""), then
-# the read-back that decides. gc.routed_to is deliberately left alone: it is
-# the pool's offer predicate, and clearing it would park the turn. Every
-# write is attempted even after one fails; the READ must also agree.
+# release_turn <bead-id> — put one turn back through hand-back.sh: one write
+# that reopens it, clears its assignee and removes the session pointers, and
+# lands only while the turn is this session's claim, so no part of the release
+# lands without the rest. Then the read-back that decides. gc.routed_to is
+# deliberately left alone: it is the pool's offer predicate, and clearing it
+# would park the turn.
 release_turn() {
     _id="$1"
     _ok=1
-    gc bd update "$_id" --unset-metadata gc.session_id --unset-metadata gc.session_name >/dev/null 2>&1 || _ok=0
-    gc bd update "$_id" --status=open >/dev/null 2>&1 || _ok=0
-    gc bd update "$_id" --assignee="" >/dev/null 2>&1 || _ok=0
+    "$HERE/hand-back.sh" "$_id" >/dev/null 2>&1 || _ok=0
 
-    # Trust the read, not the writes: a partial release still holds the turn.
+    # Trust the read, not the write: a refused hand-back still holds the turn.
     STATE=$(gc bd show "$_id" --json 2>/dev/null | scrub \
             | jq -r 'if type=="array" then "\(.[0].status // "")|\(.[0].assignee // "")" else "|" end' 2>/dev/null || printf '')
     case "$STATE" in
