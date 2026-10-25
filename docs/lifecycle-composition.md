@@ -11,7 +11,7 @@ The pack runs three lifecycles, and each already has exactly one owner:
 |---|---|
 | bead | [state-machine.md](state-machine.md) |
 | PR | [refinery-merge-cadence.md](refinery-merge-cadence.md) |
-| visit | [gascity-human-engagement.md](gascity-human-engagement.md) |
+| visit | [human-engagement.md](human-engagement.md) |
 
 This document owns none of them. It owns the **seam**: the place where a
 conversation routes work out of a subject, that work becomes a bead, the bead
@@ -38,9 +38,9 @@ above, and this doc defers to them rather than summarizing them. It is not a
 fourth lifecycle narrative: it describes no state a bead, PR, or visit passes
 through. It does not carry the board's rendering rules or the converse
 sitting's procedure, which belong to
-[gascity-human-engagement.md](gascity-human-engagement.md), nor the routing
+[human-engagement.md](human-engagement.md), nor the routing
 mechanics, which belong to
-[gascity-routing-model.md](gascity-routing-model.md). The general model of how
+[gascity/routing-model.md](gascity/routing-model.md). The general model of how
 a wait is represented, which is the hold primitive, the demand primitive and
 the shape law for routed work, is invariant I1 in
 [component-model.md](component-model.md); the rule below is that model applied
@@ -86,10 +86,9 @@ list of wait verbs finishes, and every phrase one missed would report a clean
 pass. A finding is graded by what the graph carries. A bead with no `blocks`
 edge at all needs one filed. A bead whose every blocker has closed, or names
 another store, has outlived its edge and needs its disposition instead. The one
-bead exempt is the terminal end of the wait itself — a demand others block on
-carries the hold's headline but can hold no forward edge, so `[holds]` names the
-key that marks it (`terminal_wait_key`, the `gc.demand_for` that `gc-helm.sh
-demand` stamps) and the check skips it.
+bead exempt is the terminal end of the wait itself — a gate others block on, a
+human gate or a park, can hold no forward edge, so `[holds]` names its issue
+type (`terminal_wait_type`, `gate`) and the check skips a bead of that type.
 
 ### 2. The waiting side re-derives; it never trusts stored state
 

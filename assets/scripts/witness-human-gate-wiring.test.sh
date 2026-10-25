@@ -75,9 +75,11 @@ done
 # landed (the witness closes that bead next, and a gate on it would refuse the
 # close), and an owner whose store cannot be named (a gate lands in its bead's
 # store). None of them is filed as a human gate.
+# A key filed per bead carries the bead after a dot (witness-unplaceable-owner.<bead>),
+# so the match takes the key followed by a space or by `.<bead>`.
 for k in witness-refinery-queue-unroutable witness-refinery-queue-unreadable \
          witness-orphan-work-landed witness-unplaceable-owner; do
-  if grep -A1 -- 'patrol-finding\.sh.*--scope witness-findings --key *$' "$TOML" | grep -q -- "^$k " \
+  if grep -A1 -- 'patrol-finding\.sh.*--scope witness-findings --key *$' "$TOML" | grep -qE -- "^$k( |\.<bead> )" \
      || grep -q -- "patrol-finding\.sh\"* --scope witness-findings --key $k" "$TOML"; then
     ok "$k is filed as a patrol finding"
   else

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# liveness-recheck.test.sh — the liveness-sweep visit body is a SNAPSHOT, and
-# the sitting that reads it is entitled to a corrected census.
+# liveness-recheck.test.sh — the liveness-sweep gate's message is a SNAPSHOT,
+# and whoever acts on it is entitled to a corrected census.
 #
-# THE DEFECT. classify writes its census into the visit body at pass time; the
-# converse sitting reads that body whenever the visit is claimed, which is
-# routinely a day or more later, and nothing re-checked it in between. Measured
+# THE DEFECT. classify writes its census into the message at pass time; a person
+# reads it whenever they reach it, which is routinely a day or more later, and
+# nothing re-checked it in between. Measured
 # once: the sitting read the census ~41.5h after the pass cut it, and FIVE of
 # the ten new candidates had merged AND deployed in the interval — 60% of that
 # body was wrong on arrival. A sitting that trusts such a body routes
@@ -28,12 +28,14 @@
 #      bead on a signal it did not verify is worse than the staleness it fixes,
 #      because a hidden bead has no next pass that surfaces it.
 #
-#   2. THE WIRING that makes it fire. liveness-sweep.sh stamps the id lists
-#      and the visit.recheck PATH (covered by liveness-sweep.test.sh); here the
-#      converse loop's claim-time hook is asserted to read `visit.recheck` as a
-#      PATH and run it, never to eval a command string, and the stamp key is
-#      pinned against liveness-sweep.sh so the writer and the reader cannot
-#      drift apart. Every kind in the shared standing-kinds list re-checks as
+#   2. THE WIRING that makes it fire. liveness-sweep.sh writes the census into
+#      its gate's message as this script's command line (covered by
+#      liveness-sweep.test.sh); here the flags that command names are pinned
+#      against what this script parses, so the writer and the reader cannot
+#      drift apart. The converse loop's claim-time hook, which reads a stamp
+#      nothing writes any more, is still asserted to run it as a PATH, never to
+#      eval a command string, until it retires with the converse loop's move to
+#      conversations. Every kind in the shared standing-kinds list re-checks as
 #      standing.
 # Hermetic: reads the repo, stubs `gc`; no city, no Dolt, no network, no gh.
 set -u
@@ -69,21 +71,17 @@ bash -n "$SCRIPT" && ok "liveness-recheck.sh: valid bash" \
     || bad "liveness-recheck.sh: valid bash" "bash -n failed"
 
 # --- the gc stub -------------------------------------------------------------
-# Answers the four reads the script performs, each from a file so a case can
-# inject a failure. Both bead reads are `bd list`; the demand one is the one
-# carrying --has-metadata-key, which is how the stub tells them apart:
-#   gc bd show <visit> --json                    <- $STUB_VISIT   ("FAIL" => exit 1)
+# Answers each read the script performs from a file of its own, so a case can
+# inject a failure:
 #   gc bd list --id ... --all --json             <- $STUB_BEADS   ("FAIL" => exit 1)
-#   gc bd list --has-metadata-key gc.demand_for  <- $STUB_DEMANDS ("FAIL" => exit 1)
+#   gc bd gate list --json --limit 0             <- $STUB_GATES   ("FAIL" => exit 1)
 #   gc bd ready --unassigned ...                 <- $STUB_READY   ("FAIL" => exit 1)
 mkdir -p "$TMP/bin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 [ "$1" = "bd" ] || exit 0
-demandq=""
-for a in "$@"; do case "$a" in --has-metadata-key) demandq=1 ;; esac; done
 case "$2" in
-    show)  f="${STUB_VISIT:-}" ;;
-    list)  if [ -n "$demandq" ]; then f="${STUB_DEMANDS:-}"; else f="${STUB_BEADS:-}"; fi ;;
+    list)  f="${STUB_BEADS:-}" ;;
+    gate)  [ "${3:-}" = list ] || exit 0; f="${STUB_GATES:-}" ;;
     ready) f="${STUB_READY:-}" ;;
     *)     exit 0 ;;
 esac
@@ -102,12 +100,14 @@ bead() { # bead <id> <status> <metadata-json> [title]
 }
 verdict_of() { printf '%s' "$1" | jq -r --arg id "$2" '[(.new[], .carried[]) | select(.id == $id)] | .[0].verdict // "ABSENT"'; }
 
-STUB_VISIT="$TMP/visit.json";     export STUB_VISIT
 STUB_BEADS="$TMP/beads.json";     export STUB_BEADS
 STUB_READY="$TMP/ready.json";     export STUB_READY
-STUB_DEMANDS="$TMP/demands.json"; export STUB_DEMANDS
-# Most cases have nobody owing anything; the ones that do overwrite this.
-printf '[]\n' > "$STUB_DEMANDS"
+STUB_GATES="$TMP/gates.json";     export STUB_GATES
+# A human gate a person owes, as `gate list` prints it.
+hgate() { jq -nc --arg id "$1" '{id: $id, issue_type: "gate", await_type: "human", await_id: "some-question", status: "open"}'; }
+# Most cases have nobody owing anything; the ones that do overwrite this. With
+# no gate open, bd prints null.
+printf 'null\n' > "$STUB_GATES"
 
 # --- 1. the verdict classes and their precedence -----------------------------
 echo "── every listed id is re-derived into exactly one verdict ──"
@@ -117,7 +117,7 @@ jq -nc --argjson b "[
  ,$(bead b-routed  open   '{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}')
  ,$(bead b-held    open   '{"triage.hold":"waiting on the operator"}')
  ,$(bead b-take    open   '{"gc.takeaway":"routed — nothing further needed here"}')
- ,$(bead b-demand  open   '{"gc.takeaway":"holding — needs a decision"}')
+ ,$(bead b-demand  open   '{"gc.takeaway":"holding — needs a decision"}' | jq -c '.dependencies = [{issue_id: "b-demand", depends_on_id: "g-1", type: "blocks"}]')
  ,$(bead b-stand   open   '{"task_kind":"feedback-pattern"}')
  ,$(bead b-parked  open   '{}')
  ,$(bead b-marker  open   '{"merge_result":"pull_request","pr_number":"349"}')
@@ -126,7 +126,7 @@ jq -nc --argjson b "[
 # b-stand IS ready — a standing record is open, unblocked and unassigned by
 # design, which is exactly why every other test here reads it as idle.
 jq -nc '[{id:"b-idle"},{id:"b-closed"},{id:"b-routed"},{id:"b-held"},{id:"b-take"},{id:"b-demand"},{id:"b-stand"},{id:"b-marker"}]' > "$STUB_READY"
-jq -nc '[{id:"d-1",metadata:{"gc.demand_for":"b-demand"}}]' > "$STUB_DEMANDS"
+printf '[%s,%s]\n' "$(hgate g-1)" "$(jq -nc '{id: "g-timer", issue_type: "gate", await_type: "timer", status: "open"}')" > "$STUB_GATES"
 IDS="b-idle,b-closed,b-routed,b-held,b-take,b-demand,b-stand,b-parked,b-marker,b-gone"
 C="$("$SCRIPT" --ids "$IDS" --json 2>/dev/null)"
 
@@ -138,16 +138,16 @@ eq "$(verdict_of "$C" b-held)"   "held"       "a triage.hold that appeared since
 # nothing clears it, so on its own it dates a sitting rather than naming a live
 # wait. Flagged so the sitting reads what was concluded, and left on the agenda
 # so nothing has to notice a board row to bring it back.
-eq "$(verdict_of "$C" b-take)"   "recorded"   "a takeaway with no open demand records a sitting that ended"
-eq "$(verdict_of "$C" b-demand)" "held"       "an OPEN demand on the bead is the hold — a person owes that answer"
+eq "$(verdict_of "$C" b-take)"   "recorded"   "a takeaway with no open gate records a sitting that ended"
+eq "$(verdict_of "$C" b-demand)" "held"       "an OPEN human gate blocking the bead is the hold — a person owes that answer"
 eq "$(verdict_of "$C" b-stand)"  "standing"   "a standing record is held-by-design, never an idle bead (tk-rw2ra)"
 eq "$(verdict_of "$C" b-parked)" "not-ready"  "a bead that left the ready set was parked or blocked"
 eq "$(verdict_of "$C" b-marker)" "marker"     "a merge_result marker is FLAGGED, not dropped"
 eq "$(verdict_of "$C" b-gone)"   "unreadable" "an id the read did not return stays visible"
 
-printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-demand")] | .[0].detail | test("demand d-1 is open")' >/dev/null 2>&1 \
-    && ok "the held detail names the demand bead a person has to answer" \
-    || bad "the held detail names the demand bead" "$(printf '%s' "$C" | jq -r '[(.new[]) | select(.id == "b-demand")] | .[0].detail')"
+printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-demand")] | .[0].detail | test("human gate g-1 is open")' >/dev/null 2>&1 \
+    && ok "the held detail names the gate a person has to clear" \
+    || bad "the held detail names the gate" "$(printf '%s' "$C" | jq -r '[(.new[]) | select(.id == "b-demand")] | .[0].detail')"
 printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-take")] | .[0].detail | test("gc.takeaway=routed")' >/dev/null 2>&1 \
     && ok "the recorded detail carries the takeaway text itself" \
     || bad "the recorded detail carries the takeaway" "$(printf '%s' "$C" | jq -r '[(.new[]) | select(.id == "b-take")] | .[0].detail')"
@@ -161,13 +161,17 @@ printf '%s' "$C" | jq -e '[(.new[], .carried[]) | select(.id == "b-stand")] | .[
 eq "$(printf '%s' "$C" | jq -r '.summary.new_listed')" "10" "every listed id is accounted for"
 eq "$(printf '%s' "$C" | jq -r '.summary.new_live')"   "4" "live agenda = idle + marker + recorded + unreadable (never the resolved/worked/held/standing/parked)"
 
-# Mutate the guard: close the demand (it leaves every not-closed listing) and
-# the bead it held comes back onto the agenda under its own takeaway. Re-runs
-# the script into $CX; $C above stays the pre-mutation census.
-jq -nc '[]' > "$STUB_DEMANDS"
+# Mutate the guard: clear the gate (it leaves the not-closed gate listing) and
+# the bead it held comes back onto the agenda under its own takeaway, its
+# blocks edge left behind as bd leaves it. Re-runs the script into $CX; $C above
+# stays the pre-mutation census. A gate of another type holds nothing either.
+printf 'null\n' > "$STUB_GATES"
 CX="$("$SCRIPT" --ids "$IDS" --json 2>/dev/null)"
-eq "$(verdict_of "$CX" b-demand)" "recorded" "the demand closes → the bead it held is on the agenda again"
-jq -nc '[{id:"d-1",metadata:{"gc.demand_for":"b-demand"}}]' > "$STUB_DEMANDS"
+eq "$(verdict_of "$CX" b-demand)" "recorded" "the gate clears → the bead it held is on the agenda again"
+jq -nc '[{id: "g-1", issue_type: "gate", await_type: "timer", status: "open"}]' > "$STUB_GATES"
+CX="$("$SCRIPT" --ids "$IDS" --json 2>/dev/null)"
+eq "$(verdict_of "$CX" b-demand)" "recorded" "a gate that is not a human gate holds nothing"
+printf '[%s]\n' "$(hgate g-1)" > "$STUB_GATES"
 
 # The text report prints one bucket per verdict and NOTHING else, so a verdict
 # with no bucket line is dropped from it silently while still counted in the
@@ -240,7 +244,7 @@ echo "── a bead held for placement reads as that wait, whatever else it carr
 # recorded would put the same decision on this sitting's agenda too. The queue
 # lists such a bead whether or not a blocker holds it or the first reaction left
 # its takeaway, so neither sends it to not-ready, recorded or idle. A parent or
-# a route places the bead whatever its marker says, and an open demand is a
+# a route places the bead whatever its marker says, and an open human gate is a
 # person's answer owed, which outranks the wait as it does in the sweep.
 jq -nc --argjson b "[
   $(bead p-plain    open '{"placement":"pending"}')
@@ -252,10 +256,11 @@ jq -nc --argjson b "[
  ,$(bead p-demand   open '{"placement":"pending"}')
 ]" '$b
   | map(if (.id == "p-blocked" or .id == "p-blk-take") then .dependencies = [{depends_on_id: "tk-blocker", type: "blocks"}] else . end)
-  | map(if .id == "p-parent" then (.parent = "tk-epic" | .dependencies = [{depends_on_id: "tk-epic", type: "parent-child"}]) else . end)' > "$STUB_BEADS"
-# The two blocked beads and the demanded one left the ready set.
+  | map(if .id == "p-parent" then (.parent = "tk-epic" | .dependencies = [{depends_on_id: "tk-epic", type: "parent-child"}]) else . end)
+  | map(if .id == "p-demand" then .dependencies = [{depends_on_id: "g-2", type: "blocks"}] else . end)' > "$STUB_BEADS"
+# The two blocked beads and the one a gate holds left the ready set.
 jq -nc '[{id:"p-plain"},{id:"p-take"},{id:"p-parent"},{id:"p-routed"}]' > "$STUB_READY"
-jq -nc '[{id:"d-2",metadata:{"gc.demand_for":"p-demand"}}]' > "$STUB_DEMANDS"
+printf '[%s]\n' "$(hgate g-2)" > "$STUB_GATES"
 PIDS="p-plain,p-take,p-blocked,p-blk-take,p-parent,p-routed,p-demand"
 C="$("$SCRIPT" --ids "$PIDS" --json 2>/dev/null)"
 eq "$(verdict_of "$C" p-plain)"    "awaiting-placement" "a bead held for placement reads as that wait, not idle"
@@ -264,7 +269,7 @@ eq "$(verdict_of "$C" p-blocked)"  "awaiting-placement" "…with a blocker holdi
 eq "$(verdict_of "$C" p-blk-take)" "awaiting-placement" "…with a takeaway and a blocker both"
 eq "$(verdict_of "$C" p-parent)"   "idle"               "a parent places the bead whatever its marker says"
 eq "$(verdict_of "$C" p-routed)"   "worked"             "a route places the bead whatever its marker says"
-eq "$(verdict_of "$C" p-demand)"   "held"               "an open demand outranks the placement wait"
+eq "$(verdict_of "$C" p-demand)"   "held"               "an open human gate outranks the placement wait"
 eq "$(printf '%s' "$C" | jq -r '.summary.new_live')" "1" \
    "the placement wait is not on this sitting's live agenda (only the placed, idle bead is)"
 printf '%s' "$C" | jq -e '[.new[] | select(.id == "p-take")] | .[0].detail | test("gc.takeaway=actionable")' >/dev/null 2>&1 \
@@ -283,7 +288,7 @@ printf 'FAIL\n' > "$STUB_READY"
 C="$("$SCRIPT" --ids "p-plain,p-blocked" --json 2>/dev/null)"
 eq "$(verdict_of "$C" p-plain)$(verdict_of "$C" p-blocked)" "awaiting-placementawaiting-placement" \
    "with the ready set unverified, a bead held for placement still reads as that wait"
-printf '[]\n' > "$STUB_DEMANDS"
+printf 'null\n' > "$STUB_GATES"
 
 # --- 2. report-don't-hide on every failure path ------------------------------
 echo "── the bead read failing prints NO census (a partial one looks complete) ──"
@@ -310,24 +315,24 @@ eq "$(printf '%s' "$C" | jq -r '[.new[] | select(.verdict == "not-ready")] | len
     && ok "the report says the ready read failed" \
     || bad "the report says the ready read failed" "no WARNING line in the human report"
 
-echo "── the demand read failing holds NOTHING (never hides the agenda) ──"
-# The inverse defect: an unread demand listing that held every bead would empty
+echo "── the human-gate read failing holds NOTHING (never hides the agenda) ──"
+# The inverse defect: an unread gate listing that held every bead would empty
 # the agenda outright. pr-facts.sh and signoff.sh answer "held" on the same
 # unreadable probe, because there releasing an anchor hands a person's decision
 # back to a pool. Here the cost runs the other way — a bead nothing reports is a
 # bead nobody comes back to — so an unread probe holds nothing, and says so.
-jq -nc --argjson b "[$(bead b-take open '{"gc.takeaway":"routed — nothing further needed here"}')]" '$b' > "$STUB_BEADS"
+jq -nc --argjson b "[$(bead b-take open '{"gc.takeaway":"routed — nothing further needed here"}' | jq -c '.dependencies = [{issue_id: "b-take", depends_on_id: "g-1", type: "blocks"}]')]" '$b' > "$STUB_BEADS"
 jq -nc '[{id:"b-take"}]' > "$STUB_READY"
-printf 'FAIL\n' > "$STUB_DEMANDS"
+printf 'FAIL\n' > "$STUB_GATES"
 C="$("$SCRIPT" --ids "b-take" --json 2>/dev/null)"
-eq "$(printf '%s' "$C" | jq -r '.demand_state')" "unverified" "a failed demand read is reported as unverified, not as an empty set"
-eq "$(verdict_of "$C" b-take)" "recorded" "with demands unverified, the bead stays on the agenda"
+eq "$(printf '%s' "$C" | jq -r '.gate_state')" "unverified" "a failed gate read is reported as unverified, not as an empty set"
+eq "$(verdict_of "$C" b-take)" "recorded" "with gates unverified, the bead stays on the agenda"
 eq "$(printf '%s' "$C" | jq -r '[.new[] | select(.verdict == "held")] | length')" "0" \
-   "no bead is classified held off an unverified demand read"
-"$SCRIPT" --ids "b-take" 2>/dev/null | grep -q "WARNING: the open-demand read failed" \
-    && ok "the report says the demand read failed" \
-    || bad "the report says the demand read failed" "no WARNING line in the human report"
-printf '[]\n' > "$STUB_DEMANDS"
+   "no bead is classified held off an unverified gate read"
+"$SCRIPT" --ids "b-take" 2>/dev/null | grep -q "WARNING: the human-gate read failed" \
+    && ok "the report says the gate read failed" \
+    || bad "the report says the gate read failed" "no WARNING line in the human report"
+printf 'null\n' > "$STUB_GATES"
 
 echo "── PR liveness is never re-checked, and the report says so ──"
 jq -nc --argjson b "[$(bead b-marker open '{"merge_result":"pull_request","pr_number":"349"}')]" '$b' > "$STUB_BEADS"
@@ -342,23 +347,19 @@ printf '%s' "$REPORT" | grep -q "b-marker" \
 eq "$("$SCRIPT" --ids "b-marker" --json 2>/dev/null | jq -r '.pr_liveness')" "not-rechecked" \
    "the JSON census declares pr_liveness=not-rechecked"
 
-# --- 3. the visit stamps are the input, and their absence is legible ---------
-echo "── a visit's stamped id lists drive the census ──"
-jq -nc '[{metadata: {"sweep.new_ids": "b-idle,b-closed", "sweep.carried_ids": "b-held",
-                     "sweep.pass_at": "2026-08-12T00:10:00Z",
-                     "gc.continuation_group": "tk-subject"}}]' > "$STUB_VISIT"
+# --- 3. the census flags are the input ----------------------------------------
+echo "── --ids, --carried and --pass-at drive the census ──"
 jq -nc --argjson b "[
   $(bead b-idle   open   '{}')
  ,$(bead b-closed closed '{"merge_result":"merged"}')
  ,$(bead b-held   open   '{"triage.hold":"parked by the operator"}')
 ]" '$b' > "$STUB_BEADS"
 jq -nc '[{id:"b-idle"},{id:"b-closed"},{id:"b-held"}]' > "$STUB_READY"
-C="$("$SCRIPT" tk-visit --json 2>/dev/null)"
-eq "$(printf '%s' "$C" | jq -r '[.new[].id] | join(",")')"     "b-idle,b-closed" "sweep.new_ids becomes the new section"
-eq "$(printf '%s' "$C" | jq -r '[.carried[].id] | join(",")')" "b-held"          "sweep.carried_ids becomes the carried section"
-eq "$(printf '%s' "$C" | jq -r '.pass_at')" "2026-08-12T00:10:00Z" "the census cut travels with the visit"
-eq "$(printf '%s' "$C" | jq -r '.subject')" "tk-subject"           "the subject is read from the continuation group"
-"$SCRIPT" tk-visit 2>/dev/null | grep -q "2026-08-12T00:10:00Z" \
+C="$("$SCRIPT" --ids b-idle,b-closed --carried b-held --pass-at 2026-08-12T00:10:00Z --json 2>/dev/null)"
+eq "$(printf '%s' "$C" | jq -r '[.new[].id] | join(",")')"     "b-idle,b-closed" "--ids becomes the new section"
+eq "$(printf '%s' "$C" | jq -r '[.carried[].id] | join(",")')" "b-held"          "--carried becomes the carried section"
+eq "$(printf '%s' "$C" | jq -r '.pass_at')" "2026-08-12T00:10:00Z" "the census cut travels with --pass-at"
+"$SCRIPT" --ids b-idle,b-closed --carried b-held --pass-at 2026-08-12T00:10:00Z 2>/dev/null | grep -q "2026-08-12T00:10:00Z" \
     && ok "the report leads with the census cut" \
     || bad "the report leads with the census cut" "no pass timestamp in the header"
 # 1786493400 is that cut, 2026-08-12T00:10:00Z. The script reads the clock
@@ -367,7 +368,7 @@ eq "$(printf '%s' "$C" | jq -r '.subject')" "tk-subject"           "the subject 
 # time would be ten hours out.
 age_at() { awk -v a=1786493400 -v b="$1" 'BEGIN { printf "%.1fh", (b - a) / 3600 }'; }
 T0=$(date -u +%s)
-AGE=$(TZ=HST10 "$SCRIPT" tk-visit --json 2>/dev/null | jq -r '.age')
+AGE=$(TZ=HST10 "$SCRIPT" --ids b-idle --pass-at 2026-08-12T00:10:00Z --json 2>/dev/null | jq -r '.age')
 T1=$(date -u +%s)
 case "$AGE" in
     "$(age_at "$T0")"|"$(age_at "$T1")") ok "the census reports how long ago the cut was ($AGE)" ;;
@@ -375,39 +376,44 @@ case "$AGE" in
 esac
 
 echo "── an id in both lists is counted once, as NEW (the agenda outranks the background) ──"
-jq -nc '[{metadata: {"sweep.new_ids": "b-idle", "sweep.carried_ids": "b-idle,b-held"}}]' > "$STUB_VISIT"
-C="$("$SCRIPT" tk-visit --json 2>/dev/null)"
+C="$("$SCRIPT" --ids b-idle --carried b-idle,b-held --json 2>/dev/null)"
 eq "$(printf '%s' "$C" | jq -r '[.new[].id] | join(",")')"     "b-idle" "the duplicate stays in the new section"
 eq "$(printf '%s' "$C" | jq -r '[.carried[].id] | join(",")')" "b-held" "…and is removed from carried, not counted twice"
 
-echo "── a visit filed before the stamps shipped says so instead of guessing ──"
-jq -nc '[{metadata: {"task_kind": "visit"}}]' > "$STUB_VISIT"
+echo "── the form that took a visit id is gone, and says where the census went ──"
 ERR="$("$SCRIPT" tk-visit 2>&1 >/dev/null)"; RC=$?
-[ "$RC" -ne 0 ] && ok "an unstamped visit exits non-zero" || bad "an unstamped visit exits non-zero" "got rc=$RC"
-printf '%s' "$ERR" | grep -q "sweep.new_ids" \
-    && ok "the error names the missing stamps and the by-hand fallback" \
-    || bad "the error names the missing stamps and the by-hand fallback" "got: $ERR"
+eq "$RC" "2" "a bare bead id is a usage error"
+printf '%s' "$ERR" | grep -q "run the command the liveness-sweep gate's message carries" \
+    && ok "…that points at the command the gate's message carries" \
+    || bad "the refusal names the command to run instead" "got: $ERR"
+ERR="$("$SCRIPT" 2>&1 >/dev/null)"; RC=$?
+eq "$RC" "2" "no ids at all is a usage error"
+ERR="$("$SCRIPT" --carried 2>&1 >/dev/null)"; RC=$?
+eq "$RC" "2" "a flag with no value is a usage error"
 
-echo "── an unreadable visit re-checks nothing rather than re-checking an empty set ──"
-printf 'FAIL\n' > "$STUB_VISIT"
-"$SCRIPT" tk-visit >/dev/null 2>&1 \
-    && bad "an unreadable visit exits non-zero" "exited 0" \
-    || ok "an unreadable visit exits non-zero"
-
-# --- 4. the writer side: liveness-sweep.sh stamps what the re-check reads ----
-# The stamping behaviour itself is exercised end-to-end in
-# liveness-sweep.test.sh; here the key strings are pinned so writer and
-# reader cannot drift apart.
-echo "── liveness-sweep.sh stamps the keys this script reads ──"
-for key in sweep.new_ids sweep.carried_ids sweep.pass_at visit.recheck; do
-    grep -qF "$key=" "$SWEEP" && ok "the sweep stamps $key" \
-        || bad "the sweep stamps $key" "no $key= write in $SWEEP"
+# --- 4. the writer side: liveness-sweep.sh names the flags this script reads ---
+# The command itself is exercised end-to-end in liveness-sweep.test.sh; here
+# the flags are read out of the sweep and each one run through this script, so
+# a flag renamed on one side and not the other fails here.
+echo "── every flag the sweep's re-check command names is one this script parses ──"
+SWEEP_FLAGS="$(grep -oE -- '--(ids|carried|pass-at|[a-z-]+) \$' "$SWEEP" | sed 's/ \$$//' | sort -u)"
+for flag in --ids --carried --pass-at; do
+    printf '%s\n' "$SWEEP_FLAGS" | grep -qx -- "$flag" && ok "the sweep's command names $flag" \
+        || bad "the sweep's command names $flag" "flags found: $(printf '%s' "$SWEEP_FLAGS" | tr '\n' ' ')"
+done
+for flag in $SWEEP_FLAGS; do
+    case "$flag" in --ids|--carried|--pass-at) ;; *) continue ;; esac
+    ERR="$("$SCRIPT" --ids b-idle "$flag" 2026-08-12T00:10:00Z --json 2>&1 >/dev/null)"
+    printf '%s' "$ERR" | grep -q "unknown flag" \
+        && bad "this script parses $flag" "$ERR" || ok "this script parses $flag"
 done
 
 # --- 5. the claim-time hook in the converse loop -----------------------------
-# The stamp only matters if something runs it. The sitting reads the body, so
-# the prep skill (steps 3–4) invokes the re-check before any prep; the hook
-# script it calls reads the stamp as a path and runs it, never eval-ing it.
+# The prep skill (steps 3–4) invokes the re-check before any prep; the hook
+# script it calls reads a visit's stamp as a path and runs it, never eval-ing it.
+# liveness-sweep.sh writes no such stamp any more, so the hook has no writer
+# left and retires with the converse loop's move to conversations; until then
+# it is still held to running what it reads as a path.
 echo "── the converse loop runs the re-check at claim time ──"
 has "the prep step reads visit.recheck"      'visit.recheck'            "$PREP"
 has "the prep step runs the re-check hook"   'converse-recheck-hook.sh' "$PREP"
@@ -416,26 +422,12 @@ grep -qE 'eval +"?\$RECHECK' "$RECHECK_SUT" \
     || ok "the hook never evals a metadata string"
 has "the corrected census supersedes the body" "supersedes the body's lists" "$PREP"
 
-# The seam between the two files is where this fix can rot without either side
-# looking wrong, so the hook is EXECUTED rather than grepped: the stamp key the
-# sweep writes and the key the sitting reads have to be the same string, and a
-# text assertion on each file separately would not notice them drifting apart.
-# The hook ships as converse-recheck-hook.sh; the converse prep skill calls it.
 [ -x "$RECHECK_SUT" ] && ok "converse-recheck-hook.sh is present and executable" \
     || bad "converse-recheck-hook.sh is present and executable" "missing or not +x: $RECHECK_SUT"
 bash -n "$RECHECK_SUT" && ok "converse-recheck-hook: valid bash" \
     || bad "converse-recheck-hook: valid bash" "bash -n failed"
 
-# The one string that has to agree across the two files, read out of each side
-# rather than asserted against a literal here: if this test spelled the key
-# itself, a rename in the formula plus a matching rename in the test would pass
-# while the converse hook silently read a key nobody writes any more.
-STAMP_KEY=$(sed -n 's/.*"\(visit\.[a-z_]*\)=.*/\1/p' "$SWEEP" | head -1)
-HOOK_KEY=$(sed -n 's/.*metadata\["\(visit\.[a-z_]*\)"\].*/\1/p' "$RECHECK_SUT" | head -1)
-[ -n "$STAMP_KEY" ] && ok "the sweep writes a visit.* key" \
-    || bad "the sweep writes a visit.* key" "found none in liveness-sweep.sh"
-eq "$HOOK_KEY" "$STAMP_KEY" "the key the sweep stamps is the key the sitting reads"
-
+STUB_VISIT="$TMP/visit.json"; export STUB_VISIT
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 [ "$1" = "bd" ] && [ "$2" = "show" ] || exit 0
 cat "${STUB_VISIT:-/dev/null}"

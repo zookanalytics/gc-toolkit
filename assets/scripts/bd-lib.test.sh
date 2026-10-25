@@ -664,11 +664,65 @@ eq "$(bstatus tk-w1)|$(bstatus tk-h1)|$(bstatus tk-r1)|$(bstatus tk-p1)|$(bstatu
 out=$(STUB_LIST_FAIL=1 bd_unmake_orphans task_kind "Review branch" "n"); rc=$?
 eq "$rc|$out" "1|" "bd_unmake_orphans: a listing that does not answer returns 1 and closes nothing"
 
+# --- pr_finishing_birth: a PR-finishing child is born carrying the shift -------
+eq "$PR_FINISHING_SHIFT" "-1" "PR_FINISHING_SHIFT: PR-finishing work is filed one level sooner than its anchor"
+eq "$(pr_finishing_birth '{"task_kind":"rework","anchor_bead":"tk-anc"}')" \
+  '{"task_kind":"rework","anchor_bead":"tk-anc","priority_shift":-1}' \
+  "pr_finishing_birth: the work order with priority_shift added, as a number"
+out=$(pr_finishing_birth '["not","an","object"]'); rc=$?
+[ "$rc" -ne 0 ] && [ -z "$out" ] && ok "…and a work order that is not an object prints nothing and fails" \
+  || bad "…and a work order that is not an object prints nothing and fails (rc=$rc out='$out')"
+out=$(pr_finishing_birth ''); rc=$?
+[ "$rc" -ne 0 ] && [ -z "$out" ] && ok "…and so does an empty work order" \
+  || bad "…and so does an empty work order (rc=$rc out='$out')"
+
+# --- pr_finishing_settle and route_finishing: settle under a short lock wait, then route ---
+# A writer that logs its call and the lock wait it was handed into the stub
+# gc's own log, so the order of the settle and the route write reads off one log.
+# It refuses to settle tk-stuck, as a lock it cannot take leaves it.
+cat > "$TMP/qp-log" <<'QP'
+#!/usr/bin/env bash
+printf 'qp %s wait=%s\n' "$*" "${QUEUE_PRIORITY_LOCK_WAIT_SECS:-unset}" >> "$STUB_GC_LOG"
+[ "$2" != tk-stuck ] || { echo "queue-priority: settle: could not take the priority lock" >&2; exit 1; }
+echo "queue-priority: settled $2 at P1"
+QP
+chmod +x "$TMP/qp-log"
+store '[{"id":"tk-c1","status":"open","assignee":"","title":"c1","notes":"","metadata":{"anchor_bead":"tk-anc"}},
+        {"id":"tk-stuck","status":"open","assignee":"","title":"stuck","notes":"","metadata":{"anchor_bead":"tk-anc"}}]'
+reset_log
+out=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-log" pr_finishing_settle tk-c1); rc=$?
+eq "$rc|$out" "0|queue-priority: settled tk-c1 at P1" "pr_finishing_settle: the writer's settle, its narrative on stdout"
+eq "$(grep '^qp ' "$STUB_GC_LOG")" "qp settle tk-c1 wait=$PR_FINISHING_LOCK_WAIT_SECS" "…waiting PR_FINISHING_LOCK_WAIT_SECS for the lock"
+eq "$PR_FINISHING_LOCK_WAIT_SECS" "30" "…which is 30 seconds"
+reset_log
+GC_QUEUE_PRIORITY_TOOL="$TMP/qp-log" route_finishing tk-c1 rig/gc-toolkit.polecat >/dev/null; rc=$?
+eq "$rc" "0" "route_finishing: a child that settles is routed"
+eq "$(meta tk-c1 gc.routed_to)" "rig/gc-toolkit.polecat" "…to the pool named"
+SL=$(grep -n '^qp settle tk-c1 wait=30$' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+RL=$(grep -n '^bd update tk-c1 --set-metadata gc.routed_to=rig/gc-toolkit.polecat$' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+if [ -n "$SL" ] && [ -n "$RL" ] && [ "$SL" -lt "$RL" ]; then
+  ok "…settled under the short lock wait before the route is written"
+else
+  bad "route_finishing did not settle before it routed (settle at log line '${SL:-none}', route at '${RL:-none}')"
+fi
+hasnt "$(grep '^bd update tk-c1' "$STUB_GC_LOG")" "--priority" "…and the route carries no priority"
+reset_log
+GC_QUEUE_PRIORITY_TOOL="$TMP/qp-log" route_finishing tk-stuck rig/gc-toolkit.polecat 2>/dev/null; rc=$?
+eq "$rc" "1" "route_finishing: a child that does not settle returns 1"
+eq "$(meta tk-stuck gc.routed_to)" "<absent>" "…and is not routed"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update tk-stuck" "…by any write"
+
+# One copy of the settle-then-route and of the cadence's lock wait: a creator
+# that routed a child itself, or set the wait itself, would let the two drift.
+copies=$(grep -l -E '^[[:space:]]*route_finishing[[:space:]]*\(\)|QUEUE_PRIORITY_LOCK_WAIT_SECS=' "$HERE"/*.sh \
+  | grep -v -e '\.test\.sh$' -e '/bd-lib\.sh$' | sed "s|^$HERE/||" | paste -sd' ' -)
+eq "$copies" "" "(NO-COPY) only bd-lib.sh defines route_finishing or sets the cadence's lock wait"
+
 # --- validation_work_order: the shape mol-validate reads ----------------------
 eq "$(validation_work_order tk-anc correctness abc123)" \
-  '{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"correctness","reviewed_oid":"abc123"}' \
-  "validation_work_order: task_kind, anchor, lane and the reviewed head"
-eq "$(validation_work_order tk-anc human "")" '{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"human"}' \
+  '{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"correctness","reviewed_oid":"abc123","priority_shift":-1}' \
+  "validation_work_order: task_kind, anchor, lane and the reviewed head, born carrying the PR-finishing shift"
+eq "$(validation_work_order tk-anc human "")" '{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"human","priority_shift":-1}' \
   "…and an empty head leaves the pin out"
 eq "$(printf '%s' "$(validation_work_order tk-anc human x)" | jq -r --arg s "$VALIDATION_SELECT" '. as $m | $s | split(",") | all(.[]; . as $k | $m | has($k))')" "true" \
   "…carrying every key VALIDATION_SELECT names"
@@ -775,6 +829,67 @@ else
   bad "the pass fixture never started its program"
   : > "$PROG_DIR/release"; kill -9 "$PP" 2>/dev/null; wait "$PP" 2>/dev/null
 fi
+
+# --- bd_open_human_gates: one bead's open human gates, by the one rule ----------
+# A gate blocks its bead through a `blocks` edge (gate|blocks|bead). A human gate
+# holds in every status but closed, a pinned one included. A closed gate, a gate
+# of another type, and a gate that blocks some other bead are not this bead's
+# open human gates.
+store '[{"id":"hg-bead","status":"open","title":"waits","metadata":{}},
+  {"id":"tk-a","status":"open","title":"another bead","metadata":{}},
+  {"id":"hg-open","status":"open","issue_type":"gate","await_type":"human","await_id":"k1","title":"asks"},
+  {"id":"hg-pinned","status":"pinned","issue_type":"gate","await_type":"human","await_id":"k2","title":"pinned"},
+  {"id":"hg-closed","status":"closed","issue_type":"gate","await_type":"human","await_id":"k1","title":"answered","close_reason":"ruled: yes"},
+  {"id":"hg-timer","status":"open","issue_type":"gate","await_type":"timer","await_id":"k1","title":"a timer"},
+  {"id":"hg-other","status":"open","issue_type":"gate","await_type":"human","await_id":"k1","title":"blocks another bead"}]'
+printf '%s\n' "hg-open|blocks|hg-bead" "hg-pinned|blocks|hg-bead" "hg-closed|blocks|hg-bead" \
+  "hg-timer|blocks|hg-bead" "hg-other|blocks|tk-a" > "$STUB_DEPS"
+got=$(bd_open_human_gates hg-bead); rc=$?
+eq "$rc" 0 "bd_open_human_gates: a bead whose gates read answers 0"
+eq "$(printf '%s' "$got" | jq -c '[.[].id] | sort')" '["hg-open","hg-pinned"]' "…with the open human gates its blocks edges reach, a pinned one included"
+eq "$(bd_open_human_gates hg-bead k1 | jq -c '[.[].id]')" '["hg-open"]' "…and with a key, only the open ones under that key"
+eq "$(bd_open_human_gates hg-bead k9 | jq -c '.')" '[]' "…an empty array when nothing open is under the key"
+got=$(bd_open_human_gates tk-missing); rc=$?
+[ "$rc" -ne 0 ] && ok "…non-zero for a bead the store cannot find" || bad "a bead the store cannot find answered 0"
+eq "$got" "" "…and nothing printed, so no reader takes it for no gate"
+export STUB_DEP_PARTIAL=1
+got=$(bd_open_human_gates hg-bead); rc=$?
+unset STUB_DEP_PARTIAL
+[ "$rc" -ne 0 ] && [ -z "$got" ] && ok "…and the same for a gate read that fails after printing an array" \
+  || bad "a failed gate read answered rc=$rc with '$got'"
+
+# The readers rely on these fields of each row, which the read hands on whole:
+# the assignee that says a person holds the gate, the description that carries
+# its message, and the type fields the rule reads.
+store '[{"id":"hf-bead","status":"open","title":"waits","metadata":{}},
+  {"id":"hf-gate","status":"open","issue_type":"gate","await_type":"human","await_id":"k1","title":"asks",
+   "assignee":"pat","description":"the whole message\nover two lines","created_at":"2026-10-24T00:00:00Z"},
+  {"id":"hf-closed","status":"closed","issue_type":"gate","await_type":"human","await_id":"k1","title":"done",
+   "close_reason":"ruled: yes","closed_at":"2026-10-24T01:00:00Z"}]'
+printf '%s\n' "hf-gate|blocks|hf-bead" "hf-closed|blocks|hf-bead" > "$STUB_DEPS"
+row=$(bd_human_gates hf-bead | jq -c '.[] | select(.id == "hf-gate")')
+eq "$(printf '%s' "$row" | jq -r '.assignee')" "pat" "bd_human_gates: a row carries the gate's assignee"
+eq "$(printf '%s' "$row" | jq -r '.description')" "the whole message
+over two lines" "…its description whole"
+eq "$(printf '%s' "$row" | jq -r '[.issue_type, .await_type, .await_id, .status, .title, .created_at] | join(" ")')" \
+  "gate human k1 open asks 2026-10-24T00:00:00Z" "…and the fields the open-gate rule and the dedup read"
+eq "$(bd_human_gates hf-bead | jq -r '.[] | select(.id == "hf-closed") | [.close_reason, .closed_at] | join(" ")')" \
+  "ruled: yes 2026-10-24T01:00:00Z" "…and a closed gate its answer and when it came"
+eq "$(bd_open_human_gates hf-bead k1 | jq -r '.[0].assignee')" "pat" "bd_open_human_gates hands the same rows on"
+
+# The listing form of the same rule, for a reader that reads many beads at once.
+LISTING='[{"id":"g1","issue_type":"gate","await_type":"human","status":"open"},
+  {"id":"g2","issue_type":"gate","await_type":"human","status":"closed"},
+  {"id":"g3","issue_type":"gate","await_type":"timer","status":"open"},
+  {"id":"g4","issue_type":"gate","await_type":"human","status":"pinned"},
+  {"id":"w1","issue_type":"task","status":"open","dependencies":[
+     {"issue_id":"w1","depends_on_id":"g1","type":"blocks"},
+     {"issue_id":"w1","depends_on_id":"g4","type":"tracks"}]}]'
+eq "$(printf '%s' "$LISTING" | jq -c "$HUMAN_GATE_JQ"'open_human_gates')" '["g1","g4"]' "open_human_gates: the listing's open human gates, by the same rule"
+eq "$(printf '%s' "$LISTING" | jq -c "$HUMAN_GATE_JQ"'open_human_gates as $g | .[] | select(.id == "w1") | gates_blocking($g)')" '["g1"]' \
+  "gates_blocking: the open gates a row's own blocks edges reach, and no other edge type"
+eq "$(printf '%s' "$LISTING" | jq -c "$HUMAN_GATE_JQ"'open_human_gates as $g | [.[] | select(blocked_by_any($g)) | .id]')" '["w1"]' \
+  "blocked_by_any: the rows a gate holds"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

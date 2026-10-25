@@ -137,78 +137,65 @@ store '[{"id":"tk-a","status":"open","metadata":{"merge_hold":"true"}},
         {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "needs-attention outranks working (hold + open child)"
 
-# needs-attention — an open visit on the anchor is a hold: the merge pass's finalize
-# gate refuses the merge while it stands, so an approved PR that would otherwise
-# read working (here conflicting, DIRTY) waits on a person.
+# needs-attention — an open human gate that blocks the anchor is a hold: the
+# merge pass refuses the merge while it stands, so an approved PR that would
+# otherwise read working (here conflicting, DIRTY) waits on a person.
+GATE='{"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","await_id":"pr-comments.7.x","title":"answer the review","metadata":{}}'
 store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"DIRTY@abc"}},
-        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"}}]'
-eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "an open visit on an approved PR => needs-attention, not working"
+        '"$GATE"']'
+printf 'tk-g|blocks|tk-a\n' > "$STUB_DEPS"
+eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "an open human gate on an approved PR => needs-attention, not working"
 
-# needs-attention — a visit a sitting holds (in_progress) holds the PR too.
+# needs-attention — a gate in any status but closed holds the PR.
 store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
-        {"id":"tk-v","status":"in_progress","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"}}]'
-eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "a visit in a sitting (in_progress) => needs-attention"
+        {"id":"tk-g","status":"in_progress","issue_type":"gate","await_type":"human","metadata":{}}]'
+printf 'tk-g|blocks|tk-a\n' > "$STUB_DEPS"
+eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "an in_progress human gate => needs-attention"
 
-# precedence — an open visit outranks an open rework child.
+# precedence — an open human gate outranks an open rework child.
 store '[{"id":"tk-a","status":"open","metadata":{}},
         {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}},
-        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"}}]'
-eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "needs-attention outranks working (open visit + open child)"
+        '"$GATE"']'
+printf 'tk-g|blocks|tk-a\n' > "$STUB_DEPS"
+eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "needs-attention outranks working (open human gate + open child)"
 
-# working — a CLOSED visit no longer holds the PR.
+# working — a CLEARED gate no longer holds the PR.
 store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"DIRTY@abc"}},
-        {"id":"tk-v","status":"closed","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"}}]'
-eq "$("$SUT" derive --anchor tk-a)" "working" "a closed visit releases the PR back to working"
+        {"id":"tk-g","status":"closed","issue_type":"gate","await_type":"human","metadata":{}}]'
+printf 'tk-g|blocks|tk-a\n' > "$STUB_DEPS"
+eq "$("$SUT" derive --anchor tk-a)" "working" "a cleared gate releases the PR back to working"
 
-# working — the visit is anchor-scoped: a visit on another bead never holds this PR.
+# working — the gate is anchor-scoped: a gate that blocks another bead never
+# holds this PR.
 store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
-        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-other","gc.routed_to":"human"}}]'
-eq "$("$SUT" derive --anchor tk-a)" "working" "a visit on another bead does not hold this PR"
+        '"$GATE"']'
+printf 'tk-g|blocks|tk-other\n' > "$STUB_DEPS"
+eq "$("$SUT" derive --anchor tk-a)" "working" "a gate on another bead does not hold this PR"
 
-# needs-attention — a visit covers the bead its tracks edge names, and its
-# gc.continuation_group stamp can land empty while the edge stands, so a visit that
-# only tracks the anchor holds the PR too. The derive finds it through the anchor's
-# incoming tracks edges (the edge file), and a `gc bd list` row carries the same
-# edge as {type, depends_on_id}.
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"DIRTY@abc"}},
-        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.routed_to":"human"},"dependencies":[{"issue_id":"tk-v","depends_on_id":"tk-a","type":"tracks"}]}]'
-printf 'tk-v|tracks|tk-a\n' > "$STUB_DEPS"
-eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "a visit that only tracks the anchor (no stamp) => needs-attention"
-
-# working — a visit that tracks another bead does not hold this PR.
+# working — only a human gate holds: a gate with no await type, and a task that
+# blocks the anchor, are not one.
 store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
-        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.routed_to":"human"},"dependencies":[{"issue_id":"tk-v","depends_on_id":"tk-other","type":"tracks"}]}]'
-printf 'tk-v|tracks|tk-other\n' > "$STUB_DEPS"
-eq "$("$SUT" derive --anchor tk-a)" "working" "a visit that tracks another bead does not hold this PR"
+        {"id":"tk-p","status":"open","issue_type":"gate","metadata":{}},
+        {"id":"tk-t","status":"open","issue_type":"task","metadata":{}}]'
+printf 'tk-p|blocks|tk-a\ntk-t|blocks|tk-a\n' > "$STUB_DEPS"
+eq "$("$SUT" derive --anchor tk-a)" "working" "a gate with no await type and a blocking task do not hold the PR"
 
-# working — the stamp is the fallback only for a visit with no tracks edge, so a
-# visit stamped with the anchor whose edge names another bead does not hold it.
+# working — a bead that tracks the anchor blocks nothing: a visit, a
+# conversation or a first reaction holds no PR.
 store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
-        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"},"dependencies":[{"issue_id":"tk-v","depends_on_id":"tk-other","type":"tracks"}]}]'
-printf 'tk-v|tracks|tk-other\n' > "$STUB_DEPS"
-eq "$("$SUT" derive --anchor tk-a)" "working" "an anchor stamp beside a tracks edge to another bead does not hold this PR"
-
-# working — only a visit holds: a bead of another kind tracking the anchor, such as
-# its first reaction, does not.
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
+        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"}},
         {"id":"tk-r","status":"open","metadata":{"task_kind":"reaction"}}]'
-printf 'tk-r|tracks|tk-a\n' > "$STUB_DEPS"
-eq "$("$SUT" derive --anchor tk-a)" "working" "a non-visit bead tracking the anchor does not hold the PR"
+printf 'tk-v|tracks|tk-a\ntk-r|tracks|tk-a\n' > "$STUB_DEPS"
+eq "$("$SUT" derive --anchor tk-a)" "working" "a bead that tracks the anchor does not hold the PR"
 : > "$STUB_DEPS"
 
-# working — only a visit holds: another bead in the anchor's continuation group does not.
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
-        {"id":"tk-s","status":"open","metadata":{"gc.continuation_group":"tk-a"}}]'
-eq "$("$SUT" derive --anchor tk-a)" "working" "a non-visit bead in the anchor's continuation group does not hold the PR"
-
-# The visit read is scoped to the anchor, the way the finalize gate reads it: its
-# incoming tracks edges and the beads stamped with it. It never lists every open
-# visit in the store, a read whose answer is the same for every anchor.
+# The gate read is scoped to the anchor, the way the finalize gate reads it: the
+# beads its blocks edges reach. It never lists visits, or every gate, in the store.
 : > "$STUB_GC_LOG"
 "$SUT" derive --anchor tk-a >/dev/null 2>&1
-grep -qF 'bd dep list tk-a --direction=up -t tracks' "$STUB_GC_LOG"; eq "$?" "0" "the derive reads the anchor's incoming tracks edges"
-grep -qF 'gc.continuation_group=tk-a' "$STUB_GC_LOG"; eq "$?" "0" "the derive reads the beads stamped with the anchor"
+grep -qF 'bd dep list tk-a --type blocks' "$STUB_GC_LOG"; eq "$?" "0" "the derive reads the anchor's blocks blockers"
 grep -qF 'task_kind=visit' "$STUB_GC_LOG"; eq "$?" "1" "the derive makes no store-wide read of the open visits"
+grep -qF 'gc.continuation_group' "$STUB_GC_LOG"; eq "$?" "1" "the derive reads no continuation-group stamp"
 
 store '[]'
 "$SUT" derive --anchor tk-a >/dev/null 2>&1

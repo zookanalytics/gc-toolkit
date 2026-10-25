@@ -1,24 +1,25 @@
 #!/usr/bin/env bash
-# liveness-recheck.sh — re-validate a liveness-sweep visit's census at CLAIM
-# time. The visit body is a snapshot cut at pass time and a sitting routinely
-# claims it a day or more later. Three batched bead reads re-derive every
-# listed id's class and print a corrected census.
+# liveness-recheck.sh — re-validate a liveness-sweep gate's census when a
+# person acts on it. The gate's message is a snapshot cut at pass time, and a
+# person routinely reaches it a day or more later. Three batched bead reads
+# re-derive every listed id's class and print a corrected census.
 # Bead state only — no network: a merge_result marker and a recorded takeaway
 # are FLAGGED for the sitting (never grounds for dropping a bead), and every
 # failure path leaves a bead VISIBLE (a failed batched read prints NO census;
 # a failed ready read skips the not-ready rule and says `unverified`; a failed
-# demand read holds nothing and says so; an unreturned id gets its own
+# human-gate read holds nothing and says so; an unreturned id gets its own
 # `unreadable` bucket, counted into the live agenda).
-# Callers: the converse prep step, via the visit.recheck stamp
-# liveness-sweep.sh writes on each batch visit.
+# Callers: whoever acts on a liveness-sweep gate, by the command its message
+# carries: liveness-sweep.sh writes the census into it as these flags.
 # Usage:
-#   liveness-recheck.sh <visit-bead-id> [--all] [--json]
-#   liveness-recheck.sh --ids <id[,id ...]> [--all] [--json]
-# With a visit id it reads sweep.new_ids / sweep.carried_ids / sweep.pass_at.
-#   --all   also enumerate carried ids that are still idle
-#   --json  emit the census as one JSON object
+#   liveness-recheck.sh --ids <id[,id ...]> [--carried <id[,id ...]>] [--pass-at <time>] [--all] [--json]
+#   --ids      the ids new at the pass
+#   --carried  the ids an earlier pass already reported, still unnamed
+#   --pass-at  when the pass cut its census (an ISO-8601 UTC time), for its age
+#   --all      also enumerate carried ids that are still idle
+#   --json     emit the census as one JSON object
 # Read-only: never writes a bead, never touches git, never calls the network.
-# Exit: 0 census printed · 1 unreadable · 2 usage · 3 visit carries no stamps.
+# Exit: 0 census printed · 1 unreadable · 2 usage.
 # NOT set -e: every failure is handled explicitly, routed to the visible side.
 set -uo pipefail
 
@@ -26,8 +27,9 @@ usage() {
     sed -n '/^# Usage:/,/^# Read-only/p' "$0" | sed 's/^# \{0,1\}//'
 }
 
-VISIT=""
 IDS_ARG=""
+CARRIED_ARG=""
+PASS_AT=""
 WANT_JSON=0
 WANT_ALL=0
 
@@ -35,16 +37,23 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --json) WANT_JSON=1 ;;
         --all)  WANT_ALL=1 ;;
-        --ids)
-            if [ $# -lt 2 ]; then echo "liveness-recheck: --ids needs a value" >&2; exit 2; fi
+        --ids|--carried|--pass-at)
+            if [ $# -lt 2 ]; then echo "liveness-recheck: $1 needs a value" >&2; exit 2; fi
+            case "$1" in
+                --ids)     IDS_ARG="$2" ;;
+                --carried) CARRIED_ARG="$2" ;;
+                --pass-at) PASS_AT="$2" ;;
+            esac
             shift
-            IDS_ARG="$1"
             ;;
         -h|--help) usage; exit 0 ;;
         -*) echo "liveness-recheck: unknown flag: $1" >&2; usage >&2; exit 2 ;;
         *)
-            if [ -n "$VISIT" ]; then echo "liveness-recheck: unexpected argument: $1" >&2; exit 2; fi
-            VISIT="$1"
+            # The form that took a visit id read the census the sweep stamped on
+            # its visit. A gate carries none, and its message carries the
+            # command with the census in these flags instead.
+            echo "liveness-recheck: unexpected argument: $1 — the census rides the flags now: run the command the liveness-sweep gate's message carries (--ids, --carried, --pass-at)" >&2
+            exit 2
             ;;
     esac
     shift
@@ -66,6 +75,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/dispatch-path.sh" || { echo "liveness-recheck: cannot source dispatch-path.sh from $HERE" >&2; exit 1; }
 # shellcheck source=placement.sh
 . "$HERE/placement.sh" || { echo "liveness-recheck: cannot source placement.sh from $HERE" >&2; exit 1; }
+# The one rule of which human gates still hold the bead they block, shared with
+# every reader of a bead's gates. Exposes $HUMAN_GATE_JQ, whose open_human_gates
+# the gate read below keeps and whose gates_blocking the classify block splices
+# in.
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "liveness-recheck: cannot source bd-lib.sh from $HERE" >&2; exit 1; }
 
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
@@ -82,40 +97,13 @@ split_ids() {
         | awk '{ for (i = 1; i <= NF; i++) if (!seen[$i]++) print $i }'
 }
 
-PASS_AT=""
-SUBJECT=""
-NEW_RAW=""
-CARRIED_RAW=""
-
-if [ -n "$VISIT" ] && [ -n "$IDS_ARG" ]; then
-    echo "liveness-recheck: pass a visit id OR --ids, not both" >&2
-    exit 2
-fi
-
-if [ -n "$VISIT" ]; then
-    VISIT_JSON=$(gc bd show "$VISIT" --json 2>/dev/null | scrub)
-    if ! printf '%s' "$VISIT_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-        echo "liveness-recheck: cannot read visit $VISIT — nothing re-checked" >&2
-        exit 1
-    fi
-    VISIT_META=$(printf '%s' "$VISIT_JSON" | jq -c '.[0].metadata // {}')
-    NEW_RAW=$(printf   '%s' "$VISIT_META" | jq -r '.["sweep.new_ids"]     // ""')
-    CARRIED_RAW=$(printf '%s' "$VISIT_META" | jq -r '.["sweep.carried_ids"] // ""')
-    PASS_AT=$(printf   '%s' "$VISIT_META" | jq -r '.["sweep.pass_at"]     // ""')
-    SUBJECT=$(printf   '%s' "$VISIT_META" | jq -r '.["gc.continuation_group"] // ""')
-    if [ -z "$NEW_RAW" ] && [ -z "$CARRIED_RAW" ]; then
-        echo "liveness-recheck: visit $VISIT carries no sweep.new_ids / sweep.carried_ids." >&2
-        echo "  Either it is not a liveness-sweep visit, or it was filed before those stamps" >&2
-        echo "  shipped. Re-check by hand with: liveness-recheck.sh --ids <ids from the body>" >&2
-        exit 3
-    fi
-elif [ -n "$IDS_ARG" ]; then
-    NEW_RAW="$IDS_ARG"
-else
-    echo "liveness-recheck: give a visit bead id, or --ids <id,...>" >&2
+if [ -z "$IDS_ARG" ] && [ -z "$CARRIED_ARG" ]; then
+    echo "liveness-recheck: give --ids <id,...>, the command a liveness-sweep gate's message carries" >&2
     usage >&2
     exit 2
 fi
+NEW_RAW="$IDS_ARG"
+CARRIED_RAW="$CARRIED_ARG"
 
 NEW_IDS=$(split_ids "$NEW_RAW")
 CARRIED_IDS=$(split_ids "$CARRIED_RAW")
@@ -145,7 +133,7 @@ if ! jq -e 'type == "array"' "$BEADFILE" >/dev/null 2>&1; then
     echo "liveness-recheck: the batched bead read FAILED — no census printed." >&2
     echo "  (gc bd list --id … --all --brief --json --limit=0 returned no JSON array; a bd" >&2
     echo "  without --id or --brief would fail exactly here.)" >&2
-    echo "  Nothing in the visit body has been re-verified; treat its census as unchecked," >&2
+    echo "  Nothing in the gate message has been re-verified; treat its census as unchecked," >&2
     echo "  and re-run this before routing anything." >&2
     exit 1
 fi
@@ -160,27 +148,24 @@ else
     READY_JSON=null
 fi
 
-# --- read 3: the open demands, in one key-existence query ---------------------
-# What a person still owes is its own bead (`gc-helm.sh demand`), stamped
-# gc.demand_for=<gated bead>. That is the hold; `gc.takeaway` is the record of
-# a sitting, which nothing clears, so it cannot say whether anyone is coming
-# back. A demand also blocks its gated bead, which is why the not-ready rule
-# usually catches this first — this read names the person's wait outright, and
-# still sees the demand whose blocks edge did not land.
+# --- read 3: the open human gates, in one listing -----------------------------
+# What a person still owes on a bead is a human gate that blocks it. That is the
+# hold; `gc.takeaway` is the record of a sitting, which nothing clears, so it
+# cannot say whether anyone is coming back. A gate takes the bead it blocks out
+# of the ready set, which is why the not-ready rule usually catches this
+# first — this read names the person's wait outright. The gates come from one
+# `gc bd gate list` of the store, kept to the open human gates by bd-lib.sh's
+# rule (open_human_gates), and each listed bead's own blocks edges, from read 1,
+# say which of them hold it (gates_blocking).
 # Best-effort like the ready set: unread means no bead is held, which lists
 # beads rather than hiding them.
-DEMAND_STATE=verified
-# --include-gates: a demand is a human gate (issue_type=gate), which `bd list`
-# hides by default, so the person's wait would otherwise read as no hold.
-DEMAND_RAW=$(gc bd list --has-metadata-key gc.demand_for --include-gates \
-    --status=open,in_progress,blocked,deferred,hooked,pinned --limit=0 --json 2>/dev/null | scrub)
-if printf '%s' "$DEMAND_RAW" | jq -e 'type == "array"' >/dev/null 2>&1; then
-    DEMAND_JSON=$(printf '%s' "$DEMAND_RAW" | jq -c '
-      [ .[] | {id, for: ((.metadata["gc.demand_for"] // "") | tostring)} | select(.for != "") ]
-      | group_by(.for) | map({key: .[0].for, value: (map(.id) | join(", "))}) | from_entries')
+GATE_STATE=verified
+GATE_RAW=$(gc bd gate list --json --limit 0 2>/dev/null | grep -a -vE '^gc bd:' | scrub)
+if printf '%s' "$GATE_RAW" | jq -e 'type == "array" or . == null' >/dev/null 2>&1; then
+    GATES_JSON=$(printf '%s' "$GATE_RAW" | jq -c "$HUMAN_GATE_JQ"'(. // []) | open_human_gates')
 else
-    DEMAND_STATE=unverified
-    DEMAND_JSON='{}'
+    GATE_STATE=unverified
+    GATES_JSON='[]'
 fi
 
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -201,18 +186,20 @@ fi
 CENSUS=$(jq -n \
     --slurpfile beadfile "$BEADFILE" \
     --argjson ready "$READY_JSON" \
-    --argjson demandby "$DEMAND_JSON" \
+    --argjson gates "$GATES_JSON" \
     --argjson new "$NEW_JSON" \
     --argjson carried "$CARRIED_JSON" \
-    --arg visit "$VISIT" \
-    --arg subject "$SUBJECT" \
     --arg pass_at "$PASS_AT" \
     --arg checked_at "$NOW" \
     --arg age "$AGE" \
     --arg ready_state "$READY_STATE" \
-    --arg demand_state "$DEMAND_STATE" '
+    --arg gate_state "$GATE_STATE" '
   def meta: (.metadata // {});
   def mv($k): ((meta[$k] // "") | tostring);
+  # The open human gates a listed bead waits on, through its own blocks edges:
+  # gates_blocking, from $HUMAN_GATE_JQ.
+  '"$HUMAN_GATE_JQ"'
+  def held_by($b): $b | gates_blocking($gates);
   # Standing-record idioms (never claimable, never close): standing_kinds,
   # from standing-kinds.sh, the list liveness-sweep.sh classifies by.
   '"$STANDING_KINDS_JQ"'
@@ -246,15 +233,15 @@ CENSUS=$(jq -n \
            {verdict: "standing",
             detail: ("task_kind=" + ($b | mv("task_kind"))
                     + " — open, unrouted and unassigned by design; it never closes, and there is no disposition to make")}
-         elif ((($demandby[$id] // "") != "") or (($b | mv("triage.hold")) != "")) then
+         elif (((held_by($b) | length) > 0) or (($b | mv("triage.hold")) != "")) then
            {verdict: "held",
             detail: ((if ($b | mv("triage.hold")) != "" then ["triage.hold=" + ($b | mv("triage.hold"))] else [] end)
-                     + (if ($demandby[$id] // "") != "" then
-                          ["demand " + $demandby[$id] + " is open on it — a person owes this answer"]
+                     + (if (held_by($b) | length) > 0 then
+                          ["human gate " + (held_by($b) | join(", ")) + " is open on it — a person owes this answer"]
                         else [] end))
                     | join("  ")}
          # Intake held it as new work for the placement sitting, and gc-helm.sh
-         # unplaced lists it there, so this visit would put the same decision
+         # unplaced lists it there, so this gate would put the same decision
          # on a second agenda. That queue lists the bead whether or not a
          # blocker holds it or a first reaction left a takeaway on it, so this
          # rule comes before the not-ready, marker, recorded and idle rules.
@@ -288,10 +275,9 @@ CENSUS=$(jq -n \
                           or .verdict == "recorded" or .verdict == "unreadable")] | length;
   ($new | map(classify(.))) as $newr
   | ($carried | map(classify(.))) as $carr
-  | {visit: $visit, subject: $subject,
-     pass_at: $pass_at, checked_at: $checked_at, age: $age,
+  | {pass_at: $pass_at, checked_at: $checked_at, age: $age,
      ready_state: $ready_state,
-     demand_state: $demand_state,
+     gate_state: $gate_state,
      pr_liveness: "not-rechecked",
      new: $newr, carried: $carr,
      summary: {new_listed: ($newr | length), new_live: ($newr | live),
@@ -343,20 +329,19 @@ printf '%s' "$CENSUS" | jq -r --argjson all "$WANT_ALL" '
     + bucket($rows; "standing";   "not work — a standing record, held by design; it was never dispositionable"; true)
     + bucket($rows; "not-ready";  "no longer ready — a blocker, gate or park appeared"; true)
     end;
-  ([ "liveness re-check — visit " + (if .visit == "" then "(ad-hoc id list)" else .visit end)
-       + (if .subject == "" then "" else " · subject " + .subject end),
-     "  pass cut " + (if .pass_at == "" then "(unstamped)" else .pass_at end)
+  ([ "liveness re-check",
+     "  pass cut " + (if .pass_at == "" then "(not given)" else .pass_at end)
        + " · re-checked " + .checked_at
        + (if .age == "" then "" else " · " + .age + " old" end),
-     "  reads: bead state OK · ready set " + .ready_state + " · open demands " + .demand_state
+     "  reads: bead state OK · ready set " + .ready_state + " · open human gates " + .gate_state
        + " · PR liveness NOT re-checked (a merge marker is flagged, never dropped)" ]
    + (if .ready_state == "unverified"
       then ["  WARNING: the ready read failed, so the not-ready rule was SKIPPED. A bead that has",
             "  since been parked or blocked still reads as idle here — nothing is hidden, but the",
             "  agenda may be longer than it truly is."]
       else [] end)
-   + (if .demand_state == "unverified"
-      then ["  WARNING: the open-demand read failed, so no bead reads as held. One a person is",
+   + (if .gate_state == "unverified"
+      then ["  WARNING: the human-gate read failed, so no bead reads as held. One a person is",
             "  answering right now is listed here — nothing is hidden, but check the item before",
             "  routing it."]
       else [] end)
@@ -367,5 +352,5 @@ printf '%s' "$CENSUS" | jq -r --argjson all "$WANT_ALL" '
         + (.summary.new_live | tostring) + " live; "
         + (.summary.carried_listed | tostring) + " carried listed -> "
         + (.summary.carried_live | tostring) + " live.",
-      "The visit body is the snapshot; this is the board. Work from this."]
+      "The message on the gate is the snapshot; this is the board. Work from this."]
   ) | .[]'

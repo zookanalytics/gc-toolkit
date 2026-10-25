@@ -6,9 +6,9 @@
 # clears the gate with `bd gate resolve`, whose reason is the answer, headed
 # `ruled:`, `moot:` or `benign:`. Any pack, formula or person may file one with
 # that call, and every reader treats it the same. This helper makes the same
-# call and adds two things the call does not do: it files nothing while an open
-# human gate under the key already blocks the bead, and it keeps the quiet
-# period a call declares.
+# call and adds what the call does not do: it files nothing while an open human
+# gate under the key already blocks the bead, it keeps the quiet period a call
+# declares, and it makes the gate's description the message it was given.
 #   human-gate.sh --subject <bead-id> --key <situation-key> --message <text>
 #                 [--quiet-window <seconds>]
 # The counterpart withdraws the filer's own gate once the situation it asked
@@ -130,8 +130,10 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 # Every decision below reads the bead's human gates through its `blocks` edges,
-# the one reader rule, closed gates included. A subject that names no bead
-# fails this read, and nothing is filed or resolved on an unreadable one.
+# the one reader rule, closed gates included, and tells the open ones by
+# open_human_gate, bd-lib.sh's rule of which gates still hold. A subject that
+# names no bead fails this read, and nothing is filed or resolved on an
+# unreadable one.
 if ! GATES=$(bd_human_gates "$SUBJECT"); then
   warn "could not read the human gates of '$SUBJECT' (no such bead, or its store did not answer). Nothing was filed or resolved."
   exit 1
@@ -150,8 +152,7 @@ fi
 # situation finds and resolves.
 if [ "$RETRACT" = 1 ]; then
   REASON="moot: $MESSAGE"
-  OPEN_IDS=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" \
-    '.[] | select((.await_id // "") == $k and (.status // "") != "closed") | .id' 2>/dev/null)
+  OPEN_IDS=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" "$HUMAN_GATE_JQ"'.[] | select(open_human_gate($k)) | .id' 2>/dev/null)
   if [ -z "$OPEN_IDS" ]; then
     warn "no open human gate under [$KEY] blocks $SUBJECT — nothing to withdraw"
     exit 0
@@ -187,8 +188,7 @@ fi
 # bd keeps no idempotency at create, so two writers racing in the same instant
 # can both file; the board folds both onto the bead's row, and one answer
 # clears both.
-OPEN_GATE=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" \
-  '[ .[] | select((.await_id // "") == $k and (.status // "") != "closed") ][0].id // empty' 2>/dev/null)
+OPEN_GATE=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" "$HUMAN_GATE_JQ"'[ .[] | select(open_human_gate($k)) ][0].id // empty' 2>/dev/null)
 if [ -n "$OPEN_GATE" ]; then
   warn "gate $OPEN_GATE already asks for $SUBJECT [$KEY] — not filing another"
   printf '%s\n' "$OPEN_GATE"
@@ -243,6 +243,14 @@ if [ -z "$GATE" ] || [ "$GATE" = null ]; then
   exit 1
 fi
 
+# The gate's description is the whole message: what the person reads, and what
+# a filer that keeps its report current compares against. bd gate create puts a
+# head of its own above the reason it is given and takes no description, so the
+# description is set to the message in a second write, which the read-back below
+# checks. Filing is rare beside the dedup above, so the write is paid once per
+# gate.
+gc bd update "$GATE" --description "$MESSAGE" </dev/null >/dev/null 2>&1 || true
+
 # The gate asks only while it blocks the bead under the key, so its edge, its
 # type and its await id are read back from the bead's side, the read every other
 # reader makes.
@@ -250,10 +258,14 @@ if ! GOT=$(bd_human_gates "$SUBJECT"); then
   warn "gate $GATE was filed, but the human gates of $SUBJECT did not read back; check that it blocks $SUBJECT under [$KEY]: gc bd dep list $SUBJECT --type blocks --json"
   exit 1
 fi
-if ! printf '%s' "$GOT" | jq -e --arg g "$GATE" --arg k "$KEY" \
-     'any(.[]; .id == $g and (.await_id // "") == $k and (.status // "") != "closed")' >/dev/null 2>&1; then
+if ! printf '%s' "$GOT" | jq -e --arg g "$GATE" --arg k "$KEY" "$HUMAN_GATE_JQ"'any(.[]; .id == $g and open_human_gate($k))' >/dev/null 2>&1; then
   warn "gate $GATE was filed, but it does not read back as an open human gate under [$KEY] that blocks $SUBJECT; repair: gc bd dep add $SUBJECT $GATE --type=blocks, then check its await id with gc bd show $GATE"
   exit 1
+fi
+# A description that did not take still leaves a gate that asks, its message
+# under bd's head, so the filing stands and only the repair is named.
+if ! printf '%s' "$GOT" | jq -e --arg g "$GATE" --arg m "$MESSAGE" 'any(.[]; .id == $g and (.description // "") == $m)' >/dev/null 2>&1; then
+  warn "gate $GATE asks for $SUBJECT [$KEY], but its description did not become the message, so bd's own head stands above it; repair: gc bd update $GATE --description <the message>"
 fi
 
 # The deacon's shift record. Filing a gate is a non-routine action, and this is

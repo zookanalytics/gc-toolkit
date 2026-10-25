@@ -325,7 +325,7 @@ holder's work can be salvaged.
 reads no `blocks` deps, and under a graph.v2 dispatch the routed record is the
 freshly minted workflow root, not the work bead — so a `blocks` edge on the
 work bead gates nothing and a blocked bead reaches you as an offered claim
-(docs/gascity-routing-model.md). Raw pool routing does not have this problem:
+(docs/gascity/routing-model.md). Raw pool routing does not have this problem:
 there the work bead itself is the routed unit and `bd ready` withholds it while
 a blocker is open. This gate is the pack-level safety net for the formula-sling
 path — if the work bead carries an open `blocks` blocker, refuse to build it,

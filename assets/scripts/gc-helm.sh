@@ -151,10 +151,9 @@ and what it leaves running. Re-running the text form with the same text files
 no second gate, and a --body on the re-run becomes that gate's description. It
 refuses a bead in flight (one claimed, in_progress or hooked, one carrying
 branch, merge_result or rejection_reason, or one with a workflow past
-load-context), because the bead's own edge would hold its merge, and it
-refuses a demand gate as the bead to wait on. Closing the gate releases the
-park; removing one bead's edge (gc bd dep remove <bead> <gate>) releases that
-bead alone.
+load-context), because the bead's own edge would hold its merge. Closing the
+gate releases the park; removing one bead's edge (gc bd dep remove <bead>
+<gate>) releases that bead alone.
 
 priority moves where work queues (docs/steering.md). A bead's priority is the
 priority of the bead it follows plus its own shift: a member follows its most
@@ -1691,11 +1690,6 @@ cmd_demand() {
 #   live direct blocker: merge.sh holds an anchor's merge on any open blocker
 #   of its own, and bd refuses to close a bead that has one. Parking its parent
 #   holds the parent's unstarted work and leaves this bead's PR landing.
-# - a demand gate (gc.demand_for) as the bead to wait on. A demand gate is a
-#   wait on the operator's decision, and the operator ruled that such a wait
-#   does not hold armed work, so a park behind one would read as that decision
-#   rather than as a park. The text form's gate carries no gc.demand_for, and
-#   its text can name the decision the park waits for.
 # - a bead to wait on that is closed, lives in another store, or sits under
 #   the bead: each edge would hold nothing, or bd refuses it.
 
@@ -1898,11 +1892,6 @@ cmd_park() {
             || { echo "$PROG: park: --waiting-on '$wait_on' does not resolve${path:+ in rig $path}. Nothing was written." >&2; exit 4; }
         if [ "$(printf '%s' "$wait_row" | jq -r '.status // ""' 2>/dev/null || true)" = closed ]; then
             echo "$PROG: park: $wait_on is closed, so an edge onto it holds nothing. Nothing was written." >&2
-            exit 2
-        fi
-        demand_for=$(printf '%s' "$wait_row" | jq -r '((.metadata // {})["gc.demand_for"] // "") | tostring' 2>/dev/null || true)
-        if [ -n "$demand_for" ]; then
-            echo "$PROG: park: $wait_on is a demand gate (gc.demand_for=$demand_for). It waits on the operator's decision, and the operator ruled that such a wait does not hold armed work, so a park behind it would read as that decision rather than as a park. Use the text form instead, and name the decision the park waits for: $PROG park $bead \"<why it is parked and what releases it>\". Nothing was written." >&2
             exit 2
         fi
         if printf '%s' "$survey" | jq -e --arg w "$wait_on" '(.held + [.poured[].id] + [.flight[].id]) | any(.[]; . == $w)' >/dev/null 2>&1; then
@@ -2225,7 +2214,7 @@ cmd_open() {
     # data-plane outage apart from a genuine not-found.
     # >>> open-subject-exists
     verify_subject "$bead" open "No visit filed." || exit $?
-    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+    subject_clean="$VS_PAYLOAD"
     # <<< open-subject-exists
 
     # A DONE-band row is a finished item, not open work. Minting a fresh
@@ -2532,7 +2521,7 @@ cmd_dismiss() {
     # a data-plane outage, not a missing bead. Dismissing an unverified id would
     # stamp a marker nothing ever clears.
     verify_subject "$bead" dismiss "Nothing was written." || exit $?
-    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+    subject_clean="$VS_PAYLOAD"
 
     # A VISIT id names its own sitting. The board lists a parked visit as a row
     # of its own, and engage accepts the visit id straight off that row, so
@@ -2983,7 +2972,7 @@ cmd_accept() {
     # outage, not a missing bead. The alternative is a sling on a bead that may
     # not exist.
     verify_subject "$bead" accept "Nothing dispatched." || exit $?
-    subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+    subject_clean="$VS_PAYLOAD"
 
     # A VISIT id names the recommendation's subject. The board renders Accept on
     # the folded subject tile, so the common input is the subject id; a visit id
@@ -3024,7 +3013,7 @@ cmd_accept() {
         # the subject "discuss-only" (exit 2) on a state it could not read, where the
         # contract is to fail closed (exit 4).
         verify_subject "$bead" accept "Nothing dispatched." "the subject '$bead' this visit names" || exit $?
-        subject="$VS_ID"; subject_clean="$VS_PAYLOAD"
+        subject_clean="$VS_PAYLOAD"
     fi
 
     # gc.recommended_formula is the live recommendation; gc.recommended_formula_dispatched
@@ -3366,7 +3355,7 @@ EOF
     while IFS="$TAB" read -r _eps_key _eps_label _eps_letter; do
         [ -n "$_eps_key" ] && [ -n "$_eps_letter" ] || continue
         [ -n "$_epv_smenu" ] && _epv_smenu="$_epv_smenu · "
-        _epv_smenu="$_epv_smenu[$_eps_letter] $_eps_label"
+        _epv_smenu="${_epv_smenu}[$_eps_letter] $_eps_label"
         _epv_smap="$_epv_smap$_eps_letter $_eps_key
 "
     done <<EOF
@@ -3413,7 +3402,7 @@ engage_prompt_model() {
         _epm_lbl=$(engage_model_label "$_epm_m")
         [ "$_epm_m" = opus ] && _epm_lbl="$_epm_lbl (default)"
         [ -n "$_epm_menu" ] && _epm_menu="$_epm_menu · "
-        _epm_menu="$_epm_menu[$_epm_i] $_epm_lbl"
+        _epm_menu="${_epm_menu}[$_epm_i] $_epm_lbl"
         _epm_map="$_epm_map$_epm_i $_epm_m
 "
     done
@@ -3485,7 +3474,7 @@ engage_prompt_rig() {
         _epr_map="$_epr_map$_epr_i $_epr_name
 "
         [ -n "$_epr_menu" ] && _epr_menu="$_epr_menu · "
-        _epr_menu="$_epr_menu[$_epr_i] $_epr_name"
+        _epr_menu="${_epr_menu}[$_epr_i] $_epr_name"
     done <<EOF
 $(printf '%s' "$RIGS" | jq -r '.[] | [.name, .path] | @tsv' 2>/dev/null)
 EOF

@@ -6,15 +6,13 @@
 # return a bead to a pool to be claimed again, and some of those return it only
 # when its work has not already reached a downstream court.
 #
-#   visit          release the assignee and NOTHING else. A visit's metadata
-#                  (route, continuation group, task_kind) is its identity.
 #   review         a review bead is the source bead of its own mol-review
 #                  molecule and carries no worktree of its own, so it disposes by
 #                  the source contract below (delete-source is a no-op on an
 #                  input-convoy root, reopen-source returns it to its review
-#                  pool). It is recognised by task_kind before the source arm the
-#                  way a visit is, and the witness salvage scope gate skips its
-#                  worktree salvage and merge-verify for the same reason.
+#                  pool). It is recognised by task_kind before the source arm,
+#                  and the witness salvage scope gate skips its worktree salvage
+#                  and merge-verify for the same reason.
 #   workflow-root  skip. A graph.v2 root is not schedulable work: nothing
 #                  claims it, and it closes when its workflow-finalize step
 #                  closes. Setting it open+unassigned+routed is what makes a
@@ -42,8 +40,10 @@
 #                  offered again rather than left bd-ready but unrouted. EXCEPT
 #                  when the work already reached a downstream court — an in-flight
 #                  PR (merge_result pre_open_gate/pull_request) the refinery owns
-#                  landing, or a human gate (gc.routed_to=human) a person owns
-#                  clearing: reopening would return that work to the pool — skip it.
+#                  landing, a human route (gc.routed_to=human) a person owns
+#                  clearing, or a conversation, a task assigned to `human` or to
+#                  the alias of its sitting (conversation.sh): reopening would
+#                  return that work to the pool — skip it.
 #
 # The root read is what separates the two step arms, and it is a read of the
 # root itself — not of the input convoy, and not of the anchors it tracks. A
@@ -66,8 +66,7 @@
 #   orphan-dispose.sh <bead-id> [--owner <owner>] [--apply] [--json]
 # Without --apply this previews: it classifies and prints, and writes nothing.
 #   --owner <owner>  the dead owner orphan recovery resolved, for the report.
-#                    It is not the assignee guard: on a step the owner is
-#                    usually gc.session_id and the assignee a live pool slot.
+#                    It is not the assignee guard.
 #   --json           emit the result as one JSON object instead of key=value.
 # Exit: 0 disposed or previewed · 1 unreadable bead or failed write ·
 #       2 usage · 3 PARTIAL write (some fields landed, some did not).
@@ -119,6 +118,10 @@ read_bead() { gc bd show "$1" --json 2>/dev/null | scrub; }
 # Resolved from $0 so a copy of this script runs against the copy beside it.
 HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 RUN_CANCEL="${GC_RUN_CANCEL_TOOL:-$HERE/run-cancel.sh}"
+# The one definition of a conversation's shape: conversation_assignee, which
+# the source arm's skip asks.
+# shellcheck source=conversation.sh
+. "$HERE/conversation.sh" || { echo "orphan-dispose: cannot source conversation.sh from $HERE" >&2; exit 1; }
 
 # The source arm's two `gc workflow` calls run under a hard bound. They are slow
 # rather than stuck: each scans every store in the city, and a healthy call takes
@@ -145,6 +148,7 @@ fi
 META="$(printf '%s' "$BEAD_JSON" | jq -c '.[0].metadata // {}')"
 STATUS="$(printf '%s' "$BEAD_JSON" | jq -r '.[0].status // ""')"
 ASSIGNEE="$(printf '%s' "$BEAD_JSON" | jq -r '.[0].assignee // ""')"
+ISSUE_TYPE="$(printf '%s' "$BEAD_JSON" | jq -r '.[0].issue_type // ""')"
 mval() { printf '%s' "$META" | jq -r --arg k "$1" '.[$k] // ""'; }
 
 TASK_KIND="$(mval task_kind)"
@@ -155,14 +159,11 @@ ROOT_ID="$(mval gc.root_bead_id)"
 ROUTED="$(mval gc.routed_to)"
 MERGE_RESULT="$(mval merge_result)"
 
-# Classification order matters. A visit and a review are each the source bead of
-# their own molecule (mol-visit, mol-review), so both must be recognised by
-# task_kind before the source arm would claim them. Root before step: gascity's
-# own IsWorkflowRoot is gc.kind=workflow OR gc.formula_contract=graph.v2, and a
-# step carries neither.
-if [ "$TASK_KIND" = "visit" ]; then
-    CLASS="visit"
-elif [ "$TASK_KIND" = "review" ]; then
+# Classification order matters. A review is the source bead of its own
+# molecule (mol-review), so it must be recognised by task_kind before the source
+# arm would claim it. Root before step: gascity's own IsWorkflowRoot is
+# gc.kind=workflow OR gc.formula_contract=graph.v2, and a step carries neither.
+if [ "$TASK_KIND" = "review" ]; then
     CLASS="review"
 elif [ "$KIND" = "workflow" ] || [ "$CONTRACT" = "graph.v2" ]; then
     CLASS="workflow-root"
@@ -191,11 +192,13 @@ fi
 
 # The assignee guard is the assignee read a moment ago, never --owner. Orphan
 # recovery resolves an owner by precedence over gc.session_id, assignee and
-# gc.session_name, so on the shape this script most needs to release — a step
-# whose dead owner is its gc.session_id beside a live pool-slot assignee — the
-# two are different strings. Guarding on the owner would mismatch and refuse
-# every such release. --owner records who was proved dead and is reported; the
-# guard's job is the narrower one of catching a re-claim since the read.
+# gc.session_name, so a claimed step's owner is its gc.session_id. A session
+# that claims under an alias, as a named session, a namepool member or an
+# explicit `gc hook <agent>` target does, leaves that alias as the assignee, and
+# the two are then different strings. Guarding on the owner would mismatch and
+# refuse every such release. --owner records who was proved dead and is
+# reported; the guard's job is the narrower one of catching a re-claim since the
+# read.
 GUARD="$ASSIGNEE"
 REPORT_OWNER="$ASSIGNEE"
 [ "$OWNER_SET" = "1" ] && REPORT_OWNER="$OWNER"
@@ -344,16 +347,6 @@ ACTION=""
 DETAIL=""
 
 case "$CLASS" in
-    visit)
-        # Release the assignee and nothing else: no metadata is touched, so the
-        # route, continuation group and task_kind that ARE the visit survive.
-        ACTION="release-assignee"
-        if [ "$APPLY" = "1" ]; then
-            open_bead
-            release_assignee
-            verify
-        fi
-        ;;
     workflow-root)
         ACTION="skip"
         DETAIL="root_not_schedulable"
@@ -407,22 +400,28 @@ case "$CLASS" in
         ;;
     source|review)
         # A review bead shares this arm: it is the source of its own mol-review
-        # molecule, carries no merge_result of its own and is routed to a review
-        # pool rather than a human gate, so neither skip below fires and it is
-        # always reopened to that pool. It reaches here as class=review only so
-        # the witness salvage scope gate can skip its worktree salvage and
-        # merge-verify; the disposal it needs is exactly the source contract.
+        # molecule, carries no merge_result of its own, is routed to a review pool
+        # rather than to `human`, and is held by a review session, not by `human`
+        # or a sitting, so no skip below fires and it is reopened to that pool. It
+        # reaches here as class=review only so the witness salvage scope gate can
+        # skip its worktree salvage and merge-verify; the disposal it needs is
+        # exactly the source contract.
         # A source work bead whose work already reached a downstream court is not
         # lost, so delete-source + reopen-source must not return it to the pool
         # (every cycle would re-detect and re-recover it, stamping a recovery the
-        # crash-loop signal reads as a RATE, escalating a moot visit). Two states
-        # name a downstream court, the same set mol-witness-patrol's
+        # crash-loop signal reads as a RATE, putting a moot question to a person).
+        # These states name a downstream court, the same set mol-witness-patrol's
         # downstream-court-skip filter drops upstream: an in-flight PR (merge_result
-        # pre_open_gate/pull_request) the refinery owns landing, or a human gate
-        # (gc.routed_to=human) a person owns clearing. This is the correctness
-        # boundary at the disposal itself, the last step before the irreversible
-        # reopen — a source bead that moves onto a human gate after that filter, or
-        # reaches this script by recovery or manual replay, is still skipped here.
+        # pre_open_gate/pull_request) the refinery owns landing, a human route
+        # (gc.routed_to=human) a person owns clearing, or a conversation. A
+        # conversation is assigned, not routed, and no session carries either of
+        # its owners: `human`, which Gas City reserves from session aliases, or the
+        # alias of a sitting whose session has closed, which stays the assignee
+        # until a session under that alias takes the conversation back. This is
+        # the correctness boundary at the disposal itself, the last step before
+        # the irreversible reopen — a source bead that moves onto a human route
+        # after that filter, or reaches this script by recovery or manual replay,
+        # is still skipped here.
         # pr.machine is not read: a progressing stamp is written only with an anchor
         # merge_result (which the first arm catches), and unanchoring leaves it
         # behind, so on a repooled bead it is stale. The merge_result arm mirrors
@@ -432,7 +431,10 @@ case "$CLASS" in
             DETAIL="inflight_pr(merge_result=${MERGE_RESULT:-none})"
         elif [ "$ROUTED" = "human" ]; then
             ACTION="skip"
-            DETAIL="human_gate(routed_to=human)"
+            DETAIL="human_route(routed_to=human)"
+        elif [ "$ISSUE_TYPE" = "task" ] && conversation_assignee "$ASSIGNEE" "$BEAD"; then
+            ACTION="skip"
+            DETAIL="conversation(assignee=$ASSIGNEE)"
         else
             ACTION="delegate-source-workflow"
             if [ "$APPLY" = "1" ]; then

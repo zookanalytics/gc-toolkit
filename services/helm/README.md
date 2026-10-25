@@ -12,7 +12,7 @@ the bash dies).
 > and read-only verbs that `gc-helm --help` lists, and `gc-helm.sh --json`
 > exits 2 with `unknown verb`. Its own usage text points at `helm-svc board`.
 > Retiring the remaining verbs is a separate decision recorded under "Two helm
-> boards, and they diverge" in `docs/gascity-human-engagement.md`.
+> boards" in `docs/human-engagement.md`, under Watch items.
 >
 > There is therefore no bash field set left to drift against, and
 > `cmd/helm-svc/contract_parity_test.go` — which parsed the jq object literal
@@ -328,7 +328,7 @@ the row read `m_total=0 · conversation parked`, while the deliverable it was
 waiting for sat open, unassigned and unrouted, invisible.
 
 Converse files routed work, and the demand beads that record what a person
-owes, as SIBLINGS of the subject (`docs/gascity-human-engagement.md`, "How a
+owes, as SIBLINGS of the subject (`docs/human-engagement.md`, "How a
 sitting ends"), so the `waiting_on` edge takes and the disposition rule below
 fires for them. The child roll-up stays exactly as it is: it is what keeps the
 work already filed as a child visible, and nothing re-parents it.
