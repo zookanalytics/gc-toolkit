@@ -27,6 +27,8 @@ hasnt() { if hasin "$1" "$2"; then bad "$3 (found '$2')"; else ok "$3"; fi; }
 #     naming <bead> and then the reason; a missing <bead> is an error, exit 1.
 #   gate resolve <id> --reason <r> — closes an open gate with that reason; on a
 #     gate already closed it keeps the first reason and still reports success.
+#   update <id> --description <d> — sets the bead's description; STUB_UPDATE_FAIL
+#     refuses it and writes nothing.
 #   show <id> --json.
 # The store is a JSON array of beads; EDGES holds `<waiter>|blocks|<gate>` lines.
 BIN="$TMP/bin"; mkdir -p "$BIN"
@@ -94,6 +96,14 @@ Reason: $reason" \
     exit 0 ;;
 esac
 case "${1:-}" in
+  update)
+    id="${2:-}"; shift 2
+    desc=""
+    while [ $# -gt 0 ]; do case "$1" in --description) shift; desc="${1:-}" ;; esac; shift || true; done
+    [ -n "${STUB_UPDATE_FAIL:-}" ] && { echo "Error: simulated update failure" >&2; exit 1; }
+    exists "$id" || { echo "Error: issue not found: $id" >&2; exit 1; }
+    jq -c --arg id "$id" --arg d "$desc" 'map(if .id == $id then .description = $d else . end)' "$STORE" | save
+    exit 0 ;;
   show)
     out=$(jq -c --arg id "${2:-}" '[.[] | select(.id == $id)]' "$STORE")
     if [ "$(printf '%s' "$out" | jq 'length')" = 0 ]; then
@@ -124,7 +134,7 @@ reset() {
   printf '[%s]' "$beads" > "$STUB_STORE"
   printf '%s' "${2:-}" > "$STUB_EDGES"
   : > "$STUB_GC_LOG"; printf '0' > "$STUB_SEQ"
-  unset STUB_DEP_FAIL STUB_CREATE_FAIL STUB_CREATE_NOEDGE STUB_RESOLVE_NOOP STUB_RESOLVE_RACE 2>/dev/null || true
+  unset STUB_DEP_FAIL STUB_CREATE_FAIL STUB_CREATE_NOEDGE STUB_RESOLVE_NOOP STUB_RESOLVE_RACE STUB_UPDATE_FAIL 2>/dev/null || true
 }
 field()   { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .[$k]) // "<absent>"' "$STUB_STORE"; }
 creates() { cat "$STUB_SEQ"; }
@@ -142,7 +152,8 @@ eq "$(field gate-1 await_type)" "human" "its await type is human"
 eq "$(field gate-1 await_id)" "polecat-blocked" "its await id is the situation key"
 has "$(cat "$STUB_EDGES")" "tk-w|blocks|gate-1" "it blocks the subject"
 eq "$(field gate-1 title)" "Blocked: the target branch is gone. Need: a new target." "its title is the message's first line"
-has "$(field gate-1 description)" "Need: a new target." "its description carries the message"
+eq "$(field gate-1 description)" "Blocked: the target branch is gone. Need: a new target." "its description is the message, with no head of bd's above it"
+has "$(calls)" "[update] [gate-1] [--description] [Blocked: the target branch is gone. Need: a new target.]" "…set by a write of its own after the create"
 has "$(calls)" "[gate] [create] [--type=human] [--blocks] [tk-w] [--await-id] [polecat-blocked]" "the create names the subject as its own word after --blocks"
 hasnt "$(calls)" "[--db]" "no --db pin: gc bd files the gate in the subject's own store"
 hasnt "$(calls)" "[--rig]" "no --rig either"
@@ -158,7 +169,8 @@ t=$(field gate-1 title)
 eq "$(printf '%s' "$t" | jq -Rr 'length')" "140" "an over-long first line is cut to 140 characters"
 has "$t" "…" "the cut is marked with an ellipsis"
 hasnt "$t" "second line" "only the first line becomes the title"
-has "$(field gate-1 description)" "second line" "the description keeps the whole message"
+eq "$(field gate-1 description)" "$long
+second line" "the description keeps the whole message, every line"
 
 echo "# an open human gate under the key already asks: nothing more is filed"
 reset "$(task tk-w),$(gate g-open polecat-blocked open)" "tk-w|blocks|g-open
@@ -273,6 +285,14 @@ reset "$(task tk-w)"
 err=$(STUB_CREATE_FAIL=1 "$SUT" --subject tk-w --key k --message m 2>&1 >/dev/null); rc=$?
 eq "$rc" 1 "exit 1"
 has "$err" "simulated refusal" "bd's own reason is reported"
+
+echo "# a description that does not take leaves the gate filed, and names the repair"
+reset "$(task tk-w)"
+out=$(STUB_UPDATE_FAIL=1 "$SUT" --subject tk-w --key k --message "Needs a ruling." 2>"$TMP/err"); rc=$?
+eq "$rc" 0 "the filing still exits 0: the gate blocks the subject and asks"
+eq "$out" "gate-1" "…and its id is reported as asking"
+has "$(field gate-1 description)" "Ad-hoc gate blocking tk-w" "…its description still under bd's own head"
+has "$(cat "$TMP/err")" "repair: gc bd update gate-1 --description" "…and the warning names the write that repairs it"
 
 echo "# a gate that does not read back as blocking the subject is a failure"
 reset "$(task tk-w)"

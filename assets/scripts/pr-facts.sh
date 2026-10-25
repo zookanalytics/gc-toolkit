@@ -783,22 +783,19 @@ gate_for() {
 # would leave the gate naming an obstruction that has already cleared. Each open
 # human gate under pr-dispose-failed.<num> that blocks the anchor and that no
 # person is assigned takes this pass's message as its description when that
-# differs. The note naming the parked children an earlier pass disposed is
-# carried forward: they are closed by now, so this pass names none, and the note
-# is how an operator who reverses the disposition knows what to restore.
+# differs. The description is read off the gate rows, and human-gate.sh files a
+# gate with its message as its description, so the gate this pass filed reads as
+# this pass's report and is left as filed. The note naming the parked children
+# an earlier pass disposed is carried forward: they are closed by now, so this
+# pass names none, and the note is how an operator who reverses the disposition
+# knows what to restore.
 refresh_dispose_gates() {
   local a="$1" key="pr-dispose-failed.$2" msg="$3" kids="$4" gates v old want
   local kids_lead=" The branch's parked rework/rebase children ("
   gates=$(bd_open_human_gates "$a" "$key") || return 0
   while IFS= read -r v; do
     [ -n "$v" ] || continue
-    old=$(bd_json show "$v" | jq -r '.[0].description // ""' 2>/dev/null)
-    # bd gate create writes the description as "Ad-hoc gate blocking <bead>", a
-    # blank line, and "Reason: " before the message human-gate.sh passes it, so
-    # a gate this pass just filed is compared by that message.
-    case "$old" in
-      "Ad-hoc gate blocking "*$'\n\n'"Reason: "*) old="${old#*$'\n\n'Reason: }" ;;
-    esac
+    old=$(printf '%s' "$gates" | jq -r --arg v "$v" '.[] | select(.id == $v) | (.description // "")' 2>/dev/null)
     want="$msg$kids"
     if [ -z "$kids" ]; then
       case "$old" in *"$kids_lead"*) want="$msg$kids_lead${old#*"$kids_lead"}" ;; esac

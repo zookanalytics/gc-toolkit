@@ -6,9 +6,9 @@
 # clears the gate with `bd gate resolve`, whose reason is the answer, headed
 # `ruled:`, `moot:` or `benign:`. Any pack, formula or person may file one with
 # that call, and every reader treats it the same. This helper makes the same
-# call and adds two things the call does not do: it files nothing while an open
-# human gate under the key already blocks the bead, and it keeps the quiet
-# period a call declares.
+# call and adds what the call does not do: it files nothing while an open human
+# gate under the key already blocks the bead, it keeps the quiet period a call
+# declares, and it makes the gate's description the message it was given.
 #   human-gate.sh --subject <bead-id> --key <situation-key> --message <text>
 #                 [--quiet-window <seconds>]
 # The counterpart withdraws the filer's own gate once the situation it asked
@@ -243,6 +243,14 @@ if [ -z "$GATE" ] || [ "$GATE" = null ]; then
   exit 1
 fi
 
+# The gate's description is the whole message: what the person reads, and what
+# a filer that keeps its report current compares against. bd gate create puts a
+# head of its own above the reason it is given and takes no description, so the
+# description is set to the message in a second write, which the read-back below
+# checks. Filing is rare beside the dedup above, so the write is paid once per
+# gate.
+gc bd update "$GATE" --description "$MESSAGE" </dev/null >/dev/null 2>&1 || true
+
 # The gate asks only while it blocks the bead under the key, so its edge, its
 # type and its await id are read back from the bead's side, the read every other
 # reader makes.
@@ -253,6 +261,11 @@ fi
 if ! printf '%s' "$GOT" | jq -e --arg g "$GATE" --arg k "$KEY" "$HUMAN_GATE_JQ"'any(.[]; .id == $g and open_human_gate($k))' >/dev/null 2>&1; then
   warn "gate $GATE was filed, but it does not read back as an open human gate under [$KEY] that blocks $SUBJECT; repair: gc bd dep add $SUBJECT $GATE --type=blocks, then check its await id with gc bd show $GATE"
   exit 1
+fi
+# A description that did not take still leaves a gate that asks, its message
+# under bd's head, so the filing stands and only the repair is named.
+if ! printf '%s' "$GOT" | jq -e --arg g "$GATE" --arg m "$MESSAGE" 'any(.[]; .id == $g and (.description // "") == $m)' >/dev/null 2>&1; then
+  warn "gate $GATE asks for $SUBJECT [$KEY], but its description did not become the message, so bd's own head stands above it; repair: gc bd update $GATE --description <the message>"
 fi
 
 # The deacon's shift record. Filing a gate is a non-routine action, and this is

@@ -148,10 +148,9 @@ export STUB_LANE_LOG="$TMP/lane.log"; : > "$STUB_LANE_LOG"
 # The helper's contract as pr-facts reads it back, not just its call log: ONE
 # open human gate per subject and key, blocking the subject, so the caller finds
 # it again through the subject's blocks edges; the gate's id on stdout. A stub
-# that only logged would test nothing. The description is the one bd gate create
-# writes from the helper's --reason: "Ad-hoc gate blocking <subject>", a blank
-# line, and "Reason: <message>". STUB_GATE_NOFILE models the exit 0 that files
-# nothing (a moot or benign answer inside a declared quiet window).
+# that only logged would test nothing. The description is the whole message, as
+# the helper sets it. STUB_GATE_NOFILE models the exit 0 that files nothing (a
+# moot or benign answer inside a declared quiet window).
 cat > "$SD/human-gate.sh" <<'ESC'
 #!/usr/bin/env bash
 set -u
@@ -175,7 +174,7 @@ gid="gate-$(jq 'length' "${STUB_STORE:?}")"
 tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-prfacts-gate.XXXXXX")
 jq -c --arg id "$gid" --arg k "$key" --arg t "${msg%%$'\n'*}" --arg d "$msg" --arg s "$subj" \
   '. + [{id: $id, status: "open", assignee: "", notes: "", title: $t,
-         description: ("Ad-hoc gate blocking " + $s + "\n\nReason: " + $d),
+         description: $d,
          issue_type: "gate", await_type: "human", await_id: $k, metadata: {}}]' \
   "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
 printf '%s|blocks|%s\n' "$gid" "$subj" >> "${STUB_DEPS:?}"
@@ -633,18 +632,19 @@ echo "# a refused anchor close names the children already disposed in its gate"
 store "[$(anchor F2m 33 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-m"'), $(child K5 polecat/x33), {\"id\":\"BLK\",\"status\":\"open\",\"title\":\"unrelated blocker\",\"notes\":\"\",\"metadata\":{}}]"
 gc bd dep BLK --blocks F2m >/dev/null 2>&1   # a blocker that is NOT a parked child, so dropping the children never clears it
 printf '%s' "$(prview 33 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_33.json"
-: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
+: > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"; : > "$STUB_GC_LOG"
 out=$(run)
 eq "$(bstatus K5)" "closed" "the parked child is dropped before the anchor close"
 eq "$(bstatus F2m)" "open" "…but the anchor close is still refused (another blocker), so it is left OPEN"
 has "$(cat "$STUB_ESC_LOG")" "--subject F2m --key pr-dispose-failed.33" "a gate is filed under the dispose-failed key"
 has "$(cat "$STUB_ESC_LOG")" "K5" "…naming the child that was already disposed"
 has "$(cat "$STUB_ESC_LOG")" "restore them by hand" "…and says to restore it if the disposition is wrong"
-# bd wraps the message the gate was filed with in a head of its own, and the
-# refresh compares by that message, so the gate this pass filed is left as filed.
+# The gate carries the message it was filed with as its description, which the
+# refresh reads off the gate's row, so the gate this pass filed is left as filed.
 hasnt "$out" "refreshed its pr-dispose-failed gate" "…and the gate filed this pass is not rewritten with the same report"
-has "$(jq -r '[ .[] | select((.await_id // "") == "pr-dispose-failed.33") | .description ] | .[0] // ""' "$STUB_STORE")" \
-  "Ad-hoc gate blocking F2m" "…so it keeps the description bd wrote"
+F2M_GATE=$(jq -r '[ .[] | select((.await_id // "") == "pr-dispose-failed.33") | .id ] | .[0] // ""' "$STUB_STORE")
+has "$(jq -r --arg g "$F2M_GATE" '(.[] | select(.id == $g) | .description) // ""' "$STUB_STORE")" "restore them by hand" "…so its description is the report it was filed with"
+hasnt "$(cat "$STUB_GC_LOG")" "bd show $F2M_GATE " "…read off the anchor's gate rows, with no show of the gate"
 
 # The rest of the anchor's machine review scaffolding carries no branch, and each
 # piece holds a blocks edge on the anchor: a fix unit, the must-fix finding it
@@ -821,7 +821,9 @@ vdesc() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .description) // "<ab
 echo "# a close refused for a new reason refreshes the gate's description"
 # human-gate.sh files nothing while the gate it filed first is open, so the arm
 # rewrites that gate's description when this pass's refusal differs. The note
-# naming the children an earlier pass disposed is carried forward.
+# naming the children an earlier pass disposed is carried forward. The gate's
+# description here is in bd's own form, a head above the reason, which a gate
+# whose description write did not land keeps; it is rewritten all the same.
 : > "$STUB_DEPS"
 OLD_REPORT="PR#131 was closed with a pre-recorded disposition, but bead-rehome.sh could not consummate it (rc=5): has an OPEN blocker BOLD. The anchor is left OPEN carrying the marker. The branch's parked rework/rebase children (K9) were ALREADY disposed (closed not-needed -> tk-x) before this close, to clear their blocks-hold on the anchor; if the disposition is wrong, restore them by hand."
 store "[$(anchor F2x 131 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-x"'), $(hgate VX F2x pr-dispose-failed.131 open "" "Ad-hoc gate blocking F2x"$'\n\n'"Reason: $OLD_REPORT"), $(hgate VR2 F2x an-unrelated-question)]"
