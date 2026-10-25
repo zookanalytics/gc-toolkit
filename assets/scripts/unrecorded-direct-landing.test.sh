@@ -44,11 +44,12 @@
 #     closes. A graduated convoy, which no pour rebuilds, is parked blocked
 #     instead, held by a blocks edge onto the visit, with no pour armed;
 #   - a visit that is not filed, a pack without await-ruling.sh, a wait whose
-#     edge or arm does not land, and a convoy park that lifecycle.sh refuses
-#     each leave the work assigned to the refinery and counted at the cap, the
-#     refinery taking back an assignment the wait released, and the next
-#     failed check's wait lands. A take-back that fails says the work is
-#     stranded. A check that runs clears the count.
+#     edge or arm does not land, and a convoy whose edge does not land or
+#     whose park lifecycle.sh refuses each leave the work assigned to the
+#     refinery and counted at the cap, the refinery taking back an
+#     assignment the wait released, and the next failed check's wait lands.
+#     A take-back that fails says the work is stranded. A check that runs
+#     clears the count.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -682,6 +683,14 @@ eq "$(field status) $(field assignee)" "open $REFINERY" "convoy, park refused: t
 eq "$(fails)" 3 "convoy, park refused: the count stays at the cap, so the next failed check asks again"
 has "$OUT" "the wait did not land, so wb stays with the refinery, and the next patrol checks it again" \
   "convoy, park refused: the patrol says the convoy stays with the refinery"
+# An edge that does not land leaves the convoy with the refinery too: a park
+# with no edge onto the visit would hold it on nothing.
+convoy_failure "$TMP/convoy-noedge"
+nocheck_merge_push FAKE_DEP_FAIL=1
+kept "convoy, edge refused"
+eq "$(jq length "$D/store.json")" 1 "convoy, edge refused: precondition, the visit is filed"
+has "$OUT" "no blocks edge from wb onto its visit landed, so wb is not parked" \
+  "convoy, edge refused: the patrol says the convoy is not parked"
 
 echo "── a check that runs again clears the count, and the landing goes on ──"
 fixture "$TMP/recheck" work
