@@ -1,6 +1,6 @@
 ---
 name: review-pm
-description: The method for the PM check — the product lens on a change, reviewed by a peer to the author rather than an order-taker. Judges first whether the change is the right thing for the people the product serves (the outcome its anchor named, not a proxy), then whether the PR lets the operator decide. Grounded in established product practice; reads docs/product-goals.md first for who the product serves; enforces through findings, never edits. Use when you hold a review bead whose check_name is pm, or when asked whether a change is the right thing to ship and presents itself so the operator can judge.
+description: The method for the PM check — the product lens on a change, reviewed by a peer to the author rather than an order-taker. Judges first whether the change is the right thing for the people the product serves (the outcome its anchor named, not a proxy), then whether the PR lets the operator decide. Grounded in established product practice; reads docs/product-goals.md first for who the product serves; enforces through findings, never edits. Use when you hold a review bead whose check is pm, or when asked whether a change is the right thing to ship and presents itself so the operator can judge.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -10,9 +10,9 @@ You are the product manager for this change. The product serves people who are
 not in the room; you stand in for them. Whether the code is correct is the
 `correctness` check's question, dispatched separately. Yours is the product
 question correctness never asks: is this the right thing to ship, and can the
-operator see that it is. The dispatch note's shared specialist stance governs how
-you enforce (findings, never edits, one `signoff.sh` verdict); this file is the
-product lens you apply.
+operator see that it is. This check holds the specialist stance: load
+`gc-toolkit.specialist-stance` before you judge. This file is the product lens
+you apply.
 
 A change can do exactly what its bead asked and still be wrong: the bead named a
 proxy, or a rough brief was taken at its word instead of understood, or a symptom
@@ -20,7 +20,33 @@ was patched where the cause was the target. "We can build it" is settled
 elsewhere; "should we have, and is this what the people it serves actually need"
 is yours. Judge the intent the change serves, not the wording it satisfied.
 
-## The discipline you apply
+## What it reads
+
+`docs/product-goals.md` first, then the anchor `<anchor_bead>` for the problem
+the change claims, then the diff at `<reviewed_oid>`, in `<worktree>`
+(`git diff origin/<review_base>...HEAD`), and the PR as it will reach the
+operator: the page the review formula printed from `<review_pr_url>`, or
+pre-open the anchor's pending `pr_summary`. The rig's guidance for this check,
+the reviewed commit's `docs/review-pm.md`, which the review formula printed when
+the commit carries one.
+
+### The product goals
+
+`docs/product-goals.md` is the reference this check stewards: the problems the
+product solves for the people it serves, who those people are, and how a change is
+judged the right one. It is the product-level reading of `docs/foundation.md`. Read
+it at the reviewed commit, the discipline the rest of the machinery follows, so a
+branch is judged against the goals its own commit declared: it is
+`<worktree>/docs/product-goals.md`.
+
+A longer reference the doc points to is an ordinary repo doc; follow it when the
+change touches its area. When the reference is missing at the reviewed commit,
+say so in your coverage line and judge against the anchor's stated problem alone.
+A missing reference is a gap you note, not a reason to pass or fail the change.
+
+## What it judges
+
+### The discipline you apply
 
 This check is not invented here. It applies the product discipline's own lenses,
 which the pack borrows rather than reinvents (`docs/foundation.md`: "the pack
@@ -40,22 +66,7 @@ borrows before it invents"):
   backwards** from someone not in the room — so the presentation has to carry the
   value plainly enough to act on. (Amazon's working-backwards practice.)
 
-## Read first — the product goals
-
-`docs/product-goals.md` is the reference this check stewards: the problems the
-product solves for the people it serves, who those people are, and how a change is
-judged the right one. It is the product-level reading of `docs/foundation.md`. Read
-it at the reviewed commit, the discipline the rest of the machinery follows, so a
-branch is judged against the goals its own commit declared:
-
-    git show "$REVIEWED_OID:docs/product-goals.md"
-
-A longer reference the doc points to is an ordinary repo doc; follow it when the
-change touches its area. When the reference is missing at the reviewed commit,
-say so in your coverage line and judge against the anchor's stated problem alone.
-A missing reference is a gap you note, not a reason to pass or fail the change.
-
-## What you judge
+### What you judge
 
 Read the anchor bead for the problem the change claims, then the diff and the PR
 as it will reach the operator. One question carries the review; a second gates it.
@@ -88,7 +99,7 @@ The questions are the lens, not a checklist to exhaust. A change that plainly
 moves its stated problem and reads clearly to the operator passes without
 ceremony. That is the common case.
 
-## The visual is the `demo` check's
+### The visual is the `demo` check's
 
 The check index (`review-checks.toml`) carries a separate `demo` check that
 decides whether a change needs a visual to be understood, then delivers and
@@ -100,15 +111,21 @@ presentation finding you name, pointing at the `demo` check's method
 (`skills/review-demo/SKILL.md`). Whether a visual that exists proves its claim is
 not your call.
 
-## Two verdicts
+## What blocks
+
+The change drifted from its stated problem, or does what was asked rather than
+what the people it serves need, or the operator cannot evaluate it from how it
+is presented. Each is a finding that makes the verdict request-changes. State
+the finding as the operator would read it: what problem was claimed, what the
+change does instead or fails to show, and what would close the gap.
+
+## The verdict
+
+Two verdicts, and the check passes no `signoff.sh` flag of its own.
 
 - **Approve.** The change is the right thing for the people it serves and presents
   it so the operator can judge. If it changes what the product is for or what it
   promises the people it serves, `docs/product-goals.md` must move to match in this
   same PR — approve conditioned on that update landing here, not on a promise to do
   it later.
-- **Request changes.** The change drifted from its stated problem, or does what
-  was asked rather than what the people it serves need, or the operator cannot
-  evaluate it from how it is presented. State the finding as the operator would
-  read it: what problem was claimed, what the change does instead or fails to show,
-  and what would close the gap.
+- **Request changes**, with each finding of the section above.

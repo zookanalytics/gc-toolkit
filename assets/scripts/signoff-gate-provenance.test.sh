@@ -131,8 +131,9 @@ GH
 # doctor's `git -C <rig> remote get-url origin` included, runs against the real
 # throwaway repo so the origin parse is tested and not simulated.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/git" <<GIT
-if [ "\${1:-}" = "ls-remote" ]; then
-  [ -n "\${STUB_LSREMOTE:-}" ] && printf '%s\trefs/heads/%s\n' "\$STUB_LSREMOTE" "\${3#refs/heads/}"
+_g=("\$@"); [ "\${_g[0]:-}" = "-C" ] && _g=("\${_g[@]:2}")
+if [ "\${_g[0]:-}" = "ls-remote" ]; then
+  [ -n "\${STUB_LSREMOTE:-}" ] && printf '%s\trefs/heads/%s\n' "\$STUB_LSREMOTE" "\${_g[2]#refs/heads/}"
   exit 0
 fi
 exec "$REAL_GIT" "\$@"

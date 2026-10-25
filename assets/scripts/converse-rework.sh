@@ -29,6 +29,10 @@
 #   The anchor must be an open PR: live in the store, at
 #   merge_result=pull_request, carrying no disposition (gc.pr_close_disposition_kind
 #   or gc.superseded_by), and naming its branch, its landing target and its PR.
+#   Its rig checkout, the one its id prefix names in `gc rig list`, must resolve,
+#   and its branch's head must read from that checkout's origin, since the lanes
+#   the supersede returns to unreviewed are resolved at that commit, in that
+#   checkout.
 #   --ruling-bead is the visit the ruling was reached in. --pool defaults to
 #   rework-child.sh's default.
 # Output: rework-child.sh's result line, "<child> <route> <filed|adopted|in-flight>".
@@ -41,7 +45,9 @@ set -u
 _lib_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 2; }
-SCRIPT_DIR=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
+# shellcheck source=git-lib.sh
+. "$_lib_dir/git-lib.sh" || { echo "cannot source git-lib.sh beside this script" >&2; exit 2; }
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)
 
 die() { echo "converse-rework: $1" >&2; exit 2; }
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
@@ -106,6 +112,19 @@ PR_URL=$(row_meta "$ANCHOR_ROW" existing_pr)
 [ -n "$PR_URL" ] || PR_URL=$(row_meta "$ANCHOR_ROW" pr_url)
 [ -n "$PR_URL" ] || die "anchor $ANCHOR names no PR (existing_pr and pr_url both empty), so it is not an open PR; nothing filed"
 PR_NUMBER=$(row_meta "$ANCHOR_ROW" pr_number)
+# The anchor's rig checkout. Its branch lives on that checkout's origin and its
+# check index is that checkout's, while a sitting runs from the city or another
+# rig's checkout, so the head is read and the lanes are resolved there.
+RIG_ROOT=$("$SCRIPT_DIR/bead-store.sh" --path "$ANCHOR" 2>/dev/null) || RIG_ROOT=""
+{ [ -n "$RIG_ROOT" ] && git -C "$RIG_ROOT" rev-parse --git-dir >/dev/null 2>&1; } \
+  || die "anchor $ANCHOR's rig checkout did not resolve to a repository (bead-store.sh --path $ANCHOR), so its branch head cannot be read; nothing filed"
+# The commit the ruling judged, which the supersede below resolves the anchor's
+# lanes at: the head of its branch on that checkout's origin, read through
+# git-lib.sh. Read before anything is filed, so a head that does not read
+# refuses with nothing written rather than leave a dispatched child beside lanes
+# still green.
+HEAD_OID=$(remote_branch_head "$RIG_ROOT" "$BRANCH")
+[ -n "$HEAD_OID" ] || die "the head of $ANCHOR's branch $BRANCH did not read from origin in $RIG_ROOT (git ls-remote), so no commit names the lanes the ruling returns to unreviewed; nothing filed"
 
 if [ -n "$PR_NUMBER" ]; then
   TITLE="Rework PR#$PR_NUMBER: apply operator ruling"
@@ -123,8 +142,10 @@ read -r CHILD _ <<< "$FILED"
 
 # Run on every filing, an adopted or in-flight child's included, so a re-run
 # finishes a supersede an earlier run did not. It is idempotent: a lane whose
-# reviews are already superseded has nothing left to retire.
-if ! RETIRED=$("$SCRIPT_DIR/review-outcome.sh" supersede-anchor --anchor "$ANCHOR" \
+# reviews are already superseded has nothing left to retire. It runs in the
+# rig checkout, with GC_RIG_ROOT naming it, so the resolver reads the lanes at
+# HEAD_OID there.
+if ! RETIRED=$(cd "$RIG_ROOT" && GC_RIG_ROOT="$RIG_ROOT" "$SCRIPT_DIR/review-outcome.sh" supersede-anchor --anchor "$ANCHOR" --oid "$HEAD_OID" \
        --by "operator ruling (converse visit $RULING_BEAD)" \
        --reason "rework $CHILD changes what the branch must contain; every lane re-reviews it once it lands"); then
   die "rework $CHILD is dispatched, but the review lanes on $ANCHOR did not return to unreviewed (review-outcome.sh supersede-anchor failed), so its landing would read green on reviews of the branch before the ruling. Re-run: the writer adopts $CHILD and the supersede retries"

@@ -247,7 +247,7 @@ output to every one of these fragments. It reads them from its own
 `references/` directory, where a relative link to each fragment keeps one
 source for the text and delivers it with the skill, so the method resolves no
 pack file by path. A new class fragment gets its link there too, and
-`review-method.test.sh` fails until it has one. Hard cap **12 entries per
+`review-methods.test.sh` fails until it has one. Hard cap **12 entries per
 fragment**.
 
 **`convention` — learned conventions, per role.**

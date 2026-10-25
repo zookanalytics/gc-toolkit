@@ -322,6 +322,10 @@ hasnt "$out" "cannot source hold-lib.sh" "a copied deferred-dispatch.sh sources 
 # pr-facts.sh sources the priority function's reading of a PR's approval.
 mk_sut_dir "$TMP/sut-pf" "$HERE/pr-facts.sh"
 [ -f "$TMP/sut-pf/priority-lib.sh" ] && ok "mk_sut_dir copies priority-lib.sh beside the SUT" || bad "mk_sut_dir left priority-lib.sh out"
+# A copy of gate-ensure.sh without git-lib.sh beside it exits before it reads a
+# head.
+mk_sut_dir "$TMP/sut-ge" "$HERE/gate-ensure.sh"
+[ -f "$TMP/sut-ge/git-lib.sh" ] && ok "mk_sut_dir copies git-lib.sh beside the SUT" || bad "mk_sut_dir left git-lib.sh out"
 
 # The partial-read knobs model a store error that still printed an array: a
 # matching list, or any dep probe, prints [] and exits 1.
