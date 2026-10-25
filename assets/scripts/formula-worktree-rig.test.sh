@@ -4,10 +4,13 @@
 #
 # A static guard scans formulas/ and packs/*/formulas/ and fails on any bare
 # `git worktree add`, so a new site cannot land without -C. The worktree blocks
-# of mol-review, mol-upstream-gc-sync and mol-refinery-patrol are extracted
-# verbatim and run from a WRONG cwd against real git repos: each must act on the
-# rig GC_RIG_ROOT names, or the roster entry for GC_RIG, and fail closed when
-# neither resolves. A control runs a bare add from the same cwd and proves cwd
+# of mol-review, mol-upstream-gc-sync and mol-refinery-patrol are extracted and
+# run from a WRONG cwd against real git repos, mol-review's filled in with a
+# review's values as a pour fills them: each must act on the rig GC_RIG_ROOT
+# names, or the roster entry for GC_RIG, and fail closed when neither resolves.
+# mol-review's gather also prints the reviewed commit's guidance for the
+# review's check alone, and load-dispatch's refusal of a short record names the
+# missing key and leaves the route empty. A control runs a bare add from the same cwd and proves cwd
 # steers it, so "landed in the rig, not cwd" is a real discrimination. No live
 # city, store, or network.
 #
@@ -195,42 +198,67 @@ eq "$(registered "$C/cwd" "$C/wt-bare")" yes "control: the bare add registered i
 eq "$(registered "$C/rig" "$C/wt-bare")" no  "control: the bare add never reached the rig, whatever GC_RIG_ROOT says"
 
 # --- 3. mol-review: the review's worktree. -------------------------------------
-# The worktree lives in the review's workspace, made by review-workspace.sh add
-# and removed by the verdict step's remove line.
-echo "── mol-review: review-workspace-add and review-workspace-remove ──"
-block "$REVIEW_TOML" review-workspace-add "$TMP/review.sh"
+# load-dispatch's gather makes the worktree in the review's workspace through
+# review-workspace.sh add, and the verdict step's remove line removes it. The
+# pour fills in the values a review is told, so each case renders the block
+# with its own commit, for a pre-open review of polecat/x onto main.
+echo "── mol-review: review-gather and review-workspace-remove ──"
+review_render() { # <text> <check> <oid>
+  printf '%s\n' "$1" | sed -e 's|{{review_bead}}|rb|g' -e "s|{{reviewed_oid}}|$3|g" -e 's|{{review_base}}|main|g' \
+    -e 's|{{review_branch}}|polecat/x|g' -e 's|{{anchor_bead}}|tk-anc|g' -e "s|{{check}}|$2|g" -e 's|{{review_pr_url}}||g'
+}
+GATHER="$(extract "$REVIEW_TOML" review-gather)"
+[ -n "$GATHER" ] && ok "review-gather: block extracted between markers" || bad "review-gather: block extracted between markers" "markers missing from formulas/mol-review.toml"
+review_render "$GATHER" correctness 0123456789abcdef0123456789abcdef01234567 > "$TMP/review-render.sh"
+case "$(cat "$TMP/review-render.sh")" in
+  *'{{'*) bad "review-gather: no unrendered formula placeholder left once a review's values fill it" ;;
+  *)      ok "review-gather: no unrendered formula placeholder left once a review's values fill it" ;;
+esac
+if bash -n "$TMP/review-render.sh" 2>/dev/null; then ok "review-gather: block is valid bash"; else bad "review-gather: block is valid bash"; fi
 # The pack-script locator's show-toplevel candidate is the block's one bare git
-# call. It picks where review-workspace.sh is read from, never the repository
+# call. It picks where the pack's scripts are read from, never the repository
 # the worktree is made in.
-eq "$(bare_git "$TMP/review.sh")" "rev-parse " "review: the only git call without -C is the pack-script locator's"
-block "$REVIEW_TOML" review-workspace-remove "$TMP/review-rm.sh"
-cat "$TMP/review.sh" - > "$TMP/review-probe.sh" <<'PROBE'
-printf '%s\n' "$REVIEW_WT" > "$PROBE/wt"
+eq "$(bare_git "$TMP/review-render.sh")" "rev-parse " "review: the only git call without -C is the pack-script locator's"
+extract "$REVIEW_TOML" review-workspace-remove > "$TMP/review-rm.tmpl"
+[ -s "$TMP/review-rm.tmpl" ] && ok "review-workspace-remove: block extracted between markers" \
+  || bad "review-workspace-remove: block extracted between markers" "markers missing from formulas/mol-review.toml"
+PROBE_TAIL='printf "%s\n" "$WT" > "$PROBE/wt"
 pwd -P > "$PROBE/pwd"
-git -C "$REVIEW_WT" rev-parse HEAD > "$PROBE/head"
-git -C "$PROBE_RIG" worktree list --porcelain | sed -n 's/^worktree //p' > "$PROBE/rig"
-git -C "$PROBE_CWD" worktree list --porcelain | sed -n 's/^worktree //p' > "$PROBE/cwd"
-PROBE
+git -C "$WT" rev-parse HEAD > "$PROBE/head"
+git -C "$PROBE_RIG" worktree list --porcelain | sed -n "s/^worktree //p" > "$PROBE/rig"
+git -C "$PROBE_CWD" worktree list --porcelain | sed -n "s/^worktree //p" > "$PROBE/cwd"'
+printf '[{"id":"tk-anc","title":"the change under review"}]\n' > "$TMP/anchor.json"
 
-# GC_PACK_DIR names this checkout, so the block runs the review-workspace.sh
-# under test.
-review_case() { # <mode>; sets RC, OID, D
-  local d="$TMP/review-$1" rc=0
+# GC_PACK_DIR names this checkout, so the block runs the review-workspace.sh and
+# review-checks.sh under test. The rig's origin carries the reviewed commit as
+# both main and polecat/x, which the block fetches before it makes the worktree.
+review_case() { # <mode> [check] [guidance file]; sets RC, OID, D
+  local d="$TMP/review-$1${2:+-$2}" rc=0
   mkdir -p "$d/probe" "$d/tmp"
-  git init -q -b main "$d/rig"; OID=$(commit "$d/rig" "reviewed head ($1)")
+  git init -q -b main "$d/rig"
+  if [ -n "${3:-}" ]; then
+    mkdir -p "$d/rig/docs"; printf 'GUIDANCE FOR TRIAGE: never add demo here\n' > "$d/rig/docs/$3"
+    git -C "$d/rig" add "docs/$3"
+  fi
+  OID=$(commit "$d/rig" "reviewed head ($1)")
+  git init -q --bare "$d/origin.git"
+  git -C "$d/rig" push -q "$d/origin.git" "$OID:refs/heads/main" "$OID:refs/heads/polecat/x"
+  git -C "$d/rig" remote add origin "$d/origin.git"
   # The cwd repo is a clone, so it holds the reviewed commit too: an add that
   # follows cwd succeeds there instead of failing for want of the commit.
   git clone -q "$d/rig" "$d/cwd"; commit "$d/cwd" "cwd repo moves on ($1)" >/dev/null
   pick "$1" "$d/rig"
-  ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_PACK_DIR="$ROOT" GC_RIG_ROOT="$RR" GC_RIG="$GR" REVIEW_BEAD=rb REVIEWED_OID="$OID" \
-      PROBE="$d/probe" PROBE_RIG="$d/rig" PROBE_CWD="$d/cwd" bash "$TMP/review-probe.sh" ) >"$d/out" 2>&1 || rc=$?
+  { review_render "$GATHER" "${2:-correctness}" "$OID"; printf '%s\n' "$PROBE_TAIL"; } > "$d/review-probe.sh"
+  ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_PACK_DIR="$ROOT" GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_META="$TMP/anchor.json" FAKE_LOG="$d/gc.log" \
+      PROBE="$d/probe" PROBE_RIG="$d/rig" PROBE_CWD="$d/cwd" bash "$d/review-probe.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
 
 # review_remove: the verdict step's remove line, run from the same foreign cwd.
 review_remove() {
-  ( cd "$D/cwd" && TMPDIR="$D/tmp" REVIEW_BEAD=rb SC="$ROOT/assets/scripts/step-close.sh" \
-      bash "$TMP/review-rm.sh" ) >>"$D/out" 2>&1 || true
+  review_render "$(cat "$TMP/review-rm.tmpl")" correctness "$OID" > "$D/review-rm.sh"
+  ( cd "$D/cwd" && TMPDIR="$D/tmp" SC="$ROOT/assets/scripts/step-close.sh" \
+      bash "$D/review-rm.sh" ) >>"$D/out" 2>&1 || true
 }
 
 for mode in env roster; do
@@ -241,6 +269,10 @@ for mode in env roster; do
   eq "$(in_paths "$(cat "$D/probe/cwd" 2>/dev/null || true)" "$WT")" no  "review/$mode: the worktree is NOT registered in the cwd repo"
   eq "$(cat "$D/probe/head" 2>/dev/null || true)" "$OID" "review/$mode: the worktree is checked out at the reviewed OID"
   eq "$(cat "$D/probe/pwd" 2>/dev/null || true)" "${WT:-/nonexistent}" "review/$mode: the block leaves the shell in the review worktree"
+  grep -qF "== The review's worktree: $WT" "$D/out" && ok "review/$mode: the block prints the worktree's path" \
+    || bad "review/$mode: the block prints the worktree's path" "$(tr '\n' '|' < "$D/out")"
+  grep -qF "the change under review" "$D/out" && ok "review/$mode: the block prints the anchor" \
+    || bad "review/$mode: the block prints the anchor" "$(tr '\n' '|' < "$D/out")"
   review_remove
   eq "$(registered "$D/rig" "$WT")" no "review/$mode: the verdict step's remove unregisters the worktree from the rig"
   if [ -n "$WT" ] && [ ! -e "$WT" ]; then ok "review/$mode: the verdict step's remove deletes the worktree directory"
@@ -252,6 +284,47 @@ review_case nomatch
 eq "$(wt_paths "$D/rig" | count)" 1 "review/nomatch: nothing registered in the rig repo"
 eq "$(wt_paths "$D/cwd" | count)" 1 "review/nomatch: nothing registered in the cwd repo"
 eq "$(ls -A "$D/tmp" | count)" 0 "review/nomatch: refused before creating the review workspace"
+
+# A rig's guidance for a check is the reviewed commit's docs/review-<check>.md,
+# which the gather prints for that check's review alone.
+review_case env triage review-triage.md
+eq "$RC" 0 "review/guidance: a triage review's gather runs"
+grep -qF "GUIDANCE FOR TRIAGE: never add demo here" "$D/out" && ok "review/guidance: the reviewed commit's docs/review-triage.md reaches the triage review" \
+  || bad "review/guidance: the reviewed commit's docs/review-triage.md reaches the triage review" "$(tr '\n' '|' < "$D/out")"
+review_case env correctness review-triage.md
+grep -qF "GUIDANCE FOR TRIAGE" "$D/out" && bad "review/guidance: a correctness review at the same commit is not shown triage's guidance" \
+  || ok "review/guidance: a correctness review at the same commit is not shown triage's guidance"
+
+# load-dispatch's refusal: a review whose record lacks a value every review
+# needs reviews nothing. The block names the missing key in the review's notes
+# and exits non-zero, and nothing restores a route, because the next claim
+# would meet the same gap. It runs as the pour renders it, from the parsed
+# formula, with reviewed_oid given empty.
+python3 - "$REVIEW_TOML" > "$TMP/refusal.tmpl" <<'PY'
+import sys, tomllib, re
+for step in tomllib.load(open(sys.argv[1], 'rb'))['steps']:
+    if step['id'] == 'load-dispatch':
+        print(re.findall(r'```bash\n(.*?)```', step['description'], re.S)[0], end='')
+PY
+case "$(cat "$TMP/refusal.tmpl")" in
+  *'# >>> review-record-check'*) ok "refusal: load-dispatch's first block is the record check" ;;
+  *) bad "refusal: load-dispatch's first block is the record check" "$(head -3 "$TMP/refusal.tmpl")" ;;
+esac
+D="$TMP/refusal"; mkdir -p "$D"
+review_render "$(cat "$TMP/refusal.tmpl")" correctness "" > "$D/refusal.sh"
+rc=0
+( FAKE_LOG="$D/gc.log" bash "$D/refusal.sh" ) >"$D/out" 2>&1 || rc=$?
+[ "$rc" -ne 0 ] && ok "refusal: an empty reviewed_oid reviews nothing (the block exits non-zero)" || bad "refusal: an empty reviewed_oid reviews nothing" "rc=$rc"
+grep -qF "lacks reviewed_oid" "$D/out" && ok "refusal: it names the missing key" || bad "refusal: it names the missing key" "$(tr '\n' '|' < "$D/out")"
+grep -q '^bd update rb --append-notes .*lacks reviewed_oid' "$D/gc.log" && ok "refusal: …in the review's notes" \
+  || bad "refusal: …in the review's notes" "$(tr '\n' '|' < "$D/gc.log" 2>/dev/null)"
+if grep -q 'gc.routed_to' "$D/gc.log"; then bad "refusal: it leaves the route empty" "$(grep 'gc.routed_to' "$D/gc.log")"
+else ok "refusal: it leaves the route empty"; fi
+review_render "$(cat "$TMP/refusal.tmpl")" correctness 0123456789abcdef0123456789abcdef01234567 > "$D/whole.sh"
+rc=0
+( FAKE_LOG="$D/gc-whole.log" bash "$D/whole.sh" ) >"$D/out-whole" 2>&1 || rc=$?
+eq "$rc" 0 "refusal: a whole record passes the check"
+if grep -q -- '--append-notes' "$D/gc-whole.log" 2>/dev/null; then bad "refusal: …writing nothing on the review"; else ok "refusal: …writing nothing on the review"; fi
 
 # --- 4. mol-upstream-gc-sync: the read-only survey worktree. -------------------
 echo "── mol-upstream-gc-sync: upstream-sync-worktree-add ──"

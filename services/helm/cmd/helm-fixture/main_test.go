@@ -174,25 +174,28 @@ func TestRunServesUntilItIsStopped(t *testing.T) {
 	}
 }
 
-// docCommand reads the board's capture line from docs/review-demo.md and returns
-// the command it gives demo-screenshot.sh as --serve, the directory its --cwd
-// names under $REVIEW_WT, and its --port.
+// docCommand reads the board's capture from docs/review-demo.md and returns the
+// command it gives demo-screenshot.sh as --serve, the directory its --cwd names
+// under <worktree>, and its --port. The page gives the capture in prose, as
+// inline code that can wrap, so the page is read with its line breaks folded
+// into spaces and the capture runs to the end of its code span.
 func docCommand(t *testing.T) (serve, cwd, port string) {
 	t.Helper()
 	doc, err := os.ReadFile(filepath.Join(moduleRoot, "../../docs/review-demo.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var line string
-	for _, l := range strings.Split(string(doc), "\n") {
-		if strings.Contains(l, `demo-screenshot.sh" page`) && strings.Contains(l, "helm-fixture") {
-			if line != "" {
-				t.Fatalf("docs/review-demo.md gives more than one capture of the board:\n%s\n%s", line, l)
+	text := strings.Join(strings.Fields(string(doc)), " ")
+	var capture string
+	for _, c := range regexp.MustCompile("demo-screenshot\\.sh\"? page [^`]*").FindAllString(text, -1) {
+		if strings.Contains(c, "helm-fixture") {
+			if capture != "" {
+				t.Fatalf("docs/review-demo.md gives more than one capture of the board:\n%s\n%s", capture, c)
 			}
-			line = l
+			capture = c
 		}
 	}
-	if line == "" {
+	if capture == "" {
 		t.Fatal("docs/review-demo.md gives no capture of the board through helm-fixture")
 	}
 	for _, f := range []struct {
@@ -200,12 +203,12 @@ func docCommand(t *testing.T) (serve, cwd, port string) {
 		out *string
 	}{
 		{regexp.MustCompile(`--serve "([^"]+)"`), &serve},
-		{regexp.MustCompile(`--cwd "\$REVIEW_WT/([^"]+)"`), &cwd},
+		{regexp.MustCompile(`--cwd "?<worktree>/([^"\s]+)`), &cwd},
 		{regexp.MustCompile(`--port (\S+)`), &port},
 	} {
-		m := f.re.FindStringSubmatch(line)
+		m := f.re.FindStringSubmatch(capture)
 		if m == nil {
-			t.Fatalf("the board's capture line has no %s: %s", f.re, line)
+			t.Fatalf("the board's capture has no %s: %s", f.re, capture)
 		}
 		*f.out = m[1]
 	}
@@ -313,7 +316,7 @@ func TestTheDocumentedCommandServesTheBoard(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rel, _ := filepath.Rel(repo, mod); rel != cwd {
-		t.Fatalf("the board's capture runs its command from $REVIEW_WT/%s, but the command's default board resolves from $REVIEW_WT/%s", cwd, rel)
+		t.Fatalf("the board's capture runs its command from <worktree>/%s, but the command's default board resolves from <worktree>/%s", cwd, rel)
 	}
 	board, err := os.ReadFile(filepath.Join(mod, defaultBoard))
 	if err != nil {
