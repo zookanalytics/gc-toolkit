@@ -80,8 +80,8 @@ description = "Default target branch for merges."
 default = "main"
 
 [vars.default_merge_strategy]
-description = "Default when metadata.merge_strategy is unset: 'direct' = FF + push to target; 'mr'/'pr' = gated PR pipeline. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured."
-default = "mr"
+description = "Default when metadata.merge_strategy is unset: 'direct' = FF + push to target; 'mr'/'pr' = gated PR pipeline. Whatever this default says, merge-push's merge-strategy-resolve block resolves a bead that would land direct on target_branch to mr, so target_branch takes work only through a PR. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured."
+default = "direct"
 
 [vars.delete_merged_branches]
 description = "Delete source branches after a direct merge."
@@ -618,59 +618,8 @@ case "$?" in
   *) echo "rejection-repool.sh recorded nothing that dispatches $WORK (its output above says why); ending the turn"; gc runtime drain-ack; exit 1 ;;
 esac
 # <<< mr-aware-rejection
-# >>> rejection-branch-keep
-# $BEAD_JSON is the row rejection-repool.sh read before its write, so this
-# decision costs no read of its own. It is empty only when the script could not
-# read the bead, and then the branch it names is kept: a wrongly kept branch is
-# swept later, and a wrongly deleted one strands a PR.
-# >>> merge-strategy-resolve
-# The one reading of the merge strategy. Every step that branches on it reads
-# it through this block, so the step that keeps a branch and the step that
-# opens a PR for that branch cannot disagree about the mode the bead is in.
-MERGE_STRATEGY=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.merge_strategy // "{{default_merge_strategy}}"')
-MERGE_STRATEGY="${MERGE_STRATEGY:-direct}"
-if [ "$MERGE_STRATEGY" = "pr" ]; then MERGE_STRATEGY="mr"; fi
-# A target under polecat/ is another bead's per-bead PR head, so work landing
-# there folds into that PR rather than opening one of its own. In mr mode with
-# no PR of its own to reuse, that would open a nested branch -> polecat/<id> PR,
-# which a fold never wants, so resolve it to direct: the branch merges onto the
-# PR head and the PR re-reviews at the new head. Shaped targets (the rig
-# default, integration/, a named branch) stay mr, and so does a bead already
-# recording its own PR. MS_FOLD_IN carries the reason to the branch decision so
-# a kept branch and this flip cannot disagree.
-MS_FOLD_IN=
-MS_TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // empty')
-MS_BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
-MS_HAS_OWN_PR=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata | [(.existing_pr // ""), (.pr_url // ""), (.pr_number // "" | tostring)] | map(select(. != "")) | length')
-case "$MS_TARGET" in
-  polecat/*)
-    if [ "$MERGE_STRATEGY" = "mr" ] && [ "$MS_HAS_OWN_PR" = "0" ] && [ "$MS_TARGET" != "$MS_BRANCH" ]; then
-      MERGE_STRATEGY="direct"
-      MS_FOLD_IN=1
-    fi ;;
-esac
-# <<< merge-strategy-resolve
-BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
-# Nothing PR-shaped on the bead means "no PR will ever want this branch" only
-# in direct mode. In mr mode the PR is opened later, by the cadence's pr-open,
-# so that test is true for the whole pre-open window. A first-pass rejection
-# lands inside it.
-PR_SHAPED=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata | [(.pr_url // ""), (.pr_number // "" | tostring), (.existing_pr // "")] | map(select(. != "")) | length')
-if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-  echo "keeping whatever branch $WORK names — rejection-repool.sh could not read the bead, and the visit it filed carries it"
-elif [ -z "$BRANCH" ]; then
-  echo "no metadata.branch on $WORK — no branch to delete"
-elif [ "$MERGE_STRATEGY" != "direct" ]; then
-  echo "keeping origin/$BRANCH — merge_strategy=$MERGE_STRATEGY; the PR pipeline needs the branch"
-elif [ "${PR_SHAPED:-1}" != "0" ]; then
-  echo "keeping origin/$BRANCH — the bead already records a PR"
-elif [ -n "$MS_FOLD_IN" ]; then
-  echo "keeping origin/$BRANCH — it folds into the PR at $MS_TARGET and carries the rework"
-else
-  git push origin --delete "$BRANCH" || echo "could not delete origin/$BRANCH — a kept branch is swept later; the repool already stands, so this does not fail the cycle"
-fi
-# <<< rejection-branch-keep
 ```
+Do NOT delete `origin/$BRANCH` (the rebuild resumes it, in every merge mode).
 Tear down the prep worktree with `refinery-workspace.sh teardown`, the script
 the rebase step staged it with. It is detached and holds no branch, so nothing
 else has to be deleted, and a teardown that does not complete is cleared by the
@@ -809,31 +758,18 @@ BEAD_JSON=$(gc bd show $WORK --json)
 BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch')
 TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // "{{target_branch}}"')
 # >>> merge-strategy-resolve
-# The one reading of the merge strategy. Every step that branches on it reads
-# it through this block, so the step that keeps a branch and the step that
-# opens a PR for that branch cannot disagree about the mode the bead is in.
+# The one reading of the merge strategy. merge-push is the only step that
+# branches on it. A bead that would land direct on the default branch resolves
+# to mr, so work reaches {{target_branch}} only through a PR whether or not its
+# ruleset is on (docs/warrants.md). A bead with no target lands on the default
+# branch, so it resolves to mr too. local passes through whatever its target,
+# and merge-push refuses it as an unsupported strategy.
 MERGE_STRATEGY=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.merge_strategy // "{{default_merge_strategy}}"')
 MERGE_STRATEGY="${MERGE_STRATEGY:-direct}"
 if [ "$MERGE_STRATEGY" = "pr" ]; then MERGE_STRATEGY="mr"; fi
-# A target under polecat/ is another bead's per-bead PR head, so work landing
-# there folds into that PR rather than opening one of its own. In mr mode with
-# no PR of its own to reuse, that would open a nested branch -> polecat/<id> PR,
-# which a fold never wants, so resolve it to direct: the branch merges onto the
-# PR head and the PR re-reviews at the new head. Shaped targets (the rig
-# default, integration/, a named branch) stay mr, and so does a bead already
-# recording its own PR. MS_FOLD_IN carries the reason to the branch decision so
-# a kept branch and this flip cannot disagree.
-MS_FOLD_IN=
 MS_TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // empty')
-MS_BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
-MS_HAS_OWN_PR=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata | [(.existing_pr // ""), (.pr_url // ""), (.pr_number // "" | tostring)] | map(select(. != "")) | length')
-case "$MS_TARGET" in
-  polecat/*)
-    if [ "$MERGE_STRATEGY" = "mr" ] && [ "$MS_HAS_OWN_PR" = "0" ] && [ "$MS_TARGET" != "$MS_BRANCH" ]; then
-      MERGE_STRATEGY="direct"
-      MS_FOLD_IN=1
-    fi ;;
-esac
+[ -n "$MS_TARGET" ] || MS_TARGET="{{target_branch}}"
+if [ "$MERGE_STRATEGY" = "direct" ] && [ "$MS_TARGET" = "{{target_branch}}" ]; then MERGE_STRATEGY="mr"; fi
 # <<< merge-strategy-resolve
 EXISTING_PR=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.existing_pr // empty')
 if [ -n "$EXISTING_PR" ] && [ "$MERGE_STRATEGY" = "direct" ]; then

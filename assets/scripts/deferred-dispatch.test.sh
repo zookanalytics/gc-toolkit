@@ -68,12 +68,7 @@
 #     whole candidate set resolves in a bounded read count with no per-bead call
 #     and no jq process per candidate, a disposal starts only while the pass
 #     budget has room for one, a pinned pass names its store to bead-rehome, and
-#     the until half runs when the dispatch half cannot read its armed set; a
-#     mol-design-convoy subject whose run's own blocks wrote its `until` edge
-#     and handed it off is disposed toward its owned convoy once that convoy
-#     closes, also when earlier pours left their input convoys tracking it,
-#     while one its run never handed off, or one a live run's input convoy
-#     still tracks, is left as live work;
+#     the until half runs when the dispatch half cannot read its armed set;
 #   * the CLAIM a disposal is made under — the pass claims a bead in one write
 #     conditional on its status and assignee, before the read it decides the
 #     disposal on, and runs bead-rehome as the claim. A dispatch or a worker's
@@ -214,11 +209,10 @@ fi
 case "${1:-}" in
   list)
     shift
-    key=""; field=""; ready=0; all=0; gates=0; id=""; who="-"; st=""
+    key=""; ready=0; all=0; gates=0; id=""; who="-"; st=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --has-metadata-key) shift; key="${1:-}" ;;
-        --metadata-field) shift; field="${1:-}" ;;
         --id) shift; id="${1:-}" ;;
         --ready) ready=1 ;;
         --all) all=1 ;;
@@ -281,15 +275,13 @@ case "${1:-}" in
     # Real bd hides a gate bead from a listing unless --include-gates asks for
     # it, so a fixture bead with issue_type "gate" is hidden the same way.
     # --status names the statuses listed, a comma list, closed included when it
-    # is named; --assignee names the one assignee; --metadata-field <key>=<value>
-    # keeps the beads whose key holds that value.
+    # is named; --assignee names the one assignee.
     jq -c --arg k "$key" --arg id "$id" --argjson ready "$ready" --argjson all "$all" --argjson gates "$gates" \
-          --arg who "$who" --arg st "$st" --arg mf "$field" '
+          --arg who "$who" --arg st "$st" '
       ($id | if . == "" then [] else split(",") end) as $ids
       | ($st | if . == "" then [] else split(",") end) as $sts
       | [ .[]
         | select($k == "" or (.metadata | has($k)))
-        | select($mf == "" or (((.metadata // {})[$mf | split("=") | .[0]] // "") | tostring) == ($mf | split("=") | .[1:] | join("=")))
         | select(($ids | length) == 0 or (.id as $i | $ids | index($i)))
         | select(if ($sts | length) > 0 then (.status as $s | $sts | index($s)) != null else ($all == 1 or .status != "closed") end)
         | select($who == "-" or (.assignee // "") == $who)
@@ -450,49 +442,30 @@ case "${1:-}" in
     # depend on it (the until consumer's fresh read). Real bd answers an ARRAY
     # of {id, dependency_type, status} and an ERROR OBJECT (not an array) for an
     # unresolvable id, so the stub serves both shapes to exercise the SUT's
-    # fail-closed array check. `-t <type>` keeps the edges of that type.
-    # `dep add <a> <b> --type=<t>` and `dep remove <a> <b>` write a's own edge
-    # to b, as the design-convoy formula's blocks do. bd keeps one edge per pair
-    # and refuses a second, and reports success for removing an edge that was
-    # never there.
+    # fail-closed array check.
     shift
-    if [ "${1:-}" = "add" ]; then
-      from="${2:-}"; to="${3:-}"; t="${4#--type=}"
-      jq -e --arg f "$from" --arg o "$to" 'any(.[]; .id == $f and any((._deps // [])[]; .id == $o))' "$STORE" >/dev/null \
-        && { echo "Error: dependency $from -> $to already exists" >&2; exit 1; }
-      jq -c --arg f "$from" --arg o "$to" --arg t "$t" 'map(if .id == $f then ._deps = ((._deps // []) + [{id: $o, dependency_type: $t}]) else . end)' "$STORE" > "$STORE.dep" && mv "$STORE.dep" "$STORE"
-      exit 0
-    fi
-    if [ "${1:-}" = "remove" ]; then
-      from="${2:-}"; to="${3:-}"
-      jq -c --arg f "$from" --arg o "$to" 'map(if .id == $f then ._deps = [ (._deps // [])[] | select(.id != $o) ] else . end)' "$STORE" > "$STORE.dep" && mv "$STORE.dep" "$STORE"
-      exit 0
-    fi
     [ "${1:-}" = "list" ] || { echo "bd stub: unsupported 'dep ${1:-}'" >&2; exit 2; }
     shift; depid="${1:-}"; shift || true
-    direction=down; deptype=""
+    direction=down
     while [ $# -gt 0 ]; do
       case "$1" in
         --direction=*) direction="${1#--direction=}" ;;
         --direction) shift; direction="${1:-}" ;;
-        -t) shift; deptype="${1:-}" ;;
         *) : ;;
       esac
       shift || true
     done
     if [ "$direction" = "up" ]; then
       # `bd dep list <id> --direction=up --json` answers the beads that depend
-      # on <id>, each as {id, dependency_type, issue_type, status, metadata}: a
-      # convoy's tracks edge, a child's parent-child edge, a blocked bead's
-      # blocks edge.
+      # on <id>, each as {id, dependency_type, issue_type, status}: a convoy's
+      # tracks edge, a child's parent-child edge, a blocked bead's blocks edge.
       # STUB_DEP_UP_FAIL names a bead whose dependents cannot be read.
       if [ -n "${STUB_DEP_UP_FAIL:-}" ] && [ "$STUB_DEP_UP_FAIL" = "$depid" ]; then
         echo '{"error":"simulated dependents failure","schema_version":1}'; exit 0
       fi
-      jq -c --arg id "$depid" --arg dt "$deptype" '
+      jq -c --arg id "$depid" '
         [ .[] | . as $b | ($b._deps // [])[] | select(.id == $id)
-          | select($dt == "" or .dependency_type == $dt)
-          | {id: $b.id, dependency_type: .dependency_type, issue_type: ($b.issue_type // "task"), status: $b.status, metadata: ($b.metadata // {})} ]' "$now"
+          | {id: $b.id, dependency_type: .dependency_type, issue_type: ($b.issue_type // "task"), status: $b.status} ]' "$now"
       exit 0
     fi
     if [ "$(jq -r --arg id "$depid" 'any(.[]; .id == $id)' "$now")" != "true" ]; then
@@ -504,11 +477,10 @@ case "${1:-}" in
       # whose only blocker is cross-store. Model that, so
       # own_blocks_unresolved_ids sees the edge dep list dropped. An in-store
       # gate resolves here, as it does live, though a default listing hides it.
-      jq -c --arg id "$depid" --arg dt "$deptype" '
+      jq -c --arg id "$depid" '
         . as $store
         | [ .[] | select(.id == $id) ] | .[0] as $b
-        | [ ($b._deps // [])[] | select(.id as $t | ($store | any(.[]; .id == $t)))
-            | select($dt == "" or .dependency_type == $dt) ]' "$now"
+        | [ ($b._deps // [])[] | select(.id as $t | ($store | any(.[]; .id == $t))) ]' "$now"
     fi
     ;;
   *) echo "bd stub: unsupported '${1:-}'" >&2; exit 2 ;;
@@ -619,26 +591,6 @@ if [ "${1:-}" = "session" ] && [ "${2:-}" = "nudge" ]; then
     if [ "${STUB_NUDGE_RC:-0}" != 0 ]; then
         echo "gc session nudge: simulated nudge failure" >&2; exit "$STUB_NUDGE_RC"
     fi
-    exit 0
-fi
-# `gc convoy status <id> --json` names the convoy under `convoy` and the beads it
-# tracks as its children, and `gc convoy close <id>` closes the convoy whatever
-# its children are: the reads and the write of the design-convoy formula's
-# hand-off.
-if [ "${1:-}" = "convoy" ] && [ "${2:-}" = "status" ]; then
-    jq -ce --arg c "${3:-}" '. as $s | ([ .[] | select(.id == $c and .issue_type == "convoy") ] | .[0]) as $cv
-        | if $cv == null then error("no convoy " + $c) else
-            {convoy: {id: $cv.id, status: $cv.status},
-             children: [ ($cv._deps // [])[] | select(.dependency_type == "tracks") | .id as $m
-                         | ($s | map(select(.id == $m)) | .[0]) | select(. != null) | {id, status} ]} end' "${STUB_STORE:?}" || exit 1
-    exit 0
-fi
-if [ "${1:-}" = "convoy" ] && [ "${2:-}" = "close" ]; then
-    jq -e --arg c "${3:-}" 'any(.[]; .id == $c and .issue_type == "convoy")' "${STUB_STORE:?}" >/dev/null \
-        || { echo "gc convoy close: bead ${3:-} is not a convoy" >&2; exit 1; }
-    tmp="$(mktemp "${TMPDIR:-/tmp}/gctk-deferred-dispatch-test.XXXXXX")"
-    jq -c --arg c "${3:-}" 'map(if .id == $c then .status = "closed" else . end)' "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
-    echo "Closed convoy ${3:-}"
     exit 0
 fi
 echo "gc stub: unsupported '${1:-}'" >&2; exit 2
@@ -1593,94 +1545,6 @@ store '[
 out="$("$SUT" reconcile 2>&1)"
 eq "$(rehomes)" "0" "a convoy child is never disposed"
 has "$out" "child of convoy cv-1" "the report names the convoy"
-
-# A subject slung on mol-design-convoy, as the sling and the run leave it: the
-# pour's stamp, the input convoy ic-1 tracking it, the run's records naming its
-# owned convoy cv-1, and other work m-1 waiting on it. The formula's own blocks,
-# extracted verbatim, write the subject's until edge (seed-convoy) and hand it
-# off (drain); the graduation PR's merge then closes cv-1.
-DESIGN_FORMULA="$ROOT/formulas/mol-design-convoy.toml"
-design_block() { # <marker> -> the block between the marker pair, {{convoy_id}} rendered as ic-1
-    awk -v m="$1" '$0 ~ ("# >>> " m "$") {f=1; next} $0 ~ ("# <<< " m "$") {f=0} f' "$DESIGN_FORMULA" \
-        | sed 's/{{convoy_id}}/ic-1/g'
-}
-design_store() {
-    store '[
- {"id":"s-1","issue_type":"task","status":"open","assignee":"","metadata":{"gc.execution_routed_to":"rig/rig.polecat","gc.design_convoy_id":"cv-1","gc.design_convoy_branch":"integration/cv-1","gc.design_child":"d-1","gc.design_armed":"1","gc.impl_child":"i-1","gc.impl_armed":"1"},"notes":""},
- {"id":"ic-1","issue_type":"convoy","status":"open","assignee":"","metadata":{"gc.synthetic":"true"},"notes":"","_deps":[{"id":"s-1","dependency_type":"tracks"}]},
- {"id":"cv-1","issue_type":"convoy","status":"open","assignee":"","metadata":{"target":"integration/cv-1"},"notes":""},
- {"id":"m-1","issue_type":"task","status":"open","assignee":"","metadata":{},"notes":"","_deps":[{"id":"s-1","dependency_type":"blocks"}]}]'
-}
-close_bead() { jq -c --arg id "$1" 'map(if .id == $id then .status = "closed" else . end)' "$STUB_STORE" > "$STUB_STORE.c" && mv "$STUB_STORE.c" "$STUB_STORE"; }
-design_block seed-convoy-until > "$TMP/design-until.sh"
-design_block drain-hand-off > "$TMP/design-hand-off.sh"
-
-echo "# until: a design-convoy subject closes once its owned convoy closes"
-if [ -s "$TMP/design-until.sh" ] && [ -s "$TMP/design-hand-off.sh" ]; then
-    ok "the design-convoy formula's until and hand-off blocks are extracted"
-else
-    bad "the design-convoy formula's until or hand-off block is missing from $DESIGN_FORMULA"
-fi
-design_store
-SUBJECT=s-1 CONVOY_ID=cv-1 bash "$TMP/design-until.sh" >/dev/null 2>&1; rc=$?
-eq "$rc" 0 "seed-convoy writes the subject's until edge onto its owned convoy and reads it back"
-"$SUT" reconcile >/dev/null 2>&1
-eq "$(rehomes)" "0" "the subject waits while its owned convoy is open"
-bash "$TMP/design-hand-off.sh" >/dev/null 2>&1; rc=$?
-eq "$rc" 0 "drain hands the subject off"
-eq "$(meta s-1 gc.execution_routed_to)" "<absent>" "the hand-off clears the pour's stamp"
-eq "$(status_of ic-1)" "closed" "the hand-off closes the input convoy"
-close_bead cv-1
-out="$("$SUT" reconcile 2>&1)"; rc=$?
-eq "$rc" 0 "the pass is clean"
-eq "$(rehome_call 1)" "$(printf 's-1\tcv-1\tfolded')" "the subject is disposed toward its owned convoy once that convoy closes"
-eq "$(status_of s-1)" "closed" "the subject is closed"
-eq "$(meta s-1 gc.superseded_by)" "cv-1" "its successor pointer names the owned convoy"
-
-echo "# until: a design-convoy subject its run never handed off stays open"
-design_store
-SUBJECT=s-1 CONVOY_ID=cv-1 bash "$TMP/design-until.sh" >/dev/null 2>&1
-close_bead cv-1
-out="$("$SUT" reconcile 2>&1)"
-eq "$(rehomes)" "0" "a subject still carrying the pour's marks is never disposed"
-has "$out" "LEFT s-1" "the hold is reported"
-has "$out" "gc.execution_routed_to=rig/rig.polecat" "the report names the pour's stamp"
-
-# Earlier pours over the same subject, as Gas City leaves them: ic-0 is a failed
-# sling's input convoy, closed with its edge left, and ic-9 is a cancelled run's,
-# still open under its closed root r-9.
-add_rows() { jq -c --argjson r "$1" '. + $r' "$STUB_STORE" > "$STUB_STORE.a" && mv "$STUB_STORE.a" "$STUB_STORE"; }
-trackers_of() { gc bd dep list "$1" --direction=up -t tracks --json | jq -r '[.[].id] | sort | join(",")'; }
-echo "# until: a design-convoy subject earlier pours left tracked closes once its owned convoy closes"
-design_store
-add_rows '[
- {"id":"ic-0","issue_type":"convoy","status":"closed","assignee":"","metadata":{"gc.synthetic":"true"},"notes":"","_deps":[{"id":"s-1","dependency_type":"tracks"}]},
- {"id":"ic-9","issue_type":"convoy","status":"open","assignee":"","metadata":{"gc.synthetic":"true"},"notes":"","_deps":[{"id":"s-1","dependency_type":"tracks"}]},
- {"id":"r-9","issue_type":"task","status":"closed","assignee":"","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"ic-9"},"notes":""}]'
-SUBJECT=s-1 CONVOY_ID=cv-1 bash "$TMP/design-until.sh" >/dev/null 2>&1
-bash "$TMP/design-hand-off.sh" >/dev/null 2>&1; rc=$?
-eq "$rc" 0 "drain hands off a subject earlier pours left tracked"
-eq "$(trackers_of s-1)" "" "no input convoy tracks the subject after the hand-off"
-eq "$(status_of ic-9)" "closed" "the cancelled run's input convoy is closed"
-close_bead cv-1
-out="$("$SUT" reconcile 2>&1)"; rc=$?
-eq "$rc" 0 "the pass is clean"
-eq "$(rehome_call 1)" "$(printf 's-1\tcv-1\tfolded')" "the subject is disposed toward its owned convoy once that convoy closes"
-eq "$(status_of s-1)" "closed" "the subject is closed"
-
-echo "# until: an earlier input convoy a live run names keeps the subject open"
-design_store
-add_rows '[
- {"id":"ic-0","issue_type":"convoy","status":"open","assignee":"","metadata":{"gc.synthetic":"true"},"notes":"","_deps":[{"id":"s-1","dependency_type":"tracks"}]},
- {"id":"r-0","issue_type":"task","status":"in_progress","assignee":"","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"ic-0"},"notes":""}]'
-SUBJECT=s-1 CONVOY_ID=cv-1 bash "$TMP/design-until.sh" >/dev/null 2>&1
-bash "$TMP/design-hand-off.sh" >/dev/null 2>&1; rc=$?
-eq "$rc" 0 "drain still hands off this run's own marks"
-eq "$(trackers_of s-1)" "ic-0" "the live run's input convoy still tracks the subject"
-close_bead cv-1
-out="$("$SUT" reconcile 2>&1)"
-eq "$(rehomes)" "0" "a subject a live run's convoy tracks is never disposed"
-has "$out" "tracked by convoy ic-0" "the report names that convoy"
 
 echo "# until: the fresh read catches a route that landed after the pass-start listing"
 store '[
