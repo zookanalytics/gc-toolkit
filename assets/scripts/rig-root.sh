@@ -12,7 +12,9 @@
 # nothing pins a session's cwd between steps. An empty root would let
 # `git -C ""` run in the cwd, so a rig that does not resolve prints nothing and
 # exits 1 with the reason on stderr, and the caller decides what that stops. A
-# roster entry resolves only when one path carries the name.
+# roster entry resolves only when one path carries the name, and only from a
+# roster that `gc rig list` printed without failing and jq parsed whole, since
+# either can print a path before it fails.
 #
 # Exit: 0 printed the path; 1 no path resolved; 2 usage.
 set -u
@@ -51,8 +53,15 @@ else
   WHAT="'$NAME'"
 fi
 
-PATHS=$(gc rig list --json 2>/dev/null | scrub \
-  | jq -r --arg r "$NAME" '[.rigs[]? | objects | select(.name == $r) | .path | strings | select(. != "")] | unique | .[]' 2>/dev/null)
+if ! ROSTER=$(gc rig list --json 2>/dev/null); then
+  echo "$PROG: cannot resolve the rig root: gc rig list failed, so the roster entry for '$NAME' was not read" >&2
+  exit 1
+fi
+if ! PATHS=$(printf '%s' "$ROSTER" | scrub \
+  | jq -r --arg r "$NAME" '[.rigs[]? | objects | select(.name == $r) | .path | strings | select(. != "")] | unique | .[]' 2>/dev/null); then
+  echo "$PROG: cannot resolve the rig root: the roster gc rig list printed is not JSON, so the roster entry for '$NAME' was not read" >&2
+  exit 1
+fi
 case "$(printf '%s' "$PATHS" | awk 'NF { n++ } END { print n + 0 }')" in
   1) printf '%s\n' "$PATHS" ;;
   0) echo "$PROG: cannot resolve the rig root: $WHAT matched no rig in the roster" >&2; exit 1 ;;

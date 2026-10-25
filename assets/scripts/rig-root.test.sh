@@ -26,6 +26,7 @@ mkdir -p "$TMP/bin"
 [ "$1 $2" = "rig list" ] || exit 0
 [ -z "${FAKE_GC_FAILS:-}" ] || exit 1
 cat "$FAKE_ROSTER"
+[ -z "${FAKE_GC_FAILS_AFTER:-}" ] || exit 1
 GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
@@ -80,6 +81,13 @@ run 'not json' "" myrig
 eq "$RC|$OUT" "1|" "an unreadable roster resolves nothing"
 OUT=$(GC_RIG_ROOT="" GC_RIG=myrig FAKE_GC_FAILS=1 FAKE_ROSTER="$TMP/roster.json" "$SCRIPT" 2>/dev/null); RC=$?
 eq "$RC|$OUT" "1|" "a gc that fails resolves nothing"
+printf '%s' "$ROSTER" > "$TMP/roster.json"
+OUT=$(GC_RIG_ROOT="" GC_RIG=myrig FAKE_GC_FAILS_AFTER=1 FAKE_ROSTER="$TMP/roster.json" "$SCRIPT" 2>"$TMP/err"); RC=$?
+eq "$RC|$OUT" "1|" "a gc that fails after printing a roster resolves nothing"
+has "$(cat "$TMP/err")" "gc rig list failed" "and says the roster read failed"
+run '{"rigs":[{"name":"myrig","path":"/a"}]} not json' "" myrig
+eq "$RC|$OUT" "1|" "a roster followed by text that is not JSON resolves nothing"
+has "$ERR" "is not JSON" "and says the roster did not parse"
 
 echo "── usage ──"
 run "$ROSTER" /from/env myrig --rig
