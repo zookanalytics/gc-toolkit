@@ -15,6 +15,11 @@
 #     are the two no-skill cases the review formulas send a reviewer to.
 #   - Each region the review formulas repeat across steps, the method load, the
 #     record check and the gather, is the same text in every step carrying it.
+#   - Neither review formula names a check's judgment: no test or suite, no
+#     P0, P1 or P2 grade, no Verification line, and neither the correctness
+#     method's What to check list nor any dimension of it. The correctness
+#     method is method alone: it carries no shell block and reads no record
+#     itself, because the review formula gathers what it reads.
 #   - The arch skill approves no commit without a docs/architecture.md, files a
 #     gap in architecture the change does not touch without holding the change,
 #     and passes no change on a gap in architecture it does touch. This repo's
@@ -174,6 +179,40 @@ case "$(jq -r '."review-method-load"[0][1]' "$TMP/regions")" in
   *'`{{binding_prefix}}review-{{check}}`'*'`{{binding_prefix}}specialist-stance`'*) ok "the method load names the skill from the check, and the stance for the purpose case" ;;
   *) bad "the method load names the skill from the check, and the stance for the purpose case" ;;
 esac
+
+echo "# the review formulas name no check's judgment, and the correctness method is method"
+# The formulas carry what every check shares, so a test, a grade or a
+# dimension in one is a check's judgment in the lifecycle. The text checked is
+# what a reviewer reads: the description, and each step's title and
+# description, shell blocks included.
+for f in mol-review mol-review-quorum-signoff; do
+  python3 - "$ROOT/formulas/$f.toml" > "$TMP/$f.txt" <<'PY'
+import sys, tomllib
+d = tomllib.load(open(sys.argv[1], 'rb'))
+print('\n'.join([d.get('description', '')] + [s.get('title', '') + '\n' + s.get('description', '') for s in d.get('steps', [])]))
+PY
+  [ -s "$TMP/$f.txt" ] && ok "$f: its text is read" || bad "$f: its text is read"
+done
+# The dimensions are the bold bullets of the correctness method's What to check list.
+awk '/^### What to check$/ {f = 1; next} f && /^#/ {exit} f' "$METHOD" \
+  | sed -n 's/^- \*\*\([^*]*\)\*\*.*/\1/p' > "$TMP/dimensions"
+DIMS=$(grep -c . "$TMP/dimensions" || true)
+[ "$DIMS" -ge 5 ] && ok "the What to check list names its dimensions ($(paste -sd, - < "$TMP/dimensions"))" \
+  || bad "the What to check list names its dimensions" "only $DIMS read"
+# hit <file> <ERE> [-i] : the first line that matches, empty for none.
+hit() { grep -E ${3:-} -m1 -- "$2" "$1" || true; }
+for f in mol-review mol-review-quorum-signoff; do
+  T="$TMP/$f.txt"
+  eq "$(hit "$T" '(^|[^[:alnum:]_])(tests?|tested|testing|suites?)([^[:alnum:]_]|$)' -i)" "" "$f names no test or suite"
+  eq "$(hit "$T" '(^|[^[:alnum:]_])P[0-2]([^[:alnum:]_]|$)')" "" "$f names no P0, P1 or P2 grade"
+  eq "$(grep -F -m1 -- 'Verification:' "$T" || true)" "" "$f has no Verification line"
+  eq "$(grep -F -m1 -- 'What to check' "$T" || true)" "" "$f points at no What to check list"
+  while IFS= read -r d; do
+    eq "$(grep -F -m1 -- "**$d**" "$T" || true)" "" "$f carries no '$d' dimension"
+  done < "$TMP/dimensions"
+done
+eq "$(grep -cE '^ *```(bash|sh|zsh|shell) *$' "$METHOD" || true)" "0" "the correctness method carries no shell block"
+eq "$(grep -n -m1 -- '--check' "$METHOD" || true)" "" "the correctness method reads no record itself"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
