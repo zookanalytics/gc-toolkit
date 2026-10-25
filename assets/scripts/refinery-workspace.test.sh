@@ -495,6 +495,12 @@ staged_block() {
 }
 drains() { grep -c 'drain-ack' "$GC_LOG"; }
 went_on() { case "$OUT" in *"ACTS FOR"*) echo yes ;; *) echo no ;; esac; }
+# The block resolves the rig through rig-root.sh before it looks for the
+# script, so a city whose gc-toolkit rig holds rig-root.sh alone is one where
+# the script is not reachable.
+RR_CITY="$TMP/rig-root-city"
+mkdir -p "$RR_CITY/rigs/gc-toolkit/assets/scripts"
+cp "$HERE/rig-root.sh" "$RR_CITY/rigs/gc-toolkit/assets/scripts/"
 
 ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
 staged_block "$TMP/city" wa polecat/wa
@@ -516,10 +522,10 @@ case "$OUT" in *"WORK was"*) bad "prep-staged-work, nothing in the shell: no not
 mkdir -p "$D/rig/assets/scripts"
 cp "$SUT" "$D/rig/assets/scripts/"
 : > "$GC_LOG"
-OUT=$(cd "$D/cwd" && env -u GC_RIG_ROOT GC_RIG=myrig GC_CITY_PATH="$TMP/no-pack-city" WORK=wa BRANCH=polecat/wa bash "$TMP/staged-run.sh" 2>&1); RC=$?
+OUT=$(cd "$D/cwd" && env -u GC_RIG_ROOT GC_RIG=myrig GC_CITY_PATH="$RR_CITY" WORK=wa BRANCH=polecat/wa bash "$TMP/staged-run.sh" 2>&1); RC=$?
 eq "$RC" 0 "prep-staged-work, the rig from the roster and the script only in it: exits 0"
 has "$OUT" "ACTS FOR wb ON polecat/wb" "prep-staged-work, the rig from the roster and the script only in it: the block finds the script in the rig it resolved"
-eq "$(grep -c '^rig list' "$GC_LOG")" 1 "prep-staged-work, the rig from the roster: the roster is read once, by the block, not again by the script"
+eq "$(grep -c '^rig list' "$GC_LOG")" 1 "prep-staged-work, the rig from the roster: the roster is read once, by the rig-root.sh the block runs, not again by the script"
 ( cd "$TMP" && rm -rf -- "${D:?}/rig/assets" )
 
 # A worktree at the prep path with no record, such as one any other path added.
@@ -537,7 +543,7 @@ eq "$RC" 4 "prep-staged-work, no prep worktree: exits 4"
 eq "$(went_on)" no "prep-staged-work, no prep worktree: nothing after the block runs"
 eq "$(drains)" 0 "prep-staged-work, no prep worktree: the session does not drain"
 ws stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null
-staged_block "$TMP/no-pack-city" wb polecat/wb
+staged_block "$RR_CITY" wb polecat/wb
 eq "$RC" 1 "prep-staged-work, no script reachable: exits 1"
 eq "$(went_on)" no "prep-staged-work, no script reachable: nothing after the block runs"
 has "$OUT" "refinery-workspace.sh not found" "prep-staged-work, no script reachable: it says why"

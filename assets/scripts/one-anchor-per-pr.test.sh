@@ -287,8 +287,12 @@ exit "${LCRC:-0}"
 L
 chmod +x "$TMP/bin/lc-stub"
 # The block resolves the prep worktree's path from the rig root, which
-# GC_RIG_ROOT names here, so no run reads the roster.
+# GC_RIG_ROOT names here, so no run reads the roster. It resolves that root
+# through rig-root.sh, which it finds in the pack under GC_CITY_PATH.
 export GC_RIG_ROOT="$TMP/rig"
+mkdir -p "$TMP/pack-city/rigs/gc-toolkit/assets/scripts"
+cp "$HERE/rig-root.sh" "$TMP/pack-city/rigs/gc-toolkit/assets/scripts/"
+export GC_CITY_PATH="$TMP/pack-city"
 printf '%s\n' "$TERMINAL" > "$TMP/terminal.sh"
 run_terminal() { # <pre_open> <pr_url> <pr_number>
   : > "$LCLOG"
