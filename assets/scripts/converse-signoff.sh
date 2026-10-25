@@ -210,9 +210,15 @@ fi
 # on a shared standing-scope bucket (same subject, distinct escalation_key)
 # keeps its own demand: this sign-off neither resolves it nor overwrites its
 # operator question with a re-state. escalation_key is that per-sitting
-# discriminator, empty on an ordinary visit — which keeps the pre-topic
-# behaviour. An array so an empty topic expands to no argument under zsh.
-TOPIC=$(printf '%s' "$V" | jq -r '.[0].metadata.escalation_key // ""')
+# discriminator. A visit filed for a distinct concern (visit_topic=own) sits
+# beside a live sitting on its subject, and its discriminator is `visit:` and
+# its own id, the topic converse-hold.sh filed its demands under. The topic is
+# empty on an ordinary visit, which keeps the pre-topic behaviour. An array so
+# an empty topic expands to no argument under zsh.
+TOPIC=$(printf '%s' "$V" | jq -r '.[0] | (.metadata.escalation_key // "") as $k
+  | if $k != "" then $k
+    elif (.metadata.visit_topic // "") == "own" then "visit:" + (.id // "")
+    else "" end')
 DEMAND_TOPIC=()
 [ -n "$TOPIC" ] && DEMAND_TOPIC=(--topic "$TOPIC")
 # The hold to discharge. A conversation wait gates the VISIT (the default — a

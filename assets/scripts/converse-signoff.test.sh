@@ -1676,12 +1676,13 @@ case "${2:-}" in
             echo '{"error":"no issues found matching the provided IDs","schema_version":1}'; exit 1
         fi
         case "$id" in
-            v-x) jq -nc --arg hd "${SO_HOLD_DEMAND:-}" --arg tp "${SO_TOPIC:-}" \
+            v-x) jq -nc --arg hd "${SO_HOLD_DEMAND:-}" --arg tp "${SO_TOPIC:-}" --arg vt "${SO_VISIT_TOPIC:-}" \
                     --arg tr "${SO_TRACKS:-}" --arg cg "${SO_GROUP:-}" \
                     --arg rl "$(cat "$SOST/v-x.ruling" 2>/dev/null)" \
                     '[{id:"v-x",metadata:(({"task_kind":"visit"}
                         +(if $hd=="" then {} else {"gc.hold_demand":$hd} end)
                         +(if $tp=="" then {} else {"escalation_key":$tp} end)
+                        +(if $vt=="" then {} else {"visit_topic":$vt} end)
                         +(if $cg=="" then {} else {"gc.continuation_group":$cg} end)
                         +(if $rl=="" then {} else {"gc.ruling":$rl} end)))}
                       +(if $tr=="" then {} else {dependencies:[{id:$tr,dependency_type:"tracks"}]} end)]' ;;
@@ -1851,6 +1852,25 @@ echo "── the discharge isolates by topic even with no gc.hold_demand stamp �
 run_so SO_TOPIC=finding-b SO_DEMAND_LIST="$TWO_DEMANDS"
 have "the topic-scoped fallback resolves finding-b's demand" 'bd gate resolve dB --reason approved' "$SOGC"
 if grep -q 'gate resolve dA' "$SOGC"; then bad "…and not finding-a's" "the fallback scan resolved a sibling topic's demand"; else ok "…and not finding-a's demand"; fi
+
+# A visit filed for a distinct concern (visit_topic=own) sits beside the live
+# sitting on its subject, and its topic is `visit:` and its own id. The live
+# sitting's keyless demand on item-x comes first in the listing, so the unscoped
+# first-match would resolve dA; the topic keeps the ruling on this sitting's dB.
+echo "── a distinct-concern sitting discharges its own demand, not the live sitting's ──"
+BESIDE_LIVE='[{"id":"dA","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:item-x","metadata":{"gc.demand_for":"item-x"}},{"id":"dB","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:item-x:visit:v-x","metadata":{"gc.demand_for":"item-x","gc.demand_topic":"visit:v-x"}}]'
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route "gc-toolkit/gc-toolkit.polecat")
+run_so SO_VISIT_TOPIC=own SO_DEMAND_LIST="$BESIDE_LIVE"
+eq "$SO_RC" "0" "the own-topic discharge exits 0"
+have "the ruling resolves the demand filed under the visit's own topic" 'bd gate resolve dB --reason approved' "$SOGC"
+lacks "…and never the live sitting's demand beside it" 'gate resolve dA' "$SOGC" \
+      "gate resolve reached dA — the operator question of the live sitting on the same subject"
+SOARGS=(--visit v-x --subject item-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+run_so SO_VISIT_TOPIC=own SO_DEMAND_LIST="$BESIDE_LIVE"
+have "a cut-short re-states the wait on the subject under the visit's own topic" \
+     'helm[RIG] demand item-x still need X --by converse --topic visit:v-x' "$SOLOG"
+lacks "…and leaves the live sitting's demand alone" 'gate resolve dA' "$SOGC" \
+      "the cut-short resolved dA, the live sitting's demand"
 
 echo "── the conversation wait gates the VISIT: a ruling resolves the visit demand ──"
 # Default Phase A shape: converse-hold files the conversation demand on the visit,

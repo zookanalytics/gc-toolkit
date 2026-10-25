@@ -115,8 +115,8 @@ esac
 STUB
 chmod +x "$BIN/gc"
 
-# visit <id> <group> <assignee> [tracks] [key] — one row of the in_progress
-# listing.
+# visit <id> <group> <assignee> [tracks] [key] [topic] — one row of the
+# in_progress listing.
 # A 4th argument writes the `tracks` edge a visit is filed with alongside its
 # stamp — the visit's SECOND recording of its own subject, and the one that
 # has held where the stamp did not (su-ab9je); it is what the empty-group
@@ -126,11 +126,14 @@ chmod +x "$BIN/gc"
 # apart. An empty one writes NO key at all, the ordinary subject-is-the-topic
 # shape, which must behave differently from a keyed visit rather than
 # collapsing to the same branch.
+# A 6th writes visit_topic, the stamp gc-helm.sh open --allow-duplicate gives a
+# visit filed for a distinct concern (`own`).
 visit() {
-    jq -nc --arg id "$1" --arg g "$2" --arg a "$3" --arg t "${4:-}" --arg k "${5:-}" \
+    jq -nc --arg id "$1" --arg g "$2" --arg a "$3" --arg t "${4:-}" --arg k "${5:-}" --arg vt "${6:-}" \
         '{id:$id, assignee:$a,
           metadata:({"task_kind":"visit","gc.continuation_group":$g}
-                    + (if $k == "" then {} else {"escalation_key":$k} end))}
+                    + (if $k == "" then {} else {"escalation_key":$k} end)
+                    + (if $vt == "" then {} else {"visit_topic":$vt} end))}
          + (if $t == "" then {} else {dependencies:[{id:$t, dependency_type:"tracks"}]} end)'
 }
 # rigs <key>[:suspended]... — write rigs.json naming one store per key, each
@@ -277,6 +280,57 @@ is "the lower id still holds" "$(holder v-one sub)" "v-one"
 fixture "$(visit v-two sub sess-2 '' sub)" "$(visit v-one sub sess-1)"
 is "a key equal to the subject id is not the subject's topic" \
     "$(holder v-two sub)" "v-two"
+
+echo "── a visit filed for a distinct concern keeps its own sitting beside a live one ──"
+# gc-helm.sh open --allow-duplicate (engage --reason, engage --template, a new
+# visit picked at the prompt) files a second visit on a subject that a live
+# sitting may already hold, on purpose, and stamps it visit_topic=own. Keyless,
+# its topic would be the subject, and the lowest-id tiebreak would close one of
+# the two as folded: the concern the operator opened it for, or the live
+# sitting's own. Bead ids carry no age, so which one is a coin flip per pair.
+# Both orders are pinned.
+fixture "$(visit v-two sub sess-2 '' '' own)" "$(visit v-one sub sess-1)"
+is "positive control: the pre-fix block folded the new concern into the live sitting" \
+    "$(legacy_holder v-two sub)" "v-one"
+out="$(run_block v-two sub)"
+is "the subject still names the sitting's bead" "$(field "$out" SUBJECT)" "sub"
+is "the topic is the visit itself" "$(field "$out" TOPIC)" "visit:v-two"
+is "the new concern holds its own sitting though a lower id holds the subject" \
+    "$(field "$out" HOLDER)" "v-two"
+is "…and the live sitting keeps its own" "$(holder v-one sub)" "v-one"
+fixture "$(visit v-two sub sess-2)" "$(visit v-one sub sess-1 '' '' own)"
+is "positive control: the pre-fix block folded the live sitting into the new concern" \
+    "$(legacy_holder v-two sub)" "v-one"
+is "a keyless sitting never folds into a distinct concern's sitting on its subject" \
+    "$(holder v-two sub)" "v-two"
+is "…and the distinct concern holds its own" "$(holder v-one sub)" "v-one"
+fixture "$(visit v-two sub sess-2 '' '' own)" "$(visit v-one sub sess-1 '' '' own)"
+is "two distinct concerns on one subject each hold their own (v-two)" "$(holder v-two sub)" "v-two"
+is "…and so does the other (v-one)" "$(holder v-one sub)" "v-one"
+# Keyless dedup is untouched beside it: two keyless sittings still fold to the
+# lowest keyless id, whatever id the distinct concern carries.
+fixture "$(visit v-3 sub sess-3)" "$(visit v-2 sub sess-2)" "$(visit v-1 sub sess-1 '' '' own)"
+is "positive control: the pre-fix block folded a keyless sitting into the distinct concern" \
+    "$(legacy_holder v-3 sub)" "v-1"
+is "keyless siblings still fold to the lowest keyless id beside a distinct concern" \
+    "$(holder v-3 sub)" "v-2"
+is "…and the lowest keyless id holds" "$(holder v-2 sub)" "v-2"
+# Only `own` is a topic of its own, and an escalation_key names the topic first.
+fixture "$(visit v-two sub sess-2 '' '' yes)" "$(visit v-one sub sess-1)"
+is "a visit_topic other than own folds like a keyless visit" "$(holder v-two sub)" "v-one"
+fixture "$(visit v-two sub sess-2 '' key-a own)" "$(visit v-one sub sess-1 '' key-a)"
+is "an escalation_key names the topic when both are stamped" "$(holder v-two sub)" "v-one"
+
+echo "── a visit whose own row does not read never folds ──"
+# The topic is read off the visit's own row. Taken as keyless, an unread row
+# gets the subject's topic and folds, so a distinct concern would be lost to a
+# store blip.
+fixture "$(visit v-two sub sess-2 '' '' own)" "$(visit v-one sub sess-1)"
+printf 'ERROR: dolt: connection refused\n' >"$FIXDIR/show-v-two.json"
+is "an unread visit row resolves no holder (hold, never fold)" "$(holder v-two sub)" ""
+rm -f "$FIXDIR/show-v-two.json"
+is "a visit row that resolves to nothing resolves no holder" "$(holder v-two sub)" ""
+is "…while the sibling that reads still holds its own" "$(holder v-one sub)" "v-one"
 
 echo "── only live sittings of THIS group count ──"
 fixture "$(visit v-one sub '')" "$(visit v-two sub sess-2)"

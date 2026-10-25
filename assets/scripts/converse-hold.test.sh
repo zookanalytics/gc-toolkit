@@ -89,11 +89,12 @@ case "${2:-}" in
             printf '%s' "$STUB_SHOW_OUT"
         else
             hd=""; [ -r "$PERSIST" ] && hd="$(cat "$PERSIST")"
-            jq -nc --arg hd "$hd" --arg tp "${STUB_TOPIC:-}" \
+            jq -nc --arg hd "$hd" --arg tp "${STUB_TOPIC:-}" --arg vt "${STUB_VISIT_TOPIC:-}" \
                 --arg tr "${STUB_TRACKS:-}" --arg cg "${STUB_GROUP:-}" \
                 '[{id:"v-x", metadata:(({"task_kind":"visit"}
                     + (if $hd == "" then {} else {"gc.hold_demand":$hd} end)
                     + (if $tp == "" then {} else {"escalation_key":$tp} end)
+                    + (if $vt == "" then {} else {"visit_topic":$vt} end)
                     + (if $cg == "" then {} else {"gc.continuation_group":$cg} end)))}
                   + (if $tr == "" then {} else {dependencies:[{id:$tr, dependency_type:"tracks"}]} end)]'
         fi
@@ -245,7 +246,7 @@ is "a decision that is only whitespace is refused as usage" "$RC" "2"
 is "…before any write" "$(calls)" ""
 
 echo "── the visit read gate: a visit that cannot be read stops the hold before any write ──"
-# The visit's escalation_key is the topic every demand carries. A failed read
+# Every demand carries the visit's topic, here its escalation_key. A failed read
 # taken as an empty answer files the demand with no topic, and a topic-less
 # demand matches whatever demand already sits on the gated bead, a sibling
 # sitting's on a shared subject. So a read counts only when it exits 0 with the
@@ -429,6 +430,22 @@ has "an anchored hold's visit demand carries the topic" "helm[RIG] demand v-x ne
 has "…and so does the --hold-merge demand on the shared anchor" "helm[RIG] demand item-x need X --by converse --topic finding-b" "$(calls)"
 run_hold_merge STUB_STATE=pull_request
 hasnt "an ordinary visit (no escalation_key) files no topic" "--topic" "$(calls)"
+
+echo "── a visit filed for a distinct concern scopes its demands to itself ──"
+# gc-helm.sh open --allow-duplicate (engage --reason, --template, a new visit
+# picked at the prompt) files a second visit on a subject that may already have a
+# live sitting, and stamps it visit_topic=own. The two sittings share the subject,
+# so each demand this one files carries `visit:` and its own id as the topic, and
+# neither sitting's demand on the subject refreshes the other's gate in place.
+run STUB_VISIT_TOPIC=own
+has "a pre-PR subject's conversation demand carries the visit's own topic" "helm[RIG] demand item-x need X --by converse --topic visit:v-x" "$(calls)"
+run_hold_merge STUB_STATE=pull_request STUB_VISIT_TOPIC=own
+has "an anchored hold's visit demand carries it" "helm[RIG] demand v-x need X --by converse --topic visit:v-x" "$(calls)"
+has "…and so does the --hold-merge demand on the shared anchor" "helm[RIG] demand item-x need X --by converse --topic visit:v-x" "$(calls)"
+run STUB_VISIT_TOPIC=own STUB_TOPIC=finding-b
+has "an escalation_key still names the topic when both are stamped" "helm[RIG] demand item-x need X --by converse --topic finding-b" "$(calls)"
+run STUB_VISIT_TOPIC=other
+hasnt "a visit_topic other than own is no topic of its own" "--topic" "$(calls)"
 
 echo "── fail closed: an unreadable or missing lifecycle state gates the SUBJECT ──"
 # The gate switches to the visit only for a PROVEN PR-anchor state. A state that
