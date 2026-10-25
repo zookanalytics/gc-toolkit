@@ -245,11 +245,11 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
     done <<< "$(printf '%s' "$ready_raw" | scrub | jq -r '.[]? | (.id // empty) | tostring | gsub("[[:cntrl:]]"; " ")' 2>/dev/null)"
 
     # Group the members under their root.
-    declare -A MEMBERS=() MSTATUS=() MASSIGNEE=() MSID=() MSNAME=() MROUTED=() MEXEC=() MKIND=() MUPD=() MHELD=()
-    while IFS="$SEP" read -r root id status as sid sname routed erouted kind upd held; do
+    declare -A MEMBERS=() MASSIGNEE=() MSID=() MSNAME=() MROUTED=() MEXEC=() MKIND=() MUPD=() MHELD=()
+    while IFS="$SEP" read -r root id _ as sid sname routed erouted kind upd held; do
         [ -n "$root" ] && [ -n "$id" ] || continue
         MEMBERS["$root"]="${MEMBERS[$root]:-} $id"
-        MSTATUS["$id"]="$status"; MASSIGNEE["$id"]="$as"; MSID["$id"]="$sid"; MSNAME["$id"]="$sname"
+        MASSIGNEE["$id"]="$as"; MSID["$id"]="$sid"; MSNAME["$id"]="$sname"
         MROUTED["$id"]="$routed"; MEXEC["$id"]="$erouted"; MKIND["$id"]="$kind"; MUPD["$id"]="$upd"; MHELD["$id"]="$held"
     done <<< "$step_rows"
 
@@ -383,7 +383,7 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
         unset -v S_BEAD S_RUN_READ BSTATUS
     fi
 
-    unset -v READY MEMBERS MSTATUS MASSIGNEE MSID MSNAME MROUTED MEXEC MKIND MUPD MHELD
+    unset -v READY MEMBERS MASSIGNEE MSID MSNAME MROUTED MEXEC MKIND MUPD MHELD
     unset -v S_LT S_FRONTIER S_SNAME S_FORMULA
 done <<< "$scopes"
 
