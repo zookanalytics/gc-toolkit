@@ -832,9 +832,8 @@ eq "$UNEXPLAINED" "" "every bead only the precheck keeps was dropped on a non-lo
 
 echo "── holder liveness gates the conversation exclusions (mirrors liveness-sweep.sh) ──"
 # A conversation a live sitting holds excludes its subject (the pass can skip
-# it); one whose alias no listed session carries does not, so its subject
-# survives and the pass runs, and so does the subject of one in the queue,
-# which no sitting holds.
+# it), and so does one in the queue of the operator; one whose alias no listed
+# session carries does not, so its subject survives and the pass runs.
 HLFIX="$TMP/hlfix"; mkdir -p "$HLFIX"
 cat > "$HLFIX/ready.json" <<'JSON'
 [
@@ -862,7 +861,7 @@ BASELINE_CSV="" run_precheck
 SURV="$(survivors_of "$OUT")"
 hasnt ",$SURV," ",hl-live-subj," "a live-held conversation's subject stays excluded (holder alive)"
 has   ",$SURV," ",hl-dead-subj," "a dead-held conversation's subject survives → the pass runs"
-has   ",$SURV," ",hl-queue-subj," "a conversation in the queue excludes nothing: no sitting holds it"
+hasnt ",$SURV," ",hl-queue-subj," "a conversation in the queue excludes its subject: a person is already asked"
 
 echo "── precheck fails CLOSED on an unreadable session list (never under-excludes) ──"
 export GC_SESSION_FAIL=1

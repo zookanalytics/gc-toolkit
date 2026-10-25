@@ -832,9 +832,8 @@ eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "" \
 echo "── holder liveness gates the conversing class (readable session list) ──"
 # Conversations track ready subjects: one held by a sitting a listed session
 # carries (lx-live-4's alias), one held under an alias no listed session
-# carries, and one in the queue of the operator, which no sitting holds. The
-# live-held subject stays covered; the dead-held subject and the queued one
-# return to the census. Two more track workflow ROOTS, so the ready steps under
+# carries, and one in the queue of the operator. The live-held subject and the
+# queued one stay covered; the dead-held subject returns to the census. Two more track workflow ROOTS, so the ready steps under
 # them are covered through gc.root_bead_id by the same holder test.
 # Self-contained fixtures — the suite above clobbers the shared ones.
 cat > "$TMP/hl-ready.json" <<'JSON'
@@ -863,7 +862,7 @@ FAKE_READY="$TMP/hl-ready.json" FAKE_LIVE="$TMP/hl-live.json" FAKE_WIDEN="$TMP/h
 BL="$(cat "$BASELINE_FILE" 2>/dev/null)"
 case ",$BL," in *",hl-live-subj,"*) bad "live-held conversation over-surfaces" "hl-live-subj surfaced though lx-live-4 carries its alias" ;; *) ok "a live-held conversation keeps its subject out of the census" ;; esac
 case ",$BL," in *",hl-dead-subj,"*) ok "a dead-held conversation returns its subject to the census" ;; *) bad "dead-held subject hidden" "hl-dead-subj stayed masked (baseline: $BL)" ;; esac
-case ",$BL," in *",hl-queue-subj,"*) ok "a conversation in the queue covers nothing: no sitting holds it" ;; *) bad "queued subject hidden" "hl-queue-subj stayed masked (baseline: $BL)" ;; esac
+case ",$BL," in *",hl-queue-subj,"*) bad "queued conversation's subject surfaced" "hl-queue-subj reached the census though a conversation about it waits in the operator's queue (baseline: $BL)" ;; *) ok "a conversation in the queue keeps its subject out of the census: a person is already asked" ;; esac
 case ",$BL," in *",hl-live-root-step,"*) bad "a step under a live-held conversation's root over-surfaces" "hl-live-root-step surfaced though its root's conversation is held by lx-live-5" ;; *) ok "a step whose root a live-held conversation tracks stays out of the census" ;; esac
 case ",$BL," in *",hl-dead-root-step,"*) ok "a step whose root a dead-held conversation tracks returns to the census" ;; *) bad "dead-held root step hidden" "hl-dead-root-step stayed masked (baseline: $BL)" ;; esac
 
@@ -906,7 +905,7 @@ BLF="$(cat "$BASELINE_FILE" 2>/dev/null)"
 for hidden in hl-dead-subj hl-live-subj hl-dead-root-step hl-live-root-step; do
   case ",$BLF," in *",$hidden,"*) bad "fail-open surfaced $hidden" "an unreadable session list must hide nothing new (baseline: $BLF)" ;; *) ok "unreadable session list → $hidden keeps covering" ;; esac
 done
-case ",$BLF," in *",hl-queue-subj,"*) ok "…while a conversation in the queue still covers nothing" ;; *) bad "queued subject hidden on an unreadable list" "hl-queue-subj stayed masked (baseline: $BLF)" ;; esac
+case ",$BLF," in *",hl-queue-subj,"*) bad "queued subject surfaced on an unreadable list" "hl-queue-subj reached the census (baseline: $BLF)" ;; *) ok "…and a conversation in the queue still covers its subject" ;; esac
 
 echo
 echo "liveness-sweep: $PASS passed, $FAIL failed"

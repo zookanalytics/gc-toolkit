@@ -4,10 +4,10 @@
 #   (DEF)      sourcing the file exposes $LIVENESS_CLASSIFY_JQ, and with the defs
 #              it builds on it classifies every ready bead, a bead held for
 #              placement (placement.sh) among them
-#   (CONV)     a bead a conversation tracks converses only while a live sitting
-#              holds that conversation: one in the queue of the operator, a task
-#              whose alias names another id, and a task tracking two beads hold
-#              nothing
+#   (CONV)     a bead a conversation tracks converses while that conversation
+#              waits in the queue of the operator, and while a live sitting
+#              holds it: a task whose alias names another id, and a task
+#              tracking two beads, hold nothing
 #   (GATE)     a bead whose blocks edge reaches an open human gate is held by
 #              design, read from the not-closed listing; a gate of another type
 #              holds nothing
@@ -119,7 +119,7 @@ eq "$(class_of "$ALL" n-husk)" "husk" "(DEF) a husk step is husk"
 eq "$(class_of "$ALL" n-subj)" "conversing" "(CONV) the subject of a conversation a live sitting holds is conversing"
 eq "$(class_of "$(classify '[]' '[]' '[]' '{}' '["tk-cv1"]' true true)" n-subj)" "conversing" \
    "(CONV) …whether the session list names its alias bare or qualified"
-eq "$(class_of "$ALL" n-queue)" "unnamed" "(CONV) the subject of a conversation in the queue of the operator is not conversing"
+eq "$(class_of "$ALL" n-queue)" "conversing" "(CONV) the subject of a conversation in the queue of the operator converses: a person is already asked"
 eq "$(class_of "$ALL" n-foreign)" "unnamed" "(CONV) a task whose alias names another id is no conversation"
 eq "$(class_of "$ALL" n-twin)" "unnamed" "(CONV) a task tracking two beads is no conversation"
 eq "$(class_of "$ALL" n-gated)" "held-by-design" "(GATE) a bead an open human gate blocks is held by design"
@@ -145,6 +145,8 @@ eq "$(class_of "$(classify '[]' '[]' '[]' '{}' '[]' false false)" n-subj)" "unna
    "(LIVENESS) unreadable_liveness_covers false leaves the subject unnamed"
 eq "$(class_of "$(classify '[]' '[]' '[]' '{}' '[]' true true)" n-subj)" "unnamed" \
    "(LIVENESS) a readable list without the holder leaves the subject unnamed either way"
+eq "$(class_of "$(classify '[]' '[]' '[]' '{}' '[]' false false)" n-queue)" "conversing" \
+   "(LIVENESS) a conversation in the queue covers its subject on an unreadable list too: it has no holder to prove alive"
 
 echo "# every reader sources the one classifier"
 READERS="assets/scripts/liveness-sweep.sh
@@ -163,7 +165,7 @@ done
 echo "# no private copies"
 # A copy is a jq def of the classifier or of one of its arms. Specs and
 # generated renders are history and output, not readers.
-COPY_RE='def (liveness_classify|conversation_held_live|human_side_on|machine_convoy|order_wisp|topology_kind|pre_open_all_green)[^a-z_]'
+COPY_RE='def (liveness_classify|conversation_covers|human_side_on|machine_convoy|order_wisp|topology_kind|pre_open_all_green)[^a-z_]'
 COPIES=""
 for d in agents assets doctor formulas lifecycle orders overlays packs services skills template-fragments tools; do
     [ -d "$ROOT/$d" ] || continue

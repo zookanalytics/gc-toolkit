@@ -247,8 +247,8 @@ fi
 # conversations, read the way liveness-sweep.sh reads them. A holder GONE from
 # the session list is dead, and so is one still listed in a terminal state
 # (archived/closed, helm's ownerLive dead states); one listed in any other state
-# is live; a conversation in the queue of the operator has no holder and covers
-# nothing.
+# is live; a conversation in the queue of the operator needs no holder and
+# covers its subject.
 # Fail CLOSED here: on an unreadable list LIVENESS_KNOWN is false and the
 # classifier is told a held conversation does not cover
 # (unreadable_liveness_covers false), so its subject is not excluded and the

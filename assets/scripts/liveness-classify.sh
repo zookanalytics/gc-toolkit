@@ -30,7 +30,8 @@
 #                             covers its subject when the session list was
 #                             unreadable. The sweep passes true, since an
 #                             unprovable death is not a death; the precheck
-#                             passes false and fails closed.
+#                             passes false and fails closed. A conversation in
+#                             the operator's queue covers either way.
 #   $openprs $worked $husks $preopen_green
 #                             the reads beyond the bead set: open PR urls,
 #                             convoy-worked bead ids, husk step ids, and the
@@ -113,23 +114,25 @@ LIVENESS_CLASSIFY_JQ='
   # absent from the map.
   def pre_open_all_green:
     ($preopen_green[(.id // "")] // false) == true;
-  # A conversation a live sitting holds: its assignee is the alias of the
-  # sitting and a listed (live) session carries that alias, bare or qualified;
-  # $livesessions holds every name a listed session carries. One in the queue
-  # of the operator (`human`) is held by no sitting. $livenessknown false is an
-  # unreadable session list, where $unreadable_liveness_covers decides.
-  def conversation_held_live:
+  # A conversation that covers its subject. One in the queue of the operator
+  # (`human`) covers it: a person is already asked, as human_side_on below and
+  # the board read it. One a sitting holds covers it while that sitting
+  # lives: its assignee is the alias of the sitting and a listed (live) session
+  # carries that alias, bare or qualified; $livesessions holds every name a
+  # listed session carries. $livenessknown false is an unreadable session list,
+  # where $unreadable_liveness_covers decides for a held one.
+  def conversation_covers:
     ((.assignee // "") | tostring) as $a
-    | if $a == "" or $a == "human" then false
+    | if $a == "human" then true
+      elif $a == "" then false
       elif ($livenessknown | not) then $unreadable_liveness_covers
       else any(($a, (.id // ""), "c-" + (.id // "")); . as $n | ($livesessions | index($n)) != null)
       end;
-  # Conversing subjects: the bead each conversation a live sitting holds
-  # tracks. A ready bead converses when it is one of them, or when its
-  # gc.root_bead_id is: a sitting about a workflow root covers the steps of
-  # that workflow.
+  # Conversing subjects: the bead each covering conversation tracks. A ready
+  # bead converses when it is one of them, or when its gc.root_bead_id is: a
+  # sitting about a workflow root covers the steps of that workflow.
   def liveness_classify:
-    ([ ($live[0] // [])[] | select(conversation) | select(conversation_held_live)
+    ([ ($live[0] // [])[] | select(conversation) | select(conversation_covers)
        | conversation_subjects[] ]) as $convgroups
     | ([ ($openprs // [])[] | pr_key ] | map(select(. != ""))) as $openkeys
     | (($alive[0] // []) | open_human_gates) as $humangates

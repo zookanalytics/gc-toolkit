@@ -255,8 +255,9 @@ done < "$TMP/roots"
 HUSK_STEPS=$(jq -R . < "$HUSK_TMP" | jq -sc 'map(select(length > 0)) | unique')
 HUSK_ROOTS=$(jq -R . < "$HUSK_ROOTS_TMP" | jq -sc 'map(select(length > 0)) | unique')
 
-# --- live sitting identities: "conversing" requires a live holder -------------
-# A conversation covers its subject only while the sitting holding it is live.
+# --- live sitting identities: a held conversation needs a live holder ---------
+# A conversation a sitting holds covers its subject only while that sitting is
+# live.
 # This pass is mechanical but reads sessions here — the one
 # liveness source the pack trusts (mol-witness-patrol):
 # a holder GONE from the session list is dead, and so is one still listed in a
@@ -265,10 +266,10 @@ HUSK_ROOTS=$(jq -R . < "$HUSK_ROOTS_TMP" | jq -sc 'map(select(length > 0)) | uni
 # is live. $LIVE_SESSIONS_JSON is every name a LIVE listed session carries
 # (id, session_name, alias, name, agent_name); a conversation a sitting holds is
 # assigned to that sitting's alias. A conversation in the queue of the operator
-# (assigned to `human`) is held by no sitting, so it covers nothing. On an
-# unreadable list $LIVENESS_KNOWN stays false and the sweep has the classifier
-# keep every held conversation covering (unreadable_liveness_covers): an
-# unprovable death is not a death.
+# (assigned to `human`) covers its subject without a holder, since a person is
+# already asked. On an unreadable list $LIVENESS_KNOWN stays false and the
+# sweep has the classifier keep every held conversation covering
+# (unreadable_liveness_covers): an unprovable death is not a death.
 LIVE_SESSIONS_JSON="[]"
 LIVENESS_KNOWN=false
 SESS_RAW=$(bounded gc session list --state=all --json 2>/dev/null | scrub)
