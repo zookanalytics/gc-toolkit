@@ -214,7 +214,8 @@ echo "# every reader sources the one definition"
 READERS="assets/scripts/step-close.sh
 overlays/work-context/.claude/hooks/work-context.sh
 assets/scripts/self-review-check.sh
-packs/gascity-keeper/assets/scripts/rebase-check.sh"
+packs/gascity-keeper/assets/scripts/rebase-check.sh
+assets/scripts/work-tree-holder.sh"
 while IFS= read -r r; do
     [ -n "$r" ] || continue
     f="$ROOT/$r"
