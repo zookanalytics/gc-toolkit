@@ -54,8 +54,10 @@ jq -e '(.beads | type) == "array" and (.cases | type) == "array" and (.cases | l
 # --all; --id, --metadata-field and --has-metadata-key filter it. `dep list
 # <id> --direction=up -t tracks` prints each bead that tracks <id>, without its
 # own edges, as bd does. Every read is logged. FAIL_ON names an argument
-# string: a read whose arguments contain it fails, and with FAIL_HOW=parse it
-# answers bd's error object at exit 0 instead.
+# string: a read whose arguments contain it fails, with FAIL_HOW=parse it
+# answers bd's error object at exit 0 instead, and with FAIL_HOW=empty it
+# answers nothing at exit 0, as a reader whose bd call ends in a pipe does when
+# that call fails.
 STORE="$FX"
 READS="$TMP/reads.log"
 FAIL_ON=""; FAIL_HOW=""
@@ -65,6 +67,7 @@ fx_bd() {
         case " $* " in
             *"$FAIL_ON"*)
                 if [ "$FAIL_HOW" = parse ]; then printf '{"error": "no issue found"}\n'; return 0; fi
+                if [ "$FAIL_HOW" = empty ]; then return 0; fi
                 return 1 ;;
         esac
     fi
@@ -120,7 +123,7 @@ echo "# a read that fails fails the verb"
 fails() { # <label> <fail-on> <verb args...>
     local label="$1" on="$2" how got rc
     shift 2
-    for how in exit parse; do
+    for how in exit parse empty; do
         FAIL_ON="$on"; FAIL_HOW="$how"
         got="$(verb "$@")"; rc=$?
         FAIL_ON=""; FAIL_HOW=""
