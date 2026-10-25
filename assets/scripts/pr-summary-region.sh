@@ -58,8 +58,7 @@ strip_summary_heading() { # <text>
   '
 }
 
-# The region's contents, no markers: an integration-checkpoint banner when the
-# target is under integration/, then the ## Summary a reviewer reads first, the
+# The region's contents, no markers: the ## Summary a reviewer reads first, the
 # dispatch text demoted below it when both exist, and the refinery handoff facts.
 #
 # The last handoff bullet states the gate posture, and its wording is the one
@@ -79,21 +78,6 @@ compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_o
   local summary="$1" desc="$2" id="$3" branch="$4" target="$5" checkset="$6" head_oid="$7" sup_num="$8" sup_head="$9"
   local mode="${10:-open}" phased="${11:-}"
   local greened draftg
-  # A standing banner leads the region when the base is an integration branch, so a
-  # reviewer reads it before the diff: approving mints this phase into
-  # integration/<convoy-id> and main does not move, the broader review running at
-  # graduation. Set here where the base is known; the base: label on the PR list is
-  # its counterpart (pr-status-label.sh mark-base). specs/tk-6bji7k.9/decision.md.
-  # Single-quoted printf keeps the markdown backticks literal, never a command sub.
-  case "$target" in
-    integration/*)
-      echo '> [!IMPORTANT]'
-      printf '> **This pull request merges into `%s`, not `main`.**\n' "$target"
-      echo '>'
-      printf '%s\n' '> Approving it mints this phase into the convoy integration branch, and `main` does not move. The broader review runs at graduation, when the integration branch is carried to `main`.'
-      echo
-      ;;
-  esac
   echo "## Summary"; echo
   if [ -n "$summary" ]; then strip_summary_heading "$summary"
   elif [ -n "$desc" ]; then printf '%s\n' "$desc"
