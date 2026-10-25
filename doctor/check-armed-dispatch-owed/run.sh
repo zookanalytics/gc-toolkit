@@ -65,6 +65,15 @@ set -u
     printf '  - %s\n' "assets/scripts/order-cadence.sh could not be sourced from this pack, so the window an owed arm is judged by cannot be computed."
     exit 1
 }
+# The rule of which human gates still hold, which the definition of a hold
+# below builds on. Unsourceable, a held arm cannot be told from an owed one, so
+# the check warns.
+# shellcheck source=../../assets/scripts/bd-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/bd-lib.sh" || {
+    echo "cannot determine whether owed deferred dispatches are firing"
+    printf '  - %s\n' "assets/scripts/bd-lib.sh could not be sourced from this pack, so a held arm cannot be told from an owed one."
+    exit 1
+}
 # The one definition of a hold, which reconcile also reads. Unsourceable, a held
 # arm cannot be told from an owed one, so the check warns.
 # shellcheck source=../../assets/scripts/hold-lib.sh

@@ -1209,6 +1209,40 @@ has "$out" "1 held" "the summary counts it as held"
 out="$("$SUT" list 2>&1)"
 has "$out" 'b-1 -> rig/pool [HELD by dg "Decide b-1"]' "list names the human gate that holds it"
 
+# A human gate holds until a person resolves it, pinned included (bd-lib.sh's
+# rule), while bd counts a pinned blocker as none and reports the bead ready.
+# The ready answer is no way past the gate, on the bead or on its epic.
+echo "# reconcile holds an arm bd reports ready behind a pinned human gate"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":true,"_deps":[{"id":"dg","dependency_type":"blocks"}]},
+ {"id":"dg","status":"pinned","issue_type":"gate","title":"Decide b-1","assignee":"","await_type":"human","await_id":"decide-b-1","metadata":{},"notes":""},
+ {"id":"b-2","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":true,"_deps":[{"id":"epic","dependency_type":"parent-child"}]},
+ {"id":"epic","status":"open","issue_type":"epic","assignee":"","metadata":{},"notes":"","_deps":[{"id":"eg","dependency_type":"blocks"}]},
+ {"id":"eg","status":"pinned","issue_type":"gate","title":"Decide whether the epic goes on","assignee":"","await_type":"human","await_id":"epic-goes-on","metadata":{},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$rc" 0 "holding arms behind pinned human gates is a clean pass"
+eq "$(slings)" "0" "neither arm is slung, though bd reports both ready"
+has "$out" "2 held" "the summary counts both as held"
+has "$out" 'HELD by eg "Decide whether the epic goes on" on ancestor epic: b-2' "the pass log names the pinned gate on the epic"
+eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the arm behind its own pinned gate keeps its record"
+eq "$(meta b-2 gc.dispatch_when_ready)" "rig/pool" "the arm under the gated epic keeps its record"
+out="$("$SUT" list 2>&1)"
+has "$out" 'b-1 -> rig/pool [HELD by dg "Decide b-1"]' "list names the pinned gate on the bead, not DISPATCHABLE"
+has "$out" 'b-2 -> rig/pool [HELD by eg "Decide whether the epic goes on" on ancestor epic]' "list names the pinned gate on the epic"
+echo "# the arms fire once their pinned gates are resolved"
+jq -c 'map(if .id == "dg" or .id == "eg" then .status = "closed" else . end)' "$STUB_STORE" > "$TMP/resolved.json" && mv "$TMP/resolved.json" "$STUB_STORE"
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "2" "both arms are slung on the first pass after their gates close"
+
+# Any other pinned blocker holds nothing, as bd counts it: the ready answer
+# stands, and the arm is slung.
+echo "# a pinned blocker that is not a human gate holds no ready arm"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":true,"_deps":[{"id":"pin","dependency_type":"blocks"}]},
+ {"id":"pin","status":"pinned","issue_type":"task","title":"A pinned bead","assignee":"","metadata":{},"notes":""},
+ {"id":"b-2","status":"open","assignee":"","metadata":{'"$A1"'},"notes":"","_ready":true,"_deps":[{"id":"tg","dependency_type":"blocks"}]},
+ {"id":"tg","status":"pinned","issue_type":"gate","title":"A timer, pinned","assignee":"","await_type":"timer","metadata":{},"notes":""}]'
+out="$("$SUT" reconcile 2>&1)"; rc=$?
+eq "$(slings)" "2" "an arm whose only blocker is a pinned task or a pinned gate of another type is slung"
+
 # A hold holds work that has not started. A bead in flight carries a branch, a
 # merge_result or a rejection_reason, and only a blocker of its own holds it, so
 # a re-dispatch of work already begun, such as a rejected handoff's rebuild,

@@ -489,6 +489,19 @@ eq "$RC" "0" "an arm whose epic waits on a human gate is held, not owed (exit 0)
 hasnt "$OUT" "alpha bead h-4" "it is not reported"
 clear_stores
 
+# --- 17a. HELD: a pinned human gate still holds, on the arm or on its epic. A
+#          human gate holds until a person resolves it (bd-lib.sh's rule), so
+#          pinning it releases nothing, though a pinned blocker of any other
+#          kind holds nothing (23) -------------------------------------------
+armed_store alpha "$(aedged h-6 "" pg-1)" "$(aedged h-7 epic-1 "")"
+blockers_store alpha "$(b_human_gate pg-1 h-6 | jq -c '.status = "pinned"')" "$(b_epic epic-1 "" dg-1)" \
+    "$(b_human_gate dg-1 epic-1 | jq -c '.status = "pinned"')"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "arms behind a pinned human gate of their own or of their epic are held, not owed (exit 0)"
+hasnt "$OUT" "alpha bead h-6" "the arm whose own human gate is pinned is not reported"
+hasnt "$OUT" "alpha bead h-7" "the arm whose epic's human gate is pinned is not reported"
+clear_stores
+
 # --- 17b. RELEASED: the epic's human gate was cleared just now, so the owed
 #          window runs from its close, as it runs from a park's ---------------
 armed_store alpha "$(aedged h-4 epic-1 b-0)"

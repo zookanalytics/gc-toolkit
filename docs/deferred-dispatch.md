@@ -235,6 +235,9 @@ wait that belongs to one member goes on that member
 ([component-model.md](component-model.md#i1-in-full-the-hold-the-demand-and-the-shape-law)).
 Where `bd` decides the same question, the definition follows it: a closed or
 pinned blocker holds nothing, and a closed or pinned ancestor ends the walk.
+A human gate is the one blocker read otherwise. It holds until a person
+resolves it, pinned included, by the rule every reader of a human gate
+applies (`$HUMAN_GATE_JQ` in `assets/scripts/bd-lib.sh`).
 
 A read that fails fails the pass, so an unread hold never passes for none. A
 read that answers without an id it was asked for says this store holds no
@@ -243,10 +246,10 @@ hold down only from an ancestor row the store holds, so an ancestor with no
 row, or a blocker with no row on an ancestor, holds nothing, as it holds
 nothing in `bd list --ready`. A blocker with no row on the bead itself holds
 it, marked unread, because it is the bead's own sequencing and the walk
-cannot tell whether it is open. The walk runs only where bd keeps the bead
-out of `--ready`, though, and bd holds nothing on an edge it cannot resolve,
-so a bead bd has no other reason to hold is ready and the pass slings it, as
-`arm` warns when it records the arm. An ancestor past the walk's depth cap
+cannot tell whether it is open. That counts only where bd keeps the bead out
+of `--ready`, though. bd holds nothing on an edge it cannot resolve, so a
+bead bd has no other reason to hold is ready and the pass slings it, as `arm`
+warns when it records the arm. An ancestor past the walk's depth cap
 (`HOLD_MAX_DEPTH` in `hold-lib.sh`) is never read, and it holds the bead as
 unread.
 
@@ -258,14 +261,18 @@ work already begun therefore fires under a parked epic once its own blockers
 close, while the epic's members that have not started stay held, including
 the ones under a parent in flight.
 
-`bd list --ready` stays the fast path. bd's `is_blocked` flag cascades down
-parent-child edges, so a bead in flight under a parked epic never enters
-`--ready`. The pass therefore asks hold-lib about every open armed bead bd
-keeps unready, and slings the ones nothing holds. The
-status gate still holds (a non-`open` bead is never dispatched), and an
-assignee still keeps the pass off the bead. The pass reads each generation
-of ancestors in one listing and their blockers in one more, so its cost does
-not grow with the number of armed beads under a held epic.
+`bd list --ready` stays the fast path, and the pass asks hold-lib about every
+open armed bead beside it. bd's `is_blocked` flag cascades down parent-child
+edges, so a bead in flight under a parked epic never enters `--ready`. For a
+bead bd keeps unready, every hold the walk finds counts, and the pass slings
+the ones nothing holds. For a bead bd reports ready, the answer bd gives
+stands for every blocker but a human gate, and only a human gate on the bead
+or on an ancestor holds it: bd counts a pinned blocker as none, and a pinned
+human gate still holds. The status gate still holds (a non-`open` bead is
+never dispatched), and an assignee still keeps the pass off the bead. The
+pass reads each generation of ancestors in one listing and their blockers in
+one more, so its cost does not grow with the number of armed beads under a
+held epic.
 
 A held arm keeps its record. Releasing the hold, by closing a park's gate or
 by the prerequisite landing, needs no re-arm: the first pass after it
