@@ -75,6 +75,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HERE/dispatch-path.sh" || { echo "liveness-recheck: cannot source dispatch-path.sh from $HERE" >&2; exit 1; }
 # shellcheck source=placement.sh
 . "$HERE/placement.sh" || { echo "liveness-recheck: cannot source placement.sh from $HERE" >&2; exit 1; }
+# The one rule of which human gates still hold the bead they block, shared with
+# every reader of a bead's gates. Exposes $HUMAN_GATE_JQ, whose open_human_gates
+# the gate read below keeps and whose gates_blocking the classify block splices
+# in.
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "liveness-recheck: cannot source bd-lib.sh from $HERE" >&2; exit 1; }
 
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
@@ -148,16 +154,15 @@ fi
 # cannot say whether anyone is coming back. A gate takes the bead it blocks out
 # of the ready set, which is why the not-ready rule usually catches this
 # first — this read names the person's wait outright. The gates come from one
-# `gc bd gate list` of the store, every gate not closed, and each listed bead's
-# own blocks edges, from read 1, say which of them hold it.
+# `gc bd gate list` of the store, kept to the open human gates by bd-lib.sh's
+# rule (open_human_gates), and each listed bead's own blocks edges, from read 1,
+# say which of them hold it (gates_blocking).
 # Best-effort like the ready set: unread means no bead is held, which lists
 # beads rather than hiding them.
 GATE_STATE=verified
 GATE_RAW=$(gc bd gate list --json --limit 0 2>/dev/null | grep -a -vE '^gc bd:' | scrub)
 if printf '%s' "$GATE_RAW" | jq -e 'type == "array" or . == null' >/dev/null 2>&1; then
-    GATES_JSON=$(printf '%s' "$GATE_RAW" | jq -c '[ (. // [])[]
-        | select((.await_type // "") == "human")
-        | select(((.status // "open") | tostring) != "closed") | .id ]')
+    GATES_JSON=$(printf '%s' "$GATE_RAW" | jq -c "$HUMAN_GATE_JQ"'(. // []) | open_human_gates')
 else
     GATE_STATE=unverified
     GATES_JSON='[]'
@@ -191,9 +196,10 @@ CENSUS=$(jq -n \
     --arg gate_state "$GATE_STATE" '
   def meta: (.metadata // {});
   def mv($k): ((meta[$k] // "") | tostring);
-  # The open human gates a listed bead waits on, through its own blocks edges.
-  def held_by($b): [ $b.dependencies[]? | select((.type // "") == "blocks")
-                     | (.depends_on_id // "") as $d | select(($gates | index($d)) != null) | $d ];
+  # The open human gates a listed bead waits on, through its own blocks edges:
+  # gates_blocking, from $HUMAN_GATE_JQ.
+  '"$HUMAN_GATE_JQ"'
+  def held_by($b): $b | gates_blocking($gates);
   # Standing-record idioms (never claimable, never close): standing_kinds,
   # from standing-kinds.sh, the list liveness-sweep.sh classifies by.
   '"$STANDING_KINDS_JQ"'
