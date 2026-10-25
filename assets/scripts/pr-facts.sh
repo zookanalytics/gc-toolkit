@@ -347,8 +347,9 @@ is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 
 # The wait itself is a human gate: Gas City's native bead for a wait a person
 # must clear (issue_type=gate, await_type=human). It blocks the bead that waits,
 # and a person clears it with `gc bd gate resolve`, whose reason is the answer. A
-# live human gate that blocks the anchor is a live hold, read by the one reader
-# rule (bd_human_gates); none, and the takeaway records a sitting that ended.
+# live human gate that blocks the anchor is a live hold, read by the one rule of
+# which gates still hold (bd_open_human_gates); none, and the takeaway records a
+# sitting that ended.
 # Such a gate holds the anchor's merge as well, so a dispatch that brings the
 # branch current under it spends work on a merge that waits on a person, and can
 # answer one horn of what the person is asked by fait accompli.
@@ -365,10 +366,8 @@ is_held() { case "${1:-}" in ""|false|False|FALSE|0|null) return 1 ;; *) return 
 #   2  the gates would not read
 human_gate_state() { # <anchor-id>
   local gates open
-  gates=$(bd_human_gates "${1:-}") || return 2
-  open=$(printf '%s' "$gates" | jq -r '[ .[]
-      | select(((.status // "open") | tostring | ascii_downcase) != "closed") | .id ] | .[0] // empty' 2>/dev/null) \
-    || return 2
+  gates=$(bd_open_human_gates "${1:-}") || return 2
+  open=$(printf '%s' "$gates" | jq -r '.[0].id // empty' 2>/dev/null) || return 2
   [ -n "$open" ] || return 1
   printf '%s' "$open"
 }
@@ -771,15 +770,12 @@ MERGE_PATH_KEYS_JQ='
     or test("^pr-(comments|unengaged-threads)\\." + $n + "\\.")
     or . == "merge-blocked-threads";'
 # gate_for <subject> <key> — the open human gate under <key> that blocks
-# <subject>, by the one reader rule (bd_human_gates): its id on stdout, nothing
-# when none is open. Non-zero when the gates would not read.
+# <subject>, read by bd_open_human_gates: its id on stdout, nothing when none is
+# open. Non-zero when the gates would not read.
 gate_for() {
   local gates
-  gates=$(bd_human_gates "$1") || return 1
-  printf '%s' "$gates" | jq -r --arg k "$2" '
-    [ .[] | select(((.await_id // "") | tostring) == $k)
-          | select(((.status // "open") | tostring | ascii_downcase) != "closed")
-          | .id ] | .[0] // empty' 2>/dev/null
+  gates=$(bd_open_human_gates "$1" "$2") || return 1
+  printf '%s' "$gates" | jq -r '.[0].id // empty' 2>/dev/null
 }
 # refresh_dispose_gates <anchor> <num> <message> <kids-note> — keep the
 # disposition arm's refused-close report current. human-gate.sh files the gate
@@ -793,7 +789,7 @@ gate_for() {
 refresh_dispose_gates() {
   local a="$1" key="pr-dispose-failed.$2" msg="$3" kids="$4" gates v old want
   local kids_lead=" The branch's parked rework/rebase children ("
-  gates=$(bd_human_gates "$a") || return 0
+  gates=$(bd_open_human_gates "$a" "$key") || return 0
   while IFS= read -r v; do
     [ -n "$v" ] || continue
     old=$(bd_json show "$v" | jq -r '.[0].description // ""' 2>/dev/null)
@@ -814,11 +810,7 @@ refresh_dispose_gates() {
       echo "$PROG: $a — could not refresh its pr-dispose-failed gate $v; it still names an earlier refusal" >&2
     fi
   done <<REFRESH_EOF
-$(printf '%s' "$gates" | jq -r --arg k "$key" '.[]
-    | select(((.await_id // "") | tostring) == $k)
-    | select(((.status // "open") | tostring | ascii_downcase) != "closed")
-    | select(((.assignee // "") | tostring) == "")
-    | .id' 2>/dev/null)
+$(printf '%s' "$gates" | jq -r '.[] | select(((.assignee // "") | tostring) == "") | .id' 2>/dev/null)
 REFRESH_EOF
 }
 mint_rework_child() { # <reuse-id|""> <title> <anchor> <branch> <target> <reason> <mode> <pr-url> <pr-number>
@@ -1393,8 +1385,7 @@ if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
         echo "$PROG: could not retire stale merge-blocked-approval gate $avid; leaving it for the operator" >&2
       fi
     done <<AV_EOF
-$(printf '%s' "$av_gates" | jq -r '.[]? | select((.await_type // "") == "human" and (.await_id // "") == "merge-blocked-approval")
-    | select(((.status // "open") | tostring | ascii_downcase) != "closed") | .id' 2>/dev/null)
+$(printf '%s' "$av_gates" | jq -r "$HUMAN_GATE_JQ"'.[]? | select(open_human_gate("merge-blocked-approval")) | .id' 2>/dev/null)
 AV_EOF
   else
     echo "$PROG: merge-blocked-approval gate sweep skipped — could not list the store's gates (retry next pass)" >&2
@@ -1820,7 +1811,7 @@ CHILDREN_EOF
         # pr-dispose-failed gate asks whether this close lands, so it is not
         # withdrawn here: the retry below names its key to bead-rehome.sh, which
         # withdraws it just before the close.
-        if mp_gates=$(bd_human_gates "$id"); then
+        if mp_gates=$(bd_open_human_gates "$id"); then
           while IFS=$'\t' read -r mpgate mpkey mpwho; do
             [ -n "$mpgate" ] || continue
             if [ "$mpkey" = "pr-abandoned.$num" ]; then
@@ -1840,8 +1831,7 @@ CHILDREN_EOF
             fi
           done <<MP_EOF
 $(printf '%s' "$mp_gates" | jq -r --arg n "$num" "$MERGE_PATH_KEYS_JQ"'
-    .[] | select(((.status // "open") | tostring | ascii_downcase) != "closed")
-        | ((.await_id // "") | tostring) as $k
+    .[] | ((.await_id // "") | tostring) as $k
         | select($k | merge_path_key($n))
         | [.id, $k, ((.assignee // "") | tostring)] | @tsv' 2>/dev/null)
 MP_EOF

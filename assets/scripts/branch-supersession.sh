@@ -383,14 +383,12 @@ BRIEF
 }
 
 # The open rework-base-supersession human gates that block <anchor>, one id a
-# line, by the one reader rule. Non-zero when the anchor's gates would not read.
+# line, read by bd_open_human_gates. Non-zero when the anchor's gates would not
+# read.
 open_gates() { # <anchor>
   local gates
-  gates=$(bd_human_gates "$1") || return 1
-  printf '%s' "$gates" | jq -r --arg k "$KEY" '
-    .[] | select(((.await_id // "") | tostring) == $k)
-        | select(((.status // "open") | tostring | ascii_downcase) != "closed")
-        | .id' 2>/dev/null
+  gates=$(bd_open_human_gates "$1" "$KEY") || return 1
+  printf '%s' "$gates" | jq -r '.[].id' 2>/dev/null
 }
 
 hold() {

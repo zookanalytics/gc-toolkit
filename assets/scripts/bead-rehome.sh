@@ -95,6 +95,11 @@ BRANCH_END="${GC_BRANCH_END_TOOL:-$HERE/branch-end.sh}"
 # other visit closer. Exposes work_outcome_noop.
 # shellcheck source=work-outcome.sh
 . "$HERE/work-outcome.sh" || { echo "bead-rehome: cannot source work-outcome.sh from $HERE" >&2; exit 1; }
+# The rule of which human gates still hold a bead, $HUMAN_GATE_JQ, which the
+# retry's withdrawal reads its own gates by. This script reads through bd_at, so
+# it takes the rule and none of the library's store reads.
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "bead-rehome: cannot source bd-lib.sh from $HERE" >&2; exit 1; }
 
 ORIGIN=""; SUCCESSOR=""; KIND=""; NOTE=""
 ORIGIN_STORE=""; SUCCESSOR_STORE=""; DRY_RUN=""; CHECK=""; EXCEPT_KEY=""
@@ -532,25 +537,22 @@ else
     fi
     # The retry's own gates. The finalize gate excepted the open human gates
     # under the caller's key that no person is assigned, but bd still refuses to
-    # close a bead they block, so they are resolved just before the close. That
-    # happens only once nothing else would refuse it: every other live blocker
-    # and every open child holds the close, and with one standing the gates stay
-    # open and nothing closes, as a held close leaves it. A blocker that is closed
+    # close a bead they block, so they are resolved just before the close. Which
+    # of them are open is bd-lib.sh's open_human_gate rule. That happens only
+    # once nothing else would refuse it: every other live blocker and every open
+    # child holds the close, and with one standing the gates stay open and
+    # nothing closes, as a held close leaves it. Any other blocker that is closed
     # or pinned holds nothing, as in bd. The reason names the retry and carries no
     # outcome word, because the close has not landed yet: no quiet period starts.
     if [ -n "$EXCEPT_KEY" ]; then
         BLK_JSON=$(bd_at "$ORIGIN_PATH" dep list "$ORIGIN" --type blocks --json 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true)
         printf '%s' "$BLK_JSON" | jq -e 'type == "array"' >/dev/null 2>&1 \
             || die "pointer IS recorded on $ORIGIN, but its blockers did not read, so whether anything besides its own [$EXCEPT_KEY] gates holds the close is unknown; nothing was resolved or closed. Re-run this close." 5
-        OWN_GATES=$(printf '%s' "$BLK_JSON" | jq -r --arg k "$EXCEPT_KEY" '
-            .[] | select(((.status // "open") | tostring) as $st | $st != "closed" and $st != "pinned")
-                | select((.issue_type // "") == "gate" and (.await_type // "") == "human"
-                         and ((.await_id // "") | tostring) == $k and ((.assignee // "") | tostring) == "")
-                | .id' 2>/dev/null || true)
-        OTHER_BLOCKERS=$(printf '%s' "$BLK_JSON" | jq -r --arg k "$EXCEPT_KEY" '
+        OWN_GATES=$(printf '%s' "$BLK_JSON" | jq -r --arg k "$EXCEPT_KEY" "$HUMAN_GATE_JQ"'
+            .[] | select(open_human_gate($k) and ((.assignee // "") | tostring) == "") | .id' 2>/dev/null || true)
+        OTHER_BLOCKERS=$(printf '%s' "$BLK_JSON" | jq -r --arg k "$EXCEPT_KEY" "$HUMAN_GATE_JQ"'
             [ .[] | select(((.status // "open") | tostring) as $st | $st != "closed" and $st != "pinned")
-                  | select(((.issue_type // "") == "gate" and (.await_type // "") == "human"
-                            and ((.await_id // "") | tostring) == $k and ((.assignee // "") | tostring) == "") | not)
+                  | select((open_human_gate($k) and ((.assignee // "") | tostring) == "") | not)
                   | .id ] | join(" ")' 2>/dev/null || true)
         KIDS_JSON=$(bd_at "$ORIGIN_PATH" list --parent "$ORIGIN" --include-gates --include-infra --include-templates --json --limit 1 2>/dev/null | grep -a -vE '^gc bd:' | scrub || true)
         printf '%s' "$KIDS_JSON" | jq -e 'type == "array"' >/dev/null 2>&1 \

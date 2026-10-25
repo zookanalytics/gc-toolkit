@@ -61,20 +61,19 @@ _fg_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 # clause_no_open_human_gate <bead-id> [<except-key>] — prints a one-line refusal
 # reason and returns 1 when an open human gate blocks the bead, or when the gate
-# read fails closed; prints nothing and returns 0 when none does. A gate is open
-# while its status is anything but closed. Under <except-key>, a gate whose await
-# id is that key and that no person is assigned does not hold (see the block
-# comment above).
+# read fails closed; prints nothing and returns 0 when none does. Which gates are
+# open is bd_open_human_gates' rule. Under <except-key>, a gate whose await id is
+# that key and that no person is assigned does not hold (see the block comment
+# above).
 clause_no_open_human_gate() {
     _fgg_bead="$1"
     _fgg_except="${2:-}"
-    _fgg_gates=$(bd_human_gates "$_fgg_bead") || {
+    _fgg_gates=$(bd_open_human_gates "$_fgg_bead") || {
         echo "open-human-gate probe unreadable ('gc bd dep list $_fgg_bead --type blocks' failed) — refusing finalize on $_fgg_bead (fail-closed)"
         return 1
     }
     _fgg_hit=$(printf '%s' "$_fgg_gates" | jq -r --arg ex "$_fgg_except" '
         [ .[]
-          | select(((.status // "open") | tostring | ascii_downcase) != "closed")
           | select($ex == ""
                    or ((.await_id // "") | tostring) != $ex
                    or ((.assignee // "") | tostring) != "")

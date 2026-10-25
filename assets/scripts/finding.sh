@@ -369,7 +369,7 @@ deferred_follow_up() { # <finding>
 # The open human gates already on <anchor>'s feedback, as one JSON array of
 # {id, key, title, on: [{bead, kind, how}]}. A gate is on the feedback when the
 # `blocks` edges of the anchor or of one of its live rework children reach it,
-# by the one reader rule (bd_human_gates in bd-lib.sh), the way a bare rework
+# read by bd_open_human_gates in bd-lib.sh, the way a bare rework
 # parks itself on the question it put to the operator. kind is anchor or rework,
 # how is blocks, and a gate about several of them lists each. key is the gate's
 # await id, its situation key.
@@ -437,9 +437,9 @@ feedback_visits() { # <anchor-id> [<finding-row-json>]
     | jq -rs --arg a "$1" --arg f "${2:+finding}" "$_FEEDBACK_SCOPE_JQ" 2>/dev/null) || return 2
   while IFS=$'\t' read -r kind bead; do
     [ -n "$bead" ] || continue
-    gates=$(bd_human_gates "$bead") || return 2
+    gates=$(bd_open_human_gates "$bead") || return 2
     found=$(printf '%s\n%s\n' "$found" "$gates" | jq -cs --arg b "$bead" --arg k "$kind" '
-      .[0] + [ .[1][] | select(((.status // "open") | tostring | ascii_downcase) != "closed")
+      .[0] + [ .[1][]
                | { id: ((.id // "") | tostring), key: ((.await_id // "") | tostring),
                    title: ((.title // "") | tostring), on: [ { bead: $b, kind: $k, how: "blocks" } ] } ]' 2>/dev/null) \
       || return 2

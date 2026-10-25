@@ -130,8 +130,10 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 # Every decision below reads the bead's human gates through its `blocks` edges,
-# the one reader rule, closed gates included. A subject that names no bead
-# fails this read, and nothing is filed or resolved on an unreadable one.
+# the one reader rule, closed gates included, and tells the open ones by
+# open_human_gate, bd-lib.sh's rule of which gates still hold. A subject that
+# names no bead fails this read, and nothing is filed or resolved on an
+# unreadable one.
 if ! GATES=$(bd_human_gates "$SUBJECT"); then
   warn "could not read the human gates of '$SUBJECT' (no such bead, or its store did not answer). Nothing was filed or resolved."
   exit 1
@@ -150,8 +152,7 @@ fi
 # situation finds and resolves.
 if [ "$RETRACT" = 1 ]; then
   REASON="moot: $MESSAGE"
-  OPEN_IDS=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" \
-    '.[] | select((.await_id // "") == $k and (.status // "") != "closed") | .id' 2>/dev/null)
+  OPEN_IDS=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" "$HUMAN_GATE_JQ"'.[] | select(open_human_gate($k)) | .id' 2>/dev/null)
   if [ -z "$OPEN_IDS" ]; then
     warn "no open human gate under [$KEY] blocks $SUBJECT — nothing to withdraw"
     exit 0
@@ -187,8 +188,7 @@ fi
 # bd keeps no idempotency at create, so two writers racing in the same instant
 # can both file; the board folds both onto the bead's row, and one answer
 # clears both.
-OPEN_GATE=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" \
-  '[ .[] | select((.await_id // "") == $k and (.status // "") != "closed") ][0].id // empty' 2>/dev/null)
+OPEN_GATE=$(printf '%s' "$GATES" | jq -r --arg k "$KEY" "$HUMAN_GATE_JQ"'[ .[] | select(open_human_gate($k)) ][0].id // empty' 2>/dev/null)
 if [ -n "$OPEN_GATE" ]; then
   warn "gate $OPEN_GATE already asks for $SUBJECT [$KEY] — not filing another"
   printf '%s\n' "$OPEN_GATE"
@@ -250,8 +250,7 @@ if ! GOT=$(bd_human_gates "$SUBJECT"); then
   warn "gate $GATE was filed, but the human gates of $SUBJECT did not read back; check that it blocks $SUBJECT under [$KEY]: gc bd dep list $SUBJECT --type blocks --json"
   exit 1
 fi
-if ! printf '%s' "$GOT" | jq -e --arg g "$GATE" --arg k "$KEY" \
-     'any(.[]; .id == $g and (.await_id // "") == $k and (.status // "") != "closed")' >/dev/null 2>&1; then
+if ! printf '%s' "$GOT" | jq -e --arg g "$GATE" --arg k "$KEY" "$HUMAN_GATE_JQ"'any(.[]; .id == $g and open_human_gate($k))' >/dev/null 2>&1; then
   warn "gate $GATE was filed, but it does not read back as an open human gate under [$KEY] that blocks $SUBJECT; repair: gc bd dep add $SUBJECT $GATE --type=blocks, then check its await id with gc bd show $GATE"
   exit 1
 fi

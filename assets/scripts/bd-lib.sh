@@ -186,23 +186,46 @@ bd_human_gates() {
     else error("not an array") end' 2>/dev/null
 }
 
-# $HUMAN_GATE_JQ — the same rule over a listing that includes gates (`gc bd
-# list --include-gates`), for a reader that classifies many beads from one read
-# rather than making one call per bead. Its defs, prepended to a jq program in
-# the in-variable convention standing-kinds.sh describes:
-#   open_human_gates       on the listing array: the ids of its human gates that
-#                          are not closed
-#   blocked_by_any($ids)   on one row: whether its own blocks edges reach one of
-#                          those ids, a gate blocking the bead that waits on it
+# $HUMAN_GATE_JQ — the one rule of which human gates still hold the bead they
+# block, as jq defs in the in-variable convention standing-kinds.sh describes,
+# so every reader prepends the same text. A human gate holds in every status but
+# closed, pinned included, because only its resolve clears the question it asks;
+# gctk merge and pr-status read a gate the same way. The defs:
+#   human_gate             on one row: issue_type gate and await_type human
+#   open_human_gate($k)    on one row: a human gate that still holds, and when $k
+#                          is not "", one under that situation key
+#   open_human_gates       on a listing array: the ids of its open human gates,
+#                          for a reader that classifies many beads from one
+#                          listing that includes gates (`gc bd list
+#                          --include-gates`, `gc bd gate list`)
+#   gates_blocking($ids)   on one row: the ids among $ids that its own blocks
+#                          edges reach, the gates that hold the bead
+#   blocked_by_any($ids)   on one row: whether gates_blocking($ids) names any
 # shellcheck disable=SC2034  # read by the scripts that source this file
 HUMAN_GATE_JQ='
-  def open_human_gates:
-    [ .[] | select((.issue_type // "") == "gate" and (.await_type // "") == "human")
-          | select(((.status // "open") | tostring) != "closed") | .id ];
-  def blocked_by_any($ids):
-    any(.dependencies[]?; (.type // "") == "blocks"
-        and ((.depends_on_id // "") as $d | ($ids | index($d)) != null));
+  def human_gate: (.issue_type // "") == "gate" and (.await_type // "") == "human";
+  def open_human_gate($k):
+    human_gate
+    and (((.status // "open") | tostring | ascii_downcase) != "closed")
+    and ($k == "" or ((.await_id // "") | tostring) == $k);
+  def open_human_gates: [ .[] | select(open_human_gate("")) | .id ];
+  def gates_blocking($ids):
+    [ .dependencies[]? | select((.type // "") == "blocks")
+      | (.depends_on_id // "") as $d | select(($ids | index($d)) != null) | $d ];
+  def blocked_by_any($ids): (gates_blocking($ids) | length) > 0;
 '
+
+# bd_open_human_gates <bead> [<key>] — the bead's human gates that still hold it
+# (open_human_gate above), and with <key> only those under that situation key,
+# as one JSON array of the rows bd_human_gates prints. Every reader that asks
+# which open gates hold one bead reads them here. A gate read that does not
+# answer prints nothing and returns 1, so "none open" and "could not read" stay
+# apart.
+bd_open_human_gates() {
+  local gates
+  gates=$(bd_human_gates "${1:-}") || return 1
+  printf '%s' "$gates" | jq -c --arg k "${2:-}" "$HUMAN_GATE_JQ"'[ .[] | select(open_human_gate($k)) ]' 2>/dev/null
+}
 
 # The anchor graph. A bead that hangs off a PR anchor (a review, a rework
 # child, a finding, a validation pass, a visit) names the anchor in

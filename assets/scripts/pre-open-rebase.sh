@@ -102,8 +102,9 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # The wait itself is a human gate: Gas City's native bead for a wait a person
 # must clear (issue_type=gate, await_type=human). It blocks the bead that waits,
 # and a person clears it with `gc bd gate resolve`, whose reason is the answer. A
-# live human gate that blocks the anchor is a live hold, read by the one reader
-# rule (bd_human_gates); none, and the takeaway records a sitting that ended.
+# live human gate that blocks the anchor is a live hold, read by the one rule of
+# which gates still hold (bd_open_human_gates); none, and the takeaway records a
+# sitting that ended.
 # Such a gate holds the anchor's merge as well, so a dispatch that brings the
 # branch current under it spends work on a merge that waits on a person, and can
 # answer one horn of what the person is asked by fait accompli.
@@ -120,10 +121,8 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 #   2  the gates would not read
 human_gate_state() { # <anchor-id>
   local gates open
-  gates=$(bd_human_gates "${1:-}") || return 2
-  open=$(printf '%s' "$gates" | jq -r '[ .[]
-      | select(((.status // "open") | tostring | ascii_downcase) != "closed") | .id ] | .[0] // empty' 2>/dev/null) \
-    || return 2
+  gates=$(bd_open_human_gates "${1:-}") || return 2
+  open=$(printf '%s' "$gates" | jq -r '.[0].id // empty' 2>/dev/null) || return 2
   [ -n "$open" ] || return 1
   printf '%s' "$open"
 }
