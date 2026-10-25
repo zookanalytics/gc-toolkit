@@ -1,6 +1,6 @@
 ---
 name: Gas City search for the review path's resolver modes and record keys
-description: The search the arch check asks for before the pack adds surface of its own. What Gas City, the packs it publishes and bd ship for a rig's list of review checks, a rig's guidance for one check read at the reviewed commit, the guidance a change edits, and the record a review's dispatch leaves on the review bead, read at named upstream commits, and why none of it covers what review-checks.sh's --show, --check, --extension and --edits and the review_context and review_formula keys do. Read it when checking whether the review path still needs that surface.
+description: The search the arch check asks for before the pack adds surface of its own. What Gas City, the packs it publishes and bd ship for a rig's list of review checks, a rig's guidance for one check read at the reviewed commit, the guidance a change edits, the record a review's dispatch leaves on the review bead, and a branch's head on a rig's origin, read at named upstream commits, and why none of it covers what review-checks.sh's --show, --check, --extension and --edits, the review_context and review_formula keys, and git-lib.sh's head read do. Read it when checking whether the review path still needs that surface.
 ---
 
 # Gas City search for the review path's resolver modes and record keys
@@ -54,11 +54,18 @@ change touches no path or key that a warrant in
   or the quorum, as the refinery's reconcile chooses for the pass. A review held
   with no poured workflow follows that formula's steps, as the review's fixed
   description says.
+- `git-lib.sh`'s `remote_branch_head` and `remote_branch_heads` read a branch's
+  head on the origin of a repository the caller names, from the line for the
+  branch's exact ref. gate-ensure.sh reads a head GitHub does not answer through
+  it, signoff.sh the live head a review with no pin takes, converse-rework.sh
+  the head an operator's ruling judged, in the anchor's rig checkout, and the
+  liveness sweep every pre-open anchor's head in one call.
 
 What the modes need is a read of a rig's own files at the commit a review
 judges, over the pack's own rows. What the keys need is a value that stays on
 the review bead whether or not a run holds it, so that a review held with no
-workflow still names why it went out and which formula runs it.
+workflow still names why it went out and which formula runs it. What the
+helper needs is the head of a branch on a rig's own origin, read by name.
 
 ## Where the search looked
 
@@ -73,6 +80,8 @@ Each was read on 2026-10-24:
   ([Builtin Packs](https://docs.gascity.com/reference/system-packs)).
 - bd at main `d26da8dadd50`: its documentation of issue metadata and of
   `bd config`.
+- Gas City at main `e037526466c0`, for git-lib.sh's head read: every Go caller
+  of `git ls-remote`, and the `refs/heads/` reads in its `gc` commands.
 
 The search covered review checks, lanes, reviewers and personas; a repository's
 review guidance and instruction files; configuration a rig lays over a pack's;
@@ -280,12 +289,24 @@ as a var, and gate-ensure.sh passes them on every sling. The build pack's
 `code-review-base` takes its review's subject, its report path and an optional
 context the same way.
 
+### A branch's head on a rig's origin
+
+Gas City runs `git ls-remote` only to import and resolve packs. Its import
+reads a pack source's `HEAD` (`cmd/gc/cmd_import.go`, and `lsRemoteHeadArgs` in
+`internal/importsvc/source.go`), and its pack resolver lists a source's tags
+(`internal/packman/resolve.go`). Its git helpers harden that network call for a
+source an API caller supplies (`UntrustedRemoteGitConfigArgs` in
+`internal/git/git.go`). None reads a branch of a rig's repository, and no `gc`
+command gives a pack a branch's head.
+
 ## What the pack keeps
 
 The pack keeps the resolver's `--show`, `--check`, `--extension` and `--edits`
-modes, and the `review_context` and `review_formula` keys. Each mode is a git
-read at the commit its caller names, and each key is a value of the review's
-record that Gas City keeps only on a run's root. This record goes stale, and
-the surface moves onto Gas City, when Gas City ships a way for a review to read
-a rig's own files at the commit it judges, or keeps on a bead the formula and
-vars it is to be poured with.
+modes, the `review_context` and `review_formula` keys, and git-lib.sh's head
+read. Each mode is a git read at the commit its caller names, each key is a
+value of the review's record that Gas City keeps only on a run's root, and the
+head read is a read of a rig's origin, where Gas City reads only a pack's source.
+This record goes stale, and the surface moves onto Gas City, when Gas City
+ships a way for a review to read a rig's own files at the commit it judges,
+keeps on a bead the formula and vars it is to be poured with, or gives a pack a
+branch's head on a rig's origin.
