@@ -109,6 +109,12 @@ trap 'rm -rf "$TMP"' EXIT
 # pr-facts.sh records what it observes through lifecycle.sh, which execs gctk.
 harness_build_gctk
 harness_init
+# No check index and no repository: the script under test runs from a private
+# directory, so the suite names a missing index outright, and review-checks.sh
+# then resolves every check_set token as a lane gating every transition. The
+# lanes do not depend on the checkout, and a case that needs a real index names
+# one itself.
+export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 
 # The value@oid half of a dated key. pr_posture carries a third @<since>
 # component, stamped by lifecycle.sh under compare-and-preserve: an unmet

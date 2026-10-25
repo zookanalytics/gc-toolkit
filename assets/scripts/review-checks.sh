@@ -64,10 +64,12 @@
 #
 # A commit that carries no review-checks.toml adds no rows. A commit that no
 # repository here holds or can fetch fails the call: another tree's index never
-# answers for that commit. With no repository here at all, there is no rig layer
-# to read, and the call says so on stderr. The index text is read through pipes,
-# never a scratch file. The `method` key of an older index is ignored: a check's
-# method is the skill named from the check.
+# answers for that commit. So does a call with no repository here at all (no
+# checkout around the caller, GC_RIG_ROOT unset), since the rig's rows at that
+# commit cannot be read, and resolving under the pack's rows alone would hand a
+# rig the pack's phases in place of its own. The index text is read through
+# pipes, never a scratch file. The `method` key of an older index is ignored: a
+# check's method is the skill named from the check.
 #
 # The index declares mechanical facts only. When a check applies to a given diff
 # is a judgment its method states in prose, not a column here.
@@ -75,11 +77,12 @@
 # mol-review-quorum-signoff.toml, pr-open.sh, gctk merge, gate-ensure.sh,
 # pr-facts.sh, review-outcome.sh, pr-summary-region.sh, liveness-sweep.sh,
 # review-checks.test.sh.
-# Exit: 0 ok · 1 a commit --at names cannot be read, an extension at a readable
-# commit cannot be read, the paths --edits lists cannot be listed, --check names
-# a check no layer declares or one whose phase is outside the ordered set, a
-# resolved check's phase is outside the ordered set, or (emit) no index declares
-# any check · 2 usage, a call that names no commit included.
+# Exit: 0 ok · 1 a commit --at names cannot be read (no repository here holds or
+# can fetch it, or there is no repository here at all), an extension at a
+# readable commit cannot be read, the paths --edits lists cannot be listed,
+# --check names a check no layer declares or one whose phase is outside the
+# ordered set, a resolved check's phase is outside the ordered set, or (emit) no
+# index declares any check · 2 usage, a call that names no commit included.
 set -uo pipefail
 
 usage() { sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
@@ -224,7 +227,7 @@ is_oid() {
 # since this checkout last fetched is not here yet: it is fetched by id, once,
 # rather than some other commit's file read for it. Non-zero when there are
 # repositories and none holds or can fetch the commit. With none at all, AT_REPO
-# stays empty and the call returns 0: there is no rig layer to read.
+# stays empty and the call returns 0, and each caller below refuses on that.
 AT_REPO=""
 find_at_repo() {
   local root
@@ -312,13 +315,13 @@ else
   fi
   find_at_repo || { no_commit_warning; exit 1; }
   if [ -z "$AT_REPO" ]; then
-    warn "no repository here to read '$AT' from (no checkout toplevel, GC_RIG_ROOT unset); no rig rows are read"
-  else
-    read_at review-checks.toml || { warn "$AT:review-checks.toml is there but would not read"; exit 1; }
-    if [ -n "$AT_TEXT" ]; then
-      RIG_ROWS=$(printf '%s\n' "$AT_TEXT" | parse_index)
-      IDX_SRC="${IDX_SRC:+$IDX_SRC + }$AT:review-checks.toml"
-    fi
+    warn "no repository here to read '$AT' from (no checkout toplevel, GC_RIG_ROOT unset), so the rig's rows at that commit are unreadable"
+    exit 1
+  fi
+  read_at review-checks.toml || { warn "$AT:review-checks.toml is there but would not read"; exit 1; }
+  if [ -n "$AT_TEXT" ]; then
+    RIG_ROWS=$(printf '%s\n' "$AT_TEXT" | parse_index)
+    IDX_SRC="${IDX_SRC:+$IDX_SRC + }$AT:review-checks.toml"
   fi
   ROWS=$( { [ -z "$PACK_ROWS" ] || printf '%s\n' "$PACK_ROWS" | awk '{ print "P\t" $0 }'
             [ -z "$RIG_ROWS" ]  || printf '%s\n' "$RIG_ROWS"  | awk '{ print "R\t" $0 }'; } | overlay)

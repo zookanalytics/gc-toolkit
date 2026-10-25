@@ -60,6 +60,12 @@ unset GC_RIG 2>/dev/null || true
 # gate-ensure records its verdicts through lifecycle.sh, which execs gctk.
 harness_build_gctk
 harness_init
+# No check index and no repository: the script under test runs from a private
+# directory, so the suite names a missing index outright, and review-checks.sh
+# then resolves every check_set token as a lane gating every transition. The
+# lanes do not depend on the checkout, and a case that needs a real index names
+# one itself.
+export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 
 # Private scripts dir: the SUT, lifecycle.sh, and the REAL graph-derivation
 # helpers gate-ensure now shells out to — lane-state.sh (lane green) and

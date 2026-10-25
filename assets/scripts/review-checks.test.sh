@@ -16,7 +16,8 @@
 #     names no commit refused unless --file or GC_REVIEW_CHECKS_INDEX names the
 #     index, and --extension reading a commit's docs/review-<check>.md;
 #   - --at fetching a commit the checkout has not fetched, failing on one
-#     nothing can fetch, and asking each repository once;
+#     nothing can fetch, and asking each repository once, and failing too when
+#     there is no repository here at all;
 #   - --edits listing the guidance a change edits from where it left its base,
 #     a guidance file renamed away included, at a change the checkout has not
 #     fetched.
@@ -347,12 +348,19 @@ else
   bad "layered-index fixture setup" "could not build the rig repository"
 fi
 
-# No repository here at all: there is no rig layer to read, and the call says so.
+# No repository here at all: the rig's rows at the commit cannot be read, so
+# every reader of the index fails rather than resolve under the pack's rows
+# alone, as it does for a commit no repository here holds.
 NOREPO="$TMP/norepo"; mkdir -p "$NOREPO"
-OUT="$(cd "$NOREPO" && GIT_CEILING_DIRECTORIES="$TMP" "$PSUT" --show --at 0123456789abcdef0123456789abcdef01234567 2>"$TMP/err")"; RC=$?
-is  "no repository here: exit 0" "$RC" "0"
-is  "…the pack's rows stand alone" "$(count "$OUT")" "3"
-has "…and stderr says no rig rows were read" "$(cat "$TMP/err")" "no rig rows are read"
+for call in "--show" "--check triage" "--resolve --check-set correctness,triage --through merge"; do
+  # shellcheck disable=SC2086 # each call is its words
+  OUT="$(cd "$NOREPO" && GIT_CEILING_DIRECTORIES="$TMP" "$PSUT" $call --at 0123456789abcdef0123456789abcdef01234567 2>"$TMP/err")"; RC=$?
+  is  "no repository here: ${call%% *} exits 1" "$RC" "1"
+  is  "…printing nothing" "$OUT" ""
+  has "…and stderr says the rig's rows went unread" "$(cat "$TMP/err")" "the rig's rows at that commit are unreadable"
+done
+OUT="$(cd "$NOREPO" && GIT_CEILING_DIRECTORIES="$TMP" "$PSUT" --show --file "$PACK/review-checks.toml" 2>/dev/null)"; RC=$?
+is  "…while an index named outright still reads with no repository" "$RC" "0"
 
 # ---- --at fetches a commit the checkout has not fetched ----------------------------
 # Two local repos stand in for origin and the refinery's checkout; GC_RIG_ROOT is

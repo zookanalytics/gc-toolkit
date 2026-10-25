@@ -52,6 +52,12 @@ if [ -z "$GCTK_BUILT" ]; then
     echo "passed: $PASS  failed: $FAIL"
     exit 1
 fi
+# No check index and no repository: the script under test runs from a private
+# directory, so the suite names a missing index outright, and review-checks.sh
+# then resolves every check_set token as a lane gating every transition. The
+# lanes do not depend on the checkout, and a case that needs a real index names
+# one itself.
+export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/merge.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" \
