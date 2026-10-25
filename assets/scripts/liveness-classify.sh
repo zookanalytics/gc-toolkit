@@ -36,11 +36,13 @@
 #                             ids, and the pre_open_gate anchors whose every
 #                             pre-open gate derives green, as an {anchor-id:
 #                             true} map the sweep builds through
-#                             lane-state.sh. Each arm that reads one drops
-#                             only the beads its input names, so an empty
-#                             input drops nothing. That is what lets the
-#                             precheck pass them empty and keep a survivor
-#                             set that contains the sweep's candidates.
+#                             lane-state.sh, in which an anchor whose head the
+#                             sweep could not read is "unread" instead. Each
+#                             arm that reads one drops only the beads its
+#                             input names, so an empty input drops nothing.
+#                             That is what lets the precheck pass them empty
+#                             and keep a survivor set that contains the
+#                             sweep's candidates.
 #
 # Every drop is a NAMED class. Structural edges fold in from $alive: a parent
 # is gated iff a not-closed child names it (the child holds the edge), and an
@@ -110,6 +112,10 @@ LIVENESS_CLASSIFY_JQ='
   # absent from the map.
   def pre_open_all_green:
     ($preopen_green[(.id // "")] // false) == true;
+  # A pre_open_gate anchor whose head the sweep could not read this pass, so
+  # whether it waits only on pr-open.sh is unknown, and the sweep holds it.
+  def pre_open_unread:
+    ($preopen_green[(.id // "")] // false) == "unread";
   # A visit holder is live, or it has none. A claim writes one of assignee /
   # gc.session_id / gc.session_name; $livesessions holds every name a listed
   # (live) session carries. No holder is an UNCLAIMED visit, a pending
@@ -156,6 +162,7 @@ LIVENESS_CLASSIFY_JQ='
                  and (((.metadata.pr_url // "") | pr_key) as $k | $k != "" and ($openkeys | index($k)) != null))
                 then "gated"
            elif (((.metadata.merge_result // "") == "pre_open_gate") and pre_open_all_green) then "gated"
+           elif (((.metadata.merge_result // "") == "pre_open_gate") and pre_open_unread) then "unread"
            elif (($gatedparents | index($b.id)) != null) then "gated"
            elif ([ .dependencies[]? | select((.type // "") == "tracks")
                    | select(($aliveset[(.depends_on_id // "")] // false)) ] | length > 0) then "gated"

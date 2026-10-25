@@ -113,8 +113,8 @@ ARM_FLOOR_SECS=$((10#$ARM_FLOOR_SECS))
 # REFINERY_RECONCILE_REVIEW_FORMULA=mol-review-quorum-signoff: reviews then run
 # as two provider lanes (codex + claude by default) plus a synthesizer that
 # makes the single signoff. Reverting is unsetting the env — no code change.
-# Lane config is constant across the pass; the per-review base is read from
-# each review bead's review_base by the lanes, so base_ref stays defaulted.
+# Lane config is constant across the pass; gate-ensure passes each review's own
+# values, its base among them, as vars on that review's sling.
 REVIEW_FORMULA="${REFINERY_RECONCILE_REVIEW_FORMULA:-mol-review}"
 GATE_REVIEW_FORMULA_ARGS=()
 if [ "$REVIEW_FORMULA" != "mol-review" ]; then

@@ -18,8 +18,11 @@
 # closes the window, and the precheck closes it too once it has proved there
 # is no pass to start.
 # Bias everywhere: an unreadable probe excludes nothing (re-report, never
-# hide). Exit: 0 pass completed (filed or nothing to file), 1 aborted on an
-# unreadable listing, 2 usage.
+# hide). One read is held instead: when origin does not answer the head read of
+# the pre-open anchors, each holds what the last pass made of it, so one it
+# reported is reported again and no other is reported new. Exit: 0 pass
+# completed (filed or nothing to file), 1 aborted on an unreadable listing, 2
+# usage.
 set -uo pipefail
 
 PROG="liveness-sweep"
@@ -49,6 +52,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # below to carry this sweep's --db pin and per-call bound.
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh from $HERE" >&2; exit 1; }
+# The one read of a branch's head on origin, which the pre-open green map takes
+# each anchor's head from. Its git calls go through git_remote_run, redefined
+# below to carry this sweep's per-call bound.
+# shellcheck source=git-lib.sh
+. "$HERE/git-lib.sh" || { echo "$PROG: cannot source git-lib.sh from $HERE" >&2; exit 1; }
 # The one reader of a run's link to the bead it works, which the worked and
 # husk resolutions ask through sweep_bd, below.
 # shellcheck source=run-lib.sh
@@ -115,6 +123,7 @@ elif timeout -k 1 1 true >/dev/null 2>&1; then
 else
     bounded() { timeout "$CALL_TIMEOUT" "$@"; }
 fi
+git_remote_run() { bounded "$@"; }
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
@@ -279,24 +288,54 @@ fi
 # lane-state.sh, the derivation pr-open.sh opens the PR on, pinned to this
 # sweep's store and bound by its per-call timeout. --no-remote: a pre_open_gate
 # anchor has no PR, so no GitHub approval backs a lane, as pr-open.sh reads it.
-# An anchor whose gates the resolver cannot name, or that has a lane that does
-# not derive green or cannot be read, stays out of the map and a candidate.
+# An anchor whose head origin does not carry, whose gates the resolver cannot
+# name, or that has a lane that does not derive green or cannot be read, stays
+# out of the map and a candidate. When origin does not answer the head read at
+# all, no head reads, and that says nothing about any one anchor: each anchor
+# the last pass reported stays out of the map, a candidate again, and every
+# other is "unread", a class of its own, so a failed read reports no anchor new.
 _LS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-# The resolver finds the index itself: the review-checks.toml of the rig
-# checkout the sweep runs in, which is the rig whose anchors it classifies (the
-# order runs it there, and GC_RIG_ROOT names it). The pack's copy beside this
-# script is gc-toolkit's own index and answers for no other rig.
-# GC_REVIEW_CHECKS_INDEX overrides the read, so a hermetic test can point it at
-# a fixture, or at a missing file for the no-index fallback (every non-sentinel
-# token gates).
+# The gates are resolved at the head of the anchor's branch on origin, the
+# commit pr-open.sh would open the PR at, read in the rig checkout the sweep
+# runs in (the order runs it there, and GC_RIG_ROOT names it). The resolver lays
+# that commit's own index over the pack's, so each rig's anchors are judged by
+# that rig's rows. GC_REVIEW_CHECKS_INDEX overrides the index the resolver
+# reads, so a hermetic test can point it at a fixture, or at a missing file for
+# the no-index fallback (every non-sentinel token gates). The fields are joined
+# on the unit separator, since tab is whitespace to read and an empty check_set
+# would shift the branch into its place.
 LANE_STATE="${GC_LANE_STATE_TOOL:-$_LS_DIR/lane-state.sh}"
+_LS_PREOPEN=$(jq -r '.[] | select((.metadata.merge_result // "") == "pre_open_gate")
+         | [(.id // ""), (.metadata.check_set // ""), (.metadata.branch // "")]
+         | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' "$READY" 2>/dev/null)
+# Every branch's head comes from one ls-remote that names them all, so a slow
+# origin costs the sweep one bounded call, not one per anchor, and a ready set
+# with no such anchor costs none.
+_ls_branches=()
+while IFS=$'\037' read -r _aid _acs _abr; do
+  [ -n "$_aid" ] && [ -n "$_abr" ] && _ls_branches+=("$_abr")
+done <<< "$_LS_PREOPEN"
+_LS_HEADS=""; _LS_UNREAD=0
+if [ "${#_ls_branches[@]}" -gt 0 ] && ! _LS_HEADS=$(remote_branch_heads . "${_ls_branches[@]}"); then
+  _LS_UNREAD=1
+  echo "$PROG: WARN: origin did not answer the head read for ${#_ls_branches[@]} pre-open anchor branch(es); each holds what the last pass made of it" >&2
+fi
+_LS_REPORTED=$(cat "$BASELINE_FILE" 2>/dev/null || true)
 PREOPEN_GREEN_MAP=$(
-  jq -r '.[] | select((.metadata.merge_result // "") == "pre_open_gate")
-         | [(.id // ""), (.metadata.check_set // "")] | @tsv' "$READY" 2>/dev/null \
-  | while IFS=$'\t' read -r _aid _acs; do
-      [ -n "$_aid" ] || continue
-      _g=$("$_LS_DIR/review-checks.sh" --resolve --check-set "$_acs" --through pre-open \
-           2>/dev/null </dev/null) || continue
+  printf '%s\n' "$_LS_PREOPEN" \
+  | while IFS=$'\037' read -r _aid _acs _abr; do
+      [ -n "$_aid" ] && [ -n "$_abr" ] || continue
+      if [ "$_LS_UNREAD" = 1 ]; then
+        case ",$_LS_REPORTED," in
+          *",$_aid,"*) ;;
+          *) jq -nc --arg id "$_aid" '{($id): "unread"}' ;;
+        esac
+        continue
+      fi
+      _head=$(printf '%s\n' "$_LS_HEADS" | awk -F'\t' -v b="$_abr" '$2 == b { print $1; exit }')
+      [ -n "$_head" ] || continue
+      _g=$(bounded "$_LS_DIR/review-checks.sh" --resolve --check-set "$_acs" --through pre-open \
+           --at "$_head" 2>/dev/null </dev/null) || continue
       [ -n "$(printf '%s' "$_g" | tr -d '[:space:]')" ] || continue
       _green=1
       while IFS= read -r _l; do

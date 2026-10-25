@@ -8,6 +8,10 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-review-outcome-test.XXXXXX")"; trap 'rm -
 . "$HERE/test-harness.sh"
 unset GC_RIG 2>/dev/null || true
 harness_init
+# The resolver beside review-outcome.sh reads the pack's index of the tree under
+# test. Point the override at a missing file so every check_set token is a lane
+# and the lanes do not follow that file.
+export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 SUT="$HERE/review-outcome.sh"
 LANE="$HERE/lane-state.sh"
 
@@ -192,7 +196,7 @@ store "[$CODEX_ANCHOR]"
 "$SUT" back-lane --anchor tk-hanc --lane correctness --oid deadbeef >/dev/null
 if green tk-hanc correctness; then ok "correctness lane green before the human batch is ruled"; else bad "setup: correctness did not green"; fi
 # The validator rules the human batch NOT converged -> supersede-anchor.
-NA=$("$SUT" supersede-anchor --anchor tk-hanc --reason "operator overturned a diff assumption"); rc=$?
+NA=$("$SUT" supersede-anchor --oid feedface --anchor tk-hanc --reason "operator overturned a diff assumption"); rc=$?
 eq "$rc" 0 "supersede-anchor succeeds on a check_set=correctness anchor"
 eq "$NA" "1" "…and reports the one correctness backing retired"
 if green tk-hanc correctness; then bad "the correctness check stayed green after a human non-convergence (the P0)"; else ok "supersede-anchor returns the real correctness lane to unreviewed"; fi
@@ -203,7 +207,7 @@ store "[$TWO_ANCHOR]"
 "$SUT" back-lane --anchor tk-2anc --lane correctness --oid deadbeef >/dev/null
 "$SUT" back-lane --anchor tk-2anc --lane arch  --oid deadbeef >/dev/null
 if green tk-2anc correctness && green tk-2anc arch; then ok "both lanes green before the human batch"; else bad "setup: two lanes did not green"; fi
-N2=$("$SUT" supersede-anchor --anchor tk-2anc)
+N2=$("$SUT" supersede-anchor --oid feedface --anchor tk-2anc)
 eq "$N2" "2" "supersede-anchor retires a backing on every declared lane"
 if green tk-2anc correctness; then bad "correctness stayed green after anchor-wide supersede"; else ok "correctness returned to unreviewed"; fi
 if green tk-2anc arch;  then bad "arch stayed green after anchor-wide supersede";  else ok "arch returned to unreviewed"; fi
@@ -213,7 +217,7 @@ if green tk-2anc arch;  then bad "arch stayed green after anchor-wide supersede"
 store "[$TWO_ANCHOR]"
 BC=$("$SUT" back-lane --anchor tk-2anc --lane correctness --oid deadbeef)
 BA=$("$SUT" back-lane --anchor tk-2anc --lane arch  --oid deadbeef)
-NB=$("$SUT" supersede-anchor --anchor tk-2anc --by "operator ruling (converse visit v-1)" --reason "rework fx-1 changes the branch"); rc=$?
+NB=$("$SUT" supersede-anchor --oid feedface --anchor tk-2anc --by "operator ruling (converse visit v-1)" --reason "rework fx-1 changes the branch"); rc=$?
 eq "$rc" 0 "supersede-anchor --by succeeds"
 eq "$NB" "2" "…retiring every declared lane's backing"
 has "$(notes "$BC")" "operator ruling (converse visit v-1): superseded (anchor-wide) — rework fx-1 changes the branch" "…each note naming the caller and its reason"
@@ -221,25 +225,36 @@ has "$(notes "$BA")" "operator ruling (converse visit v-1): superseded (anchor-w
 hasnt "$(notes "$BC")" "validator: superseded" "…and none crediting the validator with the supersede"
 store "[$TWO_ANCHOR]"
 BV=$("$SUT" back-lane --anchor tk-2anc --lane correctness --oid deadbeef)
-"$SUT" supersede-anchor --anchor tk-2anc --reason "operator overturned a diff assumption" >/dev/null
+"$SUT" supersede-anchor --oid feedface --anchor tk-2anc --reason "operator overturned a diff assumption" >/dev/null
 has "$(notes "$BV")" "validator: superseded (anchor-wide human batch) — operator overturned a diff assumption" "without --by the note names the validator's human batch"
-"$SUT" supersede-anchor --anchor tk-2anc --by "" >/dev/null 2>&1; rc=$?
+"$SUT" supersede-anchor --oid feedface --anchor tk-2anc --by "" >/dev/null 2>&1; rc=$?
 eq "$rc" 1 "an empty --by is a usage error"
+
+# The lanes are resolved at the commit the ruling judged, so a call that names
+# none is refused before anything is read or written.
+store "[$TWO_ANCHOR]"
+BO=$("$SUT" back-lane --anchor tk-2anc --lane correctness --oid deadbeef)
+ERR=$("$SUT" supersede-anchor --anchor tk-2anc --reason "no commit named" 2>&1 >/dev/null); rc=$?
+eq "$rc" 1 "supersede-anchor without --oid is a usage error"
+has "$ERR" "needs --oid" "…naming the missing commit"
+eq "$(meta "$BO" 'gc.outcome')" "recorded" "…and supersedes nothing"
+"$SUT" supersede-anchor --oid "" --anchor tk-2anc >/dev/null 2>&1; rc=$?
+eq "$rc" 1 "…nor with --oid empty"
 
 # A checkless anchor (check_set=none) has no lane to move: no-op success, not error.
 NONE_ANCHOR='{"id":"tk-nanc","status":"open","assignee":"","title":"anchor","notes":"","metadata":{"merge_result":"pull_request","check_set":"none"}}'
 store "[$NONE_ANCHOR]"
-if NN=$("$SUT" supersede-anchor --anchor tk-nanc); then ok "supersede-anchor succeeds on a checkless (none) anchor"; else bad "supersede-anchor failed on a none anchor"; fi
+if NN=$("$SUT" supersede-anchor --oid feedface --anchor tk-nanc); then ok "supersede-anchor succeeds on a checkless (none) anchor"; else bad "supersede-anchor failed on a none anchor"; fi
 eq "$NN" "0" "…and reports zero lanes retired"
 
 # Fail closed: an unreadable anchor is never a silent no-op that leaves a check green.
 store "[$CODEX_ANCHOR]"
-STUB_SHOW_FAIL=1 "$SUT" supersede-anchor --anchor tk-hanc >/dev/null 2>&1; rc=$?
+STUB_SHOW_FAIL=1 "$SUT" supersede-anchor --oid feedface --anchor tk-hanc >/dev/null 2>&1; rc=$?
 eq "$rc" 2 "an unreadable anchor fails closed on supersede-anchor (exit 2)"
 # An anchor that declares no check_set at all is anomalous, not checkless.
 NOCS_ANCHOR='{"id":"tk-xanc","status":"open","assignee":"","title":"anchor","notes":"","metadata":{"merge_result":"pull_request"}}'
 store "[$NOCS_ANCHOR]"
-"$SUT" supersede-anchor --anchor tk-xanc >/dev/null 2>&1; rc=$?
+"$SUT" supersede-anchor --oid feedface --anchor tk-xanc >/dev/null 2>&1; rc=$?
 eq "$rc" 2 "an anchor with no check_set fails closed (exit 2)"
 
 echo "passed: $PASS  failed: $FAIL"

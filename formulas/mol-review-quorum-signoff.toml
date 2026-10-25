@@ -7,10 +7,11 @@ mol-review-quorum scaffold (lane fan-out + per-lane provider + the
 review-quorum.lane.v1 durable schema), wired to this rig's signoff seam.
 
 Attached at dispatch to a review bead exactly as mol-review is
-(gc sling <pool> <review-bead> --on mol-review-quorum-signoff), and reads the
-same dispatch metadata: task_kind=review, check_name (the check the verdict
-satisfies), anchor_bead, review_branch / review_base, plus review_pr_url /
-review_pr_number post-open, and the dispatch-pinned reviewed_oid.
+(gc sling <pool> <review-bead> --on mol-review-quorum-signoff), and takes the
+same values as vars: the review bead, the check, the anchor, the branch, the
+base its diff starts from, the commit under review, the anchor's PR once one is
+open, and why the review went out. One sling pours the two lanes and the
+synthesis, so all three read the same commit.
 
 The mol-review hard contract is preserved intact: ONE verdict per claim — the
 synthesis makes the single signoff.sh call and the lanes never call it; the
@@ -22,15 +23,13 @@ machinery mol-review hands to.
 Lane routing is per-step: each lane carries gc.run_target / gc.provider, so
 the two lanes land on two provider pools and each runs on its pool's default
 model. The synthesis reads each lane's durable review-quorum.lane.v1 output
-from the lane step bead's
-gc.output_json. base_ref defaults to origin/main; the caller passes the
-review's base so the lanes diff against the branch's real landing target.
+from the lane step bead's gc.output_json.
 
-Each step re-derives REVIEW_BEAD from the input convoy in its own shell and
-closes its own bead through assets/scripts/step-close.sh, which resolves by
-(gc.root_bead_id, gc.step_ref) — never a GC_*BEAD_ID env var. The lanes run in
-separate pool sessions and each closes its own lane step; the synthesis is the
-terminal step and closes the chain forward.
+Each step closes its own bead through assets/scripts/step-close.sh, which
+resolves by (gc.root_bead_id, gc.step_ref) — never a GC_*BEAD_ID env var. The
+lanes run in separate pool sessions and each closes its own lane step; the
+synthesis is the terminal step and closes the chain forward. No shell variable
+survives from one block to the next, so each block names the values it uses.
 """
 formula = "mol-review-quorum-signoff"
 
@@ -38,9 +37,49 @@ formula = "mol-review-quorum-signoff"
 formula_compiler = ">=2.0.0"
 
 [vars]
-[vars.base_ref]
-description = "Diff baseline the lanes review against; the caller passes origin/<review_base>"
-default = "origin/main"
+# The record's vars default to empty rather than being required. A pour that
+# omits a required var fails before any step runs, so a review slung without
+# one would sit unpoured. Defaulted, it pours, and load-dispatch's record check
+# names the missing key on the review's notes and reviews nothing.
+[vars.review_bead]
+description = "The review bead this run answers."
+default = ""
+
+[vars.check]
+description = "The check this review applies: the review bead's check_name, in lowercase."
+default = ""
+
+[vars.anchor_bead]
+description = "The work bead the verdict lands on, whose description says what the change is for."
+default = ""
+
+[vars.review_branch]
+description = "The branch under review."
+default = ""
+
+[vars.review_base]
+description = "The branch the change lands on, where its diff starts."
+default = ""
+
+[vars.reviewed_oid]
+description = "The commit under review: the branch's head when the review was dispatched, never moved or cleared."
+default = ""
+
+[vars.review_pr_url]
+description = "The anchor's open PR, empty before one opens."
+default = ""
+
+[vars.review_pr_number]
+description = "That PR's number, empty with it."
+default = ""
+
+[vars.review_context]
+description = "Why this review went out, such as a bring-current round for triage to rule on, else empty. Free text, so the steps name it in prose and never inside a shell block."
+default = ""
+
+[vars.binding_prefix]
+description = "The binding the city imports the pack under, with its trailing dot: the prefix of the pack's skill names in a session's catalog. Sling adds it to every pour."
+default = "gc-toolkit."
 
 [vars.lane_one_id]
 description = "Durable ID for reviewer lane one"
@@ -81,33 +120,92 @@ makes the verdict. Do NOT call signoff.sh, do NOT touch the anchor, do NOT
 file finding or rework beads, and do NOT modify any file, branch, comment, or
 bead other than writing your own durable output onto this step bead.
 
-**1. Derive the review bead and pin what you are reviewing.** The review bead
-is the single tracked member of the input convoy; read it exactly as
-`formulas/mol-review.toml`'s `load-dispatch` step does — discriminate pre-open
-(`review_branch`/`review_base`) from post-open
-(`review_pr_number`/`review_pr_url`, pin the repo from `review_pr_url`), and
-pin the commit from `reviewed_oid`. Use `{{base_ref}}` as the diff baseline
-when `review_base` is absent; never fall back to main.
+This review is `{{review_bead}}`, applying the `{{check}}` check to branch
+`{{review_branch}}` at commit `{{reviewed_oid}}`, the branch's head when the
+review was dispatched. Its diff starts where the branch left `{{review_base}}`.
+The change is `{{anchor_bead}}`'s. Its PR is `{{review_pr_url}}`, empty before
+one opens. Why the dispatch sent this review: {{review_context}}
+
+**1. Check the record.** When the block names a missing key, review nothing:
+write your lane output (part 4) with verdict `blocked`, a summary naming the
+key and no findings, and close this step. The synthesis makes the refusal.
 ```bash
-CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
-REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-[ -n "$REVIEW_BEAD" ] || { echo "mol-review-quorum-signoff needs an input convoy with exactly one tracked member" >&2; exit 1; }
-M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
+# >>> review-record-check
+MISSING=""
+for kv in "review_bead={{review_bead}}" "check={{check}}" "anchor_bead={{anchor_bead}}" "review_branch={{review_branch}}" "review_base={{review_base}}" "reviewed_oid={{reviewed_oid}}"; do
+  [ -n "${kv#*=}" ] || MISSING="${MISSING:+$MISSING, }${kv%%=*}"
+done
+# <<< review-record-check
+[ -z "$MISSING" ] || { echo "the review's record lacks $MISSING: this lane reviews nothing" >&2; exit 1; }
 ```
 
-**2. Apply the check's method to the diff, read-only.** The method is the skill
-the check section of the review bead's dispatch note names, loaded from your
-skill catalog. A lane has the pins from step 1 and the diff,
-`git diff origin/<base>...<reviewed_oid>`, and none of the rest of the frame
-the method's blocks assume: no review workspace and no keepalive. So a lane
-reads what the method reads and judges as the method does, and runs nothing the
-method runs, anywhere: not at the reviewed commit and not against the
-pre-change code. The synthesis step runs all of that once for the quorum, and a
-finding that depends on its result is the synthesis's to confirm. Record a
-mutation baseline with `git status --porcelain=v1 -z` before and after and
-report any delta you introduced (there should be none).
+**2. Gather what the review reads.** The block prints the anchor, the PR's
+page when one is open, the rig's guidance for this check, and the path of the
+review's worktree at `{{reviewed_oid}}`, which the two lanes and the synthesis
+share. Read the change there with git, read-only: its diff is
+`git diff origin/{{review_base}}...HEAD`. When the block exits non-zero, review
+nothing, as for a missing key: write a `blocked` lane output whose summary
+names what failed, and close this step.
+```bash
+# >>> review-gather
+REPO="${GC_RIG_ROOT:-}"
+[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+: "${SCRIPTS:?review-workspace.sh not found in the pack}"
+git -C "$REPO" fetch --quiet origin "{{review_base}}" "{{review_branch}}" || exit 1
+git -C "$REPO" cat-file -e "{{reviewed_oid}}^{commit}" 2>/dev/null || git -C "$REPO" fetch --quiet --no-tags origin "{{reviewed_oid}}" || exit 1
+WT=$("$SCRIPTS/review-workspace.sh" add --review-bead "{{review_bead}}" --oid "{{reviewed_oid}}" --repo "$REPO") || exit 1
+cd "$WT" || exit 1
+echo "== The change: {{anchor_bead}}"
+gc bd show "{{anchor_bead}}" || exit 1
+if [ -n "{{review_pr_url}}" ]; then
+  echo "== The PR as published: {{review_pr_url}}"
+  gh pr view "{{review_pr_url}}" --json title,body --jq '.title, "", .body' || exit 1
+fi
+echo "== The rig's guidance for {{check}}: docs/review-{{check}}.md at {{reviewed_oid}}, empty when it keeps none"
+"$SCRIPTS/review-checks.sh" --extension "{{check}}" --at "{{reviewed_oid}}" || exit 1
+echo "== The pack's scripts: $SCRIPTS"
+echo "== The review's worktree: $WT"
+# <<< review-gather
+```
 
-**3. Write your durable lane output** to this step bead's `gc.output_json` as
+**3. Apply the check's method to the diff, read-only.**
+<!-- >>> review-method-load -->
+The check's method is the skill `{{binding_prefix}}review-{{check}}`. Load it
+from your skill catalog and apply it, and no other review skill. A copy of a
+skill in the review's worktree is the change under review, not your method.
+When your catalog has no such skill:
+
+- If the rig's check index declares `{{check}}`
+  (`review-checks.sh --check {{check}} --at {{reviewed_oid}}` prints its row),
+  judge the diff against the purpose the row states. Load
+  `{{binding_prefix}}specialist-stance` and hold it. Say in your coverage line
+  that the pack ships no method for this check.
+- If no index declares it (the call exits 1 saying no index declares the
+  check), approve, and pass `--needs-you` saying the check is declared
+  nowhere, so the operator decides whether it stays in the anchor's
+  `check_set`. A call that fails for any other reason, such as a commit it
+  cannot read, is no answer, and nothing approves on it.
+
+The rig's guidance for this check is the reviewed commit's
+`docs/review-{{check}}.md`, which the gather block printed when the commit
+carries one. It adds to the method and never replaces it. Most rigs keep
+none.
+<!-- <<< review-method-load -->
+
+A lane reads what the method reads and judges as the method does, and runs
+nothing the method runs, anywhere: not at the reviewed commit and not against
+the pre-change code. The synthesis step runs all of that once for the quorum,
+and a finding that depends on its result is the synthesis's to confirm. Where
+the method passes a flag or approves with `--needs-you`, say so in your
+summary for the synthesis. Record a mutation baseline with
+`git status --porcelain=v1 -z` in the worktree before and after, and report any
+delta you introduced (there should be none).
+
+**4. Write your durable lane output** to this step bead's `gc.output_json` as
 a `review-quorum.lane.v1` object, then close the step. The keys:
 `lane_id`={{lane_one_id}}, `provider`={{lane_one_provider}},
 `model` (the model you actually ran — self-report it), `verdict` (one of `pass`, `pass_with_findings`,
@@ -148,33 +246,92 @@ makes the verdict. Do NOT call signoff.sh, do NOT touch the anchor, do NOT
 file finding or rework beads, and do NOT modify any file, branch, comment, or
 bead other than writing your own durable output onto this step bead.
 
-**1. Derive the review bead and pin what you are reviewing.** The review bead
-is the single tracked member of the input convoy; read it exactly as
-`formulas/mol-review.toml`'s `load-dispatch` step does — discriminate pre-open
-(`review_branch`/`review_base`) from post-open
-(`review_pr_number`/`review_pr_url`, pin the repo from `review_pr_url`), and
-pin the commit from `reviewed_oid`. Use `{{base_ref}}` as the diff baseline
-when `review_base` is absent; never fall back to main.
+This review is `{{review_bead}}`, applying the `{{check}}` check to branch
+`{{review_branch}}` at commit `{{reviewed_oid}}`, the branch's head when the
+review was dispatched. Its diff starts where the branch left `{{review_base}}`.
+The change is `{{anchor_bead}}`'s. Its PR is `{{review_pr_url}}`, empty before
+one opens. Why the dispatch sent this review: {{review_context}}
+
+**1. Check the record.** When the block names a missing key, review nothing:
+write your lane output (part 4) with verdict `blocked`, a summary naming the
+key and no findings, and close this step. The synthesis makes the refusal.
 ```bash
-CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
-REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-[ -n "$REVIEW_BEAD" ] || { echo "mol-review-quorum-signoff needs an input convoy with exactly one tracked member" >&2; exit 1; }
-M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
+# >>> review-record-check
+MISSING=""
+for kv in "review_bead={{review_bead}}" "check={{check}}" "anchor_bead={{anchor_bead}}" "review_branch={{review_branch}}" "review_base={{review_base}}" "reviewed_oid={{reviewed_oid}}"; do
+  [ -n "${kv#*=}" ] || MISSING="${MISSING:+$MISSING, }${kv%%=*}"
+done
+# <<< review-record-check
+[ -z "$MISSING" ] || { echo "the review's record lacks $MISSING: this lane reviews nothing" >&2; exit 1; }
 ```
 
-**2. Apply the check's method to the diff, read-only.** The method is the skill
-the check section of the review bead's dispatch note names, loaded from your
-skill catalog. A lane has the pins from step 1 and the diff,
-`git diff origin/<base>...<reviewed_oid>`, and none of the rest of the frame
-the method's blocks assume: no review workspace and no keepalive. So a lane
-reads what the method reads and judges as the method does, and runs nothing the
-method runs, anywhere: not at the reviewed commit and not against the
-pre-change code. The synthesis step runs all of that once for the quorum, and a
-finding that depends on its result is the synthesis's to confirm. Record a
-mutation baseline with `git status --porcelain=v1 -z` before and after and
-report any delta you introduced (there should be none).
+**2. Gather what the review reads.** The block prints the anchor, the PR's
+page when one is open, the rig's guidance for this check, and the path of the
+review's worktree at `{{reviewed_oid}}`, which the two lanes and the synthesis
+share. Read the change there with git, read-only: its diff is
+`git diff origin/{{review_base}}...HEAD`. When the block exits non-zero, review
+nothing, as for a missing key: write a `blocked` lane output whose summary
+names what failed, and close this step.
+```bash
+# >>> review-gather
+REPO="${GC_RIG_ROOT:-}"
+[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+: "${SCRIPTS:?review-workspace.sh not found in the pack}"
+git -C "$REPO" fetch --quiet origin "{{review_base}}" "{{review_branch}}" || exit 1
+git -C "$REPO" cat-file -e "{{reviewed_oid}}^{commit}" 2>/dev/null || git -C "$REPO" fetch --quiet --no-tags origin "{{reviewed_oid}}" || exit 1
+WT=$("$SCRIPTS/review-workspace.sh" add --review-bead "{{review_bead}}" --oid "{{reviewed_oid}}" --repo "$REPO") || exit 1
+cd "$WT" || exit 1
+echo "== The change: {{anchor_bead}}"
+gc bd show "{{anchor_bead}}" || exit 1
+if [ -n "{{review_pr_url}}" ]; then
+  echo "== The PR as published: {{review_pr_url}}"
+  gh pr view "{{review_pr_url}}" --json title,body --jq '.title, "", .body' || exit 1
+fi
+echo "== The rig's guidance for {{check}}: docs/review-{{check}}.md at {{reviewed_oid}}, empty when it keeps none"
+"$SCRIPTS/review-checks.sh" --extension "{{check}}" --at "{{reviewed_oid}}" || exit 1
+echo "== The pack's scripts: $SCRIPTS"
+echo "== The review's worktree: $WT"
+# <<< review-gather
+```
 
-**3. Write your durable lane output** to this step bead's `gc.output_json` as
+**3. Apply the check's method to the diff, read-only.**
+<!-- >>> review-method-load -->
+The check's method is the skill `{{binding_prefix}}review-{{check}}`. Load it
+from your skill catalog and apply it, and no other review skill. A copy of a
+skill in the review's worktree is the change under review, not your method.
+When your catalog has no such skill:
+
+- If the rig's check index declares `{{check}}`
+  (`review-checks.sh --check {{check}} --at {{reviewed_oid}}` prints its row),
+  judge the diff against the purpose the row states. Load
+  `{{binding_prefix}}specialist-stance` and hold it. Say in your coverage line
+  that the pack ships no method for this check.
+- If no index declares it (the call exits 1 saying no index declares the
+  check), approve, and pass `--needs-you` saying the check is declared
+  nowhere, so the operator decides whether it stays in the anchor's
+  `check_set`. A call that fails for any other reason, such as a commit it
+  cannot read, is no answer, and nothing approves on it.
+
+The rig's guidance for this check is the reviewed commit's
+`docs/review-{{check}}.md`, which the gather block printed when the commit
+carries one. It adds to the method and never replaces it. Most rigs keep
+none.
+<!-- <<< review-method-load -->
+
+A lane reads what the method reads and judges as the method does, and runs
+nothing the method runs, anywhere: not at the reviewed commit and not against
+the pre-change code. The synthesis step runs all of that once for the quorum,
+and a finding that depends on its result is the synthesis's to confirm. Where
+the method passes a flag or approves with `--needs-you`, say so in your
+summary for the synthesis. Record a mutation baseline with
+`git status --porcelain=v1 -z` in the worktree before and after, and report any
+delta you introduced (there should be none).
+
+**4. Write your durable lane output** to this step bead's `gc.output_json` as
 a `review-quorum.lane.v1` object, then close the step. The keys:
 `lane_id`={{lane_two_id}}, `provider`={{lane_two_provider}},
 `model` (the model you actually ran — self-report it), `verdict` (one of `pass`, `pass_with_findings`,
@@ -209,116 +366,138 @@ id = "synthesize-and-signoff"
 title = "Synthesize the two lanes and hand ONE verdict to signoff.sh"
 needs = ["review-lane-one", "review-lane-two"]
 description = """
-Combine the two lanes into one verdict and hand it to signoff.sh — once — then
-close the chain and drain. This is the ONE verdict per claim: signoff.sh owns
-the artifact, the review bead's close with the verdict, the finding beads from
-findings.json, the rework child, and the COMMENT-only posting. You add none of that; you
-decide the verdict and call signoff.sh exactly once.
+Combine the two lanes into ONE verdict, hand it to signoff.sh once, then
+close the chain and drain. This review is `{{review_bead}}`, the `{{check}}`
+check at `{{reviewed_oid}}` on `{{review_branch}}`. Why the dispatch sent it:
+{{review_context}}
 
-**1. Re-derive the review bead and its pins** (each step is its own shell),
-exactly as `formulas/mol-review.toml`'s `load-dispatch` does:
+**1. Check the record.** When the block names a missing key, review nothing:
+append to the review's notes which key its record lacks and that closing the
+review lets the next gate-ensure pass dispatch a fresh one, then close the
+chain and drain as part 9 does, leaving the route empty.
 ```bash
-CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
-REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-[ -n "$REVIEW_BEAD" ] || { echo "mol-review-quorum-signoff needs an input convoy with exactly one tracked member" >&2; exit 1; }
-M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
-REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
-# The workflow root is on THIS synthesis step bead (the bead this claim handed
-# you), not on the review bead. Scope the lane lookup by it: lane_ids are
-# constant across pours, so gc.review_quorum_lane alone would also match lanes
-# from every other quorum molecule.
+# >>> review-record-check
+MISSING=""
+for kv in "review_bead={{review_bead}}" "check={{check}}" "anchor_bead={{anchor_bead}}" "review_branch={{review_branch}}" "review_base={{review_base}}" "reviewed_oid={{reviewed_oid}}"; do
+  [ -n "${kv#*=}" ] || MISSING="${MISSING:+$MISSING, }${kv%%=*}"
+done
+# <<< review-record-check
+[ -z "$MISSING" ] || { echo "the review's record lacks $MISSING: reviewing nothing" >&2; exit 1; }
+```
+
+**2. Read both lanes' durable output,** the `review-quorum.lane.v1` object each
+lane wrote to its step bead's `gc.output_json`, found by the lane's
+`gc.review_quorum_lane` stamp within this workflow's root:
+```bash
 SYNTH_BEAD="<the bead_id your gc hook --claim returned for this step>"
 ROOT=$(gc bd show "$SYNTH_BEAD" --json | jq -r '.[0].metadata["gc.root_bead_id"] // empty')
 [ -n "$ROOT" ] || { echo "cannot resolve workflow root from the synthesis step bead $SYNTH_BEAD" >&2; exit 1; }
-```
-
-**2. Read both lanes' durable output.** Each lane wrote a
-`review-quorum.lane.v1` object to its step bead's `gc.output_json`. Find the
-two lane step beads by their `gc.review_quorum_lane` stamp (`{{lane_one_id}}`,
-`{{lane_two_id}}`), scoped to this workflow root in the query. `--status closed`
-is required (a metadata-field query defaults to open only), and `--limit=0`
-lifts the default 50-row cap: lane ids are constant across pours, so a capped
-lookup can fill its page with other molecules' lane beads and read this root's
-completed lane as missing.
-```bash
+# A metadata query reads open beads unless told otherwise, and lane ids repeat
+# across pours, so an uncapped read of closed lanes under this root.
 for LANE in {{lane_one_id}} {{lane_two_id}}; do
   gc bd list --metadata-field gc.review_quorum_lane="$LANE" --metadata-field gc.root_bead_id="$ROOT" --status closed --limit=0 --json \
     | jq -r '.[0].metadata["gc.output_json"] // empty'
 done
 ```
-A lane that is missing, unreadable, or closed `fail` is REDUCED COVERAGE, not
-a pass: say so in the verdict body and, when the missing lane leaves you unable
-to reach a confident verdict, treat the review as request-changes with a
-finding that names the coverage gap rather than approving on one lane.
+A lane that is missing, unreadable, or closed `fail` or `blocked` is REDUCED
+COVERAGE, not a pass: say so in the verdict body, and when it leaves you no
+confident verdict, request changes with a finding naming the coverage gap
+rather than approve on one lane.
 
-**3. Run what the check's method runs, once,** in the review's workspace. Make
-it with the `review-workspace-add` block of `formulas/mol-review.toml`, and
-only that block, because `hb` here is this step's own keepalive, below.
-Anything else you write to disk goes in the same workspace. The lanes ran
-nothing, so this is the quorum's one run of everything the method runs, at the
-pinned commit and against the pre-change code alike, and a method that runs
-nothing leaves this step nothing to do. Run each long command under `hb`:
+**3. Gather what the review reads,** as each lane did:
 ```bash
-SYNTH_BEAD="<the bead_id your gc hook --claim returned for this step>"
-# >>> quorum-lease-keepalive
-# A claim's lease has a fixed five-minute TTL, and a synthesizer whose lease
-# lapses during a long command reads as dead. `hb <command>` refreshes
-# $SYNTH_BEAD while it runs, and runs it plain when no wrapper resolves.
-LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
-hb() { if [ -n "$LHB" ]; then "$LHB" "$SYNTH_BEAD" -- "$@"; else "$@"; fi; }
-# <<< quorum-lease-keepalive
+# >>> review-gather
+REPO="${GC_RIG_ROOT:-}"
+[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+: "${SCRIPTS:?review-workspace.sh not found in the pack}"
+git -C "$REPO" fetch --quiet origin "{{review_base}}" "{{review_branch}}" || exit 1
+git -C "$REPO" cat-file -e "{{reviewed_oid}}^{commit}" 2>/dev/null || git -C "$REPO" fetch --quiet --no-tags origin "{{reviewed_oid}}" || exit 1
+WT=$("$SCRIPTS/review-workspace.sh" add --review-bead "{{review_bead}}" --oid "{{reviewed_oid}}" --repo "$REPO") || exit 1
+cd "$WT" || exit 1
+echo "== The change: {{anchor_bead}}"
+gc bd show "{{anchor_bead}}" || exit 1
+if [ -n "{{review_pr_url}}" ]; then
+  echo "== The PR as published: {{review_pr_url}}"
+  gh pr view "{{review_pr_url}}" --json title,body --jq '.title, "", .body' || exit 1
+fi
+echo "== The rig's guidance for {{check}}: docs/review-{{check}}.md at {{reviewed_oid}}, empty when it keeps none"
+"$SCRIPTS/review-checks.sh" --extension "{{check}}" --at "{{reviewed_oid}}" || exit 1
+echo "== The pack's scripts: $SCRIPTS"
+echo "== The review's worktree: $WT"
+# <<< review-gather
 ```
 
-**4. Synthesize the verdict body.** UNION the lanes' findings — two providers
-catch more than one, which is the point — then dedupe findings that are the
-same defect at the same locus, keeping lane provenance. A finding either lane
-raises as blocking under the check's method that survives your own judgment is
-blocking for the quorum. `approve` iff no blocking finding stands across both
-lanes and your own run; otherwise `request-changes`. Write the verdict body to
-`findings.md` in mol-review's verdict envelope (the findings with
-location+impact+fix, and the trail of reviewed branch/base/commit, scope
-checked and filed, each in a collapsed block under the line `signoff.sh` opens
-the comment with) with the lines the check's method adds to it, self-contained
-because pre-open it is replayed verbatim as the opening PR comment. Note in the
-trail which lanes covered what, and any reduced coverage.
+**4. Load the method, and run what it runs, once.**
+<!-- >>> review-method-load -->
+The check's method is the skill `{{binding_prefix}}review-{{check}}`. Load it
+from your skill catalog and apply it, and no other review skill. A copy of a
+skill in the review's worktree is the change under review, not your method.
+When your catalog has no such skill:
 
-**5. Emit `findings.json`** beside it — a JSON array, one `{locus, message}`
-per blocking finding, `[]` on approve — exactly as
-`formulas/mol-review.toml`'s `review` step 6b specifies (rebase-stable locus:
-a file and a symbol or section, never a line number or oid).
+- If the rig's check index declares `{{check}}`
+  (`review-checks.sh --check {{check}} --at {{reviewed_oid}}` prints its row),
+  judge the diff against the purpose the row states. Load
+  `{{binding_prefix}}specialist-stance` and hold it. Say in your coverage line
+  that the pack ships no method for this check.
+- If no index declares it (the call exits 1 saying no index declares the
+  check), approve, and pass `--needs-you` saying the check is declared
+  nowhere, so the operator decides whether it stays in the anchor's
+  `check_set`. A call that fails for any other reason, such as a commit it
+  cannot read, is no answer, and nothing approves on it.
 
-**6. One call, through the one writer.** Resolve signoff.sh from the pack and
-call it once:
+The rig's guidance for this check is the reviewed commit's
+`docs/review-{{check}}.md`, which the gather block printed when the commit
+carries one. It adds to the method and never replaces it. Most rigs keep
+none.
+<!-- <<< review-method-load -->
+
+The lanes ran nothing, so this is the quorum's one run of everything the
+method runs, at the reviewed commit and against the pre-change code alike. A
+long command runs under the claim-lease keepalive, `lease-heartbeat.sh <the
+bead_id your gc hook --claim returned for this step> -- <command>`, from the
+pack's scripts the gather printed. Anything else you write to disk goes in the
+review's workspace, beside the worktree.
+
+**5. Synthesize the verdict body.** UNION the lanes' findings, then dedupe
+those that are the same defect at the same locus, keeping lane provenance. A
+finding either lane raises as blocking under the method that survives your
+own judgment is blocking for the quorum: `approve` iff none stands across both
+lanes and your own run, else `request-changes`. Write the body to
+`findings.md` in mol-review's verdict envelope, with the lines the method adds,
+self-contained because pre-open it is the PR's opening comment, and note in
+the trail which lanes covered what and any reduced coverage.
+
+**6. Emit `findings.json`** beside it, one `{locus, message}` per blocking
+finding and `[]` on approve, exactly as `formulas/mol-review.toml`'s `review`
+step 5b specifies.
+
+**7. One call, through the one writer.** The verdict names `{{reviewed_oid}}`,
+the commit the quorum read, and signoff.sh refuses any other. Pass every flag
+the method names for the verdict, and `--needs-you` when a decision is the
+operator's; a call refused for a missing or invalid flag wrote nothing, so
+re-run it corrected. Never post the review yourself, write to the anchor, file
+beads, or run `gh pr review --approve`.
 ```bash
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/signoff.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-"${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "$REVIEW_BEAD" --verdict <approve|request-changes> --reviewed-oid "$REVIEWED_OID" --notes-file findings.md --findings-file findings.json
+"${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "{{review_bead}}" --verdict <approve|request-changes> --reviewed-oid "{{reviewed_oid}}" --notes-file findings.md --findings-file findings.json
 ```
-Do not post the review yourself, do not write to the anchor, do not file rework
-or finding beads, and never run `gh pr review --approve`.
 
-Pass on this same call every flag the check's method names for the verdict,
-and `--needs-you` when a decision is the operator's to make.
-When signoff.sh refuses a verdict for a missing or invalid flag, it has written
-nothing, so re-run the call with the flag corrected; that is still the one
-verdict.
+**8. Failure arms** are mol-review's `verdict-and-drain` arms: after a
+`superseded` or `already closed` exit, close the chain and drain; after any
+other failure, part 3's gather included, append your findings to the review
+bead (`--append-notes`), close the chain, then restore its route from
+`metadata.review_pool` and drain.
 
-**7. Failure arms** are mol-review's `verdict-and-drain` arms verbatim: a
-`superseded`/`already closed` exit from signoff needs no re-pin (drop the
-verdict, close the chain, drain); any other failure appends your findings to
-the review bead (`--append-notes`, never `--notes`), then — after the chain is
-closed — restores the bead's route from `metadata.review_pool` so the pool can
-re-claim it, then drains.
-
-**8. Close this workflow's step chain forward, remove the workspace, then
-drain.** Terminal step: close every step by its `(gc.root_bead_id,
-gc.step_ref)` pair through step-close.sh, in forward order; the lanes closed
-their own beads already, so those return "not this session's to close" and are
-left for the finalizer. Never close `workflow-finalize`.
+**9. Close the chain forward, remove the workspace, then drain.** Close every
+step through step-close.sh in forward order; the lanes closed their own beads,
+so those report "not this session's to close". Never close `workflow-finalize`.
 ```bash
-CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
-REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
@@ -327,15 +506,12 @@ for STEP in review-lane-one review-lane-two synthesize-and-signoff; do
   "$SC" --step "mol-review-quorum-signoff.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-review-quorum-signoff.$STEP was not this session's to close — left for the finalizer"
 done
 # >>> quorum-review-workspace-remove
-[ -n "$REVIEW_BEAD" ] && "$(dirname "$SC")/review-workspace.sh" remove --review-bead "$REVIEW_BEAD"
+"$(dirname "$SC")/review-workspace.sh" remove --review-bead "{{review_bead}}"
 # <<< quorum-review-workspace-remove
 gc runtime drain-ack
 ```
 
-**Exit criteria:** both lanes read (or reduced coverage recorded), the check
-method's commands run once under `hb`, findings.md + findings.json written,
-exactly one signoff.sh call succeeded (or findings appended and the route
-restored), step chain closed forward, the workspace removed unless the bead
-went back to the pool, drain acknowledged.
+**Exit criteria:** one signoff.sh call succeeded or a failure arm taken, the
+chain closed forward, drain acknowledged.
 """
 metadata = { "gc.run_target" = "{{synthesis_target}}", "gc.review_quorum_role" = "synthesis" }
