@@ -706,10 +706,10 @@ hasnt "$CALLED" "session nudge" "(ALIAS-BOUND) …and kicking nothing"
 unset AFTER_REFUSAL_READS AFTER_REFUSAL_ASSIGNEE
 
 echo "# a holder that never binds is named as left over, and closing it is suggested only then"
-export ALIAS_DECOYS=1 GC_HELM_ENGAGE_BIND_WAIT=1
+export ALIAS_DECOYS=1 GC_HELM_ENGAGE_BIND_WAIT=5
 reset; run_engage tk-conv --no-attach
 eq "$RC" 4 "(ALIAS-LEFTOVER) a holder that never binds exits 4"
-has "$OUT" "did not bind it within 1s" "(ALIAS-LEFTOVER) …after waiting for a bind that never came"
+has "$OUT" "did not bind it within 5s" "(ALIAS-LEFTOVER) …after waiting for a bind that never came"
 has "$OUT" "gc session close gc-81" "(ALIAS-LEFTOVER) …naming the holder to close"
 has "$OUT" "If no other engage of tk-conv is still running" "(ALIAS-LEFTOVER) …only on the condition that no engage is still binding it"
 hasnt "$OUT" "gc-90" "(ALIAS-LEFTOVER) …never another conversation's sitting whose alias shares the prefix"
@@ -796,6 +796,619 @@ eq "$RC" 0 "(ALIAS-RETRY) a rejected bare alias is retried and engage exits 0"
 has "$CALLED" "session new converse-opus --alias tk-conv --no-attach --json" "(ALIAS-RETRY) …the bare conversation id is tried first"
 has "$CALLED" "session new converse-opus --alias c-tk-conv --no-attach --json" "(ALIAS-RETRY) …then retried under a c- prefix"
 eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.c-tk-conv" "(ALIAS-RETRY) …and the conversation binds to the retried sitting's alias"
+
+# run_fresh / run_fresh_tty — a clean store, then run_engage / run_engage_tty.
+run_fresh()     { reset; run_engage "$@"; }
+run_fresh_tty() { reset; run_engage_tty "$@"; }
+
+echo "# a bead whose prefix names no rig is refused before anything runs"
+run_fresh zz-subj --no-attach
+eq "$RC" 4 "(NORIG) an unknown prefix exits 4"
+has "$OUT" "matches no rig" "(NORIG) …saying so"
+hasnt "$CALLED" "session new" "(NORIG) …and spawns nothing"
+
+echo "# a subject whose rig carries no converse is refused with no side effect"
+# An HQ / city-store root carries no converse in the resolved roster, so no
+# converse sitting could spawn there. engage refuses BEFORE it files a conversation
+# or exports GC_RIG, rather than half-acting and failing at the spawn. Capability is
+# read from the roster (gc agent list), not the checkout — $NO_CONVERSE makes the
+# roster show gc-toolkit without converse (a proactive-only entry remains, to
+# prove the guard is converse-specific).
+export NO_CONVERSE=1
+run_fresh tk-conv --no-attach
+eq "$RC" 4 "(NOCONVERSE) a rig with no converse exits 4"
+has "$OUT" "carries no converse template" "(NOCONVERSE) …saying why"
+hasnt "$CALLED" "session new" "(NOCONVERSE) …spawning nothing"
+hasnt "$CALLED" "bd create" "(NOCONVERSE) …filing no conversation"
+hasnt "$CALLED" "bd update" "(NOCONVERSE) …binding nothing"
+unset NO_CONVERSE
+
+echo "# an importer whose CHECKOUT holds no converse template is still engageable (roster-sourced)"
+# The regression: capability must come from the import-resolved roster,
+# not a glob of the rig's checkout. Only the pack-source rig keeps agents/converse-*
+# in its tree; every importer obtains converse through the roster. $TMP/rig-bare is
+# a checkout with no converse templates, yet the default roster registers converse
+# for gc-toolkit — so engage clears the converse guard and spawns, where the old
+# glob predicate would have refused.
+export RIG_PATH="$TMP/rig-bare"
+run_fresh tk-conv --no-attach
+eq "$RC" 0 "(IMPORTER) an importer with converse in the roster but not the checkout engages"
+has "$CALLED" "session new converse-opus --alias tk-conv" "(IMPORTER) …spawning the converse sitting"
+export RIG_PATH="$TMP/rig"
+
+echo "# attach behaviour: default attaches, --no-attach does not"
+run_fresh tk-conv --no-attach
+hasnt "$CALLED" "session attach" "(ATTACH) --no-attach does not attach"
+run_fresh tk-conv
+has "$CALLED" "session attach gc-77" "(ATTACH) the default attaches to the captured session id"
+hasnt "$CALLED" "session nudge" "(ATTACH) …and an opus sitting is not kicked; it self-starts before the operator lands"
+
+echo "# for codex (the kicked provider), the kick precedes the attach"
+# attach is a foreground handoff to the pane: nothing after it in cmd_engage runs
+# until the operator detaches, so a codex kick sent after the attach would never
+# fire and the operator would land on a blank pane.
+run_fresh tk-conv --model codex
+nudge_line=$(printf '%s\n' "$CALLED" | grep -n "session nudge" | head -1 | cut -d: -f1)
+attach_line=$(printf '%s\n' "$CALLED" | grep -n "session attach" | head -1 | cut -d: -f1)
+if [ -n "$nudge_line" ] && [ -n "$attach_line" ] && [ "$nudge_line" -lt "$attach_line" ]; then
+  ok "(KICK-ORDER) the codex opening turn is sent before the attach"
+else
+  bad "(KICK-ORDER) expected nudge (line ${nudge_line:-none}) before attach (line ${attach_line:-none})"
+fi
+
+echo "# the attach waits for the reconciler to start the sitting"
+# `gc session attach` on a sitting the reconciler has not launched yet launches it
+# itself, with no prompt, and the sitting idles until someone types into it. So
+# the attach path polls the sitting's state in `gc session list` and attaches
+# only once it reads active, never while it is start-pending or creating.
+run_fresh tk-conv
+eq "$(cat "$POLLS")" 1 "(START-ACTIVE) a sitting already started is read once"
+hasnt "$OUT" "waiting up to" "(START-ACTIVE) …and attached with no wait announced"
+
+START_STATES="start-pending creating active" run_fresh tk-conv
+eq "$RC" 0 "(START-WAIT) an engage whose sitting starts on the third listing exits 0"
+eq "$(cat "$POLLS")" 3 "(START-WAIT) …reading the sitting until it reads active"
+last_poll=$(printf '%s\n' "$CALLED" | grep -n '^session list' | tail -1 | cut -d: -f1 || true)
+attach_line=$(printf '%s\n' "$CALLED" | grep -n '^session attach' | head -1 | cut -d: -f1 || true)
+if [ -n "$last_poll" ] && [ -n "$attach_line" ] && [ "$last_poll" -lt "$attach_line" ]; then
+  ok "(START-WAIT) …and attaching only after the listing that reads it active"
+else
+  bad "(START-WAIT) expected the last listing (line ${last_poll:-none}) before the attach (line ${attach_line:-none})"
+fi
+has "$OUT" "waiting up to 120s for the reconciler to start s-gc-77" \
+    "(START-WAIT) …telling the operator what it waits on, and for how long"
+
+GC_HELM_ENGAGE_WAIT_TIMEOUT=2 START_STATES="start-pending" run_fresh tk-conv
+eq "$RC" 0 "(START-TIMEOUT) a sitting still unstarted at the bound exits 0: the conversation is bound and the sitting may yet start"
+hasnt "$CALLED" "session attach" "(START-TIMEOUT) …and is NOT attached, since the attach would launch it without its prompt"
+polls=$(cat "$POLLS")
+if [ "${polls:-0}" -ge 2 ]; then
+  ok "(START-TIMEOUT) …after reading it more than once"
+else
+  bad "(START-TIMEOUT) expected at least 2 listings before giving up (got ${polls:-0})"
+fi
+has "$OUT" "the reconciler has not started s-gc-77 after 2s" "(START-TIMEOUT) …saying the reconciler has not started it"
+has "$OUT" "start-pending" "(START-TIMEOUT) …naming the state it last read"
+has "$OUT" "gc session attach gc-77" "(START-TIMEOUT) …and giving the attach to run once it is up"
+
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending gone" run_fresh tk-conv
+eq "$RC" 4 "(START-CLOSED) a sitting listed and then gone from the list (closed, read from the store) exits 4"
+hasnt "$CALLED" "session attach" "(START-CLOSED) …without attaching"
+eq "$(cat "$POLLS")" 2 "(START-CLOSED) …at the first listing it is gone from, not at the bound"
+has "$OUT" "ended before the reconciler started it (its state in 'gc session list': gone)" "(START-CLOSED) …saying the sitting ended"
+has "$OUT" "gc bd update tk-conv --if-assignee" "(START-CLOSED) …and how to hand its still-bound conversation back to the queue"
+
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="blank" run_fresh tk-conv
+eq "$RC" 4 "(START-BLANK) a sitting listed with an empty state (closed, read from the supervisor) exits 4"
+hasnt "$CALLED" "session attach" "(START-BLANK) …without attaching"
+eq "$(cat "$POLLS")" 1 "(START-BLANK) …at the first listing"
+has "$OUT" "state in 'gc session list': closed" "(START-BLANK) …naming it closed"
+
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="failed-create" run_fresh tk-conv
+eq "$RC" 4 "(START-FAILED) a sitting whose create failed exits 4"
+hasnt "$CALLED" "session attach" "(START-FAILED) …without attaching"
+has "$OUT" "state in 'gc session list': failed-create" "(START-FAILED) …naming the state"
+
+# A sitting not listed yet may only lag the supervisor's read cache, and a
+# listing that fails says nothing about the sitting, so neither ends the wait.
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="gone gone active" run_fresh tk-conv
+eq "$RC" 0 "(START-UNLISTED) a sitting not yet listed is waited on, not read as closed"
+has "$CALLED" "session attach gc-77" "(START-UNLISTED) …and attached once it reads active"
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="broken active" run_fresh tk-conv
+eq "$RC" 0 "(START-UNREADABLE) a listing that fails is waited through"
+has "$CALLED" "session attach gc-77" "(START-UNREADABLE) …and the sitting attached once a listing reads it active"
+
+echo "# --no-attach has no attach to gate, so it does not wait"
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending" run_fresh tk-conv --no-attach
+eq "$RC" 0 "(NOATTACH-NOWAIT) --no-attach on an unstarted sitting exits 0"
+polls=$(cat "$POLLS")
+eq "${polls:-0}" 0 "(NOATTACH-NOWAIT) …without reading the sitting's state"
+hasnt "$OUT" "waiting up to" "(NOATTACH-NOWAIT) …or announcing a wait"
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending" run_fresh tk-conv --model codex --no-attach
+has "$CALLED" "session nudge gc-77" "(NOATTACH-KICK) a codex sitting on --no-attach is kicked without a start wait"
+
+echo "# for codex, the kick follows the start wait"
+START_STATES="start-pending active" run_fresh tk-conv --model codex
+last_poll=$(printf '%s\n' "$CALLED" | grep -n '^session list' | tail -1 | cut -d: -f1 || true)
+nudge_line=$(printf '%s\n' "$CALLED" | grep -n '^session nudge' | head -1 | cut -d: -f1 || true)
+attach_line=$(printf '%s\n' "$CALLED" | grep -n '^session attach' | head -1 | cut -d: -f1 || true)
+if [ -n "$last_poll" ] && [ -n "$nudge_line" ] && [ -n "$attach_line" ] \
+   && [ "$last_poll" -lt "$nudge_line" ] && [ "$nudge_line" -lt "$attach_line" ]; then
+  ok "(KICK-AFTER-START) the codex kick reaches a started sitting and precedes the attach"
+else
+  bad "(KICK-AFTER-START) expected listing (${last_poll:-none}) < nudge (${nudge_line:-none}) < attach (${attach_line:-none})"
+fi
+GC_HELM_ENGAGE_WAIT_TIMEOUT=1 START_STATES="start-pending" run_fresh tk-conv --model codex
+has "$CALLED" "session nudge gc-77" "(TIMEOUT-KICK) a codex sitting unstarted at the bound is still kicked, so it begins once it starts"
+hasnt "$CALLED" "session attach" "(TIMEOUT-KICK) …but not attached"
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 START_STATES="start-pending gone" run_fresh tk-conv --model codex
+hasnt "$CALLED" "session nudge" "(CLOSED-NOKICK) a codex sitting that ended before it started is not kicked"
+
+echo "# a suspended subject rig is refused before anything spawns"
+# engage spawns a sitting the reconciler must sustain; on a suspended rig the
+# reconciler skips its agents, so the sitting never comes up and the conversation
+# would strand bound to it. Refuse before spawning, and name the resume as the fix.
+export RIG_SUSPENDED=true
+run_fresh tk-conv --no-attach
+eq "$RC" 4 "(SUSPENDED) engaging on a suspended rig exits 4"
+hasnt "$CALLED" "session new" "(SUSPENDED) …and spawns nothing"
+has "$OUT" "is suspended" "(SUSPENDED) …saying the rig is suspended"
+has "$OUT" "gc rig resume gc-toolkit" "(SUSPENDED) …and naming the resume as the fix"
+unset RIG_SUSPENDED
+
+echo "# a city whose controller is down is refused before anything spawns"
+# The reconciler, the controller's loop, is what launches the sitting; the HQ
+# row's running is gc's probe of that controller, and gc status confirms it.
+export HQ_RUNNING=false STATUS_CONTROLLER=false
+run_fresh tk-conv --no-attach
+eq "$RC" 4 "(CTRL-DOWN) engaging while the city controller is down exits 4"
+hasnt "$CALLED" "session new" "(CTRL-DOWN) …and spawns nothing"
+has "$CALLED" "status --json" "(CTRL-DOWN) …having asked gc status about the HQ reading"
+has "$OUT" "city controller did not answer" "(CTRL-DOWN) …saying the controller did not answer"
+has "$OUT" "both report it not running" "(CTRL-DOWN) …and that both readings agree"
+has "$OUT" "gc status" "(CTRL-DOWN) …and pointing at the city's status"
+hasnt "$OUT" "gc rig status" "(CTRL-DOWN) …not at the subject rig's"
+unset HQ_RUNNING STATUS_CONTROLLER
+
+echo "# an HQ running=false that gc status cannot confirm or clear still refuses"
+# The ping missed and the second reading has nothing to say: a gc status that
+# prints nothing, prints something that is not JSON, or reports a supervisor
+# that is up but cannot tell. The HQ reading stands.
+export HQ_RUNNING=false
+for _st in "" broken unknown; do
+    STATUS_CONTROLLER="$_st" run_fresh tk-conv --no-attach
+    eq "$RC" 4 "(CTRL-NOREAD:${_st:-empty}) an unconfirmed HQ running=false exits 4"
+    hasnt "$CALLED" "session new" "(CTRL-NOREAD:${_st:-empty}) …and spawns nothing"
+    has "$OUT" "'gc status' could not tell" "(CTRL-NOREAD:${_st:-empty}) …saying gc status could not tell"
+done
+unset HQ_RUNNING
+
+echo "# an HQ running=false that gc status contradicts engages"
+# A loaded controller can miss the socket ping that sets the HQ row; the
+# supervisor-aware reading in gc status answering running clears it.
+export HQ_RUNNING=false STATUS_CONTROLLER=true
+run_fresh tk-conv --no-attach
+eq "$RC" 0 "(CTRL-PING-MISSED) engaging when gc status reports the controller running exits 0"
+has "$CALLED" "status --json" "(CTRL-PING-MISSED) …after asking gc status"
+has "$CALLED" "session new converse-opus --alias tk-conv" "(CTRL-PING-MISSED) …and spawns the sitting"
+unset HQ_RUNNING STATUS_CONTROLLER
+
+echo "# a rig list with no HQ row reads as unknown and does not refuse"
+# An older gc, or one that stops listing the HQ, gives no controller reading.
+# Unknown never refuses, and gc status is not asked for a reading nothing
+# contradicts.
+export NO_HQ_ROW=1 STATUS_CONTROLLER=false
+run_fresh tk-conv --no-attach
+eq "$RC" 0 "(NO-HQ) engaging with no HQ row in the rig list exits 0"
+has "$CALLED" "session new converse-opus --alias tk-conv" "(NO-HQ) …and spawns the sitting"
+hasnt "$CALLED" "status --json" "(NO-HQ) …without asking gc status"
+unset NO_HQ_ROW STATUS_CONTROLLER
+
+echo "# a suspended rig is refused on its suspension even while the controller is down"
+# The suspension is checked first, so the refusal names the fix that is the
+# subject rig's own, and gc status is never asked.
+export HQ_RUNNING=false RIG_SUSPENDED=true STATUS_CONTROLLER=false
+run_fresh tk-conv --no-attach
+eq "$RC" 4 "(SUSPENDED-CTRL-DOWN) a suspended rig with the controller down exits 4"
+has "$OUT" "is suspended" "(SUSPENDED-CTRL-DOWN) …on the suspension"
+hasnt "$OUT" "city controller" "(SUSPENDED-CTRL-DOWN) …not on the controller"
+hasnt "$CALLED" "status --json" "(SUSPENDED-CTRL-DOWN) …and gc status is not asked"
+unset HQ_RUNNING RIG_SUSPENDED STATUS_CONTROLLER
+
+echo "# an idle subject rig (running=false) engages while the controller is up"
+# A rig row's running=false is what gc reports for an idle rig, and an idle rig
+# is not a down one: the reconciler launches the sitting there like anywhere else.
+export HQ_RUNNING=true RIG_SUSPENDED=false RIG_RUNNING=false
+run_fresh tk-conv --no-attach
+eq "$RC" 0 "(IDLE) engaging on an idle rig exits 0"
+has "$CALLED" "session new converse-opus --alias tk-conv" "(IDLE) …and spawns the sitting"
+hasnt "$CALLED" "status --json" "(IDLE) …and an HQ running=true asks gc status nothing"
+unset HQ_RUNNING RIG_SUSPENDED RIG_RUNNING
+
+echo "# a suspended rig is refused even while the controller is up"
+export HQ_RUNNING=true RIG_SUSPENDED=true
+run_fresh tk-conv --no-attach
+eq "$RC" 4 "(SUSPENDED-CTRL-UP) a suspended rig still exits 4 with the controller up"
+has "$OUT" "is suspended" "(SUSPENDED-CTRL-UP) …on the suspension"
+unset HQ_RUNNING RIG_SUSPENDED
+
+echo "# an explicitly live city (controller running, rig not suspended) spawns as normal"
+# The guard refuses only on suspended=true or an HQ running=false, so a city gc
+# reports as live must engage exactly as one that reports neither flag.
+export HQ_RUNNING=true RIG_SUSPENDED=false RIG_RUNNING=true
+run_fresh tk-conv --no-attach
+eq "$RC" 0 "(LIVE) engaging on an explicitly live city exits 0"
+has "$CALLED" "session new converse-opus --alias tk-conv" "(LIVE) …and spawns the sitting"
+unset HQ_RUNNING RIG_SUSPENDED RIG_RUNNING
+
+# ── Interactive TTY flow + starter/model/debug ───────────────────────
+echo
+echo "# the model set is the configured converse-* variants; bare 'converse' is excluded"
+# --model validates against the globbed variants (opus/fable/codex from the
+# fixture agents dir); the bare 'converse' pool template is not an engage variant.
+run_fresh tk-conv --model converse --no-attach
+eq "$RC" 2 "(IA-MODEL-SET) --model converse (the bare pool template) is not a variant, exit 2"
+hasnt "$CALLED" "session new" "(IA-MODEL-SET) …and nothing spawned"
+has "$OUT" "must be one of: opus" "(IA-MODEL-SET) …the message lists the configured variants"
+
+echo "# every success carries a ✓ summary on stdout and an always-on [debug] line"
+run_fresh tk-conv --no-attach
+eq "$RC" 0 "(IA-DEBUG) engaging exits 0"
+has "$OUT" "[debug] conversation=tk-conv" "(IA-DEBUG) the provenance rides an always-on [debug] line"
+has "$OUT" "sitting=gc-77" "(IA-DEBUG) …carrying the sitting id"
+has "$OUT" "work_dir=/w" "(IA-DEBUG) …and the sitting work_dir"
+has "$OUT" "✓ converse-opus" "(IA-DEBUG) …and the human summary names the sitting template"
+
+echo "# --no-input keeps the non-interactive one-shot behavior (takes the queued conversation)"
+run_fresh tk-subj --no-input --no-attach
+eq "$RC" 0 "(IA-NOINPUT) --no-input on a bead with a queued conversation exits 0"
+hasnt "$CALLED" "bd create" "(IA-NOINPUT) …taking that conversation, filing nothing"
+has "$CALLED" "session new converse-opus --alias tk-conv" "(IA-NOINPUT) …with no prompts"
+
+echo "# on a TTY a bead with a queued conversation is offered take-it vs new"
+# [1] take the queued conversation · Enter at the model prompt (Opus)
+run_fresh_tty '1\n\n' tk-subj --no-attach
+eq "$RC" 0 "(IA-CONV-EXISTING) picking the queued conversation exits 0"
+has "$OUT" "Subject has open conversation" "(IA-CONV-EXISTING) …after listing the bead's open conversations"
+has "$OUT" "[d] discuss broadly" "(IA-CONV-EXISTING) …in one prompt that also offers the new-conversation seed letters"
+hasnt "$CALLED" "bd create" "(IA-CONV-EXISTING) …files nothing"
+has "$CALLED" "session new converse-opus --alias tk-conv" "(IA-CONV-EXISTING) …and engages it"
+# An existing conversation's ask was written when it was filed, so there is no
+# new ask for a skill to seed: the skill prompt is not asked.
+hasnt "$OUT" "Skill — Enter" "(IA-SKILL-EXISTING) …and asks no skill, since its ask is already written"
+
+echo "# a subject engage grounds the operator with a one-line summary before the conversation prompt"
+run_fresh_tty '1\n\n' tk-subj --no-attach
+eq "$RC" 0 "(IA-SUMMARY) engaging a subject exits 0"
+has "$OUT" "the subject under engagement" "(IA-SUMMARY) the summary carries the picked bead's title"
+has "$OUT" "task · open · p2" "(IA-SUMMARY) …with its type, status, and priority"
+# The summary precedes the conversation prompt, so the operator reads what they
+# picked while deciding which conversation to take or open.
+case "$OUT" in
+  *"the subject under engagement"*"Subject has open conversation"*) ok "(IA-SUMMARY) …ahead of the conversation prompt" ;;
+  *) bad "(IA-SUMMARY) the summary should precede the conversation prompt" ;;
+esac
+
+echo "# an over-long title is truncated so the summary stays one short line"
+export \
+  SUBJ_TITLE="AAAA BBBB CCCC DDDD EEEE FFFF GGGG HHHH IIII JJJJ KKKK LLLL MMMM NNNN OOOO PPPP QQQQ RRRR SSSS TTTT ZEND"
+run_fresh_tty '1\n\n' tk-subj --no-attach
+eq "$RC" 0 "(IA-SUMMARY-TRUNC) engaging a long-titled subject exits 0"
+has "$OUT" "AAAA" "(IA-SUMMARY-TRUNC) the title head is kept"
+has "$OUT" "…" "(IA-SUMMARY-TRUNC) …with an ellipsis where it was cut"
+hasnt "$OUT" "ZEND" "(IA-SUMMARY-TRUNC) …and the tail past the cut is dropped"
+unset SUBJ_TITLE
+
+echo "# --no-input suppresses the grounding summary — its stdout is a script's to parse"
+run_fresh tk-subj --no-input --no-attach
+eq "$RC" 0 "(IA-SUMMARY-NOINPUT) --no-input on a subject exits 0"
+hasnt "$OUT" "the subject under engagement" "(IA-SUMMARY-NOINPUT) …and no grounding summary is printed"
+
+echo "# two queued conversations become a numbered choice"
+export HAVE_CONV=2
+# oldest first: [1]=tk-conv (10-01) · [2]=tk-conv2 (10-02); pick [1]
+run_fresh_tty '1\n\n' tk-subj --no-attach
+eq "$RC" 0 "(IA-CONV-MULTI) two queued conversations, picking one, exits 0"
+has "$OUT" "tk-conv2" "(IA-CONV-MULTI) …both conversations are listed"
+has "$CALLED" "session new converse-opus --alias tk-conv " "(IA-CONV-MULTI) …spawning for the picked conversation"
+
+echo "# a seed letter at the one prompt files a NEW conversation carrying that seed, even with one queued"
+# [d] a new conversation seeded discuss-broadly (one prompt, no separate starter) · Enter
+# model (Opus) · Enter skill (none)
+run_fresh_tty 'd\n\n\n' tk-subj --no-attach
+eq "$RC" 0 "(IA-NEW-TEMPLATE) a new conversation + template exits 0"
+has "$CALLED" "bd create" "(IA-NEW-TEMPLATE) …a new conversation is filed"
+hasnt "$OUT" "already open" "(IA-NEW-TEMPLATE) …deliberately, past the queue's join"
+has "$CALLED" "talk through tk-subj broadly" "(IA-NEW-TEMPLATE) …its body is the seed, subject filled in"
+has "$CALLED" "--title discuss broadly" "(IA-NEW-TEMPLATE) …titled by the seed label"
+has "$CALLED" "session new converse-opus" "(IA-NEW-TEMPLATE) …then a sitting is spawned"
+has "$OUT" "Skill — Enter = none" "(IA-SKILL-NONE) a new conversation is asked for a skill"
+hasnt "$CALLED" "Load that skill" "(IA-SKILL-NONE) …and Enter seeds none, leaving the seed as the whole brief"
+
+echo "# free text at the one prompt opens a NEW conversation carrying it verbatim as the opener"
+# free text (not a number or seed letter) · Enter model · Enter skill (none)
+run_fresh_tty 'lets revisit the scope\n\n\n' tk-subj --no-attach
+eq "$RC" 0 "(IA-NEW-FREETEXT) a new conversation + free text exits 0"
+has "$CALLED" "bd create" "(IA-NEW-FREETEXT) …a new conversation is filed"
+has "$CALLED" "lets revisit the scope" "(IA-NEW-FREETEXT) …with the typed message as its body"
+
+echo "# the model prompt is a numbered choice; picking codex spawns converse-codex + kick"
+# model list = opus, codex, fable (opus first, then glob order); [2] = codex
+run_fresh_tty '2\n' tk-conv --no-attach
+eq "$RC" 0 "(IA-MODEL-PICK) picking a model exits 0"
+has "$CALLED" "session new converse-codex --alias tk-conv" "(IA-MODEL-PICK) …spawning the picked variant"
+has "$CALLED" "session nudge gc-77" "(IA-MODEL-PICK) …and codex, the kicked provider, gets its opening turn"
+
+echo "# Enter at the model prompt keeps Opus (the work-tier default)"
+run_fresh_tty '\n' tk-conv --no-attach
+eq "$RC" 0 "(IA-MODEL-DEFAULT) Enter at the model prompt exits 0"
+has "$CALLED" "session new converse-opus" "(IA-MODEL-DEFAULT) …keeping Opus"
+
+echo "# a conversation id is grounded by the bead it tracks and its own title"
+# The conversation-or-starter prompt is skipped for a conversation id; the only
+# read is the model choice (Enter = Opus).
+run_fresh_tty '\n' tk-conv --no-attach
+eq "$RC" 0 "(IA-CONVID-SUBJECT) engaging a conversation id exits 0"
+has "$OUT" "Subject: tk-subj" "(IA-CONVID-SUBJECT) grounding names the bead the conversation tracks"
+has "$OUT" "the subject under engagement" "(IA-CONVID-SUBJECT) …with that bead's own title"
+has "$OUT" 'Conversation: tk-conv — "an earlier concern"' "(IA-CONVID-SUBJECT) …and the conversation's title"
+hasnt "$OUT" "starts a new" "(IA-CONVID-SUBJECT) …and the conversation-or-starter prompt is skipped"
+hasnt "$OUT" "Subject has open conversation" "(IA-CONVID-SUBJECT) …no conversation list is offered"
+has "$CALLED" "session new converse-opus --alias tk-conv" "(IA-CONVID-SUBJECT) …then it engages the named conversation"
+has "$OUT" "for tk-subj" "(IA-CONVID-SUBJECT) …and the success line names the bead, not the conversation id repeated"
+
+echo "# a subject given by title search resolves and engages"
+export SEARCH_HIT=1
+# search text · [1] pick the match · Enter takes its queued conversation ·
+# model Enter (Opus)
+run_fresh_tty 'findme\n1\n\n\n\n' --no-attach
+eq "$RC" 0 "(IA-SUBJECT-SEARCH) a title-searched subject resolves and engages, exit 0"
+has "$CALLED" "session new converse-opus --alias tk-conv" "(IA-SUBJECT-SEARCH) …spawning for the resolved bead's conversation"
+unset SEARCH_HIT
+
+echo "# --template pre-fills the starter and skips its prompt (here under --no-input)"
+run_fresh tk-subj --template unstick-a-stall --no-input --no-attach
+eq "$RC" 0 "(IA-TEMPLATE-FLAG) --template files a new conversation with the seed, exit 0"
+has "$CALLED" "bd create" "(IA-TEMPLATE-FLAG) …a new conversation is filed"
+has "$CALLED" "looks stalled" "(IA-TEMPLATE-FLAG) …carrying the seed body"
+hasnt "$OUT" "already open" "(IA-TEMPLATE-FLAG) …past the queue's join"
+
+echo "# an unknown --template is refused before anything spawns"
+run_fresh tk-subj --template bogus --no-input --no-attach
+eq "$RC" 2 "(IA-TEMPLATE-BAD) an unknown --template exits 2"
+has "$OUT" "unknown --template" "(IA-TEMPLATE-BAD) …naming the fault"
+hasnt "$CALLED" "session new" "(IA-TEMPLATE-BAD) …and nothing spawned"
+
+echo "# --reason and --template both set the opener — they conflict"
+run_fresh tk-subj --reason x --template discuss-broadly --no-input --no-attach
+eq "$RC" 2 "(IA-REASON-TEMPLATE) --reason and --template together exit 2"
+has "$OUT" "both set the opening message" "(IA-REASON-TEMPLATE) …saying why"
+hasnt "$CALLED" "bd create" "(IA-REASON-TEMPLATE) …and nothing filed"
+
+echo "# --new-subject: file a fresh marked subject in a chosen rig, then engage it"
+# One-shot: --rig names the rig, the positional is the subject title. The subject
+# is created MARKED (gc.reaction_owned=1 + gc.origin=operator) in that rig's
+# .beads store, then its one conversation is filed and a sitting spawned. The
+# marker is what stands the async first-reaction/proactive worker down.
+run_fresh "ship the new intake flow" --new-subject --rig gc-toolkit --no-input --no-attach
+eq "$RC" 0 "(NEWSUBJ) --new-subject --rig --no-input exits 0"
+SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -v -- '--deps tracks:' | head -n1)"
+has "$SUBJ_CREATE" "reaction_owned" "(NEWSUBJ) the subject is created with the gc.reaction_owned marker"
+has "$SUBJ_CREATE" "gc.origin" "(NEWSUBJ) …and gc.origin=operator (honest origin)"
+has "$SUBJ_CREATE" "--db $TMP/rig/.beads" "(NEWSUBJ) …in the chosen rig's store (cross-rig create)"
+has "$SUBJ_CREATE" "ship the new intake flow" "(NEWSUBJ) …titled with the subject text"
+has "$OUT" "filed subject tk-newsubj in rig 'gc-toolkit'" "(NEWSUBJ) reports the filed subject"
+has "$CALLED" "session new converse-opus --alias tk-new --no-attach" "(NEWSUBJ) then engages the one conversation it filed"
+# The title doubles as the opener when no --reason/--template is given: the
+# conversation cmd_open files carries it as its title and its ask.
+CONV_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--deps tracks:' | head -n1)"
+has "$CONV_CREATE" "--title ship the new intake flow" "(NEWSUBJ-OPENER) the title doubles as the conversation's opener"
+# The marker outlives a SUCCESSFUL engage (it is what stands the async worker
+# down); the abort backstop must be disarmed once the conversation is filed, so a clean
+# engage never revokes it. (The disarm's control; its arm is NEWSUBJ-ABORT below.)
+hasnt "$CALLED" "unset-metadata gc.reaction_owned" "(NEWSUBJ) a successful engage keeps the marker — the backstop is disarmed once the conversation is filed"
+
+echo "# --new-subject one-shot without --rig is refused (no id prefix to derive a rig)"
+run_fresh "some topic" --new-subject --no-input --no-attach
+eq "$RC" 2 "(NEWSUBJ-NORIG) --new-subject --no-input without --rig exits 2"
+has "$OUT" "needs a rig" "(NEWSUBJ-NORIG) …naming the fault"
+hasnt "$CALLED" "--metadata" "(NEWSUBJ-NORIG) …and no subject was created"
+
+echo "# --new-subject and --subject are mutually exclusive"
+run_fresh --new-subject --subject tk-subj --rig gc-toolkit --no-input --no-attach
+eq "$RC" 2 "(NEWSUBJ-CONFLICT) --new-subject with --subject exits 2"
+has "$OUT" "pass only one" "(NEWSUBJ-CONFLICT) …saying why"
+hasnt "$CALLED" "--metadata" "(NEWSUBJ-CONFLICT) …and nothing created"
+
+echo "# --rig without --new-subject is refused (an existing subject's rig comes from its id)"
+run_fresh tk-subj --rig gc-toolkit --no-input --no-attach
+eq "$RC" 2 "(NEWSUBJ-RIG-ALONE) --rig without --new-subject exits 2"
+has "$OUT" "applies only with --new-subject" "(NEWSUBJ-RIG-ALONE) …naming the fault"
+
+echo "# --new-subject with an unknown rig is refused before any create"
+run_fresh "x" --new-subject --rig nope --no-input --no-attach
+eq "$RC" 4 "(NEWSUBJ-BADRIG) an unknown --rig exits 4"
+has "$OUT" "matches no rig" "(NEWSUBJ-BADRIG) …naming the unknown rig"
+hasnt "$CALLED" "--metadata" "(NEWSUBJ-BADRIG) …and nothing created"
+
+echo "# --new-subject one-shot with no subject text is refused"
+run_fresh --new-subject --rig gc-toolkit --no-input --no-attach
+eq "$RC" 2 "(NEWSUBJ-NOTITLE) a missing subject text exits 2"
+has "$OUT" "needs a subject" "(NEWSUBJ-NOTITLE) …naming the fault"
+hasnt "$CALLED" "--metadata" "(NEWSUBJ-NOTITLE) …and nothing created"
+
+echo "# --new-subject whose subject create fails aborts without spawning"
+export SUBJ_CREATE_FAIL=1
+run_fresh "doomed subject" --new-subject --rig gc-toolkit --no-input --no-attach
+eq "$RC" 4 "(NEWSUBJ-CREATEFAIL) a failed subject create exits 4"
+has "$OUT" "could not create the subject" "(NEWSUBJ-CREATEFAIL) …naming the fault"
+hasnt "$CALLED" "session new" "(NEWSUBJ-CREATEFAIL) …and no sitting spawned"
+hasnt "$CALLED" "unset-metadata gc.reaction_owned" "(NEWSUBJ-CREATEFAIL) …and no cleanup runs — nothing was created to clean up"
+unset SUBJ_CREATE_FAIL
+
+echo "# --new-subject whose post-create gate aborts still files the subject's one conversation"
+# The subject is created MARKED before the gates that can still refuse the live
+# engage (here an unknown --model, like the suspended, controller-down and unknown
+# --template gates). An abort there must not leave the operator-origin subject with
+# no conversation: the async worker will not supply one (gc-proactive drops a
+# marked bead, a reaction that reaches one stands down, and even unmarked a first
+# reaction files none for gc.origin=operator). So the backstop files the one
+# conversation itself in the operator's queue (via cmd_open, carrying the opener)
+# and LEAVES the marker,
+# exactly as a successful engage does, so the async worker still stands down.
+run_fresh "topic after a bad model" --new-subject --rig gc-toolkit --model bogus --no-input --no-attach
+eq "$RC" 2 "(NEWSUBJ-ABORT) a post-create --model abort exits 2"
+SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -v -- '--deps tracks:' | head -n1)"
+has "$SUBJ_CREATE" "reaction_owned" "(NEWSUBJ-ABORT) the subject was already created with the marker (the abort is post-create)"
+CONV_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--deps tracks:' | head -n1)"
+has "$CONV_CREATE" "topic after a bad model" "(NEWSUBJ-ABORT) …so the backstop files the subject's one conversation, carrying its opener"
+hasnt "$CALLED" "unset-metadata gc.reaction_owned" "(NEWSUBJ-ABORT) …and LEAVES the marker, exactly as a successful engage does"
+has "$OUT" "waiting in the operator's queue" "(NEWSUBJ-ABORT) …and tells the operator it waits in their queue to engage"
+hasnt "$CALLED" "session new" "(NEWSUBJ-ABORT) …and nothing was spawned"
+
+echo "# --new-subject interactive: a lone converse rig auto-selects; prompts title, then model"
+# One converse-capable rig in the stub, so the rig step auto-selects (reads no
+# input); the answers then feed the title prompt, the model prompt (Enter=Opus),
+# and the skill prompt a new conversation gets (Enter=none).
+run_fresh_tty 'draft the Q3 plan\n\n\n' --new-subject --no-attach
+eq "$RC" 0 "(NEWSUBJ-IA) interactive --new-subject exits 0"
+has "$OUT" "the only converse-capable rig" "(NEWSUBJ-IA) the lone converse rig auto-selects"
+SUBJ_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -v -- '--deps tracks:' | head -n1)"
+has "$SUBJ_CREATE" "draft the Q3 plan" "(NEWSUBJ-IA) the typed title becomes the subject"
+has "$SUBJ_CREATE" "reaction_owned" "(NEWSUBJ-IA) …created with the marker"
+has "$CALLED" "session new converse-opus" "(NEWSUBJ-IA) …then a sitting spawns (Opus, the Enter default)"
+
+# ── --skill: a sitting seeded with a skill as its lens ────────────────
+echo
+echo "# --skill files a NEW conversation whose ask is the lens brief, even with one queued"
+# The lens brief is the new conversation's ask, which every sitting reads at its
+# claim, so the skill reaches the sitting on any model with no per-skill
+# template. The name is checked against the roster of the sitting that will
+# spawn: its rig, and its model's converse agent.
+run_fresh tk-subj --skill review-arch --no-input --no-attach
+eq "$RC" 0 "(SKILL) --skill on a subject exits 0"
+has "$CALLED" "skill list --agent gc-toolkit/gc-toolkit.converse-opus" "(SKILL) the name is checked against the sitting's own roster (its rig and model)"
+has "$CALLED" "bd create" "(SKILL) …a NEW conversation is filed, past the queued one"
+hasnt "$OUT" "already open" "(SKILL) …deliberately, past the queue's join"
+has "$CALLED" "--title review-arch lens" "(SKILL) …titled by the skill, so the board row says whose view it brings"
+has "$CALLED" "look at tk-subj through the gc-toolkit.review-arch" "(SKILL) …its ask is the lens brief, the bare name resolved to the full one"
+has "$CALLED" "Load that skill" "(SKILL) …which has the sitting load the skill"
+has "$CALLED" "then WAIT for the operator" "(SKILL) …and, with no opener, frame through the lens and wait"
+has "$CALLED" "session new converse-opus --alias tk-new" "(SKILL) …then a sitting spawns for the new conversation"
+hasnt "$CALLED" "session nudge" "(SKILL) …and the opus sitting reads the lens from its ask, unkicked"
+has "$OUT" "✓ converse-opus with review-arch on new conversation" "(SKILL) the summary names the skill the sitting was seeded with"
+
+echo "# a full skill name resolves to exactly that skill"
+run_fresh tk-subj --skill gc-toolkit.review-pm --no-input --no-attach
+eq "$RC" 0 "(SKILL-FULL) a full --skill name exits 0"
+has "$CALLED" "through the gc-toolkit.review-pm" "(SKILL-FULL) …and seeds exactly that skill"
+
+echo "# with an opener, the lens brief leads and the opener follows it"
+run_fresh tk-subj --skill review-arch --template discuss-broadly --no-input --no-attach
+eq "$RC" 0 "(SKILL-TEMPLATE) --skill with --template exits 0"
+case "$CALLED" in
+  *"-d The operator engaged this sitting"*"says what to do first."*"talk through tk-subj broadly"*)
+    ok "(SKILL-TEMPLATE) the ask is the lens brief, then the seed as the opener that says what to do first" ;;
+  *) bad "(SKILL-TEMPLATE) the ask should be the lens brief followed by the seed (got: $CALLED)" ;;
+esac
+has "$CALLED" "--title review-arch lens: discuss broadly" "(SKILL-TEMPLATE) …and the title carries the skill, then the seed label"
+run_fresh tk-subj --skill review-arch --reason "is the split justified" --no-input --no-attach
+eq "$RC" 0 "(SKILL-REASON) --skill with --reason exits 0"
+case "$CALLED" in
+  *"-d The operator engaged this sitting"*"says what to do first."*"is the split justified"*)
+    ok "(SKILL-REASON) the reason follows the brief as the opener" ;;
+  *) bad "(SKILL-REASON) the ask should be the lens brief followed by the reason (got: $CALLED)" ;;
+esac
+has "$CALLED" "--title review-arch lens: is the split justified" "(SKILL-REASON) …and rides the title after the skill"
+
+echo "# a codex sitting is checked against codex's roster, and the brief rides its kick"
+run_fresh tk-subj --skill review-arch --model codex --no-input --no-attach
+eq "$RC" 0 "(SKILL-CODEX) --skill with --model codex exits 0"
+has "$CALLED" "skill list --agent gc-toolkit/gc-toolkit.converse-codex" "(SKILL-CODEX) the roster read is the codex sitting's"
+has "$(printf '%s\n' "$CALLED" | grep '^session nudge')" "through the gc-toolkit.review-arch" "(SKILL-CODEX) …and the codex kick carries the lens brief"
+
+echo "# a name the roster does not carry is refused before anything is filed"
+run_fresh tk-subj --skill nope --no-input --no-attach
+eq "$RC" 2 "(SKILL-UNKNOWN) an unknown --skill exits 2"
+has "$OUT" "unknown --skill 'nope'" "(SKILL-UNKNOWN) …naming the fault"
+has "$OUT" "core.gc-work gc-toolkit.review-arch gc-toolkit.review-pm" "(SKILL-UNKNOWN) …and listing what the sitting carries, deduped"
+hasnt "$CALLED" "bd create" "(SKILL-UNKNOWN) …nothing filed"
+hasnt "$CALLED" "session new" "(SKILL-UNKNOWN) …nothing spawned"
+
+echo "# a bare name two packs both carry is ambiguous until named in full"
+export SKILL_AMBIG=1
+run_fresh tk-subj --skill review-arch --no-input --no-attach
+eq "$RC" 2 "(SKILL-AMBIG) an ambiguous bare --skill exits 2"
+has "$OUT" "contributing.review-arch gc-toolkit.review-arch" "(SKILL-AMBIG) …naming both candidates"
+hasnt "$CALLED" "bd create" "(SKILL-AMBIG) …nothing filed"
+run_fresh tk-subj --skill gc-toolkit.review-arch --no-input --no-attach
+eq "$RC" 0 "(SKILL-AMBIG) …and the full name settles it"
+has "$CALLED" "through the gc-toolkit.review-arch" "(SKILL-AMBIG) …seeding the named one"
+unset SKILL_AMBIG
+
+echo "# a malformed or empty --skill is refused before the roster is read"
+run_fresh tk-subj --skill 'review|arch' --no-input --no-attach
+eq "$RC" 2 "(SKILL-BADNAME) a --skill carrying a metacharacter exits 2"
+hasnt "$CALLED" "skill list" "(SKILL-BADNAME) …refused before the roster is read"
+hasnt "$CALLED" "bd create" "(SKILL-BADNAME) …nothing filed"
+run_fresh tk-subj --skill '' --no-input --no-attach
+eq "$RC" 2 "(SKILL-BADNAME) an empty --skill exits 2"
+run_fresh tk-subj --skill=review-arch --no-input --no-attach
+eq "$RC" 0 "(SKILL-BADNAME) the --skill=<name> spelling is accepted"
+
+echo "# --skill on an explicit conversation id is refused — its ask is already written"
+run_fresh tk-conv --skill review-arch --no-input --no-attach
+eq "$RC" 2 "(SKILL-CONVID) --skill with an explicit conversation id exits 2"
+has "$OUT" "engage tk-subj --skill review-arch" "(SKILL-CONVID) …pointing at the bead it tracks"
+hasnt "$CALLED" "bd create" "(SKILL-CONVID) …nothing filed"
+hasnt "$CALLED" "session new" "(SKILL-CONVID) …nothing spawned"
+
+echo "# a roster that will not read seeds the typed name unverified"
+# The same fail-open reading engage takes for a model it cannot confirm: the
+# operator's choice goes through, says it went unverified, and the brief tells
+# the sitting to say so if it cannot load the skill.
+export SKILL_ROSTER_BROKEN=1
+run_fresh tk-subj --skill review-arch --no-input --no-attach
+eq "$RC" 0 "(SKILL-UNREAD) an unreadable roster does not block the engage"
+has "$OUT" "seeded unverified" "(SKILL-UNREAD) …it says the name went unverified"
+has "$CALLED" "through the review-arch" "(SKILL-UNREAD) …and the brief carries the name as typed"
+unset SKILL_ROSTER_BROKEN
+
+echo "# --new-subject with --skill: the subject title is the opener after the brief"
+run_fresh "weigh the renderer split" --new-subject --rig gc-toolkit --skill review-arch --no-input --no-attach
+eq "$RC" 0 "(SKILL-NEWSUBJ) --new-subject with --skill exits 0"
+# The lens brief is several lines, so the create is matched by its title alone.
+has "$CALLED" "--title review-arch lens: weigh the renderer split" "(SKILL-NEWSUBJ) the conversation is titled by the skill, then the subject"
+has "$CALLED" "look at tk-newsubj through the gc-toolkit.review-arch" "(SKILL-NEWSUBJ) …and briefed with the lens on the new subject"
+
+echo "# on a TTY a new conversation is asked for a skill after the model; a name seeds it"
+# [d] a new conversation seeded discuss-broadly · Enter model (Opus) · skill review-arch
+run_fresh_tty 'd\n\nreview-arch\n' tk-subj --no-attach
+eq "$RC" 0 "(IA-SKILL) a skill typed at the prompt exits 0"
+case "$OUT" in
+  *"Model —"*"Skill — Enter = none"*) ok "(IA-SKILL) the skill prompt follows the model prompt" ;;
+  *) bad "(IA-SKILL) the skill prompt should follow the model prompt" ;;
+esac
+has "$CALLED" "through the gc-toolkit.review-arch" "(IA-SKILL) …the typed bare name seeds the resolved skill"
+has "$CALLED" "talk through tk-subj broadly" "(IA-SKILL) …with the picked seed following as the opener"
+has "$CALLED" "--title review-arch lens: discuss broadly" "(IA-SKILL) …and both in the title"
+
+echo "# ? lists the sitting's skills, a number picks one, and an unknown name is asked again"
+# [d] seed · Enter model · "nope" (unknown, re-asked) · ? (list) · [2]
+run_fresh_tty 'd\n\nnope\n?\n2\n' tk-subj --no-attach
+eq "$RC" 0 "(IA-SKILL-LIST) list-then-pick exits 0"
+has "$OUT" 'no skill "nope" on this sitting' "(IA-SKILL-LIST) an unknown name is asked again, not refused"
+has "$OUT" "[2] gc-toolkit.review-arch" "(IA-SKILL-LIST) ? lists the roster, numbered"
+has "$OUT" "[3] gc-toolkit.review-pm" "(IA-SKILL-LIST) …deduped, each skill once"
+hasnt "$OUT" "[4]" "(IA-SKILL-LIST) …with no repeated entries"
+has "$CALLED" "through the gc-toolkit.review-arch" "(IA-SKILL-LIST) …and the number picks from that list"
+
+echo "# --skill on a TTY skips the conversation/starter prompt: it already chose a new conversation"
+run_fresh_tty '\n' tk-subj --skill review-arch --no-attach
+eq "$RC" 0 "(IA-SKILL-FLAG) --skill on a TTY exits 0 with only the model asked"
+hasnt "$OUT" "starts a new one" "(IA-SKILL-FLAG) …no conversation/starter prompt"
+hasnt "$OUT" "Skill — Enter" "(IA-SKILL-FLAG) …and no skill prompt, the flag answered it"
+has "$CALLED" "--title review-arch lens" "(IA-SKILL-FLAG) …filing the new conversation with the lens"
 
 echo
 echo "gc-helm engage: $PASS passed, $FAIL failed"

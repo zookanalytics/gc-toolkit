@@ -2365,8 +2365,8 @@ current_sitting() {
     # failure here is a listing this verb cannot read, not an empty sitting.
     _held=$(printf '%s' "$_vjson" | jq -r --arg ids "$_me" "$CONVERSATION_JQ"'
         ($ids | split("\n") | map(select(. != ""))) as $me
-        | [ .[] | objects | select(conversation)
-            | select(($me | index((.assignee // "") | tostring)) != null)
+        | [ .[] | objects | select(conversation) | . as $c
+            | select(($me | index(($c.assignee // "") | tostring)) != null)
             | "\(.id) \(conversation_subjects[0])" ]
         | unique | .[]' 2>/dev/null) || {
         echo "$PROG: could not read this session's conversations — 'gc bd list' answered nothing this verb could parse. Name the subject: $PROG dismiss <bead-id>." >&2
@@ -2585,8 +2585,13 @@ accept_take_lock() {
 # Accept. The subshell it runs from keeps fd 9 and waits on it, so the lock
 # stays held while gc runs, even when something kills this run's own process
 # alone. cmd_accept defines `gc` as this once it holds the lock, so the helpers
-# it calls run the same way.
-accept_gc() { ( command gc "$@" 9>&-; exit "$?" ); }
+# it calls run the same way. The gc it runs is the program's path, $ACCEPT_GC,
+# never `command gc`: a shell applies a redirection on a builtin such as
+# `command` in the subshell itself, and bash keeps fd 9's copy on another
+# descriptor that the program inherits, so the lock would outlive the run in
+# whatever gc leaves running.
+ACCEPT_GC=""
+accept_gc() { ( "$ACCEPT_GC" "$@" 9>&-; exit "$?" ); }
 
 # accept_token — a token unique to this run, which titles the root its sling
 # pours and closes the recommendation's gate, so a later run tells this
@@ -2761,6 +2766,12 @@ cmd_accept() {
     [ -n "$path" ] && [ -d "$path/.beads" ] && export BEADS_DIR="$path/.beads"
     need_human_gate_jq
 
+    ACCEPT_GC=$(command -v gc 2>/dev/null || true)
+    case "$ACCEPT_GC" in
+        */*) ;;
+        *) echo "$PROG: accept: cannot name the gc program's path ('command -v gc' answered '${ACCEPT_GC}'), and a gc run under the acceptance lock must be a program for the lock's descriptor to close in it. Nothing dispatched." >&2
+           exit 3 ;;
+    esac
     lock_rc=0; accept_take_lock "$bead" || lock_rc=$?
     case "$lock_rc" in
         0) ;;
