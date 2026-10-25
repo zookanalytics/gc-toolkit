@@ -62,6 +62,8 @@
 # works is not reported stranded.
 # doctor/check-root-advancing takes the run of each stalled root to read
 # whether its work has landed.
+# tools/gc-proactive.sh drops the beads the map's live runs work from a scan,
+# and refuses a first reaction to a bead a live run works.
 #
 # run-lib.test.sh runs every verb over run-lib.fixture.json, the cases a copy
 # of the rule in another language must agree with, as the Go copy in

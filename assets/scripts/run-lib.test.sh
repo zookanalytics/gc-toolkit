@@ -195,9 +195,10 @@ STUB_OUT="$(
     run_lib runs no_such_reader work-a >/dev/null 2>&1; printf 'no-reader\t%s\n' "$?"
     RUN_LIB_STUB_RUNS="$TMP/absent.json"
     printf 'no-file\t%s\n' "$(run_lib map fx_bd)"
-    printf '#!/bin/sh\ncat %s\n' "$TMP/every-run.json" > "$TMP/runs-cmd"; chmod +x "$TMP/runs-cmd"
+    printf '#!/bin/sh\nprintf "%%s %%s %%s\\n" "$1" "$2" "$3" > %s\ncat %s\n' "$TMP/cmd-args" "$TMP/every-run.json" > "$TMP/runs-cmd"; chmod +x "$TMP/runs-cmd"
     RUN_LIB_STUB_CMD="$TMP/runs-cmd"
     printf 'cmd\t%s\n' "$(run_lib runs fx_bd work-a | jq -r 'map(.root) | join(",")')"
+    printf 'cmd-args\t%s\n' "$(cat "$TMP/cmd-args")"
     printf '#!/bin/sh\nexit 1\n' > "$TMP/runs-cmd"
     run_lib map fx_bd >/dev/null 2>&1; printf 'cmd-fails\t%s\n' "$?"
     RUN_LIB_STUB_CMD=""
@@ -211,6 +212,7 @@ while IFS=$'\t' read -r name verdict; do
         no-reader) eq "$verdict" "2" "(STUB) a reader the caller never defined is a usage error" ;;
         no-file) eq "$verdict" "[]" "(STUB) a runs file that does not exist is a store with no runs" ;;
         cmd) eq "$verdict" "root-a0,root-a1" "(STUB) RUN_LIB_STUB_CMD's output is the runs each call answers from" ;;
+        cmd-args) eq "$verdict" "runs fx_bd work-a" "(STUB) RUN_LIB_STUB_CMD is given the call's verb, reader and argument" ;;
         cmd-fails) eq "$verdict" "1" "(STUB) a RUN_LIB_STUB_CMD that fails fails the call" ;;
         logged) eq "$verdict" "runs fx_bd work-a" "(STUB) each call is logged with the reader it was given" ;;
         *) eq "$verdict" "same" "(STUB) the stub answers as the lib does: $name" ;;
@@ -233,7 +235,8 @@ assets/scripts/queue-priority.sh
 assets/scripts/priority-lib.sh
 assets/scripts/liveness-sweep.sh
 doctor/check-blocked-work-armed/run.sh
-doctor/check-root-advancing/run.sh"
+doctor/check-root-advancing/run.sh
+tools/gc-proactive.sh"
 while IFS= read -r r; do
     [ -n "$r" ] || continue
     f="$ROOT/$r"
