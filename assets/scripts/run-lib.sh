@@ -43,6 +43,11 @@
 # already read: run_is_root, run_convoy, run_tracked, run_of($convoys) and
 # run_rows. It follows the in-variable jq convention (dispatch-path.sh).
 #
+# Readers: step-close.sh takes the live run poured over a step's --convoy as the
+# molecule it closes in. The work-context hook takes the bead a claimed step's
+# run works, and self-review-check.sh and gascity-keeper's rebase-check.sh take
+# the bead their check loop's run works, which is the bead they certify.
+#
 # run-lib.test.sh runs every verb over run-lib.fixture.json, the cases a copy
 # of the rule in another language must agree with, as the Go copy in
 # services/helm/internal/source/facts.go does in its fixture test. The suite
@@ -121,13 +126,15 @@ run_lib() {
     esac
 }
 
-# run_lib_read <reader> <bd args...> — one read, scrubbed, printed only when it
-# is a JSON array of objects.
+# run_lib_read <reader> <bd args...> — one read, printed only when it is a JSON
+# array of objects. The `gc bd:` notice a store can print on stdout is dropped
+# while the newline that ends its line still stands, then the read is
+# scrubbed, as bd-lib.sh's bd_json does.
 run_lib_read() {
     local reader="$1" raw
     shift
     raw="$("$reader" "$@" </dev/null 2>/dev/null)" || return 1
-    raw="$(printf '%s' "$raw" | scrub)"
+    raw="$(printf '%s\n' "$raw" | grep -a -vE '^gc bd:' | scrub)"
     printf '%s' "$raw" | jq -e 'type == "array" and all(.[]; type == "object")' >/dev/null 2>&1 || return 1
     printf '%s' "$raw"
 }

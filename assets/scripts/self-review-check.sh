@@ -244,63 +244,31 @@ if [ -z "$ROOT" ]; then
 fi
 [ -n "$ROOT" ] || fail "could not resolve the molecule root bead"
 
-# --- 2. Root -> the single tracked member (the work bead) --------------------
-# Resolved with `bd` only. Two independent sources, cross-checked when both read:
-#   the convoy's direct dependants — the tracked membership itself, which
-#     carries the "exactly one member" invariant mol-polecat-work is built on;
-#   gc.var.issue on the root — stamped by the self-review iteration as the
-#     resilient fallback for when the membership read is degraded.
+# --- 2. Root -> the work bead -------------------------------------------------
+# The bead the root's run works, as run-lib.sh reads it: the one bead its input
+# convoy tracks, which is the "exactly one member" invariant mol-polecat-work is
+# built on. A root whose gc.var.issue names another bead names none, so a
+# molecule wired wrong is refused rather than certified against either bead.
+# The reads go through `bd` only. The root's own row is read first, since the
+# step's commands are read from it below. A run that cannot be read leaves
+# gc.var.issue on that row, which the self-review iteration stamps as the
+# fallback for a degraded store, so the handback below still has a bead to hand
+# back; the check says the run went unverified.
 # raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
 ROOT_JSON=$(bd show "$ROOT" --json 2>/dev/null)
 [ -n "$ROOT_JSON" ] || fail "could not read root bead $ROOT"
-
-CONVOY=$(printf '%s' "$ROOT_JSON" |
-	jq -r '.[0].metadata."gc.input_convoy_id" // .[0].metadata."gc.var.convoy_id" // empty')
-[ -n "$CONVOY" ] || fail "root $ROOT carries no input convoy id"
-
-ROOT_ISSUE=$(printf '%s' "$ROOT_JSON" | jq -r '.[0].metadata."gc.var.issue" // empty')
-
-# The convoy's tracked members are its direct children (depth 1 under the convoy
-# itself). Empty output means the query failed outright, distinct from a convoy
-# that genuinely has no members.
+# shellcheck source=run-lib.sh
+. "${GC_RUN_LIB:-$(cd "$(dirname "$0")" && pwd)/run-lib.sh}" || fail "cannot source run-lib.sh beside this script"
 # raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
-MEMBER_JSON=$(bd dep tree "$CONVOY" --json 2>/dev/null)
-MEMBER=""
-MEMBER_COUNT=""
-if [ -n "$MEMBER_JSON" ]; then
-	MEMBER_COUNT=$(printf '%s' "$MEMBER_JSON" | jq --arg convoy "$CONVOY" '
-		[ .[] | select((.depth // 0) == 1 and (.parent_id // "") == $convoy) ]
-		| length' 2>/dev/null)
-	MEMBER=$(printf '%s' "$MEMBER_JSON" | jq -r --arg convoy "$CONVOY" '
-		first(.[] | select((.depth // 0) == 1 and (.parent_id // "") == $convoy) | .id)
-		// empty' 2>/dev/null)
+review_bd() { bd "$@"; }
+if RUN_JSON=$(run_lib subject review_bd "$ROOT"); then
+	ISSUE=$(printf '%s' "$RUN_JSON" | jq -r 'if length == 1 then .[0].bead else empty end' 2>/dev/null)
+	[ -n "$ISSUE" ] || fail "the run of root $ROOT works no single bead: $(printf '%s' "$RUN_JSON" | jq -c . 2>/dev/null) (its input convoy must track exactly one bead, the one gc.var.issue names when the root records it)"
+else
+	ISSUE=$(printf '%s' "$ROOT_JSON" | jq -r '.[0].metadata."gc.var.issue" // empty' 2>/dev/null)
+	[ -n "$ISSUE" ] || fail "could not read the run of root $ROOT, and the root carries no gc.var.issue"
+	note "WARN: could not read the run of root $ROOT; proceeding on root gc.var.issue=$ISSUE (membership unverified)"
 fi
-
-case "$MEMBER_COUNT" in
-'' | *[!0-9]*)
-	# Membership unreadable. gc.var.issue is the only source left; say so — the
-	# "exactly one member" invariant went unverified this iteration.
-	[ -n "$ROOT_ISSUE" ] ||
-		fail "could not read convoy $CONVOY membership, and root $ROOT carries no gc.var.issue"
-	ISSUE="$ROOT_ISSUE"
-	note "WARN: could not read convoy $CONVOY membership; proceeding on root gc.var.issue=$ISSUE (membership unverified)"
-	;;
-1)
-	ISSUE="$MEMBER"
-	# Both sources readable and disagreeing means the molecule is wired wrong.
-	# Certifying against the wrong bead is the false pass this exists to prevent.
-	if [ -n "$ROOT_ISSUE" ] && [ "$ROOT_ISSUE" != "$ISSUE" ]; then
-		fail "root $ROOT gc.var.issue=$ROOT_ISSUE disagrees with convoy $CONVOY member $ISSUE"
-	fi
-	;;
-0)
-	fail "convoy $CONVOY does not have exactly one tracked member (found 0)"
-	;;
-*)
-	fail "convoy $CONVOY does not have exactly one tracked member (found $MEMBER_COUNT)"
-	;;
-esac
-[ -n "$ISSUE" ] || fail "could not resolve the work bead from root $ROOT / convoy $CONVOY"
 
 # --- 3. The worktree, as recorded by workspace-setup -------------------------
 # raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"

@@ -136,6 +136,8 @@ fails "subject: the roots poured over a convoy" "gc.input_convoy_id=cv-a1" subje
 fails "map: the roots that name a convoy" "--has-metadata-key gc.input_convoy_id" map fx_bd
 fails "map: the roots that record an issue" "--has-metadata-key gc.var.issue" map fx_bd all
 fails "map: the convoys the roots name" "--id " map fx_bd
+noticed_bd() { printf 'gc bd: answering from the rig "x" store\n'; fx_bd "$@"; }
+eq "$(run_lib subject noticed_bd root-a1 | jq -r '.[0].bead')" "work-a" "(FAIL) a store notice printed on stdout is dropped, not read as a failure"
 printf '[{"id": "x"}, 1]' > "$TMP/mixed.json"
 mixed_bd() { cat "$TMP/mixed.json"; }
 got="$(run_lib subject mixed_bd x)"; rc=$?
@@ -171,6 +173,7 @@ echo "# the stub its readers' suites source"
 # lib does, so a reader's suite that feeds it runs feeds what the lib reads.
 verb map fx_bd all > "$TMP/every-run.json"
 STUB_OUT="$(
+    GC_RUN_LIB="$HERE/run-lib.stub.sh"
     RUN_LIB_STUB_RUNS="$TMP/every-run.json"
     RUN_LIB_STUB_LOG="$TMP/stub.log"
     # shellcheck source=run-lib.stub.sh
@@ -204,17 +207,26 @@ while IFS=$'\t' read -r name verdict; do
 done <<< "$STUB_OUT"
 
 echo "# every reader sources the one definition"
-# Comment lines are left out, so a reader that names the definition in prose
-# but no longer calls it still fails.
-READERS=""
+# A reader names the file in the line that sources it, or, when it sources it
+# through a variable, in the `# shellcheck source=` directive above that line,
+# which run-tests.sh reads the same way. Other comment lines are left out, so a
+# reader that names the definition in prose but no longer calls it still fails.
+READERS="assets/scripts/step-close.sh
+overlays/work-context/.claude/hooks/work-context.sh
+assets/scripts/self-review-check.sh
+packs/gascity-keeper/assets/scripts/rebase-check.sh"
 while IFS= read -r r; do
     [ -n "$r" ] || continue
     f="$ROOT/$r"
     if [ ! -f "$f" ]; then bad "(READERS) $r exists"; continue; fi
     code="$(grep -vE '^[[:space:]]*#' "$f")"
-    grep -qE '(^|[[:space:];&|])(\.|source)[[:space:]].*run-lib\.sh' <<< "$code" \
-        && ok "(READERS) $r sources run-lib.sh" \
-        || bad "(READERS) $r sources run-lib.sh"
+    if grep -qE '(^|[[:space:];&|])(\.|source)[[:space:]].*run-lib\.sh' <<< "$code" \
+       || { grep -qE '^[[:space:]]*# shellcheck source=([^[:space:]]*/)?run-lib\.sh' "$f" \
+            && grep -qE '(^|[[:space:];&|])\.[[:space:]]+"\$' <<< "$code"; }; then
+        ok "(READERS) $r sources run-lib.sh"
+    else
+        bad "(READERS) $r sources run-lib.sh"
+    fi
     grep -qE 'run_lib (runs|subject|map)|RUN_JQ' <<< "$code" \
         && ok "(READERS) $r calls a verb or applies \$RUN_JQ" \
         || bad "(READERS) $r calls a verb or applies \$RUN_JQ"

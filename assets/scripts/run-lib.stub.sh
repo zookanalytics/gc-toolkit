@@ -5,9 +5,9 @@
 # does with the runs it is given and none of them stubs the reads behind the
 # runs. Sourced, never executed.
 #
-# RUN_LIB_STUB_RUNS names a JSON array of runs in run-lib.sh's shape, every run
-# the suite's store holds, closed ones included. Each verb answers from it the
-# way run-lib.sh answers from a store:
+# GC_RUN_LIB names this file, and RUN_LIB_STUB_RUNS names a JSON array of runs
+# in run-lib.sh's shape, every run the suite's store holds, closed ones
+# included. Each verb answers from it the way run-lib.sh answers from a store:
 #   runs <reader> <bead>   the runs whose bead is <bead>
 #   subject <reader> <id>  the runs whose root or input convoy is <id>
 #   map <reader> [all]     the live runs, or every run with `all`
@@ -24,8 +24,14 @@
 # fixture's store, this file answers each case of run-lib.fixture.json the way
 # run-lib.sh does.
 
+# run-lib.sh is read beside this file, which GC_RUN_LIB names. The hook a
+# suite runs under sh sources it too, so it is found without BASH_SOURCE.
+case "${GC_RUN_LIB:-}" in
+    */*) _run_lib_stub_dir="${GC_RUN_LIB%/*}" ;;
+    *) _run_lib_stub_dir=. ;;
+esac
 # shellcheck source=run-lib.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/run-lib.sh" || return 1
+. "$_run_lib_stub_dir/run-lib.sh" || return 1
 
 run_lib() {
     local verb="${1:-}" reader="${2:-}" arg="${3:-}" runs='[]' f
