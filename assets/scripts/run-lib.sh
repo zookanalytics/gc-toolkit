@@ -50,6 +50,8 @@
 # work-tree-holder.sh takes the bead each claimed step's run works when it asks
 # whether a live session is working a tree. gate-ensure.sh takes the runs
 # poured over a review, live or not, to judge whether a pour still drives it.
+# gc-helm.sh ends the live runs beneath an anchor it releases, and its park
+# survey applies run_rows to the listing it reads to find a bead's workflows.
 #
 # run-lib.test.sh runs every verb over run-lib.fixture.json, the cases a copy
 # of the rule in another language must agree with, as the Go copy in

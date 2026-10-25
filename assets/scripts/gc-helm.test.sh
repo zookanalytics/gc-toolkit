@@ -225,14 +225,6 @@ case "$1 ${2:-}" in
       *HELD*) case "$*" in *--force*) ;; *) exit 1 ;; esac ;;
       *STUCK*) exit 1 ;;
     esac ;;
-  "convoy status")
-    # Record each convoy resolved, so a test can prove the release confirms only
-    # the ONE molecule the reverse-tracks lookup matched — not one status call
-    # per open root in the store.
-    printf '%s\n' "$3" >> "${FAKE_CONVOY_CALLS:-/dev/null}"
-    anchor=$(awk -F'|' -v c="$3" '$1==c{print $2; exit}' "$FAKE_CONVOYS")
-    if [ -n "$anchor" ]; then jq -n --arg a "$anchor" '{children:[{id:$a}]}'
-    else printf '{"children":[]}\n'; fi ;;
   "bd update")
     printf '%s\n' "$*" >> "$FAKE_UPDATES"
     # FAKE_EVENTS logs updates and closes to one file, in the order they ran.
@@ -330,15 +322,6 @@ case "$1 ${2:-}" in
     # the way the real `dep list` reports a bead it cannot resolve — a JSON
     # error OBJECT on stdout, beside the non-zero exit a pipeline never sees.
     if [ "${3:-}" = "list" ]; then
-      # reverse `tracks` (dep list <bead> --direction=up -t tracks): the convoys
-      # that TRACK this bead — how the release resolves the run beneath it
-      # from its anchor. Derived from FAKE_CONVOYS (convoy|anchor).
-      case "$*" in
-        *--direction=up*)
-          awk -F'|' -v a="${4:-}" '$2==a{print $1}' "$FAKE_CONVOYS" \
-            | jq -Rnc '[inputs | select(length > 0) | {id: .}]'
-          exit 0 ;;
-      esac
       case "${4:-}" in
         A-PROBEDEAD*) exit 1 ;;
         A-PROBEJUNK*) printf '{"error":"resolving %s: no issue found","schema_version":1}\n' "${4:-}"; exit 1 ;;
@@ -367,6 +350,23 @@ export GC_RUN_CANCEL_TOOL="$TMP/bin/run-cancel-stub" FAKE_CANCELS="$TMP/cancels"
 : > "$TMP/cancels"
 
 export PATH="$TMP/bin:$PATH"
+# run-lib.sh's verbs answer from the fixture store that is current: the live
+# store while its section's gc stub is first on PATH, the main one otherwise.
+# Its rows, with a convoy row for each "convoy|anchor" line tracking that
+# anchor, are judged by run-lib.sh's own run_rows, at each call.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf '. %q || exit 1\n' "$HERE/run-lib.sh"; cat; } > "$TMP/bin/helm-runs" <<'RUNS'
+store="$FAKE_STEPS_JSON"; convoys="$FAKE_CONVOYS"
+if [ -n "${LIVE_STORE:-}" ] && [ "$(command -v gc)" = "${LIVE_STORE%/*}/bin/gc" ]; then
+  store="$LIVE_STORE"; convoys="$LIVE_CONVOYS"
+fi
+jq -c --rawfile c "$convoys" "$RUN_JQ"'
+  . + [ $c | split("\n")[] | select(length > 0) | split("|")
+        | {id: .[0], issue_type: "convoy", status: "open", dependencies: [{depends_on_id: .[1], type: "tracks"}]} ]
+  | run_rows' "$store"
+RUNS
+chmod +x "$TMP/bin/helm-runs"
+export GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_CMD="$TMP/bin/helm-runs" RUN_LIB_STUB_LOG="$TMP/run-lib.log"
+: > "$TMP/run-lib.log"
 export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
@@ -375,7 +375,7 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_EXEC="$TMP/exec" FAKE_PLACEMENT="$TMP/placement" FAKE_PARENT="$TMP/parent" \
        FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
-       FAKE_OUTCOME_DIR="$TMP/outcomes" FAKE_CONVOY_CALLS="$TMP/convoy-calls" \
+       FAKE_OUTCOME_DIR="$TMP/outcomes" \
        FAKE_EVENTS="$TMP/events"
 mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists" "$TMP/outcomes"
 : > "$TMP/convoy-calls"
@@ -439,7 +439,7 @@ unset GC_HELM_FIXTURE || true
 unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS GC_RIG BEADS_DIR || true
 
 # --- Run: park A-PARKED with --release. ---------------------------------------
-: > "$FAKE_CONVOY_CALLS"; : > "$FAKE_CANCELS"
+: > "$TMP/run-lib.log"; : > "$FAKE_CANCELS"
 OUT="$(sh "$SCRIPT" takeaway A-PARKED "parked" --by proactive --release --no-wait 2>"$TMP/err" || true)"
 ERR="$(cat "$TMP/err")"
 UP="$TMP/updates"
@@ -508,14 +508,13 @@ grep -q 'ended run root-PARKED of A-PARKED' <<< "$OUT" \
   && ok "(REPORT) the run reports the run it ended" || bad "(REPORT) the ended run is unreported (out: $OUT)"
 
 # (BOUND) the resolution is keyed on the parked anchor, not the store: one
-# reverse-tracks lookup, then a convoy-status confirm for the ONE matched root,
-# NOT a status call per open root. Enumerating every root would confirm
-# convoy-PARKED, convoy-OTHER and convoy-FOLD; asserting only the matched
-# molecule's convoy is touched is what keeps the fan-out from coming back.
-eq "$(grep -c . "$FAKE_CONVOY_CALLS")" "1" \
-  "(BOUND) --release confirms only the matched molecule's convoy, not one per open root"
-eq "$(cat "$FAKE_CONVOY_CALLS")" "convoy-PARKED" \
-  "(BOUND) …and the one it confirms is the parked anchor's own convoy"
+# run-lib.sh runs read for the anchor, NOT a map of every run or a read per
+# open root, which would touch convoy-PARKED, convoy-OTHER and convoy-FOLD.
+eq "$(grep -c '^runs ' "$TMP/run-lib.log")" "1" \
+  "(BOUND) --release reads the runs of the anchor once"
+eq "$(cut -d' ' -f1,3 "$TMP/run-lib.log" | grep '^runs ')" "runs A-PARKED" \
+  "(BOUND) …keyed on the parked anchor itself"
+eq "$(grep -c '^map ' "$TMP/run-lib.log")" "0" "(BOUND) …and never maps every run in the store"
 
 # (CANCELFAIL) a run that does not end is not a release that landed: nothing
 # retries a cancel, so the verb exits 4 after every other write, names the run
@@ -533,6 +532,20 @@ grep -qE '^bd update A-PARKED .*--status=open' "$UP" \
   && ok "(CANCELFAIL) …and the release already written is kept" || bad "(CANCELFAIL) the release write was lost: $(cat "$UP")"
 grep -q 'takeaway set on' "$TMP/cfout" \
   && bad "(CANCELFAIL) the verb reported success" || ok "(CANCELFAIL) …and success is not reported"
+
+# (RUNSUNREAD) runs that cannot be read are not runs that ended: the verb exits
+# 4 after every other write, says what it could not read and how to end a run
+# by hand, and cancels nothing on a guess.
+: > "$UP"; : > "$FAKE_CANCELS"
+RURC=0
+RUN_LIB_STUB_FAIL="runs:A-PARKED" sh "$SCRIPT" takeaway A-PARKED "parked" --by proactive --release --no-wait \
+  >"$TMP/ruout" 2>"$TMP/ruerr" || RURC=$?
+eq "$RURC" "4" "(RUNSUNREAD) an unreadable read of the runs beneath the anchor is a verb failure"
+grep -q 'could not read the runs beneath A-PARKED' "$TMP/ruerr" \
+  && ok "(RUNSUNREAD) …which says what it could not read" || bad "(RUNSUNREAD) the failed read is unnamed (stderr: $(cat "$TMP/ruerr"))"
+eq "$(grep -c . "$FAKE_CANCELS")" "0" "(RUNSUNREAD) …and nothing is cancelled on a guess"
+grep -qE '^bd update A-PARKED .*--status=open' "$UP" \
+  && ok "(RUNSUNREAD) …and the release already written is kept" || bad "(RUNSUNREAD) the release write was lost: $(cat "$UP")"
 
 # (static) the release block writes no member: no update, close, or status write
 # beyond the bd list read filter.
@@ -2348,9 +2361,6 @@ case "$1 ${2:-}" in
   "bd show")
     row=$(jq -c --arg i "$3" '[ .[] | select(.id == $i) ]' "$LIVE_STORE")
     [ "$row" != "[]" ] && printf '%s\n' "$row" || printf '[{"id":"%s","status":"open","metadata":{}}]\n' "$3" ;;
-  "convoy status")
-    a=$(awk -F'|' -v c="$3" '$1==c{print $2; exit}' "$LIVE_CONVOYS")
-    [ -n "$a" ] && jq -n --arg a "$a" '{children:[{id:$a}]}' || printf '{"children":[]}\n' ;;
   "bd update")
     printf 'update %s\n' "$*" >> "$LIVE_LOG"
     id="$3"; shift 3
@@ -2382,16 +2392,7 @@ case "$1 ${2:-}" in
     done ;;
   "bd dep")
     printf 'dep %s\n' "$*" >> "$LIVE_LOG"
-    # reverse `tracks`: the convoys tracking this bead, from LIVE_CONVOYS — the
-    # release resolves the run beneath it from its anchor this way.
-    if [ "${3:-}" = "list" ]; then
-      case "$*" in
-        *--direction=up*)
-          awk -F'|' -v a="${4:-}" '$2==a{print $1}' "$LIVE_CONVOYS" \
-            | jq -Rnc '[inputs | select(length > 0) | {id: .}]' ;;
-        *) printf '[]\n' ;;
-      esac
-    fi ;;
+    [ "${3:-}" = "list" ] && printf '[]\n' ;;
 esac
 exit 0
 GCL

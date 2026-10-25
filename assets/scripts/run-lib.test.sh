@@ -225,7 +225,8 @@ overlays/work-context/.claude/hooks/work-context.sh
 assets/scripts/self-review-check.sh
 packs/gascity-keeper/assets/scripts/rebase-check.sh
 assets/scripts/work-tree-holder.sh
-assets/scripts/gate-ensure.sh"
+assets/scripts/gate-ensure.sh
+assets/scripts/gc-helm.sh"
 while IFS= read -r r; do
     [ -n "$r" ] || continue
     f="$ROOT/$r"

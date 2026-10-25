@@ -341,6 +341,12 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 # shellcheck source=placement.sh
 . "${GC_PLACEMENT_LIB:-$SCRIPT_DIR/placement.sh}" \
     || { echo "$PROG: cannot source placement.sh from $SCRIPT_DIR" >&2; exit 3; }
+# The one reader of a run's link to the bead it works: the release finds the
+# runs beneath an anchor, and the park survey the workflows poured for a bead.
+# Exposes run_lib and $RUN_JQ.
+# shellcheck source=run-lib.sh
+. "${GC_RUN_LIB:-$SCRIPT_DIR/run-lib.sh}" \
+    || { echo "$PROG: cannot source run-lib.sh from $SCRIPT_DIR" >&2; exit 3; }
 PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
 # The priority move's writer, which owns the priority function and the store's
 # priority lock.
@@ -705,22 +711,23 @@ _resolve_superseded_reference() {
 # closes the root and every step that is not closed. This script writes no step
 # and no root. That is why the walk is reachable on a closed anchor too.
 #
-# The anchor's input convoy TRACKS it, so a reverse `tracks` lookup on the
-# anchor names the convoy(s) whose molecule resolves HERE; a root belongs to
-# this molecule when its gc.input_convoy_id is one of them and that convoy's
-# single tracked member is the anchor. Keying on the anchor keeps the
-# resolution bounded — the work does not grow with the number of molecules open
-# in the store.
+# The runs beneath the anchor are the live runs run-lib.sh names for it: a
+# run whose input convoy's one tracked bead IS the anchor. Keying on the anchor
+# keeps the resolution bounded — the work does not grow with the number of
+# molecules open in the store.
 #
 # A molecule the RELEASING session holds a step of is its own run, such as a
 # sitting disposing the anchor it runs on, and it closes its own chain the
-# normal way, so it is left alone.
+# normal way, so it is left alone. A read that fails, of the runs or of the
+# steps that say whose a run is, ends nothing and is reported as a miss, since
+# a run it could not read may still run.
 #
 # Guards: fail closed on an unresolved or foreign anchor; an absent root is the
 # witness patrol's, not ours.
 #
 # Subshell. $1 = released anchor id, $2 = rig .beads path or "". Returns
-# non-zero when a run it set out to end did not end, each named on stderr.
+# non-zero when a run it set out to end did not end, or when it could not read
+# which runs to end, each named on stderr.
 # >>> cancel-release-molecules
 cancel_release_molecules() (
     set +e
@@ -728,54 +735,36 @@ cancel_release_molecules() (
 
     _me=$(session_identities)
 
-    # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
-    _live=$(gc bd list --status=open,in_progress,blocked ${_db:+--db "$_db"} --json --limit=0 2>/dev/null || true)
-    [ -n "$_live" ] && [ "$_live" != "[]" ] || exit 0
-
-    # One row per molecule member: a root carries gc.kind=workflow and names
-    # its convoy, a step names its root.
-    _rows=$(printf '%s' "$_live" | jq -c '
-        .[]
-        | . as $b
-        | (($b.metadata["gc.kind"] // "") == "workflow") as $isroot
-        | select($isroot
-                 or ((($b.metadata["gc.step_ref"]     // "") != "")
-                     and (($b.metadata["gc.root_bead_id"] // "") != "")))
-        | { id:       $b.id,
-            kind:     (if $isroot then "root" else "step" end),
-            root:     (if $isroot then $b.id
-                                  else ($b.metadata["gc.root_bead_id"] // "") end),
-            convoy:   (if $isroot then ($b.metadata["gc.input_convoy_id"] // "") else "" end),
-            assignee: ($b.assignee // "") }' 2>/dev/null || true)
-    [ -n "$_rows" ] || exit 0
-
-    # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
-    _convoys=$(gc bd dep list "$_anchor" --direction=up -t tracks ${_db:+--db "$_db"} --json 2>/dev/null \
-        | jq -r 'if type == "array" then (.[] | .id // empty) else empty end' 2>/dev/null | grep . || true)
-    [ -n "$_convoys" ] || exit 0
-
-    _match_roots=$(printf '%s\n' "$_rows" | jq -r -s --arg c "$_convoys" '
-        ($c | split("\n") | map(select(length > 0))) as $cs
-        | [ .[]
-            | select(.kind == "root")
-            | . as $r | ($r.convoy // "") as $cv
-            | select($cv != "" and ($cs | any(. == $cv)))
-            | $r.root ]
-        | unique | .[]' 2>/dev/null || true)
+    # shellcheck disable=SC2329,SC2086  # run_lib calls it; ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
+    release_bd() { gc bd ${_db:+--db "$_db"} "$@"; }
+    if ! _runs=$(run_lib runs release_bd "$_anchor"); then
+        echo "$PROG: takeaway: could not read the runs beneath $_anchor, so none was ended and any of them may still run" >&2
+        echo "$PROG:   end each by hand: $RUN_CANCEL_TOOL --root <root>${_db:+ --db $_db} --reason \"<why>\"" >&2
+        exit 1
+    fi
+    _match_roots=$(printf '%s' "$_runs" | jq -r '.[] | select(.live) | .root' 2>/dev/null)
     [ -n "$_match_roots" ] || exit 0
+
+    # One row per live member of a molecule: a root, or a step naming its root.
+    # shellcheck disable=SC2086  # ${_db:+--db "$_db"} expands to 0 or 2 space-free fields
+    if ! _live=$(gc bd list --status=open,in_progress,blocked ${_db:+--db "$_db"} --json --limit=0 2>/dev/null) \
+       || ! _rows=$(printf '%s' "$_live" | jq -c '
+            .[]
+            | . as $b
+            | (($b.metadata["gc.kind"] // "") == "workflow") as $isroot
+            | select($isroot
+                     or ((($b.metadata["gc.step_ref"]     // "") != "")
+                         and (($b.metadata["gc.root_bead_id"] // "") != "")))
+            | { root:     (if $isroot then $b.id
+                                      else ($b.metadata["gc.root_bead_id"] // "") end),
+                assignee: ($b.assignee // "") }' 2>/dev/null); then
+        echo "$PROG: takeaway: could not read whose runs are beneath $_anchor, so none was ended and any of them may still run" >&2
+        echo "$PROG:   end each by hand: $RUN_CANCEL_TOOL --root <root>${_db:+ --db $_db} --reason \"<why>\"" >&2
+        exit 1
+    fi
 
     while IFS= read -r _root; do
         [ -n "$_root" ] || continue
-        _convoy=$(printf '%s\n' "$_rows" | jq -r --arg r "$_root" \
-            'select(.kind == "root" and .root == $r) | .convoy' 2>/dev/null | head -n1)
-        [ -n "$_convoy" ] || continue
-
-        # FAIL CLOSED: the reverse lookup proved the convoy tracks the anchor;
-        # confirm it is a clean 1:1 input convoy whose single tracked member IS
-        # the released bead before acting.
-        _ranchor=$(gc convoy status "$_convoy" --json 2>/dev/null \
-            | jq -r 'if ((.children // []) | length) == 1 then (.children[0].id // empty) else empty end' 2>/dev/null || true)
-        [ -n "$_ranchor" ] && [ "$_ranchor" = "$_anchor" ] || continue
 
         _own=""
         if [ -n "$_me" ]; then
@@ -1711,8 +1700,8 @@ cmd_demand() {
 # workflow poured for it has passed load-context. The status alone does not
 # cover a workflow, because a pour promotes its own root to in_progress and
 # never claims the bead it was poured for. A workflow is found from its bead:
-# its input convoy tracks the bead, and its root names that convoy in
-# gc.input_convoy_id. The workflow has passed load-context once no step of the
+# it is a run among the listed rows whose bead is that bead, as run-lib.sh's
+# run_rows names it. The workflow has passed load-context once no step of the
 # root whose gc.step_ref ends in .load-context is still open, so a formula with
 # no such step counts as started.
 #   flight  in flight, with why; the park leaves it running.
@@ -1724,13 +1713,14 @@ cmd_demand() {
 # Rows come in either bd shape: a listing's edges are {depends_on_id, type},
 # and a `bd show` row's are {id, dependency_type}.
 # shellcheck disable=SC2016  # jq program, single-quoted on purpose
-PARK_SURVEY_JQ='
+PARK_SURVEY_JQ="$RUN_JQ"'
   def meta: if (.metadata | type) == "object" then .metadata else {} end;
   def edges: [ (.dependencies // [])[]? | select(type == "object")
                | {t: ((.type // .dependency_type // "") | tostring),
                   on: ((.depends_on_id // .id // "") | tostring)} ];
   def has_($x): any(.[]; . == $x);
-  [ .[] | select(type == "object")
+  run_rows as $runs
+  | [ .[] | select(type == "object")
     | {id: ((.id // "") | tostring), it: ((.issue_type // "") | tostring),
        st: ((.status // "") | tostring), a: ((.assignee // "") | tostring), m: meta, e: edges} ] as $all
   | def under($front; $acc):
@@ -1739,9 +1729,6 @@ PARK_SURVEY_JQ='
             | unique | map(select(. as $x | ($acc | has_($x) | not) and $x != $b))) as $next
            | under($next; $acc + $next) end;
     under([$b]; []) as $sub
-  | [ $all[] | select(.it == "convoy") | {c: .id, tracked: [ .e[] | select(.t == "tracks") | .on ]} ] as $convoys
-  | [ $all[] | select(((.m["gc.kind"] // "") | tostring) == "workflow")
-      | {r: .id, c: ((.m["gc.input_convoy_id"] // "") | tostring)} ] as $roots
   | [ $all[] | select(((.m["gc.step_ref"] // "") | tostring) | endswith(".load-context"))
       | ((.m["gc.root_bead_id"] // "") | tostring) ] as $at_lc
   | ($all | map({key: .id, value: .}) | from_entries) as $by
@@ -1752,9 +1739,7 @@ PARK_SURVEY_JQ='
         elif (($m.branch // "") | tostring) != "" then "branch " + ($m.branch | tostring)
         elif $r.st == "in_progress" or $r.st == "hooked" then $r.st + (if $r.a != "" then " under " + $r.a else "" end)
         else "" end;
-    def workflows($id):
-      [ $convoys[] | select(.tracked | has_($id)) | .c ] as $cs
-      | [ $roots[] | select(.c as $c | $cs | has_($c)) | .r ];
+    def workflows($id): [ $runs[] | select(.bead == $id) | .root ];
     [ ([$b] + $sub)[] as $id
       | ($by[$id] // {st: "", a: "", m: {}}) as $r
       | $r.m as $m
