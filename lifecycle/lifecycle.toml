@@ -138,7 +138,7 @@ writer = "formulas/mol-refinery-patrol.toml (no commits on branch; via lifecycle
 [[transition]]
 from = "unanchored"
 to = "held"
-writer = "assets/scripts/converse-hold.sh, a converse sitting's hold (via lifecycle.sh)"
+writer = "skills/converse-hold/SKILL.md, a converse sitting's hold, only beside a human gate that blocks the subject (via lifecycle.sh)"
 
 [[transition]]
 from = "pre_open_gate"
@@ -741,7 +741,7 @@ keys = [
 #   (every dependent of the anchor, whatever the edge's type)
 #   once the store is marked joined (bd-lib.sh bd_anchor_children). Written by
 #   gate-ensure.sh, finding.sh, review-outcome.sh, signoff.sh, rework-child.sh,
-#   pr-facts.sh, pre-open-rebase.sh and visit-close.sh, each on a child joined to
+#   pr-facts.sh and pre-open-rebase.sh, each on a child joined to
 #   the anchor no later than the stamp. A review, rework, finding or validation
 #   child carries it from the create that files it
 #   (tools/lint-learned.d/create-then-stamp.sh holds that). A human gate carries
@@ -1459,9 +1459,11 @@ keys = [
 # [holds] (settled_keys): gc-helm.sh, signoff.sh
 # and lifecycle.sh write the takeaway (gc.takeaway_by records which), and
 # gc.takeaway_settled is `1` when nothing waits and empty for a live wait.
-# gc.hold_demand — on a converse hold's VISIT, the demand bead the hold filed;
-#   converse-hold.sh trusts it as the SOLE proof of a real hold and reads it back
-#   before posting the framing. Not cleared here. A bead id.
+# gc.hold_demand — RETIRED. On a converse hold's VISIT, it named the demand the
+#   hold filed. A hold now files a human gate, and its conversation's replies-to
+#   edge names the gate, so nothing writes or reads the key. An open visit
+#   carries it until the cutover's migration closes the visit, which is why
+#   doctor/check-state-space lists it in RETIRED_KEYS.
 # gc.gate_visit — on a gate bead, the visit gate-visit-sweep.sh filed for it (a
 #   bead id, or `filed`); its presence is how the sweep skips a gate already
 #   escalated, and `--unset` re-offers the visit.
@@ -1469,10 +1471,9 @@ keys = [
 #   preassigns a claimed bead's open, unassigned siblings in the same group to
 #   the claiming session. The pack's formulas stamp `main` on their step beads,
 #   beside gc.session_affinity, so one session runs a molecule's inline steps
-#   in turn. On a visit it is the subject the visit is scoped to, converse's
-#   group-scoped re-claim fence: gc-helm.sh writes it there and repairs it
-#   toward the subject id when a read-back finds it empty (an empty group
-#   disables the fence). Never cleared.
+#   in turn. A visit filed before the cutover carries its subject here, and the
+#   cutover's migration reads the visit's tracks edge instead. A conversation
+#   carries no pack metadata. Never cleared.
 # gc.origin — `operator` marks a topic a human commissioned. gc-visit-open.sh
 #   stamps it on its subject when the key is absent, and gc-helm.sh `engage
 #   --new-subject` writes it in the create payload of the subject it files.
@@ -1483,18 +1484,15 @@ keys = [
 #   first-reaction-dispose.sh gates nothing on it. Absent is an ordinary bead.
 #   Not cleared.
 # gc.outcome_reason — on a closed VISIT, the one-line sentence naming why it
-#   closed, stamped beside the gc.outcome word a reader groups by. Three writers
-#   stamp the pair before they close a visit: visit-close.sh, the guarded close,
-#   and gc-helm.sh `dismiss`, with gc.outcome=dismissed. Each reads the pair back and
-#   refuses the close when it did not land. The helm board
+#   closed, stamped beside the gc.outcome word a reader groups by. Nothing writes
+#   it: a conversation's close reason carries that sentence. The helm board
 #   (services/helm/internal/source/facts.go) shows it as the sitting's headline
 #   when the sitting left no takeaway. Absent, the headline falls back to the
 #   subject's title. Never cleared. Freeform text.
 # escalation_key — on a visit, the situation key it was filed under. Nothing
 #   writes it: a human gate carries its situation key as its await id
-#   (human-gate.sh), and the pack's readers look a gate up by that. Converse's
-#   scripts still look a visit up by it until they move to conversations, and
-#   the cutover's migration reads it once. Never cleared.
+#   (human-gate.sh), and the pack's readers look a gate up by that. The cutover's
+#   migration reads it once. Never cleared.
 # escalation_raised_by — RETIRED. It named the patrol wisp that raised a visit
 #   redirected onto a standing triage bucket. human-gate.sh refuses a wisp
 #   rather than redirecting it, and nothing ever read this key. Registered so
@@ -1511,9 +1509,8 @@ keys = [
 # visit.recheck — the recheck command liveness-sweep.sh stamped on a batch visit.
 #   Nothing writes it any more: the sweep's gate carries the command in its
 #   message (`liveness-recheck.sh --ids <new> --carried <carried> --pass-at
-#   <time>`). converse-recheck-hook.sh still runs one it finds until the converse
-#   loop moves to conversations, and the cutover's migration reads it once. A
-#   shell snippet.
+#   <time>`), and no converse step runs one: the cutover's migration reads it
+#   once, to carry the re-check onto the gate it files. A shell snippet.
 # sweep.* — the census liveness-sweep.sh stamped on a batch visit: sweep.new_ids
 #   and sweep.carried_ids (comma-joined id lists, this pass and carried) and
 #   sweep.pass_at (the pass timestamp). Nothing writes them any more: the census
@@ -1526,30 +1523,22 @@ keys = [
 #   recurrence was filed (absent until the subject is first evaluated, empty
 #   for an empty scope), and triage.hold a held-by-design marker ([holds]
 #   marker_keys).
-# gc.pr_visit_summary / gc.pr_visit_actions — the closing text of a visit's PR
-#   reminder, stamped on the VISIT by converse-signoff.sh before the visit
-#   closes, so the post-close writer can mark the reminder closed without
-#   re-deriving the sitting. The summary is the sitting's takeaway. The actions
-#   name the work it routed, then the ruling it reached or what is still owed.
-#   pr-visit-comment.sh `close` reads each one when its caller passes no
-#   --summary or --actions, as converse-settle's close step and
-#   converse-claim.sh's stranded-finish recovery do. Absent or empty leaves that
-#   line out of the closed reminder. Never cleared. Freeform text, rendered as
-#   one line.
-# gc.ruling — on a VISIT, the operator's ruling in its sitting, the one line
-#   converse-signoff.sh --ruled yes resolves the sitting's demands with. Stamped
-#   and read back before the visit closes; a --ruled no sign-off clears one an
-#   earlier run left, and stops when either write does not read back. Past that
-#   read-back no pack reader takes it: finding.sh releases a needs-you finding on a human
-#   gate cleared with a reason headed `ruled:`, and the cutover's migration reads
-#   it once, to record a ruling given before the cutover as finding.ruling_bead.
-#   Absent means nobody ruled in that sitting. Freeform text.
-# gc.folded_into — on a VISIT closed `folded`, the visit it folded into, which now
-#   carries its question. visit-close.sh requires --into on every fold and stamps
-#   it with the outcome pair, read back before the close. Gates do not fold, so
-#   finding.sh no longer follows it; the cutover's migration walks it once, from
-#   a finding's visit to the gate or visit that carries its question now. Never
-#   cleared. A bead id in the folded visit's own store.
+# gc.pr_visit_summary / gc.pr_visit_actions — RETIRED. They were the closing
+#   text of a visit's PR reminder, stashed on the visit before it closed. The
+#   sign-off passes its summary and actions to pr-sitting-comment.sh directly,
+#   so nothing writes or reads them, and doctor/check-state-space lists them in
+#   RETIRED_KEYS.
+# gc.ruling — on a VISIT closed before the cutover, the operator's ruling in its
+#   sitting. Nothing writes it: a ruling is the resolve reason of each gate a
+#   sitting answers, headed `ruled:`, and finding.sh releases a needs-you finding
+#   on that. The cutover's migration reads it once, to record a ruling given
+#   before the cutover as finding.ruling_bead. Absent means nobody ruled in that
+#   sitting. Freeform text.
+# gc.folded_into — on a VISIT closed `folded` before the cutover, the visit it
+#   folded into, which carries its question. Nothing writes it, because gates do
+#   not fold; the cutover's migration walks it once, from a finding's visit to
+#   the gate or visit that carries its question now. Never cleared. A bead id in
+#   the folded visit's own store.
 
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by

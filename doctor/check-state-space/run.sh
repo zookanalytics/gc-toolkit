@@ -64,13 +64,19 @@ HEALER_RE='^(check_set_healed|merge_result_healed|reopened_not_landed|anchorless
 # visit, which is in_progress while a sitting holds it. The escalation keys are
 # the visit-era helper's (specs/tk-0ur8r9p/design.md section 2): human-gate.sh
 # writes none of them, so a carrier holds nothing back and means a retired
-# writer is stamping again.
-RETIRED_KEYS=(stall_root escalation_raised_by escalation.recurrences escalation.recurrence_last)
+# writer is stamping again. gc.hold_demand and the gc.pr_visit_* pair are the
+# visit-era sitting's (section 7): a hold files a human gate its conversation
+# replies to, and the sign-off hands the reminder its text directly.
+RETIRED_KEYS=(stall_root escalation_raised_by escalation.recurrences escalation.recurrence_last gc.hold_demand gc.pr_visit_summary gc.pr_visit_actions)
 retired_consequence() { # <key> <value>
     case "$1" in
         stall_root) printf '%s' "a sitting that read it may have filed its hold's demand (gc.demand_for=$2), takeaway and held state on $2, and no sign-off reads the key back to discharge them. Discharge that by hand, then clear the key" ;;
         escalation_raised_by|escalation.recurrences|escalation.recurrence_last)
             printf '%s' "human-gate.sh neither redirects a wisp nor keeps a recurrence tally, so nothing writes or reads the key; it holds nothing back, and a live bead carrying it means a retired writer stamped it. Find that writer, then clear the key" ;;
+        gc.hold_demand)
+            printf '%s' "a sitting's hold filed the demand $2 on this visit, and no sign-off reads the key back to discharge it. The cutover's migration closes the visit and files that demand again as a human gate (specs/tk-0ur8r9p/design.md section 11), so run the migration on this store; on a bead that is no visit, clear the key" ;;
+        gc.pr_visit_summary|gc.pr_visit_actions)
+            printf '%s' "the sign-off hands the PR reminder its text directly, so nothing writes or reads the key; it holds nothing back, and a live bead carrying it means a retired writer stamped it. Find that writer, then clear the key" ;;
         *) printf '%s' "nothing reads it. Clear the key" ;;
     esac
 }

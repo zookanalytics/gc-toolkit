@@ -283,6 +283,18 @@ has "$OUT" "gc bd update a-r5 --unset-metadata escalation.recurrences" "it names
 has "$OUT" "gc bd update a-r6 --unset-metadata escalation_raised_by" "…and the in_progress one"
 has "$OUT" "a retired writer stamped it" "…and says what its presence means"
 hasnt "$OUT" "a-r7" "a closed bead carrying one is history, not a finding"
+# The visit-era sitting's keys. gc.hold_demand on an open visit names a hold's
+# demand the cutover's migration files again as a human gate, so the finding
+# names the migration; the reminder stash has no writer and no reader.
+store '[{"id":"a-r8","status":"in_progress","metadata":{"task_kind":"visit","gc.hold_demand":"tk-dem1"}},
+        {"id":"a-r9","status":"open","metadata":{"gc.pr_visit_summary":"we shipped it"}},
+        {"id":"a-r10","status":"closed","metadata":{"gc.pr_visit_actions":"routed tk-w"}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a live bead carrying a retired converse key is an ERROR"
+has "$OUT" "gc bd update a-r8 --unset-metadata gc.hold_demand" "it names the held visit and the clearing command"
+has "$OUT" "files that demand again as a human gate" "…and says the migration carries the hold's demand"
+has "$OUT" "gc bd update a-r9 --unset-metadata gc.pr_visit_summary" "…and the reminder stash on an open bead"
+hasnt "$OUT" "a-r10" "a closed visit carrying the stash is history, not a finding"
 store '[{"id":"a-r4","status":"open","metadata":{}}]'
 OUT=$(BD_FAIL_KEY=stall_root run_check); RC=$?
 eq "$RC" "1" "an unreadable retired-key probe warns, never passes"

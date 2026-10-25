@@ -45,10 +45,8 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 SCRIPT="$ROOT/assets/scripts/liveness-recheck.sh"
 SWEEP="$ROOT/assets/scripts/liveness-sweep.sh"
 PROMPT="$ROOT/agents/_converse/prompt.template.md"
-# The claim-time re-check lives in the converse prep skill (steps 3–4); it calls
-# the hook script, which reads the visit.recheck stamp as a path and runs it.
+# The claim-time re-check lives in the converse prep skill (steps 3–4).
 PREP="$ROOT/skills/converse-prep/SKILL.md"
-RECHECK_SUT="$ROOT/assets/scripts/converse-recheck-hook.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-liveness-recheck-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -408,52 +406,11 @@ for flag in $SWEEP_FLAGS; do
         && bad "this script parses $flag" "$ERR" || ok "this script parses $flag"
 done
 
-# --- 5. the claim-time hook in the converse loop -----------------------------
-# The prep skill (steps 3–4) invokes the re-check before any prep; the hook
-# script it calls reads a visit's stamp as a path and runs it, never eval-ing it.
-# liveness-sweep.sh writes no such stamp any more, so the hook has no writer
-# left and retires with the converse loop's move to conversations; until then
-# it is still held to running what it reads as a path.
+# --- 5. the claim-time re-check in the converse loop --------------------------
+# The prep skill (steps 3–4) runs the re-check before any prep, and the census it
+# reports supersedes the lists in the body it was filed with.
 echo "── the converse loop runs the re-check at claim time ──"
-has "the prep step reads visit.recheck"      'visit.recheck'            "$PREP"
-has "the prep step runs the re-check hook"   'converse-recheck-hook.sh' "$PREP"
-grep -qE 'eval +"?\$RECHECK' "$RECHECK_SUT" \
-    && bad "the hook never evals a metadata string" "found an eval of \$RECHECK — the stamp is a path, so read-then-run is available" \
-    || ok "the hook never evals a metadata string"
 has "the corrected census supersedes the body" "supersedes the body's lists" "$PREP"
-
-[ -x "$RECHECK_SUT" ] && ok "converse-recheck-hook.sh is present and executable" \
-    || bad "converse-recheck-hook.sh is present and executable" "missing or not +x: $RECHECK_SUT"
-bash -n "$RECHECK_SUT" && ok "converse-recheck-hook: valid bash" \
-    || bad "converse-recheck-hook: valid bash" "bash -n failed"
-
-STUB_VISIT="$TMP/visit.json"; export STUB_VISIT
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
-[ "$1" = "bd" ] && [ "$2" = "show" ] || exit 0
-cat "${STUB_VISIT:-/dev/null}"
-GC
-chmod +x "$TMP/bin/gc"
-# A stand-in for liveness-recheck.sh that records how it was invoked.
-cat > "$TMP/fake-recheck" <<'RC'
-#!/usr/bin/env bash
-printf 'invoked with: %s\n' "$*"
-RC
-chmod +x "$TMP/fake-recheck"
-jq -nc --arg p "$TMP/fake-recheck" '[{metadata: {"visit.recheck": $p}}]' > "$STUB_VISIT"
-OUT="$(VISIT=tk-visit bash "$RECHECK_SUT" 2>&1)"
-eq "$OUT" "invoked with: tk-visit" "the hook runs the stamped path with the visit id as its only argument"
-
-echo "── the hook is loud, not silent, when the stamped path is not executable ──"
-jq -nc --arg p "$TMP/not-there" '[{metadata: {"visit.recheck": $p}}]' > "$STUB_VISIT"
-OUT="$(VISIT=tk-visit bash "$RECHECK_SUT" 2>&1)"
-printf '%s' "$OUT" | grep -q "UNVERIFIED" \
-    && ok "an unrunnable stamp says the body is UNVERIFIED" \
-    || bad "an unrunnable stamp says the body is UNVERIFIED" "got: $OUT"
-
-echo "── a visit with no stamp runs nothing and says nothing ──"
-jq -nc '[{metadata: {"task_kind": "visit"}}]' > "$STUB_VISIT"
-OUT="$(VISIT=tk-visit bash "$RECHECK_SUT" 2>&1)"
-eq "$OUT" "" "an unstamped visit produces no hook output (the ordinary case, not an error)"
 
 echo
 echo "liveness-recheck: $PASS passed, $FAIL failed"
