@@ -140,7 +140,10 @@ branch, lands on the default branch and blocks the convoy. A polecat rebuilds
 the branch on that child, because a run poured onto the convoy itself would
 work on the members the convoy landed. Once the child's work lands on the
 integration branch, the refinery's merge-push anchors the convoy, which gates
-the graduation PR from then on.
+the graduation PR from then on. When the convoy is no longer open on that
+branch, merge-push anchors nothing and asks a person whether the graduation
+goes on. The child waits on that visit, off the refinery's queue, and closing
+the visit pours a fresh run on it.
 
 ## When the subject closes
 

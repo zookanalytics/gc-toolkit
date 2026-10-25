@@ -1087,10 +1087,17 @@ back, that convoy takes the gating transition this pass would have given $WORK,
 and $WORK then closes landed-on-branch. The anchoring comes first, so a close
 that fails leaves an anchor the next pass finds on the branch, and a refused
 anchoring closes nothing. A child never takes a gating state itself. When the
-bead it names is not open on the branch, that bead's kind is read from its own
-row. A convoy there, or a row that cannot be read, makes the landing wait the
-same way, and a convoy also files a visit, because only a person can say whether
-its graduation goes on. A named bead that is not a convoy leaves $WORK its own
+bead it names is not open on the branch, merge-push reads that bead by its id. A
+read that fails makes the landing wait the same way. A convoy there, or no such
+bead in the store, leaves a question only a person can answer: whether the
+graduation goes on. So merge-push files a visit on $WORK with `escalate.sh`'s
+verdict window off, and `await-ruling.sh` makes $WORK wait on it. The script
+adds a `blocks` edge from $WORK onto the visit, releases $WORK's assignment, which
+takes it off the refinery's queue, and arms a fresh `mol-polecat-work` pour of
+$WORK for when the visit closes. A held child is then never picked again ahead
+of the handoffs behind it, and it is held without a `merge_result`, which would
+make it the branch's anchor. When the wait does not land, $WORK stays routed and
+the next pass tries again. A named bead that is not a convoy leaves $WORK its own
 anchor, as a first handoff is. No other bead is anchored this way. A review's
 or a ruling's rework names a bead whose own rebuild may still be queued, and
 anchoring that bead would make the rebuild's load-context read it as finished
@@ -1154,18 +1161,30 @@ NAMED=$(printf '%s' "$SELF_ROW" | jq -r '(.[0].metadata // {}) as $m
   | .[0].id // empty' 2>/dev/null) || LANDS_ON=""
 # <<< rebuild-child-lands-on
 if [ -n "$NAMED" ] && [ -z "$LANDS_ON" ]; then
-  NAMED_ROW=$(printf '%s' "$ANCHOR_ROWS" | jq -c --arg n "$NAMED" '[ .[]? | select(.id == $n) ]' 2>/dev/null)
-  case "$NAMED_ROW" in ""|"[]") NAMED_ROW=$(gc bd show "$NAMED" --json 2>/dev/null | tr -d '[:cntrl:]') ;; esac
-  NAMED_KIND=$(printf '%s' "$NAMED_ROW" | jq -er --arg n "$NAMED" '.[0] | select(.id == $n)
-    | (.issue_type // .type // "") | tostring' 2>/dev/null) || NAMED_KIND=unreadable
+  NAMED_ROWS=$(printf '%s' "$ANCHOR_ROWS" | jq -c --arg n "$NAMED" '[ .[]? | select(.id == $n) ]' 2>/dev/null)
+  case "$NAMED_ROWS" in ""|"[]") NAMED_ROWS=$(gc bd list --id "$NAMED" --all --limit=0 --json 2>/dev/null) || NAMED_ROWS="" ;; esac
+  NAMED_KIND=$(printf '%s' "$NAMED_ROWS" | tr -d '[:cntrl:]' | jq -r --arg n "$NAMED" '
+    if type != "array" then "unreadable"
+    else ([ .[] | objects | select(.id == $n) ][0]) as $r
+      | if $r == null then "absent" else "kind:" + (($r.issue_type // $r.type // "") | tostring) end
+    end' 2>/dev/null)
   case "$NAMED_KIND" in
-    convoy)
-      echo "merge-push: $WORK rebuilds convoy $NAMED, which is not open on $BRANCH, so its landing has no bead to anchor; recording no landing and closing nothing. $WORK stays routed for the next pass." >&2
-      ESC="${LC%/*}/escalate.sh"
-      [ ! -x "$ESC" ] || "$ESC" --subject "$WORK" --key refinery-rebuild-convoy-not-open --message "$WORK, the rebuild of convoy $NAMED, has landed on $BRANCH, but $NAMED is not open on that branch, so the refinery has no bead to carry its PR. It anchored and closed nothing, and retries $WORK every pass until this is settled. If the graduation is abandoned, close $WORK. Otherwise make $NAMED open again with branch $BRANCH, and the next pass anchors it."
+    kind:convoy|absent)
+      if [ "$NAMED_KIND" = absent ]; then NAMED_STATE="not in this store"; else NAMED_STATE="not open on $BRANCH"; fi
+      echo "merge-push: $WORK rebuilds $NAMED, which is $NAMED_STATE, so its landing has no bead to anchor; recording no landing and closing nothing." >&2
+      LC_DIR="${LC%/*}"; WAITS=""
+      if GC_ESCALATE_VERDICT_WINDOW=0 "$LC_DIR/escalate.sh" --subject "$WORK" --key refinery-rebuild-convoy-not-open --message "$WORK, the rebuild of $NAMED, has landed on $BRANCH, but $NAMED is $NAMED_STATE, so no bead can carry the PR, and the refinery anchored and closed nothing. $WORK waits on this visit, off the refinery's queue. To go on with the graduation, make $NAMED open with branch $BRANCH, then close this visit: that pours a fresh run on $WORK, whose hand-back anchors $NAMED. To abandon the graduation, close $WORK, then this visit."; then
+        "$LC_DIR/await-ruling.sh" "$WORK" --key refinery-rebuild-convoy-not-open --formula mol-polecat-work && WAITS=1
+      fi
+      if [ -n "$WAITS" ]; then
+        echo "merge-push: $WORK waits on that visit, off the refinery's queue, and closing the visit pours a fresh run on it." >&2
+      else
+        echo "merge-push: the wait on a visit did not land, so $WORK stays routed for the next pass." >&2
+      fi
       gc runtime drain-ack
       exit 1 ;;
-    unreadable)
+    kind:*) ;;
+    *)
       echo "merge-push: $NAMED, which $WORK names as its anchor_bead, could not be read, so whether $WORK rebuilds a convoy cannot be told; recording no landing and closing nothing. $WORK stays routed for the next pass." >&2
       gc runtime drain-ack
       exit 1 ;;
