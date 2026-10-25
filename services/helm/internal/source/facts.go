@@ -311,14 +311,16 @@ type workflowRoot struct {
 
 // workflowRoots finds this rig's live-candidate graph.v2 roots.
 //
-// It is a copy of the rule assets/scripts/run-lib.sh defines, and
-// TestWorkflowRootsAgreeWithRunLibFixture holds it to that file's fixture. A
-// workflow root names its input convoy in gc.input_convoy_id, and the work bead
-// its run works is that convoy's single tracked member. A root whose
-// gc.var.issue names another bead is wired wrong and works none. The session
-// name is read from the root, falling back to its STEP beads: roots stamp
-// gc.session_name at claim time, but not every root in the store carries one,
-// and the steps do.
+// It copies the part of the rule assets/scripts/run-lib.sh defines that reads
+// an input convoy, and TestWorkflowRootsAgreeWithRunLibFixture holds it to that
+// file's fixture. A workflow root names its input convoy in gc.input_convoy_id,
+// and the work bead its run works is that convoy's single tracked member. A
+// root whose gc.var.issue names another bead is wired wrong and works none. A
+// root that names no input convoy is not read here, though run-lib.sh gives
+// such a root, a classic molecule among them, the bead its gc.var.issue names.
+// The session name is read from the root, falling back to its STEP beads:
+// roots stamp gc.session_name at claim time, but not every root in the store
+// carries one, and the steps do.
 func (s *BeadsSource) workflowRoots(ctx context.Context, st beadStore, r rigRef, g *gatherState) []workflowRoot {
 	roots, err := st.SearchIssues(ctx, "", beads.IssueFilter{
 		Statuses:       liveStatuses,

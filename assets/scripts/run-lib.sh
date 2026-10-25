@@ -20,7 +20,7 @@
 # {{convoy_id}}`, which is Gas City's contract. Every other reader of the link
 # asks this file.
 #
-# Three verbs, each printing one JSON array of runs, each run
+# Each verb prints one JSON array of runs, each run
 #   {root, convoy, bead, formula, live}
 # where convoy is "" for a root that names none, bead is "" for a run that
 # names none, and formula is the root's gc.formula_name, "" when it records

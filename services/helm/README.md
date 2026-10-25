@@ -729,9 +729,10 @@ makes, so the two boards agree on liveness by construction rather than by two
 derivations. The work bead a root's run works — the other half of the
 in-flight join — is read in-process from its input convoy's `tracks` edge in the
 rig store (`internal/source/facts.go`, `convoyMembers`), so it costs no
-`gc convoy status` per root. That join copies the rule
-`assets/scripts/run-lib.sh` defines, and `TestWorkflowRootsAgreeWithRunLibFixture`
-holds it to that file's fixture. It honours the
+`gc convoy status` per root. That join copies the part of the rule
+`assets/scripts/run-lib.sh` defines that reads an input convoy, so a root that
+names none is not joined, and `TestWorkflowRootsAgreeWithRunLibFixture` holds it
+to that file's fixture. It honours the
 contract for the same reason the other two do — a Gas City interface, not raw
 Dolt — and every call is best-effort: a missing or failing `gc` records a
 partial error and narrows the board (nothing reads as held or in flight)
