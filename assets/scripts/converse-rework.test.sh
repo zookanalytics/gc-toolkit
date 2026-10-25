@@ -233,12 +233,12 @@ eq "$(meta fix-1 anchor_bead)" "anc-1" "child names the anchor"
 eq "$(meta fix-1 branch)" "polecat/anc-1" "child resumes the anchor's branch"
 eq "$(meta fix-1 target)" "main" "child lands where the anchor lands"
 eq "$(meta fix-1 merge_strategy)" "mr" "child is merge_strategy=mr"
-eq "$(meta fix-1 source_ruling_bead)" "vis-1" "child names the ruling's visit as source_ruling_bead"
+eq "$(meta fix-1 source_ruling_bead)" "vis-1" "child names the ruling's conversation as source_ruling_bead"
 eq "$(meta fix-1 source_review_bead)" "" "child carries NO source_review_bead (a ruling has no verdict)"
 eq "$(meta fix-1 existing_pr)" "https://github.com/o/r/pull/42" "child keeps the rework on this PR (existing_pr)"
 eq "$(meta fix-1 pr_number)" "42" "child carries pr_number"
 has "$(meta fix-1 rejection_reason)" "apply the amendment" "rejection_reason carries the ruling"
-has "$(meta fix-1 rejection_reason)" "vis-1" "rejection_reason names the visit"
+has "$(meta fix-1 rejection_reason)" "vis-1" "rejection_reason names the conversation"
 if blocks_anchor fix-1 anc-1; then ok "child blocks the anchor (merge held by the edge)"; else bad "child does NOT block the anchor"; fi
 eq "$(meta fix-1 gc.execution_routed_to)" "gc-toolkit/gc-toolkit.polecat" "child was slung (execution_routed_to read back)"
 has "$OUT" "filed rework fix-1 on anchor anc-1" "reports the filed child"
@@ -377,7 +377,7 @@ eq "$(meta rv-c gc.outcome)" "superseded" "the correctness approve is superseded
 eq "$(meta rv-a gc.outcome)" "superseded" "…and the arch approve"
 if green correctness; then bad "correctness still derives green after the ruling"; else ok "correctness no longer derives green"; fi
 if green arch; then bad "arch still derives green after the ruling"; else ok "…nor arch"; fi
-has "$(jq -r '.[] | select(.id == "rv-c") | .notes' "$STUB_STORE")" "operator ruling (converse visit vis-1): superseded (anchor-wide) — rework fix-1" \
+has "$(jq -r '.[] | select(.id == "rv-c") | .notes' "$STUB_STORE")" "operator ruling (conversation vis-1): superseded (anchor-wide) — rework fix-1" \
   "the superseded review names the ruling and the child"
 has "$OUT" "2 standing review(s) superseded" "the run reports the lanes it returned"
 so_sl=$(grep -n '^sling ' "$STUB_GC_LOG" | head -1 | cut -d: -f1)

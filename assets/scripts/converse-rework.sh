@@ -3,8 +3,8 @@
 # can reach a ruling that changes what an already-published PR's branch must
 # contain, while the PR still reads review-ready against a head that predates the
 # ruling. This files the fix unit a review verdict would file, through
-# rework-child.sh, the one writer of a rework child, with the visit the ruling was
-# reached in as its provenance (source_ruling_bead).
+# rework-child.sh, the one writer of a rework child, with the conversation the
+# ruling was reached in as its provenance (source_ruling_bead).
 #
 # What is the ruling's own to decide is decided here: the anchor must be an open
 # PR, the child resumes the anchor's own branch and lands where the anchor lands,
@@ -24,12 +24,12 @@
 # filed, and an operator's GitHub approval.
 #
 # Usage:
-#   converse-rework.sh --anchor <anchor-bead> --ruling-bead <visit> \
+#   converse-rework.sh --anchor <anchor-bead> --ruling-bead <conversation> \
 #     --ruling "<the ruling, one line>" [--pool <pool-name>]
 #   The anchor must be an open PR: live in the store, at
 #   merge_result=pull_request, carrying no disposition (gc.pr_close_disposition_kind
 #   or gc.superseded_by), and naming its branch, its landing target and its PR.
-#   --ruling-bead is the visit the ruling was reached in. --pool defaults to
+#   --ruling-bead is the conversation the ruling was reached in. --pool defaults to
 #   rework-child.sh's default.
 # Output: rework-child.sh's result line, "<child> <route> <filed|adopted|in-flight>".
 # Exit: rework-child.sh's when it does not dispatch the child. Otherwise 0 once
@@ -59,7 +59,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 [ -n "$ANCHOR" ]      || die "--anchor is required"
-[ -n "$RULING_BEAD" ] || die "--ruling-bead is required (the visit the ruling was reached in)"
+[ -n "$RULING_BEAD" ] || die "--ruling-bead is required (the conversation the ruling was reached in)"
 [ -n "$RULING" ]      || die "--ruling is required (the one-line ruling the rework answers)"
 command -v jq >/dev/null 2>&1 || die "jq is required"
 command -v gc >/dev/null 2>&1 || die "gc is required"
@@ -113,7 +113,7 @@ else
   TITLE="Rework branch $BRANCH: apply operator ruling"
 fi
 ARGS=(--anchor "$ANCHOR" --ruling-bead "$RULING_BEAD" --branch "$BRANCH" --target "$TARGET"
-      --title "$TITLE" --reason "operator ruling (converse visit $RULING_BEAD): $RULING"
+      --title "$TITLE" --reason "operator ruling (conversation $RULING_BEAD): $RULING"
       --pr-url "$PR_URL")
 [ -z "$PR_NUMBER" ] || ARGS+=(--pr-number "$PR_NUMBER")
 [ -z "$POOL_NAME" ] || ARGS+=(--pool "$POOL_NAME")
@@ -125,7 +125,7 @@ read -r CHILD _ <<< "$FILED"
 # finishes a supersede an earlier run did not. It is idempotent: a lane whose
 # reviews are already superseded has nothing left to retire.
 if ! RETIRED=$("$SCRIPT_DIR/review-outcome.sh" supersede-anchor --anchor "$ANCHOR" \
-       --by "operator ruling (converse visit $RULING_BEAD)" \
+       --by "operator ruling (conversation $RULING_BEAD)" \
        --reason "rework $CHILD changes what the branch must contain; every lane re-reviews it once it lands"); then
   die "rework $CHILD is dispatched, but the review lanes on $ANCHOR did not return to unreviewed (review-outcome.sh supersede-anchor failed), so its landing would read green on reviews of the branch before the ruling. Re-run: the writer adopts $CHILD and the supersede retries"
 fi
