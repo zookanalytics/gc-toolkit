@@ -12,17 +12,17 @@ zero-diff checks that could not run on a work bead. So the arch check asks what
 Gas City already ships for each need
 ([review-arch.md](../../docs/review-arch.md#the-checks), checks 1 and 2).
 
-A formula step can learn its rig's path from Gas City in two ways: the
-`GC_RIG_ROOT` that Gas City sets on every rig-scoped session, and the roster
-that `gc rig list --json` prints. Formula text gets no variable that carries
-the path, so a step makes one of those reads itself. `rig-root.sh` makes them
-for every step that names a rig by path, and keeps no state. Gas City's retry
-budgets live on the step beads of a molecule it materializes. The refinery's
-patrol has no step beads, so nothing upstream counts a check's failures across
-the refinery's turns. bd's charter leaves retry plans to the orchestration
-layer and puts the per-issue data it needs in issue metadata, and the pack
-keeps its count there. Neither addition is a pack noun, so neither needs a
-warrant.
+A formula step can learn its rig's path from the `GC_RIG_ROOT` that Gas City
+sets on every rig-scoped session, or from the roster that `gc rig list --json`
+prints with every path made absolute. Formula text gets no variable that
+carries the path, so a step makes one of those reads itself. `rig-root.sh`
+makes them for every step that names a rig by path, and keeps no state. Gas
+City's retry budgets live on the step beads of a molecule it materializes. The
+refinery's patrol has no step beads, so nothing upstream counts a check's
+failures across the refinery's turns. bd's charter leaves retry plans to the
+orchestration layer and puts the per-issue data it needs in issue metadata,
+and the pack keeps its count there. Neither addition is a pack noun, so
+neither needs a warrant.
 
 ## Where the search looked
 
@@ -41,8 +41,8 @@ For the rig's path, the search covered `GC_RIG_ROOT`, `{{.RigRoot}}`, formula
 variables, `gc rig list`, `gc rig status`, and how a `gc` command chooses its
 rig. For the count, it covered every retry and attempt budget
 (`[steps.retry]`, `[steps.check]`, `max_attempts`, `gc.attempt`), restart and
-defer limits, and any counter kept in bead metadata. Each part the search found
-was read.
+defer limits, and any counter a pack keeps, in a bead or in records of its
+own. Each part the search found was read.
 
 ## Naming a rig's repository by path
 
@@ -120,10 +120,14 @@ scripts read the same roster for rig names, prefixes and scopes.
 - `gastown`'s `mol-polecat-work`, at its worktree step, and its
   `mol-witness-patrol`, for orphan recovery, require `GC_CITY_PATH`, `GC_RIG`
   and `GC_RIG_ROOT`. Each stops when any of the three is empty, and runs its
-  git calls in the rig through `-C`. Its `pr-merge-reconcile` command runs git
-  with `-C "$GC_RIG_ROOT"` when that is set, and in the current directory when
-  it is not. Its polecat and refinery agents pass `{{.RigRoot}}` to the
-  worktree script their `pre_start` runs.
+  git calls in the rig through `-C`. Its `task-artifact-cleanup` command
+  requires the same three. Its `pr-merge-reconcile` command runs git with
+  `-C "$GC_RIG_ROOT"` when that is set, and in the current directory when it
+  is not. Its polecat and refinery agents pass `{{.RigRoot}}` to the worktree
+  script their `pre_start` runs. Its `mol-digest-generate` lists the rigs with
+  `gc rig list` and reads each one's merges with `git -C <rig-path>`. Its crew
+  prompt, to make a worktree in another rig, takes that rig's root from
+  `gc rig status <name>` and runs `git -C` on it.
 - The build pack `gascity` takes its artifact root from `GC_RIG_ROOT`, falling
   back to `GC_DIR` and `GC_BEADS_SCOPE_ROOT`, in its artifact helper and its
   `build-artifact-valid.sh` check. Its review workflow's `write-report` step
@@ -131,7 +135,8 @@ scripts read the same roster for rig names, prefixes and scopes.
   current directory. Workflows in `bmad`, `compound-engineering`, `gstack` and
   `superpowers` run their artifact validators "from `$GC_RIG_ROOT`".
 - `oversight-rig` sets its project lead's `work_dir` to `{{.RigRoot}}`.
-- No other pack names a rig's root, and no pack looks a rig's path up by name.
+- No other pack names a rig's root, and only `gastown`'s crew prompt looks
+  one up by name.
 
 ### What the pack keeps
 
@@ -139,10 +144,12 @@ With no argument, `rig-root.sh` reads `GC_RIG_ROOT` first, as `gastown` and the
 build pack do, and reads the roster only when it is unset, keyed on `GC_RIG`.
 That is the rule `gc prime` applies to a prompt's `{{ .RigRoot }}`. With
 `--rig` it reads the roster, keyed on the name given. It reads the roster the
-way the core pack's `prune-branches` does. Gas City's session environment
-sets the two variables together, so the roster answers two callers: one that
-carries a rig's name without its path, and a formula that works one fixed rig,
-whatever rig its session serves.
+way the core pack's `prune-branches` does. `gastown`'s crew prompt asks
+`gc rig status <name>` instead, which skips the step that makes a configured
+path absolute. Gas City's session environment sets the two variables
+together, so the roster answers two callers: one that carries a rig's name
+without its path, and a formula that works one fixed rig, whatever rig its
+session serves.
 
 The script writes nothing and keeps no state. It is glue over two native reads,
 so it adds no pack noun and needs no warrant
@@ -225,8 +232,14 @@ The controller keeps the count in its own memory, per session (package main,
   `gc.attempt_log` on the loop's control bead. The build pack's `claim`
   command, like `gastown`'s polecat prompt, retries a claim a few times within
   one run.
+- `pr-review`'s `mol-pr-iterate` keeps an iteration count in the notes of its
+  run's root bead, which its intake step sets to 0, and halts to the mayor
+  once the count reaches 2 with the feedback still present. The count starts
+  over with each run.
 - `slack-full`'s adapter keeps a count of failed message deliveries in its own
-  process, for its health endpoint.
+  process, for its health endpoint. An ingress receipt parked for correlation
+  recovery counts its attempts across passes and restarts, and fails at the
+  sixth. Receipts are JSON files in the adapter's state directory, not beads.
 - No pack keeps a count across runs on the bead those runs act on.
 
 **bd.** An issue has no attempt or retry field (package types, `Issue`). bd's
