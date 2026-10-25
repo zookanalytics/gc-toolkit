@@ -85,8 +85,13 @@ case "$sub" in
       [ "$seen_list" = 1 ] && { depid="$a"; break; }
       [ "$a" = list ] && seen_list=1
     done
+    # A gate the human-gate.sh stub filed this run is one of its subject's
+    # blocks edges from then on, as it is live.
     f="$SHOW_DIR/dep-$depid.json"
-    if [ -f "$f" ]; then cat "$f"; else printf '[]\n'; fi
+    rows='[]'; [ -f "$f" ] && rows="$(cat "$f")"
+    if [ -s "${ESC_FILED:-/dev/null}" ]; then
+      printf '%s' "$rows" | jq -c --arg id "$depid" --slurpfile filed "$ESC_FILED" '. + [ $filed[] | select(.subject == $id) | .row ]'
+    else printf '%s\n' "$rows"; fi
     exit 0 ;;
   "bd kv")
     # The store's anchor-edges mark: set when KV_JOINED is, unset otherwise
@@ -131,29 +136,34 @@ gh_prs() { # gh_prs <days-since-update:521> <days-since-update:522>
 gh_prs 0 0
 export GH_PRS="$TMP/gh-prs.json"
 
-# human-gate.sh stub: records the call and the quiet window it declares, and
-# prints the id of the gate it filed, as human-gate.sh does.
+# human-gate.sh stub: records the call and the quiet window it declares, files
+# the gate as human-gate.sh does, an open human gate on its subject whose
+# description is the message (kept in $ESC_FILED, which the gc stub's dep list
+# serves for the rest of the run), and prints its id.
 cat > "$TMP/bin/human-gate.sh" <<'ESC'
 #!/usr/bin/env bash
 [ -n "${ESC_FAIL:-}" ] && { echo "human-gate: down" >&2; exit 1; }
-subject=""; key=""; window="-"
+subject=""; key=""; window="-"; message=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --subject) subject="$2"; shift 2 ;;
     --key)     key="$2"; shift 2 ;;
     --quiet-window) window="$2"; shift 2 ;;
-    --message) printf '%s\n---\n' "$2" >> "$ESC_BODIES"; shift 2 ;;
+    --message) message="$2"; printf '%s\n---\n' "$2" >> "$ESC_BODIES"; shift 2 ;;
     *) shift ;;
   esac
 done
 printf '%s %s\n' "$subject" "$key" >> "$ESC_CALLS"
 printf '%s %s %s\n' "$subject" "$key" "$window" >> "$ESC_CALLS.windows"
+jq -nc --arg s "$subject" --arg k "$key" --arg m "$message" \
+  '{subject: $s, row: {id: "gate-1", issue_type: "gate", await_type: "human", await_id: $k, status: "open",
+                       dependency_type: "blocks", title: ($m | split("\n")[0]), description: $m}}' >> "$ESC_FILED"
 echo "gate-1"
 ESC
 chmod +x "$TMP/bin/human-gate.sh"
 
 export PATH="$TMP/bin:$PATH"
-export SHOW_DIR="$TMP/show" GC_CALLS="$TMP/gc-calls" ESC_CALLS="$TMP/esc-calls" ESC_BODIES="$TMP/esc-bodies"
+export SHOW_DIR="$TMP/show" GC_CALLS="$TMP/gc-calls" ESC_CALLS="$TMP/esc-calls" ESC_BODIES="$TMP/esc-bodies" ESC_FILED="$TMP/esc-filed"
 export GC_HUMAN_GATE_TOOL="$TMP/bin/human-gate.sh"
 export GC_RIG=testrig
 export LIVENESS_SWEEP_STATE_DIR="$TMP/state"
@@ -297,7 +307,7 @@ printf '%s\n' '[{"id":"rv-fix","status":"closed","metadata":{"task_kind":"review
 run_sweep() { # run_sweep [baseline-csv|ABSENT] -> RC/OUT
     rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"
     [ "${1:-ABSENT}" = "ABSENT" ] || printf '%s\n' "$1" > "$BASELINE_FILE"
-    : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_CALLS.windows"; : > "$ESC_BODIES"
+    : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_CALLS.windows"; : > "$ESC_BODIES"; : > "$ESC_FILED"
     RC=0
     OUT="$(bash "$SCRIPT" 2>"$TMP/err")" || RC=$?
 }
@@ -445,6 +455,54 @@ FAKE_LIVE="$TMP/live-conv.json" run_sweep "c-plain"
 eq "$(cat "$ESC_CALLS")" "" "a conversation about the subject, even in the queue, files no gate beside it"
 grep -q "a conversation already waits on tk-subject" <<< "$OUT" && ok "…and the pass says why" || bad "conversation guard line" "$OUT"
 eq "$(cat "$BASELINE_FILE")" "c-plain" "…and the baseline is NOT advanced"
+
+echo "── a gate on the subject at any status but closed still waits ──"
+# A human gate holds until a person resolves it, so one deferred, blocked,
+# hooked or pinned still asks, and human-gate.sh would answer this pass with it.
+# Only the not-closed listing carries it.
+jq 'map(if .id == "tk-subject" then .dependencies = [{"issue_id":"tk-subject","depends_on_id":"g-parked","type":"blocks"}] else . end)' \
+    "$TMP/live.json" > "$TMP/live-parked.json"
+for st in deferred blocked hooked pinned; do
+    jq --arg st "$st" '. + [{"id":"g-parked","status":$st,"issue_type":"gate","await_type":"human","await_id":"liveness-sweep","title":"unnamed waits"}]' \
+        "$TMP/widen.json" > "$TMP/widen-parked.json"
+    FAKE_LIVE="$TMP/live-parked.json" FAKE_WIDEN="$TMP/widen-parked.json" run_sweep "c-plain"
+    eq "$(cat "$ESC_CALLS")" "" "a $st gate on the subject: no gate filed beside it"
+    grep -q "an open human gate already waits on tk-subject" <<< "$OUT" \
+        && ok "…and the pass says a $st gate waits" || bad "$st gate guard line" "$OUT"
+    eq "$(cat "$BASELINE_FILE")" "c-plain" "…and the baseline is NOT advanced past what no one was shown"
+done
+# A conversation stands only at open or in_progress, as the classifier reads
+# conversations, so one deferred about the subject is no person on it.
+jq '. + [{"id":"tk-conv-subj","status":"deferred","issue_type":"task","assignee":"human","title":"about the unnamed waits","dependencies":[{"issue_id":"tk-conv-subj","depends_on_id":"tk-subject","type":"tracks"}]}]' \
+    "$TMP/widen.json" > "$TMP/widen-conv.json"
+FAKE_WIDEN="$TMP/widen-conv.json" run_sweep "c-plain"
+eq "$(cat "$ESC_CALLS")" "tk-subject liveness-sweep" "a deferred conversation about the subject does not hold the batch back"
+
+echo "── a gate filed after the listings: the census it never carried is not reported ──"
+# The listings carry no gate on the subject, so the guard passes. One was filed
+# under the key since, carrying an earlier census, and the real human-gate.sh
+# files nothing and answers with its id and exit 0. Only the gate read back
+# says this pass's census reached no one.
+late_gate() { # late_gate <subject> <key> <description> — an open gate the listings never saw
+    jq -nc --arg id "g-late" --arg k "$2" --arg d "$3" \
+        '[{id: $id, issue_type: "gate", await_type: "human", await_id: $k, status: "open",
+           dependency_type: "blocks", title: ($d | split("\n")[0]), description: $d}]' > "$SHOW_DIR/dep-$1.json"
+}
+late_gate tk-subject liveness-sweep "unnamed waits: 1 new, 0 carried
+Census cut 2026-10-01T00:00:00Z — a snapshot, not the board. Before acting, re-check it:
+  /x/assets/scripts/liveness-recheck.sh --ids c-old --pass-at 2026-10-01T00:00:00Z"
+GC_HUMAN_GATE_TOOL="$HERE/human-gate.sh" run_sweep "c-plain"
+eq "$RC" "0" "the pass completes"
+grep -q "gate g-late already asks on tk-subject with an earlier census" <<< "$OUT" \
+    && ok "…and names the gate that answered in its place" || bad "late gate line" "$OUT"
+grep -q "filed batch gate" <<< "$OUT" \
+    && bad "…and claims no filing" "$OUT" || ok "…and claims no filing"
+eq "$(cat "$BASELINE_FILE")" "c-plain" "…and the baseline is NOT advanced: the new set was never shown"
+rm -f "$SHOW_DIR/dep-tk-subject.json"
+# A filed gate that does not read back proves nothing either.
+GC_DEP_FAIL=1 run_sweep "c-plain"
+eq "$RC" "1" "a gate whose subject's gates do not read back fails the pass"
+eq "$(cat "$BASELINE_FILE")" "c-plain" "…and leaves the baseline for the next pass to re-report"
 
 echo "── the re-file guard suppresses only a set a person ruled on ──"
 NEWKEY="$(printf '%s' "$EXPECT_SURVIVORS" | tr ',' '\n' | sort | paste -sd, -)"
@@ -602,6 +660,29 @@ jq 'map(if .id == "subj-ideas" then .dependencies = [{"issue_id":"subj-ideas","d
 FAKE_LIVE="$TMP/live-recur3.json" run_sweep "$EXPECT_SURVIVORS,idea-1"
 grep -q "subj-ideas: skipped-person-waiting" <<< "$OUT" \
     && ok "an open human gate on the subject skips" || bad "recurrence gate skip" "$OUT"
+# The same gate deferred still asks, though only the not-closed listing has it.
+jq 'map(if .id == "subj-ideas" then .dependencies = [{"issue_id":"subj-ideas","depends_on_id":"g-ideas","type":"blocks"}] else . end)' \
+    "$TMP/live-recur.json" > "$TMP/live-recur4.json"
+jq '. + [{"id":"g-ideas","status":"deferred","issue_type":"gate","await_type":"human","await_id":"triage-recurrence","title":"ideas"}]' \
+    "$TMP/widen.json" > "$TMP/widen-recur.json"
+FAKE_LIVE="$TMP/live-recur4.json" FAKE_WIDEN="$TMP/widen-recur.json" run_sweep "$EXPECT_SURVIVORS,idea-1"
+grep -q "subj-ideas: skipped-person-waiting" <<< "$OUT" \
+    && ok "a deferred human gate on the subject skips too" || bad "recurrence deferred gate skip" "$OUT"
+grep -q 'bd update subj-ideas' "$GC_CALLS" \
+    && bad "…and stamps nothing" "stamped anyway: $(grep subj-ideas "$GC_CALLS")" \
+    || ok "…and stamps nothing"
+# A gate filed under the key after the listings answers the call with an
+# earlier set, so the set this pass computed was shown to no one.
+late_gate subj-ideas triage-recurrence "triage recurrence: 1 candidates in scope
+First evaluation of this subject: all 1 are simply what is in scope now.
+Current set: idea-0"
+FAKE_LIVE="$TMP/live-recur.json" GC_HUMAN_GATE_TOOL="$HERE/human-gate.sh" run_sweep "$EXPECT_SURVIVORS,idea-1"
+grep -q "subj-ideas: gate g-late already asks with an earlier set — last_seen not advanced" <<< "$OUT" \
+    && ok "a recurrence answered with a gate filed since the listings says so" || bad "recurrence late gate" "$OUT"
+grep -q 'bd update subj-ideas' "$GC_CALLS" \
+    && bad "…and stamps no last_seen" "stamped anyway: $(grep subj-ideas "$GC_CALLS")" \
+    || ok "…and stamps no last_seen, so a later run files the set"
+rm -f "$SHOW_DIR/dep-subj-ideas.json"
 
 echo "── the pass owns the cadence window and spends it before it reads ──"
 # liveness-sweep-precheck.sh, the order's `check`, never spends this stamp on
@@ -816,7 +897,7 @@ printf '%s\n' '[{"id":"ri-demo","title":"pre-open, correctness green, demo pendi
 backing ri-demo correctness
 in_rig() { # in_rig <rig> : run_sweep from the rig's checkout, with no index override
     rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"
-    : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_CALLS.windows"; : > "$ESC_BODIES"
+    : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_CALLS.windows"; : > "$ESC_BODIES"; : > "$ESC_FILED"
     RC=0
     OUT="$(cd "$1" && env -u GC_REVIEW_CHECKS_INDEX FAKE_READY="$TMP/ri-ready.json" bash "$SCRIPT" 2>"$TMP/err")" || RC=$?
 }

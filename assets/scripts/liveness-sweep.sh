@@ -471,6 +471,26 @@ advance_baseline() {
         || echo "$PROG: WARN: cannot write baseline at $BASELINE_FILE" >&2
 }
 
+# gate_carries <subject> <gate> <line> — whether a person was shown this
+# pass's census: 0 when <gate> is a human gate on <subject> whose description
+# has a line reading <line>, the line that names the census, 1 when it is not,
+# 2 when the subject's gates do not read. human-gate.sh files nothing while a
+# gate under the key blocks the subject, and answers that call with the open
+# gate's id and exit 0, leaving the gate's message as it stood. The guards
+# below see every gate this pass's listings carry, so the one gate they cannot
+# see is one filed after those listings, and it carries an earlier census.
+# Only the gate read back tells the two apart. The read is the one reader rule
+# (bd_human_gates).
+gate_carries() {
+    local gates
+    [ -n "$2" ] || return 1
+    gates=$(bd_human_gates "$1") || return 2
+    printf '%s' "$gates" | jq -e --arg g "$2" --arg l "$3" '
+        def trim: gsub("^[[:space:]]+|[[:space:]]+$"; "");
+        ($l | trim) as $want
+        | any(.[]; .id == $g and (((.description // "") | tostring) | split("\n") | any(trim == $want)))' >/dev/null 2>&1
+}
+
 # resolve the claim-time re-check script — searched, never assumed (importer
 # rigs have no assets/ of their own).
 RECHECK_SH=""
@@ -481,10 +501,13 @@ done
 
 sweep_batch() {
     # Live guard: an open human gate on the subject, or a conversation about it,
-    # self-limits the backlog to one question. Do NOT advance the baseline here —
-    # these new candidates were never put in front of anyone.
+    # self-limits the backlog to one question. It reads ALIVE, every bead not
+    # closed, because a gate holds in every status but closed: a deferred,
+    # blocked, hooked or pinned one still asks, and human-gate.sh would answer
+    # this pass with it. Do NOT advance the baseline here — these new candidates
+    # were never put in front of anyone.
     local live_wait
-    live_wait=$(jq -r --arg s "$SWEEP_SUBJECT" "$HUMAN_GATE_JQ$CONVERSATION_JQ$LIVENESS_WAIT_JQ"'human_side_on($s)' "$LIVE")
+    live_wait=$(jq -r --arg s "$SWEEP_SUBJECT" "$HUMAN_GATE_JQ$CONVERSATION_JQ$LIVENESS_WAIT_JQ"'human_side_on($s)' "$ALIVE")
     if [ -n "$live_wait" ]; then
         echo "$PROG: $live_wait already waits on $SWEEP_SUBJECT; $CARRIED_COUNT carried, $NEW_COUNT new await it (baseline not advanced)"
         return 0
@@ -555,7 +578,7 @@ sweep_batch() {
         echo "$PROG: dry-run: would file batch gate on $SWEEP_SUBJECT [liveness-sweep]"
         return 0
     fi
-    local out
+    local out carried_rc=0
     # Each batch is the new set of one pass, an event of its own, so the call
     # declares no quiet window: an answer about an earlier set mutes nothing.
     # The gate is filed before the baseline advances: a failed filing must leave
@@ -564,7 +587,18 @@ sweep_batch() {
         echo "$PROG: human-gate.sh failed — baseline NOT advanced; the next pass re-reports" >&2
         return 1
     fi
-    echo "$PROG: filed batch gate ${out:-(no id printed)} on $SWEEP_SUBJECT [liveness-sweep]"
+    # The baseline advances only past a census a gate carries, named by this
+    # pass's re-check command, so a gate filed since this pass's listings leaves
+    # the new set for the pass after it clears.
+    gate_carries "$SWEEP_SUBJECT" "$out" "$recheck" || carried_rc=$?
+    case "$carried_rc" in
+        0) ;;
+        2) echo "$PROG: the human gates of $SWEEP_SUBJECT did not read back, so whether gate ${out:-(no id printed)} carries this census is unproven — baseline NOT advanced; the next pass re-reports" >&2
+           return 1 ;;
+        *) echo "$PROG: gate ${out:-(no id printed)} already asks on $SWEEP_SUBJECT with an earlier census; $CARRIED_COUNT carried, $NEW_COUNT new await it (baseline not advanced)"
+           return 0 ;;
+    esac
+    echo "$PROG: filed batch gate $out on $SWEEP_SUBJECT [liveness-sweep]"
     advance_baseline
 }
 if [ -n "$SWEEP_SUBJECT" ]; then
@@ -599,7 +633,9 @@ recurrence() {
             unnamed-waits) echo "$PROG: $sid: skipped-owned-by-sweep"; continue ;;
             "") echo "$PROG: $sid: skipped-no-machine-scope"; continue ;;
         esac
-        if [ -n "$(jq -r --arg s "$sid" "$HUMAN_GATE_JQ$CONVERSATION_JQ$LIVENESS_WAIT_JQ"'human_side_on($s)' "$LIVE" 2>/dev/null)" ]; then
+        # The batch guard's read: ALIVE, since a gate in any status but closed
+        # still asks.
+        if [ -n "$(jq -r --arg s "$sid" "$HUMAN_GATE_JQ$CONVERSATION_JQ$LIVENESS_WAIT_JQ"'human_side_on($s)' "$ALIVE" 2>/dev/null)" ]; then
             # Stamp nothing here: a bead entering the scope while a person is on
             # the subject must still surface on the first run after they are done.
             echo "$PROG: $sid: skipped-person-waiting"; continue
@@ -651,18 +687,27 @@ recurrence() {
         fi
         # A recurrence is filed only when the scope set changed, so each is an
         # event of its own and the call declares no quiet window.
-        if "$HUMAN_GATE" --subject "$sid" --key triage-recurrence \
-                --message "triage recurrence: $n candidates in scope
+        local msg gate carried_rc
+        msg="triage recurrence: $n candidates in scope
 $delta
-Current set: $now"; then
-            # Stamp only AFTER the gate exists: an unfiled delta is never
-            # recorded as seen, so the next run re-files it.
-            bd_write update "$sid" --set-metadata "triage.last_seen=$now" >/dev/null 2>&1 \
-                || echo "$PROG: WARN: could not stamp triage.last_seen on $sid" >&2
-            echo "$PROG: $sid: filed recurrence gate ($n in scope)"
-        else
+Current set: $now"
+        if ! gate=$("$HUMAN_GATE" --subject "$sid" --key triage-recurrence --message "$msg"); then
             echo "$PROG: $sid: human-gate.sh failed — last_seen not advanced; re-files next pass" >&2
+            continue
         fi
+        # Stamp only once a gate carries this set, named by its "Current set:"
+        # line: an unfiled delta, or one a gate filed since this pass's listings
+        # answered with an earlier message, is never recorded as seen, so a
+        # later run files it again.
+        carried_rc=0
+        gate_carries "$sid" "$gate" "Current set: $now" || carried_rc=$?
+        case "$carried_rc" in
+            0) bd_write update "$sid" --set-metadata "triage.last_seen=$now" >/dev/null 2>&1 \
+                   || echo "$PROG: WARN: could not stamp triage.last_seen on $sid" >&2
+               echo "$PROG: $sid: filed recurrence gate $gate ($n in scope)" ;;
+            2) echo "$PROG: $sid: its human gates did not read back, so whether gate ${gate:-(no id printed)} carries this set is unproven — last_seen not advanced; re-files next pass" >&2 ;;
+            *) echo "$PROG: $sid: gate ${gate:-(no id printed)} already asks with an earlier set — last_seen not advanced; re-files once it clears" ;;
+        esac
     done < "$TMP/subjects"
 }
 recurrence

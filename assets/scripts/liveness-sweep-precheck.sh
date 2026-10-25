@@ -238,8 +238,9 @@ if [ "$READS_OK" -eq 1 ]; then
         BASELINE=$(cat "$BASELINE_FILE" 2>/dev/null || true)
         N_BASELINE=$(printf '%s' "$BASELINE" | tr ',' '\n' | awk 'NF { n++ } END { print n + 0 }')
         # An open human gate on the subject, or a conversation about it: the
-        # sweep's own guard (human_side_on, liveness-classify.sh).
-        LIVE_WAIT=$(jq -r --arg s "$SUBJECT" "$HUMAN_GATE_JQ$CONVERSATION_JQ$LIVENESS_WAIT_JQ"'human_side_on($s)' "$LIVE" 2>/dev/null)
+        # sweep's own guard (human_side_on, liveness-classify.sh), over the
+        # same not-closed set it reads.
+        LIVE_WAIT=$(jq -r --arg s "$SUBJECT" "$HUMAN_GATE_JQ$CONVERSATION_JQ$LIVENESS_WAIT_JQ"'human_side_on($s)' "$ALIVE" 2>/dev/null)
     fi
 fi
 

@@ -384,6 +384,22 @@ has "$OUT" "an open human gate already waits on f-subject" "and says which condi
 cp "$TMP/live.bak" "$FIX/live.json"
 BASELINE_CSV="f-carried,f-plain" run_precheck
 eq "$RC" "1" "a gate open on a DIFFERENT bead does not block the skip"
+# A gate holds in every status but closed, so a gate on the subject that sits
+# at another status still means a person is on it. The open listing does not
+# carry it, so the guard reads every bead not closed, as the sweep's own does.
+echo "── a deferred, blocked, hooked or pinned human gate on the SWEEP subject runs the pass ──"
+cp "$FIX/widen.json" "$TMP/widen.bak"
+jq 'map(if .id == "f-subject" then .dependencies = [{"issue_id":"f-subject","depends_on_id":"g-sweep","type":"blocks"}] else . end)' \
+   "$TMP/live.bak" > "$FIX/live.json"
+for st in deferred blocked hooked pinned; do
+    jq --arg st "$st" '. + [{"id":"g-sweep","title":"unnamed waits","issue_type":"gate","await_type":"human","await_id":"liveness-sweep","status":$st}]' \
+       "$TMP/widen.bak" > "$FIX/widen.json"
+    BASELINE_CSV="f-carried,f-plain" run_precheck
+    eq "$RC" "0" "a $st human gate on the subject runs the pass, as an open one does"
+    has "$OUT" "an open human gate already waits on f-subject" "and says which condition fired"
+done
+cp "$TMP/widen.bak" "$FIX/widen.json"
+cp "$TMP/live.bak" "$FIX/live.json"
 
 # A conversation about the subject is a person on it too, held or in the queue,
 # the guard liveness-sweep.sh asks the same way (human_side_on), so the two

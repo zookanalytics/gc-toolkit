@@ -170,8 +170,12 @@ LIVENESS_CLASSIFY_JQ='
 # which ("an open human gate", "a conversation"), or prints "" for neither.
 # liveness-sweep.sh asks it before it files a batch gate or a recurrence on a
 # standing subject, and its precheck asks it the same way, so the two cannot
-# disagree about whether a person is already on the subject. It reads no input
-# variable, so it runs apart from the classifier: prepend $HUMAN_GATE_JQ
+# disagree about whether a person is already on the subject. Both pass the
+# listing of every bead not closed ($alive), since a human gate holds in every
+# status but closed. A conversation counts only at open or in_progress, the
+# statuses of the listing the classifier reads conversations from ($live), so
+# the guard and the classifier agree on which conversations stand. It reads no
+# input variable, so it runs apart from the classifier: prepend $HUMAN_GATE_JQ
 # (bd-lib.sh) and $CONVERSATION_JQ (conversation.sh), then
 #   jq -r --arg s <subject> "$HUMAN_GATE_JQ$CONVERSATION_JQ$LIVENESS_WAIT_JQ"'human_side_on($s)' <listing>
 # shellcheck disable=SC2034  # read by the scripts that source this file
@@ -179,6 +183,7 @@ LIVENESS_WAIT_JQ='
   def human_side_on($s):
     open_human_gates as $g
     | if any(.[]; .id == $s and blocked_by_any($g)) then "an open human gate"
-      elif any(.[]; conversation and ((conversation_subjects | index($s)) != null)) then "a conversation"
+      elif any(.[]; ((.status // "open") as $st | $st == "open" or $st == "in_progress")
+                    and conversation and ((conversation_subjects | index($s)) != null)) then "a conversation"
       else "" end;
 '
