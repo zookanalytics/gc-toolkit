@@ -26,9 +26,10 @@
 #   STARTED      the graph has closed at least one step, so it demonstrably
 #                moved and then stopped — a molecule that never closed a step is
 #                indistinguishable from an inline husk and reporting it would
-#                report most of the rig — AND its work has not landed (its input
-#                convoy is still open; a convoy closes when its one work bead
-#                closes on land, so a closed convoy is finished work).
+#                report most of the rig — AND its work has not landed: the bead
+#                its run works (assets/scripts/run-lib.sh) is still open, since
+#                a work bead closes on land. A run that works no bead has no
+#                landing to wait for.
 #   UNCLAIMABLE  its executable frontier — the members `bd ready` offers, minus
 #                the inert topology kinds (workflow, scope, spec) poured
 #                alongside real steps — is non-empty AND every frontier member
@@ -47,8 +48,8 @@
 # Fail-safe toward silence. Every unestablished fact reports nothing rather than
 # guessing, because each input misread turns a healthy molecule into a false
 # escalation: an unread roster makes every molecule look unheld, an unread
-# frontier makes it look unclaimable, and an unread convoy cannot prove the work
-# unlanded. The roster read declines the whole run; a per-store or per-candidate
+# frontier makes it look unclaimable, and an unread run or work bead cannot prove
+# the work unlanded. The roster read declines the whole run; a per-store or per-candidate
 # read that fails warns and leaves that store or candidate unjudged.
 #
 # Read-only. Exit 0=OK 1=Warning 2=Error. stdout: message, then "  - detail"
@@ -109,6 +110,18 @@ detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
+
+# The one reader of a run's link to the bead it works, which the landed check
+# asks through rig_bd. An unsourceable one declines the run: without it no root
+# can be tied to the work it would land.
+# shellcheck source=../../assets/scripts/run-lib.sh
+. "${GC_RUN_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/run-lib.sh}" || {
+    echo "cannot determine whether started workflow roots are advancing (I13)"
+    detail "assets/scripts/run-lib.sh could not be sourced from this pack, so no root can be tied to the bead its run works."
+    exit 1
+}
+# The reader run-lib.sh reads the store of the rig being scanned through.
+rig_bd() { run_bounded gc bd "$@" --db "$db"; }
 
 # One held note per store, not per molecule: a parked cohort is one decision,
 # and a line each would bury the findings that have to be read.
@@ -182,11 +195,8 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
     root_rows=$(printf '%s' "$roots_raw" | scrub | jq -r '
         def ep: (try ((tostring) | sub("\\.[0-9]+"; "") | fromdateiso8601) catch null);
         .[]? | . as $r | ($r.metadata // {}) as $m
-        | (($m["gc.input_convoy_id"] // "") | tostring | gsub("[[:cntrl:]]"; " ")) as $cv
-        | select($cv != "")
         | [ (($r.id // "") | tostring | gsub("[[:cntrl:]]"; " ")),
             (($m["gc.session_name"] // "") | tostring | gsub("[[:cntrl:]]"; " ")),
-            $cv,
             ((($r.updated_at // $r.created_at // "") | ep) // 0 | tostring),
             (if '"$HELD"' then "1" else "0" end),
             (($m["gc.formula_name"] // "") | tostring | gsub("[[:cntrl:]]"; " ")) ]
@@ -245,8 +255,8 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
 
     # Candidates that clear the in-memory gates, carried into the probe phase.
     survivors=()
-    declare -A S_CONVOY=() S_LT=() S_FRONTIER=() S_SNAME=() S_FORMULA=()
-    while IFS="$SEP" read -r root sname convoy rupd rheld formula; do
+    declare -A S_LT=() S_FRONTIER=() S_SNAME=() S_FORMULA=()
+    while IFS="$SEP" read -r root sname rupd rheld formula; do
         [ -n "$root" ] || continue
 
         # SILENT (cheap half): last-touch over the root and its non-closed
@@ -301,36 +311,50 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
         [ "$reachable" = "0" ] || continue    # routed or owned: reachable
 
         survivors+=("$root")
-        S_CONVOY["$root"]="$convoy"; S_LT["$root"]="$lt"; S_FRONTIER["$root"]="${frontier% }"
+        S_LT["$root"]="$lt"; S_FRONTIER["$root"]="${frontier% }"
         S_SNAME["$root"]="$sname"; S_FORMULA["$root"]="$formula"
     done <<< "$root_rows"
 
     if [ "${#survivors[@]}" -ne 0 ]; then
-        # Landed check, batched: a survivor's input convoy is closed once its one
-        # work bead closes on land. An unreadable convoy cannot prove the work
-        # unlanded, so those survivors go unjudged rather than reported.
-        cids=""
-        for root in "${survivors[@]}"; do cids="${cids}${S_CONVOY[$root]},"; done
-        declare -A CSTATUS=()
-        convoy_ok=1
-        convoy_raw=$(run_bounded gc bd list --db "$db" --id "${cids%,}" --all --json --limit 0 2>/dev/null)
-        if [ $? -ne 0 ] || [ -z "$convoy_raw" ]; then
-            convoy_ok=0
-        else
-            while IFS="$SEP" read -r cid cstatus; do
-                [ -n "$cid" ] && CSTATUS["$cid"]="$cstatus"
-            done <<< "$(printf '%s' "$convoy_raw" | scrub | jq -r '.[]? | select(type == "object")
-                | [ (((.id // "") | tostring) | gsub("[[:cntrl:]]"; " ")),
-                    (((.status // "") | tostring) | gsub("[[:cntrl:]]"; " ")) ] | join("\u001f")' 2>/dev/null)"
+        # Landed check: the bead each survivor's run works (run-lib.sh), whose
+        # statuses are read in one batch, since a work bead closes on land. A run
+        # or bead that cannot be read cannot prove the work unlanded, so that
+        # survivor goes unjudged rather than reported, and a run that works no
+        # bead has no landing to wait for.
+        declare -A S_BEAD=() S_RUN_READ=() BSTATUS=()
+        bids=""
+        for root in "${survivors[@]}"; do
+            run=$(run_lib subject rig_bd "$root") || continue
+            S_RUN_READ["$root"]=1
+            S_BEAD["$root"]=$(printf '%s' "$run" | jq -r '.[0].bead // "" | gsub("[[:cntrl:]]"; " ")' 2>/dev/null)
+            [ -z "${S_BEAD[$root]}" ] || bids="${bids}${S_BEAD[$root]},"
+        done
+        bead_ok=1
+        if [ -n "$bids" ]; then
+            bead_raw=$(run_bounded gc bd list --db "$db" --id "${bids%,}" --all --json --limit 0 2>/dev/null)
+            if [ $? -ne 0 ] || [ -z "$bead_raw" ]; then
+                bead_ok=0
+            else
+                while IFS="$SEP" read -r bid bstatus; do
+                    [ -n "$bid" ] && BSTATUS["$bid"]="$bstatus"
+                done <<< "$(printf '%s' "$bead_raw" | scrub | jq -r '.[]? | select(type == "object")
+                    | [ (((.id // "") | tostring) | gsub("[[:cntrl:]]"; " ")),
+                        (((.status // "") | tostring) | gsub("[[:cntrl:]]"; " ")) ] | join("\u001f")' 2>/dev/null)"
+            fi
         fi
 
         for root in "${survivors[@]}"; do
-            convoy="${S_CONVOY[$root]}"
-            if [ "$convoy_ok" != "1" ] || [ -z "${CSTATUS[$convoy]:-}" ]; then
-                warnings+=("$label root $root: its input convoy $convoy could not be read, so 'work not landed' is unproven — NOT judged")
+            if [ -z "${S_RUN_READ[$root]:-}" ]; then
+                warnings+=("$label root $root: its run could not be read, so 'work not landed' is unproven — NOT judged")
                 continue
             fi
-            [ "${CSTATUS[$convoy]}" = "closed" ] && continue   # work landed
+            bead="${S_BEAD[$root]:-}"
+            [ -n "$bead" ] || continue                       # its run works no bead: nothing to land
+            if [ "$bead_ok" != "1" ] || [ -z "${BSTATUS[$bead]:-}" ]; then
+                warnings+=("$label root $root: $bead, the bead its run works, could not be read, so 'work not landed' is unproven — NOT judged")
+                continue
+            fi
+            [ "${BSTATUS[$bead]}" = "closed" ] && continue   # work landed
 
             # STARTED and SILENT (full): the closed members, read per survivor.
             closed_raw=$(run_bounded gc bd list --db "$db" --metadata-field gc.root_bead_id="$root" --status closed --json --limit 0 2>/dev/null)
@@ -354,13 +378,13 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
             mins=$(( (NOW - lt) / 60 ))
             owner="${S_SNAME[$root]:-}"; [ -n "$owner" ] || owner="(no session recorded on the root)"
             fr="${S_FRONTIER[$root]}"; fr_n=$(printf '%s\n' $fr | grep -c .)
-            errors+=("$label root $root (${S_FORMULA[$root]:-?}): STRANDED — silent ${mins}m, its session \"$owner\" is gone, $closed_count step(s) closed, work bead not landed (convoy $convoy open), and its executable frontier is unreachable: $fr_n step(s) [$(echo $fr | tr ' ' ',')] open, unassigned AND unrouted, so no pool can be offered them and the witness's orphan recovery, which keys on an assignee, cannot reach them. Give the frontier a route so it re-offers, or end the run through gascity (assets/scripts/run-cancel.sh --root $root).")
+            errors+=("$label root $root (${S_FORMULA[$root]:-?}): STRANDED — silent ${mins}m, its session \"$owner\" is gone, $closed_count step(s) closed, its work bead $bead not landed (${BSTATUS[$bead]}), and its executable frontier is unreachable: $fr_n step(s) [$(echo $fr | tr ' ' ',')] open, unassigned AND unrouted, so no pool can be offered them and the witness's orphan recovery, which keys on an assignee, cannot reach them. Give the frontier a route so it re-offers, or end the run through gascity (assets/scripts/run-cancel.sh --root $root).")
         done
-        unset -v CSTATUS
+        unset -v S_BEAD S_RUN_READ BSTATUS
     fi
 
     unset -v READY MEMBERS MSTATUS MASSIGNEE MSID MSNAME MROUTED MEXEC MKIND MUPD MHELD
-    unset -v S_CONVOY S_LT S_FRONTIER S_SNAME S_FORMULA
+    unset -v S_LT S_FRONTIER S_SNAME S_FORMULA
 done <<< "$scopes"
 
 if [ "${#held_count[@]}" -ne 0 ]; then

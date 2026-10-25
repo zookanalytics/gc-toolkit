@@ -60,6 +60,8 @@
 # each root a ready step names to tell a landed workflow's husk.
 # doctor/check-blocked-work-armed takes the map, so a blocked bead a live run
 # works is not reported stranded.
+# doctor/check-root-advancing takes the run of each stalled root to read
+# whether its work has landed.
 #
 # run-lib.test.sh runs every verb over run-lib.fixture.json, the cases a copy
 # of the rule in another language must agree with, as the Go copy in
