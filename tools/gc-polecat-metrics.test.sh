@@ -3,7 +3,8 @@
 # entirely through its GC_POLECAT_METRICS_FIXTURE seam — canned bead-store reads
 # and a canned usage sink, no live city — and asserts on the --json output.
 #
-# Covers: the session trace (anchor <- convoy <- root -> load-context session),
+# Covers: the session trace (anchor <- the run that works it -> load-context
+# session),
 # the anchor-stamp fallback, an unrecoverable-session row (tokens n/a), the
 # per-session sharing caveat (one session, two beads), start-time fallback with
 # the start_source flag, review/rework counting by branch, the closed-date
@@ -58,19 +59,20 @@ cat > "$FIX/anchors.json" <<JSON
 ]
 JSON
 
-cat > "$FIX/convoys.json" <<'JSON'
+# The runs the fixture seam answers run-lib.sh's map from: those the roots and
+# their input convoys make, by run-lib.sh's own run_rows. Each convoy's title
+# names a bead it does not track, so a trace that read the title would join the
+# wrong anchor.
+# shellcheck source=../assets/scripts/run-lib.sh
+. "$HERE/../assets/scripts/run-lib.sh" || { echo "cannot source run-lib.sh" >&2; exit 1; }
+jq -c "$RUN_JQ"'run_rows' > "$FIX/runs.json" <<'JSON'
 [
-  {"id":"cv1","title":"input convoy for wb-merged1","issue_type":"convoy"},
-  {"id":"cv2","title":"input convoy for wb-shareA","issue_type":"convoy"},
-  {"id":"cv3","title":"input convoy for wb-shareB","issue_type":"convoy"}
-]
-JSON
-
-cat > "$FIX/roots.json" <<'JSON'
-[
-  {"id":"r1","title":"mol-polecat-work","metadata":{"gc.formula_name":"mol-polecat-work","gc.input_convoy_id":"cv1"}},
-  {"id":"r2","title":"mol-polecat-work","metadata":{"gc.formula_name":"mol-polecat-work","gc.input_convoy_id":"cv2"}},
-  {"id":"r3","title":"mol-polecat-work","metadata":{"gc.formula_name":"mol-polecat-work","gc.input_convoy_id":"cv3"}}
+  {"id":"cv1","title":"input convoy for wb-nosession","issue_type":"convoy","status":"closed","dependencies":[{"issue_id":"cv1","depends_on_id":"wb-merged1","type":"tracks"}]},
+  {"id":"cv2","title":"input convoy for wb-shareA","issue_type":"convoy","status":"closed","dependencies":[{"issue_id":"cv2","depends_on_id":"wb-shareA","type":"tracks"}]},
+  {"id":"cv3","title":"input convoy for wb-shareB","issue_type":"convoy","status":"closed","dependencies":[{"issue_id":"cv3","depends_on_id":"wb-shareB","type":"tracks"}]},
+  {"id":"r1","title":"mol-polecat-work","status":"closed","metadata":{"gc.kind":"workflow","gc.formula_name":"mol-polecat-work","gc.input_convoy_id":"cv1"}},
+  {"id":"r2","title":"mol-polecat-work","status":"closed","metadata":{"gc.kind":"workflow","gc.formula_name":"mol-polecat-work","gc.input_convoy_id":"cv2"}},
+  {"id":"r3","title":"mol-polecat-work","status":"closed","metadata":{"gc.kind":"workflow","gc.formula_name":"mol-polecat-work","gc.input_convoy_id":"cv3"}}
 ]
 JSON
 

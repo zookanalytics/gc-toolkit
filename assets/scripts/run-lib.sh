@@ -64,6 +64,8 @@
 # whether its work has landed.
 # tools/gc-proactive.sh drops the beads the map's live runs work from a scan,
 # and refuses a first reaction to a bead a live run works.
+# tools/gc-polecat-metrics.sh takes every run in the store to trace an anchor
+# to the session that built it.
 #
 # run-lib.test.sh runs every verb over run-lib.fixture.json, the cases a copy
 # of the rule in another language must agree with, as the Go copy in

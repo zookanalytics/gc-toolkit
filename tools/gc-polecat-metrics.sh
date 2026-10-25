@@ -23,9 +23,10 @@
 # a bead carries gc.session_id only while a polecat holds it, and the refinery
 # handoff clears it from the anchor (confirmed: ~18% of merged anchors still
 # carry one). The build session survives on the workflow's load-context step,
-# so this tool recovers it by tracing anchor <- input-convoy <- mol-polecat-work
-# root -> load-context.gc.session_id (recoverable for ~89% of workflows), and
-# falls back to the anchor's own gc.session_id when present. A bead whose
+# so this tool recovers it by tracing anchor <- the mol-polecat-work run that
+# works it (assets/scripts/run-lib.sh) -> load-context.gc.session_id
+# (recoverable for ~89% of workflows), and falls back to the anchor's own
+# gc.session_id when present. A bead whose
 # session cannot be resolved shows tokens as n/a, counted in the coverage line.
 #
 # Attribution is per SESSION, not per bead: most polecat sessions build one bead
@@ -58,8 +59,10 @@
 #
 # Test seam: GC_POLECAT_METRICS_FIXTURE=<dir> replaces every live read with a
 # canned file in <dir> (anchors.json, reviews.json, reworks.json,
-# loadcontext.json, roots.json, convoys.json, usage.jsonl), so the test drives
-# the tool with no live city. See tools/gc-polecat-metrics.test.sh.
+# loadcontext.json, runs.json, usage.jsonl), so the test drives the tool with
+# no live city. runs.json is a JSON array of runs in run-lib.sh's shape, which
+# its verbs answer from through the stub its readers' suites use. See
+# tools/gc-polecat-metrics.test.sh.
 #
 # Read-only and stateless; recomputes from live bd / sink on every call.
 # exit: 0 report emitted · 1 usage / argument error · 3 could not read anchors
@@ -71,6 +74,15 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # shellcheck source=../assets/scripts/bd-lib.sh
 . "${GC_BD_LIB:-$REPO_ROOT/assets/scripts/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh" >&2; exit 1; }
+if [ -n "${GC_POLECAT_METRICS_FIXTURE:-}" ]; then
+  : "${GC_RUN_LIB:=$REPO_ROOT/assets/scripts/run-lib.stub.sh}"
+  : "${RUN_LIB_STUB_RUNS:=$GC_POLECAT_METRICS_FIXTURE/runs.json}"
+  export RUN_LIB_STUB_RUNS
+fi
+# shellcheck source=../assets/scripts/run-lib.sh
+. "${GC_RUN_LIB:-$REPO_ROOT/assets/scripts/run-lib.sh}" || { echo "$PROG: cannot source run-lib.sh" >&2; exit 1; }
+# The reader run-lib.sh reads the store the current directory resolves through.
+metrics_bd() { gc bd "$@"; }
 
 SINCE_DAYS=30
 ALL=0
@@ -170,8 +182,10 @@ printf '%s' "$ANCHORS"            > "$TMP/anchors.json"
 fetch_or_empty reviews.json     --metadata-field task_kind=review --status all  > "$TMP/reviews.json"
 fetch_reworks                                                                   > "$TMP/reworks.json"
 fetch_or_empty loadcontext.json --metadata-field gc.step_ref=mol-polecat-work.load-context --status all > "$TMP/loadcontext.json"
-fetch_or_empty roots.json       --metadata-field gc.formula_name=mol-polecat-work --status all          > "$TMP/roots.json"
-fetch_or_empty convoys.json     --type convoy --status all                      > "$TMP/convoys.json"
+# Every run in the store, finished ones included, with the bead each works. A
+# failed read degrades to none, as the reads above do: the traced sessions go
+# unresolved and their rows show tokens as n/a.
+run_lib map metrics_bd all > "$TMP/runs.json" || { log "the runs could not be read; their build sessions are not traced"; echo '[]' > "$TMP/runs.json"; }
 
 # --- phase A: join beads into rows (no tokens yet) + the session set ------
 # Emits { rows: [...], sessions: [unique session ids across in-scope rows] }.
@@ -180,21 +194,18 @@ jq -n -c \
   --slurpfile reviews   "$TMP/reviews.json" \
   --slurpfile reworks   "$TMP/reworks.json" \
   --slurpfile lc        "$TMP/loadcontext.json" \
-  --slurpfile roots     "$TMP/roots.json" \
-  --slurpfile convoys   "$TMP/convoys.json" \
+  --slurpfile runs      "$TMP/runs.json" \
   --argjson since_epoch "$SINCE_EPOCH" '
   def meta(k): .metadata[k] // null;
   def nz(k): (.metadata[k] // "") | if . == "" then null else . end;
 
-  # root -> input convoy, convoy -> work bead (the convoy title names it)
-  ($roots[0]   | map({key: .id, value: (.metadata["gc.input_convoy_id"] // "")}) | from_entries) as $root2convoy |
-  ($convoys[0] | map({key: .id, value: (.title | sub("^input convoy for +";"") | gsub("^ +| +$";""))}) | from_entries) as $convoy2wb |
+  # root -> the work bead its run works
+  ($runs[0] | map({key: .root, value: .bead}) | from_entries) as $root2wb |
 
   # work bead -> [build sessions], traced through every load-context step
   (reduce $lc[0][] as $s ({};
      ($s.metadata["gc.root_bead_id"] // "")       as $r  |
-     ($root2convoy[$r] // "")                      as $cv |
-     ($convoy2wb[$cv] // "")                       as $wb |
+     ($root2wb[$r] // "")                          as $wb |
      ($s.metadata["gc.session_id"] // "")          as $sid|
      if ($wb|length) > 0 and ($sid|length) > 0 then .[$wb] += [$sid] else . end)
    | map_values(unique)) as $wb2sessions |

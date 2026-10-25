@@ -236,7 +236,8 @@ assets/scripts/priority-lib.sh
 assets/scripts/liveness-sweep.sh
 doctor/check-blocked-work-armed/run.sh
 doctor/check-root-advancing/run.sh
-tools/gc-proactive.sh"
+tools/gc-proactive.sh
+tools/gc-polecat-metrics.sh"
 while IFS= read -r r; do
     [ -n "$r" ] || continue
     f="$ROOT/$r"
