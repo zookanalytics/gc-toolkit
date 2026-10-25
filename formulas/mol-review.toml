@@ -1,13 +1,15 @@
 description = """
-Signoff review lifecycle — claim -> pin -> judge -> ONE signoff.sh verdict ->
-drain. Attached at dispatch (gc sling --on mol-review) to a review bead:
-metadata.task_kind=review, check_name (the check the verdict satisfies),
-anchor_bead (the gating anchor), and the review target — review_branch /
-review_base, plus the anchor's PR as review_pr_url / review_pr_number once it
-is open — and the dispatch-pinned reviewed_oid. The steps carry the lifecycle
-every check shares. The check's method, which the dispatch note's check
-section names, carries what the review reads, runs and judges, and the agent
-prompt carries only worker doctrine.
+Signoff review lifecycle — gather -> judge -> ONE signoff.sh verdict -> drain.
+Attached at dispatch (gc sling --on mol-review) to a review bead whose metadata
+is the review's record. gate-ensure.sh writes the record and passes the same
+values as this formula's vars, so the step text names each value where it uses
+it: the review bead, the check, the anchor, the branch, the base its diff
+starts from, the commit under review, the anchor's PR once one is open, and why
+the review went out. The commit is the branch's head when the review was
+dispatched, and nothing moves it. The steps carry the lifecycle every check
+shares. The check's method is the skill named from the check, and it carries
+what the review reads, runs and judges. The agent prompt carries only worker
+doctrine.
 
 Hard rules, in force for every step:
 
@@ -35,109 +37,150 @@ Hard rules, in force for every step:
   the single verdict (the mol-review-quorum-signoff formula). One verdict per
   claim holds either way, because the synthesizer makes the one signoff call.
 
-Mechanics the steps are written around: the review bead arrives as the input
-convoy (each step re-derives REVIEW_BEAD in its own shell), and each step
-closes its own bead through assets/scripts/step-close.sh, which resolves by
-(gc.root_bead_id, gc.step_ref) — never a GC_*BEAD_ID env var, which does not
-track the current step.
+Mechanics the steps are written around: each step closes its own bead through
+assets/scripts/step-close.sh, which resolves by (gc.root_bead_id,
+gc.step_ref) — never a GC_*BEAD_ID env var, which does not track the current
+step. No shell variable survives from one block to the next, so each block
+names the values it uses. A review held with no poured workflow follows these
+steps as its description says.
 """
 formula = "mol-review"
 
 [requires]
 formula_compiler = ">=2.0.0"
 
+[vars]
+# The record's vars default to empty rather than being required. A pour that
+# omits a required var fails before any step runs, so a review slung without
+# one would sit unpoured. Defaulted, it pours, and load-dispatch's record check
+# names the missing key on the review's notes and reviews nothing.
+[vars.review_bead]
+description = "The review bead this run answers."
+default = ""
+
+[vars.check]
+description = "The check this review applies: the review bead's check_name, in lowercase."
+default = ""
+
+[vars.anchor_bead]
+description = "The work bead the verdict lands on, whose description says what the change is for."
+default = ""
+
+[vars.review_branch]
+description = "The branch under review."
+default = ""
+
+[vars.review_base]
+description = "The branch the change lands on, where its diff starts."
+default = ""
+
+[vars.reviewed_oid]
+description = "The commit under review: the branch's head when the review was dispatched, never moved or cleared."
+default = ""
+
+[vars.review_pr_url]
+description = "The anchor's open PR, empty before one opens."
+default = ""
+
+[vars.review_pr_number]
+description = "That PR's number, empty with it."
+default = ""
+
+[vars.review_context]
+description = "Why this review went out, such as a bring-current round for triage to rule on, else empty. Free text, so the steps name it in prose and never inside a shell block."
+default = ""
+
+[vars.binding_prefix]
+description = "The binding the city imports the pack under, with its trailing dot: the prefix of the pack's skill names in a session's catalog. Sling adds it to every pour."
+default = "gc-toolkit."
+
 [[steps]]
 id = "load-dispatch"
-title = "Read the dispatch and pin what you are reviewing"
+title = "Gather what the review reads, at the commit it was dispatched for"
 description = """
-**1. Prime and derive the review bead** (the single tracked member of the
-input convoy):
+This review is `{{review_bead}}`, applying the `{{check}}` check. It reads
+branch `{{review_branch}}` at commit `{{reviewed_oid}}`, the branch's head when
+the review was dispatched, and its diff starts where the branch left
+`{{review_base}}`, the branch it lands on. The change is `{{anchor_bead}}`'s,
+and the verdict lands there. Its PR is `{{review_pr_url}}`, empty before one
+opens. Why the dispatch sent this review: {{review_context}}
+
+**1. Prime, and refuse a short record.** A dispatched review always carries
+every value above but the PR and the reason. One made by hand or before the
+dispatch wrote the whole record can lack one, and then this step reviews
+nothing: it records which key is missing, ends the run and leaves the bead
+unrouted, because the next claim would meet the same gap. Closing the review
+is the repair, and the next gate-ensure pass dispatches a fresh one with its
+whole record.
 ```bash
 gc prime
 gc bd prime
-CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
-REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-[ -n "$REVIEW_BEAD" ] || { echo "mol-review needs an input convoy with exactly one tracked member" >&2; exit 1; }
-gc bd show "$REVIEW_BEAD"
-M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
-```
-
-**2. Discriminate the two shapes and pin the identity.** PRE-OPEN carries
-`review_branch` and no `review_pr_number` — the verdict decides whether the PR
-opens at all. POST-OPEN carries `review_pr_number` — the PR is published and
-held on the signoff. Post-open, a number names a PR only inside one repository
-on one host, so pin both from the bead's own `review_pr_url` before asking
-`gh` anything; an unparseable `review_pr_url` is a malformed bead — refuse it
-(one re-dispatch is cheaper than posting a review on someone else's work):
-```bash
-CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
-REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-[ -n "$REVIEW_BEAD" ] || { echo "mol-review needs an input convoy with exactly one tracked member" >&2; exit 1; }
-M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
-BRANCH=$(printf '%s' "$M" | jq -r '.review_branch // empty')
-BASE=$(printf   '%s' "$M" | jq -r '.review_base   // empty')
-# >>> review-pr-pin
-PR=$(printf     '%s' "$M" | jq -r '.review_pr_number // empty')
-PR_URL=$(printf '%s' "$M" | jq -r '.review_pr_url    // empty')
-if [ -n "$PR" ]; then
-  PR_REPO_Q=$(printf '%s' "$PR_URL" | sed -n 's#^[A-Za-z][A-Za-z0-9+.-]*://\\([^/][^/]*\\)/\\([^/][^/]*/[^/][^/]*\\)/pull/[0-9].*#\\1/\\2#p')
-  [ -n "$PR_REPO_Q" ] || { echo "post-open review bead has no parseable review_pr_url: refusing to resolve PR#$PR from ambient gh context" >&2; exit 1; }
-  PR_HOST="${PR_REPO_Q%%/*}"   # for gh api --hostname
-  PR_REPO="${PR_REPO_Q#*/}"    # <owner>/<repo> for gh api REST paths
-  REFS=$(gh pr view "$PR" --repo "$PR_REPO_Q" --json headRefName,baseRefName -q '.headRefName + " " + .baseRefName') \\
-    || { echo "gh pr view $PR_REPO_Q#$PR failed: refusing to review an unpinned diff" >&2; exit 1; }
-  BRANCH="${REFS%% *}"; BASE="${REFS#* }"
-  [ -n "$BRANCH" ] && [ -n "$BASE" ] || { echo "PR $PR_REPO_Q#$PR resolved no head/base" >&2; exit 1; }
-fi
-# <<< review-pr-pin
-```
-One `gh` call reads the PR's head and base, so both come from one state of the
-PR. A read that fails or leaves either empty refuses the review rather than
-diff against a base nobody pinned.
-
-Carry the pin on every later call: `--repo "$PR_REPO_Q"` for `gh pr`,
-`--hostname "$PR_HOST"` plus explicit `repos/$PR_REPO/...` paths for `gh api`.
-A bare number resolves from ambient gh context, and every repository has a PR
-with the number you were handed.
-
-**3. Never fall back to main.** A convoy child lands on
-`integration/<convoy-id>`; diffing it against main reviews a diff the branch
-never made. Pre-open with no `review_base`: resolve the anchor's landing
-target, else escalate — never guess a base:
-```bash
-if [ -z "$PR" ] && [ -z "$BASE" ]; then
-  ANCHOR=$(printf '%s' "$M" | jq -r '.anchor_bead // empty')
-  [ -n "$ANCHOR" ] && BASE=$(gc bd show "$ANCHOR" --json | jq -r '.[0].metadata.target // empty')
-  [ -n "$BASE" ] || { echo "no review_base, no anchor target: refusing to guess a base" >&2; exit 1; }
+# >>> review-record-check
+MISSING=""
+for kv in "review_bead={{review_bead}}" "check={{check}}" "anchor_bead={{anchor_bead}}" "review_branch={{review_branch}}" "review_base={{review_base}}" "reviewed_oid={{reviewed_oid}}"; do
+  [ -n "${kv#*=}" ] || MISSING="${MISSING:+$MISSING, }${kv%%=*}"
+done
+# <<< review-record-check
+if [ -n "$MISSING" ]; then
+  echo "the review's record lacks $MISSING: reviewing nothing" >&2
+  [ -z "{{review_bead}}" ] || gc bd update "{{review_bead}}" --append-notes "mol-review reviewed nothing: the review's record lacks $MISSING. Close this review, and the next gate-ensure pass dispatches a fresh one with its whole record."
+  exit 1
 fi
 ```
-
-**4. Pin the commit.** The dispatch stamped `reviewed_oid` with the head it
-reviewed for; that pin wins when present. The diff you read, every command the
-check's method runs, and the OID you hand off are all that one commit — a
-verdict recorded against a head you never read certifies unreviewed code:
+When it exits 1, end the run with the route left empty:
 ```bash
-# >>> review-pin-commit
-# The fetch and the head read name the rig's repository by path, so the
-# session's cwd cannot pick it. An empty REPO would let it, because `git -C ""`
-# runs in the cwd, so an unresolvable rig fails closed.
-RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
-REPO=$("${RR:?rig-root.sh not found in the pack}")
-[ -n "$REPO" ] || { echo "review: cannot resolve the rig root" >&2; exit 1; }
-git -C "$REPO" fetch origin "$BASE" "$BRANCH" || { echo "review: fetching $BASE and $BRANCH into $REPO failed; refusing to pin a commit from refs that may be stale" >&2; exit 1; }
-REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
-[ -n "$REVIEWED_OID" ] || REVIEWED_OID=$(git -C "$REPO" rev-parse "origin/$BRANCH")
-echo "reviewing $BRANCH -> $BASE at $REVIEWED_OID"
-# <<< review-pin-commit
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+: "${SC:?step-close.sh not found in the pack; close each step by its (gc.root_bead_id, gc.step_ref) pair, never by an id read from the environment}"
+for STEP in load-dispatch review verdict-and-drain; do
+  "$SC" --step "mol-review.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-review.$STEP was not this session's to close — left for the finalizer"
+done
+gc runtime drain-ack
 ```
+A claimant holding the review with no poured workflow has no steps to close.
+It releases the bead and the route it claimed it by instead, then drains:
+`gc bd update <the review bead> --assignee="" --unset-metadata gc.routed_to`.
 
-**5. Read the intent and the method.** The anchor bead
-(`metadata.anchor_bead`), the PR or branch description, and any context note
-on this review bead — which round this is and what earlier rounds found tells
-you where to look hardest. The review bead's description is its dispatch
-note, and its check section names the method this review applies.
+**2. Gather what the review reads.** The block prints the anchor, the PR's
+page when one is open, the rig's guidance for this check, and the path of the
+review's worktree at `{{reviewed_oid}}`. The worktree is a detached checkout in
+a workspace named for this review, so running the block again in a later shell
+returns the same worktree. Read the change there with git. Its diff is
+`git diff origin/{{review_base}}...HEAD`, with three dots, so it shows what the
+branch changed and not what the base did since. Anything else the review
+writes to disk goes in the workspace beside the worktree, never loose in
+`/tmp` (docs/review-workspace.md). Carry the worktree's path and what the block
+printed into the steps that follow.
+```bash
+# >>> review-gather
+REPO="${GC_RIG_ROOT:-}"
+[ -n "$REPO" ] || REPO=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$REPO" ] || { echo "review: cannot resolve rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+: "${SCRIPTS:?review-workspace.sh not found in the pack}"
+git -C "$REPO" fetch --quiet origin "{{review_base}}" "{{review_branch}}" || exit 1
+git -C "$REPO" cat-file -e "{{reviewed_oid}}^{commit}" 2>/dev/null || git -C "$REPO" fetch --quiet --no-tags origin "{{reviewed_oid}}" || exit 1
+WT=$("$SCRIPTS/review-workspace.sh" add --review-bead "{{review_bead}}" --oid "{{reviewed_oid}}" --repo "$REPO") || exit 1
+cd "$WT" || exit 1
+echo "== The change: {{anchor_bead}}"
+gc bd show "{{anchor_bead}}" || exit 1
+if [ -n "{{review_pr_url}}" ]; then
+  echo "== The PR as published: {{review_pr_url}}"
+  gh pr view "{{review_pr_url}}" --json title,body --jq '.title, "", .body' || exit 1
+fi
+echo "== The rig's guidance for {{check}}: docs/review-{{check}}.md at {{reviewed_oid}}, empty when it keeps none"
+"$SCRIPTS/review-checks.sh" --extension "{{check}}" --at "{{reviewed_oid}}" || exit 1
+echo "== The pack's scripts: $SCRIPTS"
+echo "== The review's worktree: $WT"
+# <<< review-gather
+```
+A block that exits non-zero here, other than the refusal in part 1, ends the
+run as the verdict step's failure arm does.
 
-**6. Close this step bead so the graph advances.** Non-terminal step, no
+**3. Close this step bead so the graph advances.** Non-terminal step, no
 drain — the same session carries on into `review`:
 ```bash
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
@@ -146,9 +189,8 @@ done
 "${SC:?step-close.sh not found in the pack; close this step bead by the id the claim returned, never by the inherited one (tk-niu2f)}" --step mol-review.load-dispatch --convoy {{convoy_id}} --outcome pass
 ```
 
-**Exit criteria:** shape discriminated, base and branch pinned (never a
-guessed main), REVIEWED_OID pinned, intent read and the check's method named,
-this step bead closed.
+**Exit criteria:** the record checked, the anchor, the PR and the rig's
+guidance read, the worktree made at `{{reviewed_oid}}`, this step bead closed.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
@@ -157,85 +199,47 @@ id = "review"
 title = "Apply the check's method to the diff, write the verdict body"
 needs = ["load-dispatch"]
 description = """
-Each block is its own shell, so re-derive the pins first.
-`CLAIMED_STEP_BEAD_ID` is the `bead_id` your `gc hook --claim --json` returned
-for this step, whose lease the keepalive refreshes; the review bead has none.
-```bash
-CLAIMED_STEP_BEAD_ID="<the bead_id your gc hook --claim returned for this step>"
-CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
-REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-[ -n "$REVIEW_BEAD" ] || { echo "mol-review needs an input convoy with exactly one tracked member" >&2; exit 1; }
-M=$(gc bd show "$REVIEW_BEAD" --json | jq -c '.[0].metadata')
-BRANCH=$(printf '%s' "$M" | jq -r '.review_branch // empty')
-BASE=$(printf '%s' "$M" | jq -r '.review_base // empty')
-REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
-# Post-open or missing fields: re-derive exactly as load-dispatch did, its
-# review-pr-pin block included.
-```
+**1. Load the method.**
+<!-- >>> review-method-load -->
+The check's method is the skill `{{binding_prefix}}review-{{check}}`. Load it
+from your skill catalog and apply it, and no other review skill. A copy of a
+skill in the review's worktree is the change under review, not your method.
+When your catalog has no such skill:
 
-**1. The diff under review:**
-```bash
-# >>> review-diff
-# The diff reads origin/$BASE from the rig's repository, named by path as in
-# load-dispatch: another checkout's origin/$BASE can be stale, and a diff
-# against it shows changes the base made as changes the branch made.
-RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
-REPO=$("${RR:?rig-root.sh not found in the pack}")
-[ -n "$REPO" ] || { echo "review: cannot resolve the rig root" >&2; exit 1; }
-git -C "$REPO" diff --stat "origin/$BASE...$REVIEWED_OID"
-git -C "$REPO" diff       "origin/$BASE...$REVIEWED_OID"
-# <<< review-diff
-```
-Three dots — compare against the merge-base, so the diff is what the branch
-changed rather than what the base moved on underneath it.
+- If the rig's check index declares `{{check}}`
+  (`review-checks.sh --check {{check}} --at {{reviewed_oid}}` prints its row),
+  judge the diff against the purpose the row states. Load
+  `{{binding_prefix}}specialist-stance` and hold it. Say in your coverage line
+  that the pack ships no method for this check.
+- If no index declares it (the call exits 1 saying no index declares the
+  check), approve, and pass `--needs-you` saying the check is declared
+  nowhere, so the operator decides whether it stays in the anchor's
+  `check_set`. A call that fails for any other reason, such as a commit it
+  cannot read, is no answer, and nothing approves on it.
 
-**2. Check out the pinned commit** in a detached worktree inside this review's
-workspace, so the tree you read is the commit the verdict names. The workspace
-is a directory named for the review bead and belongs to the review, not to one
-shell: `add` returns the same worktree each time it runs, so a later block gets
-it back by running these lines again. Every long command the check's method
-runs goes through `hb`, the claim-lease keepalive set up here.
-```bash
-# >>> review-lease-keepalive
-# A claim's lease has a fixed five-minute TTL, and a reviewer whose lease lapses
-# during a long command reads as dead. `hb <command>` refreshes
-# $CLAIMED_STEP_BEAD_ID while it runs, and runs it plain when no wrapper resolves.
-LHB=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/lease-heartbeat.sh" ] && { LHB="$c/assets/scripts/lease-heartbeat.sh"; break; }; done
-hb() { if [ -n "$LHB" ]; then "$LHB" "$CLAIMED_STEP_BEAD_ID" -- "$@"; else "$@"; fi; }
-# <<< review-lease-keepalive
-# >>> review-workspace-add
-# --repo names the rig's repository by path, so the session's cwd cannot pick
-# it. An empty --repo would let it, so an unresolvable rig fails closed.
-RR=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-root.sh" ] && { RR="$c/assets/scripts/rig-root.sh"; break; }; done
-REPO=$("${RR:?rig-root.sh not found in the pack}")
-[ -n "$REPO" ] || { echo "review: cannot resolve the rig root" >&2; exit 1; }
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/review-workspace.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
-REVIEW_WT=$("${SCRIPTS:?review-workspace.sh not found in the pack}/review-workspace.sh" add --review-bead "$REVIEW_BEAD" --oid "$REVIEWED_OID" --repo "$REPO") || exit 1
-cd "$REVIEW_WT"
-# GCTK is the pack's own CLI, for a check's method to call in the workspace.
-# >>> gctk-bin
-GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
-# <<< gctk-bin
-# <<< review-workspace-add
-```
-Anything else the review writes to disk goes in the workspace beside `wt`
-(`dirname "$REVIEW_WT"`), never loose in `/tmp` (docs/review-workspace.md).
+The rig's guidance for this check is the reviewed commit's
+`docs/review-{{check}}.md`, which the gather block printed when the commit
+carries one. It adds to the method and never replaces it. Most rigs keep
+none.
+<!-- <<< review-method-load -->
 
-**3. Apply the check's method.** The method the dispatch note's check section
-names, with any rig extension appended, decides what you read and run here,
-which findings block, the lines it adds to the verdict envelope in step 6,
-and the flags the verdict call passes. Run its blocks after the pin block and
-step 2's blocks, in the same shell, and run nothing it does not call for.
+**2. Apply it to the diff.** Read the change in the worktree load-dispatch
+printed, at `{{reviewed_oid}}`: `git diff --stat origin/{{review_base}}...HEAD`,
+then the diff itself. The method decides what you read and run there, which
+findings block, the lines it adds to the verdict envelope in part 5, and the
+flags the verdict call passes. Run nothing it does not call for. A long
+command runs under the claim-lease keepalive, so a reviewer whose lease would
+lapse during it does not read as dead: `lease-heartbeat.sh <the bead_id your gc
+hook --claim returned for this step> -- <command>`, from the pack's scripts
+load-dispatch printed.
 
-**4. Locate every finding.** Every finding carries a location, what is wrong,
+**3. Locate every finding.** Every finding carries a location, what is wrong,
 why it matters, and what would fix it. In the tree the location is
 **file:line**. On the PR it is the page and the part of it that is wrong, as
 in `PR #<n> title` or `PR #<n> body / ## Summary`. A finding with no location
 isn't actionable, and "improve error handling" isn't a finding.
 
-**5. File what is real but not this diff's.** A finding you are confident in
+**4. File what is real but not this diff's.** A finding you are confident in
 that this branch neither caused nor was asked to fix is not one of this
 verdict's findings: blocking on it bills a rework round to work that did not
 cause it, and dropping it loses the only reader who was looking. File a bug
@@ -252,7 +256,7 @@ TOKEN="<stable identifier for this finding>"
 TITLE="<one line: what is wrong> ($TOKEN)"
 BODY="<what is wrong, why it matters, what would fix it>
 
-Found reviewing <branch> at <reviewed oid>; out of scope for that diff."
+Found reviewing {{review_branch}} at {{reviewed_oid}}; out of scope for that diff."
 # No --status: the default excludes closed, and a claimed or blocked bug is
 # still a duplicate.
 DUP_JSON=$(gc bd list --type=bug --title-contains "$TOKEN" --json 2>/dev/null)
@@ -275,7 +279,7 @@ An unreadable probe files nothing, and neither does a create that returns no
 id. Say so in the verdict rather than filing blind, and the next round
 re-probes.
 
-**6. Write the verdict body** to `findings.md` in your working directory so
+**5. Write the verdict body** to `findings.md` in your working directory so
 it travels verbatim to the next step. `signoff.sh` opens the posted comment
 with one line, the check and its verdict and then what needs the operator, so
 the body is the trail under that line, collapsed. Every check writes this
@@ -292,9 +296,9 @@ envelope, and the check's method adds its own lines to it:
 <details>
 <summary><Check> trail: <what it holds, e.g. scope and files read></summary>
 
-Reviewed branch: <branch>
-Reviewed base:   <base>
-Reviewed commit: <REVIEWED_OID>
+Reviewed branch: {{review_branch}}
+Reviewed base:   {{review_base}}
+Reviewed commit: {{reviewed_oid}}
 
 Scope checked: <what you actually read>
 
@@ -309,7 +313,7 @@ everything". When a decision is the operator's to make, pass it on the verdict
 call as `--needs-you "<the decision, what it means, where to look>"`; a finding
 is not one, because the city fixes it.
 
-**6b. Emit the finding set** to `findings.json` beside `findings.md`: a JSON
+**5b. Emit the finding set** to `findings.json` beside `findings.md`: a JSON
 array, one object per finding the check's method counts as blocking, each
 carrying a `locus` and a `message`. signoff.sh files each as a bead beside the
 rework child.
@@ -327,9 +331,9 @@ number or a commit oid, so it survives a rebase; on the PR page it is the part
 that is wrong, as in `PR #<n> body / ## Summary`. signoff.sh dedups on a
 normalized locus and message, so a re-review of the same objection files no
 second bead. An `approve` carries no blocking finding: write `[]`. The
-out-of-scope bugs from step 5 stay out of it; they are their own beads already.
+out-of-scope bugs from part 4 stay out of it; they are their own beads already.
 
-**7. Close this step bead so the graph advances.** Non-terminal step, no
+**6. Close this step bead so the graph advances.** Non-terminal step, no
 drain — the same session carries on into `verdict-and-drain`:
 ```bash
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
@@ -359,19 +363,14 @@ fix.
 **1. One call, through the one writer.** `signoff.sh` owns every mechanic
 past your judgment: posting the artifact, closing the review bead with your
 verdict and reading it back, filing the finding set from `findings.json` beside
-one slung rework child on request-changes, and refusing a pin the branch no
-longer carries:
+one slung rework child on request-changes, and refusing a commit the branch no
+longer carries. The verdict names `{{reviewed_oid}}`, the commit the review
+read, and signoff.sh refuses any other:
 ```bash
-CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
-REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-[ -n "$REVIEW_BEAD" ] || { echo "mol-review needs an input convoy with exactly one tracked member" >&2; exit 1; }
-# REVIEWED_OID is the OID the review step actually read — the pin you carried,
-# re-stated here because each block is its own shell.
-REVIEWED_OID=<the OID from the review step>
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/signoff.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-"${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "$REVIEW_BEAD" --verdict <approve|request-changes> --reviewed-oid "$REVIEWED_OID" --notes-file findings.md --findings-file findings.json
+"${SCRIPTS:?signoff.sh not found in the pack}/signoff.sh" --review-bead "{{review_bead}}" --verdict <approve|request-changes> --reviewed-oid "{{reviewed_oid}}" --notes-file findings.md --findings-file findings.json
 ```
 Do not post the review yourself, do not write to the anchor, do not file rework
 beads or finding beads (signoff.sh files the findings from your
@@ -383,34 +382,30 @@ When signoff.sh refuses a verdict for a missing or invalid flag, it has written
 nothing, so re-run the call with the flag corrected; that is still the one
 verdict.
 
-**2. Failure arms.** signoff.sh binds no verdict to a commit: the reviewed OID
-is the dispatch pin and the posted artifact's audit label, never a marker, and
-nothing in the cadence compares a marker to a head. A rebase or a new commit
-that lands on top of the pin while you read does not stale your findings —
-call it once with the OID the dispatch named. Only a rewrite that drops the
-pin from the branch (a rebase, amend or force-push) is different: signoff
-refuses the verdict, but closes the review bead itself `gc.outcome=superseded`
-and exits 0 — there is nothing here to append and nothing to restore,
-gate-ensure pours a fresh review at the live head next pass.
-"already closed" is not a failure either and has nothing to
-re-pin: this dispatch was recorded or retired before you judged it, so drop the
-verdict, close the chain and drain. Any other failure, in this order: append your findings to
-the review bead (`gc bd update "$REVIEW_BEAD" --append-notes ...`); close the
-step chain forward with part 3's step-close loop; then — only after the chain
-is closed — restore the bead's claimability from the dispatch-stamped pool
-and drain:
+**2. Failure arms.** signoff.sh binds no verdict to a later head: commits that
+land on top of the reviewed commit while you read do not stale your findings.
+Only a rewrite that takes the reviewed commit off the branch (a rebase, amend
+or force-push) is different: signoff refuses the verdict, closes the review
+bead itself `gc.outcome=superseded` and exits 0 — there is nothing here to
+append and nothing to restore, and gate-ensure pours a fresh review at the live
+head next pass. "already closed" is not a failure either: this dispatch was
+recorded or retired before you judged it, so drop the verdict, close the chain
+and drain. Any other failure, in this order: append your findings to the review
+bead (`gc bd update "{{review_bead}}" --append-notes ...`); close the step chain
+forward with part 3's step-close loop; then — only after the chain is closed —
+restore the bead's claimability from the dispatch-stamped pool and drain:
 ```bash
-POOL=$(gc bd show "$REVIEW_BEAD" --json | jq -r '.[0].metadata.review_pool // empty')
-[ -n "$POOL" ] && gc bd update "$REVIEW_BEAD" --set-metadata gc.routed_to="$POOL"
+POOL=$(gc bd show "{{review_bead}}" --json | jq -r '.[0].metadata.review_pool // empty')
+[ -n "$POOL" ] && gc bd update "{{review_bead}}" --set-metadata gc.routed_to="$POOL"
 gc runtime drain-ack
 ```
 The pour retired gc.routed_to and this workflow's steps are now closed, so no
 second authority remains; restoring the route returns the bead to the pool's
-routed tier as a formula-less review bead whose body carries the method note
+routed tier as a review with no workflow, whose description says how to run it
 (the documented recovery shape), so the next claim genuinely resumes — an
 unrecorded verdict is recoverable; a hand-rolled one is not. The review's
 workspace stays where it is, and the reviewer who claims the bead next gets
-the same worktree back from `review-workspace.sh add`.
+the same worktree back from load-dispatch's gather block.
 
 **3. Close this workflow's step chain, remove the workspace, then drain.**
 Terminal step: it still closes its own bead — that is how a graph.v2 step
@@ -420,8 +415,6 @@ blocks the next); close only through step-close.sh, which resolves by
 (gc.root_bead_id, gc.step_ref) — a GC_*BEAD_ID env var names the wrong bead
 after a claim. Never close `workflow-finalize` (the control-dispatcher's):
 ```bash
-CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
-REVIEW_BEAD=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
@@ -430,7 +423,7 @@ for STEP in load-dispatch review verdict-and-drain; do
   "$SC" --step "mol-review.$STEP" --convoy {{convoy_id}} --outcome pass || echo "step-close: mol-review.$STEP was not this session's to close — left for the finalizer"
 done
 # >>> review-workspace-remove
-[ -n "$REVIEW_BEAD" ] && "$(dirname "$SC")/review-workspace.sh" remove --review-bead "$REVIEW_BEAD"
+"$(dirname "$SC")/review-workspace.sh" remove --review-bead "{{review_bead}}"
 # <<< review-workspace-remove
 gc runtime drain-ack
 ```

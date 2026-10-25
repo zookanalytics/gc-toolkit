@@ -678,13 +678,16 @@ review_gates_for() { # <branch>
 
 # Every lane <check_set> declares, of every phase (`--through merge`), derives
 # green through lane-state.sh, as merge.sh reads it, the operator's GitHub
-# approval included. Non-zero when a lane does not, when lane-state.sh cannot
-# tell (a store that will not read, or the helper missing), and when the
-# resolver fails: a crash prints nothing, and an empty list would read as every
-# lane green. A check_set that declares no lane passes.
-lanes_green() { # <anchor-id> <check_set>
+# approval included. The lanes are resolved at <head-oid>, the PR head the
+# caller holds, as merge.sh resolves them at the head it merges. Non-zero when
+# a lane does not derive green, when lane-state.sh cannot tell (a store that
+# will not read, or the helper missing), and when the resolver fails: a crash
+# prints nothing, and an empty list would read as every lane green. The
+# resolver refuses a call at no commit, so an empty <head-oid> is non-zero too.
+# A check_set that declares no lane passes.
+lanes_green() { # <anchor-id> <check_set> <head-oid>
   local gates g
-  gates=$("$REVIEW_CHECKS" --resolve --check-set "$2" --through merge 2>/dev/null) || return 1
+  gates=$("$REVIEW_CHECKS" --resolve --check-set "$2" --through merge --at "${3:-}" 2>/dev/null) || return 1
   while IFS= read -r g; do
     [ -n "$g" ] || continue
     "$LANE_STATE" green --anchor "$1" --lane "$g" >/dev/null 2>&1 </dev/null || return 1
@@ -1302,7 +1305,7 @@ unengaged_holds() { # <id> <num> <head-oid> <row-json> <live-comments-json>
   # resolver that cannot name the lanes, establishes no precondition, so this
   # probe returns no hold, and merge.sh's lane gate holds on that unreadable
   # read independently.
-  lanes_green "$id" "$checkset" || return 1
+  lanes_green "$id" "$checkset" "$head" || return 1
   stamp=$(printf '%s' "$row" | jq -r '(.metadata.pr_unengaged_threads // "") | tostring')
   if [ "$stamp" = "$head" ]; then
     # This head was flagged already. The hold stands while its visit is open, and
@@ -3403,7 +3406,7 @@ $CBODY"
   # read fails closed (lanes_green): a lane it cannot derive, or a resolver that
   # cannot name the lanes, proves nothing green, so the block stands.
   if [ -n "$head_oid" ] && [ "$rd" = "CHANGES_REQUESTED" ] && [ -n "$SELF_LOGIN" ] \
-     && lanes_green "$id" "$checkset"; then
+     && lanes_green "$id" "$checkset" "$head_oid"; then
     auto=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json autoMergeRequest 2>/dev/null \
       | jq -r 'if (.autoMergeRequest // null) == null then "off" else "armed" end' 2>/dev/null)
     if [ "$auto" != "off" ]; then

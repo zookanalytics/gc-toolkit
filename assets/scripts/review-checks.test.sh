@@ -1,13 +1,30 @@
 #!/usr/bin/env bash
-# review-checks.test.sh — the one parser of the check-index grammar
-# (assets/scripts/review-checks.sh). Asserts it emits <check>\t<method>\t<purpose>
-# TSV, narrows with --check by the check's name case-folded, and fails closed
-# on a missing index, an undeclared check, and an index that declares nothing.
-# Also asserts the repo's own review-checks.toml declares the forced baseline
-# (correctness, triage).
+# review-checks.test.sh — the one parser and resolver of the check index
+# (assets/scripts/review-checks.sh). Asserts:
+#   - the emit verbs print <check>\t<purpose>\t<phase> TSV, --check narrows by the
+#     check's name case-folded, an older index's method key is ignored, and a
+#     missing index, an undeclared check and an index that declares nothing fail
+#     closed;
+#   - the pack's own review-checks.toml declares the forced baseline, gives every
+#     check a phase in the ordered set and a skill the pack ships, and carries no
+#     method key;
+#   - the resolver's phase-scoped gating sets, the non-lane drop, case-folded
+#     dedupe, the undeclared and unphased pre-open defaults, and the refusal of a
+#     phase outside the ordered set;
+#   - the layered index: the pack's rows beside the script, a rig's rows laid over
+#     them from the commit --at names and never from the working tree, a call that
+#     names no commit refused unless --file or GC_REVIEW_CHECKS_INDEX names the
+#     index, and --extension reading a commit's docs/review-<check>.md;
+#   - --at fetching a commit the checkout has not fetched, failing on one
+#     nothing can fetch, and asking each repository once, and failing too when
+#     there is no repository here at all;
+#   - --edits listing the guidance a change edits from where it left its base,
+#     a guidance file renamed away included, at a change the checkout has not
+#     fetched.
 #
-# Hermetic: runs the script against fixtures in a mktemp dir; no gc, no bd, no
-# network.
+# Hermetic: runs the script against fixtures in a mktemp dir, with a fixture pack
+# (a copy of the script under <pack>/assets/scripts beside a fixture index) and
+# scratch git repositories; no gc, no bd, no network.
 
 set -u
 
@@ -20,11 +37,17 @@ ok()  { PASS=$((PASS + 1)); printf '  ok    %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf '  FAIL  %s\n        %s\n' "$1" "${2:-}"; }
 is()  { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "got '$2', want '$3'"; fi; }
 has() { case "$2" in *"$3"*) ok "$1" ;; *) bad "$1" "'$2' has no '$3'" ;; esac; }
+excludes() { case "$2" in *"$3"*) bad "$1" "leaked '$3'" ;; *) ok "$1" ;; esac; }
+count()    { printf '%s\n' "$1" | grep -c .; }
 
 [ -x "$SUT" ] || { echo "missing or non-executable $SUT" >&2; exit 1; }
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/review-checks-test.XXXXXX")" || exit 1
+TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
+# Nothing from the caller's city or git config reaches the fixtures.
+unset GC_RIG_ROOT GC_REVIEW_CHECKS_INDEX GIT_DIR GIT_WORK_TREE 2>/dev/null || true
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 
 IDX="$TMP/review-checks.toml"
 cat >"$IDX" <<'TOML'
@@ -40,30 +63,27 @@ purpose = "Which specialist checks does this diff warrant?"
 phase = "pre-open"
 
 [checks.demo]
-method = "skills/gc-demo-script/SKILL.md + skills/demo-capture/SKILL.md"
 purpose = "Was the operator-watched surface recorded doing the thing?"
 phase = "open-as-draft"
 
 [unrelated]
-method = "not-a-check"
+purpose = "not-a-check"
 TOML
 
-# All rows.
+# ---- the emit verbs, over one named file ------------------------------------
 OUT="$("$SUT" --file "$IDX")"; RC=$?
 is  "all-rows exit 0" "$RC" "0"
-is  "declares exactly three checks" "$(printf '%s\n' "$OUT" | grep -c .)" "3"
-has "correctness row carries its method" "$OUT" "correctness	skills/review-correctness/SKILL.md	"
-has "triage row present" "$OUT" "triage	skills/review-triage/SKILL.md	"
-has "demo method keeps the + join" "$OUT" "gc-demo-script/SKILL.md + skills/demo-capture/SKILL.md"
-case "$OUT" in *"unrelated"*) bad "a key outside [checks.*] is not read as a check" "leaked 'unrelated'" ;; *) ok "a key outside [checks.*] is not read as a check" ;; esac
+is  "declares exactly three checks" "$(count "$OUT")" "3"
+has "a row is name, purpose and phase" "$OUT" "correctness	Is the change correct and safe as merged?	pre-open"
+has "triage row present" "$OUT" "triage	Which specialist checks does this diff warrant?	pre-open"
+has "demo row carries open-as-draft" "$OUT" "demo	Was the operator-watched surface recorded doing the thing?	open-as-draft"
+excludes "an older index's method key is ignored" "$OUT" "skills/review-correctness"
+excludes "a key outside [checks.*] is not read as a check" "$OUT" "unrelated"
+is  "--show prints the same rows" "$("$SUT" --show --file "$IDX")" "$OUT"
 
-# --check narrows to one row.
 OUT="$("$SUT" --file "$IDX" --check triage)"; RC=$?
 is  "--check exit 0" "$RC" "0"
-is  "--check emits one row" "$(printf '%s\n' "$OUT" | grep -c .)" "1"
-has "--check emits the asked row" "$OUT" "triage	skills/review-triage/SKILL.md	"
-
-# --check for an undeclared check fails closed.
+is  "--check emits the asked row alone" "$OUT" "triage	Which specialist checks does this diff warrant?	pre-open"
 "$SUT" --file "$IDX" --check nonesuch >/dev/null 2>&1
 is "undeclared --check exits 1" "$?" "1"
 
@@ -71,60 +91,57 @@ is "undeclared --check exits 1" "$?" "1"
 # check_set token by, and emits the row as the index writes it.
 OUT="$("$SUT" --file "$IDX" --check TRIAGE)"; RC=$?
 is  "--check TRIAGE exit 0" "$RC" "0"
-has "--check TRIAGE emits the triage row" "$OUT" "triage	skills/review-triage/SKILL.md	"
+has "--check TRIAGE emits the triage row" "$OUT" "triage	Which specialist checks"
 MIXED="$TMP/mixed-case.toml"
 printf '[checks.Security]\nmethod = "m"\npurpose = "p"\nphase = "pre-open"\n' >"$MIXED"
 OUT="$("$SUT" --file "$MIXED" --check security)"; RC=$?
 is  "--check security exit 0 on a row written [checks.Security]" "$RC" "0"
-is  "…and the row keeps the name the index wrote" "$OUT" "Security	m	p	pre-open"
+is  "…and the row keeps the name the index wrote" "$OUT" "Security	p	pre-open"
+# An empty purpose stays an empty column rather than folding the phase into it.
+printf '[checks.bare]\nphase = "merge"\n' >"$TMP/bare.toml"
+is "an empty purpose keeps its column" "$("$SUT" --file "$TMP/bare.toml" --check bare)" "bare		merge"
 
-# A missing index fails closed.
 "$SUT" --file "$TMP/nope.toml" >/dev/null 2>&1
-is "missing index exits 1" "$?" "1"
-
-# An index that declares no checks fails closed.
+is "a missing index exits 1" "$?" "1"
 EMPTY="$TMP/empty.toml"; printf '# nothing here\n[other]\nx = "y"\n' >"$EMPTY"
 "$SUT" --file "$EMPTY" >/dev/null 2>&1
-is "index with no checks exits 1" "$?" "1"
+is "an index with no checks exits 1" "$?" "1"
 
-# No --file is a usage error.
+# ---- a call that names neither a commit nor an index ----------------------------
 "$SUT" >/dev/null 2>&1
-is "no --file exits 2" "$?" "2"
+is "no arguments exit 2" "$?" "2"
+ERR="$("$SUT" --show 2>&1 >/dev/null)"; RC=$?
+is  "--show with no commit exits 2" "$RC" "2"
+has "…saying no commit was named" "$ERR" "no commit named"
+"$SUT" --resolve --check-set correctness --through merge --at "" >/dev/null 2>&1
+is "--resolve with --at \"\" exits 2" "$?" "2"
+"$SUT" --resolve --show --at HEAD >/dev/null 2>&1
+is "two verbs in one call exit 2" "$?" "2"
 
-# The repo's own index declares the forced baseline and the arch specialist.
+# ---- the pack's own index -----------------------------------------------------
 REAL="$REPO/review-checks.toml"
 if [ -r "$REAL" ]; then
-  "$SUT" --file "$REAL" --check correctness >/dev/null 2>&1
-  is "repo index declares correctness" "$?" "0"
-  "$SUT" --file "$REAL" --check triage >/dev/null 2>&1
-  is "repo index declares triage" "$?" "0"
-  "$SUT" --file "$REAL" --check arch >/dev/null 2>&1
-  is "repo index declares the arch specialist check" "$?" "0"
-  # Every check the real index declares carries a phase in the ordered set; an
-  # unphased check falls to the resolver's pre-phase fallback and warns on every
-  # resolve that names it, so the shipped index must not carry one.
-  unphased=$("$SUT" --file "$REAL" | awk -F'\t' 'NF && $4 !~ /^(pre-open|open-as-draft|ready-for-review|merge)$/ { print $1 }')
-  is "every check in the repo index declares a valid phase" "$unphased" ""
-  # Every method the shipped index points at exists in the repo, so a dispatch
-  # never names a method no reviewer can open. A method may join files with " + ".
-  unshipped=$("$SUT" --file "$REAL" \
-    | awk -F'\t' 'NF { n = split($2, m, / [+] /); for (i = 1; i <= n; i++) print m[i] }' \
-    | while IFS= read -r p; do [ -n "$p" ] && [ ! -e "$REPO/$p" ] && printf '%s ' "$p"; done)
-  is "every method the repo index declares ships in the repo" "$unshipped" ""
+  for c in correctness triage arch; do
+    "$SUT" --file "$REAL" --check "$c" >/dev/null 2>&1
+    is "the pack's index declares $c" "$?" "0"
+  done
+  # Every check declares a phase in the ordered set: an unphased check falls to
+  # the resolver's pre-open default and warns on every resolve that names it.
+  ERR="$("$SUT" --file "$REAL" 2>&1 >/dev/null)"
+  is "every check in the pack's index declares a valid phase" "$ERR" ""
+  # Every check's method is the skill named from the check, so every check the
+  # pack declares has one the pack ships.
+  unshipped=$("$SUT" --file "$REAL" 2>/dev/null | cut -f1 \
+    | while IFS= read -r c; do
+        [ -n "$c" ] && [ ! -f "$REPO/skills/review-$(printf '%s' "$c" | tr '[:upper:]' '[:lower:]')/SKILL.md" ] && printf '%s ' "$c"
+      done)
+  is "every check the pack's index declares has its skills/review-<check>/SKILL.md" "$unshipped" ""
+  is "the pack's index carries no method key" "$(grep -cE '^[[:space:]]*method[[:space:]]*=' "$REAL")" "0"
 else
-  bad "repo carries review-checks.toml" "no $REAL"
+  bad "the pack carries review-checks.toml" "no $REAL"
 fi
 
-# ---- the phase column ---------------------------------------------------------
-OUT="$("$SUT" --file "$IDX")"
-has "emit carries the phase column (correctness pre-open)" "$OUT" "correctness	skills/review-correctness/SKILL.md	Is the change correct and safe as merged?	pre-open"
-has "emit carries open-as-draft (demo)" "$OUT" "	open-as-draft"
-has "--check demo carries its phase" "$("$SUT" --file "$IDX" --check demo)" "	open-as-draft"
-
 # ---- the resolver: phase-scoped gating sets ----------------------------------
-excludes() { case "$2" in *"$3"*) bad "$1" "leaked '$3'" ;; *) ok "$1" ;; esac; }
-count()    { printf '%s\n' "$1" | grep -c .; }
-
 OUT="$("$SUT" --resolve --check-set "correctness,triage,demo" --through pre-open --file "$IDX" 2>/dev/null)"
 is       "resolve --through pre-open: two checks" "$(count "$OUT")" "2"
 has      "resolve pre-open has correctness" "$OUT" "correctness"
@@ -141,7 +158,6 @@ excludes "resolve drops approval" "$OUT" "approval"
 excludes "resolve drops none" "$OUT" "none"
 excludes "resolve drops off" "$OUT" "off"
 
-# --with-phase emits <name>\t<phase>.
 OUT="$("$SUT" --resolve --check-set "correctness,demo" --through merge --with-phase --file "$IDX" 2>/dev/null)"
 has "--with-phase pairs correctness with pre-open" "$OUT" "correctness	pre-open"
 has "--with-phase pairs demo with open-as-draft" "$OUT" "demo	open-as-draft"
@@ -151,7 +167,7 @@ OUT="$("$SUT" --resolve --check-set "Correctness,correctness,TRIAGE" --through m
 is  "resolve dedupes case-folded duplicates: two checks" "$(count "$OUT")" "2"
 has "resolve keeps the token's original case" "$OUT" "Correctness"
 
-# An undeclared token defaults to pre-open — the dispatchable backstop — not the
+# An undeclared token defaults to pre-open, the dispatchable backstop, not the
 # merge gate: pre-open is the one phase gate-ensure dispatches at every stage, so
 # the token always has a path to its review rather than a merge-only gate that
 # could hold the merge with no review produced. A live anchor still carrying a
@@ -159,11 +175,10 @@ has "resolve keeps the token's original case" "$OUT" "Correctness"
 # satisfiable.
 OUT="$("$SUT" --resolve --check-set "correctness,bogus" --through pre-open --file "$IDX" 2>/dev/null)"
 has "undeclared token gates pre-open" "$OUT" "bogus"
-# Pre-open precedes merge, so merge still lists it — now backed by a review the
-# dispatcher can actually run. --with-phase pins the resolved phase as pre-open,
-# proving it is not the unreachable merge-only backstop.
 OUT="$("$SUT" --resolve --check-set "correctness,bogus" --through merge --with-phase --file "$IDX" 2>/dev/null)"
 has "undeclared token still gates merge, carrying the pre-open phase" "$OUT" "bogus	pre-open"
+ERR="$("$SUT" --resolve --check-set "bogus" --through pre-open --file "$IDX" 2>&1 >/dev/null)"
+has "an undeclared token's warning names the index that was read" "$ERR" "is not declared in the index ($IDX)"
 
 # An empty set, or one naming only non-lanes, resolves to nothing at exit 0.
 OUT="$("$SUT" --resolve --check-set "" --through merge --file "$IDX" 2>/dev/null)"; RC=$?
@@ -172,108 +187,287 @@ is "empty check-set: no gates" "$(count "$OUT")" "0"
 OUT="$("$SUT" --resolve --check-set "none,off,approval" --through merge --file "$IDX" 2>/dev/null)"
 is "non-lane-only check-set: no gates" "$(count "$OUT")" "0"
 
-# A bad --through is a usage error.
 "$SUT" --resolve --check-set "correctness" --through nonsense --file "$IDX" >/dev/null 2>&1
 is "bad --through exits 2" "$?" "2"
 "$SUT" --resolve --check-set "correctness" --file "$IDX" >/dev/null 2>&1
 is "--resolve without --through exits 2" "$?" "2"
 
-# An old-format index (no phase column) defaults every declared check to pre-open,
-# so a branch cut before the phase column lands never opens an ungated PR.
+# An index with no phase column defaults every declared check to pre-open, so a
+# branch cut before the phase column never opens an ungated PR.
 OLDIDX="$TMP/old.toml"
 printf '[checks.correctness]\nmethod = "m"\npurpose = "p"\n[checks.triage]\nmethod = "m"\npurpose = "p"\n' >"$OLDIDX"
 OUT="$("$SUT" --resolve --check-set "correctness,triage" --through pre-open --file "$OLDIDX" 2>/dev/null)"
 is "old index: declared-but-unphased defaults to pre-open" "$(count "$OUT")" "2"
 ERR="$("$SUT" --resolve --check-set "correctness" --through pre-open --file "$OLDIDX" 2>&1 >/dev/null)"
 has "an absent phase is named as absent" "$ERR" "is declared with no phase"
+is "--check of an unphased row prints the pre-open it gates at" "$("$SUT" --file "$OLDIDX" --check triage 2>/dev/null)" "triage	p	pre-open"
 
 # A phase value outside the ordered set (misspelled or mis-cased) is an index
 # error, not an absent phase: the resolve exits 1 so every caller holds, rather
 # than demote a merge-phase check to pre-open and gate the create on it.
 BADIDX="$TMP/badphase.toml"
-printf '[checks.weird]\nmethod = "m"\npurpose = "p"\nphase = "Merge"\n[checks.fine]\nmethod = "m"\npurpose = "p"\nphase = "merge"\n' >"$BADIDX"
-OUT="$("$SUT" --resolve --check-set "weird" --through merge --with-phase --file "$BADIDX" 2>/dev/null)"; RC=$?
-is "an unrecognized phase fails the resolve (exit 1)" "$RC" "1"
+printf '[checks.weird]\npurpose = "p"\nphase = "Merge"\n[checks.fine]\npurpose = "p"\nphase = "merge"\n' >"$BADIDX"
+"$SUT" --resolve --check-set "weird" --through merge --with-phase --file "$BADIDX" >/dev/null 2>&1
+is "an unrecognized phase fails the resolve (exit 1)" "$?" "1"
 ERR="$("$SUT" --resolve --check-set "weird" --through merge --file "$BADIDX" 2>&1 >/dev/null)"
 has "…naming the bad value, not 'no phase'" "$ERR" "declares phase 'Merge', which is not a phase"
 OUT="$("$SUT" --resolve --check-set "fine" --through merge --with-phase --file "$BADIDX" 2>/dev/null)"; RC=$?
 is  "a set that does not name the malformed check still resolves" "$RC" "0"
 has "…with its own declared phase" "$OUT" "fine	merge"
-ERR="$("$SUT" --resolve --check-set "bogus" --through pre-open --file "$IDX" 2>&1 >/dev/null)"
-has "an undeclared token's warning names the index that was read" "$ERR" "is not declared in the index ($IDX)"
+"$SUT" --file "$BADIDX" --check weird >/dev/null 2>&1
+is "--check of a row with a phase outside the ordered set exits 1" "$?" "1"
+OUT="$("$SUT" --show --file "$BADIDX" 2>"$TMP/err")"; RC=$?
+is       "--show over a malformed row exits 0" "$RC" "0"
+is       "…listing the rows it accepts" "$OUT" "fine	p	merge"
+has      "…and naming the row it leaves out" "$(cat "$TMP/err")" "check 'weird' declares phase 'Merge'"
 
 # No readable index: every token is undeclared, so every non-lane token takes
-# pre-open and gates every transition — rather than open an ungated PR. With
-# --with-phase the tokens carry that same pre-open phase, so a reader that splits
-# the set by phase sees exactly the gates the plain resolve holds on.
+# pre-open and gates every transition, rather than open an ungated PR.
 OUT="$("$SUT" --resolve --check-set "correctness,demo,approval,none" --through pre-open --file "$TMP/nope.toml" 2>/dev/null)"; RC=$?
 is       "no-index fallback: exit 0" "$RC" "0"
 is       "no-index fallback: both real tokens survive" "$(count "$OUT")" "2"
 excludes "no-index fallback still drops approval" "$OUT" "approval"
 OUT="$("$SUT" --resolve --check-set "correctness,demo" --through pre-open --with-phase --file "$TMP/nope.toml" 2>/dev/null)"
-has "no-index --with-phase tags correctness pre-open" "$OUT" "correctness	pre-open"
 has "no-index --with-phase tags demo pre-open, the phase it gates at" "$OUT" "demo	pre-open"
 excludes "no-index --with-phase never tags a token merge" "$OUT" "	merge"
 
-# --at reads the index from a commit (git show), the path the cadence uses.
+# ---- the layered index ----------------------------------------------------------
+# A fixture pack: the script under <pack>/assets/scripts, its index at <pack>.
+PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"
+cp "$SUT" "$PACK/assets/scripts/review-checks.sh"; chmod +x "$PACK/assets/scripts/review-checks.sh"
+PSUT="$PACK/assets/scripts/review-checks.sh"
+cat >"$PACK/review-checks.toml" <<'TOML'
+[checks.correctness]
+purpose = "PACK correctness"
+phase = "pre-open"
+
+[checks.triage]
+purpose = "PACK triage"
+phase = "pre-open"
+
+[checks.demo]
+purpose = "PACK demo"
+phase = "open-as-draft"
+TOML
+
 # Fixture commits are unsigned: an operator's global commit.gpgsign would
 # otherwise need a signing agent this hermetic run does not have.
 commit_q() { git -C "$1" -c user.email=t@t.test -c user.name=t -c commit.gpgsign=false commit -q "${@:2}" >/dev/null 2>&1; }
-GITREPO="$TMP/gitrepo"; mkdir -p "$GITREPO"
-git -C "$GITREPO" init -q
-cp "$IDX" "$GITREPO/review-checks.toml"
-git -C "$GITREPO" add review-checks.toml
-commit_q "$GITREPO" -m "index"
-OID="$(git -C "$GITREPO" rev-parse --verify -q HEAD 2>/dev/null)"
-if [ -n "$OID" ]; then
-  OUT="$(cd "$GITREPO" && "$SUT" --resolve --check-set "correctness,demo" --through pre-open --at "$OID" 2>/dev/null)"
-  is       "--at git-show: correctness is pre-open" "$(count "$OUT")" "1"
-  excludes "--at git-show: demo excluded pre-open" "$OUT" "demo"
-  OUT="$(cd "$GITREPO" && "$SUT" --resolve --check-set "correctness,demo" --through open-as-draft --at "$OID" 2>/dev/null)"
-  has "--at git-show: demo included at open-as-draft" "$OUT" "demo"
+RIG="$TMP/rig"; mkdir -p "$RIG/docs"
+git -C "$RIG" init -q
+echo readme > "$RIG/README"
+git -C "$RIG" add README && commit_q "$RIG" -m "no index"
+NOIDX="$(git -C "$RIG" rev-parse --verify -q HEAD)"
+# The rig's index: demo moves to pre-open and keeps the pack's purpose, ux is the
+# rig's own check, and the method key an older index carries is ignored.
+cat >"$RIG/review-checks.toml" <<'TOML'
+[checks.Demo]
+method = "skills/review-demo/SKILL.md"
+phase = "pre-open"
+
+[checks.ux]
+purpose = "RIG ux"
+phase = "pre-open"
+TOML
+printf 'ARCH-GUIDANCE-MARK\n' > "$RIG/docs/review-arch.md"
+git -C "$RIG" add review-checks.toml docs/review-arch.md && commit_q "$RIG" -m "rig index"
+WITHIDX="$(git -C "$RIG" rev-parse --verify -q HEAD)"
+# The working tree carries an index no commit does, which no read may answer from.
+printf '[checks.wt]\npurpose = "WORKTREE wt"\nphase = "pre-open"\n[checks.demo]\nphase = "merge"\n' > "$RIG/review-checks.toml"
+
+if [ -n "$NOIDX" ] && [ -n "$WITHIDX" ]; then
+  # A commit with no index resolves to the pack's rows, and the working tree's
+  # index adds nothing.
+  OUT="$(cd "$RIG" && "$PSUT" --show --at "$NOIDX" 2>/dev/null)"; RC=$?
+  is "a commit with no index: exit 0" "$RC" "0"
+  is "…its effective index is the pack's rows" "$OUT" "$(printf 'correctness\tPACK correctness\tpre-open\ntriage\tPACK triage\tpre-open\ndemo\tPACK demo\topen-as-draft')"
+  OUT="$(cd "$RIG" && "$PSUT" --resolve --check-set "correctness,demo,wt" --through pre-open --with-phase --at "$NOIDX" 2>/dev/null)"
+  excludes "…demo keeps the pack's open-as-draft, not the working tree's merge" "$OUT" "demo"
+  has      "…and the working tree's own check is undeclared there, so pre-open" "$OUT" "wt	pre-open"
+
+  # A rig row changes a pack check's phase and keeps its purpose; a rig row adds
+  # a check; the pack's row keeps its name.
+  OUT="$(cd "$RIG" && "$PSUT" --show --at "$WITHIDX" 2>/dev/null)"
+  has      "a rig row changes a pack check's phase and keeps its purpose" "$OUT" "demo	PACK demo	pre-open"
+  has      "a rig row adds a check of the rig's own" "$OUT" "ux	RIG ux	pre-open"
+  is       "…after the pack's checks, in order" "$(printf '%s\n' "$OUT" | cut -f1 | tr '\n' ' ')" "correctness triage demo ux "
+  excludes "the working tree's index answers for no commit" "$OUT" "WORKTREE"
+  OUT="$(cd "$RIG" && "$PSUT" --resolve --check-set "correctness,demo,ux" --through pre-open --at "$WITHIDX" 2>/dev/null)"
+  is "the resolve at that commit gates the moved demo and the rig's ux at pre-open" "$(printf '%s\n' "$OUT" | tr '\n' ' ')" "correctness demo ux "
+  is "--check reads one effective row" "$(cd "$RIG" && "$PSUT" --check demo --at "$WITHIDX" 2>/dev/null)" "demo	PACK demo	pre-open"
+  # GC_RIG_ROOT names the rig's repository for a caller standing outside it.
+  OUT="$(cd "$TMP" && GC_RIG_ROOT="$RIG" "$PSUT" --check ux --at "$WITHIDX" 2>/dev/null)"
+  is "a caller outside the rig reads its rows through GC_RIG_ROOT" "$OUT" "ux	RIG ux	pre-open"
+
+  # A call that names no commit is refused, even beside a working-tree index.
+  (cd "$RIG" && "$PSUT" --show >/dev/null 2>&1); is "no --at, beside a working-tree index: exit 2" "$?" "2"
+  (cd "$RIG" && "$PSUT" --resolve --check-set correctness --through merge --at "" >/dev/null 2>&1)
+  is "--at \"\", beside a working-tree index: exit 2" "$?" "2"
+  OUT="$(cd "$RIG" && "$PSUT" --resolve --check-set correctness --through merge --at "" 2>/dev/null)"
+  is "…emitting no gates" "$(count "$OUT")" "0"
+
+  # An index named outright resolves without a commit and stands in for both
+  # layers: the pack's rows are not added to it.
+  OUT="$(cd "$RIG" && "$PSUT" --show --file "$IDX" 2>/dev/null)"; RC=$?
+  is       "--file resolves without --at" "$RC" "0"
+  excludes "…and the pack's rows are not laid under it" "$OUT" "PACK"
+  OUT="$(cd "$RIG" && GC_REVIEW_CHECKS_INDEX="$IDX" "$PSUT" --resolve --check-set "correctness,demo" --through pre-open 2>/dev/null)"; RC=$?
+  is       "GC_REVIEW_CHECKS_INDEX resolves without --at" "$RC" "0"
+  is       "…against the index it names" "$OUT" "correctness"
+  OUT="$(GC_REVIEW_CHECKS_INDEX="$IDX" "$PSUT" --resolve --check-set "correctness,demo" --through pre-open --at deadbeef 2>/dev/null)"
+  is       "GC_REVIEW_CHECKS_INDEX wins over --at" "$OUT" "correctness"
+  OUT="$(GC_REVIEW_CHECKS_INDEX="$TMP/absent.toml" "$PSUT" --resolve --check-set "correctness,demo" --through pre-open 2>/dev/null)"
+  is "GC_REVIEW_CHECKS_INDEX naming a missing file forces the no-index fallback (both survive)" "$(count "$OUT")" "2"
+
+  # The extension: a commit's docs/review-<check>.md, the check folded to
+  # lowercase; nothing at a commit that carries none; always at a commit.
+  OUT="$(cd "$RIG" && "$PSUT" --extension ARCH --at "$WITHIDX" 2>/dev/null)"; RC=$?
+  is "--extension prints the commit's docs/review-<check>.md" "$OUT" "ARCH-GUIDANCE-MARK"
+  is "…exit 0" "$RC" "0"
+  OUT="$(cd "$RIG" && "$PSUT" --extension arch --at "$NOIDX" 2>/dev/null)"; RC=$?
+  is "--extension at a commit that carries none prints nothing" "$OUT" ""
+  is "…and exits 0" "$RC" "0"
+  (cd "$RIG" && "$PSUT" --extension arch >/dev/null 2>&1); is "--extension with no commit exits 2" "$?" "2"
+  (cd "$RIG" && "$PSUT" --extension arch --file "$IDX" >/dev/null 2>&1); is "…even beside --file" "$?" "2"
+  (cd "$RIG" && GC_REVIEW_CHECKS_INDEX="$IDX" "$PSUT" --extension arch >/dev/null 2>&1); is "…even beside GC_REVIEW_CHECKS_INDEX" "$?" "2"
+  (cd "$RIG" && "$PSUT" --extension ../README --at "$WITHIDX" >/dev/null 2>&1); is "--extension takes a check name, not a path" "$?" "2"
+
+  # A rig row with a phase outside the ordered set is refused at the commits that
+  # carry it, and only there.
+  printf '[checks.triage]\nphase = "Pre-Open"\n' > "$RIG/review-checks.toml"
+  git -C "$RIG" add review-checks.toml && commit_q "$RIG" -m "bad rig phase"
+  BADRIG="$(git -C "$RIG" rev-parse --verify -q HEAD)"
+  ERR="$(cd "$RIG" && "$PSUT" --resolve --check-set "correctness,triage" --through merge --at "$BADRIG" 2>&1 >/dev/null)"; RC=$?
+  is  "a rig row with a phase outside the ordered set fails the resolve (exit 1)" "$RC" "1"
+  has "…naming it" "$ERR" "check 'triage' declares phase 'Pre-Open'"
+  OUT="$(cd "$RIG" && "$PSUT" --resolve --check-set "correctness,triage" --through merge --at "$WITHIDX" 2>/dev/null)"; RC=$?
+  is  "…while a commit without that row still resolves" "$RC" "0"
+  OUT="$(cd "$RIG" && "$PSUT" --show --at "$BADRIG" 2>/dev/null)"
+  excludes "--show leaves the refused row off the menu" "$OUT" "triage"
 else
-  bad "--at git-show setup" "could not init a fixture git repo"
+  bad "layered-index fixture setup" "could not build the rig repository"
 fi
 
-# GC_REVIEW_CHECKS_INDEX overrides --at (the hermetic-test hook a cadence caller
-# uses so its fake reviewed oid does not resolve the live checkout's index).
-OUT="$(GC_REVIEW_CHECKS_INDEX="$IDX" "$SUT" --resolve --check-set "correctness,demo" --through pre-open --at deadbeef 2>/dev/null)"
-is       "env override wins over --at: one pre-open check" "$(count "$OUT")" "1"
-excludes "env override excludes the open-as-draft check" "$OUT" "demo"
-OUT="$(GC_REVIEW_CHECKS_INDEX="$TMP/absent.toml" "$SUT" --resolve --check-set "correctness,demo" --through pre-open 2>/dev/null)"
-is "env override set to a missing file forces the no-index fallback (both survive)" "$(count "$OUT")" "2"
+# No repository here at all: the rig's rows at the commit cannot be read, so
+# every reader of the index fails rather than resolve under the pack's rows
+# alone, as it does for a commit no repository here holds.
+NOREPO="$TMP/norepo"; mkdir -p "$NOREPO"
+for call in "--show" "--check triage" "--resolve --check-set correctness,triage --through merge"; do
+  # shellcheck disable=SC2086 # each call is its words
+  OUT="$(cd "$NOREPO" && GIT_CEILING_DIRECTORIES="$TMP" "$PSUT" $call --at 0123456789abcdef0123456789abcdef01234567 2>"$TMP/err")"; RC=$?
+  is  "no repository here: ${call%% *} exits 1" "$RC" "1"
+  is  "…printing nothing" "$OUT" ""
+  has "…and stderr says the rig's rows went unread" "$(cat "$TMP/err")" "the rig's rows at that commit are unreadable"
+done
+OUT="$(cd "$NOREPO" && GIT_CEILING_DIRECTORIES="$TMP" "$PSUT" --show --file "$PACK/review-checks.toml" 2>/dev/null)"; RC=$?
+is  "…while an index named outright still reads with no repository" "$RC" "0"
 
-# --at names a head this checkout has not fetched: the resolver fetches that commit
-# from origin by id and reads ITS index, never the working tree's. Two local repos
-# stand in for origin and the refinery's checkout; GC_RIG_ROOT is cleared so the
-# only repository consulted is the clone.
+# ---- --at fetches a commit the checkout has not fetched ----------------------------
+# Two local repos stand in for origin and the refinery's checkout; GC_RIG_ROOT is
+# unset so the only repository consulted is the clone.
 ORIGIN="$TMP/origin"; CLONE="$TMP/clone"
-mkdir -p "$ORIGIN" && git -C "$ORIGIN" init -q && cp "$IDX" "$ORIGIN/review-checks.toml" \
+mkdir -p "$ORIGIN" && git -C "$ORIGIN" init -q && printf '[checks.ux]\npurpose = "one"\nphase = "open-as-draft"\n' > "$ORIGIN/review-checks.toml" \
   && git -C "$ORIGIN" add review-checks.toml && commit_q "$ORIGIN" -m one \
   && git clone -q "$ORIGIN" "$CLONE" 2>/dev/null
-# The head moves on origin after the clone, and its index moves demo to pre-open.
-sed 's/^phase = "open-as-draft"$/phase = "pre-open"/' "$IDX" > "$ORIGIN/review-checks.toml"
+# The head moves on origin after the clone, and its index moves ux to pre-open.
+printf '[checks.ux]\npurpose = "two"\nphase = "pre-open"\n' > "$ORIGIN/review-checks.toml"
 commit_q "$ORIGIN" -am two
 NEW="$(git -C "$ORIGIN" rev-parse --verify -q HEAD 2>/dev/null)"
 if [ -n "$NEW" ] && [ -d "$CLONE/.git" ] && ! git -C "$CLONE" cat-file -e "$NEW^{commit}" 2>/dev/null; then
-  OUT="$(cd "$CLONE" && env -u GC_RIG_ROOT "$SUT" --resolve --check-set "correctness,demo" --through pre-open --at "$NEW" 2>/dev/null)"; RC=$?
+  OUT="$(cd "$CLONE" && "$PSUT" --resolve --check-set "correctness,ux" --through pre-open --at "$NEW" 2>/dev/null)"; RC=$?
   is  "--at an unfetched head: exit 0" "$RC" "0"
-  has "--at an unfetched head reads that head's index (demo is pre-open there)" "$OUT" "demo"
+  has "--at an unfetched head reads that head's index (ux is pre-open there)" "$OUT" "ux"
   git -C "$CLONE" cat-file -e "$NEW^{commit}" 2>/dev/null; is "…having fetched the commit into the clone" "$?" "0"
-  # A commit neither the clone nor origin holds fails the resolve: no other
-  # tree's index answers for it.
-  OUT="$(cd "$CLONE" && env -u GC_RIG_ROOT "$SUT" --resolve --check-set "correctness" --through pre-open --at 0123456789abcdef0123456789abcdef01234567 2>/dev/null)"; RC=$?
+  # A commit neither the clone nor origin holds fails the call: no other tree's
+  # index answers for it.
+  OUT="$(cd "$CLONE" && "$PSUT" --resolve --check-set "correctness" --through pre-open --at 0123456789abcdef0123456789abcdef01234567 2>/dev/null)"; RC=$?
   is "--at a commit that cannot be fetched: exit 1" "$RC" "1"
   is "…emitting no gates" "$(count "$OUT")" "0"
-  # A commit that carries no index of its own falls through to the working tree.
+  (cd "$CLONE" && "$PSUT" --extension ux --at 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1)
+  is "--extension at a commit that cannot be fetched: exit 1" "$?" "1"
+  # Each repository is asked once. A git that logs the fetches it runs counts the
+  # asks for a commit no repository holds: the checkout named again as
+  # GC_RIG_ROOT, and a worktree beside the checkout it was added to, read one
+  # object store, so origin is asked once; two repositories are asked twice.
+  mkdir -p "$TMP/logbin"
+  printf '#!/usr/bin/env bash\ncase " $* " in *" fetch "*) printf "%%s\\n" "$*" >> "%s" ;; esac\nexec "%s" "$@"\n' \
+    "$TMP/fetch.log" "$(command -v git)" > "$TMP/logbin/git"
+  chmod +x "$TMP/logbin/git"
+  fetches() { # <cwd> <GC_RIG_ROOT> — the fetches one resolve at an unknown commit runs
+    : > "$TMP/fetch.log"
+    (cd "$1" && PATH="$TMP/logbin:$PATH" GC_RIG_ROOT="$2" "$PSUT" --resolve --check-set correctness \
+      --through pre-open --at 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1)
+    count "$(cat "$TMP/fetch.log")"
+  }
+  is "the checkout named again as GC_RIG_ROOT asks origin once" "$(fetches "$CLONE" "$CLONE")" "1"
+  git -C "$CLONE" worktree add -q --detach "$TMP/clone-wt" >/dev/null 2>&1
+  is "a worktree beside the checkout it was added to asks origin once" "$(fetches "$TMP/clone-wt" "$CLONE")" "1"
+  is "…while two repositories are each asked" "$(fetches "$CLONE" "$RIG")" "2"
+  # A commit that carries no index of its own adds no rows: the pack's stand,
+  # whatever the working tree holds.
   git -C "$CLONE" rm -q review-checks.toml && commit_q "$CLONE" -m noindex
-  NOIDX="$(git -C "$CLONE" rev-parse --verify -q HEAD)"
-  cp "$IDX" "$CLONE/review-checks.toml"
-  OUT="$(cd "$CLONE" && env -u GC_RIG_ROOT "$SUT" --resolve --check-set "correctness,demo" --through pre-open --at "$NOIDX" 2>/dev/null)"; RC=$?
+  CNOIDX="$(git -C "$CLONE" rev-parse --verify -q HEAD)"
+  printf '[checks.ux]\npurpose = "wt"\nphase = "pre-open"\n' > "$CLONE/review-checks.toml"
+  OUT="$(cd "$CLONE" && "$PSUT" --resolve --check-set "correctness,demo" --through pre-open --at "$CNOIDX" 2>/dev/null)"; RC=$?
   is       "--at a commit with no index: exit 0" "$RC" "0"
-  excludes "…the working-tree index stands in (demo stays open-as-draft)" "$OUT" "demo"
+  excludes "…the pack's rows stand (demo stays open-as-draft)" "$OUT" "demo"
+  is       "…and the working tree's index adds no row" "$(cd "$CLONE" && "$PSUT" --check ux --at "$CNOIDX" >/dev/null 2>&1; echo $?)" "1"
 else
   bad "--at fetch fixture setup" "could not build the origin/clone pair"
+fi
+
+# ---- --edits lists the guidance a change edits ---------------------------------
+# origin holds a base branch and a change cut from it. The change is pushed after
+# the clone, so the clone holds neither it nor the base's later commit.
+EO="$TMP/edits-origin"; EC="$TMP/edits-clone"
+mkdir -p "$EO/docs" && git -C "$EO" init -q && git -C "$EO" symbolic-ref HEAD refs/heads/base \
+  && printf 'x\n' > "$EO/README" && printf '[checks.ux]\nphase = "pre-open"\n' > "$EO/review-checks.toml" \
+  && printf 'old\n' > "$EO/docs/review-correctness.md" && git -C "$EO" add -A && commit_q "$EO" -m base \
+  && git clone -q "$EO" "$EC" 2>/dev/null
+# The change edits the index, renames the correctness guidance away, and touches
+# code and two docs that are not guidance. The base then edits guidance of its
+# own, which is not the change's edit.
+git -C "$EO" checkout -q -b change base 2>/dev/null
+printf '[checks.ux]\nphase = "merge"\n' > "$EO/review-checks.toml"
+git -C "$EO" mv docs/review-correctness.md correctness-notes.md 2>/dev/null
+mkdir -p "$EO/docs/sub" && printf 'n\n' > "$EO/docs/sub/review-x.md" && printf 'n\n' > "$EO/docs/architecture.md"
+printf 'y\n' >> "$EO/README"
+git -C "$EO" add -A && commit_q "$EO" -m change
+ECHANGE="$(git -C "$EO" rev-parse --verify -q HEAD 2>/dev/null)"
+git -C "$EO" checkout -q -b plain base 2>/dev/null && printf 'z\n' >> "$EO/README" && commit_q "$EO" -am plain
+EPLAIN="$(git -C "$EO" rev-parse --verify -q HEAD 2>/dev/null)"
+git -C "$EO" checkout -q base 2>/dev/null && printf 'base\n' > "$EO/docs/review-arch.md" \
+  && git -C "$EO" add -A && commit_q "$EO" -m "base moves"
+# A branch brought current by merging the moved base in: the base's guidance edit
+# reaches it through the merge, and the fork point is that base commit only when
+# the base is read as origin has it now.
+git -C "$EO" checkout -q -b merged change 2>/dev/null \
+  && git -C "$EO" -c user.email=t@t.test -c user.name=t -c commit.gpgsign=false merge -q --no-edit base >/dev/null 2>&1
+EMERGED="$(git -C "$EO" rev-parse --verify -q HEAD 2>/dev/null)"
+if [ -n "$ECHANGE" ] && [ -n "$EPLAIN" ] && [ -n "$EMERGED" ] && [ "$EMERGED" != "$ECHANGE" ] && [ -d "$EC/.git" ] && ! git -C "$EC" cat-file -e "$ECHANGE^{commit}" 2>/dev/null; then
+  OUT="$(cd "$EC" && "$PSUT" --edits --base base --at "$ECHANGE" 2>"$TMP/err")"; RC=$?
+  is "--edits at a change the clone has not fetched: exit 0" "$RC" "0"
+  is "…lists the guidance it edits, the path a rename left included" "$OUT" "$(printf 'docs/review-correctness.md\nreview-checks.toml')"
+  git -C "$EC" cat-file -e "$ECHANGE^{commit}" 2>/dev/null; is "…having fetched the change into the clone" "$?" "0"
+  is "…and saying nothing on stderr" "$(cat "$TMP/err")" ""
+  OUT="$(cd "$EC" && "$PSUT" --edits --base base --at "$EPLAIN" 2>/dev/null)"; RC=$?
+  is "--edits at a change that edits no guidance: exit 0" "$RC" "0"
+  is "…printing nothing" "$OUT" ""
+  OUT="$(cd "$EC" && "$PSUT" --edits --base base --at "$EMERGED" 2>/dev/null)"; RC=$?
+  is "--edits at a branch that merged its moved base in: exit 0" "$RC" "0"
+  is "…lists the branch's guidance edits and not the base's, read from the base origin has now" "$OUT" "$(printf 'docs/review-correctness.md\nreview-checks.toml')"
+  ERR="$(cd "$EC" && "$PSUT" --edits --base base --at 0123456789abcdef0123456789abcdef01234567 2>&1 >/dev/null)"; RC=$?
+  is  "--edits at a commit that cannot be fetched: exit 1" "$RC" "1"
+  has "…saying the commit is unreadable" "$ERR" "could not be fetched from origin"
+  ERR="$(cd "$EC" && "$PSUT" --edits --base nonesuch --at "$ECHANGE" 2>&1 >/dev/null)"; RC=$?
+  is  "--edits from a base origin does not have: exit 1" "$RC" "1"
+  has "…saying no fork point reads" "$ERR" "no fork point between origin/nonesuch and $ECHANGE reads"
+  (cd "$EC" && "$PSUT" --edits --at "$ECHANGE" >/dev/null 2>&1); is "--edits with no --base exits 2" "$?" "2"
+  (cd "$EC" && "$PSUT" --edits --base 'bad..base' --at "$ECHANGE" >/dev/null 2>&1); is "--edits with a base that is no branch name exits 2" "$?" "2"
+  (cd "$EC" && "$PSUT" --edits --base base >/dev/null 2>&1); is "--edits with no commit exits 2" "$?" "2"
+  (cd "$EC" && "$PSUT" --edits --base base --file "$IDX" >/dev/null 2>&1); is "…even beside --file" "$?" "2"
+else
+  bad "--edits fixture setup" "could not build the origin/clone pair with an unfetched change"
 fi
 
 echo
