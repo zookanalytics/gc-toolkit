@@ -44,7 +44,15 @@ mkdir -p "$TMP/bin"
 # rows (open beads). A non-empty anchor_bead column lands in the row's
 # metadata, and a non-empty issue_type column is the row's issue_type, as a
 # convoy's row carries it. `gc bd update` and `gc bd close` append to $GCLOG
-# when it is set. Everything else exits 0 with no output.
+# when it is set, and `gc runtime drain-ack` appends to $DRAINLOG. Everything
+# else exits 0 with no output.
+#
+# $FAKE_LIST_RC is the listing's exit status, and $FAKE_LIST_RAW, when set,
+# replaces the fixture's array with its own text, so a read can fail while it
+# prints a whole array, print [] as it fails, or print what is no array at all.
+# `gc bd show <id> --json` answers from $FAKE_SHOW's id|issue_type|status
+# lines, a bead's own row wherever it is open, and a bead absent there gets
+# bd's own answer for a missing id: an error object and exit 1.
 #
 # The stub honours EVERY --metadata-field it is given, the way bd does: the
 # shipped lookup filters on branch alone and applies the anchor half in its own
@@ -68,7 +76,24 @@ if [ "$1" = "bd" ] && { [ "$2" = "update" ] || [ "$2" = "close" ]; }; then
   case " $* " in *" --status=closed "*) exit "${GCUPDRC:-0}" ;; esac
   exit 0
 fi
+if [ "$1" = "runtime" ] && [ "$2" = "drain-ack" ]; then
+  [ -n "${DRAINLOG:-}" ] && printf 'drain-ack\n' >> "$DRAINLOG"
+  exit 0
+fi
+if [ "$1" = "bd" ] && [ "$2" = "show" ]; then
+  while IFS='|' read -r sid stype sstatus; do
+    [ "$sid" = "$3" ] || continue
+    printf '[{"id":"%s","issue_type":"%s","status":"%s"}]\n' "$sid" "$stype" "$sstatus"
+    exit 0
+  done < "${FAKE_SHOW:-/dev/null}"
+  printf '{"error":"no issues found matching the provided IDs"}\n'
+  exit 1
+fi
 [ "$1" = "bd" ] && [ "$2" = "list" ] || exit 0
+if [ -n "${FAKE_LIST_RAW+set}" ]; then
+  printf '%s\n' "$FAKE_LIST_RAW"
+  exit "${FAKE_LIST_RC:-0}"
+fi
 br=""; mr=""; mr_given=0
 for a in "$@"; do
   case "$a" in
@@ -101,12 +126,21 @@ while IFS='|' read -r id rmr rbr created_at ranchor rtype; do
   if [ -z "$out" ]; then out="$obj"; else out="$out,$obj"; fi
 done < "$FAKE_ANCHORS"
 printf '[%s]\n' "$out"
-exit 0
+exit "${FAKE_LIST_RC:-0}"
 GC
 chmod +x "$TMP/bin/gc"
+# escalate.sh beside lifecycle.sh, where merge-push finds it: one line per call
+# on $ESCLOG.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/escalate.sh" <<'ESC'
+[ -n "${ESCLOG:-}" ] && printf '%s\n' "$*" >> "$ESCLOG"
+exit 0
+ESC
+chmod +x "$TMP/bin/escalate.sh"
 
 export PATH="$TMP/bin:$PATH"
 export FAKE_ANCHORS="$TMP/anchors"
+export FAKE_SHOW="$TMP/show"
+: > "$FAKE_SHOW"
 
 # --- Extract the REAL resolve snippet from the formula. -----------------------
 SNIPPET="$(awk '
@@ -225,6 +259,16 @@ eq "$(resolve rework-2 polecat/parent)" "tk-aaaa1|tk-aaaa1" \
 resolve3() { # <work> <branch> [bead-json] -> "EXISTING_ANCHOR|GATING_ANCHOR|LANDS_ON"
   WORK="$1" BRANCH="$2" BEAD_JSON="${3:-}" bash "$TMP/run3.sh" 2>/dev/null | tail -1
 }
+# held <work> <branch> <bead-json> -> "<rc>|<resolved line>|<drain-acks>|<escalations>"
+#   for a resolve that may stop: it then prints no resolved line, drains and
+#   exits 1. LC names the lifecycle writer whose directory holds escalate.sh.
+held() {
+  : > "$TMP/drain.log"; : > "$TMP/esc.log"; local out rc
+  if out=$(WORK="$1" BRANCH="$2" BEAD_JSON="${3:-}" LC="$TMP/bin/lc-stub" \
+             DRAINLOG="$TMP/drain.log" ESCLOG="$TMP/esc.log" bash "$TMP/run3.sh" 2>/dev/null); then rc=0; else rc=$?; fi
+  printf '%s|%s|%s|%s' "$rc" "$(printf '%s\n' "$out" | tail -1)" \
+    "$(tr '\n' ';' < "$TMP/drain.log")" "$(tr '\n' ';' < "$TMP/esc.log")"
+}
 REBUILD_ROW='[{"id":"rebuild-1","metadata":{"task_kind":"rework","anchor_bead":"cv","branch":"integration/cv"}}]'
 cat > "$FAKE_ANCHORS" <<'A'
 rebuild-1||integration/cv|2026-07-02T00:00:00Z|cv|task
@@ -243,13 +287,41 @@ A
 eq "$(resolve3 rebuild-1 integration/cv "$REBUILD_ROW")" "anchor-pre|anchor-pre|" \
    "(5d) a merge_result-carrying anchor on the branch wins; LANDS_ON stays empty"
 # (5e) The named convoy must be open on the same branch: one this lookup does
-#      not return is never anchored, and the child is its own gating anchor.
+#      not return is never anchored. The child does not anchor itself in its
+#      place either, or its merge would close the child and leave the convoy's
+#      graduation unanchored. Its landing waits, and a visit on the child asks
+#      a person about the convoy.
 cat > "$FAKE_ANCHORS" <<'A'
 rebuild-1||integration/cv|2026-07-02T00:00:00Z|cv|task
 cv||integration/other|2026-07-01T00:00:00Z||convoy
 A
-eq "$(resolve3 rebuild-1 integration/cv "$REBUILD_ROW")" "|rebuild-1|" \
-   "(5e) a named convoy not open on the branch is not anchored"
+printf 'cv|convoy|open\n' > "$FAKE_SHOW"
+HELD_E="$(held rebuild-1 integration/cv "$REBUILD_ROW")"
+case "$HELD_E" in
+  "1||drain-ack;|--subject rebuild-1 --key refinery-rebuild-convoy-not-open --message "*)
+    ok "(5e) a named convoy open on another branch is not anchored, the child is not its own anchor, and a visit asks about it" ;;
+  *) bad "(5e) a rebuild child whose convoy is open on another branch must stop, drain and escalate once (got: $HELD_E)" ;;
+esac
+printf 'cv|convoy|closed\n' > "$FAKE_SHOW"
+case "$(held rebuild-1 integration/cv "$REBUILD_ROW")" in
+  "1||drain-ack;|--subject rebuild-1 --key refinery-rebuild-convoy-not-open "*)
+    ok "(5e) a closed named convoy holds the landing the same way" ;;
+  *) bad "(5e) a rebuild child whose convoy is closed must stop, drain and escalate once" ;;
+esac
+# (5e2) A named bead whose own row cannot be read might be a convoy, so the
+#       landing waits for the next pass. Nothing is a question for a person yet.
+: > "$FAKE_SHOW"
+eq "$(held rebuild-1 integration/cv "$REBUILD_ROW")" "1||drain-ack;|" \
+   "(5e2) a named bead that cannot be read holds the landing, and files no visit"
+# (5e3) A named bead that is not a convoy and not open on the branch leaves
+#       $WORK its own anchor, as a first handoff is.
+cat > "$FAKE_ANCHORS" <<'A'
+rb-1||polecat/a|2026-07-02T00:00:00Z|a|task
+A
+printf 'a|task|closed\n' > "$FAKE_SHOW"
+eq "$(held rb-1 polecat/a '[{"id":"rb-1","metadata":{"task_kind":"rework","anchor_bead":"a"}}]')" "0||rb-1|||" \
+   "(5e3) a rework naming a closed bead that is not a convoy is its own gating anchor"
+: > "$FAKE_SHOW"
 # (5f) A bead $WORK does not name is never elected, whatever it carries: a
 #      fresh handoff beside an unanchored convoy anchors itself, as in (3c).
 cat > "$FAKE_ANCHORS" <<'A'
@@ -579,6 +651,70 @@ case "$LANDS_UNPUSHED" in
   "1##") ok "(12f) a push that does not read back anchors nothing and closes nothing" ;;
   *) bad "(12f) a push that does not read back must write nothing (got: $LANDS_UNPUSHED)" ;;
 esac
+
+# --- The resolve and the terminal, run as merge-push runs them. ---------------
+# merge-push runs the resolve block and then the terminal block in one shell, so
+# these cases run the two as one script. A landing whose listing or named convoy
+# cannot be resolved stops before the terminal: no gating transition, no note,
+# no close, one drain, exit 1, so the next pass retries the landing.
+{ printf '%s\n' "$SNIPPET"; printf '%s\n' "$TERMINAL"; } > "$TMP/landing.sh"
+run_landing() { # [VAR=value...] -> "<rc>#<lifecycle>#<gc writes>#<drain-acks>#<escalations>"
+  : > "$LCLOG"; : > "$TMP/gc.log"; : > "$TMP/drain.log"; : > "$TMP/esc.log"; local rc
+  if env WORK=rebuild-1 BRANCH=integration/cv BEAD_JSON="$REBUILD_ROW" TARGET=main CHECK_SET=correctness \
+       LC="$TMP/bin/lc-stub" PRE_OPEN=0 PR_URL="" PR_NUMBER="" LCRC=0 GCLOG="$TMP/gc.log" \
+       DRAINLOG="$TMP/drain.log" ESCLOG="$TMP/esc.log" STUB_PREPARED_HEAD=cafef00d STUB_REMOTE_HEAD=cafef00d \
+       "$@" bash "$TMP/landing.sh" >/dev/null 2>&1; then rc=0; else rc=$?; fi
+  printf '%s#%s#%s#%s#%s' "$rc" "$(tr '\n' ';' < "$LCLOG")" "$(tr '\n' ';' < "$TMP/gc.log")" \
+    "$(tr '\n' ';' < "$TMP/drain.log")" "$(tr '\n' ';' < "$TMP/esc.log")"
+}
+cat > "$FAKE_ANCHORS" <<'A'
+rebuild-1||integration/cv|2026-07-02T00:00:00Z|cv|task
+cv||integration/cv|2026-07-01T00:00:00Z||convoy
+A
+: > "$FAKE_SHOW"
+# (13a) The control: the listing reads, the convoy is open on the branch, and
+#       the landing anchors it and closes the child. The cases below stop where
+#       they do because of what they read.
+LANDING_OK="$(run_landing)"
+case "$LANDING_OK" in
+  "0#transition cv --to pre_open_gate "*"transition rebuild-1 --to unanchored "*"#"*"update rebuild-1 --status=closed"*)
+    ok "(13a) with the listing read, the landing anchors the convoy and closes its rebuild child" ;;
+  *) bad "(13a) expected cv anchored and rebuild-1 closed (got: $LANDING_OK)" ;;
+esac
+# (13b) The listing fails, though it printed the whole branch.
+eq "$(run_landing FAKE_LIST_RC=1)" "1###drain-ack;#" \
+   "(13b) a failed listing makes no gating transition and no close, and drains for the next pass"
+# (13c) The listing fails and prints [], which a reader of its output alone
+#       takes for an empty branch.
+eq "$(run_landing FAKE_LIST_RC=1 FAKE_LIST_RAW='[]')" "1###drain-ack;#" \
+   "(13c) a failed listing that prints [] holds the landing the same way"
+# (13d) The listing exits 0 with what is no array: bd's error object.
+eq "$(run_landing FAKE_LIST_RAW='{"error":"database is locked"}')" "1###drain-ack;#" \
+   "(13d) a listing that is not a JSON array holds the landing"
+# (13e) A raw control byte inside a note is not a failed read: once it is
+#       dropped the listing parses, and the landing goes on as in (13a).
+RAW_CTRL=$'[{"id":"cv","issue_type":"convoy","created_at":"2026-07-01T00:00:00Z","metadata":{"branch":"integration/cv"},"notes":"line one\nline\ttwo"}]'
+LANDING_CTRL="$(run_landing FAKE_LIST_RAW="$RAW_CTRL")"
+case "$LANDING_CTRL" in
+  "0#transition cv --to pre_open_gate "*"#"*"update rebuild-1 --status=closed"*)
+    ok "(13e) a listing with a raw control byte in a note still anchors the convoy" ;;
+  *) bad "(13e) expected the scrubbed listing to anchor cv (got: $LANDING_CTRL)" ;;
+esac
+# (13f) The convoy the child names is closed, so the listing does not return it.
+cat > "$FAKE_ANCHORS" <<'A'
+rebuild-1||integration/cv|2026-07-02T00:00:00Z|cv|task
+A
+printf 'cv|convoy|closed\n' > "$FAKE_SHOW"
+LANDING_CLOSED="$(run_landing)"
+case "$LANDING_CLOSED" in
+  "1###drain-ack;#--subject rebuild-1 --key refinery-rebuild-convoy-not-open "*)
+    ok "(13f) a rebuild child whose convoy is closed anchors nothing, closes nothing and files one visit" ;;
+  *) bad "(13f) expected no transition, no close, one drain and one visit (got: $LANDING_CLOSED)" ;;
+esac
+# (13g) The named bead cannot be read at all.
+: > "$FAKE_SHOW"
+eq "$(run_landing)" "1###drain-ack;#" \
+   "(13g) a rebuild child whose named bead cannot be read anchors nothing and closes nothing"
 
 # --- The landed-on-branch close carries the rework's work record. -------------
 # The runtime's work-record gate reads gc.work_outcome, gc.work_commit and

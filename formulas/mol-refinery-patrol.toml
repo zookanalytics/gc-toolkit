@@ -1071,6 +1071,12 @@ the second anchor it was written to prevent. Multi-candidate tiebreak: the
 OLDEST anchor (the original predates any rework-minted duplicate);
 `created_at` is the real field, `.created`/`.id` only defensive fallbacks.
 
+The listing is read whole or not at all. One that fails, or does not parse as a
+JSON array once the raw control bytes bd can emit inside a note are dropped,
+says nothing about the branch, and reading it as an empty one would make $WORK
+the PR's anchor. So the landing waits: nothing is recorded or closed, and $WORK
+stays routed for the next pass.
+
 A convoy's rebuild child lands on a bead that carries no `merge_result` yet.
 `rejection-repool.sh` pours a rejected graduation's rebuild onto that child,
 because a convoy cannot be its own run's work bead. With no anchor on the
@@ -1080,10 +1086,15 @@ same branch, is the bead this landing anchors (`LANDS_ON`). Once the push reads
 back, that convoy takes the gating transition this pass would have given $WORK,
 and $WORK then closes landed-on-branch. The anchoring comes first, so a close
 that fails leaves an anchor the next pass finds on the branch, and a refused
-anchoring closes nothing. A child never takes a gating state itself, and no
-other bead is anchored this way. A review's or a ruling's rework names a bead
-whose own rebuild may still be queued, and anchoring that bead would make the
-rebuild's load-context read it as finished work. Step 4b of
+anchoring closes nothing. A child never takes a gating state itself. When the
+bead it names is not open on the branch, that bead's kind is read from its own
+row. A convoy there, or a row that cannot be read, makes the landing wait the
+same way, and a convoy also files a visit, because only a person can say whether
+its graduation goes on. A named bead that is not a convoy leaves $WORK its own
+anchor, as a first handoff is. No other bead is anchored this way. A review's
+or a ruling's rework names a bead whose own rebuild may still be queued, and
+anchoring that bead would make the rebuild's load-context read it as finished
+work. Step 4b of
 `mol-polecat-work`'s submit-and-exit runs the same `rebuild-child-lands-on`
 block, so the polecat stamps its summary on the bead this landing anchors.
 
@@ -1118,6 +1129,12 @@ ANCHOR_ROWS=""
 if [ -n "${BRANCH:-}" ]; then
   ANCHOR_ROWS=$(gc bd list --status=open --metadata-field branch="$BRANCH" \
     --limit=0 --json 2>/dev/null) || ANCHOR_ROWS=""
+  ANCHOR_ROWS=$(printf '%s' "$ANCHOR_ROWS" | tr -d '[:cntrl:]')
+  if ! printf '%s' "$ANCHOR_ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    echo "merge-push: the open beads on $BRANCH could not be listed, so the bead this landing gates cannot be told; recording no landing and closing nothing. $WORK stays routed for the next pass." >&2
+    gc runtime drain-ack
+    exit 1
+  fi
   EXISTING_ANCHOR=$(printf '%s' "$ANCHOR_ROWS" | jq -r --arg self "$WORK" \
     '[ .[]? | select(.id != $self)
        | select((((.metadata // {}).merge_result // "") | tostring) != "") ]
@@ -1136,6 +1153,24 @@ NAMED=$(printf '%s' "$SELF_ROW" | jq -r '(.[0].metadata // {}) as $m
   [ .[]? | select(.id == $n) | select(((.issue_type // .type // "") | tostring) == "convoy") ]
   | .[0].id // empty' 2>/dev/null) || LANDS_ON=""
 # <<< rebuild-child-lands-on
+if [ -n "$NAMED" ] && [ -z "$LANDS_ON" ]; then
+  NAMED_ROW=$(printf '%s' "$ANCHOR_ROWS" | jq -c --arg n "$NAMED" '[ .[]? | select(.id == $n) ]' 2>/dev/null)
+  case "$NAMED_ROW" in ""|"[]") NAMED_ROW=$(gc bd show "$NAMED" --json 2>/dev/null | tr -d '[:cntrl:]') ;; esac
+  NAMED_KIND=$(printf '%s' "$NAMED_ROW" | jq -er --arg n "$NAMED" '.[0] | select(.id == $n)
+    | (.issue_type // .type // "") | tostring' 2>/dev/null) || NAMED_KIND=unreadable
+  case "$NAMED_KIND" in
+    convoy)
+      echo "merge-push: $WORK rebuilds convoy $NAMED, which is not open on $BRANCH, so its landing has no bead to anchor; recording no landing and closing nothing. $WORK stays routed for the next pass." >&2
+      ESC="${LC%/*}/escalate.sh"
+      [ ! -x "$ESC" ] || "$ESC" --subject "$WORK" --key refinery-rebuild-convoy-not-open --message "$WORK, the rebuild of convoy $NAMED, has landed on $BRANCH, but $NAMED is not open on that branch, so the refinery has no bead to carry its PR. It anchored and closed nothing, and retries $WORK every pass until this is settled. If the graduation is abandoned, close $WORK. Otherwise make $NAMED open again with branch $BRANCH, and the next pass anchors it."
+      gc runtime drain-ack
+      exit 1 ;;
+    unreadable)
+      echo "merge-push: $NAMED, which $WORK names as its anchor_bead, could not be read, so whether $WORK rebuilds a convoy cannot be told; recording no landing and closing nothing. $WORK stays routed for the next pass." >&2
+      gc runtime drain-ack
+      exit 1 ;;
+  esac
+fi
 GATING_ANCHOR="${EXISTING_ANCHOR:-${LANDS_ON:-$WORK}}"
 # <<< one-anchor-per-pr-resolve
 # >>> one-anchor-per-pr-terminal
