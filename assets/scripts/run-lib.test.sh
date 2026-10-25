@@ -228,7 +228,8 @@ assets/scripts/work-tree-holder.sh
 assets/scripts/gate-ensure.sh
 assets/scripts/gc-helm.sh
 assets/scripts/queue-priority.sh
-assets/scripts/priority-lib.sh"
+assets/scripts/priority-lib.sh
+assets/scripts/liveness-sweep.sh"
 while IFS= read -r r; do
     [ -n "$r" ] || continue
     f="$ROOT/$r"

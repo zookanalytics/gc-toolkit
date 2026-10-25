@@ -49,6 +49,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # below to carry this sweep's --db pin and per-call bound.
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh from $HERE" >&2; exit 1; }
+# The one reader of a run's link to the bead it works, which the worked and
+# husk resolutions ask through sweep_bd, below.
+# shellcheck source=run-lib.sh
+. "${GC_RUN_LIB:-$HERE/run-lib.sh}" || { echo "$PROG: cannot source run-lib.sh from $HERE" >&2; exit 1; }
 ESCALATE="${GC_ESCALATE_TOOL:-$HERE/escalate.sh}"
 CALL_TIMEOUT="${LIVENESS_SWEEP_CALL_TIMEOUT:-45}"
 KILL_AFTER="${LIVENESS_SWEEP_KILL_AFTER:-5}"
@@ -137,6 +141,8 @@ _bd_call() {
     if [ -n "$DB" ]; then bounded gc bd "$1" --db "$DB" "${@:2}"; else bounded gc bd "$@"; fi
 }
 unset GC_RECONCILE_BD_CACHE
+# run-lib.sh's reads take the same pin and bound.
+sweep_bd() { _bd_call "$@"; }
 
 # --- census: fail-safe first — never classify on partial data ----------------
 READY="$TMP/ready.json"; LIVE="$TMP/live.json"; WIDEN="$TMP/widen.json"; ALIVE="$TMP/alive.json"
@@ -180,29 +186,24 @@ done < "$TMP/prrepos"
 OPEN_PRS=$(jq -R . < "$PRURLS" | jq -sc 'map(select(length > 0))' 2>/dev/null)
 printf '%s' "$OPEN_PRS" | jq -e 'type == "array"' >/dev/null 2>&1 || OPEN_PRS='[]'
 
-# --- worked-via-convoy: live molecules resolved FORWARD to their work beads --
-# A slung work bead carries no worker stamp of its own; coverage requires a
-# LIVE NAMER (a not-closed bead naming the convoy), never the convoy's mere
-# existence — a dead synthetic convoy's tracks edge is not coverage.
-WORKED_TMP="$TMP/worked"; : > "$WORKED_TMP"
-CONVOY_LIVENESS=none
-jq -r '[ .[] | (.metadata["gc.input_convoy_id"] // "") | select(. != "") ] | unique | .[]' "$ALIVE" 2>/dev/null > "$TMP/convoys"
-while IFS= read -r C; do
-    [ -n "$C" ] || continue
-    if [ "$CONVOY_LIVENESS" = "none" ]; then CONVOY_LIVENESS=verified; fi
-    # gc bd show, NOT list: only show renders this edge (.dependency_type + .id).
-    if ROWS=$(bounded gc bd show "$C" --json 2>/dev/null) && printf '%s' "$ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
-        printf '%s' "$ROWS" | jq -r '.[0].dependencies[]? | select(.dependency_type == "tracks") | .id' >> "$WORKED_TMP"
-    else
-        CONVOY_LIVENESS=unverified
-        echo "$PROG: WARN: convoy read FAILED for $C — the beads it tracks are reported, never hidden" >&2
-    fi
-done < "$TMP/convoys"
-WORKED=$(jq -R . < "$WORKED_TMP" | jq -sc 'map(select(length > 0)) | unique')
+# --- worked: the beads live runs work ---------------------------------------
+# A slung work bead carries no worker stamp of its own; coverage requires a LIVE
+# RUN working it (run-lib.sh's map), never a convoy's mere existence: a dead
+# synthetic convoy's tracks edge is not coverage, and neither is a convoy whose
+# run has finished.
+WORKED='[]'
+RUNS_LIVENESS=none
+if RUNS=$(run_lib map sweep_bd); then
+    WORKED=$(printf '%s' "$RUNS" | jq -c '[ .[] | .bead | select(. != "") ] | unique')
+    [ "$(printf '%s' "$RUNS" | jq 'length')" -eq 0 ] || RUNS_LIVENESS=verified
+else
+    RUNS_LIVENESS=unverified
+    echo "$PROG: WARN: the live runs could not be read — the beads they work are reported, never hidden" >&2
+fi
 
 # --- landed-anchor husks: steps of a finished workflow are teardown, not waits
-# Resolved per ROOT (root -> gc.input_convoy_id -> tracks members -> each
-# anchor's own state). Landed is status=closed OR merge_result=merged and
+# Resolved per ROOT: the bead its run works (run-lib.sh's subject), then that
+# anchor's own state. Landed is status=closed OR merge_result=merged and
 # deliberately only that pair — every other marker is worn mid-flight.
 HUSK_TMP="$TMP/husks"; HUSK_ROOTS_TMP="$TMP/huskroots"; : > "$HUSK_TMP"; : > "$HUSK_ROOTS_TMP"
 HUSK_LIVENESS=none
@@ -210,38 +211,24 @@ jq -r '[ .[] | (.metadata["gc.root_bead_id"] // "") | select(. != "") ] | unique
 while IFS= read -r R; do
     [ -n "$R" ] || continue
     if [ "$HUSK_LIVENESS" = "none" ]; then HUSK_LIVENESS=verified; fi
-    CONVOY=""
-    if RJSON=$(bounded gc bd show "$R" --json 2>/dev/null) && printf '%s' "$RJSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
-        CONVOY=$(printf '%s' "$RJSON" | jq -r '.[0].metadata["gc.input_convoy_id"] // ""')
+    A=""
+    if RUN=$(run_lib subject sweep_bd "$R"); then
+        A=$(printf '%s' "$RUN" | jq -r '.[0].bead // ""')
     else
         HUSK_LIVENESS=unverified
-        echo "$PROG: WARN: root read FAILED for $R — its step beads are reported, never hidden" >&2
+        echo "$PROG: WARN: the run of root $R could not be read — its step beads are reported, never hidden" >&2
     fi
-    # A root naming no convoy has no anchor that could have landed: not a husk.
-    [ -n "$CONVOY" ] || continue
-    MEMBERS=""
-    if CJSON=$(bounded gc bd show "$CONVOY" --json 2>/dev/null) && printf '%s' "$CJSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
-        MEMBERS=$(printf '%s' "$CJSON" | jq -r '.[0].dependencies[]? | select(.dependency_type == "tracks") | .id')
+    # A root whose run works no bead has no anchor that could have landed: not
+    # a husk.
+    [ -n "$A" ] || continue
+    LANDED=""
+    if AJSON=$(bounded gc bd show "$A" --json 2>/dev/null) && printf '%s' "$AJSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        LANDED=$(printf '%s' "$AJSON" | jq -r 'if ((.[0].status // "") == "closed") or ((((.[0].metadata // {}).merge_result // "") | tostring) == "merged") then "yes" else "" end')
     else
         HUSK_LIVENESS=unverified
-        echo "$PROG: WARN: convoy read FAILED for $CONVOY — root $R is reported, never hidden" >&2
+        echo "$PROG: WARN: anchor read FAILED for $A — root $R is reported, never hidden" >&2
     fi
-    [ -n "$MEMBERS" ] || continue
-    # ALL tracked members must be landed; a convoy with none is not a husk.
-    ALL_LANDED=1
-    printf '%s\n' "$MEMBERS" > "$TMP/members"
-    while IFS= read -r A; do
-        [ -n "$A" ] || continue
-        LANDED=""
-        if AJSON=$(bounded gc bd show "$A" --json 2>/dev/null) && printf '%s' "$AJSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
-            LANDED=$(printf '%s' "$AJSON" | jq -r 'if ((.[0].status // "") == "closed") or ((((.[0].metadata // {}).merge_result // "") | tostring) == "merged") then "yes" else "" end')
-        else
-            HUSK_LIVENESS=unverified
-            echo "$PROG: WARN: anchor read FAILED for $A — root $R is reported, never hidden" >&2
-        fi
-        if [ -z "$LANDED" ]; then ALL_LANDED=0; fi
-    done < "$TMP/members"
-    if [ "$ALL_LANDED" = "1" ]; then
+    if [ "$LANDED" = "yes" ]; then
         echo "$R" >> "$HUSK_ROOTS_TMP"
         jq -r --arg r "$R" '[ .[] | select((.metadata["gc.root_bead_id"] // "") == $r) | .id ] | .[]' "$READY" >> "$HUSK_TMP"
     fi
@@ -338,7 +325,7 @@ printf '%s' "$CLASSIFIED" | jq -e 'type == "array"' >/dev/null 2>&1 \
 CANDIDATES=$(printf '%s' "$CLASSIFIED" | jq -c 'map(select(.class == "unnamed") | {id, title, type})')
 # <<< classify
 echo "$PROG: funnel: $(printf '%s' "$CLASSIFIED" | jq -r 'group_by(.class) | map("\(.[0].class) \(length)") | join(" · ")')"
-echo "$PROG: liveness: pr=$PR_LIVENESS convoy=$CONVOY_LIVENESS husk=$HUSK_LIVENESS · husk roots: $(printf '%s' "$HUSK_ROOTS" | jq -r 'join(",") | if . == "" then "(none)" else . end')"
+echo "$PROG: liveness: pr=$PR_LIVENESS runs=$RUNS_LIVENESS husk=$HUSK_LIVENESS · husk roots: $(printf '%s' "$HUSK_ROOTS" | jq -r 'join(",") | if . == "" then "(none)" else . end')"
 
 # --- landed-fix wedge: a must-fix finding whose fix landed but did not close ---
 # gate-ensure closes a must-fix finding once its fix unit lands, which releases
@@ -524,13 +511,13 @@ sweep_visit() {
     local body
     body=$(jq -nr --argjson new "$NEW" --argjson carried "$CARRIED" \
         --arg pass_at "$PASS_AT" --arg cap "$LIST_CAP" \
-        --arg pr "$PR_LIVENESS" --arg convoy "$CONVOY_LIVENESS" --arg husk "$HUSK_LIVENESS" '
+        --arg pr "$PR_LIVENESS" --arg runs "$RUNS_LIVENESS" --arg husk "$HUSK_LIVENESS" '
       ($cap | tonumber) as $c
       | [ "unnamed waits: \($new | length) new, \($carried | length) carried",
           "Census cut \($pass_at) — a snapshot, not the board. Run the visit.recheck stamp on this visit before acting.",
           (if $pr == "unverified" then "WARNING: the open-PR read failed for at least one repository — PR-parked beads may be listed." else empty end),
-          (if $convoy == "unverified" then "WARNING: a convoy read failed — a molecule-driven work bead may be listed." else empty end),
-          (if $husk == "unverified" then "WARNING: a root/convoy/anchor read failed — a landed workflow step may be listed." else empty end),
+          (if $runs == "unverified" then "WARNING: the live runs could not be read — a work bead a run is building may be listed." else empty end),
+          (if $husk == "unverified" then "WARNING: a run or anchor read failed — a landed workflow step may be listed." else empty end),
           "",
           "New this pass:",
           ($new[0:$c][] | "  \(.id) — \(.title) [\(.type)]"),

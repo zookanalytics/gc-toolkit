@@ -56,6 +56,8 @@
 # their convoys, roots and steps, and priority-lib.sh follows a root to the
 # convoy it names and a convoy to the bead it tracks through run_convoy and
 # run_tracked.
+# liveness-sweep.sh takes the map for the beads live runs work, and the run of
+# each root a ready step names to tell a landed workflow's husk.
 #
 # run-lib.test.sh runs every verb over run-lib.fixture.json, the cases a copy
 # of the rule in another language must agree with, as the Go copy in

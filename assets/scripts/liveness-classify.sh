@@ -32,15 +32,15 @@
 #                             death; the precheck passes false and fails closed.
 #   $openprs $worked $husks $preopen_green
 #                             the reads beyond the bead set: open PR urls,
-#                             convoy-worked bead ids, husk step ids, and the
-#                             pre_open_gate anchors whose every pre-open gate
-#                             derives green, as an {anchor-id: true} map the
-#                             sweep builds through lane-state.sh. Each arm that
-#                             reads one drops only the beads its input names,
-#                             so an empty input drops nothing. That is what
-#                             lets the precheck pass them empty and keep a
-#                             survivor set that contains the sweep's
-#                             candidates.
+#                             the ids of the beads live runs work, husk step
+#                             ids, and the pre_open_gate anchors whose every
+#                             pre-open gate derives green, as an {anchor-id:
+#                             true} map the sweep builds through
+#                             lane-state.sh. Each arm that reads one drops
+#                             only the beads its input names, so an empty
+#                             input drops nothing. That is what lets the
+#                             precheck pass them empty and keep a survivor
+#                             set that contains the sweep's candidates.
 #
 # Every drop is a NAMED class. Structural edges fold in from $alive: a parent
 # is gated iff a not-closed child names it (the child holds the edge), and an
