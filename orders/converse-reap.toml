@@ -1,24 +1,27 @@
-# converse-reap — end a converse sitting once its visit has closed.
+# converse-reap — end a converse sitting once its conversation is over.
 #
-# Converse is spawn-on-engagement: a manual converse session is bound to a visit
-# and exempt from every pool backstop, so nothing in the runtime cycles it. The
-# agent's sign-off and the operator's `gc-helm dismiss` both close the VISIT on
-# the belief that closing the visit ends the sitting, but the manual session
-# outlives its closed visit — a live provider process, and a closed visit beside
-# a live pane when the operator has walked away. This is the
-# reap those two endings assume: a converse session whose visit reads closed (or
-# gone) is settled, so it is closed. An ATTACHED session is left alone — the pack
-# cannot see typed text in the composer, and draining a pane that has some is the
-# operator's one hard no — so this reaps only the unattached, settled sittings.
+# A sitting is a manual converse session under the alias of the conversation it
+# holds. Gas City does not end a manual session when its work closes, and a
+# sitting cannot drain itself at its sign-off without destroying an attached
+# operator's pane, so the session outlives a conversation its sign-off or a
+# dismiss closed, and one a sitting cut short handed back to the operator's
+# queue. This is the close those endings assume, under the warrant in
+# docs/warrants.md (Converse reap): a converse session whose conversation reads
+# closed, gone or back in the queue is settled, so it is closed. An ATTACHED
+# session is left alone, because the pack cannot see typed text in the
+# composer and draining a pane that has some is the operator's one hard no.
+# --min-age is this order's interval in seconds: a session younger than one
+# pass may be a sitting engage has started and not yet bound.
 #
-# City scope: converse sessions span rigs and `gc bd show` resolves a visit
-# across ledgers, so one pass reads the whole city. A pass skipped or cut short
-# costs only the reap the next pass takes instead; the reap is idempotent.
+# City scope: converse sessions span rigs and `gc bd show` resolves a
+# conversation across ledgers, so one pass reads the whole city. A pass skipped
+# or cut short costs only the reap the next pass takes instead; the reap is
+# idempotent.
 [order]
-description = "Close converse sittings whose visit has closed or gone (unattached only); ends the live sessions they leak"
+description = "Close converse sittings whose conversation has closed, gone or returned to the operator's queue (unattached only); ends the live sessions they leak"
 trigger = "cooldown"
 interval = "5m"
-exec = "$PACK_DIR/assets/scripts/converse-reap.sh"
+exec = "$PACK_DIR/assets/scripts/converse-reap.sh --min-age 300"
 timeout = "120s"
 scope = "city"
 idempotent = true

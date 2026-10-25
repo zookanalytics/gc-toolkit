@@ -101,3 +101,46 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Retires when.** Gas City ships per-agent write scoping. A fine-grained token
   limited to the owned repositories may cover the origin half on GitHub's side,
   and the next re-verification checks that first.
+
+## Converse reap
+
+- **Covers.** `assets/scripts/converse-reap.sh`, `orders/converse-reap.toml`.
+- **Stands in for.** Ending a manual session once the work it claimed has
+  closed and nobody is attached.
+- **Evidence.** In `gastownhall/gascity`, a manual session does not end when its
+  work closes. It stays until it is closed or drained, and attaching wakes one
+  that sleeps (`cmd/gc/compute_awake_set.go` 432-440, 583-594 and 668-693).
+  No closer the controller runs on its own ends one because its work closed:
+  the stale-session closers exempt a session that has started its
+  conversation (`cmd/gc/session_reconciler.go` 1057-1060), and the core reaper
+  prunes a session only once it has drained
+  (`internal/bootstrap/packs/core/assets/scripts/reaper.sh` 69 and 1402-1404).
+  A sitting cannot drain itself at its sign-off, because a drain destroys an
+  attached operator's pane.
+- **Verified.** 2026-10-20, at `gastownhall/gascity` 1e05ae624, beside a live
+  `gc session list --state closed`.
+- **Retires when.** Gas City ends a manual session once its claimed work has
+  closed and nobody is attached.
+
+## Accept's lock
+
+- **Covers.** The acceptance lock of `assets/scripts/gc-helm.sh` accept: one
+  `flock` file per bead, `accept-<rig>-<bead>.lock`, under the city's
+  `.gc/runtime/packs/gc-toolkit`, held from Accept's live read to its last
+  write.
+- **Stands in for.** A launch that pours once per acceptance across a finished
+  run: a `gc sling` that refuses a second root under a caller's key whatever
+  the first root's status.
+- **Evidence.** In `gastownhall/gascity`, a graph.v2 `gc sling <bead> --on
+  <formula>` launches under a per-bead lock and refuses a second launch of the
+  formula at the bead, exiting 3, only while a root an earlier launch poured is
+  live (`internal/sling/sling_core.go` 544-641, the lock at 563 and the check at
+  589; the terminal-root skip in `internal/sling/sling_attachment.go` 177; and
+  `TestLiveConvoyTrackedWorkflowRootsSkipsTerminalRoots` in
+  `internal/sling/sling_test.go` 3639-3691). Once that root has closed, the next
+  launch pours again. No `gc sling` flag checks an earlier root by its title or
+  by a key (`cmd/gc/cmd_sling.go` 145-160).
+- **Verified.** 2026-10-22, at `gastownhall/gascity` 1e05ae624 and upstream
+  340ed8581.
+- **Retires when.** A Gas City launch can refuse a second root under a caller's
+  key whatever the first root's status.
