@@ -52,6 +52,10 @@
 # poured over a review, live or not, to judge whether a pour still drives it.
 # gc-helm.sh ends the live runs beneath an anchor it releases, and its park
 # survey applies run_rows to the listing it reads to find a bead's workflows.
+# queue-priority.sh takes the live runs that work a bead it settles, to write
+# their convoys, roots and steps, and priority-lib.sh follows a root to the
+# convoy it names and a convoy to the bead it tracks through run_convoy and
+# run_tracked.
 #
 # run-lib.test.sh runs every verb over run-lib.fixture.json, the cases a copy
 # of the rule in another language must agree with, as the Go copy in

@@ -81,8 +81,8 @@ shares only the word ([authority-map.md](authority-map.md)).
   the bead's own field (`readySortPriority` in `internal/beads/query.go`). bd's
   `ready` sorts by the bead's own priority by default. Neither one's
   documentation derives a priority from another bead.
-- **Verified.** 2026-10-19, at `gastownhall/gascity` main 1e05ae624 and bd 1.3.1
-  (c1c4b642a).
+- **Verified.** 2026-10-25, at `gastownhall/gascity` main 7d2577989 and bd 1.3.2
+  (9b65b9e19).
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,
   or a work query can order by a parent's priority.
 
