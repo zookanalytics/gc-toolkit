@@ -496,26 +496,28 @@ keys = [
 #   unparseable pr_url resolves to the fail-closed repo `?`. Never cleared.
 #   pr_number is an integer; pr_url is the canonical `scheme://host/owner/repo/pull/<n>`.
 # existing_pr — a PR the refinery should reuse rather than open. pr-facts.sh
-#   stamps it on a rework child equal to that child's pr_url and signoff.sh on
-#   the child it files; the refinery's rejection transition carries it through
+#   and rework-child.sh stamp it on the rework child each files, equal to that
+#   child's pr_url; the refinery's rejection transition carries it through
 #   (mol-refinery-patrol.toml). Read by mol-refinery-patrol.toml to force the PR
-#   pipeline when set (merge_strategy flips to mr) and to count the bead
-#   PR-shaped, and by signoff.sh to verify a rework child's pr_fields. Absent
-#   means no PR to reuse. Never cleared. Value is a PR URL.
+#   pipeline when set (merge_strategy flips to mr), and by pr-facts.sh and
+#   rework-child.sh to verify the child each files. Absent means no PR to reuse.
+#   Never cleared. Value is a PR URL.
 # merge_strategy — how the refinery lands the branch. mol-refinery-patrol.toml
-#   resolves it once, in its merge-strategy-resolve block: `mr` opens and merges
-#   a PR, `direct` fast-forwards and pushes straight to the target, and `pr` is
-#   an alias normalized to `mr` on read. An absent key resolves to the
-#   default_merge_strategy var (default `mr`); an empty value resolves to
-#   `direct`. `mr` is stamped by pr-facts.sh, signoff.sh, convoy-graduate.sh,
-#   pre-open-rebase.sh and mol-feedback-distiller.toml,
-#   and existing_pr forces the resolved mode up from `direct` at the refinery.
-#   A target under `polecat/` (another bead's per-bead PR head) carrying no PR of
-#   its own resolves the other way, from `mr` down to `direct`, so the branch
-#   folds onto that PR head instead of opening a nested PR against it.
-#   `pr` is written only by mol-refinery-patrol.toml, auto-promoting a bead whose
-#   direct push was rejected for branch protection into the PR pipeline. Read by
-#   mol-refinery-patrol.toml and signoff.sh. Never cleared. Enum `mr | pr | direct`.
+#   resolves it once, in merge-push's merge-strategy-resolve block: `mr` opens
+#   and merges a PR, `direct` fast-forwards and pushes straight to the target,
+#   and `pr` is an alias normalized to `mr` on read. An absent key resolves to
+#   the default_merge_strategy var (default `direct`), and an empty value to
+#   `direct`. A bead that would land `direct` on the default branch, where a bead
+#   with no target lands, resolves to `mr`, so the default branch takes work
+#   only through a PR (docs/warrants.md). existing_pr forces the resolved mode
+#   up from `direct` at the refinery. `local`, which no pack writer stamps,
+#   passes through, and merge-push refuses it as unsupported. `mr` is stamped by
+#   pr-facts.sh, rework-child.sh, pre-open-rebase.sh, convoy-graduate.sh and
+#   mol-feedback-distiller.toml. `pr` is written only by direct-merge-push.sh,
+#   auto-promoting a bead whose direct push was rejected for branch protection
+#   into the PR pipeline. Read by mol-refinery-patrol.toml, and read back by
+#   pr-facts.sh, rework-child.sh and pre-open-rebase.sh on the rework child each
+#   stamps. Never cleared. Enum `mr | pr | direct`.
 # prepare_mode — how the refinery brings a rework branch current before it lands.
 #   Every branch shape (per-bead `polecat/*`, shared `integration/*`, a
 #   graduation) is stamped `merge`: the branch is brought current by merging

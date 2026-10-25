@@ -684,9 +684,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    each open anchor recording a `pr_number`, this arm reads the branch's bead
    ledger — `branch` (committed onto the branch: the anchor, plus every rework
    hand-back), `fold_target` (folded onto it by a polecat), and `merged_target`
-   with `merge_result=merged` (landed its own PR into it) — and splices the list
-   into a delimited section. A branch carrying one bead publishes nothing here,
-   because arm 3 already named it.
+   with `merge_result=merged` (landed on it, with or without a PR of its own) —
+   and splices the list into a delimited section. A branch carrying one bead
+   publishes nothing here, because arm 3 already named it.
 
    The `gc:pr-summary` region: a rework restamps the anchor's `pr_summary`, but
    arm 3 composes that region only at `pre_open_gate` and an open anchor never

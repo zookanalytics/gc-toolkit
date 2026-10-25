@@ -38,7 +38,8 @@
 # rebase hand-back whose push cleared its pool route — a child still routed to a
 # pool has not pushed its fix and stays out), metadata.fold_target (folded onto
 # it by a polecat), and
-# metadata.merged_target with merge_result=merged (landed its own PR into it) —
+# metadata.merged_target with merge_result=merged (landed on it, with or without
+# a PR of its own) —
 # then splice the list into a delimited section at the end of the body. Rows
 # that recorded no work are dropped from the ledger — a closed duplicate keeps
 # its metadata.branch even for a rebase or rework twin — so the section names

@@ -8,10 +8,7 @@
 # branch-caused arm. Both run `gc workflow reopen-source` first, which leaves
 # the bead open with no assignee, out of the refinery's queue.
 # Stdout is one line: the bead's row as read before any write (the scrubbed
-# `gc bd show --json` array), which the handle-failures arm's branch decision
-# reads instead of a read of its own. Of the fields that decision reads, the
-# release writes only existing_pr, and only from a pr_url the decision already
-# counts. Stdout is empty when the bead could not be read.
+# `gc bd show --json` array). Stdout is empty when the bead could not be read.
 #
 # A pour, because the work bead is a member of its epic and bd's blocked flag
 # cascades down parent-child edges: a bead routed back to the pool is withheld
