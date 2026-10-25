@@ -273,7 +273,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    or a scratch failure — holds the anchor at `pre_open_gate` for the next pass
    rather than flip a managed body that may be stale. This adopt-time re-splice
    covers only the `pre_open_gate` window; once the anchor is `pull_request`,
-   republishing a rework's restamp is arm 12's job (`pr-stack.sh`), the anchor
+   republishing a rework's restamp is arm 11's job (`pr-stack.sh`), the anchor
    never returning to the state this arm scans (no `pull_request → pre_open_gate`
    lifecycle edge).
 4. **pr-facts.sh --route-comments-only** — the feedback routing of arm 7, run
@@ -586,7 +586,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    comments, unless its answer carries the `<!-- gc-finding:<id>:open -->` line
    a declined or deferred finding's answer adds, since that thread waits for a
    person.
-9. **review-sweep.sh** — cleanup over closed anchors, no merge authority. A
+8. **review-sweep.sh** — cleanup over closed anchors, no merge authority. A
    dispatched review whose anchor is closed and whose `review_branch` is gone
    from origin has no verdict left to give. Both `signoff.sh` verdicts bind a
    marker to a commit and there is no commit, and `request-changes` would
@@ -598,7 +598,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    per pass, and a listing that could not be read sweeps nothing. The release
    verb lives here rather than as a third `signoff.sh` verdict because the
    residue is filed by two dispatchers, arm 6 and arm 7.
-10. **scaffolding-sweep.sh** — cleanup over DISPOSED anchors, no merge authority.
+9. **scaffolding-sweep.sh** — cleanup over DISPOSED anchors, no merge authority.
    An anchor withdrawn won't-do or closed not-planned carries a disposition —
    `gc.superseded_by` (the pointer `bead-rehome.sh` stamps) or
    `gc.pr_close_disposition_kind` (the intent `pr-dispose.sh` records) — but its
@@ -625,7 +625,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    the one anchor whose PR-close disposition it is consummating, just before
    that close, so the close lands in the pass that reads the closed PR. A
    merged anchor is a landing, never a disposal, and is skipped.
-11. **duplicate-sweep.sh** — the reader for `duplicate_of`, no merge authority.
+10. **duplicate-sweep.sh** — the reader for `duplicate_of`, no merge authority.
    A polecat that diagnoses a duplicate dispatch stamps the marker and parks
    the bead, because polecats never close work beads; with no reader the bead
    waits for a human ruling, one bead at a time. This arm closes the ones that
@@ -664,7 +664,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    twin in this pass, and the next pass finishes it. Closing the twin releases
    its blocks edge. The arm runs after review-sweep so a twin that arm 2
    merged or arm 7 recorded on this pass is disposable on the same tick.
-12. **pr-stack.sh** — keeps an open PR current with its anchor, in both managed
+11. **pr-stack.sh** — keeps an open PR current with its anchor, in both managed
    body regions and in its title. No merge authority, and the only arm that
    writes no bead. A body is composed once, by arm 3, out of one anchor; then two
    things drift it, and this arm lands both fixes in one body edit.

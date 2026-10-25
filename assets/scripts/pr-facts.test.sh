@@ -631,7 +631,7 @@ has "$(cat "$STUB_ESC_LOG")" "restore them by hand" "…and says to restore it i
 
 # The rest of the anchor's machine review scaffolding carries no branch, and each
 # piece holds a blocks edge on the anchor: a fix unit, the must-fix finding it
-# answers, a validation pass. Arm 10 retires them, but after this arm, so a close
+# answers, a validation pass. Arm 9 retires them, but after this arm, so a close
 # attempted first is refused and escalated for a condition no person has to
 # clear. The close runs that sweep for its own anchor first. scafb seeds one
 # piece, with no branch so it is never a parked child; the store enforces the
@@ -795,7 +795,7 @@ has "$out" "has an OPEN blocker" "…refused for the obstruction itself, not for
 eq "$(bstatus VS)" "open" "the visit stays open while the obstruction stands"
 hasnt "$(cat "$STUB_ESC_LOG")" "--retract" "…nothing retracts it"
 eq "$(nvisits pr-dispose-failed.122)" "1" "…and the escalation dedups onto it rather than filing a second"
-# The obstruction clears (arm 10 retires a disposed anchor's findings), and the
+# The obstruction clears (arm 9 retires a disposed anchor's findings), and the
 # next pass retries the close the visit asked for.
 jq -c 'map(if .id == "BS" then .status = "closed" else . end)' "$STUB_STORE" > "$TMP/store.next" && mv "$TMP/store.next" "$STUB_STORE"
 : > "$STUB_ESC_LOG"

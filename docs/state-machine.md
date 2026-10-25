@@ -762,7 +762,7 @@ review's result set.
   Closing it `benign` (the overlap was incidental) lets the next pass send the
   merge-in child.
   `pre-open-rebase.sh` applies the same guard to an anchor with no PR yet.
-- **Disposal** (`review-sweep.sh`, cadence arm 9): a review outlives its own
+- **Disposal** (`review-sweep.sh`, cadence arm 8): a review outlives its own
   subject when the anchor closes and the branch is deleted before any verdict
   lands. There is no commit left for a verdict to name, so the arm closes
   the review with `gc.outcome=moot` and records the reason on it, and writes
@@ -776,7 +776,7 @@ review's result set.
   work-product key at all), unless the origin carries the operator's
   pre-recorded PR-close disposition for that kind and successor — and holds on
   anything it cannot establish. Converse and operator dispositions use the same
-  writer, and so does `duplicate-sweep.sh` (cadence arm 11). The sweep reads
+  writer, and so does `duplicate-sweep.sh` (cadence arm 10). The sweep reads
   the `duplicate_of` marker a polecat stamps when it diagnoses and parks a
   duplicate dispatch: polecats never close work beads, so the bead has no other
   way out. It checks the same evidence before it calls the writer. It also
@@ -1034,9 +1034,9 @@ That drop reaches only the parked, branch-carrying children. The rest of the
 machine review scaffolding is a fix unit, the finding beads and the validation
 pass. Each holds a `blocks` edge on the anchor, and a fix unit also blocks every
 must-fix finding it answers, so an open one refuses the anchor's close the same
-way. `scaffolding-sweep.sh` retires it. The cadence runs it as arm 10 over every
+way. `scaffolding-sweep.sh` retires it. The cadence runs it as arm 9 over every
 disposed anchor, and the consummation runs it for its own anchor just before the
-close, so the close is not refused and escalated over scaffolding that arm 10
+close, so the close is not refused and escalated over scaffolding that arm 9
 would retire later in the same pass. It closes every
 `task_kind=validation|finding|rework` bead whose `anchor_bead` names a disposed,
 non-merged anchor (`gc.superseded_by` or `gc.pr_close_disposition_kind`
