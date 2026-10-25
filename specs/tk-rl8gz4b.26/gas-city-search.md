@@ -48,6 +48,10 @@ Each was read on 2026-10-24:
   and a `gc sling` of a convoy, and each hit was read.
 - bd at `0c562176ccee`.
 
+`gc sling`'s `--dry-run` preview was read again on 2026-10-25 at main
+`149ae8df7c95`, where it is unchanged. Its answers for a bead with a live run
+and for one whose run had ended were checked by running it.
+
 ## What Gas City ships
 
 **A run poured onto a convoy works on its members.** The engineering design
@@ -88,6 +92,22 @@ never covered, because nothing tracks a convoy target. So an ordinary bead gets
 the one-bead input convoy, the lock, the refusal of a second live run and the
 stamp. A convoy target gets the lock, keyed by the convoy, and no refusal.
 
+**The duplicate check can be asked without a pour.** At main `6e35bd5ea549`
+and at `149ae8df7c95` alike, `gc sling --dry-run` previews a pour and makes
+none. For `--on <formula>` its pre-check, `dryRunReportBlockingMolecule` in the
+`gc` command, reads the bead's attached molecules and workflows
+(`FindBlockingMolecule`). It then runs the launch's duplicate check in
+`dryRunReportBlockingWorkflow`, through `LiveConvoyTrackedWorkflowRoots`, the
+exported form of `liveConvoyTrackedWorkflowRoots`. A live workflow exits 1
+with `gc sling: bead <id> already has attached workflow <root>` on stderr. No
+live workflow or attachment exits 0 with the passing line `Pre-check: <id> has
+no existing molecule/wisp children or live formulas-v2 workflow for <formula>
+✓`. A lookup that fails prints `gc sling: pre-check inconclusive: <error>` and
+exits 0 with no passing line. An open molecule or wisp exits 1 naming a
+molecule, and any other exit 1 is a usage, route or store failure. Under
+`--force` the preview skips the workflow half and prints a shorter passing
+line.
+
 **The landing is the pack's.** Gas City ships no landing for this pack's
 anchors. The anchor lifecycle, its rework children and the refinery's one anchor
 per PR are the pack's own formulas and scripts. bd records the two edges the
@@ -99,10 +119,17 @@ a child to its anchor.
 The rebuild of a rejected convoy runs on an ordinary bead, so every launch
 mechanic is Gas City's. A convoy has one rebuild child: a later repool adopts
 it, every retry slings that same bead, and `gc sling` takes its lock and refuses
-a second live run under the child's id. The arm a failed sling leaves is the
-deferred dispatch every other bead uses, and its replay is a plain `gc sling` of
-the child. The pack adds no lock, no duplicate check and no input convoy of its
-own.
+a second live run under the child's id. Whether a run is live on an adopted
+child is `gc sling`'s answer too. The repool runs the preview of the pour it is
+about to make, before it releases the child, because the release clears the
+assignee, route and stamp a live run still uses. It reads only the two answers
+that prove something: a live workflow named on the child, which it reports and
+leaves alone, and the passing pre-check for the child and `mol-polecat-work`,
+which lets it release and pour the child. Any other answer, an inconclusive
+lookup among them, stops the repool at a visit that carries `gc`'s exit and
+stderr. The arm a failed sling leaves is the deferred dispatch every other bead
+uses, and its replay is a plain `gc sling` of the child. The pack adds no lock,
+no duplicate check and no input convoy of its own.
 
 What the pack adds is glue and formula text. The filing of the child runs `bd`
 and `gc sling` the way `pre-open-rebase.sh` and `rework-child.sh` file and pour

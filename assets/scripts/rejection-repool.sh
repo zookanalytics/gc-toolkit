@@ -53,13 +53,15 @@
 #   3. For a convoy, its rebuild child is found among its live children: a
 #      task_kind=rework child on the convoy's branch that carries no review or
 #      ruling source key, which only rework-child.sh's children carry. One
-#      armed is left to the deferred dispatch that pours it, and one a run of
-#      mol-polecat-work is live on is reported and left alone. A run is live
-#      while its workflow root is not closed, the test gc sling applies before
-#      it pours the formula onto the child again. Any other child gets the
-#      release step 1 gives a plain bead, because its stamp and its assignee
-#      can outlive the run that wrote them: a cancelled run leaves its stamp,
-#      and a landing whose close was refused leaves the refinery as assignee.
+#      armed is left to the deferred dispatch that pours it, and one with a
+#      live workflow attached is reported and left alone. That answer is gc
+#      sling's own: its --dry-run preview of step 4's pour, asked before the
+#      release, because the release clears the assignee, route and stamp a live
+#      run still uses. A preview that proves neither a live workflow nor none
+#      stops the repool short. Any other child gets the release step 1 gives a
+#      plain bead, because its stamp and its assignee can outlive the run that
+#      wrote them: a cancelled run leaves its stamp, and a landing whose close
+#      was refused leaves the refinery as assignee.
 #      Its work order is then completed, with the new rejection_reason. With no
 #      child, one is filed whole: its work order (task_kind, anchor_bead,
 #      branch, target, rejection_reason, merge_strategy=mr, and existing_pr
@@ -102,14 +104,6 @@ LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 warn()  { echo "rejection-repool: $*" >&2; }
 usage() { warn "$1"; exit 1; }
 
-# >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
-# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
-# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
-# dropping a structural LF or TAB just minifies.
-scrub() { tr -d '\000-\037'; }
-# <<< control-char-scrub
-
 WORK=""; REASON=""; POOL_NAME="gc-toolkit.polecat"
 need() { [ "$2" -gt 1 ] || usage "$1 needs a value"; }
 while [ $# -gt 0 ]; do
@@ -142,25 +136,41 @@ stop_short() {
   exit 3
 }
 
-# live_runs <bead> — the roots of the $WORK_FORMULA runs live on <bead>, one per
-# line, empty when none is. A run's root names its input convoy
-# (gc.input_convoy_id), the convoy that tracks the bead, and the run is live
-# while its root is not closed. Non-zero when the convoys or their roots could
-# not be read: gc's own exit is kept, since a failed read can still print [].
-live_runs() {
-  local edges convoys c roots out=""
-  edges=$(gc bd dep list "$1" --direction=up -t tracks --json </dev/null 2>/dev/null) || return 1
-  edges=$(printf '%s' "$edges" | grep -a -vE '^gc bd:' | scrub)
-  printf '%s' "$edges" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  convoys=$(printf '%s' "$edges" | jq -r '.[] | select(((.issue_type // .type // "") | tostring) == "convoy") | .id' 2>/dev/null) || return 1
-  while IFS= read -r c; do
-    [ -n "$c" ] || continue
-    roots=$(bd_list --metadata-field "gc.input_convoy_id=$c" --status="$LIVE_STATUSES") || return 1
-    out="$out$(printf '%s' "$roots" | jq -r --arg f "$WORK_FORMULA" \
-      '.[] | select(((.metadata["gc.formula_name"] // "") | tostring) == $f) | .id' 2>/dev/null)
-"
-  done <<< "$convoys"
-  printf '%s' "$out" | sed '/^$/d'
+# sling_preview <bead> — gc sling's own answer to whether its pour of
+# $WORK_FORMULA onto <bead> would meet a live workflow, read from its --dry-run
+# preview of that pour. It sets PREVIEW to one of three answers:
+#   live     the preview exits 1 with the line naming a workflow attached to
+#            <bead>, and PREVIEW_ROOT is that workflow;
+#   none     the preview exits 0 with its passing pre-check line for <bead>
+#            and $WORK_FORMULA;
+#   unknown  anything else. A lookup that fails exits 0 as "pre-check
+#            inconclusive" with no passing line, an open molecule or wisp
+#            attachment exits 1 naming a molecule, and any other exit 1 is a
+#            usage, route or store failure, not a live run.
+# PREVIEW_SAID is gc's exit and its stderr, for the visit an unknown answer
+# files. The preview never passes --force, under which it skips the workflow
+# half of its pre-check and prints a different passing line. Without a file for
+# its stderr only a live answer and gc's words are lost, so a live run still
+# reads as unknown and never as none.
+sling_preview() {
+  local errf out rc said=""
+  PREVIEW=unknown; PREVIEW_ROOT=""
+  errf=$(mktemp "${TMPDIR:-/tmp}/rejection-repool-preview.XXXXXX" 2>/dev/null) || errf=/dev/null
+  out=$(gc sling ${GC_RIG:+--rig "$GC_RIG"} "$ROUTE" "$1" --on "$WORK_FORMULA" --dry-run </dev/null 2>"$errf"); rc=$?
+  if [ "$errf" != /dev/null ]; then
+    PREVIEW_ROOT=$(awk -v p="gc sling: bead $1 already has attached workflow " '
+      index($0, p) == 1 && substr($0, length(p) + 1) ~ /^[^[:space:]]+$/ { print substr($0, length(p) + 1); exit }' "$errf")
+    said=$(tr -s '[:space:]' ' ' < "$errf" | sed 's/^ //; s/ $//')
+    rm -f "$errf"
+  fi
+  PREVIEW_SAID="exit $rc${said:+: ${said:0:400}}"
+  if [ "$rc" = 1 ] && [ -n "$PREVIEW_ROOT" ]; then
+    PREVIEW=live
+  elif [ "$rc" = 0 ] && grep -qxF -- "  Pre-check: $1 has no existing molecule/wisp children or live formulas-v2 workflow for $WORK_FORMULA ✓" <<< "$out"; then
+    PREVIEW=none
+  else
+    PREVIEW_ROOT=""
+  fi
 }
 
 ROW=$(bd_json show "$WORK")
@@ -254,13 +264,16 @@ if [ -n "$IS_CONVOY" ]; then
       warn "$WORK: its rebuild child $POUR is armed for $ADOPT_ARM, and the deferred-dispatch reconcile pass pours it; nothing poured here"
       exit 2
     fi
-    LIVE=$(live_runs "$POUR") \
-      || stop_short "the runs on its rebuild child $POUR could not be read, so a live rebuild cannot be told from a finished one" \
-           "$RERUN once its store answers"
-    if [ -n "$LIVE" ]; then
-      warn "repooled $WORK: run ${LIVE%%$'\n'*} of $WORK_FORMULA is live on its rebuild child $POUR, and a second pour would double its rebuild"
-      exit 0
-    fi
+    sling_preview "$POUR"
+    case "$PREVIEW" in
+      live)
+        warn "repooled $WORK: workflow $PREVIEW_ROOT is live on its rebuild child $POUR, as gc sling's preview reports, and a second pour would double its rebuild"
+        exit 0 ;;
+      none) ;;
+      *)
+        stop_short "gc sling's preview of the pour onto its rebuild child $POUR did not say whether a workflow is live on it ($PREVIEW_SAID), so a live rebuild cannot be told from a finished one" \
+          "$RERUN once that preview answers: gc sling $ROUTE $POUR --on $WORK_FORMULA --dry-run" ;;
+    esac
     "$LIFECYCLE" transition "$POUR" --to unanchored --assignee "" --route "" --unset gc.execution_routed_to >&2
     LC_RC=$?
     [ "$LC_RC" = 0 ] \

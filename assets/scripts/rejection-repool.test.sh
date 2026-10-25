@@ -134,9 +134,56 @@ eq "$(meta tk-w existing_pr)" "https://github.com/o/r/pull/7" "pr_url carried ov
 # Each pour also mints its run's workflow root, open until a case ends the run
 # (end_runs): gc.input_convoy_id names the input convoy and gc.formula_name the
 # formula, as Gas City stamps a graph.v2 root.
+# Its `sling --dry-run` is gc sling's preview of that pour, logged to
+# $TMP/previews and never poured. It answers the way the preview does
+# (dryRunReportBlockingMolecule and dryRunReportBlockingWorkflow in gc's sling
+# command, gastownhall/gascity 149ae8df7c95): an open workflow root of the
+# formula over a gc.synthetic convoy that tracks the bead exits 1 naming that
+# workflow on stderr, and no such root exits 0 with the passing pre-check line.
+# STUB_PREVIEW names the other answers: inconclusive (a failed lookup, exit 0
+# with no passing line), molecule (an attached molecule, exit 1) and unrelated
+# (a usage, route or store failure, exit 1).
 POUR="$TMP/bin-pour"; mkdir -p "$POUR"
 cat > "$POUR/gc" <<EOF
 #!/usr/bin/env bash
+if [ "\${1:-}" = sling ]; then
+  case " \$* " in
+    *" --dry-run "*)
+      printf '%s\n' "\$*" >> "$TMP/previews"
+      target=""; bead=""; skip=""; formula=""
+      for a in "\${@:2}"; do
+        if [ -n "\$skip" ]; then [ "\$skip" = --on ] && formula="\$a"; skip=""; continue; fi
+        case "\$a" in
+          --rig|--on) skip="\$a" ;;
+          --*) : ;;
+          *) if [ -z "\$target" ]; then target="\$a"; elif [ -z "\$bead" ]; then bead="\$a"; fi ;;
+        esac
+      done
+      case "\${STUB_PREVIEW:-}" in
+        molecule)  echo "gc sling: bead \$bead already has attached molecule mol-\$bead" >&2; exit 1 ;;
+        unrelated) echo "gc sling: simulated store failure" >&2; exit 1 ;;
+      esac
+      printf 'Dry run: gc sling %s %s --on=%s\n\n' "\$target" "\$bead" "\$formula"
+      if [ "\${STUB_PREVIEW:-}" = inconclusive ]; then
+        echo "gc sling: pre-check inconclusive: listing tracking convoys for \$bead: simulated store error" >&2
+        exit 0
+      fi
+      cvs=\$(awk -F'|' -v b="\$bead" '\$2 == "tracks" && \$3 == b { print \$1 }' "\$STUB_DEPS" | jq -Rsc 'split("\n") | map(select(. != ""))')
+      root=\$(jq -r --argjson c "\$cvs" --arg f "\$formula" '
+        [ .[] | select(.issue_type == "convoy" and (((.metadata // {})["gc.synthetic"] // "") | tostring) == "true") | .id ] as \$syn
+        | [ .[] | (.metadata // {}) as \$m | (\$m["gc.input_convoy_id"] // "") as \$i
+            | select(.status != "closed" and (\$m["gc.kind"] // "") == "workflow" and (\$m["gc.formula_name"] // "") == \$f
+                     and any(\$c[]; . == \$i) and any(\$syn[]; . == \$i))
+            | .id ]
+        | sort | .[0] // empty' "\$STUB_STORE")
+      if [ -n "\$root" ]; then
+        echo "gc sling: bead \$bead already has attached workflow \$root" >&2
+        exit 1
+      fi
+      printf 'Attach formula:\n  Formula: %s\n  Pre-check: %s has no existing molecule/wisp children or live formulas-v2 workflow for %s ✓\n\n' "\$formula" "\$bead" "\$formula"
+      exit 0 ;;
+  esac
+fi
 if [ "\${1:-}" = sling ] && [ -z "\${STUB_SLING_FAIL:-}" ]; then
   target=""; bead=""; skip=""; formula=""
   for a in "\${@:2}"; do
@@ -182,7 +229,7 @@ grad() { # [extra-convoy-metadata-fields]
           {\"id\":\"tk-m3\",\"status\":\"closed\",\"title\":\"m3\",\"metadata\":{}}]"
   : > "$STUB_DEPS"
   for m in tk-m1 tk-m2 tk-m3; do printf 'tk-g|tracks|%s\n' "$m" >> "$STUB_DEPS"; done
-  : > "$STUB_GC_LOG"; : > "$STUB_ESC_LOG"; rm -f "$TMP/input-convoy"
+  : > "$STUB_GC_LOG"; : > "$STUB_ESC_LOG"; rm -f "$TMP/input-convoy" "$TMP/previews"
   export STUB_SLING_FAIL="" STUB_UPDATE_FAIL="" STUB_SHOW_FAIL="" STUB_AGENTS="" STUB_ESC_RC=""
 }
 kids_of() { jq -r --arg a "$1" '[.[] | select((.metadata.anchor_bead // "") == $a) | .id] | join(" ")' "$STUB_STORE"; }
@@ -306,13 +353,17 @@ grad
 run_pour tk-g --reason "$REASON"
 CHILD=$(kids_of tk-g)
 [ -n "$CHILD" ] && ok "the first repool filed the rebuild child" || bad "the first repool filed the rebuild child (none)"
-: > "$STUB_GC_LOG"
+ROOT=$(jq -r --arg c "$(cat "$TMP/input-convoy" 2>/dev/null)" '[.[] | select(((.metadata // {})["gc.input_convoy_id"] // "") == $c) | .id][0] // empty' "$STUB_STORE")
+: > "$STUB_GC_LOG"; rm -f "$TMP/previews"
 run_pour tk-g --reason "$REASON2"
 eq "$rc" 0 "a child a live run works on stands as the rebuild"
 eq "$(kids_of tk-g)" "$CHILD" "no second child is filed"
 eq "$(slings)" "0" "and nothing is poured again"
+eq "$(grep -c "^bd update $CHILD" "$STUB_GC_LOG" || true)" "0" "the live run's child is never released"
 eq "$(meta "$CHILD" rejection_reason)" "$REASON" "the live run's work order is left as it is"
-has "$out" "is live on its rebuild child $CHILD" "the run names the live run that carries the rebuild"
+eq "$(cat "$TMP/previews" 2>/dev/null)" "sling --rig gc-toolkit $ROUTE $CHILD --on mol-polecat-work --dry-run" \
+  "whether a run is live is gc sling's own preview of the pour, to the proved route and never forced"
+has "$out" "workflow ${ROOT:-<no root>} is live on its rebuild child $CHILD" "the run names the workflow gc sling's preview found live"
 grad
 export STUB_SLING_FAIL=1
 run_pour tk-g --reason "$REASON"
@@ -370,26 +421,36 @@ eq "$rc" 0 "a child whose run was cancelled is poured again"
 eq "$(slung)" "$CHILD" "onto the same child"
 eq "$(meta "$CHILD" rejection_reason)" "$REASON2" "carrying the new rejection"
 
-echo "# runs on the rebuild child that cannot be read pour nothing"
-for knob in "STUB_DEP_PARTIAL=-t tracks" "STUB_LIST_FAIL_ON=gc.input_convoy_id"; do
+echo "# a preview that proves neither a live workflow nor none pours nothing"
+# The child's run is over, so only the preview's answer stands between the
+# repool and a pour. An inconclusive lookup exits 0 and an unrelated failure
+# exits 1, so a parse of the exit code alone pours the first and reports the
+# second live.
+for answer in "inconclusive|exit 0: gc sling: pre-check inconclusive:" \
+              "molecule|exit 1: gc sling: bead @ already has attached molecule mol-@" \
+              "unrelated|exit 1: gc sling: simulated store failure"; do
+  kind="${answer%%|*}"
   grad
   run_pour tk-g --reason "$REASON"
   CHILD=$(kids_of tk-g)
   end_runs "$CHILD"
   : > "$STUB_GC_LOG"; : > "$STUB_ESC_LOG"
-  export "${knob%%=*}=${knob#*=}"
-  run_pour tk-g --reason "$REASON2"
-  unset "${knob%%=*}"
-  eq "$rc" 2 "an unreadable run read ($knob) -> visit, exit 2"
-  eq "$(slings)" "0" "nothing is poured ($knob)"
-  eq "$(meta "$CHILD" rejection_reason)" "$REASON" "nothing is written to the child ($knob)"
-  has "$(cat "$STUB_ESC_LOG")" "a live rebuild cannot be told from a finished one" "the visit names the unreadable runs ($knob)"
+  STUB_PREVIEW="$kind" run_pour tk-g --reason "$REASON2"
+  eq "$rc" 2 "a preview answering $kind -> visit, exit 2"
+  eq "$(slings)" "0" "nothing is poured ($kind)"
+  eq "$(grep -c "^bd update $CHILD" "$STUB_GC_LOG" || true)" "0" "the child is not released ($kind)"
+  eq "$(meta "$CHILD" rejection_reason)" "$REASON" "nothing is written to the child ($kind)"
+  eq "$(meta "$CHILD" gc.dispatch_when_ready)" "<absent>" "nothing is armed ($kind)"
+  has "$(cat "$STUB_ESC_LOG")" "a live rebuild cannot be told from a finished one" "the visit names the unanswered preview ($kind)"
+  said="${answer#*|}"
+  has "$(cat "$STUB_ESC_LOG")" "${said//@/$CHILD}" "the visit carries gc's exit and its own words ($kind)"
+  has "$(cat "$STUB_ESC_LOG")" "gc sling $ROUTE $CHILD --on mol-polecat-work --dry-run" "the visit names the preview that finishes it ($kind)"
 done
 
 echo "# whether the found child is armed or live is never read from a show of the child"
 # A gc whose show of $STUB_SHOW_FAIL_ID fails while every listing answers. The
-# arm is read from the listing that found the child, and a live run from the
-# edges and the roots over it.
+# arm is read from the listing that found the child, and a live run from gc
+# sling's preview.
 SHOWFAIL="$TMP/bin-showfail"; mkdir -p "$SHOWFAIL"
 printf '#!/usr/bin/env bash\n[ "${1:-} ${2:-} ${3:-}" = "bd show ${STUB_SHOW_FAIL_ID:-}" ] && exit 1\nexec "%s/gc" "$@"\n' "$POUR" > "$SHOWFAIL/gc"
 chmod +x "$SHOWFAIL/gc"
