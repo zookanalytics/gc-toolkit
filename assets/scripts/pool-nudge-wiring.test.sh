@@ -7,15 +7,11 @@
 # guarded write that reopens the bead and releases the claim together:
 #
 #   1. Every agent nudge that tells a worker what to do with its assignee names
-#      that write as one backticked `gc bd update` command: the holder guard on
-#      the worker's own session id (--if-assignee="$GC_SESSION_ID"), the status
-#      guard (--if-status=in_progress), the reopen (--status=open), the cleared
-#      assignee (--assignee="") and both session pins unset. A guard on whatever
-#      assignee the bead shows would let the write unassign another session's
-#      claim, because a write guarded on the assignee skips bd's reassign
-#      fence. No nudge names gc bd release-if-current, which leaves the pins
-#      and, given a pool session's id as the holder, releases a rig bead
-#      against the city store, where it finds nothing and still exits 0.
+#      that write as one backticked `gc bd update` command: a holder guard
+#      (--if-assignee=), the status guard (--if-status=in_progress), the reopen
+#      (--status=open), the cleared assignee (--assignee="") and both session
+#      pins unset. No nudge names gc bd release-if-current, whose gaps
+#      assets/scripts/hand-back.sh's header names.
 #   2. The polecat and polecat-codex nudges are identical, as both agent files
 #      say they are, and they carry the hand-back.
 #   3. No tracked file under agents/, formulas/, template-fragments/, skills/,
@@ -30,17 +26,24 @@
 #      listing goes with the split. The text is read with shell and TOML line
 #      continuations joined, and the phrase with line wraps joined too, so a
 #      phrase or a command that a line break splits is still found.
+#   4. Each nudge's hand-back command runs, in bash and in zsh where zsh is
+#      installed, against a stub store that enforces bd's --if-status and
+#      --if-assignee: a mismatch writes nothing and exits 13. gc hook records a
+#      claim under the worker's alias when it has one, else under its session
+#      id, and the command releases it in both forms, an empty alias included,
+#      leaving the bead open and unassigned, with no session pins, on its
+#      route. It writes nothing to a bead another session or another alias
+#      holds, or to one already closed.
 #
 # run-tests-scope: tree
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-PASS=0; FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-pool-nudge-wiring.XXXXXX")" || { echo "mktemp failed" >&2; exit 1; }
+trap 'rm -rf "$TMP"' EXIT
 
 # shellcheck source=test-harness.sh
-. "$HERE/test-harness.sh"   # tomllib_python only; the assertions below are this suite's own
+. "$HERE/test-harness.sh"
 
 TOMLS=()
 for T in "$ROOT"/agents/*/agent.toml "$ROOT"/packs/*/agents/*/agent.toml; do
@@ -49,7 +52,8 @@ done
 [ "${#TOMLS[@]}" -gt 0 ] || { echo "no agent TOMLs under $ROOT" >&2; exit 1; }
 
 # Tests and the shared harness spell out the very writes check 3 forbids, as the
-# fixtures and controls that prove it, so they are left out.
+# fixtures and controls that prove it, so they are left out. The listing runs
+# before harness_init, whose git stub answers nothing.
 TEXTS=$(git -C "$ROOT" ls-files -- agents formulas template-fragments skills packs assets/scripts doctor tools overlays \
   | grep -vE '(\.test\.sh|_test\.go|/test-harness\.sh)$')
 [ -n "$TEXTS" ] || { echo "git ls-files lists nothing under agents/, formulas/, template-fragments/, skills/, packs/, assets/scripts/, doctor/, tools/ or overlays/ in $ROOT" >&2; exit 1; }
@@ -59,27 +63,27 @@ if ! TOML_PY="$(tomllib_python)"; then
   exit 0
 fi
 
-# Each result line is "ok|<message>" or "bad|<message>". The agent TOMLs are the
-# arguments, and the tracked text files for check 3 arrive in WIRING_TEXTS, one
-# per line, because the program itself is the reader's stdin.
+# Each result line is "ok|<message>", "bad|<message>", or "run|<agent>|<command>"
+# for check 4. The agent TOMLs are the arguments, and the tracked text files for
+# check 3 arrive in WIRING_TEXTS, one per line, because the program itself is
+# the reader's stdin.
 RESULTS=$(WIRING_TEXTS="$TEXTS" "$TOML_PY" - "$ROOT" "${TOMLS[@]}" <<'PY'
 import os, re, sys, tomllib
 
 root, paths = sys.argv[1], sys.argv[2:]
 
 # --- 1. The hand-back each nudge names. ---
-# The holder guard names the worker's own session id, the identity gc hook
-# records a pool worker's claim under.
-OWN_GUARD = '--if-assignee="$GC_SESSION_ID"'
+# Check 4 runs each command found here, so it is check 4 that decides whose
+# claim the holder guard names.
 PARTS = [
-    OWN_GUARD,
+    "--if-assignee=",
     "--if-status=in_progress",
     "--status=open",
     '--assignee=""',
     "--unset-metadata gc.session_id",
     "--unset-metadata gc.session_name",
 ]
-nudges = {}
+nudges, handbacks = {}, {}
 for path in paths:
     name = os.path.relpath(os.path.dirname(path), root)
     try:
@@ -94,7 +98,9 @@ for path in paths:
     if "release-if-current" in nudge:
         print("bad|%s: the nudge names gc bd release-if-current" % name)
     commands = [c for c in re.findall(r"`([^`]*)`", nudge) if c.startswith("gc bd update ")]
-    if any(all(p in c for p in PARTS) for c in commands):
+    whole = [c for c in commands if all(p in c for p in PARTS)]
+    if whole:
+        handbacks[name] = whole[0]
         print("ok|%s: the nudge's hand-back is one guarded gc bd update that reopens the bead and releases the claim" % name)
     elif commands:
         missing = [p for p in PARTS if not any(p in c for c in commands)]
@@ -107,7 +113,7 @@ pool = ["agents/polecat", "agents/polecat-codex"]
 if all(p in nudges for p in pool):
     a, b = (nudges[p] for p in pool)
     print(("ok|" if a == b else "bad|") + "the polecat and polecat-codex nudges are %s" % ("identical" if a == b else "different"))
-    carries = OWN_GUARD in a
+    carries = pool[0] in handbacks
     print(("ok|" if carries else "bad|") + "the polecat nudge %s the hand-back" % ("carries" if carries else "does not carry"))
 else:
     print("bad|the polecat and polecat-codex nudges are missing: agents/polecat or agents/polecat-codex has no agent.toml")
@@ -153,8 +159,16 @@ for rel in sorted(KNOWN_SPLIT):
         print("ok|%s, the one release listed by name, still splits, so its listing stands" % rel)
     else:
         print("bad|%s no longer clears an assignee in a write of its own: take it out of KNOWN_SPLIT" % rel)
+
+# --- 4. The commands the shell runs. ---
+for name in sorted(handbacks):
+    print("run|%s|%s" % (name, handbacks[name]))
 PY
 ); PY_RC=$?
+
+# harness_init zeroes the tallies, clears GC_* and BEADS_*, and puts the stub gc
+# ahead of the test floor on PATH, so it runs before the first result counts.
+harness_init
 
 # A reader that dies reports nothing, which would otherwise read as no finding.
 [ "$PY_RC" -eq 0 ] || bad "the reader exited $PY_RC"
@@ -170,13 +184,112 @@ case "$RESULTS" in
   *"clears an assignee"*) ;;
   *) bad "the reader reported nothing about bd update commands that clear an assignee" ;;
 esac
-while IFS='|' read -r verdict message; do
-  case "$verdict" in
-    ok)  ok "$message" ;;
-    bad) bad "$message" ;;
-    *)   [ -z "$verdict" ] || bad "unreadable result line: $verdict|$message" ;;
+# The lines are read back from a checked file, so a loop that reads nothing
+# cannot pass for one that found nothing wrong.
+RUNS=(); LINES=0
+WANT=$(printf '%s\n' "$RESULTS" | grep -c .)
+if printf '%s\n' "$RESULTS" > "$TMP/results"; then
+  while IFS='|' read -r verdict message; do
+    [ -n "$verdict" ] && LINES=$((LINES + 1))
+    case "$verdict" in
+      ok)  ok "$message" ;;
+      bad) bad "$message" ;;
+      run) RUNS+=("$message") ;;
+      *)   [ -z "$verdict" ] || bad "unreadable result line: $verdict|$message" ;;
+    esac
+  done < "$TMP/results"
+fi
+[ "$LINES" -gt 0 ] && [ "$LINES" -eq "$WANT" ] || bad "read back $LINES of the reader's $WANT result lines"
+
+# --- 4. Each nudge's hand-back, run. ---
+# The wrapper ahead of the stub gc enforces --if-status and --if-assignee the way
+# bd does, where a mismatch writes nothing and exits 13.
+mkdir -p "$TMP/guard"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/guard/gc" <<WRAP
+if [ "\${1:-} \${2:-}" = "bd update" ]; then
+  id="\${3:-}"; has_s=0; want_s=""; has_a=0; want_a=""
+  for a in "\$@"; do
+    case "\$a" in
+      --if-status=*)   has_s=1; want_s="\${a#--if-status=}" ;;
+      --if-assignee=*) has_a=1; want_a="\${a#--if-assignee=}" ;;
+    esac
+  done
+  if [ "\$has_s" = 1 ] || [ "\$has_a" = 1 ]; then
+    row=\$("$BIN/gc" bd show "\$id" --json)
+    cur_s=\$(printf '%s' "\$row" | jq -r '.[0].status // ""')
+    cur_a=\$(printf '%s' "\$row" | jq -r '.[0].assignee // ""')
+    if { [ "\$has_s" = 1 ] && [ "\$want_s" != "\$cur_s" ]; } || { [ "\$has_a" = 1 ] && [ "\$want_a" != "\$cur_a" ]; }; then
+      printf 'Error updating %s: precondition failed: it shows status "%s" and assignee "%s"\n' "\$id" "\$cur_s" "\$cur_a" >&2
+      exit 13
+    fi
+  fi
+fi
+exec "$BIN/gc" "\$@"
+WRAP
+chmod +x "$TMP/guard/gc"
+
+POOL="gc-toolkit/gc-toolkit.polecat-codex"
+# bead <status> <assignee> <session id> — the bead W1 a hook claim stamped with
+# its session pins, on its pool's route.
+bead() {
+  store "$(jq -nc --arg st "$1" --arg as "$2" --arg sid "$3" --arg pool "$POOL" '
+    [{id: "W1", status: $st, assignee: $as, title: "work", notes: "",
+      metadata: {"gc.session_id": $sid, "gc.session_name": ("gc-toolkit__polecat-codex-" + $sid),
+                 "gc.routed_to": $pool}}]')"
+}
+# claim — what W1 shows: status, assignee, both pins and the route.
+claim() { printf '%s|%s|%s|%s|%s' "$(bstatus W1)" "$(bassignee W1)" "$(meta W1 gc.session_id)" "$(meta W1 gc.session_name)" "$(meta W1 gc.routed_to)"; }
+RELEASED="open||<absent>|<absent>|$POOL"
+# run <shell> <command> [VAR=val ...] — the command in a fresh <shell> that reads
+# no startup file and whose only session identity is the assignments. Prints
+# the exit status.
+run() {
+  local sh="$1" cmd="$2"; shift 2
+  local rc=0
+  case "$sh" in
+    bash) env -u BASH_ENV -u GC_ALIAS -u GC_SESSION_ID PATH="$TMP/guard:$PATH" "$@" bash --norc --noprofile -c "$cmd" >/dev/null 2>&1 || rc=$? ;;
+    zsh)  env -u GC_ALIAS -u GC_SESSION_ID PATH="$TMP/guard:$PATH" "$@" zsh -f -c "$cmd" >/dev/null 2>&1 || rc=$? ;;
   esac
-done <<< "$RESULTS"
+  printf '%s' "$rc"
+}
+
+SHELLS=(bash)
+if command -v zsh >/dev/null 2>&1; then SHELLS+=(zsh); else echo "skip - check 4 in zsh: zsh is not installed"; fi
+[ "${#RUNS[@]}" -gt 0 ] || bad "no nudge names a whole hand-back command, so check 4 ran nothing"
+for entry in ${RUNS[@]+"${RUNS[@]}"}; do
+  agent="${entry%%|*}"
+  cmd="${entry#*|}"
+  cmd="${cmd//<bead>/W1}"
+  for sh in "${SHELLS[@]}"; do
+    at="$agent in $sh"
+    bead in_progress gc-toolkit/gc-toolkit.hicks lx-wisp-o8f8w
+    rc=$(run "$sh" "$cmd" GC_ALIAS=gc-toolkit/gc-toolkit.hicks GC_SESSION_ID=lx-wisp-o8f8w)
+    eq "$rc|$(claim)" "0|$RELEASED" "$at: a worker with an alias hands back the bead gc hook claimed under its alias"
+
+    bead in_progress lx-wisp-me lx-wisp-me
+    rc=$(run "$sh" "$cmd" GC_SESSION_ID=lx-wisp-me)
+    eq "$rc|$(claim)" "0|$RELEASED" "$at: a worker with no alias hands back the bead claimed under its session id"
+
+    bead in_progress lx-wisp-me lx-wisp-me
+    rc=$(run "$sh" "$cmd" GC_ALIAS= GC_SESSION_ID=lx-wisp-me)
+    eq "$rc|$(claim)" "0|$RELEASED" "$at: an empty alias counts as none, so the session id is the guard"
+
+    bead in_progress lx-wisp-other lx-wisp-other
+    rc=$(run "$sh" "$cmd" GC_SESSION_ID=lx-wisp-me)
+    eq "$rc|$(claim)" "13|in_progress|lx-wisp-other|lx-wisp-other|gc-toolkit__polecat-codex-lx-wisp-other|$POOL" \
+      "$at: a bead another session holds is left as it was"
+
+    bead in_progress gc-toolkit/gc-toolkit.ripley lx-wisp-other
+    rc=$(run "$sh" "$cmd" GC_ALIAS=gc-toolkit/gc-toolkit.hicks GC_SESSION_ID=lx-wisp-o8f8w)
+    eq "$rc|$(claim)" "13|in_progress|gc-toolkit/gc-toolkit.ripley|lx-wisp-other|gc-toolkit__polecat-codex-lx-wisp-other|$POOL" \
+      "$at: a bead another alias holds is left as it was"
+
+    bead closed lx-wisp-me lx-wisp-me
+    rc=$(run "$sh" "$cmd" GC_SESSION_ID=lx-wisp-me)
+    eq "$rc|$(claim)" "13|closed|lx-wisp-me|lx-wisp-me|gc-toolkit__polecat-codex-lx-wisp-me|$POOL" \
+      "$at: a bead the worker already closed stays closed"
+  done
+done
 
 echo
 echo "pool-nudge-wiring: $PASS passed, $FAIL failed"

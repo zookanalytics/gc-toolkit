@@ -9,10 +9,11 @@
 # metadata edits in one atomic operation, so the hand-back lands whole or not at
 # all. Split into parts, it can stop half-way: a store that takes the clear and
 # fails the reopen leaves the bead in_progress with no assignee, which no pool's
-# work query serves, and pins removed ahead of a release that then fails leave
-# a held bead that no longer names its session in them. A refused write leaves
-# the claim as it was, in_progress under this session with its pins and route
-# in place.
+# work query serves, since bd ready lists only open beads and the in_progress
+# tier serves only the session a bead is assigned to. Pins removed ahead of a
+# release that then fails leave a held bead that no longer names its session in
+# them. A refused write leaves the claim as it was, in_progress under this
+# session with its pins and route in place.
 #
 # The write goes ahead only while the bead shows this session's claim, or none:
 #   in_progress, assigned to one of this session's identities;
@@ -24,16 +25,27 @@
 # The write is guarded with --if-status and --if-assignee on what the bead
 # showed, so a claim or a close that lands after that read refuses it whole.
 # bd skips its reassign fence for a write guarded on the assignee, which is
-# what lets one write clear the assignee of an in_progress bead.
+# what lets one write clear the assignee of an in_progress bead. The same skip
+# is why the bead must first show this session's claim: a guard copied from
+# any assignee the bead shows would release another session's claim.
 #
 # Anything else is not this session's to release: a closed or parked bead, one
 # held by someone else, one in_progress with no assignee, or one that cannot be
 # read. Nothing is written to it but a note saying what it showed. A write the
 # store refuses gets the same note, naming what the bead shows after it.
 #
+# gc bd release-if-current is not this write. It leaves both pins, and it opens
+# the store of whichever argument names an existing bead, trying city ids
+# first. A pool session's id is a city bead, so a rig bead released under that
+# holder goes to the city store, finds no bead there, and prints "skipped" with
+# exit 0.
+#
 # Callers: mol-polecat-work's hand-back arms (the stop to ask a person about a
 # bead with no molecule, the store-only exit, the auto_push=false halt) and
-# converse-claim.sh's release of an out-of-group turn.
+# converse-claim.sh's release of an out-of-group turn. The polecat and
+# polecat-codex nudges spell out this write for an in_progress claim, guarded
+# on $GC_ALIAS when it is non-empty and on $GC_SESSION_ID otherwise, so a
+# change to its shape changes them too (pool-nudge-wiring.test.sh runs theirs).
 # exit: 0 handed back · 1 not handed back, noted on the bead · 2 usage
 set -uo pipefail
 
