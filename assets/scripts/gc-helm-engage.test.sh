@@ -492,6 +492,13 @@ eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-1" "(BIND) the visit is assigned t
 has "$CALLED" "bd update tk-vis --if-assignee" "(BIND) …conditionally, on the open+unassigned state the guards read"
 has "$CALLED" "--if-status open" "(BIND) …and on the open status, so a lost race writes nothing"
 has "$CALLED" "--assignee gc-toolkit__converse-1" "(BIND) …by name, the identity the claim adopts"
+# Orphan recovery resolves a visit's owner from gc.session_id ahead of its
+# assignee, so a pin an earlier sitting left beside the fresh binding would have
+# it find that sitting dead and take the visit from the fresh one. The bind
+# drops both pins in the same guarded write.
+has "$(printf '%s\n' "$CALLED" | grep -- '--assignee gc-toolkit__converse-1')" \
+    "--unset-metadata gc.session_id --unset-metadata gc.session_name" \
+    "(BIND-PINS) …and drops any session pin an earlier sitting left, in the same write"
 # An opus (claude) sitting self-starts from the prompt its launch delivers on
 # argv, so engage sends it no kick. A kick here would land as a deferred reminder
 # after the sitting has already framed — the stale "begin now" this removes.
@@ -1171,6 +1178,11 @@ eq "$RC" 0 "(RECLAIM) engaging a visit bound to a gone sitting exits 0"
 has "$OUT" "reclaimed visit tk-vis" "(RECLAIM) …announcing the reclaim"
 has "$CALLED" "bd update tk-vis --if-assignee gc-toolkit__converse-dead --if-status open" "(RECLAIM) …clearing the binding only while it still holds the gone owner"
 has "$CALLED" "gc.routed_to=human" "(RECLAIM) …and re-parks it on the board"
+RECLAIM_WRITE="$(printf '%s\n' "$CALLED" | grep -- '--if-assignee gc-toolkit__converse-dead')"
+has "$RECLAIM_WRITE" "--unset-metadata gc.session_id --unset-metadata gc.session_name" \
+    "(RECLAIM-PINS) …dropping the gone sitting's session pins in the same write"
+has "$RECLAIM_WRITE" "gc.takeaway=Reclaimed from a gone sitting; re-parked for re-engagement." \
+    "(RECLAIM-HEADLINE) …under the headline the witness's release of such a visit writes too"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(RECLAIM) …then spawns a fresh sitting"
 eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-1" "(RECLAIM) …bound to the fresh sitting's runtime name"
 unset LIVE_SITTINGS

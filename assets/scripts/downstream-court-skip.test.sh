@@ -17,6 +17,10 @@
 # Two states name work that is not the pool's to recover:
 #   * an in-flight PR      — merge_result is pre_open_gate or pull_request;
 #   * a human gate         — gc.routed_to=human.
+# A visit (task_kind=visit) is routed to human too, and it passes. Its holder is
+# the sitting engaged on it, and Gas City frees no claim routed to human, so a
+# visit whose sitting is gone stays engaged on the board until orphan recovery
+# releases it. Dropping a visit here would leave that recovery unreachable.
 # pr.machine is NOT one of them: a progressing stamp is written only alongside an
 # anchor merge_result, and unanchoring back to the pool clears merge_result while
 # leaving pr.machine behind, so on a repooled bead it is stale — reading it strands
@@ -136,6 +140,21 @@ FIX3='[
 eq "$(keep "$FIX3")" "e2,e4" \
    "exact match: drops pull_request and human; keeps pull_request_draft and human-review"
 
+# A visit passes, and every other human gate drops. task_kind matches exactly,
+# so a kind that only resembles visit is still a human gate.
+# v1  visit engage bound to a sitting whose create failed  -> KEEP
+# v2  visit a sitting claimed, then its session closed      -> KEEP
+# h1  human gate carrying another task_kind                -> DROP
+# h2  human gate whose task_kind only resembles visit       -> DROP
+FIX7='[
+  {"id":"v1","status":"open","assignee":"s-lx-wisp-tjt3y","metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-ycww6"}},
+  {"id":"v2","status":"in_progress","assignee":"gascity/gc-toolkit.v2","metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-2ddu7","gc.session_id":"lx-wisp-dead","gc.session_name":"s-lx-wisp-dead"}},
+  {"id":"h1","metadata":{"task_kind":"finding","gc.routed_to":"human"}},
+  {"id":"h2","metadata":{"task_kind":"visits","gc.routed_to":"human"}}
+]'
+eq "$(keep "$FIX7")" "v1,v2" \
+   "a visit routed to human passes, bound or claimed; a human gate of any other task_kind drops"
+
 # Empty listing -> empty result (never errors).
 eq "$(keep '[]')" "" "empty listing yields empty result"
 
@@ -183,6 +202,21 @@ FIX6='[
 ]'
 eq "$(pipeline "$FIX6")" "tk-stale-prog" \
    "a stale pr.machine=progressing on an unanchored, pool-routed dead-session bead is KEPT for recovery (not a live court)"
+
+# A visit engage bound to a sitting that never started names its owner only in
+# its assignee, the sitting's runtime name. host-bead-skip keeps it and stamps
+# that owner, and downstream-court-skip lets it through to the liveness loop. A
+# parked visit names no owner, so host-bead-skip drops it, and a human-gated work
+# bead still naming its dead polecat drops here as before.
+FIX8='[
+  {"id":"gc-bound","status":"open","assignee":"s-lx-wisp-tjt3y","metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-ycww6"}},
+  {"id":"gc-parked","status":"open","assignee":null,"metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-ycww6"}},
+  {"id":"tk-gated","status":"open","assignee":null,"metadata":{"gc.routed_to":"human","gc.session_id":"lx-dead"}}
+]'
+eq "$(pipeline "$FIX8")" "gc-bound" \
+   "host-bead-skip | downstream-court-skip keeps the bound visit, drops the parked visit (no owner) and the human-gated work bead"
+eq "$(printf '%s' "$FIX8" | bash "$TMP/hostskip.sh" 2>/dev/null | bash "$TMP/filter.sh" 2>/dev/null | jq -r '.[0].owner')" "s-lx-wisp-tjt3y" \
+   "the bound visit reaches the loop owned by the sitting engage bound it to"
 
 echo
 echo "downstream-court-skip: $PASS passed, $FAIL failed"

@@ -291,7 +291,9 @@ if ! STOP_OUT=$(DETACHED_JOB_STOP_GRACE=20 "$JOB" stop "$GATE"); then
   exit 1
 fi
 # refinery-workspace.sh clears the leftover and stages the branch, so this block
-# removes nothing itself. It is found the way the launcher is.
+# removes nothing itself. It is found the way the launcher is. The stage records
+# that the prep worktree holds $BRANCH for $WORK, and merge-push takes the bead
+# and branch it acts for from that record.
 WS=""
 for c in "$RIG_ROOT" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
@@ -300,7 +302,7 @@ done
 # Check the staging result before any conflict path can run: a failed staging is
 # prep-setup infrastructure, not an origin/$TARGET conflict, so it leaves the
 # work with the refinery to retry instead of repooling it with a false rejection.
-if ! "$WS" stage --rig-root "$RIG_ROOT" --branch "$BRANCH"; then
+if ! "$WS" stage --rig-root "$RIG_ROOT" --branch "$BRANCH" --work "$WORK"; then
   echo "could not stage the prep worktree at $PREP_WT — NOT preparing the branch; leaving it with the refinery to retry (prep-setup failure, not an origin/$TARGET conflict)"
   gc runtime drain-ack
   exit 1
@@ -783,10 +785,38 @@ description = """
 **delete_merged_branches = {{delete_merged_branches}}** /
 **auto_ff_rig_main = {{auto_ff_rig_main}}**
 
-Read strategy and helpers once:
+Read the bead, its strategy and the helpers once. The step's blocks run in
+order in one shell, since each reads what an earlier one set.
+
+**The prepared head is one bead's, and this step acts for that bead.** The
+rebase step recorded in the prep worktree which bead and branch it staged
+there. The step's first lines take `WORK` and `BRANCH` from that record, never
+from the agent's shell, so every block after them pushes, lands and records
+for the bead whose head the prep worktree holds, whatever the shell carried
+before. When the shell named another bead, the block says which one it now
+acts for. When the prep worktree records nothing, or there is none, the block
+tears down what is there, pushes and records nothing, and exits 4 without
+draining: jump to next-iteration, and the next patrol prepares the work again.
 ```bash
+# >>> prep-staged-work
+RIG_ROOT="${GC_RIG_ROOT:-}"
+[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+WS=""
+for c in "$RIG_ROOT" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
+done
+[ -n "$WS" ] || { echo "refinery-workspace.sh not found, so nothing shows which bead the prep worktree holds; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+if ! HELD=$("$WS" held --rig-root "$RIG_ROOT"); then
+  "$WS" teardown --rig-root "$RIG_ROOT" || echo "the prep worktree was not torn down; the next rebase step clears it before staging"
+  echo "nothing shows which bead the prep worktree holds, so nothing is pushed or recorded; jump to next-iteration, and the next patrol prepares the work again"
+  exit 4
+fi
+PRIOR_WORK="${WORK:-}"
+{ IFS= read -r WORK; IFS= read -r BRANCH; } <<<"$HELD"
+[ -z "$PRIOR_WORK" ] || [ "$PRIOR_WORK" = "$WORK" ] || echo "WORK was $PRIOR_WORK, but the prep worktree holds $BRANCH for $WORK, so this step acts for $WORK"
+# <<< prep-staged-work
 BEAD_JSON=$(gc bd show $WORK --json)
-BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch')
 TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // "{{target_branch}}"')
 # >>> merge-strategy-resolve
 # The one reading of the merge strategy. merge-push is the only step that
@@ -868,9 +898,12 @@ head on `$TARGET` as a fast-forward pushed by its commit id, so nothing is
 checked out for the merge and nothing is left to remove. It stamps the commit
 on the bead as `direct_landing_sha` before the push, verifies the remote ref,
 then records and closes the bead through ONE lifecycle call, handed the rig
-root as `GC_RIG_ROOT`: the writer checks the landing in that checkout. A
-landing it cannot record keeps the stamp, and step 0 sends the bead back here
-on the next patrol. Exit 3 means a push rejected for branch protection
+root as `GC_RIG_ROOT`: the writer checks the landing in that checkout. It
+lands only for the bead and branch the prep worktree records, and with
+delete_merged_branches = "true" it then deletes origin/$BRANCH, never the
+target, once the landing is recorded. A landing it cannot record keeps the
+stamp and the branch, and step 0 sends the bead back here on the next patrol.
+Exit 3 means a push rejected for branch protection
 (GH006/GH013/"protected branch"/"Changes must be made through a pull
 request"/"approving review"/"Cannot update this protected ref") promoted the
 bead to `merge_strategy=pr`, and the block falls through to the mr block — the
@@ -888,7 +921,9 @@ for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC
 done
 [ -n "$DMP" ] || { echo "direct-merge-push.sh not found; NOT landing $WORK, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 DIRECT_RC=0
-"$DMP" --work "$WORK" --target "$TARGET" || DIRECT_RC=$?
+DIRECT_ARGS=(--work "$WORK" --branch "$BRANCH" --target "$TARGET")
+[ "{{delete_merged_branches}}" != "true" ] || DIRECT_ARGS+=(--delete-branch)
+"$DMP" "${DIRECT_ARGS[@]}" || DIRECT_RC=$?
 case "$DIRECT_RC" in
   0) ;;
   3) MERGE_STRATEGY=mr ;;
@@ -912,11 +947,10 @@ if [ -z "$WS" ] || ! "$WS" teardown; then
 fi
 # <<< prep-teardown
 ```
-After exit 4, jump to next-iteration (pour before burn) and delete no branch:
-nothing landed. After a merge, if delete_merged_branches = "true",
-`git -C "$RIG_ROOT" push origin --delete "$BRANCH"`; and if auto_ff_rig_main =
-"true", best-effort ff the rig canonical checkout (`$RIG_ROOT`) when it is on
-`$TARGET` with a clean tree — never abort on its failure.
+After exit 4, jump to next-iteration (pour before burn). After a merge, if
+auto_ff_rig_main = "true", best-effort ff the rig canonical checkout
+(`$RIG_ROOT`) when it is on `$TARGET` with a clean tree — never abort on its
+failure.
 
 **If MERGE_STRATEGY = "mr":** the refinery does NOT land the branch. It
 pushes the prepared branch and transitions the anchor into the gated
@@ -1076,6 +1110,12 @@ fi
 GATING_ANCHOR="${EXISTING_ANCHOR:-$WORK}"
 # <<< one-anchor-per-pr-resolve
 # >>> one-anchor-per-pr-terminal
+# The rework arm reads the prepared head back from the prep worktree, so this
+# block resolves that path itself, as the push block does.
+RIG_ROOT="${GC_RIG_ROOT:-}"
+[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
 if [ -n "$EXISTING_ANCHOR" ]; then
   # This arm closes the rework landed-on-branch, so the landing must be provable
   # against origin: the mr push above can be rejected or skipped and leave
