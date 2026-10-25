@@ -139,6 +139,8 @@ fails "map: the roots that record an issue" "--has-metadata-key gc.var.issue" ma
 fails "map: the convoys the roots name" "--id " map fx_bd
 noticed_bd() { printf 'gc bd: answering from the rig "x" store\n'; fx_bd "$@"; }
 eq "$(run_lib subject noticed_bd root-a1 | jq -r '.[0].bead')" "work-a" "(FAIL) a store notice printed on stdout is dropped, not read as a failure"
+ctl_bd() { fx_bd "$@" | LC_ALL=C sed "s/input convoy for/input$(printf '\001')convoy for/"; }
+eq "$(run_lib subject ctl_bd root-a1 | jq -r '.[0].bead')" "work-a" "(FAIL) a raw control byte in a row's title is scrubbed, not read as a failure"
 printf '[{"id": "x"}, 1]' > "$TMP/mixed.json"
 mixed_bd() { cat "$TMP/mixed.json"; }
 got="$(run_lib subject mixed_bd x)"; rc=$?
@@ -229,7 +231,8 @@ assets/scripts/gate-ensure.sh
 assets/scripts/gc-helm.sh
 assets/scripts/queue-priority.sh
 assets/scripts/priority-lib.sh
-assets/scripts/liveness-sweep.sh"
+assets/scripts/liveness-sweep.sh
+doctor/check-blocked-work-armed/run.sh"
 while IFS= read -r r; do
     [ -n "$r" ] || continue
     f="$ROOT/$r"
