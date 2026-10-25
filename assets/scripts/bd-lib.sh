@@ -221,10 +221,9 @@ HUMAN_GATE_JQ='
 
 # bd_open_human_gates <bead> [<key>] — the bead's human gates that still hold it
 # (open_human_gate above), and with <key> only those under that situation key,
-# as one JSON array of the rows bd_human_gates prints. Every reader that asks
-# which open gates hold one bead reads them here. A gate read that does not
-# answer prints nothing and returns 1, so "none open" and "could not read" stay
-# apart.
+# as one JSON array of the rows bd_human_gates prints: the read for a reader
+# that asks which open gates hold one bead. A gate read that does not answer
+# prints nothing and returns 1, so "none open" and "could not read" stay apart.
 bd_open_human_gates() {
   local gates
   gates=$(bd_human_gates "${1:-}") || return 1
