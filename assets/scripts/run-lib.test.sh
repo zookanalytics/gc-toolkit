@@ -19,7 +19,8 @@
 #             as it says
 #   (READERS) every reader of the link sources this file and calls a verb or
 #             applies $RUN_JQ
-#   (NO-COPY) no other file defines the rule's defs
+#   (NO-COPY) no other file defines the rule's defs, and none reads the key a
+#             root names its input convoy in but the ones that list it
 # A reader with a private copy of the rule drifts silently from this one. The
 # behavioral half lives beside each reader, whose suite stubs the verbs.
 # Reads the repo only; no gc, no city, no network.
@@ -269,6 +270,23 @@ for d in agents assets doctor formulas lifecycle orders overlays packs services 
     done <<< "$(grep -rlE "$DEF_RE" "$ROOT/$d" 2>/dev/null)"
 done
 eq "${COPIES# }" "" "(NO-COPY) no file outside run-lib.sh defines its own run defs"
+# The key a root names its input convoy in is read here alone. live-work.sh
+# lists it among the marks of live work, lifecycle.toml registers it, and the
+# helm board's Go copy reads it under its fixture test. Tests and fixtures carry
+# it as data.
+KEY_ALLOW=" assets/scripts/live-work.sh lifecycle/lifecycle.toml services/helm/internal/source/facts.go "
+KEY_READS=""
+for d in agents assets commands doctor formulas lifecycle orders overlays packs services skills template-fragments tools; do
+    [ -d "$ROOT/$d" ] || continue
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        rel="${f#"$ROOT"/}"
+        case "$rel" in assets/scripts/run-lib.sh|*.test.sh|*_test.go|*.fixture.json) continue ;; esac
+        case "$KEY_ALLOW" in *" $rel "*) continue ;; esac
+        KEY_READS="$KEY_READS $rel"
+    done <<< "$(grep -rlF 'gc.input_convoy_id' "$ROOT/$d" 2>/dev/null)"
+done
+eq "${KEY_READS# }" "" "(NO-COPY) no file outside run-lib.sh reads the key a root names its input convoy in"
 
 echo
 echo "run-lib: $PASS passed, $FAIL failed"
