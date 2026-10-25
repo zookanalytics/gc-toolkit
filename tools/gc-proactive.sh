@@ -24,9 +24,10 @@
 # The pool's only throttle is its max_active_sessions
 # (agents/proactive/agent.toml); routed reaction beads queue until a slot frees.
 # GC_PROACTIVE_SLING_CAP is a different bound: how many one `scan --sling` sweep
-# may file. Code a reaction routes still takes the correctness-gated mr path — not
-# on this router, but on the polecat pool the actionable exit routes the subject
-# to (its GC_DEFAULT_MERGE_STRATEGY=mr).
+# may file. Code a reaction routes reaches main only through a PR, and not by
+# anything this router does. The routed subject lands by its own target: the
+# refinery sends a bead aimed at main through a PR, and a bead aimed at an
+# integration branch reaches main in that branch's PR.
 # Tunables: GC_PROACTIVE_POOL / _SCAN_LIMIT / _SLING_CAP / _FIXTURE
 # (test hook: canned ready/scan/agents/beads/roots/convoys/rigs .json instead of
 # gc calls).

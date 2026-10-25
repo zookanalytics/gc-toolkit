@@ -31,8 +31,8 @@
 #     before any exit, closes R through the same close when the subject takes
 #     no reaction.
 #   • THE POOL BUDGET — agents/proactive/agent.toml is a small dedicated pool
-#     (max 2-3, the pool's only throttle), it defaults to mr, and one
-#     `scan --sling` sweep hands out at most GC_PROACTIVE_SLING_CAP reactions.
+#     (max 2-3, the pool's only throttle), and one `scan --sling` sweep hands
+#     out at most GC_PROACTIVE_SLING_CAP reactions.
 #   • THE PROVENANCE DISCIPLINE — tools/gc-bd-universe.sh fences reached content
 #     (PR/CI/comments/neighbor) as untrusted data; the fed slice stays unfenced.
 #
@@ -353,9 +353,9 @@ echo "── sling files a reaction bead that tracks the subject ──"
 # sling no longer pours a formula or routes the subject; it FILES a reaction bead
 # R (a plain task) carrying task_kind=reaction + gc.reaction_subject=<subject> +
 # gc.routed_to=<pool>, then wires a tracks edge R->subject. The subject stays
-# clean until R disposes it. The mr invariant for any code a reaction produces
-# now lives downstream, on the polecat pool the actionable exit routes to, not on
-# this router.
+# clean until R disposes it. Code a reaction routes reaches main only through a
+# PR, by the subject's own target and the refinery's rule for main, not by
+# anything this router does.
 DRY="$(P sling px-1 --dry-run 2>&1 || true)"
 has "default sling files a reaction task"            "gc bd create -t task"       "$DRY"
 has "…stamped as a reaction"                         "task_kind"                  "$DRY"
@@ -672,7 +672,6 @@ has "work_query routes to this pool"             "gc-toolkit.proactive"   "$A"
 has "work_query rig-qualifies the route"         '{{.Rig}}/gc-toolkit.proactive' "$A"
 has "work_query ranks routed demand by board weight (prio_w)" "prio_w"   "$A"
 has "pool carries a scale_check SPAWN predicate (tk-8j2g1)" "scale_check = '''" "$A"
-has "pool defaults the mr merge strategy"        'GC_DEFAULT_MERGE_STRATEGY = "mr"' "$A"
 has "pool is rig-scoped"                         'scope = "rig"'          "$A"
 
 echo "── the live prose surfaces state the current contract ──"
