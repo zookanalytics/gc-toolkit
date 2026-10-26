@@ -11,7 +11,7 @@
 # will close it in the UI). It does NOT close the anchor: that terminal close is
 # pr-facts's, the single consummation point, which stamps gc.superseded_by (the
 # terminal state doctor/check-closed-implies-landed accepts) and retires any
-# rework-or-close visit an earlier pass filed.
+# rework-or-close human gate an earlier pass filed.
 #
 # The anchor must be OPEN and carrying merge_result=pull_request — the state
 # pr-facts enumerates. An anchor already disposed (gc.superseded_by set) is a
@@ -25,8 +25,8 @@
 #
 # Under every kind but not-needed the successor is the bead that carries the
 # work now. Under not-needed nothing carries it, and the successor is the
-# evidence that concluded the bead was unnecessary — typically the visit bead
-# from the sitting that ruled. It is required either way, because it is the
+# evidence that concluded the bead was unnecessary — typically the conversation
+# of the sitting that ruled. It is required either way, because it is the
 # whole of what distinguishes a sound disposition from a careless close.
 #
 # Callers: converse dispositions and operator close-outs — the PR side of the
