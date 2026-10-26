@@ -12,7 +12,7 @@ before=""
 [ -d "$dir" ] && before=$(ls "$dir"/*.jsonl 2>/dev/null | sort)
 start=$(date +%s)
 ( cd "$PCWD" && timeout 300 claude --dangerously-skip-permissions --effort medium \
-    --model "${PROBE_MODEL:-claude-sonnet-5}" --settings /home/zook/loomington/.gc/settings.json \
+    --model "${PROBE_MODEL:-claude-sonnet-5}" --settings /home/zook/mycity/.gc/settings.json \
     "$@" -p 'Reply with the single word: ok' ) > "/tmp/seed-$LABEL.out" 2> "/tmp/seed-$LABEL.err"
 rc=$?
 elapsed=$(( $(date +%s) - start ))

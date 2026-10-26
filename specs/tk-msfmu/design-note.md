@@ -64,7 +64,7 @@ running bd on 2026-08-22, on a scratch bead held by this session:
 
     $ gc bd update tk-dr5wm --status=open --assignee=""
     Error: 1 of 1 issues failed to update
-      tk-dr5wm: cannot reassign tk-dr5wm: held by "gc-toolkit__polecat-lx-mazpg"
+      tk-dr5wm: cannot reassign tk-dr5wm: held by "gc-toolkit__polecat-hq-mazpg"
       (in_progress); coordinate with the holder ...
 
 Note *held by the caller's own live session* — being the holder does not exempt

@@ -186,14 +186,14 @@ bead reads expired within five minutes and `bd reclaim` cannot tell its live
 holder from a dead one) · fixed in our fork by `gc-ox80c` (#177), still live upstream
 
 > **Body draft:** the assignee `gc hook --claim` records depends on the
-> session. For a pool worker it is the session **id** (`lx-ojs28`), while
+> session. For a pool worker it is the session **id** (`hq-ojs28`), while
 > `BEADS_ACTOR` in that same session is the session **name**
 > (`gc-toolkit--gc-toolkit__polecat-1-pool`). `gc bd heartbeat` forwards to
 > bd's native owner-only `heartbeat`, which matches actor to assignee under
 > `actorMatches` — byte-identical, or equal after canonicalizing separators
 > — and a session id and a session name satisfy neither, so the holder's own
 > heartbeat is refused: `Error: heartbeat tk-eotd6: issue already claimed by
-> lx-ojs28`. Re-running the identical command as `BEADS_ACTOR=lx-ojs28 gc bd
+> hq-ojs28`. Re-running the identical command as `BEADS_ACTOR=hq-ojs28 gc bd
 > heartbeat tk-eotd6` succeeds and moves `lease_expires_at` from 08:00:10Z to
 > 08:05:09Z, so the identity comparison is the whole of the refusal. A
 > session whose `BEADS_ACTOR` already equals the recorded assignee — a named

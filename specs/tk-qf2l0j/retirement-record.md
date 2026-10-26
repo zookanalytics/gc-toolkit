@@ -18,13 +18,13 @@ pass log on all four rigs:
 |---|---|---|
 | gascity | 117 | 0 |
 | gc-toolkit | 73 | 0 |
-| shutupandlisten | 125 | 0 |
-| signal-loom | 95 | 0 |
+| rig-b | 125 | 0 |
+| rig-a | 95 | 0 |
 
 All 410 lines read `0 repaired, 0 reported (not rewritten), 0 failed`.
 
 **The bead's reproduce command does not reproduce.** It globs `~/.gc`; the
-logs are under `$GC_CITY/.gc` (`/home/zook/loomington/.gc`). As written it
+logs are under `$GC_CITY/.gc` (`/home/zook/mycity/.gc`). As written it
 returns nothing, and nothing is indistinguishable from "no pass ever fired" —
 the same shape as the finding it was meant to confirm. Anyone re-checking
 this should point the `find` at the town root and confirm the line count is

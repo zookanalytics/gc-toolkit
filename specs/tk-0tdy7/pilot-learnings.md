@@ -1,16 +1,16 @@
 ---
-name: Cross-agent review-chain pilot learnings (signal-loom Epic 6)
-description: Research input for the review-chain formula design (tk-ztapg), consolidating what the cross-agent review-chain pilots on signal-loom Epic 6 showed about push timing, review-driven work that landed outside the chain, other friction, and open questions. It surveys and does not design the formula.
+name: Cross-agent review-chain pilot learnings (rig-a Epic 6)
+description: Research input for the review-chain formula design (tk-ztapg), consolidating what the cross-agent review-chain pilots on rig-a Epic 6 showed about push timing, review-driven work that landed outside the chain, other friction, and open questions. It surveys and does not design the formula.
 ---
 
-# Cross-agent review-chain pilot learnings (signal-loom Epic 6)
+# Cross-agent review-chain pilot learnings (rig-a Epic 6)
 
 **Bead:** tk-0tdy7 (research/survey for tk-ztapg)
 **Surveyed at:** 2026-05-07
 **Surveyed by:** gc-toolkit.nux
 
 This doc consolidates pilot data from the cross-agent review-chain bootstrap on
-signal-loom Epic 6 (`sl-yqslv`). It is **research input** for tk-ztapg (formal
+rig-a Epic 6 (`ra-yqslv`). It is **research input** for tk-ztapg (formal
 review-chain formula design, mayor-owned). It does not design the formula.
 
 Pilot learning #1 (push timing) is already captured in tk-ztapg's notes as the
@@ -23,30 +23,30 @@ the chain (the operator-stated gap).
 | Doc-type / artifact | Producer (chain phase / agent / git artifact) | Source location | Surveyed at |
 |---|---|---|---|
 | Push-timing baseline | tk-ztapg notes (mayor / human) | `gc bd show tk-ztapg` notes section ("Pilot learning #1") | 2026-05-07 |
-| Epic 6 root | mayor-filed epic | `sl-yqslv` (signal-loom) | 2026-05-07 |
-| Pilot 1 impl bead | impl polecat (Claude) | `sl-v0nb0`, branch `gc-gc-toolkit.furiosa-1c1a7af7e181`, impl SHAs `3213561f` + `8a0eaead` | 2026-05-07 |
-| Pilot 1 codex review | polecat-codex | `sl-5j7i2` | 2026-05-07 |
-| Pilot 1 claude triage | impl polecat (Claude) | `sl-rt1rw`, triage SHAs `5803439d` + `998aa4be` | 2026-05-07 |
-| Pilot 1 claude review | impl polecat (Claude) | `sl-ysoae` | 2026-05-07 |
-| Pilot 1 PR | refinery merge | github.com/zookanalytics/signal-loom PR #459 (merged 2026-05-06T18:45:51Z) | 2026-05-07 |
-| Pilot 2 impl bead | impl polecat (Claude) | `sl-a6hjw`, branch `refactor/epic-6.2-orphan-conversation-deletions`, single impl SHA `6fff2941` | 2026-05-07 |
-| Pilot 2 codex review | polecat-codex | `sl-qbfbi` (0 findings → no triage commits) | 2026-05-07 |
-| Pilot 2 claude triage | impl polecat (Claude) | `sl-6f0za` (n/a — 0 commits applied) | 2026-05-07 |
-| Pilot 2 claude review | impl polecat (Claude) | `sl-5kti3` | 2026-05-07 |
+| Epic 6 root | mayor-filed epic | `ra-yqslv` (rig-a) | 2026-05-07 |
+| Pilot 1 impl bead | impl polecat (Claude) | `ra-v0nb0`, branch `gc-gc-toolkit.furiosa-1c1a7af7e181`, impl SHAs `3213561f` + `8a0eaead` | 2026-05-07 |
+| Pilot 1 codex review | polecat-codex | `ra-5j7i2` | 2026-05-07 |
+| Pilot 1 claude triage | impl polecat (Claude) | `ra-rt1rw`, triage SHAs `5803439d` + `998aa4be` | 2026-05-07 |
+| Pilot 1 claude review | impl polecat (Claude) | `ra-ysoae` | 2026-05-07 |
+| Pilot 1 PR | refinery merge | github.com/zookanalytics/rig-a PR #459 (merged 2026-05-06T18:45:51Z) | 2026-05-07 |
+| Pilot 2 impl bead | impl polecat (Claude) | `ra-a6hjw`, branch `refactor/epic-6.2-orphan-conversation-deletions`, single impl SHA `6fff2941` | 2026-05-07 |
+| Pilot 2 codex review | polecat-codex | `ra-qbfbi` (0 findings → no triage commits) | 2026-05-07 |
+| Pilot 2 claude triage | impl polecat (Claude) | `ra-6f0za` (n/a — 0 commits applied) | 2026-05-07 |
+| Pilot 2 claude review | impl polecat (Claude) | `ra-5kti3` | 2026-05-07 |
 | Pilot 2 PR | refinery merge | PR #460 (merged 2026-05-06T19:10:04Z) | 2026-05-07 |
-| Pilot 3 impl bead | impl polecat (Claude) | `sl-kze1c`, branch `audit/epic-6-a11y-2026-05`, impl SHA `0d39ed5d` | 2026-05-07 |
-| Pilot 3 codex review | polecat-codex | `sl-yv1mq` | 2026-05-07 |
-| Pilot 3 claude triage | impl polecat (Claude) | `sl-fmdth`, triage SHAs `de07aa3a` + `5ce8049d` + `93fdcd8c` | 2026-05-07 |
-| Pilot 3 claude review | impl polecat (Claude) | `sl-8dvca` | 2026-05-07 |
+| Pilot 3 impl bead | impl polecat (Claude) | `ra-kze1c`, branch `audit/epic-6-a11y-2026-05`, impl SHA `0d39ed5d` | 2026-05-07 |
+| Pilot 3 codex review | polecat-codex | `ra-yv1mq` | 2026-05-07 |
+| Pilot 3 claude triage | impl polecat (Claude) | `ra-fmdth`, triage SHAs `de07aa3a` + `5ce8049d` + `93fdcd8c` | 2026-05-07 |
+| Pilot 3 claude review | impl polecat (Claude) | `ra-8dvca` | 2026-05-07 |
 | Pilot 3 PR | refinery merge | PR #461 (merged 2026-05-07T18:11:08Z); + 2 downstream operator SHAs `96da8ef0` + `47b76bef` (cspell) | 2026-05-07 |
-| Pilot 4 impl bead | impl polecat (Claude) | `sl-zn84a`, branch `audit/epic-6.5-theme-consistency-sl-zn84a`, impl SHA `20304719` | 2026-05-07 |
-| Pilot 4 codex review | polecat-codex | `sl-r1hvi` | 2026-05-07 |
-| Pilot 4 claude triage | impl polecat (Claude) | `sl-wxlo9`, triage SHAs `fa7a3b79` + `cd64a1a8` + `fd4de194` | 2026-05-07 |
-| Pilot 4 claude review | impl polecat (Claude) | `sl-bcumr` | 2026-05-07 |
+| Pilot 4 impl bead | impl polecat (Claude) | `ra-zn84a`, branch `audit/epic-6.5-theme-consistency-ra-zn84a`, impl SHA `20304719` | 2026-05-07 |
+| Pilot 4 codex review | polecat-codex | `ra-r1hvi` | 2026-05-07 |
+| Pilot 4 claude triage | impl polecat (Claude) | `ra-wxlo9`, triage SHAs `fa7a3b79` + `cd64a1a8` + `fd4de194` | 2026-05-07 |
+| Pilot 4 claude review | impl polecat (Claude) | `ra-bcumr` | 2026-05-07 |
 | Pilot 4 PR | claude-review opened (still open at survey time) | PR #462 (open); + 1 downstream operator SHA `01df971d` (cspell) | 2026-05-07 |
 
-All bead survey done via `gc bd show --rig signal-loom <id>`. PR commit data via
-`gh api repos/zookanalytics/signal-loom/pulls/<n>/commits`.
+All bead survey done via `gc bd show --rig rig-a <id>`. PR commit data via
+`gh api repos/zookanalytics/rig-a/pulls/<n>/commits`.
 
 ## 1. Pilot inventory
 
@@ -56,10 +56,10 @@ operator commit awaiting CI / merge.
 
 | # | Story | Impl bead | Branch | PR | State | Codex findings | Triage decisions | Verdict |
 |---|---|---|---|---|---|---|---|---|
-| 1 | 6.1 doc trailer | sl-v0nb0 | `gc-gc-toolkit.furiosa-1c1a7af7e181` | #459 | merged 2026-05-06T18:45:51Z | 3 (1 nice, 2 should) | 3y/0n/0defer | approve |
-| 2 | 6.2 orphan deletions | sl-a6hjw | `refactor/epic-6.2-orphan-conversation-deletions` | #460 | merged 2026-05-06T19:10:04Z | 0 | 0y/0n/0defer (n/a) | approve |
-| 3 | 6.3 a11y audit | sl-kze1c | `audit/epic-6-a11y-2026-05` | #461 | merged 2026-05-07T18:11:08Z | 3 (2 medium, 1 low) | 3y/0n/0defer | approve* |
-| 4 | 6.5 theme audit | sl-zn84a | `audit/epic-6.5-theme-consistency-sl-zn84a` | #462 | **open** at survey time | 3 (2 must-fix, 1 nice) | 3y/0n/0defer | approve |
+| 1 | 6.1 doc trailer | ra-v0nb0 | `gc-gc-toolkit.furiosa-1c1a7af7e181` | #459 | merged 2026-05-06T18:45:51Z | 3 (1 nice, 2 should) | 3y/0n/0defer | approve |
+| 2 | 6.2 orphan deletions | ra-a6hjw | `refactor/epic-6.2-orphan-conversation-deletions` | #460 | merged 2026-05-06T19:10:04Z | 0 | 0y/0n/0defer (n/a) | approve |
+| 3 | 6.3 a11y audit | ra-kze1c | `audit/epic-6-a11y-2026-05` | #461 | merged 2026-05-07T18:11:08Z | 3 (2 medium, 1 low) | 3y/0n/0defer | approve* |
+| 4 | 6.5 theme audit | ra-zn84a | `audit/epic-6.5-theme-consistency-ra-zn84a` | #462 | **open** at survey time | 3 (2 must-fix, 1 nice) | 3y/0n/0defer | approve |
 
 `*` Pilot 3 hit a handoff bug between claude-review push and PR-open; recovered
 by a later polecat session (see §5).
@@ -73,10 +73,10 @@ is the sum of those phase spans.
 
 | # | Impl | Codex | Triage | Claude review | Chain total | Refinery to merge |
 |---|---|---|---|---|---|---|
-| 1 (sl-v0nb0) | ~1h33m | ~22m | ~10m | ~6m | ~2h11m | ~15h39m (cross-day, refinery scheduled) |
-| 2 (sl-a6hjw) | ~21m | ~10m | ~2m | ~6m | ~39m | ~40m |
-| 3 (sl-kze1c) | ~20m | ~4m | ~7m | ~9m | ~40m | ~22h27m (recovery + manual cspell fixes — see §3 + §5) |
-| 4 (sl-zn84a) | ~15m | ~28m | ~21m | ~4m (after 1h+ idle gap) | ~2h12m | not merged at survey time |
+| 1 (ra-v0nb0) | ~1h33m | ~22m | ~10m | ~6m | ~2h11m | ~15h39m (cross-day, refinery scheduled) |
+| 2 (ra-a6hjw) | ~21m | ~10m | ~2m | ~6m | ~39m | ~40m |
+| 3 (ra-kze1c) | ~20m | ~4m | ~7m | ~9m | ~40m | ~22h27m (recovery + manual cspell fixes — see §3 + §5) |
+| 4 (ra-zn84a) | ~15m | ~28m | ~21m | ~4m (after 1h+ idle gap) | ~2h12m | not merged at survey time |
 
 The chain itself runs fast (under an hour for trivial deltas, ~2h for non-trivial)
 when nothing goes wrong. Refinery-to-merge wall time is unreliable because of
@@ -136,7 +136,7 @@ codex-review bead, not refinery.
 **Confirmed.** Two PRs received human-operator commits after claude-review
 approval and outside the chain:
 
-### PR #461 (Pilot 3, sl-kze1c, a11y audit)
+### PR #461 (Pilot 3, ra-kze1c, a11y audit)
 
 ```
 0d39ed5d 2026-05-06T19:09:20Z Zook Bot   docs: add Epic 6.3 WCAG 2.1 AA audit ...
@@ -149,9 +149,9 @@ de07aa3a 2026-05-06T19:28:28Z Zook Bot   docs: triage codex finding #1 ...
 
 Last 2 commits (96da8ef0, 47b76bef): operator manually fixed cspell
 allowlist after CI failed on the audit doc, which contained bead IDs
-`sl-yqslv` and `sl-XXXXX` that cspell did not recognize.
+`ra-yqslv` and `sl-XXXXX` that cspell did not recognize.
 
-### PR #462 (Pilot 4, sl-zn84a, theme audit)
+### PR #462 (Pilot 4, ra-zn84a, theme audit)
 
 ```
 20304719 2026-05-06T19:02:36Z Zook Bot   docs: add Epic 6.5 theme consistency audit
@@ -185,7 +185,7 @@ cspell errors.
    to land the change" would let claude-review or triage handle these
    instead of bouncing to the operator.
 
-3. **Refinery escalation path**: when the chain handed sl-kze1c / sl-zn84a
+3. **Refinery escalation path**: when the chain handed ra-kze1c / ra-zn84a
    to refinery, refinery should have detected CI failure and re-routed to a
    polecat (codex or claude) for a CI-fix commit, instead of leaving it for
    the operator. The current refinery flow assumes "claude-review approved
@@ -203,17 +203,17 @@ cspell errors.
    without changing the chain at all. (Out of this bead's scope but worth
    surfacing.) Operator's commit `47b76bef` ("chore: ignore Beads
    work-item IDs (sl-XXXXX) in cspell") may already cover this for
-   signal-loom going forward.
+   rig-a going forward.
 
 ## 4. Other friction observations
 
-### 4.1 Handoff bug: claude-review push-without-PR (sl-kze1c)
+### 4.1 Handoff bug: claude-review push-without-PR (ra-kze1c)
 
-`sl-kze1c` carries `metadata.recovered=true` and
+`ra-kze1c` carries `metadata.recovered=true` and
 `metadata.recovery_note="claude-review-polecat pushed branch but never opened PR; pr_url metadata stale"`.
 
-The claude-review bead (`sl-8dvca`) closed at 2026-05-06T19:43:51Z with
-`close_reason: "Approved. PR #461 opened. sl-kze1c routed to refinery."` —
+The claude-review bead (`ra-8dvca`) closed at 2026-05-06T19:43:51Z with
+`close_reason: "Approved. PR #461 opened. ra-kze1c routed to refinery."` —
 but the PR was not actually opened. A subsequent polecat session (in
 `gc-toolkit.nux` worktree, per `metadata.work_dir`) detected the gap and
 recovered it. By the time refinery merged, the bead carried correct
@@ -238,7 +238,7 @@ This is the only handoff bug observed across 4 pilots (1 / 4).
 
 ### 4.2 Wall-time gaps suggest scheduling friction, not chain-design friction
 
-Pilot 4 (sl-zn84a) shows a 1h+ gap between claude-triage close (19:59:13Z)
+Pilot 4 (ra-zn84a) shows a 1h+ gap between claude-triage close (19:59:13Z)
 and claude-review start (21:01:00Z). Pilot 1 shows a 15h39m gap before
 refinery-merge. These are dispatch / scheduling delays, not formula-design
 issues — the chain itself is fast when an agent is available. tk-ztapg's
@@ -248,7 +248,7 @@ no chain-internal change can compress these gaps.
 ### 4.3 "4 beads per task" feels right at this scale, but cost is non-trivial
 
 Each pilot used 4 beads (impl + codex-review + claude-triage + claude-review).
-For trivial deltas (sl-a6hjw, 0 codex findings, 0 triage commits), the
+For trivial deltas (ra-a6hjw, 0 codex findings, 0 triage commits), the
 codex-review and claude-triage beads added overhead with no decision content
 (0 findings table = 0 rows). Wall time was small (~12m combined) but bead
 overhead is non-zero (Dolt commits per bead, mail / nudges, status updates).
@@ -269,7 +269,7 @@ tk-ztapg's design call.
 ### 4.4 Codex polecat behavior on prose contracts
 
 Codex review beads were filed with prose contracts in the bead description.
-All four codex polecats (sl-5j7i2, sl-qbfbi, sl-yv1mq, sl-r1hvi) honored
+All four codex polecats (ra-5j7i2, ra-qbfbi, ra-yv1mq, ra-r1hvi) honored
 the "no PR comments" and "no commits to branch" constraints. Findings landed
 in bead notes only. No PR comments were observed across the four pilots.
 
@@ -284,7 +284,7 @@ toolkit when in `phase=codex-review`) — but the prose-only bootstrap held.
 ### 4.5 `bd dep list <this>` predecessor lookup pattern
 
 The chain prose contracts referenced predecessor beads explicitly by ID
-(e.g., sl-5kti3 walks the chain via `gc bd show <this-bead-id> --json | jq
+(e.g., ra-5kti3 walks the chain via `gc bd show <this-bead-id> --json | jq
 -r '.[0].dependencies[] | select(.type=="blocks") | .depends_on_id'`).
 This pattern worked across all four pilots — claude-review beads
 successfully traced back to triage and codex notes for chain summaries.
