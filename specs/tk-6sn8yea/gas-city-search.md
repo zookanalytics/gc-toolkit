@@ -12,13 +12,14 @@ hand-back. The sitting records each hand-back it posts on its visit with
 and the time to `gc.handback_at`. `gc-helm.sh engage` prints the text once
 `gc session attach` returns. So the arch check asks what Gas City already ships
 for that need ([review-arch.md](../../docs/review-arch.md#the-checks), check 1).
-Gas City keeps each session's transcript and reads it after the session ends,
-through `gc session logs` and the API's transcript endpoints, for both providers
-that converse sittings run. A transcript does not mark which text is a
-hand-back, though. In three recent sittings, neither the last text nor the last
-text in a hand-back's shape picked out the hand-back every time. So the sitting
-says which text is its hand-back by recording it. The record goes on the visit
-as metadata, which bd names as its extension point for an orchestrator's data.
+Gas City reads the transcript a session's provider writes, after the session
+ends as well as before, through `gc session logs` and the API's transcript
+endpoints, for both providers that converse sittings run. A transcript does
+not mark which text is a hand-back, though. In three recent sittings, neither
+the last text nor the last text in a hand-back's shape picked out the
+hand-back every time. So the sitting says which text is its hand-back by
+recording it. The record goes on the visit as metadata, which bd names as its
+extension point for an orchestrator's data.
 
 ## The surface and the need
 
@@ -46,7 +47,8 @@ Claude, for `converse-opus` and `converse-fable`, and Codex, for
 Each was read on 2026-10-26:
 
 - Gas City at main `f78779e41522`: its documentation, its engineering docs, the
-  `core` pack it bundles, and its source.
+  `core`, `bd` and `dolt` packs it bundles from its own repository, and its
+  source.
 - Every pack in `gastownhall/gascity-packs` at main `dac12a4a802c`, and the
   `gastown` and `gascity` packs Gas City bundles, at the packs commit its
   `go.mod` pins, `66c672b5ed00`.
@@ -81,7 +83,7 @@ text or content blocks, beside the provider's raw message (package main,
 `sessionLogEntryJSON`).
 
 The API serves the same transcript.
-`GET /v0/city/{cityName}/session/{id}/transcript` answers in one of three
+`GET /v0/city/{cityName}/session/{id}/transcript` takes one of three
 formats. `conversation`, the default, returns turns. `raw` forwards the
 provider's own frames, which a consumer parses by the provider the envelope
 names (engineering doc *API Control Plane*, section 3.6). `structured` returns
@@ -90,15 +92,23 @@ carry an id, role, model, provider, status, stop reason, timestamp, usage and
 content blocks (`SessionTranscriptStructuredResponse` and
 `SessionStructuredMessageAssistant` in the OpenAPI document the
 [Supervisor REST API](https://docs.gascity.com/reference/api) page links). The
-same page says the session stream reports a closed session's state in
-`GC-Session-State`.
+endpoint resolves a closed session as well as a live one, and the session
+stream answers a closed session with one snapshot of its transcript (package
+api, `humaHandleSessionTranscript` and `streamSession`).
 
 So Gas City can return a sitting's transcript after its session ends, for both
 providers, and in a shape that does not depend on the provider. No read can say
-which text is the hand-back. Nothing on an entry or a message says what it is
-for, and a structured message is a user, assistant, system, tool or unknown
-message. A sitting posts other text too, such as progress notes, step remarks
-and memory notes. The hand-back is the one it means the operator to act on.
+which text is the hand-back. Nothing on a text entry or a text block says what
+it is for, and a structured message is a user, assistant, system, tool or
+unknown message. The structured format marks only the provider's own asks: an
+interaction block, for a prompt the provider raises such as an approval, and a
+tool call whose input kind is `question`, when the agent calls its provider's
+question tool (`SessionStructuredInteraction` and
+`SessionStructuredToolInput` in the OpenAPI document). A question tool carries
+a question and its options, not a hand-back's header, body and decision, and a
+sign-off asks nothing. A sitting posts other text too, such as progress notes,
+step remarks and memory notes. The hand-back is the one it means the operator
+to act on.
 
 Three sittings' transcripts show what a read would get. They are the three the
 arch validation pass sampled, read again on 2026-10-26 with
@@ -125,25 +135,30 @@ sitting's own prose, from the header down to the close-out line.
 ### A live session's pane
 
 [`gc session peek`](https://docs.gascity.com/reference/cli#gc-session-peek)
-shows a session's output "without attaching", read through the session's
-runtime (package main, `doSessionPeekFallback`, which calls the session
-handle's `Peek`). The API's session response carries the same preview as
-`last_output`, filled only while the session runs (package api,
-`enrichSessionResponseWithKeyedPaths`). Both read the pane, which goes with the
-session, and the operator ruled out copying it.
+shows a session's output "without attaching". It reads the API's session
+response when the controller is up, and the session handle's `Peek` otherwise
+(package main, `routeSessionPeek` and `doSessionPeekFallback`). The API's
+session response carries that preview as `last_output`, filled only while the
+session runs (package api, `enrichSessionResponseWithKeyedPaths`). Either way
+it reads the pane, which goes with the session, and the operator ruled out
+copying it.
 
 ### Events, mail and external messaging
 
 - Gas City's session events record what happened to a session, such as
   `session.woke`, `session.draining` and `session.stopped` (package events).
-  None of them is a reply the agent posted. The `extmsg.inbound` and
-  `extmsg.outbound` events belong to external messaging's conversations,
-  below.
+  `session.pending` carries a prompt the provider raises, such as an approval,
+  which the controller reads off the session's screen so that a client can
+  answer it (`SessionPendingPayload` in the OpenAPI document). None of them is
+  a reply the agent posted. The `extmsg.inbound` and `extmsg.outbound` events
+  belong to external messaging's conversations, below.
 - [`gc mail send`](https://docs.gascity.com/reference/cli#gc-mail-send) sends
   "a message to a session alias or human". A sitting could mail the operator
   each hand-back. That delivers each one a second time, as unread mail in the
   operator's inbox, after the pane has already shown it, and the tab would
   still have to work out which message is the latest hand-back for its visit.
+  `gc handoff` sends the same kind of mail to the session itself, for its next
+  run.
 - External messaging gives an agent an explicit reply.
   `POST /v0/city/{cityName}/extmsg/outbound` "publishes an agent's reply to the
   client's callback", and `GET /v0/city/{cityName}/extmsg/transcript` "lists a
@@ -169,6 +184,10 @@ them.
   or another agent adds to the visit would print as the sitting's last words,
   unless the reader also matched each comment's author to the session that held
   the visit.
+- A visit's title and description are written when it is filed, and carry the
+  ask it was filed with, so a hand-back written there would replace the ask.
+  bd's design and acceptance criteria fields hold design notes and acceptance
+  criteria (`bd update --design` and `--acceptance`).
 - A bead's notes are one free-text field that all its writers share. A visit's
   notes carry what others write about it, such as a diagnosis appended for its
   sitting, so the latest hand-back cannot be cut out of them without a marker.
@@ -183,32 +202,53 @@ them.
 ### The packs Gas City publishes
 
 When a published pack hands a worker's words to a person, the worker writes
-them out itself. No pack reads them back from the worker's transcript.
+them out itself. No pack reads them back from the worker's transcript. Each
+finding is at packs main unless it names the bundled pin.
 
-- `pr-pipeline` and `pr-review` write a run's summary for a person as metadata.
-  Their formulas set `summary_for_human` on the run's root bead when the run
-  halts or finishes, "so downstream loop-close handlers can surface the
-  outcome" (`pr-review`'s `mol-pr-iterate`, and likewise `pr-pipeline`'s
-  `mol-pr-from-issue` and `pr-review`'s `mol-adopt-pr` and `mol-pr-revert`).
-- `gastown`'s `mol-polecat-work` stamps `halt_reason` when a worker stops at
-  one of its STOP arms, because otherwise "an unrecorded exit just loops
-  through witness recovery until someone reads session logs".
-- `slack-full` and `discord` publish an agent's reply when the agent runs their
-  `reply-current` command with the reply's body. `slack-full` publishes through
-  Gas City's external-messaging outbound by default, which records the reply in
-  the conversation's transcript. Each command looks up only the inbound event
-  it answers. `slack-full` takes the newest `extmsg.inbound` event for the
-  session from Gas City's event log (`find_latest_inbound_for_session`).
+- `pr-pipeline` and `pr-review` write a run's summary for a person as
+  `summary_for_human` on the run's root bead, "so downstream loop-close
+  handlers can surface the outcome" (`pr-review`'s `mol-pr-iterate`).
+  `mol-pr-iterate`, `pr-review`'s `mol-pr-revert` and `pr-pipeline`'s
+  `mol-pr-from-issue` set it when the run halts or finishes, and `pr-review`'s
+  `mol-adopt-pr` sets it when the run halts.
+- `gastown`'s `mol-polecat-work` stamps `halt_reason` on the work bead at
+  several of its halts. Its base-branch STOP arms do so because otherwise "an
+  unrecorded exit just loops through witness recovery until someone reads
+  session logs". At the bundled pin it stamps `halt_reason` at one halt, when
+  `auto_push` is off.
+- The chat packs send an agent's words to a chat only when the agent runs one
+  of their commands with the text: `reply-current` in `slack-full`,
+  `slack-channel` and `discord`, and `post-message` in `slack-mini`. In
+  `slack-full`, plain assistant output "stays private to the session and does
+  NOT go to Slack". In `discord`, plain assistant output "does not go back to
+  Discord" when an event asks for an explicit publish. `slack-full` publishes
+  through Gas City's external-messaging outbound by default, which records the
+  reply in the conversation's transcript. A session with an active company
+  turn posts with the acting agent's own Slack token instead.
+- To address a reply, `slack-full` takes the newest `extmsg.inbound` event for
+  the session from Gas City's event log (`find_latest_inbound_for_session`).
   `discord` reads the session's transcript through the API for the newest
   `<discord-event>` block in a user message, and falls back to ingress records
   it keeps itself (`find_latest_discord_reply_context`). Neither reads the
-  agent's reply back from anywhere.
+  agent's reply from its transcript. `discord` keeps each reply it publishes,
+  with its body, in a publish record of its own, and can quote it from there
+  when a person replies to that message.
+- `oversight-rig` delivers its escalation rollups through Gas City's
+  external-messaging outbound, and its project lead does not read "raw agent
+  transcripts".
+- `gastown`'s agents read a live session's pane with `gc session peek`. Before
+  its shutdown dance kills a stuck session, it reads the last 100 lines: "Save
+  this output — it's the last evidence of what the agent was doing". None of
+  its commands stores that output.
 - `profiler` copies a run's transcripts into a profile for analysis. It lists a
   session whose transcript file is gone as a gap, because it reads transcripts
   "from the provider's own storage at collect time" (its README, "Known v0
-  limits").
-- The `gascity` pack names session logs only in prose: its `build-base`
-  workflow tells an agent not to inspect them for methodology metadata.
+  limits"). `cass` points an agent at an external tool that searches past
+  coding-agent sessions for earlier work. Both read transcripts as material to
+  analyze, not as a record of what an agent said to a person.
+- The `gascity` pack names session logs only to tell an agent not to read them:
+  in its `build-base` and `implement` workflows, and at the bundled pin in its
+  role prompts, which forbid "session-log inspection" when looking for work.
 
 ## What the change does with it
 
@@ -219,10 +259,11 @@ keeps the record in bd as metadata.
   read can take for it. The published packs hand a worker's words to a person
   the same way.
 - The record is metadata on the visit, as bd documents for orchestrator data,
-  under keys that use neither of bd's reserved prefixes (`bd:` and `_`). A
-  visit already carries the board's one-line headline the same way, as
-  `gc.takeaway`, which each write replaces. `gc.handback` holds the whole
-  hand-back beside it.
+  under keys that use neither of bd's reserved prefixes (`bd:` and `_`). The
+  board's one-line headline is kept the same way, as `gc.takeaway`, which each
+  write replaces. A hold writes it on the visit when the subject is a pull
+  request's anchor, and on the subject otherwise. `gc.handback` always goes on
+  the visit, and holds the whole hand-back.
 - engage reads the record from the same visit row it reads for the visit's
   status and outcome. The tab's last words then depend on the bead store alone,
   not on where a provider writes its transcript or on the reader's search
