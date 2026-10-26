@@ -397,6 +397,7 @@ tk-wamr3 Comments
 tk-v32d2u Comments
 tk-0rhvews Testing
 tk-prvea Cross-file trace
+tk-gz2vhjc Scope claims
 MAP
 INV=$(bash "$SUT" --inventory --repo "$ROOT" | grep -c "^$LEDGER_REL	" || true)
 eq "$INV" "$ANCHORS" "the inventory reads every anchor in the ledger"

@@ -123,6 +123,13 @@ that names its cause.
   swallows its delegate's failure, or reports success when the delegate never
   ran, is a finding. A diff in which nothing wraps or delegates leaves this
   angle nothing to read.
+- **Scope claims** — check each sentence in the diff in which the change sums
+  up its own scope, footprint or coverage against what the change builds: a
+  design's headline, a line saying it adds no X or that only Y changes, a
+  safeguard, compliance or coverage statement. A claim broader than what the
+  change builds, or smaller than what it changes, is a finding. The honest
+  form is the narrow sentence that is literally true, followed by the list of
+  what it leaves out.
 - **Testing** — do the tests exercise real behavior, is the new path
   covered, does a regression pin the bug that was fixed? A new case pins its
   change only if it fails when the change is reverted, so the correctness
