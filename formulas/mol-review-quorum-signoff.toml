@@ -479,9 +479,8 @@ lanes and your own run, else `request-changes`. Write the body to
 self-contained because pre-open it is the PR's opening comment, and note in
 the trail which lanes covered what and any reduced coverage.
 
-**6. Emit `findings.json`** beside it, one `{locus, message}` per blocking
-finding and `[]` on approve, exactly as `formulas/mol-review.toml`'s `review`
-step 5b specifies.
+**6. Emit `findings.json`** beside it, every finding that stands for the
+quorum, exactly as `formulas/mol-review.toml`'s `review` step 5b specifies.
 
 **7. One call, through the one writer.** The verdict names `{{reviewed_oid}}`,
 the commit the quorum read, and signoff.sh refuses any other. Pass every flag
@@ -498,9 +497,9 @@ done
 
 **8. Failure arms** are mol-review's `verdict-and-drain` arms: after a
 `superseded` or `already closed` exit, close the chain and drain; after any
-other failure, part 3's gather included, append your findings to the review
-bead (`--append-notes`), close the chain, then restore its route from
-`metadata.review_pool` and drain.
+other failure, part 3's gather included, append `findings.md` and
+`findings.json` to the review bead (`--append-notes`), close the chain, then
+restore its route from `metadata.review_pool` and drain.
 
 **9. Close the chain forward, remove the workspace, then drain.** Close every
 step through step-close.sh in forward order; the lanes closed their own beads,

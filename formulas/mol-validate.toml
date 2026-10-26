@@ -175,7 +175,8 @@ printf '%s' "$BATCH_JSON" | jq -r --arg lane "$LANE" '.[]
       | "\\(.id)\\t\\(.title)"'
 ```
 Read each finding's full body (`gc bd show <id>`) — the locus, what is wrong,
-why it matters, and the fix the reviewer proposed. That is what you rule on.
+why it matters, and the fix the reviewer proposed, and for a reviewer's finding
+its grade, its failure scenario and its verification. That is what you rule on.
 
 **4. Read the intent.** The anchor bead (`metadata.anchor_bead`) and the PR or
 branch it gates tell you what the diff was for, which is what makes a finding
@@ -263,12 +264,20 @@ carries the finding's question the same way.
 
 {{defer_policy}}
 
+**A P2.** A reviewer's finding graded P2 (`Severity: P2` in its body) is filed
+only beside a blocking finding, because its review sent the PR back for a
+rework round anyway, and that round is its one chance. Rule it must-fix when
+its fix is low-risk and net-positive, so it lands in that round, and declined,
+with the reason, when it is risky or marginal. Never defer a P2: a follow-up PR
+for a minor improvement costs the operator an approval, and `finding.sh`
+refuses the deferral.
+
 **Rule every finding the block above printed.** For each id in that
 reconstructed batch, read its full body (`gc bd show <id>`) for the locus, the
-objection, and the fix proposed, judge it against the threshold above, and write
-ONE disposition through `finding.sh set-disposition` (the finding id replaces
-`<F>`) — the primitive owns the edge each disposition takes, so you never touch a
-dependency edge by hand:
+objection, and the fix proposed, judge it against the threshold above, and a P2
+against the rule for one, and write ONE disposition through `finding.sh
+set-disposition` (the finding id replaces `<F>`) — the primitive owns the edge
+each disposition takes, so you never touch a dependency edge by hand:
 
 - **must-fix** — a real objection to fix before merge. This is the default.
   `finding.sh` wires the finding `--blocks` the anchor, the hold merge.sh's
@@ -367,15 +376,17 @@ looks ruled, holds no merge, and passes this step's exit criteria. A non-zero
 exit from any `set-disposition` call stops the pass here: do not close this step
 and do not go on to `rule-convergence`; append what failed to the
 validation-pass bead (`gc bd update "$VALIDATION_PASS" --append-notes ...`) and
-leave the chain open for the next claim to resume. Exit 3 is the one exception:
-it wrote nothing, because an open visit already carries the finding's question,
-so re-rule that finding as the first paragraph says and carry on. The rulings that owe an answer
-ride the same guard: a declined finding's `--reply`, a deferred finding's
-follow-up and its reply, and a needs-you finding's visit and its reply are all
-recorded BEFORE the finding is closed or left open, and `set-disposition` exits
-non-zero if any does not stick — so an answer the raiser would never hear leaves
-the finding unruled and the pass open to retry rather than closing over a silent
-overrule or a deferral with no tracked follow-up.
+leave the chain open for the next claim to resume. Two refusals are the
+exceptions, because each wrote nothing: exit 3, because an open visit already
+carries the finding's question, so re-rule that finding as the first paragraph
+says; and a P2's deferral, so rule it must-fix or declined. Carry on after
+either. The rulings that owe an answer ride the same guard: a declined finding's
+`--reply`, a deferred finding's follow-up and its reply, and a needs-you
+finding's visit and its reply are all recorded BEFORE the finding is closed or
+left open, and `set-disposition` exits non-zero if any does not stick — so an
+answer the raiser would never hear leaves the finding unruled and the pass open
+to retry rather than closing over a silent overrule or a deferral with no
+tracked follow-up.
 
 Rule the WHOLE batch: a finding left `unvalidated` holds nothing and is invisible
 to the merge predicate, so an objection you leave unruled is silently dropped. An

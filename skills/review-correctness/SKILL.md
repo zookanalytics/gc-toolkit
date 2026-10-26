@@ -1,6 +1,6 @@
 ---
 name: review-correctness
-description: The method for the correctness check, the standing review of whether a change is correct and safe as merged. Read the whole diff, settle its test evidence, work the What to check list, grade every finding P0, P1 or P2, and add the Verification line to the verdict. Use when you hold a review bead whose check is correctness, or when asked whether a change is correct and safe to merge.
+description: The method for the correctness check, the standing review of whether a change is correct and safe as merged. Read the whole diff, settle its test evidence, work the What to check list, give every finding its failure scenario and grade it P0, P1 or P2, verify each blocking one, and add the Verification line to the verdict. Use when you hold a review bead whose check is correctness, or when asked whether a change is correct and safe to merge.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -129,6 +129,24 @@ carries, not the first one that appears.
   pass: it carries the lessons that are a shape rather than a statement, and
   no prompt carries it.
 
+### What each finding carries
+
+A finding is a defect you can show happening, so each one names its failure
+scenario: the concrete input or state that triggers it, then the wrong output,
+the crash or the wrong record that follows on the tree as merged. Name it for
+every candidate whose trigger you can name, including one you are not sure is
+reached, rather than drop a half-believed one; a blocking finding's
+verification says how sure you are. A concern with no trigger you can name is
+not a finding.
+
+Each P0 and P1 also carries its verification, one line that opens with
+CONFIRMED or PLAUSIBLE. CONFIRMED names the evidence that the trigger reaches
+the failure: a run, the line that does it, the caller that passes the input.
+PLAUSIBLE says why the trigger is realistic when the evidence could not be had.
+
+Each finding names its category, the dimension of What to check that found it,
+and its severity, the grade below.
+
 ## What blocks
 
 P0 — broken or unsafe as merged: data loss, a merge that bypasses a check, a
@@ -136,26 +154,44 @@ crash on the normal path. P1 — a real defect that will bite: wrong behavior on
 a reachable input, a fail-open where fail-closed was intended. P2 — worth
 fixing, not worth blocking: a narrow hazard, a test gap, a clarity problem.
 Grade honestly: a P2 inflated to P1 costs a whole rework round; a P1
-discounted to P2 merges the bug. When you can't tell whether something is
-reachable, say what you checked and grade on what you know.
+discounted to P2 merges the bug. Read the grade off the failure scenario: a
+reachable trigger whose wrong output is a durable wrong record, or a fail-open
+where fail-closed was intended, is P1 however rare the trigger. When you can't
+tell whether something is reachable, say what you checked and grade on what
+you know.
 
 P0 and P1 are the blocking findings. The verdict is request-changes when the
-diff carries at least one, each with its required fix, and approve when it
-carries none, with every P2 riding along as a non-blocking note.
+diff carries at least one, each with its required fix. The PR then goes back
+for a rework round anyway, so its P2s go back with it: each is filed beside the
+blocking findings, and the validator rules it must-fix when its fix is low-risk
+and net-positive and declines it when it is risky or marginal. The verdict is
+approve when the diff carries no P0 or P1, and its P2s are recorded on the
+verdict and neither filed nor fixed.
 
 ## The verdict
 
-The envelope's Findings block lists every P0, P1 and P2, each with its grade,
-location, impact and fix, and its summary counts them per grade, as in
-`1 P1, 2 P2`. The trail ends with the line that records the test evidence,
-after `Filed:`:
+`findings.json` carries every finding, P0, P1 and P2, each as one object with
+its `locus` and `message` and the fields of its contract: its `severity`, its
+`category`, its `failure_scenario`, and on a P0 or P1 its `verification`.
+
+```json
+{"locus": "<file>:<symbol or section>", "message": "<what is wrong, why it matters, and the fix>",
+ "severity": "P1", "category": "<the dimension that found it>",
+ "failure_scenario": "<the input or state, then the wrong output>",
+ "verification": "CONFIRMED: <the evidence>"}
+```
+
+`signoff.sh` refuses, with nothing written, a set that lacks one of these
+fields, an approve that carries a P0 or P1, and a request-changes that carries
+neither. It renders the set as the posted verdict's Findings block, the most
+severe first and counted per grade, as in `1 P1, 2 P2`. The trail ends with the
+line that records the test evidence the review relied on, after `Filed:`:
 
 ```
 Verification: <test evidence relied on; each suite run at the reviewed commit, N passed, M failed>
 ```
 
-Each P0 and P1 goes in `findings.json`; a P2 does not. The check passes no
-`signoff.sh` flag of its own. An approve of a change that edits
-`review-checks.toml` or a `docs/review-*.md` carries the formula's
+The check passes no `signoff.sh` flag of its own. An approve of a change that
+edits `review-checks.toml` or a `docs/review-*.md` carries the formula's
 `--needs-you`, saying what the edit changes about the review that ran under
 it, and `signoff.sh` refuses one without it.

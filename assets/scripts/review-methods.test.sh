@@ -7,6 +7,8 @@
 #     and every skills/review-* directory has a row.
 #   - Every signoff.sh flag a check's verdict section names is one signoff.sh
 #     accepts, and every skill a check's skill says to load is one the pack ships.
+#     Every field signoff.sh checks a finding set for is one the correctness
+#     method's verdict section names.
 #   - The correctness method reads the work-quality fragments and the exemplar
 #     corpus from its own references/ directory, through relative links that
 #     resolve to template-fragments/, and resolves no pack file by path.
@@ -71,6 +73,15 @@ for d in "$ROOT"/skills/review-*/; do
   c=$(basename "$d"); c=${c#review-}
   grep -qxF -- "$c" <<< "$NAMES" && ok "skills/review-$c has a row in the pack's index" \
     || bad "skills/review-$c has a row in the pack's index"
+done
+# The finding set signoff.sh holds to the finding contract carries the fields
+# the correctness method's verdict section tells its reviewer to write.
+FIELDS=$(grep -m1 -F '("locus", "message"' "$ROOT/assets/scripts/signoff.sh" | grep -oE '"[a-z_]+"' | tr -d '"')
+[ "$(printf '%s\n' "$FIELDS" | grep -c .)" -ge 6 ] && ok "signoff.sh's finding fields are read ($(printf '%s' "$FIELDS" | paste -sd' ' -))" \
+  || bad "signoff.sh's finding fields are read" "got '$FIELDS'"
+for f in $FIELDS; do
+  grep -qF -- "\`$f\`" "$TMP/verdict.correctness" && ok "correctness: its verdict section names \`$f\`, a field signoff.sh checks" \
+    || bad "correctness: its verdict section names \`$f\`, a field signoff.sh checks"
 done
 grep -l 'specialist-stance' "$ROOT"/skills/review-*/SKILL.md | xargs -n1 dirname | xargs -n1 basename | sort > "$TMP/stance-holders"
 [ -s "$TMP/stance-holders" ] && ok "the specialist checks load the stance ($(paste -sd' ' - < "$TMP/stance-holders"))" \

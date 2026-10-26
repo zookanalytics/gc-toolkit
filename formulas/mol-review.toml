@@ -284,18 +284,12 @@ re-probes.
 
 **5. Write the verdict body** to `findings.md` in your working directory so
 it travels verbatim to the next step. `signoff.sh` opens the posted comment
-with one line, the check and its verdict and then what needs the operator, so
-the body is the trail under that line, collapsed. Every check writes this
-envelope, and the check's method adds its own lines to it:
+with one line, the check and its verdict and then what needs the operator, and
+renders the Findings block under it from `findings.json` (part 5b), so the body
+is the trail under them, collapsed. Every check writes this envelope, and the
+check's method adds its own lines to it:
 
 ```
-<details>
-<summary>Findings: <none, or how many the check's method found></summary>
-
-<every finding, each with its location, impact, and the fix>
-
-</details>
-
 <details>
 <summary><Check> trail: <what it holds, e.g. scope and files read></summary>
 
@@ -310,16 +304,18 @@ Filed: <bug ids for findings out of scope for this diff, or "none">
 </details>
 ```
 
-A check that files no findings leaves that block out. Say what you did **not**
-check — an honest coverage line is worth more than an implied "I read
-everything". When a decision is the operator's to make, pass it on the verdict
-call as `--needs-you "<the decision, what it means, where to look>"`; a finding
-is not one, because the city fixes it.
+Write no findings block of your own: each finding is written once, in
+`findings.json`. Say what you did **not** check — an honest coverage line is
+worth more than an implied "I read everything". When a decision is the
+operator's to make, pass it on the verdict call as
+`--needs-you "<the decision, what it means, where to look>"`; a finding is not
+one, because the city fixes it.
 
 **5b. Emit the finding set** to `findings.json` beside `findings.md`: a JSON
-array, one object per finding the check's method counts as blocking, each
-carrying a `locus` and a `message`. signoff.sh files each as a bead beside the
-rework child.
+array, one object per finding the check's method raises, each carrying a
+`locus` and a `message`, and the fields the method's verdict section adds. A
+method that grades its findings puts the grade in `severity` and says which
+grades block, and a finding with no grade blocks.
 
 ```bash
 cat > findings.json <<'JSON'
@@ -331,10 +327,13 @@ JSON
 
 The `locus` names a file and a symbol, function, or section, never a line
 number or a commit oid, so it survives a rebase; on the PR page it is the part
-that is wrong, as in `PR #<n> body / ## Summary`. signoff.sh dedups on a
-normalized locus and message, so a re-review of the same objection files no
-second bead. An `approve` carries no blocking finding: write `[]`. The
-out-of-scope bugs from part 4 stay out of it; they are their own beads already.
+that is wrong, as in `PR #<n> body / ## Summary`. signoff.sh refuses a set that
+disagrees with the verdict or lacks a field the method requires, with nothing
+written. It renders the set on the posted verdict, and on request-changes files
+each finding as a bead beside the rework child, deduped on a normalized locus
+and message, so a re-review of the same objection files no second bead. A
+verdict with no finding writes `[]`. The out-of-scope bugs from part 4 stay out
+of it; they are their own beads already.
 
 **6. Close this step bead so the graph advances.** Non-terminal step, no
 drain — the same session carries on into `verdict-and-drain`:
@@ -393,8 +392,9 @@ bead itself `gc.outcome=superseded` and exits 0 — there is nothing here to
 append and nothing to restore, and gate-ensure pours a fresh review at the live
 head next pass. "already closed" is not a failure either: this dispatch was
 recorded or retired before you judged it, so drop the verdict, close the chain
-and drain. Any other failure, in this order: append your findings to the review
-bead (`gc bd update "{{review_bead}}" --append-notes ...`); close the step chain
+and drain. Any other failure, in this order: append `findings.md` and
+`findings.json` to the review bead
+(`gc bd update "{{review_bead}}" --append-notes ...`); close the step chain
 forward with part 3's step-close loop; then — only after the chain is closed —
 restore the bead's claimability from the dispatch-stamped pool and drain:
 ```bash
