@@ -57,13 +57,14 @@ fi
 # A session inherits a key from the supervisor's service env. gascity writes
 # that env when 'gc supervisor install' writes the service file, and fills a key
 # from ${GC_HOME:-~/.gc}/secrets.env only when the key is a provider credential,
-# by a prefix such as OPENAI_, or when GC_SUPERVISOR_ENV names it in the
-# environment the install runs in. The supervisor hands a key without such a
-# prefix on to its sessions only while its own GC_SUPERVISOR_ENV names it, and
-# the service env keeps that list only when the list names GC_SUPERVISOR_ENV
-# too. A key placed in the file after the write reaches no session until the
-# file is written again. The file probe follows gascity's dotenv grammar: an
-# optional 'export ', spaces around '=', and a non-empty value, quoted or not.
+# by a prefix such as OPENAI_, or on gascity's short allowlist, or when
+# GC_SUPERVISOR_ENV names it in the environment the install runs in. The
+# supervisor hands a key that is neither, such as the Vercel key below, on to
+# its sessions when its own GC_SUPERVISOR_ENV names it, and the service env
+# keeps that list only when the list names GC_SUPERVISOR_ENV too. A key placed
+# in the file after the write reaches no session until the file is written
+# again. The file probe follows gascity's dotenv grammar: an optional
+# 'export ', spaces around '=', and a non-empty value, quoted or not.
 # Presence only; no value is ever read into output.
 secrets_file="${GC_HOME:-$HOME/.gc}/secrets.env"
 in_secrets_file() { # in_secrets_file <KEY>: the file sets KEY to a non-empty value
@@ -114,8 +115,9 @@ fi
 # Vercel's Protection Bypass for Automation key, which lets automation past a
 # deployment's Vercel sign-in. A city that serves no app behind that sign-in has
 # no use for it, so a key set nowhere is a note and no item. A key the secrets
-# file holds and this environment lacks is an item: it has no provider prefix,
-# so it reaches sessions only through the GC_SUPERVISOR_ENV opt-in above.
+# file holds and this environment lacks is an item: it is neither a provider
+# credential nor on gascity's allowlist, so it reaches sessions from that file
+# only through the GC_SUPERVISOR_ENV opt-in above.
 vercel_key=VERCEL_AUTOMATION_BYPASS_SECRET
 vercel_state=""
 if [ -n "${VERCEL_AUTOMATION_BYPASS_SECRET:-}" ]; then

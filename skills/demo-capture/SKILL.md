@@ -191,6 +191,7 @@ The `doctor/check-demo-toolchain` check reports which of the others are
 resolvable, so a session knows before it captures whether the clip will be
 narrated or silent, and whether ffmpeg is in place. It also reports whether
 `VERCEL_AUTOMATION_BYPASS_SECRET`, Vercel's Protection Bypass for Automation
-key, reaches the session. A key without a provider prefix reaches sessions
-from the secrets file only when `GC_SUPERVISOR_ENV` names it, and the check
-names that opt-in when the file holds the key and the session does not.
+key, reaches the session. That key is neither a provider credential nor on
+gascity's short allowlist, so it reaches sessions from the secrets file only
+when `GC_SUPERVISOR_ENV` names it, and the check names that opt-in when the
+file holds the key and the session does not.
