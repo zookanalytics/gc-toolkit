@@ -23,11 +23,14 @@ subject's blocked state to the visit), whose
 outcome is recorded to the subject and which closes when it resolves —
 out loud, with a sign-off, if it was ever *held*; silently against its
 subject if its premise died or it turned out to need no human, in which
-case it never becomes a sitting at all. At most one sitting is live per
-subject (the continuation-group vacuum serializes pending visits into
-it). "Conversation" is deliberately **not** a technical term in this
-pack — it reverts to plain speech, which also leaves upstream's extmsg
-"conversation" (an external channel thread) unambiguous.
+case it never becomes a sitting at all. When a visit is claimed while a
+sitting on its topic is live, it folds into that sitting if the sitting has
+the lower id (`converse-fold.sh`). A visit's topic is its subject unless it
+carries an escalation_key or was filed for a distinct concern, so sittings
+on one subject can run side by side. "Conversation" is deliberately
+**not** a technical term in this pack — it reverts to plain speech, which
+also leaves upstream's extmsg "conversation" (an external channel thread)
+unambiguous.
 
 gc-toolkit's conversation model is a bet on Gas City's own momentum: the
 runtime is steadily growing the primitives a human conversation needs, and
@@ -440,22 +443,27 @@ demand with no edge leaves the work reading ready while a person still
 owes an answer, which is precisely the state the verb exists to remove.
 One open demand per gated bead and topic: a resumed sitting that re-states
 the same question under the same topic (`--topic`, the visit's
-escalation_key) refreshes its own demand rather than giving one wait two
-blockers. The topic scopes the lookup so two sittings on one shared
-standing-scope bucket each keep their own demand — without it the second
-would refresh the first's gate in place and overwrite the operator question
-it holds. An absent topic matches on the gated bead alone, the behaviour
-every caller that files no topic keeps.
+escalation_key, or `visit:<visit-id>` for a visit with a topic of its own)
+refreshes its own demand rather than giving one wait two blockers. The topic
+scopes the lookup: a lookup under a topic finds only that topic's demand, so
+a sitting with a topic never refreshes another sitting's gate in place, which
+would overwrite the operator question it holds. Two findings on a shared
+standing-scope bucket each carry a topic, and so does a visit filed for a
+distinct concern beside a live sitting on its subject. An absent topic
+matches on the gated bead alone, the behaviour every caller that files no
+topic keeps.
 
-`converse-hold.sh` passes the visit's escalation_key as the topic on every
-demand a sitting files. The discharge in `converse-signoff.sh` resolves only
+A visit's topic has one definition, `assets/scripts/visit-topic.sh`, and
+converse's fold check, its hold and its discharge all take the topic from
+there. `converse-hold.sh` passes the visit's escalation_key as the topic on
+every demand a sitting files, or `visit:<visit-id>` when the visit carries
+`visit_topic=own`. The discharge in `converse-signoff.sh` resolves only
 demands the sitting itself filed, never the first unassigned demand on the
 item. The conversation demand is the one `gc.hold_demand` names, the id
 `converse-hold.sh` stamps on the visit. Any other demand, such as a
 `--hold-merge` demand on the anchor or a hold that predates the stamp, is found
-by the same topic-scoped lookup, keyed on the visit's escalation_key. So a
-sign-off under a standing scope resolves or re-states its own operator question
-and leaves a sibling topic's untouched.
+by the same topic-scoped lookup. So a sign-off under a topic resolves or
+re-states its own operator question and leaves a sibling topic's untouched.
 
 The gate is the STATE; the visit is its RESOLUTION. Because the operator does
 not read the "human" mailbox, the notify order is a durable record, not the
@@ -509,7 +517,12 @@ A **conversation visit** is keyless, and its subject names its situation.
 `gc-visit-open.sh` file through it. It folds a second ask into whatever visit is
 already open on the subject. The one deliberate exception is `gc-helm.sh
 engage` when the operator asks for a new visit, which passes `--allow-duplicate`
-to file a fresh visit for a distinct concern. The formula copies of the snippet,
+to file a fresh visit for a distinct concern. That visit carries
+`visit_topic=own`, a topic of its own: converse's fold check never folds its
+sitting into a live sitting on the subject, nor a later sitting on the subject
+into it, and its demands carry the topic `visit:<visit-id>`. The stamp is a
+topic, not coverage: what a visit covers is still its `tracks` edge, with
+the group stamp as the fallback. The formula copies of the snippet,
 in `mol-visit`, `mol-validate-close` and `mol-feedback-distiller`, first look
 for a conversation visit already open on the subject and reuse it. That check
 matters when a step runs twice, either because a later command in it failed and

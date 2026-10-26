@@ -464,6 +464,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/tmux-pick-session.sh` | visit | The session picker. |
 | `assets/scripts/tmux-keeper-toggle.sh` | visit | Pins or unpins the keeper in the session picker. |
 | `assets/scripts/work-outcome.sh` | visit | The one `gc.work_outcome=no-op` stamp a visit gets before it closes, for the work-record gate `gc bd close` runs. Every visit closer sources it: `visit-close.sh`, the `gc-helm.sh` dismiss verb, `bead-rehome.sh` and `converse-claim.sh`. |
+| `assets/scripts/visit-topic.sh` | visit | The one definition of a visit's topic: its escalation_key, the visit itself when it was filed for a distinct concern (`visit_topic=own`), else its subject. It encodes that decision for the fold's comparison and for the demands a sitting files. `converse-fold.sh`, `converse-hold.sh` and `converse-signoff.sh` source it. |
 | `orders/feedback-miner.toml` | feedback | Fires the sweep of recently merged PR review threads. |
 | `orders/feedback-distiller.toml` | feedback | The daily heartbeat that judges pending observations. |
 | `formulas/mol-feedback-miner.toml` | feedback | Cold capture: records each review post from outside the city as one condensed observation, and each corrective-feedback hit in the city's own posts as another. |

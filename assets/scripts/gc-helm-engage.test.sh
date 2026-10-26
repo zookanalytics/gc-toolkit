@@ -562,6 +562,9 @@ has "$CALLED" "bd create" "(REASON-NEW) …a NEW visit is filed, not the existin
 has "$CALLED" "visit: tk-subj — a distinct concern" "(REASON-NEW) …its title tail carries the reason"
 has "$CALLED" "-d a distinct concern" "(REASON-NEW) …and its body (the claim-time brief) too"
 hasnt "$OUT" "already open" "(REASON-NEW) …bypassing the one-visit-per-subject dedup on purpose"
+# The new visit is about its own concern, so it carries a topic of its own and
+# converse's fold never closes it into the live sitting on the subject.
+has "$CALLED" '"visit_topic":"own"' "(REASON-NEW) …and it carries a topic of its own (visit_topic=own)"
 # The internal file-a-visit path must not leak cmd_open's terminal success
 # chatter: engage emits the human summary on stdout and one [debug] line on
 # stderr, and cmd_open's "…filed / Engage it when ready" advice is stale once
@@ -587,6 +590,7 @@ printf 'open' > "$VIS_STATUS"
 run_engage tk-subj --no-attach
 eq "$RC" 0 "(NOREASON-EXISTING) engaging a subject-with-visit and no reason exits 0"
 hasnt "$CALLED" "bd create" "(NOREASON-EXISTING) …no new visit is filed"
+hasnt "$CALLED" "visit_topic" "(NOREASON-EXISTING) …and no topic is stamped on the visit it engages"
 has "$CALLED" "session new converse-opus --alias tk-vis" "(NOREASON-EXISTING) …the existing visit is engaged"
 has "$OUT" "bound the pre-existing" "(BOUND-EXISTING) …and the output flags that a visit that already existed was bound"
 has "$OUT" "compare notes on the WIP proposals" "(BOUND-EXISTING) …naming the bound visit's subject, not just its id"
@@ -1330,6 +1334,7 @@ has "$CALLED" "bd create" "(IA-NEW-TEMPLATE) …a new visit is filed"
 hasnt "$OUT" "already open" "(IA-NEW-TEMPLATE) …deliberately, past the one-visit dedup"
 has "$CALLED" "talk through tk-subj broadly" "(IA-NEW-TEMPLATE) …its body is the seed, subject filled in"
 has "$CALLED" "visit: tk-subj — discuss broadly" "(IA-NEW-TEMPLATE) …titled by the seed label"
+has "$CALLED" '"visit_topic":"own"' "(IA-NEW-TEMPLATE) …with a topic of its own"
 has "$CALLED" "session new converse-opus" "(IA-NEW-TEMPLATE) …then a sitting is spawned"
 has "$OUT" "Skill — Enter = none" "(IA-SKILL-NONE) a new visit is asked for a skill"
 hasnt "$CALLED" "Load that skill" "(IA-SKILL-NONE) …and Enter seeds none, leaving the seed as the whole brief"
@@ -1407,6 +1412,7 @@ run_engage tk-subj --template unstick-a-stall --no-input --no-attach
 eq "$RC" 0 "(IA-TEMPLATE-FLAG) --template files a new visit with the seed, exit 0"
 has "$CALLED" "bd create" "(IA-TEMPLATE-FLAG) …a new visit is filed"
 has "$CALLED" "looks stalled" "(IA-TEMPLATE-FLAG) …carrying the seed body"
+has "$CALLED" '"visit_topic":"own"' "(IA-TEMPLATE-FLAG) …and a topic of its own"
 hasnt "$OUT" "already open" "(IA-TEMPLATE-FLAG) …past the dedup"
 unset HAVE_VISIT
 
