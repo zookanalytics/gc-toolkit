@@ -83,7 +83,7 @@ func TestProbeTimeoutRejectsZero(t *testing.T) {
 // pickerReads are the tile fields tmux-pick-helm.sh dereferences, read off the
 // script rather than listed here: a remembered list drifts out of step with the
 // script without failing.
-var pickerReads = regexp.MustCompile(`\.(held|severity|id|rig|title|frontier)\b`)
+var pickerReads = regexp.MustCompile(`\.(held|visit_state|severity|id|rig|title|frontier|needs)\b`)
 
 // emittedKeys serializes one tile through the CLI's own renderer and reads the
 // real bytes rather than reflecting over the struct, so a stray omitempty is
