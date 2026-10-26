@@ -18,16 +18,27 @@ subject while the sitting runs shows up there, and so does one another answer
 has already cleared. Answer a gate only once the operator rules on it,
 replying to it first and naming what the answer releases (step 7). The
 sign-off resolves it. A ruling given on a turn that does not sign off is
-resolved at once, so a dismiss that ends the sitting later leaves nothing the
-operator ruled on open:
+answered at once, so a dismiss that ends the sitting later leaves nothing the
+operator ruled on open. Answer it through the sign-off's writer with
+`--answer`, never with a bare `gc bd gate resolve`. A gate can be what holds a
+merge, so the writer puts the ruling's consequences in place before it
+resolves the gate. On an open PR the first of them is the rework or the
+retirement the ruling calls for, passed the way step 7 passes it, and the next
+is the subject's headline with each wait this turn routed. It resolves only the
+gates `--answer` names, leaves the conversation open, and exits non-zero when
+it stopped short. Until it exits 0, do not tell the operator the ruling is in
+place:
 ```bash
-gc bd gate resolve <gate> --reason "ruled: <the operator's ruling, one line>" \
-  && gc bd show <gate> --json | jq -r '.[0] | "\(.status) \(.close_reason // "")"'
+"$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate> \
+  --ruling "<the operator's ruling, one line>" \
+  --outcome "<where the subject stands now, at most 140 characters>"
+  # on an open PR, add --rework, --no-rework or --retire <kind> (step 7)
+  # --waiting-on <bead> for each bead this turn routed work into, or --no-wait
 ```
-A close reason other than yours is an answer that reached the gate first, and
-it stands: tell the operator. The sign-off reads a gate you answered here as
-already cleared and leaves it. Record what each turn settles as step 6 says,
-and sign off (step 7) once nothing important is pending.
+An answer that reached the gate first stands, and the writer prints it: tell
+the operator. The sign-off reads a gate you answered here as already cleared
+and leaves it. Record what each turn settles as step 6 says, and sign off
+(step 7) once nothing important is pending.
 
 **After a restart, run step 1's claim again.** It returns the conversation as
 an existing assignment, and step 1's restart rule says where the sitting picks

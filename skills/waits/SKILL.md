@@ -163,7 +163,9 @@ limits arming too (the work skill).
   with `ruled:` when the person decided, approved or acted, `moot:` when the
   premise no longer holds, and `benign:` when it holds but needs nobody. In a
   sitting, the sign-off's `--ruled yes` resolves the gates its conversation
-  replies to and releases a `held` bead (the converse-settle step).
+  replies to and releases a `held` bead (the converse-settle step), and its
+  `--answer` resolves the gates a ruling settles on a turn that does not sign
+  off (the converse-continue step).
 - **An arm no longer wanted:** `"$(gc <binding> scripts-dir)/deferred-dispatch.sh" disarm <bead> --reason "<why>"`.
 - **A park** (`gc-helm.sh park`) is released by closing its gate,
   `gc bd close <gate>`, or for one bead by `gc bd dep remove <bead> <gate>`

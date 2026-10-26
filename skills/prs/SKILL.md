@@ -56,10 +56,11 @@ branch, so the PR keeps its history.
 
 Writer: `rework-child.sh`, the one writer of a rework child that a ruling or a
 review verdict sends. A sitting reaches it through its sign-off, by adding
-`--rework` to the `--ruled yes` call (the converse-settle step), which also
-returns every review lane to unreviewed so the whole branch is reviewed again
-once the rework lands. A review verdict reaches it through the reviewer's own
-sign-off.
+`--rework` to the `--ruled yes` call (the converse-settle step), or to the
+`--answer` call of a turn that does not sign off (the converse-continue step).
+That also returns every review lane to unreviewed, so the whole branch is
+reviewed again once the rework lands. A review verdict reaches it through the
+reviewer's own sign-off.
 
 Scope found while the PR is open, with no ruling behind it, rides a supplement
 bead instead. A supplement is PR-finishing work, and its create sets up
@@ -111,7 +112,10 @@ open gate per anchor and situation key:
 A sitting files its own with the key `conversation` and replies to it (the
 converse-hold step). The gate is cleared with
 `gc bd gate resolve <gate> --reason "ruled: <the answer>"`, and the same call
-with `--retract` withdraws your own gate once the question has gone.
+with `--retract` withdraws your own gate once the question has gone. A sitting
+clears a gate only through its sign-off writer (the converse-settle and
+converse-continue steps), which first carries out what the ruling does to the
+PR, its rework or its retirement, so the merge never lands in between.
 
 Every open bead the anchor waits on, and every open bead filed under it, holds
 its merge, whatever it was for. Never make an anchor wait on a follow-up that
@@ -142,7 +146,8 @@ gate is cleared.
 
 In a sitting, retire a PR only on the operator's ruling, and only through the
 sign-off writer: `--retire <kind>` on its `--ruled yes` call (the
-converse-settle step). The writer runs
+converse-settle step), or on its `--answer` call when the ruling comes on a
+turn that does not sign off (the converse-continue step). The writer runs
 `pr-dispose.sh` before it answers any gate, so a gate that holds the merge
 keeps holding it until the PR is closed. Answered first, that gate would let
 an approved PR merge before its retirement. Under `not-needed` the successor

@@ -48,6 +48,7 @@ REPO="$HERE/../.."
 SKILLS="$REPO/skills"
 PROMPT="$REPO/agents/_converse/prompt.template.md"
 SETTLE="$REPO/skills/converse-settle/SKILL.md"
+CONTINUE="$REPO/skills/converse-continue/SKILL.md"
 MECHANIK="$REPO/agents/mechanik/prompt.template.md"
 WORK_SKILL="$REPO/skills/work/SKILL.md"
 PRS_SKILL="$REPO/skills/prs/SKILL.md"
@@ -323,6 +324,11 @@ have "…and holds a follow-up on another rig's bead with a human gate in its ow
 have "the prompt gives the disposal writer's call" 'bead-rehome.sh" --origin "$SUBJECT"' "$PROMPT"
 have "the prompt gives the retire call, through the sign-off" '--route human --no-wait --retire not-needed' "$PROMPT"
 have "…as the prs skill does" '--route human --no-wait --retire not-needed' "$PRS_SKILL"
+# A gate can hold a merge, so a sitting answers every gate through the sign-off
+# writer, which carries out what the ruling does to the PR first.
+have "the continue step answers a ruling on a turn that does not sign off through the writer" 'converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate>' "$CONTINUE"
+lacks "…and never through a bare gate resolve" 'gc bd gate resolve <gate>' "$CONTINUE" \
+    "a bare resolve releases what the gate holds before the ruling's rework or retirement is in place"
 have "the prompt gives the call that withdraws a recommendation" 'converse-invalidate-recommendation.sh" "<why' "$PROMPT"
 have "the prompt gives the call that opens a conversation" 'gc-helm.sh" open <bead>' "$PROMPT"
 have "the prompt gives the PR post calls" 'pr-post.sh" reply --host github.com' "$PROMPT"

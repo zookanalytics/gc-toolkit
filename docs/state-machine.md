@@ -757,10 +757,11 @@ review's result set.
   (`specs/tk-ztapg/review-cycle-architecture.md`), so request-changes files a
   child every round and nothing in the cadence bounds them. One writer, one
   verdict: no second component writes a verdict.
-- **Ruling** (operator, via converse): a ruling on an open-PR subject must say
-  what it does to the PR (`converse-signoff.sh --rework`, `--no-rework` or
-  `--retire <kind>`), and one that says none of them is refused. Each runs
-  before any gate the ruling answers is resolved,
+- **Ruling** (operator, via converse): a ruling on an open-PR subject, whether
+  given at the sign-off or on a turn that answers a gate without signing off
+  (`--answer`), must say what it does to the PR (`converse-signoff.sh
+  --rework`, `--no-rework` or `--retire <kind>`), and one that says none of
+  them is refused. Each runs before any gate the ruling answers is resolved,
   because a gate can be what holds the merge. `--retire` records the
   disposition and closes the PR through `pr-dispose.sh`, and `pr-facts.sh`
   then takes the anchor through the `pull_request → closed (disposed)`

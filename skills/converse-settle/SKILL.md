@@ -42,8 +42,9 @@ this turn.** Post the hand-back in the shape the prompt's Definitions define
 (**The hand-back**), leave the conversation OPEN, and wait for operator input
 the way a held sitting does; signing off now would close the conversation
 under a message they have not read. A gate the operator has already ruled on
-is still answered now (step 8), so a dismiss that ends the sitting later
-leaves nothing they ruled on open. The sitting ends on a later turn: the
+is still answered now, through the sign-off's `--answer` (step 8), so a
+dismiss that ends the sitting later leaves nothing they ruled on open. The
+sitting ends on a later turn: the
 operator's `gc-helm dismiss`, further engagement, or a genuinely terminal
 sign-off once nothing important is pending. Whether a sign-off is terminal is
 still your judgment, and a sitting that is genuinely settled still signs off

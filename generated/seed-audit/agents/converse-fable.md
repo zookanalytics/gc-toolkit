@@ -289,7 +289,8 @@ Rules:
   disposed as superseded in one act (the `prs` skill). Retire it through the
   sign-off, which closes the PR before it answers any gate, so a merge a gate
   holds stays held until the PR cannot land. Add `--retire not-needed` to the
-  `--ruled yes` call (step 7). It runs `pr-dispose.sh` with this sitting's
+  `--ruled yes` call (step 7), or to the `--answer` call of a turn that does
+  not sign off (step 8). It runs `pr-dispose.sh` with this sitting's
   conversation as the successor, and `--retire <kind> --successor <bead>`
   names the bead that carries the work instead:
 

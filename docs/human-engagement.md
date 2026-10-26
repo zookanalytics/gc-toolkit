@@ -457,7 +457,9 @@ sitting signs off only when nothing important is pending; a turn that hands
 the operator something to read or answer posts the hand-back and leaves the
 conversation open. A gate the operator rules on during such a turn is answered
 at once, so a dismiss that ends the sitting later leaves nothing the operator
-ruled on open.
+ruled on open. It is answered through the same script with `--answer <gate>`,
+which runs steps 1 to 3 for the gates it names and stops there, leaving the
+conversation open for the sign-off.
 
 **A sitting cut short** writes its record, signs off with `--ruled no`, which
 leaves every gate its conversation replies to open and owed with its reply in

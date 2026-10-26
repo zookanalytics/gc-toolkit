@@ -26,6 +26,9 @@
 #             --no-rework or --retire; the rework or the retirement runs first,
 #             and one that fails writes nothing else, so the gate keeps holding
 #             the merge
+#   (ANSWER*) a ruling on a turn that does not sign off answers only the gates
+#             it names, after the same rework or retirement, and leaves the
+#             conversation open for the sign-off
 #   (CUT-SHORT*) the hand-back is one write guarded on the holder and the
 #             status, and a conversation that reads closed, before that write or
 #             because a dismiss closed it first, stays closed
@@ -224,6 +227,7 @@ merge_held() {
 }
 RULED=(--ruled yes --ruling "fix the retry before the merge" --route human --no-wait)
 RETIRED=(--ruled yes --ruling "the work moved to the new design" --route human --no-wait)
+ANSWERED=(--ruling "fix the retry before the merge" --outcome "ruled on the review; the rollout is still open")
 
 echo "# refusals before any write"
 acceptance; run_signoff --outcome x
@@ -391,6 +395,71 @@ open_pr
 run_signoff --conversation tk-conv --outcome "retired: a duplicate" "${RETIRED[@]}" --retire duplicate --successor tk-new
 eq "$RC" 0 "(RETIRE-SUCCESSOR) --retire duplicate --successor exits 0"
 has "$(cat "$CALLS")" "pr-dispose --anchor tk-anc --successor tk-new --kind duplicate" "(RETIRE-SUCCESSOR) …naming the bead that carries the work as the successor"
+
+echo "# a ruling on a turn that does not sign off: the gates it names, after what it does to the PR"
+acceptance; gate tk-two later-question; edge tk-anc blocks tk-two; edge tk-conv replies-to tk-two
+run_signoff --conversation tk-conv --answer tk-rec "${ANSWERED[@]}"
+eq "$RC" 2 "(ANSWER-USAGE) --answer on a gate the conversation does not reply to exits 2"
+run_signoff --conversation tk-conv --answer tk-rev --outcome x
+eq "$RC" 2 "(ANSWER-USAGE) --answer without --ruling exits 2"
+run_signoff --conversation tk-conv --answer tk-rev "${ANSWERED[@]}" --ruled no
+eq "$RC" 2 "(ANSWER-USAGE) --answer beside --ruled no exits 2"
+run_signoff --conversation tk-conv --answer tk-rev "${ANSWERED[@]}" --route human
+eq "$RC" 2 "(ANSWER-USAGE) --answer beside --route exits 2"
+run_signoff --conversation tk-conv --answer tk-rev "${ANSWERED[@]}" --leave tk-two
+eq "$RC" 2 "(ANSWER-USAGE) --answer beside --leave exits 2"
+eq "$(writes)" 0 "(ANSWER-USAGE) …and nothing is written"
+run_signoff --conversation tk-conv --answer tk-rev "${ANSWERED[@]}"
+eq "$RC" 0 "(ANSWER) an answer on a turn that does not sign off exits 0"
+eq "$(field tk-rev status)/$(field tk-rev close_reason)" "closed/ruled: fix the retry before the merge" "(ANSWER) the gate it names is resolved with ruled: <ruling>"
+eq "$(field tk-two status)" "open" "(ANSWER) the other gate the conversation replies to stays open"
+eq "$(field tk-conv status)/$(field tk-conv assignee)" "in_progress/gc-toolkit/gc-toolkit.tk-conv" "(ANSWER) the conversation stays open under its sitting"
+eq "$(meta tk-anc gc.takeaway)" "ruled on the review; the rollout is still open" "(ANSWER) the headline is written"
+case "$(cat "$CALLS")" in
+  *"gc-helm takeaway"*"gate resolve tk-rev"*) ok "(ANSWER) …before the gate" ;;
+  *) bad "(ANSWER) the gate was resolved before the headline: $(cat "$CALLS")" ;;
+esac
+hasnt "$(cat "$CALLS")" "bd close" "(ANSWER) nothing is closed"
+hasnt "$(cat "$CALLS")" "lifecycle" "(ANSWER) …no held subject is read or released"
+hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(ANSWER) …and the reminder is left for the sign-off"
+has "$OUT" "ANSWERED tk-rev for conversation tk-conv on tk-anc" "(ANSWER) the answer is reported"
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
+eq "$RC" 0 "(ANSWER) the sign-off that follows exits 0"
+has "$OUT" "gate tk-rev was already cleared before this sign-off" "(ANSWER) …reading the answered gate as already cleared"
+eq "$(field tk-two status)/$(field tk-conv status)" "closed/closed" "(ANSWER) …and answering the gate left open before it closes the conversation"
+open_pr
+run_signoff --conversation tk-conv --answer tk-rev "${ANSWERED[@]}"
+eq "$RC" 2 "(ANSWER-OPEN-PR) an answer on an open PR that says nothing of the PR exits 2"
+eq "$(writes)" 0 "(ANSWER-OPEN-PR) …writing nothing"
+eq "$(merge_held tk-anc)" held "(ANSWER-OPEN-PR) …so the gate still holds the merge"
+REWORK_FAIL=1 run_signoff --conversation tk-conv --answer tk-rev "${ANSWERED[@]}" --rework
+eq "$RC" 1 "(ANSWER-REWORK-FAIL) an answer whose rework does not file exits 1"
+has "$OUT" "REWORK NOT COMPLETE on tk-anc" "(ANSWER-REWORK-FAIL) …saying so"
+has "$OUT" "NOT ANSWERED" "(ANSWER-REWORK-FAIL) …and that the ruling is not carried out"
+eq "$(field tk-rev status)" "open" "(ANSWER-REWORK-FAIL) …leaving the gate open"
+eq "$(merge_held tk-anc)" held "(ANSWER-REWORK-FAIL) …so the real finalize gate still holds the merge"
+: > "$CALLS"
+run_signoff --conversation tk-conv --answer tk-rev "${ANSWERED[@]}" --rework
+eq "$RC" 0 "(ANSWER-REWORK) the re-run, whose rework files, exits 0"
+case "$(cat "$CALLS")" in
+  *"converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the retry before the merge"*"gate resolve tk-rev"*) ok "(ANSWER-REWORK) the rework is filed before the gate is resolved" ;;
+  *) bad "(ANSWER-REWORK) the gate was resolved before the rework was filed: $(cat "$CALLS")" ;;
+esac
+eq "$(merge_held tk-anc)" released "(ANSWER-REWORK) …and only then does the gate release the merge"
+eq "$(field tk-conv status)" "in_progress" "(ANSWER-REWORK) the conversation stays open"
+open_pr
+RETIRE_FAIL=1 run_signoff --conversation tk-conv --answer tk-rev --ruling "the work moved" --outcome "retired" --retire not-needed
+eq "$RC" 1 "(ANSWER-RETIRE-FAIL) an answer whose retirement leaves the PR open exits 1"
+eq "$(field tk-rev status)" "open" "(ANSWER-RETIRE-FAIL) …leaving the gate open"
+eq "$(merge_held tk-anc)" held "(ANSWER-RETIRE-FAIL) …so the real finalize gate still holds the merge"
+: > "$CALLS"
+run_signoff --conversation tk-conv --answer tk-rev --ruling "the work moved" --outcome "retired" --retire not-needed
+eq "$RC" 0 "(ANSWER-RETIRE) the re-run, whose retirement completes, exits 0"
+case "$(cat "$CALLS")" in
+  *"pr-dispose --anchor tk-anc --successor tk-conv --kind not-needed"*"gate resolve tk-rev"*) ok "(ANSWER-RETIRE) the PR is retired before the gate is resolved" ;;
+  *) bad "(ANSWER-RETIRE) the gate was resolved before the PR was retired: $(cat "$CALLS")" ;;
+esac
+eq "$(merge_held tk-anc)" released "(ANSWER-RETIRE) …and only then does the gate release the merge"
 
 echo "# cut short: the conversation goes back to the operator's queue"
 acceptance; run_signoff --conversation tk-conv --outcome "cut short: the rollout question is still owed" --ruled no

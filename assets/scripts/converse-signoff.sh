@@ -24,6 +24,11 @@
 # the ruling puts in the merge's way is written before step 3: the rework
 # child's blocks edge, the closed PR, and each wait the headline wires.
 #
+# A ruling given on a turn that does not sign off (--answer) runs steps 1 to 3
+# for the gates --answer names, and stops there: the conversation stays open
+# under its sitting, and the sign-off later reads each of those gates as
+# already cleared.
+#
 # Cut short (--ruled no), it writes the headline, leaves every gate the
 # conversation replies to open and owed, with its reply in place for the next
 # sitting, and hands the conversation back to the operator's queue with one
@@ -47,7 +52,7 @@
 # Usage:
 #   converse-signoff.sh --conversation <task> --outcome "<headline, ≤140 chars>" \
 #     [--subject <id>] [--ruled yes|no] [--ruling "<one line>"] \
-#     [--route <rig>/<agent>|human] [--leave <gate> ...] \
+#     [--route <rig>/<agent>|human] [--leave <gate> ...] [--answer <gate> ...] \
 #     [--no-wait | --waiting-on <bead> ...] \
 #     [--rework | --no-rework | --retire <kind> [--successor <bead>]]
 #   --outcome is the subject's headline, and the close reason the sittings card
@@ -57,7 +62,12 @@
 #   --leave (with --ruled yes) names a gate the conversation replies to that the
 #   ruling leaves owed: it stays open, and its reply stays as the record that
 #   this conversation took it up.
-#   --rework | --no-rework | --retire <kind> (with --ruled yes): what the ruling
+#   --answer names a gate the conversation replies to that the ruling answers
+#     on a turn that does not sign off. It carries a ruling, so it takes
+#     --ruling and the open-PR answer below; it releases no subject and leaves
+#     every other gate as it is, so --ruled no, --route and --leave are refused
+#     beside it.
+#   --rework | --no-rework | --retire <kind> (with a ruling): what the ruling
 #     does to an already-published PR. --rework says its branch must change:
 #     the rework is filed against the subject anchor, sourced by this
 #     conversation. --no-rework says the branch stands, and the PR reminder
@@ -70,12 +80,14 @@
 #     of the three; given none, it is refused with nothing written. The rework
 #     or the retirement runs before every other write, and when it does not
 #     complete nothing else is written.
-# Exit: 0 signed off; 1 stopped short — a read failed, the rework did not file,
-#   the PR did not retire, the headline did not land, a gate did not close, or
-#   the conversation did not close or hand back — so do NOT post the sign-off;
-#   repair what it names and re-run, which repeats every write it made safely;
-#   2 refused before any write: usage, a conversation that is not one, or a
-#   ruling on an open PR that gave none of --rework, --no-rework and --retire.
+# Exit: 0 signed off, or with --answer the named gates answered; 1 stopped
+#   short — a read failed, the rework did not file, the PR did not retire, the
+#   headline did not land, a gate did not close, or the conversation did not
+#   close or hand back — so do NOT post the sign-off, or report the ruling as
+#   carried out; repair what it names and re-run, which repeats every write it
+#   made safely; 2 refused before any write: usage, a conversation that is not
+#   one, a gate it does not reply to, or a ruling on an open PR that gave none of
+#   --rework, --no-rework and --retire.
 set -u
 
 # >>> control-char-scrub
@@ -89,7 +101,7 @@ scrub() { tr -d '\000-\037'; }
 CONVERSATION=""
 SUBJECT=""
 OUTCOME=""
-RULED=no
+RULED=""
 RULING=""
 ROUTE=""
 PR_ANSWER=""
@@ -97,6 +109,7 @@ RETIRE_KIND=""
 SUCCESSOR=""
 WAIT=()
 LEAVE=()
+ANSWER_GATES=()
 UNDONE="NOT SIGNED OFF — do NOT post the sign-off."
 
 die() { echo "converse-signoff: $1" >&2; exit 2; }
@@ -150,6 +163,7 @@ while [ $# -gt 0 ]; do
     --ruling)     shift; [ $# -gt 0 ] || die "--ruling needs a value"; RULING="$1" ;;
     --route)      shift; [ $# -gt 0 ] || die "--route needs a value"; ROUTE="$1" ;;
     --leave)      shift; [ $# -gt 0 ] || die "--leave needs a gate id"; LEAVE+=("$1") ;;
+    --answer)     shift; [ $# -gt 0 ] || die "--answer needs a gate id"; ANSWER_GATES+=("$1") ;;
     --rework)     pr_answer rework ;;
     --no-rework)  pr_answer no-rework ;;
     --retire)     shift; [ $# -gt 0 ] || die "--retire needs a kind"; pr_answer retire; RETIRE_KIND="$1" ;;
@@ -164,10 +178,21 @@ done
 
 [ -n "$CONVERSATION" ] || die "--conversation is required"
 [ -n "$OUTCOME" ] || die "--outcome is required"
-case "$RULED" in yes|no) ;; *) die "--ruled must be yes or no" ;; esac
+case "${RULED:-no}" in yes|no) ;; *) die "--ruled must be yes or no" ;; esac
+ANSWERING=""
+if [ "${#ANSWER_GATES[@]}" -gt 0 ]; then
+  ANSWERING=yes
+  [ "${RULED:-yes}" = yes ] || die "--answer carries a ruling, so it cannot be --ruled no"
+  [ -n "$RULING" ] || die "--answer requires --ruling (the answer each gate it names resolves with)"
+  [ -z "$ROUTE" ] || die "--route is where a sign-off releases a held subject to, and --answer releases nothing"
+  [ "${#LEAVE[@]}" -eq 0 ] || die "--answer resolves only the gates it names, so --leave has nothing to leave"
+  RULED=yes
+  UNDONE="NOT ANSWERED — do NOT tell the operator the ruling is carried out."
+fi
+RULED="${RULED:-no}"
 if [ "$RULED" = yes ]; then
   [ -n "$RULING" ] || die "--ruled yes requires --ruling (the answer each gate resolves with)"
-  [ -n "$ROUTE" ]  || die "--ruled yes requires --route (where a held subject is released to)"
+  [ -n "$ANSWERING" ] || [ -n "$ROUTE" ] || die "--ruled yes requires --route (where a held subject is released to)"
 else
   [ -z "$PR_ANSWER" ] || die "--rework, --no-rework and --retire require a ruling (they answer what it does to an open PR)"
   [ "${#LEAVE[@]}" -eq 0 ] || die "--leave requires --ruled yes: a cut-short sign-off leaves every gate open"
@@ -206,6 +231,10 @@ for g in "${LEAVE[@]+"${LEAVE[@]}"}"; do
   printf '%s\n' "$REPLIES" | grep -qxF -- "$g" \
     || die "--leave $g names a gate conversation $CONVERSATION does not reply to; nothing was written"
 done
+for g in "${ANSWER_GATES[@]+"${ANSWER_GATES[@]}"}"; do
+  printf '%s\n' "$REPLIES" | grep -qxF -- "$g" \
+    || die "--answer $g names a gate conversation $CONVERSATION does not reply to; add the reply first, then re-run. Nothing was written"
+done
 [ "$PR_ANSWER" != retire ] || [ -n "$SUCCESSOR" ] || SUCCESSOR="$CONVERSATION"
 # Each gate the conversation replies to, read now: a gate that does not read
 # could be one still open, so the sign-off stops before it writes anything.
@@ -233,10 +262,11 @@ fi
 # here, with the other reads. lifecycle.sh exits 2 when the subject does not
 # read, an answer that cannot say whether it is held. Any other refusal (an
 # undeclared state, no gctk binary) answers as not held, the side that leaves
-# the bead visibly waiting on a person.
+# the bead visibly waiting on a person. An answer releases nothing, so it reads
+# no state.
 LC=$(pack_script lifecycle.sh)
 SUBJECT_STATE=""
-if [ "$RULED" = yes ] && [ -n "$LC" ]; then
+if [ "$RULED" = yes ] && [ -z "$ANSWERING" ] && [ -n "$LC" ]; then
   SUBJECT_STATE=$("$LC" state "$SUBJECT" 2>/dev/null)
   [ $? -ne 2 ] || stopped "the lifecycle state of $SUBJECT could not be read, so this ruling cannot tell whether to release it from held; nothing was written"
 fi
@@ -299,11 +329,13 @@ done
 [ -n "$routed" ] && ACTIONS+=("routed work to $routed")
 
 if [ "$RULED" = yes ]; then
-  # 3. The gates the ruling answers. A reply onto a bead that is no human gate
-  # holds nothing to resolve.
+  # 3. The gates the ruling answers: those --answer names, or else each one the
+  # conversation replies to. A reply onto a bead that is no human gate holds
+  # nothing to resolve.
   case "$RULING" in ruled:*) ANSWER="$RULING" ;; *) ANSWER="ruled: $RULING" ;; esac
+  if [ -n "$ANSWERING" ]; then TO_ANSWER="${ANSWER_GATES[*]}"; else TO_ANSWER="$REPLIES"; fi
   UNCLOSED=""
-  for g in $REPLIES; do
+  for g in $TO_ANSWER; do
     if printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g"; then
       echo "gate $g stays open and owed: the ruling leaves it, and this conversation's reply stays on it"
       ACTIONS+=("left gate $g owed")
@@ -335,6 +367,10 @@ if [ "$RULED" = yes ]; then
     fi
   done
   [ -z "$UNCLOSED" ] || stopped "the ruling did not close $UNCLOSED; the conversation is not closed, so a re-run resolves it"
+  if [ -n "$ANSWERING" ]; then
+    echo "ANSWERED $TO_ANSWER for conversation $CONVERSATION on $SUBJECT; the conversation stays open, and its sign-off reads each of those gates as already cleared"
+    exit 0
+  fi
 
   # 4. `held` is cleared by a ruling, not by a sitting ending. The state was
   # read before the first write; nothing this sign-off writes changes it.
