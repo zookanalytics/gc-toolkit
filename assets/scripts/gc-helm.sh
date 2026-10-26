@@ -62,7 +62,7 @@ Usage:
   gc-helm priority <bead-id> <P0-P4> [--dry-run]  set the priority of a bead that follows nothing, and re-rank the work that follows it
   gc-helm priority <bead-id> --shift <±n> [--dry-run]  set the shift of a bead that follows a parent or an anchor: +1 is one level later, -1 one level sooner
   gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this sitting: close the conversation a live sitting holds on the bead, answering no gate; a conversation id closes that conversation (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok}
-  gc-helm accept <bead-id> [--reason "..."] [--conversation <task>]  accept a recommendation: resolve the human gate that put it to the operator, read the answer back, and dispatch the bead's gc.recommended_formula at it; refuses while another human gate blocks the bead, and finishes an acceptance an earlier Accept left unfinished (subject or conversation id). --conversation names the conversation whose sitting's sign-off runs this Accept, which it does not warn of
+  gc-helm accept <bead-id> [--reason "..."] [--conversation <task>] [--var <key>=<value> ...]  accept a recommendation: resolve the human gate that put it to the operator, read the answer back, and dispatch the bead's gc.recommended_formula at it; refuses while another human gate blocks the bead, and finishes an acceptance an earlier Accept left unfinished (subject or conversation id). --conversation names the conversation whose sitting's sign-off runs this Accept, which it does not warn of; each --var rides the sling, a var the operator settled for this dispatch
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — operator-intake.sh uses it to route a PR reference before it becomes a topic
   gc-helm unplaced [--json]  list the placement sitting's queue: every live bead in the city's stores marked placement=pending that nothing has placed since (no parent, route, arm, assignee or live pour), priority then age; --json prints one object for a caller: the rows as beads, the suspended rigs it skipped, and the rigs whose store did not answer. Read-only, files nothing; exits 4 after the list when a store did not answer
 
@@ -213,7 +213,10 @@ resolve leaves an unfinished acceptance, which the next Accept finishes under
 the same token, slinging only when no root carries the token. A sitting takes a
 recommendation through this verb too: its sign-off's --accept runs it with
 --conversation naming the sitting's own conversation, which Accept then does
-not warn of as a live sitting on the bead.
+not warn of as a live sitting on the bead, and with a --var for each var the
+operator's ruling settled for the dispatch, such as mol-design-convoy's
+design_gated=false. Each --var rides the sling; a root an earlier run already
+poured under the token keeps the vars it was poured with.
 EOF
 }
 
@@ -2742,6 +2745,35 @@ accept_warn_live() {
     return 0
 }
 
+# accept_var <key>=<value> — add a var the caller settled for the dispatch to
+# accept_vars, one per line. Exits 2 on anything else: a key must lead, and a
+# var holds no newline, so the list splits back into the vars it was given.
+ACCEPT_NL='
+'
+accept_var() {
+    case "$1" in
+        *"$ACCEPT_NL"*) ;;
+        [!=]*=*) accept_vars="${accept_vars:+$accept_vars$ACCEPT_NL}$1"; return 0 ;;
+    esac
+    echo "$PROG: accept: --var takes <key>=<value> on one line, not '$1'" >&2
+    exit 2
+}
+
+# accept_sling <bead> <formula> <token> — the dispatch: the formula slung at
+# the bead, titled with the token, with a --var for each line of accept_vars.
+accept_sling() {
+    _asl_rest="$accept_vars"
+    set -- ${GC_RIG:+--rig "$GC_RIG"} "$1" --on "$2" --title "$2 accept:$3"
+    while [ -n "$_asl_rest" ]; do
+        set -- "$@" --var "${_asl_rest%%"$ACCEPT_NL"*}"
+        case "$_asl_rest" in
+            *"$ACCEPT_NL"*) _asl_rest="${_asl_rest#*"$ACCEPT_NL"}" ;;
+            *) _asl_rest="" ;;
+        esac
+    done
+    gc sling "$@"
+}
+
 # ── Verb: accept ─────────────────────────────────────────────────────
 # Accept a recommendation: clear the human gate that put gc.recommended_formula
 # to the operator, the gate under the key first-reaction, and dispatch the
@@ -2776,7 +2808,7 @@ accept_warn_live() {
 # the same token: it records the dispatch when a root carries the token, and
 # otherwise takes the read-back, the sling and the record.
 cmd_accept() {
-    bead=""; accept_reason=""; accept_conv=""
+    bead=""; accept_reason=""; accept_conv=""; accept_vars=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --reason=*) accept_reason="${1#--reason=}"; shift ;;
@@ -2785,6 +2817,9 @@ cmd_accept() {
             --conversation=*) accept_conv="${1#--conversation=}"; shift ;;
             --conversation)   shift; [ $# -gt 0 ] || { echo "$PROG: accept: --conversation requires a value" >&2; exit 2; }
                               accept_conv="$1"; shift ;;
+            --var=*) accept_var "${1#--var=}"; shift ;;
+            --var)   shift; [ $# -gt 0 ] || { echo "$PROG: accept: --var requires <key>=<value>" >&2; exit 2; }
+                     accept_var "$1"; shift ;;
             -h|--help)  usage; exit 0 ;;
             -*) echo "$PROG: accept: unknown flag '$1'" >&2; exit 2 ;;
             *) [ -z "$bead" ] || { echo "$PROG: accept takes one bead-id" >&2; exit 2; }; bead="$1"; shift ;;
@@ -2942,7 +2977,7 @@ cmd_accept() {
                     echo "$PROG: accept: acceptance $tok already dispatched $formula at $bead (root ${root_state#found }), but the record did not stick (gc.recommended_formula still reads live). The next Accept finishes the record without a second dispatch: $PROG accept $bead" >&2
                     exit 4
                 fi
-                echo "$PROG: accept: acceptance $tok had already dispatched $formula at $bead (root ${root_state#found }); recorded it, slinging nothing"
+                echo "$PROG: accept: acceptance $tok had already dispatched $formula at $bead (root ${root_state#found }); recorded it, slinging nothing${accept_vars:+. That root keeps the vars it was poured with, so the --var given here does not reach it}"
                 bust_cache
                 return 0 ;;
             unread)
@@ -2970,9 +3005,9 @@ cmd_accept() {
     # Step 4: dispatch the recommendation AT the bead (--on), titled with the
     # token, so the root it pours names the acceptance that sent it. A graph.v2
     # formula reads the bead as its input convoy's one tracked member, so the
-    # sling carries no var of its own.
+    # sling carries no var of its own, only each --var the caller gave.
     sling_rc=0
-    gc sling ${GC_RIG:+--rig "$GC_RIG"} "$bead" --on "$formula" --title "$formula accept:$tok" || sling_rc=$?
+    accept_sling "$bead" "$formula" "$tok" || sling_rc=$?
     if [ "$sling_rc" -ne 0 ]; then
         # A sling can fail after its pour committed, and that pour runs, so the
         # token's root decides whether the dispatch landed.

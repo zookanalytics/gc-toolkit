@@ -132,12 +132,14 @@ instead of claiming your own.
   sign-off answers that gate through `gc-helm.sh accept`, the writer the
   board's Accept runs, after every other write but the close. Under the
   subject's acceptance lock it dispatches the formula, or records a dispatch
-  an Accept already made, so the work goes once (the `work` skill). It
-  refuses, writing nothing, while a human gate the ruling does not answer
-  still holds the subject. Answer that gate in the same ruling once the
-  operator rules on it, or sign off without `--accept` and with `--leave`
-  on the recommendation's gate, and the board offers Accept once the other
-  gate is cleared.
+  an Accept already made, so the work goes once (the `work` skill). A var the
+  operator settles for that dispatch rides beside `--accept` as
+  `--var <key>=<value>`; the formula's own description names the vars it
+  takes. It refuses, writing nothing, while a human gate the ruling does not
+  answer still holds the subject. Answer that gate in the same ruling once the
+  operator rules on it, or sign off without `--accept` and with `--leave` on
+  the recommendation's gate, and the board offers Accept once the other gate
+  is cleared.
 - **New work carries it.** File and send that work (below), then sign off
   with `--ruled yes --route human --waiting-on <the work>`.
 - **New work decomposes an epic subject.** File it as the subject's member and

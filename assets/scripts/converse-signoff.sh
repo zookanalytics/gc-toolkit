@@ -34,8 +34,9 @@
 # releases an open PR other than the subject, such as an epic member's gate the
 # epic's sitting answers, or a gate about the subject and another PR, puts the
 # question of that PR to the ruling just as an open-PR subject does. The
-# acceptance follows the release, because a workflow poured at a bead that
-# still reads `held` ends its run as finished.
+# acceptance follows the release: mol-polecat-work's load-context reads any
+# merge_result, `held` included, as a PR or merge that already exists, and
+# cancels a run poured at a bead that still carries one.
 #
 # A ruling given on a turn that does not sign off (--answer) runs steps 1 to 3
 # for the gates --answer names, and step 5 when it takes the recommendation,
@@ -68,7 +69,7 @@
 #     [--route <rig>/<agent>|human] [--leave <gate> ...] [--answer <gate> ...] \
 #     [--no-wait | --waiting-on <bead> ...] \
 #     [--rework | --no-rework | --retire <kind> [--successor <bead>]] \
-#     [--pr-anchor <bead>] [--accept]
+#     [--pr-anchor <bead>] [--accept [--var <key>=<value> ...]]
 #   --outcome is the subject's headline, and the close reason the sittings card
 #   falls back to. --ruled defaults to `no`. --ruled yes requires --ruling, the
 #   answer each gate resolves with, and --route, where a `held` subject is
@@ -117,6 +118,10 @@
 #     holds the subject, since the dispatch waits for every gate that holds it,
 #     and, on a turn that does not sign off, while the subject reads `held`,
 #     which only the sign-off releases.
+#   --var <key>=<value> (with --accept, repeatable) is a var the ruling settled
+#     for the recommendation's dispatch, such as mol-design-convoy's
+#     design_gated=false. Accept passes each one to its sling. A dispatch an
+#     earlier Accept already made keeps the vars it was made with.
 # Exit: 0 signed off, or with --answer the named gates answered; 1 stopped
 #   short — a read failed, the rework did not file, the PR did not retire, the
 #   headline did not land, a gate did not close, the recommendation was not
@@ -129,7 +134,8 @@
 #   PR without a --pr-anchor naming one of them, or an --accept with no
 #   recommendation's gate among the gates the ruling answers, no recommendation
 #   on the subject, another open human gate the ruling does not answer, or a
-#   held subject on a turn that does not sign off.
+#   held subject on a turn that does not sign off, or a --var without --accept
+#   or not of the form <key>=<value>.
 set -u
 
 # >>> control-char-scrub
@@ -151,6 +157,7 @@ RETIRE_KIND=""
 SUCCESSOR=""
 PR_PICK=""
 ACCEPT=""
+ACCEPT_VARS=()
 WAIT=()
 LEAVE=()
 ANSWER_GATES=()
@@ -218,6 +225,12 @@ while [ $# -gt 0 ]; do
     --successor)  shift; [ $# -gt 0 ] || die "--successor needs a bead id"; SUCCESSOR="$1" ;;
     --pr-anchor)  shift; [ $# -gt 0 ] || die "--pr-anchor needs a bead id"; PR_PICK="$1" ;;
     --accept)     ACCEPT=yes ;;
+    --var)        shift; [ $# -gt 0 ] || die "--var needs <key>=<value>"
+                  case "$1" in
+                    *$'\n'*) die "--var takes <key>=<value> on one line" ;;
+                    [!=]*=*) ACCEPT_VARS+=(--var "$1") ;;
+                    *)       die "--var takes <key>=<value>, not '$1'" ;;
+                  esac ;;
     --no-wait)    WAIT+=(--no-wait) ;;
     --waiting-on) shift; [ $# -gt 0 ] || die "--waiting-on needs a bead id"; WAIT+=(--waiting-on "$1") ;;
     -h|--help)    sed -n '2,/^set -u$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -228,6 +241,8 @@ done
 
 [ -n "$CONVERSATION" ] || die "--conversation is required"
 [ -n "$OUTCOME" ] || die "--outcome is required"
+[ "${#ACCEPT_VARS[@]}" -eq 0 ] || [ -n "$ACCEPT" ] \
+  || die "--var requires --accept: it is a var of the recommendation's dispatch"
 case "${RULED:-no}" in yes|no) ;; *) die "--ruled must be yes or no" ;; esac
 ANSWERING=""
 if [ "${#ANSWER_GATES[@]}" -gt 0 ]; then
@@ -429,9 +444,9 @@ fi
 # read, an answer that cannot say whether it is held. Any other refusal (an
 # undeclared state, no gctk binary) answers as not held, the side that leaves
 # the bead visibly waiting on a person. An answer releases nothing, so it reads
-# no state unless it takes the recommendation: a workflow poured at a bead that
-# reads `held` ends its run as finished, and only the sign-off releases one, so
-# such an answer is refused.
+# no state unless it takes the recommendation: mol-polecat-work cancels a run
+# poured at a bead that still reads `held`, and only the sign-off releases one,
+# so such an answer is refused.
 LC=$(pack_script lifecycle.sh)
 SUBJECT_STATE=""
 if [ "$RULED" = yes ] && { [ -z "$ANSWERING" ] || [ -n "$ACCEPT" ]; } && [ -n "$LC" ]; then
@@ -439,7 +454,7 @@ if [ "$RULED" = yes ] && { [ -z "$ANSWERING" ] || [ -n "$ACCEPT" ]; } && [ -n "$
   [ $? -ne 2 ] || stopped "the lifecycle state of $SUBJECT could not be read, so this ruling cannot tell whether it reads held; nothing was written"
 fi
 if [ -n "$ANSWERING" ] && [ -n "$ACCEPT" ] && [ "$SUBJECT_STATE" = held ]; then
-  die "$SUBJECT reads held, which only the sign-off releases, and a workflow poured at a held bead ends its run as finished; nothing was written. Take the recommendation at the sign-off (--ruled yes with --accept)"
+  die "$SUBJECT reads held, which only the sign-off releases, and mol-polecat-work cancels a run poured at a held bead; nothing was written. Take the recommendation at the sign-off (--ruled yes with --accept)"
 fi
 HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh on any candidate root, so the subject's headline cannot be written; nothing was written"
 
@@ -453,7 +468,8 @@ HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh on any candidate root, 
 # takes the recommendation once Accept can.
 take_recommendation() {
   local out rc g row st why other="" open=""
-  out=$("$HELM" accept "$SUBJECT" --conversation "$CONVERSATION" --reason "$RULING" 2>&1); rc=$?
+  out=$("$HELM" accept "$SUBJECT" --conversation "$CONVERSATION" --reason "$RULING" \
+    "${ACCEPT_VARS[@]+"${ACCEPT_VARS[@]}"}" 2>&1); rc=$?
   [ -z "$out" ] || printf '%s\n' "$out"
   if [ "$rc" -eq 0 ]; then
     echo "took the recommendation: $REC_FORMULA at $SUBJECT, through Accept"
@@ -478,7 +494,7 @@ take_recommendation() {
   fi
   if [ -z "$open" ] && show_row "$SUBJECT" | jq -e '((.metadata // {})["gc.recommended_formula"] // "") == ""
       and ((.metadata // {})["gc.recommended_formula_dispatched"] // "") != ""' >/dev/null 2>&1; then
-    echo "the recommendation was already taken: an Accept dispatched $REC_FORMULA at $SUBJECT and recorded it"
+    echo "the recommendation was already taken: an Accept dispatched $REC_FORMULA at $SUBJECT and recorded it${ACCEPT_VARS[*]:+. That dispatch keeps the vars it was made with, so the --var given here does not reach it}"
     ACTIONS+=("the recommendation was already taken through Accept")
     return 0
   fi
@@ -597,11 +613,11 @@ if [ "$RULED" = yes ]; then
   [ -n "$CONSEQUENCE" ] && ACTIONS+=("$CONSEQUENCE")
   for p in "${STANDS[@]+"${STANDS[@]}"}"; do ACTIONS+=("ruling leaves the branch of $p as it stands"); done
 
-  # 5. The recommendation, once nothing holds the subject back: a workflow
-  # poured at a bead that still reads `held` ends its run as finished.
+  # 5. The recommendation, once nothing holds the subject back: mol-polecat-work
+  # cancels a run poured at a bead that still reads `held`.
   if [ -n "$ACCEPT" ]; then
     [ -z "$RELEASE_FAILED" ] \
-      || stopped "the recommendation is not taken while $SUBJECT reads held, because a workflow poured at a held bead ends its run as finished; the conversation is not closed, so a re-run releases it and then takes the recommendation"
+      || stopped "the recommendation is not taken while $SUBJECT reads held, because mol-polecat-work cancels a run poured at a held bead; the conversation is not closed, so a re-run releases it and then takes the recommendation"
     take_recommendation
   fi
 

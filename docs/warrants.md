@@ -148,6 +148,6 @@ shares only the word ([authority-map.md](authority-map.md)).
   `internal/sling/sling_test.go` 3639-3691). Once that root has closed, the next
   launch pours again. No `gc sling` flag checks an earlier root by its title or
   by a key (`cmd/gc/cmd_sling.go` 145-160).
-- **Verified.** 2026-10-26, at `gastownhall/gascity` main 4bab0b485.
+- **Verified.** 2026-10-26, at `gastownhall/gascity` main e2671dc4d.
 - **Retires when.** A Gas City launch can refuse a second root under a caller's
   key whatever the first root's status.

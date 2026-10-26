@@ -47,7 +47,8 @@
 #             recommendation, another gate holds the subject, or an answer on a
 #             held subject would pour at it; a take Accept does not complete
 #             stops the sign-off, and an answer that reached the gate first
-#             stands
+#             stands; each --var reaches Accept's writer, and one without
+#             --accept, or not <key>=<value>, is refused
 #
 # Runs the REAL converse-signoff.sh with a stubbed `gc` on PATH over a
 # file-backed store, and stub pack scripts at $GC_RIG_ROOT, from a cwd outside
@@ -779,6 +780,20 @@ recommend; ACCEPT_DOES=other run_signoff --conversation tk-conv --outcome "the r
 eq "$RC" 0 "(ACCEPT-FIRST) a take another answer beat to the gate exits 0"
 has "$OUT" "another answer reached the recommendation's gate first — tk-rec: \"moot: the reaction withdrew its recommendation\"" "(ACCEPT-FIRST) …reporting the answer that stands"
 eq "$(field tk-conv status)" "closed" "(ACCEPT-FIRST) …and the conversation closes"
+
+echo "# --var hands Accept's writer a var the ruling settled for the dispatch"
+recommend; run_signoff --conversation tk-conv --outcome "mol-fix is taken all-in-one" "${TAKE[@]}" --var design_gated=false
+eq "$RC" 0 "(ACCEPT-VAR) a take that settles a var for the dispatch exits 0"
+has "$(cat "$CALLS")" "gc-helm accept tk-anc --conversation tk-conv --reason take the reaction's mol-fix --var design_gated=false" "(ACCEPT-VAR) …passing it to Accept's writer"
+ACCEPT_DOES=dispatched run_signoff --conversation tk-conv --outcome "mol-fix is taken all-in-one" "${TAKE[@]}" --var design_gated=false
+eq "$RC" 0 "(ACCEPT-VAR) a re-run once the dispatch is made exits 0"
+has "$OUT" "keeps the vars it was made with, so the --var given here does not reach it" "(ACCEPT-VAR) …saying the dispatch already made keeps its own vars"
+recommend; run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "fix it" --route human --no-wait --var design_gated=false
+eq "$RC" 2 "(ACCEPT-VAR-ALONE) --var without --accept exits 2"
+eq "$(writes)" 0 "(ACCEPT-VAR-ALONE) …writing nothing"
+recommend; run_signoff --conversation tk-conv --outcome x "${TAKE[@]}" --var design_gated
+eq "$RC" 2 "(ACCEPT-VAR-FORM) a --var that is not <key>=<value> exits 2"
+eq "$(writes)" 0 "(ACCEPT-VAR-FORM) …writing nothing"
 
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"

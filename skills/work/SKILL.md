@@ -130,7 +130,9 @@ finished, while the writer finds the run by its token and only records it.
   recommendation's gate, and `--accept` on the sign-off, or on the `--answer`
   call of a turn that does not sign off, hands that gate to Accept's writer
   once the ruling's other writes have landed, every other gate it answers
-  included (the converse-settle step).
+  included (the converse-settle step). A var the operator settles for the
+  dispatch rides beside it as `--var <key>=<value>`; the formula's own
+  description names the vars it takes.
 
 ## Choose the formula
 

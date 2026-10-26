@@ -43,10 +43,13 @@
 #   (SELF-KILL) a run killed by itself keeps the lock until its sling exits
 #   (OUTLIVE)  a sling that outlives the lock meets Gas City's launch lock
 #   (SLING-*)  a failed sling is judged by the token's root
+#   (VAR-*)    each --var rides the sling as given, a root already poured keeps
+#              its own vars, and a --var that is not <key>=<value> is refused
 #   (SITTING-*) a sitting's sign-off takes the recommendation through this
 #              same writer (converse-signoff.sh --accept), so the board's Accept
 #              and the sitting dispatch it once between them, whichever runs
-#              first, stops part way, or holds the lock
+#              first, stops part way, or holds the lock, and a var the
+#              sitting's ruling settled rides Accept's sling
 #
 # Runs the REAL gc-helm.sh (as `sh`, as shipped) with a stubbed `gc` on PATH
 # over a file-backed store: no live city, Dolt, network or sessions. The stub's
@@ -229,11 +232,11 @@ case "$1 ${2:-}" in
   "sling "*|"sling")
     _bead=""; _formula=""; _title=""; _p=""; _var=""
     for a in "$@"; do
-      case "$_p" in --on) _formula="$a" ;; --title) _title="$a" ;; --var) _var=1 ;; esac
+      case "$_p" in --on) _formula="$a" ;; --title) _title="$a" ;; --var) _var="$_var --var $a" ;; esac
       case "$a" in tk-*) [ "$_p" = "--rig" ] || _bead="$a" ;; esac
       _p="$a"
     done
-    log "sling $_bead --on $_formula --title $_title${_var:+ --var}"
+    log "sling $_bead --on $_formula --title $_title$_var"
     if [ -n "${SLING_PAUSE:-}" ]; then touch "$SLING_PAUSE/arrived"; wait_for "$SLING_PAUSE/go"; fi
     [ "${STOP_AT:-}" = sling ] && kill_run
     # Gas City's per-bead launch lock, held across processes.
@@ -481,6 +484,22 @@ eq "$(slings)" "$SL_BEFORE" "(STOP-after-sling-closed) …slinging nothing: the 
 eq "$(roots "accept:$T")" 1 "(STOP-after-sling-closed) …so no second root is poured"
 eq "$(meta tk-anc gc.recommended_formula_dispatched)" "mol-fix" "(STOP-after-sling-closed) …and the dispatch is recorded"
 
+echo "# each --var rides the sling, and a root already poured keeps its own vars"
+rec; run_accept tk-anc --var design_gated=false --var note=a=b
+TOK="$(token_of tk-rec)"
+eq "$RC" 0 "(VAR) an Accept given vars exits 0"
+has "$(grep '^sling ' "$CALLS")" "sling tk-anc --on mol-fix --title mol-fix accept:$TOK --var design_gated=false --var note=a=b" "(VAR) …slinging each var as given, in order"
+rec; STOP_AT=after-sling run_accept tk-anc
+SL_BEFORE="$(slings)"; run_accept tk-anc --var design_gated=false
+eq "$RC" 0 "(VAR-POURED) a finish given vars, after a stopped run poured its root, exits 0"
+eq "$(slings)" "$SL_BEFORE" "(VAR-POURED) …slinging nothing"
+has "$OUT" "That root keeps the vars it was poured with, so the --var given here does not reach it" "(VAR-POURED) …and saying the root keeps its own vars"
+for v in design_gated =false "$(printf 'a=b\nc=d')"; do
+    rec; run_accept tk-anc --var "$v"
+    eq "$RC" 2 "(VAR-FORM) a --var that is not <key>=<value> on one line ('$v') exits 2"
+    eq "$(writes)" 0 "(VAR-FORM) …writing nothing"
+done
+
 echo "# a gate filed after the stop holds the finish"
 unfinished 0123456789abcdef; gate tk-hold liveness "Is the rig still alive?"; edge tk-anc blocks tk-hold
 run_accept tk-anc
@@ -649,12 +668,13 @@ sitting() {
     jq '.assignee = "gc-toolkit/gc-toolkit.tk-conv" | .status = "in_progress"' "$STORE/b/tk-conv.json" > "$STORE/b/tk-conv.tmp" && mv "$STORE/b/tk-conv.tmp" "$STORE/b/tk-conv.json"
     jq -n '[{id:"gc-50", session_name:"s-gc-50", alias:"gc-toolkit/gc-toolkit.tk-conv", template:"gc-toolkit/gc-toolkit.converse-opus", state:"active", closed:false}]' > "$STORE/sessions.json"
 }
-# run_take -> RC, OUT: the sitting's sign-off on the operator's ruling to take
-# the recommendation, from a cwd outside any checkout.
+# run_take [<arg>...] -> RC, OUT: the sitting's sign-off on the operator's
+# ruling to take the recommendation, with any further sign-off args, from a
+# cwd outside any checkout.
 run_take() {
     set +e
     ( cd "$TMP/cwd" && GC_RIG_ROOT="$TMP/rig" bash "$SIGNOFF" --conversation tk-conv --outcome "mol-fix is taken" \
-        --ruled yes --ruling "take the reaction's mol-fix" --route human --no-wait --accept ) > "$TMP/out" 2>&1; RC=$?
+        --ruled yes --ruling "take the reaction's mol-fix" --route human --no-wait --accept "$@" ) > "$TMP/out" 2>&1; RC=$?
     set -e
     OUT="$(cat "$TMP/out")"
 }
@@ -719,6 +739,13 @@ eq "$RC" 0 "(SITTING-RACE) the take's re-run exits 0"
 has "$OUT" "the recommendation was already taken" "(SITTING-RACE) …finding it taken"
 eq "$(slings)" 1 "(SITTING-RACE) …one sling in all"
 eq "$(field tk-conv status)" "closed" "(SITTING-RACE) …and the conversation closes"
+
+echo "# a sitting's take hands Accept's sling the var its ruling settled"
+rec; sitting
+run_take --var design_gated=false
+TS="$(token_of tk-rec)"
+eq "$RC" 0 "(SITTING-VAR) a sitting's take that settles a var exits 0"
+has "$(grep '^sling ' "$CALLS")" "--title mol-fix accept:$TS --var design_gated=false" "(SITTING-VAR) …and Accept slings the formula with it"
 
 echo
 echo "gc-helm accept: $PASS passed, $FAIL failed"

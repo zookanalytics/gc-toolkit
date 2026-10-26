@@ -543,16 +543,18 @@ only when no root carries the token. The lock's warrant is in
 A sitting takes a recommendation through the same writer. When the operator
 rules to take it, the sign-off's `--accept` leaves the recommendation's gate
 out of step 3 and runs `gc-helm.sh accept` at step 5, once the ruling's other
-writes have landed and a `held` subject is released, because a workflow poured
-at a bead that still reads `held` ends its run as finished. Under the lock,
-that run finishes an acceptance the board's Accept left unfinished instead of
-sending the formula again, and a board Accept that runs after the sitting's
-finds the recommendation dispatched. Gas City's launch lock refuses a second
-pour only while the first root is live, so a sling of the sitting's own would
-pour the formula again once the stopped Accept's root had finished. The
-sign-off refuses `--accept`, writing nothing, while a human gate the ruling
-does not answer still holds the subject, and on an `--answer` turn while the
-subject reads `held`.
+writes have landed and a `held` subject is released, because mol-polecat-work's
+load-context cancels a run poured at a bead that still reads `held`. Under the
+lock, that run finishes an acceptance the board's Accept left unfinished
+instead of sending the formula again, and a board Accept that runs after the
+sitting's finds the recommendation dispatched. Gas City's launch lock refuses
+a second pour only while the first root is live, so a sling of the sitting's
+own would pour the formula again once the stopped Accept's root had finished.
+A var the ruling settles for the dispatch, such as a design convoy's
+`design_gated` ([design-convoy.md](design-convoy.md)), rides the sign-off's
+`--var` to Accept's sling. The sign-off refuses `--accept`, writing nothing,
+while a human gate the ruling does not answer still holds the subject, and on
+an `--answer` turn while the subject reads `held`.
 
 ## How a parked subject comes back
 
