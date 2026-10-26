@@ -267,8 +267,10 @@ Another non-invariant check, `doctor/check-demo-toolchain`, reports readiness
 rather than structure: whether the demo:capture toolchain — Node, ffmpeg,
 `OPENAI_API_KEY`, and the `gh` that delivers a clip inline — is resolvable,
 warn-only, so a demo session learns before it captures whether the clip will
-narrate or degrade to a silent, captioned one. The capture installs its own
-browser, so the check does not probe for one.
+narrate or degrade to a silent, captioned one. It also reports whether
+`VERCEL_AUTOMATION_BYPASS_SECRET` reaches the session, and warns when the
+secrets file holds that key and the session does not. The capture installs its
+own browser, so the check does not probe for one.
 That is the whole set: every check asserts a live structural property or reports
 toolchain readiness, and none greps the source for a past fix.
 
@@ -462,6 +464,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/tmux-pick-session.sh` | visit | The session picker. |
 | `assets/scripts/tmux-keeper-toggle.sh` | visit | Pins or unpins the keeper in the session picker. |
 | `assets/scripts/work-outcome.sh` | visit | The one `gc.work_outcome=no-op` stamp a visit gets before it closes, for the work-record gate `gc bd close` runs. Every visit closer sources it: `visit-close.sh`, the `gc-helm.sh` dismiss verb, `bead-rehome.sh` and `converse-claim.sh`. |
+| `assets/scripts/visit-topic.sh` | visit | The one definition of a visit's topic: its escalation_key, the visit itself when it was filed for a distinct concern (`visit_topic=own`), else its subject. It encodes that decision for the fold's comparison and for the demands a sitting files. `converse-fold.sh`, `converse-hold.sh` and `converse-signoff.sh` source it. |
 | `orders/feedback-miner.toml` | feedback | Fires the sweep of recently merged PR review threads. |
 | `orders/feedback-distiller.toml` | feedback | The daily heartbeat that judges pending observations. |
 | `formulas/mol-feedback-miner.toml` | feedback | Cold capture: records each review post from outside the city as one condensed observation, and each corrective-feedback hit in the city's own posts as another. |

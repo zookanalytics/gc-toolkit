@@ -1460,12 +1460,15 @@ case "${2:-}" in
             echo '{"error":"no issues found matching the provided IDs","schema_version":1}'; exit 1
         fi
         case "$id" in
-            v-x) jq -nc --arg hd "${SO_HOLD_DEMAND:-}" --arg tp "${SO_TOPIC:-}" \
-                    --arg tr "${SO_TRACKS:-}" --arg cg "${SO_GROUP:-}" \
+            # SO_VISIT_META is a metadata object the visit carries as well.
+            v-x) vm="${SO_VISIT_META:-}"; [ -n "$vm" ] || vm='{}'
+                 jq -nc --arg hd "${SO_HOLD_DEMAND:-}" --arg tp "${SO_TOPIC:-}" --arg vt "${SO_VISIT_TOPIC:-}" \
+                    --arg tr "${SO_TRACKS:-}" --arg cg "${SO_GROUP:-}" --argjson vm "$vm" \
                     --arg rl "$(cat "$SOST/v-x.ruling" 2>/dev/null)" \
-                    '[{id:"v-x",metadata:(({"task_kind":"visit"}
+                    '[{id:"v-x",metadata:(({"task_kind":"visit"} + $vm
                         +(if $hd=="" then {} else {"gc.hold_demand":$hd} end)
                         +(if $tp=="" then {} else {"escalation_key":$tp} end)
+                        +(if $vt=="" then {} else {"visit_topic":$vt} end)
                         +(if $cg=="" then {} else {"gc.continuation_group":$cg} end)
                         +(if $rl=="" then {} else {"gc.ruling":$rl} end)))}
                       +(if $tr=="" then {} else {dependencies:[{id:$tr,dependency_type:"tracks"}]} end)]' ;;
@@ -1635,6 +1638,60 @@ echo "── the discharge isolates by topic even with no gc.hold_demand stamp �
 run_so SO_TOPIC=finding-b SO_DEMAND_LIST="$TWO_DEMANDS"
 have "the topic-scoped fallback resolves finding-b's demand" 'bd gate resolve dB --reason approved' "$SOGC"
 if grep -q 'gate resolve dA' "$SOGC"; then bad "…and not finding-a's" "the fallback scan resolved a sibling topic's demand"; else ok "…and not finding-a's demand"; fi
+
+# A visit filed for a distinct concern (visit_topic=own) sits beside the live
+# sitting on its subject, and its topic is `visit:` and its own id. The live
+# sitting's keyless demand on item-x comes first in the listing, so the unscoped
+# first-match would resolve dA; the topic keeps the ruling on this sitting's dB.
+echo "── a distinct-concern sitting discharges its own demand, not the live sitting's ──"
+BESIDE_LIVE='[{"id":"dA","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:item-x","metadata":{"gc.demand_for":"item-x"}},{"id":"dB","assignee":"","issue_type":"gate","await_type":"human","await_id":"gc-demand:item-x:visit:v-x","metadata":{"gc.demand_for":"item-x","gc.demand_topic":"visit:v-x"}}]'
+SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route "gc-toolkit/gc-toolkit.polecat")
+run_so SO_VISIT_TOPIC=own SO_DEMAND_LIST="$BESIDE_LIVE"
+eq "$SO_RC" "0" "the own-topic discharge exits 0"
+have "the ruling resolves the demand filed under the visit's own topic" 'bd gate resolve dB --reason approved' "$SOGC"
+lacks "…and never the live sitting's demand beside it" 'gate resolve dA' "$SOGC" \
+      "gate resolve reached dA — the operator question of the live sitting on the same subject"
+SOARGS=(--visit v-x --subject item-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+run_so SO_VISIT_TOPIC=own SO_DEMAND_LIST="$BESIDE_LIVE"
+have "a cut-short re-states the wait on the subject under the visit's own topic" \
+     'helm[RIG] demand item-x still need X --by converse --topic visit:v-x' "$SOLOG"
+lacks "…and leaves the live sitting's demand alone" 'gate resolve dA' "$SOGC" \
+      "the cut-short resolved dA, the live sitting's demand"
+
+echo "── every case of the shared topic fixture discharges under its demand topic ──"
+# visit-topic.sh is the one definition of a visit's topic, and
+# visit-topic.fixture.json holds the cases the fold, the hold and the sign-off
+# each run. The stub serves the fixture's visit carrying each case's metadata.
+# A ruling resolves the merge hold filed on the subject under the case's demand
+# topic, the topic converse-hold.sh files it under. A cut-short re-states the
+# visit's wait on the subject under that topic, or under none.
+FX="$REPO/assets/scripts/visit-topic.fixture.json"
+eq "$(jq -r '.visit' "$FX")" "v-x" "the fixture's visit is the one the stub serves"
+eq "$(jq -r '.subject' "$FX")" "item-x" "the fixture's subject is the one the sign-off is handed"
+while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    name="$(printf '%s' "$c" | jq -r '.name')"
+    meta="$(printf '%s' "$c" | jq -c '.metadata')"
+    want="$(printf '%s' "$c" | jq -r '.demand_topic')"
+    UNDER_TOPIC="$(jq -nc --arg t "$want" '[{id:"dT", assignee:"", issue_type:"gate", await_type:"human",
+        await_id:("gc-demand:item-x" + (if $t == "" then "" else ":" + $t end)),
+        metadata:({"gc.demand_for":"item-x"} + (if $t == "" then {} else {"gc.demand_topic":$t} end))}]')"
+    SOARGS=(--visit v-x --subject item-x --outcome "settled — done" --ruled yes --no-wait --ruling approved --route human)
+    run_so SO_VISIT_META="$meta" SO_DEMAND_LIST="$UNDER_TOPIC" STUB_STATE=pull_request
+    eq "$SO_RC" "0" "(FIXTURE) $name: the ruled sign-off exits 0"
+    have "(FIXTURE) $name: the ruling resolves the merge hold filed under its demand topic" \
+         'bd gate resolve dT --reason approved' "$SOGC"
+    SOARGS=(--visit v-x --subject item-x --outcome "cut-short — need input" --ruled no --still-owed "still need X")
+    run_so SO_VISIT_META="$meta" SO_HOLD_DEMAND=d-v SO_DEMAND=0 SO_VISIT_DEMAND=1
+    if [ -n "$want" ]; then
+        have "(FIXTURE) $name: a cut-short re-states the wait under its demand topic" \
+             "helm[RIG] demand item-x still need X --by converse --topic $want" "$SOLOG"
+    else
+        have "(FIXTURE) $name: a cut-short re-states the wait" \
+             'helm[RIG] demand item-x still need X --by converse' "$SOLOG"
+        lacks "(FIXTURE) $name: …under no topic" '--topic' "$SOLOG" "the re-state carried a topic"
+    fi
+done <<< "$(jq -c '.cases[]' "$FX")"
 
 echo "── the conversation wait gates the VISIT: a ruling resolves the visit demand ──"
 # Default Phase A shape: converse-hold files the conversation demand on the visit,

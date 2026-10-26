@@ -52,7 +52,11 @@ Definitions:
   visit and make it unclaimable (`formulas/mol-visit.toml`).
 - **Topic** — what makes two visits the same sitting, which is not always
   a bead: `escalation_key` when `escalate.sh` filed the visit for one
-  situation, the subject otherwise. The fold check keys on `$TOPIC`.
+  situation, the visit itself when it was opened for a concern of its own
+  (`visit_topic=own`, stamped by `gc-helm.sh open --allow-duplicate`, which
+  `engage` uses when the operator asks for a new visit), the subject
+  otherwise. The fold check keys on `$TOPIC`, and a sitting whose topic is
+  not its subject files its demands under that topic.
 - **Demand** — what a person owes, as a native human gate
   (`issue_type=gate`, `await_type=human`): a ruling files unassigned, a task
   only a person can perform is assigned to them, and the assignment is what
@@ -242,8 +246,8 @@ The loop, every visit:
      --into "$HOLDER" --outcome folded --reason "folded into $HOLDER"
    ```
    Then drain (**How this thread ends**). When `$HOLDER` is `$VISIT` you are the holder: prep and
-   continue. When it is EMPTY the listing did not read, which proves nothing —
-   hold.
+   continue. When it is EMPTY the listing or the visit's own row did not
+   read, which proves nothing — hold.
 
    `$HOLDER` is always a visit in this visit's own store, because a fold never
    crosses stores: the merge-hold keys it moves hold a PR's merge only in that
