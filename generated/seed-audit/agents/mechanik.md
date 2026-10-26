@@ -211,23 +211,27 @@ A bead that joins the effort later takes step 4's writes, and a summary task's
 wait on it, before it is slung. The summary task waits on the bead and never the
 reverse, because the summary must read the branch after the bead has landed. The
 effort's summary task is the landing bead's wait whose title begins `summary:`,
-the newest when there are several. While it has not been dispatched, it still
-carries its arm and no dispatch marker, and its own wait on the bead is enough:
+the newest when there are several. While it still carries its arm and no
+dispatch marker, and a bead it waits on is still open, no dispatch pass can
+sling it, and its own wait on the bead is enough:
 
 ```bash
 # The summary task's wait on a bead that joins later, after step 4's writes.
 # dep add's second id is the bead that is waited on.
-gc bd --rig <rig> show "$SUMMARY" --json | tr -d '[:cntrl:]' | jq -e '.[0].metadata | (.["gc.dispatch_when_ready"] // "") != "" and (.["gc.dispatch_when_ready_slung"] // "") == ""' >/dev/null \
+gc bd --rig <rig> show "$SUMMARY" --json | tr -d '[:cntrl:]' | jq -e '.[0] | (.metadata | (.["gc.dispatch_when_ready"] // "") != "" and (.["gc.dispatch_when_ready_slung"] // "") == "") and any(.dependencies[]?; .dependency_type == "blocks" and .status != "closed")' >/dev/null \
   && gc bd --rig <rig> dep add "$SUMMARY" "$WORK" --type=blocks \
   && gc bd --rig <rig> dep list "$SUMMARY" --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg w "$WORK" 'any(.[]; .id == $w)' >/dev/null \
-  || { echo "$SUMMARY has been dispatched or does not wait on $WORK; file a fresh summary task by step 5" >&2; exit 1; }
+  || { echo "$SUMMARY may already be dispatched, or does not wait on $WORK; file a fresh summary task by step 5" >&2; exit 1; }
 ```
 
-A summary task that has been dispatched may already have read the branch, so a
-fresh summary task waits on the bead instead: filed and read back by step 5 with
-the bead among its waits, which makes the landing bead wait on it too, and armed
-as in step 7. Then sling the bead. Once the refinery has taken the landing bead,
-work for its branch rides the PR as a rework or a supplement.
+A summary task that has been dispatched may already have read the branch. One
+whose beads have all closed may still be slung by a pass that read it as ready
+before the wait was added, because a pass slings from the readiness it read
+when it started. Either way a fresh summary task waits on the bead instead:
+filed and read back by step 5 with the bead among its waits, which makes the
+landing bead wait on it too, and armed as in step 7. Then sling the bead. Once
+the refinery has taken the landing bead, work for its branch rides the PR as a
+rework or a supplement.
 
 A **shared input artifact** (a decisions doc, a spec several beads need before
 any produce mergeable work) is the effort's first bead. It lands on the branch

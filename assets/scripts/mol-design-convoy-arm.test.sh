@@ -46,7 +46,8 @@
 # waits read back before it hands the landing bead over, and dispatches only
 # after that. Its block for a bead that joins later makes the undispatched
 # summary task wait on the bead, never the reverse, and refuses a summary task
-# that has been dispatched.
+# that has been dispatched, or whose beads have all closed so that a pass may
+# already be slinging it.
 #
 # EXECUTES the real snippets extracted verbatim between the formula markers and
 # from the mechanik's fenced blocks, so the test cannot drift from the shipped
@@ -897,7 +898,8 @@ for sh in "${SHELLS[@]}"; do
   # --- a bead that joins later ---
   # The effort's beads and its summary task are filed and dispatched; work-2
   # joins with step 4's writes. The summary task's own wait takes it while the
-  # task is undispatched, which the arm with no dispatch marker shows.
+  # task is undispatched, which the arm with no dispatch marker shows, and still
+  # held, which the open work-1 shows.
   JOINED='map(if .id == "land-1" then ._deps += [{id: "work-2", dependency_type: "blocks"}] else . end)
     + [{id: "work-2", title: "x", issue_type: "task", status: "open", assignee: "", description: "", metadata: {target: "integration/land-1"}, _deps: []}]'
   recipe_store; run_recipe "$sh"
@@ -919,6 +921,16 @@ for sh in "${SHELLS[@]}"; do
       && ok "[$sh] late join: a dispatched summary task ($marker) takes no wait, and a fresh one is asked for" \
       || bad "[$sh] late join: a dispatched summary task ($marker) took the wait (rc=$RC)"
   done
+
+  # Armed with no marker, every bead it waits on closed: a pass that read it as
+  # ready slings it whatever wait is added after, so it takes none either.
+  recipe_store; run_recipe "$sh"
+  jq -c "$JOINED"' | map(if .id == "sum-1" then .metadata += {"gc.dispatch_when_ready": "rig/gc-toolkit.polecat"} elif .id == "work-1" then .status = "closed" else . end)' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
+  export SUMMARY=sum-1 WORK=work-2
+  run_late "$sh"
+  stopped && not_logged "dep add" && [ "$(waits_on sum-1 work-2)" = "0" ] && reported "file a fresh summary task" \
+    && ok "[$sh] late join: a summary task whose beads have all closed takes no wait, and a fresh one is asked for" \
+    || bad "[$sh] late join: a summary task whose beads have all closed took the wait (rc=$RC)"
   unset SUMMARY WORK
 done
 
