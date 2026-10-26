@@ -324,8 +324,9 @@ export interface Tile {
   recommendation: string | null;
   /**
    * Why the sitting last spawned for this row's visit failed to start —
-   * `'startup timeout'`, `'setup timeout'`, `'never started'`, or
-   * `'start error: <the recorded error>'`. Non-empty exactly when `visit_state`
+   * `'startup timeout'`, `'setup timeout'`, `'provider error: <code>'`,
+   * `'never started'`, `'start error: <the recorded error>'`, or
+   * `'reason unread'`. Non-empty exactly when `visit_state`
    * is `'start-failed'`, `''` on every other row. Always present.
    */
   visit_start_failure: string;

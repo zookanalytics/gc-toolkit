@@ -116,8 +116,8 @@ func hqWith(sessions []*beads.Issue, episodes ...*beads.Issue) *fakeStore {
 // TestStartFailureReadsGasCitysRecord: the reason is read from the record Gas
 // City keeps of the start, not inferred. A deadline is a startup timeout unless
 // the episode places it in a pre_start command; no episode, or a cleared one,
-// is a create rolled back before any start ran; any other failure carries the
-// error the episode recorded.
+// is a rollback that recorded no cause; any other failure carries the error the
+// episode recorded.
 func TestStartFailureReadsGasCitysRecord(t *testing.T) {
 	failed := sessionBead("hq-wisp-f1", failAlias, "failed-create", minsBefore(9), ptime(minsBefore(8)))
 	cases := []struct {
@@ -153,6 +153,28 @@ func TestStartFailureReadsGasCitysRecord(t *testing.T) {
 			}
 			if res.Partial {
 				t.Errorf("a whole read is not partial: %v", res.PartialErrors)
+			}
+		})
+	}
+}
+
+// TestProviderErrorIsReadOffTheSession: a start that failed on a provider error
+// a person must fix accrues no episode. The rollback writes the error's code to
+// the session bead in the write that closes it, so the reason is read there,
+// not taken for a create that never started.
+func TestProviderErrorIsReadOffTheSession(t *testing.T) {
+	for _, c := range []struct{ code, want string }{
+		{"quota_exceeded", "provider error: quota_exceeded"},
+		{"model_not_found", "provider error: model_not_found"},
+	} {
+		t.Run(c.code, func(t *testing.T) {
+			failed := sessionBead("hq-wisp-f1", failAlias, "failed-create", minsBefore(9), ptime(minsBefore(8)))
+			failed.Metadata = json.RawMessage(metaJSON("alias", failAlias, "agent_name", failAlias,
+				"session_name", "s-hq-wisp-f1", "session_origin", "manual", "state", "failed-create",
+				"session_health", "unhealthy", "session_health_reason", c.code, "provider_terminal_error", c.code))
+			res := gatherFailures(t, []*beads.Issue{boundVisit(failVisit, minsBefore(10))}, hqWith([]*beads.Issue{failed}))
+			if got := sittingsByID(res)[failVisit].StartFailure; got != c.want {
+				t.Errorf("StartFailure = %q, want %q", got, c.want)
 			}
 		})
 	}

@@ -703,7 +703,8 @@ closed reads as parked, and the operator can engage it again.
 
 A visit whose sitting failed to start reads `start failed` on the board
 instead, with the reason Gas City recorded: a startup timeout, a setup timeout,
-a create rolled back before it started, or the start's error
+a provider error such as a quota exceeded, the start's error, or never started
+when Gas City recorded no cause
 ([gascity/human-engagement.md](gascity/human-engagement.md#a-failed-start-is-recorded-on-the-session-bead-and-in-a-startup-health-episode)).
 The board reads that record itself, so the mark shows as soon as the failure is
 recorded, without waiting for the patrol, and it stays until the visit is

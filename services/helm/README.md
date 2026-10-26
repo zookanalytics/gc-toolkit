@@ -704,17 +704,23 @@ city store:
   alias is the visit's id, stored qualified as `<rig>/<binding>.<alias>`, or
   `v-<id>` where Gas City refuses the bare id as an alias;
 - the reconciler's rollback closes that session bead with `state=failed-create`;
-- a start that ran also leaves a `startup-health-episode` bead keyed by the
-  session's name, whose kind and last detail say why it failed.
+- a start that failed on a provider error a person must fix, a model not found
+  or a quota exceeded, has the rollback write the error's code to the session
+  bead's `provider_terminal_error`;
+- a start that failed otherwise leaves a `startup-health-episode` bead keyed by
+  the session's name, whose kind and last detail say why it failed;
+- every other rollback records no cause, such as that of a create rolled back
+  before any start ran.
 
 The read goes from the session side, which the witness's release does not
 touch: every failed-create manual session whose alias names an open visit. A
 session spawned under the same alias after the failed one is the visit engaged
 again, and clears the mark whatever became of that session; a newer session
-that failed too is the visit's failure now. The reason reads `startup timeout`
-for a deadline, `setup timeout` for a deadline inside a `pre_start` command,
-`never started` for a create rolled back before any start ran (it leaves no
-episode), and `start error: <the recorded error>` otherwise.
+that failed too is the visit's failure now. The reason reads
+`provider error: <code>` for a provider error, `startup timeout` for a
+deadline, `setup timeout` for a deadline inside a `pre_start` command,
+`start error: <the recorded error>` for any other error the episode recorded,
+and `never started` when Gas City recorded no cause.
 
 | field | on the row |
 |---|---|
@@ -733,8 +739,8 @@ subject is its own conversation. Accept follows the visit's binding, the way
 stands and returns once the witness releases it.
 
 The read costs two queries over the city's session beads on every gather (about
-half a second on the live city), plus three small ones for each open visit with
-a failed start on record. A read that fails is noted partial and marks nothing
+half a second on the live city), plus up to three small ones for each open visit
+with a failed start on record. A read that fails is noted partial and marks nothing
 it could not establish. An episode read that fails after the failure is
 established marks the row `reason unread`. The supervisor backend gathers no
 sittings, so it shows no failed start either.

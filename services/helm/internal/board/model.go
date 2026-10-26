@@ -627,13 +627,16 @@ type Sitting struct {
 	// StartFailure says why the sitting last spawned for this visit failed to
 	// start. It is empty unless that sitting failed and no sitting has been
 	// spawned for the visit since. Gas City records a failed start in the city
-	// store: the rollback closes the session bead as failed-create, and a start
-	// that ran leaves a startup-health episode saying why it failed
-	// ([source.BeadsSource.markStartFailures] reads both). The words are
-	// "startup timeout", "setup timeout", "never started" for a create rolled
-	// back before any start ran, or the error the episode recorded. A derivation
-	// input that the tile carries as [Tile.VisitStartFailure], so it has no
-	// wire tag here.
+	// store: the rollback closes the session bead as failed-create, and the
+	// session bead or a startup-health episode says why the start failed, when
+	// anything does ([source.BeadsSource.markStartFailures] reads them). The
+	// words are "startup timeout", "setup timeout", "provider error: <code>"
+	// for a provider error a person must fix, "never started" when Gas City
+	// recorded no cause, as for a create rolled back before any start ran,
+	// "start error: <error>" for any other error the episode recorded, or
+	// "reason unread" when the record could not be read. A derivation input
+	// that the tile carries as [Tile.VisitStartFailure], so it has no wire tag
+	// here.
 	StartFailure string `json:"-"`
 
 	// OpenedAt is when the conversation STARTED — gc.claimed_at, falling back

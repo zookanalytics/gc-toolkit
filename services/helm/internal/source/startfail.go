@@ -18,10 +18,13 @@ import (
 // names the visit it was spawned for. Gas City stores the alias qualified, as
 // <rig>/<binding>.<alias>, and engage spawns under `v-<visit id>` when Gas City
 // refuses the bare id as an alias. When the reconciler cannot start the
-// session, its rollback closes the session bead with state=failed-create. A
-// start that ran also leaves a startup-health-episode bead, keyed by the
-// session's name, whose kind and last detail say why it failed. A create rolled
-// back before any start ran leaves no episode.
+// session, its rollback closes the session bead with state=failed-create. Where
+// the start failed on a provider error a person must fix, such as a model not
+// found or a quota exceeded, the rollback writes the error's code to the
+// session bead itself. Where it failed otherwise, the reconciler first leaves a
+// startup-health-episode bead, keyed by the session's name, whose kind and last
+// detail say why. Every other rollback records no cause, such as that of a
+// create rolled back before any start ran.
 //
 // Nothing of this is written on the visit, and the witness's release of the
 // visit's binding removes the only link the visit had to its session. So the
@@ -41,6 +44,10 @@ const (
 	stateFailed     = "failed-create"
 	originManual    = "manual"
 
+	// The code of a provider error a person must fix, which the rollback writes
+	// in the same write as the failed-create close.
+	mdProviderError = "provider_terminal_error"
+
 	// The startup-health episode keys. A start that hit a deadline records the
 	// kind "timeout"; the detail is the start's error.
 	mdEpisodeSession = "startup_health_session_name"
@@ -51,8 +58,9 @@ const (
 )
 
 // The reasons a sitting's start failed, as [board.Sitting.StartFailure] carries
-// them. Any other failure reads "start error" followed by the error the episode
-// recorded.
+// them. A provider error reads "provider error" followed by the code the
+// session recorded, and any other failure reads "start error" followed by the
+// error the episode recorded.
 const (
 	reasonStartupTimeout = "startup timeout"
 	reasonSetupTimeout   = "setup timeout"
@@ -60,8 +68,8 @@ const (
 	reasonUnread         = "reason unread"
 )
 
-// startErrorMax bounds the error carried in a "start error" reason. The episode
-// keeps up to 500 runes of it, and the reason leads a row's NEEDS.
+// startErrorMax bounds the error a reason carries. An episode keeps up to 500
+// runes of it, and the reason leads a row's NEEDS.
 const startErrorMax = 160
 
 // markStartFailures sets [board.Sitting.StartFailure] on every open sitting
@@ -112,7 +120,7 @@ func (s *BeadsSource) markStartFailures(ctx context.Context, st beadStore, r rig
 		if again {
 			continue
 		}
-		reason, err := startFailureReason(ctx, st, md[mdSessionName])
+		reason, err := startFailureReason(ctx, st, md)
 		if err != nil {
 			g.note(true, []string{"start-failure-reason@" + r.name + ": " + visit + ": " + err.Error()})
 			reason = reasonUnread
@@ -228,12 +236,18 @@ func spawnedSince(ctx context.Context, st beadStore, failed *beads.Issue, md map
 	return false, nil
 }
 
-// startFailureReason reads the startup-health episode Gas City keeps for the
-// failed session's name and says why its start failed. Gas City reads an
-// episode as the session's only while the episode bead is not closed, and so
-// does this. With no episode, or one counting no failure, the rollback came
+// startFailureReason says why the failed session's start failed, from the
+// failed session's metadata md. A provider error is on the session bead
+// itself. Otherwise the reason is in the startup-health episode Gas City keeps
+// for the session's name, which Gas City reads as the session's only while the
+// episode bead is not closed, and so does this. With no episode, or one
+// counting no failure, Gas City recorded no cause, as for a create rolled back
 // before any start ran.
-func startFailureReason(ctx context.Context, st beadStore, sessionName string) (string, error) {
+func startFailureReason(ctx context.Context, st beadStore, md map[string]string) (string, error) {
+	if code := oneLine(md[mdProviderError]); code != "" {
+		return "provider error: " + code, nil
+	}
+	sessionName := md[mdSessionName]
 	if sessionName == "" {
 		return reasonUnread, nil
 	}
@@ -255,11 +269,11 @@ func startFailureReason(ctx context.Context, st beadStore, sessionName string) (
 	if ep == nil {
 		return reasonNeverStarted, nil
 	}
-	md := decodeMetadata(ep.Metadata)
-	if n, err := strconv.Atoi(md[mdEpisodeCount]); err != nil || n < 1 {
+	epmd := decodeMetadata(ep.Metadata)
+	if n, err := strconv.Atoi(epmd[mdEpisodeCount]); err != nil || n < 1 {
 		return reasonNeverStarted, nil
 	}
-	return describeStartFailure(md[mdEpisodeKind], md[mdEpisodeDetail]), nil
+	return describeStartFailure(epmd[mdEpisodeKind], epmd[mdEpisodeDetail]), nil
 }
 
 // describeStartFailure names a failed start from its episode's kind and detail.
@@ -272,12 +286,18 @@ func describeStartFailure(kind, detail string) string {
 		}
 		return reasonStartupTimeout
 	}
-	detail = strings.Join(strings.Fields(detail), " ")
-	if detail == "" {
+	if detail = oneLine(detail); detail == "" {
 		return "start error"
 	}
-	if runes := []rune(detail); len(runes) > startErrorMax {
-		detail = string(runes[:startErrorMax]) + "…"
-	}
 	return "start error: " + detail
+}
+
+// oneLine is a recorded error as a reason carries it: on one line, and cut to
+// startErrorMax runes with the cut marked.
+func oneLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if runes := []rune(s); len(runes) > startErrorMax {
+		s = string(runes[:startErrorMax]) + "…"
+	}
+	return s
 }
