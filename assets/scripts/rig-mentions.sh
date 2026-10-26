@@ -45,6 +45,14 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 2; }
 
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
+# <<< control-char-scrub
+
 PACK_DEPENDENCIES="gascity gc-toolkit sprintshow"
 
 usage() {
