@@ -42,7 +42,7 @@
 #     Print the rig's guidance for <check>, the docs/review-<check>.md the commit
 #     carries, <check> folded to lowercase. A commit that carries none prints
 #     nothing and exits 0, the common case. The file exists only at a commit, so
-#     this always needs --at, whatever names the index.
+#     this always needs --at, even when GC_REVIEW_CHECKS_INDEX names the index.
 #
 #   review-checks.sh --edits --base <branch> --at <oid>
 #     Print the rig's guidance the change at <oid> edits, one path per line:
@@ -50,7 +50,12 @@
 #     from where it left <branch> on origin. A change that edits none prints
 #     nothing and exits 0. A rename counts at both of its paths, so a guidance
 #     file renamed away is an edit to it. A change exists only at a commit, so
-#     this always needs --at, whatever names the index.
+#     this always needs --at, even when GC_REVIEW_CHECKS_INDEX names the index.
+#
+# A call is one of these forms and takes only the flags its form names, in any
+# order. A second form's verb is a usage error, and so is a flag only another
+# form takes, such as --through on --show or --file on --extension: the call
+# would not read it, so it is refused rather than ignored.
 #
 # Phase ordering: pre-open < open-as-draft < ready-for-review < merge. A check
 # that reads only the diff is pre-open; one that needs the deployed preview is
@@ -82,7 +87,8 @@
 # readable commit cannot be read, the paths --edits lists cannot be listed,
 # --check names a check no layer declares or one whose phase is outside the
 # ordered set, a resolved check's phase is outside the ordered set, or (emit) no
-# index declares any check · 2 usage, a call that names no commit included.
+# index declares any check · 2 usage, a call that names no commit, or a flag its
+# form does not take, included.
 set -uo pipefail
 
 usage() { sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
@@ -91,7 +97,7 @@ warn() { echo "review-checks: $*" >&2; }
 HERE="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PACK_INDEX="$(CDPATH='' cd -- "$HERE/../.." && pwd)/review-checks.toml"
 
-MODE=""
+MODE=""; GIVEN=""
 FILE=""; ONLY_CHECK=""; CHECK_SET=""; THROUGH=""; AT=""; WITH_PHASE=""; EXT_CHECK=""; EDIT_BASE=""
 set_mode() { # <mode> — one mode per call
   if [ -n "$MODE" ] && [ "$MODE" != "$1" ]; then
@@ -99,7 +105,10 @@ set_mode() { # <mode> — one mode per call
   fi
   MODE="$1"
 }
+# Each pass of the loop starts at a flag, because a flag's value is shifted with
+# it, so GIVEN lists the flags the call named.
 while [ $# -gt 0 ]; do
+  GIVEN="$GIVEN $1"
   case "$1" in
     --resolve)     set_mode resolve; shift ;;
     --show)        set_mode show; shift ;;
@@ -117,6 +126,19 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$MODE" ] || MODE=show
+
+# The flags each form takes beside its verb. The loop above refused every flag
+# no form takes, so one not listed here is another form's.
+case "$MODE" in
+  resolve)   TAKES="--check-set --through --with-phase --at --file" ;;
+  show)      TAKES="--check --at --file" ;;
+  extension) TAKES="--at" ;;
+  edits)     TAKES="--base --at" ;;
+esac
+for flag in $GIVEN; do
+  case " --$MODE $TAKES " in *" $flag "*) continue ;; esac
+  echo "review-checks: --$MODE takes ${TAKES// /, }; $flag is another call's flag" >&2; usage >&2; exit 2
+done
 
 # A call names the commit it judges, unless an index is named outright. The
 # extension is a file only a commit carries, and the edits a change only a

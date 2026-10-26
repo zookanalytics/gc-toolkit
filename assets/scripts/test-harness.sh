@@ -1354,6 +1354,14 @@ case "$*" in
   # no repository under it and therefore no committed artifact to keep current.
   *"rev-parse --show-toplevel"*) printf '%s\n' "${STUB_TOPLEVEL:-}" ;;
   *"rev-parse --verify --quiet"*) printf '%s\n' "${STUB_FETCHED_HEAD:-}" ;;
+  # A rig's not-for-review.toml as its default branch carries it, served from
+  # the directory -C names: a test declares by writing the file there, and with
+  # no file there the branch carries none.
+  *"cat-file blob "*":not-for-review.toml"*)
+    dir=""; prev=""
+    for a in "$@"; do [ "$prev" = "-C" ] && dir="$a"; prev="$a"; done
+    [ -n "$dir" ] && [ -f "$dir/not-for-review.toml" ] || exit 128
+    exec cat "$dir/not-for-review.toml" ;;
   *"fetch "*) exit "${STUB_FETCH_RC:-0}" ;;
   *"ls-remote"*)
     # STUB_LS_REMOTE names a file of branch names, one per line, served in

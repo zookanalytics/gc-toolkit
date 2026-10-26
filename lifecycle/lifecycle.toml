@@ -305,12 +305,12 @@ comment_watermark_key = "pr_comment_watermark"
 review_watermark_key = "pr_review_watermark"
 issue_comment_watermark_key = "pr_issue_comment_watermark"
 # What the watermarks count is feedback: every review, inline comment and
-# conversation comment that is not the city's own post, whoever wrote it. The
-# city's own post carries the mark pr-post.sh appends, or is an unmarked post
-# under the city's login from before this instant (UTC, YYYY-MM-DDTHH:MM:SSZ),
-# when its posts did not yet carry one. pr-facts.sh stamps it the first time it
-# reads the open PR; absent or malformed, every post under the city's login is
-# the city's own.
+# conversation comment that is neither the city's own post nor marked as not for
+# review (docs/not-for-review.md), whoever wrote it. The city's own post carries
+# the mark pr-post.sh appends, or is an unmarked post under the city's login
+# from before this instant (UTC, YYYY-MM-DDTHH:MM:SSZ), when its posts did not
+# yet carry one. pr-facts.sh stamps it the first time it reads the open PR;
+# absent or malformed, every post under the city's login is the city's own.
 provenance_since_key = "pr_provenance_since"
 # What the outstanding comments were routed to: "rework:<bead-id>" (a fix-pool
 # child, whatever holds the anchor) or "visit:<bead-id>" (nowhere to route work:
@@ -904,7 +904,7 @@ keys = [
   "finding.pr_comment",
   # Set by the same write-back once a posted finding has closed and its comment
   # carries the answer: `1` when it was answered and its thread, if it has one,
-  # is resolved, carries a later post that is not the city's own, or stays open
+  # is resolved, carries a later post that is feedback, or stays open
   # for the operator because the finding was declined or deferred, and `gone`
   # when the comment had been removed from the PR and nothing was left to
   # answer. A finding carrying it costs the write-back no GitHub read.

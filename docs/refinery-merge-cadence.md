@@ -421,8 +421,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    any of those arms run, and routes unanswered review feedback — under a
    `commented` posture and equally under a human `changes_requested` — to a
    rework child or a visit. Feedback is every review, inline comment and
-   conversation comment that is not the city's own post
-   ([state-machine.md](state-machine.md#operator-feedback)), whoever wrote it.
+   conversation comment that is neither the city's own post nor marked as not
+   for review ([state-machine.md](state-machine.md#operator-feedback)), whoever
+   wrote it.
    The posture write is idempotent, so re-running it
    here after arm 1 costs nothing when nothing changed. The routing runs in two
    places by design: arm 4 picks the feedback up ahead of the slow arms, and this
@@ -565,8 +566,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    any other locus becomes a Conversation comment. Once the finding closes, the
    comment is answered with how it closed: the fix units and the commits they
    made, the deferral's follow-up, or the decline. A fixed finding's
-   thread is then resolved unless a post that is not the city's own has come
-   after it. A thread the identity cannot resolve leaves the finding owed its
+   thread is then resolved unless a post that is feedback has come after it.
+   A thread the identity cannot resolve leaves the finding owed its
    answer, as above. A declined or deferred finding's thread stays open for the
    operator to accept or overrule. A Conversation comment is edited to carry the
    answer. A finding that closed
