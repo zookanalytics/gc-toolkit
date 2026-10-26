@@ -1,6 +1,6 @@
 ---
 name: Gas City and human engagement (platform facts)
-description: What Gas City offers for engaging a person, and how a session and its pane end, where upstream's docs leave it unsaid — human gates and the core orders that surface them, where a question surfaces, the gc-roles worker contract, the idle ladder, max age, manual sessions, the stop, the no-wake-reason drain and the backstops — each cited and dated. gc-toolkit's own model on these is human-engagement.md.
+description: What Gas City offers for engaging a person, and how a session and its pane end, where upstream's docs leave it unsaid — human gates and the core orders that surface them, where a question surfaces, the gc-roles worker contract, the idle ladder, max age, manual sessions, the stop, the no-wake-reason drain, the backstops and the claim releases that keep a bead routed to `human` — each cited and dated. gc-toolkit's own model on these is human-engagement.md.
 ---
 
 # Gas City and human engagement
@@ -309,6 +309,27 @@ three backstops, and the city's fork has no `work_ladder` at all.
 (`cmd/gc/nudge_backstop.go`), `workLadder` (`cmd/gc/reconcile_steps_nudges.go`)
 and `cmd/gc/work_ladder_lane.go` (upstream only); read at upstream
 `1e05ae624` and the fork on 2026-10-19.
+
+### No release frees a claim routed to `human`
+
+Gas City gives an ended session's claims back on several paths: the
+retired-session sweep that `gc session close` runs, the close cascade, the
+stranded repair and the dead-assignee sweep. Each passes every claim through
+one route guard, and a claim whose `gc.routed_to` names no configured agent
+stays assigned, whichever of the session's identities its assignee spells.
+`human` is a session alias Gas City reserves, and no agent in this city carries
+that name, so a bead routed to `human` keeps its assignee after its holder has
+gone. A create that rolls back closes its session bead as `failed-create` and
+runs none of those releases.
+
+*Evidence:* `releaseRoute` and `releasePolicies` (`cmd/gc/work_release.go`),
+the route check in `releaseOrphanedPoolAssignments`
+(`cmd/gc/pool_session_name.go`), `unclaimWorkAssignedToRetiredSessionBeadVia`,
+`closeBeadPreservingAssignees` and `closeFailedCreateBead`
+(`cmd/gc/session_beads.go`), `rollbackPendingCreateClears`
+(`cmd/gc/session_lifecycle_parallel.go`) and `ValidateAlias`
+(`internal/session/names.go`); read at upstream `ba3ed611d` and the fork
+`cc0a776b1` on 2026-10-23.
 
 ## Refresh procedure
 

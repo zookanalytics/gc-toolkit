@@ -109,6 +109,12 @@ trap 'rm -rf "$TMP"' EXIT
 # pr-facts.sh records what it observes through lifecycle.sh, which execs gctk.
 harness_build_gctk
 harness_init
+# No check index and no repository: the script under test runs from a private
+# directory, so the suite names a missing index outright, and review-checks.sh
+# then resolves every check_set token as a lane gating every transition. The
+# lanes do not depend on the checkout, and a case that needs a real index names
+# one itself.
+export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 
 # The value@oid half of a dated key. pr_posture carries a third @<since>
 # component, stamped by lifecycle.sh under compare-and-preserve: an unmet
@@ -204,11 +210,10 @@ exit 1
 SUPS
 chmod +x "$SD/branch-supersession.sh"
 export STUB_SUPERSESSION_LOG="$TMP/supersession.log" STUB_SUPERSESSION_HOLD=""; : > "$STUB_SUPERSESSION_LOG"
-printf '#!/usr/bin/env bash\necho "METHOD${2:+ note: $2}"\n' > "$SD/review-dispatch-body.sh"
 # validate-dispatch-body.sh's real output is prose the validator reads; the test
 # only needs a non-empty note so the validation-pass open takes its body path.
 printf '#!/usr/bin/env bash\necho "VALIDATE-METHOD${2:+ note: $2}"\n' > "$SD/validate-dispatch-body.sh"
-chmod +x "$SD/escalate.sh" "$SD/review-dispatch-body.sh" "$SD/validate-dispatch-body.sh"
+chmod +x "$SD/escalate.sh" "$SD/validate-dispatch-body.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
 # patrol-finding.sh, one durable bead per situation key: the write-back files a
 # review thread it cannot resolve through it. Each call is logged one argument
@@ -903,7 +908,7 @@ echo "# the sweep's retract runs through the real escalate.sh and visit-close.sh
 # GC_RIG names the store, since no rig set is served here to derive it from.
 SD2="$TMP/scripts-real-escalate"
 mk_sut_dir "$SD2" "$HERE/pr-facts.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/visit-close.sh" "$HERE/finalize-gate.sh" "$HERE/escalate.sh"
-cp "$SD/bead-rehome.sh" "$SD/review-dispatch-body.sh" "$SD/validate-dispatch-body.sh" "$SD/lane-state.sh" "$SD2/"
+cp "$SD/bead-rehome.sh" "$SD/validate-dispatch-body.sh" "$SD/lane-state.sh" "$SD2/"
 : > "$STUB_DEPS"
 store "[$(anchor F2w 127 ',"gc.superseded_by":"tk-w"' | jq -c '.status = "closed"'), $(dvisit VW F2w pr-dispose-failed.127)]"
 printf 'VW|tracks|F2w\n' > "$STUB_DEPS"
@@ -1869,11 +1874,17 @@ store "[$(anchor D1 20)]"
 printf '%s' "$(prview 20 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "CHANGES_REQUESTED"' > "$GH_DIR/pr_view_20.json"
 printf '[{"id":901,"user":{"login":"gc-city-bot"},"state":"CHANGES_REQUESTED","commit_id":"sha-OLD","submitted_at":"2026-08-19T00:00:00Z"}]' > "$GH_DIR/reviews_20.json"
 : > "$STUB_GH_LOG"
+# The resolver logs the arguments it is asked with, then runs as itself.
+cp "$SD/review-checks.sh" "$TMP/review-checks.real"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexec "%s" "$@"\n' "$TMP/resolver.log" "$TMP/review-checks.real" > "$SD/review-checks.sh"
+chmod +x "$SD/review-checks.sh"; : > "$TMP/resolver.log"
 out=$(run)
+cp "$TMP/review-checks.real" "$SD/review-checks.sh"; chmod +x "$SD/review-checks.sh"
 has "$out" "dismissed our own superseded CHANGES_REQUESTED (review 901)" "the stale own block is dismissed"
 eq "$(meta D1 signoff_dismissed)" "901@sha-20" "signoff_dismissed recorded (and read back) first"
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/20/reviews/901/dismissals" "the dismissal hit the pinned endpoint"
 eq "$(grep -cxF 'green --anchor D1 --lane correctness' "$STUB_LANE_LOG")" "1" "…once its lane derived green, asked as merge.sh asks it, the GitHub approval included"
+has "$(cat "$TMP/resolver.log")" "--through merge --at sha-20" "…its lanes resolved at the PR head the arm read, as merge.sh resolves at the head it merges"
 
 echo "# …a lane that does not derive green keeps the block"
 store "[$(anchor D7 266)]"
@@ -3799,6 +3810,20 @@ printf '[{"id":8830,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_
 out=$(run)
 eq "$(meta vp-83 reviewed_oid)" "sha-OLD" "the in-flight pass keeps its head; the batch does not move the validator's pin"
 has "$(meta Vh pr_comment_disposition)" "rework:" "…and the batch still watermarks behind the open pass"
+
+echo "# a PR view that gives no head routes no batch, so no human-lane pass is opened unpinned"
+# The batch is read inside the posture derivation, which pins to a head or says
+# nothing. With no head nothing is routed: no pass opens that a ruling could not
+# resolve the anchor's lanes for, and the batch is not watermarked, so it
+# retries once a head reads.
+store "[$(anchor Vz 84)]"
+printf '%s' "$(prview 84 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED" | .headRefOid = ""' > "$GH_DIR/pr_view_84.json"
+echo '[]' > "$GH_DIR/reviews_84.json"
+printf '[{"id":8840,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_84.json"
+out=$(run)
+has "$out" "PR#84 live head unresolved; posture not recorded" "a PR view with no head records no posture"
+eq "$(jq '[.[] | select((.metadata.task_kind // "") == "validation") | select((.metadata.anchor_bead // "") == "Vz")] | length' "$STUB_STORE")" "0" "…opens no validation pass"
+eq "$(meta Vz pr_comment_disposition)" "<absent>" "…and leaves the batch unwatermarked, so it retries"
 
 echo "# a pass whose task_kind write half-lands is invisible to the validator path, so the shape gate holds it"
 # task_kind=validation is the key gate-ensure's open_validation_pass selects a

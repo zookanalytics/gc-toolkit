@@ -179,13 +179,16 @@ mk_sut_dir() { # <dir> <file>...
   # review-verdict.sh, the approval rule, review-dismissal.sh, what a dismissal
   # retires, review-answer.sh, what the living answer to a review shows,
   # hold-lib.sh, the one definition of a hold, which deferred-dispatch.sh
-  # sources, and priority-lib.sh, the priority function, whose reading of a PR's
-  # approval pr-facts.sh sources, are sourced by sibling path the same way.
+  # sources, priority-lib.sh, the priority function, whose reading of a PR's
+  # approval pr-facts.sh sources, and git-lib.sh, the one read of a branch's
+  # head on origin, which gate-ensure.sh and signoff.sh source, are sourced by
+  # sibling path the same way.
   [ -f "$here/review-verdict.sh" ] && cp "$here/review-verdict.sh" "$d/"
   [ -f "$here/review-dismissal.sh" ] && cp "$here/review-dismissal.sh" "$d/"
   [ -f "$here/review-answer.sh" ] && cp "$here/review-answer.sh" "$d/"
   [ -f "$here/hold-lib.sh" ] && cp "$here/hold-lib.sh" "$d/"
   [ -f "$here/priority-lib.sh" ] && cp "$here/priority-lib.sh" "$d/"
+  [ -f "$here/git-lib.sh" ] && cp "$here/git-lib.sh" "$d/"
   return 0
 }
 

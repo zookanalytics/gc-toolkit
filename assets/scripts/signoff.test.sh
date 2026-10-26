@@ -6,10 +6,17 @@
 # recorded on its review bead, the record a lane's green derives from, and binds
 # to no commit, so the reviewed oid reaches the artifact and the review bead and
 # nothing else, the anchor stores no lane state, and a head that moved under the
-# review refuses nothing. request-changes always files exactly one rework child — convergence
+# review refuses nothing. The commit a review's record pins is never moved or
+# cleared: a --reviewed-oid naming another commit is refused with nothing
+# written, and a commit a rewrite took off the branch closes the review
+# superseded with its pin in place. request-changes always files exactly one rework child — convergence
 # is judged by the validator, not counted here — and is idempotent on
 # source_review_bead, so a re-pool adopts the child it already filed rather than
-# minting a twin.
+# minting a twin. Triage's --add-gates is validated against the effective index
+# at the reviewed commit (the pack's checks with the commit's rows), each flag is
+# refused from every check of the pack's index but its owner, and a correctness
+# approve on a change to its own review guidance is refused until --needs-you
+# names the edit.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -75,17 +82,6 @@ case "${1:-}" in
         fi
       fi
     fi
-    # A read that stops working only AFTER the delete: keyed on the unset so the
-    # SUT's first read of the bead still resolves. Both modes answer the same ''
-    # through row_meta that a genuinely cleared key does.
-    mode=$(awk -v i="$2" '$1 == i {print $2}' "${STUB_SHOW_DEAD:-/dev/null}" 2>/dev/null)
-    if [ -n "$mode" ] && grep -qx "$2" "${STUB_UNSET_LOG:-/dev/null}" 2>/dev/null; then
-      case "$mode" in
-        garbage) printf 'not-json\n' ;;
-        *)       echo '{"error":"no issues found"}' ;;
-      esac
-      exit 0
-    fi
     out=$(bead_json "$2")
     if [ "$(printf '%s' "$out" | jq 'length')" = "0" ]; then
       echo '{"error":"no issues found"}'
@@ -94,6 +90,12 @@ case "${1:-}" in
     shift; id="$1"; shift
     if [ -n "${STUB_UPD_FAIL:-}" ] && grep -qx "$id" "$STUB_UPD_FAIL" 2>/dev/null; then
       echo "bd: denied (stub)" >&2; exit 1
+    fi
+    # STUB_CLOSE_DENY lists ids whose closing write is refused, nothing of it
+    # written, while every other write to them lands.
+    if [ -n "${STUB_CLOSE_DENY:-}" ] && grep -qx "$id" "$STUB_CLOSE_DENY" 2>/dev/null \
+       && grep -qx -- '--status=closed' < <(printf '%s\n' "$@"); then
+      echo "bd: close denied (stub)" >&2; exit 1
     fi
     # STUB_DROP_KEYS="id:key1,key2 id2:key" — apply the update but silently drop
     # the named keys, modelling a write that reported success and half-landed.
@@ -110,7 +112,6 @@ case "${1:-}" in
             'map(if .id == $id then .metadata[$k] = $v else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
           esac ;;
         --unset-metadata) shift
-          printf '%s\n' "$id" >> "${STUB_UNSET_LOG:-/dev/null}"
           # A concurrent writer re-stamping the key loses the delete without
           # failing the call: rc 0, key untouched. Denial is STUB_UPD_FAIL.
           # A line is "<id>" to lose every unset on that bead, or "<id> <key>"
@@ -306,13 +307,14 @@ exit 0
 STUB
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/git" <<'STUB'
-# resolve_index resolves the repo root with `git rev-parse --show-toplevel`,
-# then reads the check index at the reviewed commit with
-# `git -C <root> show <oid>:review-checks.toml`. Serve a non-empty root
-# (STUB_TOPLEVEL) so the SUT resolves it inside the sandbox the way production
-# resolves it inside the worktree, instead of falling back to an ambient
-# GC_RIG_ROOT the CI runner never sets. When STUB_INDEX names a file, serve it
-# as the index; otherwise fall through (exit 0, empty) so the SUT sees no index.
+# The resolver beside signoff.sh finds the repo root with
+# `git rev-parse --show-toplevel`, then reads the rig's index at the reviewed
+# commit with `git -C <root> show <oid>:review-checks.toml`, and lays it over the
+# pack's index of the tree under test. Serve a non-empty root (STUB_TOPLEVEL) so
+# it resolves inside the sandbox the way production resolves it inside the
+# worktree, instead of falling back to an ambient GC_RIG_ROOT the CI runner
+# never sets. When STUB_INDEX names a file, serve it as the commit's index;
+# otherwise fall through (exit 0, empty) so the commit carries none.
 _g=("$@"); [ "${_g[0]:-}" = "-C" ] && _g=("${_g[@]:2}")
 if [ "${_g[0]:-}" = "rev-parse" ] && [ "${_g[1]:-}" = "--show-toplevel" ]; then
   printf '%s\n' "${STUB_TOPLEVEL:-$PWD}"; exit 0
@@ -320,8 +322,49 @@ fi
 if [ "${_g[0]:-}" = "show" ] && [ -n "${STUB_INDEX:-}" ]; then
   case "${_g[1]:-}" in *:review-checks.toml) cat "$STUB_INDEX"; exit 0 ;; esac
 fi
-if [ "${1:-}" = "ls-remote" ]; then
-  [ -n "${STUB_LSREMOTE:-}" ] && printf '%s\trefs/heads/%s\n' "$STUB_LSREMOTE" "${3#refs/heads/}"
+# `rev-parse --verify -q <oid>^{commit}` expands an abbreviation STUB_EXPAND
+# names ("<abbrev>=<full>" lines), and fails on any other, as git fails on a
+# commit this checkout does not hold.
+if [ "${_g[0]:-}" = "rev-parse" ] && [ "${_g[1]:-}" = "--verify" ]; then
+  _want="${_g[${#_g[@]}-1]}"; _want="${_want%^\{commit\}}"
+  _full=$(printf '%s\n' "${STUB_EXPAND:-}" | awk -F= -v a="$_want" '$1 == a { print $2; exit }')
+  [ -n "$_full" ] || exit 1
+  printf '%s\n' "$_full"; exit 0
+fi
+# ls-remote matches its pattern against a ref's tail, so STUB_LSREMOTE_TAIL
+# serves a ref that ends in the branch's ref, sorted ahead of it as git sorts.
+if [ "${_g[0]:-}" = "ls-remote" ]; then
+  [ -n "${STUB_LSREMOTE_TAIL:-}" ] && printf '%s\trefs/heads/a/%s\n' "$STUB_LSREMOTE_TAIL" "${_g[2]:-}"
+  [ -n "${STUB_LSREMOTE:-}" ] && printf '%s\trefs/heads/%s\n' "$STUB_LSREMOTE" "${_g[2]#refs/heads/}"
+  exit 0
+fi
+# A reviewed commit this checkout has not fetched: `cat-file -e` on
+# STUB_UNFETCHED fails until a `fetch ... origin <that oid>` has asked origin for
+# it by id. Every fetch is logged to STUB_FETCH_LOG.
+if [ "${_g[0]:-}" = "fetch" ]; then
+  printf '%s\n' "${_g[*]}" >> "${STUB_FETCH_LOG:-/dev/null}"; exit 0
+fi
+if [ "${_g[0]:-}" = "cat-file" ] && [ -n "${STUB_UNFETCHED:-}" ]; then
+  case "${_g[2]:-}" in
+    "$STUB_UNFETCHED"*) grep -q -- " origin $STUB_UNFETCHED\$" "${STUB_FETCH_LOG:-/dev/null}" 2>/dev/null || exit 1 ;;
+  esac
+fi
+# The backstop's path list, which the resolver's --edits reads:
+# `-C <root> merge-base <base> <oid>` answers the fork point (STUB_FORK, set
+# empty for one that does not read), and `-C <root> diff --name-only` answers
+# STUB_DIFF_PATHS, one path per line. The path a rename left,
+# STUB_DIFF_RENAMED_FROM, is listed only beside --no-renames, as git lists it:
+# with rename detection on, the default, a renamed file is named by the path it
+# lands at alone.
+if [ "${_g[0]:-}" = "merge-base" ] && [ "${_g[1]:-}" != "--is-ancestor" ]; then
+  [ -n "${STUB_FORK-fork0}" ] && printf '%s\n' "${STUB_FORK-fork0}"
+  exit 0
+fi
+if [ "${_g[0]:-}" = "diff" ]; then
+  [ -n "${STUB_DIFF_PATHS:-}" ] && printf '%s\n' "$STUB_DIFF_PATHS"
+  case " ${_g[*]} " in
+    *" --no-renames "*) [ -n "${STUB_DIFF_RENAMED_FROM:-}" ] && printf '%s\n' "$STUB_DIFF_RENAMED_FROM" ;;
+  esac
   exit 0
 fi
 # merge-base --is-ancestor: 0 ancestor, 1 not, 128 a commit git cannot resolve.
@@ -359,7 +402,7 @@ mkdir -p "$TMP/qp-rig/.beads"
 printf '#!/usr/bin/env bash\nexec %q "$@" --db %q\n' "$HERE/queue-priority.sh" "$TMP/qp-rig/.beads" > "$BIN/queue-priority"
 chmod +x "$BIN/queue-priority"
 export GC_QUEUE_PRIORITY_TOOL="$BIN/queue-priority"
-# The git stub serves this as `rev-parse --show-toplevel`, giving resolve_index a
+# The git stub serves this as `rev-parse --show-toplevel`, giving the resolver a
 # repo root without leaning on an ambient GC_RIG_ROOT (unset on the CI runner).
 export STUB_TOPLEVEL="$TMP"
 # request-changes files findings and approve closes them through finding.sh;
@@ -368,11 +411,8 @@ export GC_FINDING_TOOL="$BIN/finding" STUB_FINDING_LOG="$TMP/finding.log"
 export STUB_STORE="$TMP/store.json" STUB_DEPS="$TMP/deps" STUB_GC_LOG="$TMP/gc.log"
 export STUB_GH_LOG="$TMP/gh.log" STUB_GH_BODY="$TMP/gh.body" STUB_CREATED="$TMP/created"
 export STUB_SEQ="$TMP/seq" STUB_UPD_FAIL="$TMP/updfail" STUB_GH_ALL="$TMP/gh.all"
-export STUB_UNSET_NOOP="$TMP/unsetnoop" STUB_UNSET_LOG="$TMP/unsetlog"
+export STUB_UNSET_NOOP="$TMP/unsetnoop" STUB_CLOSE_DENY="$TMP/closedeny"
 export STUB_DROP_NOTES="$TMP/dropnotes"
-# "<id> norows|garbage": gc bd show stops resolving that id once the id
-# has been unset, standing in for a read-back the store cannot answer.
-export STUB_SHOW_DEAD="$TMP/showdead"
 # "<id> <n> garbage|norows": gc bd show resolves that id for its first <n>
 # calls, then returns dead output — a fresh re-read that fails after an earlier
 # read of the same bead resolved. STUB_SHOW_CNT counts the shows of that id.
@@ -397,7 +437,7 @@ reset() { # $1 = anchor json, extra beads appended via $2
   printf '[%s,%s%s]' "$1" "$REVIEW" "${2:-}" > "$STUB_STORE"
   : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_GH_LOG"; : > "$STUB_GH_BODY"
   : > "$STUB_CREATED"; : > "$STUB_UPD_FAIL"; : > "$STUB_UNSET_NOOP"; printf '0' > "$STUB_SEQ"
-  : > "$STUB_UNSET_LOG"; : > "$STUB_SHOW_DEAD"; : > "$STUB_DROP_NOTES"
+  : > "$STUB_DROP_NOTES"; : > "$STUB_CLOSE_DENY"
   : > "$STUB_SHOW_DEAD_AFTER"; : > "$STUB_SHOW_CNT"
   : > "$STUB_FINDING_LOG"
 }
@@ -441,6 +481,10 @@ anchor_meta() { # <k=v>... — stamp the anchor before the run
     mv "$STUB_STORE.n" "$STUB_STORE"
   done
 }
+pin() { # <oid>: stand in for the reviewed_oid a dispatch pins on the review bead
+  jq -c --arg o "$1" 'map(if .id == "rv-1" then .metadata.reviewed_oid = $o else . end)' \
+    "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+}
 # A rework child of tk-anc as store JSON, and the blocks edge that hangs it on
 # the anchor. The idempotency guard finds an open child by the source_review_bead
 # it carries; the edge holds the merge and is what the work-order verify checks.
@@ -470,25 +514,52 @@ eq "$(meta rv-1 reviewed_oid)" "$OID_HEAD" "pre-open records reviewed_oid on the
 has "$(notes rv-1)" "tk-anc" "pre-open verdict notes carry the anchor link"
 backed "pre-open closes the review bead as the lane's backing"
 no_lane_key "…and stores no lane state on the anchor"
+# A ref whose tail is the branch's ref answers the same ls-remote, listed first.
+reset "$ANCHOR_PRE"
+out=$(STUB_LSREMOTE_TAIL="$OID_OLD" "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "pre-open approve beside a ref that ends in the branch's ref exits 0"
+eq "$(meta rv-1 reviewed_oid)" "$OID_HEAD" "…and records the head of the branch's own ref"
 
-echo "# --reviewed-oid override"
+echo "# --reviewed-oid names the commit of a review whose record pins none"
 reset "$ANCHOR_PR"
 "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_OVR1 >/dev/null 2>&1
-has "$(cat "$STUB_GH_BODY")" "$OID_OVR1" "the override names the commit in the artifact"
+has "$(cat "$STUB_GH_BODY")" "$OID_OVR1" "the flag names the commit in the artifact"
 
 echo "# a dispatch-pinned reviewed_oid wins over a moved live head"
-reset "$ANCHOR_PR"
-jq -c --arg o "$OID_PIN" 'map(if .id == "rv-1" then .metadata.reviewed_oid = $o else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+reset "$ANCHOR_PR"; pin "$OID_PIN"
 STUB_LSREMOTE="$OID_MOVED" "$SUT" --review-bead rv-1 --verdict approve >/dev/null 2>&1; rc=$?
 eq "$rc" 0 "pinned-oid approve exits 0"
 has "$(cat "$STUB_GH_BODY")" "$OID_PIN" "the artifact names the PINNED commit, not the moved live head"
 backed "…and the review backs the lane either way"
 
-echo "# …and the explicit --reviewed-oid flag still outranks the bead pin"
-reset "$ANCHOR_PR"
-jq -c --arg o "$OID_PIN" 'map(if .id == "rv-1" then .metadata.reviewed_oid = $o else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
-"$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_OVR2 >/dev/null 2>&1
-has "$(cat "$STUB_GH_BODY")" "$OID_OVR2" "the flag outranks the dispatch pin"
+echo "# a --reviewed-oid naming another commit than the pin is refused"
+# The record names the commit the dispatch read, and nothing moves it: a verdict
+# names that commit or is not recorded.
+reset "$ANCHOR_PR"; pin "$OID_PIN"
+out=$("$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_OVR2 2>&1); rc=$?
+eq "$rc" 1 "the flag cannot move the dispatch pin: exit 1"
+has "$out" "$OID_PIN" "…and the refusal names the commit the review was dispatched for"
+hasnt "$(cat "$STUB_GC_LOG")" "update" "…with nothing written"
+eq "$(meta rv-1 reviewed_oid)" "$OID_PIN" "…the pin left as the dispatch wrote it"
+eq "$(cat "$STUB_GH_BODY")" "" "…and nothing posted"
+reset "$ANCHOR_PR"; pin "$OID_PIN"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes --reviewed-oid "${OID_OVR2:0:12}" 2>&1); rc=$?
+eq "$rc" 1 "an abbreviation of another commit is refused too"
+eq "$(cat "$STUB_CREATED")" "" "…filing no rework child"
+
+echo "# …while the pin itself, abbreviated or in capitals, names the pinned commit"
+reset "$ANCHOR_PR"; pin "$OID_PIN"
+"$SUT" --review-bead rv-1 --verdict approve --reviewed-oid "${OID_PIN:0:12}" >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "an abbreviation of the pin is accepted"
+eq "$(meta rv-1 reviewed_oid)" "$OID_PIN" "…and the record keeps the whole pinned commit"
+has "$(cat "$STUB_GH_BODY")" "check.correctness @ $OID_PIN" "…which the artifact names"
+reset "$ANCHOR_PR"; pin "$OID_PIN"
+"$SUT" --review-bead rv-1 --verdict approve --reviewed-oid "$(printf '%s' "$OID_PIN" | tr 'a-f' 'A-F')" >/dev/null 2>&1; rc=$?
+eq "$rc" 0 "the pin in capitals is accepted"
+backed "…and the review backs the lane"
+reset "$ANCHOR_PR"; pin "$OID_PIN"
+"$SUT" --review-bead rv-1 --verdict approve --reviewed-oid "${OID_PIN:0:6}" >/dev/null 2>&1; rc=$?
+eq "$rc" 1 "six characters of the pin name too little to be taken for it"
 
 echo "# the oid is the artifact's audit trail, held to no length"
 reset "$ANCHOR_PR"
@@ -542,10 +613,6 @@ eq "$(head -1 "$STUB_GH_BODY")" "PM: approve. Nothing needs you." "a check named
 # and signoff_verdict=approve. Nothing here ever posts an APPROVED GitHub
 # review, so that bead is the only backing a city verdict leaves: an approve
 # closed without the record derives no green and cannot land.
-pin() { # <oid>: stand in for the reviewed_oid a dispatch pins on the review bead
-  jq -c --arg o "$1" 'map(if .id == "rv-1" then .metadata.reviewed_oid = $o else . end)' \
-    "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
-}
 
 echo "# post-open approve records the commit it judged"
 reset "$ANCHOR_PR"; pin "$OID_PIN"
@@ -559,10 +626,10 @@ reset "$ANCHOR_PR"
 eq "$(meta rv-1 reviewed_oid)" "$OID_HEAD" "the fallback head is written back, not left implicit"
 backed "…and the lane resolves against it"
 
-echo "# …and so does a --reviewed-oid the caller pinned over the dispatch"
-reset "$ANCHOR_PR"; pin "$OID_PIN"
+echo "# …and so does the --reviewed-oid of a review whose record pins no commit"
+reset "$ANCHOR_PR"
 "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid "$OID_OVR1" >/dev/null 2>&1
-eq "$(meta rv-1 reviewed_oid)" "$OID_OVR1" "the override replaces the pin with the commit actually judged"
+eq "$(meta rv-1 reviewed_oid)" "$OID_OVR1" "the commit the call names is recorded"
 backed "…and the lane resolves against it"
 
 echo "# request-changes records it too"
@@ -677,8 +744,8 @@ has "$(notes rv-1)" "Anchor: tk-anc — check.correctness @ $OID_HEAD" "the trai
 # from the branch's history is different: mol-review tested content nobody can
 # merge, so the verdict is refused rather than recorded, with no rework filed,
 # and the review bead closes superseded so gate-ensure pours a fresh review at
-# the live head. A probe that cannot answer (unknown) proceeds rather than
-# discard a review round that happened.
+# the live head. The pin stays as the dispatch wrote it. A probe that cannot
+# answer (unknown) proceeds rather than discard a review round that happened.
 
 echo "# a pin the branch no longer carries (gone) is refused, not recorded"
 reset "$ANCHOR_PR"; pin "$OID_PIN"
@@ -688,11 +755,27 @@ eq "$rc" 0 "the refusal is the completed action: exit 0"
 has "$out" "head moved" "…and says the head moved"
 has "$out" "superseded" "…and names the disposition"
 hasnt "$(cat "$STUB_GC_LOG")" "update tk-anc" "nothing is written to the anchor"
-eq "$(meta rv-1 reviewed_oid)" "<absent>" "the review bead's own dispatch pin is cleared"
+eq "$(meta rv-1 reviewed_oid)" "$OID_PIN" "the review bead keeps the commit its dispatch pinned"
+hasnt "$(cat "$STUB_GC_LOG")" "--unset-metadata reviewed_oid" "…which nothing clears"
 eq "$(status rv-1)" "closed" "the review bead is closed…"
 eq "$(meta rv-1 gc.outcome)" "superseded" "…as superseded, not recorded"
+has "$(notes rv-1)" "signoff refused a verdict at $OID_PIN" "…with a note naming the refused commit"
 eq "$(cat "$STUB_GH_BODY")" "" "no artifact is posted"
 hasnt "$(cat "$STUB_GH_LOG")" "pr review" "…and no PR comment goes out"
+
+echo "# a superseded close that does not read back exits 2, the pin still recorded"
+# The next claimant reviews the same departed commit once more and retries the
+# close, since only this refusal tests whether the commit is on the branch.
+reset "$ANCHOR_PR"; pin "$OID_PIN"
+printf 'rv-1\n' > "$STUB_CLOSE_DENY"
+out=$(STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" \
+  "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 2 "a close the store refused exits 2"
+has "$out" "did not read back" "…naming the close that did not land"
+eq "$(meta rv-1 reviewed_oid)" "$OID_PIN" "…with the dispatch pin still recorded"
+eq "$(meta rv-1 signoff_verdict)" "<absent>" "…and no verdict"
+eq "$(status rv-1)" "in_progress" "…and the review left open for the retry"
+eq "$(cat "$STUB_GH_BODY")" "" "…posting nothing"
 
 echo "# …and request-changes is refused on the same terms: no rework"
 reset "$ANCHOR_PR"; pin "$OID_PIN"
@@ -719,21 +802,31 @@ out=$(STUB_LSREMOTE="" "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
 eq "$rc" 0 "an unanswerable probe does not discard a review round that happened"
 backed "…and the review backs the lane"
 
-echo "# …but a caller's dead --reviewed-oid never clears a live dispatch pin"
-# The clear is the refusal's recovery path for the pin THIS verdict was bound
-# to. A caller who pinned somewhere else refuses on its own oid and leaves the
-# dispatch's record standing, so the re-claim still reads a live pin.
+echo "# …and a caller's dead --reviewed-oid is refused before the branch is asked"
+# A commit other than the pin is no verdict on this review, so it never reaches
+# the gone probe, and a live dispatch pin never closes superseded over it.
 reset "$ANCHOR_PR"; pin "$OID_LIVEPIN"
-STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" \
-  "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_DEAD >/dev/null 2>&1
-eq "$(meta rv-1 reviewed_oid)" "$OID_LIVEPIN" "the dispatch pin the caller overrode is left alone"
+out=$(STUB_PR_HEAD="$OID_LIVE" STUB_COMPARE_MB="$OID_BASE" \
+  "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid $OID_DEAD 2>&1); rc=$?
+eq "$rc" 1 "a dead commit the record does not pin is refused"
+hasnt "$out" "superseded" "…and closes nothing superseded"
+eq "$(status rv-1)" "in_progress" "…leaving the review open"
+eq "$(meta rv-1 reviewed_oid)" "$OID_LIVEPIN" "…with the dispatch pin as it was"
 
-echo "# an abbreviated pin is accepted: nothing compares it to a head length-wise"
+echo "# on a review with no pin, an abbreviated --reviewed-oid is taken in full"
+# The record and every reader at the commit take a full id, and the resolver
+# fetches an unfetched commit only by its full id.
+reset "$ANCHOR_PR"
+out=$(STUB_EXPAND="${OID_OVR1:0:9}=$OID_OVR1" "$SUT" --review-bead rv-1 --verdict approve --reviewed-oid "${OID_OVR1:0:9}" 2>&1); rc=$?
+eq "$rc" 0 "an abbreviation of a commit this checkout holds is accepted"
+eq "$(meta rv-1 reviewed_oid)" "$OID_OVR1" "…and recorded as the full id"
+has "$(cat "$STUB_GH_BODY")" "$OID_OVR1" "…which the artifact names"
+backed "…and the review backs the lane"
 reset "$ANCHOR_PR"
 out=$("$SUT" --review-bead rv-1 --verdict approve --reviewed-oid 8d7f0cf3c 2>&1); rc=$?
-eq "$rc" 0 "an abbreviated sha is no longer refused"
-backed "…and the review backs the lane"
-has "$(cat "$STUB_GH_BODY")" "8d7f0cf3c" "…with the artifact naming what it was given"
+eq "$rc" 1 "an abbreviation this checkout cannot expand, a commit it has not fetched, is refused"
+has "$out" "re-run naming the full commit id" "…asking for the full id"
+hasnt "$(cat "$STUB_GC_LOG")" "update" "…and nothing was written"
 
 echo "# a non-hex oid still names no commit, and is refused"
 reset "$ANCHOR_PR"
@@ -1295,18 +1388,35 @@ eq "$rc" 0 "re-adding an already-declared check exits 0"
 eq "$(meta tk-anc check_set)" "correctness,triage" "check_set is unchanged when the check is already declared"
 hasnt "$(notes tk-anc)" "triage-add: triage @" "no triage-add note for a check already present"
 
-echo "# no readable index widens NOTHING — triage adds no check, correctness carries it"
-# The reviewed commit carries no review-checks.toml (STUB_INDEX unset), so there is
-# no declared menu to classify over. A widening would name an undeclared method, so
-# --add-gates is a no-op: the verdict still records, the forced baseline is intact,
-# and no triage-add note is written.
+echo "# a commit that carries no index of its own widens by the pack's checks"
+# The reviewed commit carries no review-checks.toml (STUB_INDEX unset), so its
+# effective index is the pack's, and every check the pack ships is on the menu.
 reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
 out=$("$SUT" --review-bead rv-tri --verdict approve --add-gates demo 2>&1); rc=$?
-eq "$rc" 0 "a triage approve with no index still records its verdict"
-eq "$(meta tk-anc check_set)" "correctness,triage" "no index means no widening — the forced baseline is unchanged"
-hasnt "$(meta tk-anc check_set)" "demo" "the undeclared check never reaches check_set"
-hasnt "$(notes tk-anc)" "triage-add: demo @" "no triage-add note is written when the widening is refused"
-has "$out" "widens nothing" "the no-op names the no-index rule"
+eq "$rc" 0 "a triage approve at a commit with no index records its verdict"
+has "$(meta tk-anc check_set)" "demo" "…and the pack's demo check reaches check_set"
+has "$(notes tk-anc)" "triage-add: demo @" "…recorded as a triage-add note"
+
+echo "# a pack check the commit's own index leaves out is still on the menu"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
+out=$(STUB_INDEX="$IDX" "$SUT" --review-bead rv-tri --verdict approve --add-gates arch 2>&1); rc=$?
+eq "$rc" 0 "adding arch, which the commit's index does not declare, exits 0"
+has "$(meta tk-anc check_set)" "arch" "…and arch reaches check_set from the pack's layer"
+
+echo "# every check the effective index declares but triage is refused --add-gates"
+# The pack's index of the tree under test, iterated: the owner of the widening is
+# the one check signoff.sh names for it, whatever the index declares.
+PACK_CHECKS=$("$HERE/review-checks.sh" --file "$HERE/../../review-checks.toml" 2>/dev/null | cut -f1)
+[ -n "$PACK_CHECKS" ] && ok "the pack's index lists its checks" || bad "the pack's index lists no checks"
+for c in $PACK_CHECKS; do
+  [ "$c" = triage ] && continue
+  rv=$(printf '%s' "$TRI" | sed "s/\"id\":\"rv-tri\"/\"id\":\"rv-$c\"/; s/\"check_name\":\"triage\"/\"check_name\":\"$c\"/")
+  reset "$ANCHOR_PR" ",$rv"; anchor_meta "check_set=correctness,triage"
+  out=$("$SUT" --review-bead "rv-$c" --verdict approve --add-gates triage 2>&1); rc=$?
+  eq "$rc" 1 "the $c check's approve may not widen"
+  has "$out" "only the 'triage' check may widen" "…the refusal names the widen rule ($c)"
+  eq "$(meta tk-anc check_set)" "correctness,triage" "…and nothing is written ($c)"
+done
 
 echo "# only a triage approve may widen"
 reset "$ANCHOR_PR"
@@ -1487,8 +1597,21 @@ has "$(meta tk-anc check_set)" "demo" "the declared check reaches check_set"
 reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
 out=$(STUB_INDEX="$IDX" "$SUT" --review-bead rv-tri --verdict approve --add-gates nonesuch 2>&1); rc=$?
 eq "$rc" 1 "a check the index does not declare is refused"
-has "$out" "not on the index" "the refusal names the closed index"
+has "$out" "not on the effective index" "the refusal names the closed index"
 hasnt "$(meta tk-anc check_set)" "nonesuch" "the undeclared check never reaches check_set"
+
+echo "# a widening at an abbreviated commit is checked at that commit's full id"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
+out=$(STUB_INDEX="$IDX" STUB_EXPAND="${OID_OVR1:0:9}=$OID_OVR1" "$SUT" --review-bead rv-tri --verdict approve --add-gates demo --reviewed-oid "${OID_OVR1:0:9}" 2>&1); rc=$?
+eq "$rc" 0 "a triage review with no pin widens at an abbreviation this checkout expands"
+has "$(meta tk-anc check_set)" "demo" "…the check reaching check_set"
+has "$(notes tk-anc)" "triage-add: demo @$OID_OVR1" "…and its note naming the full id"
+reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
+out=$(STUB_INDEX="$IDX" "$SUT" --review-bead rv-tri --verdict approve --add-gates demo --reviewed-oid "${OID_OVR1:0:9}" 2>&1); rc=$?
+eq "$rc" 1 "an abbreviation of a commit this checkout has not fetched is refused"
+hasnt "$out" "not on the effective index" "…for its commit, not as a check the index lacks"
+has "$out" "re-run naming the full commit id" "…asking for the full id"
+hasnt "$(meta tk-anc check_set)" "demo" "…and widening nothing"
 
 echo "# the widening is read back: a write that does not land leaves the review OPEN"
 reset "$ANCHOR_PR" ",$TRI"; anchor_meta "check_set=correctness,triage"
@@ -1672,6 +1795,72 @@ has "$out" "visual decision did not read back" "the failure names the read-back"
 eq "$(cat "$STUB_GH_BODY")" "" "nothing is posted"
 eq "$(meta rv-demo signoff_verdict)" "<absent>" "no verdict is recorded"
 eq "$(status rv-demo)" "in_progress" "the review bead stays open for a retry"
+
+echo "# every check the effective index declares but demo is refused --visual"
+for c in $PACK_CHECKS; do
+  [ "$c" = demo ] && continue
+  rv=$(printf '%s' "$REVIEW" | sed "s/\"id\":\"rv-1\"/\"id\":\"rv-v$c\"/; s/\"check_name\":\"correctness\"/\"check_name\":\"$c\"/")
+  reset "$ANCHOR_PR" ",$rv"
+  out=$("$SUT" --review-bead "rv-v$c" --verdict approve --visual none 2>&1); rc=$?
+  eq "$rc" 1 "the $c check's verdict carrying --visual is refused"
+  has "$out" "only the 'demo' check records a visual decision" "…the refusal names the owning check ($c)"
+  eq "$(meta "rv-v$c" visual)" "<absent>" "…and nothing is stamped ($c)"
+done
+
+echo "# a correctness approve on a change to its own review guidance names the edit"
+# The rig's guidance is read at the commit under review, so a branch that edits
+# review-checks.toml or a docs/review-*.md is reviewed under its own edit. The
+# approve is refused, with nothing written, until --needs-you names that edit
+# for the person who approves the merge.
+reset "$ANCHOR_PR"
+out=$(STUB_DIFF_PATHS=$'lib/x.sh\nreview-checks.toml\ndocs/review-correctness.md\ndocs/sub/review-x.md' "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 1 "a correctness approve on a guidance edit with no --needs-you is refused"
+has "$out" "edits its own review guidance (review-checks.toml docs/review-correctness.md)" "…naming the guidance files among the paths it touches"
+hasnt "$out" "docs/sub/review-x.md" "…and no file outside the guidance it names"
+has "$out" "re-run with --needs-you" "…and the flag that records it"
+eq "$(cat "$STUB_GH_BODY")" "" "…posting nothing"
+eq "$(status rv-1)" "in_progress" "…and leaving the review open"
+eq "$(meta rv-1 signoff_verdict)" "<absent>" "…with no verdict recorded"
+# A guidance file renamed away is an edit to the guidance, though rename
+# detection would name only the path it lands at.
+reset "$ANCHOR_PR"
+out=$(STUB_DIFF_PATHS=$'specs/x/old-correctness-guidance.md' STUB_DIFF_RENAMED_FROM=$'docs/review-correctness.md' "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 1 "a correctness approve on a change that renames a guidance file away is refused"
+has "$out" "edits its own review guidance (docs/review-correctness.md)" "…naming the path the rename left"
+# A head pushed after this checkout last fetched is in no repository here until
+# it is fetched by id, as the resolver fetches any commit it reads, so the edit
+# is still named rather than left unchecked.
+reset "$ANCHOR_PR"; : > "$TMP/fetch.log"
+out=$(STUB_UNFETCHED="$OID_HEAD" STUB_FETCH_LOG="$TMP/fetch.log" STUB_DIFF_PATHS=$'review-checks.toml' "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 1 "a correctness approve on a guidance edit at a head this checkout has not fetched is refused"
+has "$out" "edits its own review guidance (review-checks.toml)" "…naming the edit"
+has "$(cat "$TMP/fetch.log")" "origin $OID_HEAD" "…having fetched the reviewed commit by id"
+reset "$ANCHOR_PR"
+out=$(STUB_DIFF_PATHS=$'docs/review-demo.md' "$SUT" --review-bead rv-1 --verdict approve --needs-you "this change adds demo guidance, which its own demo review ran under" 2>&1); rc=$?
+eq "$rc" 0 "the same approve with --needs-you records"
+eq "$(head -1 "$STUB_GH_BODY")" "Correctness: approve. Needs you: this change adds demo guidance, which its own demo review ran under." "…its opening line naming the edit"
+reset "$ANCHOR_PR"
+out=$(STUB_DIFF_PATHS=$'lib/x.sh\ndocs/architecture.md' "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "a change that touches neither file records with no --needs-you"
+eq "$(head -1 "$STUB_GH_BODY")" "Correctness: approve. Nothing needs you." "…and nothing needs the operator"
+reset "$ANCHOR_PR"
+out=$(STUB_DIFF_PATHS=$'review-checks.toml' "$SUT" --review-bead rv-1 --verdict request-changes 2>&1); rc=$?
+eq "$rc" 0 "a correctness request-changes on a guidance edit records"
+for c in $PACK_CHECKS; do
+  [ "$c" = correctness ] && continue
+  rv=$(printf '%s' "$REVIEW" | sed "s/\"id\":\"rv-1\"/\"id\":\"rv-g$c\"/; s/\"check_name\":\"correctness\"/\"check_name\":\"$c\"/")
+  reset "$ANCHOR_PR" ",$rv"
+  extra=(); [ "$c" = demo ] && extra=(--visual none)
+  out=$(STUB_DIFF_PATHS=$'review-checks.toml' "$SUT" --review-bead "rv-g$c" --verdict approve ${extra[@]+"${extra[@]}"} 2>&1); rc=$?
+  eq "$rc" 0 "the $c check's approve on a guidance edit is not held by the backstop"
+done
+# Paths that cannot be listed leave the edit unchecked, and the opening line says
+# so, rather than hold a review that can never answer.
+reset "$ANCHOR_PR"
+out=$(STUB_FORK="" STUB_DIFF_PATHS=$'review-checks.toml' "$SUT" --review-bead rv-1 --verdict approve 2>&1); rc=$?
+eq "$rc" 0 "a correctness approve whose paths cannot be listed records"
+has "$(head -1 "$STUB_GH_BODY")" "Correctness: approve. Needs you: signoff could not list the paths this change touches" "…its opening line saying the guidance went unchecked"
+has "$(head -1 "$STUB_GH_BODY")" "read its diff for such an edit before you approve the merge." "…and what the approver does instead"
 
 echo "# metadata-key drift against lifecycle.toml"
 # A metadata key is state, and the registry is the exhaustive declaration

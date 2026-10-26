@@ -202,9 +202,10 @@ recorded onto the integration branch, and no hold or branch vetoes.
 check names. `none` and `off` are sentinels that declare no check at all (`none`
 is the spelling the rest of this pack uses). `approval` is a third name a
 check_set may carry, but it is a universal merge rule, not a check (below). The
-one resolver, `review-checks.sh --resolve --check-set <cs> --through <phase>`,
-drops all three and returns the checks whose phase gates `<phase>`, so no reader
-re-derives that drop: `gate-ensure.sh`, `pr-open.sh`, `merge.sh`, `pr-facts.sh`,
+one resolver, `review-checks.sh --resolve --check-set <cs> --through <phase> --at <oid>`,
+reads the check index at the commit the reader judges, drops all three and
+returns the checks whose phase gates `<phase>`, so no reader re-derives that
+drop: `gate-ensure.sh`, `pr-open.sh`, `merge.sh`, `pr-facts.sh`,
 `review-outcome.sh`, `liveness-sweep.sh` and `bring-current-guard.sh` all ask it
 rather than tokenizing `check_set` themselves.
 
@@ -233,11 +234,13 @@ merges once every check, of every phase, derives green. An empty `check_set` is
 not the opt-out at any transition: it means never normalized, and gate-ensure
 stamps the default earlier in the same pass. A `check_set` whose checks are all
 `pre-open` (gc-toolkit today) opens its PR ready at once — the draft stage
-appears only when a check names a later phase. A name the index does not
-declare takes `pre-open`, and so does every name in a repo that keeps no index,
-so it gates every transition. A declared phase outside the four is an index
-error: every transition whose check_set names that check holds until the index
-is fixed.
+appears only when a check names a later phase. The index is the pack's
+`review-checks.toml`, which declares every check the pack ships, with the rows
+of the rig's own `review-checks.toml` at the commit being judged laid over it, so
+a rig that keeps none has the pack's checks. A name no layer declares takes
+`pre-open`, so it gates every transition. A declared phase outside the four is
+an index error: every transition whose check_set names that check holds until
+the index is fixed.
 
 Each check is a **lane**. A lane's state is derived from the anchor's beads and
 never stored on the anchor, and it is a state of the lane, never a claim about a
@@ -367,23 +370,27 @@ the PR therefore always matches what is still owed.
 The review bead carries the `mol-review` formula (attached at dispatch via
 `gc sling --on`); the reviewing polecat follows its steps. The dispatch pins
 `reviewed_oid=<live head>` on the review bead, naming the commit the reviewer
-read — it binds no lane state, and a push that only adds commits on top (the
-branch growing) leaves the pin `on` the branch and is not this check's
-business. What the pin still guards against is a rewrite: `signoff.sh` asks
+read, and nothing moves or clears it afterwards: `signoff.sh` refuses a
+verdict that names another commit. The pin binds no lane state, and a push
+that only adds commits on top (the branch growing) leaves the pin `on` the
+branch and is not this check's business. What the pin still guards against is
+a rewrite: `signoff.sh` asks
 whether `reviewed_oid` is still an ancestor of the live head
 (`git merge-base --is-ancestor`, with a GitHub compare consulted first when a
 PR is open); a rebase, amend, or force-push that takes the pinned commit off
 the branch answers `gone`, and **both verdicts are refused** — findings about
 a diff the branch no longer carries would mint a rework child with nothing to
 implement. The refusal is not a dead end an operator must clear by hand: it
-clears the dead `reviewed_oid` pin itself, then closes the review bead
-`gc.outcome=superseded`, so gate-ensure's in-flight probe stops seeing it and
-pours a fresh review at the live head on its next pass. No verdict is
-recorded either way.
+closes the review bead `gc.outcome=superseded` with its pin in place, so
+gate-ensure's in-flight probe stops seeing it and pours a fresh review at the
+live head on its next pass. No verdict is recorded either way. A close the
+store does not take exits 2, and the next claimant reviews the same departed
+commit once more before its verdict meets the same refusal.
 
-Whichever source wins, `signoff.sh` writes that commit back to the review bead
-as `reviewed_oid` before it posts anything, on both verdicts and whether or
-not the PR is open. The lane state itself names no commit, so that record is
+`signoff.sh` writes the commit the verdict names back to the review bead as
+`reviewed_oid` before it posts anything, on both verdicts and whether or not
+the PR is open: the pin, or on a review whose record carries none, the commit
+the call names or else the live head. The lane state itself names no commit, so that record is
 the whole of what a city verdict leaves behind: the city posts no APPROVED
 GitHub review, and `lane-state.sh` derives a lane's green only against a
 review bead carrying it. A store that will not take the record costs a
@@ -753,6 +760,11 @@ review's result set.
   cascades down parent-child edges, while a poured workflow's root has no
   parent, so a hold on the epic leaves the rebuild running. The bead rests
   `poured`, and the polecat running the pour starts from the recorded reason.
+  The rejection never pours a convoy, such as a graduation's anchor, because a
+  run poured onto a convoy works on the beads it tracks. A convoy's rebuild is
+  poured onto its rebuild child instead, an ordinary task that carries the
+  reason, resumes the convoy's branch and blocks it, and merge-push anchors the
+  convoy once the child's work lands on the branch.
 - **Rework** (review verdict): `signoff.sh --verdict request-changes` files
   and slings exactly one rework child through `rework-child.sh`, with the
   reviewer's findings and the lane's validation pass beside it. The validator

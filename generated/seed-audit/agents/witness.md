@@ -104,8 +104,9 @@ the current wisp.
   roots (`gc.kind` workflow/scope/spec — not recoverable work; their steps carry
   the work and the control-dispatcher's `workflow-finalize` closes the root), and
   beads owned by configured named identities are not orphans. A visit whose
-  session died DOES return to the pool — respawn-and-reconstitute is the designed
-  path.
+  sitting is gone is recovered too: its release keeps the route, so the visit
+  parks on the board again, and the sitting the operator engages next
+  reconstitutes the conversation from the record.
 
 ## Findings
 

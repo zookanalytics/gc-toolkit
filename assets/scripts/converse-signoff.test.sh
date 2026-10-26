@@ -784,7 +784,11 @@ run_claim() {
     : > "$CTMP/updates"
     : > "$CTMP/closes"
     CRC=0
-    COUT=$(env PATH="$CTMP/bin:$PATH" FAKE_CLAIM="$CTMP/claim.json" \
+    # The sitting is converse-1, the holder the HELD fixtures name, recorded
+    # under its alias as gc hook records a converse claim. No other identity
+    # from the shell running this suite reaches it.
+    COUT=$(env -u GC_SESSION_ID -u GC_SESSION_NAME -u GC_AGENT GC_ALIAS=converse-1 \
+               PATH="$CTMP/bin:$PATH" FAKE_CLAIM="$CTMP/claim.json" \
                FAKE_UPDATES="$CTMP/updates" FAKE_SHOW="$CTMP/show.json" \
                FAKE_SHOW_DIR="$CTMP/show.d" FAKE_CLOSES="$CTMP/closes" \
                FAKE_CLOSE_REFUSE="$CLOSE_REFUSE" \
@@ -872,25 +876,20 @@ grep -q -- '--assignee=' <<< "$CUPD" \
   && ok "(FOREIGN) …and unassigned, so the pool can offer it again" \
   || bad "(FOREIGN) the assignee was never cleared: $CUPD"
 
-# (SPLIT) bd's claim guard refuses --assignee "" on an in_progress bead and
-# rolls the WHOLE update back, so batching the clears loses the ones that
-# needed no claim. One call doing both is the shape that fails.
-if grep -qE -- '--status=open.*--assignee=|--assignee=.*--status=open' <<< "$CUPD"; then
-    bad "(SPLIT) the release is split into separate writes" \
-        "status and assignee ride one update — the claim guard rolls both back"
+# (ONE) the release is ONE write, through hand-back.sh: the turn reopened, its
+# assignee cleared and both session pointers removed together, guarded on the
+# status and assignee it showed. A release split into parts can stop half-way:
+# a store that takes the clear and fails the reopen leaves the turn in_progress
+# with no assignee, which no pool serves, and pointers removed ahead of the
+# reopen leave a held turn that no longer names its session. The guard on the
+# assignee is what lets bd take the clear from one write on an in_progress
+# bead, since bd skips its reassign fence for a write guarded on the assignee.
+ONE='update tk-foreign --if-status=open --if-assignee= --status=open --assignee= --unset-metadata gc.session_id --unset-metadata gc.session_name'
+if [ "$(grep -c -- 'update tk-foreign ' <<< "$CUPD")" = "1" ] && grep -qF -- "$ONE" <<< "$CUPD"; then
+    ok "(ONE) the release is one guarded write that reopens, unassigns and drops the session pointers together"
 else
-    ok "(SPLIT) the release is split into separate writes"
-fi
-
-# (ORDER) the session pointers must be gone BEFORE the bead becomes offerable,
-# or the pool offers a turn that still names a dead session.
-sess_ln=$(grep -n -- '--unset-metadata gc.session_id' <<< "$CUPD" | head -1 | cut -d: -f1)
-asg_ln=$(grep -n -- '--assignee=' <<< "$CUPD" | head -1 | cut -d: -f1)
-if [ -n "$sess_ln" ] && [ -n "$asg_ln" ] && [ "$sess_ln" -lt "$asg_ln" ]; then
-    ok "(ORDER) the session pointers are cleared before the turn is offerable"
-else
-    bad "(ORDER) the session pointers are cleared before the turn is offerable" \
-        "unset=${sess_ln:-none} assignee=${asg_ln:-none} in: $CUPD"
+    bad "(ONE) the release is one guarded write that reopens, unassigns and drops the session pointers together" \
+        "want exactly one tk-foreign update carrying '$ONE' in: $CUPD"
 fi
 
 # (NOROUTE) gc.routed_to is the pool's offer predicate. Clearing it would PARK
@@ -929,33 +928,20 @@ eq "$COUT" "action=drain reason=out-of-group bead=tk-foreign group=tk-other" \
    "(VACUUM) the named turn still decides the verdict"
 eq "$CRC" "1" "(VACUUM) …and the session is told to drain"
 for vb in tk-foreign tk-sib1 tk-sib2; do
-    if grep -q -- "update $vb --unset-metadata gc.session_id" <<< "$CUPD" \
-       && grep -q -- "update $vb --status=open" <<< "$CUPD" \
-       && grep -q -- "update $vb --assignee=" <<< "$CUPD"; then
+    if grep -qF -- "update $vb --if-status=open --if-assignee= --status=open --assignee= --unset-metadata gc.session_id --unset-metadata gc.session_name" <<< "$CUPD"; then
         ok "(VACUUM) $vb is put back before the drain"
     else
         bad "(VACUUM) $vb is put back before the drain" "not fully released in: $CUPD"
     fi
 done
 
-# (VACUUM-ORDER) the ordered writes are PER TURN, not just for the first one:
-# a sibling made offerable while it still names a dead session is the same
-# failure the (ORDER) case pins for the named turn.
-v_sess=$(grep -n -- 'update tk-sib2 --unset-metadata gc.session_id' <<< "$CUPD" | head -1 | cut -d: -f1)
-v_asg=$(grep -n -- 'update tk-sib2 --assignee=' <<< "$CUPD" | head -1 | cut -d: -f1)
-if [ -n "$v_sess" ] && [ -n "$v_asg" ] && [ "$v_sess" -lt "$v_asg" ]; then
-    ok "(VACUUM-ORDER) a sibling's session pointers are cleared before it is offerable"
+# (VACUUM-ONE) the one-write release is PER TURN, not just for the first one: a
+# sibling released in parts can stop half-way the same way the (ONE) case rules
+# out for the named turn.
+if [ "$(grep -c -- 'update tk-sib1 ' <<< "$CUPD")|$(grep -c -- 'update tk-sib2 ' <<< "$CUPD")" = "1|1" ]; then
+    ok "(VACUUM-ONE) each sibling is released in one write of its own"
 else
-    bad "(VACUUM-ORDER) a sibling's session pointers are cleared before it is offerable" \
-        "unset=${v_sess:-none} assignee=${v_asg:-none} in: $CUPD"
-fi
-
-# (VACUUM-SPLIT) the split that the claim guard forces applies to siblings too.
-if grep -qE -- 'update tk-sib1 .*(--status=open.*--assignee=|--assignee=.*--status=open)' <<< "$CUPD"; then
-    bad "(VACUUM-SPLIT) a sibling's release is split into separate writes" \
-        "status and assignee ride one update — the claim guard rolls both back"
-else
-    ok "(VACUUM-SPLIT) a sibling's release is split into separate writes"
+    bad "(VACUUM-ONE) each sibling is released in one write of its own" "in: $CUPD"
 fi
 
 # (VACUUM-NOROUTE) parking a sibling is as bad as parking the named turn.

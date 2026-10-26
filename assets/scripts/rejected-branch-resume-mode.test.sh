@@ -163,6 +163,9 @@ printf 'cancel %s\n' "$*" >> "$CALLS"
 SH
 chmod +x "$PACK/assets/scripts/bring-current-audit.sh" "$PACK/assets/scripts/await-ruling.sh" \
   "$PACK/assets/scripts/run-cancel.sh"
+# hand-back.sh is the pack's own script, run for real. A bead with no molecule
+# parks through it, and the stub applies its metadata edits.
+cp "$HERE/hand-back.sh" "$PACK/assets/scripts/hand-back.sh"; chmod +x "$PACK/assets/scripts/hand-back.sh"
 
 # --- Histories. -----------------------------------------------------------------
 # A bare origin whose main holds the merge base. polecat/w1 adds a file of its
@@ -363,9 +366,11 @@ eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "" "(13) git refuses to start a 
 eq "$(meta rejection_reason)" "$CONFLICTS" "(13) …and the rejection stays"
 
 echo "# a stop to ask a person leaves the rejection, so the next run merges again"
+# The bead is held in_progress under polecat, the session the stop runs as, so a
+# bead with no molecule is this session's to hand back.
 for how in molecule bare; do
   clone polecat/w2
-  run_block "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: $r, anchor_bead: "tk-a"}')")"
+  run_block "$(bead polecat/w2 "$(jq -nc --arg r "$CONFLICTS" '{rejection_reason: $r, anchor_bead: "tk-a"}')" | jq -c 'map(.status = "in_progress" | .assignee = "polecat")')"
   set_meta conflict_audit '[{"path":"resolved-before-the-stop.txt"}]'
   if [ "$how" = molecule ]; then
     again "$TMP/bring-current-unresolvable.sh" CLAIMED_STEP_BEAD_ID=tk-step
@@ -375,7 +380,7 @@ for how in molecule bare; do
     grep -q '^cancel .*--bead tk-step ' "$CALLS" && ok "(14) molecule: …and its run is cancelled" \
       || bad "(14) molecule: …and its run is cancelled"
   else
-    again "$TMP/bring-current-unresolvable.sh"
+    again "$TMP/bring-current-unresolvable.sh" GC_SESSION_ID=polecat GC_SESSION_NAME= GC_AGENT= GC_ALIAS=
     eq "$(meta gc.routed_to)" "human" "(14) bare: the bead parks to a person"
   fi
   eq "$RC" "0" "(14) $how: the stop-and-ask block exits 0"

@@ -1,0 +1,312 @@
+---
+name: Gas City search for the review path's resolver modes and record keys
+description: The search the arch check asks for before the pack adds surface of its own. What Gas City, the packs it publishes and bd ship for a rig's list of review checks, a rig's guidance for one check read at the reviewed commit, the guidance a change edits, the record a review's dispatch leaves on the review bead, and a branch's head on a rig's origin, read at named upstream commits, and why none of it covers what review-checks.sh's --show, --check, --extension and --edits, the review_context and review_formula keys, and git-lib.sh's head read do. Read it when checking whether the review path still needs that surface.
+---
+
+# Gas City search for the review path's resolver modes and record keys
+
+This design adds pack surface. `review-checks.sh`, the pack's one reader of the
+check index, gains modes that print a rig's checks and its review guidance at
+the commit a review judges. The dispatch writes `review_context` and
+`review_formula` on the review bead. So the arch check asks what Gas City
+already ships for each need
+([review-arch.md](../../docs/review-arch.md#the-checks), check 1).
+
+Gas City ships the mechanism the design passes a review's values through:
+formula vars, which the sling fills into the step text. The design composes
+them. For the rest of the surface the search found nothing that covers the
+need. Gas City reads its configuration from the city and its packs. The reads
+at a git commit the search found take a pack at the commit its import pins or
+its release names, or every formula layer at one ref, while a review needs a
+rig's own files at the commit it judges. Gas City records a run's formula and
+vars on the run's root, while a review needs them on a review bead that may
+have no run.
+Every pack that names reviewers or lanes declares them itself. None of the
+surface is a pack noun, so it takes no warrant
+([review-arch.md](../../docs/review-arch.md#the-checks), check 2), and the
+change touches no path or key that a warrant in
+[warrants.md](../../docs/warrants.md) covers.
+
+## The surface and the need
+
+- `review-checks.sh --show --at <oid>` prints the checks a rig gets: the pack's
+  index, with the rows of the `review-checks.toml` that commit carries laid over
+  it key by key. `--check <name> --at <oid>` prints one row of it. Triage reads
+  its menu with `--show`, and signoff.sh and the review formulas ask `--check`
+  whether a check is declared. `review-outcome.sh supersede-anchor --oid` names
+  the commit an operator's ruling judged, which that verb resolves the anchor's
+  checks at.
+- `review-checks.sh --extension <check> --at <oid>` prints the rig's guidance
+  for one check, the `docs/review-<check>.md` that commit carries. A review
+  prints it while it gathers what it reads, and carries it into the step that
+  applies the check's method, so the rig's words add to the pack's method, and
+  a branch's edit to them governs its own review.
+- `review-checks.sh --edits --base <branch> --at <oid>` prints the review
+  guidance a change edits: `review-checks.toml` and each `docs/review-*.md`
+  among the paths it touches from where it left `<branch>`, with a renamed file
+  counted at both of its paths. signoff.sh reads it to name such an edit to the
+  person who approves the merge.
+- `review_context` is why the dispatch sent a review: the lane it found short of
+  green, or the bring-current round a triage review rules on. gate-ensure.sh
+  writes it on the review bead, passes it as a formula var on the sling, and
+  rewrites it when its stranded arm slings the review again.
+- `review_formula` is the formula gate-ensure.sh pours onto a review, mol-review
+  or the quorum, as the refinery's reconcile chooses for the pass. A review held
+  with no poured workflow follows that formula's steps, as the review's fixed
+  description says.
+- `git-lib.sh`'s `remote_branch_head` and `remote_branch_heads` read a branch's
+  head on the origin of a repository the caller names, from the line for the
+  branch's exact ref. gate-ensure.sh reads a head GitHub does not answer through
+  it, signoff.sh the live head a review with no pin takes, converse-rework.sh
+  the head an operator's ruling judged, in the anchor's rig checkout, and the
+  liveness sweep every pre-open anchor's head in one call.
+
+What the modes need is a read of a rig's own files at the commit a review
+judges, over the pack's own rows. What the keys need is a value that stays on
+the review bead whether or not a run holds it, so that a review held with no
+workflow still names why it went out and which formula runs it. What the
+helper needs is the head of a branch on a rig's own origin, read by name.
+
+## Where the search looked
+
+Each was read on 2026-10-24:
+
+- Gas City at main `c05f1d782c30`: its documentation, its engineering docs, the
+  `core` pack it bundles, and the source of its formula parser, of sling, of its
+  git helpers, of its pack cache and pack releases, and of its bead metadata
+  vocabulary.
+- Every pack Gas City publishes, at `c1848011ae23`. Gas City bundles `gastown`
+  and the build pack, `gascity`, from among them
+  ([Builtin Packs](https://docs.gascity.com/reference/system-packs)).
+- bd at main `d26da8dadd50`: its documentation of issue metadata and of
+  `bd config`.
+- Gas City at main `e037526466c0`, for git-lib.sh's head read: every Go caller
+  of `git ls-remote`, and the `refs/heads/` reads in its `gc` commands.
+
+The search covered review checks, lanes, reviewers and personas; a repository's
+review guidance and instruction files; configuration a rig lays over a pack's;
+reading a file at a git ref; listing the paths a change touches
+(`--name-only`, `--name-status`, a pull request's file list); and what a
+dispatch or a run leaves on a bead (`formula`, `workflow_id`, `molecule_id`,
+`gc.var.`, a reason or a context). Each part the search found was read.
+
+## What Gas City ships near each need
+
+### A rig's list of checks
+
+Gas City keeps no list of review checks. A review's lanes are formula
+structure. `core`'s `mol-review-quorum` takes its lanes, their providers and
+their targets as formula vars.
+[Multi-Lane Review Loops](https://docs.gascity.com/guides/understanding-formulas#multi-lane-review-loops)
+describes lanes as the children of a review formula's loop, and the build pack,
+`gascity`, declares its acceptance, test-evidence and simplicity lanes that way
+in `build-basic-review`. Where Gas City says "check" it means other things.
+`[steps.check]` runs a script that decides whether a step passed
+([Check](https://docs.gascity.com/reference/specs/formula-spec-v2#3-1-check)),
+and `[[doctor.check]]` declares a health check for `gc doctor`
+([LocalDoctorCheck](https://docs.gascity.com/reference/config#localdoctorcheck)).
+
+Gas City lays a rig's configuration over a pack's in the city's own
+configuration. A rig's entry there sets `formula_vars`, a `formulas_dir` that is
+the highest formula layer, and patches to the agents its packs bring
+([Rig](https://docs.gascity.com/reference/config#rig)). Formula layers run from
+the city's packs, through the city's own `formulas/` and the rig's packs, to the
+rig's `formulas_dir`, and the highest layer that holds a name wins
+([File Naming And Layers](https://docs.gascity.com/reference/specs/formula-spec-v2#1-1-file-naming-and-layers)).
+All of it is read from the city's configuration and from files on disk. A rig's
+`review-checks.toml` lives in the rig's own repository, and the design reads it
+at the commit being judged, so that a branch's edit to it governs its own
+review (decision 5 of [review-path.md](review-path.md)).
+
+The search found Gas City reading files at a git commit in its pack handling
+and in its formula parser. A remote pack import is cloned into a machine-local
+cache and checked out at the commit the import pins, and a checkout with no
+`pack.toml` is refused (package `packman`, `EnsureRepoInCache`).
+`gc pack release` hashes a pack's tracked files at a commit to fingerprint the
+release (package `packregistry`, `PackContentHash`). Both read a pack at a
+commit the city or the release names, not a rig's files at the commit a review
+judges.
+
+When `GC_FORMULA_REF` names a ref, the formula parser reads each formula file
+and description file that sits in a git repository at that ref, and takes a
+file the ref lacks as absent (package `formula`, `SourceFromEnv` and
+`GitRefSource`). It exists to keep formula resolution off in-flight branches.
+It serves the formula parser, which reads formulas and the files they name, not
+a data file such as the index. It also applies one ref to every repository a
+layer lives in, so it cannot read the pack's files as installed and a rig's
+files at the commit under review in one resolution.
+
+bd keeps configuration per project in the beads database, under namespaces such
+as `custom.*` ([bd config](https://beads.gascity.com/cli-reference/config)). A
+value there belongs to the store, not to a commit, so a branch cannot carry its
+own.
+
+Among the packs Gas City publishes, each list of reviewers is the pack's own.
+`compound-engineering`'s `compound-code-review` turns its persona catalog into
+review lanes, picks its conditional reviewers with a selector that judges the
+diff, and records the pick in `gc.build.selected_reviewers`. `gstack`,
+`superpowers` and `bmad` declare their review lanes in their own formulas.
+`pr-pipeline`'s `mol-pr-review` scores a fixed set of categories, and
+`pr-review`'s `review-pr` skill runs a fixed set of providers. No pack reads a
+list of review checks from the repository under review. Two take the quality
+gates they run from its checkout: `pr-pipeline`'s `mol-pr-ship` runs each
+build, lint and test gate through the project's Makefile target when it has
+one, and `gastown`'s refinery reads its gates from the project's instruction
+file, as the next section says. The nearest shape is in the BMAD Method skills
+that `bmad` vendors. A skill's `customize.toml` holds its defaults, and a
+project's team and personal override files are merged over it key by key. That
+merge runs through a resolver a BMAD install puts in the project, reads the
+project's working tree, and customizes BMAD's own workflows, so it holds
+nothing for this pack to call.
+
+So the pack keeps `--show` and `--check`. The rig's rows come from
+`git show <oid>:review-checks.toml` in the rig's repository, fetched by id when
+no repository here holds the commit, and the pack's rows from the index at the
+root of the pack the script ships in.
+
+### A rig's guidance for one check
+
+Gas City lets a formula step take its text from a file. A `description_file`
+under `../assets/` resolves through the formula layers, so a city or a
+higher-priority pack can replace a step's prose by shipping the same asset path
+([Description Files](https://docs.gascity.com/reference/specs/formula-spec-v2#1-8-description-files)).
+The parser reads that file when it loads the formula, from the literal path the
+step names, and the winning layer's file becomes the step's description: its
+text, or past 4 KiB a pointer that tells the agent to read the file (package
+`formula`, `resolveDescriptionFiles` and `winningAssetPath`). That does not
+carry a rig's guidance for a check. The path belongs to the step, so a step that
+serves every check cannot choose a file by the check it reviews. The winning
+text replaces the pack's prose rather than following it, while a rig's guidance
+extends the pack's method. And the layers are the city's, read from disk or at
+the one `GC_FORMULA_REF` ref, not from the rig's repository at the reviewed
+commit.
+
+Gas City's skills are authored at a pack's level or at an agent role's level,
+and are linked into each agent's provider skill directory when the city starts
+([Skills](https://docs.gascity.com/guides/capabilities-for-coding-agent-users#skills),
+[gc skill list](https://docs.gascity.com/reference/cli#gc-skill-list)). A
+check's method is such a skill in this design. A rig's repository is not a
+skill scope, and a skill is read as linked, not at a commit.
+
+The packs read a repository's own guidance in the checkout where the agent
+works. Most of it is the repository's general instruction files.
+`compound-engineering`'s project-standards reviewer reads each `CLAUDE.md` and
+`AGENTS.md` in a directory above a changed path. `pr-pipeline`'s
+`mol-pr-start` reads `CONTRIBUTING.md`, `AGENTS.md`, `CONVENTIONS.md` and
+`CLAUDE.md`, and the design docs whose status is accepted or implemented,
+before it plans. `gastown`'s `mol-refinery-patrol` falls back to the project's
+instruction file for its quality gates when no gate command is configured. The
+others are files a project keeps on one subject. `gstack`'s skills read its
+`TODOS.md`, `DESIGN.md` and `TESTING.md`. `compound-engineering` takes a
+`DESIGN.md` as a partial override of its HTML style defaults.
+`oversight-rig`'s project lead reads the rig's `.gc/project-brief.md` each tick.
+A BMAD skill's `persistent_facts` can load project files as context. None of
+these is chosen by the check a review applies, and none is read at a recorded
+commit. The build pack's `code-review-base` reads no repository file for its
+settings: it treats the values rendered into its step text as authoritative,
+and requires them neither in bead metadata nor in a `review-config.yaml`.
+
+So the pack keeps `--extension`. It is `git show <oid>:docs/review-<check>.md`
+behind the resolver, which finds or fetches the commit.
+
+### The guidance a change edits
+
+Gas City has no command that lists the paths a change touches, and its `git`
+package has no helper that does. The GitHub PR monitor records a pull request's
+readiness and routes its repair, and keeps no file list
+([GitHubPRMonitor](https://docs.gascity.com/reference/config#githubprmonitor)).
+The packs that need the list make it in their own steps. Some take the pull
+request's file list from `gh pr view --json files`, as `pr-review`'s
+`mol-adopt-pr` and `pr-pipeline`'s `mol-pr-review` do, and others run git.
+`contributing-to-gascity`'s `fine-tune` skill lists the design docs and release
+gates a branch touches with `git diff --name-only main...HEAD -- <paths>`.
+`gstack`'s `land-and-deploy` skill lists the project documents a branch touched
+the same way. `pr-pipeline`'s `mol-pr-from-issue` matches the touched paths
+against protected patterns, and `gastown`'s `mol-polecat-work` has its
+affected-tests command read `git diff --name-only $BASE_REF...HEAD`.
+
+So the pack keeps `--edits`, which is the same git call. It sits in the
+resolver because the resolver is the one place that says which paths are review
+guidance. It turns rename detection off, so a guidance file renamed away counts
+as an edit to it.
+
+### A review's dispatch record
+
+Gas City records a run's formula and vars on the run's root. The compiler
+stamps the formula's name, `gc.formula_name`, on every root (package `formula`,
+`toRecipeWithGraph`). Sling stamps a graph.v2 root with its input convoy and a
+snapshot of the runtime vars, `gc.graphv2_vars.v1`
+([Compilation](https://docs.gascity.com/reference/specs/formula-spec-v2#2-compilation),
+under root stamping; package `sling`, `stampGraphV2RootMetadata`). The bead a
+convoy-first `--on` launch pours over gets its route, `gc.execution_routed_to`,
+and its merge strategy, and no key that names the formula or the root (package
+`sling`, `attachFormulaToBead`). The launch's input convoy is its one link to
+the root, and the root is neither a child of the bead nor its `workflow_id` or
+`molecule_id` (package `sling`, the comment on
+`liveConvoyTrackedWorkflowRoots`). While a run lives, its formula and vars are
+on its root. A review with no run has no root, and nothing on the review bead
+names either.
+
+An agent's `default_sling_formula` names the formula a sling to that agent
+pours when the sling names none, and `[agent_defaults]` gives one to every
+agent that sets none of its own
+([Agent](https://docs.gascity.com/reference/config#agent),
+[AgentDefaults](https://docs.gascity.com/reference/config#agentdefaults)). The
+review pool also claims work that is not a review, so its default, where a city
+sets one, pours that work (`mol-polecat-work` for a polecat pool). One default
+could not choose between the review formulas either: the refinery's reconcile
+chooses one for each pass. `gc sling` takes a formula and its vars and has no
+flag for why it dispatched
+([gc sling](https://docs.gascity.com/reference/cli#gc-sling)). The `github`
+pack's intake hands an order the event that triggered it, as environment for
+that one run.
+
+Gas City and bd both leave keys like these to the pack. Gas City's bead
+metadata vocabulary declares only the keys its engine reads, and pack-private
+keys stay open-world by design (package `beadmeta`, and the engineering doc
+*Bead Store*). bd calls metadata "the preferred extension point for data that is
+specific to an integration, orchestrator, team workflow, or experimental
+automation", and reserves only the `bd:` and `_` prefixes
+([Issue Metadata](https://beads.gascity.com/core-concepts/metadata#reserved-key-prefixes)).
+The bundled `gastown` pack keeps its review legs' record the same way.
+`mol-idea-to-plan` writes `coordinator`, `review_id`, `review_phase` and
+`review_leg` on each leg's bead and slings it with its own `review_formula`
+var, and `mol-review-leg` reads those keys back from the bead.
+
+So the pack keeps `review_context` and `review_formula` as keys of the review's
+record, beside the values that record already carried.
+
+### The values the step text names
+
+Gas City ships this, and the design composes it. A formula declares vars, with
+`required` for a value the pour must have, and the pour fills each `{{name}}`
+in the step text from the sling's `--var` values, the rig's `formula_vars` and
+the declared defaults
+([Variables](https://docs.gascity.com/reference/specs/formula-spec-v2#1-4-variables),
+[Rig](https://docs.gascity.com/reference/config#rig)). The review formulas
+declare each value of "What a review is told" in [review-path.md](review-path.md)
+as a var, and gate-ensure.sh passes them on every sling. The build pack's
+`code-review-base` takes its review's subject, its report path and an optional
+context the same way.
+
+### A branch's head on a rig's origin
+
+Gas City runs `git ls-remote` only to import and resolve packs. Its import
+reads a pack source's `HEAD` (`cmd/gc/cmd_import.go`, and `lsRemoteHeadArgs` in
+`internal/importsvc/source.go`), and its pack resolver lists a source's tags
+(`internal/packman/resolve.go`). Its git helpers harden that network call for a
+source an API caller supplies (`UntrustedRemoteGitConfigArgs` in
+`internal/git/git.go`). None reads a branch of a rig's repository, and no `gc`
+command gives a pack a branch's head.
+
+## What the pack keeps
+
+The pack keeps the resolver's `--show`, `--check`, `--extension` and `--edits`
+modes, the `review_context` and `review_formula` keys, and git-lib.sh's head
+read. Each mode is a git read at the commit its caller names, each key is a
+value of the review's record that Gas City keeps only on a run's root, and the
+head read is a read of a rig's origin, where Gas City reads only a pack's source.
+This record goes stale, and the surface moves onto Gas City, when Gas City
+ships a way for a review to read a rig's own files at the commit it judges,
+keeps on a bead the formula and vars it is to be poured with, or gives a pack a
+branch's head on a rig's origin.

@@ -60,7 +60,10 @@
 # and after an arm that did not land, the re-run arms to the pool the earlier
 # run recorded.
 #
-# Callers: the decline arms of mol-polecat-work that wait for a person.
+# Callers: the decline arms of mol-polecat-work that wait for a person, and
+# mol-refinery-patrol's merge-push, which makes a convoy's rebuild child wait
+# when no bead can carry its PR. The child is assigned to the refinery, so the
+# release is of a claim in that session's name.
 # exit: 0 the work bead waits on the visit and is armed, or is closed and needs
 #       neither · 1 the wait did not land · 2 usage
 set -uo pipefail

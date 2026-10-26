@@ -35,6 +35,13 @@
 #     other refused push, or a push origin does not read back, exits 1;
 #   - a pause with a leading zero is read in base 10;
 #   - an unresolvable rig and a missing prepared head land nothing;
+#   - a prep worktree that records another bead's staging, another branch, or
+#     no staging, lands, stamps and records nothing, before any store call;
+#   - with --delete-branch, a recorded landing deletes origin/<branch>, whether
+#     it pushed the landing or found it already there, and only after the
+#     transition; a delete origin refuses leaves the landing standing at exit
+#     0; the target is never deleted; and a run that lands nothing, or one
+#     without the flag, deletes nothing;
 #   - the script never drains the session.
 set -uo pipefail
 
@@ -58,7 +65,8 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR 2
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
-# The script under test and the bd-lib.sh it sources, beside a stub
+# The script under test, the bd-lib.sh it sources and the
+# refinery-workspace.sh it checks the prep worktree's record with, beside a stub
 # lifecycle.sh that logs each transition and the GC_RIG_ROOT it was handed. The
 # stub refuses every call when LC_FAIL is set, and the first LC_FAIL_TIMES calls
 # when that is set. With LC_WRITE_RC set, a call it does not refuse writes the
@@ -67,7 +75,7 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER
 # what it wrote.
 SUT="$TMP/sut"
 mkdir -p "$SUT" "$TMP/bin" "$TMP/gitshim" "$TMP/sleepshim"
-cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$SUT/"
+cp "$HERE/direct-merge-push.sh" "$HERE/bd-lib.sh" "$HERE/refinery-workspace.sh" "$SUT/"
 chmod +x "$SUT/direct-merge-push.sh"
 cat > "$SUT/lifecycle.sh" <<'LC'
 #!/usr/bin/env bash
@@ -171,8 +179,8 @@ stamp() { jq -r '.[0].metadata.direct_landing_sha // "none"' "$D/bead.json"; }
 transitions() { if [ -s "$D/lc.log" ]; then wc -l < "$D/lc.log" | tr -d ' '; else echo 0; fi; }
 
 # setup <dir>: origin with main and polecat/wb one commit ahead, the rig
-# cloned from it, the prep worktree staged at polecat/wb, and the bead. Sets D,
-# BASE, FEATURE and PREP.
+# cloned from it, the prep worktree staged for wb at polecat/wb, and the bead.
+# Sets D, BASE, FEATURE and PREP.
 setup() {
   D="$1"
   mkdir -p "$D/tmp"
@@ -186,7 +194,7 @@ setup() {
   git -C "$D/seed" checkout -q main
   git clone -q "$D/origin.git" "$D/rig"
   PREP="$(git -C "$D/rig" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
-  git -C "$D/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+  "$SUT/refinery-workspace.sh" stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null 2>&1
   printf '{"rigs":[{"name":"myrig","path":"%s"}]}\n' "$D/rig" > "$D/roster.json"
   printf '%s\n' '[{"id":"wb","status":"in_progress","metadata":{"branch":"polecat/wb","target":"main"}}]' > "$D/bead.json"
   : > "$D/gc.log"; : > "$D/lc.log"
@@ -194,20 +202,23 @@ setup() {
 
 # run [<env>...]: the script from a directory outside every repository, with
 # GC_RIG_ROOT naming the rig unless the case overrides it, and no pause between
-# tries. Sets RC and OUT.
+# tries. Its arguments are DMP_ARGS, which a case sets and puts back. Sets RC
+# and OUT.
+DEFAULT_ARGS=(--work wb --branch polecat/wb --target main)
+DMP_ARGS=("${DEFAULT_ARGS[@]}")
 run() {
   OUT=$(cd "$D/tmp" && env TMPDIR="$D/tmp" GC_RIG_ROOT="$D/rig" GC_RIG=myrig FAKE_ROSTER="$D/roster.json" \
     FAKE_GC_LOG="$D/gc.log" FAKE_LC_LOG="$D/lc.log" FAKE_BEAD="$D/bead.json" DIRECT_MERGE_PUSH_BACKOFF=0 \
-    "$@" "$SUT/direct-merge-push.sh" --work wb --target main 2>&1)
+    "$@" "$SUT/direct-merge-push.sh" "${DMP_ARGS[@]}" 2>&1)
   RC=$?
 }
+on_origin() { if git -C "$D/origin.git" rev-parse -q --verify "refs/heads/$1" >/dev/null; then echo yes; else echo no; fi; }
 # next_patrol: what the next patrol's rebase step does before it lands again:
 # fetch, stage the prep worktree at origin/polecat/wb, and merge origin/main in.
 # The logs start over, so each attempt's assertions read only its own calls.
 next_patrol() {
   git -C "$D/rig" fetch -q origin
-  git -C "$D/rig" worktree remove --force --force "$PREP"
-  git -C "$D/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+  "$SUT/refinery-workspace.sh" stage --rig-root "$D/rig" --branch polecat/wb --work wb >/dev/null 2>&1
   git -C "$PREP" merge -q --no-edit origin/main
   : > "$D/gc.log"; : > "$D/lc.log"; : > "$D/lc.log.root"
 }
@@ -247,6 +258,7 @@ eq "$(wt_count "$D/rig")" 2 "ff: no worktree is added; the rig and its prep work
 eq "$(ls -A "$D/tmp" | wc -l | tr -d ' ')" 0 "ff: nothing is written under TMPDIR"
 eq "$(git -C "$D/rig" rev-parse HEAD)" "$RIG_HEAD_BEFORE" "ff: the rig's HEAD does not move"
 eq "$(git -C "$D/rig" for-each-ref --format='%(refname)' refs/heads/ | tr '\n' ' ')" "refs/heads/main " "ff: no local branch is created"
+eq "$(on_origin polecat/wb)" yes "ff: without --delete-branch, origin/polecat/wb stays"
 no_drain ff
 
 echo "── the roster names the rig when GC_RIG_ROOT is empty ──"
@@ -327,6 +339,74 @@ eq "$RC" 0 "landed: exits 0"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$AHEAD" "landed: origin/main stays at its tip"
 recorded_at "landed, a stamp origin/main does not carry" "$AHEAD"
 case "$(cat "$D/gc.log")" in *"bd update"*) bad "landed: nothing is stamped, since nothing is pushed" "$(cat "$D/gc.log")" ;; *) ok "landed: nothing is stamped, since nothing is pushed" ;; esac
+
+echo "── --delete-branch deletes the branch a recorded landing came from ──"
+setup "$TMP/delete"
+# The transitions logged at the moment origin receives the delete.
+cat > "$D/origin.git/hooks/pre-receive" <<HOOK
+#!/usr/bin/env bash
+while read -r old new ref; do
+  case "\$new" in 0000000000000000000000000000000000000000) wc -l < "$D/lc.log" | tr -d ' ' > "$D/transitions-at-delete" ;; esac
+done
+HOOK
+chmod +x "$D/origin.git/hooks/pre-receive"
+DMP_ARGS=("${DEFAULT_ARGS[@]}" --delete-branch)
+run
+eq "$RC" 0 "delete: exits 0"
+recorded_at delete "$FEATURE"
+eq "$(on_origin polecat/wb)" no "delete: origin/polecat/wb is deleted"
+eq "$(cat "$D/transitions-at-delete" 2>/dev/null)" 1 "delete: the delete reaches origin after the landing is recorded"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$FEATURE" "delete: origin/main keeps the landing"
+
+echo "── --delete-branch after a landing found already on origin ──"
+setup "$TMP/delete-landed"
+git -C "$D/seed" push -q "$D/origin.git" "polecat/wb:main"
+git -C "$D/rig" fetch -q origin
+run
+eq "$RC" 0 "delete-landed: exits 0"
+recorded_at delete-landed "$FEATURE"
+eq "$(on_origin polecat/wb)" no "delete-landed: origin/polecat/wb is deleted"
+
+echo "── a delete origin refuses leaves the landing standing ──"
+setup "$TMP/delete-refused"
+cat > "$D/origin.git/hooks/pre-receive" <<'HOOK'
+#!/usr/bin/env bash
+while read -r old new ref; do
+  case "$new" in 0000000000000000000000000000000000000000) echo "deletes are refused here" >&2; exit 1 ;; esac
+done
+HOOK
+chmod +x "$D/origin.git/hooks/pre-receive"
+run
+eq "$RC" 0 "delete-refused: exits 0"
+recorded_at delete-refused "$FEATURE"
+has "$OUT" "wb landed and is recorded, but origin/polecat/wb was not deleted, so it stays on origin" "delete-refused: it says the branch stays"
+eq "$(on_origin polecat/wb)" yes "delete-refused: origin/polecat/wb stays"
+
+echo "── --delete-branch never deletes the target ──"
+setup "$TMP/delete-target"
+"$SUT/refinery-workspace.sh" stage --rig-root "$D/rig" --branch main --work wb >/dev/null 2>&1
+DMP_ARGS=(--work wb --branch main --target main --delete-branch)
+run
+eq "$RC" 0 "delete-target: exits 0"
+recorded_at delete-target "$BASE"
+has "$OUT" "keeping origin/main: it is the target wb landed on" "delete-target: it says why the branch stays"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "delete-target: origin/main stays"
+
+echo "── --delete-branch with nothing landed deletes nothing ──"
+setup "$TMP/delete-moved"
+MOVED=$(commit "$D/seed" "landed while the gate ran")
+git -C "$D/seed" push -q "$D/origin.git" main
+DMP_ARGS=("${DEFAULT_ARGS[@]}" --delete-branch)
+run
+eq "$RC" 4 "delete-moved: exits 4"
+eq "$(on_origin polecat/wb)" yes "delete-moved: origin/polecat/wb stays for the next patrol"
+setup "$TMP/delete-protected"
+printf '%s\n' '#!/usr/bin/env bash' 'echo "GH006: Protected branch update failed for refs/heads/main." >&2' 'exit 1' > "$D/origin.git/hooks/pre-receive"
+chmod +x "$D/origin.git/hooks/pre-receive"
+run
+eq "$RC" 3 "delete-protected: exits 3"
+eq "$(on_origin polecat/wb)" yes "delete-protected: origin/polecat/wb stays for the PR"
+DMP_ARGS=("${DEFAULT_ARGS[@]}")
 
 echo "── a push refused for branch protection promotes the bead ──"
 setup "$TMP/protected"
@@ -541,12 +621,49 @@ setup "$TMP/noprep"
 git -C "$D/rig" worktree remove --force "$PREP"
 run
 eq "$RC" 1 "noprep: exits 1"
-has "$OUT" "no prepared head in $PREP" "noprep: it says why"
+has "$OUT" "no prep worktree is staged at $PREP" "noprep: it says why"
 eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "noprep: nothing pushed"
 no_transition noprep
 
+echo "── a prep worktree staged for another bead lands nothing ──"
+setup "$TMP/otherbead"
+"$SUT/refinery-workspace.sh" stage --rig-root "$D/rig" --branch polecat/wb --work other >/dev/null 2>&1
+run
+eq "$RC" 1 "otherbead: exits 1"
+has "$OUT" "holds polecat/wb for other, not polecat/wb for wb; nothing landed" "otherbead: it names the bead the prep worktree holds, and says nothing landed"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "otherbead: nothing pushed"
+eq "$(stamp)" none "otherbead: no stamp is written"
+eq "$(wc -l < "$D/gc.log" | tr -d ' ')" 0 "otherbead: the check comes before any store call"
+no_transition otherbead
+no_drain otherbead
+
+echo "── a prep worktree staged from another branch lands nothing ──"
+setup "$TMP/otherbranch"
+DMP_ARGS=(--work wb --branch polecat/other --target main --delete-branch)
+run
+eq "$RC" 1 "otherbranch: exits 1"
+has "$OUT" "holds polecat/wb for wb, not polecat/other for wb; nothing landed" "otherbranch: it names the branch the prep worktree holds, and says nothing landed"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "otherbranch: nothing pushed"
+eq "$(stamp)" none "otherbranch: no stamp is written"
+eq "$(wc -l < "$D/gc.log" | tr -d ' ')" 0 "otherbranch: the check comes before any store call"
+eq "$(on_origin polecat/wb)" yes "otherbranch: no branch is deleted"
+no_transition otherbranch
+DMP_ARGS=("${DEFAULT_ARGS[@]}")
+
+echo "── a prep worktree that records nothing lands nothing ──"
+setup "$TMP/norecord"
+git -C "$D/rig" worktree remove --force --force "$PREP"
+git -C "$D/rig" worktree add -q -f --detach "$PREP" origin/polecat/wb
+run
+eq "$RC" 1 "norecord: exits 1"
+has "$OUT" "records no bead and branch" "norecord: it says why"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$BASE" "norecord: nothing pushed"
+eq "$(stamp)" none "norecord: no stamp is written"
+no_transition norecord
+
 echo "── usage ──"
-for args in "" "--work wb" "--target main" "--work wb --target main --extra" "--work"; do
+for args in "" "--work wb" "--target main" "--work wb --target main" "--work wb --branch polecat/wb" \
+  "--work wb --branch polecat/wb --target main --extra" "--work" "--work wb --target main --branch"; do
   # shellcheck disable=SC2086 # each case is a word list
   ( cd "$TMP" && "$SUT/direct-merge-push.sh" $args ) >/dev/null 2>&1
   eq "$?" 2 "usage: '$args' exits 2"
