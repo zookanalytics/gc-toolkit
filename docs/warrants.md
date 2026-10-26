@@ -142,13 +142,12 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Evidence.** In `gastownhall/gascity`, a graph.v2 `gc sling <bead> --on
   <formula>` launches under a per-bead lock and refuses a second launch of the
   formula at the bead, exiting 3, only while a root an earlier launch poured is
-  live (`internal/sling/sling_core.go` 544-641, the lock at 563 and the check at
+  live (`internal/sling/sling_core.go` 544-724, the lock at 563 and the check at
   589; the terminal-root skip in `internal/sling/sling_attachment.go` 177; and
   `TestLiveConvoyTrackedWorkflowRootsSkipsTerminalRoots` in
   `internal/sling/sling_test.go` 3639-3691). Once that root has closed, the next
   launch pours again. No `gc sling` flag checks an earlier root by its title or
   by a key (`cmd/gc/cmd_sling.go` 145-160).
-- **Verified.** 2026-10-22, at `gastownhall/gascity` 1e05ae624 and upstream
-  340ed8581.
+- **Verified.** 2026-10-26, at `gastownhall/gascity` main 4bab0b485.
 - **Retires when.** A Gas City launch can refuse a second root under a caller's
   key whatever the first root's status.
