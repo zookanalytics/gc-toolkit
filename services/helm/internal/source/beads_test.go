@@ -68,21 +68,29 @@ func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.Issue
 	//                            closed, which is the board flooded rather than
 	//                            the board stable. A fake that accepted it would
 	//                            leave that untested.
-	//   Statuses=[open,inprog]   the JOIN queries (conversations, human gates,
-	//                            workflow roots and steps) — a CLAIMED
-	//                            conversation is a held one, not a finished one,
-	//                            and a claimed step is the normal state of a
-	//                            live molecule.
+	//   Statuses=[open,inprog]   the JOIN queries (conversations, workflow roots
+	//                            and steps) — a CLAIMED conversation is a held
+	//                            one, not a finished one, and a claimed step is
+	//                            the normal state of a live molecule.
 	//   Statuses=bd-lib.sh's live set, keyed on task_kind=review
 	//                            the live REVIEW read (readReviews), which reads
 	//                            an anchor's live children the way bd-lib.sh
 	//                            does. The set is spelled out here, not read from
 	//                            the source, so the fake pins it to bd-lib.sh's.
+	//   ExcludeStatus=[closed], keyed on issue_type=gate
+	//                            the live HUMAN GATE read, which reads every gate
+	//                            that still holds the way bd-lib.sh's
+	//                            HUMAN_GATE_JQ does: in every status but closed.
 	//
 	// Anything else — no scope at all, or a widened one — is refused, so the
 	// filter stays load-bearing rather than decorative.
 	reviewRead := len(filter.MetadataFields) == 1 && filter.MetadataFields["task_kind"] == "review"
+	gateRead := filter.IssueType != nil && *filter.IssueType == beads.IssueType("gate")
 	switch {
+	case len(filter.ExcludeStatus) > 0:
+		if !gateRead || filter.Status != nil || len(filter.Statuses) > 0 || !slices.Equal(filter.ExcludeStatus, []beads.Status{beads.StatusClosed}) {
+			return nil, errors.New("a status exclusion is the live gate read alone: issue_type=gate excluding closed, with no other status scope")
+		}
 	case filter.Status != nil && *filter.Status == beads.StatusOpen && len(filter.Statuses) == 0:
 	case filter.Status != nil && *filter.Status == beads.StatusClosed && len(filter.Statuses) == 0:
 		if filter.ClosedAfter == nil {
@@ -91,7 +99,7 @@ func (f *fakeStore) SearchIssues(_ context.Context, _ string, filter beads.Issue
 	case filter.Status == nil && slices.Equal(filter.Statuses, []beads.Status{beads.StatusOpen, beads.StatusInProgress}):
 	case filter.Status == nil && reviewRead && slices.Equal(filter.Statuses, []beads.Status{"open", "in_progress", "blocked", "deferred", "hooked", "pinned"}):
 	default:
-		return nil, errors.New("expected status=open (anchors), statuses=[open,in_progress] (joins), status=closed+ClosedAfter (closed rows) or the live review read")
+		return nil, errors.New("expected status=open (anchors), statuses=[open,in_progress] (joins), status=closed+ClosedAfter (closed rows), the live review read or the live gate read")
 	}
 	if filter.IssueType != nil {
 		kind := string(*filter.IssueType)
@@ -186,6 +194,9 @@ func (f *fakeStore) matching(in []*beads.Issue, filter beads.IssueFilter) []*bea
 			continue
 		}
 		if len(filter.Statuses) > 0 && !slices.Contains(filter.Statuses, iss.Status) {
+			continue
+		}
+		if slices.Contains(filter.ExcludeStatus, iss.Status) {
 			continue
 		}
 		if filter.ClosedAfter != nil && (iss.ClosedAt == nil || !iss.ClosedAt.After(*filter.ClosedAfter)) {
@@ -2256,6 +2267,57 @@ func TestGatherAdmitsHumanGatesWithTheBeadsTheyBlock(t *testing.T) {
 	for _, a := range res.Anchors {
 		if a.ID == "tk-legacy" && a.Kind != board.KindGate {
 			t.Errorf("a gate is admitted only as a gate, not by its route or takeaway: got kind %q", a.Kind)
+		}
+	}
+}
+
+// TestGatherKeepsAHumanGateInEveryStatusThatHolds: a human gate holds the bead
+// it blocks in every status but closed, pinned included (bd-lib.sh's
+// HUMAN_GATE_JQ), so the live pass reads it in each of them. Each gate here
+// blocks a plain task that has no row of its own, so the gate's own row is the
+// only place the board asks its question: a gate the read missed would be a
+// question off the board with nothing reported partial.
+func TestGatherKeepsAHumanGateInEveryStatusThatHolds(t *testing.T) {
+	st := populatedStore()
+	holding := []beads.Status{
+		beads.StatusOpen, beads.StatusInProgress, beads.StatusBlocked,
+		beads.StatusDeferred, beads.Status("hooked"), beads.Status("pinned"),
+	}
+	want := map[string]string{} // gate id -> the question it asks
+	for _, status := range holding {
+		id, plain := "tk-g-"+string(status), "tk-plain-"+string(status)
+		g := gateBead(id, "Question held while "+string(status)+"?", "human", "q-"+string(status), time.Time{}, "")
+		g.Status = status
+		st.issues["gate"] = append(st.issues["gate"], g)
+		st.depsUp[id] = []*beads.IssueWithDependencyMetadata{withDepType(child(plain, "open", testNow, ""), "blocks")}
+		want[id] = g.Title
+	}
+
+	src := newBeadsTestSource(t, cityWithRigs(t, map[string]string{"gc-toolkit": "tk"}),
+		map[string]*fakeStore{"gc-toolkit": st})
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if res.Partial {
+		t.Fatalf("unexpected partial: %v", res.PartialErrors)
+	}
+	gates := anchorsOfKind(res, board.KindGate)
+	if ids := slices.Sorted(maps.Keys(gates)); !slices.Equal(ids, slices.Sorted(maps.Keys(want))) {
+		t.Fatalf("human gates = %v, want one in each status that holds: %v", ids, slices.Sorted(maps.Keys(want)))
+	}
+
+	b := board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)
+	for _, status := range holding {
+		id := "tk-g-" + string(status)
+		i := slices.IndexFunc(b.Tiles, func(tl board.Tile) bool { return tl.ID == id })
+		if i < 0 {
+			t.Errorf("the %s gate has no row, so its question is off the board", status)
+			continue
+		}
+		if tl := b.Tiles[i]; tl.Needs != want[id] || !tl.Owed || tl.Section != board.SectionGate {
+			t.Errorf("the %s gate's row asks its question and is owed as a gate: needs=%q owed=%v section=%q",
+				status, tl.Needs, tl.Owed, tl.Section)
 		}
 	}
 }

@@ -1206,19 +1206,27 @@ func (s *BeadsSource) collectReviewReworkAnchors(ctx context.Context, g *gatherS
 	return out
 }
 
-// collectGateAnchors gathers one rig's human gates for one pass: the open ones
-// on the live pass (since nil), and on the closed pass those closed after
-// since. A gate carries no pack marker, so the query is keyed on the gate type
-// and the await type is read here: only a gate that awaits a person is a human
-// gate, the one reader rule bd-lib.sh's HUMAN_GATE_JQ applies. Each gate's
-// beads are its `blocks` dependents, read in the pass's one batched inbound
-// read ([BeadsSource.attachEdges]).
+// gateHoldingExcluded is what the live gate read leaves out: closed, and
+// nothing else. bd-lib.sh's HUMAN_GATE_JQ holds a human gate in every status
+// but closed, pinned included, because only its resolve clears the question it
+// asks, so the read excludes the one status that releases a gate rather than
+// listing the statuses a holding gate can be in. `bd gate list` reads gates
+// the same way.
+var gateHoldingExcluded = []beads.Status{beads.StatusClosed}
+
+// collectGateAnchors gathers one rig's human gates for one pass: on the live
+// pass (since nil) every gate that still holds, in any status but closed, and
+// on the closed pass those closed after since. A gate carries no pack marker,
+// so the query is keyed on the gate type and the await type is read here: only
+// a gate that awaits a person is a human gate, the one reader rule bd-lib.sh's
+// HUMAN_GATE_JQ applies. Each gate's beads are its `blocks` dependents, read in
+// the pass's one batched inbound read ([BeadsSource.attachEdges]).
 func (s *BeadsSource) collectGateAnchors(ctx context.Context, g *gatherState, st beadStore, r rigRef, since *time.Time) []pendingAnchor {
 	gate := beads.IssueType(board.KindGate)
-	filter := beads.IssueFilter{IssueType: &gate, Statuses: liveStatuses, Lite: true}
+	filter := beads.IssueFilter{IssueType: &gate, ExcludeStatus: gateHoldingExcluded, Lite: true}
 	if since != nil {
 		closed := beads.StatusClosed
-		filter.Statuses, filter.Status, filter.ClosedAfter = nil, &closed, since
+		filter.ExcludeStatus, filter.Status, filter.ClosedAfter = nil, &closed, since
 	}
 	issues, err := st.SearchIssues(ctx, "", filter)
 	if err != nil {
