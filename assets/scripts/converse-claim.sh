@@ -124,9 +124,8 @@ BEAD_JSON=$(gc bd show "$BEAD" --json 2>/dev/null | scrub)
 
 # The claim reports the gc.continuation_group STAMP, and the stamp lands empty
 # on a minority of visits while the `tracks` edge filed alongside it still
-# carries the subject (su-ab9je is the edge holding where the stamp
-# did not). Left empty, the deliberate cannot-prove-foreign fallback below
-# silently disables this guard for exactly the turn it exists to catch — an
+# carries the subject. Left empty, the deliberate cannot-prove-foreign fallback
+# below silently disables this guard for exactly the turn it exists to catch — an
 # unrelated visit vacuumed onto a live sitting — so recover the
 # group from the edge first. Scoped to task_kind=visit on purpose: `tracks` is
 # not a visit-only edge (a convoy tracks its members), and inventing a group

@@ -290,8 +290,8 @@ func crossRigRefs(a Anchor, f Facts) []string {
 
 	seen := map[string]bool{}
 	for _, m := range re.FindAllString(a.Description, -1) {
-		// A hit that is really a rig NAME is not a bead id: "signal-loom" must
-		// not read as a `signal-` bead.
+		// A hit that is really a rig NAME is not a bead id: "web-app" must not
+		// read as a `web-` bead.
 		if rigNames[m] || m == a.ID || seen[m] {
 			continue
 		}

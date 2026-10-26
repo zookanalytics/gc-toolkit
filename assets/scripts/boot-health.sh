@@ -241,7 +241,7 @@ This order does NOT nudge or file warrants. Escalation is deliberately a human
 decision until nudge delivery to always/wake_mode=fresh sessions is trustworthy
 — 4 of 5 nudges to this session failed on 'queued nudge session fence
 mismatch', which would also disable mol-shutdown-dance's pardon path and let it
-kill a healthy deacon. See lx-llzfk and tk-qdhnd.
+kill a healthy deacon. See tk-qdhnd.
 
 To inspect (the wisp query carries no --status on purpose — a poured-but-
 unclaimed wisp is 'open', and filtering on in_progress reports [] against a

@@ -31,7 +31,7 @@ Use this skill when:
 
 You receive parsed arguments from the command wrapper:
 
-- **Bead ID** (required) — e.g., `sl-8jv`
+- **Bead ID** (required) — e.g., `tk-8jv`
 - **`--pr <number>`** (optional) — PR number, otherwise derived from
   `metadata.pr_number` on the bead
 - **`--focus "area"`** (optional) — bias the demo narration toward a
@@ -73,7 +73,7 @@ From the JSON, extract and keep in working memory:
 - `description` — original assignment (the "what to build"). Scan for:
   - Goals and scope priorities (TIER 1, TIER 2, MUST HAVE)
   - Locked decisions or must-have behaviors
-  - References to sibling beads (e.g., `sl-9hi`, `sl-so9`)
+  - References to sibling beads (e.g., `tk-9hi`, `tk-so9`)
   - Test strategies (hints about what to verify in the demo)
 - `notes` — the polecat's implementation report. Scan for:
   - "Implemented:" section — lists what was actually built
@@ -105,7 +105,7 @@ mattered, and how it fits with other beads.
 ### Step A3: Read sibling design-leg beads
 
 Scan the work bead's `description` and `notes` for bead IDs referenced in
-prose (e.g., "per sl-so9 §6", "sl-9hi G2.1").
+prose (e.g., "per tk-so9 §6", "tk-9hi G2.1").
 Extract candidate IDs with a regex, validate each against the ledger, and
 read the real ones:
 
@@ -400,8 +400,8 @@ Filename: `<bead-id>-<slug>.md`.
 
 Examples:
 
-- `sl-8jv-conv-ui-polish.md`
-- `sl-ya9-gc-demo-script.md`
+- `tk-8jv-conv-ui-polish.md`
+- `tk-ya9-gc-demo-script.md`
 
 ### Step E3: Write the file
 

@@ -731,8 +731,8 @@ type Facts struct {
 	Sittings []Sitting
 	// Prefixes is every rig's issue prefix; RigNames is every rig's name. The
 	// cross-rig-ref scan looks for OTHER rigs' prefixes in an anchor's prose and
-	// discards any hit that is really a rig name (so "signal-loom" is not read
-	// as a "signal-" bead id).
+	// discards any hit that is really a rig name (so "web-app" is not read as
+	// a "web-" bead id).
 	Prefixes []string
 	RigNames []string
 }

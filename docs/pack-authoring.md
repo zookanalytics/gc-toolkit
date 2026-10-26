@@ -358,7 +358,7 @@ matches and a live owner resolves to **absent**:
 
 ```
 assignee "gascity/gc-toolkit.gc-z0vi2" -> absent
-alias    "gc-toolkit.gc-z0vi2"         -> active  (session s-lx-wisp-q5qbl)
+alias    "gc-toolkit.gc-z0vi2"         -> active  (session s-hq-wisp-q5qbl)
 ```
 
 Nothing downstream catches it: "absent after exact lookup" classifies as

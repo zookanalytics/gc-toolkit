@@ -236,8 +236,8 @@ if [ "$READS_OK" -eq 1 ]; then
         BASELINE=$(cat "$BASELINE_FILE" 2>/dev/null || true)
         N_BASELINE=$(printf '%s' "$BASELINE" | tr ',' '\n' | awk 'NF { n++ } END { print n + 0 }')
         # A visit names its subject by its shared identity (tracks edge,
-        # gc.continuation_group fallback — the stamp alone has landed empty,
-        # su-ab9je). visit_identity_subjects is visit-identity.sh.
+        # gc.continuation_group fallback — the stamp alone has landed empty).
+        # visit_identity_subjects is visit-identity.sh.
         LIVE_VISIT=$(jq -r --arg s "$SUBJECT" "$VISIT_IDENTITY_JQ"'[.[] | select((.metadata.task_kind // "") == "visit")
                                                     | visit_identity_subjects[]]
                                                | (index($s) // "") | tostring' "$LIVE" 2>/dev/null)

@@ -17,8 +17,8 @@ to reading: given an id, which store answers for it, and what its silence means.
 
 ## A lookup resolves a live id but not its absence
 
-Every bead id begins with a prefix its store owns — `tk-` for gc-toolkit,
-`su-` for shutupandlisten, `lx-` for the city's own store. The prefix is the
+Every bead id begins with a prefix its store owns: `tk-` for gc-toolkit, and
+another rig's prefix or the city store's for each of theirs. The prefix is the
 whole of that binding, and nothing else in a lookup carries it. An unpinned
 `gc bd show` resolves a live id from whichever store holds it, wherever the
 caller stands. What it cannot carry is an absence: a miss is answered by the

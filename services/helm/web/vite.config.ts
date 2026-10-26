@@ -2,9 +2,15 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 // The dev server proxies the board fetch to a running helm service mount, so
-// `npm run dev` renders live data. Point it at another city (or another
-// supervisor port) with HELM_DEV_MOUNT.
-const DEFAULT_DEV_MOUNT = 'http://127.0.0.1:8372/v0/city/loomington/svc/helm';
+// `npm run dev` renders live data. The mount defaults to the supervisor's
+// loopback port and the city a Gas City session runs in, which GC_CITY names
+// by its path or by its name. Point it at another city (or another supervisor
+// port) with HELM_DEV_MOUNT.
+const DEFAULT_DEV_CITY = (process.env.GC_CITY ?? '').replace(/\/+$/, '').split('/').pop() ?? '';
+const DEFAULT_DEV_MOUNT =
+  DEFAULT_DEV_CITY === ''
+    ? ''
+    : `http://127.0.0.1:8372/v0/city/${encodeURIComponent(DEFAULT_DEV_CITY)}/svc/helm`;
 // ttyd's own loopback port. In deployment the board reaches ttyd because a
 // tailscale-serve mapping publishes both under one origin; the dev server has
 // no such mapping, so it proxies /terminal itself to reproduce that same-origin
@@ -18,7 +24,12 @@ const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 // traffic somewhere it should not go.
 function resolveLoopbackTarget(envName: string, fallback: string): string {
   const raw = process.env[envName];
-  if (raw === undefined) return fallback;
+  if (raw === undefined) {
+    if (fallback === '') {
+      throw new Error(`${envName} is unset, and no GC_CITY names a city to default it to`);
+    }
+    return fallback;
+  }
   let hostname: string;
   try {
     hostname = new URL(raw).hostname;
