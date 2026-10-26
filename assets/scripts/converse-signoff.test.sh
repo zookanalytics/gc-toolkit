@@ -60,7 +60,7 @@ HELM="$REPO/assets/scripts/gc-helm.sh"
 # pages: each pin below reads the one that carries the text it guards.
 ENGAGE="$REPO/docs/human-engagement.md"
 ENGAGE_GC="$REPO/docs/gascity/human-engagement.md"
-# Steps 2–8 are carried by on-demand skills; step 1 and the routing table stay
+# Steps 2–7 are carried by on-demand skills; step 1 and the routing table stay
 # in the prompt. Each pin below reads the file that carries the text it guards:
 # the prompt for step 1, the routing table and the shared Definitions/Rules, and
 # the per-step skill for a moved step body.
@@ -312,7 +312,7 @@ echo "── the loop's step numbering still resolves ──"
 # Inserting a step renumbers every step after it AND every cross-reference to
 # them ("stamp the takeaway at hold time (step 5)"). A stale pointer sends the
 # role to the wrong step, and nothing at runtime notices. Step 1 is inline
-# (`1. **Claim.**`); steps 2–8 are named by the routing table (`**Step N**` /
+# (`1. **Claim.**`); steps 2–7 are named by the routing table (`**Step N**` /
 # `**Steps N–M**`). The steps that EXIST are the union of the two, ranges
 # expanded, and a `step N` reference is stale when it points outside that set.
 steps_defined="$(
