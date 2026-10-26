@@ -29,8 +29,9 @@
 # of the sitting that ruled. It is required either way, because it is the
 # whole of what distinguishes a sound disposition from a careless close.
 #
-# Callers: converse dispositions and operator close-outs — the PR side of the
-# bead-rehome disposition doctrine (docs/state-machine.md "Disposition").
+# Callers: a sitting's ruling, through converse-signoff.sh --retire, and
+# operator close-outs — the PR side of the bead-rehome disposition doctrine
+# (docs/state-machine.md "Disposition").
 # The current store must be the anchor's rig (GC_RIG, or run in its checkout).
 # Exit: 0 stamped (PR closed) or already disposed · 1 error · 2 usage.
 set -uo pipefail

@@ -22,8 +22,10 @@
 #   (UNCLOSED, HEADLINE) a gate that does not close or a headline that does not
 #             land stops the sign-off before the conversation closes
 #   (HELD)    a held subject is released on a ruling
-#   (OPEN-PR, REWORK*) a ruling on an open PR answers --rework or --no-rework;
-#             the rework files first, and a filing that fails writes nothing else
+#   (OPEN-PR, REWORK*, RETIRE*) a ruling on an open PR answers --rework,
+#             --no-rework or --retire; the rework or the retirement runs first,
+#             and one that fails writes nothing else, so the gate keeps holding
+#             the merge
 #   (CUT-SHORT*) the hand-back is one write guarded on the holder and the
 #             status, and a conversation that reads closed, before that write or
 #             because a dismiss closed it first, stays closed
@@ -31,7 +33,8 @@
 #
 # Runs the REAL converse-signoff.sh with a stubbed `gc` on PATH over a
 # file-backed store, and stub pack scripts at $GC_RIG_ROOT, from a cwd outside
-# any checkout so no real pack script is reached.
+# any checkout so no real pack script is reached. Whether a gate still holds the
+# anchor's merge is read by the REAL finalize-gate.sh over the same store.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -155,6 +158,16 @@ printf 'converse-rework %s\n' "$*" >> "$CALLS"
 [ -n "${REWORK_FAIL:-}" ] && { echo "rework refused: anchor has no branch"; exit 2; }
 echo "tk-child gc-toolkit/gc-toolkit.polecat filed"
 R
+# RETIRE_FAIL models pr-dispose.sh recording the disposition and then failing
+# to close the PR, which leaves it open.
+cat > "$S/pr-dispose.sh" <<'D'
+#!/usr/bin/env bash
+printf 'pr-dispose %s\n' "$*" >> "$CALLS"
+_a=""; _k=""; _p=""; for a in "$@"; do [ "$_p" = "--anchor" ] && _a="$a"; [ "$_p" = "--kind" ] && _k="$a"; _p="$a"; done
+gc bd update "$_a" --set-metadata "gc.pr_close_disposition_kind=$_k" >/dev/null
+[ -n "${RETIRE_FAIL:-}" ] && { echo "pr-dispose: the marker is recorded but 'gh pr close 7' failed and the PR is still OPEN"; exit 1; }
+echo "pr-dispose: closed PR#7 as $_k"
+D
 cat > "$S/pr-sitting-comment.sh" <<'P'
 #!/usr/bin/env bash
 printf 'pr-sitting-comment %s\n' "$*" >> "$CALLS"
@@ -188,6 +201,13 @@ acceptance() {
     gate tk-rev review-needs-you.tk-find; edge tk-anc blocks tk-rev
     conv tk-conv tk-anc; edge tk-conv replies-to tk-rev
 }
+# An open PR whose merge only the conversation's own gate holds, so resolving
+# that gate releases the merge.
+open_pr() {
+    fresh; bead tk-anc; setm tk-anc merge_result pull_request
+    gate tk-rev conversation; edge tk-anc blocks tk-rev
+    conv tk-conv tk-anc; edge tk-conv replies-to tk-rev
+}
 
 # run_signoff <args...> -> RC, OUT (stdout and stderr), from a cwd outside any
 # checkout.
@@ -197,7 +217,13 @@ run_signoff() {
     set -e
 }
 writes() { grep -c -v '^lifecycle state' "$CALLS" 2>/dev/null || true; }
+# merge_held <bead> — "held" while the real finalize gate refuses the bead, the
+# check merge.sh makes for an open human gate before it lands a PR.
+merge_held() {
+    if (cd "$TMP/cwd" && bash "$HERE/finalize-gate.sh" check "$1" >/dev/null 2>&1); then echo released; else echo held; fi
+}
 RULED=(--ruled yes --ruling "fix the retry before the merge" --route human --no-wait)
+RETIRED=(--ruled yes --ruling "the work moved to the new design" --route human --no-wait)
 
 echo "# refusals before any write"
 acceptance; run_signoff --outcome x
@@ -326,6 +352,45 @@ acceptance; setm tk-anc merge_result pull_request
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --no-rework
 eq "$RC" 0 "(NO-REWORK) --no-rework exits 0"
 has "$(grep '^pr-sitting-comment' "$CALLS")" "ruling leaves the branch of tk-anc as it stands" "(NO-REWORK) …recording that the branch stands"
+
+echo "# a ruling that the PR will not land retires it before any gate releases the merge"
+open_pr
+run_signoff --conversation tk-conv --outcome x "${RETIRED[@]}" --retire duplicate
+eq "$RC" 2 "(RETIRE-USAGE) --retire duplicate without --successor exits 2"
+run_signoff --conversation tk-conv --outcome x "${RETIRED[@]}" --retire abandoned
+eq "$RC" 2 "(RETIRE-USAGE) --retire with a kind bead-rehome does not take exits 2"
+run_signoff --conversation tk-conv --outcome x "${RETIRED[@]}" --rework --retire not-needed
+eq "$RC" 2 "(RETIRE-USAGE) --rework beside --retire exits 2"
+run_signoff --conversation tk-conv --outcome x "${RETIRED[@]}" --no-rework --successor tk-new
+eq "$RC" 2 "(RETIRE-USAGE) --successor without --retire exits 2"
+run_signoff --conversation tk-conv --outcome x --retire not-needed
+eq "$RC" 2 "(RETIRE-USAGE) --retire without a ruling exits 2"
+eq "$(writes)" 0 "(RETIRE-USAGE) …and nothing is written"
+eq "$(merge_held tk-anc)" held "(RETIRE) the conversation's gate holds the open PR's merge before the ruling"
+RETIRE_FAIL=1 run_signoff --conversation tk-conv --outcome "retired" "${RETIRED[@]}" --retire not-needed
+eq "$RC" 1 "(RETIRE-FAIL) a retirement that leaves the PR open exits 1"
+has "$OUT" "RETIREMENT NOT COMPLETE on tk-anc" "(RETIRE-FAIL) …saying so"
+has "$OUT" "NOT SIGNED OFF" "(RETIRE-FAIL) …and that the sign-off is not to be posted"
+hasnt "$(cat "$CALLS")" "gc-helm takeaway" "(RETIRE-FAIL) …with no headline written"
+eq "$(field tk-rev status)" "open" "(RETIRE-FAIL) …no gate resolved"
+eq "$(merge_held tk-anc)" held "(RETIRE-FAIL) …so the real finalize gate still holds the open PR's merge"
+eq "$(field tk-conv status)" "in_progress" "(RETIRE-FAIL) …and the conversation stays open for the re-run"
+: > "$CALLS"
+run_signoff --conversation tk-conv --outcome "retired: the work moved" "${RETIRED[@]}" --retire not-needed
+eq "$RC" 0 "(RETIRE) the re-run's --retire exits 0"
+has "$(cat "$CALLS")" "pr-dispose --anchor tk-anc --successor tk-conv --kind not-needed --note the work moved to the new design" "(RETIRE) the PR is retired as not-needed, with the conversation as the evidence and the ruling as the note"
+has "$(grep -v '^lifecycle state' "$CALLS" | head -1)" "pr-dispose" "(RETIRE) …before every other write"
+case "$(cat "$CALLS")" in
+  *"pr-dispose"*"gate resolve tk-rev"*) ok "(RETIRE) …so the PR is closed before the gate that held its merge is resolved" ;;
+  *) bad "(RETIRE) the gate was resolved before the PR was retired: $(cat "$CALLS")" ;;
+esac
+eq "$(merge_held tk-anc)" released "(RETIRE) the gate releases the merge only after the PR is closed"
+eq "$(field tk-conv status)" "closed" "(RETIRE) the conversation is closed"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "retired the PR of tk-anc (not-needed, successor tk-conv)" "(RETIRE) …and the reminder says the PR was retired"
+open_pr
+run_signoff --conversation tk-conv --outcome "retired: a duplicate" "${RETIRED[@]}" --retire duplicate --successor tk-new
+eq "$RC" 0 "(RETIRE-SUCCESSOR) --retire duplicate --successor exits 0"
+has "$(cat "$CALLS")" "pr-dispose --anchor tk-anc --successor tk-new --kind duplicate" "(RETIRE-SUCCESSOR) …naming the bead that carries the work as the successor"
 
 echo "# cut short: the conversation goes back to the operator's queue"
 acceptance; run_signoff --conversation tk-conv --outcome "cut short: the rollout question is still owed" --ruled no

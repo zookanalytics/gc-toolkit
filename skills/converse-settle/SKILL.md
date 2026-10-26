@@ -69,9 +69,10 @@ rule on it in this sitting.
 
 When nothing important is pending, sign off. Write the durable trace first,
 then post the sign-off as the thread's last word. `converse-signoff.sh` writes
-the trace in one order every time: the ruling's rework, the subject's
-headline, the answer on each gate the conversation replies to, the release of
-a `held` subject, the conversation's close, and the PR reminder. You tell it
+the trace in one order every time: the ruling's rework or the PR's retirement,
+the subject's headline, the answer on each gate the conversation replies to,
+the release of a `held` subject, the conversation's close, and the PR
+reminder. You tell it
 what this sitting settled. `--ruled yes` resolves each open gate the
 conversation replies to with `ruled: <the ruling>`, except each one a
 `--leave` names, which the ruling leaves owed with its reply in place, and
@@ -90,14 +91,14 @@ if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      # --route <rig>/<agent> releases a held subject to that pool instead
      # --leave <gate>, once for each gate the ruling leaves owed
      # --waiting-on <bead> [--waiting-on <bead> ...] in place of --no-wait
-     # --rework | --no-rework   (with --ruled yes; required on an open-PR subject)
+     # --rework, --no-rework or --retire <kind>: one is required on an open-PR subject
 then
   : # signed off — report any answer it says reached a gate first, then post the sign-off below
 else
-  # NOT signed off: a read failed, the rework did not file, the headline did
-  # not land, a gate did not close, or the conversation did not close or hand
-  # back. Do NOT post the sign-off. Repair what it printed and re-run, or raise
-  # it in the thread.
+  # NOT signed off: a read failed, the rework did not file, the PR did not
+  # retire, the headline did not land, a gate did not close, or the
+  # conversation did not close or hand back. Do NOT post the sign-off. Repair
+  # what it printed and re-run, or raise it in the thread.
   exit 1
 fi
 ```
@@ -125,21 +126,26 @@ instead of claiming your own.
   A member takes no `--waiting-on`, because bd refuses that edge.
 
 **On a `--ruled yes` sign-off whose subject is an open PR
-(`merge_result=pull_request`), answer whether the ruling changes what the
-branch must contain.** Pass `--rework` when it does, since the PR still reads
-review-ready against a head that predates the ruling (the `prs` skill,
+(`merge_result=pull_request`), answer what the ruling does to the PR.** Pass
+`--rework` when it changes what the branch must contain, since the PR still
+reads review-ready against a head that predates the ruling (the `prs` skill,
 sending it back for rework). Pass `--no-rework` when the branch stands as it
-is. Given neither on an open-PR subject, the
-sign-off refuses and writes nothing, because a ruling whose rework is
-never filed lands only in notes nothing reads while the stale PR keeps
-reading ready. The rework files before the sign-off writes
-anything else. A rework that does not complete stops the sign-off there,
-and the script exits non-zero. No headline is written, no gate is answered
-and the conversation stays open, so a merge hold your hold filed still holds
-the PR. Re-run once the cause is repaired, and the re-run adopts a child an
-earlier attempt filed. `--rework` applies only to an open-PR subject. On
-any other subject, file and send the ruling's consequence as work (below),
-and re-run without `--rework`.
+is. Pass `--retire <kind>` when the PR will not land (the `prs` skill,
+retiring it): `not-needed` when nothing carries the work, with this
+conversation as the evidence, or `duplicate`, `folded`, `re-homed` or
+`fixed-upstream` with `--successor <bead>`, the bead that carries it now.
+Given none of the three on an open-PR subject, the sign-off refuses and writes
+nothing, because a ruling whose rework is never filed lands only in notes
+nothing reads while the stale PR keeps reading ready, and a gate answered
+before the PR is closed lets an approved PR merge. The rework or the
+retirement runs before the sign-off writes anything else. One that does not
+complete stops the sign-off there, and the script exits non-zero. No headline
+is written, no gate is answered and the conversation stays open, so a merge
+hold your hold filed still holds the PR. Re-run once the cause is repaired:
+the re-run adopts a child an earlier attempt filed, and finds a PR an earlier
+attempt closed. `--rework` and `--retire` apply only to an open-PR subject. On
+any other subject, file and send the ruling's consequence as work (below), and
+re-run without them.
 
 Then post the **sign-off** — the sitting's last word, a hand-back in
 the shape the prompt's Definitions define (**The hand-back**),

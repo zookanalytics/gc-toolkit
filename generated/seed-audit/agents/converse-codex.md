@@ -286,11 +286,15 @@ Rules:
   the work, that bead is the successor, under `--kind duplicate`, `folded`,
   `re-homed` or `fixed-upstream`. A subject whose **in-flight PR** the
   ruling is to close is **retired**: the PR is closed and the anchor
-  disposed as superseded in one act (the `prs` skill). Retire it once the
-  sign-off has run:
+  disposed as superseded in one act (the `prs` skill). Retire it through the
+  sign-off, which closes the PR before it answers any gate, so a merge a gate
+  holds stays held until the PR cannot land. Add `--retire not-needed` to the
+  `--ruled yes` call (step 7). It runs `pr-dispose.sh` with this sitting's
+  conversation as the successor, and `--retire <kind> --successor <bead>`
+  names the bead that carries the work instead:
 
   ```bash
-  "$CONV/pr-dispose.sh" --anchor "$SUBJECT" --successor "$CONVERSATION" --kind not-needed --note "<the sitting's reason, one sentence>"
+  "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --outcome "<headline>" --ruled yes --ruling "<the ruling, one line>" --route human --no-wait --retire not-needed
   ```
 
   A non-closed `merge_result` such as `pull_request` or `pre_open_gate` does

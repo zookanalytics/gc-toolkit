@@ -140,10 +140,15 @@ too (the work skill). An open human gate on the anchor holds its close the same
 way (`docs/finalize-gate.md`), so the reconcile closes the anchor once each
 gate is cleared.
 
-In a sitting, retire a PR only on the operator's ruling, once the sign-off has
-answered the gates the ruling settles, with the sitting's conversation as the
-successor:
+In a sitting, retire a PR only on the operator's ruling, and only through the
+sign-off writer: `--retire <kind>` on its `--ruled yes` call (the
+converse-settle step). The writer runs
+`pr-dispose.sh` before it answers any gate, so a gate that holds the merge
+keeps holding it until the PR is closed. Answered first, that gate would let
+an approved PR merge before its retirement. Under `not-needed` the successor
+is the sitting's conversation, and every other kind names the bead that
+carries the work with `--successor <bead>`:
 
 ```bash
-"$(gc <binding> scripts-dir)/pr-dispose.sh" --anchor <anchor> --successor <conversation> --kind not-needed --note "<why, one sentence>"
+"$(gc <binding> scripts-dir)/converse-signoff.sh" --conversation <conversation> --outcome "<headline>" --ruled yes --ruling "<the ruling, one line>" --route human --no-wait --retire not-needed
 ```

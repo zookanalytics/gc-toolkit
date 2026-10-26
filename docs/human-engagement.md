@@ -429,9 +429,11 @@ own.
 **The sign-off** is `assets/scripts/converse-signoff.sh`, which writes the
 durable trace in one order every time:
 
-1. a ruling's rework, through `converse-rework.sh`, with the conversation as
-   the rework child's `source_ruling_bead`, so a ruling that changes what an
-   open PR's branch must contain becomes work the refinery lands;
+1. what a ruling does to an open PR: its rework, through `converse-rework.sh`,
+   with the conversation as the rework child's `source_ruling_bead`, so a
+   ruling that changes what the PR's branch must contain becomes work the
+   refinery lands; or its retirement, through `pr-dispose.sh`, which records
+   the disposition and closes the PR;
 2. the subject's headline;
 3. `ruled: <the ruling>` on each open gate the conversation replies to that the
    ruling answers, each read back, with an earlier answer reported;
@@ -446,11 +448,16 @@ ruling leaves owed stays open with its reply in place. It reads those gates
 from the conversation's own row (`gc bd list --id <task>`), whose edges keep a
 reply onto a gate in another store. Every read it depends on runs before its
 first write, and it stops short, with nothing posted, when any write does not
-read back, so a re-run repeats each write safely. A sitting signs off only when
-nothing important is pending; a turn that hands the operator something to read
-or answer posts the hand-back and leaves the conversation open. A gate the
-operator rules on during such a turn is answered at once, so a dismiss that
-ends the sitting later leaves nothing the operator ruled on open.
+read back, so a re-run repeats each write safely. A gate can be what holds a
+merge, and resolving it releases the merge, so whatever the ruling puts in the
+merge's way lands before any gate is resolved. A ruling on an open PR must say
+what it does to the PR (`--rework`, `--no-rework` or `--retire`), and the
+rework child's `blocks` edge or the closed PR is in place before step 3. A
+sitting signs off only when nothing important is pending; a turn that hands
+the operator something to read or answer posts the hand-back and leaves the
+conversation open. A gate the operator rules on during such a turn is answered
+at once, so a dismiss that ends the sitting later leaves nothing the operator
+ruled on open.
 
 **A sitting cut short** writes its record, signs off with `--ruled no`, which
 leaves every gate its conversation replies to open and owed with its reply in
