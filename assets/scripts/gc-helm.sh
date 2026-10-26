@@ -3169,11 +3169,12 @@ engage_valid_model() {
 }
 
 # engage_find_conversations <subject> — the subject's conversations that are
-# not closed, one "<id>\t<state>\t<assignee>\t<title>" row each. The state is
-# `live` when a live sitting holds the conversation, `queue` when it waits in
-# the operator's queue, and `left` when its sitting's session has closed: live
-# first, then the queue, then the ones left, oldest first within each. Returns
-# 1 when either read did not answer, so a caller never starts a second sitting
+# not closed, one "<id>\t<state>\t<assignee>\t<status>\t<title>" row each. The
+# state is `live` when a live sitting holds the conversation, `queue` when it
+# waits in the operator's queue, and `left` when its sitting's session has
+# closed: live first, then the queue, then the ones left, oldest first within
+# each. The status is the conversation's own, as the listing read it. Returns 1
+# when either read did not answer, so a caller never starts a second sitting
 # beside a live one it could not see.
 engage_find_conversations() {
     _efc_rows=$(bead_conversations "$1") || return 1
@@ -3183,7 +3184,8 @@ engage_find_conversations() {
                              elif ((.assignee // "") | tostring) == "human" then "queue"
                              else "left" end)} ]
         | sort_by((if .state == "live" then 0 elif .state == "queue" then 1 else 2 end), (.created_at // ""))
-        | .[] | [.id, .state, ((.assignee // "") | tostring), ((.title // "") | tostring)] | @tsv' 2>/dev/null
+        | .[] | [.id, .state, ((.assignee // "") | tostring),
+                 ((.status // "open") | tostring | ascii_downcase), ((.title // "") | tostring)] | @tsv' 2>/dev/null
 }
 
 # engage_starter_list — "<key>\t<label>" per starter seed, in menu order.
@@ -3319,7 +3321,7 @@ engage_prompt_conversation_or_starter() {
             [ -n "$_epv_row" ] || continue
             _epv_id=$(printf '%s' "$_epv_row" | cut -f1)
             _epv_st=$(printf '%s' "$_epv_row" | cut -f2)
-            _epv_title=$(printf '%s' "$_epv_row" | cut -f4-)
+            _epv_title=$(printf '%s' "$_epv_row" | cut -f5-)
             [ -n "$_epv_id" ] || continue
             case "$_epv_st" in
                 live)  _epv_lbl="in session — attaches" ;;
@@ -3922,8 +3924,9 @@ cmd_engage() {
     # else one waiting in the queue, else one whose sitting's session has
     # closed, else a new one. The listing and the session list must both answer
     # before engage chooses, so it never starts a second sitting beside a live
-    # one it could not see.
-    CONV=""; conv_state=""; conv_holder=""
+    # one it could not see. The holder and the status engage reads here are what
+    # its bind is guarded on below.
+    CONV=""; conv_state=""; conv_holder=""; conv_status=""
     if [ -n "$named_conv" ]; then
         CONV="$named_conv"
     elif [ "$engage_file_new" = 1 ] || [ -n "$engage_reason" ]; then
@@ -3946,6 +3949,7 @@ cmd_engage() {
         fi
         conv_state=$(printf '%s' "$conv_line" | cut -f2)
         conv_holder=$(printf '%s' "$conv_line" | cut -f3)
+        conv_status=$(printf '%s' "$conv_line" | cut -f4)
     else
         if [ "$engage_file_new" = 1 ] || [ -n "$engage_reason" ]; then
             echo "$PROG: engage: filing a new conversation on $bead, then engaging it" >&2
@@ -3970,7 +3974,9 @@ cmd_engage() {
             _ens_cleanup_bead=""
             trap - EXIT INT TERM HUP
         fi
-        conv_new="$OPEN_FILED"; conv_state=queue; conv_holder=human
+        # open files a conversation, or joins one, only as it waits in the
+        # queue: assigned to human, at open.
+        conv_new="$OPEN_FILED"; conv_state=queue; conv_holder=human; conv_status=open
     fi
 
     # Pointed at a gate, the conversation engage landed on replies to it,
@@ -4206,30 +4212,48 @@ cmd_engage() {
     # Bind the conversation to the sitting: its assignee becomes the session's
     # alias, so the session's own `gc hook --claim` adopts it (the default work
     # query's assigned tiers) with no pool routing. The bind is CONDITIONAL on
-    # the holder engage read — `human` for a conversation in the queue, or the
-    # alias of a sitting whose session has closed — so of two binds from that
-    # holder only one lands, and a hand-off or another engage that landed first
-    # makes this one miss: a mismatch writes nothing and exits 13, and this
-    # engage must not overwrite whoever holds the conversation now. A
-    # conversation already assigned to this alias, as a sitting whose session
-    # closed leaves it, needs no bind: the new session takes it as its own.
+    # the holder and the status engage read — `human` and open for a
+    # conversation in the queue, or the alias of a sitting whose session has
+    # closed and the status that sitting left — so of two binds from that holder
+    # only one lands, and a hand-off or another engage that landed first makes
+    # this one miss. So does a dismiss: it closes the conversation and keeps its
+    # holder, so a bind guarded on the holder alone would bind a closed
+    # conversation, which no claim adopts. A mismatch writes nothing and exits
+    # 13, and this engage must not overwrite whoever holds the conversation
+    # now. A conversation already assigned to this alias, as a sitting whose
+    # session closed leaves it, needs no bind: the new session takes it as its
+    # own. Either way the conversation must read back held by this sitting and
+    # not closed, or the sitting has nothing to claim and is closed.
     if [ "$conv_holder" != "$salias" ]; then
         bind_rc=0
-        gc bd update "$CONV" --if-assignee "$conv_holder" --assignee "$salias" >/dev/null 2>&1 || bind_rc=$?
+        gc bd update "$CONV" --if-assignee "$conv_holder" --if-status "$conv_status" --assignee "$salias" >/dev/null 2>&1 || bind_rc=$?
         if [ "$bind_rc" -eq 13 ]; then
-            winner=$(assignee_now "$CONV")
+            missed_row=$(row_now "$CONV")
+            winner=$(printf '%s' "$missed_row" | jq -r '.assignee // ""' 2>/dev/null || true)
+            missed_status=$(printf '%s' "$missed_row" | jq -r '(.status // "") | ascii_downcase' 2>/dev/null || true)
+            if [ "$missed_status" = closed ]; then
+                engage_abort "$sid" "conversation $CONV was closed while this sitting spawned (a dismiss closes a conversation and keeps its holder), so there is nothing to bind. The sitting $sname this engage spawned holds nothing and was closed; engage the subject to open a fresh conversation: $PROG engage $bead"
+            fi
+            if [ -n "$missed_row" ] && [ "$winner" = "$conv_holder" ]; then
+                engage_abort "$sid" "conversation $CONV went from $conv_status to '${missed_status:-unread}' while this sitting spawned, so the bind wrote nothing. The sitting $sname this engage spawned holds nothing and was closed; re-run to reach the conversation where it is now: $PROG engage $bead"
+            fi
             engage_abort "$sid" "conversation $CONV was taken by '${winner:-nobody}' while this sitting spawned — not overwriting. The sitting $sname this engage spawned holds nothing and was closed; re-run to reach the conversation where it is now: $PROG engage $bead"
         fi
         if [ "$bind_rc" -ne 0 ]; then
             engage_abort "$sid" "spawned $sname but the bind of conversation $CONV failed (rc $bind_rc). The sitting holds nothing and was closed; the conversation is unchanged — re-run: $PROG engage $bead"
         fi
     fi
-    assigned=$(assignee_now "$CONV")
+    bound_row=$(row_now "$CONV")
+    assigned=$(printf '%s' "$bound_row" | jq -r '.assignee // ""' 2>/dev/null || true)
+    bound_status=$(printf '%s' "$bound_row" | jq -r '(.status // "") | ascii_downcase' 2>/dev/null || true)
     if [ "$assigned" != "$salias" ]; then
         if [ -n "$assigned" ] && [ "$assigned" != "$conv_holder" ]; then
             engage_abort "$sid" "conversation $CONV is held by '$assigned', not the sitting '$salias' this engage spawned — another writer took it after the bind. The sitting holds nothing and was closed; re-run to reach it: $PROG engage $bead"
         fi
         engage_abort "$sid" "conversation $CONV read back assigned to '${assigned:-nobody}' after binding it to '$salias' — the bind did not persist. The sitting holds nothing and was closed; the conversation is unchanged — re-run: $PROG engage $bead"
+    fi
+    if [ "$bound_status" = closed ]; then
+        engage_abort "$sid" "conversation $CONV reads closed (a dismiss, or a sign-off, closed it while this sitting spawned), so the sitting $sname has nothing to claim and was closed. Engage the subject to open a fresh conversation: $PROG engage $bead"
     fi
     bust_cache
 

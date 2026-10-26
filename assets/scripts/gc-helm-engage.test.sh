@@ -40,6 +40,11 @@
 #             bead waits on, is warned about, never refused
 #   (TAKEN, BIND-FAIL, STOMP, NOPERSIST) a bind that misses or does not stick
 #             closes the sitting it spawned and overwrites nothing
+#   (DISMISSED-*) a conversation a dismiss closes while the sitting spawns, in
+#             the queue, filed by engage, or resumed under the same alias or
+#             another, fails the bind's status guard or its read-back: the
+#             sitting is closed, and the conversation stays closed with the
+#             holder the dismiss left
 #   (ALIAS-*, RACE-CONCURRENT) a spawn refused at the alias spawns nothing and
 #             waits for the holder's bind; two engages of one conversation spawn
 #             once and bind once
@@ -325,6 +330,9 @@ case "$1 ${2:-}" in
       echo 'gc session new: invalid session alias: "gc-62297" conflicts with session ID syntax' >&2; jq -n '{ok:true}'
     else
       printf '%s' "$SID" > "$SPAWNED"
+      # $DISMISS_ON_SPAWN: a dismiss closes that conversation while the spawn
+      # runs, keeping its holder, as bd's close does.
+      [ -n "${DISMISS_ON_SPAWN:-}" ] && printf 'closed' > "$ST/$DISMISS_ON_SPAWN.status"
       _qa="gc-toolkit/gc-toolkit.$_al"; [ -n "${SPAWN_NO_ALIAS:-}" ] && _qa=""
       printf '%s' "gc-toolkit/gc-toolkit.$_al" > "$ST/spawned-alias"
       jq -n --arg id "$SID" --arg n "$SNAME" --arg a "$_qa" '{schema_version:"1", ok:true, session_id:$id, session_name:$n, alias:$a, template:"t", transport:"tmux", work_dir:"/w", deferred_start:true, attached:false}'
@@ -354,21 +362,24 @@ case "$1 ${2:-}" in
   "bd update")
     printf 'bd update %s\n' "$*" >> "$CALLS"
     _id="$3"; shift 3
-    _ifa_set=0; _ifa=""; _new_set=0; _new=""; _notes=0
+    _ifa_set=0; _ifa=""; _ifs_set=0; _ifs=""; _new_set=0; _new=""; _notes=0
     while [ $# -gt 0 ]; do
       case "$1" in
         --if-assignee) _ifa_set=1; _ifa="${2-}"; shift 2 ;;
+        --if-status)   _ifs_set=1; _ifs="${2-}"; shift 2 ;;
         --assignee)    _new_set=1; _new="${2-}"; shift 2 ;;
         --append-notes) _notes=1; shift 2 ;;
         *) shift ;;
       esac
     done
-    # bd's --if-assignee guard, checked and written under one lock, as the store
-    # does: a mismatch writes nothing and exits 13. $RACE_LOST makes the guard
-    # lose: another writer took the conversation in the spawn window, recorded
-    # as $RACE_WINNER (empty for none) with status $RACE_STATUS. $BIND_FAIL fails
-    # it for another reason, $BIND_NOPERSIST reports success and writes nothing,
-    # and $BIND_STOMP overwrites the binding just written.
+    # bd's --if-assignee and --if-status guards, checked and written under one
+    # lock, as the store does: a mismatch writes nothing and exits 13.
+    # $RACE_LOST makes the guard lose: another writer took the conversation in
+    # the spawn window, recorded as $RACE_WINNER (empty for none) with status
+    # $RACE_STATUS. $BIND_FAIL fails it for another reason, $BIND_NOPERSIST
+    # reports success and writes nothing, $BIND_STOMP overwrites the binding
+    # just written, and $CLOSE_AFTER_BIND closes the conversation just after
+    # it, as a dismiss landing between the bind and its read-back does.
     if [ "$_ifa_set" = 1 ]; then
       if [ -n "${RACE_LOST:-}" ]; then
         printf '%s' "${RACE_WINNER-gc-toolkit/gc-toolkit.tk-conv-elsewhere}" > "$ST/$_id.assignee"
@@ -380,9 +391,11 @@ case "$1 ${2:-}" in
       stub_lock "$ST/$_id.lock"
       _cur="$(cat "$ST/$_id.assignee" 2>/dev/null || printf 'human')"
       if [ "$_cur" != "$_ifa" ]; then stub_unlock "$ST/$_id.lock"; exit 13; fi
+      if [ "$_ifs_set" = 1 ] && [ "$(stat_of "$_id")" != "$_ifs" ]; then stub_unlock "$ST/$_id.lock"; exit 13; fi
       [ "$_new_set" = 1 ] && printf '%s' "$_new" > "$ST/$_id.assignee"
       stub_unlock "$ST/$_id.lock"
       [ -n "${BIND_STOMP:-}" ] && printf '%s' "$BIND_STOMP" > "$ST/$_id.assignee"
+      [ -n "${CLOSE_AFTER_BIND:-}" ] && printf 'closed' > "$ST/$_id.status"
       exit 0
     fi
     [ "$_new_set" = 1 ] && printf '%s' "$_new" > "$ST/$_id.assignee"
@@ -495,7 +508,7 @@ reset; run_engage tk-conv --no-attach
 eq "$RC" 0 "(CONVID) engaging a queued conversation exits 0"
 has "$CALLED" "session new converse-opus --alias tk-conv --no-attach --json" "(CONVID) spawns converse-opus --alias <conversation> --no-attach"
 eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(BIND) the conversation is assigned to the sitting's qualified alias, the actor its claim runs as"
-has "$CALLED" "bd update tk-conv --if-assignee human --assignee gc-toolkit/gc-toolkit.tk-conv" "(BIND) …guarded on the holder engage read, the operator's queue"
+has "$CALLED" "bd update tk-conv --if-assignee human --if-status open --assignee gc-toolkit/gc-toolkit.tk-conv" "(BIND) …guarded on the holder and the status engage read, the operator's queue and open"
 has "$(cat "$TMP/psc.log")" "engage --sitting tk-conv --subject tk-subj" "(CONVID-PRCOMMENT) engage posts the open reminder on the bead the conversation tracks"
 hasnt "$CALLED" "session nudge" "(NO-KICK) an opus sitting self-starts from its prompt and is not kicked"
 hasnt "$OUT" "took the conversation" "(CONVID) an explicit conversation id is not reported as one engage chose"
@@ -715,6 +728,47 @@ reset; BIND_NOPERSIST=1 run_engage tk-conv --no-attach
 eq "$RC" 4 "(NOPERSIST) a non-persisting bind exits 4"
 has "$CALLED" "session close gc-77" "(NOPERSIST) …the spawned sitting is closed"
 has "$OUT" "the bind did not persist" "(NOPERSIST) …and the operator is told the bind did not persist"
+
+echo "# a conversation a dismiss closes while the sitting spawns is not bound, and the sitting is closed"
+# bd's close keeps the assignee, so the holder engage read still holds a
+# dismissed conversation: only the status guard and the read-back tell a closed
+# conversation, which no claim adopts. Run on codex, the one provider engage
+# kicks, so "never kicked" proves the abort comes first.
+reset; DISMISS_ON_SPAWN=tk-conv run_engage tk-conv --model codex --no-attach
+eq "$RC" 4 "(DISMISSED-QUEUE) a queued conversation dismissed during the spawn exits 4"
+has "$CALLED" "bd update tk-conv --if-assignee human --if-status open" "(DISMISSED-QUEUE) …the bind is guarded on the status engage read, so the store rejects it (exit 13)"
+has "$OUT" "was closed while this sitting spawned" "(DISMISSED-QUEUE) …saying the conversation closed"
+has "$CALLED" "session close gc-77" "(DISMISSED-QUEUE) …closing the sitting it spawned"
+eq "$(asg tk-conv)/$(cat "$STATE_DIR/tk-conv.status")" "human/closed" "(DISMISSED-QUEUE) …and the conversation stays closed with the holder the dismiss left"
+hasnt "$CALLED" "session nudge" "(DISMISSED-QUEUE) …and the closed codex sitting is never kicked"
+hasnt "$OUT" "✓ converse-codex" "(DISMISSED-QUEUE) …never reporting a sitting"
+export HAVE_CONV=0
+reset; DISMISS_ON_SPAWN=tk-new run_engage tk-subj --no-attach
+eq "$RC" 4 "(DISMISSED-NEW) a conversation engage filed, dismissed during the spawn, exits 4"
+has "$CALLED" "bd update tk-new --if-assignee human --if-status open" "(DISMISSED-NEW) …its bind guarded on the queue and open, as open filed it"
+has "$CALLED" "session close gc-77" "(DISMISSED-NEW) …and the sitting it spawned is closed"
+unset HAVE_CONV
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
+DISMISS_ON_SPAWN=tk-conv run_engage tk-subj --model codex --no-attach
+eq "$RC" 4 "(DISMISSED-LEFT) a conversation resumed under its own alias, dismissed during the spawn, exits 4"
+hasnt "$CALLED" "bd update" "(DISMISSED-LEFT) …binding nothing, since it is already assigned to the alias"
+has "$OUT" "reads closed" "(DISMISSED-LEFT) …its read-back finding it closed"
+has "$CALLED" "session close gc-77" "(DISMISSED-LEFT) …and closing the sitting it spawned"
+hasnt "$CALLED" "session nudge" "(DISMISSED-LEFT) …which is never kicked"
+reset; held tk-conv gc-toolkit/gc-toolkit.c-tk-conv
+run_engage tk-subj --no-attach
+eq "$RC" 0 "(LEFT-REBIND) a conversation left under its c- alias, resumed under its bare id, exits 0"
+has "$CALLED" "bd update tk-conv --if-assignee gc-toolkit/gc-toolkit.c-tk-conv --if-status in_progress --assignee gc-toolkit/gc-toolkit.tk-conv" "(LEFT-REBIND) …binding it guarded on the alias and the status its sitting left"
+reset; held tk-conv gc-toolkit/gc-toolkit.c-tk-conv
+DISMISS_ON_SPAWN=tk-conv run_engage tk-subj --no-attach
+eq "$RC" 4 "(DISMISSED-LEFT-REBIND) that conversation dismissed during the spawn exits 4"
+has "$OUT" "was closed while this sitting spawned" "(DISMISSED-LEFT-REBIND) …the status guard missing on the closed conversation"
+eq "$(asg tk-conv)/$(cat "$STATE_DIR/tk-conv.status")" "gc-toolkit/gc-toolkit.c-tk-conv/closed" "(DISMISSED-LEFT-REBIND) …which keeps the holder the dismiss left"
+has "$CALLED" "session close gc-77" "(DISMISSED-LEFT-REBIND) …and the sitting it spawned is closed"
+reset; CLOSE_AFTER_BIND=1 run_engage tk-conv --no-attach
+eq "$RC" 4 "(DISMISSED-AFTER-BIND) a conversation closed between the bind and its read-back exits 4"
+has "$OUT" "reads closed" "(DISMISSED-AFTER-BIND) …the read-back finding it closed"
+has "$CALLED" "session close gc-77" "(DISMISSED-AFTER-BIND) …and closing the sitting it spawned"
 
 echo "# a spawn whose answer names no alias reads it from the session list"
 reset; SPAWN_NO_ALIAS=1 run_engage tk-conv --no-attach

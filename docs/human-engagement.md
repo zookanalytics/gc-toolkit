@@ -116,8 +116,8 @@ the seam the pack builds at each.
   alias, so the default work query offers the session that one task and
   nothing else. The alias is reserved city-wide while a session that is not
   closed holds it, and the bind that hands the task to the session is a write
-  guarded on the holder the binder read, so two sittings never hold one
-  conversation.
+  guarded on the holder and the status the binder read, so two sittings never
+  hold one conversation, and none is bound to one a dismiss has closed.
 - **A sitting is the worker contract with its close replaced by a hold.**
   Upstream's `gc-role-worker` contract is claim, execute, close. A sitting
   claims its conversation, holds it `in_progress` while the operator thinks,
@@ -211,11 +211,16 @@ these steps:
    short leaves it, is closed first once it is older than the bind wait and
    unattached.
 6. **It binds the task to the session's alias** with
-   `gc bd update <task> --if-assignee <holder> --assignee <alias>`, where the
-   holder is the assignee engage read or filed. A bind that misses, because
-   another engage or a hand-off landed first, closes the session this engage
-   started. Then engage posts the PR reminder, waits for the reconciler to
-   start the session, and attaches the operator.
+   `gc bd update <task> --if-assignee <holder> --if-status <status> --assignee
+   <alias>`, where the holder and the status are the ones engage read, or the
+   queue and `open` for a conversation it filed. A task already assigned to the
+   alias, as a sitting whose session closed leaves it, needs no bind. Either
+   way the task must read back assigned to the alias and not closed. A bind
+   misses when another engage or a hand-off landed first, or when a dismiss
+   closed the task, since a dismiss keeps the holder and changes the status. A
+   bind that misses, or a read-back that finds the task closed, closes the
+   session this engage started. Then engage posts the PR reminder, waits for
+   the reconciler to start the session, and attaches the operator.
 
 Engage warns when it starts a sitting while another live sitting tracks the
 bead, or replies to a gate the bead waits on. **One sitting per bead is a
