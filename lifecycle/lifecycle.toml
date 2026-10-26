@@ -1462,10 +1462,11 @@ keys = [
 # gc.gate_visit — on a gate bead, the visit gate-visit-sweep.sh filed for it (a
 #   bead id, or `filed`); its presence is how the sweep skips a gate already
 #   escalated, and `--unset` re-offers the visit.
-# gc.continuation_group — the subject a visit is scoped to, converse's
-#   group-scoped re-claim fence. Written on the visit by gc-helm.sh and
-#   escalate.sh, and repaired toward the subject id when a read-back finds it
-#   empty (an empty group disables the fence). Never cleared. A bead id.
+# gc.continuation_group — the subject a visit is scoped to, recorded beside the
+#   visit's tracks edge; converse-claim.sh reports it as the sitting's subject.
+#   Written on the visit by gc-helm.sh and escalate.sh, and repaired toward the
+#   subject id when a read-back finds it empty (a reader that lists a subject's
+#   visits by the stamp alone misses it). Never cleared. A bead id.
 # gc.origin — `operator` marks a topic a human commissioned. gc-visit-open.sh
 #   stamps it on its subject when the key is absent, and gc-helm.sh `engage
 #   --new-subject` writes it in the create payload of the subject it files.

@@ -529,54 +529,49 @@ lacks "no 'is one bounded sitting' definition anywhere in the doc" \
     "a visit is a request FOR one bounded sitting; the bare equation is the bug written as the model"
 
 echo "── the post-sitting ending is documented, not just the held one ──"
-# An operator lost an unsubmitted multi-paragraph reply. The
-# held-sitting section above reads as the complete account of how the pane
-# goes; it is not. Once a sitting ENDS its manual session stays up until the
-# converse-reap order closes it, on the first pass that finds the visit closed
-# and the pane unattached, and that close kills the pane and its process tree
-# outright: nothing reads the composer, and nothing warns. Every claim below is
-# load-bearing for a reader deciding whether a visible pane is safe to type
-# into, so each is pinned inside that section rather than anywhere in the doc.
-# The HEADING, not the phrase: the forward pointer in the held-sitting
-# section quotes the section name, so a bare phrase match passes even
-# with the section itself deleted (caught by mutating this file).
+# Once a sitting ENDS, its session goes, and the pane with it: the sitting's
+# own drain-ack ends it, dismiss stops it, and converse-reap closes one that
+# outlives its closed visit, attached or not. The stop kills the pane and its
+# process tree outright, so a reply typed and not sent goes with it. Every claim
+# below is load-bearing for a reader deciding whether a visible pane is safe to
+# type into, so each is pinned inside that section rather than anywhere in the
+# doc. The HEADING, not the phrase: the forward pointer in the held-sitting
+# section quotes the section name, so a bare phrase match passes even with the
+# section itself deleted.
 have "doc carries the post-sitting ending" '## How a pane dies when no sitting is live' "$ENGAGE"
 POST_SEC="$TMPD/post-sitting-section.txt"
 awk '/^## How a pane dies when no sitting is live/ {f=1; next} f && /^## / {exit} f {print}' \
-    "$ENGAGE" >"$POST_SEC"
-# What ends a settled sitting is the pack's reap, not a runtime clock: the
+    "$ENGAGE" | tr '\n' ' ' | tr -s ' ' >"$POST_SEC"
+# What ends a settled sitting is its own drain-ack, not a runtime clock: the
 # awake set keeps a manual session, so the pool's no-wake-reason drain never
-# reaches one. A section that drops either half has a reader trusting a clock
-# that does not run, or missing the one that does.
-have "the section names the reap that ends a settled sitting" 'converse-reap' "$POST_SEC"
-have "the section names the reap's close" 'gc session close' "$POST_SEC"
-have "the section says what holds the pane up" 'manual origin' "$POST_SEC"
+# reaches one. The reap is the backstop, and it no longer spares an attached
+# session.
+have "the section says the sitting ends its own session" 'gc runtime drain-ack' "$POST_SEC"
 have "the section says the pool drain does not reach a sitting" 'no-wake-reason' "$POST_SEC"
+have "the section names the reap as the backstop" 'converse-reap' "$POST_SEC"
+have "the section names the reap's close" 'gc session close' "$POST_SEC"
+have "…which closes a session whether or not anyone is attached" 'attached or not' "$POST_SEC"
 # The mechanism, pinned at the call that destroys the pane. A reader who
 # trusts a visible pane needs to know there is no interruption, no prompt and
 # no read-out first — the pane and everything composed in it goes in one step.
 have "the section names the destructor" 'KillSessionWithProcesses' "$POST_SEC"
 have "the section rules out the keystroke" 'no Ctrl-C keystroke injection into the pane' "$POST_SEC"
-# Regression guard, not decoration. The first version of this section
-# said the drain's first act was `Provider.Interrupt` -> SendKeysRaw C-c
-# clearing the composer, and THIS suite pinned that string — so the false
-# mechanism was load-bearing in two places at once and a corrected doc
-# would have failed the tests. `verifiedInterrupt` is the drain code's
-# only interrupt wrapper and has no caller outside its own unit test;
-# nothing on this path types into the pane. Keep it that way.
+have "…and says an unsent reply goes with the pane" 'goes with the pane' "$POST_SEC"
+# Regression guard: nothing on this path types into the pane. The stop kills
+# the pane's process tree through Provider.Stop and sends no keys.
 lacks "doc does not revive the keystroke mechanism" 'SendKeysRaw' "$ENGAGE" \
     "the stop kills the pane's process tree through Provider.Stop; it sends no keys"
-# Attachment is the reap's only proxy for a reader, and with one tmux client
-# switched between sessions it covers only the pane on screen. A reader who
-# takes "the reap skips attached panes" as protection for a pane they switched
-# away from is the one who loses a draft.
-have "the section says attachment covers only the pane on screen" 'one tmux client' "$POST_SEC"
-have "the section points at the upstream filing" 'gc-ze774' "$POST_SEC"
-# The operator's ruling is a PROHIBITION, and it is the part most likely
-# to be softened by a later edit into "capture it on the way out" — which
-# is the option they explicitly overrode. Pin the ruling itself, not a
-# paraphrase of it.
-have "doc carries the hard-no ruling" 'should be a hard no' "$POST_SEC"
+# The city's tmux server carries a client per sitting tab beside the main
+# connection, so attachment was never a single pane on screen.
+lacks "the doc does not claim the city runs one tmux client" 'one tmux client' "$ENGAGE" \
+    "the operator keeps a tab per sitting beside the main connection"
+# The operator's ruling (sitting tk-irjgyll, 2026-10-25): viewing does not hold
+# a sitting open, a tab exits and prints the last hand-back, and the main
+# connection moves on. Pin the ruling and the mechanism that carries it.
+have "doc carries the viewing ruling" 'nothing holds a session open because someone is viewing it' "$POST_SEC"
+have "…the per-session tmux option that carries it" 'detach-on-destroy' "$POST_SEC"
+have "…the client flag the main connection keeps moving on with" '-f no-detach-on-destroy' "$POST_SEC"
+have "…and the tab printing the sitting's last hand-back" 'last hand-back the sitting recorded on it' "$POST_SEC"
 # A reader who finds the held-sitting section first must not stop there:
 # without a forward pointer the held-sitting account silently doubles as "all
 # the ways the pane goes", which is the reading that left this window
@@ -591,8 +586,8 @@ fi
 # Both role-facing copies carry it too. converse-opus is where someone goes to
 # tune idle_timeout, and the prompt is what the session reads at wake; a
 # correction that lands only in the central doc reaches neither.
-have "config names the reap that ends a settled sitting" 'converse-reap' "$ATOML"
-have "prompt names the reap that ends a settled sitting" 'converse-reap' "$PROMPT"
+have "config names the reap that closes a sitting outliving its visit" 'converse-reap' "$ATOML"
+have "prompt names the reap that closes a sitting outliving its visit" 'converse-reap' "$PROMPT"
 
 echo "── the writer the contract depends on still exists ──"
 have "gc-helm exposes the takeaway verb" 'cmd_takeaway()' "$HELM"

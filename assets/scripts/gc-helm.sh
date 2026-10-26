@@ -2336,8 +2336,8 @@ cmd_open() {
     gc bd dep add "$VISIT" "$bead" --type=tracks
     # Read the group stamp back and repair it from the subject if it landed
     # empty: it can land present-but-empty while every sibling stamp in the
-    # same update lands, and an empty group disables converse's group-scoped
-    # re-claim fence. Repair and warn, never exit — this block files the one
+    # same update lands, and a reader that lists a subject's visits by the
+    # stamp alone misses a visit whose stamp is empty. Repair and warn, never exit — this block files the one
     # visit for its scope, and on a persistent miss the tracks edge still
     # carries the subject for guards that read the union.
     GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""' 2>/dev/null || printf '')
