@@ -20,6 +20,8 @@
 #             is not kicked; a codex sitting keeps the START-directive kick
 #   (SUBJECT) engaging a bead takes its conversation from the queue, says so,
 #             and offers --reason; a bead with none gets one filed
+#   (JOIN-RACE) a conversation another open files in the queue after engage's
+#             listing is the one engage takes, through the open it runs
 #   (REASON-NEW) --reason files a fresh conversation even when one waits
 #   (CONVID-REASON) --reason on an explicit conversation id is refused
 #   (LIVE)    a conversation a live sitting holds is attached to, not doubled
@@ -248,8 +250,16 @@ case "$1 ${2:-}" in
         case " $* " in
           *" --type tracks "*)
             if [ "$_who" = "${CONV_SUBJECT:-tk-subj}" ]; then
+              # $CONV_FILED_AFTER: a concurrent open files tk-conv in the queue
+              # once that many listings of the bead's conversations have
+              # answered without it.
+              _ids=$(conv_ids)
+              if [ -n "${CONV_FILED_AFTER:-}" ]; then
+                _n=$(( $(cat "$ST/tracks-reads" 2>/dev/null || echo 0) + 1 )); printf '%s' "$_n" > "$ST/tracks-reads"
+                [ "$_n" -le "$CONV_FILED_AFTER" ] || _ids="tk-conv"
+              fi
               _rows='[]'
-              for c in $(conv_ids); do
+              for c in $_ids; do
                 _rows=$(jq -c --argjson r "$(conv_row "$c" list)" '. + [$r | del(.dependencies) + {dependency_type:"tracks"}]' <<< "$_rows")
               done
               printf '%s\n' "$_rows"
@@ -440,7 +450,7 @@ export GC_SITTING_COMMENT_TOOL="$TMP/rec-psc" REC_PSC_LOG="$TMP/psc.log"
 reset() {
     : > "$CALLS"; : > "$SPAWNED"; : > "$POLLS"; : > "$TMP/psc.log"
     rm -f "$ALIAS_REFUSED" "$ALIAS_REFUSED.reads"
-    find "${STATE_DIR:?}" -type f \( -name '*.assignee' -o -name '*.status' -o -name '*.subject' -o -name spawned-alias \) -delete
+    find "${STATE_DIR:?}" -type f \( -name '*.assignee' -o -name '*.status' -o -name '*.subject' -o -name spawned-alias -o -name tracks-reads \) -delete
     : > "$STATE_DIR/replies"; : > "$STATE_DIR/live"
     for _l in ${LIVE_SITTINGS:-}; do printf '%s %s\n' "${_l%%=*}" "${_l#*=}" >> "$STATE_DIR/live"; done
     return 0
@@ -526,6 +536,14 @@ has "$CALLED" "session new converse-opus --alias tk-new" "(SUBJECT-NONE) …then
 eq "$(asg tk-new)" "gc-toolkit/gc-toolkit.tk-new" "(SUBJECT-NONE) …and the new conversation is bound to it"
 has "$OUT" "✓ converse-opus on new conversation tk-new for tk-subj" "(SUBJECT-NONE) the summary names it new"
 hasnt "$OUT" "no session spawned" "(SUBJECT-NONE) open's own success chatter is not repeated"
+
+echo "# a conversation another open files after engage's listing is the one engage takes"
+reset; CONV_FILED_AFTER=1 run_engage tk-subj --no-attach
+eq "$RC" 0 "(JOIN-RACE) engaging a bead whose conversation another open filed in the meantime exits 0"
+hasnt "$CALLED" "bd create" "(JOIN-RACE) …filing no second conversation"
+has "$CALLED" "session new converse-opus --alias tk-conv --no-attach --json" "(JOIN-RACE) …and spawning the sitting for the queued one"
+eq "$(asg tk-conv)" "gc-toolkit/gc-toolkit.tk-conv" "(JOIN-RACE) …bound to it"
+has "$OUT" "✓ converse-opus on existing conversation tk-conv for tk-subj" "(JOIN-RACE) the summary names it as one that already existed"
 unset HAVE_CONV
 
 echo "# --reason files a fresh conversation for a distinct concern, even when one waits"

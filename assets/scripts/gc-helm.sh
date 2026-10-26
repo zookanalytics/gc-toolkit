@@ -2102,9 +2102,11 @@ conversation_reply() {
 # already carries writes nothing. --reason is the title, --body the ask
 # the sitting reads when it claims the conversation — callers with their own
 # origin (operator-intake.sh) pass both rather than misreporting the board
-# wording. The conversation is filed in the bead's own store.
+# wording. The conversation is filed in the bead's own store. It leaves the
+# conversation's id in CONV and OPEN_FILED at 1 when it filed it, or 0 when it
+# joined one already in the queue, for engage, which runs it in its own shell.
 cmd_open() {
-    bead=""; open_reason=""; open_body=""; open_allow_dup=""; open_json=""
+    bead=""; open_reason=""; open_body=""; open_allow_dup=""; open_json=""; OPEN_FILED=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --reason=*) open_reason="${1#--reason=}"; shift ;;
@@ -2213,6 +2215,7 @@ $open_body"
                 echo "$PROG: open: conversation $existing waits in the queue for $bead, but its reply onto gate $TAKE_GATE did not read back. Add it by hand: gc bd dep add $existing $TAKE_GATE --type replies-to" >&2
                 exit 4
             fi
+            CONV="$existing"; OPEN_FILED=0
             bust_cache
             if [ -n "$open_json" ]; then
                 jq -nc --arg s "$bead" --arg c "$existing" '{subject: $s, conversation: $c, filed: false}'
@@ -2271,6 +2274,7 @@ $gate_desc}"
         echo "$PROG: open: conversation $CONV is filed on $bead, but its reply onto gate $TAKE_GATE did not read back. Add it by hand: gc bd dep add $CONV $TAKE_GATE --type replies-to" >&2
         exit 4
     fi
+    OPEN_FILED=1
     bust_cache
 
     if [ -n "$open_json" ]; then
@@ -3840,9 +3844,11 @@ cmd_engage() {
             echo "$PROG: engage: no conversation on $bead — filing one, then engaging it" >&2
             set -- "${pointed_gate:-$bead}"
         fi
-        # cmd_open runs in this shell and leaves the new id in CONV. Its stdout
-        # is terminal advice for a standalone `open`, stale here because engage
-        # holds the conversation itself just below. Errors stay on stderr.
+        # cmd_open runs in this shell and leaves in CONV the conversation it
+        # filed, or the one it joined when another open filed one in the queue
+        # after engage's listing above. Its stdout is terminal advice for a
+        # standalone `open`, stale here because engage holds the conversation
+        # itself just below. Errors stay on stderr.
         cmd_open "$@" >/dev/null || { echo "$PROG: engage: could not file a conversation for $bead" >&2; exit 4; }
         # The conversation is filed, so a --new-subject subject is no longer an
         # orphan — disarm the abort backstop armed in engage_create_subject.
@@ -3850,7 +3856,7 @@ cmd_engage() {
             _ens_cleanup_bead=""
             trap - EXIT INT TERM HUP
         fi
-        conv_new=1; conv_state=queue; conv_holder=human
+        conv_new="$OPEN_FILED"; conv_state=queue; conv_holder=human
     fi
 
     # Pointed at a gate, the conversation engage landed on replies to it,
