@@ -1465,7 +1465,7 @@ keys = [
   "stale_escalated_at", "stale_escalated_to",
   "visit.recheck", "sweep.*", "triage.*",
   "gc.pr_visit_summary", "gc.pr_visit_actions",
-  "gc.ruling", "gc.folded_into",
+  "gc.ruling", "gc.folded_into", "gc.handback", "gc.handback_at",
 ]
 # The gc.takeaway family and gc.demand_for carry their mechanics in the comment
 # above and in [holds] (settled_keys, terminal_wait_key): gc-helm.sh, signoff.sh
@@ -1477,10 +1477,11 @@ keys = [
 # gc.gate_visit — on a gate bead, the visit gate-visit-sweep.sh filed for it (a
 #   bead id, or `filed`); its presence is how the sweep skips a gate already
 #   escalated, and `--unset` re-offers the visit.
-# gc.continuation_group — the subject a visit is scoped to, converse's
-#   group-scoped re-claim fence. Written on the visit by gc-helm.sh and
-#   escalate.sh, and repaired toward the subject id when a read-back finds it
-#   empty (an empty group disables the fence). Never cleared. A bead id.
+# gc.continuation_group — the subject a visit is scoped to, recorded beside the
+#   visit's tracks edge; converse-claim.sh reports it as the sitting's subject.
+#   Written on the visit by gc-helm.sh and escalate.sh, and repaired toward the
+#   subject id when a read-back finds it empty (a reader that lists a subject's
+#   visits by the stamp alone misses it). Never cleared. A bead id.
 # gc.origin — `operator` marks a topic a human commissioned. gc-visit-open.sh
 #   stamps it on its subject when the key is absent, and gc-helm.sh `engage
 #   --new-subject` writes it in the create payload of the subject it files.
@@ -1557,6 +1558,13 @@ keys = [
 #   close-answered follows it, as it follows bead-rehome.sh's gc.superseded_by on
 #   a re-homed visit, to the visit whose ruling answers the question. Never
 #   cleared. A bead id in the folded visit's own store.
+# gc.handback / gc.handback_at — on a VISIT, the latest hand-back its converse
+#   sitting posted, whole (a framing or the sign-off), and when it was recorded
+#   (RFC-3339 UTC). gc-helm.sh `handback` writes both in one update, each record
+#   replacing the one before, and reads the text back. gc-helm.sh `engage` reads
+#   them once the tab's attach returns on a closed visit, and prints the text in
+#   the operator's terminal as the sitting's last words. Absent, the tab says the
+#   sitting recorded no hand-back. Never cleared. Freeform multi-line text.
 
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by
