@@ -130,7 +130,8 @@ until they engage it, which starts a converse sitting on it.
 Writer: `"$(gc <binding> scripts-dir)/gc-helm.sh" open <bead> --reason "<what this conversation is about>" --body "<the ask the sitting reads>"`.
 While a conversation on the bead waits in the queue, `open` files no second
 one: it appends your concern to that conversation's notes, where the sitting
-reads it.
+reads it, and a concern the conversation already carries is not appended again,
+so a call that asks on every pass leaves one copy.
 
 A conversation keeps nothing out of `bd ready`, and holds no merge and no
 close: it blocks nothing, and nothing waits on it. When work must wait for

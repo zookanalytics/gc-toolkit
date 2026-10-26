@@ -2076,7 +2076,8 @@ conversation_reply() {
 # one. A human gate names the one bead still waiting on it, and the
 # conversation replies to that gate. Without --allow-duplicate, a concern on a
 # bead whose conversation already waits in the queue joins it: the reason and
-# body are appended to that task's notes. --reason is the title, --body the ask
+# body are appended to that task's notes, once, so a concern the conversation
+# already carries writes nothing. --reason is the title, --body the ask
 # the sitting reads when it claims the conversation — callers with their own
 # origin (operator-intake.sh) pass both rather than misreporting the board
 # wording. The conversation is filed in the bead's own store.
@@ -2173,8 +2174,18 @@ cmd_open() {
 
 $open_body"
                 fi
-                gc bd update "$existing" --append-notes "$join_note" >/dev/null 2>&1 \
-                    || echo "$PROG: open: could not append the new concern to conversation $existing's notes; say it in the sitting." >&2
+                # A concern the conversation already carries, as its own ask or
+                # as a note an earlier join appended, is no second concern, so
+                # nothing is written for it. A caller that asks again on every
+                # pass while its condition stands, as deferred dispatch's capped
+                # arm does, would otherwise grow the notes by a copy a pass. A
+                # row that does not read proves nothing, so the note is appended.
+                if row_now "$existing" | jq -e --arg ask "${open_body:-$open_reason}" --arg n "$join_note" \
+                        '((.description // "") == $ask) or ((.notes // "") | contains($n))' >/dev/null 2>&1; then
+                    :
+                elif ! gc bd update "$existing" --append-notes "$join_note" >/dev/null 2>&1; then
+                    echo "$PROG: open: could not append the new concern to conversation $existing's notes; say it in the sitting." >&2
+                fi
             fi
             if [ -n "$TAKE_GATE" ] && ! conversation_reply "$existing" "$TAKE_GATE"; then
                 echo "$PROG: open: conversation $existing waits in the queue for $bead, but its reply onto gate $TAKE_GATE did not read back. Add it by hand: gc bd dep add $existing $TAKE_GATE --type replies-to" >&2

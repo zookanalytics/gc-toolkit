@@ -17,7 +17,8 @@
 #              tracks the bead and is assigned to `human`, read back as a
 #              conversation, exit 0
 #   (QUEUED)   a conversation already waiting in the queue is joined, exit 0,
-#              nothing created; a new reason is appended to its notes
+#              nothing created; a new reason is appended to its notes, and a
+#              concern it already carries is not appended again
 #   (HELD)     a conversation a sitting holds is not joined: a fresh one is
 #              filed in the queue
 #   (OPEN-JSON) --json prints {subject, conversation, filed}
@@ -59,6 +60,9 @@ mkdir -p "$TMP/bin"
 #   bd dep list <bead> --direction=up --type tracks — the bead's conversations:
 #     one row for $FAKE_CONV when set, with assignee $FAKE_CONV_ASSIGNEE
 #     (default human) and status $FAKE_CONV_STATUS (default open).
+#   bd show $FAKE_CONV — that conversation's own row, its ask
+#     $FAKE_CONV_DESC (default "an earlier concern") and its notes
+#     $FAKE_CONV_NOTES (default none).
 #   bd dep list <gate> --direction=up --type blocks — the beads waiting on the
 #     gate: $FAKE_WAITERS, a JSON array.
 #   bd list --id <c> — the conversation a create filed, read back: a task that
@@ -74,6 +78,11 @@ case "$1 ${2:-}" in
     # mapping matters here.
     jq -n '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"}]}' ;;
   "bd show")
+    if [ -n "${FAKE_CONV:-}" ] && [ "$3" = "$FAKE_CONV" ]; then
+      jq -n --arg i "$3" --arg d "${FAKE_CONV_DESC:-an earlier concern}" --arg n "${FAKE_CONV_NOTES:-}" \
+        '[{id:$i, title:"an earlier concern", description:$d, notes:$n, status:"open", issue_type:"task", assignee:"human"}]'
+      exit 0
+    fi
     case "$3" in
       tk-gate*)
         jq -n --arg i "$3" '[{id:$i, title:"Approve the rollout", description:"Gate on the waiting bead. Approve it or say why not.", status:"open", issue_type:"gate", await_type:"human", await_id:"rollout"}]'
@@ -220,6 +229,25 @@ grep -q 'bd update tk-conv0 --append-notes Another concern joined this conversat
   || bad "(QUEUED) the concern joins the conversation's notes (calls: $CALLS)"
 grep -q 'Compare the two options' <<< "$CALLS" \
   && ok "(QUEUED) …with its body" || bad "(QUEUED) body appended (calls: $CALLS)"
+# The same concern again joins nothing. A caller that asks on every pass while
+# its condition stands, as deferred dispatch's capped arm does, re-sends the
+# words the conversation already carries, in a note an earlier join appended or
+# as the ask it was filed with.
+export FAKE_CONV_NOTES="Another concern joined this conversation: the cost question
+
+Compare the two options."
+run_open found tk-real1 --reason "the cost question" --body "Compare the two options."
+eq "$RC" "0" "(QUEUED) the same concern again exits 0"
+[ -z "$CALLS" ] \
+  && ok "(QUEUED) a concern an earlier join appended is not appended again" \
+  || bad "(QUEUED) the same concern was appended again (calls: $CALLS)"
+unset FAKE_CONV_NOTES
+export FAKE_CONV_DESC="Compare the two options."
+run_open found tk-real1 --reason "the cost question" --body "Compare the two options."
+[ -z "$CALLS" ] \
+  && ok "(QUEUED) a concern that is the conversation's own ask is not appended" \
+  || bad "(QUEUED) the conversation's own ask was appended (calls: $CALLS)"
+unset FAKE_CONV_DESC
 
 # --- (HELD) a conversation a sitting holds is not joined ----------------------
 # A conversation held by a sitting is in that sitting, not in the queue, so a
