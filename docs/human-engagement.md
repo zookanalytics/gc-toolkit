@@ -736,7 +736,12 @@ converse's copyable line is on screen. After a y/n confirm,
 `assets/scripts/tmux-dismiss-sitting.sh` looks the pane's session up in
 `gc session list`, refuses one that is not a converse sitting, and runs the
 argument-free dismiss under that session's identity, so dismiss itself infers
-which subject the sitting is on. Nothing is typed into the pane.
+which subject the sitting is on. It passes `--operator`, because the keystroke
+comes from outside the sitting, and dismiss stops the session with an
+operator ack. That ack runs with no session identity or incarnation token.
+The key's job inherits the sitting's tmux environment, and Gas City refuses
+an operator ack whose caller names the session it stops. Nothing is typed
+into the pane.
 
 The ending the pack cannot reach from config at all is the pane itself: Gas
 City's stop destroys the tmux session, its pane and its scrollback on every

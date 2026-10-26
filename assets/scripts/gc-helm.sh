@@ -61,7 +61,7 @@ Usage:
   gc-helm park <bead-id> --waiting-on <bead-id>  the same hold behind an existing bead, filing no gate
   gc-helm priority <bead-id> <P0-P4> [--dry-run]  set the priority of a bead that follows nothing, and re-rank the work that follows it
   gc-helm priority <bead-id> --shift <±n> [--dry-run]  set the shift of a bead that follows a parent or an anchor: +1 is one level later, -1 one level sooner
-  gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit and stopping the session that held it; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
+  gc-helm dismiss  [<bead-id>] [--reason "..."] [--operator] [--json]  the operator is done with this subject: end its sitting by closing its open visit and stopping the session that held it; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --operator stops every session as the operator, from outside it; --json prints {subject,matched,closed,ok} and names which identity matched each visit
   gc-helm handback <visit-id> < hand-back  record the hand-back a converse sitting is posting, read from stdin, on its visit, replacing the one before; engage prints the latest in the operator's tab once the sitting has ended
   gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: resolve the human gate that put it to the operator, dispatch the subject's gc.recommended_formula at the subject (a failed dispatch reopens the gate), and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
@@ -176,8 +176,11 @@ dismiss is the operator's explicit "end this sitting". It closes the subject's
 open visit, then stops the converse session that held it with
 `gc runtime drain-ack`, so the controller ends the session outside this
 process: the session dismiss runs in acks itself, last, and any other is acked
-as an operator. A session that will not stop is left to converse-reap, which
-closes any converse session whose visit reads closed. It stamps
+as an operator. --operator says the caller is outside the sitting even when it
+runs under the sitting's identity to infer the subject, as prefix+X does, so
+every session is acked as an operator and none acks itself. A session that
+will not stop is left to converse-reap, which closes any converse session
+whose visit reads closed. It stamps
 gc.outcome=dismissed first, so the ended sitting is still one the board can
 report, and a visit that will not take that stamp is left open rather than
 closed unreadable; the close itself falls back to --force when the visit is
@@ -2591,6 +2594,20 @@ sitting_session_of() {
           else empty end' 2>/dev/null || true
 }
 
+# operator_drain_ack <session-id> — stop a session as the operator, from outside
+# it, with `gc runtime drain-ack --operator`. Gas City refuses an operator ack
+# whose caller's GC_SESSION_ID or GC_INSTANCE_TOKEN names the session it stops.
+# A caller can carry both, because a run-shell job inherits the tmux
+# environment of the session its key was pressed in, incarnation token
+# included. So the ack runs with this process's session identity and token
+# removed.
+operator_drain_ack() {
+    (
+        unset GC_SESSION_ID GC_SESSION_NAME GC_ALIAS GC_INSTANCE_TOKEN
+        gc runtime drain-ack --operator "$1"
+    ) >/dev/null 2>&1
+}
+
 # ── Verb: dismiss ────────────────────────────────────────────────────
 # The operator's explicit "end this sitting". converse runs with no
 # idle_timeout, so a held visit keeps its sitting up until something closes the
@@ -2607,15 +2624,18 @@ sitting_session_of() {
 # The stop is `gc runtime drain-ack`, so the controller ends the session
 # outside this process: a dismiss typed into the sitting's own pane is never
 # killed half done. The session this verb runs in acks itself, last of all;
-# any other is acked as an operator. A session that will not stop is left to
-# converse-reap, which closes any converse session whose visit reads closed.
+# any other is acked as an operator. Under --operator the caller is outside
+# every sitting, whatever identity it runs under, so no session acks itself.
+# A session that will not stop is left to converse-reap, which closes any
+# converse session whose visit reads closed.
 cmd_dismiss() {
-    bead=""; dismiss_reason=""; dismiss_json=""; dismiss_stop=""
+    bead=""; dismiss_reason=""; dismiss_json=""; dismiss_stop=""; dismiss_operator=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --reason=*) dismiss_reason="${1#--reason=}"; shift ;;
             --reason)   shift; [ $# -gt 0 ] || { echo "$PROG: dismiss: --reason requires a value" >&2; exit 2; }
                         dismiss_reason="$1"; shift ;;
+            --operator) dismiss_operator=1; shift ;;
             --json)     dismiss_json=1; shift ;;
             -h|--help)  usage; exit 0 ;;
             -*) echo "$PROG: dismiss: unknown flag '$1'" >&2; exit 2 ;;
@@ -2816,7 +2836,7 @@ cmd_dismiss() {
 
     # dismiss_stop_sittings — stop each session dismiss_stop names, the one this
     # verb runs in last, since a dismiss typed into a sitting's pane ends with
-    # that pane.
+    # that pane. Under --operator none is the one this verb runs in.
     dismiss_stop_sittings() {
         _ds_own=""
         _ds_ifs=$IFS
@@ -2824,8 +2844,8 @@ cmd_dismiss() {
 '
         for _ds_line in $dismiss_stop; do
             _ds_id=${_ds_line%% *}
-            if [ "${_ds_line#* }" = own ]; then _ds_own=$_ds_id; continue; fi
-            if gc runtime drain-ack --operator "$_ds_id" >/dev/null 2>&1; then
+            if [ "${_ds_line#* }" = own ] && [ -z "$dismiss_operator" ]; then _ds_own=$_ds_id; continue; fi
+            if operator_drain_ack "$_ds_id"; then
                 _dmsg "$PROG: dismiss: stopped session $_ds_id, which held the sitting"
             else
                 echo "$PROG: dismiss: could not stop session $_ds_id, which held the sitting; converse-reap closes it on its next pass, because its visit is closed" >&2
