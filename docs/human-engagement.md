@@ -455,9 +455,12 @@ ends the sitting later leaves nothing the operator ruled on open.
 **A sitting cut short** writes its record, signs off with `--ruled no`, which
 leaves every gate its conversation replies to open and owed with its reply in
 place and hands the conversation back to the operator's queue with one write
-guarded on the sitting that holds it, and drains. The task is then the queued
-conversation it was before any sitting took it, so the board shows it owed and
-the next engagement takes it up from its record.
+guarded on the sitting that holds it and on the status it read, and drains.
+The task is then the queued conversation it was before any sitting took it,
+so the board shows it owed and the next engagement takes it up from its
+record. A dismiss closes the conversation and keeps its holder, so the status
+guard is what keeps the hand-back from reopening a conversation the operator
+dismissed while the sign-off ran.
 
 **Dismiss** (`gc-helm dismiss`) ends a sitting. It closes the conversation a
 live sitting holds on the bead, or the conversation an id names, with a reason

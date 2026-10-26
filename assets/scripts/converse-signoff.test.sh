@@ -24,8 +24,9 @@
 #   (HELD)    a held subject is released on a ruling
 #   (OPEN-PR, REWORK*) a ruling on an open PR answers --rework or --no-rework;
 #             the rework files first, and a filing that fails writes nothing else
-#   (CUT-SHORT*) the hand-back is one write guarded on the holder, and a
-#             conversation that already reads closed stays closed
+#   (CUT-SHORT*) the hand-back is one write guarded on the holder and the
+#             status, and a conversation that reads closed, before that write or
+#             because a dismiss closed it first, stays closed
 #   (RERUN)   a re-run after a sign-off changes nothing
 #
 # Runs the REAL converse-signoff.sh with a stubbed `gc` on PATH over a
@@ -52,9 +53,11 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/rig/assets/scripts" "$TMP/cwd"
 # --- gc stub ------------------------------------------------------------------
 # One JSON file per bead under $STORE/b/<id>.json, its edges as deps
 # [{type, on}] on the bead the edge starts from. Every write is appended to
-# $CALLS. Hooks: LIST_DOWN fails `bd list`; GATE_STUCK=<gate> makes its resolve
-# change nothing; EARLIER_ANSWER=<reason> closes the gate with that reason
-# inside the resolve call, before the sign-off's own answer.
+# $CALLS. A guarded update whose --if-assignee or --if-status misses exits 13
+# and writes nothing, as bd does. Hooks: LIST_DOWN fails `bd list`;
+# GATE_STUCK=<gate> makes its resolve change nothing; EARLIER_ANSWER=<reason>
+# closes the gate with that reason inside the resolve call, before the
+# sign-off's own answer.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 B="$STORE/b"
 row() { cat "$B/$1.json" 2>/dev/null; }
@@ -106,11 +109,16 @@ case "$1 ${2:-}" in
     log "$*"
     _id="$3"; shift 3
     _r=$(row "$_id")
-    _ifa_set=0; _ifa=""
+    _ifa_set=0; _ifa=""; _ifs_set=0; _ifs=""
     _args=("$@")
     _i=0
-    while [ "$_i" -lt "${#_args[@]}" ]; do [ "${_args[$_i]}" = "--if-assignee" ] && { _ifa_set=1; _ifa="${_args[$((_i + 1))]}"; }; _i=$((_i + 1)); done
+    while [ "$_i" -lt "${#_args[@]}" ]; do
+      [ "${_args[$_i]}" = "--if-assignee" ] && { _ifa_set=1; _ifa="${_args[$((_i + 1))]}"; }
+      [ "${_args[$_i]}" = "--if-status" ] && { _ifs_set=1; _ifs="${_args[$((_i + 1))]}"; }
+      _i=$((_i + 1))
+    done
     if [ "$_ifa_set" = 1 ] && [ "$(printf '%s' "$_r" | jq -r '.assignee // ""')" != "$_ifa" ]; then exit 13; fi
+    if [ "$_ifs_set" = 1 ] && [ "$(printf '%s' "$_r" | jq -r '.status // ""')" != "$_ifs" ]; then exit 13; fi
     while [ $# -gt 0 ]; do
       case "$1" in
         --set-metadata) _k="${2%%=*}"; _v="${2#*=}"; _r=$(printf '%s' "$_r" | jq --arg k "$_k" --arg v "$_v" '.metadata[$k] = $v'); shift 2 ;;
@@ -326,24 +334,38 @@ eq "$(meta tk-anc gc.takeaway)" "cut short: the rollout question is still owed" 
 eq "$(field tk-rev status)" "open" "(CUT-SHORT) the gate stays open and owed"
 eq "$(jq -r '[.deps[] | select(.type == "replies-to") | .on] | join(" ")' "$STORE/b/tk-conv.json")" "tk-rev" "(CUT-SHORT) …with its reply in place for the next sitting"
 eq "$(field tk-conv assignee)/$(field tk-conv status)" "human/open" "(CUT-SHORT) the conversation is back in the operator's queue"
-has "$(cat "$CALLS")" "bd update tk-conv --if-assignee gc-toolkit/gc-toolkit.tk-conv --assignee human --status open" "(CUT-SHORT) …by one write guarded on the sitting that held it"
+has "$(cat "$CALLS")" "bd update tk-conv --if-assignee gc-toolkit/gc-toolkit.tk-conv --if-status in_progress --assignee human --status open" "(CUT-SHORT) …by one write guarded on the sitting that held it and the status it read"
 hasnt "$(cat "$CALLS")" "bd close" "(CUT-SHORT) …and nothing is closed"
 has "$(grep '^pr-sitting-comment' "$CALLS")" "--outcome handed back" "(CUT-SHORT) the reminder says the conversation was handed back"
-# The guard misses when another writer took the conversation first: model it by
-# changing the holder between the sign-off's read and its write.
-acceptance
+# The guard misses when another writer reached the conversation first: model it
+# by changing the conversation between the sign-off's read and its write. Another
+# sitting taking it changes the holder. A dismiss closes it and keeps the
+# holder, so only the status guard sees it.
 cp "$TMP/bin/gc" "$TMP/bin/gc.real"
 cat > "$TMP/bin/gc" <<'G2'
 #!/usr/bin/env bash
-if [ "$1 $2 $3" = "bd update tk-conv" ] && [ -n "${STEAL_BEFORE_UPDATE:-}" ]; then
-  jq '.assignee = "gc-toolkit/gc-toolkit.c-tk-conv"' "$STORE/b/$3.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$3.json"
+if [ "$1 $2 $3" = "bd update tk-conv" ]; then
+  if [ -n "${STEAL_BEFORE_UPDATE:-}" ]; then
+    jq '.assignee = "gc-toolkit/gc-toolkit.c-tk-conv"' "$STORE/b/$3.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$3.json"
+  fi
+  if [ -n "${DISMISS_BEFORE_UPDATE:-}" ]; then
+    jq '.status = "closed" | .close_reason = "dismissed by the operator"' "$STORE/b/$3.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/$3.json"
+  fi
 fi
 exec "$(dirname "$0")/gc.real" "$@"
 G2
 chmod +x "$TMP/bin/gc"
+acceptance
 STEAL_BEFORE_UPDATE=1 run_signoff --conversation tk-conv --outcome "cut short" --ruled no
 eq "$RC" 1 "(CUT-SHORT-RACE) a hand-back whose guard misses exits 1"
 eq "$(field tk-conv assignee)" "gc-toolkit/gc-toolkit.c-tk-conv" "(CUT-SHORT-RACE) …overwriting nothing"
+acceptance
+DISMISS_BEFORE_UPDATE=1 run_signoff --conversation tk-conv --outcome "cut short" --ruled no
+eq "$RC" 0 "(CUT-SHORT-DISMISS) a dismiss that lands between the sign-off's read and its hand-back exits 0"
+eq "$(field tk-conv status)/$(field tk-conv assignee)" "closed/gc-toolkit/gc-toolkit.tk-conv" "(CUT-SHORT-DISMISS) …and the dismissed conversation stays closed, not reopened into the operator's queue"
+has "$OUT" "was closed while this sign-off ran" "(CUT-SHORT-DISMISS) …saying so"
+hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(CUT-SHORT-DISMISS) …leaving the reminder the dismiss wrote"
+eq "$(field tk-rev status)" "open" "(CUT-SHORT-DISMISS) the gate stays open and owed"
 mv "$TMP/bin/gc.real" "$TMP/bin/gc"
 # A conversation that already reads closed has ended: a dismiss or an earlier
 # sign-off closed it, and bd's close kept its assignee, so the guarded hand-back

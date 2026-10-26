@@ -20,9 +20,10 @@
 #   6. updates the subject's PR reminder.
 # Cut short (--ruled no), it writes the headline, leaves every gate the
 # conversation replies to open and owed, with its reply in place for the next
-# sitting, and hands the conversation back to the operator's queue with a write
-# guarded on the sitting that holds it, then updates the reminder. A
-# conversation that already reads closed stays closed.
+# sitting, and hands the conversation back to the operator's queue with one
+# write guarded on the sitting that holds it and the status it read, then
+# updates the reminder. A conversation that reads closed, before that write or
+# because a dismiss closed it first, stays closed.
 #
 # It resolves no gate its conversation does not reply to: a gate the sitting
 # never took up stays for whoever owes it. The gates are read from the
@@ -309,24 +310,34 @@ if [ "$RULED" = yes ]; then
 else
   # Cut short: the gates stay open and owed, with their replies in place, and
   # the conversation goes back to the operator's queue with one write guarded
-  # on the sitting that holds it, which drops the claim's lease. A conversation
-  # already in the queue has no sitting to hand it back from. One that reads
-  # closed has ended, by a dismiss or an earlier sign-off, and bd's close keeps
-  # its assignee, so the guarded write would reopen it: it stays closed.
+  # on the sitting that holds it and on the status read above, which drops the
+  # claim's lease. A conversation already in the queue has no sitting to hand
+  # it back from. One that reads closed has ended, by a dismiss or an earlier
+  # sign-off, and bd's close keeps its assignee, so a write guarded on the
+  # holder alone would reopen it: it stays closed. A dismiss that lands between
+  # the read and the write fails the status guard, and the read-back finds the
+  # conversation closed.
   [ -n "$REPLIES" ] && ACTIONS+=("left $(printf '%s' "$REPLIES" | tr '\n' ' ' | sed 's/ *$//') open and owed")
+  BACK_AT=""
   if [ "$CONV_STATUS" = closed ]; then
     echo "conversation $CONVERSATION already reads closed, so it stays closed and is not handed back"
-    REMINDER_OUTCOME=""
+  elif [ "$HOLDER" = human ]; then
+    BACK_AT="human/open"
   else
-    if [ "$HOLDER" != human ]; then
-      gc bd update "$CONVERSATION" --if-assignee "$HOLDER" --assignee human --status open >/dev/null 2>&1 || true
-      BACK=$(show_row "$CONVERSATION") || BACK=""
-      if [ "$(printf '%s' "$BACK" | jq -r '"\(.assignee // "")/\(.status // "")"' 2>/dev/null)" != "human/open" ]; then
-        stopped "conversation $CONVERSATION did not read back in the operator's queue (assignee human, status open) after its hand-back from $HOLDER; re-run once the store answers"
-      fi
-    fi
+    gc bd update "$CONVERSATION" --if-assignee "$HOLDER" --if-status "$CONV_STATUS" --assignee human --status open >/dev/null 2>&1 || true
+    BACK=$(show_row "$CONVERSATION") || BACK=""
+    BACK_AT=$(printf '%s' "$BACK" | jq -r '"\(.assignee // "")/\((.status // "") | ascii_downcase)"' 2>/dev/null)
+    case "$BACK_AT" in
+      human/open) ;;
+      */closed) echo "conversation $CONVERSATION was closed while this sign-off ran, so it stays closed and is not handed back" ;;
+      *) stopped "conversation $CONVERSATION did not read back in the operator's queue (assignee human, status open) after its hand-back from $HOLDER; re-run once the store answers" ;;
+    esac
+  fi
+  if [ "$BACK_AT" = human/open ]; then
     ACTIONS+=("conversation back in the operator's queue")
     REMINDER_OUTCOME="handed back"
+  else
+    REMINDER_OUTCOME=""
   fi
 fi
 
