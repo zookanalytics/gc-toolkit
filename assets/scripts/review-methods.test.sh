@@ -21,7 +21,9 @@
 #   - Every step that applies a check's method lets the method hand reading to
 #     subagents, each read-only in the review's workspace and never calling
 #     signoff.sh, while the agent holding the step writes every finding. No
-#     review formula or review skill forbids subagents.
+#     review formula or review skill forbids subagents, and the correctness
+#     method says when it hands an angle to a finder or a candidate to a
+#     verifier, and that each gets the diff and the files it needs.
 #   - Neither review formula names a check's judgment: no test or suite, no
 #     P0, P1 or P2 grade, no Verification line, and neither the correctness
 #     method's What to check list nor any dimension of it. The correctness
@@ -238,7 +240,7 @@ done
 eq "$(grep -cE '^ *```(bash|sh|zsh|shell) *$' "$METHOD" || true)" "0" "the correctness method carries no shell block"
 eq "$(grep -n -m1 -- '--check' "$METHOD" || true)" "" "the correctness method reads no record itself"
 
-echo "# no review text forbids subagents"
+echo "# no review text forbids subagents, and the correctness method says how it uses them"
 # The formulas a review pours and the skills it loads, read flat so a phrase
 # may wrap.
 for f in "$ROOT/formulas/mol-review.toml" "$ROOT/formulas/mol-review-quorum-signoff.toml" \
@@ -246,6 +248,9 @@ for f in "$ROOT/formulas/mol-review.toml" "$ROOT/formulas/mol-review-quorum-sign
   eq "$(flat "$f" | grep -Eio -- 'single honest pass|no subagents|no persona|no fan-out' | head -1)" "" \
     "${f#"$ROOT"/} forbids no subagents"
 done
+hasF "$METHOD" '### Finders and verifiers' "the correctness method says when it hands an angle to a finder or a candidate to a verifier"
+hasF "$METHOD" 'the diff and the files its angle or candidate runs through, never your whole context' \
+  "…and gives each the diff and the files it needs, never the reviewer's whole context"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

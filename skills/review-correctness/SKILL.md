@@ -203,6 +203,42 @@ Each finding names its category, which is the dimension of What to check that
 found it, spelled as the list spells it. A defect a hunting angle found names
 that angle. Each finding also names its severity, the grade below.
 
+### Finders and verifiers
+
+Where your provider offers subagents, you may hand an angle to a finder and a
+blocking candidate to a verifier. Use one where it adds unbiased feedback, or
+where it costs fewer tokens in all than doing that reading yourself. Where
+your provider offers none, you do this reading yourself.
+
+- **A finder** hunts with one angle and returns every candidate whose trigger
+  it can name, each with its locus and failure scenario, including one it is
+  not sure is reached. Its feedback is unbiased by your reading, because it
+  starts without the anchor's account of what the change was meant to do and
+  without the path your earlier angles took through the diff, so it reads
+  what the code does. It saves tokens when its angle reads files you would
+  not otherwise open, such as the callers a cross-file trace follows. A file
+  you read stays in your context for the rest of the review, and from a
+  finder only its candidates come back.
+- **A verifier** checks one blocking candidate: whether its trigger reaches
+  its failure on the tree as merged. Its feedback is unbiased by the finding,
+  because it never saw the reasoning that raised the candidate, so it has no
+  stake in the answer. What it returns is evidence for the candidate's
+  verification.
+
+Give a finder or a verifier the diff and the files its angle or candidate
+runs through, never your whole context. A finder gets its angle as What to
+check states it, and the rig's guidance for this check when the angle reads
+it. A verifier gets the candidate's locus and failure scenario, without the
+argument for it. Neither gets the anchor, the PR, another candidate or a
+conclusion of yours. A subagent reads again whatever it needs that you already
+hold, so a finder whose angle reads only files you have read saves no tokens
+and earns its place by its fresh reading alone.
+
+A subagent works under the review formula's rules for subagents, so a run it
+needs comes back to you as the run to make, and you make it. What it returns
+is a candidate or evidence: you judge each candidate against the diff, and
+every finding, its fields and the verdict are yours to write.
+
 ## What blocks
 
 P0 — broken or unsafe as merged: data loss, a merge that bypasses a check, a
