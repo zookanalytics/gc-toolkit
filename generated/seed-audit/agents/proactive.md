@@ -132,8 +132,9 @@ esac
      city-config question that is genuinely a policy call, such as resuming an
      order the operator paused, is still a `ruling`. A problem in code the
      pack's deletion plan retires is not actionable: do what the `work`
-     skill's filing section says for one, then take the `blocked` exit waiting
-     on the bead that retires the code.
+     skill's filing section says for one, except that the subject waits on
+     the bead that retires the code through the `blocked` exit, in place of
+     the `until` edge the skill gives a problem's own bead.
    - **recommend** — you can name the action, but it warrants the operator's
      trigger before it runs: an authority-gated action (retire an in-flight PR,
      supersede an anchor) or a consequential, partly-uncertain call you have a
