@@ -29,15 +29,15 @@ keeps no record of a rig's own checks at a commit. The packs it bundles judge a
 failing check pre-existing in the run that meets it, track the failure as a
 bug, and record nothing a later run at the same commit can read. The review
 findings the bundled packs define carry no category or failure scenario.
-`core`'s lane object lives in one run's step output, which no Gas City code
-reads. The build pack's verdict report ties its worst severity to the review's
-outcome, but any finding makes it a `fail`, where under the P2 rule the
-operator ruled a review whose findings are all P2 approves, and it is a file
+`core`'s lane object lives in one run's step output, and no Gas City code
+reads its findings. The build pack's verdict report ties its worst severity to
+the review's outcome, but any finding makes it a `fail`, where under the P2 rule
+the operator ruled a review whose findings are all P2 approves, and it is a file
 among a build's artifacts, not a record the validator rules. Packs Gas City
 publishes but does not bundle carry more of the contract, `gstack`'s security
-review nearly all of it, but each in a format of its own skills that no Gas
-City component reads. None of the surface is a pack noun: the finding bead is a
-kind the pack already has, and its new fields are keys. So it takes no warrant
+review nearly all of it, but each in a format of its own skills that no Gas City
+component reads. None of the surface is a pack noun: the finding bead is a kind
+the pack already has, and its new fields are keys. So it takes no warrant
 ([review-arch.md](../../docs/review-arch.md#the-checks), check 2), and the
 change touches no path or key that a warrant in
 [warrants.md](../../docs/warrants.md) covers.
@@ -59,16 +59,17 @@ change touches no path or key that a warrant in
   written against, and when it names a tracker. `self-review-check.sh` applies
   it to the work bead at HEAD, and `review-evidence.sh` to the anchor at the
   reviewed commit.
-- The finding contract. A reviewer's `findings.json` gives each finding a
-  `severity` of P0, P1 or P2, a `category` naming the part of the method that
-  found it, a `failure_scenario`, and on a P0 or P1 a `verification` that opens
-  CONFIRMED or PLAUSIBLE. `signoff.sh --findings-file` refuses, with nothing
+- The finding contract. In a reviewer's `findings.json`, every correctness
+  finding, and any other finding a method grades, carries a `severity` of P0,
+  P1 or P2, a `category` naming the part of the method that found it and a
+  `failure_scenario`, and on a P0 or P1 a `verification` that opens CONFIRMED
+  or PLAUSIBLE. `signoff.sh --findings-file` refuses, with nothing
   written, a set that lacks a field the contract requires, that carries a
   refuted candidate, or that disagrees with the verdict: an approve with a
   blocking finding, or a request-changes with none. It renders the set as the
   posted verdict's Findings block. `finding.sh upsert` takes them as
-  `--severity`, `--category`, `--failure-scenario` and `--verification`, and at a
-  finding's first raise stamps them as `finding.severity`, `finding.category`,
+  `--severity`, `--category`, `--failure-scenario` and `--verification`, and at
+  a finding's first raise stamps them as `finding.severity`, `finding.category`,
   `finding.failure_scenario` and `finding.verification`, and as lines of its
   description, outside `finding.key`. `finding.sh set-disposition` refuses to
   defer a finding whose `finding.severity` is P2. `lifecycle/lifecycle.toml`
@@ -120,11 +121,11 @@ repository it is configured for, reads the status checks and check runs on each
 one's head commit, and judges its readiness: clean, pending, failed,
 conflicted, behind, blocked or draft
 ([GitHubPRMonitor](https://docs.gascity.com/reference/config#githubprmonitor);
-package `githubmonitor`, `EvaluatePullRequests` and `classifyChecks`). For a pull
-request whose readiness fails, `gc github pr backfill --create-repair-beads`
-files or refreshes one repair bead per pull request and head, with the head's
-sha and the names of its failed and pending checks in its metadata, and routes
-it to the monitor's repair route
+package `githubmonitor`, `EvaluatePullRequests` and `classifyChecks`). For a
+pull request whose readiness fails, `gc github pr backfill
+--create-repair-beads` files or refreshes one repair bead per pull request and
+head, with the head's sha and the names of its failed and pending checks in its
+metadata, and routes it to the monitor's repair route
 ([gc github pr backfill](https://docs.gascity.com/reference/cli#gc-github-pr-backfill);
 package `main`, `githubPRRepairMetadata`). That is a record of GitHub's checks,
 written only for an open pull request that is failing, and it names the
@@ -191,8 +192,9 @@ link. Their own records of a check are a task's account of itself, as in the
 build pack, or a run's notes: `pr-pipeline`'s `mol-pr-ship` notes on its run's
 root which gates passed. The `release-gates` directory holds one release
 decision, written as a document that names the reviewed commit, the merged
-tree and whether the tests passed, and nothing reads it back. None reads a record of a rig's checks at a commit,
-made by whichever run ran them, before it runs anything itself.
+tree and whether the tests passed, and nothing reads it back. None reads a
+record of a rig's checks at a commit, made by whichever run ran them, before it
+runs anything itself.
 
 So the pack keeps `review-evidence.sh`. It reads the records `gctk rig` keeps
 at a commit in the rig clone's git directory, which every run of a rig's checks
@@ -225,14 +227,14 @@ The packs Gas City publishes judge a failure in the session that meets it too.
 the tests as a baseline before work starts, so that new bugs can be told from
 pre-existing ones, and asks the person whether to go on when they fail.
 `gstack`'s `ship` workflow triages pre-existing test failures instead of
-stopping on them. `pr-pipeline`'s `mol-pr-ship` calls a failure the
-repository's CI docs list as a baseline flake baseline noise, in its ship
-report, and `pr-review`'s `mol-pr-ci-diagnose` sorts a pull request's failing
-checks by cause, an infrastructure flake among them, from their logs. The `pre_existing` flag of a
-`compound-engineering` review finding, and the `bmad` code review's deferral of
-a pre-existing issue, mark a finding about code the change did not touch, not a
-failing check. None records a judgment that a later run at the same commit
-reads.
+stopping on them. `pr-pipeline`'s `mol-pr-ship` classifies a failure that the
+repository's CI docs list as a baseline flake as baseline noise, and surfaces
+that in its ship report, and `pr-review`'s `mol-pr-ci-diagnose` sorts a pull
+request's failing checks by cause, an infrastructure flake among them, from
+their logs. The `pre_existing` flag of a `compound-engineering` review finding,
+and the `bmad` code review's deferral of a pre-existing issue, mark a finding
+about code the change did not touch, not a failing check. None records a
+judgment that a later run at the same commit reads.
 
 So the pack keeps `rig-check-lib.sh`. The mark it reads, and the tracker ledger
 behind it, are the pack's existing `rig_check_pre_existing` key and
@@ -242,9 +244,9 @@ answers, which the self-review's exit condition and the review's gather share.
 ### A finding's grade and record
 
 `core`'s `mol-review-quorum` fans a review out to read-only reviewer lanes and
-a synthesis. Each lane writes a `review-quorum.lane.v1` object to its step bead's
-`gc.output_json`, with `findings` listed as "array of findings with severity,
-title, body, file, line or range". Package `reviewquorum` declares the
+a synthesis. Each lane writes a `review-quorum.lane.v1` object to its step
+bead's `gc.output_json`, with `findings` listed as "array of findings with
+severity, title, body, file, line or range". Package `reviewquorum` declares the
 contract. A `Finding` carries a title, a body, a file, a start and end line, a
 free-text severity, the lanes that raised it, and evidence. A lane's verdict is
 `pass`, `pass_with_findings`, `fail` or `blocked`, and the lane chooses it.
@@ -410,10 +412,11 @@ verification, so the contract is readable on every verdict.
 The other checks Gas City makes of a step's output test less.
 `gc.output_json_required` makes a retry attempt transient when its output is
 missing or does not parse as JSON, and checks nothing of its shape (package
-`dispatch`, `classifyRetryAttempt`). The `gc.output_json_schema` label a quorum
-step carries is read by no Go code, and for a graph.v2 formula the compiler
-warns that `gc.output_json` "is deprecated; use drain in v2 formulas" (package
-`formula`, `GraphV2OutputJSONWarnings`). `reviewquorum`'s `Finalize` refuses a
+`dispatch`, `classifyRetryAttempt`). The `gc.output_json_schema` key a quorum
+step carries is read by no Go code. `gc lint` warns, for each graph.v2 step
+that requires `gc.output_json` and has no drain, that `gc.output_json` "is
+deprecated; use drain in v2 formulas" (package `formula`,
+`GraphV2OutputJSONWarnings`). `reviewquorum`'s `Finalize` refuses a
 lane whose finding count does not match its findings, or whose verdict reports
 findings it does not list, and nothing calls it.
 
@@ -438,13 +441,13 @@ set that breaks the contract before any write.
 
 ### Keys on the finding bead
 
-Gas City declares only the metadata keys its engine reads. Its bead metadata
-vocabulary says that pack- and prompt-private keys "stay open-world by design
-and are intentionally NOT declared here" (package `beadmeta`), and the
-engineering doc *Bead Store* says the namespace "is deliberately open-world at
-the edges". bd calls metadata "the preferred extension point" for data specific
-to an integration, an orchestrator or a team workflow, and reserves only the
-`bd:` and `_` prefixes
+Gas City leaves a pack's private metadata keys undeclared. Package `beadmeta`
+names its own scope as "engine-touched bead-metadata KEY NAMES", and says that
+pack- and prompt-private keys that no Go file reads "stay open-world by design
+and are intentionally NOT declared here". The engineering doc *Bead Store* says
+the namespace "is deliberately open-world at the edges". bd calls metadata "the
+preferred extension point" for data specific to an integration, an orchestrator
+or a team workflow, and reserves only the `bd:` and `_` prefixes
 ([Issue Metadata](https://beads.gascity.com/core-concepts/metadata#reserved-key-prefixes)).
 So the finding contract's keys are pack keys, registered in the pack's
 lifecycle registry with the rest of a finding's.
@@ -455,13 +458,13 @@ The pack keeps `review-evidence.sh` and `rig-check-lib.sh`, the finding
 contract's keys, `finding.sh upsert`'s contract flags, `set-disposition`'s
 refusal to defer a P2, and `signoff.sh`'s check and rendering of a finding
 set. The gather reads the records of a rig's own checks at a commit, which Gas
-City does not keep. The judgment is a record of which fail, at which commit, a tracked
-failure covers, so that a later run at that commit can read it, where Gas City's
-packs act on the judgment only in the run that makes it. The contract keeps on
-a finding bead what Gas City's review findings lack, in bd's metadata and the
-bead's description. This record goes stale, and the surface moves onto Gas
-City, when Gas City keeps a rig's check results at a commit where a review can
-read them before a pull request exists, records a pre-existing judgment that a
-later run at the same commit can read, or ships a review finding that a
+City does not keep. The judgment is a record of which fail, at which commit, a
+tracked failure covers, so that a later run at that commit can read it, where
+Gas City's packs act on the judgment only in the run that makes it. The contract
+keeps on a finding bead what Gas City's review findings lack, in bd's metadata
+and the bead's description. This record goes stale, and the surface moves onto
+Gas City, when Gas City keeps a rig's check results at a commit where a review
+can read them before a pull request exists, records a pre-existing judgment that
+a later run at the same commit can read, or ships a review finding that a
 validator rules on its own and that carries a grade with its failure scenario
 and verification.
