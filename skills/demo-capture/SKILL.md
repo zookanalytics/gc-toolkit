@@ -106,7 +106,7 @@ closes the bead it was poured on. `gc formula show mol-rig-demo` prints the
 pour line and every input. A pour must set exactly one app target
 (`serve_dir`, `serve_cmd`, or `base_url`), because nothing in the toolkit maps
 a rig to its app. The `demo` review check makes the call inside the review
-instead of pouring the mol (`skills/review-demo/SKILL.md`).
+instead of pouring the mol (`gc-toolkit.review-demo`).
 
 ## Capture — you drive over Playwright MCP
 
