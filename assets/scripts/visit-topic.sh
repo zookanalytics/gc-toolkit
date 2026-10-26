@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # visit-topic.sh — the single definition of a visit's topic: what makes two
-# visits the same sitting, and what keeps the demands of two sittings on one
-# subject apart. Sourced, never executed.
+# visits the same sitting, and what a sitting files its demands under.
+# Sourced, never executed.
 #
-# A visit's topic is one of three kinds, decided in this order:
+# A visit's topic is one of these kinds, decided in this order:
 #   key      the visit carries an escalation_key. escalate.sh files one visit
 #            per situation, often under a shared subject, and the key is the
 #            only stamp that tells two situations on one subject apart.

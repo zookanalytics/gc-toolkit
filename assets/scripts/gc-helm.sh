@@ -2297,10 +2297,10 @@ cmd_open() {
         visit_body="Operator picked $bead off the helm board: rebuild the subject's slice, prep, hold for the operator."
     fi
     # A visit filed for a distinct concern is about that concern, not about the
-    # subject at large, so it carries a topic of its own: visit_topic=own, read
-    # by converse-fold.sh, converse-hold.sh and converse-signoff.sh as the visit
-    # itself. Its sitting never folds into a live sitting on the subject, nor
-    # one into it, and the demands it files stay apart from a sibling's. The
+    # subject at large, so it carries a topic of its own: visit_topic=own, which
+    # visit-topic.sh reads as the visit itself. Its sitting never folds into a
+    # live sitting on the subject, nor one into it, and the demands it files
+    # carry its topic, so its hold never refreshes a sibling's demand. The
     # topic decides no coverage: the subject is still the tracks edge.
     visit_topic=""
     if [ -n "$open_allow_dup" ]; then visit_topic="own"; fi
