@@ -284,6 +284,8 @@ hasF "$METHOD" 'the sweep is given the candidates so far, each as its locus and 
 hasF "$METHOD" "The sweep's finder gets the sweep's targets in place of an angle, and the candidates so far." \
   "…which its finder's brief carries, with the targets in place of an angle"
 hasF "$METHOD" 'or `Fresh-eyes sweep` for a defect the sweep below found' "…a defect it adds names the sweep as its category"
+hasF "$TMP/verdict.correctness" '"category": "<the dimension of What to check that found it, or Fresh-eyes sweep>"' \
+  "…which the finding set's template offers beside the dimension"
 hasF "$METHOD" 'each P0 and P1 among them is verified with the rest' "…and is verified with the rest"
 hasF "$TMP/verdict.correctness" 'the trail carries a `Swept:` line that says how the sweep ran and what it added' \
   "…and the trail the verdict section shapes records the sweep on a Swept: line"

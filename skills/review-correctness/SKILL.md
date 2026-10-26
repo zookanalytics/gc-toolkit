@@ -353,7 +353,7 @@ its `locus` and `message` and the fields of its contract: its `severity`, its
 
 ```json
 {"locus": "<file>:<symbol or section>", "message": "<what is wrong, why it matters, and the fix>",
- "severity": "P1", "category": "<the dimension of What to check that found it>",
+ "severity": "P1", "category": "<the dimension of What to check that found it, or Fresh-eyes sweep>",
  "failure_scenario": "<the input or state, then the wrong output>",
  "verification": "CONFIRMED: <the evidence>"}
 ```
