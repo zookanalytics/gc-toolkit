@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hermetic test for the gctk-bin block: the one line by which a formula step,
-# the correctness method, self-review-check.sh and rig-check-pre-existing.sh find
+# review-evidence.sh, self-review-check.sh and rig-check-pre-existing.sh find
 # the gctk binary they call directly, as $GCTK. Formula text has no include
 # mechanism, so each caller carries the line in a `# >>> gctk-bin` block, and
 # this holds every copy to the one definition and runs it.
@@ -29,7 +29,7 @@ LINE='GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"'
 
 echo "# every copy is the one line"
 git -C "$ROOT" grep -l -F -e '# >>> gctk-bin' -- formulas skills assets/scripts ':!*.test.sh' > "$TMP/files"
-eq "$(tr '\n' ' ' < "$TMP/files")" "assets/scripts/rig-check-pre-existing.sh assets/scripts/self-review-check.sh formulas/mol-polecat-work.toml formulas/mol-refinery-patrol.toml skills/review-correctness/SKILL.md " \
+eq "$(tr '\n' ' ' < "$TMP/files")" "assets/scripts/review-evidence.sh assets/scripts/rig-check-pre-existing.sh assets/scripts/self-review-check.sh formulas/mol-polecat-work.toml formulas/mol-refinery-patrol.toml " \
   "the block sits in the files that call gctk directly"
 while IFS= read -r f; do
   awk '/# >>> gctk-bin$/ {f = 1; n++; next} /# <<< gctk-bin$/ {f = 0; next} f {print n "\t" $0}' "$ROOT/$f" > "$TMP/copies"

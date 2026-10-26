@@ -9,7 +9,8 @@
 # review's values as a pour fills them: each must act on the rig GC_RIG_ROOT
 # names, or the roster entry for GC_RIG, and fail closed when neither resolves.
 # mol-review's gather also prints the reviewed commit's guidance for the
-# review's check alone, and load-dispatch's refusal of a short record names the
+# review's check alone and what gctk rig recorded there, read in the review's
+# worktree, and load-dispatch's refusal of a short record names the
 # missing key and leaves the route empty. A control runs a bare add from the same cwd and proves cwd
 # steers it, so "landed in the rig, not cwd" is a real discrimination. No live
 # city, store, or network.
@@ -83,7 +84,18 @@ cat > "$BIN/lifecycle" <<'LC'
 echo "$*" >> "$FAKE_LC_LOG"
 echo "${GC_RIG_ROOT:-<unset>}" >> "$FAKE_LC_LOG.root"
 LC
-chmod +x "$BIN/gc" "$BIN/lifecycle"
+# gctk answers the gather's record reads: a fail of the tests, a pass of lint
+# and nothing for typecheck, logging each call and the directory it ran in.
+cat > "$TMP/gctk" <<'GCTK'
+#!/usr/bin/env bash
+printf '%s|%s\n' "$*" "$(pwd -P)" >> "$GCTK_LOG"
+case "$2" in
+  test) echo '{"check":"test","result":"fail","scope":"affected","exit_code":1,"command":"t"}'; exit 1 ;;
+  lint) echo '{"check":"lint","result":"pass","exit_code":0,"command":"l"}'; exit 0 ;;
+  *) exit 3 ;;
+esac
+GCTK
+chmod +x "$BIN/gc" "$BIN/lifecycle" "$TMP/gctk"
 export PATH="$BIN:$PATH"
 export FAKE_ROSTER="$TMP/roster.json"
 
@@ -250,6 +262,7 @@ review_case() { # <mode> [check] [guidance file]; sets RC, OID, D
   pick "$1" "$d/rig"
   { review_render "$GATHER" "${2:-correctness}" "$OID"; printf '%s\n' "$PROBE_TAIL"; } > "$d/review-probe.sh"
   ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_PACK_DIR="$ROOT" GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_META="$TMP/anchor.json" FAKE_LOG="$d/gc.log" \
+      GCTK_BIN="$TMP/gctk" GCTK_LOG="$d/gctk.log" \
       PROBE="$d/probe" PROBE_RIG="$d/rig" PROBE_CWD="$d/cwd" bash "$d/review-probe.sh" ) >"$d/out" 2>&1 || rc=$?
   RC=$rc; D=$d
 }
@@ -273,6 +286,11 @@ for mode in env roster; do
     || bad "review/$mode: the block prints the worktree's path" "$(tr '\n' '|' < "$D/out")"
   grep -qF "the change under review" "$D/out" && ok "review/$mode: the block prints the anchor" \
     || bad "review/$mode: the block prints the anchor" "$(tr '\n' '|' < "$D/out")"
+  grep -qxF "== What gctk rig recorded at $OID" "$D/out" && grep -qxF "test: fail, scope affected, exit 1, command: t" "$D/out" \
+    && grep -qxF "lint: pass, exit 0, command: l" "$D/out" \
+    && ok "review/$mode: the block prints what gctk rig recorded at the reviewed commit" \
+    || bad "review/$mode: the block prints what gctk rig recorded at the reviewed commit" "$(tr '\n' '|' < "$D/out")"
+  eq "$(cut -d'|' -f2 "$D/gctk.log" 2>/dev/null | sort -u)" "${WT:-/nonexistent}" "review/$mode: the records are read in the review's worktree"
   review_remove
   eq "$(registered "$D/rig" "$WT")" no "review/$mode: the verdict step's remove unregisters the worktree from the rig"
   if [ -n "$WT" ] && [ ! -e "$WT" ]; then ok "review/$mode: the verdict step's remove deletes the worktree directory"

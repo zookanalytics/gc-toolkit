@@ -187,7 +187,9 @@ QREMOVE="$(extract "$ROOT/formulas/mol-review-quorum-signoff.toml" quorum-review
 for v in GATHER REMOVE QREMOVE; do
     if [ -n "${!v}" ]; then ok "the formula's $v lines extract"; else bad "the formula's $v lines extract (markers missing)"; fi
 done
-PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"; cp "$SUT" "$HERE/review-checks.sh" "$PACK/assets/scripts/"
+# The pack holds the scripts the gather calls and the libs they source.
+PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"
+cp "$SUT" "$HERE/review-checks.sh" "$HERE/review-evidence.sh" "$HERE/bd-lib.sh" "$HERE/rig-check-lib.sh" "$PACK/assets/scripts/"
 # The gather fetches the base and the branch from origin before it makes the
 # worktree, and reads the anchor.
 ORIGIN="$TMP/origin.git"; git init -q --bare "$ORIGIN"
