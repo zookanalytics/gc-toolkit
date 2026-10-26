@@ -565,10 +565,12 @@ lacks "doc does not revive the keystroke mechanism" 'SendKeysRaw' "$ENGAGE" \
 # connection, so attachment was never a single pane on screen.
 lacks "the doc does not claim the city runs one tmux client" 'one tmux client' "$ENGAGE" \
     "the operator keeps a tab per sitting beside the main connection"
-# The operator's ruling (sitting tk-irjgyll, 2026-10-25): viewing does not hold
-# a sitting open, a tab exits and prints the last hand-back, and the main
-# connection moves on. Pin the ruling and the mechanism that carries it.
-have "doc carries the viewing ruling" 'nothing holds a session open because someone is viewing it' "$POST_SEC"
+# Viewing does not hold a sitting open, a tab exits and prints the last
+# hand-back, and the main connection moves on. Nothing copies the pane, so the
+# visit's record is what the tab prints. Pin the constraint and the mechanism
+# that carries it.
+have "doc says viewing holds no sitting open" 'nothing holds a session open because someone is viewing it' "$POST_SEC"
+have "…and that nothing copies the pane" 'Nothing copies the pane' "$POST_SEC"
 have "…the per-session tmux option that carries it" 'detach-on-destroy' "$POST_SEC"
 have "…the client flag the main connection keeps moving on with" '-f no-detach-on-destroy' "$POST_SEC"
 have "…and the tab printing the sitting's last hand-back" 'last hand-back the sitting recorded on it' "$POST_SEC"

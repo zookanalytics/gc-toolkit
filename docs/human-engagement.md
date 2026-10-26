@@ -1010,13 +1010,11 @@ Three things about that path are worth knowing before trusting a pane:
   A sitting's stop event reads the same, and there it is the sitting's own
   `drain-ack`.
 
-**The operator's ruling on this (2026-10-25, sitting tk-irjgyll on
-tk-e8t8pen):** a sitting ends its session as soon as its visit closes,
-whichever path closes it, and nothing holds a session open because someone
-is viewing it. A tab on a sitting exits and prints the sitting's last
-hand-back, while the main connection and tabs on any other session keep
-moving on. Copying the pane, and keeping a live or a dead pane on screen
-after the session ends, were ruled out.
+**What the design holds to.** A sitting ends its session as soon as its
+visit closes, whichever path closes it, and nothing holds a session open
+because someone is viewing it. Nothing copies the pane, and no pane, live or
+dead, stays on screen after its session ends, so what a tab prints is the
+record on the visit.
 
 **What follows for the pack.** The record has to be written before the pane
 matters: the takeaway stamped at hold time, the outcome appended as soon as
