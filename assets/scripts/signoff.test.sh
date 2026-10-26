@@ -1299,18 +1299,93 @@ reset "$ANCHOR_PR"
 FF="$TMP/findings.json"
 cat > "$FF" <<'JSON'
 [
-  {"locus":"assets/scripts/foo.sh:bar()","message":"unquoted expansion in the loop","severity":"P1"},
-  {"locus":"docs/x.md","message":"stale reference to a retired script","severity":"P2"}
+  {"locus":"docs/x.md","message":"stale reference to a retired script","severity":"P2","category":"readiness","failure_scenario":"a reader follows the reference to a script that no longer exists"},
+  {"locus":"assets/scripts/foo.sh:bar()","message":"unquoted expansion in the loop","severity":"P1","category":"correctness","failure_scenario":"a work_dir holding a space splits in two and the loop removes the wrong directory","verification":"CONFIRMED: bar() run on /tmp/a b removed /tmp/a"}
 ]
 JSON
 out=$("$SUT" --review-bead rv-1 --verdict request-changes --findings-file "$FF" 2>&1); rc=$?
 eq "$rc" 0 "request-changes with --findings-file exits 0"
-has "$(cat "$STUB_FINDING_LOG")" "upsert --anchor tk-anc --lane correctness --locus assets/scripts/foo.sh:bar() --message unquoted expansion in the loop" "signoff files the first objection as a finding on the reviewed lane"
-has "$(cat "$STUB_FINDING_LOG")" "upsert --anchor tk-anc --lane correctness --locus docs/x.md --message stale reference to a retired script" "signoff files the second objection as a finding"
+has "$(cat "$STUB_FINDING_LOG")" "upsert --anchor tk-anc --lane correctness --locus assets/scripts/foo.sh:bar() --message unquoted expansion in the loop --severity P1 --category correctness --failure-scenario a work_dir holding a space splits in two and the loop removes the wrong directory --verification CONFIRMED: bar() run on /tmp/a b removed /tmp/a" "signoff files the first objection as a finding on the reviewed lane, with its contract beside its locus and message"
+has "$(cat "$STUB_FINDING_LOG")" "upsert --anchor tk-anc --lane correctness --locus docs/x.md --message stale reference to a retired script --severity P2 --category readiness --failure-scenario a reader follows the reference to a script that no longer exists" "signoff files the P2 beside it, because the PR goes back for a rework round anyway"
+hasnt "$(grep -F -- '--locus docs/x.md' "$STUB_FINDING_LOG")" "--verification" "…passing no verification the P2 did not carry"
 FIX=$(jq -r '[ .[] | select(.id | startswith("fix-")) ] | .[0].id // empty' "$STUB_STORE")
 hasnt "$(cat "$STUB_FINDING_LOG")" "wire-fix-unit" "signoff does NOT wire the fix unit to the unvalidated findings — the validator hangs that edge as it rules each one must-fix, so a later declined ruling can still close its finding"
 has "$(cat "$STUB_DEPS")" "tk-anc|$FIX|blocks" "the fix unit still blocks the anchor (the merge is held)"
 has "$(meta "$FIX" rejection_reason)" "address the 2 finding(s) this bead blocks" "rejection_reason points the worker at the findings, not the objection prose"
+BODY=$(cat "$STUB_GH_BODY")
+has "$BODY" "<summary>Findings: 1 P1, 1 P2</summary>" "the posted verdict renders the set as its Findings block, counted per grade"
+has "$BODY" '**1. P1, correctness** `assets/scripts/foo.sh:bar()`' "…the most severe finding first, with its grade, category and locus"
+has "$BODY" "Failure scenario: a work_dir holding a space splits in two and the loop removes the wrong directory" "…its failure scenario"
+has "$BODY" "Verification: CONFIRMED: bar() run on /tmp/a b removed /tmp/a" "…and its verification"
+has "$BODY" '**2. P2, readiness** `docs/x.md`' "…then the P2"
+hasnt "$BODY" "None of these is filed" "…which a request-changes verdict files"
+LN_HEAD=$(grep -n -m1 '^Correctness: request-changes\.' "$STUB_GH_BODY" | cut -d: -f1)
+LN_FIND=$(grep -n -m1 '<summary>Findings:' "$STUB_GH_BODY" | cut -d: -f1)
+LN_TRAIL=$(grep -n -m1 'VERDICT body: findings here' "$STUB_GH_BODY" | cut -d: -f1)
+if [ -n "$LN_HEAD" ] && [ -n "$LN_FIND" ] && [ -n "$LN_TRAIL" ] && [ "$LN_HEAD" -lt "$LN_FIND" ] && [ "$LN_FIND" -lt "$LN_TRAIL" ]; then
+  ok "the Findings block sits between the opening line and the trail"
+else
+  bad "the Findings block sits between the opening line and the trail (lines: head '$LN_HEAD' findings '$LN_FIND' trail '$LN_TRAIL')"
+fi
+
+echo "# a finding set the finding contract refuses writes nothing"
+# refused <label> <verdict> <json> <reason>: the call exits 1 naming the reason,
+# and the store, the posts and the finding log are as they were.
+refused() {
+  local before
+  reset "$ANCHOR_PR"
+  printf '%s' "$3" > "$TMP/refused.json"
+  before=$(cat "$STUB_STORE")
+  out=$("$SUT" --review-bead rv-1 --verdict "$2" --findings-file "$TMP/refused.json" 2>&1); rc=$?
+  eq "$rc" 1 "$1: refused (exit 1)"
+  has "$out" "$4" "$1: the refusal names why"
+  eq "$(cat "$STUB_STORE")" "$before" "$1: nothing written to the store"
+  eq "$(cat "$STUB_GH_LOG")$(cat "$STUB_FINDING_LOG")$(cat "$STUB_CREATED")" "" "$1: nothing posted, filed or created"
+}
+P1_OK='"locus":"a.sh:f()","message":"m","severity":"P1","category":"correctness","failure_scenario":"input x gives wrong output y"'
+refused "a P1 with no verification" request-changes "[{$P1_OK}]" "it is a P1 with no \`verification\`"
+refused "a verification that opens with neither CONFIRMED nor PLAUSIBLE" request-changes "[{$P1_OK,\"verification\":\"probably: it looks wrong\"}]" "does not open with CONFIRMED or PLAUSIBLE"
+refused "a verification that names no evidence" request-changes "[{$P1_OK,\"verification\":\"CONFIRMED\"}]" "does not open with CONFIRMED or PLAUSIBLE and then the evidence"
+refused "a correctness finding with no grade" request-changes '[{"locus":"a.sh","message":"m"}]' "every correctness finding is graded"
+refused "a grade outside P0, P1 and P2" request-changes '[{"locus":"a.sh","message":"m","severity":"P3","category":"c","failure_scenario":"s"}]' 'its `severity` is "P3", not P0, P1 or P2'
+refused "a graded finding with no failure scenario" request-changes '[{"locus":"a.sh","message":"m","severity":"P2","category":"c"},{"locus":"b.sh","message":"m","severity":"P0","category":"c","failure_scenario":"s","verification":"PLAUSIBLE: a concurrent claim reaches it"}]' "finding 1 (a.sh): it names no \`failure_scenario\`"
+refused "a finding with no locus" request-changes '[{"message":"m","severity":"P1","category":"c","failure_scenario":"s","verification":"CONFIRMED: ran it"}]' "it has no \`locus\`"
+refused "an approve carrying a P1" approve "[{$P1_OK,\"verification\":\"CONFIRMED: ran it\"}]" "an approve carries no blocking finding"
+refused "a request-changes whose findings are all P2" request-changes '[{"locus":"a.sh","message":"m","severity":"P2","category":"c","failure_scenario":"s"}]' "when only P2s remain, the review approves"
+refused "a request-changes with an empty set" request-changes '[]' "request-changes needs a blocking finding"
+refused "a set that is not an array" request-changes '{"locus":"a.sh"}' "it is not one JSON array of findings"
+refused "a file that is not JSON" request-changes 'not json' "is not JSON"
+has "$out" "is not JSON (" "a file that is not JSON: the refusal quotes the parse error"
+
+echo "# an approve whose findings are all P2 records them on the verdict and files none"
+reset "$ANCHOR_PR"
+cat > "$TMP/p2.json" <<'JSON'
+[{"locus":"docs/y.md: Usage","message":"the example names a flag the script renamed","severity":"p2","category":"readiness","failure_scenario":"a reader copies the example and gets an unknown-flag error"}]
+JSON
+out=$("$SUT" --review-bead rv-1 --verdict approve --findings-file "$TMP/p2.json" 2>&1); rc=$?
+eq "$rc" 0 "approve with only P2s exits 0"
+backed "…and closes the review as the lane's backing"
+eq "$(cat "$STUB_FINDING_LOG")" "" "…and files no finding"
+BODY=$(cat "$STUB_GH_BODY")
+has "$BODY" "<summary>Findings: 1 P2</summary>" "the posted verdict records the P2s, its grade upper-cased"
+has "$BODY" "None of these is filed or fixed: a review whose findings are all P2 approves." "…and says none of them is filed or fixed"
+has "$BODY" "Failure scenario: a reader copies the example and gets an unknown-flag error" "…with each one's failure scenario"
+
+echo "# a check whose method grades none files its findings with no contract"
+reset "$ANCHOR_PR"
+jq -c 'map(if .id == "rv-1" then .metadata.check_name = "arch" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+printf '%s' '[{"locus":"docs/architecture.md","message":"the change moves the architecture and the doc does not"}]' > "$TMP/arch.json"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes --findings-file "$TMP/arch.json" 2>&1); rc=$?
+eq "$rc" 0 "an arch request-changes with an ungraded finding exits 0"
+has "$(cat "$STUB_FINDING_LOG")" "upsert --anchor tk-anc --lane arch --locus docs/architecture.md --message the change moves the architecture and the doc does not" "…files it on the arch lane"
+hasnt "$(cat "$STUB_FINDING_LOG")" "--severity" "…with no grade"
+has "$(cat "$STUB_GH_BODY")" "<summary>Findings: 1</summary>" "…and the Findings block counts it without a grade"
+
+echo "# pre-open, the Findings block lands in the review's notes with the verdict"
+reset "$ANCHOR_PRE"
+out=$("$SUT" --review-bead rv-1 --verdict request-changes --findings-file "$FF" 2>&1); rc=$?
+eq "$rc" 0 "pre-open request-changes with a finding set exits 0"
+has "$(notes rv-1)" "<summary>Findings: 1 P1, 1 P2</summary>" "the notes pr-open.sh replays carry the Findings block"
 
 # --- request-changes WITHOUT --findings-file is unchanged (backward compat) ------
 echo "# request-changes without findings-file"
@@ -1329,14 +1404,6 @@ eq "$rc" 0 "request-changes with --needs-you exits 0"
 eq "$(head -1 "$STUB_GH_BODY")" "Correctness: request-changes. Needs you: decide whether the retry default belongs in this PR." "the posted verdict opens with the decision"
 FIX3=$(jq -r '[ .[] | select(.id | startswith("fix-")) ] | .[0].id // empty' "$STUB_STORE")
 eq "$(meta "$FIX3" rejection_reason)" "signoff requested changes: Correctness: request-changes." "the rework child's reason is the check and verdict alone, since the worker that reads it is not the operator"
-
-# --- a malformed findings file never costs the rework dispatch ------------------
-echo "# a malformed findings file is best-effort"
-reset "$ANCHOR_PR"
-printf 'not json' > "$TMP/bad.json"
-out=$("$SUT" --review-bead rv-1 --verdict request-changes --findings-file "$TMP/bad.json" 2>&1); rc=$?
-eq "$rc" 0 "a malformed findings file still lands the verdict"
-has "$(cat "$STUB_CREATED")" "Rework PR#42" "…and still files the rework child that holds the merge"
 
 # --- approve is a pure verdict-recorder: it resolves no findings -----------------
 # Stage-3 resolution — closing a green lane's still-unvalidated findings as moot —
