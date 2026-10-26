@@ -98,6 +98,9 @@ case "$1 ${2:-}" in
        '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"},
                {name:"signal-loom", path:$sl, prefix:"sl"}]}' ;;
   "session list")
+    # FAKE_SESSIONS_JSON replaces the listing, for the dismiss cases that stop
+    # the session holding a visit.
+    [ -n "${FAKE_SESSIONS_JSON:-}" ] && { printf '%s\n' "$FAKE_SESSIONS_JSON"; exit 0; }
     # The no-id dismiss resolves the session's own rig from its record, because
     # a converse sitting defaults its store to the CITY ledger. converse-lx-1's
     # record names rig signal-loom (the rig whose path HAS a .beads dir), so the
@@ -215,6 +218,15 @@ case "$1 ${2:-}" in
         '(if $pl != "" then .[0].metadata.placement = $pl else . end) | (if $pa != "" then .[0].parent = $pa else . end)')
     fi
     printf '%s\n' "$row" ;;
+  "runtime drain-ack")
+    # The stop dismiss sends the session that held a visit. The log line names
+    # the caller's own session id and how many closes had landed, so a test can
+    # tell a self-ack from an operator ack and the stop from the close it
+    # follows. FAKE_DRAIN_RC fails it.
+    shift 2
+    printf 'drain-ack %s | self=%s | closes=%s\n' "$*" "${GC_SESSION_ID:-}" \
+        "$(grep -c . "$FAKE_CLOSES" 2>/dev/null || echo 0)" >> "${FAKE_DRAINS:-/dev/null}"
+    exit "${FAKE_DRAIN_RC:-0}" ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     printf '%s\n' "$*" >> "${FAKE_EVENTS:-/dev/null}"
@@ -2250,6 +2262,69 @@ eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(DISMISS-INFER) …and 
 # missing bead-id with no sitting to infer is the no-identity case above.)
 ARC=0; sh "$SCRIPT" dismiss A-PARKED --nope >/dev/null 2>&1 || ARC=$?
 eq "$ARC" "2" "(DISMISS-ARGS) an unknown flag is a usage error"
+
+# ── dismiss stops the session that held the visit it closed ──────────────────
+# A sitting must not outlive its visit, and a session viewed in a tab is not
+# kept up by the viewing. The stop is `gc runtime drain-ack`, so the controller
+# ends the session outside the verb's process: the holder the verb runs in acks
+# itself, after every close; any other holder is acked as an operator. Only a
+# live converse session counts as a holder, and a stop that fails leaves the
+# dismiss standing and names converse-reap.
+STOP_SESSIONS='{"sessions":[
+  {"id":"gc-toolkit__converse-lx-1","session_name":"gc-toolkit__converse-lx-1",
+   "alias":"gc-toolkit/gc-toolkit.v-HELD","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"signal-loom","closed":false},
+  {"id":"gc-toolkit__converse-lx-2","session_name":"gc-toolkit__converse-lx-2",
+   "alias":"gc-toolkit/gc-toolkit.v-STUCK","template":"gc-toolkit/gc-toolkit.polecat","closed":false},
+  {"id":"gc-old","session_name":"gc-toolkit__converse-lx-1",
+   "template":"gc-toolkit/gc-toolkit.converse-opus","closed":true}]}'
+export FAKE_DRAINS="$TMP/drains"
+
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID= GC_SESSION_NAME= GC_ALIAS= sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
+eq "$SRC" "0" "(DISMISS-STOP-OTHER) a dismiss from outside the sitting exits 0"
+eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-lx-1 | self= | closes=2" \
+   "(DISMISS-STOP-OTHER) …and acks the holding session as an operator, once, after the visit's close"
+grep -q 'stopped session gc-toolkit__converse-lx-1' <<< "$SOUT" \
+  && ok "(DISMISS-STOP-OTHER) …and says which session it stopped" \
+  || bad "(DISMISS-STOP-OTHER) the stop is not reported (got: $SOUT)"
+
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
+eq "$SRC" "0" "(DISMISS-STOP-OWN) a dismiss typed into the sitting exits 0"
+eq "$(cat "$TMP/drains")" "drain-ack  | self=gc-toolkit__converse-lx-1 | closes=2" \
+   "(DISMISS-STOP-OWN) …and the sitting acks its own session, after the visit's close"
+grep -q 'ending this session (gc-toolkit__converse-lx-1)' <<< "$SOUT" \
+  && ok "(DISMISS-STOP-OWN) …saying so before it does" \
+  || bad "(DISMISS-STOP-OWN) the self-stop is not announced (got: $SOUT)"
+
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_RC=1 GC_SESSION_ID= GC_SESSION_NAME= GC_ALIAS= sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
+eq "$SRC" "0" "(DISMISS-STOP-FAIL) a stop that fails leaves the dismiss standing"
+grep -q 'could not stop session gc-toolkit__converse-lx-1.*converse-reap' <<< "$SOUT" \
+  && ok "(DISMISS-STOP-FAIL) …and names converse-reap as what closes the session" \
+  || bad "(DISMISS-STOP-FAIL) the failed stop is not reported (got: $SOUT)"
+
+# v-STUCK's holder runs a polecat template, so dismissing its subject closes
+# the visit and stops nothing: only a converse session is a sitting.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID= GC_SESSION_NAME= GC_ALIAS= sh "$SCRIPT" dismiss A-STUCK 2>&1)" || SRC=$?
+eq "$(cat "$TMP/drains")" "" "(DISMISS-STOP-CONVERSE) a visit held by a session that is not a converse sitting stops nothing"
+# v-OTHER is held by nobody, and a holder's closed past session is no holder.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID= GC_SESSION_NAME= GC_ALIAS= sh "$SCRIPT" dismiss A-OTHER 2>&1)" || SRC=$?
+eq "$(cat "$TMP/drains")" "" "(DISMISS-STOP-NOHOLDER) a visit nobody held stops nothing"
+
+# The claim stamps the holder's id on the visit and re-assigns it to the
+# session's qualified alias, so the gc.session_id pin finds a holder whose
+# name the assignee does not carry.
+PINNED='[{"id":"v-PINNED","assignee":"gc-toolkit/gc-toolkit.v-PINNED","metadata":{"task_kind":"visit","gc.continuation_group":"A-PINNED","gc.session_id":"gc-81","gc.session_name":"gc-toolkit__converse-gc-81"}}]'
+PINNED_SESSIONS='{"sessions":[{"id":"gc-81","session_name":"gc-toolkit__converse-gc-81","alias":"gc-toolkit/gc-toolkit.v-PINNED-other","template":"gc-toolkit/gc-toolkit.converse-fable","closed":false}]}'
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
+SRC=0; SOUT="$(FAKE_LIST_OUT="$PINNED" FAKE_SESSIONS_JSON="$PINNED_SESSIONS" GC_SESSION_ID= GC_SESSION_NAME= GC_ALIAS= sh "$SCRIPT" dismiss A-PINNED 2>&1)" || SRC=$?
+grep -q '^drain-ack --operator gc-81 ' "$TMP/drains" \
+  && ok "(DISMISS-STOP-PIN) the visit's gc.session_id names the holder to stop" \
+  || bad "(DISMISS-STOP-PIN) the pinned holder was not stopped (drains: $(cat "$TMP/drains"); out: $SOUT)"
+unset FAKE_DRAINS
 
 export FAKE_STEPS_JSON="$TMP/steps.json"
 

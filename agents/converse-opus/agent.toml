@@ -71,11 +71,12 @@ session_live = ['tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{
 nudge = ""
 # 0 keeps this template off the idle reap; any positive value re-arms it. Idle
 # is measured from terminal output, and an operator reading a held thread
-# produces none. A sitting ends when its visit closes — the agent's own
-# sign-off, or the operator's bare `gc-helm dismiss` (it infers the subject) —
-# and the `converse-reap` order then closes the settled, unattached session.
-# Why, and the ending this does not reach (an OPEN visit the operator walked
-# away from): docs/human-engagement.md.
+# produces none. A sitting ends when its visit closes, and its session with
+# it: the agent's own sign-off ends in its drain-ack, and the operator's bare
+# `gc-helm dismiss` (it infers the subject) stops the session that held the
+# visit. The `converse-reap` order closes any converse session that outlives
+# its closed visit, attached or not. Why, and the ending this does not reach
+# (an OPEN visit the operator walked away from): docs/human-engagement.md.
 idle_timeout = "0"
 # Sittings are opened by hand, never spawned by demand: min 0 starts nothing.
 # max_active_sessions does not ration them: `gc session new` checks no session
