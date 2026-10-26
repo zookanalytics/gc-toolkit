@@ -1,6 +1,6 @@
 ---
 name: review-correctness
-description: The method for the correctness check, the standing review of whether a change is correct and safe as merged. Read the whole diff, settle its test evidence, work the What to check list, give every finding its failure scenario and grade it P0, P1 or P2, verify each blocking one, and add the Verification line to the verdict. Use when you hold a review bead whose check is correctness, or when asked whether a change is correct and safe to merge.
+description: The method for the correctness check, the standing review of whether a change is correct and safe as merged. Read the whole diff, settle its test evidence, hunt with the What to check list's named angles and work the rest of the list, give every finding its failure scenario and the angle or dimension that found it, grade it P0, P1 or P2, verify each blocking one, and add the Verification line to the verdict. Use when you hold a review bead whose check is correctness, or when asked whether a change is correct and safe to merge.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -64,17 +64,65 @@ carries, not the first one that appears.
 
 - **Intent** — does it do what the anchor bead asked? Deviations are fine
   when they are better; flag them either way.
-- **Correctness** — bugs, reachable edge cases, error handling, the failure
-  mode nobody wrote a test for.
-- **Contract** — does it break a caller, a stored format, a metadata key, or
-  a script that greps for the old shape? Find the other call sites of
-  anything it changed; the recurring defect class is a predicate fixed in
-  one copy and left stale in two. Search the same way for what it adds: a
-  rule the diff writes where existing code already defines it, or one edit
-  repeated across copies of a code path, is a finding until one definition
-  serves every site, and a follow-up to fold the copies later does not
-  answer it. Where the surface has no include mechanism, that definition is
-  a marker-fenced block a test holds every copy to.
+
+The hunting angles come next. Each reads the whole diff from its own
+direction, and a defect one direction passes over can be in plain view from
+another. So work every angle, even after another has raised a finding at the
+same place. A defect two angles find is one finding, raised under the angle
+that names its cause.
+
+- **Line by line** — read every changed line inside the whole function, block
+  or section that encloses it, not the hunk alone. Bugs in the unchanged lines
+  of a touched function are in scope, because a change's defect often sits in
+  a line it left alone: one that now receives a new input, runs under a new
+  condition or in a new order, or reads a value the change redefined. At each
+  line, ask what input or state makes it wrong: a condition that tests the
+  wrong thing or misses a case, a boundary handled on one side only, a value
+  used before it is checked, two writers that race, a limit or a cache that
+  never resets, an error swallowed or reported as success, outside input taken
+  unchecked, the failure mode nobody wrote a test for. A defect in an
+  unchanged line is this diff's when the change brought it about, and one the
+  line already had is real but not this diff's.
+- **Removed behavior** — for every line the diff deletes or replaces, name
+  the invariant it held: the check it made, the case it refused or answered,
+  the error it reported, the guarantee its callers relied on. Then find where
+  the new code re-establishes that invariant, on every path the old line
+  covered. A replacement that drops a refusal, narrows a check, loses an error
+  path, answers a batch differently from its items one at a time, or ports a
+  function without one of its cases is a finding, unless the change says why
+  the behavior goes and nothing still relies on it.
+- **Cross-file trace** — follow everything the change touches into the files
+  around it, to its callers and its callees. Does it break a caller, a stored
+  format, a metadata key, or a script that greps for the old shape? Find the
+  other call sites of anything it changed; the recurring defect class is a
+  predicate fixed in one copy and left stale in two. Read each callee the
+  change now relies on, for what it does with the input the change now passes
+  it. A fact the change works out from a shape, such as a path, a name or a
+  format, when another component records it, is a finding, and the fix reads
+  that record. Search the same way for what it adds: a rule the diff writes
+  where existing code already defines it, or one edit repeated across copies
+  of a code path, is a finding until one definition serves every site, and a
+  follow-up to fold the copies later does not answer it. Where the surface has
+  no include mechanism, that definition is a marker-fenced block a test holds
+  every copy to.
+- **Language pitfalls** — hunt the defects each language and framework in the
+  diff is known for, file by file: how it splits, quotes and expands, how it
+  treats a missing or null value, what it converts silently, what it does by
+  default on an error. A failed read taken as an empty or clean answer is one
+  in every language. Where the rig's guidance for this check names the
+  pitfalls this repository has met, and which of them its gates catch, hunt
+  those first, and hardest where no gate reaches.
+- **Wrappers and delegates** — where the change adds or edits a wrapper, a
+  proxy, an adapter, or any code that hands its work to another, check the
+  hand-off in both directions. Each argument, flag, input and environment
+  value a caller passes must reach the delegate as the caller meant it, and
+  each result, exit status, error and signal the delegate returns must reach
+  the caller. A default the wrapper adds, a timeout or a retry it imposes, or
+  an output it filters is checked against every caller that goes through it,
+  including any that called the delegate directly before. A wrapper that
+  swallows its delegate's failure, or reports success when the delegate never
+  ran, is a finding. A diff in which nothing wraps or delegates leaves this
+  angle nothing to read.
 - **Testing** — do the tests exercise real behavior, is the new path
   covered, does a regression pin the bug that was fixed? A new case pins its
   change only if it fails when the change is reverted, so the correctness
@@ -144,8 +192,9 @@ CONFIRMED or PLAUSIBLE. CONFIRMED names the evidence that the trigger reaches
 the failure: a run, the line that does it, the caller that passes the input.
 PLAUSIBLE says why the trigger is realistic when the evidence could not be had.
 
-Each finding names its category, the dimension of What to check that found it,
-and its severity, the grade below.
+Each finding names its category, which is the dimension of What to check that
+found it, spelled as the list spells it. A defect a hunting angle found names
+that angle. Each finding also names its severity, the grade below.
 
 ## What blocks
 
@@ -176,7 +225,7 @@ its `locus` and `message` and the fields of its contract: its `severity`, its
 
 ```json
 {"locus": "<file>:<symbol or section>", "message": "<what is wrong, why it matters, and the fix>",
- "severity": "P1", "category": "<the dimension that found it>",
+ "severity": "P1", "category": "<the dimension of What to check that found it>",
  "failure_scenario": "<the input or state, then the wrong output>",
  "verification": "CONFIRMED: <the evidence>"}
 ```

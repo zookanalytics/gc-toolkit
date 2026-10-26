@@ -387,8 +387,8 @@ grep -E '<!-- [^>]*adopted:[0-9]{4}-[0-9]{2}-[0-9]{2}[^>]*-->' "$LEDGER" > "$TMP
 ANCHORS=$(grep -c . "$TMP/ledger-lines" || true)
 UNKNOWN=$(sed 's/.*--> *//' "$TMP/ledger-lines" | grep -vxF -f "$TMP/dimensions" | head -n1 || true)
 eq "$UNKNOWN" "" "every ledger line names a dimension of the What to check list"
-# The dimension each of these anchors amends, as recorded at its adoption: each
-# is held to that dimension, not to any.
+# The dimension each of these anchors amends: each is held to that dimension,
+# not to any.
 while read -r rule dim; do
   got=$(grep -F -- "<!-- rule:$rule " "$LEDGER" | sed 's/.*--> *//')
   eq "$got" "$dim" "$rule's ledger line names $dim, the dimension it amends"
@@ -396,7 +396,7 @@ done <<'MAP'
 tk-wamr3 Comments
 tk-v32d2u Comments
 tk-0rhvews Testing
-tk-prvea Contract
+tk-prvea Cross-file trace
 MAP
 INV=$(bash "$SUT" --inventory --repo "$ROOT" | grep -c "^$LEDGER_REL	" || true)
 eq "$INV" "$ANCHORS" "the inventory reads every anchor in the ledger"
