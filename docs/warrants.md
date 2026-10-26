@@ -78,11 +78,18 @@ shares only the word ([authority-map.md](authority-map.md)).
 - **Evidence.** Gas City offers ready work in canonical ready order: priority,
   then `created_at`, then id (`gc ready` in `docs/reference/cli.md`, and the
   routed-queue policy in `engdocs/architecture/dispatch.md`). The priority is
-  the bead's own field (`readySortPriority` in `internal/beads/query.go`). bd's
-  `ready` sorts by the bead's own priority by default. Neither one's
-  documentation derives a priority from another bead.
-- **Verified.** 2026-10-19, at `gastownhall/gascity` main 1e05ae624 and bd 1.3.1
-  (c1c4b642a).
+  the bead's own field (`readySortPriority` in `internal/beads/query.go`).
+  Gas City copies a priority only when it creates beads: a sling pours its
+  workflow at the priority of the bead it is slung on (`BeadPriorityOverride`
+  in `internal/sling/sling.go`), and nothing updates the poured beads when
+  that bead's priority changes. bd's `ready` sorts by the bead's own priority
+  by default (`--sort` in bd's `docs/cli-reference/ready.md`). No `--sort`
+  choice of `gc ready`, or of bd's `ready`, `list`, `query` or `search`, orders
+  by a parent's priority. Neither one's documentation derives a priority from
+  another bead.
+- **Verified.** 2026-10-26, at `gastownhall/gascity` main f78779e41,
+  `gastownhall/gascity-packs` main dac12a4a8, bd 1.3.2 (9b65b9e19), and
+  `gastownhall/beads` main 4acde6b4e.
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,
   or a work query can order by a parent's priority.
 
