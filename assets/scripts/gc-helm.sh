@@ -1153,8 +1153,7 @@ cmd_takeaway() {
     # route its stamp does not match — the shape doctor/executor-identity-residue
     # reports on an open, routed bead — and a gc.session_id left behind is the
     # stale pin the runtime's orphan recovery resolves an owner from.
-    # converse-claim.sh's release_turn clears the same pair when it puts a turn
-    # back. Both are read back after this write and a lone unset retried, the way
+    # Both are read back after this write and a lone unset retried, the way
     # the route beside them is: a silent multi-pair drop would otherwise report a
     # successful release while the very residue
     # doctor/executor-identity-residue exists to catch survives on the bead.

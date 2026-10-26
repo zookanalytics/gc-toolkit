@@ -130,8 +130,8 @@ sentence. Record it on the visit just before you post it (the prompt's
 <the sign-off as you post it>
 HANDBACK
 ```
-Only then close the visit through the shared guarded close — the sitting's
-last action, with nothing said after it. `visit-close.sh` stamps the outcome
+Only then close the visit through the shared guarded close, with nothing
+said after it. `visit-close.sh` stamps the outcome
 word and its one-line reason, reads both back, and only then closes; the
 stamp before the close is on purpose. An open visit carrying `gc.outcome` is
 a sitting whose sign-off already posted and whose only missing write is the
@@ -213,5 +213,9 @@ owed to a sitting that was **held**; one closed before any framing was
 posted (step 2's `moot`/`benign`, step 1's `folded`) asked the
 operator nothing, so closing those silently is the contract.
 
-Then continue within the group or drain (step 8, the `converse-continue`
-skill).
+Then drain: a closed visit ends this session (the prompt's **How this
+thread ends**). Run `gc runtime drain-ack` once the close has landed and
+anything the ruling still owes after it has run, and run nothing after it.
+A close that did not land leaves the visit open and the sitting not over:
+repair what `visit-close.sh` printed, or raise it in the thread, and do not
+drain.
