@@ -46,7 +46,7 @@ reads it back, and closes the visit — no takeaway, nothing posted:
 VISIT="$VISIT" SUBJECT="$SUBJECT" \
   "$CONV/converse-close-out.sh" <moot|benign> "<the premise, and what is true instead>"
 ```
-Then go to step 8 and claim again. **Post nothing** — no framing, no
+Once it exits 0, drain (the prompt's **How this thread ends**). **Post nothing** — no framing, no
 sign-off, not even "this turned out to be fine". Deliberately **no
 takeaway stamp** either: it is the subject's headline of what it
 NEEDS, and one for a visit that needs nobody spends the attention this
