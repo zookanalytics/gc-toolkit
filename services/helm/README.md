@@ -57,13 +57,13 @@ POST /helm/dismiss  -> { bead, verb, message }   close the subject's open visit
                     — the write routes; see *Actuating from the board*
 ```
 
-A `Tile` carries 50 fields, declared in `internal/board/model.go` and mirrored
-in `web/src/contract.ts`. The order started as the bash board's object literal
-so the two `--json` outputs could be diffed line for line; that literal is gone
+A `Tile`'s fields are declared in `internal/board/model.go` and mirrored in
+`web/src/contract.ts`. The order started as the bash board's object literal so
+the two `--json` outputs could be diffed line for line; that literal is gone
 and the order is now simply the wire's:
 
 ```
-id rig kind title severity owed weight held
+id rig kind title severity owed weight held visit_state
 n_closed m_total open in_progress assigned
 in_progress_live in_progress_dead dead_owner in_flight in_flight_heads owned
 stranded empty complete
@@ -72,6 +72,8 @@ waiting_on waiting_on_open disposition_due
 takeaway takeaway_at takeaway_by updated_at closed_at frontier needs rank_score
 pr_number pr_url pr_branch pr_machine pr_conversation pr_approval pr_owed_since
 section cluster_key group_root group_parent
+acceptable accept_formula pr_branch_url pr_phase phase recommendation
+visit_start_failure
 ```
 
 `updated_at`, `closed_at` and `pr_owed_since` are `omitzero` and `cluster_key`
@@ -82,7 +84,9 @@ omitted on every row nothing is owed on; `cluster_key` is absent on a row that
 is not one of a template's several.
 
 Tiles are deduplicated by id and **partitioned**: every `owed` row first,
-longest-waiting first, then everything else by `rank_score` descending.
+longest-waiting first, then everything else by `rank_score` descending. A row
+whose visit's sitting failed to start leads the owed rows whatever its age (see
+*A sitting that failed to start*, below).
 
 `section` bands each row by the KIND of attention it wants — `review` (a pull
 request), `gate` (a person must answer), `stalled` (open work nothing is
@@ -686,6 +690,54 @@ section on the next read rather than after the TTL.
 anchor kind, so the bash board's `--json` contract and the parity test are
 untouched; the bash board simply has no sittings section. Adding one there is a
 separate decision, in the same class as the other bash-only verbs.
+
+### A sitting that failed to start
+
+`gc-helm engage` binds a visit to the sitting it spawns before that sitting
+starts, so a sitting Gas City cannot start leaves its visit bound to a session
+that never ran. The binding alone reads `engaged`, and once the witness releases
+it the visit reads like any parked one. So the board reads the failure itself
+(`source.BeadsSource.markStartFailures`), from the records Gas City keeps in the
+city store:
+
+- engage spawns the sitting as a manual session (`session_origin=manual`) whose
+  alias is the visit's id, stored qualified as `<rig>/<binding>.<alias>`, or
+  `v-<id>` where Gas City refuses the bare id as an alias;
+- the reconciler's rollback closes that session bead with `state=failed-create`;
+- a start that ran also leaves a `startup-health-episode` bead keyed by the
+  session's name, whose kind and last detail say why it failed.
+
+The read goes from the session side, which the witness's release does not
+touch: every failed-create manual session whose alias names an open visit. A
+session spawned under the same alias after the failed one is the visit engaged
+again, and clears the mark whatever became of that session; a newer session
+that failed too is the visit's failure now. The reason reads `startup timeout`
+for a deadline, `setup timeout` for a deadline inside a `pre_start` command,
+`never started` for a create rolled back before any start ran (it leaves no
+episode), and `start error: <the recorded error>` otherwise.
+
+| field | on the row |
+|---|---|
+| `visit_state` | `start-failed`, on the held subject's row, or on the visit's own row when its subject has none |
+| `visit_start_failure` | the reason |
+| `needs` | `start failed (<reason>): <the ask>` |
+| `owed`, `severity` | owed, and at least `ELEVATED` |
+
+The row leads the operator's queue, ahead of every row owed longer, so it is
+among the rows `tmux-pick-helm.sh` offers off the head of the queue, and the
+picker and both terminal views mark it `✗`. The mark shows as soon as Gas City
+records the failure and stays until the visit is engaged again or closed. A
+failed start outranks a live sitting on the same row, because each visit on a
+subject is its own conversation. Accept follows the visit's binding, the way
+`gc-helm.sh accept` reads it: it stays off while the failed sitting's binding
+stands and returns once the witness releases it.
+
+The read costs two queries over the city's session beads on every gather (about
+half a second on the live city), plus three small ones for each open visit with
+a failed start on record. A read that fails is noted partial and marks nothing
+it could not establish. An episode read that fails after the failure is
+established marks the row `reason unread`. The supervisor backend gathers no
+sittings, so it shows no failed start either.
 
 ## Architecture
 

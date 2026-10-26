@@ -698,8 +698,17 @@ patrol listed it, or that is settled meanwhile, keeps what that writer left.
 engage's reclaim and its bind drop every session pin the visit still carries.
 The patrol resolves a visit's holder from `gc.session_id` ahead of its
 assignee, so a gone sitting's pin beside a fresh binding would read the fresh
-sitting's visit as orphaned. Within one patrol the board reads the visit as
-parked, and the operator can engage it again.
+sitting's visit as orphaned. Within one patrol the visit of a session that
+closed reads as parked, and the operator can engage it again.
+
+A visit whose sitting failed to start reads `start failed` on the board
+instead, with the reason Gas City recorded: a startup timeout, a setup timeout,
+a create rolled back before it started, or the start's error
+([gascity/human-engagement.md](gascity/human-engagement.md#a-failed-start-is-recorded-on-the-session-bead-and-in-a-startup-health-episode)).
+The board reads that record itself, so the mark shows as soon as the failure is
+recorded, without waiting for the patrol, and it stays until the visit is
+engaged again or closed. The row leads the operator's queue, so the tmux picker
+offers it (services/helm/README.md, "A sitting that failed to start").
 
 Two endings the idle setting does not own:
 
