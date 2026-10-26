@@ -121,12 +121,10 @@ holds the browser.
 demo_engine_cli assemble .captures/agent-run -o demos/board.mp4
 ```
 
-`manifest.json` is the contract `assemble` reads — one entry per frame with
-`file`, `narration` (the caption and the spoken line), `duration`, optional
-`observation`, `proof` (`passed` | `adapted` | `failed`), and `severity`
-(`error` | `warning` | `null`). The engine's `examples/agent-mcp/` documents
-the manifest shape and the MCP wiring; `examples/seed-test/` shows the
-seed-test bootstrap for a demo that first needs a login or seeded data.
+`manifest.json` is the contract `assemble` reads. The engine's
+`examples/agent-mcp/` documents its shape and the MCP wiring, and
+`examples/seed-test/` shows the seed-test bootstrap for a demo that first needs
+a login or seeded data.
 
 ## Deliver to the PR
 
@@ -151,40 +149,17 @@ all exit non-zero rather than leaving the clip undelivered.
 ## Demo-script format
 
 A demo script is markdown that reads as a walkthrough and carries
-machine-checkable directives, so one file both documents and drives the demo:
+machine-checkable directives, so one file both documents and drives the demo.
+The engine documents the format in the "Demo-script format" section of its
+`README.md`. Read it in the engine the library resolves, so the script you
+write is one that engine reads. After `demo_engine_find`, that README is
+`$DEMO_ENGINE_DIR/README.md` when the city has the engine's source as a rig,
+and the one the published package ships otherwise. The engine's
+`demos/sample.md` is a worked example.
 
-```markdown
-# Demo: <title>
-
-**Start:** `/path?query`          ← joined onto the server origin
-
-<free prose → the cover subtitle>
-
-## Steps
-
-1. **<caption shown on screen, spoken as narration>**
-   `<action>`                     ← 0+ backtick directives, run in order
-   <free prose → step description>
-   _Prove:_ <human prose> `<assertion>`
-   _Fail if:_ <human prose> `<assertion>`
-
-## Scrutiny                        ← optional; a closing card
-- <what a viewer should check critically>
-```
-
-Actions: `goto` · `wait <ms>` · `waitFor <selector>` ·
-`waitForText <selector> ~ <substring>` · `click <selector>` ·
-`type <selector> ~ <text>` · `scroll <selector>`. Assertions (in `_Prove:_` /
-`_Fail if:_`): `visible` · `hidden` · `count <sel> <op> <n>` · `text <sel> ~
-<matcher>` · `eval <js>`. `_Prove:_` must hold (polled); `_Fail if:_` fails the
-step when it matches.
-
-A script drafted in the generic `demo:capture` dialect — an `**Auth:**` line, a
-`## Scrutiny` section, and prose-only `_Prove:_`/`_Fail if:_` — parses and runs
-unedited, recording *manual* proofs; sharpening it is additive (add actions and
-assertions, never restructure). The `gc-demo-script` skill generates a script
-in this dialect from a Gas City bead. The engine's `demos/sample.md` is a
-worked example, and its `README.md` is the full format reference.
+The `gc-demo-script` skill writes a script in the generic `demo:capture`
+dialect from a Gas City bead. The README's format section says how the engine
+reads that dialect and how such a script is sharpened.
 
 ## Narration
 
