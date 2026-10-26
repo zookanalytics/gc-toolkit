@@ -122,6 +122,8 @@ instead of claiming your own.
 `work` skill says why):
 - **The subject is the work.** Sign off with `--ruled yes --route human --no-wait`,
   then send the subject: `gc sling <rig>/<pool> "$SUBJECT" --on <formula>`.
+  The formula the subject recommends is never sent this way; take it as the
+  next case says.
 - **The subject takes its recommendation.** The operator rules to take the
   formula a first reaction recommended, `gc.recommended_formula`. Make the
   conversation reply to the recommendation's gate, the human gate under the
