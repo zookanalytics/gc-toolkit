@@ -25,6 +25,11 @@
 #             more than one, the re-run of an attempt that stopped after
 #             resolving the gate acts on the same PR, and a release that does
 #             not read stops the sign-off before any write
+#   (RECORD*, RETIRED-RERUN*) the PR an answer acts on is recorded on the
+#             conversation before it acts, and a re-run of the same ruling acts
+#             on that PR even once its retirement has closed it, never falling
+#             back to the subject; a re-run that answers differently is not
+#             bound by the record
 #   (RIG*)    the rework or the retirement runs in the rig of the PR it acts
 #             on, its store, pool and checkout, when a gate in another rig's
 #             store releases that PR, and a PR whose rig cannot be resolved
@@ -494,6 +499,42 @@ run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --retire du
 eq "$RC" 0 "(SHARED-OTHER-PR) --retire on that ruling exits 0"
 has "$(cat "$CALLS")" "pr-dispose --anchor tk-pr2 --successor tk-anc --kind duplicate" "(SHARED-OTHER-PR) …retiring the one open PR the ruling reaches"
 
+echo "# a re-run acts on the PR its ruling recorded, even once that PR's retirement has closed it"
+# An attempt that retires the member's PR and answers its gate, then stops
+# because the conversation's close does not land, asks for a re-run. pr-facts
+# can consummate the retirement before it, closing the member's anchor, which is
+# then no open PR the ruling reaches. The re-run takes the PR from the record
+# the first attempt wrote on the conversation, finds it closed and goes on,
+# rather than falling back to the epic, which pr-dispose.sh refuses.
+epic_pr; CLOSE_STUCK=tk-conv run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
+eq "$RC" 1 "(RETIRED-RERUN) a sign-off that retired the member's PR, and whose close does not land, stops short"
+eq "$(meta tk-conv gc.ruling_consequence | jq -c '.["ruled: the work moved to the new design"]')" '{"act":"retire","anchor":"tk-mem"}' "(RECORD) the conversation records the PR its ruling's --retire acts on, under the ruling's answer"
+case "$(cat "$CALLS")" in
+  *"bd update tk-conv --set-metadata gc.ruling_consequence="*"pr-dispose --anchor tk-mem"*) ok "(RECORD) …before the retirement acts" ;;
+  *) bad "(RECORD) the record should precede the retirement: $(cat "$CALLS")" ;;
+esac
+setf tk-mem status closed; setm tk-mem gc.superseded_by tk-conv
+: > "$CALLS"
+run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
+eq "$RC" 0 "(RETIRED-RERUN) the re-run exits 0 though the retired member has closed since"
+has "$OUT" "tk-mem, the PR an earlier attempt of this ruling recorded for its --retire, reads closed" "(RETIRED-RERUN) …finding the PR its ruling retired closed"
+hasnt "$(cat "$CALLS")" "pr-dispose" "(RETIRED-RERUN) …disposing nothing again, and never the epic"
+eq "$(field tk-conv status)" "closed" "(RETIRED-RERUN) …and closing the conversation"
+shared_pr; CLOSE_STUCK=tk-conv run_signoff --conversation tk-conv --outcome "settled" "${RETIRED[@]}" --retire duplicate --successor tk-anc --pr-anchor tk-pr2
+eq "$RC" 1 "(RETIRED-RERUN-PICK) a sign-off that retired the PR --pr-anchor names, and whose close does not land, stops short"
+setf tk-pr2 status closed; setm tk-pr2 gc.superseded_by tk-anc
+: > "$CALLS"
+run_signoff --conversation tk-conv --outcome "settled" "${RETIRED[@]}" --retire duplicate --successor tk-anc --pr-anchor tk-pr2
+eq "$RC" 0 "(RETIRED-RERUN-PICK) the re-run with the same --pr-anchor exits 0, the PR it names recovered from the record once closed"
+hasnt "$(cat "$CALLS")" "pr-dispose" "(RETIRED-RERUN-PICK) …disposing nothing again"
+has "$OUT" "the ruling leaves the branch of tk-anc as it stands" "(RETIRED-RERUN-PICK) …and the subject's PR still stands under the ruling"
+epic_pr; REWORK_FAIL=1 run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
+eq "$RC" 1 "(RECORD-OTHER-ANSWER) a rework that does not file stops the sign-off"
+eq "$(meta tk-conv gc.ruling_consequence | jq -r '.["ruled: fix the retry before the merge"].anchor')" "tk-mem" "(RECORD-OTHER-ANSWER) …after recording the PR it acted on"
+run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --no-rework
+eq "$RC" 0 "(RECORD-OTHER-ANSWER) a re-run that answers --no-rework instead is not bound by the record, and exits 0"
+has "$OUT" "the ruling leaves the branch of tk-mem as it stands" "(RECORD-OTHER-ANSWER) …the member's branch standing"
+
 echo "# the rework or the retirement runs in the rig of the PR it acts on"
 # The epic's conversation lives in rig-a (prefix tk). The member's PR and the
 # gate that holds its merge live in rig-b (prefix rb), and the conversation
@@ -563,7 +604,8 @@ eq "$(writes)" 0 "(OPEN-PR) …writing nothing"
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 0 "(REWORK) --rework exits 0"
 has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the retry before the merge" "(REWORK) the rework is filed with the conversation as its source ruling bead"
-has "$(grep -v '^lifecycle state' "$CALLS" | head -1)" "converse-rework" "(REWORK) …before every other write"
+has "$(grep -v '^lifecycle state' "$CALLS" | head -1)" "bd update tk-conv --set-metadata gc.ruling_consequence=" "(REWORK) the PR it acts on is recorded on the conversation first"
+has "$(grep -v '^lifecycle state' "$CALLS" | sed -n 2p)" "converse-rework --anchor tk-anc" "(REWORK) …then the rework runs, before every other write"
 has "$(cat "$CALLS")" "converse-rework ran in GC_RIG=rig-a GC_RIG_ROOT=$RIG_A PWD=$RIG_A" "(REWORK) …in the rig of the PR it acts on"
 has "$(grep '^pr-sitting-comment' "$CALLS")" "filed ruling-driven rework on tk-anc" "(REWORK) …and the reminder says so"
 acceptance; setm tk-anc merge_result pull_request

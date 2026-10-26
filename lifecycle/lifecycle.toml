@@ -1464,6 +1464,7 @@ keys = [
   "visit.recheck", "sweep.*", "triage.*",
   "gc.pr_visit_summary", "gc.pr_visit_actions",
   "gc.ruling", "gc.folded_into",
+  "gc.ruling_consequence",
 ]
 # The gc.takeaway family carries its mechanics in the comment above and in
 # [holds] (settled_keys): gc-helm.sh, signoff.sh
@@ -1483,7 +1484,7 @@ keys = [
 #   beside gc.session_affinity, so one session runs a molecule's inline steps
 #   in turn. A visit filed before the cutover carries its subject here, and the
 #   cutover's migration reads the visit's tracks edge instead. A conversation
-#   carries no pack metadata. Never cleared.
+#   carries none. Never cleared.
 # gc.origin — `operator` marks a topic a human commissioned. operator-intake.sh
 #   stamps it on its subject when the key is absent, and gc-helm.sh `engage
 #   --new-subject` writes it in the create payload of the subject it files.
@@ -1550,6 +1551,15 @@ keys = [
 #   not fold; the cutover's migration walks it once, from a finding's visit to
 #   the gate or visit that carries its question now. Never cleared. A bead id in
 #   the folded visit's own store.
+# gc.ruling_consequence — on a conversation, the open PR each of its rulings'
+#   --rework or --retire acts on: a JSON object from the ruling's answer
+#   (`ruled: <ruling>`) to {act, anchor}, act `rework` or `retire` and anchor
+#   the PR's anchor bead. converse-signoff.sh writes a ruling's entry and reads
+#   it back before the rework or the retirement acts, and a re-run of that
+#   ruling with the same answer acts on the anchor it names, even once that
+#   anchor has closed, as a retired PR's does when pr-facts consummates its
+#   disposition. An entry binds no re-run that answers differently, which
+#   rewrites it when its answer acts on a PR. Never cleared.
 
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by

@@ -766,7 +766,9 @@ review's result set.
   member of an epic subject. The rework or the retirement acts on one PR,
   which `--pr-anchor` names when the ruling reaches more than one, and each
   other one stands. Each runs before any gate the ruling answers is resolved,
-  because a gate can be what holds the merge, and in that PR's own rig.
+  because a gate can be what holds the merge, and in that PR's own rig, after
+  the conversation records which PR it acts on (`gc.ruling_consequence`), so a
+  re-run of the same ruling acts on the same PR even once it has closed.
   `--retire` records the
   disposition and closes the PR through `pr-dispose.sh`, and `pr-facts.sh`
   then takes the anchor through the `pull_request → closed (disposed)`

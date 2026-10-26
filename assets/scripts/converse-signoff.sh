@@ -11,7 +11,9 @@
 #      source_ruling_bead (--rework), or its retirement, through pr-dispose.sh,
 #      which records the disposition and closes the PR (--retire). Either one
 #      runs in that PR's own rig, its store, pool and checkout, whichever rig
-#      the conversation lives in;
+#      the conversation lives in, and the PR it acts on is recorded on the
+#      conversation before it acts, so a re-run of the same ruling acts on the
+#      same PR even once that PR has closed;
 #   2. writes the subject's headline (gc-helm.sh takeaway) and reads it back;
 #   3. resolves each open gate the conversation replies to with
 #      `ruled: <ruling>`, except each one --leave names, and reads each back. bd
@@ -100,13 +102,21 @@
 #     the work now, which every kind but not-needed requires; under not-needed
 #     it defaults to this conversation, the evidence that ruled the work out.
 #     --rework and --retire act on one PR, the one the ruling reaches, else
-#     the subject. The rework or the retirement runs in that PR's rig, before
-#     every other write, and when it does not complete nothing else is written.
+#     the subject. The rework or the retirement runs in that PR's rig, after
+#     one write that records the PR on the conversation (gc.ruling_consequence)
+#     and before every other write, and when it does not complete nothing else
+#     is written. A re-run of the same ruling with the same answer acts on the
+#     PR the record names, the one --pr-anchor named or the ruling reached
+#     then, even once it has closed, as a retired PR closes when pr-facts
+#     consummates its disposition; a PR that reads closed has nothing left for
+#     the rework or the retirement to do, so the re-run goes on without it.
 #   --pr-anchor <bead> names the PR --rework or --retire acts on when the
 #     ruling reaches more than one, which it requires; every other one the
 #     ruling reaches stands. A conversation owns one live rework child, so a
 #     sign-off files one rework, and a second PR whose branch must change takes
-#     a ruling of its own: the gate that releases it stays owed until then.
+#     a ruling of its own: the gate that releases it stays owed until then. A
+#     re-run may name the PR an earlier attempt of the same ruling recorded,
+#     even once it has closed.
 #   --accept (with a ruling) says the ruling takes the subject's
 #     recommendation, gc.recommended_formula, which a first reaction put to the
 #     operator through the human gate under the key first-reaction. That gate
@@ -385,20 +395,47 @@ fi
 # conversation owns one live rework child (rework-child.sh), so one sign-off
 # files one rework, and each other open PR the ruling reaches stands under it,
 # as --no-rework says of every one.
+#
+# The PR a ruling's rework or retirement acts on is recorded on the conversation
+# (gc.ruling_consequence, keyed by the ruling's answer) before it acts, because
+# what it acts on can close in between: pr-facts consummates a retirement by
+# closing the retired PR's anchor, and a closed bead is no open PR the ruling
+# reaches. A re-run of the same ruling with the same answer recovers that PR
+# from the record, so it never falls back to the subject or acts on another PR,
+# and a recorded PR that reads closed has nothing left for the answer to do. A
+# re-run that answers differently is a new answer, and the record does not
+# bind it.
+CONSEQUENCE_JQ='def consequences: ((.metadata // {})["gc.ruling_consequence"] // {})
+  | (if type == "string" then (fromjson? // {}) else . end) | if type == "object" then . else {} end;'
+RECORDED_ON=""
+case "$PR_ANSWER" in
+  rework|retire)
+    RECORDED_ON=$(printf '%s' "$CONV_ROW" | jq -r --arg a "$ANSWER" --arg act "$PR_ANSWER" "$CONSEQUENCE_JQ"'
+      consequences | .[$a] // {} | select(((.act // "") | tostring) == $act) | (.anchor // "") | tostring' 2>/dev/null) ;;
+esac
 PR_TARGET=""
+TARGET_CLOSED=""
 STANDS=()
 case "$PR_ANSWER" in
   rework|retire)
     if [ -n "$PR_PICK" ]; then
-      reaches_pr "$PR_PICK" \
+      reaches_pr "$PR_PICK" || [ "$PR_PICK" = "$RECORDED_ON" ] \
         || die "--pr-anchor $PR_PICK is no open PR this ruling reaches (${PR_LIST:-none}); nothing was written"
       PR_TARGET="$PR_PICK"
+    elif [ -n "$RECORDED_ON" ]; then
+      PR_TARGET="$RECORDED_ON"
+      echo "an earlier attempt of this ruling recorded $PR_TARGET as the PR its --$PR_ANSWER acts on; acting on it again"
     elif [ "${#PR_ANCHORS[@]}" -gt 1 ]; then
       die "this ruling reaches more than one open PR ($PR_LIST), and --$PR_ANSWER acts on one; nothing was written. Name it with --pr-anchor <bead>, and each other one stands under this ruling. A conversation files one live rework, so a PR whose own branch must change or which must retire as well takes a ruling of its own: leave the gate that releases it owed, with --leave or out of --answer, until that ruling is carried out"
     else
       PR_TARGET="${PR_ANCHORS[0]:-$SUBJECT}"
     fi
-    for p in "${PR_ANCHORS[@]+"${PR_ANCHORS[@]}"}"; do [ "$p" = "$PR_TARGET" ] || STANDS+=("$p"); done ;;
+    for p in "${PR_ANCHORS[@]+"${PR_ANCHORS[@]}"}"; do [ "$p" = "$PR_TARGET" ] || STANDS+=("$p"); done
+    if [ -n "$RECORDED_ON" ] && [ "$PR_TARGET" = "$RECORDED_ON" ]; then
+      TROW=$(show_row "$PR_TARGET") \
+        || stopped "$PR_TARGET, the PR an earlier attempt of this ruling recorded for its --$PR_ANSWER, could not be read to tell whether it is still open; nothing was written"
+      [ "$(printf '%s' "$TROW" | jq -r '(.status // "") | ascii_downcase')" = closed ] && TARGET_CLOSED=yes
+    fi ;;
   no-rework)
     STANDS=("${PR_ANCHORS[@]+"${PR_ANCHORS[@]}"}")
     [ "${#STANDS[@]}" -gt 0 ] || STANDS=("$SUBJECT") ;;
@@ -414,7 +451,7 @@ esac
 # a bead's store. The conversation stays the rework's provenance.
 TARGET_RIG=""
 TARGET_PATH=""
-if [ -n "$PR_TARGET" ]; then
+if [ -n "$PR_TARGET" ] && [ -z "$TARGET_CLOSED" ]; then
   BS=$(pack_script bead-store.sh) \
     || stopped "no bead-store.sh on any candidate root, so the rig that holds $PR_TARGET, where its --$PR_ANSWER acts, could not be resolved; nothing was written"
   TARGET_RIG=$("$BS" "$PR_TARGET" 2>/dev/null) && TARGET_PATH=$("$BS" --path "$PR_TARGET" 2>/dev/null) && [ -d "$TARGET_PATH" ] \
@@ -527,11 +564,29 @@ take_recommendation() {
 # verdict files, sourced by this conversation, and returns every review lane to
 # unreviewed; the child's blocks edge holds the merge. --retire records the
 # disposition and closes the PR, so there is nothing left to merge. Either one
-# runs in the PR's own rig, before any gate this sitting answers is resolved.
-# One that does not complete stops here with nothing else written, and a
-# re-run adopts a child an earlier attempt filed, or finds the PR it closed.
+# runs in the PR's own rig, after the record of the PR it acts on and before
+# any gate this sitting answers is resolved. One that does not complete stops
+# here with nothing else written, and a re-run adopts a child an earlier
+# attempt filed, or finds the PR it closed.
 CONSEQUENCE=""
-case "$PR_ANSWER" in
+# The PR the answer acts on is recorded first, so an attempt that stops at any
+# later write leaves its re-run that PR to act on. A record that does not read
+# back stops the sign-off with nothing else written.
+if [ -n "$PR_TARGET" ] && [ "$RECORDED_ON" != "$PR_TARGET" ]; then
+  RECORD=$(printf '%s' "$CONV_ROW" | jq -c --arg a "$ANSWER" --arg act "$PR_ANSWER" --arg t "$PR_TARGET" "$CONSEQUENCE_JQ"'
+    consequences + {($a): {act: $act, anchor: $t}}' 2>/dev/null)
+  [ -n "$RECORD" ] && gc bd update "$CONVERSATION" --set-metadata "gc.ruling_consequence=$RECORD" >/dev/null 2>&1
+  show_row "$CONVERSATION" | jq -e --arg a "$ANSWER" --arg act "$PR_ANSWER" --arg t "$PR_TARGET" "$CONSEQUENCE_JQ"'
+      consequences | .[$a] == {act: $act, anchor: $t}' >/dev/null 2>&1 \
+    || stopped "the PR this ruling's --$PR_ANSWER acts on ($PR_TARGET) did not read back recorded on conversation $CONVERSATION (gc.ruling_consequence), and a re-run needs it once that PR closes; nothing else was written"
+fi
+ACTING="$PR_ANSWER"
+if [ -n "$TARGET_CLOSED" ]; then
+  echo "$PR_TARGET, the PR an earlier attempt of this ruling recorded for its --$PR_ANSWER, reads closed, so the $PR_ANSWER has nothing left to act on"
+  CONSEQUENCE="found $PR_TARGET closed, so the $PR_ANSWER had nothing left to act on"
+  ACTING=""
+fi
+case "$ACTING" in
   rework)
     CR=$(pack_script converse-rework.sh)
     if [ -z "$CR" ]; then
