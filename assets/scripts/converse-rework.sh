@@ -115,7 +115,7 @@ PR_NUMBER=$(row_meta "$ANCHOR_ROW" pr_number)
 # The anchor's rig checkout. Its branch lives on that checkout's origin and its
 # check index is that checkout's, while a sitting runs from the city or another
 # rig's checkout, so the head is read and the lanes are resolved there.
-RIG_ROOT=$("$SCRIPT_DIR/bead-store.sh" --path "$ANCHOR" 2>/dev/null) || RIG_ROOT=""
+RIG_ROOT=$("$SCRIPT_DIR/bead-store.sh" --path "$ANCHOR") || RIG_ROOT=""
 { [ -n "$RIG_ROOT" ] && git -C "$RIG_ROOT" rev-parse --git-dir >/dev/null 2>&1; } \
   || die "anchor $ANCHOR's rig checkout did not resolve to a repository (bead-store.sh --path $ANCHOR), so its branch head cannot be read; nothing filed"
 # The commit the ruling judged, which the supersede below resolves the anchor's

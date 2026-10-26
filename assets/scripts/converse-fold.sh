@@ -124,7 +124,7 @@ else
   # The scan reads the in_progress listing, the live sittings, of every rig's
   # store: this visit's own for the holder, and every other one for a sitting on
   # this topic that was filed in the wrong store.
-  SCOPES=$(run_bounded gc rig list --json 2>/dev/null | scrub \
+  SCOPES=$("$HERE/rig-map.sh" \
     | jq -r '.rigs[]? | select((.path // "") != "")
              | [.path, ((.suspended // false) | tostring), (.prefix // "")] | join("\u001f")' 2>/dev/null)
   if [ -z "$SCOPES" ]; then

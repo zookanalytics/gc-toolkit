@@ -17,8 +17,8 @@
 # owns it (gc-helm react exit 5), a live workflow already drives it (exit 6), or
 # it is already routed or armed (exit 7), so react is a no-op that files
 # nothing: nothing would file the visit, so this does.
-# Exit: 0 conversation queued · 2 usage · 3 environment (rig enumeration
-# matches gc-helm.sh's per-cause taxonomy) · 4 runtime failure.
+# Exit: 0 conversation queued · 2 usage · 3 environment (the rig map did not
+# read, with rig-map.sh's reason, or the city has no rigs) · 4 runtime failure.
 set -u
 
 # >>> control-char-scrub
@@ -160,39 +160,10 @@ esac
 RIGS=""
 enumerate_rigs() {
     [ -n "$RIGS" ] && return 0
-    # >>> rig-enumeration-taxonomy
-    # Mirrors gc-helm.sh's enumerate_rigs (per-cause sentences); no
-    # timeout arm because this script does not bound the call.
-    # The stderr capture outlives nothing: it is read and removed a few lines
-    # down, and the traps that cover the signal landing while `gc rig list`
-    # runs come off with it. A trap is process-global, so a helper that leaves
-    # one installed rewrites how every later line of every caller handles a
-    # signal — these live exactly as long as the file they remove.
-    _er_errf=$(mktemp "${TMPDIR:-/tmp}/gctk-rig-enum.XXXXXX" 2>/dev/null || printf '')
-    _er_rc=0
-    if [ -n "$_er_errf" ]; then
-        trap 'rm -f "$_er_errf" 2>/dev/null' EXIT
-        trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-        rigs_raw=$(gc rig list --json 2>"$_er_errf") || _er_rc=$?
-        _er_why=$(tr '\n' ' ' < "$_er_errf" 2>/dev/null | cut -c1-300 | sed 's/  */ /g; s/^ *//; s/ *$//')
-        rm -f "$_er_errf" 2>/dev/null || true
-        trap - EXIT INT TERM HUP
-    else
-        rigs_raw=$(gc rig list --json 2>/dev/null) || _er_rc=$?
-        _er_why=""
-    fi
-    [ "$_er_rc" -eq 0 ] \
-        || die "could not enumerate rigs: 'gc rig list' exited ${_er_rc}${_er_why:+ — $_er_why}. That is the data plane, not this script — try 'gc doctor' and check Dolt. This command wrote nothing." 3
-    # jq -e separates the rest by exit status: 4 = no output at all,
-    # 5 = would not parse, 1 = parsed but not the {"rigs":[…]} contract.
-    _er_shape=0
-    printf '%s' "$rigs_raw" | jq -e 'type=="object" and (.rigs|type)=="array"' >/dev/null 2>&1 || _er_shape=$?
-    case "$_er_shape" in
-        0) : ;;
-        4) die "could not enumerate rigs: 'gc rig list --json' exited 0 but printed nothing. A silent empty answer usually means gc was killed or the city path is wrong — check GC_CITY and 'gc doctor'. This command wrote nothing." 3 ;;
-        5) die "could not enumerate rigs: 'gc rig list --json' printed something that is not JSON${_er_why:+ — $_er_why}. Run it by hand to see what it actually emitted (a stray log line on stdout is the usual cause). This command wrote nothing." 3 ;;
-        *) die "could not enumerate rigs: 'gc rig list --json' printed JSON with no '.rigs' array. That is a gc contract change, not a city problem. This command wrote nothing." 3 ;;
-    esac
+    # rig-map.sh names on stderr why a listing did not read, the same reason
+    # gc-helm.sh's enumerate_rigs passes on, so the two front doors tell one
+    # story about a city with no readable rig map.
+    rigs_raw=$("$SCRIPT_DIR/rig-map.sh") || die "could not enumerate rigs. This command wrote nothing." 3
     # The projection carries the flags the wait-note below reads from this same
     # enumeration (city-liveness.sh says which, and why a rig row's running is
     # not one). A `gc rig list` that omits a flag leaves it null, which the note
@@ -201,7 +172,6 @@ enumerate_rigs() {
     [ -n "$RIGS" ] || RIGS='[]'
     [ "$(printf '%s' "$RIGS" | jq 'length' 2>/dev/null || echo 0)" -gt 0 ] \
         || die "no rigs in this city: 'gc rig list' answered normally with an empty rig set. Add one with 'gc rig add', or point GC_CITY at the intended city. This command wrote nothing." 3
-    # <<< rig-enumeration-taxonomy
 }
 
 # require_reaction_agent <rig> — refuse (die, nothing filed) when <rig> has no

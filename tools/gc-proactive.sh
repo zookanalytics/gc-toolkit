@@ -124,6 +124,10 @@ resolve_pool_target() {
     esac
 }
 
+# The pack's one read of the rig map, which rig_beads_db, deliverable and
+# assignable ask.
+RIG_MAP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/rig-map.sh"
+
 # rig_beads_db -> this rig's .beads dir, to pin gc bd --db: an unpinned
 # up-walk from a worktree (where .beads is gitignored) overshoots to the HQ
 # ledger and demand comes back empty. Empty when unresolvable; callers fall
@@ -131,7 +135,7 @@ resolve_pool_target() {
 rig_beads_db() {
     [ -n "${GC_RIG:-}" ] || return 0
     local path
-    path="$(gc rig list --json 2>/dev/null \
+    path="$("$RIG_MAP" 2>/dev/null \
         | jq -r --arg n "$GC_RIG" '.rigs[]? | select(.name==$n) | .path' 2>/dev/null \
         | head -n1 || true)"
     [ -n "$path" ] && [ -d "$path/.beads" ] && printf '%s' "$path/.beads"
@@ -529,7 +533,7 @@ cmd_deliverable() {
             riglist=""
             [ -f "$FIXTURE/rigs.json" ] && riglist="$(cat "$FIXTURE/rigs.json")"
         else
-            riglist="$(gc rig list --json 2>/dev/null || true)"
+            riglist="$("$RIG_MAP" 2>/dev/null || true)"
         fi
         if [ -n "$riglist" ]; then
             bead_prefix="${bead%%-*}"
@@ -679,7 +683,7 @@ cmd_assignable() {
             riglist=""
             [ -f "$FIXTURE/rigs.json" ] && riglist="$(cat "$FIXTURE/rigs.json")"
         else
-            riglist="$(gc rig list --json 2>/dev/null || true)"
+            riglist="$("$RIG_MAP" 2>/dev/null || true)"
         fi
         if [ -n "$riglist" ]; then
             bead_prefix="${bead%%-*}"

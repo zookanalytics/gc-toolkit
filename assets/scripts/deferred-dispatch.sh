@@ -1042,7 +1042,7 @@ until_store_ref() {
     local want rigs name path
     want="$(cd "$BD_DB" 2>/dev/null && pwd -P)" || return 1
     [ -n "$want" ] || return 1
-    rigs="$(pass_child gc rig list --json 2>/dev/null)" || return 1
+    rigs="$(pass_child "$SCRIPTS_DIR/rig-map.sh")" || return 1
     while IFS=$'\t' read -r name path; do
         [ -n "$name" ] && [ -n "$path" ] || continue
         if [ "$(cd "$path/.beads" 2>/dev/null && pwd -P)" = "$want" ]; then
