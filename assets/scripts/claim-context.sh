@@ -4,14 +4,15 @@
 # that workflow was poured for, so the session starts the step without
 # re-reading any of them.
 #
-#   claim-context.sh <bead-id> [--step]
+#   claim-context.sh <bead-id> [--no-step]
 #
 # <bead-id> is the bead_id the claim returned. The output names that bead and
-# its gc.step_ref, the workflow root with its formula and input convoy, and the
+# its gc.step_ref, the claimed step's own title and description, which are its
+# instructions, the workflow root with its formula and input convoy, and the
 # work bead: its title, status, assignee, priority, type, metadata, notes and
-# description. --step adds the claimed bead's own title and description, which
-# for a formula step are its instructions, for a claim result with no
-# step_reminder, as every result on the claimed tier is.
+# description. A claim result on the claimed tier carries no step_reminder, so
+# the instructions print unless --no-step says the result's step_reminder
+# already carries them.
 #
 # The work bead is the input convoy's one tracked member. A claimed bead that
 # belongs to no workflow is the work bead itself. A workflow with no input
@@ -42,20 +43,21 @@ SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
   cat >&2 <<'USAGE'
-usage: claim-context.sh <bead-id> [--step]
+usage: claim-context.sh <bead-id> [--no-step]
 
 Prints what a session orients on after gc hook --claim: the claimed bead and its
-gc.step_ref, its workflow root, formula and input convoy, and the work bead's
+gc.step_ref, the claimed step's own title and description, which are its
+instructions, its workflow root, formula and input convoy, and the work bead's
 title, status, assignee, priority, type, metadata, notes and description.
---step adds the claimed bead's own title and description, the step's
-instructions, for a claim result that carries no step_reminder.
+--no-step leaves out the step's instructions, for a claim result whose
+step_reminder carries them.
 USAGE
 }
 
-BEAD=""; WANT_STEP=""
+BEAD=""; WANT_STEP=1
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --step)    WANT_STEP=1; shift ;;
+    --no-step) WANT_STEP=""; shift ;;
     -h|--help) usage; exit 0 ;;
     -*)        usage; exit 2 ;;
     *)         [ -z "$BEAD" ] || { usage; exit 2; }; BEAD="$1"; shift ;;
@@ -120,7 +122,7 @@ elif [ "$(meta "$CLAIMED" gc.kind)" = workflow ]; then
   ROOT_ID="$BEAD"; ROOT="$CLAIMED"
 fi
 
-# The claimed bead, then its instructions when asked for, then the workflow.
+# The claimed bead, then its instructions unless --no-step, then the workflow.
 if [ -z "$ROOT_ID" ]; then
   echo "Claimed $BEAD ($(get "$CLAIMED" '.status // "unknown"')). It belongs to no workflow, so it is the work bead."
   echo

@@ -3,18 +3,18 @@
 # orients from after gc hook --claim.
 #
 # What it holds:
-#   - a formula step's claim prints the step's gc.step_ref, its workflow's
-#     formula and input convoy, and the work bead's title, status, assignee,
-#     priority, type, metadata, notes and description, from two store reads,
-#     the step and the convoy;
-#   - the step's own instructions print only with --step, ahead of the
-#     workflow, and --step costs no read;
+#   - a formula step's claim prints the step's gc.step_ref and instructions,
+#     its workflow's formula and input convoy, and the work bead's title,
+#     status, assignee, priority, type, metadata, notes and description, from
+#     two store reads, the step and the convoy;
+#   - the step's instructions print ahead of the workflow, and --no-step
+#     leaves them out at no change in reads;
 #   - a step whose record lacks its root, or carries it without metadata,
 #     reads the root, one read more;
 #   - a workflow with no input convoy, and a convoy that tracks no bead or more
 #     than one, print no work bead and say why;
 #   - a claimed bead in no workflow is the work bead, printed once with or
-#     without --step, from one read;
+#     without --no-step, from one read;
 #   - a claimed workflow root reads as one, with its convoy's work bead;
 #   - an empty metadata, notes or description reads as (none);
 #   - a `gc bd:` notice line ahead of the JSON is not a failed read;
@@ -23,8 +23,9 @@
 #     another bead's record;
 #   - a call with no bead, two beads or an unknown flag exits 2 and reads
 #     nothing;
-#   - the polecat claim contract runs this script by its pack path, with a flag
-#     the script takes.
+#   - the polecat claim contract runs this script by its pack path with no
+#     flag, the form that prints the step's instructions, and names the flag
+#     the script takes for a result that carries them.
 #
 # The harness's gc stub serves each bead from a JSON store and logs every call,
 # which is how the reads are counted.
@@ -94,23 +95,25 @@ store "[$BASE_STORE]"
 cc tk-step
 eq "$RC" 0 "a step claim exits 0"
 has "$OUT" "Claimed tk-step, step mol-polecat-work.implement (in_progress)." "…names the claimed bead, its gc.step_ref and status"
+has "$OUT" "## Implement the solution (tk-step)" "…the step's title, the way a step_reminder prints it"
+has "$OUT" "STEP-MARKER: the step instructions" "…and its description, the step's instructions"
+if before "$OUT" "STEP-MARKER" "Workflow tk-root"; then ok "…ahead of the workflow"; else bad "…ahead of the workflow (got: $OUT)"; fi
 has "$OUT" "Workflow tk-root runs mol-polecat-work over input convoy tk-convoy." "…its workflow, formula and input convoy"
 has "$OUT" "Work bead tk-work: Fix the thing" "…the work bead and its title"
 has "$OUT" "Status open, assignee none, priority P1, type bug." "…its status, assignee, priority and type"
 has "$OUT" '"rejection_reason": "REJ-MARKER"' "…its metadata"
 has "$OUT" "NOTES-MARKER: a ruling appended after filing" "…its notes"
 has "$OUT" "DESC-MARKER: what to build" "…its description"
-hasnt "$OUT" "STEP-MARKER" "…and not the step's instructions, which the claim result carries"
 hasnt "$OUT" "tk-epic" "…and no edge of the convoy but its tracks edges"
 eq "$READS" "tk-step tk-convoy" "…from two reads: the step, whose record carries its root, and the convoy"
 eq "$OTHER" "" "…and no other gc call"
 
-cc tk-step --step
-eq "$RC" 0 "--step exits 0"
-has "$OUT" "## Implement the solution (tk-step)" "…prints the step's title the way a step_reminder does"
-has "$OUT" "STEP-MARKER: the step instructions" "…and its description"
-if before "$OUT" "STEP-MARKER" "Workflow tk-root"; then ok "…ahead of the workflow"; else bad "…ahead of the workflow (got: $OUT)"; fi
-has "$OUT" "NOTES-MARKER" "…and still the work bead's notes"
+cc tk-step --no-step
+eq "$RC" 0 "--no-step exits 0"
+hasnt "$OUT" "Step instructions" "…and leaves out the step's instructions, which a step_reminder carries"
+hasnt "$OUT" "STEP-MARKER" "…its description too"
+has "$OUT" "Claimed tk-step, step mol-polecat-work.implement (in_progress)." "…still names the claimed bead"
+has "$OUT" "NOTES-MARKER" "…and still prints the work bead's notes"
 eq "$(nreads)" 2 "…from the same two reads"
 
 echo "# a step whose record does not carry its root"
@@ -127,7 +130,7 @@ has "$OUT" "over input convoy tk-convoy." "…and its convoy found"
 
 echo "# workflows with no single work bead"
 store "[$(step tk-step "[$(jq -nc '{id: "tk-root", dependency_type: "tracks", metadata: {"gc.kind": "workflow", "gc.formula_name": "mol-feedback-distiller"}}')]")]"
-cc tk-step --step
+cc tk-step
 eq "$RC" 0 "a workflow with no input convoy: exit 0"
 has "$OUT" "Workflow tk-root runs mol-feedback-distiller with no input convoy, so it has no work bead. The step's instructions are the plan." \
     "…says it has no work bead"
@@ -147,13 +150,17 @@ has "$OUT" "Input convoy tk-convoy tracks no bead, so this workflow has no work 
 
 echo "# a claimed bead in no workflow, and a claimed root"
 store "[$BASE_STORE]"
-cc tk-work --step
+cc tk-work
 eq "$RC" 0 "a bead in no workflow: exit 0"
 has "$OUT" "Claimed tk-work (open). It belongs to no workflow, so it is the work bead." "…is the work bead"
 has "$OUT" "NOTES-MARKER" "…with its notes"
-eq "$(printf '%s\n' "$OUT" | grep -c 'DESC-MARKER')" 1 "…and its description once, --step or not"
+eq "$(printf '%s\n' "$OUT" | grep -c 'DESC-MARKER')" 1 "…and its description once"
+hasnt "$OUT" "Step instructions" "…as the work bead, not as step instructions"
 eq "$READS" "tk-work" "…from one read"
-cc tk-root --step
+NO_FLAG="$OUT"
+cc tk-work --no-step
+eq "$RC|$OUT" "0|$NO_FLAG" "…and --no-step prints it the same"
+cc tk-root
 eq "$RC" 0 "a claimed workflow root: exit 0"
 has "$OUT" "Claimed tk-root (in_progress), the root of a workflow, whose work runs as its step beads." "…reads as a root"
 has "$OUT" "Work bead tk-work: Fix the thing" "…with its convoy's work bead"
@@ -221,8 +228,9 @@ eq "$RC|$(nreads)" "0|0" "--help: exit 0, and nothing read"
 echo "# the claim contract that runs it"
 DOCTRINE="$ROOT_DIR/template-fragments/polecat-doctrine.template.md"
 CALL=$(grep -F 'assets/scripts/claim-context.sh' "$DOCTRINE" | grep -v '^#' | head -1)
-has "$CALL" '"{{ .ConfigDir }}/assets/scripts/claim-context.sh" <bead_id>' "polecat-doctrine runs the script by the pack's path, on the claim's bead_id"
-has "$(cat "$DOCTRINE")" "add \`--step\`" "…and names --step for a result with no step_reminder"
+eq "$CALL" '"{{ .ConfigDir }}/assets/scripts/claim-context.sh" <bead_id>' \
+   "polecat-doctrine runs the script by the pack's path on the claim's bead_id, with no flag, so a claimed result's read prints the step"
+has "$(cat "$DOCTRINE")" "add \`--no-step\`" "…and names --no-step for a result that carries a step_reminder"
 for P in polecat polecat-codex; do
   has "$(cat "$ROOT_DIR/agents/$P/prompt.template.md")" '{{ template "polecat-doctrine" . }}' "the $P prompt carries that contract"
 done
