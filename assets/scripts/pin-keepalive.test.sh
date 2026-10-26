@@ -112,7 +112,7 @@ base_sessions() {
   {"id":"s-refinery","alias":"gc-toolkit/gc-toolkit.refinery","session_name":"gc-toolkit--gc-toolkit__refinery","provider":"claude-watch","state":"asleep"},
   {"id":"s-pol1","alias":"","session_name":"gc-toolkit--gc-toolkit__polecat-1-pool","provider":"claude","state":"active"},
   {"id":"s-conv","alias":"","session_name":"gc-toolkit--gc-toolkit__converse-2-pool","provider":"claude","state":"asleep"},
-  {"id":"s-codex","alias":"gc-toolkit/gc-toolkit.hicks","session_name":"gc-toolkit--gc-toolkit__polecat-lx-hicks","provider":"codex","state":"active"}
+  {"id":"s-codex","alias":"gc-toolkit/gc-toolkit.hicks","session_name":"gc-toolkit--gc-toolkit__polecat-hq-hicks","provider":"codex","state":"active"}
 ]}
 JSON
 }

@@ -125,7 +125,7 @@ case "$1 ${2:-}" in
     jq -n --arg susp "${RIG_SUSPENDED-}" --arg run "${RIG_RUNNING-}" --arg hq "${HQ_RUNNING-}" \
           --arg nohq "${NO_HQ_ROW-}" \
       '{rigs:[ (if $nohq != "" then empty
-                else {name:"loomington", path:"/nonexistent-city", prefix:"lx", hq:true}
+                else {name:"mycity", path:"/nonexistent-city", prefix:"hq", hq:true}
                      + (if $hq   != "" then {running:   ($hq   == "true")} else {} end) end),
                ({name:"gc-toolkit", path:(env.RIG_PATH // "/nonexistent-rig"), prefix:"tk", hq:false}
                + (if $susp != "" then {suspended: ($susp == "true")} else {} end)

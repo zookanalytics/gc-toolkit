@@ -31,7 +31,7 @@
       "stale_days": 4,
       "priority": 1,
       "cross_rig_refs": [
-        "sl-9k2mq"
+        "ra-9k2mq"
       ],
       "open_heads": [
         "tk-eemvf.5",
@@ -275,7 +275,7 @@
   ],
   "partial": true,
   "partial_errors": [
-    "rig shutupandlisten: context canceled"
+    "rig rig-b: context canceled"
   ],
   "pack_health": [
     {
@@ -297,10 +297,10 @@
       "last_build_rc": 0,
       "restart_pending": false,
       "probe_status": "unreadable",
-      "probe_detail": "rig shutupandlisten: dial tcp 127.0.0.1:3306: connect: connection refused",
+      "probe_detail": "rig rig-b: dial tcp 127.0.0.1:3306: connect: connection refused",
       "checked_at": "2026-08-11T15:00:00Z",
       "severity": "HIGH",
-      "detail": "9f1c0b7e5a4d CANNOT read the city's bead stores — the board will not render: rig shutupandlisten: dial tcp 127.0.0.1:3306: connect: connection refused"
+      "detail": "9f1c0b7e5a4d CANNOT read the city's bead stores — the board will not render: rig rig-b: dial tcp 127.0.0.1:3306: connect: connection refused"
     },
     {
       "component": "helm",

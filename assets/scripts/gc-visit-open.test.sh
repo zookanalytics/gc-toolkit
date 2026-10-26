@@ -103,7 +103,7 @@ case "$1 ${2:-}" in
           --arg hrun "${HQ_RUNNING-}" \
           --arg gsusp "${GASCITY_SUSPENDED-}" --arg grun "${GASCITY_RUNNING-}" \
           --arg tsusp "${GCTK_SUSPENDED-}"    --arg trun "${GCTK_RUNNING-}" \
-      '{rigs:[({name:"loomington", path:$c, prefix:"lx", hq:true}
+      '{rigs:[({name:"mycity", path:$c, prefix:"hq", hq:true}
                + (if $hrun  != "" then {running:   ($hrun =="true")} else {} end)),
               ({name:"gc-toolkit", path:$t, prefix:"tk", hq:false}
                + (if $tsusp != "" then {suspended: ($tsusp=="true")} else {} end)
@@ -349,7 +349,7 @@ eq "$RC" "2" "(RIG) an unknown rig is a usage error"
 eq "$CALLS" "" "(RIG) an unknown rig creates nothing and files nothing"
 has "$ERR" "unknown rig" "(RIG) the error names the problem"
 # die() takes the exit code as its SECOND argument; a $*-joined message printed
-# it as trailing noise ("… shutupandlisten) 2"). Caught live, not by the
+# it as trailing noise ("… rig-b) 2"). Caught live, not by the
 # substring assertion above — so assert the whole line, not a fragment.
 [[ "$ERR" =~ \)$ ]] && ok "(RIG) the exit code does not leak into the message" \
     || bad "(RIG) the exit code leaks into the message (got: $ERR)"

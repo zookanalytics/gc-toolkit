@@ -900,8 +900,8 @@ func TestClosedPassReadsLiteLivePassReadsFull(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})
 	store := &fakeStore{issues: map[string][]*beads.Issue{
 		"epic": {
-			withDesc(issue("tk-live", "live epic", "epic", 2, testNow.Add(-time.Hour), ""), "blocks sl-aa111 downstream"),
-			withDesc(closedIssue("tk-done", "done epic", "epic", 2, testNow.Add(-2*24*time.Hour), testNow.Add(-24*time.Hour), ""), "closed once sl-bb222 landed"),
+			withDesc(issue("tk-live", "live epic", "epic", 2, testNow.Add(-time.Hour), ""), "blocks ra-aa111 downstream"),
+			withDesc(closedIssue("tk-done", "done epic", "epic", 2, testNow.Add(-2*24*time.Hour), testNow.Add(-24*time.Hour), ""), "closed once ra-bb222 landed"),
 		},
 	}}
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{"gc-toolkit": store})
@@ -1139,7 +1139,7 @@ func TestBeadsGatherMetadataKindsDegradeIndependently(t *testing.T) {
 // TestBeadsGatherDegradesPerRig mirrors SupervisorSource's contract: one rig
 // failing must not lose the others, and it must be recorded as partial.
 func TestBeadsGatherDegradesPerRig(t *testing.T) {
-	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": "sl"})
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "rig-a": "ra"})
 	broken := &fakeStore{
 		failType: map[string]error{
 			"epic":     errors.New("dolt timeout"),
@@ -1153,7 +1153,7 @@ func TestBeadsGatherDegradesPerRig(t *testing.T) {
 	}
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{
 		"gc-toolkit":  populatedStore(),
-		"signal-loom": broken,
+		"rig-a": broken,
 	})
 
 	res, err := src.Gather(context.Background())
@@ -1239,7 +1239,7 @@ func TestBeadsGatherErrorsOnTotalOutage(t *testing.T) {
 // TestBeadsCheckAndRigDiscovery covers the startup probe and the on-disk
 // enumeration, including a rig directory with no bead store.
 func TestBeadsCheckAndRigDiscovery(t *testing.T) {
-	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": ""})
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "rig-a": ""})
 	if err := os.MkdirAll(filepath.Join(root, "rigs", "not-a-rig"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1255,7 +1255,7 @@ func TestBeadsCheckAndRigDiscovery(t *testing.T) {
 	if len(rigs) != 2 {
 		t.Fatalf("want 2 rigs with bead stores, got %d: %+v", len(rigs), rigs)
 	}
-	// Sorted by name, so gc-toolkit precedes signal-loom deterministically.
+	// Sorted by name, so gc-toolkit precedes rig-a deterministically.
 	if rigs[0].name != "gc-toolkit" || rigs[0].prefix != "tk" {
 		t.Errorf("first rig: %+v", rigs[0])
 	}
@@ -1444,7 +1444,7 @@ func TestReadIssuePrefix(t *testing.T) {
 	}
 	cases := []struct{ name, body, want string }{
 		{"underscore.yaml", "dolt.mode: server\nissue_prefix: tk\n", "tk"},
-		{"hyphen.yaml", "issue-prefix: sl\n", "sl"},
+		{"hyphen.yaml", "issue-prefix: ra\n", "ra"},
 		{"quoted.yaml", `issue_prefix: "gc"` + "\n", "gc"},
 		{"absent.yaml", "dolt.mode: server\n", ""},
 	}
@@ -1469,16 +1469,16 @@ func joinStore() *fakeStore {
 		issue("tk-visit1", "visit: tk-epic — operator pick", "task", 2, testNow,
 			`{"task_kind":"visit","gc.continuation_group":"tk-epic"}`),
 		issue("tk-root1", "mol-polecat-work", "task", 2, testNow,
-			`{"gc.input_convoy_id":"tk-icv1","gc.session_name":"gc-toolkit__polecat-lx-live"}`),
+			`{"gc.input_convoy_id":"tk-icv1","gc.session_name":"gc-toolkit__polecat-hq-live"}`),
 		// A root with NO session of its own: the name has to come off its steps.
 		issue("tk-root2", "mol-polecat-work", "task", 2, testNow,
 			`{"gc.input_convoy_id":"tk-icv2"}`),
 		issue("tk-step2", "implement", "task", 2, testNow,
-			`{"gc.root_bead_id":"tk-root2","gc.session_name":"gc-toolkit__polecat-lx-steps"}`),
+			`{"gc.root_bead_id":"tk-root2","gc.session_name":"gc-toolkit__polecat-hq-steps"}`),
 		// A HUSK: an open root whose session is long gone. Joining on root
 		// existence alone would flip it to "in flight".
 		issue("tk-root3", "mol-polecat-work", "task", 2, testNow,
-			`{"gc.input_convoy_id":"tk-icv3","gc.session_name":"gc-toolkit__polecat-lx-dead"}`),
+			`{"gc.input_convoy_id":"tk-icv3","gc.session_name":"gc-toolkit__polecat-hq-dead"}`),
 	)
 	// Each input convoy tracks its one work bead. resolveInflight reads the
 	// member from this `tracks` edge in-process, so the fixture carries the
@@ -1492,9 +1492,9 @@ func joinStore() *fakeStore {
 func liveGC() *fakeGC {
 	return &fakeGC{
 		sessions: map[string]string{
-			"gc-toolkit__polecat-lx-live":  "active",
-			"gc-toolkit__polecat-lx-steps": "active",
-			"gc-toolkit__polecat-lx-dead":  "archived",
+			"gc-toolkit__polecat-hq-live":  "active",
+			"gc-toolkit__polecat-hq-steps": "active",
+			"gc-toolkit__polecat-hq-dead":  "archived",
 		},
 	}
 }
@@ -1515,10 +1515,10 @@ func TestGatherJoinsVisitsAndInflight(t *testing.T) {
 	if !res.Facts.Visits["tk-epic"] {
 		t.Errorf("an open visit marks its subject held: visits=%v", res.Facts.Visits)
 	}
-	if got := res.Facts.Inflight["tk-work1"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-lx-live" {
+	if got := res.Facts.Inflight["tk-work1"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-hq-live" {
 		t.Errorf("root with its own session_name resolves: got %v", got)
 	}
-	if got := res.Facts.Inflight["tk-work2"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-lx-steps" {
+	if got := res.Facts.Inflight["tk-work2"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-hq-steps" {
 		t.Errorf("root without a session_name falls back to its steps: got %v", got)
 	}
 	if got, ok := res.Facts.Inflight["tk-work3"]; ok {
@@ -1530,7 +1530,7 @@ func TestGatherJoinsVisitsAndInflight(t *testing.T) {
 	if calls := gc.externalCalls(); calls != 1 {
 		t.Errorf("gather spent %d subprocesses, want 1 (session list; membership and ownership are in-process)", calls)
 	}
-	if res.Facts.OwnerState["gc-toolkit__polecat-lx-live"] != "active" {
+	if res.Facts.OwnerState["gc-toolkit__polecat-hq-live"] != "active" {
 		t.Errorf("session states carried: %v", res.Facts.OwnerState)
 	}
 }
@@ -1547,7 +1547,7 @@ func TestGatherAnchorOwnWorkflowCountsOnItsTile(t *testing.T) {
 		issue("tk-slung", "Land the slung fix", "task", 2, testNow,
 			`{"merge_result":"pre_open_gate","branch":"polecat/tk-slung"}`),
 		issue("tk-root9", "mol-polecat-work", "task", 2, testNow,
-			`{"gc.input_convoy_id":"tk-icv9","gc.session_name":"gc-toolkit__polecat-lx-live"}`),
+			`{"gc.input_convoy_id":"tk-icv9","gc.session_name":"gc-toolkit__polecat-hq-live"}`),
 	)
 	// An idle child, so a tile that missed the anchor's own molecule would band
 	// stranded rather than merely read zero.
@@ -1562,7 +1562,7 @@ func TestGatherAnchorOwnWorkflowCountsOnItsTile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
-	if got := res.Facts.Inflight["tk-slung"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-lx-live" {
+	if got := res.Facts.Inflight["tk-slung"]; len(got) != 1 || got[0] != "gc-toolkit__polecat-hq-live" {
 		t.Fatalf("the join is keyed by the convoy's member, here the anchor's own bead: got %v", res.Facts.Inflight)
 	}
 
@@ -1581,19 +1581,19 @@ func TestGatherAnchorOwnWorkflowCountsOnItsTile(t *testing.T) {
 // TestGatherCarriesPrefixesAndDescription pins the two anchor-side inputs the
 // cross-rig scan needs: every rig's prefix/name, and the anchor's prose.
 func TestGatherCarriesPrefixesAndDescription(t *testing.T) {
-	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": "sl"})
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "rig-a": "ra"})
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{
-		"gc-toolkit": populatedStore(), "signal-loom": {},
+		"gc-toolkit": populatedStore(), "rig-a": {},
 	})
 	res, err := src.Gather(context.Background())
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
-	if !slices.Equal(res.Facts.Prefixes, []string{"sl", "tk"}) {
-		t.Errorf("prefixes = %v, want [sl tk]", res.Facts.Prefixes)
+	if !slices.Equal(res.Facts.Prefixes, []string{"ra", "tk"}) {
+		t.Errorf("prefixes = %v, want [ra tk]", res.Facts.Prefixes)
 	}
-	if !slices.Equal(res.Facts.RigNames, []string{"gc-toolkit", "signal-loom"}) {
-		t.Errorf("rig names = %v, want [gc-toolkit signal-loom]", res.Facts.RigNames)
+	if !slices.Equal(res.Facts.RigNames, []string{"gc-toolkit", "rig-a"}) {
+		t.Errorf("rig names = %v, want [gc-toolkit rig-a]", res.Facts.RigNames)
 	}
 	i, ok := findAnchor(res, "tk-epic")
 	if !ok {
@@ -1734,7 +1734,7 @@ func TestHQBeadStoreIsGathered(t *testing.T) {
 	if err := os.MkdirAll(hq, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(hq, "config.yaml"), []byte("issue_prefix: lx\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(hq, "config.yaml"), []byte("issue_prefix: hq\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1753,7 +1753,7 @@ func TestHQBeadStoreIsGathered(t *testing.T) {
 	if !slices.Contains(names, filepath.Base(root)) {
 		t.Errorf("the HQ store must be gathered as a rig: got %v", names)
 	}
-	if !slices.Contains(prefixes, "lx") {
+	if !slices.Contains(prefixes, "hq") {
 		t.Errorf("the HQ prefix must reach Facts.Prefixes (it scopes the cross-rig scan): got %v", prefixes)
 	}
 	if !slices.Contains(names, "gc-toolkit") {
@@ -1781,7 +1781,7 @@ func TestCityWithoutHQStoreStillWorks(t *testing.T) {
 // backend usable — while every store OPEN fails, which is where Gather would
 // have died. Probe asks the question Check cannot.
 func TestBeadsProbeVersusCheck(t *testing.T) {
-	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": "sl"})
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "rig-a": "ra"})
 	skew := errors.New("schema version mismatch: database is at v65, binary knows up to v61")
 
 	var tried []string
@@ -1807,7 +1807,7 @@ func TestBeadsProbeVersusCheck(t *testing.T) {
 	if !strings.Contains(err.Error(), "v65") || !strings.Contains(err.Error(), "gc-toolkit") {
 		t.Errorf("Probe must name the rig and the underlying failure, got: %v", err)
 	}
-	if !slices.Equal(tried, []string{"gc-toolkit", "signal-loom"}) {
+	if !slices.Equal(tried, []string{"gc-toolkit", "rig-a"}) {
 		t.Errorf("Probe must try every rig before giving up, tried %v", tried)
 	}
 }
@@ -1816,7 +1816,7 @@ func TestBeadsProbeVersusCheck(t *testing.T) {
 // Gather's. Gather returns a board as long as ONE rig could be read, so a Probe
 // that demanded all of them would refuse a backend that serves fine.
 func TestBeadsProbeSucceedsOnOneReadableRig(t *testing.T) {
-	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": "sl"})
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "rig-a": "ra"})
 	var tried []string
 	src := NewBeadsSource(
 		WithCityPath(root),
@@ -1834,8 +1834,8 @@ func TestBeadsProbeSucceedsOnOneReadableRig(t *testing.T) {
 		t.Fatalf("one readable rig must satisfy Probe: %v", err)
 	}
 	// Rigs are walked in sorted order and Probe stops at the first success, so
-	// it must not have looked past signal-loom.
-	if !slices.Equal(tried, []string{"gc-toolkit", "signal-loom"}) {
+	// it must not have looked past rig-a.
+	if !slices.Equal(tried, []string{"gc-toolkit", "rig-a"}) {
 		t.Errorf("Probe must stop at the first readable rig, tried %v", tried)
 	}
 
@@ -2395,17 +2395,17 @@ func TestDoneWindowUsesOneClockAcrossRigs(t *testing.T) {
 				testNow.Add(-23*time.Hour), testNow.Add(-23*time.Hour), "")},
 		}}
 	}
-	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "signal-loom": "sl"})
+	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "rig-a": "ra"})
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{
 		"gc-toolkit":  boundary("tk"),
-		"signal-loom": boundary("sl"),
+		"rig-a": boundary("ra"),
 	}, withClock(advancingClock(testNow, 2*time.Hour)))
 
 	res, err := src.Gather(context.Background())
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
-	for _, id := range []string{"tk-edge", "sl-edge"} {
+	for _, id := range []string{"tk-edge", "ra-edge"} {
 		if _, ok := findAnchor(res, id); !ok {
 			t.Errorf("%s closed inside the window at the pass clock and must be gathered; a per-rig clock read ages it out", id)
 		}

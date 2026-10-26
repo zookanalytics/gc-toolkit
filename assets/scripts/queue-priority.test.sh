@@ -307,7 +307,7 @@ roster() {
 }
 export STUB_AGENTS="$TMP/agents.json"
 roster gc-toolkit/gc-toolkit.polecat gc-toolkit/gc-toolkit.polecat-codex gc-toolkit/gc-toolkit.refinery \
-  signal-loom/gc-toolkit.polecat gc-toolkit.mechanik > "$STUB_AGENTS"
+  rig-a/gc-toolkit.polecat gc-toolkit.mechanik > "$STUB_AGENTS"
 
 # run <cmd...> -> RC, OUT, ERR; CALLS is the stub's argv log for the run.
 run() {
@@ -778,7 +778,7 @@ reset_store
 jq -c 'map(if ((.metadata // {})["gc.routed_to"] // "") == "gc-toolkit/gc-toolkit.polecat"
            then .metadata["gc.routed_to"] = "gc-toolkit/maintenance.polecat" else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
 roster gc-toolkit/maintenance.polecat gc-toolkit/maintenance.polecat-codex gc-toolkit/maintenance.refinery \
-  signal-loom/gc-toolkit.polecat > "$TMP/agents-renamed.json"
+  rig-a/gc-toolkit.polecat > "$TMP/agents-renamed.json"
 STUB_AGENTS="$TMP/agents-renamed.json" GC_RIG=gc-toolkit GC_RIG_ROOT="$TMP/rig-tk" qp reconcile
 eq "$RC" 0 "(PASS) a pass in a rig that imports the pack under another binding exits 0"
 has "$CALLS" "bd ready --metadata-field gc.routed_to=gc-toolkit/maintenance.polecat --unassigned" "(PASS) and reads the queue of the pool that binding names"
@@ -789,7 +789,7 @@ has "$OUT" "queued for gc-toolkit/maintenance.polecat" "(PASS) naming the pool i
 # A roster that names no polecat in the rig, or several, names no one queue, so
 # the pass reads none and asks for the pool.
 reset_store
-roster gc-toolkit/gc-toolkit.polecat-codex gc-toolkit/gc-toolkit.refinery signal-loom/gc-toolkit.polecat > "$TMP/agents-none.json"
+roster gc-toolkit/gc-toolkit.polecat-codex gc-toolkit/gc-toolkit.refinery rig-a/gc-toolkit.polecat > "$TMP/agents-none.json"
 STUB_AGENTS="$TMP/agents-none.json" GC_RIG=gc-toolkit GC_RIG_ROOT="$TMP/rig-tk" qp reconcile
 eq "$RC" 2 "(PASS) a rig with no agent named polecat fails the pass"
 has "$ERR" "no agent in rig gc-toolkit is named polecat" "(PASS) saying so"

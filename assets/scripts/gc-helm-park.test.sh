@@ -66,7 +66,7 @@ mkdir -p "$TMP/bin" "$TMP/rig-tk/.beads" "$TMP/rig-sl/.beads"
 # description, metadata, deps:[{on, type}]}; a row's deps are the edges it
 # carries, so a parent-child edge sits on the child and a blocks edge on the
 # bead that waits. Every call's argv is logged to $STUB_CALLS.
-#   rig list         two rigs: tk at $STUB_RIG_TK and sl at $STUB_RIG_SL, each
+#   rig list         two rigs: tk at $STUB_RIG_TK and ra at $STUB_RIG_SL, each
 #                    with a .beads dir, so the verb pins every call with --db.
 #   bd show <id>     `bd show --json`: an array of one row whose dependencies are
 #                    the targets' rows {id, dependency_type, status, title,
@@ -102,7 +102,7 @@ sub="${1:-}"; shift || true
 case "$sub" in
   rig)
     jq -n --arg tk "$STUB_RIG_TK" --arg sl "$STUB_RIG_SL" \
-      '{rigs:[{name:"gc-toolkit", path:$tk, prefix:"tk"}, {name:"signal-loom", path:$sl, prefix:"sl"}]}'
+      '{rigs:[{name:"gc-toolkit", path:$tk, prefix:"tk"}, {name:"rig-a", path:$sl, prefix:"ra"}]}'
     exit 0 ;;
   bd) : ;;
   *) echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
@@ -193,7 +193,7 @@ case "$verb" in
       shift || true
     done
     pfx="${STUB_CREATE_PREFIX:-}"
-    if [ -z "$pfx" ]; then case "$db" in */rig-sl/*) pfx=sl ;; *) pfx=tk ;; esac; fi
+    if [ -z "$pfx" ]; then case "$db" in */rig-sl/*) pfx=ra ;; *) pfx=tk ;; esac; fi
     n=$(jq '[ .[] | select(.issue_type == "gate") ] | length' "$S")
     nid="$pfx-g$((n + 1))"
     target=""
@@ -273,7 +273,7 @@ export STUB_RIG_TK="$TMP/rig-tk" STUB_RIG_SL="$TMP/rig-sl"
 #   tk-pg            another park's gate
 #   tk-task          a task to wait on
 #   tk-closed        a closed task
-#   sl-x             a task in the signal-loom store
+#   ra-x             a task in the rig-a store
 reset_store() {
   cat > "$STUB_STORE" <<'JSON'
 [
@@ -310,9 +310,9 @@ reset_store() {
  {"id":"tk-cv4","status":"open","issue_type":"convoy","title":"input convoy for tk-lc","description":"","metadata":{"gc.synthetic":"true"},"deps":[{"on":"tk-lc","type":"tracks"}]},
  {"id":"tk-r4","status":"open","issue_type":"task","title":"mol-polecat-work","description":"","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cv4"},"deps":[]},
  {"id":"tk-s4","status":"open","issue_type":"task","title":"Load context","description":"","metadata":{"gc.root_bead_id":"tk-r4","gc.step_ref":"mol-polecat-work.load-context"},"deps":[{"on":"tk-r4","type":"tracks"}]},
- {"id":"tk-claim","status":"in_progress","assignee":"lx-wisp-abc12","issue_type":"task","title":"claimed, no branch yet","description":"","metadata":{},"deps":[]},
+ {"id":"tk-claim","status":"in_progress","assignee":"hq-wisp-abc12","issue_type":"task","title":"claimed, no branch yet","description":"","metadata":{},"deps":[]},
  {"id":"tk-hook","status":"hooked","issue_type":"task","title":"on a hook","description":"","metadata":{},"deps":[]},
- {"id":"tk-dup","status":"in_progress","assignee":"lx-wisp-def34","issue_type":"task","title":"claimed, and poured too","description":"","metadata":{},"deps":[]},
+ {"id":"tk-dup","status":"in_progress","assignee":"hq-wisp-def34","issue_type":"task","title":"claimed, and poured too","description":"","metadata":{},"deps":[]},
  {"id":"tk-cv5","status":"open","issue_type":"convoy","title":"input convoy for tk-dup","description":"","metadata":{"gc.synthetic":"true"},"deps":[{"on":"tk-dup","type":"tracks"}]},
  {"id":"tk-r5","status":"in_progress","issue_type":"task","title":"mol-polecat-work","description":"","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cv5"},"deps":[]},
  {"id":"tk-s5","status":"open","issue_type":"task","title":"Load context","description":"","metadata":{"gc.root_bead_id":"tk-r5","gc.step_ref":"mol-polecat-work.load-context"},"deps":[{"on":"tk-r5","type":"tracks"}]},
@@ -320,7 +320,7 @@ reset_store() {
  {"id":"tk-pg","status":"open","issue_type":"gate","title":"Parked until the store answers in a second; close when it does","description":"","metadata":{},"deps":[]},
  {"id":"tk-task","status":"open","issue_type":"task","title":"Land the faster store","description":"","metadata":{},"deps":[]},
  {"id":"tk-closed","status":"closed","issue_type":"task","title":"already done","description":"","metadata":{},"deps":[]},
- {"id":"sl-x","status":"open","issue_type":"task","title":"a signal-loom task","description":"","metadata":{},"deps":[]}
+ {"id":"ra-x","status":"open","issue_type":"task","title":"a rig-a task","description":"","metadata":{},"deps":[]}
 ]
 JSON
 }
@@ -541,7 +541,7 @@ has "$ERR" "workflow tk-r3 past load-context" "(FLIGHT) the refusal names the wo
 nothing_written "(FLIGHT) workflow"
 run_park tk-claim "Parked for a reason"
 eq "$RC" "2" "(FLIGHT) a claimed bead with no branch and no workflow is refused (exit 2)"
-has "$ERR" "in flight (in_progress under lx-wisp-abc12)" "(FLIGHT) the refusal names the claim and its claimant"
+has "$ERR" "in flight (in_progress under hq-wisp-abc12)" "(FLIGHT) the refusal names the claim and its claimant"
 nothing_written "(FLIGHT) claimed"
 run_park tk-hook --waiting-on tk-task
 eq "$RC" "2" "(FLIGHT) a hooked bead is refused, in the --waiting-on form too"
@@ -549,7 +549,7 @@ has "$ERR" "in flight (hooked)" "(FLIGHT) the refusal names the hook"
 nothing_written "(FLIGHT) hooked"
 run_park tk-dup "Parked for a reason"
 eq "$RC" "2" "(FLIGHT) a claimed bead is refused while a workflow poured for it waits at load-context"
-has "$ERR" "in flight (in_progress under lx-wisp-def34)" "(FLIGHT) the refusal names the claim, not the waiting workflow"
+has "$ERR" "in flight (in_progress under hq-wisp-def34)" "(FLIGHT) the refusal names the claim, not the waiting workflow"
 nothing_written "(FLIGHT) claimed and poured"
 run_park tk-lc "Parked for a reason"
 eq "$RC" "0" "(FLIGHT) a bead whose workflow waits at load-context is not in flight, and parks"
@@ -572,7 +572,7 @@ run_park tk-solo --waiting-on tk-closed
 eq "$RC" "2" "(WAITS) waiting on a closed bead is refused (exit 2)"
 has "$ERR" "holds nothing" "(WAITS) the refusal says the edge would hold nothing"
 nothing_written "(WAITS) closed"
-run_park tk-solo --waiting-on sl-x
+run_park tk-solo --waiting-on ra-x
 eq "$RC" "2" "(WAITS) waiting on another store's bead is refused (exit 2)"
 has "$ERR" "another store" "(WAITS) the refusal names the store"
 nothing_written "(WAITS) another store"
@@ -632,17 +632,17 @@ has "$ERR" "nothing holds tk-solo" "(RECOVER) the failure says nothing holds the
 
 # --- (LEDGER) a gate that lands in another store is reported -------------------
 reset_store
-STUB_CREATE_PREFIX=lx run_park tk-solo "Parked for a reason"
+STUB_CREATE_PREFIX=hq run_park tk-solo "Parked for a reason"
 eq "$RC" "4" "(LEDGER) a gate filed under another store's prefix fails (exit 4)"
 has "$ERR" "landed in another rig's store" "(LEDGER) the failure names the stray gate"
 
 # --- (STORE) the gate goes to the bead's own store ------------------------------
 reset_store
-run_park sl-x "Parked until the signal-loom pack update lands"
+run_park ra-x "Parked until the rig-a pack update lands"
 eq "$RC" "0" "(STORE) parking a bead in another rig exits 0"
 grep -q "^bd create .* --db $STUB_RIG_SL/.beads --json" <<< "$CALLS" \
   && ok "(STORE) the gate is filed in that rig's store" || bad "(STORE) create pinned to the bead's store (calls: $CALLS)"
-case "$(edges_of sl-x)" in sl-*) ok "(STORE) the gate carries that store's prefix" ;; *) bad "(STORE) gate prefix (edges: $(edges_of sl-x))" ;; esac
+case "$(edges_of ra-x)" in sl-*) ok "(STORE) the gate carries that store's prefix" ;; *) bad "(STORE) gate prefix (edges: $(edges_of ra-x))" ;; esac
 
 # --- (WIRING) the verb is reachable and documented ----------------------------
 grep -qE '^[[:space:]]*park\)[[:space:]]*shift; cmd_park' "$SCRIPT" \

@@ -147,8 +147,8 @@ eq "$(keep "$FIX3")" "e2,e4" \
 # h1  human gate carrying another task_kind                -> DROP
 # h2  human gate whose task_kind only resembles visit       -> DROP
 FIX7='[
-  {"id":"v1","status":"open","assignee":"s-lx-wisp-tjt3y","metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-ycww6"}},
-  {"id":"v2","status":"in_progress","assignee":"gascity/gc-toolkit.v2","metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-2ddu7","gc.session_id":"lx-wisp-dead","gc.session_name":"s-lx-wisp-dead"}},
+  {"id":"v1","status":"open","assignee":"s-hq-wisp-tjt3y","metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-ycww6"}},
+  {"id":"v2","status":"in_progress","assignee":"gascity/gc-toolkit.v2","metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-2ddu7","gc.session_id":"hq-wisp-dead","gc.session_name":"s-hq-wisp-dead"}},
   {"id":"h1","metadata":{"task_kind":"finding","gc.routed_to":"human"}},
   {"id":"h2","metadata":{"task_kind":"visits","gc.routed_to":"human"}}
 ]'
@@ -163,15 +163,15 @@ eq "$(keep '[]')" "" "empty listing yields empty result"
 FIX4='[
   {"id":"m1","metadata":null},
   {"id":"m2","assignee":""},
-  {"id":"m3","metadata":{"gc.session_id":"lx-1"}}
+  {"id":"m3","metadata":{"gc.session_id":"hq-1"}}
 ]'
 eq "$(keep "$FIX4")" "m1,m2,m3" \
    "null, absent, and unrelated metadata all survive (no downstream state to read)"
 
 # Survivors keep every field they arrived with — the liveness loop reads the
 # bead, not just its state, and host-bead-skip's `.owner` stamp must survive.
-eq "$(printf '%s' '[{"id":"f1","owner":"lx-9","metadata":{"merge_result":"merged","gc.session_id":"lx-9"}}]' \
-      | bash "$TMP/filter.sh" 2>/dev/null | jq -r '.[0].owner')" "lx-9" \
+eq "$(printf '%s' '[{"id":"f1","owner":"hq-9","metadata":{"merge_result":"merged","gc.session_id":"hq-9"}}]' \
+      | bash "$TMP/filter.sh" 2>/dev/null | jq -r '.[0].owner')" "hq-9" \
    "a survivor keeps its fields (including the .owner host-bead-skip stamped)"
 
 # --- The composed pipeline: host-bead-skip then downstream-court-skip. --------
@@ -186,7 +186,7 @@ eq "$(printf '%s' '[{"id":"f1","owner":"lx-9","metadata":{"merge_result":"merged
 FIX5='[
   {"id":"tk-owned-pr","assignee":null,"metadata":{"gc.session_name":"polecat-1-pool","merge_result":"pull_request","gc.routed_to":"human","pr.machine":"blocked@c142@ts"}},
   {"id":"tk-owned-gate","assignee":null,"metadata":{"gc.session_name":"polecat-2-pool","merge_result":"pre_open_gate","gc.routed_to":"human"}},
-  {"id":"tk-lost","assignee":"gc-toolkit--gc-toolkit__polecat-1-pool","metadata":{"gc.session_id":"lx-dead","branch":"polecat/tk-lost"}}
+  {"id":"tk-lost","assignee":"gc-toolkit--gc-toolkit__polecat-1-pool","metadata":{"gc.session_id":"hq-dead","branch":"polecat/tk-lost"}}
 ]'
 eq "$(pipeline "$FIX5")" "tk-lost" \
    "host-bead-skip | downstream-court-skip drops the in-flight orphans (owned PR + pre-open gate), keeps the genuine dead-session orphan (tk-lost)"
@@ -198,7 +198,7 @@ eq "$(pipeline "$FIX5")" "tk-lost" \
 # to liveness-check) and downstream-court-skip must NOT drop it: pr.machine is a
 # stale stamp, not a live court, so the bead survives to be recovered.
 FIX6='[
-  {"id":"tk-stale-prog","assignee":"gc-toolkit--gc-toolkit__polecat-1-pool","metadata":{"gc.session_id":"lx-dead","branch":"polecat/tk-stale-prog","pr.machine":"progressing@abc@2026-09-05T00:00:00Z"}}
+  {"id":"tk-stale-prog","assignee":"gc-toolkit--gc-toolkit__polecat-1-pool","metadata":{"gc.session_id":"hq-dead","branch":"polecat/tk-stale-prog","pr.machine":"progressing@abc@2026-09-05T00:00:00Z"}}
 ]'
 eq "$(pipeline "$FIX6")" "tk-stale-prog" \
    "a stale pr.machine=progressing on an unanchored, pool-routed dead-session bead is KEPT for recovery (not a live court)"
@@ -209,13 +209,13 @@ eq "$(pipeline "$FIX6")" "tk-stale-prog" \
 # parked visit names no owner, so host-bead-skip drops it, and a human-gated work
 # bead still naming its dead polecat drops here as before.
 FIX8='[
-  {"id":"gc-bound","status":"open","assignee":"s-lx-wisp-tjt3y","metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-ycww6"}},
+  {"id":"gc-bound","status":"open","assignee":"s-hq-wisp-tjt3y","metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-ycww6"}},
   {"id":"gc-parked","status":"open","assignee":null,"metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-ycww6"}},
-  {"id":"tk-gated","status":"open","assignee":null,"metadata":{"gc.routed_to":"human","gc.session_id":"lx-dead"}}
+  {"id":"tk-gated","status":"open","assignee":null,"metadata":{"gc.routed_to":"human","gc.session_id":"hq-dead"}}
 ]'
 eq "$(pipeline "$FIX8")" "gc-bound" \
    "host-bead-skip | downstream-court-skip keeps the bound visit, drops the parked visit (no owner) and the human-gated work bead"
-eq "$(printf '%s' "$FIX8" | bash "$TMP/hostskip.sh" 2>/dev/null | bash "$TMP/filter.sh" 2>/dev/null | jq -r '.[0].owner')" "s-lx-wisp-tjt3y" \
+eq "$(printf '%s' "$FIX8" | bash "$TMP/hostskip.sh" 2>/dev/null | bash "$TMP/filter.sh" 2>/dev/null | jq -r '.[0].owner')" "s-hq-wisp-tjt3y" \
    "the bound visit reaches the loop owned by the sitting engage bound it to"
 
 echo

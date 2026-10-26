@@ -176,12 +176,12 @@ gc-toolkit--gc-toolkit__converse-1-pool|0|1|gc-toolkit--gc-toolkit__converse-1-p
 gc-toolkit--gc-toolkit__hicks|0|1|gc-toolkit/gc-toolkit.hicks
 gc-toolkit--gc-toolkit__polecat-1-pool|0|1|gc-toolkit--gc-toolkit__polecat-1-pool
 gc-toolkit--gc-toolkit__polecat-2-pool|0|1|gc-toolkit--gc-toolkit__polecat-2-pool
-gc-toolkit__polecat-lx-wisp-k7jiy|0|1|lx-wisp-k7jiy
+gc-toolkit__polecat-hq-wisp-k7jiy|0|1|hq-wisp-k7jiy
 gc-toolkit--gc-toolkit__refinery|0|1|gc-toolkit/gc-toolkit.refinery
 gc-toolkit--gc-toolkit__ripley|0|1|gc-toolkit/gc-toolkit.ripley
 gc-toolkit__deacon|0|1|gc-toolkit.deacon
 oversight--gc-toolkit__polecat-1-pool|0|1|oversight--gc-toolkit__polecat-1-pool
-signal-loom--gc-toolkit__refinery-1-pool|0|1|signal-loom--gc-toolkit__refinery-1-pool
+rig-a--gc-toolkit__refinery-1-pool|0|1|rig-a--gc-toolkit__refinery-1-pool
 scratch|0|1|
 ops--notebook|0|1|
 ops--polecat-9-pool|0|1|
@@ -207,12 +207,12 @@ cat > "$TMP/api.json" <<'API'
   {"session_name": "gc-toolkit--gc-toolkit__hicks",            "template": "gc-toolkit/gc-toolkit.polecat-codex", "title": ""},
   {"session_name": "gc-toolkit--gc-toolkit__polecat-1-pool",   "template": "gc-toolkit/gc-toolkit.polecat",       "title": ""},
   {"session_name": "gc-toolkit--gc-toolkit__polecat-2-pool",   "template": "gc-toolkit/gc-toolkit.polecat",       "title": ""},
-  {"session_name": "gc-toolkit__polecat-lx-wisp-k7jiy",        "template": "gc-toolkit/gc-toolkit.polecat",       "title": ""},
+  {"session_name": "gc-toolkit__polecat-hq-wisp-k7jiy",        "template": "gc-toolkit/gc-toolkit.polecat",       "title": ""},
   {"session_name": "gc-toolkit--gc-toolkit__refinery",         "template": "gc-toolkit/gc-toolkit.refinery",      "title": "landing PR #497"},
   {"session_name": "gc-toolkit--gc-toolkit__ripley",           "template": "gc-toolkit/gc-toolkit.polecat-codex", "title": ""},
   {"session_name": "gc-toolkit__deacon",                       "template": "gc-toolkit.deacon",                   "title": ""},
   {"session_name": "oversight--gc-toolkit__polecat-1-pool",    "template": "oversight/gc-toolkit.polecat",        "title": ""},
-  {"session_name": "signal-loom--gc-toolkit__refinery-1-pool", "template": "signal-loom/gc-toolkit.refinery",     "title": ""},
+  {"session_name": "rig-a--gc-toolkit__refinery-1-pool", "template": "rig-a/gc-toolkit.refinery",     "title": ""},
   {"session_name": "scratch"}
 ]}
 API
@@ -355,9 +355,9 @@ has "$APIMENU" '── gc-toolkit • 5 polecats ──' \
 # it. Without that it lands in the city group and inflates a city count.
 hasnt "$APIMENU" '── city • ' \
     "WISP: a wisp pool polecat is not counted under a city group"
-hasnt "$APIMENU" 'lx-wisp-k7jiy' \
+hasnt "$APIMENU" 'hq-wisp-k7jiy' \
     "WISP: it folds into its rig's count, hidden by the default filter"
-eq "$(derives "$APIALL" 'gc-toolkit__polecat-lx-wisp-k7jiy')" 'gc-toolkit|lx-wisp-k7jiy' \
+eq "$(derives "$APIALL" 'gc-toolkit__polecat-hq-wisp-k7jiy')" 'gc-toolkit|hq-wisp-k7jiy' \
     "WISP: --all reaches it under gc-toolkit; display is the wisp id"
 eq "$(derives "$APIALL" 'gc-toolkit__deacon')" 'city|gc-toolkit.deacon' \
     "CITYNAMED: a slashless template sets no rig, so it stays city on the live path"

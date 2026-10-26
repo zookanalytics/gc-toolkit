@@ -9,7 +9,7 @@
 # unlanded"; the resolver needs the branch), so the only thing keeping one out
 # of the queue was `assignee=""` — an unenforced convention writable by any
 # actor. On 2026-08-11 a rig witness wrote `assignee=<refinery>` onto two
-# correctly parked shutupandlisten anchors (merge_result=pull_request,
+# correctly parked rig-b anchors (merge_result=pull_request,
 # codex-green, PR#55/PR#56 open awaiting human approval). Re-processing them
 # would have reset both to merge_result=pre_open_gate, orphaned two live PRs
 # from their anchors, dispatched duplicate codex reviews, and had

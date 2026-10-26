@@ -541,7 +541,7 @@ cat > "$TMP/rigs.json" <<'JSON'
 {"rigs":[
   {"name":"gc-toolkit","prefix":"tk","path":"/x/gc-toolkit"},
   {"name":"gascity","prefix":"gc","path":"/x/gascity"},
-  {"name":"loomington","prefix":"lx","path":"/x/loomington"}]}
+  {"name":"mycity","prefix":"hq","path":"/x/mycity"}]}
 JSON
 cat > "$TMP/agents.json" <<'JSON'
 {"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}
@@ -556,7 +556,7 @@ has "$OUT" "cross-store" "(XSTORE-NO) …naming the dimension"
 has "$OUT" "CrossStoreRouteError" "(XSTORE-NO) …tying it to the sling guard it mirrors"
 
 set +e
-OUT="$(bash "$SCRIPT" deliverable gc-toolkit/gc-toolkit.converse lx-300fe 2>&1)"; RC=$?
+OUT="$(bash "$SCRIPT" deliverable gc-toolkit/gc-toolkit.converse hq-300fe 2>&1)"; RC=$?
 set -e
 eq "$RC" 1 "(XSTORE-CITY) a city-store (lx-) bead routed at a rig pool is refused"
 
@@ -589,7 +589,7 @@ hasnt "$OUT" "cross-store" "(XSTORE-UNREADABLE) with no rig list, the store arm 
 # fixture seam feeds agents.json, config.json and rigs.json.
 cat > "$TMP/rigs.json" <<'JSON'
 {"rigs":[
-  {"name":"loomington","prefix":"lx","path":"/x/loomington","hq":true},
+  {"name":"mycity","prefix":"hq","path":"/x/mycity","hq":true},
   {"name":"gc-toolkit","prefix":"tk","path":"/x/gc-toolkit","hq":false},
   {"name":"gascity","prefix":"gc","path":"/x/gascity","hq":false}]}
 JSON
@@ -648,7 +648,7 @@ OUT="$(bash "$SCRIPT" assignable gc-toolkit/gc-toolkit.witness tk-82he4j 2>&1)";
 set -e
 eq "$RC" 0 "(ASSIGNABLE-OWNSTORE) …and answers yes for its own rig's store"
 set +e
-OUT="$(bash "$SCRIPT" assignable gc-toolkit/gc-toolkit.witness lx-300fe 2>&1)"; RC=$?
+OUT="$(bash "$SCRIPT" assignable gc-toolkit/gc-toolkit.witness hq-300fe 2>&1)"; RC=$?
 set -e
 eq "$RC" 0 "(ASSIGNABLE-CITYSTORE) …and for the city store, which its hook also reads"
 

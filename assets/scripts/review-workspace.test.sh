@@ -62,7 +62,7 @@ printf '%s\n' "$*" >> "$STUB_GC_LOG"
 case "$1 $2" in
     "rig list")
         [ -z "$STUB_RIGS_FAIL" ] || { echo "not in a city directory" >&2; exit 1; }
-        printf '{"city_path":"%s","rigs":[{"name":"city","path":"%s","prefix":"lx","hq":true},{"name":"toolkit","path":"%s/rig-tk","prefix":"tk"},{"name":"loom","path":"%s/rig-sl","prefix":"sl"}]}\n' \
+        printf '{"city_path":"%s","rigs":[{"name":"city","path":"%s","prefix":"hq","hq":true},{"name":"toolkit","path":"%s/rig-tk","prefix":"tk"},{"name":"loom","path":"%s/rig-sl","prefix":"ra"}]}\n' \
             "$STUB_ROOT" "$STUB_ROOT" "$STUB_ROOT" "$STUB_ROOT"
         exit 0 ;;
     "bd show")
@@ -218,8 +218,8 @@ mk() { # <name> <hours old> — a workspace directory with one file in it
 }
 
 WT_CLOSED="$(bash "$SUT" add --review-bead tk-closed --oid "$C1" 2>/dev/null)"; status tk-closed closed
-mk gc-review-sl-done 1;          status sl-done closed
-mk gc-review-lx-city 1;          status lx-city closed
+mk gc-review-ra-done 1;          status ra-done closed
+mk gc-review-hq-city 1;          status hq-city closed
 # A name with anything after the bead id is not looked up: it ages out.
 g worktree add -q --detach "$R/gc-review-tk-old.Ab12Cd" "$C1"; age "$R/gc-review-tk-old.Ab12Cd" 48
 status tk-old closed
@@ -270,10 +270,10 @@ gone_ok() { if exists "$R/$1"; then bad "$2"; else ok "$2"; fi; }
 kept_ok() { if exists "$R/$1"; then ok "$2"; else bad "$2"; fi; }
 gone_ok gc-review-tk-closed          "the workspace of a closed review goes"
 if is_registered "$WT_CLOSED"; then bad "and its worktree registration with it"; else ok "and its worktree registration with it"; fi
-gone_ok gc-review-sl-done            "a closed review in another rig's store goes"
-has "$(cat "$STUB_GC_LOG")" "bd show sl-done --db $TMP/rig-sl/.beads --json" "a bead is looked up in the store its prefix names"
-has "$(cat "$STUB_GC_LOG")" "bd show lx-city --db $TMP/.beads --json" "the city's own prefix reads the city store"
-gone_ok gc-review-lx-city            "a closed review in the city store goes"
+gone_ok gc-review-ra-done            "a closed review in another rig's store goes"
+has "$(cat "$STUB_GC_LOG")" "bd show ra-done --db $TMP/rig-sl/.beads --json" "a bead is looked up in the store its prefix names"
+has "$(cat "$STUB_GC_LOG")" "bd show hq-city --db $TMP/.beads --json" "the city's own prefix reads the city store"
+gone_ok gc-review-hq-city            "a closed review in the city store goes"
 gone_ok gc-review-tk-old.Ab12Cd      "a suffixed name idle past the horizon goes"
 if is_registered "$R/gc-review-tk-old.Ab12Cd"; then bad "and its worktree registration with it"; else ok "and its worktree registration with it"; fi
 kept_ok gc-review-tk-new.Zz99Yy      "a suffixed name inside the horizon is kept, its bead unread"

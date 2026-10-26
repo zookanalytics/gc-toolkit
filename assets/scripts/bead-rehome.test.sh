@@ -331,7 +331,7 @@ export PATH="$TMP/bin:$PATH"
 export FAKE_RIGS_JSON="$TMP/rigs.json"
 export FAKE_ACTOR_LOG="$TMP/actors.log"
 : > "$FAKE_ACTOR_LOG"
-export BEADS_ACTOR="test__rehome-lx-0000"
+export BEADS_ACTOR="test__rehome-hq-0000"
 
 # The finalize gate is a sibling bead-rehome forks before the close. Stub it so
 # this suite tests the WIRING (a refusal holds the close, leaving an open pointed
@@ -378,18 +378,18 @@ run() { "$SCRIPT" "$@" >"$TMP/out" 2>"$TMP/err"; }
 # --- (a) happy path: pointer + populated reason + back-pointer --------------
 mkbead alpha open al-origin1
 mkbead beta  open bt-succ1
-rc=0; run --origin al-origin1 --successor bt-succ1 --kind re-homed --note "operator ruling su-a3ny" || rc=$?
+rc=0; run --origin al-origin1 --successor bt-succ1 --kind re-homed --note "operator ruling rb-a3ny" || rc=$?
 eq "$rc" 0 "re-home succeeds"
 eq "$(field alpha status al-origin1)" closed "origin is closed"
 eq "$(field alpha m.gc.superseded_by al-origin1)" bt-succ1 "forward pointer names the successor"
 eq "$(field alpha m.gc.superseded_by_store al-origin1)" rig:beta "forward pointer names the successor's store"
 REASON=$(field alpha reason al-origin1)
 has "$REASON" "re-homed to bt-succ1 in rig:beta" "close reason names kind, successor and store"
-has "$REASON" "operator ruling su-a3ny" "close reason carries the note"
+has "$REASON" "operator ruling rb-a3ny" "close reason carries the note"
 eq "$(field beta m.gc.supersedes bt-succ1)" al-origin1 "back-pointer names the origin"
 eq "$(field beta m.gc.supersedes_store bt-succ1)" rig:alpha "back-pointer names the origin's store"
 has "$(cat "$TMP/out")" "events" "output points at the events table for attribution"
-has "$(cat "$FAKE_ACTOR_LOG")" "test__rehome-lx-0000" "the actor is passed through for the audit trail"
+has "$(cat "$FAKE_ACTOR_LOG")" "test__rehome-hq-0000" "the actor is passed through for the audit trail"
 
 # --- (x) an OPEN visit on the origin holds the close (finalize gate) ---------
 # The gate refuses while a visit tracks the origin. bead-rehome stamps the
@@ -830,10 +830,10 @@ eq "$rc" 7 "a workflow root is refused"
 # --- (gate-held) another actor holds it, but self may ---------------------
 mkbead alpha in_progress al-held
 mkbead beta  open bt-hsucc
-printf 'assignee=someone-else-lx-9999\n' >> "$TMP/rigs/alpha/.beads/al-held"
+printf 'assignee=someone-else-hq-9999\n' >> "$TMP/rigs/alpha/.beads/al-held"
 rc=0; run --origin al-held --successor bt-hsucc --kind re-homed || rc=$?
 eq "$rc" 7 "an origin in_progress under another actor is refused"
-has "$(cat "$TMP/err")" "in_progress under someone-else-lx-9999" "the refusal names the holder"
+has "$(cat "$TMP/err")" "in_progress under someone-else-hq-9999" "the refusal names the holder"
 # A worker re-homing the bead it holds is the holder.
 mkbead alpha in_progress al-mine
 mkbead beta  open bt-msucc2

@@ -495,7 +495,7 @@ func fixtureBoard() board.Board {
 				Complete:       false,
 				StaleDays:      4,
 				Priority:       &p1,
-				CrossRigRefs:   []string{"sl-9k2mq"},
+				CrossRigRefs:   []string{"ra-9k2mq"},
 				OpenHeads:      []string{"tk-eemvf.5", "tk-eemvf.6"},
 				DeadOwnerHeads: []string{"tk-eemvf.4"},
 				// The populated case: one of the eight open children is parked,
@@ -707,7 +707,7 @@ func fixtureBoard() board.Board {
 			},
 		},
 		Partial:       true,
-		PartialErrors: []string{"rig shutupandlisten: context canceled"},
+		PartialErrors: []string{"rig rig-b: context canceled"},
 
 		// The three shapes a build row takes: one current, one whose build
 		// failed and left an older binary serving, and one whose binary builds
@@ -735,11 +735,11 @@ func fixtureBoard() board.Board {
 				LastBuildRC:    0,
 				RestartPending: false,
 				ProbeStatus:    "unreadable",
-				ProbeDetail:    "rig shutupandlisten: dial tcp 127.0.0.1:3306: connect: connection refused",
+				ProbeDetail:    "rig rig-b: dial tcp 127.0.0.1:3306: connect: connection refused",
 				CheckedAt:      time.Date(2026, 8, 11, 15, 0, 0, 0, time.UTC),
 				Severity:       board.SevHigh,
 				Detail: "9f1c0b7e5a4d CANNOT read the city's bead stores — the board will not render: " +
-					"rig shutupandlisten: dial tcp 127.0.0.1:3306: connect: connection refused",
+					"rig rig-b: dial tcp 127.0.0.1:3306: connect: connection refused",
 			},
 			{
 				Component:      "helm",

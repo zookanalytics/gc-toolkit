@@ -6,7 +6,7 @@
 # run `git add -A && git commit && git push origin HEAD`. When work_dir is a
 # HUSK — the git worktree was removed but the directory survives (typically only
 # .gc/ left) — the `cd` still succeeds, but git finds no repo there and walks UP
-# to the nearest enclosing repo: the TOWN repo at /home/zook/loomington. The
+# to the nearest enclosing repo: the TOWN repo at /home/zook/mycity. The
 # salvage would then add, commit and PUSH the operator's uncommitted town-repo
 # WIP to origin/main.
 #

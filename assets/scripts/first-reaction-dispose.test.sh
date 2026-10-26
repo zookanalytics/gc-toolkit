@@ -551,7 +551,7 @@ before '^DEP bd dep list' 'gc.reacted_by' "(BLKORDER) …after the edge is verif
 has "UPDATE bd update $R" "$LOG" "(BLK) …and the reaction bead is closed"
 has "disposed as blocked (tk-blk1)" "$OUT" "(BLK) …and the run reports the bead it waits on"
 
-run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on sl-foreign --reaction-bead "$R"
+run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on ra-foreign --reaction-bead "$R"
 eq "$RC" "2" "(BLKCROSS) a blocker in another store is refused"
 eq "$LOG" "" "(BLKCROSS) …and nothing was written"
 has "holds nothing" "$ERR" "(BLKCROSS) …because the edge would report success and hold nothing"
@@ -851,7 +851,7 @@ hasnt "HELM demand" "$LOG" "(RULVISIT) …and files no gate"
 has "--waiting-on tk-visit1" "$LOG" "(RULVISIT) …and holds the subject"
 has "disposed as ruling (tk-visit1)" "$OUT" "(RULVISIT) …and reports the visit it disposed onto"
 
-run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit sl-foreign --reaction-bead "$R"
+run tk-sub --disposition ruling --reason "r" --takeaway "t" --visit ra-foreign --reaction-bead "$R"
 eq "$RC" "2" "(RULVISIT) a visit in another store is refused"
 eq "$LOG" "" "(RULVISIT) …and nothing was written"
 

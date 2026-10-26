@@ -265,7 +265,7 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-trackslive","title":"tracks a not-closed bead","issue_type":"task","metadata":{},"dependencies":[{"depends_on_id":"m-live","type":"tracks"}]}
 ]
 JSON
-# LIVE carries: the standing sweep subject, the visits (v-2 is the su-ab9je
+# LIVE carries: the standing sweep subject, the visits (v-2 is the rb-ab9je
 # empty-stamp shape, v-root tracks a workflow root), the live molecule that
 # names conv-live, and the open demand on c-demand-live. blocked-child gates
 # c-parented via the reverse parent-child index.
@@ -289,12 +289,12 @@ cat > "$TMP/widen.json" <<'JSON'
 JSON
 export FAKE_READY="$TMP/ready.json" FAKE_LIVE="$TMP/live.json" FAKE_WIDEN="$TMP/widen.json"
 
-# The holder-liveness session set: lx-live-1 is listed (a visit it holds still
-# converses); a session absent from this set (e.g. lx-dead-9) is a gone sitting.
+# The holder-liveness session set: hq-live-1 is listed (a visit it holds still
+# converses); a session absent from this set (e.g. hq-dead-9) is a gone sitting.
 # The existing visits above are all UNCLAIMED, so they cover regardless of this.
 cat > "$TMP/sessions.json" <<'JSON'
 {"sessions":[
-  {"id":"lx-live-1","state":"active","closed":false,"session_name":"s-lx-live-1","alias":"","name":"testrig__conv-lx-live-1","agent_name":"testrig/testrig.tk-livevisit"}
+  {"id":"hq-live-1","state":"active","closed":false,"session_name":"s-hq-live-1","alias":"","name":"testrig__conv-hq-live-1","agent_name":"testrig/testrig.tk-livevisit"}
 ]}
 JSON
 export FAKE_SESSIONS="$TMP/sessions.json"
@@ -456,7 +456,7 @@ FAKE_LIVE="$TMP/live-held.json" run_sweep "c-plain"
 eq "$(cat "$ESC_CALLS")" "" "no second visit stacked on a held sitting"
 eq "$(cat "$BASELINE_FILE")" "c-plain" \
    "the baseline is NOT advanced — unseen candidates must not retire"
-# The su-ab9je shape: the stamp landed empty, only the tracks edge names it.
+# The rb-ab9je shape: the stamp landed empty, only the tracks edge names it.
 jq '. + [{"id":"v-edge","status":"open","title":"visit: tk-subject","metadata":{"task_kind":"visit","gc.continuation_group":""},"dependencies":[{"issue_id":"v-edge","depends_on_id":"tk-subject","type":"tracks"}]}]' \
     "$TMP/live.json" > "$TMP/live-edge.json"
 FAKE_LIVE="$TMP/live-edge.json" run_sweep "c-plain"
@@ -880,8 +880,8 @@ eq "$RC" "0" "the same pass after one that reported the anchor completes"
 eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "nh-green" "…and reports it again"
 
 echo "── holder liveness gates the conversing class (readable session list) ──"
-# Two visits track two ready subjects: one held by a live session (lx-live-1 is
-# in FAKE_SESSIONS), one by a gone session (lx-dead-9 is not). A third subject is
+# Two visits track two ready subjects: one held by a live session (hq-live-1 is
+# in FAKE_SESSIONS), one by a gone session (hq-dead-9 is not). A third subject is
 # a visit bead left in the ready set by that gone session. The live-held subject
 # stays covered; the dead-held subject and the stranded visit bead return to the
 # census. Two more visits track workflow ROOTS, so the ready steps under them are
@@ -891,7 +891,7 @@ cat > "$TMP/hl-ready.json" <<'JSON'
 [
   {"id":"hl-live-subj","title":"subject of a live-held visit","issue_type":"task","metadata":{}},
   {"id":"hl-dead-subj","title":"subject of a dead-held visit","issue_type":"task","metadata":{}},
-  {"id":"hl-ready-deadvisit","title":"a visit stranded ready by a dead session","issue_type":"task","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"}},
+  {"id":"hl-ready-deadvisit","title":"a visit stranded ready by a dead session","issue_type":"task","metadata":{"task_kind":"visit","gc.session_id":"hq-dead-9"}},
   {"id":"hl-live-root-step","title":"a step of a root a live-held visit tracks","issue_type":"task","metadata":{"gc.root_bead_id":"hl-live-root"}},
   {"id":"hl-dead-root-step","title":"a step of a root a dead-held visit tracks","issue_type":"task","metadata":{"gc.root_bead_id":"hl-dead-root"}}
 ]
@@ -899,10 +899,10 @@ JSON
 cat > "$TMP/hl-live.json" <<'JSON'
 [
   {"id":"tk-subject","status":"open","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
-  {"id":"hl-v-live","status":"in_progress","title":"visit: hl-live-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-live-1"},"dependencies":[{"issue_id":"hl-v-live","depends_on_id":"hl-live-subj","type":"tracks"}]},
-  {"id":"hl-v-dead","status":"in_progress","title":"visit: hl-dead-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"},"dependencies":[{"issue_id":"hl-v-dead","depends_on_id":"hl-dead-subj","type":"tracks"}]},
-  {"id":"hl-v-liveroot","status":"in_progress","title":"visit: hl-live-root","metadata":{"task_kind":"visit","gc.session_id":"lx-live-1"},"dependencies":[{"issue_id":"hl-v-liveroot","depends_on_id":"hl-live-root","type":"tracks"}]},
-  {"id":"hl-v-deadroot","status":"in_progress","title":"visit: hl-dead-root","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"},"dependencies":[{"issue_id":"hl-v-deadroot","depends_on_id":"hl-dead-root","type":"tracks"}]}
+  {"id":"hl-v-live","status":"in_progress","title":"visit: hl-live-subj","metadata":{"task_kind":"visit","gc.session_id":"hq-live-1"},"dependencies":[{"issue_id":"hl-v-live","depends_on_id":"hl-live-subj","type":"tracks"}]},
+  {"id":"hl-v-dead","status":"in_progress","title":"visit: hl-dead-subj","metadata":{"task_kind":"visit","gc.session_id":"hq-dead-9"},"dependencies":[{"issue_id":"hl-v-dead","depends_on_id":"hl-dead-subj","type":"tracks"}]},
+  {"id":"hl-v-liveroot","status":"in_progress","title":"visit: hl-live-root","metadata":{"task_kind":"visit","gc.session_id":"hq-live-1"},"dependencies":[{"issue_id":"hl-v-liveroot","depends_on_id":"hl-live-root","type":"tracks"}]},
+  {"id":"hl-v-deadroot","status":"in_progress","title":"visit: hl-dead-root","metadata":{"task_kind":"visit","gc.session_id":"hq-dead-9"},"dependencies":[{"issue_id":"hl-v-deadroot","depends_on_id":"hl-dead-root","type":"tracks"}]}
 ]
 JSON
 printf '[]\n' > "$TMP/hl-widen.json"
@@ -910,10 +910,10 @@ printf '%s\n' '[{"id":"hl-live-root","metadata":{}}]' > "$TMP/show/hl-live-root.
 printf '%s\n' '[{"id":"hl-dead-root","metadata":{}}]' > "$TMP/show/hl-dead-root.json"
 FAKE_READY="$TMP/hl-ready.json" FAKE_LIVE="$TMP/hl-live.json" FAKE_WIDEN="$TMP/hl-widen.json" run_sweep ABSENT
 BL="$(cat "$BASELINE_FILE" 2>/dev/null)"
-case ",$BL," in *",hl-live-subj,"*) bad "live-held visit over-surfaces" "hl-live-subj surfaced though lx-live-1 is alive" ;; *) ok "a live-held visit keeps its subject out of the census" ;; esac
+case ",$BL," in *",hl-live-subj,"*) bad "live-held visit over-surfaces" "hl-live-subj surfaced though hq-live-1 is alive" ;; *) ok "a live-held visit keeps its subject out of the census" ;; esac
 case ",$BL," in *",hl-dead-subj,"*) ok "a dead-held visit returns its subject to the census" ;; *) bad "dead-held subject hidden" "hl-dead-subj stayed masked (baseline: $BL)" ;; esac
 case ",$BL," in *",hl-ready-deadvisit,"*) ok "a visit stranded ready by a gone session surfaces (arm 1)" ;; *) bad "stranded visit bead hidden" "hl-ready-deadvisit stayed conversing (baseline: $BL)" ;; esac
-case ",$BL," in *",hl-live-root-step,"*) bad "a step under a live-held visit's root over-surfaces" "hl-live-root-step surfaced though its root's visit is held by lx-live-1" ;; *) ok "a step whose root a live-held visit tracks stays out of the census" ;; esac
+case ",$BL," in *",hl-live-root-step,"*) bad "a step under a live-held visit's root over-surfaces" "hl-live-root-step surfaced though its root's visit is held by hq-live-1" ;; *) ok "a step whose root a live-held visit tracks stays out of the census" ;; esac
 case ",$BL," in *",hl-dead-root-step,"*) ok "a step whose root a dead-held visit tracks returns to the census" ;; *) bad "dead-held root step hidden" "hl-dead-root-step stayed masked (baseline: $BL)" ;; esac
 
 echo "── a holder listed in a TERMINAL state (archived/closed) is dead, not live ──"
@@ -923,9 +923,9 @@ echo "── a holder listed in a TERMINAL state (archived/closed) is dead, not 
 # the terminal states only, not everything that is not "active".
 cat > "$TMP/hl-term-sessions.json" <<'JSON'
 {"sessions":[
-  {"id":"lx-closed-7","state":"closed","closed":true,"session_name":"s-lx-closed-7","alias":"","name":"","agent_name":""},
-  {"id":"lx-arch-8","state":"archived","closed":true,"session_name":"s-lx-arch-8","alias":"","name":"","agent_name":""},
-  {"id":"lx-asleep-2","state":"asleep","closed":false,"session_name":"s-lx-asleep-2","alias":"","name":"","agent_name":""}
+  {"id":"hq-closed-7","state":"closed","closed":true,"session_name":"s-hq-closed-7","alias":"","name":"","agent_name":""},
+  {"id":"hq-arch-8","state":"archived","closed":true,"session_name":"s-hq-arch-8","alias":"","name":"","agent_name":""},
+  {"id":"hq-asleep-2","state":"asleep","closed":false,"session_name":"s-hq-asleep-2","alias":"","name":"","agent_name":""}
 ]}
 JSON
 cat > "$TMP/hl-term-ready.json" <<'JSON'
@@ -938,16 +938,16 @@ JSON
 cat > "$TMP/hl-term-live.json" <<'JSON'
 [
   {"id":"tk-subject","status":"open","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
-  {"id":"hl-v-closed","status":"in_progress","title":"visit: hl-closed-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-closed-7"},"dependencies":[{"issue_id":"hl-v-closed","depends_on_id":"hl-closed-subj","type":"tracks"}]},
-  {"id":"hl-v-arch","status":"in_progress","title":"visit: hl-arch-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-arch-8"},"dependencies":[{"issue_id":"hl-v-arch","depends_on_id":"hl-arch-subj","type":"tracks"}]},
-  {"id":"hl-v-asleep","status":"in_progress","title":"visit: hl-asleep-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-asleep-2"},"dependencies":[{"issue_id":"hl-v-asleep","depends_on_id":"hl-asleep-subj","type":"tracks"}]}
+  {"id":"hl-v-closed","status":"in_progress","title":"visit: hl-closed-subj","metadata":{"task_kind":"visit","gc.session_id":"hq-closed-7"},"dependencies":[{"issue_id":"hl-v-closed","depends_on_id":"hl-closed-subj","type":"tracks"}]},
+  {"id":"hl-v-arch","status":"in_progress","title":"visit: hl-arch-subj","metadata":{"task_kind":"visit","gc.session_id":"hq-arch-8"},"dependencies":[{"issue_id":"hl-v-arch","depends_on_id":"hl-arch-subj","type":"tracks"}]},
+  {"id":"hl-v-asleep","status":"in_progress","title":"visit: hl-asleep-subj","metadata":{"task_kind":"visit","gc.session_id":"hq-asleep-2"},"dependencies":[{"issue_id":"hl-v-asleep","depends_on_id":"hl-asleep-subj","type":"tracks"}]}
 ]
 JSON
 FAKE_SESSIONS="$TMP/hl-term-sessions.json" FAKE_READY="$TMP/hl-term-ready.json" FAKE_LIVE="$TMP/hl-term-live.json" FAKE_WIDEN="$TMP/hl-widen.json" run_sweep ABSENT
 BLT="$(cat "$BASELINE_FILE" 2>/dev/null)"
 case ",$BLT," in *",hl-closed-subj,"*) ok "a CLOSED but still-listed holder returns its subject to the census" ;; *) bad "closed-held subject hidden" "hl-closed-subj stayed masked (baseline: $BLT)" ;; esac
 case ",$BLT," in *",hl-arch-subj,"*) ok "an ARCHIVED but still-listed holder returns its subject to the census" ;; *) bad "archived-held subject hidden" "hl-arch-subj stayed masked (baseline: $BLT)" ;; esac
-case ",$BLT," in *",hl-asleep-subj,"*) bad "asleep-held visit over-surfaces" "hl-asleep-subj surfaced though lx-asleep-2 is a live (non-terminal) session" ;; *) ok "a non-terminal (asleep) holder keeps its subject covered" ;; esac
+case ",$BLT," in *",hl-asleep-subj,"*) bad "asleep-held visit over-surfaces" "hl-asleep-subj surfaced though hq-asleep-2 is a live (non-terminal) session" ;; *) ok "a non-terminal (asleep) holder keeps its subject covered" ;; esac
 
 echo "── an unreadable session list keeps every visit covering (unprovable death) ──"
 GC_SESSION_FAIL=1 FAKE_READY="$TMP/hl-ready.json" FAKE_LIVE="$TMP/hl-live.json" FAKE_WIDEN="$TMP/hl-widen.json" run_sweep ABSENT

@@ -100,18 +100,18 @@ chmod +x "$TMP/bin/gc"
 # The open infra beads in the city store, one array as `bd list` returns.
 cat > "$WISPS_FILE" <<'JSON'
 [
-  {"id":"lx-n-open",           "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: tk-gopen"},
-  {"id":"lx-n-closed",         "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: tk-gclosed"},
-  {"id":"lx-n-gone",           "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: tk-ggone"},
-  {"id":"lx-n-nongate",        "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: tk-task"},
-  {"id":"lx-n-badid",          "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: garbage here"},
-  {"id":"lx-n-foreign-open",   "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: gc-gopen"},
-  {"id":"lx-n-foreign-closed", "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: sl-gclosed"},
-  {"id":"lx-esc-1",            "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-20T00:00:00Z"},
-  {"id":"lx-esc-2",            "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-25T00:00:00Z"},
-  {"id":"lx-esc-3",            "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-29T00:00:00Z"},
-  {"id":"lx-esc-solo",         "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Different condition [LOW]","created_at":"2026-09-28T00:00:00Z"},
-  {"id":"lx-boot",             "issue_type":"message","status":"open","assignee":"human","title":"BOOT_HEALTH: deacon cold"}
+  {"id":"hq-n-open",           "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: tk-gopen"},
+  {"id":"hq-n-closed",         "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: tk-gclosed"},
+  {"id":"hq-n-gone",           "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: tk-ggone"},
+  {"id":"hq-n-nongate",        "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: tk-task"},
+  {"id":"hq-n-badid",          "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: garbage here"},
+  {"id":"hq-n-foreign-open",   "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: gc-gopen"},
+  {"id":"hq-n-foreign-closed", "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: ra-gclosed"},
+  {"id":"hq-esc-1",            "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-20T00:00:00Z"},
+  {"id":"hq-esc-2",            "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-25T00:00:00Z"},
+  {"id":"hq-esc-3",            "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-29T00:00:00Z"},
+  {"id":"hq-esc-solo",         "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Different condition [LOW]","created_at":"2026-09-28T00:00:00Z"},
+  {"id":"hq-boot",             "issue_type":"message","status":"open","assignee":"human","title":"BOOT_HEALTH: deacon cold"}
 ]
 JSON
 
@@ -120,7 +120,7 @@ printf '[{"id":"tk-gopen","issue_type":"gate","status":"open"}]\n'      > "$BEAD
 printf '[{"id":"tk-gclosed","issue_type":"gate","status":"closed"}]\n'  > "$BEADS_DIR/tk-gclosed.json"
 printf '[{"id":"tk-task","issue_type":"task","status":"open"}]\n'       > "$BEADS_DIR/tk-task.json"
 printf '[{"id":"gc-gopen","issue_type":"gate","status":"open"}]\n'      > "$BEADS_DIR/gc-gopen.json"
-printf '[{"id":"sl-gclosed","issue_type":"gate","status":"closed"}]\n'  > "$BEADS_DIR/sl-gclosed.json"
+printf '[{"id":"ra-gclosed","issue_type":"gate","status":"closed"}]\n'  > "$BEADS_DIR/ra-gclosed.json"
 # tk-ggone.json intentionally absent => the not-found signature.
 
 run() { : > "$CALLS"; env "$@" bash "$SUT" --db "$CITY_DB" 2>"$TMP/err"; }
@@ -134,28 +134,28 @@ has "$OUT" "kept 2 live" "COUNTS: 2 live gate notices kept"
 has "$OUT" "skipped 2" "COUNTS: 2 gate notices skipped (non-gate + bad id)"
 has "$OUT" "closed 2 duplicate escalation notices" "COUNTS: 2 escalation copies closed"
 has "$OUT" "kept 2 distinct" "COUNTS: 2 distinct escalation headlines kept"
-has "$CALLED" "bd close lx-n-closed" "RESOLVED: a resolved-gate notice is closed"
+has "$CALLED" "bd close hq-n-closed" "RESOLVED: a resolved-gate notice is closed"
 has "$CALLED" "human gate tk-gclosed resolved" "RESOLVED: reason names the resolved gate"
-has "$CALLED" "bd close lx-n-gone" "GONE: a gone-gate notice is closed"
+has "$CALLED" "bd close hq-n-gone" "GONE: a gone-gate notice is closed"
 has "$CALLED" "human gate tk-ggone gone" "GONE: reason names the gone gate"
-has "$CALLED" "bd close lx-n-foreign-closed" "CROSSRIG: a foreign-rig resolved gate closes its notice"
-hasnt "$CALLED" "bd close lx-n-open" "OPEN: a live-gate notice is kept"
-hasnt "$CALLED" "bd close lx-n-foreign-open" "CROSSRIG: a foreign-rig OPEN gate keeps its notice"
-hasnt "$CALLED" "bd close lx-n-nongate" "NONGATE: a non-gate title id is left alone"
-hasnt "$CALLED" "bd close lx-n-badid" "BADID: a non-bead-id title tail is left alone"
-has "$CALLED" "bd close lx-esc-1" "ESC: the older escalation copy is closed"
-has "$CALLED" "bd close lx-esc-2" "ESC: the middle escalation copy is closed"
-hasnt "$CALLED" "bd close lx-esc-3" "ESC: the NEWEST escalation copy is kept"
-has "$CALLED" "superseded by lx-esc-3" "ESC: reason names the surviving newest copy"
-hasnt "$CALLED" "bd close lx-esc-solo" "ESCSOLO: a lone escalation headline is kept"
-hasnt "$CALLED" "bd close lx-boot" "SCOPE: a non-gate/non-escalation message is untouched"
+has "$CALLED" "bd close hq-n-foreign-closed" "CROSSRIG: a foreign-rig resolved gate closes its notice"
+hasnt "$CALLED" "bd close hq-n-open" "OPEN: a live-gate notice is kept"
+hasnt "$CALLED" "bd close hq-n-foreign-open" "CROSSRIG: a foreign-rig OPEN gate keeps its notice"
+hasnt "$CALLED" "bd close hq-n-nongate" "NONGATE: a non-gate title id is left alone"
+hasnt "$CALLED" "bd close hq-n-badid" "BADID: a non-bead-id title tail is left alone"
+has "$CALLED" "bd close hq-esc-1" "ESC: the older escalation copy is closed"
+has "$CALLED" "bd close hq-esc-2" "ESC: the middle escalation copy is closed"
+hasnt "$CALLED" "bd close hq-esc-3" "ESC: the NEWEST escalation copy is kept"
+has "$CALLED" "superseded by hq-esc-3" "ESC: reason names the surviving newest copy"
+hasnt "$CALLED" "bd close hq-esc-solo" "ESCSOLO: a lone escalation headline is kept"
+hasnt "$CALLED" "bd close hq-boot" "SCOPE: a non-gate/non-escalation message is untouched"
 
 # The notices core mails are assigned to "human"; the stub refuses this sweep's
 # close without --force (see the gc stub). A close recorded above already proves
 # --force was passed, but assert it on each pass's close site so a drop of either
 # --force is caught here, at that site.
-has "$(grep '^bd close lx-n-gone ' "$CALLS")" " --force" "HUMANGUARD: pass 1 forces the stale gate-notice close past the human-assignee guard"
-has "$(grep '^bd close lx-esc-1 ' "$CALLS")" " --force" "HUMANGUARD: pass 2 forces the duplicate-escalation close past the human-assignee guard"
+has "$(grep '^bd close hq-n-gone ' "$CALLS")" " --force" "HUMANGUARD: pass 1 forces the stale gate-notice close past the human-assignee guard"
+has "$(grep '^bd close hq-esc-1 ' "$CALLS")" " --force" "HUMANGUARD: pass 2 forces the duplicate-escalation close past the human-assignee guard"
 
 # --- DRY RUN ------------------------------------------------------------------
 : > "$CALLS"
@@ -184,7 +184,7 @@ has "$(cat "$TMP/err")" "could not read the city store" "UNREADABLE-LIST: says w
 OUT="$(GATE_BROKEN=tk-gclosed bash "$SUT" --db "$CITY_DB" 2>/dev/null)"; RC=$?
 CALLED="$(cat "$CALLS")"
 eq "$RC" "0" "UNREADABLE-GATE: exits 0"
-hasnt "$CALLED" "bd close lx-n-closed" "UNREADABLE-GATE: an unreadable gate is NOT closed"
+hasnt "$CALLED" "bd close hq-n-closed" "UNREADABLE-GATE: an unreadable gate is NOT closed"
 has "$OUT" "closed 2 stale gate notices" "UNREADABLE-GATE: the unreadable one drops from the closed count"
 
 # --- OTHER ERROR gate (fail safe) ---------------------------------------------
@@ -192,15 +192,15 @@ has "$OUT" "closed 2 stale gate notices" "UNREADABLE-GATE: the unreadable one dr
 OUT="$(GATE_ERROR=tk-gclosed bash "$SUT" --db "$CITY_DB" 2>/dev/null)"; RC=$?
 CALLED="$(cat "$CALLS")"
 eq "$RC" "0" "OTHERERR: exits 0"
-hasnt "$CALLED" "bd close lx-n-closed" "OTHERERR: a non not-found error is NOT read as gone"
+hasnt "$CALLED" "bd close hq-n-closed" "OTHERERR: a non not-found error is NOT read as gone"
 
 # --- CLOSE FAIL ---------------------------------------------------------------
 : > "$CALLS"
-OUT="$(CLOSE_FAILS="lx-n-closed" bash "$SUT" --db "$CITY_DB" 2>"$TMP/err")"; RC=$?
+OUT="$(CLOSE_FAILS="hq-n-closed" bash "$SUT" --db "$CITY_DB" 2>"$TMP/err")"; RC=$?
 CALLED="$(cat "$CALLS")"
 eq "$RC" "0" "CLOSEFAIL: the pass exits 0"
-has "$(cat "$TMP/err")" "could not close stale gate notice lx-n-closed" "CLOSEFAIL: the failure is reported"
-has "$CALLED" "bd close lx-n-gone" "CLOSEFAIL: a failed close does not stop the pass"
+has "$(cat "$TMP/err")" "could not close stale gate notice hq-n-closed" "CLOSEFAIL: the failure is reported"
+has "$CALLED" "bd close hq-n-gone" "CLOSEFAIL: a failed close does not stop the pass"
 has "$OUT" "closed 2 stale gate notices" "CLOSEFAIL: the failed close is not counted closed"
 has "$OUT" "skipped 3" "CLOSEFAIL: the failed close is counted skipped"
 

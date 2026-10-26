@@ -120,12 +120,12 @@ step() {
 convoy() { printf '{"id":"%s","status":"%s","metadata":{}}' "$1" "$2"; }
 
 # The default roster: the dead molecule's slot is NOT among the live sessions.
-sessions "$(live lx-live gc-toolkit__other)"
+sessions "$(live hq-live gc-toolkit__other)"
 
 echo "== 1. a started, session-less, unlanded molecule with an unclaimable ready frontier is an error =="
 clear_stores
 store alpha "$(root R1 CV1 dead-slot "$OLD")" \
-            "$(step done1 R1 closed "$OLD" lx-dead lx-dead gc-toolkit/gc-toolkit.polecat)" \
+            "$(step done1 R1 closed "$OLD" hq-dead hq-dead gc-toolkit/gc-toolkit.polecat)" \
             "$(step front1 R1 open "$OLD")" \
             "$(convoy CV1 open)"
 ready alpha "$(step front1 R1 open "$OLD")"
@@ -143,7 +143,7 @@ echo "== 1b. a strand whose root carries NO gc.session_name is reported, not cra
 # turned this detector into a no-op on exactly the roots it exists to catch.
 clear_stores
 store alpha "$(root R1b CV1b "" "$OLD")" \
-            "$(step done1b R1b closed "$OLD" lx-dead lx-dead gc-toolkit/gc-toolkit.polecat)" \
+            "$(step done1b R1b closed "$OLD" hq-dead hq-dead gc-toolkit/gc-toolkit.polecat)" \
             "$(step front1b R1b open "$OLD")" \
             "$(convoy CV1b open)"
 ready alpha "$(step front1b R1b open "$OLD")"
@@ -154,28 +154,28 @@ hasnt "$OUT" "bad array subscript" "an empty session_name does not abort the che
 
 echo "== 2. exempt: a live session holds a non-closed member =="
 clear_stores
-sessions "$(live lx-hold gc-toolkit__worker)"
+sessions "$(live hq-hold gc-toolkit__worker)"
 store alpha "$(root R1 CV1 dead-slot "$OLD")" \
-            "$(step done1 R1 closed "$OLD" lx-dead lx-dead)" \
-            "$(step front1 R1 in_progress "$OLD" lx-hold lx-hold)" \
+            "$(step done1 R1 closed "$OLD" hq-dead hq-dead)" \
+            "$(step front1 R1 in_progress "$OLD" hq-hold hq-hold)" \
             "$(convoy CV1 open)"
-ready alpha "$(step front1 R1 in_progress "$OLD" lx-hold lx-hold)"
+ready alpha "$(step front1 R1 in_progress "$OLD" hq-hold hq-hold)"
 OUT="$(run_check)"; RC=$?
 eq "$RC" "0" "a live member holder exempts the molecule"
 hasnt "$OUT" "STRANDED" "no strand reported when held"
-sessions "$(live lx-live gc-toolkit__other)"
+sessions "$(live hq-live gc-toolkit__other)"
 
 echo "== 3. exempt: the root's affinity slot is live (a restart reuses it) =="
 clear_stores
-sessions "$(live lx-new gc-toolkit__polecat-7-pool)"
+sessions "$(live hq-new gc-toolkit__polecat-7-pool)"
 store alpha "$(root R1 CV1 gc-toolkit__polecat-7-pool "$OLD")" \
-            "$(step done1 R1 closed "$OLD" lx-dead lx-dead)" \
+            "$(step done1 R1 closed "$OLD" hq-dead hq-dead)" \
             "$(step front1 R1 open "$OLD")" \
             "$(convoy CV1 open)"
 ready alpha "$(step front1 R1 open "$OLD")"
 OUT="$(run_check)"; RC=$?
 eq "$RC" "0" "a live affinity slot on the root exempts it"
-sessions "$(live lx-live gc-toolkit__other)"
+sessions "$(live hq-live gc-toolkit__other)"
 
 echo "== 4. exempt: never started (no closed step) — an inline husk, not a strand =="
 clear_stores
@@ -189,7 +189,7 @@ eq "$RC" "0" "zero closed steps is exempt (never advanced)"
 echo "== 5. exempt: work landed (input convoy closed) =="
 clear_stores
 store alpha "$(root R1 CV1 dead-slot "$OLD")" \
-            "$(step done1 R1 closed "$OLD" lx-dead lx-dead)" \
+            "$(step done1 R1 closed "$OLD" hq-dead hq-dead)" \
             "$(step front1 R1 open "$OLD")" \
             "$(convoy CV1 closed)"
 ready alpha "$(step front1 R1 open "$OLD")"
@@ -199,7 +199,7 @@ eq "$RC" "0" "a closed input convoy (landed work) is exempt"
 echo "== 6. exempt: a non-closed member was written recently (still advancing) =="
 clear_stores
 store alpha "$(root R1 CV1 dead-slot "$OLD")" \
-            "$(step done1 R1 closed "$OLD" lx-dead lx-dead)" \
+            "$(step done1 R1 closed "$OLD" hq-dead hq-dead)" \
             "$(step front1 R1 open "$FRESH")" \
             "$(convoy CV1 open)"
 ready alpha "$(step front1 R1 open "$FRESH")"
@@ -209,7 +209,7 @@ eq "$RC" "0" "a fresh non-closed member keeps it out of the silent set"
 echo "== 7. exempt: a step CLOSED recently dates the molecule (closed members count for silence) =="
 clear_stores
 store alpha "$(root R1 CV1 dead-slot "$OLD")" \
-            "$(step done1 R1 closed "$FRESH" lx-dead lx-dead)" \
+            "$(step done1 R1 closed "$FRESH" hq-dead hq-dead)" \
             "$(step front1 R1 open "$OLD")" \
             "$(convoy CV1 open)"
 ready alpha "$(step front1 R1 open "$OLD")"
@@ -219,7 +219,7 @@ eq "$RC" "0" "a recently CLOSED step (advancement) exempts, though every open me
 echo "== 8. exempt: the frontier is routed (reachable) =="
 clear_stores
 store alpha "$(root R1 CV1 dead-slot "$OLD")" \
-            "$(step done1 R1 closed "$OLD" lx-dead lx-dead)" \
+            "$(step done1 R1 closed "$OLD" hq-dead hq-dead)" \
             "$(step front1 R1 open "$OLD" '' '' gc-toolkit/gc-toolkit.polecat)" \
             "$(convoy CV1 open)"
 ready alpha "$(step front1 R1 open "$OLD" '' '' gc-toolkit/gc-toolkit.polecat)"
@@ -229,7 +229,7 @@ eq "$RC" "0" "a routed frontier is reachable (a pool has demand)"
 echo "== 9. exempt: the frontier carries an EXECUTION route (the recovery-fix stamp) =="
 clear_stores
 store alpha "$(root R1 CV1 dead-slot "$OLD")" \
-            "$(step done1 R1 closed "$OLD" lx-dead lx-dead)" \
+            "$(step done1 R1 closed "$OLD" hq-dead hq-dead)" \
             "$(step front1 R1 open "$OLD" '' '' '' gc-toolkit/gc-toolkit.polecat)" \
             "$(convoy CV1 open)"
 ready alpha "$(step front1 R1 open "$OLD" '' '' '' gc-toolkit/gc-toolkit.polecat)"
@@ -239,7 +239,7 @@ eq "$RC" "0" "an execution-routed frontier reads as reachable"
 echo "== 10. exempt: empty frontier (nothing ready) — a blocker names the wait =="
 clear_stores
 store alpha "$(root R1 CV1 dead-slot "$OLD")" \
-            "$(step done1 R1 closed "$OLD" lx-dead lx-dead)" \
+            "$(step done1 R1 closed "$OLD" hq-dead hq-dead)" \
             "$(step front1 R1 open "$OLD")" \
             "$(convoy CV1 open)"
 ready alpha
@@ -249,7 +249,7 @@ eq "$RC" "0" "no ready frontier is exempt"
 echo "== 11. exempt: the only ready members are inert descriptor kinds (spec/scope) =="
 clear_stores
 store alpha "$(root R1 CV1 dead-slot "$OLD")" \
-            "$(step done1 R1 closed "$OLD" lx-dead lx-dead)" \
+            "$(step done1 R1 closed "$OLD" hq-dead hq-dead)" \
             "$(step spec1 R1 open "$OLD" '' '' '' '' spec)" \
             "$(step scope1 R1 open "$OLD" '' '' '' '' scope)" \
             "$(convoy CV1 open)"
@@ -261,7 +261,7 @@ eq "$RC" "0" "a descriptor-only frontier is not an executable frontier"
 echo "== 12. held on purpose is a NOTE, not a finding =="
 clear_stores
 store alpha "$(root R1 CV1 dead-slot "$OLD" '"gc.takeaway":"operator parked this"')" \
-            "$(step done1 R1 closed "$OLD" lx-dead lx-dead)" \
+            "$(step done1 R1 closed "$OLD" hq-dead hq-dead)" \
             "$(step front1 R1 open "$OLD")" \
             "$(convoy CV1 open)"
 ready alpha "$(step front1 R1 open "$OLD")"
@@ -280,12 +280,12 @@ clear_stores
 printf '{"sessions":[]}' > "$TMP/sessions.json"
 OUT="$(run_check)"; RC=$?
 eq "$RC" "1" "empty roster warns (1)"
-sessions "$(live lx-live gc-toolkit__other)"
+sessions "$(live hq-live gc-toolkit__other)"
 
 echo "== 15. fail-safe: an unreadable store is a warning, not a strand =="
 clear_stores
 store alpha "$(root R1 CV1 dead-slot "$OLD")" \
-            "$(step done1 R1 closed "$OLD" lx-dead lx-dead)" \
+            "$(step done1 R1 closed "$OLD" hq-dead hq-dead)" \
             "$(step front1 R1 open "$OLD")" \
             "$(convoy CV1 open)"
 ready alpha "$(step front1 R1 open "$OLD")"
@@ -296,7 +296,7 @@ has "$OUT" "NOT checked" "and names it as unchecked"
 echo "== 16. fail-safe: an unreadable convoy leaves the candidate unjudged =="
 clear_stores
 store alpha "$(root R1 CV1 dead-slot "$OLD")" \
-            "$(step done1 R1 closed "$OLD" lx-dead lx-dead)" \
+            "$(step done1 R1 closed "$OLD" hq-dead hq-dead)" \
             "$(step front1 R1 open "$OLD")" \
             "$(convoy CV1 open)"
 ready alpha "$(step front1 R1 open "$OLD")"
@@ -308,7 +308,7 @@ echo "== 17. two rigs: a strand in beta is found while alpha is clean =="
 clear_stores
 store alpha "$(root A1 CVA live-clean "$FRESH")" "$(convoy CVA open)"
 store beta  "$(root B1 CVB dead-slot "$OLD")" \
-            "$(step done1 B1 closed "$OLD" lx-dead lx-dead)" \
+            "$(step done1 B1 closed "$OLD" hq-dead hq-dead)" \
             "$(step front1 B1 open "$OLD")" \
             "$(convoy CVB open)"
 ready beta "$(step front1 B1 open "$OLD")"

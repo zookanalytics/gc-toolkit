@@ -68,9 +68,9 @@ cat > "$TMP/sessions.json" <<'JSON'
 {
   "_cache_age_s": 0,
   "sessions": [
-    {"id": "lx-vllv",  "alias": "gc-toolkit.mayor",              "session_name": "gc-toolkit__mayor"},
-    {"id": "lx-2rz07", "alias": "gc-toolkit/gc-toolkit.witness", "session_name": "gc-toolkit__witness"},
-    {"id": "lx-k7r38", "alias": "gc-toolkit/gc-toolkit.nux",     "session_name": "gc-toolkit__polecat-lx-k7r38"}
+    {"id": "hq-vllv",  "alias": "gc-toolkit.mayor",              "session_name": "gc-toolkit__mayor"},
+    {"id": "hq-2rz07", "alias": "gc-toolkit/gc-toolkit.witness", "session_name": "gc-toolkit__witness"},
+    {"id": "hq-k7r38", "alias": "gc-toolkit/gc-toolkit.nux",     "session_name": "gc-toolkit__polecat-hq-k7r38"}
   ]
 }
 JSON
@@ -140,9 +140,9 @@ attaches "[--] [gc-toolkit.mayor]" "(D) a live alias attaches" "gc-toolkit.mayor
 attaches "[--] [gc-toolkit/gc-toolkit.witness]" \
   "(E) a live rig-scoped alias (contains '/') attaches" "gc-toolkit/gc-toolkit.witness"
 
-attaches "[--] [lx-k7r38]" "(F) a live session id attaches" "lx-k7r38"
-attaches "[--] [gc-toolkit__polecat-lx-k7r38]" \
-  "(G) a live session_name attaches" "gc-toolkit__polecat-lx-k7r38"
+attaches "[--] [hq-k7r38]" "(F) a live session id attaches" "hq-k7r38"
+attaches "[--] [gc-toolkit__polecat-hq-k7r38]" \
+  "(G) a live session_name attaches" "gc-toolkit__polecat-hq-k7r38"
 
 # `--` is passed so `gc` cannot read a name as a flag even if the syntax rule
 # is someday loosened. The assertions above pin it.

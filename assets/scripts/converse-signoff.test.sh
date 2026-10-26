@@ -830,7 +830,7 @@ eq "${CUPD:-<none>}" "<none>"             "(NOGROUP) …and nothing is written"
 # case, silently disabling this guard for exactly the turn it was written to
 # catch: an unrelated visit vacuumed onto a live sitting. A visit records its
 # subject twice, and the `tracks` edge has held where the stamp did not
-# (su-ab9je).
+# (rb-ab9je).
 VISIT_TRACKS='[{"id":"tk-foreign","status":"open","assignee":null,"metadata":{"task_kind":"visit"},"dependencies":[{"id":"tk-other","dependency_type":"tracks"}]}]'
 
 run_claim '{"bead_id":"tk-foreign","continuation_group":""}' "tk-subj" "$VISIT_TRACKS"

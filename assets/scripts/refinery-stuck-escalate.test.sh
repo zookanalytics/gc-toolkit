@@ -367,9 +367,9 @@ has "$RUN1" "is unassigned" "the reading says it is unassigned"
 H_NOKEY='[{"id":"tk-gone","status":"open","title":"handoff","metadata":{"branch":"polecat/tk-gone"}}]'
 has "$(run '[]' "" "" "" "$ESC_GONE" "$H_NOKEY")" "--retract --subject tk-gone" \
    "a handoff whose row carries no assignee has left"
-RPC="$(run '[]' "" "" "" "$ESC_GONE" "$(handoff in_progress '"lx-wisp-abc"')")"
+RPC="$(run '[]' "" "" "" "$ESC_GONE" "$(handoff in_progress '"hq-wisp-abc"')")"
 has "$RPC" "--retract --subject tk-gone" "a handoff reassigned to a worker has left"
-has "$RPC" "is assigned to lx-wisp-abc, not a refinery" "the reading names the new assignee"
+has "$RPC" "is assigned to hq-wisp-abc, not a refinery" "the reading names the new assignee"
 
 # A handoff that cannot be read keeps its escalation: a failed read, an error
 # object, and a row for some other bead are none of them a departure.

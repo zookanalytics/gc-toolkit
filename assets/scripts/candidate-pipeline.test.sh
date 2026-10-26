@@ -97,11 +97,11 @@ chmod +x "$TMP/bin/gc"
 # w1's description is the shape zsh's echo corrupts: a \n escape, an escaped
 # backslash ahead of $ and (, a \t escape and a \u001f escape.
 W1='  {"id":"w1","status":"in_progress","assignee":"gc-toolkit/gc-toolkit.furiosa","description":"line one\nline two \\$HOME \\(x) a\ttab a\u001fsep a \"quote\"","metadata":{}}'
-S1='  {"id":"s1","status":"in_progress","metadata":{"gc.session_id":"lx-dead","gc.session_name":"slot-1","gc.step_ref":"mol-polecat-work.implement"}}'
+S1='  {"id":"s1","status":"in_progress","metadata":{"gc.session_id":"hq-dead","gc.session_name":"slot-1","gc.step_ref":"mol-polecat-work.implement"}}'
 U1='  {"id":"u1","assignee":"","metadata":{}}'
 D1='  {"id":"d1","assignee":"gc-toolkit/gc-toolkit.refinery","metadata":{"merge_result":"pull_request"}}'
 H1='  {"id":"h1","assignee":"gc-toolkit/gc-toolkit.refinery","metadata":{"gc.routed_to":"human"}}'
-V1='  {"id":"v1","status":"open","assignee":"s-lx-wisp-tjt3y","metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-ycww6"}}'
+V1='  {"id":"v1","status":"open","assignee":"s-hq-wisp-tjt3y","metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-ycww6"}}'
 R1='  {"id":"r1","metadata":{"gc.kind":"workflow","gc.session_name":"gc-toolkit--gc-toolkit__polecat-1-pool"}}'
 
 # listing <file> [raw] — writes the listing the stub serves, pretty-printed one
@@ -177,7 +177,7 @@ rows() { sort "$TMP/out" | paste -sd ',' -; }
 said_unreadable() { grep -q 'did not parse' "$TMP/err"; }
 leftovers() { find "$TMP/runtmp" -mindepth 1 | wc -l | tr -d ' '; }
 
-WANT="c1 gc-toolkit/gc-toolkit.rictus gc-toolkit/gc-toolkit.rictus:in_progress:gc-toolkit/gc-toolkit.rictus,s1 lx-dead lx-dead:in_progress:,v1 s-lx-wisp-tjt3y s-lx-wisp-tjt3y:open:s-lx-wisp-tjt3y,w1 gc-toolkit/gc-toolkit.furiosa gc-toolkit/gc-toolkit.furiosa:in_progress:gc-toolkit/gc-toolkit.furiosa"
+WANT="c1 gc-toolkit/gc-toolkit.rictus gc-toolkit/gc-toolkit.rictus:in_progress:gc-toolkit/gc-toolkit.rictus,s1 hq-dead hq-dead:in_progress:,v1 s-hq-wisp-tjt3y s-hq-wisp-tjt3y:open:s-hq-wisp-tjt3y,w1 gc-toolkit/gc-toolkit.furiosa gc-toolkit/gc-toolkit.furiosa:in_progress:gc-toolkit/gc-toolkit.furiosa"
 
 for SH in "${SHELLS[@]}"; do
   if run "$SH" "$TMP/raw.json"; then ok "[$SH] the block exits 0"; else bad "[$SH] the block exited non-zero"; fi

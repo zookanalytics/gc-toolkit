@@ -44,7 +44,7 @@ export STUB_AGENTS='{"agents":[
   {"qualified_name":"gc-toolkit/gc-toolkit.refinery"},
   {"qualified_name":"gc-toolkit/gc-toolkit.witness"},
   {"qualified_name":"gascity/gc-toolkit.polecat"},
-  {"qualified_name":"shutupandlisten/gc-toolkit.polecat"}]}'
+  {"qualified_name":"rig-b/gc-toolkit.polecat"}]}'
 
 # run <name> [env-assignments...] -> stdout in OUT, stderr in ERR, status in RC
 run() {
@@ -82,7 +82,7 @@ ERR=$(cat "$TMP/err")
 eq "$RC" 1 "with no rig bound, three rigs' pools share the name and none wins"
 eq "$OUT" "" "nothing is printed for a caller to stamp"
 has "$ERR" "gascity/gc-toolkit.polecat" "the refusal names the candidates"
-has "$ERR" "shutupandlisten/gc-toolkit.polecat" "all of them"
+has "$ERR" "rig-b/gc-toolkit.polecat" "all of them"
 
 echo "# two city bindings make a bare role ambiguous, and a guess is refused"
 run "dog"
