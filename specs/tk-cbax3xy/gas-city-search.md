@@ -14,7 +14,7 @@ asks what Gas City already ships for that
 answers a claim with identifiers. It delivers a step's instructions through
 provider hooks when a session starts and when a prompt is submitted, so a step
 that a session claims during its turn is not among them. No Gas City command
-goes from a claimed step to the beads its input convoy tracks. `bd show`
+returns the beads that a claimed step's input convoy tracks. `bd show`
 returns a bead with each of its dependencies as a whole row, and a graph.v2
 step's record carries its workflow root that way, so the script composes two
 `gc bd show` reads. It writes nothing and adds no noun.
@@ -51,10 +51,11 @@ Each was read on 2026-10-26:
   created with. Each hit outside the tests was read.
 - Every pack Gas City publishes, at `dac12a4a802c`. Each pack was searched for
   `hook --claim`, `hook current`, `gc.input_convoy_id`, `mol current`,
-  `show --current`, `prime --hook`, `nudge drain` and `step_reminder`, and for
-  any mention of a claim, and each hit was read. Gas City bundles `gastown`
-  and `gascity` from the packs at `66c672b5ed00`. Their claim instructions
-  there differ from the head, so both are described below.
+  `show --current`, `prime --hook`, `nudge drain` and `step_reminder`, and
+  each hit was read. The packs with no hit were searched for any mention of a
+  claim. Gas City bundles `gastown` and `gascity` from the packs at
+  `66c672b5ed00`. Their claim instructions there differ from the head, so both
+  are described below.
 - bd at `249d7cde74db`: the JSON that `bd show` returns, its flags,
   `bd show --current` and `bd mol current`.
 
@@ -71,7 +72,11 @@ source, that result is `hookClaimJSONResult`. It holds the schema version,
 `ok`, the command and the action, the reason, the bead id, the assignee and
 the route, the root bead id, the continuation group with the continuation
 beads assigned alongside the claim, and whether a drain was acknowledged. It
-carries no step text and no bead record.
+carries no step text and no bead record. The claim protocol does walk from a
+step to the members its root's input convoy tracks. Before it hands out a
+workflow's step, `workflowInputDone` checks whether every member is terminal
+or handed off to another lane, and when every one is, the claim closes the
+root and its open steps as skipped. The result reports none of the members.
 
 **`gc hook current` names the claim.** The CLI Reference's
 [`gc hook current`](https://docs.gascity.com/reference/cli#gc-hook-current)
@@ -124,7 +129,7 @@ metadata". The root records that convoy as `gc.input_convoy_id`. A
 `mol-polecat-work` run's work bead is its input convoy's one member, so the
 pack's work bead is the input this contract defines.
 
-**No command goes from a claim to its input convoy's members whole.**
+**No command returns a claim's input convoy members whole.**
 [`gc convoy status`](https://docs.gascity.com/reference/cli#gc-convoy-status)
 shows "a table of all child issues with their status and assignee". Its JSON
 (`writeConvoyStatusJSON`) gives each member's id, title, status, type and
@@ -133,7 +138,9 @@ assignee, without metadata, notes or description.
 beads with their status and what blocks them, and
 [`gc beads show`](https://docs.gascity.com/reference/cli#gc-beads-show) shows
 one bead. Each takes an id the session must already know, and none starts from
-a claim.
+a claim. Gas City's execution events relate a run to the beads its input
+convoy tracks, by id only (package `executionevent`, `ProjectCurrent` and
+`WorkAssociation`).
 
 **`bd mol current` and `bd show --current` answer other questions.**
 [`bd mol current`](https://beads.gascity.com/cli-reference/mol#bd-mol-current)
@@ -219,9 +226,10 @@ as shipped no result carries one, so a session runs the read as written after
 each claim and learns the same things.
 
 The capability Gas City lacks is a read from a claim to the work that its
-workflow's input convoy tracks. The claim result names the step and its root,
-a reminder carries the step's text when a hook runs, and every other read
-takes one bead or one convoy's summary. The packs fill the gap in their own
+workflow's input convoy tracks. The claim protocol reads those members to skip
+a finished workflow, and returns none of them. The claim result names the step
+and its root, a reminder carries the step's text when a hook runs, and every
+other read takes one bead or one convoy's summary. The packs fill the gap in their own
 steps. The build pack's `prepare-worktree` resolves the work and stamps it on
 the root, and `gastown`'s resume path reads the convoy and then the bead.
 
