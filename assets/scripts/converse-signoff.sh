@@ -9,7 +9,9 @@
 #      or a bead a gate it answers releases: its rework, through
 #      converse-rework.sh with the conversation as the rework's
 #      source_ruling_bead (--rework), or its retirement, through pr-dispose.sh,
-#      which records the disposition and closes the PR (--retire);
+#      which records the disposition and closes the PR (--retire). Either one
+#      runs in that PR's own rig, its store, pool and checkout, whichever rig
+#      the conversation lives in;
 #   2. writes the subject's headline (gc-helm.sh takeaway) and reads it back;
 #   3. resolves each open gate the conversation replies to with
 #      `ruled: <ruling>`, except each one --leave names, and reads each back. bd
@@ -98,8 +100,8 @@
 #     the work now, which every kind but not-needed requires; under not-needed
 #     it defaults to this conversation, the evidence that ruled the work out.
 #     --rework and --retire act on one PR, the one the ruling reaches, else
-#     the subject. The rework or the retirement runs before every other write,
-#     and when it does not complete nothing else is written.
+#     the subject. The rework or the retirement runs in that PR's rig, before
+#     every other write, and when it does not complete nothing else is written.
 #   --pr-anchor <bead> names the PR --rework or --retire acts on when the
 #     ruling reaches more than one, which it requires; every other one the
 #     ruling reaches stands. A conversation owns one live rework child, so a
@@ -401,6 +403,26 @@ case "$PR_ANSWER" in
     STANDS=("${PR_ANCHORS[@]+"${PR_ANCHORS[@]}"}")
     [ "${#STANDS[@]}" -gt 0 ] || STANDS=("$SUBJECT") ;;
 esac
+# The rework or the retirement acts in the rig of the PR it acts on, which can
+# be another rig than the conversation's when a gate in another store releases
+# it. converse-rework.sh and rework-child.sh find the rework pool, file and
+# deduplicate the child, prove its blocks edge onto the anchor and sling it in
+# the store and rig GC_RIG names; pr-dispose.sh reads the anchor there; and the
+# review lanes read their check index from the checkout. So the consequence
+# runs with GC_RIG, GC_RIG_ROOT and the working directory all pinned to that
+# rig, resolved from the PR's id prefix by bead-store.sh, the one resolver of
+# a bead's store. The conversation stays the rework's provenance.
+TARGET_RIG=""
+TARGET_PATH=""
+if [ -n "$PR_TARGET" ]; then
+  BS=$(pack_script bead-store.sh) \
+    || stopped "no bead-store.sh on any candidate root, so the rig that holds $PR_TARGET, where its --$PR_ANSWER acts, could not be resolved; nothing was written"
+  TARGET_RIG=$("$BS" "$PR_TARGET" 2>/dev/null) && TARGET_PATH=$("$BS" --path "$PR_TARGET" 2>/dev/null) && [ -d "$TARGET_PATH" ] \
+    || stopped "the rig that holds $PR_TARGET could not be resolved from its id ('bead-store.sh $PR_TARGET' says why), and its --$PR_ANSWER acts in that rig's store, pool and checkout; nothing was written"
+fi
+# in_target_rig <cmd> [args...] — run <cmd> in the rig of the PR the
+# consequence acts on.
+in_target_rig() { ( cd "$TARGET_PATH" && GC_RIG="$TARGET_RIG" GC_RIG_ROOT="$TARGET_PATH" "$@" ); }
 # --accept takes the subject's recommendation through the gate that put it to
 # the operator, the human gate under the key first-reaction. That gate must be
 # one the ruling answers, so the conversation's reply on it records which
@@ -505,16 +527,16 @@ take_recommendation() {
 # verdict files, sourced by this conversation, and returns every review lane to
 # unreviewed; the child's blocks edge holds the merge. --retire records the
 # disposition and closes the PR, so there is nothing left to merge. Either one
-# runs before any gate this sitting answers is resolved. One that does not
-# complete stops here with nothing else written, and a re-run adopts a child an
-# earlier attempt filed, or finds the PR it closed.
+# runs in the PR's own rig, before any gate this sitting answers is resolved.
+# One that does not complete stops here with nothing else written, and a
+# re-run adopts a child an earlier attempt filed, or finds the PR it closed.
 CONSEQUENCE=""
 case "$PR_ANSWER" in
   rework)
     CR=$(pack_script converse-rework.sh)
     if [ -z "$CR" ]; then
       PR_OUT="no converse-rework.sh on any candidate root"
-    elif PR_OUT=$("$CR" --anchor "$PR_TARGET" --ruling-bead "$CONVERSATION" --ruling "$RULING" 2>&1); then
+    elif PR_OUT=$(in_target_rig "$CR" --anchor "$PR_TARGET" --ruling-bead "$CONVERSATION" --ruling "$RULING" 2>&1); then
       echo "$PR_OUT"
       CONSEQUENCE="filed ruling-driven rework on $PR_TARGET"
     fi
@@ -528,7 +550,7 @@ case "$PR_ANSWER" in
     PD=$(pack_script pr-dispose.sh)
     if [ -z "$PD" ]; then
       PR_OUT="no pr-dispose.sh on any candidate root"
-    elif PR_OUT=$("$PD" --anchor "$PR_TARGET" --successor "$SUCCESSOR" --kind "$RETIRE_KIND" --note "$RULING" 2>&1); then
+    elif PR_OUT=$(in_target_rig "$PD" --anchor "$PR_TARGET" --successor "$SUCCESSOR" --kind "$RETIRE_KIND" --note "$RULING" 2>&1); then
       echo "$PR_OUT"
       CONSEQUENCE="retired the PR of $PR_TARGET ($RETIRE_KIND, successor $SUCCESSOR)"
     fi

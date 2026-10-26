@@ -25,6 +25,10 @@
 #             more than one, the re-run of an attempt that stopped after
 #             resolving the gate acts on the same PR, and a release that does
 #             not read stops the sign-off before any write
+#   (RIG*)    the rework or the retirement runs in the rig of the PR it acts
+#             on, its store, pool and checkout, when a gate in another rig's
+#             store releases that PR, and a PR whose rig cannot be resolved
+#             stops the sign-off before any write
 #   (LEAVE)   a gate the ruling leaves owed stays open
 #   (UNCLOSED, HEADLINE) a gate that does not close or a headline that does not
 #             land stops the sign-off before the conversation closes
@@ -53,7 +57,9 @@
 # Runs the REAL converse-signoff.sh with a stubbed `gc` on PATH over a
 # file-backed store, and stub pack scripts at $GC_RIG_ROOT, from a cwd outside
 # any checkout so no real pack script is reached. Whether a gate still holds the
-# anchor's merge is read by the REAL finalize-gate.sh over the same store.
+# anchor's merge is read by the REAL finalize-gate.sh over the same store, and
+# the rig of a PR the ruling acts on by the REAL bead-store.sh over the stub's
+# rig list: rig-a carries the prefix tk and rig-b the prefix rb.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -91,6 +97,9 @@ all_ids() { for f in "$B"/*.json; do [ -f "$f" ] && basename "$f" .json; done; }
 show_row() { row "$1" | jq -c '. + {dependencies: [ .deps[] | {id: .on, dependency_type: .type} ]} | del(.deps)'; }
 list_row() { row "$1" | jq -c '. + {dependencies: [ .deps[] as $d | {issue_id: .id, depends_on_id: $d.on, type: $d.type} ]} | del(.deps)'; }
 case "$1 ${2:-}" in
+  "rig list")
+    jq -n --arg a "$RIG_A" --arg b "$RIG_B" '{rigs: [{name: "rig-a", prefix: "tk", path: $a, hq: false},
+                                                    {name: "rig-b", prefix: "rb", path: $b, hq: false}]}' ;;
   "bd show")
     [ -n "${SHOW_DOWN:-}" ] && [ "$3" = "$SHOW_DOWN" ] && { echo "bd show: data plane down" >&2; exit 1; }
     if [ -f "$B/$3.json" ]; then jq -c -n --argjson r "$(show_row "$3")" '[$r]'
@@ -201,9 +210,12 @@ printf 'lifecycle %s\n' "$*" >> "$CALLS"
 [ "$1" = state ] && printf '%s\n' "${SUBJECT_LC_STATE:-unanchored}"
 exit 0
 L
+# The rework and the retirement stand-ins each log the rig they ran in: GC_RIG,
+# GC_RIG_ROOT and the working directory.
 cat > "$S/converse-rework.sh" <<'R'
 #!/usr/bin/env bash
 printf 'converse-rework %s\n' "$*" >> "$CALLS"
+printf 'converse-rework ran in GC_RIG=%s GC_RIG_ROOT=%s PWD=%s\n' "${GC_RIG:-}" "${GC_RIG_ROOT:-}" "$PWD" >> "$CALLS"
 [ -n "${REWORK_FAIL:-}" ] && { echo "rework refused: anchor has no branch"; exit 2; }
 echo "tk-child gc-toolkit/gc-toolkit.polecat filed"
 R
@@ -212,6 +224,7 @@ R
 cat > "$S/pr-dispose.sh" <<'D'
 #!/usr/bin/env bash
 printf 'pr-dispose %s\n' "$*" >> "$CALLS"
+printf 'pr-dispose ran in GC_RIG=%s GC_RIG_ROOT=%s PWD=%s\n' "${GC_RIG:-}" "${GC_RIG_ROOT:-}" "$PWD" >> "$CALLS"
 _a=""; _k=""; _p=""; for a in "$@"; do [ "$_p" = "--anchor" ] && _a="$a"; [ "$_p" = "--kind" ] && _k="$a"; _p="$a"; done
 gc bd update "$_a" --set-metadata "gc.pr_close_disposition_kind=$_k" >/dev/null
 [ -n "${RETIRE_FAIL:-}" ] && { echo "pr-dispose: the marker is recorded but 'gh pr close 7' failed and the PR is still OPEN"; exit 1; }
@@ -221,9 +234,12 @@ cat > "$S/pr-sitting-comment.sh" <<'P'
 #!/usr/bin/env bash
 printf 'pr-sitting-comment %s\n' "$*" >> "$CALLS"
 P
+ln -s "$HERE/bead-store.sh" "$S/bead-store.sh"
 chmod +x "$S"/*.sh
 
-export PATH="$TMP/bin:$PATH" STORE="$TMP/store" CALLS="$TMP/calls" GC_RIG_ROOT="$TMP/rig"
+mkdir -p "$TMP/rig-a" "$TMP/rig-b"
+RIG_A="$(cd "$TMP/rig-a" && pwd -P)"; RIG_B="$(cd "$TMP/rig-b" && pwd -P)"
+export PATH="$TMP/bin:$PATH" STORE="$TMP/store" CALLS="$TMP/calls" GC_RIG_ROOT="$TMP/rig" RIG_A RIG_B
 unset GC_CITY_PATH 2>/dev/null || true
 
 # --- fixtures -----------------------------------------------------------------
@@ -478,6 +494,34 @@ run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --retire du
 eq "$RC" 0 "(SHARED-OTHER-PR) --retire on that ruling exits 0"
 has "$(cat "$CALLS")" "pr-dispose --anchor tk-pr2 --successor tk-anc --kind duplicate" "(SHARED-OTHER-PR) …retiring the one open PR the ruling reaches"
 
+echo "# the rework or the retirement runs in the rig of the PR it acts on"
+# The epic's conversation lives in rig-a (prefix tk). The member's PR and the
+# gate that holds its merge live in rig-b (prefix rb), and the conversation
+# replies to that gate across the stores.
+rig_pr() {
+    fresh; bead tk-epic epic; bead rb-mem; setm rb-mem merge_result pull_request
+    gate rb-mg design-choice; edge rb-mem blocks rb-mg
+    conv tk-conv tk-epic; edge tk-conv replies-to rb-mg
+}
+rig_pr; run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
+eq "$RC" 0 "(RIG-REWORK) a ruling whose gate in rig-b releases rig-b's open PR, with --rework, exits 0"
+has "$(cat "$CALLS")" "converse-rework --anchor rb-mem --ruling-bead tk-conv" "(RIG-REWORK) the rework is filed on rig-b's PR, the rig-a conversation its provenance"
+has "$(cat "$CALLS")" "converse-rework ran in GC_RIG=rig-b GC_RIG_ROOT=$RIG_B PWD=$RIG_B" "(RIG-REWORK) …and runs in rig-b: its store, its rig root and its checkout"
+eq "$(meta tk-epic gc.takeaway)" "the epic takes option B" "(RIG-REWORK) the headline stays on the epic in rig-a"
+eq "$(field rb-mg status)" "closed" "(RIG-REWORK) …and the gate in rig-b is answered after the rework"
+rig_pr; run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
+eq "$RC" 0 "(RIG-RETIRE) the same ruling with --retire exits 0"
+has "$(cat "$CALLS")" "pr-dispose --anchor rb-mem --successor tk-conv --kind not-needed" "(RIG-RETIRE) rig-b's PR is retired, the rig-a conversation its evidence"
+has "$(cat "$CALLS")" "pr-dispose ran in GC_RIG=rig-b GC_RIG_ROOT=$RIG_B PWD=$RIG_B" "(RIG-RETIRE) …in rig-b"
+fresh; bead tk-epic epic; bead zz-mem; setm zz-mem merge_result pull_request
+gate tk-mg design-choice; edge zz-mem blocks tk-mg
+conv tk-conv tk-epic; edge tk-conv replies-to tk-mg
+run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
+eq "$RC" 1 "(RIG-UNRESOLVED) a PR whose rig cannot be resolved from its id stops the sign-off"
+has "$OUT" "the rig that holds zz-mem could not be resolved" "(RIG-UNRESOLVED) …naming the PR"
+eq "$(writes)" 0 "(RIG-UNRESOLVED) …before any write"
+eq "$(field tk-mg status)" "open" "(RIG-UNRESOLVED) …so the gate still holds the PR's merge"
+
 echo "# what a gate releases is read before any write"
 epic_pr; DEP_UP_DOWN=tk-mg run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 1 "(RELEASED-UNREAD) a gate whose waiting beads do not read stops the sign-off"
@@ -520,6 +564,7 @@ run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
 eq "$RC" 0 "(REWORK) --rework exits 0"
 has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the retry before the merge" "(REWORK) the rework is filed with the conversation as its source ruling bead"
 has "$(grep -v '^lifecycle state' "$CALLS" | head -1)" "converse-rework" "(REWORK) …before every other write"
+has "$(cat "$CALLS")" "converse-rework ran in GC_RIG=rig-a GC_RIG_ROOT=$RIG_A PWD=$RIG_A" "(REWORK) …in the rig of the PR it acts on"
 has "$(grep '^pr-sitting-comment' "$CALLS")" "filed ruling-driven rework on tk-anc" "(REWORK) …and the reminder says so"
 acceptance; setm tk-anc merge_result pull_request
 REWORK_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework

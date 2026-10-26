@@ -165,12 +165,13 @@ notes nothing reads while the stale PR keeps reading ready, and a gate
 answered before the PR is closed lets an approved PR merge. `--rework` and
 `--retire` act on one PR. When the ruling reaches more than one,
 `--pr-anchor <bead>` names it, and each other one stands under the ruling, as
-`--no-rework` says of each. The rework or the retirement runs before the
-sign-off writes anything else. One that does not complete stops the sign-off
-there, and the script exits non-zero. No headline is written, no gate is
-answered and the conversation stays open, so a merge hold your hold filed
-still holds the PR. Re-run once the cause is repaired: the re-run adopts a
-child an earlier attempt filed, and finds a PR an earlier attempt closed. A
+`--no-rework` says of each. The rework or the retirement runs in that PR's
+own rig, before the sign-off writes anything else. One that does not complete
+stops the sign-off there, and the script exits non-zero. No headline is
+written, no gate is answered and the conversation stays open, so a merge hold
+your hold filed still holds the PR. Re-run once the cause is repaired: the
+re-run adopts a child an earlier attempt filed, and finds a PR an earlier
+attempt closed. A
 conversation's rework carries the ruling it was filed for, and a conversation
 owns one live rework, on whichever PR it was filed. While one filed for an
 earlier ruling of this conversation is open, `--rework` for another ruling is
