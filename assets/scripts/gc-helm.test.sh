@@ -2291,36 +2291,36 @@ eq "$ARC" "2" "(DISMISS-ARGS) an unknown flag is a usage error"
 # live converse session counts as a holder, and a stop that fails leaves the
 # dismiss standing and names converse-reap.
 STOP_SESSIONS='{"sessions":[
-  {"id":"gc-toolkit__converse-lx-1","session_name":"gc-toolkit__converse-lx-1",
-   "alias":"gc-toolkit/gc-toolkit.v-HELD","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"signal-loom","closed":false},
-  {"id":"gc-toolkit__converse-lx-2","session_name":"gc-toolkit__converse-lx-2",
+  {"id":"gc-toolkit__converse-hq-1","session_name":"gc-toolkit__converse-hq-1",
+   "alias":"gc-toolkit/gc-toolkit.v-HELD","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"rig-a","closed":false},
+  {"id":"gc-toolkit__converse-hq-2","session_name":"gc-toolkit__converse-hq-2",
    "alias":"gc-toolkit/gc-toolkit.v-STUCK","template":"gc-toolkit/gc-toolkit.polecat","closed":false},
-  {"id":"gc-old","session_name":"gc-toolkit__converse-lx-1",
+  {"id":"gc-old","session_name":"gc-toolkit__converse-hq-1",
    "template":"gc-toolkit/gc-toolkit.converse-opus","closed":true}]}'
 export FAKE_DRAINS="$TMP/drains"
 
 : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
 SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID='' GC_SESSION_NAME='' GC_ALIAS='' sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
 eq "$SRC" "0" "(DISMISS-STOP-OTHER) a dismiss from outside the sitting exits 0"
-eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-lx-1 | self= | closes=2" \
+eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-hq-1 | self= | closes=2" \
    "(DISMISS-STOP-OTHER) …and acks the holding session as an operator, once, after the visit's close"
-grep -q 'stopped session gc-toolkit__converse-lx-1' <<< "$SOUT" \
+grep -q 'stopped session gc-toolkit__converse-hq-1' <<< "$SOUT" \
   && ok "(DISMISS-STOP-OTHER) …and says which session it stopped" \
   || bad "(DISMISS-STOP-OTHER) the stop is not reported (got: $SOUT)"
 
 : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
-SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID=gc-toolkit__converse-hq-1 sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
 eq "$SRC" "0" "(DISMISS-STOP-OWN) a dismiss typed into the sitting exits 0"
-eq "$(cat "$TMP/drains")" "drain-ack  | self=gc-toolkit__converse-lx-1 | closes=2" \
+eq "$(cat "$TMP/drains")" "drain-ack  | self=gc-toolkit__converse-hq-1 | closes=2" \
    "(DISMISS-STOP-OWN) …and the sitting acks its own session, after the visit's close"
-grep -q 'ending this session (gc-toolkit__converse-lx-1)' <<< "$SOUT" \
+grep -q 'ending this session (gc-toolkit__converse-hq-1)' <<< "$SOUT" \
   && ok "(DISMISS-STOP-OWN) …saying so before it does" \
   || bad "(DISMISS-STOP-OWN) the self-stop is not announced (got: $SOUT)"
 
 : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
 SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_RC=1 GC_SESSION_ID='' GC_SESSION_NAME='' GC_ALIAS='' sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
 eq "$SRC" "0" "(DISMISS-STOP-FAIL) a stop that fails leaves the dismiss standing"
-grep -q 'could not stop session gc-toolkit__converse-lx-1.*converse-reap' <<< "$SOUT" \
+grep -q 'could not stop session gc-toolkit__converse-hq-1.*converse-reap' <<< "$SOUT" \
   && ok "(DISMISS-STOP-FAIL) …and names converse-reap as what closes the session" \
   || bad "(DISMISS-STOP-FAIL) the failed stop is not reported (got: $SOUT)"
 
@@ -2349,13 +2349,13 @@ grep -q '^drain-ack --operator gc-81 ' "$TMP/drains" \
 # every incarnation rule. A sitting's tmux environment carries its session id
 # and token, and a run-shell job inherits that environment, so a caller outside
 # the sitting can carry both.
-export FAKE_SESSION_TOKENS="gc-toolkit__converse-lx-1=tok-lx-1 gc-toolkit__converse-lx-9=tok-lx-9"
+export FAKE_SESSION_TOKENS="gc-toolkit__converse-hq-1=tok-hq-1 gc-toolkit__converse-hq-9=tok-hq-9"
 
 # A dismiss typed into the sitting proves its incarnation with its own token,
 # so its self-ack stands under v2.
 : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
-SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_V2=1 GC_SESSION_ID=gc-toolkit__converse-lx-1 GC_INSTANCE_TOKEN=tok-lx-1 sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
-eq "$(cat "$TMP/drains")" "drain-ack  | self=gc-toolkit__converse-lx-1 | closes=2" \
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_V2=1 GC_SESSION_ID=gc-toolkit__converse-hq-1 GC_INSTANCE_TOKEN=tok-hq-1 sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
+eq "$(cat "$TMP/drains")" "drain-ack  | self=gc-toolkit__converse-hq-1 | closes=2" \
    "(DISMISS-STOP-OWN-V2) a dismiss in the sitting acks its own session with its own token, which v2 takes"
 
 # --operator: the caller runs under the sitting's identity and token, as the
@@ -2365,11 +2365,11 @@ eq "$(cat "$TMP/drains")" "drain-ack  | self=gc-toolkit__converse-lx-1 | closes=
 for _mode in legacy v2; do
     _v2=""; [ "$_mode" = v2 ] && _v2=1
     : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
-    SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_V2="$_v2" GC_SESSION_ID=gc-toolkit__converse-lx-1 GC_SESSION_NAME=gc-toolkit__converse-lx-1 GC_INSTANCE_TOKEN=tok-lx-1 sh "$SCRIPT" dismiss --operator A-PARKED 2>&1)" || SRC=$?
+    SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_V2="$_v2" GC_SESSION_ID=gc-toolkit__converse-hq-1 GC_SESSION_NAME=gc-toolkit__converse-hq-1 GC_INSTANCE_TOKEN=tok-hq-1 sh "$SCRIPT" dismiss --operator A-PARKED 2>&1)" || SRC=$?
     eq "$SRC" "0" "(DISMISS-STOP-OPERATOR) [$_mode] dismiss --operator under the sitting's identity exits 0"
-    eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-lx-1 | self= | closes=2" \
+    eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-hq-1 | self= | closes=2" \
        "(DISMISS-STOP-OPERATOR) [$_mode] …and acks the sitting as an operator, with no session identity or token, which Gas City takes"
-    grep -q 'stopped session gc-toolkit__converse-lx-1' <<< "$SOUT" \
+    grep -q 'stopped session gc-toolkit__converse-hq-1' <<< "$SOUT" \
       && ok "(DISMISS-STOP-OPERATOR) [$_mode] …and says which session it stopped" \
       || bad "(DISMISS-STOP-OPERATOR) [$_mode] the operator stop is not reported (got: $SOUT)"
     grep -q 'ending this session' <<< "$SOUT" \
@@ -2380,8 +2380,8 @@ done
 # Another sitting dismissing this one's subject acks it as an operator too, and
 # its own identity never reaches that ack.
 : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
-SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_V2=1 GC_SESSION_ID=gc-toolkit__converse-lx-9 GC_INSTANCE_TOKEN=tok-lx-9 sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
-eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-lx-1 | self= | closes=2" \
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_V2=1 GC_SESSION_ID=gc-toolkit__converse-hq-9 GC_INSTANCE_TOKEN=tok-hq-9 sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
+eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-hq-1 | self= | closes=2" \
    "(DISMISS-STOP-OTHER-V2) a dismiss from another sitting acks the holder as an operator, without its own identity"
 
 # ── prefix+X through the real dismiss ─────────────────────────────────────────
@@ -2400,7 +2400,7 @@ if [ "$1" = display-message ]; then
         if [ "$a" = "-p" ]; then
             case "${!#}" in
                 '#{client_tty}')     printf '/dev/pts/7\n' ;;
-                '#{client_session}') printf 'gc-toolkit__converse-lx-1\n' ;;
+                '#{client_session}') printf 'gc-toolkit__converse-hq-1\n' ;;
             esac
             exit 0
         fi
@@ -2414,13 +2414,13 @@ KEY_CFG="$(cd "$HERE/../.." && pwd)"
 export FAKE_KEY_SAID="$TMP/key-said"
 for _mode in v2-inherited v2-bare legacy-inherited; do
     _v2=""; case "$_mode" in v2-*) _v2=1 ;; esac
-    _tok=tok-lx-1; [ "$_mode" = v2-bare ] && _tok=""
+    _tok=tok-hq-1; [ "$_mode" = v2-bare ] && _tok=""
     : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; : > "$FAKE_KEY_SAID"; rm -f "$TMP/outcomes"/*
     KRC=0; KOUT="$(PATH="$TMP/keybin:$PATH" FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_V2="$_v2" \
-        GC_SESSION_ID=gc-toolkit__converse-lx-1 GC_SESSION_NAME=gc-toolkit__converse-lx-1 GC_INSTANCE_TOKEN="$_tok" \
+        GC_SESSION_ID=gc-toolkit__converse-hq-1 GC_SESSION_NAME=gc-toolkit__converse-hq-1 GC_INSTANCE_TOKEN="$_tok" \
         sh "$HERE/tmux-dismiss-sitting.sh" "$KEY_CFG" 2>/dev/null)" || KRC=$?
     eq "$KRC/$KOUT" "0/" "(DISMISS-KEY) [$_mode] prefix+X exits 0 with nothing on stdout"
-    eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-lx-1 | self= | closes=2" \
+    eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-hq-1 | self= | closes=2" \
        "(DISMISS-KEY) [$_mode] …and the real dismiss stops the sitting with one operator ack that Gas City takes"
     grep -q 'the sitting on A-PARKED is over (visit v-HELD closed), and its session is ending' "$FAKE_KEY_SAID" \
       && ok "(DISMISS-KEY) [$_mode] …and tells the operator the sitting is over" \
