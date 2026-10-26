@@ -56,6 +56,8 @@
 # their convoys, roots and steps, and priority-lib.sh follows a root to the
 # convoy it names and a convoy to the bead it tracks through run_convoy and
 # run_tracked.
+# claim-context.sh applies run_convoy and run_tracked to the root and the input
+# convoy it has read, to print the work bead of the run a claimed step is in.
 # liveness-sweep.sh takes the map for the beads live runs work, and the run of
 # each root a ready step names to tell a landed workflow's husk.
 # doctor/check-blocked-work-armed takes the map, so a blocked bead a live run

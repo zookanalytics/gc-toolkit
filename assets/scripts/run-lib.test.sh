@@ -230,6 +230,7 @@ echo "# every reader sources the one definition"
 # reader that names the definition in prose but no longer calls it still fails.
 READERS="assets/scripts/step-close.sh
 overlays/work-context/.claude/hooks/work-context.sh
+assets/scripts/claim-context.sh
 assets/scripts/self-review-check.sh
 packs/gascity-keeper/assets/scripts/rebase-check.sh
 assets/scripts/work-tree-holder.sh
