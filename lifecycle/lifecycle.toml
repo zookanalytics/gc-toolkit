@@ -1436,12 +1436,12 @@ keys = [
 
 [metadata.human_surface]
 keys = [
-  # gc.demand_for names the bead a demand gates, stamped by gc-helm.sh demand.
-  # No reader takes it any more: a human gate names the bead it gates through
-  # its blocks edge, and an open human gate there is what tells a person still
-  # deciding from a sitting that ended, never the gc.takeaway headline beside
-  # it. Its writers go with converse's move to conversations, and the cutover's
-  # migration reads it once (specs/tk-0ur8r9p/design.md section 11).
+  # gc.demand_for names the bead a demand gates. Nothing writes it now, and its
+  # one reader left, gate-visit-sweep.sh, goes with the cutover: a human gate
+  # names the bead it gates through its blocks edge, and an open human gate
+  # there is what tells a person still deciding from a sitting that ended,
+  # never the gc.takeaway headline beside it. The cutover's migration reads it
+  # once (specs/tk-0ur8r9p/design.md section 11).
   # gc.takeaway_settled is the headline's own disposition, "1" where its writer
   # said nothing is waiting and empty where it did not: [holds] settled_keys
   # reads it, and it is rewritten with every headline rather than surviving one.
@@ -1483,12 +1483,13 @@ keys = [
 #   bead, and
 #   first-reaction-dispose.sh gates nothing on it. Absent is an ordinary bead.
 #   Not cleared.
-# gc.outcome_reason — on a closed VISIT, the one-line sentence naming why it
-#   closed, stamped beside the gc.outcome word a reader groups by. Nothing writes
-#   it: a conversation's close reason carries that sentence. The helm board
-#   (services/helm/internal/source/facts.go) shows it as the sitting's headline
-#   when the sitting left no takeaway. Absent, the headline falls back to the
-#   subject's title. Never cleared. Freeform text.
+# gc.outcome_reason — RETIRED. On a closed visit, the one-line sentence naming
+#   why it closed, stamped beside the gc.outcome word a reader groups by.
+#   Nothing writes or reads it: a conversation's close reason carries that
+#   sentence, and the helm board's sittings card reads it there as the
+#   headline when the sitting left no takeaway. Registered so that residue on a
+#   pre-retirement bead reads as known, not as a stray; doctor/check-state-space
+#   reports a live bead that still carries it.
 # escalation_key — on a visit, the situation key it was filed under. Nothing
 #   writes it: a human gate carries its situation key as its await id
 #   (human-gate.sh), and the pack's readers look a gate up by that. The cutover's

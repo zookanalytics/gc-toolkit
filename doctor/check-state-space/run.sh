@@ -67,7 +67,10 @@ HEALER_RE='^(check_set_healed|merge_result_healed|reopened_not_landed|anchorless
 # writer is stamping again. gc.hold_demand and the gc.pr_visit_* pair are the
 # visit-era sitting's (section 7): a hold files a human gate its conversation
 # replies to, and the sign-off hands the reminder its text directly.
-RETIRED_KEYS=(stall_root escalation_raised_by escalation.recurrences escalation.recurrence_last gc.hold_demand gc.pr_visit_summary gc.pr_visit_actions)
+# gc.outcome_reason is the visit-era close's (section 10): a conversation's
+# close reason carries that sentence, and the board's sittings card reads it
+# there.
+RETIRED_KEYS=(stall_root escalation_raised_by escalation.recurrences escalation.recurrence_last gc.hold_demand gc.pr_visit_summary gc.pr_visit_actions gc.outcome_reason)
 retired_consequence() { # <key> <value>
     case "$1" in
         stall_root) printf '%s' "a sitting that read it may have filed its hold's demand (gc.demand_for=$2), takeaway and held state on $2, and no sign-off reads the key back to discharge them. Discharge that by hand, then clear the key" ;;
@@ -77,6 +80,8 @@ retired_consequence() { # <key> <value>
             printf '%s' "a sitting's hold filed the demand $2 on this visit, and no sign-off reads the key back to discharge it. The cutover's migration closes the visit and files that demand again as a human gate (specs/tk-0ur8r9p/design.md section 11), so run the migration on this store; on a bead that is no visit, clear the key" ;;
         gc.pr_visit_summary|gc.pr_visit_actions)
             printf '%s' "the sign-off hands the PR reminder its text directly, so nothing writes or reads the key; it holds nothing back, and a live bead carrying it means a retired writer stamped it. Find that writer, then clear the key" ;;
+        gc.outcome_reason)
+            printf '%s' "the board's sittings card reads a conversation's close reason, so nothing writes or reads the key and it holds nothing back. On an open visit it is a close that never landed, which the cutover's migration completes (specs/tk-0ur8r9p/design.md section 11); on any other bead a retired writer stamped it. Find that writer, then clear the key" ;;
         *) printf '%s' "nothing reads it. Clear the key" ;;
     esac
 }
