@@ -47,7 +47,7 @@ the mark on a line of its own at the top, indented three spaces or less, as in
 this report a workflow posts:
 
 ```
-<!-- growth-factor:schema-diff -->
+<!-- schema-diff -->
 <!-- gc:no-review -->
 ### Schema diff
 ```

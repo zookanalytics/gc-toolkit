@@ -3640,7 +3640,7 @@ store "[$(anchor NR1 371)]"
 printf '%s' "$(prview 371 OPEN CLEAN MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_371.json"
 printf '[{"id":37100,"user":{"login":"human1","type":"User"},"state":"COMMENTED","body":"<!-- gc:no-review -->\\nFYI: the preview is up.","commit_id":"sha-371","submitted_at":"2026-10-08T01:00:00Z"}]' > "$GH_DIR/reviews_371.json"
 printf '[{"id":37101,"pull_request_review_id":37100,"user":{"login":"human1","type":"User"},"body":"<!-- gc:no-review -->\\nContext only.","path":"a.sh","line":1}]' > "$GH_DIR/comments_371.json"
-printf '[{"id":37102,"user":{"login":"github-actions[bot]","type":"Bot"},"body":"<!-- growth-factor:schema-diff -->\\n<!-- gc:no-review -->\\n### Schema diff"}]' > "$GH_DIR/issue_comments_371.json"
+printf '[{"id":37102,"user":{"login":"github-actions[bot]","type":"Bot"},"body":"<!-- schema-diff -->\\n<!-- gc:no-review -->\\n### Schema diff"}]' > "$GH_DIR/issue_comments_371.json"
 out=$(run)
 eq "$(meta_pinned NR1 pr_posture)" "review_required@sha-371" "nothing is outstanding, so the merge is not held as commented"
 eq "$(meta NR1 pr_review_watermark)|$(meta NR1 pr_comment_watermark)|$(meta NR1 pr_issue_comment_watermark)" "<absent>|<absent>|<absent>" "…no mark moves"

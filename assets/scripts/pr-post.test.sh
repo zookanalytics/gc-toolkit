@@ -304,9 +304,9 @@ eq "$(printf '%s' "$VERCEL" | jq -r --arg self bot --arg since "$CUT" "$VDEF"'gc
 echo "# feedback-def: the mark counts only among the HTML comments a body opens with"
 row() { jq -nc --arg l "$1" --arg t "$2" --arg b "$3" '{user: {login: $l, type: $t}, body: $b}'; } # <login> <type> <body>
 NR='<!-- gc:no-review -->'
-GF_REPORT=$(printf '%s\n' '<!-- growth-factor:schema-diff -->' "$NR" '### Schema diff' '' '| table | change |' '|---|---|' \
+REPORT=$(printf '%s\n' '<!-- schema-diff -->' "$NR" '### Schema diff' '' '| table | change |' '|---|---|' \
   '| `app.practices` | added |' '' '```sql' 'ALTER TABLE app.practices ADD tz text;' '```')
-eq "$(feedback "$NDEF" "$(row 'github-actions[bot]' Bot "$GF_REPORT")")" false \
+eq "$(feedback "$NDEF" "$(row 'github-actions[bot]' Bot "$REPORT")")" false \
   "a workflow's report whose mark follows its own marker line is not for review, whatever follows them"
 eq "$(feedback "$NDEF" "$(row 'previewbot[bot]' Bot "$(printf '\n\n%s\nPreview deployed.' "$NR")")")" false \
   "blank lines before the mark leave it opening the body"
