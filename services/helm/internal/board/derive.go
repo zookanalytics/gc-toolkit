@@ -381,38 +381,49 @@ const (
 	sittingClosed     = "closed"
 )
 
-// The two engagement states a held row's visit can be in, carried on
+// The engagement states a held row's visit can be in, carried on
 // [Tile.VisitState]. VisitEngaged is a live sitting in the conversation now;
-// VisitParked is an open, un-engaged visit waiting for a person. A row no open
-// visit holds carries the empty string, never one of these.
+// VisitStartFailed is a visit whose last sitting failed to start, with no
+// sitting spawned for it since; VisitParked is an open, un-engaged visit waiting
+// for a person. A row no open visit holds carries the empty string, except a
+// visit's own row whose sitting failed to start ([classifyVisits]).
 const (
-	VisitParked  = "parked"
-	VisitEngaged = "engaged"
+	VisitParked      = "parked"
+	VisitEngaged     = "engaged"
+	VisitStartFailed = "start-failed"
 )
 
 // unengagedVisit reports whether subject has a visit no one has engaged: a
-// non-closed sitting standing OPEN on it that carries neither a claim
-// (in_progress), a bound session, nor a bound assignee. engage binds the visit
-// by assignee while it is still open and before the hook claim promotes it to
-// in_progress and stamps the session, so an open visit with an assignee is a
-// pending engagement, not an un-engaged one. It reads facts.Sittings rather
-// than Tile.Held because Held does not distinguish an open visit from a claimed
-// one — both are non-closed sittings. This is the passive half of the
-// Accept/Discuss invalidation rule: a live sitting suppresses Accept, and
-// leaving the sitting without a ruling (the visit reverts to open) restores it.
+// sitting standing OPEN on it, and no non-closed sitting on it that something
+// holds ([Sitting.bound]). engage binds the visit by assignee while it is still
+// open and before the hook claim promotes it to in_progress and stamps the
+// session, so an open visit with an assignee is a pending engagement, not an
+// un-engaged one. It reads facts.Sittings rather than Tile.Held because Held
+// does not distinguish an open visit from a claimed one — both are non-closed
+// sittings. This is the passive half of the Accept/Discuss invalidation rule: a
+// live sitting suppresses Accept, and leaving the sitting without a ruling (the
+// visit reverts to open) restores it.
+//
+// It is the rule gc-helm.sh accept re-reads live (subject_unengaged), which
+// counts every binding whether or not its sitting started. So a visit whose
+// sitting failed to start suppresses Accept for as long as it stays bound to
+// that sitting, and offers it again once the witness releases the binding.
 func unengagedVisit(subject string, sittings []Sitting) bool {
-	if engagedVisit(subject, sittings) {
-		return false
-	}
-	// Not engaged, so un-engaged exactly when a visit still stands OPEN on it.
-	// The absence of any open sitting is not un-engagement — there is nothing to
-	// accept-and-dismiss — so it does not restore Accept.
+	open := false
 	for _, s := range sittings {
-		if s.covers(subject) && s.Status == sittingOpen {
-			return true
+		if !s.covers(subject) || s.Status == sittingClosed {
+			continue
+		}
+		if s.bound() {
+			return false
+		}
+		if s.Status == sittingOpen {
+			open = true
 		}
 	}
-	return false
+	// The absence of any open sitting is not un-engagement — there is nothing to
+	// accept-and-dismiss — so it does not restore Accept.
+	return open
 }
 
 // covers reports whether the sitting's visit covers subject by the shared visit
@@ -422,48 +433,115 @@ func (s Sitting) covers(subject string) bool {
 	return subject != "" && (s.Subject == subject || slices.Contains(s.Subjects, subject))
 }
 
-// engagedVisit reports whether a live sitting is holding subject's visit right
-// now: a sitting in_progress, or a non-closed one a session or an assignee is
-// bound to. The assignee arm covers the pending-engagement window — engage binds
+// bound reports whether something holds this sitting's visit: a claim
+// (in_progress), or a session or an assignee bound to a visit that has not
+// closed. The assignee arm covers the pending-engagement window — engage binds
 // the visit by assignee while it is still open, before the hook claim promotes
-// it to in_progress and stamps the session. It is the engagement half both
-// [unengagedVisit] and [classifyVisits] read, so the Accept affordance and the
-// [Tile.VisitState] a row shows are decided by one predicate and cannot drift.
+// it to in_progress and stamps the session.
+func (s Sitting) bound() bool {
+	return s.Status == sittingInProgress || (s.Status != sittingClosed && (s.Session != "" || s.Assignee != ""))
+}
+
+// engagedVisit reports whether a live sitting is holding subject's visit right
+// now: a covering sitting that something holds ([Sitting.bound]), unless that
+// sitting failed to start. The binding on a visit whose sitting failed to start
+// names a session that never ran, so nothing live holds it. [classifyVisits]
+// reads this test, and [unengagedVisit] reads the same bound predicate, so a
+// row that reads engaged never offers Accept.
 func engagedVisit(subject string, sittings []Sitting) bool {
 	for _, s := range sittings {
-		if !s.covers(subject) {
-			continue
-		}
-		if s.Status == sittingInProgress || (s.Status != sittingClosed && (s.Session != "" || s.Assignee != "")) {
+		if s.covers(subject) && s.StartFailure == "" && s.bound() {
 			return true
 		}
 	}
 	return false
 }
 
-// classifyVisits stamps [Tile.VisitState] on every held row, splitting Held into
-// its two engagement states: VisitEngaged when a live sitting is holding the
-// conversation, VisitParked otherwise. A row no visit holds keeps the empty
-// string.
+// startFailure returns why the sitting last spawned for an open visit covering
+// subject failed to start, or "" when no such visit records a failed start.
+func startFailure(subject string, sittings []Sitting) string {
+	for _, s := range sittings {
+		if s.covers(subject) && s.Status != sittingClosed && s.StartFailure != "" {
+			return s.StartFailure
+		}
+	}
+	return ""
+}
+
+// ownStartFailure is [startFailure] for a visit's own row: the row whose id is
+// the visit itself, which the fold keeps when its subject has no live row.
+func ownStartFailure(id string, sittings []Sitting) string {
+	for _, s := range sittings {
+		if s.ID == id && s.Status != sittingClosed && s.StartFailure != "" {
+			return s.StartFailure
+		}
+	}
+	return ""
+}
+
+// classifyVisits stamps [Tile.VisitState] on every held row: VisitStartFailed
+// when the last sitting spawned for a visit on the row failed to start,
+// VisitEngaged when a live sitting is holding the conversation, VisitParked
+// otherwise. A row no visit holds keeps the empty string, unless it is a visit's
+// own row whose sitting failed to start.
 //
 // It runs after the wrapper fold, where Held is final — [applyFold] flips a
 // subject to Held when a visit wrapper folds onto it — so it reads the settled
-// flag rather than the per-anchor value [deriveTile] computed. Engagement is the
-// same [engagedVisit] test Acceptable reads, so a row reads "engaged" exactly
-// when a live sitting suppresses Accept. Parked is the fallback, including the
-// case a held row's sitting has aged out of the window: an open visit no session
-// is on reads as waiting for the operator, never as being worked.
+// flag rather than the per-anchor value [computeTile] computed. Parked is the
+// fallback, including the case a held row's sitting has aged out of the window:
+// an open visit no session is on reads as waiting for the operator, never as
+// being worked.
+//
+// A failed start outranks a live sitting on the same row. Each visit on a
+// subject is a conversation of its own, and the failure is the one state on
+// the row nothing else would tell the operator about. A closed row is never
+// marked, because a closed anchor is never owed. The fold leaves an open visit
+// whose subject has closed on a row of its own, so that row carries the
+// failure instead.
 func classifyVisits(tiles []Tile, facts Facts) {
 	for i := range tiles {
-		if !tiles[i].Held {
+		t := &tiles[i]
+		live := t.ClosedAt.IsZero()
+		if !t.Held {
+			if reason := ownStartFailure(t.ID, facts.Sittings); reason != "" && live {
+				markStartFailed(t, reason)
+			}
 			continue
 		}
-		if engagedVisit(tiles[i].ID, facts.Sittings) {
-			tiles[i].VisitState = VisitEngaged
+		if reason := startFailure(t.ID, facts.Sittings); reason != "" && live {
+			markStartFailed(t, reason)
+			continue
+		}
+		if engagedVisit(t.ID, facts.Sittings) {
+			t.VisitState = VisitEngaged
 		} else {
-			tiles[i].VisitState = VisitParked
+			t.VisitState = VisitParked
 		}
 	}
+}
+
+// markStartFailed puts a row whose visit's sitting failed to start in front of
+// the operator, the one person who can engage the visit again. The state and
+// its reason ride the wire, and NEEDS leads with the failure, so every surface
+// that prints the row says so. The row is owed and banded at least ELEVATED,
+// whatever the visit's own markers made of it: the witness re-parks a visit
+// under a headline, and on a visit's own row that headline reads as a ruling,
+// which would otherwise band the row LOW and take it out of the queue.
+// [owedFirst] puts the row at the head of the queue.
+func markStartFailed(t *Tile, reason string) {
+	t.VisitState = VisitStartFailed
+	t.VisitStartFailure = reason
+	t.Owed = true
+	if t.Severity.rank() < SevElevated.rank() {
+		t.Severity = SevElevated
+		t.RankScore = rankScore(t.Severity, t.Weight, t.StaleDays, 0)
+	}
+	needs := "start failed (" + reason + ")"
+	if t.Needs != "" {
+		needs += ": " + t.Needs
+	}
+	t.Needs = needs
+	t.Section = classifySection(*t)
 }
 
 // hasOwnRow reports whether a bead carrying this metadata is an anchor in its
@@ -3100,6 +3178,11 @@ func CapSittings(in []Sitting, maxClosed int) (kept []Sitting, dropped int) {
 // no updated_at at all, so treating unknown as oldest would put every row from
 // that backend ahead of every dated one.
 //
+// One row leads the queue whatever its age: a visit whose sitting failed to
+// start ([VisitStartFailed]). The operator asked for that conversation and it
+// never began, and by age the row sorts among the newest, at the tail, below
+// the rows tmux-pick-helm.sh offers off the head of the queue.
+//
 // Apply it STABLY and after the dedup. A bead admitted under two kinds carries
 // the same id in both rows and ties every test below, so only the rank order
 // the dedup already resolved can decide which of the two survives.
@@ -3120,6 +3203,9 @@ func owedFirst(a, b Tile) bool {
 	}
 	if !a.Owed {
 		return false
+	}
+	if fa, fb := a.VisitState == VisitStartFailed, b.VisitState == VisitStartFailed; fa != fb {
+		return fa
 	}
 	sa, sb := owedSince(a), owedSince(b)
 	if sa.IsZero() != sb.IsZero() {
