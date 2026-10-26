@@ -16,7 +16,12 @@
 #     through --check, and a token no index declares resolves to nothing, which
 #     are the two no-skill cases the review formulas send a reviewer to.
 #   - Each region the review formulas repeat across steps, the method load, the
-#     record check and the gather, is the same text in every step carrying it.
+#     record check, the gather and the subagent rules, is the same text in every
+#     step carrying it.
+#   - Every step that applies a check's method lets the method hand reading to
+#     subagents, each read-only in the review's workspace and never calling
+#     signoff.sh, while the agent holding the step writes every finding. No
+#     review formula or review skill forbids subagents.
 #   - Neither review formula names a check's judgment: no test or suite, no
 #     P0, P1 or P2 grade, no Verification line, and neither the correctness
 #     method's What to check list nor any dimension of it. The correctness
@@ -177,11 +182,11 @@ for path in sys.argv[1:]:
     d = tomllib.load(open(path, 'rb'))
     for s in d['steps']:
         text = s['description']
-        for m in re.finditer(r'(?:<!-- |# )>>> (review-method-load|review-record-check|review-gather)(?: -->)?\n(.*?)\n(?:<!-- |# )<<< \1', text, re.S):
+        for m in re.finditer(r'(?:<!-- |# )>>> (review-method-load|review-record-check|review-gather|review-subagents)(?: -->)?\n(.*?)\n(?:<!-- |# )<<< \1', text, re.S):
             out.setdefault(m.group(1), []).append([d['formula'] + '.' + s['id'], m.group(2)])
 print(json.dumps(out))
 PY
-for r in review-method-load:4 review-record-check:4 review-gather:4; do
+for r in review-method-load:4 review-record-check:4 review-gather:4 review-subagents:4; do
   name=${r%%:*}; want=${r#*:}
   eq "$(jq -r --arg r "$name" '.[$r] | length' "$TMP/regions")" "$want" "$name: the steps that carry it carry it ($want)"
   eq "$(jq -r --arg r "$name" '[.[$r][][1]] | unique | length' "$TMP/regions")" "1" "$name: every copy is the same text"
@@ -189,6 +194,14 @@ done
 case "$(jq -r '."review-method-load"[0][1]' "$TMP/regions")" in
   *'`{{binding_prefix}}review-{{check}}`'*'`{{binding_prefix}}specialist-stance`'*) ok "the method load names the skill from the check, and the stance for the purpose case" ;;
   *) bad "the method load names the skill from the check, and the stance for the purpose case" ;;
+esac
+eq "$(jq -r '[."review-subagents"[][0]] | sort | join(" ")' "$TMP/regions")" \
+  "$(jq -r '[."review-method-load"[][0]] | sort | join(" ")' "$TMP/regions")" \
+  "the subagent rules ride every step that loads a check's method, and no other"
+case "$(jq -r '."review-subagents"[0][1]' "$TMP/regions" | tr '\n' ' ')" in
+  *'read-only in the review'*'runs nothing the method runs'*'never calls signoff.sh'*'write every finding yourself'*)
+    ok "the subagent rules keep every subagent read-only and off signoff.sh, and the step's own agent the one writer" ;;
+  *) bad "the subagent rules keep every subagent read-only and off signoff.sh, and the step's own agent the one writer" ;;
 esac
 
 echo "# the review formulas name no check's judgment, and the correctness method is method"
@@ -224,6 +237,15 @@ for f in mol-review mol-review-quorum-signoff; do
 done
 eq "$(grep -cE '^ *```(bash|sh|zsh|shell) *$' "$METHOD" || true)" "0" "the correctness method carries no shell block"
 eq "$(grep -n -m1 -- '--check' "$METHOD" || true)" "" "the correctness method reads no record itself"
+
+echo "# no review text forbids subagents"
+# The formulas a review pours and the skills it loads, read flat so a phrase
+# may wrap.
+for f in "$ROOT/formulas/mol-review.toml" "$ROOT/formulas/mol-review-quorum-signoff.toml" \
+  "$ROOT"/skills/review-*/SKILL.md "$ROOT/skills/specialist-stance/SKILL.md"; do
+  eq "$(flat "$f" | grep -Eio -- 'single honest pass|no subagents|no persona|no fan-out' | head -1)" "" \
+    "${f#"$ROOT"/} forbids no subagents"
+done
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
