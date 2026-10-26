@@ -111,7 +111,7 @@ read the real ones:
 
 ```bash
 # Bead IDs are <prefix>-<suffix>. Rig prefixes vary by consuming rig
-# (lx, gc, tk, sl, su, mr, gx, …), so match the bead-id SHAPE — a short
+# (tk, gc, …), so match the bead-id SHAPE — a short
 # lowercase prefix + '-' + alphanumeric suffix — instead of a fixed
 # prefix list, then VALIDATE each candidate with `bd show` before
 # reading it. Validation drops the false positives the broader regex

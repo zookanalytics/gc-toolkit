@@ -257,7 +257,7 @@ a separate arm routes the feedback under it, so an OPEN anchor whose `pr_posture
 window is operator feedback that reads as consumed while nothing has routed it; a
 `pr_unengaged_threads` marker at the same head is a tracked hold and exempt;
 warn-only), and `doctor/check-hq-marooned-work` (no rig-workable bead sits
-unclaimed in the HQ (city / lx) store: a city-scoped role running with GC_RIG
+unclaimed in the HQ (city) store: a city-scoped role running with GC_RIG
 unset files a bare `bd create` into the HQ store, which no pool reads, so an
 open unassigned task/bug/defect there — unrouted or routed to a pool — is
 marooned by construction; the operator-queue decisions routed to human, daily

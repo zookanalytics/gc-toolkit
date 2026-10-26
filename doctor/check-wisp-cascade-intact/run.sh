@@ -49,7 +49,7 @@ esac
 # same-named key with a DELETE_RULE other than CASCADE, the wrong source column,
 # or a different referenced table reads as present while still failing to clear
 # the auxiliary rows on delete — the exact state this check has to gate against
-# once lx is repaired. The canonical names stay the key: enforcing the same edge
+# once the city store is repaired. The canonical names stay the key: enforcing the same edge
 # under a different name reads as missing here, and renaming one is a schema
 # migration that has to reach every store anyway.
 EXPECTED=(
