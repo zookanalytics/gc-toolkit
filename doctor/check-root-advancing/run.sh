@@ -153,13 +153,17 @@ done <<< "$(printf '%s' "$sessions" | jq -r '.[] | select(((.state // "") | tost
     | [.id, .session_name, .alias] | map(select((. // "") != "")) | .[]
     | tostring | gsub("[[:cntrl:]]"; " ")' 2>/dev/null)"
 
-rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
+# rig-map.sh prints the map when the listing reads and only its reason when it
+# does not, so one capture holds whichever came back.
+RIG_MAP="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/rig-map.sh"
+rigs_raw=$(run_bounded "$RIG_MAP" 2>&1); rigs_rc=$?
 scopes=$(printf '%s' "$rigs_raw" | jq -r '.rigs[]? | select((.path // "") != "")
     | [((.name // "") | gsub("[[:cntrl:]]"; " ")), .path, ((.suspended // false) | tostring)]
     | join("\u001f")' 2>/dev/null)
 if [ "$rigs_rc" -ne 0 ] || [ -z "$scopes" ]; then
     echo "cannot determine whether started workflow roots are advancing (I13)"
     detail "\`gc rig list --json\` failed (rc=$rigs_rc) or listed no rig paths; there is no set of bead stores to scan."
+    [ "$rigs_rc" -eq 0 ] || [ -z "$rigs_raw" ] || detail "$rigs_raw"
     exit 1
 fi
 

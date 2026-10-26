@@ -238,10 +238,14 @@ def unsettled($m; $k): ($settled[$k] // "") as $sk
 | join("\u001f")
 '
 
-rigs_raw=$(run_bounded gc rig list --json 2>/dev/null); rigs_rc=$?
+# rig-map.sh prints the map when the listing reads and only its reason when it
+# does not, so one capture holds whichever came back.
+RIG_MAP="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/rig-map.sh"
+rigs_raw=$(run_bounded "$RIG_MAP" 2>&1); rigs_rc=$?
 if [ "$rigs_rc" -ne 0 ] || [ -z "$rigs_raw" ]; then
     echo "cannot determine whether every hold is recorded as an edge (I1)"
     detail "\`gc rig list --json\` failed (rc=$rigs_rc) or returned nothing; there is no set of bead stores to scan."
+    [ "$rigs_rc" -eq 0 ] || [ -z "$rigs_raw" ] || detail "$rigs_raw"
     exit 1
 fi
 # The HQ entry is the city's own store. It is addressed by --city and is not a
