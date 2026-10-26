@@ -113,9 +113,10 @@ A sitting files its own with the key `conversation` and replies to it (the
 converse-hold step). The gate is cleared with
 `gc bd gate resolve <gate> --reason "ruled: <the answer>"`, and the same call
 with `--retract` withdraws your own gate once the question has gone. A sitting
-clears a gate only through its sign-off writer (the converse-settle and
-converse-continue steps), which first carries out what the ruling does to the
-PR, its rework or its retirement, so the merge never lands in between.
+clears a gate the operator ruled on only through its sign-off writer (the
+converse-settle and converse-continue steps), which first carries out what the
+ruling does to the PR, its rework or its retirement, so the merge never lands
+in between.
 
 Every open bead the anchor waits on, and every open bead filed under it, holds
 its merge, whatever it was for. Never make an anchor wait on a follow-up that
