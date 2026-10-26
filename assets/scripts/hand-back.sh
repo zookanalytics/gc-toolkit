@@ -41,7 +41,8 @@
 # exit 0.
 #
 # Callers: mol-polecat-work's hand-back arms (the stop to ask a person about a
-# bead with no molecule, the store-only exit, the auto_push=false halt) and
+# bead with no molecule, the store-only exit, the auto_push=false halt),
+# mol-review's release of a review with no workflow and a short record, and
 # converse-claim.sh's release of an out-of-group turn. The polecat and
 # polecat-codex nudges spell out this write for an in_progress claim, guarded
 # on $GC_ALIAS when it is non-empty and on $GC_SESSION_ID otherwise, so a

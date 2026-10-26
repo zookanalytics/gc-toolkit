@@ -142,8 +142,10 @@ done
 gc runtime drain-ack
 ```
 A claimant holding the review with no poured workflow has no steps to close.
-It releases the bead and the route it claimed it by instead, then drains:
-`gc bd update <the review bead> --assignee="" --unset-metadata gc.routed_to`.
+It hands the bead back instead, then drains: the pack's
+`assets/scripts/hand-back.sh <the review bead> --unset-metadata gc.routed_to`
+reopens the bead and releases its claim and the route it claimed it by in one
+write.
 
 **2. Gather what the review reads.** The block prints the anchor, the PR's
 page when one is open, the rig's guidance for this check, what `gctk rig`
