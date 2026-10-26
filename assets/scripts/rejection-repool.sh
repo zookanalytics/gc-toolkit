@@ -20,7 +20,7 @@
 # A convoy is never the bead poured. gc sling takes a convoy target as the
 # run's own input convoy, so that run works on the beads the convoy tracks, and
 # mol-polecat-work takes the one bead its input convoy tracks as its work bead.
-# A graduation's anchor is such a convoy (convoy-graduate.sh). So a convoy's
+# A graduation's anchor is such a convoy. So a convoy's
 # rebuild is poured onto its rebuild child, an ordinary task that resumes the
 # convoy's branch, lands on its target and blocks it. gc sling gives the child
 # what it gives any bead it pours onto: a one-bead input convoy, a launch lock
