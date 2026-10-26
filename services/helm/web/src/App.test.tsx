@@ -65,6 +65,7 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     acceptable: false,
     accept_formula: '',
     recommendation: null,
+    visit_start_failure: '',
     ...over,
   };
 }

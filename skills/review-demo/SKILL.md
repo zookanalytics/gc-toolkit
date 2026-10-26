@@ -96,8 +96,8 @@ reports whether the `gh` it needs is present.
   --output demo.mp4 <app target>`, the rig-demo mol's capture core. Do not pour
   `mol-rig-demo` for it. A pour runs later in another session, so this verdict
   could not judge its clip, and by then the reviewed worktree is gone.
-  `skills/gc-demo-script/SKILL.md` writes the `demo:capture` script from the
-  anchor and the diff. Keep the script and the clip in the review workspace.
+  The skill `gc-toolkit.gc-demo-script` writes the `demo:capture` script from
+  the anchor and the diff. Keep the script and the clip in the review workspace.
 
   The app target is the draft's preview, `--base-url <url>`, where one
   deploys. Otherwise serve the reviewed worktree, so the clip shows the
@@ -143,7 +143,7 @@ reports whether the `gh` it needs is present.
   render takes no keepalive.
 
   For a page, write the script as you would for a video
-  (`skills/gc-demo-script/SKILL.md`). Its steps drive the app to the state, the
+  (`gc-toolkit.gc-demo-script`). Its steps drive the app to the state, the
   capture is the state the last step leaves, and the app target is the one a
   video takes. A `--serve` command given `--port` finds that port in `$PORT`,
   and `--port 0` picks a free one, so two captures never share a server.

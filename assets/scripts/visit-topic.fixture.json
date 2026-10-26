@@ -1,0 +1,25 @@
+{
+  "description": "Cases for a visit's topic (assets/scripts/visit-topic.sh). Every case is the visit named by visit, on the subject named by subject, carrying the case's metadata. kind is what visit_topic_kind decides, fold_topic is what visit_fold_topic gives for the subject, and demand_topic is what visit_demand_topic gives, empty for no topic. visit-topic.test.sh runs the defs over these cases. converse-fold-scope.test.sh, converse-hold.test.sh and converse-signoff.test.sh run their consumers over them, and their stubs serve the visit under this id and the subject under this id.",
+  "visit": "v-x",
+  "subject": "item-x",
+  "cases": [
+    {"name": "a visit escalate.sh filed for one situation",
+     "metadata": {"escalation_key": "finding-b"},
+     "kind": "key", "fold_topic": "key:finding-b", "demand_topic": "finding-b"},
+    {"name": "a visit filed for a distinct concern",
+     "metadata": {"visit_topic": "own"},
+     "kind": "own", "fold_topic": "visit:v-x", "demand_topic": "visit:v-x"},
+    {"name": "an ordinary visit",
+     "metadata": {},
+     "kind": "subject", "fold_topic": "item-x", "demand_topic": ""},
+    {"name": "an escalation_key wins over visit_topic=own",
+     "metadata": {"escalation_key": "finding-b", "visit_topic": "own"},
+     "kind": "key", "fold_topic": "key:finding-b", "demand_topic": "finding-b"},
+    {"name": "a visit_topic other than own is no topic of its own",
+     "metadata": {"visit_topic": "other"},
+     "kind": "subject", "fold_topic": "item-x", "demand_topic": ""},
+    {"name": "an empty escalation_key is no key",
+     "metadata": {"escalation_key": "", "visit_topic": "own"},
+     "kind": "own", "fold_topic": "visit:v-x", "demand_topic": "visit:v-x"}
+  ]
+}

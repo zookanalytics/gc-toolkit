@@ -86,10 +86,9 @@ sq() {
     printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
-# Supervisor API discovery — see gc-toolkit-status-line.sh for the
-# canonical comment. Port honors ~/.gc/supervisor.toml; city name is
-# resolved by matching the current city path against [[cities]] entries
-# in ~/.gc/cities.toml. Keep in lockstep with status-line.
+# Supervisor API discovery. The port honors ~/.gc/supervisor.toml (default
+# 8372). The city name is the [[cities]] entry in ~/.gc/cities.toml whose path
+# matches the city path, else that path's basename.
 gc_api_base() {
     port=8372
     cfg="${GC_HOME:-$HOME/.gc}/supervisor.toml"
@@ -102,7 +101,8 @@ gc_api_base() {
 gc_city_name() {
     cfg="${GC_HOME:-$HOME/.gc}/cities.toml"
     city_path="${EXPLICIT_CITY_PATH:-${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}}"
-    # No cwd walk-up — see gc-toolkit-status-line.sh for rationale.
+    # No cwd walk-up: a copy of gc's findCity in sh would diverge from it. No
+    # city path means no name, and so no API call.
     [ -z "$city_path" ] && return
     city_path="${city_path%/}"
     if [ -f "$cfg" ]; then

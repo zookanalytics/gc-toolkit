@@ -557,9 +557,9 @@ POOL=$("$POOL_ROUTE" "$POOL_NAME") || exit 1
 #
 # A shared subject makes the group a bucket rather than a topic, so what keeps
 # two findings in it apart is the escalation_key stamped on each visit below.
-# The converse fold check (converse-fold.sh) reads exactly that: it resolves a
-# visit's topic as the key under a `key:` prefix, else the subject, and folds a
-# sitting only into a sibling of the same topic. On a redirected visit the
+# The converse fold check (converse-fold.sh) reads exactly that: a keyed
+# visit's topic is its key under a `key:` prefix, and it folds a sitting only
+# into a sibling of the same topic. On a redirected visit the
 # subject is the shared bucket, so the key is the only discriminator it has;
 # dropping it, or scoping it to the bucket, would make every finding here look
 # like one situation and fold all but the lowest id away unread.

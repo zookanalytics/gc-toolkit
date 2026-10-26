@@ -305,12 +305,12 @@ comment_watermark_key = "pr_comment_watermark"
 review_watermark_key = "pr_review_watermark"
 issue_comment_watermark_key = "pr_issue_comment_watermark"
 # What the watermarks count is feedback: every review, inline comment and
-# conversation comment that is not the city's own post, whoever wrote it. The
-# city's own post carries the mark pr-post.sh appends, or is an unmarked post
-# under the city's login from before this instant (UTC, YYYY-MM-DDTHH:MM:SSZ),
-# when its posts did not yet carry one. pr-facts.sh stamps it the first time it
-# reads the open PR; absent or malformed, every post under the city's login is
-# the city's own.
+# conversation comment that is neither the city's own post nor marked as not for
+# review (docs/not-for-review.md), whoever wrote it. The city's own post carries
+# the mark pr-post.sh appends, or is an unmarked post under the city's login
+# from before this instant (UTC, YYYY-MM-DDTHH:MM:SSZ), when its posts did not
+# yet carry one. pr-facts.sh stamps it the first time it reads the open PR;
+# absent or malformed, every post under the city's login is the city's own.
 provenance_since_key = "pr_provenance_since"
 # What the outstanding comments were routed to: "rework:<bead-id>" (a fix-pool
 # child, whatever holds the anchor) or "visit:<bead-id>" (nowhere to route work:
@@ -890,7 +890,7 @@ keys = [
   "finding.pr_comment",
   # Set by the same write-back once a posted finding has closed and its comment
   # carries the answer: `1` when it was answered and its thread, if it has one,
-  # is resolved, carries a later post that is not the city's own, or stays open
+  # is resolved, carries a later post that is feedback, or stays open
   # for the operator because the finding was declined or deferred, and `gone`
   # when the comment had been removed from the PR and nothing was left to
   # answer. A finding carrying it costs the write-back no GitHub read.
@@ -1445,7 +1445,7 @@ keys = [
   "gc.takeaway", "gc.takeaway_at", "gc.takeaway_by", "gc.takeaway_settled",
   "gc.demand_for", "gc.hold_demand", "gc.gate_visit",
   "gc.continuation_group", "gc.origin", "gc.outcome_reason",
-  "escalation_key", "escalation_raised_by",
+  "escalation_key", "escalation_raised_by", "visit_topic",
   "escalation.recurrences", "escalation.recurrence_last",
   "stale_escalated_at", "stale_escalated_to",
   "visit.recheck", "sweep.*", "triage.*",
@@ -1488,6 +1488,16 @@ keys = [
 #   situation, keyed on escalation_key (the caller's dedup handle, read back and
 #   read by pr-facts.sh); escalation_raised_by records the ephemeral wisp id that
 #   raised a redirected visit. Neither is cleared.
+# visit_topic — `own` on a visit filed for a distinct concern: gc-helm.sh open
+#   writes it in the create payload of every visit it files with
+#   --allow-duplicate, which engage passes when the operator asks for a new
+#   visit. visit-topic.sh, the one definition of a visit's topic, is its only
+#   reader. Through it converse-fold.sh reads the visit's topic as the visit
+#   itself, so its sitting never folds into a live sitting on the subject nor
+#   one into it, and converse-hold.sh and converse-signoff.sh scope its demands
+#   to the topic `visit:<visit-id>`. A topic, not coverage: no reader of what a
+#   visit covers reads it. Absent, or any other value, the visit's topic is its
+#   escalation_key, else its subject. Never cleared.
 # escalation.recurrences / escalation.recurrence_last — the suppression tally
 #   escalate.sh keeps on the CLOSED verdict-bearing visit: how many times the
 #   situation recurred while a verdict stood (an integer string, absent reads as

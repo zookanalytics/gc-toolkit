@@ -272,7 +272,7 @@ Keep each heading under 80 characters.
 Below each bold heading, write a short action description for the executor
 (one or two sentences). Then, for **every** step, write the two REQUIRED
 lines that `demo:capture` consumes to score the frame (see
-`skills/demo-capture/SKILL.md` §"Demo Script Format" — the executor treats
+`gc-toolkit.demo-capture` §"Demo-script format" — the executor treats
 `_Prove:_` as the contract and marks the frame an error if it isn't met):
 
 - `_Prove:_ <criterion>` — what the captured frame must **visibly**
