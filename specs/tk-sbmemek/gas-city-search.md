@@ -46,7 +46,8 @@ Each was read on 2026-10-26:
   documentation, the checks `gc doctor` registers, the packs it bundles, and
   its source. The source was searched case-insensitively for `secrets.env`,
   `GC_SUPERVISOR_ENV` and Vercel, and each hit outside the tests was read, as
-  was every environment read in a file that builds a doctor check result.
+  was every environment read in a file that builds a doctor check result and
+  every read of a variable named as a key, token, secret or password.
 - Every pack Gas City publishes, at `dac12a4a802c`. Each pack's doctor checks
   were read, each pack was searched case-insensitively for `secrets.env`,
   `GC_SUPERVISOR_ENV`, `supervisor install`, `workspace.env`, `passthrough` and
@@ -74,15 +75,15 @@ unless `shouldPersistSupervisorEnv` admits it, through the
 `supervisorServiceEnvKeys` allowlist or a provider credential, or the opt-in
 list names it. A provider credential is a key that package `processenv`'s
 `IsProviderCredentialEnv` accepts: a key that starts with one of the
-`providerCredentialEnvPrefixes`, such as `OPENAI_`, or one of a few exact
-names.
+`providerCredentialEnvPrefixes`, such as `OPENAI_`, or one of the exact names
+in `providerCredentialEnvKeys`, such as `AWS_ACCESS_KEY_ID`.
 `supervisorSecretsEnvFileEntries` reports an unreadable file and each malformed
 line on stderr. Nothing reports a key the gate skips.
 `VERCEL_AUTOMATION_BYPASS_SECRET` is not a provider credential and is not on the
 allowlist, and nothing in Gas City names Vercel.
 
-**A session receives such a key through the same list, or through
-`[workspace.env]`.** The same page's section
+**A session receives such a key through the same list, or through an `env`
+table in the city's config.** The same page's section
 ["A Custom Environment Variable Doesn't Reach Agent Sessions"](https://docs.gascity.com/getting-started/troubleshooting#a-custom-environment-variable-doesn%E2%80%99t-reach-agent-sessions)
 says that `passthroughEnv` forwards a variable into a session only when it is
 `GC_`-prefixed, in a small fixed provider, locale and XDG set, or named in
@@ -92,18 +93,21 @@ that it survives a restart, then runs `gc supervisor install` and restarts the
 supervisor. Sessions already running keep their old environment. In the
 source, the fixed set is package `processenv`'s
 `ProviderProcessPassthroughEnv`, which also forwards provider credentials. The
-page also offers `[workspace.env]` in `city.toml`. Its `$VAR` form expands
+page also offers `[workspace.env]` in `city.toml`, one of the `env` tables a
+session's environment merges, as are a provider's and an agent's
+(`resolveTemplate` in the `gc` command). The `$VAR` form of each expands
 against the supervisor's own environment (package `processenv`,
 `ExpandSessionEnvValue`), so a key that only the secrets file holds must clear
-the install's gate first. Its literal form writes the value into `city.toml`.
+the install's gate first. The literal form writes the value into the config.
 For a key like this one, the opt-in is the one route that carries it from the
 secrets file into the supervisor and on into its sessions.
 
 **`gc doctor` reports neither drop.** None of the checks `gc doctor` registers
-at `f78779e41522` reads the secrets file or `GC_SUPERVISOR_ENV`. The
-environment reads in its checks configure the checks themselves, such as which
-store, Dolt log or archive repository a check inspects. The checks nearest the
-need cover other things:
+at `f78779e41522` reads the secrets file or `GC_SUPERVISOR_ENV`. Its checks
+read the environment to configure themselves, such as which store, Dolt log or
+archive repository a check inspects, and `provider-catalog-local-readiness`
+also reads provider keys there, as below. The checks nearest the need cover
+other things:
 
 - `pack-credentials` (package `doctor`, `PackCredentialsCheck`) loads the git
   credential rules for remote pack imports and matches them against the city's
@@ -114,7 +118,12 @@ need cover other things:
   check the running supervisor's build, its systemd unit and its API.
 - `provider-catalog-local-readiness` probes the provider CLIs installed on the
   host, such as whether `claude` reports a first-party sign-in, and warns when
-  a ready one is missing from the city's `[providers]`.
+  a ready one is missing from the city's `[providers]`. Its probe (package
+  `api`, `ProbeProviders`) reads provider keys from `gc doctor`'s own
+  environment: an installed MiMo Code is ready when `XIAOMI_API_KEY` is set or
+  its own credential file holds a login, and ZCode needs `ZCODE_API_KEY`. A
+  provider without a credential is not ready and goes unreported, so the check
+  names no missing key, and it never reads the secrets file.
 - `gate-sandbox-reads` (`gateSandboxReadCheck` in the `gc` command) rebuilds
   the environment a convergence gate runs in and checks that a bead read
   succeeds there. It probes a gate's environment, not a session's, and
@@ -132,7 +141,8 @@ would carry.
 **A pack adds a readiness check through a pack doctor check.** The
 [Gas City Pack Specification](https://docs.gascity.com/reference/specs/pack-spec#1-2-11-doctor-directory),
 section 1.2.11 "Doctor Directory", defines a pack check as a `doctor/<name>/`
-directory with a `run.sh` and an optional `doctor.toml`. The Troubleshooting
+directory whose check script is `run.sh` unless its optional `doctor.toml`
+names another. The Troubleshooting
 page's section
 ["Add City-Local Doctor Checks"](https://docs.gascity.com/getting-started/troubleshooting#add-city-local-doctor-checks)
 gives the protocol a check script follows: exit 0 for OK, 1 for a warning and 2
@@ -163,9 +173,13 @@ and none names Vercel's bypass key. Vercel appears only in skill and prompt
 text. `gstack`'s deploy skill detects a Vercel project, reads a preview
 deploy's URL from a pull request's checks and waits out an automatic deploy.
 The other mentions, in `bmad`, `compound-engineering` and `gstack`'s other
-skills, are examples in prose. The `github` pack's one read of
-`[workspace.env]`, `workspace_env_value`, takes a deployment setting from the
-process environment or from `city.toml`, and reports nothing.
+skills, are examples in prose. The `github` pack reads `[workspace.env]` in
+`workspace_env_value`, which takes its public URL overrides, and in
+`city_workspace_env`, which takes its `GITHUB_INTAKE_` settings, such as the
+App identity and its resolver, and passes them into the environment of the
+resolver it runs. Each takes a setting from the process environment first and
+from `city.toml` second. Neither is a doctor check, and neither reads Gas
+City's secrets file.
 
 ## What the change does with it
 
