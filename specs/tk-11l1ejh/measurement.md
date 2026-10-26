@@ -251,7 +251,7 @@ these come to 64,052 lines.
 | comment share, the key registry | 1,428 of 1,791 (79%) | |
 | comment share, orders | 331 of 496 (66%) | |
 | shell inside formula code fences | 3,898 lines of 8,842 | lines between fence markers in `formulas/*.toml` |
-| tests whose subject is a formula block | 48 files, 14,351 lines; 12 script tests also extract one | test files naming a formula and a `# >>>` marker, with no script of their own |
+| tests whose subject is formula step text | 52 files, 16,385 lines; 13 script tests also read a block | each `*.test.sh` outside `tools/` whose text holds both `formulas/` and `# >>>`, split by whether an `X.sh` sits beside `X.test.sh` |
 | "legacy" in runtime code | 30 mentions in 15 files | `git grep -c -i legacy` over runtime scripts, doctor checks, formulas and service source, keeping the paths `measure.sh` counts as runtime |
 | compatibility pieces, with their tests | `molecule-hold.sh` 168; the hand-offs at tk-iirrmiw.1's head 241 (`escalate.sh` 127, `escalation-rig.sh` 14, its test 100) | `wc -l`, and `git show <ref>:<path>` on the branch |
 | dead code | 1,675 lines with tests: `surface-census.sh` (431), `tools/gc-polecat-metrics.sh` (507), `migrate-approval-out-of-check-set.sh` (276), `tools/bead-universe-reachability-fixture.sh` (461) | `git grep -l -F <name> -- . ':!specs' ':!generated'` finds no caller |

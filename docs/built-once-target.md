@@ -31,8 +31,8 @@ scheduled only when a bead carries it, and the operator funds each one.
 
 - **A line** is a physical line of a tracked text file at a commit, as
   `git diff --numstat` counts it. A symlink or a binary file counts nothing.
-- **Pack weight** is four kinds of line. Code is scripts, Go and the board's
-  web source. Flow is formulas, orders and the other TOML and JSON config. Text
+- **Pack weight** counts these kinds of line. Code is scripts, Go and the
+  board's web source. Flow is formulas, orders and the other TOML and JSON config. Text
   is agent prompts, fragments and skills. Test is tests and their fixtures.
   Runtime is code, flow and text.
 - **Beside the pack** are docs (15.0k), the tooling under `tools/` and
@@ -284,9 +284,10 @@ A restatement needs no trigger either, once the doctrine has its home.
 
 ### Tests that pin what should not exist
 
-- 48 test files, 14.4k lines, exist to extract a marked block of formula step
-  text and run it, and 12 script tests extract one too. Trigger: the step's
-  mechanics become one call to a script with its own test (P4).
+- 52 test files, 16.4k lines, have no script of their own. Each reads a marked
+  block of formula step text, to run it or to pin its text, and 13 script tests
+  read one too. Trigger: the step's mechanics become one call to a script with
+  its own test (P4).
 - Tests that hold two copies equal, and tests that assert a retired name stays
   retired. Trigger: the copy or the name is gone. Carried by tk-c8724xi and
   tk-1tfzr71.25.
@@ -311,7 +312,7 @@ shows its measured net instead.
 
 | Bead | What it removes | Size | Waits on |
 |---|---|---|---|
-| tk-tggczbp, the one-bead PR model | graduation, the convoy seed, the convoy-check order | −268 net on its branch, which adds a run reader | its open blockers, then the operator's review of its PR |
+| tk-tggczbp, the one-bead PR model | graduation, the convoy seed, the convoy-check order | −268 net on its branch, which adds a run reader | the operator's review of its PR |
 | tk-iirrmiw, the native-gates convoy | visits and their plumbing, onto native human gates | −2,771 net across its branches so far | review of unit C (tk-5u2xpan) |
 | tk-o6pd01i, the cutover (unit D) | `gate-visit-sweep`, `visit-identity.sh`, the gate pass of `notification-wisp-reap`; it adds a migration that its follow-up deletes | 597 | unit C landing |
 
@@ -361,7 +362,7 @@ No bead carries these. Each waits for the operator to fund it.
 | P1 | Wire the discipline below: move `measure.sh` into `tools/`, add a size lens to the arch check's extension ([review-arch.md](review-arch.md)), and add the predicted net to an epic's contract ([epics.md](epics.md)) | about 150 lines of tooling and prose | the operator adopts this page | tk-iirrmiw, whose branch rewrites review-arch.md | each change lands unmeasured, so nothing stops a net-positive epic |
 | P2 | Delete the dead code now | 1,675 lines | nothing calls it, and the approval migration's dry run finds nothing to change | nothing | three of the four files wait for the end of lane B, and the fixture for no bead at all |
 | P3 | One decline call, replacing the 20 copies of the decline sequence in step text | 20 copies, 29 refusal sentences | none | tk-c8724xi, which edits the same files and whose scope this extends | every new step that declines copies the sequence again |
-| P4 | Step text calls tested scripts, and the block-extraction tests go | 3.9k lines of shell in step text, 48 tests of 14.4k lines | none | tk-1tfzr71.12, .19 and .20, which rewrite those formulas and apply it as they do | each block test grows with its block |
+| P4 | Step text calls tested scripts, and the block-extraction tests go | 3.9k lines of shell in step text, 52 tests of 16.4k lines | none | tk-1tfzr71.12, .19 and .20, which rewrite those formulas and apply it as they do | each block test grows with its block |
 | P5 | The Go port (tk-ssm8qns) ports only the map's surviving intents, and each port deletes the shell it replaces in the same change | the port's contract | the port is armed | its blockers | while shell and Go both hold a domain, the domain has two implementations |
 
 ## The measurement discipline
