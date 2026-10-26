@@ -1,20 +1,25 @@
 #!/bin/sh
 # tmux-dismiss-sitting.sh — prefix+X: end the converse sitting in view. It is
 # the keystroke for `gc-helm dismiss`, which, with no bead named, infers the
-# sitting's subject from the caller's session identity and closes the open
-# visit that holds the sitting up.
+# sitting's subject from the caller's session identity, closes the open visit
+# that holds the sitting up, and stops the session that held it.
 #
 # Usage: tmux-dismiss-sitting.sh <config-dir> [--city-path <path>]
 #
 # Bound by tmux-bindings.sh behind confirm-before, as a backgrounded run-shell.
 # It reads the session the key was pressed in, looks that session up in
 # `gc session list`, and refuses unless it runs a converse template. Then it
-# runs `gc-helm.sh dismiss` under the identity on that record (session name,
-# id, alias), the identity a `!` command typed inside the sitting carries, so
-# dismiss's own fail-closed inference picks the subject. The identity comes
-# from the record, not from the job's environment. The record is what says
-# whether this is a converse sitting, and a non-converse Gas City pane
-# carries an identity of its own that dismiss would act on all the same.
+# runs `gc-helm.sh dismiss --operator` under the identity on that record
+# (session name, id, alias), the identity a `!` command typed inside the
+# sitting carries, so dismiss's own fail-closed inference picks the subject.
+# The keystroke is the operator's, from outside the sitting, so --operator has
+# dismiss stop the session as the operator rather than as the session itself.
+# The identity comes from the record, not from the job's environment. The
+# record is what says whether this is a converse sitting, and a non-converse
+# Gas City pane carries an identity of its own that dismiss would act on all
+# the same. The job inherits the pressed session's tmux environment, its
+# incarnation token included. The token is dropped, because the record
+# carries none and the sitting's token proves the sitting, not the operator.
 #
 # Nothing is typed into the pane. A keystroke sent there lands in whatever
 # program holds it, including a reply half-typed into the converse composer.
@@ -120,11 +125,11 @@ say 30000 "dismiss: ending this converse sitting…"
 # The sitting's own identity and rig, and no store pin: BEADS_DIR is unset in a
 # converse session, so dismiss resolves the store from the rig the way a `!`
 # command typed in the sitting would.
-unset BEADS_DIR
+unset BEADS_DIR GC_INSTANCE_TOKEN
 RC=0
 OUT=$(GC_SESSION_NAME="$(field session_name)" GC_SESSION_ID="$(field id)" \
     GC_ALIAS="$(field alias)" GC_RIG="$(field rig)" \
-    sh "$HELM" dismiss --json 2>"${ERR:-/dev/null}") || RC=$?
+    sh "$HELM" dismiss --operator --json 2>"${ERR:-/dev/null}") || RC=$?
 
 if [ "$RC" -ne 0 ]; then
     WHY=""
@@ -139,7 +144,7 @@ VISITS=$(printf '%s' "$OUT" | jq -r '[.matched[]?.id] | join(" ")' 2>/dev/null |
 CLOSED=$(printf '%s' "$OUT" | jq -r '.closed // 0' 2>/dev/null || echo 0)
 case "$CLOSED" in ''|*[!0-9]*) CLOSED=0 ;; esac
 if [ "$CLOSED" -gt 0 ]; then
-    say 6000 "dismiss: the sitting on ${SUBJECT:-?} is over (visit ${VISITS:-?} closed); its session closes after you leave it"
+    say 6000 "dismiss: the sitting on ${SUBJECT:-?} is over (visit ${VISITS:-?} closed), and its session is ending"
 else
     say 6000 "dismiss: no open visit on ${SUBJECT:-?} — nothing was holding a sitting"
 fi
