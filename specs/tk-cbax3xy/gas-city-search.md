@@ -24,9 +24,9 @@ step's record carries its workflow root that way, so the script composes two
 The script is operational surface: a script under `assets/scripts/`
 ([review-arch.md](../../docs/review-arch.md#when-the-lens-applies)). The
 change's other files are prompt text (the claim contract in the polecat
-doctrine and the two polecat nudges), the script's test, its row in the
-component model and the seed-audit renders. None of them is operational
-surface.
+doctrine, and the polecat and polecat-codex nudges), the script's test, its
+row in the component model and the seed-audit renders. None of them is
+operational surface.
 
 The need is orientation. A fresh pool session's first claim of a
 `mol-polecat-work` or `mol-review` step must learn the step's instructions,
@@ -84,8 +84,8 @@ section says it prints "the work bead this session most recently claimed",
 which it reads from the stamp the claim protocol writes on the session's own
 bead. Gas City's "work bead" here is the bead the claim names, and for a
 graph.v2 run that bead is the step. `doHookCurrent` prints the bead's id and
-the session that claimed it, or the id alone with `--id-only`, and reads no
-bead.
+the session that claimed it, or the id alone with `--id-only`, and does not
+read the claimed bead.
 
 **A step reminder carries a step's instructions, written when a hook runs.**
 `formatWispStepReminder` in the `gc` command renders a step as a
@@ -173,16 +173,19 @@ pack's `graph-worker` prompt tells a graph.v2 worker not to use it.
   for the later steps. The `claim` command reads an input convoy only to
   declare an explicit run's work to an observer (`declare_explicit_work`), and
   it prints none of that convoy.
-- The `gastown` pack's polecat claims in a scripted block, re-reads the
-  claimed bead with `gc bd show` to check that it owns the bead, and prints
-  the bead's metadata. At `66c672b5ed00` the prompt's read is
-  `gc bd show <id> --json | jq '.[0].metadata'`, the line this pack's claim
-  contract carried before this change. The polecat then reads its formula's
-  steps. At the packs' head, its resume path takes the work bead from
-  `gc convoy status` and reads it with `gc bd show`.
+- The `gastown` pack's polecat reads the claimed bead and prints its
+  metadata. At `66c672b5ed00` its prompt runs `gc hook --claim --json` and
+  then `gc bd show <id> --json | jq '.[0].metadata'`, the line this pack's
+  claim contract carried before this change. The polecat then reads its
+  formula's steps. At the packs' head it claims in a scripted block, which
+  re-reads the claimed bead with `gc bd show` to check that it owns the bead
+  and prints the bead's metadata, and its resume path takes the work bead
+  from `gc convoy status` and reads it with `gc bd show`.
 - `contributing-to-gascity`, `pr-pipeline` and `pr-review` find their
   molecule's root with `gc bd mol current --json`.
-- The other packs mention no claim.
+- No other pack says what a session reads after it claims. The
+  `oversight-rig` project lead routes a bead and nudges a session to claim
+  it, and the remaining packs mention no work claim.
 
 **The `gc` this city runs adds a step reminder to its claim results, and Gas
 City does not.** The installed `gc` is built from a fork of Gas City. Its
@@ -229,9 +232,10 @@ The capability Gas City lacks is a read from a claim to the work that its
 workflow's input convoy tracks. The claim protocol reads those members to skip
 a finished workflow, and returns none of them. The claim result names the step
 and its root, a reminder carries the step's text when a hook runs, and every
-other read takes one bead or one convoy's summary. The packs fill the gap in their own
-steps. The build pack's `prepare-worktree` resolves the work and stamps it on
-the root, and `gastown`'s resume path reads the convoy and then the bead.
+other read takes one bead or one convoy's summary. The packs fill the gap in
+their own steps. The build pack's `prepare-worktree` resolves the work and
+stamps it on the root, and `gastown`'s resume path reads the convoy and then
+the bead.
 
 This answer changes if Gas City's claim result, or a command it ships, returns
 a claimed step's instructions together with its input convoy's members whole.
