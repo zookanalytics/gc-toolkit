@@ -307,8 +307,9 @@ migration only while a store still has something for it to change (P2).
 
 ## The deletion schedule
 
-The schedule runs in the order below. An armed bead is blocked by what it waits
-on and slings itself when that lands. A size is the lines of the whole files a
+Stages 1 to 3 run in the order below, and each of the page's own items starts
+when what it waits on lands. An armed bead is blocked by what it waits on and
+slings itself when that lands. A size is the lines of the whole files a
 bead's contract retires, with their tests, at the baseline, so a bead that also
 rewrites part of a file retires more than its size. A branch already in flight
 shows its measured net instead.
