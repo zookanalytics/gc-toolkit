@@ -187,7 +187,7 @@ client() {
     CLIENT_PID=$!
 }
 clients_on() {          # clients_on <server> <session> — some client shows <session>
-    tmux -L "$1" list-clients -F '#{client_session}' 2>/dev/null | grep -qxF -- "$2"
+    grep -qxF -- "$2" < <(tmux -L "$1" list-clients -F '#{client_session}' 2>/dev/null)
 }
 no_clients() { [ -z "$(tmux -L "$1" list-clients 2>/dev/null)" ]; }
 one_client_elsewhere() {   # one_client_elsewhere <server> <gone-session>

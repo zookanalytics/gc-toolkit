@@ -2280,7 +2280,7 @@ STOP_SESSIONS='{"sessions":[
 export FAKE_DRAINS="$TMP/drains"
 
 : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
-SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID= GC_SESSION_NAME= GC_ALIAS= sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID='' GC_SESSION_NAME='' GC_ALIAS='' sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
 eq "$SRC" "0" "(DISMISS-STOP-OTHER) a dismiss from outside the sitting exits 0"
 eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-lx-1 | self= | closes=2" \
    "(DISMISS-STOP-OTHER) …and acks the holding session as an operator, once, after the visit's close"
@@ -2298,7 +2298,7 @@ grep -q 'ending this session (gc-toolkit__converse-lx-1)' <<< "$SOUT" \
   || bad "(DISMISS-STOP-OWN) the self-stop is not announced (got: $SOUT)"
 
 : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
-SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_RC=1 GC_SESSION_ID= GC_SESSION_NAME= GC_ALIAS= sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_RC=1 GC_SESSION_ID='' GC_SESSION_NAME='' GC_ALIAS='' sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
 eq "$SRC" "0" "(DISMISS-STOP-FAIL) a stop that fails leaves the dismiss standing"
 grep -q 'could not stop session gc-toolkit__converse-lx-1.*converse-reap' <<< "$SOUT" \
   && ok "(DISMISS-STOP-FAIL) …and names converse-reap as what closes the session" \
@@ -2307,11 +2307,11 @@ grep -q 'could not stop session gc-toolkit__converse-lx-1.*converse-reap' <<< "$
 # v-STUCK's holder runs a polecat template, so dismissing its subject closes
 # the visit and stops nothing: only a converse session is a sitting.
 : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
-SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID= GC_SESSION_NAME= GC_ALIAS= sh "$SCRIPT" dismiss A-STUCK 2>&1)" || SRC=$?
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID='' GC_SESSION_NAME='' GC_ALIAS='' sh "$SCRIPT" dismiss A-STUCK 2>&1)" || SRC=$?
 eq "$(cat "$TMP/drains")" "" "(DISMISS-STOP-CONVERSE) a visit held by a session that is not a converse sitting stops nothing"
 # v-OTHER is held by nobody, and a holder's closed past session is no holder.
 : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
-SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID= GC_SESSION_NAME= GC_ALIAS= sh "$SCRIPT" dismiss A-OTHER 2>&1)" || SRC=$?
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID='' GC_SESSION_NAME='' GC_ALIAS='' sh "$SCRIPT" dismiss A-OTHER 2>&1)" || SRC=$?
 eq "$(cat "$TMP/drains")" "" "(DISMISS-STOP-NOHOLDER) a visit nobody held stops nothing"
 
 # The claim stamps the holder's id on the visit and re-assigns it to the
@@ -2320,7 +2320,7 @@ eq "$(cat "$TMP/drains")" "" "(DISMISS-STOP-NOHOLDER) a visit nobody held stops 
 PINNED='[{"id":"v-PINNED","assignee":"gc-toolkit/gc-toolkit.v-PINNED","metadata":{"task_kind":"visit","gc.continuation_group":"A-PINNED","gc.session_id":"gc-81","gc.session_name":"gc-toolkit__converse-gc-81"}}]'
 PINNED_SESSIONS='{"sessions":[{"id":"gc-81","session_name":"gc-toolkit__converse-gc-81","alias":"gc-toolkit/gc-toolkit.v-PINNED-other","template":"gc-toolkit/gc-toolkit.converse-fable","closed":false}]}'
 : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
-SRC=0; SOUT="$(FAKE_LIST_OUT="$PINNED" FAKE_SESSIONS_JSON="$PINNED_SESSIONS" GC_SESSION_ID= GC_SESSION_NAME= GC_ALIAS= sh "$SCRIPT" dismiss A-PINNED 2>&1)" || SRC=$?
+SRC=0; SOUT="$(FAKE_LIST_OUT="$PINNED" FAKE_SESSIONS_JSON="$PINNED_SESSIONS" GC_SESSION_ID='' GC_SESSION_NAME='' GC_ALIAS='' sh "$SCRIPT" dismiss A-PINNED 2>&1)" || SRC=$?
 grep -q '^drain-ack --operator gc-81 ' "$TMP/drains" \
   && ok "(DISMISS-STOP-PIN) the visit's gc.session_id names the holder to stop" \
   || bad "(DISMISS-STOP-PIN) the pinned holder was not stopped (drains: $(cat "$TMP/drains"); out: $SOUT)"

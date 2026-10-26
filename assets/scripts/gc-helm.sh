@@ -4652,7 +4652,8 @@ cmd_engage() {
             _aa_at=$(_aa_meta gc.handback_at)
             # The text is the sitting's own, printed to the operator's terminal,
             # so control bytes other than tab and newline are dropped.
-            _aa_text=$(_aa_meta gc.handback | tr -d '\000-\010\013-\037\177')
+            _aa_text=$(printf '%s' "$_aa_row" | jq -r '(.metadata // {})["gc.handback"] // "" | tostring
+                | gsub("[\\x00-\\x08\\x0b-\\x1f\\x7f]"; "")' 2>/dev/null || true)
             printf '\nThe sitting on %s has ended: visit %s closed%s%s.\n' "$_eng_for" "$VISIT" \
                 "${_aa_outcome:+ as $_aa_outcome}" "${_aa_reason:+ ($_aa_reason)}"
             if [ -n "$_aa_text" ]; then
