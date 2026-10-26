@@ -23,7 +23,15 @@
 #     signoff.sh, while the agent holding the step writes every finding. No
 #     review formula or review skill forbids subagents, and the correctness
 #     method says when it hands an angle to a finder or a candidate to a
-#     verifier, and that each gets the diff and the files it needs.
+#     verifier, that each gets the diff and the files it needs and none of the
+#     reviewer's conversation, and that its brief states the rules it runs
+#     under.
+#   - The correctness method checks each blocking candidate before the
+#     verdict, in a context that did not raise it: a verifier subagent where
+#     the provider offers one, a separate pass where it offers none. The check
+#     returns CONFIRMED, PLAUSIBLE or REFUTED, a refutation quotes the line
+#     that proves it, and a refuted candidate does not block, stays out of the
+#     finding set and keeps its refutation in the trail.
 #   - Neither review formula names a check's judgment: no test or suite, no
 #     P0, P1 or P2 grade, no Verification line, and neither the correctness
 #     method's What to check list nor any dimension of it. The correctness
@@ -251,6 +259,24 @@ done
 hasF "$METHOD" '### Finders and verifiers' "the correctness method says when it hands an angle to a finder or a candidate to a verifier"
 hasF "$METHOD" 'the diff and the files its angle or candidate runs through, never your whole context' \
   "…and gives each the diff and the files it needs, never the reviewer's whole context"
+hasF "$METHOD" 'start it with none of your conversation' "…and none of the reviewer's conversation"
+hasF "$METHOD" 'Its brief states those rules, because a subagent can hold every tool you hold' \
+  "…and states the formula's rules for subagents in its brief"
+
+echo "# each blocking candidate is checked in a context that did not raise it, before the verdict"
+hasF "$METHOD" '### Verify each blocking candidate' "the correctness method verifies each blocking candidate"
+hasF "$METHOD" 'Before the verdict, check each candidate P0 and P1 in a context that did not raise it.' "…before the verdict, in a context that did not raise it"
+hasF "$METHOD" 'Where your provider offers subagents, hand each one to a verifier' "…by a verifier subagent where the provider offers one"
+hasF "$METHOD" 'Where it offers none, check each one yourself in a separate pass once the hunt is done' "…and in a separate pass where it offers none"
+for r in CONFIRMED PLAUSIBLE REFUTED; do
+  hasF "$METHOD" "- **$r** —" "…which returns $r as one of its results"
+done
+hasF "$METHOD" 'the check quotes the line that proves it' "…a refutation quotes the line that proves it"
+hasF "$METHOD" 'A REFUTED candidate is dropped: it is not a finding, it does not block, and `findings.json` does not carry it.' \
+  "…a refuted candidate does not block, and the finding set does not carry it"
+awk '/^## The verdict$/ {f = 1; next} f && /^## / {exit} f' "$METHOD" > "$TMP/verdict.refuted"
+hasF "$TMP/verdict.refuted" 'The trail carries a `Refuted:` line for each candidate its check refuted' "…and its refutation stays in the trail the verdict section shapes"
+hasF "$TMP/verdict.refuted" 'an entry whose verification is REFUTED' "…and names signoff.sh's refusal of a set that carries one"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

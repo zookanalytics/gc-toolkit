@@ -206,10 +206,10 @@ A lane reads what the method reads and judges as the method does, and runs
 nothing the method runs, anywhere: not at the reviewed commit and not against
 the pre-change code. The synthesis step runs all of that once for the quorum,
 and a finding that depends on its result is the synthesis's to confirm. Where
-the method passes a flag or approves with `--needs-you`, say so in your
-summary for the synthesis. Record a mutation baseline with
-`git status --porcelain=v1 -z` in the worktree before and after, and report any
-delta you introduced (there should be none).
+the method passes a flag, approves with `--needs-you` or puts a line in the
+trail, say so in your summary for the synthesis. Record a mutation baseline
+with `git status --porcelain=v1 -z` in the worktree before and after, and
+report any delta you introduced (there should be none).
 
 <!-- >>> review-subagents -->
 The check's method may hand part of the reading to subagents, where your
@@ -343,10 +343,10 @@ A lane reads what the method reads and judges as the method does, and runs
 nothing the method runs, anywhere: not at the reviewed commit and not against
 the pre-change code. The synthesis step runs all of that once for the quorum,
 and a finding that depends on its result is the synthesis's to confirm. Where
-the method passes a flag or approves with `--needs-you`, say so in your
-summary for the synthesis. Record a mutation baseline with
-`git status --porcelain=v1 -z` in the worktree before and after, and report any
-delta you introduced (there should be none).
+the method passes a flag, approves with `--needs-you` or puts a line in the
+trail, say so in your summary for the synthesis. Record a mutation baseline
+with `git status --porcelain=v1 -z` in the worktree before and after, and
+report any delta you introduced (there should be none).
 
 <!-- >>> review-subagents -->
 The check's method may hand part of the reading to subagents, where your

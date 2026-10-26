@@ -1,6 +1,6 @@
 ---
 name: review-correctness
-description: The method for the correctness check, the standing review of whether a change is correct and safe as merged. Read the whole diff, settle its test evidence, hunt with the What to check list's named angles and work the rest of the list, give every finding its failure scenario and the angle or dimension that found it, grade it P0, P1 or P2, verify each blocking one, and add the Verification line to the verdict. Use when you hold a review bead whose check is correctness, or when asked whether a change is correct and safe to merge.
+description: The method for the correctness check, the standing review of whether a change is correct and safe as merged. Read the whole diff, settle its test evidence, hunt with the What to check list's named angles and work the rest of the list, give every finding its failure scenario and the angle or dimension that found it, grade it P0, P1 or P2, check each blocking one in a context that did not raise it and drop the ones that check refutes, and add the Verification line to the verdict. Use when you hold a review bead whose check is correctness, or when asked whether a change is correct and safe to merge.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -195,20 +195,53 @@ verification says how sure you are. A concern with no trigger you can name is
 not a finding.
 
 Each P0 and P1 also carries its verification, one line that opens with
-CONFIRMED or PLAUSIBLE. CONFIRMED names the evidence that the trigger reaches
-the failure: a run, the line that does it, the caller that passes the input.
-PLAUSIBLE says why the trigger is realistic when the evidence could not be had.
+CONFIRMED or PLAUSIBLE, the result its check returned (below), and then the
+evidence behind that result.
 
 Each finding names its category, which is the dimension of What to check that
 found it, spelled as the list spells it. A defect a hunting angle found names
 that angle. Each finding also names its severity, the grade below.
 
+### Verify each blocking candidate
+
+Before the verdict, check each candidate P0 and P1 in a context that did not
+raise it. Where your provider offers subagents, hand each one to a verifier
+(below). Where it offers none, check each one yourself in a separate pass once
+the hunt is done: take the candidates one at a time, start from a candidate's
+locus and failure scenario alone, and read the code along its trigger's path
+again rather than recall it. Either way the question is whether the trigger
+reaches the failure on the tree as merged, not whether the argument that
+raised the candidate holds, so look first for the line that would rule it out.
+
+The check returns one of three results:
+
+- **CONFIRMED** — the evidence shows the trigger reaching the failure: a run,
+  the line that does it, the caller that passes the input.
+- **PLAUSIBLE** — the trigger is realistic and nothing rules the failure out,
+  but the evidence that the trigger reaches it could not be had. This is the
+  usual result for a race or a rare path.
+- **REFUTED** — the candidate is wrong, and the check quotes the line that
+  proves it: the guard that stops the trigger, the caller that never passes
+  the input, the line that already does what the candidate says is missing,
+  or the line of a run's output that shows the failure does not follow. A
+  refutation that quotes no line, or quotes one that does not say what the
+  refutation claims, is not one, and the candidate stands as PLAUSIBLE.
+
+A CONFIRMED or PLAUSIBLE candidate stands, and its verification is that result
+and its evidence. When the evidence shows a failure other than the one the
+candidate named, write the failure it shows as the scenario, and grade the
+candidate again on it. A REFUTED candidate is dropped: it is not a finding, it
+does not block, and `findings.json` does not carry it. Read its quoted line
+where it sits before you drop it. Its refutation stays in the trail, on a
+`Refuted:` line of its own (The verdict, below).
+
 ### Finders and verifiers
 
-Where your provider offers subagents, you may hand an angle to a finder and a
-blocking candidate to a verifier. Use one where it adds unbiased feedback, or
-where it costs fewer tokens in all than doing that reading yourself. Where
-your provider offers none, you do this reading yourself.
+Where your provider offers subagents, you may hand an angle to a finder, and
+you hand each blocking candidate to a verifier. Use a finder where it adds
+unbiased feedback, or where it costs fewer tokens in all than doing that
+reading yourself. Where your provider offers none, you do this reading
+yourself.
 
 - **A finder** hunts with one angle and returns every candidate whose trigger
   it can name, each with its locus and failure scenario, including one it is
@@ -222,11 +255,13 @@ your provider offers none, you do this reading yourself.
 - **A verifier** checks one blocking candidate: whether its trigger reaches
   its failure on the tree as merged. Its feedback is unbiased by the finding,
   because it never saw the reasoning that raised the candidate, so it has no
-  stake in the answer. What it returns is evidence for the candidate's
-  verification.
+  stake in the answer. It returns the check's result, with the evidence or the
+  quoted line behind it.
 
 Give a finder or a verifier the diff and the files its angle or candidate
-runs through, never your whole context. A finder gets its angle as What to
+runs through, never your whole context, and start it with none of your
+conversation. Some providers copy your conversation into a subagent unless
+told not to, so tell yours not to. A finder gets its angle as What to
 check states it, and the rig's guidance for this check when the angle reads
 it. A verifier gets the candidate's locus and failure scenario, without the
 argument for it. Neither gets the anchor, the PR, another candidate or a
@@ -235,7 +270,8 @@ hold, so a finder whose angle reads only files you have read saves no tokens
 and earns its place by its fresh reading alone.
 
 A subagent works under the review formula's rules for subagents, so a run it
-needs comes back to you as the run to make, and you make it. What it returns
+needs comes back to you as the run to make, and you make it. Its brief states
+those rules, because a subagent can hold every tool you hold. What it returns
 is a candidate or evidence: you judge each candidate against the diff, and
 every finding, its fields and the verdict are yours to write.
 
@@ -274,12 +310,15 @@ its `locus` and `message` and the fields of its contract: its `severity`, its
 ```
 
 `signoff.sh` refuses, with nothing written, a set that lacks one of these
-fields, an approve that carries a P0 or P1, and a request-changes that carries
-neither. It renders the set as the posted verdict's Findings block, the most
-severe first and counted per grade, as in `1 P1, 2 P2`. The trail ends with the
-line that records the test evidence the review relied on, after `Filed:`:
+fields, an entry whose verification is REFUTED, an approve that carries a P0 or
+P1, and a request-changes that carries neither. It renders the set as the
+posted verdict's Findings block, the most severe first and counted per grade,
+as in `1 P1, 2 P2`. The trail carries a `Refuted:` line for each candidate its
+check refuted, after `Filed:`, and ends with the line that records the test
+evidence the review relied on:
 
 ```
+Refuted: <locus>: <its failure scenario>. <file>:<line> reads `<the quoted line>`, so <why the failure cannot follow>
 Verification: <test evidence relied on; each suite run at the reviewed commit, N passed, M failed>
 ```
 
