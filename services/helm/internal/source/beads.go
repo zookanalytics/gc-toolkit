@@ -307,11 +307,13 @@ func (s *BeadsSource) Close() error {
 	return nil
 }
 
-// rigRef is one rig's identity plus the location of its bead store.
+// rigRef is one rig's identity plus the location of its bead store. hq marks
+// the city's own store, the one Gas City keeps its session beads in.
 type rigRef struct {
 	name     string
 	prefix   string
 	beadsDir string
+	hq       bool
 }
 
 // rigs enumerates the city's bead stores: the HQ store at <city>/.beads, then
@@ -335,7 +337,7 @@ func (s *BeadsSource) rigs() ([]rigRef, error) {
 	}
 
 	var out []rigRef
-	add := func(name, dir string) {
+	add := func(name, dir string, hq bool) {
 		beadsDir := filepath.Join(dir, ".beads")
 		if st, err := os.Stat(beadsDir); err != nil || !st.IsDir() {
 			return
@@ -344,10 +346,11 @@ func (s *BeadsSource) rigs() ([]rigRef, error) {
 			name:     name,
 			prefix:   readIssuePrefix(filepath.Join(beadsDir, "config.yaml")),
 			beadsDir: beadsDir,
+			hq:       hq,
 		})
 	}
 
-	add(filepath.Base(strings.TrimRight(s.cityPath, string(filepath.Separator))), s.cityPath)
+	add(filepath.Base(strings.TrimRight(s.cityPath, string(filepath.Separator))), s.cityPath, true)
 
 	root := filepath.Join(s.cityPath, "rigs")
 	entries, err := os.ReadDir(root)
@@ -361,7 +364,7 @@ func (s *BeadsSource) rigs() ([]rigRef, error) {
 	}
 	for _, e := range entries {
 		if e.IsDir() {
-			add(e.Name(), filepath.Join(root, e.Name()))
+			add(e.Name(), filepath.Join(root, e.Name()), false)
 		}
 	}
 
@@ -416,10 +419,11 @@ func (s *BeadsSource) store(ctx context.Context, r rigRef) (beadStore, error) {
 }
 
 // Gather reads every anchor kind from every rig, plus the three cross-anchor
-// joins the derivation needs. A rig that cannot be opened or queried degrades
-// to empty and records a partial error; only a total failure — no rig produced
-// anything — aborts, so the server returns 502 rather than an empty board that
-// reads as "nothing needs attention".
+// joins the derivation needs, and marks each open visit whose last sitting
+// failed to start ([BeadsSource.markStartFailures]). A rig that cannot be
+// opened or queried degrades to empty and records a partial error; only a total
+// failure — no rig produced anything — aborts, so the server returns 502 rather
+// than an empty board that reads as "nothing needs attention".
 func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 	rigs, err := s.rigs()
 	if err != nil {
@@ -436,6 +440,8 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 
 	var sittings []board.Sitting
 	var roots []workflowRoot
+	var hq beadStore
+	var hqRig rigRef
 	for _, r := range rigs {
 		st, err := s.store(ctx, r)
 		if err != nil {
@@ -445,10 +451,19 @@ func (s *BeadsSource) Gather(ctx context.Context) (*Result, error) {
 		s.gatherRig(ctx, g, st, r, now)
 		sittings = append(sittings, s.rigSittings(ctx, st, r, g, now)...)
 		roots = append(roots, s.workflowRoots(ctx, st, r, g)...)
+		if r.hq {
+			hq, hqRig = st, r
+		}
 	}
 
 	if !g.anyOK {
 		return nil, fmt.Errorf("no rig bead store could be read: %s", strings.Join(g.partialErrs, "; "))
+	}
+
+	// A sitting's session lives in the city store whichever rig its visit is
+	// in, so failed starts are read once, over every rig's sittings.
+	if hq != nil {
+		s.markStartFailures(ctx, hq, hqRig, g, sittings)
 	}
 
 	owners := sessionStates(ctx, s.gc, g)

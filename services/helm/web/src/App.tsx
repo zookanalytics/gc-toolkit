@@ -34,9 +34,10 @@ const SECTION_ORDER = ['review', 'gate', 'stalled', 'active', 'cleanup', 'done']
 const COLLAPSE_STORAGE_KEY = 'helm.board.collapsed';
 
 // The one Tile.visit_state value the marker branches on (board.VisitEngaged).
-// A held row carries 'engaged' or 'parked'; anything that is not 'engaged' —
-// 'parked', or the '' a re-derivation slip could leave — reads as parked, the
-// state that invites the operator to look rather than telling them it is handled.
+// A held row carries 'engaged', 'start-failed' or 'parked'; anything that is not
+// 'engaged' — 'parked', 'start-failed' (whose row's needs names the failure), or
+// the '' a re-derivation slip could leave — reads as parked, the state that
+// invites the operator to look rather than telling them it is handled.
 const VISIT_ENGAGED = 'engaged';
 
 // A sitting is finished when its visit bead closed; anything else is a

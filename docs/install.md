@@ -102,6 +102,10 @@ Any per-rig `[rigs.imports.gc-toolkit]` overrides the default for that rig.
 - **Skills** — surfaced via `gc skill list` (`gc-toolkit.handoff`,
   `gc-toolkit.session-title`, …).
 - **Doctor checks** — the structural checks verified below.
+- **Comments not for review** — a comment a rig's workflow or integration
+  posts on a pull request stays out of review when it opens with gc-toolkit's
+  no-review mark or with a marker the rig declares in
+  `not-for-review.toml` ([not-for-review.md](not-for-review.md)).
 
 ---
 
@@ -208,7 +212,7 @@ The pack's checks, and what a failure means:
 | `check-until-resolved-owed` | every open, unassigned bead whose `until` targets have all closed, and which no open `blocks` blocker of its own holds, was disposed within the deferred-dispatch cadence of becoming owed, unless it carries live work (`assets/scripts/live-work.sh`), which the order never disposes (warn-only) | the deferred-dispatch order not firing, its passes spending their budget before they reach the bead, or the close held, commonly by an open visit on the bead; a resolved bead left open because it carries live work is reported separately, for a person to decide |
 | `check-feedback-routing-owed` | an open anchor whose PR posture is `commented`/`changes_requested` has that feedback routed within the owed window (warn-only) | the merge cadence's feedback arm not routing, so operator feedback reads as consumed while nothing acts on it |
 | `check-hq-marooned-work` | no rig-workable bead sits unclaimed in the HQ (city/lx) store, which no pool reads | a city-scoped role with `GC_RIG` unset filing a bare `bd create` into the HQ store, marooning the work by construction |
-| `check-demo-toolchain` | the demo:capture toolchain — Node, ffmpeg, `OPENAI_API_KEY`, and `gh` — is resolvable (readiness, warn-only) | a missing demo dependency, so a capture degrades to a silent, captioned clip |
+| `check-demo-toolchain` | the demo:capture toolchain — Node, ffmpeg, `OPENAI_API_KEY`, and `gh` — is resolvable, and `VERCEL_AUTOMATION_BYPASS_SECRET` reaches the session whenever the secrets file holds it (readiness, warn-only) | a missing demo dependency, so a capture degrades to a silent, captioned clip, or `VERCEL_AUTOMATION_BYPASS_SECRET` in the secrets file but not in the session, because `GC_SUPERVISOR_ENV` does not name it or the supervisor was installed before the file held it |
 
 `gc doctor --verbose` explains any failure; `gc doctor --fix` applies the
 canonical remediation where one exists.

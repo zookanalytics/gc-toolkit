@@ -1,6 +1,6 @@
 ---
 name: Architecture — how gc-toolkit composes Gas City to deliver its beliefs
-description: The 30,000-ft guide to gc-toolkit — the boundary between operator, runtime, pack, and GitHub; how a piece of work moves from filed to landed; how humans engage; how lessons compound; and the consistency test a new capability must pass to belong. Read it to know what the system is, to place a new capability, or to check an existing one.
+description: The 30,000-ft guide to gc-toolkit — the boundary between operator, runtime, pack, and GitHub; how a piece of work moves from filed to landed; what a review reads from the installed pack and what from the rig under review; how humans engage; how lessons compound; and the consistency test a new capability must pass to belong. Read it to know what the system is, to place a new capability, or to check an existing one.
 ---
 
 # Architecture
@@ -14,8 +14,9 @@ shared primitive; nothing exists because an incident once happened.
 ## Scope
 
 **Mandate.** How gc-toolkit composes Gas City's primitives to deliver
-foundation: the system boundary, how work moves end to end, how humans engage,
-how lessons compound, and the test that keeps new work grounded.
+foundation: the system boundary, how work moves end to end, what the installed
+pack supplies and what a rig supplies, how humans engage, how lessons compound,
+and the test that keeps new work grounded.
 
 **Boundaries.** It works at altitude. The anchor lifecycle's states, writers,
 and check mechanics are owned by [state-machine.md](state-machine.md); the merge
@@ -23,7 +24,9 @@ cadence's runtime semantics by
 [refinery-merge-cadence.md](refinery-merge-cadence.md); the primitive list and
 the invariant→check binding by [component-model.md](component-model.md); the
 filing conventions by [file-structure.md](file-structure.md); how work is
-structured into epics and when an epic closes by [epics.md](epics.md).
+structured into epics and when an epic closes by [epics.md](epics.md); how a
+pack skill is named and surfaced by [skills.md](skills.md); how pack text
+reaches the pack's scripts by [pack-authoring.md](pack-authoring.md).
 
 ## The boundary
 
@@ -158,6 +161,80 @@ edit no writer saw. See
 [authority-map.md](authority-map.md). There is no healer category: writers
 complete their own transitions, so nothing reconstructs pack-written state
 after the fact.
+
+## What the pack supplies and what a rig supplies
+
+The city installs the pack once, and every rig runs the same copy. Each rig
+imports the gc-toolkit checkout `rigs/gc-toolkit`, the installed pack. What runs
+is that checkout's working tree, which the `reconcile-rig-checkouts` order keeps
+fast-forwarded to `main`
+([pack-authoring.md](pack-authoring.md#a-landed-pack-change-is-confirmed-on-the-deployed-checkout)).
+The pack supplies how work is done, such as its formulas, scripts, skills and
+agent prompts. A rig supplies the repository the work changes, along with any
+review guidance the rig keeps in it.
+
+A review is where the two meet. It reads its values from the record its dispatch
+wrote, and every other piece either from the installed pack, as that checkout
+stands when the piece is read, or from the rig at the reviewed commit. The
+reviewed commit is the branch's head when the review was dispatched, and nothing
+moves it afterwards.
+
+| What the reviewer uses | Where it comes from | Which version |
+|---|---|---|
+| The review's steps, `mol-review` or `mol-review-quorum-signoff` | The pack's formula. Each rig's `.beads/formulas` entry for it is a link Gas City makes into the installed pack. | The installed pack when the review is poured. A poured review keeps its step text. |
+| The review's values: its check, anchor, branch, base, reviewed commit and PR, and why it went out | The record `assets/scripts/gate-ensure.sh` writes on the review bead and passes to the pour as formula vars | Fixed at dispatch |
+| The check's method, the skill `gc-toolkit.review-<check>` | The reviewer's skill catalog, which links each pack skill into the installed pack. The formula names the skill under `binding_prefix`, the var `gc sling` adds to every pour. | The installed pack when the reviewer loads it |
+| The specialist stance, the skill `gc-toolkit.specialist-stance`, held by arch, demo, pm and a check of the rig's own | The reviewer's skill catalog | The installed pack when the reviewer loads it |
+| The pack's scripts, and the pack's check index | The installed pack's script directory. A skill reaches it through `gc <binding> scripts-dir`, and a formula step through a loop over candidate directories. `assets/scripts/review-checks.sh` reads the `review-checks.toml` at the root of the pack it ships in. | The installed pack when the script runs |
+| The rig's check index rows | The rig's `review-checks.toml`, laid over the pack's rows | The reviewed commit |
+| The rig's guidance for the check | The rig's `docs/review-<check>.md`, which the formula prints | The reviewed commit |
+| The diff, and the docs a check stewards, such as `docs/architecture.md` for arch and `docs/product-goals.md` for pm | The review's worktree ([review-workspace.md](review-workspace.md)) | The reviewed commit |
+
+The header of [`review-checks.toml`](../review-checks.toml) states how the
+pack's check index and a rig's are layered. `review-checks.sh` resolves both
+for every reader of the index, not only the review, and every reader takes the
+rig's rows at the commit it judges. [skills.md](skills.md) states how a pack
+skill is named and surfaced, and `gc skill list` prints the file each catalog
+entry points at. The method-load paragraph of `formulas/mol-review.toml` states
+which skill a review loads, and what the reviewer does when its catalog has
+none.
+
+- **A rig supplies no skill to a review.** The review names the method and the
+  stance under the pack's binding, and the catalog answers both from the
+  installed pack. Skills a rig's repository carries for its own agents can
+  appear in a reviewer's skill list, and no review step names one. A check that
+  a rig's index declares, and that the pack ships no skill for, is judged
+  against the purpose its row states, with the specialist stance held. A check
+  no index declares is approved with `--needs-you`, so the operator decides
+  whether it stays in the anchor's `check_set`.
+- **A rig's guidance is read at the reviewed commit, not from the rig's
+  default branch,** so a branch is judged against the guidance it carries. A
+  guidance fix merged on the default branch reaches an open PR when that PR
+  next merges its base.
+- **When gc-toolkit reviews itself, the pack and the rig are the same files at
+  two commits.** A branch that edits a check's method, the specialist stance, a
+  review formula or a script the review calls is reviewed under the installed
+  copy, not its own. A branch that edits `review-checks.toml` or a
+  `docs/review-<check>.md` is reviewed under its own edit, because that
+  guidance is read at the reviewed commit. The index's rows at that commit are
+  laid over the installed copy's. In any rig, `signoff.sh` refuses a
+  correctness approve on a change that edits its own review guidance until
+  `--needs-you` names the edit to the person who approves the merge.
+- **Only a skill's catalog name reaches its installed copy.** A path such as
+  `skills/<name>/SKILL.md` resolves against whatever tree the agent stands in:
+  another rig's checkout, or in gc-toolkit a reviewer's home worktree or the
+  branch under review. None of them is the installed pack. So pack text names
+  a skill it tells an agent to load as `gc-toolkit.<name>`, and a path in its
+  place is a defect.
+- **Known limit: a formula step finds the pack's scripts only because
+  gc-toolkit is a rig of this city.** Its loop takes the first directory it
+  tries that holds the script. In gc-toolkit's own rig that is `$GC_RIG_ROOT`,
+  and in every other rig it is `$GC_CITY_PATH/rigs/gc-toolkit`. A city that
+  imports the pack from a URL rather than as a rig checkout has neither, so its
+  formula steps find no script. A skill has no such limit, because
+  `gc <binding> scripts-dir` prints the script directory of whichever pack gc
+  loaded
+  ([pack-authoring.md](pack-authoring.md#step-text-and-skills-reach-pack-scripts-at-runtime)).
 
 ## How humans engage
 

@@ -270,15 +270,20 @@ type Tile struct {
 	// be flagged for lacking.
 	Held bool `json:"held"`
 	// VisitState refines Held into the visit's engagement: VisitEngaged when a
-	// live sitting is in the conversation right now, VisitParked when the visit
-	// stands open and un-engaged — filed and waiting for a person to pick it up.
-	// Empty on a row no open visit holds (Held is false), the same
-	// not-applicable empty a closed row's Phase carries.
+	// live sitting is in the conversation right now, VisitStartFailed when the
+	// sitting last spawned for the visit failed to start and none has been
+	// spawned since, VisitParked when the visit stands open and un-engaged —
+	// filed and waiting for a person to pick it up. Empty on a row no open visit
+	// holds (Held is false), the same not-applicable empty a closed row's Phase
+	// carries. The one row that is not held and still carries a value is a
+	// visit's own row whose sitting failed to start, which reads
+	// VisitStartFailed too ([classifyVisits]).
 	//
-	// It reads the same [unengagedVisit] rule Acceptable does, so the two never
-	// disagree: a parked visit is the one Accept is offered on, an engaged one
-	// suppresses it. It is derived here rather than in the browser because the
-	// rule reads the visit's assignee — the pending-engagement window — which
+	// Engaged ([engagedVisit]) and Acceptable ([unengagedVisit]) read one
+	// binding predicate, so the two never disagree: an engaged visit suppresses
+	// Accept, and Accept is offered only on a visit that stands open and
+	// unbound. It is derived here rather than in the browser because the rule
+	// reads the visit's assignee — the pending-engagement window — which
 	// [Sitting.Assignee] deliberately keeps off the wire.
 	VisitState string `json:"visit_state"`
 
@@ -546,6 +551,12 @@ type Tile struct {
 	// triple, and non-null exactly on an acceptable row (see computeTile): the
 	// accept affordance and the reasoning behind it ride the wire together.
 	Recommendation *string `json:"recommendation"`
+
+	// VisitStartFailure is why the sitting last spawned for this row's visit
+	// failed to start, in the words [Sitting.StartFailure] carries. It is
+	// non-empty exactly when VisitState is VisitStartFailed, so a consumer reads
+	// the state and its reason off one row.
+	VisitStartFailure string `json:"visit_start_failure"`
 }
 
 // Sitting is one converse sitting — the visit bead a conversation runs inside —
@@ -606,6 +617,27 @@ type Sitting struct {
 	// engaged so it suppresses Accept in that window. It is a derivation input,
 	// not part of the record the web renders, so it carries no wire tag.
 	Assignee string `json:"-"`
+
+	// FiledAt is when the visit bead was created. A sitting spawned for the
+	// visit cannot have failed to start before then, so the gather bounds its
+	// read of failed starts by the earliest FiledAt among the open visits. A
+	// gather input, so it carries no wire tag.
+	FiledAt time.Time `json:"-"`
+
+	// StartFailure says why the sitting last spawned for this visit failed to
+	// start. It is empty unless that sitting failed and no sitting has been
+	// spawned for the visit since. Gas City records a failed start in the city
+	// store: the rollback closes the session bead as failed-create, and the
+	// session bead or a startup-health episode says why the start failed, when
+	// anything does ([source.BeadsSource.markStartFailures] reads them). The
+	// words are "startup timeout", "setup timeout", "provider error: <code>"
+	// for a provider error a person must fix, "never started" when Gas City
+	// recorded no cause, as for a create rolled back before any start ran,
+	// "start error: <error>" for any other error the episode recorded, or
+	// "reason unread" when the record could not be read. A derivation input
+	// that the tile carries as [Tile.VisitStartFailure], so it has no wire tag
+	// here.
+	StartFailure string `json:"-"`
 
 	// OpenedAt is when the conversation STARTED — gc.claimed_at, falling back
 	// to the bead's creation time for a visit that was never claimed. ClosedAt

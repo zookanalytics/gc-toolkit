@@ -174,10 +174,14 @@ func (f *fakeStore) searchByIDs(filter beads.IssueFilter) ([]*beads.Issue, error
 	return out, nil
 }
 
-// matching applies the status and closed-window predicates the library applies
-// in SQL. Without it the fake would hand an open-visit query the closed visits
-// too: the two sitting passes could not be told apart, and the done pass would
-// re-return every OPEN anchor as a closed one.
+// matching applies the status, closed-window, created-window and metadata
+// predicates the library applies in SQL. Without it the fake would hand an
+// open-visit query the closed visits too: the two sitting passes could not be
+// told apart, and the done pass would re-return every OPEN anchor as a closed
+// one. The created window and the metadata equality are what the failed-start
+// read selects on (a type-keyed query, which searchByMetadata does not reach),
+// so a fake that skipped them would let that read ask the wrong question and
+// still find its session.
 func (f *fakeStore) matching(in []*beads.Issue, filter beads.IssueFilter) []*beads.Issue {
 	var out []*beads.Issue
 	for _, iss := range in {
@@ -190,9 +194,29 @@ func (f *fakeStore) matching(in []*beads.Issue, filter beads.IssueFilter) []*bea
 		if filter.ClosedAfter != nil && (iss.ClosedAt == nil || !iss.ClosedAt.After(*filter.ClosedAfter)) {
 			continue
 		}
+		if filter.CreatedAfter != nil && !iss.CreatedAt.After(*filter.CreatedAfter) {
+			continue
+		}
+		if !metadataMatches(iss, filter.MetadataFields) {
+			continue
+		}
 		out = append(out, iss)
 	}
 	return out
+}
+
+// metadataMatches is IssueFilter.MetadataFields: every key equal, AND semantics.
+func metadataMatches(iss *beads.Issue, want map[string]string) bool {
+	if len(want) == 0 {
+		return true
+	}
+	md := decodeMetadata(iss.Metadata)
+	for k, v := range want {
+		if got, ok := md[k]; !ok || got != v {
+			return false
+		}
+	}
+	return true
 }
 
 // searchByMetadata models the library's metadata predicates over the fixtures:

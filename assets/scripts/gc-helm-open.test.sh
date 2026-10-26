@@ -144,6 +144,11 @@ grep -qF '"task_kind":"visit"' <<< "$VCREATE" \
 grep -q 'bd update tk-visit1 .*task_kind=visit' <<< "$CALLS" \
   && bad "(EXISTS) no second write stamps the visit's identity" "found an update stamping task_kind (calls: $CALLS)" \
   || ok "(EXISTS) no second write stamps the visit's identity"
+# An ordinary open is about the subject at large, so it carries no topic of its
+# own and converse's fold keys it on the subject.
+grep -qF 'visit_topic' <<< "$CALLS" \
+  && bad "(EXISTS) an ordinary visit carries no topic of its own (calls: $CALLS)" \
+  || ok "(EXISTS) an ordinary visit carries no topic of its own"
 grep -q 'bd dep add tk-visit1 tk-real1 --type=tracks' <<< "$CALLS" \
   && ok "(EXISTS) tracks edge wired to the subject" || bad "(EXISTS) tracks edge (calls: $CALLS)"
 # A successful open parks the visit on the board and spawns no session, so its
@@ -232,6 +237,17 @@ grep -q 'bd create .*--title visit: tk-real1 — a distinct concern' <<< "$CALLS
 grep -q 'is already open' <<< "$OUT$ERR" \
   && bad "(ALLOWDUP) still short-circuited on the existing visit" \
   || ok "(ALLOWDUP) the dedup short-circuit is bypassed"
+# The second visit is about its own concern, so it carries a topic of its own:
+# converse's fold never folds it into the live sitting on the subject, nor that
+# sitting into it. The stamp rides the create, so no sitting claims the visit
+# without it.
+VCREATE=$(grep 'bd create .*--title visit: tk-real1' <<< "$CALLS" || true)
+grep -qF '"visit_topic":"own"' <<< "$VCREATE" \
+  && ok "(ALLOWDUP) the second visit carries visit_topic=own, on the create" \
+  || bad "(ALLOWDUP) visit_topic=own on the create (calls: $CALLS)"
+grep -q 'bd update tk-visit1 .*visit_topic' <<< "$CALLS" \
+  && bad "(ALLOWDUP) no second write stamps the topic (calls: $CALLS)" \
+  || ok "(ALLOWDUP) no second write stamps the topic"
 # CONTROL: without the flag, the same held subject still short-circuits and files
 # nothing — so the bypass is the flag's doing, not the ambient state.
 : > "$FAKE_CALLS"

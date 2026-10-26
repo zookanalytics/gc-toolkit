@@ -5,6 +5,8 @@
 #     check's name case-folded, an older index's method key is ignored, and a
 #     missing index, an undeclared check and an index that declares nothing fail
 #     closed;
+#   - a call that names a second form's verb, or a flag only another form takes,
+#     refused as a usage error wherever the flag stands;
 #   - the pack's own review-checks.toml declares the forced baseline, gives every
 #     check a phase in the ordered set and a skill the pack ships, and carries no
 #     method key;
@@ -117,6 +119,31 @@ has "…saying no commit was named" "$ERR" "no commit named"
 is "--resolve with --at \"\" exits 2" "$?" "2"
 "$SUT" --resolve --show --at HEAD >/dev/null 2>&1
 is "two verbs in one call exit 2" "$?" "2"
+
+# ---- a flag only another form takes --------------------------------------------
+# The call would not read it, so it is refused rather than ignored, before any
+# index or commit is read.
+ERR="$("$SUT" --show --check-set correctness --file "$IDX" 2>&1 >/dev/null)"; RC=$?
+is  "--show with --check-set exits 2" "$RC" "2"
+has "…naming the flag and what --show takes" "$ERR" "--show takes --check, --at, --file; --check-set is another call's flag"
+"$SUT" --through merge --show --file "$IDX" >/dev/null 2>&1
+is "--through ahead of --show exits 2" "$?" "2"
+"$SUT" --file "$IDX" --with-phase >/dev/null 2>&1
+is "--with-phase with no verb, a --show, exits 2" "$?" "2"
+"$SUT" --check triage --through merge --file "$IDX" >/dev/null 2>&1
+is "--check with --through exits 2" "$?" "2"
+"$SUT" --resolve --check-set correctness --through merge --check triage --file "$IDX" >/dev/null 2>&1
+is "--resolve with --check exits 2" "$?" "2"
+"$SUT" --resolve --check-set correctness --through merge --base main --file "$IDX" >/dev/null 2>&1
+is "--resolve with --base exits 2" "$?" "2"
+"$SUT" --extension arch --check-set correctness --at HEAD >/dev/null 2>&1
+is "--extension with --check-set exits 2" "$?" "2"
+"$SUT" --edits --base main --through merge --at HEAD >/dev/null 2>&1
+is "--edits with --through exits 2" "$?" "2"
+OUT="$("$SUT" --check-set correctness --through merge --resolve --file "$IDX" 2>/dev/null)"; RC=$?
+is  "a form's own flags ahead of its verb still resolve: exit 0" "$RC" "0"
+is  "…to the gates they name" "$OUT" "correctness"
+is  "--check ahead of --show reads its one row" "$("$SUT" --check triage --show --file "$IDX" 2>/dev/null)" "triage	Which specialist checks does this diff warrant?	pre-open"
 
 # ---- the pack's own index -----------------------------------------------------
 REAL="$REPO/review-checks.toml"
@@ -328,8 +355,8 @@ if [ -n "$NOIDX" ] && [ -n "$WITHIDX" ]; then
   is "--extension at a commit that carries none prints nothing" "$OUT" ""
   is "…and exits 0" "$RC" "0"
   (cd "$RIG" && "$PSUT" --extension arch >/dev/null 2>&1); is "--extension with no commit exits 2" "$?" "2"
-  (cd "$RIG" && "$PSUT" --extension arch --file "$IDX" >/dev/null 2>&1); is "…even beside --file" "$?" "2"
   (cd "$RIG" && GC_REVIEW_CHECKS_INDEX="$IDX" "$PSUT" --extension arch >/dev/null 2>&1); is "…even beside GC_REVIEW_CHECKS_INDEX" "$?" "2"
+  (cd "$RIG" && "$PSUT" --extension arch --file "$IDX" --at "$WITHIDX" >/dev/null 2>&1); is "--extension refuses --file, even beside a commit it reads: exit 2" "$?" "2"
   (cd "$RIG" && "$PSUT" --extension ../README --at "$WITHIDX" >/dev/null 2>&1); is "--extension takes a check name, not a path" "$?" "2"
 
   # A rig row with a phase outside the ordered set is refused at the commits that
@@ -465,7 +492,7 @@ if [ -n "$ECHANGE" ] && [ -n "$EPLAIN" ] && [ -n "$EMERGED" ] && [ "$EMERGED" !=
   (cd "$EC" && "$PSUT" --edits --at "$ECHANGE" >/dev/null 2>&1); is "--edits with no --base exits 2" "$?" "2"
   (cd "$EC" && "$PSUT" --edits --base 'bad..base' --at "$ECHANGE" >/dev/null 2>&1); is "--edits with a base that is no branch name exits 2" "$?" "2"
   (cd "$EC" && "$PSUT" --edits --base base >/dev/null 2>&1); is "--edits with no commit exits 2" "$?" "2"
-  (cd "$EC" && "$PSUT" --edits --base base --file "$IDX" >/dev/null 2>&1); is "…even beside --file" "$?" "2"
+  (cd "$EC" && "$PSUT" --edits --base base --file "$IDX" --at "$ECHANGE" >/dev/null 2>&1); is "--edits refuses --file, even beside a commit it reads: exit 2" "$?" "2"
 else
   bad "--edits fixture setup" "could not build the origin/clone pair with an unfetched change"
 fi
