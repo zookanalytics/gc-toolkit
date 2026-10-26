@@ -1,6 +1,6 @@
 ---
 name: review-correctness
-description: The method for the correctness check, the standing review of whether a change is correct and safe as merged. Read the whole diff, settle its test evidence, hunt with the What to check list's named angles and work the rest of the list, give every finding its failure scenario and the angle or dimension that found it, grade it P0, P1 or P2, check each blocking one in a context that did not raise it and drop the ones that check refutes, and add the Verification line to the verdict. Use when you hold a review bead whose check is correctness, or when asked whether a change is correct and safe to merge.
+description: The method for the correctness check, the standing review of whether a change is correct and safe as merged. Read the whole diff, settle its test evidence, hunt with the What to check list's named angles and work the rest of the list, sweep once more with fresh eyes for what the hunt missed, give every finding its failure scenario and the angle, dimension or sweep that found it, grade it P0, P1 or P2, check each blocking one in a context that did not raise it and drop the ones that check refutes, and add the Verification line to the verdict. Use when you hold a review bead whose check is correctness, or when asked whether a change is correct and safe to merge.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -198,20 +198,67 @@ Each P0 and P1 also carries its verification, one line that opens with
 CONFIRMED or PLAUSIBLE, the result its check returned (below), and then the
 evidence behind that result.
 
-Each finding names its category, which is the dimension of What to check that
-found it, spelled as the list spells it. A defect a hunting angle found names
-that angle. Each finding also names its severity, the grade below.
+Each finding names its category: the dimension of What to check that found
+it, spelled as the list spells it, or `Fresh-eyes sweep` for a defect the
+sweep below found. A defect a hunting angle found names that angle. Each
+finding also names its severity, the grade below.
+
+### The fresh-eyes sweep
+
+When the hunt is done and its candidates are deduped, one fresh pass looks
+only for defects that no candidate names yet. It aims at what a first pass
+misses:
+
+- **Moved code that dropped a guard** — a block the diff moves, extracts into
+  a helper, inlines or reorders, whose new copy lacks a check, an early exit,
+  an error path, a lock or a cleanup the old copy had, or runs before the
+  state it relies on is set. A move reads as code that did not change, so pair
+  each block the diff deletes with the place it reappears, and read the two
+  copies side by side.
+- **Setup and teardown asymmetry in tests** — a test or fixture that creates,
+  changes or stubs something and does not undo it on every exit, the failing
+  ones included: a file, a directory, an environment value, the working
+  directory, a process, a global. A teardown that undoes what its setup never
+  made, or that is registered only after a step that can fail first, is the
+  same defect from the other end. Either leaves a later test passing or
+  failing by the order the suite runs in, or leaves state behind on the
+  machine that ran it.
+- **Config defaults that flipped** — a default the change alters: a flag's, a
+  setting's, a parameter's, or what an unset environment value or an absent
+  key means. Every caller, configuration and deployment that relied on the old
+  default without naming it changes with it. A key renamed without reading its
+  old name sends every configuration that set it to the default.
+- **Second-tier footguns** — a hazard off the path the change was written
+  for, on the next path out: a second run, a retry, a resume after an
+  interrupt, the error path of an error path, an empty or unexpected input, a
+  caller the change did not have in mind. An interface the diff calls in a way
+  that is easy to get wrong, or adds in a shape that invites the wrong call, is
+  one too.
+
+Where your provider offers subagents, hand the sweep to a finder of its own
+(below). Where it offers none, sweep yourself in a separate pass: read the
+diff again from its first file rather than recall it, with only these targets
+in mind. Either way the sweep is given the candidates so far, each as its
+locus and failure scenario, so that it spends its reading on what they leave
+out.
+
+Judge each candidate the sweep returns against the diff, and drop one that
+repeats a candidate already raised. Each one it adds carries every field a
+finding carries (above), and each P0 and P1 among them is verified with the
+rest (below). The trail records the sweep on a `Swept:` line (The verdict,
+below).
 
 ### Verify each blocking candidate
 
 Before the verdict, check each candidate P0 and P1 in a context that did not
 raise it. Where your provider offers subagents, hand each one to a verifier
 (below). Where it offers none, check each one yourself in a separate pass once
-the hunt is done: take the candidates one at a time, start from a candidate's
-locus and failure scenario alone, and read the code along its trigger's path
-again rather than recall it. Either way the question is whether the trigger
-reaches the failure on the tree as merged, not whether the argument that
-raised the candidate holds, so look first for the line that would rule it out.
+the hunt and the sweep are done: take the candidates one at a time, start from
+a candidate's locus and failure scenario alone, and read the code along its
+trigger's path again rather than recall it. Either way the question is whether
+the trigger reaches the failure on the tree as merged, not whether the
+argument that raised the candidate holds, so look first for the line that
+would rule it out.
 
 The check returns one of these results:
 
@@ -237,11 +284,11 @@ where it sits before you drop it. Its refutation stays in the trail, on a
 
 ### Finders and verifiers
 
-Where your provider offers subagents, you may hand an angle to a finder, and
-you hand each blocking candidate to a verifier. Use a finder where it adds
-unbiased feedback, or where it costs fewer tokens in all than doing that
-reading yourself. Where your provider offers none, you do this reading
-yourself.
+Where your provider offers subagents, you may hand an angle to a finder, you
+hand the sweep to a finder of its own, and you hand each blocking candidate to
+a verifier. Use a finder for an angle where it adds unbiased feedback, or
+where it costs fewer tokens in all than doing that reading yourself. Where
+your provider offers none, you do this reading yourself.
 
 - **A finder** hunts with one angle and returns every candidate whose trigger
   it can name, each with its locus and failure scenario, including one it is
@@ -263,8 +310,10 @@ runs through, never your whole context, and start it with none of your
 conversation. Some providers copy your conversation into a subagent unless
 told not to, so tell yours not to. A finder gets its angle as What to
 check states it, and the rig's guidance for this check when the angle reads
-it. A verifier gets the candidate's locus and failure scenario, without the
-argument for it. Neither gets the anchor, the PR, another candidate or a
+it. The sweep's finder gets the sweep's targets in place of an angle, and the
+candidates so far. A verifier gets the candidate's locus and failure scenario,
+without the argument for it. Apart from the candidates so far the sweep's
+finder gets, neither gets the anchor, the PR, another candidate or a
 conclusion of yours. A subagent reads again whatever it needs that you already
 hold, so a finder whose angle reads only files you have read saves no tokens
 and earns its place by its fresh reading alone.
@@ -313,11 +362,13 @@ its `locus` and `message` and the fields of its contract: its `severity`, its
 fields, an entry whose verification is REFUTED, an approve that carries a P0 or
 P1, and a request-changes that carries neither. It renders the set as the
 posted verdict's Findings block, the most severe first and counted per grade,
-as in `1 P1, 2 P2`. The trail carries a `Refuted:` line for each candidate its
-check refuted, after `Filed:`, and ends with the line that records the test
+as in `1 P1, 2 P2`. After `Filed:`, the trail carries a `Swept:` line that
+says how the sweep ran and what it added, then a `Refuted:` line for each
+candidate its check refuted, and it ends with the line that records the test
 evidence the review relied on:
 
 ```
+Swept: <by a subagent, or in a separate pass>: <the locus of each candidate it added, or "none">
 Refuted: <locus>: <its failure scenario>. <file>:<line> reads `<the quoted line>`, so <why the failure cannot follow>
 Verification: <test evidence relied on; each suite run at the reviewed commit, N passed, M failed>
 ```

@@ -26,6 +26,14 @@
 #     verifier, that each gets the diff and the files it needs and none of the
 #     reviewer's conversation, and that its brief states the rules it runs
 #     under.
+#   - The correctness method sweeps once more when the hunt's candidates are
+#     deduped, looking only for defects no candidate names yet: moved code that
+#     dropped a guard, setup and teardown asymmetry in tests, config defaults
+#     that flipped, and second-tier footguns. A finder of its own sweeps where
+#     the provider offers subagents and the reviewer sweeps in a separate pass
+#     where it offers none, either way given the candidates so far. A defect
+#     the sweep adds names it as its category and is verified with the rest,
+#     and the trail records the sweep on a Swept: line above the Refuted: lines.
 #   - The correctness method checks each blocking candidate before the
 #     verdict, in a context that did not raise it: a verifier subagent where
 #     the provider offers one, a separate pass where it offers none. The check
@@ -263,11 +271,30 @@ hasF "$METHOD" 'start it with none of your conversation' "…and none of the rev
 hasF "$METHOD" 'Its brief states those rules, because a subagent can hold every tool you hold' \
   "…and states the formula's rules for subagents in its brief"
 
+echo "# one fresh pass after the hunt looks only for the defects the hunt missed"
+hasF "$METHOD" '### The fresh-eyes sweep' "the correctness method sweeps once more after the hunt"
+hasF "$METHOD" 'When the hunt is done and its candidates are deduped, one fresh pass looks only for defects that no candidate names yet.' \
+  "…once the hunt's candidates are deduped, for defects no candidate names yet"
+for t in 'Moved code that dropped a guard' 'Setup and teardown asymmetry in tests' 'Config defaults that flipped' 'Second-tier footguns'; do
+  hasF "$METHOD" "- **$t** —" "…aimed at: $t"
+done
+hasF "$METHOD" 'Where your provider offers subagents, hand the sweep to a finder of its own' "…by a finder of its own where the provider offers subagents"
+hasF "$METHOD" 'Where it offers none, sweep yourself in a separate pass' "…and in a separate pass where it offers none"
+hasF "$METHOD" 'the sweep is given the candidates so far, each as its locus and failure scenario' "…either way given the candidates so far, each as its locus and failure scenario"
+hasF "$METHOD" "The sweep's finder gets the sweep's targets in place of an angle, and the candidates so far." \
+  "…which its finder's brief carries, with the targets in place of an angle"
+hasF "$METHOD" 'or `Fresh-eyes sweep` for a defect the sweep below found' "…a defect it adds names the sweep as its category"
+hasF "$METHOD" 'each P0 and P1 among them is verified with the rest' "…and is verified with the rest"
+hasF "$TMP/verdict.correctness" 'the trail carries a `Swept:` line that says how the sweep ran and what it added' \
+  "…and the trail the verdict section shapes records the sweep on a Swept: line"
+eq "$(grep -oE '^(Swept|Refuted|Verification): ' "$TMP/verdict.correctness" | tr -d ' ' | paste -sd' ' -)" "Swept: Refuted: Verification:" \
+  "…above the trail's Refuted: and Verification: lines"
+
 echo "# each blocking candidate is checked in a context that did not raise it, before the verdict"
 hasF "$METHOD" '### Verify each blocking candidate' "the correctness method verifies each blocking candidate"
 hasF "$METHOD" 'Before the verdict, check each candidate P0 and P1 in a context that did not raise it.' "…before the verdict, in a context that did not raise it"
 hasF "$METHOD" 'Where your provider offers subagents, hand each one to a verifier' "…by a verifier subagent where the provider offers one"
-hasF "$METHOD" 'Where it offers none, check each one yourself in a separate pass once the hunt is done' "…and in a separate pass where it offers none"
+hasF "$METHOD" 'Where it offers none, check each one yourself in a separate pass once the hunt and the sweep are done' "…and in a separate pass where it offers none, once the hunt and the sweep are done"
 for r in CONFIRMED PLAUSIBLE REFUTED; do
   hasF "$METHOD" "- **$r** —" "…which returns $r as one of its results"
 done
@@ -275,7 +302,7 @@ hasF "$METHOD" 'the check quotes the line that proves it' "…a refutation quote
 hasF "$METHOD" 'A REFUTED candidate is dropped: it is not a finding, it does not block, and `findings.json` does not carry it.' \
   "…a refuted candidate does not block, and the finding set does not carry it"
 awk '/^## The verdict$/ {f = 1; next} f && /^## / {exit} f' "$METHOD" > "$TMP/verdict.refuted"
-hasF "$TMP/verdict.refuted" 'The trail carries a `Refuted:` line for each candidate its check refuted' "…and its refutation stays in the trail the verdict section shapes"
+hasF "$TMP/verdict.refuted" 'a `Refuted:` line for each candidate its check refuted' "…and its refutation stays in the trail the verdict section shapes"
 hasF "$TMP/verdict.refuted" 'an entry whose verification is REFUTED' "…and names signoff.sh's refusal of a set that carries one"
 
 echo "---"
