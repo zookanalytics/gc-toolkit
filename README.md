@@ -103,7 +103,7 @@ render's byte and token counts.
 - [docs/bead-store-resolution.md](docs/bead-store-resolution.md) — which store answers for a bead id, and the proof a destructive gate owes before reading absence
 - [docs/outbound-sends.md](docs/outbound-sends.md) — a GitHub write to a repo the rig does not own is the operator's send; how an agent parks one
 - [docs/not-for-review.md](docs/not-for-review.md) — the pull-request comments the city never reads as review feedback: the no-review mark, and the third-party markers a rig declares
-- [docs/built-once-target.md](docs/built-once-target.md) — what the pack weighs if built once, subsystem by subsystem beside its measured size, the removals that close the distance in the order they land, and how a change's net size is judged
+- [docs/built-once-target.md](docs/built-once-target.md) — the shape the pack would have if built once and where its weight is, subsystem by subsystem beside its measured size, the removals in the order they land, and the rules every change follows
 
 ## Related
 

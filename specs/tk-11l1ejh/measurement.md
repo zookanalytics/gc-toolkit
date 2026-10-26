@@ -1,6 +1,6 @@
 ---
 name: Built-once target — the measurements behind it
-description: The derivations behind docs/built-once-target.md at main b09345315 — the baseline table, how each subsystem's target was derived from what survives, the whole files each scheduled removal names, the counts behind what has no place in the target, the pack's growth and the ledger of changes since the migration map, and the net of the branches in flight. Read it to check or re-derive a number the doc states.
+description: The derivations behind docs/built-once-target.md at main b09345315 — the baseline table, how each subsystem's built-once estimate was derived from what survives, the whole files each scheduled removal names, the counts behind what has no place in the built-once shape, the pack's growth and the ledger of changes since the migration map, and the net of the branches in flight. Read it to check or re-derive a number the doc states.
 ---
 
 # The measurements behind the built-once target
@@ -56,18 +56,19 @@ Component-model §4 has a row for 104 of the 145 runtime scripts under
 `orphan-dispose.sh` (639), `converse-signoff.sh` (489) and `self-review-check.sh`
 (479).
 
-## 2. How each target was derived
+## 2. How each estimate was derived
 
-Each subsystem's target is the baseline size of what survives it, cut by the
-doc's rules: a primitive Gas City ships weighs nothing, a fact is said
-once with comments kept to reasons, and tests weigh no more than code and flow.
+Each subsystem's estimate is the baseline size of what survives it, cut by the
+doc's assumptions: a primitive Gas City ships weighs nothing, a fact is said
+once with comments kept to reasons, and tests weigh about what code and flow
+weigh.
 What survives comes from the migration members' contracts (their Keeps and
 Retires) and the native-gates design. The cuts are estimates, rounded to 0.5k
 for each subsystem's total.
 
 **Work**, 6,748 to 2,500:
 
-| What survives | Baseline | Target |
+| What survives | Baseline | Built once |
 |---|---|---|
 | `mol-polecat-work.toml`, extending core's `mol-polecat-base` | 1,980 | 500 |
 | `mol-design-convoy.toml`, its recipes on `tracks` | 493 | 300 |
@@ -81,7 +82,7 @@ decline call) and `convoy-seed.sh` (158).
 
 **Review**, 10,576 to 4,000:
 
-| What survives | Baseline | Target |
+| What survives | Baseline | Built once |
 |---|---|---|
 | the five check skills, the specialist stance, the rubric ledger | 913 | 900 |
 | the demo-capture and gc-demo-script skills | 670 | 650 |
@@ -98,7 +99,7 @@ Retiring: `finding.sh` (1,428), `gate-ensure.sh` (1,243), `mol-validate.toml`
 
 **Merge**, 16,552 to 2,000:
 
-| What survives | Baseline | Target |
+| What survives | Baseline | Built once |
 |---|---|---|
 | the PR summary and title: `pr-summary-region.sh`, `pr-stack.sh`'s re-render | 750 | 350 |
 | the step from a GitHub event to the bead that owns it | part of `pr-facts.sh` | 300 |
@@ -121,7 +122,7 @@ and two orders (39).
 
 **Human engagement**, 14,985 to 5,500:
 
-| What survives | Baseline | Target |
+| What survives | Baseline | Built once |
 |---|---|---|
 | the conversation doctrine: the converse prompt, its skills, agent config | 1,167 | 900 |
 | the first-reaction and mechanik prompts and config | 671 | 650 |
@@ -148,7 +149,7 @@ certain.
 
 **Patrol**, 9,801 to 2,500:
 
-| What survives | Baseline | Target |
+| What survives | Baseline | Built once |
 |---|---|---|
 | the witness: HELP-mail triage, salvage, the refinery-queue watch | 1,298 | 500 |
 | the deacon: `gc doctor` from an order | 710 | 250 |
@@ -171,11 +172,11 @@ wisp-cascade-intact, session-store-scope, hq-marooned-work, state-space,
 wait-is-an-edge, and pour-text-current reduced to 150. The three checks of
 molecule execution (step-terminal, root-advancing, claim-advancing; 1,489)
 become one of about 750, and the dispatch-arm checks one of about 300. The
-comment rule takes 3,991 to about 3,200, rounded to 3,000.
+comment cut takes 3,991 to about 3,200, rounded to 3,000.
 
 **Shared glue**, 10,940 to 5,000:
 
-| What survives | Baseline | Target |
+| What survives | Baseline | Built once |
 |---|---|---|
 | the gh write guard, `gh-origin-guard.sh` and its codex registrar, under their warrant | 1,274 | 950 |
 | `render-seed-audit.sh` | 1,072 | 800 |
@@ -197,7 +198,7 @@ and the `gctk-build` order (18).
 **gctk**, 5,776 to 1,500: the rig check runner (`internal/cli/rig.go`,
 `internal/rig/`, 1,084), `internal/git` (144), the store client cut to what the
 records need (662 to about 300), the daemon (172) and `main` (113) come to
-about 1,800, and the comment rule takes them to 1,500. `internal/cli/merge.go`
+about 1,800, and the comment cut takes them to 1,500. `internal/cli/merge.go`
 (1,892), `internal/cli/lifecycle.go` with `internal/lifecycle` (1,200),
 `internal/cli/pace.go` (143) and pr-status (363) go.
 
@@ -205,7 +206,7 @@ about 1,800, and the comment rule takes them to 1,500. `internal/cli/merge.go`
 registry's 1,791 lines become about 300; **doctrine**, 1,658 to 1,300;
 **keeper**, 3,791 to 0.
 
-**Tests**: the target for each subsystem is its target code and flow, rounded:
+**Tests**: each subsystem's estimate is its estimated code and flow, rounded:
 work 2,500, review 2,000, merge 2,000, human engagement 4,000, board 5,000,
 patrol 2,000, doctor 3,000, shared glue 5,000, gctk 1,500, feedback 1,500, in
 all 28,500.
@@ -237,7 +238,7 @@ that rewrites part of a file retires more than this.
 Counted once, with tk-tggczbp's deletions taken out of tk-1tfzr71.10 and .23,
 these come to 64,052 lines.
 
-## 4. The counts behind what has no place in the target
+## 4. The counts behind what has no place in the built-once shape
 
 | Count | Result | Command |
 |---|---|---|
@@ -321,9 +322,9 @@ Net lines by `measure.sh <merge base> <branch head>`, on 2026-10-26:
 | Branch | Head | Merge base | Runtime | Tests | Pack |
 |---|---|---|---|---|---|
 | `integration/tk-iirrmiw` (native-gates units A and B) | 8c895c258 | 35cf7c70f, on main | +247 | +2,064 | +2,311 |
-| `polecat/tk-5u2xpan` (unit C) | c45343824 | 8c895c258, on `integration/tk-iirrmiw` | −1,006 | −4,731 | −5,737 |
+| `polecat/tk-5u2xpan` (unit C) | 9f46eb843 | 8c895c258, on `integration/tk-iirrmiw` | −874 | −4,418 | −5,292 |
 | `polecat/tk-iirrmiw.1` (the integration fix) | a79c16f89 | b11e0b262, on `integration/tk-iirrmiw` | +226 | +429 | +655 |
 | `integration/tk-tggczbp` (the one-bead PR model) | be958eeb8 | b09345315, on main | −204 | −64 | −268 |
 
-The native-gates convoy nets −2,771 across its branches so far. The one-bead
+The native-gates convoy nets −2,326 across its branches so far. The one-bead
 PR model's branch changes 120 files, adding 4,761 lines and deleting 4,990.
