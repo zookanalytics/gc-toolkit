@@ -106,7 +106,9 @@ exit a wisp from an intermediate step: continue, or jump to next-iteration,
 which pours and ASSIGNS the next wisp before burning this one — a failed
 assign rolls the pour back and keeps the current wisp. Do NOT enter a
 "standing by" idle state between cycles; after next-iteration, run
-`gc hook`.
+`gc hook`. A turn you end anyway comes back as Stop hook feedback from the
+patrol-continue hook, which hands you the next cycle; run it
+(docs/patrol-continue.md).
 
 ## Findings
 
