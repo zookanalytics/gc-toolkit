@@ -112,6 +112,7 @@ sixth line names the bead ln-kg9z6.1.2 and the session polecat-hb-wisp-7k6m1
 seventh line names xln-abc and ln-a, neither of them an id
 eighth line names $TMP/harbor/rigs/x, a path under the HQ
 TXT
+echo "a file whose name holds a space names lantern" > "$REPO/spaced name.md"
 sed -i.bak '/removes/d' "$REPO/kept.md" && rm -f "$REPO/kept.md.bak"
 git -C "$REPO" add -A
 git -C "$REPO" commit -q -m "add the lines"
@@ -127,6 +128,7 @@ has "$out" "added.md:6: names bead hb-wisp-7k6m1 of rig harbor" "an id after a d
 hasnt "$out" "added.md:7:" "a prefix inside a word, or one letter after the dash, is not an id"
 has "$out" "added.md:8: names $TMP/harbor, the checkout of rig harbor" "a path into a rig's checkout is a mention"
 has "$out" "added.md:8: names rig harbor" "...and so is the name inside it"
+has "$out" "spaced name.md:1: names rig lantern" "a file whose name holds a space is located by line too"
 hasnt "$out" "kept.md" "a line the branch keeps or removes is not read"
 hasnt "$out" "self.md" "a line naming only the rig itself is not a mention"
 has "$out" "rig-mentions: " "the list ends with its count"

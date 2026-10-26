@@ -121,10 +121,11 @@ if [ -n "$BASE" ]; then
   git rev-parse -q --verify "$BASE^{commit}" >/dev/null 2>&1 || fail "cannot resolve '$BASE' in this repository"
   diff=$(git -c core.quotePath=false diff -U0 --no-color --no-ext-diff "$BASE...HEAD" 2>/dev/null) \
     || fail "cannot diff $BASE...HEAD"
+  # git ends a +++ line with a tab when the file's name holds a space.
   printf '%s\n' "$diff" | awk '
     /^diff --git / { hunk = 0; file = ""; next }
     /^@@ / { hunk = 1; split($3, h, ","); line = substr(h[1], 2) + 0; next }
-    !hunk && /^\+\+\+ / { file = substr($0, 5); sub(/^b\//, "", file); next }
+    !hunk && /^\+\+\+ / { file = substr($0, 5); sub(/^b\//, "", file); sub(/\t$/, "", file); next }
     hunk && /^\+/ { print file ":" line "\t" substr($0, 2); line++ }
   ' >> "$LINES"
   # A commit a remote already has is public, and changing its message needs a
