@@ -468,9 +468,9 @@ rework or the retirement acts on one PR, which `--pr-anchor` names when the
 ruling reaches more than one, and each other one stands. It runs in that PR's
 own rig, with its store, pool and checkout, when a gate in another rig's store
 releases it. The PR it acts on is recorded on the conversation first
-(`gc.ruling_consequence`), so a re-run of the same ruling acts on the same PR,
-and goes on without it once that PR has closed, as a retired PR's anchor does
-when its disposition is consummated. A conversation owns one live rework, so
+(`gc.ruling_consequence`), so a re-run of the same ruling acts on the same PR.
+A re-run that finds that PR closed, as a retirement leaves it once pr-facts
+consummates it, goes on without it. A conversation owns one live rework, so
 a second PR whose branch must change waits behind its gate, left owed, for a
 ruling of its own. A
 sitting signs off only when nothing important is pending; a turn that hands

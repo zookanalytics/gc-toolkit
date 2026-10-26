@@ -1302,9 +1302,10 @@ keys = [
 #   `accept` writes it and reads it back before the resolve that names the
 #   token, and a run that finishes that acceptance slings the vars recorded
 #   under the token, so the board's Accept, which passes no --var, dispatches
-#   what the operator accepted. A record whose token no answer names is a run
-#   that stopped before its resolve, and the next acceptance overwrites it.
-#   Never cleared.
+#   what the operator accepted. A record whose token no answer on the gate
+#   names, left by a run that stopped before its resolve or by an answer Accept
+#   reopened, binds nothing, and the next acceptance overwrites it. Never
+#   cleared.
 # gc.reaction_owned — `1`, the stand-down marker on a subject whose reaction a
 #   live owner already holds. gc-helm.sh `engage --new-subject` writes it in the
 #   create payload of the subject it files, beside gc.origin, so no scan sees
