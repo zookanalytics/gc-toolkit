@@ -855,6 +855,20 @@ keys = [
   # machine:<lane> or human:<login> — who raised it. A human finding is what
   # lets an operator's PR comment produce work the way a reviewer's finding does.
   "finding.source",
+  # The finding contract a reviewer's findings.json carries, which signoff.sh
+  # checks and finding.sh upsert stamps at the first raise, in the description
+  # as well. None is part of finding.key, so a re-raise rewording its scenario
+  # re-adopts the open finding, and a re-raise keeps the first raise's record.
+  # Absent from a human finding and from one whose method grades none.
+  # finding.severity — P0, P1 or P2, the grade the method gave it. A P2 is filed
+  #   only beside a blocking finding, and the validator rules it must-fix or
+  #   declined: finding.sh refuses its deferral.
+  # finding.category — the part of the method that found it.
+  # finding.failure_scenario — the input or state that triggers it, then the
+  #   wrong output that follows.
+  # finding.verification — on a P0 or P1, CONFIRMED with the evidence, or
+  #   PLAUSIBLE with why the trigger is realistic.
+  "finding.severity", "finding.category", "finding.failure_scenario", "finding.verification",
   # The GitHub comment databaseId that raised a human finding, stamped by
   # pr-facts.sh at file time: an inline review comment, a review body (the
   # review's own id, so it equals finding.review_id), or a Conversation comment.
@@ -1102,10 +1116,11 @@ keys = [
 #   reviews, and the refinery's handle-failures writes it on the anchor at the
 #   merged head. A write for the same record adds its trackers; one for another
 #   record replaces the value. self-review-check.sh reads the work bead's to
-#   pass a recorded fail at HEAD, and the correctness review reads the anchor's
-#   test value to run no suite for a recorded fail at the reviewed commit; each
-#   reads a value whose record is not the one --check reads now, such as one a
-#   run with another command or scope replaced, as no judgment. Only the
+#   pass a recorded fail at HEAD, and review-evidence.sh reads the anchor's at
+#   the reviewed commit, so a review's gather calls that fail pre-existing and
+#   the correctness method runs no suite for it. Both judge by rig-check-lib.sh,
+#   which reads a value whose record is not the one --check reads now, such as
+#   one a run with another command or scope replaced, as no judgment. Only the
 #   self-review writes and reads a setup or build value, against its note.
 #   Absent means no caller judged a fail pre-existing. Never cleared.
 
