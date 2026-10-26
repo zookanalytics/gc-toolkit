@@ -65,7 +65,8 @@
 #             (START-BACKSTOP), is left unattached and exits 4, with the attach
 #             to run later. (START-INTERRUPT) Ctrl-C stops the wait, leaves the
 #             visit bound and the sitting open, and prints the attach, after
-#             kicking a codex sitting (INTERRUPT-KICK).
+#             kicking a codex sitting (INTERRUPT-KICK); a hang-up or a TERM
+#             stops it the same way (INTERRUPT-HUP, INTERRUPT-TERM).
 #             (NOATTACH-*) --no-attach does not wait, and (KICK-AFTER-START) a
 #             codex kick on the attach path follows the wait
 #   (BOUND-EXISTING) engaging a SUBJECT that binds a pre-existing visit names that
@@ -464,8 +465,8 @@ export CALLS="$TMP/calls" ASSIGNEE="$TMP/assignee" VIS_STATUS="$TMP/vstatus" ALI
 export SPAWNED="$TMP/spawned" POLLS="$TMP/polls" VIS_UNREAD="$TMP/vis-unread"
 unset GC_HELM_FIXTURE || true
 # The START-BACKSTOP case reads the default bound, and only a case's own prefix
-# runs the clock stubs fake.
-unset GC_HELM_ENGAGE_WAIT_TIMEOUT FAKE_CLOCK FAKE_CLOCK_SCALE || true
+# runs the clock stubs fake or picks the signal an interrupted case sends.
+unset GC_HELM_ENGAGE_WAIT_TIMEOUT FAKE_CLOCK FAKE_CLOCK_SCALE INTERRUPT_SIG || true
 export TMPDIR="$TMP"
 
 # A fixture agents dir, so the converse-<model> list engage globs is hermetic —
@@ -504,19 +505,20 @@ run_engage() {
 polls_read() { _p=$(cat "$POLLS" 2>/dev/null || true); printf '%s' "${_p:-0}"; }
 
 # run_engage_interrupted <bead> [extra-args...] — run_engage, with a Ctrl-C sent
-# once the start wait has read the sitting twice. Job control puts engage in a
-# process group of its own, as a terminal puts its foreground job, and the
-# SIGINT goes to that whole group, as a terminal's Ctrl-C does. A shell that
-# starts with SIGINT ignored cannot trap it, and a suite started in the
-# background by a shell without job control inherits it ignored, so perl puts
-# the default back before engage starts. The case's own bound turns a Ctrl-C
+# once the start wait has read the sitting twice: SIGINT, or the signal
+# $INTERRUPT_SIG names. Job control puts engage in a process group of its own,
+# as a terminal puts its foreground job, and the signal goes to that whole
+# group, as a terminal's Ctrl-C does. A shell that starts with a signal ignored
+# cannot trap it, and a suite started in the background by a shell without job
+# control inherits SIGINT ignored, so perl puts the default back for each
+# signal a case sends before engage starts. The case's own bound turns a signal
 # that never lands into a failure within a minute, not a hang.
 run_engage_interrupted() {
     : > "$CALLS"; : > "$ASSIGNEE"; : > "$SPAWNED"; : > "$POLLS"; rm -f "$ALIAS_REFUSED" "$ALIAS_REFUSED.reads" "$VIS_UNREAD"
     set +e
     set -m
     if command -v perl >/dev/null 2>&1; then
-        GC_HELM_ENGAGE_WAIT_TIMEOUT=60 perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or die "exec: $!\n"' \
+        GC_HELM_ENGAGE_WAIT_TIMEOUT=60 perl -e '$SIG{$_} = "DEFAULT" for qw(INT TERM HUP); exec @ARGV or die "exec: $!\n"' \
             sh "$SCRIPT" engage "$@" </dev/null >"$TMP/out" 2>"$TMP/err" &
     else
         GC_HELM_ENGAGE_WAIT_TIMEOUT=60 sh "$SCRIPT" engage "$@" </dev/null >"$TMP/out" 2>"$TMP/err" &
@@ -527,7 +529,7 @@ run_engage_interrupted() {
     while [ "$(polls_read)" -lt 2 ] && [ "$_w" -lt 1200 ] && kill -0 "$_eng_pid" 2>/dev/null; do
         sleep 0.05; _w=$((_w + 1))
     done
-    kill -INT -- "-$_eng_pid" 2>/dev/null
+    kill -"${INTERRUPT_SIG:-INT}" -- "-$_eng_pid" 2>/dev/null
     wait "$_eng_pid"; RC=$?
     set -e
     OUT="$(cat "$TMP/out")$(cat "$TMP/err")"
@@ -1212,6 +1214,16 @@ hasnt "$CALLED" "session nudge" "(START-INTERRUPT) …and an opus sitting is not
 START_STATES="start-pending" run_engage_interrupted tk-vis --model codex
 eq "$RC" 130 "(INTERRUPT-KICK) Ctrl-C during a codex sitting's wait exits 130"
 has "$CALLED" "session nudge gc-77" "(INTERRUPT-KICK) …after kicking the sitting, so it begins once it starts"
+# A terminal that goes away under the wait, and a TERM, stop it the same way.
+INTERRUPT_SIG=HUP START_STATES="start-pending" run_engage_interrupted tk-vis --model codex
+eq "$RC" 129 "(INTERRUPT-HUP) a hang-up during a codex sitting's wait exits 129"
+has "$OUT" "stopped waiting after" "(INTERRUPT-HUP) …through the same stop as Ctrl-C"
+has "$CALLED" "session nudge gc-77" "(INTERRUPT-HUP) …kicking the sitting, so it begins once it starts"
+hasnt "$CALLED" "session close" "(INTERRUPT-HUP) …and leaving it open"
+eq "$(cat "$ASSIGNEE")" "gc-toolkit__converse-1" "(INTERRUPT-HUP) …with the visit still bound to it"
+INTERRUPT_SIG=TERM START_STATES="start-pending" run_engage_interrupted tk-vis
+eq "$RC" 143 "(INTERRUPT-TERM) a TERM during the wait exits 143"
+has "$OUT" "stopped waiting after" "(INTERRUPT-TERM) …through the same stop as Ctrl-C"
 
 echo "# a suspended subject rig is refused before anything spawns"
 # engage spawns a sitting the reconciler must sustain; on a suspended rig the

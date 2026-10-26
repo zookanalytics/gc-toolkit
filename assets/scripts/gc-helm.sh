@@ -4699,13 +4699,14 @@ cmd_engage() {
                 ;;
         esac
     }
-    # engage_wait_interrupted <exit-code> — the wait's INT and TERM trap. It
-    # writes and closes nothing, so the binding and the start carry on without
-    # engage. A codex sitting is kicked first, as on every path past the wait,
-    # so it begins once it starts. The handler disarms itself, so a second
-    # Ctrl-C ends engage at once.
+    # engage_wait_interrupted <exit-code> — the wait's INT, TERM and HUP trap,
+    # HUP being the terminal going away under the wait. The handler writes and
+    # closes nothing, so the binding and the start carry on without engage. A
+    # codex sitting is kicked first, as on every path past the wait, so it
+    # begins once it starts. The handler disarms itself, so a second Ctrl-C ends
+    # engage at once.
     engage_wait_interrupted() {
-        trap - INT TERM
+        trap - INT TERM HUP
         engage_kick
         echo "$PROG: engage: stopped waiting after $(engage_dur "$start_waited"). Visit $VISIT stays bound to $sname, which the reconciler goes on starting; attach once it reads active in 'gc session list': gc session attach $sid" >&2
         exit "$1"
@@ -4715,8 +4716,9 @@ cmd_engage() {
         start_waited=0
         trap 'engage_wait_interrupted 130' INT
         trap 'engage_wait_interrupted 143' TERM
+        trap 'engage_wait_interrupted 129' HUP
         engage_await_start || start_rc=$?
-        trap - INT TERM
+        trap - INT TERM HUP
         if [ "$start_rc" -eq 2 ]; then
             echo "$PROG: engage: the sitting $sname ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. Visit $VISIT is still bound to it; unbind it to put it back on the board: gc bd update $VISIT --assignee \"\"" >&2
             exit 4
