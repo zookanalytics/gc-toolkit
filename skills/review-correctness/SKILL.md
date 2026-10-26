@@ -213,7 +213,7 @@ again rather than recall it. Either way the question is whether the trigger
 reaches the failure on the tree as merged, not whether the argument that
 raised the candidate holds, so look first for the line that would rule it out.
 
-The check returns one of three results:
+The check returns one of these results:
 
 - **CONFIRMED** — the evidence shows the trigger reaching the failure: a run,
   the line that does it, the caller that passes the input.

@@ -17,8 +17,10 @@ what Codex offers.
 - The Codex CLI the city runs, `codex-cli 0.164.0`. The app-server daemon
   under the city's Codex home is the same release.
 - `codex features list` under that home: `multi_agent` is stable and on, and
-  `multi_agent_v2` is stable and off. The home's `config.toml` turns on one
-  feature of its own, `code_mode_host`, and turns none off.
+  `multi_agent_v2` is stable and off. The home's `config.toml` sets no
+  multi-agent feature. It turns off `api_key_model_discovery` and
+  `mcp_oauth_refresh_coordination`, which are on by default, and sets
+  `auth_elicitation` and `code_mode_host` to their default, on.
 - The prompt a codex session's model receives, rendered by
   `codex debug prompt-input` under a copy of that home's model, feature and
   project settings. The model is `gpt-6.1-sol`, the one the city's codex
@@ -61,7 +63,7 @@ facts in its own terms:
 
 So the method asks a codex review to verify its blocking candidates in
 verifier subagents. The separate pass is the form for a provider that offers
-no subagent, which includes a Codex whose `multi_agent` feature is off.
+no subagent.
 
 ## Not observed
 
@@ -76,5 +78,7 @@ which is what the method's sentence on the conversation guards against.
 Read the tool from the rendered prompt, `codex debug prompt-input` under the
 city's Codex home, not from the feature list. `codex features list` reports
 `multi_agent_v2` off, yet the tool the model is given takes `fork_turns` and
-`task_name`. The binary also refuses an older `fork_context` parameter in
-favor of `fork_turns`, so the tool's shape has moved before.
+`task_name`. Turning `multi_agent` off in a copy of the home's config leaves
+the rendered prompt unchanged, `spawn_agent` included. The binary also
+refuses an older `fork_context` parameter in favor of `fork_turns`, so the
+tool's shape has moved before.
