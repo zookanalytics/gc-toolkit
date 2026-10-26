@@ -453,8 +453,10 @@ distinct concern beside a live sitting on its subject. An absent topic
 matches on the gated bead alone, the behaviour every caller that files no
 topic keeps.
 
-`converse-hold.sh` passes the visit's escalation_key as the topic on every
-demand a sitting files, or `visit:<visit-id>` when the visit carries
+A visit's topic has one definition, `assets/scripts/visit-topic.sh`, and
+converse's fold check, its hold and its discharge all take the topic from
+there. `converse-hold.sh` passes the visit's escalation_key as the topic on
+every demand a sitting files, or `visit:<visit-id>` when the visit carries
 `visit_topic=own`. The discharge in `converse-signoff.sh` resolves only
 demands the sitting itself filed, never the first unassigned demand on the
 item. The conversation demand is the one `gc.hold_demand` names, the id

@@ -36,12 +36,11 @@
 #
 # The visit is read before the first write, and a visit that cannot be read
 # stops the hold (exit 1). Every demand this hold files carries the visit's
-# topic: its escalation_key, or `visit:` and its own id when it carries
-# visit_topic=own. A read that fails is not a visit with no topic. Taken
-# as one, the demand is filed without a topic, and a demand with no topic
-# matches any demand already on the gated bead. On a subject that sibling
-# sittings share, it can refresh another sitting's demand in place and
-# overwrite the question that sitting is holding.
+# demand topic, which visit-topic.sh reads off the visit's row. A read that
+# fails is not a visit with no topic. Taken as one, the demand is filed without
+# a topic, and a demand with no topic matches any demand already on the gated
+# bead. On a subject that sibling sittings share, it can refresh another
+# sitting's demand in place and overwrite the question that sitting is holding.
 #
 # Inputs:
 #   $1           the one decision or input needed, ≤130 chars. The takeaway
@@ -96,6 +95,10 @@ show_one() {
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=visit-identity.sh
 . "$HERE/visit-identity.sh" || { echo "converse-hold: cannot source visit-identity.sh from $HERE" >&2; exit 2; }
+# The one definition of a visit's topic, shared with converse-fold.sh and
+# converse-signoff.sh. Exposes $VISIT_TOPIC_JQ.
+# shellcheck source=visit-topic.sh
+. "$HERE/visit-topic.sh" || { echo "converse-hold: cannot source visit-topic.sh from $HERE" >&2; exit 2; }
 
 # One positional (the need) plus the optional --hold-merge flag, in any order.
 # The need is a sentence, never a flag, so the first non-flag argument is it.
@@ -181,17 +184,16 @@ fi
 # a topic the second sitting's demand on it (the conversation wait on a pre-PR
 # subject, or a --hold-merge on an anchor) refreshes the first's gate in place
 # and overwrites the operator question it is holding.
-# Every demand this sitting files carries the topic. The visit's escalation_key
-# is the per-sitting discriminator (two findings on one bucket keep their own).
-# A visit filed for a distinct concern (visit_topic=own) shares its subject with
-# a live sitting on purpose, and its discriminator is `visit:` and its own id,
-# so neither sitting's demand refreshes the other's. The topic is empty on an
-# ordinary visit, which keeps the pre-topic behaviour. An array so an empty
-# topic expands to no argument under zsh.
-TOPIC=$(printf '%s' "$V" | jq -r '.[0] | (.metadata.escalation_key // "") as $k
-  | if $k != "" then $k
-    elif (.metadata.visit_topic // "") == "own" then "visit:" + (.id // "")
-    else "" end')
+# Every demand this sitting files carries the visit's demand topic. On a keyed
+# visit it is the escalation_key, so two findings on one bucket keep their own.
+# A visit filed for a distinct concern shares its subject with a live sitting
+# on purpose, and its topic is `visit:` and its own id. A lookup under a topic
+# finds only that topic's demand, so a sitting with a topic never refreshes a
+# sibling's demand. The topic is empty on an ordinary visit, which keeps the
+# pre-topic behaviour. A lookup with no topic matches every demand on the gated
+# bead, a sibling's topic-scoped demand included, so the protection runs one
+# way. An array so an empty topic expands to no argument under zsh.
+TOPIC=$(printf '%s' "$V" | jq -r "$VISIT_TOPIC_JQ"'.[0] | visit_demand_topic')
 DEMAND_TOPIC=()
 [ -n "$TOPIC" ] && DEMAND_TOPIC=(--topic "$TOPIC")
 # Resolve the lifecycle writer and read $SUBJECT's state up front: it decides

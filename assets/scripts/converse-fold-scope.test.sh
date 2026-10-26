@@ -332,6 +332,28 @@ rm -f "$FIXDIR/show-v-two.json"
 is "a visit row that resolves to nothing resolves no holder" "$(holder v-two sub)" ""
 is "…while the sibling that reads still holds its own" "$(holder v-one sub)" "v-one"
 
+echo "── every case of the shared topic fixture folds by its fold topic ──"
+# visit-topic.sh is the one definition of a visit's topic, and
+# visit-topic.fixture.json holds the cases the fold, the hold and the sign-off
+# each run. Each case's visit sits beside a live keyless sitting on its subject
+# with a lower id, and folds into it exactly when its fold topic is the subject.
+FX="$REPO/assets/scripts/visit-topic.fixture.json"
+FXV="$(jq -r '.visit' "$FX")"
+FXS="$(jq -r '.subject' "$FX")"
+while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    name="$(printf '%s' "$c" | jq -r '.name')"
+    want="$(printf '%s' "$c" | jq -r '.fold_topic')"
+    row="$(printf '%s' "$c" | jq -c --arg v "$FXV" --arg s "$FXS" \
+        '{id: $v, assignee: "sess-x", metadata: ({"task_kind": "visit", "gc.continuation_group": $s} + .metadata)}')"
+    fixture "$row" "$(visit v-a "$FXS" sess-a)"
+    out="$(run_block "$FXV" "$FXS")"
+    is "(FIXTURE) $name: its fold topic" "$(field "$out" TOPIC)" "$want"
+    if [ "$want" = "$FXS" ]; then hwant=v-a; else hwant="$FXV"; fi
+    is "(FIXTURE) $name: it folds into the keyless sitting only when its topic is the subject" \
+        "$(field "$out" HOLDER)" "$hwant"
+done <<< "$(jq -c '.cases[]' "$FX")"
+
 echo "── only live sittings of THIS group count ──"
 fixture "$(visit v-one sub '')" "$(visit v-two sub sess-2)"
 is "an unassigned sibling is not a holder, even with a lower id" \

@@ -1491,11 +1491,12 @@ keys = [
 # visit_topic — `own` on a visit filed for a distinct concern: gc-helm.sh open
 #   writes it in the create payload of every visit it files with
 #   --allow-duplicate, which engage passes when the operator asks for a new
-#   visit. converse-fold.sh reads the visit's topic as the visit itself, so its
-#   sitting never folds into a live sitting on the subject nor one into it, and
-#   converse-hold.sh and converse-signoff.sh scope its demands to the topic
-#   `visit:<visit-id>`. A topic, not coverage: no reader of what a visit covers
-#   reads it. Absent, or any other value, the visit's topic is its
+#   visit. visit-topic.sh, the one definition of a visit's topic, is its only
+#   reader. Through it converse-fold.sh reads the visit's topic as the visit
+#   itself, so its sitting never folds into a live sitting on the subject nor
+#   one into it, and converse-hold.sh and converse-signoff.sh scope its demands
+#   to the topic `visit:<visit-id>`. A topic, not coverage: no reader of what a
+#   visit covers reads it. Absent, or any other value, the visit's topic is its
 #   escalation_key, else its subject. Never cleared.
 # escalation.recurrences / escalation.recurrence_last — the suppression tally
 #   escalate.sh keeps on the CLOSED verdict-bearing visit: how many times the
