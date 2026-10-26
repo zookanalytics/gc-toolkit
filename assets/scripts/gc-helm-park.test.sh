@@ -59,14 +59,14 @@ if [ -z "$FLOOR" ] || [ ! -x "$FLOOR/gc" ]; then
   exit 2
 fi
 
-mkdir -p "$TMP/bin" "$TMP/rig-tk/.beads" "$TMP/rig-sl/.beads"
+mkdir -p "$TMP/bin" "$TMP/rig-tk/.beads" "$TMP/rig-ra/.beads"
 
 # --- gc stub ------------------------------------------------------------------
 # The store is a JSON array of rows {id, status, assignee, issue_type, title,
 # description, metadata, deps:[{on, type}]}; a row's deps are the edges it
 # carries, so a parent-child edge sits on the child and a blocks edge on the
 # bead that waits. Every call's argv is logged to $STUB_CALLS.
-#   rig list         two rigs: tk at $STUB_RIG_TK and ra at $STUB_RIG_SL, each
+#   rig list         two rigs: tk at $STUB_RIG_TK and ra at $STUB_RIG_RA, each
 #                    with a .beads dir, so the verb pins every call with --db.
 #   bd show <id>     `bd show --json`: an array of one row whose dependencies are
 #                    the targets' rows {id, dependency_type, status, title,
@@ -101,8 +101,8 @@ printf '%s\n' "$*" >> "${STUB_CALLS:?}"
 sub="${1:-}"; shift || true
 case "$sub" in
   rig)
-    jq -n --arg tk "$STUB_RIG_TK" --arg sl "$STUB_RIG_SL" \
-      '{rigs:[{name:"gc-toolkit", path:$tk, prefix:"tk"}, {name:"rig-a", path:$sl, prefix:"ra"}]}'
+    jq -n --arg tk "$STUB_RIG_TK" --arg ra "$STUB_RIG_RA" \
+      '{rigs:[{name:"gc-toolkit", path:$tk, prefix:"tk"}, {name:"rig-a", path:$ra, prefix:"ra"}]}'
     exit 0 ;;
   bd) : ;;
   *) echo "gc stub: unsupported '$sub'" >&2; exit 2 ;;
@@ -193,7 +193,7 @@ case "$verb" in
       shift || true
     done
     pfx="${STUB_CREATE_PREFIX:-}"
-    if [ -z "$pfx" ]; then case "$db" in */rig-sl/*) pfx=ra ;; *) pfx=tk ;; esac; fi
+    if [ -z "$pfx" ]; then case "$db" in */rig-ra/*) pfx=ra ;; *) pfx=tk ;; esac; fi
     n=$(jq '[ .[] | select(.issue_type == "gate") ] | length' "$S")
     nid="$pfx-g$((n + 1))"
     target=""
@@ -244,7 +244,7 @@ unset "${!GC_@}" "${!BEADS_@}" 2>/dev/null || true
 export PATH="$TMP/bin:$FLOOR:$PATH"
 export TMPDIR="$TMP"
 export STUB_STORE="$TMP/store.json" STUB_CALLS="$TMP/calls"
-export STUB_RIG_TK="$TMP/rig-tk" STUB_RIG_SL="$TMP/rig-sl"
+export STUB_RIG_TK="$TMP/rig-tk" STUB_RIG_RA="$TMP/rig-ra"
 
 # The store every case starts from.
 #   tk-epic          an epic; its members:
@@ -640,9 +640,9 @@ has "$ERR" "landed in another rig's store" "(LEDGER) the failure names the stray
 reset_store
 run_park ra-x "Parked until the rig-a pack update lands"
 eq "$RC" "0" "(STORE) parking a bead in another rig exits 0"
-grep -q "^bd create .* --db $STUB_RIG_SL/.beads --json" <<< "$CALLS" \
+grep -q "^bd create .* --db $STUB_RIG_RA/.beads --json" <<< "$CALLS" \
   && ok "(STORE) the gate is filed in that rig's store" || bad "(STORE) create pinned to the bead's store (calls: $CALLS)"
-case "$(edges_of ra-x)" in sl-*) ok "(STORE) the gate carries that store's prefix" ;; *) bad "(STORE) gate prefix (edges: $(edges_of ra-x))" ;; esac
+case "$(edges_of ra-x)" in ra-*) ok "(STORE) the gate carries that store's prefix" ;; *) bad "(STORE) gate prefix (edges: $(edges_of ra-x))" ;; esac
 
 # --- (WIRING) the verb is reachable and documented ----------------------------
 grep -qE '^[[:space:]]*park\)[[:space:]]*shift; cmd_park' "$SCRIPT" \

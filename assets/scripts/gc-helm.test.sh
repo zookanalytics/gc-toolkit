@@ -92,11 +92,11 @@ S
 case "$1 ${2:-}" in
   "rig list")
     # Two rigs. gc-toolkit's path has no .beads dir, so gc-helm issues
-    # un-scoped bd calls for `tk-` ids; rig-a's does, so an `sl-` id
+    # un-scoped bd calls for `tk-` ids; rig-a's does, so an `ra-` id
     # exercises the rig pin.
-    jq -n --arg sl "$FAKE_SL_PATH" \
+    jq -n --arg ra "$FAKE_RA_PATH" \
        '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"},
-               {name:"rig-a", path:$sl, prefix:"ra"}]}' ;;
+               {name:"rig-a", path:$ra, prefix:"ra"}]}' ;;
   "session list")
     # The no-id dismiss resolves the session's own rig from its record, because
     # a converse sitting defaults its store to the CITY ledger. converse-hq-1's
@@ -409,7 +409,7 @@ J
 cat > "$TMP/deplists/A-PROBEJUNK.json" <<'J'
 [{"id":"w-child","status":"open","dependency_type":"blocks","metadata":{}}]
 J
-export FAKE_SL_PATH="$TMP/rig-a"
+export FAKE_RA_PATH="$TMP/rig-a"
 : > "$TMP/deps"; : > "$TMP/closes"; : > "$TMP/lists"; : > "$TMP/routed"
 : > "$TMP/settled"; : > "$TMP/takeaway"
 # metadata.branch per bead, for the --waiting-on landed-rider skip. w-same,
