@@ -19,7 +19,7 @@
 #   finding.severity     the grade the reviewer's method gave it, P0, P1 or P2;
 #                        absent from a finding no method graded. A P2 is ruled
 #                        must-fix or declined and never deferred
-#   finding.category     the angle of the method that found it
+#   finding.category     the part of the reviewer's method that found it
 #   finding.failure_scenario
 #                        the input or state that triggers it, then the wrong
 #                        output that follows

@@ -863,7 +863,7 @@ keys = [
   # finding.severity — P0, P1 or P2, the grade the method gave it. A P2 is filed
   #   only beside a blocking finding, and the validator rules it must-fix or
   #   declined: finding.sh refuses its deferral.
-  # finding.category — the angle of the method that found it.
+  # finding.category — the part of the method that found it.
   # finding.failure_scenario — the input or state that triggers it, then the
   #   wrong output that follows.
   # finding.verification — on a P0 or P1, CONFIRMED with the evidence, or
