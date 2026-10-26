@@ -528,7 +528,9 @@ sitting's sign-off later reports the gate already cleared.
 `gc-helm.sh accept` runs under the bead's acceptance lock, a `flock` on one
 file per bead under `<city>/.gc/runtime/packs/gc-toolkit`, from before its live
 read of the three conditions to its last write, and refuses, writing nothing,
-while another Accept holds it. On an open gate it resolves the gate with
+while another Accept holds it. On an open gate it records the acceptance's
+dispatch input on the gate (`gc.acceptance`: its token, the formula and each
+var) and reads it back, resolves the gate with
 `ruled: accepted <formula> accept:<token>`, reads its own answer back, reads
 back that no other open human gate blocks the bead, slings the formula titled
 `<formula> accept:<token>`, and records the dispatch by stripping
@@ -537,8 +539,10 @@ another reached first stands, and Accept slings nothing. A gate filed in the
 meantime, or a sling that poured no root, reopens the recommendation's gate. A
 run that stopped after its resolve leaves an unfinished acceptance, which the
 board keeps owed and the next Accept finishes under the same token, slinging
-only when no root carries the token. The lock's warrant is in
-[warrants.md](warrants.md).
+only when no root carries the token. That sling carries the vars the
+acceptance recorded, whoever finishes it: the board's Accept passes none, and a
+run given vars other than the recorded ones dispatches nothing. The lock's
+warrant is in [warrants.md](warrants.md).
 
 A sitting takes a recommendation through the same writer. When the operator
 rules to take it, the sign-off's `--accept` leaves the recommendation's gate

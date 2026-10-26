@@ -203,20 +203,24 @@ acceptance an earlier Accept did not finish, and no other open human gate
 blocks the bead. Every Accept on a bead runs under the bead's acceptance lock,
 a flock on a file under <city>/.gc/runtime/packs/gc-toolkit, from before its
 live read of those three conditions to its last write, and refuses while
-another Accept holds it. It resolves the gate with `ruled: accepted <formula>
-accept:<token>`, reads its own answer back, checks that no open human gate
-blocks the bead, slings the formula titled `<formula> accept:<token>`, and
-records the dispatch by stripping gc.recommended_formula. An answer another
-reached first stands, and Accept slings nothing. A gate filed in the meantime,
-or a sling that poured no root, reopens the gate. A run that stopped after its
-resolve leaves an unfinished acceptance, which the next Accept finishes under
-the same token, slinging only when no root carries the token. A sitting takes a
+another Accept holds it. It records the acceptance's dispatch input (its
+token, the formula and each --var) on the gate, resolves the gate with
+`ruled: accepted <formula> accept:<token>`, reads its own answer back, checks
+that no open human gate blocks the bead, slings the formula titled `<formula>
+accept:<token>`, and records the dispatch by stripping gc.recommended_formula.
+An answer another reached first stands, and Accept slings nothing. A gate filed
+in the meantime, or a sling that poured no root, reopens the gate. A run that
+stopped after its resolve leaves an unfinished acceptance, which the next
+Accept finishes under the same token, slinging only when no root carries the
+token, and slinging the vars the acceptance recorded. A sitting takes a
 recommendation through this verb too: its sign-off's --accept runs it with
 --conversation naming the sitting's own conversation, which Accept then does
 not warn of as a live sitting on the bead, and with a --var for each var the
 operator's ruling settled for the dispatch, such as mol-design-convoy's
-design_gated=false. Each --var rides the sling; a root an earlier run already
-poured under the token keeps the vars it was poured with.
+design_gated=false. Each --var rides the sling. A run that finishes an
+acceptance slings the vars that acceptance was made with and refuses a --var
+that differs from them, and a root an earlier run already poured under the
+token keeps the vars it was poured with.
 EOF
 }
 
@@ -2774,6 +2778,54 @@ accept_sling() {
     gc sling "$@"
 }
 
+# accept_input <token> <formula> — the acceptance's dispatch input as one line
+# of JSON, {token, formula, vars}, with vars as accept_vars lists them.
+accept_input() {
+    printf '%s' "$accept_vars" | jq -Rsc --arg t "$1" --arg f "$2" \
+        '{token: $t, formula: $f, vars: (if . == "" then [] else split("\n") end)}'
+}
+
+# accept_record <token> <formula> <gate>... — record the acceptance's dispatch
+# input on each gate as gc.acceptance, before the resolve that names the token,
+# and read each back. Returns 0 once every gate reads it back; ACCEPT_RECORD_LEFT
+# names the ones that do not.
+ACCEPT_RECORD_LEFT=""
+accept_record() {
+    _arc_tok="$1"; _arc_formula="$2"; shift 2; ACCEPT_RECORD_LEFT=""
+    _arc_in=$(accept_input "$_arc_tok" "$_arc_formula") || _arc_in=""
+    if [ -z "$_arc_in" ]; then
+        ACCEPT_RECORD_LEFT="$*"
+        return 1
+    fi
+    for _arc_g in "$@"; do
+        gc bd update "$_arc_g" --set-metadata "gc.acceptance=$_arc_in" >/dev/null 2>&1 || true
+        if ! row_now "$_arc_g" | jq -e --arg want "$_arc_in" '
+                ((.metadata // {})["gc.acceptance"] // null)
+                | (if type == "string" then (fromjson? // null) else . end) == ($want | fromjson)' >/dev/null 2>&1; then
+            ACCEPT_RECORD_LEFT="${ACCEPT_RECORD_LEFT:+$ACCEPT_RECORD_LEFT }$_arc_g"
+        fi
+    done
+    [ -z "$ACCEPT_RECORD_LEFT" ]
+}
+
+# accept_recorded_vars <gate-row> <token> <formula> — the vars the acceptance
+# under <token> was accepted with, one per line as accept_vars holds them, read
+# off the gate's gc.acceptance. Returns 1 when the gate records no dispatch
+# input under that token for that formula.
+accept_recorded_vars() {
+    printf '%s' "$1" | jq -er --arg t "$2" --arg f "$3" '
+        ((.metadata // {})["gc.acceptance"] // empty)
+        | (if type == "string" then (fromjson? // empty) else . end)
+        | select(type == "object" and ((.token // "") | tostring) == $t and ((.formula // "") | tostring) == $f)
+        | [ (.vars // [])[] | tostring ] | join("\n")' 2>/dev/null
+}
+
+# accept_vars_said <vars> — vars as a sling would carry them, for a message.
+accept_vars_said() {
+    if [ -z "$1" ]; then printf 'no --var'; return 0; fi
+    printf '%s' "$1" | awk 'BEGIN { ORS = "" } { printf "%s--var %s", (NR > 1 ? " " : ""), $0 }'
+}
+
 # ── Verb: accept ─────────────────────────────────────────────────────
 # Accept a recommendation: clear the human gate that put gc.recommended_formula
 # to the operator, the gate under the key first-reaction, and dispatch the
@@ -2795,18 +2847,24 @@ accept_sling() {
 # Every Accept on a bead runs under the bead's acceptance lock from before its
 # live read of those conditions to its last write, so one run's search, sling
 # and record never interleave with another's, and an acceptance is dispatched
-# once even after the work it sent has finished. On an open gate it resolves
-# the gate with `ruled: accepted <formula> accept:<token>`, reads its own
-# answer back, reads back that no open human gate blocks the bead, slings the
-# formula titled `<formula> accept:<token>`, and records the dispatch. The
-# first answer to reach the gate wins: a sitting's ruling, a filer's
-# withdrawal or a person's resolve stands, and Accept slings nothing and
-# reopens nothing. A gate filed in the meantime, or a sling that poured no
-# root under the token, reopens the gate from Accept's own close. A run that
-# stopped after its resolve leaves the gate closed with its answer beside the
-# recommendation, an unfinished acceptance, which the next run finishes under
-# the same token: it records the dispatch when a root carries the token, and
-# otherwise takes the read-back, the sling and the record.
+# once even after the work it sent has finished. On an open gate it records
+# the acceptance's dispatch input on the gate (gc.acceptance: the token, the
+# formula and each --var) and reads it back, resolves the gate with
+# `ruled: accepted <formula> accept:<token>`, reads its own answer back, reads
+# back that no open human gate blocks the bead, slings the formula titled
+# `<formula> accept:<token>`, and records the dispatch. The first answer to
+# reach the gate wins: a sitting's ruling, a filer's withdrawal or a person's
+# resolve stands, and Accept slings nothing and reopens nothing. A gate filed
+# in the meantime, or a sling that poured no root under the token, reopens the
+# gate from Accept's own close. A run that stopped after its resolve leaves the
+# gate closed with its answer beside the recommendation, an unfinished
+# acceptance, which the next run finishes under the same token: it records the
+# dispatch when a root carries the token, and otherwise takes the read-back,
+# the sling and the record, slinging the vars the gate records under the token.
+# An acceptance dispatches the input it was accepted with whoever finishes it,
+# so a finishing run given a --var that differs from that input dispatches
+# nothing, and one given none, as the board's Accept is, slings the recorded
+# vars.
 cmd_accept() {
     bead=""; accept_reason=""; accept_conv=""; accept_vars=""
     while [ $# -gt 0 ]; do
@@ -2922,9 +2980,16 @@ cmd_accept() {
     accept_warn_live "$bead" $rec_gates
 
     if [ -z "$tok" ]; then
-        # Step 1: the operator's acceptance, which the resolve is.
+        # Step 1: the operator's acceptance, which the resolve is. Its dispatch
+        # input goes on the gate first, under the token the answer names, so
+        # whichever run finishes the acceptance slings what was accepted.
         tok=$(accept_token)
         answer="ruled: accepted $formula accept:$tok"
+        # shellcheck disable=SC2086  # the gate ids are space-free words
+        if ! accept_record "$tok" "$formula" $rec_gates; then
+            echo "$PROG: accept: could not record acceptance $tok's dispatch input ($(accept_vars_said "$accept_vars")) on $bead's recommendation gate ${ACCEPT_RECORD_LEFT:-$rec_gates}, so nothing is resolved or dispatched. Re-run once the store answers: $PROG accept $bead" >&2
+            exit 4
+        fi
         for g in $rec_gates; do
             gc bd gate resolve "$g" --reason "$answer" >/dev/null 2>&1 || true
         done
@@ -2984,6 +3049,20 @@ cmd_accept() {
                 echo "$PROG: accept: could not search for a root of acceptance $tok on $bead, which proves nothing, so nothing is dispatched or written. Re-run once the store answers: $PROG accept $bead" >&2
                 exit 4 ;;
         esac
+        # No root carries the token, so this run slings, and it slings the
+        # input the acceptance was made with, read off the gate, never this
+        # run's own: the board's Accept passes no --var, and a retry's defaults
+        # would undo a var the operator's ruling settled.
+        if ! recorded_vars=$(accept_recorded_vars "$rec_newest" "$tok" "$formula"); then
+            echo "$PROG: accept: the recommendation's gate $rec_gates on $bead records no dispatch input for acceptance $tok, so the vars it was accepted with cannot be told, and nothing is dispatched or written. Reopen the gate and Accept again: gc bd reopen $rec_gates && $PROG accept $bead" >&2
+            exit 4
+        fi
+        if [ -n "$accept_vars" ] && [ "$accept_vars" != "$recorded_vars" ]; then
+            echo "$PROG: accept: acceptance $tok on $bead was accepted with $(accept_vars_said "$recorded_vars"), and this run was given $(accept_vars_said "$accept_vars"). An acceptance dispatches the input it was accepted with, so nothing is dispatched or written. Finish it as accepted, with those vars or none: $PROG accept $bead. To dispatch other vars, reopen the gate first: gc bd reopen $rec_gates" >&2
+            exit 4
+        fi
+        accept_vars="$recorded_vars"
+        [ -z "$accept_vars" ] || echo "$PROG: accept: acceptance $tok slings the vars it was accepted with: $(accept_vars_said "$accept_vars")" >&2
     fi
 
     # Step 3: no open human gate blocks the bead. A gate filed between the live

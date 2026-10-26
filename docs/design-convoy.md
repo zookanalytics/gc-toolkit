@@ -170,7 +170,9 @@ remove the edge first: `gc bd dep remove <subject> <convoy>`.
 
 `design_gated` is a var, default `true`. The operator settles it per initiative
 when acting on the recommendation. The board's Accept passes no var, so an
-Accept from the board takes the design-gated default. For all-in-one, the
+Accept from the board takes the design-gated default, except when it finishes
+an acceptance a sitting's sign-off left unfinished: that sling carries the var
+the acceptance recorded on the recommendation's gate. For all-in-one, the
 operator takes the recommendation to a sitting (Discuss) instead, and the
 sitting's sign-off takes it with `--accept --var design_gated=false`. The
 sign-off hands the var to Accept's writer, which answers the gate that put the

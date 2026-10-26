@@ -20,8 +20,9 @@
 # its fixtures):
 #   (STALE)    a recommendation beside a review gate: Accept refuses and names
 #              the review gate, writing nothing
-#   (ACCEPT)   with the recommendation's gate the last one open, Accept answers
-#              it alone, slings with the token in the root's title and records
+#   (ACCEPT)   with the recommendation's gate the last one open, Accept records
+#              the acceptance's dispatch input on the gate, answers the gate
+#              alone, slings with the token in the root's title and records
 #   (LATE)     a gate filed after the live read stops the dispatch and reopens
 #              the recommendation's gate
 #   (EARLIER)  a sitting's answer that reaches the gate first stands: nothing is
@@ -43,13 +44,17 @@
 #   (SELF-KILL) a run killed by itself keeps the lock until its sling exits
 #   (OUTLIVE)  a sling that outlives the lock meets Gas City's launch lock
 #   (SLING-*)  a failed sling is judged by the token's root
-#   (VAR-*)    each --var rides the sling as given, a root already poured keeps
-#              its own vars, and a --var that is not <key>=<value> is refused
+#   (VAR-*)    each --var rides the sling as given and is recorded on the gate
+#              before the resolve; a finish slings the recorded vars, refuses a
+#              --var that differs from them and an acceptance that records none;
+#              a root already poured keeps its own vars; and a --var that is not
+#              <key>=<value> is refused
 #   (SITTING-*) a sitting's sign-off takes the recommendation through this
 #              same writer (converse-signoff.sh --accept), so the board's Accept
 #              and the sitting dispatch it once between them, whichever runs
 #              first, stops part way, or holds the lock, and a var the
-#              sitting's ruling settled rides Accept's sling
+#              sitting's ruling settled rides Accept's sling, also when the
+#              board's Accept finishes a take that stopped after its resolve
 #
 # Runs the REAL gc-helm.sh (as `sh`, as shipped) with a stubbed `gc` on PATH
 # over a file-backed store: no live city, Dolt, network or sessions. The stub's
@@ -312,8 +317,17 @@ close_gate() { jq --arg r "$2" '.status = "closed" | .close_reason = $r' "$STORE
 close_bead() { jq '.status = "closed"' "$STORE/b/$1.json" > "$STORE/b/$1.tmp" && mv "$STORE/b/$1.tmp" "$STORE/b/$1.json"; }
 # rec — the base fixture: tk-anc recommends mol-fix, put by the open gate tk-rec.
 rec() { fresh; bead tk-anc mol-fix; gate tk-rec first-reaction "Accept mol-fix on tk-anc: the reaction recommends it"; edge tk-anc blocks tk-rec; }
-# unfinished <token> — the base fixture with tk-rec closed by an Accept that stopped.
-unfinished() { rec; close_gate tk-rec "ruled: accepted mol-fix accept:$1"; }
+# record_on <gate> <token> <formula> [<key>=<value>...] — the dispatch input an
+# Accept records on the gate before it resolves it.
+record_on() {
+    _g="$1"; _t="$2"; _f="$3"; shift 3
+    _v=$(jq -nc '$ARGS.positional' --args "$@")
+    jq --arg t "$_t" --arg f "$_f" --argjson v "$_v" '.metadata["gc.acceptance"] = ({token: $t, formula: $f, vars: $v} | tojson)' \
+        "$STORE/b/$_g.json" > "$STORE/b/$_g.tmp" && mv "$STORE/b/$_g.tmp" "$STORE/b/$_g.json"
+}
+# unfinished <token> — the base fixture with tk-rec closed by an Accept that
+# stopped, its dispatch input recorded on the gate as that Accept left it.
+unfinished() { rec; record_on tk-rec "$1" mol-fix; close_gate tk-rec "ruled: accepted mol-fix accept:$1"; }
 
 # --- readers ------------------------------------------------------------------
 field()   { jq -r --arg k "$2" '.[$k] // "" | tostring' "$STORE/b/$1.json" 2>/dev/null; }
@@ -394,6 +408,11 @@ eq "$(field tk-rev close_reason)" "ruled: fix the retry before the merge" "(ACCE
 case "$(cat "$CALLS")" in
   *"bd gate resolve tk-rec"*"sling tk-anc"*) ok "(ACCEPT) the resolve comes before the sling" ;;
   *) bad "(ACCEPT) the resolve should precede the sling (calls: $(cat "$CALLS"))" ;;
+esac
+eq "$(meta tk-rec gc.acceptance | jq -c .)" "{\"token\":\"$TOK\",\"formula\":\"mol-fix\",\"vars\":[]}" "(ACCEPT) the gate records the acceptance's dispatch input under its token"
+case "$(cat "$CALLS")" in
+  *"bd update tk-rec --set-metadata gc.acceptance="*"bd gate resolve tk-rec"*) ok "(ACCEPT) …before the resolve that names the token" ;;
+  *) bad "(ACCEPT) the dispatch input should be recorded before the resolve (calls: $(cat "$CALLS"))" ;;
 esac
 hasnt "$(cat "$CALLS")" "bd close" "(ACCEPT) Accept runs no dismiss"
 : > "$CALLS"; run_accept tk-anc
@@ -499,6 +518,39 @@ for v in design_gated =false "$(printf 'a=b\nc=d')"; do
     eq "$RC" 2 "(VAR-FORM) a --var that is not <key>=<value> on one line ('$v') exits 2"
     eq "$(writes)" 0 "(VAR-FORM) …writing nothing"
 done
+
+echo "# an acceptance's vars are recorded before its resolve, and whoever finishes it slings them"
+rec; run_accept tk-anc --var design_gated=false --var note=a=b
+TOK="$(token_of tk-rec)"
+eq "$(meta tk-rec gc.acceptance | jq -c .)" "{\"token\":\"$TOK\",\"formula\":\"mol-fix\",\"vars\":[\"design_gated=false\",\"note=a=b\"]}" "(VAR-RECORD) the gate records each var under the acceptance's token"
+for stop in resolve sling; do
+    rec; STOP_AT=$stop run_accept tk-anc --var design_gated=false
+    T="$(token_of tk-rec)"
+    eq "$(roots "accept:$T")" 0 "(VAR-STOP-$stop) an Accept given a var stopped before its pour leaves nothing poured"
+    run_accept tk-anc
+    eq "$RC" 0 "(VAR-STOP-$stop) the board's plain Accept finishes the acceptance"
+    has "$OUT" "slings the vars it was accepted with: --var design_gated=false" "(VAR-STOP-$stop) …saying it slings the vars the acceptance recorded"
+    has "$(grep '^sling ' "$CALLS" | tail -1)" "--title mol-fix accept:$T --var design_gated=false" "(VAR-STOP-$stop) …and slinging the var the acceptance was made with, not the retry's none"
+    eq "$(roots "accept:$T")" 1 "(VAR-STOP-$stop) …pouring one root under the token"
+done
+rec; STOP_AT=resolve run_accept tk-anc --var design_gated=false
+T="$(token_of tk-rec)"; W_BEFORE="$(writes)"
+run_accept tk-anc --var design_gated=true
+eq "$RC" 4 "(VAR-MISMATCH) a finish given a var that differs from the acceptance's exits 4"
+has "$OUT" "was accepted with --var design_gated=false, and this run was given --var design_gated=true" "(VAR-MISMATCH) …naming both"
+eq "$(writes)" "$W_BEFORE" "(VAR-MISMATCH) …writing and slinging nothing"
+run_accept tk-anc --var design_gated=false
+eq "$RC" 0 "(VAR-MISMATCH) a finish given the same var exits 0"
+has "$(grep '^sling ' "$CALLS" | tail -1)" "--title mol-fix accept:$T --var design_gated=false" "(VAR-MISMATCH) …slinging it once"
+unfinished 0123456789abcdef
+jq 'del(.metadata["gc.acceptance"])' "$STORE/b/tk-rec.json" > "$STORE/b/tk-rec.tmp" && mv "$STORE/b/tk-rec.tmp" "$STORE/b/tk-rec.json"
+run_accept tk-anc
+eq "$RC" 4 "(VAR-NO-RECORD) an unfinished acceptance whose gate records no dispatch input exits 4"
+has "$OUT" "records no dispatch input for acceptance 0123456789abcdef" "(VAR-NO-RECORD) …saying the vars it was accepted with cannot be told"
+eq "$(writes)" 0 "(VAR-NO-RECORD) …and writes and slings nothing"
+unfinished 0123456789abcdef; record_on tk-rec 0123456789abcdef mol-other design_gated=false
+run_accept tk-anc
+eq "$RC" 4 "(VAR-NO-RECORD) a record made for another formula is no record of this acceptance"
 
 echo "# a gate filed after the stop holds the finish"
 unfinished 0123456789abcdef; gate tk-hold liveness "Is the rig still alive?"; edge tk-anc blocks tk-hold
@@ -746,6 +798,16 @@ run_take --var design_gated=false
 TS="$(token_of tk-rec)"
 eq "$RC" 0 "(SITTING-VAR) a sitting's take that settles a var exits 0"
 has "$(grep '^sling ' "$CALLS")" "--title mol-fix accept:$TS --var design_gated=false" "(SITTING-VAR) …and Accept slings the formula with it"
+
+echo "# a sitting's take that stops after its resolve, finished from the board, keeps the var"
+rec; sitting
+STOP_AT=resolve run_take --var design_gated=false
+TS="$(token_of tk-rec)"
+eq "$RC" 1 "(SITTING-VAR-STOP) a take whose Accept stopped after its resolve stops the sign-off short"
+eq "$(roots "accept:$TS")" 0 "(SITTING-VAR-STOP) …with nothing poured"
+run_accept tk-anc
+eq "$RC" 0 "(SITTING-VAR-STOP) the board's Accept finishes the take's acceptance"
+has "$(grep '^sling ' "$CALLS" | tail -1)" "--title mol-fix accept:$TS --var design_gated=false" "(SITTING-VAR-STOP) …slinging the var the sitting's ruling settled, so the dispatch is the one the operator ruled"
 
 echo
 echo "gc-helm accept: $PASS passed, $FAIL failed"

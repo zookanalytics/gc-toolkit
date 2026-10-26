@@ -1235,6 +1235,7 @@ keys = [
   "gc.reacted_by", "gc.proactive_reaction",
   "gc.blocker_key",
   "gc.recommended_formula", "gc.recommended_formula_dispatched",
+  "gc.acceptance",
   "gc.reaction_owned",
   "gc.first_reaction", "gc.first_reaction_reason", "gc.first_reaction_target",
   "gc.first_reaction_at",
@@ -1292,9 +1293,18 @@ keys = [
 # gc.recommended_formula_dispatched — the formula gc-helm.sh `accept` slung,
 #   written in the update that unsets gc.recommended_formula and read back after
 #   it. `accept` reads it to resume a run that dispatched but did not finish: it
-#   completes the unset and the visit dismiss, and never slings again. `accept`
-#   slings before it writes this key, so absent means no Accept has recorded a
-#   dispatch. Never cleared. A formula name.
+#   completes the unset and never slings again. `accept` slings before it writes
+#   this key, so absent means no Accept has recorded a dispatch. Never cleared.
+#   A formula name.
+# gc.acceptance — on the human gate under the key first-reaction, the dispatch
+#   input of the acceptance that answers it: a JSON object {token, formula,
+#   vars}, with vars the `<key>=<value>` strings its sling carries. gc-helm.sh
+#   `accept` writes it and reads it back before the resolve that names the
+#   token, and a run that finishes that acceptance slings the vars recorded
+#   under the token, so the board's Accept, which passes no --var, dispatches
+#   what the operator accepted. A record whose token no answer names is a run
+#   that stopped before its resolve, and the next acceptance overwrites it.
+#   Never cleared.
 # gc.reaction_owned — `1`, the stand-down marker on a subject whose reaction a
 #   live owner already holds. gc-helm.sh `engage --new-subject` writes it in the
 #   create payload of the subject it files, beside gc.origin, so no scan sees
