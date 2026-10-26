@@ -14,11 +14,14 @@ open, and why the review went out. One sling pours the two lanes and the
 synthesis, so all three read the same commit.
 
 The mol-review hard contract is preserved intact: ONE verdict per claim — the
-synthesis makes the single signoff.sh call and the lanes never call it; the
-verdict is posted as a COMMENT, never a GitHub approval (signoff.sh owns
-that). The lanes add reviewer breadth on a second
-provider; the check, the finding beads, and the rework child are the same
-machinery mol-review hands to.
+synthesis makes the single signoff.sh call, and neither the lanes nor any
+subagent a lane or the synthesis runs ever calls it; the verdict is posted as
+a COMMENT, never a GitHub approval (signoff.sh owns that). Every subagent is
+read-only in the review's workspace and returns what it found to the agent
+that ran it. The lanes add reviewer breadth on a second provider, and a lane
+may itself fan out to subagents, which write no lane output of their own, so
+the quorum keeps its two lanes, one per provider. The check, the finding
+beads, and the rework child are the same machinery mol-review hands to.
 
 Lane routing is per-step: each lane carries gc.run_target / gc.provider, so
 the two lanes land on two provider pools and each runs on its pool's default

@@ -212,7 +212,9 @@ epic's notes carry each ruling as it was made.
 - **The verifier** is a subagent or a separate pass, whichever the reviewing
   provider supports. Reviews run on the polecat-codex pool
   (`assets/scripts/refinery-reconcile.sh:89`), so the verify-or-demote unit
-  checks what codex offers.
+  checks what codex offers, and
+  [codex-verifier.md](../tk-qjdt90g.6/codex-verifier.md) records what it
+  found.
 - **Sequencing.** The method units wait for the review-path redesign (design
   convoy tk-gaklsnk) to reach main, because it reshapes the same files.
   gc-toolkit's own guidance and the outside-feedback capture start at once,
