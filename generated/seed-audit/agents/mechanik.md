@@ -207,12 +207,27 @@ of them. The summary task is dispatched once the effort's beads have landed, and
 its close releases the landing bead to the refinery, which opens the one PR with
 the summary the task wrote.
 
-A bead that joins the effort later takes the same writes before it is slung: its
-target, the landing bead's wait on it, and the summary task's. A summary task
-that has already been dispatched may already have read the branch, so the bead
-waits instead on a fresh summary task, filed and armed as the first one was, and
-the landing bead waits on that one too. Once the refinery has taken the landing
-bead, work for its branch rides the PR as a rework or a supplement.
+A bead that joins the effort later takes step 4's writes, and a summary task's
+wait on it, before it is slung. The summary task waits on the bead and never the
+reverse, because the summary must read the branch after the bead has landed. The
+effort's summary task is the landing bead's wait whose title begins `summary:`,
+the newest when there are several. While it has not been dispatched, it still
+carries its arm and no dispatch marker, and its own wait on the bead is enough:
+
+```bash
+# The summary task's wait on a bead that joins later, after step 4's writes.
+# dep add's second id is the bead that is waited on.
+gc bd --rig <rig> show "$SUMMARY" --json | tr -d '[:cntrl:]' | jq -e '.[0].metadata | (.["gc.dispatch_when_ready"] // "") != "" and (.["gc.dispatch_when_ready_slung"] // "") == ""' >/dev/null \
+  && gc bd --rig <rig> dep add "$SUMMARY" "$WORK" --type=blocks \
+  && gc bd --rig <rig> dep list "$SUMMARY" --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg w "$WORK" 'any(.[]; .id == $w)' >/dev/null \
+  || { echo "$SUMMARY has been dispatched or does not wait on $WORK; file a fresh summary task by step 5" >&2; exit 1; }
+```
+
+A summary task that has been dispatched may already have read the branch, so a
+fresh summary task waits on the bead instead: filed and read back by step 5 with
+the bead among its waits, which makes the landing bead wait on it too, and armed
+as in step 7. Then sling the bead. Once the refinery has taken the landing bead,
+work for its branch rides the PR as a rework or a supplement.
 
 A **shared input artifact** (a decisions doc, a spec several beads need before
 any produce mergeable work) is the effort's first bead. It lands on the branch

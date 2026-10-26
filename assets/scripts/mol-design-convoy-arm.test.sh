@@ -44,10 +44,12 @@
 # placeholders filled in: it cuts from origin/HEAD's branch and records it as
 # the landing bead's target, files every bead and the summary task with their
 # waits read back before it hands the landing bead over, and dispatches only
-# after that.
+# after that. Its block for a bead that joins later makes the undispatched
+# summary task wait on the bead, never the reverse, and refuses a summary task
+# that has been dispatched.
 #
 # EXECUTES the real snippets extracted verbatim between the formula markers and
-# from the mechanik's fenced block, so the test cannot drift from the shipped
+# from the mechanik's fenced blocks, so the test cannot drift from the shipped
 # instruction. No live city or network.
 set -euo pipefail
 
@@ -835,7 +837,9 @@ done
 # bead of the effort. NEXT_IDS gives the landing bead, the bead and the summary
 # task their ids in the order the recipe files them.
 RECIPE="$(fenced_block "$MECHANIK" '# >>> effort-default-branch')"
+LATE="$(fenced_block "$MECHANIK" "dep add's second id is the bead that is waited on")"
 [ -n "$RECIPE" ] && ok "the mechanik's recipe is found" || bad "the mechanik's recipe is not found in $MECHANIK"
+[ -n "$LATE" ] && ok "the mechanik's block for a bead that joins later is found" || bad "the mechanik's late-join block is not found in $MECHANIK"
 fill() {
   sed -e 's#{{ \.BindingPrefix }}#gc-toolkit.#g' \
       -e 's#<each bead of the effort, comma-separated>#$WORK#g' \
@@ -851,6 +855,7 @@ recipe_store() {
   printf '%s\n' "$ORIGIN_HEAD" > "$ORIGIN_REFS"
 }
 run_recipe() { { printf '%s\n' "$RECIPE" | fill; printf 'printf "past\\n" > "%s"\n' "$TMP/past.flag"; } > "$TMP/block.sh"; run_file "$1"; }
+run_late() { { printf '%s\n' "$LATE" | fill; printf 'printf "past\\n" > "%s"\n' "$TMP/past.flag"; } > "$TMP/block.sh"; run_file "$1"; }
 
 for sh in "${SHELLS[@]}"; do
   recipe_store
@@ -888,6 +893,33 @@ for sh in "${SHELLS[@]}"; do
   run_recipe "$sh"
   stopped && not_logged "bd --rig rig update" && ok "[$sh] recipe: a cut that fails records nothing on the landing bead" \
     || bad "[$sh] recipe: went ahead after a failed cut (rc=$RC)"
+
+  # --- a bead that joins later ---
+  # The effort's beads and its summary task are filed and dispatched; work-2
+  # joins with step 4's writes. The summary task's own wait takes it while the
+  # task is undispatched, which the arm with no dispatch marker shows.
+  JOINED='map(if .id == "land-1" then ._deps += [{id: "work-2", dependency_type: "blocks"}] else . end)
+    + [{id: "work-2", title: "x", issue_type: "task", status: "open", assignee: "", description: "", metadata: {target: "integration/land-1"}, _deps: []}]'
+  recipe_store; run_recipe "$sh"
+  jq -c "$JOINED"' | map(if .id == "sum-1" then .metadata += {"gc.dispatch_when_ready": "rig/gc-toolkit.polecat"} else . end)' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
+  export SUMMARY=sum-1 WORK=work-2
+  run_late "$sh"
+  eq "$RC" "0" "[$sh] late join: an undispatched summary task takes the joining bead's wait"
+  eq "$(waits_on sum-1 work-2)" "1" "[$sh] late join: the summary task waits on the joining bead"
+  eq "$(open_blockers work-2)" "" "[$sh] late join: the joining bead waits on no summary task, so it is free to sling"
+  case " $(open_blockers sum-1) " in *" work-2 "*) ok "[$sh] late join: the summary task is held until the joining bead lands" ;;
+    *) bad "[$sh] late join: the summary task is not held by the joining bead" ;; esac
+
+  for marker in '{}' '{"gc.dispatch_when_ready": "rig/gc-toolkit.polecat", "gc.dispatch_when_ready_slung": "slinging@2026-10-26T00:00:00Z"}'; do
+    recipe_store; run_recipe "$sh"
+    jq -c --arg m "$marker" "$JOINED"' | map(if .id == "sum-1" then .metadata = ($m | fromjson) else . end)' "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
+    export SUMMARY=sum-1 WORK=work-2
+    run_late "$sh"
+    stopped && not_logged "dep add" && [ "$(waits_on sum-1 work-2)" = "0" ] && reported "file a fresh summary task" \
+      && ok "[$sh] late join: a dispatched summary task ($marker) takes no wait, and a fresh one is asked for" \
+      || bad "[$sh] late join: a dispatched summary task ($marker) took the wait (rc=$RC)"
+  done
+  unset SUMMARY WORK
 done
 
 echo
