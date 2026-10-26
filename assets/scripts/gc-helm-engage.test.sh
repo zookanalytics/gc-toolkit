@@ -25,6 +25,9 @@
 #   (LIVE)    a conversation a live sitting holds is attached to, not doubled
 #   (LEFT)    a conversation whose sitting's session closed is resumed under
 #             the same alias, with no bind needed
+#   (TWO-TRACKS, UNREAD) a task assigned to human that tracks the bead and
+#             another is no conversation engage takes, and a candidate whose
+#             own row does not read starts nothing
 #   (CUT-SHORT) a session still holding the alias of a conversation back in
 #             the queue is closed first, so the new sitting can take the alias
 #   (GATE)    a gate names the one bead waiting on it; the conversation engage
@@ -69,8 +72,12 @@ mkdir -p "$TMP/bin" "$TMP/state"
 # assignee and status live in $STATE/<id>.assignee and $STATE/<id>.status
 # (defaults human and open), so a bind and its read-back see what the store
 # would. $HAVE_CONV says which conversations track tk-subj: unset or 1 tk-conv,
-# 2 tk-conv and tk-conv2, 0 none. The gate tk-gate is a human gate; the beads waiting on
-# it are $GATE_WAITERS (JSON). The live converse sessions are the lines of
+# 2 tk-conv and tk-conv2, two tk-conv and tk-two, 0 none. tk-two is an older
+# task assigned to human that tracks tk-subj and tk-elsewhere, so it is no
+# conversation. `bd list --id` answers each named row with its edges, leaving
+# out an id in $LIST_DROPS, as a row the store did not return. The gate tk-gate
+# is a human gate; the beads waiting on it are $GATE_WAITERS (JSON). The live
+# converse sessions are the lines of
 # $STATE/live ("<sid> <alias>"), seeded per case from $LIVE_SITTINGS; `session
 # close` removes one. Every session call and every mutating bd call is appended
 # to $CALLS; reads are not, except the ones a case counts.
@@ -88,6 +95,7 @@ subj_of() { cat "$ST/$1.subject" 2>/dev/null || printf 'tk-subj'; }
 conv_ids() {
   case "${HAVE_CONV-1}" in
     2) printf 'tk-conv tk-conv2' ;;
+    two) printf 'tk-two tk-conv' ;;
     0|"") ;;
     *) printf 'tk-conv' ;;
   esac
@@ -99,12 +107,15 @@ conv_row() {
   _reps=$(awk -v c="$1" '$1 == c {print $2}' "$ST/replies" 2>/dev/null | jq -Rsc '[ split("\n")[] | select(. != "") ]')
   _created="2026-10-01T00:00:00Z"; [ "$1" = tk-conv2 ] && _created="2026-10-02T00:00:00Z"
   _title="an earlier concern"; [ "$1" = tk-conv2 ] && _title="a second concern"
+  _also=""
+  if [ "$1" = tk-two ]; then _created="2026-09-01T00:00:00Z"; _title="a task about two beads"; _also="tk-elsewhere"; fi
   jq -n --arg c "$1" --arg a "$(asg_of "$1")" --arg st "$(stat_of "$1")" --arg s "$(subj_of "$1")" \
-        --arg t "$_title" --arg cr "$_created" --arg shape "$2" --argjson r "${_reps:-[]}" '
-    {id:$c, issue_type:"task", status:$st, assignee:$a, title:$t, created_at:$cr}
+        --arg t "$_title" --arg cr "$_created" --arg shape "$2" --arg x "$_also" --argjson r "${_reps:-[]}" '
+    ([$s] + (if $x == "" then [] else [$x] end)) as $tracked
+    | {id:$c, issue_type:"task", status:$st, assignee:$a, title:$t, created_at:$cr}
     + (if $shape == "show"
-       then {dependencies:([{id:$s, dependency_type:"tracks"}] + [ $r[] | {id:., dependency_type:"replies-to"} ])}
-       else {dependencies:([{issue_id:$c, depends_on_id:$s, type:"tracks"}] + [ $r[] | {issue_id:$c, depends_on_id:., type:"replies-to"} ])} end)'
+       then {dependencies:([ $tracked[] | {id:., dependency_type:"tracks"} ] + [ $r[] | {id:., dependency_type:"replies-to"} ])}
+       else {dependencies:([ $tracked[] | {issue_id:$c, depends_on_id:., type:"tracks"} ] + [ $r[] | {issue_id:$c, depends_on_id:., type:"replies-to"} ])} end)'
 }
 case "$1 ${2:-}" in
   "rig list")
@@ -213,7 +224,12 @@ case "$1 ${2:-}" in
     _id=""; _prev=""
     for a in "$@"; do [ "$_prev" = "--id" ] && _id="$a"; _prev="$a"; done
     if [ -n "$_id" ]; then
-      jq -c -n --argjson r "$(conv_row "$_id" list)" '[$r]'
+      _rows='[]'
+      for _i in $(printf '%s' "$_id" | tr ',' ' '); do
+        case ",${LIST_DROPS:-}," in *",$_i,"*) continue ;; esac
+        _rows=$(jq -c --argjson r "$(conv_row "$_i" list)" '. + [$r]' <<< "$_rows")
+      done
+      printf '%s\n' "$_rows"
       exit 0
     fi
     case "$*" in
@@ -779,6 +795,24 @@ reset; run_engage tk-subj --no-attach
 eq "$RC" 0 "(MULTI) a bead with two queued conversations exits 0"
 has "$CALLED" "session new converse-opus --alias tk-conv --no-attach" "(MULTI) …taking the oldest, the first the queue offers"
 unset HAVE_CONV
+
+echo "# a task assigned to human that tracks the bead and another is no conversation"
+# A conversation tracks exactly one bead (conversation.sh), and its sign-off
+# refuses any other task, so engage never binds a sitting to the two-bead task,
+# though it is older than the real conversation beside it.
+export HAVE_CONV=two
+reset; run_engage tk-subj --no-attach
+eq "$RC" 0 "(TWO-TRACKS) a bead with a two-bead task beside its queued conversation exits 0"
+has "$CALLED" "session new converse-opus --alias tk-conv --no-attach" "(TWO-TRACKS) …taking the real conversation"
+hasnt "$CALLED" "tk-two" "(TWO-TRACKS) …and neither spawning for nor binding the two-bead task"
+unset HAVE_CONV
+
+echo "# a candidate whose own row does not read is not guessed a conversation"
+reset; LIST_DROPS=tk-conv run_engage tk-subj --no-attach
+eq "$RC" 4 "(UNREAD) a conversation candidate whose own row does not read exits 4"
+hasnt "$CALLED" "session new" "(UNREAD) …spawning nothing"
+hasnt "$CALLED" "bd update" "(UNREAD) …and binding nothing"
+has "$OUT" "could not read the conversations on tk-subj" "(UNREAD) …naming the read"
 
 echo "# a spawn failure carries gc's reason"
 reset; SPAWN_EMPTY=1 run_engage tk-conv --no-attach

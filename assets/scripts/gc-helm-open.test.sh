@@ -21,6 +21,10 @@
 #              concern it already carries is not appended again
 #   (HELD)     a conversation a sitting holds is not joined: a fresh one is
 #              filed in the queue
+#   (TWO-TRACKS) a task assigned to human that tracks the bead and another is
+#              no conversation: open joins a real one beside it, or files its
+#              own, and never writes to it
+#   (UNREAD)   a candidate whose own row does not read files nothing, exit 4
 #   (OPEN-JSON) --json prints {subject, conversation, filed}
 #   (ALLOWDUP) --allow-duplicate files a fresh conversation beside a queued one
 #   (GATE)     a human gate names the one bead still waiting on it, and the
@@ -57,18 +61,24 @@ mkdir -p "$TMP/bin"
 # gate ids tk-gate* read as human gates. Every MUTATING call (create, update,
 # close, dep add) is appended to $FAKE_CALLS so "nothing was filed" is asserted
 # against the actual argv, not against exit status alone; reads are not.
-#   bd dep list <bead> --direction=up --type tracks — the bead's conversations:
-#     one row for $FAKE_CONV when set, with assignee $FAKE_CONV_ASSIGNEE
-#     (default human) and status $FAKE_CONV_STATUS (default open).
+#   bd dep list <bead> --direction=up --type tracks — the tasks that track the
+#     bead: one row for $FAKE_CONV when set, with assignee $FAKE_CONV_ASSIGNEE
+#     (default human) and status $FAKE_CONV_STATUS (default open), and one for
+#     $FAKE_TWO when set, an older task assigned to human. The bead is recorded,
+#     so the tasks' own rows can name it.
 #   bd show $FAKE_CONV — that conversation's own row, its ask
 #     $FAKE_CONV_DESC (default "an earlier concern") and its notes
 #     $FAKE_CONV_NOTES (default none).
 #   bd dep list <gate> --direction=up --type blocks — the beads waiting on the
 #     gate: $FAKE_WAITERS, a JSON array.
-#   bd list --id <c> — the conversation a create filed, read back: a task that
-#     tracks the subject its --deps named and carries the assignee it was filed
-#     with, unless $FAKE_SHAPE_BROKEN drops the edge. Its replies-to edges are
-#     the ones `dep add` recorded.
+#   bd list --id <ids> — each named bead's own row, with its edges, for the
+#     comma-separated ids. $FAKE_CONV tracks the recorded bead alone, and
+#     $FAKE_TWO tracks it and tk-elsewhere, so it is no conversation. Any other
+#     id is the conversation a create filed, read back: a task that tracks the
+#     subject its --deps named and carries the assignee it was filed with,
+#     unless $FAKE_SHAPE_BROKEN drops the edge. Its replies-to edges are the
+#     ones `dep add` recorded. An id in $FAKE_LIST_DROPS is left out, as a row
+#     the store did not return.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 ${2:-}" in
   "rig list")
@@ -110,10 +120,16 @@ case "$1 ${2:-}" in
       list)
         case " $* " in
           *" --type tracks "*)
+            printf '%s' "$4" > "$TMP_TRACKED"
+            _rows='[]'
+            if [ -n "${FAKE_TWO:-}" ]; then
+              _rows=$(jq -c --arg c "$FAKE_TWO" '. + [{id:$c, issue_type:"task", status:"open", assignee:"human", title:"a task about two beads", created_at:"2026-09-01T00:00:00Z", dependency_type:"tracks"}]' <<< "$_rows")
+            fi
             if [ -n "${FAKE_CONV:-}" ]; then
-              jq -n --arg c "$FAKE_CONV" --arg a "${FAKE_CONV_ASSIGNEE:-human}" --arg st "${FAKE_CONV_STATUS:-open}" \
-                '[{id:$c, issue_type:"task", status:$st, assignee:$a, title:"an earlier concern", created_at:"2026-10-01T00:00:00Z", dependency_type:"tracks"}]'
-            else printf '[]\n'; fi ;;
+              _rows=$(jq -c --arg c "$FAKE_CONV" --arg a "${FAKE_CONV_ASSIGNEE:-human}" --arg st "${FAKE_CONV_STATUS:-open}" \
+                '. + [{id:$c, issue_type:"task", status:$st, assignee:$a, title:"an earlier concern", created_at:"2026-10-01T00:00:00Z", dependency_type:"tracks"}]' <<< "$_rows")
+            fi
+            printf '%s\n' "$_rows" ;;
           *" --type blocks "*) printf '%s\n' "${FAKE_WAITERS:-[]}" ;;
           *) printf '[]\n' ;;
         esac ;;
@@ -122,18 +138,33 @@ case "$1 ${2:-}" in
         [ "${3:-}" = add ] && printf '%s %s\n' "$4" "$5" >> "$TMP_REPLIES" ;;
     esac ;;
   "bd list")
-    # The read-back of a conversation a create just filed (--id).
-    _id=""; _prev=""
-    for a in "$@"; do [ "$_prev" = "--id" ] && _id="$a"; _prev="$a"; done
-    if [ -n "$_id" ]; then
-      _subj="$(cat "$TMP_SUBJ" 2>/dev/null || true)"
-      _asg="$(cat "$TMP_ASG" 2>/dev/null || true)"
-      _reps="$(awk -v c="$_id" '$1 == c {print $2}' "$TMP_REPLIES" 2>/dev/null | jq -Rsc --arg c "$_id" '[ split("\n")[] | select(. != "") | {issue_id:$c, depends_on_id:., type:"replies-to"} ]')"
-      if [ -n "${FAKE_SHAPE_BROKEN:-}" ]; then _subj=""; fi
-      jq -n --arg c "$_id" --arg s "$_subj" --arg a "$_asg" --argjson r "${_reps:-[]}" \
-        '[{id:$c, issue_type:"task", status:"open", assignee:$a,
-           dependencies:((if $s == "" then [] else [{issue_id:$c, depends_on_id:$s, type:"tracks"}] end) + $r)}]'
-    else printf '[]\n'; fi ;;
+    # Each named bead's own row (--id, comma-separated).
+    _ids=""; _prev=""
+    for a in "$@"; do [ "$_prev" = "--id" ] && _ids="$a"; _prev="$a"; done
+    _out='[]'
+    _tracked="$(cat "$TMP_TRACKED" 2>/dev/null || true)"
+    for _id in $(printf '%s' "$_ids" | tr ',' ' '); do
+      case ",${FAKE_LIST_DROPS:-}," in *",$_id,"*) continue ;; esac
+      if [ -n "${FAKE_CONV:-}" ] && [ "$_id" = "$FAKE_CONV" ]; then
+        _row=$(jq -n --arg c "$_id" --arg a "${FAKE_CONV_ASSIGNEE:-human}" --arg st "${FAKE_CONV_STATUS:-open}" --arg s "$_tracked" \
+          '{id:$c, issue_type:"task", status:$st, assignee:$a, title:"an earlier concern", created_at:"2026-10-01T00:00:00Z",
+            dependencies:[{issue_id:$c, depends_on_id:$s, type:"tracks"}]}')
+      elif [ -n "${FAKE_TWO:-}" ] && [ "$_id" = "$FAKE_TWO" ]; then
+        _row=$(jq -n --arg c "$_id" --arg s "$_tracked" \
+          '{id:$c, issue_type:"task", status:"open", assignee:"human", title:"a task about two beads", created_at:"2026-09-01T00:00:00Z",
+            dependencies:[{issue_id:$c, depends_on_id:$s, type:"tracks"}, {issue_id:$c, depends_on_id:"tk-elsewhere", type:"tracks"}]}')
+      else
+        _subj="$(cat "$TMP_SUBJ" 2>/dev/null || true)"
+        _asg="$(cat "$TMP_ASG" 2>/dev/null || true)"
+        _reps="$(awk -v c="$_id" '$1 == c {print $2}' "$TMP_REPLIES" 2>/dev/null | jq -Rsc --arg c "$_id" '[ split("\n")[] | select(. != "") | {issue_id:$c, depends_on_id:., type:"replies-to"} ]')"
+        if [ -n "${FAKE_SHAPE_BROKEN:-}" ]; then _subj=""; fi
+        _row=$(jq -n --arg c "$_id" --arg s "$_subj" --arg a "$_asg" --argjson r "${_reps:-[]}" \
+          '{id:$c, issue_type:"task", status:"open", assignee:$a,
+            dependencies:((if $s == "" then [] else [{issue_id:$c, depends_on_id:$s, type:"tracks"}] end) + $r)}')
+      fi
+      _out=$(jq -c --argjson r "$_row" '. + [$r]' <<< "$_out")
+    done
+    printf '%s\n' "$_out" ;;
   "bd create")
     printf 'bd create %s\n' "$*" >> "$FAKE_CALLS"
     # FAKE_CREATE_ERROR models bd REJECTING the create (e.g. a title over the
@@ -158,14 +189,14 @@ GC
 chmod +x "$TMP/bin/gc"
 
 export PATH="$TMP/bin:$PATH"
-export FAKE_CALLS="$TMP/calls" TMP_SUBJ="$TMP/subj" TMP_ASG="$TMP/asg" TMP_REPLIES="$TMP/replies"
+export FAKE_CALLS="$TMP/calls" TMP_SUBJ="$TMP/subj" TMP_ASG="$TMP/asg" TMP_REPLIES="$TMP/replies" TMP_TRACKED="$TMP/tracked"
 # Neutralize any inherited helm fixture hook so enumerate_rigs uses the stub.
 unset GC_HELM_FIXTURE || true
 # Keep the cache out of the operator's real cache dir.
 export TMPDIR="$TMP"
 
 # reset_store — forget the conversation an earlier case filed.
-reset_store() { : > "$FAKE_CALLS"; rm -f "$TMP_SUBJ" "$TMP_ASG"; : > "$TMP_REPLIES"; }
+reset_store() { : > "$FAKE_CALLS"; rm -f "$TMP_SUBJ" "$TMP_ASG" "$TMP_TRACKED"; : > "$TMP_REPLIES"; }
 
 # run_open <show-mode> <bead-id> [args...] -> sets RC/OUT/ERR/CALLS
 run_open() {
@@ -258,6 +289,43 @@ eq "$RC" "0" "(HELD) a bead whose conversation a sitting holds exits 0"
 grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
   && ok "(HELD) a fresh conversation is filed in the queue" || bad "(HELD) fresh conversation (out: $OUT calls: $CALLS)"
 unset FAKE_CONV FAKE_CONV_ASSIGNEE FAKE_CONV_STATUS
+
+# --- (TWO-TRACKS) a task that tracks two beads is no conversation -------------
+# A task assigned to human that tracks the bead and another bead is ordinary
+# work: a conversation tracks exactly one bead (conversation.sh). open neither
+# joins it nor appends a concern to it, and beside a real conversation waiting
+# in the queue it joins that one, though the two-bead task is older.
+export FAKE_TWO=tk-two FAKE_CONV=tk-conv0
+run_open found tk-real1 --reason "the cost question"
+eq "$RC" "0" "(TWO-TRACKS) open beside a two-bead task and a queued conversation exits 0"
+grep -q 'bd update tk-conv0 --append-notes Another concern joined this conversation: the cost question' <<< "$CALLS" \
+  && ok "(TWO-TRACKS) the concern joins the real conversation" \
+  || bad "(TWO-TRACKS) the concern joins the real conversation (calls: $CALLS)"
+grep -q 'tk-two' <<< "$CALLS$OUT" \
+  && bad "(TWO-TRACKS) the two-bead task is never joined or written (out: $OUT calls: $CALLS)" \
+  || ok "(TWO-TRACKS) the two-bead task is neither joined nor written"
+unset FAKE_CONV
+run_open found tk-real1 --reason "the cost question"
+eq "$RC" "0" "(TWO-TRACKS) open beside the two-bead task alone exits 0"
+grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
+  && ok "(TWO-TRACKS) …and files a conversation of its own" \
+  || bad "(TWO-TRACKS) a fresh conversation is filed (out: $OUT calls: $CALLS)"
+grep -q 'bd update tk-two' <<< "$CALLS" \
+  && bad "(TWO-TRACKS) …and appends nothing to the two-bead task (calls: $CALLS)" \
+  || ok "(TWO-TRACKS) …and appends nothing to the two-bead task"
+unset FAKE_TWO
+
+# --- (UNREAD) a candidate whose own row does not read is not guessed ----------
+# The inverse listing names a task that tracks the bead, but its own row, which
+# says whether the bead is all it tracks, does not come back. Nothing proves it
+# a conversation or not, so open files nothing and appends nothing.
+export FAKE_CONV=tk-conv0 FAKE_LIST_DROPS=tk-conv0
+run_open found tk-real1 --reason "the cost question"
+eq "$RC" "4" "(UNREAD) a candidate whose own row does not read exits 4"
+[ -z "$CALLS" ] && ok "(UNREAD) nothing is filed or appended" || bad "(UNREAD) wrote something (calls: $CALLS)"
+grep -q 'could not read the conversations on tk-real1' <<< "$ERR" \
+  && ok "(UNREAD) …naming the read" || bad "(UNREAD) names the read (err: $ERR)"
+unset FAKE_CONV FAKE_LIST_DROPS
 
 # --- (OPEN-JSON) --json prints one object -------------------------------------
 run_open found tk-real1 --json
@@ -1028,7 +1096,8 @@ mkdir -p "$TMP/rebin"
 # `bd show` branches on the id so a supersede chain and a live bead read
 # differently. The conversation tk-convE tracks $FAKE_CONV_SUBJ, waiting in the
 # queue until a bind writes the assignee kept in $CONV_STATE. `bd list` tells
-# the PR search (carries `blocked` in --status) apart from a by-id read. The
+# the PR search (carries `blocked` in --status) apart from a by-id read, which
+# answers tk-convE's own row with its edges. The
 # session list holds no sitting; `session new` returns a fixed identity, its
 # alias qualified as gascity stores it. Mutations append to $FAKE_CALLS.
 case "$1 ${2:-}" in
@@ -1045,9 +1114,15 @@ case "$1 ${2:-}" in
       *) printf '{"error":"no issues found"}\n'; exit 1 ;;
     esac ;;
   "bd list")
+    _id=""; _p=""
+    for a in "$@"; do [ "$_p" = "--id" ] && _id="$a"; _p="$a"; done
     case "$*" in
       *blocked*) printf '%s' "${FAKE_PR_ROWS:-[]}" ;;
-      *)         printf '[]' ;;
+      *)
+        if [ "$_id" = tk-convE ]; then
+          _a="$(cat "$CONV_STATE" 2>/dev/null || true)"
+          jq -n --arg a "${_a:-human}" --arg s "${FAKE_CONV_SUBJ:-}" '[{id:"tk-convE", issue_type:"task", status:"open", assignee:$a, title:"an earlier concern", created_at:"2026-10-01T00:00:00Z", dependencies:[{issue_id:"tk-convE", depends_on_id:$s, type:"tracks"}]}]'
+        else printf '[]'; fi ;;
     esac ;;
   "bd dep")
     case "$3" in

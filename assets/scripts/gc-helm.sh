@@ -448,16 +448,35 @@ gate_waiters() {
 }
 
 # bead_conversations <bead> — the conversations about the bead that are not
-# closed: the tasks that track it, assigned to `human` or to the alias that
-# names their own id ($CONVERSATION_JQ), as `gc bd dep list` rows. Returns 1
-# when the read did not answer.
+# closed, as `gc bd list` rows: each task whose own row has the whole shape
+# ($CONVERSATION_JQ's conversation) with the bead as its one subject. The
+# inverse `tracks` listing names the candidates, the tasks that track the bead
+# assigned to `human` or to the alias that names their own id. It proves only
+# that each one tracks the bead, not that the bead is all it tracks, so the
+# candidates' own rows are read with their edges, in one listing, and the shared
+# rule decides. Returns 1 when either read did not answer, or answered without a
+# candidate's row, because a candidate whose edges nothing read proves nothing.
 bead_conversations() {
     _bc_rows=$(bd_rows dep list "$1" --direction=up --type tracks) || return 1
-    printf '%s' "$_bc_rows" | jq -c "$CONVERSATION_JQ"'
+    _bc_ids=$(printf '%s' "$_bc_rows" | jq -r "$CONVERSATION_JQ"'
         [ .[] | objects
           | select((.issue_type // "task") == "task")
           | select(((.status // "open") | tostring | ascii_downcase) != "closed")
-          | select((((.assignee // "") | tostring) == "human") or conversation_alias) ]' 2>/dev/null
+          | select((((.assignee // "") | tostring) == "human") or conversation_alias)
+          | (.id // "") | tostring | select(. != "") ] | unique | join(",")' 2>/dev/null) || return 1
+    if [ -z "$_bc_ids" ]; then
+        printf '[]\n'
+        return 0
+    fi
+    _bc_own=$(bd_rows list --id "$_bc_ids" --all) || return 1
+    printf '%s' "$_bc_own" | jq -ce --arg b "$1" --arg ids "$_bc_ids" "$CONVERSATION_JQ"'
+        ($ids | split(",")) as $want
+        | [ .[] | objects | select(((.id // "") | tostring) as $i | any($want[]; . == $i)) ] as $own
+        | if ([ $own[] | .id ] | unique) != $want then error("a candidate row did not read")
+          else [ $own[]
+                 | select(((.status // "open") | tostring | ascii_downcase) != "closed")
+                 | select(conversation and conversation_subjects == [$b]) ]
+          end' 2>/dev/null
 }
 
 # live_sittings — the converse sessions `gc session list` holds that have not
@@ -2153,7 +2172,7 @@ cmd_open() {
     # <<< open-subject-closed
 
     if ! open_convs=$(bead_conversations "$bead"); then
-        echo "$PROG: open: could not read the conversations on $bead ('gc bd dep list $bead --direction=up --type tracks' did not answer). No conversation filed." >&2
+        echo "$PROG: open: could not read the conversations on $bead ('gc bd dep list $bead --direction=up --type tracks', or 'gc bd list --id' of the tasks it names, did not answer). No conversation filed." >&2
         exit 4
     fi
 
@@ -2453,7 +2472,7 @@ cmd_dismiss() {
             # of either that did not answer proves no sitting live and none
             # gone, so it fails rather than reading as "nothing to end".
             if ! d_convs=$(bead_conversations "$TAKE_BEAD"); then
-                echo "$PROG: dismiss: could not read the conversations on $TAKE_BEAD ('gc bd dep list' did not answer). Nothing was written. Name the conversation to close it: $PROG dismiss <conversation-id>." >&2
+                echo "$PROG: dismiss: could not read the conversations on $TAKE_BEAD ('gc bd dep list', or 'gc bd list --id' of the tasks it names, did not answer). Nothing was written. Name the conversation to close it: $PROG dismiss <conversation-id>." >&2
                 exit 4
             fi
             if ! d_live=$(live_sittings); then
