@@ -32,11 +32,10 @@
 #      its gate's message as this script's command line (covered by
 #      liveness-sweep.test.sh); here the flags that command names are pinned
 #      against what this script parses, so the writer and the reader cannot
-#      drift apart. The converse loop's claim-time hook, which reads a stamp
-#      nothing writes any more, is still asserted to run it as a PATH, never to
-#      eval a command string, until it retires with the converse loop's move to
-#      conversations. Every kind in the shared standing-kinds list re-checks as
-#      standing.
+#      drift apart. The converse prep skill, which runs the re-check a sitting
+#      finds in a gate's message, is asserted to run the pack's own copy with
+#      the values the message names, never the message's line as written. Every
+#      kind in the shared standing-kinds list re-checks as standing.
 # Hermetic: reads the repo, stubs `gc`; no city, no Dolt, no network, no gh.
 set -u
 
@@ -407,10 +406,14 @@ for flag in $SWEEP_FLAGS; do
 done
 
 # --- 5. the claim-time re-check in the converse loop --------------------------
-# The prep skill (steps 3–4) runs the re-check before any prep, and the census it
-# reports supersedes the lists in the body it was filed with.
+# The prep skill (steps 3–4) runs the re-check a gate's message names before any
+# prep, and the census it reports supersedes the lists in the message it was
+# filed with. The message is data: the skill runs the pack's own copy with the
+# values the message names, never the line as written.
 echo "── the converse loop runs the re-check at claim time ──"
-has "the corrected census supersedes the body" "supersedes the body's lists" "$PREP"
+has "the corrected census supersedes the message" "supersedes the message's lists" "$PREP"
+has "the prep skill runs the pack's own copy of the re-check" '"$CONV/liveness-recheck.sh" --ids <ids> --carried <ids> --pass-at <time>' "$PREP"
+has "…never the message's line as written" "never a command" "$PREP"
 
 echo
 echo "liveness-recheck: $PASS passed, $FAIL failed"

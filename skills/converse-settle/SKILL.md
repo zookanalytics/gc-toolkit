@@ -1,12 +1,13 @@
 ---
 name: converse-settle
-description: Converse's record, sign-off, and visit close (safety-critical).
+description: Converse's record, its answer to each gate the ruling settles, the sign-off, and the conversation's close (safety-critical).
 ---
 
-# Steps 6–7 — Record, sign off, and close the visit
+# Steps 6–7 — Record, sign off, and close the conversation
 
-`$CONV`, `$VISIT`, and `$SUBJECT` are resolved in step 1's claim block. Run
-these once the operator has replied to the held sitting (step 5).
+Each tool call starts a fresh shell, so set `CONV`, `CONVERSATION` and
+`SUBJECT` literally, from what step 1 found, at the top of every call below.
+Run these once the operator has replied to the held sitting (step 5).
 
 ## 6. Record
 
@@ -24,63 +25,93 @@ gc bd update "$SUBJECT" --append-notes "## Current state ($(date -u +%Y-%m-%d))
 Decisions in force: <each decision in force>
 Open questions: <each open question, or none>"
 ```
+The record goes on the subject alone. A gate the sitting answers can block a
+bead that is not the subject, such as a rework child waiting on its anchor's
+bring-current gate, or a member of an epic whose gate the epic's sitting
+answers. That bead reads the answer in the gate's resolve reason, and the
+record and headline stay off it.
 
-## 7. Sign off, then close the visit — only when nothing important is still pending
+## 7. Sign off, then close the conversation — only when nothing important is still pending
 
-The sign-off is the terminal act: it stamps the outcome and closes the visit.
-So before you take it, ask whether this is a sign-off turn at all. **If there
-is important information you want to communicate to the operator — a live
-decision, a routing answer, anything they need to read or may want to respond
-to, anything past "settled and done" — do not sign off this turn.** Post the
-hand-back in the shape the prompt's Definitions define (**The hand-back**),
-leave the visit OPEN, and wait for operator input the way a held sitting does;
-signing off now would close the visit under a message they have not read. The
-sitting ends on a later turn: the operator's `gc-helm dismiss`, further
-engagement, or a genuinely terminal sign-off once nothing important is pending.
-Whether a sign-off is terminal is still your judgment, and a sitting that is
-genuinely settled still signs off and closes here rather than waiting for a
-manual dismiss.
+The sign-off is the terminal act: it answers the gates the ruling settles and
+closes the conversation. So before you take it, ask whether this is a sign-off
+turn at all. **If there is important information you want to communicate to
+the operator — a live decision, a routing answer, anything they need to read
+or may want to respond to, anything past "settled and done" — do not sign off
+this turn.** Post the hand-back in the shape the prompt's Definitions define
+(**The hand-back**), leave the conversation OPEN, and wait for operator input
+the way a held sitting does; signing off now would close the conversation
+under a message they have not read. A gate the operator has already ruled on
+is still answered now (step 8), so a dismiss that ends the sitting later
+leaves nothing they ruled on open. The sitting ends on a later turn: the
+operator's `gc-helm dismiss`, further engagement, or a genuinely terminal
+sign-off once nothing important is pending. Whether a sign-off is terminal is
+still your judgment, and a sitting that is genuinely settled still signs off
+and closes here rather than waiting for a manual dismiss.
+
+**A gate is answered through the conversation's reply, and the operator hears
+what the answer releases first.** The sitting answers only the gates its
+conversation replies to: the gate engage was pointed at, one its hold filed,
+and any other human gate the operator rules on within the subject's universe.
+To answer one the conversation does not reply to yet, add the reply and read
+it back, then name every bead the answer releases, read from the gate's
+`blocks` dependents, so an answer that releases a bead beyond the subject is
+given knowingly:
+```bash
+gc bd dep add "$CONVERSATION" <gate> --type replies-to \
+  && gc bd list --id "$CONVERSATION" --all --json | jq -e --arg g <gate> 'any(.[0].dependencies[]?; .type == "replies-to" and .depends_on_id == $g)' >/dev/null \
+  && gc bd dep list <gate> --direction=up --type blocks --json | jq -r '.[] | "\(.id) [\(.status)] \(.title)"'
+```
+A gate with no tie to the subject takes its own conversation, so that its
+outcome does not land in the notes of a bead that is not about it. A gate
+assigned to a person is that person's to clear: reply to it only when they
+rule on it in this sitting.
 
 When nothing important is pending, sign off. Write the durable trace first,
-then post the sign-off as the thread's last word, and close the visit last of
-all. `converse-signoff.sh` writes the durable trace and discharges whichever
-demands the hold filed — the conversation wait on the visit, and any explicit
-merge hold on the anchor; you tell it what this sitting settled. It resolves
-each demand gate when the sitting settled the question (`--ruled yes`, with the
-`--ruling` it resolves with and the `--route` the subject itself is released
-to, chosen as below)
-and re-states each when it did not (`--ruled no`, with what is
-`--still-owed`). What is waiting on the subject is yours to state: one
-`--waiting-on <bead>` per dependency this sitting ROUTED work into, `--no-wait`
-when it settled the subject and nothing is waiting, and NEITHER where the
-subject is parked for a person. It exits non-zero when it stopped short of
-discharging the hold, and then you must NOT sign off:
+then post the sign-off as the thread's last word. `converse-signoff.sh` writes
+the trace in one order every time: the ruling's rework, the subject's
+headline, the answer on each gate the conversation replies to, the release of
+a `held` subject, the conversation's close, and the PR reminder. You tell it
+what this sitting settled. `--ruled yes` resolves each open gate the
+conversation replies to with `ruled: <the ruling>`, except each one a
+`--leave` names, which the ruling leaves owed with its reply in place, and
+`--route` is where a `held` subject is released to, chosen as below.
+`--ruled no` answers nothing: it leaves every gate open and owed and hands the
+conversation back to the operator's queue, which is the low-context path in
+the prompt's Rules. What is waiting on the subject is yours to state: one
+`--waiting-on <bead>` per dependency this sitting ROUTED work into, or the gate
+still holding it, `--no-wait` when it settled the subject and nothing is
+waiting, and NEITHER where the subject is parked for a person. It exits
+non-zero when it stopped short, and then you must NOT post the sign-off:
 ```bash
-if VISIT="$VISIT" SUBJECT="$SUBJECT" "$CONV/converse-signoff.sh" \
-     --visit "$VISIT" --subject "$SUBJECT" \
-     --outcome "<outcome> — <what this sitting settled or needs next, ≤140 chars>" \
-     --ruled no --still-owed "<what is still owed, ≤140 chars>"
-     # --ruled yes --ruling "<the ruling, one line>" --route <rig>/<agent>|human
-     # --no-wait   |   --waiting-on <bead> [--waiting-on <bead> ...]
+if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
+     --outcome "<outcome> — <what this sitting settled or needs next, at most 140 characters>" \
+     --ruled yes --ruling "<the ruling, one line>" --route human --no-wait
+     # --route <rig>/<agent> releases a held subject to that pool instead
+     # --leave <gate>, once for each gate the ruling leaves owed
+     # --waiting-on <bead> [--waiting-on <bead> ...] in place of --no-wait
      # --rework | --no-rework   (with --ruled yes; required on an open-PR subject)
 then
-  : # the trace ran — fix any write it reports failed, then post the sign-off below
+  : # signed off — report any answer it says reached a gate first, then post the sign-off below
 else
-  # NOT signed off: a read failed, a demand did not close, the rework did not
-  # file, or the wait did not re-state, so the hold may still stand. Do NOT post
-  # the sign-off or close the visit. Repair what it printed and re-run, or raise
+  # NOT signed off: a read failed, the rework did not file, the headline did
+  # not land, a gate did not close, or the conversation did not close or hand
+  # back. Do NOT post the sign-off. Repair what it printed and re-run, or raise
   # it in the thread.
   exit 1
 fi
 ```
 Re-running it is safe. What it wrote before it stopped is written again the
-same way, and a demand it did not discharge is still there for the re-run to
-find.
-**Set `--ruled` from what this sitting actually settled.** The gate
-starts shut, so `--ruled no` re-states the wait rather than dropping it;
-`--ruled yes` resolves it and releases a `held` subject. A demand a named
-person must perform is assigned, and the discharge leaves it alone —
-that one is theirs to close.
+same way, a gate it already answered reads as answered, and a gate it did not
+reach is still open for the re-run to find.
+
+**The first answer wins.** bd resolves a gate that is already closed without
+changing it, so the sign-off reads each gate back after its resolve. A close
+reason other than its own means another answer reached the gate first: a
+filer's withdrawal, an Accept, another sitting, or a person at the command
+line. The sign-off prints that answer and leaves it standing. Tell the
+operator, in the sign-off, which gate it was and what that answer said,
+instead of claiming your own.
 
 **On `--ruled yes`, the `--route` follows which bead carries the work** (the
 `work` skill says why):
@@ -103,9 +134,9 @@ sign-off refuses and writes nothing, because a ruling whose rework is
 never filed lands only in notes nothing reads while the stale PR keeps
 reading ready. The rework files before the sign-off writes
 anything else. A rework that does not complete stops the sign-off there,
-and the script exits non-zero. No trace is written and every demand this
-sitting filed still stands, so a merge hold you took still holds the PR.
-Re-run once the cause is repaired, and the re-run adopts a child an
+and the script exits non-zero. No headline is written, no gate is answered
+and the conversation stays open, so a merge hold your hold filed still holds
+the PR. Re-run once the cause is repaired, and the re-run adopts a child an
 earlier attempt filed. `--rework` applies only to an open-PR subject. On
 any other subject, file and send the ruling's consequence as work (below),
 and re-run without `--rework`.
@@ -122,26 +153,10 @@ with its recommendation.>
 ```
 A converse is about its one subject; name another bead only where the
 conversation's substance genuinely leads there, and then as a plain
-sentence.
-Only then close the visit through the shared guarded close — the sitting's
-last action, with nothing said after it. `visit-close.sh` stamps the outcome
-word and its one-line reason, reads both back, and only then closes; the
-stamp before the close is on purpose. An open visit carrying `gc.outcome` is
-a sitting whose sign-off already posted and whose only missing write is the
-close, which is the one shape `converse-claim.sh` finishes without posting
-anything. `--reason` is the sentence a board reader reads — why this sitting
-closed — beside the one-word `--outcome` they group by; a held sitting's is
-what it settled.
-```bash
-"$CONV/visit-close.sh" --visit "$VISIT" \
-  --outcome "<one-word-outcome>" \
-  --reason "<one line: why this sitting closed>"
-# Once that close lands, mark the visit's PR reminder closed, if the subject has
-# a PR. Best-effort and update-only (a visit that never engaged left no comment);
-# it reads the summary and actions converse-signoff.sh stashed on the visit, and
-# refuses while the visit is not closed, so the reminder never leads the close.
-"$CONV/pr-visit-comment.sh" close --visit "$VISIT" --subject "$SUBJECT" || true
-```
+sentence. The sign-off already closed the conversation, so nothing is said
+after this message, and you do not drain: `converse-reap` ends the session
+once nobody is attached.
+
 **If this sitting ROUTED work, file and send it, then pass
 `--waiting-on <work-bead>` to the sign-off for each dependency it sent.** The
 `work` skill says which bead carries the work and how to choose its formula.
@@ -180,18 +195,18 @@ gc bd --rig <rig> dep add <follow-up> <blocker> --type=blocks \
 ```
 When the edge does not read back and `dep list` warns that its target has no
 row in this database, the blocker is in another rig's store, where no edge can
-hold the follow-up. Make it wait on a demand in its own store that names the
-blocker, and arm it on that demand. The demand reaches the operator, who
-resolves it once the blocker lands, and the arm then sends the follow-up.
+hold the follow-up. Make it wait on a human gate in its own store that names
+the blocker, and arm it on that gate. The gate reaches the operator, who
+clears it once the blocker lands, and the arm then sends the follow-up.
 Remove the edge first, because the arm reads it as a blocker that holds
-nothing and warns that the next pass sends the follow-up. The demand's
-headline, filled in, is at most 140 characters, and the demand verb refuses a
-longer one:
+nothing and warns that the next pass sends the follow-up. The helper files the
+gate in the follow-up's own store, and the message's first line is the gate's
+title, cut at 140 characters, so keep that line to one plain sentence:
 ```bash
 gc bd --rig <rig> dep remove <follow-up> <blocker> \
-  && "$CONV/gc-helm.sh" demand <follow-up> "Resolve once <what the blocker delivers> lands, so <what the follow-up does> can start" \
-    --body "<follow-up> waits for <blocker> in <its rig>. Resolve this once <blocker> closes." \
-  && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>, through its demand"
+  && "$CONV/human-gate.sh" --subject <follow-up> --key waits-for-<blocker> --message "Clear once <what the blocker delivers> lands, so <what the follow-up does> can start
+<follow-up> waits for <blocker> in <its rig>. Clear this gate once <blocker> closes." \
+  && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>, through its human gate"
 ```
 
 **A recorded wait is also the return trip.** Once every recorded wait
@@ -199,12 +214,11 @@ closes, the subject returns through the liveness sweep
 (`assets/scripts/liveness-sweep.sh`) as an unnamed wait; it reads
 those edges AND children, so legacy work stays visible.
 
-Never close a visit whose `gc.outcome` stamp has not verified, and
-never end a sitting without its sign-off: a thread that stops after a
-decision with no wrap-up reads as a crash. The sign-off is
-owed to a sitting that was **held**; one closed before any framing was
-posted (step 2's `moot`/`benign`, step 1's `folded`) asked the
-operator nothing, so closing those silently is the contract.
+Never close a conversation by hand, and never end a held sitting without
+its sign-off: a thread that stops after a decision with no wrap-up reads as a
+crash, and a conversation closed by hand answers none of the gates it replies
+to. The sign-off is owed to a sitting that was **held**; one closed before any
+framing was posted (step 2's `moot` or `benign`) asked the operator nothing,
+so closing it silently is the contract.
 
-Then continue within the group or drain (step 8, the `converse-continue`
-skill).
+Then go to step 8 (the `converse-continue` skill).

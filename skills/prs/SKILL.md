@@ -101,13 +101,17 @@ exposed is a supplement.
 ## Hold its merge
 
 The message is that the PR must not land until something is settled. The merge
-holds while any open bead blocks the anchor, and resolving that bead releases
-it.
+holds while any open bead blocks the anchor, and clearing that bead releases
+it. The operator sees the gate on the anchor's row of the board and answers it
+there or in a sitting.
 
-Writer: in a sitting, `converse-hold.sh --hold-merge` (the converse-hold step).
-Anywhere else, file the open question as a demand on the anchor:
-`"$(gc <binding> scripts-dir)/gc-helm.sh" demand <anchor> "<what must be settled first, at most 140 characters>"`.
-The gate-visit sweep then files a visit, so the operator is asked.
+Writer: a human gate on the anchor, filed through the helper, which keeps one
+open gate per anchor and situation key:
+`"$(gc <binding> scripts-dir)/human-gate.sh" --subject <anchor> --key <situation-key> --message "<what must be settled first, at most 140 characters>"`.
+A sitting files its own with the key `conversation` and replies to it (the
+converse-hold step). The gate is cleared with
+`gc bd gate resolve <gate> --reason "ruled: <the answer>"`, and the same call
+with `--retract` withdraws your own gate once the question has gone.
 
 Every open bead the anchor waits on, and every open bead filed under it, holds
 its merge, whatever it was for. Never make an anchor wait on a follow-up that
@@ -123,23 +127,23 @@ disposition writer, `bead-rehome.sh`.
 
 Writer: `"$(gc <binding> scripts-dir)/pr-dispose.sh" --anchor <anchor> --successor <bead> --kind not-needed --note "<why, one sentence>"`.
 The anchor must be open at `merge_result=pull_request`. Under `not-needed` the
-successor is the evidence that ruled the work out, such as the visit where it
-was decided. Under `duplicate`, `folded`, `re-homed` and `fixed-upstream` it is
-the bead that carries the work now. Never close the PR by hand first: a PR
-closed with no disposition recorded reads as abandoned, and the reconcile files
-a visit asking what to do with it.
+successor is the evidence that ruled the work out, such as the conversation
+where it was decided. Under `duplicate`, `folded`, `re-homed` and
+`fixed-upstream` it is the bead that carries the work now. Never close the PR
+by hand first: a PR closed with no disposition recorded reads as abandoned, and
+the reconcile files a human gate on the anchor asking whether to rework it or
+close it.
 
 A supplement still open on the PR keeps its `blocks` edge on the anchor, so the
 anchor's close waits until the supplement closes. Stop and close the supplement
-too (the work skill).
+too (the work skill). An open human gate on the anchor holds its close the same
+way (`docs/finalize-gate.md`), so the reconcile closes the anchor once each
+gate is cleared.
 
-In a sitting, retire a PR only on the operator's ruling, after the sign-off,
-and close the visit right after it:
+In a sitting, retire a PR only on the operator's ruling, once the sign-off has
+answered the gates the ruling settles, with the sitting's conversation as the
+successor:
 
 ```bash
-"$(gc <binding> scripts-dir)/pr-dispose.sh" --anchor <anchor> --successor <visit> --kind not-needed --note "<why, one sentence>" \
-  && "$(gc <binding> scripts-dir)/visit-close.sh" --visit <visit> --outcome "<one-word-outcome>" --reason "<one line: why this sitting closed>"
+"$(gc <binding> scripts-dir)/pr-dispose.sh" --anchor <anchor> --successor <conversation> --kind not-needed --note "<why, one sentence>"
 ```
-
-The sitting's open visit holds the anchor's close (`docs/finalize-gate.md`), so
-the reconcile closes the anchor once the visit is closed.

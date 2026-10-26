@@ -138,9 +138,13 @@ for s in $BLOCKS; do
     f="$SKILLS/$s/SKILL.md"
     [ -r "$f" ] || continue
     found=""
-    for probe in 'GC_RIG_ROOT' 'rev-parse --show-toplevel' 'CONV' '"$S/' 'GC_CITY_PATH/rigs'; do
+    for probe in 'GC_RIG_ROOT' 'rev-parse --show-toplevel' '"$S/' 'GC_CITY_PATH/rigs'; do
         grep -qF -- "$probe" "$f" && found="$found [$probe]"
     done
+    # CONV, the scripts directory a converse sitting sets, as a whole word: the
+    # sitting's CONVERSATION, which a writer takes in its environment, is
+    # another variable.
+    grep -qE '(^|[^A-Za-z0-9_])CONV([^A-Za-z0-9_]|$)' "$f" && found="$found [CONV]"
     [ -z "$found" ] && ok "$s: looks for no writer in a checkout or a variable an earlier call set" \
         || bad "$s: looks for no writer in a checkout or a variable an earlier call set" "found:$found"
     refs=$(grep -oF -- "$RESOLVE" "$f" | wc -l | tr -d ' ')
@@ -315,11 +319,11 @@ lacks "…and keeps no blanket rule against filing under the subject" \
     "an epic subject's decomposition is filed as its member"
 have "the settle step gives the arm it names" 'deferred-dispatch.sh" arm <follow-up>' "$SETTLE"
 have "…once the follow-up's own store reads the edge back" '&& gc bd --rig <rig> dep list <follow-up> --direction=down -t blocks --json' "$SETTLE"
-have "…and holds a follow-up on another rig's bead with a demand in its own store" 'gc-helm.sh" demand <follow-up>' "$SETTLE"
+have "…and holds a follow-up on another rig's bead with a human gate in its own store" 'human-gate.sh" --subject <follow-up>' "$SETTLE"
 have "the prompt gives the disposal writer's call" 'bead-rehome.sh" --origin "$SUBJECT"' "$PROMPT"
 have "the prompt gives the retire call" 'pr-dispose.sh" --anchor "$SUBJECT"' "$PROMPT"
 have "the prompt gives the call that withdraws a recommendation" 'converse-invalidate-recommendation.sh" "<why' "$PROMPT"
-have "the prompt gives the call that asks for a visit" 'gc-helm.sh" open <bead>' "$PROMPT"
+have "the prompt gives the call that opens a conversation" 'gc-helm.sh" open <bead>' "$PROMPT"
 have "the prompt gives the PR post calls" 'pr-post.sh" reply --host github.com' "$PROMPT"
 for f in "$PROMPT" "$SETTLE"; do
     missing=""
@@ -476,9 +480,9 @@ if [ "$n" = "${CHAIN_FAIL_AT:-}" ]; then echo "writer: refused" >&2; exit 1; fi
 exit 0
 STUB
 cp "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/deferred-dispatch.sh"
-cp "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/gc-helm.sh"
+cp "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/human-gate.sh"
 chmod +x "$CH/bin/gc" "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/deferred-dispatch.sh" \
-    "$CH/pack/assets/scripts/gc-helm.sh"
+    "$CH/pack/assets/scripts/human-gate.sh"
 # fill_block — an example with each <placeholder> filled with x, the stub pack in
 # for a template's {{ .ConfigDir }}, and the disposition kinds cut to one.
 fill_block() {
@@ -496,7 +500,7 @@ run_chain() {
     : >"$CH/edges"
     printf 'x' >"$CH/store/gc.recommended_formula"
     (cd "$TMP/away" && env -u BASH_ENV -u ENV CHAIN_DIR="$CH" CHAIN_FAIL_AT="${3:-}" \
-        CHAIN_CROSS_STORE="${4:-}" CONV="$CH/pack/assets/scripts" SUBJECT=tk-x VISIT=tk-v \
+        CHAIN_CROSS_STORE="${4:-}" CONV="$CH/pack/assets/scripts" SUBJECT=tk-x CONVERSATION=tk-v \
         PATH="$CH/bin:$PATH" $1 "$2" </dev/null >/dev/null 2>&1)
     echo $?
 }
@@ -531,14 +535,14 @@ converse prompt: disposing of a no-work subject|$PROMPT|gc.work_outcome=no-op
 disposition fragment: closing a bead that did not land|$DISPOSITION|gc.work_outcome=no-op
 converse-settle: filing and sending routed work|$SETTLE|gc sling <rig>/<pool> "\$WORK"
 converse-settle: arming a follow-up|$SETTLE|gc bd --rig <rig> dep add <follow-up> <blocker>
-converse-settle: arming a follow-up on a demand|$SETTLE|gc bd --rig <rig> dep remove <follow-up> <blocker>
+converse-settle: arming a follow-up on a human gate|$SETTLE|gc bd --rig <rig> dep remove <follow-up> <blocker>
 SPECS
 # The arm runs only once the follow-up's own store reads the edge back. A dep add
 # onto a bead in another store prints success and exits 0 but holds nothing, so
 # on that answer the example stops at the read-back and arms nothing. When the
-# wait goes on a demand instead, a demand that did not land arms nothing either.
+# wait goes on a human gate instead, a gate that did not land arms nothing either.
 fenced_block "$SETTLE" 'gc bd --rig <rig> dep add <follow-up> <blocker>' | fill_block >"$CH/block"
-fenced_block "$SETTLE" 'gc bd --rig <rig> dep remove <follow-up> <blocker>' | fill_block >"$CH/demand-block"
+fenced_block "$SETTLE" 'gc bd --rig <rig> dep remove <follow-up> <blocker>' | fill_block >"$CH/gate-block"
 for sh_ in $shells; do
     run=$sh_
     [ "$sh_" = zsh ] && run="zsh -f"
@@ -554,11 +558,11 @@ for sh_ in $shells; do
     else
         bad "($sh_) converse-settle: …and an edge that reads back is armed" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
     fi
-    rc=$(run_chain "$run" "$CH/demand-block" 2)
-    if [ "$rc" -ne 0 ] && grep -q '^writer gc-helm.sh demand ' "$CH/log" && ! grep -q '^writer deferred-dispatch.sh arm ' "$CH/log"; then
-        ok "($sh_) converse-settle: a demand that did not land arms nothing"
+    rc=$(run_chain "$run" "$CH/gate-block" 2)
+    if [ "$rc" -ne 0 ] && grep -q '^writer human-gate.sh --subject ' "$CH/log" && ! grep -q '^writer deferred-dispatch.sh arm ' "$CH/log"; then
+        ok "($sh_) converse-settle: a gate that did not land arms nothing"
     else
-        bad "($sh_) converse-settle: a demand that did not land arms nothing" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
+        bad "($sh_) converse-settle: a gate that did not land arms nothing" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
     fi
 done
 # Taking a recommendation records the dispatch only once the sling went: a
