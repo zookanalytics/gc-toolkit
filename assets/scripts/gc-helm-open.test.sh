@@ -1215,8 +1215,8 @@ grep -q 'conversation tk-convE for tk-succ' <<< "$OUT" \
 grep -q 'tk-pred is closed and superseded' <<< "$ERR" \
   && ok "(RESOLVE-ENGAGE-SUPERSEDE) announces the redirect before spawning" \
   || bad "(RESOLVE-ENGAGE-SUPERSEDE) redirect announced (err: $ERR)"
-grep -q 'bd update tk-convE --if-assignee human --assignee gc-toolkit/gc-toolkit.tk-convE' <<< "$CALLS" \
-  && ok "(RESOLVE-ENGAGE-SUPERSEDE) binds the conversation to the sitting's alias, guarded on the queue" \
+grep -q 'bd update tk-convE --if-assignee human --if-status open --assignee gc-toolkit/gc-toolkit.tk-convE' <<< "$CALLS" \
+  && ok "(RESOLVE-ENGAGE-SUPERSEDE) binds the conversation to the sitting's alias, guarded on the queue and open" \
   || bad "(RESOLVE-ENGAGE-SUPERSEDE) bound the resolved bead's conversation (calls: $CALLS)"
 
 # (RESOLVE-ENGAGE-PR) engage holds the conversation about the PR's bead.
