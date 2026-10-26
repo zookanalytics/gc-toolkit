@@ -314,19 +314,19 @@ HEAD_SHA=$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null) ||
 # rig_check_pre_existing.<check> holds that very record at this HEAD: the
 # iteration found the same failure red on the base and carried by a tracker
 # (rig-check-pre-existing.sh). A run with another command or scope replaces the
-# record, and its fail needs a judgment of its own.
+# record, and its fail needs a judgment of its own. rig-check-lib.sh holds the
+# one definition of that judgment.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || fail "could not resolve this script's directory"
+# shellcheck source=rig-check-lib.sh
+. "$HERE/rig-check-lib.sh" || fail "cannot source rig-check-lib.sh beside this script"
 FAILED=""
 UNRECORDED=""
 # judged <check> <record> : a fail at HEAD fails the check unless the work
 # bead's pre-existing mark for it holds <record> and names a tracker.
 judged() {
 	local pre
-	pre=$(printf '%s' "$ISSUE_JSON" | jq -r --arg k "rig_check_pre_existing.$1" --arg c "$HEAD_SHA" --arg rec "$2" '
-		($rec | fromjson? // null) as $r
-		| .[0].metadata[$k] // empty
-		| (if type == "string" then (fromjson? // empty) else . end)
-		| select(type == "object" and .commit == $c and ((.trackers // []) | length) > 0)
-		| if $r != null and .record == $r then "tracked by " + (.trackers | join(", ")) else "another run" end' 2>/dev/null)
+	pre=$(printf '%s' "$ISSUE_JSON" | jq -r --arg k "rig_check_pre_existing.$1" --arg c "$HEAD_SHA" --arg rec "$2" \
+		"$PRE_EXISTING_JQ"' pre_existing($k; $c; $rec)' 2>/dev/null)
 	case "$pre" in
 	"tracked by "*) note "$1: the fail at $HEAD_SHA is pre-existing, $pre" ;;
 	"another run")

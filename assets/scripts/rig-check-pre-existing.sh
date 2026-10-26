@@ -20,9 +20,10 @@
 # current directory), which must be <sha>. A later run at that commit with
 # another command or scope replaces the record, and its fail is not the one
 # judged, so each reader honors the judgment only while --check still reads
-# that record: self-review-check.sh lets the loop converge past it on the work
-# bead at HEAD, and the correctness review runs no suite for it on the anchor
-# at the reviewed commit.
+# that record, by rig-check-lib.sh's one definition: self-review-check.sh lets
+# the loop converge past it on the work bead at HEAD, and review-evidence.sh
+# calls it pre-existing on the anchor at the reviewed commit, so a correctness
+# review runs no suite for it.
 #
 # setup and build have no record, so for them the record is the bead's own
 # self_review_setup_build, the self-review's note of what setup and build did

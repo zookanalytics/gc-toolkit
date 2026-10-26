@@ -6,14 +6,15 @@
 # (services/helm); this script renders nothing.
 # Verbs (full grammar and per-verb notes in usage(), `gc-helm --help`): the
 # write verbs open, engage, react, takeaway, demand, park, priority, dismiss,
-# accept, and the read-only resolve and unplaced. open, engage and react take a <subject>
-# (a bead id, a PR number or URL, or a superseded id) and resolve it to the
-# live bead that owns the work by metadata and the graph, never a title; an
-# unresolvable or ambiguous reference is refused and nothing is filed.
+# handback, accept, and the read-only resolve and unplaced. open, engage and
+# react take a <subject> (a bead id, a PR number or URL, or a superseded id)
+# and resolve it to the live bead that owns the work by metadata and the graph,
+# never a title; an unresolvable or ambiguous reference is refused and nothing
+# is filed.
 # Callers: tmux-pick-helm.sh + gc-visit-open.sh (open), helm-svc POST
 # /helm/open via GC_HELM_OPEN_TOOL (open — its stderr/stdout sentences are
 # parsed by services/helm/internal/server, guarded by open_parity_test.go),
-# converse and the proactive worker (takeaway), converse (demand), the
+# converse and the proactive worker (takeaway), converse (demand, handback), the
 # placement sitting (unplaced), operators by hand (park, priority).
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
 # unenumerable — each failure names its own operator move),
@@ -60,7 +61,8 @@ Usage:
   gc-helm park <bead-id> --waiting-on <bead-id>  the same hold behind an existing bead, filing no gate
   gc-helm priority <bead-id> <P0-P4> [--dry-run]  set the priority of a bead that follows nothing, and re-rank the work that follows it
   gc-helm priority <bead-id> --shift <±n> [--dry-run]  set the shift of a bead that follows a parent or an anchor: +1 is one level later, -1 one level sooner
-  gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
+  gc-helm dismiss  [<bead-id>] [--reason "..."] [--operator] [--json]  the operator is done with this subject: end its sitting by closing its open visit and stopping the session that held it; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --operator stops every session as the operator, from outside it; --json prints {subject,matched,closed,ok} and names which identity matched each visit
+  gc-helm handback <visit-id> < hand-back  record the hand-back a converse sitting is posting, read from stdin, on its visit, replacing the one before; engage prints the latest in the operator's tab once the sitting has ended
   gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: resolve the human gate that put it to the operator, dispatch the subject's gc.recommended_formula at the subject (a failed dispatch reopens the gate), and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
   gc-helm unplaced [--json]  list the placement sitting's queue: every live bead in the city's stores marked placement=pending that nothing has placed since (no parent, route, arm, assignee or live pour), priority then age; --json prints one object for a caller: the rows as beads, the suspended rigs it skipped, and the rigs whose store did not answer. Read-only, files nothing; exits 4 after the list when a store did not answer
@@ -172,12 +174,18 @@ all back (assets/scripts/queue-priority.sh move). --dry-run prints what it
 would write.
 
 dismiss is the operator's explicit "end this sitting". It closes the subject's
-open visit, which is what holds a converse sitting's pane up; converse-reap
-then ends the now-settled session. It stamps gc.outcome=dismissed first, so the
-ended sitting is still one the board can report, and a visit that will not take
-that stamp is left open rather than closed unreadable; the close itself falls
-back to --force when the visit is held under a session identity this actor
-cannot close under. A visit the verb could not account for aborts the run,
+open visit, then stops the converse session that held it with
+`gc runtime drain-ack`, so the controller ends the session outside this
+process: the session dismiss runs in acks itself, last, and any other is acked
+as an operator. --operator says the caller is outside the sitting even when it
+runs under the sitting's identity to infer the subject, as prefix+X does, so
+every session is acked as an operator and none acks itself. A session that
+will not stop is left to converse-reap, which closes any converse session
+whose visit reads closed. It stamps
+gc.outcome=dismissed first, so the ended sitting is still one the board can
+report, and a visit that will not take that stamp is left open rather than
+closed unreadable; the close itself falls back to --force when the visit is
+held under a session identity this actor cannot close under. A visit the verb could not account for aborts the run,
 which exits 4. It writes nothing to the subject: the DONE band a closed anchor
 lands in carries no per-row state, so a row leaves only by ageing past
 GC_HELM_DONE_WINDOW (default 7d).
@@ -190,6 +198,14 @@ gc.continuation_group or tracks edge. That is what lets a bare `gc-helm dismiss`
 end the sitting the operator is reading. Inference fails CLOSED — no identity,
 no held visit, more than one, or an unreadable listing each refuse rather than
 guess a subject, and name the explicit-id form as the fix.
+
+handback records the hand-back a converse sitting is posting, each framing and
+the sign-off, on its visit. The text is read from stdin and stamped as
+gc.handback with gc.handback_at, replacing the one recorded before, then read
+back. engage runs its attach as a child, so when the tab's tmux client exits,
+engage reads the visit. A closed visit prints how it closed and the latest
+hand-back; a visit still open prints the command that re-attaches. A bead that
+is not a visit is refused, and so is an empty stdin.
 EOF
 }
 
@@ -1130,8 +1146,7 @@ cmd_takeaway() {
     # route its stamp does not match — the shape doctor/executor-identity-residue
     # reports on an open, routed bead — and a gc.session_id left behind is the
     # stale pin the runtime's orphan recovery resolves an owner from.
-    # converse-claim.sh's release_turn clears the same pair when it puts a turn
-    # back. Both are read back after this write and a lone unset retried, the way
+    # Both are read back after this write and a lone unset retried, the way
     # the route beside them is: a silent multi-pair drop would otherwise report a
     # successful release while the very residue
     # doctor/executor-identity-residue exists to catch survives on the bead.
@@ -2321,8 +2336,8 @@ cmd_open() {
     gc bd dep add "$VISIT" "$bead" --type=tracks
     # Read the group stamp back and repair it from the subject if it landed
     # empty: it can land present-but-empty while every sibling stamp in the
-    # same update lands, and an empty group disables converse's group-scoped
-    # re-claim fence. Repair and warn, never exit — this block files the one
+    # same update lands, and a reader that lists a subject's visits by the
+    # stamp alone misses a visit whose stamp is empty. Repair and warn, never exit — this block files the one
     # visit for its scope, and on a persistent miss the tracks edge still
     # carries the subject for guards that read the union.
     GROUP_GOT=$(gc bd show "$VISIT" --json | tr -d '[:cntrl:]' | jq -r '.[0].metadata["gc.continuation_group"] // ""' 2>/dev/null || printf '')
@@ -2498,24 +2513,126 @@ current_sitting_subject() {
     SITTING_LISTING="$_vjson"; SITTING_LISTING_DIR="${BEADS_DIR:-}"
 }
 
+# ── Verb: handback ───────────────────────────────────────────────────
+# A converse sitting records each hand-back it posts, every framing and the
+# sign-off, on its VISIT. The text arrives on stdin and replaces the one
+# recorded before, so the visit carries the sitting's latest words. engage's
+# attach path prints them once the sitting's session has ended and the
+# operator's tab is back at a shell, where nothing of the pane survives. The
+# takeaway is the board's one-line headline; this is the hand-back whole.
+# gc.handback and gc.handback_at land in one write, and the text is read back.
+cmd_handback() {
+    bead=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -h|--help) usage; exit 0 ;;
+            -*) echo "$PROG: handback: unknown flag '$1'" >&2; exit 2 ;;
+            *) [ -z "$bead" ] || { echo "$PROG: handback takes one visit id" >&2; exit 2; }; bead="$1"; shift ;;
+        esac
+    done
+    [ -n "$bead" ] || { echo "$PROG: handback needs <visit-id>, with the hand-back on stdin" >&2; usage; exit 2; }
+    handback_text=$(cat)
+    if [ -z "$(printf '%s' "$handback_text" | tr -d '[:space:]')" ]; then
+        echo "$PROG: handback: stdin carried no hand-back, so nothing was recorded on $bead. Pipe in the hand-back as it is posted." >&2
+        exit 2
+    fi
+    verify_subject "$bead" handback "Nothing was recorded." || exit $?
+    handback_kind=$(printf '%s' "$VS_ROW" | jq -r '.metadata.task_kind // ""' 2>/dev/null || true)
+    if [ "$handback_kind" != "visit" ]; then
+        echo "$PROG: handback: $bead is not a visit (task_kind '${handback_kind:-<none>}'), and a hand-back is recorded on the visit its sitting holds. Nothing was recorded." >&2
+        exit 2
+    fi
+    path=$(rig_path_for_bead "$bead")
+    db=""; [ -n "$path" ] && [ -d "$path/.beads" ] && db="$path/.beads"
+    handback_at=$(iso_now)
+    # One repair write, because a write that exits 0 can still read back without
+    # its value (the store behaviour meta_now guards against on the takeaway).
+    handback_ok=""
+    for _hb_try in 1 2; do
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        gc bd update "$bead" ${db:+--db "$db"} --set-metadata "gc.handback=$handback_text" \
+            --set-metadata "gc.handback_at=$handback_at" >/dev/null 2>&1 || true
+        if [ "$(meta_now "$bead" gc.handback)" = "$handback_text" ]; then handback_ok=1; break; fi
+    done
+    if [ -z "$handback_ok" ]; then
+        echo "$PROG: handback: the hand-back did not read back on $bead, so its tab would print an older one, or none. Re-run it." >&2
+        exit 4
+    fi
+    echo "$PROG: handback: recorded on $bead at $handback_at"
+}
+
+# sitting_session_of <visit-row> — the live converse session holding a visit,
+# printed as "<session-id> own" when it is the session this verb runs in and
+# "<session-id> other" when it is not, else nothing. The holder is the session
+# the visit's gc.session_id names, else the one its gc.session_name or assignee
+# names: the claim stamps both pins, and a bind the sitting never claimed
+# leaves the assignee alone. Only a converse template counts, so a visit some
+# other agent holds never stops that agent, and a listing that will not read
+# names nobody.
+sitting_session_of() {
+    _sso_sid=$(printf '%s' "$1" | jq -r '(.metadata // {})["gc.session_id"] // ""' 2>/dev/null || true)
+    _sso_sn=$(printf '%s' "$1" | jq -r '(.metadata // {})["gc.session_name"] // ""' 2>/dev/null || true)
+    _sso_as=$(printf '%s' "$1" | jq -r '.assignee // ""' 2>/dev/null || true)
+    [ -n "$_sso_sid$_sso_sn$_sso_as" ] || return 0
+    gc session list --state all --json 2>/dev/null | scrub | jq -r \
+        --arg id "$_sso_sid" --arg sn "$_sso_sn" --arg as "$_sso_as" --arg me "$(session_identities)" '
+        ($me | split("\n") | map(select(. != ""))) as $mine
+        | if type == "object" and ((.sessions // null) | type) == "array" then
+            [ .sessions[] | objects
+              | select((.closed // false) != true)
+              | select((.template // "") | test("(^|[./])converse(-[^./]*)?$"))
+              | select(($id != "" and (.id // "") == $id)
+                       or ($sn != "" and (.session_name // "") == $sn)
+                       or ($as != "" and ((.session_name // "") == $as or (.alias // "") == $as or (.id // "") == $as)))
+              | select((.id // "") != "")
+              | .id + " " + (if ([.id, .session_name, .alias] | map(select(. != null and . != "")) | any(. as $x | $mine | index($x) != null))
+                             then "own" else "other" end) ]
+            | first // empty
+          else empty end' 2>/dev/null || true
+}
+
+# operator_drain_ack <session-id> — stop a session as the operator, from outside
+# it, with `gc runtime drain-ack --operator`. Gas City refuses an operator ack
+# whose caller's GC_SESSION_ID or GC_INSTANCE_TOKEN names the session it stops.
+# A caller can carry both, because a run-shell job inherits the tmux
+# environment of the session its key was pressed in, incarnation token
+# included. So the ack runs with this process's session identity and token
+# removed.
+operator_drain_ack() {
+    (
+        unset GC_SESSION_ID GC_SESSION_NAME GC_ALIAS GC_INSTANCE_TOKEN
+        gc runtime drain-ack --operator "$1"
+    ) >/dev/null 2>&1
+}
+
 # ── Verb: dismiss ────────────────────────────────────────────────────
 # The operator's explicit "end this sitting". converse runs with no
-# idle_timeout, so a held visit keeps its pane up until something closes the
+# idle_timeout, so a held visit keeps its sitting up until something closes the
 # visit; closing it here is the act that ends a sitting the operator no longer
-# wants, and converse-reap ends the now-settled session. The DONE band the
-# subject's closed anchor lands in carries no per-row state — a row leaves only
-# by ageing past GC_HELM_DONE_WINDOW — so dismiss writes nothing to the subject.
+# wants, and the verb then stops the session that held it, so the sitting does
+# not outlive its visit. The DONE band the subject's closed anchor lands in
+# carries no per-row state — a row leaves only by ageing past
+# GC_HELM_DONE_WINDOW — so dismiss writes nothing to the subject.
 #
 # The outcome stamp precedes the close: a visit closed without a gc.outcome is
 # a sitting the board cannot report, and once closed no re-run reaches it. A
 # visit the verb could not account for aborts the run. Idempotent.
+#
+# The stop is `gc runtime drain-ack`, so the controller ends the session
+# outside this process: a dismiss typed into the sitting's own pane is never
+# killed half done. The session this verb runs in acks itself, last of all;
+# any other is acked as an operator. Under --operator the caller is outside
+# every sitting, whatever identity it runs under, so no session acks itself.
+# A session that will not stop is left to converse-reap, which closes any
+# converse session whose visit reads closed.
 cmd_dismiss() {
-    bead=""; dismiss_reason=""; dismiss_json=""
+    bead=""; dismiss_reason=""; dismiss_json=""; dismiss_stop=""; dismiss_operator=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --reason=*) dismiss_reason="${1#--reason=}"; shift ;;
             --reason)   shift; [ $# -gt 0 ] || { echo "$PROG: dismiss: --reason requires a value" >&2; exit 2; }
                         dismiss_reason="$1"; shift ;;
+            --operator) dismiss_operator=1; shift ;;
             --json)     dismiss_json=1; shift ;;
             -h|--help)  usage; exit 0 ;;
             -*) echo "$PROG: dismiss: unknown flag '$1'" >&2; exit 2 ;;
@@ -2702,7 +2819,42 @@ cmd_dismiss() {
         if [ "$_closed_this" = 1 ] && [ -x "$VISIT_COMMENT_TOOL" ]; then
             "$VISIT_COMMENT_TOOL" close --visit "$_v" --subject "$bead" --outcome dismissed --summary "$_why" || true
         fi
+        # The session holding the closed visit, read from the row the listing
+        # gave, which still names it. It is stopped once the run's writes are
+        # done (dismiss_stop_sittings).
+        if [ "$_closed_this" = 1 ]; then
+            _v_row=$(printf '%s' "$visits_json" | jq -c --arg v "$_v" \
+                'if type == "array" then ([ .[] | select(type == "object" and (.id // "") == $v) ] | first // empty) else empty end' 2>/dev/null || true)
+            _v_holder=$(sitting_session_of "$_v_row")
+            [ -n "$_v_holder" ] && dismiss_stop="${dismiss_stop:+$dismiss_stop
+}$_v_holder"
+        fi
     done
+
+    # dismiss_stop_sittings — stop each session dismiss_stop names, the one this
+    # verb runs in last, since a dismiss typed into a sitting's pane ends with
+    # that pane. Under --operator none is the one this verb runs in.
+    dismiss_stop_sittings() {
+        _ds_own=""
+        _ds_ifs=$IFS
+        IFS='
+'
+        for _ds_line in $dismiss_stop; do
+            _ds_id=${_ds_line%% *}
+            if [ "${_ds_line#* }" = own ] && [ -z "$dismiss_operator" ]; then _ds_own=$_ds_id; continue; fi
+            if operator_drain_ack "$_ds_id"; then
+                _dmsg "$PROG: dismiss: stopped session $_ds_id, which held the sitting"
+            else
+                echo "$PROG: dismiss: could not stop session $_ds_id, which held the sitting; converse-reap closes it on its next pass, because its visit is closed" >&2
+            fi
+        done
+        IFS=$_ds_ifs
+        if [ -n "$_ds_own" ]; then
+            _dmsg "$PROG: dismiss: ending this session ($_ds_own), which held the sitting"
+            gc runtime drain-ack >/dev/null 2>&1 \
+                || echo "$PROG: dismiss: could not end this session ($_ds_own); converse-reap closes it on its next pass, because its visit is closed" >&2
+        fi
+    }
 
     # A visit the verb could not account for aborts the run: each unfinished
     # visit above says what it needs, and a re-run resumes from there.
@@ -2713,6 +2865,7 @@ cmd_dismiss() {
         [ -n "$dismiss_json" ] && jq -nc --arg s "$bead" --argjson m "$visits_matched" --argjson c "$closed_n" \
             '{subject: $s, matched: $m, closed: $c, ok: false}'
         echo "$PROG: dismiss: $bead was NOT dismissed — a sitting is unaccounted for. Each unfinished visit above says what it needs, and a re-run resumes from there." >&2
+        dismiss_stop_sittings
         exit 4
     fi
 
@@ -2723,6 +2876,7 @@ cmd_dismiss() {
     else
         [ "$closed_n" -eq 0 ] && echo "$PROG: dismiss: no open visit on $bead — nothing was holding a sitting"
     fi
+    dismiss_stop_sittings
     return 0
 }
 
@@ -4494,12 +4648,53 @@ cmd_engage() {
             ;;
     esac
 
+    # Once the attach returns, the tab is back at this shell, and what it prints
+    # next is the operator's only account of the sitting it left: nothing of the
+    # pane survives it. tmux shows [exited] when the sitting's session ended
+    # (each converse template sets detach-on-destroy on its own session) and
+    # [detached] when the operator left it, and both exit 0, so the visit says
+    # which. A closed visit is a sitting that ended, and the tab prints how the
+    # visit closed and the last hand-back the sitting recorded on it
+    # (cmd_handback). A visit still open is a sitting still going, and the tab
+    # prints how to re-attach. A failed attach reads the same visit first,
+    # because a sitting that ended before the tab reached it is reported, not
+    # offered for an attach.
+    engage_after_attach() {
+        _aa_row=$(row_now "$VISIT")
+        _aa_meta() { printf '%s' "$_aa_row" | jq -r --arg k "$1" '(.metadata // {})[$k] // "" | tostring' 2>/dev/null || true; }
+        _aa_status=$(printf '%s' "$_aa_row" | jq -r '.status // ""' 2>/dev/null || true)
+        if [ "$_aa_status" = "closed" ]; then
+            _aa_outcome=$(_aa_meta gc.outcome)
+            _aa_reason=$(_aa_meta gc.outcome_reason)
+            _aa_at=$(_aa_meta gc.handback_at)
+            # The text is the sitting's own, printed to the operator's terminal,
+            # so control bytes other than tab and newline are dropped.
+            _aa_text=$(printf '%s' "$_aa_row" | jq -r '(.metadata // {})["gc.handback"] // "" | tostring
+                | gsub("[\\x00-\\x08\\x0b-\\x1f\\x7f]"; "")' 2>/dev/null || true)
+            printf '\nThe sitting on %s has ended: visit %s closed%s%s.\n' "$_eng_for" "$VISIT" \
+                "${_aa_outcome:+ as $_aa_outcome}" "${_aa_reason:+ ($_aa_reason)}"
+            if [ -n "$_aa_text" ]; then
+                printf 'Its last hand-back%s:\n\n%s\n' "${_aa_at:+, recorded $_aa_at}" "$_aa_text"
+            else
+                printf 'It recorded no hand-back.\n'
+            fi
+        elif [ "$1" -ne 0 ]; then
+            echo "$PROG: engage: could not attach to $sid — attach when ready: gc session attach $sid" >&2
+        elif [ -z "$_aa_status" ]; then
+            printf '\nCould not read visit %s, so whether its sitting has ended is unknown: gc bd show %s\n' "$VISIT" "$VISIT"
+        else
+            printf '\nThe sitting on %s is still open (visit %s). Re-attach: gc session attach %s\n' "$_eng_for" "$VISIT" "$sid"
+        fi
+    }
+
     # The summary already printed the attach line; on the default path we attach
     # a started sitting. One still unstarted at the bound is left unattached,
     # because the attach would launch it without its prompt.
     if [ "$engage_attach" = "1" ]; then
         if [ "$start_rc" -eq 0 ]; then
-            gc session attach "$sid" || echo "$PROG: engage: could not attach to $sid — attach when ready: gc session attach $sid" >&2
+            attach_rc=0
+            gc session attach "$sid" || attach_rc=$?
+            engage_after_attach "$attach_rc"
         else
             echo "$PROG: engage: the reconciler has not started $sname after ${ENGAGE_WAIT_TIMEOUT}s (its state in 'gc session list': ${start_state:-unreadable}), so it was not attached; an attach now would launch it without its prompt. Attach once it reads active there: gc session attach $sid" >&2
         fi
@@ -4519,8 +4714,9 @@ case "${1:-}" in
     park)          shift; cmd_park "$@" ;;
     priority)      shift; cmd_priority "$@" ;;
     dismiss)       shift; cmd_dismiss "$@" ;;
+    handback)      shift; cmd_handback "$@" ;;
     accept)        shift; cmd_accept "$@" ;;
     board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm)" >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
-    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, accept, takeaway, demand, park, priority, dismiss, resolve, unplaced, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, accept, takeaway, demand, park, priority, dismiss, handback, resolve, unplaced, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
 esac

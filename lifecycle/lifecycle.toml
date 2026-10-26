@@ -864,6 +864,20 @@ keys = [
   # machine:<lane> or human:<login> — who raised it. A human finding is what
   # lets an operator's PR comment produce work the way a reviewer's finding does.
   "finding.source",
+  # The finding contract a reviewer's findings.json carries, which signoff.sh
+  # checks and finding.sh upsert stamps at the first raise, in the description
+  # as well. None is part of finding.key, so a re-raise rewording its scenario
+  # re-adopts the open finding, and a re-raise keeps the first raise's record.
+  # Absent from a human finding and from one whose method grades none.
+  # finding.severity — P0, P1 or P2, the grade the method gave it. A P2 is filed
+  #   only beside a blocking finding, and the validator rules it must-fix or
+  #   declined: finding.sh refuses its deferral.
+  # finding.category — the part of the method that found it.
+  # finding.failure_scenario — the input or state that triggers it, then the
+  #   wrong output that follows.
+  # finding.verification — on a P0 or P1, CONFIRMED with the evidence, or
+  #   PLAUSIBLE with why the trigger is realistic.
+  "finding.severity", "finding.category", "finding.failure_scenario", "finding.verification",
   # The GitHub comment databaseId that raised a human finding, stamped by
   # pr-facts.sh at file time: an inline review comment, a review body (the
   # review's own id, so it equals finding.review_id), or a Conversation comment.
@@ -1111,10 +1125,11 @@ keys = [
 #   reviews, and the refinery's handle-failures writes it on the anchor at the
 #   merged head. A write for the same record adds its trackers; one for another
 #   record replaces the value. self-review-check.sh reads the work bead's to
-#   pass a recorded fail at HEAD, and the correctness review reads the anchor's
-#   test value to run no suite for a recorded fail at the reviewed commit; each
-#   reads a value whose record is not the one --check reads now, such as one a
-#   run with another command or scope replaced, as no judgment. Only the
+#   pass a recorded fail at HEAD, and review-evidence.sh reads the anchor's at
+#   the reviewed commit, so a review's gather calls that fail pre-existing and
+#   the correctness method runs no suite for it. Both judge by rig-check-lib.sh,
+#   which reads a value whose record is not the one --check reads now, such as
+#   one a run with another command or scope replaced, as no judgment. Only the
 #   self-review writes and reads a setup or build value, against its note.
 #   Absent means no caller judged a fail pre-existing. Never cleared.
 
@@ -1459,7 +1474,7 @@ keys = [
   "stale_escalated_at", "stale_escalated_to",
   "visit.recheck", "sweep.*", "triage.*",
   "gc.pr_visit_summary", "gc.pr_visit_actions",
-  "gc.ruling", "gc.folded_into",
+  "gc.ruling", "gc.folded_into", "gc.handback", "gc.handback_at",
 ]
 # The gc.takeaway family and gc.demand_for carry their mechanics in the comment
 # above and in [holds] (settled_keys, terminal_wait_key): gc-helm.sh, signoff.sh
@@ -1471,10 +1486,11 @@ keys = [
 # gc.gate_visit — on a gate bead, the visit gate-visit-sweep.sh filed for it (a
 #   bead id, or `filed`); its presence is how the sweep skips a gate already
 #   escalated, and `--unset` re-offers the visit.
-# gc.continuation_group — the subject a visit is scoped to, converse's
-#   group-scoped re-claim fence. Written on the visit by gc-helm.sh and
-#   escalate.sh, and repaired toward the subject id when a read-back finds it
-#   empty (an empty group disables the fence). Never cleared. A bead id.
+# gc.continuation_group — the subject a visit is scoped to, recorded beside the
+#   visit's tracks edge; converse-claim.sh reports it as the sitting's subject.
+#   Written on the visit by gc-helm.sh and escalate.sh, and repaired toward the
+#   subject id when a read-back finds it empty (a reader that lists a subject's
+#   visits by the stamp alone misses it). Never cleared. A bead id.
 # gc.origin — `operator` marks a topic a human commissioned. gc-visit-open.sh
 #   stamps it on its subject when the key is absent, and gc-helm.sh `engage
 #   --new-subject` writes it in the create payload of the subject it files.
@@ -1551,6 +1567,13 @@ keys = [
 #   close-answered follows it, as it follows bead-rehome.sh's gc.superseded_by on
 #   a re-homed visit, to the visit whose ruling answers the question. Never
 #   cleared. A bead id in the folded visit's own store.
+# gc.handback / gc.handback_at — on a VISIT, the latest hand-back its converse
+#   sitting posted, whole (a framing or the sign-off), and when it was recorded
+#   (RFC-3339 UTC). gc-helm.sh `handback` writes both in one update, each record
+#   replacing the one before, and reads the text back. gc-helm.sh `engage` reads
+#   them once the tab's attach returns on a closed visit, and prints the text in
+#   the operator's terminal as the sitting's last words. Absent, the tab says the
+#   sitting recorded no hand-back. Never cleared. Freeform multi-line text.
 
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by
