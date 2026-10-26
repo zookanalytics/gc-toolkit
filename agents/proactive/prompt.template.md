@@ -130,7 +130,10 @@ esac
      is. A town-repo edit (`city.toml`, `packs.lock`) is mechanik's direct edit,
      so it goes to mechanik, and a blocked one waits assigned to mechanik. A
      city-config question that is genuinely a policy call, such as resuming an
-     order the operator paused, is still a `ruling`.
+     order the operator paused, is still a `ruling`. A problem in code the
+     pack's deletion plan retires is not actionable: do what the `work`
+     skill's filing section says for one, then take the `blocked` exit waiting
+     on the bead that retires the code.
    - **recommend** — you can name the action, but it warrants the operator's
      trigger before it runs: an authority-gated action (retire an in-flight PR,
      supersede an anchor) or a consequential, partly-uncertain call you have a

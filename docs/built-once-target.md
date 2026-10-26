@@ -357,7 +357,7 @@ Each item is carried by the bead it names.
 |---|---|---|---|---|
 | P1 | [Rule 3](#the-rules)'s size line: `measure.sh` moves into `tools/`, and each PR's managed summary carries its size change | the tool and the summary line | tk-i17pn6e | this page landing |
 | P3 | One decline call replaces the 20 copies of the decline sequence in step text, under rule 2 | 20 copies, 29 refusal sentences | tk-qitjxcm | tk-c8724xi, which edits the same files |
-| P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 3.9k lines of shell in step text, 52 tests of 16.4k lines | tk-udqthpx states the rule and adds its lint, and tk-1tfzr71.12, .19 and .20 apply it to the formulas they rewrite | this page landing, for tk-udqthpx |
+| P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 3.9k lines of shell in step text, 52 tests of 16.4k lines | tk-1tfzr71.12, .19 and .20, each applying it to the formulas it rewrites | each bead's place in its lane |
 | P5 | Each Go port (tk-ssm8qns) carries only the migration map's surviving intents and deletes the shell it replaces in the same change, and rule 3's size line shows its net | the port's contract | a note on tk-ssm8qns | the port's blockers |
 
 ## The rules
@@ -367,25 +367,22 @@ Every change follows these rules.
 1. **Code the deletion plan retires gets no new work.** The plan is the
    schedule above, with the whole files
    [the measurement record](../specs/tk-11l1ejh/measurement.md#3-the-scheduled-removals-whole-files)
-   lists for each bead. A problem found in that code goes to the bead that
-   retires it, as a note there, and the problem's own bead waits on that
-   retirement. A problem that hurts the operator now gets the smallest stopgap
-   and no new test suite.
-2. **Step text holds no procedures.** A formula step calls a tested script, and
-   anything two steps need is one script. Existing step text changes at its own
-   rewrite.
+   lists for each bead. The work skill's filing section
+   (`skills/work/SKILL.md`) says what becomes of a problem found in that code,
+   and the mechanik and the first reaction read it before they file a fix.
+2. **Step text holds no procedures.**
+   [pack-authoring.md](pack-authoring.md#step-text-calls-a-tested-script)
+   states the rule where formulas are written, and `tools/lint-step-text.sh`
+   fails a change that adds a procedure to step text.
 3. **Every PR shows its size change.** The size line is computed from git, from
    the merge base to the head: the net runtime and test lines, by subsystem. It
    names separately the lines the change adds to code the plan retires, and the
    bead that retires each. It carries no budget, no prediction and no stored
    history. The PR's CI test run time can sit beside it as information.
 
-tk-udqthpx states rules 1 and 2 where agents file and route work and where they
-write formula steps, and adds a lint that flags a procedure in the lines a
-formula change adds. tk-i17pn6e puts rule 3's line in each PR's managed
-summary. Both are armed to start when this page lands. Until they land, an
-agent meets the rules only on this page, and `measure.sh BASE HEAD` computes a
-change's net by hand, without the split for code the plan retires.
+tk-i17pn6e puts rule 3's line in each PR's managed summary. Until it lands,
+`measure.sh BASE HEAD` computes a change's net by hand, without the split for
+code the plan retires.
 
 ## Keeping it true
 
