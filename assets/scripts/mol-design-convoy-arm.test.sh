@@ -15,7 +15,7 @@
 # subject, which is the effort's landing bead. A refused push after which origin
 # carries the branch is an earlier pass's cut, a subject that records the branch
 # is cut no further, and a subject that records another branch or lands
-# elsewhere is refused. The cut is two marked blocks, effort-default-branch and
+# elsewhere is refused. The cut is the marked blocks effort-default-branch and
 # effort-branch-push, which the mechanik's recipe carries too. The copies must
 # stay identical, so both ways of standing an effort up cut from the branch
 # origin/HEAD names, a default other than main included.

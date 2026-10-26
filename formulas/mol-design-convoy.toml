@@ -118,7 +118,7 @@ The default branch is the one `origin/HEAD` names in the rig's checkout, or
 rig's checkout never moves. Its empty lease refuses a branch that already
 exists, so a refused push after which origin carries the branch is a cut an
 earlier pass already made. The mechanik's recipe for standing an effort up by
-hand cuts with the same two marked blocks, `effort-default-branch` and
+hand cuts with the same marked blocks, `effort-default-branch` and
 `effort-branch-push`, so both cut from the same branch. A subject that already
 records the branch is cut no further, and one that records another branch is not
 this run's to cut. Neither is one that lands on a branch other than the default,
@@ -519,12 +519,11 @@ on `mol-polecat-report`. Armed or slung, every bead the subject waits on is
 already waited on, and a run that stops partway leaves the subject with the
 refinery, held by every bead not yet closed.
 
-**Idempotent on resume** via three markers on the subject, each stamped right
-after its own dispatch: `gc.design_armed` (the design child is slung),
-`gc.impl_armed` (the implementation child is armed or slung) and
-`gc.summary_armed` (the summary task is armed). A re-run dispatches nothing
-twice, and a subject whose summary task is armed is finished, so its re-run
-writes nothing:
+**Idempotent on resume** via a marker on the subject for each dispatch, stamped
+right after it: `gc.design_armed` (the design child is slung), `gc.impl_armed`
+(the implementation child is armed or slung) and `gc.summary_armed` (the
+summary task is armed). A re-run dispatches nothing twice, and a subject whose
+summary task is armed is finished, so its re-run writes nothing:
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 SUBJECT=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')

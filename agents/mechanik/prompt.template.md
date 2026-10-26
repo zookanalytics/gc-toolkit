@@ -113,7 +113,7 @@ BRANCH="integration/$LANDING"
 # names none) with one create-only push from the rig's checkout, after a fetch.
 # The push sends a ref and moves no checkout. Its empty lease refuses a branch
 # that already exists, so a resumed recipe that finds the branch on origin goes
-# on. mol-design-convoy cuts its subject's branch with the same two blocks.
+# on. mol-design-convoy cuts its subject's branch with the same marked blocks.
 RIG_ROOT=$(gc rig list --json | jq -r --arg r <rig> '.rigs[] | select(.name == $r) | .path')
 [ -n "$LANDING" ] && [ -d "$RIG_ROOT" ] || { echo "no landing bead, or no checkout of <rig>; stopping" >&2; exit 1; }
 # >>> effort-default-branch
