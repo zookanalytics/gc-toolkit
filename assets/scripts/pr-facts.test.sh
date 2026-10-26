@@ -6993,7 +6993,7 @@ has "$(lanswer 607 6008)" "the config key was renamed in the same change. (7a7a7
 eq "$(lcount 607 6008)" "1" "…still in the one living answer"
 
 echo "# a decline whose thread waits on the reviewer needs them, in its thread and in the living answer, until they resolve it"
-# The shape of growth-factor PR #15: one point fixed and its thread resolved,
+# A review of two points: one fixed and its thread resolved,
 # one declined and its thread left open for the reviewer to accept or push back on.
 store "[$(anchor LA17 618 "$(lmeta rework:KL17 6182 6018)"), $(fixunit KL17 closed),
   $(lfind LR1 LA17 6181 6018 must-fix closed '**Count each page once.**' '{"finding.fix_unit":"KL17","finding.fix_answer":"Fixed as you suggested."}'),
