@@ -44,7 +44,11 @@ the gate calls it by that path. The `test` line is the test evidence:
   suites the diff touches in `<worktree>` through the gate, so that run is
   recorded as well, `gctk rig test --scope affected --command '<the suites>'`,
   and record the real pass and fail counts. With no gctk binary there is no
-  gate, so run them plain.
+  gate, so run them plain. A suite is one the diff touches when the diff
+  changes it or a file it reads or runs. When the diff touches none, as when it
+  changes only a document that no suite reads, there is nothing to run. Run
+  nothing, and the Verification line says so, with how you found that no suite
+  touches the diff.
 
 Either way you may run one targeted suite for a gap you suspect, and the run of
 each new case against the pre-change code that the Testing dimension asks for
@@ -194,6 +198,11 @@ reached, rather than drop a half-believed one; a blocking finding's
 verification says how sure you are. A concern with no trigger you can name is
 not a finding.
 
+Prose is text that a person or an agent reads and acts on, such as a document,
+a spec, a prompt, a skill or a comment. A finding on prose has a reader where
+code has an input, so its failure scenario names the text, the reader who acts
+on it, and the wrong action or false belief that follows on the tree as merged.
+
 Each P0 and P1 also carries its verification, one line that opens with
 CONFIRMED or PLAUSIBLE, the result its check returned (below), and then the
 evidence behind that result.
@@ -259,6 +268,13 @@ trigger's path again rather than recall it. Either way the question is whether
 the trigger reaches the failure on the tree as merged, not whether the
 argument that raised the candidate holds, so look first for the line that
 would rule it out.
+
+On prose, the tree the text describes answers that question. Read each claim
+against the files it is about at the reviewed commit, trace each instruction
+one step at a time as it is written, and walk a behavior the text commits to
+through the case the candidate names. A line that makes the text true refutes
+the candidate. A line that contradicts it, a step that does the wrong thing, or
+a case the behavior fails confirms it.
 
 The check returns one of these results:
 
@@ -337,6 +353,18 @@ where fail-closed was intended, is P1 however rare the trigger. When you can't
 tell whether something is reachable, say what you checked and grade on what
 you know.
 
+On prose, a finding blocks when its failure scenario is one of these:
+
+- A claim about the tree that the tree as merged contradicts.
+- An instruction that does the wrong thing when it is followed as written.
+- A behavior the text commits to that fails on a reachable case.
+
+Read its grade off the wrong action or belief, as you read code's off the
+wrong output, so an instruction that loses data when it is followed as written
+is P0. A failure that depends on how work the text leaves open is later built
+does not block, because the text leaves that choice to the work that builds
+it. It is a P2 at most, or a note in the trail for that work.
+
 P0 and P1 are the blocking findings. The verdict is request-changes when the
 diff carries at least one, each with its required fix. The PR then goes back
 for a rework round anyway, so its P2s go back with it: each is filed beside the
@@ -370,7 +398,7 @@ evidence the review relied on:
 ```
 Swept: <by a subagent, or in a separate pass>: <the locus of each candidate it added, or "none">
 Refuted: <locus>: <its failure scenario>. <file>:<line> reads `<the quoted line>`, so <why the failure cannot follow>
-Verification: <test evidence relied on; each suite run at the reviewed commit, N passed, M failed>
+Verification: <test evidence relied on; each suite run at the reviewed commit, N passed, M failed; or that no suite touches the diff, and how you found it>
 ```
 
 The check passes no `signoff.sh` flag of its own. An approve of a change that

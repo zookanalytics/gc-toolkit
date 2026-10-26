@@ -40,6 +40,14 @@
 #     returns CONFIRMED, PLAUSIBLE or REFUTED, a refutation quotes the line
 #     that proves it, and a refuted candidate does not block, stays out of the
 #     finding set and keeps its refutation in the trail.
+#   - The correctness method grades prose under the same contract. A finding on
+#     prose names the text, the reader who acts on it and the wrong action or
+#     false belief that follows on the tree as merged, and its check reads the
+#     tree. It blocks when it is a claim the tree contradicts, an instruction
+#     that does the wrong thing as written, or a committed behavior that fails
+#     on a reachable case, and a failure that depends on how work the text
+#     leaves open is built is a P2 at most. A diff no suite touches has nothing
+#     to run, and the Verification line says so.
 #   - Neither review formula names a check's judgment: no test or suite, no
 #     P0, P1 or P2 grade, no Verification line, and neither the correctness
 #     method's What to check list nor any dimension of it. The correctness
@@ -306,6 +314,30 @@ hasF "$METHOD" 'A REFUTED candidate is dropped: it is not a finding, it does not
 awk '/^## The verdict$/ {f = 1; next} f && /^## / {exit} f' "$METHOD" > "$TMP/verdict.refuted"
 hasF "$TMP/verdict.refuted" 'a `Refuted:` line for each candidate its check refuted' "…and its refutation stays in the trail the verdict section shapes"
 hasF "$TMP/verdict.refuted" 'an entry whose verification is REFUTED' "…and names signoff.sh's refusal of a set that carries one"
+
+echo "# prose is graded under the same contract, and a diff no suite touches has nothing to run"
+hasF "$METHOD" 'Prose is text that a person or an agent reads and acts on, such as a document, a spec, a prompt, a skill or a comment.' \
+  "the correctness method says what prose is"
+hasF "$METHOD" 'A finding on prose has a reader where code has an input, so its failure scenario names the text, the reader who acts on it, and the wrong action or false belief that follows on the tree as merged.' \
+  "…that a finding on prose names the text, its reader and the wrong action or belief on the tree as merged"
+hasF "$METHOD" 'On prose, the tree the text describes answers that question.' "…and that its check reads the tree the text describes"
+awk '/^## What blocks$/ {f = 1; next} f && /^## / {exit} f' "$METHOD" > "$TMP/blocks"
+hasF "$TMP/blocks" 'On prose, a finding blocks when its failure scenario is one of these:' "what blocks says which failures on prose block"
+for b in 'A claim about the tree that the tree as merged contradicts.' \
+  'An instruction that does the wrong thing when it is followed as written.' \
+  'A behavior the text commits to that fails on a reachable case.'; do
+  hasF "$TMP/blocks" "- $b" "…$b"
+done
+hasF "$TMP/blocks" 'A failure that depends on how work the text leaves open is later built does not block' \
+  "…and that a failure which depends on how open work is built does not"
+hasF "$TMP/blocks" 'It is a P2 at most, or a note in the trail for that work.' "…being a P2 at most, or a note for that work"
+awk '/^### Settle the test evidence$/ {f = 1; next} f && /^#/ {exit} f' "$METHOD" > "$TMP/evidence"
+hasF "$TMP/evidence" 'When the diff touches none, as when it changes only a document that no suite reads, there is nothing to run.' \
+  "the test evidence of a diff no suite touches is that there is nothing to run"
+hasF "$TMP/evidence" 'Run nothing, and the Verification line says so, with how you found that no suite touches the diff.' \
+  "…which the Verification line says, with how the reviewer found it"
+hasF "$TMP/verdict.correctness" 'or that no suite touches the diff, and how you found it>' \
+  "…in the form the verdict section's Verification line offers"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"
