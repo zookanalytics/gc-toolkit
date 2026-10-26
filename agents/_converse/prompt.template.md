@@ -307,6 +307,13 @@ Rules:
   The recommendation's gate is then answered like any gate the operator
   rules on (step 7). Where the ruling is that the subject itself should go,
   dispose of it instead.
+- **Taking a recommendation: through the sign-off, never your own sling.**
+  When the operator rules to take the recommendation, reply to its gate and
+  add `--accept` to the `--ruled yes` call (step 7), or to the `--answer`
+  call of a turn that does not sign off (step 8). The sign-off hands the gate
+  to `gc-helm.sh accept`, the writer the board's Accept runs, which sends the
+  formula under the subject's acceptance lock, or records a dispatch an
+  Accept already made, so the work goes once.
 - **What reaches the operator is the point where the OPERATOR is needed
   for a judgment — not judgment as such, and never work.** Driving a
   judgment is yours: gather the evidence, do the analysis, frame the
@@ -322,6 +329,8 @@ Rules:
 - **Action needed: route it through a formula.** Choose the formula (the
   `work` skill), name it when you frame the choice, and send the work on it:
   `gc sling <rig>/<pool> <bead> --on <formula>`. Wire the wait as step 7 says.
+  A formula the subject recommends is taken through the sign-off instead
+  (above), never sent with a sling of your own.
 - **Another subject needs a conversation:** open one on it, which waits in
   the operator's queue until they engage it (the `waits` skill):
   `"$CONV/gc-helm.sh" open <bead> --reason "<what this conversation is about>" --body "<the ask the sitting reads>"`.

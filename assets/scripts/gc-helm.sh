@@ -62,7 +62,7 @@ Usage:
   gc-helm priority <bead-id> <P0-P4> [--dry-run]  set the priority of a bead that follows nothing, and re-rank the work that follows it
   gc-helm priority <bead-id> --shift <±n> [--dry-run]  set the shift of a bead that follows a parent or an anchor: +1 is one level later, -1 one level sooner
   gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this sitting: close the conversation a live sitting holds on the bead, answering no gate; a conversation id closes that conversation (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok}
-  gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: resolve the human gate that put it to the operator, read the answer back, and dispatch the bead's gc.recommended_formula at it, no sitting; refuses while another human gate blocks the bead, and finishes an acceptance an earlier Accept left unfinished (subject or conversation id)
+  gc-helm accept <bead-id> [--reason "..."] [--conversation <task>]  accept a recommendation: resolve the human gate that put it to the operator, read the answer back, and dispatch the bead's gc.recommended_formula at it; refuses while another human gate blocks the bead, and finishes an acceptance an earlier Accept left unfinished (subject or conversation id). --conversation names the conversation whose sitting's sign-off runs this Accept, which it does not warn of
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — operator-intake.sh uses it to route a PR reference before it becomes a topic
   gc-helm unplaced [--json]  list the placement sitting's queue: every live bead in the city's stores marked placement=pending that nothing has placed since (no parent, route, arm, assignee or live pour), priority then age; --json prints one object for a caller: the rows as beads, the suspended rigs it skipped, and the rigs whose store did not answer. Read-only, files nothing; exits 4 after the list when a store did not answer
 
@@ -210,7 +210,10 @@ records the dispatch by stripping gc.recommended_formula. An answer another
 reached first stands, and Accept slings nothing. A gate filed in the meantime,
 or a sling that poured no root, reopens the gate. A run that stopped after its
 resolve leaves an unfinished acceptance, which the next Accept finishes under
-the same token, slinging only when no root carries the token.
+the same token, slinging only when no root carries the token. A sitting takes a
+recommendation through this verb too: its sign-off's --accept runs it with
+--conversation naming the sitting's own conversation, which Accept then does
+not warn of as a live sitting on the bead.
 EOF
 }
 
@@ -2713,7 +2716,9 @@ accept_reopen_said() {
 # accept_warn_live <bead> <gate>... — the warning Accept owes when a live
 # sitting's conversation tracks the bead or replies to the recommendation's
 # gate: Accept clears the gate anyway, and that sitting learns it at its
-# sign-off. Best effort, writes nothing; a read that does not answer is named.
+# sign-off. The conversation --conversation names is the caller's own, whose
+# sign-off runs this Accept, so it is not warned of. Best effort, writes
+# nothing; a read that does not answer is named.
 accept_warn_live() {
     _awl_bead="$1"; shift
     if ! _awl_live=$(live_sittings); then
@@ -2725,8 +2730,8 @@ accept_warn_live() {
         _awl_rep=$(bd_rows dep list "$_awl_g" --direction=up --type replies-to 2>/dev/null || printf '[]')
         _awl_rows=$(printf '%s\n%s' "$_awl_rows" "$_awl_rep" | jq -sc 'add // []' 2>/dev/null || printf '%s' "$_awl_rows")
     done
-    _awl_held=$(printf '%s' "$_awl_rows" | jq -r --argjson live "$_awl_live" "$CONVERSATION_JQ$SITTING_JQ"'
-        [ .[] | objects | select(held_live($live)) | .id // empty ] | unique | join(" ")' 2>/dev/null || true)
+    _awl_held=$(printf '%s' "$_awl_rows" | jq -r --argjson live "$_awl_live" --arg self "${accept_conv:-}" "$CONVERSATION_JQ$SITTING_JQ"'
+        [ .[] | objects | select(held_live($live)) | .id // empty | select(. != $self) ] | unique | join(" ")' 2>/dev/null || true)
     if [ -n "$_awl_held" ]; then
         echo "$PROG: accept: warning: a live sitting holds conversation $_awl_held on $_awl_bead or replying to the recommendation's gate. Accept clears the gate anyway, and that sitting learns it at its sign-off." >&2
     fi
@@ -2734,14 +2739,16 @@ accept_warn_live() {
 }
 
 # ── Verb: accept ─────────────────────────────────────────────────────
-# Accept a recommendation straight off the board: clear the human gate that put
-# gc.recommended_formula to the operator, the gate under the key
-# first-reaction, and dispatch the formula at the bead, with no sitting.
-# Discuss (engage) stays the path for a recommendation the operator wants to
-# weigh instead. Accept clears that one gate and nothing else: separate
-# situations on one bead are separate gates, and each gate's close does
-# something of its own, so one click must not spend itself as answers the
-# operator never gave.
+# Accept a recommendation: clear the human gate that put gc.recommended_formula
+# to the operator, the gate under the key first-reaction, and dispatch the
+# formula at the bead. The board runs it straight off a row, and a sitting's
+# sign-off runs it when the operator's ruling takes the recommendation
+# (converse-signoff.sh --accept), so every dispatch of a recommendation goes
+# through this one writer and its lock. Discuss (engage) stays the path for a
+# recommendation the operator wants to weigh instead. Accept clears that one
+# gate and nothing else: separate situations on one bead are separate gates,
+# and each gate's close does something of its own, so one click must not spend
+# itself as answers the operator never gave.
 #
 # It is offered while all three hold: the bead carries gc.recommended_formula;
 # the recommendation's gate is open and unassigned, or closed with an
@@ -2765,12 +2772,15 @@ accept_warn_live() {
 # the same token: it records the dispatch when a root carries the token, and
 # otherwise takes the read-back, the sling and the record.
 cmd_accept() {
-    bead=""; accept_reason=""
+    bead=""; accept_reason=""; accept_conv=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --reason=*) accept_reason="${1#--reason=}"; shift ;;
             --reason)   shift; [ $# -gt 0 ] || { echo "$PROG: accept: --reason requires a value" >&2; exit 2; }
                         accept_reason="$1"; shift ;;
+            --conversation=*) accept_conv="${1#--conversation=}"; shift ;;
+            --conversation)   shift; [ $# -gt 0 ] || { echo "$PROG: accept: --conversation requires a value" >&2; exit 2; }
+                              accept_conv="$1"; shift ;;
             -h|--help)  usage; exit 0 ;;
             -*) echo "$PROG: accept: unknown flag '$1'" >&2; exit 2 ;;
             *) [ -z "$bead" ] || { echo "$PROG: accept takes one bead-id" >&2; exit 2; }; bead="$1"; shift ;;

@@ -72,8 +72,8 @@ When nothing important is pending, sign off. Write the durable trace first,
 then post the sign-off as the thread's last word. `converse-signoff.sh` writes
 the trace in one order every time: the ruling's rework or the PR's retirement,
 the subject's headline, the answer on each gate the conversation replies to,
-the release of a `held` subject, the conversation's close, and the PR
-reminder. You tell it
+the release of a `held` subject, the subject's recommendation when the ruling
+takes it, the conversation's close, and the PR reminder. You tell it
 what this sitting settled. `--ruled yes` resolves each open gate the
 conversation replies to with `ruled: <the ruling>`, except each one a
 `--leave` names, which the ruling leaves owed with its reply in place, and
@@ -94,13 +94,15 @@ if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      # --waiting-on <bead> [--waiting-on <bead> ...] in place of --no-wait
      # --rework, --no-rework or --retire <kind>: one is required when the ruling reaches an open PR
      # --pr-anchor <bead> names the PR --rework or --retire acts on, when it reaches more than one
+     # --accept when the ruling takes the subject's recommendation (below)
 then
   : # signed off — report any answer it says reached a gate first, then post the sign-off below
 else
   # NOT signed off: a read failed, the rework did not file, the PR did not
-  # retire, the headline did not land, a gate did not close, or the
-  # conversation did not close or hand back. Do NOT post the sign-off. Repair
-  # what it printed and re-run, or raise it in the thread.
+  # retire, the headline did not land, a gate did not close, the
+  # recommendation was not taken, or the conversation did not close or hand
+  # back. Do NOT post the sign-off. Repair what it printed and re-run, or raise
+  # it in the thread.
   exit 1
 fi
 ```
@@ -120,6 +122,20 @@ instead of claiming your own.
 `work` skill says why):
 - **The subject is the work.** Sign off with `--ruled yes --route human --no-wait`,
   then send the subject: `gc sling <rig>/<pool> "$SUBJECT" --on <formula>`.
+- **The subject takes its recommendation.** The operator rules to take the
+  formula a first reaction recommended, `gc.recommended_formula`. Make the
+  conversation reply to the recommendation's gate, the human gate under the
+  key `first-reaction`, as for any gate you answer, and sign off with
+  `--ruled yes --route human --no-wait --accept`. Send nothing yourself: the
+  sign-off answers that gate through `gc-helm.sh accept`, the writer the
+  board's Accept runs, after every other write but the close. Under the
+  subject's acceptance lock it dispatches the formula, or records a dispatch
+  an Accept already made, so the work goes once (the `work` skill). It
+  refuses, writing nothing, while a human gate the ruling does not answer
+  still holds the subject. Answer that gate in the same ruling once the
+  operator rules on it, or sign off without `--accept` and with `--leave`
+  on the recommendation's gate, and the board offers Accept once the other
+  gate is cleared.
 - **New work carries it.** File and send that work (below), then sign off
   with `--ruled yes --route human --waiting-on <the work>`.
 - **New work decomposes an epic subject.** File it as the subject's member and

@@ -43,6 +43,10 @@
 #   (SELF-KILL) a run killed by itself keeps the lock until its sling exits
 #   (OUTLIVE)  a sling that outlives the lock meets Gas City's launch lock
 #   (SLING-*)  a failed sling is judged by the token's root
+#   (SITTING-*) a sitting's sign-off takes the recommendation through this
+#              same writer (converse-signoff.sh --accept), so the board's Accept
+#              and the sitting dispatch it once between them, whichever runs
+#              first, stops part way, or holds the lock
 #
 # Runs the REAL gc-helm.sh (as `sh`, as shipped) with a stubbed `gc` on PATH
 # over a file-backed store: no live city, Dolt, network or sessions. The stub's
@@ -219,7 +223,9 @@ case "$1 ${2:-}" in
     done
     printf '%s' "$_r" | put "$_id"; unlock ;;
   "bd close")
-    log "bd close $*" ;;
+    _id="$3"; lock; log "bd close $*"
+    [ -f "$B/$_id.json" ] && row "$_id" | jq '.status = "closed"' | put "$_id"
+    unlock ;;
   "sling "*|"sling")
     _bead=""; _formula=""; _title=""; _p=""; _var=""
     for a in "$@"; do
@@ -618,6 +624,101 @@ run_accept tk-anc
 eq "$RC" 1 "(SLING-REFUSED) a sling Gas City refuses because the formula already runs at the bead exits 1"
 has "$OUT" "already runs at tk-anc from another dispatch" "(SLING-REFUSED) …naming the other dispatch"
 eq "$(field tk-rec status)" "open" "(SLING-REFUSED) …and the recommendation's gate is reopened"
+
+# --- a sitting takes the recommendation through the same writer --------------
+# The REAL converse-signoff.sh, taking the recommendation (--accept), runs the
+# REAL gc-helm.sh accept over the same store. The other pack scripts it finds
+# at $GC_RIG_ROOT stand in: the headline writes gc.takeaway, the subject reads
+# unanchored, and the PR reminder records nothing.
+SIGNOFF="$HERE/converse-signoff.sh"
+mkdir -p "$TMP/rig/assets/scripts" "$TMP/cwd"
+cat > "$TMP/rig/assets/scripts/gc-helm.sh" <<H
+#!/usr/bin/env bash
+case "\$1" in
+  accept)   exec sh "$SCRIPT" "\$@" ;;
+  takeaway) gc bd update "\$2" --set-metadata "gc.takeaway=\$3" >/dev/null ;;
+esac
+H
+printf '#!/usr/bin/env bash\n[ "$1" = state ] && echo unanchored\nexit 0\n' > "$TMP/rig/assets/scripts/lifecycle.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/rig/assets/scripts/pr-sitting-comment.sh"
+chmod +x "$TMP/rig/assets/scripts/"*.sh
+# sitting — a live sitting holds tk-conv, a conversation on tk-anc that took up
+# the recommendation's gate tk-rec.
+sitting() {
+    bead tk-conv; edge tk-conv tracks tk-anc; edge tk-conv replies-to tk-rec
+    jq '.assignee = "gc-toolkit/gc-toolkit.tk-conv" | .status = "in_progress"' "$STORE/b/tk-conv.json" > "$STORE/b/tk-conv.tmp" && mv "$STORE/b/tk-conv.tmp" "$STORE/b/tk-conv.json"
+    jq -n '[{id:"gc-50", session_name:"s-gc-50", alias:"gc-toolkit/gc-toolkit.tk-conv", template:"gc-toolkit/gc-toolkit.converse-opus", state:"active", closed:false}]' > "$STORE/sessions.json"
+}
+# run_take -> RC, OUT: the sitting's sign-off on the operator's ruling to take
+# the recommendation, from a cwd outside any checkout.
+run_take() {
+    set +e
+    ( cd "$TMP/cwd" && GC_RIG_ROOT="$TMP/rig" bash "$SIGNOFF" --conversation tk-conv --outcome "mol-fix is taken" \
+        --ruled yes --ruling "take the reaction's mol-fix" --route human --no-wait --accept ) > "$TMP/out" 2>&1; RC=$?
+    set -e
+    OUT="$(cat "$TMP/out")"
+}
+close_roots() { for r in "$STORE"/b/tk-root*.json; do [ -f "$r" ] && { jq '.status = "closed"' "$r" > "$r.tmp" && mv "$r.tmp" "$r"; }; done; return 0; }
+
+echo "# a sitting's take after a board Accept that stopped past its sling dispatches nothing more"
+rec; sitting
+STOP_AT=after-sling run_accept tk-anc
+T="$(token_of tk-rec)"; close_roots
+eq "$(roots)" 1 "(SITTING-FINISH) the stopped Accept poured one root, and that root has finished"
+eq "$(meta tk-anc gc.recommended_formula)" "mol-fix" "(SITTING-FINISH) …while the bead still carries the recommendation"
+SL_BEFORE="$(slings)"
+run_take
+eq "$RC" 0 "(SITTING-FINISH) the sitting's sign-off taking the recommendation exits 0"
+has "$OUT" "an earlier Accept left unfinished ($T)" "(SITTING-FINISH) …finishing the stopped Accept's acceptance under its token"
+eq "$(slings)" "$SL_BEFORE" "(SITTING-FINISH) …slinging nothing"
+eq "$(roots)" 1 "(SITTING-FINISH) …so the formula still has one root at the bead"
+eq "$(meta tk-anc gc.recommended_formula_dispatched)/$(meta tk-anc gc.recommended_formula)" "mol-fix/" "(SITTING-FINISH) …and the dispatch is recorded"
+eq "$(field tk-rec close_reason)" "ruled: accepted mol-fix accept:$T" "(SITTING-FINISH) the gate keeps the Accept's answer"
+hasnt "$(cat "$CALLS")" "bd gate resolve tk-rec ruled: take" "(SITTING-FINISH) …and the sign-off never resolves it with its own"
+eq "$(field tk-conv status)" "closed" "(SITTING-FINISH) the conversation closes"
+eq "$(jq -r '[.deps[] | select(.type == "replies-to") | .on] | join(" ")' "$STORE/b/tk-conv.json")" "tk-rec" "(SITTING-FINISH) …keeping its reply onto the gate"
+hasnt "$OUT" "warning: a live sitting holds conversation tk-conv" "(SITTING-FINISH) Accept does not warn the sitting of itself"
+
+echo "# a sitting's take before a board Accept: the board's Accept dispatches nothing more"
+rec; sitting
+run_take
+TS="$(token_of tk-rec)"
+eq "$RC" 0 "(SITTING-FIRST) a sitting's take on an open gate exits 0"
+[ -n "$TS" ] && ok "(SITTING-FIRST) the gate carries an Accept's answer, under the sitting's token" \
+  || bad "(SITTING-FIRST) tk-rec's close reason is not an Accept's answer (got '$(field tk-rec close_reason)')"
+eq "$(slings)" 1 "(SITTING-FIRST) …and the formula is slung once"
+has "$(grep '^sling ' "$CALLS")" "--title mol-fix accept:$TS" "(SITTING-FIRST) …titled with that token"
+: > "$CALLS"; run_accept tk-anc
+eq "$RC" 2 "(SITTING-FIRST) a board Accept after the take exits 2"
+eq "$(writes)" 0 "(SITTING-FIRST) …writing nothing"
+eq "$(roots)" 1 "(SITTING-FIRST) …so one root in all"
+
+echo "# a sitting's take after a board Accept that finished: nothing more"
+rec; sitting
+run_accept tk-anc
+SL_BEFORE="$(slings)"
+run_take
+eq "$RC" 0 "(SITTING-AFTER) a sitting's take after the board's Accept finished exits 0"
+has "$OUT" "the recommendation was already taken" "(SITTING-AFTER) …finding it already taken"
+eq "$(slings)" "$SL_BEFORE" "(SITTING-AFTER) …slinging nothing"
+eq "$(field tk-conv status)" "closed" "(SITTING-AFTER) …and the conversation closes"
+
+echo "# a sitting's take while a board Accept holds the lock stops short, and its re-run finds the take done"
+rec; sitting; mkdir -p "$TMP/pS"; rm -f "$TMP/pS"/*
+SLING_PAUSE="$TMP/pS" bg_accept board tk-anc; A_PID=$BG_PID
+wait_file "$TMP/pS/arrived"
+run_take
+eq "$RC" 1 "(SITTING-RACE) a take while a board Accept holds the lock stops short"
+has "$OUT" "holds its acceptance lock (pid $A_PID" "(SITTING-RACE) …naming the Accept that holds it"
+has "$OUT" "the recommendation was not taken" "(SITTING-RACE) …saying nothing was taken"
+eq "$(field tk-conv status)" "in_progress" "(SITTING-RACE) …and leaving the conversation open"
+touch "$TMP/pS/go"; set +e; wait "$A_PID"; A_RC=$?; set -e
+eq "$A_RC" 0 "(SITTING-RACE) the board's Accept then slings and records"
+run_take
+eq "$RC" 0 "(SITTING-RACE) the take's re-run exits 0"
+has "$OUT" "the recommendation was already taken" "(SITTING-RACE) …finding it taken"
+eq "$(slings)" 1 "(SITTING-RACE) …one sling in all"
+eq "$(field tk-conv status)" "closed" "(SITTING-RACE) …and the conversation closes"
 
 echo
 echo "gc-helm accept: $PASS passed, $FAIL failed"

@@ -40,6 +40,14 @@
 #             status, and a conversation that reads closed, before that write or
 #             because a dismiss closed it first, stays closed
 #   (RERUN)   a re-run after a sign-off changes nothing
+#   (ACCEPT*) a ruling that takes the subject's recommendation hands its gate
+#             to Accept's writer after every other write but the close, never
+#             resolving it itself; it is refused before any write when the
+#             ruling does not answer that gate, the subject carries no
+#             recommendation, another gate holds the subject, or an answer on a
+#             held subject would pour at it; a take Accept does not complete
+#             stops the sign-off, and an answer that reached the gate first
+#             stands
 #
 # Runs the REAL converse-signoff.sh with a stubbed `gc` on PATH over a
 # file-backed store, and stub pack scripts at $GC_RIG_ROOT, from a cwd outside
@@ -153,13 +161,38 @@ GC
 chmod +x "$TMP/bin/gc"
 
 # --- stub pack scripts at the rig root the sign-off searches first ------------
+# gc-helm.sh's accept leaves the store as Accept's writer would, per
+# ACCEPT_DOES: take (the default) answers each open first-reaction gate on the
+# subject with an Accept's answer and records the dispatch; refuse writes
+# nothing, as a run refused at the lock does; other finds the gate answered
+# first; dispatched finds the recommendation already dispatched.
 S="$TMP/rig/assets/scripts"
 cat > "$S/gc-helm.sh" <<'H'
 #!/usr/bin/env bash
 printf 'gc-helm %s\n' "$*" >> "$CALLS"
-[ "$1" = takeaway ] || exit 0
-[ -n "${TAKEAWAY_FAIL:-}" ] && { echo "takeaway refused" >&2; exit 2; }
-gc bd update "$2" --set-metadata "gc.takeaway=$3" >/dev/null
+B="$STORE/b"
+case "$1" in
+  takeaway)
+    [ -n "${TAKEAWAY_FAIL:-}" ] && { echo "takeaway refused" >&2; exit 2; }
+    gc bd update "$2" --set-metadata "gc.takeaway=$3" >/dev/null ;;
+  accept)
+    _s="$2"; _f=$(jq -r '.metadata["gc.recommended_formula"] // ""' "$B/$_s.json")
+    _rec=""
+    for g in $(jq -r '.deps[] | select(.type == "blocks") | .on' "$B/$_s.json"); do
+      jq -e '.await_id == "first-reaction" and .status != "closed"' "$B/$g.json" >/dev/null 2>&1 && _rec="$_rec $g"
+    done
+    close_rec() { for g in $_rec; do jq --arg r "$1" '.status = "closed" | .close_reason = $r' "$B/$g.json" > "$B/x" && mv "$B/x" "$B/$g.json"; done; }
+    case "${ACCEPT_DOES:-take}" in
+      refuse) echo "gc-helm.sh: accept: another Accept on $_s holds its acceptance lock (pid 7), so this one refuses and writes nothing." >&2; exit 4 ;;
+      other)  close_rec "moot: the reaction withdrew its recommendation"
+              echo "gc-helm.sh: accept: another answer reached $_s's recommendation gate first" >&2; exit 4 ;;
+      dispatched) echo "gc-helm.sh: accept: $_s carries no gc.recommended_formula: its recommendation was dispatched. Nothing to accept; nothing dispatched." >&2; exit 2 ;;
+      *) close_rec "ruled: accepted $_f accept:0123456789abcdef"
+         jq --arg f "$_f" '.metadata["gc.recommended_formula_dispatched"] = $f | del(.metadata["gc.recommended_formula"])' "$B/$_s.json" > "$B/x" && mv "$B/x" "$B/$_s.json"
+         echo "gc-helm.sh: accept: dispatched $_f at $_s (acceptance 0123456789abcdef)" ;;
+    esac ;;
+esac
+exit 0
 H
 cat > "$S/lifecycle.sh" <<'L'
 #!/usr/bin/env bash
@@ -653,6 +686,99 @@ eq "$(field tk-conv status)" "closed" "(CUT-SHORT-CLOSED) …and the conversatio
 hasnt "$(cat "$CALLS")" "bd update tk-conv" "(CUT-SHORT-CLOSED) …with no hand-back written"
 hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(CUT-SHORT-CLOSED) …leaving the reminder its closer wrote"
 eq "$(field tk-rev status)" "open" "(CUT-SHORT-CLOSED) the gate stays open and owed"
+
+# recommend — tk-anc recommends mol-fix through tk-rec, the gate a first
+# reaction filed under the key first-reaction, and the conversation took that
+# gate up.
+recommend() {
+    fresh; bead tk-anc; setm tk-anc gc.recommended_formula mol-fix
+    gate tk-rec first-reaction; edge tk-anc blocks tk-rec
+    conv tk-conv tk-anc; edge tk-conv replies-to tk-rec
+}
+TAKE=(--ruled yes --ruling "take the reaction's mol-fix" --route human --no-wait --accept)
+
+echo "# a ruling that takes the recommendation hands its gate to Accept's writer"
+recommend; run_signoff --conversation tk-conv --outcome "took the reaction's mol-fix" "${TAKE[@]}"
+eq "$RC" 0 "(ACCEPT) a sign-off that takes the recommendation exits 0"
+has "$(cat "$CALLS")" "gc-helm accept tk-anc --conversation tk-conv --reason take the reaction's mol-fix" "(ACCEPT) …running Accept's writer on the subject, naming its own conversation"
+hasnt "$(cat "$CALLS")" "gate resolve tk-rec" "(ACCEPT) …and never resolving the recommendation's gate itself"
+eq "$(field tk-rec close_reason)" "ruled: accepted mol-fix accept:0123456789abcdef" "(ACCEPT) the gate carries Accept's answer"
+eq "$(meta tk-anc gc.recommended_formula_dispatched)" "mol-fix" "(ACCEPT) …and the dispatch is recorded"
+eq "$(field tk-conv status)" "closed" "(ACCEPT) the conversation closes"
+eq "$(jq -r '[.deps[] | select(.type == "replies-to") | .on] | join(" ")' "$STORE/b/tk-conv.json")" "tk-rec" "(ACCEPT) …keeping its reply onto the gate it took up"
+has "$OUT" "took the recommendation: mol-fix at tk-anc, through Accept" "(ACCEPT) the take is reported"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "took the recommendation: mol-fix, through Accept" "(ACCEPT) …and listed among the reminder's actions"
+case "$(cat "$CALLS")" in
+  *"gc-helm takeaway"*"gc-helm accept"*"bd close tk-conv"*) ok "(ACCEPT-ORDER) headline, then the acceptance, then the close" ;;
+  *) bad "(ACCEPT-ORDER) the writes ran out of order: $(cat "$CALLS")" ;;
+esac
+TAKEN="$(cat "$CALLS")"
+ACCEPT_DOES=dispatched run_signoff --conversation tk-conv --outcome "took the reaction's mol-fix" "${TAKE[@]}"
+eq "$RC" 0 "(ACCEPT-RERUN) a re-run of a sign-off that took the recommendation exits 0"
+has "$OUT" "the recommendation was already taken" "(ACCEPT-RERUN) …finding it already taken"
+eq "$(grep -c '^bd close' "$CALLS")" "$(printf '%s\n' "$TAKEN" | grep -c '^bd close')" "(ACCEPT-RERUN) …and closing nothing again"
+
+echo "# the acceptance case in one sitting: the review gate first, then the recommendation"
+recommend; gate tk-rev review-needs-you.tk-find; edge tk-anc blocks tk-rev; edge tk-conv replies-to tk-rev
+run_signoff --conversation tk-conv --outcome "fix the retry; mol-fix is taken" "${TAKE[@]}"
+eq "$RC" 0 "(ACCEPT-BESIDE) a ruling on both gates that takes the recommendation exits 0"
+eq "$(field tk-rev close_reason)" "ruled: take the reaction's mol-fix" "(ACCEPT-BESIDE) the review gate is answered with the ruling"
+case "$(cat "$CALLS")" in
+  *"gate resolve tk-rev"*"gc-helm accept tk-anc"*) ok "(ACCEPT-BESIDE) …before Accept's writer runs, so no other gate holds the bead when it dispatches" ;;
+  *) bad "(ACCEPT-BESIDE) Accept ran before the review gate was answered: $(cat "$CALLS")" ;;
+esac
+eq "$(field tk-rec close_reason)" "ruled: accepted mol-fix accept:0123456789abcdef" "(ACCEPT-BESIDE) the recommendation's gate carries Accept's answer"
+
+echo "# --accept refusals before any write"
+recommend; run_signoff --conversation tk-conv --outcome x --ruled no --accept
+eq "$RC" 2 "(ACCEPT-USAGE) --accept without a ruling exits 2"
+recommend; run_signoff --conversation tk-conv --outcome x "${TAKE[@]}" --leave tk-rec
+eq "$RC" 2 "(ACCEPT-LEFT) --accept on a ruling that leaves the recommendation's gate owed exits 2"
+eq "$(writes)" 0 "(ACCEPT-LEFT) …writing nothing"
+acceptance; setm tk-anc gc.recommended_formula mol-fix
+run_signoff --conversation tk-conv --outcome x "${TAKE[@]}"
+eq "$RC" 2 "(ACCEPT-NO-REPLY) --accept from a conversation that does not reply to the recommendation's gate exits 2"
+has "$OUT" "first-reaction" "(ACCEPT-NO-REPLY) …naming the gate it must reply to"
+eq "$(writes)" 0 "(ACCEPT-NO-REPLY) …writing nothing"
+recommend; jq 'del(.metadata["gc.recommended_formula"])' "$STORE/b/tk-anc.json" > "$STORE/b/x" && mv "$STORE/b/x" "$STORE/b/tk-anc.json"
+run_signoff --conversation tk-conv --outcome x "${TAKE[@]}"
+eq "$RC" 2 "(ACCEPT-NONE) --accept on a subject that carries no recommendation exits 2"
+eq "$(writes)" 0 "(ACCEPT-NONE) …writing nothing"
+recommend; gate tk-rev review-needs-you.tk-find; edge tk-anc blocks tk-rev
+run_signoff --conversation tk-conv --outcome x "${TAKE[@]}"
+eq "$RC" 2 "(ACCEPT-WITHHELD) --accept while another human gate the ruling does not answer holds the subject exits 2"
+has "$OUT" "tk-rev" "(ACCEPT-WITHHELD) …naming that gate"
+eq "$(writes)" 0 "(ACCEPT-WITHHELD) …writing nothing"
+eq "$(field tk-rec status)" "open" "(ACCEPT-WITHHELD) …so the recommendation's gate stays open"
+
+echo "# --accept on a turn that does not sign off"
+recommend; run_signoff --conversation tk-conv --answer tk-rec --ruling "take the reaction's mol-fix" --outcome "mol-fix is taken; the rollout is still open" --no-wait --accept
+eq "$RC" 0 "(ACCEPT-ANSWER) an --answer that takes the recommendation exits 0"
+eq "$(meta tk-anc gc.recommended_formula_dispatched)" "mol-fix" "(ACCEPT-ANSWER) …dispatching it through Accept"
+eq "$(field tk-conv status)" "in_progress" "(ACCEPT-ANSWER) …and the conversation stays open under its sitting"
+has "$OUT" "ANSWERED tk-rec" "(ACCEPT-ANSWER) …saying which gate it answered"
+recommend; SUBJECT_LC_STATE=held run_signoff --conversation tk-conv --answer tk-rec --ruling "take it" --outcome x --accept
+eq "$RC" 2 "(ACCEPT-ANSWER-HELD) an --answer that takes a held subject's recommendation exits 2"
+has "$OUT" "reads held" "(ACCEPT-ANSWER-HELD) …saying the subject reads held"
+eq "$(writes)" 0 "(ACCEPT-ANSWER-HELD) …writing nothing"
+recommend; SUBJECT_LC_STATE=held run_signoff --conversation tk-conv --outcome "mol-fix is taken" "${TAKE[@]}"
+eq "$RC" 0 "(ACCEPT-HELD) a sign-off that takes a held subject's recommendation exits 0"
+case "$(cat "$CALLS")" in
+  *"lifecycle transition tk-anc --to unanchored"*"gc-helm accept tk-anc"*) ok "(ACCEPT-HELD) …releasing the subject before Accept dispatches at it" ;;
+  *) bad "(ACCEPT-HELD) Accept ran before the release: $(cat "$CALLS")" ;;
+esac
+
+echo "# a take Accept does not complete stops the sign-off, and an answer that reached the gate first stands"
+recommend; ACCEPT_DOES=refuse run_signoff --conversation tk-conv --outcome "mol-fix is taken" "${TAKE[@]}"
+eq "$RC" 1 "(ACCEPT-REFUSED) a take Accept refuses stops the sign-off"
+has "$OUT" "holds its acceptance lock" "(ACCEPT-REFUSED) …showing why Accept refused"
+has "$OUT" "the recommendation was not taken" "(ACCEPT-REFUSED) …and that nothing was taken"
+has "$OUT" "NOT SIGNED OFF" "(ACCEPT-REFUSED) …saying not to post the sign-off"
+eq "$(field tk-conv status)" "in_progress" "(ACCEPT-REFUSED) …and the conversation is not closed"
+recommend; ACCEPT_DOES=other run_signoff --conversation tk-conv --outcome "the reaction withdrew mol-fix" "${TAKE[@]}"
+eq "$RC" 0 "(ACCEPT-FIRST) a take another answer beat to the gate exits 0"
+has "$OUT" "another answer reached the recommendation's gate first — tk-rec: \"moot: the reaction withdrew its recommendation\"" "(ACCEPT-FIRST) …reporting the answer that stands"
+eq "$(field tk-conv status)" "closed" "(ACCEPT-FIRST) …and the conversation closes"
 
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"

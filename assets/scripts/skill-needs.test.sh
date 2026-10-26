@@ -330,6 +330,13 @@ have "the continue step answers a ruling on a turn that does not sign off throug
 lacks "…and never through a bare gate resolve" 'gc bd gate resolve <gate>' "$CONTINUE" \
     "a bare resolve releases what the gate holds before the ruling's rework or retirement is in place"
 have "the prompt gives the call that withdraws a recommendation" 'converse-invalidate-recommendation.sh" "<why' "$PROMPT"
+# One writer dispatches a recommendation, under the bead's acceptance lock and a
+# token that finds a dispatch an Accept that stopped part way already poured. A
+# sling of the agent's own pours the formula again once that run has finished.
+have "the work skill takes a recommendation through Accept's writer" 'gc-helm.sh" accept <bead>' "$WORK_SKILL"
+lacks "…and gives no sling of its own that records the dispatch" 'gc.recommended_formula_dispatched=' "$WORK_SKILL" \
+    "a sling and record of its own bypasses Accept's lock and token, and dispatches the recommendation twice"
+have "the settle step takes a subject's recommendation through the sign-off" '--ruled yes --route human --no-wait --accept' "$SETTLE"
 have "the prompt gives the call that opens a conversation" 'gc-helm.sh" open <bead>' "$PROMPT"
 have "the prompt gives the PR post calls" 'pr-post.sh" reply --host github.com' "$PROMPT"
 for f in "$PROMPT" "$SETTLE"; do
@@ -426,14 +433,13 @@ done
 [ -z "$found" ] && ok "…and looks for it in no checkout" || bad "…and looks for it in no checkout" "found:$found"
 
 echo "── a step that depends on the one before it runs only once that one succeeded ──"
-# An example that sends work and then records the dispatch, records an outcome
-# and then closes, files a bead and then sends it, or adds a wait and then
-# arms, chains the second step onto the first with &&. Run apart, a refused
-# first step leaves the second recording what never happened: a dispatch marker
-# over a failed sling strips the recommendation, and the board's Accept reads
-# the marker as a dispatch already sent; an arm with no edge sends its bead on
-# the next pass. Each example runs as written, its placeholders filled, under a
-# stub gc that refuses its first call, and nothing may run after that call.
+# An example that records an outcome and then closes, files a bead and then
+# sends it, or adds a wait and then arms, chains the second step onto the first
+# with &&. Run apart, a refused first step lets the second act on what never
+# happened: a close with no recorded outcome, a sling of a bead never filed, or
+# an arm with no edge, which sends its bead on the next pass. Each example
+# runs as written, its placeholders filled, under a stub gc that refuses its
+# first call, and nothing may run after that call.
 CH="$TMP/chain"
 mkdir -p "$CH/bin" "$CH/pack/assets/scripts"
 cat >"$CH/bin/gc" <<'STUB'
@@ -498,14 +504,13 @@ fill_block() {
         -e 's#<[^>]*>#x#g'
 }
 # run_chain <shell> <block> [fail-at] [cross-store] — one run of a filled example
-# in a fresh shell, from an empty log, no edges and a store holding one
-# recommendation, with call number <fail-at> refused; prints its status.
+# in a fresh shell, from an empty log, no edges and an empty store, with call
+# number <fail-at> refused; prints its status.
 run_chain() {
     rm -rf "$CH/store" "$CH/count"
     mkdir -p "$CH/store"
     : >"$CH/log"
     : >"$CH/edges"
-    printf 'x' >"$CH/store/gc.recommended_formula"
     (cd "$TMP/away" && env -u BASH_ENV -u ENV CHAIN_DIR="$CH" CHAIN_FAIL_AT="${3:-}" \
         CHAIN_CROSS_STORE="${4:-}" CONV="$CH/pack/assets/scripts" SUBJECT=tk-x CONVERSATION=tk-v \
         PATH="$CH/bin:$PATH" $1 "$2" </dev/null >/dev/null 2>&1)
@@ -536,7 +541,6 @@ while IFS='|' read -r label file marker; do
         fi
     done
 done <<SPECS
-work: taking a recommendation|$WORK_SKILL|gc.recommended_formula_dispatched=
 work: closing a bead that needs no work|$WORK_SKILL|gc.work_outcome=no-op
 converse prompt: disposing of a no-work subject|$PROMPT|gc.work_outcome=no-op
 disposition fragment: closing a bead that did not land|$DISPOSITION|gc.work_outcome=no-op
@@ -572,22 +576,6 @@ for sh_ in $shells; do
         bad "($sh_) converse-settle: a gate that did not land arms nothing" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
     fi
 done
-# Taking a recommendation records the dispatch only once the sling went: a
-# refused sling leaves both keys as they were, and a sent one swaps them.
-fenced_block "$WORK_SKILL" 'gc.recommended_formula_dispatched=' | fill_block >"$CH/block"
-run_chain bash "$CH/block" 1 >/dev/null
-if [ "$(cat "$CH/store/gc.recommended_formula" 2>/dev/null)" = x ] && [ ! -e "$CH/store/gc.recommended_formula_dispatched" ]; then
-    ok "work: a refused sling leaves the recommendation and records no dispatch"
-else
-    bad "work: a refused sling leaves the recommendation and records no dispatch" "store holds: $(ls "$CH/store" | tr '\n' ' ')"
-fi
-run_chain bash "$CH/block" >/dev/null
-if [ ! -e "$CH/store/gc.recommended_formula" ] && [ "$(cat "$CH/store/gc.recommended_formula_dispatched" 2>/dev/null)" = x ]; then
-    ok "work: …and a sent one strips the recommendation and records the dispatch"
-else
-    bad "work: …and a sent one strips the recommendation and records the dispatch" "store holds: $(ls "$CH/store" | tr '\n' ' ')"
-fi
-
 echo "── each real need scores highest on the skill that answers it ──"
 # <expected skill> TAB <the need, verbatim>
 cat >"$TMP/needs" <<'NEEDS'

@@ -439,9 +439,12 @@ durable trace in one order every time:
 3. `ruled: <the ruling>` on each open gate the conversation replies to that the
    ruling answers, each read back, with an earlier answer reported;
 4. the release of a `held` subject;
-5. the conversation's close, whose reason is the headline the sitting settled
+5. the subject's recommendation, when the ruling takes it (`--accept`): the
+   recommendation's gate, which step 3 leaves, is answered by Accept's writer
+   (below), which sends the formula once;
+6. the conversation's close, whose reason is the headline the sitting settled
    on;
-6. the PR reminder.
+7. the PR reminder.
 
 It resolves no gate its conversation does not reply to: a gate the sitting
 never took up stays for whoever owes it, and a gate it replies to that the
@@ -465,8 +468,9 @@ the operator something to read or answer posts the hand-back and leaves the
 conversation open. A gate the operator rules on during such a turn is answered
 at once, so a dismiss that ends the sitting later leaves nothing the operator
 ruled on open. It is answered through the same script with `--answer <gate>`,
-which runs steps 1 to 3 for the gates it names and stops there, leaving the
-conversation open for the sign-off.
+which runs steps 1 to 3 for the gates it names, and step 5 when the ruling
+takes the recommendation, and stops there, leaving the conversation open for
+the sign-off.
 
 **A sitting cut short** writes its record, signs off with `--ruled no`, which
 leaves every gate its conversation replies to open and owed with its reply in
@@ -535,6 +539,20 @@ run that stopped after its resolve leaves an unfinished acceptance, which the
 board keeps owed and the next Accept finishes under the same token, slinging
 only when no root carries the token. The lock's warrant is in
 [warrants.md](warrants.md).
+
+A sitting takes a recommendation through the same writer. When the operator
+rules to take it, the sign-off's `--accept` leaves the recommendation's gate
+out of step 3 and runs `gc-helm.sh accept` at step 5, once the ruling's other
+writes have landed and a `held` subject is released, because a workflow poured
+at a bead that still reads `held` ends its run as finished. Under the lock,
+that run finishes an acceptance the board's Accept left unfinished instead of
+sending the formula again, and a board Accept that runs after the sitting's
+finds the recommendation dispatched. Gas City's launch lock refuses a second
+pour only while the first root is live, so a sling of the sitting's own would
+pour the formula again once the stopped Accept's root had finished. The
+sign-off refuses `--accept`, writing nothing, while a human gate the ruling
+does not answer still holds the subject, and on an `--answer` turn while the
+subject reads `held`.
 
 ## How a parked subject comes back
 

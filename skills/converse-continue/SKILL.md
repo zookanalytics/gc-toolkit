@@ -25,7 +25,11 @@ merge, so the writer puts the ruling's consequences in place before it
 resolves the gate. When the ruling reaches an open PR, the subject or one the
 gate releases, the first of them is the rework or the retirement the ruling
 calls for, passed the way step 7 passes it, and the next is the subject's
-headline with each wait this turn routed. It resolves only the
+headline with each wait this turn routed. A ruling that takes the subject's
+recommendation names the recommendation's gate with `--answer` and adds
+`--accept`, so Accept's writer answers that gate and sends the formula, as at
+the sign-off (step 7). While the subject reads held, `--answer` refuses to take
+it, because only the sign-off releases a held subject. It resolves only the
 gates `--answer` names, leaves the conversation open, and exits non-zero when
 it stopped short. Until it exits 0, do not tell the operator the ruling is in
 place:
@@ -34,6 +38,7 @@ place:
   --ruling "<the operator's ruling, one line>" \
   --outcome "<where the subject stands now, at most 140 characters>"
   # when the ruling reaches an open PR, add --rework, --no-rework or --retire <kind> (step 7)
+  # when it takes the subject's recommendation, --answer its gate and add --accept (step 7)
   # --waiting-on <bead> for each bead this turn routed work into, or --no-wait
 ```
 An answer that reached the gate first stands, and the writer prints it: tell

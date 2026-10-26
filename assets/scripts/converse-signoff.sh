@@ -19,20 +19,28 @@
 #      person at the command line. The first answer wins, and the sign-off
 #      reports it;
 #   4. releases a subject that reads `held`;
-#   5. closes the conversation;
-#   6. updates the subject's PR reminder.
+#   5. takes the subject's recommendation when the ruling takes it (--accept),
+#      through gc-helm.sh accept, the writer the board's Accept runs: under the
+#      subject's acceptance lock it answers the recommendation's gate, which
+#      step 3 leaves to it, dispatches the recommended formula at the subject
+#      and records the dispatch, or finishes an acceptance an earlier Accept
+#      left unfinished without dispatching it again;
+#   6. closes the conversation;
+#   7. updates the subject's PR reminder.
 # A gate can hold a merge, and resolving it releases the merge, so everything
 # the ruling puts in the merge's way is written before step 3: the rework
 # child's blocks edge, the closed PR, and each wait the headline wires. The
 # beads each gate releases are read before the first write, so a gate that
 # releases an open PR other than the subject, such as an epic member's gate the
 # epic's sitting answers, or a gate about the subject and another PR, puts the
-# question of that PR to the ruling just as an open-PR subject does.
+# question of that PR to the ruling just as an open-PR subject does. The
+# acceptance follows the release, because a workflow poured at a bead that
+# still reads `held` ends its run as finished.
 #
 # A ruling given on a turn that does not sign off (--answer) runs steps 1 to 3
-# for the gates --answer names, and stops there: the conversation stays open
-# under its sitting, and the sign-off later reads each of those gates as
-# already cleared.
+# for the gates --answer names, and step 5 when it takes the recommendation,
+# and stops there: the conversation stays open under its sitting, and the
+# sign-off later reads each of those gates as already cleared.
 #
 # Cut short (--ruled no), it writes the headline, leaves every gate the
 # conversation replies to open and owed, with its reply in place for the next
@@ -60,7 +68,7 @@
 #     [--route <rig>/<agent>|human] [--leave <gate> ...] [--answer <gate> ...] \
 #     [--no-wait | --waiting-on <bead> ...] \
 #     [--rework | --no-rework | --retire <kind> [--successor <bead>]] \
-#     [--pr-anchor <bead>]
+#     [--pr-anchor <bead>] [--accept]
 #   --outcome is the subject's headline, and the close reason the sittings card
 #   falls back to. --ruled defaults to `no`. --ruled yes requires --ruling, the
 #   answer each gate resolves with, and --route, where a `held` subject is
@@ -96,16 +104,32 @@
 #     ruling reaches stands. A conversation owns one live rework child, so a
 #     sign-off files one rework, and a second PR whose branch must change takes
 #     a ruling of its own: the gate that releases it stays owed until then.
+#   --accept (with a ruling) says the ruling takes the subject's
+#     recommendation, gc.recommended_formula, which a first reaction put to the
+#     operator through the human gate under the key first-reaction. That gate
+#     must be one the ruling answers: the conversation replies to it, and on a
+#     turn that does not sign off --answer names it. Step 3 leaves it to step 5,
+#     which runs gc-helm.sh accept, the one writer that dispatches a
+#     recommendation, so the sitting never slings it itself. Under Accept's lock
+#     and its token, a dispatch the board's Accept already poured is recorded
+#     and not sent again, even when that Accept stopped before recording it.
+#     Refused while another open human gate that the ruling does not answer
+#     holds the subject, since the dispatch waits for every gate that holds it,
+#     and, on a turn that does not sign off, while the subject reads `held`,
+#     which only the sign-off releases.
 # Exit: 0 signed off, or with --answer the named gates answered; 1 stopped
 #   short — a read failed, the rework did not file, the PR did not retire, the
-#   headline did not land, a gate did not close, or the conversation did not
-#   close or hand back — so do NOT post the sign-off, or report the ruling as
-#   carried out; repair what it names and re-run, which repeats every write it
-#   made safely; 2 refused before any write: usage, a conversation that is not
-#   one, a gate it does not reply to, a ruling that reaches an open PR and gave
-#   none of --rework, --no-rework and --retire, or a --rework or --retire on a
-#   ruling that reaches more than one open PR without a --pr-anchor naming one
-#   of them.
+#   headline did not land, a gate did not close, the recommendation was not
+#   taken, or the conversation did not close or hand back — so do NOT post the
+#   sign-off, or report the ruling as carried out; repair what it names and
+#   re-run, which repeats every write it made safely; 2 refused before any
+#   write: usage, a conversation that is not one, a gate it does not reply to,
+#   a ruling that reaches an open PR and gave none of --rework, --no-rework and
+#   --retire, a --rework or --retire on a ruling that reaches more than one open
+#   PR without a --pr-anchor naming one of them, or an --accept with no
+#   recommendation's gate among the gates the ruling answers, no recommendation
+#   on the subject, another open human gate the ruling does not answer, or a
+#   held subject on a turn that does not sign off.
 set -u
 
 # >>> control-char-scrub
@@ -126,6 +150,7 @@ PR_ANSWER=""
 RETIRE_KIND=""
 SUCCESSOR=""
 PR_PICK=""
+ACCEPT=""
 WAIT=()
 LEAVE=()
 ANSWER_GATES=()
@@ -172,6 +197,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # with gc-helm.sh dismiss. Exposes work_outcome_noop.
 # shellcheck source=work-outcome.sh
 . "$HERE/work-outcome.sh" || die "cannot source work-outcome.sh from $HERE"
+# The one read of which human gates still hold a bead, the read gc-helm.sh
+# accept makes. Exposes bd_open_human_gates.
+# shellcheck source=bd-lib.sh
+. "$HERE/bd-lib.sh" || die "cannot source bd-lib.sh from $HERE"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -188,6 +217,7 @@ while [ $# -gt 0 ]; do
     --retire)     shift; [ $# -gt 0 ] || die "--retire needs a kind"; pr_answer retire; RETIRE_KIND="$1" ;;
     --successor)  shift; [ $# -gt 0 ] || die "--successor needs a bead id"; SUCCESSOR="$1" ;;
     --pr-anchor)  shift; [ $# -gt 0 ] || die "--pr-anchor needs a bead id"; PR_PICK="$1" ;;
+    --accept)     ACCEPT=yes ;;
     --no-wait)    WAIT+=(--no-wait) ;;
     --waiting-on) shift; [ $# -gt 0 ] || die "--waiting-on needs a bead id"; WAIT+=(--waiting-on "$1") ;;
     -h|--help)    sed -n '2,/^set -u$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -216,6 +246,7 @@ if [ "$RULED" = yes ]; then
 else
   [ -z "$PR_ANSWER" ] || die "--rework, --no-rework and --retire require a ruling (they answer what it does to an open PR)"
   [ "${#LEAVE[@]}" -eq 0 ] || die "--leave requires --ruled yes: a cut-short sign-off leaves every gate open"
+  [ -z "$ACCEPT" ] || die "--accept requires a ruling (--ruled yes, or --answer): it takes the recommendation the operator ruled to take"
 fi
 if [ "$PR_ANSWER" = retire ]; then
   case "$RETIRE_KIND" in
@@ -355,19 +386,104 @@ case "$PR_ANSWER" in
     STANDS=("${PR_ANCHORS[@]+"${PR_ANCHORS[@]}"}")
     [ "${#STANDS[@]}" -gt 0 ] || STANDS=("$SUBJECT") ;;
 esac
+# --accept takes the subject's recommendation through the gate that put it to
+# the operator, the human gate under the key first-reaction. That gate must be
+# one the ruling answers, so the conversation's reply on it records which
+# conversation took it up. Step 3 leaves it, and step 5 hands it to Accept's
+# writer. Accept dispatches only once no other open human gate holds the
+# subject, because a formula's sling reads no blocks edge, so a gate this
+# ruling does not answer refuses the take here, before any write, rather than
+# after step 3 has answered the others. Accept answers every open gate under
+# the key, as it does on the board, so a twin that a race filed under the key
+# does not count as another gate.
+REC_GATES=""
+REC_FORMULA=""
+if [ -n "$ACCEPT" ]; then
+  ANSWERED_GATES=""
+  for g in $TO_ANSWER; do
+    printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g" && continue
+    ANSWERED_GATES="${ANSWERED_GATES:+$ANSWERED_GATES }$g"
+    printf '%s' "$GATES_JSON" | jq -e --arg g "$g" 'any(.[]; .id == $g and (.issue_type // "") == "gate"
+        and (.await_type // "") == "human" and (.await_id // "") == "first-reaction")' >/dev/null 2>&1 \
+      && REC_GATES="${REC_GATES:+$REC_GATES }$g"
+  done
+  [ -n "$REC_GATES" ] \
+    || die "--accept takes $SUBJECT's recommendation through the gate that puts it to the operator, the human gate under the key first-reaction, and no gate this ruling answers is that gate; nothing was written. Reply to it first${ANSWERING:+ and name it with --answer}, then re-run"
+  REC_FORMULA=$(printf '%s' "$SUBJECT_ROW" | jq -r '(.metadata // {})["gc.recommended_formula"] // "" | tostring')
+  REC_SENT=$(printf '%s' "$SUBJECT_ROW" | jq -r '(.metadata // {})["gc.recommended_formula_dispatched"] // "" | tostring')
+  [ -n "$REC_FORMULA$REC_SENT" ] \
+    || die "--accept takes $SUBJECT's recommendation, and $SUBJECT carries none (no gc.recommended_formula); nothing was written. Answer its gate without --accept"
+  REC_FORMULA="${REC_FORMULA:-$REC_SENT}"
+  HOLDING=$(bd_open_human_gates "$SUBJECT") \
+    || stopped "the human gates that hold $SUBJECT could not be read, and its recommendation is dispatched only once no gate but its own holds it; nothing was written"
+  OTHERS=$(printf '%s' "$HOLDING" | jq -r --arg answered "$ANSWERED_GATES" '
+      ($answered | split(" ")) as $a
+      | [ .[] | select(((.await_id // "") | tostring) != "first-reaction")
+              | select(((.id // "") | tostring) as $i | ($a | index($i)) == null)
+              | "\(.id) (\(.title // "untitled"))" ] | join("; ")')
+  [ -z "$OTHERS" ] \
+    || die "$SUBJECT's recommendation is dispatched only once no other human gate holds it, and $OTHERS still holds it, which this ruling does not answer; nothing was written. Answer that gate in the same ruling once the operator rules on it, or leave the recommendation's gate owed until it is cleared, when Accept on the board takes the recommendation"
+fi
 # A ruling releases a subject that still reads `held`, so the state is read
 # here, with the other reads. lifecycle.sh exits 2 when the subject does not
 # read, an answer that cannot say whether it is held. Any other refusal (an
 # undeclared state, no gctk binary) answers as not held, the side that leaves
 # the bead visibly waiting on a person. An answer releases nothing, so it reads
-# no state.
+# no state unless it takes the recommendation: a workflow poured at a bead that
+# reads `held` ends its run as finished, and only the sign-off releases one, so
+# such an answer is refused.
 LC=$(pack_script lifecycle.sh)
 SUBJECT_STATE=""
-if [ "$RULED" = yes ] && [ -z "$ANSWERING" ] && [ -n "$LC" ]; then
+if [ "$RULED" = yes ] && { [ -z "$ANSWERING" ] || [ -n "$ACCEPT" ]; } && [ -n "$LC" ]; then
   SUBJECT_STATE=$("$LC" state "$SUBJECT" 2>/dev/null)
-  [ $? -ne 2 ] || stopped "the lifecycle state of $SUBJECT could not be read, so this ruling cannot tell whether to release it from held; nothing was written"
+  [ $? -ne 2 ] || stopped "the lifecycle state of $SUBJECT could not be read, so this ruling cannot tell whether it reads held; nothing was written"
+fi
+if [ -n "$ANSWERING" ] && [ -n "$ACCEPT" ] && [ "$SUBJECT_STATE" = held ]; then
+  die "$SUBJECT reads held, which only the sign-off releases, and a workflow poured at a held bead ends its run as finished; nothing was written. Take the recommendation at the sign-off (--ruled yes with --accept)"
 fi
 HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh on any candidate root, so the subject's headline cannot be written; nothing was written"
+
+# take_recommendation — step 5: hand the recommendation's gate to gc-helm.sh
+# accept, the writer the board's Accept runs, and read back what it left. Accept
+# exits 0 once it has dispatched the formula, or recorded a dispatch that an
+# earlier Accept poured under its token. Any other exit is read off the gates
+# and the subject. A recommendation already dispatched and withdrawn was taken,
+# and an answer that reached the gate first stands, as in step 3. Anything
+# else stops the sign-off here, before the conversation closes, so a re-run
+# takes the recommendation once Accept can.
+take_recommendation() {
+  local out rc g row st why other="" open=""
+  out=$("$HELM" accept "$SUBJECT" --conversation "$CONVERSATION" --reason "$RULING" 2>&1); rc=$?
+  [ -z "$out" ] || printf '%s\n' "$out"
+  if [ "$rc" -eq 0 ]; then
+    echo "took the recommendation: $REC_FORMULA at $SUBJECT, through Accept"
+    ACTIONS+=("took the recommendation: $REC_FORMULA, through Accept")
+    return 0
+  fi
+  for g in $REC_GATES; do
+    row=$(show_row "$g") \
+      || stopped "gc-helm.sh accept exited $rc, and gate $g could not be read back to tell whether the recommendation was taken; the conversation is not closed"
+    st=$(printf '%s' "$row" | jq -r '(.status // "") | ascii_downcase')
+    why=$(printf '%s' "$row" | jq -r '.close_reason // ""')
+    if [ "$st" != closed ]; then
+      open="${open:+$open }$g"
+    elif ! printf '%s' "$why" | grep -qE '^ruled: accepted [^ ]+ accept:[0-9a-f]+$'; then
+      other="${other:+$other; }$g: \"$why\""
+    fi
+  done
+  if [ -z "$open" ] && [ -n "$other" ]; then
+    echo "another answer reached the recommendation's gate first — $other. The first answer stands, so the recommendation is not taken."
+    ACTIONS+=("left the recommendation untaken: another answer reached its gate first")
+    return 0
+  fi
+  if [ -z "$open" ] && show_row "$SUBJECT" | jq -e '((.metadata // {})["gc.recommended_formula"] // "") == ""
+      and ((.metadata // {})["gc.recommended_formula_dispatched"] // "") != ""' >/dev/null 2>&1; then
+    echo "the recommendation was already taken: an Accept dispatched $REC_FORMULA at $SUBJECT and recorded it"
+    ACTIONS+=("the recommendation was already taken through Accept")
+    return 0
+  fi
+  stopped "the recommendation was not taken: gc-helm.sh accept exited $rc, and its output above says why${open:+, and its gate $open is still open}. The conversation is not closed. Repair what Accept names, then re-run, which finishes an acceptance Accept left unfinished without dispatching it twice"
+}
 
 # 1. What the ruling does to an open PR. --rework files the fix unit a review
 # verdict files, sourced by this conversation, and returns every review lane to
@@ -429,9 +545,11 @@ done
 if [ "$RULED" = yes ]; then
   # 3. The gates the ruling answers: those --answer names, or else each one the
   # conversation replies to. A reply onto a bead that is no human gate holds
-  # nothing to resolve.
+  # nothing to resolve. The recommendation's gate, when the ruling takes the
+  # recommendation, is step 5's to answer through Accept.
   UNCLOSED=""
   for g in $TO_ANSWER; do
+    case " $REC_GATES " in *" $g "*) continue ;; esac
     if printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g"; then
       echo "gate $g stays open and owed: the ruling leaves it, and this conversation's reply stays on it"
       ACTIONS+=("left gate $g owed")
@@ -463,21 +581,31 @@ if [ "$RULED" = yes ]; then
   done
   [ -z "$UNCLOSED" ] || stopped "the ruling did not close $UNCLOSED; the conversation is not closed, so a re-run resolves it"
   if [ -n "$ANSWERING" ]; then
+    [ -z "$ACCEPT" ] || take_recommendation
     echo "ANSWERED $TO_ANSWER for conversation $CONVERSATION on $SUBJECT; the conversation stays open, and its sign-off reads each of those gates as already cleared"
     exit 0
   fi
 
   # 4. `held` is cleared by a ruling, not by a sitting ending. The state was
   # read before the first write; nothing this sign-off writes changes it.
+  RELEASE_FAILED=""
   if [ "$SUBJECT_STATE" = "held" ]; then
     "$LC" transition "$SUBJECT" --to unanchored --route "$ROUTE" \
-      || echo "RELEASE FROM held FAILED on $SUBJECT — it still reads as waiting on a person"
+      || { echo "RELEASE FROM held FAILED on $SUBJECT — it still reads as waiting on a person"; RELEASE_FAILED=yes; }
   fi
   ACTIONS+=("ruling: $RULING (released to $ROUTE)")
   [ -n "$CONSEQUENCE" ] && ACTIONS+=("$CONSEQUENCE")
   for p in "${STANDS[@]+"${STANDS[@]}"}"; do ACTIONS+=("ruling leaves the branch of $p as it stands"); done
 
-  # 5. Close the conversation. The work-record gate the close runs wants
+  # 5. The recommendation, once nothing holds the subject back: a workflow
+  # poured at a bead that still reads `held` ends its run as finished.
+  if [ -n "$ACCEPT" ]; then
+    [ -z "$RELEASE_FAILED" ] \
+      || stopped "the recommendation is not taken while $SUBJECT reads held, because a workflow poured at a held bead ends its run as finished; the conversation is not closed, so a re-run releases it and then takes the recommendation"
+    take_recommendation
+  fi
+
+  # 6. Close the conversation. The work-record gate the close runs wants
   # gc.work_outcome, stamped in a write of its own so it never decides whether
   # the conversation closes. The sitting holds the conversation, so a plain
   # close is the holder's own; --force covers an actor bd does not read as its
@@ -525,7 +653,7 @@ else
   fi
 fi
 
-# 6. The PR reminder, once the conversation reads closed or back in the queue.
+# 7. The PR reminder, once the conversation reads closed or back in the queue.
 # Best effort and update-only: a conversation no sitting engaged left no comment,
 # and a cut-short sign-off on one already closed leaves the reminder its closer
 # wrote.
