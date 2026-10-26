@@ -14,9 +14,10 @@ claimed and this session stays, so the sitting keeps its thread. The hold's
 record lands BEFORE the framing, because until it does nothing outside this
 pane knows the sitting is waiting, and a restart reads a sitting that never
 held. One sentence, at most 130 characters, says what the operator owes. The
-headline reads `holding — <your sentence>`, the board's NEEDS cell, and the
-prefix spends part of the headline cap, so `gc-helm.sh takeaway` refuses a
-longer one. What will not fit goes in the notes.
+headline reads `holding — <your sentence>`, which the board shows as this
+sitting's headline, and the prefix spends part of the headline cap, so
+`gc-helm.sh takeaway` refuses a longer one. What will not fit goes in the
+notes.
 
 **1. Record the hold on the conversation and the subject.** The
 conversation's `holding:` line is the trace step 1's restart rule reads, so

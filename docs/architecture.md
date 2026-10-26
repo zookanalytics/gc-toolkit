@@ -51,7 +51,7 @@ flowchart LR
     PR[pull request]
   end
 
-  OP -->|files subject / visit| LEDGER
+  OP -->|files subject / conversation| LEDGER
   OP -.->|reads| HELM
   LEDGER --> POOL
   POOL -->|claim| FORM
@@ -153,44 +153,49 @@ after the fact.
 
 ## How humans engage
 
-The human surface is subject / visit / takeaway on native primitives
-([human-engagement.md](human-engagement.md) is the reference).
+The human surface is subject / human gate / conversation / takeaway on native
+primitives ([human-engagement.md](human-engagement.md) is the reference).
 
-- **A subject bead is the conversation.** Its id is the conversation's
-  identity; turns are small child beads that park on the helm board
-  (`gc.routed_to=human`) until the operator engages one. Warm, the next turn
-  vacuums onto the live sitting through the continuation group; cold,
-  `gc-helm engage` spawns a fresh `converse-<model>` sitting that reconstitutes
-  from the record. The record is the durable thing; sessions are disposable.
-- **A visit is a filed turn**, and the board and the converse sittings work on
-  visits. `gc-helm.sh open` files every visit, parked on the helm board
-  (`gc.routed_to=human`) until the operator engages it. The operator's intake,
-  `gc-visit-open.sh`, files its visits through it, and so does a caller asking
-  about a bead with open children, which a gate on the bead would pause.
+- **A subject is the bead a human gate or a conversation is about.** Its notes
+  carry the durable outcome of every conversation about it, and the resolve
+  reasons of the gates it waits on carry their answers, so whoever works it
+  next inherits what was decided. The record is the durable thing; sessions are
+  disposable.
 - **A human gate is a wait for a person.** Two channels carry a signal, and
   which applies depends on who can answer it. Mail is the agent-to-agent
   pathway: a worker mails the witness, which unblocks what it can and promotes
-  what needs a person. A human gate is the human engagement: `human-gate.sh`
-  files Gas City's native human gate on the bead that waits, **exactly one open
-  gate per bead and situation key**. The gate blocks that bead, so the bead
-  leaves `bd ready` and the pool's offer, and bd refuses its close, until a
-  person resolves the gate with the answer as its reason. A quiet period applies
-  only where a call declares `--quiet-window`, and `--retract` resolves the
-  filer's own gate as moot once its situation has gone. `escalate.sh` is the
-  name that step text from an earlier version of a formula calls, and it hands
-  the call to `human-gate.sh` unchanged. There is no mayor; a situation that
-  needs a human is a human gate, same as any other. A patrol files a human gate
-  on the bead a situation is about, or a finding (`patrol-finding.sh`), rather
-  than mail, because a patrol sits at the top of the agent tier and has no peer
-  to mail. A gate `human-gate.sh` files reaches the operator through no visit
-  and no board row of its own. `gate-visit-sweep` files a visit only for a gate
-  that carries `gc.demand_for`, which `gc-helm.sh demand` writes and
-  `human-gate.sh` does not, and the board reads an open blocker as something a
-  person owes only when it is a `decision` or routed to `human`. Every other
-  reader finds a bead's human gates the one way, through the bead's `blocks`
-  edges (`bd_human_gates` in `assets/scripts/bd-lib.sh`), and takes a cleared
-  gate's answer from its resolve reason, so a gate holds what it blocks
-  whoever filed it.
+  what needs a person. A human gate is the human engagement: Gas City's native
+  gate (`await_type=human`) on the bead that waits, which any pack, formula or
+  person files natively or through `human-gate.sh`, the helper that keeps
+  **exactly one open gate per bead and situation key**. The gate blocks that
+  bead, so the bead leaves `bd ready` and the pool's offer, and bd refuses its
+  close, until a person resolves the gate with the answer as its reason, headed
+  `ruled:`, `moot:` or `benign:`. A quiet period applies only where a call
+  declares `--quiet-window`, and `--retract` resolves the filer's own gate as
+  moot once its situation has gone. `escalate.sh` is the name that step text
+  from an earlier version of a formula calls, and it hands the call to
+  `human-gate.sh` unchanged. There is no mayor; a situation that needs a human
+  is a human gate, same as any other. A patrol files a human gate on the bead a
+  situation is about, or a finding (`patrol-finding.sh`), rather than mail,
+  because a patrol sits at the top of the agent tier and has no peer to mail.
+  Every reader finds a bead's human gates the one way, through the bead's
+  `blocks` edges (`bd_human_gates` in `assets/scripts/bd-lib.sh`), and takes a
+  cleared gate's answer from its resolve reason, so a gate holds what it blocks
+  whoever filed it. The board folds each open gate onto the row of every bead
+  it blocks.
+- **A conversation is a task about one subject.** It tracks its subject,
+  replies to each human gate it answers through bd's `replies-to` edge, and
+  blocks nothing. It waits in the operator's queue, assigned to `human`, until
+  the operator engages it. `gc-helm.sh open` files one, and so do the
+  operator's intake, `operator-intake.sh`, and a caller asking about a bead with
+  open children, which a gate on the bead would pause. `gc-helm engage` takes
+  the bead's conversation, or files one, and spawns a manual `converse-<model>`
+  session under an alias that names it: the sitting. The sitting claims its
+  conversation with a plain `gc hook --claim`, holds for the operator, answers
+  each gate the operator rules on through its conversation's reply, and signs
+  off by resolving those gates and closing the conversation. A sitting cut
+  short hands the conversation back to the queue, and the next engagement
+  resumes it from the record.
 - **A takeaway records what a sitting concluded**, and its `--waiting-on` edge
   is what makes the wait machine-answerable
   ([lifecycle-composition.md](lifecycle-composition.md)).
@@ -208,8 +213,10 @@ The human surface is subject / visit / takeaway on native primitives
   ([steering.md](steering.md#priority)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
   per render from the ledger. `gc-helm.sh` carries the write verbs open,
-  engage, react, takeaway, demand, dismiss, accept, park and priority, and the
-  read-only verbs resolve and unplaced. `gc-helm.sh unplaced` lists the placement
+  engage, react, takeaway, dismiss, accept, park and priority, and the
+  read-only verbs resolve and unplaced. Accept clears a first reaction's
+  recommendation gate and nothing else, under the bead's acceptance lock, and
+  is offered only while no other human gate blocks the bead. `gc-helm.sh unplaced` lists the placement
   sitting's queue ([steering.md](steering.md)). Everything works without the
   board: it spends no state, so it can never be wrong for longer than one
   render.

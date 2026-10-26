@@ -48,7 +48,7 @@ in the discard list below it.
 | **Order** | controller-owned recurring pass, no LLM | cadence becomes an invisible daemon |
 | **Agent session** | one mortal executor with an identity | nothing can be claimed, and nothing can be recycled |
 | **Worktree + `polecat/<bead>` branch** | per-bead isolation | concurrent writers stomp one checkout |
-| **Visit / subject** | the human's queue | results propagate as a colour change on a board nobody opens |
+| **Human gate / conversation / subject** | the human's queue: a gate on the bead that waits, and a conversation about one bead | results propagate as a colour change on a board nobody opens |
 
 ### Discard list
 
@@ -68,8 +68,7 @@ Dropping these is as much the design as keeping the list above.
 A bead's kind is `metadata.task_kind`. Every reader that branches on kind
 reads that key and nothing else — `visit`, `review`, `triage-subject`,
 `observation` and the standing kinds are all resolved this way, in the
-liveness sweeps, the gate scripts, the doctor checks, and `helm`'s visit
-filter. The standing kinds name a record that is open, unrouted and unassigned
+liveness sweeps, the gate scripts and the doctor checks. The standing kinds name a record that is open, unrouted and unassigned
 by design and never closes. Their one definition is
 `assets/scripts/standing-kinds.sh`, which a reader sources for the list and
 for the `is_standing_kind` test.
@@ -101,14 +100,13 @@ writes.
 ### An anchor's children
 
 A bead that hangs off an anchor (a review, a rework child, a finding, a
-validation pass, a visit) names the anchor in `anchor_bead`, and that key is
+validation pass) names the anchor in `anchor_bead`, and that key is
 what makes it a child. The child also has an edge onto the anchor, its
 membership edge, and that edge can be of any type. bd keeps one edge per ordered
 pair and refuses a second type on it, so an edge the pair already carries is the
 membership edge. The pack joins a child whose pair has no edge with a `related`
-edge. A visit whose subject is the anchor is usually joined already, because
-`gc-helm.sh open`, which files every visit, puts a `tracks` edge from the visit
-onto its subject.
+edge. A conversation about the anchor carries no `anchor_bead`, so its `tracks`
+edge makes it no child.
 
 The live children are read by `anchor_bead` over the live statuses. That read
 scans only the live beads, and it sees a child whatever filed it, edge or not.
@@ -116,9 +114,8 @@ The closed children are read through the edge, one
 `gc bd dep list <anchor> --direction=up`, because a
 `--metadata-field anchor_bead=<id>` query that covers closed has no index to use
 and reads the whole closed ledger. That read takes every dependent whatever its
-edge type, so a visit joined by its `tracks` edge is read, and a dependent is a
-closed child when its `anchor_bead` names the anchor. A convoy tracking the
-anchor is therefore not one, and a bead moved to another anchor leaves the old
+edge type, and a dependent is a closed child when its `anchor_bead` names the
+anchor. A convoy tracking the anchor is therefore not one, and a bead moved to another anchor leaves the old
 one's set with its old edge still in place.
 
 The edge answers for the closed children only in a store marked joined.
@@ -285,17 +282,19 @@ store. A `bd dep add` naming a bead in another rig's store returns `✓ Added
 dependency` and exit 0, and holds nothing. `bd dep list --json` omits the row,
 so every consumer reading stdout sees no wait and the bead stays ready; a
 warning may still be printed on stderr, which is not the channel anything
-reads. A wait on work in another rig is filed as a demand bead in the waiting
-bead's own store, naming the foreign bead in its body. And the status stays `open`:
+reads. A wait on work in another rig is filed as a human gate in the waiting
+bead's own store, naming the foreign bead in its message. And the status stays `open`:
 setting `status=blocked` by hand does not converge, because when the blocker
 closes the stored status is still `blocked`.
 
 **The demand** is that what a person owes is a bead, and the dependent work
-blocks on it. A ruling only the operator can give is `issue_type=decision`; a
-task only a named human can perform is a bead assigned to them; a question a
-person must answer is the human gate `human-gate.sh` files, created with the
-waiting bead's `blocks` edge onto it. Filing the demand without wiring the edge
-is the common failure, and a demand that gates nothing is a note.
+blocks on it. It is a human gate on the bead that waits, filed natively
+(`gc bd gate create --type=human --blocks <bead>`) or through `human-gate.sh`,
+and created with the waiting bead's `blocks` edge onto it: unassigned while the
+operator owes it, or assigned to the one person who must perform the action.
+Work a person owes that nothing waits on is an ordinary bead assigned to them.
+Filing the gate without wiring the edge is the common failure, and a gate that
+blocks nothing is a note.
 
 **The shape law** is that a blocker on a bead with `parent-child` children
 holds every part of it, so such a bead carries a `blocks` edge only for a wait
@@ -367,7 +366,7 @@ other value.
   a city: no order, formula, or `test_command` invokes it.
 - `doctor/check-*`. §3 places each check against the invariant it asserts.
 - `tools/`. The command surface a human drives, including the
-  `gc-proactive.sh` entry point that `gc-helm.sh` and `gc-visit-open.sh` shell
+  `gc-proactive.sh` entry point that `gc-helm.sh` and `operator-intake.sh` shell
   out to on a human's action.
 
 **The placement rule.** A component belongs to the workflow whose product it
@@ -438,21 +437,22 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/direct-merge-push.sh` | merge | The patrol's direct-mode landing: stamps the prepared head on the bead, pushes it onto its target as a fast-forward, named by commit id, reads the landing back from origin, and records and closes the bead in one lifecycle transition. A landing whose record fails keeps the stamp, and the next patrol records it. A push refused for branch protection moves the bead to the PR path instead, and a target that moved after the prepare lands nothing and leaves the bead for the next patrol. |
 | `assets/scripts/refinery-workspace.sh` | merge | The refinery's directories under a rig's git dir: stages the branch under prep in its detached worktree and tears it down, and empties the checks directory the gate reads, so no block of the patrol removes anything itself. |
 | `assets/scripts/first-reaction-dispose.sh` | visit | Performs a first reaction's disposition — one of five exits (route the bead to a pool or to the named agent whose work it is, which it tells through `deferred-dispatch.sh notify`, recommend an action for the operator to trigger, hold it on an edge, route it to a validating closer, or put it to the operator as a human gate for their judgment) — stamps `gc.reacted_by` on the subject, and closes the reaction bead. A pool route, or a blocked exit's arm, reaches only a bead the intake rule admits: a member of an epic, PR-finishing work, or an emergency whose named check it confirms failing on main, routed at P0. It marks any other bead `placement=pending` and leaves it unrouted for the placement sitting ([steering.md](steering.md)). Its `--stand-down`, which the reaction runs before it reads the subject, closes the reaction bead the same way and writes nothing else when the subject already carries this reaction's `gc.reacted_by` or a live owner's `gc.reaction_owned`. The reaction is its own leased task bead R filed by `tools/gc-proactive.sh`; the prompt is the method. It sits in visit because its product is a bead the human no longer has to triage. It never closes the subject: the close disposition slings it to a validating closer. |
-| `formulas/mol-validate-close.toml` | visit | The validating closer a `close` disposition routes to: a capable pool re-checks the no-work conclusion against live state and closes the subject (`gc.work_outcome=no-op`) when it holds. When it does not, it files a human gate on the subject, or opens a visit on it through `gc-helm.sh open` when the subject has an open child that a gate would pause. The one bead-closer outside the refinery, gated on its own confident check. |
+| `formulas/mol-validate-close.toml` | visit | The validating closer a `close` disposition routes to: a capable pool re-checks the no-work conclusion against live state and closes the subject (`gc.work_outcome=no-op`) when it holds. When it does not, it files a human gate on the subject, or opens a conversation on it through `gc-helm.sh open` when the subject has an open child that a gate would pause. The one bead-closer outside the refinery, gated on its own confident check. |
 | `orders/helm-build.toml` | visit | Keeps the served board binary current with `services/helm`. |
 | `services/helm` | visit | The board. Derives every row per render from the ledger. |
-| `assets/scripts/gc-helm.sh` | visit | The board's write verbs (takeaway, open, engage, react, dismiss, demand, accept, and the operator's [park](steering.md) and [priority](steering.md#priority), whose writes `queue-priority.sh move` makes) and its read-only verbs: resolve, and unplaced, which lists the placement sitting's queue. |
+| `assets/scripts/gc-helm.sh` | visit | The board's write verbs (takeaway, open, engage, react, dismiss, accept, and the operator's [park](steering.md) and [priority](steering.md#priority), whose writes `queue-priority.sh move` makes) and its read-only verbs: resolve, and unplaced, which lists the placement sitting's queue. open files a conversation, engage holds one in a sitting, dismiss ends a sitting, and accept clears a recommendation's human gate under the bead's acceptance lock. |
 | `assets/scripts/gc-helm-svc.sh` | visit | The `proxy_process` launcher for the board backend. |
-| `assets/scripts/gc-visit-open.sh` | visit | Operator-origin visit intake in one command. |
+| `assets/scripts/operator-intake.sh` | visit | Operator-origin intake in one command: a first reaction on the bead, or a conversation in the operator's queue when no reaction can be filed. |
 | `assets/scripts/city-liveness.sh` | visit | The one reading of the liveness flags in `gc rig list --json`: whether a rig is suspended, and whether the city controller is running, where the HQ row's `running=false` counts only when `gc status` does not contradict it. `gc-helm.sh`'s engage refuses on them and `gc-visit-open.sh` notes that a report will wait. |
 | `orders/converse-reap.toml` | visit | Fires the converse sitting reaper every five minutes, city-wide. |
-| `assets/scripts/converse-reap.sh` | visit | The pass that order runs: closes each unattached converse session whose visit reads closed or gone. A sign-off or a `gc-helm dismiss` closes the visit and leaves the manual session running, so this pass is the teardown both endings rely on ([human-engagement.md](human-engagement.md)). It leaves an attached session alone, because attachment is the only signal the pack has that someone is at the pane. It sits in visit, not in patrol with the other reapers, because it completes a visit's ending the way `reconcile-rig-checkouts` completes a merge's effect. |
-| `assets/scripts/converse-claim.sh` | visit | Claims one turn for a continuation group, and puts back a turn belonging to another. |
+| `assets/scripts/converse-reap.sh` | visit | The pass that order runs: closes each unattached converse session whose conversation reads closed, gone, or back in the operator's queue. A sign-off or a `gc-helm dismiss` closes the conversation, and a sitting cut short hands it back, and each leaves the manual session running, so this pass is the teardown those endings rely on ([human-engagement.md](human-engagement.md)). It leaves an attached session alone, because attachment is the only signal the pack has that someone is at the pane. It sits in visit, not in patrol with the other reapers, because it completes a sitting's ending the way `reconcile-rig-checkouts` completes a merge's effect. |
+| `assets/scripts/converse-signoff.sh` | visit | A sitting's sign-off, in one order every time: the ruling's rework, the subject's headline, the answer on each human gate the conversation replies to (read back, an earlier answer reported), the release of a `held` subject, and the conversation's close, or its hand-back to the operator's queue when the sitting is cut short. |
+| `assets/scripts/pr-sitting-comment.sh` | visit | The reminder on a subject's PR that a sitting engaged, edited in place when it ends, keyed by the conversation under the marker `<!-- gc:sitting:<task> -->`. |
 | `assets/scripts/bead-rehome.sh` | visit | The one evidence-gated close-with-successor writer: it re-establishes the evidence for each close itself, and `--check` evaluates it without writing. After a close it hands the branch the closed bead names to `branch-end.sh`. Callers are converse dispositions, operator re-homes, `duplicate-sweep.sh`, `pr-facts.sh` consummating a pre-recorded PR-close disposition, `scaffolding-sweep.sh` carrying a finding forward, and `deferred-dispatch.sh` disposing a bead its `until` targets resolved. A retry names its own report's situation key (`--except-key`): the finalize gate excepts the human gates filed under it that no person is assigned, and the writer withdraws them just before the close, once nothing else would hold it. |
 | `assets/scripts/pr-dispose.sh` | visit | Records a deliberate supersede/not-planned PR-close disposition on the open anchor and closes the PR, so `pr-facts.sh` consummates it through `bead-rehome.sh` instead of filing a rework-or-close human gate. The PR side of the same disposition doctrine, with the same callers: converse dispositions and operator close-outs. |
 | `assets/scripts/converse-rework.sh` | visit | Turns a sitting's ruling on an open PR into the rework it owes: it refuses an anchor that is not an open PR, takes the work order from the anchor, files the child through `rework-child.sh` with the visit as `source_ruling_bead`, and then returns every lane the anchor declares to `unreviewed` through `review-outcome.sh supersede-anchor`. Its one caller is `converse-signoff.sh --rework`. It sits in visit for the reason `pr-dispose.sh` does. Both carry out a ruling on an open PR, this one as a rework and `pr-dispose.sh` as a close. |
 | `assets/scripts/gc-terminal-attach.sh` | visit | The city web terminal's attach target. |
-| `assets/scripts/tmux-visit-prompt.sh` | visit | `prefix + a`: type a message, get a durable conversation. |
+| `assets/scripts/tmux-intake-prompt.sh` | visit | `prefix + a`: type a message, get a durable conversation. |
 | `assets/scripts/tmux-dismiss-sitting.sh` | visit | `prefix + X`: dismiss the converse sitting in view, after a confirm. |
 | `assets/scripts/tmux-bindings.sh` | visit | Installs the keybindings that reach the surfaces above. |
 | `assets/scripts/tmux-pick-helm.sh` | visit | The board picker. |
@@ -460,7 +460,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/tmux-keeper-toggle.sh` | visit | Pins or unpins the keeper in the session picker. |
 | `assets/scripts/tmux-status-line-override.sh` | visit | Sets the gc-toolkit status bar. |
 | `assets/scripts/gc-toolkit-status-line.sh` | visit | Renders what that status bar shows. |
-| `assets/scripts/work-outcome.sh` | visit | The one `gc.work_outcome=no-op` stamp a visit gets before it closes, for the work-record gate `gc bd close` runs. Every visit closer sources it: `visit-close.sh`, the `gc-helm.sh` dismiss verb, `bead-rehome.sh` and `converse-claim.sh`. |
+| `assets/scripts/work-outcome.sh` | visit | The one `gc.work_outcome=no-op` stamp a conversation gets before it closes, for the work-record gate `gc bd close` runs. Every closer of one sources it: `converse-signoff.sh`, the `gc-helm.sh` dismiss verb, and `bead-rehome.sh` for a visit origin it re-homes. |
 | `orders/feedback-miner.toml` | feedback | Fires the sweep of recently merged PR review threads. |
 | `orders/feedback-distiller.toml` | feedback | The daily heartbeat that judges pending observations. |
 | `formulas/mol-feedback-miner.toml` | feedback | Cold capture: records each review post from outside the city as one condensed observation, and each corrective-feedback hit in the city's own posts as another. |
@@ -518,7 +518,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/placement.sh` | shared primitive | The one definition of a bead that waits for placement: it carries `placement=pending` and has no parent, route, arm, assignee or live pour. Visit lists those beads as the placement sitting's queue (`gc-helm.sh unplaced`), and its proactive scan files no first reaction for them. Patrol's liveness sweep and its precheck name them as a wait through the classifier, the claim-time re-check of a sweep visit names the same wait, and the doctor sweep's `check-blocked-work-armed` owes them no arm ([steering.md](steering.md)). |
 | `assets/scripts/conversation.sh` | shared primitive | The one definition of a conversation's shape: an ordinary task that tracks the one bead it is about, assigned to `human` while it waits in the operator's queue or to the alias of the sitting that holds it, which names the task's own id. Patrol's liveness classifier, sweep and precheck read conversations through its jq form, and orphan recovery's `orphan-dispose.sh` through its shell form, so a conversation is never returned to a pool; the witness patrol's candidate filter carries a copy its test holds to it. |
 | `assets/scripts/hold-lib.sh` | shared primitive | The one definition of a hold: an open `blocks` blocker on a bead or on one of its parent-child ancestors, where only a blocker of its own holds a bead in flight (one carrying a branch, a merge_result or a rejection_reason). A human gate is open until it is resolved, pinned included, by bd-lib.sh's rule, and it holds a bead bd reports ready. Its walk reads a generation of ancestors per listing, so a reader judges any number of beads in a few reads. Work's deferred-dispatch pass sources it to sling an armed bead only when nothing holds it, and to name the blocker that does. Patrol's doctor sweep runs `check-armed-dispatch-owed`, which sources it so a held arm is not reported owed. |
-| `assets/scripts/pr-post.sh` | shared primitive | The one writer of the city's PR posts, each carrying the provenance mark, and the owner of the definition that tells the city's own post from feedback. Merge (`pr-open.sh`, `pr-facts.sh`), review (`signoff.sh`) and visit (`pr-visit-comment.sh`, `pr-dispose.sh`, converse sittings) post through it, and `pr-facts.sh`, `signoff.sh` and `feedback-miner.sh` read its definition. |
+| `assets/scripts/pr-post.sh` | shared primitive | The one writer of the city's PR posts, each carrying the provenance mark, and the owner of the definition that tells the city's own post from feedback. Merge (`pr-open.sh`, `pr-facts.sh`), review (`signoff.sh`) and visit (`pr-sitting-comment.sh`, `pr-dispose.sh`, converse sittings) post through it, and `pr-facts.sh`, `signoff.sh` and `feedback-miner.sh` read its definition. |
 | `assets/scripts/gc-build.sh` | shared primitive | Builds each of the pack's compiled Go components out of band and records what it serves, so no caller builds in its own exec path. Visit runs it for the board's `helm-svc` through `orders/helm-build.toml`, probing the binary and restarting the service onto it, and merge runs it for `gctk`, the cadence's data plane, through `orders/gctk-build.toml`. |
 | `assets/scripts/icu4c-cgo.sh` | shared primitive | The cgo flags every compile of `services/helm` needs on macOS, where Homebrew keeps icu4c off the default search path and Dolt's go-icu-regex needs its headers. Visit sources it for the helm-svc build (`gc-build.sh helm`), and merge sources it for the go vet in `tools/lint.sh`, which the gc-toolkit rig's lint command runs. |
 | `assets/scripts/branch-end.sh` | shared primitive | Ends a retired bead's branch on the git remote, the way delete-on-merge ends a landed one: keeps a branch a live bead still names, pins the tip (the PR's `refs/pull/<n>/head`, or an annotated `archive/<branch>@<short-sha>` tag read back on origin), then deletes it at that tip. `bead-rehome.sh` runs it after every disposition close, so it serves that writer's callers for the same reason: converse (visit), and `pr-facts.sh`, `duplicate-sweep.sh` and `scaffolding-sweep.sh` (merge). Its origin write is granted in [authority-map.md](authority-map.md). |
@@ -532,7 +532,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 
 - **The operator surface is visit.** The board, the tmux bindings and pickers,
   the status line, and the web terminal exist so a human can reach the queue
-  that subjects and visits hold. `services/helm` and `orders/helm-build.toml`
+  that human gates and conversations hold. `services/helm` and `orders/helm-build.toml`
   sit there for the same reason: the board is the read half of human
   engagement, and the order exists only to keep it current.
 - **`reconcile-rig-checkouts` is merge.** A directory-imported pack runs from

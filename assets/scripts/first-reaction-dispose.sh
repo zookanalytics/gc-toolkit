@@ -180,8 +180,8 @@ Usage:
   recommendation is older than the newest first-reaction gate.
   --recommended-formula (recommend only, required) names the execution mol the
   recommendation runs; it stamps gc.recommended_formula on the subject, which
-  is what offers the operator Accept on the board. A ruling carries no
-  recommended action and rejects it.
+  with the first-reaction gate is what offers the operator Accept on the board.
+  A ruling carries no recommended action and rejects it.
 EOF
 }
 
