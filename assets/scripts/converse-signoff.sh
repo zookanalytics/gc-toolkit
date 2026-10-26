@@ -21,7 +21,8 @@
 # Cut short (--ruled no), it writes the headline, leaves every gate the
 # conversation replies to open and owed, with its reply in place for the next
 # sitting, and hands the conversation back to the operator's queue with a write
-# guarded on the sitting that holds it, then updates the reminder.
+# guarded on the sitting that holds it, then updates the reminder. A
+# conversation that already reads closed stays closed.
 #
 # It resolves no gate its conversation does not reply to: a gate the sitting
 # never took up stays for whoever owes it. The gates are read from the
@@ -309,26 +310,35 @@ else
   # Cut short: the gates stay open and owed, with their replies in place, and
   # the conversation goes back to the operator's queue with one write guarded
   # on the sitting that holds it, which drops the claim's lease. A conversation
-  # already in the queue has no sitting to hand it back from.
-  if [ "$HOLDER" != human ]; then
-    gc bd update "$CONVERSATION" --if-assignee "$HOLDER" --assignee human --status open >/dev/null 2>&1 || true
-    BACK=$(show_row "$CONVERSATION") || BACK=""
-    if [ "$(printf '%s' "$BACK" | jq -r '"\(.assignee // "")/\(.status // "")"' 2>/dev/null)" != "human/open" ]; then
-      stopped "conversation $CONVERSATION did not read back in the operator's queue (assignee human, status open) after its hand-back from $HOLDER; re-run once the store answers"
-    fi
-  fi
+  # already in the queue has no sitting to hand it back from. One that reads
+  # closed has ended, by a dismiss or an earlier sign-off, and bd's close keeps
+  # its assignee, so the guarded write would reopen it: it stays closed.
   [ -n "$REPLIES" ] && ACTIONS+=("left $(printf '%s' "$REPLIES" | tr '\n' ' ' | sed 's/ *$//') open and owed")
-  ACTIONS+=("conversation back in the operator's queue")
-  REMINDER_OUTCOME="handed back"
+  if [ "$CONV_STATUS" = closed ]; then
+    echo "conversation $CONVERSATION already reads closed, so it stays closed and is not handed back"
+    REMINDER_OUTCOME=""
+  else
+    if [ "$HOLDER" != human ]; then
+      gc bd update "$CONVERSATION" --if-assignee "$HOLDER" --assignee human --status open >/dev/null 2>&1 || true
+      BACK=$(show_row "$CONVERSATION") || BACK=""
+      if [ "$(printf '%s' "$BACK" | jq -r '"\(.assignee // "")/\(.status // "")"' 2>/dev/null)" != "human/open" ]; then
+        stopped "conversation $CONVERSATION did not read back in the operator's queue (assignee human, status open) after its hand-back from $HOLDER; re-run once the store answers"
+      fi
+    fi
+    ACTIONS+=("conversation back in the operator's queue")
+    REMINDER_OUTCOME="handed back"
+  fi
 fi
 
 # 6. The PR reminder, once the conversation reads closed or back in the queue.
-# Best effort and update-only: a conversation no sitting engaged left no comment.
+# Best effort and update-only: a conversation no sitting engaged left no comment,
+# and a cut-short sign-off on one already closed leaves the reminder its closer
+# wrote.
 REMINDER=$(pack_script pr-sitting-comment.sh)
-if [ -n "$REMINDER" ]; then
+if [ -n "$REMINDER" ] && [ -n "$REMINDER_OUTCOME" ]; then
   ACTIONS_TEXT=""
   for a in "${ACTIONS[@]+"${ACTIONS[@]}"}"; do ACTIONS_TEXT="${ACTIONS_TEXT:+$ACTIONS_TEXT; }$a"; done
   "$REMINDER" close --sitting "$CONVERSATION" --subject "$SUBJECT" \
     --outcome "$REMINDER_OUTCOME" --summary "$OUTCOME" --actions "$ACTIONS_TEXT" || true
 fi
-echo "SIGNED OFF conversation $CONVERSATION on $SUBJECT ($REMINDER_OUTCOME)"
+echo "SIGNED OFF conversation $CONVERSATION on $SUBJECT (${REMINDER_OUTCOME:-already closed})"

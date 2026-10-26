@@ -24,7 +24,8 @@
 #   (HELD)    a held subject is released on a ruling
 #   (OPEN-PR, REWORK*) a ruling on an open PR answers --rework or --no-rework;
 #             the rework files first, and a filing that fails writes nothing else
-#   (CUT-SHORT*) the hand-back is one write guarded on the holder
+#   (CUT-SHORT*) the hand-back is one write guarded on the holder, and a
+#             conversation that already reads closed stays closed
 #   (RERUN)   a re-run after a sign-off changes nothing
 #
 # Runs the REAL converse-signoff.sh with a stubbed `gc` on PATH over a
@@ -344,6 +345,16 @@ STEAL_BEFORE_UPDATE=1 run_signoff --conversation tk-conv --outcome "cut short" -
 eq "$RC" 1 "(CUT-SHORT-RACE) a hand-back whose guard misses exits 1"
 eq "$(field tk-conv assignee)" "gc-toolkit/gc-toolkit.c-tk-conv" "(CUT-SHORT-RACE) …overwriting nothing"
 mv "$TMP/bin/gc.real" "$TMP/bin/gc"
+# A conversation that already reads closed has ended: a dismiss or an earlier
+# sign-off closed it, and bd's close kept its assignee, so the guarded hand-back
+# would reopen it into the operator's queue.
+acceptance; setf tk-conv status closed
+run_signoff --conversation tk-conv --outcome "cut short" --ruled no
+eq "$RC" 0 "(CUT-SHORT-CLOSED) a cut-short sign-off on a closed conversation exits 0"
+eq "$(field tk-conv status)" "closed" "(CUT-SHORT-CLOSED) …and the conversation stays closed"
+hasnt "$(cat "$CALLS")" "bd update tk-conv" "(CUT-SHORT-CLOSED) …with no hand-back written"
+hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(CUT-SHORT-CLOSED) …leaving the reminder its closer wrote"
+eq "$(field tk-rev status)" "open" "(CUT-SHORT-CLOSED) the gate stays open and owed"
 
 echo
 echo "converse-signoff: $PASS passed, $FAIL failed"
