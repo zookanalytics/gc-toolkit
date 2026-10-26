@@ -91,11 +91,10 @@ formula default or the startup pour drops to it.
 
 After three rapid stops in a row the hook stops handing back. Another
 hand-back would only loop, so it resets the session instead
-(`gc session reset`, by the session's alias or id). It first writes a
-`recovery` line to the incident ledger. The fresh conversation starts from
-the deacon's prompt, and its startup reconcile adopts the wisp the patrol
-left. A reset that fails lets the turn end, and boot-health is then what
-reports the cold deacon.
+(`gc session reset`, by the session's alias or id). The fresh conversation
+starts from the deacon's prompt, and its startup reconcile adopts the wisp
+the patrol left. A reset that fails lets the turn end, and boot-health is
+then what reports the cold deacon.
 
 The reset waits while an operator is attached to the deacon's pane, because
 it would end the conversation under them. An attachment the hook cannot read
@@ -103,6 +102,14 @@ counts as one, as it does for the context recycle. The turn ends and the
 count stands, so the deacon takes the operator's next prompt, and the next
 rapid stop with nobody attached takes the reset. A deacon the operator
 leaves without a prompt stays idle, and boot-health reports it cold.
+
+The reset also waits for its `recovery` line in the incident ledger. The
+deacon's prompt reads the ledger before it patrols, in place of the
+transcript the reset ends, so the hook writes the line first and resets only
+once the append succeeds. When the ledger script is missing or the append
+fails, the turn ends and the count stands, so the next rapid stop tries the
+line again. The deacon is then idle until something prompts it, and
+boot-health reports it cold.
 
 Claude Code has its own bound: it overrides a hook that blocks the turn from
 ending nine times in a row with no tool call in between, and ends the turn.

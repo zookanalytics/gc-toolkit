@@ -6,9 +6,9 @@
 # next patrol cycle back. It prints nothing for any other agent, while a
 # background task runs, or on a payload it cannot read. After MAX_RAPID stops
 # in a row that each came within MIN_TURN seconds of a hand-back, it resets the
-# session instead, unless an operator is attached. Every path exits 0, so the
-# exit code tells nothing apart; this test reads stdout, the state file and the
-# calls the hook makes.
+# session instead, unless an operator is attached or its recovery line does not
+# reach the incident ledger. Every path exits 0, so the exit code tells nothing
+# apart; this test reads stdout, the state file and the calls the hook makes.
 #
 # It runs the SHIPPED script, never a copy. gc and tmux are stubbed by pointing
 # HOME at the sandbox: the hook prepends "$HOME/go/bin" to PATH itself, so a
@@ -59,12 +59,15 @@ printf '%s\n' "${TMUX_ATTACHED:-0}"
 STUB
 chmod +x "$SANDBOX/home/go/bin/tmux"
 
-# The ledger stub sits where the hook looks for gc-deacon-ledger.sh.
+# The ledger stub sits where the hook looks for gc-deacon-ledger.sh. It logs
+# every call and exits LEDGER_STUB_RC, as the real script exits 1 when its
+# append does not land.
 CITY="$SANDBOX/city"
 mkdir -p "$CITY/rigs/gc-toolkit/assets/scripts"
 cat > "$CITY/rigs/gc-toolkit/assets/scripts/gc-deacon-ledger.sh" <<'STUB'
 #!/bin/sh
 printf '%s\n' "$*" >> "$LEDGER_LOG"
+exit "${LEDGER_STUB_RC:-0}"
 STUB
 chmod +x "$CITY/rigs/gc-toolkit/assets/scripts/gc-deacon-ledger.sh"
 
@@ -202,6 +205,27 @@ printf 's1 %s 1\n' "$now" > "$STATE"
 run_hook gc-toolkit.deacon "$(payload s1)" "$IN_TMUX" TMUX_ATTACHED=1
 eq "$(printf '%s' "$OUT" | jq -r '.decision' 2>/dev/null)" "block" "an attached operator does not hold a hand-back below the limit"
 eq "$(cat "$SANDBOX/tmux.log")" "" "below the limit the hook does not ask tmux"
+
+echo "== the reset waits for its recovery line =="
+printf 's1 %s 2\n' "$now" > "$STATE"
+run_hook gc-toolkit.deacon "$(payload s1)" LEDGER_STUB_RC=1
+eq "$OUT|$RC" "|0" "a failed ledger append: the third rapid stop is not handed back"
+has "$(cat "$SANDBOX/ledger.log")" "append recovery" "a failed ledger append: the recovery line was tried"
+eq "$(cat "$SANDBOX/gc.log")" "" "a failed ledger append: the session is not reset"
+eq "$(cat "$STATE")" "s1 $now 2" "a failed ledger append: the state file keeps its count"
+has "$ERR" "the recovery line did not reach the ledger" "a failed ledger append is reported on stderr"
+
+run_hook gc-toolkit.deacon "$(payload s1)"
+has "$(cat "$SANDBOX/ledger.log")" "append recovery" "the next rapid stop writes the recovery line"
+eq "$(cat "$SANDBOX/gc.log")" "session reset gc-toolkit.deacon" "the next rapid stop takes the held reset"
+eq "$(cat "$STATE")" "s1 0 0" "the reset that follows the line starts the count over"
+
+printf 's1 %s 2\n' "$now" > "$STATE"
+run_hook gc-toolkit.deacon "$(payload s1)" GC_CITY_PATH="$SANDBOX/no-ledger"
+eq "$OUT|$RC" "|0" "no ledger script: the third rapid stop is not handed back"
+eq "$(cat "$SANDBOX/gc.log")" "" "no ledger script: the session is not reset"
+eq "$(cat "$STATE")" "s1 $now 2" "no ledger script: the state file keeps its count"
+has "$ERR" "gc-deacon-ledger.sh not found" "a missing ledger script is reported on stderr"
 
 echo "== a real cycle outlasts the rapid-stop bound =="
 # A turn that runs a cycle spends the patrol's whole event_timeout in its

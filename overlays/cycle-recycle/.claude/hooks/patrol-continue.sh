@@ -23,6 +23,8 @@
 #     conversation starts from the deacon's prompt, whose startup reconcile
 #     adopts the wisp the patrol left. While an operator is attached to the
 #     pane the reset waits, because it would end the conversation under them.
+#     It also goes ahead only once the hook has written its recovery line to
+#     the incident ledger.
 #
 # Invariants:
 #   * ALWAYS exit 0. A block rides the JSON decision on stdout, never the exit
@@ -107,19 +109,26 @@ if [ "$rapid" -ge "$MAX_RAPID" ]; then
         exit 0 ;;
     esac
   fi
-  printf '%s 0 0\n' "$SID" > "$STATE" 2>/dev/null || true
-  echo "patrol-continue: $WHY; resetting the session" >&2
-  # The ledger line goes first: the reset can end this process with the session.
+  # The reset also waits for its recovery line in the incident ledger, which
+  # the fresh conversation reads in place of the transcript the reset ends. The
+  # line goes first because the reset can end this process with the session.
+  # When the ledger script is missing or the append fails, the turn ends with
+  # the count kept, as it does under an attached operator, so the next rapid
+  # stop tries the line again.
   LEDGER=""
   for C in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
     [ -x "$C/assets/scripts/gc-deacon-ledger.sh" ] && { LEDGER="$C/assets/scripts/gc-deacon-ledger.sh"; break; }
   done
-  if [ -n "$LEDGER" ]; then
-    "$LEDGER" append recovery "patrol-continue reset the session: $WHY (${GC_SESSION_NAME:-$SID})" - >&2 \
-      || echo "patrol-continue: the ledger append failed (non-fatal)" >&2
-  else
-    echo "patrol-continue: gc-deacon-ledger.sh not found; the reset goes unrecorded in the ledger" >&2
+  if [ -z "$LEDGER" ]; then
+    echo "patrol-continue: $WHY; gc-deacon-ledger.sh not found, so the reset waits for its recovery line and the turn ends" >&2
+    exit 0
   fi
+  if ! "$LEDGER" append recovery "patrol-continue reset the session: $WHY (${GC_SESSION_NAME:-$SID})" - >&2; then
+    echo "patrol-continue: $WHY; the recovery line did not reach the ledger, so the reset waits and the turn ends" >&2
+    exit 0
+  fi
+  printf '%s 0 0\n' "$SID" > "$STATE" 2>/dev/null || true
+  echo "patrol-continue: $WHY; resetting the session" >&2
   RESET_TARGET="${GC_ALIAS:-${GC_SESSION_ID:-}}"
   if [ -z "$RESET_TARGET" ]; then
     echo "patrol-continue: neither GC_ALIAS nor GC_SESSION_ID names this session; nothing to reset" >&2
