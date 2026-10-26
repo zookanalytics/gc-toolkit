@@ -7,15 +7,19 @@
 # an invariant. Every gap is a WARNING: a missing ffmpeg fails the capture until
 # provisioned, a missing key downgrades it to the documented silent+captioned
 # result, and a missing or too-old gh means a produced clip cannot be delivered
-# inline, but none is a structural defect. It goes green once every item resolves.
+# inline, but none is a structural defect. It also reports whether
+# VERCEL_AUTOMATION_BYPASS_SECRET reaches this environment, and warns only when
+# the secrets file holds that key and this environment lacks it. It goes green
+# once every item resolves.
 # The browser is not an item: rig-demo-capture.sh installs it on every capture,
 # through the engine's own Playwright.
 # Read-only, probes the host only. Exit 0=OK 1=Warning 2=Error. stdout: a
-# message line, then "  - detail" lines. Never prints the key's value.
+# message line, then "  - detail" lines: the warnings, then notes that report a
+# state and are no item. Never prints a key's value.
 
 set -u
 
-warnings=()
+warnings=(); notes=()
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 
 # --- Node >= 22.18 (the engine's floor) ----------------------------------
@@ -49,19 +53,39 @@ elif command -v gc >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
 fi
 [ -n "$ffmpeg_ok" ] || warnings+=("No ffmpeg resolvable — none on PATH, FFMPEG_BIN unset, and the engine's ffmpeg-static is not provisioned. Install a host ffmpeg, or run 'npm run provision:ffmpeg' in the engine checkout (npm >= 12 blocks its automatic install script).")
 
-# --- OPENAI_API_KEY: in this environment, where the engine reads it --------
-# A session inherits the key from the supervisor's service env. gascity fills
-# that env from ${GC_HOME:-~/.gc}/secrets.env when it writes the service file,
-# as 'gc supervisor install' does, so a key placed in the file after that write
-# reaches no session until the file is written again. The file probe follows
-# gascity's dotenv grammar: an optional 'export ', spaces around '=', and a
-# non-empty value, quoted or not.
-# Presence only; the value is never read into output.
+# --- Keys: in this environment, where the engine reads them ----------------
+# A session inherits a key from the supervisor's service env. gascity writes
+# that env when 'gc supervisor install' writes the service file, and fills a key
+# from ${GC_HOME:-~/.gc}/secrets.env only when the key is a provider credential,
+# by a prefix such as OPENAI_, or on gascity's short allowlist, or when
+# GC_SUPERVISOR_ENV names it in the environment the install runs in. The
+# supervisor hands a key that is neither, such as the Vercel key below, on to
+# its sessions when its own GC_SUPERVISOR_ENV names it, and the service env
+# keeps that list only when the list names GC_SUPERVISOR_ENV too. A key placed
+# in the file after the write reaches no session until the file is written
+# again. The file probe follows gascity's dotenv grammar: an optional
+# 'export ', spaces around '=', and a non-empty value, quoted or not.
+# Presence only; no value is ever read into output.
 secrets_file="${GC_HOME:-$HOME/.gc}/secrets.env"
+in_secrets_file() { # in_secrets_file <KEY>: the file sets KEY to a non-empty value
+    grep -Eq "^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=[[:space:]]*([^\"'[:space:]]|\"[^\"]|'[^'])" "$secrets_file" 2>/dev/null
+}
+# opted_in <KEY>: this environment's GC_SUPERVISOR_ENV names KEY. gascity splits
+# the list on commas, semicolons and whitespace.
+opted_in() {
+    local list="${GC_SUPERVISOR_ENV:-}"
+    list=${list//[,;[:space:]]/ }
+    case " $list " in
+        *" $1 "*) return 0 ;;
+    esac
+    return 1
+}
+
+# --- OPENAI_API_KEY: voices the steps --------------------------------------
 key_ok=""
 if [ -n "${OPENAI_API_KEY:-}" ]; then
     key_ok="environment"
-elif grep -Eq "^[[:space:]]*(export[[:space:]]+)?OPENAI_API_KEY[[:space:]]*=[[:space:]]*([^\"'[:space:]]|\"[^\"]|'[^'])" "$secrets_file" 2>/dev/null; then
+elif in_secrets_file OPENAI_API_KEY; then
     warnings+=("OPENAI_API_KEY is in $secrets_file but not in this environment, so a capture here is SILENT and captioned. Sessions get the key from the supervisor's service env, which gascity writes from that file when 'gc supervisor install' runs. Run it (it restarts the supervisor); sessions started after that carry the key.")
 else
     warnings+=("OPENAI_API_KEY is not set (checked the environment and $secrets_file) — narration falls back to a SILENT, captioned clip, which is the documented degradation, not a failure. To voice the steps, put the key in $secrets_file and run 'gc supervisor install'.")
@@ -87,10 +111,32 @@ else
     warnings+=("gh not found — 'gh pr comment --attach' delivers a produced demo inline to its PR; install gh >= 2.99.0.")
 fi
 
+# --- VERCEL_AUTOMATION_BYPASS_SECRET: reported, an item only when stranded --
+# Vercel's Protection Bypass for Automation key, which lets automation past a
+# deployment's Vercel sign-in. A city that serves no app behind that sign-in has
+# no use for it, so a key set nowhere is a note and no item. A key the secrets
+# file holds and this environment lacks is an item: it is neither a provider
+# credential nor on gascity's allowlist, so it reaches sessions from that file
+# only through the GC_SUPERVISOR_ENV opt-in above.
+vercel_key=VERCEL_AUTOMATION_BYPASS_SECRET
+vercel_state=""
+if [ -n "${VERCEL_AUTOMATION_BYPASS_SECRET:-}" ]; then
+    vercel_state="environment"
+elif in_secrets_file "$vercel_key" && opted_in "$vercel_key"; then
+    warnings+=("$vercel_key is in $secrets_file and GC_SUPERVISOR_ENV here names it, but the key is not in this environment. gascity copies the key from that file into the supervisor's service env when 'gc supervisor install' runs with GC_SUPERVISOR_ENV naming it, so run the install again; sessions started after that carry the key.")
+elif in_secrets_file "$vercel_key"; then
+    warnings+=("$vercel_key is in $secrets_file but not in this environment. The key has no provider prefix, so gascity carries it from that file into sessions only when GC_SUPERVISOR_ENV names it in the environment 'gc supervisor install' runs in, and GC_SUPERVISOR_ENV here does not name it. Add the key, and GC_SUPERVISOR_ENV itself, to the GC_SUPERVISOR_ENV list the city's setup gives that install, then run the install again; sessions started after that carry the key.")
+else
+    vercel_state="not set"
+    notes+=("$vercel_key is not set (checked the environment and $secrets_file). A key set nowhere is reported and not counted as an item.")
+fi
+
 if [ "${#warnings[@]}" -ne 0 ]; then
-    echo "demo:capture toolchain incomplete — ${#warnings[@]} item(s) to provision before a narrated capture and inline delivery"
+    echo "demo:capture toolchain incomplete — ${#warnings[@]} item(s) to provision"
     detail "${warnings[@]}"
+    detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: demo:capture toolchain ready — Node $node_ok, ffmpeg ($ffmpeg_ok), OPENAI_API_KEY ($key_ok), gh $gh_ok"
+echo "OK: demo:capture toolchain ready — Node $node_ok, ffmpeg ($ffmpeg_ok), OPENAI_API_KEY ($key_ok), gh $gh_ok, $vercel_key ($vercel_state)"
+detail ${notes[@]+"${notes[@]}"}
 exit 0

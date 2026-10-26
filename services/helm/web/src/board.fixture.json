@@ -67,7 +67,8 @@
       "pr_branch_url": "",
       "pr_phase": "",
       "phase": "needs-review",
-      "recommendation": null
+      "recommendation": null,
+      "visit_start_failure": ""
     },
     {
       "id": "gt-1a2b3",
@@ -123,7 +124,8 @@
       "pr_branch_url": "",
       "pr_phase": "",
       "phase": "needs-review",
-      "recommendation": null
+      "recommendation": null,
+      "visit_start_failure": ""
     },
     {
       "id": "tk-01n5cc",
@@ -180,7 +182,8 @@
       "pr_branch_url": "",
       "pr_phase": "needs-attention",
       "phase": "needs-attention",
-      "recommendation": null
+      "recommendation": null,
+      "visit_start_failure": ""
     },
     {
       "id": "tk-9tbbk",
@@ -237,7 +240,8 @@
       "pr_branch_url": "",
       "pr_phase": "",
       "phase": "",
-      "recommendation": null
+      "recommendation": null,
+      "visit_start_failure": ""
     }
   ],
   "sittings": [

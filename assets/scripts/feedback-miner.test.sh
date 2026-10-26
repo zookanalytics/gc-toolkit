@@ -31,6 +31,20 @@ CO="$TMP/checkout"
 git init -q -b main "$CO"
 git -C "$CO" remote add upstream git@github.com:them/repo.git
 git -C "$CO" remote add origin git@github.com:ours/repo.git
+# default_branch <checkout> — commits its index and makes that commit the
+# checkout's default branch, origin/main, which origin/HEAD names the way a
+# clone records it: what a merge and the fetch after it leave.
+default_branch() {
+  git -C "$1" -c commit.gpgsign=false -c user.name=fixture -c user.email=fixture@example.com \
+      -c core.hooksPath=/dev/null commit -q --allow-empty -m fixture \
+    && git -C "$1" update-ref refs/remotes/origin/main HEAD \
+    && git -C "$1" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+}
+# The rig declares Vercel's deployment notice not for review, by the prefix its
+# first line opens with. A declaration counts as the default branch carries it.
+printf '%s\n' '# Vercel' '[[marker]]' 'prefix = "[vc]: #"' > "$CO/not-for-review.toml"
+git -C "$CO" add not-for-review.toml
+default_branch "$CO"
 
 # --- stub gh ---------------------------------------------------------------------
 # gh's own resolution order with no default set: a bare `gh repo view` answers
@@ -272,6 +286,10 @@ export STUB_LOG="$TMP" STUB_FIX="$FIX" STUB_STORE="$STORE"
 unset GC_PATROL_FINDING_TOOL GC_BD_LIB GC_FINDING_DEFAULT_RIG
 export GC_PROACTIVE_TOOL="$BIN/gc-proactive"
 export GC_RIG=fixture-rig
+# The swept checkout is the repository pr-post.sh reads the rig's declaration
+# from, whatever rig GC_RIG_ROOT names (case 111), so the session's own value
+# is cleared rather than set.
+unset GC_RIG_ROOT
 
 MARK='<!-- gc:city -->'
 CUT=$(ago 2)
@@ -321,6 +339,8 @@ $MARK" "$(ago_h 4)"
   review 106 "autoapprove[bot]" Bot APPROVED "Auto-approved: dependency bump." "$(ago_h 3)"
   review 107 johnzook User APPROVED "" "$(ago_h 1)"
   review 108 johnzook User COMMENTED "$LONG" "$(ago_h 2)"
+  review 109 johnzook User COMMENTED "<!-- gc:no-review -->
+FYI: the preview is up, nothing to change." "$(ago_h 2)"
 } | jq -s . > "$FIX/11.reviews.json"
 {
   inline 201 johnzook 101 "This loop never terminates on empty input." "$(ago_h 5)"
@@ -328,14 +348,19 @@ $MARK" "$(ago_h 4)"
 <!-- gc-writeback -->
 $MARK" "$(ago_h 4)" 201
   inline 203 city-bot 103 "**The guard reads the wrong variable.** It checks \$a where \$b is meant." "$(ago_h 3)"
+  inline 204 johnzook 101 "<!-- gc:no-review -->
+Context only, nothing to change." "$(ago_h 5)"
 } | jq -s . > "$FIX/11.inline.json"
 {
   issue 301 city-bot User "Pre-open signoff (comment-only — not an approval): VERDICT: approve" "$(ago 3)"
-  issue 302 "vercel[bot]" Bot "[vc]: deployment preview ready" "$(ago_h 3)"
+  issue 302 "vercel[bot]" Bot "[vc]: #dkbu2MRiHxbtC
+The latest updates on your projects." "$(ago_h 3)"
   issue 303 johnzook User "   " "$(ago_h 2)"
   issue 304 johnzook User "Could this use a demo video?" "$(ago_h 1)"
   issue 305 "reviewer[bot]" Bot "The query interpolates the user's input into its SQL; bind it as a parameter.
-[vc]: is mentioned here, not at the top." "$(ago_h 2)"
+[vc]: # is mentioned here, not at the top." "$(ago_h 2)"
+  issue 306 "previewbot[bot]" Bot "<!-- gc:no-review -->
+Schema diff: no changes." "$(ago_h 2)"
 } | jq -s . > "$FIX/11.issue.json"
 issue 401 johnzook User "Old feedback from last week." "$(ago 10)" 12 | jq -s . > "$FIX/12.issue.json"
 # PR 12's city post is a review body.
@@ -380,6 +405,8 @@ eq "$OUT" "ours/repo	city-bot" "(1) identity resolves origin's repository and th
 git -C "$CO" remote remove origin
 "$SUT" identity --checkout "$CO" >/dev/null 2>&1; eq "$?" "1" "(2) a checkout with no origin resolves no identity"
 git -C "$CO" remote add origin git@github.com:ours/repo.git
+# Removing origin took its remote-tracking refs, the default branch among them.
+default_branch "$CO"
 
 echo "── sweep, first run: no outside capture day recorded yet, so it back-fills ──"
 fresh_dir a
@@ -408,8 +435,11 @@ eq "$(class_of "$(key 11 comment 301)")" "city" "(18) an unmarked city post from
 eq "$(field_of "$(key 11 comment 301)" flag)" "false" "(19) it is not flagged"
 eq "$(class_of "$(key 11 review 105)")" "outside" "(20) an app account's commenting review is outside"
 eq "$(class_of "$(key 11 review 106)")" "notice" "(21) an app account's approval is a notice"
-eq "$(class_of "$(key 11 comment 302)")" "notice" "(22) an app account's deploy notice is a notice"
-eq "$(class_of "$(key 11 comment 305)")" "outside" "(22a) an app account's conversation comment that is not a deploy notice is outside"
+eq "$(class_of "$(key 11 comment 302)")" "notice" "(22) a deploy notice opening with a prefix the rig declares is a notice"
+eq "$(class_of "$(key 11 comment 305)")" "outside" "(22a) an app account's conversation comment that only carries that prefix past its start is outside"
+eq "$(class_of "$(key 11 comment 306)")" "notice" "(22b) an app account's comment opening with the no-review mark is a notice"
+eq "$(class_of "$(key 11 review 109)")" "notice" "(22c) so is a person's review body opening with it"
+eq "$(class_of "$(key 11 comment 204)")" "notice" "(22d) and a person's inline comment opening with it"
 eq "$(class_of "$(key 11 review 107)")" "" "(23) an approval with no body is not read"
 eq "$(class_of "$(key 11 comment 303)")" "" "(24) a whitespace-only comment is not read"
 eq "$(class_of "$(key 12 comment 401)")" "outside" "(25) a back-fill PR's outside comment is read"
@@ -426,7 +456,7 @@ eq "$("$SUT" show --dir "$W" --outside --limit 2 | grep -c '^--- ')" "2" "(34) -
 OUT=$("$SUT" show --dir "$W" --outside --limit 50)
 has "$OUT" "== 9 of 9 unrecorded outside post(s) not yet shown whole ==" "(30) show --outside counts the unrecorded outside posts"
 hasnt "$OUT" "$(key 11 review 102)" "(31) show --outside leaves the city's posts out"
-hasnt "$OUT" "$(key 11 comment 302)" "(32) show --outside leaves app notices out"
+hasnt "$OUT" "$(key 11 comment 302)" "(32) show --outside leaves notices out"
 has "$OUT" "--- $(key 11 comment 305)" "(32a) and shows an app account's conversation comment that is not a deploy notice"
 eq "$(printf '%s\n' "$OUT" | grep '^--- ' | head -1)" "--- $(key 11 comment 304)" "(33) the newest outside post is shown first"
 OUT=$("$SUT" show --dir "$W" --city)
@@ -516,7 +546,7 @@ ROWS_EOF
 ); RC=$?
 eq "$RC" "1" "(58) a call with refused rows exits 1"
 has "$OUT" "no swept post has this key" "(59) an unknown key is refused"
-has "$OUT" "an app account notice is not review feedback" "(60) an app notice is refused"
+has "$OUT" "a notice is not review feedback" "(60) a notice is refused"
 has "$OUT" "the row has no statement" "(61) an empty statement is refused"
 has "$OUT" "directive must be standing or diff" "(62) a bad directive is refused"
 has "$OUT" "row is not a JSON object" "(63) a line that is not JSON is refused"
@@ -1051,6 +1081,32 @@ NAMED="== corrections outside posts already name, to reuse when one fits: guard-
 has "$("$SUT" show --dir "$W" --outside)" "$NAMED" "(107) show counts this run's corrections, most used first"
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
 has "$("$SUT" show --dir "$W" --outside)" "$NAMED" "(108) and a sweep re-run into the run's dir, which reads them from the store too, counts each once"
+
+echo "── what is not for review follows the swept rig's declaration ──"
+fresh_dir nfr
+UNDECLARED="$TMP/undeclared"
+git init -q -b main "$UNDECLARED"
+git -C "$UNDECLARED" remote add origin git@github.com:ours/repo.git
+default_branch "$UNDECLARED"
+"$SUT" sweep --checkout "$UNDECLARED" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
+eq "$(class_of "$(key 11 comment 302)")" "notice" \
+  "(109) on a rig that declares nothing, Vercel's deploy notice is still a notice, by the miner's own fallback"
+eq "$(class_of "$(key 11 comment 305)")" "outside" "(109a) …while an app's comment that only mentions [vc]: past its first line is outside"
+eq "$(class_of "$(key 11 comment 306)")" "notice" "(110) and a comment opening with the no-review mark is a notice on any rig"
+fresh_dir nfr-other
+OTHERDECL="$TMP/other-declaration"
+git init -q -b main "$OTHERDECL"
+git -C "$OTHERDECL" remote add origin git@github.com:ours/repo.git
+printf '%s\n' '[[marker]]' 'prefix = "Schema diff:"' > "$OTHERDECL/not-for-review.toml"
+git -C "$OTHERDECL" add not-for-review.toml
+default_branch "$OTHERDECL"
+"$SUT" sweep --checkout "$OTHERDECL" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
+eq "$(class_of "$(key 11 comment 302)")" "outside" \
+  "(110a) a rig that declares any prefix decides for itself, so a deploy notice it has not declared is outside"
+fresh_dir nfr-root
+GC_RIG_ROOT="$UNDECLARED" "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
+eq "$(class_of "$(key 11 comment 302)")" "notice" \
+  "(111) a session whose GC_RIG_ROOT names another rig still reads the swept checkout's declaration"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

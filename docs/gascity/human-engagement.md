@@ -1,6 +1,6 @@
 ---
 name: Gas City and human engagement (platform facts)
-description: What Gas City offers for engaging a person, and how a session and its pane end, where upstream's docs leave it unsaid — human gates and the core orders that surface them, where a question surfaces, the gc-roles worker contract, the idle ladder, max age, manual sessions, the stop, the no-wake-reason drain, the backstops and the claim releases that keep a bead routed to `human` — each cited and dated. gc-toolkit's own model on these is human-engagement.md.
+description: What Gas City offers for engaging a person, and how a session and its pane end, where upstream's docs leave it unsaid — human gates and the core orders that surface them, where a question surfaces, the gc-roles worker contract, the idle ladder, max age, manual sessions, the stop, the no-wake-reason drain, the backstops, the claim releases that keep a bead routed to `human`, and where a failed start is recorded — each cited and dated. gc-toolkit's own model on these is human-engagement.md.
 ---
 
 # Gas City and human engagement
@@ -330,6 +330,57 @@ the route check in `releaseOrphanedPoolAssignments`
 (`cmd/gc/session_lifecycle_parallel.go`) and `ValidateAlias`
 (`internal/session/names.go`); read at upstream `ba3ed611d` and the fork
 `cc0a776b1` on 2026-10-23.
+
+### A failed start is recorded on the session bead and in a startup-health episode
+
+`gc session new --no-attach` makes a pending create, which the reconciler
+starts later. When that start fails, the reconciler's rollback writes
+`state=failed-create` and closes the session bead in one write. The bead's
+`close_reason` is the canonical text for the state, "session create failed:
+aborted before creation_complete", whatever the cause, so the close reason does
+not say why the start failed. The session keeps its `alias`, `agent_name` and
+`session_name` through that close.
+
+A start that failed on a provider error a person must fix, a model not found or
+a quota exceeded, carries the why on the session bead. Its rollback writes the
+error's code, `model_not_found` or `quota_exceeded`, to `provider_terminal_error`
+beside `session_health=unhealthy`, in the same write as the failed-create close,
+and the start accrues no episode.
+
+Any other failed start puts the why in a startup-health episode, which it
+accrues before the rollback: a bead of type `startup-health-episode`, keyed by
+the session's name in `startup_health_session_name`. Its `startup_health_kind`
+is `timeout` when the start hit a deadline and `other` otherwise, and its
+`startup_health_last_detail` is the start's error, cut to 500 runes. A deadline
+inside a `pre_start` command reads `running pre_start: pre_start[N]: context
+deadline exceeded` in the detail. A successful start clears its session name's
+episode to a zero count, and Gas City reads an episode only while its bead is
+not closed. A manual session's name is its own (`s-<session id>`), so its
+episode describes that one session.
+
+Every other rollback records no cause. A pending create rolled back before any
+start ran, past its never-started deadline, leaves the failed-create row and no
+episode.
+
+*Evidence:* the `rollbackPending` arm of the async start result, which calls
+`recordStartupHealthFailure` and then `rollbackPendingCreate`, the
+terminal-provider-error arm before it, which calls
+`rollbackPendingCreateMarkingTerminal` and records no episode,
+`rollbackPendingCreateClears`, which lays the failed-create patch over that
+arm's terminal-error patch in one write, and the successful-start clear
+(`cmd/gc/session_lifecycle_parallel.go`); the start effect's abandon table,
+which does the same (`readStartFailure` and `abandonStep`,
+`cmd/gc/reconcile_effect_abandon.go`); `providerTerminalErrorPatch`
+(`cmd/gc/session_reconcile.go`); `ProviderTerminalErrorReason`
+(`internal/runtime/dialog.go`); `failedCreateClosePatch` and
+`closeFailedCreateBeadInTx` (`cmd/gc/session_beads.go`); `ClosePatch` and
+`CanonicalCloseReason` (`internal/session/lifecycle_transition.go`);
+`RecordStartupFailure`, `startupHealthEpisodeBeads` and
+`SaveStartupHealthEpisode` (`internal/session/startup_health.go`). Read at the
+fork `e03752646`, the build the city runs, and at upstream `adae2e678` on
+2026-10-26; the two agree. On the city's own records that day, a startup
+timeout, two setup timeouts and a never-started rollback each read as
+described.
 
 ## Refresh procedure
 

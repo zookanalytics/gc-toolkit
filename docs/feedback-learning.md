@@ -96,12 +96,14 @@ Four producers file the same bead contract:
      standing correction also names the correction's slug in
      `obs.correction`, so the recurrence metric counts its repeats. A post
      is the city's when it carries the city's mark
-     (`assets/scripts/pr-post.sh`). An unmarked post is outside when another
-     login posted it, or when it is Claude Code's `/code-review` output
-     posted under the city's login. A GitHub App's approvals and deploy
-     notices are not review feedback. A deploy notice is told by what it
-     says: Vercel's opens with its `[vc]:` line. Any other conversation
-     comment an app posts is outside. The rig's store records the day from
+     (`assets/scripts/pr-post.sh`). A post that is not for review
+     ([not-for-review.md](not-for-review.md)) and a GitHub App's approval
+     are notices, not review feedback, whoever posted them. On a rig that
+     declares no marker, so is Vercel's deployment notice, an app's
+     conversation comment whose first non-blank line opens with `[vc]:`.
+     Any other unmarked post is outside when another login posted it, an
+     app's included, or when it is Claude Code's `/code-review` output
+     posted under the city's login. The rig's store records the day from
      which the outside capture still owes a read of every merged or closed
      PR updated since, and every run reads the PRs updated since then. A
      post updates its PR, so a post made long after its PR closed is read

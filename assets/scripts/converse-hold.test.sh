@@ -69,8 +69,9 @@ PREFIX="holding — "
 BUDGET=$((CAP - $(printf '%s' "$PREFIX" | jq -Rsr 'length')))
 
 # A stub gc serving the two reads/one write the script makes: `bd show` returns
-# the visit with whatever the stamp has persisted, or STUB_SHOW_OUT in its place
-# when that is set (empty for no answer at all), and exits STUB_SHOW_RC. Its
+# the visit with whatever the stamp has persisted, plus the metadata object
+# STUB_VISIT_META carries, or STUB_SHOW_OUT in its place when that is set
+# (empty for no answer at all), and exits STUB_SHOW_RC. Its
 # first STUB_SHOW_FAILS reads answer nothing and exit 1, a store that recovers
 # between the hold's reads. `bd update` persists the stamped id unless
 # STAMP_PERSIST=0, overridable by STAMP_VALUE for the landed-wrong case, and
@@ -89,11 +90,13 @@ case "${2:-}" in
             printf '%s' "$STUB_SHOW_OUT"
         else
             hd=""; [ -r "$PERSIST" ] && hd="$(cat "$PERSIST")"
-            jq -nc --arg hd "$hd" --arg tp "${STUB_TOPIC:-}" \
-                --arg tr "${STUB_TRACKS:-}" --arg cg "${STUB_GROUP:-}" \
-                '[{id:"v-x", metadata:(({"task_kind":"visit"}
+            vm="${STUB_VISIT_META:-}"; [ -n "$vm" ] || vm='{}'
+            jq -nc --arg hd "$hd" --arg tp "${STUB_TOPIC:-}" --arg vt "${STUB_VISIT_TOPIC:-}" \
+                --arg tr "${STUB_TRACKS:-}" --arg cg "${STUB_GROUP:-}" --argjson vm "$vm" \
+                '[{id:"v-x", metadata:(({"task_kind":"visit"} + $vm
                     + (if $hd == "" then {} else {"gc.hold_demand":$hd} end)
                     + (if $tp == "" then {} else {"escalation_key":$tp} end)
+                    + (if $vt == "" then {} else {"visit_topic":$vt} end)
                     + (if $cg == "" then {} else {"gc.continuation_group":$cg} end)))}
                   + (if $tr == "" then {} else {dependencies:[{id:$tr, dependency_type:"tracks"}]} end)]'
         fi
@@ -245,7 +248,7 @@ is "a decision that is only whitespace is refused as usage" "$RC" "2"
 is "…before any write" "$(calls)" ""
 
 echo "── the visit read gate: a visit that cannot be read stops the hold before any write ──"
-# The visit's escalation_key is the topic every demand carries. A failed read
+# Every demand carries the visit's topic, here its escalation_key. A failed read
 # taken as an empty answer files the demand with no topic, and a topic-less
 # demand matches whatever demand already sits on the gated bead, a sibling
 # sitting's on a shared subject. So a read counts only when it exits 0 with the
@@ -429,6 +432,50 @@ has "an anchored hold's visit demand carries the topic" "helm[RIG] demand v-x ne
 has "…and so does the --hold-merge demand on the shared anchor" "helm[RIG] demand item-x need X --by converse --topic finding-b" "$(calls)"
 run_hold_merge STUB_STATE=pull_request
 hasnt "an ordinary visit (no escalation_key) files no topic" "--topic" "$(calls)"
+
+echo "── a visit filed for a distinct concern scopes its demands to itself ──"
+# gc-helm.sh open --allow-duplicate (engage --reason, --template, a new visit
+# picked at the prompt) files a second visit on a subject that may already have a
+# live sitting, and stamps it visit_topic=own. The two sittings share the subject,
+# so each demand this one files carries `visit:` and its own id as the topic, and
+# its lookup never matches the live sitting's demand on the subject. The live
+# sitting's lookup carries no topic and still matches this one's demand, so the
+# protection runs one way.
+run STUB_VISIT_TOPIC=own
+has "a pre-PR subject's conversation demand carries the visit's own topic" "helm[RIG] demand item-x need X --by converse --topic visit:v-x" "$(calls)"
+run_hold_merge STUB_STATE=pull_request STUB_VISIT_TOPIC=own
+has "an anchored hold's visit demand carries it" "helm[RIG] demand v-x need X --by converse --topic visit:v-x" "$(calls)"
+has "…and so does the --hold-merge demand on the shared anchor" "helm[RIG] demand item-x need X --by converse --topic visit:v-x" "$(calls)"
+run STUB_VISIT_TOPIC=own STUB_TOPIC=finding-b
+has "an escalation_key still names the topic when both are stamped" "helm[RIG] demand item-x need X --by converse --topic finding-b" "$(calls)"
+run STUB_VISIT_TOPIC=other
+hasnt "a visit_topic other than own is no topic of its own" "--topic" "$(calls)"
+
+echo "── every case of the shared topic fixture files its demands under its demand topic ──"
+# visit-topic.sh is the one definition of a visit's topic, and
+# visit-topic.fixture.json holds the cases the fold, the hold and the sign-off
+# each run. The stub serves the fixture's visit carrying each case's metadata.
+# An anchored hold with --hold-merge files both demands a sitting can file, the
+# conversation demand on the visit and the merge hold on the anchor, and each
+# carries the case's demand topic, or none.
+FX="$REPO/assets/scripts/visit-topic.fixture.json"
+is "the fixture's visit is the one the stub serves" "$(jq -r '.visit' "$FX")" "v-x"
+is "the fixture's subject is the one the hold is handed" "$(jq -r '.subject' "$FX")" "item-x"
+while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    name="$(printf '%s' "$c" | jq -r '.name')"
+    want="$(printf '%s' "$c" | jq -r '.demand_topic')"
+    run_hold_merge STUB_STATE=pull_request STUB_VISIT_META="$(printf '%s' "$c" | jq -c '.metadata')"
+    is "(FIXTURE) $name: the hold proceeds" "$(verdict)" "held"
+    if [ -n "$want" ]; then
+        has "(FIXTURE) $name: the visit demand carries its demand topic" \
+            "helm[RIG] demand v-x need X --by converse --topic $want" "$(calls)"
+        has "(FIXTURE) $name: …and so does the merge hold" \
+            "helm[RIG] demand item-x need X --by converse --topic $want" "$(calls)"
+    else
+        hasnt "(FIXTURE) $name: no demand carries a topic" "--topic" "$(calls)"
+    fi
+done <<< "$(jq -c '.cases[]' "$FX")"
 
 echo "── fail closed: an unreadable or missing lifecycle state gates the SUBJECT ──"
 # The gate switches to the visit only for a PROVEN PR-anchor state. A state that

@@ -51,7 +51,7 @@ FIXTURE="${GC_HELM_FIXTURE:-}"              # test hook: <dir>/rigs.json replace
 usage() {
     cat >&2 <<'EOF'
 Usage:
-  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--json]  file a visit on the bead, parked on the helm board for the operator to engage; --allow-duplicate files a second visit even when one is already open; --json prints {subject,visit,identity,filed} and names which identity matched an existing visit
+  gc-helm open  <bead-id> [--reason "..."] [--body "..."] [--allow-duplicate] [--json]  file a visit on the bead, parked on the helm board for the operator to engage; --allow-duplicate files a second visit even when one is already open, with a topic of its own (visit_topic=own) so its sitting never folds into a live one on the subject; --json prints {subject,visit,identity,filed} and names which identity matched an existing visit
   gc-helm engage [<subject>] [--subject <id>] [--new-subject [--rig <name>]] [--model <variant>] [--skill <name>] [--reason "..." | --template <key>] [--no-input] [--no-attach]  spawn a converse sitting for a parked visit, bind it, and attach. On a TTY it prompts for subject, visit (existing vs new), starter, model, and, for a new visit, skill; any value on the command line pre-fills and skips its prompt, and --no-input keeps the non-interactive one-shot behavior. --skill seeds the sitting with any skill it carries as its lens on the subject (--skill review-arch is a visit with the Architect). --new-subject files a FRESH subject bead (its title is the positional text; --rig picks the rig, prompted otherwise) and engages it in one gesture
   gc-helm react <bead-id> [--reason "..."]  file a first reaction — a reaction bead that tracks the subject, claimed and disposed by the proactive pool
   gc-helm takeaway <bead-id> "<text>" [--by host|proactive|converse] [--waiting-on <bead-id>... | --no-wait] [--release [--route <rig>/<agent> | --assign <named-agent>]]  set the board-visible takeaway headline (≤140 chars, ENFORCED)
@@ -99,7 +99,8 @@ explicit visit id, whose brief is already written, and on a name the roster
 does not carry; a roster that will not read seeds the name unverified. A
 --reason, --template or --skill with a SUBJECT files a new visit carrying that
 opener and engages it even when one is parked, passing --allow-duplicate
-through to open and --body the opener as the claim-time brief. With no
+through to open and --body the opener as the claim-time brief. That visit
+has a topic of its own, so it gets its own sitting beside a live one. With no
 starter, an existing parked visit is engaged and a
 fresh one is filed only when the subject has none. A --reason with an explicit
 visit id is refused, because a new visit needs a subject and the reason would
@@ -2295,6 +2296,14 @@ cmd_open() {
     else
         visit_body="Operator picked $bead off the helm board: rebuild the subject's slice, prep, hold for the operator."
     fi
+    # A visit filed for a distinct concern is about that concern, not about the
+    # subject at large, so it carries a topic of its own: visit_topic=own, which
+    # visit-topic.sh reads as the visit itself. Its sitting never folds into a
+    # live sitting on the subject, nor one into it, and the demands it files
+    # carry its topic, so its hold never refreshes a sibling's demand. The
+    # topic decides no coverage: the subject is still the tracks edge.
+    visit_topic=""
+    if [ -n "$open_allow_dup" ]; then visit_topic="own"; fi
 
     # File the visit — the canonical gate-visit lines (formulas/mol-visit.toml).
     # The converse routed-pool is retired: a filed visit parks on the helm board
@@ -2305,9 +2314,12 @@ cmd_open() {
     # The route, the group and task_kind ride the create, so the visit and the
     # keys the already-held guard above matches land in one write. A visit
     # stamped in a second write is invisible to that guard whenever the write
-    # fails, and the next open on the subject files a second visit.
-    VISIT_META=$(jq -nc --arg pool "$POOL" --arg subject "$bead" \
-        '{"gc.routed_to": $pool, "gc.continuation_group": $subject, "task_kind": "visit"}')
+    # fails, and the next open on the subject files a second visit. A topic of
+    # its own rides the same write, so no sitting ever claims the visit
+    # without it.
+    VISIT_META=$(jq -nc --arg pool "$POOL" --arg subject "$bead" --arg topic "$visit_topic" \
+        '{"gc.routed_to": $pool, "gc.continuation_group": $subject, "task_kind": "visit"}
+         + (if $topic == "" then {} else {"visit_topic": $topic} end)')
     # bd create answers an ARRAY (or bare object) carrying the id on success and
     # a bare {"error":…} OBJECT on failure; extract the id type-guarded and
     # scrubbed so an error object never crashes jq. The subject already resolved
