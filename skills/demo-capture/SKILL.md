@@ -184,9 +184,13 @@ needs `OPENAI_API_KEY`. Each is fetched on demand rather than assumed:
 - **`OPENAI_API_KEY`** — read from the environment. The host places it in
   `$GC_HOME/secrets.env` (`~/.gc/secrets.env` when `GC_HOME` is unset), and
   gascity copies it into the supervisor's service env when
-  `gc supervisor install` writes that env. Sessions started after that carry
-  the key.
+  `gc supervisor install` writes that env, as it does any key with an
+  AI-provider prefix. Sessions started after that carry the key.
 
 The `doctor/check-demo-toolchain` check reports which of the others are
 resolvable, so a session knows before it captures whether the clip will be
-narrated or silent, and whether ffmpeg is in place.
+narrated or silent, and whether ffmpeg is in place. It also reports whether
+`VERCEL_AUTOMATION_BYPASS_SECRET`, Vercel's Protection Bypass for Automation
+key, reaches the session. A key without a provider prefix reaches sessions
+from the secrets file only when `GC_SUPERVISOR_ENV` names it, and the check
+names that opt-in when the file holds the key and the session does not.

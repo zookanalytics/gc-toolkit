@@ -267,8 +267,10 @@ Another non-invariant check, `doctor/check-demo-toolchain`, reports readiness
 rather than structure: whether the demo:capture toolchain — Node, ffmpeg,
 `OPENAI_API_KEY`, and the `gh` that delivers a clip inline — is resolvable,
 warn-only, so a demo session learns before it captures whether the clip will
-narrate or degrade to a silent, captioned one. The capture installs its own
-browser, so the check does not probe for one.
+narrate or degrade to a silent, captioned one. It also reports whether
+`VERCEL_AUTOMATION_BYPASS_SECRET` reaches the session, and warns when the
+secrets file holds that key and the session does not. The capture installs its
+own browser, so the check does not probe for one.
 That is the whole set: every check asserts a live structural property or reports
 toolchain readiness, and none greps the source for a past fix.
 
