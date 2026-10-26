@@ -188,7 +188,7 @@ run CLAIM_MODE=nowork
 has  "an empty claim drains as no-work" "action=drain reason=no-work" "$OUT"
 is   "…exit 1" "$RC" "1"
 run CLAIM_REASON=claimed
-has  "a fresh claim with no group filter is WORK" "action=work bead=v-x group=g" "$OUT"
+has  "a fresh claim is WORK" "action=work bead=v-x group=g" "$OUT"
 is   "…exit 0" "$RC" "0"
 run OUTCOME=settled SHOW_STATUS=closed
 has  "an existing_assignment visit carrying gc.outcome FINISHes" "action=finish bead=v-x group=g reason=outcome-stamped" "$OUT"
@@ -233,13 +233,26 @@ run OUTCOME=settled SHOW_STATUS=closed EVENTS="$EVENTS" WORK_OUTCOME=abandoned
 hasnt "a work outcome the visit already records is not written over" "gc.work_outcome=" "$(cat "$EVENTS" 2>/dev/null)"
 has  "…and the visit is still closed" "bd close v-x" "$(cat "$EVENTS" 2>/dev/null)"
 
+echo "── the claim takes no group, so it puts nothing back ──"
+# A sitting works one visit and drains once it closes, so whatever the claim
+# hands this session is its own. A caller still passing a group, as a sitting
+# started on an earlier prompt does, has it ignored: a turn in another group is
+# worked, and no write puts it back.
+EVENTS="$TMPD/nogroup.events"; rm -f "$EVENTS" "$EVENTS.wo"
+OUT="$(cd "$BARE" && env PATH="$BIN:$PATH" GIT_CEILING_DIRECTORIES="$TMPD" CLAIM_REASON=claimed CLAIM_GROUP=other EVENTS="$EVENTS" bash "$SUT" mine 2>&1)"; RC=$?
+has  "a claim in another group than the one passed is WORK" "action=work bead=v-x group=other" "$OUT"
+is   "…exit 0" "$RC" "0"
+is   "…and nothing is written to put it back" "$(cat "$EVENTS" 2>/dev/null)" ""
+OUT="$(cd "$BARE" && env PATH="$BIN:$PATH" GIT_CEILING_DIRECTORIES="$TMPD" CLAIM_REASON=claimed CLAIM_GROUP=other EVENTS="$EVENTS" bash "$SUT" --sh mine 2>&1)"
+has  "…and --sh ignores the group the same way" "ACTION='work'" "$OUT"
+
 echo "── --sh: the same verdict as eval-able shell assignments ──"
-# The converse prompt runs `eval "$(converse-claim.sh --sh "$SUBJECT")"`, so the
-# stdout must be assignments only (nothing to execute), the verdict must still
-# show on stderr, and the exit status must match the default mode.
+# The converse prompt runs `eval "$(converse-claim.sh --sh)"`, so the stdout
+# must be assignments only (nothing to execute), the verdict must still show on
+# stderr, and the exit status must match the default mode.
 SH_OUT=""; SH_ERR=""; SH_RC=0
 runsh() {
-    SH_OUT="$(cd "$BARE" && env PATH="$BIN:$PATH" GIT_CEILING_DIRECTORIES="$TMPD" "$@" bash "$SUT" --sh "${SH_GROUP-}" 2>"$TMPD/sh.err")"
+    SH_OUT="$(cd "$BARE" && env PATH="$BIN:$PATH" GIT_CEILING_DIRECTORIES="$TMPD" "$@" bash "$SUT" --sh 2>"$TMPD/sh.err")"
     SH_RC=$?
     SH_ERR="$(cat "$TMPD/sh.err")"
 }
@@ -247,7 +260,7 @@ runsh() {
 # so the test asserts the value the caller ends up with, not the raw quoted text.
 shval() { SH_OUT="$SH_OUT" bash -c "eval \"\$SH_OUT\"; printf '%s' \"\${$1-}\""; }
 
-SH_GROUP="" runsh CLAIM_REASON=claimed
+runsh CLAIM_REASON=claimed
 is    "--sh WORK sets ACTION=work"  "$(shval ACTION)"  "work"
 is    "--sh WORK sets VISIT"        "$(shval VISIT)"   "v-x"
 is    "--sh WORK sets SUBJECT=group" "$(shval SUBJECT)" "g"
@@ -257,22 +270,22 @@ hasnt "--sh keeps the raw key=value OFF stdout"  "bead="    "$SH_OUT"
 EVAL_VISIT="$(SH_OUT="$SH_OUT" bash -c 'eval "$SH_OUT"; printf %s "${VISIT-}"')"
 is    "--sh stdout evals cleanly (VISIT resolves)" "$EVAL_VISIT" "v-x"
 
-SH_GROUP="mine" runsh OUTCOME=settled SHOW_STATUS=closed
+runsh OUTCOME=settled SHOW_STATUS=closed
 is    "--sh FINISH sets ACTION=finish" "$(shval ACTION)" "finish"
-is    "--sh FINISH keeps the caller's group, not the child's" "$(shval SUBJECT)" "mine"
+is    "--sh FINISH sets SUBJECT to the finished visit's group" "$(shval SUBJECT)" "g"
 is    "--sh FINISH exits 4" "$SH_RC" "4"
 
-SH_GROUP="g" runsh
+runsh
 is    "--sh HOLD sets ACTION=hold" "$(shval ACTION)" "hold"
 is    "--sh HOLD exits 3"          "$SH_RC"          "3"
 has   "--sh HOLD still prints BEGAN on stderr" "premise-gate: BEGAN=" "$SH_ERR"
 
-SH_GROUP="" runsh CLAIM_MODE=nowork
+runsh CLAIM_MODE=nowork
 is    "--sh DRAIN sets ACTION=drain" "$(shval ACTION)" "drain"
 is    "--sh DRAIN exits 1"           "$SH_RC"          "1"
 
 # eval-safety: SUBJECT is a continuation group from `gc hook --claim` and bead
-# metadata, and the prompt runs `eval "$(converse-claim.sh --sh ...)"`. A group
+# metadata, and the prompt runs `eval "$(converse-claim.sh --sh)"`. A group
 # carrying shell metacharacters must reach the caller as one literal string, not
 # as syntax the eval executes. `;` would end the assignment and start a command;
 # `$(...)` would substitute — both are inert once the value is single-quoted.
@@ -280,7 +293,7 @@ is    "--sh DRAIN exits 1"           "$SH_RC"          "1"
 # group with a space is already truncated before the quote; injection does not
 # need one, as `g;INJECTED=$(whoami)` shows.)
 INJ='g;INJECTED=$(whoami)'
-SH_GROUP="" runsh CLAIM_REASON=claimed CLAIM_GROUP="$INJ"
+runsh CLAIM_REASON=claimed CLAIM_GROUP="$INJ"
 is    "--sh passes a metacharacter group through as one literal" "$(shval SUBJECT)" "$INJ"
 INJ_VAR="$(SH_OUT="$SH_OUT" bash -c 'eval "$SH_OUT"; printf %s "${INJECTED-}"')"
 is    "--sh eval neither splits the assignment nor substitutes" "$INJ_VAR"         ""

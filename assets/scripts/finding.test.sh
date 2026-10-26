@@ -49,6 +49,68 @@ F1_other=$("$SUT" upsert --anchor tk-anc2 --lane correctness --locus "assets/scr
 if [ "$F1_other" != "$F1" ]; then ok "the same key on another anchor is its own finding"; else bad "dedup crossed anchors"; fi
 
 # ---------------------------------------------------------------------------
+# upsert carries the finding contract outside the key: a grade, a category, a
+# failure scenario and a verification ride the create as metadata and follow
+# the message in the description, ahead of the line naming who raised it. A
+# re-raise that rewords them re-adopts the open finding and keeps its record.
+# ---------------------------------------------------------------------------
+# Its own anchor, so the findings it rules hold nothing the cases after it read.
+store "$(jq -c '. + [{"id":"tk-ancK","status":"open","assignee":"","title":"aK","notes":"","metadata":{"merge_result":"pull_request","check_set":"correctness","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]' "$STUB_STORE")"
+# The harness's create keeps no -d description, so a gc ahead of it on PATH
+# records the one this create passes and hands the call on.
+mkdir -p "$TMP/capture"
+printf '#!/usr/bin/env bash\nif [ "${1:-}" = bd ] && [ "${2:-}" = create ]; then p=""; for a in "$@"; do [ "$p" = -d ] && printf %%s "$a" > %q; p="$a"; done; fi\nexec %q "$@"\n' \
+  "$TMP/created-desc" "$BIN/gc" > "$TMP/capture/gc"
+chmod +x "$TMP/capture/gc"
+FC=$(PATH="$TMP/capture:$PATH" "$SUT" upsert --anchor tk-ancK --lane correctness --locus "assets/scripts/qux.sh:read_stamp()" \
+  --message "an unreadable stamp reads as absent" --severity P1 --category readiness \
+  --failure-scenario "a store read that times out makes recovery rebuild a branch that has a PR" \
+  --verification "CONFIRMED: read_stamp() returns empty on rc 2")
+eq "$(meta "$FC" 'finding.severity')" "P1" "upsert stamps finding.severity"
+eq "$(meta "$FC" 'finding.category')" "readiness" "…finding.category"
+eq "$(meta "$FC" 'finding.failure_scenario')" "a store read that times out makes recovery rebuild a branch that has a PR" "…finding.failure_scenario"
+eq "$(meta "$FC" 'finding.verification')" "CONFIRMED: read_stamp() returns empty on rc 2" "…and finding.verification"
+eq "$(meta "$FC" 'finding.key')" "$("$SUT" key --lane correctness --locus "assets/scripts/qux.sh:read_stamp()" --message "an unreadable stamp reads as absent")" \
+  "the contract is outside finding.key: the key is the lane, locus and message alone"
+eq "$(cat "$TMP/created-desc" 2>/dev/null)" "$(printf '%s\n\n%s\n\n%s\n%s\n%s\n%s\n\n%s' \
+  'Locus: assets/scripts/qux.sh:read_stamp()' 'an unreadable stamp reads as absent' \
+  'Severity: P1' 'Category: readiness' \
+  'Failure scenario: a store read that times out makes recovery rebuild a branch that has a PR' \
+  'Verification: CONFIRMED: read_stamp() returns empty on rc 2' \
+  'Raised by machine:correctness reviewing anchor tk-ancK.')" \
+  "the description keeps its locus line first and its raised-by line last, the contract between the message and it"
+FCb=$("$SUT" upsert --anchor tk-ancK --lane correctness --locus "assets/scripts/qux.sh:read_stamp()" \
+  --message "an unreadable stamp reads as absent" --severity P2 --category testing \
+  --failure-scenario "a reworded scenario")
+eq "$FCb" "$FC" "a re-raise rewording its contract re-adopts the open finding"
+eq "$(meta "$FC" 'finding.severity')|$(meta "$FC" 'finding.failure_scenario')" \
+  "P1|a store read that times out makes recovery rebuild a branch that has a PR" "…and keeps the first raise's record"
+eq "$(meta "$F2" 'finding.severity')|$(meta "$F2" 'finding.verification')" "<absent>|<absent>" \
+  "a finding filed with no contract carries none of its keys"
+BEFORE=$(jq 'length' "$STUB_STORE")
+"$SUT" upsert --anchor tk-ancK --lane correctness --locus "a.sh" --message "m" --severity high 2>/dev/null; rc=$?
+eq "$rc|$(jq 'length' "$STUB_STORE")" "1|$BEFORE" "upsert refuses a grade other than P0, P1 or P2, filing nothing"
+
+# ---------------------------------------------------------------------------
+# A P2 is ruled must-fix or declined, never deferred: set-disposition refuses
+# its deferral before it writes anything, and the other two rulings proceed.
+# ---------------------------------------------------------------------------
+P2D=$("$SUT" upsert --anchor tk-ancK --lane correctness --locus "docs/p2.md" --message "a narrow wording hazard" \
+  --severity P2 --category comments --failure-scenario "a reader takes the old flag name from the example")
+P2_BEFORE=$(cat "$STUB_STORE")
+out=$("$SUT" set-disposition --finding "$P2D" --anchor tk-ancK --disposition deferred --reason "later" 2>&1); rc=$?
+eq "$rc" "1" "deferring a P2 is refused (exit 1)"
+has "$out" "never deferred" "…naming the rule"
+eq "$(cat "$STUB_STORE")" "$P2_BEFORE" "…with nothing written: no follow-up, no disposition, no close"
+"$SUT" set-disposition --finding "$P2D" --anchor tk-ancK --disposition declined --reason "risky for a marginal gain"; rc=$?
+eq "$rc|$(meta "$P2D" 'finding.disposition')|$(bstatus "$P2D")" "0|declined|closed" "a P2 is declined as any finding is"
+P2M=$("$SUT" upsert --anchor tk-ancK --lane correctness --locus "docs/p2m.md" --message "a low-risk tidy-up" \
+  --severity P2 --category comments --failure-scenario "a reader misreads the step order")
+"$SUT" set-disposition --finding "$P2M" --anchor tk-ancK --disposition must-fix; rc=$?
+eq "$rc|$(meta "$P2M" 'finding.disposition')" "0|must-fix" "…and ruled must-fix as any finding is"
+has "$(deps)" "$P2M|blocks|tk-ancK" "…holding the anchor until it is fixed"
+
+# ---------------------------------------------------------------------------
 # set-disposition must-fix: the finding blocks the anchor — the hold merge.sh's
 # blocker probe already reads.
 # ---------------------------------------------------------------------------

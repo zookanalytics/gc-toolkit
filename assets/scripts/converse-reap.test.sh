@@ -2,9 +2,9 @@
 # Hermetic test for converse-reap.sh.
 #
 # converse-reap ends a converse sitting once its visit has closed: converse is
-# spawn-on-engagement, the manual session is exempt from every pool backstop, and
-# closing the visit (sign-off or dismiss) does not close the session, so a settled
-# sitting leaks a live session until this pass closes it.
+# spawn-on-engagement and the manual session is exempt from every pool backstop,
+# so a session that outlives its closed visit (a stop that did not take, or a
+# visit another path closed) runs until this pass closes it.
 #
 # Runs the REAL converse-reap.sh with a stubbed `gc` (CONVERSE_REAP_GC) — no live
 # city, sessions, or store. The stub answers `session list` from a fixture file,
@@ -17,8 +17,9 @@
 #   (OBJ)     the closed visit is recognised whether bd answers with an array or
 #             the single object it returns for one id
 #   (OPEN)    a session whose visit is still open (a live hold) is kept
-#   (ATTACHED) a session an operator is attached to is NEVER closed, even with a
-#             closed visit — the typed-text hard-no
+#   (ATTACHED) a session an operator is attached to is closed once its visit
+#             reads closed, because viewing a sitting does not keep it open, and
+#             is kept while its visit is open
 #   (NONVISIT) an alias that resolves to a non-visit bead is left alone
 #   (NOALIAS)  a converse session with no alias is left alone
 #   (BADALIAS) an alias whose tail is not a bead id is left alone
@@ -113,6 +114,7 @@ build_world() {
   visit     tk-open    in_progress
   visit_obj tk-obj     closed
   visit     tk-attn    closed
+  visit     tk-attnopen in_progress
   task_bead tk-task    open
   # tk-gone: no fixture file => absent
   {
@@ -122,6 +124,7 @@ build_world() {
     printf ','; sess s-obj    gc-toolkit/gc-toolkit.tk-obj    asleep false false
     printf ','; sess s-gone   gc-toolkit/gc-toolkit.tk-gone   asleep false false
     printf ','; sess s-attn   gc-toolkit/gc-toolkit.tk-attn   active true  false
+    printf ','; sess s-attnopen gc-toolkit/gc-toolkit.tk-attnopen active true false
     printf ','; sess s-task   gc-toolkit/gc-toolkit.tk-task   asleep false false
     printf ','; sess s-noalias null                           asleep false false
     printf ','; sess s-badalias gc-toolkit/gc-toolkit.nodash  asleep false false
@@ -141,15 +144,16 @@ has "$CLOSED" "close s-closed"  "CLOSED: a closed visit's session is closed"
 has "$CLOSED" "close s-gone"    "GONE: a vanished visit's session is closed"
 has "$CLOSED" "close s-obj"     "OBJ: a closed visit answered as a bare object is recognised"
 hasnt "$CLOSED" "close s-open"  "OPEN: a live hold is kept"
-hasnt "$CLOSED" "close s-attn"  "ATTACHED: an attached session is never closed, even with a closed visit"
+has "$CLOSED" "close s-attn"    "ATTACHED: an attached session is closed once its visit reads closed"
+hasnt "$CLOSED" "close s-attnopen" "ATTACHED: an attached session whose visit is open is kept"
 hasnt "$CLOSED" "close s-task"  "NONVISIT: an alias resolving to a non-visit is left alone"
 hasnt "$CLOSED" "close s-noalias" "NOALIAS: a session with no alias is left alone"
 hasnt "$CLOSED" "close s-badalias" "BADALIAS: a non-bead-id alias tail is left alone"
 hasnt "$CLOSED" "close s-notconv" "NONCONVERSE: a non-converse session is ignored"
 hasnt "$CLOSED" "close s-alreadyclosed" "ALREADYCLOSED: an already-closed session is not a candidate"
 
-has "$OUT" "closed 3 settled converse sittings" "COUNTS: three sittings reaped"
-has "$OUT" "kept 1 held"    "COUNTS: one live hold kept"
+has "$OUT" "closed 4 settled converse sittings" "COUNTS: four sittings reaped"
+has "$OUT" "kept 2 held"    "COUNTS: two live holds kept"
 has "$OUT" "skipped 2"      "COUNTS: the non-visit and bad-alias candidates are skipped"
 
 # --- dry-run ------------------------------------------------------------------
@@ -158,7 +162,7 @@ OUT="$(bash "$SUT" --dry-run 2>&1)"; RC=$?
 CLOSED="$(cat "$CALLS" 2>/dev/null)"
 eq "$RC" "0" "DRYRUN: exits 0"
 eq "$CLOSED" "" "DRYRUN: closes nothing"
-has "$OUT" "would close 3 settled converse sittings" "DRYRUN: reports the plan count"
+has "$OUT" "would close 4 settled converse sittings" "DRYRUN: reports the plan count"
 has "$OUT" "s-closed (visit tk-closed closed)" "DRYRUN: names a closed-visit sitting in the plan"
 has "$OUT" "s-gone (visit tk-gone gone)" "DRYRUN: names a gone-visit sitting in the plan"
 
@@ -194,7 +198,7 @@ has "$CF_ERR" "could not close settled sitting s-closed" "CLOSEFAIL: the failure
 has "$CLOSED" "close s-gone" "CLOSEFAIL: a failed close does not stop the pass"
 hasnt "$CF_OUT" "s-closed (visit tk-closed closed)" "CLOSEFAIL: the failed sitting is NOT listed among the reaped"
 has "$CF_OUT" "s-gone (visit tk-gone gone)" "CLOSEFAIL: a sitting that did close IS listed"
-has "$CF_OUT" "closed 2 settled" "CLOSEFAIL: only the two that closed are counted reaped"
+has "$CF_OUT" "closed 3 settled" "CLOSEFAIL: only the three that closed are counted reaped"
 has "$CF_OUT" "skipped 3" "CLOSEFAIL: the failed close is counted skipped, with the non-visit and bad-alias"
 
 # --- a visit read that fails with a NON not-found error is skipped ------------

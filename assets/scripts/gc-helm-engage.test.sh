@@ -47,6 +47,12 @@
 #             reserves the alias under a lock, as gascity does: one spawns and
 #             binds, and the other spawns nothing and points at the winner
 #   (ATTACH)  the default attaches to the captured session id; --no-attach does not
+#   (ENDED*, DETACHED, UNREAD, ATTACH-FAIL-*) once the attach returns, the visit
+#             says what the tab prints: a closed visit prints how it closed and
+#             the last hand-back recorded on it, its control bytes dropped; a
+#             visit still open prints the re-attach command; an unreadable one
+#             says the ending is unknown; and a failed attach on a closed visit
+#             reports the ending rather than an attach to retry
 #   (START-*) the attach waits until the sitting's `gc session list` state reads
 #             active, because an attach that reaches a sitting the reconciler
 #             has not started launches it without its prompt. It waits however
@@ -214,6 +220,7 @@ case "$1 ${2:-}" in
   "bd show")
     id="$3"
     if [ "$id" = "tk-vis" ]; then
+      [ -f "$VIS_UNREAD" ] && { echo "bd show: data plane down" >&2; exit 1; }
       # Once a spawn is refused at the alias ($ALIAS_REFUSED exists), the
       # refused engage polls this visit. The change it waits for lands on the
       # $AFTER_REFUSAL_READS-th read: a concurrent engage's bind
@@ -234,9 +241,13 @@ case "$1 ${2:-}" in
       # blank $VIS_CGROUP and set $VIS_TRACKS to exercise the tracks-edge fallback:
       # `gc bd show` renders that edge as a dependency bead row keyed
       # .dependency_type/.id, which is the shape the fallback must read.
+      # $VIS_META_EXTRA, a JSON object, adds metadata keys such as the outcome
+      # and the hand-back a closed sitting leaves.
+      _extra="${VIS_META_EXTRA:-}"; [ -n "$_extra" ] || _extra='{}'
       jq -n --arg i "$id" --arg s "$st" --arg a "$who" \
             --arg cg "${VIS_CGROUP-tk-subj}" --arg tr "${VIS_TRACKS-}" \
-        '[{id:$i, title:"visit: tk-subj — compare notes on the WIP proposals", status:$s, assignee:$a, metadata:{task_kind:"visit","gc.continuation_group":$cg}}
+            --argjson extra "$_extra" \
+        '[{id:$i, title:"visit: tk-subj — compare notes on the WIP proposals", status:$s, assignee:$a, metadata:({task_kind:"visit","gc.continuation_group":$cg} + $extra)}
           + (if $tr != "" then {dependencies:[{id:$tr, dependency_type:"tracks", title:"the subject under engagement", status:"open", issue_type:"task", priority:2}]} else {} end)]'
     else
       jq -n --arg i "$id" --arg k "${BEAD_KIND:-task}" --arg t "${SUBJ_TITLE:-the subject under engagement}" \
@@ -333,7 +344,14 @@ case "$1 ${2:-}" in
           + (if $amb != "" then ["contributing.review-arch"] else [] end)
           | map({name:., source:(split(".")[0]), path:("/skills/" + . + "/SKILL.md")}))}' ;;
   "session attach")
-    printf 'session attach %s\n' "$*" >> "$CALLS" ;;
+    # The attach returns when the tab's client exits. $ATTACH_ENDS is the visit's
+    # status by then: closed for a sitting that ended under the tab, in_progress
+    # for one the operator detached from. $ATTACH_UNREADABLE makes every later
+    # read of the visit fail, and $ATTACH_FAIL fails the attach itself.
+    printf 'session attach %s\n' "$*" >> "$CALLS"
+    [ -n "${ATTACH_ENDS:-}" ] && printf '%s' "$ATTACH_ENDS" > "$VIS_STATUS"
+    [ -n "${ATTACH_UNREADABLE:-}" ] && : > "$VIS_UNREAD"
+    [ -n "${ATTACH_FAIL:-}" ] && { echo "gc session attach: session not found" >&2; exit 1; } ;;
   "session suspend")
     printf 'session suspend %s\n' "$*" >> "$CALLS" ;;
   "session close")
@@ -443,7 +461,7 @@ reps() { _r=""; _n=0; while [ "$_n" -lt "$2" ]; do _r="$_r $1"; _n=$((_n + 1)); 
 
 export PATH="$TMP/bin:$PATH"
 export CALLS="$TMP/calls" ASSIGNEE="$TMP/assignee" VIS_STATUS="$TMP/vstatus" ALIAS_REFUSED="$TMP/alias-refused"
-export SPAWNED="$TMP/spawned" POLLS="$TMP/polls"
+export SPAWNED="$TMP/spawned" POLLS="$TMP/polls" VIS_UNREAD="$TMP/vis-unread"
 unset GC_HELM_FIXTURE || true
 # The START-BACKSTOP case reads the default bound, and only a case's own prefix
 # runs the clock stubs fake.
@@ -473,7 +491,7 @@ export RIG_PATH="$TMP/rig"
 # suite is launched from ([ -t 0 ] is false); the interactive path is driven by
 # run_engage_tty below.
 run_engage() {
-    : > "$CALLS"; : > "$ASSIGNEE"; : > "$SPAWNED"; : > "$POLLS"; rm -f "$ALIAS_REFUSED" "$ALIAS_REFUSED.reads"
+    : > "$CALLS"; : > "$ASSIGNEE"; : > "$SPAWNED"; : > "$POLLS"; rm -f "$ALIAS_REFUSED" "$ALIAS_REFUSED.reads" "$VIS_UNREAD"
     printf '1700000000' > "$TMP/clock"
     set +e
     OUT="$(sh "$SCRIPT" engage "$@" </dev/null 2>"$TMP/err")"; RC=$?
@@ -494,7 +512,7 @@ polls_read() { _p=$(cat "$POLLS" 2>/dev/null || true); printf '%s' "${_p:-0}"; }
 # the default back before engage starts. The case's own bound turns a Ctrl-C
 # that never lands into a failure within a minute, not a hang.
 run_engage_interrupted() {
-    : > "$CALLS"; : > "$ASSIGNEE"; : > "$SPAWNED"; : > "$POLLS"; rm -f "$ALIAS_REFUSED" "$ALIAS_REFUSED.reads"
+    : > "$CALLS"; : > "$ASSIGNEE"; : > "$SPAWNED"; : > "$POLLS"; rm -f "$ALIAS_REFUSED" "$ALIAS_REFUSED.reads" "$VIS_UNREAD"
     set +e
     set -m
     if command -v perl >/dev/null 2>&1; then
@@ -1796,6 +1814,66 @@ eq "$RC" 0 "(IA-SKILL-FLAG) --skill on a TTY exits 0 with only the model asked"
 hasnt "$OUT" "starts a new one" "(IA-SKILL-FLAG) …no visit/starter prompt"
 hasnt "$OUT" "Skill — Enter" "(IA-SKILL-FLAG) …and no skill prompt, the flag answered it"
 has "$CALLED" "visit: tk-subj — review-arch lens" "(IA-SKILL-FLAG) …filing the new visit with the lens"
+unset HAVE_VISIT
+
+echo "# after the attach returns, the tab says how the sitting it showed ended"
+# The attach returns once the tab's tmux client exits. A closed visit is a
+# sitting that ended under the tab, and the tab prints how it closed and the
+# last hand-back it recorded; a visit still open is one the operator detached
+# from, and the tab prints how to re-attach.
+export BEAD_KIND=visit VIS_OWNER="" HAVE_VISIT=""
+HB_TEXT='tk-subj — the board redesign
+
+Settled: the new layout is on for the operator, and the rest wait a week.'
+HB_META=$(jq -nc --arg t "$HB_TEXT" '{"gc.outcome":"done","gc.outcome_reason":"settled the rollout","gc.handback":$t,"gc.handback_at":"2026-10-26T12:00:00Z"}')
+printf 'open' > "$VIS_STATUS"
+ATTACH_ENDS=closed VIS_META_EXTRA="$HB_META" run_engage tk-vis
+eq "$RC" 0 "(ENDED) a sitting that ended under the tab exits 0"
+has "$OUT" "The sitting on tk-subj has ended: visit tk-vis closed as done (settled the rollout)." \
+    "(ENDED) the tab says the sitting ended, and how its visit closed"
+has "$OUT" "Its last hand-back, recorded 2026-10-26T12:00:00Z:" "(ENDED) …then introduces the last hand-back"
+has "$OUT" "$HB_TEXT" "(ENDED) …and prints the hand-back whole"
+hasnt "$OUT" "Re-attach" "(ENDED) …offering no re-attach to a sitting that is gone"
+
+printf 'open' > "$VIS_STATUS"
+ATTACH_ENDS=closed VIS_META_EXTRA="$(jq -nc --arg t "$(printf 'tk-subj — label\n\nred\033[31m text\rover')" '{"gc.outcome":"done","gc.handback":$t}')" run_engage tk-vis
+case "$OUT" in
+  *"$(printf '\033')"*|*"$(printf '\r')"*) bad "(ENDED-CTRL) control bytes in a recorded hand-back are not printed to the terminal" ;;
+  *) ok "(ENDED-CTRL) control bytes in a recorded hand-back are not printed to the terminal" ;;
+esac
+has "$OUT" "red[31m textover" "(ENDED-CTRL) …while its text is"
+
+printf 'open' > "$VIS_STATUS"
+ATTACH_ENDS=closed VIS_META_EXTRA='{"gc.outcome":"dismissed","gc.outcome_reason":"dismissed by the operator"}' run_engage tk-vis
+has "$OUT" "visit tk-vis closed as dismissed (dismissed by the operator)." "(ENDED-NONE) a sitting that recorded no hand-back still says how it ended"
+has "$OUT" "It recorded no hand-back." "(ENDED-NONE) …and that it left none"
+
+printf 'open' > "$VIS_STATUS"
+ATTACH_ENDS=in_progress VIS_META_EXTRA="$HB_META" run_engage tk-vis
+eq "$RC" 0 "(DETACHED) a tab the operator detached exits 0"
+has "$OUT" "The sitting on tk-subj is still open (visit tk-vis). Re-attach: gc session attach gc-77" \
+    "(DETACHED) a visit still open says the sitting is still going, with the re-attach command"
+hasnt "$OUT" "$HB_TEXT" "(DETACHED) …and prints no hand-back as if it had ended"
+
+printf 'open' > "$VIS_STATUS"
+ATTACH_ENDS=in_progress ATTACH_UNREADABLE=1 run_engage tk-vis
+has "$OUT" "Could not read visit tk-vis, so whether its sitting has ended is unknown" \
+    "(UNREAD) a visit that does not read back is reported as unknown, not as ended or open"
+
+printf 'open' > "$VIS_STATUS"
+ATTACH_FAIL=1 ATTACH_ENDS=closed VIS_META_EXTRA="$HB_META" run_engage tk-vis
+has "$OUT" "The sitting on tk-subj has ended" "(ATTACH-FAIL-ENDED) an attach that failed because the sitting already ended reports the ending"
+hasnt "$OUT" "could not attach" "(ATTACH-FAIL-ENDED) …instead of an attach to retry"
+
+printf 'open' > "$VIS_STATUS"
+ATTACH_FAIL=1 ATTACH_ENDS=in_progress run_engage tk-vis
+has "$OUT" "could not attach to gc-77 — attach when ready: gc session attach gc-77" \
+    "(ATTACH-FAIL-OPEN) an attach that failed on a sitting still going says so, as before"
+
+printf 'open' > "$VIS_STATUS"
+ATTACH_ENDS=closed VIS_META_EXTRA="$HB_META" run_engage tk-vis --no-attach
+hasnt "$OUT" "has ended" "(NOATTACH-REPORT) --no-attach attaches nothing, so it reports no ending"
+printf 'open' > "$VIS_STATUS"
 unset HAVE_VISIT
 
 echo
