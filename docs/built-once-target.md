@@ -7,7 +7,7 @@ description: What gc-toolkit weighs if built once on Gas City as shipped, subsys
 
 Built once, on Gas City as shipped and with every fact said in one place,
 gc-toolkit weighs about 64k lines: 35.0k of runtime and 28.5k of tests. At the
-baseline it weighs 253.7k: 112.1k of runtime and 141.6k of tests. The runtime
+baseline it weighs 250.6k: 109.0k of runtime and 141.6k of tests. The runtime
 target is the top of the 25-35k range the migration epic (tk-1tfzr71) was
 ratified on. That epic's members and the native-gates convoy carry most of the
 removals below. The rest of the distance is copies, comments and tests, which
@@ -37,7 +37,7 @@ scheduled only when a bead carries it, and the operator funds each one.
   Runtime is code, flow and text.
 - **Beside the pack** are docs (15.0k), the tooling under `tools/` and
   `.github/` (13.0k), the record under `specs/` (61.0k) and generated files
-  (4.8k). They are reported and not budgeted.
+  (8.0k). They are reported and not budgeted.
 - **A path's subsystem** is its row in
   [component-model.md](component-model.md#4-where-each-component-sits) §4, and
   a test takes its script's row. §4 has a row for 104 of the 145 runtime
@@ -51,7 +51,7 @@ derived in [the measurement record](../specs/tk-11l1ejh/measurement.md).
 
 ## The target, subsystem by subsystem
 
-Three rules derive every target from what survives in each subsystem:
+These rules derive every target from what survives in each subsystem:
 
 1. **Gas City as shipped.** Where Gas City ships the primitive, the subsystem
    is a call to it, and the pack's version weighs nothing.
@@ -70,7 +70,7 @@ Three rules derive every target from what survives in each subsystem:
 | review | the declared checks as lanes of one check loop | 10.6k / 10.0k | 4.0k / 2.0k |
 | merge | Gas Town's refinery flow under GitHub's branch rules | 16.6k / 25.2k | 2.0k / 2.0k |
 | human engagement | native human gates and conversation tasks | 15.0k / 24.0k | 5.5k / 4.0k |
-| board | a ranked render of platform objects | 18.8k / 18.4k | 5.0k / 5.0k |
+| board | a ranked render of platform objects | 15.6k / 18.4k | 5.0k / 5.0k |
 | patrol | Gas City's orders, plus the patrols' judgment | 9.8k / 15.6k | 2.5k / 2.0k |
 | doctor | one check per surviving invariant | 7.6k / 8.9k | 3.0k / 3.0k |
 | shared glue | one call per series of native steps | 10.9k / 19.7k | 5.0k / 5.0k |
@@ -79,7 +79,7 @@ Three rules derive every target from what survives in each subsystem:
 | config | the pack, its check index and its key registry | 2.5k / 0 | 0.7k / 0 |
 | doctrine | shared fragments and skills | 1.7k / 0 | 1.3k / 0 |
 | keeper sub-pack | nothing: the target has no fork | 3.8k / 1.1k | 0 / 0 |
-| **total** | | **112.1k / 141.6k** | **35.0k / 28.5k** |
+| **total** | | **109.0k / 141.6k** | **35.0k / 28.5k** |
 
 Human engagement is the workflow §4 calls visit. The keeper is the opt-in
 `packs/gascity-keeper/`.
@@ -91,11 +91,13 @@ differs: the per-bead worktree that `gc worktree` provisions, the self-review
 loop over `gctk rig` records, and the push and handoff. Each step closes
 through `gc hook current`, and a decline is one call. Work owns the work branch
 and the handoff write. Priority following stays under its warrant, and deferred
-dispatch shrinks to the two residuals tk-1tfzr71.16 keeps under warrants:
-sling on unblock, and close on an `until` edge.
+dispatch shrinks to the residuals tk-1tfzr71.16 keeps under warrants: sling on
+unblock, and close on an `until` edge.
 
-The trade: load-context and the duplicate-dispatch gate become core's, so a
-pack refinement of either waits for upstream or carries a warrant of its own.
+The trade: load-context becomes core's, so a pack refinement of it waits for
+upstream or carries a warrant of its own. The duplicate-dispatch gate is in the
+fork's load-context and not in upstream's. Until upstream takes it, keeping the
+gate keeps a fork commit or a warranted override.
 
 ### Review
 
@@ -162,8 +164,7 @@ controller's stall handling or to Gas Town's dance (tk-1tfzr71.18 and .19).
 ### Doctor
 
 Doctor keeps one check per invariant of a surviving pack noun or warranted
-mechanism, and the three checks of molecule execution (I8, I11 and I13) become
-one.
+mechanism, and the checks of molecule execution (I8, I11 and I13) become one.
 
 The trade: a check retires with the noun it guards, such as the anchor, a
 lane, a visit, a raw route or a dispatch arm.
@@ -228,7 +229,7 @@ bd 1.3.2.
 | `duplicate-sweep.sh` and the successor keys | `bd duplicate`, `bd supersede` | tk-1tfzr71.13 |
 | hand-stamped routes and the sweeps that repair them | `gc sling --no-formula`, assignment | tk-1tfzr71.15 |
 | `orphan-dispose.sh`'s generic arms | core's orphan-sweep | tk-1tfzr71.19 |
-| `pr-facts.sh` polling and its mirrored keys | core's PR monitor and webhook receiver | tk-1tfzr71.21 |
+| `pr-facts.sh` polling and its mirrored keys | the PR monitor and webhook receiver | tk-1tfzr71.21 |
 | visits, `gate-visit-sweep` and the converse plumbing | native human gates, core's notify and renudge orders | tk-iirrmiw, tk-o6pd01i |
 
 ### Copied boilerplate
@@ -265,7 +266,7 @@ and the change that fires the trigger deletes it.
   calls disposable, 276 lines with its test. Trigger: every store migrated,
   which its dry run shows by finding nothing to change. Carried by
   tk-1tfzr71.25, last in its lane.
-- Readers of legacy shapes, which "legacy" names 36 times across 16 runtime
+- Readers of legacy shapes, which "legacy" names 30 times across 15 runtime
   files: the bare `superseded_by` key, the `gc.proactive_reaction=1` proof and
   PR bodies older than the managed region, among others. Trigger: no store or
   open PR holds the shape. Each goes with the member that rewrites its reader.
@@ -347,7 +348,7 @@ convoy lands only after the operator approves its design.
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, unused tools | 2,688 |
 
 The whole files that tk-o6pd01i, tk-kvdomjb and the migration members name come
-to 64k of the 190k between the baseline and the target. Their partial rewrites
+to 64k of the 187k between the baseline and the target. Their partial rewrites
 carry more, chiefly the board, `gc-helm.sh`, the work and patrol formulas,
 deferred dispatch and the sign-off. The proposals below carry the rest.
 

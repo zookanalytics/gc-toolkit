@@ -27,7 +27,7 @@ git rev-parse --verify --quiet "$HEAD_REF^{commit}" >/dev/null || { echo "measur
 git rev-parse --verify --quiet "$BASE^{tree}" >/dev/null || { echo "measure.sh: $BASE is not a commit" >&2; exit 2; }
 
 RULES=$(cat <<'RULES'
-kind	generated	^generated/|/dist/|(^|/)package-lock\.json$|(^|/)go\.sum$
+kind	generated	^generated/|/dist/|/gen/|(^|/)package-lock\.json$|(^|/)go\.sum$
 kind	record	^specs/
 kind	tooling	^tools/|^\.github/|^\.[^/]*$|(^|/)\.gitkeep$
 kind	test	\.test\.(sh|ts|tsx)$|_test\.go$|/testdata/|/fixture/|\.fixture\.json$|\.stub\.sh$|^assets/scripts/test-harness\.sh$|(^|/)vitest\.config\.ts$

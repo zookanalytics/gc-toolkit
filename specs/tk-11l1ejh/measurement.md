@@ -17,19 +17,19 @@ $ specs/tk-11l1ejh/measure.sh b09345315
 lines at b09345315
 
 kind          lines
-code          91068
+code          87911
 flow          14168
 text           6886
 test         141625
 docs          15007
 tooling       13049
 record        60959
-generated      4837
+generated      7994
 
 subsystem      code     flow     text     test    total
 merge         14986     1442      124    25194    41746
 visit         12719      618     1648    24015    39000
-board         18741       55        0    18448    37244
+board         15584       55        0    18448    34087
 shared        10922       18        0    19708    30648
 patrol         7271     2119      411    15550    25351
 review         6946     1997     1633     9977    20553
@@ -43,7 +43,12 @@ doctrine          0        0     1658        0     1658
 ```
 
 The doc's "human engagement" is the `visit` row. Runtime is code, flow and
-text: 112,122 lines. Pack weight adds tests: 253,747.
+text: 108,965 lines. Pack weight adds tests: 250,590.
+
+Generated counts the board's typed supervisor client,
+`services/helm/web/src/drill/gen/supervisor.d.ts` (3,157 lines), which
+openapi-typescript writes from Gas City's API and `npm run gen:supervisor-types`
+regenerates. Its generator, `gen-supervisor-types.mjs`, is board code.
 
 Component-model §4 has a row for 104 of the 145 runtime scripts under
 `assets/scripts/`. The other 41, 9,131 lines, are placed by the `post` rules in
@@ -54,7 +59,7 @@ Component-model §4 has a row for 104 of the 145 runtime scripts under
 ## 2. How each target was derived
 
 Each subsystem's target is the baseline size of what survives it, cut by the
-doc's three rules: a primitive Gas City ships weighs nothing, a fact is said
+doc's rules: a primitive Gas City ships weighs nothing, a fact is said
 once with comments kept to reasons, and tests weigh no more than code and flow.
 What survives comes from the migration members' contracts (their Keeps and
 Retires) and the native-gates design. The cuts are estimates, rounded to 0.5k
@@ -134,8 +139,8 @@ plumbing (`converse-claim.sh`, `converse-hold.sh`, `converse-fold.sh`,
 `work-outcome.sh`), `bead-rehome.sh`, and the remaining small scripts, 2,924
 lines in all.
 
-**Board**, 18,796 to 5,000: Go 9,662 to 2,500 (derive and rank, the supervisor
-client, the server), web 8,946 to 2,500 (the attention views), and `go.mod`.
+**Board**, 15,639 to 5,000: Go 9,662 to 2,500 (derive and rank, the supervisor
+client, the server), web 5,789 to 2,500 (the attention views), and `go.mod`.
 The second data plane (`internal/source/beads.go`, 1,280), the visit package
 (224) and the TypeScript mirror's parity test (886 lines of test) go. The rest
 of the cut is the Helm UX epic's choice of views, so this row is the least
@@ -240,14 +245,14 @@ these come to 64,052 lines.
 | copies of the decline sequence | 20: 12 in `mol-polecat-work.toml`, 5 in `mol-rig-demo.toml`, 2 in `mol-validate.toml`, 1 in the polecat doctrine fragment | `git grep -c -F 'run-cancel.sh" --step' -- formulas agents template-fragments packs` |
 | copies of its refusal sentence | 29 in 4 files | `git grep -c -F 'NOT cancelling or draining' -- . ':!specs' ':!generated'` |
 | copies of the step-close loop | 10 in 5 formulas | `git grep -c -E 'for STEP in ' -- formulas packs` |
-| comment share, runtime scripts under `assets/scripts/` | 20,834 of 57,691 lines (36%), shebangs excluded | lines matching `^[[:space:]]*#` |
+| comment share, runtime shell scripts under `assets/scripts/` | 20,834 of 57,691 lines (36%), shebangs excluded | lines matching `^[[:space:]]*#` |
 | comment share, Go outside tests | 5,136 of 15,581 (32%) | lines matching `^[[:space:]]*//` |
 | comment share, doctor checks | 2,363 of 7,535 (31%) | |
 | comment share, the key registry | 1,428 of 1,791 (79%) | |
 | comment share, orders | 331 of 496 (66%) | |
 | shell inside formula code fences | 3,898 lines of 8,842 | lines between fence markers in `formulas/*.toml` |
 | tests whose subject is a formula block | 48 files, 14,351 lines; 12 script tests also extract one | test files naming a formula and a `# >>>` marker, with no script of their own |
-| "legacy" in runtime code | 36 mentions in 16 files | `git grep -c -i legacy` over runtime scripts, doctor checks, formulas and service source |
+| "legacy" in runtime code | 30 mentions in 15 files | `git grep -c -i legacy` over runtime scripts, doctor checks, formulas and service source, keeping the paths `measure.sh` counts as runtime |
 | compatibility pieces, with their tests | `molecule-hold.sh` 168; the hand-offs at tk-iirrmiw.1's head 241 (`escalate.sh` 127, `escalation-rig.sh` 14, its test 100) | `wc -l`, and `git show <ref>:<path>` on the branch |
 | dead code | 1,675 lines with tests: `surface-census.sh` (431), `tools/gc-polecat-metrics.sh` (507), `migrate-approval-out-of-check-set.sh` (276), `tools/bead-universe-reachability-fixture.sh` (461) | `git grep -l -F <name> -- . ':!specs' ':!generated'` finds no caller |
 | commits on the Gas City fork's main that upstream main lacks | 102, at upstream f78779e41 | `git -C rigs/gascity rev-list --count upstream/main..origin/main` |
@@ -263,7 +268,9 @@ orphan-sweep, reaper, wisp-compact, spawn-storm-detect, prune-branches,
 notify-on-human-gate-creation and renudge-stale-human-gates. `bd duplicate` and
 `bd supersede` are in the installed bd 1.3.2. Store maintenance there still
 runs observe-only (`engdocs/contributors/dolt-maintenance.md`), so the Dolt
-reclaim warrant holds.
+reclaim warrant holds. Core's `mol-polecat-base` has a load-context step at
+f78779e41 with no duplicate-dispatch gate in it. The gate is the fork's
+(29f4f2137, revised at a319c2fd6), and upstream main has neither commit.
 
 ## 5. Growth
 
@@ -272,11 +279,11 @@ Pack weight on main, at the last first-parent commit before each date:
 | Date | Commit | Code | Flow | Text | Test | Pack weight |
 |---|---|---|---|---|---|---|
 | 2026-08-01 | 763e2825f | 9,292 | 8,833 | 5,061 | 6,208 | 29,394 |
-| 2026-09-01 | 2ff5ddd60 | 26,970 | 6,125 | 4,177 | 31,805 | 69,077 |
-| 2026-09-15 | 98419730d | 46,034 | 8,862 | 4,695 | 59,502 | 119,093 |
-| 2026-10-01 | c8062093a | 58,749 | 10,735 | 4,984 | 75,151 | 149,619 |
-| 2026-10-15 | 132909cb5 | 82,676 | 13,242 | 5,966 | 120,281 | 222,165 |
-| baseline | b09345315 | 91,068 | 14,168 | 6,886 | 141,625 | 253,747 |
+| 2026-09-01 | 2ff5ddd60 | 23,813 | 6,125 | 4,177 | 31,805 | 65,920 |
+| 2026-09-15 | 98419730d | 42,877 | 8,862 | 4,695 | 59,502 | 115,936 |
+| 2026-10-01 | c8062093a | 55,592 | 10,735 | 4,984 | 75,151 | 146,462 |
+| 2026-10-15 | 132909cb5 | 79,519 | 13,242 | 5,966 | 120,281 | 219,008 |
+| baseline | b09345315 | 87,911 | 14,168 | 6,886 | 141,625 | 250,590 |
 
 The migration map was read at 35cf7c70f, the base of the native-gates
 convoy's branch. These changes landed on main after it, net lines by
@@ -311,12 +318,12 @@ of runtime and 4,944 of tests, 6,546 in all. The six fixes that grew it added
 
 Net lines by `measure.sh <merge base> <branch head>`, on 2026-10-26:
 
-| Branch | Against | Runtime | Tests | Pack |
-|---|---|---|---|---|
-| `integration/tk-iirrmiw` (native-gates units A and B) | its main merge base, 35cf7c70f | +247 | +2,064 | +2,311 |
-| `polecat/tk-5u2xpan` (unit C) | `integration/tk-iirrmiw` | −1,006 | −4,731 | −5,737 |
-| `polecat/tk-iirrmiw.1` (the integration fix) | `integration/tk-iirrmiw` | +226 | +429 | +655 |
-| `integration/tk-tggczbp` (the one-bead PR model) | main, b09345315 | −204 | −64 | −268 |
+| Branch | Head | Merge base | Runtime | Tests | Pack |
+|---|---|---|---|---|---|
+| `integration/tk-iirrmiw` (native-gates units A and B) | 8c895c258 | 35cf7c70f, on main | +247 | +2,064 | +2,311 |
+| `polecat/tk-5u2xpan` (unit C) | c45343824 | 8c895c258, on `integration/tk-iirrmiw` | −1,006 | −4,731 | −5,737 |
+| `polecat/tk-iirrmiw.1` (the integration fix) | a79c16f89 | b11e0b262, on `integration/tk-iirrmiw` | +226 | +429 | +655 |
+| `integration/tk-tggczbp` (the one-bead PR model) | be958eeb8 | b09345315, on main | −204 | −64 | −268 |
 
 The native-gates convoy nets −2,771 across its branches so far. The one-bead
 PR model's branch changes 120 files, adding 4,761 lines and deleting 4,990.
