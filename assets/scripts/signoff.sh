@@ -119,10 +119,12 @@ usage: signoff.sh --review-bead <id> --verdict approve|request-changes
                  contract: a `severity` of P0, P1 or P2, which every correctness
                  finding carries, and with a severity a `category` and a
                  `failure_scenario`, and on a P0 or P1 a `verification` opening
-                 CONFIRMED or PLAUSIBLE and then the evidence. A P2 does not
-                 block, and a finding with no severity does. An approve carries
-                 no blocking finding and request-changes at least one. A set that
-                 breaks any of this is refused with nothing written. The posted
+                 CONFIRMED or PLAUSIBLE and then the evidence. A candidate
+                 whose verification is REFUTED is not a finding at any grade,
+                 and stays out of the set. A P2 does not block, and a finding
+                 with no severity does. An approve carries no blocking finding
+                 and request-changes at least one. A set that breaks any of
+                 this is refused with nothing written. The posted
                  artifact renders the set as its Findings block, and
                  request-changes files each finding, a P2 among them, as a
                  first-class finding bead beside the rework child, deduped on
@@ -259,12 +261,14 @@ LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 # verdict ($verdict) and the check ($check). Prints {errors, set}: each way the
 # set breaks its shape or the finding contract, and the set with every field
 # trimmed, absent ones empty, and each grade upper-cased. P0, P1 and a finding
-# with no grade block; a P2 does not.
+# with no grade block; a P2 does not. A candidate whose verification is REFUTED
+# is no finding at any grade, so the set may not carry one.
 FINDINGS_CHECK_JQ='
   def field($k): if (.[$k] // null) == null then ""
                  elif (.[$k] | type) == "string" then .[$k] | gsub("^[[:space:]]+|[[:space:]]+$"; "")
                  else null end;
   def grade: field("severity") | if type == "string" then ascii_upcase else . end;
+  def refuted: field("verification") | type == "string" and test("^REFUTED([^[:alnum:]]|$)"; "i");
   def problems:
     grade as $g
     | [ ( ("locus", "message", "severity", "category", "failure_scenario", "verification") as $k
@@ -278,9 +282,11 @@ FINDINGS_CHECK_JQ='
         ( select(($g // "") | IN("P0", "P1", "P2"))
           | (select(field("category") == "") | "it names no `category`"),
             (select(field("failure_scenario") == "") | "it names no `failure_scenario`") ),
+        ( select(refuted)
+          | "its `verification` is REFUTED, and a refuted candidate is not a finding: leave it out of the set, and keep its refutation in the trail" ),
         ( select(($g // "") | IN("P0", "P1"))
           | field("verification") as $v
-          | if $v == null then empty
+          | if $v == null or refuted then empty
             elif $v == "" then "it is a \($g) with no `verification`"
             elif ($v | test("^(CONFIRMED|PLAUSIBLE)[^[:alnum:]]+[^[:space:]]"; "i")) then empty
             else "its `verification` does not open with CONFIRMED or PLAUSIBLE and then the evidence" end ) ];

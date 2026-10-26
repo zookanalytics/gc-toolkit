@@ -1348,6 +1348,9 @@ refused "a verification that opens with neither CONFIRMED nor PLAUSIBLE" request
 refused "a verification that names no evidence" request-changes "[{$P1_OK,\"verification\":\"CONFIRMED\"}]" "does not open with CONFIRMED or PLAUSIBLE and then the evidence"
 refused "a verification that is not a string" request-changes "[{$P1_OK,\"verification\":{\"status\":\"CONFIRMED\",\"evidence\":\"ran it\"}}]" "its \`verification\` is not a string"
 hasnt "$out" "is not JSON" "a verification that is not a string: the refusal lists it, and does not call the file unparseable"
+refused "a P1 its check refuted" request-changes "[{$P1_OK,\"verification\":\"REFUTED: a.sh:12 reads [ -n \\\"\$x\\\" ] || exit 1\"}]" "its \`verification\` is REFUTED, and a refuted candidate is not a finding"
+hasnt "$out" "does not open with CONFIRMED or PLAUSIBLE" "a P1 its check refuted: the refusal names the refutation, not a missing verification"
+refused "a refuted candidate filed as a P2" request-changes '[{"locus":"b.sh","message":"m","severity":"P0","category":"c","failure_scenario":"s","verification":"CONFIRMED: ran it"},{"locus":"a.sh","message":"m","severity":"P2","category":"c","failure_scenario":"s","verification":"refuted: a.sh:3 guards the empty case"}]' "finding 2 (a.sh): its \`verification\` is REFUTED"
 refused "a correctness finding with no grade" request-changes '[{"locus":"a.sh","message":"m"}]' "every correctness finding is graded"
 refused "a grade outside P0, P1 and P2" request-changes '[{"locus":"a.sh","message":"m","severity":"P3","category":"c","failure_scenario":"s"}]' 'its `severity` is "P3", not P0, P1 or P2'
 refused "a graded finding with no failure scenario" request-changes '[{"locus":"a.sh","message":"m","severity":"P2","category":"c"},{"locus":"b.sh","message":"m","severity":"P0","category":"c","failure_scenario":"s","verification":"PLAUSIBLE: a concurrent claim reaches it"}]' "finding 1 (a.sh): it names no \`failure_scenario\`"
@@ -1372,6 +1375,25 @@ BODY=$(cat "$STUB_GH_BODY")
 has "$BODY" "<summary>Findings: 1 P2</summary>" "the posted verdict records the P2s, its grade upper-cased"
 has "$BODY" "None of these is filed or fixed: a review whose findings are all P2 approves." "…and says none of them is filed or fixed"
 has "$BODY" "Failure scenario: a reader copies the example and gets an unknown-flag error" "…with each one's failure scenario"
+
+echo "# a refuted candidate does not block: the review approves, and its refutation rides in the trail"
+reset "$ANCHOR_PR"
+printf '%s' '[]' > "$TMP/none.json"
+cat > "$TMP/refuted-trail.md" <<'MD'
+<details>
+<summary>Correctness trail: the whole diff</summary>
+
+Filed: none
+Refuted: a.sh:f(): an empty work_dir removes the cwd. a.sh:12 reads `[ -n "$dir" ] || exit 1`, so an empty work_dir exits before the removal
+Verification: no suite touched
+
+</details>
+MD
+out=$("$SUT" --review-bead rv-1 --verdict approve --findings-file "$TMP/none.json" --notes-file "$TMP/refuted-trail.md" 2>&1); rc=$?
+eq "$rc" 0 "an approve whose only blocking candidate was refuted exits 0"
+backed "…and closes the review as the lane's backing"
+eq "$(cat "$STUB_FINDING_LOG")" "" "…and files nothing for the refuted candidate"
+has "$(cat "$STUB_GH_BODY")" 'Refuted: a.sh:f(): an empty work_dir removes the cwd. a.sh:12 reads `[ -n "$dir" ] || exit 1`' "…and the posted verdict's trail carries the refutation and the line it quotes"
 
 echo "# a check whose method grades none files its findings with no contract"
 reset "$ANCHOR_PR"
