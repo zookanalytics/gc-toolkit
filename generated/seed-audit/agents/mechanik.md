@@ -123,7 +123,8 @@ the same `<rig>` you sling to. bd holds nothing on an edge between two stores,
 so every bead of an effort is filed in its rig's store.
 
 Stand an effort up with a landing bead, one push, three writes per bead and a
-summary task, reading each write back before the next step:
+summary task, reading each write back before the next step. Nothing goes to the
+refinery or to a pool until every wait of the effort reads back:
 
 ```bash
 # 1. The landing bead: an ordinary task titled for what the effort delivers,
@@ -132,58 +133,79 @@ summary task, reading each write back before the next step:
 LANDING=$(gc bd --rig <rig> create "<what the effort delivers>" -t task -d "<what the effort is to deliver>" --parent <epic> --json | jq -r '.id // empty')
 BRANCH="integration/$LANDING"
 
-# 2. Its branch: one create-only push from the rig's checkout, after a fetch.
+# 2. Its branch, cut from the default branch origin/HEAD names (main when it
+# names none) with one create-only push from the rig's checkout, after a fetch.
 # The push sends a ref and moves no checkout. Its empty lease refuses a branch
-# that already exists, so a resumed recipe that finds the branch on origin goes on.
+# that already exists, so a resumed recipe that finds the branch on origin goes
+# on. mol-design-convoy cuts its subject's branch with the same two blocks.
 RIG_ROOT=$(gc rig list --json | jq -r --arg r <rig> '.rigs[] | select(.name == $r) | .path')
-[ -n "$LANDING" ] && [ -d "$RIG_ROOT" ] && git -C "$RIG_ROOT" fetch origin \
-  && { git -C "$RIG_ROOT" push origin "refs/remotes/origin/main:refs/heads/${BRANCH}" --force-with-lease="refs/heads/${BRANCH}:" \
-       || git -C "$RIG_ROOT" ls-remote --exit-code --heads origin "$BRANCH"; } \
-  || { echo "no landing bead, or no $BRANCH on origin; stopping" >&2; exit 1; }
+[ -n "$LANDING" ] && [ -d "$RIG_ROOT" ] || { echo "no landing bead, or no checkout of <rig>; stopping" >&2; exit 1; }
+# >>> effort-default-branch
+git -C "$RIG_ROOT" fetch --prune origin || { echo "git fetch failed in $RIG_ROOT" >&2; exit 1; }
+DEFAULT_REF=$(git -C "$RIG_ROOT" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || true)
+BASE="${DEFAULT_REF#refs/remotes/origin/}"
+[ -n "$BASE" ] && [ "$BASE" != "$DEFAULT_REF" ] || BASE=main
+# <<< effort-default-branch
+# >>> effort-branch-push
+git -C "$RIG_ROOT" show-ref --verify --quiet "refs/remotes/origin/${BASE}" || { echo "origin/${BASE} not found to cut $BRANCH from" >&2; exit 1; }
+if ! git -C "$RIG_ROOT" push origin "refs/remotes/origin/${BASE}:refs/heads/${BRANCH}" --force-with-lease="refs/heads/${BRANCH}:"; then
+  git -C "$RIG_ROOT" fetch origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}" || true
+  git -C "$RIG_ROOT" show-ref --verify --quiet "refs/remotes/origin/${BRANCH}" || { echo "the push of $BRANCH failed and origin does not carry it" >&2; exit 1; }
+  echo "origin already carries $BRANCH, so an earlier pass cut it"
+fi
+# <<< effort-branch-push
 
-# 3. Record the branch on the landing bead, and read it back.
-gc bd --rig <rig> update "$LANDING" --set-metadata branch="$BRANCH" --set-metadata target=main \
-  && gc bd --rig <rig> show "$LANDING" --json | jq -e --arg b "$BRANCH" '.[0].metadata | .branch == $b and .target == "main"' >/dev/null \
-  || { echo "$LANDING does not read back its branch; stopping" >&2; exit 1; }
+# 3. Record the branch, and the default branch as the target, on the landing
+# bead, and read both back.
+gc bd --rig <rig> update "$LANDING" --set-metadata branch="$BRANCH" --set-metadata target="$BASE" \
+  && gc bd --rig <rig> show "$LANDING" --json | jq -e --arg b "$BRANCH" --arg t "$BASE" '.[0].metadata | .branch == $b and .target == $t' >/dev/null \
+  || { echo "$LANDING does not read back its branch and target; stopping" >&2; exit 1; }
 
-# 4. Each bead of the effort: its target in its create and the landing bead's
-# wait on it, both read back, then the sling, or an arm when it waits on other
-# work. A stage is slung with --merge mr.
+# 4. File each bead of the effort with its target in its create and the landing
+# bead's wait on it, and read both back. Nothing is slung yet.
 WORK=$(gc bd --rig <rig> create "<task>" -t task -d "<what to build>" --parent <epic> \
   --metadata "$(jq -nc --arg t "$BRANCH" '{target: $t}')" --deps "blocks:$LANDING" --json | jq -r '.id // empty')
 [ -n "$WORK" ] \
   && gc bd --rig <rig> show "$WORK" --json | jq -e --arg b "$BRANCH" '.[0].metadata.target == $b' >/dev/null \
   && gc bd --rig <rig> dep list "$LANDING" --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg w "$WORK" 'any(.[]; .id == $w)' >/dev/null \
-  && gc sling <rig>/gc-toolkit.polecat "$WORK"
+  || { echo "${WORK:-the bead} does not read back its target and the landing bead's wait; stopping" >&2; exit 1; }
 
-# 5. Hand the landing bead to the refinery once its first wait reads back, at
-# the address gc agent list prints, with the notice that assignment owes.
-# Assigned before it waits on anything, it would reach the refinery at once,
-# and the refinery refuses a branch with no change.
-gc bd --rig <rig> update "$LANDING" --assignee <rig>/gc-toolkit.refinery \
-  && "$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify "$LANDING" --agent <rig>/gc-toolkit.refinery
-
-# 6. The summary task, once the effort's beads are filed: no target, under the
-# effort's epic, its description naming the landing bead. It waits on each bead
-# of the effort and the landing bead waits on it, and it is armed on
-# mol-polecat-report only once those edges read back.
+# 5. The summary task, once every bead of the effort is filed: no target, under
+# the effort's epic, its description naming the landing bead. It waits on each
+# bead of the effort and the landing bead waits on it, all read back.
 SUMMARY=$(gc bd --rig <rig> create "summary: the PR for <what the effort delivers>" -t task \
   -d "Write the pr_summary of $LANDING once every bead this task waits on has landed, by the polecat doctrine's paragraph on integration branches." \
   --parent <epic> --deps "<each bead of the effort, comma-separated>,blocks:$LANDING" --json | jq -r '.id // empty')
 [ -n "$SUMMARY" ] || { echo "no summary task filed; stopping" >&2; exit 1; }
 WAITS=$(gc bd --rig <rig> dep list "$SUMMARY" --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -r '[.[].id] | join(" ")')
 for B in <each bead of the effort>; do
-  case " $WAITS " in *" $B "*) ;; *) echo "$SUMMARY does not wait on $B; not arming" >&2; exit 1 ;; esac
+  case " $WAITS " in *" $B "*) ;; *) echo "$SUMMARY does not wait on $B; stopping" >&2; exit 1 ;; esac
 done
 gc bd --rig <rig> dep list "$LANDING" --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg s "$SUMMARY" 'any(.[]; .id == $s)' >/dev/null \
-  && "$(gc <binding> scripts-dir)/deferred-dispatch.sh" arm "$SUMMARY" --target <rig>/gc-toolkit.polecat \
-       --sling-arg --on --sling-arg mol-polecat-report --reason "writes the pr_summary of $LANDING once the effort's beads land"
+  || { echo "$LANDING does not wait on $SUMMARY; stopping" >&2; exit 1; }
+
+# 6. Hand the landing bead to the refinery, at the address gc agent list prints,
+# with the notice that assignment owes. It waits on every bead of the effort and
+# on the summary task, so the refinery takes it only once they have all closed.
+gc bd --rig <rig> update "$LANDING" --assignee <rig>/gc-toolkit.refinery \
+  && "$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify "$LANDING" --agent <rig>/gc-toolkit.refinery \
+  || { echo "$LANDING is not handed to the refinery; dispatching nothing" >&2; exit 1; }
+
+# 7. Dispatch the work: sling each bead of the effort, or arm it when it waits
+# on other work (a stage is slung with --merge mr), then arm the summary task
+# on mol-polecat-report.
+gc sling <rig>/gc-toolkit.polecat "$WORK"
+"$(gc <binding> scripts-dir)/deferred-dispatch.sh" arm "$SUMMARY" --target <rig>/gc-toolkit.polecat \
+  --sling-arg --on --sling-arg mol-polecat-report --reason "writes the pr_summary of $LANDING once the effort's beads land"
 ```
 
 The branch is named for the bead that lands it, so an integration branch has one
-landing bead. The summary task is dispatched once the effort's beads have
-landed, and its close releases the landing bead to the refinery, which opens the
-one PR with the summary the task wrote.
+landing bead. Every bead is filed and waited on before any is slung, and the
+landing bead goes to the refinery only once it waits on all of them and on the
+summary task, so no bead can land while the landing bead waits on fewer than all
+of them. The summary task is dispatched once the effort's beads have landed, and
+its close releases the landing bead to the refinery, which opens the one PR with
+the summary the task wrote.
 
 A bead that joins the effort later takes the same writes before it is slung: its
 target, the landing bead's wait on it, and the summary task's. A summary task

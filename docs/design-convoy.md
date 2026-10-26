@@ -9,9 +9,10 @@ A design-convoy is an integration effort whose first bead settles a design on th
 effort's branch and whose implementation is armed behind that design's approval,
 so the whole unit reaches the default branch as one reviewed PR. A molecule
 converse recommends and the operator Accepts stands it up: it cuts the
-integration branch, files the design child, arms implementation, and files the
-summary task, with no human running git. No convoy carries a design-convoy's
-branch: the branch is its subject's own.
+integration branch, files the design child, the implementation child and the
+summary task, and only once every wait among them reads back hands the subject
+to the refinery and dispatches the work, with no human running git. No convoy
+carries a design-convoy's branch: the branch is its subject's own.
 
 ## Scope
 
@@ -55,19 +56,27 @@ The subject is the effort's landing bead. Its steps:
 |---|---|
 | `load-context` | Read the subject and its recommendation card for the design topic and intended implementation. Resolve `design_gated` (var, default `true`). |
 | `seed-branch` | Cut `integration/<subject-id>` from the default branch with one create-only push from the rig's checkout, and record it on the subject: `branch` names the integration branch and `target` the default branch, read back. |
-| `arm-design` | File the design child with the integration branch as its `target` in its create, under the subject's epic when it has one, make the subject wait on it by a `blocks` edge, and read both back. Then hand the subject to the refinery, assigned with the notice that assignment owes, and sling the child: `--merge mr` when design-gated, with no merge strategy for all-in-one. |
-| `arm-implementation` | File one implementation child the same way, which builds the initiative per the design and lands with no PR of its own. `design_gated=true`: a `blocks` edge from the design child plus a `deferred-dispatch.sh arm`, so the design's closure dispatches it. `design_gated=false`: sling it now, in parallel. |
-| `arm-summary` | File the summary task beside the subject, under the subject's epic when it has one, with no `target`. It waits on each child by a `blocks` edge, and the subject waits on it. The three edges are read back, and only then is it armed to the polecat pool on `mol-polecat-report`. Then close the step chain and drain. |
+| `file-design` | File the design child with the integration branch as its `target` in its create, under the subject's epic when it has one, make the subject wait on it by a `blocks` edge, and read both back. |
+| `file-implementation` | File one implementation child the same way, which builds the initiative per the design and lands with no PR of its own. `design_gated=true`: also hold it behind the design child by a `blocks` edge, read back. |
+| `file-summary` | File the summary task beside the subject, under the subject's epic when it has one, with no `target`. It waits on each child by a `blocks` edge, and the subject waits on it. The three edges are read back. |
+| `dispatch` | Read every target and edge of the setup back. Then hand the subject to the refinery, assigned with the notice that assignment owes, and dispatch the work: sling the design child, `--merge mr` when design-gated; arm the implementation child behind the design (`design_gated=true`) or sling it now, in parallel (`design_gated=false`); and arm the summary task to the polecat pool on `mol-polecat-report`. Then close the step chain and drain. |
+
+Nothing is handed over or dispatched until the whole setup reads back. The
+filing steps dispatch nothing, so a run that stops between them leaves no child
+in flight and the subject with nobody, and no child can land while the subject
+waits on fewer than all of them. That includes the all-in-one implementation,
+which starts only once the summary task it must give its split beads to is
+filed and waited on.
 
 Every step re-derives the subject from the input convoy in its own shell and
 records its result on the subject (`branch` and `target`, `gc.design_child`,
 `gc.impl_child`, `gc.summary_task`, and the `*_armed` markers), so a crashed run
 resumes without cutting a second branch or filing a second child, task or
-workflow. An arm stamps its `*_armed` marker only after every setup write it made
-has landed and read back. A target or an edge that does not read back fails the
-step with the marker unstamped, so the resume re-runs that arm rather than
-skipping it. The read-back decides, not the add's exit status, because a resumed
-add can meet an edge the failed pass already wrote.
+workflow. The dispatch step stamps each `*_armed` marker right after its own
+dispatch, so a resume dispatches nothing twice. A target or an edge that does
+not read back fails its step, so the resume re-runs that step. The read-back
+decides, not the add's exit status, because a resumed add can meet an edge the
+failed pass already wrote.
 
 The implementation is one child, not a fan-out: the design defines the
 breakdown, so the child carries "split into multiple beads if the design
@@ -81,10 +90,13 @@ task as well, so the subject and the summary task wait for every piece.
 `seed-branch` fetches origin and pushes `refs/remotes/origin/<default>` to
 `refs/heads/integration/<subject-id>` with an empty lease
 (`--force-with-lease=refs/heads/integration/<subject-id>:`). The default branch
-is the one `origin/HEAD` names. The push sends a ref and checks nothing out, so
-the rig's checkout never moves. Reconcile keeps that checkout fast-forwarded to
-the default branch and directory-imported packs build from its working tree, so
-a branch checkout or commit there would park the deploy off the default branch.
+is the one `origin/HEAD` names, or `main` when it names none. The mechanik's
+recipe for standing an effort up by hand cuts with the same marked blocks, so
+an effort cut either way starts from, and lands on, the same branch. The push
+sends a ref and checks nothing out, so the rig's checkout never moves.
+Reconcile keeps that checkout fast-forwarded to the default branch and
+directory-imported packs build from its working tree, so a branch checkout or
+commit there would park the deploy off the default branch.
 The empty lease refuses a branch that already exists, so a refused push after
 which origin carries the branch is a cut an earlier pass already made. A subject
 that records the branch already is not cut again. One that records another
@@ -125,16 +137,16 @@ is what releases implementation, which then lands on the branch with no PR of
 its own.
 
 **Gate 2, the subject's PR.** The subject waits on each child and on the summary
-task by `blocks` edges, assigned to the refinery since `arm-design`. The summary
-task is dispatched once both children have landed, and writes the subject's
-`pr_summary` from the finished branch: what the whole branch does, and where the
-finished work departs from the subject's description. Once it closes, nothing
-the subject waits on is open. The refinery takes the subject and brings its
-branch current with the default branch, and the merge cadence opens the PR from
-the integration branch into the default branch, with the summary task's account
-as its `## Summary`. The same universal rule holds that PR until an operator's
-approval stands on it, so the operator reviews the whole unit, design and
-implementation together, before the default branch moves.
+task by `blocks` edges, and the `dispatch` step assigned it to the refinery. The
+summary task is dispatched once both children have landed, and writes the
+subject's `pr_summary` from the finished branch: what the whole branch does,
+and where the finished work departs from the subject's description. Once it
+closes, nothing the subject waits on is open. The refinery takes the subject and
+brings its branch current with the default branch, and the merge cadence opens
+the PR from the integration branch into the default branch, with the summary
+task's account as its `## Summary`. The same universal rule holds that PR until
+an operator's approval stands on it, so the operator reviews the whole unit,
+design and implementation together, before the default branch moves.
 
 ## When the subject closes
 

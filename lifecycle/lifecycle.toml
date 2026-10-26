@@ -1668,7 +1668,7 @@ keys = [
 
 [metadata.design_convoy]
 # The resume record formulas/mol-design-convoy.toml keeps on its subject, the
-# effort's landing bead (docs/design-convoy.md). Each arm step reads it from the
+# effort's landing bead (docs/design-convoy.md). Each step reads it from the
 # subject when the step starts, so a resumed run files no second bead and
 # dispatches nothing twice.
 keys = [
@@ -1678,16 +1678,18 @@ keys = [
 ]
 # gc.design_child / gc.impl_child / gc.summary_task — the design child, the
 #   implementation child and the summary task, each written on the subject by
-#   the step that files it, in the update after its create. The later arm steps
-#   read the children's ids to wire their edges, and the implementation child's
-#   brief tells it to make the bead gc.summary_task names wait on each bead it
-#   splits into. Absent means the bead is not filed: its own step files it, and
-#   a later step that needs it stops. Not cleared. A bead id.
-# gc.design_armed / gc.impl_armed / gc.summary_armed — `1` once an arm step's
-#   writes have read back and its bead is dispatched: the subject handed to the
-#   refinery and the design child slung, the implementation child armed behind
-#   the design or slung, the summary task armed. Absent means that dispatch has
-#   not finished, so a resume runs it again. Not cleared. A string.
+#   the step that files it, in the update after its create. The later steps
+#   read the ids to wire their edges and to dispatch, and the implementation
+#   child's brief tells it to make the bead gc.summary_task names wait on each
+#   bead it splits into. Absent means the bead is not filed: its own step files
+#   it, and a later step that needs it stops. Not cleared. A bead id.
+# gc.design_armed / gc.impl_armed / gc.summary_armed — `1` once the dispatch
+#   step has dispatched that bead: the design child slung, the implementation
+#   child armed behind the design or slung, the summary task armed. The step
+#   dispatches only after every target and edge of the setup has read back and
+#   the subject is with the refinery, and stamps each marker right after its
+#   own dispatch. Absent means that dispatch has not happened, so a resume runs
+#   it. Not cleared. A string.
 
 [metadata.learning]
 # The feedback-learning loop's beads (docs/feedback-learning.md). obs.* is the
