@@ -30,6 +30,15 @@ pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.Wo
 wake_mode = "resume"
 # The operator attaches to the sitting.
 attach = true
+# A client attached to the sitting exits when the sitting's session ends,
+# instead of moving to another session. detach-on-destroy is a tmux session
+# option, so this sets it for the sitting's session alone and leaves the
+# server's global value as it is: a client attached with
+# `-f no-detach-on-destroy`, and every client on any other session, still moves
+# on. Gas City runs session_live after every start of the session with
+# GC_TMUX_SOCKET naming the city's tmux server, and re-applies a changed value
+# without a restart. The `=<name>:` target matches the session exactly.
+session_live = ['tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" detach-on-destroy on']
 # Empty on purpose, and empty is not what protects a sitting. A sitting runs as
 # a manual (spawn-on-engagement) session, never pool_managed, and all three
 # claim backstops gate governs() on pool_managed (gascity idle_nudge.go,
