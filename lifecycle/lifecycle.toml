@@ -855,6 +855,20 @@ keys = [
   # machine:<lane> or human:<login> — who raised it. A human finding is what
   # lets an operator's PR comment produce work the way a reviewer's finding does.
   "finding.source",
+  # The finding contract a reviewer's findings.json carries, which signoff.sh
+  # checks and finding.sh upsert stamps at the first raise, in the description
+  # as well. None is part of finding.key, so a re-raise rewording its scenario
+  # re-adopts the open finding, and a re-raise keeps the first raise's record.
+  # Absent from a human finding and from one whose method grades none.
+  # finding.severity — P0, P1 or P2, the grade the method gave it. A P2 is filed
+  #   only beside a blocking finding, and the validator rules it must-fix or
+  #   declined: finding.sh refuses its deferral.
+  # finding.category — the angle of the method that found it.
+  # finding.failure_scenario — the input or state that triggers it, then the
+  #   wrong output that follows.
+  # finding.verification — on a P0 or P1, CONFIRMED with the evidence, or
+  #   PLAUSIBLE with why the trigger is realistic.
+  "finding.severity", "finding.category", "finding.failure_scenario", "finding.verification",
   # The GitHub comment databaseId that raised a human finding, stamped by
   # pr-facts.sh at file time: an inline review comment, a review body (the
   # review's own id, so it equals finding.review_id), or a Conversation comment.
