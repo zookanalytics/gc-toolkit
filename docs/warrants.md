@@ -82,7 +82,9 @@ shares only the word ([authority-map.md](authority-map.md)).
   `ready` sorts by the bead's own priority by default. Neither one's
   documentation derives a priority from another bead.
 - **Verified.** 2026-10-25, at `gastownhall/gascity` main 7d2577989 and bd 1.3.2
-  (9b65b9e19).
+  (9b65b9e19), whose `BuildReadyWorkOrder` in
+  `internal/storage/sqlbuild/ready.go` orders the priority policy by the bead's
+  own priority.
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,
   or a work query can order by a parent's priority.
 

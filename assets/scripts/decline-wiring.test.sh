@@ -103,9 +103,10 @@ fi
 # its verdict window, and the wait needs an open visit. So the escalation each
 # await-ruling.sh call follows runs with GC_ESCALATE_VERDICT_WINDOW set, or is
 # bring-current-audit.sh's ask, which turns the window off itself
-# (bring-current-audit.test.sh holds it to that).
+# (bring-current-audit.test.sh holds it to that). The refinery's patrol is read
+# too: merge-push makes a convoy's rebuild child wait on a visit.
 if TOML_PY="$(tomllib_python)"; then
-  for f in mol-polecat-work mol-validate mol-rig-demo; do
+  for f in mol-polecat-work mol-validate mol-rig-demo mol-refinery-patrol; do
     out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
 import re, sys, tomllib
 d = tomllib.load(open(sys.argv[1], "rb"))

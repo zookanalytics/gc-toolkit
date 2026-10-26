@@ -703,6 +703,11 @@ review's result set.
   cascades down parent-child edges, while a poured workflow's root has no
   parent, so a hold on the epic leaves the rebuild running. The bead rests
   `poured`, and the polecat running the pour starts from the recorded reason.
+  The rejection never pours a convoy, such as a graduation's anchor, because a
+  run poured onto a convoy works on the beads it tracks. A convoy's rebuild is
+  poured onto its rebuild child instead, an ordinary task that carries the
+  reason, resumes the convoy's branch and blocks it, and merge-push anchors the
+  convoy once the child's work lands on the branch.
 - **Rework** (review verdict): `signoff.sh --verdict request-changes` files
   and slings exactly one rework child through `rework-child.sh`, with the
   reviewer's findings and the lane's validation pass beside it. The validator
