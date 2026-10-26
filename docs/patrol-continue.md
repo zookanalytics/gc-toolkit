@@ -84,7 +84,10 @@ A real cycle spends the formula's `event_timeout` (600s) in its inter-cycle
 wait. A stop that comes within 300s of a hand-back is a rapid stop: that turn
 ran no cycle. The hook counts rapid stops in a row, per conversation, in one
 state file per session bead under `$TMPDIR`. A stop after a longer turn
-clears the count, and a new conversation starts it over.
+clears the count, and a new conversation starts it over. The 300s bound has
+to stay under every `event_timeout` the deacon is poured with, or each real
+cycle would count as a rapid stop, so the hook's suite fails when the
+formula default or the startup pour drops to it.
 
 After three rapid stops in a row the hook stops handing back. Another
 hand-back would only loop, so it resets the session instead
@@ -93,6 +96,13 @@ hand-back would only loop, so it resets the session instead
 the deacon's prompt, and its startup reconcile adopts the wisp the patrol
 left. A reset that fails lets the turn end, and boot-health is then what
 reports the cold deacon.
+
+The reset waits while an operator is attached to the deacon's pane, because
+it would end the conversation under them. An attachment the hook cannot read
+counts as one, as it does for the context recycle. The turn ends and the
+count stands, so the deacon takes the operator's next prompt, and the next
+rapid stop with nobody attached takes the reset. A deacon the operator
+leaves without a prompt stays idle, and boot-health reports it cold.
 
 Claude Code has its own bound: it overrides a hook that blocks the turn from
 ending nine times in a row with no tool call in between, and ends the turn.

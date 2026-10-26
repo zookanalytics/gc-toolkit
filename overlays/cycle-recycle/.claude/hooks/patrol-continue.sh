@@ -21,7 +21,8 @@
 #     its inter-cycle wait, so those turns ran no cycle, and another hand-back
 #     would only loop. The hook resets the session instead: the fresh
 #     conversation starts from the deacon's prompt, whose startup reconcile
-#     adopts the wisp the patrol left.
+#     adopts the wisp the patrol left. While an operator is attached to the
+#     pane the reset waits, because it would end the conversation under them.
 #
 # Invariants:
 #   * ALWAYS exit 0. A block rides the JSON decision on stdout, never the exit
@@ -89,8 +90,24 @@ else
 fi
 
 if [ "$rapid" -ge "$MAX_RAPID" ]; then
-  printf '%s 0 0\n' "$SID" > "$STATE" 2>/dev/null || true
   WHY="$rapid turns in a row ended within ${MIN_TURN}s of a hand-back without a patrol cycle"
+  # A reset ends the conversation, so it waits while an operator is attached to
+  # watch or work the pane, and an attachment it cannot read counts as one, as
+  # in cycle-recycle.sh. The turn ends and the state file keeps its count, so
+  # the next rapid stop with nobody attached takes the reset.
+  if [ -n "${TMUX:-}" ]; then
+    attached=$(tmux display-message -p '#{session_attached}' 2>/dev/null || true)
+    case "$attached" in
+      0) : ;;
+      '' | *[!0-9]*)
+        echo "patrol-continue: $WHY; the attachment state is unknown, so the reset waits and the turn ends" >&2
+        exit 0 ;;
+      *)
+        echo "patrol-continue: $WHY; $attached client(s) attached, so the reset waits and the turn ends" >&2
+        exit 0 ;;
+    esac
+  fi
+  printf '%s 0 0\n' "$SID" > "$STATE" 2>/dev/null || true
   echo "patrol-continue: $WHY; resetting the session" >&2
   # The ledger line goes first: the reset can end this process with the session.
   LEDGER=""

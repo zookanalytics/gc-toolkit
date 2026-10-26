@@ -6,14 +6,15 @@
 # next patrol cycle back. It prints nothing for any other agent, while a
 # background task runs, or on a payload it cannot read. After MAX_RAPID stops
 # in a row that each came within MIN_TURN seconds of a hand-back, it resets the
-# session instead. Every path exits 0, so the exit code tells nothing apart;
-# this test reads stdout, the state file and the calls the hook makes.
+# session instead, unless an operator is attached. Every path exits 0, so the
+# exit code tells nothing apart; this test reads stdout, the state file and the
+# calls the hook makes.
 #
-# It runs the SHIPPED script, never a copy. gc is stubbed by pointing HOME at
-# the sandbox: the hook prepends "$HOME/go/bin" to PATH itself, so a stub placed
-# there wins over the real gc. The ledger is stubbed at the path the hook
-# resolves under GC_CITY_PATH. Every run starts from env -i, so no live GC_*
-# variable reaches the hook.
+# It runs the SHIPPED script, never a copy. gc and tmux are stubbed by pointing
+# HOME at the sandbox: the hook prepends "$HOME/go/bin" to PATH itself, so a
+# stub placed there wins over the real one. The ledger is stubbed at the path
+# the hook resolves under GC_CITY_PATH. Every run starts from env -i, so no live
+# GC_* or TMUX variable reaches the hook.
 #
 # The test lives under assets/scripts/ rather than beside the hook because
 # everything under overlays/cycle-recycle/.claude/ is staged into the patrol
@@ -48,6 +49,16 @@ exit "${GC_STUB_RC:-0}"
 STUB
 chmod +x "$SANDBOX/home/go/bin/gc"
 
+# The tmux stub logs every call and answers the attached-client count in
+# TMUX_ATTACHED, or fails with TMUX_STUB_RC and prints nothing.
+cat > "$SANDBOX/home/go/bin/tmux" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >> "$TMUX_LOG"
+[ "${TMUX_STUB_RC:-0}" = 0 ] || exit "$TMUX_STUB_RC"
+printf '%s\n' "${TMUX_ATTACHED:-0}"
+STUB
+chmod +x "$SANDBOX/home/go/bin/tmux"
+
 # The ledger stub sits where the hook looks for gc-deacon-ledger.sh.
 CITY="$SANDBOX/city"
 mkdir -p "$CITY/rigs/gc-toolkit/assets/scripts"
@@ -65,11 +76,11 @@ mkdir -p "$STATE_DIR"
 # $RC. Extra arguments are added to the environment.
 run_hook() {
     local agent="$1" payload="$2"; shift 2
-    : > "$SANDBOX/gc.log"; : > "$SANDBOX/ledger.log"
+    : > "$SANDBOX/gc.log"; : > "$SANDBOX/ledger.log"; : > "$SANDBOX/tmux.log"
     printf '%s' "$payload" | env -i HOME="$SANDBOX/home" PATH="/usr/bin:/bin:$(dirname "$(command -v jq)")" \
         TMPDIR="$STATE_DIR" GC_AGENT="$agent" GC_ALIAS="gc-toolkit.deacon" \
         GC_SESSION_ID="hq-sess" GC_SESSION_NAME="gc-toolkit__deacon" GC_CITY_PATH="$CITY" \
-        GC_LOG="$SANDBOX/gc.log" LEDGER_LOG="$SANDBOX/ledger.log" "$@" \
+        GC_LOG="$SANDBOX/gc.log" LEDGER_LOG="$SANDBOX/ledger.log" TMUX_LOG="$SANDBOX/tmux.log" "$@" \
         sh "$HOOK" > "$SANDBOX/out" 2> "$SANDBOX/err"
     RC=$?
     OUT="$(cat "$SANDBOX/out")"
@@ -169,6 +180,47 @@ printf 's1 %s 2\n' "$now" > "$STATE"
 run_hook gc-toolkit.deacon "$(payload s1)" GC_STUB_RC=1
 eq "$OUT|$RC" "|0" "a failed reset still exits 0 with no output"
 has "$ERR" "gc session reset gc-toolkit.deacon failed" "a failed reset is reported on stderr"
+
+echo "== an attached operator holds the reset =="
+IN_TMUX="TMUX=$SANDBOX/tmux-socket,1,0"
+printf 's1 %s 2\n' "$now" > "$STATE"
+run_hook gc-toolkit.deacon "$(payload s1)" "$IN_TMUX" TMUX_ATTACHED=1
+eq "$OUT|$RC" "|0" "an attached operator: the third rapid stop is not handed back"
+eq "$(cat "$SANDBOX/gc.log")" "" "an attached operator: the session is not reset"
+eq "$(cat "$SANDBOX/ledger.log")" "" "an attached operator: no recovery line is written"
+eq "$(cat "$STATE")" "s1 $now 2" "an attached operator: the state file keeps its count"
+has "$(cat "$SANDBOX/tmux.log")" "session_attached" "the attachment is read from tmux"
+
+run_hook gc-toolkit.deacon "$(payload s1)" "$IN_TMUX" TMUX_STUB_RC=1
+eq "$OUT|$RC" "|0" "an unreadable attachment: no output, exit 0"
+eq "$(cat "$SANDBOX/gc.log")" "" "an unreadable attachment holds the reset"
+
+run_hook gc-toolkit.deacon "$(payload s1)" "$IN_TMUX" TMUX_ATTACHED=0
+eq "$(cat "$SANDBOX/gc.log")" "session reset gc-toolkit.deacon" "with nobody attached, the next rapid stop takes the held reset"
+
+printf 's1 %s 1\n' "$now" > "$STATE"
+run_hook gc-toolkit.deacon "$(payload s1)" "$IN_TMUX" TMUX_ATTACHED=1
+eq "$(printf '%s' "$OUT" | jq -r '.decision' 2>/dev/null)" "block" "an attached operator does not hold a hand-back below the limit"
+eq "$(cat "$SANDBOX/tmux.log")" "" "below the limit the hook does not ask tmux"
+
+echo "== a real cycle outlasts the rapid-stop bound =="
+# A turn that runs a cycle spends the patrol's whole event_timeout in its
+# inter-cycle wait, so MIN_TURN must sit under every event_timeout the pack
+# pours with. Otherwise each real cycle counts as a rapid stop and the hook
+# resets the deacon every MAX_RAPID cycles.
+MIN_TURN_SET=$(sed -n 's/^MIN_TURN=\([0-9][0-9]*\).*/\1/p' "$HOOK")
+FORMULA_WAIT=$(awk '/^\[vars\.event_timeout\]/ { f = 1; next } /^\[/ { f = 0 } f && /^default *=/ { gsub(/[^0-9]/, ""); print; exit }' "$REPO/formulas/mol-deacon-patrol.toml")
+POUR_WAIT=$(grep -F 'gc bd mol wisp mol-deacon-patrol ' "$REPO/agents/deacon/prompt.template.md" | sed -n "s/.*--var event_timeout='\([0-9][0-9]*\)'.*/\1/p")
+for pair in "the formula default=$FORMULA_WAIT" "the startup pour=$POUR_WAIT"; do
+    name="${pair%%=*}"; wait_s="${pair#*=}"
+    case "$MIN_TURN_SET" in '' | *[!0-9]*) bad "MIN_TURN is read from the hook" "got '$MIN_TURN_SET'"; continue ;; esac
+    case "$wait_s" in '' | *[!0-9]*) bad "the event_timeout of $name is read" "got '$wait_s'"; continue ;; esac
+    if [ "$MIN_TURN_SET" -lt "$wait_s" ]; then
+        ok "MIN_TURN ($MIN_TURN_SET) is under the event_timeout of $name ($wait_s)"
+    else
+        bad "MIN_TURN is under the event_timeout of $name" "MIN_TURN $MIN_TURN_SET, event_timeout $wait_s"
+    fi
+done
 
 echo "== wiring: the overlay runs the hook at every Stop, beside cycle-recycle =="
 jq -e . "$SETTINGS" >/dev/null 2>&1 && ok "the overlay's settings.json parses" || bad "the overlay's settings.json parses" "jq rejected $SETTINGS"
