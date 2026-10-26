@@ -140,17 +140,15 @@
 #               display-message is the only channel.
 #   (REACT)     the react path reports that the visit is still to come, rather
 #               than claiming one was filed.
-#   (INDICATOR) the in-flight status-line slot is written while the intake
-#               runs and cleared when it ends — however it ends. (That the
-#               agent behind it is resolved in the FOREGROUND is not asserted
-#               here: it takes a multi-session server to show the difference.
-#               `#{client_tty}`/`#{client_session}` are empty in the detached
-#               half, and `#{session_name}` answers with whichever session
-#               tmux considers current — on a real city, not necessarily the
-#               operator who pressed the key. ROUNDTRIP covers the message
-#               target, which fails outright without the foreground capture.)
-#   (TIMEOUT)   a wedged intake is reported rather than hanging with the
-#               indicator lit and no message. A silent hang is the same
+#   (FILING)    the press shows an in-flight notice before the intake runs, and
+#               the outcome replaces it after. Without one the popup closes on
+#               nothing for as long as the intake takes, which looks like a
+#               key that did nothing. The notice goes to the client that
+#               pressed the key, holds until the outcome or a key press
+#               replaces it (-d 0, so it is not a say), and keeps the pane
+#               drawing under it (-C). A cancelled press shows none.
+#   (TIMEOUT)   a wedged intake is reported rather than hanging with nothing
+#               after its in-flight notice. A silent hang is the same
 #               outcome as a silent failure: a thought the operator believes
 #               was filed and was not.
 #   (GONE)      tmux-spawn-thread.sh is deleted and nothing live still points
@@ -205,15 +203,15 @@ wait_for() {            # wait_for <predicate> [args…] — poll until it exits
     done
 }
 # Predicates for wait_for; each re-reads its observable on every poll. A say is
-# a `display-message -d` (the handler's only operator channel); a call is one
-# gc-visit-open invocation the stub logs. msg_has reads the live server through
-# process substitution, never a pipe into grep -q, so a match is not lost to
-# SIGPIPE under `set -o pipefail`.
-calls_ge() { local n; n=$(grep -c '=== call ===' "$2" 2>/dev/null); [ "${n:-0}" -ge "$1" ]; }         # calls_ge N FILE
-says_ge()  { local n; n=$(grep -c 'display-message .*-d ' "$2" 2>/dev/null); [ "${n:-0}" -ge "$1" ]; } # says_ge N FILE
-lines_ge() { local n; n=$(grep -c '' "$2" 2>/dev/null); [ "${n:-0}" -ge "$1" ]; }                      # lines_ge N FILE
-has_file() { [ -f "$1" ]; }
-no_file()  { [ ! -f "$1" ]; }
+# a `display-message -d` with a positive delay (the handler's only operator
+# channel). The in-flight notice waits for a key press (`-d 0`), so it is not
+# one, and a wait for the outcome cannot stop at it. A call is one gc-visit-open
+# invocation the stub logs. msg_has reads the live server through process
+# substitution, never a pipe into grep -q, so a match is not lost to SIGPIPE
+# under `set -o pipefail`.
+calls_ge() { local n; n=$(grep -c '=== call ===' "$2" 2>/dev/null); [ "${n:-0}" -ge "$1" ]; }             # calls_ge N FILE
+says_ge()  { local n; n=$(grep -c 'display-message .*-d [1-9]' "$2" 2>/dev/null); [ "${n:-0}" -ge "$1" ]; } # says_ge N FILE
+lines_ge() { local n; n=$(grep -c '' "$2" 2>/dev/null); [ "${n:-0}" -ge "$1" ]; }                          # lines_ge N FILE
 msg_has()  { grep -q "$1" < <(tmux -L "$SOCKET" show-messages 2>/dev/null); }
 
 [ -f "$SCRIPT" ] && ok "tmux-visit-prompt.sh present" || { bad "missing at $SCRIPT"; exit 1; }
@@ -293,7 +291,6 @@ case "$1" in
     # -p means "print the format", which is how the handler reads the client
     # and session. Everything else is a message to the operator.
     for a in "$@"; do [ "$a" = "-p" ] && { echo "${FAKE_FORMAT:-}"; exit 0; }; done ;;
-  show-environment) printf 'GC_AGENT=%s\n' "${FAKE_AGENT:-}" ;;
 esac
 exit 0
 TMUXSTUB
@@ -645,6 +642,7 @@ has "$tcalls" "cancelled — nothing filed" \
     "CANCELSAY: a cancel says so — silence is what makes it indistinguishable from a broken key"
 has "$tcalls" "Esc discards" \
     "CANCELSAY: ...and names the reason the text is gone, which is the one fact that makes it legible"
+hasnt "$tcalls" "gc visit: filing" "CANCEL: ...and no in-flight notice claims a filing that never starts"
 
 # (CANCELKEEP) — the preserve branch, exercised on the ONLY thing that can
 # reach it: a non-zero exit that nonetheless left bytes in the file. Real `gum
@@ -819,26 +817,21 @@ for blank in "" "   "; do
     has "$(cat "$TMP/tmux.log")" "nothing typed" "BLANK: '${blank}' still tells the operator"
 done
 
-# (INDICATOR)
-FAKE_AGENT_NAME="gcvp.test-$$"
-INDICATOR_PATH="/tmp/gc-status-gcvp-test-$$.indicator"
-CFG_SLOW="$TMP/cfg-slow"; mkcfg "$CFG_SLOW" '#!/bin/sh
-sleep 0.3
+# (FILING) — the intake stub writes a mark into the tmux log when it runs, so
+# the log's own order shows the notice went up before the intake and the
+# outcome came after it.
+CFG_MARK="$TMP/cfg-mark"; mkcfg "$CFG_MARK" '#!/bin/sh
+printf "=== intake ===\n" >> "$TMUX_CALLS"
 echo "gc-visit-open: subject tk-sub04 — visit filed (x)."'
-rm -f "$INDICATOR_PATH"
-(
-    export CALLS="$TMP/calls.log" TMUX_CALLS="$TMP/tmux.log" GUM_CALLS="$TMP/gum.log"
-    export FAKE_TOPIC="a slow topic" TMPDIR="$TMP/tmpfiles"
-    export FAKE_FORMAT="gc-toolkit__probe" FAKE_AGENT="$FAKE_AGENT_NAME"
-    : > "$TMUX_CALLS"
-    PATH="$TMP/gumbin:$TMP/bin:$PATH" sh "$SCRIPT" "$CFG_SLOW"
-)
-wait_for has_file "$INDICATOR_PATH" \
-    && ok "INDICATOR: the in-flight slot is written while the intake runs" \
-    || bad "INDICATOR: no indicator at $INDICATOR_PATH while the intake ran"
-wait_for no_file "$INDICATOR_PATH" \
-    && ok "INDICATOR: the slot is cleared when the intake finishes" \
-    || { bad "INDICATOR: the slot was not cleared when the intake finished"; rm -f "$INDICATOR_PATH"; }
+FAKE_FORMAT="gc-toolkit__probe" run_handler "$CFG_MARK" "a topic in flight"
+fcalls=$(cat "$TMP/tmux.log")
+case "$fcalls" in
+    *"gc visit: filing"*"=== intake ==="*"gc visit: subject tk-sub04"*)
+        ok "FILING: the notice shows before the intake runs, and the outcome follows it" ;;
+    *) bad "FILING: the notice does not precede the intake and its outcome (in: $fcalls)" ;;
+esac
+has "$fcalls" "display-message -c gc-toolkit__probe -C -d 0 gc visit: filing" \
+    "FILING: it goes to the presser's client, holds until a message or key press replaces it, and keeps the pane drawing"
 
 # (TIMEOUT)
 CFG_HANG="$TMP/cfg-hang"; mkcfg "$CFG_HANG" '#!/bin/sh
