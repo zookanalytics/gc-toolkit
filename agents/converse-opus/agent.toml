@@ -35,9 +35,11 @@ attach = true
 # option, so this sets it for the sitting's session alone and leaves the
 # server's global value as it is: a client attached with
 # `-f no-detach-on-destroy`, and every client on any other session, still moves
-# on. Gas City runs session_live after every start of the session with
-# GC_TMUX_SOCKET naming the city's tmux server, and re-applies a changed value
-# without a restart. The `=<name>:` target matches the session exactly.
+# on. `gc-helm engage` runs its attach as a child, so once the client exits it
+# prints the sitting's last hand-back below tmux's `[exited]`. Gas City runs
+# session_live after every start of the session with GC_TMUX_SOCKET naming the
+# city's tmux server, and re-applies a changed value without a restart. The
+# `=<name>:` target matches the session exactly.
 session_live = ['tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" detach-on-destroy on']
 # Empty on purpose, and empty is not what protects a sitting. A sitting runs as
 # a manual (spawn-on-engagement) session, never pool_managed, and all three

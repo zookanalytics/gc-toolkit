@@ -101,6 +101,14 @@ step-5 hold and the step-7 sign-off both.
   reassurance-adjective (`proven`, `safe`, `costs nothing`). A single
   obvious course is one recommendation, not a manufactured list.
 
+**Record each hand-back on the visit, then post it.** The operator reads a
+sitting in a terminal tab, and the pane goes when the sitting ends. The tab
+then prints the last hand-back recorded on the visit, so record every one you
+post, each framing and the sign-off, as its own text: the header, the body and
+the decision, never the detail above them or the close-out line below. Each
+record replaces the one before. The step-5 and step-7 skills carry the command,
+and a record that fails does not hold the post back.
+
 **A hand-back with nothing for the operator to decide is legal.**
 Sometimes the whole point of a sitting is that they wanted to know
 something and now do, and an invented decision spends the attention

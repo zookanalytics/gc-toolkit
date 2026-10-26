@@ -93,6 +93,13 @@ Definitions define (**The hand-back**): detail and evidence first, the
 hand-back itself as the last word, and — since a decision is open here —
 lead its close with the recommendation. Every framing that returns a
 decision wears that shape; this hold and the step-7 sign-off both.
+Record the hand-back on the visit just before you post it (**Record each
+hand-back on the visit, then post it**):
+```bash
+"$CONV/gc-helm.sh" handback "$VISIT" <<'HANDBACK'
+<the hand-back as you post it: header, body, decision>
+HANDBACK
+```
 
 Then offer the close-out, as the last line and the only thing below
 the hand-back. It keeps the bottom of a reply clear of standing-by

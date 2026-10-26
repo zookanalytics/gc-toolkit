@@ -6,14 +6,15 @@
 # (services/helm); this script renders nothing.
 # Verbs (full grammar and per-verb notes in usage(), `gc-helm --help`): the
 # write verbs open, engage, react, takeaway, demand, park, priority, dismiss,
-# accept, and the read-only resolve and unplaced. open, engage and react take a <subject>
-# (a bead id, a PR number or URL, or a superseded id) and resolve it to the
-# live bead that owns the work by metadata and the graph, never a title; an
-# unresolvable or ambiguous reference is refused and nothing is filed.
+# handback, accept, and the read-only resolve and unplaced. open, engage and
+# react take a <subject> (a bead id, a PR number or URL, or a superseded id)
+# and resolve it to the live bead that owns the work by metadata and the graph,
+# never a title; an unresolvable or ambiguous reference is refused and nothing
+# is filed.
 # Callers: tmux-pick-helm.sh + gc-visit-open.sh (open), helm-svc POST
 # /helm/open via GC_HELM_OPEN_TOOL (open — its stderr/stdout sentences are
 # parsed by services/helm/internal/server, guarded by open_parity_test.go),
-# converse and the proactive worker (takeaway), converse (demand), the
+# converse and the proactive worker (takeaway), converse (demand, handback), the
 # placement sitting (unplaced), operators by hand (park, priority).
 # Exit codes: 0 ok, 2 usage, 3 environment (jq/gc missing, rigs
 # unenumerable — each failure names its own operator move),
@@ -61,6 +62,7 @@ Usage:
   gc-helm priority <bead-id> <P0-P4> [--dry-run]  set the priority of a bead that follows nothing, and re-rank the work that follows it
   gc-helm priority <bead-id> --shift <±n> [--dry-run]  set the shift of a bead that follows a parent or an anchor: +1 is one level later, -1 one level sooner
   gc-helm dismiss  [<bead-id>] [--reason "..."] [--json]  the operator is done with this subject: end its sitting by closing its open visit; a DONE row is not cleared, it ages out of the window (subject inferred from the current sitting when omitted); --json prints {subject,matched,closed,ok} and names which identity matched each visit
+  gc-helm handback <visit-id> < hand-back  record the hand-back a converse sitting is posting, read from stdin, on its visit, replacing the one before; engage prints the latest in the operator's tab once the sitting has ended
   gc-helm accept <bead-id> [--reason "..."]  accept a recommendation: resolve the human gate that put it to the operator, dispatch the subject's gc.recommended_formula at the subject (a failed dispatch reopens the gate), and dismiss its visit, no sitting; refuses a subject that carries no recommended formula (subject or visit id)
   gc-helm resolve <bead-id|pr-number|pr-url>  print the LIVE bead a reference resolves to (a PR ref to its anchor, a superseded id to its successor); a live id or an unrecognized reference prints unchanged, an unresolvable or ambiguous PR is refused. Read-only, files nothing — gc-visit-open uses it to route a PR reference before it becomes a topic
   gc-helm unplaced [--json]  list the placement sitting's queue: every live bead in the city's stores marked placement=pending that nothing has placed since (no parent, route, arm, assignee or live pour), priority then age; --json prints one object for a caller: the rows as beads, the suspended rigs it skipped, and the rigs whose store did not answer. Read-only, files nothing; exits 4 after the list when a store did not answer
@@ -189,6 +191,14 @@ gc.continuation_group or tracks edge. That is what lets a bare `gc-helm dismiss`
 end the sitting the operator is reading. Inference fails CLOSED — no identity,
 no held visit, more than one, or an unreadable listing each refuse rather than
 guess a subject, and name the explicit-id form as the fix.
+
+handback records the hand-back a converse sitting is posting, each framing and
+the sign-off, on its visit. The text is read from stdin and stamped as
+gc.handback with gc.handback_at, replacing the one recorded before, then read
+back. engage runs its attach as a child, so when the tab's tmux client exits,
+engage reads the visit. A closed visit prints how it closed and the latest
+hand-back; a visit still open prints the command that re-attaches. A bead that
+is not a visit is refused, and so is an empty stdin.
 EOF
 }
 
@@ -2501,6 +2511,54 @@ current_sitting_subject() {
     SITTING_LISTING="$_vjson"; SITTING_LISTING_DIR="${BEADS_DIR:-}"
 }
 
+# ── Verb: handback ───────────────────────────────────────────────────
+# A converse sitting records each hand-back it posts, every framing and the
+# sign-off, on its VISIT. The text arrives on stdin and replaces the one
+# recorded before, so the visit carries the sitting's latest words. engage's
+# attach path prints them once the sitting's session has ended and the
+# operator's tab is back at a shell, where nothing of the pane survives. The
+# takeaway is the board's one-line headline; this is the hand-back whole.
+# gc.handback and gc.handback_at land in one write, and the text is read back.
+cmd_handback() {
+    bead=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -h|--help) usage; exit 0 ;;
+            -*) echo "$PROG: handback: unknown flag '$1'" >&2; exit 2 ;;
+            *) [ -z "$bead" ] || { echo "$PROG: handback takes one visit id" >&2; exit 2; }; bead="$1"; shift ;;
+        esac
+    done
+    [ -n "$bead" ] || { echo "$PROG: handback needs <visit-id>, with the hand-back on stdin" >&2; usage; exit 2; }
+    handback_text=$(cat)
+    if [ -z "$(printf '%s' "$handback_text" | tr -d '[:space:]')" ]; then
+        echo "$PROG: handback: stdin carried no hand-back, so nothing was recorded on $bead. Pipe in the hand-back as it is posted." >&2
+        exit 2
+    fi
+    verify_subject "$bead" handback "Nothing was recorded." || exit $?
+    handback_kind=$(printf '%s' "$VS_ROW" | jq -r '.metadata.task_kind // ""' 2>/dev/null || true)
+    if [ "$handback_kind" != "visit" ]; then
+        echo "$PROG: handback: $bead is not a visit (task_kind '${handback_kind:-<none>}'), and a hand-back is recorded on the visit its sitting holds. Nothing was recorded." >&2
+        exit 2
+    fi
+    path=$(rig_path_for_bead "$bead")
+    db=""; [ -n "$path" ] && [ -d "$path/.beads" ] && db="$path/.beads"
+    handback_at=$(iso_now)
+    # One repair write, because a write that exits 0 can still read back without
+    # its value (the store behaviour meta_now guards against on the takeaway).
+    handback_ok=""
+    for _hb_try in 1 2; do
+        # shellcheck disable=SC2086  # ${db:+--db "$db"} expands to 0 or 2 space-free fields
+        gc bd update "$bead" ${db:+--db "$db"} --set-metadata "gc.handback=$handback_text" \
+            --set-metadata "gc.handback_at=$handback_at" >/dev/null 2>&1 || true
+        if [ "$(meta_now "$bead" gc.handback)" = "$handback_text" ]; then handback_ok=1; break; fi
+    done
+    if [ -z "$handback_ok" ]; then
+        echo "$PROG: handback: the hand-back did not read back on $bead, so its tab would print an older one, or none. Re-run it." >&2
+        exit 4
+    fi
+    echo "$PROG: handback: recorded on $bead at $handback_at"
+}
+
 # ── Verb: dismiss ────────────────────────────────────────────────────
 # The operator's explicit "end this sitting". converse runs with no
 # idle_timeout, so a held visit keeps its pane up until something closes the
@@ -4497,12 +4555,52 @@ cmd_engage() {
             ;;
     esac
 
+    # Once the attach returns, the tab is back at this shell, and what it prints
+    # next is the operator's only account of the sitting it left: nothing of the
+    # pane survives it. tmux shows [exited] when the sitting's session ended
+    # (each converse template sets detach-on-destroy on its own session) and
+    # [detached] when the operator left it, and both exit 0, so the visit says
+    # which. A closed visit is a sitting that ended, and the tab prints how the
+    # visit closed and the last hand-back the sitting recorded on it
+    # (cmd_handback). A visit still open is a sitting still going, and the tab
+    # prints how to re-attach. A failed attach reads the same visit first,
+    # because a sitting that ended before the tab reached it is reported, not
+    # offered for an attach.
+    engage_after_attach() {
+        _aa_row=$(row_now "$VISIT")
+        _aa_meta() { printf '%s' "$_aa_row" | jq -r --arg k "$1" '(.metadata // {})[$k] // "" | tostring' 2>/dev/null || true; }
+        _aa_status=$(printf '%s' "$_aa_row" | jq -r '.status // ""' 2>/dev/null || true)
+        if [ "$_aa_status" = "closed" ]; then
+            _aa_outcome=$(_aa_meta gc.outcome)
+            _aa_reason=$(_aa_meta gc.outcome_reason)
+            _aa_at=$(_aa_meta gc.handback_at)
+            # The text is the sitting's own, printed to the operator's terminal,
+            # so control bytes other than tab and newline are dropped.
+            _aa_text=$(_aa_meta gc.handback | tr -d '\000-\010\013-\037\177')
+            printf '\nThe sitting on %s has ended: visit %s closed%s%s.\n' "$_eng_for" "$VISIT" \
+                "${_aa_outcome:+ as $_aa_outcome}" "${_aa_reason:+ ($_aa_reason)}"
+            if [ -n "$_aa_text" ]; then
+                printf 'Its last hand-back%s:\n\n%s\n' "${_aa_at:+, recorded $_aa_at}" "$_aa_text"
+            else
+                printf 'It recorded no hand-back.\n'
+            fi
+        elif [ "$1" -ne 0 ]; then
+            echo "$PROG: engage: could not attach to $sid — attach when ready: gc session attach $sid" >&2
+        elif [ -z "$_aa_status" ]; then
+            printf '\nCould not read visit %s, so whether its sitting has ended is unknown: gc bd show %s\n' "$VISIT" "$VISIT"
+        else
+            printf '\nThe sitting on %s is still open (visit %s). Re-attach: gc session attach %s\n' "$_eng_for" "$VISIT" "$sid"
+        fi
+    }
+
     # The summary already printed the attach line; on the default path we attach
     # a started sitting. One still unstarted at the bound is left unattached,
     # because the attach would launch it without its prompt.
     if [ "$engage_attach" = "1" ]; then
         if [ "$start_rc" -eq 0 ]; then
-            gc session attach "$sid" || echo "$PROG: engage: could not attach to $sid — attach when ready: gc session attach $sid" >&2
+            attach_rc=0
+            gc session attach "$sid" || attach_rc=$?
+            engage_after_attach "$attach_rc"
         else
             echo "$PROG: engage: the reconciler has not started $sname after ${ENGAGE_WAIT_TIMEOUT}s (its state in 'gc session list': ${start_state:-unreadable}), so it was not attached; an attach now would launch it without its prompt. Attach once it reads active there: gc session attach $sid" >&2
         fi
@@ -4522,8 +4620,9 @@ case "${1:-}" in
     park)          shift; cmd_park "$@" ;;
     priority)      shift; cmd_priority "$@" ;;
     dismiss)       shift; cmd_dismiss "$@" ;;
+    handback)      shift; cmd_handback "$@" ;;
     accept)        shift; cmd_accept "$@" ;;
     board)         echo "$PROG: the board moved to 'helm-svc board' (services/helm)" >&2; exit 2 ;;
     -h|--help|help) usage; exit 0 ;;
-    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, accept, takeaway, demand, park, priority, dismiss, resolve, unplaced, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
+    *)             echo "$PROG: unknown verb '${1:-}' (try: open, engage, react, accept, takeaway, demand, park, priority, dismiss, handback, resolve, unplaced, help; the board is 'helm-svc board')" >&2; usage; exit 2 ;;
 esac

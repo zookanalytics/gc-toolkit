@@ -33,6 +33,7 @@ is important information you want to communicate to the operator — a live
 decision, a routing answer, anything they need to read or may want to respond
 to, anything past "settled and done" — do not sign off this turn.** Post the
 hand-back in the shape the prompt's Definitions define (**The hand-back**),
+recorded on the visit first by the block below the sign-off's shape,
 leave the visit OPEN, and wait for operator input the way a held sitting does;
 signing off now would close the visit under a message they have not read. The
 sitting ends on a later turn: the operator's `gc-helm dismiss`, further
@@ -122,7 +123,13 @@ with its recommendation.>
 ```
 A converse is about its one subject; name another bead only where the
 conversation's substance genuinely leads there, and then as a plain
-sentence.
+sentence. Record it on the visit just before you post it (the prompt's
+**Record each hand-back on the visit, then post it**):
+```bash
+"$CONV/gc-helm.sh" handback "$VISIT" <<'HANDBACK'
+<the sign-off as you post it>
+HANDBACK
+```
 Only then close the visit through the shared guarded close — the sitting's
 last action, with nothing said after it. `visit-close.sh` stamps the outcome
 word and its one-line reason, reads both back, and only then closes; the

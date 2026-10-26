@@ -1450,7 +1450,7 @@ keys = [
   "stale_escalated_at", "stale_escalated_to",
   "visit.recheck", "sweep.*", "triage.*",
   "gc.pr_visit_summary", "gc.pr_visit_actions",
-  "gc.ruling", "gc.folded_into",
+  "gc.ruling", "gc.folded_into", "gc.handback", "gc.handback_at",
 ]
 # The gc.takeaway family and gc.demand_for carry their mechanics in the comment
 # above and in [holds] (settled_keys, terminal_wait_key): gc-helm.sh, signoff.sh
@@ -1532,6 +1532,13 @@ keys = [
 #   close-answered follows it, as it follows bead-rehome.sh's gc.superseded_by on
 #   a re-homed visit, to the visit whose ruling answers the question. Never
 #   cleared. A bead id in the folded visit's own store.
+# gc.handback / gc.handback_at — on a VISIT, the latest hand-back its converse
+#   sitting posted, whole (a framing or the sign-off), and when it was recorded
+#   (RFC-3339 UTC). gc-helm.sh `handback` writes both in one update, each record
+#   replacing the one before, and reads the text back. gc-helm.sh `engage` reads
+#   them once the tab's attach returns on a closed visit, and prints the text in
+#   the operator's terminal as the sitting's last words. Absent, the tab says the
+#   sitting recorded no hand-back. Never cleared. Freeform multi-line text.
 
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by
