@@ -57,30 +57,27 @@ not started, so when only one member waits, gate that member. No closing
 line means the wait did not land, so the merge or the work it was to hold is
 NOT held: do NOT post the framing.
 
-**3. Write the headline.** The subject's headline says what the operator
-owes, and its wait flag says what holds the subject. Pass `--waiting-on` the
-gate that holds it, one the conversation replies to or the one step 2 filed
-on it. When no gate holds the subject, pass `--no-wait`: nothing waits on it
-but the conversation, which the board shows in session on the subject's row.
+**3. Write the headline, and the held state when a gate holds the subject.**
+The subject's headline says what the operator owes, and its wait flag says
+what holds the subject. Pass `--waiting-on` the gate that holds it, one the
+conversation replies to or the one step 2 filed on it. A pre-PR (unanchored)
+subject that gate blocks also moves to `held` while the operator owes the
+answer, so the anchor readers leave it alone, and the sign-off moves it back:
 ```bash
-"$CONV/gc-helm.sh" takeaway "$SUBJECT" "holding — $NEED" --by converse --waiting-on <the gate that holds the subject>
+"$CONV/gc-helm.sh" takeaway "$SUBJECT" "holding — $NEED" --by converse --waiting-on <the gate that holds the subject> \
+  && if [ "$("$CONV/lifecycle.sh" state "$SUBJECT")" = unanchored ]; then "$CONV/lifecycle.sh" transition "$SUBJECT" --to held --route human; fi
 ```
+When no gate holds the subject, write the headline alone, with `--no-wait` in
+place of `--waiting-on`, and leave the subject's state as it is: nothing waits
+on it but the conversation, which the board shows in session on the subject's
+row, and a held bead must carry a live edge (`doctor/check-wait-is-an-edge`).
 When the writer refuses the headline, the board cannot show the hold: do NOT
 post the framing. Fix what it names and re-run.
 
-**The headline is the sentence; `held` is the state.** A pre-PR
-(unanchored) subject that a gate blocks moves to `held` while the operator
-owes the answer, so the anchor readers leave it alone, and the sign-off moves
-it back:
-```bash
-[ "$("$CONV/lifecycle.sh" state "$SUBJECT")" = unanchored ] \
-  && "$CONV/lifecycle.sh" transition "$SUBJECT" --to held --route human
-```
-Where `$SUBJECT` already carries an anchor state the held transition is
-skipped, and refused if attempted: `merge.sh`, `gate-ensure.sh` and
-`pr-facts.sh` enumerate anchors by that state, and `held` drops it from all
-three. Only with a gate that blocks it does a subject go `held`, because a
-held bead must carry a live edge (`doctor/check-wait-is-an-edge`).
+**The headline is the sentence; `held` is the state.** Where `$SUBJECT`
+already carries an anchor state the held transition is skipped, and refused if
+attempted: `merge.sh`, `gate-ensure.sh` and `pr-facts.sh` enumerate anchors by
+that state, and `held` drops it from all three.
 
 Never park a live conversation: the writer's `--release` clears the
 assignee and route, and the only place it belongs is a stand-down
