@@ -24,6 +24,12 @@
 #      wisp query reads empty, and `--type=wisp` is not an issue type at all —
 #      it errors. Either way the caller concludes "no wisp" and the row it was
 #      looking for leaks.
+#   4. THE DEACON'S STORE FOLLOWS ITS SHELL. Without `--city`, `gc bd list` and
+#      `gc bd mol wisp` answer from the store the working directory selects,
+#      and the deacon's shell keeps whatever directory it last changed to. From
+#      a rig checkout its reconcile reads that rig's store, finds no wisp, and
+#      pours one there, where no later city-store reconcile looks. So every
+#      deacon query and pour names the city store.
 #
 # Two guards per agent, both executed here, extracted verbatim from the shipped
 # instructions so the test cannot drift from what the agent actually reads:
@@ -80,6 +86,14 @@ set -u
 # test by looking like "nothing found".
 VALID_TYPES=" bug feature task epic chore decision agent convergence convoy event gate merge-request message molecule rig role session spec step "
 
+# A call names the city store with a non-empty --city; gc treats an empty one
+# as absent. An unnamed store is the ambient one the working directory selects:
+# GC_AMBIENT_FIXTURE when the caller sets it, else the same fixture.
+city_pinned=false
+for a in "$@"; do
+  case "$a" in --city=?*) city_pinned=true ;; esac
+done
+
 case "${1:-} ${2:-}" in
   "bd list")
     status=all
@@ -96,6 +110,8 @@ case "${1:-} ${2:-}" in
         --include-infra) infra=true ;;
       esac
     done
+    store="$GC_FIXTURE"
+    [ "$city_pinned" = false ] && [ -n "${GC_AMBIENT_FIXTURE:-}" ] && store="$GC_AMBIENT_FIXTURE"
     if [ -n "$type" ]; then
       case "$VALID_TYPES" in
         *" $type "*) ;;
@@ -112,7 +128,7 @@ case "${1:-} ${2:-}" in
          | select($a == "" or (.assignee // "") == $a)
          | select($t == "" or (.issue_type // "") == $t)
          | select($infra or ((.ephemeral // false) | not))
-       ] | if $lim > 0 then .[0:$lim] else . end' "$GC_FIXTURE"
+       ] | if $lim > 0 then .[0:$lim] else . end' "$store"
     ;;
   "bd mol")
     # gc bd mol burn <id> --force
@@ -123,6 +139,9 @@ case "${1:-} ${2:-}" in
     fi
     # gc bd mol wisp <formula> --root-only ... --json
     if [ "${3:-}" = "wisp" ]; then
+      if [ -n "${GC_POURED_IN:-}" ]; then
+        if [ "$city_pinned" = true ]; then echo city >> "$GC_POURED_IN"; else echo ambient >> "$GC_POURED_IN"; fi
+      fi
       [ "${GC_POUR_EMPTY:-0}" = "1" ] && { echo '{}'; exit 0; }
       echo '{"new_epic_id":"w-new"}'
       exit 0
@@ -144,6 +163,9 @@ chmod +x "$TMP/bin/gc"
 
 # --- Runners. ----------------------------------------------------------------
 # Both read $AGENT_ID and the extracted snippet files the agent loop writes.
+# Each run sets GC_CITY_PATH, as every session's environment does. A caller
+# that sets RUN_AMBIENT to a fixture file runs the snippet in a directory whose
+# own store differs from the city store: an unpinned query reads RUN_AMBIENT.
 
 # run_reconcile <fixture-json> -> "<survivor>|<burned,ids>"
 run_reconcile() {
@@ -154,8 +176,8 @@ run_reconcile() {
   : > "$TMP/burned"; : > "$TMP/wisp"
   ( export PATH="$TMP/bin:$PATH" GC_FIXTURE="$TMP/fixture.json" \
            GC_BURNED="$TMP/burned" GC_UPDATED="$TMP/updated" GC_AGENT="$AGENT_ID" \
-           GC_RIG="$AGENT_RIG"
-    # shellcheck disable=SC1091
+           GC_RIG="$AGENT_RIG" GC_CITY_PATH="/city" GC_AMBIENT_FIXTURE="${RUN_AMBIENT:-}"
+    # shellcheck disable=SC1090,SC1091
     . "$script"
     printf '%s' "$WISP" > "$TMP/wisp" )
   printf '%s|%s' "$(cat "$TMP/wisp")" "$(sort "$TMP/burned" | paste -sd, -)"
@@ -164,12 +186,13 @@ run_reconcile() {
 # run_pour <assign-fails> <pour-empty> <burn-fails> <gc-bead-id> [fixture] [script]
 #   -> "<exit>|<burned,ids>|<updated,ids>"
 run_pour() {
-  : > "$TMP/burned"; : > "$TMP/updated"
+  : > "$TMP/burned"; : > "$TMP/updated"; : > "$TMP/poured"
   printf '%s' "${5:-[]}" > "$TMP/fixture.json"
   local script="${6:-$TMP/pour.sh}" rc=0
   ( export PATH="$TMP/bin:$PATH" GC_FIXTURE="$TMP/fixture.json" \
            GC_BURNED="$TMP/burned" GC_UPDATED="$TMP/updated" GC_AGENT="$AGENT_ID" \
-           GC_RIG="$AGENT_RIG" GC_BEAD_ID="${4:-}" \
+           GC_RIG="$AGENT_RIG" GC_BEAD_ID="${4:-}" GC_CITY_PATH="/city" \
+           GC_AMBIENT_FIXTURE="${RUN_AMBIENT:-}" GC_POURED_IN="$TMP/poured" \
            GC_ASSIGN_FAILS="${1:-0}" GC_POUR_EMPTY="${2:-0}" GC_BURN_FAILS="${3:-0}"
     bash "$script" >/dev/null 2>&1 ) || rc=$?
   printf '%s|%s|%s' "$rc" \
@@ -374,6 +397,29 @@ for SPEC in "${AGENTS[@]}"; do
        "$AGENT: REGRESSION: a foreign gc.rig orphan is skipped; this rig's gc.rig orphan is adopted"
   fi
 
+  # The deacon's wisps live in the city store, and its shell can stand in a rig
+  # checkout whose own store holds none of them (mechanism 4). RUN_AMBIENT is
+  # that rig store, empty here.
+  if [ "$SCOPE" = city ]; then
+    printf '[]' > "$TMP/ambient.json"
+    eq "$(RUN_AMBIENT="$TMP/ambient.json" run_reconcile "$(fx "$FX_LEAK")")" "w-run|w-orph" \
+       "$AGENT: REGRESSION: from a rig checkout the reconcile still reads the city store"
+
+    # CONTROL: without --city the reconcile reads the rig store, finds no wisp,
+    # and the startup block goes on to pour one into that store.
+    sed 's/ --city="\$GC_CITY_PATH"//' "$TMP/reconcile.sh" > "$TMP/reconcile-ambient.sh"
+    if cmp -s "$TMP/reconcile.sh" "$TMP/reconcile-ambient.sh"; then
+      bad "$AGENT: control did not strip --city from the reconcile — its shape changed, re-check the sed"
+    else
+      eq "$(RUN_AMBIENT="$TMP/ambient.json" run_reconcile "$(fx "$FX_LEAK")" "$TMP/reconcile-ambient.sh")" "|" \
+         "$AGENT: CONTROL: an unpinned reconcile from a rig checkout finds no wisp"
+    fi
+
+    # The startup pour sits outside the reconcile markers, so its line is read.
+    eq "$(grep -F "gc bd mol wisp $TITLE " "$PROMPT" | grep -c -- '--city="$GC_CITY_PATH"' || true)" "1" \
+       "$AGENT: the startup pour names the city store"
+  fi
+
   # --- Pour guard. -----------------------------------------------------------
   eq "$(run_pour 0 0 0 w-cur)" "$POUR_OK" \
      "$AGENT: happy path: pours and assigns the new wisp"
@@ -417,6 +463,24 @@ for SPEC in "${AGENTS[@]}"; do
     fi
   fi
 
+  # The pour block from a rig checkout: its fallback still finds the current
+  # wisp in the city store, and the next wisp lands there.
+  if [ "$SCOPE" = city ]; then
+    eq "$(RUN_AMBIENT="$TMP/ambient.json" run_pour 0 0 0 "" "$(fx "$FX_CURRENT")")" "$POUR_OK" \
+       "$AGENT: REGRESSION: from a rig checkout the pour block resolves and burns the city-store wisp"
+    eq "$(paste -sd, - < "$TMP/poured")" "city" \
+       "$AGENT: REGRESSION: from a rig checkout the next wisp is poured into the city store"
+    sed 's/ --city="\$GC_CITY_PATH"//' "$TMP/pour.sh" > "$TMP/pour-ambient.sh"
+    if cmp -s "$TMP/pour.sh" "$TMP/pour-ambient.sh"; then
+      bad "$AGENT: control did not strip --city from the pour block — its shape changed, re-check the sed"
+    else
+      eq "$(RUN_AMBIENT="$TMP/ambient.json" run_pour 0 0 0 "" "$(fx "$FX_CURRENT")" "$TMP/pour-ambient.sh")" "1||w-new" \
+         "$AGENT: CONTROL: an unpinned pour block from a rig checkout cannot resolve the current wisp"
+      eq "$(paste -sd, - < "$TMP/poured")" "ambient" \
+         "$AGENT: CONTROL: an unpinned pour from a rig checkout lands in the rig store"
+    fi
+  fi
+
   # --- Static guard: wisp-query invariants over every fenced block. ----------
   # Nothing else in the pack locks these four invariants down, so they are
   # asserted here, over every fenced block in the prompt rather than only the
@@ -442,6 +506,8 @@ for SPEC in "${AGENTS[@]}"; do
     eq "${RIGGED:-0}" "${TOTAL:-0}" "$AGENT: every wisp query is rig-scoped (passes \$GC_RIG to jq)"
   else
     eq "${RIGGED:-0}" "0" "$AGENT: no wisp query is rig-scoped (the city singleton matches by title alone)"
+    CITIED=$(printf '%s\n' "$Q" | grep -c -- '--city="$GC_CITY_PATH"' || true)
+    eq "${CITIED:-0}" "${TOTAL:-0}" "$AGENT: every wisp query names the city store"
   fi
 done
 
