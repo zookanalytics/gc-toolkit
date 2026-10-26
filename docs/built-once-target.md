@@ -265,11 +265,6 @@ and the change that fires the trigger deletes it.
   with its test. Trigger: no open step bead names it. Carried by tk-1tfzr71.12.
 - The PR reminder's old marker. Trigger: no open PR carries one. Carried by the
   cutover's follow-up, which tk-o6pd01i files.
-- `migrate-approval-out-of-check-set.sh`, a one-shot migration its own header
-  calls disposable, 276 lines with its test. Trigger: every store migrated,
-  which its dry run shows by finding nothing to change. Carried by tk-aomj8do,
-  which runs that dry run against every store that imports the pack before it
-  deletes the script (P2).
 - Readers of legacy shapes, which "legacy" names 30 times across 15 runtime
   files: the bare `superseded_by` key, the `gc.proactive_reaction=1` proof and
   PR bodies older than the managed region, among others. Trigger: no store or
@@ -296,14 +291,6 @@ A restatement needs no trigger either, once the doctrine has its home.
 - Tests that hold two copies equal, and tests that assert a retired name stays
   retired. Trigger: the copy or the name is gone. Carried by tk-c8724xi and
   tk-1tfzr71.25.
-
-### Dead code
-
-`assets/scripts/surface-census.sh`, `tools/gc-polecat-metrics.sh`,
-`tools/bead-universe-reachability-fixture.sh` and the one-shot approval
-migration: nothing in the tree calls them, and they weigh 1,675 lines with
-their tests. Trigger: none. tk-aomj8do deletes them, and keeps the approval
-migration only while a store still has something for it to change (P2).
 
 ## The deletion schedule
 
@@ -352,14 +339,14 @@ convoy lands only after the operator approves its design.
 | B | tk-1tfzr71.18 | warrants, the dance, pin keepalive, boot health, quota park, each after its re-check | 5,571 |
 | B | tk-1tfzr71.19 | the doctor runner, the liveness census, the incident ledger, the copied patrol steps | 7,859 |
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
-| B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, unused tools | 2,688 |
+| B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,474 |
 
 The whole files that tk-o6pd01i, tk-kvdomjb and the migration members name come
-to 64k of the 187k between the baseline and the built-once estimate. Their
+to 63k of the 187k between the baseline and the built-once estimate. Their
 partial rewrites carry more, chiefly the board, `gc-helm.sh`, the work and
 patrol formulas, deferred dispatch and the sign-off. tk-c8724xi and the page's
-own items below carry the script-dir and decline copies, the dead code and the
-step-text tests. Most of the comment and test weight of the code that survives
+own items below carry the script-dir and decline copies and the step-text
+tests. Most of the comment and test weight of the code that survives
 has no bead.
 
 ### 4. The page's own items
@@ -369,7 +356,6 @@ Each item is carried by the bead it names.
 | # | Item | Extent | Carried by | Waits on |
 |---|---|---|---|---|
 | P1 | [Rule 3](#the-rules)'s size line: `measure.sh` moves into `tools/`, and each PR's managed summary carries its size change | the tool and the summary line | tk-i17pn6e | this page landing |
-| P2 | Delete the dead code now | 1,675 lines | tk-aomj8do | nothing |
 | P3 | One decline call replaces the 20 copies of the decline sequence in step text, under rule 2 | 20 copies, 29 refusal sentences | tk-qitjxcm | tk-c8724xi, which edits the same files |
 | P4 | Rule 2: step text calls tested scripts, and the block-extraction tests go with the blocks they extract | 3.9k lines of shell in step text, 52 tests of 16.4k lines | tk-udqthpx states the rule and adds its lint, and tk-1tfzr71.12, .19 and .20 apply it to the formulas they rewrite | this page landing, for tk-udqthpx |
 | P5 | Each Go port (tk-ssm8qns) carries only the migration map's surviving intents and deletes the shell it replaces in the same change, and rule 3's size line shows its net | the port's contract | a note on tk-ssm8qns | the port's blockers |
