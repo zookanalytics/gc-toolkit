@@ -273,6 +273,30 @@ eq "$RC" "0" "exit 0 on the re-run"
 eq "$(created)" "1" "still exactly one child (dedup on source_ruling_bead)"
 has "$OUT" "already dispatched" "re-run reports the child is already in flight"
 
+echo "# --- a later ruling of the same conversation is refused while its first rework is open ---"
+# A conversation can rule on a turn that does not sign off and again at its
+# sign-off, and both rulings key their rework on the conversation. The writer
+# adopts the live child with the work order it was filed with, so a later
+# ruling it adopted would never reach the branch.
+reset "$ANCHOR_PR"
+"$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" >/dev/null 2>&1
+: > "$STUB_GC_LOG"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "also rename the section" 2>&1); RC=$?
+eq "$RC" "2" "exit 2 when the conversation's open rework records another ruling"
+eq "$(created)" "1" "…filing no second child"
+has "$OUT" 'fix-1, which records "operator ruling (conversation vis-1): apply the amendment"' "…naming the open rework and what it carries"
+eq "$(grep -c -E '^(bd update|bd dep|bd create|sling)' "$STUB_GC_LOG")" "0" "…with nothing written"
+hasnt "$(meta fix-1 rejection_reason)" "rename the section" "…so the open rework's work order is as it was filed"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2>&1); RC=$?
+eq "$RC" "0" "a re-run of the first ruling still adopts its rework"
+eq "$(created)" "1" "…filing no second child"
+tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-cr.XXXXXX")
+jq -c 'map(if .id == "fix-1" then .status = "closed" else . end)' "$STUB_STORE" > "$tmp" && mv "$tmp" "$STUB_STORE"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "also rename the section" 2>&1); RC=$?
+eq "$RC" "0" "once the first rework has landed and closed, the later ruling is filed"
+eq "$(created)" "2" "…as a child of its own"
+has "$(meta fix-2 rejection_reason)" "also rename the section" "…carrying the later ruling"
+
 echo "# --- guard: a non-PR anchor is refused, nothing filed ---"
 reset '[{"id":"anc-1","status":"open","metadata":{"merge_result":"","branch":"polecat/anc-1","target":"main"}}]'
 OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "x" 2>&1); RC=$?

@@ -70,16 +70,17 @@
 #   --rework | --no-rework | --retire <kind> (with a ruling): what the ruling
 #     does to an already-published PR. --rework says its branch must change:
 #     the rework is filed against the subject anchor, sourced by this
-#     conversation. --no-rework says the branch stands, and the PR reminder
-#     records that. --retire says the PR will not land: pr-dispose.sh records
-#     the disposition under <kind> (re-homed, folded, fixed-upstream, duplicate
-#     or not-needed) and closes the PR. Its successor is --successor, the bead
-#     that carries the work now, which every kind but not-needed requires; under
-#     not-needed it defaults to this conversation, the evidence that ruled the
-#     work out. A ruling on a subject at merge_result=pull_request must give one
-#     of the three; given none, it is refused with nothing written. The rework
-#     or the retirement runs before every other write, and when it does not
-#     complete nothing else is written.
+#     conversation, and refused while a rework the conversation filed for
+#     another ruling is open. --no-rework says the branch stands, and the PR
+#     reminder records that. --retire says the PR will not land: pr-dispose.sh
+#     records the disposition under <kind> (re-homed, folded, fixed-upstream,
+#     duplicate or not-needed) and closes the PR. Its successor is --successor,
+#     the bead that carries the work now, which every kind but not-needed
+#     requires; under not-needed it defaults to this conversation, the evidence
+#     that ruled the work out. A ruling on a subject at
+#     merge_result=pull_request must give one of them; given none, it is refused
+#     with nothing written. The rework or the retirement runs before every other
+#     write, and when it does not complete nothing else is written.
 # Exit: 0 signed off, or with --answer the named gates answered; 1 stopped
 #   short — a read failed, the rework did not file, the PR did not retire, the
 #   headline did not land, a gate did not close, or the conversation did not

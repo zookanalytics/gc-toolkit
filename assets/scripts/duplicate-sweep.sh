@@ -236,9 +236,10 @@ CANDS_EOF
 #     second, independent proof that it was never dispatched;
 #   - its source is CLOSED. For a review, close_review is signoff.sh's last
 #     write, so no request-changes pass is left that could adopt and dispatch
-#     the twin while this arm closes it. For a ruling, the sign-off that files
-#     the child closes the conversation after it, and only a sign-off runs
-#     converse-rework.sh, so no filing is left that could adopt it either;
+#     the twin while this arm closes it. For a ruling, only the conversation's
+#     own sitting runs converse-rework.sh (at its sign-off, or with --answer on
+#     an earlier turn), and a closed conversation has no sitting left, so no
+#     filing is left that could adopt it either;
 #   - a sibling LANDED: another rework child naming the same source and the
 #     same anchor, never disposed itself (no successor pointer, no
 #     duplicate_of), recording no outcome but shipped (scaffolding-sweep's

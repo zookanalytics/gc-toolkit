@@ -29,8 +29,9 @@
 #   The anchor must be an open PR: live in the store, at
 #   merge_result=pull_request, carrying no disposition (gc.pr_close_disposition_kind
 #   or gc.superseded_by), and naming its branch, its landing target and its PR.
-#   --ruling-bead is the conversation the ruling was reached in. --pool defaults to
-#   rework-child.sh's default.
+#   --ruling-bead is the conversation the ruling was reached in. While a rework
+#   it filed for another ruling is open, this ruling is refused. --pool defaults
+#   to rework-child.sh's default.
 # Output: rework-child.sh's result line, "<child> <route> <filed|adopted|in-flight>".
 # Exit: rework-child.sh's when it does not dispatch the child. Otherwise 0 once
 #   every lane is back to unreviewed, and 2 when that supersede fails: the child
@@ -112,8 +113,27 @@ if [ -n "$PR_NUMBER" ]; then
 else
   TITLE="Rework branch $BRANCH: apply operator ruling"
 fi
+REASON="operator ruling (conversation $RULING_BEAD): $RULING"
+
+# A conversation can rule more than once: on a turn that does not sign off
+# (converse-signoff.sh --answer), and again at its sign-off. Its rework children
+# share one source key, and the writer adopts the live one with the work order
+# it was filed with, which is right for a re-run of the same ruling. A live child
+# that records another reason would carry that reason to the branch and never
+# this ruling, so the filing is refused, with nothing written.
+PRIOR=$(bd_list --metadata-field "source_ruling_bead=$RULING_BEAD" --status="$LIVE_STATUSES") \
+  || die "could not read the live rework children of conversation $RULING_BEAD; nothing filed"
+OTHER=$(printf '%s' "$PRIOR" | jq -r --arg v "$RULING_BEAD" --arg a "$ANCHOR" --arg r "$REASON" '
+    [ .[]? | select(((.metadata.source_ruling_bead // "") | tostring) == $v)
+           | select(((.metadata.anchor_bead // "") | tostring) as $on | $on == $a or $on == "")
+           | ((.metadata.rejection_reason // "") | tostring) as $was
+           | select($was != "" and $was != $r)
+           | "\(.id), which records \"\($was)\"" ] | first // empty' 2>/dev/null)
+[ -z "$OTHER" ] \
+  || die "conversation $RULING_BEAD already has an open rework, $OTHER. It keeps the work order it was filed with, so this ruling would not reach the branch; nothing filed. A ruling that asks nothing of the branch beyond that rework takes --no-rework. One that asks for more waits for that rework to land: keep the gate it answers open, and re-run once the rework has closed"
+
 ARGS=(--anchor "$ANCHOR" --ruling-bead "$RULING_BEAD" --branch "$BRANCH" --target "$TARGET"
-      --title "$TITLE" --reason "operator ruling (conversation $RULING_BEAD): $RULING"
+      --title "$TITLE" --reason "$REASON"
       --pr-url "$PR_URL")
 [ -z "$PR_NUMBER" ] || ARGS+=(--pr-number "$PR_NUMBER")
 [ -z "$POOL_NAME" ] || ARGS+=(--pool "$POOL_NAME")
