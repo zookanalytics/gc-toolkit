@@ -73,7 +73,7 @@ cap() ( if rig_carries_converse "$1"; then echo 0; else echo 1; fi )
 # The regression: an importer carries converse ONLY in the roster, never in its
 # own checkout. The predicate takes a rig NAME and reads the roster, so a rig
 # present there is capable regardless of any checkout.
-export ROSTER="$(roster_converse_for gc-toolkit gascity rig-a)"
+ROSTER="$(roster_converse_for gc-toolkit gascity rig-a)"; export ROSTER
 is "an imported rig present in the roster is capable" "$(cap gascity)" 0
 is "the pack-source rig is capable" "$(cap gc-toolkit)" 0
 
@@ -82,7 +82,7 @@ is "the pack-source rig is capable" "$(cap gc-toolkit)" 0
 is "a rig absent from a readable roster is NOT capable" "$(cap rig-b)" 1
 
 # An HQ / city-store root carries no converse in the roster — correctly excluded.
-export ROSTER="$(roster_converse_for gc-toolkit gascity)"
+ROSTER="$(roster_converse_for gc-toolkit gascity)"; export ROSTER
 is "an HQ/city root absent from the roster is NOT capable" "$(cap mycity)" 1
 
 # --- the match is converse-specific and variant-aware -------------------------
@@ -120,7 +120,7 @@ is "a roster whose .agents is not an array fails open (capable)" "$(cap gascity)
 
 # --- the roster is fetched once per shell (picker loop pays one query) ---------
 
-export ROSTER="$(roster_converse_for gc-toolkit gascity)"
+ROSTER="$(roster_converse_for gc-toolkit gascity)"; export ROSTER
 : > "$ROSTER_CALLS"
 ( rig_carries_converse gc-toolkit; rig_carries_converse gascity; rig_carries_converse mycity ) >/dev/null 2>&1
 is "three checks in one shell fetch the roster once" "$(wc -c < "$ROSTER_CALLS" | tr -d ' ')" 1

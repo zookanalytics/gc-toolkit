@@ -553,8 +553,8 @@ echo "# the create stamps the dedup keys, so a lost follow-up write cannot orpha
 # leaves a dedup-complete visit. STUB_UPD_FAIL fails every update to prove no
 # follow-up write is relied on.
 reset
-STUB_UPD_FAIL=1
-out1=$("$SUT" --subject tk-orphan --key stuck --message "first" 2>&1); rc1=$?
+export STUB_UPD_FAIL=1
+"$SUT" --subject tk-orphan --key stuck --message "first" >/dev/null 2>&1; rc1=$?
 eq "$rc1" 0 "the first escalation succeeds with no follow-up update at all"
 eq "$(visits)" "1" "one visit filed"
 eq "$(meta vis-1 escalation_key)" "stuck" "the create stamped escalation_key without any update"

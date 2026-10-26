@@ -131,10 +131,10 @@ reset_fix() { base_sessions; base_beads; }
 # OUT and RC are set in the CALLER: a $(...) capture would run the script in a
 # subshell and the exit code — the whole contract — would be the subshell's.
 OUT=""; RC=0
-run_check() { # run_check [args...]
+run_check() { # run_check
   rm -rf "$STATE"; : > "$STUB_PIN_LOG"; : > "$STUB_GC_LOG"
   unset STUB_SERVICE_FAIL STUB_SESSION_LIST_FAIL STUB_SESSION_LIST_GARBAGE STUB_SHOW_FAIL STUB_PIN_FAIL 2>/dev/null || true
-  OUT="$(PIN_KEEPALIVE_CITY="$TMP/city" PIN_KEEPALIVE_STATE_DIR="$STATE" "$SCRIPT" --check "$@" 2>&1)"; RC=$?
+  OUT="$(PIN_KEEPALIVE_CITY="$TMP/city" PIN_KEEPALIVE_STATE_DIR="$STATE" "$SCRIPT" --check 2>&1)"; RC=$?
 }
 run_exec() { # run_exec [args...]
   : > "$STUB_PIN_LOG"; : > "$STUB_GC_LOG"
@@ -269,7 +269,7 @@ eq "$(wc -c < "$STUB_GC_LOG" | tr -d ' ')" "0" "and read nothing at all — the 
 echo "── --force reclassifies inside the window without moving it ──"
 STAMPED="$(cat "$STATE/last-pass")"
 sleep 1
-OUT3="$(PIN_KEEPALIVE_CITY="$TMP/city" PIN_KEEPALIVE_STATE_DIR="$STATE" "$SCRIPT" --check --force 2>&1)"; RC3=$?
+PIN_KEEPALIVE_CITY="$TMP/city" PIN_KEEPALIVE_STATE_DIR="$STATE" "$SCRIPT" --check --force >/dev/null 2>&1; RC3=$?
 eq "$RC3" "1" "--force reclassifies the quiet roster"
 eq "$(cat "$STATE/last-pass")" "$STAMPED" "--force leaves the window where it found it"
 

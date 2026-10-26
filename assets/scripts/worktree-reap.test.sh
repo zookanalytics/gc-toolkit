@@ -743,7 +743,7 @@ echo 'not json' > "$TMP/statuses.broken.json"
 : > "$TMP/beads.broken.json"
 bead_to "$TMP/beads.broken.json" zz-bad   closed 100 "" polecat/zz-bad
 bead_to "$TMP/beads.broken.json" zz-child open   ""  "" polecat/zz-bad
-BAD_TREE="$(git -C "$REPO2" rev-parse main^{tree})"
+BAD_TREE="$(git -C "$REPO2" rev-parse "main^{tree}")"
 BAD_TIP="$(git -C "$REPO2" commit-tree "$BAD_TREE" -p "$(git -C "$REPO2" rev-parse main)" -m 'work in zz-bad')"
 git -C "$REPO2" branch polecat/zz-bad "$BAD_TIP"
 git -C "$REPO2" update-ref refs/remotes/origin/main "$BAD_TIP"

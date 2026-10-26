@@ -1152,8 +1152,8 @@ func TestBeadsGatherDegradesPerRig(t *testing.T) {
 		},
 	}
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{
-		"gc-toolkit":  populatedStore(),
-		"rig-a": broken,
+		"gc-toolkit": populatedStore(),
+		"rig-a":      broken,
 	})
 
 	res, err := src.Gather(context.Background())
@@ -2397,8 +2397,8 @@ func TestDoneWindowUsesOneClockAcrossRigs(t *testing.T) {
 	}
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk", "rig-a": "ra"})
 	src := newBeadsTestSource(t, root, map[string]*fakeStore{
-		"gc-toolkit":  boundary("tk"),
-		"rig-a": boundary("ra"),
+		"gc-toolkit": boundary("tk"),
+		"rig-a":      boundary("ra"),
 	}, withClock(advancingClock(testNow, 2*time.Hour)))
 
 	res, err := src.Gather(context.Background())
