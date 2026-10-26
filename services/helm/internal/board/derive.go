@@ -487,10 +487,11 @@ func ownStartFailure(id string, sittings []Sitting) string {
 //
 // It runs after the wrapper fold, where Held is final — [applyFold] flips a
 // subject to Held when a visit wrapper folds onto it — so it reads the settled
-// flag rather than the per-anchor value [computeTile] computed. Parked is the
-// fallback, including the case a held row's sitting has aged out of the window:
-// an open visit no session is on reads as waiting for the operator, never as
-// being worked.
+// flag rather than the per-anchor value [computeTile] computed. It runs before
+// [tagClusters], which keys on the section and needs a failed start rewrites.
+// Parked is the fallback, including the case a held row's sitting has aged out
+// of the window: an open visit no session is on reads as waiting for the
+// operator, never as being worked.
 //
 // A failed start outranks a live sitting on the same row. Each visit on a
 // subject is a conversation of its own, and the failure is the one state on
@@ -2116,9 +2117,15 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	// each row to its top-most tile.
 	assignGroupRoots(folded, anchors)
 
+	// Split Held into parked, engaged or start-failed on each held row, from the
+	// same sittings the fold read. After the fold so it sees the final Held, and
+	// before the clusters, because marking a failed start rewrites the row's
+	// section and needs.
+	classifyVisits(folded, facts)
+
 	// Tag rows that are instances of one recurring template. This is last of the
 	// derivation passes because it keys on the FINAL section and needs, which the
-	// fold above can change.
+	// fold and the visit states above can change.
 	tagClusters(folded)
 
 	// Turn each pre-PR branch into a GitHub link, learned once per rig from a
@@ -2133,11 +2140,6 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	// (merged or closed). Then let the frontier lead with that state so the
 	// board's primary vocabulary is the liveness.
 	classifyPhases(folded, anchors, facts)
-
-	// Split Held into parked vs engaged on each held row, from the same sittings
-	// the fold read. After the fold so it sees the final Held, beside
-	// classifyPhases because both stamp a per-row derived state the renderers read.
-	classifyVisits(folded, facts)
 
 	sort.SliceStable(folded, func(i, j int) bool { return owedFirst(folded[i], folded[j]) })
 

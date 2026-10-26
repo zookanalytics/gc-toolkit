@@ -170,3 +170,33 @@ func TestClosedSubjectIsNeverMarked(t *testing.T) {
 		t.Errorf("the visit's own row carries the failure: state=%q owed=%v", own.VisitState, own.Owed)
 	}
 }
+
+// TestStartFailedRowClustersOnWhatItReads: rows sharing a section and a needs
+// sentence fold into one line, and the mark rewrites the failed row's section
+// and needs. So the row clusters on what it reads after the mark, and stands on
+// a line of its own rather than behind a sentence it no longer carries, while
+// the rows it used to share that sentence with still fold together.
+func TestStartFailedRowClustersOnWhatItReads(t *testing.T) {
+	ids := []string{"tk-a", "tk-b", "tk-c", "tk-d"}
+	facts := Facts{Visits: map[string]bool{}, Sittings: []Sitting{failedSitting("tk-va", "tk-a", "startup timeout")}}
+	var anchors []Anchor
+	for _, id := range ids {
+		anchors = append(anchors, heldSubject(id))
+		facts.Visits[id] = true
+		if id != "tk-a" {
+			facts.Sittings = append(facts.Sittings, Sitting{ID: "tk-v" + id[3:], Subject: id, Status: "open"})
+		}
+	}
+	b := BuildBoard(anchors, fixtureNow, false, nil, facts)
+
+	failed := mustTile(t, b, "tk-a")
+	if failed.VisitState != VisitStartFailed || failed.ClusterKey != "" {
+		t.Errorf("the failed start stands on its own line: state=%q cluster_key=%q needs=%q",
+			failed.VisitState, failed.ClusterKey, failed.Needs)
+	}
+	for _, id := range ids[1:] {
+		if got := mustTile(t, b, id); got.ClusterKey == "" || got.ClusterKey != got.Needs {
+			t.Errorf("%s folds with the rows sharing its needs: cluster_key=%q needs=%q", id, got.ClusterKey, got.Needs)
+		}
+	}
+}
