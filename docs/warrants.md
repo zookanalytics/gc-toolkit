@@ -95,14 +95,29 @@ shares only the word ([authority-map.md](authority-map.md)).
   [gh-origin-guard.md](gh-origin-guard.md).
 - **Stands in for.** Scoping an agent's outbound writes to the repositories its
   rig owns.
-- **Evidence.** Gas City's trust model covers which commands run and which
-  secrets reach them, and nothing in it scopes where an agent's `gh` writes go
-  (`docs/reference/trust-boundaries.md`). Its documentation describes no
-  per-agent write scope.
-- **Verified.** 2026-10-19, at `gastownhall/gascity` main 1e05ae624.
-- **Retires when.** Gas City ships per-agent write scoping. A fine-grained token
-  limited to the owned repositories may cover the origin half on GitHub's side,
-  and the next re-verification checks that first.
+- **Evidence.**
+  - Gas City's trust model covers which commands run and which secrets reach
+    them, and nothing in it scopes where an agent's `gh` writes go
+    (`docs/reference/trust-boundaries.md`).
+  - Its configuration gives an agent explicit `env`, which can carry a token,
+    and no field of an agent or a rig limits where it writes (`Agent` and `Rig`
+    in `docs/reference/config.md`). Its documentation describes no per-agent
+    write scope.
+  - In `gastownhall/gascity-packs`, the `github` pack's `comment-issue`,
+    `push-branch` and `create-pr` commands write as a GitHub App installation,
+    so GitHub holds those writes to the installation's repositories. It scopes
+    no agent's own `gh`.
+- **Verified.** 2026-10-26, at `gastownhall/gascity` main 37bd09351 and
+  `gastownhall/gascity-packs` main dac12a4a8, and against GitHub's *Managing
+  your personal access tokens* page, read the same day.
+- **Retires when.** Gas City ships per-agent write scoping. A GitHub
+  fine-grained token covers only part of the origin rule. GitHub refuses it a
+  write outside its one owner's selected repositories, so a stranger's
+  repository is held out on GitHub's side. It cannot reach a second owner's
+  repositories, or one where its account is an outside collaborator, yet a
+  rig's origin can sit under another owner's account and a city-scope agent
+  owns every rig's origin. A token the rigs share also leaves each rig's agents
+  free to write to the others' repositories, which the guard refuses.
 
 ## Prep worktree staging record
 
