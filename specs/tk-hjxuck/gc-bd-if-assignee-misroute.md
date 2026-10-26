@@ -44,7 +44,7 @@ For `unclaim` there is a second contributor. `unclaim` is absent from the
 `internal/bdflags` subcommand manifest, so `bdArgsNameClassOwnedBead`
 (`cmd/gc/cmd_bd_by_id.go`) falls into its "undecidable — judge every token"
 branch and also inspects the `--if-assignee` value; this path matters for a
-class-reserved (`gcs-`) session id, while the `lx-`-shaped ids seen in practice
+class-reserved (`gcs-`) session id, while the `hq-`-shaped ids seen in practice
 misroute through `resolveBdScopeTarget` above.
 
 ### Reproduction (mycity, gascity HEAD cf63b7da1, 2026-09-15)

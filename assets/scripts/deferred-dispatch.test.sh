@@ -842,26 +842,26 @@ has "$out" 'b-1 is HELD by park "Parked until the operator unparks it" on ancest
 
 echo "# arm warns on a cross-store blocker it cannot resolve"
 # bd resolves dependencies within one store, so a `blocks` edge to a bead in
-# another rig (here sl-x, which has no row in this store) holds nothing: bd
+# another rig (here ra-x, which has no row in this store) holds nothing: bd
 # reports the bead ready (_ready) and `bd list --ready` sees no blocker. arm's
 # hint would then say nothing holds the bead while the blocker is open, so arm
 # must name the unresolvable blocker instead, the one
-# place a human can redirect the sequencing. Another store holds sl-x, and this
-# run is unpinned, so `gc bd` would answer a read naming sl-x from that store
+# place a human can redirect the sequencing. Another store holds ra-x, and this
+# run is unpinned, so `gc bd` would answer a read naming ra-x from that store
 # and find its row: the check must ask only about b-1's own edges.
-store '[{"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"","_ready":true,"_deps":[{"id":"sl-x","dependency_type":"blocks","status":"open"}]}]'
-printf '%s' '[{"id":"sl-x","status":"open","assignee":"","metadata":{},"notes":""}]' > "$TMP/foreign.json"
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"","_ready":true,"_deps":[{"id":"ra-x","dependency_type":"blocks","status":"open"}]}]'
+printf '%s' '[{"id":"ra-x","status":"open","assignee":"","metadata":{},"notes":""}]' > "$TMP/foreign.json"
 out="$(STUB_FOREIGN_STORE="$TMP/foreign.json" "$SUT" arm b-1 --target rig/pool 2>&1)"; rc=$?
 eq "$rc" 0 "arm still records the dispatch on a cross-store-blocked bead"
 eq "$(meta b-1 gc.dispatch_when_ready)" "rig/pool" "the dispatch record is written"
-has "$out" "sl-x" "arm names the unresolvable cross-store blocker"
+has "$out" "ra-x" "arm names the unresolvable cross-store blocker"
 has "$out" "no row in this store" "arm says why that blocker holds nothing here"
 hasnt "$out" "nothing holds b-1" "arm does NOT claim the cross-store-blocked bead is unblocked"
 
 # The same arm pinned with --db: no routing, and the same answer.
-store '[{"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"","_ready":true,"_deps":[{"id":"sl-x","dependency_type":"blocks","status":"open"}]}]'
+store '[{"id":"b-1","status":"open","assignee":"","metadata":{},"notes":"","_ready":true,"_deps":[{"id":"ra-x","dependency_type":"blocks","status":"open"}]}]'
 out="$(STUB_FOREIGN_STORE="$TMP/foreign.json" "$SUT" arm b-1 --target rig/pool --db "$TMP/rig/.beads" 2>&1)"
-has "$out" "has a 'blocks' edge to sl-x" "a pinned arm names the cross-store blocker too"
+has "$out" "has a 'blocks' edge to ra-x" "a pinned arm names the cross-store blocker too"
 hasnt "$out" "nothing holds b-1" "and does not claim the bead is unblocked"
 
 echo "# arm does not mistake an in-store gate blocker for a cross-store one"

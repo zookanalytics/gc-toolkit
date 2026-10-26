@@ -79,8 +79,8 @@ its `key=value` argument never parses as a bare id.
 
 The failure is not the empty answer. It is a gate that reads one as
 permission: no owning bead, so nothing is protected, so delete. A prune run
-from inside a `tk-` rig that reads a `su-` bead's ambient-store miss as its
-absence takes a whole live rig's worktrees for unowned.
+from inside a `tk-` rig that reads the ambient-store miss on another rig's
+bead as its absence takes a whole live rig's worktrees for unowned.
 
 So any gate whose next act is destructive — worktree prune or reclaim,
 witness salvage, source disposal — resolves the owning store from the id

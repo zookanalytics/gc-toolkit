@@ -144,12 +144,12 @@ de07aa3a 2026-05-06T19:28:28Z Zook Bot   docs: triage codex finding #1 ...
 5ce8049d 2026-05-06T19:29:26Z Zook Bot   docs: triage codex finding #2 ...
 93fdcd8c 2026-05-06T19:30:18Z Zook Bot   docs: triage codex finding #3 ...
 96da8ef0 2026-05-06T21:16:33Z John Zook  docs: allow Beads epic id 'yqslv' in cspell for audit doc
-47b76bef 2026-05-06T21:24:02Z John Zook  chore: ignore Beads work-item IDs (sl-XXXXX) in cspell
+47b76bef 2026-05-06T21:24:02Z John Zook  chore: ignore Beads work-item IDs (ra-XXXXX) in cspell
 ```
 
 Last 2 commits (96da8ef0, 47b76bef): operator manually fixed cspell
 allowlist after CI failed on the audit doc, which contained bead IDs
-`ra-yqslv` and `sl-XXXXX` that cspell did not recognize.
+`ra-yqslv` and `ra-XXXXX` that cspell did not recognize.
 
 ### PR #462 (Pilot 4, ra-zn84a, theme audit)
 
@@ -198,11 +198,11 @@ cspell errors.
    final step or expose a "kick back to claude-triage" rejection path.
 
 4. **Lower-cost option**: project-level cspell config that auto-allowlists
-   `sl-`/`tk-`/etc. bead-ID patterns globally. This is a one-time fix that
+   `ra-`/`tk-`/etc. bead-ID patterns globally. This is a one-time fix that
    would have prevented all three downstream commits in this pilot batch
    without changing the chain at all. (Out of this bead's scope but worth
    surfacing.) Operator's commit `47b76bef` ("chore: ignore Beads
-   work-item IDs (sl-XXXXX) in cspell") may already cover this for
+   work-item IDs (ra-XXXXX) in cspell") may already cover this for
    rig-a going forward.
 
 ## 4. Other friction observations

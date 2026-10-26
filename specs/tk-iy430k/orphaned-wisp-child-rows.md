@@ -119,7 +119,7 @@ space on the volume returned to 21 GiB. The transient peak is the thing to
 budget for: the store nearly triples before it shrinks.
 
 `gc dolt health` reports `orphans: []`, `quarantine: []` and no zombie
-processes. The hq backup manifest remains the newest file in `.dolt-backup/lx`,
+processes. The hq backup manifest remains the newest file in `.dolt-backup/hq`,
 which is the restorability invariant the deacon patrol's backup-manifest check
 enforces.
 

@@ -558,7 +558,7 @@ has "$OUT" "CrossStoreRouteError" "(XSTORE-NO) …tying it to the sling guard it
 set +e
 OUT="$(bash "$SCRIPT" deliverable gc-toolkit/gc-toolkit.converse hq-300fe 2>&1)"; RC=$?
 set -e
-eq "$RC" 1 "(XSTORE-CITY) a city-store (lx-) bead routed at a rig pool is refused"
+eq "$RC" 1 "(XSTORE-CITY) a city-store (hq-) bead routed at a rig pool is refused"
 
 echo "# deliverable falls through to the roster when target and bead share a store"
 set +e

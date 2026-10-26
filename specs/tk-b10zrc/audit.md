@@ -13,7 +13,7 @@ description: The full set of bead-creation sites reachable from city-scoped role
 unresolved rig — it warns and writes to the ambient store.
 
 A **city-scoped** role runs with `GC_RIG` unset from the city path, so an
-unqualified create resolves to the city (HQ / `lx-`) store. A **rig-workable**
+unqualified create resolves to the city (HQ / `hq-`) store. A **rig-workable**
 bead placed there — a task/bug meant for a rig's polecat pool — is unclaimable:
 the pool reads only its rig store, so the bead maroons. The two safe forms for a
 rig-less caller are to name the rig (`gc bd --rig <rig>`, `gc convoy create

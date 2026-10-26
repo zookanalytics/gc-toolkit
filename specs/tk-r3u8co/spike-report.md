@@ -136,7 +136,7 @@ gc dolt compact --gc-only --dry-run --only-db hq
 gc dolt compact --gc-only --only-db hq
 
 # 3. Confirm the drop and clear the warning.
-du -sh /home/zook/mycity/.beads/dolt/lx/.dolt
+du -sh /home/zook/mycity/.beads/dolt/hq/.dolt
 gc doctor 2>&1 | grep -i dolt-noms-size
 ```
 

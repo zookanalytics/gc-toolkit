@@ -316,7 +316,7 @@ for caller in gc-toolkit mycity ""; do
   label="GC_RIG=${caller:-<unset>}"
   reset; printf '[]' > "$CITY_STORE"
   out=$(run_city "$caller" --subject hq-hq1 --key k1 --message m 2>&1); rc=$?
-  eq "$rc" 0 "$label: an lx- subject's escalation files"
+  eq "$rc" 0 "$label: an hq- subject's escalation files"
   eq "$(city_visits)" "hq-hq1" "  ... its visit is in the city store"
   eq "$(jq 'length' "$STUB_STORE")" "0" "  ... and nothing landed in the caller's rig store"
   has "$(cat "$STUB_DEPS")" "vis-1|hq-hq1|tracks|city.json" "  ... the tracks edge is written in the city store, beside its subject"
@@ -417,13 +417,13 @@ has "$out" "reports no path" "  ... naming why the store could not be proven"
 echo "# a wisp subject files in the store its prefix names, and is never refused"
 # A wisp is ephemeral whatever its prefix resolves to, so its visit hangs on the
 # standing triage subject. When the prefix names a store, every call is pinned to
-# it by path, as for a durable subject: an lx- wisp's triage visit lands in the
+# it by path, as for a durable subject: an hq- wisp's triage visit lands in the
 # city store whatever the caller's GC_RIG. When no store can be derived, the
 # visit files in the ambient store rather than being refused, even with GC_RIG
 # unset.
 reset; printf '[]' > "$CITY_STORE"
 out=$(run_city gc-toolkit --subject hq-wisp-aaaaa --key k1 --message m 2>&1); rc=$?
-eq "$rc" 0 "an lx- wisp subject's escalation files"
+eq "$rc" 0 "an hq- wisp subject's escalation files"
 eq "$(jq -r '[.[] | .metadata.task_kind] | join(",")' "$CITY_STORE")" "triage-subject,visit" "  ... its triage subject and its visit are in the city store"
 eq "$(jq 'length' "$STUB_STORE")" "0" "  ... and nothing landed in the caller's rig store"
 if pinned_to_city; then ok "  ... every bd call was pinned to the city store by path"
