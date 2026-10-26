@@ -255,6 +255,17 @@ grep -q '^The old procedure, moved:$' "$REPO/$F" && ! grep -q '^The old procedur
 run_lint "$F"
 expect 0 "a block moved unedited to another step weighs nothing: exit 0"
 
+# The old procedure is copied, unedited, from step two into step one, and the
+# finding names step one, where the copy went.
+base_formula | awk '
+  /^Run the call:$/ { print "The old procedure, copied:"; print "```bash"; print "A=$(gc bd show \"$B\" --json)"; print "if [ -n \"$A\" ]; then"; print "  echo \"$A\""; print "fi"; print "```" }
+  { print }' > "$REPO/$F"
+grep -q '^The old procedure, copied:$' "$REPO/$F" && grep -q '^The old procedure:$' "$REPO/$F" \
+  && ok "the copy fixture copied the block" || bad "the copy fixture copied the block"
+run_lint "$F"
+expect 1 "a procedure copied into another step weighs on the step it was copied into: exit 1" \
+  "^$F:11: step text gains a procedure: step one gains shell blocks that do more than call a script, with 3 commands and control flow (if)"
+
 # --- Other formula paths. ------------------------------------------------------
 fresh_repo
 g mv "$F" formulas/mol-y.toml

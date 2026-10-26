@@ -427,7 +427,9 @@ AWKEOF
 # where line is the first line the change adds to the step's procedures, and
 # code lines are every line of code in those procedures. A
 # block whose code is unchanged, wherever it moved, is paired by its text and
-# weighs nothing; a block that is one call weighs nothing either.
+# weighs nothing. It pairs with a block of its own step before another step's,
+# so a copied procedure weighs on the step it was copied into. A block that is
+# one call weighs nothing either.
 JUDGE_AWK=$(cat <<'AWKEOF'
 FILENAME == OLD {
     split($0, f, "\034")
@@ -451,7 +453,10 @@ END {
     for (j in osid) had[osid[j]] = 1
     for (i = 1; i <= nn; i++)
         for (j = 1; j <= on; j++)
-            if (!oclaim[j] && ntext[i] == otext[j]) { oclaim[j] = 1; nclaim[i] = 1; break }
+            if (!oclaim[j] && ntext[i] == otext[j] && nsid[nstep[i]] == osid[ostep[j]]) { oclaim[j] = 1; nclaim[i] = 1; break }
+    for (i = 1; i <= nn; i++)
+        for (j = 1; j <= on && !nclaim[i]; j++)
+            if (!oclaim[j] && ntext[i] == otext[j]) { oclaim[j] = 1; nclaim[i] = 1 }
     for (j = 1; j <= on; j++)
         if (!oclaim[j] && (ocmd[j] > 1 || ocf[j] > 0)) { s = osid[ostep[j]]; ox[s] += ocmd[j]; oy[s] += ocf[j] }
     for (i = 1; i <= nn; i++) {
