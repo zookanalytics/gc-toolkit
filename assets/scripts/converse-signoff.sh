@@ -76,9 +76,10 @@
 #   --rework | --no-rework | --retire <kind> (with a ruling): what the ruling
 #     does to an already-published PR it reaches: the subject at
 #     merge_result=pull_request, and each bead at merge_result=pull_request
-#     that an open human gate the ruling answers releases. A ruling that reaches
-#     one must give one of them; given none, it is refused with nothing
-#     written. --rework says the PR's branch must change: the rework is filed
+#     that a human gate the ruling answers releases, while the gate is open or
+#     once this ruling's own answer has closed it, so a re-run reaches the PRs
+#     an earlier attempt did. A ruling that reaches one must give one of them;
+#     given none, it is refused with nothing written. --rework says the PR's branch must change: the rework is filed
 #     against that PR's anchor, sourced by this conversation, and refused while
 #     a rework the conversation filed for another ruling is open. --no-rework
 #     says the branch of each such PR stands, and the PR reminder records that.
@@ -267,10 +268,13 @@ for g in $REPLIES; do
   GATES_JSON=$(printf '%s' "$GATES_JSON" | jq -c --argjson r "$GROW" '. + [$r]')
 done
 # The gates the ruling answers: those --answer names, or else each one the
-# conversation replies to. Step 3 skips the ones --leave names.
+# conversation replies to. Step 3 skips the ones --leave names, and resolves the
+# rest with ANSWER.
 TO_ANSWER=""
+ANSWER=""
 if [ "$RULED" = yes ]; then
   if [ -n "$ANSWERING" ]; then TO_ANSWER="${ANSWER_GATES[*]}"; else TO_ANSWER="$REPLIES"; fi
+  case "$RULING" in ruled:*) ANSWER="$RULING" ;; *) ANSWER="ruled: $RULING" ;; esac
 fi
 # A ruling that changes what an open PR's branch must contain is demand on that
 # PR, and nothing but --rework turns it into demand: unfiled, the ruling lands
@@ -279,13 +283,16 @@ fi
 # any gate it answers releases the merge, or an approved PR lands first. Only
 # the sitting knows a ruling's consequence, so a ruling must answer the question
 # for each open PR it reaches: the subject when it is one, and each bead at
-# merge_result=pull_request that an open human gate the ruling answers releases,
-# such as an epic member whose gate the epic's sitting answers, or the other PR
-# behind a gate about two. What each such gate releases is read here, with the
-# other reads. A listing of a gate's beads, or the row of a bead it releases,
-# that does not read could hide an open PR, so the sign-off stops before it
-# writes anything, and a subject that will not read cannot be told from an open
-# PR either.
+# merge_result=pull_request that a human gate the ruling answers releases, such
+# as an epic member whose gate the epic's sitting answers, or the other PR behind
+# a gate about two. Such a gate is one still open, or one this ruling's own
+# answer has closed: an attempt that stopped after resolving it had already
+# acted on what it released, and the re-run it asks for must act on the same PR
+# rather than fall back to the subject. What each such gate releases is read
+# here, with the other reads. A listing of a gate's beads, or the row of a bead
+# it releases, that does not read could hide an open PR, so the sign-off stops
+# before it writes anything, and a subject that will not read cannot be told
+# from an open PR either.
 PR_ANCHORS=()
 GATE_WAITERS='{}'
 reaches_pr() { # <bead> — 0 when the ruling already reaches it as an open PR
@@ -301,8 +308,9 @@ if [ "$RULED" = yes ]; then
   [ "$(printf '%s' "$SUBJECT_ROW" | jq -r '.metadata.merge_result // ""')" = pull_request ] && PR_ANCHORS+=("$SUBJECT")
   for g in $TO_ANSWER; do
     printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g" && continue
-    printf '%s' "$GATES_JSON" | jq -e --arg g "$g" 'any(.[]; .id == $g and (.issue_type // "") == "gate"
-        and (.await_type // "") == "human" and ((.status // "") | ascii_downcase) != "closed")' >/dev/null 2>&1 || continue
+    printf '%s' "$GATES_JSON" | jq -e --arg g "$g" --arg a "$ANSWER" 'any(.[]; .id == $g and (.issue_type // "") == "gate"
+        and (.await_type // "") == "human"
+        and (((.status // "") | ascii_downcase) != "closed" or (.close_reason // "") == $a))' >/dev/null 2>&1 || continue
     WAITERS=$(gc bd dep list "$g" --direction=up --type blocks --json 2>/dev/null | grep -av '^gc bd:' | scrub \
       | jq -ce 'if type == "array" then [ .[] | objects ] else error("unread") end' 2>/dev/null) \
       || stopped "the beads that wait on gate $g could not be read, and answering it releases them, so an open PR among them could not be told; nothing was written"
@@ -422,7 +430,6 @@ if [ "$RULED" = yes ]; then
   # 3. The gates the ruling answers: those --answer names, or else each one the
   # conversation replies to. A reply onto a bead that is no human gate holds
   # nothing to resolve.
-  case "$RULING" in ruled:*) ANSWER="$RULING" ;; *) ANSWER="ruled: $RULING" ;; esac
   UNCLOSED=""
   for g in $TO_ANSWER; do
     if printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g"; then
