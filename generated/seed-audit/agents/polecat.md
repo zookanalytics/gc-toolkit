@@ -119,8 +119,8 @@ before it is where polecat-vs-polecat races live.
 ```bash
 # 1. Claim exactly one work item.
 gc hook --claim --json
-# 2. Only after a successful claim: read the bead and its formula steps.
-gc bd show <id> --json | jq '.[0].metadata'
+# 2. Only after a successful claim: orient from its result and one read.
+"[[PACK-ROOT]]/assets/scripts/claim-context.sh" <bead_id>
 # 3. Execute the steps in order. After closing any step bead, immediately run
 #    gc hook --claim --json again and keep going until a terminal step drains
 #    you or the hook returns no work.
@@ -131,8 +131,21 @@ Every `action: "work"` result is a claim you hold, whatever its `reason`.
 `existing_assignment` are claims already in your name, which is what a
 fresh-woken pool session sees when it was given work before it woke. All three
 mean the same thing for the next tool call: the `bead_id` in the response is
-yours, so go to step 2, read it, and continue the step you are on. None of them
-is a terminal answer, and only `action: "drain"` ends the turn.
+yours, so go to step 2 and continue the step you are on. None of them is a
+terminal answer, and only `action: "drain"` ends the turn.
+
+**Orient from the claim and one read.** Step 2 is the one read the claim
+needs. It prints the step's `gc.step_ref` and instructions, its workflow and
+input convoy, and the work bead's status, assignee, metadata, notes and
+description. A `step_reminder` in the result is the step's instructions, and a
+`claimed` result carries none. When the result carries one, add `--no-step`,
+so the read does not print the instructions again. Run it after your first
+claim of a bead or a workflow. A later claim in the same workflow, one with the
+same `root_bead_id`, needs no read when its result carries a `step_reminder`,
+and step 2 as written when it carries none. Do not read the claimed bead, its
+workflow root or its work bead again to learn what the work is. A step's own
+blocks still read what they act on, and a premise you read earlier is read
+again before you act on it.
 
 ## The governing rule: follow the formula the bead carries
 
