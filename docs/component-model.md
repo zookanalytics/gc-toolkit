@@ -461,8 +461,6 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/tmux-pick-helm.sh` | visit | The board picker. |
 | `assets/scripts/tmux-pick-session.sh` | visit | The session picker. |
 | `assets/scripts/tmux-keeper-toggle.sh` | visit | Pins or unpins the keeper in the session picker. |
-| `assets/scripts/tmux-status-line-override.sh` | visit | Sets the gc-toolkit status bar. |
-| `assets/scripts/gc-toolkit-status-line.sh` | visit | Renders what that status bar shows. |
 | `assets/scripts/work-outcome.sh` | visit | The one `gc.work_outcome=no-op` stamp a visit gets before it closes, for the work-record gate `gc bd close` runs. Every visit closer sources it: `visit-close.sh`, the `gc-helm.sh` dismiss verb, `bead-rehome.sh` and `converse-claim.sh`. |
 | `orders/feedback-miner.toml` | feedback | Fires the sweep of recently merged PR review threads. |
 | `orders/feedback-distiller.toml` | feedback | The daily heartbeat that judges pending observations. |
@@ -532,8 +530,8 @@ prerequisite, and the four exclusions above are what such a check encodes.
 ### The placements worth arguing about
 
 - **The operator surface is visit.** The board, the tmux bindings and pickers,
-  the status line, and the web terminal exist so a human can reach the queue
-  that subjects and visits hold. `services/helm` and `orders/helm-build.toml`
+  and the web terminal exist so a human can reach the queue that subjects and
+  visits hold. `services/helm` and `orders/helm-build.toml`
   sit there for the same reason: the board is the read half of human
   engagement, and the order exists only to keep it current.
 - **`reconcile-rig-checkouts` is merge.** A directory-imported pack runs from
