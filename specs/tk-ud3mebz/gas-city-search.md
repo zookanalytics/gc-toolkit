@@ -12,11 +12,11 @@ converse's fold, hold and sign-off compare. So the arch check asks what Gas
 City already ships for that need
 ([review-arch.md](../../docs/review-arch.md#the-checks), check 1). Nothing Gas
 City ships records, when a bead is filed, that it is a separate conversation
-from another bead on the same subject, and its gates and waits carry no topic.
-Each of its exclusivity primitives keeps one live holder per key and takes
-that key from its caller. A visit's topic is that key. The pack keeps it as
-metadata, which bd names as the extension point for an orchestrator's
-workflow data.
+from another bead on the same subject. Its message threads join beads only by
+replies, and its gates and waits carry no topic. Each primitive near the need
+that keeps one holder per key takes the key from its caller. A visit's topic
+is such a key, and the pack decides it. The pack keeps it as metadata, which
+bd names as the extension point for an orchestrator's workflow data.
 
 ## The surface and the need
 
@@ -74,12 +74,13 @@ session, to keep its worktree and conversation context. In the `gc` command,
 `gc.root_bead_id` or a group, and otherwise pins only open, unassigned
 siblings that share both. Graph routing pins `gc.session_affinity=require`
 beside a formula-declared group. The controller's continuation backstop
-qualifies a step only when both keys are set (`continuationRowCouldBeCandidate`),
-checks the step's workflow root again before it acts, and re-delivers the claim
-nudge to the pool session the step was pre-assigned to
-(`nudgeStalledPoolContinuations`). Package `beadmeta` lists both keys in
-`SessionAffinityMetadataKeys`, which must be cleared together whenever work is
-rerouted off its original session without a preserved assignee.
+qualifies a step only when it carries a group and `gc.session_affinity=require`
+(`continuationRowCouldBeCandidate`), checks the step's workflow root again
+before it acts, and re-delivers the claim nudge to the pool session the step
+was pre-assigned to (`nudgeStalledPoolContinuations`). Package `beadmeta` lists
+both keys in `SessionAffinityMetadataKeys`, which must be cleared together
+whenever work is rerouted off its original session without a preserved
+assignee.
 
 A continuation group gathers one workflow's steps onto one session. The pack
 files a visit with no `gc.root_bead_id`, so continuation never acts on one.
@@ -90,8 +91,8 @@ does stamp a visit's subject in `gc.continuation_group`, beside the visit's
 `tracks` edge, and `visit-identity.sh` reads the stamp only when that edge is
 missing. The packs that use groups (`gascity`, `superpowers`, `bmad`,
 `compound-engineering` and `gstack`) declare them on formula steps. Most group
-the steps that apply a review's findings, and `superpowers` keeps the steps of
-one development item under a group named for its issue.
+the steps that apply a review's findings, and `superpowers` keeps a development
+item's implementation steps under a group named for its issue.
 
 ### Gates, waits and questions
 
@@ -99,9 +100,10 @@ one development item under a group named for its issue.
   blocks one issue. `bd gate create` takes a type (`human`, `timer`, `gh:run`
   or `gh:pr`), the issue it blocks, a reason, a title, a timeout and an
   `--await-id`, which bd calls the condition identifier, such as a run ID or a
-  PR number. A human gate waits for a manual `bd gate resolve`. bd gives a gate
-  no field for the conversation it belongs to, so two gates on one bead are
-  told apart only by what their caller writes on them.
+  PR number. A human gate waits for a manual `bd gate resolve`. Its waiters,
+  which `bd gate add-waiter` registers, are the addresses woken when it closes.
+  bd gives a gate no field for the conversation it belongs to, so two gates on
+  one bead are told apart only by what their caller writes on them.
 - A formula's `[steps.gate]` table (`type`, `id`, `timeout`) compiles to a
   sibling gate bead that blocks its step. The formula spec lists the gate's
   `type` vocabulary as accepted but inert: no bundled watcher acts on it, and
@@ -115,13 +117,15 @@ one development item under a group named for its issue.
 - A pending interaction is a question a live session stops to ask, such as a
   tool approval prompt. The
   [API reference](https://docs.gascity.com/reference/api#pending-interactions)
-  lists them per session and city-wide, and clears one when it is answered,
-  withdrawn or replaced, or when its session is gone.
-- The `core` pack's `notify-on-human-gate-creation` and
-  `renudge-stale-human-gates` orders mail and nudge the addressee of an open
-  human gate, once per gate and again past a staleness threshold. They take the
-  addressee from the gate's assignee, then its `gc.deferred_assignee`, then the
-  city's escalation recipient.
+  lists them city-wide and returns a session's one in full, and clears one when
+  it is answered, withdrawn or replaced, or when its session is gone.
+- The `core` pack's `notify-on-human-gate-creation` order mails the addressee
+  of a human gate once, when the gate is created, and
+  `renudge-stale-human-gates` mails it again on an interval while the gate
+  stays open past a staleness threshold. Each nudges the addressee too when it
+  is a session rather than `human`. They take the addressee from the gate's
+  assignee, then its `gc.deferred_assignee`, then `GC_ESCALATION_RECIPIENT`,
+  which defaults to `human`.
 - A `gc converge` loop is a root bead whose gate, manual, a condition script or
   both, decides whether it runs again. A person answers a manual gate with
   `gc converge approve` or `gc converge iterate` on the loop's bead.
@@ -130,24 +134,25 @@ None of these carries a topic, and a session wait and a pending interaction
 each belong to one session. A sitting's demand is the other direction: an
 answer a person owes, which blocks the bead it gates and outlives the sitting
 that asked for it. No published pack creates a bd gate or reads `await_type`.
-The `gascity` pack's human checkpoints, in its `github-pr-review`,
-`github-issue-triage-base` and `github-issue-fix-base` workflows, and
-`superpowers`' approval steps park the session with
-`gc session wait --sleep --on-beads` on the step bead itself, record the
-checkpoint on their own run's root, and mail a person once. Each question there
-has a step bead of its own, so no two questions share a bead.
+The only gate commands a pack carries are in `gastown`'s deacon prompt, which
+checks timer and GitHub gates and lists them. The `gascity` pack's human
+checkpoints, in its `github-pr-review`, `github-issue-triage-base` and
+`github-issue-fix-base` workflows, and `superpowers`' approval steps park the
+session with `gc session wait --sleep --on-beads` on the step bead itself,
+record the checkpoint on their own run's root, and mail a person once. Each
+checkpoint waits on a step bead of its own, so no two checkpoints share a bead.
 
-### One live holder per key
+### One holder per key
 
-Gas City keeps one live holder per key in several places. Each takes the key
-from its caller.
+Gas City keeps one holder per key in several places near the need, and in each
+the key is the caller's.
 
 - A session alias is exclusive among open sessions (package `session`,
   `AliasConflictInfo`), and
   [`gc session new --alias`](https://docs.gascity.com/reference/cli#gc-session-new)
   sets it.
 - An external-messaging binding links one external conversation to one session
-  or agent, and binding a conversation that is already bound conflicts
+  or agent, and binding a bound conversation to another target conflicts
   ([`gc extmsg bind`](https://docs.gascity.com/reference/cli#gc-extmsg-bind);
   package `extmsg`, `Bind`). The client names its conversations: it picks a
   stable `conversation_id` for each call, chat thread or channel, and a
@@ -156,10 +161,12 @@ from its caller.
 - [`gc mail send --dedup`](https://docs.gascity.com/reference/cli#gc-mail-send)
   suppresses a send while a live message with the same key sits in the
   recipient's mailbox.
-- `gc sling` refuses to launch a formula on a bead while a run of that formula
-  on it is still live (package `sling`, `checkLegacySourceWorkflowConflict`).
+- Unless forced, `gc sling` refuses to launch a formula on a bead while a run
+  of that formula on it is live, so its key is the formula and the bead
+  (package `sling`, `checkLegacySourceWorkflowConflict`).
 - Attaching a sub-DAG to a workflow under an idempotency key reuses the one
-  already attached under that key (package `molecule`, `findExistingAttach`).
+  already attached under that key, even a closed one (package `molecule`,
+  `findExistingAttach`).
 
 Each makes a key exclusive and leaves the choice of key to its caller. None
 decides which visits on one subject are one conversation. The pack makes that
@@ -193,23 +200,46 @@ because the operator said so when filing it, whatever its text says, so a
 judgment by content cannot honor it. A session's `--title` is a human-readable
 label ([`gc session new`](https://docs.gascity.com/reference/cli#gc-session-new)).
 
+Gas City and bd thread messages, and a thread is joined only by a reply.
+`gc mail send` starts a thread with a fresh id, kept in a `thread:<id>` label,
+and [`gc mail reply`](https://docs.gascity.com/reference/cli#gc-mail-reply)
+files its message in the original's thread (package `beadmail`), which
+[`gc mail thread`](https://docs.gascity.com/reference/cli#gc-mail-thread)
+lists. bd's `replies-to` edge does the same for any bead, and its `thread_id`
+names the conversation's root (package `types`, `Dependency`). The fold needs
+the other default: two ordinary visits on one subject are one conversation
+with no reply between them, and a visit stands apart only when its filer gives
+it a key or a topic of its own. Nor can a visit reply to its subject, because
+bd keeps one edge per pair of beads whatever its type (the `dependencies`
+table's unique key on an issue and its target), and the visit's `tracks` edge
+to its subject records what it covers. A session's own conversation is derived
+from its bead and continuation epoch (package `session`,
+`LogicalConversationID`), so it names one sitting's transcript and cannot make
+two sittings one.
+
 ### The packs Gas City publishes
 
-No published pack decides whether two beads are one conversation, or scopes a
-person's question on a bead that several sessions share.
+Several published packs keep one item per key of their own. `oversight-rig`'s
+project lead writes no second escalation for a source bead an open one already
+references, `gastown` files at most one open warrant per target and sends a
+repeating mail with `gc mail send --dedup`, and the `gascity` pack's
+pull-request review resumes an earlier attempt on the same head commit. None
+of these lets a filer mark a second item on the same key as a separate
+concern, and no published pack files a person's question on a bead that
+several sessions share.
 
-- The chat packs separate concurrent conversations by the platform's own
-  identity. `slack-full`'s adapter keeps a thread-to-session registry
-  (`threadSessionRegistry`) for its launcher mode, to converge later posts in a
-  thread on one agent session. `discord` gives each managed launcher thread a
-  session of its own. A new concern starts a new thread, and the platform's
-  thread id is the key.
-- `oversight-rig` delivers a rig's escalations to the channel its project-lead
-  session is bound to, so a rig's escalations share one conversation.
-- `gastown` dedups a repeating notification with `gc mail send --dedup`, and
-  files at most one open warrant per target.
+- The chat packs key a conversation on the platform's own identity: a channel,
+  or a thread in the launcher modes of `slack-full` and `discord`.
+  `slack-full`'s adapter maps a launcher thread to one agent session
+  (`threadSessionRegistry`), so later posts in the thread converge on it, and
+  `discord` keys a launcher session on the launch and the agent's handle.
+  There a new concern starts a new thread, and the platform's thread id is the
+  key.
+- `oversight-rig` delivers a rig's escalations to the conversation its
+  project-lead session is bound to, so a rig's escalations share one
+  conversation.
 - `bmad`'s brainstorming skill names each session's output folder for its
-  topic, so several brainstorms on one project do not collide.
+  topic and date, so brainstorms on different topics do not collide.
 
 ## What the change does with it
 
@@ -237,6 +267,6 @@ The change composes what Gas City ships for each part, and keeps only the key.
 The change adds a metadata key and a sourced definition, and no bead kind or
 lifecycle state, so it adds no pack noun and needs no warrant
 ([review-arch.md](../../docs/review-arch.md#the-checks), check 2). This answer
-changes if Gas City ships a conversation identity that a filer can give a bead,
-or a topic on a gate that its lookup and resolution key on. Either would be the
-primitive to move the topic onto.
+changes if Gas City ships a conversation key that a filer can give beads that
+do not reply to one another, or a topic on a gate that its lookup and
+resolution key on. Either would be the primitive to move the topic onto.
