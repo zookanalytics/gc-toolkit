@@ -380,8 +380,9 @@ beads or finding beads (signoff.sh files the findings from your
 
 Pass on this same call every flag the check's method names for the verdict,
 and `--needs-you` when the review step named a decision for the operator.
-When signoff.sh refuses a verdict for a missing or invalid flag, it has written
-nothing, so re-run the call with the flag corrected; that is still the one
+When signoff.sh refuses a verdict for a missing or invalid flag, or refuses
+the finding set and lists what is wrong with it, it has written nothing, so
+correct the flag or `findings.json` and re-run the call; that is still the one
 verdict.
 
 **2. Failure arms.** signoff.sh binds no verdict to a later head: commits that

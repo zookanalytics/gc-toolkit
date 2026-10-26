@@ -485,9 +485,10 @@ quorum, exactly as `formulas/mol-review.toml`'s `review` step 5b specifies.
 **7. One call, through the one writer.** The verdict names `{{reviewed_oid}}`,
 the commit the quorum read, and signoff.sh refuses any other. Pass every flag
 the method names for the verdict, and `--needs-you` when a decision is the
-operator's; a call refused for a missing or invalid flag wrote nothing, so
-re-run it corrected. Never post the review yourself, write to the anchor, file
-beads, or run `gh pr review --approve`.
+operator's; a call refused for a missing or invalid flag, or for a finding set
+whose problems it lists, wrote nothing, so re-run it corrected. Never post the
+review yourself, write to the anchor, file beads, or run
+`gh pr review --approve`.
 ```bash
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/signoff.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }

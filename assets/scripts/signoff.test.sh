@@ -1346,6 +1346,8 @@ P1_OK='"locus":"a.sh:f()","message":"m","severity":"P1","category":"correctness"
 refused "a P1 with no verification" request-changes "[{$P1_OK}]" "it is a P1 with no \`verification\`"
 refused "a verification that opens with neither CONFIRMED nor PLAUSIBLE" request-changes "[{$P1_OK,\"verification\":\"probably: it looks wrong\"}]" "does not open with CONFIRMED or PLAUSIBLE"
 refused "a verification that names no evidence" request-changes "[{$P1_OK,\"verification\":\"CONFIRMED\"}]" "does not open with CONFIRMED or PLAUSIBLE and then the evidence"
+refused "a verification that is not a string" request-changes "[{$P1_OK,\"verification\":{\"status\":\"CONFIRMED\",\"evidence\":\"ran it\"}}]" "its \`verification\` is not a string"
+hasnt "$out" "is not JSON" "a verification that is not a string: the refusal lists it, and does not call the file unparseable"
 refused "a correctness finding with no grade" request-changes '[{"locus":"a.sh","message":"m"}]' "every correctness finding is graded"
 refused "a grade outside P0, P1 and P2" request-changes '[{"locus":"a.sh","message":"m","severity":"P3","category":"c","failure_scenario":"s"}]' 'its `severity` is "P3", not P0, P1 or P2'
 refused "a graded finding with no failure scenario" request-changes '[{"locus":"a.sh","message":"m","severity":"P2","category":"c"},{"locus":"b.sh","message":"m","severity":"P0","category":"c","failure_scenario":"s","verification":"PLAUSIBLE: a concurrent claim reaches it"}]' "finding 1 (a.sh): it names no \`failure_scenario\`"

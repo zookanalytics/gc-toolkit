@@ -280,7 +280,8 @@ FINDINGS_CHECK_JQ='
             (select(field("failure_scenario") == "") | "it names no `failure_scenario`") ),
         ( select(($g // "") | IN("P0", "P1"))
           | field("verification") as $v
-          | if $v == "" then "it is a \($g) with no `verification`"
+          | if $v == null then empty
+            elif $v == "" then "it is a \($g) with no `verification`"
             elif ($v | test("^(CONFIRMED|PLAUSIBLE)[^[:alnum:]]+[^[:space:]]"; "i")) then empty
             else "its `verification` does not open with CONFIRMED or PLAUSIBLE and then the evidence" end ) ];
   if length != 1 or (.[0] | type) != "array" then
