@@ -161,8 +161,8 @@ RIGS=""
 enumerate_rigs() {
     [ -n "$RIGS" ] && return 0
     # rig-map.sh names on stderr why a listing did not read, the same reason
-    # gc-helm.sh's enumerate_rigs passes on, so the two front doors tell one
-    # story about a city with no readable rig map.
+    # gc-helm.sh's enumerate_rigs passes on, so this intake and the board's
+    # verbs tell one story about a city with no readable rig map.
     rigs_raw=$("$SCRIPT_DIR/rig-map.sh") || die "could not enumerate rigs. This command wrote nothing." 3
     # The projection carries the flags the wait-note below reads from this same
     # enumeration (city-liveness.sh says which, and why a rig row's running is
