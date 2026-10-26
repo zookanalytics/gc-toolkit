@@ -91,6 +91,20 @@ has "$(notes AN1)" "Validation pass VP1 ruled that a fresh whole-diff review is 
    "the judgment is noted on the anchor"
 has "$out" "dismissed the approvals from human1, human2 and human3 (reviews 501,502,504,505)" "the outcome is reported"
 
+echo "# a part of the rig's declaration that the definitions refuse is named, not swallowed"
+# The stubbed git places the script in no repository, so GC_RIG_ROOT names the
+# rig, and the stub serves its not-for-review.toml as the default branch's. An
+# unquoted prefix is refused, so the comments it meant to cover stay feedback.
+mkdir -p "$TMP/rig-typo"
+printf '%s\n' '[[marker]]' 'prefix = [vc]: #' > "$TMP/rig-typo/not-for-review.toml"
+store "[$(anchorrow), $(passrow)]"
+reviews "$MIXED"
+fresh
+out=$(GC_RIG_ROOT="$TMP/rig-typo" withdraw); rc=$?
+eq "$rc" "0" "it exits 0"
+has "$out" "pr-post: $TMP/rig-typo/not-for-review.toml on origin/main: line 2: the prefix is not a one-line string" \
+   "the refused prefix is named in what it prints"
+
 echo "# a retry finishes the recorded set and dismisses nothing given after it"
 NOTED="Validation pass VP1 ruled that a fresh whole-diff review is warranted, so the approvals from human1 on PR#$NUM (reviews 501,504) are dismissed: $REASON."
 store "[$(anchorrow "$PRMETA" "$NOTED"), $(passrow ',"approval_dismissed":"501,504"')]"
