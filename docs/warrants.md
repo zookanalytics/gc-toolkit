@@ -112,12 +112,13 @@ shares only the word ([authority-map.md](authority-map.md)).
   that sleeps (`cmd/gc/compute_awake_set.go` 432-440, 583-594 and 668-693).
   No closer the controller runs on its own ends one because its work closed:
   the stale-session closers exempt a session that has started its
-  conversation (`cmd/gc/session_reconciler.go` 1057-1060), and the core reaper
-  prunes a session only once it has drained
+  conversation (`reapStaleSessionBeads`, `reapPreBootSessionBeads` and
+  `cleanDeadRuntimeCorpse` in `cmd/gc/session_beads.go`, at 3057, 3237 and
+  3500), and the core reaper prunes a session only once it has drained
   (`internal/bootstrap/packs/core/assets/scripts/reaper.sh` 69 and 1402-1404).
   A sitting cannot drain itself at its sign-off, because a drain destroys an
   attached operator's pane.
-- **Verified.** 2026-10-20, at `gastownhall/gascity` 1e05ae624, beside a live
+- **Verified.** 2026-10-26, at `gastownhall/gascity` 1e05ae624, beside a live
   `gc session list --state closed`.
 - **Retires when.** Gas City ends a manual session once its claimed work has
   closed and nobody is attached.

@@ -346,11 +346,12 @@ type openResponse struct {
 // One flat shape for all three, because — unlike open's filed/existing
 // distinction, which the operator must see to not double-file — what these three
 // return that a surface acts on is the tool's own sentence. It names the ids each
-// verb produces in prose (accept: the cleared gate and the slung formula; engage:
-// the spawned session to attach to; dismiss: the closed conversation), and passing that
-// through verbatim means these routes' messages IMPROVE when the script's do,
-// with no change here. Like [openResponse], it is DELIBERATELY NOT in
-// src/contract.ts; its mirror lives beside the fetch in web/src/actuate/client.ts.
+// verb produces in prose (accept: the slung formula and its acceptance token;
+// engage: the spawned session to attach to; dismiss: the closed conversation),
+// and passing that through verbatim means these routes' messages IMPROVE when
+// the script's do, with no change here. Like [openResponse], it is DELIBERATELY
+// NOT in src/contract.ts; its mirror lives beside the fetch in
+// web/src/actuate/client.ts.
 type actuateResponse struct {
 	Bead string `json:"bead"`
 	Verb string `json:"verb"`

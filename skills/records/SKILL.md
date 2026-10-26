@@ -49,9 +49,10 @@ the document instead (the work skill).
 
 The message is one sentence saying what the bead needs now. The helm board
 shows it as the bead's NEEDS cell, except on a row with no PR that a human gate
-or a conversation holds, where NEEDS names what the gate asks or that the bead
-is in conversation. `doctor/check-wait-is-an-edge` checks the wait the headline
-declares against the bead's `blocks` edges.
+or a conversation holds, where NEEDS names what the gate asks, or what a
+conversation waiting in the operator's queue asks, or reads `in conversation`
+while a sitting holds the bead. `doctor/check-wait-is-an-edge` checks the wait
+the headline declares against the bead's `blocks` edges.
 
 Writer: `"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<what it needs now, at most 140 characters>" --no-wait`
 when the bead waits on nothing, or `--waiting-on <bead>` (repeatable) for each
