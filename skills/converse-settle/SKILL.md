@@ -92,7 +92,8 @@ if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      # --route <rig>/<agent> releases a held subject to that pool instead
      # --leave <gate>, once for each gate the ruling leaves owed
      # --waiting-on <bead> [--waiting-on <bead> ...] in place of --no-wait
-     # --rework, --no-rework or --retire <kind>: one is required on an open-PR subject
+     # --rework, --no-rework or --retire <kind>: one is required when the ruling reaches an open PR
+     # --pr-anchor <bead> names the PR --rework or --retire acts on, when it reaches more than one
 then
   : # signed off — report any answer it says reached a gate first, then post the sign-off below
 else
@@ -126,8 +127,11 @@ instead of claiming your own.
   or with `--waiting-on` naming only the dependencies the sitting also sent.
   A member takes no `--waiting-on`, because bd refuses that edge.
 
-**On a `--ruled yes` sign-off whose subject is an open PR
-(`merge_result=pull_request`), answer what the ruling does to the PR.** Pass
+**On a `--ruled yes` sign-off that reaches an open PR
+(`merge_result=pull_request`), answer what the ruling does to the PR.** The
+ruling reaches the subject when it is an open PR, and each open PR that a gate
+it answers releases, such as a member of an epic subject whose gate the
+epic's sitting answers, or the other PR behind a gate about two. Pass
 `--rework` when it changes what the branch must contain, since the PR still
 reads review-ready against a head that predates the ruling (the `prs` skill,
 sending it back for rework). Pass `--no-rework` when the branch stands as it
@@ -135,23 +139,29 @@ is. Pass `--retire <kind>` when the PR will not land (the `prs` skill,
 retiring it): `not-needed` when nothing carries the work, with this
 conversation as the evidence, or `duplicate`, `folded`, `re-homed` or
 `fixed-upstream` with `--successor <bead>`, the bead that carries it now.
-Given none of them on an open-PR subject, the sign-off refuses and writes
-nothing, because a ruling whose rework is never filed lands only in notes
-nothing reads while the stale PR keeps reading ready, and a gate answered
-before the PR is closed lets an approved PR merge. The rework or the
-retirement runs before the sign-off writes anything else. One that does not
-complete stops the sign-off there, and the script exits non-zero. No headline
-is written, no gate is answered and the conversation stays open, so a merge
-hold your hold filed still holds the PR. Re-run once the cause is repaired:
-the re-run adopts a child an earlier attempt filed, and finds a PR an earlier
-attempt closed. A conversation's rework carries the ruling it was filed for.
-While one filed for an earlier ruling of this conversation is open, `--rework`
-for another ruling is refused, because the open one would never carry it: give
-a ruling that asks nothing of the branch beyond it `--no-rework`, and keep the
-gate of one that asks for more open (`--leave <gate>`, or cut the sitting
-short) until that rework has landed. `--rework` and `--retire` apply only to
-an open-PR subject. On any other subject, file and send the ruling's
-consequence as work (below), and re-run without them.
+Given none of them on a ruling that reaches an open PR, the sign-off refuses
+and writes nothing, because a ruling whose rework is never filed lands only in
+notes nothing reads while the stale PR keeps reading ready, and a gate
+answered before the PR is closed lets an approved PR merge. `--rework` and
+`--retire` act on one PR. When the ruling reaches more than one,
+`--pr-anchor <bead>` names it, and each other one stands under the ruling, as
+`--no-rework` says of each. The rework or the retirement runs before the
+sign-off writes anything else. One that does not complete stops the sign-off
+there, and the script exits non-zero. No headline is written, no gate is
+answered and the conversation stays open, so a merge hold your hold filed
+still holds the PR. Re-run once the cause is repaired: the re-run adopts a
+child an earlier attempt filed, and finds a PR an earlier attempt closed. A
+conversation's rework carries the ruling it was filed for, and a conversation
+owns one live rework, on whichever PR it was filed. While one filed for an
+earlier ruling of this conversation is open, `--rework` for another ruling is
+refused, because the open one would never carry it: give a ruling that asks
+nothing of the branch beyond it `--no-rework`, and keep the gate of one that
+asks for more open (`--leave <gate>`, or cut the sitting short) until that
+rework has landed. A second PR whose own branch must change waits the same
+way: keep the gate that releases it open until a ruling of its own is carried
+out. `--rework` and `--retire` apply only to an open PR. When the ruling
+reaches none, file and send its consequence as work (below), and re-run
+without them.
 
 Then post the **sign-off** — the sitting's last word, a hand-back in
 the shape the prompt's Definitions define (**The hand-back**),

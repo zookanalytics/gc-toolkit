@@ -22,9 +22,10 @@ answered at once, so a dismiss that ends the sitting later leaves nothing the
 operator ruled on open. Answer it through the sign-off's writer with
 `--answer`, never with a bare `gc bd gate resolve`. A gate can be what holds a
 merge, so the writer puts the ruling's consequences in place before it
-resolves the gate. On an open PR the first of them is the rework or the
-retirement the ruling calls for, passed the way step 7 passes it, and the next
-is the subject's headline with each wait this turn routed. It resolves only the
+resolves the gate. When the ruling reaches an open PR, the subject or one the
+gate releases, the first of them is the rework or the retirement the ruling
+calls for, passed the way step 7 passes it, and the next is the subject's
+headline with each wait this turn routed. It resolves only the
 gates `--answer` names, leaves the conversation open, and exits non-zero when
 it stopped short. Until it exits 0, do not tell the operator the ruling is in
 place:
@@ -32,7 +33,7 @@ place:
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate> \
   --ruling "<the operator's ruling, one line>" \
   --outcome "<where the subject stands now, at most 140 characters>"
-  # on an open PR, add --rework, --no-rework or --retire <kind> (step 7)
+  # when the ruling reaches an open PR, add --rework, --no-rework or --retire <kind> (step 7)
   # --waiting-on <bead> for each bead this turn routed work into, or --no-wait
 ```
 An answer that reached the gate first stands, and the writer prints it: tell

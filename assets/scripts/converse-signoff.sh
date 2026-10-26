@@ -5,7 +5,8 @@
 # A sitting holds one conversation, a task that tracks the subject and replies
 # to each human gate it answers. When the operator ruled (--ruled yes), the
 # sign-off:
-#   1. carries out what the ruling does to an open PR: its rework, through
+#   1. carries out what the ruling does to an open PR it reaches, the subject
+#      or a bead a gate it answers releases: its rework, through
 #      converse-rework.sh with the conversation as the rework's
 #      source_ruling_bead (--rework), or its retirement, through pr-dispose.sh,
 #      which records the disposition and closes the PR (--retire);
@@ -22,7 +23,11 @@
 #   6. updates the subject's PR reminder.
 # A gate can hold a merge, and resolving it releases the merge, so everything
 # the ruling puts in the merge's way is written before step 3: the rework
-# child's blocks edge, the closed PR, and each wait the headline wires.
+# child's blocks edge, the closed PR, and each wait the headline wires. The
+# beads each gate releases are read before the first write, so a gate that
+# releases an open PR other than the subject, such as an epic member's gate the
+# epic's sitting answers, or a gate about the subject and another PR, puts the
+# question of that PR to the ruling just as an open-PR subject does.
 #
 # A ruling given on a turn that does not sign off (--answer) runs steps 1 to 3
 # for the gates --answer names, and stops there: the conversation stays open
@@ -54,7 +59,8 @@
 #     [--subject <id>] [--ruled yes|no] [--ruling "<one line>"] \
 #     [--route <rig>/<agent>|human] [--leave <gate> ...] [--answer <gate> ...] \
 #     [--no-wait | --waiting-on <bead> ...] \
-#     [--rework | --no-rework | --retire <kind> [--successor <bead>]]
+#     [--rework | --no-rework | --retire <kind> [--successor <bead>]] \
+#     [--pr-anchor <bead>]
 #   --outcome is the subject's headline, and the close reason the sittings card
 #   falls back to. --ruled defaults to `no`. --ruled yes requires --ruling, the
 #   answer each gate resolves with, and --route, where a `held` subject is
@@ -68,27 +74,37 @@
 #     every other gate as it is, so --ruled no, --route and --leave are refused
 #     beside it.
 #   --rework | --no-rework | --retire <kind> (with a ruling): what the ruling
-#     does to an already-published PR. --rework says its branch must change:
-#     the rework is filed against the subject anchor, sourced by this
-#     conversation, and refused while a rework the conversation filed for
-#     another ruling is open. --no-rework says the branch stands, and the PR
-#     reminder records that. --retire says the PR will not land: pr-dispose.sh
-#     records the disposition under <kind> (re-homed, folded, fixed-upstream,
-#     duplicate or not-needed) and closes the PR. Its successor is --successor,
-#     the bead that carries the work now, which every kind but not-needed
-#     requires; under not-needed it defaults to this conversation, the evidence
-#     that ruled the work out. A ruling on a subject at
-#     merge_result=pull_request must give one of them; given none, it is refused
-#     with nothing written. The rework or the retirement runs before every other
-#     write, and when it does not complete nothing else is written.
+#     does to an already-published PR it reaches: the subject at
+#     merge_result=pull_request, and each bead at merge_result=pull_request
+#     that an open human gate the ruling answers releases. A ruling that reaches
+#     one must give one of them; given none, it is refused with nothing
+#     written. --rework says the PR's branch must change: the rework is filed
+#     against that PR's anchor, sourced by this conversation, and refused while
+#     a rework the conversation filed for another ruling is open. --no-rework
+#     says the branch of each such PR stands, and the PR reminder records that.
+#     --retire says the PR will not land: pr-dispose.sh records the disposition
+#     under <kind> (re-homed, folded, fixed-upstream, duplicate or not-needed)
+#     and closes the PR. Its successor is --successor, the bead that carries
+#     the work now, which every kind but not-needed requires; under not-needed
+#     it defaults to this conversation, the evidence that ruled the work out.
+#     --rework and --retire act on one PR, the one the ruling reaches, else
+#     the subject. The rework or the retirement runs before every other write,
+#     and when it does not complete nothing else is written.
+#   --pr-anchor <bead> names the PR --rework or --retire acts on when the
+#     ruling reaches more than one, which it requires; every other one the
+#     ruling reaches stands. A conversation owns one live rework child, so a
+#     sign-off files one rework, and a second PR whose branch must change takes
+#     a ruling of its own: the gate that releases it stays owed until then.
 # Exit: 0 signed off, or with --answer the named gates answered; 1 stopped
 #   short — a read failed, the rework did not file, the PR did not retire, the
 #   headline did not land, a gate did not close, or the conversation did not
 #   close or hand back — so do NOT post the sign-off, or report the ruling as
 #   carried out; repair what it names and re-run, which repeats every write it
 #   made safely; 2 refused before any write: usage, a conversation that is not
-#   one, a gate it does not reply to, or a ruling on an open PR that gave none of
-#   --rework, --no-rework and --retire.
+#   one, a gate it does not reply to, a ruling that reaches an open PR and gave
+#   none of --rework, --no-rework and --retire, or a --rework or --retire on a
+#   ruling that reaches more than one open PR without a --pr-anchor naming one
+#   of them.
 set -u
 
 # >>> control-char-scrub
@@ -108,6 +124,7 @@ ROUTE=""
 PR_ANSWER=""
 RETIRE_KIND=""
 SUCCESSOR=""
+PR_PICK=""
 WAIT=()
 LEAVE=()
 ANSWER_GATES=()
@@ -169,6 +186,7 @@ while [ $# -gt 0 ]; do
     --no-rework)  pr_answer no-rework ;;
     --retire)     shift; [ $# -gt 0 ] || die "--retire needs a kind"; pr_answer retire; RETIRE_KIND="$1" ;;
     --successor)  shift; [ $# -gt 0 ] || die "--successor needs a bead id"; SUCCESSOR="$1" ;;
+    --pr-anchor)  shift; [ $# -gt 0 ] || die "--pr-anchor needs a bead id"; PR_PICK="$1" ;;
     --no-wait)    WAIT+=(--no-wait) ;;
     --waiting-on) shift; [ $# -gt 0 ] || die "--waiting-on needs a bead id"; WAIT+=(--waiting-on "$1") ;;
     -h|--help)    sed -n '2,/^set -u$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -208,6 +226,10 @@ if [ "$PR_ANSWER" = retire ]; then
 else
   [ -z "$SUCCESSOR" ] || die "--successor names a retired PR's successor, so it requires --retire"
 fi
+case "$PR_ANSWER" in
+  rework|retire) ;;
+  *) [ -z "$PR_PICK" ] || die "--pr-anchor names the open PR --rework or --retire acts on, so it requires one of them" ;;
+esac
 command -v jq >/dev/null 2>&1 || die "jq is required"
 command -v gc >/dev/null 2>&1 || die "gc is required"
 
@@ -244,21 +266,87 @@ for g in $REPLIES; do
   GROW=$(show_row "$g") || stopped "gate $g, which conversation $CONVERSATION replies to, could not be read; nothing was written"
   GATES_JSON=$(printf '%s' "$GATES_JSON" | jq -c --argjson r "$GROW" '. + [$r]')
 done
+# The gates the ruling answers: those --answer names, or else each one the
+# conversation replies to. Step 3 skips the ones --leave names.
+TO_ANSWER=""
+if [ "$RULED" = yes ]; then
+  if [ -n "$ANSWERING" ]; then TO_ANSWER="${ANSWER_GATES[*]}"; else TO_ANSWER="$REPLIES"; fi
+fi
 # A ruling that changes what an open PR's branch must contain is demand on that
 # PR, and nothing but --rework turns it into demand: unfiled, the ruling lands
 # only in notes nothing reads, and the PR keeps reading ready against a head the
 # ruling has outdated. A ruling that the PR will not land must close it before
 # any gate it answers releases the merge, or an approved PR lands first. Only
-# the sitting knows a ruling's consequence, so a ruling on an open PR must
-# answer the question one way or another. A subject that will not read cannot
-# be told from an open PR, so it is refused the same way.
-if [ "$RULED" = yes ] && [ -z "$PR_ANSWER" ]; then
-  SUBJECT_ROW=$(show_row "$SUBJECT") \
-    || die "could not read $SUBJECT to tell whether it is an open PR; nothing was written. Re-run with --rework, --no-rework or --retire <kind>"
-  if [ "$(printf '%s' "$SUBJECT_ROW" | jq -r '.metadata.merge_result // ""')" = pull_request ]; then
-    die "$SUBJECT is an open PR (merge_result=pull_request), so a ruling on it must say what it does to the PR; nothing was written. Re-run with --rework to file the rework its branch needs, --no-rework if the branch stands, or --retire <kind> if the PR will not land"
+# the sitting knows a ruling's consequence, so a ruling must answer the question
+# for each open PR it reaches: the subject when it is one, and each bead at
+# merge_result=pull_request that an open human gate the ruling answers releases,
+# such as an epic member whose gate the epic's sitting answers, or the other PR
+# behind a gate about two. What each such gate releases is read here, with the
+# other reads. A listing of a gate's beads, or the row of a bead it releases,
+# that does not read could hide an open PR, so the sign-off stops before it
+# writes anything, and a subject that will not read cannot be told from an open
+# PR either.
+PR_ANCHORS=()
+GATE_WAITERS='{}'
+reaches_pr() { # <bead> — 0 when the ruling already reaches it as an open PR
+  local p
+  for p in "${PR_ANCHORS[@]+"${PR_ANCHORS[@]}"}"; do [ "$p" = "$1" ] && return 0; done
+  return 1
+}
+if [ "$RULED" = yes ]; then
+  if ! SUBJECT_ROW=$(show_row "$SUBJECT"); then
+    [ -n "$PR_ANSWER" ] || die "could not read $SUBJECT to tell whether it is an open PR; nothing was written. Re-run with --rework, --no-rework or --retire <kind>"
+    stopped "could not read $SUBJECT to tell whether it is an open PR, which decides the PR the ruling's answer acts on; nothing was written"
   fi
+  [ "$(printf '%s' "$SUBJECT_ROW" | jq -r '.metadata.merge_result // ""')" = pull_request ] && PR_ANCHORS+=("$SUBJECT")
+  for g in $TO_ANSWER; do
+    printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g" && continue
+    printf '%s' "$GATES_JSON" | jq -e --arg g "$g" 'any(.[]; .id == $g and (.issue_type // "") == "gate"
+        and (.await_type // "") == "human" and ((.status // "") | ascii_downcase) != "closed")' >/dev/null 2>&1 || continue
+    WAITERS=$(gc bd dep list "$g" --direction=up --type blocks --json 2>/dev/null | grep -av '^gc bd:' | scrub \
+      | jq -ce 'if type == "array" then [ .[] | objects ] else error("unread") end' 2>/dev/null) \
+      || stopped "the beads that wait on gate $g could not be read, and answering it releases them, so an open PR among them could not be told; nothing was written"
+    GATE_WAITERS=$(printf '%s' "$GATE_WAITERS" | jq -c --arg g "$g" --argjson w "$WAITERS" '. + {($g): [ $w[] | (.id // "") | select(. != "") ]}')
+    for b in $(printf '%s' "$WAITERS" | jq -r --arg s "$SUBJECT" '.[]
+        | select(((.status // "") | tostring | ascii_downcase) != "closed")
+        | (.id // "") | select(. != "" and . != $s)'); do
+      reaches_pr "$b" && continue
+      BROW=$(show_row "$b") \
+        || stopped "$b, which gate $g releases, could not be read to tell whether it is an open PR; nothing was written"
+      [ "$(printf '%s' "$BROW" | jq -r '.metadata.merge_result // ""')" = pull_request ] && PR_ANCHORS+=("$b")
+    done
+  done
 fi
+PR_LIST="${PR_ANCHORS[*]+"${PR_ANCHORS[*]}"}"
+if [ "$RULED" = yes ] && [ -z "$PR_ANSWER" ] && [ -n "$PR_LIST" ]; then
+  [ "$PR_LIST" != "$SUBJECT" ] \
+    || die "$SUBJECT is an open PR (merge_result=pull_request), so a ruling on it must say what it does to the PR; nothing was written. Re-run with --rework to file the rework its branch needs, --no-rework if the branch stands, or --retire <kind> if the PR will not land"
+  die "this ruling reaches $PR_LIST at merge_result=pull_request, as its subject or as a bead a gate it answers releases, so it must say what it does to each open PR; nothing was written. Re-run with --rework to file the rework a branch needs, --no-rework if the branch stands, or --retire <kind> if the PR will not land, and with --pr-anchor <bead> to name the one --rework or --retire acts on when it reaches more than one"
+fi
+# --rework and --retire act on one open PR: the one the ruling reaches, the one
+# --pr-anchor names when it reaches more than one, or else the subject, which
+# converse-rework.sh and pr-dispose.sh refuse unless it is an open PR. A
+# conversation owns one live rework child (rework-child.sh), so one sign-off
+# files one rework, and each other open PR the ruling reaches stands under it,
+# as --no-rework says of every one.
+PR_TARGET=""
+STANDS=()
+case "$PR_ANSWER" in
+  rework|retire)
+    if [ -n "$PR_PICK" ]; then
+      reaches_pr "$PR_PICK" \
+        || die "--pr-anchor $PR_PICK is no open PR this ruling reaches (${PR_LIST:-none}); nothing was written"
+      PR_TARGET="$PR_PICK"
+    elif [ "${#PR_ANCHORS[@]}" -gt 1 ]; then
+      die "this ruling reaches more than one open PR ($PR_LIST), and --$PR_ANSWER acts on one; nothing was written. Name it with --pr-anchor <bead>, and each other one stands under this ruling. A conversation files one live rework, so a PR whose own branch must change or which must retire as well takes a ruling of its own: leave the gate that releases it owed, with --leave or out of --answer, until that ruling is carried out"
+    else
+      PR_TARGET="${PR_ANCHORS[0]:-$SUBJECT}"
+    fi
+    for p in "${PR_ANCHORS[@]+"${PR_ANCHORS[@]}"}"; do [ "$p" = "$PR_TARGET" ] || STANDS+=("$p"); done ;;
+  no-rework)
+    STANDS=("${PR_ANCHORS[@]+"${PR_ANCHORS[@]}"}")
+    [ "${#STANDS[@]}" -gt 0 ] || STANDS=("$SUBJECT") ;;
+esac
 # A ruling releases a subject that still reads `held`, so the state is read
 # here, with the other reads. lifecycle.sh exits 2 when the subject does not
 # read, an answer that cannot say whether it is held. Any other refusal (an
@@ -286,31 +374,32 @@ case "$PR_ANSWER" in
     CR=$(pack_script converse-rework.sh)
     if [ -z "$CR" ]; then
       PR_OUT="no converse-rework.sh on any candidate root"
-    elif PR_OUT=$("$CR" --anchor "$SUBJECT" --ruling-bead "$CONVERSATION" --ruling "$RULING" 2>&1); then
+    elif PR_OUT=$("$CR" --anchor "$PR_TARGET" --ruling-bead "$CONVERSATION" --ruling "$RULING" 2>&1); then
       echo "$PR_OUT"
-      CONSEQUENCE="filed ruling-driven rework on $SUBJECT"
+      CONSEQUENCE="filed ruling-driven rework on $PR_TARGET"
     fi
     if [ -z "$CONSEQUENCE" ]; then
-      echo "REWORK NOT COMPLETE on $SUBJECT: $PR_OUT"
+      echo "REWORK NOT COMPLETE on $PR_TARGET: $PR_OUT"
       echo "Nothing else was written: no headline, gate answer or close. $UNDONE"
-      echo "Repair the cause and re-run. If $SUBJECT is not an open PR, file the ruling's consequence as work, then re-run without --rework and with --waiting-on <that bead>. If it cannot be repaired, raise it in the thread."
+      echo "Repair the cause and re-run. If $PR_TARGET is not an open PR, file the ruling's consequence as work, then re-run without --rework and with --waiting-on <that bead>. If it cannot be repaired, raise it in the thread."
       exit 1
     fi ;;
   retire)
     PD=$(pack_script pr-dispose.sh)
     if [ -z "$PD" ]; then
       PR_OUT="no pr-dispose.sh on any candidate root"
-    elif PR_OUT=$("$PD" --anchor "$SUBJECT" --successor "$SUCCESSOR" --kind "$RETIRE_KIND" --note "$RULING" 2>&1); then
+    elif PR_OUT=$("$PD" --anchor "$PR_TARGET" --successor "$SUCCESSOR" --kind "$RETIRE_KIND" --note "$RULING" 2>&1); then
       echo "$PR_OUT"
-      CONSEQUENCE="retired the PR of $SUBJECT ($RETIRE_KIND, successor $SUCCESSOR)"
+      CONSEQUENCE="retired the PR of $PR_TARGET ($RETIRE_KIND, successor $SUCCESSOR)"
     fi
     if [ -z "$CONSEQUENCE" ]; then
-      echo "RETIREMENT NOT COMPLETE on $SUBJECT: $PR_OUT"
+      echo "RETIREMENT NOT COMPLETE on $PR_TARGET: $PR_OUT"
       echo "Nothing else was written: no headline, gate answer or close, so each gate the conversation replies to still holds the merge. $UNDONE"
       echo "Repair the cause and re-run; pr-dispose.sh keeps a disposition an earlier attempt recorded and closes the PR it left open. If it cannot be repaired, raise it in the thread."
       exit 1
     fi ;;
 esac
+for p in "${STANDS[@]+"${STANDS[@]}"}"; do echo "the ruling leaves the branch of $p as it stands"; done
 
 # 2. The headline. An ARRAY, not a string: this city runs zsh, which does not
 # word-split an unquoted parameter, so "${WAIT[@]}" is what passes each flag as
@@ -334,7 +423,6 @@ if [ "$RULED" = yes ]; then
   # conversation replies to. A reply onto a bead that is no human gate holds
   # nothing to resolve.
   case "$RULING" in ruled:*) ANSWER="$RULING" ;; *) ANSWER="ruled: $RULING" ;; esac
-  if [ -n "$ANSWERING" ]; then TO_ANSWER="${ANSWER_GATES[*]}"; else TO_ANSWER="$REPLIES"; fi
   UNCLOSED=""
   for g in $TO_ANSWER; do
     if printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g"; then
@@ -361,8 +449,7 @@ if [ "$RULED" = yes ]; then
     elif [ "$BACK_REASON" != "$ANSWER" ]; then
       echo "another answer reached gate $g first: \"$BACK_REASON\". The first answer stands, and this ruling is not its answer."
     else
-      RELEASED=$(gc bd dep list "$g" --direction=up --type blocks --json 2>/dev/null | scrub \
-        | jq -r '[ .[]? | objects | .id // empty ] | join(" ")' 2>/dev/null || true)
+      RELEASED=$(printf '%s' "$GATE_WAITERS" | jq -r --arg g "$g" '(.[$g] // []) | join(" ")')
       echo "resolved gate $g: $ANSWER${RELEASED:+ (it held $RELEASED)}"
       ACTIONS+=("resolved gate $g")
     fi
@@ -381,7 +468,7 @@ if [ "$RULED" = yes ]; then
   fi
   ACTIONS+=("ruling: $RULING (released to $ROUTE)")
   [ -n "$CONSEQUENCE" ] && ACTIONS+=("$CONSEQUENCE")
-  [ "$PR_ANSWER" = no-rework ] && ACTIONS+=("ruling leaves the branch of $SUBJECT as it stands")
+  for p in "${STANDS[@]+"${STANDS[@]}"}"; do ACTIONS+=("ruling leaves the branch of $p as it stands"); done
 
   # 5. Close the conversation. The work-record gate the close runs wants
   # gc.work_outcome, stamped in a write of its own so it never decides whether

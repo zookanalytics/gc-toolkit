@@ -429,11 +429,12 @@ own.
 **The sign-off** is `assets/scripts/converse-signoff.sh`, which writes the
 durable trace in one order every time:
 
-1. what a ruling does to an open PR: its rework, through `converse-rework.sh`,
-   with the conversation as the rework child's `source_ruling_bead`, so a
-   ruling that changes what the PR's branch must contain becomes work the
-   refinery lands; or its retirement, through `pr-dispose.sh`, which records
-   the disposition and closes the PR;
+1. what a ruling does to an open PR it reaches, the subject or a PR that a
+   gate it answers releases: its rework, through `converse-rework.sh`, with
+   the conversation as the rework child's `source_ruling_bead`, so a ruling
+   that changes what the PR's branch must contain becomes work the refinery
+   lands; or its retirement, through `pr-dispose.sh`, which records the
+   disposition and closes the PR;
 2. the subject's headline;
 3. `ruled: <the ruling>` on each open gate the conversation replies to that the
    ruling answers, each read back, with an earlier answer reported;
@@ -450,9 +451,15 @@ reply onto a gate in another store. Every read it depends on runs before its
 first write, and it stops short, with nothing posted, when any write does not
 read back, so a re-run repeats each write safely. A gate can be what holds a
 merge, and resolving it releases the merge, so whatever the ruling puts in the
-merge's way lands before any gate is resolved. A ruling on an open PR must say
-what it does to the PR (`--rework`, `--no-rework` or `--retire`), and the
-rework child's `blocks` edge or the closed PR is in place before step 3. A
+merge's way lands before any gate is resolved. A ruling that reaches an open
+PR must say what it does to the PR (`--rework`, `--no-rework` or `--retire`),
+and the rework child's `blocks` edge or the closed PR is in place before step
+3. It reaches the subject when the subject is an open PR, and each open PR
+that a gate it answers releases, such as a member of an epic subject. The
+rework or the retirement acts on one PR, which `--pr-anchor` names when the
+ruling reaches more than one, and each other one stands. A conversation owns
+one live rework, so a second PR whose branch must change waits behind its
+gate, left owed, for a ruling of its own. A
 sitting signs off only when nothing important is pending; a turn that hands
 the operator something to read or answer posts the hand-back and leaves the
 conversation open. A gate the operator rules on during such a turn is answered

@@ -18,6 +18,12 @@
 #   (SHARED)  a gate about two beads: one resolve releases both, and the record
 #             and headline go on the subject alone
 #   (EPIC)    a member's gate answered from the epic's sitting
+#   (EPIC-PR*, SHARED-PR*, RELEASED-UNREAD) a gate the ruling answers that
+#             releases an open PR other than the subject puts that PR's
+#             question to the ruling: the rework or the retirement acts on that
+#             PR, --pr-anchor names the one it acts on when the ruling reaches
+#             more than one, and a release that does not read stops the
+#             sign-off before any write
 #   (LEAVE)   a gate the ruling leaves owed stays open
 #   (UNCLOSED, HEADLINE) a gate that does not close or a headline that does not
 #             land stops the sign-off before the conversation closes
@@ -61,9 +67,10 @@ mkdir -p "$TMP/bin" "$TMP/store/b" "$TMP/rig/assets/scripts" "$TMP/cwd"
 # [{type, on}] on the bead the edge starts from. Every write is appended to
 # $CALLS. A guarded update whose --if-assignee or --if-status misses exits 13
 # and writes nothing, as bd does. Hooks: LIST_DOWN fails `bd list`;
-# GATE_STUCK=<gate> makes its resolve change nothing; EARLIER_ANSWER=<reason>
-# closes the gate with that reason inside the resolve call, before the
-# sign-off's own answer.
+# SHOW_DOWN=<id> fails `bd show` of that bead; DEP_UP_DOWN=<gate> fails the
+# listing of the beads that wait on that gate; GATE_STUCK=<gate> makes its
+# resolve change nothing; EARLIER_ANSWER=<reason> closes the gate with that
+# reason inside the resolve call, before the sign-off's own answer.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 B="$STORE/b"
 row() { cat "$B/$1.json" 2>/dev/null; }
@@ -74,6 +81,7 @@ show_row() { row "$1" | jq -c '. + {dependencies: [ .deps[] | {id: .on, dependen
 list_row() { row "$1" | jq -c '. + {dependencies: [ .deps[] as $d | {issue_id: .id, depends_on_id: $d.on, type: $d.type} ]} | del(.deps)'; }
 case "$1 ${2:-}" in
   "bd show")
+    [ -n "${SHOW_DOWN:-}" ] && [ "$3" = "$SHOW_DOWN" ] && { echo "bd show: data plane down" >&2; exit 1; }
     if [ -f "$B/$3.json" ]; then jq -c -n --argjson r "$(show_row "$3")" '[$r]'
     else printf '{"error":"no issues found matching the provided IDs"}\n'; exit 1; fi ;;
   "bd list")
@@ -85,6 +93,7 @@ case "$1 ${2:-}" in
       list)
         _who="$4"; _ty=""; _up=0; _p=""
         for a in "$@"; do case "$a" in --direction=up) _up=1 ;; esac; [ "$_p" = "--type" ] && _ty="$a"; _p="$a"; done
+        [ "$_up" = 1 ] && [ -n "${DEP_UP_DOWN:-}" ] && [ "$_who" = "$DEP_UP_DOWN" ] && { echo "bd dep list: data plane down" >&2; exit 1; }
         if [ "$_up" = 1 ]; then
           for i in $(all_ids); do
             row "$i" | jq -c --arg w "$_who" --arg t "$_ty" 'select(any(.deps[]; .type == $t and .on == $w)) | . + {dependency_type: $t} | del(.deps)'
@@ -242,6 +251,8 @@ run_signoff --conversation tk-conv --outcome x --rework
 eq "$RC" 2 "(USAGE) --rework without a ruling exits 2"
 run_signoff --conversation tk-conv --outcome x --leave tk-rev
 eq "$RC" 2 "(USAGE) --leave without a ruling exits 2"
+run_signoff --conversation tk-conv --outcome x "${RULED[@]}" --no-rework --pr-anchor tk-anc
+eq "$RC" 2 "(USAGE) --pr-anchor without --rework or --retire exits 2"
 run_signoff --conversation tk-conv --outcome x "${RULED[@]}" --leave tk-rec
 eq "$RC" 2 "(USAGE) --leave on a gate the conversation does not reply to exits 2"
 eq "$(writes)" 0 "(USAGE) …and nothing is written"
@@ -311,6 +322,113 @@ eq "$RC" 0 "(EPIC) the epic's sign-off exits 0"
 eq "$(field tk-mg status)" "closed" "(EPIC) the member's gate is resolved"
 eq "$(meta tk-epic gc.takeaway)" "the epic takes option B" "(EPIC) the record and headline go on the epic"
 hasnt "$(cat "$CALLS")" "update tk-mem" "(EPIC) …and the member is never written"
+
+echo "# an open PR a gate releases: a member's PR answered from the epic's sitting"
+# The member is an open PR behind its own gate, which only the epic's
+# conversation replies to. Answering the gate releases the member's merge, so
+# the ruling must say what it does to the member's PR, and the rework or the
+# retirement lands on that PR before the gate is resolved. The record and the
+# headline stay on the epic.
+epic_pr() {
+    fresh; bead tk-epic epic; bead tk-mem; setm tk-mem merge_result pull_request; edge tk-mem parent-child tk-epic
+    gate tk-mg design-choice; edge tk-mem blocks tk-mg
+    conv tk-conv tk-epic; edge tk-conv replies-to tk-mg
+}
+epic_pr
+eq "$(merge_held tk-mem)" held "(EPIC-PR) the member's gate holds its open PR's merge before the ruling"
+run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}"
+eq "$RC" 2 "(EPIC-PR) a ruling whose gate releases a member's open PR, saying nothing of that PR, exits 2"
+has "$OUT" "reaches tk-mem at merge_result=pull_request" "(EPIC-PR) …naming the member's PR"
+eq "$(writes)" 0 "(EPIC-PR) …writing nothing"
+eq "$(merge_held tk-mem)" held "(EPIC-PR) …so the gate still holds the member's merge"
+run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --rework
+eq "$RC" 0 "(EPIC-PR-REWORK) --rework exits 0"
+has "$(cat "$CALLS")" "converse-rework --anchor tk-mem --ruling-bead tk-conv --ruling fix the retry before the merge" "(EPIC-PR-REWORK) the rework is filed on the member's PR, sourced by the epic's conversation"
+hasnt "$(cat "$CALLS")" "converse-rework --anchor tk-epic" "(EPIC-PR-REWORK) …never on the epic"
+case "$(cat "$CALLS")" in
+  *"converse-rework --anchor tk-mem"*"gate resolve tk-mg"*) ok "(EPIC-PR-REWORK) …before the member's gate is resolved" ;;
+  *) bad "(EPIC-PR-REWORK) the gate was resolved before the rework was filed: $(cat "$CALLS")" ;;
+esac
+eq "$(meta tk-epic gc.takeaway)" "the epic takes option B" "(EPIC-PR-REWORK) the record and headline stay on the epic"
+eq "$(meta tk-mem gc.takeaway)" "" "(EPIC-PR-REWORK) …and the member carries none"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "close --sitting tk-conv --subject tk-epic" "(EPIC-PR-REWORK) the reminder stays the subject's"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "filed ruling-driven rework on tk-mem" "(EPIC-PR-REWORK) …and says the member's PR was sent back"
+epic_pr
+run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
+eq "$RC" 0 "(EPIC-PR-RETIRE) --retire exits 0"
+case "$(cat "$CALLS")" in
+  *"pr-dispose --anchor tk-mem --successor tk-conv --kind not-needed"*"gate resolve tk-mg"*) ok "(EPIC-PR-RETIRE) the member's PR is retired before its gate is resolved" ;;
+  *) bad "(EPIC-PR-RETIRE) the member's PR was not retired before its gate: $(cat "$CALLS")" ;;
+esac
+hasnt "$(cat "$CALLS")" "pr-dispose --anchor tk-epic" "(EPIC-PR-RETIRE) …and the epic is never disposed"
+epic_pr
+run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --no-rework
+eq "$RC" 0 "(EPIC-PR-NO-REWORK) --no-rework exits 0"
+has "$OUT" "the ruling leaves the branch of tk-mem as it stands" "(EPIC-PR-NO-REWORK) the member's branch is said to stand"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "ruling leaves the branch of tk-mem as it stands" "(EPIC-PR-NO-REWORK) …in the reminder too"
+hasnt "$(cat "$CALLS")" "converse-rework" "(EPIC-PR-NO-REWORK) …and nothing is filed"
+epic_pr
+run_signoff --conversation tk-conv --answer tk-mg "${ANSWERED[@]}"
+eq "$RC" 2 "(EPIC-PR-ANSWER) an answer on a turn that does not sign off, releasing a member's open PR and saying nothing of it, exits 2"
+eq "$(writes)" 0 "(EPIC-PR-ANSWER) …writing nothing"
+eq "$(merge_held tk-mem)" held "(EPIC-PR-ANSWER) …so the gate still holds the member's merge"
+run_signoff --conversation tk-conv --answer tk-mg "${ANSWERED[@]}" --rework
+eq "$RC" 0 "(EPIC-PR-ANSWER) the answer with --rework exits 0"
+case "$(cat "$CALLS")" in
+  *"converse-rework --anchor tk-mem --ruling-bead tk-conv"*"gate resolve tk-mg"*) ok "(EPIC-PR-ANSWER) the member's rework is filed before its gate is resolved" ;;
+  *) bad "(EPIC-PR-ANSWER) the gate was resolved before the member's rework: $(cat "$CALLS")" ;;
+esac
+eq "$(field tk-conv status)" "in_progress" "(EPIC-PR-ANSWER) the conversation stays open"
+
+echo "# a gate about the subject and another open PR"
+# One gate blocks the subject's PR and another PR, so its answer releases both.
+# A conversation files one live rework, so --rework or --retire names the PR it
+# acts on, and the other stands under the ruling.
+shared_pr() {
+    fresh; bead tk-anc; setm tk-anc merge_result pull_request; bead tk-pr2; setm tk-pr2 merge_result pull_request
+    gate tk-sg approach; edge tk-anc blocks tk-sg; edge tk-pr2 blocks tk-sg
+    conv tk-conv tk-anc; edge tk-conv replies-to tk-sg
+}
+shared_pr
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+eq "$RC" 2 "(SHARED-PR) --rework on a ruling that releases two open PRs, naming neither, exits 2"
+has "$OUT" "reaches more than one open PR (tk-anc tk-pr2)" "(SHARED-PR) …naming both"
+eq "$(writes)" 0 "(SHARED-PR) …writing nothing"
+eq "$(merge_held tk-pr2)" held "(SHARED-PR) …so the gate still holds the other PR's merge"
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --pr-anchor tk-other
+eq "$RC" 2 "(SHARED-PR) --pr-anchor naming no open PR the ruling reaches exits 2"
+eq "$(writes)" 0 "(SHARED-PR) …writing nothing"
+run_signoff --conversation tk-conv --outcome "the approach stands; fix the retry" "${RULED[@]}" --rework --pr-anchor tk-anc
+eq "$RC" 0 "(SHARED-PR) --rework --pr-anchor naming the subject's PR exits 0"
+has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(SHARED-PR) the rework is filed on the PR it names"
+hasnt "$(cat "$CALLS")" "converse-rework --anchor tk-pr2" "(SHARED-PR) …and on no other"
+case "$(cat "$CALLS")" in
+  *"converse-rework --anchor tk-anc"*"gate resolve tk-sg"*) ok "(SHARED-PR) …before the shared gate is resolved" ;;
+  *) bad "(SHARED-PR) the shared gate was resolved before the rework: $(cat "$CALLS")" ;;
+esac
+has "$OUT" "the ruling leaves the branch of tk-pr2 as it stands" "(SHARED-PR) the other PR stands under the ruling"
+has "$(grep '^pr-sitting-comment' "$CALLS")" "ruling leaves the branch of tk-pr2 as it stands" "(SHARED-PR) …as the reminder records"
+eq "$(meta tk-pr2 gc.takeaway)" "" "(SHARED-PR) the headline stays off the other PR"
+fresh; bead tk-anc; bead tk-pr2; setm tk-pr2 merge_result pull_request
+gate tk-sg approach; edge tk-anc blocks tk-sg; edge tk-pr2 blocks tk-sg
+conv tk-conv tk-anc; edge tk-conv replies-to tk-sg
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
+eq "$RC" 2 "(SHARED-OTHER-PR) a ruling on a subject that is no PR, whose gate releases another bead's open PR, exits 2"
+eq "$(writes)" 0 "(SHARED-OTHER-PR) …writing nothing"
+eq "$(merge_held tk-pr2)" held "(SHARED-OTHER-PR) …so the gate still holds that PR's merge"
+run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --retire duplicate --successor tk-anc
+eq "$RC" 0 "(SHARED-OTHER-PR) --retire on that ruling exits 0"
+has "$(cat "$CALLS")" "pr-dispose --anchor tk-pr2 --successor tk-anc --kind duplicate" "(SHARED-OTHER-PR) …retiring the one open PR the ruling reaches"
+
+echo "# what a gate releases is read before any write"
+epic_pr; DEP_UP_DOWN=tk-mg run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+eq "$RC" 1 "(RELEASED-UNREAD) a gate whose waiting beads do not read stops the sign-off"
+has "$OUT" "NOT SIGNED OFF" "(RELEASED-UNREAD) …saying not to post the sign-off"
+eq "$(writes)" 0 "(RELEASED-UNREAD) …and writes nothing"
+epic_pr; SHOW_DOWN=tk-mem run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
+eq "$RC" 1 "(RELEASED-UNREAD) a bead the gate releases whose row does not read stops the sign-off"
+eq "$(writes)" 0 "(RELEASED-UNREAD) …and writes nothing"
+eq "$(field tk-mg status)" "open" "(RELEASED-UNREAD) …leaving the gate open"
 
 echo "# a gate the ruling leaves owed stays open"
 acceptance; gate tk-two later-question; edge tk-anc blocks tk-two; edge tk-conv replies-to tk-two
