@@ -1199,9 +1199,12 @@ cd "$WORKTREE" || { echo "recorded work_dir is missing: $WORKTREE" >&2; exit 1; 
 ```bash
 git diff origin/{{base_branch}}...HEAD
 git log --oneline origin/{{base_branch}}..HEAD
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-mentions.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+"${SCRIPTS:?rig-mentions.sh not found in the pack}/rig-mentions.sh" --branch origin/{{base_branch}} --bead "$WORK_BEAD_ID"
 ```
 Check for bugs, security issues, missing error handling, debug cruft,
-unintended file changes. Fix what you find. On a retry, the previous attempt's
+unintended file changes, and each mention of another rig the last command
+lists. Fix what you find. On a retry, the previous attempt's
 failure reproduces in the checks below — run them and read the failure rather
 than re-deriving from scratch.
 
@@ -1712,11 +1715,14 @@ cat > "$PR_SUMMARY_FILE" <<'PRSUMMARY'
 paragraph or a few bullets of markdown>
 PRSUMMARY
 wc -c "$PR_SUMMARY_FILE"
+SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-mentions.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+"${SCRIPTS:?rig-mentions.sh not found in the pack}/rig-mentions.sh" --file "$PR_SUMMARY_FILE"
 ```
 
 Quote the delimiter as written: an unquoted `<<PRSUMMARY` runs any backticks
 in your prose. Leaving the file empty carries no summary and the PR body
-falls back to the dispatch text.
+falls back to the dispatch text. Rewrite the file to fix each mention of
+another rig the last command lists.
 
 What the summary describes is the BRANCH, not this pass. On a rework or
 rebase child the PR body publishes the whole branch, so an account of only
