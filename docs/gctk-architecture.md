@@ -41,8 +41,8 @@ forward.
 
 | Call | The intent it carries | Who calls it |
 |---|---|---|
-| `gctk waits blocked <bead>...` | is this bead blocked, and on what | deferred dispatch, the refinery's queue and the witness's check on it, gc-helm's route guard, bead-context's frontier, doctor checks, and the board through the package |
-| `gctk waits pending <bead>...` | which of this bead's own waits have not landed, and when the last one did | the `until` disposal, gc-helm's park and release guards, the check that a wait is an edge, patrol findings, the mechanik's wait on an effort's summary, and the board through the package |
+| `gctk waits blocked <bead>...` | is this bead blocked, and on what | deferred dispatch, the refinery's queue and the witness's check on it, bead-context's frontier, and doctor checks |
+| `gctk waits pending <bead>...` | which of this bead's own waits have not landed, and when the last one did | the `until` disposal, gc-helm's park, release and route guards, the check that a wait is an edge, patrol findings, the mechanik's wait on an effort's summary, and the board through the package |
 | `gctk waits foreign` | which wait edges point into another store, and so hold nothing | a doctor check |
 | `gctk dispatch arm <bead>` | start this bead by itself once nothing holds it, on a formula if one is named | whoever files work that must wait: formula steps, prompts, skills |
 | `gctk dispatch disarm <bead>` | stop an armed bead from starting by itself | the waits and work skills |
@@ -72,10 +72,10 @@ The synthesis of review lanes into one verdict is judgment, so it stays in the
 review formula's step text.
 
 Of the commands gctk holds now, `rig` and `version` keep their place in the
-tree, and `pr-status` takes its place as `pr status`. `lifecycle` and `merge` carry the anchor
-state machine and the pack's merge rule, which retire as merging moves onto
-Gas Town's refinery and GitHub's branch rules. They join the tree unchanged and
-gain nothing new.
+tree, and `pr-status` takes its place as `pr status`. `lifecycle` and `merge`
+carry the anchor state machine and the pack's merge rule, which retire as
+merging moves onto Gas Town's refinery and GitHub's branch rules. They join the
+tree unchanged and gain nothing new.
 
 ## What each domain owns
 
@@ -248,13 +248,15 @@ The store applies waits two ways, and `waits` uses each where it applies.
 
 - **Is this bead blocked, and on what?** For work that has not started, the
   answer is the store's blocked set, which names the waits on the bead itself
-  or, when it has none of its own, the ancestor it is held through. For work in
+  or, when it has none of its own, the parent it is held through. For work in
   flight, only the waits the store names on the bead itself count.
 - **Which of its own waits are pending?** These are the waits on the bead
   itself that have not landed, with the time the last one did. A caller that
-  asks what a bead records it waits on, or what still holds its close, asks
-  this: a takeaway's waits, an `until` disposal, the check that a wait is an
-  edge, and the board's ruled rows.
+  asks what a bead records it waits on, what still holds its close, or whether
+  its own work sits on another bead asks this: a takeaway's waits and its route
+  guard, an `until` disposal, the check that a wait is an edge, and the board's
+  ruled rows. An ancestor's park answers none of them, because the work it
+  holds is still the bead's own.
 
 The rest follows from the store:
 

@@ -77,7 +77,7 @@ questions, and the design moves none of them into `waits`.
 | Sense | Rules | What it reads | Where it goes |
 |---|---|---|---|
 | A hold marker | 16 | `merge_hold`, `rebase_hold`, `triage.hold`, `blocked_reason`, a takeaway, review quiescence, a live must-fix finding, an arm read as a hold | each marker belongs to the act it pauses, mostly a merge, and retires with the merge, GitHub-intake, review-lane or intake member (tk-1tfzr71.20, .21, .22, .17) |
-| A park for a person | 11 | `gc.routed_to=human`, `placement=pending`, visits | the native-gates convoy (tk-iirrmiw) turns a wait on a person into a gate, which is a wait the store holds; placement is intake's (tk-1tfzr71.17) |
+| A park for a person | 11 | `gc.routed_to=human`, `placement=pending`, visits | the native-gates effort (tk-1tfzr71.4) turns a wait on a person into a gate, which is a wait the store holds; placement is intake's (tk-1tfzr71.17) |
 | A bead's own status | 11 | `hooked`, `in_progress`, `blocked`, `deferred`, `pinned` as the bead's own | not a wait. The store's ready rule adds status to the blocked answer, and each status reader's question is its own |
 | Ready and composite | 9 | a dispatch path, the merge cadence's composite holds, the liveness classifiers | the dispatch member and the members that retire the cadence and the census |
 
@@ -119,7 +119,7 @@ follows.
 | `doctor/check-refinery-patrol-live/run.sh:158-185` | D8 | moves: blocked, as a call-site swap; the check retires with tk-1tfzr71.20 |
 | `formulas/mol-witness-patrol.toml:937-965`, check-refinery | D10 | moves: blocked, as a call-site swap; the step retires with tk-1tfzr71.19 |
 | `assets/scripts/gc-helm.sh:969-983`, takeaway `--release` | D11 | moves: pending |
-| `gc-helm.sh:1014-1036`, takeaway `--route` and `--assign` | D12 | moves: blocked, less the bead's own demand gate |
+| `gc-helm.sh:1014-1036`, takeaway `--route` and `--assign` | D12 | moves: pending, less the bead's own demand gate |
 | `gc-helm.sh:1821-1825, 1862-1886`, park `--waiting-on` | D26 | moves: the new edge is read back through pending, so a target that holds nothing is refused |
 | `assets/scripts/bead-context.sh:295-301, 550-559`, `--frontier` | D22 | moves: blocked |
 | `assets/scripts/patrol-finding.sh:304-310, 350-367` | D21 | moves: pending |
@@ -143,7 +143,7 @@ follows.
 | `assets/scripts/liveness-recheck.sh:155, 175-185, 228-268` | D2 | retires with tk-1tfzr71.19 |
 | `liveness-sweep.sh:400-407` | D13 | retires with tk-1tfzr71.19 |
 | `doctor/check-routed-work-claimable/run.sh:243-485` | D5 | retires with tk-1tfzr71.15 |
-| `gc-helm.sh:4253-4264`, `engage` | D11 | retires with the native-gates convoy, tk-iirrmiw |
+| `gc-helm.sh:4253-4264`, `engage` | D11 | retires with the native-gates effort, tk-1tfzr71.4 |
 | `assets/scripts/finding.sh:1179-1196` | D13 | retires with tk-1tfzr71.22 |
 | `finding.sh:1397-1427` | D13 | retires with tk-1tfzr71.22 |
 | `finding.sh:1428-1452` | D13 | retires with tk-1tfzr71.22 |
@@ -197,12 +197,6 @@ counts.
 
 ### On live beads
 
-- **Routing or assigning a bead held through an ancestor is refused.**
-  gc-helm's takeaway guard refuses `--route` and `--assign` on a blocked bead,
-  because no pool can see it until the wait lands, and it now counts an
-  ancestor's wait. Today it allows them. Two live beads are routed to a person
-  under a parked parent, tk-georjc and one in another store, and the same holds
-  for any of the 192 beads above.
 - **bead-context's frontier reads the 192 beads held through an ancestor as
   blocked.** Today it reads them as ready.
 - **A doctor check lists the three edges into another store**, on tk-nt5uda,
@@ -212,8 +206,12 @@ counts.
 
 Nothing changes for deferred dispatch, the refinery's queue or the witness's
 check on it: the 99 armed beads and the 7 handoffs read the same under both
-rules. The board's ruled rows ask `pending`, the bead's own waits, so tk-georjc
-keeps its row.
+rules. The board's ruled rows and gc-helm's takeaway guards ask `pending`, the
+bead's own waits. So tk-georjc keeps its row, and a sitting can still route or
+assign it, or any of the 192 beads above. The route guard refuses a bead whose
+own work sits on a blocker, and a parked parent's members still carry their
+own work, which reaches the pool once the park is released
+([steering.md](../../docs/steering.md#what-a-park-holds)).
 
 ### With no live bead on them today
 
@@ -242,6 +240,6 @@ Each of these members gets a note naming the one rule, and its replacement asks
   status, a pinned one included, and `merge.go` also holds a merge on the
   bead's children and on beads that name its PR. Which of those holds survive
   is merge policy, for tk-1tfzr71.20's design.
-- **Visits (tk-iirrmiw), the liveness census (tk-1tfzr71.19), intake
+- **Visits (tk-1tfzr71.4), the liveness census (tk-1tfzr71.19), intake
   (tk-1tfzr71.17) and the routed-work check (tk-1tfzr71.15)** retire their
   copies whole.

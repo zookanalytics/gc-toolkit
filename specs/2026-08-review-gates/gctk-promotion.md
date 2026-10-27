@@ -11,8 +11,8 @@ gctk is built to, which pack logic moves into it, and the rules a move follows.
 A move carries only an intent that survives the migration onto Gas City,
 deletes the shell it replaces, and keeps no test that holds two copies equal,
 so the remaining one-subcommand-per-script ports this record scoped are not
-built. The
-build and deploy pattern below is still how the binary is built and served.
+built. The build and deploy pattern below is still how the binary is built and
+served.
 
 `services/gctk` is the binary's source, and `services/gctk/README.md` carries
 the operating detail and states everything the binary holds.

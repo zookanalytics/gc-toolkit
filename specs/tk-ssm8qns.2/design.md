@@ -27,14 +27,13 @@ deleted. Approving decides six things.
 - **One rule for "is this blocked?", and it is the store's.** Work that has not
   started is held by whatever keeps it out of `bd ready`, a wait of its own or
   an ancestor's. Work in flight is held only by its own waits, the ones bd
-  refuses its close for. The cost is three answers that change on live beads
+  refuses its close for. The cost is two answers that change on live beads
   ([blocked-census.md](blocked-census.md#the-answers-that-change-for-approval)):
-  - routing or assigning a bead that its epic's park holds is refused, which
-    touches 2 beads routed to a person today;
   - bead-context's frontier reads 192 beads as blocked;
   - a doctor check lists 3 edges into another store.
 
-  Nothing changes for the 99 armed beads or the 7 refinery handoffs.
+  Nothing changes for the 99 armed beads, the 7 refinery handoffs, or a
+  sitting's route of a bead its epic's park holds.
 - **An earlier ruling gives way.** A demand gate on a parent holds the parent's
   work that has not started, as every gate does, so deferred dispatch stops
   exempting it. No live bead sits under one. The cost: a member armed under a
@@ -96,17 +95,20 @@ the migration map came after it, and the design follows them where they differ.
    earlier ruling that waiting on their decision does not hold armed work.
    Keeping the exemption would make `waits` walk the tree past the store's
    answer, which is the second rule this Feature removes. The native-gates
-   design, which its convoy tk-iirrmiw is building, already decided the same
-   way in tk-0ur8r9p, decision 4: a gate on a bead with open children pauses
-   every part that has not started, and each caller chooses whether its
-   question blocks the parent, one member, or opens a conversation instead. No
-   live bead sits under such an ancestor today.
+   design, which lands with tk-1tfzr71.4 from `integration/tk-iirrmiw`, already
+   decided the same way in tk-0ur8r9p, decision 4: a gate on a bead with open
+   children pauses every part that has not started, and each caller chooses
+   whether its question blocks the parent, one member, or opens a conversation
+   instead. No live bead sits under such an ancestor today.
 6. **`waits` answers two questions, and both are the store's.** "Is it blocked"
    is the ready rule's, and "which of its own waits are pending" is the close
-   rule's. A caller that asks what a bead records it waits on is asking the
-   second. Answering it with the first would read an epic's park as a
-   takeaway's wait: the board would band tk-georjc, whose ruling recorded no
-   wait, as work in flight.
+   rule's. A caller that asks what a bead records it waits on, or whether its
+   own work sits on another bead, is asking the second. Answering it with the
+   first would read an epic's park as a takeaway's wait: the board would band
+   tk-georjc, whose ruling recorded no wait, as work in flight. The takeaway's
+   route guard would refuse to route a member its epic's park holds, yet
+   steering.md expects a park to hold routed members, and the doctor check on
+   blocked work flags a member that has neither a route nor an arm.
 
 ## Rulings on the queued beads
 
@@ -123,8 +125,9 @@ Dropping the last two fallback ports also leaves `gctk-resolve.sh`'s
 `gctk_resolve`, its version-skew guard and `GCTK_FALLBACK` with no caller, at
 this commit as before: only `gctk_require`, which `lifecycle.sh` and `merge.sh`
 call, is in use. They served only a port that lands with its script kept as the
-fallback, so unit 1 deletes them with their cases in `gctk-resolve.test.sh` and
-the `GCTK_FALLBACK` clear in `test-harness.sh`.
+fallback, so unit 1 deletes them with their cases in `gctk-resolve.test.sh`,
+and the `GCTK_FALLBACK` clear in `test-harness.sh` with its cases in
+`test-harness.test.sh`.
 
 ## The derived domain set against the starting proposal
 
@@ -141,7 +144,7 @@ rest, and adds four the proposal did not name.
 | review | narrowed | Only the lanes' synthesis and the check loop's check script survive (tk-1tfzr71.22). |
 | findings | dropped | Finding beads for machine findings retire with the review lanes. |
 | pr | kept | Title and summary composition, any merge rule GitHub cannot express, the hop from a GitHub event to its owning bead, and the PR status the board shares. |
-| engagement | dropped | Visits, demands and takeaways move onto Gas City's human gates (the converse convoy, tk-iirrmiw). |
+| engagement | dropped | Visits, demands and takeaways move onto Gas City's human gates (the native-gates effort, tk-1tfzr71.4). |
 | disposition | dropped | `bd duplicate` and `bd supersede` (tk-1tfzr71.13). |
 | run | dropped | `run-cancel.sh` is retained glue, one call over an endpoint with no CLI verb. The map keeps it as shell. |
 | convoy | dropped | `gc convoy land`, tracks and Gas Town's auto-land (tk-1tfzr71.23). |
@@ -233,9 +236,12 @@ next section lists.
 - Each suite whose caller moved drives it through the built binary over the
   harness's stub store, as the suites that reach `gctk merge` do. Nothing keeps
   two copies equal.
-- The docs that state the hold rule say the one rule in the same change:
-  steering.md's park sections, deferred-dispatch.md's hold section,
-  component-model.md's `hold-lib.sh` row, and the waits skill.
+- Every doc, skill and comment that states the hold rule or names
+  `hold-lib.sh` says the one rule in the same change: steering.md's park
+  sections, deferred-dispatch.md, component-model.md's `hold-lib.sh` row and
+  its I14 and `check-armed-dispatch-owed` entries, authority-map.md's row for
+  arming deferred dispatch, the waits skill, and the comments in
+  `dispatch-path.sh` and `gc-helm.sh`.
 - The refinery's median pass time, read from its pass log over a day before
   and after the swap, stays under 552 s.
 
@@ -244,9 +250,11 @@ next section lists.
 - A `blocks` edge onto tk-ssm8qns.1 from tk-1tfzr71.16, .18, .20, .21, .22 and
   .24, with a note on each naming the domain it builds.
 - A rule-1 note on each member that retires a copy, naming the one rule its
-  replacement follows: tk-1tfzr71.12, .15, .17, .19, .20, .21, .22, and the
-  native-gates convoy tk-iirrmiw. tk-1tfzr71.12's note names the change for a
-  bead slung by hand under a parked epic (blocked-census.md).
+  replacement follows: tk-1tfzr71.12, .15, .17, .19, .20, .21, .22, and
+  tk-1tfzr71.4, the native-gates effort's landing bead. Its convoy, tk-iirrmiw,
+  is closed, and what waited on the convoy waits on that bead.
+  tk-1tfzr71.12's note names the change for a bead slung by hand under a parked
+  epic (blocked-census.md).
 - The priority, sends, dolt and seed Features, filed under the epic as the
   carriers table says.
 
