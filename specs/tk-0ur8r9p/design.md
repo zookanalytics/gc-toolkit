@@ -536,11 +536,12 @@ section). A gate the liveness sweep raises names, in its message, the command
 that re-reads the current state. That replaces the `visit.recheck` hook.
 
 **Its await id** is the situation key alone, the filer's key, which bd calls the
-gate's condition identifier. A gate a sitting files uses the key
-`conversation` (section 7), and a first reaction's gate the key `first-reaction`
-(section 8). The key is what tells two gates on one bead apart: the helper's
-dedup, a filer's withdrawal, a declared quiet period and Accept each read it
-among the gates the bead's `blocks` edges reach. The helper refuses a key
+gate's condition identifier. A gate a sitting files uses a key that names its
+conversation, `conversation.<conversation id>` (section 7), and a first
+reaction's gate the key `first-reaction` (section 8). The key is what tells
+two gates on one bead apart: the helper's dedup, a filer's withdrawal, a
+declared quiet period and Accept each read it among the gates the bead's
+`blocks` edges reach. The helper refuses a key
 outside `[A-Za-z0-9._-]`, as escalate.sh does today
 (`assets/scripts/escalate.sh` 123-124). bd stores the await id and returns it
 with the gate. bd's gate check skips human gates (bd `cmd/bd/gate.go` 712-731),
@@ -1302,10 +1303,13 @@ hold with a gate of their own. It adds its conversation's reply onto
 that gate and reads it back, so a resumed or handed-off conversation knows the
 gate it owes without a search by key. converse-hold.sh retires, and so do its
 demand, its `gc.hold_demand` stamp, its `gc.gate_visit` stamp and
-`--hold-merge`. An unanchored subject moves to `held` and back through
-lifecycle.sh, now from the hold and settle skills, and only with a gate that
-blocks it, because check-wait-is-an-edge requires a held bead to carry a live
-edge.
+`--hold-merge`. An unanchored subject moves to `held` through lifecycle.sh
+from the hold skill, and only with a gate that blocks it, because
+check-wait-is-an-edge requires a held bead to carry a live edge. It moves back
+from the sign-off, from Accept before it dispatches, and from the premise
+re-check's moot or benign close once no open human gate holds it, since a
+sitting cut short leaves the subject held and the next one can find its
+question moot.
 
 A hold does not use `gc session wait --sleep`. That command sets a wait hold, and
 the controller then drains the session (Gas City `cmd/gc/cmd_wait.go` 406-416),
@@ -1797,7 +1801,7 @@ record discipline. Only text that depends on the visit bead changes.
 
 | File | What changes |
 |---|---|
-| `skills/converse-recheck-premise` | The premise is read from the conversation's ask and from the title and framing of each gate it replies to. A moot or benign verdict on a gate is `gc bd gate resolve` with that headword, in place of converse-close-out.sh. A conversation whose premise has died is closed with the record written. |
+| `skills/converse-recheck-premise` | The premise is read from the conversation's ask and from the title and framing of each gate it replies to. A moot or benign verdict on a gate is `gc bd gate resolve` with that headword, in place of converse-close-out.sh. A conversation whose premise has died is closed with the record written, once a subject that an earlier, cut-short sitting's hold left `held` is released, when no open human gate still holds it (section 7). |
 | `skills/converse-prep` | It reads the conversation task with its notes and the gates it replies to, its bead's gates with theirs, and the subject's notes. A recheck command named in a gate's framing, or in the notes a migrated visit left (section 11), is run, in place of the `visit.recheck` hook. |
 | `skills/converse-hold` | The hold of section 7, in place of converse-hold.sh, the visit demand and `--hold-merge`, with the reply onto a gate the hold files. The dismiss line at the foot of every framing stays. |
 | `skills/converse-settle` | converse-signoff.sh's new shape. Before a gate is resolved, the sitting adds its conversation's reply onto it when the reply is missing, and names every bead the answer releases (section 7). The resolve replaces visit-close.sh and the guarded stamps, each resolve is read back, and the reminder update passes its text directly. A cross-store follow-up waits through the helper. |
@@ -2144,7 +2148,13 @@ one still open and finishes it:
    `gc.demand_for` names when that bead waits on it through a `blocks` edge,
    else the first bead that does. Its title is the demand's takeaway, else its
    title, its framing is the demand's description, and its key is the demand's
-   topic, `gc.demand_topic` or else `conversation`. The helper's dedup returns
+   topic, `gc.demand_topic`, or else its fallback key. An item with no key of
+   its own takes a fallback key that names it, because the helper keeps one
+   open gate per bead and key, and a fallback two items share would let one
+   answer clear both questions. A visit's is `conversation.<visit id>`. A
+   demand's is the key of the visit whose `gc.hold_demand` names it, because
+   converse-hold gave its demands the visit's own key (converse-hold.sh
+   183-189), or else `conversation.<demand id>`. The helper's dedup returns
    a gate already open under that key on that bead, so a rerun finds the gate
    it filed and files no second one. A legacy demand that no bead waits on
    through a `blocks` edge leaves the gate no bead to block without adding a
@@ -2176,11 +2186,12 @@ that stops part way leaves the visit open for the rerun to finish:
 
 1. **It reads the subject and the key.** The subject is the visit's `tracks`
    target, else its `gc.continuation_group`. The key is its `escalation_key`,
-   else `conversation`. A visit gate-visit-sweep filed is the exception,
-   because the sweep files a visit only to put one demand to a person. While
-   that demand is open, the visit's key is the demand's topic, its
-   `gc.demand_topic` or else `conversation`, so step 3 takes the demand as the
-   visit's gate. The sweep's visit is one whose creator is the sweep's
+   else its fallback key, `conversation.<visit id>`. A visit gate-visit-sweep
+   filed is the exception, because the sweep files a visit only to put one
+   demand to a person. While that demand is open, the visit's key is the
+   demand's key, its `gc.demand_topic` or else its fallback key, so step 3
+   takes the demand as the visit's gate. The sweep's visit is one whose
+   creator is the sweep's
    order (see the platform section) and whose framing names the demand
    (gate-visit-sweep.sh 156-160). When that demand was a legacy one, the pass
    above has closed it with `migrated: gate <id>`, so the visit's key is the
@@ -2204,8 +2215,8 @@ that stops part way leaves the visit open for the rerun to finish:
    and leaves it open for a person.
 3. **A demand that already covers the visit's situation becomes the visit's
    gate.** A demand covers it when its `gc.demand_for` names the visit's
-   subject or the visit itself, and its topic, `gc.demand_topic` or else
-   `conversation`, is the visit's key. A `gc.gate_visit` that names the visit
+   subject or the visit itself, and its key, `gc.demand_topic` or else its
+   fallback key, is the visit's key. A `gc.gate_visit` that names the visit
    does not show that. The sweep stamps a demand with any visit already open on
    the demand's subject, whatever that visit asks (gate-visit-sweep.sh
    132-137), so a first reaction's demand can name a review's visit beside it.
@@ -2223,14 +2234,18 @@ that stops part way leaves the visit open for the rerun to finish:
    same await id. converse-hold leaves such a pair, its demand on the visit and
    the second one its `--hold-merge` files on the subject (converse-hold.sh
    286-308). The pair stays the duplicate a race can also leave, which the board
-   folds and one ruling answers (section 2). A demand keeps blocking what it
+   folds and one ruling answers (section 2). On a visit with no key of its own,
+   nothing names the `--hold-merge` demand, so it takes a fallback key of its
+   own. It stays a second gate on the anchor for the visit's question, which the
+   operator clears beside the visit's gate, rather than a key shared with every
+   other keyless visit on the anchor. A demand keeps blocking what it
    blocks, because its filer chose that, so the migration adds no wait on a bead
    with open children that is not there today.
 
    Step 3 takes each demand that covers the visit's situation, and every
    demand filed on the visit itself, whatever it asks. A demand it takes is shaped
-   here. Its await id becomes its own topic, `gc.demand_topic` or else
-   `conversation`, and its title becomes its takeaway, through
+   here. Its await id becomes its own key, `gc.demand_topic` or else its
+   fallback key, and its title becomes its takeaway, through
    `bd update --title`. The await id is written last, after the title and any
    edge move below, through `bd update --await-id`, because it is what marks a
    gate as shaped. A gate is shaped when its await id no longer starts with
@@ -2354,8 +2369,8 @@ store's open gates (`bd gate list --json --limit 0`, see the platform section).
 They hold every demand in the store but a legacy one the run left open for a
 person, because the pass before the visits filed the others again as gates. It
 shapes each open human gate that is not yet shaped, the way step 3 does,
-with the await id written last: its await id becomes its topic,
-`gc.demand_topic` or else `conversation`. It keeps every edge it has, because a
+with the await id written last: its await id becomes its key,
+`gc.demand_topic` or else its fallback key. It keeps every edge it has, because a
 gate is about each bead it blocks. A demand whose `blocks` edge never landed has
 none to keep, so once its keys go it is about no bead. The board gives it a row
 of its own (section 8), the first line of its description still names the bead
@@ -2462,8 +2477,9 @@ states this section names:
   notes, the board shows the bead owed with that task's title, and a rerun files
   no second task.
 - **A visit the operator opened on a PR anchor.** The run leaves a gate
-  under the key `conversation` that blocks the anchor, so the merge stays
-  held.
+  under the visit's fallback key, `conversation.<visit id>`, that blocks the
+  anchor, so the merge stays held, and a second such visit on the same anchor
+  leaves a gate of its own.
 - **A visit escalate.sh filed on an epic with open children and no waiter, and
   one on a plain task with an open child.** For each, the run leaves a
   conversation in the queue and no edge onto the parent, so its children stay
@@ -2855,9 +2871,10 @@ free of pack surface. A reader who
 knows Gas City and bd, and not this pack, must still learn these conventions,
 each carried by a native field, a flag or a name:
 
-- the situation key a gate's await id carries, and the two keys the pack reads
-  by name: `conversation`, the key of a gate a sitting files, and
-  `first-reaction`, the gate Accept clears;
+- the situation key a gate's await id carries, the one key the pack reads by
+  name, `first-reaction`, the gate Accept clears, and the shape
+  `conversation.<id>`, a key that names the conversation, visit or demand a
+  gate asks for, so two questions on one bead keep two gates;
 - the headwords `ruled:`, `moot:` and `benign:` at the head of a gate's close
   reason. `ruled:` releases a needs-you finding, and `moot:` or `benign:`
   starts the quiet period under the gate's key for a filer that declares one;
