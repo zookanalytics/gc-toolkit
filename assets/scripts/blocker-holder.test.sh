@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# blocker-holder.test.sh — whether an automated actor holds an anchor's live
+# blockers, over the hermetic bd stub. Seeds each blocker as a store bead with a
+# `BLOCKER|blocks|ANCHOR` edge, and a run as a workflow root naming its input
+# convoy plus a `CONVOY|tracks|BEAD` edge, which the harness's run-lib stub
+# serves. Asserts the one line the script prints, actor, stuck or none, and
+# that a read that does not resolve prints nothing and exits 2.
+set -u
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/blocker-holder-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
+. "$HERE/test-harness.sh"; harness_init
+
+SD="$TMP/scripts"
+mk_sut_dir "$SD" "$HERE/blocker-holder.sh"
+SUT="$SD/blocker-holder.sh"
+
+anchor() { printf '{"id":"%s","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}' "$1"; }
+# A blocker: id, status, assignee, then metadata entries to append.
+blk() { # <id> <status> <assignee> [<extra-metadata>]
+  printf '{"id":"%s","status":"%s","assignee":"%s","notes":"","metadata":{"task_kind":"rework"%s}}' "$1" "$2" "$3" "${4:-}"
+}
+# A graph.v2 run over <bead>: its input convoy and its workflow root, whose
+# status says whether the run is live. The convoy's tracks edge is seeded
+# separately in STUB_DEPS.
+convoy() { printf '{"id":"%s","status":"open","assignee":"","notes":"","issue_type":"convoy","metadata":{}}' "$1"; }
+root()   { printf '{"id":"%s","status":"%s","assignee":"","notes":"","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"%s"}}' "$1" "$2" "$3"; }
+POUR=',"gc.execution_routed_to":"rig/gc-toolkit.polecat","source_review_bead":"rv-1"'
+
+echo "# a blocker routed to a pool is held"
+store "[$(anchor A1), $(blk B1 open '' ',"gc.routed_to":"rig/gc-toolkit.polecat"')]"
+printf 'B1|blocks|A1\n' > "$STUB_DEPS"
+out=$("$SUT" --anchor A1); rc=$?
+eq "$rc" 0 "an answer exits 0"
+eq "$out" "actor B1 routed to rig/gc-toolkit.polecat" "a pool route is an actor"
+
+echo "# a rework the refinery holds, its route cleared, is held"
+store "[$(anchor A2), $(blk B2 open 'rig/gc-toolkit.refinery' "$POUR")]"
+printf 'B2|blocks|A2\n' > "$STUB_DEPS"
+eq "$("$SUT" --anchor A2)" "actor B2 claimed by rig/gc-toolkit.refinery" "a claim is an actor, the refinery's hand-back included"
+
+echo "# a poured rework its live run works is held"
+store "[$(anchor A3), $(blk B3 open '' "$POUR"), $(convoy C3), $(root R3 in_progress C3)]"
+printf 'B3|blocks|A3\nC3|tracks|B3\n' > "$STUB_DEPS"
+eq "$("$SUT" --anchor A3)" "actor B3 worked by run R3" "a live run working the blocker is an actor"
+
+echo "# a poured rework whose run has ended is held by nothing: the stamp outlives the run"
+store "[$(anchor A4), $(blk B4 open '' "$POUR"), $(convoy C4), $(root R4 closed C4)]"
+printf 'B4|blocks|A4\nC4|tracks|B4\n' > "$STUB_DEPS"
+eq "$("$SUT" --anchor A4)" "stuck B4" "an execution stamp with no live run is no actor"
+
+echo "# a blocker with no route, claim or run is stuck"
+store "[$(anchor A5), $(blk B5 open '')]"
+printf 'B5|blocks|A5\n' > "$STUB_DEPS"
+eq "$("$SUT" --anchor A5)" "stuck B5" "an unmarked live blocker is stuck"
+
+echo "# a blocker routed to a person is theirs: neither an actor nor stuck"
+store "[$(anchor A6), $(blk B6 open '' ',"gc.routed_to":"human"')]"
+printf 'B6|blocks|A6\n' > "$STUB_DEPS"
+eq "$("$SUT" --anchor A6)" "none" "a human route answers none"
+store "[$(anchor A6b), $(blk B6b open 'human')]"
+printf 'B6b|blocks|A6b\n' > "$STUB_DEPS"
+eq "$("$SUT" --anchor A6b)" "stuck B6b" "a claim in the name human is no actor either"
+
+echo "# one actor answers for the anchor, whichever blocker is listed first"
+store "[$(anchor A7), $(blk B7s open ''), $(blk B7a open '' "$POUR"), $(convoy C7), $(root R7 open C7)]"
+printf 'B7s|blocks|A7\nB7a|blocks|A7\nC7|tracks|B7a\n' > "$STUB_DEPS"
+eq "$("$SUT" --anchor A7)" "actor B7a worked by run R7" "a stuck blocker listed first does not hide the actor after it"
+
+echo "# only live blockers count, a missing status reading open"
+store "[$(anchor A8), $(blk B8c closed ''), $(blk B8e '' '')]"
+printf 'B8c|blocks|A8\nB8e|blocks|A8\n' > "$STUB_DEPS"
+eq "$("$SUT" --anchor A8)" "none" "a closed blocker and an empty status hold nothing"
+store "[$(anchor A8n), {\"id\":\"B8n\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{}}]"
+printf 'B8n|blocks|A8n\n' > "$STUB_DEPS"
+eq "$("$SUT" --anchor A8n)" "stuck B8n" "a blocker with no status at all reads open"
+store "[$(anchor A9)]"
+: > "$STUB_DEPS"
+eq "$("$SUT" --anchor A9)" "none" "an anchor nothing blocks answers none"
+
+echo "# a read that does not resolve prints nothing and exits 2"
+store "[$(anchor A10), $(blk B10 open '')]"
+printf 'B10|blocks|A10\n' > "$STUB_DEPS"
+out=$(STUB_DEP_GARBAGE="--direction=down" "$SUT" --anchor A10 2>/dev/null); rc=$?
+eq "$rc" 2 "an unreadable blocker list exits 2"
+eq "$out" "" "…printing no answer"
+out=$(RUN_LIB_STUB_FAIL="runs:B10" "$SUT" --anchor A10 2>/dev/null); rc=$?
+eq "$rc" 2 "an unreadable run read exits 2"
+eq "$out" "" "…printing no answer, since a run it could not read might be live"
+
+echo "# usage"
+"$SUT" >/dev/null 2>&1; rc=$?
+eq "$rc" 1 "no --anchor is a usage error"
+"$SUT" --anchor A1 --bogus >/dev/null 2>&1; rc=$?
+eq "$rc" 1 "an unknown argument is a usage error"
+
+echo "----- blocker-holder: $PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ]

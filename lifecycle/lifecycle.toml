@@ -327,10 +327,11 @@ disposition_key = "pr_comment_disposition"
 # pass and prints it to a log; this key is where the answer is kept, so a reader
 # never re-implements two scripts' predicates to learn it.
 machine_key = "pr.machine"
-#   progressing       some automated actor will act — a pool-routed blocker is
-#                     open, a declared lane is short of green, a required check
-#                     is still running, or a conflicting branch waits on the
-#                     merge-in rework pr-facts.sh files
+#   progressing       some automated actor will act — one holds a live blocker
+#                     (assets/scripts/blocker-holder.sh), a declared lane is
+#                     short of green, a required check is still running, or a
+#                     conflicting branch waits on the merge-in rework
+#                     pr-facts.sh files
 #   settled           every declared check reads green; the cadence
 #                     is done and the PR waits on approval, on the merge pass,
 #                     or on nothing
@@ -350,7 +351,8 @@ machines = ["progressing", "settled", "blocked"]
 #                     bead naming its branch, or an armed re-dispatch
 #   behind            the base moved ahead (BEHIND), and nothing brings the
 #                     branch current
-#   blocker           an unrouted blocker no automated actor will clear holds it
+#   blocker           a live blocker holds it, and no automated actor holds any
+#                     of its live blockers (assets/scripts/blocker-holder.sh)
 #   rule              branch protection holds it by a rule the merge pass
 #                     cannot name
 causes = ["review-threads", "check-failed", "conflict", "behind", "blocker", "rule"]

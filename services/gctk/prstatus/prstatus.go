@@ -84,7 +84,7 @@ const (
 	CauseCheckFailed   = "check-failed"   // a required check failed at the head
 	CauseConflict      = "conflict"       // the branch conflicts and its merge-in is deferred
 	CauseBehind        = "behind"         // the base moved ahead and nothing brings the branch current
-	CauseBlocker       = "blocker"        // an unrouted blocker no automated actor will clear
+	CauseBlocker       = "blocker"        // a live blocker no automated actor holds
 	CauseRule          = "rule"           // a branch rule the merge pass cannot name
 )
 
@@ -158,9 +158,10 @@ func Derive(f Facts) State {
 	// The merge pass's blocked verdict, at the head the posture was read at.
 	// The pass records most causes only with nothing in flight, so live work
 	// that arrives afterwards is the city acting on the cause, and the next pass
-	// replaces the verdict. An unrouted blocker is the exception: the pass
-	// records it after weighing the live holders, and the blocker is often one
-	// of them, such as a must-fix finding nothing answers.
+	// replaces the verdict. The blocker cause is the exception: the pass records
+	// it only once no automated actor holds any live blocker
+	// (assets/scripts/blocker-holder.sh), and the blocker itself is often in
+	// the in-flight set, such as a must-fix finding nothing answers.
 	if machine == "blocked" && (postureHead == "" || machineHead == postureHead) &&
 		(f.InFlightCount == 0 || f.PRMachineCause == CauseBlocker) {
 		return NeedsAttention

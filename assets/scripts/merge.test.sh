@@ -61,7 +61,8 @@ export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/merge.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" \
-  "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/finalize-gate.sh" "$HERE/review-checks.sh"
+  "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/finalize-gate.sh" "$HERE/review-checks.sh" \
+  "$HERE/blocker-holder.sh"
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "${STUB_ESC_LOG:?}"\n' > "$SD/escalate.sh"
 chmod +x "$SD/escalate.sh"
 export STUB_ESC_LOG="$TMP/esc.log"; : > "$STUB_ESC_LOG"
@@ -1345,7 +1346,7 @@ out=$("$SUT" 2>&1)
 eq "$(pinned V8)" "settled@sha-87" "the verdict is recorded"
 eq "$(meta V8 'gc.routed_to')" "human" "…and the anchor keeps the route it carried"
 
-echo "# an open blocker is progressing only when a POOL is behind it"
+echo "# an open blocker is progressing only when an automated actor holds it, a pool among them"
 store "[$(anchor V6 85), $(rev V6),
         {\"id\":\"rw-v6\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"gc.routed_to\":\"rig/gc-toolkit.polecat\"}},
         $(anchor V7 86), $(rev V7),
@@ -1380,6 +1381,41 @@ out=$("$SUT" 2>&1)
 eq "$(pinned BK1)" "blocked@sha-92" "an unrouted blocker no automated actor will clear records blocked, not silence"
 eq "$(cause BK1)" "blocker" "…its cause is the blocker"
 has "$(reason BK1)" "rw-bk1" "…and the reason names the blocking bead"
+
+# A route is one mark of an automated actor among three. The pass asks
+# blocker-holder.sh, the answer gate-ensure.sh asks for too, and it counts a
+# claim and a live run as well: a rework handed back to the refinery carries no
+# route and the refinery as its assignee, and a graph.v2 pour leaves the bead it
+# works unrouted and unassigned, with only its run to show it is worked.
+echo "# a rework the refinery holds is the city's move, not a blocker"
+store "[$(anchor BK1r 172), $(rev BK1r),
+        {\"id\":\"rw-bk1r\",\"status\":\"open\",\"assignee\":\"rig/gc-toolkit.refinery\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"rework\",\"anchor_bead\":\"BK1r\",\"source_review_bead\":\"rv-bk1r\",\"gc.execution_routed_to\":\"rig/gc-toolkit.polecat\"}}]"
+printf 'rw-bk1r|blocks|BK1r\n' > "$STUB_DEPS"
+printf '%s' "$(prview 172 OPEN CLEAN)" > "$GH_DIR/pr_view_172.json"
+approved 172
+out=$("$SUT" 2>&1)
+eq "$(pinned BK1r)" "progressing@sha-172" "a rework the refinery holds records progressing"
+eq "$(cause BK1r)" "<absent>" "…with no blocked cause"
+
+echo "# a poured rework its live run works is the city's move; once the run ends, it is a blocker"
+POURED='{"id":"rw-%s","status":"open","assignee":"","notes":"","metadata":{"task_kind":"rework","anchor_bead":"%s","source_review_bead":"rv-%s","gc.execution_routed_to":"rig/gc-toolkit.polecat"}}'
+store "[$(anchor BK1p 173), $(rev BK1p), $(printf "$POURED" BK1p BK1p BK1p),
+        {\"id\":\"cv-bk1p\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"issue_type\":\"convoy\",\"metadata\":{}},
+        {\"id\":\"wf-bk1p\",\"status\":\"in_progress\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"gc.kind\":\"workflow\",\"gc.input_convoy_id\":\"cv-bk1p\"}},
+        $(anchor BK1e 174), $(rev BK1e), $(printf "$POURED" BK1e BK1e BK1e),
+        {\"id\":\"cv-bk1e\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"issue_type\":\"convoy\",\"metadata\":{}},
+        {\"id\":\"wf-bk1e\",\"status\":\"closed\",\"assignee\":\"\",\"notes\":\"\",\"metadata\":{\"gc.kind\":\"workflow\",\"gc.input_convoy_id\":\"cv-bk1e\"}}]"
+printf 'rw-BK1p|blocks|BK1p\ncv-bk1p|tracks|rw-BK1p\nrw-BK1e|blocks|BK1e\ncv-bk1e|tracks|rw-BK1e\n' > "$STUB_DEPS"
+printf '%s' "$(prview 173 OPEN CLEAN)" > "$GH_DIR/pr_view_173.json"
+printf '%s' "$(prview 174 OPEN CLEAN)" > "$GH_DIR/pr_view_174.json"
+approved 173
+approved 174
+out=$("$SUT" 2>&1)
+eq "$(pinned BK1p)" "progressing@sha-173" "a rework a live run works records progressing"
+eq "$(pinned BK1e)" "blocked@sha-174" "a rework whose run has ended records blocked: its execution stamp outlives the run"
+eq "$(cause BK1e)" "blocker" "…its cause is the blocker"
+has "$(reason BK1e)" "rw-BK1e" "…and the reason names the bead no automated actor holds"
+: > "$STUB_DEPS"
 
 echo "# a BLOCKED PR held by an unresolved review thread records blocked with the cause"
 store "[$(anchor BK2 93), $(rev BK2)]"

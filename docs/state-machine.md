@@ -665,7 +665,7 @@ ones.
 
 | Value | Meaning |
 |---|---|
-| `progressing` | some automated actor will act: a pool-routed blocker is open, a declared lane is short of green, a required check is still running, or a conflicting branch waits on its merge-in rework |
+| `progressing` | some automated actor will act: one holds a live blocker, a declared lane is short of green, a required check is still running, or a conflicting branch waits on its merge-in rework |
 | `settled` | every declared check derives `green`; the cadence is done, and the PR waits on approval, on the merge pass, or on nothing |
 | `blocked` | a hold no automated actor will clear and no review verdict is owed on. The cause rides `pr.machine_cause` as one of the values below and `pr.machine_reason` as a sentence, and the board and the `status:` label show it as needs-attention rather than folding it into the awaiting-review tail |
 
@@ -678,7 +678,7 @@ records `blocked` only for a cause no automated actor will clear:
 | `check-failed` | a required check failed at the head: a check run concluded `FAILURE`, `TIMED_OUT`, `CANCELLED`, `ACTION_REQUIRED` or `STARTUP_FAILURE`, or a status context reads `FAILURE` or `ERROR` |
 | `conflict` | the branch conflicts with its base (`DIRTY`), and something defers the merge-in rework `pr-facts.sh` would file: a `rebase_hold` on the anchor or on any bead naming its branch, or an armed re-dispatch |
 | `behind` | the base moved ahead (`BEHIND`), which no automation brings current |
-| `blocker` | an unrouted live blocker that no pool will claim holds the anchor |
+| `blocker` | a live blocker holds the anchor, and no automated actor holds any of its live blockers |
 | `rule` | GitHub reports `BLOCKED` and the pass can name no cause: no unresolved required thread, no approval owed and no required check failed or running |
 
 GitHub reports `BLOCKED` for every unmet rule, so the pass reads the branch's
@@ -698,15 +698,30 @@ branch rules, the review threads, the required-check set, the check rollup, the
 beads naming the branch) records nothing, and the verdict the last pass recorded
 stands.
 
+An anchor a live blocker holds is `progressing` when an automated actor holds
+any of its live blockers, `blocked` with cause `blocker` when none does, and
+gets no verdict when every live blocker is routed to a person.
+`assets/scripts/blocker-holder.sh` answers that question for both writers of
+the axis. An automated actor holds a blocker routed to a pool or an agent, one
+an agent has claimed, and one a live run works. A rework handed back to the
+refinery is claimed by it until it lands, and a graph.v2 pour leaves the bead
+it works unrouted and unassigned, so its run is the only mark. The
+`gc.execution_routed_to` stamp a pour leaves outlives the run, so it is not
+one.
+
 `gate-ensure.sh` records its own `progressing` or `settled` after the merge pass
 in the same reconcile pass. It replaces a `blocked` verdict at the same head
-only when an automated actor is due to act: a lane short of green, or a fix
-unit, rework child or validation pass in flight. The merge pass records
-`blocked` only once every lane derives green, after weighing holds
-`gate-ensure.sh` does not read, such as an unrouted blocker. So its `settled`
-adds nothing to a `blocked` verdict, and neither does a `progressing` it reaches
-only because a must-fix finding has nothing answering it or a quiescence probe
-did not answer. A verdict at a head the branch has left is replaced.
+only when an automated actor is due to act: a lane short of green or, for any
+cause but `blocker`, a fix unit, rework child or validation pass in flight. For
+the `blocker` cause it asks `blocker-holder.sh`, as the merge pass did, because
+quiescence counts a rework child or validation pass by its status alone. Only an
+actor holding a blocker replaces that verdict, and an answer that does not
+resolve leaves it. The merge pass records `blocked` only once every lane derives
+green, after weighing holds `gate-ensure.sh` does not read, such as a live
+blocker no automated actor holds. So its `settled` adds nothing to a `blocked`
+verdict, and neither does a `progressing` it reaches only because a must-fix
+finding has nothing answering it or a quiescence probe did not answer. A verdict
+at a head the branch has left is replaced.
 
 A standing non-city `CHANGES_REQUESTED` is not `blocked`: a review verdict is
 what it waits on. While a fix unit answering it is in flight the anchor reads

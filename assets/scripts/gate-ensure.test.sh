@@ -72,7 +72,7 @@ export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 # finding.sh (fix-in-flight), copied in unstubbed so the fixtures exercise the
 # real derivation.
 SD="$TMP/scripts"
-mk_sut_dir "$SD" "$HERE/gate-ensure.sh" "$HERE/lifecycle.sh" "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/review-checks.sh"
+mk_sut_dir "$SD" "$HERE/gate-ensure.sh" "$HERE/lifecycle.sh" "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/review-checks.sh" "$HERE/blocker-holder.sh"
 # escalate.sh stub: records subject/key/message so the wedge arm's one-visit
 # contract can be asserted without a live converse pool.
 export STUB_ESCALATE_LOG="$TMP/escalate.log"
@@ -1628,13 +1628,15 @@ eq "$(pinned XB3)" "progressing@$(oid xb3)" "a lane short of green replaces a bl
 
 echo "# a progressing verdict no actor stands behind leaves the blocked verdict standing too"
 # With every lane green, a must-fix finding nothing answers makes this arm's
-# verdict progressing, and it is the very unrouted blocker the merge pass named.
-# Nothing acts on it, so the blocked verdict stands instead of trading places
-# with progressing on every pass. A fix unit in flight is an actor, and its
-# progressing replaces the blocked verdict.
+# verdict progressing, and it is the very blocker the merge pass named. Nothing
+# acts on it, so the blocked verdict stands instead of trading places with
+# progressing on every pass. A fix unit in flight is an actor, and its
+# progressing replaces the blocked verdict: claimed by a polecat, it blocks the
+# anchor from its dispatch as well as the finding it answers.
 store "[$(anchor XB4 pull_request correctness "" polecat/xb4 ',"pr.machine":"blocked@'"$(oid xb4)"'@2026-10-27T00:11:44Z","pr.machine_cause":"blocker"'), $(backed rev-xb4 XB4), $(mustfix find-xb4 XB4),
-        $(anchor XB5 pull_request correctness "" polecat/xb5 ',"pr.machine":"blocked@'"$(oid xb5)"'@2026-10-27T00:11:44Z","pr.machine_cause":"blocker"'), $(backed rev-xb5 XB5), $(mustfix find-xb5 XB5), $(fixunit fix-xb5 XB5 in_progress rev-xb5)]"
-printf 'find-xb4|blocks|XB4\nfind-xb5|blocks|XB5\nfix-xb5|blocks|find-xb5\n' >> "$STUB_DEPS"
+        $(anchor XB5 pull_request correctness "" polecat/xb5 ',"pr.machine":"blocked@'"$(oid xb5)"'@2026-10-27T00:11:44Z","pr.machine_cause":"blocker"'), $(backed rev-xb5 XB5), $(mustfix find-xb5 XB5),
+        {\"id\":\"fix-xb5\",\"status\":\"in_progress\",\"assignee\":\"rig/gc-toolkit.polecat-1\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"rework\",\"anchor_bead\":\"XB5\",\"source_review_bead\":\"rev-xb5\"}}]"
+printf 'find-xb4|blocks|XB4\nfind-xb5|blocks|XB5\nfix-xb5|blocks|find-xb5\nfix-xb5|blocks|XB5\n' >> "$STUB_DEPS"
 oid xb4 > "$GH_DIR/head_polecat_xb4"
 oid xb5 > "$GH_DIR/head_polecat_xb5"
 : > "$STUB_GC_LOG"
@@ -1643,6 +1645,25 @@ has "$out" "XB4 must-fix finding(s) find-xb4 open with no fix unit or validation
 eq "$(machine XB4)" "blocked@$(oid xb4)@2026-10-27T00:11:44Z" "a must-fix finding nothing answers leaves the blocked verdict standing"
 hasnt "$(cat "$STUB_GC_LOG")" "bd update XB4" "…writing nothing"
 eq "$(pinned XB5)" "progressing@$(oid xb5)" "a fix unit in flight replaces it: an actor is due to act"
+
+echo "# for the blocker cause, this arm asks blocker-holder.sh, the merge pass's own question"
+# Quiescence counts a rework child carrying a source key by its status alone,
+# so it reads XB6's rework, which no route, claim or run marks, as in flight.
+# The merge pass asked blocker-holder.sh and found nothing holding it, so this
+# arm asks the same way and leaves the verdict standing. A rework the refinery
+# holds is the shape the merge pass reads as held, and its progressing
+# replaces the verdict.
+store "[$(anchor XB6 pull_request correctness "" polecat/xb6 ',"pr.machine":"blocked@'"$(oid xb6)"'@2026-10-27T00:11:44Z","pr.machine_cause":"blocker"'), $(backed rev-xb6 XB6), $(fixunit rw-xb6 XB6 open rev-xb6),
+        $(anchor XB7 pull_request correctness "" polecat/xb7 ',"pr.machine":"blocked@'"$(oid xb7)"'@2026-10-27T00:11:44Z","pr.machine_cause":"blocker"'), $(backed rev-xb7 XB7),
+        {\"id\":\"rw-xb7\",\"status\":\"open\",\"assignee\":\"rig/gc-toolkit.refinery\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"rework\",\"anchor_bead\":\"XB7\",\"source_review_bead\":\"rev-xb7\"}}]"
+printf 'rw-xb6|blocks|XB6\nrw-xb7|blocks|XB7\n' >> "$STUB_DEPS"
+oid xb6 > "$GH_DIR/head_polecat_xb6"
+oid xb7 > "$GH_DIR/head_polecat_xb7"
+: > "$STUB_GC_LOG"
+run >/dev/null
+eq "$(machine XB6)" "blocked@$(oid xb6)@2026-10-27T00:11:44Z" "a rework nothing holds leaves the blocker verdict standing, though quiescence counts it"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update XB6" "…writing nothing"
+eq "$(pinned XB7)" "progressing@$(oid xb7)" "a rework the refinery holds replaces it: an actor holds the blocker"
 
 echo "# the skip is the exact verdict at the exact head, and nothing wider"
 # A verdict the head has moved past is a different verdict, and a value not yet

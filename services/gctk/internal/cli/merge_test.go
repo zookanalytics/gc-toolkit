@@ -210,8 +210,8 @@ func TestIsLiveDefaultsOnlyANullStatusToOpen(t *testing.T) {
 		if got := isLive(&b[0]); got != tc.live {
 			t.Errorf("isLive(%s) = %v, want %v", tc.row, got, tc.live)
 		}
-		if got := stuckHolder(b) != ""; got != tc.live {
-			t.Errorf("stuckHolder(%s) holds = %v, want %v", tc.row, got, tc.live)
+		if got := hasLiveBlocker(b); got != tc.live {
+			t.Errorf("hasLiveBlocker(%s) = %v, want %v", tc.row, got, tc.live)
 		}
 	}
 }

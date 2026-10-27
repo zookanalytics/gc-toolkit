@@ -1086,7 +1086,8 @@ const (
 	// MachineBlocked is a hold no automated actor will clear and no review
 	// verdict is owed on: an unresolved required review thread, a failed
 	// required check, a base gone BEHIND, a conflict whose merge-in a hold
-	// defers, an unrouted blocker, or a branch rule the merge pass cannot name.
+	// defers, a blocker no automated actor holds, or a branch rule the merge
+	// pass cannot name.
 	// It is owed by the operator and distinct from settled, so an approved PR
 	// held this way surfaces as needs-attention rather than awaiting-review. The
 	// cause rides mdPRMachineCause as a value and mdPRMachineReason as a
@@ -1307,8 +1308,8 @@ func askingDemand(blockers []Blocker) *Blocker {
 //
 // A row is owed by the operator when the machine axis is blocked (a hold no
 // automated actor will clear — an unresolved required review thread, a base
-// gone BEHIND, or an unrouted blocker), when the city is asking and waiting on
-// an answer, or when the cadence is done and GitHub is holding
+// gone BEHIND, or a blocker no automated actor holds), when the city is asking
+// and waiting on an answer, or when the cadence is done and GitHub is holding
 // the merge for a human review — one never given, or a standing
 // `changes_requested` the city has reworked as far as it can. GitHub keeps a
 // CHANGES_REQUESTED standing across pushes and the city never dismisses it, so

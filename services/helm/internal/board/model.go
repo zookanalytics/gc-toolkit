@@ -401,10 +401,11 @@ type Tile struct {
 	//
 	// `blocked` is a hold no automated actor will clear and no review verdict is
 	// owed on — an unresolved required review thread, a failed required check, a
-	// base gone BEHIND, a conflict whose merge-in a hold defers, an unrouted
-	// blocker, or a branch rule the merge pass cannot name. The operator is owed
-	// it, distinct from `settled`. Its cause rides `pr.machine_cause` as a value
-	// and `pr.machine_reason` as the sentence surfaced in the row's `needs`.
+	// base gone BEHIND, a conflict whose merge-in a hold defers, a blocker no
+	// automated actor holds, or a branch rule the merge pass cannot name. The
+	// operator is owed it, distinct from `settled`. Its cause rides
+	// `pr.machine_cause` as a value and `pr.machine_reason` as the sentence
+	// surfaced in the row's `needs`.
 	//
 	// `unknown` is a rendered value, not a fallback to the quiet end — the same
 	// choice [Anchor.WaitingUnknown] already makes, and for the same reason. An

@@ -36,10 +36,10 @@ import (
 // writer lifecycle.sh execs. Every other seam is a subprocess — gc/bd/gh/git
 // and the sibling shell helpers (escalate.sh, record-failure-cap.sh,
 // lane-state.sh, finalize-gate.sh, review-checks.sh, render-seed-audit.sh,
-// pr-status-label.sh), resolved from GCTK_SCRIPTS_DIR, which gctk-resolve.sh
-// exports as merge.sh's directory before it execs this binary. Subprocess seams
-// let merge.test.sh's stubs on PATH drive the binary, and keep the
-// observability and permissions surfaces those tools have for every other
+// pr-status-label.sh, blocker-holder.sh), resolved from GCTK_SCRIPTS_DIR, which
+// gctk-resolve.sh exports as merge.sh's directory before it execs this binary.
+// Subprocess seams let merge.test.sh's stubs on PATH drive the binary, and keep
+// the observability and permissions surfaces those tools have for every other
 // caller. Run any other way, with GCTK_SCRIPTS_DIR unset, the pass refuses
 // (exit 1) before it reads a PR.
 
@@ -572,10 +572,17 @@ func (m *merger) handle(row *gcbd.Bead) {
 		return
 	}
 	if inflight := m.inflightHolder(id, byPR, children, blockers); inflight != "" {
-		if ph := poolHolder(blockers); ph != "" {
-			m.recordMachine(id, "progressing", headOid, aroute)
-		} else if sh := stuckHolder(blockers); sh != "" {
-			m.recordBlocked(id, headOid, aroute, prstatus.CauseBlocker, "held by "+inflight+" — an unrouted blocker no automated actor will clear")
+		// gate-ensure.sh asks blocker-holder.sh the same question before it
+		// replaces a blocker verdict, so the two writers reach one answer.
+		if hasLiveBlocker(blockers) {
+			switch kind, bead, ok := m.blockerHolder(id); {
+			case !ok:
+				fmt.Fprintf(m.stdout, "%s: PR#%s the holders of anchor %s's blockers could not be read; no verdict recorded\n", mergeProg, num, id)
+			case kind == "actor":
+				m.recordMachine(id, "progressing", headOid, aroute)
+			case kind == "stuck":
+				m.recordBlocked(id, headOid, aroute, prstatus.CauseBlocker, "held by "+blockerLabel(blockers, bead)+", which no automated actor holds or will claim")
+			}
 		}
 		fmt.Fprintf(m.stdout, "%s: PR#%s held by %s; merge held (anchor %s)\n", mergeProg, num, inflight, id)
 		m.held++
@@ -1216,12 +1223,13 @@ func (m *merger) requiredContextsFor(branch string) (st string, contexts []strin
 // directory missing a helper is not refused here: the pass is refused only for
 // a missing check resolver, which Merge checks next. Every other helper is
 // handled where it is called. A missing lane-state.sh or finalize-gate.sh holds
-// that anchor. A missing escalate.sh, record-failure-cap.sh,
-// render-seed-audit.sh or pr-status-label.sh is skipped. The pass still records
-// a PR that has already merged.
+// that anchor. A missing blocker-holder.sh records no verdict for an anchor a
+// live blocker holds, whose merge is held anyway. A missing escalate.sh,
+// record-failure-cap.sh, render-seed-audit.sh or pr-status-label.sh is skipped.
+// The pass still records a PR that has already merged.
 func helperDirProblem(dir string) string {
 	if dir == "" {
-		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh, pr-status-label.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
+		return "GCTK_SCRIPTS_DIR is unset, so the sibling helpers (lane-state.sh, finalize-gate.sh, review-checks.sh, escalate.sh, record-failure-cap.sh, render-seed-audit.sh, pr-status-label.sh, blocker-holder.sh) cannot be found; run gctk merge through assets/scripts/merge.sh, which sets it"
 	}
 	return ""
 }
@@ -1642,17 +1650,23 @@ func (m *merger) inflightHolder(id string, byPR, children, blockers []gcbd.Bead)
 				continue
 			}
 		}
-		kind := "unclosed rework/review bead"
-		if b.Meta("task_kind") == "finding" {
-			if fd := b.Meta("finding.disposition"); fd != "" {
-				kind = fd + " finding"
-			} else {
-				kind = "finding"
-			}
-		}
-		return fmt.Sprintf("%s %s (%s)", kind, b.ID, holderStatus(b))
+		return holderLabel(b)
 	}
 	return ""
+}
+
+// holderLabel names a bead that holds the merge: its kind, its id and its
+// status.
+func holderLabel(b *gcbd.Bead) string {
+	kind := "unclosed rework/review bead"
+	if b.Meta("task_kind") == "finding" {
+		if fd := b.Meta("finding.disposition"); fd != "" {
+			kind = fd + " finding"
+		} else {
+			kind = "finding"
+		}
+	}
+	return fmt.Sprintf("%s %s (%s)", kind, b.ID, holderStatus(b))
 }
 
 // mergeLive is mergeLiveStatuses as the set a holder's status is tested in.
@@ -1666,31 +1680,50 @@ func holderStatus(b *gcbd.Bead) string { return b.StatusLowerOr("open") }
 // isLive reports whether a referencing bead's status lets it hold the merge.
 func isLive(b *gcbd.Bead) bool { return inSlice(mergeLive, holderStatus(b)) }
 
-// poolHolder is the first live blocker a pool will claim (routed to something
-// other than a human).
-func poolHolder(blockers []gcbd.Bead) string {
+// hasLiveBlocker reports whether any blocker is live, the only case in which
+// the pass asks who holds the blockers.
+func hasLiveBlocker(blockers []gcbd.Bead) bool {
 	for i := range blockers {
-		b := &blockers[i]
-		if !isLive(b) {
-			continue
-		}
-		if r := b.Meta("gc.routed_to"); r != "" && r != "human" {
-			return b.ID
+		if isLive(&blockers[i]) {
+			return true
 		}
 	}
-	return ""
+	return false
 }
 
-// stuckHolder is the first live blocker carrying no route at all — one no
-// automated actor will claim and no `asking` edge names.
-func stuckHolder(blockers []gcbd.Bead) string {
+// blockerHolder asks blocker-holder.sh whether an automated actor holds the
+// anchor's live blockers. kind is actor, stuck or none, and bead is the blocker
+// an actor or stuck answer names. ok is false when the helper is missing or did
+// not answer, and the pass then records no verdict.
+func (m *merger) blockerHolder(id string) (kind, bead string, ok bool) {
+	p := m.scriptPath("blocker-holder.sh")
+	if !isExecutable(p) {
+		return "", "", false
+	}
+	out, rc := capture(p, "--anchor", id)
+	if rc != 0 {
+		return "", "", false
+	}
+	line, _, _ := strings.Cut(string(out), "\n")
+	f := strings.Fields(line)
+	switch {
+	case len(f) >= 2 && (f[0] == "actor" || f[0] == "stuck"):
+		return f[0], f[1], true
+	case len(f) == 1 && f[0] == "none":
+		return f[0], "", true
+	}
+	return "", "", false
+}
+
+// blockerLabel names the blocker id among blockers by holderLabel, or by its id
+// alone when the listing the pass read does not carry it.
+func blockerLabel(blockers []gcbd.Bead, id string) string {
 	for i := range blockers {
-		b := &blockers[i]
-		if isLive(b) && b.Meta("gc.routed_to") == "" {
-			return b.ID
+		if blockers[i].ID == id {
+			return holderLabel(&blockers[i])
 		}
 	}
-	return ""
+	return id
 }
 
 type reviewRow struct {

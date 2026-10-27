@@ -542,8 +542,9 @@ in flight reads `progressing` and stays the city's move.
 
 **Blocked, not settled.** `blocked` is a hold no automated actor will clear and
 no review verdict is owed on: an unresolved required review thread, a failed
-required check, a base gone BEHIND, a conflict whose merge-in a hold defers, an
-unrouted blocker no pool will reap, or a branch rule the merge pass cannot name.
+required check, a base gone BEHIND, a conflict whose merge-in a hold defers, a
+live blocker no automated actor holds, or a branch rule the merge pass cannot
+name.
 A required check still running is `progressing`, not `blocked`. The operator is
 owed the row, and its specific cause is spelled out in `needs` as
 `blocked: <reason>`, read from `pr.machine_reason`; `pr.machine_cause` carries
