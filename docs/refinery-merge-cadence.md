@@ -218,9 +218,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    which slings the one bead that re-renders the default branch and lands the
    new text in a pull request of its own. While that bead is live, a later
    merge that finds the same files files nothing more. The merge does not wait
-   on the hand-off, whatever it answers. A branch's own commits leave such a
-   file as the branch's base has it: the pre-commit hook and the remedy above
-   render `--since` a revision, keeping each file the change does not move.
+   on the hand-off, whatever it answers. A branch's own commits add none of
+   that text: the pre-commit hook and the remedy above render `--since` a
+   revision, which keeps each file the change does not move as that revision
+   has it, or as HEAD has it where HEAD already commits the new text.
 
    What the artifact commits is chosen to stay out of the queue's way. A line
    that moves on every edit to one agent's prompt, committed beside the lines

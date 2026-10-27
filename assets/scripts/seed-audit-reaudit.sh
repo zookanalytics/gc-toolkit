@@ -29,15 +29,18 @@
 # seed_audit_reaudit=<base>. One already dispatched is reported and left alone.
 # One filed and never dispatched, because an earlier run stopped between its
 # create and its sling, is adopted and slung. One someone holds, routes or parks
-# is reported and left alone. A dedup query that does not answer files nothing,
-# because an unreadable answer cannot be told from no bead, and it reads the
-# store itself, never a pass's memo, since a memo taken before this run's own
-# write would show no bead. Otherwise the bead is created with its identity in
-# the create (bd_create), settled at its priority (queue-priority.sh settle),
-# and slung with mol-polecat-work, and the dispatch is proved by reading
-# gc.execution_routed_to back. The route is proved before any write, after the
-# dedup read, so a base whose re-audit is already in flight costs one query
-# (pool-route.sh).
+# is reported and left alone, and so is one armed for a deferred dispatch
+# (gc.dispatch_when_ready). A run that declined it waits on a visit that way,
+# and the arm re-slings it once the visit closes, so a sling from here would
+# step past the person's ruling. A dedup query that does not answer files
+# nothing, because an unreadable answer cannot be told from no bead, and it
+# reads the store itself, never a pass's memo, since a memo taken before this
+# run's own write would show no bead. Otherwise the bead is created with its
+# identity in the create (bd_create), settled at its priority (queue-priority.sh
+# settle), and slung with mol-polecat-work, and the dispatch is proved by
+# reading gc.execution_routed_to back. The route is proved before any write,
+# after the dedup read, so a base whose re-audit is already in flight costs one
+# query (pool-route.sh).
 #
 # Output: one line on stdout, "<bead> <route> <filed|adopted|in-flight|held>",
 #   or "none <base> not-default" for a base that is not the default branch. The
@@ -124,7 +127,8 @@ if [ -n "$ROW" ]; then
   HOLDER=$(printf '%s' "$ROW" | jq -r '
       [ (if (.status // "") != "open" then "status " + (.status // "") else empty end),
         (if (.assignee // "") != "" then "assignee " + .assignee else empty end),
-        (if ((.metadata["gc.routed_to"] // "") | tostring) != "" then "route " + (.metadata["gc.routed_to"] | tostring) else empty end) ]
+        (if ((.metadata["gc.routed_to"] // "") | tostring) != "" then "route " + (.metadata["gc.routed_to"] | tostring) else empty end),
+        (if ((.metadata["gc.dispatch_when_ready"] // "") | tostring) != "" then "armed for " + (.metadata["gc.dispatch_when_ready"] | tostring) else empty end) ]
       | join(", ")' 2>/dev/null)
   if [ -n "$HOLDER" ]; then
     warn "$BASE's re-audit $BEAD is held ($HOLDER); leaving it to whoever holds it, and filing no second one"

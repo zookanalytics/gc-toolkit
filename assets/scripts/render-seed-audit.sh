@@ -1111,9 +1111,23 @@ fi
 # some file needs it. A file that renders the same at <rev> did not move with
 # the change, so it is kept as <rev> commits it, or left out when <rev> commits
 # none: its text moved with the `gc` binary (see WHOSE TEXT IT IS), or <rev> had
-# it stale already. A file that renders differently at <rev> moved with the
-# change and is written as rendered. A revision that carries no audit, or only
-# the stub a pack ships before its first render, keeps nothing.
+# it stale already. That holds unless HEAD already commits the file as rendered.
+# The change then adds nothing to it, and <rev>'s copy would undo text a commit
+# of the branch adopted, such as the re-audit's own. A file that renders
+# differently at <rev> moved with the change and is written as rendered. A
+# revision that carries no audit, or only the stub a pack ships before its first
+# render, keeps nothing.
+#
+# Whether HEAD commits <file> under the audit with <path>'s bytes, or commits no
+# such file where <path> holds none.
+head_commits() { # <file> <path>
+    local blob
+    if blob="$(git -C "$ROOT" rev-parse -q --verify "HEAD:$AUDIT/$1" 2>/dev/null)"; then
+        [ -f "$2" ] && git -C "$ROOT" cat-file blob "$blob" | cmp -s - "$2"
+    else
+        [ ! -f "$2" ]
+    fi
+}
 KEPT=()
 if [ -n "$SINCE" ]; then
     SINCE_TREE="$TMPROOT/since"
@@ -1135,6 +1149,7 @@ if [ -n "$SINCE" ]; then
         [ "$rc" -eq 0 ] || render_failed "$SINCE" "$SINCE_RENDER" "$rc"
         for p in "${differs[@]}"; do
             same "$SINCE_RENDER/$p" "$STAGE/$p" || continue
+            head_commits "$p" "$STAGE/$p" && continue
             KEPT+=("$p")
             if [ -f "$since_audit/$p" ]; then
                 mkdir -p "$(dirname "$STAGE/$p")" && cp "$since_audit/$p" "$STAGE/$p" \

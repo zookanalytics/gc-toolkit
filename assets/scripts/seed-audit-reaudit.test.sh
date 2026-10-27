@@ -6,8 +6,9 @@
 # branch, read from origin/HEAD, filing nothing; a filed re-audit carrying its
 # identity in the create, listing the files and who found them, settled before
 # it is slung on mol-polecat-work to the pool route, with the stdout line the
-# merge gate quotes; one live re-audit per base, whether dispatched, held or
-# never dispatched (adopted, made whole and slung), while a closed one or
+# merge gate quotes; one live re-audit per base, whether dispatched, held,
+# armed to re-sling once its wait clears, or never dispatched (adopted, made
+# whole and slung), while a closed one or
 # another base's files beside it; the stops that dispatch nothing (an
 # unanswered dedup query, an unsettled priority, a pour that does not stamp),
 # each leaving what a retry adopts; and every metadata key it writes registered
@@ -227,6 +228,16 @@ eq "$(calls '^sling ')" "0" "…and slinging nothing"
 reset "$(reaudit re-9 blocked)"
 OUT=$(run --base main 2>/dev/null)
 eq "$OUT" "re-9 - held" "a parked re-audit is left to whoever parked it"
+
+# A declined run leaves its bead open, unassigned and unrouted, waiting on a
+# visit with a re-sling armed for when the visit closes (await-ruling.sh).
+reset "$(reaudit re-9 open "" ',"gc.dispatch_when_ready":"gc-toolkit/gc-toolkit.polecat","resling_target":"gc-toolkit/gc-toolkit.polecat"')"
+OUT=$(run --base main 2>&1); RC=$?
+eq "$RC" "0" "a re-audit armed to re-sling once its wait clears exits 0"
+has "$OUT" "re-9 - held" "…reporting it held"
+has "$OUT" "held (armed for gc-toolkit/gc-toolkit.polecat)" "…naming the arm"
+eq "$(beads)" "1" "…filing no second one"
+eq "$(calls '^sling ')" "0" "…and slinging nothing past the wait"
 
 reset '{"id":"re-9","status":"open","assignee":"","metadata":{"seed_audit_reaudit":"main"},"notes":""}'
 OUT=$(run --base main 2>&1); RC=$?

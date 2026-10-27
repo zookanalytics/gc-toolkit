@@ -40,19 +40,24 @@
 # commits them, the text that moved with gc, a file only gc added and the index
 # row that would list it, against a plain render as the control; one render when
 # no file differs; the whole render since a revision with no audit; its
-# refusals; and the pre-commit hook committing what the commit moves and not
-# gc's text. For the renderer and sizes: what INDEX.md carries and
-# SOURCES.txt's absence; --sizes with and without a base; the gcq wrapper's cwd
-# pin; the hook install's refusal, for a hand-installed hook and for a listing
-# that fails, against a control holding only a sample hook; the builtin-fallback
-# guard, which holds the pack's own agents and not a builtin provider's; a TMPDIR
-# spelled with a trailing slash, by its physical path and through a symlink, each
-# against the tree a plain one renders; a city spelling no needle names, which
-# fails the render; and a wc that pads its count, against the host's. For names:
-# a shared name, rendered per agent under its qualified name against a control
-# that refuses the bare one, with the guard holding only this pack's copy, a
-# rig-scoped copy rendered from the rig declared first, and this pack's agent
-# missing beside another pack's copy failing the render.
+# refusals; the pre-commit hook committing what the commit moves and not gc's
+# text, renewing what an earlier commit of its branch left stale, and keeping
+# the text a commit of its branch adopted; a hooked commit that concludes a
+# merge of the default branch keeping what that branch re-rendered, judged from
+# the fork point the merge leaves; and, with no gc on PATH, the render the hook
+# names instead, since the fork point, or since the head a merge brings in where
+# there is no origin/HEAD. For the renderer and sizes: what INDEX.md
+# carries and SOURCES.txt's absence; --sizes with and without a base; the gcq
+# wrapper's cwd pin; the hook install's refusal, for a hand-installed hook and
+# for a listing that fails, against a control holding only a sample hook; the
+# builtin-fallback guard, which holds the pack's own agents and not a builtin
+# provider's; a TMPDIR spelled with a trailing slash, by its physical path and
+# through a symlink, each against the tree a plain one renders; a city spelling
+# no needle names, which fails the render; and a wc that pads its count, against
+# the host's. For names: a shared name, rendered per agent under its qualified
+# name against a control that refuses the bare one, with the guard holding only
+# this pack's copy, a rig-scoped copy rendered from the rig declared first, and
+# this pack's agent missing beside another pack's copy failing the render.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -434,6 +439,101 @@ has "$out" "as $(git -C "$R" rev-parse base) commits them" "…keeping what it k
 git -C "$R" config --unset core.hooksPath
 git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
 gc_restores
+
+echo "# a hooked commit keeps the text a commit of its branch adopted"
+branch base hooked-adopted
+mkdir -p "$R/assets/hooks"
+cp "$HERE/../hooks/pre-commit" "$R/assets/hooks/pre-commit"
+commit "carry the pre-commit hook"
+git -C "$R" symbolic-ref refs/remotes/origin/HEAD refs/heads/base
+gc_moves
+render; commit "re-audit: adopt the text gc moved"
+git -C "$R" config core.hooksPath assets/hooks
+edit_prompt alpha "moved by a hooked commit after the re-audit"
+git -C "$R" add -A
+out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "move alpha's prompt" 2>&1); rc=$?
+eq "$rc" 0 "the hooked commit lands"
+has "$(git -C "$R" diff --name-only HEAD~1 HEAD)" "generated/seed-audit/agents/alpha.md" "…carrying the render its own change moved"
+if as_committed HEAD~1 agents/claude.md; then ok "…and keeping the text the re-audit adopted"
+else bad "…but claude.md went back to the text the fork point commits"; fi
+if as_committed HEAD~1 formulas/mol-gc.md; then ok "…the file the re-audit added"
+else bad "…but the file the re-audit added was dropped"; fi
+if as_committed HEAD~1 INDEX.md; then ok "…and the index row that lists it"
+else bad "…but the index went back to the fork point's"; fi
+hasnt "$out" "kept" "…keeping nothing as the fork point commits it"
+git -C "$R" config --unset core.hooksPath
+git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
+gc_restores
+
+# The default branch re-renders what gc moved, and gc moves again before a
+# branch cut earlier merges it in. The merge conflicts, so the commit that
+# concludes it runs the hook.
+echo "# a hooked merge of the default branch keeps what that branch re-rendered"
+branch base hooked-merge-fork
+mkdir -p "$R/assets/hooks"
+cp "$HERE/../hooks/pre-commit" "$R/assets/hooks/pre-commit"
+printf 'shared\n' > "$R/shared.md"
+commit "carry the pre-commit hook and a file both sides edit"
+branch hooked-merge-fork hooked-merge-main
+gc_moves
+render; commit "the default branch's re-audit adopts the text gc moved"
+edit_prompt beta "moved on the default branch"
+render; printf 'the default branch\n' > "$R/shared.md"
+commit "the default branch moves beta's prompt"
+gc_restores
+branch hooked-merge-fork hooked-merge
+edit_prompt alpha "moved by the branch"
+render; printf 'the branch\n' > "$R/shared.md"
+commit "the branch moves alpha's prompt"
+git -C "$R" symbolic-ref refs/remotes/origin/HEAD refs/heads/hooked-merge-main
+git -C "$R" config core.hooksPath assets/hooks
+gc_moves; printf 'a line a still newer gc renders\n' > "$STUB/claude.gc"
+if git -C "$R" merge -q --no-edit hooked-merge-main >/dev/null 2>&1; then bad "the merge was meant to conflict"
+else ok "the merge of the default branch conflicts"; fi
+printf 'the branch and the default branch\n' > "$R/shared.md"; git -C "$R" add shared.md
+out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q --no-edit 2>&1); rc=$?
+eq "$rc" 0 "the hooked commit that concludes the merge lands"
+if as_committed hooked-merge-main agents/claude.md; then ok "…keeping the text the default branch's re-audit adopted"
+else bad "…but claude.md is not as the default branch commits it"; fi
+if as_committed hooked-merge-main formulas/mol-gc.md; then ok "…and the file it added"
+else bad "…but mol-gc.md is not as the default branch commits it"; fi
+has "$out" "as $(git -C "$R" rev-parse hooked-merge-main) commits them" "…judged from the fork point the merge leaves"
+out=$(check_merge hooked-merge-main hooked-merge); rc=$?
+eq "$rc" 0 "…so the merge gate holds nothing"
+has "$out" "hooked-merge-main is already stale in these files" "…and reports gc's newer text as the default branch's own"
+git -C "$R" config --unset core.hooksPath
+git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
+gc_restores
+
+# With no gc to render with, the hook names the render to run instead, which
+# shows the fork point it judges from without rendering anything.
+echo "# with no gc, the hook names the render it would have run"
+branch base hooked-no-gc
+mkdir -p "$R/assets/hooks"
+cp "$HERE/../hooks/pre-commit" "$R/assets/hooks/pre-commit"
+printf 'shared\n' > "$R/shared.md"
+commit "carry the pre-commit hook and a file both sides edit"
+branch hooked-no-gc hooked-no-gc-base
+edit_prompt beta "moved on the base"; printf 'the base\n' > "$R/shared.md"
+commit "the base moves beta's prompt"
+branch hooked-no-gc hooked-no-gc-head
+git -C "$R" symbolic-ref refs/remotes/origin/HEAD refs/heads/base
+git -C "$R" config core.hooksPath assets/hooks
+edit_prompt alpha "moved on the head"; printf 'the head\n' > "$R/shared.md"
+git -C "$R" add -A
+out=$(cd "$R" && PATH="$(without_gc)" git commit -q -m "move alpha's prompt" 2>&1); rc=$?
+eq "$rc" 0 "a hooked commit on a host with no gc lands"
+has "$out" "render-seed-audit.sh --since $(git -C "$R" rev-parse base) && git add generated/seed-audit" \
+    "…naming the render since the branch's fork point"
+git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
+if git -C "$R" merge -q --no-edit hooked-no-gc-base >/dev/null 2>&1; then bad "the merge was meant to conflict"
+else ok "a merge that conflicts in a checkout with no origin/HEAD"; fi
+printf 'the head and the base\n' > "$R/shared.md"; git -C "$R" add shared.md
+out=$(cd "$R" && PATH="$(without_gc)" git commit -q --no-edit 2>&1); rc=$?
+eq "$rc" 0 "…is concluded by a hooked commit"
+has "$out" "render-seed-audit.sh --since $(git -C "$R" rev-parse hooked-no-gc-base) && git add generated/seed-audit" \
+    "…that names the render since the head the merge brings in, not since HEAD"
+git -C "$R" config --unset core.hooksPath
 
 # ------------------------------------------------ the shape that has to merge
 #

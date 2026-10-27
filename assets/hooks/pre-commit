@@ -43,11 +43,40 @@ if [ ! -x "$script" ]; then
     printf 'pre-commit: restore it with: chmod +x assets/scripts/render-seed-audit.sh\n' >&2
 fi
 
+# The commit carries what its branch moves and nothing else. The render runs
+# --since the branch's fork point from the default branch. A file that renders
+# differently now but the same at the fork point is no change of the branch's,
+# so it is kept as the fork point commits it, unless HEAD already commits it as
+# rendered. Its text moved with the gc binary, and that text lands through the
+# default branch's re-audit in a change of its own (render-seed-audit.sh, WHOSE
+# TEXT IT IS). A file the branch moves is written as rendered, which also renews
+# one an earlier commit left stale.
+#
+# A commit that concludes a merge has the merged heads for parents as well, so
+# its fork point is taken with them. Taken from HEAD alone, a merge of the
+# default branch would fork where the branch last met it, and a file that branch
+# re-rendered since would be put back as that older fork point commits it, which
+# the merge gate holds. With no default branch to fork from, a merge renders
+# --since the head it brings in, and any other commit --since HEAD. A repository
+# with no commit yet renders the whole tree.
+since=()
+if git rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+    merging=()
+    merge_heads="$(git rev-parse --git-path MERGE_HEAD 2>/dev/null)"
+    if [ -n "$merge_heads" ] && [ -f "$merge_heads" ]; then
+        while IFS= read -r c; do [ -n "$c" ] && merging+=("$c"); done < "$merge_heads"
+    fi
+    fork="$(git merge-base refs/remotes/origin/HEAD HEAD ${merging[@]+"${merging[@]}"} 2>/dev/null)"
+    since=(--since "${fork:-${merging[0]:-HEAD}}")
+fi
+render_cmd="assets/scripts/render-seed-audit.sh"
+[ "${#since[@]}" -eq 0 ] || render_cmd="$render_cmd ${since[*]}"
+
 if ! command -v gc >/dev/null 2>&1; then
     printf 'pre-commit: seed audit NOT regenerated — gc is not on PATH.\n' >&2
     printf 'pre-commit: %s input file(s) changed; run the render on a host with gc:\n' \
         "$(printf '%s\n' "$touched" | wc -l | tr -d ' ')" >&2
-    printf 'pre-commit:   assets/scripts/render-seed-audit.sh && git add generated/seed-audit\n' >&2
+    printf 'pre-commit:   %s && git add generated/seed-audit\n' "$render_cmd" >&2
     exit 0
 fi
 
@@ -59,24 +88,10 @@ if [ -n "$dirty" ]; then
     while IFS= read -r f; do printf 'pre-commit:   %s\n' "$f" >&2; done <<< "$dirty"
 fi
 
-# The commit carries what its branch moves and nothing else. The render runs
-# --since the branch's fork point from the default branch, or HEAD where there
-# is none. A file that renders differently now but the same at the fork point is
-# no change of the branch's, so it is kept as the fork point commits it. Its
-# text moved with the gc binary, and that text lands through the default
-# branch's re-audit in a change of its own (render-seed-audit.sh, WHOSE TEXT IT
-# IS). A file the branch moves is written as rendered, which also renews one an
-# earlier commit left stale. A repository with no commit yet renders the whole
-# tree.
-since=()
-if git rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
-    fork="$(git merge-base HEAD refs/remotes/origin/HEAD 2>/dev/null)"
-    since=(--since "${fork:-HEAD}")
-fi
 printf 'pre-commit: seed inputs changed — regenerating what this branch moves in generated/seed-audit ...\n' >&2
 if ! bash "$script" ${since[@]+"${since[@]}"} >&2; then
     printf 'pre-commit: render FAILED. Commit aborted so a broken audit is not committed.\n' >&2
-    printf 'pre-commit: re-run it directly to see why: assets/scripts/render-seed-audit.sh\n' >&2
+    printf 'pre-commit: re-run it directly to see why: %s\n' "$render_cmd" >&2
     exit 1
 fi
 
