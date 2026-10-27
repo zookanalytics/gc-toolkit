@@ -1608,9 +1608,10 @@ eq "$rc" 0 "the no-head pass exits 0"
 eq "$(machine X5)" "<absent>" "a verdict pinned to no head is never written"
 
 echo "# a blocked verdict the merge pass recorded at this head outlives this arm's settled"
-# The merge pass records blocked only once every lane derives green and nothing
-# is in flight, so a settled here adds nothing it did not know. Writing it would
-# flip the status: label between needs-attention and merging every pass.
+# The merge pass records blocked only once every lane derives green, after
+# weighing holds this arm does not read, so a settled here adds nothing it did
+# not know. Writing it would flip the status: label between needs-attention and
+# merging every pass.
 store "[$(anchor XB1 pull_request correctness "" polecat/xb1 ',"pr.machine":"blocked@'"$(oid xb1)"'@2026-10-27T00:11:44Z","pr.machine_cause":"review-threads"'), $(backed rev-xb1 XB1),
         $(anchor XB2 pull_request correctness "" polecat/xb2 ',"pr.machine":"blocked@'"$(oid stale-xb2)"'@2026-10-27T00:11:44Z"'), $(backed rev-xb2 XB2),
         $(anchor XB3 pull_request correctness "" polecat/xb3 ',"pr.machine":"blocked@'"$(oid xb3)"'@2026-10-27T00:11:44Z"'), $(mustfix find-xb3 XB3)]"
@@ -1624,6 +1625,24 @@ eq "$(meta XB1 pr.machine_cause)" "review-threads" "…and its cause"
 hasnt "$(cat "$STUB_GC_LOG")" "bd update XB1" "…writing nothing"
 eq "$(pinned XB2)" "settled@$(oid xb2)" "a blocked verdict at a head the branch has left is replaced"
 eq "$(pinned XB3)" "progressing@$(oid xb3)" "a lane short of green replaces a blocked verdict: an actor is due to act"
+
+echo "# a progressing verdict no actor stands behind leaves the blocked verdict standing too"
+# With every lane green, a must-fix finding nothing answers makes this arm's
+# verdict progressing, and it is the very unrouted blocker the merge pass named.
+# Nothing acts on it, so the blocked verdict stands instead of trading places
+# with progressing on every pass. A fix unit in flight is an actor, and its
+# progressing replaces the blocked verdict.
+store "[$(anchor XB4 pull_request correctness "" polecat/xb4 ',"pr.machine":"blocked@'"$(oid xb4)"'@2026-10-27T00:11:44Z","pr.machine_cause":"blocker"'), $(backed rev-xb4 XB4), $(mustfix find-xb4 XB4),
+        $(anchor XB5 pull_request correctness "" polecat/xb5 ',"pr.machine":"blocked@'"$(oid xb5)"'@2026-10-27T00:11:44Z","pr.machine_cause":"blocker"'), $(backed rev-xb5 XB5), $(mustfix find-xb5 XB5), $(fixunit fix-xb5 XB5 in_progress rev-xb5)]"
+printf 'find-xb4|blocks|XB4\nfind-xb5|blocks|XB5\nfix-xb5|blocks|find-xb5\n' >> "$STUB_DEPS"
+oid xb4 > "$GH_DIR/head_polecat_xb4"
+oid xb5 > "$GH_DIR/head_polecat_xb5"
+: > "$STUB_GC_LOG"
+out=$(run)
+has "$out" "XB4 must-fix finding(s) find-xb4 open with no fix unit or validation pass answering them" "test premise: nothing answers XB4's finding"
+eq "$(machine XB4)" "blocked@$(oid xb4)@2026-10-27T00:11:44Z" "a must-fix finding nothing answers leaves the blocked verdict standing"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update XB4" "…writing nothing"
+eq "$(pinned XB5)" "progressing@$(oid xb5)" "a fix unit in flight replaces it: an actor is due to act"
 
 echo "# the skip is the exact verdict at the exact head, and nothing wider"
 # A verdict the head has moved past is a different verdict, and a value not yet

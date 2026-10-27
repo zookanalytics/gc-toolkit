@@ -1160,6 +1160,7 @@ GATES
   # fully green anchor lets the loop skip the lazy compute, so run it here
   # before settling and fail closed — a hold, an unanswered must-fix finding,
   # or a probe that cannot answer is progressing, not settled.
+  lane_short=$mach_progress
   if [ "$mach_progress" = 0 ]; then
     if [ "$quiesce_computed" = 0 ]; then
       quiesce_computed=1
@@ -1172,14 +1173,18 @@ GATES
   if [ "$mach_progress" = 1 ]; then mach="progressing"
   else mach="settled"
   fi
-  # A blocked verdict at this head is the merge pass's, recorded only once every
-  # lane derived green and nothing was in flight, so this arm's settled knows
-  # nothing it did not. It stands until the merge pass records another verdict
-  # or the head moves. A progressing verdict still replaces it: an actor is due
-  # to act.
+  # A blocked verdict at this head is the merge pass's. It records one only once
+  # every lane derives green, after weighing holds this arm does not read, such
+  # as an unrouted blocker, so it stands until the merge pass records another
+  # verdict or the head moves. This arm replaces it only when an automated actor
+  # is due to act: a lane short of green, or a fix unit, rework child or
+  # validation pass in flight. A settled verdict adds nothing to it, and neither
+  # does a progressing one reached only because a must-fix finding has nothing
+  # answering it or a quiescence probe did not answer.
   rec_mach=$(meta_of "$row" "pr.machine")
   rec_head="${rec_mach#*@}"; rec_head="${rec_head%%@*}"
-  if [ "$mach" = settled ] && [ "${rec_mach%%@*}" = blocked ] && [ "$rec_head" = "$head" ]; then
+  if [ "${rec_mach%%@*}" = blocked ] && [ "$rec_head" = "$head" ] \
+     && [ "$lane_short" = 0 ] && [ -z "$quiesce_hold" ]; then
     continue
   fi
   #

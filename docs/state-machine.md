@@ -695,10 +695,14 @@ required-check set, the check rollup) records nothing, and the verdict the last
 pass recorded stands.
 
 `gate-ensure.sh` records its own `progressing` or `settled` after the merge pass
-in the same reconcile pass. Its `settled` leaves a `blocked` verdict at the same
-head standing, because the merge pass records `blocked` only once every lane
-derives green, which is all `settled` says. Its `progressing` replaces one, and a
-head move replaces it as before.
+in the same reconcile pass. It replaces a `blocked` verdict at the same head
+only when an automated actor is due to act: a lane short of green, or a fix
+unit, rework child or validation pass in flight. The merge pass records
+`blocked` only once every lane derives green, after weighing holds
+`gate-ensure.sh` does not read, such as an unrouted blocker. So its `settled`
+adds nothing to a `blocked` verdict, and neither does a `progressing` it reaches
+only because a must-fix finding has nothing answering it or a quiescence probe
+did not answer. A verdict at a head the branch has left is replaced.
 
 A standing non-city `CHANGES_REQUESTED` is not `blocked`: a review verdict is
 what it waits on. While a fix unit answering it is in flight the anchor reads
