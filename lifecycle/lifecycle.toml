@@ -1442,17 +1442,18 @@ keys = [
 #   or shift it says what the next body of work is aimed at. Absent or whitespace
 #   alone reads as unrecorded.
 # epic_ruling_at / epic_ruling_by / epic_ruling_evidence — when the latest ruling
-#   was recorded, who recorded it, and the visit bead of the sitting that carried
-#   it. Bookkeeping beside epic_ruling; absent leaves the provenance unstated.
+#   was recorded, who recorded it, and the human gate whose resolve carried it.
+#   Bookkeeping beside epic_ruling; absent leaves the provenance unstated.
 
 [metadata.human_surface]
 keys = [
-  # gc.demand_for names the bead a demand gates. Nothing writes it now, and its
-  # one reader left, gate-visit-sweep.sh, goes with the cutover: a human gate
-  # names the bead it gates through its blocks edge, and an open human gate
-  # there is what tells a person still deciding from a sitting that ended,
-  # never the gc.takeaway headline beside it. The cutover's migration reads it
-  # once (specs/tk-0ur8r9p/design.md section 11).
+  # gc.demand_for names the bead a demand gates. Nothing writes it now, and no
+  # pack script reads it but the cutover's migration: a human gate names the
+  # bead it gates through its blocks edge, and an open human gate there is what
+  # tells a person still deciding from a sitting that ended, never the
+  # gc.takeaway headline beside it. The migration reads it once, copies it from
+  # a legacy demand onto the gate it files that demand again as, and removes it
+  # from every gate it shapes (specs/tk-0ur8r9p/design.md section 11).
   # gc.takeaway_settled is the headline's own disposition, "1" where its writer
   # said nothing is waiting and empty where it did not: [holds] settled_keys
   # reads it, and it is rewritten with every headline rather than surviving one.
@@ -1476,9 +1477,10 @@ keys = [
 #   edge names the gate, so nothing writes or reads the key. An open visit
 #   carries it until the cutover's migration closes the visit, which is why
 #   doctor/check-state-space lists it in RETIRED_KEYS.
-# gc.gate_visit — on a gate bead, the visit gate-visit-sweep.sh filed for it (a
-#   bead id, or `filed`); its presence is how the sweep skips a gate already
-#   escalated, and `--unset` re-offers the visit.
+# gc.gate_visit — on a demand, the visit the retired gate-visit sweep filed for
+#   it (a bead id, or `filed`). Nothing writes or reads it: the cutover's
+#   migration removes it with a gate's other pack keys and reads nothing from
+#   it, and the follow-up that deletes the migration retires it.
 # gc.continuation_group — Gas City's continuation group: the hook claim
 #   preassigns a claimed bead's open, unassigned siblings in the same group to
 #   the claiming session. The pack's formulas stamp `main` on their step beads,

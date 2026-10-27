@@ -26,8 +26,9 @@ state rules.
 
 **Boundaries.** Nudging is the order's only action. Killing a wedged session is
 the dog pool's, on a warrant, per [authority-map.md](authority-map.md), and each
-patrol's warrant path is its own formula's. How an escalation visit reaches a
-person is [human-engagement.md](human-engagement.md).
+patrol's warrant path is its own formula's. The order's escalation is one mail
+(below); how the pack engages a person otherwise is
+[human-engagement.md](human-engagement.md).
 
 ## Mechanism
 
@@ -267,8 +268,9 @@ rule stated only in the first one does not reach the other two. Queue starvation
 is the easiest of them to get wrong: a quota-parked agent holds open beads with
 `bead.updated_at` frozen for hours, which is the starvation signature exactly.
 Seven warrants were filed against two quota-parked agents on 2026-08-02. If a
-park outlasts `QUOTA_PARK_ESCALATE_AFTER` (2h), one escalation visit is filed
-via `escalate.sh` — once per episode, not once per cycle.
+park outlasts `QUOTA_PARK_ESCALATE_AFTER` (2h), one escalation mail goes to
+`QUOTA_PARK_ESCALATE_TO` (`mayor/` by default) — once per episode, not once per
+cycle.
 
 "Hold back" is the whole of it, though, and not "never warrant": each of those
 steps asks this order for a verdict rather than reading the pane, and defers only
@@ -397,9 +399,10 @@ an undefined path. The regression suite asserts that agreement in both
 directions — every value the surface emits is one the patrol formulas handle.
 
 The defer is bounded at the far end too. `escalated=1` means the park outlasted
-`ESCALATE_AFTER` and an escalation visit is already open; a session still parked
-after that has not been recovered by nudging, and the patrols refresh the
-escalation via `escalate.sh` instead of deferring again in silence.
+`ESCALATE_AFTER` and its escalation mail went out; a session still parked after
+that has not been recovered by nudging, and `mol-deacon-patrol` reads it as
+live-but-wedged and files one warrant for the dog pool instead of deferring
+again in silence.
 
 `QUOTA_PARK_EXCLUDE` suppresses the *action*, not the observation. An excluded
 alias is still counted as parked in the summary line, but it is not nudged and
@@ -412,30 +415,29 @@ acting on, which is the deferral the exclusion was meant to end. So the episode
 is cleared as the exclusion takes effect.
 
 **The escalation quotes no pane text.** A pane holds whatever the agent printed,
-and an agent can print text shaped like an operator directive; the visit is
-durable and the operator reads it as an authenticated channel, so an excerpt in
-the body launders untrusted content into that channel. The visit carries only
+and an agent can print text shaped like an operator directive; the mail is
+durable and its reader takes it as an authenticated channel, so an excerpt in
+the body launders untrusted content into that channel. The mail carries only
 the alias, session id, park age, attempt count, and the same closed **detector
 class** the status surface reports. All of that comes from the session list or
 the script's own state file. A human who wants the screen reads it directly
-with `gc session peek <id>`, which the visit body says.
+with `gc session peek <id>`, which the mail body says.
 
 It says one more thing, for the same reason the patrol rule changed: that this is
-a **possible** park and not a proven one. The evidence behind the visit is a
+a **possible** park and not a proven one. The evidence behind the mail is a
 pattern match on a pane, so the body asks the reader to check rather than telling
 them the session is healthy and must not be warranted — an instruction that,
 derived from agent-controlled text, is one an agent could have written for
 itself.
 
-**An escalation whose bound expired is not filed twice.** `escalate.sh` writes
+**An escalation whose bound expired is not sent twice.** `gc mail send` writes
 through Dolt, the layer likeliest to be slow during the incident this order runs
-in, so a bound can expire *after* the write commits: the visit exists and this
-script never heard about it. `escalate.sh` itself keeps exactly one open visit
-per situation key, so a retry refreshes rather than duplicates; the local flag
-still carries three states, the same way an unconfirmed nudge does: `1` for a
-write that completed, `unconfirmed` for one whose bound expired mid-flight
-(suppresses the resend, and says in the log that it is doing so), and empty only
-for a *fast* rejection, which delivered nothing and can safely be retried.
+in, so a bound can expire *after* the write commits: the mail exists and this
+script never heard about it. So the local flag carries three states, the same
+way an unconfirmed nudge does: `1` for a write that completed, `unconfirmed` for
+one whose bound expired mid-flight (suppresses the resend, and says in the log
+that it is doing so), and empty only for a *fast* rejection, which delivered
+nothing and can safely be retried.
 
 ## Two rules the recurrences taught us
 
@@ -483,7 +485,8 @@ polls. Being early costs one no-op nudge; being late costs a day of throughput.
 | `QUOTA_PARK_PEEK_LINES` | `20` | pane lines captured; must be ≥ 1 |
 | `QUOTA_PARK_TAIL_LINES` | `12` | how far up the banner may sit; must be ≥ 1 |
 | `QUOTA_PARK_BACKOFF_BASE` / `_CAP` | `120` / `900` | seconds between retries; must be ≥ 1 |
-| `QUOTA_PARK_ESCALATE_AFTER` | `7200` | one escalation visit (via `escalate.sh`) per long park; `0` disables |
+| `QUOTA_PARK_ESCALATE_AFTER` | `7200` | one escalation mail per long park; `0` disables |
+| `QUOTA_PARK_ESCALATE_TO` | `mayor/` | the mailbox the escalation mail goes to |
 | `QUOTA_PARK_EXCLUDE` | — | ERE of aliases never nudged |
 | `QUOTA_PARK_CALL_TIMEOUT` | `15` | seconds per `gc` call, a fraction allowed (e.g. `0.5`), rounded up to a whole second where `timeout(1)` parses only whole seconds; `0` disables the bound |
 | `QUOTA_PARK_KILL_AFTER` | `5` | seconds after that before SIGKILL, for a call that ignores SIGTERM, a fraction allowed (rounded up like `CALL_TIMEOUT` where `timeout(1)` is integer-only); must be > 0 (`timeout -k 0` is accepted and would silently restore the soft bound) |

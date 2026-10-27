@@ -74,8 +74,9 @@ The surfaces a change presents itself through, where the operator judges it:
 - **PRs surfaced for a merge decision** — the `## Summary` is the merge-decision
   surface. It is where the operator decides yes or no, so it must account for the
   whole change and let them weigh it.
-- **Visits and escalations** — the filed, routed record raised when an agent needs
-  a human. The operator claims these; each names what it needs and what closes it.
+- **Human gates and conversations** — a human gate is the wait an agent files on
+  the bead that needs a person, and a conversation is where the operator settles
+  it. Each gate names what it needs and what clears it.
 - **Demos** — a narrated recording of an operator-watched surface doing the thing.
   One strong way a change shows its value when the operator would want to see it
   run, not the only way.

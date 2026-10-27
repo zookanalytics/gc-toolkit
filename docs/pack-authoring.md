@@ -140,7 +140,7 @@ both at once:
   place at the destination path and never committed is still sitting there
   after the merge, and it is what the pack reads. It also blocks its own
   repair: `git merge --ff-only` refuses to clobber untracked files, so the
-  reconciler cannot advance the checkout and files an escalation visit instead,
+  reconciler cannot advance the checkout and files a human gate instead,
   leaving the rig behind *and* holding the stale draft. Because the working
   tree is the deployment, an untracked file **is** a deployed artifact,
   committed or not.

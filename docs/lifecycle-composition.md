@@ -1,5 +1,5 @@
 ---
-name: Lifecycle composition — the bead → PR → visit seam and how completion propagates back
+name: Lifecycle composition — the bead → PR → conversation seam and how completion propagates back
 description: How the pack's three lifecycles compose — the rule for recording a wait as a graph edge, who re-derives it, and how a finished piece of work propagates back to the conversation that asked for it. Read it when work crosses from one lifecycle into another, or when something finished without anyone noticing.
 ---
 
@@ -11,7 +11,7 @@ The pack runs three lifecycles, and each already has exactly one owner:
 |---|---|
 | bead | [state-machine.md](state-machine.md) |
 | PR | [refinery-merge-cadence.md](refinery-merge-cadence.md) |
-| visit | [human-engagement.md](human-engagement.md) |
+| human gate and conversation | [human-engagement.md](human-engagement.md) |
 
 This document owns none of them. It owns the **seam**: the place where a
 conversation routes work out of a subject, that work becomes a bead, the bead
@@ -35,8 +35,8 @@ when the rule is broken.
 
 **Boundaries.** It does not restate the three lifecycles — each has one owner
 above, and this doc defers to them rather than summarizing them. It is not a
-fourth lifecycle narrative: it describes no state a bead, PR, or visit passes
-through. It does not carry the board's rendering rules or the converse
+fourth lifecycle narrative: it describes no state a bead, PR, gate or
+conversation passes through. It does not carry the board's rendering rules or the converse
 sitting's procedure, which belong to
 [human-engagement.md](human-engagement.md), nor the routing
 mechanics, which belong to
@@ -141,8 +141,8 @@ human opening the board and noticing. That is the operator's attention being
 spent on discovery, which is the thing the pack exists to avoid.
 
 So the terminal clause of the rule: when a subject's waiting set fully closes,
-something must **file a visit back** to the conversation, rather than only
-re-banding the row.
+something must **open a conversation** on the subject in the operator's queue,
+rather than only re-banding the row.
 
 The intended shape is `tk-2cyxo` (in flight):
 
@@ -155,9 +155,11 @@ The intended shape is `tk-2cyxo` (in flight):
   does, through the edge that records it, so a subject whose waiting set has
   fully closed already returns as an unnamed wait. What the push adds is where
   it returns to — the subject's own conversation rather than the batch queue.
-- **Idempotent**, never filing a second visit while one is open for the subject.
-- **Additive.** The takeaway is never cleared; the visit is filed beside it.
-- **Self-describing.** The visit states its own premise — the subject, which
+- **Idempotent**, never filing a second conversation while one waits for the
+  subject.
+- **Additive.** The takeaway is never cleared; the conversation is filed beside
+  it.
+- **Self-describing.** The conversation states its own premise — the subject, which
   blockers closed, and when — so the next sitting can cheaply kill it if the
   situation has changed.
 

@@ -87,7 +87,7 @@ Any per-rig `[rigs.imports.gc-toolkit]` overrides the default for that rig.
 - **The roster** — worker pools (`polecat`, and `polecat-codex` on the
   codex provider), patrols (`refinery`, `witness`, `deacon`), conversation
   sittings (`converse-opus`, `converse-fable`, `converse-codex`, which
-  `gc-helm engage` opens per visit), and `proactive` (always-on, 2-slot).
+  `gc-helm engage` opens per conversation), and `proactive` (always-on, 2-slot).
 - **The lifecycle** — `lifecycle/lifecycle.toml` (states, transitions,
   metadata registry) and the single transition writer
   `assets/scripts/lifecycle.sh`. The script execs the `gctk` binary that the
@@ -204,7 +204,7 @@ The pack's checks, and what a failure means:
 | `check-session-store-scope` | a live agent's store environment names only its own rig's scope, in both the running pane and the warm-respawn environment | a global store key the tmux server holds reaching the next respawned session, so one agent reads another rig's store |
 | `check-blocked-work-armed` | every blocked, unassigned plain-work bead carries a dispatch path — `gc.routed_to` or a `gc.dispatch_when_ready` arm (warn-only) | a blocked work bead with no route and no arm, so it strands when its blocker closes and no pool is offered it |
 | `check-armed-dispatch-owed` | every bead armed with `gc.dispatch_when_ready` that nothing holds, by an open blocker on it or, unless it is in flight, on an ancestor, was slung within the deferred-dispatch cadence (warn-only) | the deferred-dispatch order not firing, or an arm set at a non-open status that `bd ready` never surfaces |
-| `check-until-resolved-owed` | every open, unassigned bead whose `until` targets have all closed, and which no open `blocks` blocker of its own holds, was disposed within the deferred-dispatch cadence of becoming owed, unless it carries live work (`assets/scripts/live-work.sh`), which the order never disposes (warn-only) | the deferred-dispatch order not firing, its passes spending their budget before they reach the bead, or the close held, commonly by an open visit on the bead; a resolved bead left open because it carries live work is reported separately, for a person to decide |
+| `check-until-resolved-owed` | every open, unassigned bead whose `until` targets have all closed, and which no open `blocks` blocker of its own holds, was disposed within the deferred-dispatch cadence of becoming owed, unless it carries live work (`assets/scripts/live-work.sh`), which the order never disposes (warn-only) | the deferred-dispatch order not firing, its passes spending their budget before they reach the bead, or the close held, commonly by an open human gate on the bead; a resolved bead left open because it carries live work is reported separately, for a person to decide |
 | `check-feedback-routing-owed` | an open anchor whose PR posture is `commented`/`changes_requested` has that feedback routed within the owed window (warn-only) | the merge cadence's feedback arm not routing, so operator feedback reads as consumed while nothing acts on it |
 | `check-hq-marooned-work` | no rig-workable bead sits unclaimed in the HQ (city/lx) store, which no pool reads | a city-scoped role with `GC_RIG` unset filing a bare `bd create` into the HQ store, marooning the work by construction |
 | `check-demo-toolchain` | the demo:capture toolchain — Node, ffmpeg, `OPENAI_API_KEY`, and `gh` — is resolvable (readiness, warn-only) | a missing demo dependency, so a capture degrades to a silent, captioned clip |

@@ -122,9 +122,9 @@ was cleared. The same definition serves the queue's other readers:
 
 - the liveness sweep names such a bead's wait, so it does not report the bead as
   an unnamed wait;
-- the claim-time re-check of a sweep visit (`liveness-recheck.sh`) names the
-  same wait, so a visit filed before intake held the bead does not put it on
-  that sitting's agenda as well;
+- the re-check a liveness gate's message carries (`liveness-recheck.sh`) names
+  the same wait, so a census cut before intake held the bead does not put it on
+  that gate's agenda as well;
 - `doctor/check-blocked-work-armed` owes such a bead no arm, because its
   dispatch is the route the sitting gives it;
 - the proactive scan files no first reaction for such a bead, because its next
@@ -164,9 +164,10 @@ gc-helm.sh park <bead-id> --waiting-on <bead-id>
 The text form files a gate of its own and makes the bead wait on it. The gate is
 `issue_type=gate`, titled with the text, which says why the bead is parked and
 what releases it. The text is required. It is one line of at most 140
-characters, refused over the cap rather than cut, the rule a demand's title
-follows. `--body` is the gate's description. The gate carries no await type, no
-`gc.demand_for` and no hold marker, so no sweep closes or visits it. It is filed
+characters, refused over the cap rather than cut, the rule a takeaway headline
+follows. `--body` is the gate's description. The gate carries no await type and
+no hold marker: it is a plain blocker that pauses the bead, not a human gate,
+and no sweep closes it. It is filed
 in the bead's own store, because bd resolves an edge only within one store, and
 it is born with the bead's edge in one write. Who parked the bead, and when, are
 the gate's creator and creation time. Re-running the text form with the same
@@ -462,8 +463,8 @@ stops partway, leaves a record that a later pass settles again and that no
 return to the other rank reads as settled. `pr-facts.sh` settles the work of an
 anchor it moves out of `pull_request` in the pass that moves it, and the next
 full pass settles an anchor that another writer moved, such as a repool through
-`rejection-repool.sh`. A finding or a visit carries `anchor_bead` too, but no
-pool claims it, so that settle leaves it as it is.
+`rejection-repool.sh`. A finding carries `anchor_bead` too, but no pool claims
+it, so that settle leaves it as it is.
 
 ### The pass
 

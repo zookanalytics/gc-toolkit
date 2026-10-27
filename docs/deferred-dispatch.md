@@ -344,7 +344,7 @@ the pass carries its own lock:
   `refinery-reconcile.sh` takes its pass lock through the same
   `take_pass_lock` and runs its arms through `pass_child`, under a state key
   of its own.
-- Every `gc`, `escalate.sh` and `bead-rehome.sh` call the pass makes runs
+- Every `gc`, `human-gate.sh`, `gc-helm.sh` and `bead-rehome.sh` call the pass makes runs
   through `pass_child`, with the lock's descriptor closed. A process that a
   `gc` call starts can outlive the pass: a store read can bring up a Dolt
   server, and `gc` hands the descriptors it was given to what it starts. A
@@ -377,7 +377,7 @@ budget from its own start, `DEFERRED_DISPATCH_PASS_BUDGET_SECS` (420s,
 0 = unpaced), and starts a notice or a sling only while at least
 `DEFERRED_DISPATCH_SLING_ALLOWANCE_SECS` (90s) of it is left. Past that
 point it sends no notice, starts no sling and files no escalation, since
-`escalate.sh` is store work the timeout can cut short too. Each remaining
+`human-gate.sh` is store work the timeout can cut short too. Each remaining
 ready bead keeps its arm with no marker on it, this pass counts no attempt
 against it, and the next pass slings it. A notice it leaves keeps its record,
 and the next pass sends it. A capped bead stays capped and armed, and the next
@@ -539,7 +539,7 @@ retires an arm on any other closed bead. Until a pass finishes it, a bead in
 progress under the claim reads to the doctor check below as the bead the pass
 claimed.
 
-When the close is held, commonly by an open visit tracking the bead,
+When the close is held, commonly by an open human gate that blocks the bead,
 `bead-rehome` refuses the close rather than forcing it, after it has stamped
 the pointer. The pass gives the bead back without the pointer, and a later
 pass retries the disposal once the hold clears. A successor pointer on an open

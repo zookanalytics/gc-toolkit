@@ -70,7 +70,7 @@
 #
 # A bead that waits for placement (placement.sh) is a named wait too: intake
 # held it as new work for the operator's placement sitting, and
-# `gc-helm.sh unplaced` lists it there, so the sweep's triage visit would ask
+# `gc-helm.sh unplaced` lists it there, so the sweep's triage gate would ask
 # the operator the same question a second time. The predicate reads the marker
 # and every shape that places a bead, so a marker left on a bead the sitting
 # already placed names no wait.

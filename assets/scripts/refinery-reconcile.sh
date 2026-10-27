@@ -447,7 +447,7 @@ run_pass "(9) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=
 # cleaned on the same tick. No merge authority: it writes scaffolding beads, and
 # a bug bead for a finding it carries forward, never the anchor — bead-rehome
 # (via pr-facts' close arm) closes that, held by finalize-gate while a human
-# visit is still owed. BEADS_ACTOR projected — the close of a carried-forward
+# gate on it is still open. BEADS_ACTOR projected — the close of a carried-forward
 # finding is delegated to bead-rehome and attributed in the events table.
 ( export BEADS_ACTOR="$AGENT"
   run_pass "(10) scaffolding-sweep" scaffolding-sweep.sh ) \
