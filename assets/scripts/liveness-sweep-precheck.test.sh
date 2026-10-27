@@ -278,7 +278,7 @@ hasnt ",$SURV," ",f-subject," "task_kind=triage-subject is excluded (class 4a)"
 hasnt ",$SURV," ",f-ingroup," "a subject with a live visit is excluded (class 3)"
 # the same class-3 exclusion, on a visit that named its subject
 # ONLY through the tracks edge because the gc.continuation_group stamp landed
-# empty (su-ab9je). Keyed on the stamp alone this bead is a survivor, the pass
+# empty (rb-ab9je). Keyed on the stamp alone this bead is a survivor, the pass
 # runs, and the sweep files a SECOND visit on a subject converse still holds.
 hasnt ",$SURV," ",f-trackedvisit," "a subject whose live visit names it only by the tracks edge is excluded (class 3)"
 # A takeaway is one field a sitting stamps at the hold and REPLACES with its
@@ -371,7 +371,7 @@ cp "$TMP/live.bak" "$FIX/live.json"
 BASELINE_CSV="f-carried,f-plain" run_precheck
 eq "$RC" "1" "a visit live on a DIFFERENT subject does not block the skip"
 
-# The su-ab9je shape at the SUBJECT level. The sitting is live
+# The rb-ab9je shape at the SUBJECT level. The sitting is live
 # and held, but its gc.continuation_group stamp landed empty, so only the tracks
 # edge names f-subject. Read on the stamp alone this is "no visit", and the
 # precheck greenlights a pass that files a SECOND visit on a subject converse is
@@ -827,19 +827,19 @@ cat > "$HLFIX/ready.json" <<'JSON'
   {"id":"f-subject","title":"triage: unnamed waits (this rig)","issue_type":"task","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
   {"id":"hl-live-subj","title":"subject of a live-held visit","issue_type":"task","metadata":{}},
   {"id":"hl-dead-subj","title":"subject of a dead-held visit","issue_type":"task","metadata":{}},
-  {"id":"hl-ready-deadvisit","title":"a visit stranded ready by a dead session","issue_type":"task","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"}}
+  {"id":"hl-ready-deadvisit","title":"a visit stranded ready by a dead session","issue_type":"task","metadata":{"task_kind":"visit","gc.session_id":"hq-dead-9"}}
 ]
 JSON
 cat > "$HLFIX/live.json" <<'JSON'
 [
   {"id":"f-subject","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
-  {"id":"hl-v-live","title":"visit: hl-live-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-live-1"},"dependencies":[{"issue_id":"hl-v-live","depends_on_id":"hl-live-subj","type":"tracks"}]},
-  {"id":"hl-v-dead","title":"visit: hl-dead-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-dead-9"},"dependencies":[{"issue_id":"hl-v-dead","depends_on_id":"hl-dead-subj","type":"tracks"}]}
+  {"id":"hl-v-live","title":"visit: hl-live-subj","metadata":{"task_kind":"visit","gc.session_id":"hq-live-1"},"dependencies":[{"issue_id":"hl-v-live","depends_on_id":"hl-live-subj","type":"tracks"}]},
+  {"id":"hl-v-dead","title":"visit: hl-dead-subj","metadata":{"task_kind":"visit","gc.session_id":"hq-dead-9"},"dependencies":[{"issue_id":"hl-v-dead","depends_on_id":"hl-dead-subj","type":"tracks"}]}
 ]
 JSON
 printf '[]\n' > "$HLFIX/widen.json"
 cat > "$TMP/hl-sessions.json" <<'JSON'
-{"sessions":[{"id":"lx-live-1","state":"active","closed":false,"session_name":"s-lx-live-1","alias":"","name":"n","agent_name":"testrig/testrig.tk-livevisit"}]}
+{"sessions":[{"id":"hq-live-1","state":"active","closed":false,"session_name":"s-hq-live-1","alias":"","name":"n","agent_name":"testrig/testrig.tk-livevisit"}]}
 JSON
 FIXDIR="$HLFIX"; export FIXDIR
 FAKE_SESSIONS="$TMP/hl-sessions.json"; export FAKE_SESSIONS
@@ -874,17 +874,17 @@ JSON
 cat > "$HLTERM/live.json" <<'JSON'
 [
   {"id":"f-subject","title":"triage: unnamed waits (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"unnamed-waits"}},
-  {"id":"hl-v-closed","title":"visit: hl-closed-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-closed-7"},"dependencies":[{"issue_id":"hl-v-closed","depends_on_id":"hl-closed-subj","type":"tracks"}]},
-  {"id":"hl-v-arch","title":"visit: hl-arch-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-arch-8"},"dependencies":[{"issue_id":"hl-v-arch","depends_on_id":"hl-arch-subj","type":"tracks"}]},
-  {"id":"hl-v-asleep","title":"visit: hl-asleep-subj","metadata":{"task_kind":"visit","gc.session_id":"lx-asleep-2"},"dependencies":[{"issue_id":"hl-v-asleep","depends_on_id":"hl-asleep-subj","type":"tracks"}]}
+  {"id":"hl-v-closed","title":"visit: hl-closed-subj","metadata":{"task_kind":"visit","gc.session_id":"hq-closed-7"},"dependencies":[{"issue_id":"hl-v-closed","depends_on_id":"hl-closed-subj","type":"tracks"}]},
+  {"id":"hl-v-arch","title":"visit: hl-arch-subj","metadata":{"task_kind":"visit","gc.session_id":"hq-arch-8"},"dependencies":[{"issue_id":"hl-v-arch","depends_on_id":"hl-arch-subj","type":"tracks"}]},
+  {"id":"hl-v-asleep","title":"visit: hl-asleep-subj","metadata":{"task_kind":"visit","gc.session_id":"hq-asleep-2"},"dependencies":[{"issue_id":"hl-v-asleep","depends_on_id":"hl-asleep-subj","type":"tracks"}]}
 ]
 JSON
 printf '[]\n' > "$HLTERM/widen.json"
 cat > "$TMP/hlterm-sessions.json" <<'JSON'
 {"sessions":[
-  {"id":"lx-closed-7","state":"closed","closed":true,"session_name":"s-lx-closed-7","alias":"","name":"","agent_name":""},
-  {"id":"lx-arch-8","state":"archived","closed":true,"session_name":"s-lx-arch-8","alias":"","name":"","agent_name":""},
-  {"id":"lx-asleep-2","state":"asleep","closed":false,"session_name":"s-lx-asleep-2","alias":"","name":"","agent_name":""}
+  {"id":"hq-closed-7","state":"closed","closed":true,"session_name":"s-hq-closed-7","alias":"","name":"","agent_name":""},
+  {"id":"hq-arch-8","state":"archived","closed":true,"session_name":"s-hq-arch-8","alias":"","name":"","agent_name":""},
+  {"id":"hq-asleep-2","state":"asleep","closed":false,"session_name":"s-hq-asleep-2","alias":"","name":"","agent_name":""}
 ]}
 JSON
 FIXDIR="$HLTERM"; export FIXDIR

@@ -134,7 +134,7 @@ The pattern by which a lesson becomes a check is visible in the artifacts themse
 
 `pack.toml`'s own comments are the audit trail. Two worked examples:
 
-- boot's `layered-startup-discovery-boot`: *"Base boot reads the deacon's patrol wisp with `gc bd list … --json` and no `--include-infra`, at two sites… Wisps are ephemeral, so both return empty on every wake and the triage rows keyed on wisp staleness can never fire (**lx-ody8m**). This fragment supersedes both sites."*
+- boot's `layered-startup-discovery-boot`: *"Base boot reads the deacon's patrol wisp with `gc bd list … --json` and no `--include-infra`, at two sites… Wisps are ephemeral, so both return empty on every wake and the triage rows keyed on wisp staleness can never fire (**hq-ody8m**). This fragment supersedes both sites."*
 - witness's `layered-startup-discovery-witness`: *"…every restart pours a fresh wisp while leaking the prior one (**tk-1waw2**)."*
 
 `template-fragments/polecat-non-impl-done.template.md` is the same shape written as prompt prose: it opens by naming the failure it repairs ("refinery sees a branch with no commits ahead of the target, rejects the merge, and the bead loiters open until a human closes it") and includes a four-signal detector with a "durable structural fallback" — and notes *"one of the recurrences this override exists to fix was a review bead whose review never reached GitHub."*

@@ -248,31 +248,31 @@ for entry in ${RUNS[@]+"${RUNS[@]}"}; do
   cmd="${cmd//<bead>/W1}"
   for sh in "${SHELLS[@]}"; do
     at="$agent in $sh"
-    bead in_progress gc-toolkit/gc-toolkit.hicks lx-wisp-o8f8w
-    rc=$(run "$sh" "$cmd" GC_ALIAS=gc-toolkit/gc-toolkit.hicks GC_SESSION_ID=lx-wisp-o8f8w)
+    bead in_progress gc-toolkit/gc-toolkit.hicks hq-wisp-o8f8w
+    rc=$(run "$sh" "$cmd" GC_ALIAS=gc-toolkit/gc-toolkit.hicks GC_SESSION_ID=hq-wisp-o8f8w)
     eq "$rc|$(claim)" "0|$RELEASED" "$at: a worker with an alias hands back the bead gc hook claimed under its alias"
 
-    bead in_progress lx-wisp-me lx-wisp-me
-    rc=$(run "$sh" "$cmd" GC_SESSION_ID=lx-wisp-me)
+    bead in_progress hq-wisp-me hq-wisp-me
+    rc=$(run "$sh" "$cmd" GC_SESSION_ID=hq-wisp-me)
     eq "$rc|$(claim)" "0|$RELEASED" "$at: a worker with no alias hands back the bead claimed under its session id"
 
-    bead in_progress lx-wisp-me lx-wisp-me
-    rc=$(run "$sh" "$cmd" GC_ALIAS= GC_SESSION_ID=lx-wisp-me)
+    bead in_progress hq-wisp-me hq-wisp-me
+    rc=$(run "$sh" "$cmd" GC_ALIAS= GC_SESSION_ID=hq-wisp-me)
     eq "$rc|$(claim)" "0|$RELEASED" "$at: an empty alias counts as none, so the session id is the guard"
 
-    bead in_progress lx-wisp-other lx-wisp-other
-    rc=$(run "$sh" "$cmd" GC_SESSION_ID=lx-wisp-me)
-    eq "$rc|$(claim)" "13|in_progress|lx-wisp-other|lx-wisp-other|gc-toolkit__polecat-codex-lx-wisp-other|$POOL" \
+    bead in_progress hq-wisp-other hq-wisp-other
+    rc=$(run "$sh" "$cmd" GC_SESSION_ID=hq-wisp-me)
+    eq "$rc|$(claim)" "13|in_progress|hq-wisp-other|hq-wisp-other|gc-toolkit__polecat-codex-hq-wisp-other|$POOL" \
       "$at: a bead another session holds is left as it was"
 
-    bead in_progress gc-toolkit/gc-toolkit.ripley lx-wisp-other
-    rc=$(run "$sh" "$cmd" GC_ALIAS=gc-toolkit/gc-toolkit.hicks GC_SESSION_ID=lx-wisp-o8f8w)
-    eq "$rc|$(claim)" "13|in_progress|gc-toolkit/gc-toolkit.ripley|lx-wisp-other|gc-toolkit__polecat-codex-lx-wisp-other|$POOL" \
+    bead in_progress gc-toolkit/gc-toolkit.ripley hq-wisp-other
+    rc=$(run "$sh" "$cmd" GC_ALIAS=gc-toolkit/gc-toolkit.hicks GC_SESSION_ID=hq-wisp-o8f8w)
+    eq "$rc|$(claim)" "13|in_progress|gc-toolkit/gc-toolkit.ripley|hq-wisp-other|gc-toolkit__polecat-codex-hq-wisp-other|$POOL" \
       "$at: a bead another alias holds is left as it was"
 
-    bead closed lx-wisp-me lx-wisp-me
-    rc=$(run "$sh" "$cmd" GC_SESSION_ID=lx-wisp-me)
-    eq "$rc|$(claim)" "13|closed|lx-wisp-me|lx-wisp-me|gc-toolkit__polecat-codex-lx-wisp-me|$POOL" \
+    bead closed hq-wisp-me hq-wisp-me
+    rc=$(run "$sh" "$cmd" GC_SESSION_ID=hq-wisp-me)
+    eq "$rc|$(claim)" "13|closed|hq-wisp-me|hq-wisp-me|gc-toolkit__polecat-codex-hq-wisp-me|$POOL" \
       "$at: a bead the worker already closed stays closed"
   done
 done

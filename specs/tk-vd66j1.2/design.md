@@ -87,7 +87,7 @@ each producing a narrated MP4 whose streams `ffprobe` confirms:
 | Rig | App target | Mode | Result |
 |---|---|---|---|
 | sprintshow | `--serve-dir examples/sample-app` + `demos/sample.md` | walkthrough | 24.4s, h264 1280×900 + AAC narration; all 6 step-proofs held |
-| shutupandlisten | `--serve-dir web/dist` + a smoke script | walkthrough | 12.8s, h264 1280×900 + AAC narration; all 5 step-proofs held |
+| rig-b | `--serve-dir web/dist` + a smoke script | walkthrough | 12.8s, h264 1280×900 + AAC narration; all 5 step-proofs held |
 
 Both clips carry a real video stream and a real narration audio stream, so the
 toolchain (engine, Chromium, ffmpeg, `OPENAI_API_KEY`) resolves and the capture
@@ -95,7 +95,7 @@ is genuinely narrated, not the silent fallback. The two targets are different
 rigs reached the same way, which is what "any rig" rests on: the rig-specific
 input is the one serve flag. The demo scripts are per-rig scenario inputs, not
 committed pack artifacts — the sprintshow script ships with that engine, and the
-shutupandlisten smoke script was written for the proof and lives outside the
+rig-b smoke script was written for the proof and lives outside the
 tree, the way a generated or hand-written scenario does.
 
 ## Boundaries

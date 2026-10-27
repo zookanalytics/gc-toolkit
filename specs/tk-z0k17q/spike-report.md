@@ -62,7 +62,7 @@ Two repositories. Core is our fork `zookanalytics/gascity` (upstream
 | A normal pool offers by its own address | `agents/proactive/agent.toml:38-39` | gc-toolkit |
 | The (retired) converse offer predicate | `assets/scripts/converse-claim.sh:229-234`, `agents/converse/agent.toml:9` | gc-toolkit |
 | The stampers (per class) | §3, table | gc-toolkit |
-| Live census | `gc bd list` over the rig store and `/home/zook/loomington/.beads` | live |
+| Live census | `gc bd list` over the rig store and `/home/zook/mycity/.beads` | live |
 
 ---
 
@@ -88,7 +88,7 @@ is this pack's signal, doing two jobs at once:
   `Metadata["gc.routed_to"]=="human"`.
 
 **Live census (2026-09-15).** Rig store `gc-toolkit`: 97 open beads carry
-`gc.routed_to=human`. City store `/home/zook/loomington/.beads`: 4 more (the
+`gc.routed_to=human`. City store `/home/zook/mycity/.beads`: 4 more (the
 mayor advisories the origin bead first reported). By class:
 
 | Class | Count (rig) | Selector | Native non-route signal it also carries |
@@ -202,8 +202,8 @@ the runtime trying to spawn a human session.
    `human`, and would not match. The declaration must be a top-level `[[agent]]`
    in the town's `city.toml`, which carries no binding
    (`pack.go:946` appends the town's own agents after the binding-prefixed
-   imports). `city.toml` is tracked in the **`loomington` town repo**
-   (`zookanalytics/loomington`), not this rig — see §6.
+   imports). `city.toml` is tracked in the **`mycity` town repo**
+   (`zookanalytics/mycity`), not this rig — see §6.
 
 3. **A plain entry would spawn; `max_active_sessions=0` stops it.**
    `build_desired_state.go:506-540` iterates `cfg.Agents`, and at :538 does
@@ -302,7 +302,7 @@ work is filed once the operator accepts the model. On acceptance of §5:
 
 | # | Work | Owner / rig | Wiring |
 |---|---|---|---|
-| 1 | Add the `[[agent]] name="human", max_active_sessions=0` stanza to `city.toml`; `gc reload`; run §C. | **The `loomington` town repo** (`zookanalytics/loomington`), where `city.toml` is tracked — not gc-toolkit. A PR there, then the operator's `gc reload` (a live town action). | Arms nothing; it *is* the fix. Closes `tk-99sxtg` once §C is clean. |
+| 1 | Add the `[[agent]] name="human", max_active_sessions=0` stanza to `city.toml`; `gc reload`; run §C. | **The `mycity` town repo** (`zookanalytics/mycity`), where `city.toml` is tracked — not gc-toolkit. A PR there, then the operator's `gc reload` (a live town action). | Arms nothing; it *is* the fix. Closes `tk-99sxtg` once §C is clean. |
 | 2 (optional) | A gc-toolkit regression that asserts a `gc.routed_to=human` bead does not trip `session-model` once `human` is configured, mirroring `doctor_routed_to_checks_test.go`'s human case, so a future config edit that drops the stanza is caught. | gc-toolkit (or gascity, wherever the doctor test suite lives) | `blocks`-armed on #1; only meaningful after the stanza exists. |
 | 3 (only if Alternative B is chosen) | The four-to-six beads in §5, Alternative B. | gc-toolkit board + `lifecycle` + gascity dispatch | A convoy, each `blocks`-armed on the one before; #5-Alt-B(1) and (2) gate the rest. |
 
@@ -318,7 +318,7 @@ A polecat must not reconfigure or reload a live town, so these run at the
 operator's convenience after this PR merges. They confirm §4's static verdict.
 
 ```bash
-cd /home/zook/loomington
+cd /home/zook/mycity
 
 # 0. Baseline: the finding exists, and count the population it covers.
 #    gc doctor has no per-check flag, and the per-bead finding lines print only
@@ -328,10 +328,10 @@ cd /home/zook/loomington
 #    proceed.
 gc doctor --verbose 2>&1 | grep 'stale-routed-config:.*human' || echo "NO human stale-routed-config finding — unexpected before the fix; is human already configured, or did the check not run?"
 gc bd list --metadata-field gc.routed_to=human --limit 0 --json | jq length          # rig
-gc bd list --db /home/zook/loomington/.beads --metadata-field gc.routed_to=human --limit 0 --json | jq length   # city
+gc bd list --db /home/zook/mycity/.beads --metadata-field gc.routed_to=human --limit 0 --json | jq length   # city
 # Guard for the finding-trade (must stay 0 before adoption):
 gc bd list --assignee human --status open,in_progress --limit 0 --json | jq length
-gc bd list --db /home/zook/loomington/.beads --assignee human --status open,in_progress --limit 0 --json | jq length
+gc bd list --db /home/zook/mycity/.beads --assignee human --status open,in_progress --limit 0 --json | jq length
 
 # 1. Add the stanza to city.toml (top level, not under [rigs.imports]):
 #      [[agent]]
@@ -390,7 +390,7 @@ stanza (a rejected stanza is silently not applied).
   the `human` exemption — but that is out of scope here and needs no action while
   the population is zero.
 - **Town-config ownership.** The declaration lives in `city.toml`, tracked in
-  the `loomington` town repo (`zookanalytics/loomington`), not this rig. #6.1 is
+  the `mycity` town repo (`zookanalytics/mycity`), not this rig. #6.1 is
   therefore a PR there plus the operator's `gc reload`, not a gc-toolkit bead.
   The live `gc reload` and `gc doctor` steps are §C either way.
 - **Config validation of a command-less agent.** Whether `gc reload` accepts an

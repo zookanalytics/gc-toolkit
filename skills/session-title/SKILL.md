@@ -149,7 +149,7 @@ Optimize for **future-self at a glance**:
 - Topic, not status. "debugging X" or "wip X" is noise — every live
   session is in progress. "X" alone says more.
 - Human-meaningful references, not opaque IDs. `<repo> PR #N`, topic
-  names (`session-title`, `signal-loom`), and verb-noun phrases all
+  names (`session-title`, `seed-audit`), and verb-noun phrases all
   scan. Bare bead IDs (`tk-xxxxx`, `gc-yyyyy`) leave the operator
   with nothing to read at a glance.
 

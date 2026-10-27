@@ -26,7 +26,7 @@ genuine invented scope, derived from an *uncommitted* findings file. It is a
 constraint rather than extra work, and it is arguably the smartest idea in the
 document, but it was not asked for.
 
-Drift worth knowing: it assumed the gate runs on **signal-loom**, where the brief
+Drift worth knowing: it assumed the gate runs on **rig-a**, where the brief
 said "in the gc-toolkit pack." It flagged this as an assumption rather than
 burying it. The plan stage later turned that assumption into an argued decision.
 
@@ -231,7 +231,7 @@ Worth recording, because it is the strongest argument for keeping the review sta
   decomposes into a bead telling an implementer to delete a shipped, working hook.
   Verified independently.
 - Two real bugs in `gc-next` surfaced by the plan stage and confirmed by review:
-  **`gc-role-worker` has no provider on signal-loom** (it imports only `gc-next`,
+  **`gc-role-worker` has no provider on rig-a** (it imports only `gc-next`,
   which declares no `[imports]`), and the **claim/drain command drift** (upstream
   `gc gc claim` / `--drain-ack` / `gc runtime drain-ack` vs. the prompt's bare
   `gc hook --claim --json`).

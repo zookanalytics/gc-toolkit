@@ -12,9 +12,9 @@
 # call rather than an agent's. This script is where that boundary is enforced.
 #
 # The boundary is the OWN ORIGIN of a rig, not an organization. Rigs legitimately
-# live outside the operator's org — shutupandlisten's origin is
-# suandl/shutupandlisten — so an org-keyed rule would refuse that rig's whole PR
-# flow while still permitting writes to unrelated repositories inside the org.
+# live outside the operator's org, under another owner's account, so an
+# org-keyed rule would refuse such a rig's whole PR flow while still permitting
+# writes to unrelated repositories inside the org.
 #
 # On a repository we own, a post (a comment, a review, a thread reply, or an
 # edit of one) has to carry the provenance mark assets/scripts/pr-post.sh

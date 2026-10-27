@@ -109,7 +109,7 @@ AAC audio track — a genuinely narrated clip, not a silent fallback.
 - **npm publish is out of scope** — deferred to the operator, who holds the
   credentials.
 - **The host baseline (Dec1) is a separate, non-blocking track.** The Playwright
-  browser and ffmpeg as general host packages, via the loomington server-setup
+  browser and ffmpeg as general host packages, via the mycity server-setup
   repo, are a host/town change this bead does not make. The engine self-provisions
   both for its own use, which is what let the proof run with no host ffmpeg
   present; the doctor check names the gap rather than committing a host change

@@ -113,7 +113,7 @@ describe('resolveTerminalSession', () => {
 
   it('reads the session override', () => {
     expect(resolveTerminalSession('?session=gc-toolkit.mayor')).toBe('gc-toolkit.mayor');
-    expect(resolveTerminalSession('?terminal=/tty&session=lx-k7r38')).toBe('lx-k7r38');
+    expect(resolveTerminalSession('?terminal=/tty&session=hq-k7r38')).toBe('hq-k7r38');
     // URLSearchParams decodes, so a rig-scoped name arrives whole.
     expect(resolveTerminalSession('?session=gc-toolkit%2Fgc-toolkit.witness')).toBe(
       'gc-toolkit/gc-toolkit.witness',

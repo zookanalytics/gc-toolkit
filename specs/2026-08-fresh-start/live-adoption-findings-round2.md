@@ -7,7 +7,7 @@ description: Delta report re-running the live-adoption validation against 2d6c12
 
 **Branch:** `claude/gc-toolkit-fresh-start-ehvljb` @ `2d6c12a`
 (was `a295fb7` in round 1; three fix commits `c32c7a8`, `0a88909`, `2d6c12a`)
-**City:** `/Users/zook/Code/gc-next`, rigs `gc-toolkit` (tk) and `signal-loom` (sl)
+**City:** `/Users/zook/Code/gc-next`, rigs `gc-toolkit` (tk) and `rig-a` (ra)
 **Host:** darwin 25.6.0, `gc version` = `edge`
 **Run:** 2026-08-08 23:15–00:35Z. City stopped, round-1 visits cleared, restarted clean on the new pack.
 **Recommendation: ADOPT, with two carve-outs** — see §Recommendation.

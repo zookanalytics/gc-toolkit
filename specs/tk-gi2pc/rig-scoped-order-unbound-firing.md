@@ -25,11 +25,11 @@ symbol names, which are stable, rather than trusting the numbers.
 
 ## Symptom
 
-Two workflow roots sat open, unassigned, and unclaimable in the HQ (`lx`) store:
+Two workflow roots sat open, unassigned, and unclaimable in the HQ (`hq`) store:
 
 ```
-lx-dh2v  mol-liveness-sweep     gc.routed_to = "gc-toolkit.polecat"  (bare)
-lx-3sik  mol-triage-recurrence  gc.routed_to = "gc-toolkit.polecat"  (bare)
+hq-dh2v  mol-liveness-sweep     gc.routed_to = "gc-toolkit.polecat"  (bare)
+hq-3sik  mol-triage-recurrence  gc.routed_to = "gc-toolkit.polecat"  (bare)
 ```
 
 `gc doctor` session-model reported both as blocking `stale-routed-config`
@@ -84,8 +84,8 @@ $ gc order list --json | jq -r '.orders[] | select(.name=="liveness-sweep")
 -                gc-toolkit.polecat     <-- unbound: strands every 6h
 gascity          gc-toolkit.polecat
 gc-toolkit       gc-toolkit.polecat
-shutupandlisten  gc-toolkit.polecat
-signal-loom      gc-toolkit.polecat
+rig-b  gc-toolkit.polecat
+rig-a      gc-toolkit.polecat
 ```
 
 ## Why only these two orders
@@ -174,7 +174,7 @@ rig-scoped order.
   clear today's strand and leave the next new order to strand exactly the same
   way. The operator ruled the city.toml path out of scope, and requirement 2
   rules out extending a convention that fails silently.
-- **No HQ-scope pool.** Considered and rejected by the operator: `lx` does not
+- **No HQ-scope pool.** Considered and rejected by the operator: `hq` does not
   need a liveness sweep.
 - **No change to the bare-pool-at-rest convention.** Bare + `scope = "rig"` is
   correct and deliberate; late qualification per importing rig is the design.

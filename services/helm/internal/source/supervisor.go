@@ -45,7 +45,7 @@ const maxGatherFanout = 8
 // table in README.md.
 type SupervisorSource struct {
 	baseURL string // e.g. http://127.0.0.1:8372
-	city    string // registered city name, e.g. "loomington"
+	city    string // registered city name, e.g. "mycity"
 	client  *http.Client
 
 	// gc supplies session liveness. No supervisor endpoint does, and without
@@ -273,8 +273,8 @@ func (g *gatherState) note(partial bool, errs []string) {
 // as a total outage and errors rather than returning a misleading empty board.
 func (g *gatherState) ok() { g.anyOK = true }
 
-// rigOf resolves a bead's rig name from its id prefix (e.g. "su-lou" -> "su" ->
-// "shutupandlisten"). Falls back to the bare prefix when unknown.
+// rigOf resolves a bead's rig name from its id prefix (e.g. "tk-lou" -> "tk" ->
+// "gc-toolkit"). Falls back to the bare prefix when unknown.
 func (g *gatherState) rigOf(id string) (rig, prefix string) {
 	prefix = id
 	if i := strings.IndexByte(id, '-'); i >= 0 {

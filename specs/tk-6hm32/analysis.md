@@ -26,7 +26,7 @@ scope and lives in a follow-up bead.
 | Original named-session-handoff carve-out commit | gascity gc binary | commit `53f0c926` (2026-04-19, "fix: skip restart request for named sessions on self-handoff") | 2026-05-08 |
 | Regression tests covering the no-op behavior | gascity gc binary | `cmd/gc/cmd_runtime_drain_test.go::TestRuntimeRequestRestartNamedOnDemandReturnsWithoutBlocking` and `cmd/gc/cmd_handoff_test.go::TestDoHandoff_Regression744_NamedSessionSkipsRestart` | 2026-05-08 |
 | tk-fyzvk diagnostic (parent — Option A + B recommendation) | gc-toolkit pack | `rigs/gc-toolkit/specs/tk-fyzvk/analysis.md` @ `c9decbb` | 2026-05-08 |
-| Live refinery session bead (target of test contemplated by Track 1) | live bd ledger | `gc session list`: `lx-htsx1` (gc-toolkit/gc-toolkit.refinery, active), `lx-rmdm1` (gascity/gc-toolkit.refinery, asleep), `lx-mo3ln` (signal-loom/gc-toolkit.refinery, asleep) | 2026-05-08 |
+| Live refinery session bead (target of test contemplated by Track 1) | live bd ledger | `gc session list`: `hq-htsx1` (gc-toolkit/gc-toolkit.refinery, active), `hq-rmdm1` (gascity/gc-toolkit.refinery, asleep), `hq-mo3ln` (rig-a/gc-toolkit.refinery, asleep) | 2026-05-08 |
 
 ## TL;DR
 
@@ -60,7 +60,7 @@ broken pour-before-burn invariant.
 **Result: YES, it no-ops. The cycle-recycle template's claim is correct.**
 
 Evidence is from code inspection rather than a runtime test against
-`lx-htsx1` because the behavior is fully determined by:
+`hq-htsx1` because the behavior is fully determined by:
 
 1. The refinery's `mode = "on_demand"` declaration in `pack.toml`.
 2. A pre-emptive guard in `cmd_runtime_drain.go` that short-circuits the
@@ -156,7 +156,7 @@ Decision matrix:
 
 Refinery is the only currently-configured agent class in the false
 column. (`gc session list` confirms three live refinery sessions:
-`lx-htsx1`, `lx-rmdm1`, `lx-mo3ln` — all named `<rig>/gc-toolkit.refinery`,
+`hq-htsx1`, `hq-rmdm1`, `hq-mo3ln` — all named `<rig>/gc-toolkit.refinery`,
 all spawned from the on_demand `[[named_session]]` block.)
 
 ### 1.4 Regression test — the contract is intentional
@@ -185,7 +185,7 @@ session creation time. The predicate does not branch on rig name,
 binding name, or any per-rig metadata.
 
 So **every rig's refinery behaves identically** under request-restart —
-gc-toolkit, gascity, signal-loom — because all three vendor the same
+gc-toolkit, gascity, rig-a — because all three vendor the same
 `refinery` template with `mode = "on_demand"`. There is no
 rig-conditional behavior to surface here.
 
@@ -380,7 +380,7 @@ and depends on understanding the full behavior change of `mode =
   Option A + B definitions.
 - **Adding tests.** The implementation bead can add them.
 - **Live runtime test of `gc runtime request-restart`** against
-  `lx-htsx1`. Code inspection is unambiguous (§1.2-1.4) and a runtime
+  `hq-htsx1`. Code inspection is unambiguous (§1.2-1.4) and a runtime
   test would only re-confirm what the regression test in §1.4 already
   proves, at the cost of disrupting an active production refinery's
   wisp lifecycle. If the operator wants empirical confirmation, the

@@ -16,7 +16,7 @@ check that closes the rest.
 
 Skill materialization reads the rig checkout that the city has
 registered — not a branch worktree. Every path `gc skill list` reports
-resolves under `/home/zook/loomington/rigs/gc-toolkit/`, so a skill
+resolves under `/home/zook/mycity/rigs/gc-toolkit/`, so a skill
 added on `polecat/tk-wghh1` is invisible to it until the branch is on
 that checkout. Making it visible early would mean editing the canonical
 checkout, which polecats must not do.
@@ -48,8 +48,8 @@ Once the branch lands and the sinks refresh (`gc start`), one command
 settles it:
 
 ```bash
-ls -d /home/zook/loomington/rigs/gc-toolkit/.claude/skills/gc-toolkit.signoff-review \
-      /home/zook/loomington/rigs/gc-toolkit/.codex/skills/gc-toolkit.signoff-review
+ls -d /home/zook/mycity/rigs/gc-toolkit/.claude/skills/gc-toolkit.signoff-review \
+      /home/zook/mycity/rigs/gc-toolkit/.codex/skills/gc-toolkit.signoff-review
 ```
 
 Both paths present — symlinked to `skills/signoff-review` — confirms the

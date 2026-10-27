@@ -169,12 +169,12 @@ export GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" GC_DIR=""
 
 # This session's four identity forms. A work bead whose assignee is any of them
 # is "owned by you" and must be a no-op; anything else is a foreign owner.
-SELF_NAME="lx-me-pool"; SELF_ID="sess-me"; SELF_AGENT="rig/rig.polecat"; SELF_ALIAS="me-alias"
+SELF_NAME="hq-me-pool"; SELF_ID="sess-me"; SELF_AGENT="rig/rig.polecat"; SELF_ALIAS="me-alias"
 REFINERY="gc-toolkit/gc-toolkit.refinery"
 SESS_EMPTY='{"sessions":[]}'
 # A session list that answers, naming live sessions none of the fixtures' owners
 # match: the probe returns 0 for any owner not listed here.
-SESS_REAL='{"sessions":[{"session_name":"lx-busy","id":"sess-busy","alias":"rig/rig.polecat-busy"}]}'
+SESS_REAL='{"sessions":[{"session_name":"hq-busy","id":"sess-busy","alias":"rig/rig.polecat-busy"}]}'
 
 # run <work-bead-json> -> prints "<rc>|<ordered verb log>"
 #   FAKE_SESSIONS controls the liveness probe; FAKE_TREE_RC/OUT the tree check;
@@ -219,7 +219,7 @@ eq "$(run '[{"status":"open","assignee":"","metadata":{"branch":"polecat/tk-work
 
 # A foreign owner on an in_progress bead is a no-op ONLY when that owner has
 # crashed — absent from the session list, the work is ours to take over.
-eq "$(FAKE_SESSIONS="$SESS_EMPTY" run '[{"status":"in_progress","assignee":"lx-dead","metadata":{}}]')" \
+eq "$(FAKE_SESSIONS="$SESS_EMPTY" run '[{"status":"in_progress","assignee":"hq-dead","metadata":{}}]')" \
    "0|" \
    "in_progress under a CRASHED foreign owner: no-op — take over abandoned work"
 
@@ -269,8 +269,8 @@ done
 # A closed bead is decided by its status before any owner or liveness check, so
 # a closed bead under a foreign owner the session list reports live is finished,
 # not a live conflict, and files no visit.
-eq "$(FAKE_SESSIONS='{"sessions":[{"session_name":"lx-other"}]}' \
-      run '[{"status":"closed","assignee":"lx-other","metadata":{}}]')" \
+eq "$(FAKE_SESSIONS='{"sessions":[{"session_name":"hq-other"}]}' \
+      run '[{"status":"closed","assignee":"hq-other","metadata":{}}]')" \
    "1|UPDATE;CANCEL;DRAIN;" \
    "closed under a LIVE foreign owner: finished, cancels with no visit — the liveness probe does not apply"
 
@@ -280,21 +280,21 @@ eq "$(run '[{"status":"closed","metadata":{"merge_result":"merged"}}]')" \
 
 # --- 3. A live duplicate: the other run builds it, so nobody decides. ---------
 
-eq "$(FAKE_SESSIONS='{"sessions":[{"session_name":"lx-other"}]}' \
-      run '[{"status":"in_progress","assignee":"lx-other","metadata":{}}]')" \
+eq "$(FAKE_SESSIONS='{"sessions":[{"session_name":"hq-other"}]}' \
+      run '[{"status":"in_progress","assignee":"hq-other","metadata":{}}]')" \
    "1|UPDATE;CANCEL;DRAIN;" \
    "in_progress under a LIVE foreign owner: cancels this run with no visit, drains, exits 1"
 
 # A liveness probe that answers nothing cannot disprove a live owner, so the
 # gate assumes one.
-eq "$(FAKE_SESSIONS='' run '[{"status":"in_progress","assignee":"lx-other","metadata":{}}]')" \
+eq "$(FAKE_SESSIONS='' run '[{"status":"in_progress","assignee":"hq-other","metadata":{}}]')" \
    "1|UPDATE;CANCEL;DRAIN;" \
    "in_progress under a foreign owner the liveness probe cannot answer for: assumes live, cancels"
 
 # A live owner is a conflict even when a merge_result says a PR exists: the
 # in-flight check runs before the stamp is read.
-eq "$(FAKE_SESSIONS='{"sessions":[{"session_name":"lx-other"}]}' \
-      run '[{"status":"in_progress","assignee":"lx-other","metadata":{"merge_result":"pull_request"}}]')" \
+eq "$(FAKE_SESSIONS='{"sessions":[{"session_name":"hq-other"}]}' \
+      run '[{"status":"in_progress","assignee":"hq-other","metadata":{"merge_result":"pull_request"}}]')" \
    "1|UPDATE;CANCEL;DRAIN;" \
    "in_progress under a LIVE foreign owner with a merge_result: still the live duplicate"
 
@@ -383,12 +383,12 @@ no  "$(cat "$TMP/cancel")" 'closed before claim' "closed + merge_result: the sta
 eq  "$(cat "$TMP/esc")"  '' "closed + merge_result: no escalation filed"
 
 # LIVE duplicate: no visit; the note and the cancel reason name the live owner.
-FAKE_SESSIONS='{"sessions":[{"session_name":"lx-other"}]}' \
-  run '[{"status":"in_progress","assignee":"lx-other","metadata":{}}]' >/dev/null
+FAKE_SESSIONS='{"sessions":[{"session_name":"hq-other"}]}' \
+  run '[{"status":"in_progress","assignee":"hq-other","metadata":{}}]' >/dev/null
 eq  "$(cat "$TMP/esc")"    '' "in-flight: no visit — the live run builds the work"
 has "$(cat "$TMP/update")" 'Duplicate dispatch refused; run cancelled' "in-flight: the note names the duplicate"
-has "$(cat "$TMP/update")" 'under live lx-other' "in-flight: the note names the live owner"
-has "$(cat "$TMP/cancel")" 'duplicate dispatch: tk-work already in_progress under live lx-other' "in-flight: cancel reason names the live owner"
+has "$(cat "$TMP/update")" 'under live hq-other' "in-flight: the note names the live owner"
+has "$(cat "$TMP/cancel")" 'duplicate dispatch: tk-work already in_progress under live hq-other' "in-flight: cancel reason names the live owner"
 
 # UNREADABLE: its own key, and the messages say the bead could not be read
 # rather than naming a duplicate dispatch.
@@ -428,8 +428,8 @@ eq "$out" "1|UPDATE;CANCEL;" \
 out="$(FAKE_CANCEL_RC=1 run '[{"status":"closed","assignee":"","metadata":{}}]')"
 eq "$out" "1|UPDATE;CANCEL;" \
    "closed, cancel fails: does not drain, files no escalation"
-out="$(FAKE_CANCEL_RC=1 FAKE_SESSIONS='{"sessions":[{"session_name":"lx-other"}]}' \
-      run '[{"status":"in_progress","assignee":"lx-other","metadata":{}}]')"
+out="$(FAKE_CANCEL_RC=1 FAKE_SESSIONS='{"sessions":[{"session_name":"hq-other"}]}' \
+      run '[{"status":"in_progress","assignee":"hq-other","metadata":{}}]')"
 eq "$out" "1|UPDATE;CANCEL;" \
    "live duplicate, cancel fails: does not drain"
 
@@ -442,8 +442,8 @@ eq "$out" "1|UPDATE;CANCEL;DRAIN;" \
 has "$(cat "$TMP/out")" 'The refusal note did not land on tk-work' "closed, refusal note refused: the failure is reported"
 has "$(cat "$TMP/cancel")" 'already closed' "closed, refusal note refused: the cancel reason still records the refusal"
 
-out="$(FAKE_UPDATE_RC=1 FAKE_SESSIONS='{"sessions":[{"session_name":"lx-other"}]}' \
-      run '[{"status":"in_progress","assignee":"lx-other","metadata":{}}]')"
+out="$(FAKE_UPDATE_RC=1 FAKE_SESSIONS='{"sessions":[{"session_name":"hq-other"}]}' \
+      run '[{"status":"in_progress","assignee":"hq-other","metadata":{}}]')"
 eq "$out" "1|UPDATE;CANCEL;DRAIN;" \
    "in-flight, refusal note refused: still cancels and drains"
 has "$(cat "$TMP/out")" 'The refusal note did not land on tk-work' "in-flight, refusal note refused: the failure is reported"
@@ -467,7 +467,7 @@ eq "$(cat "$TMP/tree-args")" "<--bead><tk-work><--work-dir></w/slots/p/worktrees
 run "[{\"status\":\"in_progress\",\"assignee\":\"$SELF_NAME\",\"metadata\":{}}]" >/dev/null
 eq "$(grep -c . "$TMP/tree-args")" "1" "owned by this session: the tree check runs"
 
-FAKE_SESSIONS="$SESS_EMPTY" run '[{"status":"in_progress","assignee":"lx-dead","metadata":{}}]' >/dev/null
+FAKE_SESSIONS="$SESS_EMPTY" run '[{"status":"in_progress","assignee":"hq-dead","metadata":{}}]' >/dev/null
 eq "$(grep -c . "$TMP/tree-args")" "1" "in_progress under a crashed foreign owner: the tree check runs"
 
 # A bead refused on its status or assignee never reaches the tree check.
@@ -481,12 +481,12 @@ run '[{"status":"deferred","assignee":"","metadata":{}}]' >/dev/null
 eq "$(cat "$TMP/tree-args")" "" "parked: no tree check"
 FAKE_SESSIONS="$SESS_REAL" run '' >/dev/null
 eq "$(cat "$TMP/tree-args")" "" "unreadable: no tree check"
-FAKE_SESSIONS='{"sessions":[{"session_name":"lx-other"}]}' \
-  run '[{"status":"in_progress","assignee":"lx-other","metadata":{}}]' >/dev/null
+FAKE_SESSIONS='{"sessions":[{"session_name":"hq-other"}]}' \
+  run '[{"status":"in_progress","assignee":"hq-other","metadata":{}}]' >/dev/null
 eq "$(cat "$TMP/tree-args")" "" "in_progress under a live foreign owner: no tree check"
 
 # Held: a live session is working this work in its tree.
-FINDING_HELD="worktree /w/slots/p/worktrees/tk-work (uncommitted paths: 2) is held by live pool__polecat-lx-p, which is working tk-work"
+FINDING_HELD="worktree /w/slots/p/worktrees/tk-work (uncommitted paths: 2) is held by live pool__polecat-hq-p, which is working tk-work"
 eq "$(FAKE_TREE_RC=1 FAKE_TREE_OUT="$FINDING_HELD" run '[{"status":"open","assignee":"","metadata":{"work_dir":"/w/slots/p/worktrees/tk-work"}}]')" \
    "1|UPDATE;CANCEL;DRAIN;" \
    "a live session working this bead in its tree: cancels this run with no visit, drains, exits 1"
@@ -530,7 +530,7 @@ eq "$(cat "$TMP/esc-window")" "600" "parked: a window the caller set passes thro
 # let through, a crashed owner's or this session's, is the wait's to release,
 # and the wait proves which it may release, so the gate names no owner.
 eq "$(FAKE_SESSIONS="$SESS_EMPTY" FAKE_TREE_RC=2 FAKE_TREE_OUT="$FINDING_UNDECIDED" \
-      run '[{"status":"in_progress","assignee":"lx-dead","metadata":{}}]')" \
+      run '[{"status":"in_progress","assignee":"hq-dead","metadata":{}}]')" \
    "1|UPDATE;ESCALATE;AWAIT;CANCEL;DRAIN;" \
    "undecided tree, in_progress under a crashed foreign owner: escalates, waits, cancels"
 eq "$(cat "$TMP/await")" "tk-work --key polecat-duplicate-dispatch --formula mol-polecat-work" \
@@ -600,15 +600,15 @@ ln -s "$HERE/work-tree-holder.sh" "$TMP/e2e-pack/assets/scripts/work-tree-holder
 ln -s "$HERE/run-lib.sh" "$TMP/e2e-pack/assets/scripts/run-lib.sh"
 
 E2E_SESSIONS=$(jq -nc --arg me "$ME" --arg peer "$PEER" '{sessions: [
-  {id: "lx-me", session_name: "pool__polecat-lx-me", name: "pool__polecat-lx-me", agent_name: "rig/rig.me", alias: null, state: "active", work_dir: $me},
-  {id: "lx-peer", session_name: "pool__polecat-lx-peer", name: "pool__polecat-lx-peer", agent_name: "rig/rig.peer", alias: null, state: "active", work_dir: $peer}]}')
+  {id: "hq-me", session_name: "pool__polecat-hq-me", name: "pool__polecat-hq-me", agent_name: "rig/rig.me", alias: null, state: "active", work_dir: $me},
+  {id: "hq-peer", session_name: "pool__polecat-hq-peer", name: "pool__polecat-hq-peer", agent_name: "rig/rig.peer", alias: null, state: "active", work_dir: $peer}]}')
 # e2e_beads <work bead the peer's molecule tracks> — the peer's claimed step,
 # its root and input convoy as Gas City writes them, and that work bead's row.
 # The fake gc answers every list with all of them, and run-lib.sh picks out the
 # rows it asked for.
 e2e_beads() {
   jq -nc --arg w "$1" --arg tree "$PEER/worktrees/$1" '[
-    {id: "st-p", status: "in_progress", assignee: "lx-peer", metadata: {"gc.root_bead_id": "root-p"}, dependencies: []},
+    {id: "st-p", status: "in_progress", assignee: "hq-peer", metadata: {"gc.root_bead_id": "root-p"}, dependencies: []},
     {id: "root-p", status: "in_progress", assignee: null, issue_type: "task", metadata: {"gc.kind": "workflow", "gc.input_convoy_id": "cv-p"}, dependencies: []},
     {id: "cv-p", status: "open", assignee: null, issue_type: "convoy", metadata: {}, dependencies: [{issue_id: "cv-p", depends_on_id: $w, type: "tracks"}]},
     {id: $w, status: "open", assignee: null, metadata: {branch: ("polecat/" + $w), work_dir: $tree}, dependencies: []}]'
@@ -618,13 +618,13 @@ E2E_BEAD="[{\"status\":\"open\",\"assignee\":\"\",\"metadata\":{\"work_dir\":\"$
 eq "$(RUN_DIR="$ME" GC_DIR="$ME" GC_PACK_DIR="$TMP/e2e-pack" FAKE_SESSIONS="$E2E_SESSIONS" FAKE_BEADS="$(e2e_beads tk-work)" run "$E2E_BEAD")" \
    "1|UPDATE;CANCEL;DRAIN;" \
    "end to end: a live peer running a molecule over this bead in its recorded tree ends this dispatch"
-has "$(cat "$TMP/update")" "worktree $PEER/worktrees/tk-work (uncommitted paths: 1) is held by live pool__polecat-lx-peer, which is working tk-work" \
+has "$(cat "$TMP/update")" "worktree $PEER/worktrees/tk-work (uncommitted paths: 1) is held by live pool__polecat-hq-peer, which is working tk-work" \
     "end to end: the note names the peer's tree, its uncommitted path and the peer"
 
 eq "$(RUN_DIR="$ME" GC_DIR="$ME" GC_PACK_DIR="$TMP/e2e-pack" FAKE_SESSIONS="$E2E_SESSIONS" FAKE_BEADS="$(e2e_beads tk-other)" run "$E2E_BEAD")" \
    "0|" \
    "end to end: the peer slot's session on other work leaves the tree adoptable, and the gate passes"
-has "$(cat "$TMP/out")" "is adoptable: live pool__polecat-lx-peer in $PEER is working other work (tk-other)" \
+has "$(cat "$TMP/out")" "is adoptable: live pool__polecat-hq-peer in $PEER is working other work (tk-other)" \
     "end to end: the adoptable finding is printed"
 
 # --- Summary. -----------------------------------------------------------------

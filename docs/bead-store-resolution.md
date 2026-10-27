@@ -17,8 +17,8 @@ to reading: given an id, which store answers for it, and what its silence means.
 
 ## A lookup resolves a live id but not its absence
 
-Every bead id begins with a prefix its store owns — `tk-` for gc-toolkit,
-`su-` for shutupandlisten, `lx-` for the city's own store. The prefix is the
+Every bead id begins with a prefix its store owns: `tk-` for gc-toolkit, and
+another rig's prefix or the city store's for each of theirs. The prefix is the
 whole of that binding, and nothing else in a lookup carries it. An unpinned
 `gc bd show` resolves a live id from whichever store holds it, wherever the
 caller stands. What it cannot carry is an absence: a miss is answered by the
@@ -79,8 +79,8 @@ its `key=value` argument never parses as a bare id.
 
 The failure is not the empty answer. It is a gate that reads one as
 permission: no owning bead, so nothing is protected, so delete. A prune run
-from inside a `tk-` rig that reads a `su-` bead's ambient-store miss as its
-absence takes a whole live rig's worktrees for unowned.
+from inside a `tk-` rig that reads the ambient-store miss on another rig's
+bead as its absence takes a whole live rig's worktrees for unowned.
 
 So any gate whose next act is destructive — worktree prune or reclaim,
 witness salvage, source disposal — resolves the owning store from the id

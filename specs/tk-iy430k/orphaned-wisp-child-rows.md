@@ -1,6 +1,6 @@
 ---
-name: Orphaned wisp child rows — why lx regrew, and the verb that empties it
-description: What made the lx store expensive (3.4M child rows pointing at wisps that no longer exist), why four months of reclaims never removed one of them, and how wisp-orphan-purge.sh deletes them safely against a live city. Read before treating lx growth as a compaction problem or before widening the purge to another table.
+name: Orphaned wisp child rows — why hq regrew, and the verb that empties it
+description: What made the hq store expensive (3.4M child rows pointing at wisps that no longer exist), why four months of reclaims never removed one of them, and how wisp-orphan-purge.sh deletes them safely against a live city. Read before treating hq growth as a compaction problem or before widening the purge to another table.
 ---
 
 # Orphaned wisp child rows
@@ -12,7 +12,7 @@ children. `wisp_events`, `wisp_labels`, `wisp_comments` and
 `wisp_dependencies` all key on `issue_id`, and nothing deletes a child when
 its wisp goes, so the child rows accumulate without bound.
 
-At filing, lx held 3,407,828 such rows against 1,319 live wisps: 2,094,721 of
+At filing, hq held 3,407,828 such rows against 1,319 live wisps: 2,094,721 of
 2,117,323 `wisp_events` (99.0%) and 1,313,103 of 1,317,809 `wisp_labels`
 (99.6%). `wisp_comments` held 4 rows, all orphaned. `wisp_dependencies` held
 2, neither orphaned — it is covered by rule, not because it was dirty.
@@ -33,7 +33,7 @@ mid-purge reproduced the distribution on what remained:
 | 08-05 .. the 08-19 reclaim | 412,635 | 363,981 |
 | since the 08-19 reclaim | 22,285 | 21,628 |
 
-2.07M of 2.09M rows survived both interventions. That is why lx returned to the
+2.07M of 2.09M rows survived both interventions. That is why hq returned to the
 same size after each one, and why the footprint read as a compaction problem for
 four months. Compaction is healthy; the rows are the problem. A reclaim is still
 required *after* the delete, because a DELETE alone does not shrink the store
@@ -92,7 +92,7 @@ wholesale, not a few rows.
 
 ## Verification
 
-Run against lx on 2026-09-03, in two passes: the first was stopped deliberately
+Run against hq on 2026-09-03, in two passes: the first was stopped deliberately
 after 250,024 rows to correct the live-row guard, and the second carried the
 rest. Stopping mid-run is the resumability claim being exercised rather than
 asserted — the working set was clean, HEAD matched the working copy, and the
@@ -119,7 +119,7 @@ space on the volume returned to 21 GiB. The transient peak is the thing to
 budget for: the store nearly triples before it shrinks.
 
 `gc dolt health` reports `orphans: []`, `quarantine: []` and no zombie
-processes. The lx backup manifest remains the newest file in `.dolt-backup/lx`,
+processes. The hq backup manifest remains the newest file in `.dolt-backup/hq`,
 which is the restorability invariant the deacon patrol's backup-manifest check
 enforces.
 
