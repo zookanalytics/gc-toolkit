@@ -1,6 +1,6 @@
 ---
 name: review-triage
-description: The method for the triage check — a broad, cheap scan that does not judge a change but decides which specialist checks it needs, then records that decision by widening the anchor's check_set from the check index's declared checks; and, when bringing the branch current conflicted, rules from the worker's audit on what that round reopens. Use when you hold a review bead whose check_name is triage, or when asked which review checks a diff warrants. Covers the index contract, the monotonic-widen rule, the expected common case of adding nothing, and the bring-current round ruling.
+description: The method for the triage check — a broad, cheap scan that does not judge a change but decides which specialist checks it needs, then records that decision by widening the anchor's check_set from the check index's declared checks; and, when bringing the branch current conflicted, rules from the worker's audit on what that round reopens. Use when you hold a review bead whose check is triage, or when asked which review checks a diff warrants. Covers the index contract, the monotonic-widen rule, the expected common case of adding nothing, and the bring-current round ruling.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -11,58 +11,113 @@ You are classifying, not judging. Whether the change is correct is the
 **which specialist checks does this diff warrant?** The usual honest answer is
 none.
 
-## Inputs — three, in this order
+## What it reads
 
-1. **The check index** — `review-checks.toml` at the commit under review. It
+Three inputs, in this order.
+
+1. **The check index** — the pack's checks, with the rows of the
+   `review-checks.toml` the commit under review carries laid over them. It
    declares the checks you may add. Read it first; it is the one place the
    available checks are declared.
-2. **The review bead** — `check_name`, `anchor_bead`, `review_branch` /
-   `review_base` or `pr_number`, and the dispatch-pinned `reviewed_oid`. The
-   anchor states what the change was for.
-3. **The diff, at the pinned commit** — `git diff --stat` first, then a skim of
-   the files the stat names. A skim is the method here; reading every hunk is
-   the specialist reviewer's job, not yours.
+2. **The anchor** — `<anchor_bead>`, which states what the change was for, and
+   the rig's guidance for triage, the reviewed commit's `docs/review-triage.md`,
+   which the review formula printed when the commit carries one. A rig steers
+   triage there in words, such as never adding a check, or adding one only for
+   one kind of change: advice you weigh beside your own reading of the diff.
+3. **The diff, at the reviewed commit** — in `<worktree>`,
+   `git diff --stat origin/<review_base>...HEAD` first, then a skim of the
+   files the stat names. A skim is the method here; reading every hunk is the
+   specialist reviewer's job, not yours.
 
-## The index contract
+### The index
 
-The check index is closed: you may add any check it declares and you may not
-invent one. Parse it rather than eyeballing it. The parser and the index come
-from different places and must be resolved separately: the parser is a pack
-script, the index is the reviewed repo's own. A pack rung on the index ladder
-would classify this rig against gc-toolkit's checks. The index comes out of the
-dispatch-pinned commit, `$REVIEWED_OID` from input 2, not off disk — the tree
-you stand in is your own worktree, not the commit you are classifying, and a
-branch may change the index it is judged against:
+Read the index through the pack's resolver rather than eyeballing a file. It
+has two layers. The pack's own index declares every check the pack ships a
+skill for, so every rig has them. The reviewed repo's `review-checks.toml` at
+the commit under review, when it keeps one, adds checks of the rig's own and
+can change a pack check's purpose or phase for that rig. The resolver is the
+pack's own copy, which `gc <binding> scripts-dir` finds from any rig: it prints
+the directory holding the pack's scripts. `<binding>` is the name the city
+imports the pack under, which gc puts in front of this skill's name:
+`gc-toolkit` in `gc-toolkit.review-triage`. `gc skill list` prints it in this
+skill's FROM column. The rig's rows come out of `<reviewed_oid>`, not off disk —
+the tree you stand in is your own worktree, not the commit you are classifying,
+and a branch may change the index it is judged against:
 
 ```bash
-PARSER=""
-for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}"; do
-  [ -n "$c" ] && [ -x "$c/assets/scripts/review-checks.sh" ] && { PARSER="$c/assets/scripts/review-checks.sh"; break; }
-done
-INDEX=$(mktemp); FOUND=""
-for c in "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_RIG_ROOT:-}"; do
-  [ -n "$c" ] || continue
-  git -C "$c" show "${REVIEWED_OID}:review-checks.toml" >"$INDEX" 2>/dev/null && { FOUND=1; break; }
-done
-[ -n "$FOUND" ] && [ -n "$PARSER" ] && "$PARSER" --file "$INDEX"
+# >>> triage-index-read
+"$(gc <binding> scripts-dir)/review-checks.sh" --show --at "<reviewed_oid>"
+# <<< triage-index-read
 ```
 
-Each row gives you the check, its method, one line of purpose, and its phase —
-the stage transition by which it must read green. When a check applies is a
-judgment its method states, so read the method; the phase is fixed per check and
-not triage's to choose, and there is no applies-when column in the index.
+Each row gives you the check, one line of purpose, and its phase — the stage
+transition by which it must read green. When a check applies is a judgment its
+method states, so read the method: the skill `<binding>.review-<check>` in your
+catalog. A check of the rig's own has no skill, and its purpose is the whole of
+what it judges. The phase is fixed per check and not triage's to choose, and
+there is no applies-when column in the index.
 
-A commit that carries no index is the no-index case below, not a reason to reach
-for the pack's copy or the tree you happen to be in. `signoff.sh` resolves it the
-same way: it validates `--add-gates` against the reviewed commit's own index, and
-widens nothing when that commit carries none — the added checks are dropped and
-correctness carries the change.
+A commit that carries no index of its own still has the pack's checks, so
+every review has a menu. A non-zero exit is an index nobody read: a commit the
+checkout cannot read, a reviewed commit the block was not given, or a scripts
+dir gc cannot print. Stop and say so rather than classify with no menu. A row
+the resolver refuses, a phase outside the ordered set, is left off the menu and
+named on stderr. That row is the index gap.
 
-## Deciding
+### The index gap
 
-For each check the index declares, read its method and ask whether the diff you
-skimmed warrants it. Add the check when the answer is yes. Two rules bound the
-judgment:
+A rig row the resolver refuses is your first finding. File it as an
+observation and classify over the rows the menu shows. Filing is recording,
+not proposing: the distiller judges it and a reviewed PR writes the index.
+
+```bash
+# >>> triage-index-gap
+OBS_META=$(jq -nc --arg scope "repo:${GC_RIG:-unknown}" --arg prov "bead:<anchor_bead>:turn:$(date -u +%Y-%m-%d)" \
+  '{task_kind: "observation", "obs.category": "review-index-gap", "obs.scope": $scope,
+    "obs.source": "self", "obs.directive": "standing", "obs.provenance": $prov,
+    "gc.outcome": "recorded", "gc.work_outcome": "no-op"}')
+OBS_JSON=$(gc bd create "obs: check index row refused (bead:<anchor_bead>)" \
+  -t task -l learning -l observation --metadata "$OBS_META" --status=closed -d "## Statement
+<the row the resolver refused, and why>
+
+## Quote
+Triage on <anchor_bead> at <reviewed_oid>.
+
+## Proposed norm
+<draft — explicitly non-binding>" --json)
+OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+[ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
+# <<< triage-index-gap
+```
+
+### A bring-current round that conflicted
+
+Bringing the branch current means merging its base in. When that took
+resolution by hand, the worker wrote one audit entry per conflicted file and
+per edit beyond the merge, `bring-current-guard.sh` stored the entries on the
+anchor beside its own diff evidence, and it reopened this lane. So the anchor's
+`bring_current_record` holds a conflicted round with no `triage` ruling, the
+reason the review formula prints says so, and your verdict also rules on that
+round. `signoff.sh` refuses the verdict without the ruling.
+
+Read the round first:
+
+```bash
+# >>> triage-round-read
+"$(gc <binding> scripts-dir)/bring-current-audit.sh" render --anchor "<anchor_bead>" --as comment   # the account
+"$(gc <binding> scripts-dir)/bring-current-audit.sh" show --anchor "<anchor_bead>"                  # the raw record
+# <<< triage-round-read
+```
+
+The account gives a routine entry one line. The raw record keeps what that
+line leaves out: what collided, what to check, and git's evidence.
+
+## What it judges
+
+The check index is closed: you may add any check it declares and you may not
+invent one. For each check the index declares, read its method and ask whether
+the diff you skimmed warrants it. Add the check when the answer is yes. Two
+rules bound the judgment:
 
 - **A check's method may name paths that make it mandatory.** When the diff
   touches such a path, the check is added whatever the rest of the method would
@@ -74,63 +129,17 @@ judgment:
   session per anchor, and the feedback distiller watches the add-rate for exactly
   that drift.
 
-When the repo has no readable index, there is no menu to classify over: widen
-nothing, let the standing `correctness` review carry the change, and file the
-index gap as an observation (below).
-
-## Recording the decision
-
-One `signoff.sh` call carries the verdict and the widening together. The verdict
-is `approve`: triage passed at this commit, which is what makes `check.triage`
-green and lets the rest of the cadence proceed.
-
-```bash
-signoff.sh --review-bead "$REVIEW_BEAD" --verdict approve \
-  --add-gates demo
-```
-
-- **Widening is monotonic and `signoff.sh` enforces it.** The write is a set
-  union with read-back: nothing you pass can remove a check already declared,
-  and no dispatcher, formula, or other reviewer may pre-set or shrink
-  `check_set`. The checks-needed decision lives here, in one place a human can
-  audit.
-- **Every added check is recorded** on the anchor's notes as a `triage-add:`
-  line, so the add-rate the distiller watches stays countable. Name the check
-  you added and what in the diff warranted it, in your verdict body.
-- **Adding nothing needs no flag** — approve on its own is the full verdict.
-
-Your verdict body is the triage trail, collapsed under the line `signoff.sh`
-opens the comment with: what you read, each check you added or left out and
-why, and any test runs. Triage files no findings, so it has no findings block.
-
-## A bring-current round that conflicted
-
-Bringing the branch current means merging its base in. When that took
-resolution by hand, the worker wrote one audit entry per conflicted file and
-per edit beyond the merge, `bring-current-guard.sh` stored the entries on the
-anchor beside its own diff evidence, and it reopened this lane. So the anchor's
-`bring_current_record` holds a conflicted round with no `triage` ruling, and
-your verdict also rules on that round. `signoff.sh` refuses the verdict without
-the ruling.
-
-Read the round first:
-
-```bash
-bring-current-audit.sh render --anchor "$ANCHOR" --as comment   # the account
-bring-current-audit.sh show --anchor "$ANCHOR"                  # the raw record
-```
-
-Each entry says what collided (the two intents), what the worker decided and
-why, what a reviewer should check, and the worker's rating: `routine` for an
-adjacent-line collision, an overlapping comment edit or an obvious
-composition, and `judgment` for an informed decision, such as an inferred
-intent, a side chosen on substance, or something new written. The rating is
-the worker's, and it gates nothing; the guard's evidence beside each entry says
-what git could and could not merge on its own. An item listed with no entry
-from the worker comes from a resume that asked for no audit, and only the
-guard's evidence describes it, so read the merged code there yourself. Look at
-the merged code where an entry tells you to, then decide what the round
-reopens:
+A round that conflicted is also yours to rule on. Each entry says what collided
+(the two intents), what the worker decided and why, what a reviewer should
+check, and the worker's rating: `routine` for an adjacent-line collision, an
+overlapping comment edit or an obvious composition, and `judgment` for an
+informed decision, such as an inferred intent, a side chosen on substance, or
+something new written. The rating is the worker's, and it gates nothing; the
+guard's evidence beside each entry says what git could and could not merge on
+its own. An item listed with no entry from the worker comes from a resume that
+asked for no audit, and only the guard's evidence describes it, so read the
+merged code there yourself. Look at the merged code where an entry tells you
+to, then decide what the round reopens:
 
 - **Nothing** (`--reopen none`). The resolution preserved both intents in a way
   a reader can confirm from the account, and nothing reviewed before the round
@@ -153,58 +162,53 @@ reopens:
 Lanes and the lift combine. Say why in `--round-reason`, one line a person can
 act on; on a lift it is the decision above. Never give the approval predating
 the round as the reason for a lift: every round postdates the approval it would
-lift, so that tells the operator nothing. The ruling rides the one verdict
-call:
+lift, so that tells the operator nothing.
 
-```bash
-signoff.sh --review-bead "$REVIEW_BEAD" --verdict approve \
-  --reopen correctness --round-reason "<why>" [--dismiss-approval] [--add-gates arch]
-```
+## What blocks
 
-`signoff.sh` hands the ruling to the guard, which records it in the anchor's
-record and sends each reopened lane back to unreviewed. On a lift it first
-stores the round's time on the anchor as `bring_current_lifted_at`, the line the
-approval rule reads, then re-requests each approver and dismisses the approvals
-the line covers. The verdict it posts opens with your verdict and, on a lift,
-your decision. The round's account sits collapsed under that line, rendered
-from the record the same way whether or not you lifted: what collided, what
-was decided, and what reopened.
-
-## The index gap
-
-An index that is missing, or that describes checks the repo no longer has, is
-your first finding — file it as an observation and carry on with the fallback
-above. Filing is recording, not proposing: the distiller judges it and a
-reviewed PR writes the index.
-
-```bash
-OBS_META=$(jq -nc --arg scope "repo:${GC_RIG:-unknown}" --arg prov "bead:${ANCHOR}:turn:$(date -u +%Y-%m-%d)" \
-  '{task_kind: "observation", "obs.category": "review-index-gap", "obs.scope": $scope,
-    "obs.source": "self", "obs.directive": "standing", "obs.provenance": $prov,
-    "gc.outcome": "recorded", "gc.work_outcome": "no-op"}')
-OBS_JSON=$(gc bd create "obs: check index is missing or stale for <repo> (bead:$ANCHOR)" \
-  -t task -l learning -l observation --metadata "$OBS_META" --status=closed -d "## Statement
-<what a reviewer could not classify the diff against>
-
-## Quote
-Triage on $ANCHOR at $REVIEWED_OID.
-
-## Proposed norm
-<draft — explicitly non-binding>" --json)
-OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
-[ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
-```
-
-## What triage never does
+Nothing. Triage never blocks: its verdict is always `approve`, the classifying
+pass that derives the triage lane green and lets the rest of the cadence
+proceed. Triage files no findings, so it has no findings block.
 
 - It never judges correctness, and it never files findings about the code. A
   defect you notice while skimming belongs in the `correctness` review, not here;
   say so in the verdict body and let that check hold it.
 - It never fixes anything, and it never touches the anchor other than through
   `signoff.sh`.
-- It never re-runs because the branch grew. Its verdict binds no marker to a
-  commit: an appended commit does not re-stale `check.triage`, and no pass
+- It never re-runs because the branch grew. Its verdict binds the lane to no
+  commit: an appended commit does not re-stale the triage lane, and no pass
   re-classifies the grown diff. Two things reopen the lane: a rewrite that takes
   the reviewed commit off the branch supersedes the review, and a bring-current
   round that conflicted reopens it to rule on that round. gate-ensure then pours
   a fresh triage at the live head.
+
+## The verdict
+
+The formula's one `signoff.sh` call carries the verdict and the widening
+together, `approve` with these flags:
+
+- **`--add-gates`** takes the checks you add, one or several, comma-separated,
+  as in `--add-gates demo,arch`. Adding nothing needs no flag: approve on its
+  own is the full verdict. Widening is monotonic and `signoff.sh` enforces it.
+  The write is a set union with read-back: nothing you pass can remove a check
+  already declared, only a triage verdict may add one, and no dispatcher,
+  formula, or other reviewer may pre-set or shrink `check_set`. The
+  checks-needed decision lives here, in one place a human can audit.
+  `signoff.sh` validates the add against the same effective index at the
+  reviewed commit, and records every added check on the anchor's notes as a
+  `triage-add:` line, so the add-rate the distiller watches stays countable.
+- **`--reopen`**, **`--round-reason`** and **`--dismiss-approval`** carry the
+  ruling on a conflicted round, as in
+  `--reopen correctness --round-reason "<why>" --dismiss-approval --add-gates arch`.
+  `signoff.sh` hands the ruling to the guard, which records it in the anchor's
+  record and sends each reopened lane back to unreviewed. On a lift it first
+  stores the round's time on the anchor as `bring_current_lifted_at`, the line
+  the approval rule reads, then re-requests each approver and dismisses the
+  approvals the line covers.
+
+The verdict body is the triage trail, collapsed under the line `signoff.sh`
+opens the comment with: what you read, and each check you added or left out
+and why, naming what in the diff warranted each one you added. On a ruling,
+the verdict opens with your decision on a lift, and the round's account sits
+collapsed under that line, rendered from the record the same way whether or
+not you lifted: what collided, what was decided, and what reopened.

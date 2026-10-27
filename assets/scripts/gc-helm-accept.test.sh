@@ -9,12 +9,17 @@
 # weigh instead.
 #
 # THE CONTRACT this pins:
-#   - dispatch is `gc sling <subject> --on <formula> --var issue=<subject>`: the
-#     subject is the routed anchor AND is passed as gc.var.issue so the worker
-#     reads its card (a slung formula does not receive the description).
-#   - SLING FIRST, dismiss only on success: a failed dispatch leaves the visit
-#     for the operator to retry or Discuss, never a dismissed decision with
-#     nothing running.
+#   - dispatch is `gc sling <subject> --on <formula>` with no --var: the subject
+#     is the routed anchor, and gc sling hands it to the formula. A graph.v2
+#     formula refuses a caller-supplied issue, so a graph.v2 recommendation
+#     dispatches, resolves its gate and dismisses its visit like any other.
+#   - GATE FIRST, then the sling: the human gate that put the recommendation to
+#     the operator is resolved before the dispatch, so the run the sling starts
+#     finds its work unblocked at mol-polecat-work's load-context guard and is
+#     not cancelled. A gate that will not resolve stops accept before the sling.
+#   - dismiss only on success: a failed dispatch reopens the gate and leaves the
+#     visit for the operator to retry or Discuss, never a dismissed decision or
+#     an answered gate with nothing running.
 #   - a subject with NO gc.recommended_formula is discuss-only: accept refuses,
 #     dispatching and dismissing nothing (the same key the board derives
 #     Accept-ability from, so a refusal here is a row the board would not offer).
@@ -62,7 +67,21 @@ mkdir -p "$TMP/bin"
 # gc.session_name $FAKE_VISIT_SESSION — the fields the un-engaged predicate
 # reads; $FAKE_LIST_MODE=notarray/fail drives the fail-closed path. sling and
 # close are recorded; update is recorded AND persists gc.outcome/gc.outcome_reason
-# to $FAKE_OUTCOME_DIR; sling's exit is $FAKE_SLING_RC.
+# to $FAKE_OUTCOME_DIR; sling's exit is $FAKE_SLING_RC. $FAKE_SLING_GRAPHV2 makes
+# the recommended formula a graph.v2 one: sling then refuses a caller-supplied
+# reserved var (issue, convoy_id, bead_id) and exits 1, as gascity does before
+# it pours anything.
+# $FAKE_GUARD runs the start of the run a landed sling pours: the pour stamps
+# the subject's execution route, and mol-polecat-work's load-context
+# blocked-work guard reads the subject as its work bead before the sling
+# returns, the soonest a polecat could get there. What the guard did lands in
+# $FAKE_GUARD_LOG, ending with its exit as `GUARD rc=<n>`.
+# The human gates on the subject are $FAKE_DEMAND and $FAKE_DEMAND2. Each
+# blocks the subject (its `bd show` dependencies) and lists as an open demand
+# until a resolve or close of it is recorded; $FAKE_STUCK_ID is one gate whose
+# resolve reports success and leaves it open, and `bd reopen` puts a resolved
+# gate back unless $FAKE_REOPEN_FAILS. $FAKE_BLOCKER is one more open blocker
+# of the subject that is no demand of Accept's, a prerequisite it leaves alone.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 sub="${1:-}"; verb="${2:-}"
 case "$sub" in
@@ -70,7 +89,32 @@ case "$sub" in
     jq -n '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"}]}' ;;
   sling)
     printf '%s\n' "$*" >> "$FAKE_CALLS"
-    exit "${FAKE_SLING_RC:-0}" ;;
+    if [ -n "${FAKE_SLING_GRAPHV2:-}" ]; then
+      _prev=""
+      for a in "$@"; do
+        _var=""
+        case "$a" in --var=*) _var="${a#--var=}" ;; esac
+        [ "$_prev" = "--var" ] && _var="$a"
+        case "${_var%%=*}" in
+          issue|convoy_id|bead_id)
+            echo "gc sling: formulas v2 reserved variable \"${_var%%=*}\" cannot be supplied by the caller" >&2
+            exit 1 ;;
+        esac
+        _prev="$a"
+      done
+    fi
+    [ "${FAKE_SLING_RC:-0}" = 0 ] || exit "$FAKE_SLING_RC"
+    if [ -n "${FAKE_GUARD:-}" ]; then
+      printf '%s' "gc-toolkit/gc-toolkit.polecat" > "$FAKE_OUTCOME_DIR/$FAKE_SUBJECT_ID.execution_routed_to"
+      _work="$("$0" bd show "$FAKE_SUBJECT_ID" --json)"
+      _grc=0
+      ( cd "$FAKE_GUARD_CWD" \
+          && WORK_BEAD_ID="$FAKE_SUBJECT_ID" WORK_BEAD_JSON="$_work" CLAIMED_STEP_BEAD_ID=tk-step1 \
+             GC_PACK_DIR="$FAKE_GUARD_PACK" GC_RIG_ROOT="" GC_CITY_PATH="" bash "$FAKE_GUARD" ) \
+          >> "$FAKE_GUARD_LOG" 2>&1 || _grc=$?
+      printf 'GUARD rc=%s\n' "$_grc" >> "$FAKE_GUARD_LOG"
+    fi
+    exit 0 ;;
   bd)
     case "$verb" in
       show)
@@ -104,29 +148,45 @@ case "$sub" in
                 # logged for this subject (reco_stripped), then it reads absent —
                 # the store behaviour accept's mark-dispatched read-back relies on.
                 # The dispatched marker is FAKE_DISPATCHED (an already-actuated
-                # subject a resume reads) or what a strip write recorded.
+                # subject a resume reads) or what a strip write recorded. Each
+                # human gate blocks the subject, closed once its resolve landed,
+                # and the execution route is the one a pour stamped.
                 _live="${FAKE_FORMULA:-}"; [ -e "${FAKE_OUTCOME_DIR:-/dev/null}/$id.reco_stripped" ] && _live=""
                 _disp="$(cat "${FAKE_OUTCOME_DIR:-/dev/null}/$id.reco_dispatched" 2>/dev/null || printf '%s' "${FAKE_DISPATCHED:-}")"
-                jq -n --arg i "$id" --arg f "$_live" --arg d "$_disp" \
+                _exec="$(cat "${FAKE_OUTCOME_DIR:-/dev/null}/$id.execution_routed_to" 2>/dev/null || true)"
+                _deps='[]'
+                for _g in ${FAKE_DEMAND:-} ${FAKE_DEMAND2:-}; do
+                  _gst=open; [ -e "${FAKE_OUTCOME_DIR:-/dev/null}/$_g.resolved" ] && _gst=closed
+                  _deps="$(jq -c --arg g "$_g" --arg st "$_gst" '. + [{id:$g, dependency_type:"blocks", status:$st}]' <<< "$_deps")"
+                done
+                [ -z "${FAKE_BLOCKER:-}" ] \
+                  || _deps="$(jq -c --arg g "$FAKE_BLOCKER" '. + [{id:$g, dependency_type:"blocks", status:"open"}]' <<< "$_deps")"
+                jq -n --arg i "$id" --arg f "$_live" --arg d "$_disp" --arg x "$_exec" --argjson deps "$_deps" \
                    '[{id:$i, status:"open", title:"the subject",
                       metadata:( (if $f=="" then {} else {"gc.recommended_formula":$f} end)
-                                 + (if $d=="" then {} else {"gc.recommended_formula_dispatched":$d} end) )}]' ;;
+                                 + (if $d=="" then {} else {"gc.recommended_formula_dispatched":$d} end)
+                                 + (if $x=="" then {} else {"gc.execution_routed_to":$x} end) ),
+                      dependencies:$deps}]' ;;
             esac ;;
           *) printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1 ;;
         esac ;;
       list)
         # The demand read is the one list that passes --include-gates: it
-        # answers the open human gate $FAKE_DEMAND on the subject until a
-        # resolve or close of it is recorded, and $FAKE_DEMAND_LIST_FAILS fails
-        # that read alone.
+        # answers each human gate on the subject until a resolve or close of it
+        # is recorded. $FAKE_DEMAND_LIST_FAILS fails that read alone, and
+        # $FAKE_REREAD_FAILS fails it once a reopen is recorded.
         case " $* " in
           *" --include-gates "*)
             [ -n "${FAKE_DEMAND_LIST_FAILS:-}" ] && exit 1
-            if [ -n "${FAKE_DEMAND:-}" ] && [ ! -e "$FAKE_OUTCOME_DIR/$FAKE_DEMAND.resolved" ]; then
-              jq -n --arg d "$FAKE_DEMAND" --arg s "$FAKE_SUBJECT_ID" \
-                '[{id:$d, status:"open", assignee:"", issue_type:"gate", await_type:"human",
-                   metadata:{"gc.demand_for":$s}}]'
-            else printf '[]\n'; fi
+            [ -n "${FAKE_REREAD_FAILS:-}" ] && [ -e "$FAKE_OUTCOME_DIR/reopen.seen" ] && exit 1
+            _open='[]'
+            for _g in ${FAKE_DEMAND:-} ${FAKE_DEMAND2:-}; do
+              [ -e "$FAKE_OUTCOME_DIR/$_g.resolved" ] && continue
+              _open="$(jq -c --arg d "$_g" --arg s "$FAKE_SUBJECT_ID" \
+                '. + [{id:$d, status:"open", assignee:"", issue_type:"gate", await_type:"human",
+                       metadata:{"gc.demand_for":$s}}]' <<< "$_open")"
+            done
+            printf '%s\n' "$_open"
             exit 0 ;;
         esac
         case "${FAKE_LIST_MODE:-ok}" in
@@ -143,15 +203,25 @@ case "$sub" in
         else printf '[]\n'; fi ;;
       close)
         printf '%s\n' "$*" >> "$FAKE_CALLS"
-        [ -z "${FAKE_DEMAND_STUCK:-}" ] && : > "$FAKE_OUTCOME_DIR/$3.resolved" ;;
+        [ -z "${FAKE_DEMAND_STUCK:-}" ] && [ "$3" != "${FAKE_STUCK_ID:-}" ] && : > "$FAKE_OUTCOME_DIR/$3.resolved" ;;
       gate)
         # `bd gate resolve <id>`: recorded, and the gate reads closed after it
-        # unless $FAKE_DEMAND_STUCK (a resolve that reports success and leaves
-        # the gate open) or $FAKE_RESOLVE_REFUSED (a pre-gate demand that
-        # `gate resolve` refuses, closed by `bd close` instead).
+        # unless $FAKE_DEMAND_STUCK or $FAKE_STUCK_ID names it (a resolve that
+        # reports success and leaves the gate open), or $FAKE_RESOLVE_REFUSED (a
+        # pre-gate demand that `gate resolve` refuses, closed by `bd close`
+        # instead).
         printf '%s\n' "$*" >> "$FAKE_CALLS"
         [ -n "${FAKE_RESOLVE_REFUSED:-}" ] && { echo "Error: $4 is not a gate issue" >&2; exit 1; }
-        [ -z "${FAKE_DEMAND_STUCK:-}" ] && : > "$FAKE_OUTCOME_DIR/$4.resolved"
+        [ -z "${FAKE_DEMAND_STUCK:-}" ] && [ "$4" != "${FAKE_STUCK_ID:-}" ] && : > "$FAKE_OUTCOME_DIR/$4.resolved"
+        exit 0 ;;
+      reopen)
+        # `bd reopen <id>`: recorded, and a resolved gate reads open again after
+        # it unless $FAKE_REOPEN_FAILS (a reopen that reports success and leaves
+        # the gate closed). bd answers 0 on a gate that is already open, and so
+        # does this.
+        printf '%s\n' "$*" >> "$FAKE_CALLS"
+        : > "$FAKE_OUTCOME_DIR/reopen.seen"
+        [ -z "${FAKE_REOPEN_FAILS:-}" ] && rm -f "$FAKE_OUTCOME_DIR/$3.resolved"
         exit 0 ;;
       update)
         printf '%s\n' "$*" >> "$FAKE_CALLS"
@@ -200,6 +270,32 @@ exit 0
 PVC
 chmod +x "$TMP/bin/rec-pvc"
 
+# mol-polecat-work's load-context blocked-work guard, extracted verbatim from the
+# formula, so the run a landed sling starts reads its work bead the way the
+# formula's own step does (load-context-blocked-work-gate.test.sh pins the guard
+# itself). The guard takes its release scripts from GC_PACK_DIR first, and the
+# stubs there record what it did.
+TOML="$(cd "$HERE/../.." && pwd)/formulas/mol-polecat-work.toml"
+awk '/^# >>> load-context-blocked-work-decline$/ {f=1; next} /^# <<< load-context-blocked-work-decline$/ {f=0} f' "$TOML" > "$TMP/guard.sh"
+[ -s "$TMP/guard.sh" ] && bash -n "$TMP/guard.sh" \
+  && ok "mol-polecat-work's load-context blocked-work guard extracted" \
+  || bad "the load-context-blocked-work-decline block did not extract from $TOML"
+mkdir -p "$TMP/guardpack/assets/scripts" "$TMP/guardcwd"
+cat > "$TMP/guardpack/assets/scripts/run-cancel.sh" <<'CANCEL'
+#!/usr/bin/env bash
+printf 'CANCEL %s\n' "$*" >> "$FAKE_GUARD_LOG"
+CANCEL
+cat > "$TMP/guardpack/assets/scripts/deferred-dispatch.sh" <<'ARM'
+#!/usr/bin/env bash
+printf 'ARM %s\n' "$*" >> "$FAKE_GUARD_LOG"
+ARM
+cat > "$TMP/guardpack/assets/scripts/escalate.sh" <<'ESC'
+#!/usr/bin/env bash
+printf 'ESCALATE %s\n' "$*" >> "$FAKE_GUARD_LOG"
+ESC
+chmod +x "$TMP/guardpack/assets/scripts/"*.sh
+export FAKE_GUARD_LOG="$TMP/guard.log" FAKE_GUARD_PACK="$TMP/guardpack" FAKE_GUARD_CWD="$TMP/guardcwd"
+
 export PATH="$TMP/bin:$PATH"
 export FAKE_CALLS="$TMP/calls"
 # The visit's dismiss stamps land here and read back from here, so the stub
@@ -211,15 +307,16 @@ export GC_VISIT_COMMENT_TOOL="$TMP/bin/rec-pvc" REC_PVC_LOG="$TMP/pvc.log"
 unset GC_HELM_FIXTURE GC_RIG || true
 export TMPDIR="$TMP"
 
-# run_accept <arg...> -> sets RC/OUT/ERR/CALLS from the per-case FAKE_* env.
+# run_accept <arg...> -> sets RC/OUT/ERR/CALLS/GUARD from the per-case FAKE_* env.
 run_accept() {
-    : > "$FAKE_CALLS"
+    : > "$FAKE_CALLS"; : > "$FAKE_GUARD_LOG"
     rm -f "$FAKE_OUTCOME_DIR"/* 2>/dev/null || true
     set +e
     OUT="$(sh "$SCRIPT" accept "$@" 2>"$TMP/err")"; RC=$?
     set -e
     ERR="$(cat "$TMP/err")"
     CALLS="$(cat "$FAKE_CALLS")"
+    GUARD="$(cat "$FAKE_GUARD_LOG")"
 }
 
 SUBJ="tk-subj1"; VIS="tk-vis1"; FORMULA="mol-dispose-pr"
@@ -232,8 +329,9 @@ run_accept "$SUBJ"
 eq "$RC" "0" "(DISPATCH) accepting a recommendation exits 0"
 grep -q "sling .*$SUBJ --on $FORMULA" <<< "$CALLS" \
   && ok "(DISPATCH) slings the recommended formula at the subject" || bad "(DISPATCH) sling --on formula (calls: $CALLS)"
-grep -q 'sling .*--var issue='"$SUBJ" <<< "$CALLS" \
-  && ok "(DISPATCH) passes the subject as gc.var.issue" || bad "(DISPATCH) --var issue=<subject> (calls: $CALLS)"
+grep -q '^sling .*--var' <<< "$CALLS" \
+  && bad "(DISPATCH) the sling must carry no --var; gc sling hands the formula its subject (calls: $CALLS)" \
+  || ok "(DISPATCH) the sling carries no --var: gc sling hands the formula its subject"
 grep -q "bd close $VIS" <<< "$CALLS" \
   && ok "(DISPATCH) dismisses the visit after the dispatch lands" || bad "(DISPATCH) visit dismissed (calls: $CALLS)"
 # Sling must precede the dismiss: the recording order is the execution order.
@@ -247,33 +345,91 @@ grep -q '^bd gate resolve' <<< "$CALLS" \
 # --- (GATE) the recommendation reached the operator as a human gate ------------
 # A first reaction's recommend exit holds the subject on a human gate rather than
 # on its visit, so dismissing the visit releases nothing: Accept is the
-# operator's answer, and it resolves the gate before the dismiss. Left open, the
-# gate would hold the dispatched work out of bd ready with no visit left to
-# re-offer it.
+# operator's answer, and it resolves the gate before the sling. The run the
+# sling starts reads its work bead's blockers at once, and a gate left open
+# past the dismiss would hold the dispatched work out of bd ready with no visit
+# left to re-offer it.
 export FAKE_DEMAND="tk-gate1"
 run_accept "$SUBJ"
 eq "$RC" "0" "(GATE) accepting a gate-held recommendation exits 0"
-grep -q "^bd gate resolve tk-gate1 --reason accepted: dispatched $FORMULA" <<< "$CALLS" \
+grep -q "^bd gate resolve tk-gate1 --reason accepted: dispatching $FORMULA" <<< "$CALLS" \
   && ok "(GATE) resolves the subject's human gate with the answer" || bad "(GATE) gate resolved (calls: $CALLS)"
-gate_order="$(awk -v v="$VIS" '/^sling /{s=NR} /^bd update .*--unset-metadata gc.recommended_formula/{m=NR} /^bd gate resolve /{g=NR} $0 ~ ("^bd close " v){c=NR} END{print (s>0 && m>s && g>m && c>g) ? "yes" : "no"}' <<< "$CALLS")"
-eq "$gate_order" "yes" "(GATE) sling, then the dispatch record, then the gate, then the dismiss"
+gate_order="$(awk -v v="$VIS" '/^bd gate resolve /{g=NR} /^sling /{s=NR} /^bd update .*--unset-metadata gc.recommended_formula/{m=NR} $0 ~ ("^bd close " v){c=NR} END{print (g>0 && s>g && m>s && c>m) ? "yes" : "no"}' <<< "$CALLS")"
+eq "$gate_order" "yes" "(GATE) the gate, then the sling, then the dispatch record, then the dismiss"
 grep -q "bd close $VIS" <<< "$CALLS" \
-  && ok "(GATE) dismisses the visit once the gate resolved" || bad "(GATE) visit dismissed (calls: $CALLS)"
+  && ok "(GATE) dismisses the visit once the dispatch landed" || bad "(GATE) visit dismissed (calls: $CALLS)"
+grep -q '^bd reopen ' <<< "$CALLS" \
+  && bad "(GATE) a landed dispatch reopens nothing (calls: $CALLS)" || ok "(GATE) a landed dispatch reopens nothing"
 
-# --- (GATESTUCK) a gate that is still open after its resolve -> refuse the dismiss
-# The re-read after the resolve is what proves it: a dismiss over an open gate
-# would leave the dispatched work blocked with no visit to bring it back.
+# --- (GATESTUCK) a gate still open after its resolve -> dispatch nothing --------
+# The re-read after the resolve is what proves it. A sling over an open gate
+# starts a run that cancels itself at load-context, and a dismiss over it would
+# leave the work blocked with no visit to bring it back.
 export FAKE_DEMAND_STUCK=1
 run_accept "$SUBJ"
 eq "$RC" "4" "(GATESTUCK) a gate still open after its resolve fails closed (exit 4)"
+grep -q '^sling ' <<< "$CALLS" \
+  && bad "(GATESTUCK) must NOT sling while the gate is open (calls: $CALLS)" \
+  || ok "(GATESTUCK) nothing is slung while the gate is open"
 grep -q "bd close $VIS" <<< "$CALLS" \
   && bad "(GATESTUCK) must NOT dismiss the visit over an open gate (calls: $CALLS)" \
   || ok "(GATESTUCK) the visit is not dismissed"
+grep -q "^bd update $SUBJ .*gc.recommended_formula_dispatched" <<< "$CALLS" \
+  && bad "(GATESTUCK) must record no dispatch (calls: $CALLS)" \
+  || ok "(GATESTUCK) records no dispatch, so a re-run starts from the question"
 grep -q 'tk-gate1 is still open' <<< "$ERR" \
   && ok "(GATESTUCK) names the gate that is still open" || bad "(GATESTUCK) message (err: $ERR)"
-grep -q 'resumes here without dispatching again' <<< "$ERR" \
-  && ok "(GATESTUCK) …and says a re-run resumes without a second dispatch" || bad "(GATESTUCK) resume message (err: $ERR)"
+grep -q 'nothing is dispatched' <<< "$ERR" \
+  && ok "(GATESTUCK) …and says nothing is dispatched" || bad "(GATESTUCK) nothing-dispatched message (err: $ERR)"
 unset FAKE_DEMAND_STUCK
+
+# --- (GATESTUCKRESUME) a dispatched subject whose gate stays open -> no dismiss --
+# On a resume the sling already ran, so the gate is the write still owed. Its
+# answer names the dispatch as landed, the refusal says a re-run resumes at the
+# resolve, nothing is slung again, and the answer stands, since the dispatch it
+# answers has landed.
+export FAKE_DEMAND_STUCK=1 FAKE_FORMULA="" FAKE_DISPATCHED="$FORMULA"
+run_accept "$SUBJ"
+eq "$RC" "4" "(GATESTUCKRESUME) a resume whose gate stays open fails closed (exit 4)"
+grep -q "^bd gate resolve tk-gate1 --reason accepted: dispatched $FORMULA" <<< "$CALLS" \
+  && ok "(GATESTUCKRESUME) answers the gate with the dispatch as landed" || bad "(GATESTUCKRESUME) resume answer (calls: $CALLS)"
+grep -q '^sling ' <<< "$CALLS" \
+  && bad "(GATESTUCKRESUME) must NOT sling again (calls: $CALLS)" || ok "(GATESTUCKRESUME) does not sling again"
+grep -q "bd close $VIS" <<< "$CALLS" \
+  && bad "(GATESTUCKRESUME) must NOT dismiss the visit over an open gate (calls: $CALLS)" \
+  || ok "(GATESTUCKRESUME) the visit is not dismissed"
+grep -q 'resumes here without dispatching again' <<< "$ERR" \
+  && ok "(GATESTUCKRESUME) says a re-run resumes without a second dispatch" || bad "(GATESTUCKRESUME) resume message (err: $ERR)"
+grep -q '^bd reopen ' <<< "$CALLS" \
+  && bad "(GATESTUCKRESUME) a resume reopens nothing: its dispatch already landed (calls: $CALLS)" \
+  || ok "(GATESTUCKRESUME) reopens nothing, since its dispatch already landed"
+unset FAKE_DEMAND_STUCK FAKE_DISPATCHED; export FAKE_FORMULA="$FORMULA"
+
+# --- (GATEPARTIAL) one gate resolves and another stays open -> put the first back
+# Nothing is dispatched while any gate stands, so the answer given to the gate
+# that did resolve is withdrawn, and a re-run starts from the question as it stood.
+export FAKE_DEMAND2="tk-gate2" FAKE_STUCK_ID="tk-gate2"
+run_accept "$SUBJ"
+eq "$RC" "4" "(GATEPARTIAL) a second gate still open after its resolve fails closed (exit 4)"
+grep -q '^sling ' <<< "$CALLS" \
+  && bad "(GATEPARTIAL) must NOT sling while a gate is open (calls: $CALLS)" || ok "(GATEPARTIAL) nothing is slung"
+grep -q '^bd reopen tk-gate1 ' <<< "$CALLS" \
+  && ok "(GATEPARTIAL) reopens the gate it did resolve" || bad "(GATEPARTIAL) tk-gate1 reopened (calls: $CALLS)"
+[ ! -e "$FAKE_OUTCOME_DIR/tk-gate1.resolved" ] \
+  && ok "(GATEPARTIAL) …and that gate reads open again" || bad "(GATEPARTIAL) tk-gate1 still reads closed"
+grep -q 'tk-gate2 is still open' <<< "$ERR" \
+  && ok "(GATEPARTIAL) names the gate that would not resolve" || bad "(GATEPARTIAL) message (err: $ERR)"
+grep -q 'did not reopen' <<< "$ERR" \
+  && bad "(GATEPARTIAL) the reopen landed, so no hand repair is asked for (err: $ERR)" \
+  || ok "(GATEPARTIAL) asks for no hand repair once the reopen landed"
+# A reopen that reports success and leaves the gate closed is named, with the
+# hand repair, since that gate reads answered while nothing is dispatched.
+export FAKE_REOPEN_FAILS=1
+run_accept "$SUBJ"
+eq "$RC" "4" "(GATEPARTIAL) a reopen that does not land still dispatches nothing (exit 4)"
+grep -q 'tk-gate1 did not reopen' <<< "$ERR" \
+  && ok "(GATEPARTIAL) names the gate that did not reopen, with the hand repair" || bad "(GATEPARTIAL) reopen-failure message (err: $ERR)"
+unset FAKE_DEMAND2 FAKE_STUCK_ID FAKE_REOPEN_FAILS
 
 # --- (GATELEGACY) a demand filed before demands were gates ---------------------
 # `gate resolve` refuses an issue_type=decision demand, which is closed on the
@@ -281,17 +437,21 @@ unset FAKE_DEMAND_STUCK
 export FAKE_RESOLVE_REFUSED=1
 run_accept "$SUBJ"
 eq "$RC" "0" "(GATELEGACY) a pre-gate demand is closed instead and accept completes"
-grep -q "^bd close tk-gate1 --reason accepted: dispatched $FORMULA" <<< "$CALLS" \
+grep -q "^bd close tk-gate1 --reason accepted: dispatching $FORMULA" <<< "$CALLS" \
   && ok "(GATELEGACY) closes the demand on the same terms" || bad "(GATELEGACY) demand closed (calls: $CALLS)"
 grep -q "bd close $VIS" <<< "$CALLS" \
   && ok "(GATELEGACY) …and dismisses the visit" || bad "(GATELEGACY) visit dismissed (calls: $CALLS)"
 unset FAKE_RESOLVE_REFUSED
 
-# --- (GATEUNREAD) the demand read fails -> refuse the dismiss -------------------
-# An unread store is not proof that nothing is owed on the subject.
+# --- (GATEUNREAD) the demand read fails -> dispatch nothing ---------------------
+# An unread store is not proof that nothing is owed on the subject, and a gate
+# that may still be open would cancel the run a sling starts.
 export FAKE_DEMAND_LIST_FAILS=1
 run_accept "$SUBJ"
 eq "$RC" "4" "(GATEUNREAD) an unreadable demand listing fails closed (exit 4)"
+grep -q '^sling ' <<< "$CALLS" \
+  && bad "(GATEUNREAD) must NOT sling on an unread demand state (calls: $CALLS)" \
+  || ok "(GATEUNREAD) nothing is slung"
 grep -q "bd close $VIS" <<< "$CALLS" \
   && bad "(GATEUNREAD) must NOT dismiss on an unread demand state (calls: $CALLS)" \
   || ok "(GATEUNREAD) the visit is not dismissed"
@@ -310,6 +470,61 @@ grep -q '^bd gate resolve tk-gate1' <<< "$CALLS" \
 grep -q '^sling ' <<< "$CALLS" \
   && bad "(GATERESUME) must NOT sling again (calls: $CALLS)" || ok "(GATERESUME) does not sling again"
 unset FAKE_DISPATCHED FAKE_DEMAND; export FAKE_FORMULA="$FORMULA" FAKE_VISIT=1
+
+# --- (GRAPHV2) a graph.v2 recommendation held on a gate goes through whole ------
+# mol-polecat-work is graph.v2, and gascity refuses a graph.v2 sling that carries
+# a caller-supplied issue before it pours anything. A sling that carried one would
+# fail here and leave the gate, the live recommendation and the visit open, so the
+# operator's Accept would dispatch nothing.
+export FAKE_FORMULA="mol-polecat-work" FAKE_SLING_GRAPHV2=1 FAKE_DEMAND="tk-gate1"
+run_accept "$SUBJ"
+eq "$RC" "0" "(GRAPHV2) accepting a gate-held graph.v2 recommendation exits 0"
+grep -q "^sling .*$SUBJ --on mol-polecat-work" <<< "$CALLS" \
+  && ok "(GRAPHV2) slings the graph.v2 formula at the subject" || bad "(GRAPHV2) sling --on mol-polecat-work (calls: $CALLS)"
+grep -q "^bd update $SUBJ .*gc.recommended_formula_dispatched=mol-polecat-work.*--unset-metadata gc.recommended_formula" <<< "$CALLS" \
+  && ok "(GRAPHV2) records the dispatch and withdraws the live recommendation" || bad "(GRAPHV2) dispatch record (calls: $CALLS; err: $ERR)"
+grep -q "^bd gate resolve tk-gate1 --reason accepted: dispatching mol-polecat-work" <<< "$CALLS" \
+  && ok "(GRAPHV2) resolves the recommend gate" || bad "(GRAPHV2) gate resolved (calls: $CALLS; err: $ERR)"
+grep -q "bd close $VIS" <<< "$CALLS" \
+  && ok "(GRAPHV2) dismisses the visit" || bad "(GRAPHV2) visit dismissed (calls: $CALLS; err: $ERR)"
+
+# --- (GUARD) the run Accept starts is not cancelled by Accept's own gate --------
+# mol-polecat-work's load-context cancels a run whose work bead still has an
+# open blocks blocker. The fake sling runs that guard, extracted from the
+# formula, against the subject as the sling returns, the soonest a polecat could
+# reach it. Accept resolved the gate before the sling, so the guard finds
+# nothing open and the run goes on.
+export FAKE_GUARD="$TMP/guard.sh"
+run_accept "$SUBJ"
+eq "$RC" "0" "(GUARD) accepting a gate-held mol-polecat-work recommendation exits 0"
+grep -q '^GUARD rc=0$' <<< "$GUARD" \
+  && ok "(GUARD) the run's load-context guard passes the work bead" || bad "(GUARD) guard outcome (guard: $GUARD)"
+grep -q '^CANCEL ' <<< "$GUARD" \
+  && bad "(GUARD) the run Accept started must not be cancelled (guard: $GUARD)" \
+  || ok "(GUARD) the run Accept started is not cancelled"
+grep -qE '^(ARM|ESCALATE) ' <<< "$GUARD" \
+  && bad "(GUARD) nothing is re-armed or escalated (guard: $GUARD)" || ok "(GUARD) nothing is re-armed or escalated"
+grep -q "bd close $VIS" <<< "$CALLS" \
+  && ok "(GUARD) dismisses the visit" || bad "(GUARD) visit dismissed (calls: $CALLS; err: $ERR)"
+
+# --- (GUARDCONTROL) the same guard cancels on a blocker Accept does not answer ---
+# The positive control for (GUARD): a prerequisite that is no demand of Accept's
+# still stands when the sling returns, so the guard cancels the run and arms its
+# re-dispatch to the pour's pool. A guard that never ran, or read no blockers,
+# passes (GUARD) and fails here.
+export FAKE_BLOCKER="tk-prereq1"
+run_accept "$SUBJ"
+eq "$RC" "0" "(GUARDCONTROL) Accept itself completes; the run is what declines"
+grep -q '^CANCEL ' <<< "$GUARD" \
+  && ok "(GUARDCONTROL) the guard cancels a run whose work is still blocked" || bad "(GUARDCONTROL) guard cancel (guard: $GUARD)"
+grep -q "^ARM arm $SUBJ --target gc-toolkit/gc-toolkit.polecat " <<< "$GUARD" \
+  && ok "(GUARDCONTROL) …and arms its re-dispatch to the pour's pool" || bad "(GUARDCONTROL) guard arm (guard: $GUARD)"
+grep -q '^CANCEL .*tk-prereq1' <<< "$GUARD" \
+  && ok "(GUARDCONTROL) the cancel names the blocker Accept left" || bad "(GUARDCONTROL) blocker named (guard: $GUARD)"
+grep -q 'tk-gate1' <<< "$GUARD" \
+  && bad "(GUARDCONTROL) the gate Accept resolved must not be read as a blocker (guard: $GUARD)" \
+  || ok "(GUARDCONTROL) the gate Accept resolved is not read as a blocker"
+unset FAKE_BLOCKER FAKE_GUARD FAKE_SLING_GRAPHV2 FAKE_DEMAND; export FAKE_FORMULA="$FORMULA"
 
 # --- (MARK) a landed Accept strips the live recommendation and records the dispatch
 # So a later open visit on the subject cannot re-offer Accept for a formula that
@@ -423,6 +638,52 @@ grep -q 'bd close' <<< "$CALLS" \
   || ok "(SLINGFAIL) the visit is left open — nothing dismissed"
 grep -qi 'left open' <<< "$ERR" \
   && ok "(SLINGFAIL) says the visit is left for retry or Discuss" || bad "(SLINGFAIL) message (err: $ERR)"
+grep -q '^bd reopen ' <<< "$CALLS" \
+  && bad "(SLINGFAIL) a subject with no demand has nothing to reopen (calls: $CALLS)" \
+  || ok "(SLINGFAIL) a subject with no demand reopens nothing"
+
+# --- (SLINGFAILGATE) a failed dispatch reopens the gate it resolved ------------
+# Nothing was sent, so the operator's question stands: the gate Accept resolved
+# for the dispatch reads open again, and the visit stays for a retry or Discuss.
+export FAKE_DEMAND="tk-gate1"
+run_accept "$SUBJ"
+eq "$RC" "1" "(SLINGFAILGATE) a failed sling on a gate-held subject exits 1"
+reopen_order="$(awk '/^bd gate resolve tk-gate1 /{g=NR} /^sling /{s=NR} /^bd reopen tk-gate1 /{r=NR} END{print (g>0 && s>g && r>s) ? "yes" : "no"}' <<< "$CALLS")"
+eq "$reopen_order" "yes" "(SLINGFAILGATE) the gate is resolved, the sling fails, then the gate is reopened"
+[ ! -e "$FAKE_OUTCOME_DIR/tk-gate1.resolved" ] \
+  && ok "(SLINGFAILGATE) the gate reads open again" || bad "(SLINGFAILGATE) the gate still reads closed"
+grep -q "bd close $VIS" <<< "$CALLS" \
+  && bad "(SLINGFAILGATE) must NOT dismiss the visit (calls: $CALLS)" || ok "(SLINGFAILGATE) nothing dismissed"
+grep -q "^bd update $SUBJ .*gc.recommended_formula_dispatched" <<< "$CALLS" \
+  && bad "(SLINGFAILGATE) must record no dispatch (calls: $CALLS)" || ok "(SLINGFAILGATE) records no dispatch"
+grep -q 'open again (tk-gate1)' <<< "$ERR" \
+  && ok "(SLINGFAILGATE) says the gate is open again" || bad "(SLINGFAILGATE) message (err: $ERR)"
+
+# --- (SLINGFAILREOPEN) the reopen after a failed dispatch does not land --------
+# A gate left closed reads answered while nothing was sent, so the refusal names
+# it and gives the reopen by hand.
+export FAKE_REOPEN_FAILS=1
+run_accept "$SUBJ"
+eq "$RC" "4" "(SLINGFAILREOPEN) a reopen that does not land fails closed (exit 4)"
+grep -q 'tk-gate1 did not reopen' <<< "$ERR" \
+  && ok "(SLINGFAILREOPEN) names the gate that did not reopen" || bad "(SLINGFAILREOPEN) message (err: $ERR)"
+grep -q 'gc bd reopen <id>' <<< "$ERR" \
+  && ok "(SLINGFAILREOPEN) …and gives the hand repair" || bad "(SLINGFAILREOPEN) repair (err: $ERR)"
+grep -q "bd close $VIS" <<< "$CALLS" \
+  && bad "(SLINGFAILREOPEN) must NOT dismiss the visit (calls: $CALLS)" || ok "(SLINGFAILREOPEN) nothing dismissed"
+unset FAKE_REOPEN_FAILS
+
+# --- (SLINGFAILREREAD) the read-back after the reopen does not answer ----------
+# A reopen that cannot be read back is not proof the question stands, so the
+# refusal asks for the check by hand.
+export FAKE_REREAD_FAILS=1
+run_accept "$SUBJ"
+eq "$RC" "4" "(SLINGFAILREREAD) a reopen that cannot be read back fails closed (exit 4)"
+grep -q 'could not be read back after accept reopened tk-gate1' <<< "$ERR" \
+  && ok "(SLINGFAILREREAD) says the reopen could not be read back" || bad "(SLINGFAILREREAD) message (err: $ERR)"
+grep -q "bd close $VIS" <<< "$CALLS" \
+  && bad "(SLINGFAILREREAD) must NOT dismiss the visit (calls: $CALLS)" || ok "(SLINGFAILREREAD) nothing dismissed"
+unset FAKE_REREAD_FAILS FAKE_DEMAND
 export FAKE_SLING_RC=0
 
 # --- (MISSING) an unverifiable subject fails closed, dispatches nothing --------

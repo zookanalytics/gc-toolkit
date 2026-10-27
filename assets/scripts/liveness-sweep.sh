@@ -18,8 +18,11 @@
 # closes the window, and the precheck closes it too once it has proved there
 # is no pass to start.
 # Bias everywhere: an unreadable probe excludes nothing (re-report, never
-# hide). Exit: 0 pass completed (filed or nothing to file), 1 aborted on an
-# unreadable listing, 2 usage.
+# hide). One read is held instead: when origin does not answer the head read of
+# the pre-open anchors, each holds what the last pass made of it, so one it
+# reported is reported again and no other is reported new. Exit: 0 pass
+# completed (filed or nothing to file), 1 aborted on an unreadable listing, 2
+# usage.
 set -uo pipefail
 
 PROG="liveness-sweep"
@@ -49,6 +52,15 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # below to carry this sweep's --db pin and per-call bound.
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh from $HERE" >&2; exit 1; }
+# The one read of a branch's head on origin, which the pre-open green map takes
+# each anchor's head from. Its git calls go through git_remote_run, redefined
+# below to carry this sweep's per-call bound.
+# shellcheck source=git-lib.sh
+. "$HERE/git-lib.sh" || { echo "$PROG: cannot source git-lib.sh from $HERE" >&2; exit 1; }
+# The one reader of a run's link to the bead it works, which the worked and
+# husk resolutions ask through sweep_bd, below.
+# shellcheck source=run-lib.sh
+. "${GC_RUN_LIB:-$HERE/run-lib.sh}" || { echo "$PROG: cannot source run-lib.sh from $HERE" >&2; exit 1; }
 ESCALATE="${GC_ESCALATE_TOOL:-$HERE/escalate.sh}"
 CALL_TIMEOUT="${LIVENESS_SWEEP_CALL_TIMEOUT:-45}"
 KILL_AFTER="${LIVENESS_SWEEP_KILL_AFTER:-5}"
@@ -66,22 +78,9 @@ done
 
 command -v jq >/dev/null 2>&1 || { echo "$PROG: jq is required" >&2; exit 1; }
 
-# --- per-rig state (same keying as liveness-sweep-precheck.sh) ---------------
-state_key() {
-    local readable="$1" identity="$2" safe
-    safe="$(printf '%s' "$readable" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"
-    case "$safe" in ''|.|..) safe=rig ;; esac
-    if [ "$safe" = "$readable" ] && [ "$readable" = "$identity" ] && [ "${#safe}" -le 64 ]; then
-        printf '%s' "$safe"
-    else
-        printf '%s-%s' "${safe:0:64}" "$(printf '%s' "$identity" | cksum | cut -d' ' -f1)"
-    fi
-}
-if [ -n "${GC_RIG:-}" ]; then RIG_KEY="$(state_key "$GC_RIG" "$GC_RIG")"
-elif [ -n "${GC_RIG_ROOT:-}" ]; then ROOT_TAIL="${GC_RIG_ROOT%/}"; RIG_KEY="$(state_key "${ROOT_TAIL##*/}" "$GC_RIG_ROOT")"
-else RIG_KEY=_unscoped; fi
+# --- per-rig state (bd-lib.sh's rig_state_key, as liveness-sweep-precheck.sh) -
 STATE_BASE="${LIVENESS_SWEEP_STATE_DIR:-${GC_PACK_STATE_DIR:-${TMPDIR:-/tmp}/gc}/liveness-sweep}"
-STATE_DIR="$STATE_BASE/$RIG_KEY"
+STATE_DIR="$STATE_BASE/$(rig_state_key)"
 BASELINE_FILE="$STATE_DIR/reported"
 STAMP="$STATE_DIR/last-pass"
 
@@ -124,6 +123,7 @@ elif timeout -k 1 1 true >/dev/null 2>&1; then
 else
     bounded() { timeout "$CALL_TIMEOUT" "$@"; }
 fi
+git_remote_run() { bounded "$@"; }
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
@@ -150,6 +150,8 @@ _bd_call() {
     if [ -n "$DB" ]; then bounded gc bd "$1" --db "$DB" "${@:2}"; else bounded gc bd "$@"; fi
 }
 unset GC_RECONCILE_BD_CACHE
+# run-lib.sh's reads take the same pin and bound.
+sweep_bd() { _bd_call "$@"; }
 
 # --- census: fail-safe first — never classify on partial data ----------------
 READY="$TMP/ready.json"; LIVE="$TMP/live.json"; WIDEN="$TMP/widen.json"; ALIVE="$TMP/alive.json"
@@ -193,29 +195,24 @@ done < "$TMP/prrepos"
 OPEN_PRS=$(jq -R . < "$PRURLS" | jq -sc 'map(select(length > 0))' 2>/dev/null)
 printf '%s' "$OPEN_PRS" | jq -e 'type == "array"' >/dev/null 2>&1 || OPEN_PRS='[]'
 
-# --- worked-via-convoy: live molecules resolved FORWARD to their work beads --
-# A slung work bead carries no worker stamp of its own; coverage requires a
-# LIVE NAMER (a not-closed bead naming the convoy), never the convoy's mere
-# existence — a dead synthetic convoy's tracks edge is not coverage.
-WORKED_TMP="$TMP/worked"; : > "$WORKED_TMP"
-CONVOY_LIVENESS=none
-jq -r '[ .[] | (.metadata["gc.input_convoy_id"] // "") | select(. != "") ] | unique | .[]' "$ALIVE" 2>/dev/null > "$TMP/convoys"
-while IFS= read -r C; do
-    [ -n "$C" ] || continue
-    if [ "$CONVOY_LIVENESS" = "none" ]; then CONVOY_LIVENESS=verified; fi
-    # gc bd show, NOT list: only show renders this edge (.dependency_type + .id).
-    if ROWS=$(bounded gc bd show "$C" --json 2>/dev/null) && printf '%s' "$ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
-        printf '%s' "$ROWS" | jq -r '.[0].dependencies[]? | select(.dependency_type == "tracks") | .id' >> "$WORKED_TMP"
-    else
-        CONVOY_LIVENESS=unverified
-        echo "$PROG: WARN: convoy read FAILED for $C — the beads it tracks are reported, never hidden" >&2
-    fi
-done < "$TMP/convoys"
-WORKED=$(jq -R . < "$WORKED_TMP" | jq -sc 'map(select(length > 0)) | unique')
+# --- worked: the beads live runs work ---------------------------------------
+# A slung work bead carries no worker stamp of its own; coverage requires a LIVE
+# RUN working it (run-lib.sh's map), never a convoy's mere existence: a dead
+# synthetic convoy's tracks edge is not coverage, and neither is a convoy whose
+# run has finished.
+WORKED='[]'
+RUNS_LIVENESS=none
+if RUNS=$(run_lib map sweep_bd); then
+    WORKED=$(printf '%s' "$RUNS" | jq -c '[ .[] | .bead | select(. != "") ] | unique')
+    [ "$(printf '%s' "$RUNS" | jq 'length')" -eq 0 ] || RUNS_LIVENESS=verified
+else
+    RUNS_LIVENESS=unverified
+    echo "$PROG: WARN: the live runs could not be read — the beads they work are reported, never hidden" >&2
+fi
 
 # --- landed-anchor husks: steps of a finished workflow are teardown, not waits
-# Resolved per ROOT (root -> gc.input_convoy_id -> tracks members -> each
-# anchor's own state). Landed is status=closed OR merge_result=merged and
+# Resolved per ROOT: the bead its run works (run-lib.sh's subject), then that
+# anchor's own state. Landed is status=closed OR merge_result=merged and
 # deliberately only that pair — every other marker is worn mid-flight.
 HUSK_TMP="$TMP/husks"; HUSK_ROOTS_TMP="$TMP/huskroots"; : > "$HUSK_TMP"; : > "$HUSK_ROOTS_TMP"
 HUSK_LIVENESS=none
@@ -223,38 +220,24 @@ jq -r '[ .[] | (.metadata["gc.root_bead_id"] // "") | select(. != "") ] | unique
 while IFS= read -r R; do
     [ -n "$R" ] || continue
     if [ "$HUSK_LIVENESS" = "none" ]; then HUSK_LIVENESS=verified; fi
-    CONVOY=""
-    if RJSON=$(bounded gc bd show "$R" --json 2>/dev/null) && printf '%s' "$RJSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
-        CONVOY=$(printf '%s' "$RJSON" | jq -r '.[0].metadata["gc.input_convoy_id"] // ""')
+    A=""
+    if RUN=$(run_lib subject sweep_bd "$R"); then
+        A=$(printf '%s' "$RUN" | jq -r '.[0].bead // ""')
     else
         HUSK_LIVENESS=unverified
-        echo "$PROG: WARN: root read FAILED for $R — its step beads are reported, never hidden" >&2
+        echo "$PROG: WARN: the run of root $R could not be read — its step beads are reported, never hidden" >&2
     fi
-    # A root naming no convoy has no anchor that could have landed: not a husk.
-    [ -n "$CONVOY" ] || continue
-    MEMBERS=""
-    if CJSON=$(bounded gc bd show "$CONVOY" --json 2>/dev/null) && printf '%s' "$CJSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
-        MEMBERS=$(printf '%s' "$CJSON" | jq -r '.[0].dependencies[]? | select(.dependency_type == "tracks") | .id')
+    # A root whose run works no bead has no anchor that could have landed: not
+    # a husk.
+    [ -n "$A" ] || continue
+    LANDED=""
+    if AJSON=$(bounded gc bd show "$A" --json 2>/dev/null) && printf '%s' "$AJSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        LANDED=$(printf '%s' "$AJSON" | jq -r 'if ((.[0].status // "") == "closed") or ((((.[0].metadata // {}).merge_result // "") | tostring) == "merged") then "yes" else "" end')
     else
         HUSK_LIVENESS=unverified
-        echo "$PROG: WARN: convoy read FAILED for $CONVOY — root $R is reported, never hidden" >&2
+        echo "$PROG: WARN: anchor read FAILED for $A — root $R is reported, never hidden" >&2
     fi
-    [ -n "$MEMBERS" ] || continue
-    # ALL tracked members must be landed; a convoy with none is not a husk.
-    ALL_LANDED=1
-    printf '%s\n' "$MEMBERS" > "$TMP/members"
-    while IFS= read -r A; do
-        [ -n "$A" ] || continue
-        LANDED=""
-        if AJSON=$(bounded gc bd show "$A" --json 2>/dev/null) && printf '%s' "$AJSON" | jq -e 'type == "array"' >/dev/null 2>&1; then
-            LANDED=$(printf '%s' "$AJSON" | jq -r 'if ((.[0].status // "") == "closed") or ((((.[0].metadata // {}).merge_result // "") | tostring) == "merged") then "yes" else "" end')
-        else
-            HUSK_LIVENESS=unverified
-            echo "$PROG: WARN: anchor read FAILED for $A — root $R is reported, never hidden" >&2
-        fi
-        if [ -z "$LANDED" ]; then ALL_LANDED=0; fi
-    done < "$TMP/members"
-    if [ "$ALL_LANDED" = "1" ]; then
+    if [ "$LANDED" = "yes" ]; then
         echo "$R" >> "$HUSK_ROOTS_TMP"
         jq -r --arg r "$R" '[ .[] | select((.metadata["gc.root_bead_id"] // "") == $r) | .id ] | .[]' "$READY" >> "$HUSK_TMP"
     fi
@@ -265,7 +248,7 @@ HUSK_ROOTS=$(jq -R . < "$HUSK_ROOTS_TMP" | jq -sc 'map(select(length > 0)) | uni
 # --- live sitting identities: "conversing" requires a live holder -------------
 # A visit covers its subject (and is itself conversing) only while the sitting
 # holding it is live. This pass is mechanical but reads sessions here — the one
-# liveness source the pack trusts (mol-witness-patrol, dead-molecule-dispose):
+# liveness source the pack trusts (mol-witness-patrol):
 # a holder GONE from the session list is dead, and so is one still listed in a
 # terminal state — archived or closed, the dead states helm's ownerLive keys on
 # (services/helm/internal/board/derive.go); a holder listed in any other state
@@ -295,51 +278,84 @@ fi
 # every read the classifier takes; its precheck runs the same classifier with
 # the reads beyond the bead set left empty.
 #
-# The pre-open gate set per pre_open_gate anchor, from the ONE resolver — the same
-# review-checks.sh --resolve pr-open.sh and merge.sh ask — so an undeclared or
-# legacy token (codex) gates pre-open here exactly as it does there, instead of
-# this sweep re-deriving the phase filter and dropping it (which classed a green
-# legacy-token anchor as un-gated and flagged it). The census counts only the
-# gates that must be green BEFORE the PR opens, so an open-as-draft check (demo),
-# which runs against the open PR, never holds a pre_open_gate anchor as not-yet-
-# gated. Built once per pass as a {anchor-id: [gates]} map, read by the
-# classifier's pre_open_all_green. If the resolver script is absent
-# (have_resolver=0) the classifier falls back to the anchor's own check_set.
+# The pre_open_gate anchors whose lanes are all green, as an {anchor-id: true}
+# map the classifier's pre_open_all_green reads: such an anchor waits only on
+# pr-open.sh, so it is gated, not an unnamed wait. The gates come from the ONE
+# resolver, the review-checks.sh --resolve pr-open.sh and merge.sh ask, so an
+# undeclared or legacy token (codex) gates pre-open here exactly as it does
+# there, and an open-as-draft check (demo), which runs against the open PR,
+# never holds a pre_open_gate anchor as not yet gated. Each gate derives through
+# lane-state.sh, the derivation pr-open.sh opens the PR on, pinned to this
+# sweep's store and bound by its per-call timeout. --no-remote: a pre_open_gate
+# anchor has no PR, so no GitHub approval backs a lane, as pr-open.sh reads it.
+# An anchor whose head origin does not carry, whose gates the resolver cannot
+# name, or that has a lane that does not derive green or cannot be read, stays
+# out of the map and a candidate. When origin does not answer the head read at
+# all, no head reads, and that says nothing about any one anchor: each anchor
+# the last pass reported stays out of the map, a candidate again, and every
+# other is "unread", a class of its own, so a failed read reports no anchor new.
 _LS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-# The index the resolver reads; GC_REVIEW_CHECKS_INDEX overrides the default (the
-# rig's own review-checks.toml beside the pack) so a hermetic test can point it at
-# a fixture, or at a missing file for the no-index fallback (every non-sentinel
-# token gates). Passed as --file when readable; otherwise the resolver resolves it
-# itself (the inherited env override, then the working tree).
-_LS_IDX="${GC_REVIEW_CHECKS_INDEX-$_LS_DIR/../../review-checks.toml}"
-PREOPEN_GATES_MAP="{}"; HAVE_RESOLVER=0
-if [ -x "$_LS_DIR/review-checks.sh" ]; then
-  HAVE_RESOLVER=1
-  _ls_idx_arg=()
-  [ -r "$_LS_IDX" ] && _ls_idx_arg=(--file "$_LS_IDX")
-  PREOPEN_GATES_MAP=$(
-    jq -r '.[] | select((.metadata.merge_result // "") == "pre_open_gate")
-           | [(.id // ""), (.metadata.check_set // "")] | @tsv' "$READY" 2>/dev/null \
-    | while IFS=$'\t' read -r _aid _acs; do
-        [ -n "$_aid" ] || continue
-        _g=$("$_LS_DIR/review-checks.sh" --resolve --check-set "$_acs" --through pre-open \
-             ${_ls_idx_arg[@]+"${_ls_idx_arg[@]}"} 2>/dev/null) || continue
-        printf '%s\n' "$_g" | jq -R . | jq -sc --arg id "$_aid" \
-          'map(select(length > 0)) | {($id): .}'
-      done \
-    | jq -sc 'add // {}' 2>/dev/null)
-  [ -n "$PREOPEN_GATES_MAP" ] || PREOPEN_GATES_MAP="{}"
+# The gates are resolved at the head of the anchor's branch on origin, the
+# commit pr-open.sh would open the PR at, read in the rig checkout the sweep
+# runs in (the order runs it there, and GC_RIG_ROOT names it). The resolver lays
+# that commit's own index over the pack's, so each rig's anchors are judged by
+# that rig's rows. GC_REVIEW_CHECKS_INDEX overrides the index the resolver
+# reads, so a hermetic test can point it at a fixture, or at a missing file for
+# the no-index fallback (every non-sentinel token gates). The fields are joined
+# on the unit separator, since tab is whitespace to read and an empty check_set
+# would shift the branch into its place.
+LANE_STATE="${GC_LANE_STATE_TOOL:-$_LS_DIR/lane-state.sh}"
+_LS_PREOPEN=$(jq -r '.[] | select((.metadata.merge_result // "") == "pre_open_gate")
+         | [(.id // ""), (.metadata.check_set // ""), (.metadata.branch // "")]
+         | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' "$READY" 2>/dev/null)
+# Every branch's head comes from one ls-remote that names them all, so a slow
+# origin costs the sweep one bounded call, not one per anchor, and a ready set
+# with no such anchor costs none.
+_ls_branches=()
+while IFS=$'\037' read -r _aid _acs _abr; do
+  [ -n "$_aid" ] && [ -n "$_abr" ] && _ls_branches+=("$_abr")
+done <<< "$_LS_PREOPEN"
+_LS_HEADS=""; _LS_UNREAD=0
+if [ "${#_ls_branches[@]}" -gt 0 ] && ! _LS_HEADS=$(remote_branch_heads . "${_ls_branches[@]}"); then
+  _LS_UNREAD=1
+  echo "$PROG: WARN: origin did not answer the head read for ${#_ls_branches[@]} pre-open anchor branch(es); each holds what the last pass made of it" >&2
 fi
+_LS_REPORTED=$(cat "$BASELINE_FILE" 2>/dev/null || true)
+PREOPEN_GREEN_MAP=$(
+  printf '%s\n' "$_LS_PREOPEN" \
+  | while IFS=$'\037' read -r _aid _acs _abr; do
+      [ -n "$_aid" ] && [ -n "$_abr" ] || continue
+      if [ "$_LS_UNREAD" = 1 ]; then
+        case ",$_LS_REPORTED," in
+          *",$_aid,"*) ;;
+          *) jq -nc --arg id "$_aid" '{($id): "unread"}' ;;
+        esac
+        continue
+      fi
+      _head=$(printf '%s\n' "$_LS_HEADS" | awk -F'\t' -v b="$_abr" '$2 == b { print $1; exit }')
+      [ -n "$_head" ] || continue
+      _g=$(bounded "$_LS_DIR/review-checks.sh" --resolve --check-set "$_acs" --through pre-open \
+           --at "$_head" 2>/dev/null </dev/null) || continue
+      [ -n "$(printf '%s' "$_g" | tr -d '[:space:]')" ] || continue
+      _green=1
+      while IFS= read -r _l; do
+        [ -n "$_l" ] || continue
+        bounded "$LANE_STATE" green --anchor "$_aid" --lane "$_l" --no-remote ${DB:+--db "$DB"} \
+          >/dev/null 2>&1 </dev/null || { _green=0; break; }
+      done <<< "$_g"
+      [ "$_green" = 1 ] && jq -nc --arg id "$_aid" '{($id): true}'
+    done \
+  | jq -sc 'add // {}' 2>/dev/null)
+[ -n "$PREOPEN_GREEN_MAP" ] || PREOPEN_GREEN_MAP="{}"
 
 # >>> classify
-# PREOPEN_GATES_MAP and HAVE_RESOLVER are set above for the whole-sweep run;
-# default them here as well, since the precheck test extracts this marked block
-# and sources it on its own under `set -u`.
-[ -n "${HAVE_RESOLVER:-}" ] || HAVE_RESOLVER=0
-[ -n "${PREOPEN_GATES_MAP:-}" ] || PREOPEN_GATES_MAP="{}"
+# PREOPEN_GREEN_MAP is set above for the whole-sweep run; default it here as
+# well, since the precheck test extracts this marked block and sources it on its
+# own under `set -u`.
+[ -n "${PREOPEN_GREEN_MAP:-}" ] || PREOPEN_GREEN_MAP="{}"
 CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfile alive "$ALIVE" \
       --argjson openprs "${OPEN_PRS:-[]}" --argjson worked "${WORKED:-[]}" --argjson husks "${HUSK_STEPS:-[]}" \
-      --argjson preopen_gates "$PREOPEN_GATES_MAP" --arg have_resolver "$HAVE_RESOLVER" \
+      --argjson preopen_green "$PREOPEN_GREEN_MAP" \
       --argjson livesessions "${LIVE_SESSIONS_JSON:-[]}" --argjson livenessknown "${LIVENESS_KNOWN:-false}" \
       --argjson unreadable_liveness_covers true \
       "$VISIT_IDENTITY_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ$LIVENESS_CLASSIFY_JQ"'liveness_classify')
@@ -348,7 +364,7 @@ printf '%s' "$CLASSIFIED" | jq -e 'type == "array"' >/dev/null 2>&1 \
 CANDIDATES=$(printf '%s' "$CLASSIFIED" | jq -c 'map(select(.class == "unnamed") | {id, title, type})')
 # <<< classify
 echo "$PROG: funnel: $(printf '%s' "$CLASSIFIED" | jq -r 'group_by(.class) | map("\(.[0].class) \(length)") | join(" · ")')"
-echo "$PROG: liveness: pr=$PR_LIVENESS convoy=$CONVOY_LIVENESS husk=$HUSK_LIVENESS · husk roots: $(printf '%s' "$HUSK_ROOTS" | jq -r 'join(",") | if . == "" then "(none)" else . end')"
+echo "$PROG: liveness: pr=$PR_LIVENESS runs=$RUNS_LIVENESS husk=$HUSK_LIVENESS · husk roots: $(printf '%s' "$HUSK_ROOTS" | jq -r 'join(",") | if . == "" then "(none)" else . end')"
 
 # --- landed-fix wedge: a must-fix finding whose fix landed but did not close ---
 # gate-ensure closes a must-fix finding once its fix unit lands, which releases
@@ -534,13 +550,13 @@ sweep_visit() {
     local body
     body=$(jq -nr --argjson new "$NEW" --argjson carried "$CARRIED" \
         --arg pass_at "$PASS_AT" --arg cap "$LIST_CAP" \
-        --arg pr "$PR_LIVENESS" --arg convoy "$CONVOY_LIVENESS" --arg husk "$HUSK_LIVENESS" '
+        --arg pr "$PR_LIVENESS" --arg runs "$RUNS_LIVENESS" --arg husk "$HUSK_LIVENESS" '
       ($cap | tonumber) as $c
       | [ "unnamed waits: \($new | length) new, \($carried | length) carried",
           "Census cut \($pass_at) — a snapshot, not the board. Run the visit.recheck stamp on this visit before acting.",
           (if $pr == "unverified" then "WARNING: the open-PR read failed for at least one repository — PR-parked beads may be listed." else empty end),
-          (if $convoy == "unverified" then "WARNING: a convoy read failed — a molecule-driven work bead may be listed." else empty end),
-          (if $husk == "unverified" then "WARNING: a root/convoy/anchor read failed — a landed workflow step may be listed." else empty end),
+          (if $runs == "unverified" then "WARNING: the live runs could not be read — a work bead a run is building may be listed." else empty end),
+          (if $husk == "unverified" then "WARNING: a run or anchor read failed — a landed workflow step may be listed." else empty end),
           "",
           "New this pass:",
           ($new[0:$c][] | "  \(.id) — \(.title) [\(.type)]"),

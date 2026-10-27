@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -380,82 +381,168 @@ const (
 	sittingClosed     = "closed"
 )
 
-// The two engagement states a held row's visit can be in, carried on
+// The engagement states a held row's visit can be in, carried on
 // [Tile.VisitState]. VisitEngaged is a live sitting in the conversation now;
-// VisitParked is an open, un-engaged visit waiting for a person. A row no open
-// visit holds carries the empty string, never one of these.
+// VisitStartFailed is a visit whose last sitting failed to start, with no
+// sitting spawned for it since; VisitParked is an open, un-engaged visit waiting
+// for a person. A row no open visit holds carries the empty string, except a
+// visit's own row whose sitting failed to start ([classifyVisits]).
 const (
-	VisitParked  = "parked"
-	VisitEngaged = "engaged"
+	VisitParked      = "parked"
+	VisitEngaged     = "engaged"
+	VisitStartFailed = "start-failed"
 )
 
 // unengagedVisit reports whether subject has a visit no one has engaged: a
-// non-closed sitting standing OPEN on it that carries neither a claim
-// (in_progress), a bound session, nor a bound assignee. engage binds the visit
-// by assignee while it is still open and before the hook claim promotes it to
-// in_progress and stamps the session, so an open visit with an assignee is a
-// pending engagement, not an un-engaged one. It reads facts.Sittings rather
-// than Tile.Held because Held does not distinguish an open visit from a claimed
-// one — both are non-closed sittings. This is the passive half of the
-// Accept/Discuss invalidation rule: a live sitting suppresses Accept, and
-// leaving the sitting without a ruling (the visit reverts to open) restores it.
+// sitting standing OPEN on it, and no non-closed sitting on it that something
+// holds ([Sitting.bound]). engage binds the visit by assignee while it is still
+// open and before the hook claim promotes it to in_progress and stamps the
+// session, so an open visit with an assignee is a pending engagement, not an
+// un-engaged one. It reads facts.Sittings rather than Tile.Held because Held
+// does not distinguish an open visit from a claimed one — both are non-closed
+// sittings. This is the passive half of the Accept/Discuss invalidation rule: a
+// live sitting suppresses Accept, and leaving the sitting without a ruling (the
+// visit reverts to open) restores it.
+//
+// It is the rule gc-helm.sh accept re-reads live (subject_unengaged), which
+// counts every binding whether or not its sitting started. So a visit whose
+// sitting failed to start suppresses Accept for as long as it stays bound to
+// that sitting, and offers it again once the witness releases the binding.
 func unengagedVisit(subject string, sittings []Sitting) bool {
-	if engagedVisit(subject, sittings) {
-		return false
-	}
-	// Not engaged, so un-engaged exactly when a visit still stands OPEN on it.
-	// The absence of any open sitting is not un-engagement — there is nothing to
-	// accept-and-dismiss — so it does not restore Accept.
+	open := false
 	for _, s := range sittings {
-		if s.Subject == subject && s.Status == sittingOpen {
-			return true
+		if !s.covers(subject) || s.Status == sittingClosed {
+			continue
+		}
+		if s.bound() {
+			return false
+		}
+		if s.Status == sittingOpen {
+			open = true
 		}
 	}
-	return false
+	// The absence of any open sitting is not un-engagement — there is nothing to
+	// accept-and-dismiss — so it does not restore Accept.
+	return open
+}
+
+// covers reports whether the sitting's visit covers subject by the shared visit
+// identity: subject is one of [Sitting.Subjects], or is [Sitting.Subject], which
+// Subjects contains whenever the gather resolved it.
+func (s Sitting) covers(subject string) bool {
+	return subject != "" && (s.Subject == subject || slices.Contains(s.Subjects, subject))
+}
+
+// bound reports whether something holds this sitting's visit: a claim
+// (in_progress), or a session or an assignee bound to a visit that has not
+// closed. The assignee arm covers the pending-engagement window — engage binds
+// the visit by assignee while it is still open, before the hook claim promotes
+// it to in_progress and stamps the session.
+func (s Sitting) bound() bool {
+	return s.Status == sittingInProgress || (s.Status != sittingClosed && (s.Session != "" || s.Assignee != ""))
 }
 
 // engagedVisit reports whether a live sitting is holding subject's visit right
-// now: a sitting in_progress, or a non-closed one a session or an assignee is
-// bound to. The assignee arm covers the pending-engagement window — engage binds
-// the visit by assignee while it is still open, before the hook claim promotes
-// it to in_progress and stamps the session. It is the engagement half both
-// [unengagedVisit] and [classifyVisits] read, so the Accept affordance and the
-// [Tile.VisitState] a row shows are decided by one predicate and cannot drift.
+// now: a covering sitting that something holds ([Sitting.bound]), unless that
+// sitting failed to start. The binding on a visit whose sitting failed to start
+// names a session that never ran, so nothing live holds it. [classifyVisits]
+// reads this test, and [unengagedVisit] reads the same bound predicate, so a
+// row that reads engaged never offers Accept.
 func engagedVisit(subject string, sittings []Sitting) bool {
 	for _, s := range sittings {
-		if s.Subject != subject {
-			continue
-		}
-		if s.Status == sittingInProgress || (s.Status != sittingClosed && (s.Session != "" || s.Assignee != "")) {
+		if s.covers(subject) && s.StartFailure == "" && s.bound() {
 			return true
 		}
 	}
 	return false
 }
 
-// classifyVisits stamps [Tile.VisitState] on every held row, splitting Held into
-// its two engagement states: VisitEngaged when a live sitting is holding the
-// conversation, VisitParked otherwise. A row no visit holds keeps the empty
-// string.
+// startFailure returns why the sitting last spawned for an open visit covering
+// subject failed to start, or "" when no such visit records a failed start.
+func startFailure(subject string, sittings []Sitting) string {
+	for _, s := range sittings {
+		if s.covers(subject) && s.Status != sittingClosed && s.StartFailure != "" {
+			return s.StartFailure
+		}
+	}
+	return ""
+}
+
+// ownStartFailure is [startFailure] for a visit's own row: the row whose id is
+// the visit itself, which the fold keeps when its subject has no live row.
+func ownStartFailure(id string, sittings []Sitting) string {
+	for _, s := range sittings {
+		if s.ID == id && s.Status != sittingClosed && s.StartFailure != "" {
+			return s.StartFailure
+		}
+	}
+	return ""
+}
+
+// classifyVisits stamps [Tile.VisitState] on every held row: VisitStartFailed
+// when the last sitting spawned for a visit on the row failed to start,
+// VisitEngaged when a live sitting is holding the conversation, VisitParked
+// otherwise. A row no visit holds keeps the empty string, unless it is a visit's
+// own row whose sitting failed to start.
 //
 // It runs after the wrapper fold, where Held is final — [applyFold] flips a
 // subject to Held when a visit wrapper folds onto it — so it reads the settled
-// flag rather than the per-anchor value [deriveTile] computed. Engagement is the
-// same [engagedVisit] test Acceptable reads, so a row reads "engaged" exactly
-// when a live sitting suppresses Accept. Parked is the fallback, including the
-// case a held row's sitting has aged out of the window: an open visit no session
-// is on reads as waiting for the operator, never as being worked.
+// flag rather than the per-anchor value [computeTile] computed. It runs before
+// [tagClusters], which keys on the section and needs a failed start rewrites.
+// Parked is the fallback, including the case a held row's sitting has aged out
+// of the window: an open visit no session is on reads as waiting for the
+// operator, never as being worked.
+//
+// A failed start outranks a live sitting on the same row. Each visit on a
+// subject is a conversation of its own, and the failure is the one state on
+// the row nothing else would tell the operator about. A closed row is never
+// marked, because a closed anchor is never owed. The fold leaves an open visit
+// whose subject has closed on a row of its own, so that row carries the
+// failure instead.
 func classifyVisits(tiles []Tile, facts Facts) {
 	for i := range tiles {
-		if !tiles[i].Held {
+		t := &tiles[i]
+		live := t.ClosedAt.IsZero()
+		if !t.Held {
+			if reason := ownStartFailure(t.ID, facts.Sittings); reason != "" && live {
+				markStartFailed(t, reason)
+			}
 			continue
 		}
-		if engagedVisit(tiles[i].ID, facts.Sittings) {
-			tiles[i].VisitState = VisitEngaged
+		if reason := startFailure(t.ID, facts.Sittings); reason != "" && live {
+			markStartFailed(t, reason)
+			continue
+		}
+		if engagedVisit(t.ID, facts.Sittings) {
+			t.VisitState = VisitEngaged
 		} else {
-			tiles[i].VisitState = VisitParked
+			t.VisitState = VisitParked
 		}
 	}
+}
+
+// markStartFailed puts a row whose visit's sitting failed to start in front of
+// the operator, the one person who can engage the visit again. The state and
+// its reason ride the wire, and NEEDS leads with the failure, so every surface
+// that prints the row says so. The row is owed and banded at least ELEVATED,
+// whatever the visit's own markers made of it: the witness re-parks a visit
+// under a headline, and on a visit's own row that headline reads as a ruling,
+// which would otherwise band the row LOW and take it out of the queue.
+// [owedFirst] puts the row at the head of the queue.
+func markStartFailed(t *Tile, reason string) {
+	t.VisitState = VisitStartFailed
+	t.VisitStartFailure = reason
+	t.Owed = true
+	if t.Severity.rank() < SevElevated.rank() {
+		t.Severity = SevElevated
+		t.RankScore = rankScore(t.Severity, t.Weight, t.StaleDays, 0)
+	}
+	needs := "start failed (" + reason + ")"
+	if t.Needs != "" {
+		needs += ": " + t.Needs
+	}
+	t.Needs = needs
+	t.Section = classifySection(*t)
 }
 
 // hasOwnRow reports whether a bead carrying this metadata is an anchor in its
@@ -782,7 +869,7 @@ func frontier(a Anchor, r rollup, held bool, takeaway string, waitingOpen []stri
 		return "human-gated decision"
 	// A merge anchor names the pull request instead, and OUTRANKS the
 	// human-routed phrase below, which is not a competing fact but a less
-	// specific version of the same one: a wedged anchor is routed to a person
+	// specific version of the same one: an anchor is routed to a person
 	// precisely because no agent will take it, and the operator still has to
 	// know WHICH pull request that is.
 	//
@@ -856,7 +943,7 @@ func collapseWS(s string) string {
 // phrase. Otherwise a terse deterministic STATE phrase, never a bead-id list:
 // the mechanical heads (open_heads, cross_rig_refs) are --json-only so the
 // human table stays explanatory and cannot emit a raw or truncated bead id.
-func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled, humanGatedInFlight bool,
+func needs(a Anchor, r rollup, held bool, heldBy, takeaway string, dispDue, isRuled, humanGatedInFlight bool,
 	machine, approval string, ask *Blocker, prIsOwed bool, stallNeeds string) string {
 	// A closed anchor outranks even the takeaway. The sentence a sitting left
 	// describes what the row wanted while it was live; a closed row wants
@@ -924,7 +1011,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled, hum
 	case a.Source == "decision":
 		return "operator decision"
 	// A merge anchor whose POSITION is what puts it in the queue answers with
-	// that position, and outranks the human-routed phrase below: a wedged or
+	// that position, and outranks the human-routed phrase below: a blocked or
 	// asked-about anchor is routed to a person precisely because nothing else
 	// will move it, so "no question recorded" would deny the one question the
 	// row is carrying.
@@ -936,7 +1023,7 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled, hum
 	// takeaway under a hand-set route is the finding on those rows, and the
 	// phrase below is the one that names it.
 	case isMergeAnchor(a) && prIsOwed:
-		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], ask)
+		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], ask, heldBy)
 	// The two kinds a PERSON put here. On these the empty takeaway is itself
 	// the finding — whoever routed or parked the row never recorded what is
 	// owed — so the phrase names that rather than reading like a valid ask a
@@ -951,12 +1038,12 @@ func needs(a Anchor, r rollup, held bool, takeaway string, dispDue, isRuled, hum
 	// "no children — decompose or assign" would ask for work that is not the
 	// row's to do.
 	case isMergeAnchor(a):
-		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], ask)
+		return prNeeds(machine, approval, prPosture, a.Metadata[mdPRMachineReason], ask, heldBy)
 	case r.mTotal == 0:
 		return "no children — decompose or assign"
 	case r.open == 0:
 		if a.Source == "convoy" {
-			return fmt.Sprintf("all %d closed — graduate", r.mTotal)
+			return fmt.Sprintf("all %d tracked closed", r.mTotal)
 		}
 		return fmt.Sprintf("all %d closed — close or extend", r.mTotal)
 	// Ahead of the dead-owner and idle phrases: this row has no ask of its own
@@ -994,9 +1081,8 @@ func agePhrase(days int) string {
 // values are lifecycle/lifecycle.toml's [machine_axis].machines; lifecycle.test.sh
 // fails on drift between the two lists.
 const (
-	MachineProgressing     = "progressing"
-	MachineSettled         = "settled"
-	MachineWedgedException = "wedged-exception"
+	MachineProgressing = "progressing"
+	MachineSettled     = "settled"
 	// MachineBlocked is a hold no review verdict clears: an unresolved required
 	// review thread, a base gone BEHIND, a branch that CONFLICTS with the base
 	// with no merge-in rework in flight, or an unrouted blocker no automated
@@ -1042,7 +1128,6 @@ const (
 	mdPRURL           = "pr_url"
 	mdBranch          = "branch"
 	mdMergeHold       = "merge_hold"
-	mdSignoffCap      = "signoff_cap"
 	mdRebaseHold      = "rebase_hold"
 	mdPRMergeState    = "pr_merge_state"
 	mdOpenedAsDraft   = "opened_as_draft"
@@ -1079,16 +1164,12 @@ func splitDated(v string) (value, oid string, since time.Time, ok bool) {
 	return parts[0], parts[1], ts, true
 }
 
-func isWedge(v string) bool {
-	return v == MachineWedgedException
-}
-
 func isBlocked(v string) bool {
 	return v == MachineBlocked
 }
 
 func knownMachine(v string) bool {
-	return v == MachineProgressing || v == MachineSettled || isWedge(v) || isBlocked(v)
+	return v == MachineProgressing || v == MachineSettled || isBlocked(v)
 }
 
 // poolRouted reports whether an open blocker has an automated actor behind it.
@@ -1127,21 +1208,16 @@ func demand(b Blocker) bool {
 
 // prMachine is what the merge cadence can do with this anchor on its next pass.
 //
-// Read off the bead, with ONE live upgrade. A recorded wedge always stands: it
-// is the stronger statement, and an operator who loses sight of a wedge has
-// lost the row this surface exists to show. Below that, an open pool-routed
-// blocker means an actor is due to act whatever the last gate pass recorded —
-// that half of the derivation is a bead read the gather already makes, while
-// the marker-versus-live-head half needs a `git ls-remote` the render path must
-// not do, which is why the cadence records it.
+// Read off the bead, with ONE live upgrade: an open pool-routed blocker means an
+// actor is due to act whatever the last gate pass recorded — that half of the
+// derivation is a bead read the gather already makes, while the
+// marker-versus-live-head half needs a `git ls-remote` the render path must not
+// do, which is why the cadence records it.
 func prMachine(a Anchor, blockers []Blocker) string {
 	if !isMergeAnchor(a) {
 		return ""
 	}
 	v, _, _, ok := splitDated(a.Metadata[mdPRMachine])
-	if ok && isWedge(v) {
-		return v
-	}
 	for _, b := range blockers {
 		if poolRouted(b) {
 			return MachineProgressing
@@ -1225,10 +1301,10 @@ func askingDemand(blockers []Blocker) *Blocker {
 
 // prOwed applies the owed rule to a merge anchor, and dates it.
 //
-// A row is owed by the operator when the machine axis is wedged, when it is
-// blocked (a hold no automated actor will clear — an unresolved required review
-// thread, a base gone BEHIND, or an unrouted blocker), when the city is asking
-// and waiting on an answer, or when the cadence is done and GitHub is holding
+// A row is owed by the operator when the machine axis is blocked (a hold no
+// automated actor will clear — an unresolved required review thread, a base
+// gone BEHIND, or an unrouted blocker), when the city is asking and waiting on
+// an answer, or when the cadence is done and GitHub is holding
 // the merge for a human review — one never given, or a standing
 // `changes_requested` the city has reworked as far as it can. GitHub keeps a
 // CHANGES_REQUESTED standing across pushes and the city never dismisses it, so
@@ -1238,7 +1314,7 @@ func askingDemand(blockers []Blocker) *Blocker {
 // leaves it alone.
 //
 // since is the EARLIEST instant among the causes the row currently holds. A row
-// wedged three days ago and asked about an hour ago has been owed for three
+// blocked three days ago and asked about an hour ago has been owed for three
 // days, and the queue ranks it there. No single stage of the cadence evaluates
 // the whole rule, so no single writer could keep one owed-since key honest;
 // each cause is dated instead by the writer that already decides it, and a
@@ -1260,11 +1336,10 @@ func prOwed(a Anchor, machine, approval string, ask *Blocker) (bool, time.Time) 
 	}
 	owed := false
 
-	if isWedge(machine) || isBlocked(machine) {
+	if isBlocked(machine) {
 		owed = true
-		// A head move — or, for a blocked verdict, the block clearing — is what
-		// releases it, and merge.sh records the new verdict then, so the instant
-		// rides the head-pinned key that records it.
+		// The block clearing is what releases it, and merge.sh records the new
+		// verdict then, so the instant rides the head-pinned key that records it.
 		if _, _, at, ok := splitDated(a.Metadata[mdPRMachine]); ok {
 			note(at)
 		}
@@ -1437,8 +1512,8 @@ func prFrontier(a Anchor, owedSince, now time.Time) string {
 
 // prIdentity names the pull request: its number once one is open, the branch
 // before that, and the EMPTY string when the anchor records neither. The branch
-// is an ordinary case rather than a fallback, because most wedged anchors have
-// no pull request open at all.
+// is an ordinary case rather than a fallback, because an anchor at
+// pre_open_gate has no pull request open at all.
 //
 // The empty string is what keeps [frontier] honest. An anchor at a human state
 // carries merge_result and can carry nothing else, and a row's one summary line
@@ -1463,7 +1538,7 @@ func prBranch(a Anchor) string {
 
 // humanSince is a coarse age for a queue ordered by it. Days once there is a
 // day to report, hours below that, and "just now" below an hour: the queue
-// spans days, and a minute-accurate figure on a three-day wedge is noise
+// spans days, and a minute-accurate figure on a three-day wait is noise
 // pretending to be precision.
 func humanSince(t, now time.Time) string {
 	d := now.Sub(t)
@@ -1478,15 +1553,17 @@ func humanSince(t, now time.Time) string {
 }
 
 // prNeeds is a merge anchor's one-glance ask, in the order an operator can act
-// on: a wedge names its shape and its release, a question names itself, an
-// unmet approval names the one thing that would land the row — a first review,
-// or the re-review a standing changes_requested is waiting on — and a row
-// nothing is owed on says who has it. `unknown` says the cadence has not
-// recorded a position, which is a fact about the city rather than an all-clear.
-func prNeeds(machine, approval, posture, reason string, ask *Blocker) string {
+// on: a question names itself, a block names its cause, an open visit names what
+// holds the row, an unmet approval names the one thing that would land the row —
+// a first review, or the re-review a standing changes_requested is waiting on —
+// and a row nothing is owed on says who has it. heldBy is the open-visit phrase
+// ([visitHold]), empty on a row no open visit covers. The merge pass's finalize
+// gate refuses the merge while a visit covers the anchor, so the visit outranks
+// the approval and the cadence's position, as it does in the row's phase.
+// `unknown` says the cadence has not recorded a position, which is a fact about
+// the city rather than an all-clear.
+func prNeeds(machine, approval, posture, reason string, ask *Blocker, heldBy string) string {
 	switch {
-	case machine == MachineWedgedException:
-		return "wedged: the review cap parked this anchor — a ruling releases it, a new commit does not"
 	case ask != nil:
 		if t := collapseWS(ask.Title); t != "" {
 			return "asking: " + t
@@ -1499,6 +1576,8 @@ func prNeeds(machine, approval, posture, reason string, ask *Blocker) string {
 			return "blocked: " + r
 		}
 		return "blocked — a person must clear it before the merge can proceed"
+	case heldBy != "":
+		return heldBy
 	case machine == MachineSettled && approval == ApprovalRequired:
 		if posture == postureChangesRequested {
 			return "changes requested — reviewer re-review needed"
@@ -1513,16 +1592,42 @@ func prNeeds(machine, approval, posture, reason string, ask *Blocker) string {
 	}
 }
 
+// visitHold is the needs phrase of a row an open visit covers. It says that an
+// open visit holds the row, and names each holding visit by the question it asks
+// ([holdingVisitAsks]) when the row has its sitting, never by a bead id. It
+// claims nothing about who owes the answer: an engaged visit, or one routed to
+// an agent, holds a row the operator's queue does not list.
+func visitHold(asks []string) string {
+	switch len(asks) {
+	case 0:
+		return "held by an open visit"
+	case 1:
+		return "held by an open visit: " + asks[0]
+	default:
+		return fmt.Sprintf("held by %d open visits: %s", len(asks), strings.Join(asks, " · "))
+	}
+}
+
+// holdingVisitAsks returns the question each running sitting whose visit covers
+// subject asks, read off the visit's title ([visitAsk]), in sitting order.
+func holdingVisitAsks(subject string, sittings []Sitting) []string {
+	var asks []string
+	for _, s := range sittings {
+		if s.Status == sittingClosed || !s.covers(subject) {
+			continue
+		}
+		if ask := visitAsk(s.Title); ask != "" {
+			asks = append(asks, ask)
+		}
+	}
+	return asks
+}
+
 // The pre-open state the stall signal reads. mergeResultPreOpenGate is the
 // merge_result of an anchor parked before its PR exists; pr-open.sh opens the PR
-// once every lane the anchor's check_set declares derives green. mdCheckPrefix
-// plus a lane names that lane's marker (check.correctness), and checkGreen is the
-// value signoff.sh stamps there when the lane's review approves and clears when a
-// review requests changes.
+// once every lane the anchor's check_set declares derives green.
 const (
 	mergeResultPreOpenGate = "pre_open_gate"
-	mdCheckPrefix          = "check."
-	checkGreen             = "green"
 
 	stallReasonNeverReviewed       = "never-reviewed"
 	stallReasonFindingsOpen        = "findings-open"
@@ -1542,14 +1647,16 @@ const preOpenStaleThresholdDays = 3
 // does not read green, and dates the stall for the owed clock.
 //
 // Every declared lane holds the PR, so the anchor is past its checks only once
-// each lane's marker reads green, and any lane name counts — a legacy codex lane
-// as much as correctness. A check_set that declares no lane is not a stalled
-// check: pr-open.sh opens none, off or approval alone without a review, and
-// gate-ensure.sh stamps the default over an empty one.
+// each lane derives green from the anchor's reviews ([laneGreen]), and any lane
+// name counts — a legacy codex lane as much as correctness. A check_set that
+// declares no lane is not a stalled check: pr-open.sh opens none, off or
+// approval alone without a review, and gate-ensure.sh stamps the default over
+// an empty one. Reviews the source could not read name no lane, so they fire
+// no stall.
 //
 // It fires only on the bare held shape — the one prOwed leaves with no cause of
-// its own. A recorded wedge, a demand, or a settled-and-unapproved position each
-// already owns the row: prOwed dates it and prNeeds names it. This adds a cause
+// its own. A demand or a settled-and-unapproved position already owns the row:
+// prOwed dates it and prNeeds names it. This adds a cause
 // for what is left, the anchor whose position reads "in the merge cadence" (a
 // stale progressing marker) or "position unknown" while no review is actually
 // running. The caller keeps the stronger surfacings — disposition, ruling,
@@ -1564,22 +1671,16 @@ const preOpenStaleThresholdDays = 3
 // and a genuinely stalled anchor is touched by nothing, so the last-touch instant
 // is when it went quiet. An anchor a reconcile pass still writes is fresh and
 // never reaches the threshold, which is the correct non-fire.
-func preOpenCheckStall(a Anchor, machine string, blockers []Blocker, stale int, f Facts) (stalled bool, since time.Time, lane, reason string) {
+func preOpenCheckStall(a Anchor, blockers []Blocker, stale int, f Facts) (stalled bool, since time.Time, lane, reason string) {
 	if a.Metadata[mdMergeResult] != mergeResultPreOpenGate {
 		return false, time.Time{}, "", ""
 	}
 	lanes := checkLanes(a.Metadata[mdCheckSet])
-	if len(lanes) == 0 {
+	if len(lanes) == 0 || a.ReviewsUnknown {
 		return false, time.Time{}, "", ""
 	}
-	// A recorded wedge already owns the row — owed, dated, named — so leave it to
-	// prOwed/prNeeds rather than restating it in weaker words.
-	if isWedge(machine) {
-		return false, time.Time{}, "", ""
-	}
-	// Every lane reads green: pr-open.sh opens the PR on its next pass, so the
-	// anchor is about to leave this state, not stalled in it. A lane marker
-	// carries a bare state word, so a settled lane is an exact "green".
+	// Every lane derives green: pr-open.sh opens the PR on its next pass, so the
+	// anchor is about to leave this state, not stalled in it.
 	lane = firstUngreenLane(a, lanes)
 	if lane == "" {
 		return false, time.Time{}, "", ""
@@ -1600,7 +1701,7 @@ func preOpenCheckStall(a Anchor, machine string, blockers []Blocker, stale int, 
 // character, and drop the tokens that name no lane. none and off are the
 // checkless opt-out, and approval is met by a GitHub review, which cannot exist
 // before the PR does. The drop is case-insensitive; a surviving name keeps its
-// case, because it names a lane and that lane's marker.
+// case, because it names a lane and the check_name its reviews carry.
 func checkLanes(checkSet string) []string {
 	var lanes []string
 	for _, tok := range strings.Split(checkSet, ",") {
@@ -1613,11 +1714,11 @@ func checkLanes(checkSet string) []string {
 	return lanes
 }
 
-// firstUngreenLane returns the first of lanes whose check marker on a is not
-// checkGreen, or "" when every lane reads green.
+// firstUngreenLane returns the first of lanes that does not derive green from
+// a's reviews, or "" when every lane does.
 func firstUngreenLane(a Anchor, lanes []string) string {
 	for _, lane := range lanes {
-		if a.Metadata[mdCheckPrefix+lane] != checkGreen {
+		if !laneGreen(a.Reviews, lane) {
 			return lane
 		}
 	}
@@ -1765,7 +1866,7 @@ func classifySection(t Tile) string {
 		return SectionDone
 	case t.PRMachine != "":
 		// A merge anchor is a pull request's row whether the cadence is working
-		// it or it is wedged on the operator; the round-trip axes carry which.
+		// it or it waits on the operator; the round-trip axes carry which.
 		return SectionReview
 	case t.Owed:
 		// Owed is humanGated-and-unruled, disposition-due, or a PR owed by the
@@ -1795,6 +1896,10 @@ func classifySection(t Tile) string {
 func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	r := rollUp(a, f)
 	held := f.Visits[a.ID]
+	heldBy := ""
+	if held {
+		heldBy = visitHold(holdingVisitAsks(a.ID, f.Sittings))
+	}
 	stale := staleDays(a.UpdatedAt, now)
 	closedDays := staleDays(a.ClosedAt, now)
 	xrefs := crossRigRefs(a, f)
@@ -1843,7 +1948,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	if a.ClosedAt.IsZero() && !dispDue && !isRuled && !humanGated(a) && takeaway == "" && ask == nil {
 		var stalledSince time.Time
 		var stalledLane, stalledReason string
-		stalled, stalledSince, stalledLane, stalledReason = preOpenCheckStall(a, machine, a.Blockers, stale, f)
+		stalled, stalledSince, stalledLane, stalledReason = preOpenCheckStall(a, a.Blockers, stale, f)
 		if stalled {
 			stallNeeds = preOpenStallNeeds(stalledLane, stalledReason)
 			prIsOwed = true
@@ -1939,7 +2044,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 		UpdatedAt: a.UpdatedAt,
 		ClosedAt:  a.ClosedAt,
 		Frontier:  frontier(a, r, held, takeaway, waitingOpen, dispDue, isRuled, isRuledInFlight, humanGatedInFlight, parkedInFlight, closedDays, owedSince, now),
-		Needs:     needs(a, r, held, takeaway, dispDue, isRuled, humanGatedInFlight, machine, approval, ask, prIsOwed, stallNeeds),
+		Needs:     needs(a, r, held, heldBy, takeaway, dispDue, isRuled, humanGatedInFlight, machine, approval, ask, prIsOwed, stallNeeds),
 		RankScore: rankScore(sev, w, stale, closedDays),
 
 		PRNumber:       prNumber(a),
@@ -2012,9 +2117,15 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	// each row to its top-most tile.
 	assignGroupRoots(folded, anchors)
 
+	// Split Held into parked, engaged or start-failed on each held row, from the
+	// same sittings the fold read. After the fold so it sees the final Held, and
+	// before the clusters, because marking a failed start rewrites the row's
+	// section and needs.
+	classifyVisits(folded, facts)
+
 	// Tag rows that are instances of one recurring template. This is last of the
 	// derivation passes because it keys on the FINAL section and needs, which the
-	// fold above can change.
+	// fold and the visit states above can change.
 	tagClusters(folded)
 
 	// Turn each pre-PR branch into a GitHub link, learned once per rig from a
@@ -2029,11 +2140,6 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	// (merged or closed). Then let the frontier lead with that state so the
 	// board's primary vocabulary is the liveness.
 	classifyPhases(folded, anchors, facts)
-
-	// Split Held into parked vs engaged on each held row, from the same sittings
-	// the fold read. After the fold so it sees the final Held, beside
-	// classifyPhases because both stamp a per-row derived state the renderers read.
-	classifyVisits(folded, facts)
 
 	sort.SliceStable(folded, func(i, j int) bool { return owedFirst(folded[i], folded[j]) })
 
@@ -2112,14 +2218,15 @@ const (
 // signal that a resolved row merged rather than closed without merging.
 const mergeResultMerged = "merged"
 
-// classifyPhases stamps a row's tri-state — who must act on it next — from the
-// shared prstatus core. It fills two fields: PRPhase on a merge anchor (the PR
-// round-trip axis, empty elsewhere), and Phase on every live row (the per-bead
-// liveness, empty only on a closed row). Both read the holds and posture off the
-// anchor and count the open rework children the board already gathers (a child
-// names its anchor in [mdAnchorBead]); a non-merge bead's Phase reads its own
-// live-workflow signal from facts instead. Counting is deduped by child id,
-// because one gather can list a bead twice.
+// classifyPhases stamps a row's tri-state — what stands between it and done —
+// from the shared prstatus core. It fills two fields: PRPhase on a merge anchor
+// (the PR round-trip axis, empty elsewhere), and Phase on every live row (the
+// per-bead liveness, empty only on a closed row). Both read the holds and
+// posture off the anchor and its open visit off facts, and count the open rework
+// children the board already gathers (a child names its anchor in
+// [mdAnchorBead]); a non-merge bead's Phase reads its own live-workflow signal
+// from facts instead. Counting is deduped by child id, because one gather can
+// list a bead twice.
 //
 // A bead WITH children on the board then takes its children's rolled-up state in
 // place of its own ([aggregatePhases]) — a parent's frontier is its children's
@@ -2162,7 +2269,7 @@ func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
 			continue
 		}
 		kids := reworkKids[tiles[i].ID]
-		prP := prPhase(a, kids)
+		prP := prPhase(a, f, kids)
 		phase := beadPhase(a, f, kids)
 		// prstatus.Derive names the phase from posture, merge-state, holds, the
 		// draft stage and an in-flight count. A blocked machine verdict is a hold
@@ -2323,18 +2430,19 @@ func aggregatePhases(tiles []Tile, anchors []Anchor) {
 	}
 }
 
-// prPhase answers who must act on a LIVE merge anchor next, delegating to
-// prstatus.Derive — the same function assets/scripts/pr-status-label.sh runs
-// through `gctk pr-status derive` to write the GitHub PR list's status: label.
+// prPhase names what stands between a LIVE merge anchor's PR and landing,
+// delegating to prstatus.Derive — the same function
+// assets/scripts/pr-status-label.sh runs through `gctk pr-status derive` to
+// write the GitHub PR list's status: label.
 // The board and the label derive the state from one code path, so a bead's board
 // liveness and its PR label cannot disagree. Empty on a non-merge row.
 // [classifyPhases] calls it only on a live row; a resolved anchor's PR state is
 // [terminalPRPhase]'s, off the close rather than the frozen pre-merge facts.
-func prPhase(a Anchor, openReworkKids int) string {
+func prPhase(a Anchor, f Facts, openReworkKids int) string {
 	if !isMergeAnchor(a) {
 		return ""
 	}
-	return string(prstatus.Derive(phaseFacts(a, Facts{}, openReworkKids)))
+	return string(prstatus.Derive(phaseFacts(a, f, openReworkKids)))
 }
 
 // terminalPRPhase names a resolved PR's final state for the PR round-trip axis on
@@ -2367,10 +2475,14 @@ func beadPhase(a Anchor, f Facts, openReworkKids int) string {
 // phaseFacts gathers the prstatus.Facts a row projects. The holds, the dated
 // posture/merge-state and the draft-stage markers are read straight off the
 // anchor — prstatus splits the '@' and applies the hold truthiness itself, so
-// the stored values pass through as they are. The in-flight count is the one
-// input that differs by row shape: a merge anchor counts its open review/rework
-// children (each names it in [mdAnchorBead]), the set prPhase has always fed;
-// any other bead reads the live-workflow signal standing over its own bead
+// the stored values pass through as they are. An open visit is the visit fact
+// the row's held marker reads ([Facts.Visits]), so the phase and the marker
+// agree. That fact finds a visit's subjects by the shared visit identity, as
+// `gctk pr-status derive` does for the status label, so the phase and the
+// label count the same visits. The in-flight count is the one input that
+// differs by row shape: a merge anchor counts its open review/rework children
+// (each names it in [mdAnchorBead]), the set prPhase has always fed; any other
+// bead reads the live-workflow signal standing over its own bead
 // ([Facts.anchorInFlight]).
 func phaseFacts(a Anchor, f Facts, openReworkKids int) prstatus.Facts {
 	inFlight := openReworkKids
@@ -2379,8 +2491,8 @@ func phaseFacts(a Anchor, f Facts, openReworkKids int) prstatus.Facts {
 	}
 	return prstatus.Facts{
 		MergeHold:     a.Metadata[mdMergeHold],
-		SignoffCap:    a.Metadata[mdSignoffCap],
 		RebaseHold:    a.Metadata[mdRebaseHold],
+		OpenVisit:     f.Visits[a.ID],
 		PRPosture:     a.Metadata[mdPRPosture],
 		PRMergeState:  a.Metadata[mdPRMergeState],
 		OpenedAsDraft: a.Metadata[mdOpenedAsDraft],
@@ -2396,11 +2508,11 @@ func phaseFacts(a Anchor, f Facts, openReworkKids int) prstatus.Facts {
 // only the RENDER collapses, so nothing tooling reads is lost.
 const clusterThreshold = 3
 
-// foldWrappers collapses row-doubling. A visit bead (task_kind=visit, tracking
-// its subject in gc.continuation_group) and a demand bead (gc.demand_for naming
-// the work it gates) each carry gc.routed_to=human, so each is gathered as its
-// OWN human anchor — a second row for an attention item its subject already
-// carries. The doubling is deliberate graph structure (a tracks edge keeps the
+// foldWrappers collapses row-doubling. A visit bead (task_kind=visit, naming
+// its subject by its tracks edge, with the gc.continuation_group stamp as the
+// fallback) and a demand bead (gc.demand_for naming the work it gates) each
+// carry gc.routed_to=human, so each is gathered as its OWN human anchor — a
+// second row for an attention item its subject already carries. The doubling is deliberate graph structure (a tracks edge keeps the
 // visit claimable; beads refuses a parent->descendant blocks edge, forcing the
 // demand to be a sibling), so it cannot be fixed in the graph; the renderer
 // recognises the edges instead.
@@ -2433,11 +2545,17 @@ func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 	for i := range tiles {
 		idx[tiles[i].ID] = i
 	}
+	// A visit's subject is the one its sitting resolved by the shared visit
+	// identity, so a visit folds onto the bead it holds (Facts.Visits).
+	visitSubject := make(map[string]string, len(f.Sittings))
+	for _, s := range f.Sittings {
+		visitSubject[s.ID] = s.Subject
+	}
 	// A wrapper whose subject is itself a wrapper must not fold onto a row that is
 	// about to be dropped, so decide every drop first, then apply the folds.
 	isWrapper := func(id string) bool {
 		if a, ok := anchorByID[id]; ok {
-			_, _, _, w := wrapperTarget(a)
+			_, _, _, w := wrapperTarget(a, visitSubject)
 			return w
 		}
 		return false
@@ -2451,7 +2569,7 @@ func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 		seen := map[string]bool{}
 		for cur := start; !seen[cur]; {
 			seen[cur] = true
-			subj, _, _, _ := wrapperTarget(anchorByID[cur])
+			subj, _, _, _ := wrapperTarget(anchorByID[cur], visitSubject)
 			if subj == start {
 				return true
 			}
@@ -2470,7 +2588,7 @@ func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 		if !ok {
 			continue
 		}
-		subj, ask, kind, ok := wrapperTarget(a)
+		subj, ask, kind, ok := wrapperTarget(a, visitSubject)
 		if !ok {
 			continue
 		}
@@ -2525,15 +2643,21 @@ func foldWrappers(tiles []Tile, anchors []Anchor, f Facts) []Tile {
 
 // wrapperTarget reports the subject a wrapper row concerns, the ask it carries,
 // and its kind (wrapperVisit or wrapperDemand), or ok=false for an ordinary row.
-// A visit points at its subject through gc.continuation_group; a demand through
-// gc.demand_for. The kind matters at the fold: a demand is not visit presence,
-// so it must not stamp Tile.Held.
-func wrapperTarget(a Anchor) (subject, ask, kind string, ok bool) {
+// A visit's subject is the one its sitting resolved by the shared visit identity
+// (visitSubject, keyed by visit id), and the gc.continuation_group stamp for a
+// visit the gather recorded no sitting for. A demand points at its subject
+// through gc.demand_for. The kind matters at the fold: a demand is not visit
+// presence, so it must not stamp Tile.Held.
+func wrapperTarget(a Anchor, visitSubject map[string]string) (subject, ask, kind string, ok bool) {
 	if a.Metadata == nil {
 		return "", "", "", false
 	}
 	if a.Metadata["task_kind"] == "visit" {
-		if subj := a.Metadata[mdContinuationGroup]; subj != "" {
+		subj, gathered := visitSubject[a.ID]
+		if !gathered {
+			subj = a.Metadata[mdContinuationGroup]
+		}
+		if subj != "" {
 			return subj, visitAsk(a.Title), wrapperVisit, true
 		}
 		return "", "", "", false
@@ -2555,8 +2679,8 @@ const (
 	wrapperDemand = "demand"
 )
 
-// mdContinuationGroup is the visit metadata key naming the subject a visit holds
-// — the same field Facts.Visits keys Tile.Held on.
+// mdContinuationGroup is the visit metadata key stamping the subject a visit
+// holds. The shared visit identity reads it only for a visit with no tracks edge.
 const mdContinuationGroup = "gc.continuation_group"
 
 // visitAsk recovers the human ask from a visit's title. escalate.sh titles a
@@ -2649,7 +2773,8 @@ func applyFold(t *Tile, folded []foldedAsk, subjectInFlight bool) {
 // takeaway is per-bead content the operator has to read one at a time, and
 // folding those rows into a count-plus-id-list loses it. This holds whether the
 // takeaway is a unique LLM sentence or a deterministic one a script templated
-// across anchors (a signoff-cap headline) that recurs identically across beads.
+// across anchors (the bring-current question's headline) that recurs
+// identically across beads.
 // Only a deterministic STATE phrase, which no bead authored, clusters; those the
 // renderer folds with per-bead context, not an id soup.
 func tagClusters(tiles []Tile) {
@@ -3055,6 +3180,11 @@ func CapSittings(in []Sitting, maxClosed int) (kept []Sitting, dropped int) {
 // no updated_at at all, so treating unknown as oldest would put every row from
 // that backend ahead of every dated one.
 //
+// One row leads the queue whatever its age: a visit whose sitting failed to
+// start ([VisitStartFailed]). The operator asked for that conversation and it
+// never began, and by age the row sorts among the newest, at the tail, below
+// the rows tmux-pick-helm.sh offers off the head of the queue.
+//
 // Apply it STABLY and after the dedup. A bead admitted under two kinds carries
 // the same id in both rows and ties every test below, so only the rank order
 // the dedup already resolved can decide which of the two survives.
@@ -3076,6 +3206,9 @@ func owedFirst(a, b Tile) bool {
 	if !a.Owed {
 		return false
 	}
+	if fa, fb := a.VisitState == VisitStartFailed, b.VisitState == VisitStartFailed; fa != fb {
+		return fa
+	}
 	sa, sb := owedSince(a), owedSince(b)
 	if sa.IsZero() != sb.IsZero() {
 		return !sa.IsZero()
@@ -3091,7 +3224,7 @@ func owedFirst(a, b Tile) bool {
 //
 // PROwedSince first, and on a merge anchor it is the only honest answer:
 // gc.takeaway_at is absent there, and updated_at is touched by every reconcile
-// pass, so falling through to it would file the three-day wedge behind the one
+// pass, so falling through to it would file the three-day wait behind the one
 // raised an hour ago — the exact inversion the queue exists to prevent.
 //
 // Then gc.takeaway_at, the moment a sitting authored what is owed. updated_at

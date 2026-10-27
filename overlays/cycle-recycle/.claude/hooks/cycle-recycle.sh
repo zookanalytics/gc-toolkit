@@ -106,7 +106,8 @@ fi
 # tree is dirty, in either the refinery's own worktree (CWD) or the rig's
 # canonical checkout ($GC_RIG_ROOT). Witness/deacon are idle pollers with no
 # long git ops, so this is refinery-only. Untracked files are normal scratch and
-# are ignored (mirrors the formula's rig ff-merge dirtiness check).
+# are ignored. doctor/check-recycle-capable applies the same test to the rig's
+# canonical checkout, and its suite runs this script to prove the two agree.
 if [ "$role" = refinery ]; then
   _git_busy() { # $1=dir; exit 0 if a git op is in progress or the tree is dirty
     [ -n "$1" ] || return 1

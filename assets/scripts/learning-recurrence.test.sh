@@ -3,6 +3,9 @@
 # feedback-learning loop's recurrence metric. Stubbed gc; no live city, Dolt,
 # or network. Fixture timestamps are computed from `now` so the windows stay
 # meaningful whenever the suite runs.
+# It also holds the review rubric this checkout ships: every anchor in the
+# correctness method's rubric ledger names a dimension of its What to check list,
+# the method itself carries no anchor, and the inventory reads them all.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -67,6 +70,11 @@ obs() { # id created_at provenance category pattern source
   jq -nc --arg id "$1" --arg c "$2" --arg p "$3" --arg cat "$4" --arg pat "$5" --arg s "$6" \
     '{id:$id, created_at:$c, metadata:{task_kind:"observation", "obs.provenance":$p, "obs.category":$cat, "obs.distilled":$pat, "obs.source":$s}}'
 }
+outside() { # id created_at provenance correction — the miner's outside capture
+  jq -nc --arg id "$1" --arg c "$2" --arg p "$3" --arg cor "$4" \
+    '{id:$id, created_at:$c, metadata:({task_kind:"observation", "obs.provenance":$p, "obs.category":"outside-review", "obs.source":"miner"}
+       + (if $cor == "" then {} else {"obs.correction":$cor} end))}'
+}
 mislabelled() { # id created_at category — carries the label, not the kind
   jq -nc --arg id "$1" --arg c "$2" --arg cat "$3" \
     '{id:$id, created_at:$c, metadata:{"obs.provenance":("prov-" + $id), "obs.category":$cat}}'
@@ -111,14 +119,17 @@ cat > "$REPO/template-fragments/operator-profile.template.md" <<MD
 - An entry with no pattern-bead anchor, so recurrence cannot be attributed.
 {{ end }}
 MD
-# The review-rubric carrier anchors in a TOML comment ledger, not in the step
-# description, so the inventory has to reach a formula file too.
-mkdir -p "$REPO/formulas"
-cat > "$REPO/formulas/mol-review.toml" <<MD
-# <!-- rule:<pattern-bead> src:<refs> adopted:<date> --> <dimension>
-# <!-- rule:tk-rub1 src:audit:tk-test adopted:$ADOPTED --> Contract
-[[steps]]
-id = "review"
+# The review-rubric carrier anchors in a ledger beside the correctness method,
+# not in the method a reviewer reads, so the inventory reads the ledger and
+# never the method.
+mkdir -p "$REPO/skills/review-correctness"
+cat > "$REPO/skills/review-correctness/rubric-ledger.md" <<MD
+    <!-- rule:<pattern-bead> src:<refs> adopted:<date> --> <dimension>
+    <!-- rule:tk-rub1 src:audit:tk-test adopted:$ADOPTED --> Contract
+MD
+cat > "$REPO/skills/review-correctness/SKILL.md" <<MD
+<!-- rule:tk-instray src:audit:tk-test adopted:$ADOPTED -->
+- **Contract** — a dimension.
 MD
 
 # --- 1. inventory ---------------------------------------------------------
@@ -127,7 +138,8 @@ eq "$(grep -c . <<< "$INV")" "4" "inventory lists one row per adopted entry"
 hasnt "$INV" 'rule:<pattern-bead>' "inventory skips the seeded placeholder anchor"
 has "$INV" "tk-pat1" "inventory extracts the pattern bead from a rule: anchor"
 has "$INV" "operator-profile.template.md	-	2026-08-25" "an anchor with no rule: field reports '-' rather than guessing"
-has "$INV" "formulas/mol-review.toml	tk-rub1" "the review-rubric ledger is inventoried beside the fragment carriers"
+has "$INV" "skills/review-correctness/rubric-ledger.md	tk-rub1" "the review-rubric ledger is inventoried beside the fragment carriers"
+hasnt "$INV" "tk-instray" "the correctness method itself is not inventoried"
 
 # --- 2. report over the fixture corpus ------------------------------------
 J=$("$SUT" --repo "$REPO" --window-days 30 --json 2>&1)
@@ -167,6 +179,55 @@ eq "$(jq -r '.corpus.observations' <<< "$K")" "1" \
    "a bead carrying the label but not task_kind=observation is not an observation"
 eq "$(jq -r '.m1_category_repeat.fragmentation.categorised' <<< "$K")" "1" \
    "and its obs.category never reaches the M1 accounting"
+
+# --- 2a2. the outside capture is not a correction category ---------------
+# The miner files every outside review post under outside-review, so a window
+# of them would read as one category repeating. M1 leaves them out; the
+# corpus and M2 still count them.
+mkdir -p "$TMP/stores2o"
+{
+  obs o1 "$(ago 6)" "pr:o/r#40:comment:40" real-slug    ""      self
+  obs o2 "$(ago 5)" "pr:o/r#41:comment:41" outside-review ""    miner
+  obs o3 "$(ago 4)" "pr:o/r#42:review:42"  outside-review tk-pat1 miner
+  obs o4 "$(ago 3)" "pr:o/r#43:comment:43" outside-review ""    miner
+} | jq -s . > "$TMP/stores2o/alpha.json"
+cat > "$TMP/rigs2o.json" <<JSON
+{"rigs":[{"name":"alpha","path":"$TMP/stores2o/alpha.json"}]}
+JSON
+O=$(STUB_RIGS="$TMP/rigs2o.json" "$SUT" --repo "$REPO" --window-days 30 --json 2>&1)
+eq "$(jq -r '.corpus.events_after_dedup' <<< "$O")" "4" "outside-review observations are in the corpus"
+eq "$(jq -r '.m1_category_repeat.window.categorised' <<< "$O")" "1" "M1 leaves the outside capture out of its denominator"
+eq "$(jq -r '.m1_category_repeat.window.repeats' <<< "$O")" "0" "and never counts an outside post as a repeat"
+eq "$(jq -r '.m1_category_repeat.outside_events.window' <<< "$O")" "3" "the report counts the outside posts beside M1"
+eq "$(jq -r '[.m2_post_adoption.rules[] | select(.pattern=="tk-pat1")] | .[0].since_adoption' <<< "$O")" "1" \
+   "an outside post the distiller stamped still counts in M2"
+has "$(STUB_RIGS="$TMP/rigs2o.json" "$SUT" --repo "$REPO" --window-days 30 2>&1)" \
+    "outside review posts that name no correction, not counted above: 3 this window" "the text report names them"
+
+# --- 2a3. an outside post that names a standing correction ----------------
+# The same correction posted on three PRs, each filed as an outside post that
+# names it, counts as one category repeating. An outside post that names none
+# stays out of M1. A self-report of one of those posts under the same slug is
+# the same event, read twice.
+mkdir -p "$TMP/stores2c"
+{
+  outside c1 "$(ago 9)" "pr:o/r#50:comment:50" redundant-comments
+  outside c2 "$(ago 7)" "pr:o/r#51:comment:51" redundant-comments
+  outside c3 "$(ago 5)" "pr:o/r#52:review:52"  redundant-comments
+  obs     c4 "$(ago 4)" "pr:o/r#52:review:52"  redundant-comments "" self
+  outside c5 "$(ago 3)" "pr:o/r#53:comment:53" ""
+  outside c6 "$(ago 2)" "pr:o/r#54:comment:54" ""
+} | jq -s . > "$TMP/stores2c/alpha.json"
+cat > "$TMP/rigs2c.json" <<JSON
+{"rigs":[{"name":"alpha","path":"$TMP/stores2c/alpha.json"}]}
+JSON
+C=$(STUB_RIGS="$TMP/rigs2c.json" "$SUT" --repo "$REPO" --window-days 30 --json 2>&1)
+eq "$(jq -r '.m1_category_repeat.window.categorised' <<< "$C")" "3" "M1 counts each outside post that names a correction under it"
+eq "$(jq -r '.m1_category_repeat.window.repeats' <<< "$C")" "2" "so the second and third posting of one correction are repeats"
+eq "$(jq -c '.m1_category_repeat.top_repeating' <<< "$C")" '[{"category":"redundant-comments","count":2}]' \
+   "and the repeating category is the correction's slug"
+eq "$(jq -r '.corpus.events_after_dedup' <<< "$C")" "5" "a self-report of a post under the slug its outside capture names is the same event"
+eq "$(jq -r '.m1_category_repeat.outside_events.window' <<< "$C")" "2" "the outside posts that name no correction stay out of M1, counted beside it"
 
 # --- 2b. one provenance key, several distinct corrections -----------------
 # A whole-turn provenance (bead:<id>:turn:<date>) covers every correction made
@@ -292,11 +353,54 @@ eq "$(jq -r '.m2_post_adoption.adopted_total' <<< "$R")" "1" \
 R=$(STUB_RIGS="$TMP/rigs2.json" "$SUT" --repo "$GREPO" --window-days 30 --json 2>&1)
 eq "$(jq -r '.m2_post_adoption.adopted_total' <<< "$R")" "2" \
    "and without --ref the working tree is what it reads"
+SREPO="$TMP/srepo"; mkdir -p "$SREPO/skills/review-correctness"
+git -C "$SREPO" init -q >/dev/null 2>&1
+cat > "$SREPO/skills/review-correctness/rubric-ledger.md" <<MD
+    <!-- rule:tk-rubref src:audit:tk-test adopted:$ADOPTED --> Testing
+MD
+git -C "$SREPO" add -A >/dev/null 2>&1
+git -C "$SREPO" -c user.email=t@example.invalid -c user.name=t -c commit.gpgsign=false \
+    commit -q --no-verify -m seed >/dev/null 2>&1
+R=$("$SUT" --inventory --repo "$SREPO" --ref HEAD 2>&1)
+has "$R" "skills/review-correctness/rubric-ledger.md	tk-rubref" "--ref reads the review-rubric ledger from the ref too"
 
 # --- 6. usage ------------------------------------------------------------
 OUT=$("$SUT" --window-days 0 --repo "$REPO" 2>&1); eq "$?" "2" "--window-days 0 is rejected"
 OUT=$("$SUT" --window-days x --repo "$REPO" 2>&1); eq "$?" "2" "a non-numeric window is rejected"
 OUT=$("$SUT" --nope --repo "$REPO" 2>&1); eq "$?" "2" "an unknown flag is rejected"
+
+echo "# the shipped review rubric: its anchors sit in the ledger beside the correctness method"
+# The reviewer reads the whole method file, comments included, so no anchor, nor
+# any other HTML comment, sits in it. Each anchor's ledger line names the What to
+# check dimension it amends, and the inventory reads every one.
+ROOT="$(cd "$HERE/../.." && pwd)"
+METHOD_REL="skills/review-correctness/SKILL.md"
+METHOD="$ROOT/$METHOD_REL"
+LEDGER_REL="$(dirname "$METHOD_REL")/rubric-ledger.md"
+LEDGER="$ROOT/$LEDGER_REL"
+[ -r "$LEDGER" ] && ok "the review-rubric ledger ships beside the correctness method" || bad "$LEDGER_REL is missing"
+if grep -qF '<!--' "$METHOD"; then bad "the correctness method carries an HTML comment, which reaches the reviewer"
+else ok "the correctness method carries no HTML comment, so no anchor reaches the reviewer"; fi
+awk '/^### What to check/ {f = 1; next} /^##/ {f = 0} f && /^- \*\*/ {sub(/^- \*\*/, ""); sub(/\*\*.*/, ""); print}' "$METHOD" > "$TMP/dimensions"
+[ -s "$TMP/dimensions" ] && ok "the What to check list's dimensions are read" || bad "no dimension found in the What to check list"
+grep -E '<!-- [^>]*adopted:[0-9]{4}-[0-9]{2}-[0-9]{2}[^>]*-->' "$LEDGER" > "$TMP/ledger-lines" || true
+ANCHORS=$(grep -c . "$TMP/ledger-lines" || true)
+UNKNOWN=$(sed 's/.*--> *//' "$TMP/ledger-lines" | grep -vxF -f "$TMP/dimensions" | head -n1 || true)
+eq "$UNKNOWN" "" "every ledger line names a dimension of the What to check list"
+# The dimension each of these anchors amends: each is held to that dimension,
+# not to any.
+while read -r rule dim; do
+  got=$(grep -F -- "<!-- rule:$rule " "$LEDGER" | sed 's/.*--> *//')
+  eq "$got" "$dim" "$rule's ledger line names $dim, the dimension it amends"
+done <<'MAP'
+tk-wamr3 Comments
+tk-v32d2u Comments
+tk-0rhvews Testing
+tk-prvea Cross-file trace
+tk-gz2vhjc Scope claims
+MAP
+INV=$(bash "$SUT" --inventory --repo "$ROOT" | grep -c "^$LEDGER_REL	" || true)
+eq "$INV" "$ANCHORS" "the inventory reads every anchor in the ledger"
 
 echo
 echo "learning-recurrence.test.sh: $PASS passed, $FAIL failed"

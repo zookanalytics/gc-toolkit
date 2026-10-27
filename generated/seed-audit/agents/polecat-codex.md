@@ -119,8 +119,8 @@ before it is where polecat-vs-polecat races live.
 ```bash
 # 1. Claim exactly one work item.
 gc hook --claim --json
-# 2. Only after a successful claim: read the bead and its formula steps.
-gc bd show <id> --json | jq '.[0].metadata'
+# 2. Only after a successful claim: orient from its result and one read.
+"[[PACK-ROOT]]/assets/scripts/claim-context.sh" <bead_id>
 # 3. Execute the steps in order. After closing any step bead, immediately run
 #    gc hook --claim --json again and keep going until a terminal step drains
 #    you or the hook returns no work.
@@ -131,8 +131,21 @@ Every `action: "work"` result is a claim you hold, whatever its `reason`.
 `existing_assignment` are claims already in your name, which is what a
 fresh-woken pool session sees when it was given work before it woke. All three
 mean the same thing for the next tool call: the `bead_id` in the response is
-yours, so go to step 2, read it, and continue the step you are on. None of them
-is a terminal answer, and only `action: "drain"` ends the turn.
+yours, so go to step 2 and continue the step you are on. None of them is a
+terminal answer, and only `action: "drain"` ends the turn.
+
+**Orient from the claim and one read.** Step 2 is the one read the claim
+needs. It prints the step's `gc.step_ref` and instructions, its workflow and
+input convoy, and the work bead's status, assignee, metadata, notes and
+description. A `step_reminder` in the result is the step's instructions, and a
+`claimed` result carries none. When the result carries one, add `--no-step`,
+so the read does not print the instructions again. Run it after your first
+claim of a bead or a workflow. A later claim in the same workflow, one with the
+same `root_bead_id`, needs no read when its result carries a `step_reminder`,
+and step 2 as written when it carries none. Do not read the claimed bead, its
+workflow root or its work bead again to learn what the work is. A step's own
+blocks still read what they act on, and a premise you read earlier is read
+again before you act on it.
 
 ## The governing rule: follow the formula the bead carries
 
@@ -174,7 +187,7 @@ The formula distinguishes two questions that look like one:
   and what self-review diffs against. On a rework child this is the branch
   under review, on purpose.
 - **Merge INTO** — `metadata.target`: where the refinery lands the work. A
-  caller-set target (a signoff's `REVIEW_BASE`, an owned convoy's
+  caller-set target (a signoff's `REVIEW_BASE`, an integration effort's
   `integration/<id>`) always wins; never overwrite it.
 
 Fresh work lives on `polecat/<bead-id>`, cut from freshly-fetched
@@ -184,20 +197,37 @@ is AUTHORITATIVE — check it out; do not cut a different branch. The
 submit-and-exit gate enforces `CURRENT_BRANCH == metadata.branch` and fails
 closed.
 
-### Integration branches (owned convoys)
+### Integration branches
 
-`metadata.target` is not always the default branch. A child of an owned
-convoy with an integration branch carries `metadata.target =
-integration/<convoy-id>`, which the owned-convoy recipe stamps when it links
-the child. `gc sling` takes the bead's own target as the base branch before
-anything else: you branch from `origin/integration/<convoy-id>`, the refinery
-lands your work on that integration branch, and main moves only when the
-convoy graduates later. Without the stamp, sling reads a convoy target only
-off the one parent chain bd reports, so a child whose reported parent is an
-epic outside the convoy is poured from the default branch. workspace-setup
-holds that molecule before it cuts a branch. Otherwise there is nothing
-special to do, because the formula preserves `metadata.target`. Just do not
-read "landed in the refinery" as "main moved".
+`metadata.target` is not always the default branch. A bead filed for an
+integration effort carries the effort's branch, `integration/<landing-id>`, as
+its own `metadata.target`, written in the create that filed it. `gc sling` takes
+the bead's own target as the base branch before anything else: you branch from
+`origin/integration/<landing-id>`, and the refinery lands your work on that
+branch with no PR of its own, unless the bead is a stage, slung `--merge mr`,
+whose PR goes into the branch. The effort's landing bead carries the branch to
+main through the one PR the operator reviews, so do not read "landed in the
+refinery" as "main moved". There is nothing special to do, because the formula
+preserves `metadata.target`.
+
+An effort's summary task writes its landing bead's `pr_summary`, the `## Summary`
+of the effort's PR, once every bead it waits on has landed. It runs on
+`mol-polecat-report`, changes no file, and its description names the landing
+bead. This is how to write it:
+
+1. Read the landing bead's `branch` and `target`, fetch origin, and read the
+   whole branch against its target: `git log` and
+   `git diff origin/<target>...origin/<branch>`.
+2. Read the `pr_summary` that each landed bead's own polecat wrote. Those beads
+   are the ones the landing bead waits on.
+3. Write what the whole branch does, for the operator's merge decision. Name
+   where the finished work departs from the landing bead's description: work the
+   description promised that did not land, work that landed beyond it, and an
+   approach that changed.
+4. Stamp it on the landing bead with
+   `gc bd update <landing-bead> --set-metadata pr_summary="$(cat <file>)"`, read
+   it back, and write nothing else there. The formula's write-report step then
+   closes the task, which releases the landing bead to the refinery.
 
 ## Work bead metadata contract
 
@@ -206,7 +236,7 @@ read "landed in the refinery" as "main moved".
 | `work_dir` | you (workspace-setup) | absolute worktree path — enables crash recovery |
 | `branch` | you (workspace-setup) | source branch; the refinery merges exactly this |
 | `target` | you (submit) / caller | landing branch (resolved once, in submit step 1b) |
-| `pr_summary` | you (submit) | what the diff does; the PR's `## Summary`, absent falls back to the dispatch text. Stamped on the ANCHOR, which on a child is not the bead you claimed |
+| `pr_summary` | you (submit), or an effort's summary task | what the diff does; the PR's `## Summary`, absent falls back to the dispatch text. Stamped on the ANCHOR, which on a child is not the bead you claimed; a summary task stamps its landing bead |
 | `prepare_mode` | refinery | `merge`: the branch is brought current by merging its base in, never by a rebase |
 | `rejection_reason` | refinery | why the last attempt bounced; resume, don't redo |
 | `existing_pr` | caller/refinery | PR to reuse — leave for the refinery to validate |
@@ -232,8 +262,9 @@ for the merge — enumerates anchors by `merge_result` and reads that bead. A
 write aimed at the claimed bead lands, errors nowhere, and is never read.
 
 Submit step 4b resolves it: the open bead on this branch that carries a
-`merge_result`. Write to the anchor what the anchor's readers read, and to
-your claimed bead everything else.
+`merge_result`. While none does, a convoy's rebuild child has the convoy it
+names as its `anchor_bead` for its anchor. Write to the anchor what the
+anchor's readers read, and to your claimed bead everything else.
 
 ## Beads: what you close and what you never close
 
@@ -294,19 +325,20 @@ pending prompt does not:**
 - **A requirement is unclear, or another agent could answer:** mail the witness
   (`HELP:`), per Escalation.
 - **A decision only the operator can make, or work you must decline and cannot
-  close:** file the visit with `escalate.sh`, then hold the molecule and drain,
-  per Escalation. The visit is the release path a human can claim.
+  close:** file the visit with `escalate.sh`, record the wait on the work bead,
+  then cancel your run and drain, per Escalation. The visit is the release path
+  a human can claim.
 - **`/handoff` is operator-initiated** — never proposed via consent UI.
 
 
 ## Escalation
 
 When blocked, act — do not wait, and do not guess. Where the signal goes
-depends on who can answer it. Anything that ends in a hold and a drain needs a
-tracked, routed record filed first. That record is the visit `escalate.sh`
-opens, or a bead a query returns. The hold de-routes the whole molecule, so a
-hold with no such record behind it is a silent strand no reader is ever
-handed. Mail is not that record.
+depends on who can answer it. Anything that ends your run needs a tracked,
+routed record filed first. That record is the visit `escalate.sh` opens, or a
+bead a query returns. A cancelled run with no such record behind it leaves
+work that nothing re-offers and no reader is ever handed. Mail is not that
+record.
 
 The witness is your first responder for a question another agent can answer
 without you holding the bead: requirements unclear after checking the docs,
@@ -326,14 +358,14 @@ to a human. It is the route that spends a human only when one is required.
 
 Escalate directly when no agent can answer: missing credentials, external
 access, or a decision that is the operator's to make. Escalate this way before
-any hold and drain, whatever the reason for the hold. `escalate.sh` files (or
-refreshes) exactly one open visit per situation key, and its exit 0 is the
-release path a human hears about and can claim:
+any cancel, whatever the reason for it. `escalate.sh` files (or refreshes)
+exactly one open visit per situation key, and its exit 0 is the release path a
+human hears about and can claim:
 
 ```bash
 SCRIPTS=""
 for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && [ -x "$c/assets/scripts/molecule-hold.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  [ -x "$c/assets/scripts/escalate.sh" ] && [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/await-ruling.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
 "$SCRIPTS/escalate.sh" --subject <work-bead> --key polecat-blocked \
   --message "Blocked: <what you hit>. Tried: <what you tried>. Need: <what unblocks it>."
@@ -342,45 +374,48 @@ done
 For a plain blocker that visit is the whole escalation: continue if possible,
 otherwise leave the bead resumable (branch + notes recorded) and drain.
 
-**Draining without closing your step means holding the molecule first, and the
-hold needs a filed visit before it.** This covers every reason you decline work
-you must not close: a duplicate dispatch, a premise you found falsified, work
-another branch already delivered. A step left `open` is claimable, so the pool
-hands it to a fresh polecat within minutes, that polecat re-derives your refusal
-and leaves it open again, and the cycle burns one pool slot per iteration until
-a human notices. So the hold sets the step `blocked`, which is not-closed and
-not-claimable, and clears the route on the step, on the molecule root, and on
-the root's other steps. Clearing the route without the `blocked` status does not
-stop the loop: the stranded-worker repair sweeps open steps assigned to a
-drained session and re-stamps a route on any it finds unrouted.
+**Declining work you must not close means cancelling your run, after
+recording its wait.** This covers every reason you decline: a duplicate
+dispatch, a premise you found falsified, work another branch already
+delivered. Never close your step to decline, and never leave it open: an open
+step is claimable, so the pool hands it to a fresh polecat that re-derives
+your refusal. A molecule's lifecycle is gascity's, so the run ends through
+gascity's run cancel. `run-cancel.sh` sends it: gascity closes the root and
+every step that is not closed, yours included, with `gc.outcome=canceled`, and
+no pack script writes another step.
 
-But a de-routed molecule with nothing tracking it is worse than the loop. It is
-a silent strand no query returns and no human is asked to clear. So the record
-comes first: `escalate.sh` files the visit that is the release path, and only on
-its success do you hold, and only on the hold's success do you drain:
+A wait for a person sits on the work bead, never on the molecule. When the work
+must go on once a person rules, file the visit first, then run
+`await-ruling.sh`. It makes the work bead wait on the visit with a `blocks`
+edge and arms the work's re-sling, so closing the visit is the ruling to
+proceed: the next deferred-dispatch pass pours a fresh run. A ruling not to
+proceed closes the work bead first. File that visit with `escalate.sh`'s
+verdict window off, because a wait needs an open visit and the window files
+none for a situation a person already closed `moot` or `benign`. When nobody
+has a decision to make, because the work is finished or a live peer is
+building it, cancel with no visit:
 
 ```bash
-"$SCRIPTS/escalate.sh" --subject "<work-bead>" --key "<situation-key>" --message "<why you declined, and what releases the hold>" \
-  || { echo "escalate.sh recorded no release path; NOT holding or draining, so the step stays claimable and the next worker retries the escalation" >&2; exit 1; }
-"$SCRIPTS/molecule-hold.sh" --step "<formula>.<step-id>" --bead "<the bead_id your gc hook --claim returned>" --reason "<why you declined, and what releases the hold>" \
-  || { echo "molecule-hold did not land; NOT draining — something in the molecule is still claimable" >&2; exit 1; }
+GC_ESCALATE_VERDICT_WINDOW=0 "$SCRIPTS/escalate.sh" --subject "<work-bead>" --key "<situation-key>" --message "<why you declined, and what releases the work>" \
+  || { echo "escalate.sh recorded no visit; NOT cancelling or draining" >&2; exit 1; }
+"$SCRIPTS/await-ruling.sh" "<work-bead>" --key "<situation-key>" --formula "<the formula a re-sling pours>" \
+  || { echo "the wait did not land on the work bead; NOT cancelling or draining" >&2; exit 1; }
+"$SCRIPTS/run-cancel.sh" --step "<formula>.<step-id>" --bead "<the bead_id your gc hook --claim returned>" --reason "<why you declined>" \
+  || { echo "run-cancel.sh did not end the run; NOT draining" >&2; exit 1; }
 gc runtime drain-ack
 ```
 
-`molecule-hold.sh` closes nothing, so whatever a live worker is holding stays
-where it is. Drain only if both landed. `escalate.sh` exits non-zero when it can
-neither file nor find the visit; `molecule-hold.sh` exits non-zero when it
-cannot prove which bead is yours, when duplicate step beads make that ambiguous,
-when the blocking write is refused, or when a route it had to clear survived,
-whether on the molecule root or on a sibling step. A drain after either failed
-leaves something in the molecule claimable.
+Drain only if every part landed. `escalate.sh` exits non-zero when it can
+neither file nor find the visit, and `await-ruling.sh` when the edge or the arm
+did not land. `run-cancel.sh` exits non-zero when it cannot prove which step is
+yours, or when gascity does not confirm the cancel. After any of those the step
+stays claimed, and the next worker it goes to retries.
 
-If the ruling that comes back is stand-down — the premise was falsified, or a
-live sitting owns the decision — the disposal step is the sitting's
-`gc-helm.sh takeaway <anchor> "<ruling>" --release --no-wait`: it parks the
-anchor and quiesces the molecule's routed steps in one writer, so the chain
-stops re-offering, and `--no-wait` records that the ruling ended the wait
-rather than moving it. Your part stays the same: record, escalate, hold, drain.
+If a sitting rules stand-down on work whose run is still live, its disposal is
+`gc-helm.sh takeaway <anchor> "<ruling>" --release --no-wait`. It parks the
+anchor and cancels the run beneath it through gascity, so nothing re-offers the
+chain, and `--no-wait` records that the ruling ended the wait rather than
+moving it. Your part stays the same: record the wait, cancel, drain.
 
 ## Sends to repos we do not own
 
@@ -484,9 +519,10 @@ OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty
 The metadata and the closed status ride the create, so the observation is
 filed whole or not at all.
 
-The provenance key's `<owner/repo>` is the full slug — derive it with
-`gh repo view --json nameWithOwner -q .nameWithOwner`, or parse the
-origin URL.
+The provenance key's `<owner/repo>` is origin's full slug — derive it with
+`gh repo view "$(git remote get-url origin)" --json nameWithOwner -q .nameWithOwner`,
+or parse the origin URL. A bare `gh repo view` can answer for an upstream
+remote instead.
 
 Provenance names the turn or the comment, not the finding, so it is only
 half of the dedup key and `obs.category` is the other half. One turn can

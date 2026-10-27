@@ -12,7 +12,11 @@
 # review's child never adopted for a ruling, the open-PR guards (a live anchor
 # at pull_request, carrying no disposition, naming its branch, target and PR),
 # the no-double-dispatch refusal on a partial pour, and every lane returned to
-# unreviewed (review-outcome.sh, run for real) once the child is dispatched.
+# unreviewed (review-outcome.sh, run for real) once the child is dispatched,
+# resolved at the head of the anchor's branch, whose failed read refuses before
+# anything is filed. The head is read, and the lanes are resolved, in the
+# anchor's rig checkout, whatever directory the sitting runs from, and an anchor
+# whose rig checkout does not resolve refuses too. A git stub answers the read.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,20 +54,30 @@ if [ "${1:-}" = "sling" ]; then
     esac
     shift || true
   done
+  # A pour copies the bead's priority into its workflow once: poured_priority
+  # records it, bd's default 2 when none was written.
   if [ -z "${STUB_SLING_NOPOUR:-}" ] && [ -n "$bead" ]; then
     tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-cr.XXXXXX")
     jq -c --arg id "$bead" --arg p "$pool" \
-      'map(if .id == $id then (.metadata["gc.execution_routed_to"] = $p | .metadata |= del(.["gc.routed_to"])) else . end)' \
+      'map(if .id == $id then (.metadata["gc.execution_routed_to"] = $p | .metadata |= del(.["gc.routed_to"]) | .poured_priority = (.priority // 2)) else . end)' \
       "$STORE" > "$tmp" && mv "$tmp" "$STORE"
   fi
   exit 0
 fi
-# Any non-bd command (agent list for pool-route, session wake/nudge) is a quiet
-# success: pool-route reads an empty agent set as UNREADABLE and returns the
-# route UNVERIFIED (exit 0), which is enough for the dispatch to proceed.
+# The rig list the SUT finds the anchor's rig checkout in (bead-store.sh): the
+# anc prefix is the rig at STUB_RIG_PATH, unless STUB_RIG_UNLISTED leaves it out.
+if [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ]; then
+  if [ -n "${STUB_RIG_UNLISTED:-}" ]; then echo '{"rigs":[]}'
+  else printf '{"rigs":[{"name":"anc-rig","prefix":"anc","path":"%s"}]}\n' "${STUB_RIG_PATH:?}"; fi
+  exit 0
+fi
+# Any other non-bd command (agent list for pool-route, session wake/nudge) is a
+# quiet success: pool-route reads an empty agent set as UNREADABLE and returns
+# the route UNVERIFIED (exit 0), which is enough for the dispatch to proceed.
 [ "${1:-}" = "bd" ] || exit 0
 shift
-bead_json() { jq -c --arg id "$1" '[.[] | select(.id == $id)]' "$STORE"; }
+# Every bead bd prints carries a priority, P2 unless one was written.
+bead_json() { jq -c --arg id "$1" '[.[] | select(.id == $id) | .priority //= 2]' "$STORE"; }
 case "${1:-}" in
   show)
     out=$(bead_json "$2")
@@ -85,6 +99,9 @@ case "${1:-}" in
         --append-notes) shift
           jq -c --arg id "$id" --arg n "${1:-}" \
             'map(if .id == $id then .notes = (((.notes // "") | if . == "" then "" else . + "\n" end) + $n) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
+        --priority|-p) shift
+          jq -c --arg id "$id" --arg p "${1#P}" \
+            'map(if .id == $id then .priority = ($p | tonumber) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
       esac
       shift || true
     done
@@ -92,12 +109,14 @@ case "${1:-}" in
   create)
     shift; title="$1"; shift
     [ -n "${STUB_CREATE_FAIL:-}" ] && exit 1
-    # --metadata lands in the same insert as the bead, as bd applies it.
-    cmeta='{}'
+    # --metadata lands in the same insert as the bead, as bd applies it, and so
+    # does --parent <id>: .parent and a parent-child edge row onto <id>.
+    cmeta='{}'; cparent=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --metadata) shift; cmeta="${1:-}" ;;
         --metadata=*) cmeta="${1#--metadata=}" ;;
+        --parent) shift; cparent="${1:-}" ;;
       esac
       shift || true
     done
@@ -106,7 +125,8 @@ case "${1:-}" in
     n=$(cat "$STUB_SEQ" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s' "$n" > "$STUB_SEQ"
     printf '%s\n' "$title" >> "${STUB_CREATED:?}"
     tmp=$(mktemp "${TMPDIR:-/tmp}/gctk-cr.XXXXXX")
-    jq -c --arg id "fix-$n" --argjson m "$cmeta" '. + [{"id":$id,"status":"open","assignee":"","metadata":$m,"notes":""}]' "$STORE" > "$tmp" && mv "$tmp" "$STORE"
+    jq -c --arg id "fix-$n" --argjson m "$cmeta" --arg par "$cparent" '. + [{"id":$id,"status":"open","assignee":"","metadata":$m,"notes":""} + (if $par == "" then {} else {parent: $par} end)]' "$STORE" > "$tmp" && mv "$tmp" "$STORE"
+    [ -z "$cparent" ] || printf 'fix-%s|%s|parent-child\n' "$n" "$cparent" >> "$DEPS"
     # STUB_CREATE_NOID: the insert lands but no id comes back, as when the call
     # is killed after its write commits.
     [ -n "${STUB_CREATE_NOID:-}" ] && exit 1
@@ -155,7 +175,7 @@ case "${1:-}" in
       shift || true
     done
     out=$(jq -c --arg st "$statuses" '[ .[] | (.status // "open") as $b
-      | select($st == "" or (($st | split(",")) | index($b))) ]' "$STORE")
+      | select($st == "" or (($st | split(",")) | index($b))) | .priority //= 2 ]' "$STORE")
     for f in ${fields[@]+"${fields[@]}"}; do
       out=$(printf '%s' "$out" | jq -c --arg k "${f%%=*}" --arg v "${f#*=}" \
         '[ .[] | select(((((.metadata // {})[$k]) // "") | tostring) == $v) ]')
@@ -164,8 +184,36 @@ case "${1:-}" in
 esac
 STUB
 chmod +x "$BIN/gc"
+# A git stub for the one remote read the run makes, the anchor branch's head:
+# ls-remote answers STUB_LS_REMOTE_HEAD, else the sha1, for each refs/heads/<branch>
+# it is asked for, unless STUB_LS_REMOTE_MISS names that branch, and logs the
+# call to STUB_GIT_LOG. Every other call is the real git.
+REAL_GIT="$(command -v git)"
+{ printf '#!/usr/bin/env bash\nREAL_GIT=%q\n' "$REAL_GIT"; cat; } > "$BIN/git" <<'GIT'
+case " $* " in
+  *" ls-remote "*)
+    printf '%s\n' "$*" >> "${STUB_GIT_LOG:?}"
+    for a in "$@"; do
+      case "$a" in refs/heads/*) ;; *) continue ;; esac
+      b="${a#refs/heads/}"
+      [ "${STUB_LS_REMOTE_MISS:-}" = "$b" ] && continue
+      printf '%s\t%s\n' "${STUB_LS_REMOTE_HEAD:-$(printf '%s' "$b" | sha1sum | cut -d' ' -f1)}" "$a"
+    done
+    exit 0 ;;
+esac
+exec "$REAL_GIT" "$@"
+GIT
+chmod +x "$BIN/git"
 export PATH="$BIN:$PATH"
 export GC_RIG="gc-toolkit"
+# The priority writer rework-child.sh settles the child with: this tree's
+# queue-priority.sh over the stub store, named by GC_QUEUE_PRIORITY_TOOL. The
+# writer finds a bead's store in the rig list, which the stub does not serve, so
+# the wrapper names a store directory of the suite's own for its lock.
+mkdir -p "$TMP/qp-rig/.beads"
+printf '#!/usr/bin/env bash\nexec %q "$@" --db %q\n' "$HERE/queue-priority.sh" "$TMP/qp-rig/.beads" > "$BIN/queue-priority"
+chmod +x "$BIN/queue-priority"
+export GC_QUEUE_PRIORITY_TOOL="$BIN/queue-priority"
 
 # No check index: review-checks.sh then resolves every check_set token as a
 # lane gating every transition, so the lanes do not depend on the checkout.
@@ -175,15 +223,27 @@ export STUB_DEPS="$TMP/deps"
 export STUB_GC_LOG="$TMP/gc.log"
 export STUB_SEQ="$TMP/seq"
 export STUB_CREATED="$TMP/created"
+export STUB_GIT_LOG="$TMP/git.log"
+# The anchor's rig checkout, which the rig list names for the anc prefix.
+export STUB_RIG_PATH="$TMP/anc-rig"
+git init -q "$STUB_RIG_PATH"
+git -C "$STUB_RIG_PATH" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m "the anchor's head"
 
 # reset <anchor-json>: seed the store with one anchor and clear the logs.
 reset() {
   printf '%s\n' "$1" > "$STUB_STORE"
-  : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_CREATED"; printf '0' > "$STUB_SEQ"
-  unset STUB_SLING_NOPOUR STUB_UPD_FAIL STUB_CREATE_FAIL STUB_CREATE_NOID STUB_LIST_FAIL 2>/dev/null || true
+  : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_CREATED"; : > "$STUB_GIT_LOG"; printf '0' > "$STUB_SEQ"
+  unset STUB_SLING_NOPOUR STUB_UPD_FAIL STUB_CREATE_FAIL STUB_CREATE_NOID STUB_LIST_FAIL STUB_LS_REMOTE_MISS STUB_LS_REMOTE_HEAD STUB_RIG_UNLISTED 2>/dev/null || true
 }
 meta()    { jq -r --arg id "$1" --arg k "$2" 'first(.[] | select(.id == $id) | .metadata[$k]) // ""' "$STUB_STORE"; }
 created() { wc -l < "$STUB_CREATED" | tr -d ' '; }
+# The priority the sling poured a bead's workflow at, and every parent it
+# carries: a parent-child edge row or the parent field a create wrote.
+poured()  { jq -r --arg id "$1" 'first(.[] | select(.id == $id) | (.poured_priority // "<unpoured>")) // "<absent>"' "$STUB_STORE"; }
+parents() {
+  { awk -F'|' -v id="$1" '$1 == id && $3 == "parent-child" { print $2 }' "$STUB_DEPS"
+    jq -r --arg id "$1" '.[] | select(.id == $id) | (.parent // empty)' "$STUB_STORE"; } | sort -u | paste -sd, -
+}
 # Does the child block the anchor? The edge is recorded dependent|blocker, so a
 # child (arg 1) blocking the anchor (arg 2) is the line "<anchor>|<child>|blocks".
 blocks_anchor() { grep -qxF "$2|$1|blocks" "$STUB_DEPS"; }
@@ -219,6 +279,29 @@ if blocks_anchor fix-1 anc-1; then ok "child blocks the anchor (merge held by th
 eq "$(meta fix-1 gc.execution_routed_to)" "gc-toolkit/gc-toolkit.polecat" "child was slung (execution_routed_to read back)"
 has "$OUT" "filed rework fix-1 on anchor anc-1" "reports the filed child"
 eq "$(meta fix-1 prepare_mode)" "" "prepare_mode left unset (resume defaults merge; refinery re-stamps)"
+
+echo "# --- PR-finishing work: the shift, no parent, and the priority it is slung at ---"
+# The anchor sits under a P2 epic, its posture in the shape pr-facts.sh stores
+# it. A ruling's rework of a PR that is not approved is slung one level sooner
+# than its anchor, at P1, and of an approved PR at P0. A rank that compared the
+# whole stored posture with approved would sling the second at P1.
+OID=0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901
+under_epic() { # <posture>: ANCHOR_PR moved under a P2 epic, with that posture read at the PR's head
+  printf '%s' "$ANCHOR_PR" | jq -c --arg p "$1" '
+    (.[0] | .metadata.pr_posture = $p | .metadata.pr_head_oid = ($p | split("@")[1]) | .priority = 4
+       | .dependencies = [{issue_id: "anc-1", depends_on_id: "ep-2", type: "parent-child"}]) as $a
+    | [$a, {id: "ep-2", status: "open", assignee: "", notes: "", issue_type: "epic", priority: 2, metadata: {}}]'
+}
+reset "$(under_epic "commented@$OID@2026-10-11T00:00:00Z")"
+"$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" >/dev/null 2>&1
+eq "$(meta fix-1 priority_shift)" "-1" "the ruling's rework is born carrying the PR-finishing shift"
+eq "$(parents fix-1)" "" "…with no parent, so no hold on an epic reaches it"
+eq "$(poured fix-1)" "1" "…and slung at P1, one level sooner than its anchor under a P2 epic"
+reset "$(under_epic "approved@$OID@2026-10-11T00:00:00Z")"
+"$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" >/dev/null 2>&1
+eq "$(poured fix-1)" "0" "a ruling's rework of an approved PR is slung at P0"
+reset "$ANCHOR_PR"
+"$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment directly to docs/material-layers.md" >/dev/null 2>&1
 
 echo "# --- idempotency: a second run on the same ruling files no second child ---"
 OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment directly to docs/material-layers.md" 2>&1); RC=$?
@@ -344,6 +427,48 @@ OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2
 eq "$RC" "0" "the re-run exits 0"
 has "$OUT" "0 standing review(s) superseded" "…with nothing left to supersede"
 eq "$(created)" "1" "…and no second child"
+
+echo "# --- the lanes are resolved at the head of the anchor's branch ---"
+reset "$WITH_LANES"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2>&1); RC=$?
+eq "$RC" "0" "exit 0"
+has "$(cat "$STUB_GIT_LOG")" "-C $STUB_RIG_PATH ls-remote origin refs/heads/polecat/anc-1" "the head of the anchor's branch is read from origin in the anchor's rig checkout"
+eq "$(meta rv-c gc.outcome)" "superseded" "…and the supersede it names resolves the lanes"
+
+echo "# --- from another checkout, the head is read and the lanes resolved in the anchor's rig ---"
+# A sitting runs from the city or another rig's checkout. With no index named
+# outright, the lanes resolve at the head's commit, which the anchor's rig
+# checkout holds and the sitting's checkout does not, so a supersede resolved
+# in the sitting's directory finds no repository holding it.
+OTHER="$TMP/other-checkout"; git init -q "$OTHER"
+RIG_HEAD=$(git -C "$STUB_RIG_PATH" rev-parse HEAD)
+reset "$WITH_LANES"
+OUT=$(cd "$OTHER" && env -u GC_REVIEW_CHECKS_INDEX -u GC_RIG_ROOT STUB_LS_REMOTE_HEAD="$RIG_HEAD" \
+  "$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2>&1); RC=$?
+eq "$RC" "0" "exit 0 from another checkout"
+has "$(cat "$STUB_GIT_LOG")" "-C $STUB_RIG_PATH ls-remote origin refs/heads/polecat/anc-1" "…the head read in the anchor's rig checkout"
+eq "$(meta rv-c gc.outcome)" "superseded" "…and the lanes resolved at that head there and returned"
+eq "$(meta rv-a gc.outcome)" "superseded" "…every lane"
+
+echo "# --- an anchor whose rig checkout does not resolve refuses with nothing written ---"
+reset "$WITH_LANES"
+OUT=$(STUB_RIG_UNLISTED=1 "$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2>&1); RC=$?
+eq "$RC" "2" "exit 2 when no rig carries the anchor's prefix"
+has "$OUT" "rig checkout did not resolve" "…saying why"
+eq "$(created)" "0" "…no child filed"
+eq "$(grep -c 'ls-remote' "$STUB_GIT_LOG")" "0" "…and no head read in any other repository"
+eq "$(meta rv-c gc.outcome)" "recorded" "…and the approves stand"
+
+echo "# --- a head that does not read refuses with nothing written ---"
+reset "$WITH_LANES"
+export STUB_LS_REMOTE_MISS="polecat/anc-1"
+OUT=$("$SUT" --anchor anc-1 --ruling-bead vis-1 --ruling "apply the amendment" 2>&1); RC=$?
+unset STUB_LS_REMOTE_MISS
+eq "$RC" "2" "exit 2 when the branch's head does not read"
+has "$OUT" "did not read from origin" "…saying why"
+eq "$(created)" "0" "…no child filed"
+eq "$(meta rv-c gc.outcome)" "recorded" "…and the approves stand"
+eq "$(grep -c '^bd list' "$STUB_GC_LOG")" "0" "…before the writer's dedup read"
 
 echo "# --- a supersede that fails fails the run, and the re-run finishes it ---"
 reset "$(printf '%s' "$WITH_LANES" | jq -c '(.[] | select(.id == "anc-1") | .metadata) |= del(.check_set)')"

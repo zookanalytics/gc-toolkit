@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# review-sweep — arm 9 of the merge cadence; caller: refinery-reconcile.sh.
+# review-sweep — arm 8 of the merge cadence; caller: refinery-reconcile.sh.
 # Closes a dispatched review that has no reviewable surface left: its anchor is
 # closed AND its review_branch is absent from origin. Both conditions are
 # required. An anchor still gating means the review is owed, and a branch that
@@ -93,7 +93,7 @@ while IFS=$'\t' read -r rid anchor branch; do
 
   gc bd update "$rid" \
     --set-metadata gc.outcome=moot \
-    --append-notes "$PROG: closed with no verdict. Anchor $anchor is closed (merge_result=${AMR:-unrecorded}) and origin has no branch $branch, so neither approve nor request-changes could bind to a commit. No check marker was written and no rework child was filed." \
+    --append-notes "$PROG: closed with no verdict. Anchor $anchor is closed (merge_result=${AMR:-unrecorded}) and origin has no branch $branch, so neither approve nor request-changes could bind to a commit. No verdict was recorded and no rework child was filed." \
     --status=closed </dev/null >/dev/null 2>&1 || true
 
   if ! RROW=$(bd_show "$rid"); then

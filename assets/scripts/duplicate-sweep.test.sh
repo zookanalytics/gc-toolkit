@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/duplicate-sweep.sh — arm 11 of the merge
+# Hermetic test for assets/scripts/duplicate-sweep.sh — arm 10 of the merge
 # cadence. Covers, for the duplicate_of marker pass: both proofs of "recorded
 # no work" (an explicit work_outcome=no-op and the structural no-work-key case)
 # and the fact that a no-op duplicate carrying the TWIN's branch still
@@ -405,7 +405,7 @@ run >/dev/null
 eq "$(bstatus O1)" "closed" "keys present with empty values record no dispatch"
 
 echo "# a twin that was dispatched is left alone"
-for k in gc.execution_routed_to gc.routed_to gc.dispatch_when_ready gc.claimed_at work_dir self_review_passed_sha gc.work_outcome; do
+for k in gc.execution_routed_to gc.routed_to gc.dispatch_when_ready gc.claimed_at work_dir gc.work_outcome; do
   twin_scene "{\"$k\":\"x\"}"
   out=$(run)
   eq "$(bstatus O1)" "open" "a twin recording $k is not disposed"

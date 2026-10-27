@@ -565,26 +565,24 @@ func fixtureBoard() board.Board {
 				TakeawayBy: nil,
 
 				Frontier:  "needs-review · all 2 closed · 0 open",
-				Needs:     "all 2 closed — graduate",
+				Needs:     "all 2 tracked closed",
 				RankScore: 3000,
-				// Settled at the head with nothing in flight — awaiting a human's
-				// graduate decision — so the shared core reads it needs-review.
+				// Settled at the head with nothing in flight, so the shared core
+				// reads it needs-review.
 				Phase: board.PhaseNeedsReview,
 				// A LOW row with nothing asking bands cleanup. ClusterKey is pinned
 				// here — the fixture's one clustered row — to carry the field into
 				// the TypeScript check, the way the DONE tile carries closed_at; on
 				// a live board it is set only when at least three rows share it.
 				Section:    board.SectionCleanup,
-				ClusterKey: "all 2 closed — graduate",
+				ClusterKey: "all 2 tracked closed",
 				GroupRoot:  "gt-1a2b3",
 			},
-			// A merge anchor: the PR round-trip's row. Wedged at the convergence
-			// cap's exception, which is the live shape six of the seven wedged
-			// anchors carried when the surface was designed — and with no PR
-			// number, because that is the state most of them were in. It pins
-			// the whole axis field set, including the zero `pr_number` a
-			// pre-open row carries and the `pr_owed_since` the queue is ranked
-			// by, so the TypeScript side sees every one of them.
+			// A merge anchor: the PR round-trip's row, blocked on the operator
+			// and with no PR number yet. It pins the whole axis field set,
+			// including the zero `pr_number` a pre-open row carries and the
+			// `pr_owed_since` the queue is ranked by, so the TypeScript side sees
+			// every one of them.
 			{
 				ID:       "tk-01n5cc",
 				Rig:      "gc-toolkit",
@@ -627,9 +625,9 @@ func fixtureBoard() board.Board {
 
 				UpdatedAt: time.Date(2026, 8, 11, 14, 55, 0, 0, time.UTC),
 				Frontier:  "needs-attention · polecat/tk-01n5cc · owed 3d",
-				Needs:     "wedged: the review cap parked this anchor — a ruling releases it, a new commit does not",
+				Needs:     "blocked: held by tk-01n5cc.1 — an unrouted blocker no automated actor will clear",
 				RankScore: 2003003,
-				// A wedged live merge anchor: a human must unstick it. On a merge
+				// A blocked live merge anchor: a human must unstick it. On a merge
 				// anchor the per-bead Phase equals PRPhase — one bead, one tri-state
 				// — because both read the same shared core off the same facts.
 				PRPhase: board.PhaseNeedsAttention,
@@ -641,18 +639,18 @@ func fixtureBoard() board.Board {
 				PRNumber:       0,
 				PRURL:          "",
 				PRBranch:       "polecat/tk-01n5cc",
-				PRMachine:      board.MachineWedgedException,
+				PRMachine:      board.MachineBlocked,
 				PRConversation: board.ConversationUnknown,
 				PRApproval:     board.AxisUnknown,
 				// Three days before the board was generated, and held there by
 				// every reconcile pass in between.
 				PROwedSince: time.Date(2026, 8, 8, 11, 2, 0, 0, time.UTC),
 				// A merge anchor is a pull request's row, so it bands review even
-				// while it is wedged on the operator.
+				// while it waits on the operator.
 				Section:   board.SectionReview,
 				GroupRoot: "tk-01n5cc",
 				// The accept-able case: a recommendation rides this anchor (the
-				// design's worked instance — dispose the wedged PR), so the
+				// design's worked instance — dispose the stuck branch), so the
 				// fixture carries both fields non-zero into the TypeScript check.
 				Acceptable:    true,
 				AcceptFormula: "mol-dispose-pr",

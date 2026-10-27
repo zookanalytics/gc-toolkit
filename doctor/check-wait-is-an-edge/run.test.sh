@@ -132,9 +132,6 @@ park_route = "human"
 [holds]
 marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 settled_keys = ["gc.takeaway=gc.takeaway_settled"]
-marker_prefixes = ["dispatch_backstop."]
-gate_marker_prefix = "check."
-gate_hold_verb = "exception"
 route_key = "gc.routed_to"
 terminal_wait_key = "gc.demand_for"
 hold_severity = "warn"
@@ -211,20 +208,15 @@ notheld() { # <metadata-json> <label>
   eq "$RC" "0" "$2 is not a hold"
 }
 held '{"triage.hold":"x"}'                       "triage.hold"
-held '{"blocked_reason":"the cap fired"}'        "blocked_reason"
+held '{"blocked_reason":"a person must rule"}'  "blocked_reason"
 held '{"gc.takeaway":"needs an operator ruling"}' "gc.takeaway"
 held '{"gc.routed_to":"human"}'                  "gc.routed_to on the park route"
-held '{"dispatch_backstop.codex":"5@abc123"}'    "dispatch_backstop.<g>"
 notheld '{"gc.routed_to":"alpha/alpha.polecat"}' "gc.routed_to on a pool"
-# No lane state is a hold: each is one some actor moves the anchor on from, and
-# the cap's park is merge_hold, asserted through blocked_reason and gc.takeaway.
-notheld '{"check.codex":"green"}'                "a green lane"
-notheld '{"check.codex":"fixing"}'               "a fixing lane"
-notheld '{"check.codex":"unreviewed"}'           "an unreviewed lane"
-notheld '{"check.codex":"validating"}'           "a validating lane"
+# merge_hold is not a marker: a hold that must show as an edge asserts it
+# through blocked_reason or gc.takeaway beside it.
+notheld '{"merge_hold":"operator freeze"}'       "merge_hold"
 notheld '{"blocked_reason":""}'                  "an empty blocked_reason"
 notheld '{"gc.takeaway":""}'                     "an empty gc.takeaway"
-notheld '{"dispatch_count":"5"}'                 "a dispatch tally with no backstop stamp"
 
 # --- 8. every non-closed status is in scope -------------------------------
 for st in open in_progress blocked deferred hooked pinned; do
@@ -284,21 +276,12 @@ park_route = "parked"
 
 [holds]
 marker_keys = ["site.hold"]
-marker_prefixes = ["quarantine."]
-gate_marker_prefix = "gate."
-gate_hold_verb = "waived"
 route_key = "routed"
 TOML
 store '[{"id":"aa-101","status":"open","metadata":{"site.hold":"declared only in the fixture"}}]'
 OUT=$(PACK="$TMP/pack2" run_check); RC=$?
 eq "$RC" "1" "a marker declared only in lifecycle.toml is asserted"
 has "$OUT" "site.hold" "and the finding names it"
-store '[{"id":"aa-101","status":"open","metadata":{"quarantine.a":"x"}}]'
-OUT=$(PACK="$TMP/pack2" run_check); RC=$?
-eq "$RC" "1" "a declared marker PREFIX is asserted"
-store '[{"id":"aa-101","status":"open","metadata":{"gate.codex":"waived@abc"}}]'
-OUT=$(PACK="$TMP/pack2" run_check); RC=$?
-eq "$RC" "1" "the declared gate prefix and hold verb are asserted"
 store '[{"id":"aa-101","status":"open","metadata":{"routed":"parked"}}]'
 OUT=$(PACK="$TMP/pack2" run_check); RC=$?
 eq "$RC" "1" "the declared route key and park_route are asserted"
@@ -312,7 +295,7 @@ eq "$RC" "0" "a marker the declaration drops is no longer asserted"
 mkdir -p "$TMP/pack5/lifecycle"
 { echo '[machine]'; echo 'park_route = "human"'; echo; echo '[holds]'
   echo 'marker_keys = ["site.hold"]'; } > "$TMP/pack5/lifecycle/lifecycle.toml"
-for m in '{"dispatch_backstop.codex":"5@abc"}' '{"blocked_reason":"the cap fired"}' '{"gc.routed_to":"human"}'; do
+for m in '{"blocked_reason":"a person must rule"}' '{"gc.routed_to":"human"}'; do
   store '[{"id":"aa-101","status":"open","metadata":'"$m"'}]'
   OUT=$(PACK="$TMP/pack5" run_check); RC=$?
   eq "$RC" "0" "a declaration that drops a marker does not inherit it: $m"
@@ -321,18 +304,10 @@ store '[{"id":"aa-101","status":"open","metadata":{"site.hold":"x"}}]'
 OUT=$(PACK="$TMP/pack5" run_check); RC=$?
 eq "$RC" "1" "...and the marker it does declare still asserts"
 
-# Each half of a two-field arm is required. A gate prefix with no hold verb
-# declares no gate hold, so nothing under that prefix is one — including the
-# value an unguarded `startswith($verb + "@")` would match on an empty verb.
-mkdir -p "$TMP/pack6/lifecycle"
-{ echo '[machine]'; echo 'park_route = "human"'; echo; echo '[holds]'
-  echo 'marker_keys = ["site.hold"]'; echo 'gate_marker_prefix = "check."'; } > "$TMP/pack6/lifecycle/lifecycle.toml"
-store '[{"id":"aa-101","status":"open","metadata":{"check.codex":"@abc"}}]'
-OUT=$(PACK="$TMP/pack6" run_check); RC=$?
-eq "$RC" "0" "a gate prefix with no hold verb declares no gate hold"
-# A route key with no park route likewise declares no route hold. The value to
-# test with is the empty string, because clearing a route by setting it empty
-# does not remove the key, so live beads really do carry it.
+# Each half of the route arm is required: a route key with no park route
+# declares no route hold. The value to test with is the empty string, because
+# clearing a route by setting it empty does not remove the key, so live beads
+# really do carry it.
 mkdir -p "$TMP/pack7/lifecycle"
 { echo '[holds]'; echo 'marker_keys = ["site.hold"]'; echo 'route_key = "gc.routed_to"'; } > "$TMP/pack7/lifecycle/lifecycle.toml"
 store '[{"id":"aa-101","status":"open","metadata":{"gc.routed_to":""}}]'

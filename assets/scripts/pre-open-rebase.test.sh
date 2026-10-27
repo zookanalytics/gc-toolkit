@@ -4,7 +4,7 @@
 # cannot yet be asked about. Covers: a conflicting branch dispatching ONE child
 # stamped prepare_mode=merge and routed, carrying no PR facts; a branch that still
 # merges dispatching nothing; every branch shape brought current by merge (no
-# shape rebases or force-pushes, polecat/* and a graduation included) and this
+# shape rebases or force-pushes, polecat/* and a landing bead's included) and this
 # site's agreement with pr-facts.sh's copy; the vetoes (merge_hold, rebase_hold, a
 # rebase_hold on a bead naming the branch, a live demand, no fix pool); a branch
 # whose edited code main deleted getting the operator's supersession decision
@@ -67,7 +67,7 @@ git init -q -b main "$SRC"
   } > pin.sh
   git add f.txt pin.sh; git commit -qm base
   BASE=$(git rev-parse HEAD)
-  for spec in "polecat/tk-c1:C1" "integration/conv:CONV" "polecat/tk-grad:GRAD" "polecat/tk-hold:HOLD"; do
+  for spec in "polecat/tk-c1:C1" "integration/conv:CONV" "integration/A4:LAND" "polecat/tk-hold:HOLD"; do
     git checkout -q -b "${spec%%:*}" "$BASE"
     printf 'l1\n%s\nl3\n' "${spec#*:}" > f.txt
     git commit -qam "${spec%%:*}"
@@ -166,6 +166,47 @@ has "$(grep '^bd create' "$STUB_GC_LOG")" "--deps related:A1" "…which rides th
 has "$(grep '^bd create' "$STUB_GC_LOG")" '"prepare_mode":"merge"' "…and with its work order on the create"
 hasnt "$(grep "^bd update $K" "$STUB_GC_LOG")" "--set-metadata task_kind" "…so no second write stamps the work order"
 has "$(cat "$STUB_SESSION_LOG")" "wake $POOL" "the fix pool is woken"
+eq "$(meta "$K" priority_shift)" "-1" "the child is born carrying the PR-finishing shift"
+eq "$(bparents "$K")" "" "…with no parent, so no hold on an epic reaches it"
+eq "$(bprio "$K")" "1" "…and routed at its anchor's priority less one (A1 reads at bd's default P2)"
+# The priority writer's own write is the one pinned to its store (--db), so a
+# route that carried a priority, or a priority the arm wrote itself, fails.
+PL=$(grep -n "^bd update $K --priority 1 --db " "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+RL=$(grep -n "^bd update $K --set-metadata gc.routed_to=$POOL" "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+if [ -n "$PL" ] && [ -n "$RL" ] && [ "$PL" -lt "$RL" ]; then
+  ok "…its priority written by the priority writer before the route"
+else
+  bad "the merge-in's priority was not written by the priority writer before its route (priority write at log line '${PL:-none}', route at '${RL:-none}')"
+fi
+hasnt "$(grep "^bd update $K --set-metadata gc.routed_to" "$STUB_GC_LOG")" "--priority" "…and the route written with no priority in it"
+
+echo "# a merge-in child is routed at its rank, and an earlier PR's approval does not raise it"
+# The anchor sits under a P2 epic, its own stored priority stale. It carries the
+# approved posture an earlier PR left, in the shape pr-facts.sh stores it, but
+# rests at pre_open_gate with no open PR, so its merge-in runs one level sooner
+# than its anchor, at P1, not at the P0 of an approved PR's work.
+EP2='{"id":"EP2","status":"open","assignee":"","notes":"","title":"epic","description":"d","issue_type":"epic","priority":2,"metadata":{}}'
+reset "$EP2" "$(pre A1e polecat/tk-c1 ',"pr_posture":"approved@'"$C1_HEAD"'@2026-10-11T00:00:00Z"' \
+  | jq -c '.priority = 0 | .dependencies = [{issue_id: "A1e", depends_on_id: "EP2", type: "parent-child"}]')"
+OUT=$(run --fix-pool "$POOL")
+K=$(newborn)
+eq "$(meta "$K" "gc.routed_to")" "$POOL" "the merge-in child of an anchor under a P2 epic is routed"
+eq "$(bprio "$K")" "1" "…at P1, the approval an earlier PR left on the anchor aside"
+has "$OUT" "routed to $POOL at P1" "…and the pass log names the priority"
+
+echo "# a merge-in child whose priority does not settle is left unrouted"
+printf '#!/usr/bin/env bash\necho "queue-priority: settle: cannot compute the priority of $2" >&2\nexit 1\n' > "$TMP/qp-fail"
+chmod +x "$TMP/qp-fail"
+reset "$(pre A1f polecat/tk-c1)"
+OUT=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-fail" run --fix-pool "$POOL")
+K=$(newborn)
+has "$OUT" "rework $K did not settle at its priority; left unrouted" "the child is held, named"
+eq "$(meta "$K" "gc.routed_to")" "<absent>" "…carrying no route, so no pool claims it at a priority it was never ranked at"
+hasnt "$(cat "$STUB_SESSION_LOG")" "wake $POOL" "…and the fix pool is not woken"
+OUT=$(run --fix-pool "$POOL")
+eq "$(meta "$K" "gc.routed_to")" "$POOL" "the next pass re-routes it once its priority settles"
+eq "$(bprio "$K")" "1" "…at its priority"
+eq "$(newcount)" "1" "…with no twin filed beside it"
 
 echo "# a branch a landed change superseded gets the operator's decision, not a child"
 ( cd "$WORK" && git merge-tree --write-tree --quiet origin/main origin/polecat/tk-moot >/dev/null 2>&1 ); rc=$?
@@ -209,9 +250,9 @@ has "$(jq -r --arg k "$K" '.[]|select(.id==$k)|.title' "$STUB_STORE")" "Merge ma
 has "$(meta "$K" rejection_reason)" "Do NOT rebase it and do NOT force-push it" "the work order forbids the rewrite"
 hasnt "$(meta "$K" rejection_reason)" "force-with-lease" "and never names a force-push"
 
-reset "$(pre A4 polecat/tk-grad ',"graduation":"true"')"
+reset "$(pre A4 integration/A4 ',"target":"main"')"
 run --fix-pool "$POOL" >/dev/null
-eq "$(meta "$(newborn)" prepare_mode)" "merge" "a graduation merges whatever its branch is named"
+eq "$(meta "$(newborn)" prepare_mode)" "merge" "a landing bead, whose branch is named for itself, merges"
 
 echo "# operator and human holds"
 reset "$(pre A5 polecat/tk-hold ',"merge_hold":"true"')"
@@ -278,6 +319,17 @@ if [ -n "$JL" ] && [ -n "$WL" ] && [ "$JL" -lt "$WL" ]; then
 else
   bad "the stranded child was not joined before its work order was written (join at log line '${JL:-none}', write at '${WL:-none}')"
 fi
+
+# A child whose run stopped to ask a person keeps its rejection_reason, which
+# names this head, and waits armed to re-sling with its route keys cleared
+# (await-ruling.sh). Its arm re-dispatches it once the person rules, so it
+# covers the branch and is no strand.
+reset "$(pre AA4 polecat/tk-c1)" "$(printf '{"id":"S4","status":"open","assignee":"","title":"waiting","metadata":{"branch":"polecat/tk-c1","task_kind":"rework","anchor_bead":"AA4","rejection_reason":"stale base at head %s: ...","gc.routed_to":"","gc.execution_routed_to":"","resling_target":"%s","gc.dispatch_when_ready":"%s"}}' "$C1_HEAD" "$POOL" "$POOL")"
+OUT=$(run --fix-pool "$POOL")
+eq "$(newcount)" "0" "a child armed to re-sling at this head is not twinned"
+has "$OUT" "already covers this branch" "…it covers the branch"
+hasnt "$OUT" "re-routing stranded rework S4" "…and is not taken for a strand"
+eq "$(meta S4 "gc.routed_to")" "" "…so it is not routed to the pool while it waits for its arm"
 
 # A stranded child that cannot be joined to the anchor is neither written nor
 # routed, so no child carries anchor_bead where the anchor's closed-children read

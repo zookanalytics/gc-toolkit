@@ -3,11 +3,10 @@
 # services/helm; the open verb is covered by gc-helm-open.test.sh). Runs the
 # REAL script with a stubbed `gc` on PATH — no live city, Dolt, network, or
 # sessions. Covered:
-#   --release molecule teardown: a husk (no live session on it) is REAPED —
-#     every step and the workflow root force-closed, incl. a held in_progress
-#     step — while the releasing session's OWN molecule keeps its chain
-#   --release on a CLOSED anchor: the reap without the resurrecting park
-#   the de-pin split write, so a refused assignee clear cannot void the route pins
+#   --release ends the run beneath the anchor through run-cancel.sh (gascity's
+#     run cancel) and writes no step or root itself, while a run the releasing
+#     session holds a step of is left to close its own chain
+#   --release on a CLOSED anchor: the run's end without the resurrecting park
 #   --waiting-on edges
 #   the ≤140-codepoint length gate, shared by takeaway and demand
 #   the demand verb's sibling shape and fail-closed edge
@@ -16,7 +15,8 @@
 #   the rig-enumeration helper leaving no trap installed on its caller
 #   the react verb: an already-reacted sling skip (exit 3) re-raised as react's
 #     own no-op code (5), distinct from a dispatch (0) and a real failure (4),
-#     and a live-workflow sling skip (exit 4) re-raised as react's code (6)
+#     a live-workflow sling skip (exit 4) re-raised as react's code (6), and a
+#     dispatch-path sling skip (exit 5) re-raised as react's code (7)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,29 +34,16 @@ eq()  { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 mkdir -p "$TMP/bin"
 
 # --- Fixture ------------------------------------------------------------------
-# A-PARKED anchors the molecule root-PARKED (via convoy-PARKED). No live session
-# holds a step of it (the run carries no identity), so the release REAPS the
-# husk — every step and the root are force-closed. Steps:
-#   s-load   affine  : assignee + routed + affinity  -> reaped (closed)
-#   s-impl   pool    : routed only                   -> reaped
-#   s-held   blocked : status=blocked, route cleared, assignee kept -> reaped
-#                      (the held-step shape molecule-hold.sh writes; only an
-#                      enumeration that includes blocked sees it)
-#   s-final  finalize: control-dispatcher route      -> reaped too; the teardown
-#                                                       replaces the escape route
-#   s-quiet  quiet   : no pins                       -> reaped (an open step is
-#                                                       still open, so it blocks)
-#   s-nonmol contract: another formula's graph.v2 step -> reaped too
-#   s-noref  not-v2  : pinned but NO gc.step_ref     -> never a candidate
-#   s-other  scope   : a different molecule's step   -> untouched
-#   s-orphan failsafe: root with no convoy (anchor unresolvable) -> untouched
-#   s-NOPIN  refused : the store rejects its close   -> de-pinned as a fallback
-#   s-fold   folded  : step of a molecule whose anchor is CLOSED -> reaped
-# and the gc.kind=workflow ROOTS, which carry a pool route of their own:
-#   root-PARKED      : this molecule's root          -> reaped with its steps
-#   root-OTHER       : another molecule's root       -> untouched
-#   root-ORPHAN      : root with no convoy           -> skipped (fail closed)
-#   root-FOLD        : root of the folded anchor's molecule -> reaped too
+# A-PARKED anchors the molecule root-PARKED (via convoy-PARKED). The run holds
+# no session identity, so no step of it is the releasing session's, and the
+# release ENDS that run through run-cancel.sh. gc-helm.sh writes none of its
+# steps or its root: gascity's cancel closes them. The rest of the fixture is
+# what the walk must leave alone:
+#   s-other / root-OTHER   : a different molecule, anchored elsewhere
+#   s-orphan / root-ORPHAN : a root with no convoy (anchor unresolvable)
+#   s-noref                : a pinned bead with no gc.step_ref
+#   s-fold / root-FOLD     : the molecule of the CLOSED anchor CLOSED-A-FOLD,
+#                            which the FOLDED section releases
 cat > "$TMP/steps.json" <<'JSON'
 [
   {"id":"s-load","assignee":"gc-toolkit__polecat-lx-dead","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"root-PARKED","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_affinity":"require"}},
@@ -111,6 +98,9 @@ case "$1 ${2:-}" in
        '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"},
                {name:"signal-loom", path:$sl, prefix:"sl"}]}' ;;
   "session list")
+    # FAKE_SESSIONS_JSON replaces the listing, for the dismiss cases that stop
+    # the session holding a visit.
+    [ -n "${FAKE_SESSIONS_JSON:-}" ] && { printf '%s\n' "$FAKE_SESSIONS_JSON"; exit 0; }
     # The no-id dismiss resolves the session's own rig from its record, because
     # a converse sitting defaults its store to the CITY ledger. converse-lx-1's
     # record names rig signal-loom (the rig whose path HAS a .beads dir), so the
@@ -228,6 +218,35 @@ case "$1 ${2:-}" in
         '(if $pl != "" then .[0].metadata.placement = $pl else . end) | (if $pa != "" then .[0].parent = $pa else . end)')
     fi
     printf '%s\n' "$row" ;;
+  "runtime drain-ack")
+    # The stop dismiss sends the session that held a visit. The log line names
+    # the caller's own session id and how many closes had landed, so a test can
+    # tell a self-ack from an operator ack and the stop from the close it
+    # follows. FAKE_DRAIN_RC fails it.
+    #
+    # Gas City's incarnation rules (cmd/gc/cmd_runtime_drain.go), which refuse
+    # with nothing acknowledged: an --operator ack names its target, and is
+    # refused when the caller's GC_SESSION_ID or GC_INSTANCE_TOKEN names that
+    # session, under either reconciler. Under v2 (FAKE_DRAIN_V2) a self-ack
+    # must carry the token on its own session's row. FAKE_SESSION_TOKENS holds
+    # the rows' tokens as <session-id>=<token> words. A refusal ends its log
+    # line with "| refused" and exits 1.
+    shift 2
+    tok_of() { local w; for w in ${FAKE_SESSION_TOKENS:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return 0; }; done; }
+    refused=""
+    if [ "${1:-}" = "--operator" ]; then
+      if [ -z "${2:-}" ] || [ "${GC_SESSION_ID:-}" = "$2" ] \
+         || { [ -n "${GC_INSTANCE_TOKEN:-}" ] && [ "$GC_INSTANCE_TOKEN" = "$(tok_of "$2")" ]; }; then
+        refused=1
+      fi
+    elif [ -n "${FAKE_DRAIN_V2:-}" ]; then
+      own=$(tok_of "${GC_SESSION_ID:-${GC_SESSION_NAME:-}}")
+      if [ -z "${GC_INSTANCE_TOKEN:-}" ] || [ "$GC_INSTANCE_TOKEN" != "$own" ]; then refused=1; fi
+    fi
+    printf 'drain-ack %s | self=%s | closes=%s%s\n' "$*" "${GC_SESSION_ID:-}" \
+        "$(grep -c . "$FAKE_CLOSES" 2>/dev/null || echo 0)" "${refused:+ | refused}" >> "${FAKE_DRAINS:-/dev/null}"
+    [ -z "$refused" ] || { echo "gc runtime drain-ack: refused by the incarnation rules; nothing acknowledged" >&2; exit 1; }
+    exit "${FAKE_DRAIN_RC:-0}" ;;
   "bd close")
     printf '%s\n' "$*" >> "$FAKE_CLOSES"
     printf '%s\n' "$*" >> "${FAKE_EVENTS:-/dev/null}"
@@ -238,22 +257,13 @@ case "$1 ${2:-}" in
       *HELD*) case "$*" in *--force*) ;; *) exit 1 ;; esac ;;
       *STUCK*) exit 1 ;;
     esac ;;
-  "convoy status")
-    # Record each convoy resolved, so a test can prove the quiesce confirms only
-    # the ONE molecule the reverse-tracks lookup matched — not one status call
-    # per open root in the store.
-    printf '%s\n' "$3" >> "${FAKE_CONVOY_CALLS:-/dev/null}"
-    anchor=$(awk -F'|' -v c="$3" '$1==c{print $2; exit}' "$FAKE_CONVOYS")
-    if [ -n "$anchor" ]; then jq -n --arg a "$anchor" '{children:[{id:$a}]}'
-    else printf '{"children":[]}\n'; fi ;;
   "bd update")
     printf '%s\n' "$*" >> "$FAKE_UPDATES"
     # FAKE_EVENTS logs updates and closes to one file, in the order they ran.
     printf '%s\n' "$*" >> "${FAKE_EVENTS:-/dev/null}"
-    # A store that rejects the write. NOPIN stands for every reason the route
-    # pins fail to land; the quiesce must not go on to unassign a bead it has
-    # just failed to de-route. NOSTAMP is the same refusal on a VISIT, where
-    # what fails to land is the outcome the board reads a finished sitting for.
+    # A store that rejects the write. NOPIN stands for every reason a write on
+    # a bead fails to land. NOSTAMP is the same refusal on a VISIT, where what
+    # fails to land is the outcome the board reads a finished sitting for.
     case "$3" in *NOPIN*|*NOSTAMP*) exit 1 ;; esac
     # FAKE_WORK_OUTCOME_REFUSE=1 rejects any update naming gc.work_outcome: the
     # store or gate that refuses the key, which must cost that write alone.
@@ -344,15 +354,6 @@ case "$1 ${2:-}" in
     # the way the real `dep list` reports a bead it cannot resolve — a JSON
     # error OBJECT on stdout, beside the non-zero exit a pipeline never sees.
     if [ "${3:-}" = "list" ]; then
-      # reverse `tracks` (dep list <bead> --direction=up -t tracks): the convoys
-      # that TRACK this bead — how the quiesce resolves the released molecule
-      # from its anchor. Derived from FAKE_CONVOYS (convoy|anchor).
-      case "$*" in
-        *--direction=up*)
-          awk -F'|' -v a="${4:-}" '$2==a{print $1}' "$FAKE_CONVOYS" \
-            | jq -Rnc '[inputs | select(length > 0) | {id: .}]'
-          exit 0 ;;
-      esac
       case "${4:-}" in
         A-PROBEDEAD*) exit 1 ;;
         A-PROBEJUNK*) printf '{"error":"resolving %s: no issue found","schema_version":1}\n' "${4:-}"; exit 1 ;;
@@ -368,7 +369,36 @@ exit 0
 GC
 chmod +x "$TMP/bin/gc"
 
+# run-cancel.sh stand-in: each call's argv on one line of FAKE_CANCELS, and
+# FAKE_CANCEL_RC as its exit, so a test can make a run that will not end.
+cat > "$TMP/bin/run-cancel-stub" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${FAKE_CANCELS:?}"
+[ "${FAKE_CANCEL_RC:-0}" = 0 ] || echo "run-cancel: run is not cancelled: the supervisor answered 503" >&2
+exit "${FAKE_CANCEL_RC:-0}"
+STUB
+chmod +x "$TMP/bin/run-cancel-stub"
+export GC_RUN_CANCEL_TOOL="$TMP/bin/run-cancel-stub" FAKE_CANCELS="$TMP/cancels"
+: > "$TMP/cancels"
+
 export PATH="$TMP/bin:$PATH"
+# run-lib.sh's verbs answer from the fixture store that is current: the live
+# store while its section's gc stub is first on PATH, the main one otherwise.
+# Its rows, with a convoy row for each "convoy|anchor" line tracking that
+# anchor, are judged by run-lib.sh's own run_rows, at each call.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf '. %q || exit 1\n' "$HERE/run-lib.sh"; cat; } > "$TMP/bin/helm-runs" <<'RUNS'
+store="$FAKE_STEPS_JSON"; convoys="$FAKE_CONVOYS"
+if [ -n "${LIVE_STORE:-}" ] && [ "$(command -v gc)" = "${LIVE_STORE%/*}/bin/gc" ]; then
+  store="$LIVE_STORE"; convoys="$LIVE_CONVOYS"
+fi
+jq -c --rawfile c "$convoys" "$RUN_JQ"'
+  . + [ $c | split("\n")[] | select(length > 0) | split("|")
+        | {id: .[0], issue_type: "convoy", status: "open", dependencies: [{depends_on_id: .[1], type: "tracks"}]} ]
+  | run_rows' "$store"
+RUNS
+chmod +x "$TMP/bin/helm-runs"
+export GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_CMD="$TMP/bin/helm-runs" RUN_LIB_STUB_LOG="$TMP/run-lib.log"
+: > "$TMP/run-lib.log"
 export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_CONVOYS="$TMP/convoys" FAKE_UPDATES="$TMP/updates" \
        FAKE_DEPS="$TMP/deps" FAKE_CLOSES="$TMP/closes" FAKE_LISTS="$TMP/lists" \
@@ -377,7 +407,7 @@ export FAKE_STEPS_JSON="$TMP/steps.json" FAKE_ROOTS="$TMP/roots" \
        FAKE_EXEC="$TMP/exec" FAKE_PLACEMENT="$TMP/placement" FAKE_PARENT="$TMP/parent" \
        FAKE_SNAME="$TMP/sname" FAKE_SID="$TMP/sid" FAKE_DEPLISTS="$TMP/deplists" \
        FAKE_BRANCHES="$TMP/branches" FAKE_ASSIGNEES="$TMP/assignees" \
-       FAKE_OUTCOME_DIR="$TMP/outcomes" FAKE_CONVOY_CALLS="$TMP/convoy-calls" \
+       FAKE_OUTCOME_DIR="$TMP/outcomes" \
        FAKE_EVENTS="$TMP/events"
 mkdir -p "$TMP/signal-loom/.beads" "$TMP/deplists" "$TMP/outcomes"
 : > "$TMP/convoy-calls"
@@ -441,7 +471,7 @@ unset GC_HELM_FIXTURE || true
 unset GC_SESSION_NAME GC_SESSION_ID GC_ALIAS GC_RIG BEADS_DIR || true
 
 # --- Run: park A-PARKED with --release. ---------------------------------------
-: > "$FAKE_CONVOY_CALLS"
+: > "$TMP/run-lib.log"; : > "$FAKE_CANCELS"
 OUT="$(sh "$SCRIPT" takeaway A-PARKED "parked" --by proactive --release --no-wait 2>"$TMP/err" || true)"
 ERR="$(cat "$TMP/err")"
 UP="$TMP/updates"
@@ -477,120 +507,86 @@ grep -q -- '--unset-metadata gc.session_id' <<< "$A" \
 grep -q 'gc.takeaway_by=proactive' <<< "$A" \
   && ok "(RELEASE) anchor takeaway headline stamped" || bad "(RELEASE) anchor takeaway stamped"
 
-# The molecule under A-PARKED is a husk — no live session holds one of its
-# steps — so it is REAPED: every step and the root are force-closed, so
-# workflow-finalize unblocks and the root reaps instead of parking open. A
-# reaped bead announces itself on stdout; a close the store refuses is named on
-# stderr and de-pinned instead.
-reaped() { grep -qE "reaped (step|root) $1( |\$)" <<< "$OUT"; }
+# No session the run carries holds a step of the molecule under A-PARKED, so the
+# release ENDS that run through gascity: one run-cancel.sh call naming its root.
+# gascity's cancel closes the root and its steps, so gc-helm.sh writes none of
+# them.
+CANCELS="$(cat "$FAKE_CANCELS")"
+grep -qE '^--root root-PARKED .*--reason ' <<< "$CANCELS" \
+  && ok "(CANCEL) the run under the released anchor is cancelled through run-cancel.sh --root" \
+  || bad "(CANCEL) root-PARKED was not cancelled (cancels: ${CANCELS:-<none>})"
+grep -q 'took its work out of play' <<< "$CANCELS" \
+  && ok "(CANCEL) …with a reason naming the release" || bad "(CANCEL) the cancel carries no reason (cancels: $CANCELS)"
+eq "$(grep -c . "$FAKE_CANCELS")" "1" "(CANCEL) exactly one run is cancelled: the one the anchor launched"
 
-# (REAP) every worker step of the husk molecule is force-closed.
-for s in s-load s-impl s-quiet; do
-  reaped "$s" && ok "(REAP) husk step $s reaped" || bad "(REAP) husk step $s not reaped (out: $OUT)"
-done
-grep -qE '^bd update s-load .*--status=closed' "$UP" \
-  && ok "(REAP) …via update --status=closed, which carries no assignee, so the claim guard never fires" \
-  || bad "(REAP) the close did not go through update --status=closed (got: $(line_for s-load))"
-grep -qE '^bd update s-load .*gc.outcome=stand-down' "$UP" \
-  && ok "(REAP) …and records gc.outcome=stand-down" || bad "(REAP) the teardown outcome is not stamped"
+# (NOMEMBER) the pack writes no step and no root of any molecule: no status, no
+# route, no assignee, no close.
+MEMBER_WRITES="$(grep -E '^bd update (s-|root-)' "$UP" || true)"
+[ -z "$MEMBER_WRITES" ] \
+  && ok "(NOMEMBER) no step or root is written by gc-helm.sh" \
+  || bad "(NOMEMBER) gc-helm.sh wrote molecule members: $MEMBER_WRITES"
+[ ! -s "$TMP/closes" ] \
+  && ok "(NOMEMBER) …and nothing is closed by gc-helm.sh" || bad "(NOMEMBER) closes: $(cat "$TMP/closes")"
 
-# (REAP HELD) the held affine step is the whole point: an open held step is what
-# kept workflow-finalize blocked, and update --status=closed closes it whoever
-# holds it — the ownership guard is on the `close` verb, not the closed state.
-reaped s-load && ok "(REAP HELD) a held (assigned) step is closed the same as any other" \
-  || bad "(REAP HELD) the held step was left open (out: $OUT)"
+# (SCOPE) a molecule anchored elsewhere, and a root whose anchor cannot be
+# resolved, are never cancelled.
+grep -q 'root-OTHER' <<< "$CANCELS" \
+  && bad "(SCOPE) another anchor's run was cancelled" || ok "(SCOPE) a run whose anchor != the released bead is left alone"
+grep -q 'root-ORPHAN' <<< "$CANCELS" \
+  && bad "(FAILCLOSE) an unresolvable root was cancelled" || ok "(FAILCLOSE) a root with no resolvable convoy is skipped (fail closed)"
 
-# (REAP BLOCKED) molecule-hold.sh writes a held step to status=blocked with its
-# route cleared and its assignee kept, so an enumeration of only open,in_progress
-# never sees it. Left unclosed it keeps the root's chain from closing and
-# workflow-finalize can never retire the molecule — so the reap enumeration
-# includes blocked, and the held step is force-closed like any other.
-reaped s-held && ok "(REAP BLOCKED) a status=blocked held step is enumerated and reaped" \
-  || bad "(REAP BLOCKED) the blocked held step was missed by the reap (out: $OUT)"
-
-# (CONTRACT) a graph.v2 step of ANOTHER formula, under the husk root, is reaped
-# too — selection is by contract (gc.step_ref), not formula name.
-reaped s-nonmol && ok "(CONTRACT) a non-mol-polecat-work graph.v2 step under the husk anchor is reaped" \
-  || bad "(CONTRACT) graph.v2 step of another formula must be reaped (out: $OUT)"
-
-# (REAP FINAL) the teardown closes workflow-finalize too: it is the molecule's
-# escape route only while the chain can close on its own, which a husk's never
-# will, so the reap is what dies here.
-reaped s-final && ok "(REAP FINAL) workflow-finalize is closed by the teardown, not left as an escape route" \
-  || bad "(REAP FINAL) finalize left open (out: $OUT)"
-
-# (NOTV2) no gc.step_ref -> never a candidate, even under the husk root.
-[ -z "$(line_for s-noref)" ] \
-  && ok "(NOTV2) bead with no gc.step_ref never touched (not a graph.v2 step)" \
-  || bad "(NOTV2) a bead without gc.step_ref must never be touched"
-
-# (SCOPE) a different molecule (anchor != parked bead) is left untouched.
-[ -z "$(line_for s-other)" ] \
-  && ok "(SCOPE) molecule whose anchor != parked bead untouched" || bad "(SCOPE) wrong molecule reaped"
-
-# (FAILCLOSE) a root whose anchor cannot be resolved is skipped.
-[ -z "$(line_for s-orphan)" ] \
-  && ok "(FAILCLOSE) unresolved-anchor root skipped (fail closed)" || bad "(FAILCLOSE) unresolved anchor reaped"
-
-# (ROOT) the gc.kind=workflow root is a second pool-routed door into the same
-# molecule, so it is reaped alongside its steps — a release that closes every
-# worker step and leaves the root open keeps drawing spawns onto the husk.
-reaped root-PARKED \
-  && ok "(ROOT) the workflow root is closed alongside its steps" \
-  || bad "(ROOT) the workflow root was not reaped (got: ${OUT})"
-
-# (ROOTSCOPE) the root walk inherits the step walk's scope and fail-closed guard.
-[ -z "$(line_for root-OTHER)" ] \
-  && ok "(ROOTSCOPE) a root whose anchor != the parked bead is untouched" \
-  || bad "(ROOTSCOPE) another molecule's root was reaped"
-[ -z "$(line_for root-ORPHAN)" ] \
-  && ok "(ROOTSCOPE) a root with no resolvable convoy is skipped (fail closed)" \
-  || bad "(ROOTSCOPE) an unresolvable root was reaped"
-
-# (REAPFAIL) a bead the store refuses to close is not left silently: the close
-# fails, and the fallback de-pins it so it stops re-attracting spawns while the
-# patrol retries. NOPIN refuses every write, so even the de-pin is refused, and
-# the run says so on stderr and never claims it reaped.
-grep -qE '^bd update s-NOPIN .*--status=closed' "$UP" \
-  && ok "(REAPFAIL) the refused bead's close was attempted" \
-  || bad "(REAPFAIL) the reap never tried to close s-NOPIN"
-grep -qE '^bd update s-NOPIN .*--unset-metadata gc.routed_to' "$UP" \
-  && ok "(REAPFAIL) …and the fallback de-pin was attempted so it stops re-offering" \
-  || bad "(REAPFAIL) a bead that would not close was not de-pinned as a fallback"
-reaped s-NOPIN && bad "(REAPFAIL) a refused close was reported as reaped" \
-  || ok "(REAPFAIL) …and a refused close never reads as reaped"
-grep -q 'could not reap step s-NOPIN' <<< "$ERR" \
-  && ok "(REAPFAIL) …and the failure is reported for the patrol to retry" \
-  || bad "(REAPFAIL) the failed reap is silent (stderr: $ERR)"
-
-# (REPORT) the run announces the steps it reaped.
-grep -q 'reaped step s-load' <<< "$OUT" \
-  && ok "(REPORT) run reports the affine step it reaped" || bad "(REPORT) run reports s-load (out: $OUT)"
+# (REPORT) the run says which run it ended.
+grep -q 'ended run root-PARKED of A-PARKED' <<< "$OUT" \
+  && ok "(REPORT) the run reports the run it ended" || bad "(REPORT) the ended run is unreported (out: $OUT)"
 
 # (BOUND) the resolution is keyed on the parked anchor, not the store: one
-# reverse-tracks lookup, then a convoy-status confirm for the ONE matched root,
-# NOT a status call per open root. Enumerating every root would confirm
-# convoy-PARKED, convoy-OTHER and convoy-FOLD; asserting only the matched
-# molecule's convoy is touched is what keeps the fan-out from coming back.
-eq "$(grep -c . "$FAKE_CONVOY_CALLS")" "1" \
-  "(BOUND) --release confirms only the matched molecule's convoy, not one per open root"
-eq "$(cat "$FAKE_CONVOY_CALLS")" "convoy-PARKED" \
-  "(BOUND) …and the one it confirms is the parked anchor's own convoy"
+# run-lib.sh runs read for the anchor, NOT a map of every run or a read per
+# open root, which would touch convoy-PARKED, convoy-OTHER and convoy-FOLD.
+eq "$(grep -c '^runs ' "$TMP/run-lib.log")" "1" \
+  "(BOUND) --release reads the runs of the anchor once"
+eq "$(cut -d' ' -f1,3 "$TMP/run-lib.log" | grep '^runs ')" "runs A-PARKED" \
+  "(BOUND) …keyed on the parked anchor itself"
+eq "$(grep -c '^map ' "$TMP/run-lib.log")" "0" "(BOUND) …and never maps every run in the store"
 
-# (REAP static) the reap block is what force-closes; the markers bound it, and
-# --status=closed is the close verb it uses.
-BLOCK="$(awk '/# >>> reap-release-molecule/{f=1;next} /# <<< reap-release-molecule/{f=0} f' "$SCRIPT")"
-[ -n "$BLOCK" ] && ok "(MARKERS) reap block extracted between markers" || bad "(MARKERS) block extraction EMPTY — markers missing"
-grep -q -- '--status=closed' <<< "$BLOCK" \
-  && ok "(REAP static) the reap block force-closes (--status=closed present)" \
-  || bad "(REAP static) the reap block never closes anything"
-# The de-pin path is still the one that must never close: the releasing
-# session's own molecule keeps its chain, so its block writes no status.
-QBLOCK="$(awk '/# >>> quiesce-release-molecule-steps/{f=1;next} /# <<< quiesce-release-molecule-steps/{f=0} f' "$SCRIPT")"
-QDANGER="$(printf '%s\n' "$QBLOCK" | grep -v 'bd list --status' | grep -E 'bd close|--status|--close' || true)"
-[ -z "$QDANGER" ] \
-  && ok "(NOCLOSE static) the de-pin walk still closes nothing (only the bd list read-filter uses --status; the reap is a separate call)" \
-  || bad "(NOCLOSE static) the de-pin block contains a close/status-write: $QDANGER"
+# (CANCELFAIL) a run that does not end is not a release that landed: nothing
+# retries a cancel, so the verb exits 4 after every other write, names the run
+# and how to end it by hand, and keeps the release it already wrote.
+: > "$UP"; : > "$FAKE_CANCELS"
+CFRC=0
+FAKE_CANCEL_RC=1 sh "$SCRIPT" takeaway A-PARKED "parked" --by proactive --release --no-wait \
+  >"$TMP/cfout" 2>"$TMP/cferr" || CFRC=$?
+eq "$CFRC" "4" "(CANCELFAIL) a cancel that does not land is a verb failure"
+grep -q 'run root-PARKED of A-PARKED did not end' "$TMP/cferr" \
+  && ok "(CANCELFAIL) …the run is named" || bad "(CANCELFAIL) the failed cancel is unnamed (stderr: $(cat "$TMP/cferr"))"
+grep -q 'end it by hand: .*--root root-PARKED' "$TMP/cferr" \
+  && ok "(CANCELFAIL) …with the command that ends it by hand" || bad "(CANCELFAIL) no repair named (stderr: $(cat "$TMP/cferr"))"
+grep -qE '^bd update A-PARKED .*--status=open' "$UP" \
+  && ok "(CANCELFAIL) …and the release already written is kept" || bad "(CANCELFAIL) the release write was lost: $(cat "$UP")"
+grep -q 'takeaway set on' "$TMP/cfout" \
+  && bad "(CANCELFAIL) the verb reported success" || ok "(CANCELFAIL) …and success is not reported"
+
+# (RUNSUNREAD) runs that cannot be read are not runs that ended: the verb exits
+# 4 after every other write, says what it could not read and how to end a run
+# by hand, and cancels nothing on a guess.
+: > "$UP"; : > "$FAKE_CANCELS"
+RURC=0
+RUN_LIB_STUB_FAIL="runs:A-PARKED" sh "$SCRIPT" takeaway A-PARKED "parked" --by proactive --release --no-wait \
+  >"$TMP/ruout" 2>"$TMP/ruerr" || RURC=$?
+eq "$RURC" "4" "(RUNSUNREAD) an unreadable read of the runs beneath the anchor is a verb failure"
+grep -q 'could not read the runs beneath A-PARKED' "$TMP/ruerr" \
+  && ok "(RUNSUNREAD) …which says what it could not read" || bad "(RUNSUNREAD) the failed read is unnamed (stderr: $(cat "$TMP/ruerr"))"
+eq "$(grep -c . "$FAKE_CANCELS")" "0" "(RUNSUNREAD) …and nothing is cancelled on a guess"
+grep -qE '^bd update A-PARKED .*--status=open' "$UP" \
+  && ok "(RUNSUNREAD) …and the release already written is kept" || bad "(RUNSUNREAD) the release write was lost: $(cat "$UP")"
+
+# (static) the release block writes no member: no update, close, or status write
+# beyond the bd list read filter.
+CBLOCK="$(awk '/# >>> cancel-release-molecules/{f=1;next} /# <<< cancel-release-molecules/{f=0} f' "$SCRIPT")"
+[ -n "$CBLOCK" ] && ok "(MARKERS) the run-end block is extracted between its markers" || bad "(MARKERS) block extraction EMPTY — markers missing"
+CDANGER="$(printf '%s\n' "$CBLOCK" | grep -v 'bd list --status' | grep -E 'bd update|bd close|--status=|--assignee' || true)"
+[ -z "$CDANGER" ] \
+  && ok "(NOMEMBER static) the run-end block writes no member; gascity's cancel does" \
+  || bad "(NOMEMBER static) the run-end block writes a member: $CDANGER"
 
 if [ -n "$ERR" ]; then printf 'note: script stderr:\n%s\n' "$ERR" >&2; fi
 
@@ -921,8 +917,8 @@ grep -q "expected '1'" "$TMP/serr" \
 #                   with its disposition, exit 0
 #   (TAKEAWAYDEAD)  a repair that also misses is a verb failure, writes kept
 #   (TAKEAWAYEMPTY) a headline that reads back empty fails the verb the same way
-#   (TAKEAWAYREL)   under --release, the exit waits for the edges and the quiesce
-#   (TAKEAWAYFOLD)  on a closed anchor's quiesce too
+#   (TAKEAWAYREL)   under --release, the exit waits for the edges and the run's end
+#   (TAKEAWAYFOLD)  on a closed anchor's run end too
 #   (TAKEAWAYQUOTE) the by-hand repair, pasted into a shell, stamps the exact text
 : > "$TMP/updates"; : > "$TMP/settled"; printf 'holding — an earlier sitting' > "$TMP/takeaway"
 TORC=0
@@ -992,9 +988,9 @@ grep -q "gc.takeaway on A-PARKED read back as '', expected 'holding — needs a 
   || bad "(TAKEAWAYEMPTY) the miss does not name the intended headline (stderr: $(cat "$TMP/terr"))"
 
 # (TAKEAWAYREL) a park, with a wait, whose headline will not stamp. The exit
-# comes last, so the wait is still wired as an edge and the released molecule
-# is still quiesced: only the headline is left to repair by hand.
-: > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/settled"; printf 'holding — an earlier sitting' > "$TMP/takeaway"
+# comes last, so the wait is still wired as an edge and the run beneath the
+# anchor still ends: only the headline is left to repair by hand.
+: > "$TMP/updates"; : > "$TMP/deps"; : > "$TMP/settled"; : > "$FAKE_CANCELS"; printf 'holding — an earlier sitting' > "$TMP/takeaway"
 TRRC=0
 FAKE_TAKEAWAY_DROP=1 sh "$SCRIPT" takeaway A-PARKED "parked — waiting on the fix" --by proactive \
   --release --waiting-on tk-blk9 >"$TMP/tout" 2>"$TMP/terr" || TRRC=$?
@@ -1002,9 +998,9 @@ eq "$TRRC" "4" "(TAKEAWAYREL) a release whose headline will not stamp is a verb 
 grep -qE '^bd dep add A-PARKED tk-blk9 -t blocks' "$TMP/deps" \
   && ok "(TAKEAWAYREL) …after the wait is wired as an edge" \
   || bad "(TAKEAWAYREL) the failure exited before the edge (deps: $(cat "$TMP/deps"))"
-grep -qE '^bd update s-impl( |$)' "$TMP/updates" \
-  && ok "(TAKEAWAYREL) …and after the released molecule is quiesced" \
-  || bad "(TAKEAWAYREL) the failure exited before quiescing the released molecule"
+grep -q -- '--root root-PARKED' "$FAKE_CANCELS" \
+  && ok "(TAKEAWAYREL) …and after the run beneath the anchor is ended" \
+  || bad "(TAKEAWAYREL) the failure exited before ending the run beneath the anchor"
 TRL="$(grep -E "^bd update A-PARKED( |\$)" "$TMP/updates" | head -n1)"
 case "$TRL" in
   *"--status=open"*"--assignee="*) ok "(TAKEAWAYREL) …and the release it already wrote is kept, not rolled back" ;;
@@ -1014,18 +1010,18 @@ grep -q 'takeaway set on' "$TMP/tout" \
   && bad "(TAKEAWAYREL) the verb reported the takeaway as set" \
   || ok "(TAKEAWAYREL) …and success is not reported"
 
-# (TAKEAWAYFOLD) a closed anchor takes the headline and the quiesce alone, and
+# (TAKEAWAYFOLD) a closed anchor takes the headline and the run's end alone, and
 # its headline is read back the same way.
-: > "$TMP/updates"; : > "$TMP/settled"; printf 'holding — an earlier sitting' > "$TMP/takeaway"
+: > "$TMP/updates"; : > "$TMP/settled"; : > "$FAKE_CANCELS"; printf 'holding — an earlier sitting' > "$TMP/takeaway"
 TCRC=0
 FAKE_TAKEAWAY_DROP=1 sh "$SCRIPT" takeaway CLOSED-A-FOLD "folded into CARRIER-1" --by proactive --release \
   >"$TMP/tout" 2>"$TMP/terr" || TCRC=$?
 eq "$TCRC" "4" "(TAKEAWAYFOLD) a closed anchor's headline that will not stamp is a verb failure"
-grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
-  && ok "(TAKEAWAYFOLD) …after the folded molecule is reaped" \
-  || bad "(TAKEAWAYFOLD) the failure exited before the quiesce"
+grep -q -- '--root root-FOLD' "$FAKE_CANCELS" \
+  && ok "(TAKEAWAYFOLD) …after the folded anchor's run is ended" \
+  || bad "(TAKEAWAYFOLD) the failure exited before the run's end"
 grep -q 'anchor left closed' "$TMP/tout" \
-  && bad "(TAKEAWAYFOLD) the verb reported the quiesce as a set takeaway" \
+  && bad "(TAKEAWAYFOLD) the verb reported the run's end as a set takeaway" \
   || ok "(TAKEAWAYFOLD) …and success is not reported"
 
 # (TAKEAWAYQUOTE) the by-hand repair is pasted into a shell, and a headline is
@@ -1109,11 +1105,11 @@ eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(ROUTEREL) …and nothi
 : > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
 sh "$SCRIPT" takeaway A-PARKED "landed" --release --route "$POOL" >/dev/null 2>"$TMP/rerr" || true
 eq "$(grep -cE "^bd update A-PARKED( |\$)" "$TMP/updates" || true)" "1" \
-   "(ROUTEOK) a route that reads back correct is written once (the anchor, not its quiesced steps)"
+   "(ROUTEOK) a route that reads back correct is written once (the anchor, and no step of its run)"
 
 # (ROUTEFIX) the silent drop: the stamp lands empty, so the bead is visible to
 # no pool. The verb must notice and repair rather than report success.
-: > "$TMP/updates"; : > "$TMP/routed"
+: > "$TMP/updates"; : > "$TMP/routed"; : > "$FAKE_CANCELS"
 FRC=0
 sh "$SCRIPT" takeaway A-PARKED "dropped" --release --route "$POOL" >"$TMP/rout" 2>"$TMP/rerr" || FRC=$?
 eq "$(grep -c -- "--set-metadata gc.routed_to=$POOL" "$TMP/updates" || true)" "2" \
@@ -1141,9 +1137,9 @@ case "$RD" in
   *"--status=open"*"--assignee="*) ok "(ROUTEDEAD) …the release it already wrote is kept, not rolled back" ;;
   *) bad "(ROUTEDEAD) the release write was lost: ${RD:-<none>}" ;;
 esac
-grep -qE "^bd update s-impl( |\$)" "$TMP/updates" \
-  && ok "(ROUTEDEAD) …and the molecule steps the release quiesced stay quiesced" \
-  || bad "(ROUTEDEAD) the failure exited before quiescing the released molecule"
+grep -q -- '--root root-PARKED' "$FAKE_CANCELS" \
+  && ok "(ROUTEDEAD) …and the run beneath the anchor is still ended" \
+  || bad "(ROUTEDEAD) the failure exited before ending the run beneath the anchor"
 
 # A route that lands is unaffected by any of that.
 : > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
@@ -1402,7 +1398,7 @@ grep -q 'takeaway set on' "$TMP/iout" \
   || ok "(SIDDEAD) …and does not report the takeaway as set"
 : > "$TMP/sid"
 
-# ── takeaway --release on a CLOSED anchor: the quiesce without the park ──────
+# ── takeaway --release on a CLOSED anchor: the run's end without the park ────
 # A fold that lands after the pour leaves a molecule routed under an anchor
 # that is already disposed. --release is the only writer that walks that
 # molecule, and its park half (reopen, unassign, stamp the route) would
@@ -1411,7 +1407,7 @@ grep -q 'takeaway set on' "$TMP/iout" \
 #   (FOLDED)    a closed anchor keeps its disposition and still gets the walk
 #   (FOLDROUTE) --route there is refused: a pool must not claim disposed work
 #   (FOLDBLIND) a status that will not read refuses the release outright
-: > "$TMP/updates"; : > "$TMP/routed"
+: > "$TMP/updates"; : > "$TMP/routed"; : > "$FAKE_CANCELS"
 CRC=0
 sh "$SCRIPT" takeaway CLOSED-A-FOLD "folded into CARRIER-1" --by proactive --release \
    >"$TMP/rout" 2>"$TMP/rerr" || CRC=$?
@@ -1431,12 +1427,12 @@ grep -q 'gc.routed_to' <<< "$FA" \
 grep -q 'gc.takeaway=folded into CARRIER-1' <<< "$FA" \
   && ok "(FOLDED) …while the headline the sitting owes still lands" \
   || bad "(FOLDED) the headline was lost with the park write ($FA)"
-grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
-  && ok "(FOLDED) the molecule under it is reaped — a folded husk no session completes is force-closed" \
-  || bad "(FOLDED) the folded anchor's molecule was never walked"
-grep -qE '^bd update root-FOLD( |$)' "$TMP/updates" \
-  && ok "(FOLDED) …its workflow root too, so no door is left open" \
-  || bad "(FOLDED) the folded molecule's root kept its pool route"
+grep -q -- '--root root-FOLD' "$FAKE_CANCELS" \
+  && ok "(FOLDED) the run the fold outran is ended through run-cancel.sh" \
+  || bad "(FOLDED) the folded anchor's run was never ended (cancels: $(cat "$FAKE_CANCELS"))"
+grep -qE '^bd update (s-fold|root-FOLD)( |$)' "$TMP/updates" \
+  && bad "(FOLDED) gc-helm.sh wrote the folded run's members itself" \
+  || ok "(FOLDED) …and gc-helm.sh writes none of its members"
 grep -q 'superseded by CARRIER-1' "$TMP/rerr" \
   && ok "(FOLDED) …and the run names the disposition it preserved" \
   || bad "(FOLDED) the skipped park is unexplained (stderr: $(cat "$TMP/rerr"))"
@@ -1450,7 +1446,7 @@ grep -q 'anchor left closed' "$TMP/rout" \
 # is non-zero so no caller reads it as "released to that pool". The stub is set
 # to report the route as LANDED, so nothing but the closed anchor can be what
 # produces the refusal.
-: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+: > "$TMP/updates"; : > "$FAKE_CANCELS"; printf '%s' "$POOL" > "$TMP/routed"
 XRC=0
 sh "$SCRIPT" takeaway CLOSED-A-FOLD "route a disposed bead" --by proactive --release --route "$POOL" \
    >"$TMP/rout" 2>"$TMP/rerr" || XRC=$?
@@ -1458,9 +1454,9 @@ eq "$XRC" "4" "(FOLDROUTE) --route on a closed anchor is a verb runtime failure"
 grep -q "gc.routed_to=$POOL" <<< "$(line_for CLOSED-A-FOLD)" \
   && bad "(FOLDROUTE) a disposed bead was handed to a pool" \
   || ok "(FOLDROUTE) …and the pool route is never stamped"
-grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
-  && ok "(FOLDROUTE) …while the reap the operator came for still runs" \
-  || bad "(FOLDROUTE) the refusal took the reap with it"
+grep -q -- '--root root-FOLD' "$FAKE_CANCELS" \
+  && ok "(FOLDROUTE) …while the run's end the operator came for still runs" \
+  || bad "(FOLDROUTE) the refusal took the run's end with it"
 grep -q 'takeaway set on' "$TMP/rout" \
   && bad "(FOLDROUTE) the verb reported success on an unrouted bead" \
   || ok "(FOLDROUTE) …and success is not reported"
@@ -1576,9 +1572,9 @@ grep -q 'could not read the blockers on A-PROBEJUNK' "$TMP/derr" \
   || bad "(DELEGJUNK) an error object was read as an edge list (stderr: $(cat "$TMP/derr"))"
 
 # (DELEGFOLD) a closed anchor blocked by delegated work meets two refusals.
-# This one yields: refusing here would exit before the headline and the quiesce
-# a folded anchor still needs, and a disposed bead is never routed anyway.
-: > "$TMP/updates"; printf '%s' "$POOL" > "$TMP/routed"
+# This one yields: refusing here would exit before the headline and the run's
+# end a folded anchor still needs, and a disposed bead is never routed anyway.
+: > "$TMP/updates"; : > "$FAKE_CANCELS"; printf '%s' "$POOL" > "$TMP/routed"
 FRC=0
 sh "$SCRIPT" takeaway CLOSED-A-FOLD "folded, and blocked" --by converse \
    --release --route "$POOL" >/dev/null 2>"$TMP/derr" || FRC=$?
@@ -1586,12 +1582,12 @@ eq "$FRC" "4" "(DELEGFOLD) a closed anchor is refused on its disposition"
 grep -q 'has no method a pool can perform' "$TMP/derr" \
   && bad "(DELEGFOLD) the blocker refusal preempted it (stderr: $(cat "$TMP/derr"))" \
   || ok "(DELEGFOLD) …not on its blockers"
-grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
-  && ok "(DELEGFOLD) …so the quiesce a fold still needs survives the refusal" \
-  || bad "(DELEGFOLD) the quiesce was lost: $(cat "$TMP/updates")"
+grep -q -- '--root root-FOLD' "$FAKE_CANCELS" \
+  && ok "(DELEGFOLD) …so the run's end a fold still needs survives the refusal" \
+  || bad "(DELEGFOLD) the run's end was lost: $(cat "$FAKE_CANCELS")"
 
 # ── takeaway --release --assign: release the bead TO a named agent ────────────
-# A named agent's hook matches the bead's assignee and never reads gc.routed_to,
+# The pack addresses a named agent by its assignee (docs/deferred-dispatch.md),
 # so work that is its own (a town-repo edit is mechanik's) is released to it as
 # its assignee, with no route. The stub reads a bead's assignee from the
 # assignees fixture, so a row there models an assignee that landed and its
@@ -1606,7 +1602,7 @@ grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
 #                  fails the verb with the repair spelled out
 #   (TOAGENTBLK)   an open non-demand blocker refuses a bare --assign
 #   (TOAGENTWAIT)  …and a call that names its waits lands, edge and all
-#   (TOAGENTFOLD)  a closed anchor is refused on its disposition, quiesce kept
+#   (TOAGENTFOLD)  a closed anchor is refused on its disposition, run's end kept
 AGENT="gc-toolkit.mechanik"
 cp "$TMP/assignees" "$TMP/assignees.orig"
 printf 'A-PARKED|%s\nA-BLOCKED|%s\n' "$AGENT" "$AGENT" >> "$TMP/assignees"
@@ -1700,7 +1696,7 @@ grep -qE '^bd dep add A-BLOCKED w-child -t blocks' "$TMP/deps" \
   && ok "(TOAGENTWAIT) …and held on the named wait, which gates the hand-off" \
   || bad "(TOAGENTWAIT) the wait edge was not written (got: $(cat "$TMP/deps"))"
 
-: > "$TMP/updates"
+: > "$TMP/updates"; : > "$FAKE_CANCELS"
 FRC3=0
 sh "$SCRIPT" takeaway CLOSED-A-FOLD "assign a disposed bead" --by proactive \
    --release --assign "$AGENT" >"$TMP/aout" 2>"$TMP/aerr" || FRC3=$?
@@ -1711,9 +1707,9 @@ grep -q -- '--assignee' <<< "$(line_for CLOSED-A-FOLD)" \
 grep -q 'NOT assigned' "$TMP/aerr" \
   && ok "(TOAGENTFOLD) …and the refusal says so" \
   || bad "(TOAGENTFOLD) the refusal is unexplained (stderr: $(cat "$TMP/aerr"))"
-grep -qE '^bd update s-fold( |$)' "$TMP/updates" \
-  && ok "(TOAGENTFOLD) …while the quiesce a fold still needs runs" \
-  || bad "(TOAGENTFOLD) the refusal took the quiesce with it"
+grep -q -- '--root root-FOLD' "$FAKE_CANCELS" \
+  && ok "(TOAGENTFOLD) …while the run's end a fold still needs runs" \
+  || bad "(TOAGENTFOLD) the refusal took the run's end with it"
 mv "$TMP/assignees.orig" "$TMP/assignees"
 
 # ── takeaway length: the ≤140 cap, ENFORCED ─────────────────────
@@ -2300,19 +2296,163 @@ eq "$(grep -c '^bd update' "$TMP/updates" || true)" "0" "(DISMISS-INFER) …and 
 ARC=0; sh "$SCRIPT" dismiss A-PARKED --nope >/dev/null 2>&1 || ARC=$?
 eq "$ARC" "2" "(DISMISS-ARGS) an unknown flag is a usage error"
 
+# ── dismiss stops the session that held the visit it closed ──────────────────
+# A sitting must not outlive its visit, and a session viewed in a tab is not
+# kept up by the viewing. The stop is `gc runtime drain-ack`, so the controller
+# ends the session outside the verb's process: the holder the verb runs in acks
+# itself, after every close; any other holder is acked as an operator. Only a
+# live converse session counts as a holder, and a stop that fails leaves the
+# dismiss standing and names converse-reap.
+STOP_SESSIONS='{"sessions":[
+  {"id":"gc-toolkit__converse-lx-1","session_name":"gc-toolkit__converse-lx-1",
+   "alias":"gc-toolkit/gc-toolkit.v-HELD","template":"gc-toolkit/gc-toolkit.converse-opus","rig":"signal-loom","closed":false},
+  {"id":"gc-toolkit__converse-lx-2","session_name":"gc-toolkit__converse-lx-2",
+   "alias":"gc-toolkit/gc-toolkit.v-STUCK","template":"gc-toolkit/gc-toolkit.polecat","closed":false},
+  {"id":"gc-old","session_name":"gc-toolkit__converse-lx-1",
+   "template":"gc-toolkit/gc-toolkit.converse-opus","closed":true}]}'
+export FAKE_DRAINS="$TMP/drains"
+
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID='' GC_SESSION_NAME='' GC_ALIAS='' sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
+eq "$SRC" "0" "(DISMISS-STOP-OTHER) a dismiss from outside the sitting exits 0"
+eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-lx-1 | self= | closes=2" \
+   "(DISMISS-STOP-OTHER) …and acks the holding session as an operator, once, after the visit's close"
+grep -q 'stopped session gc-toolkit__converse-lx-1' <<< "$SOUT" \
+  && ok "(DISMISS-STOP-OTHER) …and says which session it stopped" \
+  || bad "(DISMISS-STOP-OTHER) the stop is not reported (got: $SOUT)"
+
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID=gc-toolkit__converse-lx-1 sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
+eq "$SRC" "0" "(DISMISS-STOP-OWN) a dismiss typed into the sitting exits 0"
+eq "$(cat "$TMP/drains")" "drain-ack  | self=gc-toolkit__converse-lx-1 | closes=2" \
+   "(DISMISS-STOP-OWN) …and the sitting acks its own session, after the visit's close"
+grep -q 'ending this session (gc-toolkit__converse-lx-1)' <<< "$SOUT" \
+  && ok "(DISMISS-STOP-OWN) …saying so before it does" \
+  || bad "(DISMISS-STOP-OWN) the self-stop is not announced (got: $SOUT)"
+
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_RC=1 GC_SESSION_ID='' GC_SESSION_NAME='' GC_ALIAS='' sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
+eq "$SRC" "0" "(DISMISS-STOP-FAIL) a stop that fails leaves the dismiss standing"
+grep -q 'could not stop session gc-toolkit__converse-lx-1.*converse-reap' <<< "$SOUT" \
+  && ok "(DISMISS-STOP-FAIL) …and names converse-reap as what closes the session" \
+  || bad "(DISMISS-STOP-FAIL) the failed stop is not reported (got: $SOUT)"
+
+# v-STUCK's holder runs a polecat template, so dismissing its subject closes
+# the visit and stops nothing: only a converse session is a sitting.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID='' GC_SESSION_NAME='' GC_ALIAS='' sh "$SCRIPT" dismiss A-STUCK 2>&1)" || SRC=$?
+eq "$(cat "$TMP/drains")" "" "(DISMISS-STOP-CONVERSE) a visit held by a session that is not a converse sitting stops nothing"
+# v-OTHER is held by nobody, and a holder's closed past session is no holder.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" GC_SESSION_ID='' GC_SESSION_NAME='' GC_ALIAS='' sh "$SCRIPT" dismiss A-OTHER 2>&1)" || SRC=$?
+eq "$(cat "$TMP/drains")" "" "(DISMISS-STOP-NOHOLDER) a visit nobody held stops nothing"
+
+# The claim stamps the holder's id on the visit and re-assigns it to the
+# session's qualified alias, so the gc.session_id pin finds a holder whose
+# name the assignee does not carry.
+PINNED='[{"id":"v-PINNED","assignee":"gc-toolkit/gc-toolkit.v-PINNED","metadata":{"task_kind":"visit","gc.continuation_group":"A-PINNED","gc.session_id":"gc-81","gc.session_name":"gc-toolkit__converse-gc-81"}}]'
+PINNED_SESSIONS='{"sessions":[{"id":"gc-81","session_name":"gc-toolkit__converse-gc-81","alias":"gc-toolkit/gc-toolkit.v-PINNED-other","template":"gc-toolkit/gc-toolkit.converse-fable","closed":false}]}'
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
+SRC=0; SOUT="$(FAKE_LIST_OUT="$PINNED" FAKE_SESSIONS_JSON="$PINNED_SESSIONS" GC_SESSION_ID='' GC_SESSION_NAME='' GC_ALIAS='' sh "$SCRIPT" dismiss A-PINNED 2>&1)" || SRC=$?
+grep -q '^drain-ack --operator gc-81 ' "$TMP/drains" \
+  && ok "(DISMISS-STOP-PIN) the visit's gc.session_id names the holder to stop" \
+  || bad "(DISMISS-STOP-PIN) the pinned holder was not stopped (drains: $(cat "$TMP/drains"); out: $SOUT)"
+
+# From here on the stub knows the sittings' tokens, so its drain-ack applies
+# every incarnation rule. A sitting's tmux environment carries its session id
+# and token, and a run-shell job inherits that environment, so a caller outside
+# the sitting can carry both.
+export FAKE_SESSION_TOKENS="gc-toolkit__converse-lx-1=tok-lx-1 gc-toolkit__converse-lx-9=tok-lx-9"
+
+# A dismiss typed into the sitting proves its incarnation with its own token,
+# so its self-ack stands under v2.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_V2=1 GC_SESSION_ID=gc-toolkit__converse-lx-1 GC_INSTANCE_TOKEN=tok-lx-1 sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
+eq "$(cat "$TMP/drains")" "drain-ack  | self=gc-toolkit__converse-lx-1 | closes=2" \
+   "(DISMISS-STOP-OWN-V2) a dismiss in the sitting acks its own session with its own token, which v2 takes"
+
+# --operator: the caller runs under the sitting's identity and token, as the
+# prefix+X job does, and is still outside it. The stop is an operator ack run
+# with neither, which Gas City takes under either reconciler, and nothing acks
+# itself.
+for _mode in legacy v2; do
+    _v2=""; [ "$_mode" = v2 ] && _v2=1
+    : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
+    SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_V2="$_v2" GC_SESSION_ID=gc-toolkit__converse-lx-1 GC_SESSION_NAME=gc-toolkit__converse-lx-1 GC_INSTANCE_TOKEN=tok-lx-1 sh "$SCRIPT" dismiss --operator A-PARKED 2>&1)" || SRC=$?
+    eq "$SRC" "0" "(DISMISS-STOP-OPERATOR) [$_mode] dismiss --operator under the sitting's identity exits 0"
+    eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-lx-1 | self= | closes=2" \
+       "(DISMISS-STOP-OPERATOR) [$_mode] …and acks the sitting as an operator, with no session identity or token, which Gas City takes"
+    grep -q 'stopped session gc-toolkit__converse-lx-1' <<< "$SOUT" \
+      && ok "(DISMISS-STOP-OPERATOR) [$_mode] …and says which session it stopped" \
+      || bad "(DISMISS-STOP-OPERATOR) [$_mode] the operator stop is not reported (got: $SOUT)"
+    grep -q 'ending this session' <<< "$SOUT" \
+      && bad "(DISMISS-STOP-OPERATOR) [$_mode] an operator dismiss announced a self-stop (got: $SOUT)" \
+      || ok "(DISMISS-STOP-OPERATOR) [$_mode] …and never takes the sitting for its own session"
+done
+
+# Another sitting dismissing this one's subject acks it as an operator too, and
+# its own identity never reaches that ack.
+: > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; rm -f "$TMP/outcomes"/*
+SRC=0; SOUT="$(FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_V2=1 GC_SESSION_ID=gc-toolkit__converse-lx-9 GC_INSTANCE_TOKEN=tok-lx-9 sh "$SCRIPT" dismiss A-PARKED 2>&1)" || SRC=$?
+eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-lx-1 | self= | closes=2" \
+   "(DISMISS-STOP-OTHER-V2) a dismiss from another sitting acks the holder as an operator, without its own identity"
+
+# ── prefix+X through the real dismiss ─────────────────────────────────────────
+# tmux-dismiss-sitting.sh runs THIS dismiss under the sitting's identity, so
+# dismiss infers the subject, and its job inherits the pressed sitting's tmux
+# environment. Its stop must still be an operator ack Gas City takes: under v2
+# with the inherited token, under v2 when the job inherited none, and under
+# legacy. A self-ack fails the second, and an operator ack that kept the
+# sitting's session id fails all three.
+mkdir -p "$TMP/keybin"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/keybin/tmux" <<'TMUXSTUB'
+# display-message -p answers the format it is asked for; any other
+# display-message is a message to the operator, logged to FAKE_KEY_SAID.
+if [ "$1" = display-message ]; then
+    for a in "$@"; do
+        if [ "$a" = "-p" ]; then
+            case "${!#}" in
+                '#{client_tty}')     printf '/dev/pts/7\n' ;;
+                '#{client_session}') printf 'gc-toolkit__converse-lx-1\n' ;;
+            esac
+            exit 0
+        fi
+    done
+    printf '%s\n' "${!#}" >> "$FAKE_KEY_SAID"
+fi
+exit 0
+TMUXSTUB
+chmod +x "$TMP/keybin/tmux"
+KEY_CFG="$(cd "$HERE/../.." && pwd)"
+export FAKE_KEY_SAID="$TMP/key-said"
+for _mode in v2-inherited v2-bare legacy-inherited; do
+    _v2=""; case "$_mode" in v2-*) _v2=1 ;; esac
+    _tok=tok-lx-1; [ "$_mode" = v2-bare ] && _tok=""
+    : > "$TMP/updates"; : > "$TMP/closes"; : > "$TMP/drains"; : > "$FAKE_KEY_SAID"; rm -f "$TMP/outcomes"/*
+    KRC=0; KOUT="$(PATH="$TMP/keybin:$PATH" FAKE_SESSIONS_JSON="$STOP_SESSIONS" FAKE_DRAIN_V2="$_v2" \
+        GC_SESSION_ID=gc-toolkit__converse-lx-1 GC_SESSION_NAME=gc-toolkit__converse-lx-1 GC_INSTANCE_TOKEN="$_tok" \
+        sh "$HERE/tmux-dismiss-sitting.sh" "$KEY_CFG" 2>/dev/null)" || KRC=$?
+    eq "$KRC/$KOUT" "0/" "(DISMISS-KEY) [$_mode] prefix+X exits 0 with nothing on stdout"
+    eq "$(cat "$TMP/drains")" "drain-ack --operator gc-toolkit__converse-lx-1 | self= | closes=2" \
+       "(DISMISS-KEY) [$_mode] …and the real dismiss stops the sitting with one operator ack that Gas City takes"
+    grep -q 'the sitting on A-PARKED is over (visit v-HELD closed), and its session is ending' "$FAKE_KEY_SAID" \
+      && ok "(DISMISS-KEY) [$_mode] …and tells the operator the sitting is over" \
+      || bad "(DISMISS-KEY) [$_mode] the outcome did not reach the operator (said: $(cat "$FAKE_KEY_SAID"))"
+done
+unset FAKE_DRAINS FAKE_SESSION_TOKENS FAKE_KEY_SAID
+
 export FAKE_STEPS_JSON="$TMP/steps.json"
 
-# ── The releasing session's own step survives the release ────────────────────
+# ── The releasing session's own run survives the release ─────────────────────
 # A releasing session may itself own a step of a molecule anchored to the bead it
-# disposes by `takeaway --release`, and then has to close its own step
-# bead. step-close.sh resolves that bead within its molecule and corroborates
-# it by the assignee; this live step carries no gc.session_id stamp, so the
-# assignee is the only handle that proves the bead is this session's, and a
-# quiesce that cleared it would land the disposition but strand the molecule:
-# the step stays open and is re-offered forever. This section runs
-# the real release and then the real step-close.sh against ONE mutating store —
-# a logging-only stub cannot show the second command failing on what the first
-# wrote.
+# disposes by `takeaway --release`, and then has to close its own chain.
+# step-close.sh resolves that bead within its molecule and corroborates it by
+# the assignee, so the release leaves that run alone: it writes none of its
+# beads and cancels nothing. A run no step of which is this session's ends
+# through the REAL run-cancel.sh, whose request a curl stub answers. This
+# section runs the real release and then the real step-close.sh against ONE
+# mutating store — a logging-only stub cannot show the second command failing
+# on what the first wrote.
 LIVE="$TMP/live"; mkdir -p "$LIVE/bin"
 export LIVE_STORE="$LIVE/store.json" LIVE_CONVOYS="$LIVE/convoys" LIVE_LOG="$LIVE/log"
 # A store write the stub cannot land must not pass silently. The stub mutates the
@@ -2320,7 +2460,7 @@ export LIVE_STORE="$LIVE/store.json" LIVE_CONVOYS="$LIVE/convoys" LIVE_LOG="$LIV
 # the first to hit ENOSPC when a concurrent run-tests.sh batch transiently
 # exhausts the shared tmpfs. Unchecked, that failed rewrite leaves the store at
 # its pre-takeaway value while the stub still exits 0, so every field() read
-# below sees stale state and the quiesce assertions FALSELY fault gc-helm.sh.
+# below sees stale state and the release assertions FALSELY fault gc-helm.sh.
 # The stub records this flag instead, and live_store_intact turns it into a
 # distinct infra abort. Sited in $TMP, not $LIVE, so it still lands when $LIVE
 # is the directory that cannot be written.
@@ -2328,19 +2468,15 @@ export LIVE_WRITE_FAILED="$TMP/live-store-write-failed"
 SESSION="gc-toolkit--gc-toolkit__proactive-1-pool"
 POOL="gc-toolkit/gc-toolkit.polecat"
 
-# A-LIVE is the anchor; root-LIVE its molecule root, pool-routed in its own
-# right. L-live is the terminal step this session is executing the release
-# FROM; L-peer is a sibling step left pinned to a session that is gone, which
-# is what the quiesce exists for; L-held is the hard case — in_progress under
-# a DIFFERENT live session, so beads refuses to clear its assignee.
+# A-LIVE is the anchor; root-LIVE its molecule root. L-live is the terminal
+# step this session is executing the release FROM, so root-LIVE is this
+# session's own run; L-peer and L-held are its other steps, one pinned to a
+# session that is gone and one in_progress under a different live session.
 #
 # A-FOLD is a second, independent anchor: CLOSED and superseded, with its own
-# molecule (root-FOLD, F-work, F-held) still carrying the pool route the pour
-# left. No live session holds a step of it, so it is a HUSK the release reaps:
-# every step and the root are force-closed. F-held is in_progress under another
-# live session, the exact step de-pinning could never release — the store is
-# what proves the reap closes it anyway (--status=closed carries no assignee,
-# so the reassign guard never fires).
+# molecule (root-FOLD, F-work, F-held) still running under the pour. No step of
+# it is this session's, so the release ends it through gascity's run cancel,
+# and the store shows gc-helm.sh wrote none of its beads.
 cat > "$LIVE_STORE" <<JSON
 [
  {"id":"A-LIVE","status":"in_progress","assignee":"$SESSION","metadata":{}},
@@ -2356,6 +2492,27 @@ cat > "$LIVE_STORE" <<JSON
 JSON
 printf 'convoy-LIVE|A-LIVE\nconvoy-FOLD|A-FOLD\n' > "$LIVE_CONVOYS"
 : > "$LIVE_LOG"
+# The real run-cancel.sh, against a supervisor a curl stub stands in for: it
+# logs each request with its headers and answers 202, as gascity's cancel does.
+export LIVE_CURL_LOG="$LIVE/curl.log"; : > "$LIVE_CURL_LOG"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$LIVE/bin/curl" <<'CURLL'
+out=""; hdr=""; url=""; method=GET
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) shift; out="$1" ;;
+    -X) shift; method="$1" ;;
+    -H) shift; hdr="$hdr$1;" ;;
+    -w|--max-time) shift ;;
+    -s) ;;
+    *) url="$1" ;;
+  esac
+  shift
+done
+printf '%s %s %s\n' "$method" "$url" "$hdr" >> "$LIVE_CURL_LOG"
+[ -n "$out" ] && printf '{"status":"canceled","closed":3}' > "$out"
+printf '202'
+CURLL
+chmod +x "$LIVE/bin/curl"
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$LIVE/bin/gc" <<'GCL'
 # A MUTATING store: `bd update` rewrites LIVE_STORE, so a later list/show
@@ -2381,9 +2538,6 @@ case "$1 ${2:-}" in
   "bd show")
     row=$(jq -c --arg i "$3" '[ .[] | select(.id == $i) ]' "$LIVE_STORE")
     [ "$row" != "[]" ] && printf '%s\n' "$row" || printf '[{"id":"%s","status":"open","metadata":{}}]\n' "$3" ;;
-  "convoy status")
-    a=$(awk -F'|' -v c="$3" '$1==c{print $2; exit}' "$LIVE_CONVOYS")
-    [ -n "$a" ] && jq -n --arg a "$a" '{children:[{id:$a}]}' || printf '{"children":[]}\n' ;;
   "bd update")
     printf 'update %s\n' "$*" >> "$LIVE_LOG"
     id="$3"; shift 3
@@ -2415,16 +2569,7 @@ case "$1 ${2:-}" in
     done ;;
   "bd dep")
     printf 'dep %s\n' "$*" >> "$LIVE_LOG"
-    # reverse `tracks`: the convoys tracking this bead, from LIVE_CONVOYS — the
-    # quiesce resolves the released molecule from its anchor this way.
-    if [ "${3:-}" = "list" ]; then
-      case "$*" in
-        *--direction=up*)
-          awk -F'|' -v a="${4:-}" '$2==a{print $1}' "$LIVE_CONVOYS" \
-            | jq -Rnc '[inputs | select(length > 0) | {id: .}]' ;;
-        *) printf '[]\n' ;;
-      esac
-    fi ;;
+    [ "${3:-}" = "list" ] && printf '[]\n' ;;
 esac
 exit 0
 GCL
@@ -2444,44 +2589,34 @@ live_store_intact() {
 }
 
 SAVED_PATH="$PATH"; PATH="$LIVE/bin:$PATH"
+SAVED_CANCEL_TOOL="$GC_RUN_CANCEL_TOOL"; unset GC_RUN_CANCEL_TOOL
+export GC_CITY_PATH="$LIVE/town" GC_HOME="$LIVE/gchome"; mkdir -p "$GC_HOME"
 RELOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
   sh "$SCRIPT" takeaway A-LIVE "released to the impl pool" --by proactive --release --route "$POOL" 2>&1 || true)"
-live_store_intact   # the quiesce writes landed, or this is disk pressure not a verdict
+live_store_intact   # the release writes landed, or this is disk pressure not a verdict
 
 eq "$(field L-live assignee)" "$SESSION" \
-   "(LIVESTEP) the step the release runs FROM keeps its assignee"
+   "(OWNRUN) the step the release runs FROM keeps its assignee"
 eq "$(field L-live gc.routed_to)" "gc-toolkit/gc-toolkit.proactive" \
-   "(LIVESTEP) …and its route"
+   "(OWNRUN) …and its route"
 eq "$(field L-live gc.session_affinity)" "require" \
-   "(LIVESTEP) …and its session affinity"
-grep -q 'kept live step L-live' <<< "$RELOUT" \
-  && ok "(LIVESTEP) …and the run says which step it kept" \
-  || bad "(LIVESTEP) the kept step is unreported (out: $RELOUT)"
-
-# The guard is narrow: a sibling pinned to a session that is GONE is exactly the
-# husk the quiesce exists for, and it must still be cleared.
-eq "$(field L-peer assignee)" "" \
-   "(LIVESTEP) a peer session's step under the same anchor is still quiesced"
-eq "$(field L-peer gc.routed_to)" "" \
-   "(LIVESTEP) …and de-routed"
-
-# The bug the split exists for. The refused `--assignee ""` used to take the
-# route pins down with it, on precisely the bead being re-offered — and the
-# patrol retry cannot succeed either while the holder is alive.
-eq "$(field L-held gc.routed_to)" "" \
-   "(HELDSTEP) a step a live session holds is de-routed even though its assignee clear is refused"
-eq "$(field L-held gc.session_affinity)" "" \
-   "(HELDSTEP) …and loses its session affinity in the same write"
+   "(OWNRUN) …and its session affinity"
+grep -q 'kept run root-LIVE of A-LIVE' <<< "$RELOUT" \
+  && ok "(OWNRUN) …and the run says which run it kept" \
+  || bad "(OWNRUN) the kept run is unreported (out: $RELOUT)"
+# This session's own run is left whole: no step of it, and not its root, is
+# written, and nothing is sent to cancel it.
+OWNW="$(grep -E '^update bd update (L-|root-LIVE)' "$LIVE_LOG" || true)"
+[ -z "$OWNW" ] && ok "(OWNRUN) no bead of this session's own run is written" \
+  || bad "(OWNRUN) the release wrote the session's own run: $OWNW"
+grep -q '/runs/root-LIVE/' "$LIVE_CURL_LOG" \
+  && bad "(OWNRUN) the session's own run was cancelled" || ok "(OWNRUN) …and it is not cancelled"
+eq "$(field L-peer gc.routed_to)" "gc-toolkit/gc-toolkit.proactive" \
+   "(OWNRUN) a sibling step keeps its route; gascity, not the pack, owns its lifecycle"
 eq "$(field L-held assignee)" "gc-toolkit__polecat-lx-other" \
-   "(HELDSTEP) …while the assignee stays with the session that holds it"
-grep -q 'de-pinned husk step L-held' <<< "$RELOUT" \
-  && ok "(HELDSTEP) …and the run says the assignee was left behind" \
-  || bad "(HELDSTEP) the partial quiesce is unreported (out: $RELOUT)"
-
-# The root is the other door: a molecule whose worker steps are all quiet still
-# draws spawns while its gc.kind=workflow root keeps a pool route.
-eq "$(field root-LIVE gc.routed_to)" "" \
-   "(LIVEROOT) the workflow root is de-routed too, so no door is left open"
+   "(OWNRUN) …and a step another live session holds keeps its holder"
+eq "$(field root-LIVE gc.routed_to)" "gc-toolkit/gc-toolkit.proactive" \
+   "(OWNRUN) …and the root is not rewritten"
 
 # The disposition itself still lands whole.
 eq "$(field A-LIVE status)" "open"  "(LIVESTEP) the anchor is released"
@@ -2508,7 +2643,7 @@ FOLDOUT="$(GC_SESSION_NAME="$SESSION" GC_SESSION_ID="lx-live1" \
   sh "$SCRIPT" takeaway A-FOLD "superseded by A-CARRIER; the pour raced the fold" \
      --by proactive --release 2>"$LIVE/folderr")" || FOLDRC=$?
 FOLDERR="$(cat "$LIVE/folderr")"
-live_store_intact   # the fold reap's writes landed, or this is disk pressure not a verdict
+live_store_intact   # the fold release's writes landed, or this is disk pressure not a verdict
 eq "$FOLDRC" "0" "(FOLDSTORE) the release on a folded anchor succeeds"
 eq "$(field A-FOLD status)" "closed" \
    "(FOLDSTORE) the anchor is still CLOSED — its disposition was not resurrected"
@@ -2522,30 +2657,25 @@ eq "$(field A-FOLD gc.superseded_by)" "A-CARRIER" \
    "(FOLDSTORE) …and the fold record itself untouched"
 eq "$(field A-FOLD gc.takeaway)" "superseded by A-CARRIER; the pour raced the fold" \
    "(FOLDSTORE) the sitting's headline still lands on it"
-eq "$(field F-work status)" "closed" \
-   "(FOLDSTORE) the molecule the fold outran is REAPED — a husk no live session completes is force-closed"
-eq "$(field F-work gc.outcome)" "stand-down" \
-   "(FOLDSTORE) …and records why it closed"
-eq "$(field root-FOLD status)" "closed" \
-   "(FOLDSTORE) …its workflow root closed with it, so no door is left to re-offer the husk"
-# The bug this fix exists for: a step in_progress under ANOTHER live session.
-# The reassign guard refuses `--assignee ""` there, which is why de-pinning
-# could never release it and workflow-finalize stayed blocked. The reap closes
-# it through `update --status=closed`, which carries no assignee, so the guard
-# never fires and the held step is gone.
-eq "$(field F-held status)" "closed" \
-   "(FOLDSTORE) a step held in_progress by another live session is force-closed — the reap uses --status=closed, which the reassign guard does not gate"
+grep -qE '^POST http://127\.0\.0\.1:8372/v0/city/town/runs/root-FOLD/cancel X-GC-Request:' "$LIVE_CURL_LOG" \
+  && ok "(FOLDSTORE) the run the fold outran is cancelled through gascity's run cancel, with its anti-CSRF header" \
+  || bad "(FOLDSTORE) no run cancel for root-FOLD (curl log: $(cat "$LIVE_CURL_LOG"))"
+grep -q 'ended run root-FOLD of A-FOLD through gascity' <<< "$FOLDOUT" \
+  && ok "(FOLDSTORE) …and the run reports it" || bad "(FOLDSTORE) the ended run is unreported (out: $FOLDOUT)"
+FOLDW="$(grep -E '^update bd update (F-|root-FOLD)' "$LIVE_LOG" || true)"
+[ -z "$FOLDW" ] && ok "(FOLDSTORE) gc-helm.sh writes none of that run's beads; gascity's cancel closes them" \
+  || bad "(FOLDSTORE) the release wrote the folded run's beads: $FOLDW"
 eq "$(field F-held assignee)" "gc-toolkit__polecat-lx-other" \
-   "(FOLDSTORE) …with the assignee left as-is: a closed bead is never re-offered, so the guard is never provoked"
+   "(FOLDSTORE) …so a step another live session holds is not reassigned under it"
 grep -q 'superseded by A-CARRIER' <<< "$FOLDERR" \
   && ok "(FOLDSTORE) …and the run names the disposition it kept" \
   || bad "(FOLDSTORE) the skipped park is unexplained (stderr: $FOLDERR)"
 grep -q 'anchor left closed' <<< "$FOLDOUT" \
-  && ok "(FOLDSTORE) …and reports a quiesce, not a release" \
+  && ok "(FOLDSTORE) …and reports the run's end, not a release" \
   || bad "(FOLDSTORE) the run claimed a release (stdout: $FOLDOUT)"
 
 # ── the disk-pressure guard itself ───────────────────────────────────────────
-# The quiesce assertions above read the store back through field(); a stub write
+# The release assertions above read the store back through field(); a stub write
 # the host could not land (ENOSPC under a concurrent run-tests.sh batch) would
 # leave that store stale and read as a false gc-helm.sh failure — the flake this
 # guard removes. Prove both halves so a regression that re-swallows the write is
@@ -2567,7 +2697,7 @@ eq "$GRC" "1" "(DISKGUARD) the flag aborts the LIVE block, not a verdict on stal
 grep -q 'disk-pressure' <<< "$GOUT" \
   && ok "(DISKGUARD) …and the abort names disk pressure, not a gc-helm.sh fault" \
   || bad "(DISKGUARD) the abort is unexplained (out: $GOUT)"
-PATH="$SAVED_PATH"
+PATH="$SAVED_PATH"; export GC_RUN_CANCEL_TOOL="$SAVED_CANCEL_TOOL"; unset GC_CITY_PATH GC_HOME
 
 # ── demand: what a person owes, as a bead the work is blocked by ──────────────
 # The verb replaces parking a subject on prose. Its whole value is the EDGE, so
@@ -2576,7 +2706,7 @@ PATH="$SAVED_PATH"
 # not land — a demand with no edge leaves the work reading ready while a person
 # owes an answer, which is the state the verb exists to remove.
 #
-# Its own stub: the release-quiesce fixture above answers `bd list` with step
+# Its own stub: the release fixture above answers `bd list` with step
 # beads, and demand reads `bd list` for an existing open demand.
 mkdir -p "$TMP/bin2"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin2/gc" <<'GC2'
@@ -3210,8 +3340,22 @@ grep -q "a live workflow already drives tk-react1" "$TMP/rerr3" \
 grep -q "already carries a first reaction\|failed" "$TMP/rerr3" \
   && bad "(REACT) a live-workflow skip must not read as already reacted or as a failure" \
   || ok "(REACT) …and is neither an already-reacted skip nor a failure"
+
+# The sling's dispatch-path guard exits RC_DISPATCH_PATH (5) when the bead is
+# already routed or armed: a third no-op with its own cause. react re-raises it
+# as its own code (7). Without that, react would report the skip as a failure
+# (exit 4) and the intake caller would name a failure to file that never
+# happened.
+rrc=0; FAKE_SLING_RC=5 sh "$SCRIPT" react tk-react1 >/dev/null 2>"$TMP/rerr4" || rrc=$?
+eq "$rrc" "7" "(REACT) a dispatch-path skip (sling exit 5) becomes react exit 7"
+grep -q "tk-react1 is already routed or armed" "$TMP/rerr4" \
+  && ok "(REACT) …and names the no-op cause" \
+  || bad "(REACT) react dispatch-path message missing: $(cat "$TMP/rerr4")"
+grep -q "already has an open first reaction\|live workflow\|failed" "$TMP/rerr4" \
+  && bad "(REACT) a dispatch-path skip must not read as another skip or as a failure" \
+  || ok "(REACT) …and is neither of the other skips nor a failure"
 unset GC_PROACTIVE_TOOL FAKE_SLING_RC
 
 echo ""
-echo "gc-helm takeaway + demand + dismiss + react (release quiesce, waiting-on edges, length gate, demand shape, argument-free sitting inference, react no-op exit): $PASS passed, $FAIL failed"
+echo "gc-helm takeaway + demand + dismiss + react (release run end, waiting-on edges, length gate, demand shape, argument-free sitting inference, react no-op exit): $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

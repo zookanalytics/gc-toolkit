@@ -1,19 +1,17 @@
 #!/bin/sh
-# converse-claim.sh — claim one turn FOR A CONTINUATION GROUP, put back
-# anything that belongs to a different one (`gc hook --claim` has no group
-# filter, so re-claim-within-the-group is claim-then-release until it grows
-# one), and name a turn this session is ALREADY working so the caller neither
-# restarts it nor ends it.
+# converse-claim.sh — claim the turn a converse session works, and name a turn
+# this session is ALREADY working so the caller neither restarts it nor ends
+# it. A sitting works one visit and ends its session as soon as that visit
+# closes, so the claim is never scoped to a group: whatever the claim hands
+# this session is its own.
 # Usage:
-#   converse-claim.sh                 first claim of a session: any group
-#   converse-claim.sh <current-group> re-claim: only this group is workable
-#   converse-claim.sh --sh [group]    the verdict as eval-able assignments
+#   converse-claim.sh        claim, and print the verdict
+#   converse-claim.sh --sh   the verdict as eval-able assignments
 # Output: one key=value line; exit status says what to do:
-#   action=work   bead=<id> group=<g> [reason=unreleasable]    exit 0
+#   action=work   bead=<id> group=<g>                          exit 0
 #   action=hold   bead=<id> group=<g> reason=already-underway [adopted=<ids>] exit 3
 #   action=finish bead=<id> group=<g> reason=outcome-stamped [adopted=<ids>] exit 4
 #   action=drain  reason=no-work                               exit 1
-#   action=drain  reason=out-of-group bead=<id> group=<g>      exit 1
 # With --sh the same verdict prints as shell assignments to eval —
 #   ACTION=<verb> VISIT=<bead> SUBJECT=<group> REASON=<reason>; the exit status
 #   is unchanged and the verdict line still shows on stderr.
@@ -23,16 +21,12 @@
 # re-checked the premise, so the mechanism that reads the trace a real hold
 # leaves (gc.hold_demand on the visit) lives here. The stdout verdict is
 # unchanged; BEGAN is the diagnostic the caller reads to pick its step-1 rule.
-# The RELEASE is the load-bearing half: never drain on a turn not put back
-# (a held visit waits for witness patrol otherwise), release the WHOLE claim
-# (the vacuumed continuation_assigned siblings too), and when part of the set
-# will not go back, work the first still-HELD turn instead of draining.
-# The HOLD verdict is load-bearing for the opposite reason: it is the only
-# answer that neither works a live sitting nor ends it. FINISH covers the one
-# case a hold gets wrong: a sitting whose record is complete and whose close
-# never ran looks exactly like a live one from the claim alone, so the outcome
-# stamp is read off the bead and the close is completed here.
-# Caller: the converse prompt's claim loop.
+# The HOLD verdict is load-bearing: it is the only answer that neither works a
+# live sitting nor ends it. FINISH covers the one case a hold gets wrong: a
+# sitting whose record is complete and whose close never ran looks exactly like
+# a live one from the claim alone, so the outcome stamp is read off the bead and
+# the close is completed here.
+# Caller: the converse prompt's claim block.
 set -u
 
 # The one definition of what subject a visit covers (its tracks-edge identity,
@@ -67,7 +61,7 @@ shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 PROG="converse-claim"
 
 usage() {
-    sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 case "${1-}" in
@@ -75,30 +69,23 @@ case "${1-}" in
 esac
 
 # --sh: emit the verdict as eval-able shell assignments rather than the default
-# key=value line, so a caller can `eval "$(converse-claim.sh --sh "$SUBJECT")"`
-# instead of parsing it. This runs the claim ONCE, in the default mode, and
-# translates its one stdout line; the child's stderr (the BEGAN diagnostic and
-# the group-recovery note) flows straight through, and the verdict is echoed
-# there too so the caller still reads it. ACTION / VISIT / SUBJECT / REASON are
-# the four the caller branches on; adopted stays on the verdict echo.
+# key=value line, so a caller can `eval "$(converse-claim.sh --sh)"` instead of
+# parsing it. This runs the claim ONCE, in the default mode, and translates its
+# one stdout line; the child's stderr (the BEGAN diagnostic and the
+# group-recovery note) flows straight through, and the verdict is echoed there
+# too so the caller still reads it. ACTION / VISIT / SUBJECT / REASON are the
+# four the caller branches on; adopted stays on the verdict echo.
 if [ "${1-}" = "--sh" ]; then
-    shift
-    _CG="${1-}"
-    _OUT=$("$0" "$@")
+    _OUT=$("$0")
     _RC=$?
     printf '%s: %s\n' "$PROG" "$_OUT" >&2
     _A=$(printf '%s' "$_OUT" | sed -n 's/.*action=\([^ ]*\).*/\1/p')
     _V=$(printf '%s' "$_OUT" | sed -n 's/.*bead=\([^ ]*\).*/\1/p')
     _G=$(printf '%s' "$_OUT" | sed -n 's/.*group=\([^ ]*\).*/\1/p')
     _R=$(printf '%s' "$_OUT" | sed -n 's/.*reason=\([^ ]*\).*/\1/p')
-    # A finish names a sitting being disposed of, not entered, so its group is
-    # not this thread's — keep the caller's group across it.
-    [ "$_A" = "finish" ] && _G="$_CG"
     printf 'ACTION=%s\nVISIT=%s\nSUBJECT=%s\nREASON=%s\n' "$(shq "$_A")" "$(shq "$_V")" "$(shq "$_G")" "$(shq "$_R")"
     exit "$_RC"
 fi
-
-CURRENT_GROUP="${1-}"
 
 command -v jq >/dev/null 2>&1 || { echo "$PROG: jq is required" >&2; exit 2; }
 command -v gc >/dev/null 2>&1 || { echo "$PROG: gc is required" >&2; exit 2; }
@@ -124,15 +111,13 @@ BEAD_JSON=$(gc bd show "$BEAD" --json 2>/dev/null | scrub)
 
 # The claim reports the gc.continuation_group STAMP, and the stamp lands empty
 # on a minority of visits while the `tracks` edge filed alongside it still
-# carries the subject (su-ab9je is the edge holding where the stamp
-# did not). Left empty, the deliberate cannot-prove-foreign fallback below
-# silently disables this guard for exactly the turn it exists to catch — an
-# unrelated visit vacuumed onto a live sitting — so recover the
-# group from the edge first. Scoped to task_kind=visit on purpose: `tracks` is
-# not a visit-only edge (a convoy tracks its members), and inventing a group
-# for a non-visit would release a turn this session was entitled to work. A
-# visit carrying neither recording still resolves to the fallback below; the
-# writer-side loss is repaired where the visit is filed.
+# carries the subject (su-ab9je is the edge holding where the stamp did not).
+# The group is the SUBJECT the caller works the sitting on, so it is recovered
+# from the edge first. Scoped to task_kind=visit on purpose: `tracks` is not a
+# visit-only edge (a convoy tracks its members), and inventing a group for a
+# non-visit would hand the caller a subject the bead never had. A visit
+# carrying neither recording reports an empty group; the writer-side loss is
+# repaired where the visit is filed.
 if [ -z "$GROUP" ]; then
     GROUP=$(printf '%s' "$BEAD_JSON" \
         | jq -r "$VISIT_IDENTITY_JQ"'if type == "array" then (.[0] // {}) else {} end
@@ -164,11 +149,6 @@ fi
 # Neither other verdict is safe on a live sitting: `work` sends the caller back
 # through a visit loop that ends at the close, and `drain` acks a stop while
 # the operator may still be reading the thread.
-#
-# This precedes the group guard because the guard's remedy is the release, and
-# releasing a turn mid-sitting is the same destruction by the other door. A
-# turn only reaches in_progress under this identity because an earlier turn of
-# this session decided to work it, so the guard has had its say.
 #
 # A hold is wrong for one shape of that claim, and it is the shape a sitting
 # ends in. A visit records its ending in writes that are not atomic: the
@@ -286,70 +266,7 @@ if [ "$REASON" = "existing_assignment" ]; then
     exit 3
 fi
 
-# Work on a match, a first claim, or no group to compare — the unknown cases
-# resolve to WORK on purpose (releasing an unproven-foreign turn is a strand
-# dressed as a fix).
-if [ -z "$CURRENT_GROUP" ] || [ -z "$GROUP" ] || [ "$GROUP" = "$CURRENT_GROUP" ]; then
-    echo "action=work bead=$BEAD group=$GROUP"
-    exit 0
-fi
-
-# Foreign group: put back everything this claim assigned, then drain.
-
-# release_turn <bead-id> — three ORDERED writes (bd's claim guard refuses
-# --assignee "" on an in_progress bead, and metadata writes bypass it, so:
-# unset session pointers, --status=open, then --assignee=""), then
-# the read-back that decides. gc.routed_to is deliberately left alone: it is
-# the pool's offer predicate, and clearing it would park the turn. Every
-# write is attempted even after one fails; the READ must also agree.
-release_turn() {
-    _id="$1"
-    _ok=1
-    gc bd update "$_id" --unset-metadata gc.session_id --unset-metadata gc.session_name >/dev/null 2>&1 || _ok=0
-    gc bd update "$_id" --status=open >/dev/null 2>&1 || _ok=0
-    gc bd update "$_id" --assignee="" >/dev/null 2>&1 || _ok=0
-
-    # Trust the read, not the writes: a partial release still holds the turn.
-    STATE=$(gc bd show "$_id" --json 2>/dev/null | scrub \
-            | jq -r 'if type=="array" then "\(.[0].status // "")|\(.[0].assignee // "")" else "|" end' 2>/dev/null || printf '')
-    case "$STATE" in
-        "open|") ;;                   # back in the pool
-        *)       _ok=0 ;;
-    esac
-    [ "$_ok" = "1" ]
-}
-
-# The claimed turn FIRST, then every vacuumed sibling; order preserved,
-# duplicates dropped.
-RELEASE_IDS=$(printf '%s' "$CLAIM" | jq -r '
-    ([.bead_id // empty] + (.continuation_assigned // []))
-    | map(select(type == "string" and . != ""))
-    | reduce .[] as $x ([]; if index($x) then . else . + [$x] end)
-    | .[]' 2>/dev/null || printf '')
-# A claim we could not re-read is still a claim: fall back to the turn we know.
-[ -z "$RELEASE_IDS" ] && RELEASE_IDS="$BEAD"
-
-RELEASED=1
-UNRELEASED=""
-# The turn to NAME must be one this session still HOLDS — the first release
-# failure, which is the claimed turn whenever the claimed turn is the stuck
-# one (naming an already-released bead would be a strand and a race).
-HELD_TURN=""
-for _turn in $RELEASE_IDS; do
-    if ! release_turn "$_turn"; then
-        RELEASED=0
-        [ -z "$HELD_TURN" ] && HELD_TURN="$_turn"
-        UNRELEASED="${UNRELEASED:+$UNRELEASED }$_turn(${STATE:-unreadable})"
-    fi
-done
-
-if [ "$RELEASED" = "0" ]; then
-    # Working a still-held turn out of group is a legible surprise; draining
-    # now would strand it silently.
-    echo "$PROG: could not release $UNRELEASED back to the pool; working $HELD_TURN rather than stranding it" >&2
-    echo "action=work bead=$HELD_TURN group=$GROUP reason=unreleasable"
-    exit 0
-fi
-
-echo "action=drain reason=out-of-group bead=$BEAD group=$GROUP"
-exit 1
+# A turn this claim started (`claimed` or `ready_assignment`) is the visit this
+# session works.
+echo "action=work bead=$BEAD group=$GROUP"
+exit 0

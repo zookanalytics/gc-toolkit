@@ -1,187 +1,121 @@
-# gctk — the compiled data plane
+# gctk — gc-toolkit's CLI
 
-`gctk` is the pack's compiled data plane as one Go binary: the merge cadence's
-logic, plus the PR-status tri-state that the `status:` label and the helm board
-must share. It is a port, not a redesign: each subcommand keeps the
-byte-identical CLI of the script it replaces, so no formula, order, prompt, or
-doctor check changes when a port lands.
+`gctk` is gc-toolkit's command-line interface, built as one Go binary: the
+documented, structured surface through which agents act on a city. Agents are
+its users. A person can run any command and it should make sense, but no
+command is shaped for ad-hoc human use. A command's usage text and its code's
+doc comments state what it does and how; this README is the map to them.
 
-Scope and rationale: `specs/2026-08-review-gates/gctk-promotion.md`.
+gctk links no beads library: it reaches beads through `gc bd` and the
+supervisor's API (`internal/gcbd`).
 
-## The language rule
+## Commands
 
-> Shell for anything an agent pastes, anything that must read as documentation,
-> or anything under ~150 lines. The compiled tool for data-plane logic that
-> writes ledger state.
-
-Shell stays the pack's lingua franca. Formula steps and prompt fragments can
-only carry shell, and it fits the small glue that remains. The merge-cadence
-cluster is the exception: highest stakes, pure data-plane, no cross-media
-sharing, and its callers already treat it as an opaque CLI. `pr-status` is
-compiled for the opposite reason: the `status:` label (shell) and the helm
-board (Go) must derive the tri-state from one code path, and only a shared
-compiled package keeps them from diverging.
-
-## Ported so far
-
-| Subcommand | Replaces | State |
+| Command | What it does | Documented in |
 |---|---|---|
-| `lifecycle` | `assets/scripts/lifecycle.sh` | ported; the script only execs the binary, with no fallback — a call with no binary to run is refused |
-| `merge` | `assets/scripts/merge.sh` | ported; the script only execs the binary, with no fallback — a pass with no binary to run is refused |
-| `pr-status` | `pr-status-label.sh`'s `derive_value` | ported; no fallback — the label is left unchanged when the binary is absent or stale |
+| `lifecycle` | anchor lifecycle transitions over the state machine `lifecycle/lifecycle.toml` declares | `internal/cli/lifecycle.go`, `internal/lifecycle` |
+| `merge` | arm 2 of the merge cadence, the single writer of merged truth | `internal/cli/merge.go` |
+| `pr-status` | a PR's status tri-state (working, needs-review or needs-attention), the one derivation the `status:` label and the helm board share | `internal/cli/prstatus.go`, `prstatus` |
+| `rig` | actions taken on the rig: running its checks and recording each result against the commit | `gctk rig --help`, `internal/cli/rig.go`, `internal/rig` |
+| `version` | the revision the binary was built from | `cmd/gctk` |
 
-Still shell: `gate-ensure`, `pr-open`, `pr-facts`, `convoy-graduate`,
-`signoff`. The spec's port order is `lifecycle` first (everything else calls
-it), then `merge`, then the rest — one subcommand per PR.
+Logic gctk does not hold runs as shell scripts. Among them are the rest of the
+merge cadence (`gate-ensure`, `pr-open`, `pr-facts`, `signoff`) and
+`refinery-reconcile.sh`, the driver that runs the cadence's arms.
+`specs/2026-08-review-gates/gctk-promotion.md` records how the merge cadence
+moves into gctk.
 
-`pr-status` is not a cadence port: it is the working | needs-review |
-needs-attention tri-state that `pr-status-label.sh` and the helm board share
-(`services/gctk/prstatus`). The label writer stays in shell, the derivation
-lives in gctk, and it has no shell fallback (see below).
+## Bridges
 
-`refinery-reconcile.sh` stays a thin shell driver: identity discovery, arm
-ordering, the posture interlock, the arm budgets. The cadence has to remain
-readable as a script.
+A shell script that only execs a gctk command is a bridge for callers that do
+not call gctk yet, and it goes away once they do. A bridge is not a contract
+gctk keeps: matching a script's flags and output byte for byte is not a goal,
+and neither are tests that pin usage text. `assets/scripts/lifecycle.sh` execs
+`gctk lifecycle`, and `assets/scripts/merge.sh` execs `gctk merge`. Both find
+the binary through `assets/scripts/gctk-resolve.sh`, which states the
+resolution chain, and neither has a shell fallback. With no binary to run, a
+bridge refuses the call with exit 1 and names the `gctk-build` order that
+publishes the binary. The merge cadence reads a refused transition as a failed
+one and a refused merge pass as `merge rc=1`, and retries both on its next
+pass. A fresh city has no binary until that order's first build, and a city
+whose build failed keeps serving the last good binary.
 
-## Subprocess seams, not a linked library
+`assets/scripts/pr-status-label.sh` writes the `status:` label in shell and
+takes the value from `gctk pr-status derive`. It resolves the binary the same
+way, and when there is none, or the binary is too old to carry `pr-status`, it
+leaves the label unchanged.
 
-gctk shells out to `gc`, `bd` and `gh` exactly as the scripts do. Linking the
-beads library would change the observability surface, the permissions surface,
-and the test surface all at once. Keeping the seams means the scripts' existing
-`.test.sh` stub harnesses drive the binary unchanged — the stubs are ordinary
-executables on `PATH`, and a Go `exec.Command("gc", …)` finds them the same way
-a shell does.
+## rig
 
-That is why `assets/scripts/lifecycle.test.sh`, which drives the binary through
-`lifecycle.sh`, is the port's acceptance bar, and why the port needs no test
-suite of its own.
+`gctk rig` holds the actions gctk takes on a rig, and checks are the first of
+them. `test`, `lint` and `typecheck` run the command their caller passes and
+record the result against the commit it ran at. `setup` and `build` run their
+command and record nothing. In a checkout they find clean, they put back what
+the command changes, other than files git ignores, so the recorded checks that
+follow in the same checkout can run. The caller passes every input: the
+command, which test run it is, and, when the rig declares no command for a
+check, that there is nothing to run. gctk reads no formula var and works out no
+diff.
 
-## Resolution, and a missing binary
+Every place that runs a rig's declared checks calls it, passing the command
+from the rig's formula vars: `mol-polecat-work`'s workspace-setup, its
+preflight-tests at the base commit and its self-review, the refinery's
+run-tests at the merged head, and the correctness review when the pinned
+commit has no record to read. `assets/scripts/self-review-check.sh`, the
+self-review's exit condition, and `assets/scripts/review-evidence.sh`, which
+every review's gather runs, read the records with `--check`. Each caller finds
+the binary by one line, the `gctk-bin` block, which takes `$GCTK_BIN` or else
+the city's build and calls no `gc`, because `self-review-check.sh` runs where
+`gc` can fail.
 
-`lifecycle.sh` and `merge.sh` hand the call to `assets/scripts/gctk-resolve.sh`,
-which resolves the binary explicitly — `$GCTK_BIN`, else the
-`.gc/services/gctk/bin/gctk` under `$GC_CITY_PATH`, `$GC_CITY` or
-`$GC_CITY_ROOT`, else the `city_path` that `gc service list --json` reports —
-and `exec`s it. That precedence is the one the rest of the pack reads, and
-`GC_CITY_PATH` leads it because that is the variable a supervisor puts in an
-agent session. The listing is what the cadence itself needs: the order runner
-that execs `refinery-reconcile.sh` carries no city variable at all, so an
-env-only chain would miss the binary on every order-driven call.
-`doctor/check-cadence-live` resolves by the same env chain.
+The records live under the rig clone's git common directory, which every
+worktree of the clone shares and which outlives any one of them:
 
-Both scripts call `gctk_require <subcommand> "$@"`, which refuses the call
-when no binary resolves. The resolver also carries `gctk_resolve`, which
-returns instead so that a script's own shell answers. It is the call for a port
-that lands with its script kept as the fallback, and no script calls it.
+| Path under the git common directory | What it holds |
+|---|---|
+| `gc-rig-checks/<check>/commits/<commit>.json` | the check's record for that commit |
+| `gc-rig-checks/test/trees/<tree>.json` | the full-suite test pass every commit with that tree reads |
 
-Resolution is never a walk up from the script's own path. The hermetic suites
-run from a tree that lives inside a live city, and a filesystem hunt would find
-that city's binary instead of the one a suite built from the tree under test.
-A suite whose scripts reach `lifecycle.sh` or `merge.sh` builds the binary from
-the checkout first, with `harness_build_gctk` in
-`assets/scripts/test-harness.sh`.
-
-`lifecycle` and `merge` have no shell fallback. When there is no binary to
-exec, `lifecycle.sh` and `merge.sh` exit 1, write nothing, and name the
-`gctk-build` order that publishes the binary:
-
-- **A fresh city** refuses lifecycle transitions and merge passes until the
-  order's first build publishes the binary. The merge cadence's arms read a
-  refused transition as a failed one and retry it on their next pass. A
-  refused merge pass is logged as `merge rc=1`, and the arm runs again on the
-  next pass.
-- **A city whose build failed** keeps serving the last good binary, because a
-  failed build leaves the published one untouched. A city whose builds have
-  never succeeded has no binary, and refuses transitions and merge passes the
-  same way a fresh city does. The refusal names the order's
-  `build-status.json`, which records why the last build failed.
-
-`GCTK_BIN=none` names no binary, so every `lifecycle.sh` and `merge.sh` call
-under it is refused. A port that keeps its script as the fallback calls
-`gctk_resolve`, and its suite reaches that shell with
-`GCTK_FALLBACK=<subcommand>`, which forces that subcommand's shell alone and
-leaves `GCTK_BIN` on the binary the suite built for `lifecycle.sh`.
-
-`pr-status` has no fallback either. Its derivation lives only in gctk — the helm
-board (Go) has no shell to fall back to, so a shell copy would be the divergence
-the shared package exists to remove. `pr-status-label.sh` resolves the binary
-the same way `lifecycle.sh` does (`$GCTK_BIN`, else the city's deployed build).
-When the binary is missing — `GCTK_BIN=none`, unset with no deployed build, or
-not executable — `derive_value` warns and returns 2 without deriving. When it is
-stale — too old to carry `pr-status` — the unknown subcommand exits non-zero,
-which reads the same way. Either way `gctk pr-status derive`'s exit-2 grammar
-leaves each best-effort caller's label unchanged, so a city without a current
-gctk gets a stale-but-safe label, never a wrong one.
+`--publish-bead <bead>` copies a record onto the bead's `rig_check.<check>` key,
+which `lifecycle/lifecycle.toml` registers. A record says what a command did at
+a commit and never whose failure it is: a caller that judges a recorded fail
+pre-existing writes that judgment on a bead with
+`assets/scripts/rig-check-pre-existing.sh`. `gctk rig --help` states the flags,
+which record answers a call, and the exit codes. `specs/tk-1hazlo2/rig-checks.md`
+records the design and its measured cost.
 
 ## Build and deploy
 
 `orders/gctk-build.toml` runs `assets/scripts/gc-build.sh gctk --deploy` on a
-5-minute cooldown. `gc-build.sh` is the one out-of-band builder for the pack's
-compiled components, helm-svc included, and gctk takes none of helm's service
-steps: no restart, no readability probe. It builds if a source is newer than
-the binary or the last record shows the binary was built from another
-revision, publishes by atomic rename, and writes a build-status record. Both
-tests are needed, because `find -newer` cannot see an input a commit deleted.
-The revision is the services/gctk SUBTREE's tree hash at HEAD (`git rev-parse
-HEAD:./` from the module), not the repo commit: it moves exactly when a
-committed input of this module changes, so a docs-only merge republishes
-nothing, and the build stamps the same value into the binary (`gctk version`).
-The record also carries `behind_main`, the commits origin/main holds under
-services/gctk that the checkout lacks, which the PACK row reports and no build
-acts on. A tick with nothing to build needs no Go toolchain. A tick with
-something to build and no toolchain is a failed build: it records
-`last_build_rc=1`, so the board's PACK row shows it, because a city that cannot
-build the binary leaves `lifecycle.sh` and `merge.sh` nothing to exec. It finds
-the city by the env chain above and, failing that, by `gc service list --json`'s
-`city_path`, and publishes under `<city>/.gc/services/gctk`, a root
-`GC_GCTK_STATE_ROOT` overrides. Nothing builds in a caller's path: a build
-inside the cadence would put a Go toolchain between a merge and its ledger
-write.
-
-The module is stdlib-only, so a cold build is seconds. There is no service to
-restart: a published gctk is serving the moment it lands.
-
-**The tradeoff, stated.** A script edit is live from the working tree
-instantly; a gctk change rides the build order. A broken build keeps the last
-good binary serving the cadence. That is slower iteration in exchange for no
-accidental live surgery on merge logic, and two things make the lag visible:
-`doctor/check-cadence-live` compares `gctk version` against the checkout's
-services/gctk subtree, and the board's PACK rows carry the same comparison
-where the operator already looks. `lifecycle.sh` and `merge.sh` make no such
-comparison before they exec. There is no other implementation to prefer, so
-each runs the binary the order last published, and the order's lag is never a
-refused call.
-
-## The state table lives once
-
-`lifecycle/lifecycle.toml` stays the human- and doctor-readable declaration.
-`internal/lifecycle` is the executable copy, and `gctk lifecycle
---dump-machine` prints it for the drift test in `lifecycle.test.sh`, which holds
-it against the TOML.
+five-minute cooldown, and `gc-build.sh` states when it builds and what it
+writes. It publishes the binary under `<city>/.gc/services/gctk`, and nothing
+builds in a caller's path, so a gctk change goes live when the order next
+publishes it, while a script edit is live from the working tree at once. The
+bridges run whatever binary the order last published.
+`doctor/check-cadence-live` and the board's PACK rows report a deployed binary
+built from sources other than the checkout's.
 
 ## Layout
 
 ```
 cmd/gctk/            dispatch and `version`
-internal/lifecycle/  the state machine — states, classifications, edges
-internal/cli/        one file per subcommand, each a contract-preserving port
-internal/gcbd/       the `gc bd` subprocess seam and its jq-equivalent accessors
+internal/cli/        the commands, each with its usage text, flags and exit codes
+internal/lifecycle/  the lifecycle state machine, which lifecycle/lifecycle.toml declares
+internal/gcbd/       bead reads and writes, through `gc bd` and the supervisor API
+internal/daemon/     finding the supervisor API the gcbd reads go through
+internal/git/        the git subprocess seam: one git command per call, in a named directory
+internal/rig/        rig's runner and its commit-keyed record store
+prstatus/            the PR status derivation, exported for the helm board
 ```
-
-`internal/gcbd`'s accessors reproduce the jq expressions the scripts used,
-corners included: `(.x // "") | tostring` treats both null and false as absent,
-so a metadata value of `false` reads as the empty string here too. Matching the
-scripts is the contract; improving on them silently is how a port diverges.
 
 ## Running the tests
 
 ```bash
-cd services/gctk && go test ./...          # the units
-bash assets/scripts/lifecycle.test.sh      # the acceptance bar
-bash assets/scripts/merge.test.sh          # the acceptance bar
-bash assets/scripts/gctk-resolve.test.sh   # which implementation answers
+cd services/gctk && go test ./...          # every package
+bash assets/scripts/lifecycle.test.sh      # lifecycle through its bridge
+bash assets/scripts/merge.test.sh          # merge through its bridge
+bash assets/scripts/gctk-resolve.test.sh   # which binary a bridge runs
 ```
 
-Each shell suite that reaches `lifecycle.sh` or `merge.sh` builds the binary
-itself and fails if it cannot: a run that could not exercise the port has not
-run the acceptance bar.
+A shell suite that reaches `lifecycle.sh` or `merge.sh` builds the binary from
+the checkout itself, and fails if it cannot.

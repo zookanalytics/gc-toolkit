@@ -9,16 +9,16 @@
 # finding, or a validation pass is out on the anchor — anchor-wide, so the fix
 # for a sibling lane's must-fix holds this lane too; a must-fix finding no fix
 # unit answers holds the merge, not the dispatch; a closed validation pass holds
-# nothing; an unreadable probe holds the dispatch fail-closed); a declared lane
-# still carrying a legacy exception@<oid>
-# park is a pre-migration hold (wedged, no dispatch); the live-head read, which
-# decides only the dispatch pin and the machine axis (a deleted ref, a body
-# without .sha, and a failed read are all unanswerable); the stray-marker sweep
-# (undeclared and outside the lane vocabulary is cleared, the retired green@
-# grammar included; a declared or well-formed one is not, and neither is an
-# undeclared legacy exception@ — left for migrate-lane-states.sh; an unpersisted
-# clear is reported); a multi-check check_set split per check rather than joined
-# into one name; in-flight dedup (routed, poured, claimed) + stranded repair
+# nothing; an unreadable probe holds the dispatch fail-closed); a declared lane's
+# exception@<oid> marker is read as nothing, so the lane derives from the graph;
+# the live-head read, which decides the dispatch pin, the machine axis and the
+# commit the gates resolve at (a deleted ref, a body without .sha, and a failed
+# read are all unanswerable, and git ls-remote answers a head GitHub does not;
+# a head neither answers holds the anchor for the pass, an index named
+# outright included);
+# a stored marker's residue, which nothing reads or clears; a multi-check
+# check_set split per check rather than joined into one name; in-flight dedup
+# (routed, poured, claimed) + stranded repair
 # (root probe: re-sling a review with no LIVE tracking convoy, or one whose live
 # convoy carries no workflow root — a pour that minted the convoy but died before
 # the root drives nothing and must not hold the anchor in flight forever; and
@@ -26,21 +26,27 @@
 # — a live chain is in flight, a spent one is wedged, an unreadable one is held —
 # never counted in flight on sight; and converge after a hard sling failure; a
 # stranded review is NOT re-slung while a fix unit is in flight); the dispatch
-# shape (metadata and blocks edge in one create, read back before the pour, so
-# a lost create reply is re-slung as stranded and never twinned; then gc sling
-# --on mol-review with
+# shape (the review's record, its blocks edge and the fixed description in one
+# create, read back before the pour, so a lost create reply is re-slung as
+# stranded and never twinned; then gc sling --on mol-review with
 # gc.execution_routed_to read-back, never retried in-pass; no dispatch tally is
-# written, and there is no dispatch ceiling); merge_hold, and the cap's park
-# under it reading as the wedge; and the review-wedge escalation, shared by both
-# reach shapes (an exec-stamp-only poured review, and a no-stamp review a
-# tracking convoy's root drives) -> a spent workflow is one deduped visit, held
-# one pass first.
+# written, and there is no dispatch ceiling); the record a review carries,
+# fresh or stranded: the formula it pours, why it went out, and the open PR a
+# pull_request anchor's review carries as review_pr_url and review_pr_number;
+# the vars every sling passes, each value a review is told after any
+# --sling-var, and a stranded review's pin, written only where its record has
+# none; merge_hold, which holds the dispatch while the machine axis still reads
+# the lanes; the review-wedge escalation, shared by both reach shapes (an
+# exec-stamp-only poured review, and a no-stamp review a tracking convoy's root
+# drives) -> a spent workflow is one deduped visit, held one pass first; and,
+# for each review formula, the vars it declares and names held against the ones
+# a real dispatch's sling passes.
 #
 # The sections run in the parts declared below, each wrapped in an `if part`
 # block. tools/run-tests.sh runs each part as its own run under its own
 # timeout. Run directly, the file runs each part in order, each in a process of
 # its own (test-harness.sh), so no part reads the fixtures an earlier part left.
-# run-tests-parts: dispatch inflight wedge machine pacing
+# run-tests-parts: dispatch inflight wedge machine pacing vars
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,15 +60,19 @@ unset GC_RIG 2>/dev/null || true
 # gate-ensure records its verdicts through lifecycle.sh, which execs gctk.
 harness_build_gctk
 harness_init
+# No check index and no repository: the script under test runs from a private
+# directory, so the suite names a missing index outright, and review-checks.sh
+# then resolves every check_set token as a lane gating every transition. The
+# lanes do not depend on the checkout, and a case that needs a real index names
+# one itself.
+export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 
 # Private scripts dir: the SUT, lifecycle.sh, and the REAL graph-derivation
 # helpers gate-ensure now shells out to — lane-state.sh (lane green) and
 # finding.sh (fix-in-flight), copied in unstubbed so the fixtures exercise the
-# real derivation, plus a body-emitter stub (interface unchanged).
+# real derivation.
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/gate-ensure.sh" "$HERE/lifecycle.sh" "$HERE/lane-state.sh" "$HERE/finding.sh" "$HERE/review-checks.sh"
-printf '#!/usr/bin/env bash\necho "METHOD${2:+ note: $2}"\n' > "$SD/review-dispatch-body.sh"
-chmod +x "$SD/review-dispatch-body.sh"
 # escalate.sh stub: records subject/key/message so the wedge arm's one-visit
 # contract can be asserted without a live converse pool.
 export STUB_ESCALATE_LOG="$TMP/escalate.log"
@@ -78,7 +88,7 @@ SUT="$SD/gate-ensure.sh"
 # The SUT forwards GC_RIG into every sling; an ambient value would rewrite the
 # assertions below. Lane state is DERIVED (there is no dispatch ceiling and no
 # GC_MAX_REVIEW_DISPATCHES to unset), so a green lane is a closed approve review
-# bead in the store, never a check.<g>=green marker.
+# bead in the store.
 unset GC_RIG 2>/dev/null || true
 POOL="rig/gc-toolkit.polecat-codex"
 FIXP="rig/gc-toolkit.polecat"
@@ -94,15 +104,28 @@ anchor() { # id mr checkset marker branch extra-json
     "${6:-}"
 }
 
-# sha1sum is exactly 40 lowercase hex, so a labelled fixture oid satisfies the
-# marker grammar. A shorter string is a MALFORMED marker — a different arm.
-# live_head_for holds the head it reads to that same grammar, so fixture HEADS
-# go through here too; a mnemonic like "sha-b4" now reads as no head at all.
+# sha1sum is exactly 40 lowercase hex, the shape live_head_for holds the head it
+# reads to, so fixture HEADS go through here; a mnemonic like "sha-b4" reads as
+# no head at all.
 oid() { printf '%s' "$1" | sha1sum | cut -d' ' -f1; }
 # The machine axis (lifecycle/lifecycle.toml [machine_axis]) as the anchor
 # carries it, and with the instant stripped.
 machine() { printf '%s' "$(meta "$1" pr.machine)"; }
 pinned()  { local v; v="$(machine "$1")"; case "$v" in *@*@*) printf '%s' "${v%@*}" ;; *) printf '%s' "$v" ;; esac; }
+# The --var arguments the last sling of <bead> carried, one key=value a line, in
+# order. The stub logs a call's arguments joined by spaces, and no value here
+# holds " --var ", so each value runs to the next --var.
+slung_vars() { # <bead>
+  grep -E "^sling .* $1 --on " "$STUB_GC_LOG" | tail -1 \
+    | awk '{ n = split($0, p, / --var /); for (i = 2; i <= n; i++) print p[i] }'
+}
+# The value the last sling of <bead> passed for <key>; nothing when it passed no such var.
+slung_var() { # <bead> <key>
+  slung_vars "$1" | awk -v k="$2" 'index($0, k "=") == 1 { print substr($0, length(k) + 2); exit }'
+}
+# What a review is told: the vars every sling of a review passes, in order.
+TOLD="review_bead check anchor_bead review_branch review_base reviewed_oid review_pr_url review_pr_number review_context"
+slung_keys() { slung_vars "$1" | cut -d= -f1 | paste -sd' ' -; }
 SHORT="8d7f0cf3c"   # the abbreviated-sha shape that wedged gc-na313
 
 # Store-row fixture builders, shared by the stranded-repair and review-wedge
@@ -150,7 +173,6 @@ live_steps() { # <root> <id-prefix>
 # --- graph-shape fixtures for the DERIVED lane state ---------------------------
 # A lane derives GREEN from a closed approve review bead: signoff_verdict=approve,
 # not superseded, with a reviewed_oid pin — exactly lane-state.sh's backing test.
-# This is what replaces a check.<g>=green marker everywhere a lane must read green.
 backed() { # <id> <anchor> [lane=correctness]
   printf '{"id":"%s","status":"closed","assignee":"","notes":"","metadata":{"task_kind":"review","check_name":"%s","anchor_bead":"%s","reviewed_oid":"%s","signoff_verdict":"approve","gc.outcome":"recorded"}}' \
     "$1" "${3:-correctness}" "$2" "$(oid "backing-$1")"
@@ -192,9 +214,9 @@ judged_rc() { # <id> <anchor> <head-oid> [oc=recorded] [lane=codex]
     "$1" "${5:-codex}" "$2" "$3" "${4:-recorded}"
 }
 
-# ==== part dispatch: the default stamp, settled lanes, the cap's park,
+# ==== part dispatch: the default stamp, settled lanes, the operator hold,
 # quiescence, the per-head bar, the validation-pass dispatch, disposed anchors,
-# the live-head read and the stray-marker sweep ====
+# the live-head read and stored-marker residue ====
 if part dispatch; then
 
 echo "# every section sits inside a part"
@@ -231,10 +253,149 @@ grep -qxF "$rid|related|A1" "$STUB_DEPS" && ok "review is joined to the anchor b
 has "$(grep '^bd create Review branch' "$STUB_GC_LOG")" "--deps related:A1" "…which rides the same create"
 hasnt "$(grep "^bd update $rid" "$STUB_GC_LOG")" "--set-metadata" "…and no second write stamps the review's metadata"
 has "$(cat "$STUB_GC_LOG")" "sling $POOL $rid --on mol-review" "the review formula is attached by an explicit gc sling --on (no default hijack)"
-hasnt "$(cat "$STUB_GC_LOG")" "--var" "the default mol-review path forwards no formula vars (the quorum pilot is opt-in)"
 eq "$(meta A1 dispatch_count)" "<absent>" "no dispatch tally is written on the anchor — the ceiling is retired"
+eq "$(meta "$rid" review_formula)" "mol-review" "review bead records the formula its dispatch pours"
+eq "$(meta "$rid" review_context)" "lane 'correctness' does not derive green (no non-superseded approve review backs it)" \
+  "review bead records why it went out"
+eq "$(meta "$rid" review_pr_url)|$(meta "$rid" review_pr_number)" "<absent>|<absent>" "a pre-open anchor's review carries no PR"
+# The step text names each value the pour fills in, so the sling carries every
+# one, read from the record that read back, and an empty one as empty.
+eq "$(slung_keys "$rid")" "$TOLD" "the sling passes every value a review is told as a --var"
+eq "$(slung_var "$rid" review_bead)|$(slung_var "$rid" check)|$(slung_var "$rid" anchor_bead)" "$rid|correctness|A1" \
+  "…naming the review bead, its check and its anchor"
+eq "$(slung_var "$rid" review_branch)|$(slung_var "$rid" review_base)|$(slung_var "$rid" reviewed_oid)" "polecat/a1|main|$(oid a1)" \
+  "…the branch, the base and the commit the record pins"
+eq "$(slung_var "$rid" review_pr_url)|$(slung_var "$rid" review_pr_number)" "|" "…the PR as empty before one opens"
+eq "$(slung_var "$rid" review_context)" "$(meta "$rid" review_context)" "…and the reason the record carries"
 d=$(jq -r --arg id "$rid" '.[] | select(.id == $id) | .description' "$STUB_STORE")
-has "$d" "METHOD" "the dispatch body came from review-dispatch-body.sh"
+case "$d" in
+  "This is a signoff review."*) ok "the description is the fixed paragraph on how to run a review held with no workflow" ;;
+  *) bad "the description is the fixed paragraph on how to run a review held with no workflow (got: $d)" ;;
+esac
+has "$d" "review_formula" "…which sends its claimant to the formula the record names"
+has "$d" "gc formula show --json" "…read with --json, the form that prints each step's text"
+eq "$(meta "$rid" priority_shift)" "-1" "the review is born carrying the PR-finishing shift"
+eq "$(bparents "$rid")" "" "…with no parent, so no hold on an epic reaches it"
+eq "$(bpoured "$rid")" "1" "…and is slung at its anchor's priority less one (A1 reads at bd's default P2)"
+
+echo "# a review and a validation pass are slung at their rank: P1 under a P2 epic, P0 once the PR is approved"
+# Each anchor sits under the P2 epic EP2, its own stored priority stale, its
+# posture in the shape pr-facts.sh stores it. A review of a PR that is not
+# approved is slung one level sooner than its anchor; a review or a validation
+# pass of an approved PR at P0. A rank that compared the whole stored posture
+# with approved would sling the approved PR's work at P1.
+EP2='{"id":"EP2","status":"open","assignee":"","notes":"","issue_type":"epic","priority":2,"metadata":{}}'
+under_ep2() { # <anchor-json> <posture>, read at the PR's head
+  printf '%s' "$1" | jq -c --arg p "$2" '.metadata.pr_posture = $p | .metadata.pr_head_oid = ($p | split("@")[1]) | .priority = 0
+    | .dependencies = [{issue_id: .id, depends_on_id: "EP2", type: "parent-child"}]'
+}
+store "[$EP2, $(under_ep2 "$(anchor RK1 pull_request correctness "" polecat/rk1)" "commented@$(oid rk1)@2026-10-11T00:00:00Z"),
+        $(under_ep2 "$(anchor RK2 pull_request correctness "" polecat/rk2)" "approved@$(oid rk2)@2026-10-11T00:00:00Z"),
+        $(under_ep2 "$(anchor RK3 pull_request correctness "" polecat/rk3)" "approved@$(oid rk3)@2026-10-11T00:00:00Z"),
+        $(validation vp-rk3 RK3 | jq -c '.metadata.priority_shift = -1')]"
+oid rk1 > "$GH_DIR/head_polecat_rk1"; oid rk2 > "$GH_DIR/head_polecat_rk2"; oid rk3 > "$GH_DIR/head_polecat_rk3"
+out=$(run_val)
+rk1=$(jq -r '.[] | select((.metadata.anchor_bead // "") == "RK1" and (.metadata.task_kind // "") == "review") | .id' "$STUB_STORE")
+rk2=$(jq -r '.[] | select((.metadata.anchor_bead // "") == "RK2" and (.metadata.task_kind // "") == "review") | .id' "$STUB_STORE")
+eq "$(bpoured "$rk1")" "1" "a review of a PR that is not approved is slung at P1 under a P2 epic"
+eq "$(bpoured "$rk2")" "0" "a review of an approved PR is slung at P0"
+eq "$(bpoured vp-rk3)" "0" "a validation pass of an approved PR is slung at P0"
+has "$out" "settled vp-rk3 at P0: anchor RK3 has an approved PR, shift -1 aside" "…the settle naming why"
+
+echo "# a review that does not settle at its priority is not slung, and the stranded arm slings it next pass"
+printf '#!/usr/bin/env bash\necho "queue-priority: settle: could not take the priority lock" >&2\nexit 1\n' > "$TMP/qp-fail"
+chmod +x "$TMP/qp-fail"
+store "[$(anchor SF1 pre_open_gate correctness "" polecat/sf1), $(validation vp-sf1 SF1)]"
+oid sf1 > "$GH_DIR/head_polecat_sf1"
+: > "$STUB_GC_LOG"
+out=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-fail" run_val)
+has "$out" "validation pass vp-sf1 did not settle at its priority; not dispatched" "a validation pass that does not settle is held, named"
+hasnt "$(cat "$STUB_GC_LOG")" "sling $VALP vp-sf1" "…and nothing is poured onto it"
+store "[$(anchor SF2 pre_open_gate correctness "" polecat/sf2)]"
+oid sf2 > "$GH_DIR/head_polecat_sf2"
+: > "$STUB_GC_LOG"
+out=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-fail" run)
+sf2=$(jq -r '.[] | select((.metadata.anchor_bead // "") == "SF2") | .id' "$STUB_STORE")
+has "$out" "review $sf2 did not settle at its priority; not slung" "a fresh review that does not settle is filed but not slung"
+hasnt "$(cat "$STUB_GC_LOG")" "sling $POOL" "…so no workflow is poured for it"
+out=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-fail" run)
+has "$out" "stranded review $sf2 did not settle at its priority; not re-slung" "the stranded arm holds it too while its settle fails"
+out=$(run)
+has "$out" "STRANDED review $sf2" "once the settle lands, the stranded arm takes it"
+eq "$(bpoured "$sf2")" "1" "…and slings it at its priority"
+eq "$(jq -r '[ .[] | select((.metadata.anchor_bead // "") == "SF2") ] | length' "$STUB_STORE")" "1" "…with no twin filed beside it"
+
+echo "# every settle gate-ensure runs waits for the priority lock 30 seconds at most"
+# The cadence runs its arms one after another, so a settle that waits out the
+# priority writer's own default holds every arm after this one. A wrapper around
+# the harness's writer records the wait each settle is handed: a fresh review and
+# a validation pass in one pass, and a review the stranded arm slings once its
+# settle lands.
+cat > "$TMP/qp-wait" <<QP
+#!/usr/bin/env bash
+printf '%s %s\n' "\${QUEUE_PRIORITY_LOCK_WAIT_SECS:-unset}" "\$2" >> "$TMP/qp-wait.log"
+exec "$GC_QUEUE_PRIORITY_TOOL" "\$@"
+QP
+chmod +x "$TMP/qp-wait"
+: > "$TMP/qp-wait.log"
+store "[$(anchor LW1 pre_open_gate correctness "" polecat/lw1), $(anchor LW2 pre_open_gate correctness "" polecat/lw2), $(validation vp-lw2 LW2 | jq -c '.metadata.priority_shift = -1')]"
+oid lw1 > "$GH_DIR/head_polecat_lw1"; oid lw2 > "$GH_DIR/head_polecat_lw2"
+GC_QUEUE_PRIORITY_TOOL="$TMP/qp-wait" run_val >/dev/null
+lw1=$(jq -r '.[] | select((.metadata.anchor_bead // "") == "LW1" and (.metadata.task_kind // "") == "review") | .id' "$STUB_STORE")
+eq "$(bpoured "$lw1")|$(bpoured vp-lw2)" "1|1" "a fresh review and a validation pass are each slung"
+store "[$(anchor LW3 pre_open_gate correctness "" polecat/lw3)]"
+oid lw3 > "$GH_DIR/head_polecat_lw3"
+GC_QUEUE_PRIORITY_TOOL="$TMP/qp-fail" run >/dev/null
+lw3=$(jq -r '.[] | select((.metadata.anchor_bead // "") == "LW3") | .id' "$STUB_STORE")
+GC_QUEUE_PRIORITY_TOOL="$TMP/qp-wait" run >/dev/null
+eq "$(bpoured "$lw3")" "1" "…and so is a review the stranded arm takes once its settle lands"
+eq "$(awk '{ print $2 }' "$TMP/qp-wait.log" | sort | paste -sd' ' -)" "$(printf '%s\n' "$lw1" vp-lw2 "$lw3" | sort | paste -sd' ' -)" \
+  "…each after one settle"
+eq "$(awk '$1 != 30' "$TMP/qp-wait.log")" "" "…and every settle waits for the priority lock 30 seconds at most"
+
+echo "# a review of an open PR carries the PR, in its record and on its sling"
+# The PR rides keys of its own: gc-helm.sh resolves a PR number to every live
+# bead whose pr_number matches, so a review carrying pr_number would make its
+# anchor's PR resolve to two beads.
+store "[$(anchor P1 pull_request correctness "" polecat/p1 ',"pr_url":"https://github.com/zook/gc-toolkit/pull/77","pr_number":"77"')]"
+oid p1 > "$GH_DIR/head_polecat_p1"
+: > "$STUB_GC_LOG"
+out=$(run)
+has "$out" "dispatched review" "the open PR's lane is dispatched a review"
+prid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$prid" review_pr_url)|$(meta "$prid" review_pr_number)" "https://github.com/zook/gc-toolkit/pull/77|77" \
+  "the review carries the anchor's PR as review_pr_url and review_pr_number"
+eq "$(meta "$prid" pr_url)|$(meta "$prid" pr_number)" "<absent>|<absent>" "…and not as pr_url or pr_number"
+eq "$(slung_var "$prid" review_pr_url)|$(slung_var "$prid" review_pr_number)" "https://github.com/zook/gc-toolkit/pull/77|77" \
+  "…and its sling passes the PR as the vars the step text names"
+
+echo "# an open PR recorded by its URL alone gives the review its number"
+store "[$(anchor P2 pull_request correctness "" polecat/p2 ',"pr_url":"https://github.com/zook/gc-toolkit/pull/78"')]"
+oid p2 > "$GH_DIR/head_polecat_p2"
+out=$(run)
+prid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$prid" review_pr_url)|$(meta "$prid" review_pr_number)" "https://github.com/zook/gc-toolkit/pull/78|78" \
+  "the number is parsed from the URL, as signoff.sh parses it"
+
+echo "# an open PR whose URL names no number gives the review neither key"
+# Half a PR is no pin: mol-review refuses a number with no URL to pin its
+# repository, and reads a URL with no number as no PR at all.
+store "[$(anchor P2n pull_request correctness "" polecat/p2n ',"pr_url":"https://github.com/zook/gc-toolkit/pulls"')]"
+oid p2n > "$GH_DIR/head_polecat_p2n"
+out=$(run)
+has "$out" "dispatched review" "the lane of a PR whose URL names no number is still dispatched a review"
+prid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$prid" review_pr_url)|$(meta "$prid" review_pr_number)" "<absent>|<absent>" \
+  "…carrying neither PR key"
+
+echo "# a PR recorded on an anchor still at pre_open_gate is not the published page"
+# pr-open.sh has yet to adopt it, and adoption republishes its body from the
+# pending pr_summary, which a pre-open review reads.
+store "[$(anchor P3 pre_open_gate correctness "" polecat/p3 ',"pr_url":"https://github.com/zook/gc-toolkit/pull/79","pr_number":"79"')]"
+oid p3 > "$GH_DIR/head_polecat_p3"
+out=$(run)
+prid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$prid" review_pr_url)|$(meta "$prid" review_pr_number)" "<absent>|<absent>" "the review of a pre_open_gate anchor carries no PR"
 
 echo "# the forced baseline: an empty check_set stamps correctness,triage and dispatches both lanes"
 store "[$(anchor A1b pre_open_gate "" "" polecat/a1b)]"
@@ -292,36 +453,34 @@ mrid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
 eq "$(meta "$mrid" check_name)" "triage" "the dispatched review names the real check"
 has "$out" "1 reviews dispatched" "the backed correctness lane bought no dispatch; only the ungated triage lane did"
 
-echo "# the cap's park suppresses the dispatch and reads as the wedge"
-# The shared predicate (also merge.sh's): merge_hold is the literal string
-# "signoff_cap" AND signoff_cap is non-empty. An operator's own hold writes
-# merge_hold=true, never this value.
-store "[$(anchor B4 pull_request correctness unreviewed polecat/b4 ',"merge_hold":"signoff_cap","signoff_cap":"correctness","gc.routed_to":"human"')]"
+echo "# a check_set token written in capitals reaches the formula as its check, in lowercase"
+# The record keeps the lane's token as the anchor wrote it; the check the step
+# text names, and the skill it is named from, is the check itself.
+store "[$(anchor MC1 pull_request "Correctness" "" polecat/mc1)]"
+oid mc1 > "$GH_DIR/head_polecat_mc1"
+: > "$STUB_GC_LOG"
+out=$(run)
+mcrid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$mcrid" check_name)|$(slung_var "$mcrid" check)" "Correctness|correctness" \
+  "the record keeps the token as written, and the sling passes the check in lowercase"
+
+echo "# an operator hold suppresses the dispatch; the machine axis still reads the lanes"
+store "[$(anchor B4 pull_request correctness unreviewed polecat/b4 ',"merge_hold":"true"')]"
 oid b4 > "$GH_DIR/head_polecat_b4"
 : > "$STUB_GC_LOG"
 out=$(run); rc=$?
-eq "$rc" 0 "the park pass exits 0"
-has "$out" "0 reviews dispatched" "a parked anchor buys no review"
-has "$out" "1 operator-held" "…and is counted as held"
-eq "$(pinned B4)" "wedged-exception@$(oid b4)" "…and the machine axis is the cap's wedge"
-
-echo "# an operator hold beside a STALE orphan signoff_cap is not the cap's wedge"
-# merge_hold=true (not the literal "signoff_cap") is an operator's own hold,
-# even with a signoff_cap value left over from an earlier park.
-store "[$(anchor B4b pull_request correctness unreviewed polecat/b4b ',"merge_hold":"true","signoff_cap":"correctness"')]"
-oid b4b > "$GH_DIR/head_polecat_b4b"
-out=$(run); rc=$?
 eq "$rc" 0 "the held pass exits 0"
-has "$out" "0 reviews dispatched" "an operator hold still suppresses the dispatch"
-eq "$(pinned B4b)" "progressing@$(oid b4b)" "…but the machine axis reads progressing, not the cap's wedge"
+has "$out" "0 reviews dispatched" "a held anchor buys no review"
+has "$out" "1 operator-held" "…and is counted as held"
+eq "$(pinned B4)" "progressing@$(oid b4)" "…and the machine axis reads progressing: a lane is short of green"
 
-echo "# a fully green capped anchor still records the wedge — the park sits on the anchor, not the lane"
-store "[$(anchor B4c pull_request correctness "" polecat/b4c ',"merge_hold":"signoff_cap","signoff_cap":"correctness","gc.routed_to":"human"'), $(backed rev-b4c B4c)]"
+echo "# a held anchor whose every lane is green records settled; the hold rides merge_hold"
+store "[$(anchor B4c pull_request correctness "" polecat/b4c ',"merge_hold":"true"'), $(backed rev-b4c B4c)]"
 oid b4c > "$GH_DIR/head_polecat_b4c"
 out=$(run); rc=$?
-eq "$rc" 0 "the settled-but-parked pass exits 0"
-has "$out" "0 reviews dispatched" "a green lane dispatches nothing, capped or not"
-eq "$(pinned B4c)" "wedged-exception@$(oid b4c)" "…but the machine axis still reads the cap's wedge, not settled"
+eq "$rc" 0 "the settled-but-held pass exits 0"
+has "$out" "0 reviews dispatched" "a green lane dispatches nothing, held or not"
+eq "$(pinned B4c)" "settled@$(oid b4c)" "…and the machine axis reads settled"
 
 echo "# a lane with no backing review dispatches, whatever stale marker it carries"
 # The marker is not read for the lane state, so a lane with no closed approve
@@ -538,20 +697,45 @@ out=$(run_val)
 has "$out" "DP2 carries a PR-close disposition (gc.pr_close_disposition_kind=duplicate)" "the disposed anchor is named as skipped"
 has "$out" "0 reviews dispatched" "…and no fresh review is dispatched onto it"
 
-echo "# an unreadable live head neither settles a lane nor stops a dispatch"
-# gh answers a deleted ref with a 422: error body on STDOUT, non-zero exit. The
-# derivation never consulted it, so the only thing the head decides now is the
-# dispatch pin and the machine axis.
+echo "# an unreadable live head holds the anchor for the pass"
+# gh answers a deleted ref with a 422: error body on STDOUT, non-zero exit, and
+# git ls-remote names no such ref. The gates resolve only at the commit they
+# judge, so the resolver refuses a call at none, and that refusal holds each
+# anchor: nothing settles, nothing dispatches, and the next pass reads again.
 store "[$(anchor C5 pre_open_gate correctness "" polecat/c5), $(backed rev-c5 C5),
         $(anchor C5b pull_request correctness "" polecat/c5b)]"
 : > "$STUB_GC_LOG"
 out=$(run); rc=$?
 eq "$rc" 0 "no-head pass exits 0"
-has "$out" "1 reviews dispatched" "the backed lane is settled and the unreviewed one still dispatches"
+has "$out" "C5 head of 'polecat/c5' unread" "the backed anchor is held, naming the head it could not read"
+has "$out" "C5b head of 'polecat/c5b' unread" "…and so is the unreviewed one"
+has "$out" "0 reviews dispatched" "…so no review goes out at no commit"
+has "$out" "2 held-for-retry" "…and both are retried next pass"
 hasnt "$out" "No commit found" "the gh error body never becomes a dispatch reason"
-eq "$(pinned C5b)" "<absent>" "an unreadable head records no machine axis"
-c5brid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
-eq "$(meta "$c5brid" reviewed_oid)" "<absent>" "…and the dispatch carries no pin it could not read"
+eq "$(pinned C5)" "<absent>" "an unreadable head records no machine axis"
+eq "$(pinned C5b)" "<absent>" "…on either anchor"
+
+echo "# …and an index named outright sends no review out at no commit either"
+# GC_REVIEW_CHECKS_INDEX lets the resolver answer without a commit, so the hold
+# rests on gate-ensure's own read of the head.
+store "[$(anchor C5o pull_request correctness "" polecat/c5o)]"
+: > "$STUB_GC_LOG"
+out=$(GC_REVIEW_CHECKS_INDEX="$HERE/../../review-checks.toml" run); rc=$?
+eq "$rc" 0 "the no-head pass under an index override exits 0"
+has "$out" "C5o head of 'polecat/c5o' unread" "the anchor is held, naming the head it could not read"
+has "$out" "0 reviews dispatched" "…so no review goes out unpinned"
+hasnt "$(cat "$STUB_GC_LOG")" "sling" "…and nothing is slung"
+
+echo "# a head GitHub does not answer is read through git ls-remote, and pins the review"
+# No head file stands for this branch, so the gh stub fails the API read.
+store "[$(anchor LR1 pull_request correctness "" polecat/lr1)]"
+printf 'polecat/lr1\n' > "$TMP/ls-remote-heads"
+: > "$STUB_GC_LOG"
+out=$(STUB_LS_REMOTE="$TMP/ls-remote-heads" run); rc=$?
+eq "$rc" 0 "ls-remote pass exits 0"
+has "$out" "1 reviews dispatched" "the head ls-remote read lets the dispatch go"
+lr1rid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+eq "$(meta "$lr1rid" reviewed_oid)" "$(oid polecat/lr1)" "…pinned at the head ls-remote names"
 
 echo "# a head that is not a SHA is not a head"
 # gh exits 0 and prints 'null' when the body carries no .sha: the exit code
@@ -563,57 +747,31 @@ out=$(run); rc=$?
 eq "$rc" 0 "malformed-head pass exits 0"
 eq "$(pinned C7)" "<absent>" "a non-SHA answer at rc=0 is unanswerable, and records nothing"
 
-echo "# stray markers: a check.<g> outside check_set that no arm could rewrite"
-# The declared correctness lane derives green from a backing review; the stray
-# check.refinery is what the sweep clears. A declared well-formed marker is left
-# alone (it is history, and this design's readers ignore it).
+echo "# a stored marker's residue is neither read nor cleared"
+# A check.<g> key a stored-marker writer left behind is inert: the declared lane
+# derives green from its backing review whatever the key says, and a key outside
+# check_set is left as it is, in any grammar.
 store "[$(anchor N1 pull_request correctness green polecat/n1 ',"check.refinery":"green@'"$SHORT"'"'), $(backed rev-n1 N1)]"
 oid n1 > "$GH_DIR/head_polecat_n1"
+: > "$STUB_GC_LOG"
 out=$(run); rc=$?
-eq "$rc" 0 "the sweep pass exits 0"
-eq "$(meta N1 check.refinery)" "<absent>" "the undeclared legacy marker is cleared"
-eq "$(meta N1 check.correctness)" "green" "…and the declared lane state is untouched"
-has "$out" "cleared undeclared malformed check marker check.refinery" "the clear is reported"
-has "$out" "1 stray markers cleared" "…and counted"
-has "$out" "0 reviews dispatched" "…and a marker that governs nothing dispatches nothing"
-has "$(jq -r '.[] | select(.id == "N1") | .notes' "$STUB_STORE")" "does not declare that check" "the anchor records why it was cleared"
+eq "$rc" 0 "the pass exits 0"
+eq "$(meta N1 check.refinery)" "green@$SHORT" "an undeclared key is left as it is"
+eq "$(meta N1 check.correctness)" "green" "…and so is a declared one"
+has "$out" "0 reviews dispatched" "…and the backed lane settles on its review alone"
+hasnt "$(cat "$STUB_GC_LOG")" "-metadata check." "…with no check.<g> key written or cleared"
 
-echo "# …a WELL-FORMED undeclared lane state is history, not damage"
-store "[$(anchor N2 pull_request correctness green polecat/n2 ',"check.refinery":"fixing"'), $(backed rev-n2 N2)]"
-oid n2 > "$GH_DIR/head_polecat_n2"
-out=$(run)
-eq "$(meta N2 check.refinery)" "fixing" "a narrowed check_set keeps its well-formed history"
-has "$out" "0 stray markers cleared" "…and nothing was swept"
-
-echo "# …an undeclared legacy exception@ is EXEMPT from the sweep — migrate-lane-states.sh's to retire"
-# Between this PR merging and the migration running, an anchor can still carry
-# check.<g>=exception@<oid> with merge_hold unset. Sweeping it here the moment
-# check_set narrows would leave the migration nothing to find, so it survives
-# like an operator's park, not like the rest of the retired grammar.
-store "[$(anchor N3 pull_request correctness green polecat/n3 ',"check.refinery":"exception@'"$SHORT"'"'), $(backed rev-n3 N3)]"
-oid n3 > "$GH_DIR/head_polecat_n3"
-out=$(run)
-eq "$(meta N3 check.refinery)" "exception@$SHORT" "the legacy park survives the sweep"
-has "$out" "0 stray markers cleared" "…and nothing is counted as swept"
-
-echo "# …a DECLARED lane still carrying that legacy exception@ park is a pre-migration hold"
-store "[$(anchor N3b pull_request correctness "exception@$SHORT" polecat/n3b ',"gc.routed_to":"human","blocked_reason":"round cap"')]"
+echo "# …a DECLARED lane's exception@ marker is not read: the lane derives from the graph"
+store "[$(anchor N3b pull_request correctness "exception@$SHORT" polecat/n3b)]"
 oid n3b > "$GH_DIR/head_polecat_n3b"
 : > "$STUB_GC_LOG"
 out=$(run); rc=$?
-eq "$rc" 0 "the pre-migration park pass exits 0"
-has "$out" "0 reviews dispatched" "a legacy exception@ park on a declared check buys no review"
-has "$out" "awaits migrate-lane-states.sh" "…and says why"
-has "$out" "1 operator-held" "…and is counted as held"
-eq "$(pinned N3b)" "wedged-exception@$(oid n3b)" "…and the machine axis reads the cap's wedge"
+eq "$rc" 0 "the pass exits 0"
+has "$out" "1 reviews dispatched" "an unbacked lane is owed its review whatever its marker says"
+has "$out" "0 operator-held" "…and nothing holds it"
+eq "$(pinned N3b)" "progressing@$(oid n3b)" "…and the machine axis reads progressing"
 
-echo "# …the none opt-out does not exempt an anchor from the sweep"
-store "[$(anchor N4 pull_request none "" polecat/n4 ',"check.refinery":"green@'"$SHORT"'"')]"
-out=$(run)
-eq "$(meta N4 check.refinery)" "<absent>" "check_set=none still gets its stray marker cleared"
-has "$out" "0 reviews dispatched" "…and none still dispatches nothing"
-
-echo "# …nor from the validation-pass dispatch: a checkless anchor's open pass still gets the validator"
+echo "# the none opt-out does not exempt an anchor from the validation-pass dispatch: a checkless anchor's open pass still gets the validator"
 # pr-facts.sh opens a human feedback pass without consulting check_set, so a
 # check_set=none anchor can carry one. The dispatch that releases its blocks edge
 # runs before the none|off opt-out; after it, the pass would hold the merge with
@@ -624,15 +782,6 @@ has "$out" "dispatched validation pass vp-n4v to $VALP" "a checkless anchor's op
 eq "$(meta vp-n4v 'gc.execution_routed_to')" "$VALP" "…and the pour read back"
 has "$out" "1 validation passes dispatched" "…counted as a validation dispatch"
 has "$out" "0 reviews dispatched" "…while check_set=none still dispatches no review"
-
-echo "# …a clear that does not persist is reported, not counted"
-store "[$(anchor N5 pull_request correctness green polecat/n5 ',"check.refinery":"green@'"$SHORT"'"'), $(backed rev-n5 N5)]"
-oid n5 > "$GH_DIR/head_polecat_n5"
-out=$(STUB_DROP_KEYS="N5:check.refinery" run 2>&1); rc=$?
-eq "$rc" 0 "an unpersisted clear does not hold the merge (the marker gates nothing)"
-eq "$(meta N5 check.refinery)" "green@$SHORT" "the marker is still there"
-has "$out" "still reads" "the failed clear is reported"
-has "$out" "0 stray markers cleared" "…and not counted"
 
 fi # part dispatch
 
@@ -672,7 +821,11 @@ eq "$(meta rev-3 'gc.execution_routed_to')" "$POOL" "…and the pour read back"
 hasnt "$out" "dispatched review new-" "no twin was minted for it"
 eq "$(meta rev-3 review_branch)|$(meta rev-3 review_base)|$(meta rev-3 review_pool)|$(meta rev-3 fix_target_pool)" "polecat/d3|main|$POOL|$FIXP" \
   "…carrying the work order the fresh dispatch files with, written before the sling"
-eq "$(meta rev-3 reviewed_oid)" "<absent>" "…without a pin it never had: mol-review pins the head it reads"
+eq "$(meta rev-3 review_formula)|$(meta rev-3 review_context)" "mol-review|lane 'correctness' does not derive green (no non-superseded approve review backs it)" \
+  "…the formula it pours and the reason among them"
+eq "$(meta rev-3 reviewed_oid)" "$(oid d3)" "…and a review the dispatch never pinned is pinned at the live head"
+eq "$(slung_keys rev-3)" "$TOLD" "the re-sling passes every value a review is told as a --var"
+eq "$(slung_var rev-3 reviewed_oid)|$(slung_var rev-3 review_bead)" "$(oid d3)|rev-3" "…the pin its record now holds among them"
 
 echo "# a stranded review keeps the head it was pinned to"
 store "[$(anchor D3p pull_request correctness "" polecat/d3p),
@@ -682,6 +835,20 @@ oid d3p > "$GH_DIR/head_polecat_d3p"
 out=$(run)
 has "$(cat "$STUB_GC_LOG")" "sling $POOL rev-3p --on mol-review" "a pinned stranded review is re-slung"
 eq "$(meta rev-3p reviewed_oid)" "1111111111111111111111111111111111111111" "…and its pin is never moved to the live head"
+eq "$(meta rev-3p review_branch)" "polecat/d3p" "…while the rest of its record is written"
+eq "$(slung_var rev-3p reviewed_oid)" "1111111111111111111111111111111111111111" "…and the re-sling passes the pin its record holds, not the live head"
+
+echo "# a stranded review of an open PR is given the PR before it is re-slung"
+store "[$(anchor D3r pull_request correctness "" polecat/d3r ',"pr_url":"https://github.com/zook/gc-toolkit/pull/80","pr_number":"80"'),
+        $(stranded_review_row rev-3r D3r)]"
+oid d3r > "$GH_DIR/head_polecat_d3r"
+: > "$STUB_GC_LOG"
+out=$(run)
+has "$(cat "$STUB_GC_LOG")" "sling $POOL rev-3r --on mol-review" "the stranded review of an open PR is re-slung"
+eq "$(meta rev-3r review_pr_url)|$(meta rev-3r review_pr_number)" "https://github.com/zook/gc-toolkit/pull/80|80" \
+  "…carrying the anchor's PR, written with the rest of its work order"
+eq "$(slung_var rev-3r review_pr_url)|$(slung_var rev-3r review_pr_number)" "https://github.com/zook/gc-toolkit/pull/80|80" \
+  "…which its re-sling passes as vars"
 
 echo "# a stranded review whose work order will not take is not re-slung"
 # A create that read back short leaves exactly the stranded shape. Its pour
@@ -769,6 +936,15 @@ out=$(run)
 has "$out" "STRANDED review rev-5" "a closed convoy no longer counts as a live pour"
 has "$(cat "$STUB_GC_LOG")" "sling $POOL rev-5 --on mol-review" "…so the stranded review is re-slung, not suppressed forever"
 eq "$(meta rev-5 'gc.execution_routed_to')" "$POOL" "…and the pour read back"
+
+echo "# a stranded review whose runs cannot be read is held, not re-slung blind"
+store "[$(anchor D5u pull_request correctness "" polecat/d5u),
+        $(stranded_review_row rev-5u D5u)]"
+oid d5u > "$GH_DIR/head_polecat_d5u"
+: > "$STUB_GC_LOG"
+out=$(RUN_LIB_STUB_FAIL="runs:rev-5u" run)
+has "$out" "stranded review rev-5u pour probe unreadable; no re-pour" "a failed read of the review's runs is no answer"
+hasnt "$(cat "$STUB_GC_LOG")" "sling $POOL rev-5u" "…so nothing is poured onto it"
 
 echo "# merge_hold gates the re-dispatch"
 store "[$(anchor E1 pull_request correctness "" polecat/e1 ',"merge_hold":"true"')]"
@@ -997,6 +1173,10 @@ out=$(run)
 has "$out" "1 reviews dispatched" "only the reopened lane dispatches"
 has "$out" "check 'triage'" "…the triage lane"
 has "$out" "reopened by a bring-current round that conflicted: rule on the round" "…and its dispatch says to rule on the round"
+bcrid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+has "$(meta "$bcrid" review_context)" "rule on the round (signoff.sh --reopen, --round-reason, --dismiss-approval) after reading its account" \
+  "…in the review_context its record carries, the ruling line included"
+eq "$(slung_var "$bcrid" review_context)" "$(meta "$bcrid" review_context)" "…which its sling passes as the review_context var"
 printf '[{"state":"APPROVED","id":1,"submitted_at":"2026-10-02T00:00:00Z"}]' > "$GH_DIR/reviews_7702.json"
 store "[$(anchor BC1 pull_request "correctness,triage" "" polecat/bc1 ",\"pr_number\":\"7702\",\"bring_current_reopened\":\"triage\",\"bring_current_round_at\":\"2026-10-01T00:00:00Z\",\"bring_current_record\":$BCREC")]"
 out=$(run)
@@ -1232,7 +1412,7 @@ has "$esc" "--key review-wedge" "…under one situation key, so repeats dedup"
 has "$esc" "check 'correctness' on W1 is held" "…naming the anchor and check that are stuck"
 has "$esc" "gc bd update rev-w1 --set-metadata gc.routed_to=$POOL" "…and the route-restore repair"
 has "$esc" "root-w1" "…and the spent workflow"
-has "$esc" "check.correctness is absent" "…and the marker state, not the dispatch arm's rationale"
+has "$esc" "correctness, which does not derive green until a review records a verdict" "…and the lane it holds, not the dispatch arm's rationale"
 has "$out" "0 reviews dispatched" "escalating still dispatches nothing"
 
 echo "# a pour still running its chain is never escalated"
@@ -1289,6 +1469,20 @@ out=$(run); out="$out$(run)"
 has "$out" "pour-liveness probe unreadable" "a review with no traceable workflow is reported, not judged"
 eq "$(cat "$STUB_ESCALATE_LOG")" "" "…and nothing is escalated on an unanswerable probe"
 has "$out" "0 reviews dispatched" "…and no twin is dispatched either"
+
+echo "# a poured review whose runs cannot be read escalates nothing"
+store "[$(anchor W5u pull_request correctness "" polecat/w5u),
+        $(review_row rev-w5u W5u),
+        $(convoy_row conv-w5u),
+        $(root_row root-w5u conv-w5u),
+        $(spent_steps root-w5u s5u)]"
+printf 'conv-w5u|tracks|rev-w5u\n' >> "$STUB_DEPS"
+oid w5u > "$GH_DIR/head_polecat_w5u"
+: > "$STUB_ESCALATE_LOG"
+out=$(RUN_LIB_STUB_FAIL="runs:rev-w5u" run); out="$out$(RUN_LIB_STUB_FAIL="runs:rev-w5u" run)"
+has "$out" "pour-liveness probe unreadable" "a spent chain whose runs cannot be read is not judged"
+eq "$(cat "$STUB_ESCALATE_LOG")" "" "…and nothing is escalated on a read that failed"
+eq "$(meta rev-w5u wedge_seen_root)" "<absent>" "…and no sighting is recorded"
 
 echo "# a root whose steps do not enumerate is unanswerable, not spent"
 store "[$(anchor W6 pull_request correctness "" polecat/w6),
@@ -1360,29 +1554,26 @@ if part machine; then
 # Recording that answer is what lets the helm board say whether an anchor is
 # moving without re-implementing these predicates, and the value is head-pinned
 # so a stale verdict can never read as current.
-echo "# machine axis: the wedge, the settled check, and the one being raised"
-# X1 is a fully green capped anchor (like B4c): the cap park records the wedge,
-# and the green lane derives from a local backing review — read through bd list,
-# never a per-anchor bd show — which is what keeps the unchanged re-record pass
-# below from re-reading the anchor.
-store "[$(anchor X1 pull_request correctness "" polecat/x1 ',"merge_hold":"signoff_cap","signoff_cap":"correctness","gc.routed_to":"human"'), $(backed rev-x1 X1),
+echo "# machine axis: the settled check, and the one being raised"
+# X1 is fully green and routed to a person. Its green lane derives from a local
+# backing review — read through bd list, never a per-anchor bd show — which is
+# what keeps the unchanged re-record pass below from re-reading the anchor.
+store "[$(anchor X1 pull_request correctness "" polecat/x1 ',"merge_hold":"true","gc.routed_to":"human"'), $(backed rev-x1 X1),
         $(anchor X2 pull_request correctness "" polecat/x2), $(backed rev-x2 X2),
         $(anchor X3 pull_request correctness "" polecat/x3), $(mustfix find-x3 X3),
-        $(anchor X4 pre_open_gate correctness unreviewed polecat/x4 ',"merge_hold":"signoff_cap","signoff_cap":"correctness","gc.routed_to":"human"')]"
+        $(anchor X4 pre_open_gate correctness unreviewed polecat/x4 ',"merge_hold":"true"')]"
 oid x1 > "$GH_DIR/head_polecat_x1"
 oid x2 > "$GH_DIR/head_polecat_x2"
 oid x3 > "$GH_DIR/head_polecat_x3"
 oid x4 > "$GH_DIR/head_polecat_x4"
 out=$(run); rc=$?
 eq "$rc" 0 "the recording pass exits 0"
-# The commonest wedge: the convergence cap parked the anchor under merge_hold
-# and routed it to a person. No automated actor lifts that, and no commit does.
-eq "$(pinned X1)" "wedged-exception@$(oid x1)" "the cap's park records the wedge, with its shape named"
+eq "$(pinned X1)" "settled@$(oid x1)" "a green anchor held for a person records settled"
 eq "$(pinned X2)" "settled@$(oid x2)" "every check green records settled"
 eq "$(pinned X3)" "progressing@$(oid x3)" "a lane short of green records progressing"
-# Most wedged anchors have no PR at all, so a key written only for open PRs
-# would miss the majority of the condition.
-eq "$(pinned X4)" "wedged-exception@$(oid x4)" "a pre_open_gate anchor is recorded the same way"
+# An anchor stalls before its PR exists as readily as after, so a key written
+# only for open PRs would miss the pre-open ones.
+eq "$(pinned X4)" "progressing@$(oid x4)" "a pre_open_gate anchor is recorded the same way"
 case "$(machine X1)" in
   *@*@20[0-9][0-9]-*Z) ok "the recorded verdict dates its own turn" ;;
   *) bad "no @<since> component: '$(machine X1)'" ;;
@@ -1403,7 +1594,7 @@ echo "# recording a verdict moves no route"
 # The stamp rides a lifecycle self-transition, and a detached state's default is
 # to clear the route. An observation must not retract a routing decision it
 # never looked at, so the anchor's own route rides back with it.
-eq "$(meta X1 'gc.routed_to')" "human" "a parked anchor keeps the route the cap gave it"
+eq "$(meta X1 'gc.routed_to')" "human" "an anchor routed to a person keeps that route"
 store "[$(anchor X6 pull_request correctness "" polecat/x6 ',"gc.routed_to":"rig/gc-toolkit.polecat"'), $(backed rev-x6 X6)]"
 oid x6 > "$GH_DIR/head_polecat_x6"
 run >/dev/null
@@ -1485,6 +1676,9 @@ has "$(cat "$STUB_GC_LOG")" "sling $POOL $prid --on mol-review-quorum-signoff" "
 has "$(cat "$STUB_GC_LOG")" "--var lane_one_provider=codex" "lane one's provider var is forwarded to the pour"
 has "$(cat "$STUB_GC_LOG")" "--var lane_two_provider=claude" "lane two's provider var is forwarded to the pour"
 has "$(cat "$STUB_GC_LOG")" "--var synthesis_target=$FIXP" "the synthesis target var is forwarded to the pour"
+eq "$(slung_keys "$prid")" "lane_one_id lane_one_provider lane_one_target lane_two_id lane_two_provider lane_two_target synthesis_target $TOLD" \
+  "…ahead of the review's own values, every one of them, so the record wins a name both give"
+eq "$(meta "$prid" review_formula)" "mol-review-quorum-signoff" "the record names the pilot formula as the one its dispatch pours"
 
 echo "# …and forward through the STRANDED zero-root re-sling too, not only the fresh dispatch"
 store "[$(anchor P2 pull_request correctness "" polecat/p2),
@@ -1503,6 +1697,8 @@ eq "$(meta rev-p2 'gc.execution_routed_to')" "$POOL" "…and the pour read back"
 has "$(cat "$STUB_GC_LOG")" "--var lane_one_provider=codex" "lane one's provider var is forwarded through the stranded re-sling"
 has "$(cat "$STUB_GC_LOG")" "--var lane_two_provider=claude" "lane two's provider var is forwarded through the stranded re-sling"
 has "$(cat "$STUB_GC_LOG")" "--var synthesis_target=$FIXP" "the synthesis target var is forwarded through the stranded re-sling"
+eq "$(slung_keys rev-p2)" "lane_one_id lane_one_provider lane_one_target lane_two_id lane_two_provider lane_two_target synthesis_target $TOLD" \
+  "…ahead of the review's own values"
 
 echo "# with GC_RECONCILE_BD_CACHE set, the arm's repeated anchor_bead reads collapse to the cache"
 # A settled-green anchor dispatches nothing, but gate-ensure and the real
@@ -1676,7 +1872,7 @@ echo "# the cursor is written as each anchor finishes, so a pass killed mid-anch
 # can be killed inside its second anchor; every other call answers "none".
 KSD="$TMP/kill-scripts"
 mk_sut_dir "$KSD" "$HERE/gate-ensure.sh" "$HERE/lifecycle.sh" "$HERE/lane-state.sh" "$HERE/review-checks.sh"
-cp "$SD/review-dispatch-body.sh" "$SD/escalate.sh" "$KSD/"
+cp "$SD/escalate.sh" "$KSD/"
 export KILL_STARTED="$TMP/kill-started" KILL_RELEASE="$TMP/kill-release"
 cat > "$KSD/finding.sh" <<'FS'
 #!/usr/bin/env bash
@@ -1737,6 +1933,66 @@ out=$(GC_REVIEW_CHECKS_INDEX="$RFR_IDX" run)
 has "$out" "for check 'rfr'" "a readied PR dispatches the ready-for-review check (no longer never-dispatched)"
 
 fi # part pacing
+
+# ==== part vars: the values a review is told meet the formulas that name them ====
+if part vars; then
+
+echo "# every value a review formula names is one its dispatch's sling passes"
+# Each review formula is poured here by a real dispatch, and the --var keys its
+# sling carried are held against what the formula declares and names. A var
+# sling adds to every pour on its own (gascity buildSlingFormulaVars) counts as
+# passed, and graph.v2 reserves convoy_id for the input convoy.
+SLING_ADDS="rig_name binding_name binding_prefix"
+ALWAYS="review_bead check anchor_bead review_branch review_base reviewed_oid"
+MAYBE="review_pr_url review_pr_number review_context"
+LANE_ARGS=(--sling-var lane_one_id=codex --sling-var lane_one_provider=codex --sling-var "lane_one_target=$POOL"
+           --sling-var lane_two_id=claude --sling-var lane_two_provider=claude --sling-var "lane_two_target=$FIXP"
+           --sling-var "synthesis_target=$FIXP")
+for F in mol-review mol-review-quorum-signoff; do
+  store "[$(anchor V1 pull_request correctness "" polecat/v1 ',"pr_url":"https://github.com/zook/gc-toolkit/pull/90","pr_number":"90"')]"
+  oid v1 > "$GH_DIR/head_polecat_v1"
+  : > "$STUB_GC_LOG"
+  if [ "$F" = mol-review ]; then extra=(); else extra=("${LANE_ARGS[@]}"); fi
+  "$SUT" --default correctness --review-pool "$POOL" --fix-pool "$FIXP" --review-formula "$F" ${extra[@]+"${extra[@]}"} >/dev/null 2>&1
+  vrid=$(jq -r '.[] | select(.id | startswith("new-")) | .id' "$STUB_STORE")
+  [ -n "$vrid" ] && ok "$F: a review is dispatched" || bad "$F: a review is dispatched"
+  { slung_vars "$vrid" | cut -d= -f1; printf '%s\n' $SLING_ADDS; } | sort -u > "$TMP/passed.$F"
+  python3 - "$HERE/../../formulas/$F.toml" "$TMP/vars.$F" <<'PY'
+import sys, tomllib, re, json
+d = tomllib.load(open(sys.argv[1], 'rb'))
+texts = [d.get('description', '')]
+for s in d.get('steps', []):
+    texts += [s.get('title', ''), s.get('description', '')]
+    texts += [str(v) for v in (s.get('metadata') or {}).values()]
+named = sorted({m for t in texts for m in re.findall(r'\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}', t)})
+blocks = [b for s in d.get('steps', []) for b in re.findall(r'```bash\n(.*?)```', s.get('description', ''), re.S)]
+vs = d.get('vars', {})
+json.dump({"named": named, "declared": sorted(vs),
+           "empty_default": sorted(k for k, v in vs.items() if not v.get('required') and v.get('default') == ''),
+           "context_in_block": any('{{review_context}}' in b for b in blocks),
+           "blocks": len(blocks)}, open(sys.argv[2], 'w'))
+PY
+  V="$TMP/vars.$F"
+  eq "$(jq -r '(.named - .declared - ["convoy_id"])[]' "$V" | paste -sd' ' -)" "" \
+    "$F: every {{name}} its text names is a var it declares, convoy_id aside"
+  eq "$(jq -r '.declared[]' "$V" | grep -vxF -f "$TMP/passed.$F" | paste -sd' ' -)" "" \
+    "$F: every var it declares is one the dispatch's sling passes or sling adds"
+  # A pour that omits a required var fails before any step runs, so a record
+  # var the formula required would keep load-dispatch's record check from ever
+  # naming the one a sling left out.
+  for k in $ALWAYS; do
+    if jq -e --arg k "$k" '.empty_default | index($k) != null' "$V" >/dev/null; then ok "$F: $k defaults to empty, so a sling without it pours and the record check names it"
+    else bad "$F: $k does not default to empty"; fi
+  done
+  for k in $MAYBE; do
+    if jq -e --arg k "$k" '.empty_default | index($k) != null' "$V" >/dev/null; then ok "$F: $k defaults to empty"
+    else bad "$F: $k does not default to empty"; fi
+  done
+  eq "$(jq -r '.context_in_block' "$V")" "false" "$F: no shell block names {{review_context}}, free text whose quote would split a command"
+  [ "$(jq -r '.blocks' "$V")" -gt 0 ] && ok "$F: its shell blocks were read" || bad "$F: no shell block was read"
+done
+
+fi # part vars
 
 echo
 echo "passed: $PASS  failed: $FAIL"

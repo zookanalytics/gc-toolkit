@@ -1,29 +1,38 @@
 description = """
-Executable design-convoy pattern — a dispatch molecule that stands up an owned
-integration convoy converse reaches by recommendation, then drains. Slung `--on`
-a single subject (the initiative) from the recommend-to-Accept path, it creates
-the owned convoy, cuts its integration branch, files a design child whose doc
-lands on that branch, and arms an implementation child behind the design's
-approval. Design and implementation graduate to the default branch as one
-reviewed unit. Doctrine: docs/design-convoy.md.
+Executable design-convoy pattern — a dispatch molecule that stands an
+integration effort up on its subject, the initiative converse reaches by
+recommendation, then drains. It is for an initiative whose design must be
+settled before or beside its build, on work large or high-blast-radius enough
+that one holistic review of design and implementation beats scattered PRs.
+Slung `--on` a single subject from the recommend-to-Accept path, it makes the
+subject the effort's landing bead: it cuts `integration/<subject-id>` and records
+it on the subject, then files a design child whose doc lands on that branch, an
+implementation child held behind the design's approval, and the summary task
+that writes the subject's PR summary once the children have landed. Only once
+every wait among them reads back does it hand the subject to the refinery and
+dispatch the children and the summary task. The subject's PR carries design and
+implementation to the default branch as one reviewed unit, and the subject
+closes when that PR merges, as any PR's owning bead does, so work queued behind
+it starts then. Doctrine: docs/design-convoy.md.
 
-The molecule writes no code and needs no worktree of its own; convoy-seed.sh
-carries the push rights a converse sitting lacks. Each step re-derives the
-subject from the input convoy ({{convoy_id}}'s one tracked member) in its own
-shell, records its result on the subject so a resume is idempotent, and closes
-its own step bead through assets/scripts/step-close.sh — resolved by
+The molecule writes no code and needs no worktree of its own. Its one push is a
+ref push from the rig's checkout, which a converse sitting cannot make. Each step
+re-derives the subject from the input convoy ({{convoy_id}}'s one tracked member)
+in its own shell, records its result on the subject so a resume is idempotent,
+and closes its own step bead through assets/scripts/step-close.sh — resolved by
 (gc.root_bead_id, gc.step_ref), never a GC_*BEAD_ID env var, which after a
 hook-claim names a different step.
 
-Every PR this convoy produces, the design child's checkpoint PR included, merges
-only with a standing APPROVED review from an account other than the city's,
-which counts until it is dismissed: merge.sh enforces that as a universal rule,
-so no check_set token arms it. design_gated (var, default
-true) chooses when implementation starts. Gated: the implementation child is
-armed behind the design child's closure, so the operator's approval of the
-design's PR is what releases it. All-in-one (design_gated=false): design and
-implementation dispatch together, and the graduation PR is where the operator
-first reviews them as one unit.
+Every PR the effort produces merges only with a standing APPROVED review from an
+account other than the city's, which counts until it is dismissed: merge.sh
+enforces that as a universal rule, so no check_set token arms it. design_gated
+(var, default true) chooses when implementation starts. Gated: the design child
+is a stage, slung --merge mr, whose PR into the integration branch is the design
+gate, and the implementation child is armed behind the design child's closure, so
+the operator's approval of the design's PR is what releases it. All-in-one
+(design_gated=false): design and implementation dispatch together and land on the
+integration branch with no PR of their own, and the subject's PR is where the
+operator first reviews them as one unit.
 """
 formula = "mol-design-convoy"
 
@@ -31,12 +40,12 @@ formula = "mol-design-convoy"
 formula_compiler = ">=2.0.0"
 
 [vars.design_gated]
-description = "true (default): the implementation child is held behind the design child by a blocks edge and dispatched when the design child closes, which happens when its checkpoint PR merges with the operator's approval. false: design and implementation dispatch together and land on the integration branch in parallel. Either way every PR needs a standing APPROVED review from an account other than the city's, which counts until it is dismissed (merge.sh's universal approval rule). The value is read case-insensitively: false, 0, no, or off selects all-in-one; true, 1, yes, or on selects design-gated; an empty or unrecognized value also selects design-gated, with a warning, so a typo never drops the design gate. The operator overrides per initiative at Accept with --var design_gated=false."
+description = "true (default): the design child is a stage, slung --merge mr, whose PR into the integration branch is the design gate, and the implementation child is held behind the design child by a blocks edge and dispatched when the design child closes, which happens when that PR merges with the operator's approval. false: design and implementation dispatch together and land on the integration branch with no PR of their own, so the subject's PR is the one the operator reviews. Every PR needs a standing APPROVED review from an account other than the city's, which counts until it is dismissed (merge.sh's universal approval rule). The value is read case-insensitively: false, 0, no, or off selects all-in-one; true, 1, yes, or on selects design-gated; an empty or unrecognized value also selects design-gated, with a warning, so a typo never drops the design gate. An Accept takes the default, because its sling passes no var. For all-in-one, the operator takes the recommendation to a sitting (Discuss) instead, and the sitting follows the work skill's steps for taking a recommendation, adding --var design_gated=false to the sling those steps run."
 default = "true"
 
 [[steps]]
 id = "load-context"
-title = "Read the initiative and resolve the convoy shape"
+title = "Read the initiative and resolve the gate shape"
 description = """
 Prime, then read the subject this design-convoy stands up.
 
@@ -59,12 +68,12 @@ gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]' | jq '.[0].metadata'
 ```
 
 **3. Resolve the gate shape.** `design_gated` is `{{design_gated}}` (default
-`true`). Design-gated holds implementation until the design's checkpoint PR
-merges with the operator's approval; all-in-one dispatches both together.
-Nothing acts on it here, since arm-implementation resolves the same var with the
-same block, but resolving it now reports a value the block does not recognize
-before the convoy exists. Confirm the resolved shape is the one this initiative
-wants before standing the convoy up:
+`true`). Design-gated holds implementation until the design's PR merges with the
+operator's approval; all-in-one dispatches both together. Nothing acts on it
+here, since file-design, file-implementation and dispatch resolve the same var
+with the same block, but resolving it now reports a value the block does not
+recognize before the branch is cut. Confirm the resolved shape is the one this
+initiative wants before standing the effort up:
 ```bash
 # >>> design-gated-resolve
 # Case-insensitive: false, 0, no, or off selects all-in-one; true, 1, yes, or on
@@ -93,61 +102,69 @@ done
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
 [[steps]]
-id = "seed-convoy"
-title = "Create the owned convoy and cut its integration branch"
+id = "seed-branch"
+title = "Cut the integration branch and record it on the subject"
 needs = ["load-context"]
 description = """
-Stand the durable convoy up with `convoy-seed.sh`: create the owned convoy, set
-its target to `integration/<convoy-id>`, and cut+push that branch from a
-disposable worktree. A converse sitting cannot do this — it never pushes — which
-is why the pattern needs this molecule.
+Cut `integration/<subject-id>` from the default branch with one create-only push
+from the rig's checkout, and record it on the subject: `branch` names the
+integration branch and `target` the default branch. The subject is the effort's
+landing bead. Its children land on the branch, and its own PR carries the branch
+to the default branch. A converse sitting cannot cut the branch, because it never
+pushes, which is why the pattern needs this molecule.
 
-**Idempotent on resume.** `convoy-seed.sh` writes the new convoy id to `--id-file`
-the instant the convoy is created — before the fallible target-set and branch cut —
-and this step records it on the subject right then, on success or failure. A re-run
-therefore passes the recorded id back as `--convoy`, so it reuses the first convoy
-instead of creating a second, and `convoy-seed.sh` skips the cut when origin already
-carries the branch.
-
+The default branch is the one `origin/HEAD` names in the rig's checkout, or
+`main` when it names none. The push sends a ref and checks nothing out, so the
+rig's checkout never moves. Its empty lease refuses a branch that already
+exists, so a refused push after which origin carries the branch is a cut an
+earlier pass already made. The mechanik's recipe for standing an effort up by
+hand cuts with the same marked blocks, `effort-default-branch` and
+`effort-branch-push`, so both cut from the same branch. A subject that already
+records the branch is cut no further, and one that records another branch is not
+this run's to cut. Neither is one that lands on a branch other than the default,
+because an effort that lands inside another effort's branch is not built. The
+record is read back before anything is filed:
 ```bash
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 SUBJECT=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 [ -n "$SUBJECT" ] || { echo "mol-design-convoy needs an input convoy with exactly one tracked member" >&2; exit 1; }
 SUBJECT_JSON=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]')
-INITIATIVE=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].title // empty')
-CONVOY_ID=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_convoy_id"] // empty')
-
-SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/convoy-seed.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-done
-[ -n "$SCRIPTS" ] || { echo "convoy-seed.sh not found in the pack" >&2; exit 1; }
-
-IDFILE=$(mktemp "${TMPDIR:-/tmp}/gctk-design-convoy-id.XXXXXX") || { echo "mktemp failed" >&2; exit 1; }
-SEED_RC=0
-# Build convoy-seed.sh's argv as an array. The agent shell is zsh, which does
-# not word-split an unquoted ${CONVOY_ID:+--convoy "$CONVOY_ID"}: it reaches
-# convoy-seed.sh as the single argument `--convoy <id>`, which it rejects as an
-# unknown argument, so the resume above never reuses the recorded convoy. An
-# array keeps --convoy and the id separate words in every shell.
-# >>> seed-convoy-invoke
-SEED_ARGS=(--name "$INITIATIVE")
-[ -n "$CONVOY_ID" ] && SEED_ARGS+=(--convoy "$CONVOY_ID")
-SEED_ARGS+=(--id-file "$IDFILE" --json)
-SEED_JSON=$("$SCRIPTS/convoy-seed.sh" "${SEED_ARGS[@]}") || SEED_RC=$?
-# <<< seed-convoy-invoke
-# convoy-seed.sh writes the created convoy id to --id-file before its fallible
-# target-set and branch cut. Record it now — on success OR failure — so a resume
-# after a mid-cut crash reuses this convoy instead of creating a second one.
-SEEDED_ID=$(tr -d '[:cntrl:]' < "$IDFILE" 2>/dev/null); rm -f "$IDFILE"
-[ -n "$SEEDED_ID" ] && gc bd update "$SUBJECT" --set-metadata "gc.design_convoy_id=$SEEDED_ID"
-[ "$SEED_RC" -eq 0 ] || { echo "convoy-seed failed (rc=$SEED_RC)" >&2; exit 1; }
-CONVOY_ID=$(printf '%s' "$SEED_JSON" | tr -d '[:cntrl:]' | jq -r '.convoy_id // empty')
-BRANCH=$(printf '%s' "$SEED_JSON" | tr -d '[:cntrl:]' | jq -r '.branch // empty')
-[ -n "$CONVOY_ID" ] && [ -n "$BRANCH" ] || { echo "convoy-seed returned no convoy id/branch" >&2; exit 1; }
-
-# Record the authoritative id+branch now that the cut has succeeded (the id was
-# already persisted above; re-recording it with the branch is idempotent).
-gc bd update "$SUBJECT" --set-metadata "gc.design_convoy_id=$CONVOY_ID" --set-metadata "gc.design_convoy_branch=$BRANCH"
+RIG_ROOT="${GC_RIG_ROOT:-}"
+[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig's checkout (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster)" >&2; exit 1; }
+# >>> seed-branch-cut
+BRANCH="integration/$SUBJECT"
+RECORDED=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata.branch // empty')
+OWN_TARGET=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata.target // empty')
+case "$RECORDED" in
+  "") ;;
+  "$BRANCH") echo "$SUBJECT already records $BRANCH; nothing to cut" ;;
+  *) echo "$SUBJECT records branch $RECORDED, not $BRANCH, so it is not this run's to cut" >&2; exit 1 ;;
+esac
+if [ -z "$RECORDED" ]; then
+  # >>> effort-default-branch
+  git -C "$RIG_ROOT" fetch --prune origin || { echo "git fetch failed in $RIG_ROOT" >&2; exit 1; }
+  DEFAULT_REF=$(git -C "$RIG_ROOT" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || true)
+  BASE="${DEFAULT_REF#refs/remotes/origin/}"
+  [ -n "$BASE" ] && [ "$BASE" != "$DEFAULT_REF" ] || BASE=main
+  # <<< effort-default-branch
+  [ -z "$OWN_TARGET" ] || [ "$OWN_TARGET" = "$BASE" ] || { echo "$SUBJECT lands on $OWN_TARGET, not the default branch $BASE; not cutting" >&2; exit 1; }
+  # >>> effort-branch-push
+  git -C "$RIG_ROOT" show-ref --verify --quiet "refs/remotes/origin/${BASE}" || { echo "origin/${BASE} not found to cut $BRANCH from" >&2; exit 1; }
+  if ! git -C "$RIG_ROOT" push origin "refs/remotes/origin/${BASE}:refs/heads/${BRANCH}" --force-with-lease="refs/heads/${BRANCH}:"; then
+    git -C "$RIG_ROOT" fetch origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}" || true
+    git -C "$RIG_ROOT" show-ref --verify --quiet "refs/remotes/origin/${BRANCH}" || { echo "the push of $BRANCH failed and origin does not carry it" >&2; exit 1; }
+    echo "origin already carries $BRANCH, so an earlier pass cut it"
+  fi
+  # <<< effort-branch-push
+  gc bd update "$SUBJECT" --set-metadata "branch=$BRANCH" --set-metadata "target=$BASE" || echo "recording $BRANCH on $SUBJECT returned non-zero; reading the record back" >&2
+fi
+RECORD=$(gc bd show "$SUBJECT" --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r '.[0].metadata | (.branch // "") + " " + (.target // "")' 2>/dev/null)
+case "$RECORD" in
+  "$BRANCH "?*) ;;
+  *) echo "$SUBJECT reads branch and target '$RECORD' after the record, not $BRANCH and a target; not filing anything" >&2; exit 1 ;;
+esac
+# <<< seed-branch-cut
 ```
 
 **Close this step bead.** Non-terminal, so no drain:
@@ -155,131 +172,35 @@ gc bd update "$SUBJECT" --set-metadata "gc.design_convoy_id=$CONVOY_ID" --set-me
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.seed-convoy --convoy {{convoy_id}} --outcome pass
+"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.seed-branch --convoy {{convoy_id}} --outcome pass
 ```
 
-**Exit criteria:** the owned convoy exists, its target is `integration/<convoy-id>`,
-that branch is on origin, the id is recorded on the subject, and this step is
-closed.
+**Exit criteria:** `integration/<subject-id>` is on origin, the subject records it
+as its `branch` with the default branch as its `target`, the record reads back,
+and this step is closed.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
 [[steps]]
-id = "arm-design"
-title = "File the design child and dispatch it"
-needs = ["seed-convoy"]
+id = "file-design"
+title = "File the design child and wire the subject's wait on it"
+needs = ["seed-branch"]
 description = """
-File the design child, link it to the convoy, and sling it to the polecat pool.
-The child branches from the integration branch, lands its design doc there, and
-the refinery opens the checkpoint PR onto that branch. That PR merges only with
-a standing APPROVED review from an account other than the city's, under
-`merge.sh`'s universal approval rule, so the child carries no check_set stamp of
-its own.
+File the design child with the integration branch as its own `target`, written
+in its create, and make the subject wait on it with a `blocks` edge.
+Design-gated, the child is a stage, slung `--merge mr`: its PR into the
+integration branch is the design gate, which `merge.sh`'s universal approval
+rule holds for the operator, so the child carries no check_set stamp.
+All-in-one, it is slung with no merge strategy and lands on the branch with no
+PR of its own.
 
-**Idempotent on resume** via two markers on the subject: `gc.design_child` (the
-child was filed) and `gc.design_armed` (it was linked and slung).
-`gc.design_child` guards the non-idempotent create alone; the convoy link is an
-idempotent sling precondition and lives under `gc.design_armed`. So a re-run
-neither files a second child nor pours a second workflow, and never slings a
-child that is unlinked from the convoy.
+This step dispatches nothing. The dispatch step slings the child once every
+wait of the setup reads back, so no child can land while the subject waits on
+fewer than all of them.
 
-```bash
-CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
-SUBJECT=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
-[ -n "$SUBJECT" ] || { echo "mol-design-convoy needs an input convoy with exactly one tracked member" >&2; exit 1; }
-SUBJECT_JSON=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]')
-INITIATIVE=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].title // empty')
-CONVOY_ID=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_convoy_id"] // empty')
-BRANCH=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_convoy_branch"] // empty')
-DESIGN_CHILD=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_child"] // empty')
-[ -n "$CONVOY_ID" ] && [ -n "$BRANCH" ] || { echo "seed-convoy did not record the convoy; cannot arm design" >&2; exit 1; }
-
-POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
-case "$POOL" in */*) ;; *) echo "cannot rig-qualify the pool; set GC_RIG" >&2; exit 1 ;; esac
-```
-
-**File the design child (only if not already filed).** Replace the `<...>` with
-the design topic and questions you read from the subject's card in load-context:
-bd answers a refused create with an `{"error": ...}` object, so the id is read
-type-guarded and a refusal reports bd's own reason:
-```bash
-if [ -z "$DESIGN_CHILD" ]; then
-  CREATE_JSON=$(gc bd create --title "design: $INITIATIVE" -t task -d "## Goal
-Design <the topic>, per the initiative $SUBJECT. Land the design doc on
-$BRANCH (this convoy's integration branch) and open it as a checkpoint PR
-onto that branch for the operator's on-branch review. Do NOT start
-implementation — it is a separate child of this convoy.
-
-## What to settle
-<the design questions from the initiative card>
-
-## Deliverable
-A design doc committed to $BRANCH and opened as a PR onto it. The design
-defines the implementation child's breakdown. Use the filing-documentation
-skill for placement." --json | tr -d '[:cntrl:]')
-  DESIGN_CHILD=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
-  [ -n "$DESIGN_CHILD" ] || { CREATE_ERR=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "bd create filed no design child${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
-  gc bd update "$SUBJECT" --set-metadata "gc.design_child=$DESIGN_CHILD" || { echo "design child $DESIGN_CHILD is filed but gc.design_child did not record on $SUBJECT; record it by hand before a re-run, or the re-run files a second child" >&2; exit 1; }
-fi
-```
-
-**Link, verify, and sling (only if not already armed).** The convoy link
-resolves `metadata.target=integration/<convoy-id>` for the child at sling time.
-It is an idempotent precondition of the sling, so it runs here, before every
-sling including a resumed one. A child slung without it opens its PR against
-the default branch, so the link is read back before the sling. The read-back
-decides, not the add's exit status: a resume re-runs the add on an edge the
-failed pass may already have written, and an add refused on an existing edge
-looks the same as one that wrote nothing. A link that does not read back fails
-the step with `gc.design_armed` unstamped, which leaves the arm for a resume to
-re-run:
-```bash
-ARMED=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_armed"] // empty')
-# >>> arm-design-dispatch
-if [ -z "$ARMED" ]; then
-  gc bd dep add "$DESIGN_CHILD" "$CONVOY_ID" --type=parent-child || echo "dep add of design child $DESIGN_CHILD under convoy $CONVOY_ID returned non-zero (already linked?); reading the edge back" >&2
-  LINKED=$(gc bd dep list "$DESIGN_CHILD" --direction=down -t parent-child --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg c "$CONVOY_ID" '[.[]? | select(.id == $c)] | length' 2>/dev/null)
-  [ "${LINKED:-0}" -ge 1 ] 2>/dev/null || { echo "design child $DESIGN_CHILD reads no parent-child edge to convoy $CONVOY_ID after the link; not slinging" >&2; exit 1; }
-  gc sling "$POOL" "$DESIGN_CHILD" --on mol-polecat-work || { echo "sling of design child failed" >&2; exit 1; }
-  gc bd update "$SUBJECT" --set-metadata "gc.design_armed=1" || { echo "design child $DESIGN_CHILD is slung but gc.design_armed did not record on $SUBJECT; record it by hand before a re-run, or the re-run slings it again" >&2; exit 1; }
-fi
-# <<< arm-design-dispatch
-```
-
-**Close this step bead.** Non-terminal, so no drain:
-```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.arm-design --convoy {{convoy_id}} --outcome pass
-```
-
-**Exit criteria:** the design child is filed, linked to the convoy with the link
-read back, slung to the pool, and this step is closed.
-"""
-metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
-
-[[steps]]
-id = "arm-implementation"
-title = "File the implementation child and arm it behind the design"
-needs = ["arm-design"]
-description = """
-File one implementation child that builds the initiative per the design.
-For `design_gated=true`, hold it behind the design child with a `blocks` edge and
-arm a deferred dispatch, so the design's closure is what sends it to the pool.
-For `design_gated=false`, sling it now to run in parallel.
-
-One implementation child, not a fan-out: the design defines the breakdown, so the
-implementation child carries "split into multiple beads if the design
-calls for it" and splits itself when it runs — the design does not exist yet to
-enumerate the pieces here.
-
-**Idempotent on resume** via `gc.impl_child` (the child was filed) and
-`gc.impl_armed` (it was linked, then slung or armed) on the subject.
-`gc.impl_child` guards the non-idempotent create alone; the convoy link and,
-when gated, the `blocks` edge are idempotent dispatch preconditions and live
-under `gc.impl_armed`. So a re-run neither files a second child nor dispatches
-one that is unlinked from the convoy or unheld behind the design.
+**Idempotent on resume** via `gc.design_child` on the subject, which guards the
+non-idempotent create, so a re-run files no second child. The wait is added and
+read back on every run.
 
 `design_gated` resolves through the same marked block load-context ran:
 ```bash
@@ -288,11 +209,334 @@ SUBJECT=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 the
 [ -n "$SUBJECT" ] || { echo "mol-design-convoy needs an input convoy with exactly one tracked member" >&2; exit 1; }
 SUBJECT_JSON=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]')
 INITIATIVE=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].title // empty')
-CONVOY_ID=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_convoy_id"] // empty')
-BRANCH=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_convoy_branch"] // empty')
+BRANCH=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata.branch // empty')
+DESIGN_CHILD=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_child"] // empty')
+[ -n "$BRANCH" ] || { echo "seed-branch did not record the branch; cannot file the design child" >&2; exit 1; }
+# >>> design-gated-resolve
+# Case-insensitive: false, 0, no, or off selects all-in-one; true, 1, yes, or on
+# selects design-gated. Anything else, empty included, falls back to the
+# design-gated default, so a typo never drops the design gate.
+DESIGN_GATED_RAW="{{design_gated}}"
+case "$(printf '%s' "$DESIGN_GATED_RAW" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" in
+  false|0|no|off) DESIGN_GATED=false ;;
+  true|1|yes|on)  DESIGN_GATED=true ;;
+  *) DESIGN_GATED=true; echo "design_gated='$DESIGN_GATED_RAW' is not a recognized boolean; using the design-gated default" >&2 ;;
+esac
+# <<< design-gated-resolve
+```
+
+**File the design child (only if not already filed).** Replace the `<...>` with
+the design topic and questions you read from the subject's card in load-context.
+The child goes under the subject's epic when it has one, so the epic ranks and
+parks it (docs/steering.md). bd answers a refused create with an
+`{"error": ...}` object, so the id is read type-guarded and a refusal reports
+bd's own reason:
+```bash
+# >>> file-design-create
+if [ -z "$DESIGN_CHILD" ]; then
+  EPIC=$(printf '%s' "$SUBJECT_JSON" | jq -r '[.[0].dependencies[]? | select(.dependency_type == "parent-child" and .issue_type == "epic") | .id] | .[0] // empty' 2>/dev/null)
+  if [ "$DESIGN_GATED" = "true" ]; then
+    DESIGN_LANDS="It is a stage: its PR into $BRANCH is the design gate, and the operator's approval of it releases the implementation."
+  else
+    DESIGN_LANDS="It lands on $BRANCH with no PR of its own (design_gated=false), and the operator first reviews it in the PR that carries $BRANCH to the default branch."
+  fi
+  DESIGN_ARGS=(--title "design: $INITIATIVE" -t task --metadata "$(jq -nc --arg t "$BRANCH" '{target: $t}')" -d "## Goal
+Design <the topic>, per the initiative $SUBJECT. Land the design doc on
+$BRANCH, the integration branch $SUBJECT carries to the default branch.
+$DESIGN_LANDS Do NOT start implementation: it is a separate bead of this
+effort.
+
+## What to settle
+<the design questions from the initiative card>
+
+## Deliverable
+A design doc committed to $BRANCH. The design defines the implementation
+child's breakdown. Use the filing-documentation skill for placement.")
+  [ -z "$EPIC" ] || DESIGN_ARGS+=(--parent "$EPIC")
+  CREATE_JSON=$(gc bd create "${DESIGN_ARGS[@]}" --json | tr -d '[:cntrl:]')
+  DESIGN_CHILD=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+  [ -n "$DESIGN_CHILD" ] || { CREATE_ERR=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "bd create filed no design child${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
+  gc bd update "$SUBJECT" --set-metadata "gc.design_child=$DESIGN_CHILD" || { echo "design child $DESIGN_CHILD is filed but gc.design_child did not record on $SUBJECT; record it by hand before a re-run, or the re-run files a second child" >&2; exit 1; }
+fi
+# <<< file-design-create
+```
+
+**Check the target, then wait.** The read-back decides, not the add's exit
+status, because a resume re-runs the add on an edge the failed pass may already
+have written. A target or a wait that does not read back fails the step:
+```bash
+# >>> file-design-wait
+CHILD_TARGET=$(gc bd show "$DESIGN_CHILD" --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r '.[0].metadata.target // empty' 2>/dev/null)
+[ "$CHILD_TARGET" = "$BRANCH" ] || { echo "design child $DESIGN_CHILD reads target '$CHILD_TARGET', not $BRANCH, so it would land elsewhere; not waiting on it" >&2; exit 1; }
+gc bd dep add "$SUBJECT" "$DESIGN_CHILD" --type=blocks || echo "dep add of the wait of $SUBJECT on design child $DESIGN_CHILD returned non-zero (already there?); reading the edge back" >&2
+WAITS=$(gc bd dep list "$SUBJECT" --direction=down -t blocks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg c "$DESIGN_CHILD" '[.[]? | select(.id == $c)] | length' 2>/dev/null)
+[ "${WAITS:-0}" -ge 1 ] 2>/dev/null || { echo "$SUBJECT reads no blocks edge onto design child $DESIGN_CHILD after the add" >&2; exit 1; }
+# <<< file-design-wait
+```
+
+**Close this step bead.** Non-terminal, so no drain:
+```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.file-design --convoy {{convoy_id}} --outcome pass
+```
+
+**Exit criteria:** the design child is filed with its target, the subject waits
+on it, both read back, and this step is closed.
+"""
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
+
+[[steps]]
+id = "file-implementation"
+title = "File the implementation child and wire its waits"
+needs = ["file-design"]
+description = """
+File one implementation child that builds the initiative per the design, with the
+integration branch as its own `target`, written in its create, and make the
+subject wait on it with a `blocks` edge. It lands on the branch with no PR of its
+own. For `design_gated=true`, hold it behind the design child with a `blocks`
+edge, so the deferred dispatch the dispatch step arms fires only once the design
+child closes. For `design_gated=false`, the dispatch step slings it beside the
+design. This step dispatches nothing.
+
+One implementation child, not a fan-out: the design defines the breakdown, which
+does not exist yet, so the child splits itself when it runs if the design calls
+for it. Its brief gives each bead it splits into the same writes, the summary
+task's wait among them, so the subject and the summary task wait for every piece.
+The summary task is filed before anything is dispatched, so it is recorded on
+the subject by the time the child runs.
+
+**Idempotent on resume** via `gc.impl_child` on the subject, which guards the
+non-idempotent create, so a re-run files no second child. The edges are added
+and read back on every run.
+
+`design_gated` resolves through the same marked block load-context ran:
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+SUBJECT=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$SUBJECT" ] || { echo "mol-design-convoy needs an input convoy with exactly one tracked member" >&2; exit 1; }
+SUBJECT_JSON=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]')
+INITIATIVE=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].title // empty')
+BRANCH=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata.branch // empty')
 DESIGN_CHILD=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_child"] // empty')
 IMPL_CHILD=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.impl_child"] // empty')
-[ -n "$CONVOY_ID" ] && [ -n "$BRANCH" ] && [ -n "$DESIGN_CHILD" ] || { echo "convoy or design child not recorded; cannot arm implementation" >&2; exit 1; }
+[ -n "$BRANCH" ] && [ -n "$DESIGN_CHILD" ] || { echo "the branch or the design child is not recorded; cannot file the implementation child" >&2; exit 1; }
+# >>> design-gated-resolve
+# Case-insensitive: false, 0, no, or off selects all-in-one; true, 1, yes, or on
+# selects design-gated. Anything else, empty included, falls back to the
+# design-gated default, so a typo never drops the design gate.
+DESIGN_GATED_RAW="{{design_gated}}"
+case "$(printf '%s' "$DESIGN_GATED_RAW" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" in
+  false|0|no|off) DESIGN_GATED=false ;;
+  true|1|yes|on)  DESIGN_GATED=true ;;
+  *) DESIGN_GATED=true; echo "design_gated='$DESIGN_GATED_RAW' is not a recognized boolean; using the design-gated default" >&2 ;;
+esac
+# <<< design-gated-resolve
+```
+
+**File the implementation child (only if not already filed).** Its brief says
+when to start, by shape. As in file-design, it is filed under the subject's epic
+when the subject has one, and the id is read type-guarded:
+```bash
+# >>> file-implementation-create
+if [ -z "$IMPL_CHILD" ]; then
+  EPIC=$(printf '%s' "$SUBJECT_JSON" | jq -r '[.[0].dependencies[]? | select(.dependency_type == "parent-child" and .issue_type == "epic") | .id] | .[0] // empty' 2>/dev/null)
+  if [ "$DESIGN_GATED" = "true" ]; then
+    IMPL_START="This bead is held behind the design child: it reaches the pool only after the design's PR merges with the operator's approval, so the design is approved when you start."
+  else
+    IMPL_START="This bead runs beside the design child (design_gated=false): build against the design as it lands on $BRANCH, and expect to revise if the operator changes the design in review."
+  fi
+  IMPL_ARGS=(--title "implement: $INITIATIVE per its design" -t task --metadata "$(jq -nc --arg t "$BRANCH" '{target: $t}')" -d "## Goal
+Implement $INITIATIVE per the design for it on $BRANCH (the design child
+$DESIGN_CHILD of this effort). Branch FROM $BRANCH, which is also your target:
+your work lands there with no PR of its own, and $SUBJECT carries the branch to
+the default branch through the effort's one PR.
+
+## Scope
+Follow the design. Split into multiple beads if the design calls for it. File
+each bead you split into the way this one was filed: with target=$BRANCH in its
+create, under this bead's parent. Then make $SUBJECT and the summary task (the
+bead $SUBJECT records as gc.summary_task) each wait on it with a blocks edge,
+and read the target and both edges back before you sling it.
+$IMPL_START")
+  [ -z "$EPIC" ] || IMPL_ARGS+=(--parent "$EPIC")
+  CREATE_JSON=$(gc bd create "${IMPL_ARGS[@]}" --json | tr -d '[:cntrl:]')
+  IMPL_CHILD=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+  [ -n "$IMPL_CHILD" ] || { CREATE_ERR=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "bd create filed no implementation child${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
+  gc bd update "$SUBJECT" --set-metadata "gc.impl_child=$IMPL_CHILD" || { echo "implementation child $IMPL_CHILD is filed but gc.impl_child did not record on $SUBJECT; record it by hand before a re-run, or the re-run files a second child" >&2; exit 1; }
+fi
+# <<< file-implementation-create
+```
+
+**Check the target, then wait, and hold it behind the design by shape.** As in
+file-design, each write is read back, and one that does not read back fails the
+step:
+```bash
+# >>> file-implementation-wait
+CHILD_TARGET=$(gc bd show "$IMPL_CHILD" --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r '.[0].metadata.target // empty' 2>/dev/null)
+[ "$CHILD_TARGET" = "$BRANCH" ] || { echo "implementation child $IMPL_CHILD reads target '$CHILD_TARGET', not $BRANCH, so it would land elsewhere; not waiting on it" >&2; exit 1; }
+gc bd dep add "$SUBJECT" "$IMPL_CHILD" --type=blocks || echo "dep add of the wait of $SUBJECT on implementation child $IMPL_CHILD returned non-zero (already there?); reading the edge back" >&2
+WAITS=$(gc bd dep list "$SUBJECT" --direction=down -t blocks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg c "$IMPL_CHILD" '[.[]? | select(.id == $c)] | length' 2>/dev/null)
+[ "${WAITS:-0}" -ge 1 ] 2>/dev/null || { echo "$SUBJECT reads no blocks edge onto implementation child $IMPL_CHILD after the add" >&2; exit 1; }
+if [ "$DESIGN_GATED" = "true" ]; then
+  # dep add's second id is the blocker, so the design blocks the implementation
+  # here, and the arm the dispatch step records fires once the design closes.
+  gc bd dep add "$IMPL_CHILD" "$DESIGN_CHILD" --type=blocks || echo "dep add holding implementation child $IMPL_CHILD behind design child $DESIGN_CHILD returned non-zero (already held?); reading the edge back" >&2
+  HELD=$(gc bd dep list "$IMPL_CHILD" --direction=down -t blocks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg d "$DESIGN_CHILD" '[.[]? | select(.id == $d)] | length' 2>/dev/null)
+  [ "${HELD:-0}" -ge 1 ] 2>/dev/null || { echo "implementation child $IMPL_CHILD reads no blocks edge from design child $DESIGN_CHILD after the add" >&2; exit 1; }
+fi
+# <<< file-implementation-wait
+```
+
+**Close this step bead.** Non-terminal, so no drain:
+```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.file-implementation --convoy {{convoy_id}} --outcome pass
+```
+
+**Exit criteria:** the implementation child is filed with its target, the
+subject waits on it, and, design-gated, the design child holds it, each write
+read back; this step is closed.
+"""
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
+
+[[steps]]
+id = "file-summary"
+title = "File the summary task and wire its waits"
+needs = ["file-implementation"]
+description = """
+File the summary task beside the subject: an ordinary task in the rig's store,
+under the subject's epic when it has one, so the epic ranks and parks it as it
+does the effort's beads (docs/steering.md). It writes the subject's
+`pr_summary`, the `## Summary` of the effort's PR, from the finished branch. Its
+method is the polecat doctrine's paragraph on integration branches, and its
+description names the subject it writes for. It lands nothing, so it carries no
+`target`.
+
+It waits on each child by a `blocks` edge, and the subject waits on it, so it
+runs once the effort's last bead has landed, and the refinery takes the subject
+only after it has closed. Each edge is read back here. The dispatch step arms it
+to the rig's polecat pool on Gas City's `mol-polecat-report`, whose write-report
+step closes it.
+
+**Idempotent on resume** via `gc.summary_task` on the subject, which guards the
+non-idempotent create, so a re-run files no second task. The edges are added
+and read back on every run:
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+SUBJECT=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$SUBJECT" ] || { echo "mol-design-convoy needs an input convoy with exactly one tracked member" >&2; exit 1; }
+SUBJECT_JSON=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]')
+INITIATIVE=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].title // empty')
+BRANCH=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata.branch // empty')
+DESIGN_CHILD=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_child"] // empty')
+IMPL_CHILD=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.impl_child"] // empty')
+SUMMARY_TASK=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.summary_task"] // empty')
+[ -n "$BRANCH" ] && [ -n "$DESIGN_CHILD" ] && [ -n "$IMPL_CHILD" ] || { echo "the branch or a child is not recorded; cannot file the summary task" >&2; exit 1; }
+```
+
+**File the summary task (only if not already filed).** Its parent is the
+subject's epic, read from the subject's own parent edge, and the id is read
+type-guarded as in file-design:
+```bash
+# >>> summary-task-create
+if [ -z "$SUMMARY_TASK" ]; then
+  EPIC=$(printf '%s' "$SUBJECT_JSON" | jq -r '[.[0].dependencies[]? | select(.dependency_type == "parent-child" and .issue_type == "epic") | .id] | .[0] // empty' 2>/dev/null)
+  SUMMARY_ARGS=(--title "summary: the PR for $INITIATIVE" -t task -d "## Goal
+Write the pr_summary of $SUBJECT, the landing bead that carries $BRANCH to the
+default branch through the effort's one PR, once every bead this task waits on
+has landed.
+
+## Method
+The polecat doctrine's paragraph on integration branches: read the finished
+branch and each landed bead's own summary, state what the whole branch does,
+name where it departs from the description of $SUBJECT, and read the write
+back. Change no file, and write nothing else on $SUBJECT.")
+  [ -z "$EPIC" ] || SUMMARY_ARGS+=(--parent "$EPIC")
+  CREATE_JSON=$(gc bd create "${SUMMARY_ARGS[@]}" --json | tr -d '[:cntrl:]')
+  SUMMARY_TASK=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
+  [ -n "$SUMMARY_TASK" ] || { CREATE_ERR=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "bd create filed no summary task${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
+  gc bd update "$SUBJECT" --set-metadata "gc.summary_task=$SUMMARY_TASK" || { echo "summary task $SUMMARY_TASK is filed but gc.summary_task did not record on $SUBJECT; record it by hand before a re-run, or the re-run files a second task" >&2; exit 1; }
+fi
+# <<< summary-task-create
+```
+
+**Wait, and read back.** As in the filing steps, the read-back decides, not the
+add's exit status, and an edge that does not read back fails the step:
+```bash
+# >>> summary-task-wait
+gc bd dep add "$SUMMARY_TASK" "$DESIGN_CHILD" --type=blocks || echo "dep add of the wait of summary task $SUMMARY_TASK on design child $DESIGN_CHILD returned non-zero (already there?); reading the edge back" >&2
+gc bd dep add "$SUMMARY_TASK" "$IMPL_CHILD" --type=blocks || echo "dep add of the wait of summary task $SUMMARY_TASK on implementation child $IMPL_CHILD returned non-zero (already there?); reading the edge back" >&2
+TASK_WAITS=$(gc bd dep list "$SUMMARY_TASK" --direction=down -t blocks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r '[.[]? | .id] | join(" ")' 2>/dev/null)
+for C in "$DESIGN_CHILD" "$IMPL_CHILD"; do
+  case " $TASK_WAITS " in
+    *" $C "*) ;;
+    *) echo "summary task $SUMMARY_TASK reads no blocks edge onto $C after the add" >&2; exit 1 ;;
+  esac
+done
+gc bd dep add "$SUBJECT" "$SUMMARY_TASK" --type=blocks || echo "dep add of the wait of $SUBJECT on summary task $SUMMARY_TASK returned non-zero (already there?); reading the edge back" >&2
+HELD=$(gc bd dep list "$SUBJECT" --direction=down -t blocks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg s "$SUMMARY_TASK" '[.[]? | select(.id == $s)] | length' 2>/dev/null)
+[ "${HELD:-0}" -ge 1 ] 2>/dev/null || { echo "$SUBJECT reads no blocks edge onto summary task $SUMMARY_TASK after the add" >&2; exit 1; }
+# <<< summary-task-wait
+```
+
+**Close this step bead.** Non-terminal, so no drain:
+```bash
+SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
+done
+"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.file-summary --convoy {{convoy_id}} --outcome pass
+```
+
+**Exit criteria:** the summary task is filed beside the subject with no target,
+it waits on both children and the subject waits on it, all three edges read
+back, and this step is closed.
+"""
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
+
+[[steps]]
+id = "dispatch"
+title = "Read the setup back, hand the subject to the refinery, dispatch its work, and drain"
+needs = ["file-summary"]
+description = """
+Nothing is handed over or dispatched until the whole setup reads back: each
+child's `target`, the subject's `blocks` edge onto each child and onto the
+summary task, the summary task's onto each child, and, design-gated, the design
+child's on the implementation child. A run that stopped before this step left
+no child in flight and the subject with nobody, so no child can have landed
+while the subject waited on fewer than all of them.
+
+Then the subject is assigned to the rig's refinery, at the address the polecat
+handoff checks against the roster, with the notice that assignment owes
+(`deferred-dispatch.sh notify`). The refinery takes it once nothing it waits on
+is open. Then the work is dispatched: the design child is slung, `--merge mr`
+when design-gated; the implementation child is armed, so the design's closure
+sends it to the pool, or, all-in-one, slung now; and the summary task is armed
+on `mol-polecat-report`. Armed or slung, every bead the subject waits on is
+already waited on, and a run that stops partway leaves the subject with the
+refinery, held by every bead not yet closed.
+
+**Idempotent on resume** via a marker on the subject for each dispatch, stamped
+right after it: `gc.design_armed` (the design child is slung), `gc.impl_armed`
+(the implementation child is armed or slung) and `gc.summary_armed` (the
+summary task is armed). A re-run dispatches nothing twice, and a subject whose
+summary task is armed is finished, so its re-run writes nothing:
+```bash
+CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
+SUBJECT=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
+[ -n "$SUBJECT" ] || { echo "mol-design-convoy needs an input convoy with exactly one tracked member" >&2; exit 1; }
+SUBJECT_JSON=$(gc bd show "$SUBJECT" --json | tr -d '[:cntrl:]')
+BRANCH=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata.branch // empty')
+DESIGN_CHILD=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_child"] // empty')
+IMPL_CHILD=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.impl_child"] // empty')
+SUMMARY_TASK=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.summary_task"] // empty')
+DESIGN_ARMED=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.design_armed"] // empty')
+IMPL_ARMED=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.impl_armed"] // empty')
+SUMMARY_ARMED=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.summary_armed"] // empty')
+[ -n "$BRANCH" ] && [ -n "$DESIGN_CHILD" ] && [ -n "$IMPL_CHILD" ] && [ -n "$SUMMARY_TASK" ] || { echo "the branch, a child or the summary task is not recorded; handing nothing over and dispatching nothing" >&2; exit 1; }
 # >>> design-gated-resolve
 # Case-insensitive: false, 0, no, or off selects all-in-one; true, 1, yes, or on
 # selects design-gated. Anything else, empty included, falls back to the
@@ -311,102 +555,79 @@ done
 [ -n "$SCRIPTS" ] || { echo "deferred-dispatch.sh not found in the pack" >&2; exit 1; }
 
 POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
-case "$POOL" in */*) ;; *) echo "cannot rig-qualify the pool; set GC_RIG" >&2; exit 1 ;; esac
+REFINERY="${GC_RIG:+$GC_RIG/}gc-toolkit.refinery"
+case "$POOL" in */*) ;; *) echo "cannot rig-qualify the pool and the refinery; set GC_RIG" >&2; exit 1 ;; esac
 ```
 
-**File the implementation child (only if not already filed).** Its brief says
-when to start, by shape, and the id is read type-guarded as in arm-design:
+**Read the setup back, hand the subject over, then dispatch.** A target or an
+edge that does not read back, a refinery address the roster lacks, a subject
+someone else holds, or a notice that does not record stops the step before
+anything is dispatched:
 ```bash
-if [ -z "$IMPL_CHILD" ]; then
-  if [ "$DESIGN_GATED" = "true" ]; then
-    IMPL_START="This bead is held behind the design child: it reaches the pool only after the design's checkpoint PR merges with the operator's approval, so the design is approved when you start."
-  else
-    IMPL_START="This bead runs beside the design child (design_gated=false): build against the design as it lands on $BRANCH, and expect to revise if the operator changes the design in review."
+# >>> setup-dispatch
+if [ -z "$SUMMARY_ARMED" ]; then
+  need_wait() {
+    gc bd dep list "$1" --direction=down -t blocks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -e --arg b "$2" 'any(.[]?; .id == $b)' >/dev/null 2>&1 || { echo "$1 reads no blocks edge onto $2, so the setup is not whole; handing nothing over and dispatching nothing" >&2; exit 1; }
+  }
+  for C in "$DESIGN_CHILD" "$IMPL_CHILD"; do
+    CHILD_TARGET=$(gc bd show "$C" --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r '.[0].metadata.target // empty' 2>/dev/null)
+    [ "$CHILD_TARGET" = "$BRANCH" ] || { echo "$C reads target '$CHILD_TARGET', not $BRANCH, so it would land elsewhere; handing nothing over and dispatching nothing" >&2; exit 1; }
+  done
+  need_wait "$SUBJECT" "$DESIGN_CHILD"
+  need_wait "$SUBJECT" "$IMPL_CHILD"
+  need_wait "$SUBJECT" "$SUMMARY_TASK"
+  need_wait "$SUMMARY_TASK" "$DESIGN_CHILD"
+  need_wait "$SUMMARY_TASK" "$IMPL_CHILD"
+  [ "$DESIGN_GATED" != "true" ] || need_wait "$IMPL_CHILD" "$DESIGN_CHILD"
+  ROSTER=$(gc agent list --json 2>/dev/null | jq -r '.agents[]? | .qualified_name // empty | ., (split("/") | .[-1])' 2>/dev/null) || true
+  if [ -z "$ROSTER" ]; then
+    echo "roster unreadable; handing $SUBJECT to $REFINERY unchecked" >&2
+  elif ! grep -qxF "$REFINERY" <<< "$ROSTER"; then
+    echo "$REFINERY names no agent, and the refinery reads its queue by exact-match assignee; not handing $SUBJECT over" >&2; exit 1
   fi
-  CREATE_JSON=$(gc bd create --title "implement: $INITIATIVE per its design" -t task -d "## Goal
-Implement $INITIATIVE per the design for it on $BRANCH (the design child
-$DESIGN_CHILD of this convoy). Branch FROM $BRANCH and open your PR ONTO
-$BRANCH — not the default branch. The convoy graduates holistically once this
-lands.
-
-## Scope
-Follow the design. Split into multiple beads if the design calls for it.
-$IMPL_START" --json | tr -d '[:cntrl:]')
-  IMPL_CHILD=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
-  [ -n "$IMPL_CHILD" ] || { CREATE_ERR=$(printf '%s' "$CREATE_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "bd create filed no implementation child${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
-  gc bd update "$SUBJECT" --set-metadata "gc.impl_child=$IMPL_CHILD" || { echo "implementation child $IMPL_CHILD is filed but gc.impl_child did not record on $SUBJECT; record it by hand before a re-run, or the re-run files a second child" >&2; exit 1; }
-fi
-```
-
-**Link, verify, then arm or sling, by shape (only if not already armed).** The
-convoy link resolves `metadata.target=integration/<convoy-id>` for the child,
-and under design-gated the `blocks` edge is what keeps the deferred dispatch
-from firing before the design closes. Both are idempotent preconditions of the
-dispatch, so they run here, before every dispatch including a resumed one, and
-each is read back before anything dispatches. As in arm-design, the read-back
-decides, not the add's exit status. An edge that does not read back fails the
-step with `gc.impl_armed` unstamped, which leaves the arm for a resume to
-re-run:
-```bash
-ARMED=$(printf '%s' "$SUBJECT_JSON" | jq -r '.[0].metadata["gc.impl_armed"] // empty')
-# >>> arm-implementation-dispatch
-if [ -z "$ARMED" ]; then
-  gc bd dep add "$IMPL_CHILD" "$CONVOY_ID" --type=parent-child || echo "dep add of implementation child $IMPL_CHILD under convoy $CONVOY_ID returned non-zero (already linked?); reading the edge back" >&2
-  LINKED=$(gc bd dep list "$IMPL_CHILD" --direction=down -t parent-child --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg c "$CONVOY_ID" '[.[]? | select(.id == $c)] | length' 2>/dev/null)
-  [ "${LINKED:-0}" -ge 1 ] 2>/dev/null || { echo "implementation child $IMPL_CHILD reads no parent-child edge to convoy $CONVOY_ID after the link; not dispatching" >&2; exit 1; }
-  if [ "$DESIGN_GATED" = "true" ]; then
-    # Hold behind the design child and arm the deferred dispatch: the design's
-    # closure, when its checkpoint PR merges with the operator's approval,
-    # fires the sling. dep add's second id is the blocker, so the design
-    # blocks the implementation here.
-    gc bd dep add "$IMPL_CHILD" "$DESIGN_CHILD" --type=blocks || echo "dep add holding implementation child $IMPL_CHILD behind design child $DESIGN_CHILD returned non-zero (already held?); reading the edge back" >&2
-    HELD=$(gc bd dep list "$IMPL_CHILD" --direction=down -t blocks --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r --arg d "$DESIGN_CHILD" '[.[]? | select(.id == $d)] | length' 2>/dev/null)
-    [ "${HELD:-0}" -ge 1 ] 2>/dev/null || { echo "implementation child $IMPL_CHILD reads no blocks edge from design child $DESIGN_CHILD after the add; not arming" >&2; exit 1; }
-    "$SCRIPTS/deferred-dispatch.sh" arm "$IMPL_CHILD" --target "$POOL" --sling-arg --on --sling-arg mol-polecat-work --reason "design-convoy: implementation armed behind design child $DESIGN_CHILD's approval" || { echo "deferred-dispatch arm failed" >&2; exit 1; }
-  else
-    gc sling "$POOL" "$IMPL_CHILD" --on mol-polecat-work || { echo "sling of implementation child failed" >&2; exit 1; }
+  OWNER=$(gc bd show "$SUBJECT" --json 2>/dev/null | tr -d '[:cntrl:]' | jq -r '.[0].assignee // empty' 2>/dev/null)
+  case "$OWNER" in
+    "$REFINERY") ;;
+    "") gc bd update "$SUBJECT" --if-assignee "" --assignee "$REFINERY" || { echo "could not assign $SUBJECT to $REFINERY; dispatching nothing" >&2; exit 1; } ;;
+    *) echo "$SUBJECT is assigned to $OWNER, so it is not this run's to hand to $REFINERY; dispatching nothing" >&2; exit 1 ;;
+  esac
+  "$SCRIPTS/deferred-dispatch.sh" notify "$SUBJECT" --agent "$REFINERY" --reason "design-convoy: the landing bead waits on its children and its summary task" || { echo "the notice the assignment of $SUBJECT owes did not record; dispatching nothing" >&2; exit 1; }
+  if [ -z "$DESIGN_ARMED" ]; then
+    SLING_ARGS=(--on mol-polecat-work)
+    [ "$DESIGN_GATED" = "true" ] && SLING_ARGS+=(--merge mr)
+    gc sling "$POOL" "$DESIGN_CHILD" "${SLING_ARGS[@]}" || { echo "sling of design child $DESIGN_CHILD failed" >&2; exit 1; }
+    gc bd update "$SUBJECT" --set-metadata "gc.design_armed=1" || { echo "design child $DESIGN_CHILD is slung but gc.design_armed did not record on $SUBJECT; record it by hand before a re-run, or the re-run slings it again" >&2; exit 1; }
   fi
-  gc bd update "$SUBJECT" --set-metadata "gc.impl_armed=1" || { echo "implementation child $IMPL_CHILD is dispatched but gc.impl_armed did not record on $SUBJECT; record it by hand before a re-run, or the re-run dispatches it again" >&2; exit 1; }
+  if [ -z "$IMPL_ARMED" ]; then
+    if [ "$DESIGN_GATED" = "true" ]; then
+      "$SCRIPTS/deferred-dispatch.sh" arm "$IMPL_CHILD" --target "$POOL" --sling-arg --on --sling-arg mol-polecat-work --reason "design-convoy: implementation armed behind design child $DESIGN_CHILD's approval" || { echo "deferred-dispatch arm of implementation child $IMPL_CHILD failed" >&2; exit 1; }
+    else
+      gc sling "$POOL" "$IMPL_CHILD" --on mol-polecat-work || { echo "sling of implementation child $IMPL_CHILD failed" >&2; exit 1; }
+    fi
+    gc bd update "$SUBJECT" --set-metadata "gc.impl_armed=1" || { echo "implementation child $IMPL_CHILD is dispatched but gc.impl_armed did not record on $SUBJECT; record it by hand before a re-run, or the re-run dispatches it again" >&2; exit 1; }
+  fi
+  "$SCRIPTS/deferred-dispatch.sh" arm "$SUMMARY_TASK" --target "$POOL" --sling-arg --on --sling-arg mol-polecat-report --reason "design-convoy: writes the pr_summary of $SUBJECT once the effort's beads have landed" || { echo "deferred-dispatch arm of summary task $SUMMARY_TASK failed" >&2; exit 1; }
+  gc bd update "$SUBJECT" --set-metadata "gc.summary_armed=1" || { echo "summary task $SUMMARY_TASK is armed but gc.summary_armed did not record on $SUBJECT; record it by hand before a re-run" >&2; exit 1; }
 fi
-# <<< arm-implementation-dispatch
+# <<< setup-dispatch
 ```
-
-**Close this step bead.** Non-terminal, so no drain:
-```bash
-SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
-done
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.arm-implementation --convoy {{convoy_id}} --outcome pass
-```
-
-**Exit criteria:** the implementation child is filed, linked to the convoy, and
-either held and armed behind the design (gated) or slung now (all-in-one), with
-each edge read back; this step is closed.
-"""
-metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
-
-[[steps]]
-id = "drain"
-title = "Close the step chain and drain"
-needs = ["arm-implementation"]
-description = """
-The convoy is standing and its children are dispatched or armed. This molecule's
-work is done. It writes no card and holds nothing: the durable owned convoy lives
-on and graduates, and the input convoy was only this pour's handle on the
-subject.
 
 This is the terminal step, so close its own step bead (the earlier steps closed
 themselves in order) and drain. The control-dispatcher's `workflow-finalize`
 closes the `kind=workflow` root once every step is closed; never close the root,
-the subject, or any child yourself.
+the subject, the summary task, or any child yourself.
 ```bash
 SC=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/step-close.sh" ] && { SC="$c/assets/scripts/step-close.sh"; break; }
 done
-"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.drain --convoy {{convoy_id}} --outcome pass
+"${SC:?step-close.sh not found in the pack}" --step mol-design-convoy.dispatch --convoy {{convoy_id}} --outcome pass
 gc runtime drain-ack
 ```
 
-**Exit criteria:** this step is closed and the session is drained.
+**Exit criteria:** every target and edge of the setup read back, the subject is
+assigned to the refinery with its notice recorded, the design child is slung,
+the implementation child is armed behind the design or slung, the summary task
+is armed on `mol-polecat-report`, this step is closed, and the session is
+drained.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }

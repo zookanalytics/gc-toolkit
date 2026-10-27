@@ -56,7 +56,7 @@ anchor), `check_name` (the lane whose batch this pass rules), and `reviewed_oid`
 `task_kind=finding` beads on that anchor for that lane.
 
 **What the pass writes**: a `finding.disposition` on each finding via
-`finding.sh set-disposition` (must-fix, deferred, declined, or needs-you —
+`finding.sh set-disposition` (must-fix, deferred, declined, needs-you or restates —
 decisions 1 and 2; a human-sourced finding is ruled on its merits like a machine one
 — the operator is a highly informed peer, not an authority the pass may not
 overrule — but declining a human objection owes them an answer, passed as
@@ -67,8 +67,10 @@ visit, holds the review changes-requested until the operator rules it, and posts
 the visit id to their thread; a comment whose question an open visit on the
 anchor's feedback already carries is `needs-you --visit` on that visit, never
 ruled on its merits, and `finding.sh` refuses any other ruling while that visit
-sits on the comment's own rework; a re-raise re-blocks because the closed
-finding re-adopts fresh on re-review),
+sits on the comment's own rework; a human review body that only frames the
+inline comments of its review round is `restates`, no point of its own; a human
+ruling also writes the label and sentence the round's living answer shows; a re-raise
+re-blocks because it is filed as a fresh finding, the closed one never re-adopted),
 and one convergence outcome via `review-outcome.sh` whose shape follows
 `check_name` (decision 3). A reviewer's lane batch backs its lane (`back-lane`)
 on convergence, or supersedes it (`supersede-lane`) when a fresh whole-diff
@@ -79,9 +81,9 @@ findings to hold the merge. A batch of either shape that has not converged also
 dismisses every approval on the PR from an account other than the city's
 (`approval-withdraw.sh`) and notes that on the anchor, because the change it
 calls for is not the code the approver saw. A converged batch leaves any
-approval standing. The pass never stamps a `check.<lane>` marker, never closes
-or routes the anchor, and never runs `gh pr review --approve` — the city does
-not approve PRs. Closing the validation-pass bead is the terminal step; the
+approval standing. The pass never writes a lane state onto the anchor, never
+closes or routes the anchor, and never runs `gh pr review --approve` — the city
+does not approve PRs. Closing the validation-pass bead is the terminal step; the
 dispositions and any convergence outcome above are what carry the lane state.
 H
 

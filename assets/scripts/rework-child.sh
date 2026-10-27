@@ -18,13 +18,19 @@
 #     with its identity (task_kind, anchor_bead and the source key) inside the
 #     create, so no run leaves a child its retry cannot find. A dedup query that
 #     does not answer files nothing, because an unreadable answer cannot be told
-#     from no child.
+#     from no child. The create also carries the PR-finishing shift (bd-lib.sh's
+#     pr_finishing_birth) and gives the child no parent: a rework is
+#     PR-finishing work, which follows its anchor (docs/steering.md). An adopted
+#     child keeps the shift it carries.
 #   - The child is joined to the anchor (bd-lib.sh's anchor graph) no later than
 #     anchor_bead lands on it. A created child's edge rides its create, and an
 #     adopted child is joined before the work order re-stamps anchor_bead. An
 #     adopted child that cannot be joined is neither stamped nor dispatched.
 #   - The work order and the child's blocks edge onto the anchor are written,
 #     then read back before dispatch. The edge is what holds the merge.
+#   - The child is settled at its priority (queue-priority.sh settle) before it
+#     is slung, because a pour copies the child's priority into its workflow
+#     once. A settle that does not land slings nothing.
 #   - The child is slung with mol-polecat-work, and the dispatch is proved by
 #     reading gc.execution_routed_to back. A pour that does not read back may
 #     still have started the workflow, so the writer never stamps a bare route,
@@ -145,8 +151,8 @@ if [ -n "$FIX_BEAD" ]; then
   [ -n "$(row_meta "$ADOPT_ROW" rejection_reason)" ] && REASON=""
   STATE=adopted
 else
-  IDENTITY=$(jq -nc --arg a "$ANCHOR" --arg k "$SRC_KEY" --arg v "$SRC_BEAD" \
-    '{task_kind: "rework", anchor_bead: $a} + {($k): $v}' 2>/dev/null)
+  IDENTITY=$(pr_finishing_birth "$(jq -nc --arg a "$ANCHOR" --arg k "$SRC_KEY" --arg v "$SRC_BEAD" \
+    '{task_kind: "rework", anchor_bead: $a} + {($k): $v}' 2>/dev/null)")
   [ -n "$IDENTITY" ] || fail "could not build the rework child's identity metadata; nothing filed"
   FIX_BEAD=$(bd_create_child "$ANCHOR" "$TITLE" -t task --metadata "$IDENTITY" --json 2>/dev/null \
     | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
@@ -217,6 +223,12 @@ if [ "$MISSING" = "ok" ] && [ -z "$EDGE_STANDS" ] && ! blocks_anchor; then
 fi
 [ "$MISSING" = "ok" ] \
   || fail "rework child $FIX_BEAD work order incomplete (${MISSING:-unreadable}); not dispatched, and a retry adopts it. Inspect it with: gc bd show $FIX_BEAD --json | jq '.[0].metadata'"
+
+# A pour copies the child's priority into its workflow once, so the child is
+# settled first: its anchor's priority plus its shift, or P0 once the anchor's PR
+# is approved. Its narrative goes to stderr, beside this script's own.
+"${GC_QUEUE_PRIORITY_TOOL:-$SCRIPT_DIR/queue-priority.sh}" settle "$FIX_BEAD" >&2 \
+  || fail "rework child $FIX_BEAD did not settle at its priority (queue-priority.sh says why above); not dispatched, and the child blocks the anchor for a retry to adopt"
 
 # mol-polecat-work gives the rework the control-dispatcher driver and continuation
 # affinity a bare gc.routed_to has no driver for. The pour retires gc.routed_to and

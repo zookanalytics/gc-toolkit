@@ -40,6 +40,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/placement.sh" || { echo "liveness-sweep-precheck: cannot source placement.sh from $HERE" >&2; exit 2; }
 # shellcheck source=liveness-classify.sh
 . "$HERE/liveness-classify.sh" || { echo "liveness-sweep-precheck: cannot source liveness-classify.sh from $HERE" >&2; exit 2; }
+# shellcheck source=bd-lib.sh
+. "$HERE/bd-lib.sh" || { echo "liveness-sweep-precheck: cannot source bd-lib.sh from $HERE" >&2; exit 2; }
 
 INTERVAL="${LIVENESS_SWEEP_INTERVAL:-21600}"     # the 6h cadence lives HERE only
 CALL_TIMEOUT="${LIVENESS_SWEEP_CALL_TIMEOUT:-45}"
@@ -63,29 +65,12 @@ TMP=""
 
 # The state dir MUST be per rig: GC_PACK_STATE_DIR is city+pack scoped while
 # this order runs per rig, so an unkeyed stamp would let the first rig
-# silence every other rig's sweep for the window. Same keying as
-# liveness-sweep.sh, which keeps its delta baseline beside this stamp.
-state_key() {
-    local readable="$1" identity="$2" safe
-    safe="$(printf '%s' "$readable" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"
-    case "$safe" in ''|.|..) safe=rig ;; esac
-    if [ "$safe" = "$readable" ] && [ "$readable" = "$identity" ] && [ "${#safe}" -le 64 ]; then
-        printf '%s' "$safe"
-    else
-        printf '%s-%s' "${safe:0:64}" "$(printf '%s' "$identity" | cksum | cut -d' ' -f1)"
-    fi
-}
-if [ -n "${GC_RIG:-}" ]; then
-    RIG_KEY="$(state_key "$GC_RIG" "$GC_RIG")"
-elif [ -n "${GC_RIG_ROOT:-}" ]; then
-    ROOT_TAIL="${GC_RIG_ROOT%/}"
-    RIG_KEY="$(state_key "${ROOT_TAIL##*/}" "$GC_RIG_ROOT")"
-else
-    RIG_KEY=_unscoped
-fi
+# silence every other rig's sweep for the window. It is keyed by bd-lib.sh's
+# rig_state_key, as liveness-sweep.sh's is, which keeps its delta baseline
+# beside this stamp.
 DEFAULT_STATE_DIR="${GC_PACK_STATE_DIR:-${TMPDIR:-/tmp}/gc}"
 STATE_BASE="${LIVENESS_SWEEP_STATE_DIR:-$DEFAULT_STATE_DIR/liveness-sweep}"
-STATE_DIR="$STATE_BASE/$RIG_KEY"
+STATE_DIR="$STATE_BASE/$(rig_state_key)"
 STAMP="$STATE_DIR/last-pass"
 BASELINE_FILE="$STATE_DIR/reported"    # written only by liveness-sweep.sh
 LOG="$STATE_DIR/pass.log"
@@ -285,13 +270,13 @@ SURVIVORS=""; N_SURVIVORS=""; NEW_IDS=""; N_NEW=""
 JQ_OK=0
 if [ "$READS_OK" -eq 1 ] && [ -n "$SUBJECT" ]; then
     # The local survivor set: the beads the classifier leaves unnamed when every
-    # read beyond the bead set is empty. have_resolver "1" with an empty gate map
-    # gates no pre-open anchor; "0" would gate one on its own check_set.
+    # read beyond the bead set is empty. An empty pre-open map gates no pre-open
+    # anchor.
     SURVIVORS=$(jq -n --slurpfile ready "$READY" --slurpfile live "$LIVE" --slurpfile alive "$ALIVE" \
       --argjson livesessions "${LIVE_SESSIONS_JSON:-[]}" --argjson livenessknown "${LIVENESS_KNOWN:-false}" \
       --argjson unreadable_liveness_covers false \
       --argjson openprs '[]' --argjson worked '[]' --argjson husks '[]' \
-      --argjson preopen_gates '{}' --arg have_resolver 1 \
+      --argjson preopen_green '{}' \
       "$VISIT_IDENTITY_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ$LIVENESS_CLASSIFY_JQ"'
       [ liveness_classify[] | select(.class == "unnamed") | .id ]' 2>/dev/null)
     if printf '%s' "$SURVIVORS" | jq -e 'type == "array"' >/dev/null 2>&1; then

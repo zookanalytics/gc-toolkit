@@ -24,7 +24,7 @@ and how a human is asked.
 speak for our own repository — a send to the rig's origin is ordinary work,
 and PRs on it go through [`pr-open.sh`](../assets/scripts/pr-open.sh). Who may
 act on what is [authority-map.md](authority-map.md); how a visit reaches a
-person is [gascity-human-engagement.md](gascity-human-engagement.md).
+person is [human-engagement.md](human-engagement.md).
 
 ## The boundary is the rig's own origin
 

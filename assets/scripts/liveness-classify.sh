@@ -30,15 +30,19 @@
 #                             when the session list was unreadable. The sweep
 #                             passes true, since an unprovable death is not a
 #                             death; the precheck passes false and fails closed.
-#   $openprs $worked $husks $preopen_gates $have_resolver
+#   $openprs $worked $husks $preopen_green
 #                             the reads beyond the bead set: open PR urls,
-#                             convoy-worked bead ids, husk step ids, and the
-#                             pre-open gate map with whether its resolver
-#                             answered. Each arm that reads one drops only
-#                             the beads its input names, so an empty input
-#                             drops nothing. That is what lets the precheck
-#                             pass them empty and keep a survivor set that
-#                             contains the sweep's candidates.
+#                             the ids of the beads live runs work, husk step
+#                             ids, and the pre_open_gate anchors whose every
+#                             pre-open gate derives green, as an {anchor-id:
+#                             true} map the sweep builds through
+#                             lane-state.sh, in which an anchor whose head the
+#                             sweep could not read is "unread" instead. Each
+#                             arm that reads one drops only the beads its
+#                             input names, so an empty input drops nothing.
+#                             That is what lets the precheck pass them empty
+#                             and keep a survivor set that contains the
+#                             sweep's candidates.
 #
 # Every drop is a NAMED class. Structural edges fold in from $alive: a parent
 # is gated iff a not-closed child names it (the child holds the edge), and an
@@ -74,13 +78,18 @@ LIVENESS_CLASSIFY_JQ='
     [ ((. // "") | tostring | ascii_downcase)
       | capture("://(?<h>[^/]+)/(?<o>[^/]+/[^/]+)/pull/(?<n>[0-9]+)") ]
     | .[0] | if . == null then "" else (.h + "/" + .o + "/pull/" + .n) end;
-  # A workflow root, a scope latch and a step-spec sidecar carry a route and no
-  # executable body. The route names the run, it is not an offer. Both readers
-  # that serve or count pool work refuse them on gc.kind: the hook at
-  # hookCandidateClaimable, the controller demand loop at demandRowServable.
-  # No worker can ever take one. Mirrors beadmeta.WorkflowTopologyKinds, which
-  # no command reads out; a kind added there and not here falls through to the
-  # route arm.
+  # A workflow root that has expanded into steps, a scope latch and a step-spec
+  # sidecar are the structure of a run, not its work, so a route on such a root
+  # names the run and is not an offer. Gas City checks for them in
+  # workflowTopologyIsNonExecutable (cmd/gc/cmd_hook_claim.go), which the route
+  # match in the hook (hookClaimMatchesRoute) and the demand count in the
+  # controller (controllerDemandRouteCandidates, cmd/gc/build_desired_state.go)
+  # both apply. It tells an expanded root by gc.workflow_expanded="true", which
+  # the pour stamps on every root it expands into steps. This predicate reads
+  # gc.kind alone, so it also takes in a workflow root without the stamp, which
+  # Gas City offers and counts as work: the root of a root-only run is the work
+  # itself. The list mirrors beadmeta.WorkflowTopologyKinds, which no command
+  # reads out; a kind added there and not here falls through to the route arm.
   def topology_kind:
     (.metadata["gc.kind"] // "") as $k
     | ["workflow", "scope", "spec"] | index($k) != null;
@@ -98,22 +107,15 @@ LIVENESS_CLASSIFY_JQ='
   def order_wisp:
     ((.id // "") | contains("-wisp-"))
     and ((.title // "") | startswith("order:"));
-  # The pre-open gates of an anchor come from $preopen_gates when the resolver
-  # answered ($have_resolver "1"). Without it they fall back to the check_set
-  # minus the none/off/approval sentinels. Either way a gate keeps the case of
-  # its check_set token, deduped case-insensitively: gate-ensure dispatches that
-  # token as the check_name and signoff stamps `check.<token>`, so the census
-  # reads the marker under the same key every other reader does.
+  # A pre_open_gate anchor whose every pre-open gate derives green waits only
+  # on pr-open.sh. The sweep derives it; an anchor it could not prove green is
+  # absent from the map.
   def pre_open_all_green:
-    (.metadata // {}) as $m
-    | (if $have_resolver == "1" then ($preopen_gates[(.id // "")] // [])
-       else (($m.check_set // "")
-             | split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(length > 0))
-             | map(select((ascii_downcase) as $g | $g != "none" and $g != "off" and $g != "approval"))
-             | reduce .[] as $t ([]; if any(.[]; ascii_downcase == ($t | ascii_downcase)) then . else . + [$t] end))
-       end) as $gates
-    | ($gates | length) > 0
-      and all($gates[]; ($m["check." + .] // "") == "green");
+    ($preopen_green[(.id // "")] // false) == true;
+  # A pre_open_gate anchor whose head the sweep could not read this pass, so
+  # whether it waits only on pr-open.sh is unknown, and the sweep holds it.
+  def pre_open_unread:
+    ($preopen_green[(.id // "")] // false) == "unread";
   # A visit holder is live, or it has none. A claim writes one of assignee /
   # gc.session_id / gc.session_name; $livesessions holds every name a listed
   # (live) session carries. No holder is an UNCLAIMED visit, a pending
@@ -160,6 +162,7 @@ LIVENESS_CLASSIFY_JQ='
                  and (((.metadata.pr_url // "") | pr_key) as $k | $k != "" and ($openkeys | index($k)) != null))
                 then "gated"
            elif (((.metadata.merge_result // "") == "pre_open_gate") and pre_open_all_green) then "gated"
+           elif (((.metadata.merge_result // "") == "pre_open_gate") and pre_open_unread) then "unread"
            elif (($gatedparents | index($b.id)) != null) then "gated"
            elif ([ .dependencies[]? | select((.type // "") == "tracks")
                    | select(($aliveset[(.depends_on_id // "")] // false)) ] | length > 0) then "gated"

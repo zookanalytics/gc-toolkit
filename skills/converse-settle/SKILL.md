@@ -5,18 +5,25 @@ description: Converse's record, sign-off, and visit close (safety-critical).
 
 # Steps 6–7 — Record, sign off, and close the visit
 
-`$CONV`, `$VISIT`, and `$SUBJECT` are resolved in step 1's claim block;
-`$PARENT` is the subject's own parent, read with `converse-parent.sh` as the
-prompt's opening Definitions describe. Run these once the operator has
-replied to the held sitting (step 5).
+`$CONV`, `$VISIT`, and `$SUBJECT` are resolved in step 1's claim block. Run
+these once the operator has replied to the held sitting (step 5).
 
 ## 6. Record
 
-Append the sitting's outcome to the subject:
-`gc bd update $SUBJECT --append-notes "<decision, rationale, what
-changed>"`. If the notes have grown past a quick read, refresh a
-`## Current state` block at the top: current position, decisions in
-force, open questions.
+Append the sitting's outcome to the subject's notes: the decision, its
+rationale, and what changed (the `records` skill). Notes are append-only, so
+never pass `--notes`, which replaces them:
+```bash
+gc bd update "$SUBJECT" --append-notes "<the decision>. <why>. <what changed>."
+```
+When the notes have grown past a quick read, append a current-state block too.
+The newest one is the one in force, and step 4 primes from it:
+```bash
+gc bd update "$SUBJECT" --append-notes "## Current state ($(date -u +%Y-%m-%d))
+<where things stand>
+Decisions in force: <each decision in force>
+Open questions: <each open question, or none>"
+```
 
 ## 7. Sign off, then close the visit — only when nothing important is still pending
 
@@ -26,6 +33,7 @@ is important information you want to communicate to the operator — a live
 decision, a routing answer, anything they need to read or may want to respond
 to, anything past "settled and done" — do not sign off this turn.** Post the
 hand-back in the shape the prompt's Definitions define (**The hand-back**),
+recorded on the visit first by the block below the sign-off's shape,
 leave the visit OPEN, and wait for operator input the way a held sitting does;
 signing off now would close the visit under a message they have not read. The
 sitting ends on a later turn: the operator's `gc-helm dismiss`, further
@@ -40,10 +48,11 @@ all. `converse-signoff.sh` writes the durable trace and discharges whichever
 demands the hold filed — the conversation wait on the visit, and any explicit
 merge hold on the anchor; you tell it what this sitting settled. It resolves
 each demand gate when the sitting settled the question (`--ruled yes`, with the
-`--ruling` it resolves with and the `--route` the subject is released to)
+`--ruling` it resolves with and the `--route` the subject itself is released
+to, chosen as below)
 and re-states each when it did not (`--ruled no`, with what is
 `--still-owed`). What is waiting on the subject is yours to state: one
-`--waiting-on <bead>` per bead this sitting ROUTED work into, `--no-wait`
+`--waiting-on <bead>` per dependency this sitting ROUTED work into, `--no-wait`
 when it settled the subject and nothing is waiting, and NEITHER where the
 subject is parked for a person. It exits non-zero when it stopped short of
 discharging the hold, and then you must NOT sign off:
@@ -74,14 +83,23 @@ starts shut, so `--ruled no` re-states the wait rather than dropping it;
 person must perform is assigned, and the discharge leaves it alone —
 that one is theirs to close.
 
+**On `--ruled yes`, the `--route` follows which bead carries the work** (the
+`work` skill says why):
+- **The subject is the work.** Sign off with `--ruled yes --route human --no-wait`,
+  then send the subject: `gc sling <rig>/<pool> "$SUBJECT" --on <formula>`.
+- **New work carries it.** File and send that work (below), then sign off
+  with `--ruled yes --route human --waiting-on <the work>`.
+- **New work decomposes an epic subject.** File it as the subject's member and
+  send it (below), then sign off with `--ruled yes --route human --no-wait`,
+  or with `--waiting-on` naming only the dependencies the sitting also sent.
+  A member takes no `--waiting-on`, because bd refuses that edge.
+
 **On a `--ruled yes` sign-off whose subject is an open PR
 (`merge_result=pull_request`), answer whether the ruling changes what the
-branch must contain.** Pass `--rework` when it does: the PR still reads
-review-ready against a head that predates the ruling. It files the rework
-demand a review verdict would file, a fix unit that blocks the subject
-anchor and resumes its branch, sourced by this visit, and returns every
-review lane to unreviewed, so the whole branch is re-reviewed once the
-rework lands. Pass `--no-rework` when the branch stands as it is. Given neither on an open-PR subject, the
+branch must contain.** Pass `--rework` when it does, since the PR still reads
+review-ready against a head that predates the ruling (the `prs` skill,
+sending it back for rework). Pass `--no-rework` when the branch stands as it
+is. Given neither on an open-PR subject, the
 sign-off refuses and writes nothing, because a ruling whose rework is
 never filed lands only in notes nothing reads while the stale PR keeps
 reading ready. The rework files before the sign-off writes
@@ -90,8 +108,8 @@ and the script exits non-zero. No trace is written and every demand this
 sitting filed still stands, so a merge hold you took still holds the PR.
 Re-run once the cause is repaired, and the re-run adopts a child an
 earlier attempt filed. `--rework` applies only to an open-PR subject. On
-any other subject, file the ruling's consequence as work the way the
-routing rule below says, and re-run without `--rework`.
+any other subject, file and send the ruling's consequence as work (below),
+and re-run without `--rework`.
 
 Then post the **sign-off** — the sitting's last word, a hand-back in
 the shape the prompt's Definitions define (**The hand-back**),
@@ -105,9 +123,15 @@ with its recommendation.>
 ```
 A converse is about its one subject; name another bead only where the
 conversation's substance genuinely leads there, and then as a plain
-sentence.
-Only then close the visit through the shared guarded close — the sitting's
-last action, with nothing said after it. `visit-close.sh` stamps the outcome
+sentence. Record it on the visit just before you post it (the prompt's
+**Record each hand-back on the visit, then post it**):
+```bash
+"$CONV/gc-helm.sh" handback "$VISIT" <<'HANDBACK'
+<the sign-off as you post it>
+HANDBACK
+```
+Only then close the visit through the shared guarded close, with nothing
+said after it. `visit-close.sh` stamps the outcome
 word and its one-line reason, reads both back, and only then closes; the
 stamp before the close is on purpose. An open visit carrying `gc.outcome` is
 a sitting whose sign-off already posted and whose only missing write is the
@@ -125,24 +149,57 @@ what it settled.
 # refuses while the visit is not closed, so the reminder never leads the close.
 "$CONV/pr-visit-comment.sh" close --visit "$VISIT" --subject "$SUBJECT" || true
 ```
-**If this sitting ROUTED work, file that work as a SIBLING of the
-subject** (`--parent "$PARENT"`, read as at the top of the prompt)
-**and pass `--waiting-on <work-bead>` to the sign-off for each bead it
-slung.** The takeaway alone cannot carry it: *waiting and holding are
-graph states, not comments.* An edge that will not take warns on stderr
-and the takeaway still lands.
+**If this sitting ROUTED work, file and send it, then pass
+`--waiting-on <work-bead>` to the sign-off for each dependency it sent.** The
+`work` skill says which bead carries the work and how to choose its formula.
+The sling runs only once the create returned the bead's id:
+```bash
+WORK=$(gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json | jq -er '.id') \
+  && gc sling <rig>/<pool> "$WORK" --on <formula>
+```
+File it beside the subject, not under it: work the subject waits on is a
+dependency, and that is the default. Add `--parent <epic>` to the create only
+when the work belongs to that epic. The subject's own parent,
+`"$CONV/converse-parent.sh" "$SUBJECT"`, applies only when the new work serves
+the same epic. Work that genuinely decomposes an epic subject is the one
+exception. It is the subject's member, created with `--parent "$SUBJECT"`, and
+it gets no `--waiting-on`, because bd refuses a `blocks` edge from a parent to
+its own descendant. Run the create as `gc bd --rig <rig> create` when the
+pool's rig is not this session's. The takeaway alone cannot carry the wait:
+*waiting and holding are graph states, not comments.* An edge that will not
+take warns on stderr and the takeaway still lands.
 
-**A follow-up you file that is itself BLOCKED — it cannot run until
-another bead lands — is ARMED, not left unrouted.** Slinging it now is
-wrong (it is blocked), and leaving it unrouted to route once the blocker
-closes is the come-back-later that keeps you or a person on the hook.
-Wire its blocker as a `blocks` edge, then arm it so the blocker closing
-routes it for you:
-`deferred-dispatch.sh arm <follow-up> --target <rig>/<agent> --reason
-"waits for <blocker>"` (resolve the script the way the blocks in step 1
-resolve `gc-helm.sh`). Then the sitting can queue everything and close.
-A blocked work bead left with no route and no arm is the debt
-`doctor/check-blocked-work-armed` flags.
+**A follow-up that cannot run until another bead lands is ARMED, not left
+unrouted** (the `waits` skill). Slinging it now is wrong, because it is
+blocked, and leaving it to route once the blocker closes is the
+come-back-later that keeps you or a person on the hook. Make it wait on the
+blocker, then arm it, so it routes itself when the blocker closes and the
+sitting can queue everything and close. An arm with nothing holding the
+follow-up sends it on the next pass, so the arm runs only once the follow-up's
+own store reads the edge back. A `dep add` onto a bead in another rig's store
+prints success and exits 0, but holds nothing. Each call names the
+follow-up's rig, the one its pool reads: unpinned, a command that also names a
+city bead is answered from the city's store.
+```bash
+gc bd --rig <rig> dep add <follow-up> <blocker> --type=blocks \
+  && gc bd --rig <rig> dep list <follow-up> --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg b <blocker> 'any(.[]; .id == $b)' >/dev/null \
+  && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>"
+```
+When the edge does not read back and `dep list` warns that its target has no
+row in this database, the blocker is in another rig's store, where no edge can
+hold the follow-up. Make it wait on a demand in its own store that names the
+blocker, and arm it on that demand. The demand reaches the operator, who
+resolves it once the blocker lands, and the arm then sends the follow-up.
+Remove the edge first, because the arm reads it as a blocker that holds
+nothing and warns that the next pass sends the follow-up. The demand's
+headline, filled in, is at most 140 characters, and the demand verb refuses a
+longer one:
+```bash
+gc bd --rig <rig> dep remove <follow-up> <blocker> \
+  && "$CONV/gc-helm.sh" demand <follow-up> "Resolve once <what the blocker delivers> lands, so <what the follow-up does> can start" \
+    --body "<follow-up> waits for <blocker> in <its rig>. Resolve this once <blocker> closes." \
+  && "$CONV/deferred-dispatch.sh" arm <follow-up> --target <rig>/<pool> --reason "waits for <blocker>, through its demand"
+```
 
 **A recorded wait is also the return trip.** Once every recorded wait
 closes, the subject returns through the liveness sweep
@@ -156,5 +213,9 @@ owed to a sitting that was **held**; one closed before any framing was
 posted (step 2's `moot`/`benign`, step 1's `folded`) asked the
 operator nothing, so closing those silently is the contract.
 
-Then continue within the group or drain (step 8, the `converse-continue`
-skill).
+Then drain: a closed visit ends this session (the prompt's **How this
+thread ends**). Run `gc runtime drain-ack` once the close has landed and
+anything the ruling still owes after it has run, and run nothing after it.
+A close that did not land leaves the visit open and the sitting not over:
+repair what `visit-close.sh` printed, or raise it in the thread, and do not
+drain.

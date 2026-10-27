@@ -70,14 +70,17 @@ export interface Tile {
   held: boolean;
   /**
    * Refines `held` into the visit's engagement: `'engaged'` when a live sitting
-   * is in the conversation right now, `'parked'` when the visit stands open and
-   * un-engaged — filed and waiting for a person to pick it up. `''` on a row no
-   * open visit holds (`held` is false).
+   * is in the conversation right now, `'start-failed'` when the sitting last
+   * spawned for the visit failed to start (`visit_start_failure` says why),
+   * `'parked'` when the visit stands open and un-engaged — filed and waiting for
+   * a person to pick it up. `''` on a row no open visit holds (`held` is
+   * false), except a visit's own row whose sitting failed to start, which reads
+   * `'start-failed'`.
    *
-   * Derived on the Go side from the same rule `acceptable` reads — a parked
-   * visit is the one Accept is offered on, an engaged one suppresses it — so the
-   * web reads this field rather than re-deriving it (the rule reads the visit's
-   * assignee, which the wire does not carry). Always present.
+   * Derived on the Go side from the same rule `acceptable` reads — an engaged
+   * visit suppresses Accept — so the web reads this field rather than
+   * re-deriving it (the rule reads the visit's assignee, which the wire does not
+   * carry). Always present.
    */
   visit_state: string;
   n_closed: number;
@@ -171,14 +174,14 @@ export interface Tile {
   pr_url: string;
   /**
    * The branch the anchor's work sits on — the row's identity for the whole
-   * span before a number exists, which is where most wedged anchors are. A
-   * field of its own rather than a read out of `frontier`, which is prose and
-   * is not rendered on every table. `''` when the anchor records no branch.
+   * span before a number exists. A field of its own rather than a read out of
+   * `frontier`, which is prose and is not rendered on every table. `''` when
+   * the anchor records no branch.
    */
   pr_branch: string;
   /**
    * What the merge cadence can do next: `'progressing'`, `'settled'`,
-   * `'wedged-exception'`, `'blocked'`, or `'unknown'`.
+   * `'blocked'`, or `'unknown'`.
    *
    * `'blocked'` is a hold no automated actor will clear and no review verdict is
    * owed on — an unresolved required review thread, a base gone BEHIND, or an
@@ -221,7 +224,7 @@ export interface Tile {
    * when the only candidate cause reads `'unknown'`: an unreadable input
    * belongs in the coverage sentence, not in a clock reporting the wait as new.
    *
-   * Not `updated_at`, which a wedged anchor's every reconcile pass touches.
+   * Not `updated_at`, which every reconcile pass touches on an owed anchor.
    */
   pr_owed_since?: string;
 
@@ -319,6 +322,14 @@ export interface Tile {
    * none; non-null exactly on an `acceptable` row.
    */
   recommendation: string | null;
+  /**
+   * Why the sitting last spawned for this row's visit failed to start —
+   * `'startup timeout'`, `'setup timeout'`, `'provider error: <code>'`,
+   * `'never started'`, `'start error: <the recorded error>'`, or
+   * `'reason unread'`. Non-empty exactly when `visit_state`
+   * is `'start-failed'`, `''` on every other row. Always present.
+   */
+  visit_start_failure: string;
 }
 
 /**

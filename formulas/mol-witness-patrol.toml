@@ -206,20 +206,17 @@ gc bd list --status=in_progress,open --json --limit=0 | tr -d '[:cntrl:]' | {
 # liveness loop. Reads the bead-list array on stdin, writes the surviving array
 # on stdout.
 #
-# A bead names its owner in up to three places and only one of them is an
-# assignee. A workflow STEP bead has no assignee at all: gc bd list --json omits
-# the key when it is empty, and the step names its owner in
-# metadata.gc.session_id, which is what gc.session_affinity=require pins it to.
-# A workflow ROOT bead names only metadata.gc.session_name.
+# A bead names its holder in its assignee, gc.session_id or gc.session_name,
+# and which of them it carries depends on how far it has got. A workflow ROOT,
+# for one, carries only gc.session_name (docs/gascity/agent-types.md, "Which
+# fields name a bead's holder").
 #
-# Precedence runs session id, then assignee, then session name. Only the id
-# names a session that will never come back. It is re-stamped on every claim, so
-# it always names the session actually holding the bead. The other two are labels
-# a successor inherits: pool work is assigned to the slot, and the slot stays
-# live under whoever holds it next. A crashed pool session leaves a bead whose
-# assignee and session name both name that still-live slot, so resolving it on
-# either label reports the successor's life as the dead owner's, and the bead
-# stays in_progress under an owner that never returns.
+# Precedence runs session id, then assignee, then session name, because only
+# the id always names one session. The other two can be an identity a later
+# session carries too, such as a named session's alias or a tmux_alias pool's
+# runtime name. Resolving a dead session's bead on that identity reads the
+# later session's life as the dead owner's, and the bead stays in_progress
+# under an owner that never returns.
 jq -c '[ .[]
   | . as $bead
   | (.metadata // {}) as $m
@@ -236,33 +233,38 @@ jq -c '[ .[]
 # escalates a moot visit each cycle; dropping it here is what stops both the
 # re-dispatch and the escalation. Two states name not-the-pool's work: an
 # in-flight PR (merge_result pre_open_gate/pull_request) or a human gate
-# (gc.routed_to=human). pr.machine is not read: a progressing stamp is written
-# only with an anchor merge_result, which unanchoring clears while leaving the
-# stamp, so on a repooled bead it is stale — the in-flight-PR test already covers
-# a bead still in the machine. A bead carrying neither state is still the pool's
-# to recover. Reads the candidate array on stdin (the host-bead-skip result),
-# writes the survivors on stdout, and touches no field a survivor arrived with.
+# (gc.routed_to=human). A visit (task_kind=visit) is routed to human as well, but
+# its holder is the sitting engaged on it, and a visit whose sitting is gone
+# stays engaged on the board until recovery releases it, so a visit passes.
+# pr.machine is not read: a progressing stamp is written only with an anchor
+# merge_result, which unanchoring clears while leaving the stamp, so on a
+# repooled bead it is stale — the in-flight-PR test already covers a bead still
+# in the machine. A bead carrying neither state is still the pool's to recover.
+# Reads the candidate array on stdin (the host-bead-skip result), writes the
+# survivors on stdout, and touches no field a survivor arrived with.
 jq -c '[ .[]
   | (.metadata // {}) as $m
   | ($m.merge_result // "") as $mr
   | ($m["gc.routed_to"] // "") as $routed
+  | ($m.task_kind // "") as $kind
   | select($mr != "pre_open_gate" and $mr != "pull_request"
-           and $routed != "human") ]'
+           and ($routed != "human" or $kind == "visit")) ]'
 # <<< downstream-court-skip
 } | {
 # >>> topology-root-skip
-# Drop graph.v2 topology ROOTS before the liveness loop. A root names its owner
-# only in gc.session_name — the pool SLOT, which a successor session keeps alive
-# — so resolving its liveness reads the successor's life as the dead run's and
-# warrants a live session; and a root has no worktree, so the salvage path only
-# churns a witness-salvage-refused notice. A root is not recoverable work: its
-# steps carry the work and the gc.session_id, and its close is the
-# control-dispatcher's workflow-finalize. The kind set is
-# beadmeta.WorkflowTopologyKinds (workflow, scope, spec) — the same set the hook
-# (hookCandidateClaimable) and pool demand (demandRowServable) refuse, mirrored
-# by liveness-sweep.sh's topology_kind. Reads the candidate array on stdin (the
-# downstream-court-skip result), writes the survivors on stdout, and touches no
-# field a survivor arrived with.
+# Drop graph.v2 topology ROOTS before the liveness loop. A root is not
+# recoverable work: its steps carry the work, its close is the
+# control-dispatcher's workflow-finalize, and orphan-dispose.sh refuses it as
+# root_not_schedulable. Left in, it misleads the loop. A root names a session
+# only in gc.session_name, a stamp the controller copies from its worked steps,
+# so that session's liveness says nothing about the run. Resolved live, the root
+# can draw a warrant against a session doing other work, and resolved dead, it
+# churns a witness-salvage-refused notice on a bead with no worktree. The kind
+# set is beadmeta.WorkflowTopologyKinds (workflow, scope, spec), matched on
+# gc.kind alone, the same match topology_kind in liveness-classify.sh makes. The
+# comment there names Gas City's own check and where the two differ. Reads the
+# candidate array on stdin (the downstream-court-skip result), writes the
+# survivors on stdout, and touches no field a survivor arrived with.
 jq -c '[ .[]
   | (.metadata // {}) as $m
   | ($m["gc.kind"] // "") as $kind
@@ -272,16 +274,19 @@ jq -c '[ .[]
 # A file that is not a JSON array is a failed listing, not a rig with no
 # candidates.
 if jq -e 'type == "array"' "$CANDIDATES" >/dev/null 2>&1; then
-  jq -r '.[] | .id + " " + .owner' "$CANDIDATES"
+  jq -r '.[] | .id + " " + .owner + " " + .owner + ":" + (.status // "") + ":" + (.assignee // "")' "$CANDIDATES"
 else
   echo "witness: the candidate listing did not parse; no orphan recovery this cycle" >&2
 fi
 rm -f "$CANDIDATES"
 # <<< candidate-pipeline
 ```
-The block prints one row per candidate, `<bead> <owner>`. The bead id is the
-`<bead>` the parts below act on, and the owner is the loop's `OWNER`. No rows
-means no candidates. A `did not parse` line means the listing itself failed,
+The block prints one row per candidate, `<bead> <owner> <claim>`. The bead id
+is the `<bead>` the parts below act on, and the owner is the loop's `OWNER`.
+`<claim>` is the loop's `CLAIM`: the owner, status and assignee the listing
+read, joined by colons, with nothing after the last colon for a bead that has
+no assignee. Part 5 hands `CLAIM` to the disposal as the claim this cycle
+judged. No rows means no candidates. A `did not parse` line means the listing itself failed,
 which is not a rig with nothing to recover: no candidate set exists this cycle,
 and orphan recovery stays blind until the listing reads again. Skip the rest of
 this step and file it
@@ -292,10 +297,9 @@ the same way lands on that finding as another occurrence.
 
 A bead naming no owner in any of the three places is already in the pool's
 court, and it is the only thing host-bead-skip drops. Every OTHER owned bead
-reaches the liveness loop regardless of kind — a visit whose session died
-SHOULD return to the pool (cold continuity is respawn-and-reconstitute) — save
-one class topology-root-skip drops by kind: the graph.v2 topology root, which
-is not recoverable work.
+reaches the liveness loop whatever its kind, a visit included, save one class
+topology-root-skip drops by kind: the graph.v2 topology root, which is not
+recoverable work.
 
 A bead whose work has ALREADY REACHED a downstream court is dropped next, by
 state not by kind. Orphan recovery returns LOST work to the pool, but a bead in
@@ -312,7 +316,18 @@ it never enters the liveness loop and is never marked.
 Two states name work that is not the pool's to recover:
 - an in-flight PR — `merge_result` is `pre_open_gate` or `pull_request`;
 - a human gate — `gc.routed_to=human`, the city's "no agent will take it" marker
-  (a signoff cap, a merge gate, an operator approval).
+  (a merge gate, an operator approval).
+
+A visit (`task_kind=visit`) is routed to `human` as well, and it is not dropped.
+A parked visit names no owner, so host-bead-skip has already dropped it. An
+engaged one is held by its sitting, and a sitting can end without closing its
+visit: its create fails after engage bound the visit, or its session is closed
+while the visit is still open. Gas City releases neither claim, because every
+release it runs keeps a claim whose route names no configured agent. So a visit
+whose sitting is gone stays engaged on the board until the liveness loop finds
+that sitting dead and part 5 releases it. Released, it parks on the board
+again, and the sitting a person engages next reconstitutes the conversation
+from the record.
 
 `pr.machine` is deliberately not read here. A `progressing` stamp is written only
 alongside an anchor `merge_result` (`merge.sh` and `gate-ensure.sh` gate the write
@@ -322,18 +337,10 @@ stale stamp, and a bead still in the machine carries the `merge_result` the firs
 bullet already drops.
 
 One owned class is dropped by kind rather than state: the graph.v2 topology
-root. A root carries `gc.kind` in the topology set — `workflow`, `scope`,
-`spec` — and only a `gc.session_name` slot label, never a `gc.session_id`. It
-is the anchor its STEP beads hang from, not a claimable unit of work; the steps
-carry the work and the `gc.session_id` that names the session actually holding
-them. The root's own close is the control-dispatcher's `workflow-finalize`, and
-`orphan-dispose.sh` already refuses a root as `root_not_schedulable`, so the
-loop has no recovery to offer it. Left in, a root does harm either way it
-resolves: live via the inherited slot label it is warranted against the
-successor that now holds the slot, absent it churns a `witness-salvage-refused`
-notice on a bead that never had a worktree. Topology-root-skip drops it before
-the loop, by the same kind set `hookCandidateClaimable` and the pool-demand
-`demandRowServable` refuse (`liveness-sweep.sh`'s `topology_kind` mirrors it).
+root, whose `gc.kind` is `workflow`, `scope` or `spec`. It is the anchor its
+STEP beads hang from, not a claimable unit of work. Topology-root-skip drops it
+before the loop, and the filter's comment says what a root left in would do
+there.
 
 Two more exclusions are structural, not kind-based:
 - **Infrastructure identities** (refinery, witness, deacon, mechanik,
@@ -465,10 +472,13 @@ Classify by the dead states: `archived`, `closed`, `failed-create`, and
 work, but only after BOTH the exact lookup and the normalizing retry.
 Never classify on the exact lookup alone: a rig-qualified assignee whose
 session registered the bare alias resolves `absent` there while its owner
-is active. A `failed-create` session is a create that rolled back. gascity
-does not close its row while work is still assigned to it, so recovering
-that work is what lets the row close. Every other state is owned, and its
-bead is not orphaned. `active` and `awake` are live, and a live owner whose
+is active. A `failed-create` session is a create that rolled back. The
+rollback closes its row in the same write and frees none of the work
+assigned to it, so its owner then reads `absent`. A row whose close did not
+land stays open in `failed-create`. Both are dead states, so the work
+assigned to either is recovered here, whatever becomes of the row.
+Every other state is owned, and its bead is not orphaned. `active` and
+`awake` are live, and a live owner whose
 bead shows no progress is the warrant path below, not a punt. The rest,
 among them `start-pending`, `creating`, `asleep`, `suspended`, `draining`,
 and `quarantined`, mean the controller or the operator still owns the
@@ -480,8 +490,11 @@ no session carries the owner.
 **2b. Live but wedged -> ONE warrant.** An `active`/`awake` owner whose
 work bead is stale (no `updated_at` movement and no wisp progress for
 longer than the work plausibly needs — judgment over the same signals as
-always, no new thresholds) is wedged, not orphaned. First ask the recovery
-order, never the pane (pane text is agent-controlled output):
+always, no new thresholds) is wedged, not orphaned. A visit that sits
+unchanged is not wedged: its live owner is a converse sitting holding at its
+prompt for the operator, and the witness prompt's converse rule says when
+such a sitting earns a warrant. First ask the recovery order, never the pane
+(pane text is agent-controlled output):
 `quota-park-nudge.sh --status <session>` — `quota_park=yes` is a healthy
 park: defer, file nothing this cycle. Otherwise file ONE warrant for the
 dog pool, dedup'd on the target like an escalation key — never kill
@@ -720,7 +733,11 @@ still runs either way: a bead whose store cannot be named is exactly the bead a
 person needs to see, and leaving it owned hides it.
 
 Then hand the bead to `orphan-dispose.sh`, which picks the disposal from what
-the bead IS:
+the bead IS. Hand it the claim this cycle judged as well, the `CLAIM` from the
+bead's row, as the row printed it. The disposal releases only that claim. A
+bead that names another owner, status or assignee when the disposal reads it,
+or that another writer takes or settles before the release lands, is skipped as
+that writer left it, and the next cycle judges it again:
 
 ```bash
 OD=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
@@ -731,11 +748,12 @@ if [ -z "$OD" ]; then
   echo "orphan-dispose.sh not found — NOT disposing of <bead>; it stays owned and returns next cycle" >&2
 else
   # Capture the disposal's own verdict: it decides whether this bead was RETURNED
-  # to the pool (result=disposed) or left untouched (result=skipped — a root, or a
-  # source already in a downstream court). `|| DISPOSE_RC=$?` keeps a non-zero exit
-  # (3 partial, 1 failed) from killing the step under set -e; the JSON is printed
-  # before either exit, so DISPOSE_RESULT still reads.
-  DISPOSE_JSON=$("$OD" <bead> --owner "$OWNER" --apply --json) || DISPOSE_RC=$?
+  # to the pool (result=disposed) or not (result=skipped — a root, a source
+  # already in a downstream court, or a bead whose claim changed after the
+  # listing). `|| DISPOSE_RC=$?` keeps a non-zero exit (3 partial, 1 failed) from
+  # killing the step under set -e; the JSON is printed before either exit, so
+  # DISPOSE_RESULT still reads.
+  DISPOSE_JSON=$("$OD" <bead> --claim "$CLAIM" --apply --json) || DISPOSE_RC=$?
   printf '%s\n' "$DISPOSE_JSON"
   DISPOSE_RESULT=$(printf '%s' "$DISPOSE_JSON" | jq -r '.result // ""')
 fi
@@ -743,8 +761,12 @@ fi
 
 Each kind is disposed by what it is. Some kinds return a bead to a pool to be
 claimed again, and some of those return it only when the work has not already
-reached a downstream court. A **visit** gives up its assignee and nothing else,
-because its route, continuation group and task_kind are its identity. A
+reached a downstream court. A **visit** gives up its assignee and the session
+pins its sitting's claim stamped, `gc.session_id` and `gc.session_name`, and
+keeps its route, continuation group and task_kind, because they are its
+identity. It then names no owner, so the next cycle does not find it again,
+and the board reads it as parked, under the headline `gc-helm engage` writes
+when it reclaims a visit from a gone sitting. A
 **review** is the source bead of its own mol-review molecule and carries no
 worktree of its own, so it disposes by the source contract below — recognised by
 task_kind before the source arm the way a visit is, and reopened to its review
@@ -759,10 +781,11 @@ Everything else is a **source bead** and goes to
 The remaining step dispositions turn on the step's root, which the disposal reads
 before it releases anything. A step whose **root has CLOSED** has no molecule left to
 resume — releasing it would hand a finished chain to a pool as fresh work — so
-it goes to `dead-molecule-dispose.sh`, which de-routes every member of the chain
-before it closes any of them. A step whose **root will not read** is left
-untouched: an unreadable root is not a live one, and the step stays owned and
-comes back next cycle rather than being released on a failed probe.
+it goes to `run-cancel.sh --ended`, which closes every member the run left open
+through gascity's own close of a workflow and writes no member itself. A step
+whose **root will not read** is left untouched: an unreadable root is not a live
+one, and the step stays owned and comes back next cycle rather than being
+released on a failed probe.
 
 Those two commands are the source arm alone. `delete-source` matches workflow
 roots on `gc.source_bead_id`, a root poured from an input convoy carries no such
@@ -778,18 +801,19 @@ half-released, and it needs a finding
 **PRESERVE `metadata.branch` on every recovery** — it is where the next
 polecat resumes from; a recovery that strips it re-does the work.
 
-A disposal that SKIPPED changed nothing — a workflow root, or a source whose work
-already reached a downstream court — so it is not a recovery and must not be
-recorded: stamping `recovered=`/`recovered_count` on it feeds the crash-loop
+A disposal that SKIPPED returned nothing to the pool — a workflow root, a source
+whose work already reached a downstream court, or a bead whose claim changed
+after the listing — so it is not a recovery and must not be recorded: stamping `recovered=`/`recovered_count` on it feeds the crash-loop
 signal a RATE for work that was never re-dispatched, the moot escalation this
 whole filter exists to stop. Gate the record on the disposal's own verdict:
 ```bash
 # >>> recovery-stamp-gate
 # STAMP_RECOVERY is 1 only for a bead orphan-dispose RETURNED to the pool
 # (result=disposed: a released visit or step, or a delegated source or review). Every other
-# verdict — skipped (a root, or a source already in a downstream court), partial,
-# failed, or an unread empty — returned nothing to the pool, so no recovery is
-# stamped and no crash-loop rate is read.
+# verdict — skipped (a root, a source already in a downstream court, or a bead
+# whose claim changed after the listing), partial, failed, or an unread empty —
+# returned nothing to the pool, so no recovery is stamped and no crash-loop rate
+# is read.
 case "${DISPOSE_RESULT:-}" in
   disposed) STAMP_RECOVERY=1 ;;
   *)        STAMP_RECOVERY=0 ;;
@@ -879,14 +903,16 @@ interval and a rebase task once the fix pool claims it, so their count is
 transient churn rather than a health signal, and a nudge asserting a count goes
 stale the moment the queue drains. What a human must see is one bead that has
 sat untouched far past that turnover, which the session is failing to advance.
-Escalate only that.
+Escalate only that. A bead something holds is waiting, not stuck: a landing bead
+sits in the queue from the moment its integration effort is stood up, and
+find-work leaves it until the effort's beads and its summary task close.
 ```bash
 # >>> refinery-stuck-escalate
 SCRIPTS=""
 for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && [ -x "$c/assets/scripts/resolve-route.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  [ -x "$c/assets/scripts/escalate.sh" ] && [ -x "$c/assets/scripts/resolve-route.sh" ] && [ -f "$c/assets/scripts/hold-lib.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-: "${SCRIPTS:?escalate.sh and resolve-route.sh not found in the pack}"
+: "${SCRIPTS:?escalate.sh, resolve-route.sh and hold-lib.sh not found in the pack}"
 # The queue is whatever is assigned to the refinery's live identity, so the
 # address is resolved against the roster rather than assembled: bd lists an
 # address no agent holds as a valid empty array, which reads exactly like a
@@ -917,7 +943,29 @@ fi
 # carries one and belongs to the cadence, and is unassigned anyway) that has sat
 # past the bound. A listing that is not an array yields nothing (STUCK_N empty),
 # which the unreadable arm below catches and escalates.
-STUCK=$(printf '%s' "$QUEUE" | jq -c --argjson now "$NOW" --argjson max "$STUCK_SECS" 'if type == "array" then [ .[] | select((.metadata.merge_result // "") == "") | select($now - ((.updated_at | fromdateiso8601?) // $now) > $max) | {id, updated_at} ] else empty end' 2>/dev/null) || STUCK=""
+PAST=$(printf '%s' "$QUEUE" | jq -c --argjson now "$NOW" --argjson max "$STUCK_SECS" 'if type == "array" then [ .[] | select((.metadata.merge_result // "") == "") | select($now - ((.updated_at | fromdateiso8601?) // $now) > $max) ] else empty end' 2>/dev/null) || PAST=""
+# A bead something holds, by hold-lib.sh's definition, is waiting, not stuck,
+# so it files nothing. The rest are aged from the later of their last write and
+# the close that released their last hold: a landing bead whose summary task has
+# just closed was last written when its effort was stood up. A bead held only by
+# a blocker the store does not return stays: find-work never takes it, and
+# nothing releases it until that blocker reads back or the edge goes. A walk
+# that cannot read leaves STUCK_N empty under HOLD_RC.
+HOLD_RC=0
+STUCK="$PAST"
+cr_hold_read() { gc bd list --all --include-gates --include-infra --include-templates --id="$1" --json --limit=0; }
+if [ -n "$PAST" ] && [ "$PAST" != "[]" ]; then
+  JUDGED=""
+  if . "$SCRIPTS/hold-lib.sh"; then
+    JUDGED=$(printf '%s' "$PAST" | hold_annotate cr_hold_read) || JUDGED=""
+  fi
+  if [ -n "$JUDGED" ]; then
+    STUCK=$(printf '%s' "$JUDGED" | jq -c --argjson now "$NOW" --argjson max "$STUCK_SECS" '[ .[] | select(.hold.state != "held") | ([.updated_at, .hold.released_at] | map(fromdateiso8601? // empty) | max) as $since | select($now - $since > $max) | {id, since: ($since | todate), why: (if .hold.state == "unread" then .hold.why else "" end)} ]' 2>/dev/null) || STUCK=""
+  else
+    STUCK=""
+    HOLD_RC=1
+  fi
+fi
 STUCK_N=$(printf '%s' "$STUCK" | jq 'if type == "array" then length else empty end' 2>/dev/null) || STUCK_N=""
 case "${STUCK_N:-}" in
   ''|*[!0-9]*) STUCK_N="" ;;
@@ -929,6 +977,12 @@ if [ -z "$REFINERY" ]; then
   # an unreadable queue is escalated.
   echo "check-refinery: no live refinery identity resolves from '${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery'; read no queue and retracted nothing; escalating the blind monitor" >&2
   "$SCRIPTS/escalate.sh" --subject "${GC_BEAD_ID:-${GC_SESSION_ID:-refinery}}" --key witness-refinery-queue-unroutable --message "check-refinery cannot resolve the refinery address it builds for rig ${GC_RIG:-<unset>} to a live agent identity, so it read no queue. A listing at an address no agent holds returns an empty array that looks like a clean queue, so the stuck-handoff monitor is blind until the address resolves. Compare the binding_prefix this witness patrol was poured with against the refinery identity in gc agent list." || echo "check-refinery: refinery address unroutable AND escalation failed" >&2
+elif [ "$HOLD_RC" -ne 0 ]; then
+  # The queue read, but what holds the handoffs past the bound did not, so a
+  # handoff waiting on its blockers cannot be told from a stuck one. That is the
+  # blind monitor too, under the same key as an unreadable queue.
+  echo "check-refinery: could not read what holds the handoffs past the stuck bound; escalating the blind monitor" >&2
+  "$SCRIPTS/escalate.sh" --subject "${GC_BEAD_ID:-${GC_SESSION_ID:-refinery}}" --key witness-refinery-queue-unreadable --message "check-refinery read the refinery queue but not what holds the handoffs that have sat past the stuck bound (the hold-lib.sh walk over their blockers failed), so it cannot tell a handoff waiting on its blockers from a stuck one. The stuck-handoff monitor is blind until those reads answer. Inspect the store's health." || echo "check-refinery: hold walk unreadable AND escalation failed" >&2
 elif [ "$QUEUE_RC" -ne 0 ] || [ -z "$STUCK_N" ]; then
   # Genuinely unreadable: bd failed, or the listing is not a JSON array even
   # after the control-byte strip. A silent stderr log here was the defect this
@@ -942,8 +996,10 @@ elif [ "$QUEUE_RC" -ne 0 ] || [ -z "$STUCK_N" ]; then
 elif [ "$STUCK_N" -eq 0 ]; then
   echo "check-refinery: no stuck handoffs; the queue is churning normally" >&2
 else
-  printf '%s' "$STUCK" | jq -r '.[] | .id + " " + (.updated_at // "unknown")' | while read -r SID SWHEN; do
-    "$SCRIPTS/escalate.sh" --subject "$SID" --key witness-refinery-queue --message "Refinery handoff $SID has sat assigned to $REFINERY, unprepared, since $SWHEN, past the ${STUCK_SECS}s stuck bound while the session kept polling. It is not draining on its own; inspect the bead and the refinery session." || echo "check-refinery: escalate failed for $SID" >&2
+  printf '%s' "$STUCK" | jq -r '.[] | .id + " " + (.since // "unknown") + " " + (.why // "")' | while read -r SID SWHEN SWHY; do
+    SNOTE=""
+    [ -z "$SWHY" ] || SNOTE=" It waits on $SWHY, a blocker this store does not return, so find-work leaves it: restore that bead or remove the edge."
+    "$SCRIPTS/escalate.sh" --subject "$SID" --key witness-refinery-queue --message "Refinery handoff $SID has sat assigned to $REFINERY, unprepared, since $SWHEN, past the ${STUCK_SECS}s stuck bound while the session kept polling. It is not draining on its own; inspect the bead and the refinery session.$SNOTE" || echo "check-refinery: escalate failed for $SID" >&2
   done
 fi
 # A handoff that has left the refinery queue is no longer sitting unprepared, so
@@ -965,7 +1021,8 @@ fi
 # assigned to a refinery.
 #
 # The candidate pass runs only after a queue read that parsed as an array
-# ($STUCK_N set), at an address the roster verified (resolve-route.sh exit 0).
+# ($STUCK_N set, which a failed hold walk leaves empty too), at an address the
+# roster verified (resolve-route.sh exit 0).
 # A failed queue read leaves every visit as it is until a later cycle reads the
 # queue, and so does an unreadable roster (exit 3): the address is then the
 # rendered name echoed back unproven, and the role each candidate is compared
@@ -1016,9 +1073,12 @@ One escalate.sh call per stuck bead: escalate.sh narrows its dedup to a durable
 subject, so each stuck bead gets its own visit and a churning queue files none.
 A stuck bead reaches a human through a re-derived visit rather than a nudge whose
 count goes stale. A queue that will not parse even after the control-byte strip
-escalates once under its own key, so a blinded monitor is surfaced rather than
-silently trusted. A refinery address that resolves to no live agent is blind the
-same way and escalates once under a key of its own, without reading a queue.
+escalates once under its own key, and so does a queue whose holds cannot be
+read, so a blinded monitor is surfaced rather than silently trusted. A held bead
+files nothing, and a wait is aged from the close that released its last hold
+when that is later than its last write. A refinery address that resolves to no
+live agent is blind the same way and escalates once under a key of its own,
+without reading a queue.
 The counterpart retract closes the loop. A handoff an open visit escalates that
 a queue read at the refinery's verified address no longer carries is read by
 id, and the visit is retracted moot through escalate.sh --retract (guarded by

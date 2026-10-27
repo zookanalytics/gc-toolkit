@@ -121,6 +121,7 @@ func TestDumpMachineNamesEveryDeclaredEdge(t *testing.T) {
 		"states " + strings.Join(lifecycle.States, " "),
 		"human_states " + strings.Join(lifecycle.HumanStates, " "),
 		"closed_states " + strings.Join(lifecycle.ClosedStates, " "),
+		"exit_sets pull_request:pr_finishing_settled=unsettled pull_request:pr_head_oid=",
 	} {
 		if !strings.Contains(got, want+"\n") {
 			t.Errorf("missing line %q in:\n%s", want, got)

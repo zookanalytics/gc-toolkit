@@ -50,18 +50,21 @@ routed, never assigned, and never blocks anything.
 - **Body sections:** `## Statement` (the generalizable point),
   `## Quote` (verbatim feedback + link), `## Proposed norm` (draft rule
   text, explicitly non-binding), optionally `## Context` (what the diff
-  was doing).
+  was doing). An outside-review observation carries no proposed norm: its
+  statement condenses what the review post said, and its context names the
+  PR and where the post sits.
 - **Metadata:**
 
 | key | values |
 |---|---|
 | `task_kind` | `observation` |
-| `obs.category` | free slug; the distiller owns the vocabulary and merges near-duplicates. Also the finding half of the dedup key, so two observations from one event need different slugs |
+| `obs.category` | free slug; the distiller owns the vocabulary and merges near-duplicates. Also the finding half of the dedup key, so two observations from one event need different slugs. `outside-review` is reserved for the miner's outside capture, one observation per review post |
+| `obs.correction` | on an `outside-review` observation whose post makes a standing correction: the correction's slug, a category slug reused when one fits. The recurrence metric's M1 counts the post under it |
 | `obs.scope` | `repo:<rig>` \| `agent:<role>` \| `global` — guess narrow |
 | `obs.source` | `self` \| `miner` \| `operator` |
 | `obs.directive` | `standing` \| `diff` — capture-time guess; the distiller re-judges |
 | `obs.endorsed` | `operator` when filed via "learn this" |
-| `obs.provenance` | the event half of the dedup key: `pr:<owner/repo>#<n>:comment:<id>`, `pr:<owner/repo>#<n>:veto`, or `bead:<id>:turn:<date>` — `<owner/repo>` is the full slug (`gh repo view --json nameWithOwner -q .nameWithOwner`, or parse the origin URL) |
+| `obs.provenance` | the event half of the dedup key: `pr:<owner/repo>#<n>:comment:<id>`, `pr:<owner/repo>#<n>:review:<id>`, `pr:<owner/repo>#<n>:veto`, or `bead:<id>:turn:<date>` — `<owner/repo>` is origin's full slug (`gh repo view "$(git remote get-url origin)" --json nameWithOwner -q .nameWithOwner`, or parse the origin URL). A bare `gh repo view` names whichever remote gh picks, which is upstream in a checkout that has one and no `gh repo set-default` |
 | `gc.outcome` | `recorded`; `--status=closed` in the same update |
 | `gc.work_outcome` | `no-op` — an observation records feedback and ships no code, so this is the honest value for the work-record gate that fires on every close |
 
@@ -85,9 +88,44 @@ Four producers file the same bead contract:
    instance first, then files one observation bead with
    `obs.source=self`.
 2. **PR miner.** The `mol-feedback-miner` order sweeps each importing
-   rig's merged/closed PRs' review and conversation comments and files
-   what self-report missed, with `obs.source=miner`. It files
-   observations only — never patterns, never proposals.
+   rig's merged/closed PRs' review and conversation comments, with
+   `obs.source=miner`, in two captures:
+   - **The outside capture.** Every review post from outside the city
+     becomes one condensed observation, `obs.category=outside-review`,
+     whether or not it is about standing behavior. A post that makes a
+     standing correction also names the correction's slug in
+     `obs.correction`, so the recurrence metric counts its repeats. A post
+     is the city's when it carries the city's mark
+     (`assets/scripts/pr-post.sh`). A post that is not for review
+     ([not-for-review.md](not-for-review.md)) and a GitHub App's approval
+     are notices, not review feedback, whoever posted them. On a rig that
+     declares no marker, so is Vercel's deployment notice, an app's
+     conversation comment whose first non-blank line opens with `[vc]:`.
+     Any other unmarked post is outside when another login posted it, an
+     app's included, or when it is Claude Code's `/code-review` output
+     posted under the city's login. The rig's store records the day from
+     which the outside capture still owes a read of every merged or closed
+     PR updated since, and every run reads the PRs updated since then. A
+     post updates its PR, so a post made long after its PR closed is read
+     too. A rig's first run records the day `outside_backfill_days` (30)
+     back, so the capture back-fills the month before it. After each run the
+     day moves to the oldest last update among the PRs the run still owes,
+     one that did not read or has an outside post not yet recorded, or to
+     the run's own day when it owes none. So a back-fill one run could not
+     finish is finished by the runs after it, however long after they come.
+     The distiller reads these observations as a set for what the city's
+     review missed, and a proposal from them is a `review-rubric` amendment
+     or a change to the correctness method, never a rule per observation
+     (`skills/learning-distill/SKILL.md`).
+   - **The standing-behavior capture.** The city's own posts are read for
+     corrective feedback about standing behavior that self-report missed, at
+     most `max_obs_per_run` a run. An outside post is never read here, so the
+     miner files one observation per outside post, not two of one point.
+
+   An unmarked post under the city's login that is not `/code-review` output,
+   posted after its PR's provenance cutover, means a writer skipped the mark;
+   the miner flags it in one patrol finding. The miner files observations and
+   that finding only — never patterns, never proposals.
 3. **Operator fast path.** "learn this: …" in any conversational session
    files the same bead with the operator's wording as `## Statement`,
    `obs.source=operator`, and `obs.endorsed=operator`. Endorsed
@@ -206,8 +244,13 @@ changing a repo does not reach the human converse class. The classes: polecats
 (polecat, polecat-codex), human (the converse-opus, converse-fable and
 converse-codex sittings), system (deacon, mechanik, proactive, witness,
 refinery, keeper).
-`formulas/mol-review.toml` resolves these fragments during a review and holds
-the diff's output to them. Hard cap **12 entries per fragment**.
+The correctness method, `skills/review-correctness/SKILL.md`, holds the diff's
+output to every one of these fragments. It reads them from its own
+`references/` directory, where a relative link to each fragment keeps one
+source for the text and delivers it with the skill, so the method resolves no
+pack file by path. A new class fragment gets its link there too, and
+`review-methods.test.sh` fails until it has one. Hard cap **12 entries per
+fragment**.
 
 **`convention` — learned conventions, per role.**
 `template-fragments/learned-conventions-<role>` fragments — one per role,
@@ -218,22 +261,25 @@ both render `{{ template "learned-conventions-polecat" . }}`). Use this
 carrier when the behavior must be carried into the turn by one role and no
 reviewer sees the moment it goes wrong.
 
-**`review-rubric` — what a reviewer checks.** `formulas/mol-review.toml`,
-step `review`, the "What to check" dimensions. Preferred over `convention`
-whenever the failure is visible in a diff: one dimension reaches every
-agent's version of the mistake through the reviewer, where a bullet reaches
-only the role whose fragment renders it. An amendment is one dimension
-sharpened or added. The anchor goes in the TOML comment ledger above the
-review step, not beside the dimension: the step description renders into a
-step bead, where an HTML comment is noise in the text a reviewer reads.
+**`review-rubric` — what a reviewer checks.** The correctness method,
+`skills/review-correctness/SKILL.md`: its "What to check" dimensions.
+Preferred over `convention` whenever the failure is visible in a diff: one
+dimension reaches every agent's version of the mistake through the reviewer,
+where a bullet reaches only the role whose fragment renders it. An amendment
+is one dimension sharpened or added. Its anchor goes in the ledger beside the
+method, `skills/review-correctness/rubric-ledger.md`, not beside the
+dimension: a reviewer reads the whole method file, where an HTML comment is
+noise.
 
 **`exemplar` — the exemplar corpus.**
 `template-fragments/learning-exemplars.template.md`, at most **8**
-before/after pairs, resolved on demand during a review rather than injected
-into any prompt. For lessons that are a shape rather than a statement.
+before/after pairs, read during a review through the correctness method's link
+to it rather than injected into any prompt. For lessons that are a shape rather
+than a statement.
 
-Every adopted entry carries an anchor comment — immediately above it in the
-four fragment carriers, in the ledger for `review-rubric`:
+Every adopted entry carries an anchor comment. In the four fragment carriers
+it sits immediately above the entry. For `review-rubric` it sits in the
+ledger, on a line that ends with the dimension it amends:
 
 ```
 <!-- rule:<pattern-bead> src:<refs> adopted:<date> -->
@@ -252,7 +298,9 @@ stops coming back. The report reads observation beads across every store and
 collapses duplicate captures — one correction read by both self-report and
 the miner. Two observations are the same correction when they share a
 provenance key AND an `obs.category`: a provenance key can name a whole
-turn, and a turn carries several distinct corrections. It gives two numbers:
+turn, and a turn carries several distinct corrections. An outside-review
+observation that names a correction counts under that slug as its category.
+It gives two numbers:
 
 - **M1, repeat feedback by category.** The share of events in the window
   whose `obs.category` was already seen on an earlier event. `obs.category`
@@ -261,6 +309,10 @@ turn, and a turn carries several distinct corrections. It gives two numbers:
   its own, the repeat count is pinned to (categorised minus distinct) and the
   share measures slug reuse rather than recurrence. The report withholds the
   rate when the key does not discriminate, and reports the spread instead.
+  The outside capture's `outside-review` names where feedback came from, not a
+  correction. M1 counts an outside post that names a correction under its
+  `obs.correction`, and leaves the rest out, counting them on a line of their
+  own.
 - **M2, recurrence after adoption.** Per adopted entry, the observations
   attributed to its pattern bead since its adoption date. Attribution runs
   through `obs.distilled`, which only the distiller stamps. An anchor records

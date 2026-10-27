@@ -28,6 +28,12 @@
 #      merge-push by ANY route converges on the PR it already owns instead of
 #      being re-parked to pre_open_gate.
 #
+# A bead something holds waits in the queue until its blockers close: a
+# landing bead is assigned to the refinery when its integration effort is
+# stood up, and find-work must not prepare it while the effort's beads or its
+# summary task are open. Section 1c runs the selection over a store of beads
+# with their edges, read through hold-lib.sh.
+#
 # Both marked blocks are extracted VERBATIM from the formula and executed
 # against a fake `gc`, so they cannot drift from the shipped instruction. No
 # live city, Dolt, network, or PRs.
@@ -102,6 +108,29 @@ mkdir -p "$TMP/bin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 [ "$1" = "bd" ] && [ "$2" = "list" ] || exit 0
 [ "${FAKE_BD_FAILS:-0}" = "1" ] && exit 0   # bd fails open: empty stdout
+# FAKE_STORE is a JSON array of beads with their edges, answered as bd answers:
+# the queue listing filters by assignee, open status, not an epic and a branch
+# key; a read by --id returns those ids, a closed one only under --all and a
+# gate only under --include-gates, the classes bd hides by default.
+# FAKE_ID_FAIL=1 fails a read by id.
+if [ -n "${FAKE_STORE:-}" ]; then
+  ids=""; who=""; all=0; gates=0; prev=""
+  for a in "$@"; do
+    [ "$prev" = "--id" ] && ids="$a"
+    case "$a" in --assignee=*) who="${a#--assignee=}" ;; --all) all=1 ;; --include-gates) gates=1 ;; esac
+    prev="$a"
+  done
+  if [ -n "$ids" ]; then
+    [ "${FAKE_ID_FAIL:-0}" = "1" ] && { echo "gc bd list: store unavailable" >&2; exit 1; }
+    jq -c --arg ids "$ids" --argjson all "$all" --argjson gates "$gates" '($ids | split(",")) as $w
+      | [ .[] | select(.id as $i | $w | index($i)) | select($all == 1 or .status != "closed")
+              | select($gates == 1 or (.issue_type // "") != "gate") ]' "$FAKE_STORE"
+  else
+    jq -c --arg who "$who" '[ .[] | select(.assignee == $who and .status == "open" and (.issue_type // "") != "epic")
+      | select((.metadata // {}) | has("branch")) ]' "$FAKE_STORE"
+  fi
+  exit 0
+fi
 lim=0
 for a in "$@"; do
   case "$a" in --limit=*) lim="${a#--limit=}" ;; esac
@@ -136,6 +165,9 @@ chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export FAKE_ROWS="$TMP/rows"
 export GC_RIG="testrig" GC_AGENT="testrig/gc-toolkit.refinery"
+# The block finds hold-lib.sh through the rig root first, and this suite's rig
+# root is the repo it tests.
+export GC_RIG_ROOT="$ROOT"
 
 { cat "$TMP/select.sh"; printf 'printf "%%s\\n" "$WORK"\n'; } > "$TMP/run-select.sh"
 
@@ -231,6 +263,79 @@ eq "$(select_work)" "tk-p1old" "(7e) highest priority first, oldest within the b
   printf 'tk-p1win|-|2026-06-01T00:00:00Z|1\n'; } > "$FAKE_ROWS"
 eq "$(select_work)" "tk-p1win" "(7f) a newer high-priority handoff past a full created-ordered window still wins (unbounded)"
 
+echo "── 1c. a bead something holds waits until its blockers close ──"
+REF="$GC_AGENT"; T0="2026-01-01T00:00:00Z"; T1="2026-02-01T00:00:00Z"
+# bead <id> <status> <assignee> <branch> <issue_type> <priority> <created_at> [blocker...]
+# prints one bead as bd lists it, with a blocks edge onto each blocker.
+bead() {
+  local id="$1" st="$2" who="$3" br="$4" ty="$5" pr="$6" cr="$7"; shift 7
+  jq -nc --arg id "$id" --arg st "$st" --arg who "$who" --arg br "$br" --arg ty "$ty" \
+    --argjson pr "$pr" --arg cr "$cr" --args '
+    {id: $id, title: ("bead " + $id), status: $st, assignee: $who, issue_type: $ty, priority: $pr,
+     created_at: $cr, metadata: (if $br == "" then {} else {branch: $br} end),
+     dependencies: [ $ARGS.positional[] as $b | {issue_id: $id, depends_on_id: $b, type: "blocks"} ]}' "$@"
+}
+# A landing bead, assigned when its effort was stood up: it carries the
+# effort's branch and main as its target, and waits on two effort beads and
+# the summary task by blocks edges. Effort beads and the summary task are
+# assigned to nobody here, so the queue listing never returns them.
+landing() { bead tk-land open "$REF" integration/cv-1 task 2 "$T0" "$@" | jq -c '.metadata.target = "main"'; }
+eff() { bead "$1" "$2" "" "" "${3:-task}" 2 "$T0"; }
+STORE="$TMP/store.json"
+store() { printf '%s\n' "$@" | jq -s . > "$STORE"; }
+select_store() { FAKE_STORE="$STORE" bash "$TMP/run-select.sh" 2>"$TMP/err"; }
+
+store "$(landing tk-e1 tk-e2 tk-sum)" "$(eff tk-e1 open)" "$(eff tk-e2 open)" "$(eff tk-sum open)"
+eq "$(select_store)" "" "(7g) a landing bead is not taken while its effort beads are open"
+case "$(select_err)" in
+  *"tk-land waits on tk-e1 \"bead tk-e1\" (+2 more)"*) ok "(7g-b) the held bead is named on stderr with what holds it" ;;
+  *) bad "(7g-b) the held bead must be named with what holds it" "got '$(select_err)'" ;;
+esac
+store "$(landing tk-e1 tk-e2 tk-sum)" "$(eff tk-e1 closed)" "$(eff tk-e2 open)" "$(eff tk-sum open)"
+eq "$(select_store)" "" "(7h) nor while the second effort bead is open"
+store "$(landing tk-e1 tk-e2 tk-sum)" "$(eff tk-e1 closed)" "$(eff tk-e2 closed)" "$(eff tk-sum open)"
+eq "$(select_store)" "" "(7i) nor, once both have closed, while its summary task is open"
+store "$(landing tk-e1 tk-e2 tk-sum)" "$(eff tk-e1 closed)" "$(eff tk-e2 closed)" "$(eff tk-sum closed)"
+eq "$(select_store)" "tk-land" "(7j) it is taken once its summary task closes"
+
+# The gate section 10 of the design files for an open convoy's hold: a plain
+# gate with no await type, the landing bead's one open blocker.
+store "$(landing tk-e1 tk-gate)" "$(eff tk-e1 closed)" "$(eff tk-gate open gate)"
+eq "$(select_store)" "" "(7k) a landing bead whose one open blocker is a gate is not taken"
+store "$(landing tk-e1 tk-gate)" "$(eff tk-e1 closed)" "$(eff tk-gate closed gate)"
+eq "$(select_store)" "tk-land" "(7l) once the gate closes it is taken"
+
+# A handoff is work in flight, so only a blocker of its own holds it.
+HAND="$(bead tk-hand open "$REF" polecat/tk-hand task 2 "$T0")"
+store "$HAND"
+eq "$(select_store)" "tk-hand" "(7m) a polecat's handoff with no blocker is taken"
+UNDER="$(printf '%s' "$HAND" | jq -c '.dependencies = [{issue_id: "tk-hand", depends_on_id: "tk-epic", type: "parent-child"}]')"
+store "$UNDER" "$(bead tk-epic open "" "" epic 2 "$T0" tk-park)" "$(eff tk-park open gate)"
+eq "$(select_store)" "tk-hand" "(7n) a handoff whose epic is parked is taken: a park on an ancestor leaves work in flight running"
+store "$(bead tk-hand open "$REF" polecat/tk-hand task 2 "$T0" tk-pre)" "$(eff tk-pre open)"
+eq "$(select_store)" "" "(7o) a handoff with an open blocker of its own waits"
+
+# A hold that cannot be read takes nothing.
+store "$(landing tk-ghost)"
+eq "$(select_store)" "" "(7p) a bead whose blocker the store does not return is not taken"
+case "$(select_err)" in
+  *"tk-land waits on tk-ghost (unreadable)"*) ok "(7p-b) the unreadable blocker is named" ;;
+  *) bad "(7p-b) the unreadable blocker must be named" "got '$(select_err)'" ;;
+esac
+store "$(landing tk-e1)" "$(eff tk-e1 closed)" "$HAND"
+eq "$(FAKE_ID_FAIL=1 select_store)" "" "(7q) a read of the blockers that fails ends the turn with nothing taken"
+case "$(select_err)" in
+  *"could not read what holds"*) ok "(7q-b) and says it could not read what holds the handoffs" ;;
+  *) bad "(7q-b) the failed hold read must be reported" "got '$(select_err)'" ;;
+esac
+store "$HAND"
+eq "$(FAKE_ID_FAIL=1 select_store)" "tk-hand" "(7r) a queue whose beads carry no blocker needs no hold read"
+
+# A held bead never crowds out free work, whatever its priority.
+store "$(bead tk-p1held open "$REF" integration/cv-2 task 1 "$T0" tk-pre)" "$(eff tk-pre open)" \
+  "$(bead tk-p2free open "$REF" polecat/tk-p2free task 2 "$T1")"
+eq "$(select_store)" "tk-p2free" "(7s) a free P2 handoff is taken past a held P1"
+
 echo "── 2. the query fetches the whole candidate set (unbounded window) ──"
 QUERY="$(grep -m1 'gc bd list' "$TMP/select.sh")"
 # A bounded window on one sort key can truncate off the bead the client-side
@@ -295,6 +400,29 @@ eq "$(WORK="tk-w" EXISTING_PR="" BEAD_JSON="$BEAD_JSON" CODEX_GATE=1 bash "$TMP/
 grep -q 'EXISTING_PR=' "$TMP/preopen.sh" \
   && bad "(18) the guard must not overwrite EXISTING_PR" "found an EXISTING_PR assignment" \
   || ok "(18) EXISTING_PR left intact (its block-and-escalate contract is unchanged)"
+
+echo "── 4. a recorded PR is looked up in origin's repository ──"
+
+# With no `gh repo set-default`, gh resolves a bare PR number against the first
+# remote in its own order, which puts upstream ahead of origin, so a bare
+# pr_number in a checkout with an upstream remote opened someone else's PR.
+GH_ARGV="$TMP/gh-argv.log"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'printf "%%s\\n" "$*" >> "%s"\nexit 0\n' "$GH_ARGV"; } > "$TMP/bin/gh"
+chmod +x "$TMP/bin/gh"
+ORIGIN_CO="$TMP/origin-checkout"
+git init -q "$ORIGIN_CO"
+git -C "$ORIGIN_CO" remote add upstream git@github.com:them/repo.git
+git -C "$ORIGIN_CO" remote add origin git@github.com:ours/repo.git
+: > "$GH_ARGV"
+( cd "$ORIGIN_CO" && preopen '' '' '55' >/dev/null )
+eq "$(grep -c -- '^pr view 55 --repo git@github.com:ours/repo.git ' "$GH_ARGV" || true)" "1" \
+   "(19) a bare pr_number is viewed in origin's repository"
+NO_ORIGIN="$TMP/no-origin"; mkdir -p "$NO_ORIGIN"
+: > "$GH_ARGV"
+( cd "$NO_ORIGIN" && preopen '' '' '55' >/dev/null )
+eq "$(grep -c -- '--repo' "$GH_ARGV" || true)" "0" \
+   "(20) with no origin to name, the view passes no --repo"
+eq "$(grep -c -- '^pr view 55 ' "$GH_ARGV" || true)" "1" "(21) and still looks the PR up"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

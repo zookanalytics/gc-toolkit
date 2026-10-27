@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
 # lane-state.sh — derive a review lane's GREEN state from the finding and
-# review-outcome graph, never from a stored check.<lane> marker.
+# review-outcome graph.
 #
 # A lane is one reviewer, named by one check_set member. `green` is a state of
 # the lane, not a claim about a commit: a push creates and closes no bead in the
 # set this reads, so it does not move a lane out of green. This is the one shared
-# helper the merge predicate, pr-open, the liveness sweep and the board are meant
-# to ask, so every reader derives green the same way.
+# helper the merge predicate, pr-open, gate-ensure, pr-facts and the liveness
+# sweep ask, and the helm board mirrors its local backing in Go
+# (services/helm/internal/board/lanes.go), so every reader derives green the
+# same way.
 #
-#   lane-state.sh green --anchor <id> --lane <lane> [--no-remote]
+#   lane-state.sh green --anchor <id> --lane <lane> [--no-remote] [--db <path>]
+#
+# --db pins every store read to that store, for a caller that pins its own reads
+# (liveness-sweep.sh). bd-lib.sh's reads go through _bd_call, which the pin
+# redefines, and the anchor read the GitHub fallback makes carries it too. The
+# bd_list memo keys an entry by the cwd and the arguments, never the pin, so it
+# stays off under one.
 #
 # green(anchor, lane) holds when a closed review bead backs the lane and no
 # review for the lane is in flight:
@@ -69,7 +77,8 @@ warn() { echo "lane-state: $*" >&2; }
 
 ALL_STATUSES="open,in_progress,blocked,deferred,hooked,pinned,closed"
 
-usage() { echo "usage: lane-state.sh green --anchor <id> --lane <lane> [--no-remote]" >&2; }
+usage() { echo "usage: lane-state.sh green --anchor <id> --lane <lane> [--no-remote] [--db <path>]" >&2; }
+LANE_DB=""
 
 # An APPROVED GitHub review on the anchor's PR backs every lane, except that a
 # lane a bring-current round reopened is backed only by an approval submitted
@@ -77,7 +86,7 @@ usage() { echo "usage: lane-state.sh green --anchor <id> --lane <lane> [--no-rem
 # fail-closed: any step that cannot be completed returns 1 (not green), never 0.
 github_approved() {
   local anchor="$1" lane="$2" arow pr slug u body since="" reopened
-  arow=$(bd_json show "$anchor")
+  arow=$(bd_json show "$anchor" ${LANE_DB:+--db "$LANE_DB"})
   pr=$(printf '%s' "$arow" | jq -r '(.[0].metadata.pr_number // "") | tostring' 2>/dev/null)
   [ -n "$pr" ] || return 1
   reopened=$(printf '%s' "$arow" | jq -r '(.[0].metadata.bring_current_reopened // "") | tostring' 2>/dev/null \
@@ -108,9 +117,14 @@ cmd_green() {
     --anchor) anchor="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --lane) lane="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --no-remote) no_remote=1; shift ;;
+    --db) LANE_DB="${2:-}"; shift 2 || { usage; exit 1; } ;;
     *) warn "unknown arg '$1'"; usage; exit 1 ;;
   esac; done
   [ -n "$anchor" ] && [ -n "$lane" ] || { warn "green needs --anchor and --lane"; exit 1; }
+  if [ -n "$LANE_DB" ]; then
+    _bd_call() { gc bd "$@" --db "$LANE_DB"; }
+    unset GC_RECONCILE_BD_CACHE
+  fi
 
   # Read live AND closed review beads: an open one must be SEEN to exclude the
   # lane, and a closed one is the backing — a status filter that skipped either

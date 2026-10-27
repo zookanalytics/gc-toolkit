@@ -1,6 +1,6 @@
 ---
 name: gctk — promote the merge-cadence cluster from shell to one Go binary
-description: Scope for porting the data-plane scripts (lifecycle, the five cadence arms, signoff) behind their existing CLI contracts into a single Go binary beside services/helm. Shell remains the pack's lingua franca everywhere else. lifecycle and merge are ported and keep no shell fallback, and the remaining subcommands port one PR at a time.
+description: Scope for porting the data-plane scripts (lifecycle, the five cadence arms, signoff) behind their existing CLI contracts into a single Go binary beside services/helm. Shell remains the pack's lingua franca. lifecycle and merge are ported and keep no shell fallback, and the remaining scripts port one PR at a time. The binary also holds subcommands outside this scope, and services/gctk/README.md states everything it holds.
 ---
 
 # gctk: the compiled data plane
@@ -11,7 +11,9 @@ operator conversation).
 
 `services/gctk` is the binary's source. The build/deploy pattern below, the
 fallback wiring, the build-status file, and its board rows are in place, and
-`services/gctk/README.md` carries the operating detail.
+`services/gctk/README.md` carries the operating detail. This spec scopes the
+ports. The binary also holds subcommands that port none of these scripts, and
+the README states everything it holds.
 
 `lifecycle` and `merge` are ported, and neither keeps a shell fallback.
 `lifecycle.sh` and `merge.sh` only exec the binary, and a call with no binary
@@ -20,7 +22,7 @@ with shell readers, the required-check set (`pr-facts.sh`) and the approval
 rule (`review-verdict.sh`), are held to gctk merge's own by `merge.test.sh`,
 which runs both over the same fixtures.
 
-Remaining, one subcommand per PR in this order: `gate-ensure`,
+Remaining ports, one subcommand per PR in this order: `gate-ensure`,
 `pr-open`, `pr-facts`, `convoy-graduate`, `signoff`. Each is filed as its own
 bead. The remaining shell scripts and their fallbacks drop when the last one
 lands.
@@ -32,10 +34,10 @@ lands.
 > data-plane logic that writes ledger state.
 
 Shell is partly forced (formula steps and prompt fragments can only carry
-shell) and genuinely fits the small glue that remains. The exception is the
-merge-cadence cluster: highest stakes, pure data-plane, no cross-media
-sharing — its callers already treat it as an opaque CLI, so the language
-behind the command is invisible to them.
+shell) and genuinely fits the small glue that remains. The exception this
+spec ports is the merge-cadence cluster: highest stakes, pure data-plane, no
+cross-media sharing — its callers already treat it as an opaque CLI, so the
+language behind the command is invisible to them.
 
 ## What ports, and what does not
 

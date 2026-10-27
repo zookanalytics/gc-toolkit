@@ -6,13 +6,11 @@
 # onto it burns a pool slot on a diff no one ships, and the validation pass hangs a
 # blocks edge on the very close it awaits.
 # For every other open pre_open_gate/pull_request anchor: canonicalize check_set
-# (empty -> stamp the declared default; a list or `none` is left alone), clear
-# any check.<g> that both fails the marker grammar and names a check check_set
-# does not declare (nothing else reads it, so nothing else could ever rewrite
-# it), then ensure every declared unsettled check is RAISABLE. A lane's state is
-# DERIVED from the finding and review-outcome graph through lane-state.sh, the
-# one helper merge.sh and pr-open.sh derive green through — never a stored
-# check.<g> marker. A lane that derives green is settled; otherwise the lane
+# (empty -> stamp the declared default; a list or `none` is left alone), then
+# ensure every declared unsettled check is RAISABLE. A lane's state is DERIVED
+# from the finding and review-outcome graph through lane-state.sh, the one
+# helper merge.sh and pr-open.sh derive green through. A lane that derives
+# green is settled; otherwise the lane
 # owes a review, has one in flight, or the anchor is mid-change, and a fresh
 # dispatch goes out only when QUIESCENCE holds: no review is dispatched while
 # anything is acting on the anchor — a fix unit in flight (including one
@@ -25,15 +23,23 @@
 # recorded, non-superseded verdict — the durable backstop for the window between
 # the close and the fix unit and findings it files, which the transient
 # quiescence beads do not yet cover. A dispatch files the review with its
-# metadata and its blocks edge in one create (bd_create, fail-closed), takes its
-# body from review-dispatch-body.sh, then pours formula and route in one call
-# (gc sling <review-pool> <bead> --on mol-review), pinned to the live head
-# (signoff.sh binds the verdict) with fix_target_pool for the rework route. A
-# create whose reply is lost has still landed whole, so the next pass's stranded
-# arm re-slings it rather than filing a twin. Either sling waits until the
-# review's whole work order reads back (bd_create for a fresh review,
-# bd_meta_ensure for a stranded one), and a failed sling is never retried
-# in-pass (a re-pour mints a second workflow root). An open review a two-write
+# record, its blocks edge and the fixed description in one create (bd_create,
+# fail-closed), then pours formula and route in one call (gc sling
+# <review-pool> <bead> --on mol-review), passing every value of the record as a
+# formula var so the step text names it. The record pins the live head as
+# reviewed_oid, the commit the review reads and signoff.sh binds the verdict
+# to, and carries fix_target_pool for the rework route. An anchor whose head
+# no read answers dispatches nothing. A create whose reply is lost has still
+# landed whole, so the next pass's stranded arm re-slings it rather than filing
+# a twin. Either sling waits until the review's whole work order reads back
+# (bd_create for a fresh review, bd_meta_ensure for a stranded one), and a
+# failed sling is never retried in-pass (a re-pour mints a second workflow
+# root). A review is PR-finishing work, born carrying the PR-finishing shift
+# and no parent, and every sling here, of a review or a validation pass, also
+# waits until the bead settles at its priority, because the pour copies that
+# priority once (docs/steering.md). The settle is bd-lib.sh's
+# pr_finishing_settle, whose wait for the priority lock is short, since every
+# arm of the cadence after this one waits on it. An open review a two-write
 # create left with its title but short of the keys inflight_review reads is
 # closed before a fresh one is filed (bd_unmake_orphans), since its blocks edge
 # would hold the anchor beside it. Reach carried by the pour ALONE is qualified before it counts: a review
@@ -55,7 +61,7 @@
 #       [--validate-pool <pool>] [--review-formula <name>] [--sling-var k=v ...]
 #       [--deadline <epoch-secs>] [--cursor <file>].
 #       The formula defaults to mol-review; --sling-var forwards formula vars
-#       verbatim to the pour.
+#       verbatim to every pour, ahead of the review's own record.
 #       --deadline stops the pass from starting another anchor once the clock
 #       reaches it. One anchor is always visited, so a pass started past its
 #       deadline still makes progress. --cursor names the file holding the last
@@ -118,7 +124,6 @@ case "$(cs_canon "$DEFAULT_CHECK_SET")" in
 esac
 
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-BODY_EMITTER="$SCRIPTS_DIR/review-dispatch-body.sh"
 ESCALATOR="$SCRIPTS_DIR/escalate.sh"
 LIFECYCLE="$SCRIPTS_DIR/lifecycle.sh"
 # The shared graph-derivation helpers: lane green (the settled state) and the
@@ -136,8 +141,9 @@ REVIEW_CHECKS="$SCRIPTS_DIR/review-checks.sh"
 [ -x "$REVIEW_CHECKS" ] || { echo "$PROG: the check resolver is missing ($REVIEW_CHECKS); cannot gate" >&2; exit 1; }
 WEDGE_KEY="review-wedge"
 
-# Origin pin for the live-head read; optional — an unresolvable origin or a
-# missing gh degrades to treating a present marker as satisfiable.
+# Origin pin for the live-head read through the GitHub API, which needs gh and a
+# GitHub origin. Without them, or when the API does not answer, the head is read
+# with git ls-remote, which needs only the origin a review fetches from anyway.
 ORIGIN_HOST=""; ORIGIN_REPO=""
 u=$(git remote get-url origin 2>/dev/null | tr -d '[:space:]')
 case "$u" in
@@ -153,15 +159,18 @@ HAVE_GH=0; command -v gh >/dev/null 2>&1 && HAVE_GH=1
 live_head_for() { # <branch> -> sha, or nothing when unanswerable
   # gh writes its error body to STDOUT, and --jq on a body without .sha prints
   # "null" at rc=0, so neither the exit code nor the output alone separates a
-  # head from a failure. Empty routes the callers to their "no head to test"
-  # arms, which is the safe direction: an unread head cannot prove a branch
-  # moved, and the next pass sees a merged anchor closed and out of scope.
-  # The head is only ever compared against a marker oid, so it is held to that
-  # same grammar.
-  [ "$HAVE_GH" = 1 ] && [ -n "$ORIGIN_REPO" ] && [ -n "${1:-}" ] || return 0
-  local out
-  out=$(gh api --hostname "$ORIGIN_HOST" \
-    "repos/$ORIGIN_REPO/commits/$1" --jq '.sha' 2>/dev/null) || return 0
+  # head from a failure. The ls-remote read is git-lib.sh's, in this checkout.
+  # The head becomes a review's reviewed_oid pin and the oid of the dated
+  # machine verdict, so it is held to the full 40-hex shape both carry. Empty
+  # means neither read answered, and the pass holds the anchor, dispatching and
+  # settling nothing, until a later pass reads it.
+  [ -n "${1:-}" ] || return 0
+  local out=""
+  if [ "$HAVE_GH" = 1 ] && [ -n "$ORIGIN_REPO" ]; then
+    out=$(gh api --hostname "$ORIGIN_HOST" \
+      "repos/$ORIGIN_REPO/commits/$1" --jq '.sha' 2>/dev/null) || out=""
+  fi
+  is_oid "$out" || out=$(remote_branch_head . "$1")
   is_oid "$out" || return 0
   printf '%s\n' "$out"
 }
@@ -172,6 +181,12 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=pace-lib.sh
 . "$_bd_lib_dir/pace-lib.sh" || { echo "cannot source pace-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=git-lib.sh
+. "$_bd_lib_dir/git-lib.sh" || { echo "cannot source git-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=run-lib.sh
+. "${GC_RUN_LIB:-$_bd_lib_dir/run-lib.sh}" || { echo "cannot source run-lib.sh beside this script" >&2; exit 1; }
+# The reader run-lib.sh reads this store through.
+gate_bd() { gc bd "$@"; }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 # The step/root reads below must see closed rows too: a spent chain is
@@ -179,22 +194,58 @@ LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 # last value, so both halves ride a single comma list.
 ALL_STATUSES="$LIVE_STATUSES,closed"
 
-# review_work_order <check> <anchor> <branch> <target> <reviewed-oid> — the
-# metadata a review bead carries. task_kind, check_name and anchor_bead are what
-# inflight_review selects it by. review_branch and review_base are what
-# mol-review reads, review_pool is the route its failure path restores, and
-# reviewed_oid pins the dispatch head that signoff.sh binds the verdict to.
-# fix_target_pool is the pool signoff.sh routes a request-changes rework to. An
-# empty <reviewed-oid> leaves the pin out, and an empty FIX_POOL leaves out
-# fix_target_pool.
+# review_work_order <check> <anchor> <branch> <target> <reviewed-oid> <pr-url>
+# <pr-number> <context> — the review's record, the metadata a review bead
+# carries. task_kind, check_name and anchor_bead are what inflight_review
+# selects it by. review_branch, review_base and reviewed_oid are the branch,
+# the base its diff starts from and the commit the review reads, which
+# signoff.sh binds the verdict to. review_pr_url and review_pr_number are the
+# anchor's open PR. They take keys of their own because gc-helm.sh resolves a
+# PR number to every live bead whose pr_number matches, and refuses the number
+# when more than one does, so a review carrying pr_number would leave its PR
+# ambiguous while the review is live. review_context is why this review went
+# out. review_formula is the formula the dispatch pours, which a review held
+# with no workflow follows. review_pool is the route the failure path restores,
+# and fix_target_pool is the pool signoff.sh routes a request-changes rework
+# to. An empty <reviewed-oid> leaves the pin out, as the stranded arm's order
+# does for a record that already carries one, an empty <pr-url> or
+# <pr-number> leaves out both PR keys, an empty <context> leaves it out, and an
+# empty FIX_POOL leaves out fix_target_pool.
 review_work_order() {
   jq -nc --arg g "$1" --arg a "$2" --arg br "$3" --arg tg "$4" \
-    --arg rp "$REVIEW_POOL" --arg oid "$5" --arg fp "$FIX_POOL" '
+    --arg rp "$REVIEW_POOL" --arg oid "$5" --arg pu "${6:-}" --arg pn "${7:-}" --arg cx "${8:-}" \
+    --arg rf "$REVIEW_FORMULA" --arg fp "$FIX_POOL" '
     {task_kind: "review", check_name: $g, anchor_bead: $a, review_branch: $br,
-     review_base: $tg, review_pool: $rp}
+     review_base: $tg, review_formula: $rf, review_pool: $rp}
     + (if $oid == "" then {} else {reviewed_oid: $oid} end)
+    + (if $pu == "" or $pn == "" then {} else {review_pr_url: $pu, review_pr_number: $pn} end)
+    + (if $cx == "" then {} else {review_context: $cx} end)
     + (if $fp == "" then {} else {fix_target_pool: $fp} end)' 2>/dev/null
 }
+
+# review_var_args <review-bead> <record-json> — every value a review is told,
+# as the --var arguments of its sling, in REVIEW_VAR_ARGS. The record is the
+# work order that read back on the bead, and the step text names each value
+# where it uses it: review_bead is the bead, check its check_name folded to
+# lowercase, and every other key the record's own, empty when the record
+# carries none.
+review_var_args() {
+  local kv
+  REVIEW_VAR_ARGS=()
+  while IFS= read -r -d '' kv; do
+    REVIEW_VAR_ARGS+=(--var "$kv")
+  done < <(printf '%s' "$2" | jq -j --arg rb "$1" '
+    {review_bead: $rb, check: ((.check_name // "") | ascii_downcase)}
+    + (. as $r | [ "anchor_bead", "review_branch", "review_base", "reviewed_oid",
+                   "review_pr_url", "review_pr_number", "review_context" ]
+       | map({key: ., value: (($r[.] // "") | tostring)}) | from_entries)
+    | to_entries[] | "\(.key)=\(.value)\u0000"' 2>/dev/null)
+}
+
+# The review bead's description: one fixed paragraph, the same on every review.
+# The record and the formula carry everything else. It names `gc formula show
+# --json` because the plain command prints the steps' titles and not their text.
+REVIEW_DESCRIPTION="This is a signoff review. Its metadata is the review's record: the check, the anchor, the reviewed branch, base and commit, the PR once one is open, and the formula that runs it. If you hold this bead with no poured workflow, run \`gc formula show --json\` on the formula its \`review_formula\` names and follow its steps in order. In recovery there is no input convoy and there are no step beads to close. Read each \`{{<key>}}\` in the steps as this bead's value under that key, \`{{check}}\` as its \`check_name\` in lowercase, \`{{review_bead}}\` as this bead, and \`{{binding_prefix}}\` as the binding your skill catalog shows on the pack's skills. The steps say what a key the bead does not carry means, and when it means you review nothing."
 
 # The keys inflight_review selects a review by. A review short of one is a
 # review no pass can find, so a fresh dispatch hands them to bd_create as its
@@ -237,11 +288,10 @@ inflight_review() { # <anchor-id> <check>
 # close_review), so the instant a review leaves inflight_review's live set it
 # enters this closed set: the two hand off on one atomic write, with no window a
 # fresh pour can slip through. A superseded review is excluded (gc.outcome is
-# then superseded, not recorded, and signoff clears its pin on a moved head): that
-# is exactly the head-move or validator-ordered re-review this bar must let
-# through, the same exclusion lane-state.sh's green backing makes. Non-zero rc =
-# the ledger could not answer; the caller holds the dispatch, like every probe
-# here.
+# then superseded, not recorded): that is exactly the head-move or
+# validator-ordered re-review this bar must let through, the same exclusion
+# lane-state.sh's green backing makes. Non-zero rc = the ledger could not
+# answer; the caller holds the dispatch, like every probe here.
 reviewed_at_head() { # <anchor-id> <check> <head>
   local raw
   raw=$(bd_anchor_children "$1" "$ALL_STATUSES") || return 1
@@ -260,12 +310,12 @@ reviewed_at_head() { # <anchor-id> <check> <head>
 # An open rework child already filed under <anchor>? Echoes its id. A rework
 # child here is a blocks-dep bead whose metadata carries a source key, which
 # rework-child.sh stamps on each child it files: source_review_bead on the one a
-# request-changes verdict files as it clears check.<g>, source_ruling_bead on the
-# one an operator ruling files. Either is changing the branch, so a review that
-# read it now would read a mid-change diff, and a lane back to unreviewed with
-# one still open is owed the rework landing, not a fresh review. Non-zero rc =
-# the ledger could not answer; the caller holds the dispatch, the same as an
-# unreadable in-flight-review lookup.
+# request-changes verdict files, source_ruling_bead on the one an operator
+# ruling files. Either is changing the branch, so a review that read it now
+# would read a mid-change diff, and a lane back to unreviewed with one still
+# open is owed the rework landing, not a fresh review. Non-zero rc = the ledger
+# could not answer; the caller holds the dispatch, the same as an unreadable
+# in-flight-review lookup.
 open_rework_child() { # <anchor-id>
   local raw
   raw=$(gc bd dep list "$1" --direction=down -t blocks --json 2>/dev/null | scrub)
@@ -318,8 +368,8 @@ open_validation_pass() { # <anchor-id>
 #   (b) a review's or a ruling's rework child in flight on the anchor     [open_rework_child]
 #   (c) a validation pass in flight on the anchor                         [open_validation_pass]
 # Clause (d), a full review already in flight on THIS lane, is per-lane and stays
-# with inflight_review at the dispatch site. Each clause is an open-bead query;
-# none reads a check.<g> marker, and each hold names a bead that is open.
+# with inflight_review at the dispatch site. Each clause is an open-bead query,
+# and each hold names a bead that is open.
 #
 # An open must-fix finding is a demand on the anchor, not an actor on it. The fix
 # unit answering it is what changes the diff, so clause (a) holds on that fix unit
@@ -357,27 +407,14 @@ compute_quiescence() { # <anchor-id>
   return 0
 }
 
-# The roots of every workflow poured over <review-bead>, one per line, via the
-# tracking convoy each pour mints. A re-pour mints a SECOND root, so all of
+# The roots of every workflow poured over <review-bead>, one per line: each run
+# run-lib.sh names for it, live or not. A re-pour mints a SECOND root, so all of
 # them must be judged — one spent root proves nothing while a sibling runs.
-# Non-zero = the linkage could not be read.
+# Non-zero = the runs could not be read, or the bead has none.
 pour_roots() { # <review-bead-id>
-  local raw ids rows out=""
-  raw=$(gc bd dep list "$1" --direction=up -t tracks --json 2>/dev/null | scrub)
-  [ -n "$raw" ] || return 1
-  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  ids=$(printf '%s' "$raw" | jq -r '
-    .[] | select((.issue_type // .type // "") == "convoy") | .id' 2>/dev/null)
-  [ -n "$ids" ] || return 1
-  while IFS= read -r c; do
-    [ -n "${c:-}" ] || continue
-    rows=$(bd_list --metadata-field "gc.input_convoy_id=$c" --status="$ALL_STATUSES") || return 1
-    out="$out$(printf '%s' "$rows" | jq -r '.[].id' 2>/dev/null)
-"
-  done <<CONVOYS
-$ids
-CONVOYS
-  out=$(printf '%s' "$out" | sed '/^$/d')
+  local runs out
+  runs=$(run_lib runs gate_bd "$1") || return 1
+  out=$(printf '%s' "$runs" | jq -r '.[].root' 2>/dev/null)
   [ -n "$out" ] || return 1
   printf '%s\n' "$out"
 }
@@ -422,43 +459,20 @@ pour_ok() { # <bead-id> <pool>
   [ "$got" = "${2:-}" ]
 }
 
-# Count the workflow ROOTS a LIVE tracking convoy carries over a bead: >0 means
-# a poured workflow still drives it and a second pour would mint a second root.
-# The convoy alone is NOT that reach — a pour can mint the convoy and the tracks
-# edge and then die before pouring the root, leaving a LIVE but EMPTY convoy that
-# drives nothing; counting that as in flight holds the anchor forever. So the
-# reach is the root, read the way pour_roots reads it (members via
-# gc.input_convoy_id). Only a live convoy is consulted (a closed/dead pour is
-# over and must not suppress the stranded re-sling); a dep row with no status
-# field counts as live (fail-closed toward no-re-pour when the shape is unknown).
-# A convoy's members are read across all statuses — a root the pour created is
-# reach whether or not its chain has begun to close. Non-zero rc = a read failed
-# and the count is unknown; the caller holds rather than re-sling blind.
+# Count the workflow runs poured over a bead (run-lib.sh): >0 means a poured
+# workflow may still drive it and a second pour would mint a second root. The
+# convoy alone is NOT that reach — a pour can mint the convoy and the tracks
+# edge and then die before pouring the root, leaving a convoy that drives
+# nothing; run-lib.sh names no run over it, so it counts zero and the caller
+# re-slings rather than hold the anchor forever. A run counts whether or not its
+# chain has begun to close, since the root the pour created is the reach, and
+# the caller judges its liveness (judge_pour_liveness). Non-zero rc = the runs
+# could not be read and the count is unknown; the caller holds rather than
+# re-sling blind.
 tracked_roots() { # <bead-id>
-  local raw ids rows n total=0
-  raw=$(gc bd dep list "$1" --direction=up -t tracks --json 2>/dev/null | scrub)
-  [ -n "$raw" ] || return 1
-  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  ids=$(printf '%s' "$raw" | jq -r '
-    .[]
-    | select((.issue_type // .type // "") == "convoy")
-    | select(((.status // "open") | tostring) as $s
-             | ($s == "open" or $s == "in_progress" or $s == "blocked"
-                or $s == "deferred" or $s == "hooked" or $s == "pinned"))
-    | .id' 2>/dev/null)
-  # No LIVE tracking convoy at all is a readable zero, not a failed read:
-  # nothing drives the review, so the caller re-slings it.
-  [ -n "$ids" ] || { printf '0\n'; return 0; }
-  while IFS= read -r c; do
-    [ -n "${c:-}" ] || continue
-    rows=$(bd_list --metadata-field "gc.input_convoy_id=$c" --status="$ALL_STATUSES") || return 1
-    n=$(printf '%s' "$rows" | jq -r 'length' 2>/dev/null)
-    case "$n" in ''|*[!0-9]*) return 1 ;; esac
-    total=$((total + n))
-  done <<CONVOYS
-$ids
-CONVOYS
-  printf '%s\n' "$total"
+  local runs
+  runs=$(run_lib runs gate_bd "$1") || return 1
+  printf '%s' "$runs" | jq -r 'length' 2>/dev/null
 }
 
 # Judge a review whose only reach to the check is a poured WORKFLOW: is that
@@ -475,7 +489,7 @@ CONVOYS
 # single read can catch a recovery mid-write and escalate a review that repairs
 # itself moments later. An unreadable root or step enumeration is HELD without
 # claiming a live pour — the merge stays held and the next pass re-probes.
-# Reads the current anchor's loop context ($id $g $title $marker $branch $target
+# Reads the current anchor's loop context ($id $g $title $branch $target
 # $REVIEW_POOL $ESCALATOR $WEDGE_KEY $PROG) and bumps $wedged on a filed visit.
 judge_pour_liveness() { # <review-bead-id>
   local rid="$1" spent_root="" spent_rc=0 rev_row seen rpool
@@ -498,7 +512,7 @@ judge_pour_liveness() { # <review-bead-id>
 "Review $rid is wedged: its poured workflow finished without a verdict, so check '$g' on $id is held with nothing driving it.
 
 Anchor:   $id — $title
-Check:    check.$g is ${marker:-absent}
+Check:    $g, which does not derive green until a review records a verdict
 Branch:   $branch -> $target
 Review:   $rid (open; no route, no assignee)
 Workflow: $spent_root — every step closed but the finalizer
@@ -533,7 +547,7 @@ recorded_verdict() { # <have> <want "value@oid">
   case "$rest" in ''|*@*) return 1 ;; *) return 0 ;; esac
 }
 
-# The oid half of the marker grammar <green|fixable|exception>@<40-hex>.
+# A full 40-hex commit oid, the shape of the live head this arm reads.
 is_oid() { # <string>
   local v="${1:-}"
   case "$v" in *[!0-9a-f]*|"") return 1 ;; esac
@@ -587,7 +601,7 @@ total=$(printf '%s' "$ROWS" | awk 'NF { n++ } END { print n + 0 }')
 # records them all and puts first only the anchors that owe a stamp or have no
 # verdict. A child list that does not read leaves those two rules and records
 # no marks. Unpaced, the walk keeps the enumerated order.
-stamped=0; dispatched=0; validated=0; held=0; unsafe=0; skipped=0; wedged=0; cleared=0; disposed=0
+stamped=0; dispatched=0; validated=0; held=0; unsafe=0; skipped=0; wedged=0; disposed=0
 pace_start "$CURSOR" "$DEADLINE"
 pace_seen_start "${CURSOR:+$CURSOR.seen}"
 first_rows=""; rest_rows=""; first_n=0
@@ -695,43 +709,6 @@ while IFS= read -r tagged; do
     canon=$(cs_canon "$checkset")
     echo "$PROG: $id had no normalized check_set; stamped '$DEFAULT_CHECK_SET'"
   fi
-  # --- retire markers no arm of the cadence can ever rewrite ------------------
-  # merge.sh and the checks loop below both read only the checks named in
-  # check_set, so a check.<g> outside it governs nothing and nothing rewrites
-  # it. Clear it when it also fails the marker grammar: a word no lane state
-  # names is not a state, and check-gate-integrity errors on it forever.
-  # A well-formed marker survives — a narrowed check_set keeps its history.
-  # A legacy exception@<oid> park is exempt from the sweep: until
-  # migrate-lane-states.sh runs it is still an operator's park to retire, not
-  # damage to clear, and clearing it silently would leave the migration
-  # nothing to find.
-  declared=",$(printf '%s' "$checkset" | tr -d '[:space:]'),"
-  stray=$(printf '%s' "$row" | jq -r --arg d "$declared" '
-    (.metadata // {}) | to_entries[]
-    | select(.key | test("^check\\.[^.]+$"))
-    | select((.value | type) == "string")
-    | select((.value | test("^(unreviewed|reviewing|validating|fixing|green)$")) | not)
-    | select((.value | test("^exception@")) | not)
-    | (.key | sub("^check\\."; "")) as $g
-    | select(($d | contains("," + $g + ",")) | not)
-    | .key' 2>/dev/null)
-  while IFS= read -r k; do
-    [ -n "${k:-}" ] || continue
-    was=$(meta_of "$row" "$k")
-    gc bd update "$id" --unset-metadata "$k" \
-      --append-notes "gate-ensure: cleared $k=\"$was\" — check_set '$checkset' does not declare that check and the marker is not a well-formed verdict, so no signoff or merge could ever act on it." \
-      >/dev/null 2>&1 </dev/null
-    still=$(gc bd show "$id" --json </dev/null 2>/dev/null | scrub \
-      | jq -r --arg k "$k" '.[0].metadata[$k] // empty' 2>/dev/null)
-    if [ -n "$still" ]; then
-      echo "$PROG: WARN $id $k still reads '$still' after the clear; retry next pass" >&2
-    else
-      cleared=$((cleared + 1))
-      echo "$PROG: $id cleared undeclared malformed check marker $k=\"$was\" (check_set '$checkset')"
-    fi
-  done <<STRAY
-$stray
-STRAY
 
   # --- dispatch the validator onto every open, undispatched validation pass -----
   # A lane enters validating when an open task_kind=validation bead sits on the
@@ -771,6 +748,9 @@ STRAY
       elif [ -z "$VALIDATE_POOL" ]; then
         echo "$PROG: $id has an open validation pass $VPASS_D but no --validate-pool was given; no dispatch (the pass holds the merge until one is)" >&2
         skipped=$((skipped + 1))
+      elif ! pr_finishing_settle "$VPASS_D"; then
+        echo "$PROG: WARN $id validation pass $VPASS_D did not settle at its priority; not dispatched, merge stays held, retry next pass" >&2
+        skipped=$((skipped + 1))
       else
         gc sling ${GC_RIG:+--rig "$GC_RIG"} "$VALIDATE_POOL" "$VPASS_D" --on "$VALIDATE_FORMULA" >/dev/null 2>&1
         if pour_ok "$VPASS_D" "$VALIDATE_POOL"; then
@@ -798,23 +778,19 @@ STRAY
   # signal the moot close keys on (the lane loop below reads local backing first).
   mr=$(meta_of "$row" merge_result)
   head=$(live_head_for "$branch")
-  # The machine axis this pass reaches for the anchor as a whole. The check loop
-  # already derives each lane as green (settled) or short of green; these two
-  # flags keep that answer instead of discarding it at the end of the iteration.
-  #
-  # The cap's wedge — shared with gctk merge's merge_hold arm — is evaluated once
-  # HERE, per anchor, not inside the per-check loop: the park sits on the
-  # anchor's own merge_hold, not on any one lane, so a fully green capped
-  # anchor (one check hand-greened, or all of them) must still record the
-  # wedge even though the loop below never reaches a hold check for it.
-  # merge_hold's value must be the literal string "signoff_cap" — an
-  # operator's own hold (merge_hold=true) beside a stale orphan signoff_cap
-  # is not the cap's park.
-  mach_wedge=0
-  mach_progress=0
-  if [ "$hold" = "signoff_cap" ] && [ -n "$(meta_of "$row" signoff_cap)" ]; then
-    mach_wedge=1
+  # Only a pull_request anchor's PR is a published page; before then a review
+  # reads the pending pr_summary instead. The number is parsed from the URL when
+  # the anchor records only the URL, as signoff.sh parses it.
+  pr_url=""; pr_number=""
+  if [ "$mr" = pull_request ]; then
+    pr_url=$(meta_of "$row" pr_url)
+    pr_number=$(meta_of "$row" pr_number)
+    [ -n "$pr_number" ] || { pr_number="${pr_url##*/pull/}"; pr_number="${pr_number%%[!0-9]*}"; }
   fi
+  # The machine axis this pass reaches for the anchor as a whole. The check loop
+  # already derives each lane as green (settled) or short of green; this flag
+  # keeps that answer instead of discarding it at the end of the iteration.
+  mach_progress=0
   # Quiescence is anchor-wide and read at most once per anchor, lazily: the first
   # non-green lane to reach the dispatch decision computes it, and a fully green
   # anchor computes it once at the settle decision below (settling asserts nothing
@@ -861,6 +837,14 @@ STRAY
   else
     GE_THROUGH=merge
   fi
+  # A head neither read answered holds the whole anchor this pass: a review
+  # reads the commit its dispatch records, and the gates resolve at the commit
+  # they judge. This holds even where an index named outright would let the
+  # resolver answer with no commit.
+  if [ -z "$head" ]; then
+    echo "$PROG: $id head of '$branch' unread (neither GitHub nor git ls-remote answered), so there is no commit to resolve its gates at or to pin a review to; dispatching nothing this pass (merge stays held, retry next pass)" >&2
+    skipped=$((skipped + 1)); continue
+  fi
   # The resolver's exit status is load-bearing: a crash prints nothing, and an
   # empty gate list would dispatch nothing AND let this anchor settle on the axis
   # below while a lane is actually short of green. Fail closed — skip the whole
@@ -871,23 +855,6 @@ STRAY
   fi
   while IFS= read -r g; do
     [ -n "$g" ] || continue
-    # The marker is read for two legacy purposes only — never to classify the
-    # lane. First, a legacy exception@ park: signoff.sh refuses to stamp green
-    # over it and migrate-lane-states.sh rewrites it to merge_hold=true, so until
-    # that migration runs a review poured against the parked anchor is wasted
-    # reach — it reads as wedged and held. Second, the wedge escalation's
-    # diagnostic line (judge_pour_liveness reads $marker). Both retire with the
-    # marker grammar itself, once the legacy-surface endgame lands; the lane
-    # STATE is DERIVED below.
-    marker=$(meta_of "$row" "check.$g")
-    case "$marker" in
-      exception@*)
-        mach_progress=1
-        mach_wedge=1
-        echo "$PROG: $id check '$g' carries a legacy park (check.$g=$marker); awaits migrate-lane-states.sh — no dispatch"
-        held=$((held + 1)); continue ;;
-    esac
-
     # Derive the lane's state from the finding and review-outcome graph, never a
     # marker: lane-state.sh is the one helper merge.sh and pr-open.sh derive green
     # through, so the readers agree. Green is settled — a non-superseded approve
@@ -954,9 +921,7 @@ STRAY
     mach_progress=1
 
     # Operator hold gates a re-dispatch (pipeline work toward landing); the armed
-    # check already holds the merge, so held-and-gated is safe. Whether this hold
-    # IS the cap's park (wedged, not merely progressing) was already decided once
-    # for the whole anchor, above.
+    # check already holds the merge, so held-and-gated is safe.
     case "$hold" in
       ""|false|False|FALSE|0|null) : ;;
       *) echo "$PROG: $id check '$g' needs raising ($why) but merge_hold is set (operator gate); no dispatch"
@@ -985,15 +950,15 @@ STRAY
       case "$FOUND" in
         "stranded "*)
           # A review with no route, no pour and no claim is inert — unless a
-          # live tracking convoy CARRIES A WORKFLOW ROOT. That root is a pour
-          # whose exec stamp dropped, but the root ALONE is not proof the pour
+          # workflow run was poured over it (run-lib.sh). That run is a pour
+          # whose exec stamp dropped, but the run ALONE is not proof the pour
           # still runs: its step chain may be live, spent (closed without a
-          # verdict), or unreadable. So a tracked root is judged by the same
-          # liveness check the poured arm uses — live counts in flight, spent
-          # escalates, unreadable holds — not counted in flight on sight. A live
-          # convoy with NO root drives nothing (a pour minted the convoy and the
-          # tracks edge but died before the root), so that case, like a
-          # never-poured one, is re-slung rather than held in flight forever.
+          # verdict), or unreadable. So a run is judged by the same liveness
+          # check the poured arm uses — live counts in flight, spent escalates,
+          # unreadable holds — not counted in flight on sight. A convoy with NO
+          # root drives nothing (a pour minted the convoy and the tracks edge
+          # but died before the root), so that case, like a never-poured one, is
+          # re-slung rather than held in flight forever.
           rid="${FOUND#stranded }"
           [ -n "$REVIEW_POOL" ] || { skipped=$((skipped + 1)); continue; }
           # Quiescence gates the re-sling too: re-routing an inert review pours a
@@ -1012,26 +977,40 @@ STRAY
             judge_pour_liveness "$rid"
             continue
           fi
-          # A stranded review is re-slung only once it carries its whole work
-          # order, the one the fresh dispatch below files with. A create that
-          # read back short leaves exactly this shape, and a pour onto it could
-          # run against a work order the bead does not carry. Nobody holds a
-          # stranded review, so a short one is written the whole order once and
-          # read back again (bd_meta_ensure). The order leaves reviewed_oid
-          # out: the pin is the head the review was dispatched for, and it is
-          # never moved here. A review without one is pinned by mol-review to
-          # the head it reads.
-          if ! rshort=$(bd_meta_ensure "$rid" "$(review_work_order "$g" "$id" "$branch" "$target" "")"); then
+          # A stranded review is re-slung only once it carries its whole record,
+          # the one the fresh dispatch below files with. A create that read
+          # back short leaves exactly this shape, and a pour onto it could run
+          # against a record the bead does not carry. Nobody holds a stranded
+          # review, so a short one is written the whole order once and read
+          # back again (bd_meta_ensure). The pin is written only where the
+          # record has none, at the head this pass read: the pin is the commit
+          # the review was dispatched for, and nothing moves it. bd_meta_ensure
+          # rewrites every key of an order once any key reads short, so an
+          # order carrying the live head would move a pin the dispatch wrote.
+          rrow=$(gc bd show "$rid" --json 2>/dev/null | scrub)
+          if ! printf '%s' "$rrow" | jq -e --arg id "$rid" 'type == "array" and (.[0].id // "") == $id' >/dev/null 2>&1; then
+            echo "$PROG: $id stranded review $rid did not read; not re-slung, merge stays held, retry next pass" >&2
+            skipped=$((skipped + 1)); continue
+          fi
+          rpin=$(printf '%s' "$rrow" | jq -r '(.[0].metadata.reviewed_oid // "") | tostring' 2>/dev/null)
+          rnew_pin="$head"; [ -z "$rpin" ] || rnew_pin=""
+          rorder=$(review_work_order "$g" "$id" "$branch" "$target" "$rnew_pin" "$pr_url" "$pr_number" "$why")
+          if ! rshort=$(bd_meta_ensure --row "$rrow" "$rid" "$rorder"); then
             echo "$PROG: WARN $id stranded review $rid did not record its whole work order (short: $rshort); not re-slung, merge stays held, retry next pass" >&2
             skipped=$((skipped + 1)); continue
           fi
-          # Zero roots: a tracking convoy exists but carries no workflow root, so
-          # nothing drives the review. Re-sling — this mints the FIRST root; the
-          # empty convoy is left in place, contributing none to a later pass's
-          # union. Forward the same SLING_VAR_ARGS the fresh dispatch passes: a
+          if ! pr_finishing_settle "$rid"; then
+            echo "$PROG: WARN $id stranded review $rid did not settle at its priority; not re-slung, merge stays held, retry next pass" >&2
+            skipped=$((skipped + 1)); continue
+          fi
+          # Zero runs: no workflow root was poured over the review, so nothing
+          # drives it. Re-sling — this mints the FIRST root; a convoy an earlier
+          # pour left with no root stays in place and names no run. Forward the same SLING_VAR_ARGS the fresh dispatch passes: a
           # --review-formula that marks its lane and synthesis vars required
-          # cannot mint that first root without them.
-          gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$rid" --on "$REVIEW_FORMULA" ${SLING_VAR_ARGS[@]+"${SLING_VAR_ARGS[@]}"} >/dev/null 2>&1
+          # cannot mint that first root without them. The record's values ride
+          # the same sling, its own pin among them.
+          review_var_args "$rid" "$(printf '%s' "$rorder" | jq -c --arg p "${rpin:-$head}" '. + {reviewed_oid: $p}')"
+          gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$rid" --on "$REVIEW_FORMULA" ${SLING_VAR_ARGS[@]+"${SLING_VAR_ARGS[@]}"} "${REVIEW_VAR_ARGS[@]}" >/dev/null 2>&1
           if pour_ok "$rid" "$REVIEW_POOL"; then
             gc session wake "$REVIEW_POOL" >/dev/null 2>&1 || true
             dispatched=$((dispatched + 1))
@@ -1073,30 +1052,25 @@ STRAY
     # the redundant read the (anchor, check, head) invariant forbids. A moved head
     # carries a different oid and is not barred; a superseded review is excluded,
     # so a validator returning the lane to unreviewed still re-pours. An
-    # unreadable head cannot prove a duplicate, so it degrades to the
-    # quiescence-only suppression above; an unreadable ledger fails closed.
-    if [ -n "$head" ]; then
-      if ! JUDGED=$(reviewed_at_head "$id" "$g" "$head"); then
-        echo "$PROG: $id check '$g' per-head bar probe unreadable; dispatching nothing (merge stays held, retry next pass)" >&2
-        skipped=$((skipped + 1)); continue
-      fi
-      if [ -n "$JUDGED" ]; then
-        echo "$PROG: $id check '$g' head $head already reviewed by $JUDGED (closed, verdict recorded); no second whole-diff review at an unmoved head"
-        held=$((held + 1)); continue
-      fi
+    # unreadable ledger fails closed.
+    if ! JUDGED=$(reviewed_at_head "$id" "$g" "$head"); then
+      echo "$PROG: $id check '$g' per-head bar probe unreadable; dispatching nothing (merge stays held, retry next pass)" >&2
+      skipped=$((skipped + 1)); continue
+    fi
+    if [ -n "$JUDGED" ]; then
+      echo "$PROG: $id check '$g' head $head already reviewed by $JUDGED (closed, verdict recorded); no second whole-diff review at an unmoved head"
+      held=$((held + 1)); continue
     fi
 
     if [ -z "$REVIEW_POOL" ]; then
       echo "$PROG: $id check '$g' is armed but no --review-pool was given; no dispatch (merge is HELD until one is)" >&2
       skipped=$((skipped + 1)); continue
     fi
-    # No dispatch ceiling. GC_MAX_REVIEW_DISPATCHES and its dispatch_backstop
-    # stamp were a convergence proxy — a converging PR could spend its budget on
-    # redundant rounds and park on the board as a failure that never happened.
-    # Quiescence above forbids the redundant round, so there is no budget left to
-    # bound and no anchor carries a dispatch tally. The runaway shapes that remain
-    # — a reviewer that dies after claim, a fix unit filed with its edge reversed
-    # — stop the PR moving rather than spin the dispatcher.
+    # There is no dispatch ceiling: quiescence above forbids the redundant round
+    # a ceiling would have bounded, so no anchor carries a dispatch tally. The
+    # runaway shapes that remain — a reviewer that dies after claim, a fix unit
+    # filed with its edge reversed — stop the PR moving rather than spin the
+    # dispatcher.
 
     # A review an earlier two-write create left behind carries this title but
     # not the keys inflight_review reads, so the probe above never saw it, and
@@ -1119,16 +1093,12 @@ STRAY
     # (rc 1). One short of any other key (rc 2) is not slung, because a pour
     # onto it could run against a work order the bead does not carry; the
     # stranded arm above finds it next pass and slings it once it is whole.
-    RID_META=$(review_work_order "$g" "$id" "$branch" "$target" "$head")
+    # A review is PR-finishing work, so it is born carrying the PR-finishing
+    # shift and no parent. The stranded arm's work order leaves the shift out:
+    # after its birth the shift is the review's own input.
+    RID_META=$(pr_finishing_birth "$(review_work_order "$g" "$id" "$branch" "$target" "$head" "$pr_url" "$pr_number" "$why")")
     RID_TITLE="Review branch $branch -> $target ($g): $title"
-    body=""
-    [ -x "$BODY_EMITTER" ] && body=$("$BODY_EMITTER" --formula "$REVIEW_FORMULA" --check-name "$g" --reviewed-oid "$head" --note "$why" 2>/dev/null) || body=""
-    if [ -n "$body" ]; then
-      RID=$(printf '%s' "$body" | bd_create --select "$REVIEW_SELECT" --child-of "$id" "$RID_META" "$RID_TITLE" -t task --deps "blocks:$id" --body-file -); rid_rc=$?
-    else
-      echo "$PROG: WARN dispatch note unavailable ($BODY_EMITTER); dispatching a title-only review" >&2
-      RID=$(bd_create --select "$REVIEW_SELECT" --child-of "$id" "$RID_META" "$RID_TITLE" -t task --deps "blocks:$id"); rid_rc=$?
-    fi
+    RID=$(printf '%s' "$REVIEW_DESCRIPTION" | bd_create --select "$REVIEW_SELECT" --child-of "$id" "$RID_META" "$RID_TITLE" -t task --deps "blocks:$id" --body-file -); rid_rc=$?
     if [ -z "$RID" ]; then
       echo "$PROG: $id could not create the review bead for check '$g'; merge stays held, retry next pass" >&2
       skipped=$((skipped + 1)); continue
@@ -1138,10 +1108,18 @@ STRAY
       skipped=$((skipped + 1)); continue
     fi
     ge_mark_child "$id" "$RID"
+    # A review that does not settle at its priority is not slung: the stranded
+    # arm settles and slings it next pass.
+    if ! pr_finishing_settle "$RID"; then
+      echo "$PROG: WARN review $RID did not settle at its priority; not slung, merge stays held, the stranded arm re-slings it next pass" >&2
+      skipped=$((skipped + 1)); continue
+    fi
     # One sling, no retry: a re-pour mints a second workflow root. A pour that
     # does not read back is held; the next pass's stranded arm probes for its
-    # tracking convoy before deciding to re-sling.
-    gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$RID" --on "$REVIEW_FORMULA" ${SLING_VAR_ARGS[@]+"${SLING_VAR_ARGS[@]}"} >/dev/null 2>&1
+    # tracking convoy before deciding to re-sling. The sling carries the record
+    # that read back, as the formula's vars.
+    review_var_args "$RID" "$RID_META"
+    gc sling ${GC_RIG:+--rig "$GC_RIG"} "$REVIEW_POOL" "$RID" --on "$REVIEW_FORMULA" ${SLING_VAR_ARGS[@]+"${SLING_VAR_ARGS[@]}"} "${REVIEW_VAR_ARGS[@]}" >/dev/null 2>&1
     if ! pour_ok "$RID" "$REVIEW_POOL"; then
       echo "$PROG: WARN review $RID pour did not read back; merge stays held, retry next pass" >&2
       skipped=$((skipped + 1)); continue
@@ -1172,52 +1150,44 @@ GATES
   # re-implementing this loop, and it costs no extra read: lifecycle.sh compares
   # against the bead it must fetch anyway.
   #
-  # Only with a readable head. The value is head-pinned so a stale verdict can
-  # never read as current, and a verdict pinned to nothing is not evidence.
+  # The value is head-pinned so a stale verdict can never read as current.
   #
-  # A wedged check outranks a progressing one. The two can co-occur only on a
-  # multi-check check_set, and there the anchor still cannot land: the cap's park
-  # holds every check at once, so no amount of progress on the others moves it,
-  # and the operator's move is the same one either way.
-  if [ -n "$head" ]; then
-    # Settling asserts nothing is owed, which is more than every lane deriving
-    # green: an in-flight fix unit or a validation pass acts on the anchor as a
-    # whole, not on a lane this loop visited, and an open must-fix finding is
-    # owed whether or not a fix unit answers it yet. That is quiescence plus its
-    # unanswered findings, the read the dispatch decision already consults. A
-    # fully green anchor lets the loop skip the lazy compute, so run it here
-    # before settling and fail closed — a hold, an unanswered must-fix finding,
-    # or a probe that cannot answer is progressing, not settled.
-    if [ "$mach_wedge" = 0 ] && [ "$mach_progress" = 0 ]; then
-      if [ "$quiesce_computed" = 0 ]; then
-        quiesce_computed=1
-        compute_quiescence "$id"
-      fi
-      if [ -n "$quiesce_hold" ] || [ -n "$quiesce_unanswered" ] || [ "$quiesce_unreadable" = 1 ]; then
-        mach_progress=1
-      fi
+  # Settling asserts nothing is owed, which is more than every lane deriving
+  # green: an in-flight fix unit or a validation pass acts on the anchor as a
+  # whole, not on a lane this loop visited, and an open must-fix finding is
+  # owed whether or not a fix unit answers it yet. That is quiescence plus its
+  # unanswered findings, the read the dispatch decision already consults. A
+  # fully green anchor lets the loop skip the lazy compute, so run it here
+  # before settling and fail closed — a hold, an unanswered must-fix finding,
+  # or a probe that cannot answer is progressing, not settled.
+  if [ "$mach_progress" = 0 ]; then
+    if [ "$quiesce_computed" = 0 ]; then
+      quiesce_computed=1
+      compute_quiescence "$id"
     fi
-    if [ "$mach_wedge" = 1 ]; then mach="wedged-exception"
-    elif [ "$mach_progress" = 1 ]; then mach="progressing"
-    else mach="settled"
+    if [ -n "$quiesce_hold" ] || [ -n "$quiesce_unanswered" ] || [ "$quiesce_unreadable" = 1 ]; then
+      mach_progress=1
     fi
-    #
-    # --route carries the anchor's OWN route back. Recording a verdict is an
-    # observation, not a routing decision, and an omitted --route would let a
-    # detached state's default clear a route this pass never looked at.
-    state=$(meta_of "$row" merge_result)
-    # lifecycle.sh declines to write a transition that changes nothing, but it
-    # has to re-read the anchor to find that out, and a per-anchor `gc bd show`
-    # is the most expensive call this arm makes. The enumerated row already
-    # carries the verdict, so the common pass — the same verdict at the same
-    # head — is recognisable here for free. Only the full dated shape counts: a
-    # bare <value>@<oid> still owes its instant, and that is a real write.
-    if [ -n "$state" ] && ! recorded_verdict "$(meta_of "$row" "pr.machine")" "$mach@$head" \
-       && ! "$LIFECYCLE" transition "$id" --to "$state" --expect "$state" \
-         --route "$(meta_of "$row" "gc.routed_to")" \
-         --set-dated "pr.machine=$mach@$head" >/dev/null; then
-      echo "$PROG: WARN $id machine axis '$mach@$head' did not record; the board reads it as unknown until the next pass" >&2
-    fi
+  fi
+  if [ "$mach_progress" = 1 ]; then mach="progressing"
+  else mach="settled"
+  fi
+  #
+  # --route carries the anchor's OWN route back. Recording a verdict is an
+  # observation, not a routing decision, and an omitted --route would let a
+  # detached state's default clear a route this pass never looked at.
+  state=$(meta_of "$row" merge_result)
+  # lifecycle.sh declines to write a transition that changes nothing, but it
+  # has to re-read the anchor to find that out, and a per-anchor `gc bd show`
+  # is the most expensive call this arm makes. The enumerated row already
+  # carries the verdict, so the common pass — the same verdict at the same
+  # head — is recognisable here for free. Only the full dated shape counts: a
+  # bare <value>@<oid> still owes its instant, and that is a real write.
+  if [ -n "$state" ] && ! recorded_verdict "$(meta_of "$row" "pr.machine")" "$mach@$head" \
+     && ! "$LIFECYCLE" transition "$id" --to "$state" --expect "$state" \
+       --route "$(meta_of "$row" "gc.routed_to")" \
+       --set-dated "pr.machine=$mach@$head" >/dev/null; then
+    echo "$PROG: WARN $id machine axis '$mach@$head' did not record; the board reads it as unknown until the next pass" >&2
   fi
 done <<ROWS_EOF
 $(printf '%s\n' "$first_rows" | awk 'NF { print "first\t" $0 }')
@@ -1232,7 +1202,7 @@ if [ -n "$PACE_RESUME_AT" ] || [ "$PACE_FIRST_SKIPPED" -gt 0 ]; then
   [ "$PACE_FIRST_SKIPPED" -eq 0 ] || paced="$paced; $PACE_FIRST_SKIPPED needing action wait for the next pass"
 fi
 echo "$PROG: $paced"
-echo "$PROG: $stamped check_sets stamped, $cleared stray markers cleared, $dispatched reviews dispatched/re-routed, $validated validation passes dispatched, $held operator-held, $disposed disposed-skipped, $skipped held-for-retry, $wedged wedged/escalated, $unsafe UNSAFE"
+echo "$PROG: $stamped check_sets stamped, $dispatched reviews dispatched/re-routed, $validated validation passes dispatched, $held operator-held, $disposed disposed-skipped, $skipped held-for-retry, $wedged wedged/escalated, $unsafe UNSAFE"
 if [ "$unsafe" -gt 0 ]; then
   echo "$PROG: UNSAFE — $unsafe anchor(s) visible to merge.sh with no check_set; merge.sh holds each on its own read; exiting rc=$UNSAFE_RC" >&2
   exit "$UNSAFE_RC"

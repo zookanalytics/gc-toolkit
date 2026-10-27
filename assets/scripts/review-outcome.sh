@@ -2,7 +2,7 @@
 # review-outcome.sh — the WRITE side of a review lane's approve-outcome bead.
 # lane-state.sh READS these beads to derive a lane's green; this writes them, so
 # the validator can make a lane green or send it back to unreviewed without ever
-# touching a stored check.<lane> marker.
+# writing a lane state onto the anchor.
 #
 # The approve backing is a first-class review-outcome bead, the same shape
 # gate-ensure.sh files at dispatch and signoff.sh closes on an approve verdict —
@@ -45,9 +45,10 @@
 #                   check_set declares — not the check_name=human pseudo-lane no
 #                   check reader derives green from. This is what returns the real
 #                   checks to unreviewed so a fresh whole-diff review is
-#                   dispatched and holds the merge. --by names the caller in the
-#                   note each superseded review carries; the default names the
-#                   validator's human batch.
+#                   dispatched and holds the merge. The lanes are resolved at the
+#                   commit --oid names, the one the ruling judged, which the call
+#                   requires. --by names the caller in the note each superseded
+#                   review carries; the default names the validator's human batch.
 #
 # A must-fix finding still open holds the lane at `fixing` and the merge on its
 # `blocks` edge; this writes no finding and reads none. Backing a lane whose
@@ -89,7 +90,7 @@ usage() {
 usage:
   review-outcome.sh back-lane --anchor <id> --lane <lane> --oid <oid> [--batch <id>] [--reason <r>]
   review-outcome.sh supersede-lane --anchor <id> --lane <lane> [--reason <r>]
-  review-outcome.sh supersede-anchor --anchor <id> [--reason <r>] [--by <who>]
+  review-outcome.sh supersede-anchor --anchor <id> --oid <oid> [--reason <r>] [--by <who>]
 USAGE
 }
 
@@ -302,14 +303,18 @@ cmd_supersede_lane() {
 }
 
 cmd_supersede_anchor() {
-  local anchor="" reason="" by="validator" scope="anchor-wide human batch"
+  local anchor="" oid="" reason="" by="validator" scope="anchor-wide human batch"
   while [ $# -gt 0 ]; do case "$1" in
     --anchor) anchor="${2:-}"; shift 2 || { usage; exit 1; } ;;
+    --oid) oid="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --reason) reason="${2:-}"; shift 2 || { usage; exit 1; } ;;
     --by) by="${2:-}"; scope="anchor-wide"; shift 2 || { usage; exit 1; } ;;
     *) warn "unknown arg '$1'"; usage; exit 1 ;;
   esac; done
   [ -n "$anchor" ] || { warn "supersede-anchor needs --anchor"; exit 1; }
+  # The lanes are read at the commit the ruling judged, so a call that names none
+  # is refused before anything is read: a rig's rows are read only at a commit.
+  [ -n "$oid" ] || { warn "supersede-anchor needs --oid, the commit the ruling judged; nothing superseded"; exit 1; }
   [ -n "$by" ] || { warn "supersede-anchor --by needs a value"; exit 1; }
 
   # Operator input rules the whole diff, so a human batch's non-convergence, or a
@@ -327,16 +332,17 @@ cmd_supersede_anchor() {
   [ -n "$checkset" ] \
     || { warn "anchor $anchor declares no check_set; refusing to treat that as no gating lane"; exit 2; }
 
-  # The declared lanes, from the one resolver merge.sh and pr-open.sh also ask:
-  # none/off is checkless by choice and approval is the universal merge rule, not a
-  # lane, so all three drop there. A check_set naming only those has no lane to
-  # move, so a deliberately checkless anchor is a zero no-op, not an error.
+  # The declared lanes, from the one resolver merge.sh and pr-open.sh also ask,
+  # at the commit --oid names: none/off is checkless by choice and approval is the
+  # universal merge rule, not a lane, so all three drop there. A check_set naming
+  # only those has no lane to move, so a deliberately checkless anchor is a zero
+  # no-op, not an error.
   local lanes
   # The resolver's exit status separates a crash from a deliberately checkless
   # anchor: a non-zero exit could not name the lanes and must fail closed (exit 2,
   # like the unreadable-anchor arms above), never collapse to a zero no-op that
   # leaves the merge open on a review the caller required.
-  if ! lanes=$("$REVIEW_CHECKS" --resolve --check-set "$checkset" --through merge 2>/dev/null); then
+  if ! lanes=$("$REVIEW_CHECKS" --resolve --check-set "$checkset" --through merge --at "$oid" 2>/dev/null); then
     warn "the check resolver failed for anchor $anchor; refusing to supersede on an unreadable lane set"; exit 2
   fi
   [ -n "$lanes" ] || { echo 0; return 0; }

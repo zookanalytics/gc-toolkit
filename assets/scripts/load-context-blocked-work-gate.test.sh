@@ -3,11 +3,11 @@
 #
 # A v2 formula-sling pours immediately and reads no `blocks` deps, so a work
 # bead with an open blocker reaches a polecat as an offered claim (the routed
-# record is the workflow root, not the work bead — docs/gascity-routing-model.md).
+# record is the workflow root, not the work bead — docs/gascity/routing-model.md).
 # This guard is the pack-level safety net: at load-context, if the work bead
 # carries an open `blocks` blocker it refuses to build, contains the pour's
-# delivery keys, arms a re-dispatch so the work re-offers when the blocker
-# closes, and holds the molecule.
+# delivery keys, arms a re-dispatch so the work re-slings when the blocker
+# closes, and cancels the run through run-cancel.sh.
 #
 # What it holds:
 #   1. DISCRIMINATION — fires ONLY on an OPEN `blocks` dep. A `relates-to` dep,
@@ -17,10 +17,10 @@
 #      five delivery keys (so `arm` accepts the bead and reconcile slings it
 #      rather than retiring a still-routed record), arms deferred-dispatch to
 #      the pool the pour was executing on replaying `--on mol-polecat-work`,
-#      then holds and drain-acks.
+#      then cancels the run and drain-acks.
 #   3. FAIL CLOSED — arm failure falls back to escalate; with no release path
-#      recorded it neither holds nor drains; a hold that did not land does not
-#      drain. The step is never left silently claimable or silently parked.
+#      recorded it neither cancels nor drains; a cancel that did not land does
+#      not drain. The step stays claimed for the next worker either way.
 #
 # EXECUTES the real snippet extracted verbatim from the formula against fake
 # `gc` and stub scripts, so the test cannot drift from the shipped instruction.
@@ -54,16 +54,16 @@ extract() {
     f' "$TOML"
 }
 
-GATE="$(extract load-context-blocked-work-hold)"
+GATE="$(extract load-context-blocked-work-decline)"
 
 [ -n "$GATE" ] \
-  && ok "gate extracted between load-context-blocked-work-hold markers" \
+  && ok "gate extracted between load-context-blocked-work-decline markers" \
   || bad "gate extraction EMPTY — markers missing from $TOML"
 
 # Two regions sharing one marker name would concatenate into one extraction and
 # double every assertion below; pin the opener to a single occurrence.
-eq "$(grep -c '^# >>> load-context-blocked-work-hold$' "$TOML")" "1" \
-   "exactly one load-context-blocked-work-hold region"
+eq "$(grep -c '^# >>> load-context-blocked-work-decline$' "$TOML")" "1" \
+   "exactly one load-context-blocked-work-decline region"
 
 # TOML `"""` strings eat a trailing backslash (line-ending escape), silently
 # joining lines. The snippet is written backslash-free; assert it, because
@@ -94,17 +94,17 @@ GC
 chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 
-# molecule-hold.sh, escalate.sh, deferred-dispatch.sh resolved out of
+# run-cancel.sh, escalate.sh, deferred-dispatch.sh resolved out of
 # $GC_PACK_DIR exactly as the arm resolves them. Each records its verb into the
 # ordered trace and its argv where the reason/target assertions can read it,
 # and returns a code the assertions control.
 mkdir -p "$TMP/pack/assets/scripts"
-cat > "$TMP/pack/assets/scripts/molecule-hold.sh" <<'HOLD'
+cat > "$TMP/pack/assets/scripts/run-cancel.sh" <<'CANCEL'
 #!/usr/bin/env bash
-printf 'HOLD\n' >> "$FAKE_LOG"
-printf '%s\n' "$*" >> "${FAKE_HOLD:-/dev/null}"
-exit "${FAKE_HOLD_RC:-0}"
-HOLD
+printf 'CANCEL\n' >> "$FAKE_LOG"
+printf '%s\n' "$*" >> "${FAKE_CANCEL:-/dev/null}"
+exit "${FAKE_CANCEL_RC:-0}"
+CANCEL
 cat > "$TMP/pack/assets/scripts/escalate.sh" <<'ESC'
 #!/usr/bin/env bash
 printf 'ESCALATE\n' >> "$FAKE_LOG"
@@ -117,22 +117,22 @@ printf 'ARM\n' >> "$FAKE_LOG"
 printf '%s\n' "$*" >> "${FAKE_ARM:-/dev/null}"
 exit "${FAKE_ARM_RC:-0}"
 ARM
-chmod +x "$TMP/pack/assets/scripts/molecule-hold.sh" \
+chmod +x "$TMP/pack/assets/scripts/run-cancel.sh" \
          "$TMP/pack/assets/scripts/escalate.sh" \
          "$TMP/pack/assets/scripts/deferred-dispatch.sh"
 export GC_PACK_DIR="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH=""
 
 # run <work-bead-json> -> prints "<rc>|<ordered verb log>"
-#   FAKE_*_RC control each stub's exit; FAKE_UPDATE/HOLD/ESC/ARM capture argv.
+#   FAKE_*_RC control each stub's exit; FAKE_UPDATE/CANCEL/ESC/ARM capture argv.
 run() {
-  : > "$TMP/log"; : > "$TMP/update"; : > "$TMP/hold"; : > "$TMP/esc"; : > "$TMP/arm"
+  : > "$TMP/log"; : > "$TMP/update"; : > "$TMP/cancel"; : > "$TMP/esc"; : > "$TMP/arm"
   local rc=0
   WORK_BEAD_ID=tk-work \
   WORK_BEAD_JSON="$1" \
   CLAIMED_STEP_BEAD_ID=st-load \
-  FAKE_LOG="$TMP/log" FAKE_UPDATE="$TMP/update" FAKE_HOLD="$TMP/hold" \
+  FAKE_LOG="$TMP/log" FAKE_UPDATE="$TMP/update" FAKE_CANCEL="$TMP/cancel" \
   FAKE_ESC="$TMP/esc" FAKE_ARM="$TMP/arm" \
-  FAKE_HOLD_RC="${FAKE_HOLD_RC:-0}" FAKE_ESC_RC="${FAKE_ESC_RC:-0}" FAKE_ARM_RC="${FAKE_ARM_RC:-0}" \
+  FAKE_CANCEL_RC="${FAKE_CANCEL_RC:-0}" FAKE_ESC_RC="${FAKE_ESC_RC:-0}" FAKE_ARM_RC="${FAKE_ARM_RC:-0}" \
     bash "$TMP/gate.sh" > "$TMP/out" 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
@@ -158,8 +158,8 @@ eq "$(run "[{\"metadata\":$META_ROUTED,\"dependencies\":[{\"id\":\"tk-done\",\"d
 
 BLOCKED_JSON="[{\"metadata\":$META_ROUTED,\"dependencies\":[{\"id\":\"tk-blk\",\"dependency_type\":\"blocks\",\"status\":\"open\"}]}]"
 eq "$(run "$BLOCKED_JSON")" \
-   "1|UPDATE;UPDATE;ARM;HOLD;DRAIN;" \
-   "open blocker: notes, clears keys, arms, holds, drain-acks, exits 1"
+   "1|UPDATE;UPDATE;ARM;CANCEL;DRAIN;" \
+   "open blocker: notes, clears keys, arms, cancels the run, drain-acks, exits 1"
 
 # The containment write clears every delivery key, execution route included.
 # Clearing gc.routed_to is what makes the bead armable; reconcile keys idempotency
@@ -180,48 +180,48 @@ has "$(cat "$TMP/update")" '--append-notes' "records the refusal on the work bea
 has "$(cat "$TMP/arm")" "arm tk-work --target $POOL" "arms re-dispatch to the pour's pool"
 has "$(cat "$TMP/arm")" '--sling-arg --on --sling-arg mol-polecat-work' "replays --on mol-polecat-work"
 
-# The hold names this step and blocker so a reader knows what releases it.
-has "$(cat "$TMP/hold")" 'mol-polecat-work.load-context' "holds THIS step"
-has "$(cat "$TMP/hold")" 'tk-blk' "hold reason names the blocker"
+# The cancel names this step and the blocker so a reader knows why the run ended.
+has "$(cat "$TMP/cancel")" '--step mol-polecat-work.load-context --bead st-load' "cancels the run of THIS step"
+has "$(cat "$TMP/cancel")" 'tk-blk' "cancel reason names the blocker"
 
 # A closed blocker in the same set must not appear in OPEN_BLOCKERS; only the
 # open one is named.
 MIXED_JSON="[{\"metadata\":$META_ROUTED,\"dependencies\":[{\"id\":\"tk-open\",\"dependency_type\":\"blocks\",\"status\":\"open\"},{\"id\":\"tk-done\",\"dependency_type\":\"blocks\",\"status\":\"closed\"}]}]"
 eq "$(run "$MIXED_JSON")" \
-   "1|UPDATE;UPDATE;ARM;HOLD;DRAIN;" \
+   "1|UPDATE;UPDATE;ARM;CANCEL;DRAIN;" \
    "mixed set: fires on the open blocker"
 run "$MIXED_JSON" >/dev/null
-has "$(cat "$TMP/hold")" 'tk-open' "names the open blocker"
-no  "$(cat "$TMP/hold")" 'tk-done' "omits the closed blocker from the set"
+has "$(cat "$TMP/cancel")" 'tk-open' "names the open blocker"
+no  "$(cat "$TMP/cancel")" 'tk-done' "omits the closed blocker from the set"
 
 # --- 3. Fail-closed arms. -----------------------------------------------------
 
 # arm cannot be recorded (deferred-dispatch exits non-zero): fall back to a
-# human visit, then hold and drain. (The RC override must reach the `run`
+# human visit, then cancel and drain. (The RC override must reach the `run`
 # function itself — an env prefix on `eq` would apply after the command
 # substitution has already expanded.)
 out="$(FAKE_ARM_RC=1 run "$BLOCKED_JSON")"
-eq "$out" "1|UPDATE;UPDATE;ARM;ESCALATE;HOLD;DRAIN;" \
-   "arm fails: escalate fallback, then hold + drain"
+eq "$out" "1|UPDATE;UPDATE;ARM;ESCALATE;CANCEL;DRAIN;" \
+   "arm fails: escalate fallback, then cancel + drain"
 
 # No execution route to derive a target from: arm is skipped (POOL empty) and
 # escalation carries the work forward.
 NOPOOL_JSON="[{\"metadata\":{},\"dependencies\":[{\"id\":\"tk-blk\",\"dependency_type\":\"blocks\",\"status\":\"open\"}]}]"
 eq "$(run "$NOPOOL_JSON")" \
-   "1|UPDATE;UPDATE;ESCALATE;HOLD;DRAIN;" \
-   "no pool target: skips arm, escalates, holds, drains"
+   "1|UPDATE;UPDATE;ESCALATE;CANCEL;DRAIN;" \
+   "no pool target: skips arm, escalates, cancels, drains"
 
-# Neither release path recorded: NEVER hold or drain — the step stays claimable
+# Neither release path recorded: NEVER cancel or drain — the step stays claimed
 # and the next worker retries the release.
 out="$(FAKE_ARM_RC=1 FAKE_ESC_RC=1 run "$BLOCKED_JSON")"
 eq "$out" "1|UPDATE;UPDATE;ARM;ESCALATE;" \
-   "no release path: does not hold, does not drain"
+   "no release path: does not cancel, does not drain"
 
-# Release recorded but the hold did not land: do NOT drain — the molecule can
-# still be re-offered.
-out="$(FAKE_HOLD_RC=1 run "$BLOCKED_JSON")"
-eq "$out" "1|UPDATE;UPDATE;ARM;HOLD;" \
-   "hold fails after arm: does not drain"
+# Release recorded but the cancel did not land: do NOT drain — the run is
+# still live.
+out="$(FAKE_CANCEL_RC=1 run "$BLOCKED_JSON")"
+eq "$out" "1|UPDATE;UPDATE;ARM;CANCEL;" \
+   "cancel fails after arm: does not drain"
 
 # --- Summary. -----------------------------------------------------------------
 echo "----"

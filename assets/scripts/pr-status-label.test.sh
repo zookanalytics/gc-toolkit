@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# pr-status-label.test.sh — hermetic tests for the workflow-owned PR labels: the
-# status: derivation (anchor state -> working/needs-review/needs-attention), its
-# mutually-exclusive set, ensure, and reconcile, and the sibling base: group
-# (mark-base) that marks an integration checkpoint. No live city, gh, or network.
+# pr-status-label.test.sh — hermetic tests for the workflow-owned status: PR
+# label: its derivation (anchor state -> working/needs-review/needs-attention), its
+# mutually-exclusive set, ensure, and reconcile. No live city, gh, or network.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-prlabel-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -36,7 +35,7 @@ ghlog() { cat "$STUB_GH_LOG"; }
 resetlog() { : > "$STUB_GH_LOG"; }
 
 # ---------------------------------------------------------------------------
-# derive: who must act next, read off the anchor's own state.
+# derive: what stands between the PR and landing, read off the anchor's own state.
 # Precedence needs-attention > working > needs-review.
 # ---------------------------------------------------------------------------
 
@@ -94,10 +93,6 @@ store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request"}}
         {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-other"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "needs-review" "live work anchored to another PR does not flip this one"
 
-# needs-attention — the signoff round cap parked the anchor for a person.
-store '[{"id":"tk-a","status":"open","metadata":{"merge_hold":"signoff_cap","signoff_cap":"codex"}}]'
-eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "a signoff-cap park => needs-attention"
-
 # needs-attention — an operator freeze is a hold the city stopped behind.
 store '[{"id":"tk-a","status":"open","metadata":{"merge_hold":"true"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "an operator freeze (merge_hold=true) => needs-attention"
@@ -136,10 +131,83 @@ eq "$("$SUT" derive --anchor tk-a)" "needs-review" "a readied draft with nothing
 store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","opened_as_draft":"abc123","merge_hold":"true"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "a held draft => needs-attention"
 
-# precedence — a cap park outranks an open rework child.
-store '[{"id":"tk-a","status":"open","metadata":{"merge_hold":"signoff_cap","signoff_cap":"codex"}},
+# precedence — a hold outranks an open rework child.
+store '[{"id":"tk-a","status":"open","metadata":{"merge_hold":"true"}},
         {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]'
-eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "needs-attention outranks working (cap park + open child)"
+eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "needs-attention outranks working (hold + open child)"
+
+# needs-attention — an open visit on the anchor is a hold: the merge pass's finalize
+# gate refuses the merge while it stands, so an approved PR that would otherwise
+# read working (here conflicting, DIRTY) waits on a person.
+store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"DIRTY@abc"}},
+        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "an open visit on an approved PR => needs-attention, not working"
+
+# needs-attention — a visit a sitting holds (in_progress) holds the PR too.
+store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
+        {"id":"tk-v","status":"in_progress","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "a visit in a sitting (in_progress) => needs-attention"
+
+# precedence — an open visit outranks an open rework child.
+store '[{"id":"tk-a","status":"open","metadata":{}},
+        {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}},
+        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "needs-attention outranks working (open visit + open child)"
+
+# working — a CLOSED visit no longer holds the PR.
+store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"DIRTY@abc"}},
+        {"id":"tk-v","status":"closed","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "working" "a closed visit releases the PR back to working"
+
+# working — the visit is anchor-scoped: a visit on another bead never holds this PR.
+store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
+        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-other","gc.routed_to":"human"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "working" "a visit on another bead does not hold this PR"
+
+# needs-attention — a visit covers the bead its tracks edge names, and its
+# gc.continuation_group stamp can land empty while the edge stands, so a visit that
+# only tracks the anchor holds the PR too. The derive finds it through the anchor's
+# incoming tracks edges (the edge file), and a `gc bd list` row carries the same
+# edge as {type, depends_on_id}.
+store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"DIRTY@abc"}},
+        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.routed_to":"human"},"dependencies":[{"issue_id":"tk-v","depends_on_id":"tk-a","type":"tracks"}]}]'
+printf 'tk-v|tracks|tk-a\n' > "$STUB_DEPS"
+eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "a visit that only tracks the anchor (no stamp) => needs-attention"
+
+# working — a visit that tracks another bead does not hold this PR.
+store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
+        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.routed_to":"human"},"dependencies":[{"issue_id":"tk-v","depends_on_id":"tk-other","type":"tracks"}]}]'
+printf 'tk-v|tracks|tk-other\n' > "$STUB_DEPS"
+eq "$("$SUT" derive --anchor tk-a)" "working" "a visit that tracks another bead does not hold this PR"
+
+# working — the stamp is the fallback only for a visit with no tracks edge, so a
+# visit stamped with the anchor whose edge names another bead does not hold it.
+store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
+        {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"},"dependencies":[{"issue_id":"tk-v","depends_on_id":"tk-other","type":"tracks"}]}]'
+printf 'tk-v|tracks|tk-other\n' > "$STUB_DEPS"
+eq "$("$SUT" derive --anchor tk-a)" "working" "an anchor stamp beside a tracks edge to another bead does not hold this PR"
+
+# working — only a visit holds: a bead of another kind tracking the anchor, such as
+# its first reaction, does not.
+store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
+        {"id":"tk-r","status":"open","metadata":{"task_kind":"reaction"}}]'
+printf 'tk-r|tracks|tk-a\n' > "$STUB_DEPS"
+eq "$("$SUT" derive --anchor tk-a)" "working" "a non-visit bead tracking the anchor does not hold the PR"
+: > "$STUB_DEPS"
+
+# working — only a visit holds: another bead in the anchor's continuation group does not.
+store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
+        {"id":"tk-s","status":"open","metadata":{"gc.continuation_group":"tk-a"}}]'
+eq "$("$SUT" derive --anchor tk-a)" "working" "a non-visit bead in the anchor's continuation group does not hold the PR"
+
+# The visit read is scoped to the anchor, the way the finalize gate reads it: its
+# incoming tracks edges and the beads stamped with it. It never lists every open
+# visit in the store, a read whose answer is the same for every anchor.
+: > "$STUB_GC_LOG"
+"$SUT" derive --anchor tk-a >/dev/null 2>&1
+grep -qF 'bd dep list tk-a --direction=up -t tracks' "$STUB_GC_LOG"; eq "$?" "0" "the derive reads the anchor's incoming tracks edges"
+grep -qF 'gc.continuation_group=tk-a' "$STUB_GC_LOG"; eq "$?" "0" "the derive reads the beads stamped with the anchor"
+grep -qF 'task_kind=visit' "$STUB_GC_LOG"; eq "$?" "1" "the derive makes no store-wide read of the open visits"
 
 store '[]'
 "$SUT" derive --anchor tk-a >/dev/null 2>&1
@@ -215,49 +283,6 @@ resetlog
 "$SUT" reconcile --anchor tk-missing --pr 51 --repo "$REPO" --current-labels "status: needs-review"
 eq "$(pv_labels 51)" "status: needs-review" "reconcile leaves the label as-is when the anchor does not resolve"
 hasnt "$(ghlog)" "pr edit" "reconcile writes nothing when it cannot derive a status"
-
-# ---------------------------------------------------------------------------
-# mark-base: the sibling `base:` group, stamped from the target at pr-open.
-# Standing (never derived from anchor state), additive, and orthogonal to status:.
-# ---------------------------------------------------------------------------
-
-# an integration/ target earns base: integration, the label created first.
-rm -f "$STUB_GH_DIR/labels.json"
-pv 60 '[]'
-resetlog
-"$SUT" mark-base --pr 60 --target "integration/tk-conv" --repo "$REPO"
-eq "$(pv_labels 60)" "base: integration" "mark-base stamps base: integration on an integration/ target"
-has "$(ghlog)" "label create" "…creating the label first (the stub refuses an unknown label)"
-{ repo_has "base: integration" && ok "the base: integration label now exists in the repo"; } || bad "base: integration not created"
-
-# a main target is the default: no label created, no PR edit.
-rm -f "$STUB_GH_DIR/labels.json"
-pv 61 '[]'
-resetlog
-"$SUT" mark-base --pr 61 --target "main" --repo "$REPO"
-eq "$(pv_labels 61)" "" "mark-base is a no-op on a main target"
-hasnt "$(ghlog)" "pr edit" "…writing nothing"
-hasnt "$(ghlog)" "label create" "…and creating no label"
-
-# orthogonal: the base marker adds alongside a status value, removing neither.
-printf '[{"name":"status: needs-review"},{"name":"base: integration"}]\n' > "$STUB_GH_DIR/labels.json"
-pv 62 '[{"name":"status: needs-review"}]'
-resetlog
-"$SUT" mark-base --pr 62 --target "integration/tk-conv" --repo "$REPO"
-eq "$(pv_labels 62)" "base: integration,status: needs-review" "mark-base adds base: alongside status:, removing neither"
-
-# and the status writer, flipping its own value, leaves the sibling base: label alone.
-pv 62 '[{"name":"status: working"},{"name":"base: integration"}]'
-resetlog
-"$SUT" set --pr 62 --value needs-review --repo "$REPO" --current-labels "status: working,base: integration"
-eq "$(pv_labels 62)" "base: integration,status: needs-review" "set flips status: and never touches the sibling base: label"
-
-# idempotent: a second mark-base adds no duplicate.
-printf '[{"name":"base: integration"}]\n' > "$STUB_GH_DIR/labels.json"
-pv 63 '[{"name":"base: integration"}]'
-resetlog
-"$SUT" mark-base --pr 63 --target "integration/tk-conv" --repo "$REPO"
-eq "$(pv_labels 63)" "base: integration" "mark-base is idempotent — a present label is a no-op add"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

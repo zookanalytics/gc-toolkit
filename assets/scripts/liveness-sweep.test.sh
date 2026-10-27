@@ -12,12 +12,13 @@ SCRIPT="$HERE/liveness-sweep.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-liveness-sweep-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-# The census phases its pre-open gates against review-checks.toml; the SUT runs
-# in place, so by default it would read the live pack's index and classify these
-# fixtures' synthetic lanes (codex, ci) as non-pre-open. Point the override at a
-# missing file so the census takes its pre-phase drop and these fixtures are
-# judged on their lane names alone, hermetically. The phase-aware path has its
-# own case at the end, with a controlled index.
+# The census phases its pre-open gates against the check index, which the
+# resolver reads at each anchor's head, laid over the pack's own, so by default
+# it would read the pack's index and whatever a fixture commit carries. Point
+# the override at a missing file so every token takes the pre-open default and
+# these fixtures are judged on their lane names alone, hermetically. The
+# phase-aware path has its own cases at the end, one with a controlled index and
+# one with a rig's committed index.
 export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 
 PASS=0; FAIL=0
@@ -46,7 +47,8 @@ case "$sub" in
   "bd list")
     case "$args" in
       *anchor_bead=*)
-        # The edge-less wedge's lane fix-unit census: reworks for an anchor,
+        # An anchor's children by anchor_bead, the read the edge-less wedge's
+        # lane fix-unit census and lane-state.sh's review derivation make,
         # served from $SHOW_DIR/reworks-<anchor>.json (default []), the rows in
         # the statuses the read asks for.
         aid=""; st=""
@@ -166,6 +168,35 @@ echo "escalate: filed visit tk-visit1 on $subject [$key] -> gc-toolkit.converse"
 ESC
 chmod +x "$TMP/bin/escalate.sh"
 
+# --- git stub ------------------------------------------------------------------
+# The sweep reads each pre-open anchor's head with git ls-remote. The stub
+# answers that from fixtures and hands every other call to the real git, so the
+# resolver still reads real fixture repositories. A branch named in
+# LS_REMOTE_HEADS ("<branch> <sha>" lines) answers that sha, one named in
+# LS_REMOTE_MISS answers nothing (a ref origin does not carry), and any other
+# answers the sha1 of its name. LS_REMOTE_FAIL makes origin not answer at all,
+# as an unreachable one does. LS_REMOTE_LOG records every ls-remote.
+REAL_GIT="$(command -v git)"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'REAL_GIT=%q\n' "$REAL_GIT"; cat; } > "$TMP/bin/git" <<'GIT'
+case " $* " in
+  *" ls-remote "*)
+    [ -n "${LS_REMOTE_LOG:-}" ] && printf '%s\n' "$*" >> "$LS_REMOTE_LOG"
+    [ -z "${LS_REMOTE_FAIL:-}" ] || exit 128
+    for a in "$@"; do
+      case "$a" in refs/heads/*) ;; *) continue ;; esac
+      b="${a#refs/heads/}"
+      case " ${LS_REMOTE_MISS:-} " in *" $b "*) continue ;; esac
+      sha=""
+      [ -n "${LS_REMOTE_HEADS:-}" ] && [ -f "$LS_REMOTE_HEADS" ] && sha=$(awk -v b="$b" '$1 == b { print $2; exit }' "$LS_REMOTE_HEADS")
+      [ -n "$sha" ] || sha=$(printf '%s' "$b" | sha1sum | cut -d' ' -f1)
+      printf '%s\t%s\n' "$sha" "$a"
+    done
+    exit 0 ;;
+esac
+exec "$REAL_GIT" "$@"
+GIT
+chmod +x "$TMP/bin/git"
+
 export PATH="$TMP/bin:$PATH"
 export SHOW_DIR="$TMP/show" GC_CALLS="$TMP/gc-calls" ESC_CALLS="$TMP/esc-calls" ESC_BODIES="$TMP/esc-bodies"
 export GC_ESCALATE_TOOL="$TMP/bin/escalate.sh"
@@ -200,14 +231,14 @@ cat > "$TMP/ready.json" <<'JSON'
   {"id":"c-pr-closed","title":"rejected — closed unmerged","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/zook/gc-toolkit/pull/999"}},
   {"id":"c-pr-otherrepo","title":"number 521 in another repository","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/someone/elsewhere/pull/521"}},
   {"id":"c-pr-nourl","title":"marker but no pr_url","issue_type":"task","metadata":{"merge_result":"pull_request"}},
-  {"id":"c-preopen-green","title":"pre-open, codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green"}},
-  {"id":"c-preopen-multigreen","title":"pre-open, two gates green (spaced)","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex, ci","check.codex":"green","check.ci":"green"}},
-  {"id":"c-preopen-approval","title":"pre-open, green + approval sentinel","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex,approval","check.codex":"green"}},
-  {"id":"c-preopen-fixable","title":"pre-open, fixable — stalled","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"fixing"}},
-  {"id":"c-preopen-partial","title":"pre-open, one of two markers absent","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex,ci","check.codex":"green"}},
-  {"id":"c-preopen-nomarker","title":"pre-open, no marker at all","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex"}},
-  {"id":"c-preopen-noset","title":"pre-open, marker but check_set unset","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check.codex":"green"}},
-  {"id":"c-preopen-none","title":"pre-open, check_set=none opt-out","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"none"}},
+  {"id":"c-preopen-green","title":"pre-open, codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/c-preopen-green"}},
+  {"id":"c-preopen-multigreen","title":"pre-open, two gates green (spaced)","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex, ci","branch":"polecat/c-preopen-multigreen"}},
+  {"id":"c-preopen-approval","title":"pre-open, green + approval sentinel","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex,approval","branch":"polecat/c-preopen-approval"}},
+  {"id":"c-preopen-fixable","title":"pre-open, changes requested — stalled","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/c-preopen-fixable"}},
+  {"id":"c-preopen-partial","title":"pre-open, one of two lanes backed","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex,ci","branch":"polecat/c-preopen-partial"}},
+  {"id":"c-preopen-nomarker","title":"pre-open, no review at all","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/c-preopen-nomarker"}},
+  {"id":"c-preopen-noset","title":"pre-open, a backed lane but check_set unset","issue_type":"task","metadata":{"merge_result":"pre_open_gate","branch":"polecat/c-preopen-noset"}},
+  {"id":"c-preopen-none","title":"pre-open, check_set=none opt-out","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"none","branch":"polecat/c-preopen-none"}},
   {"id":"c-hold","title":"operator decided this waits","issue_type":"task","metadata":{"triage.hold":"deferred; operator direction pending"}},
   {"id":"c-hold-bare","title":"held, no reason named","issue_type":"task","metadata":{"triage.hold":"true"}},
   {"id":"c-hold-empty","title":"hold was cleared","issue_type":"task","metadata":{"triage.hold":""}},
@@ -244,7 +275,7 @@ cat > "$TMP/live.json" <<'JSON'
   {"id":"v-1","status":"open","title":"visit: c-ingroup","metadata":{"task_kind":"visit","gc.continuation_group":"c-ingroup"}},
   {"id":"v-2","status":"open","title":"visit: c-trackedvisit","metadata":{"task_kind":"visit","gc.continuation_group":""},"dependencies":[{"issue_id":"v-2","depends_on_id":"c-trackedvisit","type":"tracks"}]},
   {"id":"v-root","status":"open","title":"visit: root-underconversation","metadata":{"task_kind":"visit","gc.continuation_group":"root-underconversation"},"dependencies":[{"issue_id":"v-root","depends_on_id":"root-underconversation","type":"tracks"}]},
-  {"id":"m-live","status":"open","title":"a live molecule","metadata":{"gc.input_convoy_id":"conv-live"}},
+  {"id":"m-live","status":"open","title":"a live molecule","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"conv-live"}},
   {"id":"d-open","status":"open","title":"Rule: which of the two?","metadata":{"gc.demand_for":"c-demand-live"}},
   {"id":"child-open","status":"open","title":"an open child of c-parented","metadata":{},"dependencies":[{"depends_on_id":"c-parented","type":"parent-child"}]}
 ]
@@ -268,18 +299,47 @@ cat > "$TMP/sessions.json" <<'JSON'
 JSON
 export FAKE_SESSIONS="$TMP/sessions.json"
 
-# bd show fixtures: the worked-via-convoy and landed-husk chains.
+# The worked and landed-husk chains: each root names its input convoy, which
+# tracks the bead its run works. The anchors are read with bd show; the roots
+# and convoys make the runs below.
 printf '%s\n' '[{"id":"conv-live","issue_type":"convoy","dependencies":[{"id":"c-worked","dependency_type":"tracks","status":"open"}]}]' > "$TMP/show/conv-live.json"
-printf '%s\n' '[{"id":"root-landed","metadata":{"gc.input_convoy_id":"conv-landed"}}]' > "$TMP/show/root-landed.json"
 printf '%s\n' '[{"id":"conv-landed","issue_type":"convoy","dependencies":[{"id":"anchor-landed","dependency_type":"tracks","status":"closed"}]}]' > "$TMP/show/conv-landed.json"
 printf '%s\n' '[{"id":"anchor-landed","status":"closed","metadata":{"merge_result":"merged"}}]' > "$TMP/show/anchor-landed.json"
-printf '%s\n' '[{"id":"root-live","metadata":{"gc.input_convoy_id":"conv-anchorlive"}}]' > "$TMP/show/root-live.json"
 printf '%s\n' '[{"id":"conv-anchorlive","issue_type":"convoy","dependencies":[{"id":"anchor-live","dependency_type":"tracks","status":"open"}]}]' > "$TMP/show/conv-anchorlive.json"
 printf '%s\n' '[{"id":"anchor-live","status":"open","metadata":{"merge_result":"pull_request"}}]' > "$TMP/show/anchor-live.json"
-printf '%s\n' '[{"id":"root-noconvoy","metadata":{}}]' > "$TMP/show/root-noconvoy.json"
-printf '%s\n' '[{"id":"root-underconversation","metadata":{"gc.input_convoy_id":"conv-uc"}}]' > "$TMP/show/root-underconversation.json"
+printf '%s\n' '[{"id":"root-noconvoy","status":"in_progress","metadata":{"gc.kind":"workflow"}}]' > "$TMP/show/root-noconvoy.json"
+printf '%s\n' '[{"id":"root-underconversation","status":"in_progress","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"conv-uc"}}]' > "$TMP/show/root-underconversation.json"
 printf '%s\n' '[{"id":"conv-uc","issue_type":"convoy","dependencies":[{"id":"anchor-uc","dependency_type":"tracks","status":"open"}]}]' > "$TMP/show/conv-uc.json"
 printf '%s\n' '[{"id":"anchor-uc","status":"open","metadata":{}}]' > "$TMP/show/anchor-uc.json"
+
+# run-lib.sh's verbs answer through run-lib.stub.sh from the runs these roots
+# and convoys make, by run-lib.sh's own run_rows: m-live works c-worked,
+# root-landed the landed anchor, root-live and root-underconversation the open
+# ones, and root-noconvoy works no bead.
+# shellcheck source=run-lib.sh
+. "$HERE/run-lib.sh" || { echo "cannot source run-lib.sh" >&2; exit 1; }
+jq -s 'add' "$TMP/ready.json" "$TMP/live.json" "$TMP/show/"root-*.json "$TMP/show/"conv-*.json \
+    | jq -c "$RUN_JQ"'run_rows' > "$TMP/runs.json"
+export GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json"
+
+# backing <anchor> <lane>... — the closed approve reviews lane-state.sh derives
+# each lane's green from, served as the anchor's anchor_bead listing. The sweep
+# runs the real lane-state.sh against these.
+backing() {
+    local a="$1" l rows="" n=0
+    shift
+    for l in "$@"; do
+        n=$((n + 1))
+        rows="${rows:+$rows,}{\"id\":\"rv-$a-$n\",\"status\":\"closed\",\"metadata\":{\"task_kind\":\"review\",\"anchor_bead\":\"$a\",\"check_name\":\"$l\",\"reviewed_oid\":\"deadbeef\",\"signoff_verdict\":\"approve\",\"gc.outcome\":\"recorded\"}}"
+    done
+    printf '[%s]\n' "$rows" > "$SHOW_DIR/reworks-$a.json"
+}
+backing c-preopen-green codex
+backing c-preopen-multigreen codex ci
+backing c-preopen-approval codex
+backing c-preopen-partial codex
+backing c-preopen-noset codex
+printf '%s\n' '[{"id":"rv-fix","status":"closed","metadata":{"task_kind":"review","anchor_bead":"c-preopen-fixable","check_name":"codex","reviewed_oid":"deadbeef","signoff_verdict":"request-changes","gc.outcome":"recorded"}}]' > "$SHOW_DIR/reworks-c-preopen-fixable.json"
 
 run_sweep() { # run_sweep [baseline-csv|ABSENT] -> RC/OUT
     rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"
@@ -287,7 +347,6 @@ run_sweep() { # run_sweep [baseline-csv|ABSENT] -> RC/OUT
     : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_BODIES"
     RC=0
     OUT="$(bash "$SCRIPT" 2>"$TMP/err")" || RC=$?
-    ERR="$(cat "$TMP/err")"
 }
 
 # The full unnamed set this population classifies to (ports the retired
@@ -315,12 +374,11 @@ grep -q 'visit.recheck=.*liveness-recheck.sh' "$GC_CALLS" \
     || bad "visit.recheck stamp" "$(cat "$GC_CALLS")"
 
 echo "── a routed workflow ROOT is topology, never routed-and-claimable ──"
-# gc.routed_to on a root names the run; it is not an offer. The hook refuses a
-# workflow-topology candidate (hookCandidateClaimable) and the controller's
-# demand loop refuses to count one (demandRowServable), both keyed on gc.kind,
-# so no worker can ever take the row. Calling it claimable published a count of
-# pool demand that nothing could serve. c-routed is the discriminator: an
-# ordinary routed bead keeps the claimable class.
+# The comment on topology_kind in liveness-classify.sh names the Gas City check
+# it mirrors and where the two differ. topology_kind reads gc.kind alone, so
+# root-landed and root-live classify as topology though neither carries a
+# gc.workflow_expanded stamp. c-routed is the discriminator: an ordinary routed
+# bead keeps the claimable class.
 FUNNEL="$(printf '%s' "$OUT" | grep 'funnel:' || true)"
 # Exact count per class: a substring match would accept "topology 20" too.
 funnel_count() { printf '%s' "$FUNNEL" | sed 's/.*funnel: //; s/ \xc2\xb7 /\n/g' \
@@ -458,11 +516,21 @@ grep -q "pr=unverified" <<< "$OUT" && ok "a failed gh read is 'unverified'" || b
 grep -q "c-pr-open" <<< "$(cat "$BASELINE_FILE")" \
     && ok "a live-PR bead is REPORTED when liveness is unverified" \
     || bad "unverified keeps the bead visible" "$(cat "$BASELINE_FILE")"
-GC_SHOW_FAIL="conv-live" run_sweep "$EXPECT_SURVIVORS"
-grep -q "convoy=unverified" <<< "$OUT" && ok "a failed convoy read is 'unverified'" || bad "convoy liveness" "$OUT"
+RUN_LIB_STUB_FAIL="map" run_sweep "$EXPECT_SURVIVORS"
+grep -q "runs=unverified" <<< "$OUT" && ok "a failed read of the live runs is 'unverified'" || bad "runs liveness" "$OUT"
 grep -q "c-worked" <<< "$(cat "$BASELINE_FILE")" \
-    && ok "a failed convoy read leaves its member a candidate (reported)" \
-    || bad "failed convoy read hides nothing" "$(cat "$BASELINE_FILE")"
+    && ok "a failed read of the live runs leaves the bead a run works a candidate (reported)" \
+    || bad "failed runs read hides nothing" "$(cat "$BASELINE_FILE")"
+grep -q "the live runs could not be read" "$ESC_BODIES" \
+    && ok "…and the visit body says the runs were not read" \
+    || bad "the visit body warns of the failed runs read" "$(head -5 "$ESC_BODIES")"
+run_sweep "$EXPECT_SURVIVORS"
+grep -q "runs=verified" <<< "$OUT" && ok "a read of the live runs that names some is 'verified'" || bad "runs liveness verified" "$OUT"
+RUN_LIB_STUB_FAIL="subject:root-landed" run_sweep "$EXPECT_SURVIVORS"
+grep -q "husk=unverified" <<< "$OUT" && ok "a failed read of a root's run is 'unverified'" || bad "husk liveness on a failed run read" "$OUT"
+grep -q "c-husk-step-1" <<< "$(cat "$BASELINE_FILE")" \
+    && ok "a failed read of a root's run keeps its step a candidate (reported)" \
+    || bad "failed run read hides nothing" "$(cat "$BASELINE_FILE")"
 GC_SHOW_FAIL="anchor-landed" run_sweep "$EXPECT_SURVIVORS"
 grep -q "husk=unverified" <<< "$OUT" && ok "a failed anchor read is 'unverified'" || bad "husk liveness" "$OUT"
 grep -q "c-husk-step-1" <<< "$(cat "$BASELINE_FILE")" \
@@ -685,6 +753,21 @@ for want in "bd kv --db $TMP/pin.db get anchor_edges.joined" \
 done
 rm -f "$TMP/show/dep-we-anchor.json"
 
+echo "── the pre-open derivation reads the sweep's own store under its --db pin ──"
+# lane-state.sh runs as its own process, so the sweep hands it the pin: a
+# pre-open anchor's lanes derive from the store the sweep reads, never from the
+# one the cwd resolves.
+printf '%s\n' '[{"id":"pin-preopen","title":"pre-open, backed, read under a pin","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/pin-preopen"}}]' > "$TMP/pin-ready.json"
+backing pin-preopen codex
+: > "$TMP/reads.log"
+LIVENESS_SWEEP_DB="$TMP/pin.db" READ_LOG="$TMP/reads.log" FAKE_READY="$TMP/pin-ready.json" run_sweep ABSENT
+eq "$RC" "0" "pinned: the pass completes"
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "" "pinned: the backed pre-open anchor derives green and is gated"
+LANE_READS="$(grep -F -- 'anchor_bead=pin-preopen' "$TMP/reads.log" || true)"
+[ -n "$LANE_READS" ] && ok "pinned: the derivation read the anchor's reviews" \
+    || bad "pinned: the derivation read the anchor's reviews" "no anchor_bead=pin-preopen read in: $(cat "$TMP/reads.log")"
+eq "$(printf '%s\n' "$LANE_READS" | grep -cvF -- "--db $TMP/pin.db")" "0" "pinned: …every one of them carrying the pin"
+
 echo "── …and a ruling's landed rework is no lane's fix, so it makes no wedge of a human finding ──"
 # A ruling's rework child carries no source_review_bead, like a human batch's, but
 # it answers the ruling. An anchor sent back to pre_open_gate keeps that closed
@@ -711,20 +794,110 @@ echo "── the phase-aware census asks the resolver, with a controlled index �
 PH_IDX="$TMP/phase-index.toml"
 printf '[checks.correctness]\nmethod="m"\npurpose="p"\nphase="pre-open"\n[checks.demo]\nmethod="m"\npurpose="p"\nphase="open-as-draft"\n' > "$PH_IDX"
 printf '%s\n' '[
-  {"id":"ph-legacy-green","title":"pre-open, legacy codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","check.codex":"green"}},
-  {"id":"ph-draft-pending","title":"pre-open green, open-as-draft demo pending","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","check.correctness":"green"}},
-  {"id":"ph-preopen-ungreen","title":"pre-open correctness ungreen","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","check.demo":"green"}},
-  {"id":"ph-mixed-case-green","title":"pre-open, mixed-case lane green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch","check.correctness":"green","check.Arch":"green"}}
+  {"id":"ph-legacy-green","title":"pre-open, legacy codex green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/ph-legacy-green"}},
+  {"id":"ph-draft-pending","title":"pre-open green, open-as-draft demo pending","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","branch":"polecat/ph-draft-pending"}},
+  {"id":"ph-preopen-ungreen","title":"pre-open correctness ungreen","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","branch":"polecat/ph-preopen-ungreen"}},
+  {"id":"ph-mixed-case-green","title":"pre-open, mixed-case lane green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,Arch","branch":"polecat/ph-mixed-case-green"}}
 ]' > "$TMP/ph-ready.json"
+backing ph-legacy-green codex
+backing ph-draft-pending correctness
+backing ph-preopen-ungreen demo
+backing ph-mixed-case-green correctness Arch
 GC_REVIEW_CHECKS_INDEX="$PH_IDX" FAKE_READY="$TMP/ph-ready.json" run_sweep ABSENT
 eq "$RC" "0" "the phase-aware pass completes"
 # Only ph-preopen-ungreen is an unnamed wait: the legacy codex token gated pre-open
 # (resolver default, not dropped) and its green read as converged; the open-as-draft
 # demo did NOT hold the pre-open census; a genuinely ungreen pre-open lane still does.
-# The mixed-case lane reads its marker under the token's own case (check.Arch), the
-# key signoff stamps, so it reads green rather than flagged.
+# The mixed-case lane derives under the token's own case (Arch), the check_name its
+# review carries, so it reads green rather than flagged.
 eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "ph-preopen-ungreen" \
    "the resolver classes the legacy-token, draft-pending and mixed-case anchors gated; only the pre-open-ungreen one is unnamed"
+
+echo "── the census reads the rig's index at the anchor's head, over the pack's ──"
+# The order runs the sweep in its rig's checkout, and the resolver lays the index
+# at the head of each anchor's branch over the pack's. The pack's index beside
+# the script phases demo open-as-draft. Rig A's commit phases it pre-open, so an
+# anchor whose demo lane is not green there is an unnamed wait. Rig B's commit
+# phases it open-as-draft, so the same anchor is gated. Each working tree says
+# the opposite of its commit, so a sweep that read the working tree would class
+# both the other way. No override is set, as in a real pass.
+RIG_A="$TMP/rig-a"; RIG_B="$TMP/rig-b"
+rig_index() { # rig_index <rig> <demo phase>
+    printf '[checks.correctness]\npurpose="p"\nphase="pre-open"\n[checks.demo]\npurpose="p"\nphase="%s"\n' "$2" > "$1/review-checks.toml"
+}
+rig_commit() { # rig_commit <rig> <committed demo phase> <working-tree demo phase>
+    mkdir -p "$1" && git -C "$1" init -q
+    rig_index "$1" "$2"
+    git -C "$1" add review-checks.toml
+    git -C "$1" -c user.email=t@t.test -c user.name=t -c commit.gpgsign=false commit -qm index >/dev/null 2>&1
+    printf 'polecat/ri-demo %s\n' "$(git -C "$1" rev-parse --verify -q HEAD)" > "$1.heads"
+    rig_index "$1" "$3"
+}
+rig_commit "$RIG_A" pre-open open-as-draft
+rig_commit "$RIG_B" open-as-draft pre-open
+printf '%s\n' '[{"id":"ri-demo","title":"pre-open, correctness green, demo pending","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness,demo","branch":"polecat/ri-demo"}}]' > "$TMP/ri-ready.json"
+backing ri-demo correctness
+in_rig() { # in_rig <rig> : run_sweep from the rig's checkout, with no index override
+    rm -rf "$TMP/state"; mkdir -p "$TMP/state/testrig"
+    : > "$GC_CALLS"; : > "$ESC_CALLS"; : > "$ESC_BODIES"
+    RC=0
+    OUT="$(cd "$1" && env -u GC_REVIEW_CHECKS_INDEX LS_REMOTE_HEADS="$1.heads" FAKE_READY="$TMP/ri-ready.json" bash "$SCRIPT" 2>"$TMP/err")" || RC=$?
+}
+in_rig "$RIG_A"
+eq "$RC" "0" "the pass in a rig checkout completes"
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "ri-demo" \
+   "a rig whose commit phases demo pre-open holds the anchor on its demo lane, whatever the pack's index and the working tree say"
+in_rig "$RIG_B"
+eq "$RC" "0" "the pass in the second rig checkout completes"
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "" \
+   "a rig whose commit phases demo open-as-draft gates the same anchor, whatever its working tree says"
+
+echo "── an anchor whose head does not read stays a candidate ──"
+# Its gates are read only at the commit they judge, so with no head the sweep
+# resolves nothing for it, even under the index override this file sets, which
+# would let a call that names no commit resolve.
+printf '%s\n' '[{"id":"nh-green","title":"pre-open, backed, head unread","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/nh-green"}}]' > "$TMP/nh-ready.json"
+backing nh-green codex
+: > "$TMP/ls-remote.log"
+LS_REMOTE_LOG="$TMP/ls-remote.log" FAKE_READY="$TMP/nh-ready.json" run_sweep ABSENT
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "" "a backed anchor whose head reads is gated"
+grep -qF "ls-remote origin refs/heads/polecat/nh-green" "$TMP/ls-remote.log" \
+    && ok "…its head read from origin by its branch" \
+    || bad "…its head read from origin by its branch" "ls-remote calls: $(cat "$TMP/ls-remote.log")"
+LS_REMOTE_MISS="polecat/nh-green" FAKE_READY="$TMP/nh-ready.json" run_sweep ABSENT
+eq "$RC" "0" "a pass with an unread head completes"
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "nh-green" "the same anchor with no head to read is a candidate, not gated"
+
+echo "── every pre-open anchor's head comes from one ls-remote ──"
+# One call names every branch, so a slow origin costs the pass one bounded read,
+# and each anchor still finds its own head in it.
+printf '%s\n' '[{"id":"nh-green","title":"pre-open, backed","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/nh-green"}},{"id":"nh-two","title":"pre-open, backed too","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"codex","branch":"polecat/nh-two"}}]' > "$TMP/nh2-ready.json"
+backing nh-two codex
+: > "$TMP/ls-remote.log"
+LS_REMOTE_LOG="$TMP/ls-remote.log" FAKE_READY="$TMP/nh2-ready.json" run_sweep ABSENT
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "" "two backed anchors whose heads read are both gated"
+eq "$(grep -c 'ls-remote' "$TMP/ls-remote.log")" "1" "…from one ls-remote"
+eq "$(cat "$TMP/ls-remote.log")" "-C . ls-remote origin refs/heads/polecat/nh-green refs/heads/polecat/nh-two" "…that names both branches, in the rig checkout the sweep runs in"
+LS_REMOTE_MISS="polecat/nh-two" FAKE_READY="$TMP/nh2-ready.json" run_sweep ABSENT
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "nh-two" "an anchor whose head the one call does not carry is a candidate, and the other stays gated"
+printf '%s\n' '[{"id":"np-plain","title":"no pre-open anchor","issue_type":"task","metadata":{}}]' > "$TMP/np-ready.json"
+: > "$TMP/ls-remote.log"
+LS_REMOTE_LOG="$TMP/ls-remote.log" FAKE_READY="$TMP/np-ready.json" run_sweep ABSENT
+eq "$(grep -c 'ls-remote' "$TMP/ls-remote.log")" "0" "a ready set with no pre-open anchor reads no head"
+
+echo "── an origin that does not answer holds each pre-open anchor's class ──"
+# No head reads, which says nothing about any one anchor, so the pass reports an
+# anchor again only when the last pass reported it, and reports no other new.
+LS_REMOTE_FAIL=1 FAKE_READY="$TMP/nh-ready.json" run_sweep ABSENT
+eq "$RC" "0" "a pass whose head read fails completes"
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "" "an anchor the last pass did not report is not reported new"
+case "$OUT" in *"unread 1"*) ok "…its class is unread" ;;
+  *) bad "…its class is unread" "funnel: $(printf '%s\n' "$OUT" | grep funnel)" ;; esac
+case "$(cat "$TMP/err")" in *"origin did not answer the head read"*) ok "…and the pass says why" ;;
+  *) bad "…and the pass says why" "stderr: $(head -3 "$TMP/err")" ;; esac
+LS_REMOTE_FAIL=1 FAKE_READY="$TMP/nh-ready.json" run_sweep "nh-green"
+eq "$RC" "0" "the same pass after one that reported the anchor completes"
+eq "$(cat "$BASELINE_FILE" 2>/dev/null)" "nh-green" "…and reports it again"
 
 echo "── holder liveness gates the conversing class (readable session list) ──"
 # Two visits track two ready subjects: one held by a live session (lx-live-1 is

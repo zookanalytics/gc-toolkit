@@ -107,6 +107,52 @@ func TestVisitFoldsIntoSubjectTile(t *testing.T) {
 	}
 }
 
+// TestVisitFoldsOntoTheBeadItsSittingResolved: a visit's subject is the one its
+// sitting resolved by the shared visit identity, so a visit stamped with one bead
+// and tracking another folds onto the tracked bead, which is the bead it holds.
+// The bead its stale stamp names keeps its own row, neither owed nor held.
+func TestVisitFoldsOntoTheBeadItsSittingResolved(t *testing.T) {
+	epic := func(id string) Anchor {
+		return Anchor{ID: id, Kind: "epic", Source: "epic", Rig: "gc-toolkit", Prefix: "tk", Priority: ptr(2),
+			Children: []Child{{ID: id + "-c1", Status: "open"}}}
+	}
+	anchors := []Anchor{
+		visitAnchor("tk-vis", "tk-stale", "please review the plan"),
+		epic("tk-stale"),
+		epic("tk-tracked"),
+	}
+	sit := Sitting{ID: "tk-vis", Subject: "tk-tracked", Subjects: []string{"tk-tracked"}, Status: "open"}
+	b := BuildBoard(anchors, fixtureNow, false, nil, Facts{Visits: map[string]bool{"tk-tracked": true}, Sittings: []Sitting{sit}})
+
+	if _, ok := tileByID(b, "tk-vis"); ok {
+		t.Errorf("the visit row should be folded away, not present")
+	}
+	tracked := mustTile(t, b, "tk-tracked")
+	if !tracked.Owed || !tracked.Held || tracked.Needs != "please review the plan" {
+		t.Errorf("the tracked bead takes the fold: owed=%v held=%v needs=%q", tracked.Owed, tracked.Held, tracked.Needs)
+	}
+	if stale := mustTile(t, b, "tk-stale"); stale.Owed || stale.Held {
+		t.Errorf("the bead the stale stamp names takes nothing: owed=%v held=%v", stale.Owed, stale.Held)
+	}
+}
+
+// TestEngagementReadsEveryBeadAVisitCovers: a visit covers every bead its tracks
+// edges name, so whether a sitting is engaged is read for each of them, not only
+// for the bead the row names. A live sitting on a visit tracking two beads
+// suppresses Accept on the second bead, and the same visit left open offers it.
+func TestEngagementReadsEveryBeadAVisitCovers(t *testing.T) {
+	anchors := []Anchor{recommendationSubject("tk-b", "mol-dispose-pr")}
+	covering := func(status, session string) Facts {
+		return Facts{Sittings: []Sitting{{Subject: "tk-a", Subjects: []string{"tk-a", "tk-b"}, Status: status, Session: session}}}
+	}
+	if subj := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, covering("open", "")), "tk-b"); !subj.Acceptable {
+		t.Errorf("an open visit covering the bead leaves Accept offered: Acceptable=%v", subj.Acceptable)
+	}
+	if subj := mustTile(t, BuildBoard(anchors, fixtureNow, false, nil, covering("in_progress", "converse-1")), "tk-b"); subj.Acceptable {
+		t.Errorf("a live sitting on a visit covering the bead suppresses Accept: Acceptable=%v", subj.Acceptable)
+	}
+}
+
 // recommendationSubject is a subject a reaction has stamped with a recommended
 // execution formula — the key that makes its visit a recommendation (Accept +
 // Discuss) rather than a plain one (Discuss only).
@@ -611,12 +657,12 @@ func TestParkedParentBandsGateNotActive(t *testing.T) {
 }
 
 // TestTakeawayRowsDoNotCluster: a row carrying a takeaway never clusters, however
-// many share its needs — a deterministic signoff-cap headline templated across
-// anchors does not fold into a count-plus-id soup that loses the per-bead
-// content. A deterministic STATE phrase, which no bead authored,
+// many share its needs — a deterministic headline templated across anchors
+// (the bring-current question's) does not fold into a count-plus-id soup that
+// loses the per-bead content. A deterministic STATE phrase, which no bead authored,
 // still clusters.
 func TestTakeawayRowsDoNotCluster(t *testing.T) {
-	tmpl := "signoff did not converge after 3 rework rounds (cap 3)"
+	tmpl := "Needs a decision before its branch can be brought current; the visit on its anchor asks it"
 	anchors := []Anchor{
 		// Three parked beads with the SAME templated takeaway → must not cluster.
 		{ID: "tk-t1", Kind: "parked", Source: "parked", Rig: "gc-toolkit", Prefix: "tk",

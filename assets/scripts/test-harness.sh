@@ -5,7 +5,8 @@
 # deferred-dispatch.test.sh pattern: stubs log invocations and serve canned
 # JSON; tests assert on the logs, the store, and exit codes.
 # Contract: caller sets TMP (tempdir); harness_init installs stubs on PATH and
-# exports STUB_* env the stubs read. No live city, network, gc, bd or gh: the
+# exports STUB_* env the stubs read, and GC_QUEUE_PRIORITY_TOOL, this tree's
+# priority writer over the stub store. No live city, network, gc, bd or gh: the
 # test floor (tools/test-floor) sits beneath the stubs, so a call no stub
 # answers is refused rather than handed to the real binary.
 # Sourcing it only defines functions, except in a suite that declares run-tests
@@ -121,12 +122,53 @@ harness_init() {
     exit 2
   fi
   export PATH="$BIN:$floor/harness:$floor:$PATH"
+  # The priority writer a script under test reaches through
+  # GC_QUEUE_PRIORITY_TOOL: this tree's queue-priority.sh over the stub store.
+  # The writer finds a bead's store in the rig list, which the stub does not
+  # serve, so the wrapper names a store directory of the harness's own, where
+  # the writer keeps its lock.
+  local here
+  here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  mkdir -p "$TMP/qp-rig/.beads"
+  { _stub_shebang; printf 'exec %q "$@" --db %q\n' "$here/queue-priority.sh" "$TMP/qp-rig/.beads"; } > "$BIN/queue-priority"
+  chmod +x "$BIN/queue-priority"
+  export GC_QUEUE_PRIORITY_TOOL="$BIN/queue-priority"
+  # run-lib.sh's verbs, answered from this store. A script under test sources
+  # run-lib.sh through GC_RUN_LIB, so it gets run-lib.stub.sh, which serves the
+  # runs $BIN/harness-runs prints at each call: the runs the store's roots and
+  # convoys make, each row carrying its edges from the dep rows, by run-lib.sh's
+  # own run_rows. A case's roots and convoys are the runs it reads, and no stub
+  # here answers the reads behind them.
+  { _stub_shebang; printf '. %q || exit 1\n' "$here/run-lib.sh"; cat <<'RUNS'
+# A dep row is "A|TYPE|B": A <TYPE>-edges B, an edge that sits on A for every
+# type but blocks.
+jq -c --rawfile d "$STUB_DEPS" "$RUN_JQ"'
+  [ $d | split("\n")[] | select(length > 0) | split("|") | select(.[1] != "blocks")
+    | {issue_id: .[0], depends_on_id: .[2], type: .[1]} ] as $e
+  | map(. as $r | .dependencies = ((.dependencies // []) + [ $e[] | select(.issue_id == (($r.id // "") | tostring)) ]))
+  | run_rows' "$STUB_STORE"
+RUNS
+  } > "$BIN/harness-runs"
+  chmod +x "$BIN/harness-runs"
+  export GC_RUN_LIB="$here/run-lib.stub.sh" RUN_LIB_STUB_CMD="$BIN/harness-runs" RUN_LIB_STUB_FAIL="" RUN_LIB_STUB_LOG=""
 }
 
 store() { printf '%s' "$1" > "$STUB_STORE"; }
 meta()  { jq -r --arg id "$1" --arg k "$2" '(.[] | select(.id == $id) | .metadata[$k] // "<absent>") // "<absent>"' "$STUB_STORE"; }
 bstatus() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .status) // "<absent>"' "$STUB_STORE"; }
 bassignee() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .assignee) // "<absent>"' "$STUB_STORE"; }
+# A bead's priority, bd's default 2 when none was written, and the priority a
+# sling poured its workflow at, which the stub's sling records.
+bprio() { jq -r --arg id "$1" '(.[] | select(.id == $id) | (.priority // 2)) // "<absent>"' "$STUB_STORE"; }
+bpoured() { jq -r --arg id "$1" '(.[] | select(.id == $id) | (.poured_priority // "<unpoured>")) // "<absent>"' "$STUB_STORE"; }
+# Every parent a bead carries, comma-joined and empty for none: its parent-child
+# edges in the dep rows, and the parent field a create or update wrote.
+bparents() {
+  { awk -F'|' -v id="$1" '$1 == id && $2 == "parent-child" { print $3 }' "$STUB_DEPS"
+    jq -r --arg id "$1" '.[] | select(.id == $id) | (.parent // empty),
+      ((.dependencies // [])[]? | select((.type // .dependency_type // "") == "parent-child") | (.depends_on_id // .id // empty))' "$STUB_STORE"
+  } | sort -u | paste -sd, -
+}
 notes() { jq -r --arg id "$1" '(.[] | select(.id == $id) | .notes) // ""' "$STUB_STORE"; }
 
 # Copy the SUT and the named siblings into a private scripts dir so $0-relative
@@ -153,11 +195,20 @@ mk_sut_dir() { # <dir> <file>...
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
   # review-verdict.sh, the approval rule, review-dismissal.sh, what a dismissal
-  # retires, and hold-lib.sh, the one definition of a hold, which
-  # deferred-dispatch.sh sources, are sourced by sibling path the same way.
+  # retires, review-answer.sh, what the living answer to a review shows,
+  # hold-lib.sh, the one definition of a hold, which deferred-dispatch.sh
+  # sources, priority-lib.sh, the priority function, whose reading of a PR's
+  # approval pr-facts.sh sources, git-lib.sh, the one read of a branch's head on
+  # origin, which gate-ensure.sh and signoff.sh source, and run-lib.sh, the one
+  # reader of a run's link to its bead, are sourced by sibling path the same
+  # way.
   [ -f "$here/review-verdict.sh" ] && cp "$here/review-verdict.sh" "$d/"
   [ -f "$here/review-dismissal.sh" ] && cp "$here/review-dismissal.sh" "$d/"
+  [ -f "$here/review-answer.sh" ] && cp "$here/review-answer.sh" "$d/"
   [ -f "$here/hold-lib.sh" ] && cp "$here/hold-lib.sh" "$d/"
+  [ -f "$here/priority-lib.sh" ] && cp "$here/priority-lib.sh" "$d/"
+  [ -f "$here/git-lib.sh" ] && cp "$here/git-lib.sh" "$d/"
+  [ -f "$here/run-lib.sh" ] && cp "$here/run-lib.sh" "$d/"
   return 0
 }
 
@@ -232,7 +283,10 @@ case "$sub" in
     # Emulate the graph.v2 pour on the store: retire gc.routed_to and stamp
     # gc.execution_routed_to=<target>. STUB_SLING_FAIL exits 1 with no writes;
     # STUB_DROP_KEYS="<bead>:gc.execution_routed_to" models a pour whose exec
-    # stamp dropped. Invocations land in STUB_GC_LOG like every gc call.
+    # stamp dropped. Invocations land in STUB_GC_LOG like every gc call. A pour
+    # copies the bead's priority into its workflow once, so poured_priority
+    # records the priority the bead carried at the sling, bd's default 2 when
+    # none was written (bpoured).
     [ -n "${STUB_SLING_FAIL:-}" ] && { echo "gc: simulated sling failure" >&2; exit 1; }
     target=""; bead=""
     while [ $# -gt 0 ]; do
@@ -255,6 +309,7 @@ case "$sub" in
       map(if .id == $id then
             (.metadata |= del(.["gc.routed_to"]))
             | (if $stamp == 1 then .metadata["gc.execution_routed_to"] = $t else . end)
+            | .poured_priority = (.priority // 2)
           else . end)' "$S" > "$tmp" && mv "$tmp" "$S"
     exit 0 ;;
   bd) : ;;
@@ -305,7 +360,9 @@ case "$verb" in
     if [ -n "${STUB_SHOW_NOT_FOUND_ERROR:-}" ] && ! jq -e --arg id "$id" 'any(.[]; .id == $id)' "$S" >/dev/null 2>&1; then
       printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1
     fi
-    jq -c --arg id "$id" '[ .[] | select(.id == $id) ]' "$S"
+    # Every bead bd prints carries a priority, P2 unless one was written, so a
+    # fixture row that names none reads at bd's default.
+    jq -c --arg id "$id" '[ .[] | select(.id == $id) | .priority //= 2 ]' "$S"
     ;;
   list)
     [ -n "${STUB_LIST_FAIL:-}" ] && { echo "gc: simulated list failure" >&2; exit 1; }
@@ -360,12 +417,22 @@ case "$verb" in
         | select($ex == "" or ((.issue_type // "task") != $ex))
         | select($tc == "" or (((.title // "") | ascii_downcase) | contains($tc | ascii_downcase)))
         | . as $row
-        | select(all($fields[]; ((($row.metadata // {})[.k]) // "" | tostring) == .v)) ]' \
+        | select(all($fields[]; ((($row.metadata // {})[.k]) // "" | tostring) == .v))
+        | .priority //= 2 ]' \
       "$S" --args ${fields[@]+"${fields[@]}"}
     [ -z "$ltrail" ] || echo 'gc: simulated trailing output'
     ;;
   update)
-    id="${1:-}"; shift || true
+    # bd writes every id named ahead of the flags; each is written here as an
+    # update of its own carrying the same flags, through this stub, which is
+    # the gc on the suite's PATH.
+    ids=()
+    while [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; do ids+=("$1"); shift; done
+    if [ "${#ids[@]}" -gt 1 ]; then
+      for id in "${ids[@]}"; do gc bd update "$id" "$@" >/dev/null || exit $?; echo "updated $id"; done
+      exit 0
+    fi
+    id="${ids[0]:-}"
     case " ${STUB_UPDATE_FAIL:-} " in *" $id "*) echo "gc: simulated update refusal for $id" >&2; exit 1 ;; esac
     # STUB_CLOSE_FAIL="id id2" — the same knob the `close` subcommand reads,
     # applied to the other spelling of a close: refuse only the writes carrying
@@ -378,7 +445,7 @@ case "$verb" in
       *" $id "*) case " $* " in *" --status=closed "*)
         echo "gc: simulated close refusal for $id" >&2; exit 1 ;; esac ;;
     esac
-    sets=(); unsets=(); note=""; note_set=0; asg=""; asg_set=0; newstatus=""; desc=""; desc_set=0
+    sets=(); unsets=(); note=""; note_set=0; asg=""; asg_set=0; newstatus=""; desc=""; desc_set=0; prio=""; uparent=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --description=*) desc="${1#--description=}"; desc_set=1 ;;
@@ -391,6 +458,10 @@ case "$verb" in
         --assignee) shift; asg="${1-}"; asg_set=1 ;;
         --status=*) newstatus="${1#--status=}" ;;
         --append-notes) shift; note="${1:-}"; note_set=1 ;;
+        --priority=*) prio="${1#--priority=}" ;;
+        --priority|-p) shift; prio="${1-}" ;;
+        --parent=*) uparent="${1#--parent=}" ;;
+        --parent) shift; uparent="${1-}" ;;
         *) : ;;
       esac
       shift || true
@@ -413,6 +484,10 @@ case "$verb" in
     for pair in ${STUB_DROP_KEYS:-}; do
       case "$pair" in "$id:"*) drops="${pair#*:}" ;; esac
     done
+    # A parent rides the update as bd writes it: a parent-child edge onto it.
+    if [ -n "$uparent" ]; then
+      case ",$drops," in *",parent,"*) : ;; *) dep_put "$id" parent-child "$uparent" || exit 1 ;; esac
+    fi
     # The whole update lands in ONE jq pass over the store, however many flags
     # it carries: a jq per --set-metadata, --unset-metadata, assignee, status,
     # notes and description, each with its own temp copy, made a five-flag
@@ -420,17 +495,19 @@ case "$verb" in
     # writes tens of thousands of updates. The sets ride the positional args
     # ahead of the unsets ($ns says where the split is), each `k=v` cut at its
     # first `=` as the shell cut it. A set or unset whose key STUB_DROP_KEYS
-    # names is skipped, as are the assignee, status and description it names;
-    # notes are never dropped.
+    # names is skipped, as are the assignee, status, priority, parent and
+    # description it names; notes are never dropped.
     # bd stores a value that parses as a JSON number, true, false or null as
     # that typed value, so `k=1` reads back as the number 1 and `k=true` as a
     # boolean. Every other value, a quoted JSON string included, is stored as
     # its raw text. The number grammar is JSON's, which is stricter than jq's
-    # parser, so `+1`, `00`, `.5` and `NaN` stay strings.
+    # parser, so `+1`, `00`, `.5` and `NaN` stay strings. bd takes a priority
+    # as 0-4 or P0-P4 and stores the number.
     tmp="${S%/*}/.gc-stub.$$"
     jq -c --arg id "$id" --arg dr "$drops" --argjson ns "${#sets[@]}" \
       --argjson asg_set "$asg_set" --arg asg "$asg" --arg st "$newstatus" \
       --argjson note_set "$note_set" --arg note "$note" \
+      --arg prio "$prio" --arg parent "$uparent" \
       --argjson desc_set "$desc_set" --arg desc "$desc" '
       ($dr | split(",")) as $drop
       | def kept($k): ($drop | index($k)) == null;
@@ -451,6 +528,8 @@ case "$verb" in
               | reduce $unsets[] as $k (.; .metadata |= del(.[$k]))
               | (if $asg_set == 1 and kept("assignee") then .assignee = $asg else . end)
               | (if $st != "" and kept("status") then .status = $st else . end)
+              | (if $prio != "" and kept("priority") then .priority = ($prio | ltrimstr("P") | ltrimstr("p") | tonumber) else . end)
+              | (if $parent != "" and kept("parent") then .parent = $parent else . end)
               | (if $note_set == 1 then
                    .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $note)
                  else . end)
@@ -474,9 +553,12 @@ case "$verb" in
     # and any other <type>:<id> makes the new bead depend on <id> with that type.
     # A target that does not resolve refuses the whole create with nothing
     # written. STUB_DEP_FAIL naming the minted id lands the bead without its
-    # edges, as it refuses a `dep` write from that id.
+    # edges, as it refuses a `dep` write from that id. --parent <id> rides the
+    # create as bd writes it, a parent-child edge onto <id> beside .parent, and
+    # -p/--priority sets the priority the row is born at; a create that names
+    # none is read at bd's default P2.
     title="${1:-}"; shift || true
-    body=""; cmeta="{}"; cstatus="open"; cnotes=""; cdeps=""
+    body=""; cmeta="{}"; cstatus="open"; cnotes=""; cdeps=""; cparent=""; cprio=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --body-file) shift; [ "${1:-}" = "-" ] && body="$(cat)" ;;
@@ -488,9 +570,14 @@ case "$verb" in
         --notes=*) cnotes="${1#--notes=}" ;;
         --deps) shift; cdeps="$cdeps,${1:-}" ;;
         --deps=*) cdeps="$cdeps,${1#--deps=}" ;;
+        --parent) shift; cparent="${1:-}" ;;
+        --parent=*) cparent="${1#--parent=}" ;;
+        -p|--priority) shift; cprio="${1:-}" ;;
+        --priority=*) cprio="${1#--priority=}" ;;
       esac
       shift || true
     done
+    [ -z "$cparent" ] || cdeps="$cdeps,parent-child:$cparent"
     [ -n "${STUB_CREATE_FAIL:-}" ] && { echo "gc: simulated create refusal" >&2; exit 1; }
     # One jq validates the metadata, mints the id and lands the row. An
     # unparseable --metadata fails --argjson before the program runs, which is
@@ -500,6 +587,7 @@ case "$verb" in
     # naming the id wins, as the shell loop it replaces let the last one win).
     [ -n "$cmeta" ] || { echo "Error: invalid JSON in --metadata: must be valid JSON" >&2; exit 1; }
     out=$(jq -rc --arg t "$title" --arg b "$body" --arg st "$cstatus" --arg nt "$cnotes" \
+      --arg par "$cparent" --arg pr "$cprio" \
       --argjson m "$cmeta" --arg dk "${STUB_DROP_KEYS:-}" '
       ("new-" + ((length + 1) | tostring)) as $id
       | ([$dk | splits("[ \t\n]+")] | map(select(startswith($id + ":")))
@@ -508,7 +596,9 @@ case "$verb" in
            then ($m | with_entries(select(.key as $k | $drop | index($k) | not)))
            else $m end) as $meta
       | (if ($drop | index("status")) then "open" else $st end) as $status
-      | (. + [{id: $id, status: $status, assignee: "", title: $t, description: $b, notes: $nt, issue_type: "task", metadata: $meta}]),
+      | (. + [{id: $id, status: $status, assignee: "", title: $t, description: $b, notes: $nt, issue_type: "task", metadata: $meta}
+              + (if $par == "" then {} else {parent: $par} end)
+              + (if $pr == "" then {} else {priority: ($pr | ltrimstr("P") | ltrimstr("p") | tonumber)} end)]),
         $id' "$S" 2>/dev/null) \
       || { echo "Error: invalid JSON in --metadata: must be valid JSON" >&2; exit 1; }
     for cdep in $(printf '%s' "$cdeps" | tr ',' ' '); do
@@ -779,7 +869,8 @@ case "$sub" in
         # ids the suites pick. On a PR with no threads fixture nothing reads the
         # post back. STUB_PR_COMMENT_RC models a post the API refuses;
         # STUB_PR_COMMENT_QUIET makes it land and print nothing, so the caller
-        # cannot read the new id back.
+        # cannot read the new id back. A body over 65,536 characters is refused,
+        # as GitHub refuses it.
         [ "${STUB_PR_COMMENT_RC:-0}" = "0" ] || exit "${STUB_PR_COMMENT_RC:-0}"
         n="${1:-}"; shift || true
         b=""; rq=""
@@ -791,6 +882,7 @@ case "$sub" in
           esac
           shift || true
         done
+        [ "${#b}" -le 65536 ] || { echo "gh pr stub: Body is too long (maximum is 65536 characters)" >&2; exit 1; }
         printf 'PRCOMMENT %s\n' "$n" >> "${STUB_GH_LOG:?}"
         f="$G/threads_$n.json"
         [ -s "$f" ] || exit 0
@@ -1049,9 +1141,12 @@ case "$sub" in
                 nodes: (.issue_comments // [])}}}}}' "$f"
           exit 0 ;;
         *reviews*)
+          # The reviews, and the logins the PR has pending review requests
+          # from, which the fixture keeps as .review_requests.
           [ -z "${STUB_GQL_READ_FAIL:-}" ] || exit 1
           [ -s "$f" ] || { echo "gh graphql stub: no threads fixture for PR $num" >&2; exit 1; }
           jq -c '{data: {repository: {pullRequest: {
+              reviewRequests: {nodes: [ (.review_requests // [])[] | {requestedReviewer: {login: .}} ]},
               reviews: {pageInfo: {hasNextPage: false, endCursor: null}, nodes: (.reviews // [])}}}}}' "$f"
           exit 0 ;;
         *) echo "gh graphql stub: unsupported query" >&2; exit 2 ;;
@@ -1092,12 +1187,25 @@ case "$sub" in
         [ "${STUB_ICEDIT_RC:-0}" = "0" ] || exit "${STUB_ICEDIT_RC:-0}"
         cid="${path##*/issues/comments/}"
         gqvar b body
-        hit=""
+        # GitHub refuses an edit to a body over 65,536 characters.
+        [ "${#b}" -le 65536 ] || { echo "gh api stub: Body is too long (maximum is 65536 characters)" >&2; exit 1; }
+        # The ids this stub gives new comments start over on each PR fixture, so
+        # two PRs can hold one id. GitHub's ids are unique, and an edit names its
+        # comment by id alone, so the stub picks the fixture whose comment with
+        # that id carries the review or finding key the new body carries, and
+        # otherwise the first fixture holding the id.
+        key=$(printf '%s' "$b" | grep -Eo '<!-- gc-(review-answer:r[0-9]+|finding:[A-Za-z0-9._-]+) -->' | head -1)
+        hit=""; first=""
         for cand in "$G"/threads_*.json; do
           [ -s "$cand" ] || continue
           jq -e --arg c "$cid" '[ .issue_comments[]? | select(((.databaseId // 0) | tostring) == $c) ] | length > 0' "$cand" >/dev/null 2>&1 || continue
-          hit="$cand"; break
+          [ -n "$first" ] || first="$cand"
+          if [ -z "$key" ] || jq -e --arg c "$cid" --arg k "$key" '[ .issue_comments[]? | select(((.databaseId // 0) | tostring) == $c)
+               | select((.body // "") | contains($k)) ] | length > 0' "$cand" >/dev/null 2>&1; then
+            hit="$cand"; break
+          fi
         done
+        [ -n "$hit" ] || hit="$first"
         [ -n "$hit" ] || { echo "gh api stub: no fixture holds issue comment $cid" >&2; exit 1; }
         t=$(mktemp "${hit%/*}/.gc-stub.XXXXXX")
         jq --arg c "$cid" --arg b "$b" '.issue_comments = ((.issue_comments // []) | map(if ((.databaseId // 0) | tostring) == $c then .body = $b else . end))' \
@@ -1110,6 +1218,29 @@ case "$sub" in
         printf 'ICEDIT %s\n' "$cid" >> "${STUB_GH_LOG:?}"
         out="{\"id\":$cid}"
         if [ -n "$jqexpr" ]; then printf '%s' "$out" | jq -r "$jqexpr"; else printf '%s\n' "$out"; fi
+        exit 0 ;;
+      DELETE:*/issues/comments/*)
+        # A Conversation comment deleted: it leaves the PR fixture holding it,
+        # and issue_comments_<n>.json beside it, so the next read no longer
+        # serves it. STUB_ICDELETE_RC models a delete the API refuses.
+        [ "${STUB_ICDELETE_RC:-0}" = "0" ] || exit "${STUB_ICDELETE_RC:-0}"
+        cid="${path##*/issues/comments/}"
+        hit=""
+        for cand in "$G"/threads_*.json; do
+          [ -s "$cand" ] || continue
+          jq -e --arg c "$cid" '[ .issue_comments[]? | select(((.databaseId // 0) | tostring) == $c) ] | length > 0' "$cand" >/dev/null 2>&1 \
+            && { hit="$cand"; break; }
+        done
+        [ -n "$hit" ] || { echo "gh api stub: no fixture holds issue comment $cid" >&2; exit 1; }
+        t=$(mktemp "${hit%/*}/.gc-stub.XXXXXX")
+        jq --arg c "$cid" '.issue_comments = [ (.issue_comments // [])[] | select(((.databaseId // 0) | tostring) != $c) ]' \
+          "$hit" > "$t" && mv "$t" "$hit"
+        n="${hit##*/threads_}"; n="${n%.json}"
+        r="$G/issue_comments_$n.json"
+        if [ -s "$r" ]; then
+          jq -c --arg c "$cid" 'map(select(((.id // 0) | tostring) != $c))' "$r" > "$r.tmp" && mv "$r.tmp" "$r"
+        fi
+        printf 'ICDELETE %s\n' "$cid" >> "${STUB_GH_LOG:?}"
         exit 0 ;;
     esac
     out=""
@@ -1150,9 +1281,19 @@ case "$sub" in
       */pulls/*/requested_reviewers)
         # Re-request a reviewer. The reviewer login rides the -f arg the full-args
         # log above already captured; this marks the endpoint hit for a test to
-        # assert, and STUB_REREQUEST_RC models a re-request the API refuses.
+        # assert, and STUB_REREQUEST_RC models a re-request the API refuses. One
+        # that lands joins the PR fixture's pending review requests, as GitHub
+        # records it, so the next read serves it.
         printf 'REREQUEST %s\n' "$path" >> "${STUB_GH_LOG:?}"
-        exit "${STUB_REREQUEST_RC:-0}" ;;
+        [ "${STUB_REREQUEST_RC:-0}" = "0" ] || exit "${STUB_REREQUEST_RC:-0}"
+        n="${path##*/pulls/}"; n="${n%%/*}"
+        gqvar rr 'reviewers[]'
+        f="$G/threads_$n.json"
+        if [ -n "$rr" ] && [ -s "$f" ]; then
+          t=$(mktemp "${f%/*}/.gc-stub.XXXXXX")
+          jq --arg r "$rr" '.review_requests = ((.review_requests // []) + [$r] | unique)' "$f" > "$t" && mv "$t" "$f"
+        fi
+        exit 0 ;;
       */pulls/*/reviews*|*/pulls/*/comments*)
         n="${path##*/pulls/}"; n="${n%%/*}"
         # STUB_GH_LIST_RC: the history delivered as a real gh failure. An absent
@@ -1233,6 +1374,14 @@ case "$*" in
   # no repository under it and therefore no committed artifact to keep current.
   *"rev-parse --show-toplevel"*) printf '%s\n' "${STUB_TOPLEVEL:-}" ;;
   *"rev-parse --verify --quiet"*) printf '%s\n' "${STUB_FETCHED_HEAD:-}" ;;
+  # A rig's not-for-review.toml as its default branch carries it, served from
+  # the directory -C names: a test declares by writing the file there, and with
+  # no file there the branch carries none.
+  *"cat-file blob "*":not-for-review.toml"*)
+    dir=""; prev=""
+    for a in "$@"; do [ "$prev" = "-C" ] && dir="$a"; prev="$a"; done
+    [ -n "$dir" ] && [ -f "$dir/not-for-review.toml" ] || exit 128
+    exec cat "$dir/not-for-review.toml" ;;
   *"fetch "*) exit "${STUB_FETCH_RC:-0}" ;;
   *"ls-remote"*)
     # STUB_LS_REMOTE names a file of branch names, one per line, served in

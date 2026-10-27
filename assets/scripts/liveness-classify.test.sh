@@ -51,7 +51,7 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit
 cat > "$TMP/ready.json" <<'JSON'
 [
   {"id":"n-pr","title":"parked on an open PR","issue_type":"task","metadata":{"merge_result":"pull_request","pr_url":"https://github.com/o/r/pull/7"}},
-  {"id":"n-preopen","title":"pre-open, its one gate green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness","check.correctness":"green"}},
+  {"id":"n-preopen","title":"pre-open, its one gate green","issue_type":"task","metadata":{"merge_result":"pre_open_gate","check_set":"correctness"}},
   {"id":"n-worked","title":"a bead a convoy drives","issue_type":"bug"},
   {"id":"n-husk","title":"a step of a husk molecule","issue_type":"task"},
   {"id":"n-plain","title":"an ordinary idle bug","issue_type":"bug"},
@@ -67,20 +67,20 @@ cat > "$TMP/live.json" <<'JSON'
 JSON
 cp "$TMP/live.json" "$TMP/alive.json"
 
-# classify <openprs> <worked> <husks> <preopen_gates> <have_resolver>
+# classify <openprs> <worked> <husks> <preopen_green>
 #          <livesessions> <livenessknown> <unreadable_liveness_covers>
 # Prints the classes as one sorted "id:class" list.
 classify() {
     jq -nr --slurpfile ready "$TMP/ready.json" --slurpfile live "$TMP/live.json" --slurpfile alive "$TMP/alive.json" \
         --argjson openprs "$1" --argjson worked "$2" --argjson husks "$3" \
-        --argjson preopen_gates "$4" --arg have_resolver "$5" \
-        --argjson livesessions "$6" --argjson livenessknown "$7" --argjson unreadable_liveness_covers "$8" \
+        --argjson preopen_green "$4" \
+        --argjson livesessions "$5" --argjson livenessknown "$6" --argjson unreadable_liveness_covers "$7" \
         "$VISIT_IDENTITY_JQ$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$PLACEMENT_JQ$LIVENESS_CLASSIFY_JQ"'[ liveness_classify[] | "\(.id):\(.class)" ] | sort | join(" ")'
 }
 class_of() { printf '%s\n' "$1" | tr ' ' '\n' | sed -n "s/^$2://p"; }
 
 echo "# the classifier"
-ALL="$(classify '["https://github.com/o/r/pull/7"]' '["n-worked"]' '["n-husk"]' '{"n-preopen":["correctness"]}' 1 '["s-1"]' true true)"
+ALL="$(classify '["https://github.com/o/r/pull/7"]' '["n-worked"]' '["n-husk"]' '{"n-preopen":true}' '["s-1"]' true true)"
 eq "$(printf '%s\n' "$ALL" | tr ' ' '\n' | grep -c .)" "8" "(DEF) one row per ready bead"
 eq "$(class_of "$ALL" n-pr)" "gated" "(DEF) a bead whose PR is open is gated"
 eq "$(class_of "$ALL" n-preopen)" "gated" "(DEF) a pre-open anchor whose gates are all green is gated"
@@ -92,22 +92,24 @@ eq "$(class_of "$ALL" n-placement)" "awaiting-placement" "(DEF) a bead held for 
 eq "$(class_of "$ALL" n-placed)" "unnamed" "(DEF) a bead placed under an epic waits on nothing the sitting owes, marker or not"
 
 echo "# an empty read drops nothing"
-NONE="$(classify '[]' '[]' '[]' '{}' 1 '["s-1"]' true true)"
+NONE="$(classify '[]' '[]' '[]' '{}' '["s-1"]' true true)"
 for id in n-pr n-preopen n-worked n-husk n-plain; do
     eq "$(class_of "$NONE" "$id")" "unnamed" "(EMPTY) $id is unnamed when every read beyond the bead set is empty"
 done
-# have_resolver "0" means the resolver never answered, and the pre-open arm then
-# reads the anchor's own check_set. A caller that wants that arm to drop nothing
-# passes "1" with an empty map.
-eq "$(class_of "$(classify '[]' '[]' '[]' '{}' 0 '["s-1"]' true true)" n-preopen)" "gated" \
-   "(EMPTY) with have_resolver 0 the pre-open arm falls back to the check_set"
+# A pre-open anchor the map leaves out, or names with anything but true, is not
+# gated: the sweep proved none of its gates green.
+eq "$(class_of "$(classify '[]' '[]' '[]' '{"n-preopen":false}' '["s-1"]' true true)" n-preopen)" "unnamed" \
+   "(EMPTY) a pre-open anchor the map does not name true stays an unnamed wait"
+# One the map names "unread", whose head the sweep could not read, is held.
+eq "$(class_of "$(classify '[]' '[]' '[]' '{"n-preopen":"unread"}' '["s-1"]' true true)" n-preopen)" "unread" \
+   "(DEF) a pre-open anchor whose head the sweep could not read is unread, a named class"
 
 echo "# an unreadable session list"
-eq "$(class_of "$(classify '[]' '[]' '[]' '{}' 1 '[]' false true)" n-subj)" "conversing" \
+eq "$(class_of "$(classify '[]' '[]' '[]' '{}' '[]' false true)" n-subj)" "conversing" \
    "(LIVENESS) unreadable_liveness_covers true keeps a claimed visit covering"
-eq "$(class_of "$(classify '[]' '[]' '[]' '{}' 1 '[]' false false)" n-subj)" "unnamed" \
+eq "$(class_of "$(classify '[]' '[]' '[]' '{}' '[]' false false)" n-subj)" "unnamed" \
    "(LIVENESS) unreadable_liveness_covers false leaves the subject unnamed"
-eq "$(class_of "$(classify '[]' '[]' '[]' '{}' 1 '[]' true true)" n-subj)" "unnamed" \
+eq "$(class_of "$(classify '[]' '[]' '[]' '{}' '[]' true true)" n-subj)" "unnamed" \
    "(LIVENESS) a readable list without the holder leaves the subject unnamed either way"
 
 echo "# every reader sources the one classifier"

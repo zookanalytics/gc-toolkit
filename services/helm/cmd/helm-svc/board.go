@@ -47,8 +47,9 @@ import (
 const boardUsage = `Usage:
   helm-svc board [--all] [--json] [--limit=N] [--timeout=SECONDS]
 
-  What is owed by you, oldest first — the CLI view of the same gather and
-  derivation the Helm dashboard serves.
+  What is owed by you, oldest first after any visit whose sitting failed to
+  start — the CLI view of the same gather and derivation the Helm dashboard
+  serves.
 
   --all              The city overview instead: every anchor, ranked together.
   --json             Emit the rows as a JSON array (stable contract).
@@ -370,7 +371,7 @@ func renderQueue(w io.Writer, b board.Board, queue []board.Tile, now time.Time, 
 	}
 
 	renderRows(w, queue)
-	fmt.Fprint(w, "\nOldest first — this queue is ordered by how long each row has been owed, not by rank\n")
+	fmt.Fprint(w, "\nOldest first — this queue is ordered by how long each row has been owed, not by rank; a visit whose sitting failed to start (✗) leads it\n")
 	fmt.Fprint(w, "helm-svc board --all (prefix+B in tmux) for the city overview\n")
 	renderSittings(w, b.Sittings, now)
 	renderLegend(w)
@@ -512,10 +513,15 @@ func renderRows(w io.Writer, shown []board.Tile) {
 	}
 }
 
-// renderTileLine writes one anchor's row in the sized columns.
+// renderTileLine writes one anchor's row in the sized columns. Its glyph is ✗
+// on a row whose visit's sitting failed to start, ● on any other row an open
+// visit holds.
 func renderTileLine(w io.Writer, t board.Tile, idW, rigW int) {
 	glyph := " "
-	if t.Held {
+	switch {
+	case t.VisitState == board.VisitStartFailed:
+		glyph = "✗"
+	case t.Held:
 		glyph = "●"
 	}
 	fmt.Fprint(w, rpad(glyph, colHeld)+rpad(string(t.Severity), colSeverity)+
@@ -585,12 +591,16 @@ func wantsPerson(t board.Tile) bool {
 }
 
 // familyGlyph is the overview's leading marker: ● a row whose next move is a
-// person's (review or gate), ○ a row an open visit holds, ◉ both. The overview's
-// ● is the wants-you highlight, so a visit takes its own glyph here rather than
-// colliding with it. The default queue view has no wants-you axis, so there ●
-// stays free to mean held on its own (renderTileLine).
+// person's (review or gate), ○ a row an open visit holds, ◉ both, and ✗ a row
+// whose visit's sitting failed to start, which wants a person whatever else it
+// is. The overview's ● is the wants-you highlight, so a visit takes its own
+// glyph here rather than colliding with it. The default queue view has no
+// wants-you axis, so there ● stays free to mean held on its own
+// (renderTileLine).
 func familyGlyph(t board.Tile) string {
 	switch {
+	case t.VisitState == board.VisitStartFailed:
+		return "✗"
 	case wantsPerson(t) && t.Held:
 		return "◉"
 	case wantsPerson(t):
@@ -651,7 +661,7 @@ func renderMemberLine(w io.Writer, t board.Tile, idW, rigW int) {
 func renderFamilyLegend(w io.Writer) {
 	fmt.Fprint(w, "\nFamilies (▌) group by dependency structure: a top-level anchor and the children, blockers, reviews and rework that hang off it, so a family reads as one thing\n")
 	fmt.Fprint(w, "BAND orders each family by the move a member wants: review=a pull request · gate=a person must answer · stalled=nothing moving · active=in-flight · cleanup=finished/empty · done=closed\n")
-	fmt.Fprint(w, "● wants YOU (review, gate) · ○ an open visit holds the row · ◉ both. A family's header names its root (id · kind · N/M · frontier · needs); the rows beneath are its members, most-pressing first\n")
+	fmt.Fprint(w, "● wants YOU (review, gate) · ○ an open visit holds the row · ◉ both · ✗ the sitting spawned for its visit failed to start, and NEEDS says why. A family's header names its root (id · kind · N/M · frontier · needs); the rows beneath are its members, most-pressing first\n")
 	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway · review/rework=a gate child in flight (resume: prefix+a, then the id)\n")
 	fmt.Fprint(w, "A DONE family sinks below every live one; a row ages out of the band once it has been closed longer than GC_HELM_DONE_WINDOW (default 7d, 0 off)\n")
 	fmt.Fprint(w, "PACK rows are the out-of-band build orders: what each compiled component is serving, and whether it matches the sources\n")
@@ -734,7 +744,7 @@ func renderLegend(w io.Writer) {
 	fmt.Fprint(w, "Kinds: epic/convoy/decision are roll-up anchors · human=routed to you · parked=a conversation with a takeaway (resume: prefix+a, then the id)\n")
 	fmt.Fprint(w, "A parked row with an N/M count decomposed into children and is banded by them — the takeaway is not the whole story there\n")
 	fmt.Fprint(w, "A row reading \"ruled\" was answered and its routed work has landed — close or extend it; the ruling itself is in --json takeaway\n")
-	fmt.Fprint(w, "Held: ● an open visit holds this anchor's conversation (attach via the sessions picker) · blank = none\n")
+	fmt.Fprint(w, "Held: ● an open visit holds this anchor's conversation (attach via the sessions picker) · ✗ the sitting spawned for its visit failed to start, NEEDS says why, and the row leads the queue until the visit is engaged again or closed · blank = none\n")
 	fmt.Fprint(w, "A DONE row sinks below every live band; no row leaves for being answered. A row ages out of the band once it has been closed longer than GC_HELM_DONE_WINDOW (default 7d, 0 off).\n")
 	fmt.Fprint(w, "PACK rows are the out-of-band build orders: what each compiled component is serving, and whether it matches the sources\n")
 	fmt.Fprint(w, "gc-helm.sh open <id> to file a visit · react <id> to advance a takeaway-less row. Ranking is a deterministic proxy.\n")

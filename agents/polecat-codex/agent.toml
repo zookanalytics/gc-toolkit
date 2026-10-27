@@ -11,13 +11,34 @@ work_dir = ".gc/worktrees/{{.Rig}}/polecat-codex/{{.AgentBase}}"
 # obeyed literally: the session runs the claim, reports the JSON, and stops, and
 # nothing re-offers a held claim. Both pools wake into the same startup and
 # claim contract, so the text is identical in both.
+#
+# The hand-back in the nudge is the write assets/scripts/hand-back.sh makes for
+# an in_progress claim, spelled out as one command because a session's
+# environment names no pack directory to run that script from. The script's
+# header gives the reasons for the write's shape.
+#
+# The nudge points at the prompt's claim contract for the one read a session
+# orients from, assets/scripts/claim-context.sh, rather than naming the script:
+# gc expands no template in a nudge, so only the prompt can render the pack's
+# path.
 nudge = """
 Claim and complete one work item: gc hook --claim --json returns assigned work \
 first and routed pool work second, and the bead it names is yours to carry \
 through its formula to the terminal step. Claiming is not completing. A reason \
 of existing_assignment means you already hold the work, so execute it instead \
-of reporting it. If you cannot proceed, record why on the bead and clear your \
-assignee so the work is re-offered.\
+of reporting it. Orient from the result and the one read your prompt's claim \
+contract names, not by re-reading the beads: a step_reminder in the result is \
+the step's instructions, and that read gives you the rest. If you cannot \
+proceed, record why on the bead, then hand it \
+back with one write that reopens it and releases your claim, so a pool can \
+offer the work again: `gc bd update <bead> \
+--if-assignee="${GC_ALIAS:-$GC_SESSION_ID}" --if-status=in_progress \
+--status=open --assignee="" --unset-metadata gc.session_id \
+--unset-metadata gc.session_name`. Your claim is recorded under your alias \
+when you have one and under your session id when you do not, so the write \
+lands only while you still hold the bead. If it exits non-zero, leave your \
+assignee as it is and say so on the bead, and orphan recovery returns the \
+bead once your session ends.\
 """
 # Codex reads no .claude overlay, so the gh origin guard is registered in the
 # Codex home before the session starts (docs/gh-origin-guard.md, "Codex").

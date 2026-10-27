@@ -2,13 +2,17 @@
 # Exit condition for the `self-review` check loop in mol-polecat-work.
 #
 # Exit 0 ("pass" — closes the control bead and releases submit-and-exit) ONLY
-# when the work bead carries a self-review green stamp bound to exactly the tree
-# checked out right now, and that tree is clean. Every other state, including any
-# internal error in this script, exits non-zero so the loop spawns the next
-# iteration. Fail-closed is deliberate: a false pass hands an unverified diff to
-# the refinery, which is the red handoff this loop exists to stop.
+# when the tree checked out right now is clean, `gctk rig` holds a passing
+# record at its HEAD of the run the step declares for each of the rig's recorded
+# checks (test, lint and typecheck), and the work bead notes that setup and
+# build, as the step declares them, passed at that HEAD, a fail of any of them
+# passing only by the work bead's pre-existing mark for it. Every
+# other state, including any internal error in this script, exits non-zero so
+# the loop spawns the next iteration. Fail-closed is deliberate: a false pass
+# hands an unverified diff to the refinery, which is the red handoff this loop
+# exists to stop.
 #
-# ## Why this VERIFIES the gate instead of running it
+# ## Why this READS the records instead of running the checks
 #
 # The runtime executes this script inline in the control dispatcher
 # (internal/dispatch/ralph.go -> internal/convergence/condition.go), which
@@ -24,12 +28,14 @@
 #      build/module caches under the redirected HOME start cold.
 #
 # So the iteration agent runs the declared checks in its own session — real
-# HOME, real toolchain, no dispatcher held open — and stamps the result on the
-# work bead as metadata.self_review_passed_sha. This script confirms that stamp
-# still names the live HEAD. The stamp is bound to a commit sha, so any later
-# commit invalidates it and re-gates the loop; it can go stale, but it cannot
-# silently certify a different tree. The refinery re-runs the real gate as the
-# backstop that catches a stamp written without the checks having passed.
+# HOME, real toolchain, no dispatcher held open — through `gctk rig`, which runs
+# each command itself and records its result against the commit it ran at,
+# under the rig clone's git common directory that every worktree of the clone
+# shares. This script reads those records at the live HEAD with `gctk rig
+# <check> --check`, which runs nothing and calls nothing but git, so it answers
+# here, where gc can fail. A record names one commit, so any later commit has
+# none until the checks run again, and a record cannot certify a tree the
+# command did not run on.
 #
 # ## Why cwd is not trusted
 #
@@ -238,63 +244,31 @@ if [ -z "$ROOT" ]; then
 fi
 [ -n "$ROOT" ] || fail "could not resolve the molecule root bead"
 
-# --- 2. Root -> the single tracked member (the work bead) --------------------
-# Resolved with `bd` only. Two independent sources, cross-checked when both read:
-#   the convoy's direct dependants — the tracked membership itself, which
-#     carries the "exactly one member" invariant mol-polecat-work is built on;
-#   gc.var.issue on the root — stamped by the self-review iteration as the
-#     resilient fallback for when the membership read is degraded.
+# --- 2. Root -> the work bead -------------------------------------------------
+# The bead the root's run works, as run-lib.sh reads it: the one bead its input
+# convoy tracks, which is the "exactly one member" invariant mol-polecat-work is
+# built on. A root whose gc.var.issue names another bead names none, so a
+# molecule wired wrong is refused rather than certified against either bead.
+# The reads go through `bd` only. The root's own row is read first, since the
+# step's commands are read from it below. A run that cannot be read leaves
+# gc.var.issue on that row, which the self-review iteration stamps as the
+# fallback for a degraded store, so the handback below still has a bead to hand
+# back; the check says the run went unverified.
 # raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
 ROOT_JSON=$(bd show "$ROOT" --json 2>/dev/null)
 [ -n "$ROOT_JSON" ] || fail "could not read root bead $ROOT"
-
-CONVOY=$(printf '%s' "$ROOT_JSON" |
-	jq -r '.[0].metadata."gc.input_convoy_id" // .[0].metadata."gc.var.convoy_id" // empty')
-[ -n "$CONVOY" ] || fail "root $ROOT carries no input convoy id"
-
-ROOT_ISSUE=$(printf '%s' "$ROOT_JSON" | jq -r '.[0].metadata."gc.var.issue" // empty')
-
-# The convoy's tracked members are its direct children (depth 1 under the convoy
-# itself). Empty output means the query failed outright, distinct from a convoy
-# that genuinely has no members.
+# shellcheck source=run-lib.sh
+. "${GC_RUN_LIB:-$(cd "$(dirname "$0")" && pwd)/run-lib.sh}" || fail "cannot source run-lib.sh beside this script"
 # raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
-MEMBER_JSON=$(bd dep tree "$CONVOY" --json 2>/dev/null)
-MEMBER=""
-MEMBER_COUNT=""
-if [ -n "$MEMBER_JSON" ]; then
-	MEMBER_COUNT=$(printf '%s' "$MEMBER_JSON" | jq --arg convoy "$CONVOY" '
-		[ .[] | select((.depth // 0) == 1 and (.parent_id // "") == $convoy) ]
-		| length' 2>/dev/null)
-	MEMBER=$(printf '%s' "$MEMBER_JSON" | jq -r --arg convoy "$CONVOY" '
-		first(.[] | select((.depth // 0) == 1 and (.parent_id // "") == $convoy) | .id)
-		// empty' 2>/dev/null)
+review_bd() { bd "$@"; }
+if RUN_JSON=$(run_lib subject review_bd "$ROOT"); then
+	ISSUE=$(printf '%s' "$RUN_JSON" | jq -r 'if length == 1 then .[0].bead else empty end' 2>/dev/null)
+	[ -n "$ISSUE" ] || fail "the run of root $ROOT works no single bead: $(printf '%s' "$RUN_JSON" | jq -c . 2>/dev/null) (its input convoy must track exactly one bead, the one gc.var.issue names when the root records it)"
+else
+	ISSUE=$(printf '%s' "$ROOT_JSON" | jq -r '.[0].metadata."gc.var.issue" // empty' 2>/dev/null)
+	[ -n "$ISSUE" ] || fail "could not read the run of root $ROOT, and the root carries no gc.var.issue"
+	note "WARN: could not read the run of root $ROOT; proceeding on root gc.var.issue=$ISSUE (membership unverified)"
 fi
-
-case "$MEMBER_COUNT" in
-'' | *[!0-9]*)
-	# Membership unreadable. gc.var.issue is the only source left; say so — the
-	# "exactly one member" invariant went unverified this iteration.
-	[ -n "$ROOT_ISSUE" ] ||
-		fail "could not read convoy $CONVOY membership, and root $ROOT carries no gc.var.issue"
-	ISSUE="$ROOT_ISSUE"
-	note "WARN: could not read convoy $CONVOY membership; proceeding on root gc.var.issue=$ISSUE (membership unverified)"
-	;;
-1)
-	ISSUE="$MEMBER"
-	# Both sources readable and disagreeing means the molecule is wired wrong.
-	# Certifying against the wrong bead is the false pass this exists to prevent.
-	if [ -n "$ROOT_ISSUE" ] && [ "$ROOT_ISSUE" != "$ISSUE" ]; then
-		fail "root $ROOT gc.var.issue=$ROOT_ISSUE disagrees with convoy $CONVOY member $ISSUE"
-	fi
-	;;
-0)
-	fail "convoy $CONVOY does not have exactly one tracked member (found 0)"
-	;;
-*)
-	fail "convoy $CONVOY does not have exactly one tracked member (found $MEMBER_COUNT)"
-	;;
-esac
-[ -n "$ISSUE" ] || fail "could not resolve the work bead from root $ROOT / convoy $CONVOY"
 
 # --- 3. The worktree, as recorded by workspace-setup -------------------------
 # raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
@@ -307,7 +281,7 @@ git -C "$WORKTREE" rev-parse --git-dir >/dev/null 2>&1 ||
 
 # --- 4. The tree must be clean ----------------------------------------------
 # Uncommitted changes mean the iteration left work the declared checks never
-# saw, and the stamp below cannot describe them.
+# saw, and no record at HEAD describes them.
 DIRTY=$(git -C "$WORKTREE" status --porcelain 2>/dev/null) ||
 	fail "could not read git status in $WORKTREE"
 if [ -n "$DIRTY" ]; then
@@ -318,16 +292,155 @@ fi
 HEAD_SHA=$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null) ||
 	fail "could not resolve HEAD in $WORKTREE"
 
-# --- 5. The declared checks must be green at THIS HEAD -----------------------
-# The iteration agent ran the declared typecheck/lint/build/test in its own
-# session and, on green, stamped the HEAD it verified. A stamp that names an
-# earlier commit is stale by construction: any commit since moved HEAD off it.
-GATE_SHA=$(printf '%s' "$ISSUE_JSON" | jq -r '.[0].metadata.self_review_passed_sha // empty')
-if [ -z "$GATE_SHA" ]; then
-	incomplete "no metadata.self_review_passed_sha recorded; the checks have not passed yet"
+# --- 5. Every recorded check must pass at THIS HEAD, as the step declares it --
+# The iteration ran each check through `gctk rig`. A check the rig declares no
+# command for is recorded as a pass that ran nothing, so each of the three has a
+# record to read. `--check` reports whatever is recorded at HEAD, whichever run
+# made it, and a run that stops short of a result (exit 4, or a signal) records
+# nothing and leaves the record it found. A run call answers only from the
+# record of the run it declares, the same command line and, for test, the same
+# scope, and a record counts here on the same terms: only when it is the run the
+# step declares. Another run's record, such as one an earlier pour's commands
+# left at this HEAD, says nothing about the declared run, which may have
+# stopped. The declared runs are the commands the pour rendered into the step:
+# gascity stamps each var it rendered non-empty on the root as gc.var.<name>,
+# base_branch among them since the formula defaults it to main, so a root
+# without that stamp carries none to read. The step's heredocs drop a value's
+# trailing newlines, as the command substitution below does. A check the rig
+# declares no command for has no command to match, and the iteration may run
+# the repo's own gate in its place, so any run's record answers for it.
+#
+# A recorded fail passes only when the work bead's
+# rig_check_pre_existing.<check> holds that very record at this HEAD: the
+# iteration found the same failure red on the base and carried by a tracker
+# (rig-check-pre-existing.sh). A run with another command or scope replaces the
+# record, and its fail needs a judgment of its own. rig-check-lib.sh holds the
+# one definition of that judgment.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || fail "could not resolve this script's directory"
+# shellcheck source=rig-check-lib.sh
+. "$HERE/rig-check-lib.sh" || fail "cannot source rig-check-lib.sh beside this script"
+FAILED=""
+UNRECORDED=""
+# judged <check> <record> : a fail at HEAD fails the check unless the work
+# bead's pre-existing mark for it holds <record> and names a tracker.
+judged() {
+	local pre
+	pre=$(printf '%s' "$ISSUE_JSON" | jq -r --arg k "rig_check_pre_existing.$1" --arg c "$HEAD_SHA" --arg rec "$2" \
+		"$PRE_EXISTING_JQ"' pre_existing($k; $c; $rec)' 2>/dev/null)
+	case "$pre" in
+	"tracked by "*) note "$1: the fail at $HEAD_SHA is pre-existing, $pre" ;;
+	"another run")
+		FAILED="$FAILED $1"
+		note "$1: the pre-existing mark at $HEAD_SHA judged another run's fail, so this one needs a judgment of its own"
+		;;
+	*) FAILED="$FAILED $1" ;;
+	esac
+}
+# declared <var> : what the pour rendered into the step for {{<var>}}, empty for
+# nothing.
+declared() { printf '%s' "$ROOT_JSON" | jq -r --arg k "gc.var.$1" '.[0].metadata[$k] // "" | tostring'; }
+[ -n "$(declared base_branch)" ] ||
+	fail "root $ROOT carries no gc.var.base_branch, so the commands its pour rendered into the step cannot be read"
+if ! { TEST_RUN=$(declared affected_tests_command) && FULL_RUN=$(declared test_command) &&
+	LINT_RUN=$(declared lint_command) && TYPECHECK_RUN=$(declared typecheck_command) &&
+	SETUP_RUN=$(declared setup_command) && BUILD_RUN=$(declared build_command); }; then
+	fail "could not read the commands root $ROOT's pour rendered into the step"
 fi
-if [ "$GATE_SHA" != "$HEAD_SHA" ]; then
-	incomplete "self-review stamp is stale (passed at $GATE_SHA, HEAD is $HEAD_SHA); another iteration is needed"
+TEST_SCOPE=affected
+[ -n "$TEST_RUN" ] || {
+	TEST_SCOPE=full
+	TEST_RUN=$FULL_RUN
+}
+# another_run <record> <scope> <command> : what the record at HEAD ran, against
+# the run the step declares.
+another_run() {
+	printf '%s' "$1" | jq -r --arg s "$2" --arg c "$3" --arg h "$HEAD_SHA" '
+		def run($s; $c): if $s == "none" then "a pass that ran nothing"
+			else ($c | @json) + (if $s == "" then "" else " (scope " + $s + ")" end) end;
+		"the record at \($h) is of " + run(.scope // ""; .command // "") + ", not of the declared " + run($s; $c) + ", so it answers nothing here"' 2>/dev/null ||
+		printf 'the record at %s is not of the declared run, so it answers nothing here' "$HEAD_SHA"
+}
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+[ -x "$GCTK" ] || fail "no gctk binary at $GCTK to read the recorded checks; the city's gctk-build order publishes it"
+RIG_ERR=$(mktemp "${TMPDIR:-/tmp}/self-review-check.XXXXXX") || fail "could not make a file to read gctk rig's lines into"
+trap 'rm -f "$RIG_ERR"' EXIT
+for CHECK in test lint typecheck; do
+	case "$CHECK" in
+	test) SCOPE=$TEST_SCOPE RUN=$TEST_RUN ;;
+	lint) SCOPE="" RUN=$LINT_RUN ;;
+	*) SCOPE="" RUN=$TYPECHECK_RUN ;;
+	esac
+	# rig's own lines go to stderr, where they say what is recorded, and the
+	# record it found is the one JSON line on stdout. Exit 4 is a read gctk
+	# could not make, which says nothing about the code, so the verdict quotes
+	# gctk's reason: an unreadable store, or a change its status counts and
+	# step 4's does not.
+	REC=$(cd "$WORKTREE" && "$GCTK" rig "$CHECK" --check 2>"$RIG_ERR")
+	RC=$?
+	cat "$RIG_ERR" >&2
+	case "$RC" in
+	0 | 1) ;;
+	3)
+		UNRECORDED="$UNRECORDED $CHECK"
+		continue
+		;;
+	4) fail "gctk rig $CHECK --check read nothing at $HEAD_SHA: $(head -n 4 "$RIG_ERR" | paste -sd ' ' -)" ;;
+	*) fail "gctk rig $CHECK --check exited $RC in $WORKTREE" ;;
+	esac
+	if [ -n "$RUN" ] && ! printf '%s' "$REC" | jq -e --arg s "$SCOPE" --arg c "$RUN" '(.scope // "") == $s and (.command // "") == $c' >/dev/null 2>&1; then
+		note "$CHECK: $(another_run "$REC" "$SCOPE" "$RUN")"
+		UNRECORDED="$UNRECORDED $CHECK"
+		continue
+	fi
+	[ "$RC" = 0 ] || judged "$CHECK" "$REC"
+done
+
+# --- 6. setup and build must have passed at THIS HEAD ------------------------
+# gctk rig records nothing for them, so the iteration notes on the work bead's
+# self_review_setup_build what they did at the HEAD of the clean tree it ran
+# them in, and the commands they ran: pass, fail, or none for a check the rig
+# declares no command for. A note counts only while its commands are the ones
+# the step declares, as a record does above. A fail holds the loop even when
+# every record above passes, unless a pre-existing mark holds that very note.
+NOTE=$(printf '%s' "$ISSUE_JSON" | jq -c --arg c "$HEAD_SHA" '
+	.[0].metadata.self_review_setup_build // empty
+	| (if type == "string" then (fromjson? // empty) else . end)
+	| select(type == "object" and .commit == $c)' 2>/dev/null)
+if [ -n "$NOTE" ] && ! printf '%s' "$NOTE" | jq -e --arg s "$SETUP_RUN" --arg b "$BUILD_RUN" '(.setup_command // "") == $s and (.build_command // "") == $b' >/dev/null 2>&1; then
+	note "setup and build: $(printf '%s' "$NOTE" | jq -r --arg s "$SETUP_RUN" --arg b "$BUILD_RUN" '"the note at \(.commit) is of setup \(.setup_command // "" | @json) and build \(.build_command // "" | @json), not of the declared setup \($s | @json) and build \($b | @json), so it answers nothing here"' 2>/dev/null)"
+	NOTE=""
+fi
+if [ -z "$NOTE" ]; then
+	UNRECORDED="$UNRECORDED setup build"
+else
+	for CHECK in setup build; do
+		case "$(printf '%s' "$NOTE" | jq -r --arg k "$CHECK" '.[$k] // ""' 2>/dev/null)" in
+		pass | none) ;;
+		fail) judged "$CHECK" "$NOTE" ;;
+		*) FAILED="$FAILED $CHECK" ;;
+		esac
+	done
+fi
+[ -z "$FAILED" ] || incomplete "not green at $HEAD_SHA:$FAILED; another iteration is needed"
+
+# A molecule poured before its self-review ran the checks through gctk rig
+# keeps step text that records nothing and stamps self_review_passed_sha on the
+# work bead once every declared check, setup and build included, has passed.
+# That stamp naming HEAD stands in for the setup and build outcome such a run
+# never notes, and for the records when none of the three declared runs has one
+# there, so such a run still converges.
+if [ -n "$UNRECORDED" ]; then
+	LEGACY_SHA=$(printf '%s' "$ISSUE_JSON" | jq -r '.[0].metadata.self_review_passed_sha // empty')
+	if [ "$LEGACY_SHA" = "$HEAD_SHA" ]; then
+		UNRECORDED="${UNRECORDED% setup build}"
+		if [ "$UNRECORDED" = " test lint typecheck" ]; then
+			note "PASS: self-review green at $HEAD_SHA, by the stamp of a run poured before its checks were recorded"
+			exit 0
+		fi
+	fi
+	[ -z "$UNRECORDED" ] || incomplete "nothing recorded at $HEAD_SHA for:$UNRECORDED by the runs the step declares, so another iteration is needed"
 fi
 
 note "PASS: self-review green at $HEAD_SHA"

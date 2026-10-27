@@ -17,17 +17,25 @@
 #       carrying the operator's pre-recorded PR-close disposition for this kind
 #       and successor (pr-dispose.sh) is a ruling already made, and (b) does not
 #       re-judge it.
-#   The judgment kinds re-homed|folded|not-needed are a person's call, held to
-#   (a) only: a non-closed merge_result does not bar them.
+#   The judgment kinds re-homed|folded|not-needed are held to (a) only, and a
+#   non-closed merge_result does not bar them, because the judgment is the
+#   caller's. A hand disposition judges the bead itself, and an automated
+#   caller proves its own case before it calls (docs/authority-map.md,
+#   Close-with-successor).
 # --check evaluates those gates for the given origin/successor/kind and exits
 # 0 (eligible) or non-zero (refused, with the reason on stderr), writing
 # nothing.
 # Writes, in order: pointer on the origin (verified), a populated close reason
-# (kind + successor + store), a best-effort back-pointer on the successor. When
-# the origin is a task_kind=visit it also stamps the outcome the board reads —
-# gc.outcome = the kind, gc.outcome_reason = that close reason — verified before
-# the close, because a closed visit with no gc.outcome is a sitting the board
-# cannot report and no re-run reaches it (doctor/check-visit-outcome-recorded).
+# (kind + successor + store), a best-effort back-pointer on the successor. The
+# pointer goes on in one write bd applies only while the origin still has the
+# status and assignee this run read before judging it. A caller that read the
+# bead before another actor claimed, assigned or moved it therefore stamps
+# nothing while that change stands, and exits 4, as it does for a pointer that
+# does not stick. When the origin is a task_kind=visit it also stamps the
+# outcome the board reads — gc.outcome = the kind, gc.outcome_reason = that
+# close reason — verified before the close, because a closed visit with no
+# gc.outcome is a sitting the board cannot report and no re-run reaches it
+# (doctor/check-visit-outcome-recorded).
 # A visit also gets gc.work_outcome=no-op, for the work-record gate the close
 # runs, from work-outcome.sh: a write of its own that never gates the close and
 # never replaces a work outcome the visit already records.
@@ -46,7 +54,17 @@
 # Callers: converse dispositions, operator re-homes, duplicate-sweep.sh,
 # pr-facts.sh (a PR closed with a pre-recorded disposition, and that branch's
 # parked rework children), scaffolding-sweep.sh (a finding a disposed PR leaves
-# unanswered, closed onto the bug that carries it).
+# unanswered, closed onto the bug that carries it), deferred-dispatch.sh
+# (folded, onto the `until` target that closed last, for an open, unassigned
+# bead whose `until` targets have all closed, whose `until` edge to that target
+# still stands, that no open `blocks` blocker of its own holds, and that carries
+# no live work as live-work.sh defines it, checked on its listing and again on
+# a fresh read just before the call. It claims the bead before that read and
+# runs this script as the claim, its holder, so no other caller's stamp lands
+# on the bead while it holds the claim. It removes the pointer itself:
+# reopening the bead when its read after the close finds something that landed
+# on the bead or its edges while it held the bead, and giving the bead back
+# when this script stamped the pointer and did not close the bead).
 # Doctrine: docs/state-machine.md "Disposition". Test: bead-rehome.test.sh.
 set -euo pipefail
 
@@ -221,6 +239,10 @@ ORIGIN_ID=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].id // empty' 2>/dev/null ||
     || die "origin $ORIGIN does not exist in $ORIGIN_STORE ($ORIGIN_PATH/.beads) — nothing stamped" 3
 
 ORIGIN_STATUS=$(printf '%s' "$ORIGIN_JSON" | jq -r '(.[0].status // "") | ascii_downcase' 2>/dev/null || true)
+# The status and assignee the gates below judge, as the store holds them. The
+# stamp (step 1) is conditional on both.
+JUDGED_STATUS=$(printf '%s' "$ORIGIN_JSON" | jq -r '(.[0].status // "") | tostring' 2>/dev/null || true)
+JUDGED_ASSIGNEE=$(printf '%s' "$ORIGIN_JSON" | jq -r '(.[0].assignee // "") | tostring' 2>/dev/null || true)
 # gc.superseded_by is a FLAT dotted key: bracket access, never .metadata.gc.x.
 PRIOR_SUCC=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.superseded_by"] // .[0].metadata.superseded_by // empty' 2>/dev/null || true)
 PRIOR_STORE=$(printf '%s' "$ORIGIN_JSON" | jq -r '.[0].metadata["gc.superseded_by_store"] // .[0].metadata.superseded_by_store // empty' 2>/dev/null || true)
@@ -314,12 +336,16 @@ gates_pass() { # 0 eligible, 1 refused (reason in $GATE_REASON)
 
     # (b) The evidence kinds assert a specific claim — this bead's work is
     # already delivered elsewhere — so they carry the burden of proving it.
-    # The judgment kinds (re-homed, folded, not-needed) are a person's call, so a
-    # non-closed merge_result does not bar them: the converse retire path
-    # disposes an in-flight anchor through here on the operator's ruling. An
-    # origin carrying the operator's pre-recorded PR-close disposition for this
-    # kind and successor (pr-dispose.sh) is that ruling already made, read from
-    # the store rather than taken from the caller, so (b) does not re-judge it.
+    # The judgment kinds (re-homed, folded, not-needed) carry the caller's
+    # judgment, which this script does not re-judge, so a non-closed
+    # merge_result does not bar them: the converse retire path disposes an
+    # in-flight anchor through here on the operator's ruling. An origin
+    # carrying the operator's pre-recorded PR-close disposition for this kind
+    # and successor (pr-dispose.sh) is that ruling already made, read from the
+    # store rather than taken from the caller, so (b) does not re-judge it. An
+    # automated caller passes a judgment kind only on its own proof:
+    # deferred-dispatch.sh passes folded only for a bead its `until` targets
+    # resolved, and never for one carrying live work, which a merge_result is.
     if ruled_disposition; then
         return 0
     fi
@@ -422,15 +448,29 @@ fi
 
 # 1. Stamp the pointer — and, for a visit, the outcome the board reads — and
 # prove they landed: the close below is gated on the read-back, not on an exit
-# status. Both go in one update; a --set-metadata write bypasses bd's close
-# guard, so it lands even on a visit this actor cannot close under.
+# status. Both go in one update, which bd applies only while the origin still
+# has the status and assignee the gates above judged. bd holds a claimed bead
+# against another actor's assignment and close, never against a metadata write,
+# so without that condition a caller whose gates passed before another actor
+# claimed the bead would point it under that claim. With it, a claim, an
+# assignment or a status change that lands after the gates' read makes bd write
+# nothing (exit 13), and the caller stamps nothing: while a bead is claimed,
+# only a caller the gates accept as its holder can point it. The stamp still
+# lands on a visit this actor cannot close under, because bd's close guard holds
+# only the close.
 STAMP_META=(--set-metadata gc.superseded_by="$SUCCESSOR" \
             --set-metadata gc.superseded_by_store="$SUCCESSOR_STORE")
 if [ -n "$STAMP_OUTCOME" ]; then
     STAMP_META+=(--set-metadata gc.outcome="$KIND" \
                  --set-metadata gc.outcome_reason="$REASON")
 fi
-bd_at "$ORIGIN_PATH" update "$ORIGIN" "${STAMP_META[@]}" >/dev/null 2>&1 || true
+JUDGED=(--if-status="$JUDGED_STATUS" --if-assignee="$JUDGED_ASSIGNEE")
+STAMP_RC=0
+bd_at "$ORIGIN_PATH" update "$ORIGIN" "${JUDGED[@]}" "${STAMP_META[@]}" >/dev/null 2>&1 || STAMP_RC=$?
+if [ "$STAMP_RC" = 13 ]; then
+    if [ -n "$JUDGED_ASSIGNEE" ]; then JUDGED_HOLDER="under $JUDGED_ASSIGNEE"; else JUDGED_HOLDER="and unassigned"; fi
+    die "$ORIGIN is no longer $JUDGED_STATUS $JUDGED_HOLDER, as this run read it before judging it: a claim, an assignment or a status change landed since, so nothing is stamped and $ORIGIN is not closed. Re-run to judge it as it stands now" 4
+fi
 
 CHECK_JSON=$(bead_json "$ORIGIN_PATH" "$ORIGIN")
 GOT_SUCC=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.superseded_by"] // empty' 2>/dev/null || true)
@@ -445,11 +485,12 @@ if [ -n "$STAMP_OUTCOME" ]; then
     # row that no re-run repairs — PRIOR_OUTCOME is then nonempty and STAMP_OUTCOME
     # never re-arms. One --set-metadata pair can read back empty while the update
     # exits 0, so both are the precondition, the same guard visit-close.sh and
-    # gc-helm.sh's dismiss verb apply.
+    # gc-helm.sh's dismiss verb apply. The repair carries the stamp's condition,
+    # so it writes nothing to a visit somebody has taken since.
     GOT_OUTCOME=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.outcome"] // empty' 2>/dev/null || true)
     GOT_OUTCOME_REASON=$(printf '%s' "$CHECK_JSON" | jq -r '.[0].metadata["gc.outcome_reason"] // empty' 2>/dev/null || true)
     if [ "$GOT_OUTCOME" != "$KIND" ] || [ "$GOT_OUTCOME_REASON" != "$REASON" ]; then
-        bd_at "$ORIGIN_PATH" update "$ORIGIN" \
+        bd_at "$ORIGIN_PATH" update "$ORIGIN" "${JUDGED[@]}" \
             --set-metadata gc.outcome="$KIND" \
             --set-metadata gc.outcome_reason="$REASON" >/dev/null 2>&1 || true
         CHECK_JSON=$(bead_json "$ORIGIN_PATH" "$ORIGIN")

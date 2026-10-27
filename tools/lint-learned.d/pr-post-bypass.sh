@@ -2,9 +2,9 @@
 # pr-post-bypass.sh — hardened learned rule: the pack posts on a pull request
 # only through assets/scripts/pr-post.sh.
 #
-# The city posts under the same GitHub login the operator's own review tools can
-# post under, so pr-facts.sh tells the city's notices from feedback by the
-# provenance mark pr-post.sh appends, not by the author. A post that bypasses the
+# The city posts under the bot account that backs every agent's gh token, so
+# pr-facts.sh tells the city's notices from feedback by the provenance mark
+# pr-post.sh appends, not by the author. A post that bypasses the
 # helper carries no mark, so the next reconcile pass reads the city's own notice
 # back as feedback and routes it into rework: a rework child that answers the
 # city's own words, and whose answer, posted the same way, is read back again.

@@ -188,11 +188,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    rather than of the head. `generated/seed-audit` is rendered from the whole
    source tree and committed per branch, so a PR carrying a render made at an
    older base overwrites prompt inputs it never saw, and two PRs that touch no
-   common file still clobber each other. Every `check.<gate>` marker is a
-   bare lane state bound to no commit and settles at any head once green, so
-   it stays green while the base moves underneath, the pre-commit hook is
-   branch-local, a rebase replays commits without running it, and `-diff` in
-   `.gitattributes` keeps the clobber out of the PR diff.
+   common file still clobber each other. A lane's green derives from its
+   reviews and is bound to no commit, so it stays green while the base moves
+   underneath, the pre-commit hook is branch-local, a rebase replays commits
+   without running it, and `-diff` in `.gitattributes` keeps the clobber out of
+   the PR diff.
    So the arm fetches the two commits into `refs/gc-toolkit/merge-gate/*`, and
    `render-seed-audit.sh --check-merge` renders the tree `git merge-tree`
    writes, with the renderer that tree carries. A file passes when the merge
@@ -233,7 +233,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    state dir), because a first-group anchor this arm still holds, such as one
    whose PR a human closed at this head, stays in the group, and in a fixed
    order it would lead every pass while the anchors behind it waited.
-   For each anchor whose every `pre-open` check in `check_set` reads `green`
+   For each anchor whose every `pre-open` check in `check_set` derives `green`
    (the one resolver names that set — `none`/`off` and the universal
    `approval` rule dropped; an empty set is held, never read as ungated):
    adopt an existing PR for the branch or
@@ -254,10 +254,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    refinery's to flip only when the city opened it as a draft and nobody has
    re-drafted it since. Any other draft is adopted without that claim and stays
    with whoever parked it.
-   The body's `## Summary` is the polecat's `pr_summary`, written at handoff
-   by the only actor that has read the diff; the anchor's description is
-   dispatch text, demoted to a collapsed section and standing in as the
-   summary only when the handoff carried none. The region writes that heading
+   The body's `## Summary` is the anchor's `pr_summary`, written by an actor
+   that has read the diff: the polecat at its handoff, or, on a landing bead,
+   its effort's summary task once the effort's work has landed. The anchor's
+   description is dispatch text, demoted to a collapsed section and standing
+   in as the summary only when no summary was written. The region writes that heading
    itself, so a `pr_summary` opening with one of its own is de-duplicated. The
    composed body lives between `gc:pr-summary` markers, so adopting an OPEN PR
    re-splices it from the anchor's current `pr_summary` — a rework's restamp
@@ -272,7 +273,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    or a scratch failure — holds the anchor at `pre_open_gate` for the next pass
    rather than flip a managed body that may be stale. This adopt-time re-splice
    covers only the `pre_open_gate` window; once the anchor is `pull_request`,
-   republishing a rework's restamp is arm 12's job (`pr-stack.sh`), the anchor
+   republishing a rework's restamp is arm 11's job (`pr-stack.sh`), the anchor
    never returning to the state this arm scans (no `pull_request → pre_open_gate`
    lifecycle edge).
 4. **pr-facts.sh --route-comments-only** — the feedback routing of arm 7, run
@@ -335,10 +336,10 @@ the cadence — the arms run whether or not any refinery session is awake.
 6. **gate-ensure.sh** — check satisfiability. Every gating anchor declares a
    non-empty `check_set` (the default is stamped when absent; the `none`
    sentinel is respected), and every declared check is *raisable*: the lane
-   reads `green`, or a live routed review bead is in flight, else dispatch one
+   derives `green`, or a live routed review bead is in flight, else dispatch one
    (stamp first, then attach `mol-review` via `gc sling --on`; read the pour
-   back). A lane that reads `green` ends the arm's interest however far the
-   branch has advanced since — nothing here compares a marker to a head. An
+   back). A lane that derives `green` ends the arm's interest however far the
+   branch has advanced since — no lane's green compares to a head. An
    operator's own `merge_hold` also ends the arm with no dispatch: gate-ensure
    raises no review under a hold.
    A review whose only reach is the pour stamp is qualified before it counts
@@ -421,8 +422,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    any of those arms run, and routes unanswered review feedback — under a
    `commented` posture and equally under a human `changes_requested` — to a
    rework child or a visit. Feedback is every review, inline comment and
-   conversation comment that is not the city's own post
-   ([state-machine.md](state-machine.md#operator-feedback)), whoever wrote it.
+   conversation comment that is neither the city's own post nor marked as not
+   for review ([state-machine.md](state-machine.md#operator-feedback)), whoever
+   wrote it.
    The posture write is idempotent, so re-running it
    here after arm 1 costs nothing when nothing changed. The routing runs in two
    places by design: arm 4 picks the feedback up ahead of the slow arms, and this
@@ -460,25 +462,62 @@ the cadence — the arms run whether or not any refinery session is awake.
    head for being the head, since the head can be a merge of the base. A
    finding ruled needs-you keeps its comment awaiting a person while it is
    open, and its owed reply is the answer, leading with the question mark. A
-   declined or deferred
-   finding's owed reply is its comment's answer too. That reply leads with the
-   ruling ("Declined" or "Deferred") instead of a glyph, so a reader scanning
-   the PR tells a fix from a pushback, and the comment trades EYES for
-   THUMBS_UP once it is on the PR. Whether an owed reply is on the PR is read
-   back off GitHub on every pass, by its own text, so another reply in the
-   thread never stands in for it. An inline comment is answered in its thread.
+   declined or deferred finding's owed reply is its comment's answer too. That
+   reply leads with the ruling ("Declined" or "Deferred"), so a reader scanning
+   the PR tells a fix from a pushback. The write-back leaves the thread
+   holding that reply open for the operator. While nobody has resolved it, the
+   reply also leads with the question mark, and its last line says that
+   resolving the thread accepts the ruling and that a reply in it is ruled as
+   new feedback. Such a reply is filed as a finding of its own, and the
+   declined or deferred finding stays closed. A thread the operator resolved
+   before the reply reached it gets the ruling alone. The
+   comment trades EYES for THUMBS_UP once the reply is on the PR. Whether an
+   owed reply is on the PR is read back off GitHub on every pass, by its own
+   text, so another reply in the thread never stands in for it. An inline
+   comment is answered in its thread.
    The thread is answered once every routed comment in it is resolved, by one
    reply naming each bead. It is resolved behind that reply unless it holds a
    declined or deferred finding, whose thread stays open for the operator to
-   accept or overrule, as a needs-you finding's does until they rule. A
+   accept or push back on, as a needs-you finding's does until they rule. A
    needs-you finding closes once the visit holding its question, followed
    through any fold, has closed carrying the operator's ruling and no fix unit
    on its lane, nor a ruling's rework child, is in flight, and its comment then
    resolves through its batch's bead like any other. A visit closed moot,
-   benign, dismissed or cut short carries no ruling and releases nothing. A review
-   body or a Conversation comment has no thread, so a Conversation comment of
-   the city's links to the
-   comments one bead answers and carries their answer. The routing arm leaves
+   benign, dismissed or cut short carries no ruling and releases nothing. A
+   Conversation comment has no thread, so a Conversation comment of the city's
+   links to the comments one bead answers and carries their answer. A review
+   body has no thread either, and its review round's living answer carries its
+   answer and the mark that trades its reaction. Each review round that raised
+   findings has one living answer. A round is the reviews one reviewer
+   submitted against one commit, however many GitHub reviews their client split
+   that pass into. The answer is a Conversation comment posted once the round's
+   pickup reactions land and edited in place whenever its rendering changes
+   (`assets/scripts/review-answer.sh` states what it shows): any visit waiting
+   on the operator first, a count line, then one point per finding, sorted into
+   Needs you, Worth a look, In progress and Done, each a label linked to the
+   comment, a sentence in the words of whoever answered it, and the commit,
+   follow-up or visit carrying it. A declined or deferred point is under Needs
+   you while its thread waits on the reviewer: the thread is open, holds the
+   city's reply to that point, and ends with a post that is the city's own.
+   The point ends with the same line as that reply. Once the reviewer resolves
+   the thread, the point is worth a look. A reply of theirs in the thread is a
+   point of its own, and the point it answers is worth a look until the city
+   answers that reply. The thread is still open then, so it waits on the
+   reviewer again. The count line counts the points under Needs you, so it
+   never reads all answered while one waits, and it still says where the other
+   points stand. It carries a digest of its own
+   rendering, so a pass that changes nothing writes nothing. When the city
+   holds more than one comment for a round, each keyed to one of its reviews,
+   the pass keeps one, moves every mark the others carry into it, and deletes
+   the others. It is rendered to fit the size GitHub takes in one comment: a
+   long review shortens its notes from the fix, then its quoted replies, then its
+   sentences, each cut naming the bead that holds the whole text, and past that
+   lists the points that fit and names the rest. Once every finding a human
+   CHANGES_REQUESTED review raised has closed and every answer one of them owes
+   is on the PR, the sweep re-requests the reviewer and dismisses that review
+   with a one-line note linking its round's living answer, which then says the
+   review was dismissed. A review whose body was ruled restates waits for every
+   finding of its round. A dismissal is not an approval. The routing arm leaves
    out of a batch the feedback the review threads already answered: an inline
    comment in a resolved thread with a later post of the city's, or a review
    body whose every inline comment is one. Such feedback sits inside the
@@ -528,8 +567,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    any other locus becomes a Conversation comment. Once the finding closes, the
    comment is answered with how it closed: the fix units and the commits they
    made, the deferral's follow-up, or the decline. A fixed finding's
-   thread is then resolved unless a post that is not the city's own has come
-   after it. A thread the identity cannot resolve leaves the finding owed its
+   thread is then resolved unless a post that is feedback has come after it.
+   A thread the identity cannot resolve leaves the finding owed its
    answer, as above. A declined or deferred finding's thread stays open for the
    operator to accept or overrule. A Conversation comment is edited to carry the
    answer. A finding that closed
@@ -548,15 +587,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    comments, unless its answer carries the `<!-- gc-finding:<id>:open -->` line
    a declined or deferred finding's answer adds, since that thread waits for a
    person.
-8. **convoy-graduate.sh** — all convoy members closed AND ≥1 recorded merge
-   onto the integration branch AND no hold/branch veto → assignee=refinery,
-   `branch=integration/<id>`, `merge_strategy=mr`. Every read is of this rig's
-   store. The arm lists the rig's open owned convoys first, then reads each
-   candidate's parent-child children and `tracks` targets, so a rig with no
-   owned integration convoy costs one read. A pass that answers every
-   candidate writes `convoy-graduate.stamp` in the pass state dir, and the arm
-   reads nothing until that stamp is 15 minutes old.
-9. **review-sweep.sh** — cleanup over closed anchors, no merge authority. A
+8. **review-sweep.sh** — cleanup over closed anchors, no merge authority. A
    dispatched review whose anchor is closed and whose `review_branch` is gone
    from origin has no verdict left to give. Both `signoff.sh` verdicts bind a
    marker to a commit and there is no commit, and `request-changes` would
@@ -568,7 +599,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    per pass, and a listing that could not be read sweeps nothing. The release
    verb lives here rather than as a third `signoff.sh` verdict because the
    residue is filed by two dispatchers, arm 6 and arm 7.
-10. **scaffolding-sweep.sh** — cleanup over DISPOSED anchors, no merge authority.
+9. **scaffolding-sweep.sh** — cleanup over DISPOSED anchors, no merge authority.
    An anchor withdrawn won't-do or closed not-planned carries a disposition —
    `gc.superseded_by` (the pointer `bead-rehome.sh` stamps) or
    `gc.pr_close_disposition_kind` (the intent `pr-dispose.sh` records) — but its
@@ -595,7 +626,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    the one anchor whose PR-close disposition it is consummating, just before
    that close, so the close lands in the pass that reads the closed PR. A
    merged anchor is a landing, never a disposal, and is skipped.
-11. **duplicate-sweep.sh** — the reader for `duplicate_of`, no merge authority.
+10. **duplicate-sweep.sh** — the reader for `duplicate_of`, no merge authority.
    A polecat that diagnoses a duplicate dispatch stamps the marker and parks
    the bead, because polecats never close work beads; with no reader the bead
    waits for a human ruling, one bead at a time. This arm closes the ones that
@@ -634,7 +665,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    twin in this pass, and the next pass finishes it. Closing the twin releases
    its blocks edge. The arm runs after review-sweep so a twin that arm 2
    merged or arm 7 recorded on this pass is disposable on the same tick.
-12. **pr-stack.sh** — keeps an open PR current with its anchor, in both managed
+11. **pr-stack.sh** — keeps an open PR current with its anchor, in both managed
    body regions and in its title. No merge authority, and the only arm that
    writes no bead. A body is composed once, by arm 3, out of one anchor; then two
    things drift it, and this arm lands both fixes in one body edit.
@@ -647,9 +678,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    each open anchor recording a `pr_number`, this arm reads the branch's bead
    ledger — `branch` (committed onto the branch: the anchor, plus every rework
    hand-back), `fold_target` (folded onto it by a polecat), and `merged_target`
-   with `merge_result=merged` (landed its own PR into it) — and splices the list
-   into a delimited section. A branch carrying one bead publishes nothing here,
-   because arm 3 already named it.
+   with `merge_result=merged` (landed on it, with or without a PR of its own) —
+   and splices the list into a delimited section. A branch carrying one bead
+   publishes nothing here, because arm 3 already named it.
 
    The `gc:pr-summary` region: a rework restamps the anchor's `pr_summary`, but
    arm 3 composes that region only at `pre_open_gate` and an open anchor never
@@ -714,15 +745,30 @@ The lock:
 - The driver takes a non-blocking exclusive `flock` on
   `<state-dir>/<rig>/pass.lock` before the first arm and records the holder's
   pid and start time in `pass.holder` beside it. It depends on no bead
-  surviving.
-- The arms inherit the descriptor, so the lock is held for exactly as long as a
-  writer is live, and the kernel releases it on any exit, `SIGKILL` included.
+  surviving. The lock is `bd-lib.sh`'s `take_pass_lock`, which
+  `deferred-dispatch.sh` takes its pass lock through too.
+- `<rig>` is the rig name with each byte outside `A-Za-z0-9._-` read as `_`,
+  and `rig` for a name of `.` or `..`. Every version of the driver must derive
+  it the same way. A deploy can start a new driver while the one it replaces
+  is still running a pass, and the two passes stay apart only when both name
+  the same lock file. So the key is not `bd-lib.sh`'s `rig_state_key`, which
+  cuts a rig name past 64 bytes and adds a checksum to any name it rewrites.
+- The driver holds the descriptor, and each arm runs through `bd-lib.sh`'s
+  `pass_child`, from a subshell that holds it until the arm exits. So the lock
+  is held for exactly as long as a writer is live, and the kernel releases it
+  on any exit, `SIGKILL` included.
+- The arm itself runs with the descriptor closed, and so does the drop-tail
+  report. An arm's store read can bring up a Dolt server, and `gc` hands the
+  descriptors it was given to what it starts. A server that kept the descriptor
+  would outlive the pass and hold the lock against every later one.
 - A tick that finds it held logs one `SKIPPED` line and exits 0 — the cadence
   is firing and the pass in flight is doing the work.
 - A holder older than `REFINERY_RECONCILE_LOCK_STALL_SECS` (900s default) is
-  not a slow pass: the driver is gone and an arm still owns the descriptor.
-  That tick exits 1, so `order.failed` names the wedge rather than letting a
-  stopped queue look like a firing one.
+  not a slow pass, because the order's timeout stops the pass's whole process
+  group well before that: a driver run by hand, or an arm still running after
+  its driver was killed by itself, holds the lock. That tick exits 1, so
+  `order.failed` names the wedge rather than letting a stopped queue look like
+  a firing one.
 - A tick that cannot take the lock at all runs no arm and exits 1. That covers
   `flock` missing from `PATH` and a lock file the driver cannot create or open.
   Nothing else carries single-flight, so a pass that ran anyway would be the
@@ -766,7 +812,6 @@ how a pass ended:
 | `-- (<n>) <arm>: done in <s>s (rc=<rc>)` | that arm returned after `<s>` seconds. An arm with a start line and no done line is the one the pass was killed in |
 | `<arm>: visited <k> of <n> ...` | how much of its walk a paced arm covered; `the next pass resumes at <id>` follows when its share of the pass budget stopped it. gate-ensure's `<n>` is the size of the gating set every walking arm's cost grows with, and merge counts its landing-first PRs apart. gate-ensure and pr-facts add `(<f> needing action first)`, and `<m> needing action wait for the next pass` when the budget left some of that group |
 | `pr-facts: posture-only — ...; <k> unchanged since the basis they were derived from, <r> read per PR` | the posture arm's split between the anchors it kept from the batched read and the ones it read whole. `<r>` covers each PR that moved, on the pass that sees the move and on the pass after, which confirms its basis. It covers every PR on a pass whose batched read failed (a `WARN` line names it), and on the first two passes after the script changes or after `pr-posture.seen` is lost |
-| `convoy-graduate: last complete pass <s>s ago; next one after 900s` | arm 8 read nothing this pass: its last complete pass is younger than its 15-minute interval |
 | `END <ts> (<s>s)` | that pass finished after `<s>` seconds; a `FAILED:` line sits above it if any arm failed |
 | a `===` with no `END` under it | the pass was killed or hit its timeout — the arms logged above it are how far it got |
 | `--- <ts> rig=<rig> SKIPPED: ...` | the tick found a pass already in flight and did nothing |
@@ -830,10 +875,17 @@ state first, under `refs/gc-toolkit/reconcile-set-aside/<UTC time>`, and leaves
 a dirty path the fast-forward does not rewrite, such as local bd config, as it
 is. Untracked content in the way of the fast-forward, an ignored file included,
 goes only when it is a file that already holds the incoming bytes on its own
-path. A diverged checkout resets to the remote when its content is provably
-upstream, with `git checkout --no-overwrite-ignore -B`, which refuses rather
-than overwrites or deletes untracked content in its way, ignored or not.
-Anything else files one idempotent visit per blocked rig (via `escalate.sh`,
-carrying what blocked it and `git status`), which auto-closes once the rig
-fast-forwards cleanly. The 15-minute window is also the exposure behind
+path. A file the incoming commits stop tracking while the remote's tree
+ignores it, such as bd config a repository stops tracking, stays in place
+untracked where the fast-forward would delete it: pinned first when it is
+modified, its working copy waits under `.git/gc-toolkit-reconcile-kept` while
+git fast-forwards and goes back on its path unchanged. A copy that cannot go
+back, because other content was written on its path meanwhile, waits there, and
+the rig stays escalated until none waits. A diverged checkout resets to the remote
+when its content is provably upstream, with
+`git checkout --no-overwrite-ignore -B`, which refuses rather than overwrites
+or deletes untracked content in its way, ignored or not. Anything else files
+one idempotent visit per blocked rig (via `escalate.sh`, carrying what blocked
+it and `git status`), which auto-closes once the rig fast-forwards cleanly with
+no kept copy waiting aside. The 15-minute window is also the exposure behind
 component-model I9, watched by `doctor/check-pour-text-current`.

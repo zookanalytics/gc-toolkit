@@ -77,121 +77,179 @@ convention documentation, and beads dispatched to polecats.
    the audit trail matters more than the saved minute. Your home directory,
    `city.toml`, and ad-hoc notes remain direct-edit.
 
-## Dispatch doctrine: an owned convoy is the PR unit
+## Dispatch doctrine: a PR comes from one bead
 
-The default shape for any PR-bearing dispatch is an **owned convoy** that
-anchors the PR — and its rework — to landed: a lone bead is the one-child
-convoy, a multi-bead initiative the many-child convoy. The convoy stays open
-until its work merges, so `closed` always means landed.
+{{ template "ask-for-work" . }}
 
-You run city-scoped, so `gc bd` and `gc convoy` resolve to the city store
-unless you name a rig. A dispatch bead left there is invisible to the rig's
-polecat pool, which reads only the rig store — it maroons, claimable by no
-one. Name the rig with `--rig <rig>` on every dispatch create and on every
-link between dispatch beads: the same `<rig>` you sling to.
+A PR comes from one bead, which owns it and its rework until it merges, so
+`closed` always means landed. A lone bead needs nothing else: filed in its rig's
+store and slung, it opens its own PR into main.
 
-A **shared input artifact** (a decisions doc, a spec several polecats need
-before any produce mergeable work) is never committed directly to the default
-branch — it is seeded on the convoy's integration branch.
-`assets/scripts/convoy-seed.sh` is that recipe in one idempotent act: it
-creates the owned convoy, sets `target = integration/<convoy-id>`, and
-cuts+pushes the branch from a disposable worktree. The disposable worktree is
-load-bearing — reconcile keeps the rig root fast-forwarded to the default
-branch and directory-imported packs build from its working tree, so a branch
-checkout or commit there parks the deploy off the default branch.
-`--artifact <file>` starts the branch one commit ahead of the default with
-that artifact on it; without it the branch starts equal to the default.
+Work the operator reviews as one PR is an **integration effort**. Its beads land
+on one integration branch with no PR of their own, and one **landing bead**
+carries the branch to main through that PR. A bead of the effort the operator
+asks to review on its own is a **stage**, slung `--merge mr`, whose PR goes into
+the branch.
+
+You run city-scoped, so `gc bd` resolves to the city store unless you name a
+rig. A dispatch bead left there is invisible to the rig's polecat pool, which
+reads only the rig store — it maroons, claimable by no one. Name the rig with
+`--rig <rig>` on every dispatch create and on every link between dispatch beads:
+the same `<rig>` you sling to. bd holds nothing on an edge between two stores,
+so every bead of an effort is filed in its rig's store.
+
+Stand an effort up with a landing bead, one push, three writes per bead and a
+summary task, reading each write back before the next step. Nothing goes to the
+refinery or to a pool until every wait of the effort reads back:
 
 ```bash
-# Create the convoy, cut + push its integration branch, seed the artifact onto
-# it. --json emits {convoy_id, branch}. You run city-scoped, so name the rig
-# twice: GC_RIG scopes the convoy to the rig you sling to, and --rig-root binds
-# the cut and push to that rig's checkout and its origin. Your home is not a
-# checkout of the rig, and without --rig-root the script falls back to
-# GC_RIG_ROOT and then to the repository your working directory sits in.
+# 1. The landing bead: an ordinary task titled for what the effort delivers,
+# whose description says what it is to deliver, under the effort's epic when it
+# has one (drop --parent when it has none).
+LANDING=$(gc bd --rig <rig> create "<what the effort delivers>" -t task -d "<what the effort is to deliver>" --parent <epic> --json | jq -r '.id // empty')
+BRANCH="integration/$LANDING"
+
+# 2. Its branch, cut from the default branch origin/HEAD names (main when it
+# names none) with one create-only push from the rig's checkout, after a fetch.
+# The push sends a ref and moves no checkout. Its empty lease refuses a branch
+# that already exists, so a resumed recipe that finds the branch on origin goes
+# on. mol-design-convoy cuts its subject's branch with the same marked blocks.
 RIG_ROOT=$(gc rig list --json | jq -r --arg r <rig> '.rigs[] | select(.name == $r) | .path')
-[ -d "$RIG_ROOT" ] || { echo "no checkout found for rig <rig>; not seeding" >&2; exit 1; }
-CONVOY=$(GC_RIG=<rig> "{{ .ConfigDir }}/assets/scripts/convoy-seed.sh" --rig-root "$RIG_ROOT" \
-    --name "<initiative>" --artifact <file> --artifact-message "<commit subject>" --json | jq -r .convoy_id)
+[ -n "$LANDING" ] && [ -d "$RIG_ROOT" ] || { echo "no landing bead, or no checkout of <rig>; stopping" >&2; exit 1; }
+# >>> effort-default-branch
+git -C "$RIG_ROOT" fetch --prune origin || { echo "git fetch failed in $RIG_ROOT" >&2; exit 1; }
+DEFAULT_REF=$(git -C "$RIG_ROOT" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || true)
+BASE="${DEFAULT_REF#refs/remotes/origin/}"
+[ -n "$BASE" ] && [ "$BASE" != "$DEFAULT_REF" ] || BASE=main
+# <<< effort-default-branch
+# >>> effort-branch-push
+git -C "$RIG_ROOT" show-ref --verify --quiet "refs/remotes/origin/${BASE}" || { echo "origin/${BASE} not found to cut $BRANCH from" >&2; exit 1; }
+if ! git -C "$RIG_ROOT" push origin "refs/remotes/origin/${BASE}:refs/heads/${BRANCH}" --force-with-lease="refs/heads/${BRANCH}:"; then
+  git -C "$RIG_ROOT" fetch origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}" || true
+  git -C "$RIG_ROOT" show-ref --verify --quiet "refs/remotes/origin/${BRANCH}" || { echo "the push of $BRANCH failed and origin does not carry it" >&2; exit 1; }
+  echo "origin already carries $BRANCH, so an earlier pass cut it"
+fi
+# <<< effort-branch-push
 
-# File each child work bead in the rig's store under the convoy, read the link
-# back, and stamp the convoy's target on it before you sling. The link and its
-# read-back name the rig too: a dep add that crosses stores prints success and
-# exits 0 with no edge to read back, and a child left unlinked is not one of
-# the convoy's members, so graduation does not wait for it.
-TARGET=$(gc bd --rig <rig> show "$CONVOY" --json | jq -r '.[0].metadata.target // empty')
-[ -n "$TARGET" ] || { echo "convoy $CONVOY has no readable target; file and sling nothing" >&2; exit 1; }
-WORK=$(gc bd --rig <rig> create "<task>" -t task --json | jq -r .id)
-gc bd --rig <rig> dep add "$WORK" "$CONVOY" --type=parent-child
-LINKED=$(gc bd --rig <rig> dep list "$WORK" --direction=down -t parent-child --json | tr -d '[:cntrl:]' | jq -r --arg c "$CONVOY" '[.[]? | select(.id == $c)] | length')
-[ "${LINKED:-0}" -ge 1 ] || { echo "$WORK reads no parent-child edge to $CONVOY; not slinging" >&2; exit 1; }
-gc bd --rig <rig> update "$WORK" --set-metadata target="$TARGET"
-gc sling <rig>/{{ .BindingPrefix }}polecat "$WORK"   # branches from the bead's own target
+# 3. Record the branch, and the default branch as the target, on the landing
+# bead, and read both back.
+gc bd --rig <rig> update "$LANDING" --set-metadata branch="$BRANCH" --set-metadata target="$BASE" \
+  && gc bd --rig <rig> show "$LANDING" --json | jq -e --arg b "$BRANCH" --arg t "$BASE" '.[0].metadata | .branch == $b and .target == $t' >/dev/null \
+  || { echo "$LANDING does not read back its branch and target; stopping" >&2; exit 1; }
+
+# 4. File each bead of the effort with its target in its create and the landing
+# bead's wait on it, and read both back. Nothing is slung yet.
+WORK=$(gc bd --rig <rig> create "<task>" -t task -d "<what to build>" --parent <epic> \
+  --metadata "$(jq -nc --arg t "$BRANCH" '{target: $t}')" --deps "blocks:$LANDING" --json | jq -r '.id // empty')
+[ -n "$WORK" ] \
+  && gc bd --rig <rig> show "$WORK" --json | jq -e --arg b "$BRANCH" '.[0].metadata.target == $b' >/dev/null \
+  && gc bd --rig <rig> dep list "$LANDING" --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg w "$WORK" 'any(.[]; .id == $w)' >/dev/null \
+  || { echo "${WORK:-the bead} does not read back its target and the landing bead's wait; stopping" >&2; exit 1; }
+
+# 5. The summary task, once every bead of the effort is filed: no target, under
+# the effort's epic, its description naming the landing bead. It waits on each
+# bead of the effort and the landing bead waits on it, all read back.
+SUMMARY=$(gc bd --rig <rig> create "summary: the PR for <what the effort delivers>" -t task \
+  -d "Write the pr_summary of $LANDING once every bead this task waits on has landed, by the polecat doctrine's paragraph on integration branches." \
+  --parent <epic> --deps "<each bead of the effort, comma-separated>,blocks:$LANDING" --json | jq -r '.id // empty')
+[ -n "$SUMMARY" ] || { echo "no summary task filed; stopping" >&2; exit 1; }
+WAITS=$(gc bd --rig <rig> dep list "$SUMMARY" --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -r '[.[].id] | join(" ")')
+for B in <each bead of the effort>; do
+  case " $WAITS " in *" $B "*) ;; *) echo "$SUMMARY does not wait on $B; stopping" >&2; exit 1 ;; esac
+done
+gc bd --rig <rig> dep list "$LANDING" --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg s "$SUMMARY" 'any(.[]; .id == $s)' >/dev/null \
+  || { echo "$LANDING does not wait on $SUMMARY; stopping" >&2; exit 1; }
+
+# 6. Hand the landing bead to the refinery, at the address gc agent list prints,
+# with the notice that assignment owes. It waits on every bead of the effort and
+# on the summary task, so the refinery takes it only once they have all closed.
+gc bd --rig <rig> update "$LANDING" --assignee <rig>/{{ .BindingPrefix }}refinery \
+  && "$(gc <binding> scripts-dir)/deferred-dispatch.sh" notify "$LANDING" --agent <rig>/{{ .BindingPrefix }}refinery \
+  || { echo "$LANDING is not handed to the refinery; dispatching nothing" >&2; exit 1; }
+
+# 7. Dispatch the work: sling each bead of the effort, or arm it when it waits
+# on other work (a stage is slung with --merge mr), then arm the summary task
+# on mol-polecat-report.
+gc sling <rig>/{{ .BindingPrefix }}polecat "$WORK"
+"$(gc <binding> scripts-dir)/deferred-dispatch.sh" arm "$SUMMARY" --target <rig>/{{ .BindingPrefix }}polecat \
+  --sling-arg --on --sling-arg mol-polecat-report --reason "writes the pr_summary of $LANDING once the effort's beads land"
 ```
 
-`gc sling` takes `base_branch` from the bead's own `metadata.target` first.
-Without one, it reads the first convoy target on the one parent chain bd
-reports, and then falls back to the rig default branch. A child filed under
-an epic and also linked to the convoy can report the epic as its parent, and
-then sling resolves the default branch. The stamp in the recipe above makes
-every child branch from the integration branch whichever parent bd reports,
-and the refinery lands their work back onto it, never onto the default
-branch. A child slung without the stamp, whose reported parent is not the
-convoy, is held at workspace-setup before any branch is cut.
+The branch is named for the bead that lands it, so an integration branch has one
+landing bead. Every bead is filed and waited on before any is slung, and the
+landing bead goes to the refinery only once it waits on all of them and on the
+summary task, so no bead can land while the landing bead waits on fewer than all
+of them. The summary task is dispatched once the effort's beads have landed, and
+its close releases the landing bead to the refinery, which opens the one PR with
+the summary the task wrote.
 
-A **design-first initiative** rides `mol-design-convoy` instead of a bare seed,
-and "Choosing a design-convoy" below is the test for one. The molecule runs the
-same branch cut from a pool session, then files the design child and, under the
-design-gated default, arms implementation behind the design's approval. Sling it
-on an initiative bead in the rig's store:
+A bead that joins the effort later takes step 4's writes, and a summary task's
+wait on it, before it is slung. The summary task waits on the bead and never the
+reverse, because the summary must read the branch after the bead has landed. The
+effort's summary task is the landing bead's wait whose title begins `summary:`,
+the newest when there are several. While it still carries its arm and no
+dispatch marker, and a bead it waits on is still open, no dispatch pass can
+sling it, and its own wait on the bead is enough:
 
 ```bash
-gc sling <rig>/{{ .BindingPrefix }}polecat <initiative> --on mol-design-convoy --var issue=<initiative>
+# The summary task's wait on a bead that joins later, after step 4's writes.
+# dep add's second id is the bead that is waited on.
+gc bd --rig <rig> show "$SUMMARY" --json | tr -d '[:cntrl:]' | jq -e '.[0] | (.metadata | (.["gc.dispatch_when_ready"] // "") != "" and (.["gc.dispatch_when_ready_slung"] // "") == "") and any(.dependencies[]?; .dependency_type == "blocks" and .status != "closed")' >/dev/null \
+  && gc bd --rig <rig> dep add "$SUMMARY" "$WORK" --type=blocks \
+  && gc bd --rig <rig> dep list "$SUMMARY" --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg w "$WORK" 'any(.[]; .id == $w)' >/dev/null \
+  || { echo "$SUMMARY may already be dispatched, or does not wait on $WORK; file a fresh summary task by step 5" >&2; exit 1; }
 ```
 
-When all children close AND the ledger records at least one landing on the
-branch, the cadence graduates the convoy automatically — a human-approved
-`integration/<id>` -> default-branch PR through the same work-bead machine. Children
-closed having landed nothing leave "all closed" vacuously true, and the
-pass reports the convoy vacuous rather than graduating it; land a genuinely
-complete but unrecorded convoy deliberately with `gc convoy land`.
+A summary task that has been dispatched may already have read the branch. One
+whose beads have all closed may still be slung by a pass that read it as ready
+before the wait was added, because a pass slings from the readiness it read
+when it started. Either way a fresh summary task waits on the bead instead:
+filed and read back by step 5 with the bead among its waits, which makes the
+landing bead wait on it too, and armed as in step 7. Then sling the bead. Once
+the refinery has taken the landing bead, work for its branch rides the PR as a
+rework or a supplement.
 
-Per-dispatch override: `gc sling <target> <bead> --var base_branch=<ref>`
-points one dispatch at any ref; explicit `--var` wins over the auto-compute.
-A convoy child takes its override as `metadata.target` instead, stamped before
-the sling: workspace-setup holds a convoy child whose base differs from its
-own target or, when it names none, from its convoy's target.
+A **shared input artifact** (a decisions doc, a spec several beads need before
+any produce mergeable work) is the effort's first bead. It lands on the branch
+like any bead, and the beads that need it wait on it with a `blocks` edge.
 
-**Anti-pattern:** dispatching a shared input artifact to land on the default
-branch by itself, with no convoy above it. Catching this shape is a dispatch
-judgment here, not a downstream gate, so seed the artifact on the convoy's
-integration branch as above.
+A bead that builds on work reaching main after the branch was cut needs the
+branch brought current first. That is a hand-off to you, not a bead of the
+effort: a task assigned to you that waits on the outside work by a `blocks`
+edge, with the notice `deferred-dispatch.sh` records for an assignment. The bead
+that needs the branch current waits on the hand-off by a `blocks` edge and is
+armed to dispatch when the hand-off closes. Once notified, bring the branch
+current from a disposable worktree: a fast-forward to main when the branch holds
+nothing main lacks, and a merge of main into it when it does. Push the result
+and close the hand-off. A merge that conflicts is not mechanical: push nothing,
+and put it to the operator with a visit.
 
-{{ template "design-convoy-routing" . }}
+An effort is ranked and parked through its epic. A convoy may still track an
+effort's beads for status, and carries nothing they read.
+
+Per-dispatch override: `gc sling <target> <bead> --var base_branch=<ref>` points
+one pour at any ref; explicit `--var` wins over the auto-compute. It sets only
+the pour it starts, so a bead that lands on another branch carries that branch
+as its own `target`, written in its create, where every later pour reads it.
+
+**Anti-pattern:** a bead filed for an effort without its `target`. It branches
+from main and lands on main through a PR of its own, outside the effort's PR,
+and nothing declines it before it is built.
 
 ## Scope-miss recovery: amend the open PR
 
-Scope you discover while a PR is open belongs on that PR. File a supplement
-bead in the rig's store (`gc bd --rig <rig> create`; you are city-scoped)
-carrying the PR's shape — `branch` = its `headRefName`, `existing_pr` =
-its URL, `target` = its `baseRefName` — write that metadata before you sling,
-and route the bead to `<rig>/{{ .BindingPrefix }}polecat`. `gc sling` has no
-flag for any of this, so the metadata write comes first: a polecat that claims
-the bead before `branch` is set cuts a fresh branch.
+Scope you discover while a PR is open belongs on that PR, as a supplement (the
+`prs` skill, sending it back for rework). You are city-scoped, so `<rig>` is
+the rig whose store holds the PR's anchor, and that rig's polecat pool takes
+the supplement:
 
-The polecat commits onto the PR's head branch and the refinery pushes it
-back, so the open PR gains the commits; the one-anchor-per-PR guard closes
-the supplement landed-on-branch and leaves gating with the original anchor.
-
-Close-and-replace is for an implementation that is **wrong**, not one that is
-incomplete: the commits are not something to build on. Missing docs, a test a
-reviewer asked for, an edge case the diff exposed — all supplements.
-
-`target` is the PR's base, not always `main`: a PR under an owned convoy is
-based on `integration/<convoy-id>`, and a supplement that names `main` fails
-the refinery's `base == target` check and blocks. Serialize supplements: the
-polecat pushes with a plain `git push`, so a second one in flight on the same
-branch is rejected non-fast-forward and stays with its polecat.
+```bash
+SUP=$(gc bd --rig <rig> create "<what the PR still needs>" -t task -d "<what to add, why, and what done looks like>" \
+  --deps related:<anchor>,blocks:<anchor> \
+  --metadata '{"anchor_bead":"<anchor>","branch":"<the PR head branch>","existing_pr":"<the PR url>","target":"<the PR base branch>"}' --json | jq -r '.id') \
+  && gc bd --rig <rig> dep list <anchor> --direction=down -t blocks --json | tr -d '[:cntrl:]' | jq -e --arg s "$SUP" 'any(.[]; .id == $s)' >/dev/null \
+  && gc sling <rig>/{{ .BindingPrefix }}polecat "$SUP"
+```
 
 {{ template "watch-dispatched-work" . }}
 
@@ -201,11 +259,14 @@ branch is rejected non-fast-forward and stays with its polecat.
 
 ## Upstream engagement (gascity)
 
-For every bug or design gap in upstream `gascity`, three options, in order
+For a bug in upstream `gascity`, three options, in order
 of preference: **ignore** (wait for upstream — usually right), **local
 patch** (carry the fix on the fork's main; mechanics in
-`docs/gascity-local-patching.md`), **engage upstream** (only with something
-materially new, and only through the operator).
+`docs/fork-patching.md`), **engage upstream** (only with something
+materially new, and only through the operator). A design gap takes none of
+these. A pack feature that needs something Gas City cannot express is
+reshaped to fit what Gas City ships, under the boundaries in
+`docs/foundation.md`.
 
 - **The commit message IS the review packet.** Every local-patch commit body
   must read like a self-contained upstream PR description: symptom, root
@@ -228,12 +289,12 @@ materially new, and only through the operator).
 
 Reference docs under `{{ .ConfigDir }}/docs/`:
 
-- **gascity-reference.md** — index of canonical Gas City documentation.
+- **gascity/README.md** — index of canonical Gas City documentation.
   Consult before guessing at config syntax or CLI flags.
-- **gascity-agents.md** — agent variants, identity, session lifecycle,
+- **gascity/agent-types.md** — agent variants, identity, session lifecycle,
   and addressing. Consult before reasoning about session lifecycle or
   titling. (`assets/scripts/tmux-pick-session.sh` is the picker tool.)
-- **gascity-local-patching.md** — the process for carrying local fixes
+- **fork-patching.md** — the process for carrying local fixes
   against `gascity` ahead of upstream.
 
 Gascity-rig-specific doctrine (rebase conventions, refinery rebase

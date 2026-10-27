@@ -2,8 +2,10 @@
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
 # queries it, the one-write create every script files a stamped bead through,
 # the metadata read-back that gates handing such a bead on, the close that
-# unmakes a bead no reader can find, the validation pass's work order, and the
-# gating-PR read's field set. Sourced, never executed.
+# unmakes a bead no reader can find, the birth, settle and route of PR-finishing
+# work, the validation pass's work order, the gating-PR read's field set, the
+# per-rig key an order's state lives under, and the pass lock that lets an order
+# run one pass at a time. Sourced, never executed.
 #
 # A caller resolves this file beside itself and sources it, the way
 # visit-identity.sh is sourced:
@@ -635,6 +637,62 @@ bd_unmake_orphans() {
   return 0
 }
 
+# PR-finishing work, the reviews, validation passes, merge-ins, red-check fixes
+# and review reworks that carry an anchor's branch to its merge, is filed one
+# level sooner than its anchor (docs/steering.md, "PR-finishing work"). Each
+# creator files its child carrying this shift in the create, so the child is
+# born with it, and each creator's suite asserts it. A child adopted or re-routed
+# later keeps the shift it carries: after its birth the shift is the child's own
+# input, which a priority move may have set.
+# shellcheck disable=SC2034  # read by the scripts that source this file
+PR_FINISHING_SHIFT=-1
+
+# pr_finishing_birth <metadata-json> — the create payload of a PR-finishing
+# child: its work order with priority_shift added. Prints nothing and returns
+# non-zero for a work order that is not a JSON object, an empty one included, so
+# the create that would carry it files nothing.
+pr_finishing_birth() {
+  printf '%s' "${1:-}" | jq -ce --argjson s "$PR_FINISHING_SHIFT" \
+    'if type == "object" then . + {priority_shift: $s} else error("not an object") end' 2>/dev/null
+}
+
+# The longest a settle of PR-finishing work waits for the store's priority lock
+# when a script of the merge cadence or the refinery patrol runs it:
+# gate-ensure.sh, pr-facts.sh, pre-open-rebase.sh and rejection-repool.sh. The
+# cadence and the patrol each run their arms one after another, so a longer wait
+# holds every arm after it. A bead whose settle times out in the cadence is
+# settled by a later pass, and rejection-repool.sh files a visit that asks for
+# its re-run. queue-priority.sh's own default wait is longer, and
+# rework-child.sh, which runs in a review or converse session rather than in the
+# cadence, keeps it.
+PR_FINISHING_LOCK_WAIT_SECS=30
+
+# pr_finishing_settle <bead> — the cadence's settle of a bead of PR-finishing
+# work: queue-priority.sh settle, which computes the bead's priority, writes it
+# to the bead and to every live workflow poured for it, and reads it back
+# (docs/steering.md#settle), waiting for the lock PR_FINISHING_LOCK_WAIT_SECS
+# at most. The writer's narrative goes to stdout and its refusal to stderr, for
+# the caller to keep or drop. GC_QUEUE_PRIORITY_TOOL names another writer, as
+# each suite's harness does. Non-zero when the bead did not settle.
+pr_finishing_settle() {
+  QUEUE_PRIORITY_LOCK_WAIT_SECS="$PR_FINISHING_LOCK_WAIT_SECS" \
+    "${GC_QUEUE_PRIORITY_TOOL:-$(dirname -- "${BASH_SOURCE[0]}")/queue-priority.sh}" settle "${1:-}" </dev/null
+}
+
+# route_finishing <child> <pool> — route a PR-finishing child to <pool> at its
+# priority, for the creators that route a child rather than sling it
+# (pr-facts.sh, pre-open-rebase.sh). The route makes the child claimable, so the
+# child is settled first (pr_finishing_settle), and the route is then written
+# alone, with no priority in it. No pool can claim the child before the route
+# lands, and a priority move that runs between the two writes rewrites the child
+# itself. Returns 1, having routed nothing, when the child does not settle; it
+# is left unrouted for a later pass. A route write bd refuses can still exit 0,
+# so the caller reads the route back.
+route_finishing() {
+  pr_finishing_settle "${1:-}" >/dev/null || return 1
+  gc bd update "$1" --set-metadata gc.routed_to="${2:-}" </dev/null >/dev/null 2>&1 || true
+}
+
 # The keys a validation pass is found by: signoff.sh's machine-lane probe and
 # pr-facts.sh's human-lane probe both select a pass by its task_kind, its anchor
 # and its lane, so a pass short of one of them is one neither can find.
@@ -642,15 +700,16 @@ bd_unmake_orphans() {
 VALIDATION_SELECT="task_kind,anchor_bead,check_name"
 
 # validation_work_order <anchor> <lane> <reviewed-oid> — the metadata a
-# validation pass carries, the shape mol-validate reads. task_kind, anchor_bead
-# and check_name are VALIDATION_SELECT. check_name is the lane: mol-validate
-# rules the findings whose finding.lane matches it. reviewed_oid pins the head
-# the batch was produced at, which mol-validate needs to back a machine lane; an
-# empty <reviewed-oid> leaves the pin out.
+# validation pass is filed with, the shape mol-validate reads, born carrying the
+# PR-finishing shift. task_kind, anchor_bead and check_name are
+# VALIDATION_SELECT. check_name is the lane: mol-validate rules the findings
+# whose finding.lane matches it. reviewed_oid pins the head the batch was
+# produced at, which mol-validate needs to back a machine lane; an empty
+# <reviewed-oid> leaves the pin out.
 validation_work_order() {
-  jq -nc --arg a "${1:-}" --arg l "${2:-}" --arg o "${3:-}" \
+  pr_finishing_birth "$(jq -nc --arg a "${1:-}" --arg l "${2:-}" --arg o "${3:-}" \
     '{task_kind: "validation", anchor_bead: $a, check_name: $l}
-     + (if $o == "" then {} else {reviewed_oid: $o} end)' 2>/dev/null
+     + (if $o == "" then {} else {reviewed_oid: $o} end)' 2>/dev/null)"
 }
 
 # The gating-PR read. The pr-facts arm (pr-facts.sh) and the merge arm
@@ -662,3 +721,96 @@ validation_work_order() {
 # The pinned read's field set. pr-facts.sh asks for it plus labels.
 # shellcheck disable=SC2034  # read by the scripts that source this file
 PR_FIELDS="state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeStateStatus,mergeable,reviewDecision,url"
+
+# Per-rig state and the pass lock. An order that runs once per rig keeps its
+# state in a directory named for the rig, and a pass that must never overlap
+# another over the same work holds a lock in that directory while it runs.
+
+# state_key <readable> <identity> — a directory name for <identity> that reads
+# as <readable>. A safe name that is its own identity is used as it is. Any
+# other name is the safe form of <readable>, cut to 64 bytes, then a checksum of
+# <identity>, so two identities never share a name and no name reaches outside
+# the directory it is joined to.
+state_key() {
+  local readable="$1" identity="$2" safe
+  safe="$(printf '%s' "$readable" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"
+  case "$safe" in ''|.|..) safe=rig ;; esac
+  if [ "$safe" = "$readable" ] && [ "$readable" = "$identity" ] && [ "${#safe}" -le 64 ]; then
+    printf '%s' "$safe"
+  else
+    printf '%s-%s' "${safe:0:64}" "$(printf '%s' "$identity" | cksum | cut -d' ' -f1)"
+  fi
+}
+
+# rig_state_key — the state key of the rig this process runs for. The order
+# runner sets GC_RIG and GC_RIG_ROOT together for a rig-scoped order (gascity
+# cmd/gc/order_store.go), and the key is GC_RIG. With only GC_RIG_ROOT set, the
+# root the store resolves from, the key is the root's last path element and a
+# checksum of the whole root, so two roots that end in one name stay apart. With
+# neither it is _unscoped.
+rig_state_key() {
+  local root
+  if [ -n "${GC_RIG:-}" ]; then
+    state_key "$GC_RIG" "$GC_RIG"
+  elif [ -n "${GC_RIG_ROOT:-}" ]; then
+    root="${GC_RIG_ROOT%/}"
+    state_key "${root##*/}" "$GC_RIG_ROOT"
+  else
+    printf '_unscoped'
+  fi
+}
+
+# take_pass_lock <dir> <stall-secs> — take the pass lock kept in <dir>: a
+# non-blocking exclusive flock on <dir>/pass.lock, held on fd 9, with this
+# process and the time it took the lock recorded in <dir>/pass.holder as
+# "<pid> <epoch>". Returns 0 holding it; 1 when another pass holds it and took it
+# no more than <stall-secs> ago; 2 when that pass took it longer ago than that;
+# and 3 when no lock can be taken, because flock is not on PATH or the lock file
+# cannot be created or opened. LOCK_NOTE names the holder for 1 and 2, as
+# "pid <n>, <s>s elapsed", and the cause for 3. Only a 0 leaves fd 9 open.
+#
+# The lock depends on no bead surviving. The kernel releases it once no process
+# has a descriptor on it, however each one exits, SIGKILL included. A descriptor
+# a script opens stays open across exec, so every program the pass starts
+# inherits fd 9. A program can outlive the pass that started it: a store read can
+# bring up a Dolt server, and gc hands the descriptors it was given to what it
+# starts. A program that kept fd 9 would hold the lock against every later pass,
+# so a pass runs each program that can leave a process behind, a gc call or one
+# of the pack's scripts, through pass_child.
+# shellcheck disable=SC2034  # LOCK_NOTE is read by the scripts that source this file
+take_pass_lock() {
+  local dir="$1" stall="$2" lock="$1/pass.lock" holder="$1/pass.holder"
+  local held_pid="" held_since="" elapsed=""
+  LOCK_NOTE=""
+  if ! command -v flock >/dev/null 2>&1; then
+    LOCK_NOTE="flock not found on PATH"; return 3
+  fi
+  if ! mkdir -p "$dir" 2>/dev/null || ! ( : >> "$lock" ) 2>/dev/null; then
+    LOCK_NOTE="cannot create $lock"; return 3
+  fi
+  exec 9>>"$lock" || { LOCK_NOTE="cannot open $lock"; return 3; }
+  if flock -n 9; then
+    printf '%s %s\n' "$$" "$(date -u +%s)" > "$holder" 2>/dev/null || true
+    return 0
+  fi
+  exec 9>&-
+  if [ -r "$holder" ]; then read -r held_pid held_since < "$holder" || true; fi
+  case "$held_since" in
+    ''|*[!0-9]*) ;;
+    *) elapsed=$(( $(date -u +%s) - held_since )) ;;
+  esac
+  LOCK_NOTE="pid ${held_pid:-unknown}${elapsed:+, ${elapsed}s elapsed}"
+  if [ -n "$elapsed" ] && [ "$elapsed" -gt "$stall" ]; then return 2; fi
+  return 1
+}
+
+# pass_child <program> [args...] — run <program> for a pass that holds the pass
+# lock, and return its status. <program> starts with fd 9 closed, so nothing it
+# starts, or leaves running, holds the lock. The subshell it runs from keeps fd 9
+# and waits on it, so the lock stays held while <program> runs, even after the
+# pass that started it is killed by itself; the order runner stops a pass's whole
+# process group (gascity cmd/gc/order_dispatch.go), <program> with it. The exit
+# after <program> is what keeps bash from replacing the subshell with it. Name a
+# program, not a shell function: bash closes fd 9 in the process it starts for a
+# program, and a function runs in the subshell itself.
+pass_child() { ( "$@" 9>&-; exit "$?" ); }

@@ -12,7 +12,7 @@ the bash dies).
 > and read-only verbs that `gc-helm --help` lists, and `gc-helm.sh --json`
 > exits 2 with `unknown verb`. Its own usage text points at `helm-svc board`.
 > Retiring the remaining verbs is a separate decision recorded under "Two helm
-> boards, and they diverge" in `docs/gascity-human-engagement.md`.
+> boards" in `docs/human-engagement.md`, under Watch items.
 >
 > There is therefore no bash field set left to drift against, and
 > `cmd/helm-svc/contract_parity_test.go` — which parsed the jq object literal
@@ -57,13 +57,13 @@ POST /helm/dismiss  -> { bead, verb, message }   close the subject's open visit
                     — the write routes; see *Actuating from the board*
 ```
 
-A `Tile` carries 50 fields, declared in `internal/board/model.go` and mirrored
-in `web/src/contract.ts`. The order started as the bash board's object literal
-so the two `--json` outputs could be diffed line for line; that literal is gone
+A `Tile`'s fields are declared in `internal/board/model.go` and mirrored in
+`web/src/contract.ts`. The order started as the bash board's object literal so
+the two `--json` outputs could be diffed line for line; that literal is gone
 and the order is now simply the wire's:
 
 ```
-id rig kind title severity owed weight held
+id rig kind title severity owed weight held visit_state
 n_closed m_total open in_progress assigned
 in_progress_live in_progress_dead dead_owner in_flight in_flight_heads owned
 stranded empty complete
@@ -72,6 +72,8 @@ waiting_on waiting_on_open disposition_due
 takeaway takeaway_at takeaway_by updated_at closed_at frontier needs rank_score
 pr_number pr_url pr_branch pr_machine pr_conversation pr_approval pr_owed_since
 section cluster_key group_root group_parent
+acceptable accept_formula pr_branch_url pr_phase phase recommendation
+visit_start_failure
 ```
 
 `updated_at`, `closed_at` and `pr_owed_since` are `omitzero` and `cluster_key`
@@ -82,7 +84,9 @@ omitted on every row nothing is owed on; `cluster_key` is absent on a row that
 is not one of a template's several.
 
 Tiles are deduplicated by id and **partitioned**: every `owed` row first,
-longest-waiting first, then everything else by `rank_score` descending.
+longest-waiting first, then everything else by `rank_score` descending. A row
+whose visit's sitting failed to start leads the owed rows whatever its age (see
+*A sitting that failed to start*, below).
 
 `section` bands each row by the KIND of attention it wants — `review` (a pull
 request), `gate` (a person must answer), `stalled` (open work nothing is
@@ -109,9 +113,9 @@ family by it (`flattenFamilies` in `web/src/App.tsx`); the CLI board renders one
 level deep.
 
 `cluster_key` is the shared `needs` of a run of at least three same-section rows
-that are one template (a visit family, a signoff cap); a renderer folds them
-into one entry while the wire keeps every member. `specs/tk-9tbbk.4/` records
-the band taxonomy and the wrapper fold.
+that are one template (a visit family, a run of PRs green and waiting on
+review); a renderer folds them into one entry while the wire keeps every
+member. `specs/tk-9tbbk.4/` records the band taxonomy and the wrapper fold.
 
 ### The two questions, and why they are two surfaces
 
@@ -235,12 +239,12 @@ Six kinds are gathered. The first three are selected by the bead's issue
 
 `merge` is keyed on `merge_result` PRESENCE and never on `pr_number`: an anchor
 at `pre_open_gate` has a branch, a gate set and a machine axis with no number
-yet, so a number-keyed query cannot see a gate that wedges before the PR opens.
+yet, so a number-keyed query cannot see a gate that stalls before the PR opens.
 `pr_branch` is what identifies those rows, and it travels as its own field
 because a table without a `frontier` column has nothing else to name them with.
-It is gathered LAST, so a wedged anchor — which carries `gc.routed_to=human` too
-— keeps its `human` row through the dedup instead of flipping kind between
-passes.
+It is gathered LAST, so a merge anchor routed to a person — which carries
+`gc.routed_to=human` too — keeps its `human` row through the dedup instead of
+flipping kind between passes.
 
 All six are gathered by **both** backends. The library backend filters the two
 metadata kinds in the store query; the HTTP backend filters them client-side
@@ -328,7 +332,7 @@ the row read `m_total=0 · conversation parked`, while the deliverable it was
 waiting for sat open, unassigned and unrouted, invisible.
 
 Converse files routed work, and the demand beads that record what a person
-owes, as SIBLINGS of the subject (`docs/gascity-human-engagement.md`, "How a
+owes, as SIBLINGS of the subject (`docs/human-engagement.md`, "How a
 sitting ends"), so the `waiting_on` edge takes and the disposition rule below
 fires for them. The child roll-up stays exactly as it is: it is what keeps the
 work already filed as a child visible, and nothing re-parents it.
@@ -498,17 +502,18 @@ field would be lying on a normal day.
 
 | field | values | read from |
 |---|---|---|
-| `pr_machine` | `progressing`, `settled`, `wedged-exception`, `blocked`, `unknown` | `pr.machine` on the anchor |
+| `pr_machine` | `progressing`, `settled`, `blocked`, `unknown` | `pr.machine` on the anchor |
 | `pr_conversation` | `quiet`, `outstanding`, `answered`, `asking`, `unknown` | `pr.conversation` on the anchor; `asking` from the demand edge |
 | `pr_approval` | `required`, `met`, `unknown` | `pr_posture` on the anchor |
 | `pr_owed_since` | RFC 3339, omitted when nothing is owed | the earliest live cause |
 
 **Recorded, not re-derived.** Every stage of the merge cadence reaches the
-machine axis once per pass: `assets/scripts/gate-ensure.sh` classifies each gate
-marker, and `assets/scripts/merge.sh` decides it again at each of its holds. Both
-record it through the lifecycle writer, gate-ensure through `lifecycle.sh` and
-`gctk merge` in-process, in the head-pinned `<value>@<oid>@<since>` shape the
-gate markers already use. Nothing here adds a pass, a scanner or a GitHub read.
+machine axis once per pass: `assets/scripts/gate-ensure.sh` classifies each
+declared lane, and `assets/scripts/merge.sh` decides it again at each of its
+holds. Both record it through the lifecycle writer, gate-ensure through
+`lifecycle.sh` and `gctk merge` in-process, in the head-pinned
+`<value>@<oid>@<since>` shape. Nothing here adds a pass, a scanner or a GitHub
+read.
 
 **No per-PR GitHub call.** A conversation read costs one GitHub round trip per
 open pull request, and a backlog of ordinary size spends the board's whole cache
@@ -523,11 +528,9 @@ not grow with the number of pull requests.
 `progressing` whatever the last gate pass recorded, because that half of the
 derivation is a bead read the gather already makes. The route is the
 discriminator: an anchor also blocks on ordinary prerequisites and on the demand
-bead that makes it `asking`, and no pool will claim either. A recorded wedge
-always stands, since an operator who loses sight of a wedge has lost the row this
-surface exists to show.
+bead that makes it `asking`, and no pool will claim either.
 
-**Whose move.** A row is owed by the operator when the machine axis is wedged,
+**Whose move.** A row is owed by the operator when the machine axis is blocked,
 when an open `blocks` edge to a demand bead means the city is asking, or when the
 cadence is `settled` and GitHub is holding the merge for a human review — one
 never given, or a standing `changes_requested` the city has reworked as far as it
@@ -550,8 +553,18 @@ yet green and nothing advancing it, meaning no review or rework a live session i
 working. Its checks are the lanes its `check_set` declares, split by the rule
 `merge.sh` and `pr-open.sh` apply: commas separate lanes, whitespace is stripped,
 and `none`, `off` and `approval` name no lane. Every lane holds the PR, and a lane
-is green when its `check.<lane>` marker reads `green`. A legacy `codex` lane counts
-like any other, and a `check_set` that declares no lane is never a stalled check.
+is green when a review backs it the way `lane-state.sh` reads a local backing
+(`laneGreen`): a closed review bead naming the anchor in `anchor_bead` and the
+lane in `check_name`, carrying a `reviewed_oid` and `signoff_verdict=approve`
+and not superseded, with no review for the lane still open. The library backend
+gathers a live pre-open anchor's reviews the way `bd-lib.sh` reads an anchor's
+children in a store marked joined: the live ones by `anchor_bead`, and the
+closed ones through the anchor's inbound edges. In a store without the mark,
+where only a scan of the whole closed ledger would find the closed ones, and
+when a review read fails, it marks the reviews unread. The supervisor backend
+reads no closed bead, so it marks them unread too, and unread reviews fire no
+stall. A legacy `codex` lane counts like any other, and a `check_set` that
+declares no lane is never a stalled check.
 Childless the anchor would otherwise band `LOW` and read `in the merge cadence` (a
 stale `progressing` marker) or `position unknown`, so it sinks with no age; the
 signal bands it `ELEVATED`, dates it from the anchor's `updated_at`, and its
@@ -562,9 +575,9 @@ on the anchor, because a rework title names no lane.
 Routed-ness is not liveness: a review routed to a pool no session is draining is
 itself the stall, not a healthy hold, so the suppression turns on a live worker
 (`ownerLive`/`wfLive`), not on the route `pr_machine` reads as `progressing`. A
-wedge, a demand, a takeaway or a human route already owns the row and names it, so
-the signal defers to each; it is a merge anchor either way, so it reads in the
-`review` band beside the wedged pre-open rows.
+demand, a takeaway or a human route already owns the row and names it, so the
+signal defers to each; it is a merge anchor either way, so it reads in the
+`review` band beside the other pre-open rows.
 
 **`pr_conversation` reads the recorded position.** `asking` is the demand edge,
 rendered wherever it is there. `quiet`, `outstanding` and `answered` are read
@@ -678,6 +691,60 @@ anchor kind, so the bash board's `--json` contract and the parity test are
 untouched; the bash board simply has no sittings section. Adding one there is a
 separate decision, in the same class as the other bash-only verbs.
 
+### A sitting that failed to start
+
+`gc-helm engage` binds a visit to the sitting it spawns before that sitting
+starts, so a sitting Gas City cannot start leaves its visit bound to a session
+that never ran. The binding alone reads `engaged`, and once the witness releases
+it the visit reads like any parked one. So the board reads the failure itself
+(`source.BeadsSource.markStartFailures`), from the records Gas City keeps in the
+city store:
+
+- engage spawns the sitting as a manual session (`session_origin=manual`) whose
+  alias is the visit's id, stored qualified as `<rig>/<binding>.<alias>`, or
+  `v-<id>` where Gas City refuses the bare id as an alias;
+- the reconciler's rollback closes that session bead with `state=failed-create`;
+- a start that failed on a provider error a person must fix, a model not found
+  or a quota exceeded, has the rollback write the error's code to the session
+  bead's `provider_terminal_error`;
+- a start that failed otherwise leaves a `startup-health-episode` bead keyed by
+  the session's name, whose kind and last detail say why it failed;
+- every other rollback records no cause, such as that of a create rolled back
+  before any start ran.
+
+The read goes from the session side, which the witness's release does not
+touch: every failed-create manual session whose alias names an open visit. A
+session spawned under the same alias after the failed one is the visit engaged
+again, and clears the mark whatever became of that session; a newer session
+that failed too is the visit's failure now. The reason reads
+`provider error: <code>` for a provider error, `startup timeout` for a
+deadline, `setup timeout` for a deadline inside a `pre_start` command,
+`start error: <the recorded error>` for any other error the episode recorded,
+and `never started` when Gas City recorded no cause.
+
+| field | on the row |
+|---|---|
+| `visit_state` | `start-failed`, on the held subject's row, or on the visit's own row when its subject has none |
+| `visit_start_failure` | the reason |
+| `needs` | `start failed (<reason>): <the ask>` |
+| `owed`, `severity` | owed, and at least `ELEVATED` |
+
+The row leads the operator's queue, ahead of every row owed longer, so it is
+among the rows `tmux-pick-helm.sh` offers off the head of the queue, and the
+picker and both terminal views mark it `✗`. The mark shows as soon as Gas City
+records the failure and stays until the visit is engaged again or closed. A
+failed start outranks a live sitting on the same row, because each visit on a
+subject is its own conversation. Accept follows the visit's binding, the way
+`gc-helm.sh accept` reads it: it stays off while the failed sitting's binding
+stands and returns once the witness releases it.
+
+The read costs two queries over the city's session beads on every gather (about
+half a second on the live city), plus up to three small ones for each open visit
+with a failed start on record. A read that fails is noted partial and marks nothing
+it could not establish. An episode read that fails after the failure is
+established marks the row `reason unread`. The supervisor backend gathers no
+sittings, so it shows no failed start either.
+
 ## Architecture
 
 Three packages, a clean dependency line `board <- source <- server <- cmd`:
@@ -717,10 +784,13 @@ into those anchors' child roll-ups so they cost no request of their own.
 `gc session list --state all --json` for session liveness (the gate that tells
 work in flight from an abandoned husk). This is the same read `gc-helm.sh`
 makes, so the two boards agree on liveness by construction rather than by two
-derivations. The work bead a root's input
-convoy tracks — the other half of the in-flight join — is read in-process from
-that convoy's `tracks` edge in the rig store (`internal/source/facts.go`,
-`convoyMembers`), so it costs no `gc convoy status` per root. It honours the
+derivations. The work bead a root's run works — the other half of the
+in-flight join — is read in-process from its input convoy's `tracks` edge in the
+rig store (`internal/source/facts.go`, `convoyMembers`), so it costs no
+`gc convoy status` per root. That join copies the part of the rule
+`assets/scripts/run-lib.sh` defines that reads an input convoy, so a root that
+names none is not joined, and `TestWorkflowRootsAgreeWithRunLibFixture` holds it
+to that file's fixture. It honours the
 contract for the same reason the other two do — a Gas City interface, not raw
 Dolt — and every call is best-effort: a missing or failing `gc` records a
 partial error and narrows the board (nothing reads as held or in flight)
@@ -1452,6 +1522,35 @@ Discovery env:
 The standalone invocation above reaches the supervisor over HTTP; to run it on
 the library backend instead, pass `GC_CITY_PATH` (the supervisor already injects
 it under a real service mount) and leave `GC_HELM_SOURCE` unset.
+
+## The board on fixture data (`helm-fixture`)
+
+`cmd/helm-fixture` serves the app this commit embeds with no city behind it.
+`/helm` answers a board file as JSON, and `POST /helm/<verb>` answers a canned
+answer, so nothing it serves reads or writes a city. A demo capture of the board
+runs it as its `--serve` command (`docs/review-demo.md`).
+
+```bash
+cd services/helm
+PORT=5199 go run ./cmd/helm-fixture        # the contract sample, on 127.0.0.1:5199
+go run ./cmd/helm-fixture --addr 127.0.0.1:5199 --board <file> --answers <dir>
+```
+
+- `--board` is the board answer, in the shape `web/src/contract.ts` names. The
+  default is `web/src/board.fixture.json`, the contract sample `TestBoardFixture`
+  writes, which carries every key of the board contract.
+- `--answers` is a directory of canned write answers. `dismiss.json` is the 200
+  answer to `POST /helm/dismiss`, in the shape `web/src/actuate/client.ts` reads
+  (`web/src/open/client.ts` for `open`). `dismiss.409.json` answers with status
+  409 instead, which the app reads as a refusal. A verb with no answer is refused
+  with 503 and reason `unavailable`, as helm-svc refuses a write when it has no
+  write tool.
+- It listens on loopback only: `--addr`, else `127.0.0.1:$PORT`.
+
+It is a command of its own, not a helm-svc subcommand, because a cold build of
+helm-svc, which links Dolt through cgo, takes minutes, past the 30 s a capture's
+engine waits for a `--serve` command to answer. Its tests hold its import graph
+to the standard library, the app's package and `internal/fixture`.
 
 ## What's proven vs. deferred
 

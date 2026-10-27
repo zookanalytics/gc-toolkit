@@ -4,26 +4,20 @@
 # Converse is spawn-on-engagement: `gc-helm engage` spawns a manual
 # converse-<model> session (origin=manual) bound to a visit, and the session's
 # --alias IS that visit id. A manual session is exempt from every pool backstop,
-# so nothing in the runtime cycles it. Both endings the config names — the
-# agent's sign-off and the operator's `gc-helm dismiss` — close the VISIT on the
-# belief that closing the visit ends the sitting. It does not: the manual session
-# outlives its closed visit as a live provider process and, when the operator has
-# walked away, a closed visit beside a live pane. This pass is the reap those two
-# endings assume.
+# so nothing in the runtime cycles it. A sitting ends its own session as soon as
+# its visit closes, and `gc-helm dismiss` stops the session that held the visit
+# it closes. This pass is the backstop for the session that outlives its closed
+# visit anyway: a stop that did not take, or a visit some other path closed.
 #
 # A converse session whose visit is CLOSED (or gone) is settled: the hold it
-# protected is over, so there is nothing left to protect. Close the session.
+# protected is over, so there is nothing left to protect. Close the session,
+# whether or not an operator is attached to it. Viewing a sitting does not keep
+# it open: a client attached to it exits when its session ends, because each
+# converse template sets detach-on-destroy on its own tmux session.
 #
 # The one visit this pass will NOT reap under is one still OPEN — that is a live
-# hold — and the one session it will not reap is one an operator is ATTACHED to.
-# The pack cannot see a half-typed reply in the composer (that needs the
-# runtime's typed-input state, which the pack cannot yet read), and the operator's
-# standing ruling is that draining a pane with typed text is a hard no. Attachment
-# is the only signal the pack has for "someone is at this pane", so an attached
-# sitting is left for its own sign-off or a dismiss even when its visit already
-# reads closed. The unattached settled sittings, the leaked sessions, are what
-# this reaps. A sitting whose visit is still OPEN (the operator walked away
-# before any sign-off) is the harder, separate case; this pass leaves it alone.
+# hold. A sitting whose visit is still OPEN (the operator walked away before any
+# sign-off) is the harder, separate case; this pass leaves it alone.
 #
 # Fully mechanical: `gc session list` + one `gc bd show` per converse session +
 # `gc session close` for the settled ones. No agent, no formula, no pool.
@@ -45,7 +39,7 @@ DRY_RUN=0
 for arg in "$@"; do
     case "$arg" in
         --dry-run) DRY_RUN=1 ;;
-        -h|--help) sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "$PROG: unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
@@ -65,15 +59,14 @@ if ! printf '%s' "$sessions_json" | jq -e 'type=="object" and (.sessions|type=="
 fi
 
 # Candidate rows, one per line as <session-id>\t<visit-id>: a converse template,
-# not already closed, NOT attached, and carrying an alias. engage sets the alias
-# to the visit id, qualified as <rig>/<pack>.<visit-id>, so the id is the final
-# dot-segment. A session with no alias was not engage-bound to a visit and is
-# none of our business.
+# not already closed, and carrying an alias. engage sets the alias to the visit
+# id, qualified as <rig>/<pack>.<visit-id>, so the id is the final dot-segment.
+# A session with no alias was not engage-bound to a visit and is none of our
+# business.
 candidates="$(printf '%s' "$sessions_json" | jq -r '
     .sessions[]?
     | select(((.template // "") | test("converse")))
     | select((.closed // false) == false)
-    | select((.attached // false) == false)
     | select((.alias // "") != "")
     | [ .id, ((.alias) | sub("^.*\\."; "")) ]
     | @tsv')"

@@ -26,7 +26,10 @@ A handoff the operator asks for is the `handoff` skill's
 (`skills/handoff/SKILL.md`). What becomes of the retiring session's scratch is
 [scratch-reclaim.md](scratch-reclaim.md). The rule against consent UI from any
 heartbeat agent, of which the hook is one instance, is
-`template-fragments/heartbeat-no-consent-ui.template.md`.
+`template-fragments/heartbeat-no-consent-ui.template.md`. The overlay's other
+`Stop` hook, which hands the deacon back a turn that ends between patrol
+cycles and does print a block decision, is
+[patrol-continue.md](patrol-continue.md).
 
 ## Why a hook and not an instruction
 

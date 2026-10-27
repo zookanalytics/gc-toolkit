@@ -10,11 +10,10 @@
 # feedback ahead of the slow arms, so a pass killed before the full arm has
 # still picked it up; BEADS_ACTOR projected), pre-open-rebase (the conflict
 # observer for anchors that have no PR yet), gate-ensure, pr-facts (same
-# projection), convoy-graduate (GC_AGENT projected: graduation assigns the
-# convoy), review-sweep (cleanup over closed anchors; no projection, no merge
-# authority), scaffolding-sweep (retires validation/finding/rework on a disposed
-# anchor; BEADS_ACTOR projected: it closes a finding it carries forward through
-# bead-rehome; no merge authority), duplicate-sweep (BEADS_ACTOR
+# projection), review-sweep (cleanup over closed anchors; no projection, no
+# merge authority), scaffolding-sweep (retires validation/finding/rework on a
+# disposed anchor; BEADS_ACTOR projected: it closes a finding it carries forward
+# through bead-rehome; no merge authority), duplicate-sweep (BEADS_ACTOR
 # projected: it closes duplicate dispatches through bead-rehome; no merge
 # authority), pr-stack (PR bodies only — both managed regions; no projection,
 # no merge authority).
@@ -62,6 +61,10 @@ RIG_HEAD="$(git -C "$RIG_ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unk
 # Siblings resolve from $0: the pack lives under the owning rig, so an importer
 # rig's own root has no assets/scripts at all.
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+# The pass lock, pass_child and the per-pass bd_list cache. Unsourceable,
+# nothing serialises the arms, so none runs.
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script — refusing to run any arm without the pass lock" >&2; exit 1; }
 
 # Refinery identity by discovery; FIX/REVIEW pools share its binding prefix so
 # a rename cannot split them.
@@ -89,7 +92,6 @@ REVIEW_POOL="$RIG/${BINDING_PREFIX}polecat-codex"
 # A rig that staffs a dedicated validate pool points this there without an edit.
 VALIDATE_POOL="${REFINERY_RECONCILE_VALIDATE_POOL:-$FIX_POOL}"
 CHECK_SET_DEFAULT="${REFINERY_RECONCILE_CHECK_SET:-correctness,triage}"
-INTEGRATION_AUTO_LAND="${REFINERY_RECONCILE_INTEGRATION_AUTO_LAND:-true}"
 # The pass budget, in seconds (0 = unpaced). Every arm that walks a set growing
 # with the queue is paced: past its deadline it starts no new anchor, and the
 # next pass resumes after the last one it finished (a cursor in the state dir).
@@ -111,8 +113,8 @@ ARM_FLOOR_SECS=$((10#$ARM_FLOOR_SECS))
 # REFINERY_RECONCILE_REVIEW_FORMULA=mol-review-quorum-signoff: reviews then run
 # as two provider lanes (codex + claude by default) plus a synthesizer that
 # makes the single signoff. Reverting is unsetting the env — no code change.
-# Lane config is constant across the pass; the per-review base is read from
-# each review bead's review_base by the lanes, so base_ref stays defaulted.
+# Lane config is constant across the pass; gate-ensure passes each review's own
+# values, its base among them, as vars on that review's sling.
 REVIEW_FORMULA="${REFINERY_RECONCILE_REVIEW_FORMULA:-mol-review}"
 GATE_REVIEW_FORMULA_ARGS=()
 if [ "$REVIEW_FORMULA" != "mol-review" ]; then
@@ -128,16 +130,12 @@ if [ "$REVIEW_FORMULA" != "mol-review" ]; then
   )
 fi
 
-# Graduation target = this rig's own origin/HEAD (one [order.env] serves every
-# rig, so a constant here would be per-rig drift).
-TARGET="${REFINERY_RECONCILE_TARGET:-}"
-if [ -z "$TARGET" ]; then
-  TARGET="$(git -C "$RIG_ROOT" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null)"
-  TARGET="${TARGET#origin/}"
-fi
-[ -n "$TARGET" ] || TARGET=main
-
 # Per-rig state (GC_PACK_STATE_DIR is city+pack scoped; this order runs per rig).
+# The key also names the pass lock below, so every version of this driver must
+# derive it the same way. A deploy can start a new driver while the one it
+# replaces is still running a pass, and the two passes stay apart only on one
+# lock file. bd-lib.sh's rig_state_key is not this key: it cuts a rig name past
+# 64 bytes and adds a checksum to any name it rewrites.
 RIG_KEY="$(printf '%s' "$RIG" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')"
 case "$RIG_KEY" in ''|.|..) RIG_KEY=rig ;; esac
 STATE_DIR="${REFINERY_RECONCILE_STATE_DIR:-${GC_PACK_STATE_DIR:-${TMPDIR:-/tmp}/gc}/refinery-reconcile}/$RIG_KEY"
@@ -170,60 +168,45 @@ mark_merge() { # <phase>
 # Two merge.sh writers against one rig's anchors is the failure this cadence
 # must never produce, and the controller's open-tracking gate does not prevent
 # it: the watchdog closes tracking beads at 2m, well inside the order's timeout,
-# and an un-gated tracking bead is a second dispatch. This flock depends on no
-# bead surviving. The arms inherit fd 9, so the lock is held for exactly as
-# long as a writer is live and the kernel releases it on any exit, SIGKILL
-# included.
-LOCK="$STATE_DIR/pass.lock"
-HOLDER="$STATE_DIR/pass.holder"
-# A holder older than this is not a slow pass: the driver is gone and an arm
-# still owns the fd. Merges have stopped, so it is reported, not skipped over.
+# and an un-gated tracking bead is a second dispatch. bd-lib.sh's pass lock
+# depends on no bead surviving. The driver holds it, and each arm runs through
+# pass_child, from a subshell that holds it until the arm exits, so the lock is
+# held for exactly as long as a writer is live. The arm itself runs without the
+# lock's descriptor: an arm's store read can bring up a Dolt server that outlives
+# the pass, and a server that kept the descriptor would hold the lock against
+# every later pass.
+# A holder older than this is not a slow pass, because the order's timeout stops
+# the pass's whole process group well before it: a driver run by hand, or an
+# arm still running after its driver was killed by itself, holds the lock.
+# Merges have stopped, so it is reported, not skipped over.
 LOCK_STALL_SECS="${REFINERY_RECONCILE_LOCK_STALL_SECS:-900}"
-lock_unguarded=""
-lock_held=0
-if ! command -v flock >/dev/null 2>&1; then
-  lock_unguarded="flock not found on PATH"
-elif ! ( : >> "$LOCK" ) 2>/dev/null; then
-  lock_unguarded="cannot create $LOCK"
-else
-  exec 9>>"$LOCK" || lock_unguarded="cannot open $LOCK"
-  if [ -z "$lock_unguarded" ] && flock -n 9; then
-    lock_held=1
-    printf '%s %s\n' "$$" "$(date -u +%s)" > "$HOLDER" 2>/dev/null || true
-  fi
-fi
-
-if [ -z "$lock_unguarded" ] && [ "$lock_held" = 0 ]; then
-  held_pid=""; held_since=""; elapsed=""
-  [ -r "$HOLDER" ] && read -r held_pid held_since < "$HOLDER"
-  case "$held_since" in
-    ''|*[!0-9]*) ;;
-    *) elapsed=$(( $(date -u +%s) - held_since )) ;;
-  esac
-  who="pid ${held_pid:-unknown}"
-  [ -n "$elapsed" ] && who="$who, ${elapsed}s elapsed"
-  if [ -n "$elapsed" ] && [ "$elapsed" -gt "$LOCK_STALL_SECS" ]; then
-    [ -n "$LOG_SINK" ] && printf -- '--- %s rig=%s STALLED: pass lock held %ss (%s)\n' \
-      "$TICK" "$RIG" "$elapsed" "$who" >> "$LOG_SINK"
-    echo "${PROG}[$RIG]: pass lock held ${elapsed}s (> ${LOCK_STALL_SECS}s) by $who — the cadence is wedged and nothing is landing"
+case "$LOCK_STALL_SECS" in ''|*[!0-9]*) LOCK_STALL_SECS=900 ;; esac
+LOCK_STALL_SECS=$((10#$LOCK_STALL_SECS))
+lock_rc=0
+take_pass_lock "$STATE_DIR" "$LOCK_STALL_SECS" || lock_rc=$?
+case "$lock_rc" in
+  0) ;;
+  1)
+    [ -n "$LOG_SINK" ] && printf -- '--- %s rig=%s SKIPPED: pass already in flight (%s)\n' \
+      "$TICK" "$RIG" "$LOCK_NOTE" >> "$LOG_SINK"
+    echo "${PROG}[$RIG]: a pass is already in flight ($LOCK_NOTE) — skipping this tick"
+    exit 0 ;;
+  2)
+    [ -n "$LOG_SINK" ] && printf -- '--- %s rig=%s STALLED: pass lock held past %ss (%s)\n' \
+      "$TICK" "$RIG" "$LOCK_STALL_SECS" "$LOCK_NOTE" >> "$LOG_SINK"
+    echo "${PROG}[$RIG]: pass lock held past ${LOCK_STALL_SECS}s ($LOCK_NOTE) — the cadence is wedged and nothing is landing"
     echo "${PROG}[$RIG]: pass log: $LOG"
-    exit 1
-  fi
-  [ -n "$LOG_SINK" ] && printf -- '--- %s rig=%s SKIPPED: pass already in flight (%s)\n' \
-    "$TICK" "$RIG" "$who" >> "$LOG_SINK"
-  echo "${PROG}[$RIG]: a pass is already in flight ($who) — skipping this tick"
-  exit 0
-fi
-# The lock is the whole of single-flight, so an unavailable one leaves nothing
-# serialising the arms. Running them anyway is the second merge.sh writer this
-# driver exists to prevent.
-if [ -n "$lock_unguarded" ]; then
-  [ -n "$LOG_SINK" ] && printf -- '--- %s rig=%s UNGUARDED: %s; no arm ran\n' \
-    "$TICK" "$RIG" "$lock_unguarded" >> "$LOG_SINK"
-  echo "${PROG}[$RIG]: single-flight UNGUARDED ($lock_unguarded) — refusing to run any arm without the pass lock"
-  echo "${PROG}[$RIG]: pass log: $LOG"
-  exit 1
-fi
+    exit 1 ;;
+  *)
+    # The lock is the whole of single-flight, so an unavailable one leaves nothing
+    # serialising the arms. Running them anyway is the second merge.sh writer this
+    # driver exists to prevent.
+    [ -n "$LOG_SINK" ] && printf -- '--- %s rig=%s UNGUARDED: %s; no arm ran\n' \
+      "$TICK" "$RIG" "$LOCK_NOTE" >> "$LOG_SINK"
+    echo "${PROG}[$RIG]: single-flight UNGUARDED ($LOCK_NOTE) — refusing to run any arm without the pass lock"
+    echo "${PROG}[$RIG]: pass log: $LOG"
+    exit 1 ;;
+esac
 
 # The controller keeps combined output only on a non-zero exit, so the log is
 # where a healthy pass is readable and the exit code is the alarm. The header
@@ -240,7 +223,7 @@ fi
 # records — so its rc is discarded.
 if [ -x "$SCRIPTS_DIR/merge-tail-report.sh" ]; then
   ( export BEADS_ACTOR="$AGENT"
-    "$SCRIPTS_DIR/merge-tail-report.sh" --marker "$MERGE_MARK" --rig "$RIG" ) \
+    pass_child "$SCRIPTS_DIR/merge-tail-report.sh" --marker "$MERGE_MARK" --rig "$RIG" ) \
     >> "${LOG_SINK:-/dev/null}" 2>&1 || true
 fi
 mark_merge started
@@ -251,13 +234,11 @@ mark_merge started
 # seconds of server wait. GC_RECONCILE_BD_CACHE points bd_list at a directory it
 # serves a repeat from; run_pass clears it before every arm so no arm reads
 # another's rows, and it is removed at END. A killed pass leaves it behind, so
-# setup is rm-then-create. Caching is enabled only when bd-lib sources here, so
-# run_pass can clear the dir between arms through bd_cache_clear; otherwise the
-# pass runs uncached (the cache is an optimization, never a correctness input).
+# setup is rm-then-create. A cache dir that cannot be made leaves the pass
+# uncached (the cache is an optimization, never a correctness input).
 CACHE_DIR="$STATE_DIR/cache"
 rm -rf "$CACHE_DIR" 2>/dev/null || true
-# shellcheck source=bd-lib.sh
-if . "${GC_BD_LIB:-$SCRIPTS_DIR/bd-lib.sh}" 2>/dev/null && mkdir -p "$CACHE_DIR" 2>/dev/null; then
+if mkdir -p "$CACHE_DIR" 2>/dev/null; then
   export GC_RECONCILE_BD_CACHE="$CACHE_DIR"
 fi
 
@@ -266,7 +247,8 @@ fi
 # posture arm that could not make every posture current must HOLD merge.sh in
 # the same pass. Keep it executable with only a prologue supplying SCRIPTS_DIR,
 # LOG_SINK, NOTED, FAILED, AGENT, STATE_DIR, PASS_T0, PASS_BUDGET_SECS,
-# ARM_FLOOR_SECS and the mark_merge helper (the merge-decision marker writer).
+# ARM_FLOOR_SECS, the mark_merge helper (the merge-decision marker writer) and
+# bd-lib.sh.
 note() { NOTED="${NOTED}$*"$'\n'; }
 log()  { [ -n "$LOG_SINK" ] && printf '%s\n' "$*" >> "$LOG_SINK"; return 0; }
 run_pass() { # <label> <script> [args...]
@@ -282,15 +264,15 @@ run_pass() { # <label> <script> [args...]
   t0=$(date -u +%s)
   log "-- $label (started $(date -u +%Y-%m-%dT%H:%M:%SZ))"
   # Clear the per-pass bd_list cache so this arm cannot read rows an earlier arm
-  # cached; a repeat within the arm still hits. Guarded by command -v because
-  # this block is extracted and run standalone by refinery-reconcile.test.sh,
-  # where bd-lib is not sourced and bd_cache_clear is undefined.
-  command -v bd_cache_clear >/dev/null 2>&1 && bd_cache_clear
+  # cached; a repeat within the arm still hits.
+  bd_cache_clear
+  # The arm runs without the pass lock's descriptor, and the subshell pass_child
+  # runs it from holds the lock until it exits (bd-lib.sh).
   local rc=0
   if [ -n "$LOG_SINK" ]; then
-    "$SCRIPTS_DIR/$script" "$@" >> "$LOG_SINK" 2>&1 || rc=$?
+    pass_child "$SCRIPTS_DIR/$script" "$@" >> "$LOG_SINK" 2>&1 || rc=$?
   else
-    "$SCRIPTS_DIR/$script" "$@" >/dev/null 2>&1 || rc=$?
+    pass_child "$SCRIPTS_DIR/$script" "$@" >/dev/null 2>&1 || rc=$?
   fi
   log "-- $label: done in $(( $(date -u +%s) - t0 ))s (rc=$rc)"
   return "$rc"
@@ -429,24 +411,12 @@ pace_args pr-facts
   run_pass "(7) pr-facts" pr-facts.sh --fix-pool "$FIX_POOL" "${PACE_ARGS[@]}" ) \
   || FAILED="${FAILED}pr-facts rc=$?; "
 
-# (8) convoy-graduate: GC_AGENT projected in a subshell (graduation assigns the
-# convoy to the refinery; the order env does not supply GC_AGENT). Its stamp in
-# the rig's state dir holds it to one complete pass per 15 minutes.
-if [ "$INTEGRATION_AUTO_LAND" = "false" ]; then
-  log "-- (8) convoy-graduate: DISABLED (integration_auto_land=false)"
-else
-  ( export GC_AGENT="$AGENT"
-    run_pass "(8) convoy-graduate" convoy-graduate.sh --target "$TARGET" \
-      --stamp "$STATE_DIR/convoy-graduate.stamp" ) \
-    || FAILED="${FAILED}convoy-graduate rc=$?; "
-fi
-
-# (9) review-sweep: close reviews whose anchor and branch are both gone. Late,
+# (8) review-sweep: close reviews whose anchor and branch are both gone. Late,
 # because it reads only closed anchors — nothing earlier in the pass can see
 # them, and the residue this pass's merges create drains on the same tick.
-run_pass "(9) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=$?; "
+run_pass "(8) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=$?; "
 
-# (10) scaffolding-sweep: retire the machine review scaffolding
+# (9) scaffolding-sweep: retire the machine review scaffolding
 # (validation/finding/rework) hung on an anchor once that anchor is DISPOSED, so
 # the disposed anchor can finalize instead of standing stuck behind scaffolding
 # that will never resolve. Late, beside review-sweep, because it keys on a
@@ -457,20 +427,20 @@ run_pass "(9) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=
 # visit is still owed. BEADS_ACTOR projected — the close of a carried-forward
 # finding is delegated to bead-rehome and attributed in the events table.
 ( export BEADS_ACTOR="$AGENT"
-  run_pass "(10) scaffolding-sweep" scaffolding-sweep.sh ) \
+  run_pass "(9) scaffolding-sweep" scaffolding-sweep.sh ) \
   || FAILED="${FAILED}scaffolding-sweep rc=$?; "
 
-# (11) duplicate-sweep: dispose of verified no-op duplicate dispatches and of
+# (10) duplicate-sweep: dispose of verified no-op duplicate dispatches and of
 # never-dispatched rework twins whose same-review sibling landed. Late, and
 # after review-sweep, because the gate it re-verifies is a CLOSED successor: a
 # twin that arm 2 merged or arm 7 recorded this pass is disposable on this tick
 # rather than a minute later. BEADS_ACTOR projected — the close it delegates to
 # bead-rehome is attributed in the events table.
 ( export BEADS_ACTOR="$AGENT"
-  run_pass "(11) duplicate-sweep" duplicate-sweep.sh ) \
+  run_pass "(10) duplicate-sweep" duplicate-sweep.sh ) \
   || FAILED="${FAILED}duplicate-sweep rc=$?; "
 
-# (12) pr-stack: bring each open PR's body current with its anchor in both managed
+# (11) pr-stack: bring each open PR's body current with its anchor in both managed
 # regions — re-render the beads-on-this-branch section, and refresh the pr-summary
 # region when a rework moved the anchor summary past the published one (pr-open
 # composes that region only at pre_open_gate, which an open anchor never re-enters).
@@ -479,7 +449,7 @@ run_pass "(9) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=
 # later. It writes only PR bodies — no bead, no merge authority — so it runs
 # unprojected and its failure gates nothing.
 pace_args pr-stack
-run_pass "(12) pr-stack" pr-stack.sh "${PACE_ARGS[@]}" || FAILED="${FAILED}pr-stack rc=$?; "
+run_pass "(11) pr-stack" pr-stack.sh "${PACE_ARGS[@]}" || FAILED="${FAILED}pr-stack rc=$?; "
 
 # The per-pass bd_list cache is this pass's; drop it so no later pass can read
 # these rows. A killed pass never reaches here and the next pass's rm-then-create

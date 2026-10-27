@@ -7,7 +7,7 @@
 # field rationale is documented on converse-opus.
 scope = "rig"
 provider = "codex"
-option_defaults = { model = "gpt-5.3-codex" }
+option_defaults = { model = "gpt-6.1-sol" }
 prompt_template = "agents/_converse/prompt.template.md"
 work_dir = ".gc/worktrees/{{.Rig}}/converse-codex/{{.AgentBase}}"
 # Codex reads no .claude overlay, so the gh origin guard is registered in the
@@ -15,9 +15,8 @@ work_dir = ".gc/worktrees/{{.Rig}}/converse-codex/{{.AgentBase}}"
 pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync", "{{.ConfigDir}}/assets/scripts/gh-origin-guard-codex.sh"]
 wake_mode = "resume"
 attach = true
+session_live = ['tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} set-option -t "={{.Session}}:" detach-on-destroy on']
 nudge = ""
 idle_timeout = "0"
 min_active_sessions = 0
 max_active_sessions = 8
-max_session_age = "5h"
-max_session_age_jitter = "15m"

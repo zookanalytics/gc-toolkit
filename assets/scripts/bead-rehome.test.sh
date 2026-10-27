@@ -65,7 +65,11 @@
 #       ends the branch with its tip pinned, and a delete origin refuses leaves
 #       the close standing;
 #   (ak) the command a WARN names, pasted, hands branch-end a branch name that
-#       carries shell metacharacters as one argument and runs nothing it spells.
+#       carries shell metacharacters as one argument and runs nothing it spells;
+#   (al) the stamp, and a visit outcome's repair, are conditional on the status
+#       and assignee the gates read, so a claim that lands between that read
+#       and the stamp refuses it (exit 4): nothing is stamped or closed and the
+#       claim stands, and a reopen does the same on the repair path.
 # The evidence gates this writer enforces for every caller:
 #   (gate-a) EVERY kind — no close over a review, step, or workflow bead;
 #   (gate-held) EVERY kind — no close over a bead another session holds
@@ -238,6 +242,37 @@ case "$sub" in
     # writing nothing: the store or gate that rejects the key.
     if [ -n "${FAKE_BD_REFUSE_WORK_OUTCOME:-}" ]; then
       case " $* " in *" gc.work_outcome="*) echo "refused: gc.work_outcome" >&2; exit 1 ;; esac
+    fi
+    # FAKE_UPDATE_LOG, when set, gets each update's bead id and arguments.
+    [ -z "${FAKE_UPDATE_LOG:-}" ] || printf '%s %s\n' "$id" "$*" >> "$FAKE_UPDATE_LOG"
+    # FAKE_BD_CLAIM_BEFORE_STAMP="<status> <assignee>" lands another actor's
+    # write on the bead just before the first update that stamps its
+    # gc.superseded_by is answered: a claim, an assignment or a status change
+    # made after the caller read the bead.
+    if [ -n "${FAKE_BD_CLAIM_BEFORE_STAMP:-}" ] && [ ! -e "$DB/.claimed-before-stamp.$id" ]; then
+      case " $* " in
+        *" gc.superseded_by="*)
+          : > "$DB/.claimed-before-stamp.$id"
+          printf 'status=%s\nassignee=%s\n' "${FAKE_BD_CLAIM_BEFORE_STAMP%% *}" "${FAKE_BD_CLAIM_BEFORE_STAMP#* }" >> "$f" ;;
+      esac
+    fi
+    # bd's --if-status and --if-assignee guards: the update lands only while the
+    # bead still has that status and that assignee ("" is unassigned), checked in
+    # the same write; a stale guard writes nothing and exits 13.
+    if_st="-"; if_as="-"; prev=""
+    for a in "$@"; do
+      case "$a" in
+        --if-status=*) if_st="${a#--if-status=}" ;;
+        --if-assignee=*) if_as="${a#--if-assignee=}" ;;
+      esac
+      case "$prev" in --if-status) if_st="$a" ;; --if-assignee) if_as="$a" ;; esac
+      prev="$a"
+    done
+    cur_st="$(sed -n 's/^status=//p' "$f" | tail -1)"
+    cur_as="$(sed -n 's/^assignee=//p' "$f" | tail -1)"
+    if { [ "$if_st" != "-" ] && [ "$if_st" != "$cur_st" ]; } || { [ "$if_as" != "-" ] && [ "$if_as" != "$cur_as" ]; }; then
+      echo "Error: precondition failed for $id: status/assignee changed" >&2
+      exit 13
     fi
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -707,11 +742,14 @@ eq "$(field alpha m.gc.work_outcome al-visit9)" abandoned "…which still reads 
 mkbead alpha open al-visit4
 printf 'm.task_kind=visit\n' >> "$TMP/rigs/alpha/.beads/al-visit4"
 mkbead beta open bt-vsucc4
-rc=0; FAKE_BD_DROP_OUTCOME=1 run --origin al-visit4 --successor bt-vsucc4 --kind folded || rc=$?
+: > "$TMP/updates.log"
+rc=0; FAKE_UPDATE_LOG="$TMP/updates.log" FAKE_BD_DROP_OUTCOME=1 run --origin al-visit4 --successor bt-vsucc4 --kind folded || rc=$?
 eq "$rc" 4 "a visit outcome that does not read back refuses the close"
 eq "$(field alpha status al-visit4)" open "the visit stays OPEN when the outcome did not stick"
 has "$(cat "$TMP/err")" "outcome did NOT stick" "the refusal names the missing outcome"
 eq "$(field alpha m.gc.superseded_by al-visit4)" bt-vsucc4 "the pointer is still recorded, so the bead is findable"
+eq "$(grep -c -F -e 'al-visit4 --if-status=open --if-assignee= --set-metadata gc.outcome=folded' "$TMP/updates.log")" 1 \
+   "the outcome's repair carries the stamp's condition"
 
 # --- (w) a dropped gc.outcome_reason refuses the close too -----------------
 # gc.outcome_reason is the sitting's board headline, so the read-back gate must
@@ -739,8 +777,9 @@ eq "$rc" 7 "unlanded work (merge_result set) refuses an evidence-kind close"
 eq "$(field alpha status al-unlanded)" open "the origin is left open"
 eq "$(field alpha m.gc.superseded_by al-unlanded)" "" "and nothing is stamped"
 has "$(cat "$TMP/err")" "no work" "the refusal names the no-work requirement"
-# A judgment kind is a person's call: the converse retire path disposes an
-# in-flight anchor through this writer on the operator's ruling.
+# A judgment kind carries the caller's judgment, which the writer does not
+# re-judge: the converse retire path disposes an in-flight anchor through it on
+# the operator's ruling.
 mkbead alpha open al-retire
 mkbead beta  open bt-rtsucc
 printf 'm.merge_result=pull_request\n' >> "$TMP/rigs/alpha/.beads/al-retire"
@@ -1029,6 +1068,46 @@ PASTE=$(sed -n 's/.*(branch-end exit 4); end it with: //p' "$TMP/err" | tail -1)
 has "$(cat "$BE_LOG")" '--branch polecat/al-br10;$(touch pwned) --bead al-br10 ' \
     "the WARN's command, pasted, hands branch-end the branch as one argument"
 if [ -e "$TMP/pwned" ]; then bad "…and runs nothing the branch name spells"; else ok "…and runs nothing the branch name spells"; fi
+
+# --- (al) the stamp lands only on the bead the gates judged -----------------
+# bd holds a claimed bead against another actor's assignment and close, never
+# against a metadata write, so the stamp itself carries the status and assignee
+# the gates read.
+mkbead alpha open al-judged
+mkbead beta  open bt-judged
+: > "$TMP/updates.log"
+rc=0; FAKE_UPDATE_LOG="$TMP/updates.log" run --origin al-judged --successor bt-judged --kind re-homed || rc=$?
+eq "$rc" 0 "a bead nobody took since the gates read it is disposed"
+has "$(grep -F 'gc.superseded_by=' "$TMP/updates.log")" "al-judged --if-status=open --if-assignee= --set-metadata gc.superseded_by=bt-judged" \
+   "the stamp is conditional on the status and assignee the gates read"
+mkbead alpha in_progress al-judged-mine
+printf 'assignee=%s\n' "$BEADS_ACTOR" >> "$TMP/rigs/alpha/.beads/al-judged-mine"
+mkbead beta  open bt-judged-mine
+: > "$TMP/updates.log"
+rc=0; FAKE_UPDATE_LOG="$TMP/updates.log" run --origin al-judged-mine --successor bt-judged-mine --kind re-homed || rc=$?
+eq "$rc" 0 "a bead this session holds is disposed under its claim"
+has "$(grep -F 'gc.superseded_by=' "$TMP/updates.log")" "--if-status=in_progress --if-assignee=$BEADS_ACTOR --set-metadata gc.superseded_by=bt-judged-mine" \
+   "…with the stamp conditional on that claim"
+# Another actor claims the bead after the gates read it and before the stamp.
+mkbead alpha open al-taken
+mkbead beta  open bt-taken
+: > "$FG_LOG"
+rc=0; FAKE_BD_CLAIM_BEFORE_STAMP="in_progress deferred-dispatch" run --origin al-taken --successor bt-taken --kind re-homed || rc=$?
+eq "$rc" 4 "a claim that lands between the gates and the stamp refuses the stamp (exit 4)"
+eq "$(field alpha m.gc.superseded_by al-taken)" "" "…nothing is stamped under that claim"
+eq "$(field alpha status al-taken)/$(field alpha assignee al-taken)" "in_progress/deferred-dispatch" "…the claim stands"
+eq "$(field alpha reason al-taken)" "" "…nothing is closed"
+eq "$(cat "$FG_LOG")" "" "…the close is never attempted"
+eq "$(field beta m.gc.supersedes bt-taken)" "" "…and the successor gains no back-pointer"
+has "$(cat "$TMP/err")" "al-taken is no longer open and unassigned" "the refusal names the state the gates judged"
+has "$(cat "$TMP/err")" "nothing is stamped" "…and says nothing was written"
+# The repair path reads a closed bead; a reopen before its stamp refuses it too.
+mkbead alpha closed al-reopened
+mkbead beta  open bt-reopened
+rc=0; FAKE_BD_CLAIM_BEFORE_STAMP="open " run --origin al-reopened --successor bt-reopened --kind re-homed || rc=$?
+eq "$rc" 4 "a reopen between the repair path's read and its stamp refuses the stamp"
+eq "$(field alpha m.gc.superseded_by al-reopened)" "" "…so the reopened bead carries no pointer"
+eq "$(field alpha status al-reopened)" "open" "…and stays open"
 
 echo "---"
 echo "bead-rehome.test: $PASS passed, $FAIL failed"

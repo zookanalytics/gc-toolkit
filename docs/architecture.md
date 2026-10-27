@@ -1,6 +1,6 @@
 ---
 name: Architecture — how gc-toolkit composes Gas City to deliver its beliefs
-description: The 30,000-ft guide to gc-toolkit — the boundary between operator, runtime, pack, and GitHub; how a piece of work moves from filed to landed; how humans engage; how lessons compound; and the consistency test a new capability must pass to belong. Read it to know what the system is, to place a new capability, or to check an existing one.
+description: The 30,000-ft guide to gc-toolkit — the boundary between operator, runtime, pack, and GitHub; how a piece of work moves from filed to landed; what a review reads from the installed pack and what from the rig under review; how humans engage; how lessons compound; and the consistency test a new capability must pass to belong. Read it to know what the system is, to place a new capability, or to check an existing one.
 ---
 
 # Architecture
@@ -14,8 +14,9 @@ shared primitive; nothing exists because an incident once happened.
 ## Scope
 
 **Mandate.** How gc-toolkit composes Gas City's primitives to deliver
-foundation: the system boundary, how work moves end to end, how humans engage,
-how lessons compound, and the test that keeps new work grounded.
+foundation: the system boundary, how work moves end to end, what the installed
+pack supplies and what a rig supplies, how humans engage, how lessons compound,
+and the test that keeps new work grounded.
 
 **Boundaries.** It works at altitude. The anchor lifecycle's states, writers,
 and check mechanics are owned by [state-machine.md](state-machine.md); the merge
@@ -23,12 +24,14 @@ cadence's runtime semantics by
 [refinery-merge-cadence.md](refinery-merge-cadence.md); the primitive list and
 the invariant→check binding by [component-model.md](component-model.md); the
 filing conventions by [file-structure.md](file-structure.md); how work is
-structured into epics and when an epic closes by [epics.md](epics.md).
+structured into epics and when an epic closes by [epics.md](epics.md); how a
+pack skill is named and surfaced by [skills.md](skills.md); how pack text
+reaches the pack's scripts by [pack-authoring.md](pack-authoring.md).
 
 ## The boundary
 
-Four parties, one data plane. Every durable fact is a bead; the pack owns no
-storage of its own.
+Four parties, one data plane. Lifecycle transitions, routes, waits and review
+verdicts are all written on beads.
 
 ```mermaid
 flowchart LR
@@ -58,7 +61,7 @@ flowchart LR
   FORM -->|push| BR
   FORM -->|via lifecycle.sh| LIFE
   LIFE -->|one atomic bd update| LEDGER
-  SIGN -->|check markers| LEDGER
+  SIGN -->|verdicts on review beads| LEDGER
   ORD -->|every 60s| CAD
   CAD -->|reads + writes via lifecycle.sh| LEDGER
   CAD -->|opens / merges| PR
@@ -72,6 +75,32 @@ flowchart LR
 paths matter: `lifecycle.sh` is the only writer of lifecycle transitions,
 `signoff.sh` is the only writer of check verdicts, and the merge cadence is the
 only thing that opens or merges a PR. Everything else reads.
+
+**Beside the ledger.** The pack also keeps files of its own. Some hold a run's
+progress, such as a paced cadence arm's cursor or the job directory of the
+refinery's merge gate. `gctk rig`'s check records differ, because a later call
+takes a record's result in place of running the check. A record holds the
+result of one of a rig's checks, such as its tests or its lint, at one commit.
+[`services/gctk/README.md`](../services/gctk/README.md#rig) states which checks
+are recorded and where the records live.
+
+- **Writer.** Only `gctk rig` writes a record, from a run it made itself, in a
+  checkout holding nothing HEAD does not.
+- **Authority.** A record answers a later `gctk rig` call that declares the
+  same run: the same command line and, for a test run, the same scope. That
+  call takes the recorded result without running the check, unless it forces a
+  run. A full-suite test pass also answers for every commit with the same tree.
+- **Lifetime.** Every worktree of a rig clone shares the records, and they
+  outlive any one worktree. A re-clone loses them, and the loss costs one run
+  of each check.
+- **What a record is not.** A record is evidence about a commit. It is neither
+  workflow state nor a review's verdict, and both of those stay on beads,
+  written by their own writers. Nor is it a judgment of whose failure a fail
+  is: a caller that finds a recorded fail red on the base too writes that on a
+  bead as `rig_check_pre_existing.<check>`, holding the record it judged, so a
+  run that replaces that record needs a judgment of its own.
+  `--publish-bead` copies a record onto a bead's `rig_check.<check>` key for
+  whoever reads that bead. The record, not the copy, answers `gctk rig`.
 
 ## How work moves
 
@@ -87,7 +116,9 @@ performer; the full transition table with writers is
    emergency, or the operator's own move. Other new work waits for the
    operator's placement sitting first ([steering.md](steering.md)).
 3. **Claim.** A polecat claims via `gc hook --claim`; the runtime writes
-   assignee and claim in one step.
+   assignee and claim in one step. It takes the ready bead with the most urgent
+   priority first, and the pack computes that priority from what the bead
+   follows ([steering.md](steering.md#priority)).
 4. **Implement.** The polecat works in a per-bead worktree on a
    `polecat/<bead>` branch, driven by `mol-polecat-work`.
 5. **Hand off.** Push, verify the push landed, then one atomic `gc bd update`
@@ -98,40 +129,124 @@ performer; the full transition table with writers is
    unanchored here; its first lifecycle transition is the refinery's.
 6. **Gate.** The merge cadence's gate-ensure arm makes every declared check
    raisable; a review bead is routed to the polecat-codex pool; the reviewer's
-   single call to `signoff.sh` writes the verdict marker or files one rework
-   child.
-7. **PR.** With every declared check green at the live head, `pr-open.sh` opens
-   (or adopts) the pull request.
+   single call to `signoff.sh` records the verdict on the review bead and, on
+   request-changes, files one rework child.
+7. **PR.** With every `pre-open` check deriving green from its reviews,
+   `pr-open.sh` opens (or adopts) the pull request.
 8. **Merge.** `merge.sh` validates the full authorization set, merges pinned to
    the validated commit, then closes the anchor and records `merged_sha` in one
    `lifecycle.sh` call.
 9. **Close propagates.** `closed` means *landed and verified* — the one signal
    waiting parties key on ([lifecycle-composition.md](lifecycle-composition.md)).
 
+An integration effort's beads take this pipeline through the handoff, and then
+the refinery lands each one directly on the effort's integration branch, which
+the bead carries as its own `target`, with no PR of its own. A bead the operator
+asks to review on its own is a stage, with a PR into the branch. One landing
+bead carries the branch to main through the effort's one PR. It is assigned to
+the refinery when the effort is stood up, and waits there by `blocks` edges on
+the effort's beads and on its summary task, which writes the PR's summary from
+the finished branch. Once they have closed, it takes steps 6 to 9 like any bead
+bound for main.
+
 External facts the pack does not write — GitHub closing or retargeting a PR, a
-session dying, a pool slot the runtime does not free, a provider quota park —
-are handled by six reactive paths: `pr-facts.sh` (an arm of the cadence)
-records PR events and files a visit, the witness patrol recovers work orphaned
-by dead sessions, the `dog` pool is warrant executor for due-process recovery
-of wedged sessions (demand-scaled 0-2), `pool-slot-reap.sh` closes a pool
-session bead the runtime left holding its slot with no runtime and no work,
-`quota-park-nudge.sh` nudges a session parked behind a provider limit, and
-`boot-health.sh` detects a wedged deacon (report-only by design). See
+session dying, a provider quota park — are handled by these reactive paths:
+`pr-facts.sh` (an arm of the cadence) records PR events and files a visit, the
+witness patrol recovers work orphaned by dead sessions, the `dog` pool is
+warrant executor for due-process recovery of wedged sessions (demand-scaled
+0-2), `quota-park-nudge.sh` nudges a session parked behind a provider limit,
+`boot-health.sh` detects a wedged deacon (report-only by design), and
+`queue-priority.sh reconcile` settles queued work after a raw priority or parent
+edit no writer saw. See
 [authority-map.md](authority-map.md). There is no healer category: writers
 complete their own transitions, so nothing reconstructs pack-written state
 after the fact.
 
+## What the pack supplies and what a rig supplies
+
+The city installs the pack once, and every rig runs the same copy. Each rig
+imports the gc-toolkit checkout `rigs/gc-toolkit`, the installed pack. What runs
+is that checkout's working tree, which the `reconcile-rig-checkouts` order keeps
+fast-forwarded to `main`
+([pack-authoring.md](pack-authoring.md#a-landed-pack-change-is-confirmed-on-the-deployed-checkout)).
+The pack supplies how work is done, such as its formulas, scripts, skills and
+agent prompts. A rig supplies the repository the work changes, along with any
+review guidance the rig keeps in it.
+
+A review is where the two meet. It reads its values from the record its dispatch
+wrote, and every other piece either from the installed pack, as that checkout
+stands when the piece is read, or from the rig at the reviewed commit. The
+reviewed commit is the branch's head when the review was dispatched, and nothing
+moves it afterwards.
+
+| What the reviewer uses | Where it comes from | Which version |
+|---|---|---|
+| The review's steps, `mol-review` or `mol-review-quorum-signoff` | The pack's formula. Each rig's `.beads/formulas` entry for it is a link Gas City makes into the installed pack. | The installed pack when the review is poured. A poured review keeps its step text. |
+| The review's values: its check, anchor, branch, base, reviewed commit and PR, and why it went out | The record `assets/scripts/gate-ensure.sh` writes on the review bead and passes to the pour as formula vars | Fixed at dispatch |
+| The check's method, the skill `gc-toolkit.review-<check>` | The reviewer's skill catalog, which links each pack skill into the installed pack. The formula names the skill under `binding_prefix`, the var `gc sling` adds to every pour. | The installed pack when the reviewer loads it |
+| The specialist stance, the skill `gc-toolkit.specialist-stance`, held by arch, demo, pm and a check of the rig's own | The reviewer's skill catalog | The installed pack when the reviewer loads it |
+| The pack's scripts, and the pack's check index | The installed pack's script directory. A skill reaches it through `gc <binding> scripts-dir`, and a formula step through a loop over candidate directories. `assets/scripts/review-checks.sh` reads the `review-checks.toml` at the root of the pack it ships in. | The installed pack when the script runs |
+| The rig's check index rows | The rig's `review-checks.toml`, laid over the pack's rows | The reviewed commit |
+| The rig's guidance for the check | The rig's `docs/review-<check>.md`, which the formula prints | The reviewed commit |
+| The diff, and the docs a check stewards, such as `docs/architecture.md` for arch and `docs/product-goals.md` for pm | The review's worktree ([review-workspace.md](review-workspace.md)) | The reviewed commit |
+
+The header of [`review-checks.toml`](../review-checks.toml) states how the
+pack's check index and a rig's are layered. `review-checks.sh` resolves both
+for every reader of the index, not only the review, and every reader takes the
+rig's rows at the commit it judges. [skills.md](skills.md) states how a pack
+skill is named and surfaced, and `gc skill list` prints the file each catalog
+entry points at. The method-load paragraph of `formulas/mol-review.toml` states
+which skill a review loads, and what the reviewer does when its catalog has
+none.
+
+- **A rig supplies no skill to a review.** The review names the method and the
+  stance under the pack's binding, and the catalog answers both from the
+  installed pack. Skills a rig's repository carries for its own agents can
+  appear in a reviewer's skill list, and no review step names one. A check that
+  a rig's index declares, and that the pack ships no skill for, is judged
+  against the purpose its row states, with the specialist stance held. A check
+  no index declares is approved with `--needs-you`, so the operator decides
+  whether it stays in the anchor's `check_set`.
+- **A rig's guidance is read at the reviewed commit, not from the rig's
+  default branch,** so a branch is judged against the guidance it carries. A
+  guidance fix merged on the default branch reaches an open PR when that PR
+  next merges its base.
+- **When gc-toolkit reviews itself, the pack and the rig are the same files at
+  two commits.** A branch that edits a check's method, the specialist stance, a
+  review formula or a script the review calls is reviewed under the installed
+  copy, not its own. A branch that edits `review-checks.toml` or a
+  `docs/review-<check>.md` is reviewed under its own edit, because that
+  guidance is read at the reviewed commit. The index's rows at that commit are
+  laid over the installed copy's. In any rig, `signoff.sh` refuses a
+  correctness approve on a change that edits its own review guidance until
+  `--needs-you` names the edit to the person who approves the merge.
+- **Only a skill's catalog name reaches its installed copy.** A path such as
+  `skills/<name>/SKILL.md` resolves against whatever tree the agent stands in:
+  another rig's checkout, or in gc-toolkit a reviewer's home worktree or the
+  branch under review. None of them is the installed pack. So pack text names
+  a skill it tells an agent to load as `gc-toolkit.<name>`, and a path in its
+  place is a defect.
+- **Known limit: a formula step finds the pack's scripts only because
+  gc-toolkit is a rig of this city.** Its loop takes the first directory it
+  tries that holds the script. In gc-toolkit's own rig that is `$GC_RIG_ROOT`,
+  and in every other rig it is `$GC_CITY_PATH/rigs/gc-toolkit`. A city that
+  imports the pack from a URL rather than as a rig checkout has neither, so its
+  formula steps find no script. A skill has no such limit, because
+  `gc <binding> scripts-dir` prints the script directory of whichever pack gc
+  loaded
+  ([pack-authoring.md](pack-authoring.md#step-text-and-skills-reach-pack-scripts-at-runtime)).
+
 ## How humans engage
 
 The human surface is subject / visit / takeaway on native primitives
-([gascity-human-engagement.md](gascity-human-engagement.md) is the reference).
+([human-engagement.md](human-engagement.md) is the reference).
 
 - **A subject bead is the conversation.** Its id is the conversation's
   identity; turns are small child beads that park on the helm board
-  (`gc.routed_to=human`) until the operator engages one. Warm, the next turn
-  vacuums onto the live sitting through the continuation group; cold,
-  `gc-helm engage` spawns a fresh `converse-<model>` sitting that reconstitutes
-  from the record. The record is the durable thing; sessions are disposable.
+  (`gc.routed_to=human`) until the operator engages one. `gc-helm engage`
+  spawns a fresh `converse-<model>` sitting for each turn, which
+  reconstitutes the conversation from the record and ends its session when
+  its visit closes. The record is the durable thing; sessions are disposable.
 - **A visit is a filed turn** — `mol-visit` and `gc-visit-open.sh` are the
   canonical entry point. Two channels carry a signal, and which applies
   depends on who can answer it. Mail is the agent-to-agent pathway: a worker
@@ -149,10 +264,17 @@ The human surface is subject / visit / takeaway on native primitives
   it. bd's cascade keeps the routed work under the bead out of every pool's
   offer, work already in flight finishes, and closing the gate releases the
   park. [steering.md](steering.md) says what a park holds and what it does not.
+- **A priority decides the order work runs in.** A bead's priority is the
+  priority of the bead it follows plus its own shift, so work under an epic
+  queues at the epic's priority. A PR's finishing work, which never has a
+  parent, runs one level sooner than its anchor, and at P0 once the PR is
+  approved. `gc-helm.sh priority` sets an epic's priority, or a member's shift,
+  and re-ranks the work that follows it, workflows already poured included
+  ([steering.md](steering.md#priority)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
   per render from the ledger. `gc-helm.sh` carries the write verbs open,
-  engage, react, takeaway, demand, dismiss, accept and park, and the read-only
-  verbs resolve and unplaced. `gc-helm.sh unplaced` lists the placement
+  engage, react, takeaway, demand, dismiss, accept, park and priority, and the
+  read-only verbs resolve and unplaced. `gc-helm.sh unplaced` lists the placement
   sitting's queue ([steering.md](steering.md)). Everything works without the
   board: it spends no state, so it can never be wrong for longer than one
   render.
@@ -168,7 +290,8 @@ corrective feedback into standing behavior, so attention is never spent twice:
 
 1. **Capture.** Working agents self-report observation beads when a turn
    brings corrective feedback; the `feedback-miner` order sweeps merged PRs'
-   review comments for what self-report missed; "learn this: …" is the
+   review comments, recording every review post from outside the city and
+   what self-report missed in the city's own; "learn this: …" is the
    operator fast path.
 2. **Distill.** The `feedback-distiller` order clusters observations into
    patterns and promotes recurring ones as ordinary PRs against the pack —
@@ -197,6 +320,12 @@ existing component sits. Concretely
   writer, or it does not exist.
 - **Adding a metadata key** — it is state; register it in `lifecycle.toml`.
 - **Adding an invariant** — name its doctor check in the same PR.
+
+Before any of these, a capability that adds operational surface shows that Gas
+City does not already ship it. It names the Gas City primitive it looked for
+and why none covers the need, citing Gas City's own documentation, and a pack
+noun has its warrant in [warrants.md](warrants.md). The arch check's divergence
+lens holds a change to this ([review-arch.md](review-arch.md)).
 
 If a capability fits none of the workflows, that is the signal, and it points
 one of two ways: the capability is miscast and should be recast onto the

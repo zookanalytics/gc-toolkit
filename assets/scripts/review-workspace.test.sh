@@ -9,7 +9,8 @@
 # workspace name that is a symlink; remove taking every worktree inside a
 # workspace, a nested one included, with its registration, and a read-only
 # subtree, while another worktree's stale registration is left for
-# worktree-reap; the formulas' own add and remove lines, run verbatim; and
+# worktree-reap; the formulas' own gather and remove lines, run as a pour fills
+# them in; and
 # reap's gates — the workspace of a closed review goes, its bead looked up in
 # the store its prefix names; a review that is not closed and a status that
 # cannot be read hold at any age; a bead the ledger no longer has, a name with no
@@ -173,26 +174,41 @@ has "$OUT" "no workspace" "and says there was none"
 extract() { # <toml> <marker>
     awk -v m="$2" '$0 ~ ("# >>> " m "$") {f=1; next} $0 ~ ("# <<< " m "$") {f=0} f' "$1"
 }
-ADD="$(extract "$ROOT/formulas/mol-review.toml" review-workspace-add)"
+# render <text> <review bead> <oid>: the lines as a pour fills them in from the
+# values a review is told, for a pre-open review of polecat/x onto main.
+render() {
+    printf '%s\n' "$1" | sed -e "s|{{review_bead}}|$2|g" -e "s|{{reviewed_oid}}|$3|g" \
+        -e 's|{{review_base}}|main|g' -e 's|{{review_branch}}|polecat/x|g' -e 's|{{anchor_bead}}|tk-anc|g' \
+        -e 's|{{check}}|correctness|g' -e 's|{{review_pr_url}}||g'
+}
+GATHER="$(extract "$ROOT/formulas/mol-review.toml" review-gather)"
 REMOVE="$(extract "$ROOT/formulas/mol-review.toml" review-workspace-remove)"
 QREMOVE="$(extract "$ROOT/formulas/mol-review-quorum-signoff.toml" quorum-review-workspace-remove)"
-for v in ADD REMOVE QREMOVE; do
+for v in GATHER REMOVE QREMOVE; do
     if [ -n "${!v}" ]; then ok "the formula's $v lines extract"; else bad "the formula's $v lines extract (markers missing)"; fi
 done
-PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"; cp "$SUT" "$PACK/assets/scripts/"
+# The pack holds the scripts the gather calls and the libs they source.
+PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"
+cp "$SUT" "$HERE/review-checks.sh" "$HERE/review-evidence.sh" "$HERE/bd-lib.sh" "$HERE/rig-check-lib.sh" "$PACK/assets/scripts/"
+# The gather fetches the base and the branch from origin before it makes the
+# worktree, and reads the anchor.
+ORIGIN="$TMP/origin.git"; git init -q --bare "$ORIGIN"
+g push -q "$ORIGIN" "$C2:refs/heads/main" "$C1:refs/heads/polecat/x"
+g remote add origin "$ORIGIN"
+status tk-anc open
 cd "$REPO" || exit 1
-# The add lines refuse to run without a rig root, so each run names this
+# The gather refuses to run without a rig root, so each run names this
 # repository as the rig.
 for n in 1 2; do
-    GOT="$(GC_PACK_DIR="$PACK" GC_RIG_ROOT="$REPO" REVIEW_BEAD=tk-fx REVIEWED_OID="$C1" bash -c "$ADD
-pwd -P" 2>/dev/null)"
-    eq "$GOT" "$WS/gc-review-tk-fx/wt" "block $n running the formula's add lines stands in the review's worktree"
+    GOT="$(GC_PACK_DIR="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$GATHER" tk-fx "$C1")
+pwd -P" 2>/dev/null | tail -1)"
+    eq "$GOT" "$WS/gc-review-tk-fx/wt" "block $n running the formula's gather stands in the review's worktree"
 done
 eq "$(git -C "$WS/gc-review-tk-fx/wt" rev-parse HEAD)" "$C1" "at the reviewed commit"
-GC_PACK_DIR="$PACK" REVIEW_BEAD=tk-fx SC="$PACK/assets/scripts/step-close.sh" bash -c "$REMOVE" >/dev/null 2>&1
+SC="$PACK/assets/scripts/step-close.sh" bash -c "$(render "$REMOVE" tk-fx "$C1")" >/dev/null 2>&1
 if exists "$WS/gc-review-tk-fx"; then bad "the verdict step's remove line takes the workspace"; else ok "the verdict step's remove line takes the workspace"; fi
-GC_PACK_DIR="$PACK" GC_RIG_ROOT="$REPO" REVIEW_BEAD=tk-fq REVIEWED_OID="$C1" bash -c "$ADD" >/dev/null 2>&1
-REVIEW_BEAD=tk-fq SC="$PACK/assets/scripts/step-close.sh" bash -c "$QREMOVE" >/dev/null 2>&1
+GC_PACK_DIR="$PACK" GC_RIG_ROOT="$REPO" bash -c "$(render "$GATHER" tk-fq "$C1")" >/dev/null 2>&1
+SC="$PACK/assets/scripts/step-close.sh" bash -c "$(render "$QREMOVE" tk-fq "$C1")" >/dev/null 2>&1
 if exists "$WS/gc-review-tk-fq"; then bad "the quorum's remove line takes the workspace"; else ok "the quorum's remove line takes the workspace"; fi
 
 # --- reap ----------------------------------------------------------------------

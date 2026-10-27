@@ -3,7 +3,7 @@
 # assets/scripts/merge.sh and the `gctk merge` it execs.
 # Covers: the happy path (pinned read, --squash --match-head-commit, ONE
 # lifecycle transition closing with merged_sha); every validate hold in order
-# (merge_hold, duplicate anchor + escalate, retarget, non-green check, unclosed
+# (merge_hold, duplicate anchor + escalate, retarget, an unread head, non-green check, unclosed
 # child via metadata AND dep edge, tracking_only opt-out, the universal approval
 # rule + veto and the lift line a bring-current ruling draws on it, which the
 # visit order and the terminal re-read read too, CLEAN/UNSTABLE handling,
@@ -52,6 +52,12 @@ if [ -z "$GCTK_BUILT" ]; then
     echo "passed: $PASS  failed: $FAIL"
     exit 1
 fi
+# No check index and no repository: the script under test runs from a private
+# directory, so the suite names a missing index outright, and review-checks.sh
+# then resolves every check_set token as a lane gating every transition. The
+# lanes do not depend on the checkout, and a case that needs a real index names
+# one itself.
+export GC_REVIEW_CHECKS_INDEX="$TMP/no-such-index.toml"
 
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/merge.sh" "$HERE/lifecycle.sh" "$HERE/record-failure-cap.sh" \
@@ -65,15 +71,15 @@ SUT="$SD/merge.sh"
 # defaults, and a section that wants another sets it on its own call.
 unset MERGE_STATE_REREADS MERGE_STATE_REREAD_SECS
 
-# check_set declares the lane; the anchor carries no check.<lane> marker — a
-# lane's green is DERIVED from a backing review bead, not stored on the anchor.
+# check_set declares the lane; a lane's green is DERIVED from a backing review
+# bead, not stored on the anchor.
 anchor() { # id num extra-json
   printf '{"id":"%s","status":"open","assignee":"rig/refinery","notes":"","title":"t","metadata":{"merge_result":"pull_request","pr_number":"%s","pr_url":"https://github.com/zook/gc-toolkit/pull/%s","branch":"polecat/x%s","merged_target":"main","check_set":"correctness"%s}}' \
     "$1" "$2" "$2" "$2" "${3:-}"
 }
 # A closed approve review bead backing <anchor>'s <lane> (default correctness) — the
-# green record lane-state.sh derives, in place of the retired check.<lane>=green
-# marker. reviewed_oid is what a local backing bead must carry to green a lane.
+# green record lane-state.sh derives. reviewed_oid is what a local backing bead
+# must carry to green a lane.
 rev() { # anchor [lane] [oid]
   printf '{"id":"rev-%s","status":"closed","assignee":"","notes":"approve","metadata":{"task_kind":"review","anchor_bead":"%s","check_name":"%s","reviewed_oid":"%s","signoff_verdict":"approve"}}' \
     "$1" "$1" "${2:-correctness}" "${3:-sha-r}"
@@ -146,6 +152,36 @@ eq "$(meta M1 merge_result)" "merged" "merge_result recorded"
 eq "$(meta M1 merged_sha)" "merged-sha-10" "merged_sha recorded from mergeCommit.oid"
 has "$(notes M1)" "Merged to main at merged-s" "the close reason names the landing"
 eq "$(grep -c '^bd update M1' "$STUB_GC_LOG" || true)" "1" "ONE lifecycle update carried close+record"
+
+echo "# the lanes are resolved at the head the merge is pinned to"
+# The resolver logs the arguments it is asked with, then runs as itself.
+store "[$(anchor MA1 9063), $(rev MA1)]"
+printf '%s' "$(prview 9063 OPEN CLEAN)" > "$GH_DIR/pr_view_9063.json"
+approved 9063
+cp "$SD/review-checks.sh" "$TMP/review-checks.real"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexec "%s" "$@"\n' "$TMP/resolver.log" "$TMP/review-checks.real" > "$SD/review-checks.sh"
+chmod +x "$SD/review-checks.sh"; : > "$TMP/resolver.log"; : > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1); rc=$?
+cp "$TMP/review-checks.real" "$SD/review-checks.sh"; chmod +x "$SD/review-checks.sh"
+has "$(cat "$STUB_GH_LOG")" "pr merge 9063 --repo github.com/zook/gc-toolkit --squash --match-head-commit sha-9063" "the merge is pinned to the PR head"
+eq "$(grep -c -- '--through merge --at sha-9063$' "$TMP/resolver.log")" "2" "…and both lane checks, the gate and the terminal re-read, resolve at that head"
+
+echo "# a head the pinned read does not answer holds before any lane is resolved"
+# The lanes are resolved at the head and the merge is pinned to it, so with no
+# head the hold names the head, not lane state the resolver could not read.
+store "[$(anchor MH1 9064), $(rev MH1)]"
+prview 9064 OPEN CLEAN | jq -c '.headRefOid = ""' > "$GH_DIR/pr_view_9064.json"
+approved 9064
+cp "$SD/review-checks.sh" "$TMP/review-checks.real"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexec "%s" "$@"\n' "$TMP/resolver.log" "$TMP/review-checks.real" > "$SD/review-checks.sh"
+chmod +x "$SD/review-checks.sh"; : > "$TMP/resolver.log"; : > "$STUB_GH_LOG"
+out=$("$SUT" 2>&1); rc=$?
+cp "$TMP/review-checks.real" "$SD/review-checks.sh"; chmod +x "$SD/review-checks.sh"
+has "$out" "PR#9064 live head unresolved" "a PR whose head did not read is held under the head's name"
+hasnt "$out" "lane state unreadable" "…not as unreadable lane state"
+eq "$(cat "$TMP/resolver.log")" "" "…before any lane is resolved"
+hasnt "$(cat "$STUB_GH_LOG")" "pr merge 9064" "…and nothing is merged"
+eq "$(bstatus MH1)" "open" "…and the anchor stays open"
 
 echo "# a resolver that dies mid-run holds the merge (never reads empty as 'no lanes')"
 # The lane check captures the resolver's exit status: a crash prints nothing,
@@ -1253,45 +1289,27 @@ printf '[{"user":{"login":"human2"},"state":"CHANGES_REQUESTED","commit_id":"sha
 out=$("$SUT" 2>&1)
 eq "$(pinned V2)" "progressing@sha-88" "a veto with an open fix unit in flight stays progressing"
 
-echo "# a lane short of green is progressing; the cap's park is the wedge"
-# The shared predicate (also gate-ensure.sh's): merge_hold is the literal
-# string "signoff_cap" AND signoff_cap is non-empty. signoff.sh writes that
-# literal for its round-cap park; an operator's own hold writes merge_hold=true.
-store "[$(anchor V3 82),
-        $(anchor V4 83 ',"merge_hold":"signoff_cap","signoff_cap":"correctness","gc.routed_to":"human"')]"
+echo "# a lane short of green is progressing"
+store "[$(anchor V3 82)]"
 : > "$STUB_DEPS"
 printf '%s' "$(prview 82 OPEN CLEAN)" > "$GH_DIR/pr_view_82.json"
-printf '%s' "$(prview 83 OPEN CLEAN)" > "$GH_DIR/pr_view_83.json"
 # No approver: a GitHub approval would back V3's bead-less lane green through the
 # fallback, hiding the lane-short-of-green state this records.
 echo '[]' > "$GH_DIR/reviews_82.json"
-approved 83
 out=$("$SUT" 2>&1)
 eq "$(pinned V3)" "progressing@sha-82" "a lane short of green is a check a review is due to raise"
-eq "$(pinned V4)" "wedged-exception@sha-83" "merge_hold=signoff_cap with signoff_cap beside it is the convergence cap's wedge"
 
-# An operator's own hold carries no signoff_cap, and the board must not read it
-# as a wedge no automated actor will lift.
-echo "# an operator hold with no cap stamp records no wedge"
+# An operator's hold is theirs to lift. The merge pass stops at it and records
+# nothing; gate-ensure.sh's pass is what records the anchor's lanes.
+echo "# an operator hold holds the merge and records no verdict"
 store "[$(anchor V4b 90 ',"merge_hold":"true"')]"
 printf '%s' "$(prview 90 OPEN CLEAN)" > "$GH_DIR/pr_view_90.json"
 approved 90
 out=$("$SUT" 2>&1)
 has "$out" "merge_hold set (operator gate)" "the hold holds the merge"
-eq "$(pinned V4b)" "<absent>" "…and nothing records it as the cap's wedge"
+eq "$(pinned V4b)" "<absent>" "…and records no verdict"
 
-# An operator's own hold (merge_hold=true, not the literal "signoff_cap") is
-# not the cap's wedge, even beside a signoff_cap value orphaned by an earlier
-# park the operator has since taken over.
-echo "# an operator hold beside a STALE orphan signoff_cap is not the cap's wedge"
-store "[$(anchor V4c 91 ',"merge_hold":"true","signoff_cap":"correctness"')]"
-printf '%s' "$(prview 91 OPEN CLEAN)" > "$GH_DIR/pr_view_91.json"
-approved 91
-out=$("$SUT" 2>&1)
-has "$out" "merge_hold set (operator gate)" "the hold still holds the merge"
-eq "$(pinned V4c)" "<absent>" "…but the orphaned signoff_cap does not make it the cap's wedge"
-
-echo "# checks green and waiting on a person: settled, not wedged"
+echo "# checks green and waiting on a person: settled, not blocked"
 store "[$(anchor V5 84), $(rev V5)]"
 printf '%s' "$(prview 84 OPEN CLEAN)" > "$GH_DIR/pr_view_84.json"
 # Correctness is green (local backing), so the only thing left is the universal
@@ -1302,13 +1320,13 @@ has "$out" "no external APPROVED review" "the approval hold fires"
 eq "$(pinned V5)" "settled@sha-84" "the cadence is done; the pull request waits on an approval"
 
 echo "# recording a verdict moves no route"
-store "[$(anchor V8 87 ',"merge_hold":"signoff_cap","signoff_cap":"correctness","gc.routed_to":"human"')]"
+store "[$(anchor V8 87 ',"gc.routed_to":"human"'), $(rev V8)]"
 : > "$STUB_DEPS"
 printf '%s' "$(prview 87 OPEN CLEAN)" > "$GH_DIR/pr_view_87.json"
-approved 87
+echo '[]' > "$GH_DIR/reviews_87.json"
 out=$("$SUT" 2>&1)
-eq "$(pinned V8)" "wedged-exception@sha-87" "the verdict is recorded"
-eq "$(meta V8 'gc.routed_to')" "human" "…and the anchor keeps the park route the cap gave it"
+eq "$(pinned V8)" "settled@sha-87" "the verdict is recorded"
+eq "$(meta V8 'gc.routed_to')" "human" "…and the anchor keeps the route it carried"
 
 echo "# an open blocker is progressing only when a POOL is behind it"
 store "[$(anchor V6 85), $(rev V6),

@@ -25,7 +25,7 @@ Covered here:
 4. [The helm board service](#4-the-helm-board-service)
 5. [Verification](#5-verification)
 
-For Gas City background, see [`gascity-reference.md`](gascity-reference.md).
+For Gas City background, see [`gascity/README.md`](gascity/README.md).
 
 ## Scope
 
@@ -35,7 +35,7 @@ opts into, and verifying the result.
 
 **Boundaries.** It assumes a working Gas City and a created city. Gas City
 itself is documented upstream, indexed by
-[gascity-reference.md](gascity-reference.md). What each imported agent, order,
+[gascity/README.md](gascity/README.md). What each imported agent, order,
 and check does is its own doc's, starting from
 [architecture.md](architecture.md). The sub-pack's complete wiring lives in
 `packs/gascity-keeper/pack.toml`, and the board's in `services/helm/README.md`.
@@ -102,6 +102,10 @@ Any per-rig `[rigs.imports.gc-toolkit]` overrides the default for that rig.
 - **Skills** — surfaced via `gc skill list` (`gc-toolkit.handoff`,
   `gc-toolkit.session-title`, …).
 - **Doctor checks** — the structural checks verified below.
+- **Comments not for review** — a comment a rig's workflow or integration
+  posts on a pull request stays out of review when it opens with gc-toolkit's
+  no-review mark or with a marker the rig declares in
+  `not-for-review.toml` ([not-for-review.md](not-for-review.md)).
 
 ---
 
@@ -187,8 +191,8 @@ The pack's checks, and what a failure means:
 | `check-routed-work-claimable` | every route and assignee names a live target; routed work is in `bd ready` or in `bd blocked`; rig-scoped orders bound (I3) | a pool renamed, an order missing its rig registration, or routed work stranded outside both queues |
 | `check-one-anchor-per-pr` | one open owning anchor per PR (I4) | duplicate anchors filed for one branch |
 | `check-closed-implies-landed` | closed anchor ⇒ `merged` + `merged_sha`, or explicit terminal (I5) | something closed a bead out-of-band |
-| `check-gate-integrity` | gating anchors declare `check_set`; markers are a bare lane-state word (I6+I7) | a hand-written or unmigrated marker |
-| `check-gate-marker-provenance` | every green lane on an open gating anchor rests on a verdict `signoff.sh` recorded — a closed approve review bead marked `gc.outcome=recorded`, or an APPROVED GitHub review (I7 depth) | a `check.<lane>=green` that resolves to no backing verdict, or an approve verdict whose outcome was never recorded |
+| `check-gate-integrity` | gating anchors declare a non-empty `check_set` or the `none` opt-out (I6) | an anchor normalized by no gate-ensure pass, or a `check_set` written empty by hand |
+| `check-gate-marker-provenance` | every closed approve review backing a lane on an open gating anchor records the outcome its writer stamps, `gc.outcome=recorded` or `superseded` (I7 depth) | an approve verdict whose outcome was never recorded, which still derives its lane green |
 | `check-step-terminal` | no offerable step under a closed root; no stalled frontier (I8) | a workflow died mid-molecule |
 | `check-pour-text-current` | a running molecule executes the formula text that is current when it runs (I9) | a rig checkout lagging past the reconciler's self-heal window, an unfetched remote-tracking ref, or a formula edited after a live molecule was poured |
 | `check-cadence-live` | every pack order fired within its cadence window (three intervals, or one trip of the order dispatch rotation when longer), a `gctk` binary is deployed for `lifecycle.sh` and `merge.sh` to exec, and `flock` resolves for the pass locks `refinery-reconcile` and `deferred-dispatch` take (I10) | order not registered for a rig, the controller is down, the `gctk-build` order has never published a binary, or `flock` is missing from `PATH` |
@@ -205,9 +209,10 @@ The pack's checks, and what a failure means:
 | `check-blocked-work-armed` | every blocked, unassigned plain-work bead carries a dispatch path — `gc.routed_to` or a `gc.dispatch_when_ready` arm (warn-only) | a blocked work bead with no route and no arm, so it strands when its blocker closes and no pool is offered it |
 | `check-visit-outcome-recorded` | every CLOSED visit records the `gc.outcome` it closed on, so the board can report the finished sitting (warn-only) | a visit closed with no outcome, so a dropped need reads identically to a correct dedup close |
 | `check-armed-dispatch-owed` | every bead armed with `gc.dispatch_when_ready` that nothing holds, by an open blocker on it or, unless it is in flight, on an ancestor, was slung within the deferred-dispatch cadence (warn-only) | the deferred-dispatch order not firing, or an arm set at a non-open status that `bd ready` never surfaces |
+| `check-until-resolved-owed` | every open, unassigned bead whose `until` targets have all closed, and which no open `blocks` blocker of its own holds, was disposed within the deferred-dispatch cadence of becoming owed, unless it carries live work (`assets/scripts/live-work.sh`), which the order never disposes (warn-only) | the deferred-dispatch order not firing, its passes spending their budget before they reach the bead, or the close held, commonly by an open visit on the bead; a resolved bead left open because it carries live work is reported separately, for a person to decide |
 | `check-feedback-routing-owed` | an open anchor whose PR posture is `commented`/`changes_requested` has that feedback routed within the owed window (warn-only) | the merge cadence's feedback arm not routing, so operator feedback reads as consumed while nothing acts on it |
 | `check-hq-marooned-work` | no rig-workable bead sits unclaimed in the HQ (city/lx) store, which no pool reads | a city-scoped role with `GC_RIG` unset filing a bare `bd create` into the HQ store, marooning the work by construction |
-| `check-demo-toolchain` | the demo:capture toolchain — Node, ffmpeg, `OPENAI_API_KEY`, and `gh` — is resolvable (readiness, warn-only) | a missing demo dependency, so a capture degrades to a silent, captioned clip |
+| `check-demo-toolchain` | the demo:capture toolchain — Node, ffmpeg, `OPENAI_API_KEY`, and `gh` — is resolvable, and `VERCEL_AUTOMATION_BYPASS_SECRET` reaches the session whenever the secrets file holds it (readiness, warn-only) | a missing demo dependency, so a capture degrades to a silent, captioned clip, or `VERCEL_AUTOMATION_BYPASS_SECRET` in the secrets file but not in the session, because `GC_SUPERVISOR_ENV` does not name it or the supervisor was installed before the file held it |
 
 `gc doctor --verbose` explains any failure; `gc doctor --fix` applies the
 canonical remediation where one exists.

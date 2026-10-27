@@ -49,6 +49,68 @@ F1_other=$("$SUT" upsert --anchor tk-anc2 --lane correctness --locus "assets/scr
 if [ "$F1_other" != "$F1" ]; then ok "the same key on another anchor is its own finding"; else bad "dedup crossed anchors"; fi
 
 # ---------------------------------------------------------------------------
+# upsert carries the finding contract outside the key: a grade, a category, a
+# failure scenario and a verification ride the create as metadata and follow
+# the message in the description, ahead of the line naming who raised it. A
+# re-raise that rewords them re-adopts the open finding and keeps its record.
+# ---------------------------------------------------------------------------
+# Its own anchor, so the findings it rules hold nothing the cases after it read.
+store "$(jq -c '. + [{"id":"tk-ancK","status":"open","assignee":"","title":"aK","notes":"","metadata":{"merge_result":"pull_request","check_set":"correctness","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]' "$STUB_STORE")"
+# The harness's create keeps no -d description, so a gc ahead of it on PATH
+# records the one this create passes and hands the call on.
+mkdir -p "$TMP/capture"
+printf '#!/usr/bin/env bash\nif [ "${1:-}" = bd ] && [ "${2:-}" = create ]; then p=""; for a in "$@"; do [ "$p" = -d ] && printf %%s "$a" > %q; p="$a"; done; fi\nexec %q "$@"\n' \
+  "$TMP/created-desc" "$BIN/gc" > "$TMP/capture/gc"
+chmod +x "$TMP/capture/gc"
+FC=$(PATH="$TMP/capture:$PATH" "$SUT" upsert --anchor tk-ancK --lane correctness --locus "assets/scripts/qux.sh:read_stamp()" \
+  --message "an unreadable stamp reads as absent" --severity P1 --category readiness \
+  --failure-scenario "a store read that times out makes recovery rebuild a branch that has a PR" \
+  --verification "CONFIRMED: read_stamp() returns empty on rc 2")
+eq "$(meta "$FC" 'finding.severity')" "P1" "upsert stamps finding.severity"
+eq "$(meta "$FC" 'finding.category')" "readiness" "…finding.category"
+eq "$(meta "$FC" 'finding.failure_scenario')" "a store read that times out makes recovery rebuild a branch that has a PR" "…finding.failure_scenario"
+eq "$(meta "$FC" 'finding.verification')" "CONFIRMED: read_stamp() returns empty on rc 2" "…and finding.verification"
+eq "$(meta "$FC" 'finding.key')" "$("$SUT" key --lane correctness --locus "assets/scripts/qux.sh:read_stamp()" --message "an unreadable stamp reads as absent")" \
+  "the contract is outside finding.key: the key is the lane, locus and message alone"
+eq "$(cat "$TMP/created-desc" 2>/dev/null)" "$(printf '%s\n\n%s\n\n%s\n%s\n%s\n%s\n\n%s' \
+  'Locus: assets/scripts/qux.sh:read_stamp()' 'an unreadable stamp reads as absent' \
+  'Severity: P1' 'Category: readiness' \
+  'Failure scenario: a store read that times out makes recovery rebuild a branch that has a PR' \
+  'Verification: CONFIRMED: read_stamp() returns empty on rc 2' \
+  'Raised by machine:correctness reviewing anchor tk-ancK.')" \
+  "the description keeps its locus line first and its raised-by line last, the contract between the message and it"
+FCb=$("$SUT" upsert --anchor tk-ancK --lane correctness --locus "assets/scripts/qux.sh:read_stamp()" \
+  --message "an unreadable stamp reads as absent" --severity P2 --category testing \
+  --failure-scenario "a reworded scenario")
+eq "$FCb" "$FC" "a re-raise rewording its contract re-adopts the open finding"
+eq "$(meta "$FC" 'finding.severity')|$(meta "$FC" 'finding.failure_scenario')" \
+  "P1|a store read that times out makes recovery rebuild a branch that has a PR" "…and keeps the first raise's record"
+eq "$(meta "$F2" 'finding.severity')|$(meta "$F2" 'finding.verification')" "<absent>|<absent>" \
+  "a finding filed with no contract carries none of its keys"
+BEFORE=$(jq 'length' "$STUB_STORE")
+"$SUT" upsert --anchor tk-ancK --lane correctness --locus "a.sh" --message "m" --severity high 2>/dev/null; rc=$?
+eq "$rc|$(jq 'length' "$STUB_STORE")" "1|$BEFORE" "upsert refuses a grade other than P0, P1 or P2, filing nothing"
+
+# ---------------------------------------------------------------------------
+# A P2 is ruled must-fix or declined, never deferred: set-disposition refuses
+# its deferral before it writes anything, and the other two rulings proceed.
+# ---------------------------------------------------------------------------
+P2D=$("$SUT" upsert --anchor tk-ancK --lane correctness --locus "docs/p2.md" --message "a narrow wording hazard" \
+  --severity P2 --category comments --failure-scenario "a reader takes the old flag name from the example")
+P2_BEFORE=$(cat "$STUB_STORE")
+out=$("$SUT" set-disposition --finding "$P2D" --anchor tk-ancK --disposition deferred --reason "later" 2>&1); rc=$?
+eq "$rc" "1" "deferring a P2 is refused (exit 1)"
+has "$out" "never deferred" "…naming the rule"
+eq "$(cat "$STUB_STORE")" "$P2_BEFORE" "…with nothing written: no follow-up, no disposition, no close"
+"$SUT" set-disposition --finding "$P2D" --anchor tk-ancK --disposition declined --reason "risky for a marginal gain"; rc=$?
+eq "$rc|$(meta "$P2D" 'finding.disposition')|$(bstatus "$P2D")" "0|declined|closed" "a P2 is declined as any finding is"
+P2M=$("$SUT" upsert --anchor tk-ancK --lane correctness --locus "docs/p2m.md" --message "a low-risk tidy-up" \
+  --severity P2 --category comments --failure-scenario "a reader misreads the step order")
+"$SUT" set-disposition --finding "$P2M" --anchor tk-ancK --disposition must-fix; rc=$?
+eq "$rc|$(meta "$P2M" 'finding.disposition')" "0|must-fix" "…and ruled must-fix as any finding is"
+has "$(deps)" "$P2M|blocks|tk-ancK" "…holding the anchor until it is fixed"
+
+# ---------------------------------------------------------------------------
 # set-disposition must-fix: the finding blocks the anchor — the hold merge.sh's
 # blocker probe already reads.
 # ---------------------------------------------------------------------------
@@ -432,16 +494,21 @@ hasnt "$(deps)" "cfuQ2|blocks|$QU" "…hanging no edge onto a finding the valida
 QM=$(upsert_q mf "ruled must-fix" cfuQ1)
 "$SUT" set-disposition --finding "$QM" --anchor tk-ancQ --disposition must-fix
 has "$(deps)" "cfuQ1|blocks|$QM" "the first batch's child answers the finding it raised"
+"$SUT" answer --finding "$QM" --answer "You asked for a decision, and the fix chose X." --flag
 eq "$(upsert_q mf "ruled must-fix" cfuQ2)" "$QM" "a later batch re-raises the must-fix finding"
 eq "$(meta "$QM" 'finding.fix_unit')" "cfuQ2" "…which records the later child"
+eq "$(meta "$QM" 'finding.fix_answer')|$(meta "$QM" 'finding.fix_flag')" "<absent>|<absent>" \
+  "…and clears the earlier child's answer and flag in the same write, so the point waits on the later child's answer"
 has "$(deps)" "cfuQ2|blocks|$QM" "…and hangs its close-ordering edge onto the already-ruled finding"
 has "$(deps)" "cfuQ1|blocks|$QM" "…beside the first child's, which stays"
 gc bd update cfuQ1 --status=closed >/dev/null
 "$SUT" close-answered --anchor tk-ancQ
 eq "$(bstatus "$QM")" "open" "the earlier child landing does not close a finding the later batch re-raised"
+"$SUT" answer --finding "$QM" --answer "Fixed as you suggested."
 : > "$STUB_GC_LOG"
 eq "$(upsert_q mf "ruled must-fix" cfuQ2)" "$QM" "re-raising with the child already recorded re-adopts it"
 hasnt "$(cat "$STUB_GC_LOG")" "update $QM" "…and writes nothing"
+eq "$(meta "$QM" 'finding.fix_answer')" "Fixed as you suggested." "…so the answer that child gave stands"
 hasnt "$(cat "$STUB_GC_LOG")" "dep cfuQ2 --blocks" "…and hangs no second edge"
 eq "$("$SUT" upsert --anchor tk-ancQ --lane human --locus "assets/scripts/q.sh:mf()" --message "ruled must-fix")" "$QM" "a re-raise with no --fix-unit re-adopts the finding"
 eq "$(meta "$QM" 'finding.fix_unit')" "cfuQ2" "…and leaves its recorded child alone"
@@ -477,9 +544,9 @@ upsert_r() { "$SUT" upsert --anchor tk-ancR --lane human --source "human:johnzoo
 mkdir -p "$TMP/cross"
 FR=$(upsert_r rule "crossed by a re-raise" cfuR1)
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/cross/gc" <<SHIM
-if [ "\$*" = "bd update $FR --set-metadata finding.disposition=must-fix" ]; then
-  "$BIN/gc" bd update "$FR" --set-metadata finding.fix_unit=cfuR2 >/dev/null
-fi
+case "\$*" in "bd update $FR --set-metadata finding.disposition=must-fix"*)
+  "$BIN/gc" bd update "$FR" --set-metadata finding.fix_unit=cfuR2 >/dev/null ;;
+esac
 exec "$BIN/gc" "\$@"
 SHIM
 chmod +x "$TMP/cross/gc"
@@ -497,11 +564,11 @@ eq "$(bstatus "$FR")" "open" "…so the earlier child landing does not close it 
 FS=$(upsert_r readopt "crossed by a ruling" cfuR1)
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/cross/gc" <<SHIM
 "$BIN/gc" "\$@"; rc=\$?
-if [ "\$*" = "bd update $FS --set-metadata finding.fix_unit=cfuR2" ]; then
+case "\$*" in "bd update $FS --set-metadata finding.fix_unit=cfuR2"*)
   "$BIN/gc" bd dep "$FS" --blocks tk-ancR >/dev/null
   "$BIN/gc" bd dep cfuR1 --blocks "$FS" >/dev/null
-  "$BIN/gc" bd update "$FS" --set-metadata finding.disposition=must-fix >/dev/null
-fi
+  "$BIN/gc" bd update "$FS" --set-metadata finding.disposition=must-fix >/dev/null ;;
+esac
 exit \$rc
 SHIM
 eq "$(PATH="$TMP/cross:$PATH" upsert_r readopt "crossed by a ruling" cfuR2)" "$FS" "a re-raise crossed by a ruling re-adopts the finding"
@@ -1018,6 +1085,18 @@ FV2=$(human_finding tk-ancV "assets/scripts/x.sh" "quote the expansion" 4999 500
 eq "$rc" "3" "must-fix is refused too: it would settle the operator's question as keep-and-fix"
 hasnt "$(deps)" "$FV2|blocks|tk-ancV" "…and wires no hold"
 
+# restates rules the body no point of its own and closes it, so the review could
+# dismiss while the operator decides. A body of a review inside the held batch,
+# beside an inline comment of the same review, is refused like any other ruling.
+FV5=$(human_finding tk-ancV "PR review" "Two points, both in the inline comments." 4996 4996)
+human_finding tk-ancV "assets/scripts/z.sh" "the cap reads the wrong budget" 4995 4996 >/dev/null
+err=$("$SUT" set-disposition --finding "$FV5" --anchor tk-ancV --disposition restates --reason "it lists the inline comment" 2>&1 >/dev/null); rc=$?
+eq "$rc" "3" "restates is refused too: it would rule the operator's question no point of its own"
+has "$err" "visV" "…naming the visit that already carries the question"
+eq "$(meta "$FV5" 'finding.disposition')|$(bstatus "$FV5")" "unvalidated|open" "…and the body stays unruled and open, holding the review"
+"$SUT" set-disposition --finding "$FV5" --anchor tk-ancV --disposition restates --unrelated-visit visV; rc=$?
+eq "$rc|$(meta "$FV5" 'finding.disposition')|$(bstatus "$FV5")" "0|restates|closed" "…and goes through once the visit is named as asking something else"
+
 # A Conversation comment names no review, so the anchor's batch ledger is what
 # names its batch's rework.
 FV3=$(human_finding tk-ancV "PR conversation" "why an hourly order at all?" 40)
@@ -1198,6 +1277,125 @@ gc bd update "$FT" --set-metadata finding.disposition=needs-you --set-metadata f
 eq "$(bstatus "$FS")" "closed" "shed-orphaned closes a needs-you finding whose anchor has closed"
 eq "$(bstatus "visS")" "open" "…and leaves its visit to the operator"
 eq "$(bstatus "$FT")" "open" "…and leaves one on an open anchor waiting on its visit"
+
+# ---------------------------------------------------------------------------
+# restates: a human review body that only frames the inline comments of its
+# review round closes as no point of its own, with no edge and no answer owed.
+# It takes only a review body whose review, or review round, raised an inline
+# comment.
+# ---------------------------------------------------------------------------
+: > "$STUB_DEPS"
+store '[{"id":"tk-ancR","status":"open","assignee":"","title":"ancR","notes":"","metadata":{"merge_result":"pull_request","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
+FRB=$(human_finding tk-ancR "PR review" "Requesting changes for two issues; details are in the inline comments." 9100 9100)
+FRI=$(human_finding tk-ancR "a.sh:3" "The guard drops the opt-out." 9101 9100)
+FRL=$(human_finding tk-ancR "PR review" "A lone review body with a point of its own." 9200 9200)
+"$SUT" set-disposition --finding "$FRI" --anchor tk-ancR --disposition restates 2>/dev/null; rc=$?
+eq "$rc" "1" "restates refuses an inline comment: it rules a review body"
+eq "$(meta "$FRI" 'finding.disposition')" "unvalidated" "…writing nothing"
+"$SUT" set-disposition --finding "$FRL" --anchor tk-ancR --disposition restates 2>/dev/null; rc=$?
+eq "$rc" "1" "restates refuses a body whose review raised no other finding: that body is the whole review"
+eq "$(bstatus "$FRL")" "open" "…leaving it open"
+"$SUT" set-disposition --finding "$FRB" --anchor tk-ancR --disposition restates --reason "it lists the inline finding" --label "Summary of the inline points"; rc=$?
+eq "$rc" "0" "restates rules a body that frames its review's inline comments"
+eq "$(meta "$FRB" 'finding.disposition')" "restates" "…recording restates"
+eq "$(bstatus "$FRB")" "closed" "…closing the finding"
+eq "$(meta "$FRB" 'finding.reply')" "<absent>" "…owing no answer"
+hasnt "$(deps)" "$FRB|blocks|" "…and holding nothing"
+has "$(notes "$FRB")" "restates the inline comments of its review round: it lists the inline finding" "…with its reason in the notes"
+eq "$(meta "$FRB" 'finding.label')" "Summary of the inline points" "…and the label the ruling gave it"
+# A body ruled must-fix, then restates, gives up that hold only once its close
+# has landed: a refused close leaves it must-fix, open and still blocking the
+# anchor. The clean re-run strips a blocker wired onto it before the close, which
+# bd would refuse while that blocker is open.
+store "$(jq -c '. + [{"id":"fuRb","status":"open","assignee":"","title":"a bead that blocks a finding","notes":"","metadata":{}}]' "$STUB_STORE")"
+FRM=$(human_finding tk-ancR "PR review" "Two issues; both are in the inline comments." 9300 9300)
+human_finding tk-ancR "c.sh:1" "The retry files a second follow-up." 9301 9300 >/dev/null
+"$SUT" set-disposition --finding "$FRM" --anchor tk-ancR --disposition must-fix >/dev/null
+has " $(probe_blockers tk-ancR) " " $FRM " "a review body ruled must-fix holds the anchor"
+STUB_CLOSE_FAIL="$FRM" "$SUT" set-disposition --finding "$FRM" --anchor tk-ancR --disposition restates 2>/dev/null; rc=$?
+eq "$rc|$(meta "$FRM" 'finding.disposition')|$(bstatus "$FRM")" "2|must-fix|open" "a restates ruling whose close is refused exits 2 and leaves the finding must-fix and open"
+has " $(probe_blockers tk-ancR) " " $FRM " "…still blocking the anchor through the probe the merge runs"
+gc bd dep fuRb --blocks "$FRM" >/dev/null
+STUB_ENFORCE_BLOCKS=1 "$SUT" set-disposition --finding "$FRM" --anchor tk-ancR --disposition restates; rc=$?
+eq "$rc|$(meta "$FRM" 'finding.disposition')|$(bstatus "$FRM")" "0|restates|closed" "the clean re-run commits restates"
+hasnt "$(deps)" "$FRM|blocks|tk-ancR" "…and releases the hold once it has"
+# A client can submit one pass as one review per comment, so a body review can
+# frame inline comments that other reviews of its round carry. The intake names
+# the round on each finding (finding.review_round).
+round_finding() { # <locus> <message> <comment-id> <review-id> <round>
+  local f
+  f=$(human_finding tk-ancR "$1" "$2" "$3" "$4")
+  gc bd update "$f" --set-metadata "finding.review_round=$5" >/dev/null
+  printf '%s' "$f"
+}
+FRR=$(round_finding "PR review" "Requesting changes for the two inline points of this pass." 9400 9400 johnzook@c94)
+round_finding "d.sh:4" "The lock is never released." 9411 9401 johnzook@c94 >/dev/null
+FRU=$(round_finding "PR review" "A body review whose round raised nothing beside it." 9500 9500 johnzook@c95)
+round_finding "e.sh:5" "An inline point the reviewer left against another commit." 9511 9501 johnzook@c96 >/dev/null
+"$SUT" set-disposition --finding "$FRU" --anchor tk-ancR --disposition restates 2>/dev/null; rc=$?
+eq "$rc|$(bstatus "$FRU")" "1|open" "restates refuses a body review whose round raised nothing beside it, whatever its reviewer raised in another round"
+FRV=$(round_finding "PR review" "A body review beside another body review of its round." 9600 9600 johnzook@c97)
+round_finding "PR review" "Another review body, against the same commit." 9700 9700 johnzook@c97 >/dev/null
+"$SUT" set-disposition --finding "$FRV" --anchor tk-ancR --disposition restates 2>/dev/null; rc=$?
+eq "$rc|$(bstatus "$FRV")" "1|open" "…and one whose round raised only the body of another review, which is no inline comment for it to frame"
+"$SUT" set-disposition --finding "$FRR" --anchor tk-ancR --disposition restates --reason "it lists the inline points of the pass"; rc=$?
+eq "$rc|$(meta "$FRR" 'finding.disposition')|$(bstatus "$FRR")" "0|restates|closed" \
+  "restates rules a body review that frames inline comments other reviews of its round carry"
+
+# The words a review's living answer shows ride the ruling's own write.
+"$SUT" set-disposition --finding "$FRI" --anchor tk-ancR --disposition declined --reason "already handled" \
+  --reply "the guard keeps the opt-out on this branch" --label "Opt-out guard" --answer "Declined: the branch already keeps the opt-out."
+eq "$(meta "$FRI" 'finding.label')" "Opt-out guard" "a ruling records the label it is given"
+eq "$(meta "$FRI" 'finding.answer')" "Declined: the branch already keeps the opt-out." "…and the sentence it answers with"
+eq "$(meta "$FRI" 'finding.reply')" "the guard keeps the opt-out on this branch" "…beside the reply its thread gets"
+FRN=$(human_finding tk-ancR "b.sh:9" "Should this be on by default?" 9102 9100)
+"$SUT" set-disposition --finding "$FRN" --anchor tk-ancR --disposition needs-you --reason "Should enforcement turn on now?" >/dev/null
+eq "$(meta "$FRN" 'finding.answer')" "Should enforcement turn on now?" "a needs-you ruling with no --answer records its reason as the question the living answer shows"
+# A re-ruling states its words whole: the write that commits it clears each one
+# it does not supply, so a later ruling never shows an earlier ruling's words.
+FRQ=$(human_finding tk-ancR "d.sh:4" "Should we drop X?" 9103 9100)
+"$SUT" set-disposition --finding "$FRQ" --anchor tk-ancR --disposition needs-you --reason "Should we drop X?" --label "Dropping X" >/dev/null
+eq "$(meta "$FRQ" 'finding.answer')|$(meta "$FRQ" 'finding.label')" "Should we drop X?|Dropping X" "a needs-you ruling records its question and label"
+"$SUT" set-disposition --finding "$FRQ" --anchor tk-ancR --disposition deferred --reason "dropping X waits for the next release" >/dev/null
+eq "$(meta "$FRQ" 'finding.answer')|$(meta "$FRQ" 'finding.label')" "<absent>|<absent>" \
+  "a re-ruling that supplies neither --answer nor --label clears both, so the deferral never shows the earlier question"
+has "$(meta "$FRQ" 'finding.reply')" "Deferred — tracked as follow-up" "…and the living answer reads the deferral's own reply"
+FRD=$(human_finding tk-ancR "e.sh:5" "Is this needed?" 9104 9100)
+"$SUT" set-disposition --finding "$FRD" --anchor tk-ancR --disposition needs-you --reason "Is this needed?" >/dev/null
+has "$(meta "$FRD" 'finding.reply')" "needs your decision" "a needs-you ruling stamps the reply naming its visit"
+"$SUT" set-disposition --finding "$FRD" --anchor tk-ancR --disposition declined --reason "the operator ruled it needs no change" >/dev/null
+eq "$(meta "$FRD" 'finding.reply')|$(meta "$FRD" 'finding.answer')" "<absent>|<absent>" \
+  "a decline given no --reply clears the reply an earlier ruling stamped, so it owes no answer and posts no stale question"
+FRF=$(human_finding tk-ancR "f.sh:6" "Is this the intent?" 9105 9100)
+"$SUT" set-disposition --finding "$FRF" --anchor tk-ancR --disposition needs-you --reason "Is this the intent?" >/dev/null
+"$SUT" set-disposition --finding "$FRF" --anchor tk-ancR --disposition must-fix --label "The intent" >/dev/null
+eq "$(meta "$FRF" 'finding.reply')|$(meta "$FRF" 'finding.answer')|$(meta "$FRF" 'finding.label')" "<absent>|<absent>|The intent" \
+  "a must-fix re-ruling clears the reply and the question, and keeps the label it gives"
+
+# ---------------------------------------------------------------------------
+# answer: the fix unit's own sentence on a point, and its flag; fix-notes: its
+# notes on the round, on the fix unit itself.
+# ---------------------------------------------------------------------------
+"$SUT" answer --finding "$FRI" --answer "Changed anyway, though the ruling declined it: the guard now logs the skip." --flag
+eq "$(meta "$FRI" 'finding.fix_answer')" "Changed anyway, though the ruling declined it: the guard now logs the skip." "answer records the fix unit's sentence"
+eq "$(meta "$FRI" 'finding.fix_flag')" "1" "…and its flag"
+"$SUT" answer --finding "$FRI" --answer "Fixed as you suggested."
+eq "$(meta "$FRI" 'finding.fix_answer')" "Fixed as you suggested." "a later answer replaces the sentence"
+eq "$(meta "$FRI" 'finding.fix_flag')" "<absent>" "…and one given without --flag clears the flag"
+"$SUT" answer --finding tk-ancR --answer "x" 2>/dev/null; rc=$?
+eq "$rc" "1" "answer refuses a bead that is not a finding"
+"$SUT" answer --finding "$FRI" --answer "   " 2>/dev/null; rc=$?
+eq "$rc" "1" "…and an empty sentence"
+store "$(jq -c '. + [{"id":"tk-fuR","status":"open","assignee":"","title":"rework","notes":"","metadata":{"task_kind":"rework","anchor_bead":"tk-ancR"}}]' "$STUB_STORE")"
+printf 'Each point has its own commit.\n\nThe opt-out keeps its meaning.\n' > "$TMP/fix-notes.md"
+"$SUT" fix-notes --fix-unit tk-fuR --notes-file "$TMP/fix-notes.md"
+eq "$(meta tk-fuR fix_notes)" "$(cat "$TMP/fix-notes.md")" "fix-notes records the fix unit's notes from a file"
+"$SUT" fix-notes --fix-unit tk-fuR --notes "Replaced."
+eq "$(meta tk-fuR fix_notes)" "Replaced." "…and a later call replaces them"
+"$SUT" fix-notes --fix-unit "$FRI" --notes "x" 2>/dev/null; rc=$?
+eq "$rc" "1" "fix-notes refuses a bead that is not a fix unit"
+"$SUT" fix-notes --fix-unit tk-fuR 2>/dev/null; rc=$?
+eq "$rc" "1" "…and a call with no notes"
 
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

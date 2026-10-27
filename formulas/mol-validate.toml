@@ -85,18 +85,31 @@ VALIDATION_PASS=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) 
 # >>> validate-malformed-convoy-refuse
 if [ -z "$VALIDATION_PASS" ]; then
   echo "mol-validate needs an input convoy with exactly one tracked member" >&2
-  SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
-  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
-  if ! "$SCRIPTS/escalate.sh" --subject "{{convoy_id}}" --key validate-malformed-convoy --message "Input convoy {{convoy_id}} does not have exactly one tracked member, so mol-validate cannot derive its validation-pass bead; the pour is malformed and must be redone. Held at load-dispatch; nothing was ruled or closed."; then
-    echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
-  elif "$SCRIPTS/molecule-hold.sh" --step "mol-validate.load-dispatch" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "input convoy {{convoy_id}} does not have exactly one tracked member; the pour is malformed and must be redone"; then
+  SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+  : "${SCRIPTS:?run-cancel.sh and escalate.sh not found in the pack; nothing was cancelled, and this step stays claimed}"
+  if ! "$SCRIPTS/escalate.sh" --subject "{{convoy_id}}" --key validate-malformed-convoy --message "Input convoy {{convoy_id}} does not have exactly one tracked member, so mol-validate cannot derive its validation-pass bead; the pour is malformed and must be redone. Its run is cancelled; nothing was ruled."; then
+    echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
+  elif "$SCRIPTS/run-cancel.sh" --step "mol-validate.load-dispatch" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "input convoy {{convoy_id}} does not have exactly one tracked member; the pour is malformed and must be redone"; then
     gc runtime drain-ack
   else
-    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+    echo "run-cancel.sh did not end the run; NOT draining, so the next worker retries." >&2
   fi
   exit 1
 fi
 # <<< validate-malformed-convoy-refuse
+# >>> validate-withdrawn-pass
+# A pass closed before its run reached this step was withdrawn by whoever closed
+# it, so the run ends with no visit and nothing is ruled.
+if [ "$(gc bd show "$VALIDATION_PASS" --json 2>/dev/null | jq -r 'if type == "array" then (.[0].status // "") else "" end' 2>/dev/null)" = "closed" ]; then
+  CANCEL=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && { CANCEL="$c/assets/scripts/run-cancel.sh"; break; }; done
+  if [ -n "$CANCEL" ] && "$CANCEL" --step "mol-validate.load-dispatch" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "validation pass $VALIDATION_PASS was closed before its run ruled it"; then
+    gc runtime drain-ack
+  else
+    echo "run-cancel.sh did not end the run; NOT draining, so the next worker retries." >&2
+  fi
+  exit 1
+fi
+# <<< validate-withdrawn-pass
 gc bd show "$VALIDATION_PASS"
 M=$(gc bd show "$VALIDATION_PASS" --json | jq -c '.[0].metadata')
 ```
@@ -110,14 +123,14 @@ REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
 # >>> validate-no-anchor-refuse
 if [ -z "$ANCHOR" ]; then
   echo "validation pass carries no anchor_bead; nothing to rule" >&2
-  SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/molecule-hold.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
-  : "${SCRIPTS:?molecule-hold.sh and escalate.sh not found in the pack; set this step blocked by explicit id and clear gc.routed_to on it, on its gc.root_bead_id and on the other steps under that root, or the pool re-offers this step every cycle}"
-  if ! "$SCRIPTS/escalate.sh" --subject "$VALIDATION_PASS" --key validate-no-anchor --message "Validation pass $VALIDATION_PASS carries no anchor_bead, so there is nothing to rule; the dispatch is malformed and must be redone. Held at load-dispatch; nothing was ruled or closed."; then
-    echo "escalate.sh could not record a release path (no visit filed and none open); NOT holding or draining, so the step stays claimable and visible and the next worker retries the escalation, rather than parking a blocked molecule no human is asked about." >&2
-  elif "$SCRIPTS/molecule-hold.sh" --step "mol-validate.load-dispatch" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "validation pass carries no anchor_bead; the dispatch is malformed and must be redone"; then
+  SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/run-cancel.sh" ] && [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }; done
+  : "${SCRIPTS:?run-cancel.sh and escalate.sh not found in the pack; nothing was cancelled, and this step stays claimed}"
+  if ! "$SCRIPTS/escalate.sh" --subject "$VALIDATION_PASS" --key validate-no-anchor --message "Validation pass $VALIDATION_PASS carries no anchor_bead, so there is nothing to rule; the dispatch is malformed and must be redone. Its run is cancelled; nothing was ruled."; then
+    echo "escalate.sh recorded no visit; NOT cancelling or draining, so the next worker retries." >&2
+  elif "$SCRIPTS/run-cancel.sh" --step "mol-validate.load-dispatch" --bead "${CLAIMED_STEP_BEAD_ID:-}" --reason "validation pass carries no anchor_bead; the dispatch is malformed and must be redone"; then
     gc runtime drain-ack
   else
-    echo "molecule-hold did not fully land; NOT draining. Something in this molecule is still claimable, and a drain here hands it to a fresh polecat that re-derives the same refusal." >&2
+    echo "run-cancel.sh did not end the run; NOT draining, so the next worker retries." >&2
   fi
   exit 1
 fi
@@ -129,13 +142,15 @@ gate-ensure.sh use, so a pass dispatched without one rules the correctness lane.
 
 A malformed dispatch cannot be ruled and never will be on a retry. Its convoy has
 no single tracked member, or that member carries no `anchor_bead`. So each refusal
-above files a visit through `escalate.sh` and holds this step `blocked`
-(not-closed, not-claimable) only if that visit landed, then drains. A bare
-`exit 1` would leave the step `open` and routed, and the pool would re-offer the
-same unrulable pass to a fresh validator every cycle. The store-read guards
-further down are the opposite case: an unreadable or non-array finding ledger is
-transient, so those DO fail closed to a plain `exit 1` and a later claim retries
-once the store recovers. Do not convert them to a hold.
+above files a visit through `escalate.sh` and, only if that visit landed, cancels
+the run through `run-cancel.sh`, which closes every step through gascity, then
+drains. A bare `exit 1` would leave the step claimed, and the pool would re-offer
+the same unrulable pass to a fresh validator once this session ended. A pass
+closed before its run reached this step was withdrawn, so its run is cancelled
+with no visit. The store-read guards further down are the opposite case: an
+unreadable or non-array finding ledger is transient, so those DO fail closed to
+a plain `exit 1` and a later claim retries once the store recovers. Do not
+convert them to a cancel.
 
 **3. Read the batch.** The findings to rule are the LIVE `task_kind=finding`
 beads on this anchor for this lane that no earlier pass has ruled — disposition
@@ -160,7 +175,8 @@ printf '%s' "$BATCH_JSON" | jq -r --arg lane "$LANE" '.[]
       | "\\(.id)\\t\\(.title)"'
 ```
 Read each finding's full body (`gc bd show <id>`) — the locus, what is wrong,
-why it matters, and the fix the reviewer proposed. That is what you rule on.
+why it matters, and the fix the reviewer proposed, and for a reviewer's finding
+its grade, its failure scenario and its verification. That is what you rule on.
 
 **4. Read the intent.** The anchor bead (`metadata.anchor_bead`) and the PR or
 branch it gates tell you what the diff was for, which is what makes a finding
@@ -182,7 +198,7 @@ metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require"
 
 [[steps]]
 id = "triage-findings"
-title = "Decisions 1 and 2: rule each finding must-fix, deferred, declined, or needs-you"
+title = "Decisions 1 and 2: rule each finding must-fix, deferred, declined, needs-you or restates"
 needs = ["load-dispatch"]
 description = """
 Each block is its own shell, so re-derive the pins AND re-read the batch first.
@@ -248,12 +264,20 @@ carries the finding's question the same way.
 
 {{defer_policy}}
 
+**A P2.** A reviewer's finding graded P2 (`Severity: P2` in its body) is filed
+only beside a blocking finding, because its review sent the PR back for a
+rework round anyway, and that round is its one chance. Rule it must-fix when
+its fix is low-risk and net-positive, so it lands in that round, and declined,
+with the reason, when it is risky or marginal. Never defer a P2: a follow-up PR
+for a minor improvement costs the operator an approval, and `finding.sh`
+refuses the deferral.
+
 **Rule every finding the block above printed.** For each id in that
 reconstructed batch, read its full body (`gc bd show <id>`) for the locus, the
-objection, and the fix proposed, judge it against the threshold above, and write
-ONE disposition through `finding.sh set-disposition` (the finding id replaces
-`<F>`) — the primitive owns the edge each disposition takes, so you never touch a
-dependency edge by hand:
+objection, and the fix proposed, judge it against the threshold above, and a P2
+against the rule for one, and write ONE disposition through `finding.sh
+set-disposition` (the finding id replaces `<F>`) — the primitive owns the edge
+each disposition takes, so you never touch a dependency edge by hand:
 
 - **must-fix** — a real objection to fix before merge. This is the default.
   `finding.sh` wires the finding `--blocks` the anchor, the hold merge.sh's
@@ -289,20 +313,35 @@ dependency edge by hand:
   decline they never hear is a silent overrule. Pass the answer with `--reply`;
   finding.sh records it and pr-facts.sh's write-back posts it into their PR
   thread after "Declined:", and leaves the thread open for them to accept or
-  overrule. Write it as the reason that follows that word:
+  push back on. Write it as the reason that follows that word:
   ```bash
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition declined \
     --reason "<why this is not an objection>" \
     --reply "<the reason, as it reads after 'Declined:': what you found, and why the objection does not hold>"
   ```
-  Declining closes the finding, which is what lets a re-raise re-block: if the
-  operator still disagrees they re-review, the content key re-adopts the closed
-  finding as a fresh one, and the next reconcile re-opens the human validation
-  pass on the anchor. A re-raise is theirs to make; nothing here forecloses it.
+  Declining closes the finding, which is what lets a re-raise re-block. If the
+  operator still disagrees, they reply in the thread or review again.
+  finding.sh dedups only against open findings, so their objection is filed as
+  a fresh finding, and the next reconcile re-opens the human validation pass on
+  the anchor. The declined finding stays closed and declined. A re-raise is
+  theirs to make; nothing here forecloses it.
 
   A human comment that states no objection at all — an acknowledgement, praise, or
   a question the diff already answers — is declined like a machine finding, with
   no `--reply`: there is no objection to overrule, so none is owed an answer.
+
+- **restates** — a HUMAN review body that only frames the inline comments of
+  its review round, each a finding of its own. The round is every review its
+  reviewer submitted against one commit, which a client can post as one review
+  per comment, and its findings share `finding.review_round`. A decline would
+  read as a refusal and must-fix would hold the same fix twice; this closes it
+  holding nothing, owing no answer, with no entry in the round's living answer.
+  A body raising a point of its own is ruled on that point. `finding.sh`
+  refuses it on anything but a review body whose review or review round raised
+  an inline comment.
+  ```bash
+  "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition restates
+  ```
 
 - **needs-you** — a human comment this pass genuinely cannot judge: it turns on
   product intent, a business fact, or a call that is the operator's to make, not
@@ -322,6 +361,14 @@ dependency edge by hand:
   "$SCRIPTS/finding.sh" set-disposition --finding <F> --anchor "$ANCHOR" --disposition needs-you --reason "<the decision you need from the operator, and why this pass cannot make it>"
   ```
 
+**The words the operator reads.** The PR keeps one living answer per human
+review round: a label and a sentence per point. With any human ruling, pass
+`--label "<a few words>"` when the comment has no bold headline, and with a
+decline, a deferral or needs-you pass `--answer "<one sentence>"` that starts by
+saying, in your own words, how you answered compared with what was asked
+(needs-you: the visit's question; it defaults to `--reason`). "Declined: …" and
+"Noted; no change asked" are examples, not a template.
+
 **Check every exit status.** `finding.sh set-disposition` stamps the
 disposition FIRST and wires the edge second, so a non-zero exit can leave a
 finding reading `must-fix` while nothing blocks the anchor — an objection that
@@ -329,15 +376,17 @@ looks ruled, holds no merge, and passes this step's exit criteria. A non-zero
 exit from any `set-disposition` call stops the pass here: do not close this step
 and do not go on to `rule-convergence`; append what failed to the
 validation-pass bead (`gc bd update "$VALIDATION_PASS" --append-notes ...`) and
-leave the chain open for the next claim to resume. Exit 3 is the one exception:
-it wrote nothing, because an open visit already carries the finding's question,
-so re-rule that finding as the first paragraph says and carry on. The rulings that owe an answer
-ride the same guard: a declined finding's `--reply`, a deferred finding's
-follow-up and its reply, and a needs-you finding's visit and its reply are all
-recorded BEFORE the finding is closed or left open, and `set-disposition` exits
-non-zero if any does not stick — so an answer the raiser would never hear leaves
-the finding unruled and the pass open to retry rather than closing over a silent
-overrule or a deferral with no tracked follow-up.
+leave the chain open for the next claim to resume. Two refusals are the
+exceptions, because each wrote nothing: exit 3, because an open visit already
+carries the finding's question, so re-rule that finding as the first paragraph
+says; and a P2's deferral, so rule it must-fix or declined. Carry on after
+either. The rulings that owe an answer ride the same guard: a declined finding's
+`--reply`, a deferred finding's follow-up and its reply, and a needs-you
+finding's visit and its reply are all recorded BEFORE the finding is closed or
+left open, and `set-disposition` exits non-zero if any does not stick — so an
+answer the raiser would never hear leaves the finding unruled and the pass open
+to retry rather than closing over a silent overrule or a deferral with no
+tracked follow-up.
 
 Rule the WHOLE batch: a finding left `unvalidated` holds nothing and is invisible
 to the merge predicate, so an objection you leave unruled is silently dropped. An
@@ -364,7 +413,8 @@ done
 ```
 
 **Exit criteria:** every finding in the batch carries a ruled disposition
-(must-fix, deferred, declined, or needs-you), none left unvalidated, this step closed.
+(must-fix, deferred, declined, needs-you or restates), none left unvalidated,
+this step closed.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
@@ -384,9 +434,9 @@ LANE=$(printf '%s'   "$M" | jq -r '.check_name  // empty'); [ -n "$LANE" ] || LA
 REVIEWED_OID=$(printf '%s' "$M" | jq -r '.reviewed_oid // empty')
 [ -n "$ANCHOR" ] || { echo "validation pass carries no anchor_bead; nothing to rule" >&2; exit 1; }
 SCRIPTS=""; for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/review-outcome.sh" ] && [ -x "$c/assets/scripts/approval-withdraw.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  [ -x "$c/assets/scripts/review-outcome.sh" ] && [ -x "$c/assets/scripts/approval-withdraw.sh" ] && [ -r "$c/assets/scripts/git-lib.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-[ -n "$SCRIPTS" ] || { echo "review-outcome.sh and approval-withdraw.sh not found in the pack" >&2; exit 1; }
+[ -n "$SCRIPTS" ] || { echo "review-outcome.sh, approval-withdraw.sh and git-lib.sh not found in the pack" >&2; exit 1; }
 ```
 
 **The judgement.** Decide whether the diff has converged enough that no further
@@ -432,7 +482,8 @@ the lane's standing verdict whether or not it is an approve backing: on a
 request-changes batch there is no backing, so it retires the recorded
 request-changes review itself, which is what lifts gate-ensure's per-head bar and
 lets the fresh review pour at the unmoved head. A human batch supersedes EVERY
-declared lane, since the whole diff owes a fresh look. Superseding only the
+declared lane, since the whole diff owes a fresh look, and names the lanes at
+the commit the pass judged, its `reviewed_oid`. Superseding only the
 `human` pseudo-lane would leave the real checks green and let the anchor merge
 without the review this ruling requires.
 
@@ -451,14 +502,27 @@ backing, so over an approval still standing the lane would read green on that
 approval alone, and only the `blocks` edge this pass holds on the anchor would
 keep the change from merging on it.
 
+A human batch whose pass records no `reviewed_oid`, one filed by hand or
+before passes carried it, names no commit, so its supersede resolves the lanes
+at the head of the anchor's branch on origin, the commit the fresh reviews
+will read. When that head does not read either, the batch is refused before
+the withdrawal: the supersede refuses a call that names no commit, so a
+withdrawal ahead of it would dismiss every approval and leave every lane green.
+
 Write `REASON` for the approver. It opens the dismissal message they read on
 GitHub, and it is the note on each review the supersede retires. Say in plain
 words what the change will be and why it needs another look.
 ```bash
 # >>> validate-not-converged
 REASON="<what the change will be, and why it needs a fresh whole-diff look>"
+if [ "$LANE" = human ] && [ -z "$REVIEWED_OID" ]; then
+  ANCHOR_BRANCH=$(gc bd show "$ANCHOR" --json 2>/dev/null | jq -r '.[0].metadata.branch // empty' 2>/dev/null)
+  [ -z "$ANCHOR_BRANCH" ] || REVIEWED_OID=$(. "$SCRIPTS/git-lib.sh" && remote_branch_head "${GC_RIG_ROOT:-.}" "$ANCHOR_BRANCH")
+fi
+[ "$LANE" != human ] || [ -n "$REVIEWED_OID" ] ||
+  { echo "validation pass $VALIDATION_PASS records no reviewed_oid, and the head of $ANCHOR's branch did not read from origin, so a human batch has no commit to supersede its lanes at; nothing withdrawn or superseded" >&2; exit 1; }
 "$SCRIPTS/approval-withdraw.sh" --pass "$VALIDATION_PASS" --reason "$REASON" && if [ "$LANE" = human ]; then
-  "$SCRIPTS/review-outcome.sh" supersede-anchor --anchor "$ANCHOR" --reason "$REASON"
+  "$SCRIPTS/review-outcome.sh" supersede-anchor --anchor "$ANCHOR" --oid "$REVIEWED_OID" --reason "$REASON"
 else
   "$SCRIPTS/review-outcome.sh" supersede-lane --anchor "$ANCHOR" --lane "$LANE" --reason "$REASON"
 fi

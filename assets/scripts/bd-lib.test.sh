@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# bd-lib.test.sh — hermetic tests for the bd_list memoization and the anchor
+# bd-lib.test.sh — hermetic tests for the bd_list memoization, the anchor
 # graph reads and writes (bd_anchor_children, bd_anchor_link, bd_create_child,
-# bd_anchor_backfill, bd_live_children).
+# bd_anchor_backfill, bd_live_children), and the per-rig state key, the pass
+# lock and pass_child (state_key, rig_state_key, take_pass_lock, pass_child).
 #
 # The cache is off unless GC_RECONCILE_BD_CACHE names a directory, and the
 # refinery-reconcile order is its only caller (it clears per arm and removes the
@@ -663,14 +664,171 @@ eq "$(bstatus tk-w1)|$(bstatus tk-h1)|$(bstatus tk-r1)|$(bstatus tk-p1)|$(bstatu
 out=$(STUB_LIST_FAIL=1 bd_unmake_orphans task_kind "Review branch" "n"); rc=$?
 eq "$rc|$out" "1|" "bd_unmake_orphans: a listing that does not answer returns 1 and closes nothing"
 
+# --- pr_finishing_birth: a PR-finishing child is born carrying the shift -------
+eq "$PR_FINISHING_SHIFT" "-1" "PR_FINISHING_SHIFT: PR-finishing work is filed one level sooner than its anchor"
+eq "$(pr_finishing_birth '{"task_kind":"rework","anchor_bead":"tk-anc"}')" \
+  '{"task_kind":"rework","anchor_bead":"tk-anc","priority_shift":-1}' \
+  "pr_finishing_birth: the work order with priority_shift added, as a number"
+out=$(pr_finishing_birth '["not","an","object"]'); rc=$?
+[ "$rc" -ne 0 ] && [ -z "$out" ] && ok "…and a work order that is not an object prints nothing and fails" \
+  || bad "…and a work order that is not an object prints nothing and fails (rc=$rc out='$out')"
+out=$(pr_finishing_birth ''); rc=$?
+[ "$rc" -ne 0 ] && [ -z "$out" ] && ok "…and so does an empty work order" \
+  || bad "…and so does an empty work order (rc=$rc out='$out')"
+
+# --- pr_finishing_settle and route_finishing: settle under a short lock wait, then route ---
+# A writer that logs its call and the lock wait it was handed into the stub
+# gc's own log, so the order of the settle and the route write reads off one log.
+# It refuses to settle tk-stuck, as a lock it cannot take leaves it.
+cat > "$TMP/qp-log" <<'QP'
+#!/usr/bin/env bash
+printf 'qp %s wait=%s\n' "$*" "${QUEUE_PRIORITY_LOCK_WAIT_SECS:-unset}" >> "$STUB_GC_LOG"
+[ "$2" != tk-stuck ] || { echo "queue-priority: settle: could not take the priority lock" >&2; exit 1; }
+echo "queue-priority: settled $2 at P1"
+QP
+chmod +x "$TMP/qp-log"
+store '[{"id":"tk-c1","status":"open","assignee":"","title":"c1","notes":"","metadata":{"anchor_bead":"tk-anc"}},
+        {"id":"tk-stuck","status":"open","assignee":"","title":"stuck","notes":"","metadata":{"anchor_bead":"tk-anc"}}]'
+reset_log
+out=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-log" pr_finishing_settle tk-c1); rc=$?
+eq "$rc|$out" "0|queue-priority: settled tk-c1 at P1" "pr_finishing_settle: the writer's settle, its narrative on stdout"
+eq "$(grep '^qp ' "$STUB_GC_LOG")" "qp settle tk-c1 wait=$PR_FINISHING_LOCK_WAIT_SECS" "…waiting PR_FINISHING_LOCK_WAIT_SECS for the lock"
+eq "$PR_FINISHING_LOCK_WAIT_SECS" "30" "…which is 30 seconds"
+reset_log
+GC_QUEUE_PRIORITY_TOOL="$TMP/qp-log" route_finishing tk-c1 rig/gc-toolkit.polecat >/dev/null; rc=$?
+eq "$rc" "0" "route_finishing: a child that settles is routed"
+eq "$(meta tk-c1 gc.routed_to)" "rig/gc-toolkit.polecat" "…to the pool named"
+SL=$(grep -n '^qp settle tk-c1 wait=30$' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+RL=$(grep -n '^bd update tk-c1 --set-metadata gc.routed_to=rig/gc-toolkit.polecat$' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
+if [ -n "$SL" ] && [ -n "$RL" ] && [ "$SL" -lt "$RL" ]; then
+  ok "…settled under the short lock wait before the route is written"
+else
+  bad "route_finishing did not settle before it routed (settle at log line '${SL:-none}', route at '${RL:-none}')"
+fi
+hasnt "$(grep '^bd update tk-c1' "$STUB_GC_LOG")" "--priority" "…and the route carries no priority"
+reset_log
+GC_QUEUE_PRIORITY_TOOL="$TMP/qp-log" route_finishing tk-stuck rig/gc-toolkit.polecat 2>/dev/null; rc=$?
+eq "$rc" "1" "route_finishing: a child that does not settle returns 1"
+eq "$(meta tk-stuck gc.routed_to)" "<absent>" "…and is not routed"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update tk-stuck" "…by any write"
+
+# One copy of the settle-then-route and of the cadence's lock wait: a creator
+# that routed a child itself, or set the wait itself, would let the two drift.
+copies=$(grep -l -E '^[[:space:]]*route_finishing[[:space:]]*\(\)|QUEUE_PRIORITY_LOCK_WAIT_SECS=' "$HERE"/*.sh \
+  | grep -v -e '\.test\.sh$' -e '/bd-lib\.sh$' | sed "s|^$HERE/||" | paste -sd' ' -)
+eq "$copies" "" "(NO-COPY) only bd-lib.sh defines route_finishing or sets the cadence's lock wait"
+
 # --- validation_work_order: the shape mol-validate reads ----------------------
 eq "$(validation_work_order tk-anc correctness abc123)" \
-  '{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"correctness","reviewed_oid":"abc123"}' \
-  "validation_work_order: task_kind, anchor, lane and the reviewed head"
-eq "$(validation_work_order tk-anc human "")" '{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"human"}' \
+  '{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"correctness","reviewed_oid":"abc123","priority_shift":-1}' \
+  "validation_work_order: task_kind, anchor, lane and the reviewed head, born carrying the PR-finishing shift"
+eq "$(validation_work_order tk-anc human "")" '{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"human","priority_shift":-1}' \
   "…and an empty head leaves the pin out"
 eq "$(printf '%s' "$(validation_work_order tk-anc human x)" | jq -r --arg s "$VALIDATION_SELECT" '. as $m | $s | split(",") | all(.[]; . as $k | $m | has($k))')" "true" \
   "…carrying every key VALIDATION_SELECT names"
+
+# --- state_key: one directory name per identity --------------------------------
+ck() { printf '%s' "$1" | cksum | cut -d' ' -f1; }
+eq "$(state_key gc-toolkit gc-toolkit)" "gc-toolkit" "state_key: a safe name that is its own identity is used as it is"
+eq "$(state_key 'a/b' 'a/b')" "a_b-$(ck 'a/b')" "…a name with a character outside the safe set is its safe form and a checksum"
+eq "$(state_key 'a_b' 'a_b')" "a_b" "…so it never lands on the name its safe form spells"
+eq "$(state_key '..' '..')" "rig-$(ck '..')" "…a name that would climb out of its directory reads as rig"
+eq "$(state_key '' '')" "rig-$(ck '')" "…and so does an empty one"
+LONG="$(printf '%070d' 0 | tr 0 x)"
+eq "$(state_key "$LONG" "$LONG")" "$(printf '%064d' 0 | tr 0 x)-$(ck "$LONG")" "…a name longer than 64 bytes is cut to 64, then the checksum"
+eq "$(state_key dup /one/dup)" "dup-$(ck /one/dup)" "…and a name that reads other than its identity carries the identity's checksum"
+
+# --- rig_state_key: GC_RIG, else the rig root, else _unscoped -----------------
+eq "$(GC_RIG=gc-toolkit GC_RIG_ROOT=/x/gc-toolkit rig_state_key)" "gc-toolkit" "rig_state_key: GC_RIG names the rig"
+eq "$(GC_RIG_ROOT=/one/dup rig_state_key)" "dup-$(ck /one/dup)" "…with only GC_RIG_ROOT, the root's last element and a checksum of the whole root"
+[ "$(GC_RIG_ROOT=/one/dup rig_state_key)" != "$(GC_RIG_ROOT=/two/dup rig_state_key)" ] \
+  && ok "…so two roots that end in one name keep apart" || bad "two roots that end in one name share a key"
+eq "$(GC_RIG_ROOT=/one/dup/ rig_state_key)" "dup-$(ck /one/dup/)" "…a trailing slash still reads the last element"
+eq "$(rig_state_key)" "_unscoped" "…and with neither the key is _unscoped"
+
+# --- take_pass_lock: one pass at a time ------------------------------------------
+lock_free() { ( exec 8>>"$1/pass.lock"; flock -n 8 ) 2>/dev/null; }
+await_file() { local i=0; while [ ! -e "$1" ] && [ "$i" -lt 400 ]; do sleep 0.05; i=$((i + 1)); done; [ -e "$1" ]; }
+LD="$TMP/locks/rig"
+out=$(take_pass_lock "$LD" 60; rc=$?
+      printf 'rc=%s note=%s\n' "$rc" "$LOCK_NOTE"
+      if lock_free "$LD"; then echo held=no; else echo held=yes; fi
+      if { : >&9; } 2>/dev/null; then echo fd9=open; else echo fd9=closed; fi)
+has "$out" "rc=0 note=" "take_pass_lock: a free lock is taken (0)"
+has "$out" "held=yes" "…and held while the process that took it runs"
+has "$out" "fd9=open" "…on fd 9"
+read -r hpid hsince < "$LD/pass.holder"
+eq "$hpid" "$$" "…recording the pid of the process that took it"
+case "$hsince" in ''|*[!0-9]*) bad "…and when it took it (got '$hsince')" ;; *) ok "…and when it took it" ;; esac
+lock_free "$LD" && ok "…and freed once that process exits" || bad "the lock outlived the process that took it"
+( exec 9>>"$LD/pass.lock"; flock -n 9 || exit 1; : > "$TMP/lock-held"
+  i=0; while [ ! -e "$TMP/lock-release" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i + 1)); done ) </dev/null >/dev/null 2>&1 &
+LH=$!
+if await_file "$TMP/lock-held"; then
+  printf '%s %s\n' "$LH" "$(( $(date -u +%s) - 5 ))" > "$LD/pass.holder"
+  out=$(take_pass_lock "$LD" 60; rc=$?
+        printf 'rc=%s note=%s\n' "$rc" "$LOCK_NOTE"
+        if { : >&9; } 2>/dev/null; then echo fd9=open; else echo fd9=closed; fi)
+  has "$out" "rc=1 note=pid $LH, " "take_pass_lock: a lock another pass took inside the stall bound is busy (1), naming that pass"
+  has "$out" "s elapsed" "…and how long it has held the lock"
+  has "$out" "fd9=closed" "…and a busy lock leaves no descriptor open"
+  printf '%s 1\n' "$LH" > "$LD/pass.holder"
+  eq "$(take_pass_lock "$LD" 60; echo "rc=$?")" "rc=2" "…one taken longer ago than the stall bound is stalled (2)"
+  rm -f "$LD/pass.holder"
+  eq "$(take_pass_lock "$LD" 60; echo "rc=$? note=$LOCK_NOTE")" "rc=1 note=pid unknown" "…and a holder that left no record is busy, by an unknown pid"
+else
+  bad "the holder fixture never took the lock"
+fi
+: > "$TMP/lock-release"; wait "$LH" 2>/dev/null
+mkdir -p "$TMP/noflock"
+eq "$(PATH="$TMP/noflock" take_pass_lock "$LD" 60; echo "rc=$? note=$LOCK_NOTE")" "rc=3 note=flock not found on PATH" \
+  "take_pass_lock: with no flock on PATH there is no lock (3)"
+mkdir -p "$TMP/locks/blocked/pass.lock"
+eq "$(take_pass_lock "$TMP/locks/blocked" 60; echo "rc=$? note=$LOCK_NOTE")" "rc=3 note=cannot create $TMP/locks/blocked/pass.lock" \
+  "…nor with a lock file that cannot be created"
+
+# --- pass_child: nothing a pass runs holds the lock after it ----------------------
+eq "$(pass_child sh -c 'exit 7'; echo "$?")" "7" "pass_child: returns the program's status"
+# A pass that takes the lock and runs one program through pass_child. The
+# program records whether it was handed fd 9, leaves a process running that
+# keeps every descriptor it has, and waits for its release.
+cat > "$TMP/pass.sh" <<'PASS'
+. "$1"
+take_pass_lock "$2" 60 || exit 9
+pass_child "$3"
+PASS
+cat > "$TMP/prog.sh" <<'PROG'
+#!/usr/bin/env bash
+if { : >&9; } 2>/dev/null; then echo open; else echo closed; fi > "$PROG_DIR/fd9"
+( exec sleep 300 ) </dev/null >/dev/null 2>&1 &
+echo "$!" > "$PROG_DIR/daemon"
+: > "$PROG_DIR/started"
+i=0; while [ ! -e "$PROG_DIR/release" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i + 1)); done
+PROG
+chmod +x "$TMP/prog.sh"
+export PROG_DIR="$TMP/prog"; mkdir -p "$PROG_DIR"
+LC="$TMP/locks/child"
+bash "$TMP/pass.sh" "$HERE/bd-lib.sh" "$LC" "$TMP/prog.sh" </dev/null >/dev/null 2>&1 &
+PP=$!
+if await_file "$PROG_DIR/started"; then
+  eq "$(cat "$PROG_DIR/fd9")" "closed" "pass_child: the program runs without fd 9"
+  kill -9 "$PP" 2>/dev/null; wait "$PP" 2>/dev/null
+  lock_free "$LC" && bad "killing the pass by itself freed the lock while its program ran on" \
+    || ok "…the lock stays held while it runs, though the pass that started it was killed"
+  : > "$PROG_DIR/release"
+  i=0; while ! lock_free "$LC" && [ "$i" -lt 400 ]; do sleep 0.05; i=$((i + 1)); done
+  lock_free "$LC" && ok "…and is freed once the program exits" || bad "the lock outlived the program pass_child ran"
+  dpid="$(cat "$PROG_DIR/daemon" 2>/dev/null)"
+  if [ -n "$dpid" ] && kill -0 "$dpid" 2>/dev/null; then
+    ok "…while the process the program left behind still runs, holding no lock"
+  else
+    bad "the process the program leaves behind never ran, so nothing about it was proven"
+  fi
+  [ -n "$dpid" ] && kill "$dpid" 2>/dev/null
+else
+  bad "the pass fixture never started its program"
+  : > "$PROG_DIR/release"; kill -9 "$PP" 2>/dev/null; wait "$PP" 2>/dev/null
+fi
 
 echo
 echo "passed: $PASS  failed: $FAIL"

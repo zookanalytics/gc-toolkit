@@ -17,9 +17,9 @@ burn this one. Steps are not materialized; read each description as you
 reach it. On crash, re-derive position from git and bead state.
 
 Everything downstream of the gating handoff — check arming and review
-dispatch, PR opening, the merge itself, external PR facts, convoy
-graduation — is the refinery-reconcile ORDER's (60s, no session). This
-formula never runs those passes: docs/refinery-merge-cadence.md.
+dispatch, PR opening, the merge itself, external PR facts — is the
+refinery-reconcile ORDER's (60s, no session). This formula never runs those
+passes: docs/refinery-merge-cadence.md.
 
 State writes: every merge_result transition goes through
 assets/scripts/lifecycle.sh (one atomic validated write per transition);
@@ -80,8 +80,8 @@ description = "Default target branch for merges."
 default = "main"
 
 [vars.default_merge_strategy]
-description = "Default when metadata.merge_strategy is unset: 'direct' = FF + push to target; 'mr'/'pr' = gated PR pipeline. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured."
-default = "mr"
+description = "Default when metadata.merge_strategy is unset: 'direct' = FF + push to target; 'mr'/'pr' = gated PR pipeline. Whatever this default says, merge-push's merge-strategy-resolve block resolves a bead that would land direct on target_branch to mr, so target_branch takes work only through a PR. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured."
+default = "direct"
 
 [vars.delete_merged_branches]
 description = "Delete source branches after a direct merge."
@@ -92,7 +92,7 @@ description = "After a direct merge, best-effort fast-forward the rig's canonica
 default = "true"
 
 [vars.check_set]
-description = "Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of check names, each requiring check.<name>=green before merge.sh lands the PR. 'correctness' = a review dispatched by the cadence's gate-ensure, the check that also holds the PR `## Summary` to the whole branch diff, so 'none' forgoes that summary check along with the rest of the review; 'triage' = a review that reads the check index at the reviewed commit and widens `check_set` through `signoff.sh --add-gates` with the specialist checks the diff warrants, adding only and never removing. Approval is not a check_set token — it is a universal merge rule (merge.sh requires every PR to carry a standing non-city APPROVED review), armed for every anchor and named by no token here. The 'none' sentinel is stamped (never collapsed to empty) so checkless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured, and a changed default reaches the next wisp."
+description = "Merge gating check-set stamped on every anchor this formula transitions into a gating state: comma list of check names, each a lane that must derive green (lane-state.sh) before merge.sh lands the PR. 'correctness' = a review dispatched by the cadence's gate-ensure, the check that also holds the PR `## Summary` to the whole branch diff, so 'none' forgoes that summary check along with the rest of the review; 'triage' = a review that reads the check index at the reviewed commit and widens `check_set` through `signoff.sh --add-gates` with the specialist checks the diff warrants, adding only and never removing. Approval is not a check_set token — it is a universal merge rule (merge.sh requires every PR to carry a standing non-city APPROVED review), armed for every anchor and named by no token here. The 'none' sentinel is stamped (never collapsed to empty) so checkless-by-choice and never-normalized stay distinct on the anchor; an EMPTY value is treated as absent and recovers this default, because the --root-only pour path hand-substitutes raw TOML and a mis-substitution must not silently un-gate every PR. Neither the startup pour nor the next-iteration pour passes it, so each wisp renders this default as it stands when that wisp is poured, and a changed default reaches the next wisp."
 default = "correctness,triage"
 
 [[steps]]
@@ -132,11 +132,11 @@ id = "find-work"
 title = "Find next work bead assigned to me"
 needs = ["check-inbox"]
 description = """
-Select one assigned, open, branch-bearing work bead — excluding ANY bead
-that carries a `merge_result`: a bead with one is a gating anchor driven by
-the cadence's bead-keyed passes, never by this queue, and an assignee on one
-is an anomaly to flag, not work to take. Every path that legitimately
-returns a bead here clears the field first.
+Select one assigned, open, branch-bearing work bead that nothing holds —
+excluding ANY bead that carries a `merge_result`: a bead with one is a gating
+anchor driven by the cadence's bead-keyed passes, never by this queue, and an
+assignee on one is an anomaly to flag, not work to take. Every path that
+legitimately returns a bead here clears the field first.
 
 ```bash
 # >>> find-work-select
@@ -159,7 +159,30 @@ if ! printf '%s' "$WORK_ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
   gc runtime drain-ack
   exit 0
 fi
-WORK=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") == "")] | sort_by((.priority // 2), (.created_at // .created // .id)) | .[0].id // empty' 2>/dev/null)
+# A bead something holds waits here until its blockers close. The hold is
+# hold-lib.sh's, the pack's one definition: a bead carrying a branch is work in
+# flight, so only a blocker on the bead itself holds it, never a park on an
+# ancestor. A blocker the store does not return holds the bead too, and a walk
+# that cannot read ends the turn, since a hold nobody read is no release.
+SCRIPTS=""
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -f "$c/assets/scripts/hold-lib.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+done
+fw_hold_read() { gc bd list ${GC_RIG:+--rig="$GC_RIG"} --id "$1" --all --include-gates --include-infra --include-templates --limit=0 --json; }
+WORK_JUDGED=""
+if [ -n "$SCRIPTS" ] && . "$SCRIPTS/hold-lib.sh"; then
+  WORK_JUDGED=$(printf '%s' "$WORK_ROWS" | jq -c '[.[] | select((.metadata.merge_result // "") == "")]' | hold_annotate fw_hold_read) || WORK_JUDGED=""
+fi
+if ! printf '%s' "$WORK_JUDGED" | jq -e 'type == "array"' >/dev/null 2>&1; then
+  echo "find-work: could not read what holds the assigned handoffs (hold-lib.sh not in the pack, or a store read failed) — ending the turn without claiming; the next patrol retries." >&2
+  gc runtime drain-ack
+  exit 0
+fi
+WORK=$(printf '%s' "$WORK_JUDGED" | jq -r '[.[] | select(.hold.state == "free")] | sort_by((.priority // 2), (.created_at // .created // .id)) | .[0].id // empty' 2>/dev/null)
+WORK_HELD=$(printf '%s' "$WORK_JUDGED" | jq -r '[.[] | select(.hold.state != "free") | (.id | tostring) + " waits on " + .hold.why] | join("; ")' 2>/dev/null)
+if [ -n "$WORK_HELD" ]; then
+  echo "find-work: leaving held handoff(s) until their blockers close: $WORK_HELD." >&2
+fi
 WORK_PARKED=$(printf '%s' "$WORK_ROWS" | jq -r '[.[] | select((.metadata.merge_result // "") != "") | .id + "(" + (.metadata.merge_result | tostring) + ")"] | join(" ")' 2>/dev/null)
 if [ -n "$WORK_PARKED" ]; then
   echo "find-work: NOT selecting parked gating anchor(s) that carry an assignee: $WORK_PARKED. A bead with merge_result is driven by the cadence, never by find-work; flag only — do not re-gate it, do not clear it here." >&2
@@ -175,14 +198,22 @@ parked anchor can never crowd real work out of it; the client-side filter drops
 the anchors and the sort takes the highest-priority, oldest-within-band
 handoff. Flag, never rewrite.
 
+A held bead is left in the queue, and the block's stderr names what holds it. A
+landing bead is assigned to you when its integration effort is stood up, and it
+waits on the effort's beads and its summary task by `blocks` edges, so it is
+taken once the last of them closes. A handoff with an open blocker of its own
+waits the same way, and a park on its epic holds none of them.
+
 If found: confirm `metadata.branch` exists (`gc bd show $WORK --json`),
 default `metadata.target` to {{target_branch}}, note the id, close this
 step.
 
 If NO work: this turn is over. End the turn — no sleeping, no watching, and
 do NOT run the cadence's passes inline (the refinery-reconcile order is the
-single writer; see docs/refinery-merge-cadence.md). The session_sleep policy
-restarts you on the idle interval."""
+single writer; see docs/refinery-merge-cadence.md). The next turn comes when
+work reaches you: a polecat's handoff wakes and nudges you, and deferred
+dispatch sends a notice once a bead assigned to you while it waited becomes
+ready."""
 
 [[steps]]
 id = "rebase"
@@ -194,12 +225,12 @@ description = """
 Read the bead ONCE and prepare it by bringing its branch current with the
 target — one fail-closed block, because `gc bd` fails open (errors to stderr,
 empty stdout) and an unreadable bead must not read as "unset". Every branch
-shape — per-bead `polecat/*`, shared `integration/*`, a graduation bead — is
-brought current by MERGING origin/$TARGET in, never by a rebase: a rebase
-rewrites history and forces a --force-with-lease push, which resets GitHub's
-"changes since last review" and drifts the PR's line-anchored review comments.
-main stays linear because merge.sh squashes at land, not because the branch was
-rewritten. prepare_mode=merge is stamped on the bead BEFORE touching the
+shape — per-bead `polecat/*`, and the shared `integration/*` a landing bead
+carries — is brought current by MERGING origin/$TARGET in, never by a rebase:
+a rebase rewrites history and forces a --force-with-lease push, which resets
+GitHub's "changes since last review" and drifts the PR's line-anchored review
+comments. main stays linear because merge.sh squashes at land, not because the
+branch was rewritten. prepare_mode=merge is stamped on the bead BEFORE touching the
 worktree, because the hand-back path (a rejection repool) reads it in a
 different shell to bring the branch current the same way.
 
@@ -245,24 +276,33 @@ PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)
 # A gate an interrupted iteration left running still runs in the prep worktree,
 # so it is stopped before the worktree is rebuilt under it. A gate that will not
 # stop leaves the work with the refinery. The launcher is found by path, as the
-# rig root is, never from cwd.
+# rig root is, never from cwd. Its TERM-to-KILL grace outlasts the ten seconds
+# `gctk rig` takes to stop a check's command, so no command outlives the stop.
 GATE="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-gate"
 JOB=""
 for c in "$RIG_ROOT" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
   [ -x "$c/assets/scripts/detached-job.sh" ] && { JOB="$c/assets/scripts/detached-job.sh"; break; }
 done
 [ -n "$JOB" ] || { echo "detached-job.sh not found, so a gate left running in $GATE cannot be stopped. NOT rebuilding the prep worktree; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
-if ! STOP_OUT=$("$JOB" stop "$GATE"); then
+if ! STOP_OUT=$(DETACHED_JOB_STOP_GRACE=20 "$JOB" stop "$GATE"); then
   printf '%s' "$STOP_OUT"; echo
   echo "the gate left running in $GATE did not stop. NOT rebuilding the prep worktree under it; leaving the work with the refinery to retry"
   gc runtime drain-ack
   exit 1
 fi
-git -C "$RIG_ROOT" worktree remove --force "$PREP_WT" 2>/dev/null || true
-# Check the add result before any conflict path can run: a failed staging is
+# refinery-workspace.sh clears the leftover and stages the branch, so this block
+# removes nothing itself. It is found the way the launcher is. The stage records
+# that the prep worktree holds $BRANCH for $WORK, and merge-push takes the bead
+# and branch it acts for from that record.
+WS=""
+for c in "$RIG_ROOT" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
+done
+[ -n "$WS" ] || { echo "refinery-workspace.sh not found, so the prep worktree cannot be staged. NOT preparing the branch; leaving it with the refinery to retry"; gc runtime drain-ack; exit 1; }
+# Check the staging result before any conflict path can run: a failed staging is
 # prep-setup infrastructure, not an origin/$TARGET conflict, so it leaves the
 # work with the refinery to retry instead of repooling it with a false rejection.
-if ! git -C "$RIG_ROOT" worktree add -f --detach "$PREP_WT" "origin/$BRANCH"; then
+if ! "$WS" stage --rig-root "$RIG_ROOT" --branch "$BRANCH" --work "$WORK"; then
   echo "could not stage the prep worktree at $PREP_WT — NOT preparing the branch; leaving it with the refinery to retry (prep-setup failure, not an origin/$TARGET conflict)"
   gc runtime drain-ack
   exit 1
@@ -310,11 +350,22 @@ esac
 ```
 
 Do NOT delete `origin/$BRANCH` (the resuming polecat needs it). Tear down the
-prep worktree (`git -C "$RIG_ROOT" worktree remove --force "$PREP_WT"`,
-re-resolving `RIG_ROOT`/`PREP_WT` as the rebase step did); the prep worktree is
-detached and holds no branch, so nothing else has to be deleted, the rig root's
-HEAD was never moved, and an interrupted teardown is cleared by the next
-iteration's rebase step.
+prep worktree with `refinery-workspace.sh teardown`, the script the rebase step
+staged it with. The prep worktree is detached and holds no branch, so nothing
+else has to be deleted, and the rig root's HEAD was never moved. A teardown
+that does not complete is no reason to stop, because the next iteration's
+rebase step clears the leftover before it stages:
+```bash
+# >>> prep-teardown
+WS=""
+for c in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
+done
+if [ -z "$WS" ] || ! "$WS" teardown; then
+  echo "the prep worktree was not torn down; carry on, since the next rebase step clears it before staging"
+fi
+# <<< prep-teardown
+```
 Then jump to next-iteration (pour before burn) — the rejection ends this
 cycle."""
 
@@ -343,16 +394,20 @@ one `gc formula show --rig` call and gives the gate the rig's value wherever
 the rig sets one, so every session runs the same checks. Never type a
 configured check in by hand.
 
-The gate runs each check in a bash of its own, in the prep worktree, with
-stdin closed. A comment, a quote, a heredoc or a `cd` in a command means what
-it would at a prompt, an `exit` in it ends only that check, and the checks
+The gate runs each check through `gctk rig`, which runs the command with bash
+in the prep worktree, with stdin closed, and records the result of test (the
+full suite), lint and typecheck against the merged head: the commit merge-push
+pushes and the reviews are pinned to. A run already recorded there answers
+from its record. A comment, a quote, a heredoc or a `cd` in a command means
+what it would at a prompt, an `exit` in it ends only that check, and the checks
 after a failed one still run. A check's verdict is its command's exit status,
 so a command that sends its work to the background passes before that work
 ends: each must finish in the foreground.
 
 When the rig sets no check commands, the block says so and starts no gate.
 Add the quality gates documented in the rig's CLAUDE.md where the block marks,
-each as `add_check <name> '<command>'` with the command as documented and any
+each as `add_check <check> '<command>'`, where <check> is the one it is
+(setup, typecheck, lint, build or test), with the command as documented and any
 environment it needs, and run the block again. Those checks run only for a rig
 that sets no check commands, and a gate with no check never starts, so the
 gates are never skipped silently. Start the gate:
@@ -369,18 +424,28 @@ for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC
   [ -x "$c/assets/scripts/detached-job.sh" ] && { JOB="$c/assets/scripts/detached-job.sh"; break; }
 done
 [ -n "$JOB" ] || { echo "detached-job.sh not found; NOT running the gate, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+[ -x "$GCTK" ] || { echo "no gctk binary at $GCTK to run the checks through; NOT running the gate, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 [ -d "$PREP_WT" ] || { echo "cannot find the prep worktree $PREP_WT; running no checks and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 # A gate a previous session left running reads the checks and the script this
 # block rewrites, so it is stopped first. One that survives the stop still
 # runs, so nothing is rewritten under it and the work stays with the refinery.
-if ! STOP_OUT=$("$JOB" stop "$GATE"); then
+if ! STOP_OUT=$(DETACHED_JOB_STOP_GRACE=20 "$JOB" stop "$GATE"); then
   printf '%s' "$STOP_OUT"; echo
   echo "the gate a previous session left running in $GATE did not stop, so its checks are not rewritten under it; leaving the work with the refinery to retry"
   gc runtime drain-ack
   exit 1
 fi
-rm -rf "${GATE:?}/checks"
-mkdir -p "$GATE/checks"
+# refinery-workspace.sh empties the checks directory, so this block removes
+# nothing itself. It is found the way the launcher is.
+WS=""
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
+done
+[ -n "$WS" ] || { echo "refinery-workspace.sh not found, so the previous gate's checks cannot be cleared; NOT running the gate, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+"$WS" checks --rig-root "$RIG_ROOT" || { echo "could not empty $GATE/checks; running no checks and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 # >>> rig-check-commands
 # One read serves every check. An unreadable answer gives every check an empty
 # value, which is also what a rig with no checks gives, so the block runs
@@ -397,9 +462,9 @@ fi
 check_value() {
   printf '%s' "$CHECKS_JSON" | jq -r --arg n "$1" '[.vars[] | select(.name == $n)][0] | if . == null then "" elif .rig_default != null then .rig_default else (.default // "") end'
 }
-# add_check <name> <command>: the command becomes the gate's next check. A
-# check that cannot be written runs nothing and leaves the work with the
-# refinery to retry.
+# add_check <check> <command>: the command becomes the gate's next check, run as
+# the gctk rig check of that name. A check that cannot be written runs nothing
+# and leaves the work with the refinery to retry.
 CHECKS=0
 add_check() {
   CHECKS=$((CHECKS + 1))
@@ -409,17 +474,17 @@ add_check() {
   exit 1
 }
 RUN_TESTS=$(check_value run_tests)
-for CHECK in setup_command typecheck_command lint_command build_command test_command; do
-  if [ "$CHECK" = "test_command" ] && [ "$RUN_TESTS" != "true" ]; then
+for CHECK in setup typecheck lint build test; do
+  if [ "$CHECK" = "test" ] && [ "$RUN_TESTS" != "true" ]; then
     echo "run-tests: test_command skipped (run_tests=${RUN_TESTS})"
     continue
   fi
-  CHECK_CMD=$(check_value "$CHECK")
+  CHECK_CMD=$(check_value "${CHECK}_command")
   if [ -z "$CHECK_CMD" ]; then
-    echo "run-tests: ${CHECK} not set"
+    echo "run-tests: ${CHECK}_command not set"
     continue
   fi
-  echo "run-tests: ${CHECK} = ${CHECK_CMD}"
+  echo "run-tests: ${CHECK}_command = ${CHECK_CMD}"
   add_check "$CHECK" "$CHECK_CMD"
 done
 [ "$CHECKS" -gt 0 ] || echo "run-tests: rig ${GC_RIG} sets no check commands"
@@ -427,22 +492,42 @@ done
 if [ "$CHECKS" -eq 0 ]; then
   # The rig sets no check commands. Add each quality gate its CLAUDE.md
   # documents here, in the order it gives them, as
-  #   add_check <name> '<the command as documented, with any environment it needs>'
+  #   add_check <setup|typecheck|lint|build|test> '<the command as documented, with any environment it needs>'
   :
 fi
 [ "$CHECKS" -gt 0 ] || { echo "run-tests: no check to run, so no gate started; add the quality gates the rig's CLAUDE.md documents where this block marks, and run it again"; exit 1; }
 cat > "$GATE/gate.sh" <<'GATE'
 cd "$1" || exit 2
+gctk="$3"
+# Every check ends this many seconds into the gate, inside the two hours its
+# wait allows, so the wait never stops gctk in the middle of a stop of its own.
+deadline=7080
 failed=""
-# check <name>: run the command on stdin in a bash of its own, with stdin
-# closed, and note its exit status when it fails.
+stopped=""
+# check <check>: run the command on stdin through gctk rig and note its exit
+# when it is not a pass: 1 a fail, any other a run that says nothing about the
+# code.
 check() {
-  local cmd rc
+  local cmd rc left
   cmd=$(cat)
   echo "== $1"
-  bash -c "$cmd" </dev/null
+  left=$((deadline - SECONDS))
+  if [ "$left" -lt 60 ]; then
+    echo "no time left in the gate's bound to run $1"
+    stopped="$stopped $1:timeout"
+    return
+  fi
+  if [ "$1" = test ]; then
+    "$gctk" rig test --scope full --command "$cmd" --timeout "${left}s" </dev/null
+  else
+    "$gctk" rig "$1" --command "$cmd" --timeout "${left}s" </dev/null
+  fi
   rc=$?
-  [ "$rc" -eq 0 ] || failed="$failed $1:$rc"
+  case "$rc" in
+    0) ;;
+    1) failed="$failed $1:1" ;;
+    *) stopped="$stopped $1:$rc" ;;
+  esac
 }
 # Each check is a file in the directory the job names, its name led by its
 # place in the order.
@@ -451,10 +536,11 @@ for f in "$2"/*; do
   name=${f##*/}
   check "${name#*-}" < "$f"
 done
+[ -z "$stopped" ] || { echo "GATE CUT SHORT:$stopped${failed:+ (failed:$failed)}"; exit 4; }
 [ -z "$failed" ] || { echo "GATE FAILED:$failed"; exit 1; }
 echo "GATE PASSED"
 GATE
-"$JOB" start "$GATE" -- bash "$GATE/gate.sh" "$PREP_WT" "$GATE/checks" || { echo "the gate did not start; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+"$JOB" start "$GATE" -- bash "$GATE/gate.sh" "$PREP_WT" "$GATE/checks" "$GCTK" || { echo "the gate did not start; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 # <<< refinery-gate-start
 ```
 
@@ -482,7 +568,7 @@ for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC
   [ -x "$c/assets/scripts/detached-job.sh" ] && { JOB="$c/assets/scripts/detached-job.sh"; break; }
 done
 [ -n "$JOB" ] || { echo "detached-job.sh not found from here, so this call cannot wait on the gate, which keeps running in $GATE; run this block again from the pack checkout, or with GC_RIG_ROOT or GC_CITY_PATH naming it, and do not end the turn"; exit 1; }
-WAIT_OUT=$("$JOB" wait "$GATE" --limit 7200); WAIT_RC=$?
+WAIT_OUT=$(DETACHED_JOB_STOP_GRACE=20 "$JOB" wait "$GATE" --limit 7200); WAIT_RC=$?
 printf '%s' "$WAIT_OUT"; echo
 if [ "$WAIT_RC" -eq 3 ]; then
   # This patrol's own wisp, found the way patrol-wisp-pour finds the wisp it
@@ -504,8 +590,17 @@ exit "$WAIT_RC"
 
 Read the result off the report and the job's log (`$GATE/log`):
 - `state=done rc=0`: every check passed and the log ends `GATE PASSED`.
-- `state=done rc=1`: the log's `GATE FAILED:` line names each failed check
-  with its exit code, and the log above it holds their output.
+- `state=done rc=1`: the log's `GATE FAILED:` line names each failed check,
+  and the log above it holds their output. A fail answered from its record
+  prints none; `--force` runs it again, through `detached-job.sh` with a
+  directory of its own, when handle-failures needs what failed.
+- `state=done rc=4`: a check stopped short of a verdict, which says nothing
+  about the branch. The log's `GATE CUT SHORT:` line names it, and `gctk rig`'s
+  line above it says why, such as a crash or a command that changed a tracked
+  file. Start the gate once more; the checks that passed answer from their
+  records. When the same check stops short again at the same head, take
+  handle-failures' branch-caused path with `gctk rig`'s line as the failure
+  summary, so the work goes back to its author.
 - `state=running` from a wait that exits 1: the gate ran past the limit and
   its process group survived TERM and KILL, so it still runs in the prep
   worktree. Never start another gate beside it. Escalate with key
@@ -556,63 +651,24 @@ case "$?" in
   *) echo "rejection-repool.sh recorded nothing that dispatches $WORK (its output above says why); ending the turn"; gc runtime drain-ack; exit 1 ;;
 esac
 # <<< mr-aware-rejection
-# >>> rejection-branch-keep
-# $BEAD_JSON is the row rejection-repool.sh read before its write, so this
-# decision costs no read of its own. It is empty only when the script could not
-# read the bead, and then the branch it names is kept: a wrongly kept branch is
-# swept later, and a wrongly deleted one strands a PR.
-# >>> merge-strategy-resolve
-# The one reading of the merge strategy. Every step that branches on it reads
-# it through this block, so the step that keeps a branch and the step that
-# opens a PR for that branch cannot disagree about the mode the bead is in.
-MERGE_STRATEGY=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.merge_strategy // "{{default_merge_strategy}}"')
-MERGE_STRATEGY="${MERGE_STRATEGY:-direct}"
-if [ "$MERGE_STRATEGY" = "pr" ]; then MERGE_STRATEGY="mr"; fi
-# A target under polecat/ is another bead's per-bead PR head, so work landing
-# there folds into that PR rather than opening one of its own. In mr mode with
-# no PR of its own to reuse, that would open a nested branch -> polecat/<id> PR,
-# which a fold never wants, so resolve it to direct: the branch merges onto the
-# PR head and the PR re-reviews at the new head. Shaped targets (the rig
-# default, integration/, a named branch) stay mr, and so does a bead already
-# recording its own PR. MS_FOLD_IN carries the reason to the branch decision so
-# a kept branch and this flip cannot disagree.
-MS_FOLD_IN=
-MS_TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // empty')
-MS_BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
-MS_HAS_OWN_PR=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata | [(.existing_pr // ""), (.pr_url // ""), (.pr_number // "" | tostring)] | map(select(. != "")) | length')
-case "$MS_TARGET" in
-  polecat/*)
-    if [ "$MERGE_STRATEGY" = "mr" ] && [ "$MS_HAS_OWN_PR" = "0" ] && [ "$MS_TARGET" != "$MS_BRANCH" ]; then
-      MERGE_STRATEGY="direct"
-      MS_FOLD_IN=1
-    fi ;;
-esac
-# <<< merge-strategy-resolve
-BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
-# Nothing PR-shaped on the bead means "no PR will ever want this branch" only
-# in direct mode. In mr mode the PR is opened later, by the cadence's pr-open,
-# so that test is true for the whole pre-open window. A first-pass rejection
-# lands inside it.
-PR_SHAPED=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata | [(.pr_url // ""), (.pr_number // "" | tostring), (.existing_pr // "")] | map(select(. != "")) | length')
-if ! printf '%s' "$BEAD_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
-  echo "keeping whatever branch $WORK names — rejection-repool.sh could not read the bead, and the visit it filed carries it"
-elif [ -z "$BRANCH" ]; then
-  echo "no metadata.branch on $WORK — no branch to delete"
-elif [ "$MERGE_STRATEGY" != "direct" ]; then
-  echo "keeping origin/$BRANCH — merge_strategy=$MERGE_STRATEGY; the PR pipeline needs the branch"
-elif [ "${PR_SHAPED:-1}" != "0" ]; then
-  echo "keeping origin/$BRANCH — the bead already records a PR"
-elif [ -n "$MS_FOLD_IN" ]; then
-  echo "keeping origin/$BRANCH — it folds into the PR at $MS_TARGET and carries the rework"
-else
-  git push origin --delete "$BRANCH" || echo "could not delete origin/$BRANCH — a kept branch is swept later; the repool already stands, so this does not fail the cycle"
-fi
-# <<< rejection-branch-keep
 ```
-Tear down the prep worktree (`git -C "$RIG_ROOT" worktree remove --force
-"$PREP_WT"`, re-resolving `RIG_ROOT`/`PREP_WT` as the rebase step did); it is
-detached and holds no branch, so nothing else has to be deleted. Then jump to
-next-iteration.
+Do NOT delete `origin/$BRANCH` (the rebuild resumes it, in every merge mode).
+Tear down the prep worktree with `refinery-workspace.sh teardown`, the script
+the rebase step staged it with. It is detached and holds no branch, so nothing
+else has to be deleted, and a teardown that does not complete is cleared by the
+next rebase step:
+```bash
+# >>> prep-teardown
+WS=""
+for c in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
+done
+if [ -z "$WS" ] || ! "$WS" teardown; then
+  echo "the prep worktree was not torn down; carry on, since the next rebase step clears it before staging"
+fi
+# <<< prep-teardown
+```
+Then jump to next-iteration.
 
 **Pre-existing on target:** dedup FIRST, file only if none, then proceed
 with the merge. One block, one shell — a probe result that does not survive
@@ -699,6 +755,24 @@ fi
 ```
 Note the resulting bug id in your merge notes — it satisfies the GATE.
 
+Then mark each check you judged pre-existing, once per check with every
+tracker the block printed for it, on the anchor at the merged head, so a review
+pinned there does not run into the known wall again:
+```bash
+# >>> refinery-pre-existing-mark
+CHECK="<test, lint or typecheck: the check whose failures you judged pre-existing>"
+TRACKERS="<the tracker id each run of the block above printed for it, space-separated>"
+RIG_ROOT="${GC_RIG_ROOT:-}"
+[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
+HEAD_OID=$(git -C "$PREP_WT" rev-parse HEAD)
+ANCHOR=$(gc bd show "$WORK" --json 2>/dev/null | jq -r '.[0].metadata.anchor_bead // empty' 2>/dev/null)
+PRE=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do [ -x "$c/assets/scripts/rig-check-pre-existing.sh" ] && { PRE="$c/assets/scripts/rig-check-pre-existing.sh"; break; }; done
+"${PRE:?rig-check-pre-existing.sh not found in the pack}" --bead "${ANCHOR:-$WORK}" --check "$CHECK" --commit "$HEAD_OID" --worktree "$PREP_WT" --trackers "$TRACKERS" || echo "the mark did not land; the merge goes on, and a review at this head runs the suite itself"
+# <<< refinery-pre-existing-mark
+```
+
 **GATE**: no merge without all checks passing OR every pre-existing
 failure's bug filed/found."""
 
@@ -711,37 +785,52 @@ description = """
 **delete_merged_branches = {{delete_merged_branches}}** /
 **auto_ff_rig_main = {{auto_ff_rig_main}}**
 
-Read strategy and helpers once:
+Read the bead, its strategy and the helpers once. The step's blocks run in
+order in one shell, since each reads what an earlier one set.
+
+**The prepared head is one bead's, and this step acts for that bead.** The
+rebase step recorded in the prep worktree which bead and branch it staged
+there. The step's first lines take `WORK` and `BRANCH` from that record, never
+from the agent's shell, so every block after them pushes, lands and records
+for the bead whose head the prep worktree holds, whatever the shell carried
+before. When the shell named another bead, the block says which one it now
+acts for. When the prep worktree records nothing, or there is none, the block
+tears down what is there, pushes and records nothing, and exits 4 without
+draining: jump to next-iteration, and the next patrol prepares the work again.
 ```bash
+# >>> prep-staged-work
+RIG_ROOT="${GC_RIG_ROOT:-}"
+[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+WS=""
+for c in "$RIG_ROOT" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
+done
+[ -n "$WS" ] || { echo "refinery-workspace.sh not found, so nothing shows which bead the prep worktree holds; leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+if ! HELD=$("$WS" held --rig-root "$RIG_ROOT"); then
+  "$WS" teardown --rig-root "$RIG_ROOT" || echo "the prep worktree was not torn down; the next rebase step clears it before staging"
+  echo "nothing shows which bead the prep worktree holds, so nothing is pushed or recorded; jump to next-iteration, and the next patrol prepares the work again"
+  exit 4
+fi
+PRIOR_WORK="${WORK:-}"
+{ IFS= read -r WORK; IFS= read -r BRANCH; } <<<"$HELD"
+[ -z "$PRIOR_WORK" ] || [ "$PRIOR_WORK" = "$WORK" ] || echo "WORK was $PRIOR_WORK, but the prep worktree holds $BRANCH for $WORK, so this step acts for $WORK"
+# <<< prep-staged-work
 BEAD_JSON=$(gc bd show $WORK --json)
-BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch')
 TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // "{{target_branch}}"')
 # >>> merge-strategy-resolve
-# The one reading of the merge strategy. Every step that branches on it reads
-# it through this block, so the step that keeps a branch and the step that
-# opens a PR for that branch cannot disagree about the mode the bead is in.
+# The one reading of the merge strategy. merge-push is the only step that
+# branches on it. A bead that would land direct on the default branch resolves
+# to mr, so work reaches {{target_branch}} only through a PR whether or not its
+# ruleset is on (docs/warrants.md). A bead with no target lands on the default
+# branch, so it resolves to mr too. local passes through whatever its target,
+# and merge-push refuses it as an unsupported strategy.
 MERGE_STRATEGY=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.merge_strategy // "{{default_merge_strategy}}"')
 MERGE_STRATEGY="${MERGE_STRATEGY:-direct}"
 if [ "$MERGE_STRATEGY" = "pr" ]; then MERGE_STRATEGY="mr"; fi
-# A target under polecat/ is another bead's per-bead PR head, so work landing
-# there folds into that PR rather than opening one of its own. In mr mode with
-# no PR of its own to reuse, that would open a nested branch -> polecat/<id> PR,
-# which a fold never wants, so resolve it to direct: the branch merges onto the
-# PR head and the PR re-reviews at the new head. Shaped targets (the rig
-# default, integration/, a named branch) stay mr, and so does a bead already
-# recording its own PR. MS_FOLD_IN carries the reason to the branch decision so
-# a kept branch and this flip cannot disagree.
-MS_FOLD_IN=
 MS_TARGET=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.target // empty')
-MS_BRANCH=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.branch // empty')
-MS_HAS_OWN_PR=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata | [(.existing_pr // ""), (.pr_url // ""), (.pr_number // "" | tostring)] | map(select(. != "")) | length')
-case "$MS_TARGET" in
-  polecat/*)
-    if [ "$MERGE_STRATEGY" = "mr" ] && [ "$MS_HAS_OWN_PR" = "0" ] && [ "$MS_TARGET" != "$MS_BRANCH" ]; then
-      MERGE_STRATEGY="direct"
-      MS_FOLD_IN=1
-    fi ;;
-esac
+[ -n "$MS_TARGET" ] || MS_TARGET="{{target_branch}}"
+if [ "$MERGE_STRATEGY" = "direct" ] && [ "$MS_TARGET" = "{{target_branch}}" ]; then MERGE_STRATEGY="mr"; fi
 # <<< merge-strategy-resolve
 EXISTING_PR=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.existing_pr // empty')
 if [ -n "$EXISTING_PR" ] && [ "$MERGE_STRATEGY" = "direct" ]; then
@@ -756,6 +845,7 @@ if [ -z "$LC" ]; then
   gc runtime drain-ack
   exit 1
 fi
+# >>> branch-has-real-change
 branch_has_real_change() {
   # 0-diff/0-commit guard: does <branch-ref> introduce a real change vs its
   # merge-base with <target-ref>? 0 = yes; 1 = empty (REFUSE close-as-merged);
@@ -766,87 +856,101 @@ branch_has_real_change() {
   [ "$(git rev-list --count "$bhrc_base..$2" 2>/dev/null || echo 0)" -ge 1 ] || return 1
   return 0
 }
+# <<< branch-has-real-change
 ```
 
 **0. Refuse a 0-diff branch (both modes).** A close-as-merged or a PR for a
 branch that merges to a no-op is a false completion. Never silently retry. The
 prepared head is the detached prep worktree's HEAD (the rebase step staged it
-there), so resolve that path and read its commit rather than a `temp` branch:
+there), so resolve that path and read its commit rather than a `temp` branch.
+A branch with no change is not always a false completion. `direct-merge-push.sh`
+stamps `direct_landing_sha` on the bead before it pushes, so a target that
+carries the stamped commit holds a direct landing an earlier patrol pushed and
+did not record. The block sends that bead down the direct path, which records
+it:
 ```bash
+# >>> zero-diff-guard
 RIG_ROOT="${GC_RIG_ROOT:-}"
 [ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
 PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
 PREP_SHA=$(git -C "$PREP_WT" rev-parse HEAD)
 if ! branch_has_real_change "origin/$TARGET" "$PREP_SHA"; then
-  "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close" --takeaway "the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
-  SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-    [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
-  done
-  [ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-false-completion --message "Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
-  gc runtime drain-ack
-  exit 1
+  LANDED_SHA=$(printf '%s' "$BEAD_JSON" | jq -r '.[0].metadata.direct_landing_sha // empty')
+  if [ -n "$LANDED_SHA" ] && git -C "$RIG_ROOT" merge-base --is-ancestor "$LANDED_SHA" "origin/$TARGET" 2>/dev/null; then
+    echo "origin/$TARGET carries $LANDED_SHA, which a direct landing of $WORK pushed without recording; taking the direct path to record it"
+    MERGE_STRATEGY=direct
+  else
+    "$LC" transition "$WORK" --to refused_false_completion --assignee "" --route human --set false_completion_suspected="branch $BRANCH no verified change vs origin/$TARGET; refused merge-close" --takeaway "the branch has no verified change against its target — refused close-as-merged; inspect the branch or drop the bead"
+    SCRIPTS=""; for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+      [ -x "$c/assets/scripts/escalate.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+    done
+    [ -n "$SCRIPTS" ] && "$SCRIPTS/escalate.sh" --subject "$WORK" --key refinery-false-completion --message "Branch $BRANCH introduces no verified change vs origin/$TARGET; refused close-as-merged. Bead parked for a human; never silently retried."
+    gc runtime drain-ack
+    exit 1
+  fi
 fi
+# <<< zero-diff-guard
 ```
 
-**If MERGE_STRATEGY = "direct":** merge in a throwaway detached worktree
-(the real target branch may be checked out in the rig's canonical
-worktree), push, verify the remote ref, then record + close through ONE
-lifecycle call. The call is handed the `RIG_ROOT` this block resolved as
-`GC_RIG_ROOT`: the writer checks the landing in that checkout, and the lookup
-reads the roster when the session carries no `GC_RIG_ROOT` of its own. A push
-rejected for branch protection (GH006/GH013/
-"protected branch"/"Changes must be made through a pull request"/"approving
-review"/"Cannot update this protected ref") auto-promotes the bead to
-`merge_strategy=pr` and falls through to the mr block — the prep worktree is
-untouched and still holds the prepared head for the PR push. Any other push
-failure stops the wisp.
+**If MERGE_STRATEGY = "direct":** `direct-merge-push.sh` lands the prepared
+head on `$TARGET` as a fast-forward pushed by its commit id, so nothing is
+checked out for the merge and nothing is left to remove. It stamps the commit
+on the bead as `direct_landing_sha` before the push, verifies the remote ref,
+then records and closes the bead through ONE lifecycle call, handed the rig
+root as `GC_RIG_ROOT`: the writer checks the landing in that checkout. It
+lands only for the bead and branch the prep worktree records, and with
+delete_merged_branches = "true" it then deletes origin/$BRANCH, never the
+target, once the landing is recorded. A landing it cannot record keeps the
+stamp and the branch, and step 0 sends the bead back here on the next patrol.
+Exit 3 means a push rejected for branch protection
+(GH006/GH013/"protected branch"/"Changes must be made through a pull
+request"/"approving review"/"Cannot update this protected ref") promoted the
+bead to `merge_strategy=pr`, and the block falls through to the mr block — the
+prep worktree is untouched and still holds the prepared head for the PR push.
+Exit 4 means origin/$TARGET moved past the prepared head after the prepare, so
+nothing landed. That is routine, not a fault: the block
+stops without draining, and the next patrol prepares the branch again. Any
+other non-zero exit stops the wisp, and the block leaves the work with the
+refinery; the script's output says what landed, if anything.
 ```bash
 # >>> direct-merge-push
-set -e
-RIG_ROOT="${GC_RIG_ROOT:-}"
-[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
-[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
-PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
-MERGE_PARENT=$(mktemp -d "${TMPDIR:-/tmp}/gascity-refinery-merge.XXXXXX")
-MERGE_WT="$MERGE_PARENT/target"
-# $PUSH_ERR is allocated further down but torn down here: every arm that reads
-# it exits without reaching a removal of its own.
-PUSH_ERR=""
-merge_scratch_rm() { git -C "$RIG_ROOT" worktree remove --force "$MERGE_WT" >/dev/null 2>&1 || true; rm -rf "$MERGE_PARENT"; [ -n "$PUSH_ERR" ] && rm -f "$PUSH_ERR"; return 0; }
-trap merge_scratch_rm EXIT; trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-git -C "$RIG_ROOT" fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
-TEMP_SHA=$(git -C "$PREP_WT" rev-parse HEAD)
-git -C "$RIG_ROOT" worktree add --detach "$MERGE_WT" "origin/$TARGET"
-git -C "$MERGE_WT" merge --ff-only "$TEMP_SHA"
-MERGED_SHA=$(git -C "$MERGE_WT" rev-parse HEAD)
-PUSH_ERR=$(mktemp "${TMPDIR:-/tmp}/gctk-refinery-patrol.XXXXXX")
-if git -C "$MERGE_WT" push origin "HEAD:$TARGET" 2>"$PUSH_ERR"; then
-  git -C "$RIG_ROOT" fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"
-  REMOTE=$(git -C "$RIG_ROOT" rev-parse "origin/$TARGET")
-  if [ "$MERGED_SHA" != "$REMOTE" ]; then
-    echo "PUSH FAILED — origin/$TARGET is $REMOTE, want $MERGED_SHA. STOP; do not mutate bead state."
-    gc runtime drain-ack; exit 1
-  fi
-  GC_RIG_ROOT="$RIG_ROOT" "$LC" transition "$WORK" --to merged --close --set merged_sha="$MERGED_SHA" --set merged_target="$TARGET" --unset rejection_reason --append-notes "Merged to $TARGET at $(git -C "$MERGE_WT" rev-parse --short HEAD)"
-else
-  case "$(cat "$PUSH_ERR")" in
-    *GH006*|*GH013*|*"protected branch"*|*"refusing to allow"*|*"Changes must be made through a pull request"*|*"approving review"*|*"Cannot update this protected ref"*)
-      echo "Direct push to '$TARGET' rejected (protected branch). Auto-promoting to merge_strategy=pr."
-      gc bd update "$WORK" --set-metadata merge_strategy=pr
-      MERGE_STRATEGY=mr ;;
-    *) echo "Push failed: $(cat "$PUSH_ERR"). STOP. Debug and retry; do NOT continue."; gc runtime drain-ack; exit 1 ;;
-  esac
-fi
+DMP=""
+for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/direct-merge-push.sh" ] && { DMP="$c/assets/scripts/direct-merge-push.sh"; break; }
+done
+[ -n "$DMP" ] || { echo "direct-merge-push.sh not found; NOT landing $WORK, and leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+DIRECT_RC=0
+DIRECT_ARGS=(--work "$WORK" --branch "$BRANCH" --target "$TARGET")
+[ "{{delete_merged_branches}}" != "true" ] || DIRECT_ARGS+=(--delete-branch)
+"$DMP" "${DIRECT_ARGS[@]}" || DIRECT_RC=$?
+case "$DIRECT_RC" in
+  0) ;;
+  3) MERGE_STRATEGY=mr ;;
+  4) echo "origin/$TARGET moved after $WORK was prepared, so nothing landed; tear down the prep worktree, then jump to next-iteration, and the next patrol prepares $WORK again"; exit 4 ;;
+  *) echo "direct-merge-push.sh exited $DIRECT_RC; leaving the work with the refinery"; gc runtime drain-ack; exit 1 ;;
+esac
 # <<< direct-merge-push
 ```
-After a successful direct merge: tear down the prep worktree (`git -C
-"$RIG_ROOT" worktree remove --force "$PREP_WT"` — it is detached and holds no
-branch, and the rig root's HEAD was never moved, so nothing is restored); if
-delete_merged_branches = "true", `git -C "$RIG_ROOT" push origin --delete
-"$BRANCH"`; and if auto_ff_rig_main = "true", best-effort ff the rig canonical
-checkout (`$RIG_ROOT`) when it is on `$TARGET` with a clean tree — never abort
-on its failure.
+After a successful direct merge, or the block's exit 4, tear down the prep
+worktree with `refinery-workspace.sh teardown`. It is detached and holds no
+branch, and the rig root's HEAD was never moved, so nothing is restored; a
+teardown that does not complete is cleared by the next rebase step:
+```bash
+# >>> prep-teardown
+WS=""
+for c in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
+done
+if [ -z "$WS" ] || ! "$WS" teardown; then
+  echo "the prep worktree was not torn down; carry on, since the next rebase step clears it before staging"
+fi
+# <<< prep-teardown
+```
+After exit 4, jump to next-iteration (pour before burn). After a merge, if
+auto_ff_rig_main = "true", best-effort ff the rig canonical checkout
+(`$RIG_ROOT`) when it is on `$TARGET` with a clean tree — never abort on its
+failure.
 
 **If MERGE_STRATEGY = "mr":** the refinery does NOT land the branch. It
 pushes the prepared branch and transitions the anchor into the gated
@@ -882,8 +986,8 @@ re-run the prepare block, retry. Never plain `--force`, and never force a
 branch the prepare block put in merge mode.
 
 2. Validate a caller-supplied `existing_pr` (must be OPEN, head==$BRANCH,
-base==$TARGET, in the origin repo — `gh pr view <ref> --json
-url,number,state,headRefName,baseRefName`). Any mismatch is a durable block,
+base==$TARGET, in the origin repo — `gh pr view <ref> --repo "$(git remote
+get-url origin)" --json url,number,state,headRefName,baseRefName`). Any mismatch is a durable block,
 not a retry. Fill BOTH placeholders: `blocked_reason` is the row's detail and
 `--takeaway` the one line the operator's board renders as what this bead
 needs, capped at 140 characters.
@@ -918,7 +1022,15 @@ fi
 # skipped by merge.sh and pr-facts.sh forever).
 PR_URL=""; PR_NUMBER=""
 if [ -n "$RECORDED_PR" ] && command -v gh >/dev/null 2>&1; then
-  PR_VIEW=$(gh pr view "$RECORDED_PR" --json url,number,state,headRefName,baseRefName 2>/dev/null)
+  # A bare pr_number resolves against gh's default repository, which with no
+  # `gh repo set-default` is the first remote in gh's own order, upstream ahead
+  # of origin. Naming origin pins it; a recorded URL names its own repository.
+  PR_REPO=$(git remote get-url origin 2>/dev/null)
+  if [ -n "$PR_REPO" ]; then
+    PR_VIEW=$(gh pr view "$RECORDED_PR" --repo "$PR_REPO" --json url,number,state,headRefName,baseRefName 2>/dev/null)
+  else
+    PR_VIEW=$(gh pr view "$RECORDED_PR" --json url,number,state,headRefName,baseRefName 2>/dev/null)
+  fi
   PR_URL=$(printf '%s' "$PR_VIEW" | jq -r '.url // empty' 2>/dev/null)
   PR_NUMBER=$(printf '%s' "$PR_VIEW" | jq -r '.number // empty | tostring' 2>/dev/null)
 fi
@@ -948,9 +1060,9 @@ bead already gates this branch, $WORK is a rework hand-back: move it to
 `unanchored` and close it landed-on-branch, never stamp `merge_result` on it
 (a merge_result-carrying rework child joins the anchor enumeration as a
 gateless second anchor), and let gating continue on the existing anchor: its
-lane markers are states of the lane, not of the head, so the rework's push does
-not touch them — the cadence re-reads the existing anchor's check and holds
-until it reads green.
+lanes derive their state from its reviews, not from the head, so the rework's
+push does not move them — the cadence re-derives the existing anchor's checks
+and holds until each derives green.
 
 Branch is the join key and `merge_result` present is the whole predicate: any
 declared state carries one, so an anchor parked for a person (`blocked`,
@@ -959,6 +1071,40 @@ PR, and a search restricted to the two gating states walks past it and mints
 the second anchor it was written to prevent. Multi-candidate tiebreak: the
 OLDEST anchor (the original predates any rework-minted duplicate);
 `created_at` is the real field, `.created`/`.id` only defensive fallbacks.
+
+The listing is read whole or not at all. One that fails, or does not parse as a
+JSON array once the raw control bytes bd can emit inside a note are dropped,
+says nothing about the branch, and reading it as an empty one would make $WORK
+the PR's anchor. So the landing waits: nothing is recorded or closed, and $WORK
+stays routed for the next pass.
+
+A convoy's rebuild child lands on a bead that carries no `merge_result` yet.
+`rejection-repool.sh` pours a rejected graduation's rebuild onto that child,
+because a convoy cannot be its own run's work bead. With no anchor on the
+branch, and $WORK's own row ($BEAD_JSON) showing a rework that answers no
+review and no ruling, the convoy it names as its `anchor_bead`, open on the
+same branch, is the bead this landing anchors (`LANDS_ON`). Once the push reads
+back, that convoy takes the gating transition this pass would have given $WORK,
+and $WORK then closes landed-on-branch. The anchoring comes first, so a close
+that fails leaves an anchor the next pass finds on the branch, and a refused
+anchoring closes nothing. A child never takes a gating state itself. When the
+bead it names is not open on the branch, merge-push reads that bead by its id. A
+read that fails makes the landing wait the same way. A convoy there, or no such
+bead in the store, leaves a question only a person can answer: whether the
+graduation goes on. So merge-push files a visit on $WORK with `escalate.sh`'s
+verdict window off, and `await-ruling.sh` makes $WORK wait on it. The script
+adds a `blocks` edge from $WORK onto the visit, releases $WORK's assignment, which
+takes it off the refinery's queue, and arms a fresh `mol-polecat-work` pour of
+$WORK for when the visit closes. A held child is then never picked again ahead
+of the handoffs behind it, and it is held without a `merge_result`, which would
+make it the branch's anchor. When the wait does not land, $WORK stays routed and
+the next pass tries again. A named bead that is not a convoy leaves $WORK its own
+anchor, as a first handoff is. No other bead is anchored this way. A review's
+or a ruling's rework names a bead whose own rebuild may still be queued, and
+anchoring that bead would make the rebuild's load-context read it as finished
+work. Step 4b of
+`mol-polecat-work`'s submit-and-exit runs the same `rebuild-child-lands-on`
+block, so the polecat stamps its summary on the bead this landing anchors.
 
 The child leaves through `lifecycle.sh` because `merge_result` is the
 lifecycle's field and `lifecycle.sh` is its only writer; `unanchored` is the
@@ -987,18 +1133,86 @@ branch that head is on. The read-back fetch has just put that head on
 ```bash
 # >>> one-anchor-per-pr-resolve
 EXISTING_ANCHOR=""
+ANCHOR_ROWS=""
 if [ -n "${BRANCH:-}" ]; then
   ANCHOR_ROWS=$(gc bd list --status=open --metadata-field branch="$BRANCH" \
     --limit=0 --json 2>/dev/null) || ANCHOR_ROWS=""
+  ANCHOR_ROWS=$(printf '%s' "$ANCHOR_ROWS" | tr -d '[:cntrl:]')
+  if ! printf '%s' "$ANCHOR_ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    echo "merge-push: the open beads on $BRANCH could not be listed, so the bead this landing gates cannot be told; recording no landing and closing nothing. $WORK stays routed for the next pass." >&2
+    gc runtime drain-ack
+    exit 1
+  fi
   EXISTING_ANCHOR=$(printf '%s' "$ANCHOR_ROWS" | jq -r --arg self "$WORK" \
     '[ .[]? | select(.id != $self)
        | select((((.metadata // {}).merge_result // "") | tostring) != "") ]
      | sort_by(.created_at // .created // .id) | .[0].id // empty' 2>/dev/null) || EXISTING_ANCHOR=""
 fi
-GATING_ANCHOR="${EXISTING_ANCHOR:-$WORK}"
+SELF_ROW=""
+[ -n "$EXISTING_ANCHOR" ] || SELF_ROW="${BEAD_JSON:-}"
+# >>> rebuild-child-lands-on
+LANDS_ON=""
+NAMED=$(printf '%s' "$SELF_ROW" | jq -r '(.[0].metadata // {}) as $m
+  | if (($m.task_kind // "") | tostring) == "rework"
+       and (($m.source_review_bead // "") | tostring) == ""
+       and (($m.source_ruling_bead // "") | tostring) == ""
+    then (($m.anchor_bead // "") | tostring) else "" end' 2>/dev/null) || NAMED=""
+[ -z "$NAMED" ] || LANDS_ON=$(printf '%s' "$ANCHOR_ROWS" | jq -r --arg n "$NAMED" '
+  [ .[]? | select(.id == $n) | select(((.issue_type // .type // "") | tostring) == "convoy") ]
+  | .[0].id // empty' 2>/dev/null) || LANDS_ON=""
+# <<< rebuild-child-lands-on
+if [ -n "$NAMED" ] && [ -z "$LANDS_ON" ]; then
+  NAMED_ROWS=$(printf '%s' "$ANCHOR_ROWS" | jq -c --arg n "$NAMED" '[ .[]? | select(.id == $n) ]' 2>/dev/null)
+  case "$NAMED_ROWS" in ""|"[]") NAMED_ROWS=$(gc bd list --id "$NAMED" --all --limit=0 --json 2>/dev/null) || NAMED_ROWS="" ;; esac
+  NAMED_KIND=$(printf '%s' "$NAMED_ROWS" | tr -d '[:cntrl:]' | jq -r --arg n "$NAMED" '
+    if type != "array" then "unreadable"
+    else ([ .[] | objects | select(.id == $n) ][0]) as $r
+      | if $r == null then "absent" else "kind:" + (($r.issue_type // $r.type // "") | tostring) end
+    end' 2>/dev/null)
+  case "$NAMED_KIND" in
+    kind:convoy|absent)
+      if [ "$NAMED_KIND" = absent ]; then NAMED_STATE="not in this store"; else NAMED_STATE="not open on $BRANCH"; fi
+      echo "merge-push: $WORK rebuilds $NAMED, which is $NAMED_STATE, so its landing has no bead to anchor; recording no landing and closing nothing." >&2
+      LC_DIR="${LC%/*}"; WAITS=""
+      if GC_ESCALATE_VERDICT_WINDOW=0 "$LC_DIR/escalate.sh" --subject "$WORK" --key refinery-rebuild-convoy-not-open --message "$WORK, the rebuild of $NAMED, has landed on $BRANCH, but $NAMED is $NAMED_STATE, so no bead can carry the PR, and the refinery anchored and closed nothing. $WORK waits on this visit, off the refinery's queue. To go on with the graduation, make $NAMED open with branch $BRANCH, then close this visit: that pours a fresh run on $WORK, whose hand-back anchors $NAMED. To abandon the graduation, close $WORK, then this visit."; then
+        "$LC_DIR/await-ruling.sh" "$WORK" --key refinery-rebuild-convoy-not-open --formula mol-polecat-work && WAITS=1
+      fi
+      if [ -n "$WAITS" ]; then
+        echo "merge-push: $WORK waits on that visit, off the refinery's queue, and closing the visit pours a fresh run on it." >&2
+      else
+        echo "merge-push: the wait on a visit did not land, so $WORK stays routed for the next pass." >&2
+      fi
+      gc runtime drain-ack
+      exit 1 ;;
+    kind:*) ;;
+    *)
+      echo "merge-push: $NAMED, which $WORK names as its anchor_bead, could not be read, so whether $WORK rebuilds a convoy cannot be told; recording no landing and closing nothing. $WORK stays routed for the next pass." >&2
+      gc runtime drain-ack
+      exit 1 ;;
+  esac
+fi
+GATING_ANCHOR="${EXISTING_ANCHOR:-${LANDS_ON:-$WORK}}"
 # <<< one-anchor-per-pr-resolve
 # >>> one-anchor-per-pr-terminal
-if [ -n "$EXISTING_ANCHOR" ]; then
+# The rework arm reads the prepared head back from the prep worktree, so this
+# block resolves that path itself, as the push block does.
+RIG_ROOT="${GC_RIG_ROOT:-}"
+[ -n "$RIG_ROOT" ] || RIG_ROOT=$(gc rig list --json | jq -r --arg r "$GC_RIG" '.rigs[] | select(.name == $r) | .path')
+[ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root (GC_RIG_ROOT unset, GC_RIG='$GC_RIG' matched no rig in the roster); leaving the work with the refinery to retry"; gc runtime drain-ack; exit 1; }
+PREP_WT="$(git -C "$RIG_ROOT" rev-parse --path-format=absolute --git-common-dir)/gc-refinery-prep"
+# The gating transition, onto the bead this landing anchors: pull_request once
+# both PR coordinates resolved, else pre_open_gate.
+anchor_at_gate() { # <bead>
+  if [ "$PRE_OPEN" = 1 ] || [ -z "${PR_URL:-}" ] || [ -z "${PR_NUMBER:-}" ]; then
+    if [ "$PRE_OPEN" != 1 ]; then
+      echo "merge-push: $WORK records a PR but url/number did not both resolve (url='${PR_URL:-}' number='${PR_NUMBER:-}'); parking $1 at pre_open_gate so pr-open.sh adopts the PR — an empty pr_number is unaddressable by merge.sh and pr-facts.sh forever." >&2
+    fi
+    "$LC" transition "$1" --to pre_open_gate --assignee "" --route "" --set merged_target="$TARGET" --set check_set="$CHECK_SET" --unset rejection_reason
+  else
+    "$LC" transition "$1" --to pull_request --assignee "" --route "" --set pr_url="$PR_URL" --set pr_number="$PR_NUMBER" --set merged_target="$TARGET" --set check_set="$CHECK_SET" --unset rejection_reason
+  fi
+}
+if [ -n "$EXISTING_ANCHOR" ] || [ -n "${LANDS_ON:-}" ]; then
   # This arm closes the rework landed-on-branch, so the landing must be provable
   # against origin: the mr push above can be rejected or skipped and leave
   # origin/$BRANCH at its pre-fix tip, and a sha read from the local prep
@@ -1021,6 +1235,14 @@ if [ -n "$EXISTING_ANCHOR" ]; then
     exit 1
   fi
   REWORK_SHA=$(git -C "$PREP_WT" rev-parse --short "origin/$BRANCH" 2>/dev/null || echo "")
+  if [ -n "${LANDS_ON:-}" ]; then
+    if ! anchor_at_gate "$LANDS_ON"; then
+      echo "merge-push: $LANDS_ON, the bead rework $WORK lands on, could not be anchored; closing nothing. $WORK stays routed for the next pass." >&2
+      gc runtime drain-ack
+      exit 1
+    fi
+    EXISTING_ANCHOR="$LANDS_ON"
+  fi
   gc bd update "$EXISTING_ANCHOR" --append-notes "Rework $WORK landed on $BRANCH${REWORK_SHA:+ at $REWORK_SHA}; re-gate belongs to the cadence (one-anchor-per-PR)." >/dev/null 2>&1 || true
   if "$LC" transition "$WORK" --to unanchored --unset rejection_reason; then
     if ! gc bd update "$WORK" --status=closed \
@@ -1031,13 +1253,8 @@ if [ -n "$EXISTING_ANCHOR" ]; then
   else
     echo "merge-push: $WORK could not be moved off its anchor state; left OPEN for the next pass rather than closed still carrying one (doctor/check-closed-implies-landed)" >&2
   fi
-elif [ "$PRE_OPEN" = 1 ] || [ -z "${PR_URL:-}" ] || [ -z "${PR_NUMBER:-}" ]; then
-  if [ "$PRE_OPEN" != 1 ]; then
-    echo "merge-push: $WORK records a PR but url/number did not both resolve (url='${PR_URL:-}' number='${PR_NUMBER:-}'); parking at pre_open_gate so pr-open.sh adopts the PR — an empty pr_number is unaddressable by merge.sh and pr-facts.sh forever." >&2
-  fi
-  "$LC" transition "$WORK" --to pre_open_gate --assignee "" --route "" --set merged_target="$TARGET" --set check_set="$CHECK_SET" --unset rejection_reason
 else
-  "$LC" transition "$WORK" --to pull_request --assignee "" --route "" --set pr_url="$PR_URL" --set pr_number="$PR_NUMBER" --set merged_target="$TARGET" --set check_set="$CHECK_SET" --unset rejection_reason
+  anchor_at_gate "$WORK"
 fi
 # <<< one-anchor-per-pr-terminal
 ```
@@ -1047,10 +1264,21 @@ later, on a verified merge, via the cadence — never here. A failed
 transition leaves $WORK assigned and open; the next patrol retries
 idempotently (push and anchor resolution are both re-runnable).
 
-6. Cleanup: tear down the prep worktree (`git -C "$RIG_ROOT" worktree remove
---force "$PREP_WT"`, re-resolving `RIG_ROOT`/`PREP_WT` as the push block did; an
-interrupted teardown is cleared by the next iteration's rebase step). The prep
-worktree is detached and holds no branch, so nothing else has to be deleted.
+6. Cleanup: tear down the prep worktree with `refinery-workspace.sh teardown`,
+the script the rebase step staged it with; a teardown that does not complete is
+cleared by the next iteration's rebase step. The prep worktree is detached and
+holds no branch, so nothing else has to be deleted:
+```bash
+# >>> prep-teardown
+WS=""
+for c in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+  [ -x "$c/assets/scripts/refinery-workspace.sh" ] && { WS="$c/assets/scripts/refinery-workspace.sh"; break; }
+done
+if [ -z "$WS" ] || ! "$WS" teardown; then
+  echo "the prep worktree was not torn down; carry on, since the next rebase step clears it before staging"
+fi
+# <<< prep-teardown
+```
 Never delete `$BRANCH` in mr mode — the PR needs it. The rig root's HEAD was
 never moved, so nothing has to be restored here.
 
@@ -1062,7 +1290,9 @@ leave the bead for a human to re-strategize.
 transition; mr requires a verified branch push then one gating transition
 (pre_open_gate, or pull_request with the PR recorded). The bead closes only
 on a verified merge — never at handoff — except a rework hand-back, which
-closes landed-on-branch with NO merge_result."""
+closes landed-on-branch with NO merge_result. A convoy's rebuild child gives
+the gating transition to the convoy it names first, when that convoy carries
+none yet."""
 
 [[steps]]
 id = "patrol-summary"

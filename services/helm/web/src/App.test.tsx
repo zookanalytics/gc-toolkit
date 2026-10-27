@@ -65,14 +65,15 @@ function tile(over: Partial<Tile> & Pick<Tile, 'id' | 'kind' | 'title' | 'severi
     acceptable: false,
     accept_formula: '',
     recommendation: null,
+    visit_start_failure: '',
     ...over,
   };
 }
 
 /**
  * A merge anchor row, as the board derives one: it bands `review` whatever the
- * cadence recorded. The default is the shape that put this surface in the
- * backlog — wedged at the convergence cap's park, with no pull request open.
+ * cadence recorded. The default is an owed row routed to a person, held by a
+ * block no automated actor clears, with no pull request open.
  */
 function prTile(over: Partial<Tile> & Pick<Tile, 'id'>): Tile {
   return tile({
@@ -82,11 +83,11 @@ function prTile(over: Partial<Tile> & Pick<Tile, 'id'>): Tile {
     owed: true,
     section: 'review',
     pr_branch: `polecat/${over.id}`,
-    pr_machine: 'wedged-exception',
+    pr_machine: 'blocked',
     pr_conversation: 'unknown',
     pr_approval: 'unknown',
     pr_owed_since: '2026-08-08T11:02:00Z',
-    needs: 'wedged: the review cap parked this anchor — a ruling releases it, a new commit does not',
+    needs: 'blocked — a person must clear it before the merge can proceed',
     ...over,
   });
 }
@@ -1255,36 +1256,36 @@ function servePRUnder(rootId: string, pr: Tile) {
 
 // A merge anchor bands review, and the row says WHY nothing is moving: "routed
 // to a person" alone reads identically for an anchor awaiting a ruling and for
-// one the review cap parked, where the only release is a ruling nobody gave.
-it('names the wedge and links the pull request', async () => {
+// one a conflict blocks, where the release is bringing the branch current.
+it('names the block and links the pull request', async () => {
   servePRUnder('tk-root', prTile({
-    id: 'tk-exc',
-    title: 'a pull request the review cap parked',
-    pr_machine: 'wedged-exception',
+    id: 'tk-blk',
+    title: 'a pull request a conflict blocks',
+    pr_machine: 'blocked',
     pr_number: 513,
     pr_url: 'https://github.com/zook/gc-toolkit/pull/513',
-    needs: 'wedged: the review cap parked this anchor — a ruling releases it, a new commit does not',
+    needs: "blocked: the branch conflicts with 'main' and no merge-in rework is in flight",
   }));
   render(<App />);
-  await waitFor(() => expect(screen.getByText(/a pull request the review cap parked/)).toBeTruthy());
+  await waitFor(() => expect(screen.getByText(/a pull request a conflict blocks/)).toBeTruthy());
 
-  const row = rowFor(/a pull request the review cap parked/);
+  const row = rowFor(/a pull request a conflict blocks/);
   expect(row).not.toBeNull();
-  expect(within(row as HTMLElement).getByText(/wedged: the review cap parked/)).toBeTruthy();
+  expect(within(row as HTMLElement).getByText(/blocked: the branch conflicts/)).toBeTruthy();
 
   const link = within(row as HTMLElement).getByRole('link', { name: 'PR #513' });
   expect(link.getAttribute('href')).toBe('https://github.com/zook/gc-toolkit/pull/513');
 });
 
-// The row is a MERGE ANCHOR's, not a pull request's. Most wedged anchors have no
-// pull request at all, so a surface that could only identify a row by its number
-// would have nothing to show for the majority of them.
+// The row is a MERGE ANCHOR's, not a pull request's. An anchor at pre_open_gate
+// has no pull request at all, so a surface that could only identify a row by its
+// number would have nothing to show for it.
 it('identifies a pre-open row without inventing a link', async () => {
-  servePRUnder('tk-root', prTile({ id: 'tk-pre', title: 'wedged before the PR opened' }));
+  servePRUnder('tk-root', prTile({ id: 'tk-pre', title: 'held before the PR opened' }));
   render(<App />);
-  await waitFor(() => expect(screen.getByText(/wedged before the PR opened/)).toBeTruthy());
+  await waitFor(() => expect(screen.getByText(/held before the PR opened/)).toBeTruthy());
 
-  const row = rowFor(/wedged before the PR opened/);
+  const row = rowFor(/held before the PR opened/);
   expect(within(row as HTMLElement).queryByRole('link')).toBeNull();
   expect(within(row as HTMLElement).getByText('polecat/tk-pre')).toBeTruthy();
 });
@@ -1406,14 +1407,14 @@ it('says so on a row that records neither number nor branch', async () => {
 it('dates an owed PR row by its turn, not by the last pass that touched it', async () => {
   servePRUnder('tk-root', prTile({
     id: 'tk-old',
-    title: 'wedged for three days',
+    title: 'owed for three days',
     pr_owed_since: '2026-08-08T11:02:00Z',
     updated_at: '2026-08-11T14:55:00Z',
   }));
   render(<App />);
-  await waitFor(() => expect(screen.getByText(/wedged for three days/)).toBeTruthy());
+  await waitFor(() => expect(screen.getByText(/owed for three days/)).toBeTruthy());
 
-  const row = rowFor(/wedged for three days/);
+  const row = rowFor(/owed for three days/);
   expect(within(row as HTMLElement).getByText('2026-08-08')).toBeTruthy();
   expect(within(row as HTMLElement).queryByText('2026-08-11')).toBeNull();
 });

@@ -8,9 +8,11 @@
 # startup-health-episode) are exempt while a marooned spec is still flagged; the
 # city-route exemption keys off the agent's scope not its name; a warrant is
 # still exempt when the agent list is down; a mix names only the marooned beads;
-# an empty store passes; and the fail-closed arms — no locatable city, an
-# unreadable store (with its stderr surfaced), and the GC_CITY_PATH fallback
-# when `gc agent list` cannot answer.
+# an empty store passes; the probes' scratch tree is removed on exit; and the
+# fail-closed arms — no locatable city, an unreadable store (its warning ends
+# with bd's error, never with gc's line naming the store), a listing that exits
+# 0 with no output, a scratch tree that cannot be made, and the GC_CITY_PATH
+# fallback when `gc agent list` cannot answer.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -23,7 +25,7 @@ has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esa
 hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2')" ;; *) ok "$3" ;; esac; }
 
 CITY="$TMP/testcity"
-mkdir -p "$TMP/bin" "$TMP/stores" "$CITY"
+mkdir -p "$TMP/bin" "$TMP/stores" "$TMP/rt" "$CITY"
 
 cat > "$TMP/agents.json" <<EOF
 {"city_path":"$CITY","agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat","scope":"rig"},{"qualified_name":"gc-toolkit.dog","scope":"city"}]}
@@ -33,6 +35,10 @@ printf '{"city_path":"","agents":[]}' > "$TMP/agents-nocity.json"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 case "$1 $2" in
   "agent list") rc="${AGENTS_RC:-0}"; [ "$rc" -eq 0 ] || { [ -n "${AGENTS_ERR:-}" ] && printf '%s\n' "$AGENTS_ERR" >&2; exit "$rc"; }; cat "$AGENTS_JSON" ;;
+  # Like real gc, a bd list, ready, search or show first names the store that
+  # answers it on stderr, before bd runs and whether or not the read fails.
+  "bd list"|"bd ready"|"bd search"|"bd show")
+    shift; echo 'gc bd: answering from the city store' >&2; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
   "bd "*) shift; VIA_GC_BD=1 exec "$(dirname "$0")/bd" "$@" ;;
   *) exit 0 ;;
 esac
@@ -44,7 +50,11 @@ GC
 sub="$1"; db=""; prev=""
 for a in "$@"; do [ "$prev" = "--db" ] && db="$a"; prev="$a"; done
 name=$(basename "$(dirname "$db")")
+# TREE_SEEN names a file that gets the check's scratch trees as they stand while
+# this read runs.
+[ -z "${TREE_SEEN:-}" ] || ls -d "${TMPDIR:-/tmp}"/gctk-check-hq-marooned-work.* > "$TREE_SEEN" 2>/dev/null
 [ "$name" = "${BD_FAIL_STORE:-}" ] && { [ -n "${BD_ERR:-}" ] && printf '%s\n' "$BD_ERR" >&2; exit 3; }
+[ "$name" = "${BD_SILENT_STORE:-}" ] && exit 0
 case "$sub" in
   list) f="$STORES/$name.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
   *) printf '[]' ;;
@@ -52,10 +62,13 @@ esac
 BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
 
+# Every run makes its scratch tree under $TMP/rt, inside the sandbox, so case 13
+# can tell whether any run left one behind. CHECK_TMPDIR points one run
+# elsewhere.
 run_check() {
     AGENTS_JSON="${AGENTS_JSON:-$TMP/agents.json}" \
     GC_CITY_PATH="${WANT_CITY_PATH:-}" GC_CITY="" \
-    PATH="$TMP/bin:$PATH" STORES="$TMP/stores" \
+    PATH="$TMP/bin:$PATH" STORES="$TMP/stores" TMPDIR="${CHECK_TMPDIR:-$TMP/rt}" \
     bash "$CHECK" 2>&1
 }
 store() { local IFS=,; printf '[%s]' "$*" > "$TMP/stores/testcity.json"; }
@@ -138,14 +151,23 @@ has "$OUT" "m-bug" "the fallback path names the marooned bead"
 OUT=$(AGENTS_JSON="$TMP/agents-nocity.json" WANT_CITY_PATH="$CITY" run_check); RC=$?
 eq "$RC" "2" "an empty city_path from agent list falls back to GC_CITY_PATH"
 
-# --- 8. an unreadable HQ store fails CLOSED, surfacing its stderr ------------
+# --- 8. an unreadable HQ store fails CLOSED, its warning naming bd's error ---
+# The stub, like gc, names the store on stderr ahead of bd's own error, and that
+# line never says why the read failed.
 store "$B_BUG"
 OUT=$(BD_FAIL_STORE=testcity run_check); RC=$?
 eq "$RC" "1" "an unreadable HQ store warns instead of passing"
 has "$OUT" "NOT checked" "the warning says the store was skipped, not clean"
+hasnt "$OUT" "answering from" "a failed read whose only stderr is gc's line naming the store adds no stderr to the warning"
 OUT=$(BD_FAIL_STORE=testcity BD_ERR="dolt: relation \"issues\" does not exist" run_check); RC=$?
 eq "$RC" "1" "an unreadable HQ store still warns"
-has "$OUT" "does not exist" "the store-skip warning carries \`gc bd list\` stderr"
+has "$OUT" "\`gc bd list\` stderr: dolt: relation \"issues\" does not exist" "the store-skip warning ends with bd's error"
+hasnt "$OUT" "answering from" "the warning passes over gc's line naming the store"
+# A listing that exits 0 and prints nothing is no answer: an empty store
+# answers [].
+OUT=$(BD_SILENT_STORE=testcity run_check); RC=$?
+eq "$RC" "1" "a listing that exits 0 with no output warns instead of passing"
+has "$OUT" "NOT checked" "the silent listing's warning says the store was skipped, not clean"
 
 # --- 9. city machinery and standing subjects are exempt; a real marooned bead
 #        among them is still caught -----------------------------------------
@@ -193,6 +215,25 @@ has "$OUT" "m-spec" "the marooned spec is named"
 hasnt "$OUT" "ok-startup" "a startup-health-episode host is not flagged"
 hasnt "$OUT" "ok-step" "a formula step bead is not flagged"
 hasnt "$OUT" "ok-convoy" "a convoy container is not flagged"
+
+# --- 13. every probe reads into a scratch tree the check removes -------------
+# Every run above made its tree under $TMP/rt, through the finding, OK and
+# early-exit arms alike. TREE_SEEN has the bd stub record the trees there while
+# the listing is read, so the tree is known to exist before it is known to be
+# gone. A tree that cannot be made leaves nothing to read into, so the HQ store
+# goes unread: a warning, never a pass.
+store "$B_BUG"
+OUT=$(TREE_SEEN="$TMP/tree-seen" run_check); RC=$?
+eq "$RC" "2" "the run that records its tree still flags the bug"
+case "$(cat "$TMP/tree-seen" 2>/dev/null)" in
+  "$TMP/rt/gctk-check-hq-marooned-work."*) ok "the listing is read into a gctk-check-hq-marooned-work tree under TMPDIR" ;;
+  *) bad "the listing is read into a gctk-check-hq-marooned-work tree under TMPDIR (saw '$(cat "$TMP/tree-seen" 2>/dev/null)')" ;;
+esac
+eq "$(ls -A "$TMP/rt")" "" "no run of the check left its scratch tree behind"
+OUT=$(CHECK_TMPDIR="$TMP/no-such-dir" run_check); RC=$?
+eq "$RC" "1" "a scratch tree that cannot be made warns instead of passing"
+has "$OUT" "could not create a scratch directory" "the warning names the scratch directory it could not make"
+has "$OUT" "NOT checked" "the warning says the HQ store was not checked"
 
 echo
 echo "check-hq-marooned-work: $PASS passed, $FAIL failed"

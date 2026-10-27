@@ -17,32 +17,37 @@ carries no capture, encode, or narration code of its own.
 
 ## Resolve the engine
 
-Consume the engine from the local `sprintshow` rig checkout when the city has
-one, and fall back to the published npm package otherwise. Both are driven the
-same way once resolved.
+The pack's `demo-engine-lib.sh` resolves the engine, and the pack's own
+captures source it too. It uses the local `sprintshow` rig checkout when the
+city has one and the published npm package otherwise. It holds Node to the
+engine's floor of 22.18, installs a checkout's dependencies on first use, and
+provisions the browser. Source it from the pack gc loaded and resolve the
+engine once. A video also needs ffmpeg, which the library leaves to the
+capture that assembles one:
 
 ```bash
-# Prefer the local rig checkout; the guard confirms it is the engine before use.
-SS_DIR=$(gc rig list --json 2>/dev/null | jq -r '.rigs[] | select(.name=="sprintshow") | .path // empty')
-if [ -n "$SS_DIR" ] && [ "$(jq -r '.name // empty' "$SS_DIR/package.json" 2>/dev/null)" = "@zookanalytics/sprintshow" ]; then
-  # First use installs the engine's deps (playwright, ffmpeg-static). The host
-  # has npm but not pnpm, so run the TypeScript source through `npx tsx` — no
-  # build step, and an absolute path to cli.ts means the caller's cwd stays put
-  # so relative demo-script and --serve-dir paths resolve as written.
-  [ -d "$SS_DIR/node_modules" ] || ( cd "$SS_DIR" && npm install )
-  # A host ffmpeg on PATH is used when present; otherwise fetch ffmpeg-static's
-  # binary once (npm >= 12 blocks its automatic install script).
-  command -v ffmpeg >/dev/null 2>&1 || [ -x "$SS_DIR/node_modules/ffmpeg-static/ffmpeg" ] || ( cd "$SS_DIR" && npm run provision:ffmpeg )
-  # The browser comes from the engine's own Playwright, whose installer skips a
-  # build that is already installed.
-  ( cd "$SS_DIR" && npm run provision:browser )
-  sprintshow() { npx tsx "$SS_DIR/src/cli.ts" "$@"; }
-else
-  # Any-rig path: the published package, run through npx, with the browser
-  # installed by that package's own Playwright.
-  npx --yes --package=@zookanalytics/sprintshow -- playwright install chromium-headless-shell
-  sprintshow() { npx --yes @zookanalytics/sprintshow "$@"; }
-fi
+. "$(gc <binding> scripts-dir)/demo-engine-lib.sh" && demo_engine_resolve && {
+  # A host ffmpeg on PATH is used when present; otherwise a checkout fetches
+  # ffmpeg-static's binary once (npm >= 12 blocks its automatic install script).
+  [ -z "$DEMO_ENGINE_DIR" ] || command -v ffmpeg >/dev/null 2>&1 \
+    || [ -x "$DEMO_ENGINE_DIR/node_modules/ffmpeg-static/ffmpeg" ] \
+    || ( cd "$DEMO_ENGINE_DIR" && npm run provision:ffmpeg )
+}
+```
+
+`<binding>` is the name the city imports the pack under, which gc puts in
+front of this skill's name: `gc-toolkit` in `gc-toolkit.demo-capture`.
+`gc skill list` prints it in this skill's FROM column.
+
+`demo_engine_cli <command> <arguments...>` runs the engine's CLI in the current
+directory, so relative demo-script and `--serve-dir` paths resolve as written.
+Each tool call starts a fresh shell, which has neither the library nor the
+engine it chose. So each engine command below runs after sourcing the library
+again and calling `demo_engine_find`, which finds the same engine and installs
+nothing:
+
+```bash
+. "$(gc <binding> scripts-dir)/demo-engine-lib.sh" && demo_engine_find && demo_engine_cli <command> <arguments...>
 ```
 
 ## Lint before you capture
@@ -52,7 +57,7 @@ the linter reads a script exactly as the driver will and reports what the
 driver would silently ignore:
 
 ```bash
-sprintshow lint demo.md          # --strict makes warnings non-zero
+demo_engine_cli lint demo.md          # --strict makes warnings non-zero
 ```
 
 ## Capture — the engine drives (default)
@@ -61,9 +66,9 @@ Point the engine at the app and let it drive the browser, check each step, and
 assemble the MP4:
 
 ```bash
-sprintshow run demo.md --serve-dir ./public          # serve a static directory
-sprintshow run demo.md --serve "npm run dev" --port 5173   # spin up a dev server, tear it down
-sprintshow run demo.md --base-url http://localhost:3000    # drive a server already running
+demo_engine_cli run demo.md --serve-dir ./public          # serve a static directory
+demo_engine_cli run demo.md --serve "npm run dev" --port 5173   # spin up a dev server, tear it down
+demo_engine_cli run demo.md --base-url http://localhost:3000    # drive a server already running
 ```
 
 Two capture modes come from one script:
@@ -101,7 +106,7 @@ closes the bead it was poured on. `gc formula show mol-rig-demo` prints the
 pour line and every input. A pour must set exactly one app target
 (`serve_dir`, `serve_cmd`, or `base_url`), because nothing in the toolkit maps
 a rig to its app. The `demo` review check makes the call inside the review
-instead of pouring the mol (`skills/review-demo/SKILL.md`).
+instead of pouring the mol (`gc-toolkit.review-demo`).
 
 ## Capture — you drive over Playwright MCP
 
@@ -113,15 +118,13 @@ the engine to assemble. This is the Gas City path, where the agent already
 holds the browser.
 
 ```bash
-sprintshow assemble .captures/agent-run -o demos/board.mp4
+demo_engine_cli assemble .captures/agent-run -o demos/board.mp4
 ```
 
-`manifest.json` is the contract `assemble` reads — one entry per frame with
-`file`, `narration` (the caption and the spoken line), `duration`, optional
-`observation`, `proof` (`passed` | `adapted` | `failed`), and `severity`
-(`error` | `warning` | `null`). The engine's `examples/agent-mcp/` documents
-the manifest shape and the MCP wiring; `examples/seed-test/` shows the
-seed-test bootstrap for a demo that first needs a login or seeded data.
+`manifest.json` is the contract `assemble` reads. The engine's
+`examples/agent-mcp/` documents its shape and the MCP wiring, and
+`examples/seed-test/` shows the seed-test bootstrap for a demo that first needs
+a login or seeded data.
 
 ## Deliver to the PR
 
@@ -146,40 +149,17 @@ all exit non-zero rather than leaving the clip undelivered.
 ## Demo-script format
 
 A demo script is markdown that reads as a walkthrough and carries
-machine-checkable directives, so one file both documents and drives the demo:
+machine-checkable directives, so one file both documents and drives the demo.
+The engine documents the format in the "Demo-script format" section of its
+`README.md`. Read it in the engine the library resolves, so the script you
+write is one that engine reads. After `demo_engine_find`, that README is
+`$DEMO_ENGINE_DIR/README.md` when the city has the engine's source as a rig,
+and the one the published package ships otherwise. The engine's
+`demos/sample.md` is a worked example.
 
-```markdown
-# Demo: <title>
-
-**Start:** `/path?query`          ← joined onto the server origin
-
-<free prose → the cover subtitle>
-
-## Steps
-
-1. **<caption shown on screen, spoken as narration>**
-   `<action>`                     ← 0+ backtick directives, run in order
-   <free prose → step description>
-   _Prove:_ <human prose> `<assertion>`
-   _Fail if:_ <human prose> `<assertion>`
-
-## Scrutiny                        ← optional; a closing card
-- <what a viewer should check critically>
-```
-
-Actions: `goto` · `wait <ms>` · `waitFor <selector>` ·
-`waitForText <selector> ~ <substring>` · `click <selector>` ·
-`type <selector> ~ <text>` · `scroll <selector>`. Assertions (in `_Prove:_` /
-`_Fail if:_`): `visible` · `hidden` · `count <sel> <op> <n>` · `text <sel> ~
-<matcher>` · `eval <js>`. `_Prove:_` must hold (polled); `_Fail if:_` fails the
-step when it matches.
-
-A script drafted in the generic `demo:capture` dialect — an `**Auth:**` line, a
-`## Scrutiny` section, and prose-only `_Prove:_`/`_Fail if:_` — parses and runs
-unedited, recording *manual* proofs; sharpening it is additive (add actions and
-assertions, never restructure). The `gc-demo-script` skill generates a script
-in this dialect from a Gas City bead. The engine's `demos/sample.md` is a
-worked example, and its `README.md` is the full format reference.
+The `gc-demo-script` skill writes a script in the generic `demo:capture`
+dialect from a Gas City bead. The README's format section says how the engine
+reads that dialect and how such a script is sharpened.
 
 ## Narration
 
@@ -204,9 +184,14 @@ needs `OPENAI_API_KEY`. Each is fetched on demand rather than assumed:
 - **`OPENAI_API_KEY`** — read from the environment. The host places it in
   `$GC_HOME/secrets.env` (`~/.gc/secrets.env` when `GC_HOME` is unset), and
   gascity copies it into the supervisor's service env when
-  `gc supervisor install` writes that env. Sessions started after that carry
-  the key.
+  `gc supervisor install` writes that env, as it does any key with an
+  AI-provider prefix. Sessions started after that carry the key.
 
 The `doctor/check-demo-toolchain` check reports which of the others are
 resolvable, so a session knows before it captures whether the clip will be
-narrated or silent, and whether ffmpeg is in place.
+narrated or silent, and whether ffmpeg is in place. It also reports whether
+`VERCEL_AUTOMATION_BYPASS_SECRET`, Vercel's Protection Bypass for Automation
+key, reaches the session. That key is neither a provider credential nor on
+gascity's short allowlist, so it reaches sessions from the secrets file only
+when `GC_SUPERVISOR_ENV` names it, and the check names that opt-in when the
+file holds the key and the session does not.

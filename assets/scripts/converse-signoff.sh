@@ -138,6 +138,10 @@ pack_script() {
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=visit-identity.sh
 . "$HERE/visit-identity.sh" || die "cannot source visit-identity.sh from $HERE"
+# The one definition of a visit's topic, shared with converse-fold.sh and
+# converse-hold.sh. Exposes $VISIT_TOPIC_JQ.
+# shellcheck source=visit-topic.sh
+. "$HERE/visit-topic.sh" || die "cannot source visit-topic.sh from $HERE"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -209,10 +213,13 @@ fi
 # The topic scopes the discharge to THIS sitting's demands, so a sibling sitting
 # on a shared standing-scope bucket (same subject, distinct escalation_key)
 # keeps its own demand: this sign-off neither resolves it nor overwrites its
-# operator question with a re-state. escalation_key is that per-sitting
-# discriminator, empty on an ordinary visit — which keeps the pre-topic
-# behaviour. An array so an empty topic expands to no argument under zsh.
-TOPIC=$(printf '%s' "$V" | jq -r '.[0].metadata.escalation_key // ""')
+# operator question with a re-state. The visit's demand topic is that
+# per-sitting discriminator, the one converse-hold.sh filed its demands under:
+# the escalation_key, or `visit:` and the visit's own id for a visit filed for
+# a distinct concern beside a live sitting on its subject. The topic is empty on
+# an ordinary visit, which keeps the pre-topic behaviour. An array so an empty
+# topic expands to no argument under zsh.
+TOPIC=$(printf '%s' "$V" | jq -r "$VISIT_TOPIC_JQ"'.[0] | visit_demand_topic')
 DEMAND_TOPIC=()
 [ -n "$TOPIC" ] && DEMAND_TOPIC=(--topic "$TOPIC")
 # The hold to discharge. A conversation wait gates the VISIT (the default — a

@@ -40,9 +40,11 @@ provision_worktree() {
     git -C "$WT" submodule init 2>/dev/null || true
 
     # Runtime ignores live in git metadata (--git-path resolves the exclude file
-    # for linked-worktree layouts), never in the tracked .gitignore. A worktree
-    # whose git metadata git cannot find has no exclude file to write, and git
-    # cannot stage anything from it either.
+    # for linked-worktree layouts), never in the tracked .gitignore. git shares
+    # that file among all of a repo's worktrees, the rig checkout included, so
+    # these rules hide gc's writes there too. A worktree whose git metadata git
+    # cannot find has no exclude file to write, and git cannot stage anything
+    # from it either.
     EXCLUDE=$(git -C "$WT" rev-parse --git-path info/exclude) || return 0
     case "$EXCLUDE" in
         /*) ;;
@@ -73,11 +75,44 @@ provision_worktree() {
     append_exclude ".github/hooks/"
     append_exclude ".github/copilot-instructions.md"
     append_exclude "state.json"
+    # gc links each skill into .agents/skills/ for Codex and pi, one symlink per
+    # skill, and records each link's name in an ownership manifest beside them.
+    # A person can keep files, links and skills of their own in that directory,
+    # so only the manifest and the names it records are hidden, each by its
+    # exact path. The names come from this worktree's manifest and the rig
+    # checkout's, so a link gc adds later shows until the next run reads it.
+    # Lines are only ever added, so a name gc drops stays hidden.
+    append_exclude ".agents/skills/.gc-skill-ownership.json"
+    exclude_skill_links "$WT"
+    exclude_skill_links "$RIG_ROOT"
+    # Session start stages the city's .gc/settings.json into every Claude
+    # session's work dir, and bd's workspace gate sits beside .beads, outside it.
+    append_exclude ".gc/"
+    append_exclude ".beads.gate.lock"
 }
 
 append_exclude() {
     PATTERN="$1"
     grep -qxF "$PATTERN" "$EXCLUDE" 2>/dev/null || printf '%s\n' "$PATTERN" >> "$EXCLUDE"
+}
+
+# exclude_skill_links <checkout> — hides each skill link whose name the
+# ownership manifest in <checkout>/.agents/skills/ records. git reads each
+# line of the exclude file as a pattern, so a name is taken only when it is
+# letters, digits, dots, dashes and underscores, which git matches literally.
+# The match is anchored with \A and \z, because jq's $ also matches before a
+# final newline, and a name ending in one would reach the file as another name.
+# Any other name stays visible rather than risk a pattern that hides a
+# person's file. A missing or unreadable manifest, or no jq, adds nothing.
+exclude_skill_links() {
+    MANIFEST="$1/.agents/skills/.gc-skill-ownership.json"
+    [ -f "$MANIFEST" ] || return 0
+    NAMES=$(jq -r '.targets | keys[] | select(test("\\A[A-Za-z0-9._-]+\\z") and . != "." and . != "..")' \
+        "$MANIFEST" 2>/dev/null) || return 0
+    printf '%s\n' "$NAMES" | while IFS= read -r NAME; do
+        [ -n "$NAME" ] || continue
+        append_exclude ".agents/skills/$NAME"
+    done
 }
 
 rebase_in_progress() {

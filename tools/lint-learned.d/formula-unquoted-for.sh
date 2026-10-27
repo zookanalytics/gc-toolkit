@@ -169,18 +169,16 @@ for f in "$@"; do
     esac
     # In scope: surfaces whose fenced shell blocks are pasted into a shell and
     # run, not prose. Formula TOMLs, agent prompt templates, the startup
-    # fragments injected into every prompt, the skills agents load and run,
-    # and the dispatch-containment runbook operators paste and run. Docs are
-    # named here one by one rather than matched by a docs/* glob: most docs
-    # are prose whose fenced examples are illustrative, and flagging those
-    # trains readers to ignore the rule. Add a runbook to this list when it
-    # becomes paste-to-run.
+    # fragments injected into every prompt, and the skills agents load and
+    # run. A docs runbook is named here one by one rather than matched by a
+    # docs/* glob: most docs are prose whose fenced examples are
+    # illustrative, and flagging those trains readers to ignore the rule.
+    # Add a runbook to this list when it becomes paste-to-run.
     case "$f" in
         */formulas/*.toml | formulas/*.toml) ;;
         */template-fragments/*.template.md | template-fragments/*.template.md) ;;
         */agents/*/prompt.template.md | agents/*/prompt.template.md) ;;
         */skills/*/SKILL.md | skills/*/SKILL.md) ;;
-        */docs/gascity-dispatch-containment.md | docs/gascity-dispatch-containment.md) ;;
         *) continue ;;
     esac
     # A failed scan can print nothing, which is also what a clean file

@@ -248,6 +248,26 @@ has "$CALLS" "display-menu" "(SHIFT) the row still renders"
 has "$CALLS" "DEMAND-SENTENCE" "(SHIFT) with the demand intact, not shifted out of the label"
 
 # ==============================================================================
+# A FAILED START WEARS ITS OWN GLYPH
+# ==============================================================================
+# helm-svc marks a row whose visit's sitting failed to start (visit_state
+# start-failed) and leads its needs with why. In a column of held rows the glyph
+# is what tells that row apart at a glance, in both menus.
+FAILED='[{"id":"tk-fail1","rig":"gc-toolkit","severity":"ELEVATED","title":"the plan","frontier":"needs-review · 1 open","needs":"start failed (startup timeout): talk it over","held":true,"visit_state":"start-failed"},{"id":"tk-held1","rig":"gc-toolkit","severity":"ELEVATED","title":"another plan","frontier":"needs-review · 1 open","needs":"an ask","held":true,"visit_state":"parked"},{"id":"tk-none1","rig":"gc-toolkit","severity":"ELEVATED","title":"an owed demand","frontier":"routed","needs":"a demand","held":false,"visit_state":""}]'
+fixture
+BOARD_RC=0 BOARD_ERR="" BOARD_OUT="$FAILED"
+run_pick
+has "$CALLS" "✗ ELEVATED tk-fail1" "(FAILED) a failed start leads with ✗"
+has "$CALLS" "● ELEVATED tk-held1" "(FAILED) any other held row keeps ●"
+has "$CALLS" "· ELEVATED tk-none1" "(FAILED) a row no visit holds keeps ·"
+has "$CALLS" "start failed (startup timeout)" "(FAILED) the reason reaches the label"
+
+fixture
+BOARD_RC=0 BOARD_ERR="" BOARD_OUT="$FAILED"
+run_pick --all
+has "$CALLS" "✗ ELEVATED tk-fail1" "(ALL-FAILED) the overview marks it the same way"
+
+# ==============================================================================
 # STATIC GUARD — the shape of the original defect must not come back
 # ==============================================================================
 # Anchored on the INVOCATION: the header quotes the same command, and a guard

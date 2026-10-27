@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# duplicate-sweep — arm 11 of the merge cadence; caller: refinery-reconcile.sh.
+# duplicate-sweep — arm 10 of the merge cadence; caller: refinery-reconcile.sh.
 # Closes the duplicates that are provably safe to close and leaves every other
 # bead exactly where it is. Two detections find them:
 #   - a `duplicate_of` marker. A polecat that diagnoses a duplicate dispatch
@@ -276,7 +276,7 @@ else
       "gc.dispatch_when_ready_slung", "gc.deferred_routed_to",
       "gc.deferred_execution_routed_to", "gc.deferred_assignee",
       "gc.claimed_at", "gc.session_id", "gc.session_name",
-      "work_dir", "gc.work_dir", "gc.work_commit", "self_review_passed_sha",
+      "work_dir", "gc.work_dir", "gc.work_commit",
       "prepare_mode", "merge_result" ] as $dispatch
     | [ "gc.work_outcome", "work_outcome" ] as $outcome
     | .[]

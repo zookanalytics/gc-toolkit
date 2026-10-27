@@ -13,7 +13,7 @@
 #
 # The visit is the ONLY attention channel — the operator does not read the
 # "human" mailbox, so the upstream notify-on-human-gate-creation order is a
-# durable record, not the reach (docs/gascity-human-engagement.md).
+# durable record, not the reach (docs/human-engagement.md).
 #
 # Exec, not a formula: two `bd list`s plus one `gc-helm open` per gate still
 # owed a visit needs no LLM. Cooldown, not event: the stamp makes a re-run a
