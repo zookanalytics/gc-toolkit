@@ -119,15 +119,20 @@
 #     even once it has closed.
 #   --accept (with a ruling) says the ruling takes the subject's
 #     recommendation, gc.recommended_formula, which a first reaction put to the
-#     operator through the human gate under the key first-reaction. That gate
-#     must be one the ruling answers: the conversation replies to it, and on a
-#     turn that does not sign off --answer names it. Step 3 leaves it to step 5,
-#     which runs gc-helm.sh accept, the one writer that dispatches a
-#     recommendation, so the sitting never slings it itself. Under Accept's lock
-#     and its token, a dispatch the board's Accept already poured is recorded
-#     and not sent again, even when that Accept stopped before recording it.
-#     Refused while another open human gate that the ruling does not answer
-#     holds the subject, since the dispatch waits for every gate that holds it.
+#     operator through a human gate under the key first-reaction that blocks
+#     the subject. That gate must be one the ruling answers: the conversation
+#     replies to it, and on a turn that does not sign off --answer names it. A
+#     gate under the key that blocks another bead, such as an epic's member,
+#     asks that bead's recommendation, which --accept does not take. Step 3
+#     leaves the subject's gate to step 5, which runs gc-helm.sh accept, the
+#     one writer that dispatches a recommendation, so the sitting never slings
+#     it itself. Accept answers each open gate under the key on the subject, or
+#     with none open the newest one, and the ruling must answer each of those.
+#     Under Accept's lock and its token, a dispatch the board's Accept already
+#     poured is recorded and not sent again, even when that Accept stopped
+#     before recording it. Refused while another open human gate that the
+#     ruling does not answer holds the subject, since the dispatch waits for
+#     every gate that holds it.
 #     A subject that still reads `held` when Accept's writer runs, as on a turn
 #     that does not sign off, is released by that writer before it dispatches.
 #   --var <key>=<value> (with --accept, repeatable) is a var the ruling settled
@@ -143,11 +148,11 @@
 #   write: usage, a conversation that is not one, a gate it does not reply to,
 #   a ruling that reaches an open PR and gave none of --rework, --no-rework and
 #   --retire, a --rework or --retire on a ruling that reaches more than one open
-#   PR without a --pr-anchor naming one of them, or an --accept with no
-#   recommendation's gate among the gates the ruling answers, no recommendation
-#   on the subject, another open human gate the ruling does not answer, or a
-#   held subject on a turn that does not sign off, or a --var without --accept
-#   or not of the form <key>=<value>.
+#   PR without a --pr-anchor naming one of them, or an --accept with none of
+#   the subject's own recommendation gates among the gates the ruling answers,
+#   a gate Accept would answer that the ruling does not, no recommendation on
+#   the subject, or another open human gate the ruling does not answer, or a
+#   --var without --accept or not of the form <key>=<value>.
 set -u
 
 # >>> control-char-scrub
@@ -216,8 +221,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # with gc-helm.sh dismiss. Exposes work_outcome_noop.
 # shellcheck source=work-outcome.sh
 . "$HERE/work-outcome.sh" || die "cannot source work-outcome.sh from $HERE"
-# The one read of which human gates still hold a bead, the read gc-helm.sh
-# accept makes. Exposes bd_open_human_gates.
+# The one read of a bead's human gates, the read gc-helm.sh accept makes, and
+# the rule of which of them still hold it. Exposes bd_human_gates and
+# $HUMAN_GATE_JQ.
 # shellcheck source=bd-lib.sh
 . "$HERE/bd-lib.sh" || die "cannot source bd-lib.sh from $HERE"
 
@@ -461,38 +467,53 @@ fi
 # consequence acts on.
 in_target_rig() { ( cd "$TARGET_PATH" && GC_RIG="$TARGET_RIG" GC_RIG_ROOT="$TARGET_PATH" "$@" ); }
 # --accept takes the subject's recommendation through the gate that put it to
-# the operator, the human gate under the key first-reaction. That gate must be
-# one the ruling answers, so the conversation's reply on it records which
-# conversation took it up. Step 3 leaves it, and step 5 hands it to Accept's
-# writer. Accept dispatches only once no other open human gate holds the
-# subject, because a formula's sling reads no blocks edge, so a gate this
-# ruling does not answer refuses the take here, before any write, rather than
-# after step 3 has answered the others. Accept answers every open gate under
-# the key, as it does on the board, so a twin that a race filed under the key
-# does not count as another gate.
+# the operator: a human gate under the key first-reaction that blocks the
+# subject. A gate under the key that blocks another bead, such as a member of
+# the epic a sitting is about, asks that bead's recommendation, and Accept on
+# the subject never answers it. The gate must be one the ruling answers, so the
+# conversation's reply on it records which conversation took it up. Step 3
+# leaves it, and step 5 hands it to Accept's writer, which answers the gates it
+# chooses on the subject: each open one under the key, or with none open the
+# newest, whose acceptance an earlier Accept left unfinished. The sign-off
+# answers no gate its conversation does not reply to, so each gate Accept
+# answers must be one this ruling answers. Accept dispatches only once no other
+# open human gate holds the subject, because a formula's sling reads no blocks
+# edge, so a gate this ruling does not answer refuses the take here, before any
+# write, rather than after step 3 has answered the others. One listing of the
+# subject's human gates answers all three.
 REC_GATES=""
 REC_FORMULA=""
 if [ -n "$ACCEPT" ]; then
+  SUBJECT_GATES=$(bd_human_gates "$SUBJECT") \
+    || stopped "the human gates that hold $SUBJECT could not be read, and its recommendation is taken only through its own gate, once no gate but its own holds it; nothing was written"
   ANSWERED_GATES=""
   for g in $TO_ANSWER; do
     printf '%s\n' "${LEAVE[@]+"${LEAVE[@]}"}" | grep -qxF -- "$g" && continue
     ANSWERED_GATES="${ANSWERED_GATES:+$ANSWERED_GATES }$g"
-    printf '%s' "$GATES_JSON" | jq -e --arg g "$g" 'any(.[]; .id == $g and (.issue_type // "") == "gate"
-        and (.await_type // "") == "human" and (.await_id // "") == "first-reaction")' >/dev/null 2>&1 \
+    printf '%s' "$SUBJECT_GATES" | jq -e --arg g "$g" 'any(.[]; .id == $g and ((.await_id // "") | tostring) == "first-reaction")' >/dev/null 2>&1 \
       && REC_GATES="${REC_GATES:+$REC_GATES }$g"
   done
   [ -n "$REC_GATES" ] \
-    || die "--accept takes $SUBJECT's recommendation through the gate that puts it to the operator, the human gate under the key first-reaction, and no gate this ruling answers is that gate; nothing was written. Reply to it first${ANSWERING:+ and name it with --answer}, then re-run"
+    || die "--accept takes $SUBJECT's recommendation through the gate that puts it to the operator, a human gate under the key first-reaction that blocks $SUBJECT, and no gate this ruling answers is that gate; nothing was written. A gate under the key that blocks another bead asks that bead's recommendation, which Accept on $SUBJECT does not take. Reply to $SUBJECT's own gate first${ANSWERING:+ and name it with --answer}, then re-run"
+  ACCEPT_ANSWERS=$(printf '%s' "$SUBJECT_GATES" | jq -r "$HUMAN_GATE_JQ"'
+      [ .[] | select(((.await_id // "") | tostring) == "first-reaction") ] as $rec
+      | [ $rec[] | select(open_human_gate("first-reaction")) | .id ] as $open
+      | (if ($open | length) > 0 then $open else [ $rec | sort_by(.created_at // "") | last // empty | .id ] end)
+      | join(" ")')
+  UNANSWERED=""
+  for g in $ACCEPT_ANSWERS; do
+    case " $ANSWERED_GATES " in *" $g "*) ;; *) UNANSWERED="${UNANSWERED:+$UNANSWERED }$g" ;; esac
+  done
+  [ -z "$UNANSWERED" ] \
+    || die "Accept takes $SUBJECT's recommendation by answering $UNANSWERED, which this ruling does not answer, and the sign-off answers no gate its conversation does not reply to; nothing was written. Reply to it${ANSWERING:+ and name it with --answer}, then re-run"
   REC_FORMULA=$(printf '%s' "$SUBJECT_ROW" | jq -r '(.metadata // {})["gc.recommended_formula"] // "" | tostring')
   REC_SENT=$(printf '%s' "$SUBJECT_ROW" | jq -r '(.metadata // {})["gc.recommended_formula_dispatched"] // "" | tostring')
   [ -n "$REC_FORMULA$REC_SENT" ] \
     || die "--accept takes $SUBJECT's recommendation, and $SUBJECT carries none (no gc.recommended_formula); nothing was written. Answer its gate without --accept"
   REC_FORMULA="${REC_FORMULA:-$REC_SENT}"
-  HOLDING=$(bd_open_human_gates "$SUBJECT") \
-    || stopped "the human gates that hold $SUBJECT could not be read, and its recommendation is dispatched only once no gate but its own holds it; nothing was written"
-  OTHERS=$(printf '%s' "$HOLDING" | jq -r --arg answered "$ANSWERED_GATES" '
+  OTHERS=$(printf '%s' "$SUBJECT_GATES" | jq -r --arg answered "$ANSWERED_GATES" "$HUMAN_GATE_JQ"'
       ($answered | split(" ")) as $a
-      | [ .[] | select(((.await_id // "") | tostring) != "first-reaction")
+      | [ .[] | select(open_human_gate("")) | select(((.await_id // "") | tostring) != "first-reaction")
               | select(((.id // "") | tostring) as $i | ($a | index($i)) == null)
               | "\(.id) (\(.title // "untitled"))" ] | join("; ")')
   [ -z "$OTHERS" ] \

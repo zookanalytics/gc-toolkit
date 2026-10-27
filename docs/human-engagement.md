@@ -571,7 +571,12 @@ own would pour the formula again once the stopped Accept's root had finished.
 A var the ruling settles for the dispatch, such as a design convoy's
 `design_gated` ([design-convoy.md](design-convoy.md)), rides the sign-off's
 `--var` to Accept's sling. The sign-off refuses `--accept`, writing nothing,
-while a human gate the ruling does not answer still holds the subject. An
+while a human gate the ruling does not answer still holds the subject. The
+recommendation's gate is one under the key `first-reaction` that blocks the
+subject: a gate under that key on an epic's member asks the member's
+recommendation, which Accept on the epic never answers. So the sign-off also
+refuses `--accept` unless the ruling answers one of the subject's own gates
+under the key, and each gate Accept would answer there. An
 `--answer` turn releases nothing of its own, so Accept's writer releases a
 subject that reads `held` before its sling.
 

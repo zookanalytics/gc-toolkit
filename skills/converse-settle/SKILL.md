@@ -127,7 +127,9 @@ instead of claiming your own.
 - **The subject takes its recommendation.** The operator rules to take the
   formula a first reaction recommended, `gc.recommended_formula`. Make the
   conversation reply to the recommendation's gate, the human gate under the
-  key `first-reaction`, as for any gate you answer, and sign off with
+  key `first-reaction` that blocks the subject, as for any gate you answer. A
+  gate under that key on an epic's member asks the member's recommendation,
+  which the sign-off does not take. Then sign off with
   `--ruled yes --route human --no-wait --accept`. Send nothing yourself: the
   sign-off answers that gate through `gc-helm.sh accept`, the writer the
   board's Accept runs, after every other write but the close. Under the
@@ -136,10 +138,11 @@ instead of claiming your own.
   operator settles for that dispatch rides beside `--accept` as
   `--var <key>=<value>`; the formula's own description names the vars it
   takes. It refuses, writing nothing, while a human gate the ruling does not
-  answer still holds the subject. Answer that gate in the same ruling once the
-  operator rules on it, or sign off without `--accept` and with `--leave` on
-  the recommendation's gate, and the board offers Accept once the other gate
-  is cleared.
+  answer still holds the subject, or while the subject carries another gate
+  under the key, one Accept would answer, that the ruling does not answer.
+  Answer that gate in the same ruling once the operator rules on it, or sign
+  off without `--accept` and with `--leave` on the recommendation's gate, and
+  the board offers Accept once the other gate is cleared.
 - **New work carries it.** File and send that work (below), then sign off
   with `--ruled yes --route human --waiting-on <the work>`.
 - **New work decomposes an epic subject.** File it as the subject's member and

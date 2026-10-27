@@ -52,8 +52,11 @@
 #   (ACCEPT*) a ruling that takes the subject's recommendation hands its gate
 #             to Accept's writer after every other write but the close, never
 #             resolving it itself; it is refused before any write when the
-#             ruling does not answer that gate, the subject carries no
-#             recommendation, or another gate holds the subject; a sign-off
+#             ruling does not answer that gate, answers a gate under the key
+#             that blocks another bead (an epic's member) and not the subject's
+#             own, or leaves unanswered a gate Accept would answer, the subject
+#             carries no recommendation, or another gate holds the subject; a
+#             sign-off
 #             releases a held subject before Accept's writer runs, and an
 #             answer leaves a held subject to that writer's own release; a take
 #             Accept does not complete stops the sign-off, and an answer that
@@ -839,6 +842,40 @@ eq "$RC" 2 "(ACCEPT-WITHHELD) --accept while another human gate the ruling does 
 has "$OUT" "tk-rev" "(ACCEPT-WITHHELD) …naming that gate"
 eq "$(writes)" 0 "(ACCEPT-WITHHELD) …writing nothing"
 eq "$(field tk-rec status)" "open" "(ACCEPT-WITHHELD) …so the recommendation's gate stays open"
+# epic_rec — an epic and its member each recommend a formula through a gate of
+# their own under the key first-reaction, and the epic's conversation took up
+# the member's gate alone. Accept on the epic answers the epic's gate, never
+# the member's.
+epic_rec() {
+    fresh; bead tk-epic epic; setm tk-epic gc.recommended_formula mol-fix
+    gate tk-eg first-reaction; edge tk-epic blocks tk-eg
+    bead tk-mem; edge tk-mem parent-child tk-epic; setm tk-mem gc.recommended_formula mol-polish
+    gate tk-mg first-reaction; edge tk-mem blocks tk-mg
+    conv tk-conv tk-epic; edge tk-conv replies-to tk-mg
+}
+epic_rec; run_signoff --conversation tk-conv --answer tk-mg --ruling "take the member's mol-polish" --outcome x --no-wait --accept
+eq "$RC" 2 "(ACCEPT-MEMBER) --accept on an answer to a member's first-reaction gate alone exits 2"
+has "$OUT" "blocks another bead" "(ACCEPT-MEMBER) …saying that gate asks another bead's recommendation"
+eq "$(writes)" 0 "(ACCEPT-MEMBER) …writing nothing"
+eq "$(field tk-eg status)/$(field tk-mg status)" "open/open" "(ACCEPT-MEMBER) …so the epic's gate and the member's both stay open"
+eq "$(meta tk-epic gc.recommended_formula_dispatched)" "" "(ACCEPT-MEMBER) …and the epic's recommendation is not dispatched"
+hasnt "$OUT" "ANSWERED" "(ACCEPT-MEMBER) …nor is the member's gate reported answered"
+epic_rec; run_signoff --conversation tk-conv --outcome x "${TAKE[@]}"
+eq "$RC" 2 "(ACCEPT-MEMBER) a sign-off that takes the recommendation from a member's gate alone exits 2"
+eq "$(writes)" 0 "(ACCEPT-MEMBER) …writing nothing"
+eq "$(field tk-eg status)" "open" "(ACCEPT-MEMBER) …and the epic's gate stays open"
+# Accept answers each open gate under the key on the subject, so the ruling
+# answers each of them, a twin a race filed beside the first included.
+recommend; gate tk-rec2 first-reaction; edge tk-anc blocks tk-rec2
+run_signoff --conversation tk-conv --outcome x "${TAKE[@]}"
+eq "$RC" 2 "(ACCEPT-UNANSWERED) --accept while Accept would also answer a gate the ruling does not exits 2"
+has "$OUT" "by answering tk-rec2" "(ACCEPT-UNANSWERED) …naming that gate"
+eq "$(writes)" 0 "(ACCEPT-UNANSWERED) …writing nothing"
+edge tk-conv replies-to tk-rec2
+run_signoff --conversation tk-conv --outcome "took the reaction's mol-fix" "${TAKE[@]}"
+eq "$RC" 0 "(ACCEPT-TWINS) a ruling that answers both gates under the key takes the recommendation"
+eq "$(field tk-rec status)/$(field tk-rec2 status)" "closed/closed" "(ACCEPT-TWINS) …through Accept, which answers both"
+hasnt "$(cat "$CALLS")" "gate resolve tk-rec" "(ACCEPT-TWINS) …and the sign-off resolves neither itself"
 
 echo "# --accept on a turn that does not sign off"
 recommend; run_signoff --conversation tk-conv --answer tk-rec --ruling "take the reaction's mol-fix" --outcome "mol-fix is taken; the rollout is still open" --no-wait --accept
