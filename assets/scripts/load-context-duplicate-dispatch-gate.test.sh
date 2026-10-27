@@ -582,7 +582,8 @@ has "$(cat "$TMP/out")" "run-cancel.sh, await-ruling.sh, escalate.sh and work-tr
 # --- 8. End to end with the real work-tree-holder.sh. -------------------------
 # A real repository laid out like pool slots: this session's slot ($ME) and a
 # peer slot whose per-bead tree holds uncommitted work. The pack serves the
-# real tree check beside the stub cancel, wait and escalate.
+# real tree check, and the run-lib.sh it traces a claim's molecule through,
+# beside the stub cancel, wait and escalate.
 E2E="$TMP/e2e"; E2E_REPO="$E2E/repo"; ME="$E2E/slots/me"; PEER="$E2E/slots/peer"
 (
   export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1
@@ -596,17 +597,20 @@ echo wip > "$PEER/worktrees/tk-work/wip.txt"
 mkdir -p "$TMP/e2e-pack/assets/scripts"
 cp "$TMP/pack/assets/scripts/run-cancel.sh" "$TMP/pack/assets/scripts/await-ruling.sh" "$TMP/pack/assets/scripts/escalate.sh" "$TMP/e2e-pack/assets/scripts/"
 ln -s "$HERE/work-tree-holder.sh" "$TMP/e2e-pack/assets/scripts/work-tree-holder.sh"
+ln -s "$HERE/run-lib.sh" "$TMP/e2e-pack/assets/scripts/run-lib.sh"
 
 E2E_SESSIONS=$(jq -nc --arg me "$ME" --arg peer "$PEER" '{sessions: [
   {id: "lx-me", session_name: "pool__polecat-lx-me", name: "pool__polecat-lx-me", agent_name: "rig/rig.me", alias: null, state: "active", work_dir: $me},
   {id: "lx-peer", session_name: "pool__polecat-lx-peer", name: "pool__polecat-lx-peer", agent_name: "rig/rig.peer", alias: null, state: "active", work_dir: $peer}]}')
 # e2e_beads <work bead the peer's molecule tracks> — the peer's claimed step,
-# its root and input convoy, and that work bead's row.
+# its root and input convoy as Gas City writes them, and that work bead's row.
+# The fake gc answers every list with all of them, and run-lib.sh picks out the
+# rows it asked for.
 e2e_beads() {
   jq -nc --arg w "$1" --arg tree "$PEER/worktrees/$1" '[
     {id: "st-p", status: "in_progress", assignee: "lx-peer", metadata: {"gc.root_bead_id": "root-p"}, dependencies: []},
-    {id: "root-p", status: "in_progress", assignee: null, metadata: {"gc.input_convoy_id": "cv-p"}, dependencies: []},
-    {id: "cv-p", status: "open", assignee: null, metadata: {}, dependencies: [{issue_id: "cv-p", depends_on_id: $w, type: "tracks"}]},
+    {id: "root-p", status: "in_progress", assignee: null, issue_type: "task", metadata: {"gc.kind": "workflow", "gc.input_convoy_id": "cv-p"}, dependencies: []},
+    {id: "cv-p", status: "open", assignee: null, issue_type: "convoy", metadata: {}, dependencies: [{issue_id: "cv-p", depends_on_id: $w, type: "tracks"}]},
     {id: $w, status: "open", assignee: null, metadata: {branch: ("polecat/" + $w), work_dir: $tree}, dependencies: []}]'
 }
 E2E_BEAD="[{\"status\":\"open\",\"assignee\":\"\",\"metadata\":{\"work_dir\":\"$PEER/worktrees/tk-work\",\"branch\":\"polecat/tk-work\"}}]"

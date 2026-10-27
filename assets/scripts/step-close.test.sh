@@ -34,9 +34,10 @@
 #     open rather than merging with it; and that ambiguity inside the open tier
 #     is refused like any other;
 #   * --convoy naming the molecule: the live root poured over the input convoy,
-#     taken only when this session holds or held a bead in it, so neither a
-#     re-pour over the same convoy nor an alias every session of an agent
-#     shares makes the fresh root this shell's; the derivation is the fallback;
+#     as run-lib.sh names it, taken only when this session holds or held a bead
+#     in it, so neither a re-pour over the same convoy nor an alias every
+#     session of an agent shares makes the fresh root this shell's; the
+#     derivation is the fallback, for a read that fails too;
 #   * the session stamp read from open and in_progress rows first, with closed
 #     rows read only when none of those carries it;
 #   * the chain-close loop the formula ships, run against the script: a loop
@@ -59,8 +60,8 @@
 #   * control characters inside bd's JSON, which break an unfiltered `| jq` and
 #     would otherwise read as "no such bead".
 #
-# No live city, Dolt, network, or beads — only a tmpdir, a `gc` stub, and the
-# script itself.
+# No live city, Dolt, network, or beads — only a tmpdir, a `gc` stub, the
+# run-lib.sh stub, and the script itself.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -88,8 +89,10 @@ mkdir -p "$TMP/bin"
 #   id|assignee|step_ref|status[|root[|session_id[|input_convoy|formula]]]
 # Root defaults to root-1 and the session id to absent, so a row that does not
 # care about the molecule stays four fields wide. A row with an input convoy is
-# a workflow root, as gascity pours one: gc.kind=workflow, gc.input_convoy_id
-# and gc.formula_name, and no gc.step_ref or gc.root_bead_id of its own.
+# a workflow root, as gascity pours one: gc.kind=workflow and gc.formula_name,
+# and no gc.step_ref or gc.root_bead_id of its own. Those rows are the runs the
+# run-lib.sh stub answers from (stub_runs), so the stub, not this one, answers
+# the convoy's read.
 # `bd show`   : the single bead, as a one-element array (unknown id -> []).
 # `bd list`   : every bead matching --status=, --assignee= and
 #               --metadata-field=<key>=<value>. Status takes a comma list, and
@@ -112,7 +115,7 @@ emit_one() {
   local title="step $1" meta
   [ "${FAKE_CTRL:-0}" = "1" ] && title="step $(printf '\001')$1"
   if [ -n "${7:-}" ]; then
-    meta=$(printf '"gc.kind":"workflow","gc.formula_contract":"graph.v2","gc.input_convoy_id":"%s","gc.formula_name":"%s"' "$7" "${8:-}")
+    meta=$(printf '"gc.kind":"workflow","gc.formula_contract":"graph.v2","gc.formula_name":"%s"' "${8:-}")
   else
     meta=$(printf '"gc.step_ref":"%s","gc.root_bead_id":"%s"' "$3" "${5:-root-1}")
   fi
@@ -165,7 +168,6 @@ case "$1" in
         gc.root_bead_id)    [ -z "${convoy:-}" ] && [ "$root" = "$wval" ] || continue ;;
         gc.session_id)      [ "${sid:-}" = "$wval" ] || continue ;;
         gc.step_ref)        [ -z "${convoy:-}" ] && [ "$step" = "$wval" ] || continue ;;
-        gc.input_convoy_id) [ -n "${convoy:-}" ] && [ "$convoy" = "$wval" ] || continue ;;
         *) continue ;;
       esac
       obj=$(emit_one "$id" "$assignee" "$step" "$status" "$root" "${sid:-}" "${convoy:-}" "${formula:-}")
@@ -191,6 +193,18 @@ chmod +x "$TMP/bin/gc"
 export PATH="$TMP/bin:$PATH"
 export FAKE_BEADS="$TMP/beads" FAKE_CLOSED="$TMP/closed" FAKE_UPDFAIL="$TMP/updfail" FAKE_CALLS="$TMP/calls"
 : > "$FAKE_CLOSED"; : > "$FAKE_UPDFAIL"; : > "$FAKE_CALLS"
+
+# The run-lib.sh stub, answering from the runs of the bead table: each row with
+# an input convoy is a run over it, live until its status is closed. stub_runs
+# writes them before every invocation, so each case's table stays the one
+# fixture it reads. Each verb call is logged to $RUN_LIB_STUB_LOG, and
+# RUN_LIB_STUB_FAIL fails the calls it names.
+export GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json" RUN_LIB_STUB_LOG="$TMP/runlib.log" RUN_LIB_STUB_FAIL=""
+stub_runs() {
+  awk -F'|' 'NF >= 7 && $7 != "" { printf "%s\t%s\t%s\t%s\n", $1, $7, $8, $4 }' "$FAKE_BEADS" \
+    | jq -R -s -c '[ split("\n")[] | select(length > 0) | split("\t")
+                    | {root: .[0], convoy: .[1], bead: "", formula: .[2], live: (.[3] != "closed")} ]' > "$RUN_LIB_STUB_RUNS"
+}
 
 MINE="gc-toolkit__polecat-lx-zzk9"
 STEP="mol-feedback-distiller.load-and-gate"
@@ -230,6 +244,7 @@ invoke() {  # invoke [VAR=VALUE ...] -- <script args ...>; sets OUT and RC
   while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do envv+=("$1"); shift; done
   [ "${1:-}" = "--" ] && shift
   local try=1
+  stub_runs
   while :; do
     RC=0
     OUT=$(gcenv "${envv[@]}" bash "$SCRIPT" "$@" 2>&1) || RC=$?
@@ -581,7 +596,17 @@ eq "$RC" "0" "(CONVOY) --convoy names the molecule, so the close proceeds past t
 has "$(cat "$FAKE_CLOSED")" "tk-own11 pass" "(CONVOY) it closes this molecule's bead"
 hasnt "$(cat "$FAKE_CLOSED")" "tk-q" "(CONVOY) no queued molecule's bead is touched"
 hasnt "$(cat "$FAKE_CALLS")" "gc.session_id" "(CONVOY) no gc.session_id read is issued"
-eq "$(wc -l < "$FAKE_CALLS" | tr -d ' ')" "2" "(CONVOY) two reads in all: the convoy's root, then the molecule's live rows"
+eq "$(wc -l < "$FAKE_CALLS" | tr -d ' ')" "1" "(CONVOY) one read of its own: the molecule's live rows"
+eq "$(cut -d' ' -f1,3 "$RUN_LIB_STUB_LOG" | tail -n 1)" "subject conv-mine" "(CONVOY) …after run-lib.sh names the run poured over the convoy"
+
+# A read of the convoy's runs that fails names no molecule, so the close falls
+# back to the derivation, which here meets the queued rivals and refuses.
+convoy_store
+: > "$RUN_LIB_STUB_LOG"
+invoke GC_SESSION_NAME="$MINE" GC_SESSION_ID="lx-zzk9" RUN_LIB_STUB_FAIL="subject" -- --step "$FR" --convoy conv-mine
+eq "$RC" "2" "(CONVOY-UNREAD) a failed read of the convoy's runs takes no root"
+has "$OUT" "names no single live workflow root" "(CONVOY-UNREAD) …and says the derivation decides"
+eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(CONVOY-UNREAD) …which writes nothing over the rivals"
 
 # (b) A forced re-pour over the same convoy closes the old root and pours a
 #     fresh one. A shell still running the old molecule resolves the fresh
@@ -1438,6 +1463,7 @@ B
 }
 run_loop() { # <loop file>; sets OUT and RC
   RC=0
+  stub_runs
   OUT=$(gcenv GC_SESSION_NAME="$MINE" GC_SESSION_ID="lx-zzk9" GC_PACK_DIR="$ROOT" GC_RIG_ROOT="" GC_CITY_PATH="" \
     bash "$1" 2>&1) || RC=$?
 }

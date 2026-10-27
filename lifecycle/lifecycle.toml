@@ -473,8 +473,10 @@ keys = [
 #   `polecat/<bead-id>` for fresh work.
 # target — the landing branch the work merges into: the polecat records it at
 #   submit, the refinery stamps it on a rework child (pr-facts.sh,
-#   pre-open-rebase.sh, signoff.sh), and convoy-graduate.sh writes it on
-#   graduation. Read two ways — as the fallback alias for merged_target before a
+#   pre-open-rebase.sh, signoff.sh), and an integration effort's setup
+#   (mol-design-convoy.toml, the mechanik's recipe) writes the effort's branch
+#   on each of its beads and the default branch on its landing bead. Read two
+#   ways — as the fallback alias for merged_target before a
 #   PR opens (pr-open.sh, gate-ensure.sh, both defaulting to the rig's default
 #   branch when both are absent), and directly as the landing branch by the
 #   polecat's submit target-resolve (mol-polecat-work.toml), the refinery's
@@ -482,10 +484,11 @@ keys = [
 #   derived from the anchor (mol-review.toml), and signoff.sh verifying a rework
 #   child. Absent, the merged_target readers fall through to the default branch
 #   and submit falls back to base_branch. Never cleared. A branch name.
-# merged_target — where the PR actually lands, resolved onto the anchor when the
-#   PR opens (pr-open.sh) and read by merge.sh, pr-facts.sh and gate-ensure.sh to
-#   catch a base moved out from under a validated PR. Absent falls back to
-#   target then the default branch. Never cleared.
+# merged_target — where the work actually lands. pr-open.sh resolves it onto the
+#   anchor when the PR opens, and direct-merge-push.sh records it at a direct
+#   landing. Read by merge.sh, pr-facts.sh and gate-ensure.sh to catch a base
+#   moved out from under a validated PR. Absent falls back to target then the
+#   default branch. Never cleared.
 # merged_sha — the merge commit recorded at close, by merge.sh and pr-facts.sh
 #   (record-failure-cap.sh writes it by hand). I5 forbids an empty one, so a
 #   record that cannot read the oid writes the sentinel `unverified:PR#<n>`
@@ -496,30 +499,33 @@ keys = [
 #   unparseable pr_url resolves to the fail-closed repo `?`. Never cleared.
 #   pr_number is an integer; pr_url is the canonical `scheme://host/owner/repo/pull/<n>`.
 # existing_pr — a PR the refinery should reuse rather than open. pr-facts.sh
-#   stamps it on a rework child equal to that child's pr_url and signoff.sh on
-#   the child it files; the refinery's rejection transition carries it through
+#   and rework-child.sh stamp it on the rework child each files, equal to that
+#   child's pr_url; the refinery's rejection transition carries it through
 #   (mol-refinery-patrol.toml). Read by mol-refinery-patrol.toml to force the PR
-#   pipeline when set (merge_strategy flips to mr) and to count the bead
-#   PR-shaped, and by signoff.sh to verify a rework child's pr_fields. Absent
-#   means no PR to reuse. Never cleared. Value is a PR URL.
+#   pipeline when set (merge_strategy flips to mr), and by pr-facts.sh and
+#   rework-child.sh to verify the child each files. Absent means no PR to reuse.
+#   Never cleared. Value is a PR URL.
 # merge_strategy — how the refinery lands the branch. mol-refinery-patrol.toml
-#   resolves it once, in its merge-strategy-resolve block: `mr` opens and merges
-#   a PR, `direct` fast-forwards and pushes straight to the target, and `pr` is
-#   an alias normalized to `mr` on read. An absent key resolves to the
-#   default_merge_strategy var (default `mr`); an empty value resolves to
-#   `direct`. `mr` is stamped by pr-facts.sh, signoff.sh, convoy-graduate.sh,
-#   pre-open-rebase.sh and mol-feedback-distiller.toml,
-#   and existing_pr forces the resolved mode up from `direct` at the refinery.
-#   A target under `polecat/` (another bead's per-bead PR head) carrying no PR of
-#   its own resolves the other way, from `mr` down to `direct`, so the branch
-#   folds onto that PR head instead of opening a nested PR against it.
-#   `pr` is written only by mol-refinery-patrol.toml, auto-promoting a bead whose
-#   direct push was rejected for branch protection into the PR pipeline. Read by
-#   mol-refinery-patrol.toml and signoff.sh. Never cleared. Enum `mr | pr | direct`.
+#   resolves it once, in merge-push's merge-strategy-resolve block: `mr` opens
+#   and merges a PR, `direct` fast-forwards and pushes straight to the target,
+#   and `pr` is an alias normalized to `mr` on read. An absent key resolves to
+#   the default_merge_strategy var (default `direct`), and an empty value to
+#   `direct`. A bead that would land `direct` on the default branch, where a bead
+#   with no target lands, resolves to `mr`, so the default branch takes work
+#   only through a PR (docs/warrants.md). existing_pr forces the resolved mode
+#   up from `direct` at the refinery. `local`, which no pack writer stamps,
+#   passes through, and merge-push refuses it as unsupported. `mr` is stamped by
+#   pr-facts.sh, rework-child.sh, pre-open-rebase.sh and
+#   mol-feedback-distiller.toml. `pr` is written only by direct-merge-push.sh,
+#   auto-promoting a bead whose direct push was rejected for branch protection
+#   into the PR pipeline. Read by mol-refinery-patrol.toml, and read back by
+#   pr-facts.sh, rework-child.sh and pre-open-rebase.sh on the rework child each
+#   stamps. Never cleared. Enum `mr | pr | direct | local`.
 # prepare_mode — how the refinery brings a rework branch current before it lands.
-#   Every branch shape (per-bead `polecat/*`, shared `integration/*`, a
-#   graduation) is stamped `merge`: the branch is brought current by merging
-#   origin/<target> in, never rebased, so no shape is rewritten or force-pushed.
+#   Every branch shape (per-bead `polecat/*`, and the shared `integration/*` a
+#   landing bead carries) is stamped `merge`: the branch is brought current by
+#   merging origin/<target> in, never rebased, so no shape is rewritten or
+#   force-pushed.
 #   Written by pr-facts.sh, pre-open-rebase.sh and mol-refinery-patrol.toml. The
 #   prepare and resume paths merge the target in whatever the stamp says; an
 #   absent value resolves to merge too, so a dropped stamp cannot select a
@@ -535,10 +541,11 @@ keys = [
 #   pre_open_gate, pull_request), and by the polecat once the merge its resume
 #   runs concludes. A stop before then, such as a question for a person, leaves
 #   it, so the bead's next run resumes again. Freeform instruction text.
-# graduation — `true`, set on the convoy bead by convoy-graduate.sh when an
-#   integration branch is carried to the default branch. prepare_mode is `merge`
-#   for every branch shape, so this flag does not change how the branch is
-#   brought current. Never cleared.
+# graduation — RETIRED. `true`, set on a convoy bead when convoy graduation
+#   carried its integration branch to the default branch. Nothing writes or
+#   reads it now: a landing bead carries an integration effort to the default
+#   branch. Registered so that residue on a pre-retirement bead reads as known,
+#   not as a stray.
 # blocked_reason — the human-readable reason an anchor sits in a human state
 #   (existing_pr unusable, a PR closed or retargeted out of band). Written by
 #   pr-facts.sh; it is also a [holds] marker, so a live bead carrying it owes a
@@ -557,10 +564,12 @@ keys = [
 #   product was store work. Absent auto_push means the normal push-and-hand-off
 #   path. Not cleared — the halt is terminal for that run. auto_push and
 #   branch_ready are boolean-ish; halt_reason is `auto_push_false | store_only`.
-# pr_summary — the polecat's account of what the diff does, stamped on the anchor
-#   at submit and rendered as the PR's `## Summary` by pr-open.sh, which falls
-#   back to the dispatch text and then a generic line when it is absent or blank.
-#   Never cleared. Freeform markdown.
+# pr_summary — the account of what the diff does, rendered as the PR's
+#   `## Summary` by pr-open.sh, which falls back to the dispatch text and then a
+#   generic line when it is absent or blank. The polecat stamps it on the anchor
+#   at submit, and an integration effort's summary task stamps it on the effort's
+#   landing bead once the effort's work has landed. Never cleared. Freeform
+#   markdown.
 # merge_record_failures — consecutive failures to record a merged PR on this
 #   anchor. merge.sh and pr-facts.sh both perform that record and both retry
 #   every pass with no memory, so the count is the only thing that can tell a
@@ -1221,8 +1230,8 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # merge_hold owes no blocks edge; a hold that must show as an edge asserts it
 # through blocked_reason or gc.takeaway beside it. rebase_hold and tracking_only are OPERATOR freezes
 # the pack only reads: a rebase_hold on any bead naming a branch stops
-# pre-open-rebase.sh, pr-open.sh, pr-facts.sh and convoy-graduate.sh from
-# rebasing or dispatching it, save the one dispatch pr-facts.sh files whatever
+# pre-open-rebase.sh, pr-open.sh and pr-facts.sh from rebasing or dispatching
+# it, save the one dispatch pr-facts.sh files whatever
 # holds the anchor: a review-feedback batch's rework child, which brings the
 # branch current by merge as it answers. tracking_only opts a PR out of
 # merge.sh's in-flight-holder count. The pack never writes or clears either.
@@ -1692,6 +1701,31 @@ keys = [
 #   leaves the next one a pointer it can withdraw. Cleared by the claim itself
 #   and in every write that ends one: the give-back, the release from a close
 #   that stands, and the reopen. A bead id.
+
+[metadata.design_convoy]
+# The resume record formulas/mol-design-convoy.toml keeps on its subject, the
+# effort's landing bead (docs/design-convoy.md). Each step reads it from the
+# subject when the step starts, so a resumed run files no second bead and
+# dispatches nothing twice.
+keys = [
+  "gc.design_child", "gc.design_armed",
+  "gc.impl_child", "gc.impl_armed",
+  "gc.summary_task", "gc.summary_armed",
+]
+# gc.design_child / gc.impl_child / gc.summary_task — the design child, the
+#   implementation child and the summary task, each written on the subject by
+#   the step that files it, in the update after its create. The later steps
+#   read the ids to wire their edges and to dispatch, and the implementation
+#   child's brief tells it to make the bead gc.summary_task names wait on each
+#   bead it splits into. Absent means the bead is not filed: its own step files
+#   it, and a later step that needs it stops. Not cleared. A bead id.
+# gc.design_armed / gc.impl_armed / gc.summary_armed — `1` once the dispatch
+#   step has dispatched that bead: the design child slung, the implementation
+#   child armed behind the design or slung, the summary task armed. The step
+#   dispatches only after every target and edge of the setup has read back and
+#   the subject is with the refinery, and stamps each marker right after its
+#   own dispatch. Absent means that dispatch has not happened, so a resume runs
+#   it. Not cleared. A string.
 
 [metadata.learning]
 # The feedback-learning loop's beads (docs/feedback-learning.md). obs.* is the

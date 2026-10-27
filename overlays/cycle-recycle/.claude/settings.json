@@ -7,6 +7,11 @@
           {
             "type": "command",
             "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\"; S=\"${GC_DIR:-${CLAUDE_PROJECT_DIR:-.}}/.claude/hooks/cycle-recycle.sh\"; [ -f \"$S\" ] && sh \"$S\" || true"
+          },
+          {
+            "type": "command",
+            "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\"; S=\"${GC_DIR:-${CLAUDE_PROJECT_DIR:-.}}/.claude/hooks/patrol-continue.sh\"; [ -f \"$S\" ] && sh \"$S\" || true",
+            "timeout": 120
           }
         ]
       }

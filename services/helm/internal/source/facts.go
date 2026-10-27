@@ -299,21 +299,29 @@ func visitSubjects(sittings []board.Sitting) []string {
 }
 
 // workflowRoot is one graph.v2 molecule root as the in-flight join needs it:
-// the work bead its input convoy tracks, plus every session stamped on the root
+// the root, the work bead its run works, plus every session stamped on the root
 // or on its steps. The member is resolved in-process during the rig gather (see
 // convoyMembers); the convoy id is kept as the key that resolution reads.
 type workflowRoot struct {
+	rootID   string
 	convoyID string
-	member   string // the convoy's single tracked member, "" if not exactly one
+	issue    string // the root's gc.var.issue, "" when it records none
+	member   string // the bead the run works, "" when it names none
 	sessions []string
 }
 
 // workflowRoots finds this rig's live-candidate graph.v2 roots.
 //
-// A root carries gc.input_convoy_id; the work bead it stands over is that
-// convoy's single tracked member. The session name is read from the root,
-// falling back to its STEP beads: roots stamp gc.session_name at claim time,
-// but not every root in the store carries one, and the steps do.
+// It copies the part of the rule assets/scripts/run-lib.sh defines that reads
+// an input convoy, and TestWorkflowRootsAgreeWithRunLibFixture holds it to that
+// file's fixture. A workflow root names its input convoy in gc.input_convoy_id,
+// and the work bead its run works is that convoy's single tracked member. A
+// root whose gc.var.issue names another bead is wired wrong and works none. A
+// root that names no input convoy is not read here, though run-lib.sh gives
+// such a root, a classic molecule among them, the bead its gc.var.issue names.
+// The session name is read from the root, falling back to its STEP beads:
+// roots stamp gc.session_name at claim time, but not every root in the store
+// carries one, and the steps do.
 func (s *BeadsSource) workflowRoots(ctx context.Context, st beadStore, r rigRef, g *gatherState) []workflowRoot {
 	roots, err := st.SearchIssues(ctx, "", beads.IssueFilter{
 		Statuses:       liveStatuses,
@@ -358,7 +366,10 @@ func (s *BeadsSource) workflowRoots(ctx context.Context, st beadStore, r rigRef,
 			continue
 		}
 		md := decodeMetadata(iss.Metadata)
-		convoy := md["gc.input_convoy_id"]
+		if !isRunRoot(iss, md) {
+			continue
+		}
+		convoy := strings.TrimSpace(md["gc.input_convoy_id"])
 		if convoy == "" {
 			continue
 		}
@@ -366,7 +377,7 @@ func (s *BeadsSource) workflowRoots(ctx context.Context, st beadStore, r rigRef,
 		if len(names) == 0 {
 			continue
 		}
-		out = append(out, workflowRoot{convoyID: convoy, sessions: names})
+		out = append(out, workflowRoot{rootID: iss.ID, convoyID: convoy, issue: strings.TrimSpace(md["gc.var.issue"]), sessions: names})
 		convoyIDs = append(convoyIDs, convoy)
 	}
 
@@ -376,9 +387,22 @@ func (s *BeadsSource) workflowRoots(ctx context.Context, st beadStore, r rigRef,
 	// and no `gc convoy status` subprocess.
 	members := convoyMembers(ctx, st, r, convoyIDs, g)
 	for i := range out {
-		out[i].member = members[out[i].convoyID]
+		m := members[out[i].convoyID]
+		if out[i].issue != "" && out[i].issue != m {
+			m = ""
+		}
+		out[i].member = m
 	}
 	return out
+}
+
+// isRunRoot reports whether a bead is a workflow root, as run-lib.sh's
+// run_is_root reads one: a graph.v2 root as Gas City marks it, or a classic
+// molecule.
+func isRunRoot(iss *beads.Issue, md map[string]string) bool {
+	return strings.EqualFold(strings.TrimSpace(md["gc.kind"]), "workflow") ||
+		strings.EqualFold(strings.TrimSpace(md["gc.formula_contract"]), "graph.v2") ||
+		string(iss.IssueType) == "molecule"
 }
 
 // convoyMembers resolves each convoy to its SINGLE tracked member from the rig
