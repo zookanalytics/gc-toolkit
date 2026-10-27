@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermetic test for assets/scripts/scaffolding-sweep.sh — arm 10 of the merge
+# Hermetic test for assets/scripts/scaffolding-sweep.sh — arm 9 of the merge
 # cadence, and the per-anchor sweep pr-facts.sh's disposition arm runs before
 # its close. Covers: the sweep condition (machine scaffolding on a DISPOSED
 # anchor, by either disposition marker) and every way it fails to hold (a live
@@ -192,7 +192,7 @@ store "[$(scaf FA1 AONE finding),$(scaf FA2 ATWO finding),$(anchor AONE pull_req
 out=$("$SUT" --anchor AONE 2>&1); rc=$?
 eq "$rc" 0 "a settled anchor exits 0"
 eq "$(bstatus FA1)" "closed" "the named anchor's finding is retired"
-eq "$(bstatus FA2)" "open" "…and another disposed anchor's is left for arm 10"
+eq "$(bstatus FA2)" "open" "…and another disposed anchor's is left for arm 9"
 out=$("$SUT" --anchor ANONE 2>&1); rc=$?
 eq "$rc" 0 "an anchor with no live scaffolding exits 0"
 has "$out" "no live scaffolding beads on ANONE" "…and says so"
@@ -294,7 +294,7 @@ echo "# an unreadable comment list leaves the finding for the next pass"
 store "[$(hfind FUR AP5 docs/b.md:7 502),$(hfind FUM AP5 'PR review' 900),$(anchor AP5 pull_request "$(PRD 44)")]"
 comments 44
 out=$(STUB_GH_LIST_RC=1 run); rc=$?
-eq "$rc" 0 "arm 10 completes its pass (exit 0)"
+eq "$rc" 0 "arm 9 completes its pass (exit 0)"
 eq "$(bstatus FUR)" "open" "the finding whose line could not be read is left open"
 eq "$(carrier FUR)" "<none>" "…and is not carried forward on a guess"
 has "$out" "could not be read" "…and the pass says why"

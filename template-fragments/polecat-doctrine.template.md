@@ -89,7 +89,7 @@ The formula distinguishes two questions that look like one:
   and what self-review diffs against. On a rework child this is the branch
   under review, on purpose.
 - **Merge INTO** — `metadata.target`: where the refinery lands the work. A
-  caller-set target (a signoff's `REVIEW_BASE`, an owned convoy's
+  caller-set target (a signoff's `REVIEW_BASE`, an integration effort's
   `integration/<id>`) always wins; never overwrite it.
 
 Fresh work lives on `polecat/<bead-id>`, cut from freshly-fetched
@@ -99,21 +99,37 @@ is AUTHORITATIVE — check it out; do not cut a different branch. The
 submit-and-exit gate enforces `CURRENT_BRANCH == metadata.branch` and fails
 closed.
 
-### Integration branches (owned convoys)
+### Integration branches
 
-`metadata.target` is not always the default branch. A child of an owned
-convoy with an integration branch carries `metadata.target =
-integration/<convoy-id>`, which the owned-convoy recipe stamps when it links
-the child. `gc sling` takes the bead's own target as the base branch before
-anything else: you branch from `origin/integration/<convoy-id>`, the refinery
-lands your work on that integration branch, and main moves only when the
-convoy graduates later. Without the stamp, sling reads a convoy target only
-off the one parent chain bd reports, so a child whose reported parent is an
-epic outside the convoy is poured from the default branch. workspace-setup
-cancels that run before it cuts a branch, and the work waits on a visit that
-asks for the target. Otherwise there is nothing special to do, because the
-formula preserves `metadata.target`. Just do not read "landed in the refinery"
-as "main moved".
+`metadata.target` is not always the default branch. A bead filed for an
+integration effort carries the effort's branch, `integration/<landing-id>`, as
+its own `metadata.target`, written in the create that filed it. `gc sling` takes
+the bead's own target as the base branch before anything else: you branch from
+`origin/integration/<landing-id>`, and the refinery lands your work on that
+branch with no PR of its own, unless the bead is a stage, slung `--merge mr`,
+whose PR goes into the branch. The effort's landing bead carries the branch to
+main through the one PR the operator reviews, so do not read "landed in the
+refinery" as "main moved". There is nothing special to do, because the formula
+preserves `metadata.target`.
+
+An effort's summary task writes its landing bead's `pr_summary`, the `## Summary`
+of the effort's PR, once every bead it waits on has landed. It runs on
+`mol-polecat-report`, changes no file, and its description names the landing
+bead. This is how to write it:
+
+1. Read the landing bead's `branch` and `target`, fetch origin, and read the
+   whole branch against its target: `git log` and
+   `git diff origin/<target>...origin/<branch>`.
+2. Read the `pr_summary` that each landed bead's own polecat wrote. Those beads
+   are the ones the landing bead waits on.
+3. Write what the whole branch does, for the operator's merge decision. Name
+   where the finished work departs from the landing bead's description: work the
+   description promised that did not land, work that landed beyond it, and an
+   approach that changed.
+4. Stamp it on the landing bead with
+   `gc bd update <landing-bead> --set-metadata pr_summary="$(cat <file>)"`, read
+   it back, and write nothing else there. The formula's write-report step then
+   closes the task, which releases the landing bead to the refinery.
 
 ## Work bead metadata contract
 
@@ -122,7 +138,7 @@ as "main moved".
 | `work_dir` | you (workspace-setup) | absolute worktree path — enables crash recovery |
 | `branch` | you (workspace-setup) | source branch; the refinery merges exactly this |
 | `target` | you (submit) / caller | landing branch (resolved once, in submit step 1b) |
-| `pr_summary` | you (submit) | what the diff does; the PR's `## Summary`, absent falls back to the dispatch text. Stamped on the ANCHOR, which on a child is not the bead you claimed |
+| `pr_summary` | you (submit), or an effort's summary task | what the diff does; the PR's `## Summary`, absent falls back to the dispatch text. Stamped on the ANCHOR, which on a child is not the bead you claimed; a summary task stamps its landing bead |
 | `prepare_mode` | refinery | `merge`: the branch is brought current by merging its base in, never by a rebase |
 | `rejection_reason` | refinery | why the last attempt bounced; resume, don't redo |
 | `existing_pr` | caller/refinery | PR to reuse — leave for the refinery to validate |

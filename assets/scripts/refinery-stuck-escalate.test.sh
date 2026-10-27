@@ -7,7 +7,10 @@
 # never escalate, and a false escalation here is the defect this block fixes. A
 # count-nudge is gone: it went stale the moment the assignee set drained. The
 # counterpart retract withdraws a visit only when the handoff's own row shows it
-# left the refinery; absence from the queue listing alone withdraws nothing.
+# left the refinery; absence from the queue listing alone withdraws nothing. A
+# bead something holds (hold-lib.sh) is waiting, not stuck, as a landing bead
+# waits on its effort, and a wait is aged from the close that released its last
+# hold when that is later than its last write.
 #
 # The queue is read at the refinery's live identity, resolved by the real
 # resolve-route.sh against a stubbed roster. The store stub answers only that
@@ -65,7 +68,7 @@ bash -n "$TMP/block.sh" \
 # GC_RIG_ROOT, which the block probes first, so the real pack escalate.sh is
 # never reached. The rig root also holds a copy of the real resolver.
 mkdir -p "$TMP/bin" "$TMP/rig/assets/scripts"
-cp "$ROOT/assets/scripts/resolve-route.sh" "$TMP/rig/assets/scripts/"
+cp "$ROOT/assets/scripts/resolve-route.sh" "$ROOT/assets/scripts/hold-lib.sh" "$TMP/rig/assets/scripts/"
 chmod +x "$TMP/rig/assets/scripts/resolve-route.sh"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'STUB'
 case "$1 $2" in
@@ -292,6 +295,49 @@ case "$BLOCK" in
   *'\'*) bad "block contains a backslash — the TOML \"\"\" string mangles it" ;;
   *)     ok "block is backslash-free" ;;
 esac
+
+# --- A held bead is waiting, not stuck -----------------------------------------
+# A landing bead sits in the queue from the moment its effort is stood up, so it
+# is past the bound long before its effort's beads close. Its blockers are read
+# by id, served here from the 6th run() argument with the retract arm's rows.
+# blocked <id> <updated_at> <blocker>...: a queue row with a blocks edge onto each.
+blocked() { local id="$1" when="$2"; shift 2
+  jq -nc --arg id "$id" --arg u "$when" --args '{id: $id, updated_at: $u, title: "handoff",
+    metadata: {branch: ("integration/" + $id)},
+    dependencies: [ $ARGS.positional[] as $b | {issue_id: $id, depends_on_id: $b, type: "blocks"} ]}' "$@"; }
+LAND="$(blocked tk-land "$OLD1" tk-e1 tk-sum)"
+OPEN_BLOCKERS='[{"id":"tk-e1","status":"open","title":"effort bead","metadata":{}},{"id":"tk-sum","status":"open","title":"summary task","metadata":{}}]'
+eq "$(run "[$LAND]" "" "" "" "" "$OPEN_BLOCKERS")" "" "a held landing bead past the stuck bound files no visit"
+has "$(out)" "no stuck handoffs" "and the queue reads as churning normally"
+has "$(cat "$TMP/lists")" "--id=tk-e1,tk-sum" "its blockers are read by id"
+HELD_AND_STUCK="$(run "[$LAND,{\"id\":\"tk-stuck\",\"updated_at\":\"$OLD2\",\"title\":\"handoff\",\"metadata\":{}}]" "" "" "" "" "$OPEN_BLOCKERS")"
+eq "$(printf '%s' "$HELD_AND_STUCK" | grep -c . || true)" "1" "an unheld handoff past the bound beside it still files one visit"
+has "$HELD_AND_STUCK" "--subject tk-stuck" "the visit is the unheld handoff's"
+hasnt "$HELD_AND_STUCK" "tk-land" "and not the held landing bead's"
+# Released a minute ago, last written years ago: the wait starts at the release.
+JUST="$(date -u -r "$(( $(date -u +%s) - 60 ))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-60 seconds' +%Y-%m-%dT%H:%M:%SZ)"
+RELEASED='[{"id":"tk-e1","status":"closed","closed_at":"'"$OLD2"'","metadata":{}},{"id":"tk-sum","status":"closed","closed_at":"'"$JUST"'","metadata":{}}]'
+eq "$(run "[$LAND]" "" "" "" "" "$RELEASED")" "" "a landing bead its summary task released a minute ago is not stuck"
+LONG_GONE='[{"id":"tk-e1","status":"closed","closed_at":"2020-03-01T00:00:00Z","metadata":{}},{"id":"tk-sum","status":"closed","closed_at":"'"$OLD2"'","metadata":{}}]'
+LG="$(run "[$LAND]" "" "" "" "" "$LONG_GONE")"
+has "$LG" "--subject tk-land" "one released past the bound and still not taken is stuck"
+has "$LG" "since $OLD2" "and its wait is dated from the release, not its last write"
+# Held only by a blocker the store does not return: find-work never takes it,
+# so it is stuck past the bound, and the visit names the blocker.
+GHOSTED="$(run "[$(blocked tk-ghosted "$OLD1" tk-ghost)]" "" "" "" "" '[]')"
+has "$GHOSTED" "--subject tk-ghosted" "a bead held only by an unreadable blocker is escalated past the bound"
+has "$GHOSTED" "waits on tk-ghost (unreadable), a blocker this store does not return" "the visit names the blocker it waits on"
+# A walk of the holds that cannot read blinds the monitor.
+WALK="$(HANDOFF_RC_OVERRIDE=1 run "[$LAND]" "" "" "" "" "$OPEN_BLOCKERS")"
+has "$WALK" "--key witness-refinery-queue-unreadable" "a hold walk that cannot read escalates the blind monitor"
+hasnt "$WALK" "--subject tk-" "naming no stuck bead"
+has "$(out)" "could not read what holds the handoffs past the stuck bound" "and says why"
+has "$(HANDOFF_RC_OVERRIDE=1 run "$STUCK_ONE")" "--subject tk-stuck" "a past-bound bead with no blocker needs no hold read"
+for PRELUDE in 'set -e' 'set -euo pipefail'; do
+  eq "$(run "[$LAND]" "" "" "$PRELUDE" "" "$OPEN_BLOCKERS")" "" "$PRELUDE: a held landing bead files no visit"
+  has "$(HANDOFF_RC_OVERRIDE=1 run "[$LAND]" "" "" "$PRELUDE" "" "$OPEN_BLOCKERS")" "--key witness-refinery-queue-unreadable" \
+     "$PRELUDE: a hold walk that cannot read still escalates the blind monitor"
+done
 
 # --- Retract arm: a departed handoff's escalation is withdrawn moot -----------
 # A handoff that an open witness-refinery-queue visit escalates and that the

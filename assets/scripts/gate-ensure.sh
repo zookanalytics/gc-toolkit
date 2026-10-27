@@ -183,6 +183,10 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$_bd_lib_dir/pace-lib.sh" || { echo "cannot source pace-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=git-lib.sh
 . "$_bd_lib_dir/git-lib.sh" || { echo "cannot source git-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=run-lib.sh
+. "${GC_RUN_LIB:-$_bd_lib_dir/run-lib.sh}" || { echo "cannot source run-lib.sh beside this script" >&2; exit 1; }
+# The reader run-lib.sh reads this store through.
+gate_bd() { gc bd "$@"; }
 
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 # The step/root reads below must see closed rows too: a spent chain is
@@ -403,27 +407,14 @@ compute_quiescence() { # <anchor-id>
   return 0
 }
 
-# The roots of every workflow poured over <review-bead>, one per line, via the
-# tracking convoy each pour mints. A re-pour mints a SECOND root, so all of
+# The roots of every workflow poured over <review-bead>, one per line: each run
+# run-lib.sh names for it, live or not. A re-pour mints a SECOND root, so all of
 # them must be judged — one spent root proves nothing while a sibling runs.
-# Non-zero = the linkage could not be read.
+# Non-zero = the runs could not be read, or the bead has none.
 pour_roots() { # <review-bead-id>
-  local raw ids rows out=""
-  raw=$(gc bd dep list "$1" --direction=up -t tracks --json 2>/dev/null | scrub)
-  [ -n "$raw" ] || return 1
-  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  ids=$(printf '%s' "$raw" | jq -r '
-    .[] | select((.issue_type // .type // "") == "convoy") | .id' 2>/dev/null)
-  [ -n "$ids" ] || return 1
-  while IFS= read -r c; do
-    [ -n "${c:-}" ] || continue
-    rows=$(bd_list --metadata-field "gc.input_convoy_id=$c" --status="$ALL_STATUSES") || return 1
-    out="$out$(printf '%s' "$rows" | jq -r '.[].id' 2>/dev/null)
-"
-  done <<CONVOYS
-$ids
-CONVOYS
-  out=$(printf '%s' "$out" | sed '/^$/d')
+  local runs out
+  runs=$(run_lib runs gate_bd "$1") || return 1
+  out=$(printf '%s' "$runs" | jq -r '.[].root' 2>/dev/null)
   [ -n "$out" ] || return 1
   printf '%s\n' "$out"
 }
@@ -468,43 +459,20 @@ pour_ok() { # <bead-id> <pool>
   [ "$got" = "${2:-}" ]
 }
 
-# Count the workflow ROOTS a LIVE tracking convoy carries over a bead: >0 means
-# a poured workflow still drives it and a second pour would mint a second root.
-# The convoy alone is NOT that reach — a pour can mint the convoy and the tracks
-# edge and then die before pouring the root, leaving a LIVE but EMPTY convoy that
-# drives nothing; counting that as in flight holds the anchor forever. So the
-# reach is the root, read the way pour_roots reads it (members via
-# gc.input_convoy_id). Only a live convoy is consulted (a closed/dead pour is
-# over and must not suppress the stranded re-sling); a dep row with no status
-# field counts as live (fail-closed toward no-re-pour when the shape is unknown).
-# A convoy's members are read across all statuses — a root the pour created is
-# reach whether or not its chain has begun to close. Non-zero rc = a read failed
-# and the count is unknown; the caller holds rather than re-sling blind.
+# Count the workflow runs poured over a bead (run-lib.sh): >0 means a poured
+# workflow may still drive it and a second pour would mint a second root. The
+# convoy alone is NOT that reach — a pour can mint the convoy and the tracks
+# edge and then die before pouring the root, leaving a convoy that drives
+# nothing; run-lib.sh names no run over it, so it counts zero and the caller
+# re-slings rather than hold the anchor forever. A run counts whether or not its
+# chain has begun to close, since the root the pour created is the reach, and
+# the caller judges its liveness (judge_pour_liveness). Non-zero rc = the runs
+# could not be read and the count is unknown; the caller holds rather than
+# re-sling blind.
 tracked_roots() { # <bead-id>
-  local raw ids rows n total=0
-  raw=$(gc bd dep list "$1" --direction=up -t tracks --json 2>/dev/null | scrub)
-  [ -n "$raw" ] || return 1
-  printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  ids=$(printf '%s' "$raw" | jq -r '
-    .[]
-    | select((.issue_type // .type // "") == "convoy")
-    | select(((.status // "open") | tostring) as $s
-             | ($s == "open" or $s == "in_progress" or $s == "blocked"
-                or $s == "deferred" or $s == "hooked" or $s == "pinned"))
-    | .id' 2>/dev/null)
-  # No LIVE tracking convoy at all is a readable zero, not a failed read:
-  # nothing drives the review, so the caller re-slings it.
-  [ -n "$ids" ] || { printf '0\n'; return 0; }
-  while IFS= read -r c; do
-    [ -n "${c:-}" ] || continue
-    rows=$(bd_list --metadata-field "gc.input_convoy_id=$c" --status="$ALL_STATUSES") || return 1
-    n=$(printf '%s' "$rows" | jq -r 'length' 2>/dev/null)
-    case "$n" in ''|*[!0-9]*) return 1 ;; esac
-    total=$((total + n))
-  done <<CONVOYS
-$ids
-CONVOYS
-  printf '%s\n' "$total"
+  local runs
+  runs=$(run_lib runs gate_bd "$1") || return 1
+  printf '%s' "$runs" | jq -r 'length' 2>/dev/null
 }
 
 # Judge a review whose only reach to the check is a poured WORKFLOW: is that
@@ -982,15 +950,15 @@ while IFS= read -r tagged; do
       case "$FOUND" in
         "stranded "*)
           # A review with no route, no pour and no claim is inert — unless a
-          # live tracking convoy CARRIES A WORKFLOW ROOT. That root is a pour
-          # whose exec stamp dropped, but the root ALONE is not proof the pour
+          # workflow run was poured over it (run-lib.sh). That run is a pour
+          # whose exec stamp dropped, but the run ALONE is not proof the pour
           # still runs: its step chain may be live, spent (closed without a
-          # verdict), or unreadable. So a tracked root is judged by the same
-          # liveness check the poured arm uses — live counts in flight, spent
-          # escalates, unreadable holds — not counted in flight on sight. A live
-          # convoy with NO root drives nothing (a pour minted the convoy and the
-          # tracks edge but died before the root), so that case, like a
-          # never-poured one, is re-slung rather than held in flight forever.
+          # verdict), or unreadable. So a run is judged by the same liveness
+          # check the poured arm uses — live counts in flight, spent escalates,
+          # unreadable holds — not counted in flight on sight. A convoy with NO
+          # root drives nothing (a pour minted the convoy and the tracks edge
+          # but died before the root), so that case, like a never-poured one, is
+          # re-slung rather than held in flight forever.
           rid="${FOUND#stranded }"
           [ -n "$REVIEW_POOL" ] || { skipped=$((skipped + 1)); continue; }
           # Quiescence gates the re-sling too: re-routing an inert review pours a
@@ -1035,10 +1003,9 @@ while IFS= read -r tagged; do
             echo "$PROG: WARN $id stranded review $rid did not settle at its priority; not re-slung, merge stays held, retry next pass" >&2
             skipped=$((skipped + 1)); continue
           fi
-          # Zero roots: a tracking convoy exists but carries no workflow root, so
-          # nothing drives the review. Re-sling — this mints the FIRST root; the
-          # empty convoy is left in place, contributing none to a later pass's
-          # union. Forward the same SLING_VAR_ARGS the fresh dispatch passes: a
+          # Zero runs: no workflow root was poured over the review, so nothing
+          # drives it. Re-sling — this mints the FIRST root; a convoy an earlier
+          # pour left with no root stays in place and names no run. Forward the same SLING_VAR_ARGS the fresh dispatch passes: a
           # --review-formula that marks its lane and synthesis vars required
           # cannot mint that first root without them. The record's values ride
           # the same sling, its own pin among them.
