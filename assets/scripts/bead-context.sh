@@ -138,7 +138,9 @@ bounded() {
 
 # The rig roster is read once and reused for every prefix resolution below, so a
 # bead with a dozen same-store deps does not re-shell `gc rig list` a dozen times.
-RIGS_JSON=$(bounded gc rig list --json 2>/dev/null | scrub || true)
+# A roster that does not read leaves every prefix unresolved, and rig-map.sh says
+# why on stderr.
+RIGS_JSON=$("$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rig-map.sh" || true)
 
 # prefix -> owning rig name, empty unless exactly one rig carries it (an unknown
 # or a two-rig prefix is not a store this tool may silently pick).

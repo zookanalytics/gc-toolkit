@@ -253,7 +253,7 @@ eq "$RC" "1" "a failed store read warns"
 has "$OUT" "alpha: could not list closed visits in $TMP/alpha/.beads (rc=3) — this store was NOT checked; \`gc bd list\` stderr: dolt: database is locked" "its warning carries \`gc bd list\` stderr"
 OUT=$(RIGS_RC=1 RIGS_ERR="rig registry: permission denied" run_check); RC=$?
 eq "$RC" "1" "a failed rig list warns"
-has "$OUT" "\`gc rig list\` stderr: rig registry: permission denied" "and its detail carries the probe's stderr"
+has "$OUT" "rig-map: \`gc rig list --json\` exited 1: rig registry: permission denied" "and its detail carries rig-map.sh's reason, with gc's stderr"
 OUT=$(BD_FAIL_STORE=alpha run_check); RC=$?
 hasnt "$OUT" "stderr:" "a read that wrote no stderr adds no stderr clause"
 
