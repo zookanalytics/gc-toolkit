@@ -17,8 +17,15 @@
 #              tracks the bead and is assigned to `human`, read back as a
 #              conversation, exit 0
 #   (QUEUED)   a conversation already waiting in the queue is joined, exit 0,
-#              nothing created; a new reason is appended to its notes, and a
-#              concern it already carries is not appended again
+#              nothing created; a new reason is appended to its notes in a
+#              write guarded on its waiting there, and a concern it already
+#              carries is not appended again
+#   (JOIN-*)   a join is reported only once the conversation reads back still
+#              waiting in the queue and carrying the concern: one a dismiss
+#              closed or a sitting took, before the write or after it, is
+#              passed over and the concern filed fresh; a failed append, a note
+#              that did not land, an unread row, or a listing that does not
+#              answer again exits 4
 #   (HELD)     a conversation a sitting holds is not joined: a fresh one is
 #              filed in the queue
 #   (TWO-TRACKS) a task assigned to human that tracks the bead and another is
@@ -66,9 +73,24 @@ mkdir -p "$TMP/bin"
 #     (default human) and status $FAKE_CONV_STATUS (default open), and one for
 #     $FAKE_TWO when set, an older task assigned to human. The bead is recorded,
 #     so the tasks' own rows can name it.
-#   bd show $FAKE_CONV — that conversation's own row, its ask
-#     $FAKE_CONV_DESC (default "an earlier concern") and its notes
-#     $FAKE_CONV_NOTES (default none).
+#   bd show $FAKE_CONV — that conversation's own row as the store reads it
+#     now: its ask $FAKE_CONV_DESC (default "an earlier concern"), its notes
+#     $FAKE_CONV_NOTES (default none) followed by each note an update appended,
+#     and the status and assignee it has now. Those are $FAKE_CONV_NOW_STATUS
+#     and $FAKE_CONV_NOW_ASSIGNEE, which default to the listing's, so a case
+#     can move the conversation out of the queue after open's listing. Once an
+#     update closes it ($FAKE_CLOSE_ON_APPEND), it reads closed.
+#     $FAKE_CONV_UNREADABLE makes the row fail to read.
+#   bd update $FAKE_CONV — checks --if-assignee and --if-status against the
+#     status and assignee the conversation has now, exiting 13 with nothing
+#     written on a mismatch, as bd's guard does, then appends its note.
+#     $FAKE_GUARD_MISS makes the guard miss whatever it reads, as a writer
+#     landing between open's read and its write does; $FAKE_APPEND_FAIL fails
+#     the write (exit 1); $FAKE_APPEND_DROPS answers 0 and keeps no note; and
+#     $FAKE_CLOSE_ON_APPEND closes the conversation just after the append, as a
+#     dismiss landing before open's read-back does.
+#   bd dep list ... --type tracks fails from the $FAKE_TRACKS_FAIL_FROM-th
+#     listing on, when set.
 #   bd dep list <gate> --direction=up --type blocks — the beads waiting on the
 #     gate: $FAKE_WAITERS, a JSON array.
 #   bd list --id <ids> — each named bead's own row, with its edges, for the
@@ -89,8 +111,14 @@ case "$1 ${2:-}" in
     jq -n '{rigs:[{name:"gc-toolkit", path:"/nonexistent-rig", prefix:"tk"}]}' ;;
   "bd show")
     if [ -n "${FAKE_CONV:-}" ] && [ "$3" = "$FAKE_CONV" ]; then
-      jq -n --arg i "$3" --arg d "${FAKE_CONV_DESC:-an earlier concern}" --arg n "${FAKE_CONV_NOTES:-}" \
-        '[{id:$i, title:"an earlier concern", description:$d, notes:$n, status:"open", issue_type:"task", assignee:"human"}]'
+      [ -z "${FAKE_CONV_UNREADABLE:-}" ] || exit 1
+      _notes="${FAKE_CONV_NOTES:-}"
+      if [ -s "$TMP_NOTES" ]; then _notes="${_notes:+$_notes
+}$(cat "$TMP_NOTES")"; fi
+      _now_st=$(cat "$TMP_NOW_STATUS" 2>/dev/null || printf '%s' "${FAKE_CONV_NOW_STATUS:-${FAKE_CONV_STATUS:-open}}")
+      jq -n --arg i "$3" --arg d "${FAKE_CONV_DESC:-an earlier concern}" --arg n "$_notes" \
+            --arg st "$_now_st" --arg a "${FAKE_CONV_NOW_ASSIGNEE:-${FAKE_CONV_ASSIGNEE:-human}}" \
+        '[{id:$i, title:"an earlier concern", description:$d, notes:$n, status:$st, issue_type:"task", assignee:$a}]'
       exit 0
     fi
     case "$3" in
@@ -120,6 +148,10 @@ case "$1 ${2:-}" in
       list)
         case " $* " in
           *" --type tracks "*)
+            _tn=$(( $(cat "$TMP_TRACKS_READS" 2>/dev/null || echo 0) + 1 )); printf '%s' "$_tn" > "$TMP_TRACKS_READS"
+            if [ -n "${FAKE_TRACKS_FAIL_FROM:-}" ] && [ "$_tn" -ge "$FAKE_TRACKS_FAIL_FROM" ]; then
+              echo "bd dep list: data plane down" >&2; exit 1
+            fi
             printf '%s' "$4" > "$TMP_TRACKED"
             _rows='[]'
             if [ -n "${FAKE_TWO:-}" ]; then
@@ -181,8 +213,30 @@ case "$1 ${2:-}" in
       _prev="$a"
     done
     jq -n '{id:"tk-conv1"}' ;;
-  "bd update"|"bd close")
-    printf '%s\n' "bd ${2} ${*:3}" >> "$FAKE_CALLS" ;;
+  "bd update")
+    printf '%s\n' "bd update ${*:3}" >> "$FAKE_CALLS"
+    if [ -n "${FAKE_CONV:-}" ] && [ "$3" = "$FAKE_CONV" ]; then
+      _id="$3"; shift 3
+      _ifa_set=0; _ifa=""; _ifs_set=0; _ifs=""; _note_set=0; _note=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --if-assignee)  _ifa_set=1; _ifa="${2-}"; shift 2 ;;
+          --if-status)    _ifs_set=1; _ifs="${2-}"; shift 2 ;;
+          --append-notes) _note_set=1; _note="${2-}"; shift 2 ;;
+          *) shift ;;
+        esac
+      done
+      [ -z "${FAKE_APPEND_FAIL:-}" ] || exit 1
+      _now_st=$(cat "$TMP_NOW_STATUS" 2>/dev/null || printf '%s' "${FAKE_CONV_NOW_STATUS:-${FAKE_CONV_STATUS:-open}}")
+      _now_as="${FAKE_CONV_NOW_ASSIGNEE:-${FAKE_CONV_ASSIGNEE:-human}}"
+      if [ "$_ifa_set$_ifs_set" != 00 ] && [ -n "${FAKE_GUARD_MISS:-}" ]; then exit 13; fi
+      if [ "$_ifa_set" = 1 ] && [ "$_now_as" != "$_ifa" ]; then exit 13; fi
+      if [ "$_ifs_set" = 1 ] && [ "$_now_st" != "$_ifs" ]; then exit 13; fi
+      if [ "$_note_set" = 1 ] && [ -z "${FAKE_APPEND_DROPS:-}" ]; then printf '%s\n' "$_note" >> "$TMP_NOTES"; fi
+      [ -z "${FAKE_CLOSE_ON_APPEND:-}" ] || printf 'closed' > "$TMP_NOW_STATUS"
+    fi ;;
+  "bd close")
+    printf '%s\n' "bd close ${*:3}" >> "$FAKE_CALLS" ;;
 esac
 exit 0
 GC
@@ -190,13 +244,18 @@ chmod +x "$TMP/bin/gc"
 
 export PATH="$TMP/bin:$PATH"
 export FAKE_CALLS="$TMP/calls" TMP_SUBJ="$TMP/subj" TMP_ASG="$TMP/asg" TMP_REPLIES="$TMP/replies" TMP_TRACKED="$TMP/tracked"
+export TMP_NOTES="$TMP/notes" TMP_NOW_STATUS="$TMP/now-status" TMP_TRACKS_READS="$TMP/tracks-reads"
 # Neutralize any inherited helm fixture hook so enumerate_rigs uses the stub.
 unset GC_HELM_FIXTURE || true
 # Keep the cache out of the operator's real cache dir.
 export TMPDIR="$TMP"
 
-# reset_store — forget the conversation an earlier case filed.
-reset_store() { : > "$FAKE_CALLS"; rm -f "$TMP_SUBJ" "$TMP_ASG" "$TMP_TRACKED"; : > "$TMP_REPLIES"; }
+# reset_store — forget the conversation an earlier case filed, the notes an
+# update appended, a close an update made, and the listings counted.
+reset_store() {
+    : > "$FAKE_CALLS"; rm -f "$TMP_SUBJ" "$TMP_ASG" "$TMP_TRACKED" "$TMP_NOTES" "$TMP_NOW_STATUS" "$TMP_TRACKS_READS"
+    : > "$TMP_REPLIES"
+}
 
 # run_open <show-mode> <bead-id> [args...] -> sets RC/OUT/ERR/CALLS
 run_open() {
@@ -252,14 +311,17 @@ grep -q 'engage tk-real1' <<< "$OUT" \
 [ -z "$CALLS" ] \
   && ok "(QUEUED) with no new concern, nothing is written" || bad "(QUEUED) wrote something (calls: $CALLS)"
 run_open found tk-real1 --reason "the cost question" --body "Compare the two options."
+eq "$RC" "0" "(QUEUED) a concern that joins a queued conversation exits 0"
 grep -q '^bd create' <<< "$CALLS" \
   && bad "(QUEUED) a second concern must join, not file (calls: $CALLS)" \
   || ok "(QUEUED) a second concern files no second conversation"
-grep -q 'bd update tk-conv0 --append-notes Another concern joined this conversation: the cost question' <<< "$CALLS" \
-  && ok "(QUEUED) the concern is appended to the queued conversation's notes" \
-  || bad "(QUEUED) the concern joins the conversation's notes (calls: $CALLS)"
+grep -q 'bd update tk-conv0 --if-assignee human --if-status open --append-notes Another concern joined this conversation: the cost question' <<< "$CALLS" \
+  && ok "(QUEUED) the concern is appended to the queued conversation's notes, guarded on its waiting in the queue" \
+  || bad "(QUEUED) the concern joins the conversation's notes under the queue guard (calls: $CALLS)"
 grep -q 'Compare the two options' <<< "$CALLS" \
   && ok "(QUEUED) …with its body" || bad "(QUEUED) body appended (calls: $CALLS)"
+grep -q 'conversation tk-conv0 is already open' <<< "$OUT" \
+  && ok "(QUEUED) …and reported joined once it reads back" || bad "(QUEUED) join reported (out: $OUT err: $ERR)"
 # The same concern again joins nothing. A caller that asks on every pass while
 # its condition stands, as deferred dispatch's capped arm does, re-sends the
 # words the conversation already carries, in a note an earlier join appended or
@@ -280,6 +342,89 @@ run_open found tk-real1 --reason "the cost question" --body "Compare the two opt
   || bad "(QUEUED) the conversation's own ask was appended (calls: $CALLS)"
 unset FAKE_CONV_DESC
 
+# --- (JOIN-*) a concern is reported joined only once it reads back in the queue -
+# The listing open chose from can be stale by the time it joins: a sitting can
+# take the conversation, or a dismiss close it, before the write. A conversation
+# that is no longer waiting in the queue cannot receive the concern, so open
+# passes it over and files the concern as a conversation of its own, and a write
+# or read-back that fails fails the open, so the concern is never reported
+# waiting while nothing records it.
+FAKE_APPEND_FAIL=1 run_open found tk-real1 --reason "the cost question" --body "Compare the two options."
+eq "$RC" "4" "(JOIN-FAIL) an append that fails exits 4"
+grep -q 'could not append the new concern to conversation tk-conv0' <<< "$ERR" \
+  && ok "(JOIN-FAIL) …saying the concern did not join" || bad "(JOIN-FAIL) names the failed append (err: $ERR)"
+grep -q 'already open' <<< "$OUT" \
+  && bad "(JOIN-FAIL) …and must not report the conversation waiting (out: $OUT)" \
+  || ok "(JOIN-FAIL) …and reports no conversation waiting with it"
+grep -q '^bd create' <<< "$CALLS" \
+  && bad "(JOIN-FAIL) …and files nothing beside the failed write (calls: $CALLS)" \
+  || ok "(JOIN-FAIL) …and files nothing beside the failed write"
+
+FAKE_CONV_NOW_STATUS=closed run_open found tk-real1 --reason "the cost question" --body "Compare the two options."
+eq "$RC" "0" "(JOIN-CLOSED) a queued conversation a dismiss closed after open's listing exits 0"
+grep -q 'bd update tk-conv0' <<< "$CALLS" \
+  && bad "(JOIN-CLOSED) …and writes nothing onto the closed conversation (calls: $CALLS)" \
+  || ok "(JOIN-CLOSED) …writes nothing onto the closed conversation"
+grep -q 'bd create .*--title the cost question' <<< "$CALLS" \
+  && ok "(JOIN-CLOSED) …and files the concern as a conversation of its own" \
+  || bad "(JOIN-CLOSED) the concern is filed fresh (calls: $CALLS)"
+grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
+  && ok "(JOIN-CLOSED) …reporting the conversation it filed" || bad "(JOIN-CLOSED) reports the fresh conversation (out: $OUT)"
+
+FAKE_CONV_NOW_STATUS=in_progress FAKE_CONV_NOW_ASSIGNEE=gc-toolkit/gc-toolkit.tk-conv0 \
+  run_open found tk-real1 --reason "the cost question"
+eq "$RC" "0" "(JOIN-TAKEN) a queued conversation a sitting took after open's listing exits 0"
+grep -q 'bd update tk-conv0' <<< "$CALLS" \
+  && bad "(JOIN-TAKEN) …and writes nothing onto the sitting's conversation (calls: $CALLS)" \
+  || ok "(JOIN-TAKEN) …writes nothing onto the sitting's conversation"
+grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
+  && ok "(JOIN-TAKEN) …and files the concern in the queue" || bad "(JOIN-TAKEN) files fresh (out: $OUT calls: $CALLS)"
+
+FAKE_GUARD_MISS=1 run_open found tk-real1 --reason "the cost question"
+eq "$RC" "0" "(JOIN-GUARD) a conversation that leaves the queue between open's read and its write exits 0"
+[ "$(grep -c '^bd update tk-conv0' <<< "$CALLS" || true)" = 1 ] \
+  && grep -q '^bd update tk-conv0 --if-assignee human --if-status open --append-notes' <<< "$CALLS" \
+  && ok "(JOIN-GUARD) …its one write is the guarded append, which the guard refuses" \
+  || bad "(JOIN-GUARD) one guarded append (calls: $CALLS)"
+grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
+  && ok "(JOIN-GUARD) …and the concern is filed in the queue instead" || bad "(JOIN-GUARD) files fresh (out: $OUT calls: $CALLS)"
+
+FAKE_CLOSE_ON_APPEND=1 run_open found tk-real1 --reason "the cost question"
+eq "$RC" "0" "(JOIN-CLOSED-AFTER) a conversation a dismiss closes after the append exits 0"
+grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
+  && ok "(JOIN-CLOSED-AFTER) …and its read-back sends the concern to a conversation of its own" \
+  || bad "(JOIN-CLOSED-AFTER) files fresh once the read-back reads closed (out: $OUT calls: $CALLS)"
+grep -q 'already open' <<< "$OUT" \
+  && bad "(JOIN-CLOSED-AFTER) …never reporting the closed one waiting (out: $OUT)" \
+  || ok "(JOIN-CLOSED-AFTER) …never reporting the closed one waiting"
+
+FAKE_APPEND_DROPS=1 run_open found tk-real1 --reason "the cost question"
+eq "$RC" "4" "(JOIN-LOST) an append that answers 0 and keeps no note exits 4"
+grep -q 'did not read back in conversation tk-conv0' <<< "$ERR" \
+  && ok "(JOIN-LOST) …saying the concern did not read back" || bad "(JOIN-LOST) names the read-back (err: $ERR)"
+
+FAKE_CONV_UNREADABLE=1 run_open found tk-real1 --reason "the cost question"
+eq "$RC" "4" "(JOIN-UNREAD) a conversation that does not read back exits 4"
+grep -q '^bd update tk-conv0 --if-assignee human --if-status open --append-notes' <<< "$CALLS" \
+  && ok "(JOIN-UNREAD) …after the guarded append, which an unread row cannot rule out" \
+  || bad "(JOIN-UNREAD) the append is guarded (calls: $CALLS)"
+grep -q 'could not be read back' <<< "$ERR" \
+  && ok "(JOIN-UNREAD) …saying it could not be read back" || bad "(JOIN-UNREAD) names the read (err: $ERR)"
+
+FAKE_CONV_NOW_STATUS=closed run_open found tk-real1
+eq "$RC" "0" "(JOIN-BARE) open with no concern beside a conversation closed after the listing exits 0"
+grep -q 'conversation tk-conv1 filed on tk-real1' <<< "$OUT" \
+  && ok "(JOIN-BARE) …and files a conversation in the queue rather than report the closed one" \
+  || bad "(JOIN-BARE) files fresh (out: $OUT calls: $CALLS)"
+
+FAKE_CONV_NOW_STATUS=closed FAKE_TRACKS_FAIL_FROM=2 run_open found tk-real1 --reason "the cost question"
+eq "$RC" "4" "(JOIN-REREAD) a listing that does not answer after a conversation left the queue exits 4"
+grep -q 'could not be read again' <<< "$ERR" \
+  && ok "(JOIN-REREAD) …naming the read" || bad "(JOIN-REREAD) names the re-read (err: $ERR)"
+grep -q '^bd create' <<< "$CALLS" \
+  && bad "(JOIN-REREAD) …and files nothing it could not check (calls: $CALLS)" \
+  || ok "(JOIN-REREAD) …and files nothing"
+
 # --- (HELD) a conversation a sitting holds is not joined ----------------------
 # A conversation held by a sitting is in that sitting, not in the queue, so a
 # concern opened from the board waits in the queue as its own conversation.
@@ -298,7 +443,7 @@ unset FAKE_CONV FAKE_CONV_ASSIGNEE FAKE_CONV_STATUS
 export FAKE_TWO=tk-two FAKE_CONV=tk-conv0
 run_open found tk-real1 --reason "the cost question"
 eq "$RC" "0" "(TWO-TRACKS) open beside a two-bead task and a queued conversation exits 0"
-grep -q 'bd update tk-conv0 --append-notes Another concern joined this conversation: the cost question' <<< "$CALLS" \
+grep -q 'bd update tk-conv0 --if-assignee human --if-status open --append-notes Another concern joined this conversation: the cost question' <<< "$CALLS" \
   && ok "(TWO-TRACKS) the concern joins the real conversation" \
   || bad "(TWO-TRACKS) the concern joins the real conversation (calls: $CALLS)"
 grep -q 'tk-two' <<< "$CALLS$OUT" \

@@ -2098,15 +2098,72 @@ conversation_reply() {
     conversation_replies_to "$1" "$2"
 }
 
+# open_join <conversation> — join open's concern ($join_note, empty for none)
+# to a conversation waiting in the operator's queue, assigned to `human` and
+# open, which is where a sitting claims it and reads its notes. The note is
+# appended once, in a write guarded on that queue state, so a conversation a
+# sitting took or a dismiss closed after open's listing takes no note. A
+# pointed gate ($TAKE_GATE) gets the conversation's reply. The row is then read
+# back still waiting in the queue, carrying the concern. Returns 0 once that
+# reads back; 1 when the conversation is no longer in the queue, so it cannot
+# receive the concern and the caller moves on to the next one; and 2 when a
+# write or the read-back failed, which it says on stderr.
+open_join() {
+    _oj_c="$1"; _oj_ask="${open_body:-$open_reason}"
+    # $1 is a row_now answer: a row in the queue carries the concern when it is
+    # the conversation's own ask or a note an earlier join appended.
+    _oj_queued='((.assignee // "") | tostring) == "human" and ((.status // "") | tostring | ascii_downcase) == "open"'
+    _oj_carries='((.description // "") == $ask) or ((.notes // "") | contains($n))'
+    if [ -n "$join_note" ]; then
+        _oj_row=$(row_now "$_oj_c")
+        if [ -n "$_oj_row" ] && ! printf '%s' "$_oj_row" | jq -e "$_oj_queued" >/dev/null 2>&1; then
+            return 1
+        fi
+        # A concern the conversation already carries is no second concern, so
+        # nothing is written for it. A caller that asks again on every pass
+        # while its condition stands, as deferred dispatch's capped arm does,
+        # would otherwise grow the notes by a copy a pass. A row that does not
+        # read proves nothing, so the guarded write decides.
+        if [ -z "$_oj_row" ] || ! printf '%s' "$_oj_row" | jq -e --arg ask "$_oj_ask" --arg n "$join_note" "$_oj_carries" >/dev/null 2>&1; then
+            _oj_rc=0
+            gc bd update "$_oj_c" --if-assignee human --if-status open --append-notes "$join_note" >/dev/null 2>&1 || _oj_rc=$?
+            case "$_oj_rc" in
+                0) ;;
+                13) return 1 ;;
+                *) echo "$PROG: open: could not append the new concern to conversation $_oj_c's notes (gc bd update exited $_oj_rc), so it did not join and nothing records it. Re-run once the store answers: $PROG open $bead" >&2
+                   return 2 ;;
+            esac
+        fi
+    fi
+    if [ -n "$TAKE_GATE" ] && ! conversation_reply "$_oj_c" "$TAKE_GATE"; then
+        echo "$PROG: open: conversation $_oj_c waits in the queue for $bead, but its reply onto gate $TAKE_GATE did not read back. Add it by hand: gc bd dep add $_oj_c $TAKE_GATE --type replies-to" >&2
+        return 2
+    fi
+    _oj_back=$(row_now "$_oj_c")
+    if [ -z "$_oj_back" ]; then
+        echo "$PROG: open: conversation $_oj_c could not be read back after open joined it, so whether it still waits in the queue${join_note:+ carrying the new concern} cannot be told. Re-run once the store answers: $PROG open $bead" >&2
+        return 2
+    fi
+    printf '%s' "$_oj_back" | jq -e "$_oj_queued" >/dev/null 2>&1 || return 1
+    if [ -n "$join_note" ] && ! printf '%s' "$_oj_back" | jq -e --arg ask "$_oj_ask" --arg n "$join_note" "$_oj_carries" >/dev/null 2>&1; then
+        echo "$PROG: open: the new concern did not read back in conversation $_oj_c's notes after its append, so it did not join. Re-run once the store answers: $PROG open $bead" >&2
+        return 2
+    fi
+    return 0
+}
+
 # ── Verb: open ───────────────────────────────────────────────────────
 # File a CONVERSATION about the bead in the operator's queue: an ordinary task
 # that tracks the bead, assigned to `human`, holding no session until the
 # operator engages it. The bead must RESOLVE first so a typo cannot manufacture
 # one. A human gate names the one bead still waiting on it, and the
 # conversation replies to that gate. Without --allow-duplicate, a concern on a
-# bead whose conversation already waits in the queue joins it: the reason and
-# body are appended to that task's notes, once, so a concern the conversation
-# already carries writes nothing. --reason is the title, --body the ask
+# bead whose conversation already waits in the queue joins it (open_join): the
+# reason and body are appended to that task's notes, once, so a concern the
+# conversation already carries writes nothing. One that leaves the queue
+# before the join reads back is passed over for the next one waiting there, or
+# for a conversation open files, and a join that cannot be written or read
+# back fails the open. --reason is the title, --body the ask
 # the sitting reads when it claims the conversation — callers with their own
 # origin (operator-intake.sh) pass both rather than misreporting the board
 # wording. The conversation is filed in the bead's own store. It leaves the
@@ -2193,35 +2250,39 @@ cmd_open() {
     # --allow-duplicate skips the join: engage passes it for a concern of its
     # own, which is a distinct dialogue even when the bead has one.
     if [ -z "$open_allow_dup" ]; then
-        existing=$(printf '%s' "$open_convs" | jq -r '
-            [ .[] | select(((.assignee // "") | tostring) == "human")
-                  | select(((.status // "open") | tostring) == "open") ]
-            | sort_by(.created_at // "") | (first // {}) | .id // empty' 2>/dev/null || true)
-        if [ -n "$existing" ]; then
-            if [ -n "$open_reason$open_body" ]; then
-                join_note="Another concern joined this conversation: ${open_reason:-$open_body}"
-                if [ -n "$open_reason" ] && [ -n "$open_body" ]; then
-                    join_note="$join_note
+        join_note=""
+        if [ -n "$open_reason$open_body" ]; then
+            join_note="Another concern joined this conversation: ${open_reason:-$open_body}"
+            if [ -n "$open_reason" ] && [ -n "$open_body" ]; then
+                join_note="$join_note
 
 $open_body"
-                fi
-                # A concern the conversation already carries, as its own ask or
-                # as a note an earlier join appended, is no second concern, so
-                # nothing is written for it. A caller that asks again on every
-                # pass while its condition stands, as deferred dispatch's capped
-                # arm does, would otherwise grow the notes by a copy a pass. A
-                # row that does not read proves nothing, so the note is appended.
-                if row_now "$existing" | jq -e --arg ask "${open_body:-$open_reason}" --arg n "$join_note" \
-                        '((.description // "") == $ask) or ((.notes // "") | contains($n))' >/dev/null 2>&1; then
-                    :
-                elif ! gc bd update "$existing" --append-notes "$join_note" >/dev/null 2>&1; then
-                    echo "$PROG: open: could not append the new concern to conversation $existing's notes; say it in the sitting." >&2
-                fi
             fi
-            if [ -n "$TAKE_GATE" ] && ! conversation_reply "$existing" "$TAKE_GATE"; then
-                echo "$PROG: open: conversation $existing waits in the queue for $bead, but its reply onto gate $TAKE_GATE did not read back. Add it by hand: gc bd dep add $existing $TAKE_GATE --type replies-to" >&2
-                exit 4
-            fi
+        fi
+        # A conversation that left the queue while open joined it is passed
+        # over, and the bead's conversations are read again, so open joins the
+        # next one waiting there or files one below. Each one passed over stays
+        # passed over, so the loop ends.
+        join_left=""
+        while :; do
+            existing=$(printf '%s' "$open_convs" | jq -r --arg left "$join_left" '
+                ($left | split(" ")) as $l
+                | [ .[] | select(((.assignee // "") | tostring) == "human")
+                        | select(((.status // "open") | tostring) == "open")
+                        | select(((.id // "") | tostring) as $i | any($l[]; . == $i) | not) ]
+                | sort_by(.created_at // "") | (first // {}) | .id // empty' 2>/dev/null || true)
+            [ -n "$existing" ] || break
+            join_rc=0; open_join "$existing" || join_rc=$?
+            case "$join_rc" in
+                0) ;;
+                1) join_left="${join_left:+$join_left }$existing"
+                   if ! open_convs=$(bead_conversations "$bead"); then
+                       echo "$PROG: open: conversation $existing left the operator's queue while open joined it, and the conversations on $bead could not be read again to find another. No conversation joined or filed; re-run once the store answers: $PROG open $bead" >&2
+                       exit 4
+                   fi
+                   continue ;;
+                *) exit 4 ;;
+            esac
             CONV="$existing"; OPEN_FILED=0
             bust_cache
             if [ -n "$open_json" ]; then
@@ -2231,7 +2292,7 @@ $open_body"
                 echo "       Engage it when ready: $PROG engage $bead"
             fi
             return 0
-        fi
+        done
     fi
 
     # What this conversation is ABOUT, in the caller's words, or the gate it
