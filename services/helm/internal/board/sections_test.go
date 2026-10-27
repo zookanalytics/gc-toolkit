@@ -235,21 +235,30 @@ func TestGateKeptWhenNoBeadHasARow(t *testing.T) {
 
 // TestConversationInTheQueueOwesItsBead: a conversation waiting in the
 // operator's queue holds its bead and makes it owed, with the conversation's
-// title as the row's needs. One whose sitting's session has closed waits the
-// same way.
+// title as the row's needs. One whose sitting's session has ended waits the
+// same way, read by the conversation's assignee or by its gc.session_name: a
+// session that closed, one whose launch failed and was rolled back without
+// closing it (failed-create), and one listed with no state.
 func TestConversationInTheQueueOwesItsBead(t *testing.T) {
+	const session = "gc-toolkit__converse-tk-conv"
 	for _, tc := range []struct {
 		name     string
 		assignee string
+		session  string
 		facts    Facts
 	}{
-		{"queued", "human", Facts{}},
-		{"sitting's session closed", sittingAlias("tk-conv"), Facts{OwnerState: map[string]string{sittingAlias("tk-conv"): "closed"}}},
+		{"queued", "human", "", Facts{}},
+		{"sitting's session closed", sittingAlias("tk-conv"), "", Facts{OwnerState: map[string]string{sittingAlias("tk-conv"): "closed"}}},
+		{"sitting's session failed to create", sittingAlias("tk-conv"), "", Facts{OwnerState: map[string]string{sittingAlias("tk-conv"): "failed-create"}}},
+		{"sitting's session failed to create, by its session name", sittingAlias("tk-conv"), session, Facts{OwnerState: map[string]string{session: "failed-create"}}},
+		{"sitting's session listed with no state", sittingAlias("tk-conv"), "", Facts{OwnerState: map[string]string{sittingAlias("tk-conv"): ""}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			b := BuildBoard([]Anchor{
-				epicSubject("tk-subj"), conversationAnchor("tk-conv", "tk-subj", "talk through the plan", tc.assignee),
-			}, fixtureNow, false, nil, tc.facts)
+			conv := conversationAnchor("tk-conv", "tk-subj", "talk through the plan", tc.assignee)
+			if tc.session != "" {
+				conv.Metadata = map[string]string{mdSessionName: tc.session}
+			}
+			b := BuildBoard([]Anchor{epicSubject("tk-subj"), conv}, fixtureNow, false, nil, tc.facts)
 			if _, ok := tileByID(b, "tk-conv"); ok {
 				t.Errorf("the conversation folds onto its bead's row")
 			}
@@ -263,18 +272,33 @@ func TestConversationInTheQueueOwesItsBead(t *testing.T) {
 
 // TestConversationInSessionHoldsWithoutOwing: a conversation a live session
 // holds keeps its bead held and in session, and owes the operator nothing,
-// because the operator is in it.
+// because the operator is in it. The session is found by the conversation's
+// assignee or by its gc.session_name.
 func TestConversationInSessionHoldsWithoutOwing(t *testing.T) {
-	b := BuildBoard([]Anchor{
-		epicSubject("tk-subj"), conversationAnchor("tk-conv", "tk-subj", "talk through the plan", sittingAlias("tk-conv")),
-	}, fixtureNow, false, nil, liveOwners(sittingAlias("tk-conv")))
+	const session = "gc-toolkit__converse-tk-conv"
+	for _, tc := range []struct {
+		name    string
+		session string
+		facts   Facts
+	}{
+		{"by its assignee", "", liveOwners(sittingAlias("tk-conv"))},
+		{"by its session name", session, liveOwners(session)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			conv := conversationAnchor("tk-conv", "tk-subj", "talk through the plan", sittingAlias("tk-conv"))
+			if tc.session != "" {
+				conv.Metadata = map[string]string{mdSessionName: tc.session}
+			}
+			b := BuildBoard([]Anchor{epicSubject("tk-subj"), conv}, fixtureNow, false, nil, tc.facts)
 
-	s := mustTile(t, b, "tk-subj")
-	if !s.Held || s.Owed || s.Needs != "in conversation" || s.SittingState != SittingInSession {
-		t.Errorf("a live sitting holds its bead without owing it: held=%v owed=%v needs=%q state=%q", s.Held, s.Owed, s.Needs, s.SittingState)
-	}
-	if s.Stranded || s.Severity == SevHigh {
-		t.Errorf("a held bead is not stranded: stranded=%v severity=%s", s.Stranded, s.Severity)
+			s := mustTile(t, b, "tk-subj")
+			if !s.Held || s.Owed || s.Needs != "in conversation" || s.SittingState != SittingInSession {
+				t.Errorf("a live sitting holds its bead without owing it: held=%v owed=%v needs=%q state=%q", s.Held, s.Owed, s.Needs, s.SittingState)
+			}
+			if s.Stranded || s.Severity == SevHigh {
+				t.Errorf("a held bead is not stranded: stranded=%v severity=%s", s.Stranded, s.Severity)
+			}
+		})
 	}
 }
 

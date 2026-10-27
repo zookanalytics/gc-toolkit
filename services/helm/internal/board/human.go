@@ -171,14 +171,29 @@ func gateTitles(gates []Blocker) []string {
 
 // inSession reports whether a sitting holds the conversation now: it is open,
 // its assignee is a sitting's alias rather than the operator's queue, and the
-// session holding it is live, read against the session list the way the board
-// reads every owner's liveness. A sitting whose session has closed does not
-// hold it, so its conversation waits for the operator again.
+// session holding it is a live sitting ([Facts.sittingLive]). A sitting whose
+// session has ended does not hold it, so its conversation waits for the
+// operator again.
 func (f Facts) inSession(a Anchor) bool {
 	if a.Source != KindConversation || !a.ClosedAt.IsZero() || a.Assignee == "" || a.Assignee == assigneeHuman {
 		return false
 	}
-	return f.ownerLive(a.Assignee) || f.ownerLive(a.Metadata[mdSessionName])
+	return f.sittingLive(a.Assignee) || f.sittingLive(a.Metadata[mdSessionName])
+}
+
+// sittingLive reports whether the session a conversation's holder names is a
+// live sitting. It reads the session's state by the rule gc-helm.sh's
+// live_sittings applies to the same list: a session listed with no state, or
+// as closed or failed-create, has ended. A failed-create session is one whose
+// launch was rolled back without closing it, so the list still carries it. A
+// session that [Facts.ownerLive] reads as gone, absent or archived, has ended
+// too.
+func (f Facts) sittingLive(name string) bool {
+	switch f.OwnerState[name] {
+	case "", "closed", "failed-create":
+		return false
+	}
+	return f.ownerLive(name)
 }
 
 // humanIndex holds, for each bead, the open human gates that block it and the
