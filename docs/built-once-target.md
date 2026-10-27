@@ -365,9 +365,10 @@ Every change follows these rules.
 1. **Code the deletion plan retires gets no new work.** The plan is the
    schedule above, with the whole files
    [the measurement record](../specs/tk-11l1ejh/measurement.md#3-the-scheduled-removals-whole-files)
-   lists for each bead. The work skill's filing section
-   (`skills/work/SKILL.md`) says what becomes of a problem found in that code,
-   and the mechanik and the first reaction read it before they file a fix.
+   lists for each bead. [AGENTS.md](../AGENTS.md) says what becomes of a
+   problem found in that code. Every session that works in a gc-toolkit
+   worktree loads it, a first reaction's included, and the mechanik's prompt
+   points at it.
 2. **Step text holds no procedures.**
    [pack-authoring.md](pack-authoring.md#step-text-calls-a-tested-script)
    states the rule where formulas are written, and `tools/lint-step-text.sh`

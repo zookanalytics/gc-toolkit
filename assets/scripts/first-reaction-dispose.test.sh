@@ -793,8 +793,8 @@ hasnt "HELM" "$LOG" "(BLKASSIGN) …and the bead is not released"
 unset FAKE_AGENT_GONE FAKE_DEPS_JSON
 
 # ── until: the bead's job ends when another bead lands ───────────────────────
-# A problem in code the deletion plan retires closes with the bead that retires
-# the code. The deferred-dispatch pass closes a bead once its until targets have
+# A problem in code another bead retires closes with the bead that retires the
+# code. The deferred-dispatch pass closes a bead once its until targets have
 # closed, and only a pure wait, so the exit writes the until edge and nothing
 # that routes, arms, places or blocks the subject. The subject here is a plain
 # bug with no parent, the one intake holds for placement on a pool exit.

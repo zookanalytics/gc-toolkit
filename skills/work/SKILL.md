@@ -1,6 +1,6 @@
 ---
 name: work
-description: Use when you have to say that something needs doing, carry out a decision about who does it, or change work already asked for. Covers filing new work or a follow-up in the right rig and under the right parent (a sibling of the bead that waits on it, or a member of the epic it is part of), where a problem in code the deletion plan retires goes instead of a new fix, sending a bead to a pool on a formula (routing, slinging, dispatching, releasing a held bead to a pool, assigning it to an agent, taking a recommended formula), choosing which formula, stopping or redirecting work in flight, and closing or retiring a bead that needs no work (a duplicate, or work no longer needed). Not for doing the work yourself. To make work wait for something first, use waits; for a change that is already a pull request, use prs.
+description: Use when you have to say that something needs doing, carry out a decision about who does it, or change work already asked for. Covers filing new work or a follow-up in the right rig and under the right parent (a sibling of the bead that waits on it, or a member of the epic it is part of), sending a bead to a pool on a formula (routing, slinging, dispatching, releasing a held bead to a pool, assigning it to an agent, taking a recommended formula), choosing which formula, stopping or redirecting work in flight, and closing or retiring a bead that needs no work (a duplicate, or work no longer needed). Not for doing the work yourself. To make work wait for something first, use waits; for a change that is already a pull request, use prs.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -23,16 +23,6 @@ puts in front of this skill's name: `gc-toolkit` in `gc-toolkit.work`.
 A new bead says that work needs doing. Filing it starts nothing: send it, make
 it wait, or leave it for placement.
 
-- **Code the pack's deletion plan retires gets no new work.** The plan is the
-  deletion schedule in `docs/built-once-target.md`, and section 3 of its
-  measurement record, `specs/tk-11l1ejh/measurement.md`, lists the whole files
-  each scheduled bead retires. A problem found in that code is not a new fix.
-  Append it to the notes of the bead that retires the code, so the retirement
-  carries it. A problem that already has a bead of its own waits on that
-  retirement: give it an `until` edge to the retiring bead (the waits skill),
-  which closes it once the retirement lands, and send it nowhere. A problem
-  that hurts the operator now gets the smallest stopgap that stops the harm,
-  and no new test suite.
 - **A dependency goes beside the bead it came from, never under it.** Work
   that bead waits on is a dependency, and this is the default. bd refuses a
   `blocks` edge from a parent to its own descendant, so a child could never
@@ -82,8 +72,6 @@ Writer: `gc sling <rig>/<pool> <bead> --on <formula>`. With no `--on` it pours
 the target's `default_sling_formula`, which for a polecat pool is
 `mol-polecat-work`.
 
-- **Send no fix to code the deletion plan retires.** File new work, above,
-  says where a problem in that code goes.
 - **One dispatch, never two.** A sling pours a workflow and stamps
   `gc.execution_routed_to` on the bead. A raw route, `gc.routed_to=<pool>`,
   which a sitting's sign-off `--route <pool>` also writes when it releases a
