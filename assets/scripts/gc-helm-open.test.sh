@@ -943,7 +943,7 @@ case "$1 ${2:-}" in
     _sn="$(printf '%s' "$*" | sed -n 's/.* --assignee \(.*\)$/\1/p')"
     [ -n "$_sn" ] && printf '%s' "$_sn" > "$VISIT_STATE" ;;
   "session new")
-    jq -n '{session_id:"lx-fake", session_name:"gc-toolkit/converse-opus.tk-visitE"}' ;;
+    jq -n '{session_id:"hq-fake", session_name:"gc-toolkit/converse-opus.tk-visitE"}' ;;
 esac
 exit 0
 REBIN

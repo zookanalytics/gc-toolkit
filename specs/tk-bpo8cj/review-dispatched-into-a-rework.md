@@ -10,20 +10,20 @@ review round and a polecat round on a commit that had left the branch.
 
 ## The measured run
 
-PR#559 in signal-loom, 2026-08-27, all times UTC.
+PR#559 in rig-a, 2026-08-27, all times UTC.
 
 | time | event |
 |---|---|
-| 02:33:26 | review sl-ztp2u dispatched, pins dc47a703 |
-| 02:59:38 | sl-ztp2u returns request-changes; rework sl-9k9um filed; `check.codex` cleared |
-| 03:00:43 | sl-9k9um claimed |
-| 03:01:01 | review sl-udwwq dispatched, pins dc47a703 — the same commit sl-ztp2u just rejected |
-| 03:11:35 | sl-9k9um rebases and force-pushes 0b59bf73; dc47a703 leaves the branch |
-| 03:15:08 | sl-9k9um closes |
-| 03:30:31 | sl-udwwq submits request-changes against dc47a703 |
-| 03:31 | rework sl-u4caj minted from that verdict |
+| 02:33:26 | review ra-ztp2u dispatched, pins dc47a703 |
+| 02:59:38 | ra-ztp2u returns request-changes; rework ra-9k9um filed; `check.codex` cleared |
+| 03:00:43 | ra-9k9um claimed |
+| 03:01:01 | review ra-udwwq dispatched, pins dc47a703 — the same commit ra-ztp2u just rejected |
+| 03:11:35 | ra-9k9um rebases and force-pushes 0b59bf73; dc47a703 leaves the branch |
+| 03:15:08 | ra-9k9um closes |
+| 03:30:31 | ra-udwwq submits request-changes against dc47a703 |
+| 03:31 | rework ra-u4caj minted from that verdict |
 
-sl-u4caj had nothing to implement. Its polecat verified both P1 findings at
+ra-u4caj had nothing to implement. Its polecat verified both P1 findings at
 the live head, found them already closed, ran the gates green, declined to
 commit, and escalated.
 
@@ -53,7 +53,7 @@ its refusal is the better-bounded one.
 
 `already_answered` refuses a dispatch when a **closed review judged this exact
 head on this gate** and the rework child that verdict filed is still open.
-That is the measured run precisely: sl-ztp2u closed against dc47a703, sl-9k9um
+That is the measured run precisely: ra-ztp2u closed against dc47a703, ra-9k9um
 was open, and the 03:01:01 pass would have been refused. #493 also wires the
 refusal into the stranded-review re-sling arm, which this branch did not, and
 puts a `GC_MAX_REVIEW_DISPATCHES` ceiling behind it for the reviews that leave
@@ -108,7 +108,7 @@ commit nobody can find.
 This is the backstop for every way a head moves under a live review that
 `already_answered` cannot see: an author pushing directly, an operator rebase,
 a `pr-facts.sh` conflict rework between passes. Applied to the run above, it
-refuses at 03:30:31 and sl-u4caj is never minted.
+refuses at 03:30:31 and ra-u4caj is never minted.
 
 ## Ordering against the 40-hex grammar (#489)
 

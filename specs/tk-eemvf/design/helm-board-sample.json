@@ -40,8 +40,8 @@
     "rank_score": 3018007
   },
   {
-    "id": "su-lou",
-    "rig": "shutupandlisten",
+    "id": "rb-lou",
+    "rig": "rig-b",
     "kind": "epic",
     "title": "feat: implement on-device quiet-companion validation (browser floor → AS-native precursor)",
     "severity": "HIGH",
@@ -64,8 +64,8 @@
     "priority": 2,
     "cross_rig_refs": [],
     "open_heads": [
-      "su-lou.5",
-      "su-lou.4"
+      "rb-lou.5",
+      "rb-lou.4"
     ],
     "dead_owner_heads": [],
     "takeaway": "NEEDS your MERGE: PR#11 (mic-fix) + #12 (U4-STT), both verified. On merge+reopen I dispatch ONNX/U5 + live-mic feel-test. Drained between visits.",
@@ -330,7 +330,7 @@
     "stale_days": 0,
     "priority": 2,
     "cross_rig_refs": [
-      "lx-gsaen6",
+      "hq-gsaen6",
       "tk-ko68z",
       "tk-mmny1"
     ],
@@ -385,8 +385,8 @@
     "rank_score": 7010
   },
   {
-    "id": "sl-yqslv",
-    "rig": "signal-loom",
+    "id": "ra-yqslv",
+    "rig": "rig-a",
     "kind": "epic",
     "title": "Epic 6 Polish: BMAD follow-ups (post-PR-420)",
     "severity": "LOW",

@@ -102,7 +102,7 @@ export STUB_GC_LOG="$TMP/gc.log"
 # is a /-bearing agent address (an assignee); its session id is what the warrant
 # must carry, since dance-probe.sh refuses the slash form.
 export STUB_SESSIONS='{"sessions":[
-  {"id":"lx-wisp-conv2","alias":"gc-toolkit/gc-toolkit.converse-2","session_name":"gc-toolkit--gc-toolkit__converse-2-pool","state":"active"},
+  {"id":"hq-wisp-conv2","alias":"gc-toolkit/gc-toolkit.converse-2","session_name":"gc-toolkit--gc-toolkit__converse-2-pool","state":"active"},
   {"id":"sess-1","alias":"gc-toolkit/gc-toolkit.thing","session_name":"s-sess-1","state":"active"}]}'
 
 # run <rendered-block-file> <prelude> -> transcript in OUT, gc calls in LOG
@@ -127,7 +127,7 @@ export STUB_OPEN='[]'
 run "$TMP/warrant.sh" "$WARRANT_PRELUDE"
 has "$LOG" 'bd create' "a wedged session with no open warrant files one"
 has "$LOG" '"gc.routed_to":"gc-toolkit.dog"' "routed at the city-scoped dog, unqualified"
-has "$LOG" '"warrant.target":"lx-wisp-conv2"' "the /-bearing owner is resolved to its session id"
+has "$LOG" '"warrant.target":"hq-wisp-conv2"' "the /-bearing owner is resolved to its session id"
 hasnt "$LOG" '"warrant.target":"gc-toolkit/gc-toolkit.converse-2"' "the agent address never lands as a target dance-probe.sh would refuse"
 has "$LOG" '"warrant.reason":"No progress on tk-a for 6h"' "and the reason as given"
 

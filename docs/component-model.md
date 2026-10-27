@@ -258,7 +258,7 @@ a separate arm routes the feedback under it, so an OPEN anchor whose `pr_posture
 window is operator feedback that reads as consumed while nothing has routed it; a
 `pr_unengaged_threads` marker at the same head is a tracked hold and exempt;
 warn-only), and `doctor/check-hq-marooned-work` (no rig-workable bead sits
-unclaimed in the HQ (city / lx) store: a city-scoped role running with GC_RIG
+unclaimed in the HQ (city) store: a city-scoped role running with GC_RIG
 unset files a bare `bd create` into the HQ store, which no pool reads, so an
 open unassigned task/bug/defect there — unrouted or routed to a pool — is
 marooned by construction; the operator-queue decisions routed to human, daily
@@ -395,6 +395,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 |---|---|---|
 | `formulas/mol-polecat-work.toml` | work | The work lifecycle: claim, worktree, implement, push, hand to the refinery. |
 | `assets/scripts/work-tree-holder.sh` | work | Tells load-context whether a live session is working the bead's tree, the one sign of a run in flight on a work bead the workflow never claims. |
+| `assets/scripts/rig-mentions.sh` | work | Lists each place a change names another rig of the city: its name, a bead id from its store, or a path into its checkout. The rigs come from `gc rig list`, so a repository never commits the names it looks for. The self-review runs it on the lines the branch adds, the commit messages no remote has yet, and the title, summary and dispatch text the pull request publishes, and submit-and-exit runs it on the summary it composes. The polecat fixes what it lists, and nothing stops on it. |
 | `assets/scripts/await-ruling.sh` | work | Records a work bead's wait for a person's ruling, for a declined run and for a convoy's rebuild child whose landing the refinery holds: a `blocks` edge onto the visit that asks for the ruling, and a deferred-dispatch arm that re-slings the work when the visit closes, after it releases the caller's own claim on the work bead, or one that no live worker holds. |
 | `orders/deferred-dispatch.toml` | work | Routes work whose blockers have closed, tells a named agent when bd reports the bead assigned to it ready, and disposes work whose `until` targets have closed. |
 | `assets/scripts/deferred-dispatch.sh` | work | The pass that order runs. A pending dispatch is a fact about the work, so it lives on the work bead, and so does a resolution: an `until` edge records that the bead is resolved when another one closes. Its `notify` is the dispatch a named agent's assigned work owes: a mail that wakes the agent for its hook, sent once bd reports the bead ready. The pass slings an armed bead once nothing holds it, and disposes an open, unassigned bead through `bead-rehome.sh` once every one of its `until` targets has closed and no `blocks` blocker of its own is open, unless the bead carries live work (`live-work.sh`). `until-resolved.sh` decides which beads are owed. A `blocks` edge never disposes. |

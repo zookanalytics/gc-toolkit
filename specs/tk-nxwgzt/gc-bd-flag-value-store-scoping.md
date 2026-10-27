@@ -17,8 +17,8 @@ file is the investigation behind it.
 the flag-value spelling decides the answer. Both failures are a silent empty
 array at exit 0, indistinguishable from a genuine miss:
 
-    gc bd list --assignee lx-...   -> []            (space form, wrong store)
-    gc bd list --assignee=lx-...   -> [tk-...]       (equals form, correct)
+    gc bd list --assignee hq-...   -> []            (space form, wrong store)
+    gc bd list --assignee=hq-...   -> [tk-...]       (equals form, correct)
 
     gc bd list --id gc-... --all   -> [gc-...]       (space form, resolves foreign)
     gc bd list --id=gc-... --all   -> []            (equals form, answers locally)

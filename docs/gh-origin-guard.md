@@ -109,11 +109,10 @@ the same shape `assets/scripts/pr-open.sh` already proves, where every read and
 the create are pinned to `ORIGIN_REPO_Q` derived from `git remote get-url
 origin`.
 
-An organization-keyed rule would be wrong in both directions. The
-`shutupandlisten` rig's origin is `suandl/shutupandlisten`, outside the
-operator's org, so an org allowlist would refuse that rig's entire PR flow.
-Meanwhile an unrelated repository inside the org is still not a repository that
-rig should write to.
+An organization-keyed rule would be wrong in both directions. A rig's origin
+can sit outside the operator's org, under another owner's account, and an org
+allowlist would refuse that rig's entire PR flow. Meanwhile an unrelated
+repository inside the org is still not a repository that rig should write to.
 
 ## How a target is resolved
 

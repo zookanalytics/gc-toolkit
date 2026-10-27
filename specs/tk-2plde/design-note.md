@@ -133,7 +133,7 @@ replay a table.**
 `gc.takeaway`", and it has no notion of `task_kind=triage-subject`. A standing
 triage scope — a permanent bucket the detectors file visits *into* — therefore
 renders forever as a concluded conversation, headlined by whatever its last
-sitting happened to be about. `sl-6u5z` is the worked example: its 08-13
+sitting happened to be about. `ra-6u5z` is the worked example: its 08-13
 headline read "NOW SELF-DRIVING ... only a pool cycle remains", true for about
 seven hours and false for the eight days after.
 
@@ -143,7 +143,7 @@ seven hours and false for the eight days after.
   looks the scope up in LIVE (`bd list --status=open,in_progress`) and
   **creates a new one** when it finds none. Closing a stalled-workflows scope
   mints a replacement under a fresh id on the next patrol pass and orphans the
-  old bead's visit history — verified on `sl-6u5z`, which holds 6 visits and
+  old bead's visit history — verified on `ra-6u5z`, which holds 6 visits and
   two full diagnoses in its notes.
 - `assets/scripts/liveness-sweep-precheck.sh:42-46` states it outright for the
   unnamed-waits scopes: the standing subject is "a permanent open, unassigned,
@@ -182,8 +182,8 @@ Only category (1) of the three dispositions below is safe unsupervised.
 ### Re-derivation of 2026-08-23 ~01:45Z
 
 63 rows, **25 parked** (up from 18). Applying the rules: 10 standing scopes
-excluded by (1) — `sl-djvs`, `su-vehr`, `sl-6u5z`, `su-6013`, `su-zia4`,
-`tk-n3we6`, `tk-hok6w`, `gc-b0pmq`, `su-7sjl`, `su-g48h`, each confirmed by its
+excluded by (1) — `ra-djvs`, `rb-vehr`, `ra-6u5z`, `rb-6013`, `rb-zia4`,
+`tk-n3we6`, `tk-hok6w`, `gc-b0pmq`, `rb-7sjl`, `rb-g48h`, each confirmed by its
 own `task_kind`, not by the earlier note's say-so. `tk-82epi` excluded by (2),
 held by live visit `tk-nd84o` on converse-1. `tk-gnrhr`, `tk-66rwg`,
 `tk-fhlv4`, `tk-16f29` excluded by (3), already wired to open work.
@@ -196,7 +196,7 @@ until `tk-2cyxo` ships a child-aware predicate.
 
 | bead | action | detail |
 |---|---|---|
-| `tk-x2tw7` | WIRED | `--waiting-on sl-kg9z6` (open, 44 beads). Takeaway text unchanged. |
+| `tk-x2tw7` | WIRED | `--waiting-on ra-kg9z6` (open, 44 beads). Takeaway text unchanged. |
 | `tk-gy1ws` | DISPOSED | `bead-rehome.sh --kind folded --successor tk-x2tw7`; self-declared superseded, "No decision pending in this thread." |
 
 **Left for a ruling** — each needs a decision this bead could not supply:
@@ -210,7 +210,7 @@ until `tk-2cyxo` ships a child-aware predicate.
 
 ### Trap: a cross-store edge is invisible to `bd show`
 
-`tk-x2tw7` is in the gc-toolkit store and `sl-kg9z6` in signal-loom. The edge
+`tk-x2tw7` is in the gc-toolkit store and `ra-kg9z6` in rig-a. The edge
 wrote fine, but afterwards `gc bd show tk-x2tw7 --json` reports
 `dependencies: null` — while `bd list --id tk-x2tw7 --json` shows the row, and
 the board reads it correctly. Verify a cross-store wire with `bd list`, not
@@ -231,5 +231,5 @@ the board reads it correctly. Verify a cross-store wire with `bd list`, not
   `!= "closed"` fail-closed test, `resolve_waiting_status` running at all, the
   NEEDS override, the stamp/edge order, and the edge-failure exit status each
   fail their assertions when removed.
-- Live smoke test against the loomington city, read-only: renders, and the one
+- Live smoke test against the mycity city, read-only: renders, and the one
   pre-existing edge row derives correctly.

@@ -8,7 +8,7 @@ description: Investigation record for tk-5v3k5y. The recurring blocking finding 
 - **Bead:** tk-5v3k5y — "root-cause the recurring rig-scoped order-firing stall (doctor order-firing-current, recurred 100x over 11d)"
 - **Finding tracker:** tk-ou35ed — "doctor order-firing-current: scheduled orders are stale"
 - **Routed fix:** gascity gc-q1ttz (p1 bug). Related cluster: gascity gc-uhrgn, gc-7s8mo.
-- **Investigated:** 2026-09-26, city `/home/zook/loomington`, `gc` 1.4.1, git 2.55.0, gascity source at `cb8c260db`.
+- **Investigated:** 2026-09-26, city `/home/zook/mycity`, `gc` 1.4.1, git 2.55.0, gascity source at `cb8c260db`.
 - **Author:** gc-toolkit/gc-toolkit.polecat (claude provider)
 
 ## Scope

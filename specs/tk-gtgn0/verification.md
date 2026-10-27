@@ -23,7 +23,7 @@ All measurements ran read-only against the live gc-toolkit store on
 ## The cadence runs
 
 `gc order list` registers `deferred-dispatch` at a 2m cooldown on
-gascity, gc-toolkit, shutupandlisten and signal-loom.
+gascity, gc-toolkit, rig-b and rig-a.
 `gc order history deferred-dispatch --limit 0` shows all four firing:
 gc-toolkit passed at 01:41:07Z, 01:45:07Z, 01:47:36Z, 01:50:40Z,
 01:53:35Z, 01:57:05Z, 01:59:37Z, 02:03:05Z, 02:05:40Z, 02:09:12Z and
@@ -119,8 +119,8 @@ superseded: no type, title, label or parent rule discriminates here.
 
 A blocker in another rig's store does not hold an armed dispatch, because
 `bd` resolves dependency ids within one store. Live in this store,
-tk-x2tw7 carries a `blocks` edge to `sl-kg9z6`, which is open in
-signal-loom:
+tk-x2tw7 carries a `blocks` edge to `ra-kg9z6`, which is open in
+rig-a:
 
 - `gc bd list --id tk-x2tw7 --json` renders the edge.
 - `gc bd show tk-x2tw7 --json` returns `dependencies: null`.

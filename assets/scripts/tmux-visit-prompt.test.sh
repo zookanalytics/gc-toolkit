@@ -439,8 +439,8 @@ eq "$(grep -c '=== call ===' < "$TMP/calls.log")" "1" "MULTILINE: it arrives as 
 # suite is untouched. These cases populate it.
 CHOOSER_RIGS='[{"name":"gc-toolkit","prefix":"tk","suspended":false,"running":true},
                {"name":"gascity","prefix":"gc","suspended":true,"running":true},
-               {"name":"signal-loom","prefix":"sl","suspended":false,"running":true},
-               {"name":"sprintshow","prefix":"ss","suspended":false,"running":false}]'
+               {"name":"rig-a","prefix":"ra","suspended":false,"running":true},
+               {"name":"rig-c","prefix":"rc","suspended":false,"running":false}]'
 # Isolate the chooser cases in their own draft dir so their draft bookkeeping
 # cannot inflate the DRAFTOK/CANCEL counts of the shared $TMP/drafts further
 # down.
@@ -449,16 +449,16 @@ export DRAFT_DIR_OVERRIDE="$TMP/chooser-drafts"
 # Default: the board-context rig (from the <rig>__<agent> session) leads the
 # picker, and Enter (the first offered item) confirms it — so the report is
 # filed there, not in the fixed intake default.
-export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="signal-loom__polecat-1"
+export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="rig-a__polecat-1"
 unset FAKE_CHOSEN_RIG
-run_handler "$CFG_OK" "a report from the signal-loom pane"
+run_handler "$CFG_OK" "a report from the rig-a pane"
 ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
 has "$cgum" "gum choose" "CHOOSER: the rig picker is shown"
 hasnt "$cgum" "gum input" "CHOOSER: the picker is a choose list, not a single-line input"
 has "$ccalls" "argv=[--rig]" "CHOOSER: the chosen rig is forwarded to the intake"
-has "$ccalls" "argv=[signal-loom]" "CHOOSER: the board-context rig is the confirmed default"
+has "$ccalls" "argv=[rig-a]" "CHOOSER: the board-context rig is the confirmed default"
 has "$cgum" "gascity (suspended)" "CHOOSER: a suspended rig is offered, tagged so the choice is informed"
-has "$cgum" "sprintshow" "CHOOSER: an idle rig is offered"
+has "$cgum" "rig-c" "CHOOSER: an idle rig is offered"
 hasnt "$cgum" "not running" "CHOOSER: ...untagged, since idle is not paused"
 
 # Sole rig: when the city has exactly one rig, it is the context rig and the only
@@ -466,13 +466,13 @@ hasnt "$cgum" "not running" "CHOOSER: ...untagged, since idle is not paused"
 # empty tail, and grep exits 1; that must not trip set -e and kill the script
 # after the operator already typed the report. The picker still opens on the sole
 # rig and the report still files.
-export FAKE_RIGS_JSON='[{"name":"signal-loom","prefix":"sl","suspended":false,"running":true}]'
-run_handler "$CFG_OK" "a report when signal-loom is the only rig"
+export FAKE_RIGS_JSON='[{"name":"rig-a","prefix":"ra","suspended":false,"running":true}]'
+run_handler "$CFG_OK" "a report when rig-a is the only rig"
 ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
 has "$cgum" "gum choose" "CHOOSERSOLE: the picker still opens when the city has one rig"
 has "$ccalls" "argv=[--rig]" "CHOOSERSOLE: ...and the chosen rig is forwarded"
-has "$ccalls" "argv=[signal-loom]" "CHOOSERSOLE: ...the sole rig"
-has "$ccalls" "argv=[a report when signal-loom is the only rig]" "CHOOSERSOLE: ...and the report is filed, not dropped by a set -e exit"
+has "$ccalls" "argv=[rig-a]" "CHOOSERSOLE: ...the sole rig"
+has "$ccalls" "argv=[a report when rig-a is the only rig]" "CHOOSERSOLE: ...and the report is filed, not dropped by a set -e exit"
 export FAKE_RIGS_JSON="$CHOOSER_RIGS"
 
 # Override: the operator picks a different LIVE rig; that is what the intake
@@ -482,7 +482,7 @@ run_handler "$CFG_OK" "a report redirected to gc-toolkit"
 ccalls=$(cat "$TMP/calls.log")
 has "$ccalls" "argv=[--rig]" "CHOOSER: an override still forwards --rig"
 has "$ccalls" "argv=[gc-toolkit]" "CHOOSER: the intake receives the overridden rig"
-hasnt "$ccalls" "argv=[signal-loom]" "CHOOSER: the context default is replaced, not appended"
+hasnt "$ccalls" "argv=[rig-a]" "CHOOSER: the context default is replaced, not appended"
 unset FAKE_CHOSEN_RIG
 
 # Override to a SUSPENDED rig: the operator deliberately files into a paused rig
@@ -528,7 +528,7 @@ has "$ccalls" "argv=[a report with no chooser]" "CHOOSER: the report is still fi
 # WOULD appear if the call returned — the bound is the only reason it does not,
 # and the press falls through to the message popup and the intake default.
 if command -v timeout >/dev/null 2>&1; then
-    export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="signal-loom__polecat-1" FAKE_RIG_LIST_SLEEP=60
+    export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="rig-a__polecat-1" FAKE_RIG_LIST_SLEEP=60
     GC_RIG_LIST_TIMEOUT=1 run_handler "$CFG_OK" "a report while rig list is wedged"
     ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
     hasnt "$cgum" "gum choose" "CHOOSERHANG: a wedged rig list bounds out, so no picker is shown"
@@ -550,7 +550,7 @@ fi
 # suspended rig's ids are still beads — the gate reads every rig, not just the
 # live ones offered. argv is the right assertion: `${CHOSEN_RIG:+--rig …}` passes
 # neither the flag nor a value once the chosen rig is dropped.
-export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="signal-loom__polecat-1"
+export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="rig-a__polecat-1"
 for beadid in tk-abc12 gc-9f8e7; do
     run_handler "$CFG_OK" "$beadid"
     ccalls=$(cat "$TMP/calls.log"); cgum=$(cat "$TMP/gum.log")
@@ -574,24 +574,24 @@ unset FAKE_RIGS_JSON FAKE_FORMAT
 # runs no reaction pool, so a topic filed there would strand — and it is dropped
 # from the picker even though it is a live rig. Its prefix still marks its own
 # ids as bead refs, so an existing hq-store bead stays a valid subject.
-HQ_RIGS='[{"name":"loomington","prefix":"lx","hq":true,"suspended":false,"running":true},
+HQ_RIGS='[{"name":"mycity","prefix":"hq","hq":true,"suspended":false,"running":true},
           {"name":"gc-toolkit","prefix":"tk","hq":false,"suspended":false,"running":true},
-          {"name":"signal-loom","prefix":"sl","hq":false,"suspended":false,"running":true}]'
+          {"name":"rig-a","prefix":"ra","hq":false,"suspended":false,"running":true}]'
 export FAKE_RIGS_JSON="$HQ_RIGS" FAKE_FORMAT="gc-toolkit__polecat-1"
 run_handler "$CFG_OK" "a topic that must not target the workspace"
 cgum=$(cat "$TMP/gum.log"); ccalls=$(cat "$TMP/calls.log")
 has "$cgum" "gum choose" "CHOOSERHQ: the picker is shown for a topic"
-hasnt "$cgum" "loomington" "CHOOSERHQ: the hq/city-workspace rig is withheld from the picker"
+hasnt "$cgum" "mycity" "CHOOSERHQ: the hq/city-workspace rig is withheld from the picker"
 has "$cgum" "gc-toolkit" "CHOOSERHQ: ...while non-hq rigs are still offered"
 has "$ccalls" "argv=[--rig]" "CHOOSERHQ: ...and a non-hq rig is forwarded"
-# An hq-store bead id is still a bead ref: its prefix (lx) names the hq rig, and
+# An hq-store bead id is still a bead ref: its prefix (hq) names the hq rig, and
 # the gate reads every rig including hq, so the chosen rig is dropped (the bead's
 # own rig is authoritative) and the id reaches the intake. Excluding the hq store
 # from the PICKER never strands an existing hq-store subject.
-run_handler "$CFG_OK" "lx-abc12"
+run_handler "$CFG_OK" "hq-abc12"
 cgum=$(cat "$TMP/gum.log"); ccalls=$(cat "$TMP/calls.log")
 hasnt "$ccalls" "argv=[--rig]" "CHOOSERHQ: an hq-store bead id drops the chosen rig (its own rig is authoritative)"
-has "$ccalls" "argv=[lx-abc12]" "CHOOSERHQ: ...and the hq-store bead id still reaches the intake"
+has "$ccalls" "argv=[hq-abc12]" "CHOOSERHQ: ...and the hq-store bead id still reaches the intake"
 unset FAKE_RIGS_JSON FAKE_FORMAT
 
 # (CACHE) The rig set is cached so a burst of presses opens the picker without
@@ -603,7 +603,7 @@ unset FAKE_RIGS_JSON FAKE_FORMAT
 # case, which run with the cache OFF.
 export RIG_CACHE_TTL_OVERRIDE=3600
 export DRAFT_DIR_OVERRIDE="$TMP/cache-drafts"
-export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="signal-loom__polecat-1"
+export FAKE_RIGS_JSON="$CHOOSER_RIGS" FAKE_FORMAT="rig-a__polecat-1"
 run_handler "$CFG_OK" "prime the rig cache"
 has "$(cat "$TMP/gum.log")" "gum choose" "CACHE: the first press fetches the rig set and shows the picker"
 export FAKE_RIGS_JSON=""

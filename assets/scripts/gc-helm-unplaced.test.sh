@@ -59,12 +59,12 @@ cat > "$TMP/alpha.json" <<'JSON'
 JSON
 cat > "$TMP/beta.json" <<'JSON'
 [
-  {"id":"sl-b1","title":"pack defect the witness filed","issue_type":"bug","priority":2,"status":"open","created_at":"2026-10-10T20:00:00Z","metadata":{"placement":"pending"}}
+  {"id":"ra-b1","title":"pack defect the witness filed","issue_type":"bug","priority":2,"status":"open","created_at":"2026-10-10T20:00:00Z","metadata":{"placement":"pending"}}
 ]
 JSON
 cat > "$TMP/cold.json" <<'JSON'
 [
-  {"id":"su-c1","title":"in a suspended rig","issue_type":"task","priority":0,"status":"open","created_at":"2026-10-01T00:00:00Z","metadata":{"placement":"pending"}}
+  {"id":"rb-c1","title":"in a suspended rig","issue_type":"task","priority":0,"status":"open","created_at":"2026-10-01T00:00:00Z","metadata":{"placement":"pending"}}
 ]
 JSON
 
@@ -75,8 +75,8 @@ case "${1:-} ${2:-}" in
   "rig list")
     jq -n --arg t "$FAKE_TMP" '{rigs:[
       {name:"gc-toolkit", path:($t + "/alpha"), prefix:"tk", hq:false, suspended:false},
-      {name:"signal-loom", path:($t + "/beta"), prefix:"sl", hq:false, suspended:false},
-      {name:"shutupandlisten", path:($t + "/cold"), prefix:"su", hq:false, suspended:true},
+      {name:"rig-a", path:($t + "/beta"), prefix:"ra", hq:false, suspended:false},
+      {name:"rig-b", path:($t + "/cold"), prefix:"rb", hq:false, suspended:true},
       {name:"nostore", path:($t + "/nostore"), prefix:"ns", hq:false, suspended:false}]}' ;;
   "bd list")
     db=""; prev=""
@@ -99,7 +99,7 @@ eq "$RC" "0" "(QUEUE) unplaced --json succeeds"
 printf '%s' "$OUT" | jq -e 'type == "object" and (.beads | type) == "array" and (.skipped | type) == "array" and (.unread | type) == "array"' >/dev/null 2>&1 \
     && ok "(QUEUE) …and prints one JSON object: beads, skipped and unread" || bad "(QUEUE) …and prints one JSON object: beads, skipped and unread ($OUT)"
 IDS=$(printf '%s' "$OUT" | jq -r '[.beads[].id] | join(" ")' 2>/dev/null)
-eq "$IDS" "tk-a9 sl-b1 tk-a1 tk-a10" "(ORDER) the waiting beads, priority first and then oldest, from every store that answers"
+eq "$IDS" "tk-a9 ra-b1 tk-a1 tk-a10" "(ORDER) the waiting beads, priority first and then oldest, from every store that answers"
 for id in tk-a2 tk-a3; do hasnot " $IDS " " $id " "(PLACED) $id has a parent, so it is placed"; done
 hasnot " $IDS " " tk-a4 " "(PLACED) a route places a bead"
 hasnot " $IDS " " tk-a5 " "(PLACED) an arm places a bead"
@@ -107,7 +107,7 @@ hasnot " $IDS " " tk-a6 " "(PLACED) an assignee places a bead"
 hasnot " $IDS " " tk-a7 " "(PLACED) a live pour places a bead"
 hasnot " $IDS " " tk-a8 " "(PLACED) a marker that is not pending is not in the queue"
 has " $IDS " " tk-a10 " "(BLOCKED) a bead that also waits on a blocker is in the queue"
-eq "$(printf '%s' "$OUT" | jq -r '.beads[] | select(.id == "sl-b1") | .rig' 2>/dev/null)" "signal-loom" "(QUEUE) each row names its rig"
+eq "$(printf '%s' "$OUT" | jq -r '.beads[] | select(.id == "ra-b1") | .rig' 2>/dev/null)" "rig-a" "(QUEUE) each row names its rig"
 eq "$(printf '%s' "$OUT" | jq -r '.beads[] | select(.id == "tk-a1") | .takeaway' 2>/dev/null)" "ready to build once placed" \
    "(QUEUE) …and carries the reaction's takeaway"
 eq "$(printf '%s' "$OUT" | jq -r '.beads[] | select(.id == "tk-a9") | [.type, .priority, .status, .created_at] | map(tostring) | join(" ")' 2>/dev/null)" \
@@ -119,9 +119,9 @@ has "$CALLS" "--status=open,in_progress,blocked,deferred,hooked,pinned" "(READ) 
 hasnot "$CALLS" "bd update" "(READ) it writes nothing"
 hasnot "$CALLS" "bd create" "(READ) …and files nothing"
 hasnot "$CALLS" "$TMP/cold/.beads" "(COLD) a suspended rig's store is not read"
-hasnot " $IDS " " su-c1 " "(COLD) …so its bead is not listed"
-has "$ERR" "rig shutupandlisten is suspended" "(COLD) …and the skip is named"
-eq "$(printf '%s' "$OUT" | jq -c '.skipped' 2>/dev/null)" '["shutupandlisten"]' "(COLD) …and a --json caller reads it in skipped"
+hasnot " $IDS " " rb-c1 " "(COLD) …so its bead is not listed"
+has "$ERR" "rig rig-b is suspended" "(COLD) …and the skip is named"
+eq "$(printf '%s' "$OUT" | jq -c '.skipped' 2>/dev/null)" '["rig-b"]' "(COLD) …and a --json caller reads it in skipped"
 eq "$(printf '%s' "$OUT" | jq -c '.unread' 2>/dev/null)" '[]' "(COLD) …while unread stays empty, because every store it read answered"
 hasnot "$CALLS" "$TMP/nostore" "(READ) a rig with no store is not asked"
 
@@ -138,15 +138,15 @@ has "$OUT" "unplaced: no bead waits for placement" "(TEXT) …and says the queue
 echo "# a store that does not answer"
 FAKE_DOWN=beta run --json
 eq "$RC" "4" "(PARTIAL) a store that does not answer fails the run"
-has "$ERR" "signal-loom" "(PARTIAL) …naming the rig"
+has "$ERR" "rig-a" "(PARTIAL) …naming the rig"
 has "$ERR" "this list is partial" "(PARTIAL) …and saying the list is partial"
 eq "$(printf '%s' "$OUT" | jq -r '[.beads[].id] | join(" ")' 2>/dev/null)" "tk-a9 tk-a1 tk-a10" "(PARTIAL) …after printing the rows it could read"
-eq "$(printf '%s' "$OUT" | jq -c '.unread' 2>/dev/null)" '["signal-loom"]' "(PARTIAL) …and a --json caller reads the rig in unread"
-has "$ERR" "this list is partial; unread: signal-loom" "(PARTIAL) …and stderr names it too"
+eq "$(printf '%s' "$OUT" | jq -c '.unread' 2>/dev/null)" '["rig-a"]' "(PARTIAL) …and a --json caller reads the rig in unread"
+has "$ERR" "this list is partial; unread: rig-a" "(PARTIAL) …and stderr names it too"
 FAKE_FAIL_AFTER=beta run --json
 eq "$RC" "4" "(PARTIAL) a read that prints its rows and then fails has not answered"
-has "$ERR" "signal-loom" "(PARTIAL) …so its rig is named"
-hasnot "$OUT" "sl-b1" "(PARTIAL) …and the rows it printed are not listed as the store's answer"
+has "$ERR" "rig-a" "(PARTIAL) …so its rig is named"
+hasnot "$OUT" "ra-b1" "(PARTIAL) …and the rows it printed are not listed as the store's answer"
 
 echo "# arguments"
 run --nope

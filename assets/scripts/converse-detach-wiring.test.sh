@@ -119,7 +119,7 @@ if ! command -v tmux >/dev/null 2>&1; then
     [ "$FAIL" -eq 0 ]; exit
 fi
 
-SIT="gc-toolkit__converse-opus-lx-t$$"
+SIT="gc-toolkit__converse-opus-hq-t$$"
 SIB="${SIT}9"
 ELSEWHERE="elsewhere"
 # The global value is set once the server exists: `set -g` before the first

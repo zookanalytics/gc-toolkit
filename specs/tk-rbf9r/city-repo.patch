@@ -4,7 +4,7 @@ index 261e74c..7cfc0e3 100644
 +++ b/setup/files/systemd/gc-terminal.service
 @@ -8,17 +8,37 @@ After=network-online.target
  Type=simple
- WorkingDirectory=%h/loomington
+ WorkingDirectory=%h/mycity
  # ttyd spawns the attach command PER browser connection (not at service start),
 -# so the mayor is only attached while the panel is open. Closing it SIGHUPs the
 -# attach, which detaches (does NOT kill) the mayor — safe because the mayor runs

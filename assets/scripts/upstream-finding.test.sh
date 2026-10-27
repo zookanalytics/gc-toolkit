@@ -140,7 +140,7 @@ flag is dropped. Repro: $(npm test) with sendSources: true.'
 
 # ── the happy path ────────────────────────────────────────────────────────
 reset_state
-OUT=$("$SUT" --message "Hit while working sl-kg9z6; the bug is in the pinned 0.7.1 runtime." \
+OUT=$("$SUT" --message "Hit while working ra-kg9z6; the bug is in the pinned 0.7.1 runtime." \
   -- gh issue create --repo get-convex/agent --title "sendSources cannot be enabled" --body "$BODY_TEXT" 2>&1)
 RC=$?
 eq "$RC" "0" "parking a finding exits 0"
@@ -166,7 +166,7 @@ case "$PARKED" in *$'\n'*) bad "the parked command is one pasteable line" ;; *) 
 # The bead a human reads carries the command too, not just the metadata.
 DESC=$(jq -r '.[] | select(.id == "up-1") | .description' "$STUB_STORE")
 has "$DESC" "$PARKED" "the description carries the pasteable command"
-has "$DESC" "Hit while working sl-kg9z6" "the description carries the operator's rationale"
+has "$DESC" "Hit while working ra-kg9z6" "the description carries the operator's rationale"
 
 # The ask reaches a human, on this bead.
 ESC=$(cat "$STUB_ESC_LOG")
@@ -444,9 +444,9 @@ eq "$(meta up-1 gh_verb)" "issue comment" "a comment verb is labelled as itself"
 
 # ── the pool passthrough ──────────────────────────────────────────────────
 reset_state
-"$SUT" --message "why" --pool "loomington/gc-toolkit.converse" \
+"$SUT" --message "why" --pool "mycity/gc-toolkit.converse" \
   -- gh issue create --repo a/b --title T --body B >/dev/null 2>&1
-has "$(cat "$STUB_ESC_LOG")" "--pool loomington/gc-toolkit.converse" "--pool reaches escalate.sh"
+has "$(cat "$STUB_ESC_LOG")" "--pool mycity/gc-toolkit.converse" "--pool reaches escalate.sh"
 
 # ── failures that must not report a parked send ───────────────────────────
 reset_state

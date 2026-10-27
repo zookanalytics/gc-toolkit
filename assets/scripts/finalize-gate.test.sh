@@ -134,17 +134,17 @@ eq "$rc" 1 "the same visit with no exception named: exit 1"
 # 14. Engaged, the excepted visit holds like any other: a person is in it. The
 # board counts a visit engaged once it is claimed, and also while it is still
 # open but bound by assignee or session (engage binds before the claim).
-store "[$(work A14 open), $(evisit V14 in_progress A14 dispose-failed.14 lx-sitting)]"
+store "[$(work A14 open), $(evisit V14 in_progress A14 dispose-failed.14 hq-sitting)]"
 printf 'V14|tracks|A14\n' > "$STUB_DEPS"
 out=$("$SUT" check A14 --except-key dispose-failed.14 2>/dev/null); rc=$?
 eq "$rc" 1 "excepted visit claimed (in_progress): exit 1"
 has "$out" "V14" "excepted visit claimed: names the visit"
-store "[$(work A14a open), $(evisit V14a open A14a dispose-failed.14 lx-sitting)]"
+store "[$(work A14a open), $(evisit V14a open A14a dispose-failed.14 hq-sitting)]"
 printf 'V14a|tracks|A14a\n' > "$STUB_DEPS"
 out=$("$SUT" check A14a --except-key dispose-failed.14 2>/dev/null); rc=$?
 eq "$rc" 1 "excepted visit open but bound by assignee: exit 1"
 has "$out" "V14a" "excepted visit bound by assignee: names the visit"
-store "[$(work A14s open), $(evisit V14s open A14s dispose-failed.14 "" s-lx-sitting)]"
+store "[$(work A14s open), $(evisit V14s open A14s dispose-failed.14 "" s-hq-sitting)]"
 printf 'V14s|tracks|A14s\n' > "$STUB_DEPS"
 out=$("$SUT" check A14s --except-key dispose-failed.14 2>/dev/null); rc=$?
 eq "$rc" 1 "excepted visit open but bound by session: exit 1"
@@ -183,7 +183,7 @@ store "[$(work A16b open), $(evisit V16b open A16b dispose-failed.16), $(evisit 
 out=$("$SUT" check A16b --except-key dispose-failed.16 2>/dev/null); rc=$?
 eq "$rc" 1 "a stamp-only visit under another key beside the excepted one: exit 1"
 has "$out" "W16b" "a stamp-only visit under another key beside the excepted one: names it"
-store "[$(work A16e open), $(evisit V16e open A16e dispose-failed.16 lx-sitting)]"; : > "$STUB_DEPS"
+store "[$(work A16e open), $(evisit V16e open A16e dispose-failed.16 hq-sitting)]"; : > "$STUB_DEPS"
 out=$("$SUT" check A16e --except-key dispose-failed.16 2>/dev/null); rc=$?
 eq "$rc" 1 "an engaged stamp-only visit under the excepted key: exit 1"
 
