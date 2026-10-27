@@ -109,8 +109,9 @@ there or in a sitting.
 Writer: a human gate on the anchor, filed through the helper, which keeps one
 open gate per anchor and situation key:
 `"$(gc <binding> scripts-dir)/human-gate.sh" --subject <anchor> --key <situation-key> --message "<what must be settled first, at most 140 characters>"`.
-A sitting files its own with the key `conversation` and replies to it (the
-converse-hold step). The gate is cleared with
+A sitting files its own with a key that names its conversation,
+`conversation.<conversation id>`, and replies to it (the converse-hold step),
+so two conversations on one PR each hold its merge. The gate is cleared with
 `gc bd gate resolve <gate> --reason "ruled: <the answer>"`, and the same call
 with `--retract` withdraws your own gate once the question has gone. A sitting
 clears a gate the operator ruled on only through its sign-off writer (the

@@ -396,12 +396,17 @@ and writes what the operator owes as the subject's headline,
 the subject with `--waiting-on`, or says `--no-wait` when nothing holds it but
 the conversation, so `doctor/check-wait-is-an-edge` never reads an unedged
 hold. The gates the conversation replies to stay open and owed. When something
-must wait for the answer and no open gate holds it, as when the merge must not
-land before the operator rules, the sitting files a human gate through the
-helper under the key `conversation` on the bead that must wait: the anchor when
-the merge must wait, or the one member whose work waits. It replies to that
-gate and reads the reply back, so a resumed or handed-off conversation knows
-the gate it owes. Without that need it files nothing: a conversation does not
+must wait for the answer and no gate the conversation replies to holds it, as
+when the merge must not land before the operator rules, the sitting files a
+human gate through the helper on the bead that must wait: the anchor when the
+merge must wait, or the one member whose work waits. A gate another
+conversation filed there asks that conversation's question, and its ruling
+releases the bead whether or not this one is settled. So the key names the
+conversation, `conversation.<conversation id>`: a resumed hold finds the gate
+it filed, and two conversations on one bead each hold with a gate of their
+own, so the merge waits for both rulings. The sitting replies to its gate and
+reads the reply back, so a resumed or handed-off conversation knows the gate
+it owes. Without that need it files nothing: a conversation does not
 freeze its subject, and a PR keeps moving while the operator and the sitting
 talk. An unanchored subject that a gate blocks moves to `held` and back through
 `lifecycle.sh`, because a held bead must carry a live edge. A hold does not use

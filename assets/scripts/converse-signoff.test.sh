@@ -49,6 +49,9 @@
 #             status, and a conversation that reads closed, before that write or
 #             because a dismiss closed it first, stays closed
 #   (RERUN)   a re-run after a sign-off changes nothing
+#   (TWO-CONV) two conversations on one PR, each holding with a gate of its
+#             own: the first ruling resolves only its own gate, so the merge
+#             stays held until the second ruling
 #   (ACCEPT*) a ruling that takes the subject's recommendation hands its gate
 #             to Accept's writer after every other write but the close, never
 #             resolving it itself; it is refused before any write when the
@@ -623,6 +626,23 @@ acceptance; setm tk-anc merge_result pull_request
 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --no-rework
 eq "$RC" 0 "(NO-REWORK) --no-rework exits 0"
 has "$(grep '^pr-sitting-comment' "$CALLS")" "ruling leaves the branch of tk-anc as it stands" "(NO-REWORK) …recording that the branch stands"
+
+echo "# two conversations on one PR: each ruling answers its own question"
+# Each sitting's hold filed its own gate on the anchor, under a key that names
+# its conversation (skills/converse-hold), and replies to that gate alone.
+fresh; bead tk-anc; setm tk-anc merge_result pull_request
+gate tk-ga conversation.tk-ca; edge tk-anc blocks tk-ga
+gate tk-gb conversation.tk-cb; edge tk-anc blocks tk-gb
+conv tk-ca tk-anc; edge tk-ca replies-to tk-ga
+conv tk-cb tk-anc; edge tk-cb replies-to tk-gb
+run_signoff --conversation tk-ca --outcome "the retry stays" --ruled yes --ruling "keep the retry" --route human --no-wait --no-rework
+eq "$RC" 0 "(TWO-CONV) the first conversation's sign-off exits 0"
+eq "$(field tk-ga status)/$(field tk-gb status)" "closed/open" "(TWO-CONV) …resolving its own gate and leaving the other conversation's open"
+eq "$(merge_held tk-anc)" held "(TWO-CONV) …so the merge stays held for the second decision"
+run_signoff --conversation tk-cb --outcome "the docs ship first" --ruled yes --ruling "ship the docs first" --route human --no-wait --no-rework
+eq "$RC" 0 "(TWO-CONV) the second conversation's sign-off exits 0"
+eq "$(field tk-gb close_reason)" "ruled: ship the docs first" "(TWO-CONV) …answering its own gate with its own ruling"
+eq "$(merge_held tk-anc)" released "(TWO-CONV) …and only then is the merge released"
 
 echo "# a ruling that the PR will not land retires it before any gate releases the merge"
 open_pr

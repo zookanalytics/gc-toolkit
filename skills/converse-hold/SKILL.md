@@ -36,17 +36,22 @@ held.
 **2. Gate what must wait for the answer.** The gates the conversation
 replies to stay open and owed: nothing is written to them, because the
 sitting never claimed them, and the sign-off answers them (step 7). When
-something must wait for the answer and no open gate holds it, file a human
-gate on the bead that must wait: the anchor when the merge must not land
-before the operator rules, or the one member of an epic whose work waits.
-Without that need, file nothing. A conversation does not freeze its subject,
-and a PR keeps moving while you talk, which is the shepherd case a
-conversation opened to help a stuck PR wants. The key is `conversation`, so a
-resumed hold finds the gate it filed instead of filing a second. Reply to the
-gate from the conversation and read the reply back, so a resumed or
-handed-off conversation knows the gate it owes without a search by key:
+something must wait for this conversation's answer and no gate the
+conversation replies to holds that bead, file a human gate on the bead that
+must wait: the anchor when the merge must not land before the operator rules,
+or the one member of an epic whose work waits. A gate that another
+conversation or anyone else filed there asks another question, and its answer
+releases the bead whether or not yours is settled, so it never stands in for
+yours. Without that need, file nothing. A conversation does not freeze its
+subject, and a PR keeps moving while you talk, which is the shepherd case a
+conversation opened to help a stuck PR wants. The key names this
+conversation, `conversation.<its id>`, so a resumed hold finds the gate it
+filed instead of filing a second, and two conversations on one bead each hold
+with a gate of their own. Reply to the gate from the conversation and read
+the reply back, so a resumed or handed-off conversation knows the gate it owes
+without a search by key:
 ```bash
-GATE=$("$CONV/human-gate.sh" --subject <the bead that must wait> --key conversation --message "$NEED
+GATE=$("$CONV/human-gate.sh" --subject <the bead that must wait> --key "conversation.$CONVERSATION" --message "$NEED
 <what the operator owes, and what waits on it>") \
   && gc bd dep add "$CONVERSATION" "$GATE" --type replies-to \
   && gc bd list --id "$CONVERSATION" --all --json | jq -e --arg g "$GATE" 'any(.[0].dependencies[]?; .type == "replies-to" and .depends_on_id == $g)' >/dev/null \

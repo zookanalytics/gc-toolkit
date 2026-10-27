@@ -930,7 +930,7 @@ changes around the call.
 | mol-validate-close, mol-feedback-distiller | The helper with their own keys (section 2). mol-validate-close files a gate on doubt, which an open child that is real work raises, so on a bead with open children, tested with the same call, it opens a conversation instead, because blocking the parent would pause the very work its doubt is about. The distiller's gate blocks the contested pattern, whose rule waits on the ruling. |
 | gc-helm.sh engage and open, the operator's intake, helm-svc POST /helm/open | No helper call. They file and take conversations (sections 6 and 8). |
 | The waits, prs and converse-settle skills | The helper, or the native call, where they called `gc-helm.sh demand` (section 9). The waits skill's own call to the helper is unchanged. |
-| A gate a sitting files, under the key `conversation` | It blocks the bead that must wait for the operator's later answer, which the sitting names: the anchor when the merge must wait, or the one member whose work waits. The sitting's conversation replies to it, so the conversation knows the gate it owes (section 7). |
+| A gate a sitting files, under a key that names its conversation, `conversation.<conversation id>` | It blocks the bead that must wait for the operator's later answer, which the sitting names: the anchor when the merge must wait, or the one member whose work waits. The sitting's conversation replies to it, so the conversation knows the gate it owes, and two conversations on one bead each hold with a gate of their own (section 7). |
 
 ## 4. What an open or cleared human gate means to other machinery
 
@@ -1291,10 +1291,14 @@ claimed, and the session stays, because the converse agents keep
 `idle_timeout = "0"`. The hold appends to the subject's notes and writes what
 the operator owes as the subject's headline. The gates its conversation
 replies to stay open and owed. When something must wait for the later answer
-and no open gate holds it, as when the merge must not land before the operator
-rules, the sitting files a human gate through the helper with the key
-`conversation`, on the bead that must wait: the anchor when the merge must
-wait, or the one member whose work waits. It adds its conversation's reply onto
+and no gate its conversation replies to holds it, as when the merge must not
+land before the operator rules, the sitting files a human gate through the
+helper on the bead that must wait: the anchor when the merge must wait, or the
+one member whose work waits. The key names the conversation,
+`conversation.<conversation id>`, because a gate another conversation filed on
+the same bead asks that conversation's question, and its ruling releases the
+bead whether or not this one is settled: two conversations on one bead each
+hold with a gate of their own. It adds its conversation's reply onto
 that gate and reads it back, so a resumed or handed-off conversation knows the
 gate it owes without a search by key. converse-hold.sh retires, and so do its
 demand, its `gc.hold_demand` stamp, its `gc.gate_visit` stamp and
