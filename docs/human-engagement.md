@@ -545,18 +545,18 @@ var) and reads it back, resolves the gate with
 back that no other open human gate blocks the bead, releases a bead that reads
 `held` to `unanchored`, slings the formula titled `<formula> accept:<token>`,
 and records the dispatch by stripping `gc.recommended_formula` beside
-`gc.recommended_formula_dispatched`. A sitting's hold leaves an unanchored
-subject at `held` while the operator owes the answer of a gate that blocks it,
+`gc.recommended_formula_dispatched`. A sitting's hold moves an unanchored
+subject to `held` while the operator owes the answer of a gate that blocks it,
 and mol-polecat-work's load-context cancels a run poured at a bead that still
 reads `held`, so the release comes before the sling. An answer another reached
 first stands, and Accept slings nothing. A gate filed in the meantime, or a
 sling that poured no root, reopens the recommendation's gate. A run that
 stopped after its resolve, or whose release did not land, leaves an unfinished
 acceptance, which the board keeps owed and the next Accept finishes under the
-same token, slinging only when no root carries the token. That sling carries the vars the
-acceptance recorded, whoever finishes it: the board's Accept passes none, and a
-run given vars other than the recorded ones dispatches nothing. The lock's
-warrant is in [warrants.md](warrants.md).
+same token, slinging only when no root carries the token. That sling carries
+the vars the acceptance recorded, whoever finishes it: the board's Accept
+passes none, and a run given vars other than the recorded ones dispatches
+nothing. The lock's warrant is in [warrants.md](warrants.md).
 
 A sitting takes a recommendation through the same writer. When the operator
 rules to take it, the sign-off's `--accept` leaves the recommendation's gate

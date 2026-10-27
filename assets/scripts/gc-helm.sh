@@ -206,11 +206,13 @@ live read of those three conditions to its last write, and refuses while
 another Accept holds it. It records the acceptance's dispatch input (its
 token, the formula and each --var) on the gate, resolves the gate with
 `ruled: accepted <formula> accept:<token>`, reads its own answer back, checks
-that no open human gate blocks the bead, slings the formula titled `<formula>
-accept:<token>`, and records the dispatch by stripping gc.recommended_formula.
-An answer another reached first stands, and Accept slings nothing. A gate filed
-in the meantime, or a sling that poured no root, reopens the gate. A run that
-stopped after its resolve leaves an unfinished acceptance, which the next
+that no open human gate blocks the bead, releases a bead a sitting's hold left
+at held to unanchored, since a run poured at a held bead cancels at its first
+step, slings the formula titled `<formula> accept:<token>`, and records the
+dispatch by stripping gc.recommended_formula. An answer another reached first
+stands, and Accept slings nothing. A gate filed in the meantime, or a sling
+that poured no root, reopens the gate. A run that stopped after its resolve, or
+whose release did not land, leaves an unfinished acceptance, which the next
 Accept finishes under the same token, slinging only when no root carries the
 token, and slinging the vars the acceptance recorded. A sitting takes a
 recommendation through this verb too: its sign-off's --accept runs it with
