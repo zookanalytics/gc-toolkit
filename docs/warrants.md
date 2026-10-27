@@ -151,15 +151,25 @@ shares only the word ([authority-map.md](authority-map.md)).
     removes its prep worktree after a gate that can leave files in it and after
     a landing on the target, and it clears a leftover of an interrupted
     iteration without knowing which bead staged it.
+  - With `auto_reap_closed_bead_worktrees`, the reconciler removes a per-bead
+    worktree once its work bead is closed. With `auto_prune_worker_dir`, it
+    removes a pool session's `worker_dir` once the session bead is closed
+    (`DaemonConfig` in `docs/reference/config.md`). Each removal refuses a
+    worktree with uncommitted changes or a stash, and each acts only under the
+    city's `.gc/worktrees/` tree, where the reaper takes a worktree's bead from
+    its directory name (`reapClosedBeadWorktrees` in
+    `cmd/gc/bead_worktree_reaper.go`). Neither reaches the prep worktree.
   - No formula or order in Gas City's bundled `core` pack calls `gc worktree`.
     No pack in `gastownhall/gascity-packs` calls it either, and the gastown
     pack's `mol-refinery-patrol` stages every bead on one local `temp` branch
     and records nothing about which bead that branch holds.
   - In `gastownhall/beads`, `bd worktree create` checks out a branch in the
     worktree it adds and records no bead.
-- **Verified.** 2026-10-24, at `gastownhall/gascity` main 47b36c3a0f1b,
-  `gastownhall/gascity-packs` main 8a93f3d12d92 and `gastownhall/beads` main
-  12c20a6e8170.
+- **Verified.** 2026-10-27, at `gastownhall/gascity` main f11f48825520,
+  `gastownhall/gascity-packs` main dac12a4a802c and `gastownhall/beads` main
+  5011528b3ad5. The gastown pack was also read at 66c672b5ed00, the release
+  Gas City pins (`PublicGastownPackVersion` in
+  `internal/config/public_packs.go`).
 - **Retires when.** Gas City can bind a detached worktree to a bead and remove
   the attempt that created it whatever state it is in, for example through
   `gc worktree`. The record's readers then move onto that primitive, and the
