@@ -127,10 +127,12 @@ change inside that window goes unseen until the next one.
 ### When it checks, and a session mid-turn
 
 The check runs at every turn's end and before every prompt. The witness and the
-deacon end a turn at every patrol cycle, so the end of the cycle a change lands
-in recycles them. The refinery's turns start from a nudge, and it waits idle
-between them, which is when a change usually lands, so the check before its
-next prompt is the one that reaches it.
+deacon close each patrol cycle at a turn's end, where the check recycles a
+drifted session, or in Gas City's fresh restart onto their next wisp, which
+starts from the current text, so a change reaches them within the cycle it
+lands in. The refinery's turns start from a nudge, and it waits idle between
+them, which is when a change usually lands, so the check before its next prompt
+is the one that reaches it.
 
 A session mid-turn keeps the text it has until that turn ends. The hook never
 ends a turn early, for the reason it defers under an attached operator or a
