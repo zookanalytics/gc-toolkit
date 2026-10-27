@@ -10,7 +10,9 @@
 # visits, the merge cadence's verdict, draft stage and live work. The label comes
 # off once the PR merges or closes, where GitHub's own Merged or Closed state
 # takes over: pr-facts.sh clears it when it records a merge or a close, and gctk
-# merge when it merges. It is workflow state, never an approval, and never
+# merge when it merges, each before its record. A clear that does not land is
+# recorded on the anchor as status_label_clear_owed, and pr-facts.sh's full pass
+# retries it. It is workflow state, never an approval, and never
 # asserts a PR may merge: machine-readiness rides pr.machine and the draft flag.
 # The values themselves — what each projects from, and their precedence — are
 # decided by one Go package, services/gctk/prstatus, reached through `gctk

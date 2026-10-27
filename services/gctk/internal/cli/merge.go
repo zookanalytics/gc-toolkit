@@ -480,12 +480,15 @@ func (m *merger) handle(row *gcbd.Bead) {
 			mergeOid = "unverified:PR#" + num
 		}
 		short := shortSha(mergeOid)
-		if m.transition(m.stdout, m.stderr, id, "--to", "merged", "--expect", "pull_request", "--close",
-			"--set", "merged_sha="+mergeOid, "--unset", "merge_record_failures",
-			"--append-notes", "Merged to "+base+" at "+short+" (record recovered by merge)") {
+		record := []string{"--to", "merged", "--expect", "pull_request", "--close",
+			"--set", "merged_sha=" + mergeOid, "--unset", "merge_record_failures",
+			"--append-notes", "Merged to " + base + " at " + short + " (record recovered by merge)"}
+		if m.clearStatusLabel(id, num) {
+			record = append(record, "--set", statusLabelClearOwed+"="+num)
+		}
+		if m.transition(m.stdout, m.stderr, id, record...) {
 			m.recovered++
 			fmt.Fprintf(m.stdout, "%s: recovered %s — PR#%s was already merged to %s at %s; the record had not landed\n", mergeProg, id, num, base, short)
-			m.clearStatusLabel(id, num)
 		} else {
 			fmt.Fprintf(m.stderr, "%s: PR#%s is MERGED but the record failed for %s; retry next pass\n", mergeProg, num, id)
 			m.recordFailed++
@@ -829,16 +832,19 @@ func (m *merger) handle(row *gcbd.Bead) {
 	if noteShort == "" {
 		noteShort = "merge"
 	}
-	if m.transition(m.stdout, m.stderr, id, "--to", "merged", "--expect", "pull_request", "--close",
-		"--set", "merged_sha="+mergeOid, "--unset", "merge_record_failures",
-		"--append-notes", "Merged to "+landTarget+" at "+noteShort) {
+	record := []string{"--to", "merged", "--expect", "pull_request", "--close",
+		"--set", "merged_sha=" + mergeOid, "--unset", "merge_record_failures",
+		"--append-notes", "Merged to " + landTarget + " at " + noteShort}
+	if m.clearStatusLabel(id, num) {
+		record = append(record, "--set", statusLabelClearOwed+"="+num)
+	}
+	if m.transition(m.stdout, m.stderr, id, record...) {
 		m.merged++
 		echoShort := short
 		if echoShort == "" {
 			echoShort = "?"
 		}
 		fmt.Fprintf(m.stdout, "%s: merged + recorded %s — PR#%s squashed to %s at %s\n", mergeProg, id, num, landTarget, echoShort)
-		m.clearStatusLabel(id, num)
 	} else {
 		fmt.Fprintf(m.stderr, "%s: PR#%s MERGED but the lifecycle record FAILED for %s; pr-facts records it next pass\n", mergeProg, num, id)
 		m.recordFailed++
@@ -1247,23 +1253,31 @@ func (m *merger) escalate(args ...string) {
 	_ = cmd.Run()
 }
 
+// statusLabelClearOwed is the key a merge or close record carries when the
+// status: label clear before it did not land. The record closes the anchor, and
+// no pass enumerates a closed anchor as a PR, so pr-facts.sh's full pass lists
+// the anchors carrying this key and retries the clear for each one.
+const statusLabelClearOwed = "status_label_clear_owed"
+
 // clearStatusLabel takes the status: label off a PR that merged, through the
-// label's one writer. The pass closes the anchor in the write that records the
-// merge, and pr-facts.sh visits only open anchors, so no later pass reaches this
-// PR. The clear is best effort: one that does not land leaves the label and
-// warns.
-func (m *merger) clearStatusLabel(id, num string) {
+// label's one writer, ahead of the write that records the merge. It reports
+// whether the clear is owed: true when the writer ran and did not land it, so
+// the record carries statusLabelClearOwed. A missing writer clears nothing and
+// owes nothing.
+func (m *merger) clearStatusLabel(id, num string) (owed bool) {
 	p := m.scriptPath("pr-status-label.sh")
 	if !isExecutable(p) {
-		return
+		return false
 	}
 	cmd := exec.Command(p, "clear", "--pr", num, "--repo", m.originRepoQ)
 	var errBuf bytes.Buffer
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &errBuf
 	if rc := gcbd.ExitCode(cmd.Run()); rc != 0 {
-		fmt.Fprintf(m.stderr, "%s: WARN PR#%s merged but its status: label did not come off (rc=%d; %s) (anchor %s)\n", mergeProg, num, rc, strings.TrimSpace(errBuf.String()), id)
+		fmt.Fprintf(m.stderr, "%s: WARN PR#%s merged but its status: label did not come off (rc=%d; %s); the record carries %s=%s, which pr-facts.sh retries (anchor %s)\n", mergeProg, num, rc, strings.TrimSpace(errBuf.String()), statusLabelClearOwed, num, id)
+		return true
 	}
+	return false
 }
 
 func (m *merger) recordCap(id, num, mergeOid, base string) {

@@ -1227,6 +1227,17 @@ keys = [
 # records any other verdict, and gate-ensure.sh's own verdicts leave them alone.
 keys = ["pr.machine", "pr.machine_cause", "pr.machine_reason", "pr.conversation"]
 
+[metadata.pr_status_label]
+# The status: label comes off a PR once it merges or closes. The writer that
+# records the merge or the close (merge.sh, through gctk merge, or pr-facts.sh)
+# takes it off before its record, which closes the anchor or moves it out of
+# pull_request, and so out of every enumeration of open PRs.
+# status_label_clear_owed records a clear that did not land, valued with the PR
+# number: gctk merge carries it in its record, and pr-facts.sh writes it ahead
+# of its own. pr-facts.sh's full pass lists the anchors carrying it, in any
+# status, retries each clear, and unsets the key once the clear lands.
+keys = ["status_label_clear_owed"]
+
 [metadata.pr_close_disposition]
 # The disposition a deliberate supersede/not-planned PR close records on the
 # still-OPEN anchor (merge_result=pull_request) before the PR closes, so

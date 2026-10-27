@@ -156,9 +156,10 @@ eq "$(grep -c '^bd update M1' "$STUB_GC_LOG" || true)" "1" "ONE lifecycle update
 
 echo "# a merge, or a merge recovered, takes the status: label off the PR through its writer"
 # The pass closes the anchor in the write that records the merge, so no later
-# pass visits the PR; the label writer's clear is the pass's to call. Its
-# absence (every other case in this file) skips the clear.
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\n' "$TMP/status-label.log" > "$SD/pr-status-label.sh"
+# pass visits the PR; the label writer's clear is the pass's to call, ahead of
+# that write. Its absence (every other case in this file) skips the clear. The
+# stub writer exits STUB_LABEL_RC, so a clear that does not land can be shown.
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexit "${STUB_LABEL_RC:-0}"\n' "$TMP/status-label.log" > "$SD/pr-status-label.sh"
 chmod +x "$SD/pr-status-label.sh"; : > "$TMP/status-label.log"
 store "[$(anchor ML1 12), $(rev ML1), $(anchor ML2 13)]"
 printf '%s' "$(prview 12 OPEN CLEAN)" > "$GH_DIR/pr_view_12.json"
@@ -168,6 +169,22 @@ out=$("$SUT" 2>&1)
 has "$out" "merged + recorded ML1" "test premise: the PR merges"
 has "$(cat "$TMP/status-label.log")" "clear --pr 12 --repo github.com/zook/gc-toolkit" "…and its status: label is cleared"
 has "$(cat "$TMP/status-label.log")" "clear --pr 13 --repo github.com/zook/gc-toolkit" "…and so is a merge the pass recovered the record of"
+eq "$(meta ML1 status_label_clear_owed)|$(meta ML2 status_label_clear_owed)" "<absent>|<absent>" "…and a clear that lands owes nothing"
+
+echo "# a clear that does not land rides the merge record as owed, so pr-facts.sh retries it"
+# The record closes the anchor, and no pass enumerates a closed anchor as a PR,
+# so the record itself carries the clear it still owes. The merge is recorded
+# either way.
+store "[$(anchor ML3 175), $(rev ML3), $(anchor ML4 176)]"
+printf '%s' "$(prview 175 OPEN CLEAN)" > "$GH_DIR/pr_view_175.json"
+printf '%s' "$(prview 176 MERGED CLEAN)" > "$GH_DIR/pr_view_176.json"
+approved 175
+out=$(STUB_LABEL_RC=2 "$SUT" 2>&1)
+eq "$(meta ML3 merge_result) $(bstatus ML3)" "merged closed" "a merge whose clear fails is still recorded"
+eq "$(meta ML3 status_label_clear_owed)" "175" "…and its record carries the clear it owes"
+eq "$(grep -c '^bd update ML3' "$STUB_GC_LOG" || true)" "1" "…in the one update that records the merge"
+eq "$(meta ML4 merge_result) $(meta ML4 status_label_clear_owed)" "merged 176" "a recovered record carries it too"
+has "$out" "the record carries status_label_clear_owed=175, which pr-facts.sh retries" "…and the pass says so"
 rm -f "$SD/pr-status-label.sh"
 
 echo "# the lanes are resolved at the head the merge is pinned to"

@@ -773,17 +773,27 @@ reconcile_status_label() { # <anchor> <pr-number>
   cur_labels=""
 }
 # Take the status: label off a PR that merged or closed, where GitHub's own state
-# takes over. The labels come from this pass's pinned PR read, and a PR that
-# carries none has nothing to take off. Best-effort: a clear that does not land
-# leaves the label, and a pass that visits the PR again because its record did
-# not land clears it again.
-clear_status_label() { # <pr-number>
+# takes over, ahead of the write that records the merge or the close. The labels
+# come from this pass's pinned PR read, and a PR that carries none has nothing to
+# take off. That write takes the anchor out of every enumeration of open PRs, so
+# a clear that does not land is recorded on the anchor first, as
+# status_label_clear_owed=<pr>, and the full pass retries it from there (the
+# owed-clear retry below). Returns non-zero only when neither the clear nor that
+# record landed, and the caller then leaves the anchor open for the next pass.
+clear_status_label() { # <anchor> <pr-number>
   local labels
+  [ -x "$PR_STATUS_LABEL" ] || return 0
   labels=$(printf '%s' "$PR_JSON" | jq -r '[.labels[]?.name] | join(",")' 2>/dev/null)
   [ -n "$labels" ] || return 0
-  "$PR_STATUS_LABEL" clear --pr "$1" \
+  "$PR_STATUS_LABEL" clear --pr "$2" \
     --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" --current-labels "$labels" \
-    >/dev/null 2>&1 || true
+    >/dev/null 2>&1 && return 0
+  if gc bd update "$1" --set-metadata status_label_clear_owed="$2" >/dev/null 2>&1; then
+    echo "$PROG: $1 — the status: label did not come off PR#$2; recorded status_label_clear_owed, which the full pass retries" >&2
+    return 0
+  fi
+  echo "$PROG: $1 — the status: label did not come off PR#$2, and the owed clear did not record; the anchor is left open for the next pass" >&2
+  return 1
 }
 # The escalation keys this script files on an anchor to hold its PR's merge
 # until a person answers, for PR number $n: rework or close (pr-abandoned), a
@@ -1499,6 +1509,41 @@ DF_EOF
   fi
 fi
 
+# --- retry the status: label clears that terminal records still owe ------------
+# The writer that records a PR's merge or close takes its status: label off
+# first: clear_status_label here, clearStatusLabel in gctk merge. A clear that
+# does not land is recorded on the anchor as status_label_clear_owed=<pr>, and
+# the record that follows takes the anchor out of every enumeration of open PRs.
+# So every full pass lists the anchors carrying the key, in any status, retries
+# each clear, and unsets the key once the clear lands. A clear that does not land
+# keeps the key for the next pass. So does a key whose anchor names another PR or
+# another repository, which this pass will not clear blind. Like the sweeps
+# above, this runs before the no-anchors early-exit.
+if [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ] && [ -x "$PR_STATUS_LABEL" ]; then
+  if lo_rows=$(bd_list --status="$ALL_STATUSES" --has-metadata-key=status_label_clear_owed); then
+    while IFS=$'\t' read -r loid lonum lourl; do
+      [ -n "${loid:-}" ] || continue
+      if [ -z "$lonum" ] || [ "$(canon_pr_url "$lourl")" != "https://$ORIGIN_REPO_Q/pull/$lonum" ]; then
+        echo "$PROG: WARN $loid owes a status: label clear on PR#$lonum, but its pr_url names '${lourl:-nothing}'; left for the operator" >&2
+        continue
+      fi
+      if ! "$PR_STATUS_LABEL" clear --pr "$lonum" --repo "$ORIGIN_REPO_Q" --host "$ORIGIN_HOST" >/dev/null 2>&1; then
+        echo "$PROG: the status: label clear $loid owes PR#$lonum did not land; retry next pass" >&2
+        continue
+      fi
+      if gc bd update "$loid" --unset-metadata status_label_clear_owed >/dev/null 2>&1; then
+        echo "$PROG: took the status: label off PR#$lonum, the clear $loid's record owed"
+      else
+        echo "$PROG: WARN took the status: label off PR#$lonum, but $loid still records it as owed; the next pass clears it again" >&2
+      fi
+    done <<LO_EOF
+$(printf '%s' "$lo_rows" | jq -r '.[]? | [ (.id // ""), ((.metadata.status_label_clear_owed // "") | tostring), ((.metadata.pr_url // "") | tostring) ] | map(tostring | gsub("[\t\n]"; " ")) | @tsv' 2>/dev/null)
+LO_EOF
+  else
+    echo "$PROG: WARN the anchors that owe a status: label clear could not be listed (retry next pass)" >&2
+  fi
+fi
+
 # --- the PR-finishing work of anchors resting outside pull_request --------------
 # The rank an anchor's PR-finishing work follows is approved only while the
 # anchor rests in pull_request, and the per-anchor walk below reads only those.
@@ -1780,7 +1825,7 @@ while IFS= read -r tagged; do
   # --route-comments-only) reconcile no terminal state, so a MERGED or CLOSED
   # anchor falls through to the OPEN filter.
   if [ "$state" = "MERGED" ] && [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
-    clear_status_label "$num"
+    clear_status_label "$id" "$num" || { skipped=$((skipped + 1)); continue; }
     merge_oid=$(gh pr view "$num" --repo "$ORIGIN_REPO_Q" --json mergeCommit 2>/dev/null \
       | scrub | jq -r '.mergeCommit.oid // ""')
     if [ -z "$merge_oid" ]; then
@@ -1808,7 +1853,7 @@ while IFS= read -r tagged; do
 
   # --- PR closed unmerged: out-of-band close ------------------------------------
   if [ "$state" = "CLOSED" ] && [ "$POSTURE_ONLY" != 1 ] && [ "$ROUTE_ONLY" != 1 ]; then
-    clear_status_label "$num"
+    clear_status_label "$id" "$num" || { skipped=$((skipped + 1)); continue; }
     # A deliberate supersede/not-planned close records its disposition on the
     # still-open anchor before the PR closes (assets/scripts/pr-dispose.sh):
     # the bead-rehome kind, the successor, and an optional store. When it is

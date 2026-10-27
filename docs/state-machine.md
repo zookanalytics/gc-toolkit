@@ -593,9 +593,16 @@ and leaves the label as it is.
 
 The label comes off when the PR merges or closes, where GitHub's own Merged or
 Closed state takes over. `pr-facts.sh` takes it off in the full pass that
-records an out-of-band merge or a close. `gctk merge` takes it off after it
-records a merge it made, or one whose record it recovered, because that write
-closes the anchor and `pr-facts.sh` visits only open anchors.
+records an out-of-band merge or a close. `gctk merge` takes it off for a merge
+it made, or one whose record it recovered. Each takes it off before the write
+that records the merge or the close, because that write closes the anchor or
+moves it out of `pull_request`, and no pass enumerates it as an open PR again.
+A clear that does not land is recorded on the anchor as
+`status_label_clear_owed=<pr number>`: `gctk merge` carries the key in its
+record, and `pr-facts.sh` writes it before its record, leaving the anchor open
+for the next pass when that write does not land either. Every full pass of
+`pr-facts.sh` lists the anchors carrying the key, in any status, retries each
+clear, and unsets the key once it lands.
 
 An open visit covers the anchor by the shared visit identity
 (`assets/scripts/visit-identity.sh`): the bead its tracks edge names, or its
