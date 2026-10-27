@@ -576,7 +576,7 @@ func (m *merger) handle(row *gcbd.Bead) {
 	}
 	if inflight := m.inflightHolder(id, byPR, children, blockers); inflight != "" {
 		// gate-ensure.sh asks blocker-holder.sh the same question before it
-		// replaces a blocker verdict, so the two writers reach one answer.
+		// replaces a blocker verdict, so the writers reach one answer.
 		if hasLiveBlocker(blockers) {
 			switch kind, bead, ok := m.blockerHolder(id); {
 			case !ok:
@@ -925,8 +925,8 @@ func (m *merger) handleBlocked(id, num, base, headOid, aroute, reviewDecision st
 // freeze on the branch. The merge pass has already held a merge_hold and every
 // live blocker, a demand included, before its merge-state switch, and a branch
 // a landed change supersedes reaches no merge state here, because that arm
-// files a visit the finalize gate holds the merge on. So three are left to
-// read: the anchor's own rebase_hold and arm, and the freeze a bead naming the
+// files a visit the finalize gate holds the merge on. What is left to read here
+// is the anchor's own rebase_hold and arm, and the freeze a bead naming the
 // branch puts on it. onBranch is every bead naming the branch, in any status.
 func mergeInDeferred(anchor *gcbd.Bead, onBranch []gcbd.Bead) string {
 	if isHeld(anchor.Meta("rebase_hold")) {
@@ -943,7 +943,8 @@ func mergeInDeferred(anchor *gcbd.Bead, onBranch []gcbd.Bead) string {
 
 // branchFreeze is pr-facts.sh's branch_freeze, its marked branch-freeze block:
 // the first bead naming the branch whose rebase_hold, lowercased, is anything
-// but empty, false, 0 or null. merge.test.sh holds the two to one answer.
+// but empty, false, 0 or null. merge.test.sh holds this function and the block
+// to one answer.
 func branchFreeze(onBranch []gcbd.Bead) string {
 	for i := range onBranch {
 		switch strings.ToLower(onBranch[i].Meta("rebase_hold")) {

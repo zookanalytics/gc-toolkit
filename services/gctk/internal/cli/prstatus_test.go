@@ -120,8 +120,8 @@ func TestPRStatusDerive(t *testing.T) {
 	})
 
 	// The machine verdict and its cause are read off the anchor: a blocked
-	// verdict at the posture's head holds the PR, and an unrouted blocker holds
-	// it whatever is in flight.
+	// verdict at the posture's head holds the PR, and one whose cause is a live
+	// blocker no automated actor holds counts whatever is in flight.
 	t.Run("approved, blocked by the merge pass at the posture's head => needs-attention", func(t *testing.T) {
 		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"check-failed"}}]`, `[]`)
 		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-attention\n" {
@@ -129,7 +129,7 @@ func TestPRStatusDerive(t *testing.T) {
 		}
 	})
 
-	t.Run("an unrouted blocker beside live work => needs-attention", func(t *testing.T) {
+	t.Run("the blocker cause beside live work => needs-attention", func(t *testing.T) {
 		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"blocker"}}]`,
 			`[{"id":"tk-f","status":"open","metadata":{"task_kind":"finding","anchor_bead":"tk-a"}}]`)
 		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-attention\n" {

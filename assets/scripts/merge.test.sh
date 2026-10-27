@@ -1399,11 +1399,11 @@ eq "$(pinned BK1)" "blocked@sha-92" "an unrouted blocker no automated actor will
 eq "$(cause BK1)" "blocker" "…its cause is the blocker"
 has "$(reason BK1)" "rw-bk1" "…and the reason names the blocking bead"
 
-# A route is one mark of an automated actor among three. The pass asks
-# blocker-holder.sh, the answer gate-ensure.sh asks for too, and it counts a
-# claim and a live run as well: a rework handed back to the refinery carries no
-# route and the refinery as its assignee, and a graph.v2 pour leaves the bead it
-# works unrouted and unassigned, with only its run to show it is worked.
+# A route is one mark of an automated actor. The pass asks blocker-holder.sh,
+# the answer gate-ensure.sh asks for too, and it counts a claim and a live run
+# as well: a rework handed back to the refinery carries no route and the
+# refinery as its assignee, and a graph.v2 pour leaves the bead it works
+# unrouted and unassigned, with only its run to show it is worked.
 echo "# a rework the refinery holds is the city's move, not a blocker"
 store "[$(anchor BK1r 172), $(rev BK1r),
         {\"id\":\"rw-bk1r\",\"status\":\"open\",\"assignee\":\"rig/gc-toolkit.refinery\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"rework\",\"anchor_bead\":\"BK1r\",\"source_review_bead\":\"rv-bk1r\",\"gc.execution_routed_to\":\"rig/gc-toolkit.polecat\"}}]"

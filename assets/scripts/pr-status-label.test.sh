@@ -124,10 +124,10 @@ store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","
         {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "merging" "approved + blocked + an open rework child on the cause => merging (live work)"
 
-# needs-attention — an unrouted blocker holds the PR whatever is in flight beside it.
+# needs-attention — the blocker cause holds the PR whatever is in flight beside it.
 store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr.machine":"blocked@abc@t","pr.machine_cause":"blocker"}},
         {"id":"tk-f","status":"open","metadata":{"task_kind":"finding","anchor_bead":"tk-a"}}]'
-eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "an unrouted blocker beside live work => needs-attention"
+eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "the blocker cause beside live work => needs-attention"
 
 # needs-attention — a recorded value the derivation has no word for.
 store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"dismissed@abc@t"}}]'

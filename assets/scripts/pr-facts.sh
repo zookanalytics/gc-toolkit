@@ -462,7 +462,7 @@ anchor_decision_held() { # <anchor-id>
 # (mergeInDeferred in services/gctk/internal/cli/merge.go) before it records a
 # conflicting, approved PR with nothing in flight as progressing, because a
 # frozen branch gets no merge-in. merge.test.sh runs this block and gctk merge
-# over the same fixtures and fails when the two disagree. Takes the beads that
+# over the same fixtures and fails when they disagree. Takes the beads that
 # name the branch and prints the first one that freezes it.
 branch_freeze() { # <beads-json>
   printf '%s' "${1:-}" | jq -r '

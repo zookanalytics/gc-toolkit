@@ -2215,7 +2215,7 @@ func TestPRPhaseMirrorsDeriveValue(t *testing.T) {
 		{"rebase hold needs attention", merge(map[string]string{mdRebaseHold: "true"}), 0, PhaseNeedsAttention},
 		{"approved and blocked by the merge pass with no rework needs attention", merge(map[string]string{mdPRPosture: "approved@abc@2026-01-01T00:00:00Z", mdPRMachine: "blocked@abc@2026-01-01T00:00:00Z", mdPRMachineCause: "check-failed"}), 0, PhaseNeedsAttention},
 		{"approved and blocked but reworking is merging", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMachine: "blocked@abc@2026-01-01T00:00:00Z", mdPRMachineCause: "check-failed"}), 1, PhaseMerging},
-		{"approved and held by an unrouted blocker needs attention whatever is in flight", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMachine: "blocked@abc@2026-01-01T00:00:00Z", mdPRMachineCause: "blocker"}), 1, PhaseNeedsAttention},
+		{"approved and held on the blocker cause needs attention whatever is in flight", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMachine: "blocked@abc@2026-01-01T00:00:00Z", mdPRMachineCause: "blocker"}), 1, PhaseNeedsAttention},
 		{"approved while GitHub reports BLOCKED for a check still running is merging", merge(map[string]string{mdPRPosture: "approved@abc", "pr_merge_state": "BLOCKED@abc", mdPRMachine: "progressing@abc@2026-01-01T00:00:00Z"}), 0, PhaseMerging},
 		{"open rework child is working", merge(map[string]string{mdPRPosture: "review_required@abc"}), 2, PhaseWorking},
 		{"approved and mergeable is merging", merge(map[string]string{mdPRPosture: "approved@abc", mdPRMachine: "settled@abc@2026-01-01T00:00:00Z"}), 0, PhaseMerging},
@@ -2677,7 +2677,7 @@ func TestProgressingIsNotOwed(t *testing.T) {
 
 // TestBlockedAnchorIsOwedAndNamed. A green, APPROVED PR that merge.sh cannot land
 // without a person — an unresolved required review thread, a base gone BEHIND, or
-// an unrouted blocker no automated actor will reap — records `blocked` with the
+// a live blocker no automated actor holds — records `blocked` with the
 // cause in pr.machine_reason. The board owes it to the operator, phases it
 // needs-attention, and names the cause, so it stops reading as awaiting-review
 // even though the review verdict is `approved`. That approved-and-held shape is

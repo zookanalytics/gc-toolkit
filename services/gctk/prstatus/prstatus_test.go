@@ -41,8 +41,8 @@ func TestDerive(t *testing.T) {
 		{"blocked with no posture recorded", Facts{PRMachine: "blocked@oid@t", PRMachineCause: CauseRule}, NeedsAttention},
 		{"blocked with no cause recorded", Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t"}, NeedsAttention},
 		{"blocked, with city work in flight on the cause", Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: CauseCheckFailed, InFlightCount: 1}, Merging},
-		{"an unrouted blocker holds whatever is in flight", Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: CauseBlocker, InFlightCount: 2}, NeedsAttention},
-		{"an unrouted blocker holds an unapproved PR", Facts{PRPosture: "review_required@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: CauseBlocker, InFlightCount: 1}, NeedsAttention},
+		{"the blocker cause holds whatever is in flight", Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: CauseBlocker, InFlightCount: 2}, NeedsAttention},
+		{"the blocker cause holds an unapproved PR", Facts{PRPosture: "review_required@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: CauseBlocker, InFlightCount: 1}, NeedsAttention},
 
 		// A recorded value outside its writer's vocabulary is a state the
 		// derivation cannot name.

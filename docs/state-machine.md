@@ -700,15 +700,15 @@ next pass. It is `blocked` only when something defers that merge-in: a
 `rebase_hold` on the anchor, an armed re-dispatch, or a `rebase_hold` on any bead
 naming the branch, in any status. The pass reads that last freeze by the rule the
 conflict arm applies, `pr-facts.sh`'s marked `branch-freeze` block, and
-`merge.test.sh` holds the two to one answer. A read that does not answer (the
-branch rules, the review threads, the required-check set, the check rollup, the
-beads naming the branch) records nothing, and the verdict the last pass recorded
-stands.
+`merge.test.sh` holds the pass and the block to one answer. A read that does
+not answer (the branch rules, the review threads, the required-check set, the
+check rollup, the beads naming the branch) records nothing, and the verdict the
+last pass recorded stands.
 
 An anchor a live blocker holds is `progressing` when an automated actor holds
 any of its live blockers, `blocked` with cause `blocker` when none does, and
 gets no verdict when every live blocker is routed to a person.
-`assets/scripts/blocker-holder.sh` answers that question for both writers of
+`assets/scripts/blocker-holder.sh` answers that question for each writer of
 the axis. An automated actor holds a blocker routed to a pool or an agent, one
 an agent has claimed, and one a live run works. A rework handed back to the
 refinery is claimed by it until it lands, and a graph.v2 pour leaves the bead
