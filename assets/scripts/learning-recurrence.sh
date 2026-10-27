@@ -114,7 +114,7 @@ fi
 # of the city reads as improvement.
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/gctk-learning-recurrence.XXXXXX"); trap 'rm -rf "$TMP"' EXIT
 RIGSET="$TMP/rigs"
-gc rig list --json 2>/dev/null \
+"$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/rig-map.sh" \
   | jq -r '.rigs[]? | select((.name // "") != "") | [.name, (.path // "")] | @tsv' 2>/dev/null > "$RIGSET"
 if [ ! -s "$RIGSET" ]; then
   warn "rig enumeration returned nothing — refusing to report on a partial city"

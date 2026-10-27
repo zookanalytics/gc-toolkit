@@ -25,10 +25,10 @@ STUBS="$TMP/bin"; mkdir -p "$STUBS"
 # ffmpeg-static branch (alongside gc), so symlink the real one in.
 if command -v jq >/dev/null 2>&1; then ln -s "$(command -v jq)" "$STUBS/jq"; fi
 # The check's PATH carries only the stub dir and a symlink farm of the coreutils
-# it calls — never /usr/bin, so a host tool there cannot stand in for a stub a
-# case leaves out.
+# it calls, rig-map.sh's among them — never /usr/bin, so a host tool there
+# cannot stand in for a stub a case leaves out.
 COREUTILS="$TMP/coreutils"; mkdir -p "$COREUTILS"
-for c in bash sed grep head; do
+for c in bash sed grep head dirname tr mktemp cut rm; do
   p="$(command -v "$c")" || { echo "test setup: required coreutil '$c' not found" >&2; exit 2; }
   ln -s "$p" "$COREUTILS/$c"
 done

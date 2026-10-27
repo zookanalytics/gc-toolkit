@@ -166,6 +166,47 @@ reference to a dozen live beads.
 A gate that concludes absence without going through it is reporting on
 whichever store it happened to be standing in.
 
+## Reading the rig map
+
+Every derivation above starts from the rig map: each rig's name, path, prefix
+and suspension, and a row for the city itself. The pack reads it through one
+helper, `assets/scripts/rig-map.sh`, so the reasons a listing fails and the
+time it may take are decided in one place. The helper runs `gc rig list --json`
+and prints the listing. When the listing does not read, it prints nothing on
+stdout, names the reason on stderr and exits 3. A caller then reports that the
+map did not read, and why, rather than reading the failure as a city with no
+rigs or a prefix no rig carries. The helper writes to stderr only then, so a
+caller may capture both streams in one.
+
+The helper puts one bound on the call, `GC_RIG_LIST_TIMEOUT`, 120 seconds by
+default. The bound exists to cut off a `gc` that never answers, so it sits far
+above what the listing takes on a loaded host, and no caller tunes it as a
+latency budget. A caller under a deadline it does not set bounds the call by the
+time it has left, as it bounds any other call. A doctor check does so within
+`gc doctor`'s per-check timeout, and a board verb within the board's deadline
+for the verb.
+
+`gc rig list --json` is slow on a loaded host because of the `running` flag on
+each rig row. Gas City's `doRigList` fills it with `rigHasRunningAgent`. For
+each unlimited pool agent the rig configures, until it finds one running, that
+asks `discoverPoolInstances` for the pool's instances, and each such call lists
+the city's running sessions again. With tmux sessions every list starts its own
+`tmux list-sessions`, so one listing starts a few dozen processes, and on a
+loaded host each of them waits to be scheduled. The text listing computes no
+`running` and starts two. No pack caller reads a rig row's `running`. The flag
+on the city's own row is the controller probe that `city-liveness.sh` reads.
+
+No cheaper source carries the whole map:
+
+- `gc rig list` without `--json` prints a table for people, not a contract.
+- `gc config show --json` carries each configured rig's name, path and prefix.
+  Its suspension is only what `city.toml` says, so a rig suspended with
+  `gc rig suspend` reads as not suspended, and the city's own row is not among
+  its rigs.
+- `gc status --json` carries no prefixes.
+- `.beads/routes.jsonl` maps each prefix to a relative path, with no names and
+  no suspension.
+
 ## Reading a bead's whole context
 
 `assets/scripts/bead-context.sh <id>` rebuilds a subject's working context in
