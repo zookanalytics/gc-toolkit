@@ -1607,6 +1607,24 @@ out=$(run); rc=$?
 eq "$rc" 0 "the no-head pass exits 0"
 eq "$(machine X5)" "<absent>" "a verdict pinned to no head is never written"
 
+echo "# a blocked verdict the merge pass recorded at this head outlives this arm's settled"
+# The merge pass records blocked only once every lane derives green and nothing
+# is in flight, so a settled here adds nothing it did not know. Writing it would
+# flip the status: label between needs-attention and merging every pass.
+store "[$(anchor XB1 pull_request correctness "" polecat/xb1 ',"pr.machine":"blocked@'"$(oid xb1)"'@2026-10-27T00:11:44Z","pr.machine_cause":"review-threads"'), $(backed rev-xb1 XB1),
+        $(anchor XB2 pull_request correctness "" polecat/xb2 ',"pr.machine":"blocked@'"$(oid stale-xb2)"'@2026-10-27T00:11:44Z"'), $(backed rev-xb2 XB2),
+        $(anchor XB3 pull_request correctness "" polecat/xb3 ',"pr.machine":"blocked@'"$(oid xb3)"'@2026-10-27T00:11:44Z"'), $(mustfix find-xb3 XB3)]"
+oid xb1 > "$GH_DIR/head_polecat_xb1"
+oid xb2 > "$GH_DIR/head_polecat_xb2"
+oid xb3 > "$GH_DIR/head_polecat_xb3"
+: > "$STUB_GC_LOG"
+run >/dev/null
+eq "$(machine XB1)" "blocked@$(oid xb1)@2026-10-27T00:11:44Z" "a settled pass leaves the blocked verdict at the same head, instant and all"
+eq "$(meta XB1 pr.machine_cause)" "review-threads" "…and its cause"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update XB1" "…writing nothing"
+eq "$(pinned XB2)" "settled@$(oid xb2)" "a blocked verdict at a head the branch has left is replaced"
+eq "$(pinned XB3)" "progressing@$(oid xb3)" "a lane short of green replaces a blocked verdict: an actor is due to act"
+
 echo "# the skip is the exact verdict at the exact head, and nothing wider"
 # A verdict the head has moved past is a different verdict, and a value not yet
 # in the dated shape still owes the instant lifecycle.sh appends.

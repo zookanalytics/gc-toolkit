@@ -1172,6 +1172,16 @@ GATES
   if [ "$mach_progress" = 1 ]; then mach="progressing"
   else mach="settled"
   fi
+  # A blocked verdict at this head is the merge pass's, recorded only once every
+  # lane derived green and nothing was in flight, so this arm's settled knows
+  # nothing it did not. It stands until the merge pass records another verdict
+  # or the head moves. A progressing verdict still replaces it: an actor is due
+  # to act.
+  rec_mach=$(meta_of "$row" "pr.machine")
+  rec_head="${rec_mach#*@}"; rec_head="${rec_head%%@*}"
+  if [ "$mach" = settled ] && [ "${rec_mach%%@*}" = blocked ] && [ "$rec_head" = "$head" ]; then
+    continue
+  fi
   #
   # --route carries the anchor's OWN route back. Recording a verdict is an
   # observation, not a routing decision, and an omitted --route would let a
