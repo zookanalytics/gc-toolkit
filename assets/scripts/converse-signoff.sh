@@ -480,7 +480,7 @@ in_target_rig() { ( cd "$TARGET_PATH" && GC_RIG="$TARGET_RIG" GC_RIG_ROOT="$TARG
 # open human gate holds the subject, because a formula's sling reads no blocks
 # edge, so a gate this ruling does not answer refuses the take here, before any
 # write, rather than after step 3 has answered the others. One listing of the
-# subject's human gates answers all three.
+# subject's human gates answers each of these checks.
 REC_GATES=""
 REC_FORMULA=""
 if [ -n "$ACCEPT" ]; then
