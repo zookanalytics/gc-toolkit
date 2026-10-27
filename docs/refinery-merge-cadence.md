@@ -259,7 +259,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    dispatch text, demoted to a collapsed section and standing in as the
    summary only when the handoff carried none. The region writes that heading
    itself, so a `pr_summary` opening with one of its own is de-duplicated. The
-   composed body lives between `gc:pr-summary` markers, so adopting an OPEN PR
+   region ends with a `## Size` section, which `tools/measure.sh --pr` writes
+   for the change from its merge base with the target to its head. A
+   repository that does not carry the tool gets none, and neither does a pass
+   whose fetch of the target fails. The composed body lives between
+   `gc:pr-summary` markers, so adopting an OPEN PR
    re-splices it from the anchor's current `pr_summary` — a rework's restamp
    reaches the published merge surface — while text an operator or `pr-stack.sh`
    added outside the markers stays. A body a create wrote before these markers
@@ -700,7 +704,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    body (arm 3's adoption path establishes that), or a malformed shape is left
    alone. The recompose uses `refresh` mode: the reworked head has not
    re-signed-off, so the handoff bullet names the head and defers to the PR's
-   checks rather than repeating arm 3's pre-open sign-off line.
+   checks rather than repeating arm 3's pre-open sign-off line. The recompose
+   measures the Size section again at the PR's head.
 
    The title: arm 3 writes it once, at create, composed from the anchor's title
    (a conventional-commit type, the title, then the bead id), and the squash

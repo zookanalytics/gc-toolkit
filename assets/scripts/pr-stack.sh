@@ -239,7 +239,7 @@ append_section() { # <body-file> <section-file> <out-file>
 # did.
 refresh_summary() { # <id> <body-in> <body-out> <anchor-row-json> <head_oid>
   local id="$1" bin="$2" bout="$3" row="$4" head_oid="$5"
-  local summary want cur desc checkset branch target phased SECTION
+  local summary want cur desc checkset branch target phased size SECTION
   summary=$(printf '%s' "$row" | jq -r '.metadata.pr_summary // empty' 2>/dev/null)
   [ -n "$(printf '%s' "$summary" | tr -d '[:space:]')" ] || return 1
   prs_marker_state "$bin" || return 1
@@ -261,8 +261,9 @@ refresh_summary() { # <id> <body-in> <body-out> <anchor-row-json> <head_oid>
   # leaves the region as it stands this pass rather than publish a bullet that
   # names no gate.
   phased=$(prs_resolve_phased "$checkset" "$head_oid") || return 1
+  size=$(prs_size_section "$target" "$head_oid")
   SECTION=$(mktemp "$STACK_TMP/summary.XXXXXX") || return 1
-  if ! compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "" "" refresh "$phased" > "$SECTION" \
+  if ! compose_managed "$summary" "$desc" "$id" "$branch" "$target" "$checkset" "$head_oid" "" "" refresh "$phased" "$size" > "$SECTION" \
      || [ ! -s "$SECTION" ]; then
     rm -f "$SECTION"; return 1
   fi

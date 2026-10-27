@@ -373,7 +373,8 @@ other value.
 - `doctor/check-*`. §3 places each check against the invariant it asserts.
 - `tools/`. The command surface a human drives, including the
   `gc-proactive.sh` entry point that `gc-helm.sh` and `gc-visit-open.sh` shell
-  out to on a human's action.
+  out to on a human's action, and `measure.sh`, which `pr-open.sh` and
+  `pr-stack.sh` also run for a PR's size section.
 
 **The placement rule.** A component belongs to the workflow whose product it
 advances, not the one whose name it carries. `mol-refinery-patrol` is merge

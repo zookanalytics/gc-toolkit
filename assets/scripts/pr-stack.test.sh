@@ -500,6 +500,29 @@ out=$("$SUT" 2>&1)
 hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "the second pass issues no edit"
 hasnt "$out" "summary region refreshed" "…and reports no refresh"
 
+echo "# a refresh measures the change at the PR's head, and the size closes the region"
+# The tool is a stub that logs what it was asked and prints a section body. The
+# suite's private script directory has no tools/measure.sh beside it, so every
+# other case composes no Size section.
+MEASURE="$TMP/measure-stub.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$*" >> "$MEASURE_LOG"' \
+  "printf 'Net lines from the merge base \`mb1\`: runtime +7 and tests 0.\\n'" > "$MEASURE"
+chmod +x "$MEASURE"
+MEASURE_LOG="$TMP/measure.log"; : > "$MEASURE_LOG"
+store "[$(anchor_sum Z polecat/Z 290 'correctness' 'SIZED: the summary a measured refresh carries.')]"
+pr 290 OPEN polecat/Z "$(opened_region Z polecat/Z 'correctness' 'SIZED: the summary a measured refresh carries.' '88889999')" aaaabbbb00000000
+: > "$STUB_GH_LOG"
+out=$(GC_MEASURE_TOOL="$MEASURE" MEASURE_LOG="$MEASURE_LOG" "$SUT" 2>&1)
+has "$out" "PR#290 summary region refreshed" "the moved head refreshes the region"
+has "$(body 290)" '- Head `aaaabbbb`; gates `correctness`; see the PR checks for current status.'$'\n\n''## Size'$'\n\n''Net lines from the merge base `mb1`: runtime +7 and tests 0.'$'\n''<!-- /gc:pr-summary -->' \
+  "the size section closes the region, below the handoff bullets"
+eq "$(cat "$MEASURE_LOG")" "--pr refs/remotes/origin/main aaaabbbb00000000" \
+  "the tool measures from the target as origin has it to the PR's head"
+: > "$STUB_GH_LOG"; : > "$MEASURE_LOG"
+out=$(GC_MEASURE_TOOL="$MEASURE" MEASURE_LOG="$MEASURE_LOG" "$SUT" 2>&1)
+hasnt "$(cat "$STUB_GH_LOG")" "pr edit" "a second pass over the measured region writes nothing"
+eq "$(cat "$MEASURE_LOG")" "" "…and measures nothing, since only a refresh measures"
+
 echo "# a reworked summary and a newly stacked bead land in one edit"
 store "[$(anchor_sum Y polecat/Y 220 'correctness' 'NEW: the reworked Y summary.'),
         $(printf '{"id":"Y2","status":"closed","title":"Stacked impl","created_at":"2026-02-01T00:00:00Z","metadata":{"branch":"polecat/Y2","merged_target":"polecat/Y","merge_result":"merged"}}')]"

@@ -46,6 +46,30 @@ prs_band() { # <phased> <phase>
   printf '%s\n' "${1:-}" | awk -F'\t' -v p="$2" '$2 == p { print $1 }'
 }
 
+# The measuring tool, tools/measure.sh beside the pack. GC_MEASURE_TOOL names
+# another one.
+PRS_MEASURE="${GC_MEASURE_TOOL:-$_prs_lib_dir/../../tools/measure.sh}"
+
+# The body of the region's `## Size` section: what `measure.sh --pr` prints for
+# the change from its merge base with <target>, as origin has the target now, to
+# <head_oid>. The target is fetched, as review-checks.sh fetches the base it
+# takes a fork point from, and a head this checkout lacks is fetched by id.
+# Prints nothing when no size can be read: the tool is missing, a fetch fails,
+# or the repository does not measure itself, which the tool decides. The section
+# is information that gates nothing, so a size that cannot be read is left out.
+prs_size_section() { # <target> <head_oid>
+  local target="${1:-}" head="${2:-}" out
+  [ -x "$PRS_MEASURE" ] && [ -n "$target" ] && [ -n "$head" ] || return 0
+  git check-ref-format "refs/heads/$target" >/dev/null 2>&1 || return 0
+  git cat-file -e "$head^{commit}" 2>/dev/null \
+    || git fetch --quiet --no-tags --no-write-fetch-head origin "$head" >/dev/null 2>&1 \
+    || return 0
+  git fetch --quiet --no-tags --no-write-fetch-head origin \
+    "+refs/heads/$target:refs/remotes/origin/$target" >/dev/null 2>&1 || return 0
+  out=$("$PRS_MEASURE" --pr "refs/remotes/origin/$target" "$head" 2>/dev/null) || return 0
+  [ -z "$out" ] || printf '%s\n' "$out"
+}
+
 # The region always writes its own `## Summary`, so a stored pr_summary that opens
 # with a Summary heading of its own is stripped of it here rather than published
 # under two. Only a bare `Summary` heading line goes; a heading carrying other
@@ -60,7 +84,8 @@ strip_summary_heading() { # <text>
 
 # The region's contents, no markers: an integration-checkpoint banner when the
 # target is under integration/, then the ## Summary a reviewer reads first, the
-# dispatch text demoted below it when both exist, and the refinery handoff facts.
+# dispatch text demoted below it when both exist, the refinery handoff facts,
+# and the change's ## Size when <size> carries one.
 #
 # The last handoff bullet states the gate posture, and its wording is the one
 # thing that turns on the mode. Neither mode states a CI result: the body is
@@ -74,10 +99,13 @@ strip_summary_heading() { # <text>
 # instead.
 #
 # <phased> is the anchor's resolved gate set (prs_resolve_phased at <head_oid>);
-# the two bands the bullets name are partitioned from it here.
-compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_oid> <sup_num> <sup_head> <mode> <phased>
+# the two bands the bullets name are partitioned from it here. <size> is
+# prs_size_section's body for the same head. It comes last, below the handoff
+# bullets, where prs_region_summary, which stops at the dispatch details or the
+# handoff heading, never reads it as part of the summary.
+compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_oid> <sup_num> <sup_head> <mode> <phased> <size>
   local summary="$1" desc="$2" id="$3" branch="$4" target="$5" checkset="$6" head_oid="$7" sup_num="$8" sup_head="$9"
-  local mode="${10:-open}" phased="${11:-}"
+  local mode="${10:-open}" phased="${11:-}" size="${12:-}"
   local greened draftg
   # A standing banner leads the region when the base is an integration branch, so a
   # reviewer reads it before the diff: approving mints this phase into
@@ -125,6 +153,7 @@ compose_managed() { # <summary> <desc> <id> <branch> <target> <checkset> <head_o
   [ -n "$draftg" ] && printf -- '- Draft-stage gates `%s` run against the open PR before it is marked ready for review.\n' "$draftg"
   [ -n "$sup_num" ] && printf -- '- Supersedes #%s (closed unmerged at `%.8s`); re-implemented and re-gated at `%.8s`.\n' \
     "$sup_num" "$sup_head" "$head_oid"
+  [ -n "$size" ] && printf '\n## Size\n\n%s\n' "$size"
   return 0
 }
 
@@ -168,7 +197,9 @@ prs_current_section() { # <body-file>
 # handoff bullet pinned to the pre-rework head, and only the head comparison catches
 # it — the summary text alone still reads current. A head is a commit hash, so its
 # backticked 8-char prefix does not collide with the other backticked tokens (issue,
-# branch, target, gates) the region carries.
+# branch, target, gates, the size section's paths) the region carries. The one other
+# hash, the size section's merge base, is the commit the branch left its target at,
+# so it matches only a head reset to that commit.
 # Substring-match a captured string rather than piping into `grep -q`: this
 # library is sourced by callers that may run under `set -o pipefail`, where a
 # writer SIGPIPEd by grep's early exit turns a match into a pipeline failure.
