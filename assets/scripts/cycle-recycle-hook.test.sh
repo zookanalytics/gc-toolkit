@@ -13,7 +13,8 @@
 #
 # The hook also recycles a session when a pack file its prompt or patrol
 # formula comes from changed on disk after the session's first prompt, at a
-# turn's end and, under --prompt, before a prompt, which it then blocks.
+# turn's end and, under --prompt, before a prompt, which it then blocks once a
+# restart is requested.
 # The drift cases age real files and read a transcript whose first record
 # carries the session's start.
 #
@@ -46,18 +47,39 @@ trap 'rm -rf "$SANDBOX"' EXIT
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
 # The gc stub logs every call, so a recycle reads as handoff, then session reset.
-# GC_HANDOFF_RC and GC_RESET_RC make those calls fail. The tmux stub answers the
-# hook's attachment query with TMUX_ATTACHED.
+# GC_HANDOFF_RC, GC_RESET_RC and GC_ARCHIVE_RC make those calls and gc mail
+# archive fail. Each call prints on stdout what Gas City prints, so stdout the
+# hook fails to divert shows up in its own: the reset and archive lines come
+# from cmd/gc/cmd_session_reset.go and cmd/gc/cmd_mail.go, and the handoff's
+# report from cmd/gc/cmd_handoff.go. A handoff that succeeds reports by default
+# what the on-demand refinery's does, that it sent the mail and requested no
+# restart, and a failed one reports nothing. GC_HANDOFF_REPORT replaces the
+# report. RESTART_REPORT is an always-mode session's, which Gas City prints once
+# the restart is requested and keeps when the handoff then exits 1 because it
+# cannot signal the controller. The tmux stub answers the hook's attachment
+# query with TMUX_ATTACHED.
 mkdir -p "$SANDBOX/home/go/bin"
 cat > "$SANDBOX/home/go/bin/gc" <<'STUB'
 #!/bin/sh
 printf '%s\n' "$*" >> "$GC_LOG"
 case "$1 $2" in
-  "session reset") exit "${GC_RESET_RC:-0}" ;;
-  handoff*) exit "${GC_HANDOFF_RC:-0}" ;;
+  "session reset")
+    [ "${GC_RESET_RC:-0}" != 0 ] || echo "Session $3 reset requested. Controller will restart it fresh."
+    exit "${GC_RESET_RC:-0}" ;;
+  "mail archive")
+    [ "${GC_ARCHIVE_RC:-0}" != 0 ] || echo "Archived message $3"
+    exit "${GC_ARCHIVE_RC:-0}" ;;
+  handoff*)
+    if [ -n "${GC_HANDOFF_REPORT:-}" ]; then
+      printf '%s\n' "$GC_HANDOFF_REPORT"
+    elif [ "${GC_HANDOFF_RC:-0}" = 0 ]; then
+      echo "Handoff: sent mail gm-1 (named session; restart skipped)."
+    fi
+    exit "${GC_HANDOFF_RC:-0}" ;;
 esac
 exit 0
 STUB
+RESTART_REPORT="Handoff: sent mail gm-1, requesting restart..."
 cat > "$SANDBOX/home/go/bin/tmux" <<'STUB'
 #!/bin/sh
 printf '%s\n' "${TMUX_ATTACHED:-0}"
@@ -222,7 +244,8 @@ PROMPT_TEXT="Run gc prime to check merge queue and begin processing."
 # run_drift [hook args] — the shipped hook as DRIFT_AGENT (the alpha refinery
 # unless set), run from the clean worktree, its payload naming DRIFT_TRANSCRIPT
 # (DRIFT_T unless set) and carrying PROMPT_TEXT. TMUX_UNDER_TEST, TMUX_ATTACHED,
-# GC_HANDOFF_RC and GC_RESET_RC reach it when set. Sets RC, OUT, ERR and CALLS.
+# GC_HANDOFF_RC, GC_HANDOFF_REPORT, GC_RESET_RC and GC_ARCHIVE_RC reach it when
+# set. Sets RC, OUT, ERR and CALLS.
 run_drift() {
     : > "$SANDBOX/gc.log"
     ( cd "$WT" && jq -nc --arg t "${DRIFT_TRANSCRIPT:-$DRIFT_T}" --arg p "$PROMPT_TEXT" '{transcript_path: $t, prompt: $p}' \
@@ -232,20 +255,27 @@ run_drift() {
             GC_CITY_PATH="$SANDBOX/city" GC_SESSION_ID=session-1 \
             ${TMUX_UNDER_TEST:+TMUX="$TMUX_UNDER_TEST"} TMUX_ATTACHED="${TMUX_ATTACHED:-0}" \
             GC_HANDOFF_RC="${GC_HANDOFF_RC:-0}" GC_RESET_RC="${GC_RESET_RC:-0}" \
+            GC_HANDOFF_REPORT="${GC_HANDOFF_REPORT:-}" GC_ARCHIVE_RC="${GC_ARCHIVE_RC:-0}" \
             sh "$HOOK" "$@" >"$SANDBOX/out" 2>"$SANDBOX/err" )
     RC=$?
     OUT=$(cat "$SANDBOX/out"); ERR=$(cat "$SANDBOX/err"); CALLS=$(cat "$SANDBOX/gc.log")
 }
 # drift_verdict — "recycled" when the hook sent the drift handoff and then
-# reset the session, "none" when it called no gc, else what it did instead.
+# reset the session, "recycled, HANDOFF archived" when it then archived the
+# HANDOFF it sent, "none" when it called no gc, else what it did instead.
 drift_verdict() {
     case "$CALLS" in
         "") echo none ;;
         "handoff pack drift: "*"
 session reset session-1") echo recycled ;;
+        "handoff pack drift: "*"
+session reset session-1
+mail archive gm-1") echo "recycled, HANDOFF archived" ;;
         *) echo "neither, gc calls [$CALLS], stderr [$ERR]" ;;
     esac
 }
+# block_reason — the reason the last run's block decision gives.
+block_reason() { printf '%s' "$OUT" | jq -r '.reason // empty' 2>/dev/null; }
 blocked() { printf '%s' "$OUT" | jq -r 'select(.decision == "block") | "block"' 2>/dev/null; }
 
 # --- 6. no watched file changed: nothing recycles ------------------------------
@@ -279,16 +309,56 @@ eq "$RC" "0" "the prompt-time recycle exits 0"
 carried=$(case "$CALLS" in *"$PROMPT_TEXT"*) echo yes ;; *) echo no ;; esac)
 eq "$carried" "yes" "the handoff carries the blocked prompt"
 
+says=$(case "$(block_reason)" in *"HANDOFF mail carries this prompt"*) echo yes ;; *) echo no ;; esac)
+eq "$says" "yes" "and the block reason says the HANDOFF carries it"
+
+# The refinery's handoff only sends the mail, so its reset is the one restart
+# request. A failed reset leaves no restart, so the prompt goes through, and the
+# HANDOFF the report names is archived, since the prompt runs in this session.
 GC_RESET_RC=1 run_drift --prompt
-eq "$(drift_verdict)" "recycled" "a failed reset still sends the handoff"
-eq "$OUT" "" "but the prompt goes through, since no restart backs a block"
+eq "$(drift_verdict)" "recycled, HANDOFF archived" "a failed reset on the refinery archives the HANDOFF its handoff sent"
+eq "$OUT" "" "and the prompt goes through, since no restart backs a block"
+eq "$RC" "0" "and the hook exits 0"
+
+GC_RESET_RC=1 GC_ARCHIVE_RC=1 run_drift --prompt
+eq "$OUT$RC" "0" "a failed archive still lets the prompt through, exiting 0 with nothing on stdout"
+named=$(case "$ERR" in *"gc mail archive gm-1 failed"*) echo yes ;; *) echo no ;; esac)
+eq "$named" "yes" "and names the HANDOFF it could not archive"
+
+GC_HANDOFF_REPORT="Handoff: sent mail gm-1." GC_RESET_RC=1 run_drift --prompt
+eq "$(drift_verdict)" "recycled" "a handoff report the hook does not recognize archives nothing"
+eq "$OUT" "" "and lets the prompt through"
 
 GC_HANDOFF_RC=1 run_drift --prompt
 eq "$(drift_verdict)" "recycled" "a failed handoff still requests the reset"
 eq "$(blocked)" "block" "and still blocks, since the requested restart would end the turn mid-command"
-reason=$(printf '%s' "$OUT" | jq -r '.reason // empty' 2>/dev/null)
-says=$(case "$reason" in *"failed to send"*) echo yes ;; *) echo no ;; esac)
-eq "$says" "yes" "the block reason says the prompt was not carried"
+says=$(case "$(block_reason)" in *"failed before confirming its HANDOFF mail"*) echo yes ;; *) echo no ;; esac)
+eq "$says" "yes" "the block reason says the HANDOFF mail is unconfirmed"
+
+GC_HANDOFF_RC=1 GC_RESET_RC=1 run_drift --prompt
+eq "$(drift_verdict)" "recycled" "with the handoff and the reset both failed, no report names a mail to archive"
+eq "$OUT" "" "and the prompt goes through, since neither requested a restart"
+
+# The deacon's and the witness's handoff requests the restart itself before it
+# returns, so a failed reset leaves that restart standing. A prompt let through
+# would be killed mid-command when the restart lands.
+age "$PACK/formulas/mol-deacon-patrol.toml" 60
+DRIFT_AGENT=gc-toolkit.deacon GC_HANDOFF_REPORT="$RESTART_REPORT" GC_RESET_RC=1 run_drift --prompt
+eq "$(drift_verdict)" "recycled" "a drifted deacon recycles before the prompt, its handoff requesting the restart"
+eq "$(blocked)" "block" "and a failed reset still blocks, since the handoff's restart stands"
+says=$(case "$(block_reason)" in *"HANDOFF mail carries this prompt"*) echo yes ;; *) echo no ;; esac)
+eq "$says" "yes" "with the block reason saying the HANDOFF carries the prompt"
+
+DRIFT_AGENT=gc-toolkit.deacon GC_HANDOFF_REPORT="$RESTART_REPORT" GC_HANDOFF_RC=1 GC_RESET_RC=1 run_drift --prompt
+eq "$(blocked)" "block" "a handoff that requested the restart and then could not signal the controller still blocks"
+says=$(case "$(block_reason)" in *"HANDOFF mail carries this prompt"*) echo yes ;; *) echo no ;; esac)
+eq "$says" "yes" "and its report shows the HANDOFF was sent"
+
+DRIFT_AGENT=gc-toolkit.deacon GC_HANDOFF_REPORT="$RESTART_REPORT" GC_RESET_RC=1 run_drift
+eq "$OUT$RC" "0" "at a turn's end the same failed reset prints nothing and exits 0"
+stands=$(case "$ERR" in *"the restart gc handoff requested stands"*) echo yes ;; *) echo no ;; esac)
+eq "$stands" "yes" "and says the restart the handoff requested stands"
+age "$PACK/formulas/mol-deacon-patrol.toml" 7200
 
 TMUX_UNDER_TEST=/tmp/tmux-test,1,0 TMUX_ATTACHED=1 run_drift --prompt
 eq "$(drift_verdict)" "none" "with an operator attached the recycle defers"

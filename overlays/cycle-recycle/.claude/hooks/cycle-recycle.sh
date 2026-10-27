@@ -9,10 +9,11 @@
 #   * drift: a pack file the session's prompt or patrol formula comes from
 #     changed on disk after the session's first prompt, so the session runs
 #     text the pack no longer holds.
-# A recycle writes a durable HANDOFF (`gc handoff`) and triggers a restart
-# (`gc session reset`); the inheriting session re-adopts its wisp via its
-# startup reconcile. Under --prompt only drift recycles, and once the restart
-# is requested the hook blocks the prompt, which the HANDOFF carries instead.
+# A recycle writes a durable HANDOFF (`gc handoff`) and requests a restart
+# (`gc session reset`, and `gc handoff` itself for an always-mode session); the
+# inheriting session re-adopts its wisp via its startup reconcile. Under
+# --prompt only drift recycles, and once a restart is requested the hook blocks
+# the prompt, which the HANDOFF carries instead.
 # Policy: docs/cycle-recycle.md.
 #
 # Invariants:
@@ -217,7 +218,8 @@ fi
 # --- 3. Recycle (HANDOFF mail + restart) ----------------------------------
 echo "cycle-recycle: $AGENT: $SUBJECT${BODY:+ ($BODY)} — handoff + reset" >&2
 
-# The prompt never reaches this session, so the HANDOFF carries it to the next.
+# A prompt the restart blocks never reaches this session, so the HANDOFF
+# carries it to the next.
 if [ "$MODE" = --prompt ]; then
   PROMPT=$(printf '%s' "$PAYLOAD" | jq -r '.prompt // empty' 2>/dev/null)
   [ -z "$PROMPT" ] || BODY="$BODY
@@ -227,16 +229,26 @@ The session recycled before this prompt reached it:
 $PROMPT"
 fi
 
-# `gc handoff` (non-auto) writes the durable HANDOFF mail AND stops the runtime
-# for controller-restartable classes; for on-demand named patrol sessions it
-# only writes mail and returns. Non-auto is required so controller-restartable
-# patrols actually recycle — `--auto` would mail-only and never restart them.
-HANDOFF_OK=1
-if [ -n "$BODY" ]; then
-  gc handoff "$SUBJECT" "$BODY" >&2
-else
-  gc handoff "$SUBJECT" >&2
-fi || { HANDOFF_OK=""; echo "cycle-recycle: gc handoff failed (non-fatal); reset still attempted" >&2; }
+# `gc handoff` (non-auto) writes the durable HANDOFF mail first. For a
+# controller-restartable session, which the always-mode witness and deacon are,
+# it then requests the restart and signals the controller; for an on-demand
+# named session, the refinery, it only writes the mail and clears any restart
+# already requested. Non-auto is required so controller-restartable patrols
+# actually recycle — `--auto` would mail-only and never restart them. Its exit
+# status does not say whether it requested the restart, since it exits 1 when
+# it cannot signal the controller after the request is durably set. Its report
+# on stdout does (cmd/gc/cmd_handoff.go): "Handoff: sent mail <id>, requesting
+# restart..." once the request is set, and "Handoff: sent mail <id> (named
+# session; restart skipped)." when it requests none. MAILED records that the
+# mail was sent, which a handoff that fails with no report leaves unknown.
+send_handoff() {
+  if [ -n "$BODY" ]; then gc handoff "$SUBJECT" "$BODY"; else gc handoff "$SUBJECT"; fi
+}
+RESTARTING=""; MAILED=""
+HANDOFF_OUT=$(send_handoff) && MAILED=1
+[ -z "$HANDOFF_OUT" ] || printf '%s\n' "$HANDOFF_OUT" >&2
+[ -n "$MAILED" ] || echo "cycle-recycle: gc handoff failed (non-fatal); reset still attempted" >&2
+case "$HANDOFF_OUT" in *", requesting restart"*) RESTARTING=1; MAILED=1 ;; esac
 
 # Reap this session's scratch now. The recycle abandons the tree whole — the
 # inheriting session gets a new id and a new tree — so the retiring session
@@ -265,35 +277,48 @@ if [ -n "$SID" ]; then
   fi
 fi
 
-# `gc session reset` is the actual restart trigger for on-demand named sessions
-# (a no-op for controller-restartable ones, which gc handoff already stopped),
-# and it clears any tripped named-session respawn circuit breaker. Best-effort:
-# on failure the controller's reconcile loop converges the restart anyway.
+# `gc session reset` requests a fresh restart for any session, which makes it
+# the refinery's only restart request, and it clears any tripped named-session
+# respawn circuit breaker. It signals the controller before it writes anything,
+# and the restart request is its last write, so a reset that fails requested
+# nothing: a restart the handoff requested still stands, and without one the
+# session keeps running and the hook tries again at its next check.
 # Target precedence GC_ALIAS -> GC_SESSION_ID: the refinery legitimately runs
 # with an empty GC_ALIAS (it uses GC_AGENT as its mailbox), so falling back to
 # the session ID keeps reset working for it. Both forms are accepted by
 # `gc session reset` (alias or session ID).
 RESET_TARGET="${GC_ALIAS:-${GC_SESSION_ID:-}}"
-RESET_OK=""
 if [ -n "$RESET_TARGET" ]; then
   if gc session reset "$RESET_TARGET" >&2; then
-    RESET_OK=1
+    RESTARTING=1
+  elif [ -n "$RESTARTING" ]; then
+    echo "cycle-recycle: gc session reset failed (non-fatal); the restart gc handoff requested stands" >&2
   else
-    echo "cycle-recycle: gc session reset failed (non-fatal); controller will reconcile" >&2
+    echo "cycle-recycle: gc session reset failed and gc handoff requested no restart; the session keeps running" >&2
   fi
 fi
 
-# Under --prompt, block the prompt so the old text never acts on it, but only
-# once the restart is requested: a blocked prompt with no restart behind it
-# would leave the session idle on the old text, dropping each prompt it is sent.
-# A failed handoff still blocks: the reset is already requested, and a turn let
-# through would be killed mid-command when it lands. Claude Code writes a
-# blocked prompt's text to the session's transcript.
-if [ "$MODE" = --prompt ] && [ -n "$RESET_OK" ]; then
-  CARRIED="its HANDOFF mail carries this prompt"
-  [ -n "$HANDOFF_OK" ] || CARRIED="its HANDOFF mail failed to send, so this prompt is kept only in this session's transcript"
-  jq -n --arg reason "cycle-recycle: $SUBJECT. The session restarts on the current text, and $CARRIED." \
-    '{decision: "block", reason: $reason}'
+# Under --prompt, block the prompt exactly when a restart is requested, by the
+# handoff or by the reset. A turn let through would be killed mid-command when
+# that restart lands, and a blocked prompt with no restart behind it would leave
+# the session idle on the old text, dropping each prompt it is sent. Claude Code
+# writes a blocked prompt's text to the session's transcript. A prompt let
+# through runs in this session, and the next session would act on it again from
+# the HANDOFF that carries it, so the hook archives that mail when the
+# handoff's report names it as sent with no restart requested.
+if [ "$MODE" = --prompt ]; then
+  if [ -n "$RESTARTING" ]; then
+    CARRIED="its HANDOFF mail carries this prompt"
+    [ -n "$MAILED" ] || CARRIED="gc handoff failed before confirming its HANDOFF mail, so this session's transcript may hold the only copy of this prompt"
+    jq -n --arg reason "cycle-recycle: $SUBJECT. The session restarts on the current text, and $CARRIED." \
+      '{decision: "block", reason: $reason}'
+  else
+    MAIL_ID=$(printf '%s\n' "$HANDOFF_OUT" | sed -n 's/^Handoff: sent mail \([^ ,]*\) (named session; restart skipped)\.$/\1/p' | head -n 1)
+    if [ -n "$MAIL_ID" ]; then
+      gc mail archive "$MAIL_ID" >&2 \
+        || echo "cycle-recycle: gc mail archive $MAIL_ID failed (non-fatal); that HANDOFF still carries a prompt this session ran" >&2
+    fi
+  fi
 fi
 
 exit 0
