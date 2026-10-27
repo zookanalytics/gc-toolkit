@@ -127,9 +127,9 @@
 #     and its token, a dispatch the board's Accept already poured is recorded
 #     and not sent again, even when that Accept stopped before recording it.
 #     Refused while another open human gate that the ruling does not answer
-#     holds the subject, since the dispatch waits for every gate that holds it,
-#     and, on a turn that does not sign off, while the subject reads `held`,
-#     which only the sign-off releases.
+#     holds the subject, since the dispatch waits for every gate that holds it.
+#     A subject that still reads `held` when Accept's writer runs, as on a turn
+#     that does not sign off, is released by that writer before it dispatches.
 #   --var <key>=<value> (with --accept, repeatable) is a var the ruling settled
 #     for the recommendation's dispatch, such as mol-design-convoy's
 #     design_gated=false. Accept passes each one to its sling. A dispatch an
@@ -503,17 +503,14 @@ fi
 # read, an answer that cannot say whether it is held. Any other refusal (an
 # undeclared state, no gctk binary) answers as not held, the side that leaves
 # the bead visibly waiting on a person. An answer releases nothing, so it reads
-# no state unless it takes the recommendation: mol-polecat-work cancels a run
-# poured at a bead that still reads `held`, and only the sign-off releases one,
-# so such an answer is refused.
+# no state. One that takes the recommendation leaves a held subject to Accept's
+# writer, which releases it once its answer reads back and before it sends the
+# formula, because mol-polecat-work cancels a run poured at a held bead.
 LC=$(pack_script lifecycle.sh)
 SUBJECT_STATE=""
-if [ "$RULED" = yes ] && { [ -z "$ANSWERING" ] || [ -n "$ACCEPT" ]; } && [ -n "$LC" ]; then
+if [ "$RULED" = yes ] && [ -z "$ANSWERING" ] && [ -n "$LC" ]; then
   SUBJECT_STATE=$("$LC" state "$SUBJECT" 2>/dev/null)
   [ $? -ne 2 ] || stopped "the lifecycle state of $SUBJECT could not be read, so this ruling cannot tell whether it reads held; nothing was written"
-fi
-if [ -n "$ANSWERING" ] && [ -n "$ACCEPT" ] && [ "$SUBJECT_STATE" = held ]; then
-  die "$SUBJECT reads held, which only the sign-off releases, and mol-polecat-work cancels a run poured at a held bead; nothing was written. Take the recommendation at the sign-off (--ruled yes with --accept)"
 fi
 HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh on any candidate root, so the subject's headline cannot be written; nothing was written"
 

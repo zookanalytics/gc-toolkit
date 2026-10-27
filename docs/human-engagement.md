@@ -542,14 +542,18 @@ while another Accept holds it. On an open gate it records the acceptance's
 dispatch input on the gate (`gc.acceptance`: its token, the formula and each
 var) and reads it back, resolves the gate with
 `ruled: accepted <formula> accept:<token>`, reads its own answer back, reads
-back that no other open human gate blocks the bead, slings the formula titled
-`<formula> accept:<token>`, and records the dispatch by stripping
-`gc.recommended_formula` beside `gc.recommended_formula_dispatched`. An answer
-another reached first stands, and Accept slings nothing. A gate filed in the
-meantime, or a sling that poured no root, reopens the recommendation's gate. A
-run that stopped after its resolve leaves an unfinished acceptance, which the
-board keeps owed and the next Accept finishes under the same token, slinging
-only when no root carries the token. That sling carries the vars the
+back that no other open human gate blocks the bead, releases a bead that reads
+`held` to `unanchored`, slings the formula titled `<formula> accept:<token>`,
+and records the dispatch by stripping `gc.recommended_formula` beside
+`gc.recommended_formula_dispatched`. A sitting's hold leaves an unanchored
+subject at `held` while the operator owes the answer of a gate that blocks it,
+and mol-polecat-work's load-context cancels a run poured at a bead that still
+reads `held`, so the release comes before the sling. An answer another reached
+first stands, and Accept slings nothing. A gate filed in the meantime, or a
+sling that poured no root, reopens the recommendation's gate. A run that
+stopped after its resolve, or whose release did not land, leaves an unfinished
+acceptance, which the board keeps owed and the next Accept finishes under the
+same token, slinging only when no root carries the token. That sling carries the vars the
 acceptance recorded, whoever finishes it: the board's Accept passes none, and a
 run given vars other than the recorded ones dispatches nothing. The lock's
 warrant is in [warrants.md](warrants.md).
@@ -567,8 +571,9 @@ own would pour the formula again once the stopped Accept's root had finished.
 A var the ruling settles for the dispatch, such as a design convoy's
 `design_gated` ([design-convoy.md](design-convoy.md)), rides the sign-off's
 `--var` to Accept's sling. The sign-off refuses `--accept`, writing nothing,
-while a human gate the ruling does not answer still holds the subject, and on
-an `--answer` turn while the subject reads `held`.
+while a human gate the ruling does not answer still holds the subject. An
+`--answer` turn releases nothing of its own, so Accept's writer releases a
+subject that reads `held` before its sling.
 
 ## How a parked subject comes back
 

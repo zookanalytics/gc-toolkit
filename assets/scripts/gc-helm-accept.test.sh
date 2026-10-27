@@ -11,7 +11,8 @@
 # acceptance lock, a flock under <city>/.gc/runtime/packs/gc-toolkit, from
 # before its live read to its last write. On an open gate it resolves the gate
 # with `ruled: accepted <formula> accept:<token>`, reads its own answer back,
-# reads back that no open human gate blocks the bead, slings the formula titled
+# reads back that no open human gate blocks the bead, releases a bead that
+# reads held to unanchored, slings the formula titled
 # `<formula> accept:<token>`, and records the dispatch. A run that finds the
 # gate closed with an Accept's answer beside the recommendation finishes that
 # acceptance under its token.
@@ -33,6 +34,10 @@
 #              warned about, and Accept clears the gate
 #   (PARENT)   a recommendation on a bead with an open child is accepted as on
 #              any bead
+#   (HELD, HELD-FAIL, HELD-FINISH) a bead a sitting's hold left at held is
+#              released to unanchored after Accept's answer and before its
+#              sling; a release that does not land slings nothing and leaves the
+#              acceptance for the next Accept, which releases and slings once
 #   (STOP-*)   an Accept stopped after its resolve, before its sling, or after
 #              its sling leaves the gate answered, the recommendation in place
 #              and the lock free, and the next Accept finishes it once
@@ -54,7 +59,9 @@
 #              and the sitting dispatch it once between them, whichever runs
 #              first, stops part way, or holds the lock, and a var the
 #              sitting's ruling settled rides Accept's sling, also when the
-#              board's Accept finishes a take that stopped after its resolve
+#              board's Accept finishes a take that stopped after its resolve;
+#              a held subject is released before Accept's sling at a sign-off,
+#              by the sign-off, and on a turn that does not sign off, by Accept
 #
 # Runs the REAL gc-helm.sh (as `sh`, as shipped) with a stubbed `gc` on PATH
 # over a file-backed store: no live city, Dolt, network or sessions. The stub's
@@ -284,7 +291,42 @@ exit 0
 GC
 chmod +x "$TMP/bin/gc"
 
+# --- lifecycle writer stub ----------------------------------------------------
+# lifecycle.sh over the same store, which Accept runs as $GC_LIFECYCLE_TOOL and
+# the sign-off finds at $GC_RIG_ROOT. `state <bead>` prints the bead's
+# merge_result, unanchored when it carries none. `transition <bead> --to
+# unanchored` is recorded, then refused (exit 1, nothing written) when --expect
+# names a state the bead is not in, or when the case sets $LC_FAIL; otherwise it
+# drops merge_result and writes its --route as gc.routed_to, through the gc stub.
+cat > "$TMP/lifecycle-stub" <<'L'
+#!/usr/bin/env bash
+cur() { jq -r '.metadata.merge_result // "unanchored"' "$STORE/b/$1.json" 2>/dev/null; }
+case "${1:-}" in
+  state) [ -f "$STORE/b/$2.json" ] || exit 2; cur "$2" ;;
+  transition)
+    _b="$2"; shift 2
+    printf 'lifecycle transition %s %s\n' "$_b" "$*" >> "$CALLS"
+    _to=""; _exp=""; _route=""; _route_set=0
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --to) _to="$2"; shift 2 ;;
+        --expect) _exp="$2"; shift 2 ;;
+        --route) _route="$2"; _route_set=1; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    [ -z "${LC_FAIL:-}" ] || exit 1
+    [ -z "$_exp" ] || [ "$(cur "$_b")" = "$_exp" ] || exit 1
+    [ "$_to" = unanchored ] || exit 1
+    if [ "$_route_set" = 1 ]; then gc bd update "$_b" --unset-metadata merge_result --set-metadata "gc.routed_to=$_route" >/dev/null
+    else gc bd update "$_b" --unset-metadata merge_result >/dev/null; fi ;;
+esac
+exit 0
+L
+chmod +x "$TMP/lifecycle-stub"
+
 export PATH="$TMP/bin:$PATH"
+export GC_LIFECYCLE_TOOL="$TMP/lifecycle-stub"
 export STORE="$TMP/store" CALLS="$TMP/calls" LINGERERS="$TMP/lingerers" CITY_ROOT="$TMP/city"
 export GC_CITY_PATH="$TMP/city" ACC_BEAD=tk-anc
 unset GC_HELM_FIXTURE GC_CITY GC_CITY_ROOT GC_RIG BEADS_DIR 2>/dev/null || true
@@ -328,6 +370,9 @@ record_on() {
 # unfinished <token> — the base fixture with tk-rec closed by an Accept that
 # stopped, its dispatch input recorded on the gate as that Accept left it.
 unfinished() { rec; record_on tk-rec "$1" mol-fix; close_gate tk-rec "ruled: accepted mol-fix accept:$1"; }
+# held_bead <id> — the bead as a sitting's hold leaves it: at held, routed to
+# human.
+held_bead() { jq '.metadata.merge_result = "held" | .metadata["gc.routed_to"] = "human"' "$STORE/b/$1.json" > "$STORE/b/$1.tmp" && mv "$STORE/b/$1.tmp" "$STORE/b/$1.json"; }
 
 # --- readers ------------------------------------------------------------------
 field()   { jq -r --arg k "$2" '.[$k] // "" | tostring' "$STORE/b/$1.json" 2>/dev/null; }
@@ -459,6 +504,41 @@ has "$OUT" "warning: a live sitting holds conversation tk-conv" "(LIVE-SITTING) 
 has "$(field tk-rec close_reason)" "ruled: accepted mol-fix accept:" "(LIVE-SITTING) …and clearing the gate anyway"
 eq "$(slings)" 1 "(LIVE-SITTING) …slinging once"
 eq "$(field tk-conv status)" "in_progress" "(LIVE-SITTING) …and leaving the sitting's conversation to the operator"
+
+echo "# a bead a sitting's hold left at held is released before the dispatch"
+# A sitting's hold moves an unanchored bead to held while the operator owes the
+# answer of a gate that blocks it, and mol-polecat-work's load-context cancels a
+# run poured at a bead that carries any merge_result. Accept's answer is the one
+# the hold waited for, so it releases the bead after that answer reads back and
+# before its sling.
+rec; held_bead tk-anc
+run_accept tk-anc
+eq "$RC" 0 "(HELD) Accept on a bead a sitting's hold left at held exits 0"
+eq "$(meta tk-anc merge_result)" "" "(HELD) …releasing it from held"
+eq "$(meta tk-anc gc.routed_to)" "human" "(HELD) …routed to human, as a sign-off that takes the recommendation leaves it"
+case "$(cat "$CALLS")" in
+  *"bd gate resolve tk-rec"*"lifecycle transition tk-anc --to unanchored --expect held --route human"*"sling tk-anc"*)
+    ok "(HELD) …after its answer and before its sling" ;;
+  *) bad "(HELD) the release should follow the resolve and precede the sling (calls: $(cat "$CALLS"))" ;;
+esac
+eq "$(slings)" 1 "(HELD) …slinging once"
+eq "$(meta tk-anc gc.recommended_formula_dispatched)/$(meta tk-anc gc.recommended_formula)" "mol-fix/" "(HELD) …and recording the dispatch"
+rec; held_bead tk-anc
+LC_FAIL=1 run_accept tk-anc
+T="$(token_of tk-rec)"
+eq "$RC" 4 "(HELD-FAIL) a release that does not land exits 4"
+has "$OUT" "its release to unanchored did not read back" "(HELD-FAIL) …saying the release did not land"
+eq "$(slings)" 0 "(HELD-FAIL) …slinging nothing at a bead that still reads held"
+eq "$(meta tk-anc merge_result)" "held" "(HELD-FAIL) …which still reads held"
+eq "$(meta tk-anc gc.recommended_formula)" "mol-fix" "(HELD-FAIL) …with the recommendation in place"
+[ -n "$T" ] && ok "(HELD-FAIL) …and the gate answered, an acceptance the next Accept finishes" \
+  || bad "(HELD-FAIL) tk-rec's close reason is not an Accept's answer (got '$(field tk-rec close_reason)')"
+: > "$CALLS"; run_accept tk-anc
+eq "$RC" 0 "(HELD-FINISH) the next Accept finishes the acceptance"
+has "$OUT" "an earlier Accept left unfinished ($T)" "(HELD-FINISH) …under its token"
+eq "$(meta tk-anc merge_result)" "" "(HELD-FINISH) …releasing the bead"
+eq "$(slings)" 1 "(HELD-FINISH) …and slinging once"
+has "$(grep '^sling ' "$CALLS")" "--title mol-fix accept:$T" "(HELD-FINISH) …titled with the acceptance's token"
 
 echo "# a recommendation on a bead with an open child is accepted as on any bead"
 fresh; bead tk-par mol-fix; bead tk-kid; edge tk-kid parent-child tk-par
@@ -699,8 +779,8 @@ eq "$(field tk-rec status)" "open" "(SLING-REFUSED) …and the recommendation's 
 # --- a sitting takes the recommendation through the same writer --------------
 # The REAL converse-signoff.sh, taking the recommendation (--accept), runs the
 # REAL gc-helm.sh accept over the same store. The other pack scripts it finds
-# at $GC_RIG_ROOT stand in: the headline writes gc.takeaway, the subject reads
-# unanchored, and the PR reminder records nothing.
+# at $GC_RIG_ROOT stand in: the headline writes gc.takeaway, the lifecycle
+# writer is the stub above, and the PR reminder records nothing.
 SIGNOFF="$HERE/converse-signoff.sh"
 mkdir -p "$TMP/rig/assets/scripts" "$TMP/cwd"
 cat > "$TMP/rig/assets/scripts/gc-helm.sh" <<H
@@ -710,7 +790,7 @@ case "\$1" in
   takeaway) gc bd update "\$2" --set-metadata "gc.takeaway=\$3" >/dev/null ;;
 esac
 H
-printf '#!/usr/bin/env bash\n[ "$1" = state ] && echo unanchored\nexit 0\n' > "$TMP/rig/assets/scripts/lifecycle.sh"
+cp "$TMP/lifecycle-stub" "$TMP/rig/assets/scripts/lifecycle.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/rig/assets/scripts/pr-sitting-comment.sh"
 chmod +x "$TMP/rig/assets/scripts/"*.sh
 # sitting — a live sitting holds tk-conv, a conversation on tk-anc that took up
@@ -727,6 +807,15 @@ run_take() {
     set +e
     ( cd "$TMP/cwd" && GC_RIG_ROOT="$TMP/rig" bash "$SIGNOFF" --conversation tk-conv --outcome "mol-fix is taken" \
         --ruled yes --ruling "take the reaction's mol-fix" --route human --no-wait --accept "$@" ) > "$TMP/out" 2>&1; RC=$?
+    set -e
+    OUT="$(cat "$TMP/out")"
+}
+# run_answer [<arg>...] -> RC, OUT: the same ruling on a turn that does not sign
+# off, answering the recommendation's gate with --answer.
+run_answer() {
+    set +e
+    ( cd "$TMP/cwd" && GC_RIG_ROOT="$TMP/rig" bash "$SIGNOFF" --conversation tk-conv --answer tk-rec \
+        --ruling "take the reaction's mol-fix" --outcome "mol-fix is taken; the rollout is still open" --no-wait --accept "$@" ) > "$TMP/out" 2>&1; RC=$?
     set -e
     OUT="$(cat "$TMP/out")"
 }
@@ -808,6 +897,32 @@ eq "$(roots "accept:$TS")" 0 "(SITTING-VAR-STOP) …with nothing poured"
 run_accept tk-anc
 eq "$RC" 0 "(SITTING-VAR-STOP) the board's Accept finishes the take's acceptance"
 has "$(grep '^sling ' "$CALLS" | tail -1)" "--title mol-fix accept:$TS --var design_gated=false" "(SITTING-VAR-STOP) …slinging the var the sitting's ruling settled, so the dispatch is the one the operator ruled"
+
+echo "# a sitting that held its subject: either take releases it before Accept's sling"
+# The sign-off releases a held subject itself before it runs Accept's writer,
+# which then finds nothing to release. A turn that does not sign off releases
+# nothing of its own, so Accept's writer releases the subject.
+rec; sitting; held_bead tk-anc
+run_take
+eq "$RC" 0 "(SITTING-HELD) a sign-off that takes a held subject's recommendation exits 0"
+eq "$(meta tk-anc merge_result)" "" "(SITTING-HELD) …releasing the subject"
+eq "$(grep -c '^lifecycle transition' "$CALLS")" 1 "(SITTING-HELD) …once, at the sign-off's own release, so Accept's writer finds nothing to release"
+case "$(cat "$CALLS")" in
+  *"lifecycle transition tk-anc --to unanchored --route human"*"sling tk-anc"*) ok "(SITTING-HELD) …before Accept's sling" ;;
+  *) bad "(SITTING-HELD) the release should precede the sling (calls: $(cat "$CALLS"))" ;;
+esac
+eq "$(slings)" 1 "(SITTING-HELD) …which slings once"
+rec; sitting; held_bead tk-anc
+run_answer
+eq "$RC" 0 "(SITTING-ANSWER-HELD) an --answer turn that takes a held subject's recommendation exits 0"
+eq "$(meta tk-anc merge_result)" "" "(SITTING-ANSWER-HELD) …and Accept's writer releases the subject"
+case "$(cat "$CALLS")" in
+  *"bd gate resolve tk-rec"*"lifecycle transition tk-anc --to unanchored --expect held --route human"*"sling tk-anc"*)
+    ok "(SITTING-ANSWER-HELD) …after its answer and before its sling" ;;
+  *) bad "(SITTING-ANSWER-HELD) the release should follow the answer and precede the sling (calls: $(cat "$CALLS"))" ;;
+esac
+eq "$(slings)" 1 "(SITTING-ANSWER-HELD) …slinging once"
+eq "$(field tk-conv status)" "in_progress" "(SITTING-ANSWER-HELD) …and the conversation stays open under its sitting"
 
 echo
 echo "gc-helm accept: $PASS passed, $FAIL failed"

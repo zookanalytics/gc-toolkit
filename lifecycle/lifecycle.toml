@@ -198,7 +198,7 @@ writer = "human"
 [[transition]]
 from = "held"
 to = "unanchored"
-writer = "assets/scripts/converse-signoff.sh, the ruling landed (via lifecycle.sh); or human"
+writer = "assets/scripts/converse-signoff.sh, the ruling landed; assets/scripts/gc-helm.sh accept, its answer to the recommendation's gate read back, before it dispatches (each via lifecycle.sh); or human"
 
 [gates]
 # check_set: comma list of check names on the anchor. Default stamped by

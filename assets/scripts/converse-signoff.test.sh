@@ -53,11 +53,12 @@
 #             to Accept's writer after every other write but the close, never
 #             resolving it itself; it is refused before any write when the
 #             ruling does not answer that gate, the subject carries no
-#             recommendation, another gate holds the subject, or an answer on a
-#             held subject would pour at it; a take Accept does not complete
-#             stops the sign-off, and an answer that reached the gate first
-#             stands; each --var reaches Accept's writer, and one without
-#             --accept, or not <key>=<value>, is refused
+#             recommendation, or another gate holds the subject; a sign-off
+#             releases a held subject before Accept's writer runs, and an
+#             answer leaves a held subject to that writer's own release; a take
+#             Accept does not complete stops the sign-off, and an answer that
+#             reached the gate first stands; each --var reaches Accept's writer,
+#             and one without --accept, or not <key>=<value>, is refused
 #
 # Runs the REAL converse-signoff.sh with a stubbed `gc` on PATH over a
 # file-backed store, and stub pack scripts at $GC_RIG_ROOT, from a cwd outside
@@ -845,10 +846,10 @@ eq "$RC" 0 "(ACCEPT-ANSWER) an --answer that takes the recommendation exits 0"
 eq "$(meta tk-anc gc.recommended_formula_dispatched)" "mol-fix" "(ACCEPT-ANSWER) …dispatching it through Accept"
 eq "$(field tk-conv status)" "in_progress" "(ACCEPT-ANSWER) …and the conversation stays open under its sitting"
 has "$OUT" "ANSWERED tk-rec" "(ACCEPT-ANSWER) …saying which gate it answered"
-recommend; SUBJECT_LC_STATE=held run_signoff --conversation tk-conv --answer tk-rec --ruling "take it" --outcome x --accept
-eq "$RC" 2 "(ACCEPT-ANSWER-HELD) an --answer that takes a held subject's recommendation exits 2"
-has "$OUT" "reads held" "(ACCEPT-ANSWER-HELD) …saying the subject reads held"
-eq "$(writes)" 0 "(ACCEPT-ANSWER-HELD) …writing nothing"
+recommend; SUBJECT_LC_STATE=held run_signoff --conversation tk-conv --answer tk-rec --ruling "take it" --outcome x --no-wait --accept
+eq "$RC" 0 "(ACCEPT-ANSWER-HELD) an --answer that takes a held subject's recommendation exits 0"
+hasnt "$(cat "$CALLS")" "lifecycle" "(ACCEPT-ANSWER-HELD) …reading and releasing nothing itself"
+has "$(cat "$CALLS")" "gc-helm accept tk-anc --conversation tk-conv" "(ACCEPT-ANSWER-HELD) …leaving the held subject to Accept's writer, which releases it before its sling"
 recommend; SUBJECT_LC_STATE=held run_signoff --conversation tk-conv --outcome "mol-fix is taken" "${TAKE[@]}"
 eq "$RC" 0 "(ACCEPT-HELD) a sign-off that takes a held subject's recommendation exits 0"
 case "$(cat "$CALLS")" in
