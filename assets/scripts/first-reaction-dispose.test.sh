@@ -210,6 +210,18 @@ cat > "$TMP/helm" <<'HELM'
 #!/usr/bin/env bash
 printf 'HELM %s\n' "$*" >> "$FAKE_LOG"
 [ -n "${FAKE_HELM_FAILS:-}" ] && exit 4
+# gc-helm.sh takeaway --release reads the bead's status, then writes status open
+# and no assignee with no condition on that write. FAKE_UNTIL_PASS is a command
+# the stub runs between the two, the deferred-dispatch pass running while the
+# release is in flight, and each step is logged.
+case " $* " in
+  *" --release "*)
+    if [ -n "${FAKE_UNTIL_PASS:-}" ]; then
+      printf 'HELM release reads %s\n' "$2" >> "$FAKE_LOG"
+      "$FAKE_UNTIL_PASS"
+      printf 'HELM release writes %s --status=open --assignee=\n' "$2" >> "$FAKE_LOG"
+    fi ;;
+esac
 # A release with --assign makes that agent the bead's assignee, which a later
 # `bd show` reflects.
 case " $* " in
@@ -788,43 +800,32 @@ unset FAKE_AGENT_GONE FAKE_DEPS_JSON
 # bug with no parent, the one intake holds for placement on a pool exit.
 #   (UNT)       the until edge is written, read back by its type, and the
 #               release says nothing holds the subject; the reaction completes
-#   (UNTORDER)  the edge reads back before the release, the landed proof after
+#   (UNTORDER)  the release lands before the edge is written, the landed proof
+#               after the edge reads back, and nothing after the edge releases
+#               the subject or writes its status or assignee
 #   (UNTPURE)   the pass's own read of the subject the exit left: waiting while
 #               the target is open, owed with no live-work mark once it closes;
 #               the blocked exit's subject is never selected at all
-#   (UNTEDGE)   an edge that does not read back as until fails the exit before
-#               the release; a re-run over a landed edge succeeds
+#   (UNTRACE)   the pass, run between the release's status read and its write
+#               with the target already closed, finds nothing to close there,
+#               and once the exit completes it reads the subject owed with no
+#               live-work mark
+#   (UNTEDGE)   an edge that does not read back as until fails the exit after
+#               the release, before the landed proof; a re-run over a landed
+#               edge succeeds
 #   (UNTCROSS)  a target in another store is refused, naming a person's close
 #   (UNTARGS)   until takes --until only and needs one; no other exit takes it
 #   (UNTDRY)    a dry run names the wait and writes nothing
-UNTIL_SUBJECT='[{"id":"tk-sub","status":"open","issue_type":"bug","assignee":"","metadata":{}}]'
-export FAKE_SHOW_JSON="$UNTIL_SUBJECT" FAKE_DEPS_JSON='[{"id":"tk-retire","dependency_type":"until"}]'
-run tk-sub --disposition until --reason "the file it reports on is retired whole by tk-retire" \
-    --takeaway "closes once tk-retire retires its code" --until tk-retire --reaction-bead "$R"
-eq "$RC" "0" "(UNT) an until disposition succeeds"
-has "DEP bd dep add tk-sub tk-retire --type=until" "$LOG" "(UNT) the until edge is written onto the bead whose landing ends the job"
-has "DEP bd dep list tk-sub --direction=down -t until --json" "$LOG" "(UNT) …and read back by its type"
-has "HELM takeaway tk-sub closes once tk-retire retires its code --by proactive --release --no-wait" "$LOG" \
-    "(UNT) the release says nothing holds the subject"
-has "gc.reacted_by=$R" "$LOG" "(UNT) the landed proof is stamped"
-has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed" "$LOG" \
-    "(UNT) …and the reaction bead is closed"
-has "disposed as until (tk-retire)" "$OUT" "(UNT) …and the run reports the bead it waits for"
-before '^DEP bd dep list' '^HELM takeaway' "(UNTORDER) the edge reads back before the release"
-before '^HELM takeaway' 'gc.reacted_by' "(UNTORDER) …and the landed proof follows the release"
-hasnt "--waiting-on" "$LOG" "(UNTPURE) no blocks edge rides the release"
-hasnt "-t blocks" "$LOG" "(UNTPURE) …and none is added directly"
-hasnt "--route" "$LOG" "(UNTPURE) no route"
-hasnt "--assign" "$LOG" "(UNTPURE) no assignee"
-hasnt "DEFERRED" "$LOG" "(UNTPURE) no arm and no notice"
-hasnt "placement" "$LOG" "(UNTPURE) no placement, though the subject has no parent"
-hasnt "HELM demand" "$LOG" "(UNTPURE) no human gate"
-
-# until_row — the subject as the exit left it, as `bd list --json` lists it: the
-# fixture with each metadata value the exit set on it, and each edge the exit
-# wrote, an until add or a --waiting-on blocks edge. until_reader answers
-# until-resolved.sh's two reads with that row and UNTIL_STATUSES, so
-# scan_subject is the pass's own selection and decision over it.
+#
+# until_row prints the subject as the fake store holds it, as `bd list --json`
+# lists it: the fixture with each metadata value written to it, and each edge
+# the exit wrote, an until add or a --waiting-on blocks edge. until_reader
+# answers until-resolved.sh's two reads with that row and UNTIL_STATUSES, so
+# scan_subject is the pass's own selection and decision over it. The suite
+# sources them, and so does the pass the helm stub runs inside a release, which
+# closes the subject the way the pass's disposal does when its scan reads it
+# owed.
+cat > "$TMP/until-lib.sh" <<'LIB'
 until_row() {
   local meta edges
   meta=$(grep '^UPDATE bd update tk-sub ' "$FAKE_LOG" | grep -o -- '--set-metadata [^ ]*' | sed 's/^--set-metadata //' \
@@ -838,11 +839,51 @@ until_row() {
 until_reader() {
   case " $* " in
     *" --id "*) printf '%s\n' "$UNTIL_STATUSES" ;;
-    *) printf '[%s]\n' "$UNTIL_ROW" ;;
+    *) printf '[%s]\n' "$(until_row)" ;;
   esac
 }
-scan_subject() { ( export GC_RUN_LIB="$HERE/run-lib.stub.sh"; . "$HERE/until-resolved.sh"; until_scan until_reader ) || echo "until_scan exited $?"; }
-UNTIL_ROW=$(until_row) || UNTIL_ROW=""
+scan_subject() { ( export GC_RUN_LIB="$UNTIL_SCRIPTS/run-lib.stub.sh"; . "$UNTIL_SCRIPTS/until-resolved.sh"; until_scan until_reader ) || echo "until_scan exited $?"; }
+LIB
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/until-pass" <<'PASS'
+. "$UNTIL_LIB"
+case "$(scan_subject | cut -f2)" in
+  owed) printf 'UPDATE bd update tk-sub --status=closed --set-metadata gc.superseded_by=tk-retire\n' >> "$FAKE_LOG"
+        printf 'UNTILPASS closes tk-sub\n' >> "$FAKE_LOG" ;;
+  *)    printf 'UNTILPASS leaves tk-sub\n' >> "$FAKE_LOG" ;;
+esac
+PASS
+chmod +x "$TMP/until-pass"
+export UNTIL_LIB="$TMP/until-lib.sh" UNTIL_SCRIPTS="$HERE"
+# shellcheck source=/dev/null  # written above
+. "$UNTIL_LIB"
+
+UNTIL_SUBJECT='[{"id":"tk-sub","status":"open","issue_type":"bug","assignee":"","metadata":{}}]'
+export FAKE_SHOW_JSON="$UNTIL_SUBJECT" FAKE_DEPS_JSON='[{"id":"tk-retire","dependency_type":"until"}]'
+run tk-sub --disposition until --reason "the file it reports on is retired whole by tk-retire" \
+    --takeaway "closes once tk-retire retires its code" --until tk-retire --reaction-bead "$R"
+eq "$RC" "0" "(UNT) an until disposition succeeds"
+has "DEP bd dep add tk-sub tk-retire --type=until" "$LOG" "(UNT) the until edge is written onto the bead whose landing ends the job"
+has "DEP bd dep list tk-sub --direction=down -t until --json" "$LOG" "(UNT) …and read back by its type"
+has "HELM takeaway tk-sub closes once tk-retire retires its code --by proactive --release --no-wait" "$LOG" \
+    "(UNT) the release says nothing holds the subject"
+has "gc.reacted_by=$R" "$LOG" "(UNT) the landed proof is stamped"
+has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed" "$LOG" \
+    "(UNT) …and the reaction bead is closed"
+has "disposed as until (tk-retire)" "$OUT" "(UNT) …and the run reports the bead it waits for"
+before '^HELM takeaway' '^DEP bd dep add tk-sub tk-retire --type=until' "(UNTORDER) the release lands before the edge is written"
+before '^DEP bd dep list' 'gc.reacted_by' "(UNTORDER) …and the landed proof follows the edge's read-back"
+AFTER_EDGE=$(sed -n '/^DEP bd dep add tk-sub/,$p' "$FAKE_LOG")
+hasnt "HELM" "$AFTER_EDGE" "(UNTORDER) nothing after the edge releases the subject"
+eq "$(printf '%s\n' "$AFTER_EDGE" | awk '/^UPDATE bd update tk-sub / && /--status|--assignee/')" "" \
+    "(UNTORDER) …or writes its status or assignee"
+hasnt "--waiting-on" "$LOG" "(UNTPURE) no blocks edge rides the release"
+hasnt "-t blocks" "$LOG" "(UNTPURE) …and none is added directly"
+hasnt "--route" "$LOG" "(UNTPURE) no route"
+hasnt "--assign" "$LOG" "(UNTPURE) no assignee"
+hasnt "DEFERRED" "$LOG" "(UNTPURE) no arm and no notice"
+hasnt "placement" "$LOG" "(UNTPURE) no placement, though the subject has no parent"
+hasnt "HELM demand" "$LOG" "(UNTPURE) no human gate"
+
 UNTIL_STATUSES='[{"id":"tk-retire","status":"open","closed_at":null}]'
 eq "$(scan_subject | cut -f2)" "waiting" "(UNTPURE) while tk-retire is open, the pass reads the subject as waiting on it"
 UNTIL_STATUSES='[{"id":"tk-retire","status":"closed","closed_at":"2026-10-27T00:00:00Z"}]'
@@ -850,6 +891,25 @@ UNTIL_SCAN=$(scan_subject)
 eq "$(printf '%s' "$UNTIL_SCAN" | cut -f2)" "owed" "(UNTPURE) once tk-retire closes, the pass reads the subject as owed its close"
 eq "$(printf '%s' "$UNTIL_SCAN" | cut -f3)" "tk-retire" "(UNTPURE) …pointing it at tk-retire"
 eq "$(printf '%s' "$UNTIL_SCAN" | cut -f8)" "-" "(UNTPURE) …and it carries no live-work mark that keeps the pass from closing it (live-work.sh)"
+
+# The pass can run while the release is still in flight. Here it runs between
+# the release's status read and its write, over the subject as the store holds
+# it then, with tk-retire already closed. A close it made there would be undone
+# by the release's write, and the successor pointer that close left would read
+# as live work to every later pass, so none would close the subject again.
+export FAKE_UNTIL_PASS="$TMP/until-pass" UNTIL_STATUSES='[{"id":"tk-retire","status":"closed","closed_at":"2026-10-27T00:00:00Z"}]'
+run tk-sub --disposition until --reason "r" --takeaway "t" --until tk-retire --reaction-bead "$R"
+eq "$RC" "0" "(UNTRACE) the until exit succeeds with the pass running inside its release"
+before '^HELM release reads tk-sub' '^UNTILPASS' "(UNTRACE) the pass runs after the release reads the subject"
+before '^UNTILPASS' '^HELM release writes tk-sub' "(UNTRACE) …and before the release writes it"
+has "UNTILPASS leaves tk-sub" "$LOG" "(UNTRACE) …and finds nothing to close there"
+hasnt "UNTILPASS closes tk-sub" "$LOG" "(UNTRACE) …so the release's write undoes no close"
+before '^HELM release writes tk-sub' '^DEP bd dep add tk-sub tk-retire --type=until' \
+    "(UNTRACE) …because the edge that selects the subject is written after the release's write"
+UNTIL_SCAN=$(scan_subject)
+eq "$(printf '%s' "$UNTIL_SCAN" | cut -f2)" "owed" "(UNTRACE) once the exit completes, the pass reads the subject owed its close"
+eq "$(printf '%s' "$UNTIL_SCAN" | cut -f8)" "-" "(UNTRACE) …with no live-work mark, so the pass closes it"
+unset FAKE_UNTIL_PASS
 
 # Control: the blocked exit onto the same bead leaves a blocks edge, and holds
 # the parentless subject for placement. The pass selects only a bead with an
@@ -859,7 +919,6 @@ run tk-sub --disposition blocked --reason "r" --takeaway "t" --waiting-on tk-ret
     --then-route gc-toolkit/gc-toolkit.polecat --reaction-bead "$R"
 eq "$RC" "0" "(UNTPURE) control: the blocked exit on the same subject succeeds"
 has "placement=pending" "$LOG" "(UNTPURE) control: …holds it for placement"
-UNTIL_ROW=$(until_row) || UNTIL_ROW=""
 eq "$(scan_subject)" "" "(UNTPURE) control: …and with tk-retire closed, the pass selects nothing to close"
 
 # The read-back is by type: a blocks edge onto the target, which refuses the
@@ -869,7 +928,8 @@ run tk-sub --disposition until --reason "r" --takeaway "t" --until tk-retire --r
 eq "$RC" "4" "(UNTEDGE) a target that reads back only as a blocks edge fails the exit"
 has "no until edge onto tk-retire reads back" "$ERR" "(UNTEDGE) …naming the edge that is missing"
 has "gc bd dep remove tk-sub" "$ERR" "(UNTEDGE) …and the blocks edge to remove first"
-hasnt "HELM" "$LOG" "(UNTEDGE) …before the release and the headline"
+before '^HELM takeaway' '^DEP bd dep add tk-sub' "(UNTEDGE) …after the release"
+has "The headline and the release stand" "$ERR" "(UNTEDGE) …which the failure says stands"
 hasnt "gc.reacted_by" "$LOG" "(UNTEDGE) …with no landed proof"
 hasnt "UPDATE bd update $R" "$LOG" "(UNTEDGE) …and the reaction bead left open"
 export FAKE_DEPS_JSON='[]' FAKE_DEP_FAILS=1

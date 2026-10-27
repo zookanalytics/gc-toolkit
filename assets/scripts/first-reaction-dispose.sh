@@ -176,12 +176,13 @@ Usage:
   release. Its hook offers the bead once the wait lifts, and the notice
   deferred-dispatch.sh notify arms tells the agent then, not before.
   --until (until, one or more) names a bead whose landing ends this one's job,
-  such as the bead that retires its code. The exit writes an until edge onto
-  it, reads the edge back, and releases the bead with no route, arm,
-  placement or blocks edge, so the deferred-dispatch pass closes it once
-  every --until bead has closed. A bead in another store is refused: the edge
-  does not read back, and the pass never sees that bead close, so a person
-  closes this one once it lands (--disposition ruling asks them).
+  such as the bead that retires its code. The exit releases the bead with no
+  route, arm, placement or blocks edge, then writes an until edge onto each
+  --until bead and reads it back, so the deferred-dispatch pass closes the
+  bead once every --until bead has closed. A bead in another store is
+  refused: the edge does not read back, and the pass never sees that bead
+  close, so a person closes this one once it lands (--disposition ruling asks
+  them).
   ruling and recommend put the subject to the operator as a native human gate:
   the script files it with gc-helm.sh demand under the topic first-reaction,
   the takeaway as its question, and holds the subject on it. One open gate
@@ -1114,35 +1115,6 @@ Routed to $POOL_TARGET at P0 as an emergency: $ADMIT_WHY."
     fi
 fi
 
-# ── The until exit's edge, before the release ─────────────────────────
-# Each --until bead's landing ends the subject's job, and an until edge onto it
-# says so to the deferred-dispatch pass, which closes the subject once every
-# until target has closed (skills/waits). The add's answer is not taken as the
-# edge: bd keeps one edge type per pair of beads, so a blocks edge the subject
-# already has onto that bead refuses this one, and a target the store does not
-# hold leaves nothing to read. So the edge is read back by its type, and a
-# missing one fails the exit before the release, the headline and the landed
-# proof, so a re-run resumes it.
-if [ "$DISPOSITION" = "until" ]; then
-    UNTIL_ADD_ERR=""
-    for u in $UNTIL; do
-        _err=$(gc_bd dep add "$BEAD" "$u" --type=until 2>&1 >/dev/null) \
-            || UNTIL_ADD_ERR="$UNTIL_ADD_ERR; $u: $(printf '%s' "${_err:-exited non-zero}" | tr '\n' ' ')"
-    done
-    UNTIL_HELD=$(gc_bd dep list "$BEAD" --direction=down -t until --json 2>/dev/null | scrub \
-        | jq -r 'if type == "array" then (.[]? | select(((.dependency_type // .type) // "") == "until") | (.id // empty)) else empty end' 2>/dev/null || printf '')
-    MISSING=""
-    for u in $UNTIL; do
-        case " $(printf '%s' "$UNTIL_HELD" | tr '\n' ' ') " in
-            *" $u "*) : ;;
-            *) MISSING="$MISSING $u" ;;
-        esac
-    done
-    [ -z "$MISSING" ] \
-        || die "the until disposition on $BEAD did not land: no until edge onto${MISSING} reads back (gc bd dep list $BEAD --direction=down -t until${DB:+ --db $DB})${UNTIL_ADD_ERR:+, and bd answered${UNTIL_ADD_ERR#;}}. bd keeps one edge type per pair of beads, so a blocks edge $BEAD has onto that bead refuses the until one: remove it with gc bd dep remove $BEAD <bead>${DB:+ --db $DB}. The release and the headline were not written and no landed proof was stamped, so clear the cause and re-run this command."
-    note "the until edge onto each of${UNTIL} reads back on $BEAD"
-fi
-
 # ── The act ──────────────────────────────────────────────────────────
 # gc-helm.sh takeaway carries the headline, the release, and the wait edges;
 # --route releases the bead to a pool instead of back to the human, and
@@ -1155,11 +1127,12 @@ fi
 # queue, which placement=pending names and gc-helm.sh unplaced lists. Either
 # way --no-wait says so. A blocked one names its wait as an edge, and a
 # --then-assign rides the same release, so the agent's hook offers the bead
-# once the edge clears. An until one says --no-wait too: its until edge holds
-# nothing, --waiting-on would write a blocks edge that bd refuses beside it, and
-# the release leaves it open, unassigned and unrouted, the pure wait the
-# deferred-dispatch pass closes. A recommend or a ruling names its human gate as its
-# wait, or the visit --visit named: the subject is waiting on a person, and
+# once the edge clears. An until one says --no-wait too: its until edge, written
+# after the release, holds nothing, and a --waiting-on blocks edge onto the same
+# bead would make bd refuse it. The release leaves the bead open, unassigned and
+# unrouted, the pure wait the deferred-dispatch pass closes. A recommend or a
+# ruling names its human gate as its wait, or the visit --visit named: the
+# subject is waiting on a person, and
 # that bead carries the wait, so --waiting-on records the blocks edge onto
 # it. On a gate that edge is the one gc-helm.sh demand already wrote, and
 # adding it again leaves it single. The release parks the subject and the edge
@@ -1226,6 +1199,44 @@ if [ -n "$HOLD_WAITS" ]; then
             die "the blocked disposition on $BEAD did not land. The dispatch to $THEN_ROUTE for when its wait lifts was not armed (${ARM_ERR:-deferred-dispatch.sh arm exited non-zero and named no cause}), so nothing would route $BEAD once the wait lifts. The headline, the release and the hold stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
         fi
     fi
+fi
+
+# ── The until exit's edge, after the release ──────────────────────────
+# Each --until bead's landing ends the subject's job, and an until edge onto it
+# says so to the deferred-dispatch pass, which closes the subject once every
+# until target has closed (skills/waits). The edge is also what makes the pass
+# select the subject, so it is written after the release. The release reads the
+# subject's status and then writes status open and no assignee, with no
+# condition on that write. A close the pass made between the read and the write
+# would be undone, and the successor pointer that close left reads as live work
+# to every later pass, so none of them would close the subject again. After the
+# edge this exit writes only the landed proof, which moves neither the status
+# nor the assignee. A subject that already carried an until edge when the
+# reaction began is not covered by this order: the pass can select it during
+# the release.
+# The add's answer is not taken as the edge: bd keeps one edge type per pair of
+# beads, so a blocks edge the subject already has onto that bead refuses this
+# one, and a target the store does not hold leaves nothing to read. So the edge
+# is read back by its type, and a missing one fails the exit before the landed
+# proof, so a re-run resumes it.
+if [ "$DISPOSITION" = "until" ]; then
+    UNTIL_ADD_ERR=""
+    for u in $UNTIL; do
+        _err=$(gc_bd dep add "$BEAD" "$u" --type=until 2>&1 >/dev/null) \
+            || UNTIL_ADD_ERR="$UNTIL_ADD_ERR; $u: $(printf '%s' "${_err:-exited non-zero}" | tr '\n' ' ')"
+    done
+    UNTIL_HELD=$(gc_bd dep list "$BEAD" --direction=down -t until --json 2>/dev/null | scrub \
+        | jq -r 'if type == "array" then (.[]? | select(((.dependency_type // .type) // "") == "until") | (.id // empty)) else empty end' 2>/dev/null || printf '')
+    MISSING=""
+    for u in $UNTIL; do
+        case " $(printf '%s' "$UNTIL_HELD" | tr '\n' ' ') " in
+            *" $u "*) : ;;
+            *) MISSING="$MISSING $u" ;;
+        esac
+    done
+    [ -z "$MISSING" ] \
+        || die "the until disposition on $BEAD did not land: no until edge onto${MISSING} reads back (gc bd dep list $BEAD --direction=down -t until${DB:+ --db $DB})${UNTIL_ADD_ERR:+, and bd answered${UNTIL_ADD_ERR#;}}. bd keeps one edge type per pair of beads, so a blocks edge $BEAD has onto that bead refuses the until one: remove it with gc bd dep remove $BEAD <bead>${DB:+ --db $DB}. The headline and the release stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
+    note "the until edge onto each of${UNTIL} reads back on $BEAD"
 fi
 
 # --assign and --then-assign told the release who the bead goes to, and that
