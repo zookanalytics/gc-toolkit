@@ -15,7 +15,7 @@ that did not land. So the arch check asks what Gas City already ships for each
 piece, and whether the causes are a pack noun that needs a warrant
 ([review-arch.md](../../docs/review-arch.md#the-checks), checks 1 and 2).
 
-Gas City has one classifier of a pull request's readiness, the `gc` binary's
+Gas City ships one classifier of a pull request's readiness, the `gc` binary's
 PR monitor. It reads only a PR's draft flag, its merge state and its check
 rollup, so it calls every `BLOCKED` PR blocked, a required check still running
 included, and it records its class on a repair bead it files, not on the bead
@@ -124,7 +124,7 @@ found on the live site.
 
 ### The gc binary's pull request readiness monitor
 
-Gas City has one classifier of a pull request's readiness, in the `gc`
+Gas City ships one classifier of a pull request's readiness, in the `gc`
 binary. A city declares a monitor as a `[[github.pr_monitor]]` entry
 ([GitHubPRMonitor](https://docs.gascity.com/reference/config#githubprmonitor)
 in the configuration reference), which names a repository, its base branches,
@@ -157,8 +157,15 @@ Only that command runs the monitor. No order in the bundled `core` pack calls
 it, and no code outside package `config` reads a monitor's `poll_interval`,
 webhook secret or `merge_queue` policy, though the reference documents them.
 
-It does not cover the need. It cannot tell a required check still running
-from a wedge, because it reads no branch rule, and that is the false
+Gas City's repository also keeps `scripts/prwatchdog` for its own CI. Its *PR
+evidence watchdog* workflow runs it on each pull request, and the PR's
+`Evidence / critical-path suites` check passes only when the check runs the
+watchdog names in its source, such as `CI / required`, succeed at the PR's
+head within its 25-minute deadline. It reads no branch rule, records nothing
+on a bead, and ships in neither `gc` nor a pack.
+
+The monitor does not cover the need. It cannot tell a required check still
+running from a wedge, because it reads no branch rule, and that is the false
 needs-attention this change removes. It reads a failed advisory check as a
 failed PR, where the merge pass judges only the required ones. Its classes
 say what a pool should repair, while the pack's `blocked` names what no
