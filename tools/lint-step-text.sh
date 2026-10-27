@@ -33,8 +33,9 @@
 # to it. The lint finds each string in the file to tie its text to the file's
 # lines. When the strings it finds are not all the strings tomllib reads in the
 # file, it cannot operate. Only a block fenced as bash, sh, shell, zsh, ksh or
-# dash holds commands. A here-document's body is data, except where no part of
-# its delimiter is quoted. The shell then expands the body, so a command
+# dash, in any case, holds commands, and a fence of backticks or tildes is read
+# as CommonMark reads it. A here-document's body is data, except where no part
+# of its delimiter is quoted. The shell then expands the body, so a command
 # substitution in it weighs as one in an argument does.
 #
 # lint-step-text.in-flight, beside this script, lists the branches whose
@@ -538,14 +539,22 @@ function shell_line(s, lines,   t, i) {
     finish()
 }
 # A line of a TOML string as the agent reads it, with the file lines it came
-# from. A fence opens or closes a block; a line inside a shell block is read as
-# shell.
-function rendered(s, lines,   first, tag) {
+# from. A fence is read as CommonMark reads one, at any indentation. A run of
+# three or more backticks or tildes opens a block, unless the run is backticks
+# and its line holds another backtick, which makes it inline code. The first
+# word after the run names the block's language, in any case. Only a run of the
+# same character, at least as long and with nothing after it, closes the block,
+# so any other fence line inside it is the block's own text. A line inside a
+# shell block is read as shell.
+function rendered(s, lines,   first, t, c, n, tag) {
     first = lines; sub(/ .*$/, "", first)
-    if (s ~ /^[ \t]*```/) {
-        if (infence) { fence_close(); return }
-        tag = s; sub(/^[ \t]*```[ \t]*/, "", tag); sub(/[^A-Za-z0-9_+-].*$/, "", tag)
-        infence = 1
+    t = s; sub(/^[ \t]*/, "", t)
+    c = substr(t, 1, 1); n = 0
+    if (c == "`" || c == "~") while (substr(t, n + 1, 1) == c) n++
+    if (n >= 3 && infence && c == fchar && n >= flen && substr(t, n + 1) ~ /^[ \t]*$/) { fence_close(); return }
+    if (n >= 3 && !infence && !(c == "`" && index(substr(t, n + 1), "`"))) {
+        tag = tolower(substr(t, n + 1)); sub(/^[ \t]*/, "", tag); sub(/[^a-z0-9_+-].*$/, "", tag)
+        infence = 1; fchar = c; flen = n
         fshell = (tag == "bash" || tag == "sh" || tag == "shell" || tag == "zsh" || tag == "ksh" || tag == "dash")
         fopen = first; fcmd = 0; fcf = 0; fwords = ""; ftext = ""
         buf = ""; blines = ""; bsep = ""; bhd = 0; hdn = 0; hdi = 0; hbody = ""; SC_LBL = 0

@@ -8,7 +8,9 @@
 # quote), a procedure read as a single call (a pipeline, a sequence, a
 # substitution holding a pipeline, && or ||, a substitution an expanding
 # here-document's body runs), step text left unread (a TOML string of any kind
-# wherever it sits, an edit inside a here-document's body), step text that
+# wherever it sits, an edit inside a here-document's body, a block fenced with
+# tildes, a longer run or a capitalized language, a block a fence line inside
+# it cut short, a block inline code at a line's start hid), step text that
 # predates the rule failing because a change touched its file, a moved or
 # trimmed block read as new, a branch listed as in flight stalled by its own
 # lines, a branch built on it let through with lines of its own, and a change
@@ -242,6 +244,60 @@ expect 0 "a here-document inside an argument's substitution is data: exit 0"
 with_step new "$(printf '```json\n{"a": "b; c | d"}\n```\n```\nx=1; y=2 | z\n```')" > "$REPO/$F"
 run_lint "$F"
 expect 0 "a block not fenced as shell holds no commands: exit 0"
+
+# A fence is read as CommonMark reads one: three or more backticks or tildes,
+# with the language in any case. Only a run of the same character, at least as
+# long and with nothing after it, closes a block, and a backtick run whose line
+# holds another backtick is inline code.
+with_step new "$(printf '~~~bash\necho first; echo second\n~~~')" > "$REPO/$F"
+run_lint "$F"
+expect 1 "a block fenced with tildes holds commands: exit 1" "with 2 commands\. "
+
+with_step new "$(printf '```Bash\necho first; echo second\n```')" > "$REPO/$F"
+run_lint "$F"
+expect 1 "a fence's language is read in any case: exit 1" "with 2 commands\. "
+
+with_step new "$(printf '~~~json\n{"a": "b; c | d"}\n~~~\n~~~\nx=1; y=2 | z\n~~~')" > "$REPO/$F"
+run_lint "$F"
+expect 0 "a tilde block not fenced as shell holds no commands: exit 0"
+
+FENCED=$(cat <<'EOT'
+````bash
+cat > "$F" <<'EOF'
+```
+EOF
+echo first; echo second
+````
+EOT
+)
+with_step new "$FENCED" > "$REPO/$F"
+run_lint "$F"
+expect 1 "a shorter run inside a longer fence is the block's own text: exit 1" "with 3 commands\. "
+
+FENCED=$(cat <<'EOT'
+```bash
+cat > "$F" <<'EOF'
+~~~
+```text
+EOF
+echo first; echo second
+```
+EOT
+)
+with_step new "$FENCED" > "$REPO/$F"
+run_lint "$F"
+expect 1 "a run of the other character, or one with text after it, closes no block: exit 1" "with 3 commands\. "
+
+FENCED=$(cat <<'EOT'
+```x``` names a command inline.
+```bash
+echo first; echo second
+```
+EOT
+)
+with_step new "$FENCED" > "$REPO/$F"
+run_lint "$F"
+expect 1 "inline code at the start of a line opens no block: exit 1" "with 2 commands\. "
 
 with_step new "$(block '# a comment; with | separators
 "$S/new.sh" --bead "$X"   # trailing; comment | too
