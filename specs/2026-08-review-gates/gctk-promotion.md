@@ -1,73 +1,28 @@
 ---
 name: gctk — promote the merge-cadence cluster from shell to one Go binary
-description: Scope for porting the data-plane scripts (lifecycle, the five cadence arms, signoff) behind their existing CLI contracts into a single Go binary beside services/helm. Shell remains the pack's lingua franca. lifecycle and merge are ported and keep no shell fallback, and the remaining scripts port one PR at a time. The binary also holds subcommands outside this scope, and services/gctk/README.md states everything it holds.
+description: How gctk began. lifecycle and merge moved from shell into one Go binary beside services/helm, built and deployed the way helm-svc is. The port contract this record once scoped, one subcommand per script behind an identical CLI, is replaced by docs/gctk-architecture.md, which states the shape gctk is built to and which pack logic moves into it.
 ---
 
 # gctk: the compiled data plane
 
-Status: **in progress**. Follow-up to the rewrite; independent of the
-review-gates work (same specs dir because both were scoped from the same
-operator conversation).
+Status: **port contract replaced.**
+[docs/gctk-architecture.md](../../docs/gctk-architecture.md) states the shape
+gctk is built to, which pack logic moves into it, and the rules a move follows.
+A move carries only an intent that survives the migration onto Gas City,
+deletes the shell it replaces, and keeps no test that holds two copies equal,
+so the remaining one-subcommand-per-script ports this record scoped are not
+built. The
+build and deploy pattern below is still how the binary is built and served.
 
-`services/gctk` is the binary's source. The build/deploy pattern below, the
-fallback wiring, the build-status file, and its board rows are in place, and
-`services/gctk/README.md` carries the operating detail. This spec scopes the
-ports. The binary also holds subcommands that port none of these scripts, and
-the README states everything it holds.
+`services/gctk` is the binary's source, and `services/gctk/README.md` carries
+the operating detail and states everything the binary holds.
 
-`lifecycle` and `merge` are ported, and neither keeps a shell fallback.
-`lifecycle.sh` and `merge.sh` only exec the binary, and a call with no binary
-to run exits 1 naming the `gctk-build` order. The two rules the merge shares
-with shell readers, the required-check set (`pr-facts.sh`) and the approval
-rule (`review-verdict.sh`), are held to gctk merge's own by `merge.test.sh`,
-which runs both over the same fixtures.
-
-Remaining ports, one subcommand per PR in this order: `gate-ensure`,
-`pr-open`, `pr-facts`, `convoy-graduate`, `signoff`. Each is filed as its own
-bead. The remaining shell scripts and their fallbacks drop when the last one
-lands.
-
-## The language rule (add to the review charter when it lands)
-
-> Shell for anything an agent pastes, anything that must read as
-> documentation, or anything under ~150 lines. The compiled tool for
-> data-plane logic that writes ledger state.
-
-Shell is partly forced (formula steps and prompt fragments can only carry
-shell) and genuinely fits the small glue that remains. The exception this
-spec ports is the merge-cadence cluster: highest stakes, pure data-plane, no
-cross-media sharing — its callers already treat it as an opaque CLI, so the
-language behind the command is invisible to them.
-
-## What ports, and what does not
-
-| Ports to `gctk` (subcommand) | Stays shell |
-|---|---|
-| `lifecycle` (transition/state) | every formula/prompt shell block |
-| `gate-ensure`, `pr-open`, `merge`, `pr-facts`, `convoy-graduate` | doctor checks, order predicates |
-| `signoff` | `escalate.sh`, `step-close.sh`, `deferred-dispatch.sh` (small, agent-legible) |
-| (later, if warranted) `liveness-sweep` | tmux surface, helm verbs, worktree-setup, tools/ |
-
-`refinery-reconcile.sh` stays a thin shell driver (identity discovery + arm
-ordering + the rc=3 interlock) calling `gctk <arm>` — the cadence remains
-readable as a script.
-
-## Contract-preserving port
-
-- Each subcommand keeps the **byte-identical CLI** of the script it replaces
-  (flags, exit codes 0/1/2, stdout grammar). No formula, order, prompt, or
-  doctor check changes.
-- The existing `.test.sh` stub-harness suites are the **acceptance suite**:
-  each port must pass the replaced script's tests unmodified (the stubs fake
-  `gc`/`bd`/`gh`, which gctk shells out to exactly as the scripts do —
-  keeping subprocess seams rather than linking the beads library is
-  deliberate: same observability, same stubs, same permissions surface).
-- `lifecycle/lifecycle.toml` stays the human/doctor-readable declaration; the
-  state table lives once in a typed package, and the drift test compares the
-  TOML against `gctk lifecycle --dump-machine` (replacing the shell-constant
-  mirror).
-- Port order: `lifecycle` first (everything else calls it), then `merge`,
-  then the rest; one subcommand per PR, deleting its script in the same PR.
+`lifecycle` and `merge` moved into the binary, and neither keeps a shell
+fallback. `lifecycle.sh` and `merge.sh` only exec the binary, and a call with no
+binary to run exits 1 naming the `gctk-build` order. The two rules the merge
+shares with shell readers, the required-check set (`pr-facts.sh`) and the
+approval rule (`review-verdict.sh`), are held to gctk merge's own by
+`merge.test.sh`, which runs both over the same fixtures.
 
 ## Build and deploy
 
@@ -75,13 +30,9 @@ Same pattern as helm-svc, same lessons, same script: a `gctk-build` city order
 runs the builder helm-build runs (`assets/scripts/gc-build.sh gctk`), with its
 cooldown, staleness by `find -newer` and by the recorded revision, atomic
 publish, and no build in the exec path. The launcher resolves the prebuilt
-binary. Until the binary exists at the
-deployed path, the shell scripts remain — the driver prefers `gctk` when
-present, falls back to the script during migration, and drops the fallback
-when the last port lands. `lifecycle` and `merge` are the exception and have
-no fallback: with no binary to run, `lifecycle.sh` and `merge.sh` refuse the
-call and name the build order, and a build that fails keeps the last good
-binary answering.
+binary. With no binary to run, `lifecycle.sh` and `merge.sh` refuse the call
+and name the build order, and a build that fails keeps the last good binary
+answering.
 
 **Failure-mode tradeoff, stated:** a script edit is live from the working
 tree instantly; a gctk change rides the build order (~5m) and a broken build
