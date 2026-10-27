@@ -9,8 +9,8 @@
 # because the operator reads the board and not the "human" mailbox, and a
 # finding reaches the board through the first reaction that disposes it. One
 # bead per deacon, keyed deacon-cold.<deacon>, carries every episode. A cold
-# episode files or refreshes it. A fresh wisp that ends an episode it reported
-# records the end on it (--cleared).
+# episode files or refreshes it. A fresh wisp that ends an episode which
+# reported, or tried to, records the end on it (--cleared).
 # PRECEDENCE: the patrol-wisp age measures WORK COMPLETED and wins;
 # the pane (busy marker, movement hash with digits normalized out — timers
 # advance on their own) is a FALLBACK, deciding only when the wisp ledger
@@ -102,8 +102,8 @@ gc_call() { gc_call_rc "$@" 2>/dev/null || true; }
 iso_of() { jq -rn --argjson s "$1" '$s | todateiso8601' 2>/dev/null; }
 
 # --- state (a file not starting with $STATE_MAGIC is not ours) ---------------
-# clear_owed=1 says an episode that filed the finding has ended and the finding
-# does not yet record it.
+# clear_owed=1 says the finding may hold an episode whose end it does not yet
+# record: one that filed it and has ended, or one whose filing is not confirmed.
 pane_hash=""; cold_since=0; last_report=0; clear_owed=0
 if [ "$STATE_OK" = "1" ] && [ -f "$STATE" ] && [ "$(head -n1 "$STATE" 2>/dev/null)" = "$STATE_MAGIC" ]; then
     while IFS='=' read -r k v; do
@@ -202,8 +202,8 @@ fi
 # The stored pane hash goes with the episode, so the next pane read starts a
 # new movement baseline. Work completed is also the one proof that the deacon
 # is patrolling again, so this is the pass that records the end of an episode
-# the finding reported. A record that does not land stays owed to the next
-# fresh pass.
+# that reported, or tried to (step 7). A record that does not land stays owed
+# to the next fresh pass.
 if [ -n "$WISP_AGE" ] && [ "$WISP_AGE" -lt "$WISP_FRESH" ]; then
     if [ "$last_report" -gt 0 ]; then clear_owed=1; last_report=0; fi
     if [ "$clear_owed" = "1" ] && record_cleared; then clear_owed=0; fi
@@ -309,8 +309,17 @@ patrolling normally):
 
 # The key dedups a filing, so a call that failed or timed out is retried on the
 # next pass rather than paced: only a confirmed one sets last_report, which
-# silences the next REPORT_EVERY window. A confirmed report also settles a clear
-# still owed to an earlier episode, because the finding is live again.
+# silences the next REPORT_EVERY window. A call that is not confirmed may still
+# have written the finding, because the filer writes the bead before steps that
+# can fail or outlast the bound, such as reading its key back or slinging its
+# first reaction. So the end of the episode is owed, and saved, before the
+# call. It then stays owed when the call fails or times out, and when this pass
+# is killed during it. If the call wrote nothing, the record a fresh pass makes
+# is still true, because the deacon is patrolling again: it lands on a live bead
+# the key already holds, or finds none and records nothing. A confirmed report
+# hands the debt to last_report, so it settles clear_owed, and with it any clear
+# an earlier episode still owed, because the finding is live again.
+clear_owed=1; save_state
 FILE_RC=0
 FILE_OUT="$(finding_call_rc --key "$FINDING_KEY" --scope boot-health --rig "$FINDING_RIG" \
     --priority 1 --title "$TITLE" --message "$MESSAGE" 2>&1)" || FILE_RC=$?
@@ -319,7 +328,6 @@ if [ "$FILE_RC" -eq 0 ]; then
     save_state
     echo "boot-health: reported — $SUMMARY"
 else
-    save_state
     echo "boot-health: report FAILED (rc=$FILE_RC) — retries next pass — $SUMMARY"
 fi
 if [ -n "$FILE_OUT" ]; then printf '%s\n' "$FILE_OUT"; fi

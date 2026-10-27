@@ -29,8 +29,9 @@ the key. The rest of the search found nothing closer to the need.
 - A later report that lands on that bead records that the situation is back,
   and counts the occurrence as any recurrence does.
 - boot-health is the caller. Its fresh-wisp pass runs `--cleared` for each
-  cold episode that filed or refreshed the finding, and a record that does not
-  land stays owed to a later fresh pass.
+  cold episode that tried to file or refresh the finding, because a filing that
+  is not confirmed may still have written it. A record that does not land stays
+  owed to a later fresh pass.
 
 The need has three parts. A reader can tell a finding whose situation ended
 from one still recurring without parsing its notes, and can see when and why it

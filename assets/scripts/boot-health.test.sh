@@ -25,8 +25,8 @@
 # REPORT_EVERY; (h) recovery re-arms; (i) the report paces the next window only
 # when the filing was CONFIRMED — a failed or timed-out call leaves the episode
 # DUE; (m) the report is a finding with a fixed identity, never mail; (n) a
-# fresh wisp records the end of an episode that reported, once, and keeps it
-# owed until it lands.
+# fresh wisp records the end of an episode that reported, or tried to, once,
+# and keeps it owed until it lands.
 #
 # (i) guards the second defect this file has to hold: `last_report` silences the
 # next REPORT_EVERY window, so a report recorded as filed when it was refused
@@ -71,6 +71,8 @@ chmod +x "$TMP/bin/gc"
 # The text goes to FINDING_BODY or CLEAR_BODY for the text assertions, and the
 # rest of the argv to FINDING_ARGV on one line. The CALL is recorded before the
 # outcome, so a scenario can tell "never tried" from "tried and refused".
+# OWED_LOG gets the clear_owed the state file held as the call began, which is
+# what a pass killed during the call would leave behind.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/patrol-finding" <<'STUB'
 mode=report; msg=""; args=(); take=""
 for a in "$@"; do
@@ -83,6 +85,8 @@ for a in "$@"; do
 done
 printf '%s\n' "$mode" >> "$FINDING_LOG"
 printf '%s\n' "${args[*]}" >> "$FINDING_ARGV"
+owed="$(awk -F= '$1 == "clear_owed" {print $2}' "$BOOT_HEALTH_STATE_DIR/state" 2>/dev/null)"
+printf '%s\n' "${owed:-none}" >> "$OWED_LOG"
 if [ "$mode" = cleared ]; then
   printf '%s\n' "$msg" >> "$CLEAR_BODY"; outcome="${STUB_CLEARED:-ok}"
 else
@@ -90,6 +94,8 @@ else
 fi
 case "$outcome" in
   ok)   echo "patrol-finding: stub recorded the $mode"; exit 0 ;;
+  # The filer's answer to a clear with no live bead under the key.
+  none) echo "patrol-finding: no live bead holds the key, so there is no clear to record"; exit 0 ;;
   fail) echo "patrol-finding: stub refused the $mode" >&2; exit 1 ;;
   hang) sleep 30 ;; # outlives the bound -> killed (124, or 137)
 esac
@@ -97,7 +103,7 @@ STUB
 chmod +x "$TMP/bin/patrol-finding"
 export PATH="$TMP/bin:$PATH"
 export GC_PATROL_FINDING_TOOL="$TMP/bin/patrol-finding"
-export PEEK_LOG="$TMP/peeks"
+export PEEK_LOG="$TMP/peeks" OWED_LOG="$TMP/owed"
 # The stubs answer instantly, so a timeout only ever adds a fork. 0 makes each
 # call a passthrough (same no-bound behavior as `timeout 0`). The one case that
 # must see a real timeout, the hanging filing below, sets a 1s bound inline.
@@ -112,7 +118,7 @@ wisp() { # $1=status  $2=age seconds
 
 # Run the script one or more passes against a fresh state dir. The first cold
 # pass only records (one observation is not evidence), so a report needs two.
-LOGS=(finding body clear fargv gcother argv peeks)
+LOGS=(finding body clear fargv gcother argv peeks owed)
 reset() {
     local f
     rm -rf "$TMP/state"; mkdir -p "$TMP/state"
@@ -494,7 +500,7 @@ pass STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0
 eq "$(reports)" 0 "a state file without clear_owed keeps its pacing clock"
 eq "$(state_get clear_owed)" 0 "and reads as nothing owed"
 
-# --- (n) A fresh wisp records the end of an episode that reported. ----------
+# --- (n) A fresh wisp records the end of an episode that tried to report. ---
 # The finding stays the one record of the situation, so the pass that sees the
 # deacon patrolling again says so on it. Only a fresh wisp is that proof: a pane
 # that clears the clock while the ledger is unreadable leaves the record owed to
@@ -566,6 +572,36 @@ eq "$(reports)" 2 "the new episode reports"
 eq "$(state_get clear_owed)" 0 "its report settles the end owed to the last episode"
 pass STUB_WISPS="$FRESH"
 eq "$(clears)" 2 "the next fresh pass records the new episode's end, once"
+
+# A filing that is not confirmed may still have written the finding, because
+# the filer writes the bead before it reads the key back or slings the first
+# reaction. So the end is owed, on disk, from before the call. Here the filing
+# outlives its bound, and the deacon is patrolling again on the very next pass.
+reset
+pass STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0
+pass STUB_WISPS='[]' STUB_FINDING=hang BOOT_HEALTH_REPORT_AFTER=0 \
+     BOOT_HEALTH_FILE_TIMEOUT=1 BOOT_HEALTH_KILL_AFTER=1
+eq "$(reports)" 1 "the filing that timed out was attempted"
+eq "$(cat "$TMP/owed")" 1 "the end was owed on disk before the filing call began"
+eq "$(paced)" no "a filing that timed out is not paced"
+eq "$(state_get clear_owed)" 1 "and leaves the end owed"
+pass STUB_WISPS="$FRESH"
+eq "$(clears)" 1 "the next fresh pass records the end, though no report was confirmed"
+eq "$(state_get clear_owed)" 0 "and nothing is owed once it lands"
+pass STUB_WISPS="$FRESH"
+eq "$(clears)" 1 "a second fresh pass records nothing more"
+
+# A refused filing may have written nothing. The fresh pass's record then finds
+# no live bead under the key, which the filer answers with exit 0, and that
+# settles the debt.
+reset
+pass STUB_WISPS='[]' BOOT_HEALTH_REPORT_AFTER=0
+pass STUB_WISPS='[]' STUB_FINDING=fail BOOT_HEALTH_REPORT_AFTER=0
+eq "$(state_get clear_owed)" 1 "a refused filing leaves the end owed"
+OUT="$(pass_out STUB_WISPS="$FRESH" STUB_CLEARED=none)"
+eq "$(clears)" 1 "the next fresh pass tries the record"
+has "$OUT" "no clear to record" "and passes on that no live bead took it"
+eq "$(state_get clear_owed)" 0 "a record that finds no live bead settles the debt"
 
 echo
 echo "boot-health.test.sh: $PASS passed, $FAIL failed"
