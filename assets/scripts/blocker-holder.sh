@@ -25,8 +25,8 @@
 # blocker's runs are read only when it carries neither.
 #
 # Usage: blocker-holder.sh --anchor <id>
-# Exit: 0 answered · 1 usage · 2 a read did not resolve, and nothing is printed,
-# so a caller records no verdict on it.
+# Exit: 0 answered · 1 usage · 2 a read did not resolve or its lines did not
+# reach the loops, and nothing is printed, so a caller records no verdict on it.
 set -u
 
 PROG="blocker-holder"
@@ -80,16 +80,38 @@ marks=$(printf '%s' "$rows" | jq -r --arg live "$LIVE_STATUSES" '
   | map(gsub("[\t\n]"; " ")) | @tsv') \
   || { echo "$PROG: could not read the routes and claims of the blockers of $anchor" >&2; exit 2; }
 
+# A loop that falls through answers for every blocker, so it must have read
+# every line. bash backs a large `<<<` here-string with a temp file it creates
+# silently, and a loop whose redirection fails runs zero times. So the lines go
+# through a checked temp file, and a loop that falls through having read fewer
+# lines than the list in memory holds answers nothing.
+marks_file=$(mktemp "${TMPDIR:-/tmp}/blocker-holder.XXXXXX") \
+  || { echo "$PROG: could not create a temp file for the blockers of $anchor" >&2; exit 2; }
+trap 'rm -f "$marks_file"' EXIT
+if [ -n "$marks" ]; then
+  printf '%s\n' "$marks" >"$marks_file" \
+    || { echo "$PROG: could not write the blockers of $anchor to $marks_file" >&2; exit 2; }
+fi
+newlines=${marks//[!$'\n']/}
+lines=0
+[ -z "$marks" ] || lines=$(( ${#newlines} + 1 ))
+
+read_lines=0
 while IFS=$'\t' read -r id how; do
+  read_lines=$((read_lines + 1))
   [ -n "$id" ] || continue
   if [ -n "$how" ]; then
     printf 'actor %s %s\n' "$id" "$how"
     exit 0
   fi
-done <<<"$marks"
+done <"$marks_file"
+[ "$read_lines" -eq "$lines" ] \
+  || { echo "$PROG: read $read_lines of the $lines blockers of $anchor" >&2; exit 2; }
 
 stuck=""
+read_lines=0
 while IFS=$'\t' read -r id _; do
+  read_lines=$((read_lines + 1))
   [ -n "$id" ] || continue
   runs=$(run_lib runs holder_bd "$id") \
     || { echo "$PROG: could not read the runs that work $id" >&2; exit 2; }
@@ -100,7 +122,9 @@ while IFS=$'\t' read -r id _; do
     exit 0
   fi
   [ -n "$stuck" ] || stuck="$id"
-done <<<"$marks"
+done <"$marks_file"
+[ "$read_lines" -eq "$lines" ] \
+  || { echo "$PROG: read $read_lines of the $lines blockers of $anchor" >&2; exit 2; }
 
 if [ -n "$stuck" ]; then
   printf 'stuck %s\n' "$stuck"

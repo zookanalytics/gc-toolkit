@@ -87,6 +87,44 @@ out=$(RUN_LIB_STUB_FAIL="runs:B10" "$SUT" --anchor A10 2>/dev/null); rc=$?
 eq "$rc" 2 "an unreadable run read exits 2"
 eq "$out" "" "…printing no answer, since a run it could not read might be live"
 
+echo "# blocker lines the loops cannot be handed print nothing and exit 2"
+# 400 blockers with 400-byte ids make about 160 KB of lines, past the 64 KB
+# above which bash backs a here-string with a temp file, so a loop fed one
+# under a zero file-size limit would run zero times and answer none. Only the
+# last blocker is routed, so an answer means the loop read every line.
+pad=$(printf '%0400d' 0)
+big="[$(anchor A11)"; : > "$STUB_DEPS"
+for i in $(seq 1 399); do
+  big="$big, $(blk "B11-$i-$pad" open '')"
+  printf 'B11-%s-%s|blocks|A11\n' "$i" "$pad" >> "$STUB_DEPS"
+done
+store "$big, $(blk "B11-400-$pad" open '' ',"gc.routed_to":"rig/gc-toolkit.polecat"')]"
+printf 'B11-400-%s|blocks|A11\n' "$pad" >> "$STUB_DEPS"
+mkdir -p "$TMP/bh-tmp"
+out=$(TMPDIR="$TMP/bh-tmp" "$SUT" --anchor A11)
+eq "$out" "actor B11-400-$pad routed to rig/gc-toolkit.polecat" "the long list answers with no limit on file size"
+out=$( (ulimit -f 0; trap '' XFSZ; TMPDIR="$TMP/bh-tmp" "$SUT" --anchor A11) 2>/dev/null); rc=$?
+eq "$rc" 2 "lines that cannot be written to the temp file exit 2"
+eq "$out" "" "…printing no answer, never none"
+# The second loop reads the file again, one run read per line. A run read that
+# empties the file stands in for lines lost under that loop: B13b's live run is
+# then never read, and answering from B13a alone would say stuck.
+store "[$(anchor A13), $(blk B13a open ''), $(blk B13b open '' "$POUR"), $(convoy C13), $(root R13 in_progress C13)]"
+printf 'B13a|blocks|A13\nB13b|blocks|A13\nC13|tracks|B13b\n' > "$STUB_DEPS"
+eq "$(TMPDIR="$TMP/bh-tmp" "$SUT" --anchor A13)" "actor B13b worked by run R13" "the second loop reads the run behind the second blocker"
+printf '#!/usr/bin/env bash\nfor f in %q/blocker-holder.*; do [ -f "$f" ] && : > "$f"; done\nexec %q "$@"\n' "$TMP/bh-tmp" "$RUN_LIB_STUB_CMD" > "$TMP/runs-emptying"
+chmod +x "$TMP/runs-emptying"
+out=$(TMPDIR="$TMP/bh-tmp" RUN_LIB_STUB_CMD="$TMP/runs-emptying" "$SUT" --anchor A13 2>/dev/null); rc=$?
+eq "$rc" 2 "lines lost under the second loop exit 2"
+eq "$out" "" "…printing no answer, never stuck"
+eq "$(ls -A "$TMP/bh-tmp")" "" "no run leaves a temp file behind"
+mkdir -p "$TMP/mkbin"
+printf '#!/usr/bin/env bash\necho "mktemp: No space left on device" >&2\nexit 1\n' > "$TMP/mkbin/mktemp"
+chmod +x "$TMP/mkbin/mktemp"
+out=$(PATH="$TMP/mkbin:$PATH" "$SUT" --anchor A13 2>/dev/null); rc=$?
+eq "$rc" 2 "a temp file that cannot be created exits 2"
+eq "$out" "" "…printing no answer"
+
 echo "# usage"
 "$SUT" >/dev/null 2>&1; rc=$?
 eq "$rc" 1 "no --anchor is a usage error"
