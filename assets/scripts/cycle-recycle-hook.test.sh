@@ -11,9 +11,9 @@
 # from outside a guard that defers every turn looks like a hook with nothing to
 # do. This test tells the two apart.
 #
-# The hook also recycles a session when a pack file its prompt, patrol formula
-# or hook wiring comes from changed on disk after the session's first prompt,
-# at a turn's end and, under --prompt, before a prompt, which it then blocks.
+# The hook also recycles a session when a pack file its prompt or patrol
+# formula comes from changed on disk after the session's first prompt, at a
+# turn's end and, under --prompt, before a prompt, which it then blocks.
 # The drift cases age real files and read a transcript whose first record
 # carries the session's start.
 #
@@ -228,7 +228,7 @@ run_drift() {
     ( cd "$WT" && jq -nc --arg t "${DRIFT_TRANSCRIPT:-$DRIFT_T}" --arg p "$PROMPT_TEXT" '{transcript_path: $t, prompt: $p}' \
         | env -i PATH="$PATH" HOME="$SANDBOX/home" GC_LOG="$SANDBOX/gc.log" \
             GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
-            GC_AGENT="${DRIFT_AGENT:-alpha/gc-toolkit.refinery}" GC_RIG_ROOT="${DRIFT_RIG_ROOT:-$RIG}" \
+            GC_AGENT="${DRIFT_AGENT-alpha/gc-toolkit.refinery}" GC_RIG_ROOT="${DRIFT_RIG_ROOT:-$RIG}" \
             GC_CITY_PATH="$SANDBOX/city" GC_SESSION_ID=session-1 \
             ${TMUX_UNDER_TEST:+TMUX="$TMUX_UNDER_TEST"} TMUX_ATTACHED="${TMUX_ATTACHED:-0}" \
             GC_HANDOFF_RC="${GC_HANDOFF_RC:-0}" GC_RESET_RC="${GC_RESET_RC:-0}" \
