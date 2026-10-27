@@ -221,7 +221,10 @@ the cadence — the arms run whether or not any refinery session is awake.
    on the hand-off, whatever it answers. A branch's own commits add none of
    that text: the pre-commit hook and the remedy above render `--since` a
    revision, which keeps each file the change does not move as that revision
-   has it, or as HEAD has it where HEAD already commits the new text.
+   has it. The exception is a file the branch re-rendered itself, as the
+   re-audit does. That file is rendered fresh, so when gc moves again before
+   the re-audit merges, the same remedy renews its text, and the held merge
+   clears.
 
    What the artifact commits is chosen to stay out of the queue's way. A line
    that moves on every edit to one agent's prompt, committed beside the lines

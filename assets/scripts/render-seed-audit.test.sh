@@ -32,8 +32,10 @@
 # deletes INDEX.md and leaves renders committed, one of them stale, and the
 # stub's README beside a render the head left; the cannot-tell
 # exits (unresolvable rev, conflicting merge, missing revs, no scratch dir); the
-# remedy a held merge names, run, clearing the hold; --base-stale-out naming the
-# file the base is stale in alone, emptying what an earlier check left, and
+# remedy a held merge names, run, clearing the hold, and renewing a re-render
+# that gc has moved past rather than putting back the base's copy;
+# --base-stale-out naming the file the base is stale in alone, emptying what an
+# earlier check left, and
 # refused outside --check-merge; and the merge shape, against a control carrying
 # the per-agent size rows the index no longer commits. For what a commit
 # renders: --since writing the file the change moves and keeping, as HEAD
@@ -42,9 +44,13 @@
 # no file differs; the whole render since a revision with no audit; its
 # refusals; the pre-commit hook committing what the commit moves and not gc's
 # text, renewing what an earlier commit of its branch left stale, and keeping
-# the text a commit of its branch adopted; a hooked commit that concludes a
+# the text a commit of its branch adopted; renewing a re-render of its branch
+# that gc has moved past, again after a third move; putting back gc's text that
+# rode in beside a change to a seed input, and renewing no re-render the branch
+# took back out; a hooked commit that concludes a
 # merge of the default branch keeping what that branch re-rendered, judged from
-# the fork point the merge leaves; and, with no gc on PATH, the render the hook
+# the fork point the merge leaves, and one on a re-audit branch renewing its
+# re-render; and, with no gc on PATH, the render the hook
 # names instead, since the fork point, or since the head a merge brings in where
 # there is no origin/HEAD. For the renderer and sizes: what INDEX.md
 # carries and SOURCES.txt's absence; --sizes with and without a base; the gcq
@@ -172,6 +178,8 @@ check_merge() { # <base> <head> [extra args...]
 # the builtin claude with a line a newer gc adds, and lists one formula only gc
 # defines.
 gc_moves() { printf 'a line a newer gc renders\n' > "$STUB/claude.gc"; printf 'formula = "mol-gc"\n' > "$STUB/mol-gc.toml"; }
+# A still newer gc moves both again, the formula only gc defines included.
+gc_moves_again() { printf 'a line a still newer gc renders\n' > "$STUB/claude.gc"; printf 'formula = "mol-gc"\n# a still newer gc\n' > "$STUB/mol-gc.toml"; }
 gc_restores() { rm -f "$STUB/claude.gc" "$STUB/mol-gc.toml"; }
 # The working tree holds <file> under the audit as <rev> commits it, absence included.
 as_committed() { git -C "$R" diff --quiet "$1" -- "generated/seed-audit/$2"; } # <rev> <file>
@@ -197,6 +205,26 @@ has "$out" "assets/scripts/render-seed-audit.sh --since base && git add generate
 render_since base >/dev/null; commit "render what the branch moves"
 out=$(check_merge base moved); rc=$?
 eq "$rc" 0 "…and the remedy it names clears the hold"
+
+# A re-audit renders what gc moved, and gc moves again before it merges. Its
+# copy is then neither the base's nor the render, and the remedy the hold
+# names renews the re-render rather than putting back the base's copy.
+echo "# a re-render that gc has moved past is held, and the remedy renews it"
+branch base readopted
+gc_moves
+render; commit "re-audit: adopt the text gc moved"
+gc_moves_again
+out=$(check_merge base readopted); rc=$?
+eq "$rc" 1 "a re-render that gc has moved past exits 1"
+has "$out" "agents/claude.md (the merge commits a copy that is neither base's nor its render)" \
+    "…naming the re-render's copy, with why"
+render_since base >/dev/null; commit "render what the branch moves"
+has "$(git -C "$R" show HEAD:generated/seed-audit/agents/claude.md)" "a line a still newer gc renders" \
+    "the remedy renews the re-render to what gc renders now"
+out=$(check_merge base readopted); rc=$?
+eq "$rc" 0 "…and clears the hold"
+has "$out" "seed audit is current at the merge of readopted into base" "…leaving the merge current, not the base's staleness"
+gc_restores
 
 echo "# a head that commits the fresh render is current, on one render"
 branch base fresh
@@ -465,6 +493,106 @@ git -C "$R" config --unset core.hooksPath
 git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
 gc_restores
 
+# The branch re-renders what gc moved, and gc moves again before a hooked
+# commit. The copy the re-render committed is then neither the fork point's nor
+# the render, and the adoption is renewed rather than put back as the fork
+# point commits it. A third move renews it again, though a hooked commit, not a
+# re-render, changed it last.
+echo "# a hooked commit renews a re-render of its branch that gc has moved past"
+branch base hooked-readopted
+mkdir -p "$R/assets/hooks"
+cp "$HERE/../hooks/pre-commit" "$R/assets/hooks/pre-commit"
+commit "carry the pre-commit hook"
+git -C "$R" symbolic-ref refs/remotes/origin/HEAD refs/heads/base
+gc_moves
+render; commit "re-audit: adopt the text gc moved"
+git -C "$R" config core.hooksPath assets/hooks
+gc_moves_again
+edit_prompt alpha "moved by a hooked commit after gc moved again"
+git -C "$R" add -A
+out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "move alpha's prompt" 2>&1); rc=$?
+eq "$rc" 0 "the hooked commit lands"
+has "$(git -C "$R" diff --name-only HEAD~1 HEAD)" "generated/seed-audit/agents/alpha.md" "…carrying the render its own change moved"
+has "$(git -C "$R" show HEAD:generated/seed-audit/agents/claude.md)" "a line a still newer gc renders" \
+    "…renewing the text the re-audit adopted to what gc renders now, not the fork point's"
+has "$(git -C "$R" show HEAD:generated/seed-audit/formulas/mol-gc.md 2>&1)" "a still newer gc" "…keeping the file the re-audit added, renewed"
+if as_committed HEAD~1 INDEX.md; then ok "…and the index row that lists it"
+else bad "…but the index lost the row the re-audit added"; fi
+has "$out" "renewed 2 file(s) a re-render of this branch adopted" "…saying what it renewed"
+hasnt "$out" "kept" "…and keeping nothing as the fork point commits it"
+out=$(check_merge base hooked-readopted); rc=$?
+eq "$rc" 0 "…so the merge gate holds nothing"
+has "$out" "seed audit is current at the merge" "…and finds the merge current, with no staleness left to the base"
+printf 'a line a third gc renders\n' > "$STUB/claude.gc"
+edit_prompt alpha "moved by a hooked commit after gc moved a third time"
+git -C "$R" add -A
+out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "move alpha's prompt again" 2>&1); rc=$?
+eq "$rc" 0 "a hooked commit after a third move lands"
+has "$(git -C "$R" show HEAD:generated/seed-audit/agents/claude.md)" "a line a third gc renders" \
+    "…renewing the re-render again, though a hooked commit changed it last"
+git -C "$R" config --unset core.hooksPath
+git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
+gc_restores
+
+# A commit that changed a seed input and rendered everything plainly carried
+# gc's text in beside its own change. That is no adoption: once gc moves again,
+# a hooked commit puts the fork point's copy back, the index included, though
+# gc's move left the index's text as HEAD commits it.
+echo "# gc's text that rode in beside a change to a seed input is put back, not renewed"
+branch base hooked-ride-in
+mkdir -p "$R/assets/hooks"
+cp "$HERE/../hooks/pre-commit" "$R/assets/hooks/pre-commit"
+commit "carry the pre-commit hook"
+git -C "$R" symbolic-ref refs/remotes/origin/HEAD refs/heads/base
+gc_moves
+edit_prompt beta "moved by a commit that rendered everything"
+render; commit "move beta's prompt and render the whole audit"
+git -C "$R" config core.hooksPath assets/hooks
+gc_moves_again
+edit_prompt alpha "moved by a hooked commit"
+git -C "$R" add -A
+out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "move alpha's prompt" 2>&1); rc=$?
+eq "$rc" 0 "the hooked commit lands"
+if as_committed base agents/claude.md; then ok "…putting claude.md back as the fork point commits it"
+else bad "…but claude.md kept or renewed the text that rode in"; fi
+if as_committed base formulas/mol-gc.md; then ok "…and leaving out the file only gc added"
+else bad "…but the file only gc added stayed"; fi
+if as_committed base INDEX.md; then ok "…with the index row that would list it"
+else bad "…but the index still lists the file it left out"; fi
+has "$out" "as $(git -C "$R" rev-parse base) commits them" "…saying what it kept as the fork point commits it"
+hasnt "$out" "renewed" "…and renewing nothing"
+git -C "$R" config --unset core.hooksPath
+git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
+gc_restores
+
+# A branch that re-rendered what gc moved and then took the re-render back out
+# has no copy of its own left, so once gc moves again a hooked commit keeps the
+# fork point's copy.
+echo "# a re-render the branch took back out is not renewed"
+branch base hooked-taken-back
+mkdir -p "$R/assets/hooks"
+cp "$HERE/../hooks/pre-commit" "$R/assets/hooks/pre-commit"
+commit "carry the pre-commit hook"
+git -C "$R" symbolic-ref refs/remotes/origin/HEAD refs/heads/base
+gc_moves
+render; commit "re-audit: adopt the text gc moved"
+git -C "$R" rm -q -r generated/seed-audit && git -C "$R" checkout -q base -- generated/seed-audit
+commit "take the re-render back out"
+git -C "$R" config core.hooksPath assets/hooks
+gc_moves_again
+edit_prompt alpha "moved by a hooked commit"
+git -C "$R" add -A
+out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "move alpha's prompt" 2>&1); rc=$?
+eq "$rc" 0 "the hooked commit lands"
+if as_committed base agents/claude.md; then ok "…keeping claude.md as the fork point commits it"
+else bad "…but the re-render the branch took back out was renewed"; fi
+if as_committed base formulas/mol-gc.md; then ok "…and leaving out the file only gc added"
+else bad "…but the file only gc added came back"; fi
+hasnt "$out" "renewed" "…renewing nothing"
+git -C "$R" config --unset core.hooksPath
+git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
+gc_restores
+
 # The default branch re-renders what gc moved, and gc moves again before a
 # branch cut earlier merges it in. The merge conflicts, so the commit that
 # concludes it runs the hook.
@@ -501,6 +629,45 @@ has "$out" "as $(git -C "$R" rev-parse hooked-merge-main) commits them" "…judg
 out=$(check_merge hooked-merge-main hooked-merge); rc=$?
 eq "$rc" 0 "…so the merge gate holds nothing"
 has "$out" "hooked-merge-main is already stale in these files" "…and reports gc's newer text as the default branch's own"
+git -C "$R" config --unset core.hooksPath
+git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
+gc_restores
+
+# The other side of that merge: a re-audit branch brings the default branch in
+# after gc moves again. Its commits are read along the side the merge is made
+# on, which shows the re-render, so the re-render is renewed and not put back as
+# the default branch commits it.
+echo "# a hooked merge of the default branch renews a re-render that gc has moved past"
+branch base readopt-merge-fork
+mkdir -p "$R/assets/hooks"
+cp "$HERE/../hooks/pre-commit" "$R/assets/hooks/pre-commit"
+printf 'shared\n' > "$R/shared.md"
+commit "carry the pre-commit hook and a file both sides edit"
+branch readopt-merge-fork readopt-merge-main
+edit_prompt beta "moved on the default branch"
+render; printf 'the default branch\n' > "$R/shared.md"
+commit "the default branch moves beta's prompt"
+branch readopt-merge-fork readopt-merge
+gc_moves
+render; commit "re-audit: adopt the text gc moved"
+printf 'the branch\n' > "$R/shared.md"
+commit "the branch edits the shared file"
+git -C "$R" symbolic-ref refs/remotes/origin/HEAD refs/heads/readopt-merge-main
+git -C "$R" config core.hooksPath assets/hooks
+gc_moves_again
+if git -C "$R" merge -q --no-edit readopt-merge-main >/dev/null 2>&1; then bad "the merge was meant to conflict"
+else ok "the re-audit branch's merge of the default branch conflicts"; fi
+printf 'the branch and the default branch\n' > "$R/shared.md"; git -C "$R" add shared.md
+out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q --no-edit 2>&1); rc=$?
+eq "$rc" 0 "the hooked commit that concludes the merge lands"
+has "$(git -C "$R" show HEAD:generated/seed-audit/agents/claude.md)" "a line a still newer gc renders" \
+    "…renewing the text the re-audit adopted, not the default branch's"
+has "$(git -C "$R" show HEAD:generated/seed-audit/formulas/mol-gc.md 2>&1)" "a still newer gc" "…and the file it added"
+has "$(git -C "$R" show HEAD:generated/seed-audit/agents/beta.md)" "moved on the default branch" "…beside the render the merge brings in"
+has "$out" "renewed 2 file(s) a re-render of this branch adopted" "…saying what it renewed"
+out=$(check_merge readopt-merge-main readopt-merge); rc=$?
+eq "$rc" 0 "…so the merge gate holds nothing"
+has "$out" "seed audit is current at the merge" "…and finds the merge current"
 git -C "$R" config --unset core.hooksPath
 git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
 gc_restores
