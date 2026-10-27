@@ -2015,9 +2015,18 @@ func rollupFailed(item map[string]any) (isFailed, ok bool) {
 	return set && (s == "FAILURE" || s == "ERROR"), ok
 }
 
+// rollupEnded reports a row whose run has ended: a check run with a set
+// conclusion, or a status context in state SUCCESS, FAILURE or ERROR.
+func rollupEnded(item map[string]any) (ended, ok bool) {
+	_, concluded, cok := rollupUpper(item, "conclusion")
+	g, gok := rollupGreen(item)
+	f, fok := rollupFailed(item)
+	return concluded || g || f, cok && gok && fok
+}
+
 // rollupStart is when a rollup row's run started: gh prints a check run's
 // startedAt, and a status context's createdAt under the same key. started is
-// false for a run not yet started, whose startedAt is absent, null, empty or the
+// false for a run with no start, whose startedAt is absent, null, empty or the
 // zero instant gh prints for an unset time. ok is false for any other value
 // that is not an RFC 3339 instant.
 func rollupStart(item map[string]any) (at time.Time, started, ok bool) {
@@ -2037,35 +2046,51 @@ func rollupStart(item map[string]any) (at time.Time, started, ok bool) {
 	return time.Time{}, false, false
 }
 
-// newestRuns is the rows of a context's newest run: the rows that started last,
-// a run not yet started counting as newer than every run that has. Rows that
-// started at the same instant are all newest. ok=false when a row's start is
-// unreadable.
+// newestRuns is the rows of a context's newest run. A run waiting to start, one
+// with no start that has not ended, is newer than every run that has started.
+// Of the runs that started, the rows that started last are newest, all of them
+// when they started at the same instant. A run that ended without starting,
+// such as one cancelled while queued, is not waiting and has no start to order
+// it by, so it is newest only when no run of the context started or waits to
+// start, and such rows are read together. ok=false when a row's start, or
+// whether it ended, is unreadable.
 func newestRuns(rows []map[string]any, context string) (newest []map[string]any, ok bool) {
+	var waiting, started, endedUnstarted []map[string]any
 	var last time.Time
-	waiting := false // newest holds runs not yet started
 	for _, item := range rows {
 		if rollupName(item) != context {
 			continue
 		}
-		at, started, sok := rollupStart(item)
-		switch {
-		case !sok:
+		at, hasStart, sok := rollupStart(item)
+		if !sok {
 			return nil, false
-		case !started:
-			if !waiting {
-				newest, waiting = nil, true
+		}
+		if hasStart {
+			switch {
+			case started == nil || at.After(last):
+				started, last = []map[string]any{item}, at
+			case at.Equal(last):
+				started = append(started, item)
 			}
-			newest = append(newest, item)
-		case waiting:
-			// It started before a run that has not started yet.
-		case newest == nil || at.After(last):
-			newest, last = []map[string]any{item}, at
-		case at.Equal(last):
-			newest = append(newest, item)
+			continue
+		}
+		ended, eok := rollupEnded(item)
+		switch {
+		case !eok:
+			return nil, false
+		case ended:
+			endedUnstarted = append(endedUnstarted, item)
+		default:
+			waiting = append(waiting, item)
 		}
 	}
-	return newest, true
+	switch {
+	case waiting != nil:
+		return waiting, true
+	case started != nil:
+		return started, true
+	}
+	return endedUnstarted, true
 }
 
 // requiredCheckStates sorts the required contexts that are not green, judging
@@ -2126,9 +2151,8 @@ func endedNotGreen(rollupRaw []byte, required []string) bool {
 				continue
 			}
 			g, _ := rollupGreen(item)
-			f, _ := rollupFailed(item)
-			_, concluded, _ := rollupUpper(item, "conclusion")
-			if !g && (f || concluded) {
+			ended, _ := rollupEnded(item)
+			if ended && !g {
 				return true
 			}
 		}

@@ -1557,10 +1557,12 @@ rm -f "$GH_DIR/branch_main.json"
 
 # GitHub's rollup lists every run on the head, so a required check re-run on the
 # same head keeps its failed run beside the re-run. The pass judges each
-# required check by its newest run, the one started last. A run not yet started
-# is newer than every run that has, and runs that started at the same instant
-# are read together. The rows below are check runs as gh prints them, with an
-# unset time printed as the zero instant.
+# required check by its newest run, the one started last. A run waiting to
+# start is newer than every run that has started, and runs that started at the
+# same instant are read together. A run that ended without starting is newest
+# only when no other run of its check started or waits to start. The rows below
+# are check runs as gh prints them, with an unset time printed as the zero
+# instant.
 ZT="0001-01-01T00:00:00Z"
 checkrun() { # name status conclusion startedAt completedAt
   printf '{"__typename":"CheckRun","name":"%s","workflowName":"tests","status":"%s","conclusion":"%s","startedAt":"%s","completedAt":"%s","detailsUrl":"https://github.com/zook/gc-toolkit/actions/runs/1/job/1"}' \
@@ -1606,6 +1608,30 @@ blocked_with 187 "[$FAILED_RUN, $(checkrun test COMPLETED SUCCESS 2026-10-27T01:
 out=$("$SUT" 2>&1)
 eq "$(pinned NR5) $(cause NR5)" "blocked@sha-187 check-failed" "a failed run beside a green one started at the same instant still fails"
 has "$(reason NR5)" "required check(s) test, test-macos failed" "…whichever of the two rows comes first"
+
+echo "# a run that ended without starting is not waiting: a later run started beside it is newer, in either row order"
+# A run cancelled while queued ends with no start. test lists it before the
+# re-run and test-macos after it.
+unstarted_cancel() { checkrun "$1" COMPLETED CANCELLED "$ZT" 2026-10-27T01:20:00Z; }
+store "[$(anchor NR7 192 "$(seeded_failed 192)"), $(rev NR7)]"
+blocked_with 192 "[$(unstarted_cancel test), $(checkrun test IN_PROGRESS "" 2026-10-27T01:30:00Z "$ZT"),
+  $(checkrun test-macos IN_PROGRESS "" 2026-10-27T01:30:00Z "$ZT"), $(unstarted_cancel test-macos)]"
+out=$("$SUT" 2>&1)
+eq "$(pinned NR7) $(cause NR7)" "progressing@sha-192 <absent>" "the re-run is the newest run, so the city waits on it over an earlier check-failed"
+has "$out" "PR#192 is BLOCKED by branch protection while required check(s) run at sha-192: test test-macos" "…for both checks, whichever row comes first"
+
+echo "# …and so is a queued run beside it"
+store "[$(anchor NR8 193), $(rev NR8)]"
+blocked_with 193 "[$(unstarted_cancel test), $(checkrun test QUEUED "" "$ZT" "$ZT"), $(checkrun test-macos QUEUED "" "$ZT" "$ZT"), $(unstarted_cancel test-macos)]"
+out=$("$SUT" 2>&1)
+eq "$(pinned NR8)" "progressing@sha-193" "a queued run waits to start, and a run that ended without starting does not"
+
+echo "# a run that ended without starting, alone, still reads failed"
+store "[$(anchor NR9 194), $(rev NR9)]"
+blocked_with 194 "[$(unstarted_cancel test), $MACOS_GREEN]"
+out=$("$SUT" 2>&1)
+eq "$(pinned NR9) $(cause NR9)" "blocked@sha-194 check-failed" "the cancelled run is its check's only run"
+has "$(reason NR9)" "required check(s) test failed" "…and the reason names the check"
 
 echo "# a run whose start is not an instant leaves the rollup unreadable, and no verdict is recorded"
 store "[$(anchor NR6 188 ',"pr.machine":"progressing@sha-188@2026-10-27T00:11:44Z"'), $(rev NR6)]"
@@ -1675,6 +1701,14 @@ store "[$(anchor US6 191), $(rev US6)]"
 unstable_with 191 "[$FAILED_RUN, $(checkrun test IN_PROGRESS "" 2026-10-27T01:01:00Z "$ZT"), $(checkrun test COMPLETED SUCCESS 2026-10-27T01:02:00Z 2026-10-27T01:15:00Z), $MACOS_GREEN]"
 out=$("$SUT" 2>&1)
 eq "$(pinned US6) $(cause US6)" "blocked@sha-191 check-failed" "a run that ended without passing stays on the head, whatever else still runs"
+
+echo "# an UNSTABLE PR whose required check ended without starting and is re-running records progressing, in either row order"
+store "[$(anchor US7 195 "$(seeded_failed 195)"), $(rev US7)]"
+unstable_with 195 "[$(unstarted_cancel test), $(checkrun test IN_PROGRESS "" 2026-10-27T01:30:00Z "$ZT"),
+  $(checkrun test-macos IN_PROGRESS "" 2026-10-27T01:30:00Z "$ZT"), $(unstarted_cancel test-macos)]"
+out=$("$SUT" 2>&1)
+has "$out" "PR#195 is UNSTABLE and a REQUIRED check is not green at sha-195: test(RED) test-macos(RED); merge held (anchor US7)" "test premise: the cancelled runs hold the merge"
+eq "$(pinned US7) $(cause US7)" "progressing@sha-195 <absent>" "each check's newest run is running, so the city waits on it over an earlier check-failed"
 rm -f "$GH_DIR/rules_main.json"
 
 echo "# through both writers, a failed required check re-run on its head reads merging, and a cause that holds keeps needs-attention"

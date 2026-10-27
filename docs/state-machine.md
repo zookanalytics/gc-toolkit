@@ -702,7 +702,10 @@ rules before it names a cause. An unresolved required thread is
 required checks. The check rollup lists every run on the head, so a required
 check re-run on the same head keeps its failed run beside the re-run. The pass
 judges each required check by its newest run, the one started last, and a run
-not yet started is newer than every run that has. A check whose newest run
+waiting to start is newer than every run that has started. A run that ended
+without starting, such as one cancelled while queued, has no start to order it
+by, so it is the newest run only when no other run of its check started or
+waits to start. A check whose newest run
 failed is `check-failed`. One whose newest run is still queued or running, or
 one that has not reported yet (GitHub shows it as Expected), is `progressing`,
 and every required check's newest run green leaves `rule`. The `UNSTABLE` arm

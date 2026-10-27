@@ -413,3 +413,69 @@ func TestOpenPRsReadsTheWholeStreamOrNothing(t *testing.T) {
 		}
 	}
 }
+
+// The rollup keeps every run on the head, so a re-run lists beside the run it
+// superseded, and each case is read in both row orders: the verdict must not
+// depend on which row gh prints first. A start gh prints as the zero instant is
+// unset, so a run with none is waiting when it has not ended, and has no start
+// to order it by when it has.
+func TestRequiredCheckStatesJudgesEachCheckByItsNewestRun(t *testing.T) {
+	const zt = "0001-01-01T00:00:00Z"
+	run := func(status, conclusion, startedAt, completedAt string) string {
+		return fmt.Sprintf(`{"__typename":"CheckRun","name":"test","workflowName":"tests","status":%q,"conclusion":%q,"startedAt":%q,"completedAt":%q}`,
+			status, conclusion, startedAt, completedAt)
+	}
+	greenEarly := run("COMPLETED", "SUCCESS", "2026-10-27T00:30:00Z", "2026-10-27T00:45:00Z")
+	failed := run("COMPLETED", "FAILURE", "2026-10-27T01:00:00Z", "2026-10-27T01:10:00Z")
+	greenBeside := run("COMPLETED", "SUCCESS", "2026-10-27T01:00:00Z", "2026-10-27T01:05:00Z")
+	running := run("IN_PROGRESS", "", "2026-10-27T01:30:00Z", zt)
+	greenLate := run("COMPLETED", "SUCCESS", "2026-10-27T01:30:00Z", "2026-10-27T01:45:00Z")
+	queued := run("QUEUED", "", zt, zt)
+	cancelledUnstarted := run("COMPLETED", "CANCELLED", zt, "2026-10-27T01:20:00Z")
+	for _, tc := range []struct {
+		name string
+		rows []string
+		want string // failed, pending or green
+	}{
+		{"a re-run still running beside the failed run it superseded", []string{failed, running}, "pending"},
+		{"a queued re-run beside a failed run", []string{failed, queued}, "pending"},
+		{"a green re-run beside the failed run it superseded", []string{failed, greenLate}, "green"},
+		{"a failed run after a green one", []string{greenEarly, failed}, "failed"},
+		{"a failed run and a green run that started at the same instant", []string{failed, greenBeside}, "failed"},
+		{"a run cancelled before it started beside a later run still running", []string{cancelledUnstarted, running}, "pending"},
+		{"a run cancelled before it started beside a queued run", []string{cancelledUnstarted, queued}, "pending"},
+		{"a run cancelled before it started beside a later green run", []string{cancelledUnstarted, greenLate}, "green"},
+		{"a run cancelled before it started beside any run that started", []string{cancelledUnstarted, greenEarly}, "green"},
+		{"a run cancelled before it started, alone", []string{cancelledUnstarted}, "failed"},
+		{"no run yet", nil, "pending"},
+	} {
+		orders := [][]string{tc.rows}
+		if len(tc.rows) == 2 {
+			orders = append(orders, []string{tc.rows[1], tc.rows[0]})
+		}
+		for i, rows := range orders {
+			raw := []byte(`{"statusCheckRollup":[` + strings.Join(rows, ",") + `]}`)
+			f, p, ok := requiredCheckStates(raw, []string{"test"})
+			got := "green"
+			switch {
+			case !ok:
+				got = "unreadable"
+			case len(f) > 0:
+				got = "failed"
+			case len(p) > 0:
+				got = "pending"
+			}
+			if got != tc.want {
+				t.Errorf("%s (order %d): %s, want %s", tc.name, i+1, got, tc.want)
+			}
+		}
+	}
+
+	unreadable := strings.Replace(running, `"startedAt":"2026-10-27T01:30:00Z"`, `"startedAt":5`, 1)
+	for i, rows := range [][]string{{failed, unreadable}, {unreadable, failed}} {
+		raw := []byte(`{"statusCheckRollup":[` + strings.Join(rows, ",") + `]}`)
+		if f, p, ok := requiredCheckStates(raw, []string{"test"}); ok {
+			t.Errorf("a start that is not an instant (order %d): failed=%v pending=%v, want unreadable", i+1, f, p)
+		}
+	}
+}
