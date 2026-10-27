@@ -1599,7 +1599,7 @@ const MULTI_RIG: Board = {
   generated_at: '2026-09-01T12:00:00Z',
   total: 2,
   partial: true,
-  partial_errors: ['rig shutupandlisten: context canceled'],
+  partial_errors: ['rig rig-b: context canceled'],
   tiles: [
     tile({ id: 'tk-gct', kind: 'epic', title: 'the gc-toolkit family', severity: 'NORMAL', section: 'active', rig: 'gc-toolkit' }),
     tile({ id: 'tk-gcy', kind: 'epic', title: 'the gascity family', severity: 'NORMAL', section: 'active', rig: 'gascity' }),

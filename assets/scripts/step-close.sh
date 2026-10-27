@@ -169,7 +169,7 @@ NAME_THE_MOLECULE="Pass --root <the gc.root_bead_id on the step bead this shell 
 
 # Does <id> verify as this session's bead for this step? Echoes its status on a
 # match. `index` is exact element equality — `inside`/`contains` match
-# substrings, which would let session lx-zzk own lx-zzk9's bead. A known
+# substrings, which would let session hq-zzk own hq-zzk9's bead. A known
 # molecule gates every answer below it: one assignee covers every molecule a
 # pool agent ever ran, so a matching assignee corroborates the candidate and
 # never outranks its root. An unassigned candidate inside the molecule is ours

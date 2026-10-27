@@ -310,11 +310,10 @@ const (
 //
 // Identifiers cannot be truncated the way prose can, because a hierarchical
 // bead id carries its discriminator in the TAIL. At the fixed width of 11 this
-// column used to have, sl-kg9z6.4.1, .2 and .9 all rendered as "sl-kg9z6.4." —
+// column used to have, tk-eemvf.4.1, .2 and .9 all rendered as "tk-eemvf.4." —
 // three distinct anchors the operator could not tell apart without going to
-// another tool (tk-mtuej). Rig names lost their tails the same way:
-// "shutupandlisten" rendered "shutupandlist" and butted against the next
-// column.
+// another tool (tk-mtuej). Long rig names lost their tails the same way and
+// butted against the next column.
 //
 // Sizing to content rather than capping with an ellipsis keeps the guarantee
 // absolute — no two distinct ids ever render the same cell — and costs nothing

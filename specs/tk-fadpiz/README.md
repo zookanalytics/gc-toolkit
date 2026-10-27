@@ -1,6 +1,6 @@
 ---
 name: Helm board subject-topic rendering — visual capture (tk-fadpiz)
-description: Before/after capture of the Helm board Sittings section showing the tk-fadpiz renderer change — SUBJECT renders the subject's topic (title) instead of a bare id, and HEADLINE falls back to that topic for a takeaway-less row. Captured from the live loomington city, scoped to the gc-toolkit rig.
+description: Before/after capture of the Helm board Sittings section showing the tk-fadpiz renderer change — SUBJECT renders the subject's topic (title) instead of a bare id, and HEADLINE falls back to that topic for a takeaway-less row. Captured from the live mycity city, scoped to the gc-toolkit rig.
 ---
 
 # Helm board subject-topic rendering — visual capture (tk-fadpiz)
@@ -53,7 +53,7 @@ tk-gb2tgn  no takeaway
 
 ## Reproduction
 
-Both binaries read the live loomington city; `GC_HELM_CITY_PATH` pointed at the
+Both binaries read the live mycity city; `GC_HELM_CITY_PATH` pointed at the
 rig directory is the scoping lever. The board has no rig flag — it enumerates
 `<city>/.beads` and `<city>/rigs/*/.beads`, so pointing it at
 `rigs/gc-toolkit` makes it read that one store and nothing else. This is what
@@ -62,8 +62,8 @@ keeps the capture to gc-toolkit beads only.
 ```bash
 # after — this branch (polecat/tk-fadpiz):
 cd services/helm && go build -o /tmp/helm-svc.after ./cmd/helm-svc
-GC_CITY_PATH=/home/zook/loomington \
-  GC_HELM_CITY_PATH=/home/zook/loomington/rigs/gc-toolkit \
+GC_CITY_PATH=/home/zook/mycity \
+  GC_HELM_CITY_PATH=/home/zook/mycity/rigs/gc-toolkit \
   /tmp/helm-svc.after board --limit=0
 
 # before — origin/main, built from a checkout of the base:

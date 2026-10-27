@@ -343,7 +343,7 @@ reader imagines meets that definition. The grading has no point at which it
 runs out of findings.
 
 **What the gap costs now.** When tk-wigtu9 was filed on 2026-08-26, two
-signal-loom docs-only branches, sl-bgmuy (PR#552) and sl-kg9z6.1.2 (PR#559), had
+rig-a docs-only branches, ra-bgmuy (PR#552) and ra-kg9z6.1.2 (PR#559), had
 exhausted a round cap of 3, whose terminal action was an operator ticket. The
 round counter has since been retired. The
 [review-cycle architecture](../tk-ztapg/review-cycle-architecture.md) of

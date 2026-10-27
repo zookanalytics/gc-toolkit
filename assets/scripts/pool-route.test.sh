@@ -36,7 +36,7 @@ export PATH="$BIN:$PATH"
 # is the whole subject: neither name is routable at both scopes, and the
 # conditional-prefix form the copies used to carry cannot tell them apart.
 export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse"},
-  {"qualified_name":"signal-loom/gc-toolkit.converse"},
+  {"qualified_name":"rig-a/gc-toolkit.converse"},
   {"qualified_name":"gc-toolkit/gc-toolkit.polecat"},
   {"qualified_name":"gc-toolkit.deacon"}]}'
 unset STUB_AGENTS_FAIL 2>/dev/null || true
@@ -59,7 +59,7 @@ env -u GC_RIG "$SUT" gc-toolkit.converse >"$TMP/out" 2>"$TMP/err"; RC=$?
 eq "$RC" 1 "exit 1"
 eq "$(cat "$TMP/out")" "" "stdout is EMPTY — a caller assigning it captures no route"
 has "$(cat "$TMP/err")" "matches no live agent identity" "says the name addresses nobody"
-has "$(cat "$TMP/err")" "gc-toolkit/gc-toolkit.converse, signal-loom/gc-toolkit.converse" \
+has "$(cat "$TMP/err")" "gc-toolkit/gc-toolkit.converse, rig-a/gc-toolkit.converse" \
     "and names the live rig-qualified forms the caller could have meant"
 
 echo "# a bare name that IS a live identity is returned bare"
@@ -78,7 +78,7 @@ eq "$OUT" "gc-toolkit/gc-toolkit.polecat" "no second qualifier is prepended"
 echo "# a live pool in another rig is refused: well-formed is not reachable"
 # GC_RIG picks the store the caller's bead lands in as well as the route, so an
 # identity from another rig never lists the store it would have to read.
-GC_RIG=gc-toolkit run signal-loom/gc-toolkit.converse
+GC_RIG=gc-toolkit run rig-a/gc-toolkit.converse
 eq "$RC" 1 "exit 1"
 eq "$OUT" "" "stdout is EMPTY"
 has "$ERR" "which that pool never reads" "says the store and the route disagree"
@@ -118,7 +118,7 @@ echo "# --verdict reads a route the caller did not write"
 verdict() { GC_RIG="${2-gc-toolkit}" "$SUT" --verdict "$1" 2>/dev/null; }
 eq "$(verdict gc-toolkit/gc-toolkit.converse)" "ok" "a live identity reads ok"
 eq "$(verdict gc-toolkit.converse)" "no-identity" "the bare form reads no-identity"
-eq "$(verdict signal-loom/gc-toolkit.converse)" "cross-rig" "another rig's pool reads cross-rig"
+eq "$(verdict rig-a/gc-toolkit.converse)" "cross-rig" "another rig's pool reads cross-rig"
 eq "$(verdict '')" "no-identity" "an empty route reads no-identity"
 # The operator marker is a held route, not a pool name that failed to resolve;
 # reading it as dead is how an operator-owned item gets handed back to a pool.

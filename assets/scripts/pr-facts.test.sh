@@ -468,7 +468,7 @@ has "$out" "retired stale visit V22" "the retirement is reported"
 # the retire passes --force. STUB_ENFORCE_CLOSE_OWNER makes the stub refuse a
 # plain close the way bd does, so this case fails if the --force is dropped.
 echo "# a pre-recorded disposition retires the rework-or-close visit a sitting still holds"
-store "[$(anchor F2n 39 ',"gc.pr_close_disposition_kind":"not-needed","gc.pr_close_disposition_successor":"tk-vn"'), {\"id\":\"VN\",\"status\":\"in_progress\",\"assignee\":\"lx-sitting\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"pr-abandoned.39\",\"gc.continuation_group\":\"F2n\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}]"
+store "[$(anchor F2n 39 ',"gc.pr_close_disposition_kind":"not-needed","gc.pr_close_disposition_successor":"tk-vn"'), {\"id\":\"VN\",\"status\":\"in_progress\",\"assignee\":\"hq-sitting\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"pr-abandoned.39\",\"gc.continuation_group\":\"F2n\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}]"
 printf '%s' "$(prview 39 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_39.json"
 : > "$STUB_ESC_LOG"
 out=$(STUB_ENFORCE_CLOSE_OWNER=1 run)
@@ -763,7 +763,7 @@ echo "# a pr-dispose-failed visit bound by assignee (engaged, not yet claimed) s
 # Engage binds the visit's assignee while it is still open, before the sitting's
 # claim promotes it. The board reads that as engaged, and so does the gate.
 : > "$STUB_DEPS"
-store "[$(anchor F2oa 124 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-oa"'), $(dvisit VE F2oa pr-dispose-failed.124 open lx-sitting)]"
+store "[$(anchor F2oa 124 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-oa"'), $(dvisit VE F2oa pr-dispose-failed.124 open hq-sitting)]"
 printf 'VE|tracks|F2oa\n' > "$STUB_DEPS"
 printf '%s' "$(prview 124 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_124.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
@@ -855,7 +855,7 @@ hasnt "$out" "refreshed its pr-dispose-failed visit VX" "…and writes nothing"
 
 echo "# a visit someone is engaged in keeps its description"
 : > "$STUB_DEPS"
-store "[$(anchor F2y 132 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-y"'), $(dvisit_desc VY F2y pr-dispose-failed.132 "an earlier report" lx-sitting)]"
+store "[$(anchor F2y 132 ',"gc.pr_close_disposition_kind":"folded","gc.pr_close_disposition_successor":"tk-y"'), $(dvisit_desc VY F2y pr-dispose-failed.132 "an earlier report" hq-sitting)]"
 printf 'VY|tracks|F2y\n' > "$STUB_DEPS"
 printf '%s' "$(prview 132 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_132.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
@@ -890,7 +890,7 @@ echo "# the sweep retracts only a visit whose subject closed with its pointer, a
 # visit someone is engaged in is theirs to conclude, and a subject that does
 # not read this pass is left for the next.
 : > "$STUB_DEPS"
-store "[$(anchor F2u 128 '' | jq -c '.status = "closed"'), $(dvisit VU F2u pr-dispose-failed.128), $(anchor F2v 129 ',"gc.superseded_by":"tk-v"' | jq -c '.status = "closed"'), $(dvisit VV F2v pr-dispose-failed.129 open lx-sitting), $(dvisit VG GHOST pr-dispose-failed.130)]"
+store "[$(anchor F2u 128 '' | jq -c '.status = "closed"'), $(dvisit VU F2u pr-dispose-failed.128), $(anchor F2v 129 ',"gc.superseded_by":"tk-v"' | jq -c '.status = "closed"'), $(dvisit VV F2v pr-dispose-failed.129 open hq-sitting), $(dvisit VG GHOST pr-dispose-failed.130)]"
 printf 'VU|tracks|F2u\nVV|tracks|F2v\n' > "$STUB_DEPS"
 : > "$STUB_ESC_LOG"
 out=$(run)
@@ -947,14 +947,14 @@ echo "# an engaged merge-path visit keeps holding the close"
 # A person in that conversation concludes it. Only the rework-or-close visit is
 # retired over a claim, because the disposition answers its question.
 : > "$STUB_DEPS"
-store "[$(anchor F2za 134 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-za"'), $(mpvisit VCE F2za pr-comments.134.1.2 open lx-sitting)]"
+store "[$(anchor F2za 134 ',"gc.pr_close_disposition_kind":"duplicate","gc.pr_close_disposition_successor":"tk-za"'), $(mpvisit VCE F2za pr-comments.134.1.2 open hq-sitting)]"
 printf 'VCE|tracks|F2za\n' > "$STUB_DEPS"
 printf '%s' "$(prview 134 CLOSED CLEAN MERGEABLE)" > "$GH_DIR/pr_view_134.json"
 : > "$STUB_ESC_LOG"; : > "$STUB_REHOME_LOG"
 out=$(run)
 eq "$(bstatus VCE)" "open" "the engaged feedback visit is left to its holder"
 eq "$(bstatus F2za)" "open" "…and it holds the anchor's close"
-has "$out" "VCE (pr-comments.134.1.2) is engaged (lx-sitting)" "…which the pass reports"
+has "$out" "VCE (pr-comments.134.1.2) is engaged (hq-sitting)" "…which the pass reports"
 has "$out" "held by open visit VCE" "…and names as the hold"
 
 echo "# a visit for another PR, or under a key this script does not file, is not retired"
@@ -1873,7 +1873,7 @@ eq "$(cat "$STUB_ESC_LOG")" "" "the sweep files nothing — it only retires"
 # A close that does not land leaves its visit open and reported, and the sweep
 # goes on to the next visit.
 echo "# the approval retire closes an assigned visit, and a refused close leaves it for the next pass"
-store "[{\"id\":\"MC2\",\"status\":\"closed\",\"title\":\"t\",\"notes\":\"\",\"metadata\":{\"merge_result\":\"merged\"}}, {\"id\":\"AV4\",\"status\":\"open\",\"assignee\":\"lx-sitting\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"merge-blocked-approval\",\"gc.continuation_group\":\"MC2\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}, {\"id\":\"AV5\",\"status\":\"open\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"merge-blocked-approval\",\"gc.continuation_group\":\"MC2\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}, {\"id\":\"AV6\",\"status\":\"open\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"merge-blocked-approval\",\"gc.continuation_group\":\"MC2\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}]"
+store "[{\"id\":\"MC2\",\"status\":\"closed\",\"title\":\"t\",\"notes\":\"\",\"metadata\":{\"merge_result\":\"merged\"}}, {\"id\":\"AV4\",\"status\":\"open\",\"assignee\":\"hq-sitting\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"merge-blocked-approval\",\"gc.continuation_group\":\"MC2\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}, {\"id\":\"AV5\",\"status\":\"open\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"merge-blocked-approval\",\"gc.continuation_group\":\"MC2\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}, {\"id\":\"AV6\",\"status\":\"open\",\"title\":\"visit\",\"notes\":\"\",\"metadata\":{\"escalation_key\":\"merge-blocked-approval\",\"gc.continuation_group\":\"MC2\",\"task_kind\":\"visit\",\"gc.routed_to\":\"human\"}}]"
 out=$(STUB_ENFORCE_CLOSE_OWNER=1 STUB_CLOSE_FAIL="AV5" run); rc=$?
 eq "$rc" 0 "a refused retire does not fail the pass"
 eq "$(bstatus AV4)" "closed" "an approval visit still assigned to a sitting is retired over the claim"
@@ -1971,7 +1971,7 @@ out=$(run)
 has "$(cat "$STUB_GH_LOG")" "DISMISS repos/zook/gc-toolkit/pulls/165/reviews/906/dismissals" "the city's own marked block is dismissed"
 
 echo "# posture: an anchor blocked on a human approval says so"
-# The sl-bgmuy/PR#552 fixture: check green at the live head, nothing in flight,
+# The ra-bgmuy/PR#552 fixture: check green at the live head, nothing in flight,
 # and by the pack's old accounting indistinguishable from an anchor progressing.
 store "[$(anchor S1 50)]"
 printf '%s' "$(prview 50 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_50.json"

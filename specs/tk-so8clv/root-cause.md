@@ -6,7 +6,7 @@ description: Investigation record for tk-so8clv. Armed epic children whose own b
 # Root cause — deferred-dispatch arms do not fire on epic children
 
 - **Bead:** tk-so8clv — "deferred-dispatch arms do not fire: armed beads sat hours-to-days with every blocks-edge closed, list shows waiting-on-a-blocker"
-- **Investigated:** 2026-09-27, city `/home/zook/loomington`, `bd` 1.3.0-rc.2, gc-toolkit at `d4f69823`.
+- **Investigated:** 2026-09-27, city `/home/zook/mycity`, `bd` 1.3.0-rc.2, gc-toolkit at `d4f69823`.
 - **Author:** gc-toolkit/gc-toolkit.polecat (claude provider)
 
 ## The question

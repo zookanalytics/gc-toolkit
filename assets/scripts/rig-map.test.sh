@@ -22,7 +22,7 @@ printf '%s\n' "$*" >> "$FAKE_GC_LOG"
 case "$*" in "rig list --json"|"--city "*" rig list --json") ;; *) echo "stub gc: unexpected call: $*" >&2; exit 64 ;; esac
 echo "$$" > "$FAKE_PIDFILE"
 case "${FAKE_MODE:-ok}" in
-  ok)       printf '{"schema_version":"1","rigs":[{"name":"town","path":"/c","prefix":"lx","hq":true,"suspended":false,"running":true},{"name":"al\001pha","path":"/c/rigs/alpha","prefix":"al","hq":false,"suspended":true}]}\n' ;;
+  ok)       printf '{"schema_version":"1","rigs":[{"name":"town","path":"/c","prefix":"hq","hq":true,"suspended":false,"running":true},{"name":"al\001pha","path":"/c/rigs/alpha","prefix":"al","hq":false,"suspended":true}]}\n' ;;
   # gc is one process, so exec: the bound signals gc itself and nothing else.
   slow)     exec sleep 30 ;;
   stderr)   echo "gc rig list: loading city.toml: permission denied" >&2; exit 1 ;;

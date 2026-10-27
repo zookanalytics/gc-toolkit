@@ -1308,7 +1308,7 @@ echo "# a review an earlier two-write create left without its keys is closed bef
 # the merge held by a bead nothing slings or closes.
 store "[$(anchor H4 pull_request correctness "" polecat/h4),
   {\"id\":\"tk-orph\",\"status\":\"open\",\"assignee\":\"\",\"title\":\"Review branch polecat/h4 -> main (correctness): t H4\",\"notes\":\"\",\"metadata\":{}},
-  {\"id\":\"tk-held\",\"status\":\"open\",\"assignee\":\"lx-9\",\"title\":\"Review branch polecat/h4 -> main (correctness): t H4\",\"notes\":\"\",\"metadata\":{}},
+  {\"id\":\"tk-held\",\"status\":\"open\",\"assignee\":\"hq-9\",\"title\":\"Review branch polecat/h4 -> main (correctness): t H4\",\"notes\":\"\",\"metadata\":{}},
   {\"id\":\"tk-tri\",\"status\":\"open\",\"assignee\":\"\",\"title\":\"Review branch polecat/h4 -> main (triage): t H4\",\"notes\":\"\",\"metadata\":{}}]"
 oid h4 > "$GH_DIR/head_polecat_h4"
 printf 'tk-orph|blocks|H4\n' > "$STUB_DEPS"

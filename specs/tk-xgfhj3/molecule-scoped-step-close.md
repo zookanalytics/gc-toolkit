@@ -59,7 +59,7 @@ only when it names exactly one root:
 3. Any live bead of the same formula under this session.
 
 Source 1 alone is not enough, because the stamp is not universal: the six steps
-of root tk-4ffl70 carry `gc.session_id=lx-2rrxb`, and the six of tk-j2ddcs carry
+of root tk-4ffl70 carry `gc.session_id=hq-2rrxb`, and the six of tk-j2ddcs carry
 none. Sources 2 and 3 cover those, and source 3 is also what closes a step whose
 own bead is no longer at an executable tier — the siblings still open in the same
 molecule answer for it.

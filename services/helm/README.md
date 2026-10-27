@@ -190,7 +190,7 @@ engaging a conversation about something that is finished.
 
 It runs the gather **in-process and uncached**: no daemon, no dependency on the
 sidecar being up, which is most of the point of having a CLI. Measured on the
-loomington city (5 stores, 55 anchors):
+operator's city (5 stores, 55 anchors):
 
 | | cold | warm |
 |---|---|---|
@@ -209,7 +209,7 @@ helm-svc probe --timeout=30        # bound the open (default GC_HELM_PROBE_TIMEO
 ```
 
 One question, cheaply: can the binary running it open a bead store? It opens
-one and gathers nothing — ~0.2s against the loomington city, against 2.7s for
+one and gathers nothing — ~0.2s against the operator's city, against 2.7s for
 the board — and one readable store is enough, matching what `Gather` needs to
 return a board at all.
 
@@ -487,7 +487,7 @@ Three shapes come out of it:
 | all parked | NORMAL — no ask of its own | `2 parked for the operator · nothing idle` |
 | none parked | unchanged, byte for byte | `2 open · 0 in flight (stranded)` |
 
-Measured on the live board the day this landed: `sl-kg9z6.1` had been reporting
+Measured on the live board the day this landed: a convoy in another rig had been reporting
 `7 open, 0 in flight (stranded)` while three of those seven were waiting on a
 named operator ruling, and `tk-eemvf` and `tk-9tbbk` were reading `decomposed,
 idle — assign or visit` with nothing under them but a parked child.
@@ -1135,7 +1135,7 @@ any script — gets the JSON it always got. `/helm` is JSON unconditionally; tha
 is the contract U7 mirrors and U8/U9 consume, and no Accept header changes it.
 
 ```bash
-npm run dev        # http://127.0.0.1:5175, proxying the board fetch to a live mount
+npm run dev        # http://127.0.0.1:5175, proxying the board fetch to the city GC_CITY names
 HELM_DEV_MOUNT=http://127.0.0.1:8372/v0/city/<city>/svc/helm npm run dev
 ```
 
@@ -1205,7 +1205,7 @@ ttyd -i 127.0.0.1 -p 7681 -b /terminal -W -a \
 
 `?session=<name>` on the board's own URL is what puts it there — an operator
 knob in the same family as `?terminal=`, accepting anything `gc session attach`
-names: an id (`lx-k7r38`), an alias (`gc-toolkit/gc-toolkit.witness`), or a
+names: an id (`hq-k7r38`), an alias (`gc-toolkit/gc-toolkit.witness`), or a
 session name. Naming nothing sends no `arg` and lands on the city default,
 `gc-toolkit.mayor`, which is exactly what this terminal did before.
 

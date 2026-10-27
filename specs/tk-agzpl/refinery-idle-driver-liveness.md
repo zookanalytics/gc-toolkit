@@ -75,8 +75,8 @@ The driver does not exit. Verified on this host, not inferred:
    and stayed in `tmux-spawn-<uuid>.scope`.
 
 Both observed deaths match: the 03:07:25Z arm (pid 3927, SID==PID, in session
-lx-mnm43) ticked at 03:07:25 / 03:10:23 / 03:13:02, last wrote at 03:15:47Z, and
-was gone by 03:19Z — killed when lx-mnm43's scope was torn down, ~8 minutes after
+hq-mnm43) ticked at 03:07:25 / 03:10:23 / 03:13:02, last wrote at 03:15:47Z, and
+was gone by 03:19Z — killed when hq-mnm43's scope was torn down, ~8 minutes after
 arming, not on any timer. The earlier 9h20m outage has the same signature: a
 clean stop between ticks, no error, no traceback, no exit line. A self-exit would
 have left the lock-contention line or a `PASS-EXIT` fault; neither appears.
@@ -150,7 +150,7 @@ unit inherits `WorkingDirectory=!$HOME`, which is not a git work tree.
 `merge-skill.sh:773` then fails closed on `git remote get-url origin`, prints
 "NOTHING is merged this pass", and `exit 0`s — on every tick, forever. gc-toolkit
 escaped this only by accident (its `idle-loop.sh:38` does its own `cd`);
-signal-loom's copy has no `cd` and silently no-opped under the same unit
+rig-a's copy has no `cd` and silently no-opped under the same unit
 definition. So the unit's `WorkingDirectory` is asserted too, and the arming
 script validates it *before* arming rather than waiting to observe it.
 
@@ -247,7 +247,7 @@ disagree about where a driver lives.
 
 What makes this more than a path change is that `idle-loop.sh` is not in this
 pack at all: it is hand-authored per rig, and the two copies that exist have
-already drifted (signal-loom's has no `cd`, which is why it silently no-opped
+already drifted (rig-a's has no `cd`, which is why it silently no-opped
 under a unit definition gc-toolkit survived). So the open decision is whether the
 pack should OWN the driver — shipped, parameterised, and pointed at from a
 durable path — or whether only its location moves. Filed as **tk-d83wm**

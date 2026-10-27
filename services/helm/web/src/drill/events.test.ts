@@ -8,7 +8,7 @@ import {
   type StreamState,
 } from './events';
 
-const ORIGIN = { baseUrl: 'https://gc-host.tail1234.ts.net', city: 'loomington' };
+const ORIGIN = { baseUrl: 'https://gc-host.tail1234.ts.net', city: 'mycity' };
 
 // A controllable stand-in for the browser's EventSource. Frames are pushed by
 // the test rather than by a server, so the assertions are about how this module
@@ -81,7 +81,7 @@ describe('subscribeCityEvents', () => {
       eventSourceCtor: FakeEventSource as unknown as typeof EventSource,
     });
     expect(FakeEventSource.instances[0].url).toBe(
-      'https://gc-host.tail1234.ts.net/v0/city/loomington/events/stream',
+      'https://gc-host.tail1234.ts.net/v0/city/mycity/events/stream',
     );
     stop();
   });
@@ -177,7 +177,7 @@ describe('subscribeCityEvents', () => {
     // The first connection carries no cursor: the board opens on the live
     // present, not on a replay of the city's backlog.
     expect(FakeEventSource.instances[0].url).toBe(
-      'https://gc-host.tail1234.ts.net/v0/city/loomington/events/stream',
+      'https://gc-host.tail1234.ts.net/v0/city/mycity/events/stream',
     );
 
     FakeEventSource.instances[0].emitNamed(frame({ seq: 41 }));
@@ -185,7 +185,7 @@ describe('subscribeCityEvents', () => {
     vi.advanceTimersByTime(1_000);
 
     expect(FakeEventSource.instances[1].url).toBe(
-      'https://gc-host.tail1234.ts.net/v0/city/loomington/events/stream?after_seq=41',
+      'https://gc-host.tail1234.ts.net/v0/city/mycity/events/stream?after_seq=41',
     );
 
     // ...and what the supervisor replays from that cursor — the event emitted
@@ -252,7 +252,7 @@ describe('subscribeCityEvents', () => {
     FakeEventSource.instances[0].fail();
     vi.advanceTimersByTime(1_000);
     expect(FakeEventSource.instances[1].url).toBe(
-      'https://gc-host.tail1234.ts.net/v0/city/loomington/events/stream',
+      'https://gc-host.tail1234.ts.net/v0/city/mycity/events/stream',
     );
     stop();
   });
@@ -380,7 +380,7 @@ describe('event matching', () => {
 
   it('matches a bead named only in the payload', () => {
     const event = JSON.parse(
-      frame({ subject: 'lx-8y6j', payload: { bead_id: 'tk-eemvf.3' } as never }),
+      frame({ subject: 'hq-8y6j', payload: { bead_id: 'tk-eemvf.3' } as never }),
     ) as CityEvent;
     expect(eventConcernsBead(event, 'tk-eemvf.3')).toBe(true);
   });
@@ -389,25 +389,25 @@ describe('event matching', () => {
     const event = JSON.parse(
       frame({
         type: 'session.stranded' as never,
-        subject: 'lx-8y6j',
-        payload: { session_id: 'lx-8y6j', work_bead_ids: ['tk-eemvf.3'] } as never,
+        subject: 'hq-8y6j',
+        payload: { session_id: 'hq-8y6j', work_bead_ids: ['tk-eemvf.3'] } as never,
       }),
     ) as CityEvent;
     expect(eventConcernsBead(event, 'tk-eemvf.3')).toBe(true);
   });
 
   it('matches a session by id, subject, or payload', () => {
-    const bySession = JSON.parse(frame({ session_id: 'lx-8y6j' })) as CityEvent;
-    expect(eventConcernsSession(bySession, 'lx-8y6j')).toBe(true);
+    const bySession = JSON.parse(frame({ session_id: 'hq-8y6j' })) as CityEvent;
+    expect(eventConcernsSession(bySession, 'hq-8y6j')).toBe(true);
 
-    const bySubject = JSON.parse(frame({ subject: 'lx-8y6j' })) as CityEvent;
-    expect(eventConcernsSession(bySubject, 'lx-8y6j')).toBe(true);
+    const bySubject = JSON.parse(frame({ subject: 'hq-8y6j' })) as CityEvent;
+    expect(eventConcernsSession(bySubject, 'hq-8y6j')).toBe(true);
 
     const byPayload = JSON.parse(
-      frame({ subject: 'other', payload: { session_id: 'lx-8y6j' } as never }),
+      frame({ subject: 'other', payload: { session_id: 'hq-8y6j' } as never }),
     ) as CityEvent;
-    expect(eventConcernsSession(byPayload, 'lx-8y6j')).toBe(true);
+    expect(eventConcernsSession(byPayload, 'hq-8y6j')).toBe(true);
 
-    expect(eventConcernsSession(JSON.parse(frame()) as CityEvent, 'lx-8y6j')).toBe(false);
+    expect(eventConcernsSession(JSON.parse(frame()) as CityEvent, 'hq-8y6j')).toBe(false);
   });
 });

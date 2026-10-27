@@ -42,11 +42,11 @@ change so the follow-up window is taken the same way).
 Each of the five is **one** session, not a respawn loop:
 
 ```
-gc-toolkit/gc-toolkit.witness      lx-5cv9v   started 2026-08-19T03:48:43Z
-gascity/gc-toolkit.witness         lx-vlvay   started 2026-08-19T03:48:41Z
-signal-loom/gc-toolkit.witness     lx-n5xi6   started 2026-08-19T03:48:41Z
-shutupandlisten/gc-toolkit.witness lx-rf7rk   started 2026-08-19T03:48:44Z
-gc-toolkit.deacon                  lx-b14ge   started 2026-08-19T03:48:40Z
+gc-toolkit/gc-toolkit.witness      hq-5cv9v   started 2026-08-19T03:48:43Z
+gascity/gc-toolkit.witness         hq-vlvay   started 2026-08-19T03:48:41Z
+rig-a/gc-toolkit.witness     hq-n5xi6   started 2026-08-19T03:48:41Z
+rig-b/gc-toolkit.witness hq-rf7rk   started 2026-08-19T03:48:44Z
+gc-toolkit.deacon                  hq-b14ge   started 2026-08-19T03:48:40Z
 ```
 
 Over the whole 24h window each worker shows **exactly one** distinct
@@ -228,7 +228,7 @@ is **30m**, and the witness's own `escalation_cooldown` is **24h** — at 600 s 
 patrol still takes 144 observations per cooldown window. Dolt health is
 additionally covered by `[maintenance.dolt]` and the `boot-health` order.
 
-Nothing here touches the lx-c4hqp blocks, which address backlog growth, a
+Nothing here touches the hq-c4hqp blocks, which address backlog growth, a
 separate and still-real problem. This adds the missing target rather than
 swapping one for the other.
 
@@ -240,7 +240,7 @@ merges and the rig checkout syncs:
 
 ```bash
 gc session reset gc-toolkit.deacon
-for r in gc-toolkit gascity signal-loom shutupandlisten; do
+for r in gc-toolkit gascity rig-a rig-b; do
   gc session reset "$r/gc-toolkit.witness"
 done
 # then confirm the new value is what startup will read:

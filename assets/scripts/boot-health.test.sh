@@ -80,7 +80,7 @@ export BOOT_HEALTH_CALL_TIMEOUT=0
 NOW="$(date +%s)"
 iso() { jq -rn --argjson s "$1" '$s | todateiso8601'; }
 wisp() { # $1=status  $2=age seconds
-    printf '[{"id":"lx-wisp-t","title":"mol-deacon-patrol","status":"%s","updated_at":"%s"}]' \
+    printf '[{"id":"hq-wisp-t","title":"mol-deacon-patrol","status":"%s","updated_at":"%s"}]' \
         "$1" "$(iso $((NOW - $2)))"
 }
 
@@ -140,7 +140,7 @@ eq "$(grep -c '^cold_since=0' "$TMP/state/state" || true)" 1 \
 
 # --- (b) The query must not narrow, cap, or reach into closed history. -------
 ARGV="$(cat "$TMP/argv")"
-has   "$ARGV" "--include-infra" "wisp query passes --include-infra (wisps are infra beads; lx-ody8m)"
+has   "$ARGV" "--include-infra" "wisp query passes --include-infra (wisps are infra beads; hq-ody8m)"
 has   "$ARGV" "--type=molecule" "wisp query is typed to molecule"
 has   "$ARGV" "--limit=0"       "wisp query is uncapped (a cap goes dead silently, under load only)"
 hasnt "$ARGV" "--status"        "wisp query carries NO --status filter (tk-qdhnd: hides the poured-but-unclaimed wisp)"
@@ -183,8 +183,8 @@ eq "$(grep -cxF '  cold since      2026-10-08T07:13:28Z' "$TMP/body" || true)" 1
 # and the age check goes dead exactly when the detector matters most.
 run 2 STUB_WISPS="$(awk -v n=120 -v old="$(iso $((NOW - 7200)))" -v new="$(iso $((NOW - 60)))" 'BEGIN{
     printf "[";
-    for (i = 0; i < n; i++) printf "{\"id\":\"lx-noise-%d\",\"title\":\"other molecule\",\"status\":\"in_progress\",\"updated_at\":\"%s\"},", i, old;
-    printf "{\"id\":\"lx-wisp-t\",\"title\":\"mol-deacon-patrol\",\"status\":\"open\",\"updated_at\":\"%s\"}]", new }')" \
+    for (i = 0; i < n; i++) printf "{\"id\":\"hq-noise-%d\",\"title\":\"other molecule\",\"status\":\"in_progress\",\"updated_at\":\"%s\"},", i, old;
+    printf "{\"id\":\"hq-wisp-t\",\"title\":\"mol-deacon-patrol\",\"status\":\"open\",\"updated_at\":\"%s\"}]", new }')" \
     BOOT_HEALTH_REPORT_AFTER=0
 eq "$(mailed)" no "a young wisp behind 120 unrelated rows still reads healthy"
 

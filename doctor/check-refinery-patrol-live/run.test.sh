@@ -176,7 +176,7 @@ has "$OUT" "$A: find-work queue empty" "so the stale wisp rests beside an empty 
 
 echo "── 7. only this refinery's patrol wisps date its patrol ──"
 store alpha "$(work tk-old "$A" 5430)" "$(wisp tk-wisp-stale "$A" 4230)" \
-    "$(wisp tk-wisp-foreign lx-wisp-abc 90)" "$(wisp tk-wisp-other "$A" 90 in_progress mol-other-loop)"
+    "$(wisp tk-wisp-foreign hq-wisp-abc 90)" "$(wisp tk-wisp-other "$A" 90 in_progress mol-other-loop)"
 run
 eq "$RC" "2" "a fresh wisp assigned elsewhere, or titled for another formula, is not movement"
 has "$OUT" "its patrol wisp tk-wisp-stale (in_progress) last moved 70m ago" "the stale patrol wisp is the one judged"

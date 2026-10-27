@@ -333,7 +333,7 @@ Every reconcile pass logs:
 
 ```
 buildDesiredState: agent "proactive": running command "GC_DOLT_PORT='36758' case \"${GC_PROACTIVE_ENABLED:-}\" in …": exit status 2 (using new demand=0)
-scaleCheck: PARTIAL — scale_check failed for gc-toolkit/gc-toolkit.proactive,signal-loom/gc-toolkit.proactive
+scaleCheck: PARTIAL — scale_check failed for gc-toolkit/gc-toolkit.proactive,rig-a/gc-toolkit.proactive
 ```
 
 The reconciler prefixes `GC_DOLT_PORT='…' ` to the script, whose first token is
