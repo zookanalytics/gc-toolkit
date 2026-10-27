@@ -706,12 +706,16 @@ func (m *merger) handle(row *gcbd.Bead) {
 			if notgreen != "" {
 				// The hold reads every run on the head, a superseded one
 				// included, and the verdict judges each required check by its
-				// newest run, as handleBlocked does. A hold that stands only on a
-				// superseded run lasts until a push moves the head, so it is
-				// blocked.
-				if failed, pending, ok := requiredCheckStates(rollupRaw, reqContexts); ok {
-					if !m.recordCheckVerdict(id, headOid, aroute, failed, pending) {
+				// newest run, as handleBlocked does. A hold that stands only on
+				// superseded runs lasts until a push moves the head once one of
+				// them has ended without passing, so it is blocked. While each of
+				// them is still queued or running, it can end green and release
+				// the hold, so it is progressing.
+				if failed, pending, ok := requiredCheckStates(rollupRaw, reqContexts); ok && !m.recordCheckVerdict(id, headOid, aroute, failed, pending) {
+					if endedNotGreen(rollupRaw, reqContexts) {
 						m.recordBlocked(id, headOid, aroute, prstatus.CauseCheckFailed, "a superseded run of a required check holds the merge at "+shortSha(headOid)+" until a push moves the head: "+notgreen)
+					} else {
+						m.recordMachine(id, "progressing", headOid, aroute)
 					}
 				}
 				fmt.Fprintf(m.stdout, "%s: PR#%s is UNSTABLE and a REQUIRED check is not green at %s: %s; merge held (anchor %s)\n", mergeProg, num, headOid, notgreen, id)
@@ -2107,6 +2111,29 @@ func requiredCheckStates(rollupRaw []byte, required []string) (failed, pending [
 		}
 	}
 	return failed, pending, true
+}
+
+// endedNotGreen reports whether a required context has a run on the head that
+// ended without passing: a check run that concluded anything but SUCCESS,
+// NEUTRAL or SKIPPED, or a status context in state FAILURE or ERROR. Such a run
+// stays on the head until a push moves it, while a run still queued or running
+// can end green. It reads a rollup requiredCheckStates found readable.
+func endedNotGreen(rollupRaw []byte, required []string) bool {
+	rows, _ := rollupRows(rollupRaw)
+	for _, c := range required {
+		for _, item := range rows {
+			if rollupName(item) != c {
+				continue
+			}
+			g, _ := rollupGreen(item)
+			f, _ := rollupFailed(item)
+			_, concluded, _ := rollupUpper(item, "conclusion")
+			if !g && (f || concluded) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // notGreenRequired names each required context that is MISSING or RED in the

@@ -1618,8 +1618,10 @@ rm -f "$GH_DIR/rules_main.json"
 # The UNSTABLE arm holds the merge while any run of a required check on the head
 # is not green, a superseded run included, and records the verdict the BLOCKED
 # arm records for the same required checks, each judged by its newest run. A
-# hold that stands only on a superseded run lasts until a push moves the head,
-# so it records blocked. A check outside the required set decides nothing.
+# hold that stands only on superseded runs lasts until a push moves the head
+# once one of them has ended without passing, so it records blocked. While each
+# of them still runs it records progressing. A check outside the required set
+# decides nothing.
 unstable_with() { # num rollup-json — an approved PR GitHub reports UNSTABLE, with that check rollup
   printf '%s' "$(prview "$1" OPEN UNSTABLE ",\"statusCheckRollup\":$2")" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_$1.json"
   approved "$1"
@@ -1658,6 +1660,21 @@ out=$("$SUT" 2>&1)
 has "$out" "PR#189 is UNSTABLE and a REQUIRED check is not green at sha-189: test(RED); merge held (anchor US4)" "test premise: the superseded failed run still holds the merge"
 eq "$(pinned US4) $(cause US4)" "blocked@sha-189 check-failed" "a hold the newest run does not explain is blocked"
 has "$(reason US4)" "a superseded run of a required check holds the merge at sha-189 until a push moves the head" "…and the reason says what releases it"
+
+echo "# an UNSTABLE PR held only by a superseded run still running records progressing: that run can end green"
+# A workflow that runs twice for one head runs a check twice at once, and the
+# run that started last can finish first.
+store "[$(anchor US5 190 "$(seeded_failed 190)"), $(rev US5)]"
+unstable_with 190 "[$(checkrun test IN_PROGRESS "" 2026-10-27T01:00:00Z "$ZT"), $(checkrun test COMPLETED SUCCESS 2026-10-27T01:01:00Z 2026-10-27T01:15:00Z), $MACOS_GREEN]"
+out=$("$SUT" 2>&1)
+has "$out" "PR#190 is UNSTABLE and a REQUIRED check is not green at sha-190: test(RED); merge held (anchor US5)" "test premise: the superseded run still running holds the merge"
+eq "$(pinned US5) $(cause US5)" "progressing@sha-190 <absent>" "a hold that run can release is the city's wait, over an earlier check-failed"
+
+echo "# …and a superseded run that failed beside it keeps the hold until a push"
+store "[$(anchor US6 191), $(rev US6)]"
+unstable_with 191 "[$FAILED_RUN, $(checkrun test IN_PROGRESS "" 2026-10-27T01:01:00Z "$ZT"), $(checkrun test COMPLETED SUCCESS 2026-10-27T01:02:00Z 2026-10-27T01:15:00Z), $MACOS_GREEN]"
+out=$("$SUT" 2>&1)
+eq "$(pinned US6) $(cause US6)" "blocked@sha-191 check-failed" "a run that ended without passing stays on the head, whatever else still runs"
 rm -f "$GH_DIR/rules_main.json"
 
 echo "# through both writers, a failed required check re-run on its head reads merging, and a cause that holds keeps needs-attention"
