@@ -34,7 +34,7 @@ cat > "$TMP/rigs.json" <<JSON
 {"rigs":[
   {"name":"alpha","path":"$TMP/rigs/alpha","prefix":"al","hq":false},
   {"name":"beta","path":"$TMP/rigs/beta","prefix":"bt","hq":false},
-  {"name":"town","path":"$TMP/hq","prefix":"lx","hq":true},
+  {"name":"town","path":"$TMP/hq","prefix":"hq","hq":true},
   {"name":"void","path":"","prefix":"vd","hq":false}
 ]}
 JSON
@@ -107,7 +107,7 @@ unset FAKE_RIGS_FAIL 2>/dev/null || true
 
 mkbead "$TMP/rigs/alpha" al-lives
 mkbead "$TMP/rigs/beta"  bt-lives
-mkbead "$TMP/hq"         lx-lives
+mkbead "$TMP/hq"         hq-lives
 # For the exact-id checks below: `al-uniq` is a prefix of exactly one bead, and
 # `al-dup` a prefix of two — a unique-partial hit and an ambiguous reference.
 mkbead "$TMP/rigs/alpha" al-uniqfull
@@ -124,7 +124,7 @@ eq "$OUT" alpha "  ... to alpha"
 run --path bt-anything
 eq "$OUT" "$TMP/rigs/beta" "--path names the owning rig's repo, resolved from the prefix alone"
 
-run --db lx-anything
+run --db hq-anything
 eq "$OUT" "$TMP/hq/.beads" "--db reaches the HQ store, which no --rig value names"
 
 # --- the finding: a foreign bead is not an absent one -----------------------

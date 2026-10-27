@@ -55,7 +55,7 @@ Walked three surfaces:
 1. `docs/` — current central-tier filings (17 files in 4 groups).
 2. `agents/<name>/` — agent prompt templates and provenance files.
 3. Mechanik auto-memory at
-   `/home/zook/.claude/projects/-home-zook-loomington/memory/`
+   `/home/zook/.claude/projects/-home-zook-mycity/memory/`
    (100 entries indexed in `MEMORY.md`).
 
 For each item, asked the four file-structure.md questions:
@@ -138,7 +138,7 @@ without needing to also own the prompt templates that *cite* them.
 
 ### 2b. Mechanik auto-memory
 
-Surface: `/home/zook/.claude/projects/-home-zook-loomington/memory/`. 100
+Surface: `/home/zook/.claude/projects/-home-zook-mycity/memory/`. 100
 entries indexed in `MEMORY.md`. Two filename families: `feedback_*.md` (rules
 mechanik has been corrected on) and `project_*.md` (incident records and
 current-state operational facts).

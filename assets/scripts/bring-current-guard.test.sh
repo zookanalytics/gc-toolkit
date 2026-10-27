@@ -1061,12 +1061,12 @@ has "$(notes MI26)" "Hand-back refused: the write that reopens MI26 and releases
 has "$(notes MI26)" "Stopped bringing the branch current" "…beside why it stopped"
 restart; bring
 store "[$(child MI27 "$HELD")]"
-jq -c 'map(if .id == "MI27" then .assignee = "lx-other" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
+jq -c 'map(if .id == "MI27" then .assignee = "hq-other" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 : > "$STUB_GC_LOG"; : > "$ASK_LOG"
 unres MI27; rc=$?
-eq "$rc|$(bstatus MI27)|$(bassignee MI27)" "0|in_progress|lx-other" "a bead with no molecule that another session holds is not released"
+eq "$rc|$(bstatus MI27)|$(bassignee MI27)" "0|in_progress|hq-other" "a bead with no molecule that another session holds is not released"
 eq "$(meta MI27 gc.session_id)|$(meta MI27 gc.routed_to)" "polecat|gc-toolkit/gc-toolkit.polecat" "…its pins and route untouched"
-has "$(notes MI27)" "Hand-back refused: MI27 shows status in_progress and assignee lx-other" "…and the notes say so"
+has "$(notes MI27)" "Hand-back refused: MI27 shows status in_progress and assignee hq-other" "…and the notes say so"
 restart; bring
 store "[$(child MI21)]"
 : > "$STUB_GC_LOG"; : > "$ASK_LOG"

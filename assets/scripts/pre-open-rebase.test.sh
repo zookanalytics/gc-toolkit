@@ -89,7 +89,7 @@ C1_HEAD=$(git -C "$SRC" rev-parse polecat/tk-c1)
 SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/pre-open-rebase.sh" "$HERE/branch-supersession.sh" "$HERE/pool-route.sh"
 SUT="$SD/pre-open-rebase.sh"
-POOL="loomington/gc-toolkit.polecat"
+POOL="mycity/gc-toolkit.polecat"
 # escalate.sh's contract for the supersession guard: one visit per subject+key,
 # stamped and routed at the board so the guard can find the visit it filed and
 # count it as asking somebody. STUB_ESC_RC models a refusal.
@@ -462,7 +462,7 @@ echo "# a child an earlier two-write create left without its work order is close
 # rescues it and a child filed beside it would leave the merge held by it.
 reset "$(pre AO polecat/tk-c1)" \
   '{"id":"O1","status":"open","assignee":"","title":"Merge main into polecat/tk-c1: base moved, the branch no longer merges","metadata":{}}' \
-  '{"id":"O2","status":"open","assignee":"lx-9","title":"Merge main into polecat/tk-c1: base moved, the branch no longer merges","metadata":{}}'
+  '{"id":"O2","status":"open","assignee":"hq-9","title":"Merge main into polecat/tk-c1: base moved, the branch no longer merges","metadata":{}}'
 printf 'O1|blocks|AO\n' > "$STUB_DEPS"
 OUT=$(run --fix-pool "$POOL")
 eq "$(bstatus O1)|$(meta O1 gc.outcome)" "closed|abandoned" "the orphan is closed as abandoned"

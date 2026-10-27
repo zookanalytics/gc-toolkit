@@ -21,13 +21,13 @@ A converse sitting was held to ask the operator to decide about an open
 PR that was simply awaiting their review. That is their own review queue,
 handed back to them as a decision to make.
 
-## What happened (visit su-331y, rig shutupandlisten)
+## What happened (visit rb-331y, rig rig-b)
 
 | When | What |
 |---|---|
-| 2026-08-12T02:49Z | The detector files visit su-331y on workflow root su-ykfw. Premise: *"no `triage.hold` and no `gc.takeaway` on the root"*. True at that moment. |
-| 2026-08-12T05:01Z | Converse visit su-h32f dispositions the same root and stamps `triage.hold`, naming the wait (operator review of PR #55). su-331y's premise is now false — two hours after it was filed. |
-| 2026-08-13T17:43Z | A converse session claims the stale su-331y ~1.5 days later. It rebuilds state, **sees** the hold in force, **sees** the underlying condition is a benign open PR — and holds a sitting anyway. |
+| 2026-08-12T02:49Z | The detector files visit rb-331y on workflow root rb-ykfw. Premise: *"no `triage.hold` and no `gc.takeaway` on the root"*. True at that moment. |
+| 2026-08-12T05:01Z | Converse visit rb-h32f dispositions the same root and stamps `triage.hold`, naming the wait (operator review of PR #55). rb-331y's premise is now false — two hours after it was filed. |
+| 2026-08-13T17:43Z | A converse session claims the stale rb-331y ~1.5 days later. It rebuilds state, **sees** the hold in force, **sees** the underlying condition is a benign open PR — and holds a sitting anyway. |
 
 The diagnosis worked. The loop had nowhere to put it.
 
@@ -38,7 +38,7 @@ The diagnosis worked. The loop had nowhere to put it.
 root or anchor carrying `triage.hold` or `gc.takeaway`, and the rationale
 at lines 373–380 records a deliberate choice *not* to treat
 `merge_result=pull_request` as terminal — doing so once hid two live
-stalls. su-ykfw was already silenced by its hold. Tightening the filing
+stalls. rb-ykfw was already silenced by its hold. Tightening the filing
 side to prevent this would trade a false positive for false negatives,
 which is the trade that comment exists to refuse.
 
@@ -196,8 +196,8 @@ the five that pin this round go red against the pre-fix files.
 
 ## Related
 
-- `su-59z4` — fold rule misfires on standing subjects; filed the same
+- `rb-59z4` — fold rule misfires on standing subjects; filed the same
   turn, not addressed here.
-- `su-lst2` — superseded wrong-store duplicate of this bead.
-- Instance: visit `su-331y`, subject `su-vehr`, root `su-ykfw` (rig
-  shutupandlisten).
+- `rb-lst2` — superseded wrong-store duplicate of this bead.
+- Instance: visit `rb-331y`, subject `rb-vehr`, root `rb-ykfw` (rig
+  rig-b).

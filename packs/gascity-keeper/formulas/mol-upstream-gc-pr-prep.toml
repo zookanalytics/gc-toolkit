@@ -216,8 +216,9 @@ done < "$SHA_LIST"
 **Scrub each commit (LLM judgment, not blind regex).** Rewrite anything that
 would leak city-internal context into upstream history:
 
-- Bead-ID-shaped tokens — `lx-…`, `gc-…`, `tk-…`, `sl-…` (a token like
-  `gc-init` could be a real upstream symbol; consider context).
+- Bead-ID-shaped tokens — `gc-…`, `tk-…`, or any other prefix `gc rig list`
+  reports (a token like `gc-init` could be a real upstream symbol; consider
+  context).
 - Rig names (`gc rig list` entries) and city references ("this city",
   the city's own name).
 - Internal agent handles — `polecat`, `refinery`, `witness`, `deacon`,

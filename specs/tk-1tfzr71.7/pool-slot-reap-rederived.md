@@ -42,16 +42,16 @@ asleep on `idle` that nothing woke or closed for five days.
 ## What the order's own record shows
 
 - Each close is a `cleanup` entry in the deacon's incident ledger. The ledger
-  open since 2026-10-09 (`lx-9r5e4u`; the order landed 2026-10-08) holds three:
-  `lx-wisp-e9yi1` (2026-10-10T03:44Z), `lx-wisp-utuji` (2026-10-10T13:33Z) and
-  `lx-wisp-u134u` (2026-10-11T03:38Z). Each had slept 40 to 54 minutes with no
+  open since 2026-10-09 (`hq-9r5e4u`; the order landed 2026-10-08) holds three:
+  `hq-wisp-e9yi1` (2026-10-10T03:44Z), `hq-wisp-utuji` (2026-10-10T13:33Z) and
+  `hq-wisp-u134u` (2026-10-11T03:38Z). Each had slept 40 to 54 minutes with no
   sleep reason, a shape the controller has freed since upstream #6356
   (2026-09-14).
 - There is none after 2026-10-11T03:38Z. The order kept firing about every
   five minutes (`gc order history pool-slot-reap`), so more than 2,000 passes
   found nothing to close.
 - A dry run at 2026-10-20T00:24:54Z found one asleep session, the
-  shutupandlisten witness, a named session it never closes, and would close
+  rig-b witness, a named session it never closes, and would close
   nothing.
 
 ## The residual shape, and where it goes

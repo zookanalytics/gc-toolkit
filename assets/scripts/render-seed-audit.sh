@@ -22,7 +22,7 @@
 #
 # WHY A SYNTHETIC CITY AND NOT THE LIVE ONE. `gc prime` renders against whatever
 # city is in scope, and a city contributes real prompt text of its own: the
-# loomington `city.toml` appends `command-glossary` and `operational-awareness`
+# operator's `city.toml` appends `command-glossary` and `operational-awareness`
 # to every agent via [agent_defaults], which is 6,773 B — 19% — of the polecat
 # seed. A golden file rendered against the operator's live city would move
 # whenever that file moved, with no commit in this repo to explain it, and the
@@ -32,10 +32,10 @@
 # then a pure function of this repo, which is what a committed golden file has
 # to be.
 #
-# Fidelity is not assumed, it is measured. Against `gc prime` in the live
-# loomington city, seven of nine agents render BYTE-IDENTICAL (refinery, mayor,
+# Fidelity is not assumed, it is measured. Against `gc prime` in the operator's
+# live city, seven of nine agents render BYTE-IDENTICAL (refinery, mayor,
 # deacon, converse, mechanik, proactive, keeper); polecat and witness differ by
-# one line of 36 KB — the rig checkout path, which in loomington happens to be
+# one line of 36 KB — the rig checkout path, which in that city happens to be
 # the pack directory itself. Worst case 0.04%.
 # specs/tk-yhwfv.3/seed-audit.md records the table and how to re-run it.
 #
@@ -406,7 +406,7 @@ source = "https://github.com/gastownhall/gascity.git//examples/bd"
 [imports.gc-toolkit]
 source = "@@ROOT@@"
 
-# Mirrors the loomington city.toml. These two fragments are 19% of the polecat
+# Mirrors the operator's city.toml. These two fragments are 19% of the polecat
 # seed and they are a CITY-level setting, so a pack-only render omits them and
 # under-reports every agent. Pinning them here is what makes the artifact match
 # what agents actually receive.
@@ -414,13 +414,14 @@ source = "@@ROOT@@"
 default_sling_formula = "mol-polecat-work"
 append_fragments = ["command-glossary", "operational-awareness"]
 
-# Two rig shapes, and they carry the names of the two that exist in loomington
-# because the rig name is substituted INTO the rendered prompt ("a worker agent
-# in the gc-toolkit rig", "gc session nudge gc-toolkit/..."). A scenario rig
-# called "plain" would render an audit nobody can compare against a live seed.
+# Two rig shapes, and they carry the names of the two that exist in the
+# operator's city because the rig name is substituted INTO the rendered prompt
+# ("a worker agent in the gc-toolkit rig", "gc session nudge gc-toolkit/...").
+# A scenario rig called "plain" would render an audit nobody can compare
+# against a live seed.
 #
-# gc-toolkit is the plain shape: this pack and nothing else, shared with
-# signal-loom and shutupandlisten. gascity adds the opt-in sub-pack plus the
+# gc-toolkit is the plain shape: this pack and nothing else, shared with the
+# city's application rigs. gascity adds the opt-in sub-pack plus the
 # [[rigs.patches]] that append its rebase doctrine to two agents — not
 # decoration, it is the only way the fragment table in INDEX.md can show the
 # rig-scope divergence that `gc prime` cannot render.

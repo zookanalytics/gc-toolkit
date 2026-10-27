@@ -296,7 +296,7 @@ echo "# a city-store subject's visit lands in the city store, wherever the calle
 # unset, the visit, its tracks edge and every read must reach the city store
 # by path.
 CITY_STORE="$TMP/city.json"
-CITY_RIGS='{"rigs":[{"name":"loomington","prefix":"lx","path":"/city","hq":true},
+CITY_RIGS='{"rigs":[{"name":"mycity","prefix":"hq","path":"/city","hq":true},
   {"name":"gc-toolkit","prefix":"tk","path":"/nonexistent-rig"}]}'
 CITY_DBS="{\"/nonexistent-rig/.beads\":\"$STUB_STORE\",\"/city/.beads\":\"$CITY_STORE\"}"
 run_city() { # <caller GC_RIG, empty = unset> <escalate args...>
@@ -312,20 +312,20 @@ city_visits() { jq -r '[.[] | select(.metadata.task_kind == "visit") | .metadata
 # ephemeral subject's visit body does, so each entry is rejoined before it is read.
 bd_calls() { awk '/^\[[^]]*\] /{if (c != "") print c; c=$0; next} {c=c " " $0} END{if (c != "") print c}' "$STUB_GC_LOG" | grep ' bd '; }
 pinned_to_city() { [ "$(bd_calls | grep -c .)" = "$(bd_calls | grep -c -- '--db /city/.beads')" ]; }
-for caller in gc-toolkit loomington ""; do
+for caller in gc-toolkit mycity ""; do
   label="GC_RIG=${caller:-<unset>}"
   reset; printf '[]' > "$CITY_STORE"
-  out=$(run_city "$caller" --subject lx-hq1 --key k1 --message m 2>&1); rc=$?
-  eq "$rc" 0 "$label: an lx- subject's escalation files"
-  eq "$(city_visits)" "lx-hq1" "  ... its visit is in the city store"
+  out=$(run_city "$caller" --subject hq-hq1 --key k1 --message m 2>&1); rc=$?
+  eq "$rc" 0 "$label: an hq- subject's escalation files"
+  eq "$(city_visits)" "hq-hq1" "  ... its visit is in the city store"
   eq "$(jq 'length' "$STUB_STORE")" "0" "  ... and nothing landed in the caller's rig store"
-  has "$(cat "$STUB_DEPS")" "vis-1|lx-hq1|tracks|city.json" "  ... the tracks edge is written in the city store, beside its subject"
+  has "$(cat "$STUB_DEPS")" "vis-1|hq-hq1|tracks|city.json" "  ... the tracks edge is written in the city store, beside its subject"
   if pinned_to_city; then ok "  ... every bd call was pinned to the city store by path"
   else bad "  ... every bd call was pinned to the city store by path ($(grep ' bd ' "$STUB_GC_LOG" | grep -v -- '--db /city/.beads' | head -n 1))"; fi
 done
 reset; printf '[]' > "$CITY_STORE"
-out=$(run_city gc-toolkit --subject lx-hq1 --key k1 --message m 2>&1)
-has "$out" "lives in rig 'loomington'" "a rig caller's GC_RIG is overridden with a warning that names the subject's rig"
+out=$(run_city gc-toolkit --subject hq-hq1 --key k1 --message m 2>&1)
+has "$out" "lives in rig 'mycity'" "a rig caller's GC_RIG is overridden with a warning that names the subject's rig"
 
 echo "# a board-route caller whose subject names no placeable bead redirects it to triage"
 # zz-a is a bead-shaped id whose prefix no readable rig carries: escalation-rig
@@ -417,13 +417,13 @@ has "$out" "reports no path" "  ... naming why the store could not be proven"
 echo "# a wisp subject files in the store its prefix names, and is never refused"
 # A wisp is ephemeral whatever its prefix resolves to, so its visit hangs on the
 # standing triage subject. When the prefix names a store, every call is pinned to
-# it by path, as for a durable subject: an lx- wisp's triage visit lands in the
+# it by path, as for a durable subject: an hq- wisp's triage visit lands in the
 # city store whatever the caller's GC_RIG. When no store can be derived, the
 # visit files in the ambient store rather than being refused, even with GC_RIG
 # unset.
 reset; printf '[]' > "$CITY_STORE"
-out=$(run_city gc-toolkit --subject lx-wisp-aaaaa --key k1 --message m 2>&1); rc=$?
-eq "$rc" 0 "an lx- wisp subject's escalation files"
+out=$(run_city gc-toolkit --subject hq-wisp-aaaaa --key k1 --message m 2>&1); rc=$?
+eq "$rc" 0 "an hq- wisp subject's escalation files"
 eq "$(jq -r '[.[] | .metadata.task_kind] | join(",")' "$CITY_STORE")" "triage-subject,visit" "  ... its triage subject and its visit are in the city store"
 eq "$(jq 'length' "$STUB_STORE")" "0" "  ... and nothing landed in the caller's rig store"
 if pinned_to_city; then ok "  ... every bd call was pinned to the city store by path"
@@ -553,8 +553,8 @@ echo "# the create stamps the dedup keys, so a lost follow-up write cannot orpha
 # leaves a dedup-complete visit. STUB_UPD_FAIL fails every update to prove no
 # follow-up write is relied on.
 reset
-STUB_UPD_FAIL=1
-out1=$("$SUT" --subject tk-orphan --key stuck --message "first" 2>&1); rc1=$?
+export STUB_UPD_FAIL=1
+"$SUT" --subject tk-orphan --key stuck --message "first" >/dev/null 2>&1; rc1=$?
 eq "$rc1" 0 "the first escalation succeeds with no follow-up update at all"
 eq "$(visits)" "1" "one visit filed"
 eq "$(meta vis-1 escalation_key)" "stuck" "the create stamped escalation_key without any update"
@@ -686,8 +686,8 @@ has "$(cat "$STUB_GC_LOG")" "--metadata-field gc.continuation_group=tk-a" "the s
 echo "# an ephemeral subject dedups on the key alone"
 # A patrol wisp is burned and re-poured every cycle, so its id names no durable
 # subject. A situation it raises is identified by its key alone.
-reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"doctor-fork-rate","gc.continuation_group":"lx-wisp-aaaaa"},"notes":""}]'
-out=$("$SUT" --subject lx-wisp-bbbbb --key doctor-fork-rate --message "fork rate high" 2>&1); rc=$?
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"doctor-fork-rate","gc.continuation_group":"hq-wisp-aaaaa"},"notes":""}]'
+out=$("$SUT" --subject hq-wisp-bbbbb --key doctor-fork-rate --message "fork rate high" 2>&1); rc=$?
 eq "$rc" 0 "a differing ephemeral subject exits 0"
 eq "$(visits)" "0" "the next cycle's wisp files no duplicate"
 has "$out" "already open" "the previous cycle's visit was found"
@@ -697,16 +697,16 @@ reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"
 "$SUT" --subject tk-wisp-bbb --key k1 --message m >/dev/null 2>&1
 eq "$(visits)" "0" "a rig store's tk-wisp- ids are ephemeral too"
 
-reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"k1","gc.continuation_group":"lx-wisp-aaaaa"},"notes":""}]'
-"$SUT" --subject lx-wisp-aaaaa --key k1 --message m >/dev/null 2>&1
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"k1","gc.continuation_group":"hq-wisp-aaaaa"},"notes":""}]'
+"$SUT" --subject hq-wisp-aaaaa --key k1 --message m >/dev/null 2>&1
 eq "$(visits)" "0" "the same wisp subject still dedups"
 
-reset "[$STANDING,{\"id\":\"vis-0\",\"status\":\"open\",\"assignee\":\"\",\"metadata\":{\"escalation_key\":\"k2\",\"gc.continuation_group\":\"lx-wisp-aaaaa\"},\"notes\":\"\"}]"
-"$SUT" --subject lx-wisp-bbbbb --key k1 --message m >/dev/null 2>&1
+reset "[$STANDING,{\"id\":\"vis-0\",\"status\":\"open\",\"assignee\":\"\",\"metadata\":{\"escalation_key\":\"k2\",\"gc.continuation_group\":\"hq-wisp-aaaaa\"},\"notes\":\"\"}]"
+"$SUT" --subject hq-wisp-bbbbb --key k1 --message m >/dev/null 2>&1
 eq "$(visits)" "1" "a different key still files, ephemeral subject or not"
 
-reset "[$STANDING,{\"id\":\"vis-0\",\"status\":\"closed\",\"assignee\":\"\",\"metadata\":{\"escalation_key\":\"k1\",\"gc.continuation_group\":\"lx-wisp-aaaaa\"},\"notes\":\"\"}]"
-"$SUT" --subject lx-wisp-bbbbb --key k1 --message m >/dev/null 2>&1
+reset "[$STANDING,{\"id\":\"vis-0\",\"status\":\"closed\",\"assignee\":\"\",\"metadata\":{\"escalation_key\":\"k1\",\"gc.continuation_group\":\"hq-wisp-aaaaa\"},\"notes\":\"\"}]"
+"$SUT" --subject hq-wisp-bbbbb --key k1 --message m >/dev/null 2>&1
 eq "$(visits)" "1" "a closed visit re-opens the situation for a wisp subject too"
 
 # Only the -wisp- infix is ephemeral: a durable id that merely contains the
@@ -719,23 +719,23 @@ eq "$(visits)" "1" "a bead id merely containing 'wisp' is still durable"
 # open situation.
 crowd="["
 for i in $(seq 1 20); do
-  crowd="$crowd{\"id\":\"other-$i\",\"status\":\"open\",\"assignee\":\"\",\"metadata\":{\"gc.routed_to\":\"gc-toolkit/gc-toolkit.converse\",\"escalation_key\":\"doctor-fork-rate\",\"gc.continuation_group\":\"lx-wisp-c$i\"},\"notes\":\"\"},"
+  crowd="$crowd{\"id\":\"other-$i\",\"status\":\"open\",\"assignee\":\"\",\"metadata\":{\"gc.routed_to\":\"gc-toolkit/gc-toolkit.converse\",\"escalation_key\":\"doctor-fork-rate\",\"gc.continuation_group\":\"hq-wisp-c$i\"},\"notes\":\"\"},"
 done
 reset "${crowd%,}]"
-"$SUT" --subject lx-wisp-fresh --key doctor-fork-rate --message m >/dev/null 2>&1
+"$SUT" --subject hq-wisp-fresh --key doctor-fork-rate --message m >/dev/null 2>&1
 eq "$(visits)" "0" "20 cycles of one key file no 21st visit"
 
 # The two arms meet here: the key-only match must carry its own route out of
 # the listing, exactly as the subject-narrowed one does. A routable match is
 # left alone; a route-less one is repaired rather than counted as satisfied,
 # which is the state the cycles of wisp-subject visits are already in.
-reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"doctor-fork-rate","gc.continuation_group":"lx-wisp-aaaaa"},"notes":""}]'
-out=$("$SUT" --subject lx-wisp-bbbbb --key doctor-fork-rate --message m 2>&1)
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"doctor-fork-rate","gc.continuation_group":"hq-wisp-aaaaa"},"notes":""}]'
+out=$("$SUT" --subject hq-wisp-bbbbb --key doctor-fork-rate --message m 2>&1)
 hasnt "$out" "repointed" "a routable key-only match is not repointed"
 hasnt "$(cat "$STUB_GC_LOG")" "bd update vis-0" "and its route is not rewritten"
 
-reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"escalation_key":"doctor-fork-rate","gc.continuation_group":"lx-wisp-aaaaa"},"notes":""}]'
-out=$("$SUT" --subject lx-wisp-bbbbb --key doctor-fork-rate --message m 2>&1); rc=$?
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"escalation_key":"doctor-fork-rate","gc.continuation_group":"hq-wisp-aaaaa"},"notes":""}]'
+out=$("$SUT" --subject hq-wisp-bbbbb --key doctor-fork-rate --message m 2>&1); rc=$?
 eq "$rc" 0 "an unroutable visit matched by key alone exits 0"
 eq "$(visits)" "0" "and no duplicate is filed"
 eq "$(meta vis-0 gc.routed_to)" "human" "the key-only match is repointed too — to the board"
@@ -747,7 +747,7 @@ echo "# an ephemeral subject is filed on a durable standing subject"
 # its iteration, so a visit filed on one carries both writes to a bead that is
 # gone before anyone claims it.
 reset
-out=$("$SUT" --subject lx-wisp-aaaaa --key doctor-fork-rate --message "fork rate high" 2>&1); rc=$?
+out=$("$SUT" --subject hq-wisp-aaaaa --key doctor-fork-rate --message "fork rate high" 2>&1); rc=$?
 eq "$rc" 0 "an ephemeral subject files"
 eq "$(visits)" "2" "the standing subject is minted alongside the visit"
 eq "$(meta vis-1 task_kind)" "triage-subject" "the minted bead is a standing triage subject"
@@ -758,20 +758,20 @@ hasnt "$(grep 'bd update vis-1' "$STUB_GC_LOG")" "triage-subject" "no second wri
 has "$(field vis-1 title)" "triage: escalations raised from an ephemeral subject" "and a title that says what hangs there"
 eq "$(meta vis-2 gc.continuation_group)" "vis-1" "the visit's group is the standing subject, not the wisp"
 has "$(cat "$STUB_DEPS")" "vis-2|vis-1|tracks" "and its tracks edge points there too"
-hasnt "$(cat "$STUB_DEPS")" "lx-wisp-aaaaa" "nothing is wired to the wisp"
+hasnt "$(cat "$STUB_DEPS")" "hq-wisp-aaaaa" "nothing is wired to the wisp"
 has "$(field vis-2 title)" "visit: vis-1" "the title names the durable subject"
-eq "$(meta vis-2 escalation_raised_by)" "lx-wisp-aaaaa" "the raising wisp survives as provenance"
-has "$(field vis-2 description)" "lx-wisp-aaaaa" "and the body names it, for the sitting that reads it"
+eq "$(meta vis-2 escalation_raised_by)" "hq-wisp-aaaaa" "the raising wisp survives as provenance"
+has "$(field vis-2 description)" "hq-wisp-aaaaa" "and the body names it, for the sitting that reads it"
 has "$out" "is ephemeral and cannot receive" "the redirect is announced"
 has "$(cat "$STUB_GC_LOG")" "--metadata-field task_kind=triage-subject" "both markers ride the standing-subject lookup"
 has "$(cat "$STUB_GC_LOG")" "--metadata-field triage.scope=ephemeral-subject-findings" "including the scope"
 
 echo "# …reusing the one that is already open, never minting a second"
 reset "[$STANDING]"
-"$SUT" --subject lx-wisp-bbbbb --key doctor-fork-rate --message m >/dev/null 2>&1
+"$SUT" --subject hq-wisp-bbbbb --key doctor-fork-rate --message m >/dev/null 2>&1
 eq "$(visits)" "1" "only the visit is created"
 eq "$(meta vis-1 gc.continuation_group)" "sub-0" "it hangs on the standing subject already there"
-eq "$(meta vis-1 escalation_raised_by)" "lx-wisp-bbbbb" "with this cycle's wisp recorded"
+eq "$(meta vis-1 escalation_raised_by)" "hq-wisp-bbbbb" "with this cycle's wisp recorded"
 
 echo "# two findings share the bucket but keep their own escalation_key"
 # The subject no longer tells them apart, so the key is the only thing that
@@ -779,8 +779,8 @@ echo "# two findings share the bucket but keep their own escalation_key"
 # the key, else the subject. A visit that reached the bucket without its own
 # key would fold into its sibling and close unread.
 reset "[$STANDING]"
-"$SUT" --subject lx-wisp-aaaaa --key doctor-dolt-noms-size --message m >/dev/null 2>&1
-"$SUT" --subject lx-wisp-bbbbb --key doctor-check-cadence-live --message m >/dev/null 2>&1
+"$SUT" --subject hq-wisp-aaaaa --key doctor-dolt-noms-size --message m >/dev/null 2>&1
+"$SUT" --subject hq-wisp-bbbbb --key doctor-check-cadence-live --message m >/dev/null 2>&1
 eq "$(visits)" "2" "each situation files its own visit"
 eq "$(meta vis-1 gc.continuation_group)" "sub-0" "both hang on the one standing subject"
 eq "$(meta vis-2 gc.continuation_group)" "sub-0" "sharing the bucket"
@@ -789,7 +789,7 @@ eq "$(meta vis-2 escalation_key)" "doctor-check-cadence-live" "and the second a 
 
 # A closed subject cannot receive an append or a takeaway either.
 reset "[$(printf '%s' "$STANDING" | sed 's/"status":"open"/"status":"closed"/')]"
-"$SUT" --subject lx-wisp-ccccc --key k1 --message m >/dev/null 2>&1
+"$SUT" --subject hq-wisp-ccccc --key k1 --message m >/dev/null 2>&1
 eq "$(visits)" "2" "a CLOSED standing subject is not reused — a fresh one is minted"
 
 echo "# a durable subject is never redirected"
@@ -803,12 +803,12 @@ hasnt "$(cat "$STUB_GC_LOG")" "task_kind=triage-subject" "the standing-subject l
 echo "# the redirect never runs on a path that files nothing"
 # The mint sits after the dedup and after the route check, so neither a
 # suppressed escalation nor a refused one leaves a bucket behind.
-reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"k1","gc.continuation_group":"lx-wisp-aaaaa"},"notes":""}]'
-"$SUT" --subject lx-wisp-bbbbb --key k1 --message m >/dev/null 2>&1
+reset '[{"id":"vis-0","status":"open","assignee":"","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.converse","escalation_key":"k1","gc.continuation_group":"hq-wisp-aaaaa"},"notes":""}]'
+"$SUT" --subject hq-wisp-bbbbb --key k1 --message m >/dev/null 2>&1
 eq "$(visits)" "0" "a deduped ephemeral escalation mints nothing"
 
 reset
-out=$("$SUT" --subject lx-wisp-aaaaa --key k1 --message m --pool no/such.pool 2>&1); rc=$?
+out=$("$SUT" --subject hq-wisp-aaaaa --key k1 --message m --pool no/such.pool 2>&1); rc=$?
 eq "$rc" 1 "an unroutable ephemeral escalation still exits 1"
 eq "$(visits)" "0" "and mints nothing — the refusal precedes every create"
 
@@ -816,15 +816,15 @@ echo "# a standing subject that cannot be minted files on the wisp, loudly"
 # The trade the whole script is built on: a visit whose disposition will be
 # lost has still asked a human, and filing nothing asks nobody.
 reset
-out=$(STUB_CREATE_FAIL_MATCH="triage:" "$SUT" --subject lx-wisp-aaaaa --key k1 --message m 2>&1); rc=$?
+out=$(STUB_CREATE_FAIL_MATCH="triage:" "$SUT" --subject hq-wisp-aaaaa --key k1 --message m 2>&1); rc=$?
 eq "$rc" 0 "the escalation still files"
 eq "$(visits)" "1" "exactly the visit"
-eq "$(meta vis-1 gc.continuation_group)" "lx-wisp-aaaaa" "on the wisp, nothing durable having been resolved"
+eq "$(meta vis-1 gc.continuation_group)" "hq-wisp-aaaaa" "on the wisp, nothing durable having been resolved"
 has "$out" "will be lost when it burns" "and says what that costs"
 
 echo "# a standing subject whose create drops a marker is written whole in the same call"
 reset
-out=$(STUB_CREATE_DROP="triage.scope" "$SUT" --subject lx-wisp-aaaaa --key k1 --message m 2>&1); rc=$?
+out=$(STUB_CREATE_DROP="triage.scope" "$SUT" --subject hq-wisp-aaaaa --key k1 --message m 2>&1); rc=$?
 eq "$rc" 0 "the escalation files"
 eq "$(meta vis-1 triage.scope)" "ephemeral-subject-findings" "the subject carries the marker its create dropped"
 eq "$(meta vis-2 gc.continuation_group)" "vis-1" "…and the visit hangs on it"
@@ -832,7 +832,7 @@ hasnt "$out" "markers did not read back" "…with nothing left to report"
 
 echo "# markers that do not read back cost the NEXT escalation, not this one"
 reset
-out=$(STUB_CREATE_DROP="triage.scope" STUB_UPD_FAIL_MATCH="triage.scope=" "$SUT" --subject lx-wisp-aaaaa --key k1 --message m 2>&1); rc=$?
+out=$(STUB_CREATE_DROP="triage.scope" STUB_UPD_FAIL_MATCH="triage.scope=" "$SUT" --subject hq-wisp-aaaaa --key k1 --message m 2>&1); rc=$?
 eq "$rc" 0 "the escalation files"
 eq "$(meta vis-2 gc.continuation_group)" "vis-1" "the visit hangs on it — an unmarked bead is still durable"
 has "$out" "markers did not read back" "the lost markers are reported"
@@ -842,7 +842,7 @@ has "$out" "repair:" "with the repair that makes it findable again"
 # re-check refuses it, so the visit is never wired to a bead nobody escalated
 # about.
 reset '[{"id":"other","status":"open","assignee":"","title":"an unrelated open bead","metadata":{},"notes":""}]'
-STUB_LIST_IGNORE_FIELDS=1 "$SUT" --subject lx-wisp-aaaaa --key k1 --message m >/dev/null 2>&1
+STUB_LIST_IGNORE_FIELDS=1 "$SUT" --subject hq-wisp-aaaaa --key k1 --message m >/dev/null 2>&1
 eq "$(meta vis-1 task_kind)" "triage-subject" "an unfiltered answer is refused and a bucket minted instead"
 eq "$(meta vis-2 gc.continuation_group)" "vis-1" "the visit hangs on the minted bucket"
 hasnt "$(cat "$STUB_DEPS")" "|other|" "and no edge reaches the unrelated bead"
@@ -850,7 +850,7 @@ hasnt "$(cat "$STUB_DEPS")" "|other|" "and no edge reaches the unrelated bead"
 # The same fail-open the dedup listing takes: an unreadable lookup mints a
 # second bucket rather than dropping the subject.
 reset "[$STANDING]"
-STUB_LIST_FAIL=1 "$SUT" --subject lx-wisp-aaaaa --key k1 --message m >/dev/null 2>&1
+STUB_LIST_FAIL=1 "$SUT" --subject hq-wisp-aaaaa --key k1 --message m >/dev/null 2>&1
 eq "$(visits)" "2" "an unreadable lookup mints a duplicate bucket rather than filing on the wisp"
 
 echo "# an unreadable listing files anyway (a duplicate beats a mute)"
@@ -895,12 +895,12 @@ ledger() { cat "$STUB_LEDGER_LOG" 2>/dev/null; }
 lreset() { reset "${1:-[]}"; : > "$STUB_LEDGER_LOG"; }
 
 lreset
-out=$(GC_AGENT=deacon "$LSUT/escalate.sh" --subject tk-a --key dolt-backup-loomington \
+out=$(GC_AGENT=deacon "$LSUT/escalate.sh" --subject tk-a --key dolt-backup-mycity \
         --message "manifest is 30h old (>12h = 2x backup cadence)" 2>&1); rc=$?
 eq "$rc" 0 "filing still exits 0 with the ledger wired in"
 eq "$(ledger | grep -c .)" "1" "a filed visit appends exactly one ledger entry"
 has "$(ledger)" "append escalation" "recorded under the escalation category"
-has "$(ledger)" "dolt-backup-loomington: manifest is 30h old" "carrying the situation key and the headline"
+has "$(ledger)" "dolt-backup-mycity: manifest is 30h old" "carrying the situation key and the headline"
 has "$(ledger)" "bead:vis-1" "and pointing at the visit it filed"
 
 lreset
@@ -1042,8 +1042,8 @@ has "$out" "v-moot" "and it is the newest verdict that is named"
 echo "# an ephemeral subject matches on the key alone, as its open dedup does"
 # A patrol wisp is burned and re-poured every cycle, so its id cannot identify
 # a situation from one call to the next.
-reset "[$(closed_visit v-old wedged-lx-1 tk-wisp-aaa moot 3600)]"
-out=$("$SUT" --subject tk-wisp-bbb --key wedged-lx-1 --message m 2>&1); rc=$?
+reset "[$(closed_visit v-old wedged-hq-1 tk-wisp-aaa moot 3600)]"
+out=$("$SUT" --subject tk-wisp-bbb --key wedged-hq-1 --message m 2>&1); rc=$?
 eq "$rc" 0 "a wisp subject honors the verdict its predecessor earned"
 eq "$(visits)" "0" "and files nothing"
 
@@ -1181,18 +1181,18 @@ has "$out" "retracted visit vis-2 on tk-sub" "reports the second twin"
 echo "# --retract leaves an open visit engage has bound, by assignee or by session"
 # Engage binds the visit while it is still open, before the sitting's claim
 # promotes it. The board reads that as engaged, and so does retract.
-reset "[$(rvisit vis-3 lx-sitting)]"
+reset "[$(rvisit vis-3 hq-sitting)]"
 out=$("$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
 eq "$rc" 0 "retract exits 0 when the only match is bound by assignee"
 eq "$(vccount)" "0" "and does not close the bound visit"
-has "$out" "vis-3 on tk-sub [reconcile-diverged-alpha] is engaged (lx-sitting)" "and names who holds it"
-reset "[$(rvisit vis-4 "" s-lx-sitting)]"
+has "$out" "vis-3 on tk-sub [reconcile-diverged-alpha] is engaged (hq-sitting)" "and names who holds it"
+reset "[$(rvisit vis-4 "" s-hq-sitting)]"
 out=$("$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
 eq "$(vccount)" "0" "a visit bound by session is not closed either"
-has "$out" "is engaged (session s-lx-sitting)" "and the session is named"
+has "$out" "is engaged (session s-hq-sitting)" "and the session is named"
 
 echo "# --retract closes the unengaged twin beside an engaged one"
-reset "[$(rvisit vis-5 lx-sitting), $(rvisit vis-6)]"
+reset "[$(rvisit vis-5 hq-sitting), $(rvisit vis-6)]"
 out=$("$SUT" --retract --subject tk-sub --key reconcile-diverged-alpha --message m 2>&1); rc=$?
 eq "$rc" 0 "retract exits 0"
 eq "$(vclog)" "vis-6|tk-sub|moot|m" "only the unengaged twin is closed"
@@ -1210,23 +1210,23 @@ echo "# the city store's own visits answer the dedup, the verdict window and --r
 # none of the city's visits, so an unpinned read answers 'nothing there': it
 # files a duplicate beside a visit already open, re-files a situation a sitting
 # ruled moot, or retracts nothing.
-CITY_OPEN='[{"id":"lx-v1","status":"open","assignee":"","title":"visit: lx-hq1 — m","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"k1","gc.continuation_group":"lx-hq1","gc.routed_to":"human"}}]'
+CITY_OPEN='[{"id":"hq-v1","status":"open","assignee":"","title":"visit: hq-hq1 — m","description":"d","notes":"","metadata":{"task_kind":"visit","escalation_key":"k1","gc.continuation_group":"hq-hq1","gc.routed_to":"human"}}]'
 reset; printf '%s' "$CITY_OPEN" > "$CITY_STORE"
-out=$(run_city gc-toolkit --subject lx-hq1 --key k1 --message again 2>&1); rc=$?
+out=$(run_city gc-toolkit --subject hq-hq1 --key k1 --message again 2>&1); rc=$?
 eq "$rc" 0 "an open city-store visit dedups a rig caller's repeat"
 eq "$(visits)" "0" "  ... nothing is filed in either store"
-has "$out" "visit lx-v1 already open" "  ... the city store's visit is the one found"
+has "$out" "visit hq-v1 already open" "  ... the city store's visit is the one found"
 
-reset; printf '[%s]' "$(closed_visit lx-v1 k1 lx-hq1 moot 3600)" > "$CITY_STORE"
-out=$(run_city gc-toolkit --subject lx-hq1 --key k1 --message again 2>&1); rc=$?
+reset; printf '[%s]' "$(closed_visit hq-v1 k1 hq-hq1 moot 3600)" > "$CITY_STORE"
+out=$(run_city gc-toolkit --subject hq-hq1 --key k1 --message again 2>&1); rc=$?
 eq "$rc" 0 "a moot verdict in the city store answers a rig caller's re-file"
 eq "$(visits)" "0" "  ... nothing is filed"
 eq "$(jq -r '.[0].metadata["escalation.recurrences"] // "<absent>"' "$CITY_STORE")" "1" "  ... and the recurrence is tallied on the city store's visit"
 
 reset; printf '%s' "$CITY_OPEN" > "$CITY_STORE"
-out=$(run_city gc-toolkit --retract --subject lx-hq1 --key k1 --message "resolved" 2>&1); rc=$?
+out=$(run_city gc-toolkit --retract --subject hq-hq1 --key k1 --message "resolved" 2>&1); rc=$?
 eq "$rc" 0 "--retract from a rig caller exits 0"
-eq "$(vclog)" "lx-v1|lx-hq1|moot|resolved" "  ... having found the city store's open visit and closed it as moot"
+eq "$(vclog)" "hq-v1|hq-hq1|moot|resolved" "  ... having found the city store's open visit and closed it as moot"
 
 echo
 echo "escalate.test.sh: $PASS passed, $FAIL failed"

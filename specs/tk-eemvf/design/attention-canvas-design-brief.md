@@ -98,7 +98,7 @@ cheaply.** The intended rhythm:
    leaves the board. The queue shrinks.
 
 Step 4 is the soul of it. Watch how it works in the **real data** shipped with
-this brief. The `su-lou` tile carries this one line from its own agent:
+this brief. The `rb-lou` tile carries this one line from its own agent:
 
 > "NEEDS your MERGE: PR#11 (mic-fix) + #12 (U4-STT), both verified. On
 > merge+reopen I dispatch ONNX/U5 + live-mic feel-test. Drained between visits."
@@ -118,8 +118,8 @@ fallback, not the default.
 
 **One operator.** Not a team, not a feed of stakeholders — a single human
 coordinating many concurrent agent workstreams across several independent
-projects ("rigs": you'll see `gascity`, `gc-toolkit`, `shutupandlisten`,
-`signal-loom` in the sample). They are technical, they live in a terminal, and
+projects ("rigs": you'll see `gascity`, `gc-toolkit`, `rig-b`,
+`rig-a` in the sample). They are technical, they live in a terminal, and
 their dominant, recurring cost is **context-switching** between streams. They
 are not watching this surface all day; they visit it, triage, dive into one
 thing, and leave. Design for the *returning* visitor reloading context, not for
@@ -189,7 +189,7 @@ Open it alongside this section. Here is what the fields *mean* (grouped by what
 they're for, not alphabetically):
 
 **Identity & place**
-- `id` — stable unique id (e.g. `su-lou`, `tk-eemvf`). The anchor's durable
+- `id` — stable unique id (e.g. `rb-lou`, `tk-eemvf`). The anchor's durable
   identity; tie place/color/imagery to this.
 - `rig` — which project it belongs to (`gascity`, `gc-toolkit`, …). A natural
   grouping/coloring axis.
@@ -211,14 +211,14 @@ they're for, not alphabetically):
     additionally carries `reason` and `flagged_at`.)*
   - `HIGH` — **stranded.** Work is decomposed and open but *nothing is moving*
     on it and no one is home — it needs a human to unstick it. (Also: an
-    orphaned bundle with no owner.) See `gc-k8r4y`, `su-lou`, `tk-eemvf`.
+    orphaned bundle with no owner.) See `gc-k8r4y`, `rb-lou`, `tk-eemvf`.
   - `ELEVATED` — a human-gated `decision`; or something gone stale; or work
     that's moving but has a stuck child to recover. See the two `decision`
     tiles.
   - `NORMAL` — **healthy and active.** Someone is in the conversation or live
     work is in progress. Calm. See `tk-6d0vb` (note `live: "hot"`).
   - `LOW` — **done or empty.** All children closed and awaiting graduation, or
-    an empty shell. Quiet. See `gc-8g41r` (all 9 closed), `sl-yqslv` (empty).
+    an empty shell. Quiet. See `gc-8g41r` (all 9 closed), `ra-yqslv` (empty).
 - `rank_score` / `weight` — the deterministic numeric ranking behind the band
   (subtree size + priority + cross-rig blast radius). Use for sort/size if you
   want finer ordering than the five bands.
@@ -247,7 +247,7 @@ they're for, not alphabetically):
 - `takeaway` — *the* field to feature when present. An **LLM-authored** one-line
   headline, written by the work's own resident agent, saying what it concluded
   or what it needs. This is the state-delta from §3 made literal — see
-  `su-lou`, `gc-k8r4y`, `tk-6d0vb`, `gc-8g41r`. When this exists, the operator
+  `rb-lou`, `gc-k8r4y`, `tk-6d0vb`, `gc-8g41r`. When this exists, the operator
   may not need to drill in at all. It can be `null` (the agent hasn't authored
   one) — see `tk-eemvf`, `tk-aezem4`.
 - `frontier` — a terse mechanical one-liner of the same state ("3 open · 0

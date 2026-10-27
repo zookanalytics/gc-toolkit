@@ -57,7 +57,7 @@ without saying where they come from. Separately, a rig that keeps no
    change. That is advice triage weighs, not a refusal signoff.sh enforces, and
    how reliably it holds is the operator's open question. Cost: triage can now
    add demo, arch or pm in the three rigs here that keep no index (gascity,
-   shutupandlisten, signal-loom) and in sprintshow, whose index lists only
+   rig-b, rig-a) and in rig-c, whose index lists only
    correctness and triage and says it leaves the other three out on purpose.
    No row withdraws a pack check outright. Triage's judgment does not change,
    and adding nothing stays its common case.
@@ -198,9 +198,9 @@ Facts read from the running city:
   |---|---|---|
   | gc-toolkit | correctness, triage, demo, arch, pm | none |
   | gascity | none | none |
-  | shutupandlisten | none | none |
-  | signal-loom | none | none |
-  | sprintshow | correctness and triage, no phase. Correctness's `method` is `formulas/mol-review.toml`. The header says sprintshow leaves demo, arch and pm out on purpose. | none |
+  | rig-b | none | none |
+  | rig-a | none | none |
+  | rig-c | correctness and triage, no phase. Correctness's `method` is `formulas/mol-review.toml`. The header says rig-c leaves demo, arch and pm out on purpose. | none |
 
 Settling the design turned up four defects on main. Each is the frame contract
 or the index read showing through, so the build fixes each and none is filed
@@ -680,7 +680,7 @@ that withdraws a check can come later, if advice proves too weak.
 
 A check's skill is named from the check (section 3), so the `method` key has no
 reader. The parser ignores it, the emitted TSV drops the column to
-`<name>\t<purpose>\t<phase>`, and the pack's rows lose the key. sprintshow's
+`<name>\t<purpose>\t<phase>`, and the pack's rows lose the key. rig-c's
 `method = "formulas/mol-review.toml"` stops meaning anything, as it already
 does in practice.
 
@@ -861,9 +861,9 @@ untrue are rewritten:
 - the triage skill's index contract (`:28-35`, `:55-59`), which refuses the
   pack's copy;
 - the demo skill (`:138-140`), on where its extension comes from;
-- sprintshow's own index header, which says sprintshow leaves demo, arch and pm
-  out on purpose. It is sprintshow's file, so unit A's builder files a bead for
-  its rewrite in sprintshow's store. The bead points that intent at a
+- rig-c's own index header, which says rig-c leaves demo, arch and pm
+  out on purpose. It is rig-c's file, so unit A's builder files a bead for
+  its rewrite in rig-c's store. The bead points that intent at a
   `docs/review-triage.md` that tells triage so (section 5).
 
 ### A change to its own guidance is named to the approver
@@ -1174,7 +1174,7 @@ when unit A lands.
   `scripts-dir`, and its no-index fallback goes.
 - `review-checks.toml` loses its `method` keys. Its header states the layered
   index and points at the configuration that holds the baseline.
-- A bead in sprintshow's store for its index header, which points its intent to
+- A bead in rig-c's store for its index header, which points its intent to
   leave demo, arch and pm out at a `docs/review-triage.md` (sections 5 and 6).
 - Tests 6 and 7 of section 8, the reader half of test 8, and
   `gate-ensure.test.sh`'s cases of an unread head (section 8).

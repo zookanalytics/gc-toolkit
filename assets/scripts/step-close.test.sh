@@ -22,7 +22,7 @@
 #     derived, and a hint offered as the only thing naming the molecule that
 #     would then scope it — which is no scope at all, and is refused;
 #   * the SUBSTRING trap — jq's `inside`/`contains` match substrings, so a
-#     session named lx-zzk would "own" lx-zzk9's bead. Exact membership only;
+#     session named hq-zzk would "own" hq-zzk9's bead. Exact membership only;
 #   * OWNERSHIP BY SESSION STAMP — inside a known molecule an unassigned step
 #     bead is ours only when its gc.session_id stamp is empty or this session's;
 #     one another session stamped is neither discovered nor accepted as a hint;
@@ -206,7 +206,7 @@ stub_runs() {
                     | {root: .[0], convoy: .[1], bead: "", formula: .[2], live: (.[3] != "closed")} ]' > "$RUN_LIB_STUB_RUNS"
 }
 
-MINE="gc-toolkit__polecat-lx-zzk9"
+MINE="gc-toolkit__polecat-hq-zzk9"
 STEP="mol-feedback-distiller.load-and-gate"
 OTHER_STEP="mol-feedback-miner.load-context"
 
@@ -215,7 +215,7 @@ OTHER_STEP="mol-feedback-miner.load-context"
 reset_beads() {
   cat > "$FAKE_BEADS" <<B
 tk-9b3d8|$MINE|$STEP|in_progress
-tk-dy6cn|gc-toolkit__polecat-lx-dq84|$OTHER_STEP|in_progress
+tk-dy6cn|gc-toolkit__polecat-hq-dq84|$OTHER_STEP|in_progress
 B
   : > "$FAKE_CLOSED"
   : > "$FAKE_UPDFAIL"
@@ -256,13 +256,13 @@ invoke() {  # invoke [VAR=VALUE ...] -- <script args ...>; sets OUT and RC
 
 run() {
   # run <args...>; sets OUT (stdout+stderr) and RC.
-  invoke GC_SESSION_NAME="$MINE" GC_SESSION_ID="lx-zzk9" -- "$@"
+  invoke GC_SESSION_NAME="$MINE" GC_SESSION_ID="hq-zzk9" -- "$@"
 }
 
 # --- 1. THE REGRESSION ANCHOR ------------------------------------------------
 # Stale GC_TRIGGER_BEAD_ID naming a live foreign bead, own bead present.
 reset_beads
-invoke GC_SESSION_NAME="$MINE" GC_SESSION_ID="lx-zzk9" GC_TRIGGER_BEAD_ID="tk-dy6cn" \
+invoke GC_SESSION_NAME="$MINE" GC_SESSION_ID="hq-zzk9" GC_TRIGGER_BEAD_ID="tk-dy6cn" \
        -- --step "$STEP" --outcome pass
 eq "$RC" "0" "(STALE-ENV) a stale env id does not stop the close"
 has "$(cat "$FAKE_CLOSED")" "tk-9b3d8 pass" "(STALE-ENV) closed THIS session's bead for this step"
@@ -302,7 +302,7 @@ FSTEP="mol-polecat-work.load-context"
 #     candidate belongs to another root: a refusal, never a reported pass.
 cat > "$FAKE_BEADS" <<B
 tk-mine11||$FSTEP|open|root-mine|
-tk-old111|$MINE|$FSTEP|closed|root-old|lx-old
+tk-old111|$MINE|$FSTEP|closed|root-old|hq-old
 B
 : > "$FAKE_CLOSED"
 run --step "$FSTEP"
@@ -316,8 +316,8 @@ has "$OUT" "still UNCLOSED" "(FOREIGN-ROOT) names the consequence"
 #     hands out. That names the molecule, so the chain closes on its own bead
 #     even though the finalizer stripped the assignee off it.
 cat > "$FAKE_BEADS" <<B
-tk-mine11||$FSTEP|open|root-mine|lx-zzk9
-tk-old111|$MINE|$FSTEP|closed|root-old|lx-old
+tk-mine11||$FSTEP|open|root-mine|hq-zzk9
+tk-old111|$MINE|$FSTEP|closed|root-old|hq-old
 B
 : > "$FAKE_CLOSED"
 run --step "$FSTEP"
@@ -329,7 +329,7 @@ hasnt "$(cat "$FAKE_CLOSED")" "tk-old111" "(STRIPPED-ASSIGNEE) the earlier molec
 #     `gc hook --claim --json`, with no session stamp anywhere.
 cat > "$FAKE_BEADS" <<B
 tk-mine11||$FSTEP|open|root-mine|
-tk-old111|$MINE|$FSTEP|closed|root-old|lx-old
+tk-old111|$MINE|$FSTEP|closed|root-old|hq-old
 B
 : > "$FAKE_CLOSED"
 run --step "$FSTEP" --root root-mine
@@ -340,8 +340,8 @@ has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(ROOT-FLAG) closed the bead in the
 #     assignee, same step, at in_progress — the tier that outranks ours. Scoped
 #     to the molecule it is invisible; unscoped it is the bead that gets closed.
 cat > "$FAKE_BEADS" <<B
-tk-mine11|$MINE|$FSTEP|open|root-mine|lx-zzk9
-tk-old222|$MINE|$FSTEP|in_progress|root-old|lx-old
+tk-mine11|$MINE|$FSTEP|open|root-mine|hq-zzk9
+tk-old222|$MINE|$FSTEP|in_progress|root-old|hq-old
 B
 : > "$FAKE_CLOSED"
 run --step "$FSTEP"
@@ -353,8 +353,8 @@ hasnt "$(cat "$FAKE_CLOSED")" "tk-old222" "(FOREIGN-LIVE) the other molecule's l
 #     earlier molecule. With the molecule known the root decides, and no
 #     assignee can vouch for a candidate outside it.
 cat > "$FAKE_BEADS" <<B
-tk-mine11|$MINE|$FSTEP|open|root-mine|lx-zzk9
-tk-old111|$MINE|$FSTEP|closed|root-old|lx-old
+tk-mine11|$MINE|$FSTEP|open|root-mine|hq-zzk9
+tk-old111|$MINE|$FSTEP|closed|root-old|hq-old
 B
 : > "$FAKE_CLOSED"
 run --step "$FSTEP" --root root-mine --bead tk-old111
@@ -368,8 +368,8 @@ has "$OUT" "belongs to molecule root-old" "(STALE-HINT-ROOT) the hint's own mole
 #     step it hands out names the molecule; a same-assignee hint must not
 #     outrank it, or the wrong root scopes every resolution below.
 cat > "$FAKE_BEADS" <<B
-tk-mine11|$MINE|$FSTEP|open|root-mine|lx-zzk9
-tk-old111|$MINE|$FSTEP|closed|root-old|lx-old
+tk-mine11|$MINE|$FSTEP|open|root-mine|hq-zzk9
+tk-old111|$MINE|$FSTEP|closed|root-old|hq-old
 B
 : > "$FAKE_CLOSED"
 run --step "$FSTEP" --bead tk-old111
@@ -439,7 +439,7 @@ has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(ASSIGNEE-ONLY) it is our own bead
 hasnt "$(cat "$FAKE_CLOSED")" "tk-old222" "(ASSIGNEE-ONLY) the earlier molecule stays untouched"
 
 cat > "$FAKE_BEADS" <<B
-tk-mine11||$FSTEP|open|root-mine|lx-zzk9
+tk-mine11||$FSTEP|open|root-mine|hq-zzk9
 tk-old222|$MINE|$FSTEP|in_progress|root-old|
 B
 : > "$FAKE_CLOSED"
@@ -465,8 +465,8 @@ has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(ASSIGNEE-ONLY) closed the bead fo
 #     can be this shell, so it must not stall a close.
 cat > "$FAKE_BEADS" <<B
 tk-mine11|$MINE|$FSTEP|in_progress|root-mine|
-tk-their1|gc-toolkit__polecat-lx-other|$FSTEP|open|root-thm|
-tk-their2||$FSTEP|open|root-thn|lx-other
+tk-their1|gc-toolkit__polecat-hq-other|$FSTEP|open|root-thm|
+tk-their2||$FSTEP|open|root-thn|hq-other
 B
 : > "$FAKE_CLOSED"
 invoke GC_SESSION_NAME="$MINE" -- --step "$FSTEP"
@@ -493,22 +493,22 @@ has "$OUT" "tk-mine11 (molecule root-mine)" "(ASSIGNEE-ONLY) the bead that could
 # worker on the chain is a real condition with its own fix, so it is refused
 # and named rather than closed underneath them.
 cat > "$FAKE_BEADS" <<B
-tk-held11|gc-toolkit__polecat-lx-other|$FSTEP|in_progress|root-mine|lx-other
-tk-sib111|$MINE|mol-polecat-work.implement|open|root-mine|lx-zzk9
+tk-held11|gc-toolkit__polecat-hq-other|$FSTEP|in_progress|root-mine|hq-other
+tk-sib111|$MINE|mol-polecat-work.implement|open|root-mine|hq-zzk9
 B
 : > "$FAKE_CLOSED"
 run --step "$FSTEP"
 eq "$RC" "2" "(CONTENDED) a step held by another session is refused"
 eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(CONTENDED) nothing was written"
-has "$OUT" "tk-held11 in_progress gc-toolkit__polecat-lx-other" "(CONTENDED) the holder is named"
+has "$OUT" "tk-held11 in_progress gc-toolkit__polecat-hq-other" "(CONTENDED) the holder is named"
 has "$OUT" "second worker" "(CONTENDED) says what that means"
 
 # (e) A step of our own molecule that someone else already closed is done, not
 #     contended: within one molecule the step_ref names one bead, and a re-run
 #     that finds it closed has nothing left to do.
 cat > "$FAKE_BEADS" <<B
-tk-mine11|gc-toolkit__polecat-lx-other|$FSTEP|closed|root-mine|lx-other
-tk-sib111|$MINE|mol-polecat-work.implement|open|root-mine|lx-zzk9
+tk-mine11|gc-toolkit__polecat-hq-other|$FSTEP|closed|root-mine|hq-other
+tk-sib111|$MINE|mol-polecat-work.implement|open|root-mine|hq-zzk9
 B
 : > "$FAKE_CLOSED"
 run --step "$FSTEP"
@@ -523,7 +523,7 @@ has "$OUT" "already closed" "(CLOSED-BY-PEER) says so"
 # another session's stamp is that session's, so the root-scoped discovery must
 # not close it even with --root naming our molecule.
 cat > "$FAKE_BEADS" <<B
-tk-frgn11||$FSTEP|open|root-mine|lx-other
+tk-frgn11||$FSTEP|open|root-mine|hq-other
 B
 : > "$FAKE_CLOSED"
 run --step "$FSTEP" --root root-mine
@@ -543,7 +543,7 @@ hasnt "$(cat "$FAKE_CLOSED")" "tk-frgn11" "(FOREIGN-STAMP-HINT) the hinted forei
 # naming THIS session is our own finalizer-stripped bead, and it still closes.
 # The gate rejects another session's stamp, not every unassigned bead.
 cat > "$FAKE_BEADS" <<B
-tk-mine11||$FSTEP|open|root-mine|lx-zzk9
+tk-mine11||$FSTEP|open|root-mine|hq-zzk9
 B
 : > "$FAKE_CLOSED"
 run --step "$FSTEP" --root root-mine
@@ -603,7 +603,7 @@ eq "$(cut -d' ' -f1,3 "$RUN_LIB_STUB_LOG" | tail -n 1)" "subject conv-mine" "(CO
 # back to the derivation, which here meets the queued rivals and refuses.
 convoy_store
 : > "$RUN_LIB_STUB_LOG"
-invoke GC_SESSION_NAME="$MINE" GC_SESSION_ID="lx-zzk9" RUN_LIB_STUB_FAIL="subject" -- --step "$FR" --convoy conv-mine
+invoke GC_SESSION_NAME="$MINE" GC_SESSION_ID="hq-zzk9" RUN_LIB_STUB_FAIL="subject" -- --step "$FR" --convoy conv-mine
 eq "$RC" "2" "(CONVOY-UNREAD) a failed read of the convoy's runs takes no root"
 has "$OUT" "names no single live workflow root" "(CONVOY-UNREAD) …and says the derivation decides"
 eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(CONVOY-UNREAD) …which writes nothing over the rivals"
@@ -617,7 +617,7 @@ eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(CONVOY-UNREAD) …which writes 
 cat > "$FAKE_BEADS" <<B
 root-old|||closed|||conv-1|mol-polecat-work
 root-new|||open|||conv-1|mol-polecat-work
-tk-oldlc|$MINE|$FSTEP|closed|root-old|lx-zzk9
+tk-oldlc|$MINE|$FSTEP|closed|root-old|hq-zzk9
 tk-newlc||$FSTEP|open|root-new|
 B
 : > "$FAKE_CLOSED"
@@ -630,7 +630,7 @@ has "$OUT" "tk-oldlc ($FSTEP) is already closed" "(CONVOY-REPOURED) the replaced
 # (c) A convoy with no live root, as after the finalizer closed it, falls back
 #     to the derivation rather than refusing.
 cat > "$FAKE_BEADS" <<B
-tk-mine11||$FSTEP|open|root-mine|lx-zzk9
+tk-mine11||$FSTEP|open|root-mine|hq-zzk9
 B
 : > "$FAKE_CLOSED"
 run --step "$FSTEP" --convoy conv-none
@@ -656,7 +656,7 @@ hasnt "$(cat "$FAKE_CLOSED")" "tk-q3aaaa" "(CONVOY-FORMULA) the queued rival is 
 cat > "$FAKE_BEADS" <<B
 root-a|||in_progress|||conv-3|mol-polecat-work
 root-b|||in_progress|||conv-3|mol-polecat-work
-tk-mine33||$FSTEP|open|root-a|lx-zzk9
+tk-mine33||$FSTEP|open|root-a|hq-zzk9
 B
 : > "$FAKE_CLOSED"
 run --step "$FSTEP" --convoy conv-3
@@ -671,10 +671,10 @@ has "$(cat "$FAKE_CLOSED")" "tk-mine33 pass" "(CONVOY-TIE) …and the derivation
 #     session's hand, and the close proceeds.
 cat > "$FAKE_BEADS" <<B
 root-mine|||in_progress|||conv-4|mol-polecat-work
-tk-lc111|$MINE|mol-polecat-work.load-context|closed|root-mine|lx-zzk9
+tk-lc111|$MINE|mol-polecat-work.load-context|closed|root-mine|hq-zzk9
 tk-ws111||mol-polecat-work.workspace-setup|open|root-mine|
-tk-lc222|$MINE|mol-polecat-work.load-context|closed|root-old|lx-zzk9
-tk-ws222|$MINE|mol-polecat-work.workspace-setup|closed|root-old|lx-zzk9
+tk-lc222|$MINE|mol-polecat-work.load-context|closed|root-old|hq-zzk9
+tk-ws222|$MINE|mol-polecat-work.workspace-setup|closed|root-old|hq-zzk9
 B
 : > "$FAKE_CLOSED"
 run --step mol-polecat-work.workspace-setup
@@ -695,11 +695,11 @@ hasnt "$(cat "$FAKE_CALLS")" "gc.session_id" "(CONVOY-INLINE) no gc.session_id r
 cat > "$FAKE_BEADS" <<B
 root-old|||closed|||conv-5|mol-review
 root-new|||open|||conv-5|mol-review
-tk-oldrv|gc-toolkit/gc-toolkit.nux|mol-review.review|closed|root-old|lx-zzk9
-tk-newrv|gc-toolkit/gc-toolkit.nux|mol-review.review|in_progress|root-new|lx-other
+tk-oldrv|gc-toolkit/gc-toolkit.nux|mol-review.review|closed|root-old|hq-zzk9
+tk-newrv|gc-toolkit/gc-toolkit.nux|mol-review.review|in_progress|root-new|hq-other
 B
 : > "$FAKE_CLOSED"
-invoke GC_SESSION_NAME="$MINE" GC_SESSION_ID="lx-zzk9" GC_ALIAS="gc-toolkit/gc-toolkit.nux" \
+invoke GC_SESSION_NAME="$MINE" GC_SESSION_ID="hq-zzk9" GC_ALIAS="gc-toolkit/gc-toolkit.nux" \
        -- --step mol-review.review --convoy conv-5
 eq "$RC" "0" "(CONVOY-ALIAS) a shell whose molecule was replaced exits clean"
 eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(CONVOY-ALIAS) the other session's step under the shared alias is NOT closed"
@@ -712,31 +712,31 @@ has "$OUT" "tk-oldrv (mol-review.review) is already closed" "(CONVOY-ALIAS) this
 # root answers, even when closed rows name an earlier molecule this session
 # finished; before, that pair was ambiguous and a stripped bead was refused.
 cat > "$FAKE_BEADS" <<B
-tk-mine11||$FSTEP|open|root-mine|lx-zzk9
-tk-old111|$MINE|$FSTEP|closed|root-old|lx-zzk9
+tk-mine11||$FSTEP|open|root-mine|hq-zzk9
+tk-old111|$MINE|$FSTEP|closed|root-old|hq-zzk9
 B
 : > "$FAKE_CLOSED"; : > "$FAKE_CALLS"
 run --step "$FSTEP"
 eq "$RC" "0" "(LIVE-FIRST) a live stamped bead names the molecule past an earlier closed one"
 has "$(cat "$FAKE_CLOSED")" "tk-mine11 pass" "(LIVE-FIRST) it closes this molecule's bead"
 hasnt "$(cat "$FAKE_CLOSED")" "tk-old111" "(LIVE-FIRST) the earlier molecule is untouched"
-has "$(cat "$FAKE_CALLS")" "gc.session_id=lx-zzk9 --status=open,in_progress " "(LIVE-FIRST) the stamp is read from open and in_progress rows"
+has "$(cat "$FAKE_CALLS")" "gc.session_id=hq-zzk9 --status=open,in_progress " "(LIVE-FIRST) the stamp is read from open and in_progress rows"
 hasnt "$(cat "$FAKE_CALLS")" "blocked,closed" "(LIVE-FIRST) …and closed rows are never read for it"
 
 # A re-run over a closed chain finds no live stamp, and only then reads closed rows.
 cat > "$FAKE_BEADS" <<B
-tk-9b3d8|$MINE|$STEP|closed|root-1|lx-zzk9
+tk-9b3d8|$MINE|$STEP|closed|root-1|hq-zzk9
 B
 : > "$FAKE_CLOSED"; : > "$FAKE_CALLS"
 run --step "$STEP"
 eq "$RC" "0" "(LIVE-EMPTY) a re-run over a closed chain still resolves"
-has "$(cat "$FAKE_CALLS")" "gc.session_id=lx-zzk9 --status=blocked,closed " "(LIVE-EMPTY) the closed rows are read once no live row carries the stamp"
+has "$(cat "$FAKE_CALLS")" "gc.session_id=hq-zzk9 --status=blocked,closed " "(LIVE-EMPTY) the closed rows are read once no live row carries the stamp"
 
 # Two live roots under the stamp are no answer, and reading closed rows could
 # not make one, so they are not read.
 cat > "$FAKE_BEADS" <<B
-tk-mine11|$MINE|$FSTEP|open|root-mine|lx-zzk9
-tk-oth111||mol-polecat-work.implement|in_progress|root-other|lx-zzk9
+tk-mine11|$MINE|$FSTEP|open|root-mine|hq-zzk9
+tk-oth111||mol-polecat-work.implement|in_progress|root-other|hq-zzk9
 B
 : > "$FAKE_CLOSED"; : > "$FAKE_CALLS"
 run --step "$FSTEP"
@@ -868,10 +868,10 @@ hasnt "$(cat "$FAKE_CLOSED")" "tk-dy6cn" "(HINT-BAD) the hinted foreign bead was
 has "$OUT" "ignoring the hint" "(HINT-BAD) the ignored hint is reported"
 
 # --- 5. the substring trap ---------------------------------------------------
-# jq's inside/contains match substrings: a session named lx-zzk must NOT verify
-# as the owner of a bead assigned to ...lx-zzk9.
+# jq's inside/contains match substrings: a session named hq-zzk must NOT verify
+# as the owner of a bead assigned to ...hq-zzk9.
 reset_beads
-invoke GC_SESSION_NAME="gc-toolkit__polecat-lx-zzk" \
+invoke GC_SESSION_NAME="gc-toolkit__polecat-hq-zzk" \
        -- --step "$STEP" --bead tk-9b3d8
 eq "$RC" "2" "(SUBSTRING) a session whose name is a PREFIX of the owner is refused"
 eq "$(wc -l < "$FAKE_CLOSED" | tr -d ' ')" "0" "(SUBSTRING) nothing was written"
@@ -897,7 +897,7 @@ has "$(cat "$FAKE_CLOSED")" "tk-twin1 pass" "(AMBIG) the named bead is the one c
 # what makes it *its own*: without a molecule this arm cannot tell a re-run
 # from the foreign match in 1c, and it refuses instead (asserted there).
 cat > "$FAKE_BEADS" <<B
-tk-9b3d8|$MINE|$STEP|closed|root-1|lx-zzk9
+tk-9b3d8|$MINE|$STEP|closed|root-1|hq-zzk9
 B
 : > "$FAKE_CLOSED"
 run --step "$STEP"
@@ -919,7 +919,7 @@ has "$(cat "$FAKE_CLOSED")" "tk-solo1 pass" "(ENV-OK) it closed the verified bea
 
 # --- 9. nothing resolvable — FATAL, nothing written --------------------------
 cat > "$FAKE_BEADS" <<B
-tk-dy6cn|gc-toolkit__polecat-lx-dq84|$OTHER_STEP|in_progress
+tk-dy6cn|gc-toolkit__polecat-hq-dq84|$OTHER_STEP|in_progress
 B
 : > "$FAKE_CLOSED"
 invoke GC_SESSION_NAME="$MINE" GC_TRIGGER_BEAD_ID="tk-dy6cn" \
@@ -1450,11 +1450,11 @@ if [ -n "$LOOP_SRC" ]; then ok "(LOOP) the submit-chain-close loop is extracted"
 loop_store() {
   cat > "$FAKE_BEADS" <<B
 root-loop|||in_progress|||conv-loop|mol-polecat-work
-tk-s1aaa|gc-toolkit__polecat-lx-a|mol-polecat-work.load-context|closed|root-loop|lx-a
+tk-s1aaa|gc-toolkit__polecat-hq-a|mol-polecat-work.load-context|closed|root-loop|hq-a
 tk-s2aaa||mol-polecat-work.workspace-setup|closed|root-loop|
 tk-s3aaa||mol-polecat-work.preflight-tests|closed|root-loop|
 tk-s4aaa||mol-polecat-work.implement|closed|root-loop|
-tk-s5aaa|$MINE|mol-polecat-work.submit-and-exit|in_progress|root-loop|lx-zzk9
+tk-s5aaa|$MINE|mol-polecat-work.submit-and-exit|in_progress|root-loop|hq-zzk9
 tk-wfaaa||mol-polecat-work.workflow-finalize|open|root-loop|
 tk-q1aaa||mol-polecat-work.submit-and-exit|open|root-q1|
 tk-q2aaa||mol-polecat-work.load-context|open|root-q2|
@@ -1464,7 +1464,7 @@ B
 run_loop() { # <loop file>; sets OUT and RC
   RC=0
   stub_runs
-  OUT=$(gcenv GC_SESSION_NAME="$MINE" GC_SESSION_ID="lx-zzk9" GC_PACK_DIR="$ROOT" GC_RIG_ROOT="" GC_CITY_PATH="" \
+  OUT=$(gcenv GC_SESSION_NAME="$MINE" GC_SESSION_ID="hq-zzk9" GC_PACK_DIR="$ROOT" GC_RIG_ROOT="" GC_CITY_PATH="" \
     bash "$1" 2>&1) || RC=$?
 }
 
@@ -1488,7 +1488,7 @@ hasnt "$(cat "$FAKE_CALLS")" "gc.session_id" "(LOOP-ROOT) a loop given --root is
 printf '%s\n' "$LOOP_SRC" | sed 's/ --convoy {{convoy_id}}//' > "$TMP/loop-bare.sh"
 loop_store
 run_loop "$TMP/loop-bare.sh"
-has "$(cat "$FAKE_CALLS")" "gc.session_id=lx-zzk9" "(LOOP-CONTROL) without the molecule's name, every call reads the session stamp"
+has "$(cat "$FAKE_CALLS")" "gc.session_id=hq-zzk9" "(LOOP-CONTROL) without the molecule's name, every call reads the session stamp"
 
 echo
 echo "step-close.test.sh: $PASS passed, $FAIL failed"

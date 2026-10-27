@@ -6,7 +6,7 @@
 # run `git add -A && git commit && git push origin HEAD`. When work_dir is a
 # HUSK — the git worktree was removed but the directory survives (typically only
 # .gc/ left) — the `cd` still succeeds, but git finds no repo there and walks UP
-# to the nearest enclosing repo: the TOWN repo at /home/zook/loomington. The
+# to the nearest enclosing repo: the TOWN repo at /home/zook/mycity. The
 # salvage would then add, commit and PUSH the operator's uncommitted town-repo
 # WIP to origin/main.
 #
@@ -142,12 +142,10 @@ grep -q "REFUSING salvage" "$TMP/err" \
 # The guard only protects anything if Cases B/C/D actually gate on it. Assert
 # each write-bearing case references WORKTREE_SAFE, so a future edit that drops
 # the gate fails here rather than silently re-exposing the town repo.
-for marker in \
-  'REFUSING salvage writes'; do
-  grep -qF "$marker" "$TOML" \
-    && ok "(H) salvage writes gated: '$marker'" \
-    || bad "(H) missing WORKTREE_SAFE gate: '$marker'"
-done
+marker='REFUSING salvage writes'
+grep -qF "$marker" "$TOML" \
+  && ok "(H) salvage writes gated: '$marker'" \
+  || bad "(H) missing WORKTREE_SAFE gate: '$marker'"
 grep -qF 'if [ "$WORKTREE_SAFE" = "1" ]' "$TOML" \
   && ok "(H2) the salvage block branches on WORKTREE_SAFE" \
   || bad "(H2) the salvage block must branch on WORKTREE_SAFE"

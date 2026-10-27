@@ -2220,8 +2220,8 @@ cmd_open() {
     # <<< open-subject-closed
 
     # Already held? A visit records its subject as a tracks edge to it, with the
-    # gc.continuation_group stamp as the recovery fallback (su-ab9je: the stamp
-    # can land empty). visit-identity.sh is the one matcher, shared with dismiss,
+    # gc.continuation_group stamp as the recovery fallback (the stamp can land
+    # empty). visit-identity.sh is the one matcher, shared with dismiss,
     # converse-fold and the sweeps; it also names WHICH identity matched, so a
     # fold is reported (--json and stderr), never a silent no-op.
     # --allow-duplicate skips the dedup: engage --reason files a fresh visit for
@@ -2411,8 +2411,8 @@ cmd_react() {
 # "the sitting I am in", so when no bead is named it resolves it here instead
 # of making the operator paste an id the session already knows. A converse
 # session is the ASSIGNEE of the visit it holds; the subject is that visit's
-# gc.continuation_group stamp, or its tracks edge when the stamp landed empty
-# (su-ab9je) — the same recovery converse's own visit-fold-check makes, and
+# gc.continuation_group stamp, or its tracks edge when the stamp landed empty,
+# the same recovery converse's own visit-fold-check makes, and
 # one cmd_dismiss's stamp-or-edge lookup then finds under the same id.
 # Read from this session's own rig ledger: a visit is filed in its subject's
 # rig and adopted by the converse sitting engaged on it, so the store to read

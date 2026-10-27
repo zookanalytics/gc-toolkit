@@ -42,9 +42,9 @@ As of 2026-10-06T00:40Z, main at `54fa2a3d`:
 - Arm 7 rarely finishes on two rigs (refinery-reconcile `pass.log`, read
   2026-10-06T00:53Z). gc-toolkit reached arm 7 in 76 of 253 logged passes since
   2026-10-02T18:30Z and got past it in 31. The last pass to get past it started
-  2026-10-04T09:51Z. signal-loom reached arm 7 in 321 of 335 passes since
+  2026-10-04T09:51Z. rig-a reached arm 7 in 321 of 335 passes since
   2026-10-03T05:42Z and got past it in 37, the last in the pass that started
-  2026-10-05T13:08Z. gascity, shutupandlisten and sprintshow got past arm 7 in
+  2026-10-05T13:08Z. gascity, rig-b and rig-c got past arm 7 in
   every logged pass.
 - A pass killed inside arm 7 re-derives only the labels of the PRs it reaches
   before the kill.

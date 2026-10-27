@@ -78,7 +78,7 @@ path (see the empirical runs below).
 
 - Three direct `gc doctor --json > file` runs with this exact binary: all
   **valid** JSON (`jq -e .` passes).
-- The live gate cache `/home/zook/loomington/.gc/runtime/doctor-findings.json`
+- The live gate cache `/home/zook/mycity/.gc/runtime/doctor-findings.json`
   (written by the deacon patrol at 22:50Z) is **valid**.
 - The `check-pipefail-grep-q` result *is* present in the valid output, with the
   same `$CALLS`-bearing findings the deacon saw — correctly single-escaped.

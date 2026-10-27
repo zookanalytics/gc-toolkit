@@ -143,9 +143,9 @@ refused() { grep -E "^refused bd update $1 " "$STUB_GC_LOG" || true; }
 # the source arm must scrub, or orphan recovery re-derives the dead owner.
 fixture() {
   store '[
-    {"id":"tk-step","status":"in_progress","assignee":"lx-dead","title":"Implement the solution",
+    {"id":"tk-step","status":"in_progress","assignee":"hq-dead","title":"Implement the solution",
      "metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"tk-root",
-                 "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead",
+                 "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"hq-dead",
                  "gc.session_name":"polecat-2-pool","gc.session_affinity":"require",
                  "gc.continuation_group":"cg-1",
                  "gc.native_step_dependencies.v1":"[\"mol-polecat-work.preflight-tests\"]"}},
@@ -153,12 +153,12 @@ fixture() {
      "metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2",
                  "gc.input_convoy_id":"tk-convoy","gc.routed_to":"gc-toolkit/gc-toolkit.polecat",
                  "gc.session_name":"polecat-2-pool"}},
-    {"id":"tk-visit","status":"in_progress","assignee":"lx-dead","title":"visit",
+    {"id":"tk-visit","status":"in_progress","assignee":"hq-dead","title":"visit",
      "metadata":{"task_kind":"visit","gc.routed_to":"gc-toolkit/gc-toolkit.converse",
-                 "gc.continuation_group":"cg-visit","gc.session_id":"lx-dead"}},
-    {"id":"tk-work","status":"in_progress","assignee":"lx-dead","title":"a work bead",
+                 "gc.continuation_group":"cg-visit","gc.session_id":"hq-dead"}},
+    {"id":"tk-work","status":"in_progress","assignee":"hq-dead","title":"a work bead",
      "metadata":{"branch":"polecat/tk-work","gc.routed_to":"gc-toolkit/gc-toolkit.polecat",
-                 "workflow_id":"tk-root","gc.session_id":"lx-dead","gc.session_name":"polecat-3-pool"}}
+                 "workflow_id":"tk-root","gc.session_id":"hq-dead","gc.session_name":"polecat-3-pool"}}
   ]'
   : > "$STUB_GC_LOG"
 }
@@ -173,18 +173,18 @@ OUT=$("$SCRIPT" tk-work 2>&1);  has "$OUT" "class=source"         "plain work be
 # A visit that also carried step metadata must still read as a visit: it is the
 # source bead of its own mol-visit molecule, and the visit arm is the narrower
 # contract (release the assignee and touch no metadata).
-store '[{"id":"tk-v2","status":"in_progress","assignee":"lx-dead","title":"visit",
+store '[{"id":"tk-v2","status":"in_progress","assignee":"hq-dead","title":"visit",
          "metadata":{"task_kind":"visit","gc.step_ref":"mol-visit.converse",
-                     "gc.routed_to":"r","gc.session_id":"lx-dead"}}]'
+                     "gc.routed_to":"r","gc.session_id":"hq-dead"}}]'
 OUT=$("$SCRIPT" tk-v2 2>&1); has "$OUT" "class=visit" "task_kind=visit outranks a step_ref"
 
 # A review bead is the source bead of its own mol-review molecule, so like a visit
 # it is classified by task_kind before the source arm — and before the step/root
 # checks, so a review that also carried a step_ref still reads review.
-store '[{"id":"tk-rv","status":"in_progress","assignee":"lx-dead","title":"Review branch polecat/tk-anc -> main: a finding",
+store '[{"id":"tk-rv","status":"in_progress","assignee":"hq-dead","title":"Review branch polecat/tk-anc -> main: a finding",
          "metadata":{"task_kind":"review","gc.step_ref":"mol-review.review","check_name":"codex",
                      "anchor_bead":"tk-anc","review_branch":"polecat/tk-anc",
-                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex","gc.session_id":"lx-dead"}}]'
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex","gc.session_id":"hq-dead"}}]'
 OUT=$("$SCRIPT" tk-rv 2>&1); has "$OUT" "class=review" "task_kind=review outranks a step_ref"
 
 echo "--- preview is the default ---"
@@ -193,7 +193,7 @@ OUT=$("$SCRIPT" tk-step 2>&1); rc=$?
 eq "$rc" "0" "preview exits 0"
 has "$OUT" "result=preview" "preview says so"
 eq "$(bstatus tk-step)" "in_progress" "preview left the status alone"
-eq "$(meta tk-step gc.session_id)" "lx-dead" "preview left the session pin alone"
+eq "$(meta tk-step gc.session_id)" "hq-dead" "preview left the session pin alone"
 eq "$(wc -l < "$STUB_GC_LOG" | tr -d ' ')" "2" "preview reads the step and its root, nothing more"
 hasnt "$(cat "$STUB_GC_LOG")" "bd update" "preview issued no write at all"
 
@@ -212,7 +212,7 @@ hasnt "$(cat "$STUB_GC_LOG")" "delete-source" "root arm never calls delete-sourc
 
 echo "--- step arm: pin released, chain preserved ---"
 fixture
-OUT=$("$SCRIPT" tk-step --claim lx-dead:in_progress:lx-dead --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" tk-step --claim hq-dead:in_progress:hq-dead --apply 2>&1); rc=$?
 eq "$rc" "0" "step release exits 0"
 has "$OUT" "result=disposed" "step release reports disposed"
 eq "$(bstatus tk-step)" "open" "step is open"
@@ -238,11 +238,11 @@ REL=$(writes tk-step)
 for k in gc.session_id gc.session_name gc.session_affinity gc.continuation_group; do
   has "$REL" "--unset-metadata $k" "the release removes $k"
 done
-has "$REL" "--status=open --assignee  --if-assignee=lx-dead --if-status=in_progress" \
+has "$REL" "--status=open --assignee  --if-assignee=hq-dead --if-status=in_progress" \
   "it opens and unassigns the step, guarded on the assignee and status just read"
 # The guard value is attached (=form), never space-separated, so the gc wrapper
 # never reads a session-id guard as the bead id that picks the store.
-hasnt "$(cat "$STUB_GC_LOG")" "--if-assignee lx-dead" "guard uses the attached =form, not the mis-scoping spaced form"
+hasnt "$(cat "$STUB_GC_LOG")" "--if-assignee hq-dead" "guard uses the attached =form, not the mis-scoping spaced form"
 hasnt "$REL" "--force" "the release carries no --force, which bd refuses beside --if-assignee"
 
 echo "--- the owner is not the assignee guard ---"
@@ -252,17 +252,17 @@ echo "--- the owner is not the assignee guard ---"
 # mismatch and refuse every release of this shape.
 store '[{"id":"tk-slot","status":"in_progress","assignee":"gc-toolkit/gc-toolkit.polecat","title":"step",
          "metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"tk-root",
-                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead"}},
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"hq-dead"}},
         {"id":"tk-root","status":"in_progress","assignee":"","title":"mol-polecat-work",
          "metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2"}}]'
 : > "$STUB_GC_LOG"
-OUT=$("$SCRIPT" tk-slot --claim lx-dead:in_progress:gc-toolkit/gc-toolkit.polecat --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" tk-slot --claim hq-dead:in_progress:gc-toolkit/gc-toolkit.polecat --apply 2>&1); rc=$?
 eq "$rc" "0" "a step whose owner differs from its assignee still releases"
 eq "$(bassignee tk-slot)" "" "the alias assignee is cleared"
 eq "$(meta tk-slot gc.session_id)" "<absent>" "the dead session id is cleared"
 has "$(cat "$STUB_GC_LOG")" "--if-assignee=gc-toolkit/gc-toolkit.polecat" \
   "the guard is the ASSIGNEE, not the claim's owner"
-hasnt "$(cat "$STUB_GC_LOG")" "--if-assignee=lx-dead" "the owner is never used as the guard"
+hasnt "$(cat "$STUB_GC_LOG")" "--if-assignee=hq-dead" "the owner is never used as the guard"
 
 # The two shapes a visit has when its sitting is gone. engage binds a visit to
 # the sitting it spawns by that sitting's runtime name, while the visit is still
@@ -273,12 +273,12 @@ hasnt "$(cat "$STUB_GC_LOG")" "--if-assignee=lx-dead" "the owner is never used a
 # of its own before it goes (gc-claimed).
 visit_fixture() {
   store '[
-    {"id":"gc-bound","status":"open","assignee":"s-lx-wisp-tjt3y","title":"visit: gc-ycww6 — a question",
+    {"id":"gc-bound","status":"open","assignee":"s-hq-wisp-tjt3y","title":"visit: gc-ycww6 — a question",
      "metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-ycww6",
                  "escalation_key":"polecat-blocked"}},
     {"id":"gc-claimed","status":"in_progress","assignee":"gascity/gc-toolkit.gc-claimed","title":"visit: gc-2ddu7 — a question",
      "metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-2ddu7",
-                 "gc.session_id":"lx-wisp-dead","gc.session_name":"s-lx-wisp-dead",
+                 "gc.session_id":"hq-wisp-dead","gc.session_name":"s-hq-wisp-dead",
                  "gc.claimed_at":"2026-10-22T02:06:00Z",
                  "gc.takeaway":"Settled: retry the import once the mirror is back.",
                  "gc.takeaway_at":"2026-10-22T03:00:00Z","gc.takeaway_by":"converse",
@@ -311,7 +311,7 @@ has "$(cat "$HERE/gc-helm.sh")" '--set-metadata "gc.takeaway=$GONE_SITTING_TAKEA
 
 echo "--- visit arm: a sitting that never started ---"
 visit_fixture
-OUT=$("$SCRIPT" gc-bound --claim s-lx-wisp-tjt3y:open:s-lx-wisp-tjt3y --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" gc-bound --claim s-hq-wisp-tjt3y:open:s-hq-wisp-tjt3y --apply 2>&1); rc=$?
 eq "$rc" "0" "the bound visit's release exits 0"
 has "$OUT" "class=visit" "it is classified visit"
 has "$OUT" "action=release-visit" "the visit arm runs"
@@ -324,7 +324,7 @@ eq "$(meta gc-bound task_kind)" "visit" "task_kind PRESERVED"
 eq "$(meta gc-bound escalation_key)" "polecat-blocked" "escalation key PRESERVED"
 reparked gc-bound "the bound visit"
 eq "$(writes gc-bound | wc -l | tr -d ' ')" "1" "the release is one write"
-has "$(writes gc-bound)" "--if-assignee=s-lx-wisp-tjt3y --if-status=open" "it is guarded on the binding and status just read"
+has "$(writes gc-bound)" "--if-assignee=s-hq-wisp-tjt3y --if-status=open" "it is guarded on the binding and status just read"
 for k in gc.routed_to gc.continuation_group task_kind escalation_key; do
   hasnt "$(writes gc-bound)" "$k" "the release never writes $k"
 done
@@ -337,7 +337,7 @@ echo "--- visit arm: a sitting that claimed it and is gone ---"
 # the gone sitting settled describes a conversation that is over, so the
 # release replaces it.
 visit_fixture
-OUT=$("$SCRIPT" gc-claimed --claim lx-wisp-dead:in_progress:gascity/gc-toolkit.gc-claimed --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" gc-claimed --claim hq-wisp-dead:in_progress:gascity/gc-toolkit.gc-claimed --apply 2>&1); rc=$?
 eq "$rc" "0" "the claimed visit's release exits 0"
 has "$OUT" "result=disposed" "the release reports disposed"
 eq "$(bstatus gc-claimed)" "open" "the visit is open again"
@@ -356,14 +356,14 @@ hasnt "$(cat "$STUB_GC_LOG")" "--unset-metadata gc.continuation_group" "the cont
 echo "--- visit arm: a pin or the headline that reports written and rolls back ---"
 visit_fixture
 export STUB_DROP_KEYS="gc-claimed:gc.session_name"
-OUT=$("$SCRIPT" gc-claimed --claim lx-wisp-dead:in_progress:gascity/gc-toolkit.gc-claimed --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" gc-claimed --claim hq-wisp-dead:in_progress:gascity/gc-toolkit.gc-claimed --apply 2>&1); rc=$?
 export STUB_DROP_KEYS=""
 eq "$rc" "3" "a surviving pin is a partial release, exit 3"
 has "$OUT" "result=partial" "partial is reported, not disposed"
-has "$OUT" "gc.session_name(still=s-lx-wisp-dead)" "the surviving pin is named"
+has "$OUT" "gc.session_name(still=s-hq-wisp-dead)" "the surviving pin is named"
 visit_fixture
 export STUB_DROP_KEYS="gc-claimed:gc.takeaway"
-OUT=$("$SCRIPT" gc-claimed --claim lx-wisp-dead:in_progress:gascity/gc-toolkit.gc-claimed --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" gc-claimed --claim hq-wisp-dead:in_progress:gascity/gc-toolkit.gc-claimed --apply 2>&1); rc=$?
 export STUB_DROP_KEYS=""
 eq "$rc" "3" "a headline that did not land is a partial release, exit 3"
 has "$OUT" "gc.takeaway(got=Settled: retry the import once the mirror is back.)" \
@@ -375,81 +375,81 @@ has "$OUT" "gc.takeaway(got=Settled: retry the import once the mirror is back.)"
 # moment after the listing, and a person can settle the visit. Each fixture
 # below lands the other writer's change on the store: the fresh binding, the
 # fresh sitting's claim of it, or the close.
-FRESH_BIND='map(if .id == "gc-bound" then .assignee = "s-lx-wisp-fresh" else . end)'
+FRESH_BIND='map(if .id == "gc-bound" then .assignee = "s-hq-wisp-fresh" else . end)'
 FRESH_CLAIM='map(if .id == "gc-bound" then .status = "in_progress" | .assignee = "gascity/gc-toolkit.gc-bound"
-  | .metadata["gc.session_id"] = "lx-wisp-fresh" | .metadata["gc.session_name"] = "s-lx-wisp-fresh" else . end)'
+  | .metadata["gc.session_id"] = "hq-wisp-fresh" | .metadata["gc.session_name"] = "s-hq-wisp-fresh" else . end)'
 
 echo "--- the claim recovery judged: changed before the disposal reads the bead ---"
 visit_fixture
 land "$FRESH_BIND"
-OUT=$("$SCRIPT" gc-bound --claim s-lx-wisp-tjt3y:open:s-lx-wisp-tjt3y --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" gc-bound --claim s-hq-wisp-tjt3y:open:s-hq-wisp-tjt3y --apply 2>&1); rc=$?
 eq "$rc" "0" "a visit engage re-bound after the listing exits 0"
 has "$OUT" "result=skipped" "a visit engage re-bound after the listing is skipped"
-has "$OUT" "detail=claim_changed(owner=s-lx-wisp-fresh,status=open,assignee=s-lx-wisp-fresh)" \
+has "$OUT" "detail=claim_changed(owner=s-hq-wisp-fresh,status=open,assignee=s-hq-wisp-fresh)" \
   "the skip names the claim the read found"
 eq "$(writes gc-bound)" "" "a re-bound visit takes no write"
-eq "$(bassignee gc-bound)" "s-lx-wisp-fresh" "the fresh binding survives"
+eq "$(bassignee gc-bound)" "s-hq-wisp-fresh" "the fresh binding survives"
 
 visit_fixture
 land "$FRESH_CLAIM"
-OUT=$("$SCRIPT" gc-bound --claim s-lx-wisp-tjt3y:open:s-lx-wisp-tjt3y --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" gc-bound --claim s-hq-wisp-tjt3y:open:s-hq-wisp-tjt3y --apply 2>&1); rc=$?
 has "$OUT" "result=skipped" "a visit its fresh sitting claimed after the listing is skipped"
 eq "$(writes gc-bound)" "" "the fresh claim takes no write"
 eq "$(bstatus gc-bound)" "in_progress" "the fresh claim stays in progress"
 eq "$(bassignee gc-bound)" "gascity/gc-toolkit.gc-bound" "the fresh sitting stays its assignee"
-eq "$(meta gc-bound gc.session_id)" "lx-wisp-fresh" "the fresh session id survives"
-eq "$(meta gc-bound gc.session_name)" "s-lx-wisp-fresh" "the fresh session name survives"
+eq "$(meta gc-bound gc.session_id)" "hq-wisp-fresh" "the fresh session id survives"
+eq "$(meta gc-bound gc.session_name)" "s-hq-wisp-fresh" "the fresh session name survives"
 
 # A writer that unassigns a visit without its pins leaves an earlier sitting's
 # gc.session_id on it, and a fresh binding over that pin resolves the same dead
 # owner. Only the listed assignee tells the two claims apart.
-store '[{"id":"gc-stale","status":"open","assignee":"s-lx-wisp-old","title":"visit: gc-7abc — a question",
+store '[{"id":"gc-stale","status":"open","assignee":"s-hq-wisp-old","title":"visit: gc-7abc — a question",
          "metadata":{"task_kind":"visit","gc.routed_to":"human","gc.continuation_group":"gc-7abc",
-                     "gc.session_id":"lx-wisp-earlier"}}]'
+                     "gc.session_id":"hq-wisp-earlier"}}]'
 : > "$STUB_GC_LOG"
-land 'map(if .id == "gc-stale" then .assignee = "s-lx-wisp-fresh" else . end)'
+land 'map(if .id == "gc-stale" then .assignee = "s-hq-wisp-fresh" else . end)'
 eq "$(jq -r '.[] | select(.id == "gc-stale")
       | [(.metadata["gc.session_id"] // ""), (.assignee // ""), (.metadata["gc.session_name"] // "")]
-      | map(select(. != "")) | first' "$STUB_STORE")" "lx-wisp-earlier" \
+      | map(select(. != "")) | first' "$STUB_STORE")" "hq-wisp-earlier" \
   "(premise) the re-bound visit resolves the owner recovery listed"
-OUT=$("$SCRIPT" gc-stale --claim lx-wisp-earlier:open:s-lx-wisp-old --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" gc-stale --claim hq-wisp-earlier:open:s-hq-wisp-old --apply 2>&1); rc=$?
 has "$OUT" "result=skipped" "a re-bound visit whose owner reads unchanged is skipped on its listed assignee"
 eq "$(writes gc-stale)" "" "it takes no write"
-eq "$(bassignee gc-stale)" "s-lx-wisp-fresh" "its fresh binding survives"
+eq "$(bassignee gc-stale)" "s-hq-wisp-fresh" "its fresh binding survives"
 
 visit_fixture
 land 'map(if .id == "gc-claimed" then .status = "closed" else . end)'
-OUT=$("$SCRIPT" gc-claimed --claim lx-wisp-dead:in_progress:gascity/gc-toolkit.gc-claimed --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" gc-claimed --claim hq-wisp-dead:in_progress:gascity/gc-toolkit.gc-claimed --apply 2>&1); rc=$?
 eq "$rc" "0" "a visit settled after the listing exits 0"
 has "$OUT" "result=skipped" "a visit settled after the listing is skipped"
 has "$OUT" "status=closed" "the skip names the status the read found"
 eq "$(writes gc-claimed)" "" "a settled visit takes no write"
 eq "$(bassignee gc-claimed)" "gascity/gc-toolkit.gc-claimed" "it keeps the assignee it was settled with"
-eq "$(meta gc-claimed gc.session_id)" "lx-wisp-dead" "and its pins"
+eq "$(meta gc-claimed gc.session_id)" "hq-wisp-dead" "and its pins"
 eq "$(meta gc-claimed gc.takeaway_settled)" "1" "and the headline it was settled under"
 
 # A step another holder took before the read is skipped the same way.
 fixture
-land 'map(if .id == "tk-step" then .assignee = "lx-live" | .metadata["gc.session_id"] = "lx-live" else . end)'
-OUT=$("$SCRIPT" tk-step --claim lx-dead:in_progress:lx-dead --apply 2>&1); rc=$?
+land 'map(if .id == "tk-step" then .assignee = "hq-live" | .metadata["gc.session_id"] = "hq-live" else . end)'
+OUT=$("$SCRIPT" tk-step --claim hq-dead:in_progress:hq-dead --apply 2>&1); rc=$?
 has "$OUT" "result=skipped" "a step a live session claimed after the listing is skipped"
 eq "$(writes tk-step)" "" "it takes no write"
-eq "$(meta tk-step gc.session_id)" "lx-live" "the live claim keeps its pin"
+eq "$(meta tk-step gc.session_id)" "hq-live" "the live claim keeps its pin"
 
 # A session that claims under the pool's alias leaves the same assignee and
 # status behind it, so a live session's claim of the step reads as listed in
 # both. Only its owner, the gc.session_id the claim stamps, tells it apart.
 store '[{"id":"tk-slot","status":"in_progress","assignee":"gc-toolkit/gc-toolkit.polecat","title":"step",
          "metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"tk-root",
-                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-live"}},
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"hq-live"}},
         {"id":"tk-root","status":"in_progress","assignee":"","title":"mol-polecat-work",
          "metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2"}}]'
 : > "$STUB_GC_LOG"
-OUT=$("$SCRIPT" tk-slot --claim lx-dead:in_progress:gc-toolkit/gc-toolkit.polecat --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" tk-slot --claim hq-dead:in_progress:gc-toolkit/gc-toolkit.polecat --apply 2>&1); rc=$?
 has "$OUT" "result=skipped" "a step re-claimed under its listed alias is skipped on its owner"
-has "$OUT" "owner=lx-live" "the skip names the owner the read found"
+has "$OUT" "owner=hq-live" "the skip names the owner the read found"
 eq "$(writes tk-slot)" "" "it takes no write"
-eq "$(meta tk-slot gc.session_id)" "lx-live" "the live claim keeps its pin"
+eq "$(meta tk-slot gc.session_id)" "hq-live" "the live claim keeps its pin"
 
 echo "--- the claim recovery judged: read through the listing's strip ---"
 # The candidate listing strips control characters with its own tr ahead of its
@@ -472,22 +472,22 @@ eval "$(awk '/^# >>> control-char-scrub$/ {f = 1; next} /^# <<< control-char-scr
 eval "$(awk '/^# >>> listing-strip$/ {f = 1; next} /^# <<< listing-strip$/ {f = 0} f' "$SCRIPT")"
 DEL="$(printf '\177')"
 del_fixture() {
-  store "[{\"id\":\"gc-del\",\"status\":\"open\",\"assignee\":\"s-lx-wisp-de${DEL}l\",\"title\":\"visit: gc-8abc — a question\",
+  store "[{\"id\":\"gc-del\",\"status\":\"open\",\"assignee\":\"s-hq-wisp-de${DEL}l\",\"title\":\"visit: gc-8abc — a question\",
            \"metadata\":{\"task_kind\":\"visit\",\"gc.routed_to\":\"human\",\"gc.continuation_group\":\"gc-8abc\"}}]"
   : > "$STUB_GC_LOG"
 }
 del_fixture
-eq "$(listing_strip < "$STUB_STORE" | jq -r '.[0].assignee')" "s-lx-wisp-del" \
+eq "$(listing_strip < "$STUB_STORE" | jq -r '.[0].assignee')" "s-hq-wisp-del" \
   "(premise) the listing reads the binding without its DEL"
-eq "$(scrub < "$STUB_STORE" | jq -r '.[0].assignee')" "s-lx-wisp-de${DEL}l" \
+eq "$(scrub < "$STUB_STORE" | jq -r '.[0].assignee')" "s-hq-wisp-de${DEL}l" \
   "(premise) the disposal's own read keeps it"
-dispose_guarded gc-del "s-lx-wisp-del:open:s-lx-wisp-del"
+dispose_guarded gc-del "s-hq-wisp-del:open:s-hq-wisp-del"
 eq "$rc" "0" "a binding whose DEL the listing dropped exits 0"
 has "$OUT" "result=disposed" "it is released, not skipped as a changed claim"
 eq "$(refused gc-del)" "" "its guard, the assignee as stored, is not refused"
 eq "$(bassignee gc-del)" "" "the binding is cleared"
 del_fixture
-dispose_guarded gc-del "s-lx-wisp-dex:open:s-lx-wisp-dex"
+dispose_guarded gc-del "s-hq-wisp-dex:open:s-hq-wisp-dex"
 has "$OUT" "result=skipped" "a claim that differs in a printable character still reads changed"
 eq "$(writes gc-del)" "" "and takes no write"
 
@@ -495,7 +495,7 @@ echo "--- the guards ride the one release write ---"
 # The guarding gc enforces --if-assignee and --if-status the way bd does. An
 # unraced release lands its one write under them.
 visit_fixture
-dispose_guarded gc-claimed lx-wisp-dead:in_progress:gascity/gc-toolkit.gc-claimed
+dispose_guarded gc-claimed hq-wisp-dead:in_progress:gascity/gc-toolkit.gc-claimed
 eq "$rc" "0" "an unraced release under enforced guards exits 0"
 has "$OUT" "result=disposed" "an unraced release under enforced guards lands"
 eq "$(refused gc-claimed)" "" "its write is not refused"
@@ -503,7 +503,7 @@ eq "$(writes gc-claimed | wc -l | tr -d ' ')" "1" "the release is one write"
 has "$(writes gc-claimed)" "--if-assignee=gascity/gc-toolkit.gc-claimed --if-status=in_progress" \
   "it is guarded on the listed claim"
 fixture
-dispose_guarded tk-step lx-dead:in_progress:lx-dead
+dispose_guarded tk-step hq-dead:in_progress:hq-dead
 has "$OUT" "result=disposed" "an unraced step release under enforced guards lands"
 eq "$(refused tk-step)" "" "the step's write is not refused"
 
@@ -512,17 +512,17 @@ echo "--- the claim recovery judged: changed just ahead of the release ---"
 # refuses the write, so none of the release lands, and the bead is left exactly
 # as that writer left it, its pins and headline included.
 visit_fixture
-dispose_guarded gc-bound s-lx-wisp-tjt3y:open:s-lx-wisp-tjt3y "--status=open" "$FRESH_BIND"
+dispose_guarded gc-bound s-hq-wisp-tjt3y:open:s-hq-wisp-tjt3y "--status=open" "$FRESH_BIND"
 eq "$rc" "0" "a visit re-bound ahead of the release exits 0"
 has "$OUT" "result=skipped" "a visit re-bound ahead of the release is skipped"
 has "$OUT" "detail=claim_changed(write=release)" "the skip names the refused release"
 hasnt "$OUT" "landed=" "nothing of the release landed"
 eq "$(writes gc-bound)" "" "no write reached the store"
-eq "$(bassignee gc-bound)" "s-lx-wisp-fresh" "the fresh binding survives"
+eq "$(bassignee gc-bound)" "s-hq-wisp-fresh" "the fresh binding survives"
 eq "$(meta gc-bound gc.takeaway)" "<absent>" "and no headline was written over it"
 
 visit_fixture
-dispose_guarded gc-claimed lx-wisp-dead:in_progress:gascity/gc-toolkit.gc-claimed \
+dispose_guarded gc-claimed hq-wisp-dead:in_progress:gascity/gc-toolkit.gc-claimed \
   "--status=open" 'map(if .id == "gc-claimed" then .status = "closed" else . end)'
 eq "$rc" "0" "a visit settled ahead of the release exits 0"
 has "$OUT" "result=skipped" "a visit settled ahead of the release is skipped"
@@ -530,31 +530,31 @@ has "$OUT" "detail=claim_changed(write=release)" "the refused release is named"
 hasnt "$OUT" "landed=" "nothing of the release landed"
 eq "$(bstatus gc-claimed)" "closed" "the visit stays as it was settled"
 eq "$(bassignee gc-claimed)" "gascity/gc-toolkit.gc-claimed" "it keeps its assignee"
-eq "$(meta gc-claimed gc.session_id)$(meta gc-claimed gc.session_name)" "lx-wisp-deads-lx-wisp-dead" \
+eq "$(meta gc-claimed gc.session_id)$(meta gc-claimed gc.session_name)" "hq-wisp-deads-hq-wisp-dead" \
   "and both its pins: none is gone from a bead the settling writer owns"
 eq "$(meta gc-claimed gc.takeaway)" "Settled: retry the import once the mirror is back." \
   "and the headline it was settled under"
 
 fixture
-dispose_guarded tk-step lx-dead:in_progress:lx-dead \
-  "--status=open" 'map(if .id == "tk-step" then .assignee = "lx-live" | .metadata["gc.session_id"] = "lx-live" else . end)'
+dispose_guarded tk-step hq-dead:in_progress:hq-dead \
+  "--status=open" 'map(if .id == "tk-step" then .assignee = "hq-live" | .metadata["gc.session_id"] = "hq-live" else . end)'
 has "$OUT" "result=skipped" "a step a live session claims just ahead of the release is skipped"
 has "$OUT" "detail=claim_changed(write=release)" "the refused release is named"
 hasnt "$OUT" "landed=" "nothing of the release landed"
 eq "$(bstatus tk-step)" "in_progress" "the live claim stays in progress"
-eq "$(bassignee tk-step)" "lx-live" "the live session stays its assignee"
-eq "$(meta tk-step gc.session_id)" "lx-live" "the live claim keeps its pin"
+eq "$(bassignee tk-step)" "hq-live" "the live session stays its assignee"
+eq "$(meta tk-step gc.session_id)" "hq-live" "the live claim keeps its pin"
 eq "$(meta tk-step gc.continuation_group)" "cg-1" "the chain keeps its continuation group"
 eq "$(meta tk-step gc.session_affinity)" "require" "and its session affinity"
 
 echo "--- step arm: a step with no route says so ---"
-store '[{"id":"tk-unrouted","status":"in_progress","assignee":"lx-dead","title":"step",
+store '[{"id":"tk-unrouted","status":"in_progress","assignee":"hq-dead","title":"step",
          "metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"tk-root",
-                     "gc.session_id":"lx-dead"}},
+                     "gc.session_id":"hq-dead"}},
         {"id":"tk-root","status":"in_progress","assignee":"","title":"mol-polecat-work",
          "metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2"}}]'
 : > "$STUB_GC_LOG"
-OUT=$("$SCRIPT" tk-unrouted --claim lx-dead:in_progress:lx-dead --apply 2>&1)
+OUT=$("$SCRIPT" tk-unrouted --claim hq-dead:in_progress:hq-dead --apply 2>&1)
 has "$OUT" "detail=routed=absent" "an unrouted step is released and flagged"
 eq "$(bstatus tk-unrouted)" "open" "unrouted step still released"
 
@@ -574,16 +574,16 @@ chmod +x "$TMP/bin/run-cancel-stub"
 export GC_RUN_CANCEL_TOOL="$TMP/bin/run-cancel-stub"
 
 dead_fixture() {
-  store '[{"id":"tk-step","status":"in_progress","assignee":"lx-dead","title":"step",
+  store '[{"id":"tk-step","status":"in_progress","assignee":"hq-dead","title":"step",
            "metadata":{"gc.step_ref":"mol-review.load-dispatch","gc.root_bead_id":"tk-root",
-                       "gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex","gc.session_id":"lx-dead"}},
+                       "gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex","gc.session_id":"hq-dead"}},
           {"id":"tk-root","status":"closed","assignee":"","title":"mol-review",
            "metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2","gc.outcome":"moot"}}]'
   : > "$STUB_GC_LOG"
 }
 
 dead_fixture
-OUT=$("$SCRIPT" tk-step --claim lx-dead:in_progress:lx-dead --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" tk-step --claim hq-dead:in_progress:hq-dead --apply 2>&1); rc=$?
 eq "$rc" "0" "a step under a closed root exits 0"
 has "$OUT" "class=workflow-step-dead" "it is classified dead, not releasable"
 has "$OUT" "root_status=closed" "the report carries the root status it judged on"
@@ -602,7 +602,7 @@ echo "--- step arm: a refusal (exit 2) is a skip, not a landed disposal ---"
 # that leaves the step owned for the next cycle.
 dead_fixture
 export STUB_END_RC=2 STUB_END_ERR="run-cancel: run tk-root is closed but leaves 2 member(s) open, and tk-anchor carries a branch or a merge_result."
-OUT=$("$SCRIPT" tk-step --claim lx-dead:in_progress:lx-dead --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" tk-step --claim hq-dead:in_progress:hq-dead --apply 2>&1); rc=$?
 export STUB_END_RC=0 STUB_END_ERR=""
 eq "$rc" "0" "a refused chain still exits 0"
 has "$OUT" "result=skipped" "a refusal is not reported as a disposal"
@@ -632,9 +632,9 @@ echo "--- step arm: an unreadable root withholds the release ---"
 # An unreadable root is not a live one. Releasing on a failed probe is how a
 # finished molecule gets handed back to a pool; the step stays owned and
 # returns next cycle instead.
-store '[{"id":"tk-step","status":"in_progress","assignee":"lx-dead","title":"step",
+store '[{"id":"tk-step","status":"in_progress","assignee":"hq-dead","title":"step",
          "metadata":{"gc.step_ref":"mol-polecat-work.implement","gc.root_bead_id":"tk-gone",
-                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead"}}]'
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"hq-dead"}}]'
 : > "$STUB_GC_LOG"
 OUT=$("$SCRIPT" tk-step --apply 2>&1); rc=$?
 eq "$rc" "0" "an unresolved root exits 0"
@@ -648,16 +648,16 @@ unset GC_RUN_CANCEL_TOOL
 echo "--- half-landed write is not a clean release ---"
 fixture
 export STUB_DROP_KEYS="tk-step:assignee"
-OUT=$("$SCRIPT" tk-step --claim lx-dead:in_progress:lx-dead --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" tk-step --claim hq-dead:in_progress:hq-dead --apply 2>&1); rc=$?
 eq "$rc" "3" "a partial release exits 3"
 has "$OUT" "result=partial" "a partial release says partial"
-has "$OUT" "assignee(still=lx-dead)" "the field that did not land is named"
+has "$OUT" "assignee(still=hq-dead)" "the field that did not land is named"
 export STUB_DROP_KEYS=""
 
 echo "--- a refused write is reported, not swallowed ---"
 fixture
 export STUB_UPDATE_FAIL="tk-step"
-OUT=$("$SCRIPT" tk-step --claim lx-dead:in_progress:lx-dead --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" tk-step --claim hq-dead:in_progress:hq-dead --apply 2>&1); rc=$?
 [ "$rc" -ne 0 ] && ok "a refused release exits non-zero" || bad "a refused release exited 0"
 has "$OUT" "failed=" "the refusal is named in the result"
 eq "$(bstatus tk-step)" "in_progress" "a refused release changed nothing"
@@ -665,7 +665,7 @@ export STUB_UPDATE_FAIL=""
 
 echo "--- source arm still delegates ---"
 fixture
-OUT=$("$SCRIPT" tk-work --claim lx-dead:in_progress:lx-dead --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" tk-work --claim hq-dead:in_progress:hq-dead --apply 2>&1); rc=$?
 eq "$rc" "0" "source disposal exits 0"
 has "$OUT" "action=delegate-source-workflow" "source arm delegates"
 has "$(cat "$STUB_GC_LOG")" "workflow delete-source tk-work --apply" "delete-source invoked with --apply"
@@ -684,13 +684,13 @@ echo "--- review arm: a review orphan is reopened to its pool by the source cont
 # then the dead session's pins cleared and the route restored from the durable
 # execution stamp so another reviewer is offered it. It reports class=review only
 # so the scope gate and this classifier agree that it takes no salvage path.
-store '[{"id":"tk-rev","status":"in_progress","assignee":"lx-dead","title":"Review branch polecat/tk-anc -> main: a finding",
+store '[{"id":"tk-rev","status":"in_progress","assignee":"hq-dead","title":"Review branch polecat/tk-anc -> main: a finding",
          "metadata":{"task_kind":"review","check_name":"codex","anchor_bead":"tk-anc",
                      "review_branch":"polecat/tk-anc","review_base":"main","gc.routed_to":"",
                      "gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat-codex",
-                     "gc.session_id":"lx-dead","gc.session_name":"polecat-5-pool"}}]'
+                     "gc.session_id":"hq-dead","gc.session_name":"polecat-5-pool"}}]'
 : > "$STUB_GC_LOG"
-OUT=$("$SCRIPT" tk-rev --claim lx-dead:in_progress:lx-dead --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" tk-rev --claim hq-dead:in_progress:hq-dead --apply 2>&1); rc=$?
 eq "$rc" "0" "review disposal exits 0"
 has "$OUT" "class=review" "a review orphan is classed review, not source"
 has "$OUT" "action=delegate-source-workflow" "the review arm delegates to the source contract"
@@ -708,12 +708,12 @@ echo "--- source arm: a claimed-then-orphaned source bead has its route restored
 # so it lands open, unassigned and unrouted — bd-ready yet never offered to a pool
 # again. The durable gc.execution_routed_to stamp survived the claim, so the route
 # is restored from it and the bead becomes offerable once more.
-store '[{"id":"tk-strand","status":"in_progress","assignee":"lx-dead","title":"Rework branch polecat/tk-anchor: address pre-open signoff findings",
+store '[{"id":"tk-strand","status":"in_progress","assignee":"hq-dead","title":"Rework branch polecat/tk-anchor: address pre-open signoff findings",
          "metadata":{"branch":"polecat/tk-anchor","gc.routed_to":"",
                      "gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat",
-                     "gc.session_id":"lx-dead","gc.session_name":"gc-toolkit--gc-toolkit__polecat-4-pool"}}]'
+                     "gc.session_id":"hq-dead","gc.session_name":"gc-toolkit--gc-toolkit__polecat-4-pool"}}]'
 : > "$STUB_GC_LOG"
-OUT=$("$SCRIPT" tk-strand --claim lx-dead:in_progress:lx-dead --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" tk-strand --claim hq-dead:in_progress:hq-dead --apply 2>&1); rc=$?
 eq "$rc" "0" "a restored source disposal exits 0"
 has "$OUT" "class=source" "the stranded rework is a source bead"
 has "$(cat "$STUB_GC_LOG")" "workflow reopen-source tk-strand" "reopen-source invoked"
@@ -727,12 +727,12 @@ echo "--- source arm: a route already present is never clobbered ---"
 # reopen-source (or a source-id workflow) may leave a route in place. A bead that
 # still carries gc.routed_to keeps it, rather than having it overwritten from the
 # execution stamp, so a restore never fights a live route.
-store '[{"id":"tk-liveroute","status":"in_progress","assignee":"lx-dead","title":"a work bead",
+store '[{"id":"tk-liveroute","status":"in_progress","assignee":"hq-dead","title":"a work bead",
          "metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex",
                      "gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat",
-                     "gc.session_id":"lx-dead","gc.session_name":"polecat-9-pool"}}]'
+                     "gc.session_id":"hq-dead","gc.session_name":"polecat-9-pool"}}]'
 : > "$STUB_GC_LOG"
-OUT=$("$SCRIPT" tk-liveroute --claim lx-dead:in_progress:lx-dead --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" tk-liveroute --claim hq-dead:in_progress:hq-dead --apply 2>&1); rc=$?
 eq "$rc" "0" "a preserved-route disposal exits 0"
 eq "$(meta tk-liveroute gc.routed_to)" "gc-toolkit/gc-toolkit.polecat-codex" "an existing route is left untouched"
 hasnt "$OUT" "route-unrecoverable" "a live route is not flagged unrecoverable"
@@ -742,11 +742,11 @@ echo "--- source arm: a reopened bead with no recoverable route is surfaced, not
 # stamped, the reopened bead cannot be offered and there is nothing to restore it
 # from. Leaving it silent recreates the strand, so the release is reported partial
 # (exit 3) for the patrol to surface, rather than passed off as a clean disposal.
-store '[{"id":"tk-noroute","status":"in_progress","assignee":"lx-dead","title":"Rework branch polecat/tk-old: address findings",
+store '[{"id":"tk-noroute","status":"in_progress","assignee":"hq-dead","title":"Rework branch polecat/tk-old: address findings",
          "metadata":{"branch":"polecat/tk-old","gc.routed_to":"",
-                     "gc.session_id":"lx-dead","gc.session_name":"polecat-3-pool"}}]'
+                     "gc.session_id":"hq-dead","gc.session_name":"polecat-3-pool"}}]'
 : > "$STUB_GC_LOG"
-OUT=$("$SCRIPT" tk-noroute --claim lx-dead:in_progress:lx-dead --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" tk-noroute --claim hq-dead:in_progress:hq-dead --apply 2>&1); rc=$?
 eq "$rc" "3" "an unrecoverable-route release exits 3"
 has "$OUT" "result=partial" "it reports partial, not disposed"
 has "$OUT" "route-unrecoverable" "the missing route is named"
@@ -782,11 +782,11 @@ echo "--- source arm: a stale progressing pr.machine (no anchor) is recovered --
 # so a `progressing` stamp with NO merge_result is a stale leftover on a bead
 # unanchored back to the pool — genuinely lost work. It must NOT block the reopen:
 # the source arm delegates and recovers it, whatever the stamp says.
-store '[{"id":"tk-prog","status":"in_progress","assignee":"lx-dead","title":"stale-progressing work bead",
+store '[{"id":"tk-prog","status":"in_progress","assignee":"hq-dead","title":"stale-progressing work bead",
          "metadata":{"branch":"polecat/tk-prog","pr.machine":"progressing@abc@2026-09-05T00:00:00Z",
-                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"lx-dead","gc.session_name":"polecat-9-pool"}}]'
+                     "gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"hq-dead","gc.session_name":"polecat-9-pool"}}]'
 : > "$STUB_GC_LOG"
-OUT=$("$SCRIPT" tk-prog --claim lx-dead:in_progress:lx-dead --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" tk-prog --claim hq-dead:in_progress:hq-dead --apply 2>&1); rc=$?
 eq "$rc" "0" "stale-progressing source disposal exits 0"
 has "$OUT" "action=delegate-source-workflow" "a stale progressing stamp (no anchor) delegates, not skips"
 has "$(cat "$STUB_GC_LOG")" "delete-source" "stale-progressing source calls delete-source"
@@ -837,10 +837,10 @@ echo "--- source arm: a pin that will not clear is not a clean release ---"
 # not disposed, and name the pin.
 fixture
 export STUB_DROP_KEYS="tk-work:gc.session_id"
-OUT=$("$SCRIPT" tk-work --claim lx-dead:in_progress:lx-dead --apply 2>&1); rc=$?
+OUT=$("$SCRIPT" tk-work --claim hq-dead:in_progress:hq-dead --apply 2>&1); rc=$?
 eq "$rc" "3" "a source disposal whose pin survives exits 3"
 has "$OUT" "result=partial" "it reports partial, not disposed"
-has "$OUT" "gc.session_id(still=lx-dead)" "the surviving pin is named"
+has "$OUT" "gc.session_id(still=hq-dead)" "the surviving pin is named"
 export STUB_DROP_KEYS=""
 
 echo "--- source arm: reopen does not run when the close failed ---"
@@ -863,7 +863,7 @@ STALL=60
 CEILING=20
 run_bounded_case() { # <bead>: sets OUT, rc and ELAPSED
   local start; start=$(date +%s)
-  OUT=$("$SCRIPT" "$1" --claim lx-dead:in_progress:lx-dead --apply 2>&1); rc=$?
+  OUT=$("$SCRIPT" "$1" --claim hq-dead:in_progress:hq-dead --apply 2>&1); rc=$?
   ELAPSED=$(( $(date +%s) - start ))
 }
 within_ceiling() { # <label>
@@ -885,16 +885,16 @@ eq "$rc" "1" "a timed-out delete-source exits 1"
 has "$OUT" "failed=delete-source-timeout" "the timeout is named, not reported as a plain failure"
 hasnt "$(cat "$STUB_GC_LOG")" "reopen-source" "reopen-source does not run after a timed-out delete-source"
 eq "$(bstatus tk-work)" "in_progress" "the bead stays owned for the next cycle"
-eq "$(meta tk-work gc.session_id)" "lx-dead" "its session pin is untouched"
+eq "$(meta tk-work gc.session_id)" "hq-dead" "its session pin is untouched"
 
 # A reopen-source that releases the bead, prints, and never exits has landed
 # its release. The bead reads open and unassigned, so the arm finishes the job
 # exactly as after a clean exit: pins cleared, route restored from the durable
 # execution stamp, verify green.
-store '[{"id":"tk-strand","status":"in_progress","assignee":"lx-dead","title":"a source bead",
+store '[{"id":"tk-strand","status":"in_progress","assignee":"hq-dead","title":"a source bead",
          "metadata":{"branch":"polecat/tk-anchor","gc.routed_to":"",
                      "gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat",
-                     "gc.session_id":"lx-dead","gc.session_name":"polecat-4-pool"}}]'
+                     "gc.session_id":"hq-dead","gc.session_name":"polecat-4-pool"}}]'
 : > "$STUB_GC_LOG"
 export STUB_REOPEN_SOURCE_HANG=$STALL
 run_bounded_case tk-strand
@@ -921,8 +921,8 @@ within_ceiling "a reopen-source stalled before its writes is killed at the bound
 eq "$rc" "3" "a timed-out reopen-source after a landed delete-source exits 3"
 has "$OUT" "landed=delete-source failed=reopen-source-timeout" "only the close is reported landed, and the timeout is named"
 eq "$(bstatus tk-work)" "in_progress" "an unreleased bead is not reported released"
-eq "$(bassignee tk-work)" "lx-dead" "it keeps its assignee"
-eq "$(meta tk-work gc.session_id)" "lx-dead" "and its session pin, so orphan recovery finds it again"
+eq "$(bassignee tk-work)" "hq-dead" "it keeps its assignee"
+eq "$(meta tk-work gc.session_id)" "hq-dead" "and its session pin, so orphan recovery finds it again"
 unset GC_ORPHAN_WORKFLOW_TIMEOUT GC_ORPHAN_WORKFLOW_KILL_AFTER
 
 echo "--- unreadable bead and usage ---"
@@ -933,17 +933,17 @@ hasnt "$(cat "$STUB_GC_LOG")" "bd update" "an unknown bead is never written to"
 OUT=$("$SCRIPT" 2>&1); eq "$?" "2" "no bead id exits 2"
 OUT=$("$SCRIPT" tk-step --bogus 2>&1); eq "$?" "2" "an unknown flag exits 2"
 OUT=$("$SCRIPT" tk-step --claim 2>&1); eq "$?" "2" "--claim at end of argv exits 2"
-OUT=$("$SCRIPT" tk-step --claim lx-dead --apply 2>&1); eq "$?" "2" "a --claim value with no colon exits 2"
-OUT=$("$SCRIPT" tk-step --claim lx-dead:in_progress --apply 2>&1); eq "$?" "2" "a --claim value with one colon exits 2"
-OUT=$("$SCRIPT" tk-step --claim :in_progress:lx-dead --apply 2>&1); eq "$?" "2" "a --claim value with no owner exits 2"
-OUT=$("$SCRIPT" tk-step --claim lx-dead::lx-dead --apply 2>&1); eq "$?" "2" "a --claim value with no status exits 2"
-OUT=$("$SCRIPT" tk-step --owner lx-dead --apply 2>&1); eq "$?" "2" "the retired --owner flag is refused"
+OUT=$("$SCRIPT" tk-step --claim hq-dead --apply 2>&1); eq "$?" "2" "a --claim value with no colon exits 2"
+OUT=$("$SCRIPT" tk-step --claim hq-dead:in_progress --apply 2>&1); eq "$?" "2" "a --claim value with one colon exits 2"
+OUT=$("$SCRIPT" tk-step --claim :in_progress:hq-dead --apply 2>&1); eq "$?" "2" "a --claim value with no owner exits 2"
+OUT=$("$SCRIPT" tk-step --claim hq-dead::hq-dead --apply 2>&1); eq "$?" "2" "a --claim value with no status exits 2"
+OUT=$("$SCRIPT" tk-step --owner hq-dead --apply 2>&1); eq "$?" "2" "the retired --owner flag is refused"
 hasnt "$(cat "$STUB_GC_LOG")" "bd update" "a malformed --claim writes nothing"
 
 echo "--- json output ---"
 fixture
-OUT=$("$SCRIPT" tk-step --claim lx-dead:in_progress:lx-dead --json 2>&1)
-printf '%s' "$OUT" | jq -e '.class == "workflow-step" and .result == "preview" and .root == "tk-root" and .owner == "lx-dead"' >/dev/null 2>&1 \
+OUT=$("$SCRIPT" tk-step --claim hq-dead:in_progress:hq-dead --json 2>&1)
+printf '%s' "$OUT" | jq -e '.class == "workflow-step" and .result == "preview" and .root == "tk-root" and .owner == "hq-dead"' >/dev/null 2>&1 \
   && ok "--json emits one object carrying class, result, root and the owner the claim names" \
   || bad "--json object wrong: $OUT"
 

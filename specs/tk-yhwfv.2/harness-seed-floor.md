@@ -31,7 +31,7 @@ print-mode request with the **real spawn shape** — taken from a live agent's
 process line, not guessed:
 
     claude --dangerously-skip-permissions --effort medium --model claude-sonnet-5 \
-           --settings /home/zook/loomington/.gc/settings.json <arm flags> -p '<11 words>'
+           --settings /home/zook/mycity/.gc/settings.json <arm flags> -p '<11 words>'
 
 then reads the FIRST assistant record of the new transcript and sums
 `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`. Raw
@@ -107,8 +107,8 @@ by this method.
 | cwd | deferral | control | `--strict-mcp-config` | MCP cost |
 |---|---|---:|---:|---:|
 | `rigs/gascity` (excalidraw, HTTP) | on | 64,052 | 63,930 | **122** |
-| `rigs/signal-loom` (next-devtools, playwright) | on | 54,045 | 53,977 | **68** |
-| `rigs/signal-loom` | **off** (`ToolSearch` denied) | 72,638 | 70,620 | **2,018** |
+| `rigs/rig-a` (next-devtools, playwright) | on | 54,045 | 53,977 | **68** |
+| `rigs/rig-a` | **off** (`ToolSearch` denied) | 72,638 | 70,620 | **2,018** |
 
 The servers really do connect — verified with `claude --settings … mcp list`:
 excalidraw ✔, next-devtools ✔, **playwright ✘ (CONNECTION_CLOSED)**. Their
@@ -127,7 +127,7 @@ one of them.)
 ### Deferral is the whole game, and it is one flag from off
 
 `--disallowed-tools ToolSearch` costs **+15,803** on sonnet-5 (+42%) and
-**+15,069** on opus-5; in `rigs/signal-loom` it costs **+18,593**, because the
+**+15,069** on opus-5; in `rigs/rig-a` it costs **+18,593**, because the
 MCP schemas come back too. Nothing in the city denies ToolSearch today. The
 recommendation below therefore carries a hard constraint: **whatever tool
 trimming is adopted, ToolSearch must never be in the deny list**, and any
@@ -237,7 +237,7 @@ Cwd-independent and additive, verified in two directories.
 **Not recommended:** `--exclude-dynamic-system-prompt-sections` (−259) and
 `--strict-mcp-config` (−68/−122) are within noise of free. `--strict-mcp-config`
 has an unrelated argument for it — `playwright` has been failing to connect on
-every signal-loom session — but that is a broken-config bug to fix at the
+every rig-a session — but that is a broken-config bug to fix at the
 `.mcp.json`, not a token lever.
 
 ## Reproducing
