@@ -2063,7 +2063,7 @@ func closedAnchor(id string, d int, children ...Child) Anchor {
 
 func TestClosedAnchorBandsDoneNotByItsChildren(t *testing.T) {
 	a := closedAnchor("tk-done", 1, Child{ID: "tk-c1", Status: "open"}, Child{ID: "tk-c2", Status: "open"})
-	tile := computeTile(a, fixtureNow, Facts{})
+	tile := computeTile(a, fixtureNow, Facts{}, 0)
 
 	if tile.Severity != SevDone {
 		t.Errorf("a closed anchor bands DONE: got %s", tile.Severity)
@@ -2086,7 +2086,7 @@ func TestClosedAnchorNeedsOutranksItsTakeaway(t *testing.T) {
 	a.Kind, a.Source = "parked", "parked"
 	a.Takeaway = "waiting on the operator to pick a storage backend"
 
-	tile := computeTile(a, fixtureNow, Facts{})
+	tile := computeTile(a, fixtureNow, Facts{}, 0)
 	if tile.Needs != "closed — ages out" {
 		t.Errorf("a closed row ages out on its own, it is not re-read: got %q", tile.Needs)
 	}
@@ -2458,7 +2458,7 @@ func TestClosedMergeAnchorIsNotOwed(t *testing.T) {
 	})
 	a.ClosedAt = fixtureNow.Add(-24 * time.Hour)
 
-	tile := computeTile(a, fixtureNow, Facts{})
+	tile := computeTile(a, fixtureNow, Facts{}, 0)
 	if tile.Owed {
 		t.Error("a closed merge anchor is not owed, whatever markers it still carries")
 	}
@@ -2722,20 +2722,94 @@ func TestBlockedAnchorIsOwedAndNamed(t *testing.T) {
 // TestBlockedAtAnEarlierHeadIsMerging: a blocked verdict the merge pass
 // recorded at a head the PR has since left was reached about another commit, so
 // an approved PR at the new head reads merging on both axes, as its status:
-// label does, and the roll-up treats it as a row like any other.
+// label does, and the roll-up treats it as a row like any other. The owed queue
+// reads the verdict by the same rule, so the row is not the operator's and its
+// needs phrase does not call it blocked.
 func TestBlockedAtAnEarlierHeadIsMerging(t *testing.T) {
 	at := fixtureNow.Add(-2 * time.Hour)
 	b := BuildBoard([]Anchor{
 		mergeAnchor("tk-moved", map[string]string{
-			mdPRMachine:      dated(MachineBlocked, "oldhead", at),
-			mdPRMachineCause: "check-failed",
-			mdPRPosture:      dated(postureApproved, headLive, at),
-			mdPRNumber:       "877",
+			mdPRMachine:       dated(MachineBlocked, "oldhead", at),
+			mdPRMachineCause:  "check-failed",
+			mdPRMachineReason: "required check(s) test failed at the head",
+			mdPRPosture:       dated(postureApproved, headLive, at),
+			mdPRNumber:        "877",
 		}),
 	}, fixtureNow, false, nil, Facts{})
 	tile := mustTile(t, b, "tk-moved")
 	if tile.PRPhase != PhaseMerging || tile.Phase != PhaseMerging {
 		t.Errorf("a blocked verdict at an earlier head does not hold the PR: pr_phase=%q phase=%q, want merging", tile.PRPhase, tile.Phase)
+	}
+	if tile.Owed || !tile.PROwedSince.IsZero() {
+		t.Errorf("a verdict the chip does not count owes the operator nothing: owed=%v since=%v", tile.Owed, tile.PROwedSince)
+	}
+	if strings.Contains(tile.Needs, "blocked") {
+		t.Errorf("needs must not call a merging row blocked, got %q", tile.Needs)
+	}
+	if tile.PRMachine != MachineProgressing {
+		t.Errorf("pr_machine = %q, want %q: the next merge pass replaces a verdict at another head", tile.PRMachine, MachineProgressing)
+	}
+}
+
+// TestBlockedWithReworkInFlightIsMerging: the merge pass records a cause other
+// than blocker only with nothing in flight, so an open rework child that arrives
+// afterwards is the city acting on the cause. The approved row reads merging on
+// both axes and stays out of the owed queue, whether or not a pool route marks
+// the child: a poured rework carries none.
+func TestBlockedWithReworkInFlightIsMerging(t *testing.T) {
+	at := fixtureNow.Add(-2 * time.Hour)
+	anchor := mergeAnchor("tk-fixing", map[string]string{
+		mdPRMachine:       dated(MachineBlocked, headLive, at),
+		mdPRMachineCause:  "check-failed",
+		mdPRMachineReason: "required check(s) test failed at the head",
+		mdPRPosture:       dated(postureApproved, headLive, at),
+		mdPRNumber:        "879",
+	}, Blocker{ID: "tk-fixing.rw", Title: "Rework branch polecat/tk-fixing", Status: "open", IssueType: "task"})
+	kid := Anchor{ID: "tk-fixing.rw", Title: "Rework branch polecat/tk-fixing", Kind: "rework", Source: kindRework,
+		Rig: "gc-toolkit", Prefix: "tk", Metadata: map[string]string{mdAnchorBead: "tk-fixing"}}
+
+	tile := mustTile(t, BuildBoard([]Anchor{anchor, kid}, fixtureNow, false, nil, Facts{}), "tk-fixing")
+	if tile.PRPhase != PhaseMerging || tile.Phase != PhaseMerging {
+		t.Errorf("rework in flight on the cause leaves the PR the city's to land: pr_phase=%q phase=%q, want merging", tile.PRPhase, tile.Phase)
+	}
+	if tile.Owed || !tile.PROwedSince.IsZero() {
+		t.Errorf("a verdict the chip does not count owes the operator nothing: owed=%v since=%v", tile.Owed, tile.PROwedSince)
+	}
+	if strings.Contains(tile.Needs, "blocked") {
+		t.Errorf("needs must not call a merging row blocked, got %q", tile.Needs)
+	}
+}
+
+// TestBlockerCauseWithAPoolRoutedBlockerIsOwed: the blocker cause holds the PR
+// whatever is in flight, because the merge pass records it only once no
+// automated actor holds a live blocker. A pool-routed blocker that arrives
+// before the next pass does not lift that verdict: the row reads needs-attention
+// on both axes, as its status: label does, so it stays in the owed queue, named
+// blocked, until the pass replaces the verdict.
+func TestBlockerCauseWithAPoolRoutedBlockerIsOwed(t *testing.T) {
+	at := fixtureNow.Add(-2 * time.Hour)
+	b := BuildBoard([]Anchor{
+		mergeAnchor("tk-held", map[string]string{
+			mdPRMachine:       dated(MachineBlocked, headLive, at),
+			mdPRMachineCause:  "blocker",
+			mdPRMachineReason: "held by unclosed rework/review bead tk-held.f (open) — a live blocker no automated actor holds",
+			mdPRPosture:       dated(postureApproved, headLive, at),
+			mdPRNumber:        "880",
+		}, Blocker{ID: "tk-held.f", Title: "fix the finding", Status: "open",
+			RoutedTo: "gc-toolkit/gc-toolkit.polecat", IssueType: "task"}),
+	}, fixtureNow, false, nil, Facts{})
+	tile := mustTile(t, b, "tk-held")
+	if tile.PRPhase != PhaseNeedsAttention || tile.Phase != PhaseNeedsAttention {
+		t.Fatalf("test premise: the blocker cause holds the chip whatever is in flight: pr_phase=%q phase=%q", tile.PRPhase, tile.Phase)
+	}
+	if !tile.Owed || !tile.PROwedSince.Equal(at) {
+		t.Errorf("a verdict the chip counts is owed from its own stamp: owed=%v since=%v, want since %v", tile.Owed, tile.PROwedSince, at)
+	}
+	if !strings.Contains(tile.Needs, "blocked:") {
+		t.Errorf("needs names the block the chip reads, got %q", tile.Needs)
+	}
+	if tile.PRMachine != MachineBlocked {
+		t.Errorf("pr_machine = %q, want %q", tile.PRMachine, MachineBlocked)
 	}
 }
 
@@ -3463,7 +3537,7 @@ func TestRecommendationRidesTheAcceptableRow(t *testing.T) {
 	}
 
 	// Acceptable row: the card reaches the wire, trimmed, structure intact.
-	tile := computeTile(subject("tk-rec"), fixtureNow, openVisit("tk-rec"))
+	tile := computeTile(subject("tk-rec"), fixtureNow, openVisit("tk-rec"), 0)
 	if !tile.Acceptable {
 		t.Fatal("precondition: a recommended formula + open un-engaged visit is acceptable")
 	}
@@ -3475,14 +3549,14 @@ func TestRecommendationRidesTheAcceptableRow(t *testing.T) {
 	}
 
 	// Same notes, but no open visit → not acceptable → no card on the wire.
-	if got := computeTile(subject("tk-rec"), fixtureNow, Facts{}).Recommendation; got != nil {
+	if got := computeTile(subject("tk-rec"), fixtureNow, Facts{}, 0).Recommendation; got != nil {
 		t.Errorf("off an acceptable row the wire carries no card: got %q", *got)
 	}
 
 	// Acceptable, but whitespace-only notes → null, never an empty string.
 	empty := subject("tk-rec")
 	empty.Notes = "   \n"
-	if got := computeTile(empty, fixtureNow, openVisit("tk-rec")).Recommendation; got != nil {
+	if got := computeTile(empty, fixtureNow, openVisit("tk-rec"), 0).Recommendation; got != nil {
 		t.Errorf("whitespace-only notes is null, not an empty recommendation: got %q", *got)
 	}
 }

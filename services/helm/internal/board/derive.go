@@ -1213,16 +1213,30 @@ func demand(b Blocker) bool {
 
 // prMachine is what the merge cadence can do with this anchor on its next pass.
 //
-// Read off the bead, with ONE live upgrade: an open pool-routed blocker means an
-// actor is due to act whatever the last gate pass recorded — that half of the
-// derivation is a bead read the gather already makes, while the
-// marker-versus-live-head half needs a `git ls-remote` the render path must not
-// do, which is why the cadence records it.
-func prMachine(a Anchor, blockers []Blocker) string {
+// A recorded blocked verdict is read by [prstatus.Blocked], the rule the row's
+// phase and the status: label read it by, over the facts the phase reads
+// ([phaseFacts]). It reads blocked while that rule counts it, and progressing
+// once it does not: a verdict at a head the posture has left, or one whose
+// cause city work in flight is acting on, is the next merge pass's to replace.
+// The owed rule and the needs phrase read this axis, so a row's place in the
+// operator's queue and its chip come from the one rule.
+//
+// Any other verdict is read off the bead, with ONE live upgrade: an open
+// pool-routed blocker means an actor is due to act whatever the last gate pass
+// recorded — that half of the derivation is a bead read the gather already
+// makes, while the marker-versus-live-head half needs a `git ls-remote` the
+// render path must not do, which is why the cadence records it.
+func prMachine(a Anchor, blockers []Blocker, pf prstatus.Facts) string {
 	if !isMergeAnchor(a) {
 		return ""
 	}
 	v, _, _, ok := splitDated(a.Metadata[mdPRMachine])
+	if ok && isBlocked(v) {
+		if prstatus.Blocked(pf) {
+			return MachineBlocked
+		}
+		return MachineProgressing
+	}
 	for _, b := range blockers {
 		if poolRouted(b) {
 			return MachineProgressing
@@ -1897,8 +1911,9 @@ func classifySection(t Tile) string {
 
 // computeTile derives a single tile from an anchor. now is the board's
 // generation instant, shared by every tile so one board never mixes staleness
-// measured against two different clock reads.
-func computeTile(a Anchor, now time.Time, f Facts) Tile {
+// measured against two different clock reads. reworkKids is the anchor's count
+// from [openReworkKids], the in-flight count its phase reads.
+func computeTile(a Anchor, now time.Time, f Facts, reworkKids int) Tile {
 	r := rollUp(a, f)
 	held := f.Visits[a.ID]
 	heldBy := ""
@@ -1935,7 +1950,7 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 	humanGatedInFlight := humanGated(a) && !isRuled && !isRuledInFlight &&
 		prstatus.Derive(prstatus.Facts{InFlightCount: f.anchorInFlight(a)}) == prstatus.Working
 
-	machine := prMachine(a, a.Blockers)
+	machine := prMachine(a, a.Blockers, phaseFacts(a, f, reworkKids))
 	approval := prApproval(a)
 	ask := askingDemand(a.Blockers)
 	prIsOwed, owedSince := prOwed(a, machine, approval, ask)
@@ -2093,9 +2108,13 @@ func computeTile(a Anchor, now time.Time, f Facts) Tile {
 // session liveness); a zero value is legal and yields a board with no held or
 // in-flight signal — narrower, not wrong.
 func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []string, facts Facts) Board {
+	// Counted before any tile: a merge anchor's machine axis reads a blocked
+	// verdict over the in-flight count its phase reads, and each tile settles
+	// its owed bit and needs phrase from that axis.
+	reworkKids := openReworkKids(anchors)
 	tiles := make([]Tile, 0, len(anchors))
 	for _, a := range anchors {
-		tiles = append(tiles, computeTile(a, now, facts))
+		tiles = append(tiles, computeTile(a, now, facts, reworkKids[a.ID]))
 	}
 
 	sort.SliceStable(tiles, func(i, j int) bool { return rankFirst(tiles[i], tiles[j]) })
@@ -2144,7 +2163,7 @@ func BuildBoard(anchors []Anchor, now time.Time, partial bool, partialErrors []s
 	// a closed merge anchor's PRPhase is instead a board-only terminal state
 	// (merged or closed). Then let the frontier lead with that state so the
 	// board's primary vocabulary is the liveness.
-	classifyPhases(folded, anchors, facts)
+	classifyPhases(folded, anchors, facts, reworkKids)
 
 	sort.SliceStable(folded, func(i, j int) bool { return owedFirst(folded[i], folded[j]) })
 
@@ -2224,15 +2243,32 @@ const (
 // signal that a resolved row merged rather than closed without merging.
 const mergeResultMerged = "merged"
 
+// openReworkKids counts each merge anchor's open rework children among the
+// anchors the board gathers: a child names its anchor in [mdAnchorBead]. The
+// count is the in-flight count a merge anchor's phase and machine axis read
+// ([phaseFacts]). Counting is deduped by child id, because one gather can list a
+// bead twice.
+func openReworkKids(anchors []Anchor) map[string]int {
+	kids := make(map[string]int)
+	seen := make(map[string]bool)
+	for _, a := range anchors {
+		if a.Source == kindRework && a.ClosedAt.IsZero() && !seen[a.ID] {
+			if parent := a.Metadata[mdAnchorBead]; parent != "" {
+				seen[a.ID] = true
+				kids[parent]++
+			}
+		}
+	}
+	return kids
+}
+
 // classifyPhases stamps a row's live state, whose move it is, from the shared
 // prstatus core. It fills two fields: PRPhase on a merge anchor (the PR
 // round-trip axis, empty elsewhere), and Phase on every live row (the per-bead
 // liveness, empty only on a closed row). Both read the holds, the posture and
-// the machine verdict off the anchor and its open visit off facts, and count the
-// open rework children the board already gathers (a child names its anchor in
-// [mdAnchorBead]); a non-merge bead's Phase reads its own live-workflow signal
-// from facts instead. Counting is deduped by child id, because one gather can
-// list a bead twice.
+// the machine verdict off the anchor and its open visit off facts, and the
+// anchor's open rework children from reworkKids ([openReworkKids]); a non-merge
+// bead's Phase reads its own live-workflow signal from facts instead.
 //
 // A bead WITH children on the board then takes its children's rolled-up state in
 // place of its own ([aggregatePhases]) — a parent's frontier is its children's
@@ -2242,19 +2278,11 @@ const mergeResultMerged = "merged"
 // has no live answer for it, so the terminal branch below leaves Phase empty and
 // the prefix is skipped. The PR round-trip axis is not empty there — a resolved PR
 // has a final state — so that branch stamps PRPhase merged or closed.
-func classifyPhases(tiles []Tile, anchors []Anchor, f Facts) {
+func classifyPhases(tiles []Tile, anchors []Anchor, f Facts, reworkKids map[string]int) {
 	anchorByID := make(map[string]Anchor, len(anchors))
-	reworkKids := make(map[string]int)
-	seenKid := make(map[string]bool)
 	for _, a := range anchors {
 		if _, ok := anchorByID[a.ID]; !ok {
 			anchorByID[a.ID] = a
-		}
-		if a.Source == kindRework && a.ClosedAt.IsZero() && !seenKid[a.ID] {
-			if parent := a.Metadata[mdAnchorBead]; parent != "" {
-				seenKid[a.ID] = true
-				reworkKids[parent]++
-			}
 		}
 	}
 	for i := range tiles {

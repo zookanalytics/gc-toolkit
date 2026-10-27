@@ -585,7 +585,10 @@ causes only when no live bead holds the merge, so work that arrives afterwards
 is the city acting on the cause, and the next pass replaces the verdict. Cause
 `blocker` holds whatever is in flight, because the merge pass records it after
 weighing the live holders, and the stuck holder is often one of them, such as a
-must-fix finding no fix unit answers.
+must-fix finding no fix unit answers. `prstatus.Blocked` is that rule. The helm
+board applies it too, counting the anchor's open rework children as the work in
+flight, and by it decides a blocked row's phase, whether the operator's queue
+lists the row, and the row's needs phrase.
 
 A read that does not answer changes no label. When gctk is unavailable, or the
 anchor, its in-flight set or its visits do not read, `pr-status-label.sh` exits 2

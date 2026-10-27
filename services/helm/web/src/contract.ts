@@ -185,10 +185,13 @@ export interface Tile {
    *
    * `'blocked'` is a hold no automated actor will clear and no review verdict is
    * owed on — an unresolved required review thread, a failed required check, a
-   * base gone BEHIND, a conflict whose merge-in a hold defers, an unrouted
-   * blocker, or a branch rule the merge pass cannot name. It is owed by the
-   * operator (needs-attention), distinct from `'settled'`, which waits on a
-   * review or the merge pass. Its specific cause is spelled out in `needs`.
+   * base gone BEHIND, a conflict whose merge-in a hold defers, a blocker no
+   * automated actor holds, or a branch rule the merge pass cannot name. It is
+   * owed by the operator (needs-attention), distinct from `'settled'`, which
+   * waits on a review or the merge pass. Its specific cause is spelled out in
+   * `needs`. A recorded blocked verdict reads `'blocked'` only while the rule
+   * `pr_phase` reads it by counts it, and `'progressing'` otherwise, since the
+   * next merge pass replaces it.
    *
    * `'unknown'` is a RENDERED value, never a fallback to the quiet end — the
    * same choice `waiting_unknown` makes on the gather side. A missing key means

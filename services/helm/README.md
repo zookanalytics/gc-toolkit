@@ -525,10 +525,11 @@ having happened. The rows render from the bead, and
 not grow with the number of pull requests.
 
 **One live upgrade.** An anchor with an open blocker carrying a POOL route reads
-`progressing` whatever the last gate pass recorded, because that half of the
-derivation is a bead read the gather already makes. The route is the
-discriminator: an anchor also blocks on ordinary prerequisites and on the demand
-bead that makes it `asking`, and no pool will claim either.
+`progressing`, because that half of the derivation is a bead read the gather
+already makes. It overrides any verdict the last gate pass recorded except
+`blocked`, which reads by the status rule (see *Blocked, not settled*). The route
+is the discriminator: an anchor also blocks on ordinary prerequisites and on the
+demand bead that makes it `asking`, and no pool will claim either.
 
 **Whose move.** A row is owed by the operator when the machine axis is blocked,
 when an open `blocks` edge to a demand bead means the city is asking, or when the
@@ -550,6 +551,14 @@ owed the row, and its specific cause is spelled out in `needs` as
 `blocked: <reason>`, read from `pr.machine_reason`; `pr.machine_cause` carries
 the same cause as a value. It is distinct from `settled`, which is the merge
 cadence's ordinary wait on a review or the merge pass.
+
+A recorded `blocked` verdict reads `blocked` only while it holds the PR by the
+rule the `status:` label applies, `prstatus.Blocked`: it was recorded at the head
+the posture was read at, and no rework child is open on the anchor unless its
+cause is `blocker`. Any other recorded `blocked` reads `progressing`, because the
+next merge pass replaces it, so the row is not owed and its `needs` does not call
+it blocked. The row's phase reads the verdict by the same rule, so the owed queue
+and the phase chip cannot disagree about it.
 
 **Stalled at a pre-open check.** A merge anchor parked at `pre_open_gate` is owed
 once it has held past three days (`preOpenStaleThresholdDays`) with a check not

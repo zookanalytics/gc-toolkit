@@ -405,7 +405,9 @@ type Tile struct {
 	// automated actor holds, or a branch rule the merge pass cannot name. The
 	// operator is owed it, distinct from `settled`. Its cause rides
 	// `pr.machine_cause` as a value and `pr.machine_reason` as the sentence
-	// surfaced in the row's `needs`.
+	// surfaced in the row's `needs`. A recorded `blocked` reads `blocked` only
+	// while prstatus.Blocked counts it, the rule the row's phase reads it by, and
+	// `progressing` otherwise, since the next merge pass replaces it.
 	//
 	// `unknown` is a rendered value, not a fallback to the quiet end — the same
 	// choice [Anchor.WaitingUnknown] already makes, and for the same reason. An

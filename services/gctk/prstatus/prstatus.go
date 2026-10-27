@@ -175,7 +175,9 @@ func Derive(f Facts) State {
 }
 
 // Blocked reports whether the merge pass's blocked verdict holds the PR, the
-// rule by which [Derive] reads that verdict as needs-attention.
+// rule by which [Derive] reads that verdict as needs-attention. The helm board
+// reads a blocked verdict by it too, for a row's owed bit and needs phrase, so
+// its queue and its chip read the verdict the same way.
 //
 // The verdict counts at the head the posture was read at, since a verdict at
 // another head was reached about a different commit. The pass records most
