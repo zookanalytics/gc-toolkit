@@ -831,9 +831,9 @@ has "$(tail -n 1 <<< "$(notes fnd-1)")" "): line one line two line three" "(head
 
 # ── 21. --cleared records that the situation ended ───────────────────
 # A caller that sees its situation end records it on the live bead and files
-# nothing. The next report of the finding takes the stamp off and notes that
-# the finding came back, even with its text unchanged, so the notes never end
-# on a clear that the finding has outlived.
+# nothing. A later report that lands on that bead takes the stamp off and notes
+# that the finding came back, even with its text unchanged, so the bead's notes
+# never end on a clear it has outlived.
 reset
 OUT=$("$SUT" --key deacon-cold.dc --scope boot-health --cleared --message "dc is patrolling again" 2>&1); RC=$?
 eq "$RC" "0" "(cleared/none) no live bead is nothing to record, and exits 0"
@@ -922,6 +922,12 @@ gc bd close fix-1 >/dev/null 2>&1
 "$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" >/dev/null 2>&1
 if [ "$(meta fnd-1 'finding.cleared_at')" != "<absent>" ]; then ok "(cleared/held) a held bead with nothing open takes the clear"; else bad "(cleared/held) the held bead was not stamped"; fi
 eq "$(beads)" "2" "(cleared/held) and nothing is filed beside it"
+# A later report does not land on that bead. It files a new one beside it, and
+# the held bead keeps its stamp, because it has taken no report since.
+"$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
+eq "$(meta fnd-2 'finding.recurrence_of')" "fnd-1" "(cleared/held) a later report files a new bead naming the held one"
+eq "$(meta fnd-2 'finding.cleared_at')" "<absent>" "(cleared/held) the new bead carries no stamp"
+if [ "$(meta fnd-1 'finding.cleared_at')" != "<absent>" ]; then ok "(cleared/held) the held bead keeps its stamp"; else bad "(cleared/held) the held bead lost its stamp"; fi
 
 # Notes at the cap: the stamp lands, and the note does not.
 reset

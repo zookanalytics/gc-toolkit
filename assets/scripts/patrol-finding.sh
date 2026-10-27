@@ -12,8 +12,8 @@
 # with a live finding in its scope is therefore refused, and those findings are
 # listed for the caller to compare. --distinct files it anyway.
 # A caller that sees the situation end passes --cleared. That stamps the live
-# bead with when it cleared and files nothing, and the next report of the
-# finding unsets the stamp and notes that it came back.
+# bead with when it cleared and files nothing, and a later report that lands on
+# that bead unsets the stamp and notes that it came back.
 #   patrol-finding.sh --key <situation-key> --title <one line> --message <text>
 #                     [--about <bead-id>] [--scope <slug>] [--type <t>]
 #                     [--priority <n>] [--rig <rig>] [--distinct]
@@ -100,12 +100,12 @@ usage: patrol-finding.sh --key <situation-key> --title <one line>
               gc-toolkit). It also rig-qualifies the proactive pool
   --no-react  file the bead and stop. It keeps gc.proactive=1, so the next
               `gc-proactive.sh scan --sling` sweep reacts to it
-  --cleared   the situation has ended. Stamp finding.cleared_at on the live
-              bead a recurrence would land on, add a one-line note of
-              --message, and file nothing. With no live bead there is nothing
-              to record, and the exit is 0. --title is not needed. The next
-              report of the finding unsets the stamp and notes that the
-              finding recurred
+  --cleared   the situation has ended. Stamp finding.cleared_at on the bead a
+              recurrence would land on, or else on one held at blocked with
+              nothing left to wait on, add a one-line note of --message, and
+              file nothing. With no live bead there is nothing to record, and
+              the exit is 0. --title is not needed. A later report that lands
+              on that bead unsets the stamp and notes that the finding recurred
   --dry-run   print what would be filed and exit
 U
 }
