@@ -178,11 +178,13 @@ mechanism records, though, and only the pack would read it.
   the work it decomposed into. bd's event is such a child, so the board skips
   any child of bd's `event` type, which bd defines as an audit record. Without
   that, a finding that cleared would read as one whose children had all closed.
+- `bead-context.sh --horizon` counts a bead's children, done ones included, in
+  the snapshot a converse sitting reads at prime, and the converse-prep skill
+  runs it on every subject, a finding included. It leaves an event out by the
+  same rule, so the snapshot counts no state change as finished work.
 - Elsewhere a closed event changes no decision. `live-work.sh` counts only open
   children as live work, `gc-helm.sh`'s park survey lists only beads that are
-  not closed, and `queue-priority.sh` moves no closed bead's priority. Two
-  readers show every child. `bead-context.sh --horizon` would count an event in
-  its child snapshot, and the prompts that name it run it on an epic.
+  not closed, and `queue-priority.sh` moves no closed bead's priority.
   `gc-bd-universe.sh` lists a bead's children by title for a sitting, through
   `bd children`, which includes closed ones, and an event's title names the
   state change.

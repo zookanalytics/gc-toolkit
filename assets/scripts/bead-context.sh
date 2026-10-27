@@ -445,14 +445,19 @@ EDGES_JSON=$(printf '%s' "$SUBJ" | jq -c --argjson tracked "$TRACKED_BY" '
 # come from a --parent listing, asked for with --all. bd's default scope leaves
 # out closed and pinned children, and a --status list leaves out every status it
 # does not name, a store's own statuses included, so either would drop a child
-# from the count. The listing carries each child's own row, so only its blockers
-# are read, and only while its own state advances.
+# from the count. The listing also returns the closed event bead `bd set-state`
+# files under a bead each time its state changes. An event records the change,
+# not work, so it is left out and never counted as a child. The listing carries
+# each child's own row, so only its blockers are read, and only while its own
+# state advances.
 FRONTIER_JSON=""; HORIZON_JSON=""
 if [ -n "$WANT_FRONTIER" ] || [ -n "$WANT_HORIZON" ]; then
   CHILDREN='[]'
   if [ -n "$WANT_HORIZON" ]; then
     CHILDREN=$(bd_json "$DB" list --parent "$BEAD" --all --limit 0 \
-      | jq -c 'if type == "array" then . else [] end' 2>/dev/null)
+      | jq -c 'if type == "array"
+               then [.[] | select((.issue_type? // "") != "event")]
+               else [] end' 2>/dev/null)
     [ -n "$CHILDREN" ] || CHILDREN='[]'
   fi
   WALK=$(printf '%s\n%s\n' "$SUBJ" "$CHILDREN" | jq -sc --arg f "$WANT_FRONTIER" "$WALK_JQ"'
