@@ -1589,10 +1589,13 @@ keys = [
 # finding.recurrence_of names the earlier finding a reappearance repeats: a
 # closed one, or one held at blocked with nothing open left to wait on. Either
 # way a fix that did not hold is visible.
+# finding.cleared_at is when a caller last saw the situation end, written by
+# --cleared on the live bead. The next report of the finding unsets it, so it
+# is present only while the finding has not been seen since.
 keys = [
   "finding.key", "finding.scope", "finding.digest",
   "finding.first_seen", "finding.last_seen", "finding.occurrences",
-  "finding.about", "finding.recurrence_of",
+  "finding.about", "finding.recurrence_of", "finding.cleared_at",
 ]
 # finding.key here is the same prefix the review findings use
 # ([metadata.review_findings]); the two families share the name and are told

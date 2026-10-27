@@ -119,6 +119,9 @@ case "${1:-}" in
             jq -c --arg id "$id" --arg k "$k" --arg v "$v" \
               'map(if .id == $id then .metadata[$k] = $v else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
           esac ;;
+        --unset-metadata) shift; k="${1:-}"
+          jq -c --arg id "$id" --arg k "$k" \
+            'map(if .id == $id then .metadata |= del(.[$k]) else . end)' "$tmp" > "$tmp.n" && mv "$tmp.n" "$tmp" ;;
         --append-notes) shift; note="${1:-}"
           jq -c --arg id "$id" --arg n "$note" \
             'map(if .id == $id then .notes = ((.notes // "") + (if (.notes // "") == "" then "" else "\n" end) + $n) else . end)' \
@@ -825,6 +828,117 @@ eq "$HEAD" "$(printf '中%.0s' $(seq 1 200))…" "(head) and no character is spl
 "$SUT" --key doctor-wide --title t --message "$(printf 'line one\n\tline two\r\nline three')" >/dev/null 2>&1
 eq "$(notes fnd-1 | wc -l | tr -d ' ')" "2" "(head) a multi-line text is one note line"
 has "$(tail -n 1 <<< "$(notes fnd-1)")" "): line one line two line three" "(head) its whitespace squashed to single spaces"
+
+# ── 21. --cleared records that the situation ended ───────────────────
+# A caller that sees its situation end records it on the live bead and files
+# nothing. The next report of the finding takes the stamp off and notes that
+# the finding came back, even with its text unchanged, so the notes never end
+# on a clear that the finding has outlived.
+reset
+OUT=$("$SUT" --key deacon-cold.dc --scope boot-health --cleared --message "dc is patrolling again" 2>&1); RC=$?
+eq "$RC" "0" "(cleared/none) no live bead is nothing to record, and exits 0"
+eq "$(beads)" "0" "(cleared/none) it files nothing"
+has "$OUT" "no clear to record" "(cleared/none) says there was nothing to record"
+hasnt "$(cat "$STUB_GC_LOG")" "bd update" "(cleared/none) and writes nothing"
+
+"$SUT" --key deacon-cold.dc --scope boot-health --title "dc went cold" --message "dc cold since T1" >/dev/null 2>&1
+DIGEST_1=$(meta fnd-1 'finding.digest')
+OUT=$("$SUT" --key deacon-cold.dc --scope boot-health --cleared --message "dc is patrolling again" 2>&1); RC=$?
+CLEARED_AT=$(meta fnd-1 'finding.cleared_at')
+eq "$RC" "0" "(cleared) exit 0"
+eq "$(beads)" "1" "(cleared) it files no second bead"
+has "$OUT" "fnd-1 holds [deacon-cold.dc] — recorded that it cleared, with a one-line note" "(cleared) says where it recorded the clear"
+case "$CLEARED_AT" in
+  20*Z) ok "(cleared) finding.cleared_at is stamped with when it cleared ($CLEARED_AT)" ;;
+  *) bad "(cleared) finding.cleared_at reads '$CLEARED_AT'" ;;
+esac
+eq "$(meta fnd-1 'finding.occurrences')" "1" "(cleared) a clear is not an occurrence"
+eq "$(meta fnd-1 'finding.digest')" "$DIGEST_1" "(cleared) and leaves the digest alone"
+has "$(notes fnd-1)" "boot-health: finding cleared: dc is patrolling again" "(cleared) a note names the clear"
+eq "$(notes fnd-1 | wc -l | tr -d ' ')" "1" "(cleared) in one line"
+eq "$(grep -c 'sling' "$STUB_PROACTIVE_LOG")" "1" "(cleared) no reaction is slung for a clear"
+
+# The same report again: its text is unchanged, but the finding had cleared.
+OUT=$("$SUT" --key deacon-cold.dc --scope boot-health --title "dc went cold" --message "dc cold since T1" 2>&1)
+eq "$(beads)" "1" "(cleared/return) the return lands on the same bead"
+eq "$(meta fnd-1 'finding.cleared_at')" "<absent>" "(cleared/return) the stamp is gone"
+eq "$(meta fnd-1 'finding.occurrences')" "2" "(cleared/return) the return is an occurrence"
+has "$(tail -n 1 <<< "$(notes fnd-1)")" "finding recurred after it cleared at $CLEARED_AT (occurrence 2, digest $DIGEST_1): dc cold since T1" \
+  "(cleared/return) a note says it came back, though its text is unchanged"
+has "$OUT" "a one-line note of its return after it cleared at $CLEARED_AT" "(cleared/return) says what it noted"
+has "$(cat "$STUB_GC_LOG")" "--unset-metadata finding.cleared_at" "(cleared/return) unsets the stamp rather than blanking it"
+eq "$(grep -c 'sling' "$STUB_PROACTIVE_LOG")" "1" "(cleared/return) the bead already reacted to keeps its one reaction"
+
+# Only the return was news: the next identical report notes nothing.
+OUT=$("$SUT" --key deacon-cold.dc --scope boot-health --title "dc went cold" --message "dc cold since T1" 2>&1)
+eq "$(notes fnd-1 | wc -l | tr -d ' ')" "2" "(cleared/after) an identical report after the return notes nothing"
+has "$OUT" "text unchanged" "(cleared/after) and says so"
+
+# A return with changed text is still one line, in the return's wording.
+"$SUT" --key deacon-cold.dc --scope boot-health --cleared --message "dc is patrolling again" >/dev/null 2>&1
+"$SUT" --key deacon-cold.dc --scope boot-health --title "dc went cold" --message "dc cold since T2" >/dev/null 2>&1
+eq "$(notes fnd-1 | wc -l | tr -d ' ')" "4" "(cleared/changed) a changed return adds one line after the clear's"
+has "$(tail -n 1 <<< "$(notes fnd-1)")" "finding recurred after it cleared at" "(cleared/changed) worded as a return"
+has "$(tail -n 1 <<< "$(notes fnd-1)")" "dc cold since T2" "(cleared/changed) carrying the new text"
+if [ "$(meta fnd-1 'finding.digest')" != "$DIGEST_1" ]; then ok "(cleared/changed) the digest moves with the text"; else bad "(cleared/changed) the digest stayed $DIGEST_1"; fi
+
+# --cleared needs no --title, but it needs a key and a message.
+"$SUT" --cleared --message m >/dev/null 2>&1; RC=$?
+eq "$RC" "2" "(cleared/usage) no key is a usage error"
+"$SUT" --key deacon-cold.dc --cleared >/dev/null 2>&1; RC=$?
+eq "$RC" "2" "(cleared/usage) no message is a usage error"
+
+# A closed bead is no live record, so a clear leaves it alone.
+reset
+"$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
+gc bd close fnd-1 >/dev/null 2>&1
+OUT=$("$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" 2>&1); RC=$?
+eq "$RC" "0" "(cleared/closed) exit 0"
+has "$OUT" "no clear to record" "(cleared/closed) a closed bead holds nothing to clear"
+eq "$(meta fnd-1 'finding.cleared_at')" "<absent>" "(cleared/closed) and is not stamped"
+
+# The lookup cannot be read: nothing proves where the clear belongs.
+reset
+"$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
+export STUB_LIST_FAIL=1
+OUT=$("$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" 2>&1); RC=$?
+export STUB_LIST_FAIL=""
+eq "$RC" "1" "(cleared/unreadable) a failed lookup exits 1"
+eq "$(meta fnd-1 'finding.cleared_at')" "<absent>" "(cleared/unreadable) and stamps nothing"
+
+# The write is refused: exit 1, so the caller tries again.
+export STUB_UPD_FAIL=1
+OUT=$("$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" 2>&1); RC=$?
+export STUB_UPD_FAIL=""
+eq "$RC" "1" "(cleared/refused) a refused write exits 1"
+has "$OUT" "could not record on fnd-1" "(cleared/refused) and names the bead"
+
+# A held bead with nothing left to wait on is still the newest record.
+reset
+"$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
+put_bead fix-1 open
+hold fnd-1 blocked fix-1
+gc bd close fix-1 >/dev/null 2>&1
+"$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" >/dev/null 2>&1
+if [ "$(meta fnd-1 'finding.cleared_at')" != "<absent>" ]; then ok "(cleared/held) a held bead with nothing open takes the clear"; else bad "(cleared/held) the held bead was not stamped"; fi
+eq "$(beads)" "2" "(cleared/held) and nothing is filed beside it"
+
+# Notes at the cap: the stamp lands, and the note does not.
+reset
+"$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
+set_notes fnd-1 "$(filler 65300)"
+OUT=$("$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" 2>&1); RC=$?
+eq "$RC" "0" "(cleared/cap) exit 0"
+if [ "$(meta fnd-1 'finding.cleared_at')" != "<absent>" ]; then ok "(cleared/cap) the stamp lands"; else bad "(cleared/cap) no stamp"; fi
+eq "$(notes_bytes fnd-1)" "65300" "(cleared/cap) the notes are left as they are"
+has "$OUT" "nothing is noted, because the notes are at their 65536-byte cap" "(cleared/cap) says why"
+
+# --dry-run writes nothing.
+reset
+"$SUT" --key deacon-cold.dc --title t --message m >/dev/null 2>&1
+OUT=$("$SUT" --key deacon-cold.dc --cleared --message "dc is patrolling again" --dry-run 2>&1)
+has "$OUT" "would record that [deacon-cold.dc] cleared" "(cleared/dry-run) says what it would record"
+eq "$(meta fnd-1 'finding.cleared_at')" "<absent>" "(cleared/dry-run) and stamps nothing"
 
 echo
 echo "passed: $PASS  failed: $FAIL"
