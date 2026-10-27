@@ -77,12 +77,12 @@ chmod +x "$TMP/bin/gc"
 # The open infra beads in the city store, one array as `bd list` returns.
 cat > "$WISPS_FILE" <<'JSON'
 [
-  {"id":"lx-n-gate",           "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: ra-g1"},
-  {"id":"lx-esc-1",            "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-20T00:00:00Z"},
-  {"id":"lx-esc-2",            "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-25T00:00:00Z"},
-  {"id":"lx-esc-3",            "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-29T00:00:00Z"},
-  {"id":"lx-esc-solo",         "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Different condition [LOW]","created_at":"2026-09-28T00:00:00Z"},
-  {"id":"lx-boot",             "issue_type":"message","status":"open","assignee":"human","title":"BOOT_HEALTH: deacon cold"}
+  {"id":"hq-n-gate",           "issue_type":"message","status":"open","assignee":"human","title":"Human gate awaiting you: ra-g1"},
+  {"id":"hq-esc-1",            "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-20T00:00:00Z"},
+  {"id":"hq-esc-2",            "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-25T00:00:00Z"},
+  {"id":"hq-esc-3",            "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Reaper anomalies detected [MEDIUM]","created_at":"2026-09-29T00:00:00Z"},
+  {"id":"hq-esc-solo",         "issue_type":"message","status":"open","assignee":"human","title":"ESCALATION: Different condition [LOW]","created_at":"2026-09-28T00:00:00Z"},
+  {"id":"hq-boot",             "issue_type":"message","status":"open","assignee":"human","title":"BOOT_HEALTH: deacon cold"}
 ]
 JSON
 
@@ -94,19 +94,19 @@ CALLED="$(cat "$CALLS")"
 eq "$RC" "0" "MAIN: exits 0"
 has "$OUT" "closed 2 duplicate escalation notices" "COUNTS: 2 escalation copies closed"
 has "$OUT" "kept 2 distinct" "COUNTS: 2 distinct escalation headlines kept"
-has "$CALLED" "bd close lx-esc-1" "ESC: the older escalation copy is closed"
-has "$CALLED" "bd close lx-esc-2" "ESC: the middle escalation copy is closed"
-hasnt "$CALLED" "bd close lx-esc-3" "ESC: the NEWEST escalation copy is kept"
-has "$CALLED" "superseded by lx-esc-3" "ESC: reason names the surviving newest copy"
-hasnt "$CALLED" "bd close lx-esc-solo" "ESCSOLO: a lone escalation headline is kept"
-hasnt "$CALLED" "bd close lx-boot" "SCOPE: a non-escalation message is untouched"
-hasnt "$CALLED" "bd close lx-n-gate" "SCOPE: a gate notice is untouched"
+has "$CALLED" "bd close hq-esc-1" "ESC: the older escalation copy is closed"
+has "$CALLED" "bd close hq-esc-2" "ESC: the middle escalation copy is closed"
+hasnt "$CALLED" "bd close hq-esc-3" "ESC: the NEWEST escalation copy is kept"
+has "$CALLED" "superseded by hq-esc-3" "ESC: reason names the surviving newest copy"
+hasnt "$CALLED" "bd close hq-esc-solo" "ESCSOLO: a lone escalation headline is kept"
+hasnt "$CALLED" "bd close hq-boot" "SCOPE: a non-escalation message is untouched"
+hasnt "$CALLED" "bd close hq-n-gate" "SCOPE: a gate notice is untouched"
 
 # The notices core mails are assigned to "human"; the stub refuses this sweep's
 # close without --force (see the gc stub). A close recorded above already proves
 # --force was passed, but assert it at the close site so a dropped --force is
 # caught here.
-has "$(grep '^bd close lx-esc-1 ' "$CALLS")" " --force" "HUMANGUARD: the duplicate-escalation close is forced past the human-assignee guard"
+has "$(grep '^bd close hq-esc-1 ' "$CALLS")" " --force" "HUMANGUARD: the duplicate-escalation close is forced past the human-assignee guard"
 
 # --- DRY RUN ------------------------------------------------------------------
 : > "$CALLS"
@@ -131,11 +131,11 @@ has "$(cat "$TMP/err")" "could not read the city store" "UNREADABLE-LIST: says w
 
 # --- CLOSE FAIL ---------------------------------------------------------------
 : > "$CALLS"
-OUT="$(CLOSE_FAILS="lx-esc-1" bash "$SUT" --db "$CITY_DB" 2>"$TMP/err")"; RC=$?
+OUT="$(CLOSE_FAILS="hq-esc-1" bash "$SUT" --db "$CITY_DB" 2>"$TMP/err")"; RC=$?
 CALLED="$(cat "$CALLS")"
 eq "$RC" "0" "CLOSEFAIL: the pass exits 0"
-has "$(cat "$TMP/err")" "could not close duplicate escalation notice lx-esc-1" "CLOSEFAIL: the failure is reported"
-has "$CALLED" "bd close lx-esc-2" "CLOSEFAIL: a failed close does not stop the pass"
+has "$(cat "$TMP/err")" "could not close duplicate escalation notice hq-esc-1" "CLOSEFAIL: the failure is reported"
+has "$CALLED" "bd close hq-esc-2" "CLOSEFAIL: a failed close does not stop the pass"
 has "$OUT" "closed 1 duplicate escalation notices" "CLOSEFAIL: the failed close is not counted closed"
 
 # --- DISK PRESSURE (fail closed) ----------------------------------------------
