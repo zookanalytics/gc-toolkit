@@ -620,7 +620,8 @@ has "the route default lives in the script, once"        "gc-toolkit.polecat" "$
 has "the blocked exit refuses a cross-store edge"        "another store" "$D"
 # A bead whose job ends when another lands closes through the until edge alone:
 # a blocks edge only sequences work, and the pass closes no bead on one.
-has "the until exit writes an until edge, not a blocks one" "--type=until" "$D"
+has "the until exit writes an until edge, not a blocks one" 'type: "until"' "$D"
+has "…every one of them in one write"                    "dep add --file -" "$D"
 has "…and reads it back by its type"                     "-t until"      "$D"
 # Origin does not decide the exit: an operator capture is triaged on its merits
 # like any other bead, and the guardrail (a genuine fork, an irreversible or

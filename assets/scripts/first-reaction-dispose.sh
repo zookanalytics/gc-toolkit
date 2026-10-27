@@ -177,9 +177,9 @@ Usage:
   deferred-dispatch.sh notify arms tells the agent then, not before.
   --until (until, one or more) names a bead whose landing ends this one's job,
   such as the bead that retires its code. The exit releases the bead with no
-  route, arm, placement or blocks edge, then writes an until edge onto each
-  --until bead and reads it back, so the deferred-dispatch pass closes the
-  bead once every --until bead has closed. A bead in another store is
+  route, arm, placement or blocks edge, then writes an until edge onto every
+  --until bead in one write and reads each back, so the deferred-dispatch pass
+  closes the bead once every --until bead has closed. A bead in another store is
   refused: the edge does not read back, and the pass never sees that bead
   close, so a person closes this one once it lands (--disposition ruling asks
   them).
@@ -1201,30 +1201,36 @@ if [ -n "$HOLD_WAITS" ]; then
     fi
 fi
 
-# ── The until exit's edge, after the release ──────────────────────────
+# ── The until exit's edges, after the release ─────────────────────────
 # Each --until bead's landing ends the subject's job, and an until edge onto it
 # says so to the deferred-dispatch pass, which closes the subject once every
-# until target has closed (skills/waits). The edge is also what makes the pass
-# select the subject, so it is written after the release. The release reads the
-# subject's status and then writes status open and no assignee, with no
-# condition on that write. A close the pass made between the read and the write
-# would be undone, and the successor pointer that close left reads as live work
-# to every later pass, so none of them would close the subject again. After the
-# edge this exit writes only the landed proof, which moves neither the status
-# nor the assignee. A subject that already carried an until edge when the
-# reaction began is not covered by this order: the pass can select it during
-# the release.
-# The add's answer is not taken as the edge: bd keeps one edge type per pair of
-# beads, so a blocks edge the subject already has onto that bead refuses this
-# one, and a target the store does not hold leaves nothing to read. So the edge
-# is read back by its type, and a missing one fails the exit before the landed
-# proof, so a re-run resumes it.
+# until target it reads has closed (skills/waits). So the edges land in one
+# write: bd commits a `dep add --file` as one transaction, and the first edge it
+# refuses rolls the whole set back. Written one at a time, they would let the
+# pass close the subject between two writes, once the targets written so far
+# had closed, while a target not yet written was still open.
+# The edges are also what make the pass select the subject, so they are written
+# after the release. The release reads the subject's status and then writes
+# status open and no assignee, with no condition on that write. A close the pass
+# made between the read and the write would be undone, and the successor
+# pointer that close left reads as live work to every later pass, so none of
+# them would close the subject again. After the edges this exit writes only the
+# landed proof, which moves neither the status nor the assignee. A subject that
+# already carried an until edge when the release ran is not covered by this
+# order, and neither is a re-run after the edges landed: the pass can select
+# the subject during the release.
+# The add's answer is not taken as the edges: bd keeps one edge type per pair
+# of beads, so a blocks edge the subject already has onto one of them refuses
+# its until edge, and with it the whole write, and a target the store does not
+# hold leaves nothing to read. So each edge is read back by its type, and a
+# missing one fails the exit before the landed proof, so a re-run resumes it.
 if [ "$DISPOSITION" = "until" ]; then
     UNTIL_ADD_ERR=""
-    for u in $UNTIL; do
-        _err=$(gc_bd dep add "$BEAD" "$u" --type=until 2>&1 >/dev/null) \
-            || UNTIL_ADD_ERR="$UNTIL_ADD_ERR; $u: $(printf '%s' "${_err:-exited non-zero}" | tr '\n' ' ')"
-    done
+    UNTIL_EDGES=$(jq -nc --arg from "$BEAD" --arg to "$UNTIL" \
+        '$to | split(" ")[] | select(length > 0) | {from: $from, to: ., type: "until"}') \
+        || die "could not compose the until edges for $BEAD (jq failed). The headline and the release stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
+    _err=$(printf '%s\n' "$UNTIL_EDGES" | gc_bd dep add --file - 2>&1 >/dev/null) \
+        || UNTIL_ADD_ERR=$(printf '%s' "${_err:-exited non-zero}" | tr '\n' ' ')
     UNTIL_HELD=$(gc_bd dep list "$BEAD" --direction=down -t until --json 2>/dev/null | scrub \
         | jq -r 'if type == "array" then (.[]? | select(((.dependency_type // .type) // "") == "until") | (.id // empty)) else empty end' 2>/dev/null || printf '')
     MISSING=""
@@ -1235,7 +1241,7 @@ if [ "$DISPOSITION" = "until" ]; then
         esac
     done
     [ -z "$MISSING" ] \
-        || die "the until disposition on $BEAD did not land: no until edge onto${MISSING} reads back (gc bd dep list $BEAD --direction=down -t until${DB:+ --db $DB})${UNTIL_ADD_ERR:+, and bd answered${UNTIL_ADD_ERR#;}}. bd keeps one edge type per pair of beads, so a blocks edge $BEAD has onto that bead refuses the until one: remove it with gc bd dep remove $BEAD <bead>${DB:+ --db $DB}. The headline and the release stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
+        || die "the until disposition on $BEAD did not land: no until edge onto${MISSING} reads back (gc bd dep list $BEAD --direction=down -t until${DB:+ --db $DB})${UNTIL_ADD_ERR:+, and bd answered: $UNTIL_ADD_ERR}. bd keeps one edge type per pair of beads, so a blocks edge $BEAD has onto one of those beads refuses its until edge, and the one write that carries every until edge then lands none: remove that blocks edge with gc bd dep remove $BEAD <bead>${DB:+ --db $DB}. The headline and the release stand. No landed proof was stamped and the reaction bead stays open, so clear the cause and re-run this command: a re-run resumes rather than refusing."
     note "the until edge onto each of${UNTIL} reads back on $BEAD"
 fi
 

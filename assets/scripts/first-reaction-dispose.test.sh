@@ -181,11 +181,38 @@ case "$1 ${2:-}" in
     if [ -n "${FAKE_NUDGE_FAILS:-}" ]; then echo "gc session nudge: fake nudge failure" >&2; exit 1; fi ;;
   "bd dep")
     printf 'DEP %s\n' "$*" >> "$FAKE_LOG"
-    # `dep list --json` answers with what the store holds AFTER the helm call;
-    # `dep add` is the close exit's gate edge, and FAKE_DEP_FAILS models a hold
-    # that did not land.
+    # `dep list --json` answers with what the store holds AFTER the helm call.
+    # `dep add` writes one positional edge, or every line `--file -` reads,
+    # which bd commits as one transaction, so the first edge it refuses lands
+    # none of them. Each landed edge is logged as EDGE <from> <to> <type>.
+    # FAKE_DEP_FAILS refuses every add, the close exit's hold that did not land,
+    # and FAKE_DEP_REFUSES refuses an edge onto that bead. FAKE_DEP_PASS is a
+    # command the stub runs after each add, the deferred-dispatch pass running
+    # right after the write.
     case "${3:-}" in
-      add)  [ -n "${FAKE_DEP_FAILS:-}" ] && exit 1 ;;
+      add)
+        case " $* " in
+          *" --file - "*)
+            _in=$(cat)
+            printf '%s\n' "$_in" | sed 's/^/DEPFILE /' >> "$FAKE_LOG"
+            _edges=$(printf '%s\n' "$_in" | jq -r '"\(.from) \(.to) \(.type // "blocks")"') ;;
+          *)
+            _type=blocks; _prev=""
+            for _a in "$@"; do
+              case "$_a" in --type=*) _type=${_a#--type=} ;; esac
+              case "$_prev" in -t|--type) _type=$_a ;; esac
+              _prev=$_a
+            done
+            _edges="$4 $5 $_type" ;;
+        esac
+        _rc=0
+        [ -n "${FAKE_DEP_FAILS:-}" ] && _rc=1
+        if [ -n "${FAKE_DEP_REFUSES:-}" ] && printf '%s\n' "$_edges" | awk -v r="$FAKE_DEP_REFUSES" '$2 == r { found = 1 } END { exit !found }'; then
+          _rc=1
+        fi
+        [ "$_rc" -eq 0 ] && printf '%s\n' "$_edges" | sed 's/^/EDGE /' >> "$FAKE_LOG"
+        [ -z "${FAKE_DEP_PASS:-}" ] || "$FAKE_DEP_PASS"
+        exit "$_rc" ;;
       list) printf '%s\n' "${FAKE_DEPS_JSON:-[]}" ;;
     esac ;;
   "bd close") printf 'CLOSE %s\n' "$*" >> "$FAKE_LOG" ;;
@@ -810,6 +837,11 @@ unset FAKE_AGENT_GONE FAKE_DEPS_JSON
 #               with the target already closed, finds nothing to close there,
 #               and once the exit completes it reads the subject owed with no
 #               live-work mark
+#   (UNTMULTI)  two targets, one closed and one open, land in one write, so the
+#               pass run right after it reads the subject waiting, never owed
+#               on the closed target's edge alone
+#   (UNTRETRY)  a write bd refuses lands no edge of the set, so the pass has
+#               nothing to close, and the re-run writes the whole set
 #   (UNTEDGE)   an edge that does not read back as until fails the exit after
 #               the release, before the landed proof; a re-run over a landed
 #               edge succeeds
@@ -819,7 +851,7 @@ unset FAKE_AGENT_GONE FAKE_DEPS_JSON
 #
 # until_row prints the subject as the fake store holds it, as `bd list --json`
 # lists it: the fixture with each metadata value written to it, and each edge
-# the exit wrote, an until add or a --waiting-on blocks edge. until_reader
+# that landed, an until edge or a --waiting-on blocks edge. until_reader
 # answers until-resolved.sh's two reads with that row and UNTIL_STATUSES, so
 # scan_subject is the pass's own selection and decision over it. The suite
 # sources them, and so does the pass the helm stub runs inside a release, which
@@ -830,7 +862,7 @@ until_row() {
   local meta edges
   meta=$(grep '^UPDATE bd update tk-sub ' "$FAKE_LOG" | grep -o -- '--set-metadata [^ ]*' | sed 's/^--set-metadata //' \
     | jq -Rn '[inputs | capture("^(?<k>[^=]+)=(?<v>.*)$") | {(.k): .v}] | add // {}')
-  edges=$({ grep -o 'DEP bd dep add tk-sub [^ ]* --type=until' "$FAKE_LOG" | awk '{print $6 "\tuntil"}'
+  edges=$({ awk '$1 == "EDGE" && $2 == "tk-sub" && $4 == "until" { print $3 "\tuntil" }' "$FAKE_LOG"
             grep '^HELM takeaway tk-sub ' "$FAKE_LOG" | grep -o -- '--waiting-on [^ ]*' | awk '{print $2 "\tblocks"}'; } \
     | jq -Rn '[inputs | split("\t") | {depends_on_id: .[0], type: .[1]}]')
   printf '%s' "$FAKE_SHOW_JSON" | jq -c --argjson m "$meta" --argjson e "$edges" \
@@ -862,7 +894,7 @@ export FAKE_SHOW_JSON="$UNTIL_SUBJECT" FAKE_DEPS_JSON='[{"id":"tk-retire","depen
 run tk-sub --disposition until --reason "the file it reports on is retired whole by tk-retire" \
     --takeaway "closes once tk-retire retires its code" --until tk-retire --reaction-bead "$R"
 eq "$RC" "0" "(UNT) an until disposition succeeds"
-has "DEP bd dep add tk-sub tk-retire --type=until" "$LOG" "(UNT) the until edge is written onto the bead whose landing ends the job"
+has 'DEPFILE {"from":"tk-sub","to":"tk-retire","type":"until"}' "$LOG" "(UNT) the until edge is written onto the bead whose landing ends the job"
 has "DEP bd dep list tk-sub --direction=down -t until --json" "$LOG" "(UNT) …and read back by its type"
 has "HELM takeaway tk-sub closes once tk-retire retires its code --by proactive --release --no-wait" "$LOG" \
     "(UNT) the release says nothing holds the subject"
@@ -870,9 +902,9 @@ has "gc.reacted_by=$R" "$LOG" "(UNT) the landed proof is stamped"
 has "UPDATE bd update $R --set-metadata gc.outcome=reacted --set-metadata gc.work_outcome=no-op --status=closed" "$LOG" \
     "(UNT) …and the reaction bead is closed"
 has "disposed as until (tk-retire)" "$OUT" "(UNT) …and the run reports the bead it waits for"
-before '^HELM takeaway' '^DEP bd dep add tk-sub tk-retire --type=until' "(UNTORDER) the release lands before the edge is written"
+before '^HELM takeaway' '^DEP bd dep add --file -' "(UNTORDER) the release lands before the edge is written"
 before '^DEP bd dep list' 'gc.reacted_by' "(UNTORDER) …and the landed proof follows the edge's read-back"
-AFTER_EDGE=$(sed -n '/^DEP bd dep add tk-sub/,$p' "$FAKE_LOG")
+AFTER_EDGE=$(sed -n '/^DEP bd dep add --file -/,$p' "$FAKE_LOG")
 hasnt "HELM" "$AFTER_EDGE" "(UNTORDER) nothing after the edge releases the subject"
 eq "$(printf '%s\n' "$AFTER_EDGE" | awk '/^UPDATE bd update tk-sub / && /--status|--assignee/')" "" \
     "(UNTORDER) …or writes its status or assignee"
@@ -904,12 +936,55 @@ before '^HELM release reads tk-sub' '^UNTILPASS' "(UNTRACE) the pass runs after 
 before '^UNTILPASS' '^HELM release writes tk-sub' "(UNTRACE) …and before the release writes it"
 has "UNTILPASS leaves tk-sub" "$LOG" "(UNTRACE) …and finds nothing to close there"
 hasnt "UNTILPASS closes tk-sub" "$LOG" "(UNTRACE) …so the release's write undoes no close"
-before '^HELM release writes tk-sub' '^DEP bd dep add tk-sub tk-retire --type=until' \
+before '^HELM release writes tk-sub' '^DEP bd dep add --file -' \
     "(UNTRACE) …because the edge that selects the subject is written after the release's write"
 UNTIL_SCAN=$(scan_subject)
 eq "$(printf '%s' "$UNTIL_SCAN" | cut -f2)" "owed" "(UNTRACE) once the exit completes, the pass reads the subject owed its close"
 eq "$(printf '%s' "$UNTIL_SCAN" | cut -f8)" "-" "(UNTRACE) …with no live-work mark, so the pass closes it"
 unset FAKE_UNTIL_PASS
+
+# Two targets, tk-a closed and tk-b open, and the pass runs right after each
+# edge write over the subject as the store holds it then. Both edges land in
+# the one write, so the pass never reads the subject with the edge onto tk-a
+# alone, which it would read as owed its close while tk-b is still open.
+export FAKE_DEP_PASS="$TMP/until-pass" \
+    FAKE_DEPS_JSON='[{"id":"tk-a","dependency_type":"until"},{"id":"tk-b","dependency_type":"until"}]' \
+    UNTIL_STATUSES='[{"id":"tk-a","status":"closed","closed_at":"2026-10-27T00:00:00Z"},{"id":"tk-b","status":"open","closed_at":null}]'
+run tk-sub --disposition until --reason "r" --takeaway "t" --until tk-a --until tk-b --reaction-bead "$R"
+eq "$RC" "0" "(UNTMULTI) an until disposition onto two beads succeeds"
+eq "$(grep -c '^DEP bd dep add' "$FAKE_LOG")" "1" "(UNTMULTI) …writing its edges in one add"
+has 'DEPFILE {"from":"tk-sub","to":"tk-a","type":"until"}' "$LOG" "(UNTMULTI) …which carries the edge onto tk-a"
+has 'DEPFILE {"from":"tk-sub","to":"tk-b","type":"until"}' "$LOG" "(UNTMULTI) …and the edge onto tk-b"
+has "UNTILPASS leaves tk-sub" "$LOG" "(UNTMULTI) the pass run right after the write leaves the subject"
+hasnt "UNTILPASS closes tk-sub" "$LOG" "(UNTMULTI) …and does not close it while tk-b is open"
+eq "$(scan_subject | cut -f2,7)" "$(printf 'waiting\ttk-b')" "(UNTMULTI) once the exit completes, the pass reads the subject waiting on tk-b"
+# Control: with the edge onto tk-a written alone, the pass reads the subject
+# owed its close, the close an edge-at-a-time write would let it make.
+UNTIL_FULL_LOG="$FAKE_LOG"; FAKE_LOG="$TMP/until-one-edge.log"
+{ grep -v '^EDGE ' "$UNTIL_FULL_LOG"; printf 'EDGE tk-sub tk-a until\n'; } > "$FAKE_LOG"
+eq "$(scan_subject | cut -f2)" "owed" "(UNTMULTI) control: with only the edge onto tk-a written, the pass reads the subject owed"
+FAKE_LOG="$UNTIL_FULL_LOG"
+
+# A retry after a write bd refused. The subject's blocks edge onto tk-b refuses
+# its until edge, and the one write then lands neither edge, so the pass run
+# right after it has no until edge to select the subject by. Once that blocks
+# edge is gone, the re-run writes both.
+export FAKE_DEP_REFUSES=tk-b FAKE_DEPS_JSON='[{"id":"tk-b","dependency_type":"blocks"}]'
+run tk-sub --disposition until --reason "r" --takeaway "t" --until tk-a --until tk-b --reaction-bead "$R"
+eq "$RC" "4" "(UNTRETRY) a write bd refuses fails the exit"
+has "no until edge onto tk-a tk-b reads back" "$ERR" "(UNTRETRY) …and no edge of the set reads back"
+hasnt "EDGE tk-sub" "$LOG" "(UNTRETRY) …since the refused write landed neither edge"
+has "UNTILPASS leaves tk-sub" "$LOG" "(UNTRETRY) …so the pass run right after it leaves the subject"
+eq "$(scan_subject)" "" "(UNTRETRY) …and selects nothing, the subject having no until edge"
+hasnt "gc.reacted_by" "$LOG" "(UNTRETRY) …with no landed proof"
+unset FAKE_DEP_REFUSES
+export FAKE_DEPS_JSON='[{"id":"tk-a","dependency_type":"until"},{"id":"tk-b","dependency_type":"until"}]'
+run tk-sub --disposition until --reason "r" --takeaway "t" --until tk-a --until tk-b --reaction-bead "$R"
+eq "$RC" "0" "(UNTRETRY) the re-run succeeds"
+hasnt "UNTILPASS closes tk-sub" "$LOG" "(UNTRETRY) …the pass run right after its write leaving the subject open"
+eq "$(scan_subject | cut -f2,7)" "$(printf 'waiting\ttk-b')" "(UNTRETRY) …and waiting on tk-b, with both edges written"
+has "gc.reacted_by=$R" "$LOG" "(UNTRETRY) …and the landed proof stamped"
+unset FAKE_DEP_PASS
 
 # Control: the blocked exit onto the same bead leaves a blocks edge, and holds
 # the parentless subject for placement. The pass selects only a bead with an
@@ -928,7 +1003,7 @@ run tk-sub --disposition until --reason "r" --takeaway "t" --until tk-retire --r
 eq "$RC" "4" "(UNTEDGE) a target that reads back only as a blocks edge fails the exit"
 has "no until edge onto tk-retire reads back" "$ERR" "(UNTEDGE) …naming the edge that is missing"
 has "gc bd dep remove tk-sub" "$ERR" "(UNTEDGE) …and the blocks edge to remove first"
-before '^HELM takeaway' '^DEP bd dep add tk-sub' "(UNTEDGE) …after the release"
+before '^HELM takeaway' '^DEP bd dep add --file -' "(UNTEDGE) …after the release"
 has "The headline and the release stand" "$ERR" "(UNTEDGE) …which the failure says stands"
 hasnt "gc.reacted_by" "$LOG" "(UNTEDGE) …with no landed proof"
 hasnt "UPDATE bd update $R" "$LOG" "(UNTEDGE) …and the reaction bead left open"
