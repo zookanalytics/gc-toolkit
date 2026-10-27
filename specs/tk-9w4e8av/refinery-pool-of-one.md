@@ -224,8 +224,8 @@ claims (`releasePolicies`, `work_release.go:92-99`).
 Each of these releases routes the bead the way path 1 describes for the
 retirement. It keeps a route the bead carries. When the bead carries no route,
 the release gives it back on the `gc.run_target` the bead carries. When the bead
-carries none either, the release stamps the session's template there, and every
-release takes that template as its fallback (`releaseSeatOfBead` and
+carries none either, the release stamps the session's template there, and each
+of these releases takes that template as its fallback (`releaseSeatOfBead` and
 `releaseSeatOfInfo`, `work_release.go:122-145`). The refinery's template is its
 qualified name, and on 2026-10-27 `gc session list` reports it as
 `<rig>/gc-toolkit.refinery`. Route recovery then copies the target into
@@ -237,10 +237,11 @@ an archived target is given to the pool the target names. Step 1's write
 protects only the handoffs it lists. One change therefore lands on main ahead of
 cutover, as tk-e1dbjsf (section 11). With it, every writer that assigns a
 handoff to the refinery by name leaves the bead with no route and no
-`gc.run_target`. A molecule runs the text frozen into its steps at pour time, so
-cutover waits until no run without that change can still hand off (section 12,
-step 1). From then on every old-style handoff has that shape, whether it is
-written before the retirement or after it.
+`gc.run_target`. A molecule runs the text frozen into its steps at pour time,
+and the mechanik runs the integration recipe its session read when it started.
+So cutover waits until no run and no mechanik session without that change can
+still hand off (section 12, step 1). From then on every old-style handoff has
+that shape, whether it is written before the retirement or after it.
 
 ## 2. Claiming and releasing a handoff
 
@@ -502,8 +503,8 @@ poured, adopted or burned.
 ### The claim routes what it takes
 
 A claim from tier 3 already carries the refinery's route. A claim from tier 2
-does not. The old submit text cleared `gc.routed_to`, and a keeper handoff keeps
-whatever route the bead had. Released as it stands, an old-style handoff would be
+does not. An old-style handoff carries no route once tk-e1dbjsf's change is
+live (section 1). Released as it stands, an old-style handoff would be
 open and unassigned with no route to the refinery. Tier 2 would no longer return
 it, tier 3 never did, and the alarm would not count it. A wait would leave it in
 the same shape once its blocker closed. Nothing gives such a bead the refinery's
@@ -518,7 +519,8 @@ gascity's `reopen-source`, which the witness's source arm runs, writes a carried
 `gc.run_target` over the route (`cmd_convoy_dispatch.go:2548-2570`). Before the
 route is right, gascity's drain-ack, retirement, close-cascade and
 stranded-repair releases route an unrouted bead by it (`releaseRoute`). An
-old-style handoff can carry one that names the polecat pool (section 1).
+old-style handoff written without tk-e1dbjsf's change can carry one that names
+the polecat pool (section 1).
 
 So `refinery-claim.sh` settles the claimed bead's route next, before it does
 anything else to the bead. Unless the bead already carries
@@ -1339,7 +1341,10 @@ repo.
    `mol-upstream-gc-rebase.notify-and-handoff` or `mol-design-convoy.dispatch`
    may have a description without `gc.run_target`. A step bead's description is
    the text its run executes, frozen at the pour, and the change adds the unset
-   to each of these steps. Graduate only once none is left.
+   to each of these steps. The mechanik's integration recipe is prompt text
+   instead, which a session reads when it starts. So also confirm that the
+   mechanik's session started after the change reached the city's checkout of
+   this pack. Graduate only once both hold.
 
    Then run the old-style query on each rig: open beads assigned to
    `<rig>/gc-toolkit.refinery` whose route is not `<rig>/gc-toolkit.refinery`.
@@ -1394,14 +1399,16 @@ repo.
   rather than the pack's hold. The custom query costs one script and, until
   gascity gc-9h08f6, the backstop for offers under a parked epic.
 - **Fence the late submits, or repair the releases after graduation.** `gc agent
-  suspend` stops the reconciler from starting a pool's sessions, but it leaves
-  running ones running. So a run already at its submit still hands off, and a
-  run held until after the retirement meets the releases of path 2 instead
-  (section 1). A repair after the retirement races route recovery, whose delta
-  pass restores a released bead's carried target as its route on the next
-  controller tick (`route_recovery_lane.go:28-31`). From then on the pool the
-  target names can claim the bead. Leaving no target on a handoff where it is
-  written closes both windows, and needs no hand step to beat the controller.
+  suspend` stops the reconciler from starting a pool's sessions, but a session
+  that holds work keeps running until it gives the work up
+  (`reconcile_arms_drain.go:423-424`). So a run already at its submit still
+  hands off, and a run held until after the retirement meets the releases of
+  path 2 instead (section 1). A repair after the retirement races route
+  recovery, whose delta pass restores a released bead's carried target as its
+  route on the next controller tick (`route_recovery_lane.go:28-31`). From then
+  on the pool the target names can claim the bead. Leaving no target on a
+  handoff where it is written closes both windows, and needs no hand step to
+  beat the controller.
 - **Let a park hold handoffs.** This keeps gascity's default queries and needs
   nothing custom. It is not chosen, because it reverses steer-by-epic's approved
   rule that a park leaves in-flight work running: a branch already built would
