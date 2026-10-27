@@ -702,15 +702,18 @@ func needsReviews(p pendingAnchor) bool {
 
 // needsWaitingEdges reports the kinds whose `blocks` waits the derivation reads.
 // The readers that spend them: board.ruled, the merge row's PR axes and
-// Accept's conditions (decision, human, parked, merge), and the
-// dependency-family grouping, which
+// Accept's conditions (decision, human, parked, merge), the row's own
+// waiting_on, which names the human gate a review or rework child waits on
+// beside its anchor (a shared bring-current gate), and the dependency-family
+// grouping, which
 // climbs a tile to the anchor it blocks — so epic and convoy anchors collect
 // their `blocks` edges to join a blocked epic or convoy to the family it hangs
 // off. A convoy's edges come from the same outbound read that
-// already fetches its `tracks` members; an epic's are added to that read here.
+// already fetches its `tracks` members; an epic's, a review's and a rework's
+// are added to that read here.
 func needsWaitingEdges(kind string) bool {
 	switch kind {
-	case "decision", "human", "parked", "merge", "epic", "convoy":
+	case "decision", "human", "parked", "merge", "epic", "convoy", "review", "rework":
 		return true
 	}
 	return false
@@ -838,9 +841,10 @@ func (s *BeadsSource) attachEdges(ctx context.Context, g *gatherState, st beadSt
 		// The `blocks` waits come from the SAME outbound read a convoy already
 		// spends on its `tracks`, so a convoy gathers both from one read; an epic
 		// joins that read via needsWaitingEdges. They feed the family grouping for
-		// epic and convoy, and board.ruled, the PR axes and Accept's conditions
-		// for the rest. A recommendation's bead is a parked row, so its listing,
-		// closed gates and their answers included, is read here.
+		// epic and convoy, a review or rework row's waiting_on, and board.ruled,
+		// the PR axes and Accept's conditions for the rest. A recommendation's
+		// bead is a parked row, so its listing, closed gates and their answers
+		// included, is read here.
 		if needsWaitingEdges(p.kind) {
 			if dependenciesOK {
 				p.anchor.Blockers, p.anchor.WaitingOn, p.anchor.WaitingOnClosed, p.anchor.WaitingUnknown =

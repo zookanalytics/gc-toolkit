@@ -870,6 +870,81 @@ func TestReviewReworkChildrenAreAdmittedAsTiles(t *testing.T) {
 	}
 }
 
+// TestReworkChildBehindASharedGateGathersTheGate is the shared-gate case read
+// from the store, where board.TestGateFoldsOntoEachBeadItBlocks hands the
+// derivation its waits by hand: an anchor and its rework child both wait on
+// the anchor's bring-current gate. The gather reads the child's own `blocks`
+// waits as it reads the anchor's, so the board lists the gate among what each
+// row waits on, and the child's row asks the gate's question.
+func TestReworkChildBehindASharedGateGathersTheGate(t *testing.T) {
+	const ask = "Bring the branch current over the conflict?"
+	waitsOnGate := func() *beads.IssueWithDependencyMetadata {
+		return withDepType(child("tk-gate", "open", testNow, ""), "blocks")
+	}
+	st := &fakeStore{
+		issues: map[string][]*beads.Issue{
+			"task": {
+				issue("tk-anc", "the PR", "task", 2, testNow, `{"merge_result":"pull_request","pr_number":"7"}`),
+				issue("tk-rwk", "Rework branch polecat/tk-anc", "task", 2, testNow, `{"task_kind":"rework","anchor_bead":"tk-anc"}`),
+			},
+			"gate": {gateBead("tk-gate", ask, "human", "bring-current", time.Time{}, "")},
+		},
+		depsDown: map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-anc": {waitsOnGate(), withDepType(child("tk-rwk", "open", testNow, ""), "blocks")},
+			"tk-rwk": {waitsOnGate()},
+		},
+		depsUp: map[string][]*beads.IssueWithDependencyMetadata{
+			"tk-gate": {
+				withDepType(child("tk-anc", "open", testNow, ""), "blocks"),
+				withDepType(child("tk-rwk", "open", testNow, ""), "blocks"),
+			},
+		},
+	}
+	src := newBeadsTestSource(t, cityWithRigs(t, map[string]string{"gc-toolkit": "tk"}),
+		map[string]*fakeStore{"gc-toolkit": st})
+	res, err := src.Gather(context.Background())
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if res.Partial {
+		t.Fatalf("unexpected partial: %v", res.PartialErrors)
+	}
+	rwk, ok := anchorsOfKind(res, "rework")["tk-rwk"]
+	if !ok {
+		t.Fatal("the rework child is not gathered as a rework row")
+	}
+	if !slices.Equal(rwk.WaitingOn, []string{"tk-gate"}) || len(rwk.Blockers) != 1 ||
+		rwk.Blockers[0].ID != "tk-gate" || rwk.Blockers[0].AwaitType != "human" || rwk.WaitingUnknown {
+		t.Errorf("the gather reads the rework child's own blocks waits: waiting_on=%v blockers=%+v unknown=%v",
+			rwk.WaitingOn, rwk.Blockers, rwk.WaitingUnknown)
+	}
+
+	b := board.BuildBoard(res.Anchors, testNow, res.Partial, res.PartialErrors, res.Facts)
+	row := func(id string) (board.Tile, bool) {
+		i := slices.IndexFunc(b.Tiles, func(tl board.Tile) bool { return tl.ID == id })
+		if i < 0 {
+			return board.Tile{}, false
+		}
+		return b.Tiles[i], true
+	}
+	for _, id := range []string{"tk-anc", "tk-rwk"} {
+		tl, ok := row(id)
+		if !ok {
+			t.Errorf("%s has no row", id)
+			continue
+		}
+		if !slices.Contains(tl.WaitingOnOpen, "tk-gate") {
+			t.Errorf("%s: the row lists the gate among what its bead waits on: waiting_on_open=%v", id, tl.WaitingOnOpen)
+		}
+	}
+	if tl, ok := row("tk-rwk"); ok && (tl.Needs != ask || !tl.Held || !tl.Owed) {
+		t.Errorf("the child's row is held and owed, asking the gate's question: needs=%q held=%v owed=%v", tl.Needs, tl.Held, tl.Owed)
+	}
+	if _, ok := row("tk-gate"); ok {
+		t.Error("a gate whose beads have rows takes no row of its own")
+	}
+}
+
 // withDesc stamps a description on an issue fixture — the one heavy TEXT column
 // this source reads (crossRigRefs scans an open anchor's prose).
 func withDesc(iss *beads.Issue, desc string) *beads.Issue {
