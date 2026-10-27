@@ -77,7 +77,7 @@ stateDiagram-v2
   retargeted --> [*]: human
 
   UN --> held: the converse hold — a sitting holds for an operator decision
-  held --> UN: the ruling landed
+  held --> UN: the ruling landed, or nothing holds it any more
 ```
 
 `handed_off` is the unanchored bead after the polecat's single handoff write
@@ -183,7 +183,7 @@ transition into a closed state writes none.
 | handed_off / pull_request → poured | `mol-refinery-patrol` (rejection), through `assets/scripts/rejection-repool.sh` | `rejection_reason` written and the assignee and `gc.routed_to` cleared, then a fresh `mol-polecat-work` pour dispatches the rebuild and stamps `gc.execution_routed_to` |
 | poured → handed_off | the pour's `mol-polecat-work` submit step | push verified on the remote |
 | unanchored → held | `skills/converse-hold`, a converse sitting's hold, via `lifecycle.sh`, only beside a human gate that blocks the bead | a sitting is waiting on an operator decision; state + route in one write |
-| held → unanchored | `assets/scripts/converse-signoff.sh`, a converse sitting's sign-off, via `lifecycle.sh`; or human | the ruling landed |
+| held → unanchored | `assets/scripts/converse-signoff.sh`, a converse sitting's sign-off; `gc-helm.sh accept`, before it dispatches the recommendation; `skills/converse-recheck-premise`, a moot or benign close; each via `lifecycle.sh`; or human | the ruling landed; Accept's answer read back; or the premise re-check found the conversation moot or benign, and no open human gate still holds the bead |
 
 A request-changes verdict does NOT transition the anchor: `signoff.sh` files one
 routed rework child that blocks the anchor, with the reviewer's findings and the

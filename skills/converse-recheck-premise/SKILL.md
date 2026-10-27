@@ -62,15 +62,44 @@ as its reason, and the PR reminder, where the engage left one, says so.
 Deliberately **no takeaway stamp**: it is the subject's headline of what it
 NEEDS, and one for a conversation that needs nobody spends the attention this
 exit saves.
+
+An earlier sitting on this conversation may have held and been cut short. Its
+hold moved an unanchored subject to `held`, and a cut-short sign-off leaves it
+there, so the close first reads the subject's state. A held subject that no
+open human gate still holds goes back to `unanchored`, routed to `human` as
+Accept routes its release. Its headline is replaced with the reading, because
+the hold's headline names a question that no longer stands. A held subject
+that another open human gate still holds stays held, since that gate's answer
+is still owed. Every write is read back, and the conversation closes only
+after them:
 ```bash
-gc bd update "$SUBJECT" --append-notes "<moot|benign> (conversation $CONVERSATION): <the premise, and what is true instead>" \
+KIND="<moot|benign>"; WHY="<the premise, and what is true instead>"
+STATE=$("$CONV/lifecycle.sh" state "$SUBJECT") \
+  && if [ "$STATE" != held ]; then echo "$SUBJECT reads $STATE, so nothing is released"; else
+       OPEN=$(gc bd dep list "$SUBJECT" --type blocks --json | jq -er 'if type == "array" then [ .[] | select(.issue_type == "gate" and .await_type == "human" and ((.status // "open") | ascii_downcase) != "closed") | .id ] | join(" ") else error("unread") end') \
+         && if [ -n "$OPEN" ]; then echo "$SUBJECT stays held: $OPEN still holds it"; else
+              "$CONV/gc-helm.sh" takeaway "$SUBJECT" "${KIND}: ${WHY}" --by converse --no-wait \
+                && "$CONV/lifecycle.sh" transition "$SUBJECT" --to unanchored --expect held --route human \
+                && [ "$("$CONV/lifecycle.sh" state "$SUBJECT")" = unanchored ] \
+                && echo "released $SUBJECT from held"
+            fi
+     fi \
+  && gc bd update "$SUBJECT" --append-notes "$KIND (conversation $CONVERSATION): $WHY" \
   && gc bd update "$CONVERSATION" --set-metadata gc.work_outcome=no-op \
-  && { gc bd close "$CONVERSATION" --reason "<moot|benign>: <the premise, and what is true instead>" \
-       || gc bd close "$CONVERSATION" --reason "<moot|benign>: <the premise, and what is true instead>" --force; } \
-  && { "$CONV/pr-sitting-comment.sh" close --sitting "$CONVERSATION" --subject "$SUBJECT" --outcome <moot|benign> --summary "<the premise, and what is true instead>" || true; }
+  && { gc bd close "$CONVERSATION" --reason "${KIND}: ${WHY}" \
+       || gc bd close "$CONVERSATION" --reason "${KIND}: ${WHY}" --force; } \
+  && { "$CONV/pr-sitting-comment.sh" close --sitting "$CONVERSATION" --subject "$SUBJECT" --outcome "$KIND" --summary "$WHY" || true; } \
+  && echo "closed $CONVERSATION as $KIND"
 ```
-Then go to step 8. **Post nothing** — no framing, no sign-off, not even "this
-turned out to be fine".
+When it prints its `closed` line, go to step 8. **Post nothing** — no framing,
+no sign-off, not even "this turned out to be fine".
+
+No `closed` line means the close stopped short: the subject's state or its
+gates did not read, or a write did not read back. The conversation stays open
+under this sitting, and a held subject whose questions are answered would
+otherwise wait on nothing a person can see. So say in the thread what the
+block printed, fix what it names, and re-run the block. The gates cleared
+above stay cleared, and each write in the block is safe to repeat.
 
 The exit is gated on being *named*: if you cannot point at the stamp
 or state that makes this benign, you hold the sitting.
