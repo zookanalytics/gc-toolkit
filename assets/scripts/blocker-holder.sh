@@ -34,6 +34,14 @@ _bh_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=run-lib.sh
 . "${GC_RUN_LIB:-$_bh_dir/run-lib.sh}" || { echo "$PROG: cannot source run-lib.sh beside this script" >&2; exit 2; }
 
+# >>> control-char-scrub
+# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
+# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
+# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
+# dropping a structural LF or TAB just minifies.
+scrub() { tr -d '\000-\037'; }
+# <<< control-char-scrub
+
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
 # The store both reads go to: the ambient one, as the merge pass's own reads.
