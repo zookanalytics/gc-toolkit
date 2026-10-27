@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# duplicate-sweep — arm 11 of the merge cadence; caller: refinery-reconcile.sh.
+# duplicate-sweep — arm 10 of the merge cadence; caller: refinery-reconcile.sh.
 # Closes the duplicates that are provably safe to close and leaves every other
 # bead exactly where it is. Two detections find them:
 #   - a `duplicate_of` marker. A polecat that diagnoses a duplicate dispatch

@@ -45,10 +45,12 @@ done
 # adds must be gone too, or the leak returns one release later. The deliberate
 # exceptions are the pins harness_init sets itself, after the sweep, rather than
 # inheriting them: GC_NO_API pins the gctk read seam onto the stubbed gc the same
-# way GCTK_BIN is pinned, and GC_QUEUE_PRIORITY_TOOL points the priority writer
-# a script under test reaches at a wrapper over the stub store. The sweep
-# excludes each by exact name, and the assertions below prove each pin took.
-resid="$(compgen -v | grep -E '^(GC_|BEADS_)' | grep -vxF -e GC_NO_API -e GC_QUEUE_PRIORITY_TOOL || true)"
+# way GCTK_BIN is pinned, GC_QUEUE_PRIORITY_TOOL points the priority writer a
+# script under test reaches at a wrapper over the stub store, and GC_RUN_LIB
+# points a script that sources run-lib.sh at its stub, which answers from the
+# stub store. The sweep excludes each by exact name, and the assertions below
+# prove each pin took.
+resid="$(compgen -v | grep -E '^(GC_|BEADS_)' | grep -vxF -e GC_NO_API -e GC_QUEUE_PRIORITY_TOOL -e GC_RUN_LIB || true)"
 if [ -z "$resid" ]; then ok "no GC_/BEADS_ variable survives harness_init"; else bad "residual city vars: $resid"; fi
 eq "${GC_NO_API:-}" "1" "harness_init pins GC_NO_API=1 so a gctk read hits the stub, not the live daemon"
 # The writer finds a bead's store in the rig list, which the stub does not
@@ -63,6 +65,22 @@ store '[{"id":"tk-qp","status":"open","assignee":"","title":"q","notes":"","issu
 eq "$("$GC_QUEUE_PRIORITY_TOOL" settle tk-qp --print 2>/dev/null)" "3" \
    "…whose writer computes a bead's priority from the stub store"
 store '[]'; : > "$STUB_GC_LOG"
+
+# run-lib.sh's verbs answer from the stub store: a root over an input convoy
+# that tracks one bead in the dep rows is that bead's run, read at each call.
+eq "${GC_RUN_LIB:-}" "$HERE/run-lib.stub.sh" "harness_init points GC_RUN_LIB at run-lib.sh's stub"
+store '[{"id":"tk-w","status":"open","issue_type":"task","metadata":{}},
+        {"id":"tk-cv","status":"open","issue_type":"convoy","metadata":{}},
+        {"id":"tk-r","status":"in_progress","issue_type":"task","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cv","gc.formula_name":"mol-x"}}]'
+printf 'tk-cv|tracks|tk-w\n' > "$STUB_DEPS"
+harness_rd() { gc bd "$@"; }
+# shellcheck source=run-lib.stub.sh
+eq "$( . "$GC_RUN_LIB" && run_lib runs harness_rd tk-w | jq -c 'map([.root, .convoy, .formula, .live])')" '[["tk-r","tk-cv","mol-x",true]]' \
+   "…whose runs are the store's roots over the convoys its dep rows say track a bead"
+store '[{"id":"tk-w","status":"open","issue_type":"task","metadata":{}}]'
+# shellcheck source=run-lib.stub.sh
+eq "$( . "$GC_RUN_LIB" && run_lib runs harness_rd tk-w)" '[]' "…read again at each call, so a store that changes answers anew"
+store '[]'; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"
 
 # GCTK_* is out of that sweep: the pre-init build path is not collateral — a
 # blanket GC* unset would have taken GCTK_BUILT with it — and GCTK_BIN is pinned

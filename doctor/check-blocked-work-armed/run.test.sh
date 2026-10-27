@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Hermetic test for doctor/check-blocked-work-armed. Stub gc/bd only; no live
-# city, Dolt, or network. Covers: the finding (blocked plainly-work bead with
-# neither route nor arm, including one carrying only gc.execution_routed_to —
-# provenance, not a dispatch path — and one whose route or arm holds only
-# whitespace), every exemption (routed, armed, assigned,
-# merge anchor, waiting for placement, review/step/workflow/demand metadata,
-# every standing kind, decision/epic/infra types), a marked bead placed under an
-# epic, the per-rig labelling, the remedy string, the fail-closed probes
-# (unreadable blocked listing, unreadable marked listing, a marked listing that
+# Hermetic test for doctor/check-blocked-work-armed. Stubs gc/bd and
+# run-lib.sh's verbs only; no live city, Dolt, or network. Covers: the finding
+# (blocked plainly-work bead with neither route nor arm, including one carrying
+# only gc.execution_routed_to — provenance, not a dispatch path — and one whose
+# route or arm holds only whitespace), every exemption (routed, armed, assigned,
+# worked by a live run, merge anchor, waiting for placement,
+# review/step/workflow/demand metadata, every standing kind,
+# decision/epic/infra types), a marked bead placed under an epic, the per-rig
+# labelling, the remedy string, the fail-closed probes (unreadable blocked
+# listing, unreadable runs, unreadable marked listing, a marked listing that
 # fails after printing its rows, unreadable rig list), a raw control byte in a
 # listing's row, and the quiet paths (empty store, all-armed store).
 set -uo pipefail
@@ -43,10 +44,6 @@ name=$(basename "$(dirname "$db")")
 case "$sub" in
   blocked) [ "$name" = "${BD_FAIL_BLOCKED:-}" ] && exit 3
            f="$STORES/$name.blocked.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
-  # The liveness step: `list --status open,in_progress` is the alive set the
-  # candidate's molecule root is named in; `show <convoy>` renders the tracks
-  # edge. Both read per-rig fixtures; a missing show fixture answers bd's
-  # not-found OBJECT (not an array), which the check reads as liveness-unverified.
   # `list --metadata-field placement=pending` is the placement step's read of the
   # marked beads, in the shape `bd list` prints (a parent included); each one is
   # logged so a case can tell whether the check made it. BD_PARTIAL_MARKED names
@@ -57,15 +54,22 @@ case "$sub" in
             [ "$name" = "${BD_FAIL_MARKED:-}" ] && exit 3
             f="$STORES/$name.marked.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi
             if [ "$name" = "${BD_PARTIAL_MARKED:-}" ]; then exit 3; fi ;;
-          *) f="$STORES/$name.alive.json"; if [ -f "$f" ]; then cat "$f"; else printf '[]'; fi ;;
+          *) echo "stub bd: unexpected list: $*" >&2; exit 2 ;;
         esac ;;
-  show) sid="$2"; f="$STORES/$name.show.$sid.json"
-        if [ -f "$f" ]; then cat "$f"; else printf '{"error":"no issues found matching the provided IDs"}'; fi ;;
   *) printf '[]'; exit 0 ;;
 esac
 BD
 chmod +x "$TMP/bin/gc" "$TMP/bin/bd"
+# The liveness step asks run-lib.sh's map, which run-lib.stub.sh answers from
+# the runs the fixture stores' roots and convoys make, by run-lib.sh's own
+# run_rows. The ids are distinct across the stores, so one set of runs answers
+# for every rig. RUN_LIB_STUB_FAIL fails the read, as an unreadable store does.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf '. %q || exit 1\n' "$HERE/../../assets/scripts/run-lib.sh"; cat; } > "$TMP/bin/fixture-runs" <<'RUNS'
+cat "$STORES"/*.alive.json "$STORES"/*.show.*.json 2>/dev/null | jq -cs "$RUN_JQ"'add // [] | run_rows'
+RUNS
+chmod +x "$TMP/bin/fixture-runs"
 export PATH="$TMP/bin:$PATH" STORES="$TMP/stores"
+export GC_RUN_LIB="$HERE/../../assets/scripts/run-lib.stub.sh" RUN_LIB_STUB_CMD="$TMP/bin/fixture-runs" RUN_LIB_STUB_FAIL=""
 
 run_check() {
     RIGS_JSON="${RIGS_JSON:-$TMP/rigs.json}" GC_PACK_DIR="$TMP/pack" bash "$CHECK" 2>&1
@@ -84,12 +88,12 @@ barmed()  { printf '{"id":"%s","status":"open","assignee":"","issue_type":"task"
 bassigned() { printf '{"id":"%s","status":"open","assignee":"someone/else","issue_type":"task","blocked_by":["x-0"],"metadata":{}}' "$1"; }
 bmeta()   { printf '{"id":"%s","status":"open","assignee":"","issue_type":"task","blocked_by":["x-0"],"metadata":{"%s":"%s"}}' "$1" "$2" "$3"; }
 btyped()  { printf '{"id":"%s","status":"open","assignee":"","issue_type":"%s","blocked_by":["x-0"],"metadata":{}}' "$1" "$2"; }
-# Liveness fixtures. A not-closed workflow root names its input convoy (the LIVE
-# NAMER); the convoy renders a tracks edge to the work bead. Present both and the
-# work bead reads as in-flight; omit the convoy show and liveness is unverified.
+# Liveness fixtures, the rows the runs come from. A live workflow root names its
+# input convoy, and the convoy tracks the work bead: present both and a live run
+# works the bead, so it reads as in-flight.
 alive_store() { local n="$1"; shift; local IFS=,; printf '[%s]' "$*" > "$TMP/stores/$n.alive.json"; }
 broot()       { printf '{"id":"%s","status":"in_progress","assignee":"","issue_type":"task","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"%s"}}' "$1" "$2"; }
-convoy_tracks() { printf '[{"id":"%s","dependencies":[{"dependency_type":"tracks","id":"%s"}]}]' "$1" "$2" > "$TMP/stores/$3.show.$1.json"; }
+convoy_tracks() { printf '[{"id":"%s","issue_type":"convoy","dependencies":[{"dependency_type":"tracks","id":"%s"}]}]' "$1" "$2" > "$TMP/stores/$3.show.$1.json"; }
 
 # --- 1. the finding: blocked plainly-work bead with no route and no arm ------
 blocked_store alpha "$(bwork a-1)"
@@ -125,18 +129,25 @@ has "$OUT" "OK:" "the store with only an in-flight bead reads clean"
 hasnt "$OUT" "alpha bead a-1" "the in-flight bead is not named as a finding"
 clear_stores
 
-# When the molecule liveness cannot be confirmed — the alive listing names a
-# convoy the store will not render — an exec-routed candidate is reported as
-# unverifiable and NOT flagged, so an unreadable molecule never becomes an
-# arm-it-now that double-dispatches. (No convoy_tracks fixture: show answers a
-# not-found object, not an array.)
+# When the runs cannot be read, whether a live run works an exec-routed
+# candidate is unconfirmed, so it is reported as unverifiable and NOT flagged:
+# an unreadable run never becomes an arm-it-now that double-dispatches.
 blocked_store alpha "$(bexec a-1)"
 alive_store  alpha "$(broot root-1 convoy-1)"
-OUT=$(run_check); RC=$?
+convoy_tracks convoy-1 a-1 alpha
+OUT=$(RUN_LIB_STUB_FAIL=map run_check); RC=$?
 eq "$RC" "1" "an unconfirmable exec-routed bead makes the pass report (exit 1)"
-has "$OUT" "liveness could not be confirmed" "it says liveness was unverifiable"
+has "$OUT" "whether a live run works it could not be confirmed" "it says the run could not be confirmed"
 has "$OUT" "NOT flagged" "and that it withheld the flag rather than risk a double dispatch"
 hasnt "$OUT" "no dispatch path" "it is a warning, not a stranded-work finding"
+clear_stores
+# A run that has finished works nothing: its exec-routed bead is stranded.
+blocked_store alpha "$(bexec a-1)"
+alive_store  alpha "$(broot root-1 convoy-1 | jq -c '.status = "closed"')"
+convoy_tracks convoy-1 a-1 alpha
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "an exec-routed bead whose run has finished is flagged (stranded)"
+has "$OUT" "alpha bead a-1" "…as a finding"
 clear_stores
 
 # A bead with no exec stamp is hand-filed work, not a molecule bead: liveness is
@@ -244,28 +255,14 @@ clear_stores
 # --- a raw control byte in one row does not void its listing -----------------
 # Each listing is scrubbed before jq first reads it, its type check included, so
 # one bead whose title carries a raw control byte leaves the rest judged: the
-# store is checked, liveness is confirmed, and a marked candidate's placement is
-# read.
+# store is checked, and a marked candidate's placement is read. The runs are
+# run-lib.sh's reads, which run-lib.test.sh scrubs.
 CTL_ROW=$(printf '{"id":"a-9","status":"open","assignee":"someone/else","issue_type":"task","title":"bell\001here","metadata":{"placement":"pending"}}')
 blocked_store alpha "$(bwork a-1)" "$CTL_ROW"
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a blocked listing with a raw control byte in a title is still judged (exit 1)"
 has "$OUT" "deferred-dispatch.sh arm a-1" "…its stranded bead is flagged"
 hasnt "$OUT" "NOT checked" "…rather than the store reported unchecked"
-clear_stores
-blocked_store alpha "$(bexec a-1)"
-alive_store  alpha "$(broot root-1 convoy-1)" "$CTL_ROW"
-convoy_tracks convoy-1 a-1 alpha
-OUT=$(run_check); RC=$?
-eq "$RC" "0" "an alive listing with a raw control byte in a title still confirms liveness"
-hasnt "$OUT" "liveness could not be confirmed" "…so the in-flight bead is not warned as unverifiable"
-clear_stores
-blocked_store alpha "$(bexec a-1)"
-alive_store  alpha "$(broot root-1 convoy-1)"
-printf '[{"id":"convoy-1","title":"bell\001here","dependencies":[{"dependency_type":"tracks","id":"a-1"}]}]' > "$TMP/stores/alpha.show.convoy-1.json"
-OUT=$(run_check); RC=$?
-eq "$RC" "0" "a convoy whose title carries a raw control byte still confirms liveness"
-hasnt "$OUT" "liveness could not be confirmed" "…so the bead it tracks is not warned as unverifiable"
 clear_stores
 blocked_store alpha "$(bmeta a-1 placement pending)"
 marked_store  alpha "$(bmarked a-1)" "$CTL_ROW"

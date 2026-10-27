@@ -228,7 +228,6 @@ bd 1.3.2.
 | Pack machinery | Gas City's primitive | Carried by |
 |---|---|---|
 | `worktree-reap.sh`, `worktree-setup.sh` | the controller's closed-bead worktree reaper, `gc worktree` | tk-1tfzr71.10 |
-| `orders/convoy-check.toml` | core's convoy-autoclose-backstop, the same `gc convoy check` | tk-tggczbp |
 | `step-close.sh` | `gc hook current` | tk-1tfzr71.12 |
 | `duplicate-sweep.sh` and the successor keys | `bd duplicate`, `bd supersede` | tk-1tfzr71.13 |
 | hand-stamped routes and the sweeps that repair them | `gc sling --no-formula`, assignment | tk-1tfzr71.15 |
@@ -306,7 +305,6 @@ shows its measured net instead.
 
 | Bead | What it removes | Size | Waits on |
 |---|---|---|---|
-| tk-tggczbp, the one-bead PR model | graduation, the convoy seed, the convoy-check order | −268 net on its branch, which adds a run reader | its approved PR brought current with main (tk-smufsr2) |
 | tk-iirrmiw, the native-gates convoy | visits and their plumbing, onto native human gates | −2,326 net across its branches so far | review of unit C (tk-5u2xpan) |
 | tk-o6pd01i, the cutover (unit D) | `gate-visit-sweep`, `visit-identity.sh`, the gate pass of `notification-wisp-reap`; it adds a migration that its follow-up deletes | 597 | unit C landing |
 

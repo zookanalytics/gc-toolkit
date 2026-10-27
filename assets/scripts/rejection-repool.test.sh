@@ -114,7 +114,7 @@ eq "$(visits)" "0" "a proved pour files no visit"
 eq "$(wc -l < "$TMP/stdout" | tr -d ' ')" "1" "stdout is one line"
 eq "$(jq -r '.[0].id' "$TMP/stdout" 2>/dev/null)" "tk-w" "stdout is the bead's row"
 eq "$(stdout_meta rejection_reason)" "<absent>" "the row is the read before the release: no rejection_reason yet"
-eq "$(stdout_meta branch)" "polecat/tk-w" "the row carries the branch decision's inputs"
+eq "$(stdout_meta branch)" "polecat/tk-w" "the row carries the bead's metadata"
 
 echo "# a live PR goes with the rework"
 reset ',"pr_url":"https://github.com/o/r/pull/7"'
@@ -122,8 +122,8 @@ run tk-w --reason "$REASON"
 eq "$rc" 0 "a bead with a PR pours"
 eq "$(meta tk-w existing_pr)" "https://github.com/o/r/pull/7" "pr_url carried over as existing_pr"
 
-# A graduation's anchor is a convoy that tracks the members it landed
-# (convoy-graduate.sh). POUR models the input convoy Gas City's graph.v2 pour
+# A graduation's anchor is a convoy that tracks the members it landed.
+# POUR models the input convoy Gas City's graph.v2 pour
 # gives a run (NormalizeInputConvoy, internal/graphv2/invocation.go at
 # gastownhall/gascity 6e35bd5ea): a convoy target is its own input convoy, and
 # any other target gets a one-bead convoy, marked gc.synthetic, that tracks it.

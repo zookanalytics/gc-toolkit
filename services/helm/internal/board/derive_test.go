@@ -863,8 +863,8 @@ func TestUnownedConvoyIsHigh(t *testing.T) {
 	if !owncv.Complete || owncv.Severity != SevLow {
 		t.Errorf("an all-closed owned convoy is complete/LOW: got %s complete=%v", owncv.Severity, owncv.Complete)
 	}
-	if owncv.Needs != "all 1 closed — graduate" {
-		t.Errorf("a complete convoy graduates: got %q", owncv.Needs)
+	if owncv.Needs != "all 1 tracked closed" {
+		t.Errorf("a complete convoy reads that every tracked bead is closed: got %q", owncv.Needs)
 	}
 }
 

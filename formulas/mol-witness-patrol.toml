@@ -903,14 +903,16 @@ interval and a rebase task once the fix pool claims it, so their count is
 transient churn rather than a health signal, and a nudge asserting a count goes
 stale the moment the queue drains. What a human must see is one bead that has
 sat untouched far past that turnover, which the session is failing to advance.
-Escalate only that.
+Escalate only that. A bead something holds is waiting, not stuck: a landing bead
+sits in the queue from the moment its integration effort is stood up, and
+find-work leaves it until the effort's beads and its summary task close.
 ```bash
 # >>> refinery-stuck-escalate
 SCRIPTS=""
 for c in "${GC_RIG_ROOT:-}" "$(git rev-parse --show-toplevel 2>/dev/null)" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-  [ -x "$c/assets/scripts/escalate.sh" ] && [ -x "$c/assets/scripts/resolve-route.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
+  [ -x "$c/assets/scripts/escalate.sh" ] && [ -x "$c/assets/scripts/resolve-route.sh" ] && [ -f "$c/assets/scripts/hold-lib.sh" ] && { SCRIPTS="$c/assets/scripts"; break; }
 done
-: "${SCRIPTS:?escalate.sh and resolve-route.sh not found in the pack}"
+: "${SCRIPTS:?escalate.sh, resolve-route.sh and hold-lib.sh not found in the pack}"
 # The queue is whatever is assigned to the refinery's live identity, so the
 # address is resolved against the roster rather than assembled: bd lists an
 # address no agent holds as a valid empty array, which reads exactly like a
@@ -941,7 +943,29 @@ fi
 # carries one and belongs to the cadence, and is unassigned anyway) that has sat
 # past the bound. A listing that is not an array yields nothing (STUCK_N empty),
 # which the unreadable arm below catches and escalates.
-STUCK=$(printf '%s' "$QUEUE" | jq -c --argjson now "$NOW" --argjson max "$STUCK_SECS" 'if type == "array" then [ .[] | select((.metadata.merge_result // "") == "") | select($now - ((.updated_at | fromdateiso8601?) // $now) > $max) | {id, updated_at} ] else empty end' 2>/dev/null) || STUCK=""
+PAST=$(printf '%s' "$QUEUE" | jq -c --argjson now "$NOW" --argjson max "$STUCK_SECS" 'if type == "array" then [ .[] | select((.metadata.merge_result // "") == "") | select($now - ((.updated_at | fromdateiso8601?) // $now) > $max) ] else empty end' 2>/dev/null) || PAST=""
+# A bead something holds, by hold-lib.sh's definition, is waiting, not stuck,
+# so it files nothing. The rest are aged from the later of their last write and
+# the close that released their last hold: a landing bead whose summary task has
+# just closed was last written when its effort was stood up. A bead held only by
+# a blocker the store does not return stays: find-work never takes it, and
+# nothing releases it until that blocker reads back or the edge goes. A walk
+# that cannot read leaves STUCK_N empty under HOLD_RC.
+HOLD_RC=0
+STUCK="$PAST"
+cr_hold_read() { gc bd list --all --include-gates --include-infra --include-templates --id="$1" --json --limit=0; }
+if [ -n "$PAST" ] && [ "$PAST" != "[]" ]; then
+  JUDGED=""
+  if . "$SCRIPTS/hold-lib.sh"; then
+    JUDGED=$(printf '%s' "$PAST" | hold_annotate cr_hold_read) || JUDGED=""
+  fi
+  if [ -n "$JUDGED" ]; then
+    STUCK=$(printf '%s' "$JUDGED" | jq -c --argjson now "$NOW" --argjson max "$STUCK_SECS" '[ .[] | select(.hold.state != "held") | ([.updated_at, .hold.released_at] | map(fromdateiso8601? // empty) | max) as $since | select($now - $since > $max) | {id, since: ($since | todate), why: (if .hold.state == "unread" then .hold.why else "" end)} ]' 2>/dev/null) || STUCK=""
+  else
+    STUCK=""
+    HOLD_RC=1
+  fi
+fi
 STUCK_N=$(printf '%s' "$STUCK" | jq 'if type == "array" then length else empty end' 2>/dev/null) || STUCK_N=""
 case "${STUCK_N:-}" in
   ''|*[!0-9]*) STUCK_N="" ;;
@@ -953,6 +977,12 @@ if [ -z "$REFINERY" ]; then
   # an unreadable queue is escalated.
   echo "check-refinery: no live refinery identity resolves from '${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery'; read no queue and retracted nothing; escalating the blind monitor" >&2
   "$SCRIPTS/escalate.sh" --subject "${GC_BEAD_ID:-${GC_SESSION_ID:-refinery}}" --key witness-refinery-queue-unroutable --message "check-refinery cannot resolve the refinery address it builds for rig ${GC_RIG:-<unset>} to a live agent identity, so it read no queue. A listing at an address no agent holds returns an empty array that looks like a clean queue, so the stuck-handoff monitor is blind until the address resolves. Compare the binding_prefix this witness patrol was poured with against the refinery identity in gc agent list." || echo "check-refinery: refinery address unroutable AND escalation failed" >&2
+elif [ "$HOLD_RC" -ne 0 ]; then
+  # The queue read, but what holds the handoffs past the bound did not, so a
+  # handoff waiting on its blockers cannot be told from a stuck one. That is the
+  # blind monitor too, under the same key as an unreadable queue.
+  echo "check-refinery: could not read what holds the handoffs past the stuck bound; escalating the blind monitor" >&2
+  "$SCRIPTS/escalate.sh" --subject "${GC_BEAD_ID:-${GC_SESSION_ID:-refinery}}" --key witness-refinery-queue-unreadable --message "check-refinery read the refinery queue but not what holds the handoffs that have sat past the stuck bound (the hold-lib.sh walk over their blockers failed), so it cannot tell a handoff waiting on its blockers from a stuck one. The stuck-handoff monitor is blind until those reads answer. Inspect the store's health." || echo "check-refinery: hold walk unreadable AND escalation failed" >&2
 elif [ "$QUEUE_RC" -ne 0 ] || [ -z "$STUCK_N" ]; then
   # Genuinely unreadable: bd failed, or the listing is not a JSON array even
   # after the control-byte strip. A silent stderr log here was the defect this
@@ -966,8 +996,10 @@ elif [ "$QUEUE_RC" -ne 0 ] || [ -z "$STUCK_N" ]; then
 elif [ "$STUCK_N" -eq 0 ]; then
   echo "check-refinery: no stuck handoffs; the queue is churning normally" >&2
 else
-  printf '%s' "$STUCK" | jq -r '.[] | .id + " " + (.updated_at // "unknown")' | while read -r SID SWHEN; do
-    "$SCRIPTS/escalate.sh" --subject "$SID" --key witness-refinery-queue --message "Refinery handoff $SID has sat assigned to $REFINERY, unprepared, since $SWHEN, past the ${STUCK_SECS}s stuck bound while the session kept polling. It is not draining on its own; inspect the bead and the refinery session." || echo "check-refinery: escalate failed for $SID" >&2
+  printf '%s' "$STUCK" | jq -r '.[] | .id + " " + (.since // "unknown") + " " + (.why // "")' | while read -r SID SWHEN SWHY; do
+    SNOTE=""
+    [ -z "$SWHY" ] || SNOTE=" It waits on $SWHY, a blocker this store does not return, so find-work leaves it: restore that bead or remove the edge."
+    "$SCRIPTS/escalate.sh" --subject "$SID" --key witness-refinery-queue --message "Refinery handoff $SID has sat assigned to $REFINERY, unprepared, since $SWHEN, past the ${STUCK_SECS}s stuck bound while the session kept polling. It is not draining on its own; inspect the bead and the refinery session.$SNOTE" || echo "check-refinery: escalate failed for $SID" >&2
   done
 fi
 # A handoff that has left the refinery queue is no longer sitting unprepared, so
@@ -989,7 +1021,8 @@ fi
 # assigned to a refinery.
 #
 # The candidate pass runs only after a queue read that parsed as an array
-# ($STUCK_N set), at an address the roster verified (resolve-route.sh exit 0).
+# ($STUCK_N set, which a failed hold walk leaves empty too), at an address the
+# roster verified (resolve-route.sh exit 0).
 # A failed queue read leaves every visit as it is until a later cycle reads the
 # queue, and so does an unreadable roster (exit 3): the address is then the
 # rendered name echoed back unproven, and the role each candidate is compared
@@ -1040,9 +1073,12 @@ One escalate.sh call per stuck bead: escalate.sh narrows its dedup to a durable
 subject, so each stuck bead gets its own visit and a churning queue files none.
 A stuck bead reaches a human through a re-derived visit rather than a nudge whose
 count goes stale. A queue that will not parse even after the control-byte strip
-escalates once under its own key, so a blinded monitor is surfaced rather than
-silently trusted. A refinery address that resolves to no live agent is blind the
-same way and escalates once under a key of its own, without reading a queue.
+escalates once under its own key, and so does a queue whose holds cannot be
+read, so a blinded monitor is surfaced rather than silently trusted. A held bead
+files nothing, and a wait is aged from the close that released its last hold
+when that is later than its last write. A refinery address that resolves to no
+live agent is blind the same way and escalates once under a key of its own,
+without reading a queue.
 The counterpart retract closes the loop. A handoff an open visit escalates that
 a queue read at the refinery's verified address no longer carries is read by
 id, and the visit is retracted moot through escalate.sh --retract (guarded by

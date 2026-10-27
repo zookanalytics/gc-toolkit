@@ -6,9 +6,9 @@
 // SCOPE (services/gctk/README.md). gctk is where gc-toolkit's logic for acting
 // on a city belongs, and each command is built for the long-term shape of the
 // CLI. Logic gctk does not hold yet runs as shell scripts, among them the rest
-// of the merge cadence: gate-ensure, pr-open, pr-facts, convoy-graduate and
-// signoff. A dependency is taken or declined on its merits; keeping the binary
-// free of them is not a goal.
+// of the merge cadence: gate-ensure, pr-open, pr-facts and signoff. A
+// dependency is taken or declined on its merits; keeping the binary free of
+// them is not a goal.
 //
 // A shell script that only execs a gctk command is a bridge for callers that
 // do not call gctk yet, and it goes away once they do. A bridge is not a
