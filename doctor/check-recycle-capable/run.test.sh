@@ -119,6 +119,7 @@ run_check() {
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "the real overlay hook plus a clean rig tree is OK"
 has "$OUT" "measurement reads a transcript" "the OK line states what was asserted"
+has "$OUT" "drift check sees a changed pack file" "including the drift probe through the shipped hook"
 hasnt "$OUT" "defer guard true" "a clean tree raises no deferral note"
 eq "$(cat "$TMP/curl.log")" "" "the check reaches no HTTP endpoint — the API measurement is gone"
 hasnt "$(cat "$TMP/gc.log")" "cities --json" "and resolves no city name, which only the API URL needed"
@@ -136,6 +137,7 @@ eq "$RC" "2" "a hook whose measurement returns nothing is an ERROR, not a silent
 has "$OUT" "returned nothing" "the finding names the empty measurement"
 has "$OUT" "200000" "the finding states the threshold nothing can cross"
 has "$OUT" "--measure" "the finding names the command a reader can rerun"
+has "$OUT" "--drift refinery\` found no change" "and a drift check that sees nothing is a finding of its own"
 
 # --- 3. a hook that measures the WRONG number --------------------------------
 cat > "$HOOKDIR/hooks/cycle-recycle.sh" <<'WRONG'
@@ -147,9 +149,9 @@ eq "$RC" "2" "a measurement that disagrees with the transcript is an ERROR"
 has "$OUT" "returned \"42\"" "the finding quotes what the hook actually said"
 has "$OUT" "251100" "and the total the transcript actually carries"
 
-# --- 4. a hook predating --measure is never able to recycle the doctor --------
-# It ignores the flag and falls through to its self-gate, so the probe must hand
-# it an empty GC_AGENT or running the doctor would recycle whoever ran it.
+# --- 4. a hook predating --measure or --drift never recycles the doctor -------
+# It ignores the flag and falls through to its self-gate, so each probe must
+# hand it an empty GC_AGENT or running the doctor would recycle whoever ran it.
 cat > "$HOOKDIR/hooks/cycle-recycle.sh" <<'OLD'
 #!/bin/sh
 printf '[%s]\n' "${GC_AGENT:-}" >> "$SEEN_AGENT"
@@ -158,8 +160,9 @@ echo "RECYCLED" >> "$SEEN_AGENT"
 OLD
 : > "$TMP/seen-agent"
 OUT=$(SEEN_AGENT="$TMP/seen-agent" GC_AGENT="alpha/gc-toolkit.refinery" run_check); RC=$?
-eq "$RC" "2" "a hook with no --measure reports as unmeasurable"
-eq "$(cat "$TMP/seen-agent")" "[]" "the probe cleared GC_AGENT, so the old self-gate exits"
+eq "$RC" "2" "a hook with no --measure or --drift reports as unmeasurable"
+eq "$(cat "$TMP/seen-agent")" "[]
+[]" "both probes cleared GC_AGENT, so the old self-gate exits each time"
 hasnt "$(cat "$TMP/seen-agent")" "RECYCLED" "and the doctor never triggers a recycle by probing"
 install_real_overlay
 
@@ -184,6 +187,26 @@ printf '{"hooks":{"Stop":[]}}\n' > "$HOOKDIR/settings.json"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a settings.json with no Stop command at all is an ERROR"
 has "$OUT" "no trigger" "the finding says the recycle is never invoked"
+
+# The real overlay's Stop wiring, with each UserPromptSubmit shape below.
+with_prompt_hooks() {
+  jq --argjson ups "$1" '.hooks.UserPromptSubmit = $ups' "$OVERLAY/settings.json" > "$HOOKDIR/settings.json"
+}
+with_prompt_hooks '[]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a settings.json whose UserPromptSubmit runs no cycle-recycle.sh --prompt is an ERROR"
+has "$OUT" "no UserPromptSubmit hook" "the finding names the missing prompt-time wiring"
+hasnt "$OUT" "no Stop hook" "and the Stop wiring beside it raises nothing"
+
+with_prompt_hooks '[{"matcher":"","hooks":[{"type":"command","command":"sh cycle-recycle.sh"}]}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a UserPromptSubmit wiring that runs the hook without --prompt is an ERROR"
+has "$OUT" "no UserPromptSubmit hook" "since only --prompt reads drift before a prompt"
+
+with_prompt_hooks '[{"matcher":"","hooks":[{"type":"command","command":"sh cycle-recycle.sh --prompt < /dev/null"}]}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "2" "a UserPromptSubmit wiring that redirects the hook's stdin away is an ERROR"
+has "$OUT" "the transcript path and the prompt arrive ON stdin" "the finding says what the starved hook loses"
 install_real_overlay
 
 # --- 6. fail-CLOSED on an unreadable roster or a missing tool ----------------
