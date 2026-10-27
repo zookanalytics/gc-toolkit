@@ -25,6 +25,10 @@
 #   (REASON-NEW) --reason files a fresh conversation even when one waits
 #   (CONVID-REASON) --reason on an explicit conversation id is refused
 #   (LIVE)    a conversation a live sitting holds is attached to, not doubled
+#   (REUSE-*) a live sitting engage reuses is attached only once it reads
+#             active: one still start-pending or creating is waited on and left
+#             unattached at the bound, one that ends first is reported, and
+#             --no-attach does not wait
 #   (LEFT)    a conversation whose sitting's session closed is resumed under
 #             the same alias, with no bind needed
 #   (TWO-TRACKS, UNREAD) a task assigned to human that tracks the bead and
@@ -184,9 +188,20 @@ case "$1 ${2:-}" in
     fi
     _live=$(awk 'NF == 2 {printf "%s=%s ", $1, $2}' "$ST/live" 2>/dev/null)
     _salias="$(cat "$ST/spawned-alias" 2>/dev/null || true)"
+    # The sittings $STATE/live seeds read active, unless $LIVE_STATES walks
+    # their state, one entry per listing, the last repeating, with the same
+    # tokens as $START_STATES: a sitting an earlier engage spawned with
+    # --no-attach is live while it waits for the reconciler's launch.
+    _lst=active
+    if [ -n "${LIVE_STATES:-}" ]; then
+      _ln=$(( $(cat "$ST/live-polls" 2>/dev/null || echo 0) + 1 )); printf '%s' "$_ln" > "$ST/live-polls"
+      set -- $LIVE_STATES
+      [ "$_ln" -le $# ] || _ln=$#
+      eval "_lst=\${$_ln}"
+    fi
     jq -n --arg live "$_live" --arg st "$_st" --arg sid "$SID" --arg sn "$SNAME" --arg sa "$_salias" \
-          --arg holder "${ALIAS_HOLDER:-}" --arg decoys "${ALIAS_DECOYS:-}" --arg spawned "$_spawned" \
-      '{sessions:([ $live | split(" ")[] | select(. != "") | split("=") | {id:.[0], session_name:("s-" + .[0]), alias:.[1], template:"gc-toolkit/gc-toolkit.converse-opus", state:"active", closed:false, created_at:"2026-10-01T00:00:00Z", attached:false} ]
+          --arg holder "${ALIAS_HOLDER:-}" --arg decoys "${ALIAS_DECOYS:-}" --arg spawned "$_spawned" --arg lst "$_lst" \
+      '{sessions:([ $live | split(" ")[] | select(. != "" and $lst != "gone") | split("=") | {id:.[0], session_name:("s-" + .[0]), alias:.[1], template:"gc-toolkit/gc-toolkit.converse-opus", state:(if $lst == "blank" then "" else $lst end), closed:false, created_at:"2026-10-01T00:00:00Z", attached:false} ]
          + (if $st == "" or $st == "gone" then []
             else [{id:$sid, session_name:$sn, alias:$sa, template:"gc-toolkit/gc-toolkit.converse-opus", state:(if $st == "blank" then "" else $st end)}] end)
          + (if $decoys != "" then [{id:"gc-90", session_name:"s-gc-90", alias:"gc-toolkit/gc-toolkit.tk-conv2x", template:"gc-toolkit/gc-toolkit.converse-opus", state:"active", closed:false},
@@ -463,7 +478,7 @@ export GC_SITTING_COMMENT_TOOL="$TMP/rec-psc" REC_PSC_LOG="$TMP/psc.log"
 reset() {
     : > "$CALLS"; : > "$SPAWNED"; : > "$POLLS"; : > "$TMP/psc.log"
     rm -f "$ALIAS_REFUSED" "$ALIAS_REFUSED.reads"
-    find "${STATE_DIR:?}" -type f \( -name '*.assignee' -o -name '*.status' -o -name '*.subject' -o -name spawned-alias -o -name tracks-reads \) -delete
+    find "${STATE_DIR:?}" -type f \( -name '*.assignee' -o -name '*.status' -o -name '*.subject' -o -name spawned-alias -o -name tracks-reads -o -name live-polls \) -delete
     : > "$STATE_DIR/replies"; : > "$STATE_DIR/live"
     for _l in ${LIVE_SITTINGS:-}; do printf '%s %s\n' "${_l%%=*}" "${_l#*=}" >> "$STATE_DIR/live"; done
     return 0
@@ -590,6 +605,49 @@ hasnt "$CALLED" "session attach" "(LIVE) --no-attach attaches nothing"
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 run_engage tk-subj
 has "$CALLED" "session attach gc-50" "(LIVE-ATTACH) the default attaches the operator to the live sitting"
+hasnt "$OUT" "waiting up to" "(LIVE-ATTACH) …a started one at once, with no wait announced"
+
+echo "# a live sitting engage reuses is attached only once the reconciler has started it"
+# A sitting is live from the spawn that created it, so one an earlier
+# `engage --no-attach` spawned can still read start-pending or creating when
+# another engage reuses it. An attach then would launch it from its stored
+# command without the converse prompt, so the reuse waits as a new sitting's
+# attach does.
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
+GC_HELM_ENGAGE_WAIT_TIMEOUT=2 LIVE_STATES="start-pending" run_engage tk-subj
+eq "$RC" 0 "(REUSE-PENDING) reusing a live sitting that does not start within the wait exits 0"
+hasnt "$CALLED" "session attach" "(REUSE-PENDING) …and is NOT attached, since the attach would launch it without its prompt"
+hasnt "$CALLED" "session new" "(REUSE-PENDING) …spawning no second sitting"
+has "$OUT" "has not started s-gc-50 after 2s" "(REUSE-PENDING) …saying the reconciler has not started it"
+has "$OUT" "start-pending" "(REUSE-PENDING) …naming the state it last read"
+has "$OUT" "Attach once it reads active there: gc session attach gc-50" "(REUSE-PENDING) …and giving the attach to run once it is up"
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
+GC_HELM_ENGAGE_WAIT_TIMEOUT=2 LIVE_STATES="creating" run_engage tk-subj
+hasnt "$CALLED" "session attach" "(REUSE-CREATING) a reused sitting still creating is not attached either"
+has "$OUT" "creating" "(REUSE-CREATING) …naming the state it last read"
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
+LIVE_STATES="start-pending start-pending start-pending start-pending start-pending active" run_engage tk-subj
+eq "$RC" 0 "(REUSE-WAIT) reusing a live sitting that starts during the wait exits 0"
+has "$OUT" "waiting up to" "(REUSE-WAIT) …announcing the wait"
+last_poll=$(printf '%s\n' "$CALLED" | grep -n '^session list' | tail -1 | cut -d: -f1 || true)
+attach_line=$(printf '%s\n' "$CALLED" | grep -n '^session attach' | head -1 | cut -d: -f1 || true)
+if [ -n "$last_poll" ] && [ -n "$attach_line" ] && [ "$last_poll" -lt "$attach_line" ]; then
+  ok "(REUSE-WAIT) …and attaching only after the listing that reads it active"
+else
+  bad "(REUSE-WAIT) expected the last listing (line ${last_poll:-none}) before the attach (line ${attach_line:-none})"
+fi
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 LIVE_STATES="start-pending start-pending start-pending start-pending gone" run_engage tk-subj
+eq "$RC" 4 "(REUSE-ENDED) a reused sitting that ends before it starts exits 4"
+hasnt "$CALLED" "session attach" "(REUSE-ENDED) …without attaching"
+has "$OUT" "ended before the reconciler started it" "(REUSE-ENDED) …saying it ended"
+has "$OUT" "gc-helm engage tk-subj" "(REUSE-ENDED) …and pointing at the engage that starts a sitting on it"
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
+GC_HELM_ENGAGE_WAIT_TIMEOUT=60 LIVE_STATES="start-pending" run_engage tk-subj --no-attach
+eq "$RC" 0 "(REUSE-NOATTACH) --no-attach on a reused unstarted sitting exits 0"
+hasnt "$OUT" "waiting up to" "(REUSE-NOATTACH) …without waiting, since it attaches nothing"
+hasnt "$CALLED" "session attach" "(REUSE-NOATTACH) …and attaches nothing"
+
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 run_engage tk-subj --reason "another angle" --no-attach
 eq "$RC" 0 "(LIVE-CONCERN) a concern beside a live sitting still files its own conversation"

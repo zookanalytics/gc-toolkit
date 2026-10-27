@@ -4068,8 +4068,55 @@ cmd_engage() {
     fi
     [ -z "$eng_others" ] || echo "$PROG: engage: warning: another live sitting is on $bead already — conversation $eng_others. Both fold onto $bead's row, either may answer a gate, and the first answer wins." >&2
 
+    # An attach must not reach a sitting before the reconciler does.
+    # `gc session attach` on a sitting the reconciler has not launched yet
+    # launches it itself, from the stored command with no prompt, and that
+    # sitting idles at its input until someone types into it. So every attach
+    # engage makes, to a sitting it spawns or to a live one it reuses, waits for
+    # the launch first, the same wait `gc session new` runs before its own
+    # attach, and attaches only a started sitting. --no-attach attaches
+    # nothing, so it does not wait.
+    #
+    # engage_await_start returns 0 once the sitting $sid's `gc session list` row
+    # reads `active`, which it does only once the runtime is running; before the
+    # launch it reads start-pending or creating. It returns 2 when the sitting
+    # ended first, and 1 when ENGAGE_WAIT_TIMEOUT seconds pass first. A closed
+    # sitting drops out of the list when gc reads it from the store, and stays
+    # listed with an empty state when gc reads it from the supervisor, so both a
+    # row that leaves the list and an empty state mean it ended, as does
+    # failed-create. A sitting not listed yet may only lag the supervisor's read
+    # cache, so it is waited on, and so is a listing that did not read.
+    # start_state keeps the last state read, for the messages that follow.
+    engage_await_start() {
+        _start_deadline=$(( $(date +%s) + ENGAGE_WAIT_TIMEOUT ))
+        _start_seen=0; _start_told=0; start_state=""
+        while :; do
+            start_state=$(gc session list --state all --json 2>/dev/null | scrub | jq -r --arg id "$sid" '
+                if type == "object" and ((.sessions // null) | type) == "array"
+                then (first(.sessions[] | select((.id // "") == $id)
+                            | if (.state // "") == "" then "closed" else .state end)
+                      // "unlisted")
+                else "unreadable" end' 2>/dev/null || true)
+            case "$start_state" in
+                active) return 0 ;;
+                closed|failed-create) return 2 ;;
+                unlisted) [ "$_start_seen" = 0 ] || { start_state=gone; return 2; } ;;
+                ''|unreadable) ;;
+                *) _start_seen=1 ;;
+            esac
+            [ "$(date +%s)" -lt "$_start_deadline" ] || return 1
+            if [ "$_start_told" = 0 ]; then
+                printf '  waiting up to %ss for the reconciler to start %s...\n' "$ENGAGE_WAIT_TIMEOUT" "$sname"
+                _start_told=1
+            fi
+            sleep 1
+        done
+    }
+
     # A live sitting holds this conversation: attach the operator to it rather
-    # than start a second.
+    # than start a second. A sitting is live from the spawn that created it, so
+    # one another engage spawned with --no-attach can still be waiting for the
+    # reconciler's launch, and the attach waits for it here as it does below.
     if [ "$conv_state" = live ]; then
         live_now=$(live_sittings || printf '[]')
         sid=$(printf '%s' "$live_now" | jq -r --arg a "$conv_holder" --arg c "$CONV" "$CONVERSATION_JQ"'
@@ -4080,11 +4127,20 @@ cmd_engage() {
             echo "$PROG: engage: conversation $CONV on $bead reads held by '$conv_holder', but no live session could be named for it. Nothing spawned; re-run: $PROG engage $bead" >&2
             exit 4
         fi
+        sname=$(printf '%s' "$live_now" | jq -r --arg s "$sid" '[ .[] | select(.id == $s) | .session_name | select(. != "") ] | first // empty' 2>/dev/null || true)
+        [ -n "$sname" ] || sname="$sid"
         printf '✓ the live sitting %s holds conversation %s for %s — attaching to it rather than starting a second\n' "$sid" "$CONV" "$bead"
         printf '  attach: gc session attach %s\n' "$sid"
         printf '[debug] conversation=%s sitting=%s holder=%s subject=%s\n' "$CONV" "$sid" "$conv_holder" "$bead" >&2
         if [ "$engage_attach" = "1" ]; then
-            gc session attach "$sid" || echo "$PROG: engage: could not attach to $sid — attach when ready: gc session attach $sid" >&2
+            start_rc=0
+            engage_await_start || start_rc=$?
+            case "$start_rc" in
+                0) gc session attach "$sid" || echo "$PROG: engage: could not attach to $sid — attach when ready: gc session attach $sid" >&2 ;;
+                2) echo "$PROG: engage: the sitting $sname that holds conversation $CONV ended before the reconciler started it (its state in 'gc session list': $start_state), so there is nothing to attach. Re-run to start a sitting on it: $PROG engage $bead" >&2
+                   exit 4 ;;
+                *) echo "$PROG: engage: the reconciler has not started $sname after ${ENGAGE_WAIT_TIMEOUT}s (its state in 'gc session list': ${start_state:-unreadable}), so it was not attached; an attach now would launch it without its prompt. Attach once it reads active there: gc session attach $sid" >&2 ;;
+            esac
         fi
         return 0
     fi
@@ -4364,13 +4420,8 @@ cmd_engage() {
     # releases it after the framing lands, and the operator reads a stale
     # "begin now" once per engage.
     #
-    # An attach must not reach the sitting before the reconciler does.
-    # `gc session attach` on a sitting the reconciler has not launched yet
-    # launches it itself, from the stored command with no prompt, and that
-    # sitting idles at its input until someone types into it. So the attach path
-    # waits for the launch first (engage_await_start), the same wait
-    # `gc session new` runs before its own attach, and attaches only a started
-    # sitting. --no-attach attaches nothing, so it does not wait.
+    # The attach path waits for the reconciler's launch first
+    # (engage_await_start, above), and attaches only a started sitting.
     #
     # codex is the exception to self-starting. gascity delivers its prompt the
     # same way, but the codex CLI is not trusted to consume an argv prompt at
@@ -4388,42 +4439,6 @@ cmd_engage() {
     #
     # A --reason is filed into the conversation's ask by cmd_open, so every sitting reads
     # it when it claims. The kick also carries it, for the one provider kicked.
-    #
-    # engage_await_start returns 0 once the sitting's `gc session list` row reads
-    # `active`, which it does only once the runtime is running; before the launch
-    # it reads start-pending or creating. It returns 2 when the sitting ended
-    # first, and 1 when ENGAGE_WAIT_TIMEOUT seconds pass first. A closed sitting
-    # drops out of the list when gc reads it from the store, and stays listed
-    # with an empty state when gc reads it from the supervisor, so both a row
-    # that leaves the list and an empty state mean it ended, as does
-    # failed-create. A sitting not listed yet may only lag the supervisor's read
-    # cache, so it is waited on, and so is a listing that did not read.
-    # start_state keeps the last state read, for the messages below.
-    engage_await_start() {
-        _start_deadline=$(( $(date +%s) + ENGAGE_WAIT_TIMEOUT ))
-        _start_seen=0; _start_told=0; start_state=""
-        while :; do
-            start_state=$(gc session list --state all --json 2>/dev/null | scrub | jq -r --arg id "$sid" '
-                if type == "object" and ((.sessions // null) | type) == "array"
-                then (first(.sessions[] | select((.id // "") == $id)
-                            | if (.state // "") == "" then "closed" else .state end)
-                      // "unlisted")
-                else "unreadable" end' 2>/dev/null || true)
-            case "$start_state" in
-                active) return 0 ;;
-                closed|failed-create) return 2 ;;
-                unlisted) [ "$_start_seen" = 0 ] || { start_state=gone; return 2; } ;;
-                ''|unreadable) ;;
-                *) _start_seen=1 ;;
-            esac
-            [ "$(date +%s)" -lt "$_start_deadline" ] || return 1
-            if [ "$_start_told" = 0 ]; then
-                printf '  waiting up to %ss for the reconciler to start %s...\n' "$ENGAGE_WAIT_TIMEOUT" "$sname"
-                _start_told=1
-            fi
-            sleep 1
-        done
-    }
     start_rc=0
     if [ "$engage_attach" = "1" ]; then
         engage_await_start || start_rc=$?
