@@ -705,7 +705,8 @@ type Facts struct {
 	Inflight map[string][]string
 	// OwnerState maps a session name AND its alias to that session's state, so
 	// a child's assignee, or a conversation's holder, can be resolved whichever
-	// form it was written in.
+	// form it was written in. A key a live session shares with an ended one
+	// holds the live one's state ([SessionEnded]).
 	OwnerState map[string]string
 	// Sittings are the converse sittings the gather read: every open
 	// conversation, plus those closed inside the recent window. [BuildBoard]

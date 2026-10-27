@@ -1412,6 +1412,61 @@ func writeGCStub(t *testing.T, stdout string, code int) string {
 	return path
 }
 
+// TestSessionsGiveASharedKeyToItsLiveHolder: two listed sessions can carry one
+// key, as when a new sitting takes the alias of one whose launch failed, and
+// `gc session list` puts the newest session first. An ended state never
+// replaces a live one, whichever session is listed first, and each session's
+// own name and id keep its own state. A key only ended sessions hold, or only
+// live ones, takes the later entry.
+func TestSessionsGiveASharedKeyToItsLiveHolder(t *testing.T) {
+	const alias = "gc-toolkit.converse-tk-conv"
+	row := func(id, state string) string {
+		return fmt.Sprintf(`{"id":%q,"alias":%q,"session_name":%q,"state":%q}`, id, alias, "s-"+id, state)
+	}
+	sessions := func(t *testing.T, rows ...string) map[string]string {
+		t.Helper()
+		t.Setenv("GC_HELM_GC_BIN", writeGCStub(t, `{"sessions":[`+strings.Join(rows, ",")+`]}`, 0))
+		got, err := newGCExec("").Sessions(context.Background())
+		if err != nil {
+			t.Fatalf("Sessions: %v", err)
+		}
+		return got
+	}
+	for _, ended := range []string{"failed-create", "closed", "archived", ""} {
+		name := ended
+		if name == "" {
+			name = "no state"
+		}
+		for _, order := range []string{"listed after", "listed first"} {
+			t.Run(name+" predecessor "+order, func(t *testing.T) {
+				rows := []string{row("lx-new", "active"), row("lx-old", ended)}
+				if order == "listed first" {
+					slices.Reverse(rows)
+				}
+				got := sessions(t, rows...)
+				if got[alias] != "active" {
+					t.Errorf("the shared alias reads %q, want its live holder's %q", got[alias], "active")
+				}
+				for k, want := range map[string]string{"lx-new": "active", "s-lx-new": "active", "lx-old": ended, "s-lx-old": ended} {
+					if st, ok := got[k]; !ok || st != want {
+						t.Errorf("%s reads %q (listed %v), want its own session's %q", k, st, ok, want)
+					}
+				}
+			})
+		}
+	}
+	t.Run("every holder ended", func(t *testing.T) {
+		if got := sessions(t, row("lx-a", "archived"), row("lx-b", "failed-create")); got[alias] != "failed-create" {
+			t.Errorf("a key only ended sessions hold reads %q, want the later entry's %q", got[alias], "failed-create")
+		}
+	})
+	t.Run("every holder live", func(t *testing.T) {
+		if got := sessions(t, row("lx-a", "active"), row("lx-b", "asleep")); got[alias] != "asleep" {
+			t.Errorf("a key only live sessions hold reads %q, want the later entry's %q", got[alias], "asleep")
+		}
+	})
+}
+
 // TestBeadsSourceCloses verifies shutdown releases the cached handles.
 func TestBeadsSourceCloses(t *testing.T) {
 	root := cityWithRigs(t, map[string]string{"gc-toolkit": "tk"})

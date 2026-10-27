@@ -182,18 +182,23 @@ func (f Facts) inSession(a Anchor) bool {
 }
 
 // sittingLive reports whether the session a conversation's holder names is a
-// live sitting. It reads the session's state by the rule gc-helm.sh's
-// live_sittings applies to the same list: a session listed with no state, or
-// as closed or failed-create, has ended. A failed-create session is one whose
-// launch was rolled back without closing it, so the list still carries it. A
-// session that [Facts.ownerLive] reads as gone, absent or archived, has ended
-// too.
+// live sitting: a live owner ([Facts.ownerLive]) whose state [SessionEnded]
+// does not read as ended. gc-helm.sh's live_sittings reads a session listed
+// with no state, or as closed or failed-create, as ended in the same way.
 func (f Facts) sittingLive(name string) bool {
-	switch f.OwnerState[name] {
-	case "", "closed", "failed-create":
-		return false
+	return f.ownerLive(name) && !SessionEnded(f.OwnerState[name])
+}
+
+// SessionEnded reports whether a session's listed state says it has ended:
+// archived, closed, failed-create, or no state at all, which is the state Gas
+// City gives a closed session. A failed-create session is one whose launch was
+// rolled back without closing it, so the list still carries it.
+func SessionEnded(state string) bool {
+	switch state {
+	case "", "archived", "closed", "failed-create":
+		return true
 	}
-	return f.ownerLive(name)
+	return false
 }
 
 // humanIndex holds, for each bead, the open human gates that block it and the
