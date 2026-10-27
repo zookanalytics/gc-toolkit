@@ -22,7 +22,8 @@
 #      the gate first: a filer's withdrawal, an Accept, another sitting, or a
 #      person at the command line. The first answer wins, and the sign-off
 #      reports it;
-#   4. releases a subject that reads `held`;
+#   4. releases a subject that reads `held`, and stops, the conversation left
+#      open, when that release fails;
 #   5. takes the subject's recommendation when the ruling takes it (--accept),
 #      through gc-helm.sh accept, the writer the board's Accept runs: under the
 #      subject's acceptance lock it answers the recommendation's gate, which
@@ -141,18 +142,19 @@
 #     earlier Accept already made keeps the vars it was made with.
 # Exit: 0 signed off, or with --answer the named gates answered; 1 stopped
 #   short — a read failed, the rework did not file, the PR did not retire, the
-#   headline did not land, a gate did not close, the recommendation was not
-#   taken, or the conversation did not close or hand back — so do NOT post the
-#   sign-off, or report the ruling as carried out; repair what it names and
-#   re-run, which repeats every write it made safely; 2 refused before any
-#   write: usage, a conversation that is not one, a gate it does not reply to,
-#   a ruling that reaches an open PR and gave none of --rework, --no-rework and
-#   --retire, a --rework or --retire on a ruling that reaches more than one open
-#   PR without a --pr-anchor naming one of them, or an --accept with none of
-#   the subject's own recommendation gates among the gates the ruling answers,
-#   a gate Accept would answer that the ruling does not, no recommendation on
-#   the subject, or another open human gate the ruling does not answer, or a
-#   --var without --accept or not of the form <key>=<value>.
+#   headline did not land, a gate did not close, a held subject did not
+#   release, the recommendation was not taken, or the conversation did not
+#   close or hand back — so do NOT post the sign-off, or report the ruling as
+#   carried out; repair what it names and re-run, which repeats every write it
+#   made safely; 2 refused before any write: usage, a conversation that is not
+#   one, a gate it does not reply to, a ruling that reaches an open PR and gave
+#   none of --rework, --no-rework and --retire, a --rework or --retire on a
+#   ruling that reaches more than one open PR without a --pr-anchor naming one
+#   of them, or an --accept with none of the subject's own recommendation gates
+#   among the gates the ruling answers, a gate Accept would answer that the
+#   ruling does not, no recommendation on the subject, or another open human
+#   gate the ruling does not answer, or a --var without --accept or not of the
+#   form <key>=<value>.
 set -u
 
 # >>> control-char-scrub
@@ -698,23 +700,21 @@ if [ "$RULED" = yes ]; then
   fi
 
   # 4. `held` is cleared by a ruling, not by a sitting ending. The state was
-  # read before the first write; nothing this sign-off writes changes it.
-  RELEASE_FAILED=""
+  # read before the first write; nothing this sign-off writes changes it. A
+  # release that fails stops every ruled sign-off here, before the
+  # recommendation and the close: mol-polecat-work cancels a run poured at a
+  # bead that still reads `held`, so the conversation stays open for the
+  # re-run that releases it.
   if [ "$SUBJECT_STATE" = "held" ]; then
     "$LC" transition "$SUBJECT" --to unanchored --route "$ROUTE" \
-      || { echo "RELEASE FROM held FAILED on $SUBJECT — it still reads as waiting on a person"; RELEASE_FAILED=yes; }
+      || stopped "RELEASE FROM held FAILED on $SUBJECT: it still reads as waiting on a person, and mol-polecat-work cancels a run poured at it. The conversation is not closed, so a re-run releases it${ACCEPT:+ and then takes the recommendation}"
   fi
   ACTIONS+=("ruling: $RULING (released to $ROUTE)")
   [ -n "$CONSEQUENCE" ] && ACTIONS+=("$CONSEQUENCE")
   for p in "${STANDS[@]+"${STANDS[@]}"}"; do ACTIONS+=("ruling leaves the branch of $p as it stands"); done
 
-  # 5. The recommendation, once nothing holds the subject back: mol-polecat-work
-  # cancels a run poured at a bead that still reads `held`.
-  if [ -n "$ACCEPT" ]; then
-    [ -z "$RELEASE_FAILED" ] \
-      || stopped "the recommendation is not taken while $SUBJECT reads held, because mol-polecat-work cancels a run poured at a held bead; the conversation is not closed, so a re-run releases it and then takes the recommendation"
-    take_recommendation
-  fi
+  # 5. The recommendation, once nothing holds the subject back.
+  [ -z "$ACCEPT" ] || take_recommendation
 
   # 6. Close the conversation. The work-record gate the close runs wants
   # gc.work_outcome, stamped in a write of its own so it never decides whether

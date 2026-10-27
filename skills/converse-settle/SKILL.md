@@ -99,10 +99,10 @@ then
   : # signed off — report any answer it says reached a gate first, then post the sign-off below
 else
   # NOT signed off: a read failed, the rework did not file, the PR did not
-  # retire, the headline did not land, a gate did not close, the
-  # recommendation was not taken, or the conversation did not close or hand
-  # back. Do NOT post the sign-off. Repair what it printed and re-run, or raise
-  # it in the thread.
+  # retire, the headline did not land, a gate did not close, a held subject
+  # did not release, the recommendation was not taken, or the conversation did
+  # not close or hand back. Do NOT post the sign-off. Repair what it printed
+  # and re-run, or raise it in the thread.
   exit 1
 fi
 ```

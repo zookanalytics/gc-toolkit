@@ -37,7 +37,9 @@
 #   (LEAVE)   a gate the ruling leaves owed stays open
 #   (UNCLOSED, HEADLINE) a gate that does not close or a headline that does not
 #             land stops the sign-off before the conversation closes
-#   (HELD)    a held subject is released on a ruling
+#   (HELD, HELD-FAIL) a held subject is released on a ruling, and a release
+#             that fails stops the sign-off before the close, so the
+#             conversation stays open and its re-run releases the subject
 #   (OPEN-PR, REWORK*, RETIRE*) a ruling on an open PR answers --rework,
 #             --no-rework or --retire; the rework or the retirement runs first,
 #             and one that fails writes nothing else, so the gate keeps holding
@@ -60,7 +62,8 @@
 #             own, or leaves unanswered a gate Accept would answer, the subject
 #             carries no recommendation, or another gate holds the subject; a
 #             sign-off
-#             releases a held subject before Accept's writer runs, and an
+#             releases a held subject before Accept's writer runs, and runs
+#             no Accept when that release fails, and an
 #             answer leaves a held subject to that writer's own release; a take
 #             Accept does not complete stops the sign-off, and an answer that
 #             reached the gate first stands; each --var reaches Accept's writer,
@@ -216,10 +219,13 @@ case "$1" in
 esac
 exit 0
 H
+# TRANSITION_FAIL=<code> makes a transition exit with that code, as the real
+# writer exits 1 when bd refuses the write and 2 when it does not read back.
 cat > "$S/lifecycle.sh" <<'L'
 #!/usr/bin/env bash
 printf 'lifecycle %s\n' "$*" >> "$CALLS"
 [ "$1" = state ] && printf '%s\n' "${SUBJECT_LC_STATE:-unanchored}"
+[ "$1" = transition ] && [ -n "${TRANSITION_FAIL:-}" ] && { echo "lifecycle: the transition did not land" >&2; exit "$TRANSITION_FAIL"; }
 exit 0
 L
 # The rework and the retirement stand-ins each log the rig they ran in: GC_RIG,
@@ -602,6 +608,17 @@ echo "# a held subject is released on a ruling"
 acceptance; SUBJECT_LC_STATE=held run_signoff --conversation tk-conv --outcome "settled" --ruled yes --ruling "go" --route gc-toolkit/gc-toolkit.polecat --no-wait
 eq "$RC" 0 "(HELD) a ruled sign-off on a held subject exits 0"
 has "$(cat "$CALLS")" "lifecycle transition tk-anc --to unanchored --route gc-toolkit/gc-toolkit.polecat" "(HELD) …releasing it to its route"
+acceptance; SUBJECT_LC_STATE=held TRANSITION_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" --ruled yes --ruling "go" --route gc-toolkit/gc-toolkit.polecat --no-wait
+eq "$RC" 1 "(HELD-FAIL) a ruled sign-off whose release of the held subject fails exits 1"
+has "$OUT" "RELEASE FROM held FAILED on tk-anc" "(HELD-FAIL) …naming the subject it did not release"
+has "$OUT" "NOT SIGNED OFF" "(HELD-FAIL) …saying not to post the sign-off"
+hasnt "$OUT" "SIGNED OFF conversation" "(HELD-FAIL) …and reporting no settlement"
+eq "$(field tk-conv status)" "in_progress" "(HELD-FAIL) …so the conversation stays open under its sitting"
+hasnt "$(cat "$CALLS")" "pr-sitting-comment" "(HELD-FAIL) …with no reminder update"
+SUBJECT_LC_STATE=held run_signoff --conversation tk-conv --outcome "settled" --ruled yes --ruling "go" --route gc-toolkit/gc-toolkit.polecat --no-wait
+eq "$RC" 0 "(HELD-FAIL) the re-run, once the release lands, exits 0"
+eq "$(grep -c '^lifecycle transition tk-anc --to unanchored' "$CALLS")" 2 "(HELD-FAIL) …trying the release again"
+eq "$(field tk-conv status)" "closed" "(HELD-FAIL) …and then closing the conversation"
 
 echo "# a ruling on an open PR says whether its branch changes"
 acceptance; setm tk-anc merge_result pull_request
@@ -913,6 +930,11 @@ case "$(cat "$CALLS")" in
   *"lifecycle transition tk-anc --to unanchored"*"gc-helm accept tk-anc"*) ok "(ACCEPT-HELD) …releasing the subject before Accept dispatches at it" ;;
   *) bad "(ACCEPT-HELD) Accept ran before the release: $(cat "$CALLS")" ;;
 esac
+recommend; SUBJECT_LC_STATE=held TRANSITION_FAIL=2 run_signoff --conversation tk-conv --outcome "mol-fix is taken" "${TAKE[@]}"
+eq "$RC" 1 "(ACCEPT-HELD-FAIL) a take whose release of the held subject fails exits 1"
+hasnt "$(cat "$CALLS")" "gc-helm accept" "(ACCEPT-HELD-FAIL) …before Accept's writer runs"
+eq "$(field tk-rec status)" "open" "(ACCEPT-HELD-FAIL) …so the recommendation's gate stays open"
+eq "$(field tk-conv status)" "in_progress" "(ACCEPT-HELD-FAIL) …and the conversation is not closed"
 
 echo "# a take Accept does not complete stops the sign-off, and an answer that reached the gate first stands"
 recommend; ACCEPT_DOES=refuse run_signoff --conversation tk-conv --outcome "mol-fix is taken" "${TAKE[@]}"
