@@ -85,17 +85,25 @@ claimed="$(printf '%s' "$response" \
 [ -n "$claimed" ] || exit 0
 
 # --- 4. Claimed bead -> work bead ----------------------------------------
-# A claimed formula step carries gc.root_bead_id; the root carries the input
-# convoy; the convoy's single tracked member is the work bead. A bead claimed
-# outside a formula IS the work bead.
+# A claimed formula step carries gc.root_bead_id, and the work bead is the bead
+# that root's run works, as the pack's run-lib.sh reads it. The hook is staged
+# into the work dir, so it finds the pack the way a formula step does. A bead
+# claimed outside a formula IS the work bead, and so is a step whose run names
+# no bead or cannot be read.
 work="$claimed"
 root="$(show_bead "$claimed" | jq -r '.[0].metadata["gc.root_bead_id"] // empty' 2>/dev/null)"
 if [ -n "${root:-}" ]; then
-  convoy="$(show_bead "$root" | jq -r '.[0].metadata["gc.input_convoy_id"] // empty' 2>/dev/null)"
-  if [ -n "${convoy:-}" ]; then
-    member="$(run_bounded gc convoy status "$convoy" --json 2>/dev/null \
-      | scrub \
-      | jq -r 'if (.children | length) == 1 then .children[0].id else empty end' 2>/dev/null)"
+  lib="${GC_RUN_LIB:-}"
+  if [ -z "$lib" ]; then
+    for c in "${GC_PACK_DIR:-}" "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+      [ -f "$c/assets/scripts/run-lib.sh" ] && { lib="$c/assets/scripts/run-lib.sh"; break; }
+    done
+  fi
+  hook_bd() { run_bounded gc bd "$@"; }
+  # shellcheck source=../../../../assets/scripts/run-lib.sh
+  if [ -n "$lib" ] && . "$lib" 2>/dev/null; then
+    member="$(run_lib subject hook_bd "$root" 2>/dev/null \
+      | jq -r 'if length == 1 then .[0].bead else empty end' 2>/dev/null)"
     [ -n "${member:-}" ] && work="$member"
   fi
 fi

@@ -449,21 +449,26 @@ live work fall into these groups:
 
 - **Dispatched:** a pool route, a deferred-dispatch arm or its sling marker, a
   formula pour, a deferred route, a claim, or a bound session.
-- **Worked:** a branch, a worktree, a commit, a review round, a landing target,
-  a PR, a landing state, or an outcome.
+- **Worked:** a live run working the bead (`assets/scripts/run-lib.sh`), a
+  branch, a worktree, a commit, a review round, a landing target, a PR, a
+  landing state, or an outcome.
 - **Owned by another closer:** any `task_kind`, a molecule step or workflow
   root, a demand, a duplicate diagnosis, a successor pointer
   (`gc.superseded_by`) that a disposition recorded without its close landing,
   or an issue type outside plain work (task, bug, feature, chore, spike). An
   epic closes on its own ruling.
 - **Parked:** a `hold_reason` or a `rebase_hold`.
-- **Structural:** a convoy that tracks the bead or parents it, or an open child
-  under it.
+- **Structural:** a convoy that parents the bead, or an open child under it.
+
+A convoy that tracks the bead is no mark. A status grouping holds nothing, and
+the input convoy of a run that has finished works nothing, so what a pour
+leaves live is its run, until the run's root closes.
 
 Before the close, the pass reads these marks twice. The first read is the row
-the pass-start listing returns. The second is a fresh read of the bead and of
-what depends on it, made under the pass's claim on the bead (below) just before
-the close, because a sling or a claim can land mid-pass. That includes a sling
+the pass-start listing returns. The second is a fresh read of the bead, of
+what depends on it and of the runs that work it, made under the pass's claim on
+the bead (below) just before the close, because a sling or a claim can land
+mid-pass. That includes a sling
 the pass's own dispatch half made moments earlier. A bead with any mark is
 reported and left open, which is never a pass failure. The fresh read also
 confirms the bead is still owed: its `until` edge to the successor is still

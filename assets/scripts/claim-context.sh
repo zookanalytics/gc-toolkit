@@ -18,7 +18,8 @@
 # belongs to no workflow is the work bead itself. A workflow with no input
 # convoy, such as one an order pours, has no work bead, and a convoy that tracks
 # more than one bead has no single one; the output says which, and lists the
-# tracked beads.
+# tracked beads. Which convoy a root names and which beads a convoy tracks are
+# run-lib.sh's defs, the one reading of a run's link to its bead.
 #
 # It reads the claimed bead and the input convoy, and nothing else unless a
 # record lacks what it needs. The claimed bead's record carries its workflow
@@ -40,6 +41,8 @@ PROG="claim-context"
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=run-lib.sh
+. "${GC_RUN_LIB:-$SCRIPT_DIR/run-lib.sh}" || { echo "$PROG: cannot source run-lib.sh beside this script" >&2; exit 1; }
 
 usage() {
   cat >&2 <<'USAGE'
@@ -145,7 +148,7 @@ if [ -z "$ROOT" ]; then
 fi
 FORMULA=$(meta "$ROOT" gc.formula_name)
 [ -n "$FORMULA" ] || FORMULA=$(get "$ROOT" '.title // ""')
-CONVOY_ID=$(meta "$ROOT" gc.input_convoy_id)
+CONVOY_ID=$(get "$ROOT" "$RUN_JQ"'run_convoy')
 if [ -z "$CONVOY_ID" ]; then
   echo "Workflow $ROOT_ID runs ${FORMULA:-an unnamed formula} with no input convoy, so it has no work bead. The step's instructions are the plan."
   exit 0
@@ -158,7 +161,8 @@ if [ -z "$CONVOY" ]; then
   echo "Input convoy $CONVOY_ID did not read. Read it with: gc bd show $CONVOY_ID --json"
   exit 1
 fi
-TRACKED=$(get "$CONVOY" '[.dependencies[]? | select(type == "object" and .dependency_type == "tracks")] | tojson')
+TRACKED=$(get "$CONVOY" "$RUN_JQ"'[.dependencies[]? | objects] as $deps
+  | [run_tracked[] as $id | ([$deps[] | select(((.id // "") | tostring) == $id)][0] // {id: $id})] | tojson')
 case "$(get "$TRACKED" 'length')" in
   1)
     work_bead "$(get "$TRACKED" '.[0] | tojson')" ;;

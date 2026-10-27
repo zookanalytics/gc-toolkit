@@ -81,10 +81,10 @@ shares only the word ([authority-map.md](authority-map.md)).
   the bead's own field (`readySortPriority` in `internal/beads/query.go`). bd's
   `ready` sorts by the bead's own priority by default. Neither one's
   documentation derives a priority from another bead.
-- **Verified.** 2026-10-24, at `gastownhall/gascity` main 6e35bd5ea and
-  `gastownhall/beads` main 0c562176c (`BuildReadyWorkOrder` in
+- **Verified.** 2026-10-25, at `gastownhall/gascity` main 7d2577989 and bd 1.3.2
+  (9b65b9e19), whose `BuildReadyWorkOrder` in
   `internal/storage/sqlbuild/ready.go` orders the priority policy by the bead's
-  own priority), with bd 1.3.1 (c1c4b642a).
+  own priority.
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,
   or a work query can order by a parent's priority.
 
@@ -156,3 +156,22 @@ shares only the word ([authority-map.md](authority-map.md)).
   the attempt that created it whatever state it is in, for example through
   `gc worktree`. The record's readers then move onto that primitive, and the
   record goes.
+
+## Main lands only through a PR
+
+- **Covers.** The rule in the `merge-strategy-resolve` block of
+  `formulas/mol-refinery-patrol.toml` that resolves a bead which would land
+  `direct` on the default branch to `mr`.
+- **Stands in for.** A merge strategy set per target branch. With one, the
+  default branch would take work only through a PR, whether or not its GitHub
+  ruleset is on, while an integration branch takes its work `direct`.
+- **Evidence.** In `gastownhall/gascity`, a rig carries one merge strategy,
+  `default_merge_strategy`, which `gc sling` stamps on a bead routed into the
+  rig when the caller passes no `--merge` (the `Rig` section of
+  `docs/reference/config.md`). Sling takes the explicit `--merge`, then the
+  bead's rig's default, then the agent's rig's, and reads no target branch
+  (`SlingMergeStrategy` in `internal/sling/sling.go`). Neither the reference
+  nor the code chooses a strategy by the branch a bead lands on.
+- **Verified.** 2026-10-24, at `gastownhall/gascity` main 7cff3a265.
+- **Retires when.** Gas City can set a merge strategy for a target branch, so the
+  rule becomes a line of the rig's config.

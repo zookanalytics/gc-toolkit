@@ -191,11 +191,6 @@ lane's validation pass beside it. The anchor stays `pull_request` (or
 `pre_open_gate`). The child's and the pass's `blocks` edges hold the merge, and
 so does the lane, since a request-changes close backs no lane.
 
-Convoy graduation is a separate transition on the convoy bead:
-`convoy-graduate.sh` (cadence arm 8) moves a convoy to refinery-assigned with
-`branch=integration/<id>` when all members are closed, at least one merge is
-recorded onto the integration branch, and no hold or branch vetoes.
-
 ## Checks
 
 **Vocabulary.** The anchor declares its checks in `check_set`, a comma list of
@@ -635,53 +630,6 @@ covers, the label then reads `working` until the next full pass that reaches the
 anchor re-derives `needs-attention`. In both windows the label trails the
 visit. Every write is pinned to the origin, and a label is not an approval.
 
-## The base label (GitHub projection)
-
-The `status:` label says what stands between a PR and landing; it does not say
-where an approved change lands. A checkpoint pull request into a convoy
-integration branch is at once `status: needs-review` and targeted away from
-`main`, so the base is a second, orthogonal dimension carried by a sibling
-`base:` group.
-
-| Label | Meaning |
-|---|---|
-| `base: integration` | the base is `integration/<convoy-id>`: approving the PR mints a phase into the integration branch, and `main` does not move until graduation |
-
-A `main`-targeted pull request is the default and carries no `base:` label. The
-convoy id is not encoded in the label; it rides a standing banner in the pull
-request body, set at the same moment. Both surfaces are set at pr-open where the
-base is known (`assets/scripts/pr-open.sh`), and `pr-status-label.sh mark-base` is
-the label's single writer. Unlike `status:`, the base marker is standing: a pull
-request's base does not change, so it is set once and never reconciled. The two
-groups are independent: the `status:` writer removes only `status:` values, and
-`mark-base` only ever adds a `base:` label
-([specs/tk-6bji7k.1/proposal.md](../specs/tk-6bji7k.1/proposal.md), "Where a
-checkpoint lands"; [specs/tk-6bji7k.9/decision.md](../specs/tk-6bji7k.9/decision.md)).
-
-A `main`-targeted PR carries neither marker; an integration-targeted PR carries
-both. Those two markers are all that sets a checkpoint apart from a mainline PR:
-
-```text
-PR targeting main
-  PR list   status: needs-review
-  PR body   ## Summary
-            ...
-
-PR targeting integration/<convoy-id>
-  PR list   status: needs-review   base: integration
-  PR body   > [!IMPORTANT]
-            > This pull request merges into integration/<convoy-id>, not main.
-            >
-            > Approving it mints this phase into the convoy integration branch,
-            > and main does not move. The broader review runs at graduation,
-            > when the integration branch is carried to main.
-            ## Summary
-            ...
-```
-
-GitHub renders the body blockquote as an `[!IMPORTANT]` alert box above the
-summary, and lists `base: integration` beside `status:` in its own colour.
-
 ## The machine axis
 
 Checks say whether one review passed. **`pr.machine`** says what the merge cadence
@@ -831,7 +779,7 @@ review's result set.
   Closing it `benign` (the overlap was incidental) lets the next pass send the
   merge-in child.
   `pre-open-rebase.sh` applies the same guard to an anchor with no PR yet.
-- **Disposal** (`review-sweep.sh`, cadence arm 9): a review outlives its own
+- **Disposal** (`review-sweep.sh`, cadence arm 8): a review outlives its own
   subject when the anchor closes and the branch is deleted before any verdict
   lands. There is no commit left for a verdict to name, so the arm closes
   the review with `gc.outcome=moot` and records the reason on it, and writes
@@ -845,7 +793,7 @@ review's result set.
   work-product key at all), unless the origin carries the operator's
   pre-recorded PR-close disposition for that kind and successor — and holds on
   anything it cannot establish. Converse and operator dispositions use the same
-  writer, and so does `duplicate-sweep.sh` (cadence arm 11). The sweep reads
+  writer, and so does `duplicate-sweep.sh` (cadence arm 10). The sweep reads
   the `duplicate_of` marker a polecat stamps when it diagnoses and parks a
   duplicate dispatch: polecats never close work beads, so the bead has no other
   way out. It checks the same evidence before it calls the writer. It also
@@ -1103,9 +1051,9 @@ That drop reaches only the parked, branch-carrying children. The rest of the
 machine review scaffolding is a fix unit, the finding beads and the validation
 pass. Each holds a `blocks` edge on the anchor, and a fix unit also blocks every
 must-fix finding it answers, so an open one refuses the anchor's close the same
-way. `scaffolding-sweep.sh` retires it. The cadence runs it as arm 10 over every
+way. `scaffolding-sweep.sh` retires it. The cadence runs it as arm 9 over every
 disposed anchor, and the consummation runs it for its own anchor just before the
-close, so the close is not refused and escalated over scaffolding that arm 10
+close, so the close is not refused and escalated over scaffolding that arm 9
 would retire later in the same pass. It closes every
 `task_kind=validation|finding|rework` bead whose `anchor_bead` names a disposed,
 non-merged anchor (`gc.superseded_by` or `gc.pr_close_disposition_kind`

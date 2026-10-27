@@ -10,11 +10,10 @@
 # feedback ahead of the slow arms, so a pass killed before the full arm has
 # still picked it up; BEADS_ACTOR projected), pre-open-rebase (the conflict
 # observer for anchors that have no PR yet), gate-ensure, pr-facts (same
-# projection), convoy-graduate (GC_AGENT projected: graduation assigns the
-# convoy), review-sweep (cleanup over closed anchors; no projection, no merge
-# authority), scaffolding-sweep (retires validation/finding/rework on a disposed
-# anchor; BEADS_ACTOR projected: it closes a finding it carries forward through
-# bead-rehome; no merge authority), duplicate-sweep (BEADS_ACTOR
+# projection), review-sweep (cleanup over closed anchors; no projection, no
+# merge authority), scaffolding-sweep (retires validation/finding/rework on a
+# disposed anchor; BEADS_ACTOR projected: it closes a finding it carries forward
+# through bead-rehome; no merge authority), duplicate-sweep (BEADS_ACTOR
 # projected: it closes duplicate dispatches through bead-rehome; no merge
 # authority), pr-stack (PR bodies only — both managed regions; no projection,
 # no merge authority).
@@ -93,7 +92,6 @@ REVIEW_POOL="$RIG/${BINDING_PREFIX}polecat-codex"
 # A rig that staffs a dedicated validate pool points this there without an edit.
 VALIDATE_POOL="${REFINERY_RECONCILE_VALIDATE_POOL:-$FIX_POOL}"
 CHECK_SET_DEFAULT="${REFINERY_RECONCILE_CHECK_SET:-correctness,triage}"
-INTEGRATION_AUTO_LAND="${REFINERY_RECONCILE_INTEGRATION_AUTO_LAND:-true}"
 # The pass budget, in seconds (0 = unpaced). Every arm that walks a set growing
 # with the queue is paced: past its deadline it starts no new anchor, and the
 # next pass resumes after the last one it finished (a cursor in the state dir).
@@ -131,15 +129,6 @@ if [ "$REVIEW_FORMULA" != "mol-review" ]; then
     --sling-var "synthesis_target=${REFINERY_RECONCILE_SYNTHESIS_TARGET:-$FIX_POOL}"
   )
 fi
-
-# Graduation target = this rig's own origin/HEAD (one [order.env] serves every
-# rig, so a constant here would be per-rig drift).
-TARGET="${REFINERY_RECONCILE_TARGET:-}"
-if [ -z "$TARGET" ]; then
-  TARGET="$(git -C "$RIG_ROOT" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null)"
-  TARGET="${TARGET#origin/}"
-fi
-[ -n "$TARGET" ] || TARGET=main
 
 # Per-rig state (GC_PACK_STATE_DIR is city+pack scoped; this order runs per rig).
 # The key also names the pass lock below, so every version of this driver must
@@ -422,24 +411,12 @@ pace_args pr-facts
   run_pass "(7) pr-facts" pr-facts.sh --fix-pool "$FIX_POOL" "${PACE_ARGS[@]}" ) \
   || FAILED="${FAILED}pr-facts rc=$?; "
 
-# (8) convoy-graduate: GC_AGENT projected in a subshell (graduation assigns the
-# convoy to the refinery; the order env does not supply GC_AGENT). Its stamp in
-# the rig's state dir holds it to one complete pass per 15 minutes.
-if [ "$INTEGRATION_AUTO_LAND" = "false" ]; then
-  log "-- (8) convoy-graduate: DISABLED (integration_auto_land=false)"
-else
-  ( export GC_AGENT="$AGENT"
-    run_pass "(8) convoy-graduate" convoy-graduate.sh --target "$TARGET" \
-      --stamp "$STATE_DIR/convoy-graduate.stamp" ) \
-    || FAILED="${FAILED}convoy-graduate rc=$?; "
-fi
-
-# (9) review-sweep: close reviews whose anchor and branch are both gone. Late,
+# (8) review-sweep: close reviews whose anchor and branch are both gone. Late,
 # because it reads only closed anchors — nothing earlier in the pass can see
 # them, and the residue this pass's merges create drains on the same tick.
-run_pass "(9) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=$?; "
+run_pass "(8) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=$?; "
 
-# (10) scaffolding-sweep: retire the machine review scaffolding
+# (9) scaffolding-sweep: retire the machine review scaffolding
 # (validation/finding/rework) hung on an anchor once that anchor is DISPOSED, so
 # the disposed anchor can finalize instead of standing stuck behind scaffolding
 # that will never resolve. Late, beside review-sweep, because it keys on a
@@ -450,20 +427,20 @@ run_pass "(9) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=
 # visit is still owed. BEADS_ACTOR projected — the close of a carried-forward
 # finding is delegated to bead-rehome and attributed in the events table.
 ( export BEADS_ACTOR="$AGENT"
-  run_pass "(10) scaffolding-sweep" scaffolding-sweep.sh ) \
+  run_pass "(9) scaffolding-sweep" scaffolding-sweep.sh ) \
   || FAILED="${FAILED}scaffolding-sweep rc=$?; "
 
-# (11) duplicate-sweep: dispose of verified no-op duplicate dispatches and of
+# (10) duplicate-sweep: dispose of verified no-op duplicate dispatches and of
 # never-dispatched rework twins whose same-review sibling landed. Late, and
 # after review-sweep, because the gate it re-verifies is a CLOSED successor: a
 # twin that arm 2 merged or arm 7 recorded this pass is disposable on this tick
 # rather than a minute later. BEADS_ACTOR projected — the close it delegates to
 # bead-rehome is attributed in the events table.
 ( export BEADS_ACTOR="$AGENT"
-  run_pass "(11) duplicate-sweep" duplicate-sweep.sh ) \
+  run_pass "(10) duplicate-sweep" duplicate-sweep.sh ) \
   || FAILED="${FAILED}duplicate-sweep rc=$?; "
 
-# (12) pr-stack: bring each open PR's body current with its anchor in both managed
+# (11) pr-stack: bring each open PR's body current with its anchor in both managed
 # regions — re-render the beads-on-this-branch section, and refresh the pr-summary
 # region when a rework moved the anchor summary past the published one (pr-open
 # composes that region only at pre_open_gate, which an open anchor never re-enters).
@@ -472,7 +449,7 @@ run_pass "(9) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=
 # later. It writes only PR bodies — no bead, no merge authority — so it runs
 # unprojected and its failure gates nothing.
 pace_args pr-stack
-run_pass "(12) pr-stack" pr-stack.sh "${PACE_ARGS[@]}" || FAILED="${FAILED}pr-stack rc=$?; "
+run_pass "(11) pr-stack" pr-stack.sh "${PACE_ARGS[@]}" || FAILED="${FAILED}pr-stack rc=$?; "
 
 # The per-pass bd_list cache is this pass's; drop it so no later pass can read
 # these rows. A killed pass never reaches here and the next pass's rm-then-create

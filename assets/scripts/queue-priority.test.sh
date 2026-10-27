@@ -294,6 +294,13 @@ unset "${!GC_@}" "${!BEADS_@}" "${!QUEUE_PRIORITY_@}" 2>/dev/null || true
 export PATH="$TMP/bin:$FLOOR:$PATH"
 export TMPDIR="$TMP"
 export STUB_STORE="$TMP/store.json" STUB_CALLS="$TMP/calls" STUB_RIG_TK="$TMP/rig-tk"
+# run-lib.sh's verbs answer from the store as it stands at each call: its roots
+# and convoys, judged by run-lib.sh's own run_rows.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf '. %q || exit 1\n' "$HERE/run-lib.sh"; cat; } > "$TMP/bin/qp-runs" <<'RUNS'
+jq -c "$RUN_JQ"'run_rows' "$STUB_STORE"
+RUNS
+chmod +x "$TMP/bin/qp-runs"
+export GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_CMD="$TMP/bin/qp-runs" RUN_LIB_STUB_LOG="$TMP/run-lib.log"
 DB="$TMP/rig-tk/.beads"
 POOL="gc-toolkit/gc-toolkit.polecat"
 

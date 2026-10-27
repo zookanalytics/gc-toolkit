@@ -565,17 +565,17 @@ func fixtureBoard() board.Board {
 				TakeawayBy: nil,
 
 				Frontier:  "needs-review · all 2 closed · 0 open",
-				Needs:     "all 2 closed — graduate",
+				Needs:     "all 2 tracked closed",
 				RankScore: 3000,
-				// Settled at the head with nothing in flight — awaiting a human's
-				// graduate decision — so the shared core reads it needs-review.
+				// Settled at the head with nothing in flight, so the shared core
+				// reads it needs-review.
 				Phase: board.PhaseNeedsReview,
 				// A LOW row with nothing asking bands cleanup. ClusterKey is pinned
 				// here — the fixture's one clustered row — to carry the field into
 				// the TypeScript check, the way the DONE tile carries closed_at; on
 				// a live board it is set only when at least three rows share it.
 				Section:    board.SectionCleanup,
-				ClusterKey: "all 2 closed — graduate",
+				ClusterKey: "all 2 tracked closed",
 				GroupRoot:  "gt-1a2b3",
 			},
 			// A merge anchor: the PR round-trip's row, blocked on the operator

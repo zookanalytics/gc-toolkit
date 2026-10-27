@@ -2,8 +2,8 @@
 # Hermetic test for assets/scripts/refinery-reconcile.sh — the merge-cadence
 # driver. Covers: GC_RIG required; refinery discovery + pool derivation;
 # the arm ORDER (pr-facts --posture-only, merge, pr-open, pr-facts
-# --route-comments-only, pre-open-rebase, gate-ensure, pr-facts,
-# convoy-graduate, review-sweep, scaffolding-sweep, duplicate-sweep, pr-stack) —
+# --route-comments-only, pre-open-rebase, gate-ensure, pr-facts, review-sweep,
+# scaffolding-sweep, duplicate-sweep, pr-stack) —
 # merge runs right behind its one same-pass interlock, the posture arm, which
 # merge.sh reads off the bead and would otherwise read one written a pass ago,
 # and pr-open right behind merge, so no arm whose cost grows with the gating set
@@ -17,7 +17,8 @@
 # same pass, because merge.sh validates the posture that arm records, and the
 # held arm's share of the pass budget goes to the paced arms behind it),
 # exercised by extracting and executing the marked block against stubs;
-# BEADS_ACTOR / GC_AGENT projections scoped to their arms; a failing arm not
+# BEADS_ACTOR projections scoped to their arms, and no arm handed GC_AGENT,
+# since nothing in a pass assigns work; a failing arm not
 # skipping the arms after it; the exit-1 failure report; per-arm start and
 # elapsed lines in pass.log; the per-rig pass lock (one merge.sh writer across
 # two overlapping ticks, a wedged holder reported rather than skipped over, an
@@ -65,7 +66,6 @@ export ARM_LOG="$TMP/arms.log"
 export STUB_AGENTS="$TMP/agents.json"
 printf '{"agents":[{"qualified_name":"myrig/gc-toolkit.refinery"},{"qualified_name":"myrig/gc-toolkit.polecat"}]}' > "$STUB_AGENTS"
 export REFINERY_RECONCILE_STATE_DIR="$TMP/state"
-export STUB_ORIGIN_HEAD="main"
 unset BEADS_ACTOR GC_AGENT GC_PACK_NAME 2>/dev/null || true
 
 drive() { GC_RIG=myrig GC_RIG_ROOT="$TMP" "$SD/refinery-reconcile.sh" 2>&1; }
@@ -87,13 +87,14 @@ near() { # <offset> <want-secs> <label> — within 15s, for a loaded host
 }
 
 echo "# arms run in order with derived pools and scoped identities"
-for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
+for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
 : > "$ARM_LOG"
 T0=$(date -u +%s)
 out=$(drive); rc=$?
 eq "$rc" 0 "a clean pass exits 0"
 order=$(cut -d'|' -f1 "$ARM_LOG" | paste -sd, -)
-eq "$order" "pr-facts.sh,merge.sh,pr-open.sh,pr-facts.sh,pre-open-rebase.sh,gate-ensure.sh,pr-facts.sh,convoy-graduate.sh,review-sweep.sh,scaffolding-sweep.sh,duplicate-sweep.sh,pr-stack.sh" "the arms ran in the load-bearing order (posture, then merge, then pr-open, ahead of every arm whose cost grows with the gating set)"
+ARM_ORDER="pr-facts.sh,merge.sh,pr-open.sh,pr-facts.sh,pre-open-rebase.sh,gate-ensure.sh,pr-facts.sh,review-sweep.sh,scaffolding-sweep.sh,duplicate-sweep.sh,pr-stack.sh"
+eq "$order" "$ARM_ORDER" "the arms ran in the load-bearing order (posture, then merge, then pr-open, ahead of every arm whose cost grows with the gating set)"
 dup_line=$(grep '^duplicate-sweep' "$ARM_LOG")
 has "$dup_line" "|myrig/gc-toolkit.refinery|" "duplicate-sweep ran as BEADS_ACTOR=<refinery>"
 scaf_line=$(grep '^scaffolding-sweep' "$ARM_LOG")
@@ -184,10 +185,7 @@ has "$route_line" "|myrig/gc-toolkit.refinery|" "the feedback arm ran as BEADS_A
 [ -n "$preopen_at" ] && [ "$preopen_at" -gt "$propen_at" ] \
   && ok "pre-open-rebase runs after pr-open" \
   || bad "pre-open-rebase did not run after pr-open (preopen=$preopen_at propen=$propen_at)"
-grad_line=$(grep '^convoy-graduate' "$ARM_LOG")
-has "$grad_line" "--target main" "convoy-graduate got the origin/HEAD target"
-has "$grad_line" "--stamp $TMP/state/myrig/convoy-graduate.stamp" "convoy-graduate keeps its interval stamp in the rig's pass state dir"
-has "$grad_line" "|myrig/gc-toolkit.refinery" "convoy-graduate ran with GC_AGENT=<refinery>"
+eq "$(cut -d'|' -f4 "$ARM_LOG" | sort -u | tr -d '\n')" "" "no arm is handed GC_AGENT: nothing in a pass assigns work"
 case "$gate_line" in
   *"|myrig/gc-toolkit.refinery|"*) bad "gate-ensure must NOT inherit BEADS_ACTOR (projection is scoped to the closing arms)" ;;
   *) ok "identity projections are scoped, not process-wide" ;;
@@ -265,7 +263,7 @@ has "$out" "pr-posture rc=1" "…naming the arm"
 has "$out" "merge.sh HELD this pass" "…and reporting the hold"
 if grep -q '^merge.sh' "$ARM_LOG"; then bad "merge.sh RAN on a posture the arm could not record"; else ok "merge.sh did not run"; fi
 grep -q '^pr-facts.sh|--fix-pool' "$ARM_LOG" && ok "the full pr-facts arm still ran" || bad "the full pr-facts arm was skipped"
-grep -q '^convoy-graduate' "$ARM_LOG" && ok "convoy-graduate still ran (the hold is merge's alone)" || bad "convoy-graduate was skipped"
+grep -q '^review-sweep' "$ARM_LOG" && ok "review-sweep still ran (the hold is merge's alone)" || bad "review-sweep was skipped"
 # The held merge spends none of the pass budget, so the paced arms behind it
 # divide its share: with the stub arms returning at once, pr-facts gets half of
 # the 420s and pr-stack all of it, as on a pass whose merge ran.
@@ -281,16 +279,8 @@ out=$(drive); rc=$?
 eq "$rc" 1 "a failing arm exits 1"
 has "$out" "pr-open rc=1" "…naming the failed arm"
 grep -q '^merge.sh' "$ARM_LOG" && ok "merge.sh still ran after the pr-open failure" || bad "merge.sh was skipped"
-grep -q '^convoy-graduate' "$ARM_LOG" && ok "convoy-graduate still ran" || bad "convoy-graduate was skipped"
-
-echo "# integration_auto_land=false disables graduation only"
+grep -q '^review-sweep' "$ARM_LOG" && ok "review-sweep still ran" || bad "review-sweep was skipped"
 mkarm pr-open.sh
-: > "$ARM_LOG"
-out=$(REFINERY_RECONCILE_INTEGRATION_AUTO_LAND=false drive); rc=$?
-eq "$rc" 0 "the disabled pass exits 0"
-if grep -q '^convoy-graduate' "$ARM_LOG"; then bad "convoy-graduate ran despite the kill-switch"; else ok "convoy-graduate disabled"; fi
-grep -q '^merge.sh' "$ARM_LOG" && ok "the merge arm is untouched by the switch" || bad "merge arm missing"
-grep -q '^review-sweep' "$ARM_LOG" && ok "review-sweep is untouched by the switch" || bad "review-sweep was skipped"
 
 echo "# no refinery bound = nothing to reconcile"
 printf '{"agents":[]}' > "$STUB_AGENTS"
@@ -353,7 +343,7 @@ echo "# a gate-ensure that never returns leaves merge and pr-open already run"
 # only merge drains and only pr-open advances. Model the worst case, a
 # gate-ensure that does not return within the pass, and prove both already ran
 # while the full pr-facts arm behind it has not.
-for a in pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
+for a in pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
 mkblocking_gate
 rm -f "$GATE_STARTED" "$GATE_RELEASE"
 : > "$ARM_LOG"
@@ -376,7 +366,7 @@ fi
 
 echo "# the per-rig pass lock, not the tracking bead, is the single-flight"
 LOCK_PROVEN=0
-for a in pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh; do mkarm "$a"; done
+for a in pr-open.sh merge.sh pr-facts.sh; do mkarm "$a"; done
 mkblocking_gate
 rm -f "$GATE_STARTED" "$GATE_RELEASE"
 : > "$ARM_LOG"
@@ -481,7 +471,7 @@ echo "# the merge-decision marker tracks a clean pass to 'decided', and the repo
 # until it exits. Wait for the lock to free first, or this pass reads it as
 # already in flight and skips — running no arms, no marker, and no report.
 await_lock_free || bad "the killed pass's arm never released the lock before the clean pass"
-for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
+for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
 # A report stub records how the driver invoked it. It is created only for this
 # case and removed after, so the surrounding cases run with the report absent
 # (the driver's [ -x ] guard skips it) exactly as they did before.
@@ -577,7 +567,7 @@ fi
 echo "# every arm and the drop-tail report run without the lock's descriptor, under the lock"
 # An arm's store read can bring up a Dolt server that outlives the pass, and one
 # that kept fd 9 would hold the lock against every later pass.
-for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
+for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
 cat > "$SD/merge-tail-report.sh" <<'RPT'
 #!/usr/bin/env bash
 if { : >&9; } 2>/dev/null; then fd9=open; else fd9=closed; fi
@@ -588,9 +578,10 @@ chmod +x "$SD/merge-tail-report.sh"
 export FD9_LOG="$TMP/fd9.log" LOCK_PROBE="$TMP/state/myrig/pass.lock"; : > "$FD9_LOG"
 out=$(drive); rc=$?
 eq "$rc" 0 "the pass completes"
-eq "$(grep -c ' fd9=' "$FD9_LOG")" 13 "each of the twelve arm runs and the drop-tail report recorded what it was handed"
+RUNS=$(( $(printf '%s\n' "$ARM_ORDER" | tr ',' '\n' | grep -c .) + 1 ))
+eq "$(grep -c ' fd9=' "$FD9_LOG")" "$RUNS" "each arm run in the pass order and the drop-tail report recorded what it was handed"
 eq "$(grep -c 'fd9=open' "$FD9_LOG")" 0 "none of them was handed fd 9"
-eq "$(grep -c 'lock=held' "$FD9_LOG")" 13 "and the pass lock was held while each of them ran"
+eq "$(grep -c 'lock=held' "$FD9_LOG")" "$RUNS" "and the pass lock was held while each of them ran"
 rm -f "$SD/merge-tail-report.sh"
 unset FD9_LOG LOCK_PROBE
 
@@ -630,7 +621,7 @@ echo "# a driver of any version names the same lock for a rig, whatever the rig'
 # A stand-in for that pass holds <state-dir>/<key>/pass.lock as a driver does,
 # under the key written beside each rig name below: a name past 64 bytes, one
 # with bytes the key rewrites, and one the key replaces whole.
-for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
+for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
 NAMES="$TMP/state-names"
 LONG="$(printf '%070d' 0 | tr 0 r)"
 names_drive() { # <rig>
@@ -791,7 +782,7 @@ else
 fi
 
 echo "# REFINERY_RECONCILE_REVIEW_FORMULA opts reviews into the two-lane quorum pilot"
-for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
+for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
 : > "$ARM_LOG"
 GC_RIG=myrig GC_RIG_ROOT="$TMP" REFINERY_RECONCILE_REVIEW_FORMULA=mol-review-quorum-signoff "$SD/refinery-reconcile.sh" >/dev/null 2>&1
 gate_pilot=$(grep '^gate-ensure' "$ARM_LOG")
@@ -815,7 +806,7 @@ printf '%s|%s|%s\n' "\$d" "\$([ -d "\$d" ] && echo dir-present || echo dir-absen
 exit 0
 ARM
 chmod +x "$SD/gate-ensure.sh"
-for a in pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh convoy-graduate.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
+for a in pre-open-rebase.sh pr-open.sh merge.sh pr-facts.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
 # Seed a leftover entry from a notional killed pass; the rm-then-create setup must clear it.
 mkdir -p "$CACHE_DIR"; echo '[{"id":"stale"}]' > "$CACHE_DIR/stale.json"
 : > "$CACHE_PROBE"
@@ -831,7 +822,7 @@ echo "# a pass run without GC_RIG_ROOT hands its arms the root it resolved"
 # The lifecycle writer the arms close landings through reads the rig checkout
 # from GC_RIG_ROOT. A pass the order runner did not start takes its cwd as the
 # root, and the arms must be handed that same root.
-for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh pr-facts.sh convoy-graduate.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
+for a in gate-ensure.sh pre-open-rebase.sh pr-open.sh pr-facts.sh review-sweep.sh scaffolding-sweep.sh duplicate-sweep.sh pr-stack.sh; do mkarm "$a"; done
 cat > "$SD/merge.sh" <<'ARM'
 #!/usr/bin/env bash
 printf 'merge.sh|%s\n' "${GC_RIG_ROOT:-<unset>}" >> "${ARM_LOG:?}"

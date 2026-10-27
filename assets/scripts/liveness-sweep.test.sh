@@ -275,7 +275,7 @@ cat > "$TMP/live.json" <<'JSON'
   {"id":"v-1","status":"open","title":"visit: c-ingroup","metadata":{"task_kind":"visit","gc.continuation_group":"c-ingroup"}},
   {"id":"v-2","status":"open","title":"visit: c-trackedvisit","metadata":{"task_kind":"visit","gc.continuation_group":""},"dependencies":[{"issue_id":"v-2","depends_on_id":"c-trackedvisit","type":"tracks"}]},
   {"id":"v-root","status":"open","title":"visit: root-underconversation","metadata":{"task_kind":"visit","gc.continuation_group":"root-underconversation"},"dependencies":[{"issue_id":"v-root","depends_on_id":"root-underconversation","type":"tracks"}]},
-  {"id":"m-live","status":"open","title":"a live molecule","metadata":{"gc.input_convoy_id":"conv-live"}},
+  {"id":"m-live","status":"open","title":"a live molecule","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"conv-live"}},
   {"id":"d-open","status":"open","title":"Rule: which of the two?","metadata":{"gc.demand_for":"c-demand-live"}},
   {"id":"child-open","status":"open","title":"an open child of c-parented","metadata":{},"dependencies":[{"depends_on_id":"c-parented","type":"parent-child"}]}
 ]
@@ -299,18 +299,28 @@ cat > "$TMP/sessions.json" <<'JSON'
 JSON
 export FAKE_SESSIONS="$TMP/sessions.json"
 
-# bd show fixtures: the worked-via-convoy and landed-husk chains.
+# The worked and landed-husk chains: each root names its input convoy, which
+# tracks the bead its run works. The anchors are read with bd show; the roots
+# and convoys make the runs below.
 printf '%s\n' '[{"id":"conv-live","issue_type":"convoy","dependencies":[{"id":"c-worked","dependency_type":"tracks","status":"open"}]}]' > "$TMP/show/conv-live.json"
-printf '%s\n' '[{"id":"root-landed","metadata":{"gc.input_convoy_id":"conv-landed"}}]' > "$TMP/show/root-landed.json"
 printf '%s\n' '[{"id":"conv-landed","issue_type":"convoy","dependencies":[{"id":"anchor-landed","dependency_type":"tracks","status":"closed"}]}]' > "$TMP/show/conv-landed.json"
 printf '%s\n' '[{"id":"anchor-landed","status":"closed","metadata":{"merge_result":"merged"}}]' > "$TMP/show/anchor-landed.json"
-printf '%s\n' '[{"id":"root-live","metadata":{"gc.input_convoy_id":"conv-anchorlive"}}]' > "$TMP/show/root-live.json"
 printf '%s\n' '[{"id":"conv-anchorlive","issue_type":"convoy","dependencies":[{"id":"anchor-live","dependency_type":"tracks","status":"open"}]}]' > "$TMP/show/conv-anchorlive.json"
 printf '%s\n' '[{"id":"anchor-live","status":"open","metadata":{"merge_result":"pull_request"}}]' > "$TMP/show/anchor-live.json"
-printf '%s\n' '[{"id":"root-noconvoy","metadata":{}}]' > "$TMP/show/root-noconvoy.json"
-printf '%s\n' '[{"id":"root-underconversation","metadata":{"gc.input_convoy_id":"conv-uc"}}]' > "$TMP/show/root-underconversation.json"
+printf '%s\n' '[{"id":"root-noconvoy","status":"in_progress","metadata":{"gc.kind":"workflow"}}]' > "$TMP/show/root-noconvoy.json"
+printf '%s\n' '[{"id":"root-underconversation","status":"in_progress","metadata":{"gc.kind":"workflow","gc.input_convoy_id":"conv-uc"}}]' > "$TMP/show/root-underconversation.json"
 printf '%s\n' '[{"id":"conv-uc","issue_type":"convoy","dependencies":[{"id":"anchor-uc","dependency_type":"tracks","status":"open"}]}]' > "$TMP/show/conv-uc.json"
 printf '%s\n' '[{"id":"anchor-uc","status":"open","metadata":{}}]' > "$TMP/show/anchor-uc.json"
+
+# run-lib.sh's verbs answer through run-lib.stub.sh from the runs these roots
+# and convoys make, by run-lib.sh's own run_rows: m-live works c-worked,
+# root-landed the landed anchor, root-live and root-underconversation the open
+# ones, and root-noconvoy works no bead.
+# shellcheck source=run-lib.sh
+. "$HERE/run-lib.sh" || { echo "cannot source run-lib.sh" >&2; exit 1; }
+jq -s 'add' "$TMP/ready.json" "$TMP/live.json" "$TMP/show/"root-*.json "$TMP/show/"conv-*.json \
+    | jq -c "$RUN_JQ"'run_rows' > "$TMP/runs.json"
+export GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json"
 
 # backing <anchor> <lane>... — the closed approve reviews lane-state.sh derives
 # each lane's green from, served as the anchor's anchor_bead listing. The sweep
@@ -506,11 +516,21 @@ grep -q "pr=unverified" <<< "$OUT" && ok "a failed gh read is 'unverified'" || b
 grep -q "c-pr-open" <<< "$(cat "$BASELINE_FILE")" \
     && ok "a live-PR bead is REPORTED when liveness is unverified" \
     || bad "unverified keeps the bead visible" "$(cat "$BASELINE_FILE")"
-GC_SHOW_FAIL="conv-live" run_sweep "$EXPECT_SURVIVORS"
-grep -q "convoy=unverified" <<< "$OUT" && ok "a failed convoy read is 'unverified'" || bad "convoy liveness" "$OUT"
+RUN_LIB_STUB_FAIL="map" run_sweep "$EXPECT_SURVIVORS"
+grep -q "runs=unverified" <<< "$OUT" && ok "a failed read of the live runs is 'unverified'" || bad "runs liveness" "$OUT"
 grep -q "c-worked" <<< "$(cat "$BASELINE_FILE")" \
-    && ok "a failed convoy read leaves its member a candidate (reported)" \
-    || bad "failed convoy read hides nothing" "$(cat "$BASELINE_FILE")"
+    && ok "a failed read of the live runs leaves the bead a run works a candidate (reported)" \
+    || bad "failed runs read hides nothing" "$(cat "$BASELINE_FILE")"
+grep -q "the live runs could not be read" "$ESC_BODIES" \
+    && ok "…and the visit body says the runs were not read" \
+    || bad "the visit body warns of the failed runs read" "$(head -5 "$ESC_BODIES")"
+run_sweep "$EXPECT_SURVIVORS"
+grep -q "runs=verified" <<< "$OUT" && ok "a read of the live runs that names some is 'verified'" || bad "runs liveness verified" "$OUT"
+RUN_LIB_STUB_FAIL="subject:root-landed" run_sweep "$EXPECT_SURVIVORS"
+grep -q "husk=unverified" <<< "$OUT" && ok "a failed read of a root's run is 'unverified'" || bad "husk liveness on a failed run read" "$OUT"
+grep -q "c-husk-step-1" <<< "$(cat "$BASELINE_FILE")" \
+    && ok "a failed read of a root's run keeps its step a candidate (reported)" \
+    || bad "failed run read hides nothing" "$(cat "$BASELINE_FILE")"
 GC_SHOW_FAIL="anchor-landed" run_sweep "$EXPECT_SURVIVORS"
 grep -q "husk=unverified" <<< "$OUT" && ok "a failed anchor read is 'unverified'" || bad "husk liveness" "$OUT"
 grep -q "c-husk-step-1" <<< "$(cat "$BASELINE_FILE")" \
