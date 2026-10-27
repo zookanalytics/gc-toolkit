@@ -204,10 +204,11 @@ Further checks guard structure that is not an anchor invariant:
 resolves in the composed config), `doctor/check-seed-audit-current`
 (the generated seed audit is present and its pre-commit hook is wired;
 warn-only),
-`doctor/check-recycle-capable` (cycle-recycle can fire at all: a Stop event
-reaches the hook with its stdin intact, the hook's own measurement reads the
-context size a transcript carries, and no refinery's git-op defer guard has
-been latched past a bound), `doctor/check-cycle-recycle-hook` (the cycle-recycle
+`doctor/check-recycle-capable` (cycle-recycle can fire at all: the Stop and
+UserPromptSubmit events reach the hook with its stdin intact, the hook's own
+measurement reads the context size a transcript carries, its drift check sees
+a changed pack file, and no refinery's git-op defer guard has been latched past
+a bound), `doctor/check-cycle-recycle-hook` (the cycle-recycle
 Stop hook and its no-consent doctrine name the same roles: every agent carrying
 `overlay_dir = "overlays/cycle-recycle"` injects the `heartbeat-no-consent-ui`
 fragment and every agent injecting it carries the overlay, so no role recycles

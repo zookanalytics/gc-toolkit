@@ -1,28 +1,44 @@
 #!/bin/sh
-# cycle-recycle.sh — deterministic proactive context recycle for patrol agents.
-# Runs as a Claude Code `Stop` hook (every turn boundary), so the recycle is
+# cycle-recycle.sh — deterministic proactive recycle for patrol agents.
+# Runs as a Claude Code `Stop` hook (every turn boundary) and, with --prompt, as
+# a `UserPromptSubmit` hook (before a prompt starts a turn), so the recycle is
 # enforced regardless of LLM state. Self-gates to witness | deacon | refinery;
-# no-ops for everyone else. Over an absolute 200K context threshold (measured
-# from the session transcript named on hook stdin) it writes a durable HANDOFF
-# (`gc handoff`) and triggers a restart (`gc session reset`); the inheriting
-# session re-adopts its wisp via its startup reconcile. Policy:
-# docs/cycle-recycle.md.
+# no-ops for everyone else. It recycles a session for either of two reasons,
+# both read from the session transcript named on hook stdin:
+#   * context: at a turn's end, the context is over an absolute 200K threshold;
+#   * drift: a pack file the session's prompt or patrol formula comes from
+#     changed on disk after the session's first prompt, so the session runs
+#     text the pack no longer holds.
+# A recycle writes a durable HANDOFF (`gc handoff`) and requests a restart
+# (`gc session reset`, and `gc handoff` itself for an always-mode session); the
+# inheriting session re-adopts its wisp via its startup reconcile. Under
+# --prompt only drift recycles, and once a restart is requested the hook blocks
+# the prompt, which the HANDOFF carries instead.
+# Policy: docs/cycle-recycle.md.
 #
 # Invariants:
 #   * NEVER prompt the operator (heartbeat-no-consent-ui).
-#   * ALWAYS exit 0; stdout stays empty (diagnostics to stderr), except under
-#     `--measure`, which prints the measurement and acts on nothing.
-#   * Under threshold (the common path) stays cheap: one bounded transcript
-#     tail, no network.
-#   * Over threshold, DEFER while an operator is attached or the refinery is
-#     mid git-op; uncertain -> skip. PreCompact stays the reactive net, as it
-#     is when the transcript is unreadable or carries no usage entry.
+#   * ALWAYS exit 0; stdout stays empty (diagnostics to stderr), except for the
+#     block decision under --prompt, and under `--measure` and `--drift`, which
+#     print what they read and act on nothing.
+#   * Nothing to recycle (the common path) stays cheap: two bounded transcript
+#     reads, one stat over the watched pack files, no network.
+#   * DEFER while an operator is attached or the refinery is mid git-op;
+#     uncertain -> skip. PreCompact stays the reactive net, as it is when the
+#     transcript is unreadable or carries no usage entry.
 
 set -u
 export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"
 
 TAIL_BYTES=2097152   # newest 2MiB of the transcript holds the latest usage entry
+HEAD_LINES=200       # the transcript's first records hold its first prompt
 THRESHOLD=200000
+MODE="${1:-}"
+
+# The payload the provider hands every hook on stdin; none when the hook runs
+# by hand.
+PAYLOAD=""
+[ -t 0 ] || PAYLOAD=$(cat 2>/dev/null)
 
 # measure_context <transcript-path> — print the session's live context size in
 # tokens, or nothing when no usage entry is readable. The newest usage entry's
@@ -43,19 +59,77 @@ measure_context() {
         | last // empty' 2>/dev/null
 }
 
-# transcript_from_stdin — the `transcript_path` the provider hands every hook.
-transcript_from_stdin() {
-    [ -t 0 ] && return 0   # no hook payload (invoked by hand) -> measure nothing
-    t=$(cat 2>/dev/null | jq -r '.transcript_path // empty' 2>/dev/null)
+# transcript_path — the payload's `transcript_path`, when it names a readable
+# file.
+transcript_path() {
+    t=$(printf '%s' "$PAYLOAD" | jq -r '.transcript_path // empty' 2>/dev/null)
     [ -n "$t" ] && [ -r "$t" ] && printf '%s' "$t"
+}
+
+# session_start <transcript-path> — the epoch second of the transcript's first
+# timestamped record, which is the session's first prompt, or nothing until a
+# record carries a timestamp. Gas City renders that prompt at launch, seconds
+# before the record.
+session_start() {
+    head -n "$HEAD_LINES" "$1" 2>/dev/null | jq -Rr '
+        (try fromjson catch empty) | objects | .timestamp // empty | strings
+        | sub("\\.[0-9]+"; "") | (try fromdateiso8601 catch empty)' 2>/dev/null | head -n 1
+}
+
+# pack_drift <transcript-path> <role> — print, one per line and relative to the
+# pack, each watched file of <role> whose mtime is later than the session's
+# first prompt: the role's prompt template and every fragment in the pack's
+# template-fragments/, which Gas City renders into the prompt at launch, and the
+# role's patrol formula, whose steps the session reads as it reaches them and
+# keeps. A fast-forward rewrites only the files whose content changed, so an
+# mtime is when the new text reached the checkout. The pack is the first of
+# GC_RIG_ROOT and the city's rigs/gc-toolkit that carries the role's formula.
+# Prints nothing when no file changed, or when the start, the pack or the times
+# cannot be read: uncertain -> no drift. An mtime later than now counts as no
+# change, so a file stamped in the future cannot recycle a session on every
+# turn.
+pack_drift() {
+    start=$(session_start "$1")
+    case "$start" in '' | *[!0-9]*) return 0 ;; esac
+    pack=""
+    for c in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
+        [ -n "$c" ] && [ -f "$c/formulas/mol-$2-patrol.toml" ] && { pack="$c"; break; }
+    done
+    [ -n "$pack" ] || return 0
+    now=$(date +%s)
+    (
+        cd "$pack" 2>/dev/null || exit 0
+        set -- "agents/$2/prompt.template.md" "formulas/mol-$2-patrol.toml" template-fragments/*.template.md
+        for f do
+            shift
+            [ -f "$f" ] && set -- "$@" "$f"
+        done
+        [ "$#" -gt 0 ] || exit 0
+        # GNU stat first: BSD stat refuses -c and prints nothing, while GNU stat
+        # reads -f as a file-system query and would print that instead.
+        { stat -c '%Y %n' "$@" 2>/dev/null || stat -f '%m %N' "$@" 2>/dev/null; } \
+            | awk -v s="$start" -v n="$now" '$1 ~ /^[0-9]+$/ && $1 > s && $1 <= n { sub(/^[0-9]+ /, ""); print }'
+    )
 }
 
 # `--measure` prints the context size this hook would compare against its
 # threshold and exits, acting on nothing. It is how doctor/check-recycle-capable
 # asserts the measurement against the shipped script rather than a copy of it.
-if [ "${1:-}" = --measure ]; then
-    T=$(transcript_from_stdin)
+if [ "$MODE" = --measure ]; then
+    T=$(transcript_path)
     [ -n "$T" ] && measure_context "$T"
+    exit 0
+fi
+
+# `--drift <role>` prints the files the drift check finds changed for <role>
+# and exits, acting on nothing. It takes the role as an argument rather than
+# from GC_AGENT, so doctor/check-recycle-capable drives it with GC_AGENT empty,
+# and a script predating it self-gates out instead of recycling the doctor.
+if [ "$MODE" = --drift ]; then
+    T=$(transcript_path)
+    case "${2:-}" in
+      witness | deacon | refinery) [ -n "$T" ] && pack_drift "$T" "$2" ;;
+    esac
     exit 0
 fi
 
@@ -69,26 +143,41 @@ case "$role" in
   *) exit 0 ;; # not a patrol agent — no-op, never interrupt focused work
 esac
 
-# --- 2. Measure context: the transcript named on hook stdin ---------------
+# --- 2. Measure: the transcript named on hook stdin -----------------------
 # Reading the session's own transcript keeps the measurement local to the turn
 # that triggered the hook. Nothing outside the session has to publish a context
-# size for the recycle to work.
-TRANSCRIPT="$(transcript_from_stdin)"
+# size or a start time for the recycle to work.
+TRANSCRIPT="$(transcript_path)"
 [ -n "$TRANSCRIPT" ] || exit 0 # no readable transcript -> skip (PreCompact stays the net)
 
-TOKENS="$(measure_context "$TRANSCRIPT")"
-case "$TOKENS" in
-  '' | *[!0-9]*) exit 0 ;; # no usage entry / unreadable -> unknown, skip silently
-esac
-[ "$TOKENS" -ge "$THRESHOLD" ] || exit 0 # under threshold -> cheap no-op (the common path)
+# The context check runs at a turn's end only: before a prompt, the context is
+# what it was when the last turn ended. An unreadable or missing usage entry is
+# unknown, which is no context recycle.
+SUBJECT=""; BODY=""
+if [ "$MODE" != --prompt ]; then
+  TOKENS="$(measure_context "$TRANSCRIPT")"
+  case "$TOKENS" in
+    '' | *[!0-9]*) : ;;
+    *) [ "$TOKENS" -ge "$THRESHOLD" ] && SUBJECT="context cycle: context reached $TOKENS tokens" ;;
+  esac
+fi
+if [ -z "$SUBJECT" ]; then
+  DRIFT="$(pack_drift "$TRANSCRIPT" "$role")"
+  if [ -n "$DRIFT" ]; then
+    SUBJECT="pack drift: text this session runs changed after it started"
+    BODY="Changed on disk after this session's first prompt: $(printf '%s\n' "$DRIFT" | tr '\n' ' ' | sed 's/ $//')."
+  fi
+fi
+[ -n "$SUBJECT" ] || exit 0 # nothing to recycle -> cheap no-op (the common path)
 
 # --- 2.5. Safety guards: defer (don't force) the recycle at a bad moment --
 # `gc session reset` preserves identity/alias/mail/queued work but resets the
 # conversation, so don't land it (a) under an operator attached to watch/debug
 # the pane, or (b) on the refinery mid git-op. These run only on the rare
-# over-threshold path. Bias: uncertain -> SKIP (exit 0) — deferring only delays
-# the recycle (the hook re-checks next turn; PreCompact stays the reactive net),
-# whereas a mistimed restart interrupts an operator or a multi-turn merge.
+# recycle path. Bias: uncertain -> SKIP (exit 0) — deferring only delays the
+# recycle (the hook re-checks next turn; PreCompact stays the reactive net),
+# whereas a mistimed restart interrupts an operator or a multi-turn merge. Under
+# --prompt a deferral lets the prompt through.
 
 # (a) Attached session (all patrol roles): defer while a tmux client is watching.
 if [ -n "${TMUX:-}" ]; then
@@ -126,16 +215,40 @@ if [ "$role" = refinery ]; then
   fi
 fi
 
-# --- 3. Over threshold: recycle (HANDOFF mail + restart) ------------------
-echo "cycle-recycle: $AGENT at context=$TOKENS tokens (>=$THRESHOLD) — handoff + reset" >&2
+# --- 3. Recycle (HANDOFF mail + restart) ----------------------------------
+echo "cycle-recycle: $AGENT: $SUBJECT${BODY:+ ($BODY)} — handoff + reset" >&2
 
-# `gc handoff` (non-auto) writes the durable HANDOFF mail AND stops the runtime
-# for controller-restartable classes; for on-demand named patrol sessions it
-# only writes mail and returns. Non-auto is required so controller-restartable
-# patrols actually recycle — `--auto` would mail-only and never restart them.
-if ! gc handoff "context cycle: context reached $TOKENS tokens" >&2; then
-  echo "cycle-recycle: gc handoff failed (non-fatal); reset still attempted" >&2
+# A prompt the restart blocks never reaches this session, so the HANDOFF
+# carries it to the next.
+if [ "$MODE" = --prompt ]; then
+  PROMPT=$(printf '%s' "$PAYLOAD" | jq -r '.prompt // empty' 2>/dev/null)
+  [ -z "$PROMPT" ] || BODY="$BODY
+
+The session recycled before this prompt reached it:
+
+$PROMPT"
 fi
+
+# `gc handoff` (non-auto) writes the durable HANDOFF mail first. For a
+# controller-restartable session, which the always-mode witness and deacon are,
+# it then requests the restart and signals the controller; for an on-demand
+# named session, the refinery, it only writes the mail and clears any restart
+# already requested. Non-auto is required so controller-restartable patrols
+# actually recycle — `--auto` would mail-only and never restart them. Its exit
+# status does not say whether it requested the restart, since it exits 1 when
+# it cannot signal the controller after the request is durably set. Its report
+# on stdout does (cmd/gc/cmd_handoff.go): "Handoff: sent mail <id>, requesting
+# restart..." once the request is set, and "Handoff: sent mail <id> (named
+# session; restart skipped)." when it requests none. MAILED records that the
+# mail was sent, which a handoff that fails with no report leaves unknown.
+send_handoff() {
+  if [ -n "$BODY" ]; then gc handoff "$SUBJECT" "$BODY"; else gc handoff "$SUBJECT"; fi
+}
+RESTARTING=""; MAILED=""
+HANDOFF_OUT=$(send_handoff) && MAILED=1
+[ -z "$HANDOFF_OUT" ] || printf '%s\n' "$HANDOFF_OUT" >&2
+[ -n "$MAILED" ] || echo "cycle-recycle: gc handoff failed (non-fatal); reset still attempted" >&2
+case "$HANDOFF_OUT" in *", requesting restart"*) RESTARTING=1; MAILED=1 ;; esac
 
 # Reap this session's scratch now. The recycle abandons the tree whole — the
 # inheriting session gets a new id and a new tree — so the retiring session
@@ -164,18 +277,47 @@ if [ -n "$SID" ]; then
   fi
 fi
 
-# `gc session reset` is the actual restart trigger for on-demand named sessions
-# (a no-op for controller-restartable ones, which gc handoff already stopped),
-# and it clears any tripped named-session respawn circuit breaker. Best-effort:
-# on failure the controller's reconcile loop converges the restart anyway.
+# `gc session reset` requests a fresh restart for any session, which makes it
+# the refinery's only restart request, and it clears any tripped named-session
+# respawn circuit breaker. It signals the controller before it writes anything,
+# and the restart request is its last write, so a reset that fails requested
+# nothing: a restart the handoff requested still stands, and without one the
+# session keeps running and the hook tries again at its next check.
 # Target precedence GC_ALIAS -> GC_SESSION_ID: the refinery legitimately runs
 # with an empty GC_ALIAS (it uses GC_AGENT as its mailbox), so falling back to
 # the session ID keeps reset working for it. Both forms are accepted by
 # `gc session reset` (alias or session ID).
 RESET_TARGET="${GC_ALIAS:-${GC_SESSION_ID:-}}"
 if [ -n "$RESET_TARGET" ]; then
-  if ! gc session reset "$RESET_TARGET" >&2; then
-    echo "cycle-recycle: gc session reset failed (non-fatal); controller will reconcile" >&2
+  if gc session reset "$RESET_TARGET" >&2; then
+    RESTARTING=1
+  elif [ -n "$RESTARTING" ]; then
+    echo "cycle-recycle: gc session reset failed (non-fatal); the restart gc handoff requested stands" >&2
+  else
+    echo "cycle-recycle: gc session reset failed and gc handoff requested no restart; the session keeps running" >&2
+  fi
+fi
+
+# Under --prompt, block the prompt exactly when a restart is requested, by the
+# handoff or by the reset. A turn let through would be killed mid-command when
+# that restart lands, and a blocked prompt with no restart behind it would leave
+# the session idle on the old text, dropping each prompt it is sent. Claude Code
+# writes a blocked prompt's text to the session's transcript. A prompt let
+# through runs in this session, and the next session would act on it again from
+# the HANDOFF that carries it, so the hook archives that mail when the
+# handoff's report names it as sent with no restart requested.
+if [ "$MODE" = --prompt ]; then
+  if [ -n "$RESTARTING" ]; then
+    CARRIED="its HANDOFF mail carries this prompt"
+    [ -n "$MAILED" ] || CARRIED="gc handoff failed before confirming its HANDOFF mail, so this session's transcript may hold the only copy of this prompt"
+    jq -n --arg reason "cycle-recycle: $SUBJECT. The session restarts on the current text, and $CARRIED." \
+      '{decision: "block", reason: $reason}'
+  else
+    MAIL_ID=$(printf '%s\n' "$HANDOFF_OUT" | sed -n 's/^Handoff: sent mail \([^ ,]*\) (named session; restart skipped)\.$/\1/p' | head -n 1)
+    if [ -n "$MAIL_ID" ]; then
+      gc mail archive "$MAIL_ID" >&2 \
+        || echo "cycle-recycle: gc mail archive $MAIL_ID failed (non-fatal); that HANDOFF still carries a prompt this session ran" >&2
+    fi
   fi
 fi
 
