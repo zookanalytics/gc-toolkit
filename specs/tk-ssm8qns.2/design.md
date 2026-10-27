@@ -34,6 +34,19 @@ deleted. Approving decides six things.
 
   Nothing changes for the 99 armed beads, the 7 refinery handoffs, or a
   sitting's route of a bead its epic's park holds.
+
+  One kind of wait needs a repair in bd first. bd judges a `waits-for` edge by
+  its spawner's status rather than by its gate, both in `bd blocked` and in its
+  close rule. So its listing can leave out a bead that its own gate holds,
+  blame a parent that holds nothing, or name a spawner whose gate has opened
+  ([blocked-census.md](blocked-census.md#the-stores-rules)). Until the bd the
+  city runs judges the gate, `waits` answers a bead with a `waits-for` edge of
+  its own with an error, and each caller's policy for an error applies. No
+  store held such an edge at 20:12Z, so this costs nothing today.
+  tk-ssm8qns.5 tracks the repair, the report to upstream beads is parked for
+  you to send (tk-j692b1f), and tk-ssm8qns.6 drops the error once the repair
+  is in the city's bd. The alternative, holding the proof until then, would
+  hold the six members that wait on this Feature as well.
 - **An earlier ruling gives way.** A demand gate on a parent holds the parent's
   work that has not started, as every gate does, so deferred dispatch stops
   exempting it. No live bead sits under one. The cost: a member armed under a
@@ -197,7 +210,31 @@ next section lists.
   `pr-status-label.sh`, swaps in the same change.
 - `internal/gcbd` and `internal/daemon` become the store adapter, with an
   in-memory fake. It uses `gc bd` for writes, for reads that must see a fresh
-  write, and for the blocked set, and the supervisor API for other reads.
+  write, and for the blocked set, and the supervisor API for other reads. It
+  answers a bead with a `waits-for` edge of its own with an error. If
+  tk-ssm8qns.5 has closed by the time the adapter is built, the adapter
+  answers that bead from the listing too, and tk-ssm8qns.6 closes as not
+  needed.
+- The adapter's acceptance test runs the bd the city runs against a scratch
+  store, on a dolt sql-server of its own, since that bd is built without cgo
+  and opens no embedded store. Each case builds its beads, then compares the
+  adapter's answer with what the store does:
+  - a bead with a `blocks` edge onto an open bead is blocked on that bead, and
+    bd refuses its close;
+  - a bead held only through a blocked parent is blocked through the parent,
+    and bd closes it;
+  - a parentless bead on an `all-children` gate whose spawner closed with a
+    child still open is held out of `bd ready`, and `bd blocked` leaves it
+    out. The adapter returns the error;
+  - the same gate on a bead whose parent is not blocked is named by
+    `bd blocked` as held through that parent. The adapter returns the error;
+  - a bead whose `any-children` gate one closed child has opened, and that is
+    held only through a blocked parent, is named by `bd blocked` as blocked on
+    its open spawner. The adapter returns the error;
+  - a bead whose `also_blocks` edge holds on an open spawner with no open
+    child gets the error too.
+
+  tk-ssm8qns.6 turns each error case into the gate's answer.
 - The ledger as docs/gctk-architecture.md states it. Its registry is generated
   from the declarations, and a test fails when the generated file is stale.
   rig's `rig_check.<check>` key moves into a declaration in rig's package, and
@@ -220,7 +257,8 @@ next section lists.
 - `gctk waits blocked`, `pending` and `foreign` print one JSON record per bead,
   so a shell caller reads the answer with one call.
 - Go tests on the fake cover every row of the census's disagreement table, a
-  failed read, and each condition that puts a bead in flight.
+  failed read, a bead with a `waits-for` edge of its own, which gets the
+  adapter's error, and each condition that puts a bead in flight.
 
 **Unit 3: the callers.**
 

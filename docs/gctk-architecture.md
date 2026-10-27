@@ -206,9 +206,19 @@ and CI runs those tests on every PR.
 The store's rules are the store's own. The store adapter asks the store whether
 a bead is blocked or ready and returns its answer, and computes none itself.
 The supervisor serves the ready set but no blocked set, so the adapter reads
-the blocked set through `gc bd blocked`. The adapter's own tests drive it
-through a stub `gc` on `PATH`, so they pin the question it asks, and the
-domains' tests run on the fake.
+the blocked set through `gc bd blocked`. For a bead the store marks blocked,
+the listing names the bead's own waits or, when it has none, the parent it is
+held through. It judges a `waits-for` edge by its spawner's status rather
+than by its gate, though, and bd's close rule judges it the same way. So for a
+bead with a `waits-for` edge of its own, the listing can leave the bead out,
+blame a parent that holds nothing, or name a spawner whose gate has opened. The
+adapter answers such a bead with an error, and answers every other bead from
+the listing.
+
+The adapter's own tests drive it through a stub `gc` on `PATH`, so they pin the
+question it asks. Its acceptance test runs the bd the city runs against a
+scratch store, so it pins the answer that bd gives for each kind of wait, each
+gate included. The domains' tests run on the fake.
 
 ## Compositions
 
@@ -229,8 +239,14 @@ domains' tests run on the fake.
 
 `waits` owns the question, and the answer is the store's. A wait is a `blocks`
 or `conditional-blocks` edge onto a bead in the same store that is neither
-closed nor pinned, or a `waits-for` gate whose children have not all closed.
-The store applies waits two ways, and `waits` uses each where it applies.
+closed nor pinned, or a `waits-for` edge whose gate holds. A `waits-for` edge
+names a spawner, and its gate reads the spawner's parent-child children. An
+`all-children` gate, the default, holds while at least one child is neither
+closed nor pinned, even after the spawner itself has closed. An `any-children`
+gate holds while at least one child is neither closed nor pinned and none has
+closed. An edge that a formula cook marks `also_blocks` also holds while the
+spawner itself is neither closed nor pinned, whatever its children. The store
+applies waits two ways, and `waits` uses each where it applies.
 
 - **Work that has not started** is blocked while the store keeps it out of
   `bd ready` for a wait, its own or one on a parent-child ancestor, which the
@@ -260,8 +276,11 @@ The store applies waits two ways, and `waits` uses each where it applies.
 
 The rest follows from the store:
 
-- A wait is resolved once its target is closed or pinned. A target at any other
-  status holds, `in_progress` and `hooked` included.
+- A `blocks` or `conditional-blocks` wait is resolved once its target is closed
+  or pinned. A target at any other status holds, `in_progress` and `hooked`
+  included. A `waits-for` wait is resolved by its gate, not by its spawner's
+  status. A closed spawner with a child still open holds, and an open spawner
+  whose gate has opened does not, unless the edge is marked `also_blocks`.
 - An edge onto a bead in another store holds nothing, because the store
   resolves an edge only within itself. `waits` lists each such edge for a doctor
   check to report, and the ledger refuses to write one.
@@ -276,8 +295,11 @@ The rest follows from the store:
 
 `waits` computes no wait itself. It reads the store's blocked set with the
 blockers the store names on each bead, and the close times of the waits that
-have landed. It never walks the graph, so a change in the store's rule reaches
-every caller at once, and the pack's use of that rule is one package.
+have landed. It never walks the graph and never judges a gate, so a change in
+the store's rule reaches every caller at once, and the pack's use of that rule
+is one package. For a bead with a `waits-for` edge of its own, the store
+adapter returns an error, because bd's listing cannot answer it, and `waits`
+returns that error as it returns any read it could not make.
 
 ## The rules a domain move follows
 

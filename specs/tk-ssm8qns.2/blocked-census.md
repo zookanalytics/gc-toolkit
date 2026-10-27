@@ -1,6 +1,6 @@
 ---
 name: Census of "is this blocked?" at b25a5c06, and the answers the one rule changes
-description: Every place in gc-toolkit's runtime code that decides whether a bead is blocked, held, parked or ready, taken at b25a5c06, with the dependency rules among them, where their answers disagree, and what happens to each place under the design. Beside it are the store's own rules, read in the bd the city runs, the live beads on each disagreement, measured across every store the pack serves, and every answer the one rule in docs/gctk-architecture.md changes, for the operator to approve.
+description: Every place in gc-toolkit's runtime code that decides whether a bead is blocked, held, parked or ready, taken at b25a5c06, with the dependency rules among them, where their answers disagree, and what happens to each place under the design. Beside it are the store's own rules, read in the bd the city runs and tried against it in a scratch store, the live beads on each disagreement, measured across every store the pack serves, and every answer the one rule in docs/gctk-architecture.md changes, for the operator to approve.
 ---
 
 # "Is this blocked?": the census and what the one rule changes
@@ -13,17 +13,24 @@ serves, the city store and six rig stores, each pinned with `--db`.
 
 ## The store's rules
 
-Read in bd 1.3.2, the binary on the city's `PATH` (`bd version`: 9b65b9e19, a
-local patch on top), at beads commit 9b65b9e19.
+Read in bd 1.3.2, the binary on the city's `PATH` (`bd version`: 9b65b9e19,
+with Gas City's beads patches on top, which touch none of the code below), at
+beads commit 9b65b9e19.
 
 - **Blocked.** A bead is blocked (`is_blocked`) when its status is neither
   `closed` nor `pinned` and one of these holds: a `blocks` or
   `conditional-blocks` edge onto a bead in the same store whose status is
   neither `closed` nor `pinned`; a parent-child parent that is itself blocked;
-  or a `waits-for` gate whose children have not closed
+  or a `waits-for` edge whose gate holds
   (`internal/storage/issueops/blocked_state.go`, `markBlockedTemplateForIssues`).
-  The edge rule joins on the target's row, so an edge onto an id the store does
-  not hold blocks nothing. A target at `in_progress` or `hooked` blocks.
+  The gate reads the spawner's parent-child children (`waitsForGateBlockedSQL`).
+  An `all-children` gate, the default, holds while at least one child is
+  neither `closed` nor `pinned`, whatever the spawner's own status. An
+  `any-children` gate holds while at least one child is neither `closed` nor
+  `pinned` and none is `closed`. An edge a formula cook marks `also_blocks`
+  also holds while the spawner itself is neither `closed` nor `pinned`. The
+  edge rule joins on the target's row, so an edge onto an id the store does not
+  hold blocks nothing. A target at `in_progress` or `hooked` blocks.
 - **Ready.** `bd ready` offers a bead whose status is `open` (or a custom status
   of category active, and this city declares none), that is not pinned, not
   blocked, not ephemeral, not deferred to a future time, not a child of a
@@ -34,10 +41,25 @@ local patch on top), at beads commit 9b65b9e19.
   and has a live `blocks`, `waits-for` or `conditional-blocks` blocker of its
   own. A bead blocked only through its parent closes
   (`internal/storage/issueops/close.go` and `IsBlockedInTx` in
-  `dependency_queries.go`).
-- **`bd blocked`'s attribution.** Each blocked bead lists its own live blockers.
-  A bead with none is attributed to its parent instead
-  (`internal/storage/issueops/blocked.go`, `GetBlockedIssuesInTx`).
+  `dependency_queries.go`). A blocker of its own is live when its status is
+  neither `closed` nor `pinned`, a `waits-for` spawner included, so the close
+  rule does not read the gate. A bead that its own gate holds on a closed
+  spawner closes, and an open spawner whose gate has opened still refuses the
+  close.
+- **`bd blocked`.** It reads the beads the store marks blocked and lists each
+  with its own live blockers, judged as the close rule judges them. A bead with
+  none is attributed to its parent, and a bead with neither is left out
+  (`internal/storage/issueops/blocked.go`, `GetBlockedIssuesInTx`, which bd's
+  embedded and server paths share and `bd ready --explain` reuses). For a bead
+  whose own waits are `blocks` or `conditional-blocks` edges, that is the
+  store's answer: when none of its own is live, only a blocked parent can mark
+  it, so the parent it names is the one it is held through. For a bead with a
+  `waits-for` edge of its own it is not. The listing leaves out a parentless
+  bead that its own gate holds on a closed spawner, names the parent of one
+  that has a parent, and names a spawner whose gate has opened. It also
+  discards a failed parent read, which drops every bead held through its
+  parent with no error. Upstream main at 41b0a80dd has the same code, and
+  `bd show --json` carries neither `is_blocked` nor an edge's gate.
 - **Statuses.** `hooked` is a work-in-progress status like `in_progress`, and
   `pinned` is a frozen one like `deferred` (`internal/types/types.go`,
   `BuiltInStatusCategory`).
@@ -45,6 +67,21 @@ local patch on top), at beads commit 9b65b9e19.
   `internal/api/supervisor_city_routes.go`), so a reader of the blocked set
   reads it through `gc bd blocked`. On the gc-toolkit store at a host load of
   24, `gc bd blocked` took 1.0 to 1.6 s and `gc bd ready` 1.3 to 1.4 s.
+
+On 2026-10-27 the bd the city runs gave these answers in a scratch store, on a
+dolt sql-server of its own:
+
+| Case | The store marks it blocked | `bd blocked` | `bd close` |
+|---|---|---|---|
+| A parentless bead on an `all-children` gate whose spawner closed with a child still open | yes | leaves it out | closes it |
+| The same gate, on a bead whose parent is not blocked | yes | names the parent | closes it |
+| A bead whose `any-children` gate one closed child has opened, held only through a blocked parent | yes | names the open spawner | refuses, naming the spawner |
+| A bead with a `blocks` edge onto an open bead | yes | names that bead | refuses |
+
+The first case needs no forced close: a spawner that closes with no children
+and then gains one leaves its waiter in the same state. No store held a
+`waits-for` or `conditional-blocks` edge when all seven were read again at
+20:12Z.
 
 ## The census
 
@@ -168,7 +205,7 @@ of a different rule, and each stays until its member deletes it.
 | A blocker at `hooked` or `in_progress` | holds everywhere | holds |
 | A bead whose own status is `hooked` | not ready for the store; stranded in deferred dispatch's list; refused by `arm`; parked at load-context; claimed for bead-context, gc-helm's park survey and queue-priority; idle on the board | in flight; its status is not a wait, so only its own waits hold it |
 | The statuses that resolve a blocker | closed or pinned (D1 to D10); closed only (D11 to D13, D17 to D26); anything outside the live set (D14 to D16), so a custom status resolves there | closed or pinned |
-| The edge types that hold | `blocks`, `conditional-blocks`, `waits-for` and the cascade in the store's queries; `blocks` alone elsewhere; D15 adds children and PR references, and D19 and D20 add `until` | the store's. A child or a PR reference that holds a merge is the merge's own rule, and `until` is dispatch's disposal, not a wait |
+| The edge types that hold | `blocks`, `conditional-blocks`, `waits-for` and the cascade in the store's queries; `blocks` alone elsewhere; D15 adds children and PR references, and D19 and D20 add `until` | the store's. A child or a PR reference that holds a merge is the merge's own rule, and `until` is dispatch's disposal, not a wait. A bead with a `waits-for` edge of its own gets an error until bd's listing judges the gate |
 | When a bead is in flight | `hold-lib.sh`: it carries `branch`, `merge_result` or `rejection_reason` | steering.md's definition, which adds a claim and a run past load-context |
 | A failed read | refuse, proceed, held or empty, by caller | an error. Each caller keeps its own policy for what an error means |
 
@@ -219,7 +256,10 @@ own work, which reaches the pool once the park is released
   as the target of `--waiting-on`, since an edge onto it holds nothing.
 - A demand gate on an ancestor holds the work under it that has not started.
   `hold-lib.sh`'s exemption goes.
-- `conditional-blocks` and `waits-for` hold wherever the store says they do.
+- `conditional-blocks` holds wherever the store says it does. A bead with a
+  `waits-for` edge of its own gets an error from `waits` until the bd the city
+  runs judges the gate in its listing and its close rule
+  ([design.md](design.md#what-the-operator-approves)).
 - A claimed bead, and a bead with a run past load-context, is in flight, so an
   ancestor's wait no longer holds it in deferred dispatch.
 - An own blocker in another store no longer keeps a handoff out of the
