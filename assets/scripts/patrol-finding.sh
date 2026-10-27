@@ -23,8 +23,9 @@
 #                     [--dry-run]
 # Callers: formulas/mol-deacon-patrol.toml, formulas/mol-witness-patrol.toml,
 # the refinery reconcile's assets/scripts/merge-tail-report.sh and
-# assets/scripts/pr-facts.sh, and the feedback miner's
-# assets/scripts/feedback-miner.sh.
+# assets/scripts/pr-facts.sh, the feedback miner's
+# assets/scripts/feedback-miner.sh, and the boot-health order's
+# assets/scripts/boot-health.sh.
 # The visit is not this path's exit. A finding needing the operator's judgment
 # gets there through the reaction's `ruling` or `recommend` disposition, which
 # files a human gate on it, and orders/gate-visit-sweep files that gate's visit.

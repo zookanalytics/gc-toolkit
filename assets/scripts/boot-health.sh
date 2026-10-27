@@ -5,6 +5,12 @@
 # mismatch on a fresh-wake session), and a failed nudge would let the shutdown
 # dance kill a healthy deacon — the dog pool exists, but boot-health
 # deliberately files no warrants. See orders/boot-health.toml.
+# THE REPORT IS A FINDING, filed through patrol-finding.sh. It is not mail,
+# because the operator reads the board and not the "human" mailbox, and a
+# finding reaches the board through the first reaction that disposes it. One
+# bead per deacon, keyed deacon-cold.<deacon>, carries every episode. A cold
+# episode files or refreshes it. A fresh wisp that ends an episode it reported
+# records the end on it (--cleared).
 # PRECEDENCE: the patrol-wisp age measures WORK COMPLETED and wins;
 # the pane (busy marker, movement hash with digits normalized out — timers
 # advance on their own) is a FALLBACK, deciding only when the wisp ledger
@@ -14,20 +20,29 @@
 set -euo pipefail
 
 DEACON="${BOOT_HEALTH_DEACON:-gc-toolkit.deacon}"
-REPORT_TO="${BOOT_HEALTH_REPORT_TO:-human}"
+# The rig whose store holds the finding: the one the deacon's own patrol files
+# its findings in when no GC_RIG names another.
+FINDING_RIG="${BOOT_HEALTH_RIG:-gc-toolkit}"
+FINDING="${GC_PATROL_FINDING_TOOL:-$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/patrol-finding.sh}"
+# The key names the situation, so each episode lands on the bead the first
+# one filed for as long as that bead is live.
+FINDING_KEY="deacon-cold.$(printf '%s' "$DEACON" | tr -c 'A-Za-z0-9._-' '-')"
 
 # Thresholds. WISP_FRESH is ~2.6-3 observed deacon cycles of margin (a wisp is
 # already event_timeout old when its cycle starts; max healthy age is a full
 # cycle). COUPLED to mol-deacon-patrol's event_timeout — change one, re-derive
 # the other, or this becomes a permanent false-positive generator.
 WISP_FRESH="${BOOT_HEALTH_WISP_FRESH:-3600}"       # wisp newer than this = healthy
-REPORT_AFTER="${BOOT_HEALTH_REPORT_AFTER:-1800}"   # cold this long = mail once
-REPORT_EVERY="${BOOT_HEALTH_REPORT_EVERY:-21600}"  # re-mail a CONTINUING episode
+REPORT_AFTER="${BOOT_HEALTH_REPORT_AFTER:-1800}"   # cold this long = file the finding
+REPORT_EVERY="${BOOT_HEALTH_REPORT_EVERY:-3600}"   # refresh it while the episode CONTINUES
 PEEK_LINES="${BOOT_HEALTH_PEEK_LINES:-30}"
 
 # Bounds on every gc call: `-k` adds the hard kill plain `timeout` lacks.
 CALL_TIMEOUT="${BOOT_HEALTH_CALL_TIMEOUT:-15}"
 KILL_AFTER="${BOOT_HEALTH_KILL_AFTER:-5}"
+# The finding call makes several store reads and writes, and a first filing also
+# slings its reaction, so it has its own, longer bound.
+FILE_TIMEOUT="${BOOT_HEALTH_FILE_TIMEOUT:-150}"
 
 # Busy markers: both CLIs print these while mid-turn. Held as one single-quoted
 # literal, because a `}` inside ${VAR:-default} closes the expansion early.
@@ -65,29 +80,38 @@ BH_TMP=""
 trap 'rm -f "$BH_TMP" 2>/dev/null' EXIT
 trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 
-# Bounded, exit status PRESERVED (124 timeout / 128+n killed) — the report
-# step needs the distinction. CALL_TIMEOUT=0 disables the bound (as `timeout 0`
-# already means no limit) and drops a timeout fork per call: the hermetic test
-# sets it for its instant-return reads and overrides it back to a short bound
-# for the one case that must observe a real timeout.
+# Bounded, exit status preserved (124 timeout / 128+n killed). CALL_TIMEOUT=0
+# disables the bound (as `timeout 0` already means no limit) and drops a timeout
+# fork per call: the hermetic test sets it for its instant-return reads.
+# FILE_TIMEOUT=0 does the same for the finding call.
 if [ "$CALL_TIMEOUT" = "0" ]; then
   gc_call_rc() { "$@"; }
 else
   gc_call_rc() { timeout -k "$KILL_AFTER" "$CALL_TIMEOUT" "$@"; }
 fi
+if [ "$FILE_TIMEOUT" = "0" ]; then
+  finding_call_rc() { "$FINDING" "$@"; }
+else
+  finding_call_rc() { timeout -k "$KILL_AFTER" "$FILE_TIMEOUT" "$FINDING" "$@"; }
+fi
 
 # The probe form: a failed read is an empty one (no evidence). Right for
-# reads, WRONG for the mail — see the three-way split in step 7.
+# reads, wrong for the finding, whose exit status decides the pacing (step 7).
 gc_call() { gc_call_rc "$@" 2>/dev/null || true; }
 
+iso_of() { jq -rn --argjson s "$1" '$s | todateiso8601' 2>/dev/null; }
+
 # --- state (a file not starting with $STATE_MAGIC is not ours) ---------------
-pane_hash=""; cold_since=0; last_report=0
+# clear_owed=1 says an episode that filed the finding has ended and the finding
+# does not yet record it.
+pane_hash=""; cold_since=0; last_report=0; clear_owed=0
 if [ "$STATE_OK" = "1" ] && [ -f "$STATE" ] && [ "$(head -n1 "$STATE" 2>/dev/null)" = "$STATE_MAGIC" ]; then
     while IFS='=' read -r k v; do
         case "$k" in
             pane_hash)   pane_hash="$v" ;;
             cold_since)  cold_since="${v:-0}" ;;
             last_report) last_report="${v:-0}" ;;
+            clear_owed)  clear_owed="${v:-0}" ;;
         esac
     done < <(tail -n +2 "$STATE" 2>/dev/null)
 fi
@@ -104,12 +128,36 @@ save_state() {
         printf 'pane_hash=%s\n'   "$pane_hash"
         printf 'cold_since=%s\n'  "$cold_since"
         printf 'last_report=%s\n' "$last_report"
+        printf 'clear_owed=%s\n'  "$clear_owed"
     } > "$tmp" 2>/dev/null && mv -f "$tmp" "$STATE" 2>/dev/null || rm -f "$tmp" 2>/dev/null
     BH_TMP=""
 }
 
 # Recovery closes the episode: next coldness is a NEW episode and reports again.
-clear_state() { pane_hash="$1"; cold_since=0; last_report=0; save_state; }
+# An episode that filed the finding owes it the record that the episode ended.
+# Only a fresh wisp writes that record (step 2), so it stays owed until then.
+clear_state() {
+    if [ "$last_report" -gt 0 ]; then clear_owed=1; fi
+    pane_hash="$1"; cold_since=0; last_report=0; save_state
+}
+
+# record_cleared — record on the finding that the episode has ended. Returns 0
+# when the record landed, or when no live finding was left to take it.
+record_cleared() {
+    local msg out rc=0
+    msg="$DEACON is patrolling again: newest patrol wisp updated $(iso_of "$WISP_T") (status ${WISP_STATUS:-unknown}), inside the ${WISP_FRESH}s freshness gate"
+    if [ "$cold_since" -gt 0 ]; then msg="$msg; cold since $(iso_of "$cold_since")"; fi
+    out="$(finding_call_rc --key "$FINDING_KEY" --scope boot-health --rig "$FINDING_RIG" \
+        --cleared --message "$msg." 2>&1)" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+        echo "boot-health: recorded the end of the cold episode on the finding"
+        printf '%s\n' "$out"
+        return 0
+    fi
+    echo "boot-health: the end of the cold episode is NOT recorded (rc=$rc); the next fresh pass retries"
+    printf '%s\n' "$out"
+    return 1
+}
 
 # --- 1. patrol wisp ----------------------------------------------------------
 # Three ways this query false-empties against a healthy deacon, all closed:
@@ -129,6 +177,7 @@ fi
 
 WISP_AGE=""
 WISP_STATUS=""
+WISP_T=""
 if [ -n "$WISPS" ]; then
     # Newest row by updated_at, carrying both fields.
     WISP_ROW="$(printf '%s' "$WISPS" | jq -r '
@@ -143,7 +192,7 @@ if [ -n "$WISPS" ]; then
             # jq reads this UTC form the same on every host; date(1) needs -d
             # on GNU and -j -f on BSD.
             T="$(jq -rn --arg t "$NEWEST" '$t | fromdateiso8601' 2>/dev/null)" || T=""
-            [ -n "$T" ] && WISP_AGE=$((NOW - T))
+            [ -n "$T" ] && WISP_AGE=$((NOW - T)) && WISP_T="$T"
         fi
     fi
 fi
@@ -151,8 +200,13 @@ fi
 # --- 2. a FRESH wisp = healthy, whatever the pane would show -----------------
 # Read no pane: work completed is the answer, and no pane fact can change it.
 # The stored pane hash goes with the episode, so the next pane read starts a
-# new movement baseline.
+# new movement baseline. Work completed is also the one proof that the deacon
+# is patrolling again, so this is the pass that records the end of an episode
+# the finding reported. A record that does not land stays owed to the next
+# fresh pass.
 if [ -n "$WISP_AGE" ] && [ "$WISP_AGE" -lt "$WISP_FRESH" ]; then
+    if [ "$last_report" -gt 0 ]; then clear_owed=1; last_report=0; fi
+    if [ "$clear_owed" = "1" ] && record_cleared; then clear_owed=0; fi
     clear_state ""            # wisp young: cycling normally, whatever its status
     exit 0
 fi
@@ -201,68 +255,71 @@ COLD=$((NOW - cold_since))
 [ "$COLD" -ge "$REPORT_AFTER" ] || { save_state; exit 0; }
 
 # --- 7. report ---------------------------------------------------------------
-# Once per episode, then at REPORT_EVERY while it persists, so a genuine wedge
-# does not go silent after one mail and a flapping deacon does not spam.
+# Once per episode, then at REPORT_EVERY while it persists, so the finding's
+# finding.last_seen keeps up with a genuine wedge and a flapping deacon does
+# not churn the bead.
 DUE=0
 [ "$last_report" -eq 0 ] && DUE=1
 [ "$last_report" -gt 0 ] && [ $((NOW - last_report)) -ge "$REPORT_EVERY" ] && DUE=1
 [ "$DUE" -eq 1 ] || { save_state; exit 0; }
 
 # Report what was OBSERVED, leading with the wisp signal (the trigger); the
-# pane facts are context, never the trigger.
+# pane facts are context, never the trigger. The text names instants, not
+# ages, so a refresh inside one episode repeats it and the finding counts a
+# recurrence without a note. A new episode or a change in the pane facts
+# changes the text.
 AGE_TXT="no live patrol wisp"
-[ -n "$WISP_AGE" ] && AGE_TXT="newest patrol wisp $((WISP_AGE / 60))m old (status ${WISP_STATUS:-unknown})"
+[ -n "$WISP_T" ] && AGE_TXT="newest patrol wisp updated $(iso_of "$WISP_T") (status ${WISP_STATUS:-unknown})"
 
-PANE_MOVE_TXT="static (digits normalized)"
-[ "$PANE_MOVED" -eq 1 ] && PANE_MOVE_TXT="changing (digits normalized)"
+PANE_MOVE_TXT="static"
+[ "$PANE_MOVED" -eq 1 ] && PANE_MOVE_TXT="changing"
 PANE_BUSY_TXT="busy marker absent"
 [ "$PANE_BUSY" -eq 1 ] && PANE_BUSY_TXT="busy marker present"
 
-SUMMARY="$DEACON cold for $((COLD / 60))m — $AGE_TXT"
+COLD_ISO="$(iso_of "$cold_since")"
+SUMMARY="$DEACON cold since $COLD_ISO: $AGE_TXT, past the ${WISP_FRESH}s freshness gate; pane $PANE_MOVE_TXT, $PANE_BUSY_TXT"
+TITLE="$DEACON went cold: no patrol completed within boot-health's freshness gate"
+MESSAGE="$SUMMARY.
 
-# Delivery is CHECKED, not assumed: last_report silences the next window, so
-# a send that never happened must not be recorded. Same three-way split as
-# quota-park-nudge's escalation mail.
-MAIL_RC=0
-gc_call_rc gc mail send "$REPORT_TO" -s "BOOT_HEALTH: $SUMMARY" -m "boot-health (exec order, no LLM) has seen no patrol progress from $DEACON for $((COLD / 60)) minutes.
-
-Coldness is judged on the patrol-wisp signal — work COMPLETED — not on the pane.
-The wisp ledger is readable and its newest patrol wisp is stale or absent past
-the freshness gate. The pane does not decide this: an expired-login session
-paints a busy, moving pane while completing no work, so the pane line below is
-context, not the trigger (tk-uz3de).
+boot-health, an exec order with no LLM, has seen no patrol progress from
+$DEACON since $COLD_ISO. It judges coldness on the patrol-wisp signal, which
+records work COMPLETED: the wisp ledger is readable, and its newest patrol wisp
+is stale or absent past the freshness gate. The pane does not decide this. An
+expired-login session paints a busy, moving pane while completing no work, so
+the pane line below is context, not the trigger.
 
   patrol wisp     $AGE_TXT
   freshness gate  ${WISP_FRESH}s
-  cold since      $(jq -rn --argjson s "$cold_since" '$s | todateiso8601' 2>/dev/null)
-  pane            $PANE_MOVE_TXT; $PANE_BUSY_TXT
+  cold since      $COLD_ISO
+  pane            $PANE_MOVE_TXT (digits normalized); $PANE_BUSY_TXT
 
-This order does NOT nudge or file warrants. Escalation is deliberately a human
-decision until nudge delivery to always/wake_mode=fresh sessions is trustworthy
-— 4 of 5 nudges to this session failed on 'queued nudge session fence
-mismatch', which would also disable mol-shutdown-dance's pardon path and let it
-kill a healthy deacon. See lx-llzfk and tk-qdhnd.
+boot-health does not nudge the deacon and files no warrants. Nudge delivery to
+this fresh-wake session is unreliable, and a failed nudge would let the
+shutdown dance kill a healthy deacon, so what to do about a cold deacon is a
+decision for a person or a reaction. boot-health refreshes this finding while
+the episode lasts, and records on it when a fresh patrol wisp shows the deacon
+patrolling again.
 
-To inspect (the wisp query carries no --status on purpose — a poured-but-
-unclaimed wisp is 'open', and filtering on in_progress reports [] against a
-deacon that is patrolling normally):
+To inspect (the wisp query carries no --status on purpose: a poured-but-unclaimed
+wisp is 'open', and filtering on in_progress reports [] against a deacon that is
+patrolling normally):
   gc session peek $DEACON --lines 50
-  gc bd list --assignee=$DEACON --type=molecule --include-infra --limit=0 --json \\
-    | jq '[.[] | select(.title == \"mol-deacon-patrol\") | {id, status, updated_at}]'" >/dev/null 2>&1 || MAIL_RC=$?
+  gc bd list --db $WISP_DB --assignee=$DEACON --type=molecule --include-infra --limit=0 --json \\
+    | jq '[.[] | select(.title == \"mol-deacon-patrol\") | {id, status, updated_at}]'"
 
-# save_state runs on every branch; only last_report is conditional.
-if [ "$MAIL_RC" -eq 0 ]; then
-    # Confirmed: seen to completion. Pace the next report off it.
-    last_report="$NOW"
+# The key dedups a filing, so a call that failed or timed out is retried on the
+# next pass rather than paced: only a confirmed one sets last_report, which
+# silences the next REPORT_EVERY window. A confirmed report also settles a clear
+# still owed to an earlier episode, because the finding is live again.
+FILE_RC=0
+FILE_OUT="$(finding_call_rc --key "$FINDING_KEY" --scope boot-health --rig "$FINDING_RIG" \
+    --priority 1 --title "$TITLE" --message "$MESSAGE" 2>&1)" || FILE_RC=$?
+if [ "$FILE_RC" -eq 0 ]; then
+    last_report="$NOW"; clear_owed=0
     save_state
-    echo "boot-health: reported to $REPORT_TO — $SUMMARY"
-elif [ "$MAIL_RC" -eq 124 ] || [ "$MAIL_RC" -ge 128 ]; then
-    # AMBIGUOUS: paced as sent — mail is durable and a retry would duplicate.
-    last_report="$NOW"
-    save_state
-    echo "boot-health: report UNCONFIRMED (rc=$MAIL_RC) to $REPORT_TO — paced as sent, not resent this episode — $SUMMARY"
+    echo "boot-health: reported — $SUMMARY"
 else
-    # Fast rejection: nothing delivered, nothing paced; retries next pass.
     save_state
-    echo "boot-health: report FAILED (rc=$MAIL_RC) to $REPORT_TO — retries next cycle — $SUMMARY"
+    echo "boot-health: report FAILED (rc=$FILE_RC) — retries next pass — $SUMMARY"
 fi
+if [ -n "$FILE_OUT" ]; then printf '%s\n' "$FILE_OUT"; fi
