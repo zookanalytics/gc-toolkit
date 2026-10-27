@@ -212,13 +212,24 @@ held through. It judges a `waits-for` edge by its spawner's status rather
 than by its gate, though, and bd's close rule judges it the same way. So for a
 bead with a `waits-for` edge of its own, the listing can leave the bead out,
 blame a parent that holds nothing, or name a spawner whose gate has opened. The
-adapter answers such a bead with an error, and answers every other bead from
-the listing.
+adapter answers such a bead with an error.
+
+The listing can also lose beads to a read that failed. When its read of parents
+fails, `gc bd blocked` leaves out every bead held only through a parent and
+still exits 0. So the adapter also reads the ids the store marks blocked,
+through `gc bd sql` with the query the listing starts from, and answers a
+marked bead that the listing leaves out with an error. It answers every other
+bead from the listing. The two reads are not one transaction, so a bead that
+changes between them can get an error, which the next read clears. The blocked
+mark on the supervisor's bead rows cannot stand in for that read, because it is
+Gas City's readiness answer, which also holds a bead whose blocker closed with
+`gc.work_outcome=blocked`.
 
 The adapter's own tests drive it through a stub `gc` on `PATH`, so they pin the
-question it asks. Its acceptance test runs the bd the city runs against a
-scratch store, so it pins the answer that bd gives for each kind of wait, each
-gate included. The domains' tests run on the fake.
+questions it asks, and a marked bead that the stub listing leaves out gets the
+error. Its acceptance test runs the bd the city runs against a scratch store,
+so it pins the answer that bd gives for each kind of wait, each gate included,
+and the beads it marks blocked. The domains' tests run on the fake.
 
 ## Compositions
 
@@ -300,7 +311,13 @@ have landed. It never walks the graph and never judges a gate, so a change in
 the store's rule reaches every caller at once, and the pack's use of that rule
 is one package. For a bead with a `waits-for` edge of its own, the store
 adapter returns an error, because bd's listing cannot answer it, and `waits`
-returns that error as it returns any read it could not make.
+passes that error on as its own kind. A read that failed can answer on the next
+pass, but this error stands until the bd the city runs judges the gate, so no
+caller applies its policy for a failed read to it. A caller that acts on the
+answer treats the edge as a wait that holds: deferred dispatch does not pour the
+bead, the refinery does not merge it, a takeaway does not route or assign it, an
+`until` disposal does not close it, and a park on it keeps its edge. A check, a
+listing or the board shows the edge as one that `waits` could not judge.
 
 ## The rules a domain move follows
 

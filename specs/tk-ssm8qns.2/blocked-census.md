@@ -58,15 +58,27 @@ beads commit 9b65b9e19.
   bead that its own gate holds on a closed spawner, names the parent of one
   that has a parent, and names a spawner whose gate has opened. It also
   discards a failed parent read, which drops every bead held through its
-  parent with no error. Upstream main at 41b0a80dd has the same code, and
-  `bd show --json` carries neither `is_blocked` nor an edge's gate.
+  parent with no error, and `--parent` discards a failed read of that parent's
+  children the same way. Its first read, the ids marked blocked
+  (`is_blocked = 1` with a status neither `closed` nor `pinned`, from the
+  issues and the wisps table), returns its errors, so that query run through
+  `gc bd sql` gives the whole set to check the listing against. Upstream main
+  at 41b0a80dd has the same code, and `bd show --json` carries neither
+  `is_blocked` nor an edge's gate.
 - **Statuses.** `hooked` is a work-in-progress status like `in_progress`, and
   `pinned` is a frozen one like `deferred` (`internal/types/types.go`,
   `BuiltInStatusCategory`).
 - **The supervisor** serves `/beads/ready` and no blocked route (Gas City
   `internal/api/supervisor_city_routes.go`), so a reader of the blocked set
-  reads it through `gc bd blocked`. On the gc-toolkit store at a host load of
-  24, `gc bd blocked` took 1.0 to 1.6 s and `gc bd ready` 1.3 to 1.4 s.
+  reads it through `gc bd blocked`. Its bead rows carry an `is_blocked` mark,
+  but that mark is Gas City's readiness answer. Gas City reads bd's column
+  through `bd sql` on a Dolt store, also marks a bead whose blocker closed with
+  `gc.work_outcome=blocked`, and serves the mark from a cache that trails a
+  write (`internal/beads/bdstore_ready_projection.go`,
+  `ready_projection_work_outcome.go`). On the gc-toolkit store at a host load of
+  24, `gc bd blocked` took 1.0 to 1.6 s and `gc bd ready` 1.3 to 1.4 s. At a
+  load of 12 to 16 on 2026-10-27, the marks read took 0.26 to 0.31 s and
+  `gc bd blocked` 0.49 to 0.59 s, and both named the same 404 beads.
 
 On 2026-10-27 the bd the city runs gave these answers in a scratch store, on a
 dolt sql-server of its own:
@@ -205,9 +217,9 @@ of a different rule, and each stays until its member deletes it.
 | A blocker at `hooked` or `in_progress` | holds everywhere | holds |
 | A bead whose own status is `hooked` | not ready for the store; stranded in deferred dispatch's list; refused by `arm`; parked at load-context; claimed for bead-context, gc-helm's park survey and queue-priority; idle on the board | in flight; its status is not a wait, so only its own waits hold it |
 | The statuses that resolve a blocker | closed or pinned (D1 to D10); closed only (D11 to D13, D17 to D26); anything outside the live set (D14 to D16), so a custom status resolves there | closed or pinned |
-| The edge types that hold | `blocks`, `conditional-blocks`, `waits-for` and the cascade in the store's queries; `blocks` alone elsewhere; D15 adds children and PR references, and D19 and D20 add `until` | the store's. A child or a PR reference that holds a merge is the merge's own rule, and `until` is dispatch's disposal, not a wait. A bead with a `waits-for` edge of its own gets an error until bd's listing judges the gate |
+| The edge types that hold | `blocks`, `conditional-blocks`, `waits-for` and the cascade in the store's queries; `blocks` alone elsewhere; D15 adds children and PR references, and D19 and D20 add `until` | the store's. A child or a PR reference that holds a merge is the merge's own rule, and `until` is dispatch's disposal, not a wait. A bead with a `waits-for` edge of its own gets an error until bd's listing judges the gate, and every caller holds it until then |
 | When a bead is in flight | `hold-lib.sh`: it carries `branch`, `merge_result` or `rejection_reason` | steering.md's definition, which adds a claim and a run past load-context |
-| A failed read | refuse, proceed, held or empty, by caller | an error. Each caller keeps its own policy for what an error means |
+| A failed read | refuse, proceed, held or empty, by caller | an error. Each caller keeps its own policy for what an error means. A bead the store marks blocked that `bd blocked` leaves out gets one too. The error for a bead with a `waits-for` edge of its own is not a failed read, since it stands until bd's repair, so no caller applies that policy to it |
 
 ## Live beads on each disagreement
 
@@ -259,7 +271,8 @@ own work, which reaches the pool once the park is released
 - `conditional-blocks` holds wherever the store says it does. A bead with a
   `waits-for` edge of its own gets an error from `waits` until the bd the city
   runs judges the gate in its listing and its close rule
-  ([design.md](design.md#what-the-operator-approves)).
+  ([design.md](design.md#what-the-operator-approves)). Every caller holds such
+  a bead until then, even once its gate opens.
 - A claimed bead, and a bead with a run past load-context, is in flight, so an
   ancestor's wait no longer holds it in deferred dispatch.
 - An own blocker in another store no longer keeps a handoff out of the

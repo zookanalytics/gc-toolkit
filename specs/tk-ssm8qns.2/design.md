@@ -41,12 +41,17 @@ deleted. Approving decides six things.
   blame a parent that holds nothing, or name a spawner whose gate has opened
   ([blocked-census.md](blocked-census.md#the-stores-rules)). Until the bd the
   city runs judges the gate, `waits` answers a bead with a `waits-for` edge of
-  its own with an error, and each caller's policy for an error applies. No
-  store held such an edge at 20:12Z, so this costs nothing today.
-  tk-ssm8qns.5 tracks the repair, the report to upstream beads is parked for
-  you to send (tk-j692b1f), and tk-ssm8qns.6 drops the error once the repair
-  is in the city's bd. The alternative, holding the proof until then, would
-  hold the six members that wait on this Feature as well.
+  its own with an error. Unlike a failed read, that error stands until the
+  repair, so every caller holds such a bead, even once its gate opens. No
+  store held such an edge at 20:12Z, so this costs nothing today. The same
+  repair makes `bd blocked` return an error when its read of parents fails.
+  Today it drops every bead held through a parent and exits 0, so until then
+  the adapter checks the listing against the beads the store marks blocked,
+  and a bead the listing lost gets an error. tk-ssm8qns.5 tracks the repair,
+  the report to upstream beads is parked for you to send (tk-j692b1f), and
+  tk-ssm8qns.6 drops the error and the check once the repair is in the city's
+  bd. The alternative, holding the proof until then, would hold the six
+  members that wait on this Feature as well.
 - **An earlier ruling gives way.** A demand gate on a parent holds the parent's
   work that has not started, as every gate does, so deferred dispatch stops
   exempting it. No live bead sits under one. The cost: a member armed under a
@@ -211,10 +216,13 @@ next section lists.
 - `internal/gcbd` and `internal/daemon` become the store adapter, with an
   in-memory fake. It uses `gc bd` for writes, for reads that must see a fresh
   write, and for the blocked set, and the supervisor API for other reads. It
-  answers a bead with a `waits-for` edge of its own with an error. If
-  tk-ssm8qns.5 has closed by the time the adapter is built, the adapter
-  answers that bead from the listing too, and tk-ssm8qns.6 closes as not
-  needed.
+  answers a bead with a `waits-for` edge of its own with an error. It also
+  reads the ids the store marks blocked, through `gc bd sql` with the query
+  `bd blocked` starts from over both of its tables, and answers a marked bead
+  that the listing leaves out with an error. Its tests on a stub `gc` cover
+  that bead. If tk-ssm8qns.5 has closed by the time the adapter is built, the
+  adapter answers every bead from the listing and reads no marks, and
+  tk-ssm8qns.6 closes as not needed.
 - The adapter's acceptance test runs the bd the city runs against a scratch
   store, on a dolt sql-server of its own, since that bd is built without cgo
   and opens no embedded store. Each case builds its beads, then compares the
@@ -232,9 +240,12 @@ next section lists.
     held only through a blocked parent, is named by `bd blocked` as blocked on
     its open spawner. The adapter returns the error;
   - a bead whose `also_blocks` edge holds on an open spawner with no open
-    child gets the error too.
+    child gets the error too;
+  - the marks read names every bead that a case above holds, the one that
+    `bd blocked` leaves out included.
 
-  tk-ssm8qns.6 turns each error case into the gate's answer.
+  tk-ssm8qns.6 turns each error case into the gate's answer and drops the
+  marks read.
 - The ledger as docs/gctk-architecture.md states it. Its registry is generated
   from the declarations, and a test fails when the generated file is stale.
   rig's `rig_check.<check>` key moves into a declaration in rig's package, and
@@ -255,7 +266,9 @@ next section lists.
   waits are pending, which wait edges point into another store, and whether a
   bead is in flight. It reads one snapshot and computes no wait itself.
 - `gctk waits blocked`, `pending` and `foreign` print one JSON record per bead,
-  so a shell caller reads the answer with one call.
+  so a shell caller reads the answer with one call. The record of a bead with
+  a `waits-for` edge of its own says that `waits` could not judge that edge,
+  apart from a read that failed.
 - Go tests on the fake cover every row of the census's disagreement table, a
   failed read, a bead with a `waits-for` edge of its own, which gets the
   adapter's error, and each condition that puts a bead in flight.
@@ -274,6 +287,9 @@ next section lists.
 - Each suite whose caller moved drives it through the built binary over the
   harness's stub store, as the suites that reach `gctk merge` do. Nothing keeps
   two copies equal.
+- Each moved caller's suite gives it a bead with a `waits-for` edge of its own.
+  A caller that acts holds that bead, and a check or a listing shows the edge
+  as unjudged, whatever the caller does when a read fails.
 - Every doc, skill and comment that states the hold rule or names
   `hold-lib.sh` says the one rule in the same change: steering.md's park
   sections, deferred-dispatch.md, component-model.md's `hold-lib.sh` row and
@@ -317,7 +333,9 @@ Once unit 3 lands:
   bead's own, in its own store, holds. Those answers do not move.
 - **Not gascity.** gctk reads the store's blocked set through `gc bd blocked`,
   since the supervisor serves no blocked route. That read took 1.0 to 1.6 s at
-  a host load of 24, so no pass needs a new route, and none waits on one.
+  a host load of 24, so no pass needs a new route, and none waits on one. The
+  marks read it checks the listing against took 0.3 s at a host load of 12 to
+  16, beside 0.5 to 0.6 s for the listing.
 - **No refinery pass gets slower than today's 552 s median.** find-work's hold
   read becomes one `gctk waits blocked` call in place of `hold-lib.sh`'s reads,
   and unit 3 measures the pass time.
