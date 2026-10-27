@@ -48,7 +48,7 @@ cat > "$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 set -u
 if [ "${1:-}" = rig ] && [ "${2:-}" = list ]; then
-  [ "${STUB_RIGS_RC:-0}" = 0 ] || exit "$STUB_RIGS_RC"
+  [ "${STUB_RIGS_RC:-0}" = 0 ] || { echo "the store did not answer" >&2; exit "$STUB_RIGS_RC"; }
   cat "${STUB_RIGS:?}"; exit 0
 fi
 if [ "${1:-}" = bd ] && [ "${2:-}" = show ]; then
@@ -229,6 +229,7 @@ hasnt "$out" "untracked.md" "an untracked file is not read"
 rc=0; out=$(STUB_RIGS_RC=1 run --tree) || rc=$?
 eq "$rc" 2 "an unreadable rig list checks nothing"
 has "$out" "cannot read the city's rigs" "...and says so"
+has "$out" "the store did not answer" "...with the reason the listing gave, which rig-map.sh passes on"
 rc=0; out=$(run --branch no-such-base) || rc=$?
 eq "$rc" 2 "a base that does not resolve checks nothing"
 rc=0; out=$(run) || rc=$?

@@ -81,7 +81,9 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$BASE$BEAD$TREE" ] || [ "$NFILES" -gt 0 ] || usage "name what to read: --branch, --bead, --file or --tree"
 
-RIGS=$(gc rig list --json </dev/null 2>/dev/null | scrub | jq -c '[.rigs[]? | objects
+# rig-map.sh is the pack's one read of the rig map. It bounds the listing, and
+# when the listing does not read it names why on stderr, ahead of the line below.
+RIGS=$("$HERE/rig-map.sh" | jq -c '[.rigs[]? | objects
   | {name: (.name // "" | tostring), prefix: (.prefix // "" | tostring), path: (.path // "" | tostring)}
   | select(.name != "")]' 2>/dev/null) || RIGS=""
 [ -n "$RIGS" ] && [ "$RIGS" != "[]" ] || fail "cannot read the city's rigs (gc rig list --json)"
