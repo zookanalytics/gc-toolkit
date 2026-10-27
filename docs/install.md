@@ -268,9 +268,9 @@ branch's fork point from the default branch, so a file whose text moved with
 the `gc` binary, and not with the branch, stays as the fork point has it. That
 text lands in a pull request of its own: the merge gate hands the files the
 default branch is stale in to `seed-audit-reaudit.sh`, which slings one bead to
-re-render them. A branch that adopted gc's text for a file, by committing it as
-rendered or by a re-render of its own such as that bead's, has the file
-rendered fresh, so a newer `gc` renews the adoption rather than undoing it.
+re-render them. A file that a branch re-rendered itself, as that bead does, is
+the branch's adoption of gc's text, and later commits render it fresh, so a
+newer `gc` renews the adoption rather than undoing it.
 
 ### Smoke test
 

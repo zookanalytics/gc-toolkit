@@ -1114,19 +1114,21 @@ fi
 # <rev> commits none: its text moved with the `gc` binary (see WHOSE TEXT IT
 # IS), or <rev> had it stale already.
 #
-# That holds unless the branch adopted gc's text for the file. HEAD committing
-# the file as rendered is one sign of an adoption, and the file then stays,
-# since the change adds nothing to it. A re-render is the other sign. HEAD's
-# copy is the branch's own when it differs from <rev>'s, and the branch's
-# commits are the ones HEAD has and <rev> does not. When the first of them to
-# change the file changed nothing outside the audit, a re-render started that
-# copy, and its text came from gc, as the re-audit's does. Such a file is the
-# branch's own change, so it is written as rendered, like a file the change
-# moves. Once gc moves again, the copy HEAD commits is neither <rev>'s nor the
-# render, and putting back <rev>'s copy would undo the adoption. A copy that a
-# change to anything else started is no adoption, and reverting that change
-# puts back <rev>'s copy. A revision that carries no audit, or only the stub a
-# pack ships before its first render, keeps nothing.
+# That holds unless the branch adopted gc's text for the file by re-rendering
+# it. HEAD's copy is the branch's own when it differs from <rev>'s, and the
+# branch's commits are the ones HEAD has and <rev> does not. When the first of
+# them to change the file changed nothing outside the audit, a re-render started
+# that copy, and its text came from gc, as the re-audit's does. Such a file is
+# the branch's own change, so it is written as rendered, like a file the change
+# moves, and a copy HEAD already commits as rendered stays as it is. Once gc
+# moves again, the copy HEAD commits is neither <rev>'s nor the render, and
+# putting back <rev>'s copy would undo the adoption. A copy that a change to
+# anything else started is no adoption, even one HEAD commits as rendered, so
+# <rev>'s copy is written back. Reverting such a change therefore restores
+# <rev>'s copy, and gc text that rode in beside one is taken back out. The
+# commit that brought in a page brought in its INDEX.md row, so the page and its
+# row are judged alike and go back together. A revision that carries no audit,
+# or only the stub a pack ships before its first render, keeps nothing.
 #
 # Whether HEAD commits <file> under the audit with <path>'s bytes, or commits no
 # such file where <path> holds none.
@@ -1172,8 +1174,10 @@ if [ -n "$SINCE" ]; then
         [ "$rc" -eq 0 ] || render_failed "$SINCE" "$SINCE_RENDER" "$rc"
         for p in "${differs[@]}"; do
             same "$SINCE_RENDER/$p" "$STAGE/$p" || continue
-            head_commits "$p" "$STAGE/$p" && continue
-            if head_adopted "$p"; then RENEWED+=("$p"); continue; fi
+            if head_adopted "$p"; then
+                head_commits "$p" "$STAGE/$p" || RENEWED+=("$p")
+                continue
+            fi
             KEPT+=("$p")
             if [ -f "$since_audit/$p" ]; then
                 mkdir -p "$(dirname "$STAGE/$p")" && cp "$since_audit/$p" "$STAGE/$p" \

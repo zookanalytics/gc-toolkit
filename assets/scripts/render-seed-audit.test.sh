@@ -536,7 +536,8 @@ gc_restores
 
 # A commit that changed a seed input and rendered everything plainly carried
 # gc's text in beside its own change. That is no adoption: once gc moves again,
-# a hooked commit puts the fork point's copy back.
+# a hooked commit puts the fork point's copy back, the index included, though
+# gc's move left the index's text as HEAD commits it.
 echo "# gc's text that rode in beside a change to a seed input is put back, not renewed"
 branch base hooked-ride-in
 mkdir -p "$R/assets/hooks"
@@ -556,6 +557,8 @@ if as_committed base agents/claude.md; then ok "…putting claude.md back as the
 else bad "…but claude.md kept or renewed the text that rode in"; fi
 if as_committed base formulas/mol-gc.md; then ok "…and leaving out the file only gc added"
 else bad "…but the file only gc added stayed"; fi
+if as_committed base INDEX.md; then ok "…with the index row that would list it"
+else bad "…but the index still lists the file it left out"; fi
 has "$out" "as $(git -C "$R" rev-parse base) commits them" "…saying what it kept as the fork point commits it"
 hasnt "$out" "renewed" "…and renewing nothing"
 git -C "$R" config --unset core.hooksPath
