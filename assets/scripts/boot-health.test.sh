@@ -520,7 +520,7 @@ has "$CLEAR" "newest patrol wisp updated $(iso $((NOW - 60))) (status in_progres
 has "$CLEAR" "cold since $(iso "$COLD_AT")" "the record names when the episode began"
 has "$(tail -n 1 "$TMP/fargv")" "--key deacon-cold.gc-toolkit.deacon --scope boot-health --rig gc-toolkit --cleared" \
     "the record goes to the same finding, as a clear"
-has "$OUT" "recorded the end of the cold episode" "says it recorded the end"
+has "$OUT" "the end of the cold episode is settled" "says the end is settled"
 eq "$(state_get clear_owed)" 0 "nothing is owed once the record lands"
 eq "$(state_get last_report)" 0 "the episode's pacing clock is cleared"
 pass STUB_WISPS="$FRESH" BOOT_HEALTH_REPORT_AFTER=0

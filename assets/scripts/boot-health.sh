@@ -150,7 +150,7 @@ record_cleared() {
     out="$(finding_call_rc --key "$FINDING_KEY" --scope boot-health --rig "$FINDING_RIG" \
         --cleared --message "$msg." 2>&1)" || rc=$?
     if [ "$rc" -eq 0 ]; then
-        echo "boot-health: recorded the end of the cold episode on the finding"
+        echo "boot-health: the end of the cold episode is settled"
         printf '%s\n' "$out"
         return 0
     fi
